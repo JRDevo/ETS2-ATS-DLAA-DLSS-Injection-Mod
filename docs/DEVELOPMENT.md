@@ -9,7 +9,7 @@ top-level [`README.md`](../README.md). Companion docs:
 
 A from-scratch DLAA anti-aliasing injector for Euro Truck Simulator 2 and
 American Truck Simulator (Prism3D engine, DirectX 11.1), targeting both flat and
-VR (Virtual Desktop / SteamVR).
+VR (OpenXR, e.g. Virtual Desktop).
 
 > **v0.7.7 (re-bindable hotkeys):** every hotkey is an action with a binding in `dlaa.ini` (`key_mode_cycle`,
 > `key_model_1..4`, `key_area_down/up`, `key_sharpen_down/up`, `key_width_down/up`, `key_dlaa_toggle`, `key_save`,
@@ -22,7 +22,7 @@ VR (Virtual Desktop / SteamVR).
 > **v0.7.3 – v0.7.5 (after the status below):** v0.7.3 flat: a blit RT with exactly the backbuffer's size and
 > format is the backbuffer (the `GetBuffer(0)` pointer of the last Present is not always the texture the game
 > blits into; the blit was taken for a VR eye and the mod stuck in VR mode). v0.7.4: flat / VR comes from the
-> launch options at load (`-openvr` / `-openxr` / `-oculus` = VR; log `launch mode: VR|FLAT`); flat never
+> launch options at load (`-openxr` / `-oculus` = VR; log `launch mode: VR|FLAT`); flat never
 > switches to VR and always uses `dlaa_area` 100 (outside the area the image is the raw jittered frame, which
 > flickers on a monitor); VR always ignores the backbuffer (mirror). v0.7.5: the log file is only written with
 > `debug = 1` in `dlaa.ini` (`src/log.h`, checked once at the first `Log` call).
@@ -51,7 +51,7 @@ the game's own frame. It is built on:
   MVs are computed. This is the hard 80%, and the part most likely to need work
   after a game update.
 - **D3D11 / DXGI hooks** (MinHook) and hotkeys with beeps for tuning; no overlay.
-- **No OpenVR/OpenXR calls** — VR is handled by hooking at the **D3D11
+- **No OpenXR calls** — VR is handled by hooking at the **D3D11
   render-target level**, so each eye's pass flows through the same DLAA path.
 
 ### Two deliberate choices
@@ -127,8 +127,8 @@ The version string in the load-log line comes from `project(... VERSION x.y.z)` 
    log only) create an empty `dlaa_off.txt` next to `dinput8.dll` before launch (DLAA then
    starts OFF; `Shift+F11` can still switch it on). The log is opened share-read, so
    you can tail it while the game runs.
-4. **VR test:** add `-openvr` (or `-openxr` for VDXR) to the Steam launch options,
-   start Virtual Desktop + SteamVR, launch. Confirm `Present` still fires (its resolution is the
+4. **VR test:** add `-openxr` to the Steam launch options,
+   start Virtual Desktop, launch. Confirm `Present` still fires (its resolution is the
    mirror window, expected). With v0.5.0 the log should show `eye blit detected: eye=0` and `eye=1`
    (src = scene size, RT = 6120x6496 eye texture), `eye depth snapshot: eye=0 captured ...`, two
    `NGX feature created for eye N` lines, the `frame #n summary` lines for the first Presents, and

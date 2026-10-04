@@ -15,7 +15,7 @@ labels: bug
 - Mod version (line `=== ETS2/ATS DLAA injector v... loaded ===` near the top of `dlaa_inject.log`):
 - Flat or VR (the log line `launch mode: FLAT` / `launch mode: VR` says what the mod detected):
 - Game launch options (Steam > Properties > Launch options, e.g. `-openxr`):
-- VR headset and runtime (e.g. Quest 3 via Virtual Desktop / VDXR, SteamVR), if VR:
+- VR headset and runtime (e.g. Quest 3 via Virtual Desktop / VDXR), if VR:
 - GPU and driver version:
 - `nvngx_dlss.dll` version (right-click > Properties > Details):
 - Mode in use (`End` key: DLAA = 1 beep / DLSS = 2 beeps / off) and model (`Shift+F1`..`F4`):

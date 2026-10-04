@@ -32,7 +32,7 @@ trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 - An **NVIDIA RTX** GPU with a current driver.
 - `nvngx_dlss.dll` — the NVIDIA DLSS runtime. **This mod does not ship it**; see
   Install below.
-- For VR: Virtual Desktop or SteamVR, launched with the game's `-openxr` / `-openvr`
+- For VR: an OpenXR runtime (for example Virtual Desktop), launched with the game's `-openxr`
   option.
 
 ## Install
@@ -78,7 +78,7 @@ shows once you render below native (see render scale below).
 
 ## Flat or VR
 
-The mod reads the game's launch options at start. With `-openvr`, `-openxr` or `-oculus` it runs in VR mode
+The mod reads the game's launch options at start. With `-openxr` or `-oculus` it runs in VR mode
 (one DLAA / DLSS pass per eye; the desktop mirror window is left alone). Without them it runs in flat mode.
 The log says which: `launch mode: VR` or `launch mode: FLAT`. One `dlaa.ini` serves both.
 
@@ -312,7 +312,7 @@ the game has exited (or at least after the problem has happened).
   `=== ETS2/ATS DLAA injector v<version> loaded ... ===`.
 - Flat or VR (the log line `launch mode: FLAT` / `launch mode: VR` shows what the mod
   detected) and your game launch options; if VR, the headset and runtime (e.g. Quest 3
-  via Virtual Desktop / VDXR, or SteamVR).
+  via Virtual Desktop / VDXR).
 - GPU and driver version.
 - `nvngx_dlss.dll` version (right-click > Properties > Details).
 - Mode in use (`End` key: DLAA / DLSS / off) and the model (`Shift+F1`..`F4`).
