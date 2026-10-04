@@ -1,0 +1,76 @@
+; dlaa.ini -- optional, next to dinput8.dll. Template for v0.7.0: every supported key, commented out, set to
+; its built-in default. Remove the leading '#' to change a value. Format: key = value, one per line; lines
+; starting with '#' or ';' are comments. Read once when the game starts (the log's "config (...)" line shows
+; what was used). The live-tunable keys (dlss_preset, dlaa_area, sharpness, sharp_radius, v0.7.0 dlss_upscale) can
+; be written back from the headset with Shift+F12, which rewrites this file in place and keeps every other line.
+
+# Log file dlaa_inject.log (next to dinput8.dll): 0 = no log (default), 1 = write the log. Needed for bug reports.
+# debug = 0
+
+# NGX jitter = sign * viewport shift, per axis: -1 or +1 (+1/+1 won the self-test; Ctrl+F12 cycles live)
+# jitter_sign_x = 1
+# jitter_sign_y = 1
+
+# Sub-pixel viewport jitter for DLAA: 1 on, 0 off
+# jitter_enabled = 1
+
+# Number of Halton jitter phases (1..256). v0.5.7: default 8 (was 16) = NVIDIA's 8 x (output/render ratio) for DLAA
+# jitter_phases = 8
+
+# Camera-reprojection motion vectors: 1 on, 0 = zero MVs (Ctrl+F5 toggles live)
+# mv_enabled = 1
+
+# World MV pairs closer than this (metres) are ignored (own truck/trailer move with the camera), 0..1000
+# mv_near_reject_m = 30
+
+# v0.6.0 ego reprojection (own truck mirrors / hood / wheels move WITH the camera, not like scenery):
+# world draws whose object origin is closer than this (metres, 0..30) are ego candidates
+# mv_ego_origin_m = 8
+# world-layer pixels closer than this (metres, 0..20) use the ego reprojection; 0 = off (all world as before)
+# mv_ego_pixel_m = 3
+
+# v0.6.3 MV candidate thinning (fewer per-draw MVP copies in the G-buffer pass; same draws every frame):
+# a draw is a candidate only when hash(indexCount,startIndex,baseVertex) & ((1<<shift)-1) == 0. Shift 0..4
+# (0 = every draw = old behaviour, 2 = ~1/4)
+# mv_sample_shift = 2
+# per-layer candidate caps (1..128): world (layer 0) / cabin (layer 1)
+# mv_world_slots = 40
+# mv_cabin_slots = 24
+
+# GPU timing logs (per-stage DLAA cost + depth snapshot cost, every 600): -1 auto (VR only), 0 off, 1 on
+# gpu_timing = -1
+
+# Present number that auto-starts the frame trace (Ctrl+F11; 0 = off)
+# trace_auto_frame = 0
+
+# DLSS render preset for DLAA: default (driver pick) | J | K | L | M | E | F  (E/F are deprecated by NVIDIA)
+# Start state; live Shift+F1..F4 select default / E / F / M directly (Shift+F12 saves the current value here)
+# dlss_preset = default
+
+# RCAS sharpen strength after DLAA, 0..1 (0 = off: pass skipped). Start state; Shift+F7 / Shift+F8 change it
+# live in 0.1 steps (v0.5.7: the sharpen texture always exists, ~120 MB per eye in VR; Shift+F12 saves)
+# sharpness = 0.4
+
+# RCAS ring-tap radius ("sharpen width") in texels, 1..4 (v0.5.8). The 4 taps are bilinear, so a fractional
+# radius (e.g. 1.5) averages two neighbours. The 2x-supersampled VR eye image needs > 1 px to show any
+# sharpening. Start state; Shift+F9 / Shift+F10 change it live in 0.5 steps (Shift+F12 saves)
+# sharp_radius = 1.5
+
+# v0.6.4 DLAA area: run DLAA only on a rect of this % of each eye image's width AND height (40..100; pixel count
+# ~ area^2, e.g. 70 -> 49 %), centred on the eye's optical centre. 100 = whole image (v0.6.3 behaviour). Outside
+# the rect the image is the raw jittered frame. Start state; Shift+F5 / Shift+F6 change it live in 10 % steps (Shift+F12 saves)
+# dlaa_area = 100
+# blend ramp (px, 0..512) from the raw frame to the DLAA result at the rect edges inside the image; 0 = hard edge
+# (render px; with DLSS upscaling it is scaled to output px per axis)
+# dlaa_area_feather = 96
+
+# v0.7.0 DLSS upscaling: 1 = when the eye texture / backbuffer is larger than the scene (game r_scale_x / r_scale_y
+# below 1), NGX renders from the scene size to that size and replaces the game's bilinear stretch; 0 = always DLAA
+# at render res (v0.6.5 path). Set BOTH r_scale_x and r_scale_y in Documents\Euro Truck Simulator 2\config.cfg:
+# 0.667 = Quality, 0.58 = Balanced, 0.5 = Performance (mode picked from the ratio automatically).
+# Start state; Ctrl+F4 toggles live (Shift+F12 saves)
+# dlss_upscale = 1
+
+# Audible feedback for the Shift+F-key user controls (model select, area, sharpen strength/width, DLAA on/off,
+# save) and the Ctrl+F7 passive / Ctrl+F4 upscale toggles: 1 on, 0 off
+# beeps = 1

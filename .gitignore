@@ -1,0 +1,27 @@
+/build/
+*.log
+*.user
+*.suo
+.vs/
+CMakeSettings.json
+
+# Release output of scripts/package.ps1
+/dist/
+
+# RenderDoc captures and other large local analysis data (hundreds of MB each)
+/captures/
+
+# Backups and runtime output the injector writes next to the DLL
+*.bak
+dlaa_inject.log
+dlaa_trace.txt
+/dlaa_selftest/
+/dlaa_snap/
+
+# Do NOT commit NVIDIA redistributables (license); fetch them at build time:
+/third_party/
+nvngx_dlss.dll
+sl.*.dll
+
+# NVIDIA SDK clone (license: not redistributable)
+/external/
