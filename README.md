@@ -82,6 +82,9 @@ The mod reads the game's launch options at start. With `-openvr`, `-openxr` or `
 (one DLAA / DLSS pass per eye; the desktop mirror window is left alone). Without them it runs in flat mode.
 The log says which: `launch mode: VR` or `launch mode: FLAT`. One `dlaa.ini` serves both.
 
+If the launch options say VR but no headset session starts (the game then runs on the monitor), the mod
+notices after about one second of driving and switches to flat mode by itself (`launch mode FALLBACK` in the log).
+
 ## How render scale works
 
 The game renders the 3-D scene at `r_scale_x` × `r_scale_y` of the output size and

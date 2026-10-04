@@ -874,6 +874,19 @@ bool             g_vrMode        = false;        // a blit into a non-backbuffer
 // frame, which flickers on a monitor); g_vrArea keeps the dlaa.ini value so a save in flat does not lose it.
 int              g_launchVr      = -1;
 int              g_vrArea        = 100;
+// v0.7.9: g_launchVr is only the FIRST GUESS. A VR launch whose headset session never comes up (ATS 22:45: -openxr on
+// the command line, the game ran flat on the 3840x2160 backbuffer) never draws an eye texture; its world blits go to
+// the backbuffer, which a VR launch ignores as the mirror window -> the passes were jittered and never evaluated.
+// After kFlatFallbackBlits consecutive matched backbuffer blits with NO eye-texture blit ever seen in this process the
+// mode falls back to flat (FallBackToFlat); a later eye-texture blit switches back (BackToVr).
+bool             g_eyeBlitEver   = false;        // a matched blit into a non-backbuffer (eye) RT was ever seen
+bool             g_vrFellBack    = false;        // launched VR, now running as flat (the fallback above)
+uint32_t         g_bbBlitRun     = 0;            // matched backbuffer blits in a row while VR is not confirmed
+constexpr uint32_t kFlatFallbackBlits = 60;
+// World viewport jitter is held (no shift, pass jitter 0) while the launch says VR and no eye blit has been seen: the
+// passes are not consumed by any DLAA then, a jittered raw picture would just shimmer. A real VR world starts its eye
+// blits with its first frame, so only that first frame (both eyes) runs unjittered.
+inline bool WorldJitterHeld() { return g_launchVr == 1 && !g_eyeBlitEver; }
 int              g_resetEyes     = 0;            // per-eye reset bitmask (fed from g_resetNext at the next blit)
 // ---- VR eye identity (v0.5.4): from the blit render target, not from pass order ------------------------
 struct EyeMapEntry { void* rt; int eye; int parity; int score; };   // score: v0.5.5 projection verdicts (+ = eye 0)
@@ -2023,12 +2036,24 @@ int PvEyeFind(void* rt) {
     return -1;
 }
 
+// v0.7.9: a preview target that is the backbuffer (pointer, or its exact size + format) is never a VR eye texture --
+// a VR launch whose headset never came up composites the preview into the backbuffer (ATS 22:45, 3840x2160), and the
+// eye map route then left it untouched for 30 frames and could never get a verdict (one target). Real VR eye RTs are
+// eye-sized (6120x6496 here), not the mirror window's size.
+bool PvIsBackbufferTarget(ID3D11Texture2D* tex) {
+    if (!tex) return false;
+    if ((void*)tex == g_backbuffer.load(std::memory_order_relaxed)) return true;
+    D3D11_TEXTURE2D_DESC td{};
+    tex->GetDesc(&td);
+    return g_bbW && td.Width == g_bbW && td.Height == g_bbH && td.Format == g_bbFmt;
+}
+
 // Unit of target `idx` for this frame (resolved once per frame), or -1 = leave the target untouched this frame.
 int PvUnitOf(int idx, uint64_t fr) {
     PvTarget& t = g_pt[idx];
     if (t.unit >= 0) return t.unit;
     int u = idx;                                         // flat / not a VR launch: the order (one target)
-    if (g_launchVr == 1) {
+    if (g_launchVr == 1 && !PvIsBackbufferTarget(t.tex.Get())) {   // v0.7.9: a backbuffer target takes the flat route
         void* const rt = t.tex.Get();
         int e = PvEyeFind(rt);
         if (e < 0) {
@@ -3864,7 +3889,8 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
         g_effPhases = phases;
     }
     n.phase = (int)((g_vrMode ? (s >> 1) : s) % (uint64_t)phases);
-    if (g_jitterEnabled) JitterOfPhase(n.phase, &n.jx, &n.jy); else { n.jx = 0.0f; n.jy = 0.0f; }
+    if (g_jitterEnabled && !WorldJitterHeld()) JitterOfPhase(n.phase, &n.jx, &n.jy);   // v0.7.9: held until VR is real
+    else { n.jx = 0.0f; n.jy = 0.0f; }
     n.snap = false;
     n.discarded = false;
     n.consumed = false;
@@ -4155,7 +4181,7 @@ inline void CountGameOtherThread() {
 // nothing if that is exactly what was last issued (no call spam).
 void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
     if (g_gameVpN == 0) return;
-    const bool worldShift = g_jitterPass && JitterLive() && g_sceneW &&
+    const bool worldShift = g_jitterPass && JitterLive() && !WorldJitterHeld() && g_sceneW &&   // v0.7.9: see g_eyeBlitEver
                             (UINT)g_gameVp[0].Width == g_sceneW && (UINT)g_gameVp[0].Height == g_sceneH;
     // v0.7.8: the profile-screen preview pass shifts viewport 0 too (when its size is the preview RT's size, g_pvW x
     // g_pvH), by the frame's own jitter (g_pvJx / g_pvJy: no G-buffer pass advances g_jx / g_jy on that screen).
@@ -4651,6 +4677,53 @@ bool IsRgbaBgraFamily(DXGI_FORMAT f) {
            f == DXGI_FORMAT_B8G8R8A8_UNORM || f == DXGI_FORMAT_B8G8R8A8_TYPELESS;
 }
 
+// v0.7.9 launch-mode fallback (see g_eyeBlitEver). Both switches drop the outstanding passes (they belong to the old
+// mode's pairing), every DLSS / MV history and the per-mode detection, exactly like a fresh start in the new mode.
+void DropPassesForModeSwitch() {
+    while (g_fifoHead < g_passSeq) g_ring[g_fifoHead++ % kRing].consumed = true;
+    g_flatMode = false; g_vrMode = false;                // re-detected at the next matched blit
+    g_eyeMapN = 0; g_eyeMapLogged = false; g_prevBlitRt = nullptr; g_lastUnderflowBlit = 0;
+    for (EyeMapEntry& e : g_eyeMap) e.score = 0;
+    for (bool& b : g_eyeLogged) b = false;
+    g_resetNext = true;
+    MvInvalidate();
+#ifdef WITH_DLAA
+    g_pvEyeN = 0;                                        // preview eye map: rebuilt for the new mode
+#endif
+}
+
+// Launched VR, but nothing but backbuffer blits: behave exactly as a FLAT launch from now on (backbuffer blits run
+// DLAA, dlaa_area forced to 100 with the VR value kept for Shift+F12, the area keys give the low beep, the preview
+// uses the flat route).
+void FallBackToFlat(const D3D11_TEXTURE2D_DESC& bd) {
+    g_launchVr = 0;
+    g_vrFellBack = true;
+#ifdef WITH_DLAA
+    g_vrArea = SceneDlaa::Area();
+    SceneDlaa::SetArea(100);
+#endif
+    DropPassesForModeSwitch();
+    Log("launch mode FALLBACK: the launch options say VR, but no VR eye texture was ever drawn and the last %u world blits "
+        "went to the backbuffer (%ux%u fmt=%d, Present #%llu) -- running as FLAT from now on (backbuffer blits get DLAA, "
+        "dlaa_area 100 [VR value %d kept], area keys locked, preview: flat route); an eye-texture blit later switches back "
+        "to VR", g_bbBlitRun, bd.Width, bd.Height, (int)bd.Format, (unsigned long long)g_frames.load(), g_vrArea);
+}
+
+// Fallen back to flat, and now an eye-texture blit: the headset session came up late. Back to the VR launch behaviour.
+void BackToVr(const D3D11_TEXTURE2D_DESC& bd) {
+    g_launchVr = 1;
+    g_vrFellBack = false;
+    g_eyeBlitEver = true;
+    g_bbBlitRun = 0;
+#ifdef WITH_DLAA
+    SceneDlaa::SetArea(g_vrArea);
+#endif
+    DropPassesForModeSwitch();
+    Log("launch mode back to VR: an eye-texture blit (RT %ux%u fmt=%d, Present #%llu) after the flat fallback -- VR "
+        "behaviour again (dlaa_area %d, the backbuffer is the mirror window); this blit is skipped", bd.Width, bd.Height,
+        (int)bd.Format, (unsigned long long)g_frames.load(), g_vrArea);
+}
+
 void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     // 1. RT0: the backbuffer (flat) or an eye-sized RGBA/BGRA texture (VR).
     ID3D11RenderTargetView* rtv = nullptr;
@@ -4732,8 +4805,25 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
 
     // Matched. v0.7.4: the launch options say which mode this is (g_launchVr, set at load). Flat launch: only the
     // backbuffer counts, the mod never switches to VR. VR launch: the backbuffer is always the mirror window.
+    // v0.7.9: the launch options are only the first guess -- a VR launch without any eye-texture blit falls back to
+    // flat after kFlatFallbackBlits backbuffer blits in a row, and an eye-texture blit after that switches back to VR.
+    if (!isBackbuffer && g_vrFellBack) { BackToVr(bd); tex->Release(); return; }
     if (g_launchVr == 0 && !isBackbuffer) { tex->Release(); return; }
-    if (isBackbuffer && (g_vrMode || g_launchVr == 1)) { ++g_cMirrorIgnored; tex->Release(); return; }
+    if (isBackbuffer && (g_vrMode || g_launchVr == 1)) {
+        if (g_launchVr == 1 && !g_eyeBlitEver && ++g_bbBlitRun >= kFlatFallbackBlits) {
+            FallBackToFlat(bd);                          // this blit is skipped; the next one runs as flat
+        } else {
+            ++g_cMirrorIgnored;
+        }
+        tex->Release();
+        return;
+    }
+    if (!isBackbuffer && !g_eyeBlitEver) {
+        g_eyeBlitEver = true;                            // VR is real: the world jitter is no longer held
+        if (g_bbBlitRun)
+            Log("VR confirmed at blit: an eye-texture blit (RT %ux%u fmt=%d) after %u backbuffer blit(s) -- the fallback to "
+                "flat is off for this session", bd.Width, bd.Height, (int)bd.Format, g_bbBlitRun);
+    }
     if (isBackbuffer) g_flatMode = true;
     else if (!g_vrMode) {
         g_vrMode = true; g_flatMode = false;
