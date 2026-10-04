@@ -147,6 +147,7 @@ was used). The full template with every key and its default is in
 | `sharpness` | `0.4` | sharpening after DLAA, `0`..`1` (`0` = off) |
 | `sharp_radius` | `1.5` | sharpening width in texels, `1`..`4` |
 | `dlaa_area` | `100` | run DLAA on the centre `N` % of each eye image (VR performance), `40`..`100`. VR only: in flat mode the whole picture is always used |
+| `preview_dlaa` | `1` | `1` = also anti-alias the profile / truck-preview screen (flat and VR); `0` = leave that screen untouched. VR at eye resolution needs a lot of GPU memory and time there, turn it off if that screen stutters. That screen always uses model 2 (preset E); the model keys change the drive only |
 | `jitter_sign_x` / `jitter_sign_y` | `-1` | flip if the image shimmers or looks doubled (try the 4 combinations) |
 | `beeps` | `1` | `0` = silence the hotkey beeps |
 | `key_<action>` | *(see KEYS.md)* | re-bind any hotkey, e.g. `key_dlaa_toggle = Ctrl+D`, or `none` to disable it. Full list and format: [`docs/KEYS.md`](docs/KEYS.md) |

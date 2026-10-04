@@ -1,12 +1,13 @@
 // CameraMv implementation (v0.4.1). See motion_vectors.h and
 // docs/DLAA_INTEGRATION.md ("Motion vectors"). HLSL is embedded and compiled at
 // runtime with D3DCompile (d3dcompiler_47 is an OS DLL), same as the depth pass.
+// v0.7.8: compiled once per process by the ShaderCache worker thread (shader_cache.h), not per instance.
 #ifdef WITH_DLAA
 
 #include "motion_vectors.h"
+#include "shader_cache.h"
 #include "log.h"
 #include <d3d11_1.h>
-#include <d3dcompiler.h>
 #include <cmath>
 #include <cstring>
 
@@ -265,6 +266,7 @@ cbuffer DimsCB : register(b0) {
     float  _pad;
     float2 Origin;       // v0.6.4: crop origin in the full image (px, even)
     float2 FullSize;     // v0.6.4: full image size (px) = depth twin size
+    float4 TileXf;       // v0.7.8: full-picture ndc -> reference-tile ndc = ndc * xy + zw (identity 1,1,0,0 = untiled)
 };
 Texture2D<float>           DepthIn  : register(t0);
 StructuredBuffer<float4>   Solve    : register(t1);
@@ -284,7 +286,10 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     float z  = saturate((d - lo) / (hi - lo));
 
     float2 uv  = (float2(src) + 0.5) / FullSize;
-    float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    // v0.7.8 tiled preview: R (and InvRow3) live in the clip space of the REFERENCE TILE pass, the picture is the
+    // composite of all tiles. ndc = this pixel in reference-tile ndc; the reprojected point goes back to full ndc below.
+    // Identity (1,1,0,0) for everything untiled (world path: exact, x * 1 + 0 == x).
+    float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0) * TileXf.xy + TileXf.zw;
 
     uint base = cabin ? 4u : 0u;
     // v0.6.0 ego: near world pixels move with the camera's vehicle -> R_ego
@@ -301,7 +306,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
 
     float2 mv = float2(0.0, 0.0);
     if (c.w > 1e-6) {
-        float2 pn = c.xy / c.w;
+        float2 pn = (c.xy / c.w - TileXf.zw) / TileXf.xy;      // v0.7.8: reference-tile ndc -> full-picture ndc
         float2 prevUv = float2(pn.x * 0.5 + 0.5, 0.5 - pn.y * 0.5);
         mv = (prevUv - uv) * FullSize;
         if (!all(isfinite(mv))) mv = float2(0.0, 0.0);
@@ -317,26 +322,32 @@ bool SameKey(const CameraMv::DrawKey& a, const CameraMv::DrawKey& b) {
            a.indexCount == b.indexCount && a.startIndex == b.startIndex && a.baseVertex == b.baseVertex;
 }
 
-bool CompileCs(ID3D11Device* dev, const char* src, size_t len, const char* name,
-               ID3D11ComputeShader** out) {
-    ComPtr<ID3DBlob> cso, err;
-    HRESULT hr = D3DCompile(src, len, name, nullptr, nullptr, "CSMain", "cs_5_0",
-                            D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &cso, &err);
-    if (FAILED(hr)) {
-        Log("MV: %s D3DCompile failed hr=0x%lx: %s", name, hr,
-            err ? (const char*)err->GetBufferPointer() : "(no log)");
+// v0.7.8: the bytecode comes from the process-wide ShaderCache (compiled once on its worker thread); this only
+// creates the device object (was a D3DCompile per instance on the render thread, ~1.9 s for both MV shaders).
+bool CreateCs(ID3D11Device* dev, ShaderCache::Id id, ID3D11ComputeShader** out) {
+    size_t size = 0;
+    const void* code = ShaderCache::Code(id, &size);
+    if (!code) {
+        Log("MV: %s D3DCompile failed %s", ShaderCache::Name(id), ShaderCache::Error(id));
         return false;
     }
-    hr = dev->CreateComputeShader(cso->GetBufferPointer(), cso->GetBufferSize(), nullptr, out);
-    if (FAILED(hr)) { Log("MV: %s CreateComputeShader hr=0x%lx", name, hr); return false; }
+    const HRESULT hr = dev->CreateComputeShader(code, size, nullptr, out);
+    if (FAILED(hr)) { Log("MV: %s CreateComputeShader hr=0x%lx", ShaderCache::Name(id), hr); return false; }
     return true;
 }
 
 } // namespace
 
+void CameraMv::RegisterShaders() {
+    ShaderCache::Add(ShaderCache::kMvSolve, kSolveShader, sizeof(kSolveShader) - 1, "mv_solve", "CSMain", "cs_5_0");
+    ShaderCache::Add(ShaderCache::kMvReprojDepth, kReprojDepthShader, sizeof(kReprojDepthShader) - 1,
+                     "mv_reproject_depth", "CSMain", "cs_5_0");
+}
+
 bool CameraMv::Init(ID3D11Device* dev) {
     if (m_ready) return true;
     if (m_failed || !dev) return false;
+    if (!ShaderCache::Done()) return false;            // v0.7.8: warm-up still running -> not yet (NOT failed), retried
     m_failed = true;                                   // cleared on full success
     m_dev = dev;
 
@@ -346,8 +357,8 @@ bool CameraMv::Init(ID3D11Device* dev) {
             "(CopySubresourceRegion out of the CB ring is plain buffer->buffer, not affected)",
             (int)opt.ConstantBufferPartialUpdate, (int)opt.ConstantBufferOffsetting);
 
-    if (!CompileCs(dev, kSolveShader, sizeof(kSolveShader) - 1, "mv_solve", &m_csSolve)) return false;
-    if (!CompileCs(dev, kReprojDepthShader, sizeof(kReprojDepthShader) - 1, "mv_reproject_depth", &m_csReproj)) return false;
+    if (!CreateCs(dev, ShaderCache::kMvSolve, &m_csSolve)) return false;
+    if (!CreateCs(dev, ShaderCache::kMvReprojDepth, &m_csReproj)) return false;
 
     if (!m_prev.Init(dev)) { Log("MV: prev candidate record create failed"); return false; }
     HRESULT hr;
@@ -380,7 +391,7 @@ bool CameraMv::Init(ID3D11Device* dev) {
     cb.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     cb.ByteWidth = (34 + kSlots) * 16;                 // v0.6.0: + AllPairs[128] (2592 bytes)
     if (FAILED(hr = dev->CreateBuffer(&cb, nullptr, &m_cbPairs))) { Log("MV: pair cbuffer hr=0x%lx", hr); return false; }
-    cb.ByteWidth = 32;                                 // v0.6.4: + Origin, FullSize (was 16)
+    cb.ByteWidth = 48;                                 // v0.6.4: + Origin, FullSize (was 16); v0.7.8: + TileXf
     if (FAILED(hr = dev->CreateBuffer(&cb, nullptr, &m_cbDims))) { Log("MV: dims cbuffer hr=0x%lx", hr); return false; }
 
     // Staging buffers for the one-time CB-copy check and the 600-frame R log.
@@ -586,8 +597,9 @@ bool CameraMv::WriteDims(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, uint3
                          uint32_t fullW, uint32_t fullH) {
     D3D11_MAPPED_SUBRESOURCE mp{};
     if (FAILED(ctx->Map(m_cbDims.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) return false;
-    const float dims[8] = { (float)w, (float)h, m_egoPixel, 0.0f,                  // v0.6.0: z = EgoPixelM
-                            (float)x0, (float)y0, (float)fullW, (float)fullH };     // v0.6.4
+    const float dims[12] = { (float)w, (float)h, m_egoPixel, 0.0f,                 // v0.6.0: z = EgoPixelM
+                             (float)x0, (float)y0, (float)fullW, (float)fullH,      // v0.6.4
+                             m_tileXf[0], m_tileXf[1], m_tileXf[2], m_tileXf[3] };  // v0.7.8 tiled preview (else 1,1,0,0)
     memcpy(mp.pData, dims, sizeof(dims));
     ctx->Unmap(m_cbDims.Get(), 0);
     return true;

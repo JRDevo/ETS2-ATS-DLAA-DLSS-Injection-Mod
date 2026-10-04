@@ -40,7 +40,7 @@ line of `dlaa.ini` untouched.
 | `Ctrl+F7`  | Passive mode on / off                  | 1 low tone = ON, 2 low tones = OFF |
 | `Ctrl+F8`  | Jitter-only debug on / off             | — |
 | `Ctrl+F9`  | Self-test (dumps frames)               | — |
-| `Ctrl+F10` | NGX input snapshot                     | — |
+| `Ctrl+F10` | NGX input snapshot (on the menu / truck-preview screen: a measuring capture, short freeze) | — |
 | `Ctrl+F11` | Frame trace                            | — |
 | `Ctrl+F12` | Cycle NGX jitter sign                  | — |
 
@@ -97,7 +97,7 @@ Keys: `F1`-`F24`, `A`-`Z`, `0`-`9`, `Home`, `End`, `Insert`, `Delete`, `PageUp`,
 | `key_passive` | Passive mode | `Ctrl+F7` |
 | `key_jitter_only` | Jitter-only debug | `Ctrl+F8` |
 | `key_selftest` | Self-test | `Ctrl+F9` |
-| `key_snapshot` | NGX input snapshot | `Ctrl+F10` |
+| `key_snapshot` | NGX input snapshot (menu / truck-preview screen: measuring capture) | `Ctrl+F10` |
 | `key_trace` | Frame trace | `Ctrl+F11` |
 | `key_jitter_sign` | Cycle NGX jitter sign | `Ctrl+F12` |
 

@@ -84,8 +84,12 @@ public:
 
     // Creates shaders + buffers (device only; independent of the render size).
     // Safe to call repeatedly; returns false (and stays unusable) on failure.
+    // v0.7.8: the shader bytecode comes from ShaderCache; while its warm-up is still running Init returns false
+    // WITHOUT marking itself failed (the next call retries).
     bool Init(ID3D11Device* dev);
     bool Ready() const { return m_ready; }
+    // v0.7.8: registers kSolveShader / kReprojDepthShader with ShaderCache (setup thread, before ShaderCache::Start).
+    static void RegisterShaders();
 
     // Blit side --------------------------------------------------------------
     // v0.5.4: `cur` = the candidate record of the pass being blitted; the eye's previous COMMITTED record
@@ -131,6 +135,12 @@ public:
     void SetEgoPixel(float m)  { m_egoPixel  = m < 0.0f ? 0.0f : (m > 20.0f ? 20.0f : m); }
     float EgoOrigin() const { return m_egoOrigin; }
     float EgoPixel() const  { return m_egoPixel; }
+
+    // v0.7.8 tiled preview pictures (the game renders the truck preview as N tile passes, each one part of the view at
+    // the full RT size, and composites them into one target): the candidates / R come from the REFERENCE tile, the MVs
+    // must be pixels of the composited picture. Pass B maps a full-picture ndc to reference-tile ndc as
+    // ndc * (sx, sy) + (ox, oy) before applying R and maps the result back. Default (1, 1, 0, 0) = untiled (world path).
+    void SetTileXf(float sx, float sy, float ox, float oy) { m_tileXf[0] = sx; m_tileXf[1] = sy; m_tileXf[2] = ox; m_tileXf[3] = oy; }
 
     // v0.6.0 MV debug view: the solve buffer SRV and the dims cbuffer (Size, EgoPixelM; v0.6.4 + Origin, FullSize) of the last
     // Generate(), so the debug shader can redo pass B's ego classification. Only valid after a Generate()
@@ -200,6 +210,7 @@ private:
     float    m_nearReject = 30.0f;
     float    m_egoOrigin = 8.0f;      // v0.6.0 mv_ego_origin_m
     float    m_egoPixel = 3.0f;       // v0.6.0 mv_ego_pixel_m (0 = off)
+    float    m_tileXf[4] = { 1.0f, 1.0f, 0.0f, 0.0f };   // v0.7.8 full -> reference-tile ndc (SetTileXf)
     uint64_t m_missFrames = 0, m_genFrames = 0;
     uint64_t m_pairSum[kLayers] = {0, 0};
     // ---- v0.6.1 reuse of the last good reprojection on incomplete candidate records ----

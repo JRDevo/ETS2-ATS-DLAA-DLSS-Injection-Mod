@@ -34,12 +34,28 @@ int                g_ngxRefs = 0;
 ID3D11Device*      g_ngxDev  = nullptr;     // device NGX was initialised with (compare/Shutdown1 only)
 
 // v0.5.6: render preset for PerfQuality==DLAA (dlaa.ini dlss_preset). Default (0) = driver's pick.
+constexpr int      kMenuEyeTag  = 10;              // eye tags 10.. = menu / truck-preview units (inject.cpp)
 unsigned int       g_preset     = NVSDK_NGX_DLSS_Hint_Render_Preset_Default;
 char               g_presetName[8] = "default";
 // v0.5.7: bumped by every successful SetRenderPreset; a processor whose feature was created with an older
 // generation recreates it at its next Evaluate (live Shift+End cycle). Render thread only.
 uint32_t           g_presetGen  = 0;
 uint32_t           g_presetFallbacks = 0;     // live preset creates that failed -> default
+
+// v0.7.8 creation budget: at most ONE NGX feature create per Present (BeginFrame), so two units (VR: two eyes, two
+// preview targets) or two live preset recreates never stack into one long frame. Render thread only.
+uint64_t           g_frameNo    = 1;          // advanced by BeginFrame (Present)
+uint64_t           g_createFrame = 0;         // g_frameNo of the last CreateFeature
+// v0.7.8 NGX pre-warm: one extra NGX reference held for the process life (never released), taken by Prewarm at the
+// first Present. NGX therefore never shuts down when the last unit lets go (a rebuild / area / upscale change no
+// longer pays the ~0.7 s re-init), and every unit's Init only shares it.
+bool               g_ngxPinned  = false;
+
+inline int64_t QpcNow() { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t.QuadPart; }
+inline double  QpcMs(int64_t a, int64_t b) {
+    LARGE_INTEGER f; QueryPerformanceFrequency(&f);
+    return f.QuadPart > 0 ? (double)(b - a) * 1000.0 / (double)f.QuadPart : 0.0;
+}
 
 // v0.7.0: PerfQuality for render -> output. Equal dims = DLAA. Otherwise the per-axis geometric-mean ratio
 // sqrt((outW/renderW) * (outH/renderH)) picks the NEAREST of the standard DLSS ratios.
@@ -86,7 +102,71 @@ bool ThisDllDir(wchar_t* out, DWORD cap) {
     return true;
 }
 
+// NGX itself (process-wide): the first user initialises it, later users share it (+1 reference). v0.7.8: split out
+// of Init so the pre-warm can take a reference of its own. false = init failed (logged, no reference taken).
+bool NgxAcquire(ID3D11Device* dev, bool quiet) {
+    if (g_ngxRefs > 0) {
+        ++g_ngxRefs;                           // NGX already up (other eye / the pre-warm pin): share it
+        if (!quiet) Log("DLAA: NGX already initialised, sharing it (%d users%s)", g_ngxRefs,
+                        g_ngxPinned ? " incl. the pre-warm pin" : "");
+        return true;
+    }
+    // nvngx_dlss.dll search path = our own folder (game exe folder is searched
+    // by default; this lets the snippet sit next to dinput8.dll instead).
+    static wchar_t dllDir[MAX_PATH];
+    NVSDK_NGX_FeatureCommonInfo fci{};
+    const wchar_t* paths[1] = { dllDir };
+    if (ThisDllDir(dllDir, MAX_PATH)) {
+        fci.PathListInfo.Path   = paths;
+        fci.PathListInfo.Length = 1;
+    }
+    const NVSDK_NGX_Result r = NVSDK_NGX_D3D11_Init_with_ProjectID(
+        kProjectId, NVSDK_NGX_ENGINE_TYPE_CUSTOM, kEngineVersion,
+        dllDir, dev, &fci, NVSDK_NGX_Version_API);
+    if (NVSDK_NGX_FAILED(r)) {
+        Log("DLAA: NGX init failed %s (non-NVIDIA GPU or driver too old?)", NgxErr(r));
+        return false;
+    }
+    g_ngxDev = dev;
+    g_ngxRefs = 1;
+    return true;
+}
+
 } // namespace
+
+void DlaaProcessor::BeginFrame() { ++g_frameNo; }
+bool DlaaProcessor::CreateBudgetFree() { return g_createFrame != g_frameNo; }
+
+// v0.7.8: see dlaa.h. The pin is taken once; a failed NGX init is not retried (no NVIDIA GPU: Init fails the same way
+// later and logs it there).
+bool DlaaProcessor::Prewarm(ID3D11Device* dev) {
+    static bool tried = false;
+    if (tried || !dev) return g_ngxPinned;
+    tried = true;
+    const bool fresh = g_ngxRefs == 0;
+    const int64_t t0 = QpcNow();
+    if (!NgxAcquire(dev, true)) {
+        Log("DLAA: NGX pre-warm FAILED after %.1f ms (see the line above) -- units initialise NGX themselves", QpcMs(t0, QpcNow()));
+        return false;
+    }
+    g_ngxPinned = true;
+    const int64_t t1 = QpcNow();
+    // Throwaway feature with the configured preset: the first feature create of a process also loads the DLSS model;
+    // after this one every real feature create is only its own (small) cost.
+    constexpr uint32_t kSide = 512;
+    DlaaProcessor tmp;
+    tmp.m_quiet = true;
+    tmp.SetEye(-1);
+    const bool featOk = tmp.Init(dev, kSide, kSide, kSide, kSide, /*depthInverted=*/true);
+    const int64_t t2 = QpcNow();
+    tmp.Shutdown();                            // feature + params released; the pin keeps NGX up
+    const int64_t t3 = QpcNow();
+    Log("DLAA: NGX pre-warm at the first Present: %.1f ms -- NGX %s %.1f ms, throwaway %ux%u DLAA feature (preset=%s) "
+        "create %s %.1f ms, release %.1f ms; NGX stays initialised for the process (pinned), later unit creates only "
+        "pay their own feature", QpcMs(t0, t3), fresh ? "init" : "share", QpcMs(t0, t1), kSide, kSide, g_presetName,
+        featOk ? "OK" : "FAILED", QpcMs(t1, t2), QpcMs(t2, t3));
+    return true;
+}
 
 bool DlaaProcessor::Init(ID3D11Device* dev, uint32_t renderW, uint32_t renderH, uint32_t outW, uint32_t outH,
                          bool depthInverted) {
@@ -97,38 +177,12 @@ bool DlaaProcessor::Init(ID3D11Device* dev, uint32_t renderW, uint32_t renderH, 
     m_width = renderW; m_height = renderH;
     m_outW = outW; m_outH = outH;                      // v0.7.0: == render for DLAA
 
-    NVSDK_NGX_Result r = NVSDK_NGX_Result_Success;
-    if (g_ngxRefs == 0) {
-        // nvngx_dlss.dll search path = our own folder (game exe folder is searched
-        // by default; this lets the snippet sit next to dinput8.dll instead).
-        static wchar_t dllDir[MAX_PATH];
-        NVSDK_NGX_FeatureCommonInfo fci{};
-        const wchar_t* paths[1] = { dllDir };
-        if (ThisDllDir(dllDir, MAX_PATH)) {
-            fci.PathListInfo.Path   = paths;
-            fci.PathListInfo.Length = 1;
-        }
-
-        r = NVSDK_NGX_D3D11_Init_with_ProjectID(
-            kProjectId, NVSDK_NGX_ENGINE_TYPE_CUSTOM, kEngineVersion,
-            dllDir, m_dev, &fci, NVSDK_NGX_Version_API);
-        if (NVSDK_NGX_FAILED(r)) {
-            Log("DLAA: NGX init failed %s (non-NVIDIA GPU or driver too old?)", NgxErr(r));
-            Shutdown();
-            return false;
-        }
-        g_ngxDev = m_dev;
-        g_ngxRefs = 1;
-        m_ngxInited = true;
-    } else {
-        ++g_ngxRefs;                           // NGX already up (other eye): share it
-        m_ngxInited = true;
-        Log("DLAA: NGX already initialised, sharing it (%d users)", g_ngxRefs);
-    }
+    if (!NgxAcquire(m_dev, m_quiet)) { Shutdown(); return false; }
+    m_ngxInited = true;
 
     // Capability check: is the DLSS feature available on this GPU/driver?
     NVSDK_NGX_Parameter* caps = nullptr;
-    r = NVSDK_NGX_D3D11_GetCapabilityParameters(&caps);
+    NVSDK_NGX_Result r = NVSDK_NGX_D3D11_GetCapabilityParameters(&caps);
     if (NVSDK_NGX_FAILED(r) || !caps) {
         Log("DLAA: GetCapabilityParameters failed %s", NgxErr(r));
         Shutdown();
@@ -159,8 +213,10 @@ bool DlaaProcessor::Init(ID3D11Device* dev, uint32_t renderW, uint32_t renderH, 
 
     if (!CreateFeature(depthInverted)) { Shutdown(); return false; }
     char sz[96];
-    Log("DLAA: ready -- %s, preset=%s%s", SizeText(sz, sizeof(sz)), g_presetName,
-        g_preset == NVSDK_NGX_DLSS_Hint_Render_Preset_Default ? " (driver pick)" : "");
+    if (!m_quiet)
+        Log("DLAA: ready -- %s, preset=%s%s", SizeText(sz, sizeof(sz)), m_eye >= kMenuEyeTag ? "E" : g_presetName,
+            m_eye >= kMenuEyeTag ? " (menu units always use E)" :
+            g_preset == NVSDK_NGX_DLSS_Hint_Render_Preset_Default ? " (driver pick)" : "");
     return true;
 }
 
@@ -201,17 +257,21 @@ uint32_t DlaaProcessor::PresetFallbacks() { return g_presetFallbacks; }
 bool DlaaProcessor::CreateFeature(bool depthInverted) {
     if (m_feature) { NVSDK_NGX_D3D11_ReleaseFeature(m_feature); m_feature = nullptr; }
     m_presetGen = g_presetGen;                         // also on failure: no per-frame retry storm
+    g_createFrame = g_frameNo;                         // v0.7.8: this Present's create budget is used
 
     // Render preset. Default (0) = driver's pick (currently preset K for DLAA/Quality/Balanced -- see
     // nvsdk_ngx_defs.h). v0.5.6: dlaa.ini dlss_preset. v0.7.0: written to EVERY DLSS hint parameter, so the
     // Shift+F1..F4 model choice applies whatever PerfQuality the render -> output ratio selects (NGX only
     // reads the hint of the feature's own PerfQuality; DLAA reads ..._DLAA exactly as before).
-    NVSDK_NGX_Parameter_SetUI(m_params, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_DLAA, g_preset);
-    NVSDK_NGX_Parameter_SetUI(m_params, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraQuality, g_preset);
-    NVSDK_NGX_Parameter_SetUI(m_params, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Quality, g_preset);
-    NVSDK_NGX_Parameter_SetUI(m_params, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Balanced, g_preset);
-    NVSDK_NGX_Parameter_SetUI(m_params, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Performance, g_preset);
-    NVSDK_NGX_Parameter_SetUI(m_params, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraPerformance, g_preset);
+    // v0.7.8: menu / truck-preview units (eye tag >= kMenuEyeTag) always use preset E -- the model keys change the
+    // drive only (default/K on the full eye-sized menu picture cost 3.5 ms per eye and smudged).
+    const unsigned int preset = m_eye >= kMenuEyeTag ? (unsigned int)NVSDK_NGX_DLSS_Hint_Render_Preset_E : g_preset;
+    NVSDK_NGX_Parameter_SetUI(m_params, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_DLAA, preset);
+    NVSDK_NGX_Parameter_SetUI(m_params, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraQuality, preset);
+    NVSDK_NGX_Parameter_SetUI(m_params, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Quality, preset);
+    NVSDK_NGX_Parameter_SetUI(m_params, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Balanced, preset);
+    NVSDK_NGX_Parameter_SetUI(m_params, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Performance, preset);
+    NVSDK_NGX_Parameter_SetUI(m_params, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraPerformance, preset);
 
     const NVSDK_NGX_PerfQuality_Value pq = PickPerfQuality(m_width, m_height, m_outW, m_outH);
     if (CreateFeatureOnce(depthInverted, (int)pq)) return true;
@@ -268,8 +328,12 @@ bool DlaaProcessor::Evaluate(ID3D11DeviceContext* ctx,
 
     // v0.5.7: live preset change (Shift+End) -> recreate with the new hint before this evaluate. Checked
     // before the m_feature test so a feature lost to a failed create comes back at the next change.
+    // v0.7.8: one create per Present -- when another unit already created a feature this Present, this unit keeps
+    // evaluating with its current (old preset) feature and recreates at its next Present (VR: the two eyes recreate
+    // in consecutive frames instead of ~2 x 40 ms in one). A unit without a feature always recreates.
     bool recreated = false;
-    if (m_presetGen != g_presetGen) {
+    if (m_eye >= kMenuEyeTag && m_feature) m_presetGen = g_presetGen;   // menu unit: fixed preset, no recreate
+    if (m_presetGen != g_presetGen && (!m_feature || CreateBudgetFree())) {
         if (!CreateFeature(m_depthInverted)) {
             if (g_preset != NVSDK_NGX_DLSS_Hint_Render_Preset_Default) {
                 Log("DLAA: CreateFeature for preset %s FAILED on eye %d -- falling back to default", g_presetName, m_eye);

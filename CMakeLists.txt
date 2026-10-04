@@ -1,5 +1,5 @@
-﻿cmake_minimum_required(VERSION 3.20)
-project(ets2_ats_dlaa VERSION 0.7.7 LANGUAGES C CXX)
+cmake_minimum_required(VERSION 3.20)
+project(ets2_ats_dlaa VERSION 0.7.8 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,7 +11,7 @@ add_library(dinput8 SHARED
     src/inject.cpp
 )
 set_target_properties(dinput8 PROPERTIES PREFIX "" OUTPUT_NAME "dinput8")
-# Single source of the version string: project(... VERSION 0.7.7) above feeds the
+# Single source of the version string: project(... VERSION 0.7.8) above feeds the
 # load-log line in src/inject.cpp through this compile definition. Bump it in project()
 # only; the doc headers are the only other place the version is written by hand.
 target_compile_definitions(dinput8 PRIVATE DLAA_INJECTOR_VERSION="${PROJECT_VERSION}")
@@ -73,7 +73,10 @@ if (WITH_DLAA)
     if (NOT NGX_LIB_RELEASE)
         message(FATAL_ERROR "nvsdk_ngx_d.lib not found under ${NGX_SDK_DIR}/lib/Windows_x86_64/x64")
     endif()
-    target_sources(dinput8 PRIVATE src/dlaa.cpp src/motion_vectors.cpp src/scene_dlaa.cpp)
+    # v0.7.8: shader_cache.cpp compiles every embedded shader once per process on a worker thread (no D3DCompile on
+    # the render thread any more; the blocks below are still fxc-validated at build time).
+    target_sources(dinput8 PRIVATE src/dlaa.cpp src/motion_vectors.cpp src/scene_dlaa.cpp src/preview_blit.cpp
+                                   src/shader_cache.cpp)
     target_include_directories(dinput8 PRIVATE "${NGX_SDK_DIR}/include")
     target_compile_definitions(dinput8 PRIVATE WITH_DLAA=1)
     # d3dcompiler: runtime HLSL compile for the depth + motion-vector passes (OS DLL).
@@ -111,10 +114,14 @@ if (WITH_DLAA)
             "src/scene_dlaa.cpp@kDepthConvertShader"
             "src/scene_dlaa.cpp@kMvDebugShader"
             "src/scene_dlaa.cpp@kRcasShader"
+            "src/preview_blit.cpp@kPvBlitVs@vs_5_0@VSMain"      # v0.7.8 profile-screen preview format-converting copy
+            "src/preview_blit.cpp@kPvBlitPs@ps_5_0@PSMain"
             "src/scene_dlaa.cpp@kCompositeVs@vs_5_0@VSMain"     # v0.7.0 upscale composite (graphics)
             "src/scene_dlaa.cpp@kCompositePs@ps_5_0@PSMain"
             "src/motion_vectors.cpp@kSolveShader"
-            "src/motion_vectors.cpp@kReprojDepthShader")
+            "src/motion_vectors.cpp@kReprojDepthShader"
+            "src/inject.cpp@kPvStatsShader"                     # v0.7.8 Ctrl+F10 preview capture metrics
+            "src/inject.cpp@kPvDepthAsmShader")                 # v0.7.8 tiled preview picture depth
         string(REPLACE ";" "," _shader_blocks_arg "${_shader_blocks}")
         set(_shader_stamp "${CMAKE_CURRENT_BINARY_DIR}/shaders/validated.stamp")
         add_custom_command(
@@ -128,6 +135,8 @@ if (WITH_DLAA)
                     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/validate_shaders.cmake"
             DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/scene_dlaa.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/motion_vectors.cpp"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/src/preview_blit.cpp"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/src/inject.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/validate_shaders.cmake"
             COMMENT "Validating embedded HLSL shader blocks with fxc"
             VERBATIM)

@@ -237,6 +237,8 @@
 #include "log.h"
 #ifdef WITH_DLAA
 #include "scene_dlaa.h"
+#include "preview_blit.h"
+#include "shader_cache.h"
 #endif
 
 namespace {
@@ -565,6 +567,9 @@ void CycleMode(uint64_t n);              // v0.7.2 plain End: DLAA -> DLSS -> of
 void SaveSettings(uint64_t n);           // v0.6.5 Shift+F12: write the 4 live values (v0.7.0: + dlss_upscale) to dlaa.ini
 void CheckPresetFallback(uint64_t n);    // v0.5.7: beep + log when a live preset fell back to default
 void OnLiveTuningChange();               // v0.5.7; v0.6.2 also DLAA toggle / passive / MV (restarts the GPU spans window)
+void PreviewInvalidate();                // v0.7.8 profile-screen preview slots: drop their MV / DLSS history
+void PreviewNextFrame(uint64_t n);       // v0.7.8 per-Present preview bookkeeping (slot counter, jitter, stats)
+void MaybePrewarmNgx();                  // v0.7.8 NGX pre-warm at the first Present with DLAA on
 #endif
 
 HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
@@ -610,6 +615,9 @@ HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
         }
     }
     if (depth == 0) UpdateGameContext(sc, n);   // v0.6.2: before anything else this frame (hotkeys may reset state)
+#ifdef WITH_DLAA
+    if (depth == 0) MaybePrewarmNgx();          // v0.7.8: NGX init + first feature on the boot screen (once)
+#endif
     if (depth == 0) {                           // v0.7.7 re-bindable hotkeys (dlaa.ini key_*, see PollKeys)
         PollKeys();                              // down-edges for this Present (exact modifiers, foreground only)
 
@@ -708,6 +716,7 @@ HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
                 const int nx = (cur + 1) % 4;
                 g_signX = kCycle[nx][0]; g_signY = kCycle[nx][1];
                 g_resetNext = true;
+                PreviewInvalidate();             // v0.7.8: the preview slots drop their history too (own reset epoch)
                 Log("jitter sign now X=%+d Y=%+d (%s)", g_signX, g_signY, KeyName(KA_JITTER_SIGN));
             }
         }
@@ -788,6 +797,7 @@ uint32_t         g_compX = 0, g_compY = 0;       // output (viewport) origin ins
 bool             g_compSrgb = false;             // the blit's SRV0 was an _SRGB view
 uint64_t         g_compSkipped = 0;              // armed composites dropped because RT0 changed
 void MvInvalidate() {
+    PreviewInvalidate();
     for (SceneDlaa& d : g_dlaa) d.Mv().Invalidate();
     for (EyeRecState& e : g_eyeRec) e = EyeRecState();    // v0.6.1 (the generation key would catch it too)
 }
@@ -1876,6 +1886,1931 @@ void STDMETHODCALLTYPE hkClearRTV(ID3D11DeviceContext* ctx, ID3D11RenderTargetVi
     TraceClearRtv(ctx, v, c);
     oClearRTV(ctx, v, c);
 }
+#ifdef WITH_DLAA
+// ---- v0.7.8 profile / truck-preview screen DLAA (flat + VR) ----------------------------------------------------
+// That screen has no world G-buffer. FLAT (frame trace dlaa_trace_profilescreen.txt), per frame, up to 4 times:
+// clear RT_P (R11G11B10_FLOAT, backbuffer size) + DS_P (D32_FLOAT_S8X24_UINT), OMSetRenderTargets n=1 (RT_P + DS_P),
+// viewport MinDepth 0.01 / MaxDepth 0.9, ~207 DrawIndexed of the truck, DiscardView DS_P, then a 3-vertex Draw onto the
+// backbuffer with RT_P as PS SRV0 (the composite): pass, composite, pass, composite, ..., then the UI DrawIndexed.
+// VR (dlaa_trace_profilescreen_vr_real.txt): per eye 4 passes into 4 DIFFERENT eye-sized RT_k sharing ONE DS_P, ALL
+// passes first, then 4 composites (PS SRV0 = RT_3 .. RT_0) into the eye RT, then a Draw verts=96; eye 1 repeats it.
+// The 4 passes are LAYERS the composites blend together (every layer carries visible edges), so DLAA runs ONCE PER
+// COMPOSITE TARGET on the finished LDR composite, like the world path (round 4; rounds 1-3 ran one float DLAA per layer,
+// 1.8-2.5 s NGX creation each):
+//  * Slots = preview passes keyed by the bind order within the frame (kPvSlots = 8). Each remembers its RT_k; a composite
+//    (3-vertex Draw, PS SRV0 = RT_k, RT0 = a target) takes the OLDEST not-yet-composited slot whose RT == SRV0.
+//  * Targets = the RT0 of matched composites, indexed by the order of their first composite in the frame (kPtMax = 2:
+//    flat = the backbuffer, VR = the two eye RTs). Round 5: the DLAA UNITS (one SceneDlaa each: own CameraMv history,
+//    own NGX feature) belong to the EYE, not to the composite order -- flat: unit 0; VR: the eye of the target's RT,
+//    from a small RT map corrected by projection verdicts (see PvEyeEntry). Round 4 tied unit k to "the k-th
+//    composite target of the frame", and the game renders the two eyes in either order: each unit's history and MV
+//    prev then came from the OTHER eye every swapped frame (VR log 20:37: R_world = the other eye's projection,
+//    |R[0][3]| ~0.97, in every sample of both units) -- ghosting with preset K ("default").
+//  * Reference pass: depth + MVs of a target come from the LOWEST slot composited into it (flat 0; VR 0 and 4). That
+//    mapping is learned at every Present (g_ptRefMask); from the next frame on only the reference slots snapshot depth
+//    (at DiscardView, before the next pass clears the shared DS) and collect MV candidates, the other slots' twins are
+//    freed. The first frame of a screen therefore has no depth and runs nothing.
+//  * A target is pending after its first matched composite. Its DLAA runs once, before the first of: (a) a Draw /
+//    DrawIndexed on the game context while it is bound that is not a matched composite (flat: the UI, VR: the verts=96
+//    Draw), (b) an OMSetRenderTargets that binds something else that is not a preview pass, (c) Present.
+//  * Formats: the target is LDR 8-bit. R8G8B8A8 (VR eye RT, typeless): SceneDlaa runs in place (CopyResource, exactly the
+//    world path). B8G8R8A8 (flat backbuffer): PreviewBlit copies it into an R8G8B8A8_TYPELESS scratch through an SRV / RTV
+//    pair in the UNORM (non-sRGB) format (the draw's load / store converts the byte order, the gamma-encoded bytes travel
+//    unchanged), SceneDlaa runs in place on the scratch, and a second PreviewBlit draw writes it back.
+// Nothing here touches g_ring / g_passSeq / g_fifoHead / g_dlaa. Render thread only.
+constexpr int      kPvSlots       = 8;
+constexpr int      kPtMax         = 2;
+constexpr uint64_t kPvQuietFrames = 30;          // no world G-buffer bind for this many Presents before a bind can count
+struct PvSlot {
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> rt;  // RT_k this frame's pass of the slot rendered into (ref dropped at Present)
+    bool      composited = false;                // its composite Draw was handled this frame
+    PassSlot  ps;                                // twin + cand (and the collector's skip counters, otherwise unused)
+    // v0.7.8 preview capture (Ctrl+F10): the viewport decisions ReconcileViewports made while this pass was bound (full
+    // preview-sized viewport 0 only): last applied shift, how often shifted / issued unshifted. Reset at the slot's bind.
+    float     capShX = 0.0f, capShY = 0.0f;
+    int       capShN = 0, capUnshN = 0;
+    uint32_t  diCount = 0;                       // round 6: DrawIndexed calls while this pass was bound (diagnostics)
+    D3D11_VIEWPORT compVp{};                     // round 6: viewport 0 of its composite Draw (layout log: where it lands)
+};
+struct PvTarget {                                // per frame, indexed by composite order (reset at Present)
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> tex; // this frame's composite target (ref dropped at Present)
+    bool      pending = false;                   // composited into, DLAA not run yet this frame
+    int       curRef = 99;                       // lowest slot composited into it this frame
+    int       slotMask = 0;                      // v0.7.8 capture: every slot composited into it this frame
+    int       unit = -1;                         // round 5: unit (= eye) it was given this frame (-1 = not resolved / none)
+};
+struct PvUnit {                                  // round 5: one DLAA unit per EYE (flat: unit 0), persistent
+    SceneDlaa dl;                                // instance tag (SetEye) 10 + unit in the logs ("eye 10" = eye 0)
+    uint64_t  lastFrame = 0, epoch = 0, runs = 0;
+    int       lastRef = -1;                      // reference slot of the last successful Run (log only: VR 0 or 4)
+    int       lastOrder = -1;                    // composite order of its target at the last successful Run (log only)
+    bool      inited = false, unsupported = false;
+    // BGRA path (flat backbuffer): UNORM views of the target + an RGBA8 scratch SceneDlaa runs on
+    Microsoft::WRL::ComPtr<ID3D11Texture2D>           viewsOf;   // texture the target views below belong to
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>  tgtSrv;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView>    tgtRtv;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D>           scratch;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>  scratchSrv;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView>    scratchRtv;
+    UINT      sw = 0, sh = 0;                    // scratch size
+};
+PvSlot           g_pv[kPvSlots];
+PvTarget         g_pt[kPtMax];
+PvUnit           g_pu[kPtMax];
+bool             g_previewPass  = false;         // current OM binding is a preview pass (jitter shift, MV collection)
+int              g_pvCount      = 0;             // preview passes bound this frame (reset at Present)
+int              g_ptCount      = 0;             // composite targets seen this frame
+int              g_ptPendingMask = 0;            // bit idx = target idx is pending
+int              g_ptBoundIdx   = -1;            // pending target that is the current RT0 (-1 none)
+int              g_ptRefMask    = 0;             // learned reference slots (bit = slot); 0 = not learned yet
+int              g_pvCur        = -1;            // slot of the newest preview pass (draw / discard target; -1 none)
+Microsoft::WRL::ComPtr<ID3D11Texture2D> g_pvDs;   // DS_P of the current frame (shared by the passes; ref dropped at Present)
+int              g_previewDlaa  = 1;             // dlaa.ini preview_dlaa (0 = the preview path never activates)
+int              g_pvCaptureAt  = 0;             // dlaa.ini preview_capture_at (debug): Ctrl+F10 capture N Presents after the
+bool             g_pvCaptureAtDone = false;      //   preview DLAA first ran (0 = off); once per session
+uint64_t         g_pvFirstRunPresent = 0;        // Present of the first preview frame with a successful unit run
+int64_t          g_pvT0         = 0;             // QPC / Present index at the start of the 600-frame fps window
+uint64_t         g_pvF0         = 0;
+UINT             g_pvW = 0, g_pvH = 0;           // RT_k size = the viewport size the jitter shift applies to
+float            g_pvJx = 0.0f, g_pvJy = 0.0f;   // viewport shift of the whole frame (advances per Present, all passes share it)
+uint64_t         g_pvEpoch      = 1;             // bumped by PreviewInvalidate: targets reset their DLSS history on a mismatch
+uint64_t         g_lastGbufFrame = 0;            // g_frames at the last world G-buffer bind (4 RTVs + scene DSV)
+bool             g_pvDetectLogged = false, g_pvRunLogged = false;
+int              g_pvOkFrame    = 0;             // targets that ran OK this frame
+uint64_t         g_pvFrames     = 0, g_pvRunsTotal = 0;   // frames with >= 1 OK target / OK runs in total
+
+void PreviewInvalidate() {
+    for (PvUnit& u : g_pu) u.dl.Mv().Invalidate();
+    ++g_pvEpoch;
+}
+
+// ---- round 5: VR eye of a preview target (RT map + projection verdicts) ------------------------------------------
+// Same principle as the world path (EyeOfRT + EyeVerdict): the eye comes from the target RT pointer, never from the
+// order (the eye RTs rotate, 3 per eye; the eye order changes between frames). The map is learned from the MVPs: at
+// Present, when both targets of the frame have a reference-slot candidate record, the first <= 8 world MVPs of each are
+// GPU-copied into one small staging buffer and read back a few Presents later (DO_NOT_WAIT, never a stall). Projection
+// x skew p = -dot(row0.xyz, row3.xyz) / |row3.xyz|^2 (EyeVerdict's p); the target with the LARGER mean p is eye 0. (The
+// world rule "p > 0 = eye 0" does not hold on this screen: the 20:37 log's MVPs give p ~ +1.49 and ~ +0.52.)
+// An RT not decided yet is left untouched (no DLAA, no history) -- a handful of frames on entering the screen; after
+// kPvGuessFrames without any verdict it falls back to the composite order (the round 4 behaviour). A decided RT keeps a
+// score (+1 per eye-0 verdict, -1 per eye-1, clamped +-6); a flip needs |score| >= 2 against it and drops both units'
+// history (PreviewInvalidate). Two targets of one frame mapped to the same unit: the second one is left untouched.
+// Render thread only; flat (one target, launch mode flat) never uses any of it.
+struct PvEyeEntry { void* rt; int eye; int score; uint64_t firstFrame; };   // eye -1 = not decided yet
+constexpr int      kPvEyeCap      = 16;
+constexpr int      kPvRbRing      = 4;
+constexpr int      kPvRbMvps      = 8;           // MVPs read back per target (world layer, record order)
+constexpr uint64_t kPvGuessFrames = 30;          // no verdict for this many Presents -> composite-order guess
+PvEyeEntry       g_pvEye[kPvEyeCap];
+int              g_pvEyeN       = 0;
+struct PvEyeReadback {
+    ID3D11Buffer* staging = nullptr;             // 2 x kPvRbMvps x 64 bytes, STAGING + CPU read (held for the process life)
+    void*         rt[2] = {};                    // target RT of each half (identity only)
+    int           n[2] = {};                     // MVPs in each half
+    uint64_t      frame = 0;                     // Present it was queued at
+};
+PvEyeReadback    g_pvRb[kPvRbRing];
+int              g_pvRbHead = 0, g_pvRbPending = 0;
+bool             g_pvRbInitTried = false, g_pvRbOk = false;
+uint64_t         g_pvSettledN   = 0;             // Presents since the map settled (readback throttle)
+int              g_pvUnitMask   = 0;             // units given to a target this frame (reset at Present)
+uint64_t         g_pvVerdicts = 0, g_pvNoVote = 0, g_pvCorrections = 0, g_pvRbThrottled = 0;
+uint64_t         g_pvOrderSwaps = 0;             // targets whose unit != composite order (the round 4 mix-up, per run)
+uint64_t         g_pvConflicts = 0, g_pvUndecided = 0;   // targets left untouched: unit taken / eye unknown
+
+int PvEyeFind(void* rt) {
+    for (int i = 0; i < g_pvEyeN; ++i) if (g_pvEye[i].rt == rt) return i;
+    return -1;
+}
+
+// Unit of target `idx` for this frame (resolved once per frame), or -1 = leave the target untouched this frame.
+int PvUnitOf(int idx, uint64_t fr) {
+    PvTarget& t = g_pt[idx];
+    if (t.unit >= 0) return t.unit;
+    int u = idx;                                         // flat / not a VR launch: the order (one target)
+    if (g_launchVr == 1) {
+        void* const rt = t.tex.Get();
+        int e = PvEyeFind(rt);
+        if (e < 0) {
+            if (g_pvEyeN >= kPvEyeCap) {
+                Log("preview eye map full (%d RTs): cleared", g_pvEyeN);
+                g_pvEyeN = 0;
+            }
+            e = g_pvEyeN++;
+            g_pvEye[e] = { rt, -1, 0, fr };
+            if (g_pvEyeN <= 8)
+                Log("preview eye map: new target RT %p (composite order %d, entry #%d) -- eye from the next projection verdict",
+                    rt, idx, g_pvEyeN);
+        }
+        PvEyeEntry& en = g_pvEye[e];
+        if (en.eye < 0 && fr - en.firstFrame > kPvGuessFrames) {
+            en.eye = idx;
+            static int guessLogs = 0;
+            if (guessLogs++ < 8)
+                Log("preview eye map: RT %p got no projection verdict in %llu Presents -> eye %d by composite order (guess)",
+                    rt, (unsigned long long)kPvGuessFrames, idx);
+        }
+        if (en.eye < 0) { ++g_pvUndecided; return -1; }
+        u = en.eye;
+        if ((g_pvUnitMask >> u) & 1) {                   // the frame's other target already has this eye: map conflict
+            if (g_pvConflicts++ < 10)
+                Log("preview eye map: target %d (RT %p) maps to eye %d, already used this frame -- left untouched (conflict #%llu)",
+                    idx, rt, u, (unsigned long long)g_pvConflicts);
+            return -1;
+        }
+        if (u != idx) ++g_pvOrderSwaps;
+    }
+    g_pvUnitMask |= 1 << u;
+    t.unit = u;
+    return u;
+}
+
+bool PvEnsureEyeReadback(ID3D11DeviceContext* ctx) {
+    if (g_pvRbInitTried) return g_pvRbOk;
+    g_pvRbInitTried = true;
+    Microsoft::WRL::ComPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    if (!dev) return false;
+    D3D11_BUFFER_DESC bd{};
+    bd.ByteWidth = 2 * kPvRbMvps * CandidateRecord::kSlotBytes;
+    bd.Usage = D3D11_USAGE_STAGING;
+    bd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    g_pvRbOk = true;
+    for (PvEyeReadback& r : g_pvRb)
+        if (FAILED(dev->CreateBuffer(&bd, nullptr, &r.staging)) || !r.staging) { g_pvRbOk = false; break; }
+    if (!g_pvRbOk) Log("preview eye verdict: staging ring creation failed (VR preview targets fall back to the composite order)");
+    return g_pvRbOk;
+}
+
+// Mean projection x skew over the finite MVPs of one half (n x 16 floats, rows). false = no usable MVP.
+bool PvMeanSkew(const float* data, int n, double* pOut) {
+    double sum = 0.0; int cnt = 0;
+    for (int i = 0; i < n; ++i) {
+        const float* m = data + (size_t)i * 16;
+        bool finite = true;
+        for (int k = 0; k < 16; ++k) if (!std::isfinite(m[k])) { finite = false; break; }
+        if (!finite) continue;
+        const float* r0 = m; const float* r3 = m + 12;
+        const double d33 = (double)r3[0] * r3[0] + (double)r3[1] * r3[1] + (double)r3[2] * r3[2];
+        if (d33 <= 1e-12) continue;
+        sum += -((double)r0[0] * r3[0] + (double)r0[1] * r3[1] + (double)r0[2] * r3[2]) / d33;
+        ++cnt;
+    }
+    if (!cnt) return false;
+    *pOut = sum / cnt;
+    return true;
+}
+
+void PvApplyVerdict(void* rt, int eye, double p) {
+    const int i = PvEyeFind(rt);
+    if (i < 0) return;                                   // map cleared since the readback was queued
+    PvEyeEntry& e = g_pvEye[i];
+    if (e.eye < 0) {                                     // first verdict decides an undecided RT directly
+        e.eye = eye;
+        e.score = eye == 0 ? 1 : -1;
+        static int logs = 0;
+        if (logs++ < 8) Log("preview eye map: RT %p -> eye %d by projection verdict (p=%.4f)", rt, eye, p);
+        return;
+    }
+    e.score += eye == 0 ? 1 : -1;
+    if (e.score > 6) e.score = 6;
+    if (e.score < -6) e.score = -6;
+    const int decided = e.score >= 2 ? 0 : (e.score <= -2 ? 1 : e.eye);
+    if (decided != e.eye) {
+        ++g_pvCorrections;
+        if (g_pvCorrections <= 20)
+            Log("preview eye map: RT %p corrected eye %d -> %d by projection verdict (score %d, p=%.4f) -- both units' "
+                "history dropped", rt, e.eye, decided, e.score, p);
+        e.eye = decided;
+        PreviewInvalidate();
+    }
+}
+
+// Poll pending readbacks oldest-first (stop at the first the GPU has not finished) and turn each into a verdict.
+void PvPollEyeReadbacks(ID3D11DeviceContext* ctx) {
+    while (g_pvRbPending > 0) {
+        PvEyeReadback& r = g_pvRb[g_pvRbHead];
+        D3D11_MAPPED_SUBRESOURCE ms{};
+        const HRESULT hr = ctx->Map(r.staging, 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &ms);
+        if (hr == DXGI_ERROR_WAS_STILL_DRAWING) break;
+        g_pvRbHead = (g_pvRbHead + 1) % kPvRbRing; --g_pvRbPending;
+        if (FAILED(hr) || !ms.pData) {
+            if (SUCCEEDED(hr)) ctx->Unmap(r.staging, 0);
+            continue;
+        }
+        double p[2] = {};
+        bool ok[2];
+        for (int i = 0; i < 2; ++i) ok[i] = PvMeanSkew((const float*)ms.pData + (size_t)i * kPvRbMvps * 16, r.n[i], &p[i]);
+        ctx->Unmap(r.staging, 0);
+        ++g_pvVerdicts;
+        if (!ok[0] || !ok[1] || r.rt[0] == r.rt[1] || std::fabs(p[0] - p[1]) < 0.05) {
+            if (g_pvNoVote++ < 5)
+                Log("preview eye verdict: no vote (Present #%llu, p=%.4f/%.4f usable=%d/%d, RTs %p / %p)",
+                    (unsigned long long)r.frame, p[0], p[1], (int)ok[0], (int)ok[1], r.rt[0], r.rt[1]);
+            continue;
+        }
+        const int hi = p[0] > p[1] ? 0 : 1;              // larger x skew = eye 0
+        if (g_pvVerdicts <= 6)
+            Log("preview eye verdict (Present #%llu): order 0 RT %p p=%.4f, order 1 RT %p p=%.4f -> eye 0 = order %d",
+                (unsigned long long)r.frame, r.rt[0], p[0], r.rt[1], p[1], hi);
+        PvApplyVerdict(r.rt[hi], 0, p[hi]);
+        PvApplyVerdict(r.rt[1 - hi], 1, p[1 - hi]);
+    }
+}
+
+// Present (before the frame's targets are reset): queue this frame's two reference records for a verdict. Once the
+// map is settled (>= 2 RTs, every score saturated) only every 31st frame (coprime to the 3-image RT cycle).
+void PvQueueEyeReadback(ID3D11DeviceContext* ctx, uint64_t n) {
+    if (g_ptCount != 2 || g_pvRbPending >= kPvRbRing) return;
+    const CandidateRecord* rec[2] = {};
+    int cnt[2] = {};
+    for (int i = 0; i < 2; ++i) {
+        const int ref = g_pt[i].curRef;
+        if (!g_pt[i].tex || ref < 0 || ref >= kPvSlots) return;
+        const CandidateRecord& c = g_pv[ref].ps.cand;
+        if (!c.Ready() || !c.Buffer() || c.Count(0) <= 0) return;
+        rec[i] = &c;
+        cnt[i] = c.Count(0) < kPvRbMvps ? c.Count(0) : kPvRbMvps;
+    }
+    if (g_pt[0].tex.Get() == g_pt[1].tex.Get()) return;
+    bool settled = g_pvEyeN >= 2;
+    for (int i = 0; settled && i < g_pvEyeN; ++i)
+        if (g_pvEye[i].score != 6 && g_pvEye[i].score != -6) settled = false;
+    if (!settled) g_pvSettledN = 0;
+    else if (g_pvSettledN++ % 31 != 0) { ++g_pvRbThrottled; return; }
+    if (!PvEnsureEyeReadback(ctx)) return;
+    PvEyeReadback& r = g_pvRb[(g_pvRbHead + g_pvRbPending) % kPvRbRing];
+    for (int i = 0; i < 2; ++i) {
+        const D3D11_BOX box{ 0, 0, 0, (UINT)cnt[i] * CandidateRecord::kSlotBytes, 1, 1 };   // layer 0 = the record's first slots
+        ctx->CopySubresourceRegion(r.staging, 0, (UINT)(i * kPvRbMvps) * CandidateRecord::kSlotBytes, 0, 0,
+                                   rec[i]->Buffer(), 0, &box);
+        r.rt[i] = g_pt[i].tex.Get();
+        r.n[i] = cnt[i];
+    }
+    r.frame = n;
+    ++g_pvRbPending;
+}
+
+// ---- v0.7.8 round 6: TILED preview pictures --------------------------------------------------------------------------
+// Proven by the Ctrl+F10 capture (VR 21:48): every composite target is built from N TILE passes. Each pass renders a part
+// of the view at the FULL RT size -- its first MVP = the reference pass's with row0 += bx * row3 / row1 += by * row3
+// (slot 1: x 6120 px = 2 ndc, slot 2: y 2 ndc, slot 3: both; rows 2 / 3 equal, same draw, same viewport shift) = 2x2
+// tiles = the game's 2x supersampling -- and the composites shrink them into the target. Rounds 4 / 5 gave NGX the depth
+// of the reference tile stretched over the whole picture (a corner of the backdrop: the depth BMP had no truck) and MVs
+// from R in reference-tile clip space (the capture: "MVs do NOT reduce the error", mean 18-44 px with R ~ identity).
+//  * Layout (PvLayout per composite order = group): the FIRST candidate MVP of every pass of the target (the same draw
+//    in every pass) is read back asynchronously at Present (no stall); per pass a least-squares fit
+//    row0 = ax * ref row0 + bx * ref row3, row1 = ay * ref row1 + by * ref row3, rows 2 / 3 equal, i.e. tile ndc =
+//    a * reference-tile ndc + b. Tile k shows reference ndc x in [(-1 - bx) / ax, (1 - bx) / ax]; the PICTURE is the
+//    union of the tiles: reference ndc = h * picture ndc + c (h = half extent, c = centre of the union). Accepted as
+//    tiled only if every fit is exact (relative residual < 1e-3), a > 0 and the tile areas add up to the union
+//    (0.98..1.02); otherwise ("untiled": one pass, depth slices, anything else) the round 5 reference-slot path runs
+//    unchanged. Rechecked every Present until 8 identical results in a row, then every 31st; a change drops the history.
+//    Where each tile lands is thus derived from the projections (the composites themselves draw full-target viewports,
+//    logged as "composite vp"); the capture's depth / colour edge alignment verifies it on the real picture.
+//  * Depth: at each tile pass's DiscardView (the shared DS still holds that pass) the DS is copied into ONE shared tile
+//    twin and kPvDepthAsmShader reduces it into the group's picture-size R32F depth at the tile's rect: each picture pixel
+//    takes the MAX (reversed-Z = NEAREST) of the tile texels it covers (2x2 here). Nearest, because a thin foreground
+//    silhouette (the truck's edges, light against the backdrop) must keep the truck's depth and motion rather than the
+//    backdrop's -- the usual closest-depth choice for temporal AA; the colour of such a pixel is mostly the truck too
+//    (2 of its 4 samples or more). Complete once every tile of the layout went through this frame; NGX then gets it,
+//    otherwise the target is left untouched this frame (logged as asm-miss).
+//  * Motion: CameraMv::SetTileXf(hx, hy, cx, cy): pass B maps picture ndc into reference-tile ndc before R and back after
+//    it (R_picture = S^-1 R_tile S), so the MVs are pixels of the composited picture.
+//  * Jitter: a viewport shift of s tile pixels is s / (a * h) picture pixels after the composite's shrink (the tile's
+//    texel spans 1 / (a * h) picture pixel; here a = 1, h = 2). Round 5 told NGX s while the picture moved s / 2. Now the
+//    tile passes get g_pvJx * a * hx (g_pvJy * a * hy) and NGX gets g_pvJx / g_pvJy: the picture carries exactly the full
+//    Halton offsets NGX is told (+-0.5 px), as in the world path.
+// Render thread only.
+template <class T> using PcPtr = Microsoft::WRL::ComPtr<T>;
+
+// Compute-stage save / restore around our own dispatches outside SceneDlaa (the slots they use).
+struct PvCsSave {
+    ID3D11ComputeShader*       cs = nullptr;
+    ID3D11ClassInstance*       inst[256] = {};
+    UINT                       nInst = 256;
+    ID3D11ShaderResourceView*  srv[7] = {};
+    ID3D11UnorderedAccessView* uav = nullptr;
+    ID3D11Buffer*              cb = nullptr;
+    ID3D11SamplerState*        smp = nullptr;
+    void Save(ID3D11DeviceContext* c) {
+        c->CSGetShader(&cs, inst, &nInst);
+        c->CSGetShaderResources(0, 7, srv);
+        c->CSGetUnorderedAccessViews(0, 1, &uav);
+        c->CSGetConstantBuffers(0, 1, &cb);
+        c->CSGetSamplers(0, 1, &smp);
+    }
+    void Restore(ID3D11DeviceContext* c) {
+        const UINT keep = (UINT)-1;
+        c->CSSetShader(cs, inst, nInst);
+        c->CSSetShaderResources(0, 7, srv);
+        c->CSSetUnorderedAccessViews(0, 1, &uav, &keep);
+        c->CSSetConstantBuffers(0, 1, &cb);
+        c->CSSetSamplers(0, 1, &smp);
+        if (cs) cs->Release();
+        for (UINT i = 0; i < nInst && i < 256; ++i) if (inst[i]) inst[i]->Release();
+        for (auto* p : srv) if (p) p->Release();
+        if (uav) uav->Release();
+        if (cb) cb->Release();
+        if (smp) smp->Release();
+    }
+};
+
+bool PvSameKey(const CandidateRecord::DrawKey& a, const CandidateRecord::DrawKey& b) {
+    return a.ib == b.ib && a.vb == b.vb && a.ibOffset == b.ibOffset && a.vbOffset == b.vbOffset &&
+           a.indexCount == b.indexCount && a.startIndex == b.startIndex && a.baseVertex == b.baseVertex;
+}
+
+// kPvDepthAsmShader-BEGIN (the build validates this block with fxc)
+const char kPvDepthAsmShader[] = R"(
+cbuffer AsmCB : register(b0) {
+    float4 Map;        // tile ndc = picture ndc * Map.xy + Map.zw (x, y)
+    uint2  FullSize;   // picture (composite target) size
+    uint2  TileSize;   // tile pass RT / DS size
+    uint2  RectOrg;    // picture pixel rect the tile covers (dispatch origin, size)
+    uint2  RectSize;
+};
+Texture2D<float>   TileDepth : register(t0);   // the tile pass's pre-discard depth (R32_FLOAT_X8X24 view of the twin)
+RWTexture2D<float> FullDepth : register(u0);   // picture depth, cleared to 0 (far) at the frame's first tile
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID) {
+    if (id.x >= RectSize.x || id.y >= RectSize.y) return;
+    uint2 p = RectOrg + id.xy;
+    if (p.x >= FullSize.x || p.y >= FullSize.y) return;
+    float2 fs = float2(FullSize);
+    float2 ts = float2(TileSize);
+    // the picture pixel's footprint [p, p + 1) -> picture ndc -> tile ndc -> tile texels
+    float fx0 = float(p.x) / fs.x * 2.0 - 1.0, fx1 = float(p.x + 1) / fs.x * 2.0 - 1.0;
+    float fy0 = 1.0 - float(p.y) / fs.y * 2.0, fy1 = 1.0 - float(p.y + 1) / fs.y * 2.0;
+    float kx0 = fx0 * Map.x + Map.z, kx1 = fx1 * Map.x + Map.z;
+    float ky0 = fy0 * Map.y + Map.w, ky1 = fy1 * Map.y + Map.w;
+    float u0 = (min(kx0, kx1) + 1.0) * 0.5 * ts.x, u1 = (max(kx0, kx1) + 1.0) * 0.5 * ts.x;
+    float v0 = (1.0 - max(ky0, ky1)) * 0.5 * ts.y, v1 = (1.0 - min(ky0, ky1)) * 0.5 * ts.y;
+    int x0 = max((int)floor(u0 + 1e-3), 0), x1 = min((int)ceil(u1 - 1e-3), (int)TileSize.x);
+    int y0 = max((int)floor(v0 + 1e-3), 0), y1 = min((int)ceil(v1 - 1e-3), (int)TileSize.y);
+    if (x1 <= x0 || y1 <= y0) return;           // not covered by this tile
+    x1 = min(x1, x0 + 4);
+    y1 = min(y1, y0 + 4);
+    float d = 0.0;
+    [loop] for (int y = y0; y < y1; ++y)
+        [loop] for (int x = x0; x < x1; ++x)
+            d = max(d, TileDepth[int2(x, y)]);  // reversed-Z: max = the nearest surface
+    FullDepth[p] = max(FullDepth[p], d);        // tiles meeting inside a pixel: nearest of both
+}
+)";
+// kPvDepthAsmShader-END
+
+void PvAsmRegisterShaders() {
+    ShaderCache::Add(ShaderCache::kPvDepthAsm, kPvDepthAsmShader, sizeof(kPvDepthAsmShader) - 1, "pv_depth_asm", "CSMain", "cs_5_0");
+}
+
+struct PvTileFit { float ax = 1.0f, bx = 0.0f, ay = 1.0f, by = 0.0f; };   // tile ndc = a * reference-tile ndc + b
+struct PvLayout {
+    bool      known = false, tiled = false;
+    int       slotMask = 0, ref = -1, nTiles = 0;
+    PvTileFit t[kPvSlots];                       // per slot (the reference slot: 1, 0)
+    float     hx = 1.0f, hy = 1.0f, cx = 0.0f, cy = 0.0f;   // reference-tile ndc = h * picture ndc + c
+    UINT      W = 0, H = 0, Wt = 0, Ht = 0;      // picture (target) size, tile RT size
+    int       same = 0;                          // identical verdicts in a row
+    double    resid = 0.0, area = 0.0;           // worst fit residual, tile area / union area
+};
+PvLayout         g_pvLay[kPtMax];
+int              g_pvSlotGroup[kPvSlots] = { -1, -1, -1, -1, -1, -1, -1, -1 };   // composite order of each slot (last frame)
+struct PvLayRb {
+    ID3D11Buffer* staging = nullptr;             // kPtMax x kPvSlots x 64 bytes (first MVP of every pass)
+    int      groups = 0;
+    int      mask[kPtMax] = {}, ref[kPtMax] = {};
+    bool     ok[kPtMax] = {};                    // every pass of the group had a first candidate of the same draw
+    UINT     W[kPtMax] = {}, H[kPtMax] = {}, Wt = 0, Ht = 0;
+    uint64_t frame = 0;
+};
+constexpr int    kPvLayRing     = 4;
+PvLayRb          g_pvLayRb[kPvLayRing];
+int              g_pvLayHead = 0, g_pvLayPending = 0;
+bool             g_pvLayInitTried = false, g_pvLayOk = false;
+uint64_t         g_pvLaySettledN = 0, g_pvLayThrottled = 0, g_pvLayChanges = 0;
+struct PvAsm {                                   // the picture depth of one group
+    PcPtr<ID3D11Texture2D>           tex;        // R32_FLOAT, picture size, SRV + UAV
+    PcPtr<ID3D11UnorderedAccessView> uav;
+    PcPtr<ID3D11ShaderResourceView>  srv;
+    UINT      w = 0, h = 0;
+    int       frameMask = 0;                     // tiles reduced into it this frame (reset at Present)
+    DepthTwin twin;                              // what SceneDlaa::Run gets (tex / srv above; valid = complete)
+};
+PvAsm            g_pvAsm[kPtMax];
+DepthTwin        g_pvTileTwin;                   // the shared copy of the tile pass's DS (one tile at a time)
+PcPtr<ID3D11ComputeShader> g_pvAsmCs;
+PcPtr<ID3D11Buffer>        g_pvAsmCb;
+bool             g_pvAsmFailed = false;
+uint64_t         g_pvAsmMiss = 0, g_pvAsmTilesWin = 0;
+// Round 6 diagnostics: preview flushes whose reference pass had no MV candidate (VR: the first ~14 s on the menu).
+uint64_t         g_pvNoCandFlushes = 0;
+bool             g_pvNoCandLogged = false, g_pvCandBackLogged = false;
+
+// GPU cost of the depth assembly (shared DS copy + reduce per tile pass): non-blocking timestamp pairs, averaged and
+// logged next to the preview stats line.
+struct PvAsmTimer {
+    struct Q { PcPtr<ID3D11Query> dis, t0, t1; bool busy = false; };
+    Q        q[8];
+    int      head = 0;
+    bool     broken = false;
+    double   sum = 0.0;
+    uint64_t n = 0;
+    int Begin(ID3D11DeviceContext* ctx) {
+        if (broken) return -1;
+        Q& s = q[head];
+        if (s.busy) return -1;
+        if (!s.dis) {
+            PcPtr<ID3D11Device> dev;
+            ctx->GetDevice(&dev);
+            D3D11_QUERY_DESC qd{};
+            qd.Query = D3D11_QUERY_TIMESTAMP_DISJOINT;
+            if (!dev || FAILED(dev->CreateQuery(&qd, &s.dis))) { broken = true; return -1; }
+            qd.Query = D3D11_QUERY_TIMESTAMP;
+            if (FAILED(dev->CreateQuery(&qd, &s.t0)) || FAILED(dev->CreateQuery(&qd, &s.t1))) { broken = true; return -1; }
+        }
+        ctx->Begin(s.dis.Get());
+        ctx->End(s.t0.Get());
+        const int i = head;
+        head = (head + 1) % 8;
+        return i;
+    }
+    void End(ID3D11DeviceContext* ctx, int i) {
+        if (i < 0) return;
+        ctx->End(q[i].t1.Get());
+        ctx->End(q[i].dis.Get());
+        q[i].busy = true;
+    }
+    void Poll(ID3D11DeviceContext* ctx) {
+        for (Q& s : q) {
+            if (!s.busy) continue;
+            D3D11_QUERY_DATA_TIMESTAMP_DISJOINT dd{};
+            if (ctx->GetData(s.dis.Get(), &dd, sizeof(dd), D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK) continue;
+            UINT64 a = 0, b = 0;
+            if (ctx->GetData(s.t0.Get(), &a, sizeof(a), D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK ||
+                ctx->GetData(s.t1.Get(), &b, sizeof(b), D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK) continue;
+            s.busy = false;
+            if (dd.Disjoint || !dd.Frequency || b < a) continue;
+            sum += (double)(b - a) * 1000.0 / (double)dd.Frequency;
+            ++n;
+        }
+    }
+};
+PvAsmTimer       g_pvAsmTimer;
+
+// Viewport-shift factor of a tile pass (picture pixels -> tile pixels): a * h of its group's layout; 1 when untiled.
+void PvShiftScale(int slot, float* kx, float* ky) {
+    *kx = 1.0f; *ky = 1.0f;
+    if (slot < 0 || slot >= kPvSlots) return;
+    const int g = g_pvSlotGroup[slot];
+    if (g < 0 || g >= kPtMax || !g_pvLay[g].tiled || !((g_pvLay[g].slotMask >> slot) & 1)) return;
+    *kx = g_pvLay[g].t[slot].ax * g_pvLay[g].hx;
+    *ky = g_pvLay[g].t[slot].ay * g_pvLay[g].hy;
+}
+
+// row t = a * u + b * v (4-vectors), least squares. false = degenerate. *res = |t - a u - b v| / |t|.
+bool PvFitRow(const float* u, const float* v, const float* t, double* a, double* b, double* res) {
+    double uu = 0, uv = 0, vv = 0, ut = 0, vt = 0, tt = 0;
+    for (int i = 0; i < 4; ++i) {
+        uu += (double)u[i] * u[i]; uv += (double)u[i] * v[i]; vv += (double)v[i] * v[i];
+        ut += (double)u[i] * t[i]; vt += (double)v[i] * t[i]; tt += (double)t[i] * t[i];
+    }
+    const double det = uu * vv - uv * uv;
+    if (!(std::fabs(det) > 1e-12 * uu * vv) || !std::isfinite(det)) return false;
+    *a = (ut * vv - vt * uv) / det;
+    *b = (uu * vt - uv * ut) / det;
+    double r = 0;
+    for (int i = 0; i < 4; ++i) { const double e = t[i] - *a * u[i] - *b * v[i]; r += e * e; }
+    *res = std::sqrt(r) / (std::sqrt(tt) > 1e-9 ? std::sqrt(tt) : 1e-9);
+    return std::isfinite(*a) && std::isfinite(*b);
+}
+
+// One group's verdict from a readback (data = kPtMax x kPvSlots MVPs, 16 floats each, rows).
+void PvSolveLayout(int g, const PvLayRb& r, const float* data, uint64_t now) {
+    PvLayout L;
+    L.known = true; L.slotMask = r.mask[g]; L.ref = r.ref[g];
+    L.W = r.W[g]; L.H = r.H[g]; L.Wt = r.Wt; L.Ht = r.Ht;
+    const float* M0 = data + (size_t)(g * kPvSlots + L.ref) * 16;
+    bool fitOk = true;
+    double worst = 0.0, areaSum = 0.0;
+    double xmin = 1e30, xmax = -1e30, ymin = 1e30, ymax = -1e30;
+    char why[96] = "";
+    for (int s = 0; s < kPvSlots; ++s) {
+        if (!((L.slotMask >> s) & 1)) continue;
+        ++L.nTiles;
+        const float* M = data + (size_t)(g * kPvSlots + s) * 16;
+        double ax = 1, bx = 0, ay = 1, by = 0, rx = 0, ry = 0;
+        if (s != L.ref) {
+            if (!PvFitRow(M0, M0 + 12, M, &ax, &bx, &rx) || !PvFitRow(M0 + 4, M0 + 12, M + 4, &ay, &by, &ry)) {
+                fitOk = false; snprintf(why, sizeof(why), "slot %d: degenerate fit", s); continue;
+            }
+            double d23 = 0, n23 = 1e-9;                  // rows 2 / 3 must be the reference's
+            for (int i = 8; i < 16; ++i) {
+                d23 = (std::max)(d23, (double)std::fabs(M[i] - M0[i]));
+                n23 = (std::max)(n23, (double)std::fabs(M0[i]));
+            }
+            worst = (std::max)(worst, (std::max)((std::max)(rx, ry), d23 / n23));
+        }
+        if (!(ax > 1e-6) || !(ay > 1e-6)) { fitOk = false; snprintf(why, sizeof(why), "slot %d: a <= 0", s); continue; }
+        L.t[s].ax = (float)ax; L.t[s].bx = (float)bx; L.t[s].ay = (float)ay; L.t[s].by = (float)by;
+        const double x0 = (-1.0 - bx) / ax, x1 = (1.0 - bx) / ax, y0 = (-1.0 - by) / ay, y1 = (1.0 - by) / ay;
+        xmin = (std::min)(xmin, x0); xmax = (std::max)(xmax, x1); ymin = (std::min)(ymin, y0); ymax = (std::max)(ymax, y1);
+        areaSum += (x1 - x0) * (y1 - y0);
+    }
+    L.resid = worst;
+    if (fitOk && worst >= 1e-3) { fitOk = false; snprintf(why, sizeof(why), "fit residual %.2e >= 1e-3", worst); }
+    if (L.nTiles > 1 && fitOk) {
+        L.hx = (float)((xmax - xmin) * 0.5); L.cx = (float)((xmax + xmin) * 0.5);
+        L.hy = (float)((ymax - ymin) * 0.5); L.cy = (float)((ymax + ymin) * 0.5);
+        const double ua = (xmax - xmin) * (ymax - ymin);
+        L.area = areaSum / (ua > 1e-12 ? ua : 1e-12);
+        L.tiled = L.area > 0.98 && L.area < 1.02 && L.W && L.H;
+        if (!L.tiled) snprintf(why, sizeof(why), "tile area / union area %.4f (gaps or overlap)", L.area);
+    }
+    PvLayout& cur = g_pvLay[g];
+    bool same = cur.known && cur.tiled == L.tiled && cur.slotMask == L.slotMask && cur.ref == L.ref && cur.W == L.W &&
+                cur.H == L.H && cur.Wt == L.Wt && cur.Ht == L.Ht;
+    if (same && L.tiled) {
+        same = std::fabs(cur.hx - L.hx) < 1e-3f && std::fabs(cur.hy - L.hy) < 1e-3f && std::fabs(cur.cx - L.cx) < 1e-3f &&
+               std::fabs(cur.cy - L.cy) < 1e-3f;
+        for (int s = 0; same && s < kPvSlots; ++s)
+            if ((L.slotMask >> s) & 1)
+                same = std::fabs(cur.t[s].ax - L.t[s].ax) < 1e-3f && std::fabs(cur.t[s].bx - L.t[s].bx) < 1e-3f &&
+                       std::fabs(cur.t[s].ay - L.t[s].ay) < 1e-3f && std::fabs(cur.t[s].by - L.t[s].by) < 1e-3f;
+    }
+    if (same) { if (cur.same < 1000000) ++cur.same; return; }
+    L.same = 1;
+    cur = L;
+    ++g_pvLayChanges;
+    PreviewInvalidate();                                 // depth / MV / jitter space changed: no history across it
+    if (g_pvLayChanges > 20) return;
+    char buf[1100]; size_t bl = 0; buf[0] = 0;
+    for (int s = 0; s < kPvSlots && bl + 160 < sizeof(buf); ++s) {
+        if (!((L.slotMask >> s) & 1)) continue;
+        const D3D11_VIEWPORT& v = g_pv[s].compVp;
+        const int w = snprintf(buf + bl, sizeof(buf) - bl, " | slot %d a=(%.4f,%.4f) b=(%+.4f,%+.4f) composite vp=(%.0f,%.0f %.0fx%.0f)",
+                               s, (double)L.t[s].ax, (double)L.t[s].ay, (double)L.t[s].bx, (double)L.t[s].by,
+                               (double)v.TopLeftX, (double)v.TopLeftY, (double)v.Width, (double)v.Height);
+        if (w > 0) bl += (size_t)w;
+    }
+    Log("preview tile layout (target order %d, Present #%llu): %s -- %d pass(es) (slot mask 0x%x, ref slot %d) of %ux%u -> "
+        "picture %ux%u | picture ndc -> ref-tile ndc: x*%.4f%+.4f, y*%.4f%+.4f | tile ndc = a*ref + b:%s | worst fit residual "
+        "%.2e, tile area / picture area %.4f%s%s", g, (unsigned long long)now,
+        L.tiled ? "TILED -- depth assembled from every tile (nearest), MVs + jitter in picture space"
+                : (L.nTiles <= 1 ? "untiled (one pass) -- reference-slot path" : "NOT a clean tiling -- reference-slot path"),
+        L.nTiles, L.slotMask, L.ref, L.Wt, L.Ht, L.W, L.H, (double)L.hx, (double)L.cx, (double)L.hy, (double)L.cy, buf,
+        L.resid, L.area, why[0] ? " | " : "", why);
+}
+
+bool PvEnsureLayoutReadback(ID3D11DeviceContext* ctx) {
+    if (g_pvLayInitTried) return g_pvLayOk;
+    g_pvLayInitTried = true;
+    PcPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    if (!dev) return false;
+    D3D11_BUFFER_DESC bd{};
+    bd.ByteWidth = kPtMax * kPvSlots * CandidateRecord::kSlotBytes;
+    bd.Usage = D3D11_USAGE_STAGING;
+    bd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    g_pvLayOk = true;
+    for (PvLayRb& r : g_pvLayRb)
+        if (FAILED(dev->CreateBuffer(&bd, nullptr, &r.staging)) || !r.staging) { g_pvLayOk = false; break; }
+    if (!g_pvLayOk) Log("preview tile layout: staging ring creation failed (the reference-slot path stays)");
+    return g_pvLayOk;
+}
+
+void PvPollLayoutReadbacks(ID3D11DeviceContext* ctx, uint64_t now) {
+    while (g_pvLayPending > 0) {
+        PvLayRb& r = g_pvLayRb[g_pvLayHead];
+        D3D11_MAPPED_SUBRESOURCE ms{};
+        const HRESULT hr = ctx->Map(r.staging, 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &ms);
+        if (hr == DXGI_ERROR_WAS_STILL_DRAWING) break;
+        g_pvLayHead = (g_pvLayHead + 1) % kPvLayRing; --g_pvLayPending;
+        if (FAILED(hr) || !ms.pData) { if (SUCCEEDED(hr)) ctx->Unmap(r.staging, 0); continue; }
+        for (int g = 0; g < r.groups && g < kPtMax; ++g)
+            if (r.ok[g]) PvSolveLayout(g, r, (const float*)ms.pData, now);
+        ctx->Unmap(r.staging, 0);
+    }
+}
+
+// Present (before the frame's targets are reset): the first MVP of every pass of every target, for PvSolveLayout.
+void PvQueueLayoutReadback(ID3D11DeviceContext* ctx, uint64_t n) {
+    if (g_ptCount <= 0 || g_pvLayPending >= kPvLayRing) return;
+    bool settled = true;
+    for (int i = 0; i < g_ptCount && i < kPtMax; ++i)
+        if (!g_pvLay[i].known || g_pvLay[i].same < 8) settled = false;
+    if (!settled) g_pvLaySettledN = 0;
+    else if (g_pvLaySettledN++ % 31 != 0) { ++g_pvLayThrottled; return; }
+    if (!PvEnsureLayoutReadback(ctx)) return;
+    PvLayRb& r = g_pvLayRb[(g_pvLayHead + g_pvLayPending) % kPvLayRing];
+    bool any = false;
+    r.groups = g_ptCount < kPtMax ? g_ptCount : kPtMax;
+    r.Wt = g_pvW; r.Ht = g_pvH; r.frame = n;
+    const D3D11_BOX box{ 0, 0, 0, CandidateRecord::kSlotBytes, 1, 1 };
+    for (int i = 0; i < r.groups; ++i) {
+        const PvTarget& t = g_pt[i];
+        r.ok[i] = false; r.mask[i] = t.slotMask; r.ref[i] = t.curRef; r.W[i] = r.H[i] = 0;
+        if (!t.tex || t.curRef < 0 || t.curRef >= kPvSlots || !t.slotMask) continue;
+        D3D11_TEXTURE2D_DESC td{};
+        t.tex->GetDesc(&td);
+        r.W[i] = td.Width; r.H[i] = td.Height;
+        const CandidateRecord& rc = g_pv[t.curRef].ps.cand;
+        if (!rc.Ready() || !rc.Buffer() || rc.Count(0) <= 0) continue;
+        bool ok = true;
+        for (int s = 0; s < kPvSlots && ok; ++s) {
+            if (!((t.slotMask >> s) & 1)) continue;
+            const CandidateRecord& c = g_pv[s].ps.cand;
+            ok = c.Ready() && c.Buffer() && c.Count(0) > 0 && PvSameKey(c.Key(0, 0), rc.Key(0, 0));
+        }
+        if (!ok) continue;
+        for (int s = 0; s < kPvSlots; ++s)
+            if ((t.slotMask >> s) & 1)
+                ctx->CopySubresourceRegion(r.staging, 0, (UINT)(i * kPvSlots + s) * CandidateRecord::kSlotBytes, 0, 0,
+                                           g_pv[s].ps.cand.Buffer(), 0, &box);
+        r.ok[i] = true;
+        any = true;
+    }
+    if (any) ++g_pvLayPending;
+}
+
+bool PvEnsureAsm(ID3D11DeviceContext* ctx, PvAsm& A, const PvLayout& L, int g) {
+    if (g_pvAsmFailed) return false;
+    PcPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    if (!dev) return false;
+    if (!g_pvAsmCs) {
+        size_t size = 0;
+        const void* code = ShaderCache::Code(ShaderCache::kPvDepthAsm, &size);
+        D3D11_BUFFER_DESC bd{};
+        bd.ByteWidth = 48;
+        bd.Usage = D3D11_USAGE_DYNAMIC;
+        bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        if (!code || FAILED(dev->CreateComputeShader(code, size, nullptr, &g_pvAsmCs)) ||
+            FAILED(dev->CreateBuffer(&bd, nullptr, &g_pvAsmCb))) {
+            g_pvAsmFailed = true;
+            Log("preview depth assembly: shader / constant buffer unavailable (%s) -- tiled pictures stay untouched",
+                ShaderCache::Error(ShaderCache::kPvDepthAsm));
+            return false;
+        }
+    }
+    if (A.tex && A.w == L.W && A.h == L.H) return true;
+    A.tex.Reset(); A.uav.Reset(); A.srv.Reset(); A.twin.Shutdown();
+    D3D11_TEXTURE2D_DESC td{};
+    td.Width = L.W; td.Height = L.H; td.MipLevels = 1; td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_R32_FLOAT;
+    td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_DEFAULT;
+    td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+    HRESULT hr;
+    if (FAILED(hr = dev->CreateTexture2D(&td, nullptr, &A.tex)) ||
+        FAILED(hr = dev->CreateUnorderedAccessView(A.tex.Get(), nullptr, &A.uav)) ||
+        FAILED(hr = dev->CreateShaderResourceView(A.tex.Get(), nullptr, &A.srv))) {
+        Log("preview depth assembly: %ux%u R32F create hr=0x%lx", L.W, L.H, (unsigned long)hr);
+        A.tex.Reset(); A.uav.Reset(); A.srv.Reset();
+        return false;
+    }
+    A.w = L.W; A.h = L.H;
+    A.twin.tex = A.tex; A.twin.srv = A.srv; A.twin.w = L.W; A.twin.h = L.H; A.twin.valid = false;
+    Log("preview depth assembly: picture depth %ux%u R32F created for target order %d (%.0f MB)", L.W, L.H, g,
+        (double)L.W * (double)L.H * 4.0 / (1024.0 * 1024.0));
+    return true;
+}
+
+// DiscardView of tile pass `slot` of group `g` (the shared DS holds it): copy + reduce into the picture depth.
+void PvAssembleTile(ID3D11DeviceContext* ctx, int g, int slot) {
+    const PvLayout& L = g_pvLay[g];
+    PvAsm& A = g_pvAsm[g];
+    if (!PvEnsureAsm(ctx, A, L, g)) return;
+    t_inDlaa = true;
+    const int tq = g_pvAsmTimer.Begin(ctx);
+    if (!A.frameMask) {
+        const FLOAT zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };   // far (reversed-Z) where no tile writes
+        ctx->ClearUnorderedAccessViewFloat(A.uav.Get(), zero);
+    }
+    const bool ok = g_pvTileTwin.Snapshot(ctx, g_pvDs.Get(), false);
+    D3D11_MAPPED_SUBRESOURCE mp{};
+    if (ok && SUCCEEDED(ctx->Map(g_pvAsmCb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) {
+        const PvTileFit& f = L.t[slot];
+        const double Ax = (double)f.ax * L.hx, Bx = (double)f.ax * L.cx + f.bx;
+        const double Ay = (double)f.ay * L.hy, By = (double)f.ay * L.cy + f.by;
+        // the tile's picture-pixel rect (+1 px margin; the shader rejects pixels outside the tile)
+        const double xf0 = (-1.0 - Bx) / Ax, xf1 = (1.0 - Bx) / Ax, yf0 = (-1.0 - By) / Ay, yf1 = (1.0 - By) / Ay;
+        auto clampPx = [](double v, UINT lim) { return v < 0.0 ? 0u : (v > (double)lim ? lim : (UINT)v); };
+        const UINT px0 = clampPx(std::floor((xf0 + 1.0) * 0.5 * L.W) - 1.0, L.W);
+        const UINT px1 = clampPx(std::ceil((xf1 + 1.0) * 0.5 * L.W) + 1.0, L.W);
+        const UINT py0 = clampPx(std::floor((1.0 - yf1) * 0.5 * L.H) - 1.0, L.H);
+        const UINT py1 = clampPx(std::ceil((1.0 - yf0) * 0.5 * L.H) + 1.0, L.H);
+        struct { float map[4]; UINT fw, fh, tw, th, ox, oy, rw, rh; } cb =
+            { { (float)Ax, (float)Ay, (float)Bx, (float)By }, L.W, L.H, g_pvTileTwin.w, g_pvTileTwin.h, px0, py0,
+              px1 > px0 ? px1 - px0 : 0u, py1 > py0 ? py1 - py0 : 0u };
+        memcpy(mp.pData, &cb, sizeof(cb));
+        ctx->Unmap(g_pvAsmCb.Get(), 0);
+        if (cb.rw && cb.rh) {
+            PvCsSave s;
+            s.Save(ctx);
+            ID3D11ShaderResourceView* srv = g_pvTileTwin.srv.Get();
+            ID3D11ShaderResourceView* nullSrv = nullptr;
+            ID3D11UnorderedAccessView* uav = A.uav.Get();
+            ID3D11UnorderedAccessView* nullUav = nullptr;
+            ID3D11Buffer* cbp = g_pvAsmCb.Get();
+            const UINT keep = (UINT)-1;
+            ctx->CSSetShader(g_pvAsmCs.Get(), nullptr, 0);
+            ctx->CSSetConstantBuffers(0, 1, &cbp);
+            ctx->CSSetShaderResources(0, 1, &srv);
+            ctx->CSSetUnorderedAccessViews(0, 1, &uav, &keep);
+            ctx->Dispatch((cb.rw + 7) / 8, (cb.rh + 7) / 8, 1);
+            ctx->CSSetShaderResources(0, 1, &nullSrv);
+            ctx->CSSetUnorderedAccessViews(0, 1, &nullUav, &keep);
+            s.Restore(ctx);
+        }
+        A.frameMask |= 1 << slot;
+        ++g_pvAsmTilesWin;
+        if (A.frameMask == L.slotMask) A.twin.valid = true;   // every tile is in: NGX may use it this frame
+    }
+    g_pvAsmTimer.End(ctx, tq);
+    t_inDlaa = false;
+    static int logs = 0;
+    if (logs < 2 || (!ok && logs < 6)) {
+        ++logs;
+        Log("preview depth assembly: tile slot %d of target order %d %s", slot, g,
+            ok ? "reduced into the picture depth" : "FAILED (DS copy)");
+    }
+}
+
+bool PvIsRgba8(DXGI_FORMAT f) {
+    return f == DXGI_FORMAT_R8G8B8A8_TYPELESS || f == DXGI_FORMAT_R8G8B8A8_UNORM || f == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+}
+bool PvIsBgra8(DXGI_FORMAT f) {
+    return f == DXGI_FORMAT_B8G8R8A8_TYPELESS || f == DXGI_FORMAT_B8G8R8A8_UNORM || f == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+}
+
+// ---- v0.7.8 Ctrl+F10 preview capture (profile / truck-preview screen) -------------------------------------------------
+// Diagnostic only: proves where the preview DLAA loses its effect (VR: "white flicker on straight truck edges, no
+// difference DLAA on / off"). Started by the snapshot key while preview units run (the world F10 snapshot still takes
+// the key in the world). Per preview unit: 1 priming frame (edge / depth tile counts -> the crop, prev copies) + 8
+// measured consecutive frames. Every frame, right after the unit's Run (inside the flush, before the game's next draw):
+//   * the target (= our copied-back result) is copied into a capture texture (the target is still bound as RT0, so it
+//     cannot be read through an SRV), then ONE compute dispatch (kPvStatsShader) accumulates whole-image sums into a raw
+//     buffer with 64-bit atomics: |out-in|, frame-to-frame |in-prevIn| / |out-prevOut|, motion-compensated versions
+//     (prev sampled at p + mv, the DLSS convention), the warp error |warp(prevOut)-in| vs |prevOut-in|, all also on edge
+//     pixels (luma gradient of the input > kPcEdgeThr) and on "truck edges" (edge + non-far depth), depth coverage,
+//     edges sitting on far depth, MV statistics;
+//   * the solve buffer (R_world) and the first MVP of EVERY pass composited into the target (all slots collect
+//     candidates while the capture runs) are GPU-copied; the viewport shift each pass actually got is recorded by
+//     ReconcileViewports (PvSlot::capSh*);
+//   * 1536x1536 crops of in / out / depth / mv are copied into staging textures.
+// At the Present of the same frame the target is copied again and compared with our result (pixels changed by the
+// game's later draws). Nothing waits on the GPU until the end, except one tiny tile-count readback after the priming
+// frame (crop choice). At the end: one blocking readback per unit, the "pvcap:" log lines, the BMPs in
+// <dll folder>\dlaa_selftest\preview_<unit>_<frame>_{in,out,depth,mv}.bmp, a SUMMARY line per unit, everything released.
+// VRAM while it runs: 3 full-size RGBA8 textures per unit (VR 6120x6496: ~480 MB per unit). Render thread only.
+bool WriteBmp(const wchar_t* path, const uint8_t* src, UINT pitch, UINT w, UINT h);   // self-test section below
+float HalfToFloat(uint16_t h);                                                         // F10 snapshot section below
+
+// kPvStatsShader-BEGIN (the build validates this block with fxc)
+const char kPvStatsShader[] = R"(
+cbuffer StatsCB : register(b0) {
+    uint2 Size;       // target size (px)
+    uint  Base;       // byte offset of this frame's counter block in Acc
+    uint  Flags;      // 1 = prev textures valid, 2 = "later draws" compare (Out vs PrevOut only), 4 = tile pass, 8 = Ngx bound
+    float EdgeThr;    // luma gradient (central differences, x + y) above which a pixel is an edge
+    float FarDepth;   // depth <= this = far plane (reversed-Z: the preview DS clears to 0, geometry is >= 0.01)
+    uint  TileBase;   // byte offset of the tile counters (tile pass: 2 uints per 256x256 tile = edges, non-far)
+    uint  TilesX;
+};
+Texture2D<float4> In      : register(t0);
+Texture2D<float4> Out     : register(t1);
+Texture2D<float4> PrevIn  : register(t2);
+Texture2D<float4> PrevOut : register(t3);
+Texture2D<float>  Depth   : register(t4);
+Texture2D<float2> Mv      : register(t5);
+Texture2D<float4> Ngx     : register(t6);   // NGX output before RCAS (unbound = 0: then Flags bit 3 is clear)
+SamplerState      Lin     : register(s0);
+RWByteAddressBuffer Acc   : register(u0);
+
+#define NC 27
+groupshared uint gs[NC];
+groupshared uint gsMax;
+groupshared uint gsInvMin;
+
+uint Diff(float4 a, float4 b) { return (uint)(dot(abs(a.rgb - b.rgb), float3(1.0, 1.0, 1.0)) * 255.0 + 0.5); }
+float Luma(int2 p) {
+    int2 q = clamp(p, int2(0, 0), int2(Size) - int2(1, 1));
+    return dot(In.Load(int3(q, 0)).rgb, float3(0.299, 0.587, 0.114));
+}
+
+[numthreads(16, 16, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex, uint3 gid : SV_GroupID) {
+    if (gi < NC) gs[gi] = 0;
+    if (gi == 0) { gsMax = 0; gsInvMin = 0; }
+    GroupMemoryBarrierWithGroupSync();
+
+    uint v[NC];
+    [unroll] for (int k = 0; k < NC; ++k) v[k] = 0;
+    uint mvq = 0;
+    bool inside = id.x < Size.x && id.y < Size.y;
+    if (inside) {
+        int2 p = int2(id.xy);
+        int3 l = int3(p, 0);
+        if ((Flags & 2u) != 0u) {
+            uint d = Diff(Out.Load(l), PrevOut.Load(l));
+            v[0] = 1; v[1] = d; v[2] = d > 3u ? 1u : 0u;
+        } else {
+            float g = abs(Luma(p + int2(1, 0)) - Luma(p - int2(1, 0))) + abs(Luma(p + int2(0, 1)) - Luma(p - int2(0, 1)));
+            bool edge = g > EdgeThr;
+            bool far = Depth.Load(l) <= FarDepth;
+            if ((Flags & 4u) != 0u) {
+                v[0] = edge ? 1u : 0u;
+                v[1] = far ? 0u : 1u;
+            } else {
+                float4 cin  = In.Load(l);
+                float4 cout = Out.Load(l);
+                uint e  = edge ? 1u : 0u;
+                uint te = (edge && !far) ? 1u : 0u;
+                v[0] = 1;
+                v[1] = Diff(cout, cin);
+                v[2] = e;
+                v[3] = e * v[1];
+                float2 mv = Mv.Load(l);
+                float m = length(mv);
+                if (isnan(m)) m = 0;
+                mvq = (uint)min(m * 16.0, 4.0e9);
+                if ((Flags & 1u) != 0u) {
+                    float4 pin  = PrevIn.Load(l);
+                    float4 pout = PrevOut.Load(l);
+                    float2 uv   = (float2(p) + 0.5 + mv) / float2(Size);   // DLSS: current + mv = previous
+                    float4 win  = PrevIn.SampleLevel(Lin, uv, 0);
+                    float4 wout = PrevOut.SampleLevel(Lin, uv, 0);
+                    v[4]  = Diff(cin, pin);   v[5]  = Diff(cout, pout);
+                    v[6]  = e * v[4];         v[7]  = e * v[5];
+                    v[8]  = Diff(wout, cin);  v[9]  = Diff(pout, cin);
+                    v[10] = e * v[8];         v[11] = e * v[9];
+                    v[12] = Diff(win, cin);   v[13] = Diff(wout, cout);
+                    v[14] = e * v[12];        v[15] = e * v[13];
+                    v[23] = te * v[13];
+                }
+                v[16] = far ? 0u : 1u;
+                v[17] = (edge && far) ? 1u : 0u;
+                v[18] = mvq;
+                v[19] = m > 0.5 ? 1u : 0u;
+                v[20] = far ? 0u : mvq;
+                v[21] = te;
+                v[22] = te * v[1];
+                if ((Flags & 8u) != 0u) {                       // what RCAS did to the NGX output
+                    v[24] = Diff(cout, Ngx.Load(l));
+                    v[25] = e * v[24];
+                }
+                if (edge) {                                     // round 6: a depth edge within 2 px of this colour edge?
+                    float dmin = 1e9, dmax = -1e9;
+                    [loop] for (int yy = -2; yy <= 2; ++yy)
+                        [loop] for (int xx = -2; xx <= 2; ++xx) {
+                            int2 q = clamp(p + int2(xx, yy), int2(0, 0), int2(Size) - int2(1, 1));
+                            float dq = Depth.Load(int3(q, 0));
+                            dmin = min(dmin, dq); dmax = max(dmax, dq);
+                        }
+                    v[26] = (dmax - dmin) > 0.05 * max(dmax, 1e-6) ? 1u : 0u;   // >= 5 % reversed-Z step = a silhouette
+                }
+            }
+        }
+    }
+    [unroll] for (int k2 = 0; k2 < NC; ++k2) if (v[k2] != 0u) InterlockedAdd(gs[k2], v[k2]);
+    if (inside && (Flags & 6u) == 0u) { InterlockedMax(gsMax, mvq); InterlockedMax(gsInvMin, 0xFFFFFFFFu - mvq); }
+    GroupMemoryBarrierWithGroupSync();
+
+    if ((Flags & 4u) != 0u) {
+        if (gi < 2u && gs[gi] != 0u) {
+            uint tile = (gid.y * 16u / 256u) * TilesX + (gid.x * 16u / 256u);
+            Acc.InterlockedAdd(TileBase + tile * 8u + gi * 4u, gs[gi]);
+        }
+        return;
+    }
+    if (gi < NC) {
+        uint val = gs[gi];
+        if (val != 0u) {
+            uint addr = Base + gi * 8u;
+            uint orig;
+            Acc.InterlockedAdd(addr, val, orig);
+            if (orig + val < orig) Acc.InterlockedAdd(addr + 4u, 1u);   // 64-bit sum: carry into the high word
+        }
+    } else if (gi == NC) {
+        Acc.InterlockedMax(Base + NC * 8u, gsMax);
+    } else if (gi == NC + 1) {
+        Acc.InterlockedMax(Base + NC * 8u + 4u, gsInvMin);
+    }
+}
+)";
+// kPvStatsShader-END
+
+constexpr int   kPcMeasured  = 8;                // measured frames (after 1 priming frame)
+constexpr UINT  kPcBlock     = 256;              // bytes per counter block: 27 x 64-bit sums, max, inverse min
+constexpr UINT  kPcLaterBase = kPcMeasured * kPcBlock;          // "later draws" blocks follow the frame blocks
+constexpr UINT  kPcTileBase  = 2 * kPcMeasured * kPcBlock;      // then the tile counters (priming frame)
+constexpr UINT  kPcTile      = 256;              // px per crop-choice tile (multiple of the 16 px thread group)
+constexpr UINT  kPcCrop      = 1536;             // crop side (px)
+constexpr float kPcEdgeThr   = 0.20f;
+constexpr float kPcFarDepth  = 0.0005f;
+constexpr UINT  kPcSolveBytes = CameraMv::kSolveFloats * 4;
+
+struct PvCapFrame {                              // CPU-side facts of one measured frame of one unit
+    bool     ran = false, havePrev = false, mvDone = false, reset = false, rcas = false, solve = false, later = false;
+    bool     worldMiss = false, tiled = false;
+    float    tx[4] = { 1.0f, 1.0f, 0.0f, 0.0f };     // round 6: picture -> reference-tile ndc (TileXf) used this frame
+    int      order = -1, ref = -1, pairs = 0, nSlots = 0;
+    uint64_t present = 0;
+    float    njx = 0.0f, njy = 0.0f;
+    int      slot[kPvSlots] = {};
+    float    shX[kPvSlots] = {}, shY[kPvSlots] = {};
+    int      shN[kPvSlots] = {}, unshN[kPvSlots] = {}, candW[kPvSlots] = {};
+    bool     mvp[kPvSlots] = {}, sameDraw[kPvSlots] = {};
+};
+struct PvCapUnit {
+    bool     used = false, failed = false, tiles = false;
+    UINT     w = 0, h = 0, tilesX = 0, tilesY = 0, accBytes = 0;
+    PcPtr<ID3D11Texture2D>           prevIn, outTex[2];          // R8G8B8A8_TYPELESS, full size
+    PcPtr<ID3D11ShaderResourceView>  prevInSrv, outSrv[2];       // UNORM views (the bytes as they are)
+    int      cur = 0;                                            // outTex[cur] = this frame's, [cur ^ 1] = previous
+    PcPtr<ID3D11Buffer>              acc, accStage, solveStage, mvpStage;
+    PcPtr<ID3D11UnorderedAccessView> accUav;
+    int      lastF = -1;                                         // capture frame of the last run
+    uint64_t lastPresent = 0;
+    bool     cropChosen = false;
+    UINT     cx = 0, cy = 0, cw = 0, ch = 0;
+    PcPtr<ID3D11Texture2D>           crop[kPcMeasured][4];       // staging: in, out, depth, mv
+    bool     laterPending = false;
+    int      laterF = -1;
+    PcPtr<ID3D11Texture2D>           laterTex;                   // this frame's target (ref until Present)
+    PvCapFrame fr[kPcMeasured];
+};
+struct PvCap {
+    int      f = 0;                              // 0 = priming frame, 1..kPcMeasured = measured
+    int      idle = 0;                           // Presents in a row without any unit run (abort at 60)
+    uint64_t start = 0;
+    PcPtr<ID3D11ComputeShader> cs;
+    PcPtr<ID3D11Buffer>        cb;
+    PcPtr<ID3D11SamplerState>  smp;
+    PvCapUnit u[kPtMax];
+    wchar_t  dir[MAX_PATH] = {};
+};
+bool   g_pvCapActive = false;
+PvCap* g_pvCap = nullptr;                        // heap: only while a capture runs
+
+void PvCapRegisterShaders() {
+    ShaderCache::Add(ShaderCache::kPvStats, kPvStatsShader, sizeof(kPvStatsShader) - 1, "pv_stats", "CSMain", "cs_5_0");
+}
+
+void PvCapDispatch(ID3D11DeviceContext* ctx, PvCapUnit& c, UINT flags, UINT base, ID3D11ShaderResourceView* in,
+                   ID3D11ShaderResourceView* out, ID3D11ShaderResourceView* prevIn, ID3D11ShaderResourceView* prevOut,
+                   ID3D11ShaderResourceView* depth, ID3D11ShaderResourceView* mv, ID3D11ShaderResourceView* ngx = nullptr) {
+    PvCap& P = *g_pvCap;
+    D3D11_MAPPED_SUBRESOURCE mp{};
+    if (FAILED(ctx->Map(P.cb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) return;
+    struct { UINT w, h, base, flags; float edgeThr, farDepth; UINT tileBase, tilesX; } cbd =
+        { c.w, c.h, base, flags, kPcEdgeThr, kPcFarDepth, kPcTileBase, c.tilesX };
+    memcpy(mp.pData, &cbd, sizeof(cbd));
+    ctx->Unmap(P.cb.Get(), 0);
+    PvCsSave s;
+    s.Save(ctx);
+    ID3D11ShaderResourceView* srvs[7] = { in, out, prevIn, prevOut, depth, mv, ngx };
+    ID3D11ShaderResourceView* nulls[7] = {};
+    ID3D11UnorderedAccessView* uav = c.accUav.Get();
+    ID3D11UnorderedAccessView* nullUav = nullptr;
+    ID3D11Buffer* cb = P.cb.Get();
+    ID3D11SamplerState* smp = P.smp.Get();
+    const UINT keep = (UINT)-1;
+    ctx->CSSetShader(P.cs.Get(), nullptr, 0);
+    ctx->CSSetConstantBuffers(0, 1, &cb);
+    ctx->CSSetSamplers(0, 1, &smp);
+    ctx->CSSetShaderResources(0, 7, srvs);
+    ctx->CSSetUnorderedAccessViews(0, 1, &uav, &keep);
+    ctx->Dispatch((c.w + 15) / 16, (c.h + 15) / 16, 1);
+    ctx->CSSetShaderResources(0, 7, nulls);
+    ctx->CSSetUnorderedAccessViews(0, 1, &nullUav, &keep);
+    s.Restore(ctx);
+}
+
+bool PvCapMakeColor(ID3D11Device* dev, UINT w, UINT h, PcPtr<ID3D11Texture2D>& tex, PcPtr<ID3D11ShaderResourceView>& srv) {
+    D3D11_TEXTURE2D_DESC td{};
+    td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_R8G8B8A8_TYPELESS;
+    td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_DEFAULT;
+    td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+    sd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    sd.Texture2D.MipLevels = 1;
+    return SUCCEEDED(dev->CreateTexture2D(&td, nullptr, &tex)) && SUCCEEDED(dev->CreateShaderResourceView(tex.Get(), &sd, &srv));
+}
+
+bool PvCapMakeBuffer(ID3D11Device* dev, UINT bytes, bool raw, PcPtr<ID3D11Buffer>& buf) {
+    D3D11_BUFFER_DESC bd{};
+    bd.ByteWidth = bytes;
+    if (raw) {
+        bd.Usage = D3D11_USAGE_DEFAULT;
+        bd.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+        bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
+    } else {
+        bd.Usage = D3D11_USAGE_STAGING;
+        bd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    }
+    return SUCCEEDED(dev->CreateBuffer(&bd, nullptr, &buf));
+}
+
+// The unit's capture resources (first run in the capture). false = not possible (logged; the unit is skipped).
+bool PvCapEnsureUnit(ID3D11DeviceContext* ctx, ID3D11Device* dev, PvCapUnit& c, int ui, UINT w, UINT h) {
+    if (c.acc) return c.w == w && c.h == h;
+    c.w = w; c.h = h;
+    c.tilesX = (w + kPcTile - 1) / kPcTile;
+    c.tilesY = (h + kPcTile - 1) / kPcTile;
+    c.accBytes = (kPcTileBase + c.tilesX * c.tilesY * 8 + 15) & ~15u;
+    bool ok = PvCapMakeColor(dev, w, h, c.prevIn, c.prevInSrv) && PvCapMakeColor(dev, w, h, c.outTex[0], c.outSrv[0]) &&
+              PvCapMakeColor(dev, w, h, c.outTex[1], c.outSrv[1]) && PvCapMakeBuffer(dev, c.accBytes, true, c.acc) &&
+              PvCapMakeBuffer(dev, c.accBytes, false, c.accStage) &&
+              PvCapMakeBuffer(dev, kPcMeasured * kPcSolveBytes, false, c.solveStage) &&
+              PvCapMakeBuffer(dev, kPcMeasured * kPvSlots * CandidateRecord::kSlotBytes, false, c.mvpStage);
+    if (ok) {
+        D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};
+        ud.Format = DXGI_FORMAT_R32_TYPELESS;
+        ud.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+        ud.Buffer.NumElements = c.accBytes / 4;
+        ud.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW;
+        ok = SUCCEEDED(dev->CreateUnorderedAccessView(c.acc.Get(), &ud, &c.accUav));
+    }
+    if (!ok) {
+        Log("pvcap: unit %d capture resources for %ux%u could not be created (VRAM?) -- unit skipped", ui, w, h);
+        return false;
+    }
+    const UINT zero[4] = { 0, 0, 0, 0 };
+    ctx->ClearUnorderedAccessViewUint(c.accUav.Get(), zero);
+    Log("pvcap: unit %d capture resources created: 3 x %ux%u RGBA8 (%.0f MB VRAM until the capture ends) + counters", ui, w, h,
+        3.0 * (double)w * (double)h * 4.0 / (1024.0 * 1024.0));
+    return true;
+}
+
+void PvCapStart(ID3D11DeviceContext* ctx, uint64_t n) {
+    PcPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    size_t size = 0;
+    const void* code = ShaderCache::Code(ShaderCache::kPvStats, &size);
+    if (!dev || !code) { Log("pvcap: not started -- stats shader unavailable (%s)", ShaderCache::Error(ShaderCache::kPvStats)); return; }
+    PvCap* P = new (std::nothrow) PvCap();
+    if (!P) return;
+    D3D11_BUFFER_DESC bd{};
+    bd.ByteWidth = 32;
+    bd.Usage = D3D11_USAGE_DYNAMIC;
+    bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    D3D11_SAMPLER_DESC sd{};
+    sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sd.ComparisonFunc = D3D11_COMPARISON_NEVER;
+    sd.MaxLOD = D3D11_FLOAT32_MAX;
+    if (FAILED(dev->CreateComputeShader(code, size, nullptr, &P->cs)) || FAILED(dev->CreateBuffer(&bd, nullptr, &P->cb)) ||
+        FAILED(dev->CreateSamplerState(&sd, &P->smp)) || !PathNextToDll(L"dlaa_selftest\\", P->dir)) {
+        Log("pvcap: not started -- shader / constant buffer / sampler / path creation failed");
+        delete P;
+        return;
+    }
+    CreateDirectoryW(P->dir, nullptr);
+    P->start = n;
+    g_pvCap = P;
+    g_pvCapActive = true;
+    Log("pvcap: started (snapshot key on the preview screen, Present #%llu) -- 1 priming + %d measured frames per preview "
+        "unit; edge = input luma gradient > %.2f, far = depth <= %.4f; levels below are mean |difference| per colour "
+        "channel in 8-bit steps (0..255)", (unsigned long long)n, kPcMeasured, (double)kPcEdgeThr, (double)kPcFarDepth);
+}
+
+
+// Right after unit `ui`'s successful Run on target `tg` (composite order `order`) in this frame `fr`.
+void PvCapAfterRun(ID3D11DeviceContext* ctx, int ui, int order, PvTarget& tg, int ref, float njx, float njy, bool bgra,
+                   UINT w, UINT h, uint64_t fr) {
+    PvCap& P = *g_pvCap;
+    PvCapUnit& c = P.u[ui];
+    PvUnit& pu = g_pu[ui];
+    SceneDlaa& dl = pu.dl;
+    if (c.failed || c.laterPending) return;
+    PcPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    ID3D11Texture2D* outSrc = bgra ? pu.scratch.Get() : tg.tex.Get();
+    if (!dev || !outSrc || !dl.ColorInTex() || !dl.ColorInSrv() || !dl.DepthSrv() || !dl.MvSrv()) { c.failed = true; return; }
+    t_inDlaa = true;
+    if (!PvCapEnsureUnit(ctx, dev.Get(), c, ui, w, h)) { c.failed = true; t_inDlaa = false; return; }
+    const int f = P.f;
+    c.used = true;
+    ctx->CopyResource(c.outTex[c.cur].Get(), outSrc);    // our result as it sits in the target now
+    if (f == 0) {
+        PvCapDispatch(ctx, c, 4u, 0, dl.ColorInSrv(), nullptr, nullptr, nullptr, dl.DepthSrv(), nullptr);
+        c.tiles = true;
+    } else {
+        const int m = f - 1;
+        PvCapFrame& F = c.fr[m];
+        F.ran = true;
+        F.havePrev = c.lastF == f - 1 && c.lastPresent + 1 == fr;
+        ID3D11ShaderResourceView* const ngx = dl.LastSharpened() ? dl.NgxOutSrv() : nullptr;   // RCAS ran: its input
+        PvCapDispatch(ctx, c, (F.havePrev ? 1u : 0u) | (ngx ? 8u : 0u), (UINT)m * kPcBlock, dl.ColorInSrv(),
+                      c.outSrv[c.cur].Get(), c.prevInSrv.Get(), c.outSrv[c.cur ^ 1].Get(), dl.DepthSrv(), dl.MvSrv(), ngx);
+        F.present = fr; F.order = order; F.ref = ref; F.njx = njx; F.njy = njy;
+        F.mvDone = dl.LastMvDone(); F.reset = dl.LastReset(); F.rcas = dl.LastSharpened();
+        F.pairs = dl.Mv().Last().pairs[0]; F.worldMiss = dl.Mv().Last().worldMiss;
+        if (order >= 0 && order < kPtMax && g_pvLay[order].tiled) {
+            const PvLayout& lay = g_pvLay[order];
+            F.tiled = true; F.tx[0] = lay.hx; F.tx[1] = lay.hy; F.tx[2] = lay.cx; F.tx[3] = lay.cy;
+        }
+        if (F.mvDone && dl.Mv().SolveSrv()) {                // R of THIS frame (the solve buffer is rewritten every frame)
+            PcPtr<ID3D11Resource> sres;
+            dl.Mv().SolveSrv()->GetResource(&sres);
+            const D3D11_BOX box{ 0, 0, 0, kPcSolveBytes, 1, 1 };
+            if (sres) { ctx->CopySubresourceRegion(c.solveStage.Get(), 0, (UINT)m * kPcSolveBytes, 0, 0, sres.Get(), 0, &box); F.solve = true; }
+        }
+        const CandidateRecord& rc = g_pv[ref].ps.cand;
+        int k = 0;
+        for (int s = 0; s < kPvSlots; ++s) {
+            if (!((tg.slotMask >> s) & 1)) continue;
+            const PvSlot& sl = g_pv[s];
+            F.slot[k] = s; F.shX[k] = sl.capShX; F.shY[k] = sl.capShY; F.shN[k] = sl.capShN; F.unshN[k] = sl.capUnshN;
+            const CandidateRecord& cr = sl.ps.cand;
+            F.candW[k] = cr.Ready() ? cr.Count(0) : 0;
+            if (cr.Ready() && cr.Buffer() && cr.Count(0) > 0) {
+                const D3D11_BOX box{ 0, 0, 0, CandidateRecord::kSlotBytes, 1, 1 };   // first world MVP
+                ctx->CopySubresourceRegion(c.mvpStage.Get(), 0, (UINT)(m * kPvSlots + k) * CandidateRecord::kSlotBytes, 0, 0,
+                                           cr.Buffer(), 0, &box);
+                F.mvp[k] = true;
+                F.sameDraw[k] = rc.Ready() && rc.Count(0) > 0 && PvSameKey(cr.Key(0, 0), rc.Key(0, 0));
+            }
+            ++k;
+        }
+        F.nSlots = k;
+        if (c.cropChosen) {
+            const D3D11_BOX box{ c.cx, c.cy, 0, c.cx + c.cw, c.cy + c.ch, 1 };
+            ID3D11Texture2D* src[4] = { dl.ColorInTex(), c.outTex[c.cur].Get(), dl.DepthTex(), dl.MvTex() };
+            for (int q = 0; q < 4; ++q)
+                if (c.crop[m][q] && src[q]) ctx->CopySubresourceRegion(c.crop[m][q].Get(), 0, 0, 0, 0, src[q], 0, &box);
+        }
+        if (!bgra) { c.laterTex = tg.tex; c.laterF = m; c.laterPending = true; }   // compared again at Present (VR)
+    }
+    ctx->CopyResource(c.prevIn.Get(), dl.ColorInTex());
+    c.lastF = f; c.lastPresent = fr;
+    c.cur ^= 1;                                          // [cur ^ 1] = this frame's result from now on
+    t_inDlaa = false;
+}
+
+// After the priming frame: blocking readback of the tile counts, crop = the 1536 px window with the most edge pixels.
+void PvCapChooseCrop(ID3D11DeviceContext* ctx, PcPtr<ID3D11Device>& dev, PvCapUnit& c, int ui) {
+    ctx->CopyResource(c.accStage.Get(), c.acc.Get());
+    D3D11_MAPPED_SUBRESOURCE mp{};
+    if (FAILED(ctx->Map(c.accStage.Get(), 0, D3D11_MAP_READ, 0, &mp))) { Log("pvcap: unit %d tile readback failed -- no crops", ui); return; }
+    const uint32_t* t = (const uint32_t*)((const uint8_t*)mp.pData + kPcTileBase);
+    const UINT wt = (kPcCrop / kPcTile) < c.tilesX ? kPcCrop / kPcTile : c.tilesX;
+    const UINT ht = (kPcCrop / kPcTile) < c.tilesY ? kPcCrop / kPcTile : c.tilesY;
+    uint64_t totE = 0, totNf = 0, best = 0;
+    UINT bx = 0, by = 0;
+    for (UINT i = 0; i < c.tilesX * c.tilesY; ++i) { totE += t[i * 2]; totNf += t[i * 2 + 1]; }
+    for (UINT y0 = 0; y0 + ht <= c.tilesY; ++y0)
+        for (UINT x0 = 0; x0 + wt <= c.tilesX; ++x0) {
+            uint64_t s = 0;
+            for (UINT y = y0; y < y0 + ht; ++y)
+                for (UINT x = x0; x < x0 + wt; ++x) s += t[(y * c.tilesX + x) * 2];
+            if (s > best) { best = s; bx = x0; by = y0; }
+        }
+    ctx->Unmap(c.accStage.Get(), 0);
+    c.cw = kPcCrop < c.w ? kPcCrop : c.w;
+    c.ch = kPcCrop < c.h ? kPcCrop : c.h;
+    c.cx = bx * kPcTile; if (c.cx > c.w - c.cw) c.cx = c.w - c.cw;
+    c.cy = by * kPcTile; if (c.cy > c.h - c.ch) c.cy = c.h - c.ch;
+    const DXGI_FORMAT fmts[4] = { DXGI_FORMAT_R8G8B8A8_TYPELESS, DXGI_FORMAT_R8G8B8A8_TYPELESS, DXGI_FORMAT_R32_FLOAT,
+                                  DXGI_FORMAT_R16G16_FLOAT };
+    bool ok = true;
+    for (int m = 0; m < kPcMeasured && ok; ++m)
+        for (int q = 0; q < 4 && ok; ++q) {
+            D3D11_TEXTURE2D_DESC td{};
+            td.Width = c.cw; td.Height = c.ch; td.MipLevels = 1; td.ArraySize = 1;
+            td.Format = fmts[q]; td.SampleDesc.Count = 1;
+            td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+            ok = SUCCEEDED(dev->CreateTexture2D(&td, nullptr, &c.crop[m][q]));
+        }
+    if (!ok) {
+        for (auto& row : c.crop) for (auto& p : row) p.Reset();
+        Log("pvcap: unit %d crop staging creation failed -- numbers only, no BMPs", ui);
+        return;
+    }
+    c.cropChosen = true;
+    const double px = (double)c.w * (double)c.h;
+    Log("pvcap: unit %d crop %ux%u at (%u,%u) of %ux%u = the window with the most edge pixels (%llu of %llu edge px in the "
+        "image, %.2f%% of all px are edges; non-far depth covers %.1f%% of the image)", ui, c.cw, c.ch, c.cx, c.cy, c.w, c.h,
+        (unsigned long long)best, (unsigned long long)totE, px > 0 ? 100.0 * (double)totE / px : 0.0,
+        px > 0 ? 100.0 * (double)totNf / px : 0.0);
+}
+
+void PvCapFinish(ID3D11DeviceContext* ctx, bool aborted);
+
+// Present (after the frame's flushes): the "later draws" compare, the crop choice after the priming frame, next frame.
+void PvCapAtPresent(ID3D11DeviceContext* ctx, uint64_t n) {
+    PvCap& P = *g_pvCap;
+    bool any = false;
+    for (int ui = 0; ui < kPtMax; ++ui) {
+        PvCapUnit& c = P.u[ui];
+        if (c.used && c.lastF == P.f) any = true;        // ran since the last advance
+        if (!c.laterPending) continue;
+        c.laterPending = false;
+        t_inDlaa = true;
+        ctx->CopyResource(c.outTex[c.cur].Get(), c.laterTex.Get());   // [cur] is free until the next run
+        PvCapDispatch(ctx, c, 2u, kPcLaterBase + (UINT)c.laterF * kPcBlock, nullptr, c.outSrv[c.cur].Get(), nullptr,
+                      c.outSrv[c.cur ^ 1].Get(), nullptr, nullptr);
+        t_inDlaa = false;
+        c.fr[c.laterF].later = true;
+        c.laterTex.Reset();
+    }
+    if (!any) {
+        if (++P.idle >= 60) PvCapFinish(ctx, true);
+        return;
+    }
+    P.idle = 0;
+    if (P.f == 0) {
+        PcPtr<ID3D11Device> dev;
+        ctx->GetDevice(&dev);
+        for (int ui = 0; ui < kPtMax; ++ui)
+            if (dev && P.u[ui].used && P.u[ui].tiles && !P.u[ui].failed) PvCapChooseCrop(ctx, dev, P.u[ui], ui);
+    }
+    if (++P.f > kPcMeasured) PvCapFinish(ctx, false);
+}
+
+// Mean projection x / y skew of one MVP (EyeVerdict's p / q).
+void PvSkew(const float* m, double* p, double* q) {
+    const double d33 = (double)m[12] * m[12] + (double)m[13] * m[13] + (double)m[14] * m[14];
+    *p = d33 > 1e-12 ? -((double)m[0] * m[12] + (double)m[1] * m[13] + (double)m[2] * m[14]) / d33 : 0.0;
+    *q = d33 > 1e-12 ? -((double)m[4] * m[12] + (double)m[5] * m[13] + (double)m[6] * m[14]) / d33 : 0.0;
+}
+
+bool PvCapWriteCrop(ID3D11DeviceContext* ctx, ID3D11Texture2D* st, int kind, const wchar_t* path, UINT w, UINT h,
+                    float* dMin, float* dMax) {
+    D3D11_MAPPED_SUBRESOURCE mp{};
+    if (FAILED(ctx->Map(st, 0, D3D11_MAP_READ, 0, &mp))) return false;
+    bool ok;
+    if (kind < 2) {
+        ok = WriteBmp(path, (const uint8_t*)mp.pData, mp.RowPitch, w, h);
+    } else {
+        std::vector<uint8_t> rgba((size_t)w * h * 4);
+        if (kind == 2) {                                 // depth: far = dark blue, else min..max of the crop -> 40..255
+            float lo = 1e9f, hi = -1e9f;
+            for (UINT y = 0; y < h; ++y) {
+                const float* r = (const float*)((const uint8_t*)mp.pData + (size_t)y * mp.RowPitch);
+                for (UINT x = 0; x < w; ++x) if (r[x] > kPcFarDepth) { if (r[x] < lo) lo = r[x]; if (r[x] > hi) hi = r[x]; }
+            }
+            *dMin = lo; *dMax = hi;
+            const float span = hi > lo ? hi - lo : 1.0f;
+            for (UINT y = 0; y < h; ++y) {
+                const float* r = (const float*)((const uint8_t*)mp.pData + (size_t)y * mp.RowPitch);
+                for (UINT x = 0; x < w; ++x) {
+                    uint8_t* o = &rgba[((size_t)y * w + x) * 4];
+                    if (r[x] <= kPcFarDepth) { o[0] = 0; o[1] = 0; o[2] = 64; }
+                    else { const uint8_t g = (uint8_t)(40.0f + 215.0f * (r[x] - lo) / span); o[0] = o[1] = o[2] = g; }
+                    o[3] = 255;
+                }
+            }
+        } else {                                         // mv: R = 128 + 32 * mv.x, G = 128 + 32 * mv.y, B = |mv| > 0.5 px
+            for (UINT y = 0; y < h; ++y) {
+                const uint16_t* r = (const uint16_t*)((const uint8_t*)mp.pData + (size_t)y * mp.RowPitch);
+                for (UINT x = 0; x < w; ++x) {
+                    const float mx = HalfToFloat(r[x * 2]), my = HalfToFloat(r[x * 2 + 1]);
+                    auto q8 = [](float v) { v = 128.0f + 32.0f * v; return (uint8_t)(v < 0.0f ? 0.0f : (v > 255.0f ? 255.0f : v)); };
+                    uint8_t* o = &rgba[((size_t)y * w + x) * 4];
+                    o[0] = q8(mx); o[1] = q8(my); o[2] = (mx * mx + my * my > 0.25f) ? 255 : 0; o[3] = 255;
+                }
+            }
+        }
+        ok = WriteBmp(path, rgba.data(), w * 4, w, h);
+    }
+    ctx->Unmap(st, 0);
+    return ok;
+}
+
+void PvCapFinish(ID3D11DeviceContext* ctx, bool aborted) {
+    PvCap& P = *g_pvCap;
+    t_inDlaa = true;
+    for (int ui = 0; ui < kPtMax; ++ui) {
+        PvCapUnit& c = P.u[ui];
+        if (!c.used || c.failed || !c.acc) continue;
+        ctx->CopyResource(c.accStage.Get(), c.acc.Get());
+        D3D11_MAPPED_SUBRESOURCE ma{}, ms{}, mm{};
+        if (FAILED(ctx->Map(c.accStage.Get(), 0, D3D11_MAP_READ, 0, &ma))) { Log("pvcap: unit %d counter readback failed", ui); continue; }
+        const bool haveS = SUCCEEDED(ctx->Map(c.solveStage.Get(), 0, D3D11_MAP_READ, 0, &ms));
+        const bool haveM = SUCCEEDED(ctx->Map(c.mvpStage.Get(), 0, D3D11_MAP_READ, 0, &mm));
+        const uint32_t* A = (const uint32_t*)ma.pData;
+        // averages for the summary (frames with a previous frame only for the temporal numbers)
+        double sOutIn = 0, sOutInE = 0, sFlIn = 0, sFlOut = 0, sMcIn = 0, sMcOut = 0, sMcInE = 0, sMcOutE = 0, sMcOutT = 0;
+        double sWarp = 0, sUnwarp = 0, sWarpE = 0, sUnwarpE = 0, sLater = 0, sNf = 0, sEdgeFar = 0, sMv = 0, sMvMax = 0;
+        double sFlInE = 0, sFlOutE = 0, sRcas = 0, sRcasE = 0, sAlign = 0;
+        int nTiled = 0;
+        int nF = 0, nP = 0, nL = 0, nReset = 0, nRcas = 0, nMv = 0;
+        for (int m = 0; m < kPcMeasured; ++m) {
+            const PvCapFrame& F = c.fr[m];
+            if (!F.ran) { Log("pvcap: unit %d frame %d: unit did not run in this capture frame", ui, m); continue; }
+            const uint32_t* B = A + (size_t)m * kPcBlock / 4;
+            auto S = [&](int k) { return (double)(((uint64_t)B[k * 2 + 1] << 32) | B[k * 2]); };
+            const double N = S(0), Ne = S(2), Nt = S(21);
+            auto L = [](double sum, double cnt) { return cnt > 0 ? sum / (3.0 * cnt) : 0.0; };
+            const double mvMax = (double)B[54] / 16.0, mvMin = (double)(0xFFFFFFFFu - B[55]) / 16.0;
+            char later[96] = "n/a (flat target or no Present compare)";
+            if (F.later) {
+                const uint32_t* Lb = A + (size_t)(kPcLaterBase + m * kPcBlock) / 4;
+                auto SL = [&](int k) { return (double)(((uint64_t)Lb[k * 2 + 1] << 32) | Lb[k * 2]); };
+                const double ln = SL(0);
+                const double pct = ln > 0 ? 100.0 * SL(2) / ln : 0.0;
+                snprintf(later, sizeof(later), "%.2f%% px changed, mean %.3f", pct, L(SL(1), ln));
+                sLater += pct; ++nL;
+            }
+            Log("pvcap: unit %d frame %d (Present #%llu, target order %d, ref slot %d): out-in %.3f (edges %.3f, truck-edges %.3f) | "
+                "after later draws: %s | depth non-far %.1f%%, edge px %.2f%% of image, edge px on far depth %.1f%%, colour edges with a "
+                "depth edge within 2 px %.1f%% | "
+                "mv mean %.3f max %.2f min %.3f px, >0.5 px on %.1f%%, mean on non-far %.3f px | reset=%d mvDone=%d (pairs %d%s) "
+                "rcas=%d (RCAS changed the NGX output by %.3f, edges %.3f) ngx jitter=(%+.4f,%+.4f) prev=%d | tiled=%d picture->ref-tile "
+                "ndc x*%.3f%+.3f y*%.3f%+.3f", ui, m,
+                (unsigned long long)F.present, F.order, F.ref,
+                L(S(1), N), L(S(3), Ne), L(S(22), Nt), later, N > 0 ? 100.0 * S(16) / N : 0.0, N > 0 ? 100.0 * Ne / N : 0.0,
+                Ne > 0 ? 100.0 * S(17) / Ne : 0.0, Ne > 0 ? 100.0 * S(26) / Ne : 0.0, N > 0 ? S(18) / 16.0 / N : 0.0, mvMax, mvMin,
+                N > 0 ? 100.0 * S(19) / N : 0.0, S(16) > 0 ? S(20) / 16.0 / S(16) : 0.0, (int)F.reset, (int)F.mvDone, F.pairs,
+                F.worldMiss ? ", WORLD MISS" : "", (int)F.rcas, L(S(24), N), L(S(25), Ne), (double)F.njx, (double)F.njy,
+                (int)F.havePrev, (int)F.tiled, (double)F.tx[0], (double)F.tx[2], (double)F.tx[1], (double)F.tx[3]);
+            if (F.havePrev)
+                Log("pvcap: unit %d frame %d temporal: raw flicker in->out %.3f->%.3f (edges %.3f->%.3f) | motion-compensated "
+                    "flicker in->out %.3f->%.3f (edges %.3f->%.3f, truck-edges out %.3f) | warp error warped/unwarped "
+                    "%.3f/%.3f (edges %.3f/%.3f)", ui, m, L(S(4), N), L(S(5), N), L(S(6), Ne), L(S(7), Ne), L(S(12), N),
+                    L(S(13), N), L(S(14), Ne), L(S(15), Ne), L(S(23), Nt), L(S(8), N), L(S(9), N), L(S(10), Ne), L(S(11), Ne));
+            // passes of this target: viewport shift applied, candidates, game projection offset vs the reference slot
+            {
+                char buf[1400]; size_t bl = 0; buf[0] = 0;
+                const float* refM = nullptr;
+                for (int k = 0; k < F.nSlots; ++k)
+                    if (F.slot[k] == F.ref && F.mvp[k] && haveM)
+                        refM = (const float*)((const uint8_t*)mm.pData + (size_t)(m * kPvSlots + k) * CandidateRecord::kSlotBytes);
+                for (int k = 0; k < F.nSlots && bl + 200 < sizeof(buf); ++k) {
+                    int wr = snprintf(buf + bl, sizeof(buf) - bl, " | slot %d shift=(%+.4f,%+.4f) shifted=%d unshifted=%d cand=%d",
+                                      F.slot[k], (double)F.shX[k], (double)F.shY[k], F.shN[k], F.unshN[k], F.candW[k]);
+                    if (wr > 0) bl += (size_t)wr;
+                    if (F.mvp[k] && haveM && refM) {
+                        const float* M = (const float*)((const uint8_t*)mm.pData + (size_t)(m * kPvSlots + k) * CandidateRecord::kSlotBytes);
+                        double p, q, pr, qr;
+                        PvSkew(M, &p, &q); PvSkew(refM, &pr, &qr);
+                        double rd[4] = {};
+                        for (int r = 0; r < 4; ++r)
+                            for (int cc = 0; cc < 4; ++cc) {
+                                const double d = std::fabs((double)M[r * 4 + cc] - (double)refM[r * 4 + cc]);
+                                if (d > rd[r]) rd[r] = d;
+                            }
+                        wr = snprintf(buf + bl, sizeof(buf) - bl, " same-draw=%d proj-offset vs ref=(%+.3f,%+.3f) px rowdiff=%.3g/%.3g/%.3g/%.3g",
+                                      (int)F.sameDraw[k], -(p - pr) * c.w / 2.0, (q - qr) * c.h / 2.0, rd[0], rd[1], rd[2], rd[3]);
+                        if (wr > 0) bl += (size_t)wr;
+                    }
+                }
+                Log("pvcap: unit %d frame %d passes (%d):%s", ui, m, F.nSlots, buf);
+            }
+            if (F.solve && haveS) {
+                const float* R = (const float*)((const uint8_t*)ms.pData + (size_t)m * kPcSolveBytes);
+                Log("pvcap: unit %d frame %d R_world [%.5f %.5f %.5f %.5f] [%.5f %.5f %.5f %.5f] [%.5f %.5f %.5f %.5f] "
+                    "[%.5f %.5f %.5f %.5f] (pairs %.0f valid %.0f pick %.0f)", ui, m, R[0], R[1], R[2], R[3], R[4], R[5], R[6],
+                    R[7], R[8], R[9], R[10], R[11], R[12], R[13], R[14], R[15], R[32], R[33], R[34]);
+            }
+            ++nF;
+            sAlign += Ne > 0 ? 100.0 * S(26) / Ne : 0.0; nTiled += F.tiled ? 1 : 0;
+            sOutIn += L(S(1), N); sOutInE += L(S(3), Ne); sRcas += L(S(24), N); sRcasE += L(S(25), Ne);
+            sNf += N > 0 ? 100.0 * S(16) / N : 0.0; sEdgeFar += Ne > 0 ? 100.0 * S(17) / Ne : 0.0;
+            sMv += N > 0 ? S(18) / 16.0 / N : 0.0; if (mvMax > sMvMax) sMvMax = mvMax;
+            nReset += F.reset ? 1 : 0; nRcas += F.rcas ? 1 : 0; nMv += F.mvDone ? 1 : 0;
+            if (F.havePrev) {
+                ++nP;
+                sFlIn += L(S(4), N); sFlOut += L(S(5), N); sFlInE += L(S(6), Ne); sFlOutE += L(S(7), Ne);
+                sMcIn += L(S(12), N); sMcOut += L(S(13), N); sMcInE += L(S(14), Ne); sMcOutE += L(S(15), Ne);
+                sMcOutT += L(S(23), Nt);
+                sWarp += L(S(8), N); sUnwarp += L(S(9), N); sWarpE += L(S(10), Ne); sUnwarpE += L(S(11), Ne);
+            }
+        }
+        if (haveM) ctx->Unmap(c.mvpStage.Get(), 0);
+        if (haveS) ctx->Unmap(c.solveStage.Get(), 0);
+        ctx->Unmap(c.accStage.Get(), 0);
+        // crops -> BMP
+        int files = 0;
+        if (c.cropChosen) {
+            static const char* kKind[4] = { "in", "out", "depth", "mv" };
+            for (int m = 0; m < kPcMeasured; ++m) {
+                if (!c.fr[m].ran) continue;
+                float dLo = 0, dHi = 0;
+                for (int q = 0; q < 4; ++q) {
+                    if (!c.crop[m][q]) continue;
+                    wchar_t name[64];
+                    swprintf_s(name, L"preview_%d_%d_%S.bmp", ui, m, kKind[q]);
+                    wchar_t path[MAX_PATH];
+                    wcscpy_s(path, P.dir); wcscat_s(path, name);
+                    if (PvCapWriteCrop(ctx, c.crop[m][q].Get(), q, path, c.cw, c.ch, &dLo, &dHi)) ++files;
+                    else Log("pvcap: FAILED to write preview_%d_%d_%s.bmp", ui, m, kKind[q]);
+                }
+                if (m == 0)
+                    Log("pvcap: unit %d crop files: depth BMP = far plane dark blue, else grey 40..255 over depth %.5f..%.5f; "
+                        "mv BMP = R 128+32*mv.x, G 128+32*mv.y (px), B 255 where |mv| > 0.5 px", ui, (double)dLo, (double)dHi);
+            }
+        }
+        const double k1 = nF ? 1.0 / nF : 0.0, kp = nP ? 1.0 / nP : 0.0;
+        const double mcIn = sMcInE * kp, mcOut = sMcOutE * kp;
+        Log("pvcap SUMMARY unit %d (eye tag %d): %d measured frames (%d with a previous frame), %d BMPs written%s | DLAA changes "
+            "the picture by %.3f levels/channel (edges %.3f) | flicker on edge px, motion-compensated: input %.3f, output %.3f -> "
+            "output is %s (%.0f%% of input) | raw frame-to-frame on edge px: input %.3f, output %.3f | MV check (out[n-1] warped "
+            "by MV vs not, against in[n]): all %.3f vs %.3f, edges %.3f vs %.3f -> MVs %s | truck-edge output flicker %.3f | "
+            "%s | depth: %.1f%% of px non-far, %.1f%% of edge px sit on far depth, %.1f%% of colour edges have a depth edge within "
+            "2 px (depth aligned with the picture) | tiled picture path in %d/%d frames | mv mean %.3f px, max %.2f px | NGX reset in "
+            "%d/%d frames, RCAS ran %d/%d (changed the NGX output by %.3f, edges %.3f), MV pass ran %d/%d", ui, 10 + ui, nF, nP, files, aborted ? " (ABORTED: units stopped running)" : "",
+            sOutIn * k1, sOutInE * k1, mcIn, mcOut, mcOut < mcIn ? "MORE stable" : "NOT more stable",
+            mcIn > 0 ? 100.0 * mcOut / mcIn : 0.0, sFlInE * kp, sFlOutE * kp, sWarp * kp, sUnwarp * kp, sWarpE * kp,
+            sUnwarpE * kp, sWarpE < sUnwarpE ? "reduce the error (they fit)" : "do NOT reduce the error",
+            sMcOutT * kp, nL ? "" : "later draws: not measured", sNf * k1, sEdgeFar * k1, sAlign * k1, nTiled, nF, sMv * k1, sMvMax, nReset, nF, nRcas,
+            nF, sRcas * k1, sRcasE * k1, nMv, nF);
+        if (nL) Log("pvcap SUMMARY unit %d: the game's draws after our DLAA changed %.2f%% of the target's pixels on average "
+                    "(before Present)", ui, sLater / nL);
+    }
+    t_inDlaa = false;
+    Log("pvcap: done (%s) -- files in dlaa_selftest\\, capture resources released", aborted ? "aborted" : "complete");
+    delete g_pvCap;
+    g_pvCap = nullptr;
+    g_pvCapActive = false;
+}
+
+// BGRA target: UNORM (non-sRGB, DXGI_FORMAT_B8G8R8A8_UNORM) SRV + RTV on the target and an R8G8B8A8_TYPELESS scratch of
+// its size with UNORM views (rebuilt when the target texture / size changes). false = not possible (logged once).
+// Round 5: the views / scratch belong to the unit `t` (flat: unit 0), `tex` is this frame's target.
+bool PvPrepareBgra(ID3D11Device* dev, PvUnit& t, ID3D11Texture2D* tex, int idx, const D3D11_TEXTURE2D_DESC& td) {
+    if (t.viewsOf.Get() != tex) {
+        t.tgtSrv.Reset(); t.tgtRtv.Reset(); t.viewsOf = tex;
+        if (!(td.BindFlags & D3D11_BIND_SHADER_RESOURCE) || !(td.BindFlags & D3D11_BIND_RENDER_TARGET)) {
+            Log("preview target %d: BGRA target %ux%u lacks SHADER_RESOURCE / RENDER_TARGET bind (bind flags 0x%x) -- no DLAA there",
+                idx, td.Width, td.Height, (unsigned)td.BindFlags);
+            return false;
+        }
+        D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+        sd.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        sd.Texture2D.MipLevels = 1;
+        D3D11_RENDER_TARGET_VIEW_DESC rd{};
+        rd.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+        HRESULT hr;
+        if (FAILED(hr = dev->CreateShaderResourceView(tex, &sd, &t.tgtSrv)) ||
+            FAILED(hr = dev->CreateRenderTargetView(tex, &rd, &t.tgtRtv))) {
+            Log("preview target %d: UNORM views of the BGRA target failed hr=0x%lx (target fmt %d, bind 0x%x) -- no DLAA there",
+                idx, (unsigned long)hr, (int)td.Format, (unsigned)td.BindFlags);
+            t.tgtSrv.Reset(); t.tgtRtv.Reset();
+            return false;
+        }
+    }
+    if (!t.tgtSrv || !t.tgtRtv) return false;
+    if (!t.scratch || t.sw != td.Width || t.sh != td.Height) {
+        t.scratch.Reset(); t.scratchSrv.Reset(); t.scratchRtv.Reset();
+        D3D11_TEXTURE2D_DESC sdsc{};
+        sdsc.Width = td.Width; sdsc.Height = td.Height;
+        sdsc.MipLevels = 1; sdsc.ArraySize = 1;
+        sdsc.Format = DXGI_FORMAT_R8G8B8A8_TYPELESS;
+        sdsc.SampleDesc.Count = 1;
+        sdsc.Usage = D3D11_USAGE_DEFAULT;
+        sdsc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+        D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+        sd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        sd.Texture2D.MipLevels = 1;
+        D3D11_RENDER_TARGET_VIEW_DESC rd{};
+        rd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+        HRESULT hr;
+        if (FAILED(hr = dev->CreateTexture2D(&sdsc, nullptr, &t.scratch)) ||
+            FAILED(hr = dev->CreateShaderResourceView(t.scratch.Get(), &sd, &t.scratchSrv)) ||
+            FAILED(hr = dev->CreateRenderTargetView(t.scratch.Get(), &rd, &t.scratchRtv))) {
+            Log("preview target %d: RGBA8 scratch %ux%u create hr=0x%lx -- no DLAA there", idx, td.Width, td.Height, (unsigned long)hr);
+            t.scratch.Reset(); t.scratchSrv.Reset(); t.scratchRtv.Reset();
+            return false;
+        }
+        t.sw = td.Width; t.sh = td.Height;
+    }
+    return true;
+}
+
+// Runs target `idx`'s DLAA now (it is pending): see the block comment. Always clears `pending`.
+// Round 5: the work is done by the target's EYE unit (PvUnitOf); a target whose eye is not known yet (or that collides
+// with the frame's other target) is left untouched this frame.
+void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
+    PvTarget& tg = g_pt[idx];
+    if (!tg.pending) return;
+    tg.pending = false;
+    g_ptPendingMask &= ~(1 << idx);
+    if (g_ptBoundIdx == idx) g_ptBoundIdx = -1;
+    if (!tg.tex) return;
+    if (!g_dlaaOn.load(std::memory_order_relaxed) || g_passive.load(std::memory_order_relaxed)) return;
+    if (!SceneDlaa::ShadersReady()) return;              // v0.7.8 warm-up still running: untouched, nothing built yet
+    const int ref = tg.curRef;
+    if (ref < 0 || ref >= kPvSlots) return;
+    PvSlot& rs = g_pv[ref];
+    const uint64_t fr = g_frames.load(std::memory_order_relaxed);
+    const int ui = PvUnitOf(idx, fr);
+    if (ui < 0) return;                                  // VR eye of this RT not known yet / map conflict: untouched
+    PvUnit& t = g_pu[ui];
+    if (t.unsupported) return;
+    if (g_jitterOnly.load(std::memory_order_relaxed)) {  // jitter-only debug: no evaluate, keep the MV history rolling
+        t_inDlaa = true;
+        if (t.dl.Mv().Ready() && rs.ps.cand.Ready()) t.dl.Mv().Commit(ctx, rs.ps.cand);
+        t_inDlaa = false;
+        return;
+    }
+    {   // Round 6 diagnostics: the reference pass collected no MV candidate (VR logs: the first ~14 s on the menu)
+        const CandidateRecord& rc = rs.ps.cand;
+        if (!rc.Ready() || rc.Count(0) + rc.Count(1) == 0) {
+            if (++g_pvNoCandFlushes == 120 && !g_pvNoCandLogged) {
+                g_pvNoCandLogged = true;
+                Log("preview MV: the reference pass (slot %d) collected no candidate in 120 flushes -- this pass: DrawIndexed=%u, "
+                    "collector skips: sampled=%u no-record/ctx/viewport=%u full=%u no-cb=%u cb-range=%u, record ready=%d "
+                    "world=%d cabin=%d | dlaa=%d passive=%d mv=%d", ref, rs.diCount, rs.ps.skSampled, rs.ps.skNoCtx,
+                    rs.ps.skFull, rs.ps.skNoCb, rs.ps.skRange, (int)rc.Ready(), rc.Ready() ? rc.Count(0) : 0,
+                    rc.Ready() ? rc.Count(1) : 0, (int)g_dlaaOn.load(), (int)g_passive.load(), (int)g_mvOn.load());
+            }
+        } else if (g_pvNoCandLogged && !g_pvCandBackLogged) {
+            g_pvCandBackLogged = true;
+            Log("preview MV: first candidates after %llu candidate-less flushes (slot %d: world=%d cabin=%d, DrawIndexed=%u)",
+                (unsigned long long)g_pvNoCandFlushes, ref, rc.Count(0), rc.Count(1), rs.diCount);
+        }
+    }
+    // Round 6: the depth NGX gets. A TILED group (PvLayout): the picture depth assembled from every tile pass of this frame;
+    // otherwise (untiled, or the layout not known yet) the reference pass's own pre-discard snapshot, as in round 5.
+    const PvLayout& lay = g_pvLay[idx];
+    const bool tiled = lay.tiled;
+    DepthTwin* depth = nullptr;
+    if (tiled) {
+        PvAsm& A = g_pvAsm[idx];
+        if (lay.slotMask != tg.slotMask || lay.ref != ref || !A.twin.valid || A.frameMask != lay.slotMask) {
+            static int missLogs = 0;
+            if (missLogs++ < 10)
+                Log("preview target %d: tiled picture depth incomplete (tiles 0x%x of 0x%x, this frame's passes 0x%x, ref %d vs %d) "
+                    "-- frame left untouched (asm-miss #%llu)", idx, A.frameMask, lay.slotMask, tg.slotMask, ref, lay.ref,
+                    (unsigned long long)(g_pvAsmMiss + 1));
+            ++g_pvAsmMiss;
+            return;
+        }
+        depth = &A.twin;
+    } else {
+        if (!rs.ps.snap || !rs.ps.twin.valid) {          // no pre-discard depth of the reference pass
+            static int warned = 0;
+            if (g_ptRefMask != 0 && warned++ < 5)        // (the first frame of a screen has none by design: nothing learned yet)
+                Log("preview target %d: reference slot %d has no depth snapshot at the flush -- frame left untouched", idx, ref);
+            return;
+        }
+        depth = &rs.ps.twin;
+    }
+    D3D11_TEXTURE2D_DESC td{};
+    tg.tex->GetDesc(&td);
+    if (tiled && (td.Width != depth->w || td.Height != depth->h)) { ++g_pvAsmMiss; return; }
+    const bool rgba = PvIsRgba8(td.Format), bgra = PvIsBgra8(td.Format);
+    if ((!rgba && !bgra) || td.SampleDesc.Count != 1) {
+        t.unsupported = true;
+        Log("preview target %d: %ux%u fmt=%d samples=%u is not an 8-bit RGBA / BGRA target -- no DLAA there", idx, td.Width, td.Height,
+            (int)td.Format, td.SampleDesc.Count);
+        return;
+    }
+    Microsoft::WRL::ComPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    if (!dev) return;
+    if (bgra && (!PreviewBlit::Ensure(dev.Get()) || !PvPrepareBgra(dev.Get(), t, tg.tex.Get(), idx, td))) { t.unsupported = true; return; }
+    if (!t.inited) {
+        t.inited = true;
+        t.dl.SetEye(10 + ui);                            // log tag "eye 10 / 11" = preview unit 0 / 1 (round 5: = eye 0 / 1)
+        t.dl.Mv().SetNearReject(0.0f);                   // the truck is close: no near-reject (the solve shader would bypass it anyway)
+        t.dl.Mv().SetEgoOrigin(0.0f);                    // no ego split: the whole truck is one rigid object
+        t.dl.Mv().SetEgoPixel(0.0f);
+        t.dl.SetOpticalCentre(0.5f, 0.5f);
+    }
+    // Cost visibility: the instance's own non-blocking GPU timestamp queries ("DLAA GPU cost eye 10 / 11" lines, every
+    // 600 timed frames). Flat: only with gpu_timing = 1 (the flat default stays as before); VR: also in auto mode.
+    t.dl.SetTiming(g_gpuTiming > 0 || (g_gpuTiming < 0 && g_launchVr == 1));
+    // Round 5: no reset on a reference-slot change any more -- the unit is the eye, so slot 0 vs 4 only reflects which eye
+    // the game rendered first this frame (round 4 reset on it, but its units were order-bound, see the block comment).
+    const bool reset = t.runs == 0 || t.lastFrame + 1 != fr || t.epoch != g_pvEpoch;
+    const float njx = (float)g_signX * g_pvJx, njy = (float)g_signY * g_pvJy;
+    const int64_t t0 = t.runs == 0 ? Qpc() : 0;          // wall time of the first Run (NGX create + textures)
+    const int areaNow = SceneDlaa::Area();               // preview targets always use the whole image (no dlaa_area crop)
+    if (areaNow != 100) SceneDlaa::SetArea(100);
+    // Round 6: MVs in picture space (pass B maps picture ndc into the reference tile's clip space and back).
+    if (tiled) t.dl.Mv().SetTileXf(lay.hx, lay.hy, lay.cx, lay.cy);
+    else       t.dl.Mv().SetTileXf(1.0f, 1.0f, 0.0f, 0.0f);
+    t_inDlaa = true;
+    bool ok = false;
+    if (rgba) {
+        ok = t.dl.Run(ctx, tg.tex.Get(), nullptr, depth, &rs.ps.cand, njx, njy, reset, g_mvOn.load(), g_mvDebug.load(), false, 0, 0);
+    } else {
+        PreviewBlit::SaveState(ctx);
+        PreviewBlit::Draw(ctx, t.tgtSrv.Get(), t.scratchRtv.Get(), td.Width, td.Height);          // target -> RGBA8 scratch
+        ok = t.dl.Run(ctx, t.scratch.Get(), nullptr, depth, &rs.ps.cand, njx, njy, reset, g_mvOn.load(), g_mvDebug.load(), false, 0, 0);
+        if (ok) PreviewBlit::Draw(ctx, t.scratchSrv.Get(), t.tgtRtv.Get(), td.Width, td.Height);  // result -> target
+        PreviewBlit::RestoreState(ctx);
+    }
+    t_inDlaa = false;
+    if (areaNow != 100) SceneDlaa::SetArea(areaNow);
+    if (!ok && t.dl.Deferred()) return;                  // v0.7.8: built at a later Present (one NGX create per Present)
+    t.epoch = g_pvEpoch;
+    if (t0) {
+        static int firstLogs = 0;
+        if (firstLogs++ < 8)
+            Log("preview unit %d (eye tag %d, target order %d): %ux%u fmt=%d (%s), reference slot %d, DLAA unit created (first Run %.1f ms, ok=%d, Present #%llu)",
+                ui, 10 + ui, idx, td.Width, td.Height, (int)td.Format, bgra ? "BGRA: copied through an RGBA8 scratch" : "RGBA8: in place", ref,
+                g_qpcFreq > 0 ? (double)(Qpc() - t0) * 1000.0 / (double)g_qpcFreq : 0.0, (int)ok, (unsigned long long)fr);
+    }
+    if (ok) {
+        // MV prev of this run = the unit's record committed at its previous run (slot t.lastRef, order t.lastOrder); cur =
+        // slot `ref`. Same unit = same eye, whatever the slot / order (round 5).
+        if (t.runs < 2 || (t.lastOrder >= 0 && t.lastOrder != idx && g_pvOrderSwaps <= 4))
+            Log("preview DLAA eval: unit %d (eye tag %d) target order %d Present #%llu viewport shift=(%+.4f,%+.4f) NGX "
+                "jitter=(%+.4f,%+.4f) reset=%d ref slot %d (MV prev from slot %d, order %d) depth=snapshot", ui, 10 + ui, idx,
+                (unsigned long long)fr, g_pvJx, g_pvJy, njx, njy, (int)reset, ref, t.lastRef, t.lastOrder);
+        t.lastFrame = fr; t.lastRef = ref; t.lastOrder = idx; ++t.runs; ++g_pvOkFrame; ++g_pvRunsTotal;
+        if (g_pvCapActive) PvCapAfterRun(ctx, ui, idx, tg, ref, njx, njy, bgra, td.Width, td.Height, fr);   // Ctrl+F10 capture
+    } else {
+        static int fails = 0;
+        if (fails++ < 10)
+            Log("preview DLAA: target %d (unit %d) Run failed (init failed=%d, Present #%llu) -- frame left untouched", idx,
+                ui, (int)t.dl.InitFailed(), (unsigned long long)fr);
+    }
+}
+
+// Called at the end of every top-level Present's pre-work (OnPresentBoundary): (c) flushes pending targets, logs, learns
+// the reference slots, then starts the next frame (counters, ref drop, jitter for the next frame). The jitter phase is
+// per Present here (no G-buffer pass advances g_jx / g_jy on this screen; in VR one Present covers both eyes); the
+// viewport shift of every preview pass and the NGX jitter both read g_pvJx / g_pvJy, which only change here, so the
+// blended result of a frame is consistently jittered.
+void PreviewNextFrame(uint64_t n) {
+    if (g_ptPendingMask) {
+        ID3D11DeviceContext* c = g_gameCtx.load(std::memory_order_acquire);
+        for (int i = 0; i < kPtMax; ++i)
+            if (c) PreviewFlush(c, i); else g_pt[i].pending = false;
+        g_ptPendingMask = 0;
+    }
+    if (g_pvOkFrame > 0) {
+        ++g_pvFrames;
+        if (!g_pvRunLogged) {
+            g_pvRunLogged = true;
+            Log("preview DLAA: running on %d target(s) (Present #%llu) -- one LDR DLAA per composite target, depth + MV from "
+                "the reference slot", g_pvOkFrame, (unsigned long long)n);
+        }
+        if (!g_pvT0) { g_pvT0 = Qpc(); g_pvF0 = n; }
+        if (g_pvFrames % 600 == 0) {
+            const double secs = g_qpcFreq > 0 ? (double)(Qpc() - g_pvT0) / (double)g_qpcFreq : 0.0;
+            char refs[96];
+            size_t rl = 0;
+            refs[0] = 0;
+            for (int i = 0; i < g_ptCount && i < kPtMax && rl + 24 < sizeof(refs); ++i) {
+                const int w = snprintf(refs + rl, sizeof(refs) - rl, " t%d:slot%d", i, g_pt[i].curRef);
+                if (w > 0) rl += (size_t)w;
+            }
+            // Round 5 eye map: order!=eye = target runs whose eye unit differed from the composite order (each one was a
+            // cross-eye history mix in round 4); untouched = targets skipped (eye unknown yet / conflict).
+            Log("preview DLAA stats: %llu preview frames, %llu target runs, %d target(s) ran this frame, reference slots [%s ], "
+                "jitter phase %d/%d, %.1f Presents/s over the last window (Present #%llu) | eye map: %d RTs, verdicts=%llu "
+                "no-vote=%llu corrections=%llu throttled=%llu, order!=eye=%llu, untouched: unknown-eye=%llu conflict=%llu",
+                (unsigned long long)g_pvFrames, (unsigned long long)g_pvRunsTotal, g_pvOkFrame, refs,
+                (int)(n % (uint64_t)(g_phases > 0 ? g_phases : 1)), g_phases, secs > 0.0 ? (double)(n - g_pvF0) / secs : 0.0,
+                (unsigned long long)n, g_pvEyeN, (unsigned long long)g_pvVerdicts, (unsigned long long)g_pvNoVote,
+                (unsigned long long)g_pvCorrections, (unsigned long long)g_pvRbThrottled, (unsigned long long)g_pvOrderSwaps,
+                (unsigned long long)g_pvUndecided, (unsigned long long)g_pvConflicts);
+            // Round 6: the tiled-picture depth assembly cost (GPU, non-blocking timestamps) and its health.
+            ID3D11DeviceContext* const tc = g_gameCtx.load(std::memory_order_acquire);
+            if (tc) g_pvAsmTimer.Poll(tc);
+            if (g_pvAsmTilesWin > 0 || g_pvAsmMiss > 0) {
+                const double per = g_pvAsmTimer.n ? g_pvAsmTimer.sum / (double)g_pvAsmTimer.n : 0.0;
+                const double tpf = (double)g_pvAsmTilesWin / 600.0;
+                Log("preview depth assembly GPU cost: %.3f ms per tile pass (shared DS copy + reduce, %llu timed), %.2f tile "
+                    "passes per frame -> %.2f ms per frame | asm-miss (target left untouched) %llu in total | layout readbacks "
+                    "throttled %llu, layout changes %llu", per, (unsigned long long)g_pvAsmTimer.n, tpf, per * tpf,
+                    (unsigned long long)g_pvAsmMiss, (unsigned long long)g_pvLayThrottled, (unsigned long long)g_pvLayChanges);
+                g_pvAsmTimer.sum = 0.0; g_pvAsmTimer.n = 0; g_pvAsmTilesWin = 0;
+            }
+            g_pvT0 = Qpc(); g_pvF0 = n;
+        }
+    }
+    if (g_pvOkFrame > 0 && !g_pvFirstRunPresent) g_pvFirstRunPresent = n;
+    {   // v0.7.8 Ctrl+F10 on the preview screen: measuring capture (see PvCap); the world F10 snapshot is untouched.
+        // dlaa.ini preview_capture_at = N (debug): the same capture once, N Presents after the preview DLAA first ran.
+        ID3D11DeviceContext* c = g_gameCtx.load(std::memory_order_acquire);
+        const bool autoCap = g_pvCaptureAt > 0 && !g_pvCaptureAtDone && g_pvFirstRunPresent &&
+                             n >= g_pvFirstRunPresent + (uint64_t)g_pvCaptureAt;
+        if (c && g_pvCapActive) PvCapAtPresent(c, n);
+        else if (c && g_pvOkFrame > 0 && (g_snapRequest.load(std::memory_order_relaxed) || autoCap)) {
+            if (autoCap) {
+                g_pvCaptureAtDone = true;
+                Log("pvcap: automatic start (dlaa.ini preview_capture_at=%d, preview DLAA first ran at Present #%llu)",
+                    g_pvCaptureAt, (unsigned long long)g_pvFirstRunPresent);
+            }
+            g_snapRequest = false;
+            PvCapStart(c, n);
+        }
+    }
+    if (g_ptCount > 0) {                                 // learn the reference slots (lowest composited slot per target)
+        int mask = 0;
+        for (int i = 0; i < g_ptCount && i < kPtMax; ++i)
+            if (g_pt[i].curRef < kPvSlots) mask |= 1 << g_pt[i].curRef;
+        if (mask != g_ptRefMask) {
+            static int logs = 0;
+            if (logs++ < 20)
+                Log("preview reference slots mask 0x%x -> 0x%x (%d target(s), Present #%llu)", g_ptRefMask, mask, g_ptCount,
+                    (unsigned long long)n);
+            g_ptRefMask = mask;
+        }
+        // Round 6: the group (= composite order) each slot went into, for the next frame's tile-pass depth assembly.
+        for (int s = 0; s < kPvSlots; ++s) g_pvSlotGroup[s] = -1;
+        for (int i = 0; i < g_ptCount && i < kPtMax; ++i)
+            for (int s = 0; s < kPvSlots; ++s)
+                if ((g_pt[i].slotMask >> s) & 1) g_pvSlotGroup[s] = i;
+        // Depth twins: only the reference slots of UNTILED groups keep one (a tiled group uses g_pvTileTwin + the picture
+        // depth). Candidate records stay for every slot (16 KB each): round 6 reads every pass's first candidate.
+        for (int i = 0; i < kPvSlots; ++i) {
+            const int grp = g_pvSlotGroup[i];
+            const bool tiledSlot = grp >= 0 && g_pvLay[grp].tiled;
+            if (!((g_ptRefMask >> i) & 1) || tiledSlot) g_pv[i].ps.twin.Shutdown();
+        }
+    }
+    // Round 6 tile layout: finished readbacks first, then this frame's passes (flat and VR).
+    if ((g_pvLayPending > 0 || g_ptCount > 0) && g_dlaaOn.load(std::memory_order_relaxed) &&
+        !g_passive.load(std::memory_order_relaxed)) {
+        ID3D11DeviceContext* c = g_gameCtx.load(std::memory_order_acquire);
+        if (c) {
+            t_inDlaa = true;
+            if (g_pvLayPending > 0) PvPollLayoutReadbacks(c, n);
+            PvQueueLayoutReadback(c, n);
+            t_inDlaa = false;
+        }
+    }
+    for (PvAsm& a : g_pvAsm) { a.frameMask = 0; a.twin.valid = false; }
+    // Round 5 VR eye map: finished verdicts first, then this frame's two reference records (see PvEyeEntry).
+    if (g_launchVr == 1 && (g_pvRbPending > 0 || g_ptCount == 2) && g_dlaaOn.load(std::memory_order_relaxed) &&
+        !g_passive.load(std::memory_order_relaxed)) {
+        ID3D11DeviceContext* c = g_gameCtx.load(std::memory_order_acquire);
+        if (c) {
+            t_inDlaa = true;
+            if (g_pvRbPending > 0) PvPollEyeReadbacks(c);
+            PvQueueEyeReadback(c, n);
+            t_inDlaa = false;
+        }
+    }
+    g_pvCount = 0; g_pvOkFrame = 0; g_pvCur = -1;
+    g_ptCount = 0; g_ptPendingMask = 0; g_ptBoundIdx = -1; g_pvUnitMask = 0;
+    for (PvSlot& s : g_pv) { s.rt.Reset(); s.composited = false; }
+    for (PvTarget& t : g_pt) { t.tex.Reset(); t.pending = false; t.curRef = 99; t.unit = -1; t.slotMask = 0; }
+    g_pvDs.Reset();
+    if (g_jitterEnabled) JitterOfPhase((int)((n + 1) % (uint64_t)(g_phases > 0 ? g_phases : 1)), &g_pvJx, &g_pvJy);
+    else { g_pvJx = 0.0f; g_pvJy = 0.0f; }
+}
+
+// hkOMSetRenderTargets (game context, not t_inDlaa): sets g_previewPass. `gbuf` = this bind is the world G-buffer
+// (4 RTVs + scene DSV). Preview pass = preview_dlaa on, n == 1, DSV set, RTV0 R11G11B10_FLOAT, RT size == DSV size and
+// >= 1024 wide (flat: the backbuffer size; VR: the eye size), single-sample, DSV D32_FLOAT_S8X24 / R32G8X24_TYPELESS,
+// and no world G-buffer bind within the last kPvQuietFrames Presents (so it never fires in the game world). A new
+// (non-redundant) preview bind takes the next slot of the frame and records its RT; passes beyond kPvSlots are
+// ignored (no jitter, no DLAA).
+void PreviewOnBind(UINT n, ID3D11RenderTargetView* const* rtvs, ID3D11DepthStencilView* dsv, bool gbuf) {
+    const uint64_t fr = g_frames.load(std::memory_order_relaxed);
+    if (gbuf) { g_lastGbufFrame = fr; g_pvCur = -1; g_pvCount = 0; }
+    bool pv = false;
+    if (n == 1 && rtvs && rtvs[0] && dsv && g_previewDlaa &&
+        !g_gameDeviceChanged.load(std::memory_order_relaxed) && fr - g_lastGbufFrame > kPvQuietFrames) {
+        Microsoft::WRL::ComPtr<ID3D11Resource> rres, dres;
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> rt, ds;
+        rtvs[0]->GetResource(&rres);
+        dsv->GetResource(&dres);
+        if (rres) rres.As(&rt);
+        if (dres) dres.As(&ds);
+        if (rt && ds) {
+            D3D11_TEXTURE2D_DESC rd{}, dd{};
+            rt->GetDesc(&rd);
+            ds->GetDesc(&dd);
+            const bool ok = rd.Format == DXGI_FORMAT_R11G11B10_FLOAT && rd.Width >= 1024 &&
+                            rd.SampleDesc.Count == 1 && dd.Width == rd.Width && dd.Height == rd.Height &&
+                            dd.SampleDesc.Count == 1 &&
+                            (dd.Format == DXGI_FORMAT_D32_FLOAT_S8X24_UINT || dd.Format == DXGI_FORMAT_R32G8X24_TYPELESS);
+            if (ok) {
+                if (g_previewPass && g_pvCur >= 0 && rt.Get() == g_pv[g_pvCur].rt.Get() && ds.Get() == g_pvDs.Get()) {
+                    pv = true;                                   // redundant rebind inside the same pass: same slot
+                } else if (g_pvCount < kPvSlots) {
+                    const int slot = g_pvCount++;
+                    PvSlot& s = g_pv[slot];
+                    s.ps.cand.Reset();
+                    s.ps.twin.valid = false;
+                    s.ps.snap = false;
+                    s.rt = rt; s.composited = false;
+                    s.capShX = s.capShY = 0.0f; s.capShN = s.capUnshN = 0;   // v0.7.8 capture: viewport decisions of this pass
+                    s.diCount = 0;                                            // round 6: per-pass collector diagnostics
+                    s.ps.skSampled = s.ps.skNoCtx = s.ps.skFull = s.ps.skNoCb = s.ps.skRange = 0;
+                    g_pvDs = ds;
+                    g_pvW = rd.Width; g_pvH = rd.Height;
+                    g_pvCur = slot;
+                    pv = true;
+                    if (!g_pvDetectLogged) {
+                        g_pvDetectLogged = true;
+                        Log("preview pass detected (profile / truck-preview screen): RT %ux%u fmt=%d (R11G11B10_FLOAT) + DSV %ux%u "
+                            "fmt=%d, backbuffer %ux%u fmt=%d (%s), no world G-buffer bind for %llu Presents (Present #%llu) -- "
+                            "one DLAA per composite target, up to %d slots per frame",
+                            rd.Width, rd.Height, (int)rd.Format, dd.Width, dd.Height, (int)dd.Format, g_bbW, g_bbH, (int)g_bbFmt,
+                            (rd.Width == g_bbW && rd.Height == g_bbH) ? "RT = backbuffer size" : "RT is eye-sized",
+                            (unsigned long long)(fr - g_lastGbufFrame), (unsigned long long)fr, kPvSlots);
+                    }
+                } else {
+                    g_pvCur = -1;                                // beyond the slot cap: ignored (neither jittered nor collected)
+                    static int capLogs = 0;
+                    if (capLogs++ < 3)
+                        Log("preview pass beyond the %d-slot cap ignored (Present #%llu)", kPvSlots, (unsigned long long)fr);
+                }
+            }
+        }
+    }
+    g_previewPass = pv;
+}
+
+// Trigger (b), from hkOMSetRenderTargets after PreviewOnBind while some target is pending: a bind that is not a preview
+// pass and does not bind the pending target itself flushes that target. Also tracks which pending target is the
+// current RT0 (g_ptBoundIdx), so the per-Draw / DrawIndexed trigger (a) is a plain integer test. (The DLAA runs after
+// the game's bind went through; it saves / restores whatever it changes, so the game's new binding is what comes back.)
+void PreviewOnBindTargets(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* rtvs) {
+    Microsoft::WRL::ComPtr<ID3D11Resource> res;
+    if (n >= 1 && rtvs && rtvs[0]) rtvs[0]->GetResource(&res);
+    int bound = -1;
+    for (int i = 0; i < kPtMax; ++i)
+        if ((g_ptPendingMask >> i & 1) && res && res.Get() == (ID3D11Resource*)g_pt[i].tex.Get()) bound = i;
+    if (!g_previewPass)
+        for (int i = 0; i < kPtMax; ++i)
+            if ((g_ptPendingMask >> i & 1) && i != bound) PreviewFlush(ctx, i);
+    g_ptBoundIdx = (bound >= 0 && (g_ptPendingMask >> bound & 1)) ? bound : -1;
+}
+
+// DiscardResource / DiscardView / DiscardView1 on the game context: the preview depth (one DS shared by all the
+// passes) is snapshotted into the twin of the pass just drawn (g_pvCur) right before the discard destroys it (same
+// as the VR snapshot-at-discard) -- only for a learned reference slot. g_pvCur keeps pointing at the newest preview pass
+// until the next preview bind.
+void PreviewOnDiscard(ID3D11DeviceContext* ctx, ID3D11Resource* res) {
+    if (t_inDlaa || !res || g_pvCur < 0 || (ID3D11Resource*)g_pvDs.Get() != res) return;
+    if (!g_dlaaOn.load(std::memory_order_relaxed) || g_jitterOnly.load(std::memory_order_relaxed) ||
+        g_passive.load(std::memory_order_relaxed)) return;
+    // Round 6: a pass of a TILED group goes into the group's picture depth (every tile, see PvLayout); the reference
+    // slot's own snapshot below is only the untiled / not-yet-known path.
+    const int grp = g_pvSlotGroup[g_pvCur];
+    if (grp >= 0 && grp < kPtMax && g_pvLay[grp].tiled && ((g_pvLay[grp].slotMask >> g_pvCur) & 1)) {
+        if (SceneDlaa::ShadersReady() && !((g_pvAsm[grp].frameMask >> g_pvCur) & 1)) PvAssembleTile(ctx, grp, g_pvCur);
+        return;
+    }
+    if (!((g_ptRefMask >> g_pvCur) & 1)) return;
+    PvSlot& s = g_pv[g_pvCur];
+    if (s.ps.snap) return;
+    t_inDlaa = true;
+    const bool ok = s.ps.twin.Snapshot(ctx, g_pvDs.Get(), false);
+    t_inDlaa = false;
+    s.ps.snap = ok;
+    static int logs = 0;
+    if (logs < 2 || (!ok && logs < 6)) {
+        ++logs;
+        Log("preview depth snapshot slot %d: %s (before the DS_P discard)", g_pvCur, ok ? "captured" : "FAILED");
+    }
+}
+#endif
+
 // ---- v0.5.2 pass FIFO ----------------------------------------------------------------------
 // Starts a new G-buffer pass. Called from the scene-depth clear (before the game's clear runs, so the scene
 // depth still holds the previous pass) or, for the very first pass, from the first G-buffer bind.
@@ -2014,6 +3949,9 @@ bool OnDepthDiscard(ID3D11DeviceContext1* ctx, ID3D11Resource* res, bool* snappe
 void STDMETHODCALLTYPE hkDiscardResource(ID3D11DeviceContext1* ctx, ID3D11Resource* res) {
     bool snapped = false;
     const bool scene = IsGameCtx1(ctx) && OnDepthDiscard(ctx, res, &snapped);
+#ifdef WITH_DLAA
+    if (g_pvCur >= 0 && IsGameCtx1(ctx)) PreviewOnDiscard(ctx, res);   // v0.7.8 profile-screen preview depth
+#endif
     TraceDiscard(ctx, "DiscardResource", res, nullptr, scene, snapped);
     oDiscardResource(ctx, res);
 }
@@ -2024,6 +3962,9 @@ void STDMETHODCALLTYPE hkDiscardView(ID3D11DeviceContext1* ctx, ID3D11View* view
     if (view) view->GetResource(&r);
     bool snapped = false;
     const bool scene = game && OnDepthDiscard(ctx, r, &snapped);
+#ifdef WITH_DLAA
+    if (game && g_pvCur >= 0) PreviewOnDiscard(ctx, r);                // v0.7.8 profile-screen preview depth
+#endif
     TraceDiscard(ctx, "DiscardView", r, view, scene, snapped);
     if (r) r->Release();
     oDiscardView(ctx, view);
@@ -2035,6 +3976,9 @@ void STDMETHODCALLTYPE hkDiscardView1(ID3D11DeviceContext1* ctx, ID3D11View* vie
     if (view) view->GetResource(&r);
     bool snapped = false;
     const bool scene = game && OnDepthDiscard(ctx, r, &snapped);
+#ifdef WITH_DLAA
+    if (game && g_pvCur >= 0) PreviewOnDiscard(ctx, r);                // v0.7.8 profile-screen preview depth
+#endif
     TraceDiscard(ctx, "DiscardView1", r, view, scene, snapped);
     if (r) r->Release();
     oDiscardView1(ctx, view, rects, n);
@@ -2136,6 +4080,11 @@ int            g_passLogged   = 0;         // bit0 = G-buffer logged, bit1 = for
 
 // Jitter only while DLAA is live and the jitter is enabled in dlaa.ini (v0.6.2: and not in passive mode).
 bool JitterLive() {
+#ifdef WITH_DLAA
+    // v0.7.8: no viewport jitter before the shader warm-up is done (no DLAA unit can run yet, a jittered raw frame would
+    // just shimmer). Only the first seconds after the DLL load.
+    if (!ShaderCache::Done()) return false;
+#endif
     return g_dlaaOn.load(std::memory_order_relaxed) && g_jitterEnabled && !g_passive.load(std::memory_order_relaxed);
 }
 
@@ -2206,20 +4155,41 @@ inline void CountGameOtherThread() {
 // nothing if that is exactly what was last issued (no call spam).
 void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
     if (g_gameVpN == 0) return;
-    const bool shift = g_jitterPass && JitterLive() && g_sceneW &&
-                       (UINT)g_gameVp[0].Width == g_sceneW && (UINT)g_gameVp[0].Height == g_sceneH;
+    const bool worldShift = g_jitterPass && JitterLive() && g_sceneW &&
+                            (UINT)g_gameVp[0].Width == g_sceneW && (UINT)g_gameVp[0].Height == g_sceneH;
+    // v0.7.8: the profile-screen preview pass shifts viewport 0 too (when its size is the preview RT's size, g_pvW x
+    // g_pvH), by the frame's own jitter (g_pvJx / g_pvJy: no G-buffer pass advances g_jx / g_jy on that screen).
+#ifdef WITH_DLAA
+    const bool pvShift = !worldShift && g_previewPass && JitterLive() && g_pvW &&
+                         (UINT)g_gameVp[0].Width == g_pvW && (UINT)g_gameVp[0].Height == g_pvH;
+    // Round 6: a tile pass is shrunk by a * h into the picture -- its shift is scaled up so the PICTURE moves by exactly
+    // (g_pvJx, g_pvJy), the offset NGX is told (PvShiftScale; 1 for an untiled pass).
+    float pvKx = 1.0f, pvKy = 1.0f;
+    if (pvShift) PvShiftScale(g_pvCur, &pvKx, &pvKy);
+    const float sx = pvShift ? g_pvJx * pvKx : g_jx, sy = pvShift ? g_pvJy * pvKy : g_jy;
+    // v0.7.8 preview capture: record the decision for the current preview pass (proof the 4 passes get the same shift).
+    if (g_pvCapActive && g_previewPass && g_pvCur >= 0 && g_pvW &&
+        (UINT)g_gameVp[0].Width == g_pvW && (UINT)g_gameVp[0].Height == g_pvH) {
+        PvSlot& cs = g_pv[g_pvCur];
+        if (pvShift) { cs.capShX = sx; cs.capShY = sy; ++cs.capShN; } else ++cs.capUnshN;
+    }
+#else
+    const bool pvShift = false;
+    const float sx = g_jx, sy = g_jy;
+#endif
+    const bool shift = worldShift || pvShift;
     if (!gameJustSet && shift == g_vpShifted &&
-        (!shift || (g_vpShiftX == g_jx && g_vpShiftY == g_jy))) return;
+        (!shift || (g_vpShiftX == sx && g_vpShiftY == sy))) return;
     if (shift) {
         D3D11_VIEWPORT v[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
         memcpy(v, g_gameVp, g_gameVpN * sizeof(D3D11_VIEWPORT));
-        v[0].TopLeftX += g_jx;
-        v[0].TopLeftY += g_jy;
+        v[0].TopLeftX += sx;
+        v[0].TopLeftY += sy;
         oRSSetViewports(ctx, g_gameVpN, v);
     } else {
         oRSSetViewports(ctx, g_gameVpN, g_gameVp);
     }
-    g_vpShifted = shift; g_vpShiftX = g_jx; g_vpShiftY = g_jy;
+    g_vpShifted = shift; g_vpShiftX = sx; g_vpShiftY = sy;
 }
 
 void STDMETHODCALLTYPE hkRSSetViewports(ID3D11DeviceContext* ctx, UINT n, const D3D11_VIEWPORT* vps) {
@@ -2295,6 +4265,10 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
     g_jitterPass = pass;
     const bool wasGbuf = g_gbufPass;
     g_gbufPass = pass && n == 4;
+#ifdef WITH_DLAA
+    PreviewOnBind(n, rtvs, dsv, g_gbufPass);       // v0.7.8 profile-screen preview pass (flat + VR), sets g_previewPass
+    if (g_ptPendingMask) PreviewOnBindTargets(ctx, n, rtvs);   // v0.7.8 round 4 trigger (b) + bound-target tracking
+#endif
     if (g_gbufPass) {
         // The very first pass: its clear ran before the scene depth was known, so start it here.
         // v0.6.2: also the first pass after a game-context change (g_needFirstPass, was g_passSeq == 0).
@@ -2974,6 +4948,13 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         // v0.6.2 passive mode: no DLAA, no commit (nothing was collected); history reset on leaving (TogglePassive).
     } else if (g_dlaaOn.load() && g_jitterOnly.load()) {
         if (dl.Mv().Ready()) dl.Mv().Commit(ctx, slot.cand);         // keep this eye's MV candidate history rolling
+    } else if (g_dlaaOn.load() && !SceneDlaa::ShadersReady()) {
+        // v0.7.8: the one-time shader warm-up (ShaderCache worker thread) is still running: this blit passes through
+        // untouched, the eye's unit is built at a later blit. (Only possible in the first seconds after the DLL load.)
+        static uint64_t waits = 0;
+        if (waits++ == 0)
+            Log("DLAA waits for the shader warm-up (eye %d, blit #%llu) -- frames pass through untouched until it is done",
+                eye, (unsigned long long)g_blitCount);
     } else if (g_dlaaOn.load()) {
         // A global reset request (g_resetNext) applies to every eye: latch it at the next blit.
         if (g_resetNext) { g_resetEyes = (1 << kMaxEyes) - 1; g_resetNext = false; }
@@ -3000,7 +4981,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         // v0.7.0: NGX / texture init failed for the UPSCALE sizes -> block exactly these sizes (both eyes) so the
         // next blits rebuild as DLAA at render res instead of staying un-anti-aliased. Long low tone. Ctrl+F4 ON
         // (or a size change) retries.
-        if (upW && !ok && dl.Upscaling() && dl.InitFailed()) {
+        if (upW && !ok && !dl.Deferred() && dl.Upscaling() && dl.InitFailed()) {
             snprintf(g_upBlocked, sizeof(g_upBlocked), "%ux%u->%ux%u", dl.FullW(), dl.FullH(), upW, upH);
             Log("DLSS upscale init FAILED on eye %d for %s (see the DLAA: lines above) -- falling back to DLAA at render "
                 "res for this size (toggling the upscale key off/on retries)", eye, g_upBlocked);
@@ -3015,7 +4996,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
             SnapshotStep(ctx, eye, outTex, SnapInfo{ g_blitCount, slot.phase, stVx, stVy, njx, njy, resetUsed, g_mvOn.load(), useSnap });
             t_inDlaa = false;
         }
-        if (g_dlaaFrames[eye] < 4)
+        if (g_dlaaFrames[eye] < 4 && !(!ok && dl.Deferred()))   // v0.7.8: a deferred build is not a failed eval
             Log("DLAA eval: eye=%d pass s=%llu phase=%d viewport shift=(%+.4f,%+.4f) NGX jitter=(%+.4f,%+.4f) depth=%s ok=%d",
                 eye, (unsigned long long)slot.s, slot.phase, stVx, stVy, njx, njy, useSnap ? "snapshot" : "live", (int)ok);
         if (ok) {
@@ -3070,6 +5051,72 @@ void RunPendingComposite(ID3D11DeviceContext* ctx) {
 }
 #endif
 
+#ifdef WITH_DLAA
+// v0.7.8 profile-screen preview: the game's composite Draw (3 vertices, PS SRV0 = the RT_k of a slot, RT0 = the
+// backbuffer in flat or the eye RT in VR). Flat order is pass, composite, pass, composite; VR order is 4 passes, then 4
+// composites in reverse RT order, then the same for eye 1 (see the block comment above PvSlot). The slot is the OLDEST
+// slot of this frame whose RT == PS SRV0 and that is not composited yet. Round 4: nothing is evaluated here any more;
+// the composite only marks its slot done, finds / creates the frame's index of its RT0 (the composite TARGET, max
+// kPtMax), lowers that target's reference slot and leaves the target pending: its single DLAA runs later, from
+// PreviewFlush, once the composites into it are finished. RT0 other than the backbuffer / a Texture2D of the preview
+// RT's size: not a composite. Returns true when this Draw is a matched preview composite (the caller then must not treat
+// it as the "something else drew into the pending target" trigger).
+bool PreviewComposite(ID3D11DeviceContext* ctx) {
+    if (g_pvCount <= 0 || !g_pvDs) return false;
+    if (!g_dlaaOn.load(std::memory_order_relaxed) || g_passive.load(std::memory_order_relaxed)) return false;
+    // PS SRV0 -> the oldest uncomposited slot of the frame with that RT.
+    ID3D11ShaderResourceView* srv = nullptr;
+    ctx->PSGetShaderResources(0, 1, &srv);
+    if (!srv) return false;
+    ID3D11Resource* sres = nullptr;
+    srv->GetResource(&sres);
+    srv->Release();
+    if (!sres) return false;
+    int slot = -1;
+    for (int i = 0; i < g_pvCount && i < kPvSlots; ++i)
+        if (!g_pv[i].composited && (ID3D11Resource*)g_pv[i].rt.Get() == sres) { slot = i; break; }
+    sres->Release();
+    if (slot < 0) return false;
+    // RT0: the backbuffer (pointer, or the size-and-format rule of HandlePossibleBlit) or a Texture2D with the preview
+    // RT's width / height (the VR eye RT, any format).
+    ID3D11RenderTargetView* rtv = nullptr;
+    ctx->OMGetRenderTargets(1, &rtv, nullptr);
+    if (!rtv) return false;
+    Microsoft::WRL::ComPtr<ID3D11Resource> rres;
+    rtv->GetResource(&rres);
+    rtv->Release();
+    if (!rres) return false;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> tex;
+    rres.As(&tex);
+    if (!tex || (ID3D11Resource*)tex.Get() == (ID3D11Resource*)g_pv[slot].rt.Get()) return false;   // (RT_k is never its own target)
+    D3D11_TEXTURE2D_DESC bd{};
+    tex->GetDesc(&bd);
+    const bool target = (void*)tex.Get() == g_backbuffer.load(std::memory_order_relaxed) ||
+                        (g_bbW && bd.Width == g_bbW && bd.Height == g_bbH && bd.Format == g_bbFmt && bd.SampleDesc.Count == 1) ||
+                        (bd.Width == g_pvW && bd.Height == g_pvH && bd.SampleDesc.Count == 1);
+    if (!target) return false;
+    g_pv[slot].composited = true;                        // this pass's composite is handled now
+    int idx = -1;
+    for (int i = 0; i < g_ptCount; ++i)
+        if (g_pt[i].tex.Get() == tex.Get()) { idx = i; break; }
+    if (idx < 0 && g_ptCount < kPtMax) {
+        idx = g_ptCount++;
+        g_pt[idx].tex = tex;
+        g_pt[idx].curRef = 99;
+        g_pt[idx].slotMask = 0;
+    }
+    if (idx < 0) return true;                            // a third target in one frame: composite recognised, no DLAA for it
+    PvTarget& t = g_pt[idx];
+    if (slot < t.curRef) t.curRef = slot;
+    t.slotMask |= 1 << slot;                             // v0.7.8: all passes of this target (round 6: the tile layout)
+    if (g_gameVpN > 0) g_pv[slot].compVp = g_gameVp[0]; // round 6: where the game's composite draws it (layout log)
+    t.pending = true;
+    g_ptPendingMask |= 1 << idx;
+    g_ptBoundIdx = idx;                                  // this target is the current RT0 and now pending
+    return true;
+}
+#endif
+
 // Draw: detect the swapchain / eye blit and run DLAA on its source texture before it executes.
 // v0.7.0: in upscale mode the DLSS result is drawn into the blit RT right AFTER the game's blit Draw.
 void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT startVertex) {
@@ -3079,6 +5126,14 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
         oDraw(ctx, vertexCount, startVertex);
         return;
     }
+#ifdef WITH_DLAA
+    // v0.7.8 profile-screen preview: a matched composite only marks its target pending; any other Draw while a pending
+    // target is the current RT0 (trigger (a): flat UI, VR verts=96 Draw) runs that target's DLAA before the Draw.
+    {
+        const bool pvMatched = vertexCount == 3 && g_pvCount > 0 && !t_inDlaa && PreviewComposite(ctx);
+        if (!pvMatched && g_ptBoundIdx >= 0 && !t_inDlaa) PreviewFlush(ctx, g_ptBoundIdx);
+    }
+#endif
     if (vertexCount - 3u <= 1u && !t_inDlaa && g_sceneDepth && g_backbuffer.load(std::memory_order_relaxed)) {
         HandlePossibleBlit(ctx, vertexCount);
     }
@@ -3090,9 +5145,30 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
     if (g_sceneEndAfterDraw && !t_inDlaa) SpanAfterDraw(ctx);
 }
 
+#ifdef WITH_DLAA
+// v0.7.8: NGX pre-warm at the first top-level Present with DLAA on (normally Present #0, the boot screen, where the
+// one-time ~0.7 s of NGX init + first feature create is invisible; it used to land on the first DLAA unit, i.e. the
+// VR main menu). Render thread, the game's immediate context, never after a game device change. See
+// DlaaProcessor::Prewarm. DLAA off at boot: done at the first Present after it is switched on.
+void MaybePrewarmNgx() {
+    static bool done = false;
+    if (done || !g_dlaaOn.load(std::memory_order_relaxed) || g_gameDeviceChanged.load(std::memory_order_relaxed)) return;
+    ID3D11DeviceContext* const c = g_gameCtx.load(std::memory_order_acquire);
+    if (!c) return;
+    done = true;
+    t_inDlaa = true;                                   // NGX's own context calls pass straight through our hooks
+    SceneDlaa::PrewarmNgx(c);
+    t_inDlaa = false;
+}
+#endif
+
 // Top-level Present boundary (called from hkPresent before oPresent). v0.5.2: nothing here drives frame logic
 // any more (passes/blits are matched by the FIFO); logging only.
 void OnPresentBoundary(uint64_t n) {
+#ifdef WITH_DLAA
+    PreviewNextFrame(n);                               // v0.7.8 profile-screen preview: log, reset slots, next jitter
+    DlaaProcessor::BeginFrame();                       // v0.7.8: a fresh NGX feature-create budget for the next frame
+#endif
     if (n < 6)
         Log("Present #%llu: passes=%llu blits=%llu outstanding=%d mode=%s eye-map-entries=%d",
             (unsigned long long)n, (unsigned long long)g_passSeq, (unsigned long long)g_blitCount,
@@ -3114,7 +5190,10 @@ int g_mvWorldSlots  = 40;                           // world (layer 0) cap, 1..C
 int g_mvCabinSlots  = 24;                           // cabin (layer 1) cap, 1..CandidateRecord::kSlots
 
 // v0.6.1: `ps` = the newest pass slot (caller guarantees g_passSeq > 0); every early return counts its reason.
-void CollectMvCandidate(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex, PassSlot& ps) {
+// v0.7.8: `worldCap` > 0 overrides the world-layer cap (the preview's non-reference tile passes only need their FIRST
+// candidate: the tile-layout readback compares it with the reference pass's first one).
+void CollectMvCandidate(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex, PassSlot& ps,
+                        int worldCap = 0) {
     // v0.5.4: candidates go to the record of the NEWEST pass (the one being rendered); the eye is only known
     // at the blit, where the record is matched/committed against that eye's CameraMv.
     CandidateRecord& mv = ps.cand;
@@ -3143,7 +5222,7 @@ void CollectMvCandidate(ID3D11DeviceContext* ctx, UINT indexCount, UINT startInd
     if (!g_ctx1 || g_gameVpN == 0) { ++ps.skNoCtx; return; }
     const int layer = g_gameVp[0].MinDepth >= 0.85f ? 1 : 0;     // cabin [0.9,1.0] vs world [0.01,0.9]
     // v0.6.3: per-layer caps replace the kSlots (128) LayerFull limit (both clamped 1..kSlots in LoadConfig).
-    if (mv.Count(layer) >= (layer == 0 ? g_mvWorldSlots : g_mvCabinSlots)) { ++ps.skFull; return; }
+    if (mv.Count(layer) >= (layer == 0 ? (worldCap > 0 ? worldCap : g_mvWorldSlots) : g_mvCabinSlots)) { ++ps.skFull; return; }
 
     ID3D11Buffer* cb = nullptr;
     UINT first = 0, num = 0;
@@ -3204,6 +5283,25 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
 #endif
         }
     }
+#ifdef WITH_DLAA
+    // v0.7.8 profile-screen preview: the truck's draws feed the current slot's own candidate record (same
+    // CollectMvCandidate, same gates as the world path; the viewport MinDepth 0.01 makes it the world layer).
+    // v0.7.8 round 4: only for the learned reference slots (the others' candidates are never used).
+    // Round 5: VR collects them even with MV off (the preview eye verdict reads them), like the world path.
+    // Ctrl+F10 preview capture: every slot while it runs (it compares the passes' projections; nothing else uses them).
+    // Round 6 (tiled pictures): every pass collects -- the reference slot its full record, the other passes their FIRST
+    // candidate only (the tile-layout readback compares it with the reference pass's first one, PvLayout). Independent
+    // of the MV key (the layout is needed for the depth too).
+    if (g_previewPass && g_pvCur >= 0 && !t_inDlaa && IsGameCtx(ctx)) {
+        ++g_pv[g_pvCur].diCount;                                  // round 6 diagnostics (no-candidate report)
+        if (g_dlaaOn.load(std::memory_order_relaxed) && !g_passive.load(std::memory_order_relaxed)) {
+            const bool full = ((g_ptRefMask >> g_pvCur) & 1) || g_pvCapActive;
+            CollectMvCandidate(ctx, indexCount, startIndex, baseVertex, g_pv[g_pvCur].ps, full ? 0 : 1);
+        }
+    }
+    // Trigger (a): a DrawIndexed (flat: the UI) while a pending composite target is the current RT0 runs its DLAA first.
+    if (g_ptBoundIdx >= 0 && !t_inDlaa && IsGameCtx(ctx)) PreviewFlush(ctx, g_ptBoundIdx);
+#endif
     oDrawIndexed(ctx, indexCount, startIndex, baseVertex);
 }
 
@@ -3341,6 +5439,10 @@ bool DlaaOffFilePresent() {
 //                                  (hash(indexCount,startIndex,baseVertex) & ((1<<s)-1)) == 0 (0 = every draw)
 //   mv_world_slots                 int 1..128 (default 40, v0.6.3): world (layer 0) candidate cap per pass
 //   mv_cabin_slots                 int 1..128 (default 24, v0.6.3): cabin (layer 1) candidate cap per pass
+//   preview_dlaa                   0/1 (default 1, v0.7.8): DLAA on the profile / truck-preview screen (flat and VR);
+//                                  0 = that path never activates (the screen stays un-anti-aliased as before v0.7.8)
+//   preview_capture_at             int >= 0 (default 0 = off, v0.7.8 debug): one Ctrl+F10-style preview capture this many
+//                                  Presents after the preview DLAA first runs
 //   dlss_preset                   default | J | K | L | M | E | F (case-insensitive, default "default" = driver
 //                                  pick): DLSS render preset for DLAA, applied at NGX feature creation (v0.5.6).
 //                                  Start state; v0.6.5 Shift+F1..F4 select default / E / F / M live (Shift+F12 saves)
@@ -3423,6 +5525,10 @@ void LoadConfig() {
 #endif
             }
             else if (!strcmp(key, "gpu_timing"))     g_gpuTiming = v < 0 ? -1 : (v ? 1 : 0);
+#ifdef WITH_DLAA
+            else if (!strcmp(key, "preview_dlaa"))   g_previewDlaa = v != 0 ? 1 : 0;   // v0.7.8
+            else if (!strcmp(key, "preview_capture_at")) g_pvCaptureAt = v < 0 ? 0 : (int)v;   // v0.7.8 debug
+#endif
             else if (!strcmp(key, "trace_auto_frame")) g_traceAutoFrame = v < 0 ? 0 : (int)v;
             else if (!strcmp(key, "vr_eye_alternate")) Log("dlaa.ini: vr_eye_alternate is ignored since v0.5.4 (eye identity comes from the blit render target)");
             else if (!strcmp(key, "jitter_phases"))  g_phases = v < 1 ? 8 : (v > 256 ? 256 : (int)v);
@@ -3477,6 +5583,7 @@ void LoadConfig() {
     const float sharp = SceneDlaa::Sharpness();
     const float sharpRadius = SceneDlaa::SharpRadius();
     const int   area = SceneDlaa::Area(), feather = SceneDlaa::Feather();
+    const int   previewDlaa = g_previewDlaa;
 #else
     const float nearRej = 30.0f;
     const float egoOrigin = 8.0f;
@@ -3486,12 +5593,18 @@ void LoadConfig() {
     const float sharp = 0.0f;
     const float sharpRadius = 1.5f;
     const int   area = 100, feather = 96;
+    const int   previewDlaa = 0;
 #endif
-    Log("config (%s): jitter_enabled=%d jitter_phases=%d jitter_sign_x=%d jitter_sign_y=%d mv_enabled=%d mv_near_reject_m=%.1f mv_ego_origin_m=%.1f mv_ego_pixel_m=%.1f mv_sample_shift=%d mv_world_slots=%d mv_cabin_slots=%d gpu_timing=%d trace_auto_frame=%d dlss_preset=%s sharpness=%.2f sharp_radius=%.1f dlaa_area=%d dlaa_area_feather=%d dlss_upscale=%d beeps=%d",
+    Log("config (%s): jitter_enabled=%d jitter_phases=%d jitter_sign_x=%d jitter_sign_y=%d mv_enabled=%d mv_near_reject_m=%.1f mv_ego_origin_m=%.1f mv_ego_pixel_m=%.1f mv_sample_shift=%d mv_world_slots=%d mv_cabin_slots=%d gpu_timing=%d trace_auto_frame=%d dlss_preset=%s sharpness=%.2f sharp_radius=%.1f dlaa_area=%d dlaa_area_feather=%d dlss_upscale=%d beeps=%d preview_dlaa=%d",
         haveIni ? "dlaa.ini" : "no dlaa.ini, defaults", (int)g_jitterEnabled, g_phases, g_signX, g_signY,
         (int)g_mvOn.load(), nearRej, (double)egoOrigin, (double)egoPixel, mvShift, mvWorldSlots, mvCabinSlots,
         g_gpuTiming, g_traceAutoFrame, preset, (double)sharp, (double)sharpRadius, area, feather,
-        (int)g_dlssUpscale.load(), (int)g_beeps);
+        (int)g_dlssUpscale.load(), (int)g_beeps, previewDlaa);
+#ifdef WITH_DLAA
+    if (g_pvCaptureAt > 0)
+        Log("dlaa.ini: preview_capture_at=%d (debug) -- one preview capture (as Ctrl+F10) %d Presents after the preview DLAA "
+            "first runs; files in dlaa_selftest\\, pvcap: lines in this log", g_pvCaptureAt, g_pvCaptureAt);
+#endif
     LogKeyBinds();
 }
 
@@ -3513,6 +5626,17 @@ bool HookFn(const char* name, void* target, void* hook, void** orig) {
 }
 
 DWORD WINAPI SetupThread(LPVOID) {
+#ifdef WITH_DLAA
+    // v0.7.8: compile every embedded shader once, on ShaderCache's own worker thread, while the game boots (was a
+    // D3DCompile per unit inside its first Run on the render thread: ~2 s freeze per CameraMv). Not under the
+    // loader lock here (StartInjection only spawned this thread).
+    CameraMv::RegisterShaders();
+    SceneDlaa::RegisterShaders();
+    PreviewBlit::RegisterShaders();
+    PvCapRegisterShaders();                              // Ctrl+F10 preview capture metrics shader
+    PvAsmRegisterShaders();                              // round 6 tiled preview: picture depth assembly
+    ShaderCache::Start();
+#endif
     // Create a throwaway device+swapchain purely to read the shared
     // IDXGISwapChain vtable, then read the Present address (vtable index 8).
     WNDCLASSEXW wc{ sizeof(wc) };

@@ -40,6 +40,14 @@
 # GPU timing logs (per-stage DLAA cost + depth snapshot cost, every 600): -1 auto (VR only), 0 off, 1 on
 # gpu_timing = -1
 
+# v0.7.8: DLAA on the profile / truck-preview screen (flat and VR; it has no world G-buffer, so the normal path
+# never touched it). 1 = on (default), 0 = that screen is never touched (no extra GPU cost / memory there)
+# preview_dlaa = 1
+
+# Debug (v0.7.8): one measuring capture of the profile / truck-preview DLAA (the same as Ctrl+F10 on that screen) this
+# many Presents after the preview DLAA first runs; files in dlaa_selftest\, "pvcap:" lines in the log. 0 = off (default)
+# preview_capture_at = 0
+
 # Present number that auto-starts the frame trace (Ctrl+F11; 0 = off)
 # trace_auto_frame = 0
 

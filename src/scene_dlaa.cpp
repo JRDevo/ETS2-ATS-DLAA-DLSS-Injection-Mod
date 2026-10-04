@@ -2,8 +2,8 @@
 #ifdef WITH_DLAA
 
 #include "scene_dlaa.h"
+#include "shader_cache.h"
 #include "log.h"
-#include <d3dcompiler.h>
 #include <cmath>
 #include <cstring>
 
@@ -415,6 +415,30 @@ uint32_t RectOrigin(uint32_t full, uint32_t size, float c) {
 
 } // namespace
 
+// v0.7.8: see scene_dlaa.h.
+void SceneDlaa::RegisterShaders() {
+    ShaderCache::Add(ShaderCache::kDepthConvert, kDepthConvertShader, sizeof(kDepthConvertShader) - 1, "depth_convert",
+                     "CSMain", "cs_5_0");
+    ShaderCache::Add(ShaderCache::kRcas, kRcasShader, sizeof(kRcasShader) - 1, "rcas_sharpen", "CSMain", "cs_5_0");
+    ShaderCache::Add(ShaderCache::kCompositeVs, kCompositeVs, sizeof(kCompositeVs) - 1, "composite_vs", "VSMain", "vs_5_0");
+    ShaderCache::Add(ShaderCache::kCompositePs, kCompositePs, sizeof(kCompositePs) - 1, "composite_ps", "PSMain", "ps_5_0");
+    ShaderCache::Add(ShaderCache::kMvDebug, kMvDebugShader, sizeof(kMvDebugShader) - 1, "mv_debug", "CSMain", "cs_5_0");
+}
+
+bool SceneDlaa::ShadersReady() { return ShaderCache::Done(); }
+
+bool SceneDlaa::PrewarmNgx(ID3D11DeviceContext* ctx) {
+    if (!ctx) return false;
+    ComPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    if (!dev) return false;
+    CsState saved;                                     // NGX may bind compute state while creating the feature
+    saved.Save(ctx);
+    const bool ok = DlaaProcessor::Prewarm(dev.Get());
+    saved.Restore(ctx);
+    return ok;
+}
+
 void SceneDlaa::CropSize(uint32_t fullW, uint32_t fullH, int area, uint32_t* cw, uint32_t* ch) {
     if (area >= 100) { *cw = fullW; *ch = fullH; return; }
     if (area < 1) area = 1;
@@ -433,6 +457,9 @@ bool SceneDlaa::Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32
                       outFullW == m_outFullW && outFullH == m_outFullH && ow == m_ow && oh == m_oh;   // v0.7.0
     if (m_ready && same) return true;
     if (m_failed && same) return false;     // already failed at these dims
+    // v0.7.8: a (re)build creates an NGX feature (~10-40 ms with textures): at most one per Present, so two units
+    // never build in the same frame. Nothing is torn down here; the next Present retries.
+    if (!DlaaProcessor::CreateBudgetFree()) { m_deferred = true; return false; }
 
     // Dims changed (or first use, or v0.6.4 the DLAA area changed, or v0.7.0 upscale on/off / output size):
     // tear down and rebuild everything.
@@ -458,18 +485,15 @@ bool SceneDlaa::Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32
     for (GpuQ& q : m_q) q = GpuQ();
 
     HRESULT hr;
-    // Depth-convert compute shader (compiled once, kept across resizes).
+    // Depth-convert compute shader (created once, kept across resizes; v0.7.8 bytecode from ShaderCache).
     if (!m_depthCs) {
-        ComPtr<ID3DBlob> cso, err;
-        hr = D3DCompile(kDepthConvertShader, sizeof(kDepthConvertShader) - 1, "depth_convert",
-                        nullptr, nullptr, "CSMain", "cs_5_0",
-                        D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &cso, &err);
-        if (FAILED(hr)) {
-            Log("DLAA: depth shader D3DCompile failed hr=0x%lx: %s", hr,
-                err ? (const char*)err->GetBufferPointer() : "(no log)");
+        size_t size = 0;
+        const void* code = ShaderCache::Code(ShaderCache::kDepthConvert, &size);
+        if (!code) {
+            Log("DLAA: depth shader D3DCompile failed %s", ShaderCache::Error(ShaderCache::kDepthConvert));
             return false;
         }
-        hr = dev->CreateComputeShader(cso->GetBufferPointer(), cso->GetBufferSize(), nullptr, &m_depthCs);
+        hr = dev->CreateComputeShader(code, size, nullptr, &m_depthCs);
         if (FAILED(hr)) { Log("DLAA: depth CreateComputeShader hr=0x%lx", hr); return false; }
     }
     if (!m_depthCb) {
@@ -578,24 +602,22 @@ bool SceneDlaa::EnsureComposite(ID3D11Device* dev) {
     if (m_compTried) return false;
     m_compTried = true;
     HRESULT hr;
-    ComPtr<ID3DBlob> cso, err;
-    hr = D3DCompile(kCompositeVs, sizeof(kCompositeVs) - 1, "composite_vs", nullptr, nullptr, "VSMain", "vs_5_0",
-                    D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &cso, &err);
-    if (FAILED(hr)) {
-        Log("DLAA: composite VS D3DCompile failed hr=0x%lx: %s", hr, err ? (const char*)err->GetBufferPointer() : "(no log)");
+    // v0.7.8: bytecode from ShaderCache (Run only gets here once its warm-up is done).
+    size_t vsSize = 0, psSize = 0;
+    const void* vsCode = ShaderCache::Code(ShaderCache::kCompositeVs, &vsSize);
+    const void* psCode = ShaderCache::Code(ShaderCache::kCompositePs, &psSize);
+    if (!vsCode) {
+        Log("DLAA: composite VS D3DCompile failed %s", ShaderCache::Error(ShaderCache::kCompositeVs));
         return false;
     }
-    if (FAILED(hr = dev->CreateVertexShader(cso->GetBufferPointer(), cso->GetBufferSize(), nullptr, &m_compVs))) {
+    if (FAILED(hr = dev->CreateVertexShader(vsCode, vsSize, nullptr, &m_compVs))) {
         Log("DLAA: composite CreateVertexShader hr=0x%lx", hr); return false;
     }
-    cso.Reset(); err.Reset();
-    hr = D3DCompile(kCompositePs, sizeof(kCompositePs) - 1, "composite_ps", nullptr, nullptr, "PSMain", "ps_5_0",
-                    D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &cso, &err);
-    if (FAILED(hr)) {
-        Log("DLAA: composite PS D3DCompile failed hr=0x%lx: %s", hr, err ? (const char*)err->GetBufferPointer() : "(no log)");
+    if (!psCode) {
+        Log("DLAA: composite PS D3DCompile failed %s", ShaderCache::Error(ShaderCache::kCompositePs));
         return false;
     }
-    if (FAILED(hr = dev->CreatePixelShader(cso->GetBufferPointer(), cso->GetBufferSize(), nullptr, &m_compPs))) {
+    if (FAILED(hr = dev->CreatePixelShader(psCode, psSize, nullptr, &m_compPs))) {
         Log("DLAA: composite CreatePixelShader hr=0x%lx", hr); return false;
     }
     // RT0: out = src * a + dst * (1 - a) on RGB (a = 1 -> exactly src); alpha channel NOT written (the eye RT's
@@ -667,16 +689,13 @@ bool SceneDlaa::EnsureDebugCs(ID3D11Device* dev) {
     if (m_mvDbgCs) return true;
     if (m_mvDbgTried) return false;
     m_mvDbgTried = true;
-    ComPtr<ID3DBlob> cso, err;
-    HRESULT hr = D3DCompile(kMvDebugShader, sizeof(kMvDebugShader) - 1, "mv_debug",
-                            nullptr, nullptr, "CSMain", "cs_5_0",
-                            D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &cso, &err);
-    if (FAILED(hr)) {
-        Log("DLAA: MV debug shader D3DCompile failed hr=0x%lx: %s", hr,
-            err ? (const char*)err->GetBufferPointer() : "(no log)");
+    size_t size = 0;                                   // v0.7.8: bytecode from ShaderCache
+    const void* code = ShaderCache::Code(ShaderCache::kMvDebug, &size);
+    if (!code) {
+        Log("DLAA: MV debug shader D3DCompile failed %s", ShaderCache::Error(ShaderCache::kMvDebug));
         return false;
     }
-    hr = dev->CreateComputeShader(cso->GetBufferPointer(), cso->GetBufferSize(), nullptr, &m_mvDbgCs);
+    HRESULT hr = dev->CreateComputeShader(code, size, nullptr, &m_mvDbgCs);
     if (FAILED(hr)) { Log("DLAA: MV debug CreateComputeShader hr=0x%lx", hr); return false; }
     return true;
 }
@@ -690,16 +709,13 @@ int   SceneDlaa::s_feather = 96;         // v0.6.4 dlaa.ini dlaa_area_feather (d
 bool SceneDlaa::EnsureSharpen(ID3D11Device* dev) {
     HRESULT hr;
     if (!m_sharpCs) {
-        ComPtr<ID3DBlob> cso, err;
-        hr = D3DCompile(kRcasShader, sizeof(kRcasShader) - 1, "rcas_sharpen",
-                        nullptr, nullptr, "CSMain", "cs_5_0",
-                        D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &cso, &err);
-        if (FAILED(hr)) {
-            Log("DLAA: RCAS shader D3DCompile failed hr=0x%lx: %s", hr,
-                err ? (const char*)err->GetBufferPointer() : "(no log)");
+        size_t size = 0;                               // v0.7.8: bytecode from ShaderCache
+        const void* code = ShaderCache::Code(ShaderCache::kRcas, &size);
+        if (!code) {
+            Log("DLAA: RCAS shader D3DCompile failed %s", ShaderCache::Error(ShaderCache::kRcas));
             return false;
         }
-        hr = dev->CreateComputeShader(cso->GetBufferPointer(), cso->GetBufferSize(), nullptr, &m_sharpCs);
+        hr = dev->CreateComputeShader(code, size, nullptr, &m_sharpCs);
         if (FAILED(hr)) { Log("DLAA: RCAS CreateComputeShader hr=0x%lx", hr); return false; }
     }
     if (!m_sharpCb) {
@@ -914,6 +930,8 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
                     DepthTwin* depthTwin, const CandidateRecord* cand, float jitterX, float jitterY, bool reset, bool useMv, bool mvDebug, bool candBad,
                     uint32_t outW, uint32_t outH) {
     if (m_compPending) CancelComposite(ctx);           // v0.7.0: never left open (Composite always follows Run)
+    m_deferred = false;
+    if (!ShaderCache::Done()) { m_deferred = true; return false; }   // v0.7.8: warm-up running (callers gate first)
     D3D11_TEXTURE2D_DESC td{};
     tonemap->GetDesc(&td);
 
@@ -941,7 +959,14 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
 
     ComPtr<ID3D11Device> dev;
     ctx->GetDevice(&dev);
+    // v0.7.8: a Run that (re)builds the unit is timed and logged (proof that no build costs more than its textures +
+    // its own NGX feature any more: shaders come from ShaderCache, NGX is pre-warmed).
+    const bool building = !(m_ready && cw == m_w && ch == m_h && td.Width == m_fullW && td.Height == m_fullH &&
+                            ofw == m_outFullW && ofh == m_outFullH && ow == m_ow && oh == m_oh);
+    LARGE_INTEGER runT0{}, ensT1{};
+    if (building) QueryPerformanceCounter(&runT0);
     if (!dev || !Ensure(dev.Get(), td.Width, td.Height, cw, ch, rx, ry, ofw, ofh, ow, oh)) return false;
+    if (building) QueryPerformanceCounter(&ensT1);
     if (up && (oxc != m_oxc || oyc != m_oyc)) {
         static int outLogs = 0;                        // v0.7.0: both rects, once per change (cap)
         if (outLogs++ < 40)
@@ -1063,6 +1088,7 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
         }
     }
     const bool sharpened = ok && sharpOn;
+    m_lastMvDone = mvDone; m_lastReset = reset; m_lastSharpened = sharpened;   // v0.7.8 preview capture (log only)
     if (sharpened) {
         // UAVs first: NGX may have left m_out's UAV bound, and an SRV of a resource still bound as a UAV
         // would be silently nulled by the runtime. Clearing all 8 slots (CsState restores them) avoids that.
@@ -1141,6 +1167,18 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
     saved.Restore(ctx);
     // v0.7.0: a pending composite keeps the timing slot open (Composite / CancelComposite close it).
     if (m_timing && !m_compPending) GpuEnd(ctx);
+    if (building) {                                    // v0.7.8 build cost (CPU wall time on the render thread)
+        static int buildLogs = 0;
+        if (buildLogs++ < 40) {
+            LARGE_INTEGER t{}, f{};
+            QueryPerformanceCounter(&t);
+            QueryPerformanceFrequency(&f);
+            const double toMs = f.QuadPart > 0 ? 1000.0 / (double)f.QuadPart : 0.0;
+            Log("DLAA: eye %d unit built in this Run: %.1f ms (textures + NGX feature %.1f ms, MV init + first eval %.1f ms), ok=%d",
+                m_eye, (double)(t.QuadPart - runT0.QuadPart) * toMs, (double)(ensT1.QuadPart - runT0.QuadPart) * toMs,
+                (double)(t.QuadPart - ensT1.QuadPart) * toMs, (int)ok);
+        }
+    }
     return ok;
 }
 

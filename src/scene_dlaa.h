@@ -79,6 +79,20 @@ public:
     void CancelComposite(ID3D11DeviceContext* ctx);   // pending result dropped (RT changed): timing slot closed
     bool Upscaling() const { return m_up; }           // v0.7.0: the last Ensure built the upscale path
     bool InitFailed() const { return m_failed; }      // v0.7.0: the last Ensure failed (no retry at these dims)
+    // v0.7.8: the last Run returned false WITHOUT doing anything and will simply work later: the shader warm-up was
+    // not finished, or the unit's (re)build waited for a Present with a free creation budget (one NGX feature create
+    // per Present, see DlaaProcessor::CreateBudgetFree). Nothing was touched, nothing is marked failed.
+    bool Deferred() const { return m_deferred; }
+
+    // v0.7.8 one-time work moved off the first Run:
+    //  RegisterShaders(): the depth-convert / RCAS / MV-debug / composite sources into ShaderCache (setup thread,
+    //    before ShaderCache::Start). ShadersReady(): the warm-up is done -- Run returns false (Deferred) until then;
+    //    callers test it first so a unit just does not run.
+    //  PrewarmNgx(ctx): DlaaProcessor::Prewarm inside a save / restore of the compute stage (render thread, the
+    //    game's immediate context, first Present). Returns whether NGX is pinned.
+    static void RegisterShaders();
+    static bool ShadersReady();
+    static bool PrewarmNgx(ID3D11DeviceContext* ctx);
     // v0.7.0 output-space rect of the last Run (origin in the full output, size = m_out / m_sharp / NGX target).
     uint32_t OutRectX() const { return m_oxc; }
     uint32_t OutRectY() const { return m_oyc; }
@@ -156,6 +170,15 @@ public:
     ID3D11Texture2D* OutTex()     const { return m_out.Get(); }       // R8G8B8A8_UNORM, NGX output
     ID3D11Texture2D* MvTex()      const { return m_mv.Get(); }        // R16G16_FLOAT
     ID3D11Texture2D* DepthTex()   const { return m_depthR32.Get(); }  // R32_FLOAT
+    // v0.7.8 preview capture (Ctrl+F10 on the profile / truck-preview screen): SRVs of the same textures and what the
+    // last Run did -- MV pass B ran (else zero MVs), the reset finally passed to NGX (incl. forced ones), RCAS ran.
+    ID3D11ShaderResourceView* ColorInSrv() const { return m_colorInSrv.Get(); }
+    ID3D11ShaderResourceView* DepthSrv()   const { return m_depthR32Srv.Get(); }
+    ID3D11ShaderResourceView* MvSrv()      const { return m_mvSrv.Get(); }
+    ID3D11ShaderResourceView* NgxOutSrv()  const { return m_outSrv.Get(); }   // NGX output before RCAS (null: no RCAS setup)
+    bool LastMvDone() const { return m_lastMvDone; }
+    bool LastReset() const { return m_lastReset; }
+    bool LastSharpened() const { return m_lastSharpened; }
 
 private:
     // v0.6.4: (fullW, fullH) = tonemap / depth size, (cw, ch) = crop size (= full at area 100), (rx, ry) = crop
@@ -271,6 +294,8 @@ private:
     float    m_cu = 0.5f, m_cv = 0.5f; // v0.6.4: optical centre (uv) the rect is centred on
     bool     m_ready  = false;     // NGX + textures valid for m_w x m_h (of m_fullW x m_fullH)
     bool     m_failed = false;     // init failed for these dims; no retry until dims change
+    bool     m_deferred = false;   // v0.7.8: the last Run waited (shader warm-up / creation budget), see Deferred()
+    bool     m_lastMvDone = false, m_lastReset = false, m_lastSharpened = false;   // v0.7.8 capture info of the last Run
     uint64_t m_frames = 0;
     uint64_t m_evalFails = 0;
 };

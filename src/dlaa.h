@@ -73,6 +73,19 @@ public:
 
     void SetEye(int e) { m_eye = e; }          // v0.5.7: log tag only
 
+    // v0.7.8 NGX pre-warm, called once at the first Present (render thread, the game's immediate context, its device):
+    // initialises NGX, PINS it (one reference held for the process life, so it never shuts down and is never
+    // re-initialised) and creates + releases a throwaway 512x512 DLAA feature with the configured preset, so the
+    // one-time cost (~0.7 s: NGX init + first feature / model load) lands on the boot screen instead of the first
+    // DLAA unit. Logs the split (init / feature). Later calls do nothing; returns whether NGX is pinned.
+    static bool Prewarm(ID3D11Device* dev);
+    // v0.7.8 creation budget: at most one NGX feature create per Present. BeginFrame() is called once per Present
+    // (after that Present's own work); CreateBudgetFree() = no feature was created since. Every CreateFeature uses
+    // it; a live preset recreate waits for a free Present (the old feature keeps evaluating), and SceneDlaa defers a
+    // unit (re)build to the next Present.
+    static void BeginFrame();
+    static bool CreateBudgetFree();
+
     // v0.7.0: "DLAA", "UltraQuality", "Quality", "Balanced", "Performance", "UltraPerformance" -- the
     // PerfQuality value the current feature was created with (log / snapshot only).
     const char* QualityName() const;
@@ -95,6 +108,7 @@ private:
     bool                 m_ngxInited    = false;
     uint32_t             m_presetGen    = 0;   // preset generation m_feature was (last tried to be) created with
     int                  m_eye          = -1;
+    bool                 m_quiet        = false;   // v0.7.8 pre-warm instance: no "ready" / "sharing" lines (failures still logged)
 };
 
 #endif // WITH_DLAA
