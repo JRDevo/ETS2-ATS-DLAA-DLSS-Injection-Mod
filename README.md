@@ -119,14 +119,41 @@ the result is and in how much GPU time they cost. Switch live with
 `Shift+F1`..`F4` (1 to 4 beeps), look for a few seconds, then save your choice
 with `Shift+F12`.
 
-| Key | Model | Picture | GPU cost | Use it when |
-|-----|-------|---------|----------|-------------|
-| `Shift+F1` | **1 = default** (the driver's pick, currently preset `K`) | Newest model: most detail, most stable fine lines | High | Flat screen, or VR with GPU time to spare |
-| `Shift+F2` | **2 = `E`** | Clean and calm, slightly softer than model 1 | Low | **Start here in VR.** Best balance of picture and frame rate |
-| `Shift+F3` | **3 = `F`** | Smoothest edges; holds on to old frames the longest, so fine moving detail (road texture, fences) can smear | Low (same as `E`) | You still see shimmer with model 2 and do not mind some softness in motion |
-| `Shift+F4` | **4 = `M`** | Very heavy model | Very high | Flat screen only, on a strong card. Not usable in VR |
+| Key | Model | In one line | Cost |
+|-----|-------|-------------|------|
+| `Shift+F1` | **1** (default, preset `K`) | Best detail | High |
+| `Shift+F2` | **2** (preset `E`) | Good picture, fast. **Start here** | Low |
+| `Shift+F3` | **3** (preset `F`) | Smoothest edges, but can smear moving detail | Low |
+| `Shift+F4` | **4** (preset `M`) | Very heavy. Flat screen only | Very high |
 
-How to pick:
+### Recommended settings
+
+**Scaling** is the game's own slider: *Options → Graphics → Scaling*. **Stereo
+buffer scale** is VR only and is not in the menu: with the game closed, set
+`uset r_manual_stereo_buffer_scale "1.5"` (for example) in `config.cfg`.
+
+| Your setup | Mode (`End`) | Model | Scaling (in game) | Stereo buffer scale |
+|------------|--------------|-------|-------------------|---------------------|
+| **Flat**, strong card | DLAA | 1 | 100 % | not used |
+| **Flat**, need more frame rate | DLSS | 1 or 2 | 75 % (or 50 %) | not used |
+| **VR**, top-end card | DLAA | 2 | 100 % (75 % if the frame rate drops) | 2.0 |
+| **VR**, mid-range card | DLSS | 2 | 75 % | 1.0 to 1.5 |
+
+- **Flat:** do not set Scaling above 100 %. The mod already removes the jagged
+  edges, so extra pixels only cost frame rate.
+- **VR:** the stereo buffer scale is what makes the picture sharp; `1.0` is the
+  headset's own resolution, higher is sharper and heavier. Raise it as far as
+  your card allows, then use Scaling below 100 % with **DLSS** mode to win the
+  frame rate back.
+- **Scaling below 100 % only makes sense in DLSS mode.** In DLAA mode the game
+  just stretches the smaller picture and it looks soft.
+- The slider has fixed steps. Values in between (for example `0.667`) can be set
+  in `config.cfg`, see *How render scale works* above.
+- These are starting points. Only the "VR, top-end card" row is measured: model 2
+  holds a steady 72 fps at stereo buffer scale 2.0 with `r_scale_x` 0.75. Watch
+  your own frame rate and move one step up or down.
+
+How to pick a model:
 
 1. Start with **model 2**. Drive for a minute. Watch thin things in the distance:
    power lines, fences, lamp posts, road markings.
