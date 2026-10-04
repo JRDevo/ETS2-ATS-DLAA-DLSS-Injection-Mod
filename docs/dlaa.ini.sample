@@ -74,3 +74,41 @@
 # Audible feedback for the Shift+F-key user controls (model select, area, sharpen strength/width, DLAA on/off,
 # save) and the Ctrl+F7 passive / Ctrl+F4 upscale toggles: 1 on, 0 off
 # beeps = 1
+
+# ---- Hotkeys (v0.7.7) -------------------------------------------------------------------------------------------
+# key_<action> = [Shift+][Ctrl+][Alt+]Key, or none to disable the action. The values below are the defaults:
+# just edit the value. Keys: F1-F24, A-Z, 0-9, Home, End, Insert, Delete, PageUp, PageDown, Up, Down, Left, Right,
+# Space, Tab, Backspace, Enter, Pause, Numpad0-Numpad9, NumpadAdd, NumpadSubtract, NumpadMultiply, NumpadDivide,
+# NumpadDecimal, [ ] ; ' , . / \ - = `   Modifiers must match exactly; put nothing after the value on the line.
+# Mode cycle DLAA -> DLSS -> off (saved to the `mode` key at once)
+key_mode_cycle = End
+# DLAA model 1..4 = preset default / E / F / M
+key_model_1 = Shift+F1
+key_model_2 = Shift+F2
+key_model_3 = Shift+F3
+key_model_4 = Shift+F4
+# DLAA area -10 % / +10 %
+key_area_down = Shift+F5
+key_area_up = Shift+F6
+# Sharpen strength -0.1 / +0.1
+key_sharpen_down = Shift+F7
+key_sharpen_up = Shift+F8
+# Sharpen width -0.5 / +0.5
+key_width_down = Shift+F9
+key_width_up = Shift+F10
+# DLAA on / off
+key_dlaa_toggle = Shift+F11
+# Save the live values to this file
+key_save = Shift+F12
+# DLSS upscale on / off
+key_upscale_toggle = Ctrl+F4
+# Debug: motion vectors on/off, MV debug view, passive mode, jitter-only, self-test, NGX snapshot, frame trace,
+# cycle NGX jitter sign
+key_mv_toggle = Ctrl+F5
+key_mv_debug = Ctrl+F6
+key_passive = Ctrl+F7
+key_jitter_only = Ctrl+F8
+key_selftest = Ctrl+F9
+key_snapshot = Ctrl+F10
+key_trace = Ctrl+F11
+key_jitter_sign = Ctrl+F12

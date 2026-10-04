@@ -1,8 +1,9 @@
-# ETS2 / ATS DLAA Injector — hotkey cheat sheet (v0.7.2)
+# ETS2 / ATS DLAA Injector — hotkey cheat sheet (v0.7.7)
 
-Every control is an **F-key with exactly one modifier**. The game window must be focused.
-The modifier must match exactly — a bare F-key, the wrong modifier, or any combo that also
-holds **Alt** does nothing.
+The tables below show the **default** keys. Every key can be changed in `dlaa.ini` (see
+"Change a key" at the end). The game window must be focused. The modifiers must match
+exactly — with the default `Shift+F11`, Shift+Ctrl+F11 or Shift+Alt+F11 does nothing, and a
+key with no modifier (like `End`) only fires when Shift, Ctrl and Alt are all up.
 
 - **Shift + F-key = USER keys** (the ones you use while playing)
 - **Ctrl + F-key = DEBUG keys** (diagnostics / capture)
@@ -62,3 +63,43 @@ line of `dlaa.ini` untouched.
 
 A single long low 200 Hz tone has two meanings by context: right after a `Shift+F5..F10` press it
 means "already at the min/max, unchanged"; right after `Shift+F12` it means the save failed.
+
+## Change a key
+
+Put a `key_<action>` line in `dlaa.ini` (next to `dinput8.dll`, read when the game starts). The value is
+zero or more modifiers `Shift`, `Ctrl`, `Alt` joined with `+`, then one key. Not case-sensitive, spaces are
+ignored. `none` (or an empty value) turns the action off. A value that is not understood is logged
+(with `debug = 1`) and the default stays. Write the binding alone on the line, no comment after it.
+
+```
+key_dlaa_toggle = Ctrl+D
+key_mode_cycle = none
+key_save = Ctrl+Alt+S
+```
+
+Keys: `F1`-`F24`, `A`-`Z`, `0`-`9`, `Home`, `End`, `Insert`, `Delete`, `PageUp`, `PageDown`, `Up`, `Down`,
+`Left`, `Right`, `Space`, `Tab`, `Backspace`, `Enter`, `Pause`, `Numpad0`-`Numpad9`, `NumpadAdd`,
+`NumpadSubtract`, `NumpadMultiply`, `NumpadDivide`, `NumpadDecimal`, and the punctuation keys
+``[ ] ; ' , . / \ - = ` ``.
+
+| `dlaa.ini` key | Action | Default |
+|----------------|--------|---------|
+| `key_mode_cycle` | Mode DLAA → DLSS → off | `End` |
+| `key_model_1` … `key_model_4` | DLAA model 1..4 | `Shift+F1` … `Shift+F4` |
+| `key_area_down` / `key_area_up` | DLAA area −/+10 % | `Shift+F5` / `Shift+F6` |
+| `key_sharpen_down` / `key_sharpen_up` | Sharpen strength −/+0.1 | `Shift+F7` / `Shift+F8` |
+| `key_width_down` / `key_width_up` | Sharpen width −/+0.5 | `Shift+F9` / `Shift+F10` |
+| `key_dlaa_toggle` | DLAA on / off | `Shift+F11` |
+| `key_save` | Save settings to `dlaa.ini` | `Shift+F12` |
+| `key_upscale_toggle` | DLSS upscale on / off | `Ctrl+F4` |
+| `key_mv_toggle` | Motion vectors on / off | `Ctrl+F5` |
+| `key_mv_debug` | MV debug view | `Ctrl+F6` |
+| `key_passive` | Passive mode | `Ctrl+F7` |
+| `key_jitter_only` | Jitter-only debug | `Ctrl+F8` |
+| `key_selftest` | Self-test | `Ctrl+F9` |
+| `key_snapshot` | NGX input snapshot | `Ctrl+F10` |
+| `key_trace` | Frame trace | `Ctrl+F11` |
+| `key_jitter_sign` | Cycle NGX jitter sign | `Ctrl+F12` |
+
+If two actions get the same combination the log warns and both fire. At most one of the user keys (models,
+area, sharpen, width, save) acts per frame.

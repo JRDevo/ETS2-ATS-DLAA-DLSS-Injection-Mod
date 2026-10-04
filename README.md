@@ -10,11 +10,17 @@ account, no in-game menu — a few hotkeys and an optional text config.
 
 **An NVIDIA RTX GPU is required** (DLAA and DLSS only run on RTX cards).
 
+## ⬇ Download
+
+**[Download the latest release here](https://github.com/JRDevo/ETS2-ATS-Truckers-DLAA-DLSS-Mod/releases/latest)**
+— get the `.zip` under **Assets**, then follow [Install](#install) below.
+(The green **Code** button downloads the source code, not the mod.)
+
 This is an unofficial fan project. It is not affiliated with, or endorsed by, SCS
 Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
-> Status: v0.7.6. DLAA has been run in ETS2 (VR) and ATS (flat and VR). The DLSS
+> Status: v0.7.7. DLAA has been run in ETS2 (VR) and ATS (flat and VR). The DLSS
 > *upscaling* path (render below native, reconstruct up) runs in VR but is still
 > being tuned. Treat upscaling as experimental.
 
@@ -32,15 +38,17 @@ trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 ## Install
 
 1. **Make a backup** of the game's `bin\win_x64\` folder first.
-2. Find the game's executable folder, e.g.
+2. [Download the latest release zip](https://github.com/JRDevo/ETS2-ATS-Truckers-DLAA-DLSS-Mod/releases/latest)
+   and unzip it.
+3. Find the game's executable folder, e.g.
    `...\steamapps\common\Euro Truck Simulator 2\bin\win_x64\`
    (or `...\American Truck Simulator\bin\win_x64\`).
-3. **Remove any other proxy mod first.** Only one `dinput8.dll` / `dxgi.dll` proxy
+4. **Remove any other proxy mod first.** Only one `dinput8.dll` / `dxgi.dll` proxy
    can load — delete any other mod's `dinput8.dll` or `dxgi.dll` from that
    folder before continuing.
-4. Copy **`dinput8.dll`** into `bin\win_x64\`. Optionally also copy **`dlaa.ini`**
-   there to change defaults (see below) — it is not required.
-5. **Add the NVIDIA DLSS runtime yourself.** This mod ships **no** NVIDIA files.
+5. Copy **`dinput8.dll`** into `bin\win_x64\`. Optionally also copy **`dlaa.ini`**
+   there to change settings or keys (see below) — it is not required.
+6. **Add the NVIDIA DLSS runtime yourself.** This mod ships **no** NVIDIA files.
    Put your own **`nvngx_dlss.dll`** in the same `bin\win_x64\` folder, next to
    `dinput8.dll`. You can get it from:
    - the NVIDIA DLSS SDK on GitHub — <https://github.com/NVIDIA/DLSS>, file
@@ -49,7 +57,7 @@ trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
    You can drop in a **newer** `nvngx_dlss.dll` at any time to update the DLSS model
    — just replace the file.
-6. Launch the game. DLAA starts on. No log file is written unless you set
+7. Launch the game. DLAA starts on. No log file is written unless you set
    `debug = 1` in `dlaa.ini` (see Troubleshooting).
 
 To uninstall, delete `dinput8.dll` (and `dlaa.ini`) from `bin\win_x64\`.
@@ -102,12 +110,16 @@ up to it.
 
 ## Controls
 
-Every control except `End` is an **F-key with one modifier**, so it can be used
+**Every key can be changed.** Open `dlaa.ini`, find the `key_...` line for the
+action and edit the key, e.g. `key_dlaa_toggle = Ctrl+D` (or `none` to turn it
+off). Restart the game. Full list: [`docs/KEYS.md`](docs/KEYS.md).
+
+By default every control except `End` is an **F-key with one modifier**, so it can be used
 blind in a headset. The game window must be focused. **Shift + F-key = the keys you
 use while playing**; Ctrl + F-key are debug keys (see [`docs/KEYS.md`](docs/KEYS.md)
 for the full sheet).
 
-| Key | Action |
+| Default key | Action |
 |-----|--------|
 | `End` | Cycle mode: DLAA → DLSS → off (saved) |
 | `Shift+F1`..`F4` | DLAA model / preset: 1 = default (driver pick), 2 = `E`, 3 = `F`, 4 = `M` |
@@ -137,6 +149,7 @@ was used). The full template with every key and its default is in
 | `dlaa_area` | `100` | run DLAA on the centre `N` % of each eye image (VR performance), `40`..`100`. VR only: in flat mode the whole picture is always used |
 | `jitter_sign_x` / `jitter_sign_y` | `-1` | flip if the image shimmers or looks doubled (try the 4 combinations) |
 | `beeps` | `1` | `0` = silence the hotkey beeps |
+| `key_<action>` | *(see KEYS.md)* | re-bind any hotkey, e.g. `key_dlaa_toggle = Ctrl+D`, or `none` to disable it. Full list and format: [`docs/KEYS.md`](docs/KEYS.md) |
 | `debug` | `0` | `1` = write the log file `dlaa_inject.log` (off by default) |
 
 ## Troubleshooting

@@ -1,3 +1,14 @@
+// v0.7.7 -- RE-BINDABLE HOTKEYS. Every control is now an action with a binding read from dlaa.ini (key_mode_cycle,
+//           key_model_1..4, key_area_down/up, key_sharpen_down/up, key_width_down/up, key_dlaa_toggle, key_save,
+//           key_upscale_toggle, key_mv_toggle, key_mv_debug, key_passive, key_jitter_only, key_selftest,
+//           key_snapshot, key_trace, key_jitter_sign). Format "[Shift+][Ctrl+][Alt+]Key" (F1-F24, A-Z, 0-9, Home,
+//           End, Insert, Delete, PageUp/PageDown, arrows, Space, Tab, Backspace, Enter, Pause, Numpad keys, OEM
+//           punctuation) or "none" = disabled; a bad value logs a warning and keeps the default. Defaults are
+//           exactly the v0.7.6 keys. Semantics unchanged: down-edge only, game focused, top-level Present, the
+//           modifiers must match EXACTLY (no modifier = none held; Alt is now a usable modifier). The F-key-only
+//           g_fWasDown[12] / FKeyPressed and the static End edge are replaced by one per-VK g_vkWasDown table
+//           refreshed every Present (PollKeys). The trace key is still consumed before TraceAtPresent. Two
+//           actions on the same combo log a warning at load (both fire); the binding table is logged once.
 // v0.7.0 -- REAL DLSS UPSCALING (render res < output res). The game's r_scale_x / r_scale_y shrink only the scene
 //           texture (the blit SOURCE); the blit RT (VR eye texture / flat backbuffer) keeps its size, so scene size
 //           vs blit viewport size IS the render scale. New dlaa.ini dlss_upscale (default 1) + Ctrl+F4 live: when
@@ -250,9 +261,9 @@ constexpr int kMaxDepth = 4;
 // Everything below is touched from the render thread only, except g_dlaaOn.
 std::atomic<bool> g_dlaaOn{false};       // DLAA + jitter live switch (Shift+F11)
 bool     g_resetNext      = true;        // pass reset=true to NGX on the next evaluate
-// v0.6.5: all live controls are now F1..F12 with a single modifier (Shift = user keys, Ctrl = debug keys).
-// One down-edge state per F-key (index 0 = F1 .. 11 = F12) replaces the old per-key g_*WasDown globals.
-bool     g_fWasDown[12]   = {};          // edge detect, one slot per F-key (FKeyPressed)
+// v0.7.7: every hotkey is a re-bindable action (dlaa.ini key_*), see KeyBind / PollKeys below. One down-edge
+// state per virtual-key code (g_vkWasDown) replaces the F-key-only table of v0.6.5.
+bool     g_vkWasDown[256] = {};          // edge detect per VK, refreshed every top-level Present (PollKeys)
 std::atomic<bool> g_mvDebug{false};      // Ctrl+F6: blit source replaced by the MV visualization
 std::atomic<bool> g_mvOn{true};          // camera-reprojection MVs live switch (Ctrl+F5, dlaa.ini mv_enabled)
 std::atomic<bool> g_snapRequest{false};       // set by Present on Ctrl+F10, consumed at the next DLAA blit
@@ -315,14 +326,155 @@ bool IsForeground() {
     GetWindowThreadProcessId(GetForegroundWindow(), &pid);
     return pid == GetCurrentProcessId();
 }
-// v0.6.5: down-edge of VK_F1+i this Present (foreground only). The stored state is refreshed on every call so a
-// key released while the game is not focused is not later mistaken for a fresh press. VK_F1..VK_F12 are
-// contiguous (0x70..0x7B). Replaces the old per-key g_*WasDown edge globals.
-bool FKeyPressed(int i) {
-    const bool down = (GetAsyncKeyState(VK_F1 + i) & 0x8000) != 0;
-    const bool edge = down && !g_fWasDown[i] && IsForeground();
-    g_fWasDown[i] = down;
-    return edge;
+// ---- v0.7.7 re-bindable hotkeys ---------------------------------------------------------------------------
+// Every action has a binding "[Shift+][Ctrl+][Alt+]Key" (dlaa.ini key_<action>, defaults below = the v0.7.6 keys).
+// A binding fires on the key's DOWN-EDGE only, game in the foreground, with EXACTLY its modifiers held (a binding
+// without modifiers fires only when none of Shift/Ctrl/Alt is down). vk == 0 = disabled ("none").
+enum KeyAction {
+    KA_MODE_CYCLE, KA_MODEL1, KA_MODEL2, KA_MODEL3, KA_MODEL4, KA_AREA_DOWN, KA_AREA_UP, KA_SHARPEN_DOWN,
+    KA_SHARPEN_UP, KA_WIDTH_DOWN, KA_WIDTH_UP, KA_DLAA_TOGGLE, KA_SAVE, KA_UPSCALE_TOGGLE, KA_MV_TOGGLE,
+    KA_MV_DEBUG, KA_PASSIVE, KA_JITTER_ONLY, KA_SELFTEST, KA_SNAPSHOT, KA_TRACE, KA_JITTER_SIGN, KA_COUNT
+};
+enum { MOD_SHIFT_BIT = 1, MOD_CTRL_BIT = 2, MOD_ALT_BIT = 4 };
+struct KeyBind {
+    const char* ini;          // dlaa.ini key
+    const char* def;          // default binding text
+    int         vk;           // 0 = disabled
+    unsigned    mods;         // MOD_*_BIT
+    char        name[48];     // binding as shown in logs
+    bool        hit;          // down-edge this Present (PollKeys)
+};
+KeyBind g_keys[KA_COUNT] = {
+    { "key_mode_cycle",      "End",       0, 0, "", false },
+    { "key_model_1",         "Shift+F1",  0, 0, "", false },
+    { "key_model_2",         "Shift+F2",  0, 0, "", false },
+    { "key_model_3",         "Shift+F3",  0, 0, "", false },
+    { "key_model_4",         "Shift+F4",  0, 0, "", false },
+    { "key_area_down",       "Shift+F5",  0, 0, "", false },
+    { "key_area_up",         "Shift+F6",  0, 0, "", false },
+    { "key_sharpen_down",    "Shift+F7",  0, 0, "", false },
+    { "key_sharpen_up",      "Shift+F8",  0, 0, "", false },
+    { "key_width_down",      "Shift+F9",  0, 0, "", false },
+    { "key_width_up",        "Shift+F10", 0, 0, "", false },
+    { "key_dlaa_toggle",     "Shift+F11", 0, 0, "", false },
+    { "key_save",            "Shift+F12", 0, 0, "", false },
+    { "key_upscale_toggle",  "Ctrl+F4",   0, 0, "", false },
+    { "key_mv_toggle",       "Ctrl+F5",   0, 0, "", false },
+    { "key_mv_debug",        "Ctrl+F6",   0, 0, "", false },
+    { "key_passive",         "Ctrl+F7",   0, 0, "", false },
+    { "key_jitter_only",     "Ctrl+F8",   0, 0, "", false },
+    { "key_selftest",        "Ctrl+F9",   0, 0, "", false },
+    { "key_snapshot",        "Ctrl+F10",  0, 0, "", false },
+    { "key_trace",           "Ctrl+F11",  0, 0, "", false },
+    { "key_jitter_sign",     "Ctrl+F12",  0, 0, "", false },
+};
+inline bool KeyHit(KeyAction a) { return g_keys[a].hit; }
+inline const char* KeyName(KeyAction a) { return g_keys[a].name; }
+
+// Parses one binding ("Ctrl+Shift+F5", case-insensitive, spaces ignored). "" / "none" -> vk 0 (disabled), true.
+bool ParseBinding(const char* text, int* vkOut, unsigned* modsOut) {
+    char buf[64]; int n = 0;
+    for (const char* c = text; *c && n < (int)sizeof(buf) - 1; ++c)
+        if (*c != ' ' && *c != '\t' && *c != '\r' && *c != '\n') buf[n++] = (char)tolower((unsigned char)*c);
+    buf[n] = 0;
+    *vkOut = 0; *modsOut = 0;
+    if (!n || !strcmp(buf, "none")) return true;
+    unsigned mods = 0;
+    const char* p = buf;
+    for (;;) {                                           // peel leading "shift+" / "ctrl+" / "alt+" (the key stays last)
+        if      (!strncmp(p, "shift+", 6)) { mods |= MOD_SHIFT_BIT; p += 6; }
+        else if (!strncmp(p, "ctrl+", 5))  { mods |= MOD_CTRL_BIT;  p += 5; }
+        else if (!strncmp(p, "alt+", 4))   { mods |= MOD_ALT_BIT;   p += 4; }
+        else break;
+    }
+    if (!*p) return false;
+    int vk = 0;
+    const size_t len = strlen(p);
+    if (len == 1 && p[0] >= 'a' && p[0] <= 'z') vk = 'A' + (p[0] - 'a');
+    else if (len == 1 && p[0] >= '0' && p[0] <= '9') vk = p[0];
+    else if (p[0] == 'f' && len >= 2 && len <= 3 && isdigit((unsigned char)p[1]) && (len == 2 || isdigit((unsigned char)p[2]))) {
+        const int f = atoi(p + 1);
+        if (f >= 1 && f <= 24) vk = VK_F1 + f - 1;
+    }
+    else if (!strncmp(p, "numpad", 6) && len == 7 && isdigit((unsigned char)p[6])) vk = VK_NUMPAD0 + (p[6] - '0');
+    else {
+        static const struct { const char* name; int vk; } kNames[] = {
+            { "home", VK_HOME }, { "end", VK_END }, { "insert", VK_INSERT }, { "delete", VK_DELETE },
+            { "pageup", VK_PRIOR }, { "pagedown", VK_NEXT }, { "up", VK_UP }, { "down", VK_DOWN },
+            { "left", VK_LEFT }, { "right", VK_RIGHT }, { "space", VK_SPACE }, { "tab", VK_TAB },
+            { "backspace", VK_BACK }, { "enter", VK_RETURN }, { "pause", VK_PAUSE },
+            { "numpadadd", VK_ADD }, { "numpadsubtract", VK_SUBTRACT }, { "numpadmultiply", VK_MULTIPLY },
+            { "numpaddivide", VK_DIVIDE }, { "numpaddecimal", VK_DECIMAL },
+            { "[", VK_OEM_4 }, { "]", VK_OEM_6 }, { ";", VK_OEM_1 }, { "'", VK_OEM_7 }, { ",", VK_OEM_COMMA },
+            { ".", VK_OEM_PERIOD }, { "/", VK_OEM_2 }, { "\\", VK_OEM_5 }, { "-", VK_OEM_MINUS },
+            { "=", VK_OEM_PLUS }, { "`", VK_OEM_3 },
+        };
+        for (const auto& k : kNames) if (!strcmp(p, k.name)) { vk = k.vk; break; }
+    }
+    if (!vk) return false;
+    *vkOut = vk; *modsOut = mods;
+    return true;
+}
+
+// Resets every binding to its default (called first in LoadConfig).
+void InitKeyBinds() {
+    for (KeyBind& k : g_keys) {
+        ParseBinding(k.def, &k.vk, &k.mods);
+        snprintf(k.name, sizeof(k.name), "%s", k.def);
+    }
+}
+// Applies one dlaa.ini "key_*" line. Unknown key_ names are ignored silently (like every unknown ini key).
+void SetKeyBindFromIni(const char* key, const char* value) {
+    for (KeyBind& k : g_keys) {
+        if (strcmp(key, k.ini)) continue;
+        char trimmed[48] = {}; int n = 0;                // trimmed raw text, used as the display name
+        const char* s = value;
+        while (*s == ' ' || *s == '\t') ++s;
+        for (; *s && *s != '\r' && *s != '\n' && n < (int)sizeof(trimmed) - 1; ++s) trimmed[n++] = *s;
+        while (n > 0 && (trimmed[n - 1] == ' ' || trimmed[n - 1] == '\t')) trimmed[--n] = 0;
+        int vk; unsigned mods;
+        if (ParseBinding(trimmed, &vk, &mods)) {
+            k.vk = vk; k.mods = mods;
+            snprintf(k.name, sizeof(k.name), "%s", vk ? trimmed : "none");
+        } else {
+            Log("dlaa.ini: %s '%s' not recognised (modifiers Shift/Ctrl/Alt + one key, or none) -- keeping %s",
+                k.ini, trimmed, k.name);
+        }
+        return;
+    }
+}
+// Logs the final binding table once and warns about two actions on the same combo.
+void LogKeyBinds() {
+    char line[512]; int len = 0;
+    for (int i = 0; i < KA_COUNT; ++i) {
+        char item[96];
+        const int w = snprintf(item, sizeof(item), "%s=%s", g_keys[i].ini + 4, g_keys[i].vk ? g_keys[i].name : "none");
+        if (len + w + 2 >= (int)sizeof(line)) { Log("hotkeys: %s", line); len = 0; }
+        len += snprintf(line + len, sizeof(line) - (size_t)len, "%s%s", len ? " " : "", item);
+    }
+    if (len) Log("hotkeys: %s", line);
+    for (int i = 0; i < KA_COUNT; ++i)
+        for (int j = i + 1; j < KA_COUNT; ++j)
+            if (g_keys[i].vk && g_keys[i].vk == g_keys[j].vk && g_keys[i].mods == g_keys[j].mods)
+                Log("dlaa.ini: WARNING %s and %s share the binding %s -- both will fire", g_keys[i].ini, g_keys[j].ini,
+                    g_keys[i].name);
+}
+// Once per top-level Present: fills KeyBind::hit. The per-VK was-down state is refreshed every call for every bound
+// key, foreground or not, so a key released while the game is not focused is not later seen as a fresh press.
+void PollKeys() {
+    const bool fg = IsForeground();
+    const unsigned held = ((GetAsyncKeyState(VK_SHIFT)   & 0x8000) ? MOD_SHIFT_BIT : 0u) |
+                          ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? MOD_CTRL_BIT  : 0u) |
+                          ((GetAsyncKeyState(VK_MENU)    & 0x8000) ? MOD_ALT_BIT   : 0u);
+    bool down[KA_COUNT];
+    for (int i = 0; i < KA_COUNT; ++i) {
+        KeyBind& k = g_keys[i];
+        k.hit = false;
+        down[i] = k.vk && (GetAsyncKeyState(k.vk) & 0x8000) != 0;
+        if (down[i] && !g_vkWasDown[k.vk & 0xFF] && fg && held == k.mods) k.hit = true;
+    }
+    for (int i = 0; i < KA_COUNT; ++i)                   // update after all edges are computed (bindings may share a VK)
+        if (g_keys[i].vk) g_vkWasDown[g_keys[i].vk & 0xFF] = down[i];
 }
 
 // Writes "module.dll+0xOFFSET" for the module containing addr (or "?" + addr).
@@ -458,114 +610,97 @@ HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
         }
     }
     if (depth == 0) UpdateGameContext(sc, n);   // v0.6.2: before anything else this frame (hotkeys may reset state)
-    if (depth == 0) {                           // v0.6.5 unified hotkeys: Shift+F-key (user) / Ctrl+F-key (debug)
-        // Modifier state, sampled once. A control fires only for its EXACT modifier: Shift held with neither
-        // Ctrl nor Alt (the user keys), or Ctrl held with neither Shift nor Alt (the debug keys). Every other
-        // combination -- a bare F-key, Shift+Ctrl, anything with Alt -- does nothing.
-        const bool shiftDn = (GetAsyncKeyState(VK_SHIFT)   & 0x8000) != 0;
-        const bool ctrlDn  = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
-        const bool altDn   = (GetAsyncKeyState(VK_MENU)    & 0x8000) != 0;
-        const bool shiftOnly = shiftDn && !ctrlDn && !altDn;
-        const bool ctrlOnly  = ctrlDn  && !shiftDn && !altDn;
-        // Down-edge of every F-key this Present (state refreshed each frame inside FKeyPressed; foreground only).
-        bool fe[12];
-        for (int i = 0; i < 12; ++i) fe[i] = FKeyPressed(i);
+    if (depth == 0) {                           // v0.7.7 re-bindable hotkeys (dlaa.ini key_*, see PollKeys)
+        PollKeys();                              // down-edges for this Present (exact modifiers, foreground only)
 
-        // Ctrl+F11 = frame trace. Handled before TraceAtPresent so the request is consumed this same frame.
-        if (ctrlOnly && fe[10]) {
+        // frame trace key. Handled before TraceAtPresent so the request is consumed this same frame.
+        if (KeyHit(KA_TRACE)) {
             g_traceRequest = true;
-            Log("frame trace requested (Ctrl+F11, Present #%llu)", (unsigned long long)n);
+            Log("frame trace requested (%s, Present #%llu)", KeyName(KA_TRACE), (unsigned long long)n);
         }
         TraceAtPresent(sc, n);                   // F11 frame-trace state machine (v0.4.3)
 #ifdef WITH_DLAA
         CheckPresetFallback(n);                  // v0.5.7: a live preset create failed -> told by ear
 #endif
 
-        // ---- Shift + F-key = USER keys ---------------------------------------------------------------
-        if (shiftOnly && fe[10]) {               // Shift+F11 = DLAA on/off (old plain-End behaviour + beeps)
+        // ---- user keys -------------------------------------------------------------------------------
+        if (KeyHit(KA_DLAA_TOGGLE)) {            // DLAA on/off (old plain-End behaviour + beeps)
 #ifdef WITH_DLAA
             if (g_gameDeviceChanged && !g_dlaaOn.load()) {
-                Log("DLAA stays OFF (Shift+F11, Present #%llu): the game render device changed, our NGX feature / "
-                    "textures / queries belong to the old device -- restart the game", (unsigned long long)n);
+                Log("DLAA stays OFF (%s, Present #%llu): the game render device changed, our NGX feature / "
+                    "textures / queries belong to the old device -- restart the game", KeyName(KA_DLAA_TOGGLE), (unsigned long long)n);
                 PlayTones(1, 200, 400, 0);
             } else {
                 const bool on = !g_dlaaOn.load();
                 g_dlaaOn = on;
                 if (on) { g_resetNext = true; MvInvalidate(); }   // drop DLSS history + stale MV candidates on re-enable
-                Log("DLAA %s (Shift+F11, Present #%llu)", on ? "ON" : "OFF", (unsigned long long)n);
+                Log("DLAA %s (%s, Present #%llu)", on ? "ON" : "OFF", KeyName(KA_DLAA_TOGGLE), (unsigned long long)n);
                 PlayTones(1, on ? 1200 : 300, 150, 0);
                 OnLiveTuningChange();            // v0.6.2: restart the timing windows (GPU spans: on/off compare)
             }
 #else
-            Log("Shift+F11 ignored: DLAA not compiled in");
+            Log("%s ignored: DLAA not compiled in", KeyName(KA_DLAA_TOGGLE));
 #endif
         }
 #ifdef WITH_DLAA
-        {                                        // v0.7.2 plain End (no modifier) = mode cycle DLAA -> DLSS -> off
-            static bool endWasDown = false;
-            const bool endDn = (GetAsyncKeyState(VK_END) & 0x8000) != 0;
-            if (endDn && !endWasDown && !shiftDn && !ctrlDn && !altDn && IsForeground()) CycleMode(n);
-            endWasDown = endDn;
-        }
-        if (shiftOnly) {
-            if      (fe[0]) SelectDlssPreset(0, n);  // Shift+F1  model 1 = default (driver pick) -- 1 beep
-            else if (fe[1]) SelectDlssPreset(1, n);   // Shift+F2  model 2 = E                      -- 2 beeps
-            else if (fe[2]) SelectDlssPreset(2, n);   // Shift+F3  model 3 = F                      -- 3 beeps
-            else if (fe[3]) SelectDlssPreset(3, n);   // Shift+F4  model 4 = M                      -- 4 beeps
-            else if (fe[4]) StepArea(-1, n);          // Shift+F5  DLAA area -10 %
-            else if (fe[5]) StepArea(+1, n);          // Shift+F6  DLAA area +10 %
-            else if (fe[6]) StepSharpness(-1, n);     // Shift+F7  sharpen strength -0.1
-            else if (fe[7]) StepSharpness(+1, n);     // Shift+F8  sharpen strength +0.1
-            else if (fe[8]) StepSharpRadius(-1, n);   // Shift+F9  sharpen width -0.5
-            else if (fe[9]) StepSharpRadius(+1, n);   // Shift+F10 sharpen width +0.5
-            else if (fe[11]) SaveSettings(n);         // Shift+F12 save the 4 live values + dlss_upscale to dlaa.ini
-        }
+        if (KeyHit(KA_MODE_CYCLE)) CycleMode(n); // v0.7.2 mode cycle DLAA -> DLSS -> off (default End)
+        if      (KeyHit(KA_MODEL1))       SelectDlssPreset(0, n);  // model 1 = default (driver pick) -- 1 beep
+        else if (KeyHit(KA_MODEL2))       SelectDlssPreset(1, n);  // model 2 = E                      -- 2 beeps
+        else if (KeyHit(KA_MODEL3))       SelectDlssPreset(2, n);  // model 3 = F                      -- 3 beeps
+        else if (KeyHit(KA_MODEL4))       SelectDlssPreset(3, n);  // model 4 = M                      -- 4 beeps
+        else if (KeyHit(KA_AREA_DOWN))    StepArea(-1, n);         // DLAA area -10 %
+        else if (KeyHit(KA_AREA_UP))      StepArea(+1, n);         // DLAA area +10 %
+        else if (KeyHit(KA_SHARPEN_DOWN)) StepSharpness(-1, n);    // sharpen strength -0.1
+        else if (KeyHit(KA_SHARPEN_UP))   StepSharpness(+1, n);    // sharpen strength +0.1
+        else if (KeyHit(KA_WIDTH_DOWN))   StepSharpRadius(-1, n);  // sharpen width -0.5
+        else if (KeyHit(KA_WIDTH_UP))     StepSharpRadius(+1, n);  // sharpen width +0.5
+        else if (KeyHit(KA_SAVE))         SaveSettings(n);         // save the 4 live values + dlss_upscale to dlaa.ini
 
-        // ---- Ctrl + F-key = DEBUG keys ---------------------------------------------------------------
-        if (ctrlOnly) {
-            if (fe[3]) {                         // v0.7.0 Ctrl+F4 DLSS upscale on/off
+        // ---- debug keys ------------------------------------------------------------------------------
+        {
+            if (KeyHit(KA_UPSCALE_TOGGLE)) {                         // v0.7.0 DLSS upscale on/off
                 const bool on = !g_dlssUpscale.load();
                 g_dlssUpscale = on;
                 if (on) g_upBlocked[0] = 0;      // a failed upscale size is retried
                 g_resetNext = true;              // each eye also rebuilds its textures + NGX feature at its next blit
-                Log("DLSS upscale %s (Ctrl+F4, Present #%llu)%s", on ? "ON" : "OFF", (unsigned long long)n,
+                Log("DLSS upscale %s (%s, Present #%llu)%s", on ? "ON" : "OFF", KeyName(KA_UPSCALE_TOGGLE), (unsigned long long)n,
                     on ? " -- render (scene) res -> blit RT res whenever the blit RT is larger"
                        : " -- DLAA at render res, copied back over the blit source (v0.6.5 path)");
                 PlayTones(1, on ? 1200 : 300, 150, 0);
                 OnLiveTuningChange();            // timing windows restart (new pipeline shape)
             }
-            if (fe[4]) {                         // Ctrl+F5 motion vectors on/off (old HOME)
+            if (KeyHit(KA_MV_TOGGLE)) {                         // motion vectors on/off (old HOME)
                 const bool on = !g_mvOn.load();
                 g_mvOn = on;
                 g_resetNext = true;
                 MvInvalidate();                  // forget stale candidates either way
-                Log("motion vectors %s (Ctrl+F5, Present #%llu)", on ? "ON (camera reprojection)" : "OFF (zero MVs)",
-                    (unsigned long long)n);
+                Log("motion vectors %s (%s, Present #%llu)", on ? "ON (camera reprojection)" : "OFF (zero MVs)",
+                    KeyName(KA_MV_TOGGLE), (unsigned long long)n);
                 OnLiveTuningChange();            // v0.6.2: MV state is part of the GPU spans window key
             }
-            if (fe[5]) {                         // Ctrl+F6 MV debug view (old INSERT)
+            if (KeyHit(KA_MV_DEBUG)) {                         // MV debug view (old INSERT)
                 const bool on = !g_mvDebug.load();
                 g_mvDebug = on;
-                Log("MV debug view %s (Ctrl+F6, Present #%llu)", on ? "ON (R=mv.x G=mv.y B=cabin; gray = still)" : "OFF",
-                    (unsigned long long)n);
+                Log("MV debug view %s (%s, Present #%llu)", on ? "ON (R=mv.x G=mv.y B=cabin; gray = still)" : "OFF",
+                    KeyName(KA_MV_DEBUG), (unsigned long long)n);
             }
-            if (fe[6]) TogglePassive(n);         // Ctrl+F7 passive mode (old Ctrl+End)
-            if (fe[7]) {                         // Ctrl+F8 jitter-only debug (old plain PageUp)
+            if (KeyHit(KA_PASSIVE)) TogglePassive(n);         // Ctrl+F7 passive mode (old Ctrl+End)
+            if (KeyHit(KA_JITTER_ONLY)) {                         // jitter-only debug (old plain PageUp)
                 const bool jo = !g_jitterOnly.load();
                 g_jitterOnly = jo;
                 g_resetNext = true;              // also resets on the way back to DLAA
-                Log("jitter-only debug %s (Ctrl+F8, Present #%llu)", jo ? "ON (DLAA evaluate skipped)" : "OFF",
-                    (unsigned long long)n);
+                Log("jitter-only debug %s (%s, Present #%llu)", jo ? "ON (DLAA evaluate skipped)" : "OFF",
+                    KeyName(KA_JITTER_ONLY), (unsigned long long)n);
             }
-            if (fe[8]) {                         // Ctrl+F9 self-test (old F9)
+            if (KeyHit(KA_SELFTEST)) {                         // self-test (old F9)
                 g_selfTestRequest = true;
-                Log("self-test requested (Ctrl+F9, Present #%llu)", (unsigned long long)n);
+                Log("self-test requested (%s, Present #%llu)", KeyName(KA_SELFTEST), (unsigned long long)n);
             }
-            if (fe[9]) {                         // Ctrl+F10 NGX input snapshot (old F10)
+            if (KeyHit(KA_SNAPSHOT)) {                         // NGX input snapshot (old F10)
                 g_snapRequest = true;
-                Log("NGX input snapshot requested (Ctrl+F10, Present #%llu)", (unsigned long long)n);
+                Log("NGX input snapshot requested (%s, Present #%llu)", KeyName(KA_SNAPSHOT), (unsigned long long)n);
             }
-            if (fe[11]) {                        // Ctrl+F12 cycle NGX jitter sign (old plain PageDown)
+            if (KeyHit(KA_JITTER_SIGN)) {                        // cycle NGX jitter sign (old plain PageDown)
                 static const int kCycle[4][2] = { {-1,-1}, {+1,+1}, {+1,-1}, {-1,+1} };
                 int cur = 0;
                 for (int i = 0; i < 4; ++i)
@@ -573,7 +708,7 @@ HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
                 const int nx = (cur + 1) % 4;
                 g_signX = kCycle[nx][0]; g_signY = kCycle[nx][1];
                 g_resetNext = true;
-                Log("jitter sign now X=%+d Y=%+d (Ctrl+F12)", g_signX, g_signY);
+                Log("jitter sign now X=%+d Y=%+d (%s)", g_signX, g_signY, KeyName(KA_JITTER_SIGN));
             }
         }
 #endif
@@ -784,7 +919,7 @@ void TogglePassive(uint64_t n) {
     const bool on = !g_passive.load();
     g_passive = on;
     if (!on) { g_resetNext = true; MvInvalidate(); }
-    Log("passive mode %s (Ctrl+F7, Present #%llu)%s", on ? "ON" : "OFF", (unsigned long long)n,
+    Log("passive mode %s (passive key, Present #%llu)%s", on ? "ON" : "OFF", (unsigned long long)n,
         on ? " -- no jitter / candidate copies / depth snapshot / DLAA; tracking + GPU spans only" : "");
     PlayTones(on ? 1 : 2, 250, 150, 100);                // 1 low beep = ON, 2 low beeps = OFF
     OnLiveTuningChange();
@@ -800,7 +935,7 @@ void SelectDlssPreset(int idx, uint64_t n) {
     static const char* kName[4]   = { "default", "E", "F", "M" };
     const char* cur = SceneDlaa::DlssPresetName();
     if (!strcmp(cur, kName[idx])) {                      // already this model: re-beep only, no recreate
-        Log("DLSS preset already %s (Shift+F%d, Present #%llu) -- unchanged", kName[idx], idx + 1,
+        Log("DLSS preset already %s (model key %d, Present #%llu) -- unchanged", kName[idx], idx + 1,
             (unsigned long long)n);
         PlayTones(idx + 1, 880, 120, 100);               // 1 default, 2 E, 3 F, 4 M
         return;
@@ -808,7 +943,7 @@ void SelectDlssPreset(int idx, uint64_t n) {
     SceneDlaa::SetDlssPreset(kLetter[idx]);
     g_resetNext = true;                                  // DLSS history of both eyes
     OnLiveTuningChange();
-    Log("DLSS preset now %s (Shift+F%d, Present #%llu)", SceneDlaa::DlssPresetName(), idx + 1,
+    Log("DLSS preset now %s (model key %d, Present #%llu)", SceneDlaa::DlssPresetName(), idx + 1,
         (unsigned long long)n);
     PlayTones(idx + 1, 880, 120, 100);                   // 1 default, 2 E, 3 F, 4 M
 }
@@ -817,7 +952,7 @@ void SelectDlssPreset(int idx, uint64_t n) {
 void StepSharpness(int dir, uint64_t n) {
     const float cur = SceneDlaa::Sharpness();
     if (dir > 0 ? cur >= 1.0f : cur <= 0.0f) {
-        Log("sharpness now %.1f (Shift+F7/F8, Present #%llu) -- already at the limit, unchanged",
+        Log("sharpness now %.1f (sharpen keys, Present #%llu) -- already at the limit, unchanged",
             (double)cur, (unsigned long long)n);
         PlayTones(1, 200, 150, 0);                       // low beep: clamp limit
         return;
@@ -825,7 +960,7 @@ void StepSharpness(int dir, uint64_t n) {
     SceneDlaa::SetSharpness(std::floor((cur + 0.1f * (float)dir) * 10.0f + 0.5f) / 10.0f);   // clamps 0..1
     const float s = SceneDlaa::Sharpness();
     OnLiveTuningChange();
-    Log("sharpness now %.1f (Shift+F7/F8, Present #%llu)", (double)s, (unsigned long long)n);
+    Log("sharpness now %.1f (sharpen keys, Present #%llu)", (double)s, (unsigned long long)n);
     PlayTones(1, (DWORD)(400.0f + 800.0f * s + 0.5f), 150, 0);
 }
 
@@ -833,7 +968,7 @@ void StepSharpness(int dir, uint64_t n) {
 void StepSharpRadius(int dir, uint64_t n) {
     const float cur = SceneDlaa::SharpRadius();
     if (dir > 0 ? cur >= 4.0f : cur <= 1.0f) {
-        Log("sharpen radius now %.1f px (Shift+F9/F10, Present #%llu) -- already at the limit, unchanged",
+        Log("sharpen radius now %.1f px (width keys, Present #%llu) -- already at the limit, unchanged",
             (double)cur, (unsigned long long)n);
         PlayTones(1, 200, 150, 0);                       // low beep: clamp limit (same as the strength limit tone)
         return;
@@ -841,7 +976,7 @@ void StepSharpRadius(int dir, uint64_t n) {
     SceneDlaa::SetSharpRadius(std::floor((cur + 0.5f * (float)dir) * 10.0f + 0.5f) / 10.0f);   // clamps 1..4
     const float r = SceneDlaa::SharpRadius();
     OnLiveTuningChange();
-    Log("sharpen radius now %.1f px (Shift+F9/F10, Present #%llu)", (double)r, (unsigned long long)n);
+    Log("sharpen radius now %.1f px (width keys, Present #%llu)", (double)r, (unsigned long long)n);
     // TWO short beeps (distinguishable from the single strength beep) at 400 + 250 * radius Hz.
     BeepSeq s;
     s.n = 2;
@@ -856,7 +991,7 @@ void StepSharpRadius(int dir, uint64_t n) {
 // a DLSS history reset.
 void StepArea(int dir, uint64_t n) {
     if (g_launchVr == 0) {                               // v0.7.4: flat = always the whole picture
-        Log("DLAA area stays 100%% (Shift+F5/F6, Present #%llu): flat mode always uses the whole picture", (unsigned long long)n);
+        Log("DLAA area stays 100%% (area keys, Present #%llu): flat mode always uses the whole picture", (unsigned long long)n);
         PlayTones(1, 200, 150, 0);
         return;
     }
@@ -864,7 +999,7 @@ void StepArea(int dir, uint64_t n) {
     uint32_t cw = 0, ch = 0;
     if (dir > 0 ? cur >= 100 : cur <= 40) {
         SceneDlaa::CropSize(g_sceneW, g_sceneH, cur, &cw, &ch);
-        Log("DLAA area now %d%% (%ux%u of %ux%u per eye, Shift+F5/F6, Present #%llu) -- already at the limit, unchanged",
+        Log("DLAA area now %d%% (%ux%u of %ux%u per eye, area keys, Present #%llu) -- already at the limit, unchanged",
             cur, cw, ch, g_sceneW, g_sceneH, (unsigned long long)n);
         PlayTones(1, 200, 150, 0);                       // low beep: clamp limit (same as the other limit tones)
         return;
@@ -874,7 +1009,7 @@ void StepArea(int dir, uint64_t n) {
     SceneDlaa::CropSize(g_sceneW, g_sceneH, a, &cw, &ch);
     g_resetNext = true;                                  // DLSS history of both eyes (the rebuild also resets)
     OnLiveTuningChange();
-    Log("DLAA area now %d%% (%ux%u of %ux%u per eye, Shift+F5/F6, Present #%llu)",
+    Log("DLAA area now %d%% (%ux%u of %ux%u per eye, area keys, Present #%llu)",
         a, cw, ch, g_sceneW, g_sceneH, (unsigned long long)n);
     // THREE short beeps (distinguishable from the 1-beep strength and 2-beep radius codes) at 300 + 6 * area Hz.
     PlayTones(3, (DWORD)(300 + 6 * a), 90, 70);
@@ -921,7 +1056,7 @@ bool WriteIniPreserving(const IniKV* kv, int nkv) {
     out.reserve(in.size() + 256);
     bool seen[8] = {};                                   // nkv <= 8
     if (in.empty()) {
-        out += "# dlaa.ini -- settings saved by the ETS2 DLAA injector (Shift+F12)";
+        out += "# dlaa.ini -- settings saved by the ETS2 DLAA injector";
         out += nl;
     } else {
         size_t i = 0;
@@ -988,13 +1123,13 @@ void SaveSettings(uint64_t n) {
     snprintf(kv[3].val, sizeof(kv[3].val), "%.1f", (double)radius);
     snprintf(kv[4].val, sizeof(kv[4].val), "%d", upscale);
     if (WriteIniPreserving(kv, 5)) {
-        Log("settings saved to dlaa.ini: dlss_preset=%s dlaa_area=%d sharpness=%.1f sharp_radius=%.1f dlss_upscale=%d (Shift+F12, Present #%llu)",
+        Log("settings saved to dlaa.ini: dlss_preset=%s dlaa_area=%d sharpness=%.1f sharp_radius=%.1f dlss_upscale=%d (save key, Present #%llu)",
             preset, area, (double)sharp, (double)radius, upscale, (unsigned long long)n);
         BeepSeq s;                                       // success: rising two-tone 600 -> 900 Hz, 120 ms each
         s.n = 2; s.freq[0] = 600; s.ms[0] = 120; s.freq[1] = 900; s.ms[1] = 120; s.gapMs = 40;
         PlayBeeps(s);
     } else {
-        Log("settings save FAILED (dlss_preset=%s dlaa_area=%d sharpness=%.1f sharp_radius=%.1f dlss_upscale=%d, Shift+F12, Present #%llu)",
+        Log("settings save FAILED (dlss_preset=%s dlaa_area=%d sharpness=%.1f sharp_radius=%.1f dlss_upscale=%d, save key, Present #%llu)",
             preset, area, (double)sharp, (double)radius, upscale, (unsigned long long)n);
         PlayTones(1, 200, 400, 0);                       // failure: one long 200 Hz tone (400 ms)
     }
@@ -1010,7 +1145,7 @@ void CycleMode(uint64_t n) {
     const int cur = !wasOn ? 0 : (g_dlssUpscale.load() ? 2 : 1);
     int next = cur == 0 ? 1 : (cur == 1 ? 2 : 0);
     if (next != 0 && !wasOn && g_gameDeviceChanged) {
-        Log("mode stays OFF (End, Present #%llu): the game render device changed -- restart the game", (unsigned long long)n);
+        Log("mode stays OFF (mode key, Present #%llu): the game render device changed -- restart the game", (unsigned long long)n);
         PlayTones(1, 200, 400, 0);
         return;
     }
@@ -1024,7 +1159,7 @@ void CycleMode(uint64_t n) {
     IniKV kv[1] = { { "mode", {} } };
     snprintf(kv[0].val, sizeof(kv[0].val), "%d", next);
     const bool saved = WriteIniPreserving(kv, 1);
-    Log("mode %s (End, Present #%llu)%s", next == 1 ? "DLAA" : (next == 2 ? "DLSS" : "OFF"), (unsigned long long)n,
+    Log("mode %s (mode key, Present #%llu)%s", next == 1 ? "DLAA" : (next == 2 ? "DLSS" : "OFF"), (unsigned long long)n,
         saved ? " -- saved to dlaa.ini" : " -- dlaa.ini save FAILED");
     if (next == 0) PlayTones(1, 300, 150, 0);
     else           PlayTones(next, 1200, 150, 100);
@@ -1962,7 +2097,7 @@ void TraceAtPresent(IDXGISwapChain* sc, uint64_t n) {
         if (g_traceState.load() == 0) { g_traceCause = "auto"; g_traceState.store(1); }
     }
     if (g_traceRequest.exchange(false) && g_traceState.load() == 0) {
-        g_traceCause = "Ctrl+F11";
+        g_traceCause = "trace key";
         g_traceState.store(1);
     }
 }
@@ -2671,7 +2806,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
                 "(viewport %s: %.1f,%.1f %.1fx%.1f) | blit SRV0 view fmt=%d%s | RTV view fmt=%d%s | dlss_upscale=%d",
                 up ? "ACTIVE" : (!sizeUp ? "not applicable (output not larger than the scene)"
                                          : (blocked ? "OFF (NGX init failed for this size: DLAA fallback)"
-                                                    : "OFF (dlss_upscale=0 / Ctrl+F4)")),
+                                                    : "OFF (dlss_upscale=0 / upscale key)")),
                 (unsigned long long)g_blitCount + 1, d.Width, d.Height, ow, oh, ox, oy, bd.Width, bd.Height, (int)bd.Format,
                 vpUsed ? "used" : (nvp ? "ignored, not inside RT0" : "none bound"),
                 nvp ? (double)vps[0].TopLeftX : 0.0, nvp ? (double)vps[0].TopLeftY : 0.0,
@@ -2715,7 +2850,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         Log("swapchain blit detected on the game context %p: src %ux%u fmt=%d -> %s %ux%u (verts=%u, scene depth %ux%u)%s",
             (void*)ctx, d.Width, d.Height, (int)d.Format, isBackbuffer ? "backbuffer" : "eye RT", bd.Width, bd.Height,
             vertexCount, g_sceneW, g_sceneH,
-            g_dlaaOn.load() ? "" : " -- DLAA currently OFF (dlaa_off.txt / Shift+F11), not evaluating");
+            g_dlaaOn.load() ? "" : " -- DLAA currently OFF (dlaa_off.txt / DLAA toggle key), not evaluating");
     }
     if (g_blitCount % 600 == 0) {
         // v0.5.6 CPU / rate window: everything since the previous stats line (600 blits).
@@ -2868,7 +3003,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         if (upW && !ok && dl.Upscaling() && dl.InitFailed()) {
             snprintf(g_upBlocked, sizeof(g_upBlocked), "%ux%u->%ux%u", dl.FullW(), dl.FullH(), upW, upH);
             Log("DLSS upscale init FAILED on eye %d for %s (see the DLAA: lines above) -- falling back to DLAA at render "
-                "res for this size (Ctrl+F4 off/on retries)", eye, g_upBlocked);
+                "res for this size (toggling the upscale key off/on retries)", eye, g_upBlocked);
             PlayTones(1, 200, 400, 0);
         }
         // v0.7.0 upscale: the snapshot "out" and the self-test dump the DLSS output (output rect size), since the
@@ -3222,10 +3357,16 @@ bool DlaaOffFilePresent() {
 //   dlss_upscale                   0/1 (default 1, v0.7.0): DLSS upscaling from the scene size (r_scale_x / r_scale_y)
 //                                  to the blit RT size whenever that is larger; 0 = always DLAA at render res (the
 //                                  v0.6.5 path). Start state; Ctrl+F4 toggles live (Shift+F12 saves)
+//   key_<action>                   v0.7.7 re-bindable hotkeys, "[Shift+][Ctrl+][Alt+]Key" or none; see docs/KEYS.md and
+//                                  g_keys[] (key_mode_cycle, key_model_1..4, key_area_down/up, key_sharpen_down/up,
+//                                  key_width_down/up, key_dlaa_toggle, key_save, key_upscale_toggle, key_mv_toggle,
+//                                  key_mv_debug, key_passive, key_jitter_only, key_selftest, key_snapshot, key_trace,
+//                                  key_jitter_sign)
 //   beeps                          0/1 (default 1): v0.5.7 audible feedback for the Shift+F-key user controls
 //                                  (model select, area, sharpen strength/width, DLAA on/off, save) and the
 //                                  Ctrl+F7 passive / v0.7.0 Ctrl+F4 upscale toggles (kernel32 Beep on a worker thread)
 void LoadConfig() {
+    InitKeyBinds();                                      // v0.7.7: defaults first, key_* lines below override
     wchar_t path[MAX_PATH];
     FILE* f = nullptr;
     if (PathNextToDll(L"dlaa.ini", path)) _wfopen_s(&f, path, L"r");
@@ -3240,6 +3381,7 @@ void LoadConfig() {
             while (*key == ' ' || *key == '\t') ++key;
             for (char* e = eq - 1; e >= key && (*e == ' ' || *e == '\t'); --e) *e = 0;
             const long v = strtol(eq + 1, nullptr, 10);
+            if (!strncmp(key, "key_", 4)) { SetKeyBindFromIni(key, eq + 1); continue; }   // v0.7.7 hotkeys
             if      (!strcmp(key, "jitter_sign_x"))  g_signX = v < 0 ? -1 : 1;
             else if (!strcmp(key, "jitter_sign_y"))  g_signY = v < 0 ? -1 : 1;
             else if (!strcmp(key, "jitter_enabled")) g_jitterEnabled = v != 0;
@@ -3350,6 +3492,7 @@ void LoadConfig() {
         (int)g_mvOn.load(), nearRej, (double)egoOrigin, (double)egoPixel, mvShift, mvWorldSlots, mvCabinSlots,
         g_gpuTiming, g_traceAutoFrame, preset, (double)sharp, (double)sharpRadius, area, feather,
         (int)g_dlssUpscale.load(), (int)g_beeps);
+    LogKeyBinds();
 }
 
 // Create + enable one MinHook detour; logs the outcome.
@@ -3495,13 +3638,13 @@ void StartInjection() {
 #ifdef WITH_DLAA
     g_dlaaDisabled = DlaaOffFilePresent();
     g_dlaaOn = !g_dlaaDisabled;
-    Log("DLAA build: %s", g_dlaaDisabled ? "dlaa_off.txt found -- starts OFF (press End in-game to enable)"
-                                         : "starts ON (Shift+F11 toggles; dlaa_off.txt next to the DLL = start OFF)");
+    Log("DLAA build: %s", g_dlaaDisabled ? "dlaa_off.txt found -- starts OFF (use the mode / DLAA toggle key in-game to enable)"
+                                         : "starts ON (the DLAA toggle key switches it; dlaa_off.txt next to the DLL = start OFF)");
     if (g_iniMode >= 0 && !g_dlaaDisabled) {             // v0.7.2: the mode saved by the End key wins over dlss_upscale
         g_dlaaOn = g_iniMode != 0;
         if (g_iniMode != 0) g_dlssUpscale = g_iniMode == 2;
-        Log("mode from dlaa.ini: %s (End cycles DLAA -> DLSS -> off and saves it)",
-            g_iniMode == 1 ? "DLAA" : (g_iniMode == 2 ? "DLSS" : "OFF"));
+        Log("mode from dlaa.ini: %s (%s cycles DLAA -> DLSS -> off and saves it)",
+            g_iniMode == 1 ? "DLAA" : (g_iniMode == 2 ? "DLSS" : "OFF"), KeyName(KA_MODE_CYCLE));
     }
 #else
     Log("DLAA build: not compiled in (WITH_DLAA=OFF) -- detect + log only");

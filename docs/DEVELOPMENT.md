@@ -11,6 +11,14 @@ A from-scratch DLAA anti-aliasing injector for Euro Truck Simulator 2 and
 American Truck Simulator (Prism3D engine, DirectX 11.1), targeting both flat and
 VR (Virtual Desktop / SteamVR).
 
+> **v0.7.7 (re-bindable hotkeys):** every hotkey is an action with a binding in `dlaa.ini` (`key_mode_cycle`,
+> `key_model_1..4`, `key_area_down/up`, `key_sharpen_down/up`, `key_width_down/up`, `key_dlaa_toggle`, `key_save`,
+> `key_upscale_toggle`, `key_mv_toggle`, `key_mv_debug`, `key_passive`, `key_jitter_only`, `key_selftest`,
+> `key_snapshot`, `key_trace`, `key_jitter_sign`; value `[Shift+][Ctrl+][Alt+]Key` or `none`, defaults = the old keys).
+> Same rules as before (down-edge, focused game, exact modifiers, top-level Present); one per-VK edge table
+> (`PollKeys`) replaces the F-key-only one. Bad values log a warning and keep the default; duplicate combos warn
+> at load. See [`KEYS.md`](KEYS.md).
+>
 > **v0.7.3 – v0.7.5 (after the status below):** v0.7.3 flat: a blit RT with exactly the backbuffer's size and
 > format is the backbuffer (the `GetBuffer(0)` pointer of the last Present is not always the texture the game
 > blits into; the blit was taken for a VR eye and the mod stuck in VR mode). v0.7.4: flat / VR comes from the
