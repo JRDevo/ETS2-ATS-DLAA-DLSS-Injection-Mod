@@ -108,6 +108,59 @@ upscaling).
 `r_scale_y` then shrink the render below that eye size for DLSS to reconstruct back
 up to it.
 
+## Models (presets) — which one to use
+
+A "model" (NVIDIA calls it a *render preset*) is the neural network that cleans
+the picture. All of them remove jagged edges; they differ in how sharp and stable
+the result is and in how much GPU time they cost. Switch live with
+`Shift+F1`..`F4` (1 to 4 beeps), look for a few seconds, then save your choice
+with `Shift+F12`.
+
+| Key | Model | Picture | GPU cost | Use it when |
+|-----|-------|---------|----------|-------------|
+| `Shift+F1` | **1 = default** (the driver's pick, currently preset `K`) | Newest model: most detail, most stable fine lines | High | Flat screen, or VR with GPU time to spare |
+| `Shift+F2` | **2 = `E`** | Clean and calm, slightly softer than model 1 | Low | **Start here in VR.** Best balance of picture and frame rate |
+| `Shift+F3` | **3 = `F`** | Smoothest edges; holds on to old frames the longest, so fine moving detail (road texture, fences) can smear | Low (same as `E`) | You still see shimmer with model 2 and do not mind some softness in motion |
+| `Shift+F4` | **4 = `M`** | Very heavy model | Very high | Flat screen only, on a strong card. Not usable in VR |
+
+How to pick:
+
+1. Start with **model 2**. Drive for a minute. Watch thin things in the distance:
+   power lines, fences, lamp posts, road markings.
+2. Frame rate is still fine and you want more detail? Try **model 1**. If the
+   frame rate drops (in VR: stutter or reprojection), go back to 2 — or, in VR,
+   make the DLAA area smaller with `Shift+F5` so model 1 only works on the middle
+   of the view.
+3. Still shimmer on model 2? Try **model 3**. If the road or fences look smeared
+   while moving, go back to 2.
+4. Press `Shift+F12` to save.
+
+What to expect:
+
+- **No model makes the picture sharper than what the game renders.** They remove
+  crawling and flicker on edges. If the picture is soft, raise the render scale
+  (see above) or the sharpening (`Shift+F7` / `F8`); do not look for a "sharper
+  model".
+- **Cost grows with resolution.** As an example, on a top-end card at a very high
+  VR resolution (about 4600 × 6500 per eye) we measured per eye: model 2 and 3
+  about 1 ms, model 1 about 2.5 ms, model 4 about 9 ms. At 72 Hz a frame has
+  14 ms in total, for both eyes and the game. On a flat 1440p or 4K screen all
+  of them are much cheaper.
+- **Things that move on their own** (traffic, wheels, wipers) can show a little
+  ghosting with any model. The mod knows how the camera moves, not how each
+  object moves.
+- **A model change takes one short hitch** (a few hundredths of a second) while
+  the new network loads.
+- **The menu and truck-preview screens always use model 2.** The model keys only
+  change the picture while driving.
+- Which models exist depends on the `nvngx_dlss.dll` you installed. `E` and `F`
+  are older models that newer DLSS files may drop one day; if a model cannot be
+  created the mod falls back to model 1 by itself. More letters (`J`, `L`) can be
+  set with `dlss_preset` in `dlaa.ini`.
+- The same model is used in **DLAA** and **DLSS** mode. The mode (`End` key)
+  decides *what resolution* the model works from; the model decides *how* it
+  cleans the picture.
+
 ## Controls
 
 **Every key can be changed.** Open `dlaa.ini`, find the `key_...` line for the
