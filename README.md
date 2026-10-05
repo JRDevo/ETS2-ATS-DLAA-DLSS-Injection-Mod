@@ -1,4 +1,4 @@
-** Ive removed my post from Reddit, you cant be constructive there. **
+**I've removed my post from Reddit, you can't be constructive there.**
 
 # ETS2 & ATS: DLAA & DLSS Injection Mod
 
@@ -14,7 +14,7 @@ account, no in-game menu — a few hotkeys and an optional text config.
 
 ## ⬇ Download
 
-**[Download the latest release here](https://github.com/JRDevo/ETS2-ATS-Truckers-DLAA-DLSS-Mod/releases/latest)**
+**[Download the latest release here](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/releases/latest)**
 — get the `.zip` under **Assets**, then follow [Install](#install) below.
 (The green **Code** button downloads the source code, not the mod.)
 
@@ -22,7 +22,7 @@ This is an unofficial fan project. It is not affiliated with, or endorsed by, SC
 Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
-> Status: v0.7.7. DLAA has been run in ETS2 (VR) and ATS (flat and VR). The DLSS
+> Status: v0.7.10. DLAA has been run in ETS2 (VR) and ATS (flat and VR). The DLSS
 > *upscaling* path (render below native, reconstruct up) runs in VR but is still
 > being tuned. Treat upscaling as experimental.
 
@@ -40,7 +40,7 @@ trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 ## Install
 
 1. **Make a backup** of the game's `bin\win_x64\` folder first.
-2. [Download the latest release zip](https://github.com/JRDevo/ETS2-ATS-Truckers-DLAA-DLSS-Mod/releases/latest)
+2. [Download the latest release zip](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/releases/latest)
    and unzip it.
 3. Find the game's executable folder, e.g.
    `...\steamapps\common\Euro Truck Simulator 2\bin\win_x64\`
@@ -233,7 +233,7 @@ was used). The full template with every key and its default is in
 | `sharp_radius` | `1.5` | sharpening width in texels, `1`..`4` |
 | `dlaa_area` | `100` | run DLAA on the centre `N` % of each eye image (VR performance), `40`..`100`. VR only: in flat mode the whole picture is always used |
 | `preview_dlaa` | `1` | `1` = also anti-alias the profile / truck-preview screen (flat and VR); `0` = leave that screen untouched. VR at eye resolution needs a lot of GPU memory and time there, turn it off if that screen stutters. That screen always uses model 2 (preset E); the model keys change the drive only |
-| `jitter_sign_x` / `jitter_sign_y` | `-1` | flip if the image shimmers or looks doubled (try the 4 combinations) |
+| `jitter_sign_x` / `jitter_sign_y` | `1` | flip if the image shimmers or looks doubled (try the 4 combinations) |
 | `beeps` | `1` | `0` = silence the hotkey beeps |
 | `key_<action>` | *(see KEYS.md)* | re-bind any hotkey, e.g. `key_dlaa_toggle = Ctrl+D`, or `none` to disable it. Full list and format: [`docs/KEYS.md`](docs/KEYS.md) |
 | `debug` | `0` | `1` = write the log file `dlaa_inject.log` (off by default) |
@@ -248,7 +248,9 @@ was used). The full template with every key and its default is in
   "verify files" and it reverts), or antivirus may have quarantined the unsigned
   DLL. A `dxgi.dll`/`dinput8.dll` from another mod still present will also conflict.
 - **No DLAA, or a crash referencing NGX/DLSS:** `nvngx_dlss.dll` is missing or too
-  old — add or update it (see Install step 5).
+  old — add or update it (see Install step 6).
+- **No DLAA with Windows HDR on:** up to v0.7.10 the mod does not work when Windows HDR is on (the log shows
+  `blits=0`). Turn HDR off in *Windows Settings → Display → HDR*. HDR support is being tested for the next version.
 - **Start with DLAA off** (detect + log only): put an empty file named
   `dlaa_off.txt` next to `dinput8.dll` before launch. `Shift+F11` / `End` still
   switch it on.
