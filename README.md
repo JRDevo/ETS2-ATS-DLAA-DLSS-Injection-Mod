@@ -1,3 +1,5 @@
+** Ive removed my post from Reddit, you cant be constructive there. **
+
 # ETS2 & ATS: DLAA & DLSS Injection Mod
 
 NVIDIA DLAA and DLSS upscaling for **Euro Truck Simulator 2** and **American Truck
