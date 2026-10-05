@@ -1,0 +1,56 @@
+# Bug flow: an issue that waits for the reporter carries the label "needs-info".
+#   - day 7 without any activity : a reminder comment + label "stale"
+#   - day 14 without any activity: the issue is closed (reason "not planned")
+#   - the reporter comments      : "needs-info" and "stale" are removed, the clock stops
+# Issues without "needs-info" are never touched.
+name: Needs-info bug flow
+
+on:
+  schedule:
+    - cron: '17 4 * * *'        # once a day
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+
+jobs:
+  close-silent:
+    if: github.event_name != 'issue_comment'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          only-labels: needs-info
+          stale-issue-label: stale
+          days-before-stale: 7
+          days-before-close: 7
+          days-before-pr-stale: -1
+          days-before-pr-close: -1
+          close-issue-reason: not_planned
+          stale-issue-message: >
+            We need more information to work on this. Please send what was asked above
+            (normally `dlaa_inject.log` and `dlaa.ini`, made with the latest version).
+            Without an answer this issue closes in 7 days.
+          close-issue-message: >
+            Closed: no answer for 2 weeks. If you still have the problem, comment here with
+            the requested files and we open it again.
+
+  reporter-answered:
+    # the reporter (not a maintainer, not a bot) commented on an issue that waits for them
+    if: >
+      github.event_name == 'issue_comment' &&
+      !github.event.issue.pull_request &&
+      github.event.comment.user.login == github.event.issue.user.login &&
+      contains(github.event.issue.labels.*.name, 'needs-info')
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh issue edit "$ISSUE" --repo "$REPO" --remove-label needs-info
+          gh issue edit "$ISSUE" --repo "$REPO" --remove-label stale || true
+          if [ "${{ github.event.issue.state }}" = "closed" ]; then gh issue reopen "$ISSUE" --repo "$REPO"; fi
