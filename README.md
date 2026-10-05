@@ -22,6 +22,8 @@ account, no in-game menu — a few hotkeys and an optional text config.
 - **DLSS upscaling** — render fewer pixels and let DLSS rebuild the full picture, for more frame rate.
 - **Flat and VR** — one DLL and one `dlaa.ini` for both. VR runs one pass per eye (OpenXR).
 - **Windows HDR** — works with HDR on in flat mode (new in v0.8.0).
+- **NVIDIA Smooth Motion** — works with the driver's frame generation switched on, in flat mode
+  (new in v0.8.1).
 - **Menu and truck-preview screens** get anti-aliasing too, not only the drive.
 - **Four DLSS models** to pick from, switched live with a key, from light to heavy.
 - **Adjustable sharpening** — strength and width, live.
@@ -42,7 +44,7 @@ This is an unofficial fan project. It is not affiliated with, or endorsed by, SC
 Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
-> Status: v0.8.0. Windows HDR works in flat mode (new in v0.8.0). DLAA has been run in ETS2 (VR) and ATS (flat and VR). The DLSS
+> Status: v0.8.1. Works with NVIDIA Smooth Motion on in flat mode (new in v0.8.1). Windows HDR works in flat mode (since v0.8.0). DLAA has been run in ETS2 (VR) and ATS (flat and VR). The DLSS
 > *upscaling* path (render below native, reconstruct up) runs in VR but is still
 > being tuned. Treat upscaling as experimental.
 
@@ -273,6 +275,11 @@ was used). The full template with every key and its default is in
 - **Windows HDR:** supported from v0.8.0 in flat mode (driving and the menu / truck-preview screen). Older
   versions do nothing with HDR on (the log shows `blits=0`): update. If brightness or colours change when you
   switch DLAA on and off in HDR, put `dlss_hdr = 0` in `dlaa.ini` and report it.
+- **NVIDIA Smooth Motion:** supported from v0.8.1 in flat mode (driving and the menu / truck-preview
+  screen). Older versions do nothing with Smooth Motion on (the log shows `passes=0 blits=0` and
+  `caller=NvPresent64.dll`): update. Smooth Motion only adds frames on the monitor; it does nothing for
+  the headset picture in VR, so switch it off for VR.
+- **Faint dark line down the middle of the menu / truck-preview screen:** fixed in v0.8.1: update.
 - **Start with DLAA off** (detect + log only): put an empty file named
   `dlaa_off.txt` next to `dinput8.dll` before launch. `Shift+F11` / `End` still
   switch it on.

@@ -28,6 +28,7 @@ enum Id : int {
     kPvBlitPs,             // preview_blit.cpp   kPvBlitPs               ps_5_0
     kPvStats,              // inject.cpp         kPvStatsShader          cs_5_0 (Ctrl+F10 preview capture metrics)
     kPvDepthAsm,           // inject.cpp         kPvDepthAsmShader       cs_5_0 (tiled preview: picture depth assembly)
+    kPvEdgeFill,           // inject.cpp         kPvEdgeFillShader       cs_5_0 (v0.8.1: preview tile edge, zero-guarded fill)
     kCount
 };
 

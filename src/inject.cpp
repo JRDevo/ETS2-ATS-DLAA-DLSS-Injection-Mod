@@ -1,3 +1,75 @@
+// v0.8.1 -- PRESENT LAYER (driver frame generation, NVIDIA Smooth Motion = NvPresent64.dll). The layer presents its own
+//           swapchain from its own D3D11 device on its own thread (real + generated frames); the game renders on another
+//           device and its own Present never reaches our dxgi hook. v0.8.0 took the game context from the presenting
+//           device, the v0.6.2 filter then threw every game call away (log captures/dlaa_inject_ats_flat_smoothmotion_on.log:
+//           caller=NvPresent64.dll, "G-buffer bind on a non-game context ... not adopted", passes=0 blits=0). Now:
+//           (a) ADOPTION: scene binds (4 RTVs + D32S8 >= 1024 = G-buffer, or the preview pass shape) on ONE foreign
+//           immediate context (>= 60 binds, >= 1 s, >= 30 Presents) while the presenting context has passes=0 blits=0,
+//           the Presents come from another thread and not from the game exe -> that context becomes the game context
+//           on its own thread, under g_plMx (hkPresent's per-frame work runs under it until then). Soft: nothing was
+//           created on the presenting device, so DLAA is NOT forced off (ResetPassTracking's restart rule is for a real
+//           device change). Blocked evidence logs one WARNING with the reason. A known present-layer module
+//           (nvpresent*) presenting another device while the game context is known never flips it (UpdateGameContext).
+//           (b) FRAME BOUNDARY: in present-layer mode hkPresent (layer thread) only counts + logs (g_plPresents; the
+//           layer presents generated frames too: ETS2 test ~140/s vs ~70 game frames/s). The per-frame work (hotkeys,
+//           trace, NGX pre-warm, preview bookkeeping, NGX create budget, status logs, backbuffer) runs on the game
+//           render thread (g_plGameTid, hard-gated: a request from any other thread is dropped + logged) at the
+//           FRAME-END RULE (FrameEndOnBind / FrameEndOnDraw): the frame ends at the first bind of a non-screen target
+//           after a FINAL draw into the screen target (RT0 with the backbuffer's size / format) -- not a 3-vertex
+//           R11G11B10 tile composite (the SDR profile screen composites its 4 tile passes into the backbuffer), and
+//           only after non-screen work since the last end. Simulated on both traces (ATS HDR world, ETS2 SDR profile
+//           screen): exactly 1 per frame, with and without the runtime's post-Present unbind; the naive "any backbuffer
+//           draw" rule gave 4 (profile) / 2 (world). In normal mode the rule only counts ("frame-end rule check" lines).
+//           g_frames counts these game frames. Fallbacks while the rule finds nothing for 1 s: the scene depth clear
+//           that starts a world pass, else an idle boundary (a game bind after 30 ms without one); both turn the
+//           preview path off (PreviewFramesOk), it needs exact frames. The first build used RSSetViewports with 0
+//           viewports as an "engine frame-start marker": the test logs showed it is the D3D11 runtime inside Present
+//           (caller d3d11.dll+0x196ff5; under the layer 0 on the game context during play, and once from the layer's
+//           thread at shutdown, which ran the per-frame work on the wrong thread) -- now a diagnostic line only.
+//           (c) BACKBUFFER: size / format = the presenting swapchain's (ETS2 test: the game's target had the same
+//           3840x2160 fmt=24, matched by the v0.7.3 desc rule); the identity is the screen target a frame-end boundary
+//           ends on. Both are logged.
+//           (d) NGX: the pre-warm never runs on the presenting device while Presents come through a known present
+//           layer. Round 3 (ETS2 test: waiting for the adoption put its 0.6 s exactly on the first menu truck = a
+//           visible jerk): MaybeEarlyPrewarm runs it on the boot screen instead, on the game's render thread inside the
+//           game's own OMSetRenderTargets, on the first immediate context that is not the presenting one, of another
+//           device, called from inside the game exe image, not on the layer's thread, 10 binds in a row. The adoption
+//           line says whether NGX is already on the adopted device (WARNING if not). Fallbacks: no qualifying call =
+//           the pre-warm at the first boundary after the adoption; NGX on a wrong device = NgxAcquire re-initialises
+//           it on the game device while only the pin holds it.
+//           (e) PREVIEW LAYOUT under the layer (round 3, a "jerk" entering the truck screen with full 72/s windows = no
+//           stall): the main menu draws the truck as 4 untiled passes, the truck screen as 2x2 tiles. A settled layout
+//           was re-checked every 31st frame -- ~70 ms at the menus' 400+ Presents/s in normal mode, ~0.43 s at 72 game
+//           frames/s under the layer -- so after a switch the old layout's jitter scale / depth / MVs were applied for up
+//           to 0.43 s (smear), then the verdict reset the history. Under a present layer: every 4th frame. Each layout
+//           switch logs one "preview layout switch" line (stale frames, resets, picture-depth creation ms, our CPU ms
+//           per frame around it).
+//           (f) TILED PREVIEW SEAM (round 4, user: a faint black line at the screen's horizontal middle, top to bottom,
+//           gone with the mode off). Not layer-specific, a bug of the tiled preview since v0.7.8 round 6: the tile
+//           passes' viewport shift is 2x the picture jitter (up to +-0.875 tile px), and a shift beyond +-0.5 px leaves the
+//           tile's first / last column (row) unrasterized = the pass's black clear; the left tiles' right column and the
+//           right tiles' left column meet at the vertical seam. PvFixTileEdges fills such a column / row from its inner
+//           neighbour at the pass's DS discard, before the game's composite. Debug switches (dlaa.ini): preview_edge_fix,
+//           preview_tile_jitter, preview_layout_recheck. Apart from (f), normal (no layer) flat and VR are unchanged.
+//           (g) SEAM LINE, round 5 (user: the line is still there; log captures/dlaa_inject_ets2_v081r4_linestill.log). That
+//           run never left the "NOT a clean tiling -- reference-slot path" verdict (main menu, ~4.6 s of DLAA), no pass was
+//           shifted by more than 0.4375 px and no edge-fix line exists: under the D3D11 pixel-centre rule (f) cannot
+//           explain the line there. Proven from the logs: the verdict itself was wrong. Slots 0 / 2 fit the 2x2 tiling
+//           exactly, slots 1 / 3 with residual ~0.6 and the SAME a.x / b.x in every misread verdict (r2 / r3 / r4 logs);
+//           a tile offset only changes MVP rows 0 / 1, so a different row 3 = another INSTANCE of the same mesh (the game
+//           culls per tile; the first sampled draw of the right tiles is not the left tiles' one). The main menu therefore
+//           ran as untiled (shift scale 1 = the picture moved by half the jitter NGX was told, depth of the top-left tile
+//           stretched over the picture, MVs in tile space) and the truck screen flipped TILED <-> untiled with a history
+//           reset each time. Fixes: PvSolveLayout pairs the first 16 candidates of every pass by draw key and takes the
+//           exact fit (the other passes collect 16 instead of 1); PvFixTileEdges also handles 0 < |shift| <= 0.49 with a
+//           ZERO-GUARDED fill (kPvEdgeFillShader: only texels still at the clear colour get the inner neighbour = a no-op
+//           on a GPU that follows the centre rule). The line's cause is NOT proven by these: the snapshot key on an
+//           RGBA16F (HDR) preview target now runs a SEAM CAPTURE (PvSeam: 8 frames normal + 4 with the preview jitter
+//           forced to 0; bands around x = W/2 of the DLAA input / NGX output / our result / the final target, the tile
+//           RTs' edge columns before the fix, per-frame "pvseam:" lines + a VERDICT line, BMPs). Diagnostics: composites
+//           landing after the target's DLAA ran ("late composites"), the edge-fix stats line every 600 preview frames also
+//           untiled. Debug switches: preview_sharpen (0 = no RCAS on preview units; it ran with the world's 0.7 / r 4),
+//           preview_seam_capture (the seam capture on 8-bit targets too).
 // v0.8.0 -- HDR (flat). With Windows HDR on the game renders a float pipeline and the backbuffer is R10G10B10A2 (HDR10):
 //           forward colour F (RGBA16F) -> composite C = F + bloom (RGBA16F, scene size) -> a 3-vertex copy of C into a
 //           backbuffer-sized RGBA16F output target O (NOT the backbuffer) -> UI into O -> encode O into the backbuffer.
@@ -277,8 +349,11 @@ uint64_t              g_cBbByDesc = 0;    // flat blits matched by size / format
 // into the backbuffer) and the 8-bit blit rule can never match. Only while this is true the HDR blit rule
 // (HandlePossibleBlit) is evaluated at all; each blit is still decided from its own formats. Render thread (Present).
 bool                  g_hdrOut = false;
+// v0.8.1: + the TYPELESS twins (a game-side backbuffer learned under a present layer is a plain texture; a real swapchain
+// buffer from GetBuffer(0) is never typeless, so the normal path is unchanged).
 inline bool IsHdrBackbufferFmt(DXGI_FORMAT f) {
-    return f == DXGI_FORMAT_R10G10B10A2_UNORM || f == DXGI_FORMAT_R16G16B16A16_FLOAT;
+    return f == DXGI_FORMAT_R10G10B10A2_UNORM || f == DXGI_FORMAT_R16G16B16A16_FLOAT ||
+           f == DXGI_FORMAT_R10G10B10A2_TYPELESS || f == DXGI_FORMAT_R16G16B16A16_TYPELESS;
 }
 
 constexpr int kMaxDepth = 4;
@@ -311,6 +386,59 @@ inline bool IsGameCtx(ID3D11DeviceContext* c) {
 inline bool IsGameCtx1(ID3D11DeviceContext1* c) {
     return c && ((void*)c == g_gameCtx1.load(std::memory_order_acquire) ||
                  static_cast<ID3D11DeviceContext*>(c) == g_gameCtx.load(std::memory_order_acquire));
+}
+// ---- v0.8.1 present layer (see the header). Before g_plActive the per-frame work runs in hkPresent under g_plMx;
+// the adoption (game thread) takes the same lock, so the hand-over of the render-thread state is ordered. Once
+// g_plActive is set it never clears, and hkPresent touches nothing but the atomics below and the log.
+std::atomic<bool>          g_plActive{false};     // present-layer mode: per-frame work on the game render thread
+std::atomic<bool>          g_plSuspect{false};    // a top-level Present came from a known present-layer module
+std::atomic<bool>          g_plAdopted{false};    // the game context was adopted from the scene render (evidence)
+std::atomic<bool>          g_plBlockLogged{false};// the one "adoption evidence seen but BLOCKED" WARNING was written
+std::mutex                 g_plMx;                // hkPresent's per-frame work (until g_plActive) vs the adoption
+std::atomic<unsigned long> g_plPresentTid{0};     // thread of the last top-level Present (evidence)
+std::atomic<void*>         g_plPresentCaller{nullptr};   // its return address (evidence: which module presents)
+std::atomic<uint64_t>      g_plPresents{0};       // top-level Presents while g_plActive (layer thread; generated frames too)
+std::atomic<uint64_t>      g_plScDesc{0};         // presenting swapchain: W | H << 20 | format << 40 (0 = unknown)
+std::atomic<int64_t>       g_plActiveQpc{0};      // QPC when present-layer mode started (boundary fallback / watchdog)
+std::atomic<bool>          g_prewarmDone{false};  // the NGX pre-warm ran (MaybePrewarmNgx, or v0.8.1 the early one)
+char                       g_plModule[64] = "";   // present-layer module name (set under g_plMx, log only)
+std::atomic<unsigned long> g_plGameTid{0};        // the game render thread in present-layer mode: EVERY boundary runs there
+// Game render thread (present-layer mode) / any top-level work otherwise:
+uint32_t                   g_plDraws = 0;         // game-context draws since the last game-thread frame boundary
+uint64_t                   g_mkMarkers = 0;       // RSSetViewports(0 viewports) on the game context (the D3D11 runtime inside
+                                                  // Present, d3d11.dll+0x196ff5 in the v0.8.1 test logs): diagnostic only
+uint64_t                   g_plBoundRule = 0;     // game-thread frame boundaries from the frame-end rule (FrameEndOnBind)
+uint64_t                   g_plBoundFallback = 0; // ... taken at the scene depth clear (no rule frame end for 1 s)
+uint64_t                   g_plBoundIdle = 0;     // ... taken at a game bind after >= 30 ms without any (no rule frame end for 1 s)
+bool                       g_plRuleDriving = false; // the last boundary came from the frame-end rule (preview needs exact frames)
+enum PlBoundaryKind { kPlbFrameEnd = 0, kPlbSceneClear = 1, kPlbIdle = 2 };
+inline bool PresentLayerActive() { return g_plActive.load(std::memory_order_acquire); }
+inline uint64_t PlPackDesc(UINT w, UINT h, DXGI_FORMAT f) {
+    return (uint64_t)(w & 0xFFFFFu) | ((uint64_t)(h & 0xFFFFFu) << 20) | ((uint64_t)(unsigned)f << 40);
+}
+inline UINT        PlDescW(uint64_t d) { return (UINT)(d & 0xFFFFFu); }
+inline UINT        PlDescH(uint64_t d) { return (UINT)((d >> 20) & 0xFFFFFu); }
+inline DXGI_FORMAT PlDescF(uint64_t d) { return (DXGI_FORMAT)(unsigned)(d >> 40); }
+void OnFrameStartMarker(ID3D11DeviceContext* ctx, void* caller);    // hkRSSetViewports, game ctx, 0 viewports (diagnostic)
+void LayerFrameBoundary(ID3D11DeviceContext* ctx, int kind);        // the game-thread frame boundary (PlBoundaryKind)
+void FrameEndOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* rtvs);   // the frame-end rule
+void FrameEndOnDraw(ID3D11DeviceContext* ctx, UINT verts, bool indexed);
+void FrameEndReset();                                                // the rule's state back to "nothing seen" (adoption)
+// v0.8.1: the profile-screen preview path needs exact frame boundaries (per-frame slots / jitter); under a present layer
+// it only runs while the frame-end rule drives the frames (fallback boundaries can land mid-frame).
+inline bool PreviewFramesOk() { return !g_plActive.load(std::memory_order_relaxed) || g_plRuleDriving; }
+// v0.8.1: present-layer mode, this is the game render thread (the only thread a boundary / the frame-end rule runs on).
+inline bool PlOnGameThread() {
+    const unsigned long t = g_plGameTid.load(std::memory_order_relaxed);
+    return t != 0 && t == GetCurrentThreadId();
+}
+void LayerBoundaryWatchdog();                                        // no boundary for 5 s -> one WARNING
+// Game-context Draw / DrawIndexed (not our own work): feeds the frame-end rule and the fallbacks' "draws since the last
+// boundary"; every 4096 draws in present-layer mode the watchdog looks at the clock.
+inline void CountGameDraw(bool inDlaa, ID3D11DeviceContext* ctx, UINT verts, bool indexed) {
+    if (inDlaa) return;
+    FrameEndOnDraw(ctx, verts, indexed);
+    if ((++g_plDraws & 4095u) == 0 && g_plActive.load(std::memory_order_relaxed)) LayerBoundaryWatchdog();
 }
 int      g_signX = +1, g_signY = +1;     // dlaa.ini: NGX jitter = sign * viewport shift
                                          // (+1,+1) won the F9 self-test 2026-10-03: least flicker, sharpest
@@ -532,6 +660,34 @@ void DescribeAddr(void* addr, char* buf, size_t cap) {
     }
     snprintf(buf, cap, "?(%p)", addr);
 }
+// v0.8.1: base name ("NvPresent64.dll") of the module containing addr; false (out = "") when there is none.
+bool ModuleBaseOf(void* addr, char* out, size_t cap) {
+    out[0] = 0;
+    HMODULE mod = nullptr;
+    if (!addr || !GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                     reinterpret_cast<LPCWSTR>(addr), &mod) || !mod) return false;
+    wchar_t wpath[MAX_PATH]{};
+    if (!GetModuleFileNameW(mod, wpath, MAX_PATH)) return false;
+    const wchar_t* base = wcsrchr(wpath, L'\\');
+    base = base ? base + 1 : wpath;
+    WideCharToMultiByte(CP_UTF8, 0, base, -1, out, (int)cap - 1, nullptr, nullptr);
+    out[cap - 1] = 0;
+    return out[0] != 0;
+}
+// v0.8.1: a known driver frame-generation present layer (NVIDIA Smooth Motion: NvPresent64.dll / NvPresent.dll). It
+// presents its OWN swapchain from its own device and thread; the game's render device is never the presenting one.
+inline bool IsPresentLayerName(const char* base) { return base && _strnicmp(base, "nvpresent", 9) == 0; }
+// v0.8.1: base name of the game exe (compare against a Present caller module).
+const char* GameExeBase() {
+    static char s_exe[MAX_PATH] = "";
+    if (!s_exe[0]) {
+        char path[MAX_PATH] = "";
+        GetModuleFileNameA(nullptr, path, MAX_PATH);
+        const char* b = strrchr(path, '\\');
+        strncpy_s(s_exe, b ? b + 1 : path, _TRUNCATE);
+    }
+    return s_exe;
+}
 
 // ---- v0.5.7 audible feedback (the user is in a headset) -----------------------------------------------
 // Beep sequences play on a short-lived worker thread (kernel32 Beep blocks for its duration), never on the
@@ -590,7 +746,9 @@ void OnPresentBoundary(uint64_t n);      // per-Present frame reset (eye counter
 bool g_logTick = false;                  // v0.7.10: this Present prints the periodic log lines (first frames + every 10 s of wall clock)
 void TraceAtPresent(IDXGISwapChain* sc, uint64_t n);   // F11 frame trace, defined below
 extern std::atomic<bool> g_traceRequest; // v0.6.5: set by the Ctrl+F11 handler in hkPresent, defined with the trace state below
-void UpdateGameContext(IDXGISwapChain* sc, uint64_t n); // v0.6.2: g_gameCtx from the presenting device
+bool UpdateGameContext(IDXGISwapChain* sc, uint64_t n, void* caller); // v0.6.2: g_gameCtx from the presenting device
+                                         // (v0.8.1: true = a present layer took over, present-layer mode is now on)
+void LayerBackbufferAtBoundary(ID3D11DeviceContext* ctx, uint64_t n, bool fromRule); // v0.8.1 game-side backbuffer
 void ResetSpanWindow();                  // v0.6.2: restart the "GPU spans" averaging window
 void TogglePassive(uint64_t n);          // v0.6.2 (v0.6.5 Ctrl+F7)
 #ifdef WITH_DLAA
@@ -607,73 +765,60 @@ void PreviewNextFrame(uint64_t n);       // v0.7.8 per-Present preview bookkeepi
 void MaybePrewarmNgx();                  // v0.7.8 NGX pre-warm at the first Present with DLAA on
 #endif
 
-HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
-    const int   depth  = t_depth;
-    void* const caller = _ReturnAddress();
-    char where[MAX_PATH + 32];
-    const unsigned long tid = GetCurrentThreadId();
+// v0.7.10: the periodic log cadence -- by wall clock, not frame count (loading screens Present at 1000+ fps and flooded
+// the log). v0.8.1: one function for both frame drivers (hkPresent, or the game-thread boundary under a present layer;
+// never both at once, see g_plMx).
+bool ComputeLogTick(uint64_t n) {
+    static ULONGLONG s_lastLogTick = 0;
+    const ULONGLONG nowTick = GetTickCount64();
+    const bool tick = n < 5 || nowTick - s_lastLogTick >= 10000;
+    if (tick) s_lastLogTick = nowTick;
+    return tick;
+}
 
-    if (depth >= kMaxDepth) {                   // safety: break the loop
-        const uint64_t c = g_cuts.fetch_add(1);
-        g_reentrant.fetch_add(1);
-        if (c < 5) {
-            DescribeAddr(caller, where, sizeof(where));
-            Log("recursion cut at depth %d (tid=%lu caller=%s)", depth, tid, where);
-        }
-        return S_OK;
+// v0.7.3 / v0.8.0 backbuffer identity + size / format + HDR output state (v0.8.1: one place for both frame drivers).
+// bb == nullptr keeps the current identity (only the desc is known). The HDR line is logged on every change (cap), the
+// first one is the "HDR seen" line a bug report needs.
+void ApplyBackbufferDesc(void* bb, UINT w, UINT h, DXGI_FORMAT f, uint64_t n) {
+    if (bb) g_backbuffer.store(bb, std::memory_order_relaxed);
+    g_bbW = w; g_bbH = h; g_bbFmt = f;
+    const bool hdrNow = IsHdrBackbufferFmt(f);
+    if (hdrNow != g_hdrOut) {
+        g_hdrOut = hdrNow;
+        static int hdrLogs = 0;
+        if (hdrLogs++ < 10)
+            Log("%s: backbuffer %ux%u fmt=%d (%s) at Present #%llu -- %s", hdrNow ? "HDR output detected" : "HDR output off",
+                w, h, (int)f,
+                (f == DXGI_FORMAT_R10G10B10A2_UNORM || f == DXGI_FORMAT_R10G10B10A2_TYPELESS) ? "R10G10B10A2_UNORM, HDR10" :
+                (f == DXGI_FORMAT_R16G16B16A16_FLOAT || f == DXGI_FORMAT_R16G16B16A16_TYPELESS) ? "R16G16B16A16_FLOAT, scRGB" : "8-bit",
+                (unsigned long long)n,
+                hdrNow ? "HDR blit rule in use: the world blit is the draw that copies the game's RGBA16F scene "
+                         "composite into its backbuffer-sized RGBA16F output target (DLAA/DLSS run on that RGBA16F "
+                         "scene, see the config line's dlss_hdr); the 8-bit rule stays for any 8-bit blit"
+                       : "8-bit blit rule only (the v0.7.x behaviour)");
     }
+}
+// Refresh the back buffer identity (cheap; GetBuffer(0) is stable but can change on ResizeBuffers). Release the ref at
+// once: the pointer is only compared.
+void RefreshBackbufferFromSwapchain(IDXGISwapChain* sc, uint64_t n) {
+    ID3D11Texture2D* bb = nullptr;
+    if (SUCCEEDED(sc->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&bb)) && bb) {
+        D3D11_TEXTURE2D_DESC bbd{};                  // v0.7.3: size / format for the flat blit match
+        bb->GetDesc(&bbd);
+        bb->Release();
+        ApplyBackbufferDesc(bb, bbd.Width, bbd.Height, bbd.Format, n);
+    }
+}
 
-    uint64_t n = 0;
-    if (depth >= 1) {
-        // Re-entered (e.g. via an overlay detour): no DLAA work, pass through.
-        const uint64_t r = g_reentrant.fetch_add(1);
-        if (r < 20) {
-            DescribeAddr(caller, where, sizeof(where));
-            Log("re-entrant Present #%llu depth=%d tid=%lu caller=%s",
-                (unsigned long long)r, depth, tid, where);
-        }
-        return oPresent(sc, sync, flags);
-    } else {
-        n = g_frames.fetch_add(1);
-        // v0.7.10: by wall clock, not frame count -- loading screens Present at 1000+ fps and flooded the log.
-        static ULONGLONG s_lastLogTick = 0;
-        const ULONGLONG nowTick = GetTickCount64();
-        g_logTick = n < 5 || nowTick - s_lastLogTick >= 10000;
-        if (g_logTick) s_lastLogTick = nowTick;
-        if (g_logTick) {                        // first frames + every 10 s
-            DescribeAddr(caller, where, sizeof(where));
-            DXGI_SWAP_CHAIN_DESC d{};
-            if (SUCCEEDED(sc->GetDesc(&d)))
-                Log("Present #%llu  %ux%u fmt=%d sync=%u flags=0x%x tid=%lu caller=%s reentrant=%llu",
-                    (unsigned long long)n, d.BufferDesc.Width, d.BufferDesc.Height,
-                    (int)d.BufferDesc.Format, sync, flags, tid, where,
-                    (unsigned long long)g_reentrant.load());
-            else
-                Log("Present #%llu sync=%u flags=0x%x tid=%lu caller=%s reentrant=%llu",
-                    (unsigned long long)n, sync, flags, tid, where,
-                    (unsigned long long)g_reentrant.load());
-        }
-        // v0.7.10: once, at the first top-level Present -- note if Present is reached through a driver / overlay present
-        // layer (not the game exe or dxgi). `where` is "module+0xoffset" (just set by DescribeAddr, since n==0 < 5).
-        if (n == 0) {
-            char mod[MAX_PATH];
-            size_t i = 0;
-            for (; where[i] && where[i] != '+' && i < sizeof(mod) - 1; ++i) mod[i] = where[i];
-            mod[i] = 0;
-            char exePath[MAX_PATH];
-            GetModuleFileNameA(nullptr, exePath, MAX_PATH);
-            const char* eb = strrchr(exePath, '\\');
-            eb = eb ? eb + 1 : exePath;
-            if (_stricmp(mod, eb) != 0 && _stricmp(mod, "dxgi.dll") != 0)
-                Log("note: Present is called through %s (driver/overlay present layer), not %s / dxgi.dll -- the "
-                    "caller= values above are that layer, not the game", mod, eb);
-        }
-    }
-    if (depth == 0) UpdateGameContext(sc, n);   // v0.6.2: before anything else this frame (hotkeys may reset state)
+// The per-frame work (v0.8.1: was the body of hkPresent at depth 0). Normal mode: hkPresent, sc = the presenting
+// swapchain, under g_plMx. Present-layer mode: the game render thread at the frame boundary (LayerFrameBoundary), sc =
+// nullptr, bctx = the game context, fromRule = the boundary is the frame-end rule (between two frames, the frame's last
+// target still bound: the game-side backbuffer identity is taken from it).
+void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx, bool fromRule) {
 #ifdef WITH_DLAA
-    if (depth == 0) MaybePrewarmNgx();          // v0.7.8: NGX init + first feature on the boot screen (once)
+    MaybePrewarmNgx();                          // v0.7.8: NGX init + first feature on the boot screen (once)
 #endif
-    if (depth == 0) {                           // v0.7.7 re-bindable hotkeys (dlaa.ini key_*, see PollKeys)
+    {                                           // v0.7.7 re-bindable hotkeys (dlaa.ini key_*, see PollKeys)
         PollKeys();                              // down-edges for this Present (exact modifiers, foreground only)
 
         // frame trace key. Handled before TraceAtPresent so the request is consumed this same frame.
@@ -784,40 +929,124 @@ HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
     // v0.5: VR -- eye targets via the same device-context hooks.
     // v0.6: ImGui overlay (HOME / Ctrl+P) for live tuning + preset menu.
     // ----------------------------------------------------------------------
-    if (depth == 0) {
-        // Refresh the back buffer identity (cheap; GetBuffer(0) is stable but can change
-        // on ResizeBuffers). Release the ref at once: the pointer is only compared.
-        ID3D11Texture2D* bb = nullptr;
-        if (SUCCEEDED(sc->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&bb)) && bb) {
-            g_backbuffer.store(bb, std::memory_order_relaxed);
-            D3D11_TEXTURE2D_DESC bbd{};                  // v0.7.3: size / format for the flat blit match
-            bb->GetDesc(&bbd);
-            g_bbW = bbd.Width; g_bbH = bbd.Height; g_bbFmt = bbd.Format;
-            bb->Release();
-            // v0.8.0: HDR output on / off (Windows HDR toggled, or the game recreated its swapchain). Logged on every
-            // change (cap), the first one is the "HDR seen" line a bug report needs.
-            const bool hdrNow = IsHdrBackbufferFmt(bbd.Format);
-            if (hdrNow != g_hdrOut) {
-                g_hdrOut = hdrNow;
-                static int hdrLogs = 0;
-                if (hdrLogs++ < 10)
-                    Log("%s: backbuffer %ux%u fmt=%d (%s) at Present #%llu -- %s", hdrNow ? "HDR output detected" : "HDR output off",
-                        bbd.Width, bbd.Height, (int)bbd.Format,
-                        bbd.Format == DXGI_FORMAT_R10G10B10A2_UNORM ? "R10G10B10A2_UNORM, HDR10" :
-                        bbd.Format == DXGI_FORMAT_R16G16B16A16_FLOAT ? "R16G16B16A16_FLOAT, scRGB" : "8-bit",
-                        (unsigned long long)n,
-                        hdrNow ? "HDR blit rule in use: the world blit is the draw that copies the game's RGBA16F scene "
-                                 "composite into its backbuffer-sized RGBA16F output target (DLAA/DLSS run on that RGBA16F "
-                                 "scene, see the config line's dlss_hdr); the 8-bit rule stays for any 8-bit blit"
-                               : "8-bit blit rule only (the v0.7.x behaviour)");
-            }
-        }
+    if (sc) RefreshBackbufferFromSwapchain(sc, n);                       // normal: the presenting swapchain IS the game's
+    else if (bctx) LayerBackbufferAtBoundary(bctx, n, fromRule);         // v0.8.1 present layer: the game side
+    OnPresentBoundary(n);
+}
+
+// v0.8.1: top-level Present in present-layer mode (the layer's own present thread, real AND generated frames). Touches
+// nothing but atomics and the log: counts, remembers the presenting swapchain's desc for the game-side backbuffer logic,
+// one line every 10 s. The game's frames are counted on the game render thread (LayerFrameBoundary -> g_frames).
+HRESULT LayerPresent(IDXGISwapChain* sc, UINT sync, UINT flags, void* caller, unsigned long tid) {
+    const uint64_t k = g_plPresents.fetch_add(1, std::memory_order_relaxed);
+    DXGI_SWAP_CHAIN_DESC d{};
+    const bool haveDesc = SUCCEEDED(sc->GetDesc(&d));
+    if (haveDesc)
+        g_plScDesc.store(PlPackDesc(d.BufferDesc.Width, d.BufferDesc.Height, d.BufferDesc.Format), std::memory_order_relaxed);
+    static std::atomic<ULONGLONG> s_last{0};
+    const ULONGLONG now = GetTickCount64();
+    ULONGLONG last = s_last.load(std::memory_order_relaxed);
+    if (k < 3 || (now - last >= 10000 && s_last.compare_exchange_strong(last, now))) {
+        if (k < 3) s_last.store(now, std::memory_order_relaxed);
+        char where[MAX_PATH + 32];
+        DescribeAddr(caller, where, sizeof(where));
+        Log("Present (present layer) #%llu  %ux%u fmt=%d sync=%u flags=0x%x tid=%lu caller=%s -- game frames so far %llu "
+            "(counted on the game render thread)", (unsigned long long)k, haveDesc ? d.BufferDesc.Width : 0u,
+            haveDesc ? d.BufferDesc.Height : 0u, haveDesc ? (int)d.BufferDesc.Format : 0, sync, flags, tid, where,
+            (unsigned long long)g_frames.load(std::memory_order_relaxed));
     }
-    if (depth == 0) OnPresentBoundary(n);
     ++t_depth;
     const HRESULT hr = oPresent(sc, sync, flags);
     --t_depth;
-    if (depth == 0 && n < 5)
+    if (FAILED(hr)) {
+        const uint64_t f = g_failures.fetch_add(1);
+        if (f < 20)
+            Log("oPresent failed hr=0x%lx (depth=0 tid=%lu, present layer)", (unsigned long)hr, tid);
+    }
+    return hr;
+}
+
+HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
+    const int   depth  = t_depth;
+    void* const caller = _ReturnAddress();
+    char where[MAX_PATH + 32];
+    const unsigned long tid = GetCurrentThreadId();
+
+    if (depth >= kMaxDepth) {                   // safety: break the loop
+        const uint64_t c = g_cuts.fetch_add(1);
+        g_reentrant.fetch_add(1);
+        if (c < 5) {
+            DescribeAddr(caller, where, sizeof(where));
+            Log("recursion cut at depth %d (tid=%lu caller=%s)", depth, tid, where);
+        }
+        return S_OK;
+    }
+
+    if (depth >= 1) {
+        // Re-entered (e.g. via an overlay detour): no DLAA work, pass through.
+        const uint64_t r = g_reentrant.fetch_add(1);
+        if (r < 20) {
+            DescribeAddr(caller, where, sizeof(where));
+            Log("re-entrant Present #%llu depth=%d tid=%lu caller=%s",
+                (unsigned long long)r, depth, tid, where);
+        }
+        return oPresent(sc, sync, flags);
+    }
+    // ---- top level (depth 0) ----
+    g_plPresentTid.store(tid, std::memory_order_relaxed);        // v0.8.1: present-layer evidence (who presents)
+    g_plPresentCaller.store(caller, std::memory_order_relaxed);
+    if (PresentLayerActive()) return LayerPresent(sc, sync, flags, caller, tid);   // v0.8.1: count + log only
+    // v0.8.1: the per-frame work runs under g_plMx until present-layer mode starts (the adoption on the game thread
+    // takes the same lock, so it never overlaps this). Uncontended in normal operation.
+    std::unique_lock<std::mutex> plLock(g_plMx);
+    if (g_plActive.load(std::memory_order_relaxed)) {           // adopted while we waited for the lock
+        plLock.unlock();
+        return LayerPresent(sc, sync, flags, caller, tid);
+    }
+    const uint64_t n = g_frames.fetch_add(1);
+    g_logTick = ComputeLogTick(n);
+    if (g_logTick) {                            // first frames + every 10 s
+        DescribeAddr(caller, where, sizeof(where));
+        DXGI_SWAP_CHAIN_DESC d{};
+        if (SUCCEEDED(sc->GetDesc(&d)))
+            Log("Present #%llu  %ux%u fmt=%d sync=%u flags=0x%x tid=%lu caller=%s reentrant=%llu",
+                (unsigned long long)n, d.BufferDesc.Width, d.BufferDesc.Height,
+                (int)d.BufferDesc.Format, sync, flags, tid, where,
+                (unsigned long long)g_reentrant.load());
+        else
+            Log("Present #%llu sync=%u flags=0x%x tid=%lu caller=%s reentrant=%llu",
+                (unsigned long long)n, sync, flags, tid, where,
+                (unsigned long long)g_reentrant.load());
+    }
+    // v0.7.10: once, at the first top-level Present -- note if Present is reached through a driver / overlay present
+    // layer (not the game exe or dxgi). `where` is "module+0xoffset" (just set by DescribeAddr, since n==0 < 5).
+    if (n == 0) {
+        char mod[MAX_PATH];
+        size_t i = 0;
+        for (; where[i] && where[i] != '+' && i < sizeof(mod) - 1; ++i) mod[i] = where[i];
+        mod[i] = 0;
+        const char* eb = GameExeBase();
+        if (_stricmp(mod, eb) != 0 && _stricmp(mod, "dxgi.dll") != 0)
+            Log("note: Present is called through %s (driver/overlay present layer), not %s / dxgi.dll -- the "
+                "caller= values above are that layer, not the game", mod, eb);
+        // v0.8.1: a known frame-generation present layer presents its own swapchain from its own device: the game
+        // context taken below is most likely NOT the game's render context. Nothing is device-bound until the scene
+        // render shows which context is the game's (adoption) -- the NGX pre-warm waits for it.
+        if (IsPresentLayerName(mod)) {
+            g_plSuspect.store(true, std::memory_order_relaxed);
+            strncpy_s(g_plModule, mod, _TRUNCATE);
+            Log("present layer: %s is a known driver frame-generation present layer (NVIDIA Smooth Motion) -- it presents "
+                "its own swapchain from its own device and thread (tid=%lu); the game's render context is taken from the "
+                "scene render once it is seen (see the 'present layer' lines), the NGX pre-warm waits for it", mod, tid);
+        }
+    }
+    if (!UpdateGameContext(sc, n, caller))      // v0.6.2: before anything else this frame (hotkeys may reset state)
+        PresentFrameWork(sc, n, nullptr, false);// v0.8.1: false = a present layer took over this very Present
+    plLock.unlock();
+    ++t_depth;
+    const HRESULT hr = oPresent(sc, sync, flags);
+    --t_depth;
+    if (n < 5)
         Log("Present #%llu oPresent returned hr=0x%lx", (unsigned long long)n, (unsigned long)hr);
     if (FAILED(hr)) {
         const uint64_t f = g_failures.fetch_add(1);
@@ -2032,6 +2261,11 @@ struct PvSlot {
     int       capShN = 0, capUnshN = 0;
     uint32_t  diCount = 0;                       // round 6: DrawIndexed calls while this pass was bound (diagnostics)
     D3D11_VIEWPORT compVp{};                     // round 6: viewport 0 of its composite Draw (layout log: where it lands)
+    // v0.8.1 round 4: the viewport shift ReconcileViewports applied to this pass (tile px; reset at the slot's bind), for
+    // the tile edge fix-up at its DS discard (PvFixTileEdges).
+    float     shX = 0.0f, shY = 0.0f;
+    bool      shOn = false;
+    D3D11_VIEWPORT capVp{};                      // v0.8.1 round 5 seam capture: the game's last viewport 0 in this pass
 };
 struct PvTarget {                                // per frame, indexed by composite order (reset at Present)
     Microsoft::WRL::ComPtr<ID3D11Texture2D> tex; // this frame's composite target (ref dropped at Present)
@@ -2039,6 +2273,8 @@ struct PvTarget {                                // per frame, indexed by compos
     int       curRef = 99;                       // lowest slot composited into it this frame
     int       slotMask = 0;                      // v0.7.8 capture: every slot composited into it this frame
     int       unit = -1;                         // round 5: unit (= eye) it was given this frame (-1 = not resolved / none)
+    int       flushes = 0;                       // v0.8.1 round 5: PreviewFlush calls on it this frame (DLAA attempts)
+    int       maskAtFlush = 0;                   // ... slotMask at the first of them
 };
 struct PvUnit {                                  // round 5: one DLAA unit per EYE (flat: unit 0), persistent
     SceneDlaa dl;                                // instance tag (SetEye) 10 + unit in the logs ("eye 10" = eye 0)
@@ -2067,6 +2303,18 @@ int              g_ptRefMask    = 0;             // learned reference slots (bit
 int              g_pvCur        = -1;            // slot of the newest preview pass (draw / discard target; -1 none)
 Microsoft::WRL::ComPtr<ID3D11Texture2D> g_pvDs;   // DS_P of the current frame (shared by the passes; ref dropped at Present)
 int              g_previewDlaa  = 1;             // dlaa.ini preview_dlaa (0 = the preview path never activates)
+// v0.8.1 round 4 (black seam line on the TILED truck screen; see PvFixTileEdges). Debug switches, dlaa.ini:
+int              g_pvEdgeFix    = 1;             // preview_edge_fix: 1 = fill the tile edge a > 0.5 px shift leaves uncovered
+uint64_t         g_pvEdgeFixes  = 0;             // tile edge columns / rows filled in total (PvFixTileEdges)
+uint64_t         g_pvEdgeGuarded = 0;            // round 5: zero-guarded edge fills dispatched in total (PvFixTileEdges)
+int              g_pvTileJitter = 1;             // preview_tile_jitter: 0 = TILED passes get no viewport shift and NGX jitter 0
+int              g_pvLayRecheck = 0;             // preview_layout_recheck: settled-layout re-check period in frames (0 = auto:
+                                                 // 4 under a present layer, 31 otherwise)
+// v0.8.1 round 5 (seam line, see PvSeam): debug switches + one diagnostic counter
+int              g_pvSharpen    = 1;             // preview_sharpen: 0 = no RCAS on preview units (the world keeps it)
+int              g_pvSeamAlways = 0;             // preview_seam_capture: 1 = the snapshot key runs the seam capture on 8-bit
+                                                 // preview targets too (RGBA16F / HDR targets always get it)
+uint64_t         g_pvLateComps  = 0;             // composites into a target AFTER its DLAA ran in the same frame
 int              g_pvCaptureAt  = 0;             // dlaa.ini preview_capture_at (debug): Ctrl+F10 capture N Presents after the
 bool             g_pvCaptureAtDone = false;      //   preview DLAA first ran (0 = off); once per session
 uint64_t         g_pvFirstRunPresent = 0;        // Present of the first preview frame with a successful unit run
@@ -2081,9 +2329,38 @@ bool             g_pvHdrTarget  = false;         // v0.8.0: the last flushed pre
 int              g_pvOkFrame    = 0;             // targets that ran OK this frame
 uint64_t         g_pvFrames     = 0, g_pvRunsTotal = 0;   // frames with >= 1 OK target / OK runs in total
 
+// v0.8.1 round 3: the CPU time of our preview work per frame (PreviewFlush, PreviewOnDiscard incl. the tile depth assembly
+// and depth snapshots, PreviewNextFrame incl. the layout readback / verdict) and one line per tile-layout switch with
+// the frames around it, so a test log tells a mod-side cost (resets, resource creation, a stale layout) from the game's.
+int64_t          g_pvCpuTicks   = 0;             // this frame (outermost scopes only)
+double           g_pvCpuRing[4] = {};            // the last 4 finished frames, ms
+int              g_pvCpuHead    = 0;
+uint64_t         g_pvInvalidates = 0;            // PreviewInvalidate calls (= preview DLSS history resets)
+double           g_pvCreateMs   = 0.0;           // time in picture-depth (re)creation (PvEnsureAsm), summed
+thread_local int t_pvCpuDepth   = 0;
+struct PvCpuScope {
+    int64_t t0;
+    PvCpuScope() : t0(t_pvCpuDepth++ == 0 ? Qpc() : 0) {}
+    ~PvCpuScope() { if (--t_pvCpuDepth == 0) g_pvCpuTicks += Qpc() - t0; }
+};
+struct PvSwitchRep {                             // armed by PvSolveLayout on a layout change, logged 8 frames later
+    bool     armed = false;
+    int      g = 0;
+    bool     fromKnown = false, fromTiled = false, toTiled = false;
+    uint64_t frame = 0, queued = 0, prevQueued = 0;
+    double   before[4] = {};
+    double   after[8] = {};
+    int      nAfter = 0;
+    uint64_t inv0 = 0;
+    double   create0 = 0.0;
+};
+PvSwitchRep      g_pvSw;
+int              g_pvSwLogs = 0;
+
 void PreviewInvalidate() {
     for (PvUnit& u : g_pu) u.dl.Mv().Invalidate();
     ++g_pvEpoch;
+    ++g_pvInvalidates;                           // v0.8.1 round 3 (switch report)
 }
 
 // ---- round 5: VR eye of a preview target (RT map + projection verdicts) ------------------------------------------
@@ -2424,6 +2701,17 @@ void PvAsmRegisterShaders() {
 }
 
 struct PvTileFit { float ax = 1.0f, bx = 0.0f, ay = 1.0f, by = 0.0f; };   // tile ndc = a * reference-tile ndc + b
+// v0.8.1 round 5: the layout fit compares the first kPvLayCands world candidates of every pass with the reference
+// pass's (pairs of the SAME draw key, the exact fit wins), not only the two first candidates. The round 3 / 4 test logs
+// classified the main menu as "NOT a clean tiling" in every verdict and the truck screen in about half of them: slots 0
+// and 2 fit the 2x2 tiling exactly, slots 1 and 3 (the right column) with residual ~0.6 and an IDENTICAL a.x / b.x. The
+// tile offset only changes rows 0 / 1 of the MVP, so row 3 (view depth) of every tile equals the reference's for the
+// same object; slots 1 / 3 had a different row 3 -> their first sampled draw is ANOTHER INSTANCE of the same mesh (same
+// IB / VB / offsets / counts, other world matrix: the game culls per tile, so the instance drawn first in the left tiles
+// is not drawn in the right ones). The misread verdict ran the main menu on the untiled path (viewport shift scale 1 =
+// the picture moved by half the jitter NGX was told; depth of the top-left tile stretched over the whole picture; MVs
+// in tile space) and flipped the truck screen between both paths (a history reset at every flip).
+constexpr int    kPvLayCands    = 16;
 struct PvLayout {
     bool      known = false, tiled = false;
     int       slotMask = 0, ref = -1, nTiles = 0;
@@ -2432,22 +2720,27 @@ struct PvLayout {
     UINT      W = 0, H = 0, Wt = 0, Ht = 0;      // picture (target) size, tile RT size
     int       same = 0;                          // identical verdicts in a row
     double    resid = 0.0, area = 0.0;           // worst fit residual, tile area / union area
+    int       mRef[kPvSlots] = {}, mSlot[kPvSlots] = {};   // v0.8.1 round 5: candidate pair of the fit (log only)
 };
 PvLayout         g_pvLay[kPtMax];
 int              g_pvSlotGroup[kPvSlots] = { -1, -1, -1, -1, -1, -1, -1, -1 };   // composite order of each slot (last frame)
 struct PvLayRb {
-    ID3D11Buffer* staging = nullptr;             // kPtMax x kPvSlots x 64 bytes (first MVP of every pass)
+    ID3D11Buffer* staging = nullptr;             // kPtMax x kPvSlots x kPvLayCands x 64 bytes (round 5: first MVPs of every pass)
     int      groups = 0;
     int      mask[kPtMax] = {}, ref[kPtMax] = {};
-    bool     ok[kPtMax] = {};                    // every pass of the group had a first candidate of the same draw
+    bool     ok[kPtMax] = {};                    // every pass of the group had at least one world candidate
     UINT     W[kPtMax] = {}, H[kPtMax] = {}, Wt = 0, Ht = 0;
     uint64_t frame = 0;
+    uint64_t prevFrame = 0;                      // v0.8.1 round 3: frame of the readback queued before this one (0 = none)
+    int      n[kPtMax][kPvSlots] = {};           // v0.8.1 round 5: MVPs copied per pass + their draw keys
+    CandidateRecord::DrawKey key[kPtMax][kPvSlots][kPvLayCands] = {};
 };
 constexpr int    kPvLayRing     = 4;
 PvLayRb          g_pvLayRb[kPvLayRing];
 int              g_pvLayHead = 0, g_pvLayPending = 0;
 bool             g_pvLayInitTried = false, g_pvLayOk = false;
 uint64_t         g_pvLaySettledN = 0, g_pvLayThrottled = 0, g_pvLayChanges = 0;
+uint64_t         g_pvLayLastQueued = 0;          // v0.8.1 round 3: frame of the last queued layout readback
 struct PvAsm {                                   // the picture depth of one group
     PcPtr<ID3D11Texture2D>           tex;        // R32_FLOAT, picture size, SRV + UAV
     PcPtr<ID3D11UnorderedAccessView> uav;
@@ -2525,6 +2818,7 @@ void PvShiftScale(int slot, float* kx, float* ky) {
     if (g < 0 || g >= kPtMax || !g_pvLay[g].tiled || !((g_pvLay[g].slotMask >> slot) & 1)) return;
     *kx = g_pvLay[g].t[slot].ax * g_pvLay[g].hx;
     *ky = g_pvLay[g].t[slot].ay * g_pvLay[g].hy;
+    if (!g_pvTileJitter) { *kx = 0.0f; *ky = 0.0f; }     // v0.8.1 round 4 debug: dlaa.ini preview_tile_jitter = 0
 }
 
 // row t = a * u + b * v (4-vectors), least squares. false = degenerate. *res = |t - a u - b v| / |t|.
@@ -2544,12 +2838,16 @@ bool PvFitRow(const float* u, const float* v, const float* t, double* a, double*
     return std::isfinite(*a) && std::isfinite(*b);
 }
 
-// One group's verdict from a readback (data = kPtMax x kPvSlots MVPs, 16 floats each, rows).
+// One group's verdict from a readback (data = kPtMax x kPvSlots x kPvLayCands MVPs, 16 floats each, rows).
+// v0.8.1 round 5: per pass, every (reference candidate i, pass candidate j) pair with the same draw key is fitted; the
+// pair with the smallest residual (fit + rows 2 / 3) is the pass's fit. Same instance -> exact (1e-8 in the logs); another
+// instance of the mesh -> residual ~0.6, never chosen while the same instance is among the candidates. The first pair
+// (0, 0) alone is the round 4 verdict.
 void PvSolveLayout(int g, const PvLayRb& r, const float* data, uint64_t now) {
     PvLayout L;
     L.known = true; L.slotMask = r.mask[g]; L.ref = r.ref[g];
     L.W = r.W[g]; L.H = r.H[g]; L.Wt = r.Wt; L.Ht = r.Ht;
-    const float* M0 = data + (size_t)(g * kPvSlots + L.ref) * 16;
+    auto mvp = [&](int s, int i) { return data + ((size_t)(g * kPvSlots + s) * kPvLayCands + (size_t)i) * 16; };
     bool fitOk = true;
     double worst = 0.0, areaSum = 0.0;
     double xmin = 1e30, xmax = -1e30, ymin = 1e30, ymax = -1e30;
@@ -2557,18 +2855,34 @@ void PvSolveLayout(int g, const PvLayRb& r, const float* data, uint64_t now) {
     for (int s = 0; s < kPvSlots; ++s) {
         if (!((L.slotMask >> s) & 1)) continue;
         ++L.nTiles;
-        const float* M = data + (size_t)(g * kPvSlots + s) * 16;
-        double ax = 1, bx = 0, ay = 1, by = 0, rx = 0, ry = 0;
+        double ax = 1, bx = 0, ay = 1, by = 0;
         if (s != L.ref) {
-            if (!PvFitRow(M0, M0 + 12, M, &ax, &bx, &rx) || !PvFitRow(M0 + 4, M0 + 12, M + 4, &ay, &by, &ry)) {
-                fitOk = false; snprintf(why, sizeof(why), "slot %d: degenerate fit", s); continue;
+            double best = 1e30;
+            int pairs = 0;
+            for (int i = 0; i < r.n[g][L.ref]; ++i)
+                for (int j = 0; j < r.n[g][s]; ++j) {
+                    if (!PvSameKey(r.key[g][L.ref][i], r.key[g][s][j])) continue;
+                    ++pairs;
+                    const float* M0 = mvp(L.ref, i);
+                    const float* M = mvp(s, j);
+                    double fax, fbx, fay, fby, rx, ry;
+                    if (!PvFitRow(M0, M0 + 12, M, &fax, &fbx, &rx) || !PvFitRow(M0 + 4, M0 + 12, M + 4, &fay, &fby, &ry))
+                        continue;
+                    double d23 = 0, n23 = 1e-9;          // rows 2 / 3 must be the reference's
+                    for (int k = 8; k < 16; ++k) {
+                        d23 = (std::max)(d23, (double)std::fabs(M[k] - M0[k]));
+                        n23 = (std::max)(n23, (double)std::fabs(M0[k]));
+                    }
+                    const double res = (std::max)((std::max)(rx, ry), d23 / n23);
+                    if (res < best) { best = res; ax = fax; bx = fbx; ay = fay; by = fby; L.mRef[s] = i; L.mSlot[s] = j; }
+                }
+            if (best >= 1e29) {
+                fitOk = false;
+                snprintf(why, sizeof(why), pairs ? "slot %d: degenerate fit" : "slot %d: no draw in common with the reference "
+                         "among the first %d candidates", s, kPvLayCands);
+                continue;
             }
-            double d23 = 0, n23 = 1e-9;                  // rows 2 / 3 must be the reference's
-            for (int i = 8; i < 16; ++i) {
-                d23 = (std::max)(d23, (double)std::fabs(M[i] - M0[i]));
-                n23 = (std::max)(n23, (double)std::fabs(M0[i]));
-            }
-            worst = (std::max)(worst, (std::max)((std::max)(rx, ry), d23 / n23));
+            worst = (std::max)(worst, best);
         }
         if (!(ax > 1e-6) || !(ay > 1e-6)) { fitOk = false; snprintf(why, sizeof(why), "slot %d: a <= 0", s); continue; }
         L.t[s].ax = (float)ax; L.t[s].bx = (float)bx; L.t[s].ay = (float)ay; L.t[s].by = (float)by;
@@ -2599,6 +2913,14 @@ void PvSolveLayout(int g, const PvLayRb& r, const float* data, uint64_t now) {
     }
     if (same) { if (cur.same < 1000000) ++cur.same; return; }
     L.same = 1;
+    if (g_pvSwLogs < 20) {                               // v0.8.1 round 3: report the frames around this switch
+        g_pvSw = PvSwitchRep();
+        g_pvSw.armed = true; g_pvSw.g = g;
+        g_pvSw.fromKnown = cur.known; g_pvSw.fromTiled = cur.tiled; g_pvSw.toTiled = L.tiled;
+        g_pvSw.frame = now; g_pvSw.queued = r.frame; g_pvSw.prevQueued = r.prevFrame;
+        for (int i = 0; i < 4; ++i) g_pvSw.before[i] = g_pvCpuRing[(g_pvCpuHead + i) % 4];   // oldest first
+        g_pvSw.inv0 = g_pvInvalidates; g_pvSw.create0 = g_pvCreateMs;
+    }
     cur = L;
     ++g_pvLayChanges;
     PreviewInvalidate();                                 // depth / MV / jitter space changed: no history across it
@@ -2607,9 +2929,10 @@ void PvSolveLayout(int g, const PvLayRb& r, const float* data, uint64_t now) {
     for (int s = 0; s < kPvSlots && bl + 160 < sizeof(buf); ++s) {
         if (!((L.slotMask >> s) & 1)) continue;
         const D3D11_VIEWPORT& v = g_pv[s].compVp;
-        const int w = snprintf(buf + bl, sizeof(buf) - bl, " | slot %d a=(%.4f,%.4f) b=(%+.4f,%+.4f) composite vp=(%.0f,%.0f %.0fx%.0f)",
-                               s, (double)L.t[s].ax, (double)L.t[s].ay, (double)L.t[s].bx, (double)L.t[s].by,
-                               (double)v.TopLeftX, (double)v.TopLeftY, (double)v.Width, (double)v.Height);
+        const int w = snprintf(buf + bl, sizeof(buf) - bl, " | slot %d a=(%.4f,%.4f) b=(%+.4f,%+.4f) cand %d/%d of %d composite "
+                               "vp=(%.0f,%.0f %.0fx%.0f)", s, (double)L.t[s].ax, (double)L.t[s].ay, (double)L.t[s].bx,
+                               (double)L.t[s].by, L.mRef[s], L.mSlot[s], r.n[g][s], (double)v.TopLeftX, (double)v.TopLeftY,
+                               (double)v.Width, (double)v.Height);
         if (w > 0) bl += (size_t)w;
     }
     Log("preview tile layout (target order %d, Present #%llu): %s -- %d pass(es) (slot mask 0x%x, ref slot %d) of %ux%u -> "
@@ -2628,7 +2951,7 @@ bool PvEnsureLayoutReadback(ID3D11DeviceContext* ctx) {
     ctx->GetDevice(&dev);
     if (!dev) return false;
     D3D11_BUFFER_DESC bd{};
-    bd.ByteWidth = kPtMax * kPvSlots * CandidateRecord::kSlotBytes;
+    bd.ByteWidth = kPtMax * kPvSlots * kPvLayCands * CandidateRecord::kSlotBytes;   // round 5: 16 KB
     bd.Usage = D3D11_USAGE_STAGING;
     bd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
     g_pvLayOk = true;
@@ -2659,37 +2982,51 @@ void PvQueueLayoutReadback(ID3D11DeviceContext* ctx, uint64_t n) {
     for (int i = 0; i < g_ptCount && i < kPtMax; ++i)
         if (!g_pvLay[i].known || g_pvLay[i].same < 8) settled = false;
     if (!settled) g_pvLaySettledN = 0;
-    else if (g_pvLaySettledN++ % 31 != 0) { ++g_pvLayThrottled; return; }
+    // v0.8.1 round 3: a settled layout is re-checked every 31st frame -- ~70 ms at the 400+ Presents/s of the menus in
+    // normal mode, but ~0.43 s at the 72 game frames/s counted under a present layer (ETS2 test): after the game switched
+    // the picture between 4 tiles and 4 untiled passes (main menu <-> truck screen) the OLD layout was applied for up to
+    // 0.43 s (tile jitter scale, depth and MVs of the wrong picture: a visible smear) before the verdict and its reset.
+    // Under a present layer: every 4th frame (~55 ms at 72/s, the normal-mode time). Normal mode / VR unchanged.
+    else if (g_pvLaySettledN++ % (g_pvLayRecheck > 0 ? (unsigned)g_pvLayRecheck
+                                                      : (g_plActive.load(std::memory_order_relaxed) ? 4u : 31u)) != 0) {
+        ++g_pvLayThrottled;                              // (v0.8.1 round 4: dlaa.ini preview_layout_recheck overrides)
+        return;
+    }
     if (!PvEnsureLayoutReadback(ctx)) return;
     PvLayRb& r = g_pvLayRb[(g_pvLayHead + g_pvLayPending) % kPvLayRing];
     bool any = false;
     r.groups = g_ptCount < kPtMax ? g_ptCount : kPtMax;
-    r.Wt = g_pvW; r.Ht = g_pvH; r.frame = n;
-    const D3D11_BOX box{ 0, 0, 0, CandidateRecord::kSlotBytes, 1, 1 };
+    r.Wt = g_pvW; r.Ht = g_pvH; r.frame = n; r.prevFrame = g_pvLayLastQueued;
     for (int i = 0; i < r.groups; ++i) {
         const PvTarget& t = g_pt[i];
         r.ok[i] = false; r.mask[i] = t.slotMask; r.ref[i] = t.curRef; r.W[i] = r.H[i] = 0;
+        for (int s = 0; s < kPvSlots; ++s) r.n[i][s] = 0;
         if (!t.tex || t.curRef < 0 || t.curRef >= kPvSlots || !t.slotMask) continue;
         D3D11_TEXTURE2D_DESC td{};
         t.tex->GetDesc(&td);
         r.W[i] = td.Width; r.H[i] = td.Height;
-        const CandidateRecord& rc = g_pv[t.curRef].ps.cand;
-        if (!rc.Ready() || !rc.Buffer() || rc.Count(0) <= 0) continue;
+        // round 5: every pass needs >= 1 world candidate; the key pairing (same draw) is the solver's job now
         bool ok = true;
         for (int s = 0; s < kPvSlots && ok; ++s) {
             if (!((t.slotMask >> s) & 1)) continue;
             const CandidateRecord& c = g_pv[s].ps.cand;
-            ok = c.Ready() && c.Buffer() && c.Count(0) > 0 && PvSameKey(c.Key(0, 0), rc.Key(0, 0));
+            ok = c.Ready() && c.Buffer() && c.Count(0) > 0;
         }
         if (!ok) continue;
-        for (int s = 0; s < kPvSlots; ++s)
-            if ((t.slotMask >> s) & 1)
-                ctx->CopySubresourceRegion(r.staging, 0, (UINT)(i * kPvSlots + s) * CandidateRecord::kSlotBytes, 0, 0,
-                                           g_pv[s].ps.cand.Buffer(), 0, &box);
+        for (int s = 0; s < kPvSlots; ++s) {
+            if (!((t.slotMask >> s) & 1)) continue;
+            const CandidateRecord& c = g_pv[s].ps.cand;
+            const int nc = c.Count(0) < kPvLayCands ? c.Count(0) : kPvLayCands;   // layer 0 = the buffer's first slots
+            const D3D11_BOX box{ 0, 0, 0, (UINT)nc * CandidateRecord::kSlotBytes, 1, 1 };
+            ctx->CopySubresourceRegion(r.staging, 0, (UINT)((i * kPvSlots + s) * kPvLayCands) * CandidateRecord::kSlotBytes,
+                                       0, 0, c.Buffer(), 0, &box);
+            for (int k = 0; k < nc; ++k) r.key[i][s][k] = c.Key(0, k);
+            r.n[i][s] = nc;
+        }
         r.ok[i] = true;
         any = true;
     }
-    if (any) ++g_pvLayPending;
+    if (any) { ++g_pvLayPending; g_pvLayLastQueued = n; }
 }
 
 bool PvEnsureAsm(ID3D11DeviceContext* ctx, PvAsm& A, const PvLayout& L, int g) {
@@ -2715,6 +3052,7 @@ bool PvEnsureAsm(ID3D11DeviceContext* ctx, PvAsm& A, const PvLayout& L, int g) {
     }
     if (A.tex && A.w == L.W && A.h == L.H) return true;
     A.tex.Reset(); A.uav.Reset(); A.srv.Reset(); A.twin.Shutdown();
+    const int64_t tc0 = Qpc();                           // v0.8.1 round 3 (switch report)
     D3D11_TEXTURE2D_DESC td{};
     td.Width = L.W; td.Height = L.H; td.MipLevels = 1; td.ArraySize = 1;
     td.Format = DXGI_FORMAT_R32_FLOAT;
@@ -2730,6 +3068,7 @@ bool PvEnsureAsm(ID3D11DeviceContext* ctx, PvAsm& A, const PvLayout& L, int g) {
         return false;
     }
     A.w = L.W; A.h = L.H;
+    if (g_qpcFreq > 0) g_pvCreateMs += (double)(Qpc() - tc0) * 1000.0 / (double)g_qpcFreq;
     A.twin.tex = A.tex; A.twin.srv = A.srv; A.twin.w = L.W; A.twin.h = L.H; A.twin.valid = false;
     Log("preview depth assembly: picture depth %ux%u R32F created for target order %d (%.0f MB)", L.W, L.H, g,
         (double)L.W * (double)L.H * 4.0 / (1024.0 * 1024.0));
@@ -3492,6 +3831,549 @@ void PvCapFinish(ID3D11DeviceContext* ctx, bool aborted) {
     g_pvCapActive = false;
 }
 
+// ---- v0.8.1 round 5: preview SEAM capture (the snapshot key on an RGBA16F / HDR preview target) ----------------------
+// The open question of the centre line (a faint dark column at the picture's horizontal middle, top to bottom, gone with
+// the mode off) in ONE user run: is it already in what DLAA gets (game side: the tile passes, our viewport shift, the
+// game's composite), made by NGX (depth / MVs / the jitter it is told) or by RCAS -- and does it need our jitter at all?
+// Started like the 8-bit capture (snapshot key / dlaa.ini preview_capture_at while preview units run) when the target is
+// RGBA16F, or on any target with dlaa.ini preview_seam_capture = 1. Records kSmA (8) consecutive frames with the normal
+// jitter (one full Halton cycle), then kSmB (4) with the preview jitter forced to 0 (viewport shift 0 AND NGX told 0): the
+// same numbers without any shift of ours. Per frame, target order 0 only:
+//   * every pass's DS discard (its RT is complete), BEFORE the tile edge fix: the tile RT's 32 first / 32 last columns and
+//     2 first / 2 last rows (staging), the viewport shift it got and the game's own viewport 0;
+//   * right after the target's DLAA Run: a band of 128 columns (x = W/2 - 64 .. W/2 + 63, full height) of the DLAA input
+//     (colorIn = the composited picture), the NGX output (before RCAS), our result in the target (after RCAS), the depth
+//     and the MVs NGX got; at the frame end the same band of the target again (FINAL: after the game's later draws, UI);
+//   * layout state, shift scale, jitter, reset / RCAS / MV flags, DLAA runs and late composites of the target.
+// Nothing waits on the GPU while it runs (each copy goes into its own staging texture); at the end ONE blocking readback
+// (a one-time hitch), "pvseam:" log lines, BMPs in dlaa_selftest\ (seam<N>_<frame>_bands.bmp = IN | NGX | OUT | FINAL |
+// depth | MV, seam<N>_<frame>_tiles.bmp = each pass's first / last 32 tile columns, texels exactly 0 in magenta; N = the
+// capture number of the session), released.
+// Staging memory while it runs: ~14 MB per frame at 3840x2160 RGBA16F (~170 MB for the 12 frames). Render thread only.
+constexpr int  kSmA = 8, kSmB = 4, kSmFrames = kSmA + kSmB;
+constexpr UINT kSmHalf     = 64;                 // band = picture columns [W/2 - 64, W/2 + 64)
+constexpr UINT kSmTileCols = 32;                 // tile RT edge strips: columns [0, 32) and [Wt - 32, Wt)
+constexpr UINT kSmTileRows = 2;                  // ... rows [0, 2) and [Ht - 2, Ht)
+constexpr int  kSmSlots    = 4;                  // passes recorded per frame (the frame's first 4)
+enum { kSmIn = 0, kSmNgx, kSmOut, kSmFin, kSmDepth, kSmMv, kSmBands };
+struct PvSmFrame {
+    bool        ran = false;
+    uint64_t    present = 0;
+    bool        known = false, tiled = false, jitterOff = false, reset = false, rcas = false, mvDone = false;
+    float       kx = 1.0f, ky = 1.0f, jx = 0.0f, jy = 0.0f, njx = 0.0f, njy = 0.0f;
+    int         ref = -1, maskAtRun = 0, maskEnd = 0, flushes = 0;
+    UINT        bx = 0, bw = 0;                  // band origin / width in the picture
+    PcPtr<ID3D11Texture2D> band[kSmBands];
+    DXGI_FORMAT bandFmt[kSmBands] = {};
+    bool        tile[kSmSlots] = {}, shOn[kSmSlots] = {};
+    float       shX[kSmSlots] = {}, shY[kSmSlots] = {};
+    D3D11_VIEWPORT vp[kSmSlots] = {};
+    PcPtr<ID3D11Texture2D> tL[kSmSlots], tR[kSmSlots], tT[kSmSlots], tB[kSmSlots];
+    DXGI_FORMAT tileFmt = DXGI_FORMAT_UNKNOWN;
+    UINT        tw = 0, th = 0;                  // tile RT size
+};
+struct PvSeam {
+    int      id = 0;                             // capture number this session (file names seam<id>_<frame>_...)
+    int      f = 0;                              // frame being recorded (0 .. kSmFrames - 1)
+    int      idle = 0;                           // frame ends in a row without a run of target 0 (abort at 60)
+    uint64_t start = 0;
+    UINT     W = 0, H = 0;                       // picture (target) size at the start
+    wchar_t  dir[MAX_PATH] = {};
+    PvSmFrame fr[kSmFrames];
+};
+bool    g_pvSmActive = false;
+PvSeam* g_pvSm = nullptr;                        // heap: only while a seam capture runs
+
+// Copies the rect (x, y, w, h) of `src` (clamped to it) into a NEW staging texture `out` of its format.
+bool PvSmStage(ID3D11DeviceContext* ctx, ID3D11Texture2D* src, UINT x, UINT y, UINT w, UINT h, PcPtr<ID3D11Texture2D>& out,
+               DXGI_FORMAT* fmt) {
+    out.Reset();
+    if (!src) return false;
+    D3D11_TEXTURE2D_DESC sd{};
+    src->GetDesc(&sd);
+    if (sd.SampleDesc.Count != 1 || x >= sd.Width || y >= sd.Height || !w || !h) return false;
+    if (w > sd.Width - x) w = sd.Width - x;
+    if (h > sd.Height - y) h = sd.Height - y;
+    PcPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    D3D11_TEXTURE2D_DESC td{};
+    td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1; td.Format = sd.Format; td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    if (!dev || FAILED(dev->CreateTexture2D(&td, nullptr, &out)) || !out) { out.Reset(); return false; }
+    const D3D11_BOX b{ x, y, 0, x + w, y + h, 1 };
+    ctx->CopySubresourceRegion(out.Get(), 0, 0, 0, 0, src, 0, &b);
+    if (fmt) *fmt = sd.Format;
+    return true;
+}
+
+void PvSmFinish(ID3D11DeviceContext* ctx, bool aborted);
+
+void PvSmStart(ID3D11DeviceContext* ctx, uint64_t n) {
+    if (!g_pt[0].tex) { Log("pvseam: not started -- no preview target this frame (Present #%llu)", (unsigned long long)n); return; }
+    PvSeam* P = new (std::nothrow) PvSeam();
+    if (!P) return;
+    if (!PathNextToDll(L"dlaa_selftest\\", P->dir)) { delete P; Log("pvseam: not started -- no output path"); return; }
+    CreateDirectoryW(P->dir, nullptr);
+    D3D11_TEXTURE2D_DESC td{};
+    g_pt[0].tex->GetDesc(&td);
+    static int captures = 0;
+    P->id = ++captures;
+    P->W = td.Width; P->H = td.Height; P->start = n;
+    g_pvSm = P;
+    g_pvSmActive = true;
+    (void)ctx;
+    Log("pvseam: capture %d started (snapshot key / preview_capture_at on the preview screen, Present #%llu) -- target order 0 %ux%u "
+        "fmt=%d; %d frames with the normal jitter, then %d with the preview jitter forced to 0; band x=%u..%u (seam between "
+        "x=%u and x=%u), tile edges of the first %d passes before the edge fix; staging ~%.0f MB until the end",
+        P->id, (unsigned long long)n, td.Width, td.Height, (int)td.Format, kSmA, kSmB,
+        td.Width / 2 > kSmHalf ? td.Width / 2 - kSmHalf : 0u, td.Width / 2 + kSmHalf - 1, td.Width / 2 - 1, td.Width / 2,
+        kSmSlots, (double)kSmFrames * (6.0 * 2.0 * kSmHalf * td.Height * 8.0 +
+                                       kSmSlots * (2.0 * kSmTileCols * td.Height + 2.0 * kSmTileRows * td.Width) * 4.0) /
+                  (1024.0 * 1024.0));
+}
+
+// PreviewOnDiscard of pass `slot` (its RT complete, before PvFixTileEdges and the game's composite).
+void PvSmOnPass(ID3D11DeviceContext* ctx, int slot) {
+    PvSeam& P = *g_pvSm;
+    if (P.f >= kSmFrames || slot < 0 || slot >= kSmSlots) return;
+    PvSmFrame& F = P.fr[P.f];
+    PvSlot& s = g_pv[slot];
+    if (!s.rt || F.tile[slot]) return;
+    D3D11_TEXTURE2D_DESC d{};
+    s.rt->GetDesc(&d);
+    if (d.Width < kSmTileCols * 2 || d.Height < kSmTileRows * 2) return;
+    t_inDlaa = true;
+    const bool ok = PvSmStage(ctx, s.rt.Get(), 0, 0, kSmTileCols, d.Height, F.tL[slot], &F.tileFmt) &&
+                    PvSmStage(ctx, s.rt.Get(), d.Width - kSmTileCols, 0, kSmTileCols, d.Height, F.tR[slot], nullptr) &&
+                    PvSmStage(ctx, s.rt.Get(), 0, 0, d.Width, kSmTileRows, F.tT[slot], nullptr) &&
+                    PvSmStage(ctx, s.rt.Get(), 0, d.Height - kSmTileRows, d.Width, kSmTileRows, F.tB[slot], nullptr);
+    t_inDlaa = false;
+    F.tile[slot] = ok;
+    F.tw = d.Width; F.th = d.Height;
+    F.shX[slot] = s.shX; F.shY[slot] = s.shY; F.shOn[slot] = s.shOn; F.vp[slot] = s.capVp;
+}
+
+// Right after unit `ui`'s successful Run on target order `idx` (`out` = where our result sits now).
+void PvSmAfterRun(ID3D11DeviceContext* ctx, int ui, int idx, PvTarget& tg, int ref, float njx, float njy,
+                  ID3D11Texture2D* out, uint64_t fr) {
+    PvSeam& P = *g_pvSm;
+    if (idx != 0 || P.f >= kSmFrames) return;
+    PvSmFrame& F = P.fr[P.f];
+    if (F.ran) return;                                   // first run of the frame only (more runs: counted at the frame end)
+    SceneDlaa& dl = g_pu[ui].dl;
+    D3D11_TEXTURE2D_DESC td{};
+    tg.tex->GetDesc(&td);
+    F.bw = td.Width < 2 * kSmHalf ? td.Width : 2 * kSmHalf;
+    F.bx = td.Width / 2 > kSmHalf ? td.Width / 2 - kSmHalf : 0u;
+    t_inDlaa = true;
+    ID3D11Texture2D* src[kSmBands] = { dl.ColorInTex(), dl.OutTex(), out, nullptr, dl.DepthTex(), dl.MvTex() };
+    for (int b = 0; b < kSmBands; ++b)
+        if (src[b]) PvSmStage(ctx, src[b], F.bx, 0, F.bw, td.Height, F.band[b], &F.bandFmt[b]);
+    t_inDlaa = false;
+    F.ran = true; F.present = fr; F.ref = ref;
+    const PvLayout& lay = g_pvLay[idx];
+    F.known = lay.known; F.tiled = lay.tiled;
+    PvShiftScale(ref, &F.kx, &F.ky);
+    F.jx = g_pvJx; F.jy = g_pvJy; F.njx = njx; F.njy = njy;
+    F.reset = dl.LastReset(); F.rcas = dl.LastSharpened(); F.mvDone = dl.LastMvDone();
+    F.jitterOff = P.f >= kSmA;
+    F.maskAtRun = tg.slotMask;
+}
+
+// Frame end (PreviewNextFrame, after the flushes, before the targets reset): the FINAL band, then the next frame.
+void PvSmAtFrameEnd(ID3D11DeviceContext* ctx, uint64_t n) {
+    PvSeam& P = *g_pvSm;
+    if (P.f >= kSmFrames) { PvSmFinish(ctx, false); return; }
+    PvSmFrame& F = P.fr[P.f];
+    if (!F.ran) {                                        // no run of target 0 this frame: its pass strips are dropped
+        F = PvSmFrame();
+        if (++P.idle >= 60) PvSmFinish(ctx, true);
+        return;
+    }
+    P.idle = 0;
+    F.maskEnd = g_pt[0].slotMask; F.flushes = g_pt[0].flushes;
+    if (g_pt[0].tex) {
+        D3D11_TEXTURE2D_DESC td{};
+        g_pt[0].tex->GetDesc(&td);
+        t_inDlaa = true;
+        PvSmStage(ctx, g_pt[0].tex.Get(), F.bx, 0, F.bw, td.Height, F.band[kSmFin], &F.bandFmt[kSmFin]);
+        t_inDlaa = false;
+    }
+    if (++P.f == kSmA)
+        Log("pvseam: %d frames with the normal jitter recorded (Present #%llu) -- the next %d frames run with the preview "
+            "jitter forced to 0 (viewport shift 0, NGX told 0)", kSmA, (unsigned long long)n, kSmB);
+    if (P.f >= kSmFrames) PvSmFinish(ctx, false);
+}
+
+// ---- readback side (PvSmFinish) ----
+float PvSmF11(uint32_t v, int manBits) {             // unsigned R11G11B10 component: 5-bit exponent, 6 / 5-bit mantissa
+    const uint32_t e = (v >> manBits) & 31u, m = v & ((1u << manBits) - 1u);
+    const float mf = (float)m / (float)(1u << manBits);
+    if (e == 0) return std::ldexp(mf, -14);
+    if (e == 31) return 0.0f;                            // inf / NaN: not a colour here
+    return std::ldexp(1.0f + mf, (int)e - 15);
+}
+// Texel x of a mapped row -> rgb (linear float formats or 0..1 for UNORM). *flt = float format (tone-compress for viewing);
+// *zero = all three channels exactly 0 (the clear colour). false = format not handled.
+bool PvSmTexel(DXGI_FORMAT f, const uint8_t* row, UINT x, float rgb[3], bool* flt, bool* zero) {
+    switch (f) {
+    case DXGI_FORMAT_R16G16B16A16_FLOAT: case DXGI_FORMAT_R16G16B16A16_TYPELESS: {
+        const uint16_t* p = (const uint16_t*)row + (size_t)x * 4;
+        for (int c = 0; c < 3; ++c) rgb[c] = HalfToFloat(p[c]);
+        *flt = true; *zero = !(p[0] & 0x7FFF) && !(p[1] & 0x7FFF) && !(p[2] & 0x7FFF);
+        return true;
+    }
+    case DXGI_FORMAT_R11G11B10_FLOAT: {
+        const uint32_t v = ((const uint32_t*)row)[x];
+        rgb[0] = PvSmF11(v & 0x7FFu, 6); rgb[1] = PvSmF11((v >> 11) & 0x7FFu, 6); rgb[2] = PvSmF11(v >> 22, 5);
+        *flt = true; *zero = v == 0;
+        return true;
+    }
+    case DXGI_FORMAT_R8G8B8A8_TYPELESS: case DXGI_FORMAT_R8G8B8A8_UNORM: case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+    case DXGI_FORMAT_B8G8R8A8_TYPELESS: case DXGI_FORMAT_B8G8R8A8_UNORM: case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: {
+        const uint8_t* p = row + (size_t)x * 4;
+        const bool bgr = f == DXGI_FORMAT_B8G8R8A8_TYPELESS || f == DXGI_FORMAT_B8G8R8A8_UNORM ||
+                         f == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+        rgb[0] = p[bgr ? 2 : 0] / 255.0f; rgb[1] = p[1] / 255.0f; rgb[2] = p[bgr ? 0 : 2] / 255.0f;
+        *flt = false; *zero = !p[0] && !p[1] && !p[2];
+        return true;
+    }
+    case DXGI_FORMAT_R10G10B10A2_UNORM: case DXGI_FORMAT_R10G10B10A2_TYPELESS: {
+        const uint32_t v = ((const uint32_t*)row)[x];
+        rgb[0] = (v & 1023u) / 1023.0f; rgb[1] = ((v >> 10) & 1023u) / 1023.0f; rgb[2] = ((v >> 20) & 1023u) / 1023.0f;
+        *flt = false; *zero = (v & 0x3FFFFFFFu) == 0;
+        return true;
+    }
+    case DXGI_FORMAT_R32_FLOAT: {
+        rgb[0] = ((const float*)row)[x]; rgb[1] = rgb[2] = 0.0f;
+        *flt = true; *zero = rgb[0] == 0.0f;
+        return true;
+    }
+    case DXGI_FORMAT_R16G16_FLOAT: {
+        const uint16_t* p = (const uint16_t*)row + (size_t)x * 2;
+        rgb[0] = HalfToFloat(p[0]); rgb[1] = HalfToFloat(p[1]); rgb[2] = 0.0f;
+        *flt = true; *zero = false;
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+// Display luma: linear float colour tone-compressed L / (1 + L) (HDR highlights do not swamp the means), UNORM as stored.
+inline float PvSmLuma(const float rgb[3], bool flt) {
+    float l = 0.2126f * rgb[0] + 0.7152f * rgb[1] + 0.0722f * rgb[2];
+    if (!(l > 0.0f)) return 0.0f;                        // negative / NaN -> 0
+    return flt ? l / (1.0f + l) : l;
+}
+uint8_t PvSmView(float v, bool flt) {                    // one channel -> 8-bit for the BMPs (float: x / (1 + x), sRGB)
+    static uint8_t lut[4096];                            // sRGB encode of 0..1 (the WriteBmpRgba16f mapping), built once
+    static bool lutReady = false;
+    if (!lutReady) {
+        for (int i = 0; i < 4096; ++i) {
+            const double y = (double)i / 4095.0;
+            const double s = y <= 0.0031308 ? 12.92 * y : 1.055 * std::pow(y, 1.0 / 2.4) - 0.055;
+            lut[i] = (uint8_t)(s <= 0.0 ? 0 : (s >= 1.0 ? 255 : (int)(s * 255.0 + 0.5)));
+        }
+        lutReady = true;
+    }
+    if (!(v > 0.0f)) return 0;
+    if (flt) return lut[(int)(v / (1.0f + v) * 4095.0f + 0.5f) & 4095];
+    return (uint8_t)(v >= 1.0f ? 255 : (int)(v * 255.0f + 0.5f));
+}
+
+// One colour band, mapped: luma plane (bw x h), column means and the seam numbers.
+struct PvSmBandStats {
+    bool  ok = false, flt = false;
+    std::vector<float> lum;                          // bw x h display luma
+    std::vector<float> col;                          // column means
+    float dip = 0.0f;                                // worst local dip at the seam columns (fraction, < 0 = darker)
+    int   dipX = -1;                                 // its band column
+    float noise = 0.0f;                              // RMS of the same local dip over the columns away from the seam
+    float darkRows = 0.0f, darkRowsTyp = 0.0f;       // fraction of rows darker than both neighbours by > 3 % at dipX / typical
+    bool  sig = false;                               // dip < -max(1 %, 3 x noise)
+};
+void PvSmBand(const D3D11_MAPPED_SUBRESOURCE& m, DXGI_FORMAT f, UINT bw, UINT h, UINT seam, PvSmBandStats& S) {
+    S.lum.assign((size_t)bw * h, 0.0f);
+    S.col.assign(bw, 0.0f);
+    float rgb[3]; bool flt = false, zero = false;
+    for (UINT y = 0; y < h; ++y) {
+        const uint8_t* row = (const uint8_t*)m.pData + (size_t)y * m.RowPitch;
+        for (UINT x = 0; x < bw; ++x) {
+            if (!PvSmTexel(f, row, x, rgb, &flt, &zero)) return;
+            const float l = PvSmLuma(rgb, flt);
+            S.lum[(size_t)y * bw + x] = l;
+            S.col[x] += l;
+        }
+    }
+    for (UINT x = 0; x < bw; ++x) S.col[x] /= (float)(h ? h : 1);
+    S.ok = true; S.flt = flt;
+    const int d = 3;                                     // neighbours 3 columns either side
+    auto local = [&](int x) {
+        const float nb = 0.5f * (S.col[x - d] + S.col[x + d]);
+        return nb > 1e-6f ? S.col[x] / nb - 1.0f : 0.0f;
+    };
+    auto darkFrac = [&](int x) {
+        int rows = 0, dark = 0;
+        for (UINT y = 0; y < h; ++y) {
+            const float* r = &S.lum[(size_t)y * bw];
+            const float nb = 0.5f * (r[x - d] + r[x + d]);
+            if (nb < 0.02f) continue;                    // too dark to tell
+            ++rows;
+            if (r[x] < 0.97f * nb) ++dark;
+        }
+        return rows ? (float)dark / (float)rows : 0.0f;
+    };
+    const int s = (int)seam;
+    S.dip = 1e9f;
+    for (int x = s - 3; x <= s + 2; ++x) {
+        if (x - d < 0 || x + d >= (int)bw) continue;
+        const float v = local(x);
+        if (v < S.dip) { S.dip = v; S.dipX = x; }
+    }
+    if (S.dipX < 0) { S.dip = 0.0f; return; }
+    double sq = 0.0, dsum = 0.0;
+    int nq = 0, nd = 0;
+    for (int x = d + 3; x < (int)bw - d - 3; ++x) {
+        if (x > s - 12 && x < s + 12) continue;
+        const float v = local(x);
+        sq += (double)v * v; ++nq;
+        if ((x & 3) == 0) { dsum += darkFrac(x); ++nd; }
+    }
+    S.noise = nq ? (float)std::sqrt(sq / nq) : 0.0f;
+    S.darkRows = darkFrac(S.dipX);
+    S.darkRowsTyp = nd ? (float)(dsum / nd) : 0.0f;
+    S.sig = S.dip < -(std::max)(0.01f, 3.0f * S.noise);
+}
+
+void PvSmFinish(ID3D11DeviceContext* ctx, bool aborted) {
+    PvSeam& P = *g_pvSm;
+    t_inDlaa = true;
+    static const char* kBandName[kSmBands] = { "IN", "NGX", "OUT", "FINAL", "depth", "mv" };
+    struct Acc { int n = 0, sig = 0; double dip = 0.0; };
+    Acc acc[2][4];                                       // [phase A / B][IN NGX OUT FINAL]
+    float worstZero = 0.0f; int wzF = -1, wzSlot = -1; const char* wzEdge = ""; float wzShift = 0.0f;
+    float worstZeroSmall = 0.0f;                         // ... on an edge whose shift was <= 0.49 px (the open case)
+    int frames = 0, bmps = 0;
+    for (int m = 0; m < kSmFrames; ++m) {
+        PvSmFrame& F = P.fr[m];
+        if (!F.ran) continue;
+        ++frames;
+        const UINT h = P.H, bw = F.bw, seam = P.W / 2 - F.bx;   // band column of picture x = W/2 (the seam's right side)
+        // --- colour bands ---
+        PvSmBandStats S[4];
+        D3D11_MAPPED_SUBRESOURCE mp[kSmBands] = {};
+        bool mapped[kSmBands] = {};
+        for (int b = 0; b < kSmBands; ++b)
+            if (F.band[b]) mapped[b] = SUCCEEDED(ctx->Map(F.band[b].Get(), 0, D3D11_MAP_READ, 0, &mp[b]));
+        for (int b = 0; b < 4; ++b)
+            if (mapped[b]) PvSmBand(mp[b], F.bandFmt[b], bw, h, seam, S[b]);
+        // BMP: IN | NGX | OUT | FINAL | depth | mv, 4 px grey gaps
+        {
+            const UINT gap = 4, W6 = bw * kSmBands + gap * (kSmBands - 1);
+            std::vector<uint8_t> img((size_t)W6 * h * 4, 96);
+            float dLo = 1e30f, dHi = -1e30f;
+            if (mapped[kSmDepth])
+                for (UINT y = 0; y < h; ++y)
+                    for (UINT x = 0; x < bw; ++x) {
+                        float rgb[3]; bool flt, zero;
+                        if (!PvSmTexel(F.bandFmt[kSmDepth], (const uint8_t*)mp[kSmDepth].pData + (size_t)y * mp[kSmDepth].RowPitch,
+                                       x, rgb, &flt, &zero)) break;
+                        if (rgb[0] > 0.0f) { dLo = (std::min)(dLo, rgb[0]); dHi = (std::max)(dHi, rgb[0]); }
+                    }
+            for (int b = 0; b < kSmBands; ++b) {
+                if (!mapped[b]) continue;
+                for (UINT y = 0; y < h; ++y) {
+                    const uint8_t* row = (const uint8_t*)mp[b].pData + (size_t)y * mp[b].RowPitch;
+                    uint8_t* o = &img[((size_t)y * W6 + (size_t)b * (bw + gap)) * 4];
+                    for (UINT x = 0; x < bw; ++x, o += 4) {
+                        float rgb[3]; bool flt = false, zero = false;
+                        if (!PvSmTexel(F.bandFmt[b], row, x, rgb, &flt, &zero)) break;
+                        if (b == kSmDepth) {             // far (0) = dark blue, else grey over the band's depth range
+                            if (rgb[0] <= 0.0f) { o[0] = 0; o[1] = 0; o[2] = 64; }
+                            else { const uint8_t g = (uint8_t)(40.0f + 215.0f * (rgb[0] - dLo) / (dHi > dLo ? dHi - dLo : 1.0f)); o[0] = o[1] = o[2] = g; }
+                        } else if (b == kSmMv) {         // R = 128 + 32 * mv.x, G = 128 + 32 * mv.y (px)
+                            auto q8 = [](float v) { v = 128.0f + 32.0f * v; return (uint8_t)(v < 0.0f ? 0.0f : (v > 255.0f ? 255.0f : v)); };
+                            o[0] = q8(rgb[0]); o[1] = q8(rgb[1]); o[2] = 0;
+                        } else {
+                            for (int c = 0; c < 3; ++c) o[c] = PvSmView(rgb[c], flt);
+                        }
+                        o[3] = 255;
+                    }
+                }
+            }
+            wchar_t path[MAX_PATH];
+            swprintf_s(path, L"%sseam%d_%d_bands.bmp", P.dir, P.id, m);
+            if (WriteBmp(path, img.data(), W6 * 4, W6, h)) ++bmps;
+        }
+        for (int b = 0; b < kSmBands; ++b) if (mapped[b]) ctx->Unmap(F.band[b].Get(), 0);
+        // --- tile edges (before the edge fix) ---
+        char tbuf[1600]; size_t tl = 0; tbuf[0] = 0;
+        {
+            const UINT sw = kSmTileCols * 2 + 2, gap = 8;
+            const UINT TW = sw * kSmSlots + gap * (kSmSlots - 1), th = F.th;
+            std::vector<uint8_t> img((size_t)TW * (th ? th : 1) * 4, 96);
+            for (int s = 0; s < kSmSlots; ++s) {
+                if (!F.tile[s]) continue;
+                D3D11_MAPPED_SUBRESOURCE ml{}, mr{}, mt{}, mb{};
+                const bool okL = SUCCEEDED(ctx->Map(F.tL[s].Get(), 0, D3D11_MAP_READ, 0, &ml));
+                const bool okR = SUCCEEDED(ctx->Map(F.tR[s].Get(), 0, D3D11_MAP_READ, 0, &mr));
+                const bool okT = SUCCEEDED(ctx->Map(F.tT[s].Get(), 0, D3D11_MAP_READ, 0, &mt));
+                const bool okB = SUCCEEDED(ctx->Map(F.tB[s].Get(), 0, D3D11_MAP_READ, 0, &mb));
+                // zero fraction + mean luma of strip column `c` (0..31) over th rows
+                auto colStat = [&](const D3D11_MAPPED_SUBRESOURCE& mm, UINT c, float* z, float* l) {
+                    UINT nz = 0; double sl = 0.0;
+                    for (UINT y = 0; y < th; ++y) {
+                        float rgb[3]; bool flt = false, zero = false;
+                        if (!PvSmTexel(F.tileFmt, (const uint8_t*)mm.pData + (size_t)y * mm.RowPitch, c, rgb, &flt, &zero)) break;
+                        nz += zero ? 1u : 0u; sl += PvSmLuma(rgb, flt);
+                    }
+                    *z = th ? 100.0f * nz / th : 0.0f; *l = th ? (float)(sl / th) : 0.0f;
+                };
+                auto rowZero = [&](const D3D11_MAPPED_SUBRESOURCE& mm, UINT r) {
+                    UINT nz = 0;
+                    const uint8_t* row = (const uint8_t*)mm.pData + (size_t)r * mm.RowPitch;
+                    for (UINT x = 0; x < F.tw; ++x) {
+                        float rgb[3]; bool flt = false, zero = false;
+                        if (!PvSmTexel(F.tileFmt, row, x, rgb, &flt, &zero)) break;
+                        nz += zero ? 1u : 0u;
+                    }
+                    return F.tw ? 100.0f * nz / F.tw : 0.0f;
+                };
+                float z0 = 0, l0 = 0, z1 = 0, l1 = 0, zN2 = 0, lN2 = 0, zN1 = 0, lN1 = 0;
+                if (okL) { colStat(ml, 0, &z0, &l0); colStat(ml, 1, &z1, &l1); }
+                if (okR) { colStat(mr, kSmTileCols - 2, &zN2, &lN2); colStat(mr, kSmTileCols - 1, &zN1, &lN1); }
+                const float zT = okT ? rowZero(mt, 0) : 0.0f, zB = okB ? rowZero(mb, kSmTileRows - 1) : 0.0f;
+                struct { float z; const char* e; float sh; } edges[4] = {
+                    { z0, "first column", F.shX[s] }, { zN1, "last column", F.shX[s] }, { zT, "first row", F.shY[s] },
+                    { zB, "last row", F.shY[s] } };
+                for (auto& e : edges) {
+                    if (e.z > worstZero) { worstZero = e.z; wzF = m; wzSlot = s; wzEdge = e.e; wzShift = e.sh; }
+                    if (std::fabs(e.sh) <= 0.49f && e.z > worstZeroSmall) worstZeroSmall = e.z;
+                }
+                const D3D11_VIEWPORT& v = F.vp[s];
+                const int w = snprintf(tbuf + tl, sizeof(tbuf) - tl, " | slot %d vp=(%.2f,%.2f %.0fx%.0f) shift=(%+.4f,%+.4f)%s: "
+                                       "col0 %.1f%% zero L=%.4f, col1 %.1f%% L=%.4f, col%u %.1f%% L=%.4f, col%u %.1f%% zero L=%.4f, "
+                                       "row0 %.1f%% zero, row%u %.1f%% zero", s, (double)v.TopLeftX, (double)v.TopLeftY,
+                                       (double)v.Width, (double)v.Height, (double)F.shX[s], (double)F.shY[s],
+                                       F.shOn[s] ? "" : " (not shifted)", (double)z0, (double)l0, (double)z1, (double)l1,
+                                       F.tw - 2, (double)zN2, (double)lN2, F.tw - 1, (double)zN1, (double)lN1, (double)zT,
+                                       F.th - 1, (double)zB);
+                if (w > 0 && tl + (size_t)w < sizeof(tbuf)) tl += (size_t)w;
+                // BMP strip: first 32 columns | 2 px gap | last 32 columns; texels exactly 0 = magenta
+                auto paint = [&](const D3D11_MAPPED_SUBRESOURCE& mm, UINT xo) {
+                    for (UINT y = 0; y < th; ++y) {
+                        const uint8_t* row = (const uint8_t*)mm.pData + (size_t)y * mm.RowPitch;
+                        uint8_t* o = &img[((size_t)y * TW + (size_t)s * (sw + gap) + xo) * 4];
+                        for (UINT x = 0; x < kSmTileCols; ++x, o += 4) {
+                            float rgb[3]; bool flt = false, zero = false;
+                            if (!PvSmTexel(F.tileFmt, row, x, rgb, &flt, &zero)) break;
+                            if (zero) { o[0] = 255; o[1] = 0; o[2] = 255; }
+                            else for (int c = 0; c < 3; ++c) o[c] = PvSmView(rgb[c], flt);
+                            o[3] = 255;
+                        }
+                    }
+                };
+                if (okL) paint(ml, 0);
+                if (okR) paint(mr, kSmTileCols + 2);
+                if (okL) ctx->Unmap(F.tL[s].Get(), 0);
+                if (okR) ctx->Unmap(F.tR[s].Get(), 0);
+                if (okT) ctx->Unmap(F.tT[s].Get(), 0);
+                if (okB) ctx->Unmap(F.tB[s].Get(), 0);
+            }
+            if (th) {
+                wchar_t path[MAX_PATH];
+                swprintf_s(path, L"%sseam%d_%d_tiles.bmp", P.dir, P.id, m);
+                if (WriteBmp(path, img.data(), TW * 4, TW, th)) ++bmps;
+            }
+        }
+        // --- verdict of this frame ---
+        const char* where = "no dark column at the seam in this frame";
+        if (S[0].sig)       where = "the dark column is ALREADY IN THE DLAA INPUT (game side: tile passes / our viewport shift / composite)";
+        else if (S[1].sig)  where = "NOT in the input -- CREATED BY NGX (depth / MV / jitter side)";
+        else if (S[2].sig)  where = "not in the input nor the NGX output -- created by RCAS (preview_sharpen=0 removes it)";
+        else if (S[3].sig)  where = "only after our DLAA -- created by the game's later draws (UI / encode)";
+        auto bandTxt = [&](const PvSmBandStats& b, char* o, size_t on) {
+            if (!b.ok) { snprintf(o, on, "n/a"); return; }
+            snprintf(o, on, "%+.2f%% at x=%u%s (dark rows %.0f%% vs %.0f%% typical, noise %.2f%%)", 100.0 * b.dip,
+                     F.bx + (UINT)(b.dipX < 0 ? 0 : b.dipX), b.sig ? " SIGNIFICANT" : "", 100.0 * b.darkRows,
+                     100.0 * b.darkRowsTyp, 100.0 * b.noise);
+        };
+        char bt[4][160];
+        for (int b = 0; b < 4; ++b) bandTxt(S[b], bt[b], sizeof(bt[b]));
+        Log("pvseam: frame %d%s (game frame #%llu) layout=%s ref slot %d, shift scale (%.2f,%.2f) | jitter (%+.4f,%+.4f) picture px, "
+            "NGX told (%+.4f,%+.4f) | reset=%d rcas=%d mv=%d | DLAA runs %d, composited before the run 0x%x, by the frame end "
+            "0x%x | seam dip (worst of x=W/2-3..W/2+2 vs the columns 3 px either side): IN %s | NGX %s | OUT %s | FINAL %s -> %s",
+            m, F.jitterOff ? " [jitter forced 0]" : "", (unsigned long long)F.present,
+            !F.known ? "unknown" : (F.tiled ? "TILED" : "untiled/reference-slot"), F.ref, (double)F.kx, (double)F.ky,
+            (double)F.jx, (double)F.jy, (double)F.njx, (double)F.njy, (int)F.reset, (int)F.rcas, (int)F.mvDone, F.flushes,
+            F.maskAtRun, F.maskEnd, bt[0], bt[1], bt[2], bt[3], where);
+        {   // the 8 columns around the seam, per stage
+            char cb[900]; size_t cl = 0; cb[0] = 0;
+            for (int b = 0; b < 4; ++b) {
+                if (!S[b].ok) continue;
+                int w = snprintf(cb + cl, sizeof(cb) - cl, "%s%s:", b ? " | " : "", kBandName[b]);
+                if (w > 0) cl += (size_t)w;
+                for (int x = (int)seam - 4; x < (int)seam + 4 && cl + 16 < sizeof(cb); ++x) {
+                    w = snprintf(cb + cl, sizeof(cb) - cl, " %.4f", (x >= 0 && x < (int)bw) ? (double)S[b].col[x] : 0.0);
+                    if (w > 0) cl += (size_t)w;
+                }
+            }
+            Log("pvseam: frame %d column mean luma x=%u..%u (seam between %u and %u; HDR values as L/(1+L)): %s", m,
+                F.bx + seam - 4, F.bx + seam + 3, F.bx + seam - 1, F.bx + seam, cb);
+        }
+        Log("pvseam: frame %d tile passes (%ux%u fmt=%d; edge texels EXACTLY 0 = never rasterized, measured before the edge "
+            "fix)%s", m, F.tw, F.th, (int)F.tileFmt, tl ? tbuf : " | none recorded");
+        const int ph = F.jitterOff ? 1 : 0;
+        for (int b = 0; b < 4; ++b)
+            if (S[b].ok) { ++acc[ph][b].n; acc[ph][b].sig += S[b].sig ? 1 : 0; acc[ph][b].dip += S[b].dip; }
+    }
+    // --- summary + verdict ---
+    char ph[2][400];
+    for (int p = 0; p < 2; ++p) {
+        size_t l = 0; ph[p][0] = 0;
+        for (int b = 0; b < 4; ++b) {
+            const int w = snprintf(ph[p] + l, sizeof(ph[p]) - l, "%s%s significant %d/%d mean dip %+.2f%%", b ? ", " : "",
+                                   kBandName[b], acc[p][b].sig, acc[p][b].n, acc[p][b].n ? 100.0 * acc[p][b].dip / acc[p][b].n : 0.0);
+            if (w > 0) l += (size_t)w;
+        }
+    }
+    Log("pvseam SUMMARY (capture %d): %d frame(s) recorded%s, %d BMPs | jitter on (%d frames): %s | jitter forced 0: %s | "
+        "tile edge texels exactly 0 before the edge fix: worst %.1f%% (frame %d slot %d %s, shift %+.4f tile px), worst on an "
+        "edge shifted <= 0.49 px: %.1f%%", P.id, frames, aborted ? " (ABORTED: target 0 stopped running)" : "", bmps, acc[0][0].n, ph[0], ph[1],
+        (double)worstZero, wzF, wzSlot, wzEdge, (double)wzShift, (double)worstZeroSmall);
+    const char* verdict;
+    auto half = [&](int p, int b) { return acc[p][b].n > 0 && acc[p][b].sig * 2 >= acc[p][b].n; };
+    if (half(0, 0)) {
+        verdict = half(1, 0) ? "the dark column is IN THE DLAA INPUT, also with our jitter forced to 0 -> the game's own picture "
+                               "(tile passes / composite) has it; NGX / RCAS at most amplify it (compare the IN / NGX / OUT dips)"
+                             : "the dark column is IN THE DLAA INPUT only while we jitter -> our viewport shift creates it at the "
+                               "tile edges (see the tile lines: edge texels left at 0, and which pass / shift)";
+    } else if (half(0, 1)) {
+        verdict = half(1, 1) ? "the input is clean; NGX creates the dark column, also without jitter -> depth / MV side"
+                             : "the input is clean; NGX creates the dark column only while jittered -> the jitter NGX is told vs "
+                               "what the picture got (shift scale / layout) is the suspect";
+    } else if (half(0, 2)) {
+        verdict = "input and NGX output are clean; RCAS (the sharpen after NGX) creates the dark column -> dlaa.ini preview_sharpen=0";
+    } else if (half(0, 3)) {
+        verdict = "our result is clean; the dark column appears only after our DLAA (the game's later draws)";
+    } else {
+        verdict = "no dark seam column measured in this capture -- capture again while the line is visible on screen";
+    }
+    auto meanDip = [&](int b) { return acc[0][b].n ? 100.0 * acc[0][b].dip / acc[0][b].n : 0.0; };
+    Log("pvseam VERDICT (capture %d): %s | mean seam dip with jitter: IN %+.2f%% -> NGX %+.2f%% -> OUT %+.2f%% -> FINAL "
+        "%+.2f%%%s", P.id, verdict, meanDip(0), meanDip(1), meanDip(2), meanDip(3), worstZeroSmall > 1.0f ? " | NOTE: tile "
+        "edges shifted by <= 0.49 px were left at the clear colour (the GPU drops the fractional edge column) -- the "
+        "zero-guarded edge fill covers that case" : "");
+    t_inDlaa = false;
+    Log("pvseam: capture %d done (%s) -- BMPs in dlaa_selftest\\ (seam%d_<frame>_bands.bmp: IN | NGX | OUT | FINAL | depth | "
+        "mv, %u px each, the seam at x=%u inside every band; seam%d_<frame>_tiles.bmp: per pass its first | last %u tile "
+        "columns, magenta = texel exactly 0), staging released", P.id, aborted ? "aborted" : "complete", P.id, 2 * kSmHalf,
+        kSmHalf, P.id, kSmTileCols);
+    delete g_pvSm;
+    g_pvSm = nullptr;
+    g_pvSmActive = false;
+}
+
 // BGRA target: UNORM (non-sRGB, DXGI_FORMAT_B8G8R8A8_UNORM) SRV + RTV on the target and an R8G8B8A8_TYPELESS scratch of
 // its size with UNORM views (rebuilt when the target texture / size changes). false = not possible (logged once).
 // Round 5: the views / scratch belong to the unit `t` (flat: unit 0), `tex` is this frame's target.
@@ -3553,9 +4435,11 @@ bool PvPrepareBgra(ID3D11Device* dev, PvUnit& t, ID3D11Texture2D* tex, int idx, 
 // Round 5: the work is done by the target's EYE unit (PvUnitOf); a target whose eye is not known yet (or that collides
 // with the frame's other target) is left untouched this frame.
 void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
+    PvCpuScope cpuScope;                                 // v0.8.1 round 3 (per-frame CPU of our preview work)
     PvTarget& tg = g_pt[idx];
     if (!tg.pending) return;
     tg.pending = false;
+    if (tg.flushes++ == 0) tg.maskAtFlush = tg.slotMask; // v0.8.1 round 5 (late-composite check, seam capture)
     g_ptPendingMask &= ~(1 << idx);
     if (g_ptBoundIdx == idx) g_ptBoundIdx = -1;
     if (!tg.tex) return;
@@ -3636,7 +4520,8 @@ void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
         if (hdrLogs++ < 4)
             Log("preview target %d: %ux%u fmt=%d -- %s", idx, td.Width, td.Height, (int)td.Format,
                 f16 ? "RGBA16F (HDR output): preview DLAA runs in place as an HDR unit (RGBA16F colour, NGX IsHDR unless "
-                      "dlss_hdr=0); the Ctrl+F10 preview capture is 8-bit only and is not started on it"
+                      "dlss_hdr=0); the snapshot key runs the seam capture (pvseam) on it, the 8-bit measuring capture "
+                      "does not start here"
                     : "8-bit again: preview DLAA on the LDR path");
     }
     Microsoft::WRL::ComPtr<ID3D11Device> dev;
@@ -3654,10 +4539,13 @@ void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
     // Cost visibility: the instance's own non-blocking GPU timestamp queries ("DLAA GPU cost eye 10 / 11" lines, every
     // 600 timed frames). Flat: only with gpu_timing = 1 (the flat default stays as before); VR: also in auto mode.
     t.dl.SetTiming(g_gpuTiming > 0 || (g_gpuTiming < 0 && g_launchVr == 1));
+    t.dl.SetNoSharpen(!g_pvSharpen);                     // v0.8.1 round 5: dlaa.ini preview_sharpen = 0 (A/B)
     // Round 5: no reset on a reference-slot change any more -- the unit is the eye, so slot 0 vs 4 only reflects which eye
     // the game rendered first this frame (round 4 reset on it, but its units were order-bound, see the block comment).
     const bool reset = t.runs == 0 || t.lastFrame + 1 != fr || t.epoch != g_pvEpoch;
-    const float njx = (float)g_signX * g_pvJx, njy = (float)g_signY * g_pvJy;
+    // v0.8.1 round 4 debug (dlaa.ini preview_tile_jitter = 0): a TILED target's passes are not shifted, so NGX is told 0.
+    const bool noTileJit = !g_pvTileJitter && idx >= 0 && idx < kPtMax && g_pvLay[idx].tiled;
+    const float njx = noTileJit ? 0.0f : (float)g_signX * g_pvJx, njy = noTileJit ? 0.0f : (float)g_signY * g_pvJy;
     const int64_t t0 = t.runs == 0 ? Qpc() : 0;          // wall time of the first Run (NGX create + textures)
     const int areaNow = SceneDlaa::Area();               // preview targets always use the whole image (no dlaa_area crop)
     if (areaNow != 100) SceneDlaa::SetArea(100);
@@ -3696,6 +4584,7 @@ void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
                 (unsigned long long)fr, g_pvJx, g_pvJy, njx, njy, (int)reset, ref, t.lastRef, t.lastOrder);
         t.lastFrame = fr; t.lastRef = ref; t.lastOrder = idx; ++t.runs; ++g_pvOkFrame; ++g_pvRunsTotal;
         if (g_pvCapActive && !f16) PvCapAfterRun(ctx, ui, idx, tg, ref, njx, njy, bgra, td.Width, td.Height, fr);   // Ctrl+F10 capture (v0.8.0: 8-bit only)
+        if (g_pvSmActive) PvSmAfterRun(ctx, ui, idx, tg, ref, njx, njy, bgra ? t.scratch.Get() : tg.tex.Get(), fr);   // v0.8.1 round 5
     } else {
         static int fails = 0;
         if (fails++ < 10)
@@ -3709,7 +4598,42 @@ void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
 // per Present here (no G-buffer pass advances g_jx / g_jy on this screen; in VR one Present covers both eyes); the
 // viewport shift of every preview pass and the NGX jitter both read g_pvJx / g_pvJy, which only change here, so the
 // blended result of a frame is consistently jittered.
+// v0.8.1 round 3: the finished frame's preview CPU time into the ring; the armed layout-switch report collects the 8
+// frames after the switch and is logged then (one line per switch, 20 at most).
+void PvFrameCpuDone(uint64_t n) {
+    const double ms = g_qpcFreq > 0 ? (double)g_pvCpuTicks * 1000.0 / (double)g_qpcFreq : 0.0;
+    g_pvCpuTicks = 0;
+    g_pvCpuRing[g_pvCpuHead] = ms;
+    g_pvCpuHead = (g_pvCpuHead + 1) % 4;
+    if (!g_pvSw.armed) return;
+    g_pvSw.after[g_pvSw.nAfter++] = ms;
+    if (g_pvSw.nAfter < 8) return;
+    g_pvSw.armed = false;
+    ++g_pvSwLogs;
+    double mx = 0.0; int mi = 0;
+    for (int i = 0; i < 8; ++i) if (g_pvSw.after[i] > mx) { mx = g_pvSw.after[i]; mi = i; }
+    const PvSwitchRep& w = g_pvSw;
+    const uint64_t staleMax = w.prevQueued ? (w.frame - w.prevQueued) : (w.frame - w.queued);
+    Log("preview layout switch (target order %d, %s -> %s, verdict at game frame #%llu): from a readback queued at #%llu "
+        "(%llu frame(s) latency), the readback before it at #%llu -> the old layout was applied to at most %llu frame(s) "
+        "of the new picture (jitter scale / depth / MVs of the wrong layout there) | preview DLSS history resets %llu | "
+        "picture depth created %.1f ms | our preview CPU ms per frame, 4 before: %.2f %.2f %.2f %.2f | 8 after: %.2f %.2f "
+        "%.2f %.2f %.2f %.2f %.2f %.2f (max %.2f at +%d) | %s (frame #%llu)", w.g,
+        !w.fromKnown ? "unknown" : (w.fromTiled ? "TILED" : "untiled"), w.toTiled ? "TILED" : "untiled",
+        (unsigned long long)w.frame, (unsigned long long)w.queued, (unsigned long long)(w.frame - w.queued),
+        (unsigned long long)w.prevQueued, (unsigned long long)staleMax,
+        (unsigned long long)(g_pvInvalidates - w.inv0), g_pvCreateMs - w.create0,
+        w.before[0], w.before[1], w.before[2], w.before[3], w.after[0], w.after[1], w.after[2], w.after[3], w.after[4],
+        w.after[5], w.after[6], w.after[7], mx, mi,
+        g_pvLayRecheck > 0 ? "settled layouts re-checked every preview_layout_recheck-th frame (dlaa.ini)"
+        : g_plActive.load(std::memory_order_relaxed) ? "present layer: settled layouts re-checked every 4th frame"
+                                                     : "settled layouts re-checked every 31st frame",
+        (unsigned long long)n);
+}
+
 void PreviewNextFrame(uint64_t n) {
+    PvFrameCpuDone(n);                                   // v0.8.1 round 3: the frame that just ended
+    PvCpuScope cpuScope;
     if (g_ptPendingMask) {
         ID3D11DeviceContext* c = g_gameCtx.load(std::memory_order_acquire);
         for (int i = 0; i < kPtMax; ++i)
@@ -3756,6 +4680,14 @@ void PreviewNextFrame(uint64_t n) {
                     (unsigned long long)g_pvAsmMiss, (unsigned long long)g_pvLayThrottled, (unsigned long long)g_pvLayChanges);
                 g_pvAsmTimer.sum = 0.0; g_pvAsmTimer.n = 0; g_pvAsmTilesWin = 0;
             }
+            // v0.8.1 (round 5: every window, also untiled -- the round 4 test never printed it on the main menu)
+            Log("preview tile edge fix (v0.8.1): %llu uncovered tile edge column(s) / row(s) filled in total, %llu "
+                "zero-guarded fills (shift <= 0.49 px, round 5) | late composites (after the target's DLAA) %llu | layout "
+                "changes %llu, now %s | dlaa.ini preview_edge_fix=%d preview_tile_jitter=%d preview_layout_recheck=%d "
+                "preview_sharpen=%d", (unsigned long long)g_pvEdgeFixes, (unsigned long long)g_pvEdgeGuarded,
+                (unsigned long long)g_pvLateComps, (unsigned long long)g_pvLayChanges,
+                !g_pvLay[0].known ? "unknown" : (g_pvLay[0].tiled ? "TILED" : "untiled"), g_pvEdgeFix, g_pvTileJitter,
+                g_pvLayRecheck, g_pvSharpen);
             g_pvT0 = Qpc(); g_pvF0 = n;
         }
     }
@@ -3766,6 +4698,10 @@ void PreviewNextFrame(uint64_t n) {
         const bool autoCap = g_pvCaptureAt > 0 && !g_pvCaptureAtDone && g_pvFirstRunPresent &&
                              n >= g_pvFirstRunPresent + (uint64_t)g_pvCaptureAt;
         if (c && g_pvCapActive) PvCapAtPresent(c, n);
+        else if (c && g_pvSmActive) {                    // v0.8.1 round 5 seam capture (before the targets reset)
+            g_snapRequest = false;                       // a key press while it runs does not queue a second one
+            PvSmAtFrameEnd(c, n);
+        }
         else if (c && g_pvOkFrame > 0 && (g_snapRequest.load(std::memory_order_relaxed) || autoCap)) {
             if (autoCap) {
                 g_pvCaptureAtDone = true;
@@ -3773,12 +4709,10 @@ void PreviewNextFrame(uint64_t n) {
                     g_pvCaptureAt, (unsigned long long)g_pvFirstRunPresent);
             }
             g_snapRequest = false;
-            if (g_pvHdrTarget) {                         // v0.8.0: the capture's textures / metrics / BMPs are 8-bit only
-                Log("pvcap: not started -- the preview target is RGBA16F (HDR output); the preview capture is 8-bit only "
-                    "(Present #%llu)", (unsigned long long)n);
-            } else {
-                PvCapStart(c, n);
-            }
+            // v0.8.0: the measuring capture is 8-bit only. v0.8.1 round 5: an RGBA16F (HDR) target -- or any target with
+            // dlaa.ini preview_seam_capture = 1 -- gets the seam capture instead (PvSeam).
+            if (g_pvHdrTarget || g_pvSeamAlways) PvSmStart(c, n);
+            else PvCapStart(c, n);
         }
     }
     if (g_ptCount > 0) {                                 // learn the reference slots (lowest composited slot per target)
@@ -3831,10 +4765,16 @@ void PreviewNextFrame(uint64_t n) {
     g_pvCount = 0; g_pvOkFrame = 0; g_pvCur = -1;
     g_ptCount = 0; g_ptPendingMask = 0; g_ptBoundIdx = -1; g_pvUnitMask = 0;
     for (PvSlot& s : g_pv) { s.rt.Reset(); s.composited = false; }
-    for (PvTarget& t : g_pt) { t.tex.Reset(); t.pending = false; t.curRef = 99; t.unit = -1; t.slotMask = 0; }
+    for (PvTarget& t : g_pt) {
+        t.tex.Reset(); t.pending = false; t.curRef = 99; t.unit = -1; t.slotMask = 0;
+        t.flushes = 0; t.maskAtFlush = 0;                // v0.8.1 round 5
+    }
     g_pvDs.Reset();
     if (g_jitterEnabled) JitterOfPhase((int)((n + 1) % (uint64_t)(g_phases > 0 ? g_phases : 1)), &g_pvJx, &g_pvJy);
     else { g_pvJx = 0.0f; g_pvJy = 0.0f; }
+    // v0.8.1 round 5 seam capture, second part: the preview jitter forced to 0 (viewport shift 0 AND NGX told 0, both read
+    // these two values) -- the same numbers without any shift of ours.
+    if (g_pvSmActive && g_pvSm && g_pvSm->f >= kSmA) { g_pvJx = 0.0f; g_pvJy = 0.0f; }
 }
 
 // hkOMSetRenderTargets (game context, not t_inDlaa): sets g_previewPass. `gbuf` = this bind is the world G-buffer
@@ -3848,7 +4788,8 @@ void PreviewOnBind(UINT n, ID3D11RenderTargetView* const* rtvs, ID3D11DepthStenc
     if (gbuf) { g_lastGbufFrame = fr; g_pvCur = -1; g_pvCount = 0; }
     bool pv = false;
     if (n == 1 && rtvs && rtvs[0] && dsv && g_previewDlaa &&
-        !g_gameDeviceChanged.load(std::memory_order_relaxed) && fr - g_lastGbufFrame > kPvQuietFrames) {
+        !g_gameDeviceChanged.load(std::memory_order_relaxed) && fr - g_lastGbufFrame > kPvQuietFrames &&
+        PreviewFramesOk()) {                                     // v0.8.1: exact frames needed (present layer)
         Microsoft::WRL::ComPtr<ID3D11Resource> rres, dres;
         Microsoft::WRL::ComPtr<ID3D11Texture2D> rt, ds;
         rtvs[0]->GetResource(&rres);
@@ -3874,6 +4815,8 @@ void PreviewOnBind(UINT n, ID3D11RenderTargetView* const* rtvs, ID3D11DepthStenc
                     s.ps.snap = false;
                     s.rt = rt; s.composited = false;
                     s.capShX = s.capShY = 0.0f; s.capShN = s.capUnshN = 0;   // v0.7.8 capture: viewport decisions of this pass
+                    s.shX = s.shY = 0.0f; s.shOn = false;                     // v0.8.1 round 4: the shift of this pass
+                    s.capVp = D3D11_VIEWPORT{};                               // v0.8.1 round 5 seam capture
                     s.diCount = 0;                                            // round 6: per-pass collector diagnostics
                     s.ps.skSampled = s.ps.skNoCtx = s.ps.skFull = s.ps.skNoCb = s.ps.skRange = 0;
                     g_pvDs = ds;
@@ -3921,8 +4864,236 @@ void PreviewOnBindTargets(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetVi
 // passes) is snapshotted into the twin of the pass just drawn (g_pvCur) right before the discard destroys it (same
 // as the VR snapshot-at-discard) -- only for a learned reference slot. g_pvCur keeps pointing at the newest preview pass
 // until the next preview bind.
+// ---- v0.8.1 round 4: TILED preview, uncovered tile edge = the black seam line --------------------------------------------
+// The truck screen draws its picture as 2x2 tiles; every tile pass renders a QUARTER of the picture into the full tile RT
+// (2x supersampled: 1 tile px = 0.5 picture px) and the game's composite shrinks it into its quadrant. To move the
+// PICTURE by the NGX jitter (g_pvJx, g_pvJy in [-0.5, 0.5) picture px) PvShiftScale scales the tile pass's viewport shift
+// by a * h = 2: up to +-0.875 tile px. A viewport moved right by sx > 0.5 px no longer contains the centre (0.5) of tile
+// column 0, and one moved left by sx <= -0.5 no longer contains the centre of the last column (W - 0.5 < W + sx): that
+// whole column is never rasterized and keeps the pass's clear colour, (0,0,0,0) = black. Same for rows with sy. Untiled
+// passes (scale 1, |shift| <= 0.4375) never lose a whole pixel. With the 8 Halton phases sx = 2 * jx = 0, -0.5, +0.5,
+// -0.75, +0.25, -0.25, +0.75, -0.875: 3 of 8 frames lose the tiles' RIGHT column, 1 of 8 their LEFT column. The right
+// column of the left tiles and the left column of the right tiles meet at picture x = W/2: after the 2:1 composite a
+// half-black picture column at the screen's horizontal middle in half of the frames -> DLSS integrates a faint dark line
+// top to bottom (user, round 3 test: exactly there, gone with the mode off). sy = 2 * jy gives the same at the
+// horizontal seam (4 of 8 frames, top / bottom rows) and at the screen edges. Fix: at the pass's DS discard (its RT is
+// complete, the composite follows) each uncovered edge column / row is replaced by its inner neighbour (2 small copies
+// through a 1-px scratch strip; a copy inside one subresource is not used). An edge shift of a fraction of a tile pixel
+// stays (sub-pixel, invisible). dlaa.ini preview_edge_fix = 0 turns it off (A/B).
+// v0.8.1 round 5: ZERO-GUARDED fill for the smaller shifts. The rule above (a pixel is rasterized when its CENTRE lies
+// inside the shifted viewport -> |shift| < 0.5 never loses a column) is the D3D11 rule, but the round 4 test log has the
+// line in a run where no pass was shifted by 0.5 or more (untiled verdict, scale 1, |shift| <= 0.4375). So for
+// 0 < |shift| <= 0.49 the edge column / row on the side the viewport moved away from is no longer trusted: a small compute
+// pass (kPvEdgeFillShader, from the shader cache) copies that edge + its inner neighbour into a 2-texel strip and writes
+// back the edge with every texel that is EXACTLY the clear colour (0,0,0) replaced by its inner neighbour. Rendered
+// R11G11B10 texels are practically never exactly 0 (and a true black one gets its neighbour = no visible change), so on a
+// GPU that follows the rule this changes nothing; on one that drops the fractional edge it removes the black column.
+// The seam capture (pvseam, snapshot key) logs the zero texels of every tile edge BEFORE this fix = the proof either way.
+// |shift| > 0.49 keeps the unconditional copy above (provably uncovered). Both off with dlaa.ini preview_edge_fix = 0.
+// kPvEdgeFillShader-BEGIN (the build validates this block with fxc)
+const char kPvEdgeFillShader[] = R"(
+cbuffer EdgeCB : register(b0) {
+    uint Count;      // texels along the edge (tile RT height for a column, width for a row)
+    uint Axis;       // 0 = column (Strip is 2 x Count), 1 = row (Strip is Count x 2)
+    uint EdgeIdx;    // 0 / 1: which of the 2 strip texels is the edge; the other one is its inner neighbour
+    uint Pad;
+};
+Texture2D<float4>   Strip : register(t0);
+RWTexture2D<float4> Dst   : register(u0);   // 1 x Count (column) / Count x 1 (row), the tile RT's format
+
+[numthreads(64, 1, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID) {
+    if (id.x >= Count) return;
+    const int i = (int)id.x;
+    const int e = (int)EdgeIdx, n = 1 - (int)EdgeIdx;
+    const int2 pe = Axis == 0 ? int2(e, i) : int2(i, e);
+    const int2 pn = Axis == 0 ? int2(n, i) : int2(i, n);
+    const float3 ce = Strip.Load(int3(pe, 0)).rgb;
+    const float3 cn = Strip.Load(int3(pn, 0)).rgb;
+    Dst[Axis == 0 ? int2(0, i) : int2(i, 0)] = float4(all(ce == 0.0) ? cn : ce, 1.0);
+}
+)";
+// kPvEdgeFillShader-END
+
+void PvEdgeRegisterShaders() {
+    ShaderCache::Add(ShaderCache::kPvEdgeFill, kPvEdgeFillShader, sizeof(kPvEdgeFillShader) - 1, "pv_edge_fill", "CSMain", "cs_5_0");
+}
+
+Microsoft::WRL::ComPtr<ID3D11Texture2D> g_pvEdgeCol, g_pvEdgeRow;   // 1 x H and W x 1 scratch strips (tile RT format)
+bool             g_pvEdgeFailed = false;
+// round 5 zero-guarded fill: 2-texel strips (SRV) + 1-texel results (UAV) per axis, its CS + constant buffer
+PcPtr<ID3D11Texture2D>           g_pvEgStrip[2], g_pvEgOut[2];    // [0] column (2 x H / 1 x H), [1] row (W x 2 / W x 1)
+PcPtr<ID3D11ShaderResourceView>  g_pvEgStripSrv[2];
+PcPtr<ID3D11UnorderedAccessView> g_pvEgOutUav[2];
+PcPtr<ID3D11ComputeShader>       g_pvEgCs;
+PcPtr<ID3D11Buffer>              g_pvEgCb;
+bool             g_pvEgFailed = false;
+
+// The zero-guarded fill's resources for a tile RT of `d` (axis 0 = column, 1 = row). false = not available (logged once
+// and off for the session; a shader-cache warm-up still running is a plain false without the log).
+bool PvEnsureEdgeGuard(ID3D11DeviceContext* ctx, const D3D11_TEXTURE2D_DESC& d, int axis) {
+    if (g_pvEgFailed) return false;
+    PcPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    if (!dev) return false;
+    HRESULT hr = S_OK;
+    const char* what = "";
+    if (!g_pvEgCs) {
+        if (!ShaderCache::Done()) return false;
+        size_t size = 0;
+        const void* code = ShaderCache::Code(ShaderCache::kPvEdgeFill, &size);
+        D3D11_BUFFER_DESC bd{};
+        bd.ByteWidth = 16;
+        bd.Usage = D3D11_USAGE_DYNAMIC;
+        bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        if (!code) { hr = E_FAIL; what = "shader"; }
+        else if (FAILED(hr = dev->CreateComputeShader(code, size, nullptr, &g_pvEgCs))) what = "compute shader";
+        else if (FAILED(hr = dev->CreateBuffer(&bd, nullptr, &g_pvEgCb))) what = "constant buffer";
+    }
+    const UINT sw = axis == 0 ? 2u : d.Width, sh = axis == 0 ? d.Height : 2u;
+    const UINT ow = axis == 0 ? 1u : d.Width, oh = axis == 0 ? d.Height : 1u;
+    if (SUCCEEDED(hr) && g_pvEgStrip[axis]) {
+        D3D11_TEXTURE2D_DESC e{};
+        g_pvEgStrip[axis]->GetDesc(&e);
+        if (e.Width != sw || e.Height != sh || e.Format != d.Format) {
+            g_pvEgStrip[axis].Reset(); g_pvEgStripSrv[axis].Reset(); g_pvEgOut[axis].Reset(); g_pvEgOutUav[axis].Reset();
+        }
+    }
+    if (SUCCEEDED(hr) && !g_pvEgStrip[axis]) {
+        D3D11_TEXTURE2D_DESC td{};
+        td.MipLevels = 1; td.ArraySize = 1; td.Format = d.Format; td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_DEFAULT;
+        td.Width = sw; td.Height = sh; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        if (FAILED(hr = dev->CreateTexture2D(&td, nullptr, &g_pvEgStrip[axis])) ||
+            FAILED(hr = dev->CreateShaderResourceView(g_pvEgStrip[axis].Get(), nullptr, &g_pvEgStripSrv[axis]))) {
+            what = "strip texture / SRV";
+        } else {
+            td.Width = ow; td.Height = oh; td.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+            if (FAILED(hr = dev->CreateTexture2D(&td, nullptr, &g_pvEgOut[axis])) ||
+                FAILED(hr = dev->CreateUnorderedAccessView(g_pvEgOut[axis].Get(), nullptr, &g_pvEgOutUav[axis])))
+                what = "result texture / typed UAV";
+        }
+    }
+    if (FAILED(hr)) {
+        g_pvEgFailed = true;
+        g_pvEgStrip[axis].Reset(); g_pvEgStripSrv[axis].Reset(); g_pvEgOut[axis].Reset(); g_pvEgOutUav[axis].Reset();
+        Log("preview tile edge fix: the zero-guarded fill for shifts below 0.5 px is unavailable (%s, hr=0x%lx, tile RT fmt=%d, "
+            "%s) -- only the > 0.49 px copy stays", what, (unsigned long)hr, (int)d.Format,
+            ShaderCache::Error(ShaderCache::kPvEdgeFill));
+        return false;
+    }
+    return true;
+}
+
+void PvFixTileEdges(ID3D11DeviceContext* ctx, PvSlot& s) {
+    if (!g_pvEdgeFix || !s.shOn || !s.rt) return;
+    const bool fl = s.shX > 0.49f, fr = s.shX < -0.49f, ft = s.shY > 0.49f, fb = s.shY < -0.49f;
+    // round 5: the side a smaller shift moved the viewport away from (zero-guarded fill only)
+    constexpr float kEps = 1e-4f;
+    const bool gl = !fl && s.shX > kEps, gr = !fr && s.shX < -kEps, gt = !ft && s.shY > kEps, gb = !fb && s.shY < -kEps;
+    if (!(fl || fr || ft || fb || gl || gr || gt || gb)) return;
+    D3D11_TEXTURE2D_DESC d{};
+    s.rt->GetDesc(&d);
+    if (d.Width < 4 || d.Height < 4 || d.SampleDesc.Count != 1) return;
+    ID3D11Texture2D* const rt = s.rt.Get();
+    if ((fl || fr || ft || fb) && !g_pvEdgeFailed) {
+        auto ensure = [&](Microsoft::WRL::ComPtr<ID3D11Texture2D>& t, UINT w, UINT h) {
+            if (t) {
+                D3D11_TEXTURE2D_DESC e{};
+                t->GetDesc(&e);
+                if (e.Width == w && e.Height == h && e.Format == d.Format) return true;
+                t.Reset();
+            }
+            Microsoft::WRL::ComPtr<ID3D11Device> dev;
+            ctx->GetDevice(&dev);
+            D3D11_TEXTURE2D_DESC td{};
+            td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1; td.Format = d.Format;
+            td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_DEFAULT;
+            return dev && SUCCEEDED(dev->CreateTexture2D(&td, nullptr, &t)) && t;
+        };
+        if (((fl || fr) && !ensure(g_pvEdgeCol, 1, d.Height)) || ((ft || fb) && !ensure(g_pvEdgeRow, d.Width, 1))) {
+            g_pvEdgeFailed = true;
+            Log("preview tile edge fix: scratch strip create failed (tile RT %ux%u fmt=%d) -- off for this session", d.Width,
+                d.Height, (int)d.Format);
+        } else {
+            t_inDlaa = true;
+            auto col = [&](UINT from, UINT to) {         // column `from` -> column `to` (all rows)
+                const D3D11_BOX b{ from, 0, 0, from + 1, d.Height, 1 };
+                ctx->CopySubresourceRegion(g_pvEdgeCol.Get(), 0, 0, 0, 0, rt, 0, &b);
+                ctx->CopySubresourceRegion(rt, 0, to, 0, 0, g_pvEdgeCol.Get(), 0, nullptr);
+            };
+            auto row = [&](UINT from, UINT to) {         // row `from` -> row `to` (all columns)
+                const D3D11_BOX b{ 0, from, 0, d.Width, from + 1, 1 };
+                ctx->CopySubresourceRegion(g_pvEdgeRow.Get(), 0, 0, 0, 0, rt, 0, &b);
+                ctx->CopySubresourceRegion(rt, 0, 0, to, 0, g_pvEdgeRow.Get(), 0, nullptr);
+            };
+            if (fl) col(1, 0);                           // columns first, then rows (the rows carry the fixed corners)
+            if (fr) col(d.Width - 2, d.Width - 1);
+            if (ft) row(1, 0);
+            if (fb) row(d.Height - 2, d.Height - 1);
+            t_inDlaa = false;
+            g_pvEdgeFixes += (fl ? 1 : 0) + (fr ? 1 : 0) + (ft ? 1 : 0) + (fb ? 1 : 0);
+            static int logs = 0;
+            if (logs++ < 3)
+                Log("preview tile edge fix: pass slot %d shifted (%+.4f,%+.4f) tile px on a %ux%u tile RT -- %s%s%s%s left "
+                    "uncovered (cleared black) -> filled from the inner neighbour before the game's composite (dlaa.ini "
+                    "preview_edge_fix=0 turns this off)", g_pvCur, (double)s.shX, (double)s.shY, d.Width, d.Height,
+                    fl ? "left column " : "", fr ? "right column " : "", ft ? "top row " : "", fb ? "bottom row " : "");
+        }
+    }
+    const bool gcol = (gl || gr) && PvEnsureEdgeGuard(ctx, d, 0);
+    const bool grow = (gt || gb) && PvEnsureEdgeGuard(ctx, d, 1);
+    if (!gcol && !grow) return;
+    t_inDlaa = true;
+    PvCsSave cs;
+    cs.Save(ctx);
+    ID3D11ShaderResourceView* nullSrv = nullptr;
+    ID3D11UnorderedAccessView* nullUav = nullptr;
+    const UINT keep = (UINT)-1;
+    ID3D11Buffer* cb = g_pvEgCb.Get();
+    ctx->CSSetShader(g_pvEgCs.Get(), nullptr, 0);
+    ctx->CSSetConstantBuffers(0, 1, &cb);
+    int n = 0;
+    auto fill = [&](int axis, UINT edge) {               // edge column (axis 0) / row (axis 1) `edge`, inner = its neighbour
+        const UINT len = axis == 0 ? d.Height : d.Width;
+        const UINT lo = edge == 0 ? 0u : edge - 1;       // the strip holds [lo, lo + 2): edge 0 -> idx 0, last -> idx 1
+        const D3D11_BOX b = axis == 0 ? D3D11_BOX{ lo, 0, 0, lo + 2, d.Height, 1 } : D3D11_BOX{ 0, lo, 0, d.Width, lo + 2, 1 };
+        ctx->CopySubresourceRegion(g_pvEgStrip[axis].Get(), 0, 0, 0, 0, rt, 0, &b);
+        D3D11_MAPPED_SUBRESOURCE mp{};
+        if (FAILED(ctx->Map(cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) return;
+        const UINT c[4] = { len, (UINT)axis, edge == 0 ? 0u : 1u, 0u };
+        memcpy(mp.pData, c, sizeof(c));
+        ctx->Unmap(cb, 0);
+        ID3D11ShaderResourceView* srv = g_pvEgStripSrv[axis].Get();
+        ID3D11UnorderedAccessView* uav = g_pvEgOutUav[axis].Get();
+        ctx->CSSetShaderResources(0, 1, &srv);
+        ctx->CSSetUnorderedAccessViews(0, 1, &uav, &keep);
+        ctx->Dispatch((len + 63) / 64, 1, 1);
+        ctx->CSSetShaderResources(0, 1, &nullSrv);
+        ctx->CSSetUnorderedAccessViews(0, 1, &nullUav, &keep);
+        ctx->CopySubresourceRegion(rt, 0, axis == 0 ? edge : 0, axis == 0 ? 0 : edge, 0, g_pvEgOut[axis].Get(), 0, nullptr);
+        ++n;
+    };
+    if (gcol && gl) fill(0, 0);                          // columns first, then rows (as above)
+    if (gcol && gr) fill(0, d.Width - 1);
+    if (grow && gt) fill(1, 0);
+    if (grow && gb) fill(1, d.Height - 1);
+    cs.Restore(ctx);
+    t_inDlaa = false;
+    g_pvEdgeGuarded += (uint64_t)n;
+    static int glogs = 0;
+    if (n && glogs++ < 2)
+        Log("preview tile edge fix (zero-guarded, v0.8.1 round 5): pass slot %d shifted (%+.4f,%+.4f) tile px -- %s%s%s%s: "
+            "texels still at the clear colour (0,0,0) are replaced by their inner neighbour, rendered ones stay",
+            g_pvCur, (double)s.shX, (double)s.shY, (gcol && gl) ? "left column " : "", (gcol && gr) ? "right column " : "",
+            (grow && gt) ? "top row " : "", (grow && gb) ? "bottom row " : "");
+}
+
 void PreviewOnDiscard(ID3D11DeviceContext* ctx, ID3D11Resource* res) {
+    PvCpuScope cpuScope;                                 // v0.8.1 round 3
     if (t_inDlaa || !res || g_pvCur < 0 || (ID3D11Resource*)g_pvDs.Get() != res) return;
+    if (g_pvSmActive) PvSmOnPass(ctx, g_pvCur);          // v0.8.1 round 5 seam capture: the tile edges BEFORE the fix
+    PvFixTileEdges(ctx, g_pv[g_pvCur]);                  // v0.8.1 round 4: before any early return below (see there)
     if (!g_dlaaOn.load(std::memory_order_relaxed) || g_jitterOnly.load(std::memory_order_relaxed) ||
         g_passive.load(std::memory_order_relaxed)) return;
     // Round 6: a pass of a TILED group goes into the group's picture depth (every tile, see PvLayout); the reference
@@ -4034,6 +5205,9 @@ void OnSceneDepthClear(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v) {
     // A clear only starts a pass if the previous pass actually rendered into the G-buffer.
     if (g_depthDirty) {
         g_depthDirty = false;
+        // v0.8.1: present-layer FALLBACK frame boundary (only while the frame-end rule found no frame end for 1 s):
+        // the clear that starts a world pass = a new frame in flat. Runs the per-frame work before the pass starts.
+        if (g_plActive.load(std::memory_order_relaxed)) LayerFrameBoundary(ctx, kPlbSceneClear);
         StartPass(ctx, true);
     }
     if (g_passSeq) ++g_ring[(g_passSeq - 1) % kRing].sceneClears;   // lands on the pass it started, if any
@@ -4152,7 +5326,8 @@ void TraceFinish() {
     Log("trace: wrote dlaa_trace.txt (%llu lines%s)", (unsigned long long)lines.size(), dropped ? ", TRUNCATED" : "");
 }
 
-// Called from hkPresent (top-level only, render thread). `n` = this Present's number. The trace key (v0.6.5
+// Called from hkPresent (top-level only, render thread; v0.8.1 present layer: the game-thread boundary, sc = nullptr).
+// `n` = this Present's number. The trace key (v0.6.5
 // Ctrl+F11) is read in hkPresent's unified hotkey block and sets g_traceRequest, consumed below the same frame.
 void TraceAtPresent(IDXGISwapChain* sc, uint64_t n) {
     const int st = g_traceState.load();
@@ -4168,9 +5343,12 @@ void TraceAtPresent(IDXGISwapChain* sc, uint64_t n) {
         LB b; b.add("IMM Present (trace start boundary, #%llu)", (unsigned long long)n);
         TraceEmit(b);
     } else if (st == 2) {
-        LB b; b.add("IMM Present #%llu ending frame %d", (unsigned long long)n, g_traceFrame);
+        LB b;
+        if (sc) b.add("IMM Present #%llu ending frame %d", (unsigned long long)n, g_traceFrame);
+        else    b.add("IMM frame boundary #%llu ending frame %d (present layer: frame-end rule / scene clear / idle, "
+                      "the game's own Present is not hooked)", (unsigned long long)n, g_traceFrame);   // v0.8.1
         ID3D11Texture2D* bb = nullptr;
-        if (SUCCEEDED(sc->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&bb)) && bb) {
+        if (sc && SUCCEEDED(sc->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&bb)) && bb) {
             b.add(" backbuffer="); DescRes(b, bb); bb->Release();
         }
         TraceEmit(b);
@@ -4238,24 +5416,57 @@ inline bool CountForeign(ID3D11DeviceContext* ctx) {
     g_foreignCtx.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
+void PlNoteEvidence(ID3D11DeviceContext* ctx, int kind, UINT dw, UINT dh);   // v0.8.1, defined with the game context
+void MaybeEarlyPrewarm(ID3D11DeviceContext* ctx, void* caller);                // v0.8.1 round 3, ditto
 // OMSetRenderTargets on a foreign context: a bind that passes the scene-depth test (4 RTVs + D32S8 >= 1024 wide,
-// single-sample = InspectDepth) is logged once and NOT adopted.
-void NoteForeignOM(ID3D11DeviceContext* ctx, UINT n, ID3D11DepthStencilView* dsv) {
-    if (!CountForeign(ctx) || n != 4 || !dsv || g_fgnGbufLogged.load(std::memory_order_relaxed)) return;
+// single-sample = InspectDepth) is logged once and NOT adopted on its own. v0.8.1: until a context was adopted from a
+// present layer, such binds -- and the profile-screen preview pass shape (1 RTV R11G11B10_FLOAT + a D32S8 DSV of the
+// RT's size, see PreviewOnBind) -- are present-layer evidence (PlNoteEvidence; adoption needs many of them on ONE
+// context plus the presenting side's conditions).
+void NoteForeignOM(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* rtvs, ID3D11DepthStencilView* dsv) {
+    if (!CountForeign(ctx) || !dsv || (n != 4 && n != 1)) return;
+    // Evidence is collected until an adoption, and only while the game context has rendered no scene pass: once it
+    // does (the normal case) no adoption is possible, nothing to collect. g_passSeq: racy read, a 0-test only.
+    const bool collect = !g_plAdopted.load(std::memory_order_relaxed) && g_passSeq == 0;
+    if (!collect && (n != 4 || g_fgnGbufLogged.load(std::memory_order_relaxed))) return;   // v0.6.2 behaviour
     ID3D11Resource* res = nullptr;
     dsv->GetResource(&res);
     if (!res) return;
+    D3D11_TEXTURE2D_DESC d{};
+    bool depthOk = false;
     ID3D11Texture2D* tex = nullptr;
     if (SUCCEEDED(res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&tex)) && tex) {
-        D3D11_TEXTURE2D_DESC d{};
         tex->GetDesc(&d);
         tex->Release();
         const bool fmtOk = d.Format == DXGI_FORMAT_D32_FLOAT_S8X24_UINT || d.Format == DXGI_FORMAT_R32G8X24_TYPELESS;
-        if (fmtOk && d.Width >= 1024 && d.SampleDesc.Count == 1 && !g_fgnGbufLogged.exchange(true))
-            Log("G-buffer bind on a non-game context %p (game %p): depth %ux%u fmt=%d tid=%lu -- not adopted",
-                (void*)ctx, (void*)g_gameCtx.load(), d.Width, d.Height, (int)d.Format, GetCurrentThreadId());
+        depthOk = fmtOk && d.Width >= 1024 && d.SampleDesc.Count == 1;
     }
     res->Release();
+    if (!depthOk) return;
+    int kind = 0;                                            // 1 = G-buffer, 2 = preview pass shape
+    if (n == 4) {
+        kind = 1;
+    } else if (collect && rtvs && rtvs[0]) {
+        ID3D11Resource* rres = nullptr;
+        rtvs[0]->GetResource(&rres);
+        if (rres) {
+            ID3D11Texture2D* rt = nullptr;
+            if (SUCCEEDED(rres->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&rt)) && rt) {
+                D3D11_TEXTURE2D_DESC rd{};
+                rt->GetDesc(&rd);
+                rt->Release();
+                if (rd.Format == DXGI_FORMAT_R11G11B10_FLOAT && rd.SampleDesc.Count == 1 && rd.Width == d.Width &&
+                    rd.Height == d.Height) kind = 2;
+            }
+            rres->Release();
+        }
+    }
+    if (!kind) return;
+    if (kind == 1 && !g_fgnGbufLogged.exchange(true))
+        Log("G-buffer bind on a non-game context %p (game %p): depth %ux%u fmt=%d tid=%lu -- not adopted%s",
+            (void*)ctx, (void*)g_gameCtx.load(), d.Width, d.Height, (int)d.Format, GetCurrentThreadId(),
+            collect ? " (yet: v0.8.1 collects present-layer evidence, see the 'present layer' lines)" : "");
+    if (collect) PlNoteEvidence(ctx, kind, d.Width, d.Height);
 }
 // Draw on a foreign context: a 3/4-vertex draw whose PS SRV0 is an R8G8B8A8 texture at the scene dims (= what
 // our blit trigger looks for) is logged once (our DLAA only runs on game-context blits).
@@ -4307,11 +5518,14 @@ void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
     float pvKx = 1.0f, pvKy = 1.0f;
     if (pvShift) PvShiftScale(g_pvCur, &pvKx, &pvKy);
     const float sx = pvShift ? g_pvJx * pvKx : g_jx, sy = pvShift ? g_pvJy * pvKy : g_jy;
+    if (pvShift && g_pvCur >= 0) { PvSlot& ss = g_pv[g_pvCur]; ss.shX = sx; ss.shY = sy; ss.shOn = true; }   // round 4
     // v0.7.8 preview capture: record the decision for the current preview pass (proof the 4 passes get the same shift).
-    if (g_pvCapActive && g_previewPass && g_pvCur >= 0 && g_pvW &&
-        (UINT)g_gameVp[0].Width == g_pvW && (UINT)g_gameVp[0].Height == g_pvH) {
+    if ((g_pvCapActive || g_pvSmActive) && g_previewPass && g_pvCur >= 0) {
         PvSlot& cs = g_pv[g_pvCur];
-        if (pvShift) { cs.capShX = sx; cs.capShY = sy; ++cs.capShN; } else ++cs.capUnshN;
+        if (gameJustSet) cs.capVp = g_gameVp[0];         // v0.8.1 round 5 seam capture: the game's own viewport 0
+        if (g_pvW && (UINT)g_gameVp[0].Width == g_pvW && (UINT)g_gameVp[0].Height == g_pvH) {
+            if (pvShift) { cs.capShX = sx; cs.capShY = sy; ++cs.capShN; } else ++cs.capUnshN;
+        }
     }
 #else
     const bool pvShift = false;
@@ -4339,6 +5553,9 @@ void STDMETHODCALLTYPE hkRSSetViewports(ID3D11DeviceContext* ctx, UINT n, const 
         oRSSetViewports(ctx, n, vps);
         return;
     }
+    // v0.8.1: 0 viewports on the game context. The v0.8.1 test logs show the D3D11 runtime issues it inside Present
+    // (caller d3d11.dll, also on the layer's thread at shutdown): counted + its caller logged once, NEVER a frame boundary.
+    if (n == 0 && !t_inDlaa) OnFrameStartMarker(ctx, _ReturnAddress());
     if (t_inDlaa || !vps || n == 0) {
         oRSSetViewports(ctx, n, vps);
         return;
@@ -4356,7 +5573,8 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
                                             ID3D11DepthStencilView* dsv) {
     TraceOM(ctx, n, rtvs, dsv);
     if (!IsGameCtx(ctx)) {                         // v0.6.2: other contexts never touch g_gbufPass / g_jitterPass
-        NoteForeignOM(ctx, n, dsv);
+        MaybeEarlyPrewarm(ctx, _ReturnAddress());   // v0.8.1: NGX pre-warm on the game's thread before the adoption
+        NoteForeignOM(ctx, n, rtvs, dsv);
         oOMSetRenderTargets(ctx, n, rtvs, dsv);
         return;
     }
@@ -4364,6 +5582,11 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
         oOMSetRenderTargets(ctx, n, rtvs, dsv);
         return;
     }
+    // v0.8.1: the frame-end rule (both modes; under a present layer it runs the game-thread frame boundary right here,
+    // before this bind -- the previous frame's last target is still bound), then the IDLE fallback boundary (no rule
+    // frame end for 1 s and no boundary of any kind for 30 ms). LayerFrameBoundary returns at once unless that holds.
+    FrameEndOnBind(ctx, n, rtvs);
+    if (g_plActive.load(std::memory_order_relaxed)) LayerFrameBoundary(ctx, kPlbIdle);
     CountGameOtherThread();                        // v0.6.2 flight recorder
     // Jitter-pass test: the bound DSV is the scene depth AND either
     //  (a) 4 RTVs (G-buffer), or
@@ -5437,6 +6660,14 @@ bool PreviewComposite(ID3D11DeviceContext* ctx) {
     }
     if (idx < 0) return true;                            // a third target in one frame: composite recognised, no DLAA for it
     PvTarget& t = g_pt[idx];
+    if (t.flushes > 0) {                                 // v0.8.1 round 5: this part lands AFTER the target's DLAA ran
+        ++g_pvLateComps;
+        static int lateLogs = 0;
+        if (lateLogs++ < 3)
+            Log("preview target %d: composite of slot %d AFTER the target's DLAA already ran this frame (composited before it: "
+                "0x%x, Present #%llu) -- that part is not anti-aliased and the target runs again with a history reset", idx,
+                slot, t.maskAtFlush, (unsigned long long)g_frames.load(std::memory_order_relaxed));
+    }
     if (slot < t.curRef) t.curRef = slot;
     t.slotMask |= 1 << slot;                             // v0.7.8: all passes of this target (round 6: the tile layout)
     if (g_gameVpN > 0) g_pv[slot].compVp = g_gameVp[0]; // round 6: where the game's composite draws it (layout log)
@@ -5456,6 +6687,7 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
         oDraw(ctx, vertexCount, startVertex);
         return;
     }
+    CountGameDraw(t_inDlaa, ctx, vertexCount, false);   // v0.8.1: frame-end rule + present-layer bookkeeping
 #ifdef WITH_DLAA
     // v0.7.8 profile-screen preview: a matched composite only marks its target pending; any other Draw while a pending
     // target is the current RT0 (trigger (a): flat UI, VR verts=96 Draw) runs that target's DLAA before the Draw.
@@ -5480,12 +6712,27 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
 // one-time ~0.7 s of NGX init + first feature create is invisible; it used to land on the first DLAA unit, i.e. the
 // VR main menu). Render thread, the game's immediate context, never after a game device change. See
 // DlaaProcessor::Prewarm. DLAA off at boot: done at the first Present after it is switched on.
+// v0.8.1: while the Presents come through a known present layer and no game context was adopted yet, the game context
+// is the layer's presenting device, not the game's: NGX would be initialised (and pinned) on the wrong device. The
+// pre-warm then waits until the adoption (it runs at the first game-thread frame boundary after it) or until the
+// presenting context renders a scene pass itself (= it IS the game's).
 void MaybePrewarmNgx() {
-    static bool done = false;
-    if (done || !g_dlaaOn.load(std::memory_order_relaxed) || g_gameDeviceChanged.load(std::memory_order_relaxed)) return;
+    if (g_prewarmDone.load(std::memory_order_acquire) || !g_dlaaOn.load(std::memory_order_relaxed) ||
+        g_gameDeviceChanged.load(std::memory_order_relaxed)) return;
     ID3D11DeviceContext* const c = g_gameCtx.load(std::memory_order_acquire);
     if (!c) return;
-    done = true;
+    if (g_plSuspect.load(std::memory_order_relaxed) && !g_plActive.load(std::memory_order_relaxed) && g_passSeq == 0) {
+        static bool deferLogged = false;
+        if (!deferLogged) {
+            deferLogged = true;
+            Log("DLAA: NGX pre-warm deferred -- the Presents come through the present layer %s, whose device is not the "
+                "game's render device; NGX is initialised on the game device: early, on the game's render thread at its "
+                "first draws (MaybeEarlyPrewarm), else once its render context is adopted",
+                g_plModule[0] ? g_plModule : "?");
+        }
+        return;
+    }
+    g_prewarmDone.store(true, std::memory_order_release);
     t_inDlaa = true;                                   // NGX's own context calls pass straight through our hooks
     SceneDlaa::PrewarmNgx(c);
     t_inDlaa = false;
@@ -5494,6 +6741,7 @@ void MaybePrewarmNgx() {
 
 // Top-level Present boundary (called from hkPresent before oPresent). v0.5.2: nothing here drives frame logic
 // any more (passes/blits are matched by the FIFO); logging only.
+void LogFrameEndCheck(uint64_t n);      // v0.8.1, defined with the frame-end rule
 void OnPresentBoundary(uint64_t n) {
 #ifdef WITH_DLAA
     PreviewNextFrame(n);                               // v0.7.8 profile-screen preview: log, reset slots, next jitter
@@ -5511,10 +6759,19 @@ void OnPresentBoundary(uint64_t n) {
         // v0.8.0: " | hdr-out=1 hdr-blits=N" appended only while the output is HDR (the 8-bit line is unchanged).
         char hdrTail[64] = "";
         if (g_hdrOut) snprintf(hdrTail, sizeof(hdrTail), " | hdr-out=1 hdr-blits=%llu", (unsigned long long)g_hdrBlitCount);
-        Log("Present #%llu: passes=%llu blits=%llu outstanding=%d mode=%s eye-map-entries=%d | dlaa=%s dlaa-mode=%s ngx-feature=%d%s",
+        // v0.8.1: " | present-layer: ..." appended only in present-layer mode (n = game frames, see LayerFrameBoundary).
+        char plTail[192] = "";
+        if (g_plActive.load(std::memory_order_relaxed))
+            snprintf(plTail, sizeof(plTail), " | present-layer: game frames counted on the game thread (frame-end=%llu "
+                     "scene-clear=%llu idle=%llu), layer presents=%llu, backbuffer %ux%u fmt=%d",
+                     (unsigned long long)g_plBoundRule, (unsigned long long)g_plBoundFallback,
+                     (unsigned long long)g_plBoundIdle, (unsigned long long)g_plPresents.load(std::memory_order_relaxed),
+                     g_bbW, g_bbH, (int)g_bbFmt);
+        Log("Present #%llu: passes=%llu blits=%llu outstanding=%d mode=%s eye-map-entries=%d | dlaa=%s dlaa-mode=%s ngx-feature=%d%s%s",
             (unsigned long long)n, (unsigned long long)g_passSeq, (unsigned long long)g_blitCount,
             (int)(g_passSeq - g_fifoHead), g_vrMode ? "VR" : (g_flatMode ? "flat" : "undetected"), g_eyeMapN,
-            g_dlaaOn.load(std::memory_order_relaxed) ? "on" : "off", DlaaModeStr(), ngxFeature, hdrTail);
+            g_dlaaOn.load(std::memory_order_relaxed) ? "on" : "off", DlaaModeStr(), ngxFeature, hdrTail, plTail);
+        LogFrameEndCheck(n);                           // v0.8.1: does the frame-end rule fire once per frame?
     }
 
     // v0.7.10: one-shot triage warnings when the 3D scene never showed up. After ~1800 Presents AND ~30 s wall-clock
@@ -5530,8 +6787,12 @@ void OnPresentBoundary(uint64_t n) {
             s_warnedNoPass = true;
             Log("WARNING: no scene pass seen after %llu Presents / ~30 s -- the 3D scene render has not been "
                 "recognised. Likely still in the menu / a loading screen (load a save and drive), or an unsupported "
-                "game version / render path, or another injector or driver layer owns the device.",
-                (unsigned long long)n);
+                "game version / render path, or another injector or driver layer owns the device.%s",
+                (unsigned long long)n,
+                (g_plSuspect.load(std::memory_order_relaxed) && !g_plActive.load(std::memory_order_relaxed))   // v0.8.1
+                    ? " The Presents come through a present layer and no foreign scene render was adopted yet (see the "
+                      "'present layer' / 'G-buffer bind on a non-game context' lines; none = no 3D scene rendered yet)."
+                    : "");
         } else if (!s_warnedNoBlit && g_passSeq >= 600 && g_blitCount == 0) {   // 600 passes: the first blit follows the first pass by a frame or two
             s_warnedNoBlit = true;
             // v0.8.0: + backbuffer format and scene / backbuffer sizes and the HDR rule's state, so an unsupported
@@ -5629,12 +6890,16 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
     // v0.6.1: every call is counted on the newest pass (flight recorder).
     // v0.6.2: only the game context is tracked (identity compare, no GetType); for any other context the type is
     // queried once: deferred -> g_diDeferred, other immediate -> g_foreignCtx (once the game context is known).
-    if (!IsGameCtx(ctx)) {
+    const bool gameCtx = IsGameCtx(ctx);
+    if (!gameCtx) {
         if (ctx->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE)
             g_diDeferred.fetch_add(1, std::memory_order_relaxed);   // any thread
         else if (g_gameCtx.load(std::memory_order_relaxed))
             g_foreignCtx.fetch_add(1, std::memory_order_relaxed);
-    } else if (g_passSeq) {
+    } else {
+        CountGameDraw(t_inDlaa, ctx, 0, true);     // v0.8.1: frame-end rule + present-layer bookkeeping
+    }
+    if (gameCtx && g_passSeq) {
         PassSlot& ps = g_ring[(g_passSeq - 1) % kRing];
         if (!g_gbufPass) {
             ++ps.diOther;
@@ -5665,11 +6930,13 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
     // Round 6 (tiled pictures): every pass collects -- the reference slot its full record, the other passes their FIRST
     // candidate only (the tile-layout readback compares it with the reference pass's first one, PvLayout). Independent
     // of the MV key (the layout is needed for the depth too).
+    // v0.8.1 round 5: the other passes collect their first kPvLayCands (16) -- the layout pairs candidates of the same
+    // instance, the first one of a tile is often another instance of the reference's first mesh (see PvLayout).
     if (g_previewPass && g_pvCur >= 0 && !t_inDlaa && IsGameCtx(ctx)) {
         ++g_pv[g_pvCur].diCount;                                  // round 6 diagnostics (no-candidate report)
         if (g_dlaaOn.load(std::memory_order_relaxed) && !g_passive.load(std::memory_order_relaxed)) {
             const bool full = ((g_ptRefMask >> g_pvCur) & 1) || g_pvCapActive;
-            CollectMvCandidate(ctx, indexCount, startIndex, baseVertex, g_pv[g_pvCur].ps, full ? 0 : 1);
+            CollectMvCandidate(ctx, indexCount, startIndex, baseVertex, g_pv[g_pvCur].ps, full ? 0 : kPvLayCands);
         }
     }
     // Trigger (a): a DrawIndexed (flat: the UI) while a pending composite target is the current RT0 runs its DLAA first.
@@ -5679,7 +6946,7 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
 }
 
 // ---- v0.6.2 game render context (hkPresent, depth 0) -------------------------------------------------------------
-void*            g_gameDev       = nullptr;      // device of g_gameCtx (identity; Present thread only)
+void*            g_gameDev       = nullptr;      // device of g_gameCtx (identity; Present thread only; v0.8.1 + the adoption, under g_plMx)
 void*            g_candDev       = nullptr;      // another device that is presenting (identity)
 int              g_candPresents  = 0;            // ... consecutive top-level Presents from it
 uint32_t         g_cCandLogs     = 0;            // "Present from another device" lines (cap 5)
@@ -5690,7 +6957,16 @@ constexpr int    kCtxSwitchPresents = 3;         // a new device is adopted afte
 // first G-buffer bind). Runs on the thread that presents the NEW device (= its render thread). Our device-bound
 // resources (NGX features, SceneDlaa / pass twins / candidate buffers, eye-verdict staging ring, self-test
 // staging) belong to the OLD device and are not recreated: DLAA is forced OFF for the rest of the session.
+// v0.8.1: split -- ResetPassTrackingCore is the tracking reset alone (also used by the present-layer adoption, where
+// nothing was created on the old device and DLAA stays as it is); ResetPassTracking adds the forced OFF + its line.
+void ResetPassTrackingCore(bool forceDlaaOff);
 void ResetPassTracking(uint64_t n) {
+    ResetPassTrackingCore(true);
+    Log("game context change: pass tracking reset (scene depth, G-buffer/jitter pass flags, viewports, FIFO head -> "
+        "%llu, first-pass detection, flat/VR mode, eye map, MV history); DLAA forced OFF (Present #%llu)",
+        (unsigned long long)g_passSeq, (unsigned long long)n);
+}
+void ResetPassTrackingCore(bool forceDlaaOff) {
     if (g_sceneDepth) { g_sceneDepth->Release(); g_sceneDepth = nullptr; }   // rediscovered by InspectDepth
     g_sceneW = g_sceneH = 0;
     g_tonemapTex = nullptr;
@@ -5705,31 +6981,56 @@ void ResetPassTracking(uint64_t n) {
     for (bool& b : g_eyeLogged) b = false;
     g_tonemapLogged = false; g_passLogged = 0;                 // detection lines are logged again
     g_renderTid.store(0, std::memory_order_relaxed);
-    g_dlaaOn = false;
-    g_gameDeviceChanged = true;
+    if (forceDlaaOff) {
+        g_dlaaOn = false;
+        g_gameDeviceChanged = true;
+    }
     g_resetNext = true;
     MvInvalidate();
     SpanReleaseAll();
 #ifdef WITH_DLAA
-    g_rbInitTried = true; g_rbOk = false; g_rbPending = 0;     // eye-verdict staging ring is old-device
+    // Eye-verdict staging ring is old-device (v0.8.1 adoption: never created there -- passes=0 blits=0 -- so it stays
+    // untried and is created on the adopted device at its first use).
+    if (forceDlaaOff) { g_rbInitTried = true; g_rbOk = false; g_rbPending = 0; }
     if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
     g_ctx1Owner = nullptr;
     if (g_staging) { g_staging->Release(); g_staging = nullptr; g_stagW = g_stagH = 0; g_stagFmt = DXGI_FORMAT_UNKNOWN; }
 #endif
-    Log("game context change: pass tracking reset (scene depth, G-buffer/jitter pass flags, viewports, FIFO head -> "
-        "%llu, first-pass detection, flat/VR mode, eye map, MV history); DLAA forced OFF (Present #%llu)",
-        (unsigned long long)g_passSeq, (unsigned long long)n);
 }
 
 // Called by hkPresent at depth 0 before anything else: the presenting device's immediate context is the game's
 // render context. Identity only: every ref taken here is released before returning.
-void UpdateGameContext(IDXGISwapChain* sc, uint64_t n) {
+// v0.8.1: `caller` = the Present's return address. Returns true when a known present layer (IsPresentLayerName)
+// presents ANOTHER device while a game context is known: that device is never adopted (the layer would take the place
+// of the game's context and every game call would be filtered out); present-layer mode starts instead, the game context
+// stays, and the caller skips this Present's per-frame work (it moves to the game render thread).
+bool UpdateGameContext(IDXGISwapChain* sc, uint64_t n, void* caller) {
     ID3D11Device* dev = nullptr;
-    if (FAILED(sc->GetDevice(__uuidof(ID3D11Device), (void**)&dev)) || !dev) return;   // not a D3D11 swapchain
+    if (FAILED(sc->GetDevice(__uuidof(ID3D11Device), (void**)&dev)) || !dev) return false;   // not a D3D11 swapchain
     if ((void*)dev == g_gameDev) {
         g_candDev = nullptr; g_candPresents = 0;
         dev->Release();
-        return;
+        return false;
+    }
+    if (g_gameDev) {
+        char mod[MAX_PATH];
+        if (ModuleBaseOf(caller, mod, sizeof(mod)) && IsPresentLayerName(mod)) {   // v0.8.1, see above
+            g_plSuspect.store(true, std::memory_order_relaxed);
+            strncpy_s(g_plModule, mod, _TRUNCATE);
+            g_plActiveQpc.store(Qpc(), std::memory_order_relaxed);
+            // The game render thread: the thread of the last matched blit if there was one, else claimed by the first
+            // game-context bind from a thread other than this (the layer's) one (FrameEndOnBind).
+            g_plGameTid.store(g_renderTid.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            g_plActive.store(true, std::memory_order_release);   // caller holds g_plMx: ordered against the adoption
+            Log("present layer appeared: Present #%llu from another D3D11 device %p through %s (tid=%lu) while the game "
+                "render context %p (device %p) is known -- that device is NOT adopted (it only presents); present-layer "
+                "mode: the game context stays, the per-frame work moves to the game render thread (tid=%lu, 0 = claimed "
+                "at its next bind; frame-end rule), this thread only counts its Presents", (unsigned long long)n, (void*)dev,
+                mod, GetCurrentThreadId(), (void*)g_gameCtx.load(std::memory_order_relaxed), g_gameDev,
+                g_plGameTid.load(std::memory_order_relaxed));
+            dev->Release();
+            return true;
+        }
     }
     if (g_gameDev) {                                           // another device presents: adopt only if it persists
         if ((void*)dev != g_candDev) {
@@ -5741,11 +7042,11 @@ void UpdateGameContext(IDXGISwapChain* sc, uint64_t n) {
                     GetCurrentThreadId(), kCtxSwitchPresents);
             }
         }
-        if (++g_candPresents < kCtxSwitchPresents) { dev->Release(); return; }
+        if (++g_candPresents < kCtxSwitchPresents) { dev->Release(); return false; }
     }
     ID3D11DeviceContext* ic = nullptr;
     dev->GetImmediateContext(&ic);
-    if (!ic) { dev->Release(); return; }
+    if (!ic) { dev->Release(); return false; }
     ID3D11DeviceContext1* ic1 = nullptr;
     ic->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&ic1);   // once per change
     ID3D11DeviceContext* const old = g_gameCtx.load(std::memory_order_relaxed);
@@ -5769,6 +7070,493 @@ void UpdateGameContext(IDXGISwapChain* sc, uint64_t n) {
     if (ic1) ic1->Release();
     ic->Release();
     dev->Release();
+    return false;
+}
+
+// ---- v0.8.1 present layer: the game's render context from the scene render -----------------------------------------
+// Evidence (foreign immediate contexts, any thread, under g_plEvMx): scene binds (NoteForeignOM) on ONE context. Ready
+// at >= kPlMinBinds binds over >= kPlMinSecs and >= kPlMinPresents top-level Presents since its first bind. Then the
+// presenting side must look like a present layer: its context rendered no scene pass and matched no blit, the last
+// top-level Present came from another thread and not from the game exe. Otherwise ONE warning names the reason (the
+// conditions are re-checked every 64 binds; a later adoption is still possible).
+struct PlEvidence {
+    ID3D11DeviceContext* ctx = nullptr;  // candidate (identity only)
+    unsigned long tid = 0;               // thread of its first bind
+    uint32_t gbuf = 0, pv = 0;           // G-buffer / preview-pass-shape binds
+    uint32_t otherTid = 0;               // ... of them from another thread than `tid`
+    int64_t  t0 = 0;                     // QPC at its first bind
+    uint64_t presents0 = 0;              // g_frames (top-level Presents so far) at its first bind
+    UINT     dw = 0, dh = 0;             // scene depth size of the last bind (log)
+};
+std::mutex         g_plEvMx;
+PlEvidence         g_plEv;
+constexpr uint32_t kPlMinBinds    = 60;
+constexpr double   kPlMinSecs     = 1.0;
+constexpr uint64_t kPlMinPresents = 30;
+// Game render thread from here on (present-layer mode):
+int64_t            g_plLastRuleQpc     = 0;      // QPC of the last frame boundary from the frame-end rule (0 = none yet)
+int64_t            g_plLastBoundaryQpc = 0;      // QPC of the last frame boundary of any kind
+int                g_plFallbackKind    = -1;     // fallback kind driving the frames right now (-1 = none / the rule)
+
+void AdoptFromPresentLayer(ID3D11DeviceContext* ctx, const PlEvidence& ev, const char* pmod, unsigned long ptid);
+
+void PlNoteEvidence(ID3D11DeviceContext* ctx, int kind, UINT dw, UINT dh) {
+    PlEvidence ev;
+    const unsigned long tid = GetCurrentThreadId();
+    {
+        std::lock_guard<std::mutex> lk(g_plEvMx);
+        if (g_plAdopted.load(std::memory_order_relaxed)) return;
+        if (g_plEv.ctx != ctx) {                         // a new candidate: the evidence starts over
+            g_plEv = PlEvidence();
+            g_plEv.ctx = ctx; g_plEv.tid = tid; g_plEv.t0 = Qpc();
+            g_plEv.presents0 = g_frames.load(std::memory_order_relaxed);
+        }
+        if (kind == 1) ++g_plEv.gbuf; else ++g_plEv.pv;
+        if (tid != g_plEv.tid) ++g_plEv.otherTid;
+        g_plEv.dw = dw; g_plEv.dh = dh;
+        const uint32_t binds = g_plEv.gbuf + g_plEv.pv;
+        if (binds < kPlMinBinds) return;
+        if (g_plBlockLogged.load(std::memory_order_relaxed) && (binds & 63u) != 0) return;
+        if (g_qpcFreq <= 0 || (double)(Qpc() - g_plEv.t0) / (double)g_qpcFreq < kPlMinSecs) return;
+        if (g_frames.load(std::memory_order_relaxed) - g_plEv.presents0 < kPlMinPresents) return;
+        ev = g_plEv;
+    }
+    // The presenting side. g_passSeq / g_blitCount are written by the presenting context's hooks (other thread): plain
+    // aligned 64-bit reads, only tested for 0 (re-tested under g_plMx in the adoption).
+    const uint64_t passes = g_passSeq, blits = g_blitCount;
+    const unsigned long ptid = g_plPresentTid.load(std::memory_order_relaxed);
+    char pmod[MAX_PATH];
+    ModuleBaseOf(g_plPresentCaller.load(std::memory_order_relaxed), pmod, sizeof(pmod));
+    const char* block = nullptr;
+    if (passes || blits)                     block = "the presenting context renders scene passes / blits itself";
+    else if (ptid == tid)                    block = "the top-level Presents come from the scene's own render thread";
+    else if (!_stricmp(pmod, GameExeBase())) block = "the top-level Presents are made by the game exe itself";
+    if (block) {
+        if (!g_plBlockLogged.exchange(true))
+            Log("WARNING: present layer: adoption evidence seen but adoption BLOCKED -- %s | candidate context %p (tid=%lu): "
+                "%u G-buffer + %u preview-pass binds (depth %ux%u) over %.1f s / %llu Presents; presenting context %p "
+                "passes=%llu blits=%llu, last top-level Present from %s tid=%lu -- the game context is left as it is",
+                block, (void*)ctx, tid, ev.gbuf, ev.pv, ev.dw, ev.dh,
+                g_qpcFreq > 0 ? (double)(Qpc() - ev.t0) / (double)g_qpcFreq : 0.0,
+                (unsigned long long)(g_frames.load(std::memory_order_relaxed) - ev.presents0),
+                (void*)g_gameCtx.load(std::memory_order_relaxed), (unsigned long long)passes, (unsigned long long)blits,
+                pmod[0] ? pmod : "?", ptid);
+        return;
+    }
+    AdoptFromPresentLayer(ctx, ev, pmod, ptid);
+}
+
+// ---- v0.8.1 round 3: EARLY NGX pre-warm under a present layer known by name ------------------------------------------
+// The round-2 test (ETS2, Smooth Motion): the pre-warm waited for the adoption, and the adoption needs scene / preview
+// binds, so its ~0.6 s landed exactly when the menu truck first appeared (a visible jerk). Normal mode runs it on the
+// boot screen. Here: before the adoption, the game's own D3D11 calls already arrive on a foreign immediate context; the
+// first one that qualifies hosts the pre-warm, on its own thread, inside its OMSetRenderTargets (CS state saved /
+// restored by SceneDlaa::PrewarmNgx, t_inDlaa set so NGX's calls pass straight through; no D3DCompile: NGX only).
+// Qualifies = a present layer known by name (g_plSuspect), not adopted yet, DLAA on, no pre-warm yet; an IMMEDIATE
+// context that is not the presenting one, of a device that is not the presenting one; the call comes from code INSIDE
+// the game exe image (the engine's renderer -- keeps the layer's / overlays' own devices out); the thread is not the
+// layer's present thread; and kEpMinBinds such binds on the same context + thread in a row. A wrong guess is caught at
+// the adoption (WARNING, NgxAcquire then moves NGX). Without a qualifying call the post-adoption pre-warm stays.
+#ifdef WITH_DLAA
+std::mutex           g_epMx;                     // candidate bookkeeping (foreign calls: any thread)
+ID3D11DeviceContext* g_epCand    = nullptr;      // candidate context (identity)
+unsigned long        g_epCandTid = 0;            // ... and its thread
+uint32_t             g_epBinds   = 0;            // qualifying binds in a row on it
+std::atomic<bool>    g_epClaimed{false};         // one attempt per process
+std::atomic<bool>    g_epDone{false};            // the early pre-warm ran (g_ep* below are valid; release / acquire)
+void*                g_epDev = nullptr;          // its device / context / thread (log, adoption check)
+void*                g_epCtx = nullptr;
+unsigned long        g_epTid = 0;
+constexpr uint32_t   kEpMinBinds = 10;
+
+// The return address lies inside the game exe's image (its renderer issues the D3D11 calls).
+bool InGameExe(void* addr) {
+    static std::atomic<uintptr_t> s_base{0}, s_end{0};
+    uintptr_t base = s_base.load(std::memory_order_acquire);
+    if (!base) {
+        HMODULE m = GetModuleHandleW(nullptr);
+        if (!m) return false;
+        const IMAGE_DOS_HEADER* dos = (const IMAGE_DOS_HEADER*)m;
+        const IMAGE_NT_HEADERS* nt = (const IMAGE_NT_HEADERS*)((const uint8_t*)m + dos->e_lfanew);
+        s_end.store((uintptr_t)m + nt->OptionalHeader.SizeOfImage, std::memory_order_relaxed);
+        s_base.store((uintptr_t)m, std::memory_order_release);
+        base = (uintptr_t)m;
+    }
+    const uintptr_t a = (uintptr_t)addr;
+    return a >= base && a < s_end.load(std::memory_order_relaxed);
+}
+
+// hkOMSetRenderTargets, foreign-context branch (before the game's bind goes through).
+void MaybeEarlyPrewarm(ID3D11DeviceContext* ctx, void* caller) {
+    if (g_epClaimed.load(std::memory_order_relaxed) || t_inDlaa) return;
+    if (!g_plSuspect.load(std::memory_order_relaxed) || g_plActive.load(std::memory_order_relaxed) ||
+        g_plAdopted.load(std::memory_order_relaxed)) return;
+    if (!g_dlaaOn.load(std::memory_order_relaxed) || g_gameDeviceChanged.load(std::memory_order_relaxed) ||
+        g_prewarmDone.load(std::memory_order_acquire)) return;
+    ID3D11DeviceContext* const pres = g_gameCtx.load(std::memory_order_acquire);   // the presenting device's context
+    if (!pres || ctx == pres || !InGameExe(caller)) return;
+    const unsigned long tid = GetCurrentThreadId();
+    if (tid == g_plPresentTid.load(std::memory_order_relaxed)) return;
+    if (ctx->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE) return;
+    uint32_t binds;
+    {
+        std::lock_guard<std::mutex> lk(g_epMx);
+        if (ctx != g_epCand || tid != g_epCandTid) { g_epCand = ctx; g_epCandTid = tid; g_epBinds = 0; }
+        binds = ++g_epBinds;
+    }
+    if (binds < kEpMinBinds) return;
+    ID3D11Device* dev = nullptr;
+    ctx->GetDevice(&dev);
+    if (!dev) return;
+    void* const presDev = g_gameDev;                     // racy read (set once at Present #0): a compare only
+    if ((void*)dev == presDev || g_epClaimed.exchange(true)) { dev->Release(); return; }
+    char where[MAX_PATH + 32];
+    DescribeAddr(caller, where, sizeof(where));
+    const int64_t t0 = Qpc();
+    t_inDlaa = true;                                     // NGX's own context calls pass straight through our hooks
+    const bool ok = SceneDlaa::PrewarmNgx(ctx);          // CS state saved / restored; NGX init + throwaway feature
+    t_inDlaa = false;
+    const double ms = g_qpcFreq > 0 ? (double)(Qpc() - t0) * 1000.0 / (double)g_qpcFreq : 0.0;
+    g_epDev = (void*)dev; g_epCtx = (void*)ctx; g_epTid = tid;
+    g_prewarmDone.store(true, std::memory_order_release);   // MaybePrewarmNgx (Present / boundary) does not run it again
+    g_epDone.store(true, std::memory_order_release);
+    Log("DLAA: EARLY NGX pre-warm (present layer %s) ran before the adoption on the game's render thread: context %p, "
+        "device %p, tid=%lu, %.1f ms (%s) -- picked as an immediate context that is not the presenting one (%p, device "
+        "%p), %u binds in a row called from %s, not on the layer's present thread tid=%lu (Present #%llu)",
+        g_plModule[0] ? g_plModule : "?", (void*)ctx, (void*)dev, tid, ms,
+        ok ? "NGX pinned on this device" : "FAILED, see the line above -- units initialise NGX themselves",
+        (void*)pres, presDev, binds, where, g_plPresentTid.load(std::memory_order_relaxed),
+        (unsigned long long)g_frames.load(std::memory_order_relaxed));
+    dev->Release();                                      // identity only (the game holds its device)
+}
+#else
+void MaybeEarlyPrewarm(ID3D11DeviceContext*, void*) {}
+#endif
+
+// The adoption, on the scene's render thread inside its OMSetRenderTargets (the bind itself still passes through as
+// foreign; the next one is a game-context bind). try_lock: the game thread never waits on the presenting thread (a busy
+// lock = retried at the next scene bind). Nothing was created on the presenting device (passes=0 blits=0 re-checked
+// under the lock), so this is the tracking reset only: DLAA keeps its state, no "restart the game". The NGX pre-warm, if
+// it already ran on the presenting device (a layer not recognised by name), is moved by NgxAcquire at the first unit.
+void AdoptFromPresentLayer(ID3D11DeviceContext* ctx, const PlEvidence& ev, const char* pmod, unsigned long ptid) {
+    std::unique_lock<std::mutex> lk(g_plMx, std::try_to_lock);
+    if (!lk.owns_lock() || g_plAdopted.load(std::memory_order_relaxed)) return;
+    if (g_passSeq || g_blitCount) return;                // the presenting context started rendering the scene meanwhile
+    ID3D11Device* dev = nullptr;
+    ctx->GetDevice(&dev);
+    if (!dev) return;
+    ID3D11DeviceContext1* ic1 = nullptr;
+    ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&ic1);
+    ID3D11DeviceContext* const oldCtx = g_gameCtx.load(std::memory_order_relaxed);
+    void* const oldDev = g_gameDev;
+    const uint64_t n = g_frames.load(std::memory_order_relaxed);
+    const unsigned long tid = GetCurrentThreadId();
+    // The presenting swapchain's desc as the normal path last saw it (until LayerPresent refreshes it).
+    if (g_bbW) g_plScDesc.store(PlPackDesc(g_bbW, g_bbH, g_bbFmt), std::memory_order_relaxed);
+    ResetPassTrackingCore(false);
+    g_gameCtx1.store((void*)ic1, std::memory_order_release);
+    g_gameCtx.store(ctx, std::memory_order_release);
+    g_gameDev = dev;
+    g_candDev = nullptr; g_candPresents = 0;
+    if (!g_plModule[0]) strncpy_s(g_plModule, pmod, _TRUNCATE);
+    const int64_t now = Qpc();
+    g_plLastRuleQpc = 0; g_plLastBoundaryQpc = 0; g_plFallbackKind = -1; g_plRuleDriving = false;
+    g_plDraws = 0;
+    g_plGameTid.store(tid, std::memory_order_relaxed);   // every frame boundary runs on this thread from now on
+    FrameEndReset();                                     // the rule's state was the presenting context's until now
+    g_plActiveQpc.store(now, std::memory_order_relaxed);
+    g_plAdopted.store(true, std::memory_order_relaxed);
+    g_plActive.store(true, std::memory_order_release);   // hkPresent: count + log only from now on
+    const double secs = g_qpcFreq > 0 ? (double)(now - ev.t0) / (double)g_qpcFreq : 0.0;
+    Log("present layer detected: top-level Presents come from %s (tid=%lu; presenting device %p, swapchain %ux%u fmt=%d) "
+        "while the scene renders on immediate context %p of device %p (tid=%lu): %u G-buffer + %u preview-pass binds "
+        "(depth %ux%u, %u from another thread) over %.1f s and %llu Presents; the presenting context rendered passes=0 "
+        "blits=0", pmod[0] ? pmod : "?", ptid, oldDev, g_bbW, g_bbH, (int)g_bbFmt, (void*)ctx, (void*)dev, tid, ev.gbuf,
+        ev.pv, ev.dw, ev.dh, ev.otherTid, secs, (unsigned long long)(n - ev.presents0));
+#ifdef WITH_DLAA
+    // v0.8.1 round 3: is NGX already on the adopted device (the early pre-warm picked it at the boot screen)?
+    void* const ngxDev = DlaaProcessor::NgxDevice();
+    const bool early = g_epDone.load(std::memory_order_acquire);
+    const char* ngxNote = !ngxDev ? "NGX not initialised yet: pre-warm at the first game-thread frame boundary (on the "
+                                    "adopted device)"
+                        : ngxDev == (void*)dev ? (early ? "NGX is ALREADY on the adopted device (early pre-warm on the "
+                                                          "game's render thread, same device) -- nothing to redo"
+                                                        : "NGX is already on the adopted device")
+                        : "NGX is on ANOTHER device: re-initialised on the adopted device at the first DLAA unit (only "
+                          "the pre-warm pin holds it), see the WARNING below";
+    if (ngxDev && ngxDev != (void*)dev)
+        Log("WARNING: present layer: NGX was initialised on device %p (%s), but the adopted game device is %p -- NGX moves "
+            "to the adopted device at the first DLAA unit (line 'DLAA: NGX is initialised on device ... shutting NGX down "
+            "on the old device'); that unit pays the NGX init (~0.6 s) once", ngxDev,
+            early && g_epDev == ngxDev ? "the EARLY pre-warm's guess" : "the presenting device", (void*)dev);
+#else
+    const char* ngxNote = "no DLAA build";
+#endif
+    Log("present layer: game render context ADOPTED %p -> %p (device %p -> %p, ID3D11DeviceContext1 %p) on tid=%lu at "
+        "Present #%llu -- nothing was created on the presenting device, so DLAA is NOT forced off (dlaa=%s, mode %s); the "
+        "presenting device is never taken back; %s", (void*)oldCtx, (void*)ctx, oldDev, (void*)dev, (void*)ic1, tid,
+        (unsigned long long)n, g_dlaaOn.load(std::memory_order_relaxed) ? "on" : "off", DlaaModeStr(), ngxNote);
+    lk.unlock();
+    if (ic1) ic1->Release();                             // identity only (the game holds its device / context)
+    dev->Release();
+    // A hook call on the old (presenting) context that passed IsGameCtx just before the switch may still be finishing
+    // on the layer's thread; give it 1 ms before this thread carries on as the game context (once per process).
+    Sleep(1);
+}
+
+// hkRSSetViewports, game context, 0 viewports, not our own work (see there). DIAGNOSTIC ONLY since the v0.8.1 tests: the
+// D3D11 runtime issues it inside Present (caller d3d11.dll+0x196ff5 in both test logs; under a present layer it never
+// reaches the game context during play, and at shutdown it came from the layer's thread). Counted; its caller is logged
+// once per mode.
+void OnFrameStartMarker(ID3D11DeviceContext* ctx, void* caller) {
+    ++g_mkMarkers;
+    const bool pl = g_plActive.load(std::memory_order_acquire);
+    static std::atomic<bool> s_loggedNormal{false}, s_loggedLayer{false};
+    std::atomic<bool>& logged = pl ? s_loggedLayer : s_loggedNormal;
+    if (!logged.exchange(true)) {
+        char where[MAX_PATH + 32];
+        DescribeAddr(caller, where, sizeof(where));
+        Log("frame-start marker (RSSetViewports with 0 viewports on the game context %p) first seen%s: caller=%s tid=%lu "
+            "-- diagnostic only (issued by the D3D11 runtime inside Present; never used as a frame boundary)", (void*)ctx,
+            pl ? " in present-layer mode" : "", where, GetCurrentThreadId());
+    }
+}
+
+// ---- v0.8.1 frame-end rule (game context, not our own work). Under a present layer it is the game-thread frame
+// boundary; in normal mode it only counts (LogFrameEndCheck), so any normal log validates it on every screen.
+// The frame's last target is the game-side backbuffer, the SCREEN TARGET: an RT0 with exactly the backbuffer's size /
+// format (g_bbW / g_bbH / g_bbFmt; under a present layer the presenting swapchain's -- the ETS2 test log showed the game's
+// target has the same 3840x2160 fmt=24). A frame ENDS at the first bind of a non-screen target (or of no RT) after the
+// screen target received a FINAL draw. A final draw:
+//  - is not a profile-screen tile composite (a 3-vertex Draw whose PS SRV0 view is R11G11B10_FLOAT: in SDR the preview
+//    composites each of its 4 tile passes straight into the backbuffer, 4 times a frame), and
+//  - comes after at least one draw into a non-screen target since the last frame end (so the quads some world frames
+//    draw into the backbuffer right after Present, or a layer's own unbind between frames, never make a 2nd end).
+// Simulated on both traces (counted per Present): captures/dlaa_trace_ats_flat_hdr_scale125.txt (ATS HDR world: encode
+// -> Present -> ~700 quads into the backbuffer -> shadow bind) and the ETS2 SDR profile-screen trace (4 tile
+// composites + UI into the backbuffer -> next frame's first tile bind): exactly 1 per frame in both, with and without the
+// runtime's post-Present unbind. The naive rule (any backbuffer draw arms) gave 4 / frame (profile) and 2 / frame (world).
+bool     g_feRtScreen   = false;    // the current RT0 is the screen target
+bool     g_feArmed      = false;    // a final draw into the screen target happened (after non-screen work)
+bool     g_feNonScreen  = false;    // a draw into a non-screen target since the last frame end
+void*    g_feScreenRt   = nullptr;  // identity of the last bound screen target (no ref)
+uint64_t g_feEnds       = 0;        // frame ends found by the rule
+uint64_t g_feFinalDraws = 0;        // final draws into the screen target
+uint64_t g_feTileDraws  = 0;        // tile composites into the screen target (not final)
+
+void FrameEndOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* rtvs) {
+    const bool pl = g_plActive.load(std::memory_order_relaxed);
+    if (pl) {
+        if (g_plGameTid.load(std::memory_order_relaxed) == 0) {   // mid-session activation: claim the game thread
+            const unsigned long me = GetCurrentThreadId();
+            unsigned long expect = 0;
+            if (me != g_plPresentTid.load(std::memory_order_relaxed) &&
+                g_plGameTid.compare_exchange_strong(expect, me))
+                Log("present layer: game render thread = tid=%lu (the first game-context bind after present-layer mode "
+                    "started, not the layer's thread tid=%lu)", me, g_plPresentTid.load(std::memory_order_relaxed));
+        }
+        if (!PlOnGameThread()) return;                   // the rule's state belongs to the game render thread
+    }
+    bool screen = false;
+    void* rtPtr = nullptr;
+    if (n >= 1 && rtvs && rtvs[0] && g_bbW) {
+        ID3D11Resource* r = nullptr;
+        rtvs[0]->GetResource(&r);
+        if (r) {
+            rtPtr = (void*)r;                            // identity only (no ref kept)
+            ID3D11Texture2D* t = nullptr;
+            if (SUCCEEDED(r->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&t)) && t) {
+                D3D11_TEXTURE2D_DESC d{};
+                t->GetDesc(&d);
+                t->Release();
+                screen = d.Width == g_bbW && d.Height == g_bbH && d.Format == g_bbFmt && d.SampleDesc.Count == 1;
+            }
+            r->Release();
+        }
+    }
+    if (!screen && g_feArmed) {                          // the frame ended: before this bind reaches the context
+        g_feArmed = false;
+        g_feNonScreen = false;
+        ++g_feEnds;
+        if (pl) LayerFrameBoundary(ctx, kPlbFrameEnd);
+    }
+    g_feRtScreen = screen;
+    if (screen) g_feScreenRt = rtPtr;
+}
+
+void FrameEndReset() {
+    g_feRtScreen = false; g_feArmed = false; g_feNonScreen = false; g_feScreenRt = nullptr;
+}
+
+void FrameEndOnDraw(ID3D11DeviceContext* ctx, UINT verts, bool indexed) {
+    if (g_plActive.load(std::memory_order_relaxed) && !PlOnGameThread()) return;
+    if (!g_feRtScreen) { g_feNonScreen = true; return; }
+    if (!indexed && verts == 3) {                        // profile-screen tile composite? (not a final draw)
+        ID3D11ShaderResourceView* srv = nullptr;
+        ctx->PSGetShaderResources(0, 1, &srv);
+        bool tile = false;
+        if (srv) {
+            D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+            srv->GetDesc(&sd);
+            srv->Release();
+            tile = sd.Format == DXGI_FORMAT_R11G11B10_FLOAT;
+        }
+        if (tile) { ++g_feTileDraws; return; }
+    }
+    ++g_feFinalDraws;
+    if (g_feNonScreen) g_feArmed = true;
+}
+
+// Every status-line tick (OnPresentBoundary, g_logTick). Present-layer mode: one line per ~10 s -- rule frame ends per
+// second vs world passes per second vs the layer's Presents (rule = passes in the world, 1 per frame; anything else
+// means the rule misses or doubles frames). Normal mode: rule frame ends per top-level Present, 6 lines and then only
+// when it is off 1.00 by more than 5 % (30 lines at most); not for a VR launch (the backbuffer is the mirror window).
+void LogFrameEndCheck(uint64_t n) {
+    static uint64_t s_ends = 0, s_n = 0, s_rule = 0, s_sc = 0, s_idle = 0, s_pass = 0, s_lp = 0, s_fin = 0, s_tile = 0;
+    static int64_t  s_t = 0;
+    static int      s_lines = 0, s_devLines = 0;
+    const bool pl = g_plActive.load(std::memory_order_relaxed);
+    const int64_t now = Qpc();
+    const uint64_t lp = g_plPresents.load(std::memory_order_relaxed);
+    if (pl && s_t && g_qpcFreq > 0 && s_lines < 400) {
+        const double secs = (double)(now - s_t) / (double)g_qpcFreq;
+        if (secs > 0.5) {
+            ++s_lines;
+            const uint64_t dr = g_plBoundRule - s_rule, dp = g_passSeq - s_pass, dl = lp - s_lp;
+            Log("frame-end rule check (present layer, %.1f s): rule frame ends %llu = %.1f/s | fallback boundaries scene-clear "
+                "%llu idle %llu | world passes %llu = %.1f/s | layer presents %llu = %.1f/s | screen target %ux%u fmt=%d: final "
+                "draws %llu, tile composites %llu -- expected: rule = 1 per game frame (in the world = passes/s), fallbacks 0",
+                secs, (unsigned long long)dr, (double)dr / secs, (unsigned long long)(g_plBoundFallback - s_sc),
+                (unsigned long long)(g_plBoundIdle - s_idle), (unsigned long long)dp, (double)dp / secs,
+                (unsigned long long)dl, (double)dl / secs, g_bbW, g_bbH, (int)g_bbFmt,
+                (unsigned long long)(g_feFinalDraws - s_fin), (unsigned long long)(g_feTileDraws - s_tile));
+        }
+    } else if (!pl && n >= 6 && n > s_n && g_launchVr != 1) {
+        const uint64_t de = g_feEnds - s_ends, dn = n - s_n;
+        const double ratio = (double)de / (double)dn;
+        const bool dev = ratio < 0.95 || ratio > 1.05;
+        if (s_lines < 6 || (dev && s_devLines < 30)) {
+            if (s_lines < 6) ++s_lines; else ++s_devLines;
+            Log("frame-end rule check (normal mode, count only): %llu frame end(s) over %llu top-level Presents = %.2f per "
+                "Present%s | screen target %ux%u fmt=%d: final draws %llu, tile composites %llu", (unsigned long long)de,
+                (unsigned long long)dn, ratio, dev ? " -- NOT 1.00: the rule would miss / double frames on this screen"
+                                                   : " (1.00 = the rule finds every frame)", g_bbW, g_bbH, (int)g_bbFmt,
+                (unsigned long long)(g_feFinalDraws - s_fin), (unsigned long long)(g_feTileDraws - s_tile));
+        }
+    }
+    s_ends = g_feEnds; s_n = n; s_rule = g_plBoundRule; s_sc = g_plBoundFallback; s_idle = g_plBoundIdle;
+    s_pass = g_passSeq; s_lp = lp; s_fin = g_feFinalDraws; s_tile = g_feTileDraws; s_t = now;
+}
+
+// The game-thread frame boundary in present-layer mode: the per-frame work hkPresent does in normal mode, with
+// n = g_frames (game frames from here on). Runs ONLY on the game render thread (g_plGameTid; a request from any other
+// thread is logged and dropped -- v0.8.1 test: the runtime's RSSetViewports(0) reached the game context from the layer's
+// thread at shutdown). kind:
+//  kPlbFrameEnd   the frame-end rule (FrameEndOnBind): once per game frame, between frames. The only kind that lets the
+//                 preview path run (PreviewFramesOk) and that refreshes the game-side backbuffer identity.
+//  kPlbSceneClear the scene depth clear that starts a world pass (= a flat world frame), only while the rule found no
+//                 frame end for 1 s (since the last one, or since present-layer mode started).
+//  kPlbIdle       a game-context bind when, besides that, no boundary of any kind came for 30 ms (screens where the rule
+//                 fails): keeps hotkeys, the NGX create budget and the status lines alive. May land mid-frame, which is
+//                 harmless for those (the preview path is off then).
+void LayerFrameBoundary(ID3D11DeviceContext* ctx, int kind) {
+    static const char* const kKind[] = { "frame-end rule", "scene clear", "idle" };
+    if (!PlOnGameThread()) {
+        static std::atomic<int> s_offLogs{0};             // (not while the game thread is still unclaimed: mid-session)
+        if (g_plGameTid.load(std::memory_order_relaxed) != 0 && s_offLogs.fetch_add(1) < 3)
+            Log("frame boundary (%s) requested on tid=%lu, which is not the game render thread tid=%lu -- dropped (the "
+                "per-frame work runs on the game render thread only)", kKind[kind], GetCurrentThreadId(),
+                g_plGameTid.load(std::memory_order_relaxed));
+        return;
+    }
+    const int64_t now = Qpc();
+    if (kind == kPlbFrameEnd) {
+        g_plLastRuleQpc = now;
+        if (g_plFallbackKind >= 0) {
+            g_plFallbackKind = -1;
+            static int backLogs = 0;
+            if (backLogs++ < 8)
+                Log("frame boundary: the frame-end rule is back (game frame #%llu) -- the per-frame work runs there again, "
+                    "preview DLAA allowed again", (unsigned long long)g_frames.load(std::memory_order_relaxed));
+        }
+        g_plRuleDriving = true;
+        ++g_plBoundRule;
+    } else {
+        if (g_qpcFreq <= 0) return;
+        const int64_t ref = g_plLastRuleQpc ? g_plLastRuleQpc : g_plActiveQpc.load(std::memory_order_relaxed);
+        if (!ref || now - ref < g_qpcFreq) return;                       // the rule drives (or may still start)
+        if (kind == kPlbIdle && g_plLastBoundaryQpc && now - g_plLastBoundaryQpc < g_qpcFreq * 3 / 100) return;
+        if (g_plDraws == 0) return;
+        if (g_plFallbackKind != kind) {
+            g_plFallbackKind = kind;
+            static int fbLogs = 0;
+            if (fbLogs++ < 8)
+                Log("frame boundary FALLBACK (%s): the frame-end rule found no frame end for 1 s (screen target %ux%u fmt=%d: "
+                    "%llu final draws, %llu tile composites so far%s) -- the per-frame work now runs %s (game frame #%llu); "
+                    "the profile-screen preview DLAA is off until the rule is back", kKind[kind], g_bbW, g_bbH, (int)g_bbFmt,
+                    (unsigned long long)g_feFinalDraws, (unsigned long long)g_feTileDraws,
+                    g_feFinalDraws == 0 ? "; 0 final draws = the game-side backbuffer does not have this size / format" : "",
+                    kind == kPlbSceneClear ? "at the scene depth clear that starts a world pass (once per world frame)"
+                                           : "at a game-context bind after >= 30 ms without a boundary (hotkeys, NGX create "
+                                             "budget and status lines stay alive)",
+                    (unsigned long long)g_frames.load(std::memory_order_relaxed));
+        }
+        g_plRuleDriving = false;
+        if (kind == kPlbSceneClear) ++g_plBoundFallback; else ++g_plBoundIdle;
+    }
+    g_plDraws = 0;
+    g_plLastBoundaryQpc = now;
+    const uint64_t n = g_frames.fetch_add(1);
+    static bool s_logged = false;
+    if (!s_logged) {
+        s_logged = true;
+        Log("frame boundary: present-layer mode -- the per-frame work (hotkeys, frame trace, NGX pre-warm, preview "
+            "bookkeeping, NGX create budget, status lines, backbuffer) runs on the game render thread tid=%lu, first at %s "
+            "on the game context %p; 'Present #' in the lines below = game frames (#%llu now); the layer's own Presents "
+            "(tid=%lu) only count (%llu so far)", GetCurrentThreadId(),
+            kind == kPlbFrameEnd ? "the frame-end rule (first bind of a non-screen target after the frame's final draw)"
+                                 : (kind == kPlbSceneClear ? "the scene depth clear (fallback)" : "a game bind (idle fallback)"),
+            (void*)ctx, (unsigned long long)n, g_plPresentTid.load(std::memory_order_relaxed),
+            (unsigned long long)g_plPresents.load(std::memory_order_relaxed));
+    }
+    g_logTick = ComputeLogTick(n);
+    PresentFrameWork(nullptr, n, ctx, kind == kPlbFrameEnd);
+}
+
+// Every 4096 game draws in present-layer mode (CountGameDraw): one WARNING when no frame boundary came for 5 s.
+void LayerBoundaryWatchdog() {
+    static bool warned = false;
+    if (warned || g_qpcFreq <= 0 || !PlOnGameThread()) return;
+    const int64_t ref = g_plLastBoundaryQpc ? g_plLastBoundaryQpc : g_plActiveQpc.load(std::memory_order_relaxed);
+    if (!ref || (double)(Qpc() - ref) / (double)g_qpcFreq < 5.0) return;
+    warned = true;
+    Log("WARNING: present-layer mode: no game-thread frame boundary for 5 s while the game context keeps drawing (%u draws "
+        "since the last one; frame-end rule: %llu final draws, %llu tile composites, %llu frame ends in total) -- hotkeys, "
+        "the NGX create budget, preview bookkeeping and the status lines are paused", g_plDraws,
+        (unsigned long long)g_feFinalDraws, (unsigned long long)g_feTileDraws, (unsigned long long)g_feEnds);
+}
+
+// The game-side backbuffer under a present layer (game render thread, every frame boundary). Its size / format is the
+// presenting swapchain's (LayerPresent -> g_plScDesc; the ETS2 test log showed the game's target with the same 3840x2160
+// fmt=24) -- applied whenever that changes; this is also the frame-end rule's screen target. At a frame-end boundary the
+// identity is the screen target the frame just ended on (still bound), so the blit / preview identity tests hit it.
+void LayerBackbufferAtBoundary(ID3D11DeviceContext* ctx, uint64_t n, bool fromRule) {
+    (void)ctx;
+    const uint64_t sd = g_plScDesc.load(std::memory_order_relaxed);
+    if (sd && (PlDescW(sd) != g_bbW || PlDescH(sd) != g_bbH || PlDescF(sd) != g_bbFmt)) {
+        ApplyBackbufferDesc(nullptr, PlDescW(sd), PlDescH(sd), PlDescF(sd), n);
+        static int scLogs = 0;
+        if (scLogs++ < 5)
+            Log("present layer: backbuffer size / format from the presenting swapchain %ux%u fmt=%d (game frame #%llu) -- the "
+                "frame-end rule's screen target and the blit rules use it", PlDescW(sd), PlDescH(sd), (int)PlDescF(sd),
+                (unsigned long long)n);
+    }
+    if (!fromRule || !g_feScreenRt || g_feScreenRt == g_backbuffer.load(std::memory_order_relaxed)) return;
+    g_backbuffer.store(g_feScreenRt, std::memory_order_relaxed);
+    static int idLogs = 0;
+    if (idLogs++ < 5)
+        Log("present layer: game-side backbuffer = %p (the screen target the frame just ended on, %ux%u fmt=%d = the presenting "
+            "swapchain's size / format; game frame #%llu)", g_feScreenRt, g_bbW, g_bbH, (int)g_bbFmt, (unsigned long long)n);
 }
 
 // Full path of `name` next to this DLL.
@@ -5816,8 +7604,11 @@ bool DlaaOffFilePresent() {
 //   preview_dlaa                   0/1 (default 1, v0.7.8): DLAA on the profile / truck-preview screen (flat and VR);
 //                                  0 = that path never activates (the screen stays un-anti-aliased as before v0.7.8)
 //   preview_capture_at             int >= 0 (default 0 = off, v0.7.8 debug): one Ctrl+F10-style preview capture this many
-//                                  Presents after the preview DLAA first runs
-//   dlss_preset                   default | J | K | L | M | E | F (case-insensitive, default "default" = driver
+//                                  Presents after the preview DLAA first runs (v0.8.1: the seam capture on an RGBA16F target)
+//   preview_sharpen                0/1 (default 1, v0.8.1 debug): 0 = no RCAS sharpen on the preview units (world unchanged)
+//   preview_seam_capture           0/1 (default 0, v0.8.1 debug): 1 = the snapshot key runs the seam capture (pvseam) on
+//                                  8-bit preview targets too (RGBA16F / HDR targets always get it)
+//   dlss_preset                  default | J | K | L | M | E | F (case-insensitive, default "default" = driver
 //                                  pick): DLSS render preset for DLAA, applied at NGX feature creation (v0.5.6).
 //                                  Start state; v0.6.5 Shift+F1..F4 select default / E / F / M live (Shift+F12 saves)
 //   sharpness                      float 0..1 (default 0.4; 0 = off): FSR1 RCAS sharpen strength after NGX (v0.5.6).
@@ -5959,6 +7750,11 @@ void LoadConfig() {
 #ifdef WITH_DLAA
             else if (!strcmp(key, "preview_dlaa"))   g_previewDlaa = v != 0 ? 1 : 0;   // v0.7.8
             else if (!strcmp(key, "preview_capture_at")) g_pvCaptureAt = v < 0 ? 0 : (int)v;   // v0.7.8 debug
+            else if (!strcmp(key, "preview_edge_fix"))   g_pvEdgeFix = v != 0 ? 1 : 0;           // v0.8.1 debug
+            else if (!strcmp(key, "preview_tile_jitter")) g_pvTileJitter = v != 0 ? 1 : 0;       // v0.8.1 debug
+            else if (!strcmp(key, "preview_layout_recheck")) g_pvLayRecheck = v < 0 ? 0 : (v > 600 ? 600 : (int)v);
+            else if (!strcmp(key, "preview_sharpen"))      g_pvSharpen = v != 0 ? 1 : 0;         // v0.8.1 round 5 debug
+            else if (!strcmp(key, "preview_seam_capture")) g_pvSeamAlways = v != 0 ? 1 : 0;      // v0.8.1 round 5 debug
 #endif
             else if (!strcmp(key, "trace_auto_frame")) g_traceAutoFrame = v < 0 ? 0 : (int)v;
             else if (!strcmp(key, "vr_eye_alternate")) Log("dlaa.ini: vr_eye_alternate is ignored since v0.5.4 (eye identity comes from the blit render target)");
@@ -6039,6 +7835,10 @@ void LoadConfig() {
         g_gpuTiming, g_traceAutoFrame, preset, (double)sharp, (double)sharpRadius, area, feather,
         (int)g_dlssUpscale.load(), (int)g_beeps, previewDlaa, dlssHdr);
 #ifdef WITH_DLAA
+    if (g_pvEdgeFix != 1 || g_pvTileJitter != 1 || g_pvLayRecheck != 0 || g_pvSharpen != 1 || g_pvSeamAlways != 0)
+        Log("dlaa.ini: preview_edge_fix=%d preview_tile_jitter=%d preview_layout_recheck=%d preview_sharpen=%d "
+            "preview_seam_capture=%d (debug; defaults 1 / 1 / 0 = auto / 1 / 0)", g_pvEdgeFix, g_pvTileJitter, g_pvLayRecheck,
+            g_pvSharpen, g_pvSeamAlways);   // v0.8.1 round 4 + 5 debug switches
     if (g_pvCaptureAt > 0)
         Log("dlaa.ini: preview_capture_at=%d (debug) -- one preview capture (as Ctrl+F10) %d Presents after the preview DLAA "
             "first runs; files in dlaa_selftest\\, pvcap: lines in this log", g_pvCaptureAt, g_pvCaptureAt);
@@ -6098,6 +7898,7 @@ DWORD WINAPI SetupThread(LPVOID) {
     PreviewBlit::RegisterShaders();
     PvCapRegisterShaders();                              // Ctrl+F10 preview capture metrics shader
     PvAsmRegisterShaders();                              // round 6 tiled preview: picture depth assembly
+    PvEdgeRegisterShaders();                             // v0.8.1 round 5: zero-guarded tile edge fill
     ShaderCache::Start();
 #endif
     // Create a throwaway device+swapchain purely to read the shared
@@ -6245,10 +8046,18 @@ void StartInjection() {
 // either way we only log and do nothing else.
 void OnProcessDetach(bool processTerminating) {
     LogExiting().store(true, std::memory_order_relaxed);   // never block on the log mutex from here on
-    Log("=== injector unloading (%s): presents=%llu passes=%llu blits=%llu mode=%s dlaa=%s dlaa-mode=%s ===",
+    // v0.8.1: + the present-layer verdict, only when that mode was on (presents= then counts game frames).
+    char plTail[200] = "";
+    if (g_plActive.load(std::memory_order_relaxed))
+        snprintf(plTail, sizeof(plTail), " present-layer=%s (%s) layer-presents=%llu boundaries frame-end=%llu scene-clear=%llu "
+                 "idle=%llu", g_plModule[0] ? g_plModule : "?",
+                 g_plAdopted.load(std::memory_order_relaxed) ? "game context adopted" : "game context kept",
+                 (unsigned long long)g_plPresents.load(std::memory_order_relaxed), (unsigned long long)g_plBoundRule,
+                 (unsigned long long)g_plBoundFallback, (unsigned long long)g_plBoundIdle);
+    Log("=== injector unloading (%s): presents=%llu passes=%llu blits=%llu mode=%s dlaa=%s dlaa-mode=%s%s ===",
         processTerminating ? "process exit" : "DLL unload",
         (unsigned long long)g_frames.load(std::memory_order_relaxed),
         (unsigned long long)g_passSeq, (unsigned long long)g_blitCount,
         g_vrMode ? "VR" : (g_flatMode ? "flat" : "undetected"),
-        g_dlaaOn.load(std::memory_order_relaxed) ? "on" : "off", DlaaModeStr());
+        g_dlaaOn.load(std::memory_order_relaxed) ? "on" : "off", DlaaModeStr(), plTail);
 }

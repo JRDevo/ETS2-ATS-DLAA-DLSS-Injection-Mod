@@ -105,6 +105,25 @@ bool ThisDllDir(wchar_t* out, DWORD cap) {
 // NGX itself (process-wide): the first user initialises it, later users share it (+1 reference). v0.7.8: split out
 // of Init so the pre-warm can take a reference of its own. false = init failed (logged, no reference taken).
 bool NgxAcquire(ID3D11Device* dev, bool quiet) {
+    // v0.8.1: NGX is up on ANOTHER device. Happens when the pre-warm ran on a present layer's presenting device (driver
+    // frame generation not recognised by name) before the game's render context was adopted. Sharing it would hand NGX a
+    // context of a device it was not initialised with. If only the pre-warm pin holds it, NGX is shut down there and
+    // initialised on this device (pinned again); with live units on the old device it is refused (they belong there).
+    if (g_ngxRefs > 0 && dev && dev != g_ngxDev) {
+        if (g_ngxPinned && g_ngxRefs == 1) {
+            Log("DLAA: NGX is initialised on device %p (the pre-warm), but a unit needs device %p -- shutting NGX down "
+                "on the old device and initialising it on the new one (pinned again)", (void*)g_ngxDev, (void*)dev);
+            NVSDK_NGX_D3D11_Shutdown1(g_ngxDev);
+            g_ngxRefs = 0; g_ngxDev = nullptr; g_ngxPinned = false;
+            if (!NgxAcquire(dev, quiet)) return false;   // fresh init on dev, 1 reference (the caller's)
+            ++g_ngxRefs;                                 // + the pin again
+            g_ngxPinned = true;
+            return true;
+        }
+        Log("DLAA: NGX is initialised on device %p with %d user(s), a unit asks for device %p -- refused (restart the "
+            "game)", (void*)g_ngxDev, g_ngxRefs, (void*)dev);
+        return false;
+    }
     if (g_ngxRefs > 0) {
         ++g_ngxRefs;                           // NGX already up (other eye / the pre-warm pin): share it
         if (!quiet) Log("DLAA: NGX already initialised, sharing it (%d users%s)", g_ngxRefs,
@@ -135,6 +154,7 @@ bool NgxAcquire(ID3D11Device* dev, bool quiet) {
 } // namespace
 
 void DlaaProcessor::BeginFrame() { ++g_frameNo; }
+void* DlaaProcessor::NgxDevice() { return (void*)g_ngxDev; }
 bool DlaaProcessor::CreateBudgetFree() { return g_createFrame != g_frameNo; }
 
 // v0.7.8: see dlaa.h. The pin is taken once; a failed NGX init is not retried (no NVIDIA GPU: Init fails the same way

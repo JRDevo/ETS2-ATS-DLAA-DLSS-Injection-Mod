@@ -82,6 +82,9 @@ public:
     // one-time cost (~0.7 s: NGX init + first feature / model load) lands on the boot screen instead of the first
     // DLAA unit. Logs the split (init / feature). Later calls do nothing; returns whether NGX is pinned.
     static bool Prewarm(ID3D11Device* dev);
+    // v0.8.1: the device NGX is initialised on (identity, nullptr = not initialised). Log only. If a unit later asks
+    // for another device while only the pre-warm pin holds NGX, NGX moves to that device (present-layer adoption).
+    static void* NgxDevice();
     // v0.7.8 creation budget: at most one NGX feature create per Present. BeginFrame() is called once per Present
     // (after that Present's own work); CreateBudgetFree() = no feature was created since. Every CreateFeature uses
     // it; a live preset recreate waits for a free Present (the old feature keeps evaluating), and SceneDlaa defers a

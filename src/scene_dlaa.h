@@ -145,6 +145,9 @@ public:
     // radius averages two neighbours; live (Ctrl+PageUp/PageDown), each eye re-uploads its CB when it changed.
     static void SetSharpRadius(float r) { s_sharpRadius = r < 1.0f ? 1.0f : (r > 4.0f ? 4.0f : r); }
     static float SharpRadius() { return s_sharpRadius; }
+    // v0.8.1: per instance -- true = this unit runs as if the sharpness were 0 (preview units with dlaa.ini
+    // preview_sharpen = 0; the RCAS pass is then skipped exactly like at sharpness 0). Default false.
+    void SetNoSharpen(bool on) { m_noSharpen = on; }
     // v0.6.4 DLAA area: percentage 40..100 of width AND height (pixel count ~ area^2; 100 = whole image = the
     // v0.6.3 path). dlaa.ini dlaa_area + live Shift/Ctrl+Home; a change recreates each eye's crop textures and
     // NGX feature at its next Run (history reset). Feather = border blend width in px (0..512, dlaa.ini only).
@@ -257,6 +260,7 @@ private:
     float                                             m_sharpCbData[kSharpCbFloats] = {};
     bool                                              m_sharpCbValid = false;
     bool                                              m_sharpRes = false;    // m_sharp* + CS + CB valid for m_w x m_h
+    bool                                              m_noSharpen = false;   // v0.8.1 SetNoSharpen (sharpness treated as 0)
     static float                                      s_sharpness;
     static float                                      s_sharpRadius;  // v0.5.8: RCAS ring-tap radius in texels (1..4)
     static int                                        s_area;         // v0.6.4 dlaa_area (40..100)

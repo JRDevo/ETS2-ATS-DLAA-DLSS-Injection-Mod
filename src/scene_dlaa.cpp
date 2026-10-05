@@ -1107,7 +1107,7 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
     // carries feather/blend/edges = 0 and the pass is skipped at sharpness 0, exactly as before.
     // v0.7.0 upscale: m_out / m_sharp are output-sized, colorIn is not -> never blend here (the composite
     // feathers against the game's own stretched frame); the pass runs only for sharpening (skipped at 0).
-    const float sharpNow  = s_sharpness;
+    const float sharpNow  = m_noSharpen ? 0.0f : s_sharpness;   // v0.8.1: SetNoSharpen = as at sharpness 0
     const float radiusNow = s_sharpRadius;
     const bool  blend     = m_crop && !m_up;
     const float cbNow[kSharpCbFloats] = {
