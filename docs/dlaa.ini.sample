@@ -79,6 +79,11 @@
 # Start state; Ctrl+F4 toggles live (Shift+F12 saves)
 # dlss_upscale = 1
 
+# v0.8.0 HDR (Windows HDR on; the game then renders an RGBA16F scene): 1 = NGX is told the colour is linear HDR
+# (IsHDR, the default); 0 = the float values are passed as plain 0..1 colour (no IsHDR). Only try 0 if the picture with
+# HDR on looks wrong (washed out / too dark / clipped highlights / flicker on bright areas). No effect without HDR.
+# dlss_hdr = 1
+
 # Audible feedback for the Shift+F-key user controls (model select, area, sharpen strength/width, DLAA on/off,
 # save) and the Ctrl+F7 passive / Ctrl+F4 upscale toggles: 1 on, 0 off
 # beeps = 1

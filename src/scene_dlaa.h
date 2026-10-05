@@ -17,6 +17,10 @@
 // tonemap. After the game's own blit Draw (which bilinear-stretches the raw frame into the eye RT) the caller
 // runs Composite(): our VS/PS draws the result into the still-bound RT0 with the feather ramp as alpha.
 // outW = outH = 0 (or equal to the tonemap) = the v0.6.5 path, unchanged.
+// v0.8.0: HDR. The unit's colour format follows the texture handed to Run: R8G8B8A8 family = the LDR path exactly as
+// before; R16G16B16A16_FLOAT (the game's HDR pipeline, Windows HDR on) = an "HDR unit": colorIn / m_out / m_sharp are
+// RGBA16F, NGX gets IsHDR (unless dlaa.ini dlss_hdr = 0), RCAS sharpens a reversibly compressed value (no 0..1
+// clamp). A change of that state rebuilds the unit (textures + NGX feature) at its next Run, like a size change.
 #pragma once
 #ifdef WITH_DLAA
 
@@ -43,7 +47,8 @@ struct DepthTwin {
 class SceneDlaa {
 public:
     // Runs DLAA on `tonemap` (R8G8B8A8_UNORM_SRGB, render res, the pre-UI LDR
-    // scene) using `sceneDepth` (D32_FLOAT_S8X24_UINT, same dims, reversed-Z)
+    // scene; v0.8.0: or R16G16B16A16_FLOAT = HDR unit, any other format = false + one log line)
+    // using `sceneDepth` (D32_FLOAT_S8X24_UINT, same dims, reversed-Z)
     // and camera-reprojection motion vectors (CameraMv) when `useMv`, else zero
     // MVs. (jitterX, jitterY) is the sub-pixel offset (pixels,
     // NGX sign convention) the frame was rasterized with; `reset` drops history.
@@ -80,6 +85,15 @@ public:
     bool Upscaling() const { return m_up; }           // v0.7.0: the last Ensure built the upscale path
     bool InitFailed() const { return m_failed; }      // v0.7.0: the last Ensure failed (no retry at these dims)
     bool FeatureReady() const { return m_dlaa.IsReady(); } // v0.7.10: the NGX feature exists (DLAA/DLSS set up) -- log triage only
+    // v0.8.0: the last Ensure built an HDR unit (RGBA16F colour textures; the tonemap handed to Run was RGBA16F).
+    bool IsHdr() const { return m_hdr; }
+    // v0.8.0 dlaa.ini dlss_hdr (process-wide, read once at load): true (default) = an HDR unit tells NGX its colour is
+    // linear HDR (IsHDR); false = the RGBA16F values are passed as display-referred 0..1 (no IsHDR, highlights clip in
+    // NGX). Only HDR units read it; LDR units never set IsHDR.
+    static void SetHdrLinear(bool on) { s_hdrLinear = on; }
+    static bool HdrLinear() { return s_hdrLinear; }
+    // v0.8.0: true for the colour formats Run accepts as an HDR unit (R16G16B16A16_FLOAT).
+    static bool IsHdrFormat(DXGI_FORMAT f) { return f == DXGI_FORMAT_R16G16B16A16_FLOAT; }
     // v0.7.8: the last Run returned false WITHOUT doing anything and will simply work later: the shader warm-up was
     // not finished, or the unit's (re)build waited for a Present with a free creation budget (one NGX feature create
     // per Present, see DlaaProcessor::CreateBudgetFree). Nothing was touched, nothing is marked failed.
@@ -167,6 +181,7 @@ public:
 
     // Snapshot accessors (v0.4.2, F10): the private textures NGX consumed. Valid after Run().
     // v0.6.4: all crop-sized (RectW x RectH). v0.7.0 upscale: OutTex is output-rect-sized (OutRectW x OutRectH).
+    // v0.8.0: colour textures are R16G16B16A16_FLOAT in an HDR unit (IsHdr()).
     ID3D11Texture2D* ColorInTex() const { return m_colorIn.Get(); }   // R8G8B8A8_UNORM, pre-AA, jittered
     ID3D11Texture2D* OutTex()     const { return m_out.Get(); }       // R8G8B8A8_UNORM, NGX output
     ID3D11Texture2D* MvTex()      const { return m_mv.Get(); }        // R16G16_FLOAT
@@ -186,8 +201,9 @@ private:
     // origin (only logged / stored on a rebuild; an origin change alone does not rebuild).
     // v0.7.0: (outFullW, outFullH) = full output size (0 = no upscale), (ow, oh) = output rect size (= cw, ch
     // without upscale). m_out / m_sharp and the NGX target are ow x oh.
+    // v0.8.0: hdr = build RGBA16F colour textures + an IsHDR feature (part of the "same unit" test).
     bool Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32_t cw, uint32_t ch, uint32_t rx, uint32_t ry,
-                uint32_t outFullW, uint32_t outFullH, uint32_t ow, uint32_t oh);
+                uint32_t outFullW, uint32_t outFullH, uint32_t ow, uint32_t oh, bool hdr);
     bool EnsureComposite(ID3D11Device* dev);               // v0.7.0: VS + PS + states + param buffer
     bool EnsureOwnTwin(ID3D11Device* dev);
     void GpuPoll(ID3D11DeviceContext* ctx);
@@ -231,11 +247,13 @@ private:
     Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_sharpUav;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>  m_sharpSrv;     // v0.7.0: composite source (upscale only)
     Microsoft::WRL::ComPtr<ID3D11ComputeShader>       m_sharpCs;
-    // b0: strength, radius, (v0.6.4) feather, blend, edge flags (L, T, R, B) -- 32 bytes, DYNAMIC (v0.5.7)
+    // b0: strength, radius, (v0.6.4) feather, blend, edge flags (L, T, R, B), (v0.8.0) mode (HDR flag + pad) --
+    // 48 bytes, DYNAMIC (v0.5.7)
     Microsoft::WRL::ComPtr<ID3D11Buffer>              m_sharpCb;
     Microsoft::WRL::ComPtr<ID3D11SamplerState>        m_sharpSampler; // v0.5.8: linear clamp, bound at s0 for the RCAS dispatch
-    // v0.6.4: the 8 floats last written into m_sharpCb (was strength + radius only); re-uploaded on any change.
-    static constexpr int                              kSharpCbFloats = 8;
+    // v0.6.4: the floats last written into m_sharpCb (was strength + radius only); re-uploaded on any change.
+    // v0.8.0: 8 -> 12 (float4 Mode, x = 1 in an HDR unit; 0 = the LDR shader path exactly as before).
+    static constexpr int                              kSharpCbFloats = 12;
     float                                             m_sharpCbData[kSharpCbFloats] = {};
     bool                                              m_sharpCbValid = false;
     bool                                              m_sharpRes = false;    // m_sharp* + CS + CB valid for m_w x m_h
@@ -243,6 +261,7 @@ private:
     static float                                      s_sharpRadius;  // v0.5.8: RCAS ring-tap radius in texels (1..4)
     static int                                        s_area;         // v0.6.4 dlaa_area (40..100)
     static int                                        s_feather;      // v0.6.4 dlaa_area_feather (0..512 px)
+    static bool                                       s_hdrLinear;    // v0.8.0 dlaa.ini dlss_hdr (IsHDR for HDR units)
 
     // ---- v0.7.0 upscale composite (VS + PS draw into the game's RT0 after its blit) ----
     Microsoft::WRL::ComPtr<ID3D11VertexShader>        m_compVs;
@@ -287,6 +306,8 @@ private:
     uint32_t m_fullW = 0, m_fullH = 0;   // v0.6.4: full tonemap / depth size the crop belongs to
     uint32_t m_rx = 0, m_ry = 0;   // v0.6.4: crop origin in the full image (even px)
     bool     m_crop = false;       // v0.6.4: m_w x m_h != m_fullW x m_fullH (sub-rect path + border blend)
+    bool     m_hdr = false;        // v0.8.0: HDR unit (RGBA16F colour textures, IsHDR feature unless dlss_hdr = 0)
+    bool     m_badFmtLogged = false;   // v0.8.0: "unsupported colour format" logged once
     bool     m_up = false;         // v0.7.0: DLSS upscaling (output != render); m_out / m_sharp / NGX target = m_ow x m_oh
     uint32_t m_outFullW = 0, m_outFullH = 0;   // v0.7.0: full output size (0 without upscale)
     uint32_t m_ow = 0, m_oh = 0;   // v0.7.0: output rect size (= m_w x m_h without upscale)

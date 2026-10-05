@@ -1,4 +1,4 @@
-# ETS2 / ATS DLAA Injector — hotkey cheat sheet (v0.7.7)
+# ETS2 & ATS: DLAA & DLSS Injection Mod — hotkey cheat sheet (v0.7.7)
 
 The tables below show the **default** keys. Every key can be changed in `dlaa.ini` (see
 "Change a key" at the end). The game window must be focused. The modifiers must match

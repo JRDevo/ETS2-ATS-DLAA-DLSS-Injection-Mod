@@ -101,6 +101,12 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
 // per axis min over its two edges of saturate(distance to that edge / Feather), each axis ramp smoothstep'd;
 // an edge that coincides with the image border (EdgeOn = 0) is not feathered (ramp 1). Feather 0 = hard edge.
 // Blend = 0: the v0.6.3 pass, same output (Orig unbound, never read).
+// v0.8.0 HDR unit (Mode.x = 1; RGBA16F linear input, values above 1): RCAS's limiters assume 0..1, and sharpening the
+// linear value rings hard around highlights. Every tap is first mapped through the REVERSIBLE tonemapper
+// c / (1 + max3(c)) (into 0..1, the one AMD recommends for running FSR / RCAS on HDR input), the unchanged RCAS math
+// (lobe + 5-tap min/max clamp) runs on those values, and the result is mapped back with c / (1 - max3(c)). No 0..1
+// saturate in HDR (the 5-tap clamp already bounds the result); the border blend lerps in linear space. Mode.x = 0:
+// exactly the LDR code path of v0.7.x.
 // kRcasShader-BEGIN (the build validates this block with fxc)
 const char kRcasShader[] = R"(
 cbuffer RcasCB : register(b0) {
@@ -109,6 +115,7 @@ cbuffer RcasCB : register(b0) {
     float  Feather;         // v0.6.4 border blend width in px (0 = hard edge)
     float  Blend;           // v0.6.4 1 = blend into Orig at the rect border (area < 100), 0 = off
     float4 EdgeOn;          // v0.6.4 (left, top, right, bottom): 1 = that rect edge is inside the image
+    float4 Mode;            // v0.8.0 x: 1 = HDR (linear RGBA16F, sharpen a compressed value), 0 = LDR; yzw unused
 };
 Texture2D<float4>   Src                : register(t0);
 Texture2D<float4>   Orig               : register(t1);   // v0.6.4 colorIn (only read when Blend = 1)
@@ -118,6 +125,10 @@ SamplerState        LinearClampSampler : register(s0);
 static const float kRcasLimit = 0.25 - (1.0 / 16.0);
 
 float Luma(float3 c) { return 0.25 * c.r + 0.5 * c.g + 0.25 * c.b; }
+float Max3(float3 c) { return max(c.r, max(c.g, c.b)); }
+// v0.8.0 reversible tonemapper (HDR only): linear >= 0 -> [0, 1) and back (exact inverse for max3 >= 0).
+float3 HdrCompress(float3 c) { return c / (1.0 + max(Max3(c), 0.0)); }
+float3 HdrExpand(float3 c)   { return c / max(1.0 - max(Max3(c), 0.0), 1.0e-5); }
 
 [numthreads(8, 8, 1)]
 void CSMain(uint3 id : SV_DispatchThreadID) {
@@ -127,14 +138,20 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     const int2   p    = int2(id.xy);
     const float2 size = float2(w, h);
     const float2 uv   = (float2(id.xy) + 0.5) / size;
+    const bool   hdr  = Mode.x > 0.5;
     //    b
     //  d e f
     //    g
-    const float4 e = Src.Load(int3(p, 0));
-    const float3 b = Src.SampleLevel(LinearClampSampler, uv + float2(0.0, -Radius) / size, 0).rgb;
-    const float3 d = Src.SampleLevel(LinearClampSampler, uv + float2(-Radius, 0.0) / size, 0).rgb;
-    const float3 f = Src.SampleLevel(LinearClampSampler, uv + float2( Radius, 0.0) / size, 0).rgb;
-    const float3 g = Src.SampleLevel(LinearClampSampler, uv + float2(0.0,  Radius) / size, 0).rgb;
+    const float4 e0 = Src.Load(int3(p, 0));
+    float3 b = Src.SampleLevel(LinearClampSampler, uv + float2(0.0, -Radius) / size, 0).rgb;
+    float3 d = Src.SampleLevel(LinearClampSampler, uv + float2(-Radius, 0.0) / size, 0).rgb;
+    float3 f = Src.SampleLevel(LinearClampSampler, uv + float2( Radius, 0.0) / size, 0).rgb;
+    float3 g = Src.SampleLevel(LinearClampSampler, uv + float2(0.0,  Radius) / size, 0).rgb;
+    float4 e = e0;
+    if (hdr) {
+        e.rgb = HdrCompress(e0.rgb);
+        b = HdrCompress(b); d = HdrCompress(d); f = HdrCompress(f); g = HdrCompress(g);
+    }
     const float bL = Luma(b), dL = Luma(d), fL = Luma(f), gL = Luma(g);
     const float mn4 = min(min(bL, dL), min(fL, gL));
     const float mx4 = max(max(bL, dL), max(fL, gL));
@@ -149,7 +166,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     const float3 mn5 = min(e.rgb, min(min(b, d), min(f, g)));
     const float3 mx5 = max(e.rgb, max(max(b, d), max(f, g)));
     c = clamp(c, mn5, mx5);
-    float3 res = saturate(c);
+    float3 res = hdr ? min(HdrExpand(c), 65504.0) : saturate(c);   // v0.8.0 HDR: back to linear, no 0..1 clamp
     if (Blend > 0.5) {
         float mask = 1.0;
         if (Feather > 0.0) {
@@ -452,9 +469,10 @@ void SceneDlaa::CropSize(uint32_t fullW, uint32_t fullH, int area, uint32_t* cw,
 }
 
 bool SceneDlaa::Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32_t w, uint32_t h,
-                       uint32_t rx, uint32_t ry, uint32_t outFullW, uint32_t outFullH, uint32_t ow, uint32_t oh) {
+                       uint32_t rx, uint32_t ry, uint32_t outFullW, uint32_t outFullH, uint32_t ow, uint32_t oh, bool hdr) {
     const bool same = w == m_w && h == m_h && fullW == m_fullW && fullH == m_fullH &&
-                      outFullW == m_outFullW && outFullH == m_outFullH && ow == m_ow && oh == m_oh;   // v0.7.0
+                      outFullW == m_outFullW && outFullH == m_outFullH && ow == m_ow && oh == m_oh &&   // v0.7.0
+                      hdr == m_hdr;                                                                       // v0.8.0
     if (m_ready && same) return true;
     if (m_failed && same) return false;     // already failed at these dims
     // v0.7.8: a (re)build creates an NGX feature (~10-40 ms with textures): at most one per Present, so two units
@@ -477,6 +495,7 @@ bool SceneDlaa::Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32
     m_fullW = fullW; m_fullH = fullH;     // v0.6.4
     m_rx = rx; m_ry = ry;
     m_crop = w != fullW || h != fullH;
+    m_hdr = hdr;                          // v0.8.0: colour textures RGBA16F + IsHDR feature
     m_up = outFullW != 0;                 // v0.7.0 (the caller passes 0 unless output > render)
     m_outFullW = outFullW; m_outFullH = outFullH;
     m_ow = ow; m_oh = oh;
@@ -512,7 +531,10 @@ bool SceneDlaa::Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32
 
     // colorIn: UNORM twin of the SRGB tonemap texture (same typeless group,
     // CopyResource preserves the gamma-encoded bytes).
-    if (FAILED(hr = MakeTex(dev, w, h, DXGI_FORMAT_R8G8B8A8_UNORM, D3D11_BIND_SHADER_RESOURCE, &m_colorIn)) ||
+    // v0.8.0 HDR unit: every colour texture (colorIn, m_out, m_sharp) is R16G16B16A16_FLOAT, the game's own HDR scene
+    // format (CopyResource in / out stays a plain same-format copy; NGX, RCAS and the composite read / write float4).
+    const DXGI_FORMAT colorFmt = hdr ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM;
+    if (FAILED(hr = MakeTex(dev, w, h, colorFmt, D3D11_BIND_SHADER_RESOURCE, &m_colorIn)) ||
         FAILED(hr = dev->CreateShaderResourceView(m_colorIn.Get(), nullptr, &m_colorInSrv))) {
         Log("DLAA: colorIn create hr=0x%lx", hr); return false;
     }
@@ -537,7 +559,7 @@ bool SceneDlaa::Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32
     // the RCAS input (SRV) and m_sharp is what gets copied back. v0.5.7: SRV always (sharpness is live).
     // v0.7.0: OUTPUT-rect-sized (ow x oh; = w x h without upscale). It stays R8G8B8A8_UNORM (NGX creates its
     // own UAV on it); the composite reads it through the UNORM SRV and decodes sRGB in the PS when needed.
-    if (FAILED(hr = MakeTex(dev, ow, oh, DXGI_FORMAT_R8G8B8A8_UNORM,
+    if (FAILED(hr = MakeTex(dev, ow, oh, colorFmt,
                             D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE, &m_out)) ||
         FAILED(hr = dev->CreateUnorderedAccessView(m_out.Get(), nullptr, &m_outUav))) {
         Log("DLAA: output create hr=0x%lx", hr); return false;
@@ -553,7 +575,7 @@ bool SceneDlaa::Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32
     hr = S_OK;
     if (EnsureSharpen(dev) &&
         (m_outSrv || SUCCEEDED(hr = dev->CreateShaderResourceView(m_out.Get(), nullptr, &m_outSrv))) &&
-        SUCCEEDED(hr = MakeTex(dev, ow, oh, DXGI_FORMAT_R8G8B8A8_UNORM,
+        SUCCEEDED(hr = MakeTex(dev, ow, oh, colorFmt,
                                D3D11_BIND_UNORDERED_ACCESS | (m_up ? D3D11_BIND_SHADER_RESOURCE : 0u), &m_sharp)) &&
         SUCCEEDED(hr = dev->CreateUnorderedAccessView(m_sharp.Get(), nullptr, &m_sharpUav)) &&
         (!m_up || SUCCEEDED(hr = dev->CreateShaderResourceView(m_sharp.Get(), nullptr, &m_sharpSrv)))) {
@@ -579,18 +601,23 @@ bool SceneDlaa::Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32
 
     // Reversed-Z scene depth -> create the feature with DepthInverted from the start.
     // v0.7.0: render w x h -> output ow x oh (equal = DLAA).
-    if (!m_dlaa.Init(dev, w, h, ow, oh, /*depthInverted=*/true)) {
-        Log("DLAA: NGX init FAILED for eye %d %ux%u -> %ux%u (see preceding DLAA lines for the reason)", m_eye, w, h,
-            ow, oh);
+    // v0.8.0: an HDR unit sets IsHDR unless dlaa.ini dlss_hdr = 0 (then the float values go in as display-referred).
+    const bool ngxHdr = hdr && s_hdrLinear;
+    if (!m_dlaa.Init(dev, w, h, ow, oh, /*depthInverted=*/true, ngxHdr)) {
+        Log("DLAA: NGX init FAILED for eye %d %ux%u -> %ux%u%s (see preceding DLAA lines for the reason)", m_eye, w, h,
+            ow, oh, hdr ? (ngxHdr ? " [HDR unit: RGBA16F colour, IsHDR=1]" : " [HDR unit: RGBA16F colour, IsHDR=0 (dlss_hdr=0)]") : "");
         return false;
     }
+    // v0.8.0: HDR units append their colour format / IsHDR state (the LDR lines are unchanged).
+    const char* const hdrTag = !hdr ? "" : (ngxHdr ? ", HDR: RGBA16F colour, IsHDR=1"
+                                                   : ", HDR: RGBA16F colour, IsHDR=0 (dlaa.ini dlss_hdr=0)");
     if (m_up)
         Log("DLAA: NGX feature created for eye %d -- DLSS %s upscale: render %ux%u at rect origin (%u,%u) of %ux%u -> "
-            "output %ux%u of %ux%u (area=%d%%), textures created, depthInverted=1, MVLowRes=1", m_eye,
-            m_dlaa.QualityName(), w, h, rx, ry, fullW, fullH, ow, oh, outFullW, outFullH, s_area);
+            "output %ux%u of %ux%u (area=%d%%), textures created, depthInverted=1, MVLowRes=1%s", m_eye,
+            m_dlaa.QualityName(), w, h, rx, ry, fullW, fullH, ow, oh, outFullW, outFullH, s_area, hdrTag);
     else
         Log("DLAA: NGX feature created for eye %d -- %ux%u at rect origin (%u,%u) of %ux%u (area=%d%%), textures "
-            "created, depthInverted=1", m_eye, w, h, rx, ry, fullW, fullH, s_area);
+            "created, depthInverted=1%s", m_eye, w, h, rx, ry, fullW, fullH, s_area, hdrTag);
     m_ready = true; m_failed = false;
     return true;
 }
@@ -705,6 +732,7 @@ float SceneDlaa::s_sharpness = 0.4f;     // dlaa.ini sharpness (default 0.4; 0 =
 float SceneDlaa::s_sharpRadius = 1.5f;   // v0.5.8 dlaa.ini sharp_radius (default 1.5; clamp 1..4)
 int   SceneDlaa::s_area = 100;           // v0.6.4 dlaa.ini dlaa_area (default 100 = whole image; clamp 40..100)
 int   SceneDlaa::s_feather = 96;         // v0.6.4 dlaa.ini dlaa_area_feather (default 96 px; clamp 0..512)
+bool  SceneDlaa::s_hdrLinear = true;     // v0.8.0 dlaa.ini dlss_hdr (default 1 = IsHDR for HDR units)
 
 bool SceneDlaa::EnsureSharpen(ID3D11Device* dev) {
     HRESULT hr;
@@ -722,7 +750,9 @@ bool SceneDlaa::EnsureSharpen(ID3D11Device* dev) {
         // v0.5.7: DYNAMIC (was immutable) -- the strength changes live; Run re-uploads it (Map WRITE_DISCARD)
         // whenever s_sharpness differs from what this eye last wrote (m_sharpCbVal). v0.5.8: radius too.
         // v0.6.4: 32 bytes (+ feather, blend, edge flags); Run re-uploads whenever any of the 8 floats changed.
-        const float cb[kSharpCbFloats] = { s_sharpness, s_sharpRadius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+        // v0.8.0: + float4 Mode (HDR flag), written by Run before the first dispatch like every other field.
+        const float cb[kSharpCbFloats] = { s_sharpness, s_sharpRadius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                           0.0f, 0.0f, 0.0f, 0.0f };
         D3D11_BUFFER_DESC bd{};
         bd.ByteWidth = sizeof(cb);
         bd.Usage = D3D11_USAGE_DYNAMIC;
@@ -934,6 +964,19 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
     if (!ShaderCache::Done()) { m_deferred = true; return false; }   // v0.7.8: warm-up running (callers gate first)
     D3D11_TEXTURE2D_DESC td{};
     tonemap->GetDesc(&td);
+    // v0.8.0: the colour format decides the unit kind. R8G8B8A8 family = LDR (the v0.7.x path, unchanged), RGBA16F =
+    // HDR unit. Anything else is not something the callers hand in; refused (once logged) instead of a format-mismatched
+    // CopyResource that would silently do nothing.
+    const bool hdr = IsHdrFormat(td.Format);
+    if (!hdr && td.Format != DXGI_FORMAT_R8G8B8A8_TYPELESS && td.Format != DXGI_FORMAT_R8G8B8A8_UNORM &&
+        td.Format != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB) {
+        if (!m_badFmtLogged) {
+            m_badFmtLogged = true;
+            Log("DLAA: eye %d colour texture %ux%u fmt=%d is neither R8G8B8A8 nor R16G16B16A16_FLOAT -- not processed",
+                m_eye, td.Width, td.Height, (int)td.Format);
+        }
+        return false;
+    }
 
     // v0.6.4 DLAA area: crop size from the area (recomputed every Run, cheap; a change rebuilds in Ensure),
     // origin centred on this eye's optical centre, clamped into the image, even pixels. Area 100 = whole image,
@@ -962,10 +1005,10 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
     // v0.7.8: a Run that (re)builds the unit is timed and logged (proof that no build costs more than its textures +
     // its own NGX feature any more: shaders come from ShaderCache, NGX is pre-warmed).
     const bool building = !(m_ready && cw == m_w && ch == m_h && td.Width == m_fullW && td.Height == m_fullH &&
-                            ofw == m_outFullW && ofh == m_outFullH && ow == m_ow && oh == m_oh);
+                            ofw == m_outFullW && ofh == m_outFullH && ow == m_ow && oh == m_oh && hdr == m_hdr);
     LARGE_INTEGER runT0{}, ensT1{};
     if (building) QueryPerformanceCounter(&runT0);
-    if (!dev || !Ensure(dev.Get(), td.Width, td.Height, cw, ch, rx, ry, ofw, ofh, ow, oh)) return false;
+    if (!dev || !Ensure(dev.Get(), td.Width, td.Height, cw, ch, rx, ry, ofw, ofh, ow, oh, hdr)) return false;
     if (building) QueryPerformanceCounter(&ensT1);
     if (up && (oxc != m_oxc || oyc != m_oyc)) {
         static int outLogs = 0;                        // v0.7.0: both rects, once per change (cap)
@@ -1072,7 +1115,8 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
         (blend && m_rx > 0) ? 1.0f : 0.0f,                       // left edge inside the image
         (blend && m_ry > 0) ? 1.0f : 0.0f,                       // top
         (blend && m_rx + m_w < m_fullW) ? 1.0f : 0.0f,           // right
-        (blend && m_ry + m_h < m_fullH) ? 1.0f : 0.0f };         // bottom
+        (blend && m_ry + m_h < m_fullH) ? 1.0f : 0.0f,           // bottom
+        m_hdr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f };                 // v0.8.0 Mode: HDR unit (compressed-value RCAS)
     bool sharpOn = m_sharpRes && (sharpNow > 0.0f || blend);
     if (ok && sharpOn && (!m_sharpCbValid || memcmp(cbNow, m_sharpCbData, sizeof(cbNow)) != 0)) {
         D3D11_MAPPED_SUBRESOURCE mp{};
@@ -1189,6 +1233,9 @@ bool SceneDlaa::Composite(ID3D11DeviceContext* ctx, uint32_t vpX, uint32_t vpY, 
     if (!m_compPending) return false;
     m_compPending = false;
     if (!m_compSrc || !m_compVs || !m_compPs || !m_compParamsSrv) { if (m_timing) GpuEnd(ctx, false); return false; }
+    // v0.8.0 HDR unit: our texels are linear RGBA16F and RT0 is the game's float output target -- never an sRGB decode
+    // (an HDR blit's SRV0 view is RGBA16F, so the caller passes false anyway; this only makes it explicit).
+    if (m_hdr) srgbDecode = false;
 
     // Params: RT-space rect origin + size, feather (output px per axis), blend, sRGB decode, edge flags.
     // Feather: dlaa_area_feather is in render px; scaled per axis to output px (same image fraction as DLAA).
@@ -1257,9 +1304,9 @@ bool SceneDlaa::Composite(ID3D11DeviceContext* ctx, uint32_t vpX, uint32_t vpY, 
     const int le = m_eye == 1 ? 1 : 0;
     if (!logged[le]) {
         logged[le] = true;
-        Log("DLAA upscale composite: eye %d first draw -- %ux%u at RT (%u,%u), feather %.1f x %.1f px%s, sRGB decode %d",
+        Log("DLAA upscale composite: eye %d first draw -- %ux%u at RT (%u,%u), feather %.1f x %.1f px%s, sRGB decode %d%s",
             m_eye, m_ow, m_oh, vpX + m_oxc, vpY + m_oyc, (double)fx, (double)fy, blend ? "" : " (area 100: alpha 1)",
-            (int)srgbDecode);
+            (int)srgbDecode, m_hdr ? " (HDR: linear RGBA16F into the game's float output target)" : "");
     }
     return true;
 }
@@ -1285,6 +1332,7 @@ void SceneDlaa::Shutdown() {
     m_depthTwin.Reset(); m_depthTwinSrv.Reset();
     m_ready = false; m_failed = false; m_w = m_h = 0;
     m_fullW = m_fullH = 0; m_rx = m_ry = 0; m_crop = false; m_resetPending = false;
+    m_hdr = false;                                     // v0.8.0
     m_up = false; m_outFullW = m_outFullH = 0; m_ow = m_oh = 0; m_oxc = m_oyc = 0;
 }
 

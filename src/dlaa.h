@@ -42,8 +42,11 @@ public:
     // real DLSS upscaling: PerfQuality picked from the per-axis geomean ratio (nearest of 1.3 UltraQuality /
     // 1.5 Quality / 1.7 Balanced / 2.0 Performance / 3.0 UltraPerformance) and MVLowRes set (MV + depth stay
     // at render res, MVs in render pixels). The user's render preset goes on EVERY DLSS hint parameter.
+    // v0.8.0: hdr = the colour input is LINEAR HDR (the game's RGBA16F scene with Windows HDR on): the feature is
+    // created with NVSDK_NGX_DLSS_Feature_Flags_IsHDR (AutoExposure stays on: no exposure texture). A creation flag:
+    // SceneDlaa rebuilds the unit (Shutdown + Init) whenever its HDR state changes. false = exactly the LDR path.
     bool Init(ID3D11Device* dev, uint32_t renderW, uint32_t renderH, uint32_t outW, uint32_t outH,
-              bool depthInverted = false);
+              bool depthInverted = false, bool hdr = false);
 
     // Runs DLAA / DLSS. color/depth/motionVectors must be SRV-capable textures at
     // render resolution; output must be UAV-capable at output resolution (guide 3.4). Views are
@@ -90,6 +93,7 @@ public:
     // PerfQuality value the current feature was created with (log / snapshot only).
     const char* QualityName() const;
     bool Upscaling() const { return m_outW != m_width || m_outH != m_height; }
+    bool Hdr() const { return m_hdr; }         // v0.8.0: the feature was created with IsHDR
 
 private:
     bool CreateFeature(bool depthInverted);   // (re)creates m_feature
@@ -105,6 +109,7 @@ private:
     uint32_t             m_outH     = 0;
     int                  m_perfQ    = 0;       // v0.7.0: NVSDK_NGX_PerfQuality_Value of m_feature (int: header stays NGX-free)
     bool                 m_depthInverted = false;
+    bool                 m_hdr          = false;   // v0.8.0: IsHDR creation flag (set by Init, kept across recreates)
     bool                 m_ngxInited    = false;
     uint32_t             m_presetGen    = 0;   // preset generation m_feature was (last tried to be) created with
     int                  m_eye          = -1;

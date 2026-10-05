@@ -1,4 +1,4 @@
-# ETS2 / ATS DLAA Injector — development notes
+# ETS2 & ATS: DLAA & DLSS Injection Mod — development notes
 
 Internals and history of the injector. For installing and using the mod, see the
 top-level [`README.md`](../README.md). Companion docs:

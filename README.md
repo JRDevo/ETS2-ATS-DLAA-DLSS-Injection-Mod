@@ -22,7 +22,7 @@ This is an unofficial fan project. It is not affiliated with, or endorsed by, SC
 Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
-> Status: v0.7.10. DLAA has been run in ETS2 (VR) and ATS (flat and VR). The DLSS
+> Status: v0.8.0. Windows HDR works in flat mode (new in v0.8.0). DLAA has been run in ETS2 (VR) and ATS (flat and VR). The DLSS
 > *upscaling* path (render below native, reconstruct up) runs in VR but is still
 > being tuned. Treat upscaling as experimental.
 
@@ -234,6 +234,7 @@ was used). The full template with every key and its default is in
 | `dlaa_area` | `100` | run DLAA on the centre `N` % of each eye image (VR performance), `40`..`100`. VR only: in flat mode the whole picture is always used |
 | `preview_dlaa` | `1` | `1` = also anti-alias the profile / truck-preview screen (flat and VR); `0` = leave that screen untouched. VR at eye resolution needs a lot of GPU memory and time there, turn it off if that screen stutters. That screen always uses model 2 (preset E); the model keys change the drive only |
 | `jitter_sign_x` / `jitter_sign_y` | `1` | flip if the image shimmers or looks doubled (try the 4 combinations) |
+| `dlss_hdr` | `1` | HDR only: `1` = tell DLSS the picture is HDR (normal); `0` = try this if HDR brightness or colours look wrong with DLAA on |
 | `beeps` | `1` | `0` = silence the hotkey beeps |
 | `key_<action>` | *(see KEYS.md)* | re-bind any hotkey, e.g. `key_dlaa_toggle = Ctrl+D`, or `none` to disable it. Full list and format: [`docs/KEYS.md`](docs/KEYS.md) |
 | `debug` | `0` | `1` = write the log file `dlaa_inject.log` (off by default) |
@@ -249,8 +250,9 @@ was used). The full template with every key and its default is in
   DLL. A `dxgi.dll`/`dinput8.dll` from another mod still present will also conflict.
 - **No DLAA, or a crash referencing NGX/DLSS:** `nvngx_dlss.dll` is missing or too
   old — add or update it (see Install step 6).
-- **No DLAA with Windows HDR on:** up to v0.7.10 the mod does not work when Windows HDR is on (the log shows
-  `blits=0`). Turn HDR off in *Windows Settings → Display → HDR*. HDR support is being tested for the next version.
+- **Windows HDR:** supported from v0.8.0 in flat mode (driving and the menu / truck-preview screen). Older
+  versions do nothing with HDR on (the log shows `blits=0`): update. If brightness or colours change when you
+  switch DLAA on and off in HDR, put `dlss_hdr = 0` in `dlaa.ini` and report it.
 - **Start with DLAA off** (detect + log only): put an empty file named
   `dlaa_off.txt` next to `dinput8.dll` before launch. `Shift+F11` / `End` still
   switch it on.

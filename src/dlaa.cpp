@@ -169,13 +169,14 @@ bool DlaaProcessor::Prewarm(ID3D11Device* dev) {
 }
 
 bool DlaaProcessor::Init(ID3D11Device* dev, uint32_t renderW, uint32_t renderH, uint32_t outW, uint32_t outH,
-                         bool depthInverted) {
+                         bool depthInverted, bool hdr) {
     if (m_ngxInited) { Log("DLAA: Init called twice -- call Shutdown first"); return false; }
     if (!dev || !renderW || !renderH || outW < renderW || outH < renderH) { Log("DLAA: bad Init args"); return false; }
 
     m_dev = dev; m_dev->AddRef();
     m_width = renderW; m_height = renderH;
     m_outW = outW; m_outH = outH;                      // v0.7.0: == render for DLAA
+    m_hdr = hdr;                                       // v0.8.0: IsHDR for every (re)create of this feature
 
     if (!NgxAcquire(m_dev, m_quiet)) { Shutdown(); return false; }
     m_ngxInited = true;
@@ -223,12 +224,14 @@ bool DlaaProcessor::Init(ID3D11Device* dev, uint32_t renderW, uint32_t renderH, 
 const char* DlaaProcessor::QualityName() const { return PerfQualityName(m_perfQ); }
 
 // v0.7.0: DLAA keeps the v0.6.5 wording ("WxH native (DLAA)"); upscaling names render -> output and the mode.
+// v0.8.0: " HDR input (IsHDR)" appended for an HDR feature (LDR text unchanged).
 const char* DlaaProcessor::SizeText(char* buf, size_t cap) const {
     if (!Upscaling())
-        snprintf(buf, cap, "%ux%u native (DLAA)", m_width, m_height);
+        snprintf(buf, cap, "%ux%u native (DLAA)%s", m_width, m_height, m_hdr ? ", HDR input (IsHDR)" : "");
     else
-        snprintf(buf, cap, "%ux%u -> %ux%u (DLSS %s, ratio x%.3f / y%.3f, MVLowRes)", m_width, m_height, m_outW, m_outH,
-                 PerfQualityName(m_perfQ), (double)m_outW / (double)m_width, (double)m_outH / (double)m_height);
+        snprintf(buf, cap, "%ux%u -> %ux%u (DLSS %s, ratio x%.3f / y%.3f, MVLowRes%s)", m_width, m_height, m_outW, m_outH,
+                 PerfQualityName(m_perfQ), (double)m_outW / (double)m_width, (double)m_outH / (double)m_height,
+                 m_hdr ? ", HDR input (IsHDR)" : "");
     return buf;
 }
 
@@ -291,9 +294,12 @@ bool DlaaProcessor::CreateFeatureOnce(bool depthInverted, int perfQuality) {
     // exposure texture; it's ignored for LDR input anyway. v0.7.0: MVLowRes when render != output (our MV
     // texture and depth stay at render res, MVs in render pixels, MVScale 1); DLAA (equal dims): MVs are
     // "display res" = render res, no MVLowRes, exactly as before.
+    // v0.8.0: IsHDR when the colour input is the game's linear RGBA16F HDR scene (Windows HDR on); AutoExposure then
+    // supplies the exposure DLSS needs for HDR input. LDR: flags exactly as before.
     int flags = NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
     if (depthInverted) flags |= NVSDK_NGX_DLSS_Feature_Flags_DepthInverted;
     if (Upscaling())   flags |= NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
+    if (m_hdr)         flags |= NVSDK_NGX_DLSS_Feature_Flags_IsHDR;
 
     NVSDK_NGX_DLSS_Create_Params cp{};
     cp.Feature.InWidth            = m_width;   // render size (v0.7.0: == target only for DLAA)
@@ -308,8 +314,8 @@ bool DlaaProcessor::CreateFeatureOnce(bool depthInverted, int perfQuality) {
     NVSDK_NGX_Result r = NGX_D3D11_CREATE_DLSS_EXT(ctx, &m_feature, m_params, &cp);
     ctx->Release();
     if (NVSDK_NGX_FAILED(r) || !m_feature) {
-        Log("DLAA: CreateFeature failed %s (%ux%u -> %ux%u, PerfQuality %s)", NgxErr(r), m_width, m_height,
-            m_outW, m_outH, PerfQualityName(perfQuality));
+        Log("DLAA: CreateFeature failed %s (%ux%u -> %ux%u, PerfQuality %s)%s", NgxErr(r), m_width, m_height,
+            m_outW, m_outH, PerfQualityName(perfQuality), m_hdr ? " [HDR input: IsHDR flag set]" : "");   // v0.8.0 tag
         m_feature = nullptr;
         return false;
     }
@@ -389,7 +395,8 @@ bool DlaaProcessor::Evaluate(ID3D11DeviceContext* ctx,
     if (NVSDK_NGX_FAILED(r)) {
         static uint64_t fails = 0;                       // don't spam the log
         if (fails < 20 || (fails % 600 == 0))
-            Log("DLAA: EvaluateFeature failed %s (fail #%llu)", NgxErr(r), (unsigned long long)fails);
+            Log("DLAA: EvaluateFeature failed %s (fail #%llu)%s", NgxErr(r), (unsigned long long)fails,
+                m_hdr ? " [HDR input: RGBA16F colour, IsHDR]" : "");   // v0.8.0 tag (LDR line unchanged)
         ++fails;
         return false;
     }
@@ -411,6 +418,7 @@ void DlaaProcessor::Shutdown() {
     m_outW = m_outH = 0;
     m_perfQ = 0;
     m_depthInverted = false;
+    m_hdr = false;
 }
 
 #endif // WITH_DLAA

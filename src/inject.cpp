@@ -1,3 +1,19 @@
+// v0.8.0 -- HDR (flat). With Windows HDR on the game renders a float pipeline and the backbuffer is R10G10B10A2 (HDR10):
+//           forward colour F (RGBA16F) -> composite C = F + bloom (RGBA16F, scene size) -> a 3-vertex copy of C into a
+//           backbuffer-sized RGBA16F output target O (NOT the backbuffer) -> UI into O -> encode O into the backbuffer.
+//           The 8-bit rule (SRV0 RGBA8 at scene size, RT0 = backbuffer) never matched: passes=N blits=0, no NGX (log +
+//           frame trace captures/dlaa_trace_ats_flat_hdr_scale125.txt). New HDR rule, only while the backbuffer format
+//           is HDR (g_hdrOut: R10G10B10A2 or RGBA16F): F = RTV0 of the forward jitter pass; a draw with RT0 = scene-sized
+//           RGBA16F reading F is the composite (g_hdrCompTex = its RT0, no blit); a draw with RT0 = backbuffer-sized
+//           RGBA16F (not C) reading C is the HDR blit, handled as a flat backbuffer blit. Told apart by SRV0 IDENTITY,
+//           so Scaling 100 % (C and O the same size) is safe. SceneDlaa runs on C as an "HDR unit" (format-driven:
+//           RGBA16F colorIn / out / sharp, NGX IsHDR unless dlaa.ini dlss_hdr=0, RCAS on a reversibly compressed value,
+//           composite without sRGB decode into O); a format change rebuilds the unit. The profile / truck-preview screen
+//           (its composite target is O too) runs in place on RGBA16F the same way. BMP dumps of RGBA16F are
+//           tone-compressed; the 8-bit preview capture refuses to start on an RGBA16F target. Logs: "HDR output
+//           detected", "HDR scene composite recognised", HDR variants of flat detected / first blit / first evaluate,
+//           Present-line tail "hdr-out=1 hdr-blits=N", no-blit WARNING with backbuffer format + sizes. The 8-bit (SDR)
+//           paths, flat and VR, are unchanged.
 // v0.7.7 -- RE-BINDABLE HOTKEYS. Every control is now an action with a binding read from dlaa.ini (key_mode_cycle,
 //           key_model_1..4, key_area_down/up, key_sharpen_down/up, key_width_down/up, key_dlaa_toggle, key_save,
 //           key_upscale_toggle, key_mv_toggle, key_mv_debug, key_passive, key_jitter_only, key_selftest,
@@ -256,6 +272,14 @@ std::atomic<void*>    g_backbuffer{nullptr};
 UINT                  g_bbW = 0, g_bbH = 0;
 DXGI_FORMAT           g_bbFmt = DXGI_FORMAT_UNKNOWN;
 uint64_t              g_cBbByDesc = 0;    // flat blits matched by size / format instead of the pointer
+// v0.8.0: the swapchain is an HDR output (R10G10B10A2_UNORM = HDR10 / PQ, R16G16B16A16_FLOAT = scRGB): with Windows HDR
+// on the game switches to its float pipeline (scene -> RGBA16F composite -> backbuffer-sized RGBA16F output -> encode
+// into the backbuffer) and the 8-bit blit rule can never match. Only while this is true the HDR blit rule
+// (HandlePossibleBlit) is evaluated at all; each blit is still decided from its own formats. Render thread (Present).
+bool                  g_hdrOut = false;
+inline bool IsHdrBackbufferFmt(DXGI_FORMAT f) {
+    return f == DXGI_FORMAT_R10G10B10A2_UNORM || f == DXGI_FORMAT_R16G16B16A16_FLOAT;
+}
 
 constexpr int kMaxDepth = 4;
 
@@ -770,6 +794,23 @@ HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
             bb->GetDesc(&bbd);
             g_bbW = bbd.Width; g_bbH = bbd.Height; g_bbFmt = bbd.Format;
             bb->Release();
+            // v0.8.0: HDR output on / off (Windows HDR toggled, or the game recreated its swapchain). Logged on every
+            // change (cap), the first one is the "HDR seen" line a bug report needs.
+            const bool hdrNow = IsHdrBackbufferFmt(bbd.Format);
+            if (hdrNow != g_hdrOut) {
+                g_hdrOut = hdrNow;
+                static int hdrLogs = 0;
+                if (hdrLogs++ < 10)
+                    Log("%s: backbuffer %ux%u fmt=%d (%s) at Present #%llu -- %s", hdrNow ? "HDR output detected" : "HDR output off",
+                        bbd.Width, bbd.Height, (int)bbd.Format,
+                        bbd.Format == DXGI_FORMAT_R10G10B10A2_UNORM ? "R10G10B10A2_UNORM, HDR10" :
+                        bbd.Format == DXGI_FORMAT_R16G16B16A16_FLOAT ? "R16G16B16A16_FLOAT, scRGB" : "8-bit",
+                        (unsigned long long)n,
+                        hdrNow ? "HDR blit rule in use: the world blit is the draw that copies the game's RGBA16F scene "
+                                 "composite into its backbuffer-sized RGBA16F output target (DLAA/DLSS run on that RGBA16F "
+                                 "scene, see the config line's dlss_hdr); the 8-bit rule stays for any 8-bit blit"
+                               : "8-bit blit rule only (the v0.7.x behaviour)");
+            }
         }
     }
     if (depth == 0) OnPresentBoundary(n);
@@ -802,6 +843,20 @@ UINT             g_sceneW = 0, g_sceneH = 0;
 uint64_t         g_depthChanges = 0;
 bool             g_tonemapLogged = false;
 void*            g_tonemapTex = nullptr;         // v0.7.1: RT of the last tonemap draw (identity only, no ref)
+// ---- v0.8.0 HDR blit rule (only evaluated while g_hdrOut; identities only, no refs) ----------------------------------
+// HDR frame end (ATS flat, Windows HDR, captures/dlaa_trace_ats_flat_hdr_scale125.txt, frame 3):
+//   [4944] OMSetRenderTargets: forward colour F (RGBA16F, scene size) + scene DSV        -> g_fwdColorTex = F
+//   [5024] Draw 3 verts: RT0 = C (RGBA16F, scene size), PS SRV0 = F, SRV1 = bloom        -> HDR composite: g_hdrCompTex = C
+//   [5028] Draw 3 verts: RT0 = O (RGBA16F, BACKBUFFER size, not the backbuffer), SRV0 = C -> the HDR "blit" (DLAA runs on C)
+//   UI into O, then [5041] Draw: backbuffer (R10G10B10A2) <- O (the HDR10 encode; never matched: SRV0 is not C)
+// [5024] and [5028] are told apart by the IDENTITY of SRV0, never by sizes: the composite reads the forward colour
+// target, the blit reads the composite's RT. So at Scaling 100 % (scene size == backbuffer size, both draws look alike
+// by shape) the rule still holds, and so does < 100 % (O larger than C: DLSS upscale + composite into O) and > 100 %
+// (O smaller: DLAA at scene res, copied back into C, the game's own [5028] downsamples it).
+void*            g_fwdColorTex = nullptr;        // RTV0 texture of the last forward jitter pass bind (1 RTV RGBA16F + scene DSV)
+void*            g_hdrCompTex  = nullptr;        // RT0 of the last HDR composite draw (scene-sized RGBA16F, SRV0 = g_fwdColorTex)
+bool             g_hdrCompLogged = false;        // "HDR scene composite recognised" logged
+uint64_t         g_hdrBlitCount = 0;             // matched HDR blits (log / triage only)
 bool             g_dlaaDisabled = false;        // dlaa_off.txt next to our DLL (start state = OFF)
 constexpr int    kMaxEyes = 2;
 uint64_t         g_dlaaFrames[kMaxEyes] = {};    // frames DLAA actually ran OK, per eye
@@ -1961,6 +2016,8 @@ void STDMETHODCALLTYPE hkClearRTV(ID3D11DeviceContext* ctx, ID3D11RenderTargetVi
 //    world path). B8G8R8A8 (flat backbuffer): PreviewBlit copies it into an R8G8B8A8_TYPELESS scratch through an SRV / RTV
 //    pair in the UNORM (non-sRGB) format (the draw's load / store converts the byte order, the gamma-encoded bytes travel
 //    unchanged), SceneDlaa runs in place on the scratch, and a second PreviewBlit draw writes it back.
+//    v0.8.0: with HDR output the target is the game's backbuffer-sized R16G16B16A16_FLOAT output target: SceneDlaa runs
+//    in place as an HDR unit (RGBA16F colour, NGX IsHDR), exactly like the RGBA8 route; the Ctrl+F10 capture is 8-bit only.
 // Nothing here touches g_ring / g_passSeq / g_fifoHead / g_dlaa. Render thread only.
 constexpr int      kPvSlots       = 8;
 constexpr int      kPtMax         = 2;
@@ -2020,6 +2077,7 @@ float            g_pvJx = 0.0f, g_pvJy = 0.0f;   // viewport shift of the whole 
 uint64_t         g_pvEpoch      = 1;             // bumped by PreviewInvalidate: targets reset their DLSS history on a mismatch
 uint64_t         g_lastGbufFrame = 0;            // g_frames at the last world G-buffer bind (4 RTVs + scene DSV)
 bool             g_pvDetectLogged = false, g_pvRunLogged = false;
+bool             g_pvHdrTarget  = false;         // v0.8.0: the last flushed preview target was RGBA16F (HDR output)
 int              g_pvOkFrame    = 0;             // targets that ran OK this frame
 uint64_t         g_pvFrames     = 0, g_pvRunsTotal = 0;   // frames with >= 1 OK target / OK runs in total
 
@@ -2076,6 +2134,10 @@ bool PvIsBackbufferTarget(ID3D11Texture2D* tex) {
     if ((void*)tex == g_backbuffer.load(std::memory_order_relaxed)) return true;
     D3D11_TEXTURE2D_DESC td{};
     tex->GetDesc(&td);
+    // v0.8.0: with HDR output the preview composites into the game's backbuffer-sized RGBA16F output target (encoded into
+    // the backbuffer afterwards) -- the backbuffer's stand-in, same flat route.
+    if (g_hdrOut && g_bbW && td.Width == g_bbW && td.Height == g_bbH && td.Format == DXGI_FORMAT_R16G16B16A16_FLOAT)
+        return true;
     return g_bbW && td.Width == g_bbW && td.Height == g_bbH && td.Format == g_bbFmt;
 }
 
@@ -3560,11 +3622,22 @@ void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
     tg.tex->GetDesc(&td);
     if (tiled && (td.Width != depth->w || td.Height != depth->h)) { ++g_pvAsmMiss; return; }
     const bool rgba = PvIsRgba8(td.Format), bgra = PvIsBgra8(td.Format);
-    if ((!rgba && !bgra) || td.SampleDesc.Count != 1) {
+    // v0.8.0: RGBA16F = the HDR output target (Windows HDR on): SceneDlaa runs in place as an HDR unit (like RGBA8).
+    const bool f16 = SceneDlaa::IsHdrFormat(td.Format);
+    if ((!rgba && !bgra && !f16) || td.SampleDesc.Count != 1) {
         t.unsupported = true;
-        Log("preview target %d: %ux%u fmt=%d samples=%u is not an 8-bit RGBA / BGRA target -- no DLAA there", idx, td.Width, td.Height,
-            (int)td.Format, td.SampleDesc.Count);
+        Log("preview target %d: %ux%u fmt=%d samples=%u is not an 8-bit RGBA / BGRA or RGBA16F target -- no DLAA there", idx,
+            td.Width, td.Height, (int)td.Format, td.SampleDesc.Count);
         return;
+    }
+    if (f16 != g_pvHdrTarget) {
+        g_pvHdrTarget = f16;
+        static int hdrLogs = 0;
+        if (hdrLogs++ < 4)
+            Log("preview target %d: %ux%u fmt=%d -- %s", idx, td.Width, td.Height, (int)td.Format,
+                f16 ? "RGBA16F (HDR output): preview DLAA runs in place as an HDR unit (RGBA16F colour, NGX IsHDR unless "
+                      "dlss_hdr=0); the Ctrl+F10 preview capture is 8-bit only and is not started on it"
+                    : "8-bit again: preview DLAA on the LDR path");
     }
     Microsoft::WRL::ComPtr<ID3D11Device> dev;
     ctx->GetDevice(&dev);
@@ -3593,7 +3666,7 @@ void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
     else       t.dl.Mv().SetTileXf(1.0f, 1.0f, 0.0f, 0.0f);
     t_inDlaa = true;
     bool ok = false;
-    if (rgba) {
+    if (rgba || f16) {                                   // v0.8.0: RGBA16F in place too (HDR unit)
         ok = t.dl.Run(ctx, tg.tex.Get(), nullptr, depth, &rs.ps.cand, njx, njy, reset, g_mvOn.load(), g_mvDebug.load(), false, 0, 0);
     } else {
         PreviewBlit::SaveState(ctx);
@@ -3610,7 +3683,8 @@ void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
         static int firstLogs = 0;
         if (firstLogs++ < 8)
             Log("preview unit %d (eye tag %d, target order %d): %ux%u fmt=%d (%s), reference slot %d, DLAA unit created (first Run %.1f ms, ok=%d, Present #%llu)",
-                ui, 10 + ui, idx, td.Width, td.Height, (int)td.Format, bgra ? "BGRA: copied through an RGBA8 scratch" : "RGBA8: in place", ref,
+                ui, 10 + ui, idx, td.Width, td.Height, (int)td.Format,
+                bgra ? "BGRA: copied through an RGBA8 scratch" : (f16 ? "RGBA16F (HDR): in place" : "RGBA8: in place"), ref,
                 g_qpcFreq > 0 ? (double)(Qpc() - t0) * 1000.0 / (double)g_qpcFreq : 0.0, (int)ok, (unsigned long long)fr);
     }
     if (ok) {
@@ -3621,7 +3695,7 @@ void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
                 "jitter=(%+.4f,%+.4f) reset=%d ref slot %d (MV prev from slot %d, order %d) depth=snapshot", ui, 10 + ui, idx,
                 (unsigned long long)fr, g_pvJx, g_pvJy, njx, njy, (int)reset, ref, t.lastRef, t.lastOrder);
         t.lastFrame = fr; t.lastRef = ref; t.lastOrder = idx; ++t.runs; ++g_pvOkFrame; ++g_pvRunsTotal;
-        if (g_pvCapActive) PvCapAfterRun(ctx, ui, idx, tg, ref, njx, njy, bgra, td.Width, td.Height, fr);   // Ctrl+F10 capture
+        if (g_pvCapActive && !f16) PvCapAfterRun(ctx, ui, idx, tg, ref, njx, njy, bgra, td.Width, td.Height, fr);   // Ctrl+F10 capture (v0.8.0: 8-bit only)
     } else {
         static int fails = 0;
         if (fails++ < 10)
@@ -3646,8 +3720,9 @@ void PreviewNextFrame(uint64_t n) {
         ++g_pvFrames;
         if (!g_pvRunLogged) {
             g_pvRunLogged = true;
-            Log("preview DLAA: running on %d target(s) (Present #%llu) -- one LDR DLAA per composite target, depth + MV from "
-                "the reference slot", g_pvOkFrame, (unsigned long long)n);
+            Log("preview DLAA: running on %d target(s) (Present #%llu) -- one %s DLAA per composite target, depth + MV from "
+                "the reference slot", g_pvOkFrame, (unsigned long long)n,
+                g_pvHdrTarget ? "HDR (RGBA16F)" : "LDR");   // v0.8.0
         }
         if (!g_pvT0) { g_pvT0 = Qpc(); g_pvF0 = n; }
         if (g_pvFrames % 600 == 0) {
@@ -3698,7 +3773,12 @@ void PreviewNextFrame(uint64_t n) {
                     g_pvCaptureAt, (unsigned long long)g_pvFirstRunPresent);
             }
             g_snapRequest = false;
-            PvCapStart(c, n);
+            if (g_pvHdrTarget) {                         // v0.8.0: the capture's textures / metrics / BMPs are 8-bit only
+                Log("pvcap: not started -- the preview target is RGBA16F (HDR output); the preview capture is 8-bit only "
+                    "(Present #%llu)", (unsigned long long)n);
+            } else {
+                PvCapStart(c, n);
+            }
         }
     }
     if (g_ptCount > 0) {                                 // learn the reference slots (lowest composited slot per target)
@@ -4312,6 +4392,7 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
                             pass = d.Format == DXGI_FORMAT_R16G16B16A16_FLOAT &&
                                    d.Width == g_sceneW && d.Height == g_sceneH;
                             if (pass && !(g_passLogged & 2)) { g_passLogged |= 2; Log("jitter pass: forward (1 RTV RGBA16F + scene DSV) detected"); }
+                            if (pass) g_fwdColorTex = (void*)rres;   // v0.8.0 HDR blit rule: the forward colour (identity)
                             rt->Release();
                         }
                         rres->Release();
@@ -4367,6 +4448,7 @@ bool  g_savedOn = false, g_savedJo = false; int g_savedSx = -1, g_savedSy = -1;
 wchar_t g_testDir[MAX_PATH] = {};
 ID3D11Texture2D* g_staging = nullptr;
 UINT g_stagW = 0, g_stagH = 0;
+DXGI_FORMAT g_stagFmt = DXGI_FORMAT_UNKNOWN;   // v0.8.0: the staging twin must match the format too (8-bit vs RGBA16F)
 
 void ApplyTestMode(int i) {
     const TestMode& m = kModes[i];
@@ -4410,10 +4492,56 @@ bool WriteBmp(const wchar_t* path, const uint8_t* src, UINT pitch, UINT w, UINT 
     return ok;
 }
 
+float HalfToFloat(uint16_t h);   // F10 snapshot section below
+bool IsRgbaBgraFamily(DXGI_FORMAT f);   // blit section below
+
+// v0.8.0: RGBA16F (HDR) rows -> 8-bit RGBA for the BMP writers. Linear HDR does not fit 8 bits, so every channel is
+// tone-compressed for VIEWING only: x / (1 + x) (negative -> 0), then sRGB-encoded (4096-entry LUT, built once). The
+// same mapping for every dump, so self-test / snapshot frames stay comparable with each other (not with 8-bit dumps).
+bool WriteBmpRgba16f(const wchar_t* path, const uint8_t* src, UINT pitch, UINT w, UINT h) {
+    static uint8_t lut[4096];
+    static bool lutReady = false;
+    if (!lutReady) {
+        for (int i = 0; i < 4096; ++i) {
+            const double y = (double)i / 4095.0;
+            const double s = y <= 0.0031308 ? 12.92 * y : 1.055 * std::pow(y, 1.0 / 2.4) - 0.055;
+            lut[i] = (uint8_t)(s <= 0.0 ? 0 : (s >= 1.0 ? 255 : (int)(s * 255.0 + 0.5)));
+        }
+        lutReady = true;
+        Log("BMP dumps of RGBA16F (HDR) textures are tone-compressed for viewing: x/(1+x) per channel, sRGB-encoded");
+    }
+    uint8_t* rgba = (uint8_t*)malloc((size_t)w * h * 4);
+    if (!rgba) return false;
+    for (UINT y = 0; y < h; ++y) {
+        const uint16_t* s = (const uint16_t*)(src + (size_t)y * pitch);
+        uint8_t* o = rgba + (size_t)y * w * 4;
+        for (UINT x = 0; x < w; ++x) {
+            for (int c = 0; c < 3; ++c) {
+                float v = HalfToFloat(s[x * 4 + c]);
+                v = v > 0.0f ? v / (1.0f + v) : 0.0f;          // NaN -> 0 as well (the compare is false)
+                o[x * 4 + c] = lut[(int)(v * 4095.0f + 0.5f) & 4095];
+            }
+            o[x * 4 + 3] = 255;
+        }
+    }
+    const bool ok = WriteBmp(path, rgba, w * 4, w, h);
+    free(rgba);
+    return ok;
+}
+
 bool DumpFrame(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, const wchar_t* path) {
     D3D11_TEXTURE2D_DESC d{};
     tex->GetDesc(&d);
-    if (!g_staging || g_stagW != d.Width || g_stagH != d.Height) {
+    // v0.8.0: 8-bit RGBA family (bytes as-is, the v0.7.x dump) or RGBA16F (tone-compressed, see above); anything else
+    // would write garbage -> refused with a log line.
+    const bool f16 = d.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
+    if (!f16 && !IsRgbaBgraFamily(d.Format)) {
+        Log("BMP dump skipped: texture %ux%u fmt=%d is neither 8-bit RGBA / BGRA nor RGBA16F", d.Width, d.Height, (int)d.Format);
+        return false;
+    }
+    // (8-bit: the staging twin is reused across the R8G8B8A8 views of one typeless group exactly as before; only an
+    // 8-bit <-> RGBA16F change recreates it.)
+    if (!g_staging || g_stagW != d.Width || g_stagH != d.Height || (g_stagFmt == DXGI_FORMAT_R16G16B16A16_FLOAT) != f16) {
         if (g_staging) { g_staging->Release(); g_staging = nullptr; }
         ID3D11Device* dev = nullptr;
         tex->GetDevice(&dev);
@@ -4424,12 +4552,13 @@ bool DumpFrame(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, const wchar_t* pa
         const HRESULT hr = dev->CreateTexture2D(&sd, nullptr, &g_staging);
         dev->Release();
         if (FAILED(hr) || !g_staging) { Log("self-test: staging create failed hr=0x%lx", (unsigned long)hr); g_staging = nullptr; return false; }
-        g_stagW = d.Width; g_stagH = d.Height;
+        g_stagW = d.Width; g_stagH = d.Height; g_stagFmt = d.Format;
     }
     ctx->CopyResource(g_staging, tex);
     D3D11_MAPPED_SUBRESOURCE mp{};
     if (FAILED(ctx->Map(g_staging, 0, D3D11_MAP_READ, 0, &mp))) { Log("self-test: Map failed"); return false; }
-    const bool ok = WriteBmp(path, (const uint8_t*)mp.pData, mp.RowPitch, d.Width, d.Height);
+    const bool ok = f16 ? WriteBmpRgba16f(path, (const uint8_t*)mp.pData, mp.RowPitch, d.Width, d.Height)   // v0.8.0
+                        : WriteBmp(path, (const uint8_t*)mp.pData, mp.RowPitch, d.Width, d.Height);
     ctx->Unmap(g_staging, 0);
     return ok;
 }
@@ -4607,6 +4736,8 @@ void SnapshotStep(ID3D11DeviceContext* ctx, int eye, ID3D11Texture2D* blitTex, c
                 (int)dl.Upscaling(), dl.FullW(), dl.FullH(), dl.OutFullW(), dl.OutFullH(),
                 dl.OutRectX(), dl.OutRectY(), dl.OutRectW(), dl.OutRectH(), dl.QualityName(),
                 dl.Upscaling() ? "DLSS output rect (output res, before the composite)" : "whole blit source after DLAA");
+        // v0.8.0: HDR unit = RGBA16F colour (the BMPs are tone-compressed for viewing, see the log)
+        fprintf(f, "hdr_unit=%d\nngx_is_hdr=%d\n", (int)dl.IsHdr(), (int)(dl.IsHdr() && SceneDlaa::HdrLinear()));
         if (haveSolve) {
             for (int m = 0; m < 2; ++m) {
                 fprintf(f, "R_%s (row-major, 16 floats):\n", m == 0 ? "world" : "cabin");
@@ -4796,7 +4927,13 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         }
     }
     rres->Release();
-    if (!rtOk) return;
+    // v0.8.0 HDR candidate: HDR output (g_hdrOut) and a single-sample RGBA16F RT0 of the scene or the backbuffer size
+    // (the only two shapes the HDR rule below can match; the bloom chain's small RTs never fetch SRV0). Only then the HDR
+    // rule is looked at; every other draw takes exactly the v0.7.x path (rtOk), and an HDR candidate that is not matched
+    // by the HDR rule falls through to it as well.
+    const bool hdrCand = g_hdrOut && g_sceneW && bd.Format == DXGI_FORMAT_R16G16B16A16_FLOAT && bd.SampleDesc.Count == 1 &&
+                         ((bd.Width == g_sceneW && bd.Height == g_sceneH) || (bd.Width == g_bbW && bd.Height == g_bbH));
+    if (!rtOk && !hdrCand) return;
     // v0.7.1: a scene-sized RT is no longer rejected here (VR at r_scale 1 x 1: eye RT == scene size, so the
     // eye blit never matched and VR got no DLAA). It is told apart from other scene-sized passes below.
     const bool rtSceneSized = !isBackbuffer && bd.Width == g_sceneW && bd.Height == g_sceneH;
@@ -4812,6 +4949,27 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     srv->Release();
     if (!sres) return;
     void* const srcPtr = (void*)sres;                    // identity only (no ref kept)
+    // v0.8.0 HDR rule (see g_fwdColorTex for the frame structure). Decided by SRV0's identity, before any QI / GetDesc:
+    //  (a) RT0 scene-sized RGBA16F reading the forward colour target = the HDR composite ([5024]): remember its RT, no blit;
+    //  (b) RT0 backbuffer-sized RGBA16F that is not the composite, reading the composite's RT = the HDR blit ([5028]).
+    bool hdrBlit = false;
+    if (hdrCand) {
+        if (g_fwdColorTex && srcPtr == g_fwdColorTex && rtPtr != srcPtr && bd.Width == g_sceneW && bd.Height == g_sceneH) {
+            if (!g_hdrCompLogged) {
+                g_hdrCompLogged = true;
+                Log("HDR scene composite recognised: Draw (%u verts) RT0 %p %ux%u fmt=%d reads the forward scene colour %p "
+                    "(scene %ux%u) -- its RT0 is the source of the HDR blit (Present #%llu)", vertexCount, rtPtr, bd.Width,
+                    bd.Height, (int)bd.Format, srcPtr, g_sceneW, g_sceneH,
+                    (unsigned long long)g_frames.load(std::memory_order_relaxed));
+            }
+            g_hdrCompTex = rtPtr;
+            sres->Release();
+            return;
+        }
+        hdrBlit = g_hdrCompTex && srcPtr == g_hdrCompTex && rtPtr != g_hdrCompTex && g_bbW &&
+                  bd.Width == g_bbW && bd.Height == g_bbH;
+        if (!hdrBlit && !rtOk) { sres->Release(); return; }
+    }
     ID3D11Texture2D* tex = nullptr;
     sres->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&tex);
     sres->Release();
@@ -4819,22 +4977,34 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
 
     D3D11_TEXTURE2D_DESC d{};
     tex->GetDesc(&d);
-    // v0.7.1: scene-sized RT. The tonemap draw (RGBA16F scene -> RGBA8 scene-size RT, right before the blit) names
-    // the scene colour texture; a scene-sized blit must read exactly that texture and write a different one.
-    if (rtSceneSized) {
-        if (d.Format == DXGI_FORMAT_R16G16B16A16_FLOAT && d.Width == g_sceneW && d.Height == g_sceneH) {
-            g_tonemapTex = rtPtr;
+    if (hdrBlit) {
+        // v0.8.0: the composite is scene-sized RGBA16F by construction (rule (a)); checked on the texture itself anyway.
+        // The HDR output target is the flat screen path: treated exactly like a backbuffer blit from here on (eye 0,
+        // flat mode, VR launch -> mirror / flat fallback counting). VR + HDR is not a game mode.
+        if (d.Format != DXGI_FORMAT_R16G16B16A16_FLOAT || d.Width != g_sceneW || d.Height != g_sceneH ||
+            d.SampleDesc.Count != 1) {
             tex->Release();
             return;
         }
-        if (srcPtr != g_tonemapTex || rtPtr == g_tonemapTex) { tex->Release(); return; }
-    }
-    const bool fmtOk = d.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB ||
-                       d.Format == DXGI_FORMAT_R8G8B8A8_UNORM ||
-                       d.Format == DXGI_FORMAT_R8G8B8A8_TYPELESS;
-    if (!fmtOk || d.Width != g_sceneW || d.Height != g_sceneH || d.SampleDesc.Count != 1) {
-        tex->Release();
-        return;
+        isBackbuffer = true;
+    } else {
+        // v0.7.1: scene-sized RT. The tonemap draw (RGBA16F scene -> RGBA8 scene-size RT, right before the blit) names
+        // the scene colour texture; a scene-sized blit must read exactly that texture and write a different one.
+        if (rtSceneSized) {
+            if (d.Format == DXGI_FORMAT_R16G16B16A16_FLOAT && d.Width == g_sceneW && d.Height == g_sceneH) {
+                g_tonemapTex = rtPtr;
+                tex->Release();
+                return;
+            }
+            if (srcPtr != g_tonemapTex || rtPtr == g_tonemapTex) { tex->Release(); return; }
+        }
+        const bool fmtOk = d.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB ||
+                           d.Format == DXGI_FORMAT_R8G8B8A8_UNORM ||
+                           d.Format == DXGI_FORMAT_R8G8B8A8_TYPELESS;
+        if (!fmtOk || d.Width != g_sceneW || d.Height != g_sceneH || d.SampleDesc.Count != 1) {
+            tex->Release();
+            return;
+        }
     }
 
     // Matched. v0.7.4: the launch options say which mode this is (g_launchVr, set at load). Flat launch: only the
@@ -4859,15 +5029,22 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
                 "flat is off for this session", bd.Width, bd.Height, (int)bd.Format, g_bbBlitRun);
     }
     if (isBackbuffer) {
-        if (!g_flatMode)   // v0.7.10: first time flat is confirmed -- one line so the log shows flat was detected (VR logs below)
-            Log("flat detected at blit: backbuffer blit (RT %ux%u fmt=%d) at Present #%llu",
-                bd.Width, bd.Height, (int)bd.Format, (unsigned long long)g_frames.load(std::memory_order_relaxed));
+        if (!g_flatMode) { // v0.7.10: first time flat is confirmed -- one line so the log shows flat was detected (VR logs below)
+            if (hdrBlit)   // v0.8.0: the HDR rule matched (RT0 = the game's RGBA16F output target, not the backbuffer)
+                Log("flat detected at blit: HDR blit (RGBA16F output target %ux%u fmt=%d, backbuffer %ux%u fmt=%d, scene "
+                    "composite %ux%u fmt=%d) at Present #%llu", bd.Width, bd.Height, (int)bd.Format, g_bbW, g_bbH,
+                    (int)g_bbFmt, d.Width, d.Height, (int)d.Format, (unsigned long long)g_frames.load(std::memory_order_relaxed));
+            else
+                Log("flat detected at blit: backbuffer blit (RT %ux%u fmt=%d) at Present #%llu",
+                    bd.Width, bd.Height, (int)bd.Format, (unsigned long long)g_frames.load(std::memory_order_relaxed));
+        }
         g_flatMode = true;
     }
     else if (!g_vrMode) {
         g_vrMode = true; g_flatMode = false;
         Log("VR detected at blit: eye identity from the blit render target (RT map)");
     }
+    if (hdrBlit) ++g_hdrBlitCount;                       // v0.8.0 (matched and not skipped as mirror / fallback)
 #ifdef WITH_DLAA
     // v0.7.0 DLSS upscale decision. Output = the blit's viewport 0 inside RT0 (rounded; the whole RT if the
     // viewport is missing or not inside it). Upscale only with dlss_upscale on (Ctrl+F4) AND output >= the scene
@@ -4925,7 +5102,14 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     if (g_blitCount == 1)   // v0.7.10: first scene->screen blit matched this process (the copy DLAA/DLSS hooks into)
         Log("first blit matched: blit #1 at Present #%llu, RT %ux%u fmt=%d, scene source %ux%u fmt=%d (%s)",
             (unsigned long long)g_frames.load(std::memory_order_relaxed), bd.Width, bd.Height, (int)bd.Format,
-            d.Width, d.Height, (int)d.Format, isBackbuffer ? "flat backbuffer" : "VR eye");
+            d.Width, d.Height, (int)d.Format,
+            hdrBlit ? "flat HDR: RGBA16F scene composite -> RGBA16F output target"   // v0.8.0
+                    : (isBackbuffer ? "flat backbuffer" : "VR eye"));
+    else if (hdrBlit && g_hdrBlitCount == 1)   // v0.8.0: HDR switched on after 8-bit blits (Windows HDR toggled in game)
+        Log("first HDR blit matched: blit #%llu at Present #%llu, RT %ux%u fmt=%d, scene source %ux%u fmt=%d (flat HDR: "
+            "RGBA16F scene composite -> RGBA16F output target)", (unsigned long long)g_blitCount,
+            (unsigned long long)g_frames.load(std::memory_order_relaxed), bd.Width, bd.Height, (int)bd.Format,
+            d.Width, d.Height, (int)d.Format);
     BlitCpuTimer cpuT;                                   // v0.5.6: CPU cost of everything below (all return paths)
     if (g_rateBlit0 == 0) { g_rateBlit0 = g_blitCount; g_rateT0 = cpuT.t0; }
 #ifdef WITH_DLAA
@@ -4955,7 +5139,8 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     if (!g_tonemapLogged) {
         g_tonemapLogged = true;
         Log("swapchain blit detected on the game context %p: src %ux%u fmt=%d -> %s %ux%u (verts=%u, scene depth %ux%u)%s",
-            (void*)ctx, d.Width, d.Height, (int)d.Format, isBackbuffer ? "backbuffer" : "eye RT", bd.Width, bd.Height,
+            (void*)ctx, d.Width, d.Height, (int)d.Format,
+            hdrBlit ? "HDR output target" : (isBackbuffer ? "backbuffer" : "eye RT"), bd.Width, bd.Height,   // v0.8.0
             vertexCount, g_sceneW, g_sceneH,
             g_dlaaOn.load() ? "" : " -- DLAA currently OFF (dlaa_off.txt / DLAA toggle key), not evaluating");
     }
@@ -5033,7 +5218,8 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         g_eyeLogged[eye] = true;
         Log("eye blit detected: eye=%d (pass s=%llu) src %ux%u -> RT %ux%u fmt=%d (%s, Present #%llu)",
             eye, (unsigned long long)slot.s, d.Width, d.Height, bd.Width, bd.Height, (int)bd.Format,
-            isBackbuffer ? "flat backbuffer" : "VR eye texture", (unsigned long long)frame);
+            hdrBlit ? "flat HDR output target" : (isBackbuffer ? "flat backbuffer" : "VR eye texture"),   // v0.8.0
+            (unsigned long long)frame);
     }
 #ifdef WITH_DLAA
     // v0.5.5: VR only -- collect finished projection verdicts (may correct the RT map for the NEXT blits),
@@ -5108,10 +5294,14 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
                                g_mvDebug.load(), candBad, upW, upH);
         t_inDlaa = false;
         static bool s_firstEvalLogged = false;   // v0.7.10: one line the first time NGX actually processed a frame
-        if (ok && !s_firstEvalLogged) {
+        static bool s_firstHdrEvalLogged = false;   // v0.8.0: and once more for the first HDR unit (HDR toggled later)
+        if (ok && (!s_firstEvalLogged || (dl.IsHdr() && !s_firstHdrEvalLogged))) {
             s_firstEvalLogged = true;
-            Log("first DLAA/DLSS evaluate OK: eye=%d mode=%s %s at Present #%llu (NGX processed a frame)",
+            if (dl.IsHdr()) s_firstHdrEvalLogged = true;
+            Log("first DLAA/DLSS evaluate OK: eye=%d mode=%s %s%s at Present #%llu (NGX processed a frame)",
                 eye, DlaaModeStr(), dl.Upscaling() ? "upscaling" : "native-res",
+                !dl.IsHdr() ? "" : (SceneDlaa::HdrLinear() ? " HDR (RGBA16F, NGX IsHDR)"          // v0.8.0
+                                                           : " HDR (RGBA16F, dlss_hdr=0: no IsHDR)"),
                 (unsigned long long)g_frames.load(std::memory_order_relaxed));
         }
         // v0.7.0: arm the composite for the Draw that follows (hkDraw, after the game's blit).
@@ -5318,10 +5508,13 @@ void OnPresentBoundary(uint64_t n) {
 #else
         const int ngxFeature = -1;
 #endif
-        Log("Present #%llu: passes=%llu blits=%llu outstanding=%d mode=%s eye-map-entries=%d | dlaa=%s dlaa-mode=%s ngx-feature=%d",
+        // v0.8.0: " | hdr-out=1 hdr-blits=N" appended only while the output is HDR (the 8-bit line is unchanged).
+        char hdrTail[64] = "";
+        if (g_hdrOut) snprintf(hdrTail, sizeof(hdrTail), " | hdr-out=1 hdr-blits=%llu", (unsigned long long)g_hdrBlitCount);
+        Log("Present #%llu: passes=%llu blits=%llu outstanding=%d mode=%s eye-map-entries=%d | dlaa=%s dlaa-mode=%s ngx-feature=%d%s",
             (unsigned long long)n, (unsigned long long)g_passSeq, (unsigned long long)g_blitCount,
             (int)(g_passSeq - g_fifoHead), g_vrMode ? "VR" : (g_flatMode ? "flat" : "undetected"), g_eyeMapN,
-            g_dlaaOn.load(std::memory_order_relaxed) ? "on" : "off", DlaaModeStr(), ngxFeature);
+            g_dlaaOn.load(std::memory_order_relaxed) ? "on" : "off", DlaaModeStr(), ngxFeature, hdrTail);
     }
 
     // v0.7.10: one-shot triage warnings when the 3D scene never showed up. After ~1800 Presents AND ~30 s wall-clock
@@ -5341,10 +5534,16 @@ void OnPresentBoundary(uint64_t n) {
                 (unsigned long long)n);
         } else if (!s_warnedNoBlit && g_passSeq >= 600 && g_blitCount == 0) {   // 600 passes: the first blit follows the first pass by a frame or two
             s_warnedNoBlit = true;
+            // v0.8.0: + backbuffer format and scene / backbuffer sizes and the HDR rule's state, so an unsupported
+            // pipeline can be identified from the log alone.
             Log("WARNING: %llu scene pass(es) seen but no blit matched after %llu Presents / ~30 s -- the scene "
                 "renders but the final scene->screen copy we hook was not recognised (unsupported render path, or "
-                "another layer intercepting the blit). DLAA/DLSS cannot run without a matched blit.",
-                (unsigned long long)g_passSeq, (unsigned long long)n);
+                "another layer intercepting the blit). DLAA/DLSS cannot run without a matched blit. | backbuffer %ux%u "
+                "fmt=%d (%s), scene %ux%u, launch mode %s | HDR rule: forward colour %s, HDR composite %s",
+                (unsigned long long)g_passSeq, (unsigned long long)n, g_bbW, g_bbH, (int)g_bbFmt,
+                g_hdrOut ? "HDR output: HDR blit rule active" : "8-bit output: 8-bit blit rule only", g_sceneW, g_sceneH,
+                g_launchVr == 1 ? "VR" : (g_launchVr == 0 ? "flat" : "unknown"),
+                g_fwdColorTex ? "seen" : "not seen", g_hdrCompTex ? "seen" : "not seen");
         }
     }
 }
@@ -5495,6 +5694,7 @@ void ResetPassTracking(uint64_t n) {
     if (g_sceneDepth) { g_sceneDepth->Release(); g_sceneDepth = nullptr; }   // rediscovered by InspectDepth
     g_sceneW = g_sceneH = 0;
     g_tonemapTex = nullptr;
+    g_fwdColorTex = nullptr; g_hdrCompTex = nullptr; g_hdrCompLogged = false;   // v0.8.0 HDR blit rule
     g_gbufPass = false; g_jitterPass = false; g_depthDirty = false;
     g_gameVpN = 0; g_vpShifted = false; g_vpShiftX = g_vpShiftY = 0.0f;
     while (g_fifoHead < g_passSeq) g_ring[g_fifoHead++ % kRing].consumed = true;   // drop outstanding passes
@@ -5514,7 +5714,7 @@ void ResetPassTracking(uint64_t n) {
     g_rbInitTried = true; g_rbOk = false; g_rbPending = 0;     // eye-verdict staging ring is old-device
     if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
     g_ctx1Owner = nullptr;
-    if (g_staging) { g_staging->Release(); g_staging = nullptr; g_stagW = g_stagH = 0; }
+    if (g_staging) { g_staging->Release(); g_staging = nullptr; g_stagW = g_stagH = 0; g_stagFmt = DXGI_FORMAT_UNKNOWN; }
 #endif
     Log("game context change: pass tracking reset (scene depth, G-buffer/jitter pass flags, viewports, FIFO head -> "
         "%llu, first-pass detection, flat/VR mode, eye map, MV history); DLAA forced OFF (Present #%llu)",
@@ -5633,7 +5833,10 @@ bool DlaaOffFilePresent() {
 //   dlss_upscale                   0/1 (default 1, v0.7.0): DLSS upscaling from the scene size (r_scale_x / r_scale_y)
 //                                  to the blit RT size whenever that is larger; 0 = always DLAA at render res (the
 //                                  v0.6.5 path). Start state; Ctrl+F4 toggles live (Shift+F12 saves)
-//   key_<action>                   v0.7.7 re-bindable hotkeys, "[Shift+][Ctrl+][Alt+]Key" or none; see docs/KEYS.md and
+//   dlss_hdr                       0/1 (default 1, v0.8.0): with Windows HDR on (the game's RGBA16F pipeline) NGX is told
+//                                  the colour is linear HDR (IsHDR); 0 = the float values are passed as display-referred
+//                                  0..1 (no IsHDR). No effect on the 8-bit (SDR) path. Read once at load
+//   key_<action>                  v0.7.7 re-bindable hotkeys, "[Shift+][Ctrl+][Alt+]Key" or none; see docs/KEYS.md and
 //                                  g_keys[] (key_mode_cycle, key_model_1..4, key_area_down/up, key_sharpen_down/up,
 //                                  key_width_down/up, key_dlaa_toggle, key_save, key_upscale_toggle, key_mv_toggle,
 //                                  key_mv_debug, key_passive, key_jitter_only, key_selftest, key_snapshot, key_trace,
@@ -5799,6 +6002,11 @@ void LoadConfig() {
                 SceneDlaa::SetFeather(v < 0 ? 0 : (v > 512 ? 512 : (int)v));  // v0.6.4, clamped to 0..512
 #endif
             }
+            else if (!strcmp(key, "dlss_hdr")) {
+#ifdef WITH_DLAA
+                SceneDlaa::SetHdrLinear(v != 0);                               // v0.8.0, HDR units only
+#endif
+            }
         }
         fclose(f);
     }
@@ -5812,6 +6020,7 @@ void LoadConfig() {
     const float sharpRadius = SceneDlaa::SharpRadius();
     const int   area = SceneDlaa::Area(), feather = SceneDlaa::Feather();
     const int   previewDlaa = g_previewDlaa;
+    const int   dlssHdr = SceneDlaa::HdrLinear() ? 1 : 0;   // v0.8.0
 #else
     const float nearRej = 30.0f;
     const float egoOrigin = 8.0f;
@@ -5822,12 +6031,13 @@ void LoadConfig() {
     const float sharpRadius = 1.5f;
     const int   area = 100, feather = 96;
     const int   previewDlaa = 0;
+    const int   dlssHdr = 0;
 #endif
-    Log("config (%s): jitter_enabled=%d jitter_phases=%d jitter_sign_x=%d jitter_sign_y=%d mv_enabled=%d mv_near_reject_m=%.1f mv_ego_origin_m=%.1f mv_ego_pixel_m=%.1f mv_sample_shift=%d mv_world_slots=%d mv_cabin_slots=%d gpu_timing=%d trace_auto_frame=%d dlss_preset=%s sharpness=%.2f sharp_radius=%.1f dlaa_area=%d dlaa_area_feather=%d dlss_upscale=%d beeps=%d preview_dlaa=%d",
+    Log("config (%s): jitter_enabled=%d jitter_phases=%d jitter_sign_x=%d jitter_sign_y=%d mv_enabled=%d mv_near_reject_m=%.1f mv_ego_origin_m=%.1f mv_ego_pixel_m=%.1f mv_sample_shift=%d mv_world_slots=%d mv_cabin_slots=%d gpu_timing=%d trace_auto_frame=%d dlss_preset=%s sharpness=%.2f sharp_radius=%.1f dlaa_area=%d dlaa_area_feather=%d dlss_upscale=%d beeps=%d preview_dlaa=%d dlss_hdr=%d",
         haveIni ? "dlaa.ini" : "no dlaa.ini, defaults", (int)g_jitterEnabled, g_phases, g_signX, g_signY,
         (int)g_mvOn.load(), nearRej, (double)egoOrigin, (double)egoPixel, mvShift, mvWorldSlots, mvCabinSlots,
         g_gpuTiming, g_traceAutoFrame, preset, (double)sharp, (double)sharpRadius, area, feather,
-        (int)g_dlssUpscale.load(), (int)g_beeps, previewDlaa);
+        (int)g_dlssUpscale.load(), (int)g_beeps, previewDlaa, dlssHdr);
 #ifdef WITH_DLAA
     if (g_pvCaptureAt > 0)
         Log("dlaa.ini: preview_capture_at=%d (debug) -- one preview capture (as Ctrl+F10) %d Presents after the preview DLAA "

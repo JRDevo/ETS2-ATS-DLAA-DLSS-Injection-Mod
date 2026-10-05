@@ -65,6 +65,10 @@ display resolution.
    2.0 Performance / 3.0 UltraPerformance; UltraQuality retried once as Quality), `MVLowRes` set (MV + depth at
    render res, MVs in render pixels, MVScale 1), the `dlss_preset` value on every `DLSS.Hint.Render.Preset.*`.
    The output is composited into the eye RT after the game's blit (README "DLSS upscaling (v0.7.0)").
+   **v0.8.0 HDR** (Windows HDR on, flat): the colour input is the game's RGBA16F scene composite (linear, values
+   above 1), so the feature is created with `IsHDR` (+ `AutoExposure` as before); `dlaa.ini dlss_hdr = 0` drops
+   `IsHDR`. Colour in / out / sharpen textures are RGBA16F for such a unit; LDR units are unchanged. See the v0.8.0
+   header comment in `src/inject.cpp` for the HDR blit rule.
 5. Per frame: `NGX_D3D11_EVALUATE_DLSS_EXT` (helper → `EvaluateFeature`) with
    color/depth/MV/output as raw `ID3D11Resource*`, jitter, MV scale, reset,
    `InRenderSubrectDimensions = {W,H}`. Sharpness stays 0 (deprecated in DLSS).
