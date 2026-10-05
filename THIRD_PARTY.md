@@ -1,7 +1,7 @@
 # Third-party components
 
 This project's own source is under the PolyForm Noncommercial License 1.0.0
-(see `LICENSE`) — free for noncommercial use only. The binary
+(see `LICENSE.md`) — free for noncommercial use only. The binary
 `dinput8.dll` it produces, and the build, link against the two third-party
 components below, and the sharpening pass follows a published AMD algorithm (last
 section). Their own license terms govern those parts.

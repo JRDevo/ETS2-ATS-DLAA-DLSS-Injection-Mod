@@ -2,7 +2,7 @@
     package.ps1 -- build Release and make the distributable release zip.
 
     Produces dist\ETS2-ATS-DLAA-Injector-v<version>.zip containing exactly:
-        dinput8.dll, dlaa.ini (clean defaults), KEYS.md, README.md, LICENSE, THIRD_PARTY.md
+        dinput8.dll, dlaa.ini (clean defaults), KEYS.md, README.md, LICENSE.md, THIRD_PARTY.md
 
     The version comes from project(... VERSION x.y.z) in CMakeLists.txt (single source).
     The script FAILS if any nvngx*.dll or sl.*.dll would end up in the zip.
@@ -79,7 +79,7 @@ $files = @(
     @{ src = (Join-Path $root 'docs\dlaa.ini.sample'); name = 'dlaa.ini' },
     @{ src = (Join-Path $root 'docs\KEYS.md');         name = 'KEYS.md' },
     @{ src = (Join-Path $root 'README.md');            name = 'README.md' },
-    @{ src = (Join-Path $root 'LICENSE');              name = 'LICENSE' },
+    @{ src = (Join-Path $root 'LICENSE.md');           name = 'LICENSE.md' },
     @{ src = (Join-Path $root 'THIRD_PARTY.md');       name = 'THIRD_PARTY.md' }
 )
 foreach ($f in $files) {

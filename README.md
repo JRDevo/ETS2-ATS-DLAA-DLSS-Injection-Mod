@@ -354,7 +354,7 @@ redistribution. Just give the version number.
 ## License and credits
 
 This project's own source is under the **PolyForm Noncommercial License 1.0.0** —
-free for noncommercial use. See [`LICENSE`](LICENSE).
+free for noncommercial use. See [`LICENSE.md`](LICENSE.md).
 
 It builds against two third-party components with their own terms — **MinHook**
 (BSD 2-Clause) and the **NVIDIA DLSS / NGX SDK** (proprietary NVIDIA RTX SDK
