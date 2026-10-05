@@ -353,12 +353,19 @@ redistribution. Just give the version number.
 
 ## License and credits
 
-This project's own source is under the **PolyForm Noncommercial License 1.0.0** —
-free for noncommercial use. See [`LICENSE.md`](LICENSE.md).
+**This mod** — [PolyForm Noncommercial License 1.0.0](LICENSE.md), Copyright (c) 2026 JRDevo.
 
-It builds against two third-party components with their own terms — **MinHook**
-(BSD 2-Clause) and the **NVIDIA DLSS / NGX SDK** (proprietary NVIDIA RTX SDK
-license). Neither is redistributed by this project, and **no NVIDIA binary is
-shipped** — you supply your own `nvngx_dlss.dll`. The sharpening pass follows AMD's
-published RCAS method (FidelityFX FSR 1.0, MIT). Details and the required notices
-are in [`THIRD_PARTY.md`](THIRD_PARTY.md).
+- Free to use, copy, change and share for **noncommercial** purposes.
+- **No commercial use** (no selling, no paid bundles) without written permission.
+- If you share it, include the license and the copyright notice.
+- No warranty: you use it at your own risk.
+
+**Third-party parts** — each has its own terms, see [`THIRD_PARTY.md`](THIRD_PARTY.md):
+
+| Part | License | Shipped with this mod? |
+|------|---------|------------------------|
+| MinHook (function hooking) | BSD 2-Clause | Compiled into `dinput8.dll` |
+| NVIDIA DLSS / NGX SDK | NVIDIA RTX SDK license (proprietary) | Only the small SDK link stub inside `dinput8.dll`. **No NVIDIA DLL** — you supply your own `nvngx_dlss.dll` |
+| RCAS sharpening method (AMD FidelityFX FSR 1.0) | MIT | Own implementation of the published method |
+
+Unofficial fan project: not affiliated with, or endorsed by, SCS Software, NVIDIA or AMD.
