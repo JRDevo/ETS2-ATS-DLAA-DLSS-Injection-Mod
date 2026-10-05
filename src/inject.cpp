@@ -303,6 +303,16 @@ double   g_upAreaRatio    = 1.0;         // output / render pixel count of the l
 char     g_upTag[48]      = "off";       // "WxH->WxH" / "off" for the [preset=.. up=..] log tags (last blit)
 char     g_upBlocked[48]  = "";          // "WxH->WxH" whose NGX upscale init failed -> DLAA fallback (Ctrl+F4 ON clears)
 int      g_effPhases      = 8;           // v0.7.0: Halton phase count in use (EffectivePhases, logged on change)
+// v0.7.10: the live DLAA mode as one word for the log lines, matching the End-key cycle ("off" = DLAA evaluate
+// skipped). dlss_upscale decides DLAA (native res) vs DLSS (upscale), same as CycleMode's names.
+inline const char* DlaaModeStr() {
+#ifdef WITH_DLAA
+    if (!g_dlaaOn.load(std::memory_order_relaxed)) return "off";
+    return g_dlssUpscale.load(std::memory_order_relaxed) ? "DLSS" : "DLAA";
+#else
+    return "off(no-DLAA-build)";
+#endif
+}
 // v0.7.0: Halton phases per pass. Upscale: max(jitter_phases, round(jitter_phases * output/render pixel ratio))
 // (DLSS guide: 8 x ratio^2), capped at 1024; DLAA: jitter_phases (v0.6.5). Jitter stays in render pixels.
 int EffectivePhases() {
@@ -553,6 +563,7 @@ void PlayTones(int count, DWORD freq, DWORD ms, DWORD gapMs) {
 
 void MvInvalidate();                     // defined with the scene state below
 void OnPresentBoundary(uint64_t n);      // per-Present frame reset (eye counters, jitter phase)
+bool g_logTick = false;                  // v0.7.10: this Present prints the periodic log lines (first frames + every 10 s of wall clock)
 void TraceAtPresent(IDXGISwapChain* sc, uint64_t n);   // F11 frame trace, defined below
 extern std::atomic<bool> g_traceRequest; // v0.6.5: set by the Ctrl+F11 handler in hkPresent, defined with the trace state below
 void UpdateGameContext(IDXGISwapChain* sc, uint64_t n); // v0.6.2: g_gameCtx from the presenting device
@@ -600,7 +611,12 @@ HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
         return oPresent(sc, sync, flags);
     } else {
         n = g_frames.fetch_add(1);
-        if (n < 5 || (n % 600 == 0)) {          // first frames + roughly every 10s
+        // v0.7.10: by wall clock, not frame count -- loading screens Present at 1000+ fps and flooded the log.
+        static ULONGLONG s_lastLogTick = 0;
+        const ULONGLONG nowTick = GetTickCount64();
+        g_logTick = n < 5 || nowTick - s_lastLogTick >= 10000;
+        if (g_logTick) s_lastLogTick = nowTick;
+        if (g_logTick) {                        // first frames + every 10 s
             DescribeAddr(caller, where, sizeof(where));
             DXGI_SWAP_CHAIN_DESC d{};
             if (SUCCEEDED(sc->GetDesc(&d)))
@@ -612,6 +628,21 @@ HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
                 Log("Present #%llu sync=%u flags=0x%x tid=%lu caller=%s reentrant=%llu",
                     (unsigned long long)n, sync, flags, tid, where,
                     (unsigned long long)g_reentrant.load());
+        }
+        // v0.7.10: once, at the first top-level Present -- note if Present is reached through a driver / overlay present
+        // layer (not the game exe or dxgi). `where` is "module+0xoffset" (just set by DescribeAddr, since n==0 < 5).
+        if (n == 0) {
+            char mod[MAX_PATH];
+            size_t i = 0;
+            for (; where[i] && where[i] != '+' && i < sizeof(mod) - 1; ++i) mod[i] = where[i];
+            mod[i] = 0;
+            char exePath[MAX_PATH];
+            GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+            const char* eb = strrchr(exePath, '\\');
+            eb = eb ? eb + 1 : exePath;
+            if (_stricmp(mod, eb) != 0 && _stricmp(mod, "dxgi.dll") != 0)
+                Log("note: Present is called through %s (driver/overlay present layer), not %s / dxgi.dll -- the "
+                    "caller= values above are that layer, not the game", mod, eb);
         }
     }
     if (depth == 0) UpdateGameContext(sc, n);   // v0.6.2: before anything else this frame (hotkeys may reset state)
@@ -3880,6 +3911,9 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
         }
     }
     const uint64_t s = g_passSeq++;
+    if (s == 0)   // v0.7.10: first scene pass recognised this process -- the G-buffer / scene render path is now tracked
+        Log("first scene pass recognised: s=0 at Present #%llu (the 3D scene render is being tracked)",
+            (unsigned long long)g_frames.load(std::memory_order_relaxed));
     PassSlot& n = g_ring[s % kRing];
     n.s = s;
     n.ResetRecorder(defNow, fgnNow, otNow, Qpc());
@@ -4824,7 +4858,12 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
             Log("VR confirmed at blit: an eye-texture blit (RT %ux%u fmt=%d) after %u backbuffer blit(s) -- the fallback to "
                 "flat is off for this session", bd.Width, bd.Height, (int)bd.Format, g_bbBlitRun);
     }
-    if (isBackbuffer) g_flatMode = true;
+    if (isBackbuffer) {
+        if (!g_flatMode)   // v0.7.10: first time flat is confirmed -- one line so the log shows flat was detected (VR logs below)
+            Log("flat detected at blit: backbuffer blit (RT %ux%u fmt=%d) at Present #%llu",
+                bd.Width, bd.Height, (int)bd.Format, (unsigned long long)g_frames.load(std::memory_order_relaxed));
+        g_flatMode = true;
+    }
     else if (!g_vrMode) {
         g_vrMode = true; g_flatMode = false;
         Log("VR detected at blit: eye identity from the blit render target (RT map)");
@@ -4883,6 +4922,10 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     }
 #endif
     ++g_blitCount;
+    if (g_blitCount == 1)   // v0.7.10: first scene->screen blit matched this process (the copy DLAA/DLSS hooks into)
+        Log("first blit matched: blit #1 at Present #%llu, RT %ux%u fmt=%d, scene source %ux%u fmt=%d (%s)",
+            (unsigned long long)g_frames.load(std::memory_order_relaxed), bd.Width, bd.Height, (int)bd.Format,
+            d.Width, d.Height, (int)d.Format, isBackbuffer ? "flat backbuffer" : "VR eye");
     BlitCpuTimer cpuT;                                   // v0.5.6: CPU cost of everything below (all return paths)
     if (g_rateBlit0 == 0) { g_rateBlit0 = g_blitCount; g_rateT0 = cpuT.t0; }
 #ifdef WITH_DLAA
@@ -5064,6 +5107,13 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         const bool ok = dl.Run(ctx, tex, g_sceneDepth, &slot.twin, &slot.cand, njx, njy, resetUsed, g_mvOn.load(),
                                g_mvDebug.load(), candBad, upW, upH);
         t_inDlaa = false;
+        static bool s_firstEvalLogged = false;   // v0.7.10: one line the first time NGX actually processed a frame
+        if (ok && !s_firstEvalLogged) {
+            s_firstEvalLogged = true;
+            Log("first DLAA/DLSS evaluate OK: eye=%d mode=%s %s at Present #%llu (NGX processed a frame)",
+                eye, DlaaModeStr(), dl.Upscaling() ? "upscaling" : "native-res",
+                (unsigned long long)g_frames.load(std::memory_order_relaxed));
+        }
         // v0.7.0: arm the composite for the Draw that follows (hkDraw, after the game's blit).
         if (dl.CompositePending()) {
             g_compEye = eye; g_compRt = rtPtr; g_compX = upX; g_compY = upY; g_compSrgb = srgbDecode;
@@ -5259,10 +5309,44 @@ void OnPresentBoundary(uint64_t n) {
     PreviewNextFrame(n);                               // v0.7.8 profile-screen preview: log, reset slots, next jitter
     DlaaProcessor::BeginFrame();                       // v0.7.8: a fresh NGX feature-create budget for the next frame
 #endif
-    if (n < 6)
-        Log("Present #%llu: passes=%llu blits=%llu outstanding=%d mode=%s eye-map-entries=%d",
+    // v0.7.10: also every 10 s (g_logTick, the Present line's cadence) so a single periodic line shows whether the scene /
+    // blits ever started and the live DLAA state. mode = the detection (VR/flat/undetected); dlaa / dlaa-mode = the
+    // live DLAA switch + its mode; ngx-feature = eye-0's NGX feature exists (-1 = logging-only build).
+    if (n < 6 || g_logTick) {
+#ifdef WITH_DLAA
+        const int ngxFeature = (int)g_dlaa[0].FeatureReady();
+#else
+        const int ngxFeature = -1;
+#endif
+        Log("Present #%llu: passes=%llu blits=%llu outstanding=%d mode=%s eye-map-entries=%d | dlaa=%s dlaa-mode=%s ngx-feature=%d",
             (unsigned long long)n, (unsigned long long)g_passSeq, (unsigned long long)g_blitCount,
-            (int)(g_passSeq - g_fifoHead), g_vrMode ? "VR" : (g_flatMode ? "flat" : "undetected"), g_eyeMapN);
+            (int)(g_passSeq - g_fifoHead), g_vrMode ? "VR" : (g_flatMode ? "flat" : "undetected"), g_eyeMapN,
+            g_dlaaOn.load(std::memory_order_relaxed) ? "on" : "off", DlaaModeStr(), ngxFeature);
+    }
+
+    // v0.7.10: one-shot triage warnings when the 3D scene never showed up. After ~1800 Presents AND ~30 s wall-clock
+    // from the first Present: warn once if no scene pass has started, or (separately) if passes started but no blit
+    // was ever matched. The first-time lines (first scene pass / first blit) make a later recovery visible, so these
+    // are never repeated. Per-frame cost is an integer compare until the window opens; Qpc only runs in that window.
+    static int64_t s_firstPresentQpc = 0;
+    if (n == 0) s_firstPresentQpc = Qpc();
+    static bool s_warnedNoPass = false, s_warnedNoBlit = false;
+    if (n >= 1800 && (!s_warnedNoPass || !s_warnedNoBlit) && g_qpcFreq > 0 && s_firstPresentQpc != 0 &&
+        (double)(Qpc() - s_firstPresentQpc) / (double)g_qpcFreq >= 30.0) {
+        if (!s_warnedNoPass && g_passSeq == 0) {
+            s_warnedNoPass = true;
+            Log("WARNING: no scene pass seen after %llu Presents / ~30 s -- the 3D scene render has not been "
+                "recognised. Likely still in the menu / a loading screen (load a save and drive), or an unsupported "
+                "game version / render path, or another injector or driver layer owns the device.",
+                (unsigned long long)n);
+        } else if (!s_warnedNoBlit && g_passSeq >= 600 && g_blitCount == 0) {   // 600 passes: the first blit follows the first pass by a frame or two
+            s_warnedNoBlit = true;
+            Log("WARNING: %llu scene pass(es) seen but no blit matched after %llu Presents / ~30 s -- the scene "
+                "renders but the final scene->screen copy we hook was not recognised (unsupported render path, or "
+                "another layer intercepting the blit). DLAA/DLSS cannot run without a matched blit.",
+                (unsigned long long)g_passSeq, (unsigned long long)n);
+        }
+    }
 }
 
 #ifdef WITH_DLAA
@@ -5557,6 +5641,60 @@ bool DlaaOffFilePresent() {
 //   beeps                          0/1 (default 1): v0.5.7 audible feedback for the Shift+F-key user controls
 //                                  (model select, area, sharpen strength/width, DLAA on/off, save) and the
 //                                  Ctrl+F7 passive / v0.7.0 Ctrl+F4 upscale toggles (kernel32 Beep on a worker thread)
+
+// v0.7.10: "a.b.c.d" file version from a module's PE version resource, for the startup "env:" lines. "no version info"
+// if the resource is absent, "unavailable" on a read error. Startup only (GetFileVersionInfo is not on any hot path).
+void FileVersionStrW(const wchar_t* path, char* out, size_t cap) {
+    out[0] = 0;
+    DWORD handle = 0;
+    const DWORD size = GetFileVersionInfoSizeW(path, &handle);
+    if (!size) { snprintf(out, cap, "no version info"); return; }
+    std::vector<unsigned char> buf(size);
+    if (!GetFileVersionInfoW(path, 0, size, buf.data())) { snprintf(out, cap, "unavailable"); return; }
+    VS_FIXEDFILEINFO* ffi = nullptr;
+    UINT len = 0;
+    if (VerQueryValueW(buf.data(), L"\\", (void**)&ffi, &len) && ffi && len)
+        snprintf(out, cap, "%u.%u.%u.%u",
+                 (unsigned)HIWORD(ffi->dwFileVersionMS), (unsigned)LOWORD(ffi->dwFileVersionMS),
+                 (unsigned)HIWORD(ffi->dwFileVersionLS), (unsigned)LOWORD(ffi->dwFileVersionLS));
+    else
+        snprintf(out, cap, "no version info");
+}
+
+// v0.7.10: find the nvngx_dlss.dll the loader would use, in the order NGX init relies on (NgxAcquire adds our own DLL's
+// folder to the search path, and Windows searches the game exe folder by default): our folder first, then the game
+// exe folder. true + full path in out, or false if neither has it. Startup only.
+bool FindNvngxDlss(wchar_t* out, DWORD cap) {
+    wchar_t dir[MAX_PATH];
+    // (a) next to dinput8.dll
+    HMODULE self = nullptr;
+    if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           (LPCWSTR)&FindNvngxDlss, &self) && self) {
+        const DWORD n = GetModuleFileNameW(self, dir, MAX_PATH);
+        if (n && n < MAX_PATH) {
+            wchar_t* slash = wcsrchr(dir, L'\\');
+            if (slash) {
+                *(slash + 1) = 0;
+                wchar_t cand[MAX_PATH];
+                if (_snwprintf_s(cand, _TRUNCATE, L"%snvngx_dlss.dll", dir) > 0 &&
+                    GetFileAttributesW(cand) != INVALID_FILE_ATTRIBUTES) { wcscpy_s(out, cap, cand); return true; }
+            }
+        }
+    }
+    // (b) next to the game exe
+    const DWORD n = GetModuleFileNameW(nullptr, dir, MAX_PATH);
+    if (n && n < MAX_PATH) {
+        wchar_t* slash = wcsrchr(dir, L'\\');
+        if (slash) {
+            *(slash + 1) = 0;
+            wchar_t cand[MAX_PATH];
+            if (_snwprintf_s(cand, _TRUNCATE, L"%snvngx_dlss.dll", dir) > 0 &&
+                GetFileAttributesW(cand) != INVALID_FILE_ATTRIBUTES) { wcscpy_s(out, cap, cand); return true; }
+        }
+    }
+    return false;
+}
+
 void LoadConfig() {
     InitKeyBinds();                                      // v0.7.7: defaults first, key_* lines below override
     wchar_t path[MAX_PATH];
@@ -5695,6 +5833,31 @@ void LoadConfig() {
         Log("dlaa.ini: preview_capture_at=%d (debug) -- one preview capture (as Ctrl+F10) %d Presents after the preview DLAA "
             "first runs; files in dlaa_selftest\\, pvcap: lines in this log", g_pvCaptureAt, g_pvCaptureAt);
 #endif
+    // v0.7.10: triage environment, logged once at load. The game exe + its file version, and the nvngx_dlss.dll the
+    // loader would use (same search order as NGX init) + its file version. Cheap, startup only. config.cfg is NOT read.
+    {
+        wchar_t exeW[MAX_PATH] = L"";
+        GetModuleFileNameW(nullptr, exeW, MAX_PATH);
+        const wchar_t* exeBaseW = wcsrchr(exeW, L'\\');
+        exeBaseW = exeBaseW ? exeBaseW + 1 : exeW;
+        char exeBase[MAX_PATH] = "";
+        WideCharToMultiByte(CP_UTF8, 0, exeBaseW, -1, exeBase, (int)sizeof(exeBase) - 1, nullptr, nullptr);
+        char exeVer[64];
+        FileVersionStrW(exeW, exeVer, sizeof(exeVer));
+        Log("env: game exe = %s (file version %s)", exeBase, exeVer);
+
+        wchar_t ngxW[MAX_PATH];
+        if (FindNvngxDlss(ngxW, MAX_PATH)) {
+            char ngxVer[64];
+            FileVersionStrW(ngxW, ngxVer, sizeof(ngxVer));
+            char ngxPath[MAX_PATH] = "";
+            WideCharToMultiByte(CP_UTF8, 0, ngxW, -1, ngxPath, (int)sizeof(ngxPath) - 1, nullptr, nullptr);
+            Log("env: nvngx_dlss.dll = %s (file version %s)", ngxPath, ngxVer);
+        } else {
+            Log("env: nvngx_dlss.dll NOT found next to dinput8.dll or the game exe -- DLAA/DLSS init will fail unless "
+                "it is elsewhere on the DLL search path");
+        }
+    }
     LogKeyBinds();
 }
 
@@ -5864,4 +6027,18 @@ void StartInjection() {
     Log("DLAA build: not compiled in (WITH_DLAA=OFF) -- detect + log only");
 #endif
     CreateThread(nullptr, 0, SetupThread, nullptr, 0, nullptr);
+}
+
+// v0.7.10: one line at process exit so the log always ends with a verdict (did the scene / blits ever run, which mode)
+// instead of just stopping. Called from DllMain's DLL_PROCESS_DETACH. Loader-lock safe: only plain-global / atomic
+// reads and Log -- no D3D, no NGX, no thread waits. processTerminating = DllMain's lpReserved != null (process exit);
+// either way we only log and do nothing else.
+void OnProcessDetach(bool processTerminating) {
+    LogExiting().store(true, std::memory_order_relaxed);   // never block on the log mutex from here on
+    Log("=== injector unloading (%s): presents=%llu passes=%llu blits=%llu mode=%s dlaa=%s dlaa-mode=%s ===",
+        processTerminating ? "process exit" : "DLL unload",
+        (unsigned long long)g_frames.load(std::memory_order_relaxed),
+        (unsigned long long)g_passSeq, (unsigned long long)g_blitCount,
+        g_vrMode ? "VR" : (g_flatMode ? "flat" : "undetected"),
+        g_dlaaOn.load(std::memory_order_relaxed) ? "on" : "off", DlaaModeStr());
 }

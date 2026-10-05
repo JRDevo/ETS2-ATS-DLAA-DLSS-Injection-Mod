@@ -4,6 +4,7 @@
 #include <cstdarg>
 #include <cstring>
 #include <mutex>
+#include <atomic>
 #include <share.h>
 
 // Tiny file logger. Writes "dlaa_inject.log" next to the game executable
@@ -34,11 +35,17 @@ inline bool LogDebugEnabled(const char* exeDirSlash) {
     return on;
 }
 
+// v0.7.10: set by the DLL_PROCESS_DETACH exit line. At process exit the other threads are already gone; one of them
+// may have died inside Log with the mutex held, so the exit line only try-locks (a blocked lock = the game hangs on quit).
+inline std::atomic<bool>& LogExiting() { static std::atomic<bool> b{false}; return b; }
+
 inline void LogImpl(const char* fmt, ...) {
     static std::mutex m;
     static FILE* f = nullptr;
     static int enabled = -1;                              // -1 = not checked yet
-    std::lock_guard<std::mutex> lk(m);
+    std::unique_lock<std::mutex> lk(m, std::defer_lock);
+    if (LogExiting().load(std::memory_order_relaxed)) { if (!lk.try_lock()) return; }
+    else lk.lock();
     if (enabled == 0) return;
     if (!f) {
         char path[MAX_PATH];

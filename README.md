@@ -283,7 +283,7 @@ If something goes wrong, [open an issue](../../issues/new/choose) (**New issue**
 happened.
 
 **Steps first:** put `debug = 1` in `dlaa.ini` (the log is off without it), start the game, reproduce the problem, then **quit the game** and
-only then collect the files. The log is written while the game runs, so grab it after
+only then collect the files. Load a save and drive for about a minute before quitting, so the log covers the 3D scene and not just the menu. The log is written while the game runs, so grab it after
 the game has exited (or at least after the problem has happened).
 
 **Files to attach** — all of them live in the game's `bin\win_x64\` folder, next to

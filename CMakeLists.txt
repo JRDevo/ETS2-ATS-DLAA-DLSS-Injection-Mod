@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(ets2_ats_dlaa VERSION 0.7.9 LANGUAGES C CXX)
+project(ets2_ats_dlaa VERSION 0.7.10 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,7 +11,7 @@ add_library(dinput8 SHARED
     src/inject.cpp
 )
 set_target_properties(dinput8 PROPERTIES PREFIX "" OUTPUT_NAME "dinput8")
-# Single source of the version string: project(... VERSION 0.7.9) above feeds the
+# Single source of the version string: project(... VERSION 0.7.10) above feeds the
 # load-log line in src/inject.cpp through this compile definition. Bump it in project()
 # only; the doc headers are the only other place the version is written by hand.
 target_compile_definitions(dinput8 PRIVATE DLAA_INJECTOR_VERSION="${PROJECT_VERSION}")
@@ -37,7 +37,8 @@ if (MSVC)
     target_compile_options(minhook_static PRIVATE /W0)
 endif()
 
-target_link_libraries(dinput8 PRIVATE d3d11 dxgi minhook_static)
+# version: GetFileVersionInfo for the v0.7.10 startup "env:" lines (game exe / nvngx_dlss.dll file versions).
+target_link_libraries(dinput8 PRIVATE d3d11 dxgi minhook_static version)
 
 if (MSVC)
     target_compile_options(dinput8 PRIVATE /W3 /permissive- /Zc:__cplusplus)

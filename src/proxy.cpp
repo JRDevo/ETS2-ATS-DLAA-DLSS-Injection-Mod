@@ -5,7 +5,8 @@
 #include <unknwn.h>
 #include "log.h"
 
-void StartInjection();   // inject.cpp
+void StartInjection();                         // inject.cpp
+void OnProcessDetach(bool processTerminating); // inject.cpp (v0.7.10 exit log line)
 
 namespace {
 HMODULE g_real = nullptr;
@@ -49,11 +50,15 @@ HRESULT WINAPI DllUnregisterServer()  { return p_DllUnregisterServer ? p_DllUnre
 
 } // extern "C"
 
-BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID) {
+BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID lpReserved) {
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(inst);
         LoadReal();
         StartInjection();     // spawns a worker thread; never do D3D work under loader lock
+    } else if (reason == DLL_PROCESS_DETACH) {
+        // v0.7.10: final log line only. lpReserved != null = the process is terminating; either way we just log
+        // (plain reads + Log, loader-lock safe) and do nothing else.
+        OnProcessDetach(lpReserved != nullptr);
     }
     return TRUE;
 }

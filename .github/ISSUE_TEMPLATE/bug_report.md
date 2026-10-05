@@ -7,6 +7,7 @@ labels: bug
 
 <!-- The log is OFF by default. FIRST put the line  debug = 1  in dlaa.ini (next to dinput8.dll; create the file if you have none). -->
 <!-- Then start the game, reproduce the problem, QUIT the game, and collect the files. The log is written while the game runs. -->
+<!-- Load a save and drive for about a minute before quitting, so the log covers the 3D scene and not just the menu. -->
 <!-- See README: "Reporting a problem (what to upload)". -->
 
 ## Environment

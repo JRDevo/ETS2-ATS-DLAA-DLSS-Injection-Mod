@@ -79,6 +79,7 @@ public:
     void CancelComposite(ID3D11DeviceContext* ctx);   // pending result dropped (RT changed): timing slot closed
     bool Upscaling() const { return m_up; }           // v0.7.0: the last Ensure built the upscale path
     bool InitFailed() const { return m_failed; }      // v0.7.0: the last Ensure failed (no retry at these dims)
+    bool FeatureReady() const { return m_dlaa.IsReady(); } // v0.7.10: the NGX feature exists (DLAA/DLSS set up) -- log triage only
     // v0.7.8: the last Run returned false WITHOUT doing anything and will simply work later: the shader warm-up was
     // not finished, or the unit's (re)build waited for a Present with a free creation budget (one NGX feature create
     // per Present, see DlaaProcessor::CreateBudgetFree). Nothing was touched, nothing is marked failed.
