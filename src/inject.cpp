@@ -1,3 +1,15 @@
+// v0.8.2 -- STABLE SCENE DEPTH (ATS 1.61 drivable cars). The cars render extra 4-RTV G-buffer views (mirrors) into their
+//           own D32S8 depths, 2048x512 and 1024x512, every frame before the main 1920x1080 scene (log captures/
+//           dlaa_inject_ats_v081_car_drive_nodlaa.log: "scene depth G-buffer pass" change #1..#1473 in ~7 s). v0.8.1
+//           adopted every one of them as THE scene depth, so the main view's ClearDepthStencilView always found the
+//           mirror depth remembered (adopted at the mirror's bind just before) -> OnSceneDepthClear never started a
+//           pass -> fifo underflow on every blit, no DLAA while driving. Now (InspectDepth) a candidate replaces the
+//           scene depth only when it ranks at least as high: the screen's aspect ratio (flat only) first, then the pixel
+//           area; a lower-ranked one is a SECONDARY view: never a G-buffer / jitter pass, no MV candidates, logged once
+//           per size, counted ("secondary gbuf ignored=" in the FIFO stats / pass sample lines). A real switch to a
+//           lower-ranked depth (resolution / Scaling down) is adopted after the scene depth was not bound as the
+//           G-buffer for 30 game frames while candidates were (the best-ranked of them). A scene depth SIZE change drops the outstanding passes
+//           and starts a new one at that very bind (its clear ran before the depth was known, like the first pass).
 // v0.8.1 -- PRESENT LAYER (driver frame generation, NVIDIA Smooth Motion = NvPresent64.dll). The layer presents its own
 //           swapchain from its own D3D11 device on its own thread (real + generated frames); the game renders on another
 //           device and its own Present never reaches our dxgi hook. v0.8.0 took the game context from the presenting
@@ -5364,10 +5376,41 @@ void TraceAtPresent(IDXGISwapChain* sc, uint64_t n) {
     }
 }
 
-// OMSetRenderTargets helper: remember the main G-buffer depth.
+// ---- v0.8.2 scene depth choice (see the v0.8.2 header note) -------------------------------------------------------
+// Render thread only (the game context's OMSetRenderTargets), like g_sceneDepth itself.
+constexpr uint64_t kSdNotStale     = ~0ull;
+constexpr uint64_t kSdExpireFrames = 30;         // game frames (g_frames: Present, or the present-layer game-thread boundary)
+uint64_t g_sdStaleSince    = kSdNotStale;        // g_frames at the first rejected candidate since the scene depth's last
+                                                 // 4-RTV bind (kSdNotStale = the scene depth was bound after the last reject)
+int      g_sdStaleBestCls  = 0;                  // best rank among the candidates rejected since g_sdStaleSince (aspect
+uint64_t g_sdStaleBestArea = 0;                  // class, then area): only that one may take over at the expiry
+uint64_t g_cSecondaryGbuf  = 0;                 // rejected candidate binds (secondary G-buffer views: mirrors, extra views)
+uint64_t g_sdRejKeys[4]    = {};                 // distinct rejected sizes already logged (W << 32 | H)
+int      g_sdRejKeysN      = 0;
+int      g_sdResizeLogs    = 0;                  // "scene depth size change" lines (cap)
+
+// 1 = (w, h) has the screen's aspect ratio (2 % tolerance: Scaling rounds the scene size). Flat only: in VR the
+// backbuffer is the mirror window and the eye texture has its own shape, so every depth is 0 there and the area alone
+// decides (also while a VR launch has not fallen back to flat yet). 0 while the backbuffer is not known.
+int SdAspectClass(UINT w, UINT h) {
+    if (!g_bbW || !g_bbH || !w || !h || g_vrMode || (g_launchVr == 1 && !g_vrFellBack)) return 0;
+    const double a = (double)w / (double)h, s = (double)g_bbW / (double)g_bbH;
+    return std::fabs(a - s) <= 0.02 * s ? 1 : 0;
+}
+
+// OMSetRenderTargets helper (4-RTV binds only): remember the main G-buffer depth.
 // `res` is the DSV's resource; borrowed (caller releases).
-void InspectDepth(ID3D11Resource* res) {
-    if (res == g_sceneDepth) return;                           // same as remembered
+// v0.8.2: returns true when the scene depth was REPLACED by one of a different size (the caller then starts a pass at
+// this bind, see hkOMSetRenderTargets). A candidate (D32S8, Width >= 1024, 1 sample) is adopted when there is no scene
+// depth yet, or it ranks at least as high as the current one (screen aspect class first, then pixel area; equal rank =
+// adopted, exactly the v0.8.1 behaviour for a same-size replacement), or the current one is stale: not bound as the
+// G-buffer for kSdExpireFrames game frames while candidates were (a real switch to a smaller / other-shaped scene;
+// then the best-ranked candidate of that window takes over, never a mirror that happens to bind first).
+// A rejected candidate changes nothing else: res != g_sceneDepth in the caller, so no G-buffer / jitter pass, no
+// g_depthDirty, no MV candidates, and its clear / discard never match the scene depth.
+bool InspectDepth(ID3D11Resource* res) {
+    if (res == g_sceneDepth) { g_sdStaleSince = kSdNotStale; return false; }   // same as remembered (bound: not stale)
+    bool resized = false;
     ID3D11Texture2D* tex = nullptr;
     if (SUCCEEDED(res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&tex)) && tex) {
         D3D11_TEXTURE2D_DESC d{};
@@ -5376,15 +5419,80 @@ void InspectDepth(ID3D11Resource* res) {
         const bool fmtOk = d.Format == DXGI_FORMAT_D32_FLOAT_S8X24_UINT ||
                            d.Format == DXGI_FORMAT_R32G8X24_TYPELESS;
         if (fmtOk && d.Width >= 1024 && d.SampleDesc.Count == 1) {
-            if (g_sceneDepth) g_sceneDepth->Release();
-            g_sceneDepth = tex; tex = nullptr;                  // keep our ref
-            g_sceneW = d.Width; g_sceneH = d.Height;
-            if (g_depthChanges++ < 10)
-                Log("scene depth G-buffer pass: %ux%u fmt=%d (change #%llu)",
-                    d.Width, d.Height, (int)d.Format, (unsigned long long)g_depthChanges);
+            bool take = !g_sceneDepth, expired = false;
+            int cCls = 0, sCls = 0;
+            uint64_t staleFrames = 0;
+            if (!take) {
+                cCls = SdAspectClass(d.Width, d.Height);
+                sCls = SdAspectClass(g_sceneW, g_sceneH);
+                take = cCls != sCls ? cCls > sCls
+                                    : (uint64_t)d.Width * d.Height >= (uint64_t)g_sceneW * g_sceneH;
+                if (!take) {
+                    // Expiry: only the best-ranked candidate of the stale window may take over (a resolution drop in a
+                    // car: the mirrors bind before the new, smaller scene every frame and must not win the expiry).
+                    const uint64_t now = g_frames.load(std::memory_order_relaxed), area = (uint64_t)d.Width * d.Height;
+                    if (g_sdStaleSince == kSdNotStale) {
+                        g_sdStaleSince = now; g_sdStaleBestCls = cCls; g_sdStaleBestArea = area;
+                    } else {
+                        const bool best = cCls != g_sdStaleBestCls ? cCls > g_sdStaleBestCls : area >= g_sdStaleBestArea;
+                        if (best) { g_sdStaleBestCls = cCls; g_sdStaleBestArea = area; }
+                        if (best && now - g_sdStaleSince >= kSdExpireFrames) {
+                            take = true; expired = true; staleFrames = now - g_sdStaleSince;
+                        }
+                    }
+                }
+            }
+            if (take) {
+                const UINT oldW = g_sceneW, oldH = g_sceneH;
+                const bool had = g_sceneDepth != nullptr;
+                if (expired)
+                    Log("scene depth %ux%u not bound as the G-buffer for %llu game frames while other G-buffer views were "
+                        "-- adopting %ux%u as the scene depth (resolution / Scaling change)", oldW, oldH,
+                        (unsigned long long)staleFrames, d.Width, d.Height);
+                if (g_sceneDepth) g_sceneDepth->Release();
+                g_sceneDepth = tex; tex = nullptr;              // keep our ref
+                g_sceneW = d.Width; g_sceneH = d.Height;
+                g_sdStaleSince = kSdNotStale;
+                if (g_depthChanges++ < 10)
+                    Log("scene depth G-buffer pass: %ux%u fmt=%d (change #%llu)",
+                        d.Width, d.Height, (int)d.Format, (unsigned long long)g_depthChanges);
+                // v0.8.2: a SIZE change (start-up: the first 4-RTV bind was a mirror and the real scene comes now; or a
+                // resolution change) -- everything tied to the old depth goes: outstanding passes (their jitter, MV
+                // candidates and depth belong to the old view; same drop as ResetPassTrackingCore), g_depthDirty, the
+                // scene-sized colour identities of the blit rules (found again later in this frame), the DLSS history.
+                // g_needFirstPass: this bind starts the new pass (the new depth's clear ran before it was known).
+                if (had && (oldW != d.Width || oldH != d.Height)) {
+                    resized = true;
+                    const uint64_t dropped = g_passSeq - g_fifoHead;
+                    while (g_fifoHead < g_passSeq) g_ring[g_fifoHead++ % kRing].consumed = true;
+                    g_depthDirty = false;
+                    g_needFirstPass = true;
+                    g_fwdColorTex = nullptr; g_hdrCompTex = nullptr; g_tonemapTex = nullptr;
+                    g_resetNext = true;
+                    if (g_sdResizeLogs++ < 8)
+                        Log("scene depth size change %ux%u -> %ux%u: %llu outstanding pass(es) dropped, a new pass starts at "
+                            "this G-buffer bind (Present #%llu)", oldW, oldH, d.Width, d.Height,
+                            (unsigned long long)dropped, (unsigned long long)g_frames.load(std::memory_order_relaxed));
+                }
+            } else {
+                ++g_cSecondaryGbuf;
+                const uint64_t key = ((uint64_t)d.Width << 32) | d.Height;
+                bool seen = false;
+                for (int i = 0; i < g_sdRejKeysN; ++i) seen = seen || g_sdRejKeys[i] == key;
+                if (!seen && g_sdRejKeysN < 4) {
+                    g_sdRejKeys[g_sdRejKeysN++] = key;
+                    if (cCls != sCls)
+                        Log("secondary G-buffer view %ux%u ignored (not the screen's aspect ratio, the scene %ux%u is -- "
+                            "mirror / extra view)", d.Width, d.Height, g_sceneW, g_sceneH);
+                    else
+                        Log("secondary G-buffer view %ux%u ignored (smaller than the scene %ux%u -- mirror / extra view)",
+                            d.Width, d.Height, g_sceneW, g_sceneH);
+                }
+            }
         }
         if (tex) tex->Release();
     }
+    return resized;
 }
 
 // ---- jitter via viewport offset ----------------------------------------------
@@ -5594,12 +5702,14 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
     //      transparent pass). The lighting pass (2 RTVs) and every shadow /
     //      mirror / probe pass (other DSVs) are never jittered.
     // InspectDepth runs first so a scene depth discovered in this very call counts.
-    bool pass = false;
+    // v0.8.2: InspectDepth may reject the depth (a secondary G-buffer view: mirror, extra view) -> dres != g_sceneDepth
+    // below, so that bind is no pass of any kind; sdResized = it replaced the scene depth with one of another size.
+    bool pass = false, sdResized = false;
     if (dsv) {
         ID3D11Resource* dres = nullptr;
         dsv->GetResource(&dres);
         if (dres) {
-            if (n == 4) InspectDepth(dres);
+            if (n == 4) sdResized = InspectDepth(dres);
             if (dres == g_sceneDepth) {
                 if (n == 4) {
                     pass = true;
@@ -5636,7 +5746,8 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
     if (g_gbufPass) {
         // The very first pass: its clear ran before the scene depth was known, so start it here.
         // v0.6.2: also the first pass after a game-context change (g_needFirstPass, was g_passSeq == 0).
-        if (!wasGbuf && g_needFirstPass) {
+        // v0.8.2: and the first pass on a scene depth of a new size (sdResized: even straight after a G-buffer bind).
+        if ((!wasGbuf || sdResized) && g_needFirstPass) {
             g_needFirstPass = false;
             StartPass(ctx, false);
             SpanBeginPending(ctx);                    // no clear follows: the spans start at this bind
@@ -6014,12 +6125,12 @@ void LogPassRecord(const char* prefix, int eye, const PassSlot& slot, int lgW, i
     Log("%s eye=%d s=%llu blit #%llu: records world=%d cabin=%d (last good %d/%d) | DrawIndexed gbuf=%u other=%u "
         "deferred=%u | gbuf binds=%u scene clears=%u | skips: sampled=%u gate=%u indlaa=%u noctx=%u full=%u nocb=%u range=%u | "
         "pass age %.2f ms, eye blit interval %.2f ms | snap=%d discarded=%d | Present #%llu | foreign-ctx OM/RS/Draw/DI=%u "
-        "game-ctx other-thread OM/RS=%u scene-depth changes=%llu%s",
+        "game-ctx other-thread OM/RS=%u scene-depth changes=%llu secondary gbuf ignored=%llu%s",
         prefix, eye, (unsigned long long)slot.s, (unsigned long long)g_blitCount, slot.cand.Count(0), slot.cand.Count(1),
         lgW, lgC, slot.diGbuf, slot.diOther, deferred, slot.gbufBinds, slot.sceneClears,
         slot.skSampled, slot.skGate, slot.skInDlaa, slot.skNoCtx, slot.skFull, slot.skNoCb, slot.skRange,
         ageMs, eyeIvMs, (int)slot.snap, (int)slot.discarded, (unsigned long long)g_frames.load(), fgn, oth,
-        (unsigned long long)g_depthChanges, note);
+        (unsigned long long)g_depthChanges, (unsigned long long)g_cSecondaryGbuf, note);   // v0.8.2: + secondary
 }
 
 // Classifies the slot's candidate record for `eye` (definition: EyeRecState) and logs anomalies / samples.
@@ -6389,11 +6500,12 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         const int    stArea    = 100;
 #endif
         Log("FIFO stats @blit %llu: passes=%llu blits=%llu depth snapshot used=%llu live used=%llu fifo underflow=%llu "
-            "fifo overflow=%llu mirror ignored=%llu | snapshots: at discard=%llu at clear=%llu live used=%llu discarded-without-snapshot=%llu (scene depth discards seen=%llu) | eye map: %s entries=%d rt-parity-mismatch=%llu verdicts=%llu no-vote=%llu corrections=%llu rb-skipped-full=%llu rb-failed=%llu rb-throttled=%llu | R |x|>0.25: e0=%llu/%llu e1=%llu/%llu | dlaa frames e0=%llu e1=%llu | "
+            "fifo overflow=%llu mirror ignored=%llu secondary gbuf ignored=%llu | snapshots: at discard=%llu at clear=%llu live used=%llu discarded-without-snapshot=%llu (scene depth discards seen=%llu) | eye map: %s entries=%d rt-parity-mismatch=%llu verdicts=%llu no-vote=%llu corrections=%llu rb-skipped-full=%llu rb-failed=%llu rb-throttled=%llu | R |x|>0.25: e0=%llu/%llu e1=%llu/%llu | dlaa frames e0=%llu e1=%llu | "
             "cpu: blit %.3f ms/blit, mv-collect %.3f ms/pass (%.0f records/pass) | rate: blits/s=%.1f fps=%.1f (%s) [preset=%s sharp=%.1f r=%.1f area=%d up=%s] | Present #%llu",
             (unsigned long long)g_blitCount, (unsigned long long)g_passSeq, (unsigned long long)g_blitCount,
             (unsigned long long)g_cSnapUsed, (unsigned long long)g_cLiveUsed, (unsigned long long)g_cUnderflow,
             (unsigned long long)g_cOverflow, (unsigned long long)g_cMirrorIgnored,
+            (unsigned long long)g_cSecondaryGbuf,                         // v0.8.2: rejected secondary G-buffer views
             (unsigned long long)g_cSnapAtDiscard, (unsigned long long)g_cSnapAtClear, (unsigned long long)g_cLiveUsed,
             (unsigned long long)g_cDiscardNoSnap, (unsigned long long)g_cDiscardSeen,
             g_vrMode ? "RT map" : "flat", g_eyeMapN, (unsigned long long)g_cRtParityMismatch,
@@ -6969,6 +7081,7 @@ void ResetPassTracking(uint64_t n) {
 void ResetPassTrackingCore(bool forceDlaaOff) {
     if (g_sceneDepth) { g_sceneDepth->Release(); g_sceneDepth = nullptr; }   // rediscovered by InspectDepth
     g_sceneW = g_sceneH = 0;
+    g_sdStaleSince = kSdNotStale;                              // v0.8.2
     g_tonemapTex = nullptr;
     g_fwdColorTex = nullptr; g_hdrCompTex = nullptr; g_hdrCompLogged = false;   // v0.8.0 HDR blit rule
     g_gbufPass = false; g_jitterPass = false; g_depthDirty = false;

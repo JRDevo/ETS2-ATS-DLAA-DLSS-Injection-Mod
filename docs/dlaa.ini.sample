@@ -5,7 +5,8 @@
 ; be written back from the headset with Shift+F12, which rewrites this file in place and keeps every other line.
 
 # Log file dlaa_inject.log (next to dinput8.dll): 0 = no log (default), 1 = write the log. Needed for bug reports.
-# debug = 0
+# This line has no '#' in front: just change the 0 to 1.
+debug = 0
 
 # NGX jitter = sign * viewport shift, per axis: -1 or +1 (+1/+1 won the self-test; Ctrl+F12 cycles live)
 # jitter_sign_x = 1

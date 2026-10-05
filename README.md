@@ -24,6 +24,7 @@ account, no in-game menu — a few hotkeys and an optional text config.
 - **Windows HDR** — works with HDR on in flat mode (new in v0.8.0).
 - **NVIDIA Smooth Motion** — works with the driver's frame generation switched on, in flat mode
   (new in v0.8.1).
+- **Drivable cars (ATS)** — DLAA / DLSS also runs while you drive a car (new in v0.8.2).
 - **Menu and truck-preview screens** get anti-aliasing too, not only the drive.
 - **Four DLSS models** to pick from, switched live with a key, from light to heavy.
 - **Adjustable sharpening** — strength and width, live.
@@ -44,7 +45,7 @@ This is an unofficial fan project. It is not affiliated with, or endorsed by, SC
 Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
-> Status: v0.8.1. Works with NVIDIA Smooth Motion on in flat mode (new in v0.8.1). Windows HDR works in flat mode (since v0.8.0). DLAA has been run in ETS2 (VR) and ATS (flat and VR). The DLSS
+> Status: v0.8.2. Works while you drive a car in ATS (new in v0.8.2). Works with NVIDIA Smooth Motion on in flat mode (new in v0.8.1). Windows HDR works in flat mode (since v0.8.0). DLAA has been run in ETS2 (VR) and ATS (flat and VR). The DLSS
 > *upscaling* path (render below native, reconstruct up) runs in VR but is still
 > being tuned. Treat upscaling as experimental.
 
@@ -280,6 +281,10 @@ was used). The full template with every key and its default is in
   `caller=NvPresent64.dll`): update. Smooth Motion only adds frames on the monitor; it does nothing for
   the headset picture in VR, so switch it off for VR.
 - **Faint dark line down the middle of the menu / truck-preview screen:** fixed in v0.8.1: update.
+- **No DLAA / DLSS while you drive a car (ATS):** fixed in v0.8.2: update. Older versions work in the menu
+  but do nothing in the car (the log shows many `fifo underflow` lines).
+- **No log file with `debug = 1`:** the line must not start with `#`. From v0.8.2 the packaged `dlaa.ini`
+  has a plain `debug = 0` line: change the 0 to 1.
 - **Start with DLAA off** (detect + log only): put an empty file named
   `dlaa_off.txt` next to `dinput8.dll` before launch. `Shift+F11` / `End` still
   switch it on.
