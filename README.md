@@ -12,6 +12,23 @@ account, no in-game menu — a few hotkeys and an optional text config.
 
 **An NVIDIA RTX GPU is required** (DLAA and DLSS only run on RTX cards).
 
+## Features
+
+- **DLAA** — NVIDIA anti-aliasing at the game's render resolution. It removes the shimmer and flicker on
+  fences, power lines, road markings and shadows that the game's own AA leaves behind.
+- **DLSS upscaling** — render fewer pixels and let DLSS rebuild the full picture, for more frame rate.
+- **Flat and VR** — one DLL and one `dlaa.ini` for both. VR runs one pass per eye (OpenXR).
+- **Windows HDR** — works with HDR on in flat mode (new in v0.8.0).
+- **Menu and truck-preview screens** get anti-aliasing too, not only the drive.
+- **Four DLSS models** to pick from, switched live with a key, from light to heavy.
+- **Adjustable sharpening** — strength and width, live.
+- **DLAA area (VR)** — process only the middle of each eye to save GPU time.
+- **Hotkeys with beeps** — made to use blind in a headset; every key can be re-bound in `dlaa.ini`.
+- **Bring your own `nvngx_dlss.dll`** — drop in a newer one at any time to get NVIDIA's newer models.
+- **Small and simple** — a single `dinput8.dll`. No launcher, no account, no in-game menu. Delete the file
+  to uninstall.
+- **Debug log** for bug reports (off by default).
+
 ## ⬇ Download
 
 **[Download the latest release here](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/releases/latest)**
