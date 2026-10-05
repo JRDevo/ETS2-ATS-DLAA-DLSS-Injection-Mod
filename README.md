@@ -2,8 +2,9 @@
 
 # ETS2 & ATS: DLAA & DLSS Injection Mod
 
-NVIDIA DLAA and DLSS upscaling for **Euro Truck Simulator 2** and **American Truck
-Simulator**, in both flat and VR. It replaces the game's own anti-aliasing with
+An **ETS2 DLSS mod** and **ATS DLSS mod**: NVIDIA DLAA and DLSS upscaling for
+**Euro Truck Simulator 2 (ETS2)** and **American Truck Simulator (ATS)**, on a flat
+screen and in VR, with Windows HDR support. It replaces the game's own anti-aliasing with
 DLAA (NVIDIA's native-resolution AA) and can optionally upscale with DLSS so the
 game renders fewer pixels and the GPU has an easier time.
 
