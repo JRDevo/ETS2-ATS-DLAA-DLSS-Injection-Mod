@@ -654,6 +654,10 @@ void*    g_menuBlitRt  = nullptr;        // ... and its render target (identity 
 // v0.10.0 phase 16 VR LATE PANEL (see that block after MenuDrawPreview): the panel / fps box go LAST onto each eye picture.
 int      g_menuLateN = 0;                // eye pictures recorded (0 = every hook test below is one integer compare)
 int      g_menuLateBound = -1;           // eye whose recorded picture is the current RT0 (game draws into it are counted)
+// v0.10.0 phase 20: the recorded pictures for the OTHER-context draw diagnostic (MenuLateOnForeignDraw runs on another thread:
+// it only reads these atomics, never g_menuLate). Written by MenuLateUpdateN (render thread).
+std::atomic<bool>  g_menuLateForeignOn{false};
+std::atomic<void*> g_menuLateTexA[2] = {};
 std::atomic<bool> g_mvDebug{false};      // Ctrl+F6: blit source replaced by the MV visualization
 std::atomic<bool> g_mvOn{true};          // camera-reprojection MVs live switch (Ctrl+F5, dlaa.ini mv_enabled)
 // v0.9.0 r5 forward depth for the MVs (see the "FORWARD DEPTH" block above hkDrawIndexed): dlaa.ini mv_fwd_depth
@@ -1119,13 +1123,23 @@ void MenuDrawVr(ID3D11DeviceContext* ctx); // v0.10.0 tuning menu: VR panel into
 void MenuDrawPreview(ID3D11DeviceContext* ctx, int idx, char trigger);   // v0.10.0 phase 15: ... onto a VR preview eye picture
 // v0.10.0 phase 16 VR late panel (hooks): a game read of a recorded eye picture (copy source / PS SRV0 of a small Draw), a game
 // bind (which recorded picture is RT0 now), a game draw into the bound recorded picture, and the reset
-void MenuLateOnRead(ID3D11DeviceContext* ctx, ID3D11Resource* src, ID3D11Resource* dst, const char* what, UINT n);
-void MenuLateOnDraw(ID3D11DeviceContext* ctx, const char* what, UINT n);
+// v0.10.0 phase 20: how the read writes its destination -- the written rectangle (not the whole target) is what the eye-read
+// test measures (ATS VR at stereo scale 1.0 copies each 3064x3248 eye picture into one half of a 6128x3248 target)
+struct MenuLateHow {
+    int how = 0;                                 // 0 CopyResource (whole), 1 CopySubresourceRegion(1) (below), 2 Draw (viewport 0)
+    UINT dsub = 0, dx = 0, dy = 0, ssub = 0;     // how 1: destination subresource / offset, source subresource
+    const D3D11_BOX* box = nullptr;              // how 1: source box (null = the whole source subresource)
+    UINT slot = 0;                               // how 2: the PS SRV slot that holds the picture
+};
+void MenuLateOnRead(ID3D11DeviceContext* ctx, ID3D11Resource* src, ID3D11Resource* dst, const char* what, UINT n, void* caller,
+                    const MenuLateHow& how);
+void MenuLateOnDraw(ID3D11DeviceContext* ctx, const char* what, UINT n, void* caller);
+void MenuLateOnForeignDraw(ID3D11DeviceContext* ctx, const char* what, UINT n, void* caller);   // phase 20: log / count only
 void MenuLateOnBind(UINT n, ID3D11RenderTargetView* const* rtvs);
 void MenuLateCountDraw();
 void MenuLateReset(const char* why);
 void MenuLateArm(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv, char kind);   // (MenuDrawVr / MenuDrawPreview)
-void MenuLateAtPresent();
+void MenuLateAtPresent(uint64_t n);
 void FpsTick();                          // v0.10.0 fps meter (the fps box + the menu's fps figure), per Present while either is on
 void CheckPresetFallback(uint64_t n);    // v0.5.7: beep + log when a live preset fell back to default
 void OnLiveTuningChange();               // v0.5.7; v0.6.2 also DLAA toggle / passive / MV (restarts the GPU spans window)
@@ -1287,7 +1301,7 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
                 Log("jitter sign now X=%+d Y=%+d (%s)", g_signX, g_signY, KeyName(KA_JITTER_SIGN));
             }
         }
-        if (g_menuLateN) MenuLateAtPresent();    // v0.10.0 phase 16 VR late panel: finished eye pictures end here
+        if (g_menuLateN) MenuLateAtPresent(n);   // v0.10.0 phase 16 VR late panel: finished eye pictures end here
         if (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)
             MenuDrawAtPresent(sc, bctx);         // v0.10.0 tuning menu panel + fps box (flat / mirror)
 #endif
@@ -2912,7 +2926,8 @@ void STDMETHODCALLTYPE hkCopyResource(ID3D11DeviceContext* ctx, ID3D11Resource* 
     if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oCopyResource(ctx, dst, src); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     TraceCopyRes(ctx, dst, src);
 #ifdef WITH_DLAA
-    if (g_menuLateN && !t_inDlaa && IsGameCtx(ctx)) MenuLateOnRead(ctx, src, dst, "CopyResource", 0);   // phase 16 VR late panel
+    if (g_menuLateN && !t_inDlaa && IsGameCtx(ctx))                                   // phase 16 VR late panel
+        MenuLateOnRead(ctx, src, dst, "CopyResource", 0, _ReturnAddress(), MenuLateHow{});
 #endif
     oCopyResource(ctx, dst, src);
 }
@@ -2921,7 +2936,10 @@ void STDMETHODCALLTYPE hkCopySubresourceRegion(ID3D11DeviceContext* ctx, ID3D11R
     if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oCopySubresourceRegion(ctx, dst, dsub, dx, dy, dz, src, ssub, box); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     TraceCopySub(ctx, "CopySubresourceRegion", dst, dsub, dx, dy, dz, src, ssub, box, 0, false);
 #ifdef WITH_DLAA
-    if (g_menuLateN && !t_inDlaa && IsGameCtx(ctx)) MenuLateOnRead(ctx, src, dst, "CopySubresourceRegion", 0);   // phase 16
+    if (g_menuLateN && !t_inDlaa && IsGameCtx(ctx)) {                                 // phase 16 (phase 20: the copied rect)
+        MenuLateHow h; h.how = 1; h.dsub = dsub; h.dx = dx; h.dy = dy; h.ssub = ssub; h.box = box;
+        MenuLateOnRead(ctx, src, dst, "CopySubresourceRegion", 0, _ReturnAddress(), h);
+    }
 #endif
     oCopySubresourceRegion(ctx, dst, dsub, dx, dy, dz, src, ssub, box);
 }
@@ -2930,7 +2948,10 @@ void STDMETHODCALLTYPE hkCopySubresourceRegion1(ID3D11DeviceContext1* ctx, ID3D1
     if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oCopySubresourceRegion1(ctx, dst, dsub, dx, dy, dz, src, ssub, box, flags); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     TraceCopySub(ctx, "CopySubresourceRegion1", dst, dsub, dx, dy, dz, src, ssub, box, flags, true);
 #ifdef WITH_DLAA
-    if (g_menuLateN && !t_inDlaa && IsGameCtx1(ctx)) MenuLateOnRead(ctx, src, dst, "CopySubresourceRegion1", 0);   // phase 16
+    if (g_menuLateN && !t_inDlaa && IsGameCtx1(ctx)) {                                // phase 16 (phase 20: the copied rect)
+        MenuLateHow h; h.how = 1; h.dsub = dsub; h.dx = dx; h.dy = dy; h.ssub = ssub; h.box = box;
+        MenuLateOnRead(ctx, src, dst, "CopySubresourceRegion1", 0, _ReturnAddress(), h);
+    }
 #endif
     oCopySubresourceRegion1(ctx, dst, dsub, dx, dy, dz, src, ssub, box, flags);
 }
@@ -9418,6 +9439,10 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
     TraceDraw(ctx, vertexCount, startVertex);
     if (!IsGameCtx(ctx)) {                         // v0.6.2: other contexts are counted / sanity-logged only
         NoteForeignDraw(ctx, vertexCount);
+#ifdef WITH_DLAA
+        if (vertexCount <= 6 && g_menuLateForeignOn.load(std::memory_order_relaxed))   // v0.10.0 phase 20: log / count only
+            MenuLateOnForeignDraw(ctx, "Draw", vertexCount, _ReturnAddress());
+#endif
         oDraw(ctx, vertexCount, startVertex);
         return;
     }
@@ -9437,9 +9462,9 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
     }
     if (!t_inDlaa && g_lodPerDraw.load(std::memory_order_relaxed)) LodOnDraw(ctx);   // v0.10.0 phase 11 LOD bias scope
 #ifdef WITH_DLAA
-    // v0.10.0 phase 16 VR late panel: a small Draw that READS a recorded eye picture (PS SRV0; the copy into the OpenXR
+    // v0.10.0 phase 16 VR late panel: a small Draw that READS a recorded eye picture (PS SRV 0..7 since phase 20; the copy into the OpenXR
     // swapchain image) gets the panel into that picture first
-    if (g_menuLateN && !t_inDlaa && vertexCount <= 6) MenuLateOnDraw(ctx, "Draw", vertexCount);
+    if (g_menuLateN && !t_inDlaa && vertexCount <= 6) MenuLateOnDraw(ctx, "Draw", vertexCount, _ReturnAddress());
 #endif
     oDraw(ctx, vertexCount, startVertex);
 #ifdef WITH_DLAA
@@ -13177,10 +13202,29 @@ void MenuDrawPreview(ID3D11DeviceContext* ctx, int idx, char trigger) {
 //    reset (menu closed with the fps box off, fps box off with the menu closed, game context change).
 // The fps box rides along (MenuDrawVrOn draws both). Render thread only; nothing runs while the menu is closed and the fps box
 // is off (g_menuLateN = 0: one integer test per hook).
-enum { kLrNone = 0, kLrWait, kLrWatch, kLrDone };
-// kLrWait  = mode late: recorded, panel not drawn yet, waiting for the game's read of the picture
-// kLrWatch = learning: panel drawn at the arm point, watching for a read
-// kLrDone  = drawn late / read seen while watching: only the game draws over the panel are still counted
+// v0.10.0 phase 20 (ATS VR log captures/dlaa_inject_ats_v0100p16_vr.log, eye picture 3064x3248 at stereo scale 1.0):
+//  * The read the phase-16 test never accepted: the game context copies each eye picture with CopySubresourceRegion into ONE
+//    6128x3248 R8G8B8A8_UNORM target (both eyes side by side), one copy per eye per frame (2752 / 6352 / 9952 "other" reads =
+//    exactly 2 per frame). The whole target is 2:1, so "target eye-shaped" rejected it. The test now measures the WRITTEN
+//    rectangle (copy: the source box / subresource at DstX / DstY; draw: viewport 0 clipped to RT0): at least 50 % of the
+//    picture's area with an aspect within 40 % (either way), not the mirror window / backbuffer. A small effect / blur texture
+//    or a landscape mirror copy still fails (area / aspect). Every distinct target is logged once ("read target #N", with the
+//    caller module, the layout guess and the verdict); the stats line names the accepted one.
+//  * ONCE per eye per Present: a per-eye stamp (the Present interval the eye got its panel in) blocks a second draw. Several
+//    pictures per eye in one frame (the loading screen; the old code drew at every arm point = the duplicated, flickering
+//    panel / fps box): the panel goes on the eye's LAST picture (learning: last arm; late: last accepted read) of the frame
+//    pattern = the smaller of the previous two Presents' counts (a pattern that alternates 1 / 2 keeps the first picture every
+//    frame instead of every other frame). A picture replaced by another one of the same eye in the same Present is
+//    "superseded" (an intermediate picture): not a miss, does not break the learning run.
+//  * Mode per arm-point category (world eye blit 'w' / menu-preview flush 'a' 'b'): the garage screens never read their picture
+//    (phase-16 log: 0 reads of any kind there), the world and the screen before it (loading, from Present #8013 on) do -- a
+//    garage visit no longer throws the world's late mode back to the arm point.
+//  * One picture recorded for both eyes in the same Present (a mono screen / an eye-map flip): kept for the first eye only.
+//  * Reads by another context (another thread / device; the log shows a Draw(4) on one reading a 3064x3248 picture) are
+//    counted and logged, never used: nothing is drawn from another thread.
+enum { kLrNone = 0, kLrWait, kLrWatch };
+// kLrWait  = mode late: recorded, the panel goes on right before the game's (pattern's) read of the picture
+// kLrWatch = learning: the panel went on at the (pattern's) arm point, the record watches for a read
 struct MenuLateRec {
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv;   // the game's view of the picture (the panel is drawn through it)
     void*    tex = nullptr;                      // its resource (identity)
@@ -13188,50 +13232,142 @@ struct MenuLateRec {
     char     kind = 0;                           // arm point: 'w' world eye blit, 'a' / 'b' menu / truck-preview trigger
     bool     drawn = false;                      // the panel went into this picture
     bool     late = false;                       // ... right before the game's read (mode late), not at the arm point
+    bool     readSeen = false;                   // phase 20: an accepted read of this picture came (phase 16: state kLrDone)
+    uint32_t reads = 0;                          // phase 20: accepted reads of this picture
     uint32_t draws = 0;                          // game draws into the picture since the arm
     uint32_t panelAt = 0;                        // `draws` when the panel was drawn (draws over the panel = draws - panelAt)
     uint64_t frame = 0;                          // Present counter at the arm (a re-arm of the same picture in it is no miss)
-    uint32_t w = 0, h = 0;                       // the picture's size (a read must go into an eye-shaped target)
+    uint32_t w = 0, h = 0;                       // the picture's size (the read's written rect is measured against it)
 };
 MenuLateRec g_menuLate[kMaxEyes];
+static_assert(kMaxEyes <= 2, "g_menuLateTexA holds 2 eyes");
 constexpr int kLateLearn = 8;                    // eye pictures in a row read after the arm point -> mode late
-constexpr int kLateMaxFallbacks = 3;             // fallbacks to the arm point before the session stays there
-int      g_menuLateMode = 0;                     // 0 = draw at the arm point (+ watch), 1 = late (right before the game's read)
-int      g_menuLateRun = 0;                      // mode 0: pictures in a row whose read was seen
-int      g_menuLateFallbacks = 0;
-int      g_menuLateGood = 0;                     // mode late: pictures drawn late in a row (kLateForgive -> the fallbacks are forgiven)
-constexpr int kLateForgive = 3600;               // ~20 s of VR frames without a miss: a fallback was a one-off (a screen change)
+constexpr int kLateMaxFallbacks = 3;             // fallbacks to the arm point before the category stays there
+constexpr int kLateForgive = 3600;               // ~25 s of VR frames without a miss: a fallback was a one-off (a screen change)
+// phase 20: the mode per arm-point category: 0 = world eye blit ('w'), 1 = menu / truck-preview / loading screens ('a', 'b')
+inline int MenuLateCat(char kind) { return kind == 'w' ? 0 : 1; }
+const char* const kLateCatName[2] = { "world", "menu / loading screens" };
+struct MenuLateMode {
+    int mode = 0;                                // 0 = draw at the arm point (+ watch), 1 = late (right before the game's read)
+    int run = 0;                                 // mode 0: pictures in a row whose read was seen
+    int fallbacks = 0;
+    int good = 0;                                // mode late: pictures drawn late in a row (kLateForgive -> fallbacks forgiven)
+};
+MenuLateMode g_menuLateM[2];
+// phase 20: events per eye per Present interval (distinct pictures armed / accepted reads) -> which one gets the panel
+constexpr uint64_t kLateNoFr = ~0ull;
+struct MenuLatePat {
+    uint64_t fr = kLateNoFr;                     // Present interval of `cnt`
+    int cnt = 0, p1 = 0, p2 = 0;                 // events in it, in the interval before, and the one before that
+    int Tick(uint64_t f) {                       // one more event in interval f; returns its 1-based index there
+        if (f != fr) {
+            const bool next = fr != kLateNoFr && f == fr + 1;
+            p2 = next ? p1 : 0;
+            p1 = next ? cnt : 0;
+            fr = f;
+            cnt = 0;
+        }
+        return ++cnt;
+    }
+    int Target() const {                         // the event that gets the panel: the smaller of the last two counts (>= 1)
+        int t = p1;
+        if (p2 > 0 && (t <= 0 || p2 < t)) t = p2;
+        return t > 0 ? t : 1;
+    }
+    int CountIn(uint64_t f) const { return f == fr ? cnt : 0; }
+};
+struct MenuLateEye {
+    uint64_t    drawnFr = kLateNoFr;             // the Present interval this eye got its panel / fps box in (once per Present)
+    char        kind = 0;                        // arm point of its last picture (the category of the no-panel log)
+    MenuLatePat arm;                             // distinct pictures of this eye armed per Present
+    MenuLatePat read;                            // accepted reads of this eye's recorded pictures per Present
+};
+MenuLateEye g_menuLateEye[kMaxEyes];
 struct MenuLateStats {
     uint64_t arms = 0, late = 0, atArm = 0, reads = 0, mirrorReads = 0, otherReads = 0, misses = 0, stale = 0, over = 0,
              overPics = 0, retired = 0;
+    uint64_t superseded = 0;                     // phase 20: replaced by another picture of the same eye in the same Present
+    uint64_t notLast = 0;                        // phase 20: arm / read skipped: not the eye's last one of the frame pattern
+    uint64_t dupSkips = 0;                       // phase 20: arm / read skipped: the eye had its panel this Present already
+    uint64_t noPanel = 0;                        // phase 20: eye-Presents with a picture armed but no panel drawn
+    uint64_t shared = 0;                         // phase 20: arms of a picture the other eye recorded in the same Present
 };
 MenuLateStats g_menuLateSt;
 uint64_t g_menuLateStArms0 = 0;                  // arms at the last stats line
+std::atomic<uint64_t> g_menuLateForeignReads{0}; // phase 20: reads of a recorded picture by another context (counted only)
+// phase 20: every distinct read target (destination resource + verdict), logged once; the stats line names the accepted one
+struct MenuLateTgt {
+    void*       res = nullptr;
+    bool        acc = false, bb = false;
+    UINT        w = 0, h = 0, arr = 0, rw = 0, rh = 0;
+    int         fmt = 0;
+    const char* what = "";
+    const char* layout = "";
+    uint64_t    n = 0;                           // reads into it (with this verdict)
+    char        caller[96] = {};
+};
+constexpr int kLateTgtMax = 16;
+MenuLateTgt g_menuLateTgt[kLateTgtMax];
+int      g_menuLateTgtN = 0;
+uint64_t g_menuLateTgtMore = 0;                  // reads into targets beyond the table
+int      g_menuLateAccIdx = -1;                  // the target last accepted as the eye read
 
 void MenuLateUpdateN() {
     int n = 0;
-    for (const MenuLateRec& r : g_menuLate) if (r.state != kLrNone) ++n;
+    for (int e = 0; e < kMaxEyes; ++e) {
+        const MenuLateRec& r = g_menuLate[e];
+        if (r.state != kLrNone) ++n;
+        g_menuLateTexA[e].store(r.state != kLrNone ? r.tex : nullptr, std::memory_order_relaxed);
+    }
     g_menuLateN = n;
+    g_menuLateForeignOn.store(n > 0, std::memory_order_relaxed);
     if (!n) g_menuLateBound = -1;
+}
+const char* MenuLateModeName(int cat) {
+    const MenuLateMode& m = g_menuLateM[cat];
+    return m.mode ? "late (right before the game reads the picture)"
+                  : (m.fallbacks >= kLateMaxFallbacks ? "at the arm point (stays: no reliable read)" : "at the arm point (learning)");
 }
 void MenuLateStatsLog(const char* why) {
     const MenuLateStats& s = g_menuLateSt;
     g_menuLateStArms0 = s.arms;
-    Log("tuning menu: VR late panel stats (%s): mode %s, eye pictures %llu (panel drawn LAST %llu, at the arm point %llu), game "
-        "reads of the picture %llu (+ %llu into the mirror window and %llu into other targets, not used), missed %llu (+ %llu "
-        "stale, not counted), fallbacks %d of %d, game draws over the panel %llu in %llu picture(s)", why, g_menuLateMode ? "late (right before the game reads the picture)"
-        : (g_menuLateFallbacks >= kLateMaxFallbacks ? "at the arm point (stays: no reliable read)" : "at the arm point (learning)"),
-        (unsigned long long)s.arms, (unsigned long long)s.late, (unsigned long long)s.atArm, (unsigned long long)s.reads,
-        (unsigned long long)s.mirrorReads, (unsigned long long)s.otherReads, (unsigned long long)s.misses,
-        (unsigned long long)s.stale, g_menuLateFallbacks,
-        kLateMaxFallbacks,
-        (unsigned long long)s.over, (unsigned long long)s.overPics);
+    char acc[512];
+    if (g_menuLateAccIdx >= 0 && g_menuLateAccIdx < g_menuLateTgtN) {
+        const MenuLateTgt& t = g_menuLateTgt[g_menuLateAccIdx];
+        snprintf(acc, sizeof(acc), "target #%d = %s into %ux%u fmt=%d (%s, written rect %ux%u, caller %s), %llu read(s); %d "
+                 "distinct target(s) logged (+ %llu read(s) into targets beyond them)", g_menuLateAccIdx, t.what, t.w, t.h, t.fmt,
+                 t.layout, t.rw, t.rh, t.caller, (unsigned long long)t.n, g_menuLateTgtN, (unsigned long long)g_menuLateTgtMore);
+    } else {
+        snprintf(acc, sizeof(acc), "NONE yet (%d distinct target(s) rejected + %llu read(s) into targets beyond them, see the "
+                 "'VR late panel: read target' lines)", g_menuLateTgtN, (unsigned long long)g_menuLateTgtMore);
+    }
+    Log("tuning menu: VR late panel stats (%s): mode world %s, menu / loading screens %s | eye pictures %llu (panel drawn LAST "
+        "%llu, at the arm point %llu; skipped %llu: not the eye's last picture / read of the frame pattern, %llu: the eye had "
+        "its panel this Present already; eye-Presents without a panel %llu) | game reads of the picture %llu accepted (+ %llu "
+        "into the mirror window / no target and %llu into other targets, rejected; %llu on another context, never used) | read "
+        "accepted: %s | missed %llu (+ %llu stale, %llu superseded in the same Present, not counted), %llu arm(s) of a picture "
+        "the other eye had recorded (one picture for both eyes: one panel), fallbacks world %d / menu "
+        "%d of %d, game draws over the panel %llu in %llu picture(s)", why, MenuLateModeName(0), MenuLateModeName(1),
+        (unsigned long long)s.arms, (unsigned long long)s.late, (unsigned long long)s.atArm, (unsigned long long)s.notLast,
+        (unsigned long long)s.dupSkips, (unsigned long long)s.noPanel, (unsigned long long)s.reads,
+        (unsigned long long)s.mirrorReads, (unsigned long long)s.otherReads,
+        (unsigned long long)g_menuLateForeignReads.load(std::memory_order_relaxed), acc, (unsigned long long)s.misses,
+        (unsigned long long)s.stale, (unsigned long long)s.superseded, (unsigned long long)s.shared, g_menuLateM[0].fallbacks,
+        g_menuLateM[1].fallbacks,
+        kLateMaxFallbacks, (unsigned long long)s.over, (unsigned long long)s.overPics);
 }
-// The record of eye `eye` ends (its next arm / a reset): over-the-panel count, a miss (mode late, never read), learning run.
+// The panel + fps box into eye `eye`'s picture now; the eye is stamped for this Present (phase 20: once per eye per Present).
+void MenuLateDrawEye(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv, uint64_t fr) {
+    MenuDrawVrOn(ctx, eye, rtv);
+    g_menuLateEye[eye].drawnFr = fr;
+}
+// The record of eye `eye` ends (its next arm / a reset / Present after its read): over-the-panel count, a miss (mode late,
+// never read), learning run.
 void MenuLateRetire(int eye, bool reset) {
     MenuLateRec& r = g_menuLate[eye];
     if (r.state == kLrNone) return;
     MenuLateStats& s = g_menuLateSt;
+    MenuLateMode& m = g_menuLateM[MenuLateCat(r.kind)];
     ++s.retired;
     if (r.drawn && r.draws > r.panelAt) {
         s.over += r.draws - r.panelAt;
@@ -13243,39 +13379,65 @@ void MenuLateRetire(int eye, bool reset) {
                 r.late ? "late" : "at the arm point", r.kind);
     }
     const uint64_t fr = g_frames.load(std::memory_order_relaxed);
-    if (r.state == kLrWait && !reset && fr - r.frame > 2) {   // waited over 2 Presents: a screen change / pause, not a draw order
-        ++s.stale;                                       // (each eye is armed every frame; its read comes in the same frame)
-        static int logs = 0;
-        if (logs++ < 3)
-            Log("tuning menu: VR late panel: eye %d's picture recorded at Present #%llu was never read (now #%llu: a screen change "
-                "or pause) -- not counted as a miss", eye, (unsigned long long)r.frame, (unsigned long long)fr);
-    } else if (r.state == kLrWait && !reset) {           // mode late and the picture was never read: the panel missed it
-        ++s.misses;
-        g_menuLateGood = 0;
-        static int logs = 0;
-        if (logs++ < 6)
-            Log("tuning menu: VR late panel MISSED eye %d's picture: no game read of it (Draw / copy into the OpenXR swapchain "
-                "image) before its next arm (arm point %c, %u game draw(s) into it since the arm, Present #%llu)", eye, r.kind,
-                r.draws, (unsigned long long)fr);
-        if (g_menuLateMode == 1) {
-            g_menuLateMode = 0;
-            g_menuLateRun = 0;
-            ++g_menuLateFallbacks;
-            Log("tuning menu: VR panel / fps box back to the arm point (fallback %d of %d%s)", g_menuLateFallbacks,
-                kLateMaxFallbacks, g_menuLateFallbacks >= kLateMaxFallbacks ? ": the session stays there" : ", learning again");
+    if (!reset && !r.readSeen) {
+        if (fr == r.frame) {                             // phase 20: another picture of this eye in the same Present
+            ++s.superseded;                              // (an intermediate picture: the loading screen writes several)
+            static int logs = 0;
+            if (logs++ < 3)
+                Log("tuning menu: VR late panel: eye %d's picture (arm point %c, %s) was replaced by another picture of the same "
+                    "eye in the same Present #%llu without a read -- an intermediate picture, not a miss (the panel goes on "
+                    "the eye's last picture / read of the frame)", eye, r.kind, r.drawn ? "panel drawn on it" : "no panel on it",
+                    (unsigned long long)fr);
+        } else if (r.state == kLrWait && fr - r.frame > 2) {   // waited over 2 Presents: a screen change / pause
+            ++s.stale;
+            static int logs = 0;
+            if (logs++ < 3)
+                Log("tuning menu: VR late panel: eye %d's picture recorded at Present #%llu was never read (now #%llu: a screen "
+                    "change or pause) -- not counted as a miss", eye, (unsigned long long)r.frame, (unsigned long long)fr);
+        } else if (r.state == kLrWait) {                 // mode late and the picture was never read: the panel missed it
+            ++s.misses;
+            m.good = 0;
+            static int logs = 0;
+            if (logs++ < 6)
+                Log("tuning menu: VR late panel MISSED eye %d's picture: no accepted game read of it before its next arm (arm "
+                    "point %c, %s, %u game draw(s) into it since the arm, Present #%llu)", eye, r.kind,
+                    kLateCatName[MenuLateCat(r.kind)], r.draws, (unsigned long long)fr);
+            if (m.mode == 1) {
+                m.mode = 0;
+                m.run = 0;
+                ++m.fallbacks;
+                Log("tuning menu: VR panel / fps box on the %s back to the arm point (fallback %d of %d%s)",
+                    kLateCatName[MenuLateCat(r.kind)], m.fallbacks, kLateMaxFallbacks,
+                    m.fallbacks >= kLateMaxFallbacks ? ": this category stays there" : ", learning again");
+            }
+        } else {                                         // learning, a later Present and no read: the run starts again
+            m.run = 0;
         }
     }
-    if (r.state == kLrWatch) g_menuLateRun = 0;          // drawn at the arm point and no read seen: the run starts again
     r = MenuLateRec();
     if (g_menuLateBound == eye) g_menuLateBound = -1;
     if (s.retired % 3600 == 0) MenuLateStatsLog("every 3600 eye pictures");
 }
-// Present: the pictures already drawn late / read end here (their draws-over-the-panel count is final; a game whose eye
-// picture is not rotated must not count the next frame's draws into it). Waiting / watching records stay (Present is not a
-// reliable frame boundary in VR: their read may still come).
-void MenuLateAtPresent() {
-    for (int e = 0; e < kMaxEyes; ++e)
-        if (g_menuLate[e].state == kLrDone) MenuLateRetire(e, false);
+// Present (n = the interval that ends): an eye armed in it without a panel is counted (flicker diagnostic); the pictures
+// already read end here (their draws-over-the-panel count is final). Unread records stay (Present is not a reliable frame
+// boundary in VR: their read may still come).
+void MenuLateAtPresent(uint64_t n) {
+    const bool want = g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow;
+    for (int e = 0; e < kMaxEyes; ++e) {
+        const MenuLateEye& ey = g_menuLateEye[e];
+        if (want && ey.arm.fr == n && ey.drawnFr != n) {
+            ++g_menuLateSt.noPanel;
+            static int logs = 0;
+            if (logs++ < 6) {
+                const int cat = MenuLateCat(ey.kind);
+                Log("tuning menu: VR late panel: eye %d got NO panel in Present #%llu -- %d picture(s) armed (pattern: panel at "
+                    "arm %d), %d accepted read(s) (pattern: panel at read %d), mode on the %s %s", e, (unsigned long long)n,
+                    ey.arm.CountIn(n), ey.arm.Target(), ey.read.CountIn(n), ey.read.Target(), kLateCatName[cat],
+                    MenuLateModeName(cat));
+            }
+        }
+        if (g_menuLate[e].state != kLrNone && g_menuLate[e].readSeen) MenuLateRetire(e, false);
+    }
     MenuLateUpdateN();
 }
 void MenuLateReset(const char* why) {
@@ -13283,6 +13445,7 @@ void MenuLateReset(const char* why) {
     for (int e = 0; e < kMaxEyes; ++e) {
         any = any || g_menuLate[e].state != kLrNone;
         MenuLateRetire(e, true);
+        g_menuLateEye[e] = MenuLateEye();
     }
     MenuLateUpdateN();
     if (any || g_menuLateSt.arms != g_menuLateStArms0) MenuLateStatsLog(why);
@@ -13305,7 +13468,8 @@ void MenuLateCountDraw() {
     const int e = g_menuLateBound;
     if (e >= 0 && e < kMaxEyes && g_menuLate[e].state != kLrNone) ++g_menuLate[e].draws;
 }
-// The arm point of eye `eye`'s picture (`rtv` = the game's view of it). Mode late: recorded only; learning: drawn now + watched.
+// The arm point of eye `eye`'s picture (`rtv` = the game's view of it). Mode late: recorded only; learning: drawn now (when
+// it is the eye's last picture of the frame pattern and the eye has no panel this Present yet) + watched.
 void MenuLateArm(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv, char kind) {
     if (eye < 0 || eye >= kMaxEyes || !rtv || t_inDlaa) return;
     if (!(g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)) return;
@@ -13314,9 +13478,22 @@ void MenuLateArm(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv,
     if (!res) return;
     MenuLateRec& r = g_menuLate[eye];
     const uint64_t fr = g_frames.load(std::memory_order_relaxed);
-    // the same picture armed again in the same frame (a second flush / blit into it) before its read: keep the record (no
-    // miss, no second panel at the arm point); the panel still goes on at the read (late) or is there already (learning)
-    if ((r.state == kLrWait || r.state == kLrWatch) && r.tex == (void*)res.Get() && r.frame == fr) {
+    // phase 20: the picture is recorded for the OTHER eye in this Present already (one picture for both eyes -- a mono screen or
+    // an eye-map flip): no second record, so no second panel (at the other eye's placement) in the same picture
+    for (int o = 0; o < kMaxEyes; ++o) {
+        const MenuLateRec& q = g_menuLate[o];
+        if (o == eye || q.state == kLrNone || q.tex != (void*)res.Get() || q.frame != fr) continue;
+        ++g_menuLateSt.shared;
+        static int logs = 0;
+        if (logs++ < 3)
+            Log("tuning menu: VR late panel: eye %d's picture (arm point %c, Present #%llu) is the picture eye %d recorded in this "
+                "Present -- one picture for both eyes: kept for eye %d only (one panel in it, not two)", eye, kind,
+                (unsigned long long)fr, o, o);
+        return;
+    }
+    // the same picture armed again in the same Present (a second flush / blit into it, also after a read): keep the record (no
+    // miss, no second panel); the panel still goes on at the read (late) or is there already (learning)
+    if (r.state != kLrNone && r.tex == (void*)res.Get() && r.frame == fr) {
         r.rtv = rtv;
         r.kind = kind;
         return;
@@ -13333,13 +13510,35 @@ void MenuLateArm(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv,
         r.w = td.Width; r.h = td.Height;
     }
     ++g_menuLateSt.arms;
-    if (g_menuLateMode == 1) {
+    MenuLateEye& ey = g_menuLateEye[eye];
+    ey.kind = kind;
+    const int idx = ey.arm.Tick(fr);                     // phase 20: this eye's idx-th distinct picture in this Present
+    const MenuLateMode& m = g_menuLateM[MenuLateCat(kind)];
+    if (m.mode == 1) {
         r.state = kLrWait;
     } else {
         r.state = kLrWatch;
-        MenuDrawVrOn(ctx, eye, rtv);                     // as in phase 15
-        r.drawn = true;
-        ++g_menuLateSt.atArm;
+        const int tgt = ey.arm.Target();
+        if (idx < tgt) {
+            ++g_menuLateSt.notLast;                      // more pictures of this eye follow in this frame (pattern)
+        } else if (ey.drawnFr == fr) {
+            ++g_menuLateSt.dupSkips;                     // phase 20: drawn on this eye already this Present
+            static int logs = 0;
+            if (logs++ < 4)
+                Log("tuning menu: VR late panel: eye %d's picture %d of Present #%llu (arm point %c) NOT drawn -- the eye has "
+                    "its panel this Present already (once per eye per Present; the old code drew here again = the duplicated "
+                    "panel / fps box)", eye, idx, (unsigned long long)fr, kind);
+        } else {
+            MenuLateDrawEye(ctx, eye, rtv, fr);          // as in phase 15
+            r.drawn = true;
+            ++g_menuLateSt.atArm;
+            if (idx > 1) {
+                static int logs = 0;
+                if (logs++ < 4)
+                    Log("tuning menu: VR late panel: eye %d has %d pictures in Present #%llu -- panel on picture %d (the last one of "
+                        "the previous Presents' pattern; arm point %c)", eye, idx, (unsigned long long)fr, idx, kind);
+            }
+        }
     }
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> cur;   // is the picture RT0 right now? (world blit / trigger (a): yes)
     ctx->OMGetRenderTargets(1, cur.GetAddressOf(), nullptr);
@@ -13353,110 +13552,262 @@ void MenuLateArm(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv,
     static bool s_logged = false;
     if (!s_logged) {
         s_logged = true;
-        Log("tuning menu: VR late panel: first eye picture recorded (eye %d, arm point %c = %s, Present #%llu) -- drawn %s; the game's "
-            "read of the picture (a Draw / copy into the OpenXR swapchain image) is watched for", eye, kind,
-            kind == 'w' ? "after the world eye blit" : "menu / truck-preview target flushed",
-            (unsigned long long)g_frames.load(std::memory_order_relaxed),
-            g_menuLateMode ? "right before that read" : "at the arm point until that read is confirmed");
+        Log("tuning menu: VR late panel: first eye picture recorded (eye %d, arm point %c = %s, %ux%u, Present #%llu) -- drawn %s; "
+            "the game's read of the picture (a Draw / copy into the OpenXR swapchain / stream image) is watched for", eye, kind,
+            kind == 'w' ? "after the world eye blit" : "menu / truck-preview target flushed", r.w, r.h, (unsigned long long)fr,
+            m.mode ? "right before that read" : "at the arm point until that read is confirmed");
     }
 }
-// A game read of `src` (a copy source, or PS SRV0 of a small Draw / DrawIndexed) into `dst` (its RT0 / copy destination).
-void MenuLateOnRead(ID3D11DeviceContext* ctx, ID3D11Resource* src, ID3D11Resource* dst, const char* what, UINT n) {
+// phase 20: the rectangle a read writes into its destination `dd` (copy: the source box / subresource at DstX / DstY, clipped;
+// CopyResource: the whole target; draw: viewport 0 clipped to RT0, the whole RT0 without one).
+void MenuLateWrittenRect(ID3D11DeviceContext* ctx, ID3D11Resource* src, const D3D11_TEXTURE2D_DESC& dd, const MenuLateHow& how,
+                         UINT picW, UINT picH, UINT* rx, UINT* ry, UINT* rw, UINT* rh) {
+    *rx = *ry = *rw = *rh = 0;
+    const UINT dMips = dd.MipLevels ? dd.MipLevels : 1;
+    const UINT dMip = how.how == 1 ? how.dsub % dMips : 0;
+    const UINT dw = (std::max)(1u, dd.Width >> dMip), dh = (std::max)(1u, dd.Height >> dMip);
+    if (how.how == 0) {
+        *rw = dw; *rh = dh;
+    } else if (how.how == 1) {
+        UINT sw = picW, sh = picH;
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> st;
+        if (src && SUCCEEDED(src->QueryInterface(__uuidof(ID3D11Texture2D), (void**)st.GetAddressOf())) && st) {
+            D3D11_TEXTURE2D_DESC sd{};
+            st->GetDesc(&sd);
+            const UINT sMips = sd.MipLevels ? sd.MipLevels : 1;
+            const UINT sMip = how.ssub % sMips;
+            sw = (std::max)(1u, sd.Width >> sMip);
+            sh = (std::max)(1u, sd.Height >> sMip);
+        }
+        UINT bw = sw, bh = sh;
+        if (how.box) {
+            const UINT l = (std::min)(how.box->left, sw), r = (std::min)(how.box->right, sw);
+            const UINT t = (std::min)(how.box->top, sh), b = (std::min)(how.box->bottom, sh);
+            bw = r > l ? r - l : 0;
+            bh = b > t ? b - t : 0;
+        }
+        *rx = how.dx; *ry = how.dy;
+        *rw = how.dx < dw ? (std::min)(bw, dw - how.dx) : 0;
+        *rh = how.dy < dh ? (std::min)(bh, dh - how.dy) : 0;
+    } else {
+        D3D11_VIEWPORT vp{};
+        UINT nv = 1;
+        ctx->RSGetViewports(&nv, &vp);
+        if (nv == 0 || vp.Width <= 0.0f || vp.Height <= 0.0f) {
+            *rw = dw; *rh = dh;
+        } else {
+            const float x0 = (std::max)(0.0f, vp.TopLeftX), y0 = (std::max)(0.0f, vp.TopLeftY);
+            const float x1 = (std::min)((float)dw, vp.TopLeftX + vp.Width), y1 = (std::min)((float)dh, vp.TopLeftY + vp.Height);
+            *rx = (UINT)x0; *ry = (UINT)y0;
+            *rw = x1 > x0 ? (UINT)(x1 - x0 + 0.5f) : 0;
+            *rh = y1 > y0 ? (UINT)(y1 - y0 + 0.5f) : 0;
+        }
+    }
+}
+// A game read of `src` (a copy source, or a PS SRV of a small Draw / DrawIndexed) into `dst` (its RT0 / copy destination).
+void MenuLateOnRead(ID3D11DeviceContext* ctx, ID3D11Resource* src, ID3D11Resource* dst, const char* what, UINT n, void* caller,
+                    const MenuLateHow& how) {
     if (!src) return;
     int eye = -1;
     for (int e = 0; e < kMaxEyes; ++e)
-        if ((g_menuLate[e].state == kLrWait || g_menuLate[e].state == kLrWatch) && g_menuLate[e].tex == (void*)src) eye = e;
+        if (g_menuLate[e].state != kLrNone && g_menuLate[e].tex == (void*)src) eye = e;
     if (eye < 0) return;
     MenuLateRec& r = g_menuLate[eye];
+    MenuLateStats& s = g_menuLateSt;
     D3D11_TEXTURE2D_DESC dd{};
+    bool isTex = false;
     bool toBb = !dst;                                    // no destination (a UAV-only draw): not the runtime's picture either
     if (dst) {
         Microsoft::WRL::ComPtr<ID3D11Texture2D> t;
         if (SUCCEEDED(dst->QueryInterface(__uuidof(ID3D11Texture2D), (void**)t.GetAddressOf())) && t) {
             t->GetDesc(&dd);
+            isTex = true;
             toBb = PvIsBackbufferTarget(t.Get());        // the mirror window (pointer, or the backbuffer's size + format)
         }
         if ((void*)dst == g_backbuffer.load(std::memory_order_relaxed)) toBb = true;
     }
+    // phase 20: the WRITTEN rectangle must look like one eye: >= 50 % of the picture's area, aspect within 40 % either way
+    UINT rx = 0, ry = 0, rw = 0, rh = 0;
+    if (isTex) MenuLateWrittenRect(ctx, src, dd, how, r.w, r.h, &rx, &ry, &rw, &rh);
+    const double areaP = (double)r.w * (double)r.h, areaR = (double)rw * (double)rh;
+    const double asP = r.h ? (double)r.w / (double)r.h : 0.0, asR = rh ? (double)rw / (double)rh : 0.0;
+    const double asOff = (asP > 0.0 && asR > 0.0) ? (std::max)(asR / asP, asP / asR) : 1e9;
+    const bool bigEnough = areaP > 0.0 && areaR >= 0.5 * areaP;
+    const bool shapeOk = asOff <= 1.4;
+    const bool accept = isTex && !toBb && bigEnough && shapeOk;
     const uint64_t fr = g_frames.load(std::memory_order_relaxed);
-    if (toBb) {
-        ++g_menuLateSt.mirrorReads;
-        static int logs = 0;
-        if (logs++ < 2)
-            Log("tuning menu: VR late panel: eye %d's picture read by the game's %s (%u) into the mirror window / no target -- not a "
-                "draw point (it can come after the OpenXR release), Present #%llu", eye, what, n, (unsigned long long)fr);
-        return;
+    // every distinct target (destination + verdict) once in the log, then counted
+    int ti = -1;
+    for (int i = 0; i < g_menuLateTgtN; ++i)
+        if (g_menuLateTgt[i].res == (void*)dst && g_menuLateTgt[i].acc == accept) ti = i;
+    if (ti < 0 && g_menuLateTgtN < kLateTgtMax) {
+        ti = g_menuLateTgtN++;
+        MenuLateTgt& t = g_menuLateTgt[ti];
+        t.res = dst; t.acc = accept; t.bb = toBb;
+        t.w = dd.Width; t.h = dd.Height; t.arr = dd.ArraySize; t.fmt = (int)dd.Format; t.rw = rw; t.rh = rh;
+        t.what = what;
+        auto approx = [](UINT a, double b) { return std::fabs((double)a - b) <= 0.1 * b; };
+        t.layout = !isTex ? (dst ? "not a 2D texture" : "no target")
+                 : toBb ? "the mirror window / backbuffer"
+                 : (rw && rh && approx(dd.Width, 2.0 * rw) && approx(dd.Height, (double)rh)) ? "side-by-side, both eyes"
+                 : (rw && rh && approx(dd.Width, (double)rw) && approx(dd.Height, 2.0 * rh)) ? "stacked, both eyes"
+                 : (rw && rh && approx(dd.Width, (double)rw) && approx(dd.Height, (double)rh)) ? (dd.ArraySize > 1 ? "eye-sized array" : "eye-sized")
+                 : (dd.Width >= rw && dd.Height >= rh) ? "a part of a bigger target" : "other";
+        char where[MAX_PATH + 32];
+        DescribeAddr(caller, where, sizeof(where));
+        strncpy_s(t.caller, where, _TRUNCATE);
+        const char* verdict = accept ? "ACCEPTED as the eye read (the late panel's draw point)"
+                            : !isTex ? "rejected: no 2D texture target"
+                            : toBb ? "rejected: the mirror window / backbuffer (it can come after the OpenXR release)"
+                            : !bigEnough ? "rejected: written rect under 50 % of the picture (an effect / mirror texture)"
+                            : "rejected: written rect not eye-shaped (aspect off by more than 40 %)";
+        char slot[24] = "";
+        if (how.how == 2) snprintf(slot, sizeof(slot), ", PS SRV slot %u", how.slot);
+        Log("tuning menu: VR late panel: read target #%d: eye %d's picture %ux%u read by the game's %s (%u%s, caller %s) into "
+            "%p %ux%u fmt=%d array=%u (aspect %.3f vs the picture's %.3f, area %.0f %% of it; mirror window / backbuffer: %s) -- "
+            "written rect %ux%u at (%u,%u) (aspect %.3f, area %.0f %% of the picture; layout: %s) -> %s, Present #%llu", ti, eye,
+            r.w, r.h, what, n, slot, t.caller, (void*)dst, dd.Width, dd.Height, (int)dd.Format, dd.ArraySize,
+            dd.Height ? (double)dd.Width / (double)dd.Height : 0.0, asP,
+            areaP > 0.0 ? 100.0 * (double)dd.Width * (double)dd.Height / areaP : 0.0, toBb ? "yes" : "no", rw, rh, rx, ry, asR,
+            areaP > 0.0 ? 100.0 * areaR / areaP : 0.0, t.layout, verdict, (unsigned long long)fr);
     }
-    // the runtime's picture is eye-shaped: the same aspect as the eye picture (+-25 %) and at least 30 % of its height (the
-    // swapchain image is ~half the eye buffer each way; a landscape mirror target or a small blur / UI texture is not)
-    const double aspE = r.h ? (double)r.w / (double)r.h : 0.0;
-    const double aspD = dd.Height ? (double)dd.Width / (double)dd.Height : 0.0;
-    const bool eyeLike = aspE > 0.0 && aspD > 0.0 && std::fabs(aspD / aspE - 1.0) <= 0.25 && (double)dd.Height >= 0.3 * r.h;
-    if (!eyeLike) {
-        ++g_menuLateSt.otherReads;
-        static int logs = 0;
-        if (logs++ < 3)
-            Log("tuning menu: VR late panel: eye %d's picture (%ux%u) read by the game's %s (%u) into %ux%u fmt=%d -- not an "
-                "eye-shaped target (the mirror / an effect texture), not a draw point, Present #%llu", eye, r.w, r.h, what, n,
-                dd.Width, dd.Height, (int)dd.Format, (unsigned long long)fr);
-        return;
-    }
-    ++g_menuLateSt.reads;
+    if (ti >= 0) ++g_menuLateTgt[ti].n;
+    else ++g_menuLateTgtMore;
+    if (toBb) { ++s.mirrorReads; return; }
+    if (!accept) { ++s.otherReads; return; }
+    ++s.reads;
+    if (ti >= 0) g_menuLateAccIdx = ti;
+    ++r.reads;
+    const bool firstRead = !r.readSeen;
+    r.readSeen = true;
+    MenuLateEye& ey = g_menuLateEye[eye];
+    const int idx = ey.read.Tick(fr);                    // phase 20: this eye's idx-th accepted read in this Present
+    MenuLateMode& m = g_menuLateM[MenuLateCat(r.kind)];
     if (r.state == kLrWait) {
-        MenuDrawVrOn(ctx, eye, r.rtv.Get());
+        const int tgt = ey.read.Target();
+        if (idx < tgt) { ++s.notLast; return; }          // more reads of this eye follow in this frame (pattern)
+        if (ey.drawnFr == fr) { ++s.dupSkips; return; }  // drawn on this eye already this Present
+        MenuLateDrawEye(ctx, eye, r.rtv.Get(), fr);
         r.drawn = true;
         r.late = true;
         r.panelAt = r.draws;
-        r.state = kLrDone;
-        ++g_menuLateSt.late;
-        if (++g_menuLateGood >= kLateForgive && g_menuLateFallbacks > 0) {
-            g_menuLateFallbacks = 0;
-            Log("tuning menu: VR late panel: %d pictures in a row drawn late since the last miss -- earlier fallbacks forgiven",
-                g_menuLateGood);
+        ++s.late;
+        if (++m.good >= kLateForgive && m.fallbacks > 0) {
+            m.fallbacks = 0;
+            Log("tuning menu: VR late panel: %d pictures in a row drawn late on the %s since the last miss -- earlier fallbacks "
+                "forgiven", m.good, kLateCatName[MenuLateCat(r.kind)]);
         }
         static int logs = 0;
         if (logs++ < 4)
             Log("tuning menu: VR panel / fps box drawn LAST on eye %d's picture: right before the game's %s (%u) reading it into "
-                "%ux%u fmt=%d (arm point %c; %u game draw(s) went into the picture since the arm -- now under the panel), Present #%llu",
-                eye, what, n, dd.Width, dd.Height, (int)dd.Format, r.kind, r.draws, (unsigned long long)fr);
+                "%ux%u fmt=%d (written rect %ux%u at (%u,%u); read %d of this Present, pattern %d; arm point %c; %u game draw(s) "
+                "went into the picture since the arm -- now under the panel), Present #%llu", eye, what, n, dd.Width, dd.Height,
+                (int)dd.Format, rw, rh, rx, ry, idx, tgt, r.kind, r.draws, (unsigned long long)fr);
         return;
     }
-    r.state = kLrDone;                                   // kLrWatch: learning
-    ++g_menuLateRun;
+    if (!firstRead) return;                              // kLrWatch (learning): one run step per picture
+    ++m.run;
     static int logs = 0;
     if (logs++ < 4)
-        Log("tuning menu: VR late panel (learning): eye %d's picture is read by the game's %s (%u) into %ux%u fmt=%d after the arm "
-            "point %c; %u game draw(s) went into it after our panel there (read %d of %d in a row), Present #%llu", eye, what, n,
-            dd.Width, dd.Height, (int)dd.Format, r.kind, r.draws, g_menuLateRun, kLateLearn, (unsigned long long)fr);
-    if (g_menuLateMode == 0 && g_menuLateRun >= kLateLearn && g_menuLateFallbacks < kLateMaxFallbacks) {
-        g_menuLateMode = 1;
-        Log("tuning menu: VR panel / fps box now drawn LAST on every eye picture -- right before the game reads the picture into the "
-            "OpenXR swapchain image (%d pictures in a row were read after the arm point; game draws over the panel at the arm "
-            "point so far: %llu in %llu picture(s)), Present #%llu", g_menuLateRun, (unsigned long long)g_menuLateSt.over,
-            (unsigned long long)g_menuLateSt.overPics, (unsigned long long)fr);
+        Log("tuning menu: VR late panel (learning, %s): eye %d's picture is read by the game's %s (%u) into %ux%u fmt=%d (written "
+            "rect %ux%u at (%u,%u)) after the arm point %c; %u game draw(s) went into it after the arm (read %d of %d in a row), "
+            "Present #%llu", kLateCatName[MenuLateCat(r.kind)], eye, what, n, dd.Width, dd.Height, (int)dd.Format, rw, rh, rx,
+            ry, r.kind, r.draws, m.run, kLateLearn, (unsigned long long)fr);
+    if (m.mode == 0 && m.run >= kLateLearn && m.fallbacks < kLateMaxFallbacks) {
+        m.mode = 1;
+        Log("tuning menu: VR panel / fps box on the %s now drawn LAST on every eye picture -- right before the game reads the "
+            "picture (%s into %ux%u fmt=%d, %s; %d pictures in a row were read after the arm point; game draws over the panel at "
+            "the arm point so far: %llu in %llu picture(s)), Present #%llu", kLateCatName[MenuLateCat(r.kind)], what, dd.Width,
+            dd.Height, (int)dd.Format, ti >= 0 ? g_menuLateTgt[ti].layout : "?", m.run, (unsigned long long)s.over,
+            (unsigned long long)s.overPics, (unsigned long long)fr);
     }
 }
-// A small game Draw / DrawIndexed (<= 6 vertices / indices) while a picture is recorded: is PS SRV0 a recorded picture?
-void MenuLateOnDraw(ID3D11DeviceContext* ctx, const char* what, UINT n) {
-    ID3D11ShaderResourceView* srv = nullptr;
-    ctx->PSGetShaderResources(0, 1, &srv);
-    if (!srv) return;
-    ID3D11Resource* sres = nullptr;
-    srv->GetResource(&sres);
-    srv->Release();
-    if (!sres) return;
-    bool rec = false;
-    for (const MenuLateRec& r : g_menuLate)
-        if ((r.state == kLrWait || r.state == kLrWatch) && r.tex == (void*)sres) rec = true;
-    if (rec) {
-        ID3D11RenderTargetView* rtv = nullptr;
-        ctx->OMGetRenderTargets(1, &rtv, nullptr);
-        ID3D11Resource* dres = nullptr;
-        if (rtv) { rtv->GetResource(&dres); rtv->Release(); }
-        MenuLateOnRead(ctx, sres, dres, what, n);
-        if (dres) dres->Release();
+// A small game Draw / DrawIndexed (<= 6 vertices / indices) while a picture is recorded: is one of PS SRV 0..7 a recorded
+// picture? (phase 16: slot 0 only; phase 20: 0..7 -- the garage screens showed no read in slot 0)
+void MenuLateOnDraw(ID3D11DeviceContext* ctx, const char* what, UINT n, void* caller) {
+    constexpr UINT kSlots = 8;
+    ID3D11ShaderResourceView* srvs[kSlots] = {};
+    ctx->PSGetShaderResources(0, kSlots, srvs);
+    ID3D11Resource* hit = nullptr;
+    UINT slot = 0;
+    for (UINT i = 0; i < kSlots; ++i) {
+        if (!srvs[i]) continue;
+        if (!hit) {
+            ID3D11Resource* res = nullptr;
+            srvs[i]->GetResource(&res);
+            bool rec = false;
+            for (const MenuLateRec& r : g_menuLate)
+                if (res && r.state != kLrNone && r.tex == (void*)res) rec = true;
+            if (rec) { hit = res; slot = i; }
+            else if (res) res->Release();
+        }
+        srvs[i]->Release();
     }
-    sres->Release();
+    if (!hit) return;
+    ID3D11RenderTargetView* rtv = nullptr;
+    ctx->OMGetRenderTargets(1, &rtv, nullptr);
+    ID3D11Resource* dres = nullptr;
+    if (rtv) { rtv->GetResource(&dres); rtv->Release(); }
+    MenuLateHow h;
+    h.how = 2;
+    h.slot = slot;
+    MenuLateOnRead(ctx, hit, dres, what, n, caller, h);
+    if (dres) dres->Release();
+    hit->Release();
+}
+// phase 20: a small Draw / DrawIndexed on ANOTHER context (another thread) reading a recorded picture: counted + logged only
+// (who reads the eye picture besides the game context -- the runtime's compositor?). Reads only the atomics; draws nothing.
+void MenuLateOnForeignDraw(ID3D11DeviceContext* ctx, const char* what, UINT n, void* caller) {
+    void* const t0 = g_menuLateTexA[0].load(std::memory_order_relaxed);
+    void* const t1 = g_menuLateTexA[1].load(std::memory_order_relaxed);
+    if (!t0 && !t1) return;
+    constexpr UINT kSlots = 8;
+    ID3D11ShaderResourceView* srvs[kSlots] = {};
+    ctx->PSGetShaderResources(0, kSlots, srvs);
+    int eye = -1;
+    UINT slot = 0;
+    for (UINT i = 0; i < kSlots; ++i) {
+        if (!srvs[i]) continue;
+        if (eye < 0) {
+            ID3D11Resource* res = nullptr;
+            srvs[i]->GetResource(&res);
+            if (res && (void*)res == t0) { eye = 0; slot = i; }
+            else if (res && (void*)res == t1) { eye = 1; slot = i; }
+            if (res) res->Release();
+        }
+        srvs[i]->Release();
+    }
+    if (eye < 0) return;
+    g_menuLateForeignReads.fetch_add(1, std::memory_order_relaxed);
+    static std::atomic<int> s_logs{0};
+    if (s_logs.fetch_add(1, std::memory_order_relaxed) >= 3) return;
+    ID3D11Device* dev = nullptr;
+    ctx->GetDevice(&dev);
+    ID3D11Device* gdev = nullptr;
+    if (ID3D11DeviceContext* gc = g_gameCtx.load(std::memory_order_acquire)) gc->GetDevice(&gdev);
+    const bool sameDev = dev && dev == gdev;
+    if (dev) dev->Release();
+    if (gdev) gdev->Release();
+    D3D11_TEXTURE2D_DESC dd{};
+    ID3D11RenderTargetView* rtv = nullptr;
+    ctx->OMGetRenderTargets(1, &rtv, nullptr);
+    if (rtv) {
+        ID3D11Resource* res = nullptr;
+        rtv->GetResource(&res);
+        rtv->Release();
+        if (res) {
+            ID3D11Texture2D* t = nullptr;
+            if (SUCCEEDED(res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&t)) && t) { t->GetDesc(&dd); t->Release(); }
+            res->Release();
+        }
+    }
+    char where[MAX_PATH + 32];
+    DescribeAddr(caller, where, sizeof(where));
+    Log("tuning menu: VR late panel: eye %d's recorded picture is read on ANOTHER context %p (%s, %s device, tid=%lu, caller %s) "
+        "by %s (%u) from PS SRV slot %u into %ux%u fmt=%d -- counted, never a draw point (nothing is drawn from another thread)",
+        eye, (void*)ctx, ctx->GetType() == D3D11_DEVICE_CONTEXT_DEFERRED ? "deferred" : "immediate",
+        sameDev ? "the game's" : "NOT the game's", GetCurrentThreadId(), where, what, n, slot, dd.Width, dd.Height,
+        (int)dd.Format);
 }
 
 // "mirror units @blit N" (the FIFO stats window, every 600 blits): one line for all units + a WARNING per unit above its
@@ -13569,6 +13920,10 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
             g_diDeferred.fetch_add(1, std::memory_order_relaxed);   // any thread
         else if (g_gameCtx.load(std::memory_order_relaxed))
             g_foreignCtx.fetch_add(1, std::memory_order_relaxed);
+#ifdef WITH_DLAA
+        if (indexCount <= 6 && g_menuLateForeignOn.load(std::memory_order_relaxed))    // v0.10.0 phase 20: log / count only
+            MenuLateOnForeignDraw(ctx, "DrawIndexed", indexCount, _ReturnAddress());
+#endif
     } else {
         CountGameDraw(t_inDlaa, ctx, 0, true);     // v0.8.1: frame-end rule + present-layer bookkeeping
 #ifdef WITH_DLAA
@@ -13639,7 +13994,7 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
     // v0.10.0 phase 11 LOD bias scope: the sampler set this draw needs (solid / see-through blend state)
     if (gameCtx && !t_inDlaa && g_lodPerDraw.load(std::memory_order_relaxed)) LodOnDraw(ctx);
 #ifdef WITH_DLAA
-    if (g_menuLateN && gameCtx && !t_inDlaa && indexCount <= 6) MenuLateOnDraw(ctx, "DrawIndexed", indexCount);   // phase 16
+    if (g_menuLateN && gameCtx && !t_inDlaa && indexCount <= 6) MenuLateOnDraw(ctx, "DrawIndexed", indexCount, _ReturnAddress());
 #endif
     oDrawIndexed(ctx, indexCount, startIndex, baseVertex);
 #ifdef WITH_DLAA

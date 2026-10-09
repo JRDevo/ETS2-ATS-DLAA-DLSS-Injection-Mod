@@ -816,6 +816,72 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   and becomes the cabin R while it moves. (4) The interior's real motion is the cabin R, not its own: correct for a cab-fixed
   interior, wrong for an interior part that moves (doors, wheel) -- those parts' real MVP is not read.
 
+### Phase 20 (v0.10.0): VR late panel -- the eye read accepted by its written rect, one panel per eye per Present
+
+- **Evidence** (ATS VR, Quest 3 / Virtual Desktop, `r_manual_stereo_buffer_scale` 1.0 = eye picture 3064x3248, log
+  `captures/dlaa_inject_ats_v0100p16_vr.log`): the phase-16 read test never accepted a read (`game reads of the picture 0`), but
+  from Present #8013 (the screen before the world, then the world) it rejected exactly 2 reads per frame "into other targets":
+  `CopySubresourceRegion` of each eye picture into ONE 6128x3248 R8G8B8A8_UNORM target (2 x 3064 wide: both eyes side by side).
+  The whole target is 2:1, the test wanted the whole target eye-shaped. The garage / menu screens showed no read of any kind
+  (also not at stereo 2.0). The same log has one `eye-blit-like draw on a non-game context ... 4 verts, PS SRV0 3064x3248
+  fmt=27 tid=...` (a reader of an eye-sized picture on another thread).
+- **Acceptance rule** (`MenuLateOnRead` + `MenuLateWrittenRect`): the read is measured by the rectangle it WRITES, not by its
+  whole target: copy = the source box (or the whole source subresource) placed at DstX / DstY, clipped to the destination mip;
+  CopyResource = the whole destination; Draw / DrawIndexed (<= 6 vertices / indices) = viewport 0 clipped to RT0 (the whole RT0
+  without one). Accepted = destination is a 2D texture, NOT the mirror window / backbuffer (pointer, or its size + format), and
+  the written rect has >= 50 % of the picture's area with an aspect within 40 % of the picture's (either way, max(a/b, b/a) <=
+  1.4). The side-by-side copy above: rect 3064x3248 = 100 %, aspect 1.0 -> accepted. Still rejected: a blur / effect / small
+  texture (< 50 %), a landscape mirror copy (aspect), the backbuffer. The small-Draw read now looks at PS SRV 0..7 (was 0; the
+  slot is logged). Every distinct destination (resource + verdict, up to 16) is logged ONCE: `read target #N` with size, format,
+  array size, aspect, area %, mirror / backbuffer yes / no, the written rect, a layout guess (side-by-side / stacked / eye-sized
+  / part of a bigger target), the caller module (`DescribeAddr` of the hook's return address) and the verdict.
+- **Once per eye per Present** (all modes): a per-eye stamp (`MenuLateEye::drawnFr`, the Present interval the eye got its panel
+  in) blocks any second draw into that eye in the same Present (`dupSkips`). Several distinct pictures of one eye in one Present:
+  the panel goes on the eye's LAST one of the frame pattern -- learning: the last arm, late: the last accepted read; "last" =
+  the smaller of the previous two Presents' counts (`MenuLatePat`; a pattern alternating 1 / 2 keeps picture 1 every frame instead
+  of flickering every other frame; an eye whose count drops below that gets no panel that Present: counted, `noPanel`). Further
+  fixes of the duplicates: the same picture re-armed in the same Present AFTER its read keeps its record (phase 16 retired it and
+  drew a second panel at the new arm); a picture already recorded for the OTHER eye in the same Present is not recorded again
+  (one picture for both eyes / an eye-map flip drew two panels, at both eyes' placements, into one picture; `shared`). A record
+  replaced by another picture of the same eye in the same Present is `superseded` (an intermediate picture): not a miss, does not
+  reset the learning run.
+- **Loading-screen choice: no loading-screen detection, no skip.** The hooks have no reliable loading-screen signal, and the
+  loading screen DOES read its picture (the side-by-side copy starts there), so it reaches mode late like the world and gets its
+  panel right before that read, once per eye; the pattern rule covers a screen that writes several pictures per eye. Skipping
+  the panel there would hide the fps box exactly where the user watches the loading progress.
+- **Mode per arm-point category** (`g_menuLateM[2]`: world eye blit 'w' / menu-preview flush 'a' 'b'): learning, fallbacks and
+  forgiveness are kept per category, so the garage (no read) no longer throws the world's late mode back to the arm point.
+  Unchanged per category: 8 pictures in a row read -> late; a late picture never read before its next arm (in a LATER Present,
+  within 2 Presents) = a miss -> back to the arm point, 3 fallbacks -> that category stays there, forgiven after 3600 good ones.
+- **Other-context reads** (`MenuLateOnForeignDraw`, hkDraw / hkDrawIndexed non-game branch, <= 6): PS SRV 0..7 compared with the
+  recorded pictures through atomics (`g_menuLateTexA`, published by `MenuLateUpdateN`; the other thread never touches
+  `g_menuLate`); counted, the first 3 logged with the context type (deferred / immediate), same device as the game's or not, tid,
+  caller and RT0. Never a draw point.
+- **Stats line** now: `mode world <..>, menu / loading screens <..> | eye pictures N (panel drawn LAST L, at the arm point A;
+  skipped S1: not the eye's last picture / read of the frame pattern, S2: the eye had its panel this Present already;
+  eye-Presents without a panel P) | game reads of the picture R accepted (+ M into the mirror window / no target and O into other
+  targets, rejected; F on another context, never used) | read accepted: target #K = <what> into WxH fmt=F (<layout>, written rect
+  wxh, caller <module+off>), N read(s) | missed ..., superseded ..., arm(s) of a picture the other eye had recorded ..., fallbacks
+  world a / menu b of 3, game draws over the panel ...`.
+- **Next VR log, read:** `tuning menu: VR late panel: read target #0: eye N's picture 3064x3248 read by the game's
+  CopySubresourceRegion (0, caller X) into ... 6128x3248 fmt=28 ... written rect 3064x3248 at (0,0) / (3064,0) ... layout:
+  side-by-side, both eyes -> ACCEPTED` (caller X = the game exe or the runtime's DLL: says who copies); `VR late panel (learning,
+  menu / loading screens)` / `(learning, world): eye N's picture is read ...`; `VR panel / fps box on the world now drawn LAST on
+  every eye picture`; `VR panel / fps box drawn LAST on eye N's picture: right before the game's CopySubresourceRegion ...`; the
+  stats line with `read accepted: target #0 = CopySubresourceRegion into 6128x3248 ...`, `game draws over the panel 0` in late
+  mode, `skipped ... the eye had its panel this Present already` or `arm(s) of a picture the other eye had recorded` > 0
+  on the loading screen (= the old duplicates, now blocked; the first ones are logged one by one), `eye-Presents
+  without a panel` near 0. Garage: any `read target` line there (slot > 0, or a Draw with a viewport) or `read on ANOTHER
+  context` = where the garage picture goes. Bad signs: `MISSED`, `back to the arm point`, `eye N got NO panel in Present` every
+  frame.
+- **Risks / not verified:** (1) the side-by-side copy is ASSUMED to be the runtime taking the picture (Virtual Desktop's stream
+  image, inside `xrReleaseSwapchainImage` / `xrEndFrame` on the game context, like OFXR Bridge); if it is the game's own desktop
+  mirror copy made AFTER the release, the late panel lands in the mirror only and vanishes from the headset in the world / on the
+  loading screen -- the `read target` caller module tells (then reject that caller). (2) The garage / dealer screens still have
+  no accepted read: there the panel stays at the arm point and the game's menu can still cover it (problem (a) remains until the
+  next log shows the garage read). (3) The game's own fps meter "duplicating" was assumed to be the same double draw; not proven.
+  (4) The pattern rule can drop the panel for one Present when an eye's picture count falls (a screen change): `noPanel` counts it.
+
 ## Roadmap / history
 
 | Ver  | Goal | Key work |
