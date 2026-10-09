@@ -189,17 +189,22 @@ up to it.
 ## Models (presets) — which one to use
 
 A "model" (NVIDIA calls it a *render preset*) is the neural network that cleans
-the picture. All of them remove jagged edges; they differ in how sharp and stable
-the result is and in how much GPU time they cost. Switch live with
-`Shift+F1`..`F4` (1 to 4 beeps), look for a few seconds, then save your choice
+the picture. All four remove jagged edges. They differ in detail, in how they
+treat thin and moving things, and in GPU time. Switch live with `Shift+F1`..`F4`
+(1 to 4 beeps) or in the tuning menu (`Delete`), look for a few seconds, then save
 with `Shift+F12`.
 
-| Key | Model | In one line | Cost |
-|-----|-------|-------------|------|
-| `Shift+F1` | **1** (default, preset `K`) | Best detail | High |
-| `Shift+F2` | **2** (preset `E`) | Good picture, fast. **Start here** | Low |
-| `Shift+F3` | **3** (preset `F`) | Smoothest edges, but can smear moving detail | Low |
-| `Shift+F4` | **4** (preset `M`) | Very heavy. Flat screen only | Very high |
+| Key | Model | What it does | When to use it | GPU per eye, VR 3064x3248 |
+|-----|-------|--------------|----------------|---------------------------|
+| `Shift+F1` | **1** (preset `K`) | Most detail, sharpest text and far objects | Flat screen. VR only with frame rate to spare | 1.0 ms (measured) |
+| `Shift+F2` | **2** (preset `E`) | Balanced: clean edges, least ghosting behind moving traffic | **Start here**, flat and VR | 0.6 ms (measured) |
+| `Shift+F3` | **3** (preset `F`) | Softest and most stable on thin lines (fences, wires, blinds); can smear moving detail | When model 2 still shimmers on fences | 0.6 ms (measured) |
+| `Shift+F4` | **4** (preset `M`) | NVIDIA's heaviest network, small gain over 1 | Flat screen tests only | about 3 ms (estimate from 9.4 ms at 4592x6496) |
+
+The costs scale with the pixels the model works on: half the pixels, about half
+the time. In VR the DLAA area (`Shift+F5` / `F6`) is the cheap way to afford a
+heavier model: at area 40 % model 1 costs about what model 2 costs at 100 %.
+The menu and truck-preview screens always use model 2, whatever you pick.
 
 ### Recommended settings
 
@@ -211,22 +216,24 @@ buffer scale** is VR only and is not in the menu: with the game closed, set
 |------------|--------------|-------|-------------------|---------------------|
 | **Flat**, strong card | DLAA | 1 | 100 % | not used |
 | **Flat**, need more frame rate | DLSS | 1 or 2 | 75 % (or 50 %) | not used |
-| **VR**, top-end card | DLAA | 2 | 100 % (75 % if the frame rate drops) | 2.0 |
-| **VR**, mid-range card | DLSS | 2 | 75 % | 1.0 to 1.5 |
+| **VR**, top-end card | DLAA | 2 (1 if the frame rate holds) | 100 % | 1.0 to 1.25 |
+| **VR**, mid-range card | DLSS | 2 | 75 % | 1.0 |
 
 - **Flat:** do not set Scaling above 100 %. The mod already removes the jagged
   edges, so extra pixels only cost frame rate.
-- **VR:** the stereo buffer scale is what makes the picture sharp; `1.0` is the
-  headset's own resolution, higher is sharper and heavier. Raise it as far as
-  your card allows, then use Scaling below 100 % with **DLSS** mode to win the
-  frame rate back.
+- **VR:** `1.0` is what the headset can show (Quest 3 through Virtual Desktop at
+  its top setting gets about 3072 x 3216 per eye, and `1.0` in ATS / ETS2 is
+  3064 x 3248). `1.25` is a little sharper for about 55 % more GPU. `2.0` draws
+  four times the pixels and the headset never shows them: with DLAA on, that is
+  wasted. Keep Scaling at 100 % in DLAA mode; use Scaling below 100 % only with
+  **DLSS** mode, to win frame rate back.
 - **Scaling below 100 % only makes sense in DLSS mode.** In DLAA mode the game
   just stretches the smaller picture and it looks soft.
 - The slider has fixed steps. Values in between (for example `0.667`) can be set
   in `config.cfg`, see *How render scale works* above.
-- These are starting points. Only the "VR, top-end card" row is measured: model 2
-  holds a steady 72 fps at stereo buffer scale 2.0 with `r_scale_x` 0.75. Watch
-  your own frame rate and move one step up or down.
+- These are starting points. Measured on an RTX 5090 with a Quest 3: model 2 at
+  stereo buffer scale 1.0 and Scaling 100 % holds 72 fps with the GPU about 60 %
+  busy; at 1.25 about 85 %. Watch your own frame rate and move one step up or down.
 
 How to pick a model:
 
@@ -465,6 +472,11 @@ roughly double. `mirror_vr_mode` (0 off, 1 all mirrors, 2 only the two largest, 
 Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR); ATS 1.61, ETS2 current.
 
 ## Troubleshooting
+
+- **Traffic, trailers or buildings look wrong (wobble, smear, pink in the `Ctrl+F6`
+  view)?** Press `Alt+F5` (or set `mv_objects = 0` in `dlaa.ini`). That turns off
+  the per-object motion and leaves the camera motion only, the way v0.8.x worked.
+  Then please send the log, see *Reporting a problem*.
 
 - **The log is off by default.** Put `debug = 1` in `dlaa.ini` (next to `dinput8.dll`)
   and start the game again: `dlaa_inject.log` is then written next to the DLL. It
