@@ -68,6 +68,11 @@
 // cb0 row later (S17, the ATS car signature) / a valid interior with one big body draw (S17b), camera-relative overlays, VR head
 // motion -- every interior pixel the exact cabin motion. "mutshape" (the MVP-shape rule off) must FAIL S17, "cabsmall=0"
 // (mv_cabin_small off) both.
+// v0.10.0 phase 22: the MVP LAYOUT detection (DrawIdMv CSGather) reads the real MVP wherever the VS keeps it: S17's interior draws
+// now pair with their rows-5..8 MVP (cabin voters, static; the left door opens from frame 50 and must get its own motion), and
+// S18 SHOP WINDOWS (see RunShopScene; scene 18, after S17 in the full run): window glass + forward reflection draws with the MVP in
+// cb0 rows 6..9 must keep the camera motion while the camera drives and yaws. "mutlayout" (the detection off = rows 4..7, phase
+// 21) must FAIL S17 and S18; "mutshape" alone no longer fails S17 (the detection finds the block, the shape fallback is unused).
 // Build: tests\build_drawid_harness.bat (cl, WARP; output in build\tests). Run: build\tests\drawid_harness.exe [scene]
 // [snap px] [debug | nocons | nofwd | noattach | notwin | noinherit | noparent | parentconj | nodepth]. Exit code 0 = all
 // checks passed.
@@ -377,6 +382,15 @@ POut PSMain(VOut i) {
     POut o; o.truth = uint2((uint)Rows[8].x, (uint)Rows[8].y); o.col = i.col; return o;
 }
 POut PSMain9(VOut i) { POut o; o.truth = uint2((uint)Rows[9].x, (uint)Rows[9].y); o.col = i.col; return o; }   // phase 19 (S17)
+// v0.10.0 phase 22 (S18): the ATS shop-window layout (captures/shop_window_audit.md) -- r0 = object position + seed, r1 = parameters,
+// r2..r5 = model-view (r5 = (0, 0, 0, 1)), the MVP in rows 6..9, the truth in row 10. Three vertex shaders as in game (G-buffer glass
+// family A / family B, the forward reflection draws): three VS pointers in the per-VS layout table.
+float4 Clip6(float3 p) { float4 q = float4(p, 1.0); return float4(dot(Rows[6], q), dot(Rows[7], q), dot(Rows[8], q), dot(Rows[9], q)); }
+VOut VSShift2(VIn i) { VOut o; o.pos = Clip6(i.pos); o.uv = i.uv; o.col = float4(i.uv, 0.75, 1); return o; }
+VOut VSShift2B(VIn i) { VOut o; o.pos = Clip6(i.pos); o.uv = i.uv; o.col = float4(0.2, i.uv, 1); return o; }
+VOut VSShift2F(VIn i) { VOut o; o.pos = Clip6(i.pos); o.uv = i.uv; o.col = float4(i.uv.yx, 0.9, 1); return o; }
+POut PSMain10(VOut i) { POut o; o.truth = uint2((uint)Rows[10].x, (uint)Rows[10].y); o.col = i.col; return o; }
+float4 PSFwd10(VOut i) : SV_Target0 { return float4(i.col.rgb, 1.0); }   // opaque: the forward re-draw writes its whole depth
 // v0.10.0 phase 3 (S6) forward pass: Rows[8].z = 0 opaque, 1 = a band with alpha 0.25 (plate), 2 = alpha 0.3 everywhere (glass)
 float FwdAlpha(VOut i) {
     if (Rows[8].z > 1.5) return 0.3;
@@ -431,6 +445,8 @@ struct Env {
     ComPtr<ID3D11PixelShader> ps;
     ComPtr<ID3D11VertexShader> vsShift;                   // v0.10.0 phase 19 (S17): the MVP in cb0 rows 5..8
     ComPtr<ID3D11PixelShader> ps9;                        //   + the truth in row 9
+    ComPtr<ID3D11VertexShader> vsShift2, vsShift2B, vsShift2F;   // v0.10.0 phase 22 (S18): the MVP in cb0 rows 6..9
+    ComPtr<ID3D11PixelShader> ps10, psFwd10;                     //   + the truth in row 10
     ComPtr<ID3D11InputLayout> il, ilInst;
     ComPtr<ID3D11RasterizerState> rsBack, rsNone;
     ComPtr<ID3D11DepthStencilState> dss;
@@ -503,6 +519,7 @@ enum { MGround, MBox0, MBoxEnd = MBox0 + 10, MClump = MBoxEnd, MBody, MWheel, MP
        MClumpCR0, MClumpCREnd = MClumpCR0 + 16,                                 // v0.10.0 phase 14 round 6 (S15)
        MS17Hood, MS17Dash, MS17Console, MS17DoorL, MS17DoorR, MS17Real0, MS17Real1,   // v0.10.0 phase 19 (S17)
        MS17Fresh, MS17Fresh2, MS17Ovl0, MS17OvlEnd = MS17Ovl0 + 3, MS17Body,
+       MS18Facade, MS18WinA, MS18WinB,                                          // v0.10.0 phase 22 (S18)
        MCount };
 
 struct DrawSpec {
@@ -4851,6 +4868,7 @@ int RunRoadsideScene(Env& E, float snapPx, Totals& tot, int mut, int eye) {
 // (variant 0: the big draws pair and become movers with an R in the wrong coordinates -- the hole), "cabsmall=0" (both: the medoid
 // of pass A is an overlay's rotation-only R, every interior pixel off by the head-bob parallax).
 int g_s17Mut = 0;
+int g_layMut = 0;        // v0.10.0 phase 22 "mutlayout": SetParentMutation bit 6 (the MVP layout detection off) in S17 / S18
 int RunCarScene(Env& E, float snapPx, Totals& tot, int variant) {
     const int frames = 100;
     const bool shifted = variant == 0;
@@ -4859,7 +4877,8 @@ int RunCarScene(Env& E, float snapPx, Totals& tot, int variant) {
                      "freshener, 3 camera-relative overlays, the hood (world layer), VR head motion" :
                      " b: VALID interior layout -- ONE big body draw (1440 indices) + a 2-draw swinging tag (6 indices each), 3 "
                      "camera-relative overlays, the hood, VR head motion",
-           frames, (double)snapPx, DrawIdMv::CabinSmall(), (g_s17Mut & 32) ? ", MUTATION: the MVP-shape rule off" : "");
+           frames, (double)snapPx, DrawIdMv::CabinSmall(), (g_s17Mut & 32) ? ", MUTATION: the MVP-shape rule off" :
+           (g_layMut ? ", MUTATION: the MVP layout detection off (rows 4..7)" : ""));
     ID3D11Device* dev = E.dev.Get();
     ID3D11DeviceContext* ctx = E.ctx.Get();
     ID3D11DeviceContext1* ctx1 = E.ctx1.Get();
@@ -4871,7 +4890,7 @@ int RunCarScene(Env& E, float snapPx, Totals& tot, int variant) {
     DrawIdMv::SetTwin(true);
     DrawIdMv::SetParent(true);
     DrawIdMv::SetInstanced(true);
-    DrawIdMv::SetParentMutation(g_s17Mut);
+    DrawIdMv::SetParentMutation(g_s17Mut | g_layMut);
     CameraMv cam;
     if (!cam.Init(dev)) { printf("CameraMv init failed\n"); return 1; }
     cam.SetEgoPixel(0.0f);
@@ -4915,6 +4934,9 @@ int RunCarScene(Env& E, float snapPx, Totals& tot, int variant) {
         swing.push_back(add("dangling tag, part 1 (swings)", kCabSwing, MS17Fresh, true, 0.0, 0.15, 0.50));
         swing.push_back(add("dangling tag, part 2 (swings with part 1)", kCabSwing, MS17Fresh2, true, 0.0, 0.15, 0.50));
     }
+    // v0.10.0 phase 22: the left door (MVP in rows 5..8) OPENS from frame 50 (hinged at its front end): with the real MVP it is a
+    // cabin mover with its own motion (phase 19 gave it the cabin R: "no MVP")
+    const int oDoorL = shifted ? big[2] : -1;
     for (int k = 0; k < 3; ++k) {
         static const double ovr[3][3] = { { -0.10, -0.15, 0.45 }, { 0.05, -0.18, 0.50 }, { 0.12, -0.12, 0.42 } };
         ovl.push_back(add("CAMERA-RELATIVE overlay (cab-fixed, projection * head rotation)", kOverlay, MS17Ovl0 + k, false,
@@ -4941,6 +4963,10 @@ int RunCarScene(Env& E, float snapPx, Totals& tot, int variant) {
     const M4 Pw = Proj(kNearWorld);
     const double kPi = 3.14159265358979;
     const double headRest[3] = { -0.35, 1.2, 0.0 };    // car-local head rest (the cabin parts' rel are relative to it)
+    auto doorAng = [&](int f) { return (shifted && f >= 50) ? 0.3 * (1.0 - cos(2.0 * kPi * (double)(f - 50) / 40.0)) : 0.0; };
+    int doorMover = 0, doorFrames = 0;
+    long long doorPx = 0, doorBadPx = 0;
+    double worstDoor = 0.0;
     const FLOAT zero[4] = { 0, 0, 0, 0 };
     const D3D11_RECT sc0 = { 0, 0, W, H };
     GpuPerf::Restart();
@@ -4967,7 +4993,8 @@ int RunCarScene(Env& E, float snapPx, Totals& tot, int variant) {
         for (int o = 0; o < nObj; ++o) {
             const CO& ob = objs[o];
             const M4 L = T(headRest[0] + ob.rel[0], headRest[1] + ob.rel[1], headRest[2] + ob.rel[2]);
-            if (ob.kind == kCabFixed || ob.kind == kCabShift) world[o] = Mul(C, L);
+            if (o == oDoorL) world[o] = Mul(C, Mul(L, Mul(T(0.0, 0.0, 0.28), Mul(RotY(-doorAng(f)), T(0.0, 0.0, -0.28)))));
+            else if (ob.kind == kCabFixed || ob.kind == kCabShift) world[o] = Mul(C, L);
             else if (ob.kind == kCabSwing) {
                 const double side = (o == swing[0]) ? 0.0 : 0.035;     // tag part 2 hangs 3.5 cm to the side on the same frame
                 world[o] = Mul(C, Mul(L, Mul(RotZ(swingA), T(side, -0.06, 0.0))));
@@ -5049,11 +5076,14 @@ int RunCarScene(Env& E, float snapPx, Totals& tot, int variant) {
             const UINT first = (UINT)d * 16u, num = 16u;
             ctx1->VSSetConstantBuffers1(0, 1, &ring, &first, &num);
             ctx1->PSSetConstantBuffers1(0, 1, &ring, &first, &num);
-            {   // the injector's camera candidates (rows 4..7 of the window, whatever the shader keeps there)
+            {   // the injector's camera candidates (v0.10.0 phase 22: at the VS's MVP row, as inject.cpp -- rows 4..7 until known)
                 CandidateRecord::DrawKey k{};
                 k.ib = E.ib[0].Get(); k.vb = E.vb[0].Get(); k.indexCount = m.ic; k.startIndex = m.si; k.baseVertex = m.bv;
                 const int layer = cab ? 1 : 0;
-                if (cand.Count(layer) < CandidateRecord::kSlots && !cand.Dropped(layer)) cand.Record(ctx, layer, ring, first * 16u + 64u, k);
+                const void* vsp = ob.kind == kOverlay ? (const void*)E.vsSkin.Get() : (ob.kind == kCabShift ? (const void*)E.vsShift.Get()
+                                                                                                             : (const void*)E.vsMain.Get());
+                if (cand.Count(layer) < CandidateRecord::kSlots && !cand.Dropped(layer))
+                    cand.Record(ctx, layer, ring, first * 16u + 16u * DrawIdMv::MvpRow(vsp), k);
             }
             rec.Record(ctx1, m.ic, 1u, m.si, m.bv, 0u, false);
             ctx->DrawIndexed(m.ic, m.si, m.bv);
@@ -5138,7 +5168,13 @@ int RunCarScene(Env& E, float snapPx, Totals& tot, int variant) {
                     if (stBad <= 6) printf("   FAIL frame %d: %s state %d, want %d (%s)\n", f, objs[o].name, stCur[o], st, what);
                 }
             };
-            for (int o : big) want(o, shifted ? DrawIdMv::kStNoMvp : DrawIdMv::kStStatic, shifted ? "rows 4..7 are not its MVP" : "cab-fixed");
+            // (v0.10.0 phase 22: the interior's real MVP (rows 5..8) is read -- cab-fixed draws are static cabin draws, no longer
+            // "no MVP"; the left door is a mover while it opens)
+            for (int o : big) {
+                if (o == oDoorL && f >= 50) continue;
+                want(o, DrawIdMv::kStStatic, shifted ? "cab-fixed, its MVP read from rows 5..8" : "cab-fixed");
+            }
+            if (oDoorL >= 0 && f >= 52) { ++doorFrames; if (stCur[oDoorL] == DrawIdMv::kStMover) ++doorMover; }
             for (int o : smallReal) want(o, DrawIdMv::kStStatic, "cab-fixed");
             for (int o : ovl) want(o, DrawIdMv::kStStatic, "camera-relative: origin-free, the cabin R");
             want(oHood, DrawIdMv::kStMover, "moves with the car: its own R");
@@ -5153,11 +5189,11 @@ int RunCarScene(Env& E, float snapPx, Totals& tot, int variant) {
             for (int o = 0; o < nObj; ++o) {
                 const CK k = objs[o].kind;
                 if (k == kWorld) continue;
-                if (k == kCabFixed || k == kCabShift || k == kOverlay) { Rexp[o] = RcabX; cls[o] = 1; continue; }
+                if (o != oDoorL && (k == kCabFixed || k == kCabShift || k == kOverlay)) { Rexp[o] = RcabX; cls[o] = 1; continue; }
                 M4 ic;
                 Inv(mvpCur[o], ic);
-                Rexp[o] = Mul(mvpPrev[o], ic);
-                cls[o] = k == kCabSwing ? 2 : (k == kHood ? 3 : 4);
+                Rexp[o] = Mul(mvpPrev[o], ic);                   // (phase 22: the door's own motion = the cabin's while closed)
+                cls[o] = o == oDoorL ? 5 : (k == kCabSwing ? 2 : (k == kHood ? 3 : 4));
             }
         }
         // ---- per pixel ----
@@ -5197,6 +5233,14 @@ int RunCarScene(Env& E, float snapPx, Totals& tot, int variant) {
                     break;
                 }
                 case 2: ++swPx; if (err > 0.03 + snapPx + big2) ++swBadPx; break;
+                case 5:                                          // v0.10.0 phase 22: the opening door (its own motion)
+                    ++doorPx; ++bigPx; worstDoor = std::max(worstDoor, err);
+                    if (!cabD || err > 0.03 + snapPx + big2) {
+                        ++doorBadPx;
+                        if (doorBadPx <= 4) printf("   FAIL frame %d: door pixel (%d,%d): MV (%.3f %.3f), its own motion (%.3f %.3f)%s\n", f, x,
+                                                   y, gx, gy, ex, ey, cabD ? "" : " -- NOT at cabin depth");
+                    }
+                    break;
                 case 3: ++hoodPx; worstHood = std::max(worstHood, err); if (err > 0.03 + snapPx + big2) ++hoodBadPx; break;
                 case 4: ++carPx; if (err > 0.03 + snapPx + big2) ++carBadPx; break;
                 default: ++worldPx; if (err > 0.03 + big2) ++worldBadPx; break;
@@ -5216,16 +5260,33 @@ int RunCarScene(Env& E, float snapPx, Totals& tot, int variant) {
     const uint64_t notMvp = ds.notMvp - st0.notMvp, notMvpC = ds.notMvpCabin - st0.notMvpCabin;
     const uint64_t cabPaired = ds.cabPaired - st0.cabPaired, cabVoters = ds.cabVoters - st0.cabVoters;
     const double rbd = rbN ? (double)rbN : 1.0;
-    const uint64_t wantShape = (shifted && !(g_s17Mut & 32)) ? 4u : 0u;
+    // (v0.10.0 phase 22: the layout detection finds the interior's MVP -- no draw falls back to "no MVP"; the mutation "mutlayout"
+    // brings back phase 19 exactly: the 4 big draws caught by the row-3 rule)
+    const uint64_t wantShape = (shifted && g_layMut && !(g_s17Mut & 32)) ? 4u : 0u;
+    const uint64_t lay1 = ds.lay[1] - st0.lay[1], layNone = (ds.layNone - st0.layNone) + (ds.layHintFail - st0.layHintFail);
+    const uint64_t wantLay1 = (shifted && !g_layMut) ? 4u : 0u;
     printf("   readbacks (frames 10+) %llu: small cabin layer: cluster R used %llu, medoid kept (agreed) %llu; last winner ic %u weight %u "
            "dev to medoid %.3f px; cabin paired %.2f / voters %.2f per readback; rows 4..7 not an MVP %.2f per readback (cabin %.2f; "
            "want %llu)\n", (unsigned long long)rbN, (unsigned long long)used, (unsigned long long)kept, ds.cabSmallIc, ds.cabSmallW,
            (double)ds.cabSmallDev, (double)cabPaired / rbd, (double)cabVoters / rbd, (double)notMvp / rbd, (double)notMvpC / rbd,
            (unsigned long long)wantShape);
-    checks += 3;
+    printf("   MVP layout (phase 22, frames 10+): rows 5..8 (+1) %.2f per readback (want %llu), none %.2f; VS table: the shifted "
+           "interior VS at rows %u..%u, the main VS at %u\n", (double)lay1 / rbd, (unsigned long long)wantLay1, (double)layNone / rbd,
+           DrawIdMv::MvpRow(E.vsShift.Get()), DrawIdMv::MvpRow(E.vsShift.Get()) + 3u, DrawIdMv::MvpRow(E.vsMain.Get()));
+    checks += 5;
     if (!rbN) { ++fails; printf("   FAIL no diagnostics readback landed\n"); }
     if (notMvpC != wantShape * rbN || notMvp != notMvpC) { ++fails; printf("   FAIL MVP-shape count (CSPair)\n"); }
-    if (DrawIdMv::CabinSmall() && used == 0) { ++fails; printf("   FAIL the small-cabin rule never replaced the medoid (an overlay's rotation-only R)\n"); }
+    if (lay1 != wantLay1 * rbN || (!g_layMut && layNone != 0)) { ++fails; printf("   FAIL MVP layout count (CSGather)\n"); }
+    if (shifted && !g_layMut && DrawIdMv::MvpRow(E.vsShift.Get()) != 5u) { ++fails; printf("   FAIL the per-VS table: the interior VS not at row 5\n"); }
+    // (v0.10.0 phase 22: in S17 pass A now reads the interior's real MVP too (inject.cpp's candidates at DrawIdMv::MvpRow), so its
+    // cabin medoid is a cab-fixed draw that AGREES with the heaviest cluster -- kept, not replaced; the cabin R itself is checked
+    // against the exact one every frame. S17b / the mutation: the medoid is still an overlay's rotation-only R and must be replaced)
+    const bool needUsed = !shifted || g_layMut != 0;
+    if (DrawIdMv::CabinSmall() && (needUsed ? used == 0 : used + kept != rbN)) {
+        ++fails;
+        printf(needUsed ? "   FAIL the small-cabin rule never replaced the medoid (an overlay's rotation-only R)\n"
+                        : "   FAIL the small-cabin rule did not run in every readback (cluster R used + medoid kept != readbacks)\n");
+    }
     checks += 5;
     if (cabBadPx) ++fails;
     if (swPx == 0 || bigPx == 0 || ovlPx == 0 || hoodPx == 0) {
@@ -5235,6 +5296,16 @@ int RunCarScene(Env& E, float snapPx, Totals& tot, int variant) {
         ++fails; printf("   FAIL swinging part: px off %lld of %lld, a mover in %d of %d draw-frames (want >= 70 %%)\n", swBadPx, swPx, swingMover, swingFrames);
     }
     if (hoodBadPx * 100 > hoodPx) { ++fails; printf("   FAIL hood pixels off its motion: %lld of %lld\n", hoodBadPx, hoodPx); }
+    if (shifted) {                                       // v0.10.0 phase 22: the opening door
+        checks += 1;
+        if (doorPx == 0 || doorBadPx * 100 > doorPx || doorMover * 10 < doorFrames * 7) {
+            ++fails;
+            printf("   FAIL opening door: px off its own motion %lld of %lld, a mover in %d of %d frames (want >= 70 %%)\n", doorBadPx,
+                   doorPx, doorMover, doorFrames);
+        }
+        printf("   opening door (MVP in rows 5..8, frames 50+): a mover in %d of %d frames, px off its own motion %lld of %lld (worst "
+               "%.3f px)\n", doorMover, doorFrames, doorBadPx, doorPx, worstDoor);
+    }
     if (worldBadPx * 1000 > worldPx || carBadPx * 100 > carPx) {
         ++fails; printf("   FAIL world pixels off the camera motion %lld of %lld / oncoming car px off %lld of %lld\n", worldBadPx, worldPx, carBadPx, carPx);
     }
@@ -5244,6 +5315,435 @@ int RunCarScene(Env& E, float snapPx, Totals& tot, int variant) {
     printf("   swinging part: a mover in %d of %d draw-frames, px off %lld of %lld; hood px off %lld of %lld (worst %.3f px); world px off "
            "%lld of %lld; oncoming car px off %lld of %lld; draw states wrong %d\n", swingMover, swingFrames, swBadPx, swPx, hoodBadPx,
            hoodPx, worstHood, worldBadPx, worldPx, carBadPx, carPx, stBad);
+    PrintPhase8(ctx, ds, "");
+    DrawIdMv::SetParentMutation(0);
+    DrawIdMv::SetAttach(attachSaved); DrawIdMv::SetTwin(twinSaved); DrawIdMv::SetParent(parentSaved); DrawIdMv::SetInstanced(instSaved);
+    printf("   %s: %d / %d checks passed\n", fails ? "FAILED" : "passed", checks - fails, checks);
+    tot.checks += checks; tot.fails += fails;
+    return fails;
+}
+
+// ---- v0.10.0 phase 22: S18 SHOP WINDOWS (captures/shop_window_audit.md: the ATS shop windows' vertex shaders keep the MVP in cb0
+// rows 6..9; phase 19's rows-4..7 read paired them with [MV row 2, (0, 0, 0, 1), MVP row 0, MVP row 1] = a mover with a wrong R as soon
+// as the camera moves -- the wobbly pink windows in VR) ---------------------------------------------------------------------------
+// A street of static buildings (12 facades, 40 posts, 10 boxes, the ground) with six shop windows on the facades, two families as in
+// game (G-buffer glass with vertex shader A or B). Every window is drawn twice on the same mesh: the G-buffer glass and a FORWARD
+// reflection draw (a third vertex shader, opaque, 1 cm in front of the glass on the odd windows -- the forward depth wins there --
+// and 1 cm behind it on the even ones -- the scene depth wins; recorded in the forward record like a re-drawn forward draw, so both id
+// paths carry the rows-6..9 MVP; in game the window forward draws are blend-off / additive and not re-drawn). All window
+// draws carry the shop-window cb0 layout: r0 = object position + seed, r1 = parameters, r2..r5 = model-view (r5 = (0, 0, 0, 1)),
+// r6..r9 = the MVP, r10 = the truth; the other draws: r0..r3 = model-view, r4..r7 = MVP, r8 = the truth. The camera drives 0.3 m /
+// frame, yaws 0.05..0.5 deg / frame (a VR head never stops) with a small pitch wobble; a car overtakes (a real mover).
+// Checks (frame 2 on): every window pixel (G-buffer truth; forward or scene depth won) = the EXACT camera motion; every window draw
+// (G-buffer and forward) static (state 2), never a mover; the world camera R vs exact; world / car pixels; the read-back layout
+// counts (the 6 G-buffer windows at +2 and the 6 forward windows shifted in every readback, no "none"); the per-VS table (the three
+// window VSes at row 6, the main VS at row 4). "mutlayout" (the layout detection off = rows 4..7, phase 21) must FAIL.
+int RunShopScene(Env& E, float snapPx, Totals& tot) {
+    const int frames = 100;
+    printf("\n===== S18 shop windows: 6 windows (2 families, MVP in cb0 rows 6..9) as G-buffer glass + forward reflection draws on static "
+           "facades, the camera driving 0.3 m / frame and yawing 0.05..0.5 deg / frame, an overtaking car (%d frames, snap %.3f px%s) "
+           "=====\n", frames, (double)snapPx, g_layMut ? "; MUTATION: the MVP layout detection off (rows 4..7)" : "");
+    ID3D11Device* dev = E.dev.Get();
+    ID3D11DeviceContext* ctx = E.ctx.Get();
+    ID3D11DeviceContext1* ctx1 = E.ctx1.Get();
+    DrawIdMv::SetParams(8.0f, snapPx);
+    DrawIdMv::SetConsensus(true);
+    const float attachSaved = DrawIdMv::AttachM();
+    const bool twinSaved = DrawIdMv::Twin(), parentSaved = DrawIdMv::Parent(), instSaved = DrawIdMv::Instanced();
+    DrawIdMv::SetAttach(0.5f);
+    DrawIdMv::SetTwin(true);
+    DrawIdMv::SetParent(true);
+    DrawIdMv::SetInstanced(true);
+    DrawIdMv::SetParentMutation(g_layMut);
+    View v;
+    S6Res r;
+    if (!MakeView(E, v, W, H)) { printf("view textures failed\n"); return 1; }
+    {
+        bool ok = MakeTex(dev, W, H, DXGI_FORMAT_R16G16_UINT, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, &r.id2) &&
+                  SUCCEEDED(dev->CreateRenderTargetView(r.id2.Get(), nullptr, &r.id2Rtv)) &&
+                  SUCCEEDED(dev->CreateShaderResourceView(r.id2.Get(), nullptr, &r.id2Srv)) &&
+                  MakeTex(dev, W, H, DXGI_FORMAT_R16G16_UINT, 0, &r.stId2, true) &&
+                  MakeTex(dev, W, H, DXGI_FORMAT_R32_TYPELESS, D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE, &r.fwd) &&
+                  MakeTex(dev, W, H, DXGI_FORMAT_R32_TYPELESS, 0, &r.stFwd, true) &&
+                  MakeTex(dev, W, H, DXGI_FORMAT_R32G8X24_TYPELESS, 0, &r.stTwin, true);
+        D3D11_DEPTH_STENCIL_VIEW_DESC dd{}; dd.Format = DXGI_FORMAT_D32_FLOAT; dd.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+        D3D11_SHADER_RESOURCE_VIEW_DESC sd{}; sd.Format = DXGI_FORMAT_R32_FLOAT; sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        sd.Texture2D.MipLevels = 1;
+        ok = ok && SUCCEEDED(dev->CreateDepthStencilView(r.fwd.Get(), &dd, &r.fwdDsv)) &&
+             SUCCEEDED(dev->CreateShaderResourceView(r.fwd.Get(), &sd, &r.fwdSrv));
+        D3D11_DEPTH_STENCIL_DESC ds{};
+        ds.DepthEnable = TRUE; ds.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO; ds.DepthFunc = D3D11_COMPARISON_GREATER_EQUAL;
+        ds.StencilEnable = FALSE; ds.StencilReadMask = 0xFF; ds.StencilWriteMask = 0xFF;
+        ds.FrontFace = { D3D11_STENCIL_OP_KEEP, D3D11_STENCIL_OP_KEEP, D3D11_STENCIL_OP_KEEP, D3D11_COMPARISON_ALWAYS };
+        ds.BackFace = ds.FrontFace;
+        ok = ok && SUCCEEDED(dev->CreateDepthStencilState(&ds, &r.dssFwdGame));
+        ds.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;            // inject.cpp g_fwdDss: GREATER_EQUAL, write ALL
+        ok = ok && SUCCEEDED(dev->CreateDepthStencilState(&ds, &r.dssFwdRe));
+        D3D11_BLEND_DESC bd{};
+        bd.RenderTarget[0].BlendEnable = TRUE;
+        bd.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA; bd.RenderTarget[0].DestBlend = D3D11_BLEND_ONE;   // the additive reflection
+        bd.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+        bd.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE; bd.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
+        bd.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+        bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+        ok = ok && SUCCEEDED(dev->CreateBlendState(&bd, &r.bsOver));
+        bd.AlphaToCoverageEnable = TRUE;                            // inject.cpp g_fwdBs: alpha-to-coverage, mask 0
+        bd.RenderTarget[0].BlendEnable = FALSE;
+        bd.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE; bd.RenderTarget[0].DestBlend = D3D11_BLEND_ZERO;
+        bd.RenderTarget[0].RenderTargetWriteMask = 0;
+        ok = ok && SUCCEEDED(dev->CreateBlendState(&bd, &r.bsA2C));
+        if (!ok) { printf("S18 resources failed\n"); return 1; }
+    }
+    CameraMv cam;
+    if (!cam.Init(dev)) { printf("CameraMv init failed\n"); return 1; }
+    cam.SetEgoPixel(0.0f);
+    cam.SetEgoOrigin(0.0f);
+    CandidateRecord cand;
+    cand.Init(dev);
+    DrawIdRecord rec, fwdRec;
+    fwdRec.SetForward(true);
+    // ---- objects ----
+    enum SK { kSWorld, kSCar, kSWinA, kSWinB, kSFwd };
+    struct SO { const char* name; SK kind; int mesh; bool cullNone; int win; };
+    std::vector<SO> objs;
+    auto add = [&](const char* n, SK k, int mesh, bool cn, int win = -1) { objs.push_back({ n, k, mesh, cn, win }); return (int)objs.size() - 1; };
+    add("ground", kSWorld, MGround, true);
+    for (int k = 0; k < 10; ++k) add("static box", kSWorld, MBox0 + k, false);
+    for (int k = 0; k < 40; ++k) add("roadside post (40 identical)", kSWorld, MPost, false);
+    for (int k = 0; k < 12; ++k) add("facade (12 identical)", kSWorld, MS18Facade, false);
+    const int oCar = add("overtaking CAR (a real mover)", kSCar, MCar0 + 3, false);
+    const int kWin = 6;
+    int oWinG[kWin], oWinF[kWin];
+    for (int w = 0; w < kWin; ++w) {
+        const bool famB = (w % 3) == 1;
+        oWinG[w] = add(famB ? "shop window glass, family B (VS B, MVP in rows 6..9)" : "shop window glass, family A (VS A, MVP in rows 6..9)",
+                       famB ? kSWinB : kSWinA, famB ? MS18WinB : MS18WinA, true, w);
+    }
+    for (int w = 0; w < kWin; ++w)
+        oWinF[w] = add("shop window REFLECTION (forward, VS F, MVP in rows 6..9, 1 cm in front)", kSFwd,
+                       objs[oWinG[w]].mesh, true, w);
+    const int nObj = (int)objs.size();
+    auto isWin = [&](int o) { const SK k = objs[o].kind; return k == kSWinA || k == kSWinB || k == kSFwd; };
+    auto vsOf = [&](int o) -> ID3D11VertexShader* {
+        const SK k = objs[o].kind;
+        return k == kSWinA ? E.vsShift2.Get() : (k == kSWinB ? E.vsShift2B.Get() : (k == kSFwd ? E.vsShift2F.Get() : E.vsMain.Get()));
+    };
+    std::vector<M4> mvpPrev(nObj, I4()), mvpCur(nObj, I4()), mvCur(nObj, I4());
+    std::mt19937 rng(1818);
+    int checks = 0, fails = 0, camRBad = 0, stBad = 0, winMoverDraws = 0, winStatDraws = 0, winDraws = 0, carMover = 0, carFrames = 0;
+    long long winPx = 0, winBadPx = 0, winFwdPx = 0, worldPx = 0, worldBadPx = 0, carPx = 0, carBadPx = 0;
+    double worstWin = 0.0, worstCamPx = 0.0, maxYawDeg = 0.0, minYawDeg = 1e9;
+    DrawIdMv::Stats st0{};
+    uint64_t rb0 = 0;
+    M4 VprevX = I4();
+    const M4 Pw = Proj(kNearWorld);
+    const double kPi = 3.14159265358979;
+    const FLOAT zero[4] = { 0, 0, 0, 0 };
+    const D3D11_RECT sc0 = { 0, 0, W, H };
+    double yaw = -0.20;
+    GpuPerf::Restart();
+    for (int f = 0; f < frames; ++f) {
+        PerfFrame();
+        // ---- camera: 0.3 m / frame, yaw rate 0.05..0.5 deg / frame (a 50-frame cycle), a small pitch wobble ----
+        const double rateDeg = 0.05 + 0.45 * (0.5 - 0.5 * cos(2.0 * kPi * f / 50.0));
+        if (f > 0) { yaw += rateDeg * kPi / 180.0; maxYawDeg = std::max(maxYawDeg, rateDeg); minYawDeg = std::min(minYawDeg, rateDeg); }
+        const M4 camPose = Mul(T(0.0, 1.6, 0.3 * f), Mul(RotY(yaw), RotX(0.01 * sin(2.0 * kPi * f / 37.0))));
+        M4 V; Inv(camPose, V);
+        std::vector<M4> world(nObj, I4());
+        world[0] = T(0, 0, 100);
+        for (int k = 0; k < 10; ++k) world[1 + k] = T((k & 1) ? 7.0 + 0.3 * k : -7.0 - 0.3 * k, 0.0, 30.0 + 9.0 * k);
+        for (int k = 0; k < 40; ++k) world[11 + k] = T((k & 1) ? 4.5 : -4.5, 0.0, 6.0 + 8.0 * (k / 2));
+        for (int k = 0; k < 12; ++k) world[51 + k] = T((k & 1) ? -10.0 : 10.0, 0.0, 25.0 + 15.0 * (k / 2));
+        world[oCar] = T(-2.2, 0.0, 15.0 + 0.9 * f);
+        for (int w = 0; w < kWin; ++w) {
+            const double s = (w & 1) ? -1.0 : 1.0, zc = 25.0 + 15.0 * w;   // on facade w (alternating sides), its street face at |x| 9.5
+            world[oWinG[w]] = Mul(T(s * (10.0 - 0.5 - 0.02), 0.0, zc), RotY(s * kPi * 0.5));
+            // the reflection: odd windows (left side) 1 cm in FRONT of the glass (the forward depth wins: forward ids), even windows
+            // (right side) 1 cm BEHIND it (the scene depth wins: G-buffer ids) -- both id paths carry the rows-6..9 MVP
+            world[oWinF[w]] = Mul(T(s * (10.0 - 0.5 - ((w & 1) ? 0.03 : 0.01)), 0.0, zc), RotY(s * kPi * 0.5));
+        }
+        for (int o = 0; o < nObj; ++o) { mvCur[o] = Mul(V, world[o]); mvpCur[o] = Mul(Pw, mvCur[o]); }
+        // ---- draw order: G-buffer shuffled, then the forward reflections; cbuffer windows ----
+        std::vector<int> order, forder;
+        for (int o = 0; o < nObj; ++o) { if (objs[o].kind == kSFwd) forder.push_back(o); else order.push_back(o); }
+        std::shuffle(order.begin(), order.end(), rng);
+        const int nd = (int)order.size(), nf = (int)forder.size();
+        ID3D11Buffer* ring = E.ring[f & 1].Get();
+        {
+            D3D11_MAPPED_SUBRESOURCE mp{};
+            if (FAILED(ctx->Map(ring, 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) { printf("ring map failed\n"); return 1; }
+            float* p = (float*)mp.pData;
+            memset(p, 0, 2u << 20);
+            for (int d = 0; d < nd + nf; ++d) {
+                const int o = d < nd ? order[d] : forder[d - nd];
+                float* w = p + (UINT)d * 64u;
+                const float idx1 = (float)((d < nd ? d : d - nd) + 1);
+                if (isWin(o)) {                                  // the shop-window layout (audit EID 26287 / 26610)
+                    const bool fw = objs[o].kind == kSFwd;
+                    w[0] = (float)world[o].m[0][3]; w[1] = (float)world[o].m[1][3]; w[2] = (float)world[o].m[2][3];
+                    w[3] = (float)(8509453 + o);
+                    w[4] = 94.0f; w[5] = 125.3f; w[6] = fw ? 8.0f : 0.0326f; w[7] = fw ? 4.0f : -7.21f;
+                    for (int rr = 0; rr < 4; ++rr) for (int c = 0; c < 4; ++c) {
+                        w[(2 + rr) * 4 + c] = (float)mvCur[o].m[rr][c];
+                        w[(6 + rr) * 4 + c] = (float)mvpCur[o].m[rr][c];
+                    }
+                    w[10 * 4 + 0] = (float)(o + 1); w[10 * 4 + 1] = idx1;
+                } else {
+                    for (int rr = 0; rr < 4; ++rr) for (int c = 0; c < 4; ++c) {
+                        w[rr * 4 + c] = (float)mvCur[o].m[rr][c];
+                        w[(4 + rr) * 4 + c] = (float)mvpCur[o].m[rr][c];
+                    }
+                    w[8 * 4 + 0] = (float)(o + 1); w[8 * 4 + 1] = idx1;
+                }
+            }
+            ctx->Unmap(ring, 0);
+        }
+        auto halton = [](int i, int b) { double q = 0, fct = 1; while (i > 0) { fct /= b; q += fct * (i % b); i /= b; } return q; };
+        const float jx = (float)(halton(f % 8 + 1, 2) - 0.5), jy = (float)(halton(f % 8 + 1, 3) - 0.5);
+        const D3D11_VIEWPORT vpW = { jx, jy, (float)W, (float)H, 0.01f, 0.9f };
+        auto bindDraw = [&](int o, int d) {
+            const SO& ob = objs[o];
+            ctx->RSSetViewports(1, &vpW);
+            ctx->RSSetScissorRects(1, &sc0);
+            ctx->RSSetState(ob.cullNone ? E.rsNone.Get() : E.rsBack.Get());
+            ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            ID3D11Buffer* vbs[2] = { E.vb[0].Get(), E.instVb[0].Get() };
+            const UINT strides[2] = { sizeof(Vtx), 12 }, offs[2] = { 0, 0 };
+            ctx->IASetVertexBuffers(0, 2, vbs, strides, offs);
+            ctx->IASetIndexBuffer(E.ib[0].Get(), DXGI_FORMAT_R32_UINT, 0);
+            ID3D11ShaderResourceView* vsSrv[4] = {};
+            ctx->VSSetShaderResources(0, 4, vsSrv);
+            ctx->IASetInputLayout(E.il.Get());
+            ctx->VSSetShader(vsOf(o), nullptr, 0);
+            const UINT first = (UINT)d * 16u, num = 16u;
+            ctx1->VSSetConstantBuffers1(0, 1, &ring, &first, &num);
+            ctx1->PSSetConstantBuffers1(0, 1, &ring, &first, &num);
+        };
+        // ---- G-buffer ----
+        ctx->ClearDepthStencilView(v.dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 0.0f, 0);
+        ctx->ClearRenderTargetView(v.truthRtv.Get(), zero);
+        ctx->ClearRenderTargetView(v.colorRtv.Get(), zero);
+        ID3D11RenderTargetView* rtvs[2] = { v.truthRtv.Get(), v.colorRtv.Get() };
+        ctx->OMSetRenderTargets(2, rtvs, v.dsv.Get());
+        ctx->OMSetDepthStencilState(E.dss.Get(), 1);
+        ctx->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFFu);
+        rec.Reset(); fwdRec.Reset(); cand.Reset();
+        cand.SetDropped(cam.MedoidDropBits());
+        for (int d = 0; d < nd; ++d) {
+            const int o = order[d];
+            const Mesh& m = E.meshes[objs[o].mesh];
+            bindDraw(o, d);
+            ctx->PSSetShader(isWin(o) ? E.ps10.Get() : E.ps.Get(), nullptr, 0);
+            CandidateRecord::DrawKey k{};                 // the camera candidates at the VS's MVP row (inject.cpp, phase 22)
+            k.ib = E.ib[0].Get(); k.vb = E.vb[0].Get(); k.indexCount = m.ic; k.startIndex = m.si; k.baseVertex = m.bv;
+            if (cand.Count(0) < CandidateRecord::kSlots && !cand.Dropped(0))
+                cand.Record(ctx, 0, ring, (UINT)d * 256u + 16u * DrawIdMv::MvpRow(vsOf(o)), k);
+            rec.Record(ctx1, m.ic, 1u, m.si, m.bv, 0u, false);
+            ctx->DrawIndexed(m.ic, m.si, m.bv);
+        }
+        ctx->PSSetShader(E.ps.Get(), nullptr, 0);
+        DrawIdMv::SetFrame((uint64_t)f + 1);
+        if (!rec.Replay(ctx1, r.id2Rtv.Get(), v.roDsv.Get(), false, false).ok) { printf("   FAIL replay (frame %d)\n", f); ++fails; }
+        // ---- forward pass: the game's reflection draw (scene depth tested, no write, additive) + the re-draw into the forward depth
+        // (as inject.cpp FwdOnDraw) + the record ----
+        ID3D11RenderTargetView* crt = v.colorRtv.Get();
+        bool fwdCleared = false;
+        for (int k = 0; k < nf; ++k) {
+            const int o = forder[k];
+            const Mesh& m = E.meshes[objs[o].mesh];
+            bindDraw(o, nd + k);
+            ctx->OMSetRenderTargets(1, &crt, v.dsv.Get());
+            ctx->OMSetDepthStencilState(r.dssFwdGame.Get(), 0);
+            ctx->OMSetBlendState(r.bsOver.Get(), nullptr, 0xFFFFFFFFu);
+            ctx->PSSetShader(E.psFwd10.Get(), nullptr, 0);
+            ctx->DrawIndexed(m.ic, m.si, m.bv);
+            if (!fwdCleared) { ctx->ClearDepthStencilView(r.fwdDsv.Get(), D3D11_CLEAR_DEPTH, 0.0f, 0); fwdCleared = true; }
+            ctx->OMSetRenderTargets(1, &crt, r.fwdDsv.Get());
+            ctx->OMSetDepthStencilState(r.dssFwdRe.Get(), 0);
+            ctx->OMSetBlendState(r.bsA2C.Get(), nullptr, 0xFFFFFFFFu);
+            ctx->DrawIndexed(m.ic, m.si, m.bv);
+            ctx->OMSetRenderTargets(1, &crt, v.dsv.Get());
+            fwdRec.Record(ctx1, m.ic, 1, m.si, m.bv, 0, false);
+        }
+        {
+            const auto fr = fwdRec.ReplayForward(ctx1, r.id2Rtv.Get(), r.fwdDsv.Get(), true, (UINT)rec.Count());
+            if (!fr.ok || fr.replayed != nf) { printf("   FAIL forward replay (frame %d): ok %d replayed %d\n", f, (int)fr.ok, fr.replayed); ++fails; }
+        }
+        ctx->PSSetShader(E.ps.Get(), nullptr, 0);
+        ID3D11RenderTargetView* nullRtv = nullptr;
+        ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
+        ctx->CopyResource(v.twin.Get(), v.depth.Get());
+        CameraMv::FrameStats fs;
+        {                                                // HDUMP=<frame> (+ HPROBE=1): the dump of this S18 frame (see RunScene)
+            char ev[16] = {}, pv[16] = {};
+            if (GetEnvironmentVariableA("HDUMP", ev, sizeof(ev)) && atoi(ev) == f) {
+                const bool probe = GetEnvironmentVariableA("HPROBE", pv, sizeof(pv)) && atoi(pv) != 0;
+                cam.DrawIds().RequestDump("harness HDUMP S18", probe ? 0.5f : -1.0f, probe ? 0.5f : -1.0f);
+            }
+        }
+        const bool ok = cam.Generate(ctx, W, H, 0, 0, W, H, cand, v.twinSrv.Get(), v.dUav.Get(), v.mvUav.Get(), &fs, false,
+                                     nullptr, nullptr, r.fwdSrv.Get(), &rec, r.id2Srv.Get(), &fwdRec);
+        if (!ok) { printf("   FAIL Generate (frame %d)\n", f); ++fails; }
+        if (f >= 1 && cam.DidN() != (uint32_t)(nd + nf)) {
+            printf("   FAIL frame %d: %u draws in the per-draw table, want %d\n", f, cam.DidN(), nd + nf); ++fails;
+        }
+        // ---- readbacks ----
+        ctx->CopyResource(v.stMv.Get(), v.mv.Get());
+        ctx->CopyResource(v.stDepth.Get(), v.dOut.Get());
+        ctx->CopyResource(v.stTruth.Get(), v.truth.Get());
+        ctx->CopyResource(r.stId2.Get(), r.id2.Get());
+        ctx->CopyResource(r.stFwd.Get(), r.fwd.Get());
+        ctx->CopyResource(r.stTwin.Get(), v.twin.Get());
+        const int nTab = (int)cam.DidN();
+        if (cam.DidRSrv() && nTab) {
+            ComPtr<ID3D11Resource> rres;
+            cam.DidRSrv()->GetResource(&rres);
+            const D3D11_BOX box{ 0, 0, 0, (UINT)nTab * DrawIdMv::kRStride * 16u, 1, 1 };
+            ctx->CopySubresourceRegion(E.stR.Get(), 0, 0, 0, 0, rres.Get(), 0, &box);
+        }
+        D3D11_MAPPED_SUBRESOURCE mMv{}, mD{}, mT{}, mI{}, mR{}, mF{}, mTw{};
+        ctx->Map(v.stMv.Get(), 0, D3D11_MAP_READ, 0, &mMv);
+        CmpFrame(mMv, W, H);
+        ctx->Map(v.stDepth.Get(), 0, D3D11_MAP_READ, 0, &mD);
+        ctx->Map(v.stTruth.Get(), 0, D3D11_MAP_READ, 0, &mT);
+        ctx->Map(r.stId2.Get(), 0, D3D11_MAP_READ, 0, &mI);
+        ctx->Map(E.stR.Get(), 0, D3D11_MAP_READ, 0, &mR);
+        ctx->Map(r.stFwd.Get(), 0, D3D11_MAP_READ, 0, &mF);
+        ctx->Map(r.stTwin.Get(), 0, D3D11_MAP_READ, 0, &mTw);
+        const float* Rt = (const float*)mR.pData;
+        std::vector<int> stCur(nObj, -1), tabIdx(nObj, -1);
+        for (int d = 0; d < nd; ++d) tabIdx[order[d]] = d;
+        for (int k = 0; k < nf; ++k) tabIdx[forder[k]] = nd + k;
+        for (int o = 0; o < nObj; ++o) {
+            const int ti = tabIdx[o];
+            if (ti >= 0 && ti < nTab) stCur[o] = (int)(Rt[(ti * 5 + 4) * 4] + 0.5f);
+        }
+        // ---- the camera R: GPU vs exact ----
+        M4 RcamG, RcamX;
+        {
+            if (f == 0) VprevX = V;
+            M4 Pinv, Vinv; Inv(Pw, Pinv); Inv(V, Vinv);
+            RcamX = Mul(Pw, Mul(VprevX, Mul(Vinv, Pinv)));
+            VprevX = V;
+            float sv[CameraMv::kSolveFloats];
+            if (!cam.ReadSolveBlocking(ctx, sv)) { printf("   FAIL solve readback\n"); ++fails; }
+            for (int rr = 0; rr < 4; ++rr) for (int c = 0; c < 4; ++c) RcamG.m[rr][c] = sv[rr * 4 + c];
+            double worst = 0.0;
+            for (int gy = 0; gy < 7; ++gy) for (int gx = 0; gx < 7; ++gx)
+                for (double zq : { 0.0, kNearWorld / 100.0, kNearWorld / 30.0, kNearWorld / 8.0 }) {
+                    const double p4[4] = { -0.9 + 0.3 * gx, -0.9 + 0.3 * gy, zq, 1.0 };
+                    double a[4], b[4];
+                    Xf(RcamX, p4, a); Xf(RcamG, p4, b);
+                    if (!(a[3] > 1e-9) || !(b[3] > 1e-9)) { worst = 1e9; continue; }
+                    worst = std::max(worst, std::hypot((a[0] / a[3] - b[0] / b[3]) * W * 0.5, (a[1] / a[3] - b[1] / b[3]) * H * 0.5));
+                }
+            if (f >= 2) {
+                ++checks;
+                if (!(worst <= 0.05)) { ++fails; ++camRBad; if (camRBad <= 3) printf("   FAIL frame %d: world camera R off by %.3f px\n", f, worst); }
+                worstCamPx = std::max(worstCamPx, worst);
+            }
+        }
+        // ---- per-draw states (frame 2 on): every window draw static (its own pair = the camera motion), never a mover ----
+        if (f >= 2) {
+            for (int o = 0; o < nObj; ++o) {
+                if (!isWin(o)) continue;
+                ++checks; ++winDraws;
+                if (stCur[o] == DrawIdMv::kStMover) ++winMoverDraws;
+                if (stCur[o] == DrawIdMv::kStStatic) ++winStatDraws;
+                if (stCur[o] != DrawIdMv::kStStatic) {
+                    ++fails; ++stBad;
+                    if (stBad <= 6) printf("   FAIL frame %d: %s (window %d) state %d, want 2 (static)\n", f, objs[o].name, objs[o].win, stCur[o]);
+                }
+            }
+            ++carFrames;
+            if (stCur[oCar] == DrawIdMv::kStMover) ++carMover;
+        }
+        if (f == 10) { st0 = cam.DrawIds().GetStats(); rb0 = st0.rbFrames; }
+        // ---- per pixel: window pixels the EXACT camera motion, world pixels the GPU camera R, the car its own ----
+        M4 RcarX = RcamG;
+        if (f >= 1) { M4 ic; Inv(mvpCur[oCar], ic); RcarX = Mul(mvpPrev[oCar], ic); }
+        for (int y = 0; y < H && f >= 2; ++y) {
+            const uint16_t* mvRow = (const uint16_t*)((const uint8_t*)mMv.pData + y * mMv.RowPitch);
+            const float* dRow = (const float*)((const uint8_t*)mD.pData + y * mD.RowPitch);
+            const uint32_t* tRow = (const uint32_t*)((const uint8_t*)mT.pData + y * mT.RowPitch);
+            const uint16_t* iRow = (const uint16_t*)((const uint8_t*)mI.pData + y * mI.RowPitch);
+            const float* fRow = (const float*)((const uint8_t*)mF.pData + y * mF.RowPitch);
+            const float* twRow = (const float*)((const uint8_t*)mTw.pData + y * mTw.RowPitch);
+            for (int x = 0; x < W; ++x) {
+                const uint32_t tObj = tRow[x * 2];
+                if (!tObj) continue;
+                const int o = (int)tObj - 1;
+                if (o < 0 || o >= nObj) continue;
+                float fw = fRow[x];                              // pass B's rule: the forward depth wins when in front (world range)
+                if (!(fw >= 0.01f && fw < 0.9f)) fw = 0.0f;
+                const bool fwWin = fw > twRow[x * 2];
+                const double dd = dRow[x];
+                const double z = (dd - 0.01) / 0.89;
+                const double u = (x + 0.5) / W, vv = (y + 0.5) / H;
+                const double p4[4] = { u * 2 - 1, 1 - vv * 2, std::min(1.0, std::max(0.0, z)), 1.0 };
+                const M4& Re = isWin(o) ? RcamX : (o == oCar ? RcarX : RcamG);
+                double c[4];
+                Xf(Re, p4, c);
+                double ex = 0, ey = 0;
+                if (c[3] > 1e-6) { ex = ((c[0] / c[3]) * 0.5 + 0.5 - u) * W; ey = ((0.5 - (c[1] / c[3]) * 0.5) - vv) * H; }
+                const double gx = H2F(mvRow[x * 2]), gy = H2F(mvRow[x * 2 + 1]);
+                const double err = std::hypot(gx - ex, gy - ey);
+                const double big2 = std::max(std::fabs(ex), std::fabs(ey)) / 1024.0;
+                if (isWin(o)) {
+                    ++winPx;
+                    if (fwWin && iRow[x * 2 + 1] != 0) ++winFwdPx;   // the forward reflection won the pixel (its forward id is used)
+                    worstWin = std::max(worstWin, err);
+                    if (err > 0.05 + big2) {
+                        ++winBadPx;
+                        if (winBadPx <= 4) printf("   FAIL frame %d: window pixel (%d,%d) of %s: MV (%.3f %.3f), the camera motion (%.3f %.3f)\n",
+                                                  f, x, y, objs[o].name, gx, gy, ex, ey);
+                    }
+                } else if (o == oCar) {
+                    ++carPx; if (err > 0.03 + snapPx + big2) ++carBadPx;
+                } else {
+                    ++worldPx; if (err > 0.03 + big2) ++worldBadPx;
+                }
+            }
+        }
+        if (g_debugLayer) { const int dl = DrainDebugLayer("S18"); ++checks; if (dl) ++fails; }
+        ctx->Unmap(v.stMv.Get(), 0); ctx->Unmap(v.stDepth.Get(), 0); ctx->Unmap(v.stTruth.Get(), 0); ctx->Unmap(r.stId2.Get(), 0);
+        ctx->Unmap(E.stR.Get(), 0); ctx->Unmap(r.stFwd.Get(), 0); ctx->Unmap(r.stTwin.Get(), 0);
+        for (int o = 0; o < nObj; ++o) mvpPrev[o] = mvpCur[o];
+    }
+    rec.Shutdown(); fwdRec.Shutdown();
+    // ---- scene totals ----
+    const DrawIdMv::Stats& ds = cam.DrawIds().GetStats();
+    const uint64_t rbN = ds.rbFrames - rb0;
+    const double rbd = rbN ? (double)rbN : 1.0;
+    const uint64_t lay0 = ds.lay[0] - st0.lay[0], lay2 = ds.lay[2] - st0.lay[2], layFwd = ds.layFwdShift - st0.layFwdShift;
+    const uint64_t layNone = (ds.layNone - st0.layNone) + (ds.layHintFail - st0.layHintFail), notMvp = ds.notMvp - st0.notMvp;
+    const UINT rowA = DrawIdMv::MvpRow(E.vsShift2.Get()), rowB = DrawIdMv::MvpRow(E.vsShift2B.Get());
+    const UINT rowF = DrawIdMv::MvpRow(E.vsShift2F.Get()), rowM = DrawIdMv::MvpRow(E.vsMain.Get());
+    printf("   readbacks (frames 10+) %llu: MVP layout per readback: rows 4..7 %.2f, rows 6..9 (+2) %.2f (want %d), forward shifted %.2f "
+           "(want %d), none %.2f (want 0); rows 4..7 not an MVP %.2f; VS table: window VS A rows %u..%u, B %u..%u, forward F %u..%u, "
+           "main VS %u..%u\n", (unsigned long long)rbN, (double)lay0 / rbd, (double)lay2 / rbd, g_layMut ? 0 : kWin, (double)layFwd / rbd,
+           g_layMut ? 0 : kWin, (double)layNone / rbd, (double)notMvp / rbd, rowA, rowA + 3u, rowB, rowB + 3u, rowF, rowF + 3u, rowM,
+           rowM + 3u);
+    checks += 8;
+    if (!rbN) { ++fails; printf("   FAIL no diagnostics readback landed\n"); }
+    if (!g_layMut && (lay2 != (uint64_t)kWin * rbN || layFwd != (uint64_t)kWin * rbN || layNone != 0 || notMvp != 0)) {
+        ++fails; printf("   FAIL MVP layout counts (CSGather)\n");
+    }
+    if (!g_layMut && (rowA != 6u || rowB != 6u || rowF != 6u || rowM != 4u)) { ++fails; printf("   FAIL the per-VS layout table\n"); }
+    if (winBadPx) { ++fails; }
+    if (winPx == 0 || winFwdPx * 10 < winPx || (winPx - winFwdPx) * 10 < winPx) {   // each id path >= 10 % of the window pixels
+        ++fails; printf("   FAIL the windows never showed / one id path (forward %lld of %lld px) barely used\n", winFwdPx, winPx);
+    }
+    if (winMoverDraws) { ++fails; printf("   FAIL window draws resolved MOVER %d times (of %d window draw-frames)\n", winMoverDraws, winDraws); }
+    if (worldBadPx * 1000 > worldPx || carBadPx * 100 > carPx || carPx == 0) {
+        ++fails; printf("   FAIL world pixels off the camera motion %lld of %lld / car px off %lld of %lld\n", worldBadPx, worldPx, carBadPx, carPx);
+    }
+    if (carMover * 10 < carFrames * 9) { ++fails; printf("   FAIL the overtaking car a mover in only %d of %d frames\n", carMover, carFrames); }
+    printf("   window pixels off the exact camera motion: %lld of %lld (worst %.3f px; must be 0), of them the forward reflection won %lld (forward id), the glass %lld (G-buffer id); "
+           "window draw-frames static %d / mover %d of %d; camera yaw rate %.3f..%.3f deg / frame, world camera R worst %.4f px (%d "
+           "frames over 0.05); world px off %lld of %lld; car px off %lld of %lld, a mover in %d of %d frames; draw states wrong %d\n",
+           winBadPx, winPx, worstWin, winFwdPx, winPx - winFwdPx, winStatDraws, winMoverDraws, winDraws, minYawDeg, maxYawDeg, worstCamPx, camRBad,
+           worldBadPx, worldPx, carBadPx, carPx, carMover, carFrames, stBad);
     PrintPhase8(ctx, ds, "");
     DrawIdMv::SetParentMutation(0);
     DrawIdMv::SetAttach(attachSaved); DrawIdMv::SetTwin(twinSaved); DrawIdMv::SetParent(parentSaved); DrawIdMv::SetInstanced(instSaved);
@@ -5288,7 +5788,8 @@ int main(int argc, char** argv) {
         else if (!strcmp(s, "mutcr")) g_s15Mut = 4;                  // phase 14 round 6: S15 with the origin-free rule off (must FAIL)
         else if (!strcmp(s, "mutinst")) g_s15Mut = 8;                //   S15 with multi-instance draws listed again (round-4 rule)
         else if (!strcmp(s, "mutr6")) g_s15Mut = 16;                 // round 7: S15 with the round-6 origin-free rule (VR eyes FAIL)
-        else if (!strcmp(s, "mutshape")) g_s17Mut = 32;              // v0.10.0 phase 19: S17 with the MVP-shape rule off (must FAIL)
+        else if (!strcmp(s, "mutshape")) g_s17Mut = 32;              // v0.10.0 phase 19: S17 with the MVP-shape rule off
+        else if (!strcmp(s, "mutlayout")) g_layMut = 64;             // v0.10.0 phase 22: S17 / S18 with rows 4..7 (must FAIL both)
         else if (!strncmp(s, "cabsmall=", 9)) DrawIdMv::SetCabinSmall((unsigned)atoi(s + 9));   // phase 19: mv_cabin_small
         else if (!strncmp(s, "inst=", 5)) DrawIdMv::SetInstReplay(atoi(s + 5));
         else if (!strncmp(s, "cmpdump=", 8)) { if (fopen_s(&g_cmpOut, s + 8, "wb")) g_cmpOut = nullptr; }
@@ -5413,6 +5914,10 @@ int main(int argc, char** argv) {
     E.meshes[MS17Fresh2] = g.Quad(0.02f, 0.03f);
     for (int k = 0; k < 3; ++k) E.meshes[MS17Ovl0 + k] = g.Box(0.02f + 0.004f * (float)k, 0.015f, 0.004f, 0, 0, 0, (float)k);
     E.meshes[MS17Body] = g.Boxes(40, 0.02f, 0.05f, 0.15f, 0.045f, 0.0f, 0.0f, -0.8775f, 0.0f, 0.0f);   // 1440 indices
+    // v0.10.0 phase 22 (S18): a facade (1 m thick, 8 m tall, 12 m long along z), two shop-window quads (xy plane, double-sided)
+    E.meshes[MS18Facade] = g.Box(0.5f, 4.0f, 6.0f, 0.0f, 4.0f, 0.0f);
+    E.meshes[MS18WinA] = g.Quad(1.5f, 1.2f, 2.5f);
+    E.meshes[MS18WinB] = g.Quad(2.0f, 1.0f, 2.2f);
     // (indices are relative to each mesh's base vertex; DrawIndexed adds it)
     for (int k = 0; k < 2; ++k) {
         D3D11_BUFFER_DESC bd{}; bd.Usage = D3D11_USAGE_DEFAULT;
@@ -5449,6 +5954,16 @@ int main(int argc, char** argv) {
     if (!vsM || !vsS || !vsI || !psB || !vsSh || !ps9) return 1;
     E.dev->CreateVertexShader(vsSh->GetBufferPointer(), vsSh->GetBufferSize(), nullptr, &E.vsShift);   // v0.10.0 phase 19
     E.dev->CreatePixelShader(ps9->GetBufferPointer(), ps9->GetBufferSize(), nullptr, &E.ps9);
+    {                                                    // v0.10.0 phase 22 (S18)
+        ComPtr<ID3DBlob> a = Compile("VSShift2", "vs_5_0"), b = Compile("VSShift2B", "vs_5_0"), c = Compile("VSShift2F", "vs_5_0"),
+                         p = Compile("PSMain10", "ps_5_0"), q = Compile("PSFwd10", "ps_5_0");
+        if (!a || !b || !c || !p || !q) return 1;
+        E.dev->CreateVertexShader(a->GetBufferPointer(), a->GetBufferSize(), nullptr, &E.vsShift2);
+        E.dev->CreateVertexShader(b->GetBufferPointer(), b->GetBufferSize(), nullptr, &E.vsShift2B);
+        E.dev->CreateVertexShader(c->GetBufferPointer(), c->GetBufferSize(), nullptr, &E.vsShift2F);
+        E.dev->CreatePixelShader(p->GetBufferPointer(), p->GetBufferSize(), nullptr, &E.ps10);
+        E.dev->CreatePixelShader(q->GetBufferPointer(), q->GetBufferSize(), nullptr, &E.psFwd10);
+    }
     E.dev->CreateVertexShader(vsM->GetBufferPointer(), vsM->GetBufferSize(), nullptr, &E.vsMain);
     E.dev->CreateVertexShader(vsS->GetBufferPointer(), vsS->GetBufferSize(), nullptr, &E.vsSkin);
     E.dev->CreateVertexShader(vsI->GetBufferPointer(), vsI->GetBufferSize(), nullptr, &E.vsInst);
@@ -5661,6 +6176,13 @@ int main(int argc, char** argv) {
                                      "motion -- every interior pixel the cabin motion"
                                    : "S17b car, valid interior: one big body draw outweighs a 2-draw swinging tag for the cabin R", fl });
         }
+    }
+    // v0.10.0 phase 22: S18 shop windows (the MVP in cb0 rows 6..9) -- after S17, so an older binary's full-run cmpdump still lines
+    // up for S1-S17 (its file is then shorter: the comparison prints "REFERENCE FILE TOO SHORT" for S18 only)
+    if ((only < 0 || only == 18) && !mutNoCons && !mutNoFwd && !mutNoAttach && !mutNoTwin && !mutPar) {
+        const int fl = RunShopScene(E, snapPx, tot);
+        res.push_back({ "S18 shop windows: glass + forward reflection draws with the MVP in cb0 rows 6..9 keep the camera motion while "
+                        "the camera drives and yaws", fl });
     }
     printf("\n");
     for (auto& r : res) printf("%-120.120s %s\n", r.first, r.second ? "FAILED" : "passed");

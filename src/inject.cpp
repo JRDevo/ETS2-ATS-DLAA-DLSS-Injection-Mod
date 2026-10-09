@@ -9099,7 +9099,8 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
             if (g_objOn) ObjIds::LogIds(g_blitCount);                      // v0.9.0 r2: per-id dump (<= 8 ids)
         }
         if (g_didCfg) {                                                    // v0.10.0 per-draw MVs (same window)
-            char didTag[6144];                                // v0.10.0 phase 3: was 2048 (+ camR / forward fields); phase 14: 6144
+            char didTag[8192];                                // v0.10.0 phase 3: was 2048 (+ camR / forward fields); phase 14: 6144;
+                                                              // phase 22: 8192 (+ the MVP layout field)
             DidStatsTag(didTag, sizeof(didTag), wPasses);
             Log("MV draw-ids @blit %llu%s", (unsigned long long)g_blitCount, didTag);
         }
@@ -9702,10 +9703,18 @@ void CollectMvCandidate(ID3D11DeviceContext* ctx, UINT indexCount, UINT startInd
     UINT first = 0, num = 0;
     g_ctx1->VSGetConstantBuffers1(0, 1, &cb, &first, &num);
     if (!cb) { ++ps.skNoCb; return; }
-    const UINT byteOff = first * 16 + 64;
+    // v0.10.0 phase 22: the MVP at the row the per-draw layout detection found for this VS (DrawIdMv::MvpRow; rows 4..7 while the
+    // VS is not known yet: pass A's 3-row shape rule then rejects a misread shifted layout)
+    UINT mvpRow = 4;
+    if (!DrawIdMv::LayoutOff()) {
+        ID3D11VertexShader* vs = nullptr;
+        ctx->VSGetShader(&vs, nullptr, nullptr);
+        if (vs) { mvpRow = DrawIdMv::MvpRow(vs); vs->Release(); }
+    }
+    const UINT byteOff = first * 16 + 16 * mvpRow;
     D3D11_BUFFER_DESC bd{};
     cb->GetDesc(&bd);
-    if (num * 16 >= 128 && byteOff + 64 <= bd.ByteWidth) {
+    if (num >= mvpRow + 4 && byteOff + 64 <= bd.ByteWidth) {
         CandidateRecord::DrawKey key{};
         ID3D11Buffer* ib = nullptr; DXGI_FORMAT ibFmt = DXGI_FORMAT_UNKNOWN; UINT ibOff = 0;
         ID3D11Buffer* vb = nullptr; UINT vbStride = 0, vbOff = 0;
@@ -10531,7 +10540,8 @@ uint64_t FwdIdentity(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex,
     const uint64_t id = ObjMix(kh + 0x9E3779B97F4A7C15ull * ((uint64_t)occ + 1));
     return id ? id : 1;
 }
-// the draw's MVP (VS cbuffer slot 0, rows 4..7) -> the open staging slot (+ what the near-camera log line names)
+// the draw's MVP (VS cbuffer slot 0, rows 4..7; v0.10.0 phase 22: the VS's MVP row, DrawIdMv::MvpRow) -> the open staging slot
+// (+ what the near-camera log line names)
 void FwdNoteMvp(ID3D11DeviceContext* ctx, uint64_t id, UINT indexCount, ID3D11DepthStencilState* dss,
                 ID3D11BlendState* bs) {
     if (g_fwdRbOpen < 0 || !g_fwdDev) return;
@@ -10552,8 +10562,14 @@ void FwdNoteMvp(ID3D11DeviceContext* ctx, uint64_t id, UINT indexCount, ID3D11De
         cb->GetDesc(&bd);
         g_fwdLastCb = cb; g_fwdLastCbBytes = bd.ByteWidth;
     }
-    const UINT off = first * 16u + 64u;
-    if (num * 16u >= 128u && off + 64u <= g_fwdLastCbBytes) {
+    UINT mvpRow = 4u;                                    // v0.10.0 phase 22 (see CameraMv's candidates above)
+    if (!DrawIdMv::LayoutOff()) {
+        ID3D11VertexShader* vs = nullptr;
+        ctx->VSGetShader(&vs, nullptr, nullptr);
+        if (vs) { mvpRow = DrawIdMv::MvpRow(vs); vs->Release(); }
+    }
+    const UINT off = first * 16u + 16u * mvpRow;
+    if (num >= mvpRow + 4u && off + 64u <= g_fwdLastCbBytes) {
         if (!S.stage) {
             D3D11_BUFFER_DESC sd{};
             sd.ByteWidth = kFwdRbMax * 64u;
@@ -11351,7 +11367,7 @@ void DidStatsTag(char* buf, size_t cap, uint64_t passes) {
         double fAvg = 0, fMax = 0; uint64_t fN = 0;
         g_didFwdReplayTimer.Take(&fAvg, &fMax, &fN);
         // v0.10.0 phase 19: the small-cabin rule (mv_cabin_small) and the MVP-shape rule, eye 0
-        char cabTxt[420];
+        char cabTxt[1024];                                // (v0.10.0 phase 22: + the MVP layout field; was 420)
         {
             const uint64_t su = s.cabSmallUsed - s0.cabSmallUsed, sk = s.cabSmallKept - s0.cabSmallKept;
             const double rbx = rbd;
@@ -11371,6 +11387,20 @@ void DidStatsTag(char* buf, size_t cap, uint64_t passes) {
                      (unsigned long long)sk, (double)(s.cabPaired - s0.cabPaired) / rbx,
                      (double)(s.cabVoters - s0.cabVoters) / rbx, (double)(s.notMvp - s0.notMvp) / rbx,
                      (double)(s.notMvpCabin - s0.notMvpCabin) / rbx);
+            // v0.10.0 phase 22 MVP LAYOUT (eye 0, read back): G-buffer draws per frame by the cb0 block their MVP was read from
+            uint32_t vc[6] = {};
+            DrawIdMv::VsLayoutCounts(vc);
+            const size_t cl = strlen(cabTxt);
+            snprintf(cabTxt + cl, sizeof(cabTxt) - cl, "; MVP layout (phase 22): normal %.1f / +1 %.1f / +2 %.1f / +3 %.1f / +4 %.1f / "
+                     "none %.1f draws per frame (none = %.1f no MVP-shaped block + %.1f the VS's cached block failed: state 5), "
+                     "forward draws with a shifted block %.1f, draws that scanned the rows %.1f per frame%s; VS layouts known: normal "
+                     "%u, +1 %u, +2 %u, +3 %u, +4 %u, undecided %u", (double)(s.lay[0] - s0.lay[0]) / rbx,
+                     (double)(s.lay[1] - s0.lay[1]) / rbx, (double)(s.lay[2] - s0.lay[2]) / rbx,
+                     (double)(s.lay[3] - s0.lay[3]) / rbx, (double)(s.lay[4] - s0.lay[4]) / rbx,
+                     (double)(s.layNone - s0.layNone + s.layHintFail - s0.layHintFail) / rbx, (double)(s.layNone - s0.layNone) / rbx,
+                     (double)(s.layHintFail - s0.layHintFail) / rbx, (double)(s.layFwdShift - s0.layFwdShift) / rbx,
+                     (double)(s.layScanned - s0.layScanned) / rbx, DrawIdMv::LayoutOff() ? " (detection OFF)" : "",
+                     vc[0], vc[1], vc[2], vc[3], vc[4], vc[5]);
         }
         const uint64_t fwdPx = s.fwdPx - s0.fwdPx;
         const double fwdPxd = fwdPx ? (double)fwdPx : 1.0;
@@ -15567,6 +15597,12 @@ void LoadConfig() {
                                  "IndexCount, a cluster of 1 is enough) when the medoid disagrees with it; a medoid that agrees "
                                  "stays (bit-identical)"
                                : "off: the cabin layer keeps the medoid below the consensus size (before)");
+    Log("phase 22 (v0.10.0): MVP layout per vertex shader -- the recorded cb0 mirror holds rows 0..11 of each draw (was 4..7); "
+        "the GPU takes the first 4-row block from row 4 up with the SHAPE of an MVP (clip x, y and w rows each > 2 %% of the "
+        "longest row: rows 4..7 normal, 5..8 the ATS car interior, 6..9 the ATS shop windows), a per-VS table caches it after the "
+        "first read-back draw ('MV draw-ids: MVP rows r..r+3 for VS ...' once per VS: every shifted one, the first 16 normal "
+        "ones); pairing, consensus, twins, attach, the parent vote, the dump and pass A all use that block; no MVP-shaped block = "
+        "state 5 (camera R) as phase 19. 'MV draw-ids @blit': 'MVP layout (phase 22): normal N / +1 A / +2 B ...'");
     }
     {                                                    // v0.10.0 phase 10
         char kept[300];

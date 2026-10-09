@@ -48,7 +48,8 @@ cbuffer PairCB : register(b0) {
     uint4  Counts;       // x = world pairs, y = cabin pairs, z = all matched world pairs (AllPairs, v0.6.0)
     float4 Params;       // x = near_reject_m (world layer only), y = ego_origin_m (v0.6.0), z = v0.10.0 phase 8: bit L = layer L
                          // has no medoid this frame (its candidates were dropped): this pass writes nothing for it
-                         // w = v0.10.0 phase 19: 1 = HARNESS mutation, the MVP-shape rule off (NotMvp)
+                         // w = v0.10.0 phase 19: 1 = HARNESS mutation, the MVP-shape rule off (NotMvp); phase 22: 2 = HARNESS
+                         // mutation, the layout detection off (the phase-19 row-3 rule)
     uint4  AllPairs[128];// v0.6.0: every matched world pair (prevByteAddr, curByteAddr, indexCount, 0)
 };
 ByteAddressBuffer          CandPrev : register(t0);
@@ -96,10 +97,14 @@ bool Inv4(float4x4 mm, out float4x4 r) {
 // v0.10.0 phase 19 MVP SHAPE (= draw_ids.cpp NotMvp, keep in step): cb0 rows 4..7 whose clip-w row 3 has a negligible xyz part
 // (< 0.02 of the longest of rows 0..2) are not an MVP -- in game the ATS car interior's shader holds its MVP one row later, and
 // such a pair's R is in the wrong coordinates. Never a medoid / ego candidate.
+// v0.10.0 phase 22: the candidates are copied from the VS's MVP row (inject.cpp: DrawIdMv::MvpRow, rows 4..7 while the VS is not
+// known), and the rule is draw_ids.cpp's 3-row SHAPE: clip-x, clip-y and clip-w rows (0, 1, 3) each > 0.02 of the longest of rows
+// 0..2 -- the shop windows' misread rows 4..7 hold a (0, 0, 0, 1) row (block row 1) and passed the phase-19 test.
 bool NotMvp(float4x4 m) {
-    if (Params.w > 0.5) return false;
+    if (Params.w > 0.5 && Params.w < 1.5) return false;
     float lm = max(length(m[0].xyz), max(length(m[1].xyz), length(m[2].xyz)));
-    return lm > 1e-20 && !(length(m[3].xyz) > 0.02 * lm);
+    if (Params.w > 1.5) return lm > 1e-20 && !(length(m[3].xyz) > 0.02 * lm);   // mutation: phase 19 exactly
+    return lm > 1e-20 && !(length(m[0].xyz) > 0.02 * lm && length(m[1].xyz) > 0.02 * lm && length(m[3].xyz) > 0.02 * lm);
 }
 
 float Frob(float4x4 a, float4x4 b) {
@@ -1717,7 +1722,8 @@ bool CameraMv::Generate(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, uint32
     memcpy((uint8_t*)mp.pData + sizeof(pairData), counts, sizeof(counts));
     {
         // v0.10.0 phase 8: z = layers without a medoid; phase 19: w = the harness mutation "MVP-shape rule off"
-        const float params[4] = { m_nearReject, m_egoOrigin, (float)noMed, DrawIdMv::MvpShapeOff() ? 1.0f : 0.0f };
+        const float params[4] = { m_nearReject, m_egoOrigin, (float)noMed,
+                                  DrawIdMv::MvpShapeOff() ? 1.0f : (DrawIdMv::LayoutOff() ? 2.0f : 0.0f) };   // phase 22: 2
         memcpy((uint8_t*)mp.pData + sizeof(pairData) + sizeof(counts), params, sizeof(params));
         memcpy((uint8_t*)mp.pData + sizeof(pairData) + sizeof(counts) + sizeof(params), allPairs, sizeof(allPairs));
     }

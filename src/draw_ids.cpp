@@ -388,10 +388,43 @@ bool OriginFree(float4x4 m) { return OriginFreeCol(Col3(m)); }
 // = not an MVP: never paired / a voter / a candidate (pass A too), state 5 (no MVP: the layer's camera R). FoldU.w bit 4 =
 // HARNESS mutation: the rule off. Cnt [232] / [233] = such G-buffer draws (all / cabin).
 static const float kShapeMin = 0.02;
+// (v0.10.0 phase 22: one more C++ raw-string split here, MSVC's 16380-byte literal cap): )" R"(
+// v0.10.0 phase 22 MVP LAYOUT (captures/shop_window_audit.md: four ATS flat RenderDoc captures, the cb0 rows of every G-buffer and
+// forward draw, VS disassembly). The game's vertex shaders do not all keep the MVP in cb0 rows 4..7:
+//   normal world draws: rows 0..3 = model-view (row 3 = (0, 0, 0, 1)), rows 4..7 = MVP;
+//   the car interior (VS R3109, phase 19): row 4 = (0, 0, 0, 1), MVP in rows 5..8 ("+1");
+//   the shop windows (VS R38017 / R38019 fake-interior glass, R37723 / R37725 reflective windows: `dp4 o1.x..w, cb0[6..9], v0`):
+//   r0 = object position + seed, r1 = parameters, r2..r5 = model-view (r5 = (0, 0, 0, 1)), MVP in rows 6..9 ("+2").
+// Phase 19's rule caught only the car (its misread row 3 is the clip-z row). The windows' misread rows 4..7 = [MV row 2, (0, 0, 0,
+// 1), MVP row 0, MVP row 1] passed it (row 3 = the clip-y row, |xyz| ~ 2), paired with that wrong matrix and, with any head motion,
+// became movers with an R in the wrong coordinates (VR: wobbly pink shop windows; parked flat: R = I, invisible).
+// SHAPE of an MVP (ShapeOk): its clip-x, clip-y and clip-w rows (0, 1, 3) each have an xyz part > kShapeMin of the longest of rows
+// 0..2; the clip-z row (2) may be ~0 (the infinite reversed-Z projection: (0, 0, 0, near)). A (0, 0, 0, 1) row inside the block
+// fails it, so rows 4..7 fail for both shifted layouts (car: block row 0, windows: block row 1), rows 5..8 of the windows fail
+// (block row 0), and the first passing block from row 4 up is the real MVP (audit data: every normal draw passes at row 4, the car
+// interior at row 5, every window draw at row 6). An anchor rule ("the block after the (0, 0, 0, 1) row") would also fit the
+// three layouts, but the shape test needs no assumption about rows 0..3 (the harness, camera-relative grass, view-space plates).
+// CSGather: a draw whose VS has a cached start row (Tab .z bits 20..23, the CPU's per-VS table, DrawIdMv::MvpRow) tests only that
+// block -- it fails = no MVP for this draw (state 5 through NotMvp; reported, the CPU re-checks the VS); a VS not cached yet scans
+// rows 4..8 (bounded by the rows mirrored, Tab .z bits 16..19) and uses the first passing block (none = rows 4..7, which fail
+// the shape: state 5, as phase 19). Per-draw code (4 bits at Cnt dword kLayCodeBase + i / 8, nibble i % 8) for the CPU table:
+// 1..5 = scanned, the block at row code + 3 used; 6 = scanned, none; 7 = the cached block passed; 8 | s = the cached block failed,
+// the scan found s (1..6 as above, NOT used). Cnt [236..240] = G-buffer draws by the block used (rows 4..7 .. 8..11), [241] none
+// MVP-shaped (not cached), [242] cached block failed, [243] forward draws with a block after row 4, [244] draws that scanned.
+// FoldU.w bit 5 = HARNESS mutation "layout detection off": rows 4..7 always + the phase-19 NotMvp exactly (phase 21).
+static const uint kLayCodeBase = 832u;
+bool ShapeOk(float4x4 m) {
+    float l0 = length(m[0].xyz), l1 = length(m[1].xyz), l3 = length(m[3].xyz);
+    float lm = max(l0, max(l1, length(m[2].xyz)));
+    return lm > 1e-20 && l0 > kShapeMin * lm && l1 > kShapeMin * lm && l3 > kShapeMin * lm;
+}
+// "this draw's MVP block is not an MVP" (CSPair / ResolveDraw): phase 22 = the block failed the shape (CSGather found none, or the
+// VS's cached block failed); a degenerate block (rows 0..2 all ~0) is left to Inv4 as before (unpaired, not state 5)
 bool NotMvp(float4x4 m) {
     if ((FoldU.w & 16u) != 0u) return false;
     float lm = max(length(m[0].xyz), max(length(m[1].xyz), length(m[2].xyz)));
-    return lm > 1e-20 && !(length(m[3].xyz) > kShapeMin * lm);
+    if ((FoldU.w & 32u) != 0u) return lm > 1e-20 && !(length(m[3].xyz) > kShapeMin * lm);   // mutation: phase 19 exactly
+    return lm > 1e-20 && !ShapeOk(m);
 }
 uint CandAt(uint c) {
     uint4 v = Cand[c >> 2];
@@ -455,8 +488,38 @@ void CSGather(uint3 tid : SV_DispatchThreadID) {
     uint4 e = Tab[i * 2u];
     float4x4 Mc = float4x4(1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1);
     if ((e.z & (kFInst | kFNoMvp)) == 0u && e.x != kNone) {
-        if ((e.z & kFFwd) != 0u) Mc = LoadM(MirrorF, e.x);
-        else Mc = LoadM(Mirror, e.x);
+        bool fw = (e.z & kFFwd) != 0u;
+        Mc = fw ? LoadM(MirrorF, e.x) : LoadM(Mirror, e.x);   // rows 4..7 (phase 21; e.x = the mirror offset of row 4)
+        if ((FoldU.w & 32u) == 0u) {                          // v0.10.0 phase 22 MVP LAYOUT (see ShapeOk)
+            uint avail = (e.z >> 16) & 15u, hint = (e.z >> 20) & 15u, a0 = e.x - 64u;
+            avail = max(avail, 8u);
+            uint code = 0u, lay = 0u, o;
+            float4x4 Bh = Mc;
+            bool hintOk = false;
+            if (hint >= 4u && hint + 4u <= avail) {
+                Bh = fw ? LoadM(MirrorF, a0 + hint * 16u) : LoadM(Mirror, a0 + hint * 16u);
+                hintOk = ShapeOk(Bh);
+            }
+            if (hintOk) { Mc = Bh; lay = hint; code = 7u; }
+            else {
+                uint found = 0u;
+                float4x4 Bf = Mc;
+                [loop] for (uint r = 4u; r <= 8u; ++r) {
+                    if (r + 4u > avail) break;
+                    float4x4 B = fw ? LoadM(MirrorF, a0 + r * 16u) : LoadM(Mirror, a0 + r * 16u);
+                    if (ShapeOk(B)) { found = r; Bf = B; break; }
+                }
+                code = found != 0u ? found - 3u : 6u;
+                if (hint != 0u) { code |= 8u; Mc = Bh; }          // the VS's cached block failed: no MVP this draw (NotMvp)
+                else if (found != 0u) { Mc = Bf; lay = found; }
+                Cnt.InterlockedAdd(244u * 4u, 1u, o);
+            }
+            if (!fw) {
+                if (lay >= 4u) Cnt.InterlockedAdd((236u + lay - 4u) * 4u, 1u, o);
+                else Cnt.InterlockedAdd((hint != 0u ? 242u : 241u) * 4u, 1u, o);
+            } else if (lay > 4u) Cnt.InterlockedAdd(243u * 4u, 1u, o);
+            Cnt.InterlockedOr((kLayCodeBase + (i >> 3u)) * 4u, code << ((i & 7u) * 4u), o);
+        }
     }
     StoreM(CurM, i * kMStride, Mc);
     CurM.Store4(i * kMStride + 64u, uint4(0u, 0u, 0u, 0u));   // track: none (CSResolve writes it for a mutual pair)
@@ -2044,10 +2107,72 @@ bool  g_twin = true;          // v0.10.0 phase 5: dlaa.ini mv_drawid_twin (unpai
 bool  g_parent = true;        // v0.10.0 phase 6: dlaa.ini mv_drawid_parent (unpaired draws take their rigid parent's R)
 int   g_parentMut = 0;        // v0.10.0 phase 6: harness mutations only (bit 0 conjugated formula, bit 1 no depth test; phase 14
                               // round 6: bit 2 origin-free rule off, bit 3 multi-instance draws listed / held again; round 7:
-                              // bit 4 the round-6 origin-free rule; phase 19: bit 5 the MVP-shape rule off, here and in pass A)
+                              // bit 4 the round-6 origin-free rule; phase 19: bit 5 the MVP-shape rule off, here and in pass A;
+                              // phase 22: bit 6 the MVP layout detection off -- rows 4..7 + the phase-19 rule, as phase 21)
 bool  g_instancedVote = false;// v0.10.0 phase 6b: replayed instanced / no-MVP draws take part in the rigid-parent vote
                               // (dlaa.ini mv_drawid_instanced; set by DrawIdMv::SetInstanced -- in game it follows the ini key,
                               // the harness turns it on for S8 only so S1-S7 are unchanged)
+// v0.10.0 phase 22 MVP LAYOUT: the per-VS table (render thread only; every unit's readbacks feed it). row = the cached start row of
+// the VS's MVP block (4..8, 0 = not decided: its draws scan), decided by the FIRST read-back draw of the VS whose scan found a
+// block; alt / altN = a different block found by consecutive draws whose cached block FAILED (kLayRecheck of them in a row without
+// a draw that confirmed the cached block -> the VS switches: a VS pointer reused by another shader); none = draws that found no
+// MVP-shaped block at all (diagnostic). Open addressing on the pointer; full = new VSes are not cached (their draws keep scanning).
+struct VsLay { const void* vs; uint8_t row, alt, logged; uint16_t altN; uint32_t none; };
+constexpr int kVsLayCap = 4096;                        // power of 2; ATS: a few hundred vertex shaders per session
+constexpr int kLayRecheck = 8;
+VsLay    g_vsLay[kVsLayCap] = {};
+int      g_vsLayN = 0;
+uint64_t g_vsLayFull = 0, g_vsLaySwitches = 0;
+int      g_vsLayLogN = 0, g_vsLayLogNormal = 0;
+VsLay* VsLayFind(const void* vs, bool create) {
+    if (!vs) return nullptr;
+    uint32_t h = (uint32_t)((Mix((uint64_t)(uintptr_t)vs) >> 40) & (uint32_t)(kVsLayCap - 1));
+    for (int probe = 0; probe < kVsLayCap; ++probe, h = (h + 1) & (uint32_t)(kVsLayCap - 1)) {
+        if (g_vsLay[h].vs == vs) return &g_vsLay[h];
+        if (!g_vsLay[h].vs) {
+            if (!create) return nullptr;
+            if (g_vsLayN >= kVsLayCap * 3 / 4) { ++g_vsLayFull; return nullptr; }
+            g_vsLay[h] = VsLay{};
+            g_vsLay[h].vs = vs;
+            ++g_vsLayN;
+            return &g_vsLay[h];
+        }
+    }
+    return nullptr;
+}
+const char* LayName(uint32_t row) {
+    static const char* const k[] = { "normal", "+1", "+2", "+3", "+4" };
+    return row >= 4u && row <= 8u ? k[row - 4u] : "none";
+}
+// one read-back draw of VS e found block `row` (4..8) by its own scan -- the first decides; a different one counts like a failure
+void VsLayEvidence(VsLay* e, uint32_t row, bool cachedFailed) {
+    if (!e->row && !cachedFailed) {
+        e->row = (uint8_t)row; e->altN = 0;
+        uint32_t c[6] = {};
+        DrawIdMv::VsLayoutCounts(c);
+        const bool normal = row == 4u;
+        if (!e->logged && ((!normal && g_vsLayLogN < 64) || (normal && g_vsLayLogNormal < 16))) {
+            e->logged = 1;
+            if (normal) ++g_vsLayLogNormal; else ++g_vsLayLogN;
+            Log("MV draw-ids: MVP rows %u..%u for VS %p (layout: %s) -- decided from its first read-back draw (v0.10.0 phase 22; VS "
+                "layouts known: normal %u, +1 %u, +2 %u, +3 %u, +4 %u, undecided %u%s)", row, row + 3u, e->vs, LayName(row), c[0],
+                c[1], c[2], c[3], c[4], c[5], (normal && g_vsLayLogNormal == 16) ? "; further normal-layout VSes are counted in the "
+                "'MVP layout' field of the 'MV draw-ids @blit' line, not logged" : "");
+        }
+        return;
+    }
+    if (row == e->row) { e->altN = 0; return; }
+    if (e->alt == row) { if (e->altN < 0xFFFFu) ++e->altN; } else { e->alt = (uint8_t)row; e->altN = 1; }
+    if (e->altN >= (uint16_t)kLayRecheck) {
+        const uint32_t old = e->row;
+        e->row = (uint8_t)row; e->altN = 0;
+        ++g_vsLaySwitches;
+        if (g_vsLaySwitches <= 32)
+            Log("MV draw-ids: MVP rows of VS %p CHANGED %u..%u -> %u..%u (layout %s -> %s): %d draws in a row failed the cached "
+                "block and found this one (v0.10.0 phase 22; switches so far %llu)", e->vs, old, old + 3u, row, row + 3u,
+                LayName(old), LayName(row), kLayRecheck, (unsigned long long)g_vsLaySwitches);
+    }
+}
 // v0.10.0 phase 6 vote rules: relative linear-depth tolerance, smallest winning vote count / share, vote cap per unpaired draw,
 // grid stride (px; 2 = a quarter of the pixels). Phase 6c (marching vote): 4 % / 8 votes / 50 % (was 2 % / 32 / 60 % for the
 // +-2 / +-5 px neighbour samples); the stride is also the march step; march reach (px per axis) and the march budget per
@@ -2183,7 +2308,11 @@ constexpr UINT kCbBytes = 64u + 48u * 16u + 96u;     // v0.10.0 phase 9: + Clip,
 // phase 14 round 4: + the per-draw centroid sums (kParSum = kMax * 200 + 24576, kMax * 12 B)
 // phase 19: + the candidates' summed voter IndexCounts (kVoteW = kMax * 212 + 24576, 256 x 4 B)
 constexpr UINT kWorkBytes = (UINT)DrawIdRecord::kMax * 212u + 24576u + 1024u;
-constexpr UINT kCntBytes = 3328u;               // v0.10.0 phase 8: + dwords 256..383 = instanced draws with a moving parent
+constexpr UINT kCntBytes = 5376u;               // v0.10.0 phase 8: + dwords 256..383 = instanced draws with a moving parent
+                                                 // v0.10.0 phase 22: + dwords 832..1343 = the per-draw MVP layout codes
+                                                 // (4 bits per draw, kLayCodeBase in the shader; was 3328)
+constexpr UINT kLayCodeBase = 832u;
+static_assert(kLayCodeBase + (UINT)DrawIdRecord::kMax / 8u <= kCntBytes / 4u && kLayCodeBase >= 773u, "v0.10.0 phase 22 codes");
                                                  // v0.10.0 phase 18: + dwords 768..772 (compact vote: tiles, items, overflows)
                                                 // phase 14: + 384..511 own-pair static G-buffer draws, 512..639 rigid parents,
                                                 // 640..767 draws that move (a mover by any route / a track reject)
@@ -2397,7 +2526,8 @@ bool DrawIdRecord::HasOpenRing(const void* res) const {
     return false;
 }
 
-UINT DrawIdRecord::AddRing(ID3D11Buffer* cb, UINT off) {
+UINT DrawIdRecord::AddRing(ID3D11Buffer* cb, UINT rowBase, UINT want, UINT* rows) {
+    *rows = 0;
     int k = m_lastRing;
     if (k < 0 || m_rings[k].buf != cb || m_rings[k].sealed) {
         k = -1;
@@ -2421,11 +2551,17 @@ UINT DrawIdRecord::AddRing(ID3D11Buffer* cb, UINT off) {
         m_lastRing = k;
     }
     Ring& r = m_rings[k];
-    if (off + 64u > r.bytes) return kNone;
-    if (off < r.lo) r.lo = off;
-    if (off + 64u > r.hi) r.hi = off + 64u;
+    if (rowBase + 128u > r.bytes) return kNone;          // rows 4..7 must exist (phase 21: the MVP's 64 bytes at +64)
+    // v0.10.0 phase 22: rows 0 .. want / 16 - 1 of the draw's window (the MVP may sit in rows 4..11, see DrawIdMv CSGather),
+    // clipped to the ring; the mirror holds the whole ring, so only the copied byte range grows
+    UINT end = rowBase + want;
+    if (end > r.bytes) end = r.bytes;
+    end = rowBase + ((end - rowBase) & ~15u);
+    if (rowBase < r.lo) r.lo = rowBase;
+    if (end > r.hi) r.hi = end;
     ++r.draws;
-    return r.base + off;
+    *rows = (end - rowBase) / 16u;
+    return r.base + rowBase + 64u;                       // the offset of row 4 (MirrorOff), as before
 }
 
 bool DrawIdRecord::EnsureMirror(ID3D11DeviceContext* ctx, UINT need) {
@@ -2564,7 +2700,12 @@ bool DrawIdRecord::Record(ID3D11DeviceContext1* ctx, UINT ic, UINT inst, UINT si
     if (m_segments > 0) k.flags |= kFLate;
     if (m_forward) k.flags |= kFFwd;                     // v0.10.0 phase 3
     k.off = kNone;
-    if (!instanced && s.cb[0] && s.cbNum[0] * 16u >= 128u) k.off = AddRing(s.cb[0], s.cbFirst[0] * 16u + 64u);
+    k.rows = 0;
+    k.vs = s.vs;                                         // v0.10.0 phase 22: identity only (DrawIdMv::MvpRow, the layout table)
+    if (!instanced && s.cb[0] && s.cbNum[0] * 16u >= 128u) {
+        const UINT nRows = s.cbNum[0] < kMirrorRows ? s.cbNum[0] : kMirrorRows;   // v0.10.0 phase 22: rows 0..11 (was 4..7)
+        k.off = AddRing(s.cb[0], s.cbFirst[0] * 16u, nRows * 16u, &k.rows);
+    }
     if (!instanced && k.off == kNone) { k.flags |= kFNoMvp; ++m_nNoMvp; }
     uint64_t f = Mix((uint64_t)(uintptr_t)s.ib + 0x9E3779B97F4A7C15ull);
     f = Mix(f ^ (uint64_t)(uintptr_t)s.vb[0]);
@@ -2927,6 +3068,8 @@ void     DrawIdRecord::CbWindow(int i, UINT* first, UINT* num) const {
     *num = (i >= 0 && i < m_n) ? m_key[i].cbNum : 0;
 }
 const void* DrawIdRecord::Ps(int i) const { return (i >= 0 && i < m_n) ? m_key[i].ps : nullptr; }   // v0.10.0 phase 21
+UINT     DrawIdRecord::MirrorRows(int i) const { return (i >= 0 && i < m_n) ? m_key[i].rows : 0u; }   // v0.10.0 phase 22
+const void* DrawIdRecord::Vs(int i) const { return (i >= 0 && i < m_n) ? m_key[i].vs : nullptr; }   // v0.10.0 phase 22
 const void*             DrawIdRecord::s_gamePs = nullptr;   // v0.10.0 phase 21: inject.cpp hkPSSetShader (NoteGamePs)
 DrawIdRecord::PsInfoFn  DrawIdRecord::s_psInfo = nullptr;   //   inject.cpp (SetPsInfoFn); null in the harness = unknown
 
@@ -3084,6 +3227,7 @@ void DrawIdRecord::ShutdownDevice() {
     s_initVs.Reset(); s_initPs[0].Reset(); s_initPs[1].Reset(); s_initDss.Reset(); s_initRs.Reset();   // v0.10.0 phase 10
     s_initDev = nullptr; s_initFailed = false;
     RsMemoClear();                                       // v0.10.0 phase 9: the scissor-enabled RS copies
+    DrawIdMv::VsLayoutClear();                           // v0.10.0 phase 22: VS pointers belong to the old device
 }
 
 // =====================================================================================================================
@@ -3135,6 +3279,25 @@ unsigned DrawIdMv::ConsMinCabin() { return g_consMinCabin; }
 void DrawIdMv::SetCabinSmall(unsigned n) { g_cabinSmall = n == 0u ? 0u : (n < 2u ? 2u : (n > 64u ? 64u : n)); }   // phase 19
 unsigned DrawIdMv::CabinSmall() { return g_cabinSmall; }
 bool DrawIdMv::MvpShapeOff() { return (g_parentMut & 32) != 0; }
+// ---- v0.10.0 phase 22 MVP LAYOUT (the per-VS table: VsLay above; the GPU side: CSGather / ShapeOk) ----
+bool DrawIdMv::LayoutOff() { return (g_parentMut & 64) != 0; }
+UINT DrawIdMv::MvpRow(const void* vs) {
+    if (LayoutOff() || !vs) return 4u;
+    const VsLay* e = VsLayFind(vs, false);
+    return (e && e->row >= 4u && e->row <= 8u) ? e->row : 4u;
+}
+void DrawIdMv::VsLayoutCounts(uint32_t out[6]) {
+    for (int q = 0; q < 6; ++q) out[q] = 0;
+    for (int h = 0; h < kVsLayCap; ++h) {
+        if (!g_vsLay[h].vs) continue;
+        const uint32_t r = g_vsLay[h].row;
+        ++out[(r >= 4u && r <= 8u) ? r - 4u : 5u];
+    }
+}
+void DrawIdMv::VsLayoutClear() {
+    memset(g_vsLay, 0, sizeof(g_vsLay));
+    g_vsLayN = 0;
+}
 
 void DrawIdMv::SetConsensus(bool on) { g_consensus = on; }
 bool DrawIdMv::Consensus() { return g_consensus; }
@@ -3244,6 +3407,7 @@ DrawIdMv::~DrawIdMv() {
     delete[] m_curBig;
     delete[] m_rbInstIdx; delete[] m_rbInstKey; delete[] m_prepInstIdx; delete[] m_prepInstKey;   // v0.10.0 phase 8
     delete[] m_rbStatKey; delete[] m_prepStatKey;        // v0.10.0 phase 14
+    delete[] m_rbVs; delete[] m_rbHint; delete[] m_prepVs; delete[] m_prepHint;   // v0.10.0 phase 22
     if (m_statReg) for (DrawIdMv*& u : g_statUnit) if (u == this) u = nullptr;
     delete[] m_dump;
 }
@@ -3561,6 +3725,28 @@ void DrawIdMv::Poll(ID3D11DeviceContext* ctx) {
         m_stats.cabPaired += c[18];
         m_stats.notMvp += c[232];
         m_stats.notMvpCabin += c[233];
+        // v0.10.0 phase 22 MVP LAYOUT: the counters, then the per-draw codes -> the per-VS table (VsLayEvidence)
+        for (int q = 0; q < 5; ++q) m_stats.lay[q] += c[236 + q];
+        m_stats.layNone += c[241]; m_stats.layHintFail += c[242]; m_stats.layFwdShift += c[243]; m_stats.layScanned += c[244];
+        if (m_rbVsN[k] && m_rbVs && !LayoutOff()) {
+            const uint32_t nV = m_rbVsN[k] < (uint32_t)kMax ? m_rbVsN[k] : (uint32_t)kMax;
+            m_rbVsN[k] = 0;
+            const void* const* vss = &m_rbVs[(size_t)k * kMax];
+            const uint8_t* hs = &m_rbHint[(size_t)k * kMax];
+            const void* lastVs = nullptr;
+            VsLay* le = nullptr;
+            for (uint32_t i = 0; i < nV; ++i) {
+                const uint32_t code = (c[kLayCodeBase + (i >> 3)] >> ((i & 7u) * 4u)) & 15u;
+                if (!code || !vss[i]) continue;
+                if (vss[i] != lastVs) { le = VsLayFind(vss[i], true); lastVs = vss[i]; }
+                if (!le) continue;
+                if (code == 7u) { if (le->row == hs[i]) le->altN = 0; continue; }     // the cached block passed
+                const uint32_t s = code & 7u;
+                if (s == 6u || s == 0u || s == 7u) { if (le->none < 0xFFFFFFFFu) ++le->none; continue; }   // no MVP-shaped block
+                if (code & 8u) { if (le->row && le->row == hs[i]) VsLayEvidence(le, s + 3u, true); }   // the cached block failed
+                else VsLayEvidence(le, s + 3u, false);                                // scanned (not cached when prepared)
+            }
+        }
         // v0.10.0 phase 14 (mv_replay_static_*): this pass's verdicts -> the static streak per FullKey. The camera R the verdicts
         // were measured against must be healthy: with the consensus on, a readback whose world layer did not use one (fallback,
         // small cluster, no pick) clears the table instead (every key is replayed again until it re-earns its streak).
@@ -3752,11 +3938,26 @@ uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ui
         a = b;
     }
     // ---- upload ----
+    // v0.10.0 phase 22 MVP LAYOUT: per draw the VS's cached MVP start row (0 = not decided: the GPU scans) and the rows mirrored
+    // from row 0 -> Tab .z bits 20..23 / 16..19; kept per readback slot (Finish) so Poll can feed the per-VS table
+    if (!m_prepVs) {
+        m_prepVs = new (std::nothrow) const void*[kMax];
+        m_prepHint = new (std::nothrow) uint8_t[kMax];
+        m_rbVs = new (std::nothrow) const void*[(size_t)kRb * kMax];
+        m_rbHint = new (std::nothrow) uint8_t[(size_t)kRb * kMax];
+        if (!m_prepVs || !m_prepHint || !m_rbVs || !m_rbHint) {
+            delete[] m_prepVs; delete[] m_prepHint; delete[] m_rbVs; delete[] m_rbHint;
+            m_prepVs = nullptr; m_prepHint = nullptr; m_rbVs = nullptr; m_rbHint = nullptr;
+        }
+    }
+    const bool layOn = !LayoutOff() && m_prepVs;
     D3D11_MAPPED_SUBRESOURCE mp{};
     if (FAILED(ctx->Map(m_tab.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) { m_prevN = 0; return 0; }
     {
         uint32_t* t = (uint32_t*)mp.pData;
         uint64_t looseN = 0, noGroup = 0;
+        const void* lastVs = nullptr;
+        uint32_t lastHint = 0;
         for (uint32_t i = 0; i < n; ++i) {
             const uint8_t fl = m_curFlags[i];
             uint32_t f = 0;
@@ -3765,6 +3966,18 @@ uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ui
             if (fl & DrawIdRecord::kFCabin) f |= 4u;
             if (m_curLooseG[i]) { f |= 256u; ++looseN; }
             if (fl & DrawIdRecord::kFFwd) f |= 512u;      // v0.10.0 phase 3: the MVP lives in the forward record's mirror
+            if (layOn) {                                  // v0.10.0 phase 22
+                const void* vs = (fl & kNoPair) ? nullptr : src(i)->Vs(idx(i));
+                if (vs != lastVs) {
+                    const VsLay* le = VsLayFind(vs, false);
+                    lastHint = (le && le->row >= 4u && le->row <= 8u) ? le->row : 0u;
+                    lastVs = vs;
+                }
+                const uint32_t hint = vs ? lastHint : 0u;
+                const UINT rows = src(i)->MirrorRows(idx(i));
+                f |= ((rows < 15u ? rows : 15u) << 16) | (hint << 20);
+                m_prepVs[i] = vs; m_prepHint[i] = (uint8_t)hint;
+            }
             if (!(fl & kNoPair) && m_curGroup[i] == kNone) ++noGroup;
             const float vmin = src(i)->VpMin(idx(i)), vmax = src(i)->VpMax(idx(i));
             t[i * 8 + 0] = src(i)->MirrorOff(idx(i));
@@ -3887,7 +4100,8 @@ uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ui
         // round-6 origin-free rule, |x|, |y|, |w| <= 1e-4 |z|)
         const uint32_t holdBits = ((parentOn && m_uhold[0] && m_uholdValid[1 - m_ping]) ? 1u : 0u) |
                                   ((g_parentMut & 4) ? 2u : 0u) | ((g_parentMut & 8) ? 4u : 0u) | ((g_parentMut & 16) ? 8u : 0u) |
-                                  ((g_parentMut & 32) ? 16u : 0u);   // phase 19: bit 4 = HARNESS mutation, the MVP-shape rule off
+                                  ((g_parentMut & 32) ? 16u : 0u) |  // phase 19: bit 4 = HARNESS mutation, the MVP-shape rule off
+                                  ((g_parentMut & 64) ? 32u : 0u);   // phase 22: bit 5 = HARNESS mutation, the layout detection off
         const uint32_t foldU[4] = { fold, g_parMaxListed, epsBits, holdBits };   // v0.10.0 phase 10: y = the listed-draw cap
         memcpy((uint8_t*)mp.pData + 64 + sizeof(cand) + 48, clip, sizeof(clip));
         memcpy((uint8_t*)mp.pData + 64 + sizeof(cand) + 64, fwdMode, sizeof(fwdMode));
@@ -3922,6 +4136,8 @@ uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ui
             d.flags = (uint8_t)(m_curFlags[i] | (m_curLooseG[i] ? 0x80 : 0));
             d.ps = r->Ps(k); d.psInfo = DrawIdRecord::PsInfo(d.ps);   // v0.10.0 phase 21
             d.vpMin = r->VpMin(k); d.vpMax = r->VpMax(k); d.inst = r->InstanceCount(k);
+            d.vs = r->Vs(k); d.rows = (uint8_t)r->MirrorRows(k);   // v0.10.0 phase 22
+            d.hint = layOn ? m_prepHint[i] : 0u;
         }
         // v0.10.0 phase 21 PIXEL PROBE: the probe buffer (made once) and the packed centre for pass B of this pass
         m_probePacked = 0; m_probeBound = false; m_probeStaged = false;
@@ -3956,6 +4172,7 @@ uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ui
     m_prepN = n;
     m_prepNG = nG;
     m_prepNF = nF;
+    m_prepLay = layOn;                                   // v0.10.0 phase 22: m_prepVs / m_prepHint hold this pass's draws
     m_prepCandW = candW;
     m_prepCandC = candC;
     m_prepElig = elig;
@@ -4202,6 +4419,12 @@ void DrawIdMv::Finish(ID3D11DeviceContext* ctx) {
         m_rbStatN[k] = (m_prepStatKey && m_rbStatKey && m_prepStatN <= (uint32_t)m_prepNG) ? m_prepStatN : 0;
         if (m_rbStatN[k]) memcpy(&m_rbStatKey[(size_t)k * kMax], m_prepStatKey, (size_t)m_rbStatN[k] * sizeof(uint64_t));
         m_rbFrame[k] = g_instFrame;
+        // v0.10.0 phase 22: the draws' VS + cached start row (the per-draw layout codes come back in this slot's Cnt copy)
+        m_rbVsN[k] = (m_prepLay && m_rbVs) ? m_prepN : 0;
+        if (m_rbVsN[k]) {
+            memcpy(&m_rbVs[(size_t)k * kMax], m_prepVs, (size_t)m_rbVsN[k] * sizeof(const void*));
+            memcpy(&m_rbHint[(size_t)k * kMax], m_prepHint, m_rbVsN[k]);
+        }
         break;
     }
     // v0.10.0 phase 4 dump: this pass's GPU tables -> staging (read by DumpPoll without waiting)
@@ -4211,7 +4434,8 @@ void DrawIdMv::Finish(ID3D11DeviceContext* ctx) {
         ctx->GetDevice(&dev);
         const UINT kM = (UINT)kMax;
         // phase 5: + the twin column; phase 6: + the parent and votes columns
-        const UINT sizes[5] = { kM * 80u, kM * kRStride * 16u, kM * 84u, 512u, (UINT)kProbeN * kProbeStride };
+        // v0.10.0 phase 22: [3] = the camera R rows (512 B) + the per-draw MVP layout codes of this pass (Cnt dwords kLayCodeBase..)
+        const UINT sizes[5] = { kM * 80u, kM * kRStride * 16u, kM * 84u, 512u + kM / 2u, (UINT)kProbeN * kProbeStride };
         bool ok = dev && m_dumpSolve;
         for (int k = 0; ok && k < 4; ++k) {
             if (m_dumpSt[k]) continue;
@@ -4255,6 +4479,8 @@ void DrawIdMv::Finish(ID3D11DeviceContext* ctx) {
             ctx->CopySubresourceRegion(m_dumpSt[2].Get(), 0, kM * 80u, 0, 0, m_work.Get(), 0, &b);
             b.left = 0; b.right = 8u * 16u;               // the camera R rows: world [0..3], cabin [4..7]
             ctx->CopySubresourceRegion(m_dumpSt[3].Get(), 0, 0, 0, 0, m_dumpSolve.Get(), 0, &b);
+            b.left = kLayCodeBase * 4u; b.right = kLayCodeBase * 4u + kM / 2u;   // v0.10.0 phase 22: the layout codes
+            ctx->CopySubresourceRegion(m_dumpSt[3].Get(), 0, 512u, 0, 0, m_cnt.Get(), 0, &b);
             m_dumpPending = true;
             m_dumpPolls = 0;
         } else {
@@ -4320,6 +4546,16 @@ void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
     const float* S = (const float*)mp[3].pData;               // camera R rows: world [0..15], cabin [16..31]
     const uint32_t kM = (uint32_t)kMax;
     const uint32_t nF = m_dumpNAll - m_dumpNG;
+    // v0.10.0 phase 22: the per-draw MVP layout codes of the same pass (CSGather, 4 bits per draw; see ShapeOk in the shader)
+    const uint32_t* LC = (const uint32_t*)((const uint8_t*)mp[3].pData + 512);
+    auto layCode = [&](uint32_t i) { return i < kM ? (LC[i >> 3] >> ((i & 7u) * 4u)) & 15u : 0u; };
+    // the block the draw's MVP was read from (4..8), 0 = none (no MVP-shaped block / the cached one failed / no code)
+    auto layRow = [&](const DumpEnt& d) -> uint32_t {
+        const uint32_t c = layCode(d.i);
+        return c == 7u ? d.hint : ((c >= 1u && c <= 5u) ? c + 3u : 0u);
+    };
+    // a line for every draw that did not read rows 4..7 (or found nothing / failed its cached block)
+    auto layOdd = [&](const DumpEnt& d) { const uint32_t c = layCode(d.i); return c != 0u && layRow(d) != 4u; };
     // v0.10.0 phase 5: which draws get a line -- every forward draw, the G-buffer draws with IndexCount <= 36 (phase 4) and
     // EVERY draw that came out of the pairing unpaired (any IndexCount) or inherited a twin's / mover's R
     auto col = [&](uint32_t base, uint32_t i) { uint32_t v = 0; memcpy(&v, W + (size_t)base + (size_t)i * 4u, 4); return v; };
@@ -4335,9 +4571,11 @@ void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
     // (v0.10.0 phase 21: + every draw whose pixel shader writes SV_Depth -- its depth is not the one its viewport implies)
     auto selected = [&](const DumpEnt& d) {
         return d.i >= m_dumpNG || d.ic <= 36u || wasUnpaired(d.i) || col(kM * 68u, d.i) != 0xFFFFFFFFu || stateOf(d.i) == 3u ||
-               (stateOf(d.i) == 5u && (d.flags & DrawIdRecord::kFNoMvp) == 0) || (d.psInfo & DrawIdRecord::kPsDepth) != 0;
+               (stateOf(d.i) == 5u && (d.flags & DrawIdRecord::kFNoMvp) == 0) || (d.psInfo & DrawIdRecord::kPsDepth) != 0 ||
+               layOdd(d);                                      // (v0.10.0 phase 22: + every draw whose MVP is not in rows 4..7)
     };
     uint32_t nSel = 0, nUnp = 0, nTwin = 0, nAtt = 0, nLeft = 0, nPar = 0;
+    uint32_t nLay[5] = {}, nLayNone = 0, nLayFail = 0, nLayOff = 0;   // v0.10.0 phase 22 (G-buffer draws with an MVP window)
     uint32_t nDepthPs = 0, nDepthPsCab = 0, nCutPs = 0, nPsUnk = 0, nCabVp = 0;   // v0.10.0 phase 21 (G-buffer draws)
     for (uint32_t q = 0; q < m_dumpN; ++q) {
         const uint32_t i = m_dump[q].i;
@@ -4347,6 +4585,13 @@ void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
             if (pi & DrawIdRecord::kPsDiscard) ++nCutPs;
             if (!(pi & DrawIdRecord::kPsScanned)) ++nPsUnk;
             if (m_dump[q].vpMin >= 0.85f) ++nCabVp;
+            if (!(m_dump[q].flags & (DrawIdRecord::kFInstanced | DrawIdRecord::kFNoMvp))) {   // v0.10.0 phase 22
+                const uint32_t c = layCode(i), r = layRow(m_dump[q]);
+                if (!c) ++nLayOff;
+                else if (r >= 4u && r <= 8u) ++nLay[r - 4u];
+                else if (c & 8u) ++nLayFail;
+                else ++nLayNone;
+            }
         }
         if (wasUnpaired(i)) {
             ++nUnp;
@@ -4371,6 +4616,16 @@ void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
         "SV_Depth (%u of them with the cabin viewport) -- every one is listed below, %u alpha-tested (discard), %u unknown (created "
         "before the hook / no PS lookup); %u G-buffer draws with the cabin viewport (MinDepth >= 0.85)", m_dumpWhy, nDepthPs,
         m_dumpNG, nDepthPsCab, nCutPs, nPsUnk, nCabVp);
+    {
+        uint32_t vc[6] = {};
+        VsLayoutCounts(vc);
+        Log("MV draw-ids dump (%s): MVP layout (v0.10.0 phase 22) of the G-buffer draws with an MVP window: rows 4..7 (normal) %u, "
+            "5..8 (+1) %u, 6..9 (+2) %u, 7..10 %u, 8..11 %u, no MVP-shaped block %u, the VS's cached block failed %u%s -- every draw "
+            "not in rows 4..7 is listed below | VS table: normal %u, +1 %u, +2 %u, +3 %u, +4 %u, undecided %u (switches %llu, table "
+            "full %llu)", m_dumpWhy, nLay[0], nLay[1], nLay[2], nLay[3], nLay[4], nLayNone, nLayFail,
+            nLayOff ? (LayoutOff() ? " (layout detection OFF: harness mutation)" : ", no code") : "", vc[0], vc[1], vc[2], vc[3],
+            vc[4], vc[5], (unsigned long long)g_vsLaySwitches, (unsigned long long)g_vsLayFull);
+    }
     static const char* const kSt[] = { "?", "UNPAIRED (camera R)", "static (camera R)", "MOVER (own R)", "instanced (camera R)",
                                        "no MVP (camera R)" };
     static const char* const kStShort[] = { "?", "unpaired", "static", "mover", "instanced", "no MVP" };
@@ -4467,9 +4722,35 @@ void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
         for (int r = 0; r < 4; ++r) rl[r] = std::sqrt((double)m[r * 4] * m[r * 4] + (double)m[r * 4 + 1] * m[r * 4 + 1] +
                                                       (double)m[r * 4 + 2] * m[r * 4 + 2]);
         const double rlm01 = rl[0] > rl[1] ? rl[0] : rl[1], rlm = rlm01 > rl[2] ? rlm01 : rl[2];
-        const bool notMvp = rlm > 1e-20 && !(rl[3] > 0.02 * rlm);
-        char shTxt[96];
-        snprintf(shTxt, sizeof(shTxt), "%s (|row3.xyz| %.4g, longest row %.4g)", notMvp ? "NOT AN MVP" : "ok", rl[3], rlm);
+        // (v0.10.0 phase 22: the shader's rule is now the 3-row SHAPE -- rows 0, 1 and 3 each > 0.02 x the longest of rows 0..2;
+        // the harness mutation "layout detection off" keeps the phase-19 row-3 test; "shape rule off" none)
+        const bool notMvp = !MvpShapeOff() && rlm > 1e-20 &&
+                            (LayoutOff() ? !(rl[3] > 0.02 * rlm) : !(rl[0] > 0.02 * rlm && rl[1] > 0.02 * rlm && rl[3] > 0.02 * rlm));
+        char shTxt[128];
+        snprintf(shTxt, sizeof(shTxt), "%s (|row0/1/3.xyz| %.4g / %.4g / %.4g, longest row %.4g)", notMvp ? "NOT AN MVP" : "ok",
+                 rl[0], rl[1], rl[3], rlm);
+        char layTxt[224];                                // v0.10.0 phase 22: where the MVP was read
+        {
+            const uint32_t c = layCode(i), r = layRow(d), mr = d.rows ? d.rows : 8u;
+            if (d.flags & (DrawIdRecord::kFInstanced | DrawIdRecord::kFNoMvp))
+                snprintf(layTxt, sizeof(layTxt), "MVP rows -: %s", (d.flags & DrawIdRecord::kFInstanced) ? "instanced" : "no cb0 window");
+            else if (!c)
+                snprintf(layTxt, sizeof(layTxt), "MVP rows 4..7 (%s)", LayoutOff() ? "layout detection OFF: harness mutation" : "no code");
+            else if (c == 7u)
+                snprintf(layTxt, sizeof(layTxt), "MVP rows %u..%u (layout %s, the VS's cached block)", r, r + 3u, LayName(r));
+            else if (c >= 1u && c <= 5u)
+                snprintf(layTxt, sizeof(layTxt), "MVP rows %u..%u (layout %s, found now: the VS was not cached)", r, r + 3u, LayName(r));
+            else if (!(c & 8u))
+                snprintf(layTxt, sizeof(layTxt), "NO MVP-shaped block in cb0 rows 4..%u (VS not cached) -> rows 4..7, state 5", mr - 1u);
+            else if ((c & 7u) >= 1u && (c & 7u) <= 5u)
+                snprintf(layTxt, sizeof(layTxt), "the VS's cached rows %u..%u FAILED the shape -> no MVP this draw (the scan found rows "
+                         "%u..%u)", (uint32_t)d.hint, d.hint + 3u, (c & 7u) + 3u, (c & 7u) + 6u);
+            else
+                snprintf(layTxt, sizeof(layTxt), "the VS's cached rows %u..%u FAILED the shape -> no MVP this draw (no block passes)",
+                         (uint32_t)d.hint, d.hint + 3u);
+            const size_t ll = strlen(layTxt);
+            snprintf(layTxt + ll, sizeof(layTxt) - ll, ", VS %p, cb0 rows mirrored %u", d.vs, (uint32_t)d.rows);
+        }
         char psTxt[160];                                 // v0.10.0 phase 21: viewport depth range + the pixel shader's DXBC flags
         snprintf(psTxt, sizeof(psTxt), " | vp depth [%.3f, %.3f] | PS %p: %s", (double)d.vpMin, (double)d.vpMax, d.ps,
                  !d.ps ? "none" : !(d.psInfo & DrawIdRecord::kPsScanned) ? "unknown (no DXBC scan)"
@@ -4477,12 +4758,12 @@ void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
                                                                                                  : "WRITES SV_Depth")
                  : ((d.psInfo & DrawIdRecord::kPsDiscard) ? "no SV_Depth, discard" : "no SV_Depth"));
         Log("MV dump %u/%u: id %u %s ic %u flags 0x%02x%s%s | full %016llx loose %016llx | cb0 first %u num %u -> mirror +%u | "
-            "group %d (%u cur / %u prev) | origin clip %.3f %.3f %.3f w %.3f%s px %.1f %.1f | col3 x %.4e y %.4e z %.4e w %.4e "
+            "%s | group %d (%u cur / %u prev) | origin clip %.3f %.3f %.3f w %.3f%s px %.1f %.1f | col3 x %.4e y %.4e z %.4e w %.4e "
             "origin-free %s | mvp-shape %s | %s%s | probe dev %.3f px%s | state %u "
             "%s%s%s%s",
             line, nSel, i + 1u, i < m_dumpNG ? "GBUF" : "FWD", d.ic, d.flags & 0x7Fu, cab ? " cabin" : "",
             (d.flags & 0x80) ? " loose-key" : "", (unsigned long long)d.full, (unsigned long long)d.loose, d.cbFirst, d.cbNum,
-            d.mirrorOff, d.group == kNone ? -1 : (int)d.group, d.gCur, d.gPrev, o[0], o[1], o[2], o[3],
+            d.mirrorOff, layTxt, d.group == kNone ? -1 : (int)d.group, d.gCur, d.gPrev, o[0], o[1], o[2], o[3],
             viewSpace ? " (view space: MVP = projection only)" : (oOn ? "" : " (behind)"), oOn ? ox : -1.0, oOn ? oy : -1.0,
             o[0], o[1], o[2], o[3], ofTxt, shTxt, pairTxt,
             devTxt, info[3] < 0.0f ? 0.0 : (double)info[3],
@@ -4547,7 +4828,8 @@ void DrawIdMv::ProbeLog(const void* const* mapped) {
         for (int r = 0; r < 4; ++r) rl[r] = std::sqrt((double)m[r * 4] * m[r * 4] + (double)m[r * 4 + 1] * m[r * 4 + 1] +
                                                       (double)m[r * 4 + 2] * m[r * 4 + 2]);
         const double rlm01 = rl[0] > rl[1] ? rl[0] : rl[1], rlm = rlm01 > rl[2] ? rlm01 : rl[2];
-        const bool notMvp = rlm > 1e-20 && !(rl[3] > 0.02 * rlm);
+        const bool notMvp = !MvpShapeOff() && rlm > 1e-20 &&     // (v0.10.0 phase 22: the shader's NotMvp, see DumpPoll)
+                            (LayoutOff() ? !(rl[3] > 0.02 * rlm) : !(rl[0] > 0.02 * rlm && rl[1] > 0.02 * rlm && rl[3] > 0.02 * rlm));
         char src[64];
         srcOf(i, src, sizeof(src));
         if (!d) {

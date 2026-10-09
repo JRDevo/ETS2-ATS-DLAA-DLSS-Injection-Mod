@@ -968,6 +968,106 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   next largest is not promoted until then). The probe costs nothing outside the dumped pass (one uniform branch on
   `FwdMode.w`).
 
+### Phase 22 (v0.10.0): the real MVP per draw -- the cb0 layout of each vertex shader (shop windows rows 6..9, car interior 5..8)
+
+- **Evidence** ([`captures/shop_window_audit.md`](../captures/shop_window_audit.md), four ATS flat RenderDoc captures, the cb0 rows of
+  every G-buffer and forward draw, VS disassembly): the game's vertex shaders do not all keep the MVP in cb0 rows 4..7. Normal world
+  draws: rows 0..3 = model-view (row 3 = (0, 0, 0, 1)), rows 4..7 = MVP. The car interior (VS R3109, phase 19): row 4 = (0, 0, 0, 1),
+  MVP in rows 5..8. Both shop-window families (fake-interior glass VS R38017 / R38019, reflective windows VS R37723 / R37725):
+  r0 = object position + seed, r1 = parameters, r2..r5 = model-view, MVP in rows 6..9 (`dp4 o1.x..w, cb0[6..9], v0`). Phase 19's
+  `NotMvp` caught only the car: the windows' misread rows 4..7 = [MV row 2, (0, 0, 0, 1), MVP row 0, MVP row 1] have the clip-y row
+  as "row 3" (|xyz| ~ 2), so they paired with that wrong matrix -- static while parked (R = I), a state-3 mover with an R in the
+  wrong coordinates as soon as the head moves (simulated: 0.05 deg of yaw -> 3.6 px probe deviation, pass B gives the window ~0 px
+  where the truth is -2 px; 0.3 m of driving -> 98 px) = the wobbly pink shop windows in VR.
+- **Layout rule = a SHAPE test, first passing block from row 4 up** (`ShapeOk`, kDrawIdCs): a 4-row block is an MVP when its clip-x,
+  clip-y and clip-w rows (0, 1, 3) each have an xyz part > 0.02 x the longest of rows 0..2 (the clip-z row may be ~0: the infinite
+  reversed-Z projection's (0, 0, 0, near)). A (0, 0, 0, 1) row inside a block fails it, so rows 4..7 fail for both shifted layouts
+  (car: block row 0, windows: block row 1), rows 5..8 fail for the windows (block row 0). Checked against the audit's cb0 census
+  (all four captures, every G-buffer and forward DrawIndexed): the scan picks rows 4..7 for every normal draw, 5..8 for the 4 car
+  interior draws, 6..9 for every window draw (G-buffer and forward) -- exactly the disassembly; the smallest passing ratio min(|row
+  0|, |row 1|, |row 3|) / longest is 0.478, the largest failing ratio 0.0 (every rejected block holds the exact (0, 0, 0, 1) row): a
+  24x margin to the 0.02 limit. Every G-buffer VS had ONE layout in all four captures (the only VS with mixed results is the
+  full-screen fog triangle: a forward `Draw`, never recorded). Why not the anchor ("the block after the (0, 0, 0, 1) row"): it fits
+  the three layouts too, but needs rows 0..3 to be a model-view, which neither the harness nor every game shader guarantees; the
+  shape test reads only the block itself and is phase 19's test extended by the two clip rows.
+- **Mirror:** the recorded cb0 copy holds rows 0 .. min(window, 12) - 1 of every draw (`DrawIdRecord::AddRing` copies from the
+  window's row 0; was rows 4..7 only; the mirror always held the whole ring, only the copied byte range grows by 64 B before / 128 B
+  after each draw's MVP -- ring ranges are copied contiguously anyway). `MirrorOff` keeps its meaning (row 4); `MirrorRows` = the
+  rows mirrored (Tab .z bits 16..19); the dump's `cb0 first N num M` stays the draw's window, `cb0 rows mirrored R` is new.
+- **GPU (`CSGather`):** a draw whose VS has a cached start row (Tab .z bits 20..23) tests only that block -- passes = used (code 7),
+  fails = no MVP for this draw (state 5 through `NotMvp`; the scan result is reported, not used). A VS not cached yet scans rows
+  4..8 and uses the first passing block (codes 1..5), none = rows 4..7, which fail the shape = state 5 (code 6; phase 19's
+  fallback). Everything downstream reads the gathered matrix (CurM / PrevM), so pairing, consensus votes / candidates, twins (the
+  MVP hash), origin attach, the parent vote's sources, the origin-free rule, forward ids (the forward record's mirror, same scan),
+  the static-skip verdicts and the dump's origin / col3 fields all use the found block with no change of their own. `NotMvp` =
+  the chosen block fails `ShapeOk` (a degenerate block, rows 0..2 ~0, is left to `Inv4` as before). Per-draw 4-bit codes in Cnt
+  dwords 832..1343 (Cnt 3328 -> 5376 B), counters Cnt [236..240] (G-buffer draws by block: rows 4..7 .. 8..11), [241] none,
+  [242] cached block failed, [243] forward draws with a shifted block, [244] draws that scanned.
+- **Per-VS cache** (`VsLay`, draw_ids.cpp; `DrawIdMv::MvpRow`): keyed by the VS pointer (the layout is a property of the VS, like the
+  phase-12 PS discard flag), global (every unit -- both VR eyes, mirror units -- feeds it from its diagnostics readback through
+  the per-draw codes; Prepare / Finish keep the draws' VS + cached row per readback slot). The FIRST read-back draw of a VS whose
+  scan found a block decides it; a VS whose cached block fails in 8 draws in a row (no draw confirming it in between) that all
+  found the same other block switches (a VS pointer reused by another shader; logged `MVP rows of VS ... CHANGED`). Draws that find
+  no block never decide a VS. 4096 slots (3072 used at most; full = new VSes keep scanning, counted), cleared on a device change
+  (`DrawIdRecord::ShutdownDevice`). Log once per VS: `MV draw-ids: MVP rows r..r+3 for VS <ptr> (layout: normal | +1 | +2 ...) --
+  decided from its first read-back draw (... VS layouts known: normal N, +1 A, +2 B, ...)` -- every shifted VS (up to 64), the first
+  16 normal ones (the rest are counted in the @blit field). Per-draw cost: one table lookup per change of VS between consecutive
+  draws in Prepare, one extra 64-byte load + `ShapeOk` per draw on the GPU (the scan only for a VS not cached yet).
+- **Other readers of "rows 4..7" changed:** pass A's camera candidates (inject.cpp, `CandidateRecord` copies) read the MVP at the
+  VS's cached row (`VSGetShader` + `MvpRow`, only while that layer's medoid is not dropped), and pass A's `NotMvp` is the same 3-row
+  shape (rejects a misread shifted layout while its VS is not cached yet); the forward-depth near-camera check (`FwdNoteMvp`) reads
+  at the cached row too. The phase-21 dump / probe text (`mvp-shape`) follows the new rule. NOT changed: the v0.9 stencil-id path
+  (`ObjRecord`, `mv_objects = 1`, legacy) still reads rows 4..7.
+- **Kept:** phase 19's state-5 fallback (no MVP-shaped block), `mv_cabin_small`.
+- **Log:** startup `phase 22 (v0.10.0): MVP layout per vertex shader -- ...`; `MV draw-ids @blit` cabin field: `MVP layout (phase 22):
+  normal N / +1 A / +2 B / +3 / +4 / none C draws per frame (none = no MVP-shaped block + the VS's cached block failed: state 5),
+  forward draws with a shifted block F, draws that scanned the rows S per frame; VS layouts known: normal .., +1 .., +2 .., undecided
+  ..`; Alt+F8 dump: a header `MVP layout (v0.10.0 phase 22) of the G-buffer draws ...: rows 4..7 (normal) N, 5..8 (+1) A, 6..9 (+2)
+  B, ... | VS table: ...`, every draw whose MVP is not in rows 4..7 gets a line, and every line says `MVP rows r..r+3 (layout X, the
+  VS's cached block | found now: the VS was not cached) , VS <ptr>, cb0 rows mirrored R` (or `NO MVP-shaped block ...` / `the VS's
+  cached rows .. FAILED the shape -> no MVP this draw`).
+- **Harness** (WARP): S17 now pairs the interior's big draws with their rows-5..8 MVP: they are static cabin draws and cabin voters
+  (want state 2, was 5; the shape count 0, the +1 layout count 4 per readback, the per-VS table row 5), and the left door OPENS from
+  frame 50 (hinged at its front end) -- a cabin mover with its own motion (48 of 48 frames a mover, 0 of 3.4 M door px off its own
+  motion). The pass-A medoid is now a correct cab-fixed draw and is KEPT by the small-cabin rule (S17 check: the rule ran in every
+  readback; S17b still needs the replacement). New **S18 shop windows** (`drawid_harness.exe 18`, after S17 in the full run): 12
+  facades, 40 posts, 10 boxes, six windows in two families (two G-buffer VSes) on the facades, each window ALSO drawn as a forward
+  reflection (a third VS, recorded in the forward record: 1 cm in front of the glass on the odd windows -- the forward id is used --
+  and 1 cm behind it on the even ones -- the G-buffer id is used), all with the shop-window cb0 layout (MVP rows 6..9, the audit's
+  r0 / r1 / model-view rows), the camera driving 0.3 m / frame and yawing 0.05..0.5 deg / frame with a pitch wobble, an overtaking car.
+  Result: 1282 / 1282 -- 0 of 496232 window px off the EXACT camera motion (worst 0.016 px; 148988 via the forward id, 347244 via the
+  G-buffer id), 1176 / 1176 window draw-frames static, 0 movers, the +2 count 6 / forward-shifted 6 / none 0 per readback, the
+  three window VSes at rows 6..9 in the table, the main VS at 4..7. **Mutation `mutlayout`** (SetParentMutation bit 6 = FoldU.w bit
+  5 / pass-A Params.w 2: rows 4..7 + the phase-19 rule everywhere = phase 21): S18 FAILS (122 window draw-frames movers, 840 states
+  wrong, 7063 window px off by up to 12.8 px), S17 FAILS (the big draws state 5, the opening door never a mover: 1.66 M of 3.4 M door
+  px off by up to 43.8 px, shape count 4, layout count 0). `mutshape` (phase 19's fallback off) no longer fails S17 (the detection
+  finds the block; the fallback is unused there) and passes S18; `cabsmall=0` still fails S17 and S17b. S17 / S18 also pass with
+  `fold=0`, `fold=1`, `nocompact`, `legacy`, `cabsmall=0` (S18) and under the D3D11 debug layer (0 messages). Full run 136218 /
+  136218 (snap 0.1 and 0.02; was 134981: S17 1184 -> 1137 checks, S17b 694 -> 696, + S18 1282), `rstatic=4` 136230 / 136230.
+- **Bit-identical:** the full run's `cmpdump` of S1-S16 (1598 frames, the first 3139430400 bytes) is BYTE-identical to HEAD 99a361c's
+  (rebuilt from `git archive`); the first difference is S17 frame 3 (the interior now paired). Scene 8 alone: HEAD / HEAD / new
+  identical.
+- **Not verified (needs the game):** the layout and the per-VS table on real game draws (only the audit's four flat captures were
+  replayed through the rule, offline); the VR head-motion case in game; ETS2 (the audit is ATS); the cost on the GPU (WARP numbers
+  only; the change adds one 64-byte load + ~10 ALU per draw and ~2 atomics per draw to CSGather).
+- **Next VR log, read:** `phase 22 (v0.10.0): MVP layout per vertex shader ...`; `MV draw-ids: MVP rows 6..9 for VS ... (layout: +2)`
+  -- expect one line per shop-window G-buffer VS that has been in view (2 in the audit scenes: R38017, R37723; the forward window
+  draws are not recorded, so R38019 / R37725 appear only if a forward-depth batch draw uses them) and `MVP rows 5..8 ... (layout: +1)`
+  once in the car; no `CHANGED` lines. In `MV draw-ids @blit`: `MVP layout (phase 22): normal N / +1 ~4 (in the car) / +2 ~1-6 (shop
+  windows in view) / ... / none ~0`, `draws that scanned the rows` ~0 after the first seconds, and `rows 4..7 not an MVP 0.0
+  draws/frame (cabin 0.0)` (phase 19's 4 car draws are now read correctly). Ctrl+F6 with the head moving: the windows no longer
+  magenta (static: the world's static colour, olive where the static gate skipped them), the car interior the static cabin tint (not
+  grey state 5), a door opening magenta (its own motion). Alt+F8 on a window: `MVP rows 6..9 (layout +2, the VS's cached block)`,
+  `mvp-shape ok`, state 2 (static).
+- **Risks:** (1) a shader whose cb0 holds another 4x4 with clip-like rows BEFORE its MVP (rows 4..7 an unrelated matrix, MVP at
+  8..11) would be read at the wrong block -- not seen in the audit. (2) The first read-back draw decides a VS; a wrong first decision
+  (a degenerate matrix that happens to pass elsewhere) needs 8 consecutive contrary draws to switch back; meanwhile that VS's draws
+  are state 5 (no MVP, camera R), not a wrong mover. (3) A VS not cached yet scans per draw for the 2-3 frames until its first
+  readback lands (correct block, just uncached). (4) Pass A candidates of a VS not yet cached read rows 4..7 for those frames (the
+  3-row shape rejects a misread shifted layout). (5) The interior's real MVP now makes car-interior parts that move (doors, wheel)
+  movers with their own motion -- correct, but the small-cabin rule's heaviest cluster can now include more draws; a big moving part
+  (a steering wheel while steering) is excluded as a mover only when it disagrees with the cluster.
+
 ## Roadmap / history
 
 | Ver  | Goal | Key work |

@@ -89,6 +89,13 @@
 //      camera R), never a mover, never a skip streak, never a consensus voter (shader OriginFree). The round-4 clutter rule is
 //      replaced: an instanced draw of more than ONE instance is never listed for the vote (no parent, no hold); the plate hold
 //      needs exactly one matching entry.
+// v0.10.0 phase 22 MVP LAYOUT (captures/shop_window_audit.md; docs/DEVELOPMENT.md "Phase 22"):
+//  12. The game's vertex shaders keep the MVP in different cb0 rows (normal 4..7, the ATS car interior 5..8, the ATS shop windows
+//      6..9). The record mirrors rows 0..11 of every draw's window; CSGather reads the first 4-row block from row 4 up with the
+//      SHAPE of an MVP (clip x, y and w rows each > 2 % of the longest row; a (0, 0, 0, 1) row inside a block fails it), cached per
+//      vertex shader (DrawIdMv::MvpRow: decided by the VS's first read-back draw, re-checked when its cached block fails); every
+//      reader of "the MVP" (pairing, consensus, twins, attach, parent vote, origin-free rule, forward ids, dump, pass A) uses it.
+//      No MVP-shaped block = state 5 (camera R), phase 19's fallback.
 // Compiled only when WITH_DLAA=1. Render thread only (the game's immediate context).
 #pragma once
 #ifdef WITH_DLAA
@@ -259,7 +266,13 @@ public:
     // v0.10.0 phase 8 (mv_inst_replay): indexCount, instance count, VS, input layout -- no start index / base vertex: a plate whose
     // vertices the CPU writes into a dynamic buffer every frame keeps its shape key while its loose key changes every frame
     uint64_t ShapeKey(int i) const;
-    UINT     MirrorOff(int i) const;             // byte offset of the MVP (rows 4..7) in the mirror, 0xFFFFFFFF = none
+    UINT     MirrorOff(int i) const;             // byte offset of cb0 row 4 in the mirror, 0xFFFFFFFF = none (row r at + (r - 4) * 16)
+    // v0.10.0 phase 22 MVP LAYOUT: the mirror holds cb0 rows 0 .. MirrorRows - 1 of every draw (its window, capped at kMirrorRows;
+    // 8 = rows 4..7 can be read only up to row 7, 0 = none) -- the GPU finds the MVP block among rows 4..11 (DrawIdMv CSGather);
+    // Vs = the draw's vertex shader (identity only: the layout is a property of the VS, DrawIdMv::MvpRow)
+    static constexpr UINT kMirrorRows = 12;
+    UINT     MirrorRows(int i) const;
+    const void* Vs(int i) const;
     uint8_t  Flags(int i) const;
     float    VpMin(int i) const;
     float    VpMax(int i) const;
@@ -310,14 +323,17 @@ private:
     struct Key { uint64_t full, loose; UINT off; uint8_t flags; float vpMin, vpMax; UINT ic, cbFirst, cbNum;   // v0.10.0 phase 4: + ic / cb0 (dump)
                  uint64_t shape;                 // v0.10.0 phase 8: ShapeKey
                  UINT jit, inst;                 // v0.10.0 phase 14 round 4: VpJitterPacked, InstanceCount
-                 const void* ps; };              // v0.10.0 phase 21: the game's PS at Record (identity; dump / probe)
+                 const void* ps;                 // v0.10.0 phase 21: the game's PS at Record (identity; dump / probe)
+                 const void* vs; UINT rows; };   // v0.10.0 phase 22: the VS (identity) + cb0 rows mirrored from row 0
     static const void* s_gamePs;                 // v0.10.0 phase 21: NoteGamePs
     static PsInfoFn    s_psInfo;                 //   SetPsInfoFn
     bool FlushPending() const {
         for (int k = 0; k < m_nRings; ++k) if (m_rings[k].hi > m_rings[k].lo) return true;
         return false;
     }
-    UINT AddRing(ID3D11Buffer* cb, UINT mvpByteOff);   // mirror byte offset or 0xFFFFFFFF
+    // v0.10.0 phase 22: copies cb0 rows 0 .. min(want, the ring's end) / 16 - 1 of the window at rowBase (row 4..7 must exist);
+    // returns the mirror byte offset of row 4 (or 0xFFFFFFFF) and *rows = the rows mirrored from row 0
+    UINT AddRing(ID3D11Buffer* cb, UINT rowBase, UINT wantBytes, UINT* rows);
     bool FlushRing(ID3D11DeviceContext* ctx, int k);
     bool EnsureMirror(ID3D11DeviceContext* ctx, UINT need);
     void ReleaseRange(int from, int to);
@@ -505,6 +521,20 @@ public:
     static unsigned CabinSmall();
     // v0.10.0 phase 19: the harness mutation "the MVP-shape rule off" (SetParentMutation bit 5) -- pass A reads it too
     static bool MvpShapeOff();
+    // ---- v0.10.0 phase 22 MVP LAYOUT (see draw_ids.cpp "MVP LAYOUT") ----
+    // The game's vertex shaders keep the MVP in different cb0 rows: rows 4..7 (normal), 5..8 (the ATS car interior, "+1"),
+    // 6..9 (the ATS shop windows, "+2"). CSGather takes the first 4-row block of rows 4..11 with the SHAPE of an MVP (clip x, y and
+    // w rows each with an xyz part >= 2 % of the longest of rows 0..2) and reports what it found per draw; a per-VS table (keyed
+    // by the VS pointer, global: every unit feeds it) caches the start row once a draw of that VS found it, so later draws test
+    // only that block (a failed cached block = no MVP for that draw, state 5; a VS whose cached block keeps failing while another
+    // block passes switches after kLayRecheck such draws). MvpRow: the cached start row of a VS (4..8), 4 when unknown / the
+    // harness mutation "layout detection off" (SetParentMutation bit 6 = phase 21's fixed rows 4..7 everywhere). Pass A
+    // (inject.cpp candidates) and the forward-depth near-camera check read the MVP at that row too.
+    static UINT MvpRow(const void* vs);
+    static bool LayoutOff();
+    // known VS entries by cached start row: out[0..4] = rows 4..8, out[5] = VS seen but not decided (no MVP-shaped block yet)
+    static void VsLayoutCounts(uint32_t out[6]);
+    static void VsLayoutClear();                  // device change (VS pointers are not stable across devices)
     // after pass B: commits the prepared pass as this eye's previous one, queues the diagnostics readback
     void Finish(ID3D11DeviceContext* ctx);
     void Forget() { m_prevN = 0; m_prepN = 0; m_consRun[0] = m_consRun[1] = 0;     // no history (the next pass pairs nothing;
@@ -621,6 +651,10 @@ public:
         uint32_t cabSmallIc = 0, cabSmallW = 0;
         float    cabSmallDev = -1.0f;
         uint64_t cabVoters = 0, cabPaired = 0, notMvp = 0, notMvpCabin = 0;
+        // v0.10.0 phase 22 (read back, Cnt [236..244]): G-buffer draws by the MVP block used (rows 4..7 / 5..8 / 6..9 / 7..10 /
+        // 8..11), none MVP-shaped (VS not cached yet), cached block failed (state 5), forward draws with a shifted block, draws
+        // that scanned the rows (VS not cached / cached block failed) -- sums
+        uint64_t lay[5] = {}, layNone = 0, layHintFail = 0, layFwdShift = 0, layScanned = 0;
     };
     const Stats& GetStats() const { return m_stats; }
     // v0.10.0 phase 3: largest per-frame avg |consensus - medoid| (px, layer 0 / 1) since the last call (restarts it)
@@ -701,6 +735,14 @@ private:
     uint64_t  m_rbFrame[kRb] = {};
     uint64_t* m_prepStatKey = nullptr;           // kMax
     uint32_t  m_prepStatN = 0;
+    // v0.10.0 phase 22 (MVP layout): the VS + cached start row (0 = none) of every draw of the pass behind each readback slot /
+    // of the prepared pass -- Poll feeds the per-VS table from the per-draw codes (Cnt dwords kLayCodeBase..)
+    const void** m_rbVs = nullptr;               // kRb * kMax
+    uint8_t*  m_rbHint = nullptr;                // kRb * kMax
+    uint32_t  m_rbVsN[kRb] = {};
+    const void** m_prepVs = nullptr;             // kMax
+    uint8_t*  m_prepHint = nullptr;              // kMax
+    bool      m_prepLay = false;                 // m_prepVs / m_prepHint hold the prepared pass (layout detection on)
     bool      m_statReg = false;                 // registered for PollMain (the destructor unregisters)
     uint64_t m_rbCtr = 0;
     // previous committed pass of this eye (CPU keys)
@@ -753,7 +795,8 @@ private:
     // v0.10.0 phase 4 dump (RequestDump): CPU facts of the chosen draws at Prepare, GPU tables copied at Finish, logged by Poll
     // (phase 5: every draw of the pass is kept -- kMax entries --; DumpPoll chooses the lines once the states are known)
     struct DumpEnt { uint32_t i, ic, cbFirst, cbNum, mirrorOff, group, gCur, gPrev; uint64_t full, loose; uint8_t flags, big;
-                     const void* ps; uint8_t psInfo; float vpMin, vpMax; uint32_t inst; };   // v0.10.0 phase 21
+                     const void* ps; uint8_t psInfo; float vpMin, vpMax; uint32_t inst;    // v0.10.0 phase 21
+                     const void* vs; uint8_t rows, hint; };                                 // v0.10.0 phase 22
     void DumpPoll(ID3D11DeviceContext* ctx);
     DumpEnt*  m_dump = nullptr;                 // kMax entries, allocated by the first RequestDump
     uint32_t  m_dumpN = 0, m_dumpNG = 0, m_dumpNAll = 0, m_dumpM = 0, m_dumpW = 0, m_dumpH = 0, m_dumpSkipped = 0;
