@@ -149,6 +149,10 @@ if (WITH_DLAA)
             "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSParentCount"   # v0.10.0 phase 6b instanced-draw pixel count (vote slots)
             "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSPickResolve"   # v0.10.0 phase 9 folded: pick + resolve + inherit (1 group)
             "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSListTwin"      # v0.10.0 phase 9 folded: parent list + twin + attach (1 group)
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSPickPar"       # v0.10.0 phase 18: consensus pick, statistic spread over a group
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSResolveInherit" # v0.10.0 phase 18: resolve + inherit, one wide dispatch
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSParentCollect" # v0.10.0 phase 18: compact vote, march items of the listed tiles
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSParentMarch"   # v0.10.0 phase 18: one thread per march item + direction
             "src/draw_ids.cpp@kFwdInitShader@vs_5_0@VSMain"     # v0.10.0 phase 10 forward-depth occlusion init (full-screen tri)
             "src/draw_ids.cpp@kFwdInitShader@ps_5_0@PSInit0"    #   full resolution
             "src/draw_ids.cpp@kFwdInitShader@ps_5_0@PSInit1"    #   1/2 resolution (min of 2x2)

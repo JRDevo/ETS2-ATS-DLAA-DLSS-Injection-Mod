@@ -44,6 +44,9 @@ enum Sec : int {
     kInherit, kParCount, kParList, kTwin, kAttach,            // twins / attach / rigid-parent list
     kParVote1, kParPick1, kParVote2, kParPick2,               // rigid-parent marching vote, both passes
     kPickRes, kListTwin,                                      // v0.10.0 phase 9 folded: pick+resolve+inherit / p-list+twin+attach
+    kResInh,                                                  // v0.10.0 phase 18 (mv_fold_dispatch 2): resolve + inherit, wide
+    kParCol1, kParCol2,                                       // v0.10.0 phase 18 (mv_vote_compact): the march items of each vote
+                                                              // pass (p-vote1 / p-vote2 are then the marches themselves)
     kPassB,           // pass B: per-pixel reprojection + depth flatten
     kMvMisc,          // the rest of the MV generation (diagnostic copies, commit copies)
     kNgx,             // the NGX evaluation itself (NOT in the mod total)

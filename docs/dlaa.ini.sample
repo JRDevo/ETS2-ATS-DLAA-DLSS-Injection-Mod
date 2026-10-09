@@ -190,9 +190,10 @@ debug = 0
 # the see-through depth (wires, fences, glass) at: 0 = half resolution in VR, full resolution in flat (default), 1 = full
 # resolution (before phase 9), 2 = half resolution (about 4x cheaper; a wire one pixel wide can lose a few pixels of its own motion)
 # mv_fwd_depth_res = 0
-# 1 = some of the small GPU steps of the per-part motion run together (fewer passes per eye, same result; default), 0 = one
-# pass each (before phase 9)
-# mv_fold_dispatch = 1
+# 1 = some of the small GPU steps of the per-part motion run together (fewer passes per eye, same result), 0 = one pass each
+# (before phase 9), 2 = like 1, but the steps that touch every part run spread over the whole GPU (v0.10.0 phase 18: about
+# 0.13 ms less per eye in VR, same result; default)
+# mv_fold_dispatch = 2
 
 # ---- v0.10.0 phase 10 ----
 # the see-through depth (mv_fwd_depth) is now drawn in ONE batch at the end of the game's see-through pass. 1 = it first copies
@@ -205,6 +206,15 @@ debug = 0
 # how many parts without a motion of their own (licence plates, ...) the "which vehicle does this sit on" search looks at per
 # frame (8..64; perf_profile low: 32)
 # mv_parent_max_listed = 64
+
+# ---- v0.10.0 phase 18 ----
+# 1 = the "which vehicle does this sit on" search runs only where such parts are on screen, one GPU thread per search
+# direction (same result, ~0.25 ms less per eye in VR; default), 0 = over the whole picture, one thread per pixel (before)
+# mv_vote_compact = 1
+# how many interior (cabin) parts must agree before their common motion replaces the old cabin estimate; 0 = 24, as outside
+# (default). The interior rarely has 24: a smaller value (8..64) lets the mod stop copying 24 interior matrices per frame once
+# the interior estimate has been steady for mv_medoid_drop frames (the log's "cabin: consensus" field shows how many agree)
+# mv_cons_min_cabin = 0
 
 # ---- legacy: the v0.9.0 stencil object ids (mv_objects = 1 only) ----
 # object ids in use at once (1..15); a vehicle and its wheels share one id while they move alike

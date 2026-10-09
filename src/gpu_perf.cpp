@@ -21,6 +21,7 @@ const SecInfo kInfo[kCount] = {
     { "twin", true, false },          { "attach", true, false },
     { "p-vote1", true, false },       { "p-pick1", true, false },      { "p-vote2", true, false },
     { "p-pick2", true, false },       { "pick+res", true, false },     { "list+twin", true, false },
+    { "res+inh", true, false },       { "p-col1", true, false },       { "p-col2", true, false },   // phase 18
     { "pass-B", true, false },        { "mv-misc", true, false },
     { "NGX", false, false },          { "rcas", true, false },         { "copy-out", true, false },
     { "dbg-view", true, false },      { "mirrors", true, false },      { "mirror-NGX", false, false },

@@ -141,6 +141,8 @@ checks without rstatic). S6, S7 and S8 (consensus convoy, plates by twin / attac
 trailer that moves from frame 0) also run gated (their own id / parent / MV checks + "the gate must skip something"). `cmpdump`
 without / `cmp` with `rstatic=4`: S1-S4 and S6-S8 0 px differ; S13 785 px in 2 frames (max 0.24 px: the start lag). Run this
 comparison after any change to the gate or the vote.
+Phase 18 knobs: `fold=0|1|2` (mv_fold_dispatch; `nofold` = 0), `nocompact` (mv_vote_compact 0), `cabmin=N` (mv_cons_min_cabin) and
+`hw` (the hardware adapter instead of WARP: the per-scene perf line then shows real GPU ms; the checks still pass on an RTX 5090).
 What it covers: `docs/DLAA_INTEGRATION.md`, "Per-draw motion vectors
 (v0.10.0)" (+ "Phase 3", "Phase 4", "Phase 5", "Phase 6", "Phase 6b", "Phase 6c", "Phase 9", "Phase 10") and "Mirror units (v0.10.0)". The pre-tonemap DLAA (phase 4 job B) is
 inject.cpp plumbing around SceneDlaa::Run and is not covered by the harness (game only); phase 7's stage logic and SceneDlaa's
@@ -698,6 +700,59 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   2x the jitter in tile px (+ the edge fix); depth = nearest of each 2x2 tile footprint (tiled) or the reference tile's
   snapshot (untiled), no forward-depth pass; MVs = camera-only medoid R of <= 40 hash-sampled draws of the reference pass
   (no per-draw / per-object MVs, near-reject 0, no ego); no pre-tonemap HDR unit.
+
+### Phase 18 (v0.10.0): VR GPU cost of the per-draw chain -- the two single-thread hot spots
+
+- **Evidence** (ATS VR, Quest 3 / VD, eye 3064x3248, `captures/dlaa_inject_ats_v0100p16_vr.log`): mod GPU 1.41 ms per eye (NGX
+  apart), of it `pick+res` 0.15-0.18, `p-vote1` 0.12-0.18 and `p-vote2` 0.08-0.17 in every window, while `p-count` -- the same
+  vote grid, more texture reads per thread -- cost 0.012. Both hot spots are LATENCY, not work: `CSPickResolve` (phase 9) resolves
+  ~2200 draws in ONE group of 256 threads (9 draws per thread, on one SM); in the vote one thread of a small (FINE) plate marches 4
+  sub-samples x 8 directions x 16 steps in a row (512 dependent texture reads) while the rest of the GPU idles. The harness on the
+  hardware adapter (`hw`, 960x540) shows the same: `pick+res` 0.044-0.058 ms for ~100-300 draws, S8 `p-vote1` 0.066-0.128 ms.
+- **`mv_fold_dispatch = 2` (new default; 1 = phase 9, 0 = phase 8, both unchanged):** the list + twin + attach group stays
+  (`list+twin`); the consensus pick runs as `CSPickPar` (the |consensus - medoid| statistic's loop over the candidates, one thread
+  each, summed by thread 0 in candidate order -- identical values), then `CSResolveInherit` = resolve + inherit in ONE wide dispatch
+  (one thread per draw; `Inherit1Draw` reads only the state its own thread just wrote). GPU sections `pick` + `res+inh`.
+- **`mv_vote_compact = 1` (new default; 0 = the phase-8 grid vote):** `CSParentCount` (same 8x8 groups as the vote) appends every
+  group that saw a COUNTABLE pixel at any sample a vote thread reads (grid sample + the three 2 px sub-samples) to a tile list -- the
+  listed draws are a subset of the countable ones, so no vote thread outside those tiles could march; `CSParentList` writes the
+  indirect args over the tiles (more than 65536 tiles: the full grid). Per vote pass `CSParentCollect` (over the tiles) does exactly
+  `CSParentVote`'s per-pixel tests and appends each march sample as an item (more than 131072: marched in place, as before);
+  `CSParentMarch` runs one thread per (item, direction) through the same `ParMarchDir` into the same vote tables (each item's
+  counters summed in groupshared and added once). Sections `p-col1` / `p-col2` (collect) + `p-vote1` / `p-vote2` (the marches).
+  Buffers per DrawIdMv unit (made on first use): 2.3 MB tile / item list + 32 B march args; Cnt grows to 3328 B (dwords 768..772).
+- **Bit-identical:** harness `cmpdump` of the pre-change binary (HEAD c7bf34c) vs this one, all scenes (S1-S16, 1598 frames): the
+  two dump files are BYTE-identical (default knobs, and `legacy`); `cmp` with `fold=1 nocompact` and with `fold=0`: 0 px, max
+  0.0000; `rstatic=4` per scene: S1-S4, S6-S8, S14, S15, S16 0 px, S13 24 px in 1 frame (max 0.24 px) -- the base binary against
+  itself gives 17 px in 1 frame (max 0.24): the documented readback-timing start lag. Mutations `noparent` / `parentconj` / `nodepth`
+  still fail S8; S8 under the D3D11 debug layer: 0 messages. Full suite 133103 / 133103 (WARP).
+- **Per-eye cost, before (p16 VR log) / after (expected; the hw harness rows are measured, GPU ms per frame, 960x540):**
+
+  | section | VR before | VR after (expected) | hw S8 before / after | hw S7 before / after |
+  |---------|-----------|---------------------|----------------------|----------------------|
+  | pick+res -> pick + res+inh | 0.15-0.18 | ~0.01 + ~0.03 | 0.057 / 0.011 + 0.006 | 0.054 / 0.011 + 0.008 |
+  | p-vote1 -> p-col1 + p-vote1 | 0.12-0.18 | ~0.01 + 0.01-0.03 | 0.066-0.128 / 0.010 + 0.008-0.015 | 0.092 / 0.010 + 0.012 |
+  | p-vote2 -> p-col2 + p-vote2 | 0.08-0.17 | ~0.01 + 0.01-0.02 | 0.031-0.033 / 0.007 + 0.007 | 0.027 / 0.007 + 0.009 |
+  | mod total | 1.41 (@21000, Ctrl+F6 on: dbg-view 0.10 of it) | ~1.0-1.1 | 0.274-0.339 / 0.168-0.173 | 0.302 / 0.187 |
+
+  Expected saving 0.27-0.42 ms per eye (both eyes: 0.5-0.8 ms per frame). The "after" VR figures are an estimate from the phase-8
+  wide-dispatch numbers (resolve 0.004-0.006, inherit 0.022-0.028 ms at ~1900 draws) and the hw harness; the next VR log decides.
+- **Cabin consensus (target 3, diagnostic + opt-in):** the cabin layer never reached the 24-draw consensus (`cabin: consensus 0 /
+  fallback N` in every window), so its medoid and its 24 candidate copies per pass (`cand-copy*`, a sampled UPPER bound of 0.09-0.17
+  ms) stayed. The `cabin:` field now prints the largest agreeing cluster of the fallback frames; `mv_cons_min_cabin = 8..64` (default
+  0 = 24, unchanged) lets a smaller cabin cluster replace the medoid (and `mv_medoid_drop` then drop the cabin copies). Not
+  bit-identical when set (the cabin camera R comes from another static cabin draw's exact R: float-rounding differences), so it is
+  off until a VR log shows the cluster size.
+- **Not changed:** pass B / RCAS / copies (the tonemap texture is typed R8G8B8A8_UNORM_SRGB, fmt 29: no UNORM view, no UAV -- RCAS
+  cannot write into it and NGX cannot read it as UNORM, so copy-in / copy-out stay; the depth convert is already inside pass B);
+  the depth snapshot (phase 10 job C: the game's depth has DSV binding only, substituting our own depth for it still risks a bind we
+  do not see -- 0.067 ms per eye now, the risk is the same); `dbg-view` costs nothing while Ctrl+F6 is off (the section is inside
+  `if (mvDebug ...)`; the @21000 window had the view ON since 21:18:31).
+- **Next VR log, look for:** `phase 18 (v0.10.0): mv_fold_dispatch=2 mv_vote_compact=1 mv_cons_min_cabin=0 ...`; `perf eye N`:
+  `pick` + `res+inh` in place of `pick+res`, `p-col1` / `p-col2` next to `p-vote1` / `p-vote2` (their sum vs the old 0.25-0.35);
+  `perf vote @blit N: ... X of Y vote groups per pass hold a countable pixel (P %) ...` (P a few %; items over the cap and tile
+  overflows 0); the `cabin: consensus 0 / fallback N (largest agreeing cluster avg C draws there; 24 needed)` field (C >= 8 steady
+  = `mv_cons_min_cabin` can be tried).
 
 ## Roadmap / history
 

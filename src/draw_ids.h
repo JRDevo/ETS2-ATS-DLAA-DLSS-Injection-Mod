@@ -464,14 +464,26 @@ public:
     // v0.10.0 phase 9: the pixel count + vote grid cover only the G-buffer record's replay clip (Clipped / ClipRect: the
     // replayed region, everything outside holds id 0); a forward record replayed at 1/2 resolution (Shift 1) has its forward
     // depth (fwdDepthSrv) and its forward ids (fwdIdSrv, R16_UINT, nullable otherwise) at 1/2 size -- read at pixel >> 1.
-    // Fewer dispatches (dlaa.ini mv_fold_dispatch, default 1): pick + resolve + inherit run as ONE single-group dispatch
-    // (CSPickResolve) and the rigid-parent list + twin + attach as another (CSListTwin); 0 = the phase-8 chain.
+    // Fewer dispatches (dlaa.ini mv_fold_dispatch): 1 (phase 9) = pick + resolve + inherit run as ONE single-group dispatch
+    // (CSPickResolve) and the rigid-parent list + twin + attach as another (CSListTwin); 0 = the phase-8 chain; 2 (phase 18,
+    // default) = the list + twin + attach group of 1, the pick with its statistic spread over a group (CSPickPar) and resolve +
+    // inherit as ONE wide dispatch (CSResolveInherit) -- the single group resolved ~2200 draws 9 per thread (0.15-0.18 ms / eye).
+    // v0.10.0 phase 18 (dlaa.ini mv_vote_compact, default 1): the rigid-parent vote runs over the vote-grid tiles that hold a
+    // countable pixel (CSParentCount lists them) and marches one thread per (sample, direction) (CSParentCollect + CSParentMarch);
+    // 0 = the phase-8 vote grid (one thread marches a sample's 8 directions in a row). Same marches, same vote tables.
     void Dispatch(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ID3D11ShaderResourceView* solveSrv,
                   const DrawIdRecord* fwd = nullptr, ID3D11UnorderedAccessView* solveUav = nullptr,
                   ID3D11ShaderResourceView* idSrv = nullptr, ID3D11ShaderResourceView* depthSrv = nullptr,
                   ID3D11ShaderResourceView* fwdDepthSrv = nullptr, ID3D11ShaderResourceView* fwdIdSrv = nullptr);
-    static void SetFold(bool on);                 // v0.10.0 phase 9 (dlaa.ini mv_fold_dispatch)
-    static bool Fold();
+    static void SetFold(int mode);                // v0.10.0 phase 9 (dlaa.ini mv_fold_dispatch 0 / 1 / 2; phase 18: 2 = default)
+    static int  Fold();
+    static void SetVoteCompact(bool on);          // v0.10.0 phase 18 (dlaa.ini mv_vote_compact)
+    static bool VoteCompact();
+    // v0.10.0 phase 18 (dlaa.ini mv_cons_min_cabin, 0 = kConsMin as the world layer, else 8..64): the cabin layer's consensus
+    // camera R needs this many agreeing draws. In game the cabin never reached kConsMin (24) -- its medoid and its 24 candidate
+    // copies per pass stayed; the 'cabin: consensus' field of the MV draw-ids line shows the largest cluster it had
+    static void SetConsMinCabin(unsigned n);
+    static unsigned ConsMinCabin();
     // after pass B: commits the prepared pass as this eye's previous one, queues the diagnostics readback
     void Finish(ID3D11DeviceContext* ctx);
     void Forget() { m_prevN = 0; m_prepN = 0; m_consRun[0] = m_consRun[1] = 0;     // no history (the next pass pairs nothing;
@@ -513,6 +525,7 @@ public:
         uint64_t cpuTicks = 0;                   // QPC ticks in Prepare
         // v0.10.0 phase 3: consensus camera R per layer (0 world, 1 cabin; read back with the diagnostics, frames that landed)
         uint64_t consFrames[2] = {}, consFallback[2] = {}, consCluster[2] = {};
+        uint64_t consFallCluster[2] = {};        // v0.10.0 phase 18: the largest agreeing cluster in the fallback frames (sum)
         uint64_t consDisFrames[2] = {};          // consensus frames that had a fresh medoid to compare with
         double   consDisSum[2] = {};             // sum of the per-frame avg |consensus - medoid| (px)
         uint64_t consDisOver1[2] = {};           // frames whose avg |consensus - medoid| > 1 px
@@ -566,6 +579,9 @@ public:
         // round 7 (read back, Cnt [224] / [229]): paired draws whose MVP origin passed the DEPTH part of the origin-free rule
         // (|w| <= 0.20 m) but failed the LATERAL part (|x| or |y| > 0.50 clip); own-pair movers with their origin |w| < 0.5 m
         uint64_t originDepthOnly = 0, originMoverNear = 0;
+        // v0.10.0 phase 18 (read back, mv_vote_compact): readbacks of a compact vote, vote-grid tiles listed (sum) / of the grid
+        // (sum), march items of the 1st / 2nd pass (sum), items over the cap (marched in place), passes whose tiles overflowed
+        uint64_t cvFrames = 0, cvTiles = 0, cvGrid = 0, cvItems1 = 0, cvItems2 = 0, cvItemOver = 0, cvTileOver = 0;
     };
     const Stats& GetStats() const { return m_stats; }
     // v0.10.0 phase 3: largest per-frame avg |consensus - medoid| (px, layer 0 / 1) since the last call (restarts it)
@@ -596,6 +612,14 @@ private:
     Microsoft::WRL::ComPtr<ID3D11ComputeShader> m_csParList, m_csParVote, m_csParPick1, m_csParPick2;   // v0.10.0 phase 6
     Microsoft::WRL::ComPtr<ID3D11ComputeShader> m_csParCount;                     // v0.10.0 phase 6b (instanced pixel count)
     Microsoft::WRL::ComPtr<ID3D11ComputeShader> m_csPickRes, m_csListTwin;       // v0.10.0 phase 9 (folded dispatches)
+    Microsoft::WRL::ComPtr<ID3D11ComputeShader> m_csPickPar, m_csResInh;         // v0.10.0 phase 18 (mv_fold_dispatch 2)
+    Microsoft::WRL::ComPtr<ID3D11ComputeShader> m_csParCollect, m_csParMarch;    // v0.10.0 phase 18 (mv_vote_compact)
+    // v0.10.0 phase 18 compact vote: tiles + march items (raw, ~2.3 MB, made on first use) and the march DispatchIndirect args
+    // (2 x (groups, 1, 1); reset from the CPU each pass, counted up by CSParentCollect)
+    Microsoft::WRL::ComPtr<ID3D11Buffer> m_parList, m_marchArgs;
+    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_parListUav, m_marchArgsUav;
+    bool m_parListFailed = false;
+    bool EnsureParList(ID3D11Device* dev);
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_parArgs;                         // v0.10.0 phase 8: DispatchIndirect args (votes)
     // v0.10.0 phase 14 round 4 PLATE HOLD: the listed draws' results of this pass / the previous one (64 x uint4, ping-pong with
     // m_ping); valid = that pass ran the rigid-parent picks (Dispatch), cleared by Forget
@@ -650,6 +674,10 @@ private:
     uint32_t m_prepW = 0, m_prepH = 0;          // v0.10.0 phase 6: full image size of the prepared pass (the vote grid)
     uint32_t m_prepClip[4] = {};                // v0.10.0 phase 9: the vote grid rect (x0 aligned to 4, y0 aligned, x1, y1)
     uint32_t m_prepFold = 0;                    // v0.10.0 phase 9: FoldU.x of the prepared pass
+    bool     m_prepCompact = false;             // v0.10.0 phase 18: the prepared pass runs the compact vote (FoldU.x bit 5)
+    uint32_t m_prepGrid = 0;                    // v0.10.0 phase 18: vote-grid groups of the prepared pass (stats)
+    uint32_t m_rbGrid[kRb] = {};                // v0.10.0 phase 18: ... of the pass behind each readback slot
+    bool     m_rbCompact[kRb] = {};
     bool     m_prepIds = false;                 // v0.10.0 phase 9: Prepare was told the id target will be bound
     bool     m_prepHist = false;
     float    m_consDisMax[2] = {};

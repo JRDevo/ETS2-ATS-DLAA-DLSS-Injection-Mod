@@ -233,7 +233,8 @@ cbuffer DidCB : register(b0) {
                          // marches every 2nd pixel with 2 px steps); z / w = march budget of the whole frame in the 1st / 2nd
                          // pass (0 = no frame cap: ParU.w per listed draw and pass, as before)
     uint4  Clip;         // v0.10.0 phase 9 (see the C++ header above): vote grid rect x0, y0 (multiples of 4), x1, y1
-    uint4  FwdMode;      //   x = forward depth / ids at 1/2^x resolution (x = 1: the ids in PFwdIds)
+    uint4  FwdMode;      //   x = forward depth / ids at 1/2^x resolution (x = 1: the ids in PFwdIds); v0.10.0 phase 18: y = the
+                         //   CABIN layer's smallest consensus cluster (dlaa.ini mv_cons_min_cabin; 0 = Cons.z as the world layer)
     uint4  FoldU;        //   x = folded-dispatch bits (pick, inherit, parent list, twins, attach); phase 10: y = listed cap;
                          //   v0.10.0 phase 14: z = asuint(deep-static epsilon, px; mv_replay_static_eps_px); round 4: w bit 0 =
                          //   the previous pass's plate-hold table (UHoldR) is valid; round 6 HARNESS MUTATIONS only: w bit 1 =
@@ -260,6 +261,19 @@ RWByteAddressBuffer        ParArgs : register(u5);  // v0.10.0 phase 8, CSParent
 Texture2D<uint>            PFwdIds : register(t11); // v0.10.0 phase 9: the 1/2-resolution forward ids
 RWStructuredBuffer<uint4>  UHoldW  : register(u6);  // v0.10.0 phase 14 round 4, CSParentPick2 only: this pass's listed draws
 StructuredBuffer<uint4>    UHoldR  : register(t12); //   (IndexCount, centroid, final parent, held age) -- and the previous pass's
+// v0.10.0 phase 18 COMPACT VOTE (dlaa.ini mv_vote_compact 1, FoldU.x bit 5): the vote-grid tiles that hold a countable pixel
+// (CSParentCount) and the march items of the current vote pass (CSParentCollect -> CSParentMarch). Bytes: [kTileBase..) tiles
+// (group x | y << 16), [kItemBase..) items (uint4: x | y << 16, draw | fwd << 31, asuint(depth), slot | step << 16).
+// CSParentCollect binds the march args buffer (2 x (groups, 1, 1) at 0 / 16, never this one) at u5 under the name ParArgs.
+RWByteAddressBuffer        ParList : register(u7);
+static const uint kTileCap = 65536u;                // tiles (beyond: the full vote grid, exactly as before)
+static const uint kItemCap = 131072u;               // march items per vote pass (beyond: marched in place, ParMarch)
+static const uint kTileBase = 0u;
+static const uint kItemBase = kTileCap * 4u;
+static const uint kCntTiles = 768u;                 // Cnt dwords: active tiles, march items of pass 1 / 2, items over the cap
+static const uint kCntItems = 769u;
+static const uint kCntItemOver = 771u;
+static const uint kCntTileOver = 772u;              //   passes whose tiles overflowed kTileCap (full grid)
 
 static const uint kNone = 0xFFFFFFFFu;
 static const uint kFInst = 1u;
@@ -610,10 +624,13 @@ void CSVote(uint3 gid : SV_GroupID, uint gi : SV_GroupIndex) {
 }
 
 // thread 0 = world, 1 = cabin: the winning cluster's R replaces the medoid in the solve buffer (>= Cons.z draws)
-void PickLayer(uint L) {
+// v0.10.0 phase 18: split into PickHead (the choice) / PickDm (the statistic per candidate) / PickTail (the writes), so CSPickPar
+// can spread the statistic's loop (64 candidates x 2 probe tests, one thread before) over a group -- same values, same order
+// returns (the winning candidate -- kNone = the layer keeps its medoid, Cnt has why --, its cluster size, small = below Cons.z)
+uint3 PickHead(uint L) {
     uint c0 = L == 0u ? 0u : Cons.x;
     uint c1 = L == 0u ? Cons.x : Cons.x + Cons.y;
-    uint best = kNone, bc = 0u, nValid = 0u;
+    uint best = kNone, nValid = 0u, bc = 0u;
     float bdev = 0.0;
     for (uint c = c0; c < c1; ++c) {
         uint4 v = Work.Load4(kVote + c * 16u);
@@ -626,31 +643,55 @@ void PickLayer(uint L) {
     Cnt.Store(o + 4u, bc);
     Cnt.Store(o + 16u, nValid);
     if (L == 0u) Cnt.Store(o + 24u, Cnt.Load(17u * 4u) >= Cons.z ? 0u : 1u);   // 1 = too few far draws: near ones voted
-    if (best == kNone) { Cnt.Store(o, 0u); return; }
-    if ((Cons.w & 1u) == 0u) { Cnt.Store(o, 3u); return; }
-    // v0.10.0 phase 8: a layer WITHOUT a medoid this frame (dropped) takes a smaller cluster (>= 8 draws) rather than keeping the
-    // last frame's R; it is still a failed consensus (state 4: the medoid re-arms)
-    bool small = bc < Cons.z;
-    if (small && ((Cons.w & (8u << L)) == 0u || bc < 8u)) { Cnt.Store(o, 2u); return; }
+    uint3 r = uint3(kNone, bc, 0u);                      // (one return: fxc's X4000 false positive on early returns)
+    if (best == kNone) Cnt.Store(o, 0u);
+    else if ((Cons.w & 1u) == 0u) Cnt.Store(o, 3u);
+    else {
+        // v0.10.0 phase 8: a layer WITHOUT a medoid this frame (dropped) takes a smaller cluster (>= 8 draws) rather than keeping
+        // the last frame's R; it is still a failed consensus (state 4: the medoid re-arms)
+        bool small = bc < ((L == 1u && FwdMode.y != 0u) ? FwdMode.y : Cons.z);   // (phase 18: mv_cons_min_cabin)
+        if (small && ((Cons.w & (8u << L)) == 0u || bc < 8u)) { Cnt.Store(o, 2u); r.z = 1u; }
+        else r = uint3(best, bc, small ? 1u : 0u);
+    }
+    return r;
+}
+// statistic: how far the medoid is from the consensus at the cluster's candidate draws (only with a fresh medoid)
+bool PickStatOn(uint L) { return (Cons.w & 2u) != 0u && (Cons.w & (8u << L)) == 0u; }   // (phase 8: not without a medoid)
+float PickDm(uint c2, float4x4 Rw, float4x4 Rm) {      // candidate c2's |medoid - consensus| px (-1: not in the winning cluster)
+    uint4 v = Work.Load4(kVote + c2 * 16u);
+    if (v.z == 0u) return -1.0;
+    uint pj = Work.Load(kPartner + v.w * 4u);
+    float4x4 Mc = LoadMW(CurM, v.w * kMStride);
+    float4x4 Mp = LoadM(PrevM, pj * kMStride);
+    if (!(ProbeDev(Mp, mul(Rw, Mc)) < Params2.y)) return -1.0;       // not a member of the winning cluster
+    return min(ProbeDev(Mp, mul(Rm, Mc)), 1e6);
+}
+void PickTail(uint L, uint bc, bool small, uint ci, float4x4 Rw, float dsum, float dmax, uint dn);
+void PickLayer(uint L) {
+    uint3 h = PickHead(L);
+    uint best = h.x, bc = h.y;
+    bool small = h.z != 0u;
+    if (best == kNone) return;
+    uint c0 = L == 0u ? 0u : Cons.x;
+    uint c1 = L == 0u ? Cons.x : Cons.x + Cons.y;
     uint ci = Work.Load(kVote + best * 16u + 12u);
     float4x4 Rw = LoadMW(Work, kRd + ci * 64u);
     uint base = L * 4u;
     float4x4 Rm = float4x4(SolveRW[base], SolveRW[base + 1u], SolveRW[base + 2u], SolveRW[base + 3u]);
-    // statistic: how far the medoid is from the consensus at the cluster's candidate draws (only with a fresh medoid)
     float dsum = 0.0, dmax = 0.0;
     uint dn = 0u;
-    if ((Cons.w & 2u) != 0u && (Cons.w & (8u << L)) == 0u) {         // (phase 8: not when this layer has no medoid)
+    if (PickStatOn(L)) {
         for (uint c2 = c0; c2 < c1; ++c2) {
-            uint4 v = Work.Load4(kVote + c2 * 16u);
-            if (v.z == 0u) continue;
-            uint pj = Work.Load(kPartner + v.w * 4u);
-            float4x4 Mc = LoadMW(CurM, v.w * kMStride);
-            float4x4 Mp = LoadM(PrevM, pj * kMStride);
-            if (!(ProbeDev(Mp, mul(Rw, Mc)) < Params2.y)) continue;       // not a member of the winning cluster
-            float dm = min(ProbeDev(Mp, mul(Rm, Mc)), 1e6);
+            float dm = PickDm(c2, Rw, Rm);
+            if (dm < 0.0) continue;
             dsum += dm; dmax = max(dmax, dm); ++dn;
         }
     }
+    PickTail(L, bc, small, ci, Rw, dsum, dmax, dn);
+}
+void PickTail(uint L, uint bc, bool small, uint ci, float4x4 Rw, float dsum, float dmax, uint dn) {
+    uint o = (L == 0u ? 20u : 28u) * 4u;
+    uint base = L * 4u;
     [unroll] for (uint r = 0u; r < 4u; ++r) SolveRW[base + r] = Rw[r];
     float4 inf = SolveRW[8u + L];
     inf.w = (float)bc;                                                   // the camera R is a consensus of bc draws
@@ -676,6 +717,49 @@ void PickLayer(uint L) {
 [numthreads(2, 1, 1)]
 void CSPick(uint3 tid : SV_DispatchThreadID) {
     if (tid.x < 2u) PickLayer(tid.x);
+}
+// (v0.10.0 phase 18: one more C++ raw-string split here, MSVC's literal cap): )" R"(
+// v0.10.0 phase 18 (mv_fold_dispatch 2): the same pick with the statistic's candidate loop spread over the group -- threads
+// 0..127 the world layer (<= kCandWorld candidates), 128..255 the cabin layer; thread 0 of each sums in candidate order (the
+// serial loop's order: identical values) and writes. CSPickResolve ran it on ONE thread inside a 256-thread group (in game:
+// pick + resolve + inherit 0.15-0.18 ms per eye, ~2200 draws resolved 9 per thread in one group)
+groupshared uint  gPkBest[2], gPkBc[2], gPkSmall[2];
+groupshared float gPkDm[256];
+[numthreads(256, 1, 1)]
+void CSPickPar(uint gi : SV_GroupIndex) {
+    uint L = gi >> 7u, t = gi & 127u;
+    if (t == 0u) {
+        uint3 h = PickHead(L);
+        gPkBest[L] = h.x; gPkBc[L] = h.y; gPkSmall[L] = h.z;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    uint best = gPkBest[L];
+    uint c0 = L == 0u ? 0u : Cons.x;
+    uint c1 = L == 0u ? Cons.x : Cons.x + Cons.y;
+    uint ci = 0u;
+    float4x4 Rw = float4x4(1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1);
+    float dm = -1.0;
+    if (best != kNone) {
+        ci = Work.Load(kVote + best * 16u + 12u);
+        Rw = LoadMW(Work, kRd + ci * 64u);
+        if (PickStatOn(L) && c0 + t < c1) {
+            uint base = L * 4u;
+            float4x4 Rm = float4x4(SolveRW[base], SolveRW[base + 1u], SolveRW[base + 2u], SolveRW[base + 3u]);
+            dm = PickDm(c0 + t, Rw, Rm);
+        }
+    }
+    gPkDm[gi] = dm;
+    GroupMemoryBarrierWithGroupSync();          // every Rm read above happens before PickTail overwrites the layer's rows
+    if (t == 0u && best != kNone) {
+        float dsum = 0.0, dmax = 0.0;
+        uint dn = 0u;
+        for (uint k = 0u; k < c1 - c0; ++k) {
+            float d = gPkDm[L * 128u + k];
+            if (d < 0.0) continue;
+            dsum += d; dmax = max(dmax, d); ++dn;
+        }
+        PickTail(L, gPkBc[L], gPkSmall[L] != 0u, ci, Rw, dsum, dmax, dn);
+    }
 }
 
 // R = the layer's FINAL camera R (v0.10.0 phase 9: from Solve, or from SolveRW in CSPickResolve)
@@ -751,6 +835,16 @@ void CSResolve(uint3 tid : SV_DispatchThreadID) {
     uint i = tid.x;
     if (i >= Counts.x) return;
     ResolveDraw(i, LayerR(Tab[i * 2u].z));               // the layer's FINAL camera R (consensus, else the medoid)
+}
+void Inherit1Draw(uint i);
+// v0.10.0 phase 18 (mv_fold_dispatch 2): resolve + inherit per draw in ONE wide dispatch (Inherit1Draw reads only its own draw's
+// state, which this thread has just written; the twin table / mover list it fills are read by later dispatches only)
+[numthreads(64, 1, 1)]
+void CSResolveInherit(uint3 tid : SV_DispatchThreadID) {
+    uint i = tid.x;
+    if (i >= Counts.x) return;
+    ResolveDraw(i, LayerR(Tab[i * 2u].z));
+    if ((FoldU.x & 2u) != 0u) Inherit1Draw(i);
 }
 
 // v0.10.0 phase 5 (the source is split into a third C++ raw string here, MSVC's literal cap): )" R"(
@@ -955,8 +1049,8 @@ bool ParCountable(uint j) {
 }
 // v0.10.0 phase 14 round 4: the centroid sums (x, y, n) of a countable draw over a 2x2 sub-grid of each vote-grid cell (a centroid
 // on the 4 px grid jitters by a pixel as a small draw moves over the grid -- the temporal check / plate hold compare centroids)
-void ParSumAt(int2 q) {
-    if (q.x >= (int)Clip.z || q.y >= (int)Clip.w) return;
+bool ParSumAt(int2 q) {                                            // (phase 18: true = q holds a countable draw)
+    if (q.x >= (int)Clip.z || q.y >= (int)Clip.w) return false;
     uint2 ids = PIds[q];
     uint o0, j = kNone;
     if (ids.x != 0u && ids.x <= Counts.w && ParCountable(ids.x - 1u)) j = ids.x - 1u;
@@ -964,26 +1058,45 @@ void ParSumAt(int2 q) {
         uint fy = FwdIdAt(q, ids);
         if (fy > Counts.w && fy <= Counts.x && (Tab[(fy - 1u) * 2u].z & (kFInst | kFNoMvp)) == 0u && ParCountable(fy - 1u)) j = fy - 1u;
     }
-    if (j == kNone) return;
+    if (j == kNone) return false;
     Work.InterlockedAdd(kParSum + j * 12u, (uint)q.x, o0);
     Work.InterlockedAdd(kParSum + j * 12u + 4u, (uint)q.y, o0);
     Work.InterlockedAdd(kParSum + j * 12u + 8u, 1u, o0);
+    return true;
 }
+// v0.10.0 phase 18 COMPACT VOTE: the count's group (8 x 8 grid samples) is exactly a vote group (same clip origin, same stride);
+// a group that saw a countable draw at any of the samples a vote thread reads (its grid sample + the three 2 px sub-samples =
+// the centroid sub-grid below) appends itself to the tile list. The listed draws are a subset of the countable ones (CSParentList
+// lists after this pass from the same states), so no vote thread outside these tiles could march.
+groupshared uint gTileAny;
 [numthreads(8, 8, 1)]
-void CSParentCount(uint3 tid : SV_DispatchThreadID) {
+void CSParentCount(uint3 tid : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint gi : SV_GroupIndex) {
+    if (gi == 0u) gTileAny = 0u;
+    GroupMemoryBarrierWithGroupSync();
     uint st = max(ParU.y, 1u);
     int2 p = int2(Clip.xy) + int2(tid.xy * st);                    // v0.10.0 phase 9: the replay's clip only
-    if (p.x >= (int)Clip.z || p.y >= (int)Clip.w) return;
-    uint2 ids = PIds[p];
-    uint o0;
-    if (ids.x != 0u && ids.x <= Counts.w && ParCountable(ids.x - 1u)) Work.InterlockedAdd(kParPix + (ids.x - 1u) * 4u, 1u, o0);
-    uint fy = FwdIdAt(p, ids);
-    if (fy > Counts.w && fy <= Counts.x) {
-        uint j = fy - 1u;
-        if ((Tab[j * 2u].z & (kFInst | kFNoMvp)) == 0u && ParCountable(j)) Work.InterlockedAdd(kParPix + j * 4u, 1u, o0);
+    if (p.x < (int)Clip.z && p.y < (int)Clip.w) {
+        uint2 ids = PIds[p];
+        uint o0;
+        if (ids.x != 0u && ids.x <= Counts.w && ParCountable(ids.x - 1u)) Work.InterlockedAdd(kParPix + (ids.x - 1u) * 4u, 1u, o0);
+        uint fy = FwdIdAt(p, ids);
+        if (fy > Counts.w && fy <= Counts.x) {
+            uint j = fy - 1u;
+            if ((Tab[j * 2u].z & (kFInst | kFNoMvp)) == 0u && ParCountable(j)) Work.InterlockedAdd(kParPix + j * 4u, 1u, o0);
+        }
+        int h = (int)max(st / 2u, 1u);                              // phase 14 round 4: centroid sub-grid
+        bool a0 = ParSumAt(p);
+        bool a1 = ParSumAt(p + int2(h, 0));
+        bool a2 = ParSumAt(p + int2(0, h));
+        bool a3 = ParSumAt(p + int2(h, h));
+        if (a0 || a1 || a2 || a3) InterlockedOr(gTileAny, 1u);
     }
-    int h = (int)max(st / 2u, 1u);                                  // phase 14 round 4: centroid sub-grid
-    ParSumAt(p); ParSumAt(p + int2(h, 0)); ParSumAt(p + int2(0, h)); ParSumAt(p + int2(h, h));
+    GroupMemoryBarrierWithGroupSync();
+    if (gi == 0u && gTileAny != 0u && (FoldU.x & 32u) != 0u) {
+        uint at;
+        Cnt.InterlockedAdd(kCntTiles * 4u, 1u, at);
+        if (at < kTileCap) ParList.Store(kTileBase + at * 4u, gid.x | (gid.y << 16));
+    }
 }
 
 // (v0.10.0 phase 9: one more C++ raw-string split here, MSVC's 16380-byte literal cap): )" R"(
@@ -1135,7 +1248,13 @@ void ParentListGroup(uint gi) {
         Work.Store(kParAnyFine, gFine);
         uint S = max(ParU.y, 1u);
         uint gw = (((Clip.z - Clip.x) + S - 1u) / S + 7u) / 8u, gh = (((Clip.w - Clip.y) + S - 1u) / S + 7u) / 8u;
-        ParArgs.Store3(0u, gVis != 0u ? uint3(gw, gh, 1u) : uint3(0u, 1u, 1u));            // CSParentVote (both passes)
+        // v0.10.0 phase 18 (FoldU.x bit 5): the same args drive CSParentCollect; over the tiles CSParentCount listed (tile mode
+        // 1), or the full grid when they did not fit the list (mode 0)
+        uint tiles = Cnt.Load(kCntTiles * 4u);
+        bool tileMode = (FoldU.x & 32u) != 0u && tiles <= kTileCap;
+        if ((FoldU.x & 32u) != 0u && !tileMode) Cnt.Store(kCntTileOver * 4u, 1u);
+        Work.Store(kParU + 272u, tileMode ? 1u : 0u);
+        ParArgs.Store3(0u, gVis == 0u ? uint3(0u, 1u, 1u) : (tileMode ? uint3(tiles, 1u, 1u) : uint3(gw, gh, 1u)));   // the votes
     }
 }
 [numthreads(256, 1, 1)]
@@ -1166,6 +1285,53 @@ static const int2 kParDir[8] = { int2(1, 0), int2(-1, 0), int2(0, 1), int2(0, -1
 // v0.10.0 phase 6c: the 8 marches from U's pixel p (depth dp; fwdU = a forward U, whose own pixels carry its GREEN id): each
 // steps ParU.y px at a time up to ParU.z px (per axis) and stops at the first pixel that is neither U's own nor a motionless
 // draw at U's depth (see the header above); the RED (G-buffer) id there is the candidate
+// (v0.10.0 phase 18: one more C++ raw-string split here, MSVC's literal cap): )" R"(
+// v0.10.0 phase 18: ONE march direction k (the body of the phase-6c loop): 0 = no source, 1 = a vote for cand (dz = relative depth
+// difference), 2 = depth-rejected; px = the px it marched. ParMarch runs the 8 in a row (one thread per sample, as before);
+// CSParentMarch runs each on its own thread (the compact vote)
+uint ParMarchDir(uint u, int2 p, float zp, uint fu, bool fwdU, uint iter, uint step, uint nStep, uint k,
+                 out uint cand, out float dz, out uint px) {
+    int2 d = kParDir[k] * (int)step;
+    int2 q = p;
+    uint res = 0u, s = 1u;
+    float zLast = zp;                                               // zLast: the patch pixel before q
+    cand = 0u; dz = 0.0;
+    [loop] for (; s <= nStep; ++s) {
+        q += d;
+        if (q.x < 0 || q.y < 0 || q.x >= (int)Params.z || q.y >= (int)Params.w) break;
+        uint2 ids = PIds[q];
+        if ((fwdU ? FwdIdAt(q, ids) : ids.x) == u + 1u) {            // U's own pixel
+            float dq = fwdU ? FwdDepthAt(q) : PDepth[q];
+            if (dq > 0.0) zLast = ZLin(dq, u);
+            continue;
+        }
+        uint g = ids.x;
+        if (g > Counts.w) break;                                     // (not a G-buffer id)
+        uint j = kParPseudo;
+        float zq = 0.0;
+        if (g == 0u) {                                               // no G-buffer draw here (sky / not replayed) ...
+            // ... phase 14: unless the static gate skipped one here (world-range depth): the pseudo static source
+            float dq0 = PDepth[q];
+            if ((ParU.x & 16u) == 0u || (fu & kFCabin) != 0u || !(dq0 >= 0.01 && dq0 < 0.9)) break;
+            zq = ZLin(dq0, u);                                       // (U's layer: U's viewport depth range)
+        } else {
+            j = g - 1u;
+            if (((Tab[j * 2u].z ^ fu) & kFCabin) != 0u) break;       // another depth layer
+            zq = ZLin(PDepth[q], j);
+        }
+        float rel = abs(zq - zp) / max(max(zq, zp), 1e-6);
+        bool nearZ = rel <= Par.x;
+        if (j == kParPseudo || ParSource(j, iter)) {                 // within Par.x of U AND flush with the patch edge
+            bool flush = abs(zq - zLast) <= Par2.x * max(max(zq, zLast), 1e-6);
+            res = (nearZ && flush) ? 1u : 2u; cand = j + 1u; dz = rel;
+            break;
+        }
+        if (!nearZ) break;                                           // a motionless surface at another depth: the patch ends
+        zLast = zq;
+    }
+    px = min(s, nStep) * step;
+    return res;
+}
 void ParMarch(uint u, uint slot, int2 p, float dp, bool fwdU, uint iter, uint step) {
     uint base = kParTab + slot * kParTabB;
     if (Work.Load(base + 96u) + Work.Load(base + 100u) + Work.Load(base + 104u) >= (uint)Par.w) return;   // bounds the atomics
@@ -1175,44 +1341,10 @@ void ParMarch(uint u, uint slot, int2 p, float dp, bool fwdU, uint iter, uint st
     uint nStep = max(ParU.z / step, 1u);
     uint nAcc = 0u, nRej = 0u, nNo = 0u, px = 0u;
     [loop] for (uint k = 0u; k < 8u; ++k) {
-        int2 d = kParDir[k] * (int)step;
-        int2 q = p;
-        uint res = 0u, cand = 0u, s = 1u;
-        float dz = 0.0, zLast = zp;                                     // zLast: the patch pixel before q
-        [loop] for (; s <= nStep; ++s) {
-            q += d;
-            if (q.x < 0 || q.y < 0 || q.x >= (int)Params.z || q.y >= (int)Params.w) break;
-            uint2 ids = PIds[q];
-            if ((fwdU ? FwdIdAt(q, ids) : ids.x) == u + 1u) {            // U's own pixel
-                float dq = fwdU ? FwdDepthAt(q) : PDepth[q];
-                if (dq > 0.0) zLast = ZLin(dq, u);
-                continue;
-            }
-            uint g = ids.x;
-            if (g > Counts.w) break;                                     // (not a G-buffer id)
-            uint j = kParPseudo;
-            float zq = 0.0;
-            if (g == 0u) {                                               // no G-buffer draw here (sky / not replayed) ...
-                // ... phase 14: unless the static gate skipped one here (world-range depth): the pseudo static source
-                float dq0 = PDepth[q];
-                if ((ParU.x & 16u) == 0u || (fu & kFCabin) != 0u || !(dq0 >= 0.01 && dq0 < 0.9)) break;
-                zq = ZLin(dq0, u);                                       // (U's layer: U's viewport depth range)
-            } else {
-                j = g - 1u;
-                if (((Tab[j * 2u].z ^ fu) & kFCabin) != 0u) break;       // another depth layer
-                zq = ZLin(PDepth[q], j);
-            }
-            float rel = abs(zq - zp) / max(max(zq, zp), 1e-6);
-            bool nearZ = rel <= Par.x;
-            if (j == kParPseudo || ParSource(j, iter)) {                 // within Par.x of U AND flush with the patch edge
-                bool flush = abs(zq - zLast) <= Par2.x * max(max(zq, zLast), 1e-6);
-                res = (nearZ && flush) ? 1u : 2u; cand = j + 1u; dz = rel;
-                break;
-            }
-            if (!nearZ) break;                                           // a motionless surface at another depth: the patch ends
-            zLast = zq;
-        }
-        px += min(s, nStep) * step;
+        uint cand, pxk;
+        float dz;
+        uint res = ParMarchDir(u, p, zp, fu, fwdU, iter, step, nStep, k, cand, dz, pxk);
+        px += pxk;
         if (res == 1u) { ++nAcc; ParAddVote(base, cand, (uint)(min(dz, 1.0) * 16384.0), 1u << k); }
         else if (res == 2u) ++nRej;
         else ++nNo;
@@ -1265,6 +1397,96 @@ void CSParentVote(uint3 tid : SV_DispatchThreadID) {
             float fw = FwdDepthAt(p), dt = PDepth[p];
             if (fw >= 0.01 && fw < 0.9 && fw > dt) ParFrom(fy - 1u, p, fw, true, iter, k != 0u);
         }
+    }
+}
+
+// (v0.10.0 phase 18: one more C++ raw-string split here, MSVC's 16380-byte literal cap): )" R"(
+// v0.10.0 phase 18 COMPACT VOTE (dlaa.ini mv_vote_compact 1). In game the vote cost 0.12-0.18 ms per pass (x 2 passes) per eye for
+// ~10k marches per frame while the pixel count over the same grid cost 0.01: the work sat in a few threads -- a thread of a small
+// (FINE) plate marched 4 sub-samples x 8 directions x 16 steps in a row (512 dependent texture reads), on a handful of SMs. Now:
+// CSParentCollect (over the tiles CSParentCount listed) does exactly CSParentVote's per-pixel tests and appends each march sample
+// as an item; CSParentMarch runs one thread per (item, direction) -- the same ParMarchDir, the same vote tables. The vote's
+// result depends only on WHICH marches run and what each finds (atomics: order-free counts; the candidate slots of a table fill in
+// arrival order as before, ParBest is order-free unless more than 8 candidates arrive -- the existing GPU-order caveat).
+void ParEmit(uint u, int2 p, float dp, bool fwdU, uint iter, bool sub) {
+    uint slot = Work.Load(kParSlot + u * 4u);
+    if (slot >= kParMaxU) return;
+    bool fine = Work.Load(kParTab + slot * kParTabB + 168u) != 0u;
+    if (sub && !fine) return;                                      // a coarse draw: its grid sample only
+    if (!ParVoter(u, slot, p, iter)) return;
+    uint step = fine ? 2u : max(ParU.y, 1u);
+    uint idx, o;
+    Cnt.InterlockedAdd((kCntItems + iter) * 4u, 1u, idx);
+    if (idx < kItemCap) {
+        ParList.Store4(kItemBase + idx * 16u, uint4((uint)p.x | ((uint)p.y << 16), u | (fwdU ? 0x80000000u : 0u), asuint(dp),
+                                                    slot | (step << 16)));
+        if ((idx & 7u) == 0u) ParArgs.InterlockedAdd(iter * 16u, 1u, o);   // (u5 = the march args here: 8 items per group)
+    } else {
+        Cnt.InterlockedAdd(kCntItemOver * 4u, 1u, o);
+        ParMarch(u, slot, p, dp, fwdU, iter, step);                // over the cap: marched in place (the phase-8 thread)
+    }
+}
+[numthreads(8, 8, 1)]
+void CSParentCollect(uint3 gid : SV_GroupID, uint3 gt : SV_GroupThreadID) {
+    if (Work.Load(kParU + 256u) == 0u) return;
+    uint iter = Work.Load(kParIter);
+    uint2 tile = gid.xy;
+    if (Work.Load(kParU + 272u) != 0u) { uint t = ParList.Load(kTileBase + gid.x * 4u); tile = uint2(t & 0xFFFFu, t >> 16); }
+    uint2 tid = tile * 8u + gt.xy;
+    int2 p0 = int2(Clip.xy) + int2(tid * max(ParU.y, 1u));
+    uint nSub = (ParU.y > 2u && Work.Load(kParAnyFine) != 0u) ? 4u : 1u;
+    for (uint k = 0u; k < nSub; ++k) {
+        int2 p = p0 + int2((int)(k & 1u), (int)(k >> 1)) * 2;
+        if (p.x >= (int)Clip.z || p.y >= (int)Clip.w) continue;
+        uint2 ids = PIds[p];
+        if (ids.x != 0u && ids.x <= Counts.w) ParEmit(ids.x - 1u, p, PDepth[p], false, iter, k != 0u);
+        uint fy = FwdIdAt(p, ids);
+        if (fy > Counts.w && fy <= Counts.x) {
+            float fw = FwdDepthAt(p), dt = PDepth[p];
+            if (fw >= 0.01 && fw < 0.9 && fw > dt) ParEmit(fy - 1u, p, fw, true, iter, k != 0u);
+        }
+    }
+}
+// 8 items per group, thread = item * 8 + direction; each item's counters are summed in groupshared and added once (as ParMarch)
+groupshared uint gMAcc[8], gMRej[8], gMNo[8], gMPx[8];
+[numthreads(64, 1, 1)]
+void CSParentMarch(uint3 gid : SV_GroupID, uint gi : SV_GroupIndex) {
+    uint li = gi >> 3u, k = gi & 7u;
+    if (k == 0u) { gMAcc[li] = 0u; gMRej[li] = 0u; gMNo[li] = 0u; gMPx[li] = 0u; }
+    GroupMemoryBarrierWithGroupSync();
+    uint iter = Work.Load(kParIter);
+    uint n = min(Cnt.Load((kCntItems + iter) * 4u), kItemCap);
+    uint item = gid.x * 8u + li;
+    uint base = 0u;
+    bool live = item < n;
+    if (live) {
+        uint4 it = ParList.Load4(kItemBase + item * 16u);
+        int2 p = int2((int)(it.x & 0xFFFFu), (int)(it.x >> 16));
+        uint u = it.y & 0x7FFFFFFFu;
+        bool fwdU = (it.y & 0x80000000u) != 0u;
+        uint slot = it.w & 0xFFFFu, step = max(it.w >> 16, 1u);
+        base = kParTab + slot * kParTabB;
+        // (the atomics bound, per direction here: never reached with the per-draw budget -- ParU.w <= 8192 marches per pass)
+        if (Work.Load(base + 96u) + Work.Load(base + 100u) + Work.Load(base + 104u) >= (uint)Par.w) live = false;
+        if (live) {
+            uint cand, px, o;
+            float dz;
+            uint res = ParMarchDir(u, p, ZLin(asfloat(it.z), u), Tab[u * 2u].z, fwdU, iter, step, max(ParU.z / step, 1u), k,
+                                   cand, dz, px);
+            InterlockedAdd(gMPx[li], px, o);
+            if (res == 1u) { InterlockedAdd(gMAcc[li], 1u, o); ParAddVote(base, cand, (uint)(min(dz, 1.0) * 16384.0), 1u << k); }
+            else if (res == 2u) InterlockedAdd(gMRej[li], 1u, o);
+            else InterlockedAdd(gMNo[li], 1u, o);
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if (k == 0u && item < n) {
+        uint old;
+        uint nAcc = gMAcc[li], nRej = gMRej[li], nNo = gMNo[li];
+        if (nAcc != 0u) Work.InterlockedAdd(base + 96u, nAcc, old);
+        if (nRej != 0u) Work.InterlockedAdd(base + 100u, nRej, old);
+        if (nNo != 0u) Work.InterlockedAdd(base + 104u, nNo, old);
+        if (iter == 0u && nAcc + nRej + nNo != 0u) Work.InterlockedAdd(base + 112u, gMPx[li], old);
     }
 }
 
@@ -1853,7 +2075,15 @@ StatEnt* StatFind(uint64_t key, bool insert) {
 }
 constexpr float kParFineSamples = 64.0f;   // < 64 coarse samples (~1000 px at mv_vote_res 4) = a FINE listed draw
 // v0.10.0 phase 9: dlaa.ini mv_fold_dispatch (1 = CSPickResolve / CSListTwin, 0 = the phase-8 chain of separate dispatches)
-bool  g_fold = true;
+// v0.10.0 phase 18: 2 (default) = CSListTwin + CSPickPar + the wide CSResolveInherit (see the header)
+int   g_foldMode = 2;
+// v0.10.0 phase 18: dlaa.ini mv_vote_compact (1 = the rigid-parent vote over the listed tiles, one thread per march direction)
+bool  g_voteCompact = true;
+// v0.10.0 phase 18: dlaa.ini mv_cons_min_cabin (0 = kConsMin, as the world layer; 8..64): the cabin layer's consensus needs this many
+// agreeing draws -- below kConsMin it can be used (and its medoid / candidate copies dropped after mv_medoid_drop healthy readbacks)
+UINT  g_consMinCabin = 0u;
+constexpr UINT kParTileCap = 65536u, kParItemCap = 131072u;   // = the shader's kTileCap / kItemCap
+constexpr UINT kParListBytes = kParTileCap * 4u + kParItemCap * 16u;
 // v0.10.0 phase 9: scissor-enabled copies of the game's rasterizer states (DrawIdRecord::ScissorRs). Key ref held (no pointer
 // reuse aliasing), copy ref held; dropped with the device objects (ShutdownDevice). A full table = no clip for new states.
 struct RsMemo { ID3D11RasterizerState* game; ID3D11RasterizerState* sc; bool had; };
@@ -1880,7 +2110,8 @@ constexpr UINT kCbBytes = 64u + 48u * 16u + 96u;     // v0.10.0 phase 9: + Clip,
 // phase 6c: the vote tables grow to 64 x 192 B (kParTab = kMax * 200 + 8704, end kMax * 200 + 20992)
 // phase 14 round 4: + the per-draw centroid sums (kParSum = kMax * 200 + 24576, kMax * 12 B)
 constexpr UINT kWorkBytes = (UINT)DrawIdRecord::kMax * 212u + 24576u;
-constexpr UINT kCntBytes = 3072u;               // v0.10.0 phase 8: + dwords 256..383 = instanced draws with a moving parent
+constexpr UINT kCntBytes = 3328u;               // v0.10.0 phase 8: + dwords 256..383 = instanced draws with a moving parent
+                                                 // v0.10.0 phase 18: + dwords 768..772 (compact vote: tiles, items, overflows)
                                                 // phase 14: + 384..511 own-pair static G-buffer draws, 512..639 rigid parents,
                                                 // 640..767 draws that move (a mover by any route / a track reject)
 static_assert(256u + (UINT)DrawIdRecord::kMax / 32u <= 384u, "instanced mover bitmask");
@@ -2808,10 +3039,22 @@ void DrawIdMv::RegisterShaders() {
     ShaderCache::Add(ShaderCache::kDrawIdPickResolve, kDrawIdCs, sizeof(kDrawIdCs) - 1, "drawid_pick_resolve", "CSPickResolve",
                      "cs_5_0");
     ShaderCache::Add(ShaderCache::kDrawIdListTwin, kDrawIdCs, sizeof(kDrawIdCs) - 1, "drawid_list_twin", "CSListTwin", "cs_5_0");
+    // v0.10.0 phase 18 (mv_fold_dispatch 2, mv_vote_compact)
+    ShaderCache::Add(ShaderCache::kDrawIdPickPar, kDrawIdCs, sizeof(kDrawIdCs) - 1, "drawid_pick_par", "CSPickPar", "cs_5_0");
+    ShaderCache::Add(ShaderCache::kDrawIdResInh, kDrawIdCs, sizeof(kDrawIdCs) - 1, "drawid_resolve_inherit", "CSResolveInherit",
+                     "cs_5_0");
+    ShaderCache::Add(ShaderCache::kDrawIdParentCollect, kDrawIdCs, sizeof(kDrawIdCs) - 1, "drawid_parent_collect",
+                     "CSParentCollect", "cs_5_0");
+    ShaderCache::Add(ShaderCache::kDrawIdParentMarch, kDrawIdCs, sizeof(kDrawIdCs) - 1, "drawid_parent_march", "CSParentMarch",
+                     "cs_5_0");
 }
 
-void DrawIdMv::SetFold(bool on) { g_fold = on; }        // v0.10.0 phase 9
-bool DrawIdMv::Fold() { return g_fold; }
+void DrawIdMv::SetFold(int mode) { g_foldMode = mode <= 0 ? 0 : (mode >= 2 ? 2 : 1); }   // v0.10.0 phase 9 / 18
+int  DrawIdMv::Fold() { return g_foldMode; }
+void DrawIdMv::SetVoteCompact(bool on) { g_voteCompact = on; }   // v0.10.0 phase 18
+bool DrawIdMv::VoteCompact() { return g_voteCompact; }
+void DrawIdMv::SetConsMinCabin(unsigned n) { g_consMinCabin = n == 0u ? 0u : (n < 8u ? 8u : (n > 64u ? 64u : n)); }
+unsigned DrawIdMv::ConsMinCabin() { return g_consMinCabin; }
 
 void DrawIdMv::SetConsensus(bool on) { g_consensus = on; }
 bool DrawIdMv::Consensus() { return g_consensus; }
@@ -2969,6 +3212,17 @@ bool DrawIdMv::Init(ID3D11Device* dev) {
         !CreateCsFromCache(dev, ShaderCache::kDrawIdParentCount, &m_csParCount) ||   // v0.10.0 phase 6b
         !CreateCsFromCache(dev, ShaderCache::kDrawIdPickResolve, &m_csPickRes) ||    // v0.10.0 phase 9
         !CreateCsFromCache(dev, ShaderCache::kDrawIdListTwin, &m_csListTwin)) return false;
+    // v0.10.0 phase 18: a missing one only keeps the phase-9 / phase-8 paths (mv_fold_dispatch 1, mv_vote_compact 0)
+    if (!CreateCsFromCache(dev, ShaderCache::kDrawIdPickPar, &m_csPickPar) ||
+        !CreateCsFromCache(dev, ShaderCache::kDrawIdResInh, &m_csResInh)) {
+        m_csPickPar.Reset(); m_csResInh.Reset();
+        Log("MV draw-ids: phase-18 pick / resolve shaders unavailable -- mv_fold_dispatch 2 runs as 1");
+    }
+    if (!CreateCsFromCache(dev, ShaderCache::kDrawIdParentCollect, &m_csParCollect) ||
+        !CreateCsFromCache(dev, ShaderCache::kDrawIdParentMarch, &m_csParMarch)) {
+        m_csParCollect.Reset(); m_csParMarch.Reset();
+        Log("MV draw-ids: phase-18 compact vote shaders unavailable -- the vote runs on the full grid (mv_vote_compact 0)");
+    }
     const UINT kM = (UINT)kMax;
     bool ok = MakeBuf(dev, kCbBytes, D3D11_BIND_CONSTANT_BUFFER, 0, 0, true, &m_cb) &&
               MakeBuf(dev, kM * 2u * 16u, D3D11_BIND_SHADER_RESOURCE, D3D11_RESOURCE_MISC_BUFFER_STRUCTURED, 16, true, &m_tab) &&
@@ -3052,6 +3306,35 @@ bool DrawIdMv::Init(ID3D11Device* dev) {
     return true;
 }
 
+// v0.10.0 phase 18: the compact vote's tile / item list + march args, made on the first pass that wants them; a failure keeps the
+// full-grid vote for this unit (one line)
+bool DrawIdMv::EnsureParList(ID3D11Device* dev) {
+    if (m_parListUav && m_marchArgsUav) return true;
+    if (m_parListFailed || !dev || !m_csParCollect || !m_csParMarch) return false;
+    m_parListFailed = true;
+    D3D11_BUFFER_DESC bd{};
+    bd.ByteWidth = kParListBytes; bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+    bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
+    D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};
+    ud.Format = DXGI_FORMAT_R32_TYPELESS;
+    ud.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+    ud.Buffer.NumElements = kParListBytes / 4u; ud.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW;
+    bool ok = SUCCEEDED(dev->CreateBuffer(&bd, nullptr, &m_parList)) &&
+              SUCCEEDED(dev->CreateUnorderedAccessView(m_parList.Get(), &ud, &m_parListUav));
+    bd.ByteWidth = 32u;
+    bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS | D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS;
+    ud.Buffer.NumElements = 8u;
+    ok = ok && SUCCEEDED(dev->CreateBuffer(&bd, nullptr, &m_marchArgs)) &&
+         SUCCEEDED(dev->CreateUnorderedAccessView(m_marchArgs.Get(), &ud, &m_marchArgsUav));
+    if (!ok) {
+        m_parList.Reset(); m_parListUav.Reset(); m_marchArgs.Reset(); m_marchArgsUav.Reset();
+        Log("MV draw-ids: compact vote buffers create failed -- the vote runs on the full grid for this unit");
+        return false;
+    }
+    m_parListFailed = false;
+    return true;
+}
+
 void DrawIdMv::Poll(ID3D11DeviceContext* ctx) {
     if (m_dumpPending) DumpPoll(ctx);                    // v0.10.0 phase 4
     for (int k = 0; k < kRb; ++k) {
@@ -3127,6 +3410,12 @@ void DrawIdMv::Poll(ID3D11DeviceContext* ctx) {
         }
         m_rbInstN[k] = 0;
         m_stats.parVis += c[205];                        // v0.10.0 phase 8
+        if (m_rbCompact[k]) {                            // v0.10.0 phase 18 (mv_vote_compact)
+            ++m_stats.cvFrames;
+            m_stats.cvTiles += c[768]; m_stats.cvGrid += m_rbGrid[k];
+            m_stats.cvItems1 += c[769]; m_stats.cvItems2 += c[770];
+            m_stats.cvItemOver += c[771]; m_stats.cvTileOver += c[772];
+        }
         m_stats.parFine += c[206];
         if (c[205] == 0) ++m_stats.parSkipped;
         m_stats.twinViewSkip += c[63];
@@ -3141,7 +3430,8 @@ void DrawIdMv::Poll(ID3D11DeviceContext* ctx) {
             m_lastCons[L] = (int)q[0];
             m_lastConsN[L] = q[1];
             // v0.10.0 phase 8: consensus health (mv_medoid_drop); a failure after a healthy run re-arms that layer's medoid
-            if (q[0] == 1 && q[1] >= (uint32_t)kConsMin) { if (m_consRun[L] < 0x7FFFFFFFu) ++m_consRun[L]; }
+            const uint32_t minL = (L == 1 && g_consMinCabin) ? g_consMinCabin : (uint32_t)kConsMin;   // (phase 18)
+            if (q[0] == 1 && q[1] >= minL) { if (m_consRun[L] < 0x7FFFFFFFu) ++m_consRun[L]; }
             else {
                 if (g_medoidDrop && m_consRun[L] >= g_medoidDrop) ++m_stats.medoidRearms[L];
                 m_consRun[L] = 0;
@@ -3172,6 +3462,7 @@ void DrawIdMv::Poll(ID3D11DeviceContext* ctx) {
             } else if (q[0] == 2 || q[0] == 4) {        // (v0.10.0 phase 8: 4 = a small cluster without a medoid)
                 if (q[0] == 4) ++m_stats.consSmall[L];
                 ++m_stats.consFallback[L];
+                m_stats.consFallCluster[L] += q[1];      // v0.10.0 phase 18 (the cabin layer's cluster size, for the log)
             }
         }
         // v0.10.0 phase 14 (mv_replay_static_*): this pass's verdicts -> the static streak per FullKey. The camera R the verdicts
@@ -3475,12 +3766,22 @@ uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ui
             if (clip[2] < clip[0]) clip[2] = clip[0];
             if (clip[3] < clip[1]) clip[3] = clip[1];
         }
-        const uint32_t fwdMode[4] = { (nF && fwd) ? fwd->Shift() : 0u, 0u, 0u, 0u };
+        const uint32_t fwdMode[4] = { (nF && fwd) ? fwd->Shift() : 0u, g_consMinCabin, 0u, 0u };   // phase 18: y (cabin min)
         const bool pickOn = m && m_nGroups && (candW + candC) && g_consensus;
         const bool twinOn = g_twin && m, attachOn = g_attachM > 0.0f && m;
         const bool parentOn = g_parent && m && idsBound && fullW && fullH;
+        // v0.10.0 phase 18: bit 5 = the compact vote (CSParentCount lists its tiles, CSParentList writes the collect args)
+        ID3D11Device* devC = nullptr;
+        if (parentOn && g_voteCompact && m_csParCollect && m_csParMarch && !m_parListUav && !m_parListFailed) ctx->GetDevice(&devC);
+        if (devC) { EnsureParList(devC); devC->Release(); }
+        const bool compact = parentOn && g_voteCompact && m_parListUav && m_marchArgsUav;
         const uint32_t fold = (pickOn ? 1u : 0u) | ((twinOn || attachOn) ? 2u : 0u) | (parentOn ? 4u : 0u) | (twinOn ? 8u : 0u) |
-                              (attachOn ? 16u : 0u);
+                              (attachOn ? 16u : 0u) | (compact ? 32u : 0u);
+        m_prepCompact = compact;
+        {
+            const uint32_t S = g_voteRes, cw = clip[2] - clip[0], chh = clip[3] - clip[1];
+            m_prepGrid = ((cw + S - 1u) / S + 7u) / 8u * (((chh + S - 1u) / S + 7u) / 8u);
+        }
         uint32_t epsBits = 0;                            // v0.10.0 phase 14: z = the deep-static epsilon (px, float bits)
         memcpy(&epsBits, &g_statEps, 4);
         // phase 14 round 4: w bit 0 = the previous pass's plate-hold table is valid (that pass ran the rigid-parent picks)
@@ -3579,13 +3880,30 @@ void DrawIdMv::Dispatch(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ID3D1
     const bool pickOn = m && m_nGroups && nCand && solveUav && g_consensus;
     // v0.10.0 phase 9: the folded chain (CSPickResolve, CSListTwin) needs the solve UAV and the same id-target decision Prepare
     // wrote into FoldU; otherwise (and with mv_fold_dispatch 0) the phase-8 chain of separate dispatches runs
-    const bool fold = g_fold && solveUav && m_csPickRes && m_csListTwin && m_prepIds == (idSrv != nullptr) && depthSrv;
+    const bool fold = g_foldMode >= 1 && solveUav && m_csPickRes && m_csListTwin && m_prepIds == (idSrv != nullptr) && depthSrv;
+    // v0.10.0 phase 18 (mv_fold_dispatch 2): the list + twin + attach group as in phase 9, but the pick (statistic spread over a
+    // group) and resolve + inherit (one thread per draw, one wide dispatch) in place of the single-group CSPickResolve
+    const bool wide = fold && g_foldMode >= 2 && m_csPickPar && m_csResInh;
     if (pickOn) {
         pt = GpuPerf::Next(ctx, pt, GpuPerf::kVote);
         ctx->CSSetShader(m_csVote.Get(), nullptr, 0);
         ctx->Dispatch(nCand, 1, 1);
     }
-    if (fold) {
+    if (wide) {
+        if (pickOn) {
+            pt = GpuPerf::Next(ctx, pt, GpuPerf::kPick);
+            ID3D11ShaderResourceView* noSolve = nullptr;
+            ctx->CSSetShaderResources(5, 1, &noSolve);
+            ctx->CSSetUnorderedAccessViews(4, 1, &solveUav, keep);
+            ctx->CSSetShader(m_csPickPar.Get(), nullptr, 0);
+            ctx->Dispatch(1, 1, 1);
+            ctx->CSSetUnorderedAccessViews(4, 1, nullUav, keep);
+            ctx->CSSetShaderResources(5, 1, &solveSrv);
+        }
+        pt = GpuPerf::Next(ctx, pt, GpuPerf::kResInh);
+        ctx->CSSetShader(m_csResInh.Get(), nullptr, 0);
+        ctx->Dispatch((n + 63) / 64, 1, 1);
+    } else if (fold) {
         pt = GpuPerf::Next(ctx, pt, GpuPerf::kPickRes);
         ID3D11ShaderResourceView* noSolve = nullptr;
         ctx->CSSetShaderResources(5, 1, &noSolve);
@@ -3620,6 +3938,15 @@ void DrawIdMv::Dispatch(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ID3D1
         pt = GpuPerf::Next(ctx, pt, GpuPerf::kInherit);
         ctx->CSSetShader(m_csInherit1.Get(), nullptr, 0);
         ctx->Dispatch((n + 63) / 64, 1, 1);
+    }
+    // v0.10.0 phase 18 (mv_vote_compact): the count lists the vote tiles into m_parList (u7, bound until the votes are done); the
+    // march args (2 x (0 groups, 1, 1)) are reset here, CSParentCollect counts them up
+    const bool compact = parentOn && m_prepCompact && m_parListUav && m_marchArgsUav && m_csParCollect && m_csParMarch;
+    if (compact) {
+        static const UINT kMarchArgs0[8] = { 0u, 1u, 1u, 0u, 0u, 1u, 1u, 0u };
+        ctx->UpdateSubresource(m_marchArgs.Get(), 0, nullptr, kMarchArgs0, 0, 0);
+        ID3D11UnorderedAccessView* lu = m_parListUav.Get();
+        ctx->CSSetUnorderedAccessViews(7, 1, &lu, keep);
     }
     if (parentOn) {                                      // v0.10.0 phase 6: the U list (state 1 = unpaired by its own pair)
         // v0.10.0 phase 6b: count each replayed instanced / no-MVP draw's on-screen pixels (needs the id target, t8) so the U
@@ -3674,9 +4001,23 @@ void DrawIdMv::Dispatch(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ID3D1
         ID3D11ShaderResourceView* psrv[4] = { idSrv, depthSrv, fwdDepthSrv, fwdIdSrv };   // (v0.10.0 phase 9: + t11)
         ctx->CSSetShaderResources(8, 4, psrv);
         for (int pass = 0; pass < 2; ++pass) {
-            pt = GpuPerf::Next(ctx, pt, pass == 0 ? GpuPerf::kParVote1 : GpuPerf::kParVote2);
-            ctx->CSSetShader(m_csParVote.Get(), nullptr, 0);
-            ctx->DispatchIndirect(m_parArgs.Get(), 0);
+            if (compact) {
+                // v0.10.0 phase 18: the march samples of this pass -> items (args from CSParentList: the listed tiles), then one
+                // thread per item and direction (args counted by the collect; u5 = the march args for the collect only)
+                pt = GpuPerf::Next(ctx, pt, pass == 0 ? GpuPerf::kParCol1 : GpuPerf::kParCol2);
+                ID3D11UnorderedAccessView* mu = m_marchArgsUav.Get();
+                ctx->CSSetUnorderedAccessViews(5, 1, &mu, keep);
+                ctx->CSSetShader(m_csParCollect.Get(), nullptr, 0);
+                ctx->DispatchIndirect(m_parArgs.Get(), 0);
+                ctx->CSSetUnorderedAccessViews(5, 1, nullUav, keep);
+                pt = GpuPerf::Next(ctx, pt, pass == 0 ? GpuPerf::kParVote1 : GpuPerf::kParVote2);
+                ctx->CSSetShader(m_csParMarch.Get(), nullptr, 0);
+                ctx->DispatchIndirect(m_marchArgs.Get(), pass == 0 ? 0u : 16u);
+            } else {
+                pt = GpuPerf::Next(ctx, pt, pass == 0 ? GpuPerf::kParVote1 : GpuPerf::kParVote2);
+                ctx->CSSetShader(m_csParVote.Get(), nullptr, 0);
+                ctx->DispatchIndirect(m_parArgs.Get(), 0);
+            }
             pt = GpuPerf::Next(ctx, pt, pass == 0 ? GpuPerf::kParPick1 : GpuPerf::kParPick2);
             ctx->CSSetShader(pass == 0 ? m_csParPick1.Get() : m_csParPick2.Get(), nullptr, 0);
             // v0.10.0 phase 14 round 4: both picks read the previous pass's listed-draw table (t12: the temporal check of a moving
@@ -3702,6 +4043,7 @@ void DrawIdMv::Dispatch(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ID3D1
     } else {
         m_uholdValid[m_ping] = false;                    // phase 14 round 4: no picks this pass -> no hold table for the next one
     }
+    if (compact) ctx->CSSetUnorderedAccessViews(7, 1, nullUav, keep);   // v0.10.0 phase 18
     if (m_dumpPrep) { m_dumpSolve.Reset(); solveSrv->GetResource(&m_dumpSolve); }
     ctx->CSSetShaderResources(0, 8, nullSrv);
     ctx->CSSetUnorderedAccessViews(0, 4, nullUav, keep);
@@ -3718,6 +4060,8 @@ void DrawIdMv::Finish(ID3D11DeviceContext* ctx) {
         m_rbPending[k] = true;
         m_rbHist[k] = m_prepHist;
         m_rbN[k] = m_prepN;
+        m_rbCompact[k] = m_prepCompact;                  // v0.10.0 phase 18
+        m_rbGrid[k] = m_prepGrid;
         m_rbElig[k] = m_prepElig;
         m_rbSeq[k] = ++m_rbCtr;
         m_rbInstN[k] = g_instReplay ? m_prepInstN : 0;   // v0.10.0 phase 8 (mv_inst_replay): the instanced draws' shape keys

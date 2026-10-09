@@ -757,6 +757,9 @@ rigid-parent vote and the mirrors made most of the rest. The user's 72 Hz target
   dispatch boundaries; 15 dispatches per eye become 11. gather / match / pair / vote / the pixel count / the vote passes stay
   separate (each needs every draw or pixel of the step before). The parent list also ranks the instanced candidates in a
   compact groupshared list (it looped over all draws in device memory: `p-list` 0.2 ms per eye in the VR log).
+  Phase 18: the default is now `mv_fold_dispatch = 2` -- `CSListTwin` stays, but the single-group `CSPickResolve` (0.15-0.18 ms
+  per eye in VR at ~2200 draws) is replaced by `CSPickPar` + the wide `CSResolveInherit`; and `mv_vote_compact = 1` runs the
+  vote passes only over the tiles that hold a countable pixel, one thread per march direction (docs/DEVELOPMENT.md, "Phase 18").
 - **Log:** config line `phase 9 (v0.10.0): mv_area_scissor=... mv_fwd_depth_res=... mirror_vr_mode=... mirror_vr_views=...
   mv_fold_dispatch=...`; once `MV area scissor: ACTIVE ... (l,t)-(r,b) of WxH = P % of the image` and `MV forward depth: 1/2
   resolution ...`; every 600 blits `perf view @blit N: area scissor ... passes clipped, rect P % ... | forward depth at 1/2

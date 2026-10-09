@@ -8319,10 +8319,30 @@ void PerfStatsLog(uint64_t blit) {
         (unsigned long long)g_p9Passes, g_p9Clipped ? 100.0 * g_p9ClipShare / (double)g_p9Clipped : 100.0,
         (long)g_p9LastClip.left, (long)g_p9LastClip.top, (long)g_p9LastClip.right, (long)g_p9LastClip.bottom, g_sceneW, g_sceneH,
         "1/2 resolution", (unsigned long long)g_p9Half, (unsigned long long)g_p9Passes,
-        DrawIdMv::Fold() ? "folded (pick+res, list+twin)" : "separate (phase 8)",
+        DrawIdMv::Fold() >= 2 ? "pick (spread) + res+inh (wide), list+twin folded (mv_fold_dispatch 2)"
+                              : (DrawIdMv::Fold() ? "folded (pick+res, list+twin)" : "separate (phase 8)"),
         (unsigned long long)DrawIdRecord::ScissorRsFails());
     g_p9Passes = g_p9Clipped = g_p9Half = 0;
     g_p9ClipShare = 0.0;
+    // v0.10.0 phase 18: the compact rigid-parent vote of eye 0 in this window
+    {
+        static DrawIdMv::Stats s_cv;
+        if (d0.cvFrames < s_cv.cvFrames) s_cv = DrawIdMv::Stats();   // (a new unit: counts restarted)
+        const uint64_t fr = d0.cvFrames - s_cv.cvFrames;
+        const double frd = fr ? (double)fr : 1.0;
+        const uint64_t tiles = d0.cvTiles - s_cv.cvTiles, grid = d0.cvGrid - s_cv.cvGrid;
+        Log("perf vote @blit %llu: rigid-parent vote %s (mv_vote_compact %d) -- eye 0, %llu read-back passes: %.1f of %.1f vote "
+            "groups per pass hold a countable pixel (%.2f %%: the collect runs only there), march items %.1f (1st pass) / %.1f "
+            "(2nd pass) per pass = threads x 8 in p-vote1 / p-vote2, items over the cap (marched in place) %llu, passes whose tiles "
+            "overflowed the list (full grid) %llu | its GPU cost: p-col1 + p-vote1 + p-col2 + p-vote2 in the perf eye lines",
+            (unsigned long long)blit, DrawIdMv::VoteCompact() ? "COMPACT (listed tiles, one thread per march direction)"
+                                                             : "on the full grid (phase 8)",
+            (int)DrawIdMv::VoteCompact(), (unsigned long long)fr, (double)tiles / frd, (double)grid / frd,
+            grid ? 100.0 * (double)tiles / (double)grid : 0.0, (double)(d0.cvItems1 - s_cv.cvItems1) / frd,
+            (double)(d0.cvItems2 - s_cv.cvItems2) / frd, (unsigned long long)(d0.cvItemOver - s_cv.cvItemOver),
+            (unsigned long long)(d0.cvTileOver - s_cv.cvTileOver));
+        s_cv = d0;
+    }
 }
 #endif
 
@@ -11264,7 +11284,8 @@ void DidStatsTag(char* buf, size_t cap, uint64_t passes) {
             snprintf(buf + used, cap - used, " | camR (eye 0): consensus %llu / medoid fallback %llu frames (%llu with near "
                      "voters), cluster avg %.0f draws, |consensus - medoid| avg %.3f / max %.3f px (%llu compared, %llu frames > 1 "
                      "px); cabin: consensus "
-                     "%llu / fallback %llu, |c - m| max %.3f px | forward ids (%s): recorded %.1f/pass (%.1f full), replayed "
+                     "%llu / fallback %llu (largest agreeing cluster avg %.1f draws there; %d needed), |c - m| max %.3f px | "
+                     "forward ids (%s): recorded %.1f/pass (%.1f full), replayed "
                      "%.1f/pass, id overflow %llu, forced %llu (capped %llu), no target %llu, CPU %.3f ms/pass, GPU %.3f ms "
                      "avg / %.3f max | forward pairing (eye 0): %.1f draws/frame in the table, paired %.1f, movers %.1f, "
                      "records dropped %llu | forward px (forward depth won) with a forward id %.1f %% (movers %.2f %%), %.0f "
@@ -11273,7 +11294,8 @@ void DidStatsTag(char* buf, size_t cap, uint64_t passes) {
                      "forward px on a mover's surface that took its R %.2f %% of forward px | dumps %llu",
                      (unsigned long long)cF, (unsigned long long)cB, (unsigned long long)cNv, cF ? (double)cN / (double)cF : 0.0,
                      dF ? dS / (double)dF : 0.0, dMax, (unsigned long long)dF, (unsigned long long)dO,
-                     (unsigned long long)kF, (unsigned long long)kB, kMax,
+                     (unsigned long long)kF, (unsigned long long)kB,
+                     kB ? (double)(s.consFallCluster[1] - s0.consFallCluster[1]) / (double)kB : 0.0, DrawIdMv::kConsMin, kMax,
                      (g_fwdCfg && g_fwdOn.load()) ? "on" : "off (mv_fwd_depth 0 / Ctrl+F3)",
                      (double)g_didFwdRec / fp, (double)g_didFwdRecFull / fp, (double)g_didFwdReplayed / fp,
                      (unsigned long long)g_didFwdOverflow, (unsigned long long)g_didFwdForced,
@@ -12358,6 +12380,7 @@ int MenuCostGroup(int sec) {
     case GpuPerf::kVote:     case GpuPerf::kPick:      case GpuPerf::kResolve:  case GpuPerf::kInherit: case GpuPerf::kParCount:
     case GpuPerf::kParList:  case GpuPerf::kTwin:      case GpuPerf::kAttach:   case GpuPerf::kParVote1:
     case GpuPerf::kParPick1: case GpuPerf::kParVote2:  case GpuPerf::kParPick2: case GpuPerf::kPickRes: case GpuPerf::kListTwin:
+    case GpuPerf::kResInh:   case GpuPerf::kParCol1:   case GpuPerf::kParCol2:                       // v0.10.0 phase 18
                              return MG_PART;
     case GpuPerf::kSnap:     case GpuPerf::kCandCopy:  case GpuPerf::kConvert:  case GpuPerf::kMedoid:  case GpuPerf::kPassB:
     case GpuPerf::kMvMisc:   return MG_CAM;
@@ -14588,7 +14611,9 @@ void LoadConfig() {
             else if (!strcmp(key, "mv_area_scissor"))   g_areaScissorCfg = v != 0;
             else if (!strcmp(key, "mv_area_margin"))    g_areaMarginCfg = v < 0 ? -1 : (v > 1024 ? 1024 : (int)v);
             else if (!strcmp(key, "mv_fwd_depth_res"))  { g_fwdResCfg = (v == 1 || v == 2) ? (int)v : 0; g_profExplicit[PK_FWD_RES] = true; }
-            else if (!strcmp(key, "mv_fold_dispatch"))  DrawIdMv::SetFold(v != 0);
+            else if (!strcmp(key, "mv_fold_dispatch"))  DrawIdMv::SetFold(v <= 0 ? 0 : (v >= 2 ? 2 : 1));   // phase 18: 2
+            else if (!strcmp(key, "mv_vote_compact"))   DrawIdMv::SetVoteCompact(v != 0);                   // v0.10.0 phase 18
+            else if (!strcmp(key, "mv_cons_min_cabin")) DrawIdMv::SetConsMinCabin(v <= 0 ? 0u : (unsigned)v);   // phase 18
             // v0.10.0 phase 10: forward-depth batch, profiles
             else if (!strcmp(key, "mv_fwd_depth_cull"))  g_fwdCullCfg = v != 0;
             else if (!strcmp(key, "mv_fwd_depth_budget_ms")) {
@@ -14968,7 +14993,7 @@ void LoadConfig() {
             "'perf view' line every 600 blits)",
             (int)g_areaScissorCfg, g_areaMarginCfg, marginNow, g_fwdResCfg,
             g_fwdResCfg == 0 ? "auto: 1/2 resolution in VR, full flat" : (g_fwdResCfg == 2 ? "1/2 resolution" : "full resolution"),
-            g_mirVrMode, g_mirVrViews, (int)DrawIdMv::Fold(),
+            g_mirVrMode, g_mirVrViews, DrawIdMv::Fold(),
             g_areaScissorCfg ? "with dlaa_area < 100 the draw-id replays, the forward-depth re-draw and the rigid-parent vote run "
                                "only inside the DLAA rect of the pass's eye(s) + the margin (the raw picture outside, as before)"
                              : "the per-pixel work covers the whole image (phase 8)",
@@ -14977,8 +15002,21 @@ void LoadConfig() {
             g_mirVrMode == 2 ? "the mirror_vr_views largest views keep DLAA, the rest are left to the game"
                              : (g_mirVrMode == 4 ? "every view keeps DLAA with camera motion vectors (no per-draw ids)"
                                                  : "see mirror_vr_mode"),
-            DrawIdMv::Fold() ? "as 11 dispatches per eye (pick + resolve + inherit and list + twin + attach folded)"
-                             : "as 15 dispatches per eye (phase 8)");
+            DrawIdMv::Fold() >= 2 ? "as 12 dispatches per eye, 14 with mv_vote_compact (phase 18: the pick spread over a group, "
+                                    "resolve + inherit in one wide dispatch, list + twin + attach folded)"
+            : (DrawIdMv::Fold() ? "as 11 dispatches per eye (pick + resolve + inherit and list + twin + attach folded)"
+                                : "as 15 dispatches per eye (phase 8)"));
+    Log("phase 18 (v0.10.0): mv_fold_dispatch=%d mv_vote_compact=%d mv_cons_min_cabin=%u -- %s; %s (see the 'perf vote' line "
+        "every 600 blits; the motion vectors are the same as with mv_fold_dispatch 1 / mv_vote_compact 0); cabin consensus: %s",
+        DrawIdMv::Fold(), (int)DrawIdMv::VoteCompact(), DrawIdMv::ConsMinCabin(),
+        DrawIdMv::Fold() >= 2 ? "the consensus pick and resolve + inherit run wide (GPU section 'pick' + 'res+inh' in place of "
+                                "'pick+res')" : "pick + resolve + inherit as before",
+        DrawIdMv::VoteCompact() ? "the rigid-parent vote marches only from the listed tiles, one thread per sample and direction "
+                                  "(sections 'p-col1' / 'p-col2' = collect, 'p-vote1' / 'p-vote2' = the marches)"
+                                : "the rigid-parent vote runs on the full grid (phase 8)",
+        DrawIdMv::ConsMinCabin() ? "a cluster of mv_cons_min_cabin agreeing cabin draws replaces the cabin medoid (after "
+                                   "mv_medoid_drop healthy readbacks the cabin candidate copies stop)"
+                                 : "as the world layer (24 draws; the cabin medoid and its candidate copies stay when it has fewer)");
     }
     {                                                    // v0.10.0 phase 10
         char kept[300];

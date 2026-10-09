@@ -92,6 +92,7 @@ namespace {
 
 constexpr int W = 960, H = 540;
 bool g_debugLayer = false;
+bool g_hw = false;        // v0.10.0 phase 18: "hw" = the hardware adapter (GPU timings in the perf lines; the checks are WARP-tuned)
 unsigned g_rstatic = 0;     // v0.10.0 phase 14: "rstatic=E" -- S1-S4 / S13 replay with the static gate (0 = off)
 double   g_yawJerk = 0.0;   // phase 14 round 5 "jerk=X": S1-S4 / S13 / S14 camera yaw rate + X rad / frame from frame 60
 constexpr int kLagMax = 2;  // most frames in a row a skipped MOVER may keep the camera R (readback latency + the stagger)
@@ -112,6 +113,12 @@ void PrintPhase8(ID3D11DeviceContext* ctx, const DrawIdMv::Stats& ds, const char
            (unsigned long long)ds.medoidRearms[0], (unsigned long long)ds.medoidRearms[1], (unsigned long long)ds.parVis,
            (unsigned long long)ds.parFine, (unsigned long long)ds.parSkipped, (unsigned long long)ds.parMarches,
            ds.rbFrames ? (double)ds.parMarches / (double)ds.rbFrames : 0.0);
+    if (ds.cvFrames)                                     // v0.10.0 phase 18
+        printf("   %s compact vote: %llu passes, tiles %.1f of %.1f vote groups per pass, march items %.1f / %.1f per pass (1st / "
+               "2nd), items over the cap %llu, tile overflows %llu\n", tag, (unsigned long long)ds.cvFrames,
+               (double)ds.cvTiles / (double)ds.cvFrames, (double)ds.cvGrid / (double)ds.cvFrames,
+               (double)ds.cvItems1 / (double)ds.cvFrames, (double)ds.cvItems2 / (double)ds.cvFrames,
+               (unsigned long long)ds.cvItemOver, (unsigned long long)ds.cvTileOver);
     if (DrawIdMv::InstReplay())
         printf("   %s mv_inst_replay: instanced draws with a moving parent %llu (read back), instanced keys wanted %d\n", tag,
                (unsigned long long)ds.instMoverDraws, DrawIdMv::InstancedKnown());
@@ -119,8 +126,9 @@ void PrintPhase8(ID3D11DeviceContext* ctx, const DrawIdMv::Stats& ds, const char
     GpuPerf::EyeStats st;
     if (GpuPerf::Stats(0, &st)) {
         char buf[2048];
-        int o = snprintf(buf, sizeof(buf), "   %s WARP perf (CPU-rasterised, not GPU numbers): mod %.3f ms/frame avg (%llu frames) |", tag,
-                         st.total, (unsigned long long)st.passes);
+        int o = snprintf(buf, sizeof(buf), g_hw ? "   %s HW perf (hardware adapter, GPU ms): mod %.3f ms/frame avg (%llu frames) |"
+                                                : "   %s WARP perf (CPU-rasterised, not GPU numbers): mod %.3f ms/frame avg (%llu frames) |",
+                         tag, st.total, (unsigned long long)st.passes);
         for (int c = 0; c < GpuPerf::kCount && o < (int)sizeof(buf) - 48; ++c)
             if (st.n[c]) o += snprintf(buf + o, sizeof(buf) - (size_t)o, " %s %.3f", GpuPerf::Name(c), st.avg[c]);
         printf("%s\n", buf);
@@ -4834,7 +4842,11 @@ int main(int argc, char** argv) {
         else if (!strncmp(s, "cands=", 6)) DrawIdMv::SetConsCands((unsigned)atoi(s + 6));
         else if (!strcmp(s, "mutclip")) g_shadowMut = 1;     // v0.10.0 phase 9 (S11 / S12 must FAIL)
         else if (!strcmp(s, "mutview")) g_shadowMut = 2;
-        else if (!strcmp(s, "nofold")) DrawIdMv::SetFold(false);   // v0.10.0 phase 9: the phase-8 dispatch chain
+        else if (!strcmp(s, "nofold")) DrawIdMv::SetFold(0);       // v0.10.0 phase 9: the phase-8 dispatch chain
+        else if (!strncmp(s, "fold=", 5)) DrawIdMv::SetFold(atoi(s + 5));   // v0.10.0 phase 18: 0 / 1 (phase 9) / 2 (default)
+        else if (!strcmp(s, "nocompact")) DrawIdMv::SetVoteCompact(false);  // v0.10.0 phase 18: the full-grid vote (phase 8)
+        else if (!strncmp(s, "cabmin=", 7)) DrawIdMv::SetConsMinCabin((unsigned)atoi(s + 7));   // phase 18: mv_cons_min_cabin
+        else if (!strcmp(s, "hw")) g_hw = true;                    // v0.10.0 phase 18: hardware adapter (GPU timings)
         else if (!strncmp(s, "rstatic=", 8)) {                       // v0.10.0 phase 14: S1-S4 / S13 with the static replay skip
             const int e = atoi(s + 8);
             g_rstatic = e < 2 ? 2u : (e > 16 ? 16u : (unsigned)e);
@@ -4848,12 +4860,14 @@ int main(int argc, char** argv) {
         }
     }
     printf("phase 8 knobs: mv_vote_res %u, mv_vote_march_cap %u, mv_cons_cands %u, mv_medoid_drop %u, mv_inst_replay %d, "
-           "mv_parent_max_listed %u%s%s; phase 14: static replay skip %s (S1-S4, S6-S8, S13)\n",
+           "mv_parent_max_listed %u%s%s; phase 14: static replay skip %s (S1-S4, S6-S8, S13); phase 18: mv_fold_dispatch %d, "
+           "mv_vote_compact %d%s\n",
            DrawIdMv::VoteRes(), DrawIdMv::MarchCap(), DrawIdMv::ConsCands(), DrawIdMv::MedoidDrop(), DrawIdMv::InstReplay(),
            DrawIdMv::ParentMaxListed(),
            g_cmpOut ? ", writing the comparison file" : "", g_cmpIn ? ", comparing with the reference file" : "",
-           g_rstatic ? "ON (rstatic)" : "off");
-    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, g_debugLayer ? D3D11_CREATE_DEVICE_DEBUG : 0, fls, 2,
+           g_rstatic ? "ON (rstatic)" : "off", DrawIdMv::Fold(), (int)DrawIdMv::VoteCompact(),
+           g_hw ? "; HARDWARE adapter (hw)" : "");
+    if (FAILED(D3D11CreateDevice(nullptr, g_hw ? D3D_DRIVER_TYPE_HARDWARE : D3D_DRIVER_TYPE_WARP, nullptr, g_debugLayer ? D3D11_CREATE_DEVICE_DEBUG : 0, fls, 2,
                                  D3D11_SDK_VERSION, &E.dev, &got, &E.ctx))) {
         printf("no WARP device%s\n", g_debugLayer ? " with the debug layer (Graphics Tools installed?)" : ""); return 1;
     }
