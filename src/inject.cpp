@@ -634,7 +634,9 @@ float    g_menuScale = 1.0f;             // flat: 0.5..2.0 (1 = 720 px wide at 1
 int      g_menuVrX = 0, g_menuVrY = -5;  // VR: % of the eye width / height, panel CENTRE from the eye's optical centre (-50..50)
 float    g_menuVrScale = 1.0f;           // VR: 0.5..2.0 (1 = 54 % of the eye width: the text of a 45 %-wide 720-px panel)
 int      g_menuVrDepth = 12;             // VR: px inward shift per eye (eye 0 right, eye 1 left), 0..200
-bool     g_menuExplicit = false;         // a menu_* value was changed in the menu -> SaveSettings writes the 7 menu_* keys
+int      g_menuVrFace = 1;               // v0.10.0 phase 16, VR: 1 = the panel is a 3-D quad turned to FACE the eye (dlaa.ini
+                                         //   menu_vr_face, MenuFacingGeom), 0 = a flat picture as before
+bool     g_menuExplicit = false;         // a menu_* value was changed in the menu -> SaveSettings writes the 8 menu_* keys
 // v0.10.0 live fps box (dlaa.ini fps_*; the tuning menu's FPS counter rows): drawn where the panel draws, also while the menu
 // is closed. Flat and VR have their own placement.
 bool     g_fpsShow = false;              // fps_show: the box is on
@@ -649,6 +651,9 @@ float    g_fpsVrScale = kFpsVrScaleDefault;
 bool     g_fpsExplicit = false;          // an fps_* value was changed in the menu -> SaveSettings writes the 7 fps_* keys
 int      g_menuBlitEye = -1;             // VR: the eye blit this Draw is (HandlePossibleBlit), drawn on after it (hkDraw)
 void*    g_menuBlitRt  = nullptr;        // ... and its render target (identity only)
+// v0.10.0 phase 16 VR LATE PANEL (see that block after MenuDrawPreview): the panel / fps box go LAST onto each eye picture.
+int      g_menuLateN = 0;                // eye pictures recorded (0 = every hook test below is one integer compare)
+int      g_menuLateBound = -1;           // eye whose recorded picture is the current RT0 (game draws into it are counted)
 std::atomic<bool> g_mvDebug{false};      // Ctrl+F6: blit source replaced by the MV visualization
 std::atomic<bool> g_mvOn{true};          // camera-reprojection MVs live switch (Ctrl+F5, dlaa.ini mv_enabled)
 // v0.9.0 r5 forward depth for the MVs (see the "FORWARD DEPTH" block above hkDrawIndexed): dlaa.ini mv_fwd_depth
@@ -1112,6 +1117,15 @@ void MenuKeys(uint64_t n);               // v0.10.0 tuning menu: open / close + 
 void MenuDrawAtPresent(IDXGISwapChain* sc, ID3D11DeviceContext* bctx); // v0.10.0 tuning menu: flat / desktop-mirror panel
 void MenuDrawVr(ID3D11DeviceContext* ctx); // v0.10.0 tuning menu: VR panel into the eye texture after the game's eye blit
 void MenuDrawPreview(ID3D11DeviceContext* ctx, int idx, char trigger);   // v0.10.0 phase 15: ... onto a VR preview eye picture
+// v0.10.0 phase 16 VR late panel (hooks): a game read of a recorded eye picture (copy source / PS SRV0 of a small Draw), a game
+// bind (which recorded picture is RT0 now), a game draw into the bound recorded picture, and the reset
+void MenuLateOnRead(ID3D11DeviceContext* ctx, ID3D11Resource* src, ID3D11Resource* dst, const char* what, UINT n);
+void MenuLateOnDraw(ID3D11DeviceContext* ctx, const char* what, UINT n);
+void MenuLateOnBind(UINT n, ID3D11RenderTargetView* const* rtvs);
+void MenuLateCountDraw();
+void MenuLateReset(const char* why);
+void MenuLateArm(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv, char kind);   // (MenuDrawVr / MenuDrawPreview)
+void MenuLateAtPresent();
 void FpsTick();                          // v0.10.0 fps meter (the fps box + the menu's fps figure), per Present while either is on
 void CheckPresetFallback(uint64_t n);    // v0.5.7: beep + log when a live preset fell back to default
 void OnLiveTuningChange();               // v0.5.7; v0.6.2 also DLAA toggle / passive / MV (restarts the GPU spans window)
@@ -1273,6 +1287,7 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
                 Log("jitter sign now X=%+d Y=%+d (%s)", g_signX, g_signY, KeyName(KA_JITTER_SIGN));
             }
         }
+        if (g_menuLateN) MenuLateAtPresent();    // v0.10.0 phase 16 VR late panel: finished eye pictures end here
         if (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)
             MenuDrawAtPresent(sc, bctx);         // v0.10.0 tuning menu panel + fps box (flat / mirror)
 #endif
@@ -1961,7 +1976,7 @@ void SaveSettings(uint64_t n) {
     const int   preTm   = g_preOn.load() ? 1 : 0;         // v0.10.0 phase 4 (Alt+F7)
     // v0.10.0 phase 10: + perf_profile; dlss_preset / dlaa_area / mirror_dlaa only when EXPLICIT (in dlaa.ini or changed by their
     // own key) -- a value that only comes from the profile is not written, so the next profile switch still moves it
-    IniKV kv[32] = {};                                    // v0.10.0 tuning menu: was 11 (+ the 7 menu_* keys + the 7 fps_* keys)
+    IniKV kv[32] = {};                                    // v0.10.0 tuning menu: was 11 (+ the 8 menu_* keys + the 7 fps_* keys)
     int nkv = 0;
     auto add = [&](const char* k) -> char* { kv[nkv].key = k; return kv[nkv++].val; };
     if (g_profExplicit[PK_PRESET]) snprintf(add("dlss_preset"), sizeof(kv[0].val), "%s", preset);
@@ -1985,6 +2000,7 @@ void SaveSettings(uint64_t n) {
         snprintf(add("menu_vr_y"), sizeof(kv[0].val), "%d", g_menuVrY);
         snprintf(add("menu_vr_scale"), sizeof(kv[0].val), "%.1f", (double)g_menuVrScale);
         snprintf(add("menu_vr_depth"), sizeof(kv[0].val), "%d", g_menuVrDepth);
+        snprintf(add("menu_vr_face"), sizeof(kv[0].val), "%d", g_menuVrFace);   // v0.10.0 phase 16
     }
     if (g_fpsExplicit) {                                  // v0.10.0 fps box: on / off + placement, only once changed in the menu
         snprintf(add("fps_show"), sizeof(kv[0].val), "%d", g_fpsShow ? 1 : 0);
@@ -1995,10 +2011,11 @@ void SaveSettings(uint64_t n) {
         snprintf(add("fps_vr_y"), sizeof(kv[0].val), "%d", g_fpsVrY);
         snprintf(add("fps_vr_scale"), sizeof(kv[0].val), "%.1f", (double)g_fpsVrScale);
     }
-    char menuW[160] = "";
+    char menuW[200] = "";
     if (g_menuExplicit)
         snprintf(menuW, sizeof(menuW), " -- menu panel: menu_x=%d menu_y=%d menu_scale=%.1f menu_vr_x=%d menu_vr_y=%d menu_vr_scale=%.1f "
-                 "menu_vr_depth=%d", g_menuX, g_menuY, (double)g_menuScale, g_menuVrX, g_menuVrY, (double)g_menuVrScale, g_menuVrDepth);
+                 "menu_vr_depth=%d menu_vr_face=%d", g_menuX, g_menuY, (double)g_menuScale, g_menuVrX, g_menuVrY, (double)g_menuVrScale,
+                 g_menuVrDepth, g_menuVrFace);
     char fpsW[160] = "";
     if (g_fpsExplicit)
         snprintf(fpsW, sizeof(fpsW), " -- fps box: fps_show=%d fps_x=%d fps_y=%d fps_scale=%.1f fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f",
@@ -2246,11 +2263,89 @@ bool VrEyeCentre(int eye, float* u, float* v) {
     return true;
 }
 
+// ---- v0.10.0 phase 16: projection SCALE per eye (the VR menu panel that faces the eye, MenuFacingGeom) ---------------
+// |P00| / |P11| = NDC units per unit of view tangent, from the same verdict MVPs as the optical centre. An MVP row is
+// P-row x (view * model): row0 = P00 * vx + P02 * vz, row3 = +-vz (vx / vz = the view x / z axes in model space, orthogonal,
+// equally long under a uniform model scale), so row0 minus its projection on row3 = P00 * vx and
+//   |P00| = |row0.xyz - (row0.row3 / |row3|^2) row3.xyz| / |row3.xyz|   (the model scale cancels), |P11| the same from row1.
+// Per readback the MEDIAN of its MVPs (a non-uniformly scaled model is an outlier), then a 16-sample window like the optical
+// centre; re-adopted only when the mean moved by more than 1 %. Sanity 0.2..5 (a 22..157 degree view).
+struct EyeScale {
+    static constexpr int kWin = 16;
+    float    sx[kWin] = {}, sy[kWin] = {};
+    int      n = 0, head = 0;
+    bool     have = false;
+    float    x = 0.0f, y = 0.0f;                 // adopted |P00| / |P11|
+    uint32_t adopts = 0;
+};
+EyeScale         g_eyeScale[kMaxEyes];           // the world eyes (eye verdicts, tag "DLAA area")
+EyeScale         g_pvEyeScale[kMaxEyes];         // the menu / truck-preview picture (preview verdicts mapped through the tile layout)
+constexpr float  kAssumedScale = 0.9f;           // nothing measured yet: ~96 degrees per eye (Quest 3-like); logged as "assumed"
+
+// |P00|, |P11| of one MVP (row-major as EyeVerdict reads it). False = degenerate / not finite.
+bool MvpScale(const float* m, double* sx, double* sy) {
+    const float* r0 = m; const float* r1 = m + 4; const float* r3 = m + 12;
+    const double d33 = (double)r3[0] * r3[0] + (double)r3[1] * r3[1] + (double)r3[2] * r3[2];
+    if (d33 <= 1e-12) return false;
+    const double k0 = ((double)r0[0] * r3[0] + (double)r0[1] * r3[1] + (double)r0[2] * r3[2]) / d33;
+    const double k1 = ((double)r1[0] * r3[0] + (double)r1[1] * r3[1] + (double)r1[2] * r3[2]) / d33;
+    double a = 0.0, b = 0.0;
+    for (int i = 0; i < 3; ++i) {
+        const double t0 = (double)r0[i] - k0 * r3[i], t1 = (double)r1[i] - k1 * r3[i];
+        a += t0 * t0; b += t1 * t1;
+    }
+    *sx = std::sqrt(a / d33);
+    *sy = std::sqrt(b / d33);
+    return std::isfinite(*sx) && std::isfinite(*sy) && *sx > 0.0 && *sy > 0.0;
+}
+// Median of v[0..n) (n <= 16; sorts v in place). 0 when n = 0.
+double SmallMedian(double* v, int n) {
+    if (n <= 0) return 0.0;
+    for (int i = 1; i < n; ++i)
+        for (int j = i; j > 0 && v[j] < v[j - 1]; --j) { const double t = v[j]; v[j] = v[j - 1]; v[j - 1] = t; }
+    return (n & 1) ? v[n / 2] : 0.5 * (v[n / 2 - 1] + v[n / 2]);
+}
+// One sample of eye `eye`'s projection scale into `set` (p / q = the same verdict's skews, only for the log's view angles).
+void NoteEyeScaleIn(EyeScale* set, const char* tag, int eye, double sx, double sy, double p, double q) {
+    if (eye < 0 || eye >= kMaxEyes || !std::isfinite(sx) || !std::isfinite(sy) || sx < 0.2 || sx > 5.0 || sy < 0.2 || sy > 5.0)
+        return;
+    EyeScale& c = set[eye];
+    c.sx[c.head] = (float)sx; c.sy[c.head] = (float)sy;
+    c.head = (c.head + 1) % EyeScale::kWin;
+    if (c.n < EyeScale::kWin) ++c.n;
+    if (c.n < kOptMinSamples) return;
+    double ax = 0.0, ay = 0.0;
+    for (int i = 0; i < c.n; ++i) { ax += c.sx[i]; ay += c.sy[i]; }
+    const float mx = (float)(ax / c.n), my = (float)(ay / c.n);
+    if (c.have && std::fabs(mx - c.x) <= 0.01f * c.x && std::fabs(my - c.y) <= 0.01f * c.y) return;
+    c.have = true; c.x = mx; c.y = my;
+    if (c.adopts++ < 20) {
+        // the eye's view (degrees): the optical axis lands at ndc (-p, -q), the picture edges at ndc -1 / +1
+        const double kDeg = 57.29577951308232;
+        const double fovX = (std::atan((1.0 - p) / mx) + std::atan((1.0 + p) / mx)) * kDeg;
+        const double fovY = (std::atan((1.0 - q) / my) + std::atan((1.0 + q) / my)) * kDeg;
+        Log("%s: eye %d projection scale |P00|=%.4f |P11|=%.4f (view about %.1f x %.1f degrees) -- the VR menu panel's facing "
+            "maths (menu_vr_face)", tag, eye, (double)mx, (double)my, fovX, fovY);
+    }
+}
+// Eye `eye`'s projection scale for the VR menu panel: the world eye's, else the menu / truck-preview picture's own, else
+// kAssumedScale. Returns 2 = world, 1 = picture, 0 = assumed.
+int VrEyeScale(int eye, float* sx, float* sy) {
+    *sx = kAssumedScale; *sy = kAssumedScale;
+    if (eye < 0 || eye >= kMaxEyes) return 0;
+    if (g_eyeScale[eye].have)   { *sx = g_eyeScale[eye].x;   *sy = g_eyeScale[eye].y;   return 2; }
+    if (g_pvEyeScale[eye].have) { *sx = g_pvEyeScale[eye].x; *sy = g_pvEyeScale[eye].y; return 1; }
+    return 0;
+}
+
 // Sign of the projection x-skew of each usable MVP votes the absolute eye (cabin layer first, then world).
 // Returns 0 / 1, or -1 for no verdict.
 // v0.6.4: *qOut = mean y skew q = -dot(row1.xyz,row3.xyz)/|row3.xyz|^2 over the same MVPs as *pOut (winning side).
-int EyeVerdict(const float* data, const int* count, float* pOut, float* qOut, int* votesOut, int* layerVotes) {
+// v0.10.0 phase 16: *sxOut / *syOut = the median projection scale |P00| / |P11| of the same MVPs (MvpScale; 0 = none).
+int EyeVerdict(const float* data, const int* count, float* pOut, float* qOut, int* votesOut, int* layerVotes, float* sxOut,
+               float* syOut) {
     int vote = 0; double pSum[2] = {}, qSum[2] = {}; int pN[2] = {};
+    double sxv[2][16] = {}, syv[2][16] = {}; int sN[2] = {};   // phase 16 (<= 8 MVPs per layer, 2 layers)
     const int layers[2] = { 1, 0 };                      // cabin, world
     for (int li = 0; li < 2; ++li) {
         const int l = layers[li];
@@ -2270,6 +2365,8 @@ int EyeVerdict(const float* data, const int* count, float* pOut, float* qOut, in
             const int side = p > 0.0 ? 0 : 1;
             lv += side == 0 ? +1 : -1;
             pSum[side] += p; qSum[side] += q; ++pN[side];
+            double sx = 0.0, sy = 0.0;                   // phase 16: the projection scale of the same MVP
+            if (sN[side] < 16 && MvpScale(m, &sx, &sy)) { sxv[side][sN[side]] = sx; syv[side][sN[side]] = sy; ++sN[side]; }
         }
         layerVotes[l] = lv;
         vote += lv;
@@ -2278,6 +2375,8 @@ int EyeVerdict(const float* data, const int* count, float* pOut, float* qOut, in
     const int eye = vote > 0 ? 0 : (vote < 0 ? 1 : -1);
     *pOut = eye >= 0 && pN[eye] ? (float)(pSum[eye] / pN[eye]) : 0.0f;   // mean p of the winning side
     *qOut = eye >= 0 && pN[eye] ? (float)(qSum[eye] / pN[eye]) : 0.0f;   // v0.6.4: mean q, same MVPs
+    *sxOut = eye >= 0 ? (float)SmallMedian(sxv[eye], sN[eye]) : 0.0f;    // phase 16
+    *syOut = eye >= 0 ? (float)SmallMedian(syv[eye], sN[eye]) : 0.0f;
     return eye;
 }
 
@@ -2294,8 +2393,8 @@ void PollEyeReadbacks(ID3D11DeviceContext* ctx) {
             if (g_cRbFailed++ < 5) Log("eye verdict: readback Map failed hr=0x%08lx (dropped)", (unsigned long)hr);
             continue;
         }
-        float p = 0.0f, q = 0.0f; int votes = 0; int lv[CandidateRecord::kLayers] = {};
-        const int v = EyeVerdict((const float*)ms.pData, r.count, &p, &q, &votes, lv);
+        float p = 0.0f, q = 0.0f, sx = 0.0f, sy = 0.0f; int votes = 0; int lv[CandidateRecord::kLayers] = {};
+        const int v = EyeVerdict((const float*)ms.pData, r.count, &p, &q, &votes, lv, &sx, &sy);
         ctx->Unmap(r.staging, 0);
         ++g_cVerdicts;
         if (g_cVerdicts <= 6)
@@ -2303,6 +2402,7 @@ void PollEyeReadbacks(ID3D11DeviceContext* ctx) {
                 r.rt, v, (double)p, (double)q, votes, lv[1], lv[0], (unsigned long long)r.seq, r.count[1], r.count[0]);
         if (v < 0) { ++g_cVerdictNoVote; continue; }
         NoteOpticalCentre(v, p, q);                      // v0.6.4: the verdict eye's own projection
+        if (sx > 0.0f) NoteEyeScaleIn(g_eyeScale, "DLAA area", v, sx, sy, p, q);   // v0.10.0 phase 16 (VR panel facing)
         ApplyEyeVerdict(r.rt, v, p);
     }
 }
@@ -2811,18 +2911,27 @@ void STDMETHODCALLTYPE hkDispatch(ID3D11DeviceContext* ctx, UINT x, UINT y, UINT
 void STDMETHODCALLTYPE hkCopyResource(ID3D11DeviceContext* ctx, ID3D11Resource* dst, ID3D11Resource* src) {
     if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oCopyResource(ctx, dst, src); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     TraceCopyRes(ctx, dst, src);
+#ifdef WITH_DLAA
+    if (g_menuLateN && !t_inDlaa && IsGameCtx(ctx)) MenuLateOnRead(ctx, src, dst, "CopyResource", 0);   // phase 16 VR late panel
+#endif
     oCopyResource(ctx, dst, src);
 }
 void STDMETHODCALLTYPE hkCopySubresourceRegion(ID3D11DeviceContext* ctx, ID3D11Resource* dst, UINT dsub, UINT dx, UINT dy,
         UINT dz, ID3D11Resource* src, UINT ssub, const D3D11_BOX* box) {
     if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oCopySubresourceRegion(ctx, dst, dsub, dx, dy, dz, src, ssub, box); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     TraceCopySub(ctx, "CopySubresourceRegion", dst, dsub, dx, dy, dz, src, ssub, box, 0, false);
+#ifdef WITH_DLAA
+    if (g_menuLateN && !t_inDlaa && IsGameCtx(ctx)) MenuLateOnRead(ctx, src, dst, "CopySubresourceRegion", 0);   // phase 16
+#endif
     oCopySubresourceRegion(ctx, dst, dsub, dx, dy, dz, src, ssub, box);
 }
 void STDMETHODCALLTYPE hkCopySubresourceRegion1(ID3D11DeviceContext1* ctx, ID3D11Resource* dst, UINT dsub, UINT dx, UINT dy,
         UINT dz, ID3D11Resource* src, UINT ssub, const D3D11_BOX* box, UINT flags) {
     if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oCopySubresourceRegion1(ctx, dst, dsub, dx, dy, dz, src, ssub, box, flags); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     TraceCopySub(ctx, "CopySubresourceRegion1", dst, dsub, dx, dy, dz, src, ssub, box, flags, true);
+#ifdef WITH_DLAA
+    if (g_menuLateN && !t_inDlaa && IsGameCtx1(ctx)) MenuLateOnRead(ctx, src, dst, "CopySubresourceRegion1", 0);   // phase 16
+#endif
     oCopySubresourceRegion1(ctx, dst, dsub, dx, dy, dz, src, ssub, box, flags);
 }
 void STDMETHODCALLTYPE hkResolveSubresource(ID3D11DeviceContext* ctx, ID3D11Resource* dst, UINT dsub, ID3D11Resource* src,
@@ -3119,8 +3228,10 @@ bool PvEnsureEyeReadback(ID3D11DeviceContext* ctx) {
 
 // Mean projection x skew over the finite MVPs of one half (n x 16 floats, rows). false = no usable MVP.
 // v0.10.0 phase 15: + the mean y skew q = -dot(row1.xyz, row3.xyz) / |row3.xyz|^2 over the same MVPs (EyeVerdict's q).
-bool PvMeanSkew(const float* data, int n, double* pOut, double* qOut) {
+// v0.10.0 phase 16: + the median projection scale |P00| / |P11| of the same MVPs (*sxOut / *syOut, 0 = none; MvpScale).
+bool PvMeanSkew(const float* data, int n, double* pOut, double* qOut, double* sxOut, double* syOut) {
     double sum = 0.0, sumQ = 0.0; int cnt = 0;
+    double sxv[16] = {}, syv[16] = {}; int sN = 0;
     for (int i = 0; i < n; ++i) {
         const float* m = data + (size_t)i * 16;
         bool finite = true;
@@ -3132,10 +3243,14 @@ bool PvMeanSkew(const float* data, int n, double* pOut, double* qOut) {
         sum += -((double)r0[0] * r3[0] + (double)r0[1] * r3[1] + (double)r0[2] * r3[2]) / d33;
         sumQ += -((double)r1[0] * r3[0] + (double)r1[1] * r3[1] + (double)r1[2] * r3[2]) / d33;
         ++cnt;
+        double sx = 0.0, sy = 0.0;
+        if (sN < 16 && MvpScale(m, &sx, &sy)) { sxv[sN] = sx; syv[sN] = sy; ++sN; }
     }
     if (!cnt) return false;
     *pOut = sum / cnt;
     *qOut = sumQ / cnt;
+    *sxOut = SmallMedian(sxv, sN);
+    *syOut = SmallMedian(syv, sN);
     return true;
 }
 
@@ -3164,7 +3279,7 @@ void PvApplyVerdict(void* rt, int eye, double p) {
     }
 }
 
-void PvNotePictureCentre(int eye, int order, double p, double q);   // v0.10.0 phase 15 (after the tile layout below)
+void PvNotePictureCentre(int eye, int order, double p, double q, double sx, double sy);   // v0.10.0 phase 15 (after the tile layout)
 
 // Poll pending readbacks oldest-first (stop at the first the GPU has not finished) and turn each into a verdict.
 void PvPollEyeReadbacks(ID3D11DeviceContext* ctx) {
@@ -3178,9 +3293,10 @@ void PvPollEyeReadbacks(ID3D11DeviceContext* ctx) {
             if (SUCCEEDED(hr)) ctx->Unmap(r.staging, 0);
             continue;
         }
-        double p[2] = {}, q[2] = {};
+        double p[2] = {}, q[2] = {}, sx[2] = {}, sy[2] = {};
         bool ok[2];
-        for (int i = 0; i < 2; ++i) ok[i] = PvMeanSkew((const float*)ms.pData + (size_t)i * kPvRbMvps * 16, r.n[i], &p[i], &q[i]);
+        for (int i = 0; i < 2; ++i)
+            ok[i] = PvMeanSkew((const float*)ms.pData + (size_t)i * kPvRbMvps * 16, r.n[i], &p[i], &q[i], &sx[i], &sy[i]);
         ctx->Unmap(r.staging, 0);
         ++g_pvVerdicts;
         if (!ok[0] || !ok[1] || r.rt[0] == r.rt[1] || std::fabs(p[0] - p[1]) < 0.05) {
@@ -3195,8 +3311,8 @@ void PvPollEyeReadbacks(ID3D11DeviceContext* ctx) {
                 (unsigned long long)r.frame, r.rt[0], p[0], r.rt[1], p[1], hi);
         PvApplyVerdict(r.rt[hi], 0, p[hi]);
         PvApplyVerdict(r.rt[1 - hi], 1, p[1 - hi]);
-        PvNotePictureCentre(0, hi, p[hi], q[hi]);       // v0.10.0 phase 15: each eye's optical centre in the picture
-        PvNotePictureCentre(1, 1 - hi, p[1 - hi], q[1 - hi]);
+        PvNotePictureCentre(0, hi, p[hi], q[hi], sx[hi], sy[hi]);   // v0.10.0 phase 15: each eye's optical centre in the
+        PvNotePictureCentre(1, 1 - hi, p[1 - hi], q[1 - hi], sx[1 - hi], sy[1 - hi]);   // picture (phase 16: + its scale)
     }
 }
 
@@ -3463,13 +3579,17 @@ PvAsmTimer       g_pvAsmTimer;
 // optical axis lands at ndc (-p, -q), so in the picture p' = (p + c.x) / h.x, q' = (q + c.y) / h.y. (ATS VR log 18:10:
 // reference p = 1.4850 with x * 2 - 1 -> 0.2425 = the world eye 0's p exactly.) An unknown layout gives no sample; an untiled
 // one is the identity. Same window / adopt rule as the world eyes (NoteOpticalCentreIn).
-void PvNotePictureCentre(int eye, int order, double p, double q) {
+// v0.10.0 phase 16: the projection scale the same way -- tile ndc = h * picture ndc + c, so |P00| in the picture = |P00| of
+// the tile / h.x (|P11| / h.y); sx / sy = 0: no scale sample.
+void PvNotePictureCentre(int eye, int order, double p, double q, double sx, double sy) {
     if (order < 0 || order >= kPtMax) return;
     const PvLayout& L = g_pvLay[order];
     if (!L.known || (L.tiled && (!(L.hx > 0.0f) || !(L.hy > 0.0f)))) return;
     const double pp = L.tiled ? (p + L.cx) / L.hx : p;
     const double qq = L.tiled ? (q + L.cy) / L.hy : q;
     NoteOpticalCentreIn(g_pvOptC, "preview DLAA area", eye, (float)pp, (float)qq);
+    if (sx > 0.0 && sy > 0.0)
+        NoteEyeScaleIn(g_pvEyeScale, "preview DLAA area", eye, L.tiled ? sx / L.hx : sx, L.tiled ? sy / L.hy : sy, pp, qq);
 }
 
 // Viewport-shift factor of a tile pass (picture pixels -> tile pixels): a * h of its group's layout; 1 when untiled.
@@ -7582,6 +7702,7 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
 #ifdef WITH_DLAA
     PreviewOnBind(n, rtvs, dsv, g_gbufPass);       // v0.7.8 profile-screen preview pass (flat + VR), sets g_previewPass
     if (g_ptPendingMask) PreviewOnBindTargets(ctx, n, rtvs);   // v0.7.8 round 4 trigger (b) + bound-target tracking
+    if (g_menuLateN) MenuLateOnBind(n, rtvs);      // v0.10.0 phase 16 VR late panel: is a recorded eye picture RT0 now?
 #endif
     LodOnBind(ctx);                                // v0.9.0 texture LOD bias: enter / leave scene state (sampler twins)
     if (g_gbufPass) {
@@ -9164,6 +9285,7 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
     }
     CountGameDraw(t_inDlaa, ctx, vertexCount, false);   // v0.8.1: frame-end rule + present-layer bookkeeping
 #ifdef WITH_DLAA
+    if (g_menuLateBound >= 0 && !t_inDlaa) MenuLateCountDraw();   // v0.10.0 phase 16: a game draw into a recorded eye picture
     // v0.7.8 profile-screen preview: a matched composite only marks its target pending; any other Draw while a pending
     // target is the current RT0 (trigger (a): flat UI, VR verts=96 Draw) runs that target's DLAA before the Draw.
     int pvMenuIdx = -1;                                  // v0.10.0 phase 15: the target flushed here gets the VR menu panel after the Draw
@@ -9176,6 +9298,11 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
         HandlePossibleBlit(ctx, vertexCount);
     }
     if (!t_inDlaa && g_lodPerDraw.load(std::memory_order_relaxed)) LodOnDraw(ctx);   // v0.10.0 phase 11 LOD bias scope
+#ifdef WITH_DLAA
+    // v0.10.0 phase 16 VR late panel: a small Draw that READS a recorded eye picture (PS SRV0; the copy into the OpenXR
+    // swapchain image) gets the panel into that picture first
+    if (g_menuLateN && !t_inDlaa && vertexCount <= 6) MenuLateOnDraw(ctx, "Draw", vertexCount);
+#endif
     oDraw(ctx, vertexCount, startVertex);
 #ifdef WITH_DLAA
     if (g_compEye >= 0 && !t_inDlaa) RunPendingComposite(ctx);   // v0.7.0 (before the scene span closes)
@@ -11948,7 +12075,8 @@ void ToggleMirrors(uint64_t n) {
 #endif
 enum MenuRowId {
     MR_MODE, MR_PROFILE, MR_MODEL, MR_SHARP, MR_WIDTH, MR_LOD, MR_LODCUT, MR_AREA, MR_DRAWIDS, MR_MIRROR, MR_PRETM, MR_FWD,
-    MR_UPSCALE, MR_DLAA, MR_OFXR, MR_POSX, MR_POSY, MR_SIZE, MR_DEPTH, MR_FPS, MR_FPSX, MR_FPSY, MR_FPSSIZE, MR_SAVE, MR_CLOSE,
+    MR_UPSCALE, MR_DLAA, MR_OFXR, MR_POSX, MR_POSY, MR_SIZE, MR_DEPTH, MR_FACE, MR_FPS, MR_FPSX, MR_FPSY, MR_FPSSIZE, MR_SAVE,
+    MR_CLOSE,
     MR_COUNT
 };
 static_assert(MR_COUNT <= TuningMenu::kMaxRows, "tuning menu: too many rows");
@@ -11979,6 +12107,8 @@ const wchar_t* const kMenuDesc[MR_COUNT] = {
     L"Moves this panel up / down. Flat and VR each keep their own position.",
     L"Makes this panel bigger or smaller.",
     L"VR: shifts the panel inward per eye so it sits closer than infinity; raise it if the panel is tiring to look at.",
+    L"VR: on = the panel turns to face you when you move it to the side (a tilted 3-D panel, same size from every angle); "
+    L"off = a flat picture.",
     L"A small live fps / frame-time box, shown also while this menu is closed. Flat and VR each keep their own position. "
     L"The Save row keeps it for the next start.",
     L"Moves the fps box sideways. Flat and VR each keep their own position.",
@@ -12076,6 +12206,7 @@ void ToggleFpsBox(uint64_t n) {
     if (!g_fpsShow) {
         TuningMenu::ReleaseWidget();
         g_fpsVrBuild = 0.0f;
+        if (!g_menuOpen.load(std::memory_order_relaxed)) MenuLateReset("fps box off");   // v0.10.0 phase 16
         if (!g_menuOpen.load(std::memory_order_relaxed)) FpsStop();   // (the menu row: the menu is open, the meter keeps running)
     }
     Log("fps box %s (tuning menu, Present #%llu) -- flat fps_x=%d fps_y=%d fps_scale=%.1f, VR fps_vr_x=%d fps_vr_y=%d "
@@ -12428,6 +12559,8 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     swprintf(p.rows[MR_SIZE].value, kV, L"%.1f", (double)(vr ? g_menuVrScale : g_menuScale));
     MenuRow(p, MR_DEPTH, L"Panel VR depth", "dlaa.ini menu_vr_depth", vr ? nullptr : "VR only", !vr);
     swprintf(p.rows[MR_DEPTH].value, kV, L"%d px", g_menuVrDepth);
+    MenuRow(p, MR_FACE, L"Panel faces you (VR)", "dlaa.ini menu_vr_face", vr ? nullptr : "VR only", !vr);   // phase 16
+    swprintf(p.rows[MR_FACE].value, kV, L"%ls", onOff[g_menuVrFace ? 1 : 0]);
     MenuRow(p, MR_FPS, L"FPS counter", "dlaa.ini fps_show", nullptr, false);
     swprintf(p.rows[MR_FPS].value, kV, L"%ls", onOff[g_fpsShow ? 1 : 0]);
     MenuRow(p, MR_FPSX, L"FPS counter X", vr ? "dlaa.ini fps_vr_x" : "dlaa.ini fps_x", nullptr, false);
@@ -12459,11 +12592,11 @@ void MenuClose(uint64_t n, const char* why) {
     g_menuOpen = false;
     g_menuBlitEye = -1; g_menuBlitRt = nullptr;
     PlayTones(1, 300, 120, 0);
-    char placed[200] = "";
+    char placed[240] = "";
     if (g_menuMoved)
-        snprintf(placed, sizeof(placed), " -- panel now flat x=%d%% y=%d%% size %.1f, VR x=%+d%% y=%+d%% size %.1f depth %d px (%s or "
-                 "the Save row writes it)", g_menuX, g_menuY, (double)g_menuScale, g_menuVrX, g_menuVrY, (double)g_menuVrScale,
-                 g_menuVrDepth, KeyName(KA_SAVE));
+        snprintf(placed, sizeof(placed), " -- panel now flat x=%d%% y=%d%% size %.1f, VR x=%+d%% y=%+d%% size %.1f depth %d px %s (%s "
+                 "or the Save row writes it)", g_menuX, g_menuY, (double)g_menuScale, g_menuVrX, g_menuVrY, (double)g_menuVrScale,
+                 g_menuVrDepth, g_menuVrFace ? "facing" : "flat", KeyName(KA_SAVE));
     char fpsPlaced[200] = "";
     if (g_fpsMoved)
         snprintf(fpsPlaced, sizeof(fpsPlaced), " -- fps box now %s, flat x=%d%% y=%d%% size %.1f, VR x=%+d%% y=%+d%% size %.1f (%s or "
@@ -12474,6 +12607,7 @@ void MenuClose(uint64_t n, const char* why) {
     g_fpsMoved = false;
     MenuPerfClose();                                      // the GPU timers back to the dlaa.ini state
     TuningMenu::ReleaseTargets();                         // the panel texture goes; the shaders / states stay (small)
+    if (!g_fpsShow) MenuLateReset("menu closed");         // v0.10.0 phase 16: nothing left to draw on the eye pictures
     if (!g_fpsShow) FpsStop();                            // the fps meter runs on only for the fps box
 }
 
@@ -12523,6 +12657,12 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_DEPTH:
         g_menuVrDepth = MenuClampI(g_menuVrDepth + 2 * dir, 0, 200);
         g_menuExplicit = g_menuMoved = true;
+        break;
+    case MR_FACE:                                           // v0.10.0 phase 16: Left and Right both switch it (also flat: kept for VR)
+        g_menuVrFace = g_menuVrFace ? 0 : 1;
+        g_menuExplicit = g_menuMoved = true;
+        Log("tuning menu: VR panel %s (menu_vr_face=%d, Present #%llu)", g_menuVrFace ? "faces the eye (a 3-D quad turned towards it)"
+            : "flat (a plain picture)", g_menuVrFace, (unsigned long long)n);
         break;
     case MR_FPS:     ToggleFpsBox(n); break;                // Left and Right both switch it
     case MR_FPSX:
@@ -12647,10 +12787,85 @@ void MenuDrawAtPresent(IDXGISwapChain* sc, ID3D11DeviceContext* bctx) {
     t_inDlaa = false;
 }
 
+// v0.10.0 phase 16: the VR panel as a 3-D quad that FACES the eye (dlaa.ini menu_vr_face = 1, the default). View space of the
+// eye: x right, y up, z forward, the eye at the origin. A view direction (x, y, z) lands in the eye picture (W x H px) at
+//   px = u * W + fx * x / z,   py = v * H - fy * y / z,   fx = W / 2 * |P00|,   fy = H / 2 * |P11|
+// ((u, v) = the eye's optical centre, VrEyeCentre; |P00| / |P11| = THIS eye's projection scale, VrEyeScale: measured from the
+// game's own MVPs, world eyes first, else the menu / truck-preview picture's, else assumed 0.9). The panel centre is where the
+// flat panel's centre is (menu_vr_x / menu_vr_y = % of the eye picture from the optical centre) as the direction C = (tx, ty, 1);
+// its half size is the flat panel's at the optical centre (a = pw / 2 / fx, b = ph / 2 / fy at distance 1) times |C| (the
+// distance to C), so it keeps the same ANGLE wherever it is moved. It is turned so its normal points at the eye (-C / |C|):
+// yaw about the vertical axis and pitch about the horizontal one, no roll (right axis r = normalize(Y x f), up = f x r,
+// f = C / |C|). The 4 corners C -+ a r +- b up go through the eye's projection above and are handed over in CLIP space with
+// w = their z (perspective-correct texture), each shifted by the panel's menu_vr_depth px (inward per eye, exactly as the flat
+// panel: both eyes use the same view-space quad, so -- as before -- the stereo depth comes only from that shift, and the distance
+// of C does not change the picture). menu_vr_x = menu_vr_y = 0 is the flat panel exactly (drawn by the flat path, pixel-snapped).
+// False = not usable (a corner at or behind z = 0.05); the caller then draws the flat panel.
+struct MenuFacing {
+    float clip[4][4];                                     // top-left, top-right, bottom-left, bottom-right (clip space)
+    double yaw = 0.0, pitch = 0.0, wDeg = 0.0, hDeg = 0.0; // the centre's direction and the panel's angular size (log)
+    float sx = 0.0f, sy = 0.0f;                           // the projection scale used
+    int   src = 0;                                        // VrEyeScale: 2 world, 1 menu picture, 0 assumed
+};
+bool MenuFacingGeom(int eye, float W, float H, float u, float v, float cx, float cy, float pw, float ph, float shift,
+                    MenuFacing& g) {
+    g.src = VrEyeScale(eye, &g.sx, &g.sy);
+    const double fx = 0.5 * W * g.sx, fy = 0.5 * H * g.sy;
+    if (!(fx > 1.0) || !(fy > 1.0)) return false;
+    const double tx = ((double)cx - u * W) / fx, ty = -((double)cy - v * H) / fy;   // the centre's view tangents (y up)
+    const double len = std::sqrt(tx * tx + ty * ty + 1.0);
+    const double f[3] = { tx / len, ty / len, 1.0 / len };
+    double r[3] = { f[2], 0.0, -f[0] };                    // Y x f (Y = (0, 1, 0))
+    const double rn = std::sqrt(r[0] * r[0] + r[2] * r[2]);
+    if (rn < 1e-6) return false;
+    r[0] /= rn; r[2] /= rn;
+    const double up[3] = { f[1] * r[2] - f[2] * r[1], f[2] * r[0] - f[0] * r[2], f[0] * r[1] - f[1] * r[0] };   // f x r
+    const double a = 0.5 * pw / fx * len, b = 0.5 * ph / fy * len;
+    const double kDeg = 57.29577951308232;
+    g.yaw = std::atan2(tx, 1.0) * kDeg;
+    g.pitch = std::atan2(ty, std::sqrt(1.0 + tx * tx)) * kDeg;
+    g.wDeg = 2.0 * std::atan(0.5 * pw / fx) * kDeg;
+    g.hDeg = 2.0 * std::atan(0.5 * ph / fy) * kDeg;
+    const double sgnX[4] = { -1.0, 1.0, -1.0, 1.0 }, sgnY[4] = { 1.0, 1.0, -1.0, -1.0 };
+    for (int i = 0; i < 4; ++i) {
+        const double P[3] = { tx + sgnX[i] * a * r[0] + sgnY[i] * b * up[0],
+                              ty + sgnX[i] * a * r[1] + sgnY[i] * b * up[1],
+                              1.0 + sgnX[i] * a * r[2] + sgnY[i] * b * up[2] };
+        if (!(P[2] > 0.05)) return false;
+        const double px = u * W + fx * P[0] / P[2] + shift;
+        const double py = v * H - fy * P[1] / P[2];
+        const double nx = px / W * 2.0 - 1.0, ny = 1.0 - py / H * 2.0;
+        g.clip[i][0] = (float)(nx * P[2]);
+        g.clip[i][1] = (float)(ny * P[2]);
+        g.clip[i][2] = (float)(0.5 * P[2]);
+        g.clip[i][3] = (float)P[2];
+    }
+    return true;
+}
+// The facing log: per eye once, and again when the placement / projection source changes (16 lines in total).
+void MenuFacingLog(int eye, const MenuFacing& g, bool facing, float pw, float ph, float u, float v, float shift) {
+    static int s_lines = 0;
+    static int s_key[kMaxEyes][6] = {};
+    static bool s_have[kMaxEyes] = {};
+    if (eye < 0 || eye >= kMaxEyes || s_lines >= 16) return;
+    const int key[6] = { g_menuVrX, g_menuVrY, (int)std::lround(g_menuVrScale * 10.0f), g_menuVrDepth, g.src, facing ? 1 : 0 };
+    if (s_have[eye] && !memcmp(key, s_key[eye], sizeof(key))) return;
+    s_have[eye] = true;
+    memcpy(s_key[eye], key, sizeof(key));
+    ++s_lines;
+    Log("tuning menu: VR panel %s (menu_vr_face=1): eye %d centre direction yaw %+.1f deg pitch %+.1f deg, panel %.1f x %.1f deg "
+        "(%.0f x %.0f px at the optical centre), projection |P00|=%.3f |P11|=%.3f (%s), optical centre uv=(%.3f, %.3f), depth shift "
+        "%+.0f px", facing ? "faces the eye" : (g_menuVrX || g_menuVrY ? "FLAT (facing quad not usable here)" : "centred = flat"),
+        eye, g.yaw, g.pitch, g.wDeg, g.hDeg, (double)pw, (double)ph, (double)g.sx, (double)g.sy,
+        g.src == 2 ? "measured, world eye" : (g.src == 1 ? "measured, menu / truck-preview picture" : "ASSUMED, not measured yet"),
+        (double)u, (double)v, (double)shift);
+}
+
 // VR: the panel while the menu is open, then the fps box while it is on, into `rtv` (an eye texture view); both centred on the
 // eye's optical centre + their own offsets, shifted inward by the same menu_vr_depth. v0.10.0 phase 15: split out of MenuDrawVr
 // for the menu / truck-preview eye pictures (MenuDrawPreview); the centre comes from VrEyeCentre (the world eye's, else the
-// preview picture's own -- the VR main menu has no world eye yet).
+// preview picture's own -- the VR main menu has no world eye yet). Phase 16: the panel faces the eye (MenuFacingGeom) with
+// menu_vr_face = 1; the fps box stays flat. Called from the VR late panel (MenuLateArm / MenuLateOnRead).
 void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv) {
     const bool menuOpen = g_menuOpen.load(std::memory_order_relaxed);
     if (eye < 0 || eye >= kMaxEyes || t_inDlaa || !rtv || !(menuOpen || g_fpsShow)) return;
@@ -12673,12 +12888,21 @@ void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv
         // text size as with the 720-px panel at 45 % of the eye width (the GPU cost column made the panel 860 px wide: ~54 %)
         const float scale = W * 0.45f / 720.0f * g_menuVrScale;
         if (eye == 0 || g_menuVrBuild <= 0.0f) g_menuVrBuild = scale;   // one build scale for both eyes and the mirror
-        const float cx = u * W + (float)g_menuVrX / 100.0f * W + shift;
+        const float cx0 = u * W + (float)g_menuVrX / 100.0f * W;   // the panel centre before the depth shift
         const float cy = v * H + (float)g_menuVrY / 100.0f * H;
         TuningMenu::Panel p;
         MenuBuildPanel(p);
         const float pw = TuningMenu::kRefWidth * scale, ph = TuningMenu::RefHeight(p.nRows) * scale;
-        TuningMenu::Draw(ctx, rtv, td.Width, td.Height, cx - 0.5f * pw, cy - 0.5f * ph, scale, g_menuVrBuild, outMode, p);
+        bool drawn = false;
+        if (g_menuVrFace) {                                // v0.10.0 phase 16: the panel turned to face the eye
+            MenuFacing g;
+            const bool ok = MenuFacingGeom(eye, W, H, u, v, cx0, cy, pw, ph, shift, g);
+            const bool facing = ok && (g_menuVrX || g_menuVrY);   // centred: the flat panel IS the facing one (pixel-snapped)
+            MenuFacingLog(eye, g, facing, pw, ph, u, v, shift);
+            if (facing) drawn = TuningMenu::DrawCorners(ctx, rtv, td.Width, td.Height, g.clip, g_menuVrBuild, outMode, p);
+        }
+        if (!drawn)
+            TuningMenu::Draw(ctx, rtv, td.Width, td.Height, cx0 + shift - 0.5f * pw, cy - 0.5f * ph, scale, g_menuVrBuild, outMode, p);
     }
     if (g_fpsShow) {
         const float scale = W * 0.08f / TuningMenu::kWidgetRefW * g_fpsVrScale;   // 1 = 8 % of the eye width
@@ -12693,7 +12917,7 @@ void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv
 }
 
 // VR world: right after the game's eye blit Draw (and the DLSS upscale composite), hkDraw. RT0 must still be the blit's eye
-// texture.
+// texture. v0.10.0 phase 16: this is the ARM point of the VR late panel (MenuLateArm draws here only while learning).
 void MenuDrawVr(ID3D11DeviceContext* ctx) {
     const int eye = g_menuBlitEye;
     void* const rt = g_menuBlitRt;
@@ -12705,7 +12929,7 @@ void MenuDrawVr(ID3D11DeviceContext* ctx) {
     Microsoft::WRL::ComPtr<ID3D11Resource> res;
     rtv->GetResource(res.GetAddressOf());
     if (!res || (void*)res.Get() != rt) return;
-    MenuDrawVrOn(ctx, eye, rtv.Get());
+    MenuLateArm(ctx, eye, rtv.Get(), 'w');               // v0.10.0 phase 16 (was MenuDrawVrOn: drawn here at once)
 }
 
 // v0.10.0 phase 15: VR menu / truck-preview screens (the main menu before a save is loaded, the garage / truck dealer): the
@@ -12720,7 +12944,8 @@ void MenuDrawVr(ID3D11DeviceContext* ctx) {
 // known yet (a new RT, the first frames of a screen) gets no panel this frame: the composite order is NOT a usable guess, the
 // game renders the two eyes in either order (the 18:10 log: order != eye in a third of the runs), and a panel that jumps
 // between the eyes' placements is worse than none for a few frames. The flat route (backbuffer target) is
-// MenuDrawAtPresent's.
+// MenuDrawAtPresent's. v0.10.0 phase 16: this is the ARM point of the VR late panel -- the game draws its own garage / dealer
+// menu into the picture AFTER it, so the panel goes on later, right before the game reads the picture (MenuLateArm).
 uint64_t g_menuPvDraws = 0;                               // panel / fps box draws onto preview eye pictures (log)
 uint64_t g_menuPvNoEye = 0;                               // ... skipped: the eye of the picture is not known yet (log)
 void MenuDrawPreview(ID3D11DeviceContext* ctx, int idx, char trigger) {
@@ -12740,14 +12965,324 @@ void MenuDrawPreview(ID3D11DeviceContext* ctx, int idx, char trigger) {
     if (g_menuPvDraws++ < 4) {
         float u = 0.5f, v = 0.5f;
         const bool known = VrEyeCentre(eye, &u, &v);
-        Log("tuning menu: VR panel / fps box drawn on a menu / truck-preview eye picture (target order %d -> eye %d, %s, "
+        Log("tuning menu: VR panel / fps box armed on a menu / truck-preview eye picture (target order %d -> eye %d, %s, "
             "trigger (%c), centre uv=(%.3f, %.3f)%s, DLAA %s, Present #%llu)", idx, eye,
             askedHere ? "eye map asked by the menu" : "the DLAA unit's eye", trigger, (double)u, (double)v,
             known ? "" : " = image centre, optical centre not known yet",
             (g_dlaaOn.load(std::memory_order_relaxed) && !g_passive.load(std::memory_order_relaxed)) ? "on" : "off / passive",
             (unsigned long long)fr);
     }
-    MenuDrawVrOn(ctx, eye, tg.rtv.Get());
+    MenuLateArm(ctx, eye, tg.rtv.Get(), trigger);        // v0.10.0 phase 16 (was MenuDrawVrOn: drawn here at once)
+}
+
+// ---- v0.10.0 phase 16: VR LATE PANEL -- the panel / fps box are the LAST thing drawn into each eye picture -------------------
+// Phase 15 drew them where the eye picture is finished for the MOD: world = right after the game's eye blit (+ the DLSS
+// composite), menu / truck-preview screens = right after the target's DLAA flush (trigger (a): after the game's first
+// non-composite Draw into it, the VR verts=96 Draw; (b): at the bind that leaves it). On the garage / truck dealer screens the
+// game draws its own menu INTO the eye picture after that point, so where the two overlap the game's menu covered our panel
+// (phase-15 run, user: "flickers where it overlaps the game's menu"). The panel must be the last draw into the picture AND it
+// must land before the picture goes to the OpenXR runtime. The runtime gets its swapchain image at xrReleaseSwapchainImage
+// (before xrEndFrame, before the mirror Present); our hooks see no OpenXR call, so "the bind that leaves the picture" and
+// Present can already be AFTER the release -- a draw there races the runtime's copy (a panel present in some frames only).
+// What the hooks DO see: ETS2 / ATS render each eye into their own eye-buffer texture (r_manual_stereo_buffer_scale; 6120x6496
+// here, the blit / preview target) and then READ it with a final Draw(4) into the OpenXR swapchain image (F11 trace,
+// CAPTURE_FINDINGS.md "VR frame structure" step 5: Draw(4) x2 into the 3072x3264 swapchain images reading the 6120x6496
+// textures). That read is the safe last point: everything the game draws into the picture is in, and the picture itself is not
+// what the runtime gets (the swapchain image is written by that very Draw).
+//  * Arm: MenuDrawVr / MenuDrawPreview (the phase-15 points) RECORD the eye picture (the game's RTV of it), per eye.
+//  * Late draw (mode "late"): the panel + fps box go into the recorded picture right BEFORE the first game Draw /
+//    DrawIndexed (<= 6 vertices / indices) that has it as PS SRV0, or the first CopyResource / CopySubresourceRegion(1) that
+//    reads it, whose destination is not the mirror window (a backbuffer read may come after the release: counted, not used).
+//  * Learning (mode "at the arm point", the start of every session): the panel is drawn at the arm point exactly as in phase
+//    15 and the record only WATCHES for such a read. kLateLearn eye pictures in a row with a read -> mode "late". In mode late,
+//    a record replaced by its eye's next arm without that read (the panel missed that picture) -> back to the arm point at once;
+//    after kLateMaxFallbacks fallbacks the session stays there (a setup whose eye buffer IS the swapchain image never reads it:
+//    there the arm point is the only safe one, and the game's own menu can still cover the panel).
+//  * Diagnostics: game draws into the picture after our panel ("draws over the panel": the overlap; mode late: expected 0),
+//    the first reads with their destination (proves the swapchain-image Draw), a stats line every 3600 pictures and at the
+//    reset (menu closed with the fps box off, fps box off with the menu closed, game context change).
+// The fps box rides along (MenuDrawVrOn draws both). Render thread only; nothing runs while the menu is closed and the fps box
+// is off (g_menuLateN = 0: one integer test per hook).
+enum { kLrNone = 0, kLrWait, kLrWatch, kLrDone };
+// kLrWait  = mode late: recorded, panel not drawn yet, waiting for the game's read of the picture
+// kLrWatch = learning: panel drawn at the arm point, watching for a read
+// kLrDone  = drawn late / read seen while watching: only the game draws over the panel are still counted
+struct MenuLateRec {
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv;   // the game's view of the picture (the panel is drawn through it)
+    void*    tex = nullptr;                      // its resource (identity)
+    int      state = kLrNone;
+    char     kind = 0;                           // arm point: 'w' world eye blit, 'a' / 'b' menu / truck-preview trigger
+    bool     drawn = false;                      // the panel went into this picture
+    bool     late = false;                       // ... right before the game's read (mode late), not at the arm point
+    uint32_t draws = 0;                          // game draws into the picture since the arm
+    uint32_t panelAt = 0;                        // `draws` when the panel was drawn (draws over the panel = draws - panelAt)
+    uint64_t frame = 0;                          // Present counter at the arm (a re-arm of the same picture in it is no miss)
+    uint32_t w = 0, h = 0;                       // the picture's size (a read must go into an eye-shaped target)
+};
+MenuLateRec g_menuLate[kMaxEyes];
+constexpr int kLateLearn = 8;                    // eye pictures in a row read after the arm point -> mode late
+constexpr int kLateMaxFallbacks = 3;             // fallbacks to the arm point before the session stays there
+int      g_menuLateMode = 0;                     // 0 = draw at the arm point (+ watch), 1 = late (right before the game's read)
+int      g_menuLateRun = 0;                      // mode 0: pictures in a row whose read was seen
+int      g_menuLateFallbacks = 0;
+int      g_menuLateGood = 0;                     // mode late: pictures drawn late in a row (kLateForgive -> the fallbacks are forgiven)
+constexpr int kLateForgive = 3600;               // ~20 s of VR frames without a miss: a fallback was a one-off (a screen change)
+struct MenuLateStats {
+    uint64_t arms = 0, late = 0, atArm = 0, reads = 0, mirrorReads = 0, otherReads = 0, misses = 0, stale = 0, over = 0,
+             overPics = 0, retired = 0;
+};
+MenuLateStats g_menuLateSt;
+uint64_t g_menuLateStArms0 = 0;                  // arms at the last stats line
+
+void MenuLateUpdateN() {
+    int n = 0;
+    for (const MenuLateRec& r : g_menuLate) if (r.state != kLrNone) ++n;
+    g_menuLateN = n;
+    if (!n) g_menuLateBound = -1;
+}
+void MenuLateStatsLog(const char* why) {
+    const MenuLateStats& s = g_menuLateSt;
+    g_menuLateStArms0 = s.arms;
+    Log("tuning menu: VR late panel stats (%s): mode %s, eye pictures %llu (panel drawn LAST %llu, at the arm point %llu), game "
+        "reads of the picture %llu (+ %llu into the mirror window and %llu into other targets, not used), missed %llu (+ %llu "
+        "stale, not counted), fallbacks %d of %d, game draws over the panel %llu in %llu picture(s)", why, g_menuLateMode ? "late (right before the game reads the picture)"
+        : (g_menuLateFallbacks >= kLateMaxFallbacks ? "at the arm point (stays: no reliable read)" : "at the arm point (learning)"),
+        (unsigned long long)s.arms, (unsigned long long)s.late, (unsigned long long)s.atArm, (unsigned long long)s.reads,
+        (unsigned long long)s.mirrorReads, (unsigned long long)s.otherReads, (unsigned long long)s.misses,
+        (unsigned long long)s.stale, g_menuLateFallbacks,
+        kLateMaxFallbacks,
+        (unsigned long long)s.over, (unsigned long long)s.overPics);
+}
+// The record of eye `eye` ends (its next arm / a reset): over-the-panel count, a miss (mode late, never read), learning run.
+void MenuLateRetire(int eye, bool reset) {
+    MenuLateRec& r = g_menuLate[eye];
+    if (r.state == kLrNone) return;
+    MenuLateStats& s = g_menuLateSt;
+    ++s.retired;
+    if (r.drawn && r.draws > r.panelAt) {
+        s.over += r.draws - r.panelAt;
+        ++s.overPics;
+        static int logs = 0;
+        if (logs++ < 6)
+            Log("tuning menu: VR late panel: %u game draw(s) went into eye %d's picture AFTER our panel (panel drawn %s, arm point %c) "
+                "-- where they overlap the game's picture covers the panel", r.draws - r.panelAt, eye,
+                r.late ? "late" : "at the arm point", r.kind);
+    }
+    const uint64_t fr = g_frames.load(std::memory_order_relaxed);
+    if (r.state == kLrWait && !reset && fr - r.frame > 2) {   // waited over 2 Presents: a screen change / pause, not a draw order
+        ++s.stale;                                       // (each eye is armed every frame; its read comes in the same frame)
+        static int logs = 0;
+        if (logs++ < 3)
+            Log("tuning menu: VR late panel: eye %d's picture recorded at Present #%llu was never read (now #%llu: a screen change "
+                "or pause) -- not counted as a miss", eye, (unsigned long long)r.frame, (unsigned long long)fr);
+    } else if (r.state == kLrWait && !reset) {           // mode late and the picture was never read: the panel missed it
+        ++s.misses;
+        g_menuLateGood = 0;
+        static int logs = 0;
+        if (logs++ < 6)
+            Log("tuning menu: VR late panel MISSED eye %d's picture: no game read of it (Draw / copy into the OpenXR swapchain "
+                "image) before its next arm (arm point %c, %u game draw(s) into it since the arm, Present #%llu)", eye, r.kind,
+                r.draws, (unsigned long long)fr);
+        if (g_menuLateMode == 1) {
+            g_menuLateMode = 0;
+            g_menuLateRun = 0;
+            ++g_menuLateFallbacks;
+            Log("tuning menu: VR panel / fps box back to the arm point (fallback %d of %d%s)", g_menuLateFallbacks,
+                kLateMaxFallbacks, g_menuLateFallbacks >= kLateMaxFallbacks ? ": the session stays there" : ", learning again");
+        }
+    }
+    if (r.state == kLrWatch) g_menuLateRun = 0;          // drawn at the arm point and no read seen: the run starts again
+    r = MenuLateRec();
+    if (g_menuLateBound == eye) g_menuLateBound = -1;
+    if (s.retired % 3600 == 0) MenuLateStatsLog("every 3600 eye pictures");
+}
+// Present: the pictures already drawn late / read end here (their draws-over-the-panel count is final; a game whose eye
+// picture is not rotated must not count the next frame's draws into it). Waiting / watching records stay (Present is not a
+// reliable frame boundary in VR: their read may still come).
+void MenuLateAtPresent() {
+    for (int e = 0; e < kMaxEyes; ++e)
+        if (g_menuLate[e].state == kLrDone) MenuLateRetire(e, false);
+    MenuLateUpdateN();
+}
+void MenuLateReset(const char* why) {
+    bool any = false;
+    for (int e = 0; e < kMaxEyes; ++e) {
+        any = any || g_menuLate[e].state != kLrNone;
+        MenuLateRetire(e, true);
+    }
+    MenuLateUpdateN();
+    if (any || g_menuLateSt.arms != g_menuLateStArms0) MenuLateStatsLog(why);
+}
+// Which recorded picture (if any) the game's new RT0 is (hkOMSetRenderTargets, after the bind went through).
+void MenuLateOnBind(UINT n, ID3D11RenderTargetView* const* rtvs) {
+    void* res = nullptr;
+    if (n >= 1 && rtvs && rtvs[0]) {
+        ID3D11Resource* r = nullptr;
+        rtvs[0]->GetResource(&r);
+        res = r;                                         // identity only
+        if (r) r->Release();
+    }
+    int b = -1;
+    for (int e = 0; e < kMaxEyes && res; ++e)
+        if (g_menuLate[e].state != kLrNone && g_menuLate[e].tex == res) b = e;
+    g_menuLateBound = b;
+}
+void MenuLateCountDraw() {
+    const int e = g_menuLateBound;
+    if (e >= 0 && e < kMaxEyes && g_menuLate[e].state != kLrNone) ++g_menuLate[e].draws;
+}
+// The arm point of eye `eye`'s picture (`rtv` = the game's view of it). Mode late: recorded only; learning: drawn now + watched.
+void MenuLateArm(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv, char kind) {
+    if (eye < 0 || eye >= kMaxEyes || !rtv || t_inDlaa) return;
+    if (!(g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)) return;
+    Microsoft::WRL::ComPtr<ID3D11Resource> res;
+    rtv->GetResource(res.GetAddressOf());
+    if (!res) return;
+    MenuLateRec& r = g_menuLate[eye];
+    const uint64_t fr = g_frames.load(std::memory_order_relaxed);
+    // the same picture armed again in the same frame (a second flush / blit into it) before its read: keep the record (no
+    // miss, no second panel at the arm point); the panel still goes on at the read (late) or is there already (learning)
+    if ((r.state == kLrWait || r.state == kLrWatch) && r.tex == (void*)res.Get() && r.frame == fr) {
+        r.rtv = rtv;
+        r.kind = kind;
+        return;
+    }
+    MenuLateRetire(eye, false);
+    r.frame = fr;
+    r.rtv = rtv;
+    r.tex = res.Get();
+    r.kind = kind;
+    {
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> t;
+        D3D11_TEXTURE2D_DESC td{};
+        if (SUCCEEDED(res.As(&t)) && t) t->GetDesc(&td);
+        r.w = td.Width; r.h = td.Height;
+    }
+    ++g_menuLateSt.arms;
+    if (g_menuLateMode == 1) {
+        r.state = kLrWait;
+    } else {
+        r.state = kLrWatch;
+        MenuDrawVrOn(ctx, eye, rtv);                     // as in phase 15
+        r.drawn = true;
+        ++g_menuLateSt.atArm;
+    }
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> cur;   // is the picture RT0 right now? (world blit / trigger (a): yes)
+    ctx->OMGetRenderTargets(1, cur.GetAddressOf(), nullptr);
+    if (cur) {
+        Microsoft::WRL::ComPtr<ID3D11Resource> cr;
+        cur->GetResource(cr.GetAddressOf());
+        if (cr.Get() == r.tex) g_menuLateBound = eye;
+        else if (g_menuLateBound == eye) g_menuLateBound = -1;
+    }
+    MenuLateUpdateN();
+    static bool s_logged = false;
+    if (!s_logged) {
+        s_logged = true;
+        Log("tuning menu: VR late panel: first eye picture recorded (eye %d, arm point %c = %s, Present #%llu) -- drawn %s; the game's "
+            "read of the picture (a Draw / copy into the OpenXR swapchain image) is watched for", eye, kind,
+            kind == 'w' ? "after the world eye blit" : "menu / truck-preview target flushed",
+            (unsigned long long)g_frames.load(std::memory_order_relaxed),
+            g_menuLateMode ? "right before that read" : "at the arm point until that read is confirmed");
+    }
+}
+// A game read of `src` (a copy source, or PS SRV0 of a small Draw / DrawIndexed) into `dst` (its RT0 / copy destination).
+void MenuLateOnRead(ID3D11DeviceContext* ctx, ID3D11Resource* src, ID3D11Resource* dst, const char* what, UINT n) {
+    if (!src) return;
+    int eye = -1;
+    for (int e = 0; e < kMaxEyes; ++e)
+        if ((g_menuLate[e].state == kLrWait || g_menuLate[e].state == kLrWatch) && g_menuLate[e].tex == (void*)src) eye = e;
+    if (eye < 0) return;
+    MenuLateRec& r = g_menuLate[eye];
+    D3D11_TEXTURE2D_DESC dd{};
+    bool toBb = !dst;                                    // no destination (a UAV-only draw): not the runtime's picture either
+    if (dst) {
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> t;
+        if (SUCCEEDED(dst->QueryInterface(__uuidof(ID3D11Texture2D), (void**)t.GetAddressOf())) && t) {
+            t->GetDesc(&dd);
+            toBb = PvIsBackbufferTarget(t.Get());        // the mirror window (pointer, or the backbuffer's size + format)
+        }
+        if ((void*)dst == g_backbuffer.load(std::memory_order_relaxed)) toBb = true;
+    }
+    const uint64_t fr = g_frames.load(std::memory_order_relaxed);
+    if (toBb) {
+        ++g_menuLateSt.mirrorReads;
+        static int logs = 0;
+        if (logs++ < 2)
+            Log("tuning menu: VR late panel: eye %d's picture read by the game's %s (%u) into the mirror window / no target -- not a "
+                "draw point (it can come after the OpenXR release), Present #%llu", eye, what, n, (unsigned long long)fr);
+        return;
+    }
+    // the runtime's picture is eye-shaped: the same aspect as the eye picture (+-25 %) and at least 30 % of its height (the
+    // swapchain image is ~half the eye buffer each way; a landscape mirror target or a small blur / UI texture is not)
+    const double aspE = r.h ? (double)r.w / (double)r.h : 0.0;
+    const double aspD = dd.Height ? (double)dd.Width / (double)dd.Height : 0.0;
+    const bool eyeLike = aspE > 0.0 && aspD > 0.0 && std::fabs(aspD / aspE - 1.0) <= 0.25 && (double)dd.Height >= 0.3 * r.h;
+    if (!eyeLike) {
+        ++g_menuLateSt.otherReads;
+        static int logs = 0;
+        if (logs++ < 3)
+            Log("tuning menu: VR late panel: eye %d's picture (%ux%u) read by the game's %s (%u) into %ux%u fmt=%d -- not an "
+                "eye-shaped target (the mirror / an effect texture), not a draw point, Present #%llu", eye, r.w, r.h, what, n,
+                dd.Width, dd.Height, (int)dd.Format, (unsigned long long)fr);
+        return;
+    }
+    ++g_menuLateSt.reads;
+    if (r.state == kLrWait) {
+        MenuDrawVrOn(ctx, eye, r.rtv.Get());
+        r.drawn = true;
+        r.late = true;
+        r.panelAt = r.draws;
+        r.state = kLrDone;
+        ++g_menuLateSt.late;
+        if (++g_menuLateGood >= kLateForgive && g_menuLateFallbacks > 0) {
+            g_menuLateFallbacks = 0;
+            Log("tuning menu: VR late panel: %d pictures in a row drawn late since the last miss -- earlier fallbacks forgiven",
+                g_menuLateGood);
+        }
+        static int logs = 0;
+        if (logs++ < 4)
+            Log("tuning menu: VR panel / fps box drawn LAST on eye %d's picture: right before the game's %s (%u) reading it into "
+                "%ux%u fmt=%d (arm point %c; %u game draw(s) went into the picture since the arm -- now under the panel), Present #%llu",
+                eye, what, n, dd.Width, dd.Height, (int)dd.Format, r.kind, r.draws, (unsigned long long)fr);
+        return;
+    }
+    r.state = kLrDone;                                   // kLrWatch: learning
+    ++g_menuLateRun;
+    static int logs = 0;
+    if (logs++ < 4)
+        Log("tuning menu: VR late panel (learning): eye %d's picture is read by the game's %s (%u) into %ux%u fmt=%d after the arm "
+            "point %c; %u game draw(s) went into it after our panel there (read %d of %d in a row), Present #%llu", eye, what, n,
+            dd.Width, dd.Height, (int)dd.Format, r.kind, r.draws, g_menuLateRun, kLateLearn, (unsigned long long)fr);
+    if (g_menuLateMode == 0 && g_menuLateRun >= kLateLearn && g_menuLateFallbacks < kLateMaxFallbacks) {
+        g_menuLateMode = 1;
+        Log("tuning menu: VR panel / fps box now drawn LAST on every eye picture -- right before the game reads the picture into the "
+            "OpenXR swapchain image (%d pictures in a row were read after the arm point; game draws over the panel at the arm "
+            "point so far: %llu in %llu picture(s)), Present #%llu", g_menuLateRun, (unsigned long long)g_menuLateSt.over,
+            (unsigned long long)g_menuLateSt.overPics, (unsigned long long)fr);
+    }
+}
+// A small game Draw / DrawIndexed (<= 6 vertices / indices) while a picture is recorded: is PS SRV0 a recorded picture?
+void MenuLateOnDraw(ID3D11DeviceContext* ctx, const char* what, UINT n) {
+    ID3D11ShaderResourceView* srv = nullptr;
+    ctx->PSGetShaderResources(0, 1, &srv);
+    if (!srv) return;
+    ID3D11Resource* sres = nullptr;
+    srv->GetResource(&sres);
+    srv->Release();
+    if (!sres) return;
+    bool rec = false;
+    for (const MenuLateRec& r : g_menuLate)
+        if ((r.state == kLrWait || r.state == kLrWatch) && r.tex == (void*)sres) rec = true;
+    if (rec) {
+        ID3D11RenderTargetView* rtv = nullptr;
+        ctx->OMGetRenderTargets(1, &rtv, nullptr);
+        ID3D11Resource* dres = nullptr;
+        if (rtv) { rtv->GetResource(&dres); rtv->Release(); }
+        MenuLateOnRead(ctx, sres, dres, what, n);
+        if (dres) dres->Release();
+    }
+    sres->Release();
 }
 
 // "mirror units @blit N" (the FIFO stats window, every 600 blits): one line for all units + a WARNING per unit above its
@@ -12843,6 +13378,7 @@ void STDMETHODCALLTYPE hkDrawIndexedInstanced(ID3D11DeviceContext* ctx, UINT ic,
     }
     // v0.10.0 phase 11 LOD bias scope: the sampler set this draw needs (solid / see-through blend state)
     if (!t_inDlaa && g_lodPerDraw.load(std::memory_order_relaxed) && IsGameCtx(ctx)) LodOnDraw(ctx);
+    if (g_menuLateBound >= 0 && !t_inDlaa && IsGameCtx(ctx)) MenuLateCountDraw();   // v0.10.0 phase 16 VR late panel
     oDrawIndexedInstanced(ctx, ic, inst, si, bv, sinst);
 }
 #endif
@@ -12861,6 +13397,9 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
             g_foreignCtx.fetch_add(1, std::memory_order_relaxed);
     } else {
         CountGameDraw(t_inDlaa, ctx, 0, true);     // v0.8.1: frame-end rule + present-layer bookkeeping
+#ifdef WITH_DLAA
+        if (g_menuLateBound >= 0 && !t_inDlaa) MenuLateCountDraw();   // v0.10.0 phase 16 (a game draw into a recorded eye picture)
+#endif
     }
 #ifdef WITH_DLAA
     int objSlot = 0;                                      // v0.9.0: stencil object id of this draw (0 = untagged)
@@ -12923,6 +13462,9 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
 #endif
     // v0.10.0 phase 11 LOD bias scope: the sampler set this draw needs (solid / see-through blend state)
     if (gameCtx && !t_inDlaa && g_lodPerDraw.load(std::memory_order_relaxed)) LodOnDraw(ctx);
+#ifdef WITH_DLAA
+    if (g_menuLateN && gameCtx && !t_inDlaa && indexCount <= 6) MenuLateOnDraw(ctx, "DrawIndexed", indexCount);   // phase 16
+#endif
     oDrawIndexed(ctx, indexCount, startIndex, baseVertex);
 #ifdef WITH_DLAA
     if (objTag) oOMSetDepthStencilState(ctx, g_objCur->twin, ObjStaticRef());   // back to the static ref
@@ -12969,6 +13511,7 @@ void ResetPassTrackingCore(bool forceDlaaOff) {
     ObjOnContextReset();                                       // v0.9.0: depth-stencil twins / object records too
     FwdOnContextReset();                                       // v0.9.0 r5: forward-depth states (old device)
     MirOnContextReset();                                       // v0.10.0 phase 2: mirror views / units' game refs
+    MenuLateReset("game context change");                      // v0.10.0 phase 16: recorded eye pictures (game refs)
     DepthTwin::PoolShutdown();                                 // v0.10.0 phase 8: pooled pass-slot textures (old device)
     GpuPerf::Shutdown();                                       // v0.10.0 phase 8: the perf queries belong to the old device
     g_fwdBound = false; g_fwdBoundTex = nullptr;               // v0.10.0 phase 7
@@ -14054,6 +14597,7 @@ void LoadConfig() {
             else if (!strcmp(key, "menu_vr_x"))      g_menuVrX = v < -50 ? -50 : (v > 50 ? 50 : (int)v);
             else if (!strcmp(key, "menu_vr_y"))      g_menuVrY = v < -50 ? -50 : (v > 50 ? 50 : (int)v);
             else if (!strcmp(key, "menu_vr_depth"))  g_menuVrDepth = v < 0 ? 0 : (v > 200 ? 200 : (int)v);
+            else if (!strcmp(key, "menu_vr_face"))   g_menuVrFace = v != 0 ? 1 : 0;         // v0.10.0 phase 16
             else if (!strcmp(key, "menu_scale") || !strcmp(key, "menu_vr_scale")) {
                 const double s = strtod(eq + 1, nullptr);
                 const float c = (s != s) ? 1.0f : (float)(s < 0.5 ? 0.5 : (s > 2.0 ? 2.0 : s));
@@ -14187,9 +14731,11 @@ void LoadConfig() {
         Ofxr::g_on.load() ? "on: the layer's calls pass through the hooks" : "off");
 #ifdef WITH_DLAA
     Log("tuning menu (v0.10.0): %s opens / closes it, %s / %s select a row, %s / %s change it; panel flat menu_x=%d menu_y=%d "
-        "menu_scale=%.1f, VR menu_vr_x=%d menu_vr_y=%d menu_vr_scale=%.1f menu_vr_depth=%d", KeyName(KA_MENU), KeyName(KA_MENU_UP),
+        "menu_scale=%.1f, VR menu_vr_x=%d menu_vr_y=%d menu_vr_scale=%.1f menu_vr_depth=%d menu_vr_face=%d (%s); VR: drawn last on "
+        "each eye picture once the game's read of it is confirmed (phase 16)", KeyName(KA_MENU), KeyName(KA_MENU_UP),
         KeyName(KA_MENU_DOWN), KeyName(KA_MENU_LEFT), KeyName(KA_MENU_RIGHT), g_menuX, g_menuY, (double)g_menuScale, g_menuVrX,
-        g_menuVrY, (double)g_menuVrScale, g_menuVrDepth);
+        g_menuVrY, (double)g_menuVrScale, g_menuVrDepth, g_menuVrFace,
+        g_menuVrFace ? "the VR panel turns to face the eye" : "flat VR panel");
     Log("fps box (v0.10.0): fps_show=%d (%s), flat fps_x=%d fps_y=%d fps_scale=%.1f, VR fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f "
         "(the tuning menu's FPS counter rows move it)", g_fpsShow ? 1 : 0, g_fpsShow ? "on: shown also while the menu is closed" : "off",
         g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY, (double)g_fpsVrScale);

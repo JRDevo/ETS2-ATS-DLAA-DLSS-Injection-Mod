@@ -351,7 +351,11 @@ value, the hotkey for it, and for the selected row a short description. **`Up` /
   beeps and logs exactly like its key. Number rows repeat while you hold `Left` / `Right`.
 - **Move the panel:** the `Panel position X`, `Panel position Y` and `Panel size` rows (and `Panel VR depth` in VR,
   which brings the panel nearer). Flat and VR keep their own position (`menu_x`, `menu_y`, `menu_scale`,
-  `menu_vr_x`, `menu_vr_y`, `menu_vr_scale`, `menu_vr_depth` in `dlaa.ini`).
+  `menu_vr_x`, `menu_vr_y`, `menu_vr_scale`, `menu_vr_depth`, `menu_vr_face` in `dlaa.ini`).
+- **VR: the panel faces you.** Move it to the side or up / down and it turns towards your eye like a real screen,
+  keeping its size from every angle (`Panel faces you (VR)` row, `menu_vr_face`, on by default; off = a flat picture).
+  On the garage / truck dealer screens the panel and the fps box are drawn on top of the game's own menu, not under it
+  (the mod finds where the game hands each eye picture to the headset in the first frames after the menu opens).
 - **Live fps counter:** the `FPS counter` row switches on a small fps box: the fps and the frame time as text with a dark outline, no background (`60 fps` /
   `16.7 ms`, updated twice a second) that stays on screen also when the menu is closed (flat, and in VR in both eyes).
   `FPS counter X`, `FPS counter Y` and `FPS counter size` move it; flat and VR keep their own position (`fps_show`,
@@ -399,6 +403,7 @@ The table below lists the commonly used keys:
 | `beeps` | `1` | `0` = silence the hotkey beeps |
 | `menu_x` / `menu_y` / `menu_scale` | `2` / `8` / `1.0` | tuning menu panel, flat (v0.10.0): left / top edge in % of the picture, size `0.5`..`2.0`. The menu's Panel rows change them live |
 | `menu_vr_x` / `menu_vr_y` / `menu_vr_scale` / `menu_vr_depth` | `0` / `-5` / `1.0` / `12` | tuning menu panel, VR (v0.10.0): centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size (1 = 54 % of the eye width), inward shift per eye in px |
+| `menu_vr_face` | `1` | tuning menu panel, VR (v0.10.0): `1` = the panel turns to face your eye when moved off the centre (a tilted 3-D panel, same size from every angle), `0` = a flat picture. The menu's `Panel faces you (VR)` row switches it live |
 | `fps_show` | `0` | live fps box (v0.10.0): `1` = a small fps / frame-time box stays on screen, also while the menu is closed. The menu's `FPS counter` row switches it live |
 | `fps_x` / `fps_y` / `fps_scale` | `1` / `1` / `1.0` | fps box, flat (v0.10.0): left / top edge in % of the picture (`0`..`95`), size `0.2`..`3.0` (1 = 92 x 44 px at 1080 p) |
 | `fps_vr_x` / `fps_vr_y` / `fps_vr_scale` | `0` / `-25` / `0.3` | fps box, VR (v0.10.0): centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size `0.2`..`3.0` (1 = 8 % of the eye width) |

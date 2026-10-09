@@ -54,14 +54,17 @@ menu and the garage / truck dealer screens, before a save is loaded).
   (`DLAA area` is VR only, `DLAA before tonemap` is flat only); it stays in the list.
 - **Panel position X / Y, Panel size** move and size the panel (repeat makes it fast); flat and VR each keep their own
   values. **Panel VR depth** (VR only) shifts the panel inward per eye so it sits nearer than infinity: raise it if the
-  panel is tiring to look at.
+  panel is tiring to look at. **Panel faces you (VR)** (on by default, `menu_vr_face`): moved off the centre, the panel
+  turns towards your eye like a real screen and keeps its size from every angle; off = a flat picture. In VR the panel and
+  the fps box are drawn on top of the game's own menu (garage / truck dealer screens) once the mod has confirmed where the
+  game hands each eye picture on (a few frames after the menu opens).
 - **FPS counter** (on / off), **FPS counter X / Y, FPS counter size**: a small live fps box: the fps and the frame time as text with a dark outline, no background
   (`60 fps` / `16.7 ms`, updated twice a second) that stays on screen also while the menu is closed, in flat and in VR
   (both eyes + the desktop mirror). Flat and VR each keep their own position (`fps_show`, `fps_x`, `fps_y`, `fps_scale`,
   `fps_vr_x`, `fps_vr_y`, `fps_vr_scale` in `dlaa.ini`); off, it costs nothing. **FPS counter size** goes from `0.2` to
   `3.0` (flat default `1.0`; VR default `0.3`, a saved `fps_vr_scale` keeps its size).
 - **Save to dlaa.ini** (or `Shift+F12`) writes the live values, and the panel position once you changed it
-  (`menu_x`, `menu_y`, `menu_scale`, `menu_vr_x`, `menu_vr_y`, `menu_vr_scale`, `menu_vr_depth`) and the fps box once you
+  (`menu_x`, `menu_y`, `menu_scale`, `menu_vr_x`, `menu_vr_y`, `menu_vr_scale`, `menu_vr_depth`, `menu_vr_face`) and the fps box once you
   changed it (the 7 `fps_*` keys), keeping every other line.
   The `Mode` row saves itself at once, like `End`.
 - **GPU line and GPU cost column.** Under the title the panel shows what the GPU spends per frame, measured live and

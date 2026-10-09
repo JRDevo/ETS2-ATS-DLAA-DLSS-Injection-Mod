@@ -379,6 +379,10 @@ debug = 0
 # menu_vr_y = -5
 # menu_vr_scale = 1.0
 # menu_vr_depth = 12
+# VR (v0.10.0 phase 16): 1 = the panel turns to FACE you when it is moved off the centre (a tilted 3-D panel that keeps the
+# same apparent size from every angle; menu_vr_x / menu_vr_y / menu_vr_scale / menu_vr_depth keep their meaning: they place
+# the panel's centre), 0 = a flat picture as before. The menu's "Panel faces you (VR)" row switches it live.
+# menu_vr_face = 1
 
 # ---- v0.10.0 FPS BOX: a small live fps / frame-time box ("60 fps" / "16.7 ms", updated twice a second), shown also
 # while the menu is closed. The menu's FPS counter rows switch and move it live; Shift+F12 / the Save row writes these

@@ -15,18 +15,22 @@ using Microsoft::WRL::ComPtr;
 
 namespace {
 
-// One quad from SV_VertexID (triangle strip, no input layout / vertex buffer); the constant buffer gives its rect in NDC.
+// One quad from SV_VertexID (triangle strip, no input layout / vertex buffer); the constant buffer gives its rect in NDC,
+// or (v0.10.0 phase 16, Opt.w = 1) its 4 corners in CLIP space (the VR panel that faces the eye: a perspective quad, w = the
+// corner's view depth, so the rasterizer interpolates the texture coordinates perspective-correct).
 // kMenuVs-BEGIN (the build validates this block with fxc, vs_5_0 / VSMain)
 const char kMenuVs[] = R"(
 cbuffer MenuCb : register(b0) {
     float4 Rect;                                     // x0, y0 (top), x1, y1 (bottom) in NDC
-    float4 Opt;                                      // x: 1 = decode sRGB -> linear, y: panel opacity
+    float4 Opt;                                      // x: 1 = decode sRGB -> linear, y: panel opacity, w: 1 = Corner[] (clip space)
+    float4 Corner[4];                                // phase 16: top-left, top-right, bottom-left, bottom-right (Opt.w = 1)
 };
 struct VOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
 VOut VSMain(uint id : SV_VertexID) {
     const float2 t = float2((float)(id & 1u), (float)(id >> 1));   // (0,0) (1,0) (0,1) (1,1)
     VOut o;
-    o.pos = float4(lerp(Rect.x, Rect.z, t.x), lerp(Rect.y, Rect.w, t.y), 0.0, 1.0);
+    if (Opt.w > 0.5) o.pos = Corner[id & 3u];
+    else             o.pos = float4(lerp(Rect.x, Rect.z, t.x), lerp(Rect.y, Rect.w, t.y), 0.0, 1.0);
     o.uv = t;
     return o;
 }
@@ -62,7 +66,7 @@ float4 PSMain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
 )";
 // kMenuPs-END
 
-struct CbData { float rect[4]; float opt[4]; };
+struct CbData { float rect[4]; float opt[4]; float corner[4][4]; };   // (phase 16: + the 4 clip-space corners)
 
 ComPtr<ID3D11VertexShader>      g_vs;
 ComPtr<ID3D11PixelShader>       g_ps;
@@ -93,6 +97,10 @@ bool                             g_wHave = false;
 std::vector<uint32_t>            g_wPixels;
 
 constexpr UINT kInst = 256;
+// PS SRV slots saved / restored (phase 16: was slot 0 only). The VR panel may now be drawn right before the game's own Draw
+// that READS the eye picture (the late draw point): binding that picture as our render target unbinds it from every SRV slot
+// it sits in, so every slot the game's next draw may read must come back.
+constexpr UINT kSrvSave = 16;
 constexpr UINT kMaxVp = D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
 struct Saved {
     ID3D11InputLayout*        il = nullptr;
@@ -104,7 +112,7 @@ struct Saved {
     ID3D11PixelShader*        ps = nullptr; ID3D11ClassInstance* psI[kInst] = {}; UINT psN = kInst;
     ID3D11Buffer*             vsCb0 = nullptr;
     ID3D11Buffer*             psCb0 = nullptr;
-    ID3D11ShaderResourceView* srv0 = nullptr;
+    ID3D11ShaderResourceView* srv[kSrvSave] = {};
     ID3D11SamplerState*       smp0 = nullptr;
     ID3D11RasterizerState*    rs = nullptr;
     D3D11_VIEWPORT            vp[kMaxVp] = {};
@@ -131,7 +139,7 @@ void SaveState(ID3D11DeviceContext* ctx) {
     ctx->PSGetShader(&s.ps, s.psI, &s.psN);
     ctx->VSGetConstantBuffers(0, 1, &s.vsCb0);
     ctx->PSGetConstantBuffers(0, 1, &s.psCb0);
-    ctx->PSGetShaderResources(0, 1, &s.srv0);
+    ctx->PSGetShaderResources(0, kSrvSave, s.srv);
     ctx->PSGetSamplers(0, 1, &s.smp0);
     ctx->RSGetState(&s.rs);
     s.vpN = 0;
@@ -157,7 +165,7 @@ void RestoreState(ID3D11DeviceContext* ctx) {
     ctx->PSSetShader(s.ps, s.psI, s.psN);
     ctx->VSSetConstantBuffers(0, 1, &s.vsCb0);
     ctx->PSSetConstantBuffers(0, 1, &s.psCb0);
-    ctx->PSSetShaderResources(0, 1, &s.srv0);
+    ctx->PSSetShaderResources(0, kSrvSave, s.srv);
     ctx->PSSetSamplers(0, 1, &s.smp0);
     ctx->RSSetState(s.rs);
     ctx->RSSetViewports(s.vpN, s.vpN ? s.vp : nullptr);
@@ -170,7 +178,8 @@ void RestoreState(ID3D11DeviceContext* ctx) {
     Rel(s.gs); RelInst(s.gsI, s.gsN);
     Rel(s.ps); RelInst(s.psI, s.psN);
     Rel(s.vsCb0); Rel(s.psCb0);
-    Rel(s.srv0); Rel(s.smp0);
+    for (ID3D11ShaderResourceView*& v : s.srv) Rel(v);
+    Rel(s.smp0);
     Rel(s.rs); Rel(s.bs); Rel(s.dss);
     for (ID3D11RenderTargetView*& r : s.rtv) Rel(r);
     Rel(s.dsv);
@@ -254,7 +263,8 @@ bool Ensure(ID3D11Device* dev) {
 }
 
 // ---- panel layout (reference px, scale 1) ------------------------------------------------------------------------
-// 25 rows at scale 1: 674 px = 62 % of a 1080p picture (was 21 rows x 21 px = 640 px before the 4 fps box rows).
+// 26 rows at scale 1: 693 px = 64 % of a 1080p picture (was 21 rows x 21 px = 640 px before the 4 fps box rows; phase 16:
+// + the VR facing row).
 constexpr float kTitleY = 8.0f,  kTitleH = 24.0f;
 constexpr float kPerfY  = 33.0f, kPerfLineH = 15.0f; // TuningMenu::kPerfLines lines (the GPU block)
 constexpr float kHeadY  = 82.0f, kHeadH  = 18.0f;
@@ -524,16 +534,10 @@ bool EnsureWidgetTexture(ID3D11Device* dev, ID3D11DeviceContext* ctx, const wcha
     return true;
 }
 
-// One textured quad of `srv` (w x h px, top-left at x0, y0 rounded to whole pixels) into `rtv`, every touched state saved
-// and restored (SaveState / RestoreState). The device objects must exist (Ensure).
-void DrawQuad(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
-              float w, float h, int outMode, ID3D11ShaderResourceView* srv, bool textureAlpha) {
-    const float px0 = std::floor(x0 + 0.5f), py0 = std::floor(y0 + 0.5f);   // whole pixels: 1:1 texels stay sharp
-    CbData cb{};
-    cb.rect[0] = px0 / (float)rtW * 2.0f - 1.0f;
-    cb.rect[1] = 1.0f - py0 / (float)rtH * 2.0f;
-    cb.rect[2] = (px0 + w) / (float)rtW * 2.0f - 1.0f;
-    cb.rect[3] = 1.0f - (py0 + h) / (float)rtH * 2.0f;
+// One textured quad of `srv` into `rtv` from `cb` (its rect / corners filled by the caller; the options are set here), every
+// touched state saved and restored (SaveState / RestoreState). The device objects must exist (Ensure).
+void DrawCb(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, CbData& cb, int outMode,
+            ID3D11ShaderResourceView* srv, bool textureAlpha) {
     cb.opt[0] = (float)(outMode < TuningMenu::kOutRaw ? TuningMenu::kOutRaw : (outMode > TuningMenu::kOutPq ? TuningMenu::kOutPq : outMode));
     cb.opt[1] = 0.88f;
     cb.opt[2] = textureAlpha ? 1.0f : 0.0f;                  // 1 = the fps box: alpha comes from the texture
@@ -567,6 +571,19 @@ void DrawQuad(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rt
     RestoreState(ctx);
 }
 
+// One textured quad of `srv` (w x h px, top-left at x0, y0 rounded to whole pixels) into `rtv` (DrawCb).
+void DrawQuad(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
+              float w, float h, int outMode, ID3D11ShaderResourceView* srv, bool textureAlpha) {
+    const float px0 = std::floor(x0 + 0.5f), py0 = std::floor(y0 + 0.5f);   // whole pixels: 1:1 texels stay sharp
+    CbData cb{};
+    cb.rect[0] = px0 / (float)rtW * 2.0f - 1.0f;
+    cb.rect[1] = 1.0f - py0 / (float)rtH * 2.0f;
+    cb.rect[2] = (px0 + w) / (float)rtW * 2.0f - 1.0f;
+    cb.rect[3] = 1.0f - (py0 + h) / (float)rtH * 2.0f;
+    cb.opt[3] = 0.0f;                                        // the rect
+    DrawCb(ctx, rtv, rtW, rtH, cb, outMode, srv, textureAlpha);
+}
+
 } // namespace
 
 namespace TuningMenu {
@@ -591,6 +608,25 @@ bool Draw(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, u
     if (!EnsureTexture(dev.Get(), ctx, p, buildScale)) return false;
     const float k = scale / g_texBuild;
     DrawQuad(ctx, rtv, rtW, rtH, x0, y0, (float)g_texW * k, (float)g_texH * k, outMode, g_srv.Get(), false);
+    return true;
+}
+
+bool DrawCorners(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, const float clip[4][4],
+                 float buildScale, int outMode, const Panel& p) {
+    if (!ctx || !rtv || !rtW || !rtH || !clip || !(buildScale > 0.0f)) return false;
+    for (int i = 0; i < 4; ++i) {
+        for (int k = 0; k < 4; ++k)
+            if (!std::isfinite(clip[i][k])) return false;
+        if (!(clip[i][3] > 0.0f)) return false;              // every corner in front of the eye
+    }
+    ComPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    if (!dev || !Ensure(dev.Get())) return false;
+    if (!EnsureTexture(dev.Get(), ctx, p, buildScale)) return false;
+    CbData cb{};
+    memcpy(cb.corner, clip, sizeof(cb.corner));
+    cb.opt[3] = 1.0f;                                        // the corners
+    DrawCb(ctx, rtv, rtW, rtH, cb, outMode, g_srv.Get(), false);
     return true;
 }
 

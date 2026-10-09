@@ -4,7 +4,7 @@
 // changed), uploads it into an R8G8B8A8_UNORM texture (UpdateSubresource on the game's context) and draws it as ONE
 // textured quad over the given render target (alpha = max(0.88, luminance), RGB write mask only).
 // The draw changes graphics state: it saves and restores every piece it touches (IA layout / topology, VS / HS / DS /
-// GS / PS + class instances, VS + PS constant buffer 0, PS SRV 0, PS sampler 0, RS state + viewports, blend,
+// GS / PS + class instances, VS + PS constant buffer 0, PS SRVs 0..15 (phase 16: was 0), PS sampler 0, RS state + viewports, blend,
 // depth-stencil, render targets + DSV) -- the PreviewBlit pattern plus the constant buffers and the sampler. The caller
 // sets t_inDlaa around Draw so our own Draw call passes straight through the hooks. Render thread only, one device at a
 // time: a new device drops every object of the old one (they are recreated lazily). Compiled only when WITH_DLAA=1.
@@ -60,6 +60,11 @@ enum OutMode : int {
 };
 bool  Draw(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
            float scale, float buildScale, int outMode, const Panel& p);
+// v0.10.0 phase 16: the panel as a PERSPECTIVE quad (the VR panel that faces the eye): `clip` = its 4 corners in clip space
+// (top-left, top-right, bottom-left, bottom-right; w = the corner's view depth > 0, so the texture is mapped perspective-
+// correct). Texture, states and save / restore as Draw. False = not drawn (a corner behind the eye / not finite, or as Draw).
+bool  DrawCorners(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, const float clip[4][4],
+                  float buildScale, int outMode, const Panel& p);
 void  ReleaseTargets();                              // drops the panel texture (menu closed: nothing kept but the shaders)
 // The fps box (kWidgetRefW x kWidgetRefH reference px, outlined text on nothing) with its top-left corner at (x0, y0) px:
 // line1 bold 15 px, line2 12 px (reference px), centred. Same arguments as Draw; the strings are copied into the cache key (at most 23 characters each).

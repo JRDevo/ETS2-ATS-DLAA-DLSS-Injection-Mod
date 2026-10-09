@@ -610,6 +610,50 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   area=100); `preview depth assembly GPU cost: ... | clip ON (dlaa_area 40: clear + reduce inside WxH ...)` (was 0.32-0.39 ms
   per tile pass); `preview depth assembly: ClearView supported`; `DLAA area now 20%` at the new limit.
 
+### Phase 16 (v0.10.0): VR panel drawn last, panel faces the eye
+
+- **Drawn LAST on each eye picture (the "VR late panel", block after `MenuDrawPreview`).** Phase 15 drew the panel / fps box
+  at the point the picture is finished for the MOD (world: after the eye blit + DLSS composite; menu screens: after the
+  target's flush, trigger (a) = after the verts=96 Draw). The garage / dealer screens draw the game's own menu into the eye
+  picture AFTER that, so it covered the panel where they overlap (user: flicker there). Drawing at the bind that leaves the
+  picture or at Present is NOT safe: the runtime gets its swapchain image at `xrReleaseSwapchainImage` (before `xrEndFrame`
+  and the mirror Present) and the hooks see no OpenXR call. What they do see: the game's eye picture (6120x6496, the blit /
+  preview target) is the game's own eye buffer, READ by a final `Draw(4)` into the OpenXR swapchain image
+  (CAPTURE_FINDINGS "VR frame structure" step 5). That read is the safe last point. So `MenuDrawVr` / `MenuDrawPreview` now
+  only ARM a per-eye record (`MenuLateArm`: the game's RTV of the picture); the hooks watch for a game read of it (PS SRV0 of
+  a Draw / DrawIndexed with <= 6 vertices / indices, or the source of CopyResource / CopySubresourceRegion(1)) whose target
+  is not the backbuffer and is eye-shaped (the picture's aspect +-25 %, >= 30 % of its height: the swapchain image, not a
+  landscape mirror / small effect texture; `MenuLateOnRead`), and count the game draws into the bound picture (`MenuLateOnBind`,
+  `MenuLateCountDraw`). Mode "arm point" (start): drawn at the arm point as in phase 15, the record only watches; 8 pictures
+  in a row read after the arm -> mode "late": drawn right before that read. A late record replaced by its eye's next arm
+  (within 2 Presents) without a read = a miss -> back to the arm point (3 fallbacks, forgiven after 3600 good pictures; then
+  the session stays at the arm point: a setup whose eye buffer IS the swapchain image never reads it). A record older than 2
+  Presents (screen change / pause) is "stale", not a miss. `menu.cpp` saves / restores PS SRVs 0..15 now (was 0): the late
+  draw binds the picture as RT while the game has it bound as SRV. Nothing runs while the menu is closed and the fps box is
+  off (`g_menuLateN = 0`).
+- **The panel faces the eye** (`menu_vr_face`, default 1, menu row `Panel faces you (VR)`, no key). `MenuFacingGeom`: the
+  centre direction C = (tx, ty, 1) from the flat placement (menu_vr_x / y in % of the eye from the optical centre), half size
+  = the flat panel's at the optical centre (a = pw / 2 / fx, b = ph / 2 / fy) times |C| (constant angle), turned to face the
+  eye (normal = -C / |C|, right axis horizontal, no roll), the 4 corners projected through THIS eye's projection
+  (px = u W + fx x / z, py = v H - fy y / z, fx = W / 2 |P00|, fy = H / 2 |P11|) and handed to the menu VS in clip space with
+  w = z (`TuningMenu::DrawCorners`, perspective-correct). |P00| / |P11| come from the same verdict MVPs as the optical
+  centre (`MvpScale`: |row0 - (row0.row3 / |row3|^2) row3| / |row3|, model scale cancels; median per readback, 16-sample
+  window, `g_eyeScale` world / `g_pvEyeScale` menu picture mapped through the tile layout / h), else 0.9 assumed.
+  menu_vr_depth stays the per-eye inward px shift (both eyes share the view-space quad, so the stereo depth comes only from
+  it, as before). menu_vr_x = menu_vr_y = 0 = the flat panel (drawn by the flat path, pixel-snapped). The fps box stays flat.
+- **Next VR log, look for:** `tuning menu (v0.10.0): ... menu_vr_face=1 (the VR panel turns to face the eye)`;
+  `DLAA area: eye N projection scale |P00|=... |P11|=... (view about W x H degrees)` (also `preview DLAA area: ...` on the
+  menu screens); `tuning menu: VR late panel: first eye picture recorded ...`; `tuning menu: VR late panel (learning): eye
+  N's picture is read by the game's Draw (4) into WxH fmt=F ... N game draw(s) went into it after our panel there` (the
+  destination should be the swapchain image, ~3060x3248; a draw count > 0 on the garage = the old overlap);
+  `tuning menu: VR panel / fps box now drawn LAST on every eye picture ...`; `tuning menu: VR panel / fps box drawn LAST on
+  eye N's picture: right before the game's Draw (4) reading it ...`; `tuning menu: VR late panel stats (menu closed): mode
+  late ..., missed 0 ..., game draws over the panel 0 ...` (mode late: 0 expected). With the panel moved to the side:
+  `tuning menu: VR panel faces the eye (menu_vr_face=1): eye N centre direction yaw +X deg pitch +Y deg, panel W x H deg ...
+  projection |P00|=... (measured, world eye)`. Bad signs: `VR late panel MISSED`, `back to the arm point`, `mode at the arm
+  point (stays: no reliable read)` (then no read of the picture exists in this setup: a Ctrl+F11 trace on the garage screen
+  with the menu open shows what the game does after its menu draws).
+
 ## Roadmap / history
 
 | Ver  | Goal | Key work |
