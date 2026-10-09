@@ -85,6 +85,9 @@ public:
     // v0.8.1: the device NGX is initialised on (identity, nullptr = not initialised). Log only. If a unit later asks
     // for another device while only the pre-warm pin holds NGX, NGX moves to that device (present-layer adoption).
     static void* NgxDevice();
+    // v0.10.0 phase 12: the last NGX init attempt of this process failed and none succeeded since (no NVIDIA GPU / driver,
+    // or a capture tool wrapping the device: PlatformError) -- no unit can evaluate. Any thread (relaxed atomic).
+    static bool NgxInitFailed();
     // v0.7.8 creation budget: at most one NGX feature create per Present. BeginFrame() is called once per Present
     // (after that Present's own work); CreateBudgetFree() = no feature was created since. Every CreateFeature uses
     // it; a live preset recreate waits for a free Present (the old feature keeps evaluating), and SceneDlaa defers a

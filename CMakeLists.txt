@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(ets2_ats_dlaa VERSION 0.8.2 LANGUAGES C CXX)
+project(ets2_ats_dlaa VERSION 0.10.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,9 +9,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_library(dinput8 SHARED
     src/proxy.cpp
     src/inject.cpp
+    src/ofxr.cpp      # v0.10.0: OFXR Bridge module-range pass-through (compiles with or without WITH_DLAA)
+    src/dinput_wrap.cpp   # v0.10.0: tuning menu keys hidden from the game (DirectInput keyboard wrap + window subclass)
 )
 set_target_properties(dinput8 PROPERTIES PREFIX "" OUTPUT_NAME "dinput8")
-# Single source of the version string: project(... VERSION 0.8.2) above feeds the
+# Single source of the version string: project(... VERSION 0.10.0) above feeds the
 # load-log line in src/inject.cpp through this compile definition. Bump it in project()
 # only; the doc headers are the only other place the version is written by hand.
 target_compile_definitions(dinput8 PRIVATE DLAA_INJECTOR_VERSION="${PROJECT_VERSION}")
@@ -38,7 +40,8 @@ if (MSVC)
 endif()
 
 # version: GetFileVersionInfo for the v0.7.10 startup "env:" lines (game exe / nvngx_dlss.dll file versions).
-target_link_libraries(dinput8 PRIVATE d3d11 dxgi minhook_static version)
+# dxguid: the DirectInput IIDs / GUID_SysKeyboard for the v0.10.0 keyboard wrapper (dinput_wrap.cpp).
+target_link_libraries(dinput8 PRIVATE d3d11 dxgi minhook_static version dxguid)
 
 if (MSVC)
     target_compile_options(dinput8 PRIVATE /W3 /permissive- /Zc:__cplusplus)
@@ -77,7 +80,9 @@ if (WITH_DLAA)
     # v0.7.8: shader_cache.cpp compiles every embedded shader once per process on a worker thread (no D3DCompile on
     # the render thread any more; the blocks below are still fxc-validated at build time).
     target_sources(dinput8 PRIVATE src/dlaa.cpp src/motion_vectors.cpp src/scene_dlaa.cpp src/preview_blit.cpp
-                                   src/shader_cache.cpp)
+                                   src/shader_cache.cpp src/draw_ids.cpp    # v0.10.0: draw_ids = per-draw MVs
+                                   src/gpu_perf.cpp                         # v0.10.0 phase 8: per-sub-pass GPU timers
+                                   src/menu.cpp)                            # v0.10.0 in-game tuning menu (GDI panel quad)
     target_include_directories(dinput8 PRIVATE "${NGX_SDK_DIR}/include")
     target_compile_definitions(dinput8 PRIVATE WITH_DLAA=1)
     # d3dcompiler: runtime HLSL compile for the depth + motion-vector passes (OS DLL).
@@ -117,10 +122,36 @@ if (WITH_DLAA)
             "src/scene_dlaa.cpp@kRcasShader"
             "src/preview_blit.cpp@kPvBlitVs@vs_5_0@VSMain"      # v0.7.8 profile-screen preview format-converting copy
             "src/preview_blit.cpp@kPvBlitPs@ps_5_0@PSMain"
+            "src/menu.cpp@kMenuVs@vs_5_0@VSMain"                # v0.10.0 tuning menu panel quad
+            "src/menu.cpp@kMenuPs@ps_5_0@PSMain"
             "src/scene_dlaa.cpp@kCompositeVs@vs_5_0@VSMain"     # v0.7.0 upscale composite (graphics)
             "src/scene_dlaa.cpp@kCompositePs@ps_5_0@PSMain"
             "src/motion_vectors.cpp@kSolveShader"
             "src/motion_vectors.cpp@kReprojDepthShader"
+            "src/motion_vectors.cpp@kObjShader"                 # v0.9.0 per-object MVs (gather + verdict + id R)
+            "src/motion_vectors.cpp@kObjShader@cs_5_0@CSResolve" # v0.9.0 r4 per-id representative
+            "src/motion_vectors.cpp@kObjShader@cs_5_0@CSVeto"   # v0.9.0 r4 same-frame id veto
+            "src/motion_vectors.cpp@kObjShader@cs_5_0@CSHold"   # v0.9.0 r7 per-id veto verdict / hold
+            "src/draw_ids.cpp@kDrawIdPs@ps_5_0@PSMain"          # v0.10.0 draw-id replay pixel shader
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSGather"        # v0.10.0 per-draw MVs: MVP gather
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSMatch"         # v0.10.0 nearest partner (both sides)
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSResolve"       # v0.10.0 mutual pairs -> R per draw
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSPair"          # v0.10.0 phase 3 mutual pair + R_draw
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSVote"          # v0.10.0 phase 3 consensus votes
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSPick"          # v0.10.0 phase 3 consensus camera R
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSAttach"        # v0.10.0 phase 4 forward draws on a G-buffer mover
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSInherit1"      # v0.10.0 phase 5 twin table + G-buffer mover list
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSTwin"          # v0.10.0 phase 5 unpaired draws inherit their matrix twin
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSParentList"    # v0.10.0 phase 6 unpaired draws -> vote slots
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSParentVote"    # v0.10.0 phase 6 pixel-neighbour rigid-parent vote
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSParentPick1"   # v0.10.0 phase 6 rigid parent -> R
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSParentPick2"   # v0.10.0 phase 6 parent through an unpaired neighbour
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSParentCount"   # v0.10.0 phase 6b instanced-draw pixel count (vote slots)
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSPickResolve"   # v0.10.0 phase 9 folded: pick + resolve + inherit (1 group)
+            "src/draw_ids.cpp@kDrawIdCs@cs_5_0@CSListTwin"      # v0.10.0 phase 9 folded: parent list + twin + attach (1 group)
+            "src/draw_ids.cpp@kFwdInitShader@vs_5_0@VSMain"     # v0.10.0 phase 10 forward-depth occlusion init (full-screen tri)
+            "src/draw_ids.cpp@kFwdInitShader@ps_5_0@PSInit0"    #   full resolution
+            "src/draw_ids.cpp@kFwdInitShader@ps_5_0@PSInit1"    #   1/2 resolution (min of 2x2)
             "src/inject.cpp@kPvStatsShader"                     # v0.7.8 Ctrl+F10 preview capture metrics
             "src/inject.cpp@kPvDepthAsmShader"                  # v0.7.8 tiled preview picture depth
             "src/inject.cpp@kPvEdgeFillShader")                 # v0.8.1 preview tile edge (zero-guarded fill)
@@ -138,7 +169,9 @@ if (WITH_DLAA)
             DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/scene_dlaa.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/motion_vectors.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/preview_blit.cpp"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/src/menu.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/inject.cpp"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/src/draw_ids.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/validate_shaders.cmake"
             COMMENT "Validating embedded HLSL shader blocks with fxc"
             VERBATIM)

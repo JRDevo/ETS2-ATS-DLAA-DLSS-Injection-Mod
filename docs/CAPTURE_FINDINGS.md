@@ -68,6 +68,77 @@ medoid over up to 8 matched draws rejects moving objects. See `docs/DLAA_INTEGRA
 section) and `src/motion_vectors.cpp`. Status: built and checked on synthetic matrices; needs an
 in-game test (log lines `MV:` incl. the `CB-copy check`).
 
+## v0.9.0 stencil audit (per-object motion vectors)
+
+Script: `scripts/rdc_stencil_audit.py` (RenderDoc python, `qrenderdoc.exe --python`; pure structured-chunk scan +
+a small replay check). Flat capture `ets2_flat_frame1969.rdc`, scene depth 2880x2160 `D32_FLOAT_S8X24_UINT`.
+
+| Pass on the scene depth | Draws | Depth-stencil state(s) |
+|---|---|---|
+| clear | — | `ClearDepthStencilView` flags DEPTH \| STENCIL, depth 0, stencil 0 (every frame) |
+| G-buffer (4 RTVs) | 643 DrawIndexed + 99 DrawIndexedInstanced | all one state: depth GREATER write ALL, **stencil on, write mask 0x0F, REPLACE, func ALWAYS**; ref 1 (738 draws) / ref 2 (4 draws, far objects 300-1000 m) |
+| lighting (2 RTVs) | 9 | depth off, **stencil test NOT_EQUAL 0, read mask 0x0F**, KEEP |
+| forward (1 RTV RGBA16F) | 190 | 188 depth-test only (stencil off); 1 draw stencil EQUAL 1, 1 draw NOT_EQUAL 0, both **read mask 0x0F**, KEEP |
+
+- No shader resource view of the scene depth exists (no stencil SRV anywhere), no copy of it, one DiscardView at
+  the end. **The game never reads or writes the upper stencil nibble** → 15 free object ids.
+- G-buffer DrawIndexed: 643 = 566 world + 77 cabin layer; 623 distinct geometry keys, 9 keys drawn more than once
+  (29 draws, max 5); with the MVP translation added 25 distinct (some meshes are drawn twice at the same place).
+  World object-origin view depth |MVP[3][3]| percentiles 5/25/50/75/95 = 8.7 / 84 / 232 / 590 / 981 m; 26 world
+  draws closer than 8 m (own truck).
+- VS cbuffer slot 0 = one 2 MB dynamic cbuffer, **Map WRITE_DISCARD once per frame before the first draw**, every
+  VS / PS constant of the frame lives there (window sizes 16 / 32 / 48 constants). Rows 4..7 = MVP verified by
+  replay on 10 draws (`|SV_Position - MVP * POSITION| / w < 2e-7`, POSITION float3 and half4). The 2 sampled
+  DrawIndexedInstanced draws do NOT use rows 4..7 as their MVP (per-instance transforms in VB slot 1).
+- A single-frame capture cannot say which draws move on their own; that verdict is made at run time (two frames).
+
+## v0.10.0 draw-id audit (per-draw motion vectors: can the G-buffer draws be replayed?)
+
+Script: `scripts/rdc_drawid_audit.py` (RenderDoc python; structured-chunk scan + shader reflection per distinct VS /
+PS), output `captures/ets2_flat_frame1969.drawid_audit.txt`. Same flat capture.
+
+- One G-buffer bind segment: 742 draws = 643 `DrawIndexed` (566 world + 77 cabin) + 99 `DrawIndexedInstanced` (world).
+- VS constant buffers: only slot 0 is bound and declared (all 26 G-buffer VSs reflect one cbuffer), always through
+  `VSSetConstantBuffers1`, always the one 2 MB dynamic ring (windows of 16 / 32 / 48 constants). VS SRVs: t3
+  (`R32G32B32A32_FLOAT` buffer, read by the 5 skinned VSs: bone matrices) and t1 (`R8G8B8A8_UINT` buffer, the instanced
+  draws). No VS samplers.
+- **No Map / UpdateSubresource / copy touches any buffer the G-buffer draws read while the pass runs**; the ring and the
+  bone buffer are WRITE_DISCARDed once each earlier in the frame. An end-of-pass replay sees the draw-time inputs.
+- No GS / HS / DS / stream-out; all TRIANGLELIST; 52 input layouts, 26 VS, 41 PS. No G-buffer PS outputs SV_Depth or
+  SV_Coverage.
+- Rasterizer: CULL_BACK (644 draws) / CULL_NONE (98), both depth clip on, **scissor enabled**, no depth bias.
+- Depth-stencil: one state for all 742 draws (depth GREATER, write ALL, stencil REPLACE write mask 0x0F, ref 1 / 2).
+- One viewport per draw, full size: world `[0.01, 0.9]` (665), cabin `[0.9, 1.0]` (77).
+- `DrawIndexedInstanced`: index counts 6..774 (mostly 6-57), 1..55 instances, per-instance data in VB slot 1
+  (TEXCOORD4..6): vegetation / small props.
+- Scene depth: typed `D32_FLOAT_S8X24_UINT`, `BIND_DEPTH_STENCIL` only, no MSAA; a read-only DSV
+  (`READ_ONLY_DEPTH | READ_ONLY_STENCIL`) on it is legal. The G-buffer ends at chunk 15684, the scene depth's
+  DiscardView is at 16800 (after the forward pass): intact at the G-buffer leave.
+
+## v0.9.0 r5 forward-pass depth audit (wire trails in DLSS mode)
+
+Script: `scripts/rdc_forward_depthwrite_audit.py` (RenderDoc python). Same flat capture `ets2_flat_frame1969.rdc`
+(parking lot, chain-link fences, no overhead rail wires in this frame; distant power cables at 350-900 m).
+
+- Scene-depth timeline: clear → G-buffer (742 draws) → lighting (9) → **forward (190)** → one DiscardView of the
+  scene depth (the injector's flat snapshot point, after the forward pass).
+- Forward draws (1 RTV RGBA16F + scene DSV, all `DrawIndexed` except 2 `Draw`): **188 test depth and write none**,
+  2 three-vertex `Draw`s write depth with the test off. World layer by blend: 111 "over" (108 `SRC_ALPHA /
+  INV_SRC_ALPHA` + 3 premultiplied), 31 additive (`DestBlend ONE`), 8 multiplicative (`DEST_COLOR / ZERO`), 4 blending
+  off; the rest is cabin layer (29) or sky layer (5). 20 distinct pixel shaders; one of them (111 draws, all
+  layers) is the generic blended material: fences, lane paint, cables.
+- Thin draws (post-VS screen boxes: span > 15 % of the width, < 5 % of the box covered): 13, all depth-write-off, 12
+  over-blended -- fence rails at 13-73 m, cables at 350-920 m, cabin details (1 additive, cabin). These are the draws whose pixels keep the
+  depth BEHIND them (sky = 0) in the snapshot.
+- Over-blended draws that would wrongly own depth if re-drawn without a layer rule: the cloud dome (premultiplied
+  over, 2574 indices, 0.2-34 m) and the sun quad (4.5 m) -- both drawn in the sky viewport `[0, 0.009]`, so the
+  world-layer rule skips them (and their depth would land in the sky layer anyway).
+- In the audited frame the r5 rule (depth test without write, `DestBlend INV_SRC_ALPHA`, world layer) selects 111
+  draws; their visible pixels (before / after diff of each draw, 105 measured) are the fence tops and the lane paint, 0.6 % of
+  the screen.
+- No `OMSetRenderTargetsAndUnorderedAccessViews` anywhere in the frame (the re-draw's `OMSetRenderTargets` cannot drop
+  game UAVs).
+
 ## VR frame structure (F11 trace, ETS2 `-openxr`, Virtual Desktop, v0.4.3)
 
 Per eye scene size = 4592x6496. Per Present frame, for eye 0 then eye 1, in order:

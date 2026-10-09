@@ -21,6 +21,13 @@
 // before; R16G16B16A16_FLOAT (the game's HDR pipeline, Windows HDR on) = an "HDR unit": colorIn / m_out / m_sharp are
 // RGBA16F, NGX gets IsHDR (unless dlaa.ini dlss_hdr = 0), RCAS sharpens a reversibly compressed value (no 0..1
 // clamp). A change of that state rebuilds the unit (textures + NGX feature) at its next Run, like a size change.
+// v0.10.0 phase 7: TWO COLOUR SETS. A change of ONLY that state (same sizes, no upscaling) no longer rebuilds: the colour
+// textures + NGX feature of the other kind are PARKED (m_park) with their history and swapped back in when Run is handed
+// that kind again (eye 0 in flat DLAA mode: the pre-tonemap HDR unit at the scene depth discard / forward leave and the
+// post-tonemap LDR unit at the blit). Depth, motion vectors and the CameraMv state are shared by both sets (they belong to the
+// pass, not to the colour format) and are NOT invalidated by a swap. Only a size / area / upscale change rebuilds (both sets
+// go). Warm() evaluates the parked set on the same pass's MV / depth without touching the game's texture (a coming stage
+// switch then needs no history reset); KindIdleRuns() tells the caller how stale a set's history is.
 #pragma once
 #ifdef WITH_DLAA
 
@@ -35,13 +42,73 @@
 struct DepthTwin {
     Microsoft::WRL::ComPtr<ID3D11Texture2D>          tex;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;   // R32_FLOAT_X8X24_TYPELESS
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> stencilSrv;   // v0.9.0: X32_TYPELESS_G8X24_UINT (stencil object ids)
     uint32_t w = 0, h = 0;
     bool     valid = false;                                 // holds a snapshot not yet consumed
     // Copies `depth` (the live scene depth) into the twin NOW (before the game clears / discards it).
     // v0.5.6: `timing` = wrap the copy in a GPU timestamp pair (shared ring, non-blocking readback), logged
     // as "depth snapshot GPU cost" every 600 timed snapshots.
     bool Snapshot(ID3D11DeviceContext* ctx, ID3D11Texture2D* depth, bool timing = false);
-    void Shutdown() { srv.Reset(); tex.Reset(); w = h = 0; valid = false; }
+    void Shutdown() { stencilSrv.Reset(); srv.Reset(); tex.Reset(); w = h = 0; valid = false; }
+
+    // ---- v0.9.0 r5 FORWARD DEPTH of the same pass (inject.cpp FwdDepth*): the forward pass's alpha-blended draws write no
+    // scene depth (RenderDoc: 188 of 190 forward draws), so the twin holds the depth BEHIND them (the sky behind a wire).
+    // inject.cpp re-draws the qualifying ones into fwdDsv (depth write on, alpha-to-coverage, colour write mask 0) and
+    // SceneDlaa::Run hands fwdSrv to pass B, which uses max(twin, forward). Own size / lifetime (Shutdown above keeps it).
+    Microsoft::WRL::ComPtr<ID3D11Texture2D>          fwdTex;   // R32_TYPELESS at the scene depth's size (single-sample only)
+    Microsoft::WRL::ComPtr<ID3D11DepthStencilView>   fwdDsv;   // D32_FLOAT
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> fwdSrv;   // R32_FLOAT
+    uint32_t fwdW = 0, fwdH = 0;
+    bool     fwdValid = false;      // cleared + written during this pass's forward phase, not yet consumed by Run
+    uint32_t fwdDraws = 0;          // re-drawn draws of this pass (stats)
+    // v0.10.0 phase 9 (dlaa.ini mv_fwd_depth_res 2): the forward targets at 1/2^fwdShift of the scene in x and y (fwdW x fwdH =
+    // the rounded-up size); the forward re-draw / replay scale their viewport (DrawIdRecord::ScaleViewport) and pass B / the vote
+    // read pixel >> fwdShift. With fwdShift 1 the forward ids have their OWN R16_UINT target of that size (fwdIdTex: an RTV
+    // must match the DSV's size, so they cannot live in the GREEN channel of the full-size id target) and the re-draw binds a
+    // same-size R8_UNORM dummy RT0 (fwdDummy: alpha-to-coverage reads the pixel shader's output 0, as with the game's RT0 at
+    // full resolution; colour writes stay off).
+    uint32_t fwdShift = 0;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D>          fwdIdTex;    // R16_UINT (fwdShift 1 only)
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView>   fwdIdRtv;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> fwdIdSrv;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D>          fwdDummyTex; // R8_UNORM (phase 10: at every resolution -- the batched
+                                                                  // re-draw at the pass end binds it as RT0)
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView>   fwdDummyRtv;
+    // Creates the forward-depth target for a w x h scene at 1/2^shift (no-op when it exists at that size). false = unusable.
+    bool EnsureFwd(ID3D11Device* dev, uint32_t w, uint32_t h, uint32_t shift = 0);
+    void FwdShutdown() {
+        fwdSrv.Reset(); fwdDsv.Reset(); fwdTex.Reset(); fwdW = fwdH = 0; fwdValid = false; fwdDraws = 0;
+        fwdShift = 0; fwdIdSrv.Reset(); fwdIdRtv.Reset(); fwdIdTex.Reset(); fwdDummyRtv.Reset(); fwdDummyTex.Reset();
+    }
+
+    // ---- v0.10.0 DRAW-ID target of the same pass (mv_objects = 2): R16_UINT at the scene depth's size, cleared and written
+    // by the G-buffer replay (DrawIdRecord::Replay, depth EQUAL against the scene depth); SceneDlaa::Run hands idSrv to
+    // CameraMv's pass B. Own size / lifetime (Shutdown above keeps it).
+    Microsoft::WRL::ComPtr<ID3D11Texture2D>          idTex;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView>   idRtv;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> idSrv;
+    uint32_t idW = 0, idH = 0;
+    bool     idValid = false;       // every replay of this pass ran (the ids are complete), not yet consumed by Run
+    // v0.10.0 phase 3: R16G16_UINT while forward ids are live (RED = G-buffer id, GREEN = forward id, written by the forward
+    // replay against fwdDsv); fwdIdValid = the forward replay of this pass ran completely (consumed by Run).
+    bool     idTwoCh = false;
+    bool     fwdIdValid = false;
+    // Creates the draw-id target for a w x h scene (no-op when it exists at that size and channel count). false = unusable.
+    bool EnsureIds(ID3D11Device* dev, uint32_t w, uint32_t h, bool twoCh = false);
+    void IdsShutdown() {
+        idSrv.Reset(); idRtv.Reset(); idTex.Reset(); idW = idH = 0; idValid = false; idTwoCh = false; fwdIdValid = false;
+    }
+
+    // ---- v0.10.0 phase 8 SLOT POOL (inject.cpp, dlaa.ini mv_slot_pool): a pass slot's three big textures (the depth twin, the
+    // forward depth, the draw-id target: 239 + 119 + 119 MB per slot at 4592x6496 in VR) are only needed from the pass's first
+    // use until its blit consumed it. ReleaseToPool (after the blit) moves them into a process-wide pool; Snapshot / EnsureFwd /
+    // EnsureIds take a matching set back before creating one. Alive sets = the passes really in flight (flat 1-2, VR 2-3)
+    // instead of one per FIFO slot (4). Pool entries of another size (a resolution change) are dropped when looked at.
+    bool pooled = false;                        // a pass slot's twin (inject.cpp sets it): takes from / gives back to the pool
+    void ReleaseToPool();
+    struct PoolStats { int depthAlive, fwdAlive, idAlive, depthPooled, fwdPooled, idPooled; double mbAlive; uint64_t created, reused; };
+    static PoolStats GetPoolStats();
+    static void PoolShutdown();                 // device change: every pooled texture is released
 };
 
 class SceneDlaa {
@@ -66,10 +133,15 @@ public:
     // v0.7.0 (outW, outH): full OUTPUT size (the game's blit viewport in the eye RT / backbuffer). Non-zero AND
     // >= the tonemap in both axes AND larger in one = DLSS upscaling: no copy-back; on success the result
     // waits for Composite() (CompositePending()). 0/0 = DLAA in place (v0.6.5 path).
+    // v0.10.0 `didRec` (mv_objects = 2): the pass's draw record; its draw ids come from depthTwin->idSrv when the pass's own
+    // snapshot is used and depthTwin->idValid (consumed like the snapshot). Never together with `objs`.
+    // v0.10.0 phase 3 `didFwdRec`: the pass's forward draw record -- used only with the draw ids, the pass's forward depth,
+    // a two-channel id target and depthTwin->fwdIdValid (consumed like the snapshot).
     bool Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Texture2D* sceneDepth,
              DepthTwin* depthTwin, const CandidateRecord* cand,
              float jitterX, float jitterY, bool reset, bool useMv, bool mvDebug = false, bool candBad = false,
-             uint32_t outW = 0, uint32_t outH = 0);
+             uint32_t outW = 0, uint32_t outH = 0, const ObjRecord* objs = nullptr,
+             const DrawIdRecord* didRec = nullptr, const DrawIdRecord* didFwdRec = nullptr);
 
     // v0.7.0 upscale composite. Call right AFTER the game's blit Draw, with that Draw's OM binding still in
     // place (RT0 = the eye RT / backbuffer). Draws the DLSS result into RT0 at (vpX, vpY) + the output rect
@@ -83,7 +155,8 @@ public:
     bool Composite(ID3D11DeviceContext* ctx, uint32_t vpX, uint32_t vpY, bool srgbDecode);
     void CancelComposite(ID3D11DeviceContext* ctx);   // pending result dropped (RT changed): timing slot closed
     bool Upscaling() const { return m_up; }           // v0.7.0: the last Ensure built the upscale path
-    bool InitFailed() const { return m_failed; }      // v0.7.0: the last Ensure failed (no retry at these dims)
+    bool InitFailed() const { return m_failed || m_altFailed; }   // v0.7.0: the last Ensure failed (no retry at these dims)
+                                                       // v0.10.0 phase 7: or the other colour set could not be built
     bool FeatureReady() const { return m_dlaa.IsReady(); } // v0.7.10: the NGX feature exists (DLAA/DLSS set up) -- log triage only
     // v0.8.0: the last Ensure built an HDR unit (RGBA16F colour textures; the tonemap handed to Run was RGBA16F).
     bool IsHdr() const { return m_hdr; }
@@ -120,7 +193,23 @@ public:
     // Upscale: output-rect-sized, what Composite() draws. Null before the first success.
     ID3D11Texture2D* ResultTex() const { return m_result; }
 
-    void SetEye(int e) { m_eye = e; m_dlaa.SetEye(e); }
+    void SetEye(int e) { m_eye = e; m_dlaa.SetEye(e); m_park.dlaa.SetEye(e); m_cam.SetObjFeed(e == 0); }   // v0.9.0: eye 0 feeds the object id table
+
+    // ---- v0.10.0 phase 7: two colour sets (see the header comment) ----
+    // Evaluations (Run or Warm) of this unit since the set of colour kind `hdr` last evaluated (0 = it was the last one);
+    // UINT64_MAX = no set of that kind exists. The caller resets a set whose history is stale before it takes over.
+    uint64_t KindIdleRuns(bool hdr) const;
+    bool KindReady(bool hdr) const { return (m_ready && m_hdr == hdr) || (m_park.valid && m_park.hdr == hdr); }
+    // Evaluates the PARKED set of `colour`'s kind (built here first if it does not exist yet: one NGX create, budgeted) on
+    // the motion vectors / depth / jitter of the LAST successful Run of this unit -- call it right after that Run, for the
+    // same pass. `colour` is only read (copy-in); no sharpen, nothing written back. false = not done (the active set is that
+    // kind, no Run to borrow from, upscaling, size mismatch, build deferred / failed, evaluate failed).
+    bool Warm(ID3D11DeviceContext* ctx, ID3D11Texture2D* colour, float jitterX, float jitterY);
+    uint64_t SetSwaps() const { return m_swaps; }      // parked <-> active swaps (no rebuild)
+    uint64_t SetBuilds() const { return m_setBuilds; } // colour-set builds that kept the other set alive
+    uint64_t Warms() const { return m_warms; }         // successful Warm evaluations
+    bool ParkedValid() const { return m_park.valid; }
+    bool ParkedHdr() const { return m_park.hdr; }
     // GPU timing (timestamp queries around Run, read back a few frames later, logged every 600 frames).
     // v0.5.6: one timestamp per stage boundary (copy-in / depth / mv / ngx / sharpen / copy-back).
     void SetTiming(bool on) { m_timing = on; }
@@ -148,16 +237,23 @@ public:
     // v0.8.1: per instance -- true = this unit runs as if the sharpness were 0 (preview units with dlaa.ini
     // preview_sharpen = 0; the RCAS pass is then skipped exactly like at sharpness 0). Default false.
     void SetNoSharpen(bool on) { m_noSharpen = on; }
-    // v0.6.4 DLAA area: percentage 40..100 of width AND height (pixel count ~ area^2; 100 = whole image = the
-    // v0.6.3 path). dlaa.ini dlaa_area + live Shift/Ctrl+Home; a change recreates each eye's crop textures and
+    // v0.6.4 DLAA area: percentage kAreaMin..100 of width AND height (pixel count ~ area^2; 100 = whole image = the
+    // v0.6.3 path). dlaa.ini dlaa_area + live Shift+F5 / F6; a change recreates each eye's crop textures and
     // NGX feature at its next Run (history reset). Feather = border blend width in px (0..512, dlaa.ini only).
-    static void SetArea(int a) { s_area = a < 40 ? 40 : (a > 100 ? 100 : a); }
+    // v0.10.0 phase 15: the lower limit is 20 (was 40): 20 % of a 4592x6496 eye = 920x1296, of a 6120x6496 menu eye =
+    // 1224x1296 -- far above NGX's minimum input and above 2 x the 96 px feather.
+    static constexpr int kAreaMin = 20;
+    static void SetArea(int a) { s_area = a < kAreaMin ? kAreaMin : (a > 100 ? 100 : a); }
     static int  Area() { return s_area; }
     static void SetFeather(int f) { s_feather = f < 0 ? 0 : (f > 512 ? 512 : f); }
     static int  Feather() { return s_feather; }
     // Crop size for a full image W x H at `area` %: each axis round(full * area / 100) to a multiple of 8
     // (at least 8), clamped to the full size; area >= 100 = full size.
     static void CropSize(uint32_t fullW, uint32_t fullH, int area, uint32_t* cw, uint32_t* ch);
+    // v0.10.0 phase 9: the rect Run will use for a full image W x H at `area` % centred on (cu, cv) -- CropSize + the same origin
+    // rule (inject.cpp clips the per-pixel work of a pass to it before the pass's blit knows its eye)
+    static void CropRect(uint32_t fullW, uint32_t fullH, int area, float cu, float cv, uint32_t* x, uint32_t* y, uint32_t* w,
+                         uint32_t* h);
     // v0.6.4: this eye's optical centre in uv (0..1, y down), used to centre the rect. Default (0.5, 0.5) until
     // the caller has one (flat: always 0.5, 0.5). The caller only changes it on a re-adopt (> 0.01 move); a
     // resulting rect-origin change resets this eye's DLSS history at the next Run.
@@ -207,6 +303,11 @@ private:
     // v0.8.0: hdr = build RGBA16F colour textures + an IsHDR feature (part of the "same unit" test).
     bool Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32_t cw, uint32_t ch, uint32_t rx, uint32_t ry,
                 uint32_t outFullW, uint32_t outFullH, uint32_t ow, uint32_t oh, bool hdr);
+    // v0.10.0 phase 7: the colour-kind part of Ensure (colorIn / m_out / m_sharp + the NGX feature) for the CURRENT sizes into
+    // the active slots; logs like Ensure. false = failed (the caller tidies up).
+    bool BuildColourSet(ID3D11Device* dev, bool hdr, bool keepsOther);
+    void SwapParked();                                 // active colour set <-> m_park (sizes, depth, MV, CameraMv stay)
+    void ShutdownParked();                             // releases the parked set (size change / Shutdown)
     bool EnsureComposite(ID3D11Device* dev);               // v0.7.0: VS + PS + states + param buffer
     bool EnsureOwnTwin(ID3D11Device* dev);
     void GpuPoll(ID3D11DeviceContext* ctx);
@@ -224,6 +325,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Buffer>              m_depthCb;      // v0.6.4: b0 = rect origin (uint2 + pad), DYNAMIC
     uint32_t                                          m_depthCbX = 0, m_depthCbY = 0;   // origin last written into m_depthCb
     Microsoft::WRL::ComPtr<ID3D11ComputeShader>       m_mvDbgCs;      // MV debug view
+    ID3D11ShaderResourceView*                         m_fwdSrvRun = nullptr;   // v0.9.0 r5: this Run's forward depth (no ref)
     bool                                              m_mvDbgTried = false;
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D>           m_colorIn;      // R8G8B8A8_UNORM, SRV
@@ -231,6 +333,7 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D>           m_depthTwin;    // R32G8X24_TYPELESS, SRV
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>  m_depthTwinSrv; // R32_FLOAT_X8X24_TYPELESS
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>  m_depthTwinStencilSrv;   // v0.9.0: X32_TYPELESS_G8X24_UINT
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D>           m_depthR32;     // R32_FLOAT, SRV+UAV -> NGX
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>  m_depthR32Srv;
@@ -263,7 +366,7 @@ private:
     bool                                              m_noSharpen = false;   // v0.8.1 SetNoSharpen (sharpness treated as 0)
     static float                                      s_sharpness;
     static float                                      s_sharpRadius;  // v0.5.8: RCAS ring-tap radius in texels (1..4)
-    static int                                        s_area;         // v0.6.4 dlaa_area (40..100)
+    static int                                        s_area;         // v0.6.4 dlaa_area (kAreaMin..100; phase 15: 20..100)
     static int                                        s_feather;      // v0.6.4 dlaa_area_feather (0..512 px)
     static bool                                       s_hdrLinear;    // v0.8.0 dlaa.ini dlss_hdr (IsHDR for HDR units)
 
@@ -322,6 +425,31 @@ private:
     bool     m_failed = false;     // init failed for these dims; no retry until dims change
     bool     m_deferred = false;   // v0.7.8: the last Run waited (shader warm-up / creation budget), see Deferred()
     bool     m_lastMvDone = false, m_lastReset = false, m_lastSharpened = false;   // v0.7.8 capture info of the last Run
+
+    // ---- v0.10.0 phase 7: the parked colour set (the other kind, same sizes; see the header comment) ----
+    struct ColourSet {
+        DlaaProcessor dlaa;                            // its own NGX feature (own history)
+        Microsoft::WRL::ComPtr<ID3D11Texture2D>           colorIn;
+        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>  colorInSrv;
+        Microsoft::WRL::ComPtr<ID3D11Texture2D>           out;
+        Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> outUav;
+        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>  outSrv;
+        Microsoft::WRL::ComPtr<ID3D11Texture2D>           sharp;
+        Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> sharpUav;
+        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>  sharpSrv;
+        bool     sharpRes = false;
+        bool     hdr = false;
+        bool     valid = false;                        // built (textures + feature) for the unit's current sizes
+        bool     resetPending = false;                 // its next evaluate drops history (fresh build / rect move)
+        uint64_t lastRun = 0;                          // m_runSerial of its last evaluation
+    };
+    ColourSet m_park;
+    uint64_t  m_runSerial = 0;                         // evaluations of this unit (Run + Warm)
+    uint64_t  m_lastRunSerial = 0;                     // m_runSerial of the ACTIVE set's last evaluation
+    bool      m_parkFailed[2] = { false, false };      // building that kind as the other set failed at these sizes (no retry)
+    bool      m_altFailed = false;                     // the last Run asked for a kind whose set could not be built
+    bool      m_warmable = false;                      // m_depthR32 / m_mv hold the last successful Run's pass (Warm may borrow)
+    uint64_t  m_swaps = 0, m_setBuilds = 0, m_warms = 0;
     uint64_t m_frames = 0;
     uint64_t m_evalFails = 0;
 };

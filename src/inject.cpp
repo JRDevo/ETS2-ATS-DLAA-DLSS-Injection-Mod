@@ -1,3 +1,238 @@
+// v0.10.0 -- (1) PER-DRAW MOTION VECTORS (dlaa.ini mv_objects = 2, default): every world G-buffer draw is recorded and
+//           replayed into a draw-id target (depth EQUAL), paired with the previous pass on the GPU and moving draws get
+//           R = MVP_prev * inverse(MVP_cur); see the "PER-DRAW MOTION VECTORS" block above hkDrawIndexed.
+//           (2) MIRROR UNITS (dlaa.ini mirror_dlaa = 1, default; mirror_min_px, mirror_max_views): the truck / car mirror
+//           views (each a small 4-RTV G-buffer + lighting + forward render with its own depth, before the main scene) were
+//           left alone since v0.8.2; each now gets its own DLAA unit (own jitter, draw-id replay on ITS depth, depth
+//           snapshot + SceneDlaa::Run in place on its RGBA16F colour at its DiscardView); see the "MIRROR UNITS" block.
+//           (3) live A/B keys key_mv_drawids Alt+F5 (mv_objects 2 <-> 0) and key_mirror_dlaa Alt+F6; Shift+F12 saves both.
+//           Logs: "mirror view detected", "first mirror DLAA evaluate OK", "mirror DLAA: ACTIVE", "mirror units @blit".
+//           (4) phase 3: CONSENSUS CAMERA R (dlaa.ini mv_camr_consensus = 1, default): the camera R of each layer is the
+//           largest cluster of agreeing per-draw R's (DrawIdMv CSPair / CSVote / CSPick, written into the solve buffer), the
+//           medoid of the sampled candidates only the fallback (it picked moving vehicles in game -> 1-2 px smear on grass,
+//           wires, sky). FORWARD-PASS DRAW IDS: the forward draws re-drawn into the forward depth are also recorded
+//           (g_didFwdRing) and replayed against the forward depth into the GREEN channel of an R16G16_UINT draw-id target
+//           (plates, decals, glass, wires get their own R). Ctrl+F6 mode-2 colours: movers magenta, static flat, forward
+//           ids yellow-tinted. Logs: "MV camera R: consensus", "MV draw-ids: first FORWARD replay", "MV forward draw n/20",
+//           camR / forward fields in "MV draw-ids @blit".
+//           (5) phase 4: ATTACH (dlaa.ini mv_fwd_attach_m, default 0.5 m): a forward draw (plate, decal) whose origin lies on
+//           a G-buffer mover's origin takes the mover's R (DrawIdMv CSAttach), and pass B gives a forward PIXEL that sits on
+//           a G-buffer mover's surface the mover's R (in game a bus plate's own pair carried no motion: pale in Ctrl+F6,
+//           jagged on screen); Ctrl+F6 shows such pixels magenta with an ORANGE tint. DUMP key key_mv_dump (Alt+F8): the
+//           per-draw state of the next frame's forward draws + small G-buffer draws ("MV dump n/N" lines). DLAA BEFORE THE
+//           TONEMAP (dlaa.ini dlaa_pre_tonemap, default 1; key_pre_tonemap Alt+F7): in flat DLAA mode the main scene's
+//           DLAA runs IN PLACE on the RGBA16F forward colour at the scene depth discard (an HDR unit, NGX IsHDR +
+//           AutoExposure, RCAS in HDR) like the mirror units, so the game's bloom / tonemap / UI see the anti-aliased
+//           picture; the blit-time DLAA (LDR) stays for DLSS upscaling, VR, HDR output and every frame the HDR path cannot
+//           take (logged: "DLAA stage: pre-tonemap ..." / "DLAA stage: post-tonemap (blit) -- why").
+//           (6) phase 5: MATRIX TWINS (dlaa.ini mv_drawid_twin, default 1): in game the plates on moving trucks were
+//           recorded draws that stayed UNPAIRED every frame (their keys are new each frame) -> camera R, white in Ctrl+F6,
+//           jagged. Now every draw left unpaired whose MVP is bit-identical to a draw paired by its own pair takes that
+//           draw's R and state (DrawIdMv CSInherit1 / CSTwin, GPU, same frame); a G-buffer draw still unpaired takes a
+//           G-buffer mover's R when its origin lies within mv_fwd_attach_m of the mover's and it shares the mover's
+//           orientation (CSAttach). Ctrl+F6: CYAN tint = took its twin's R, ORANGE = took a mover's R by origin. Alt+F8
+//           dumps also list every unpaired / inherited draw ("twin -> id X") and one pass of forward draws that get no
+//           forward depth / id ("MV dump fwd-skip" lines + state combinations). Stats: "twin:" field of "MV draw-ids @blit".
+//           (7) phase 6: RIGID PARENTS (dlaa.ini mv_drawid_parent, default 1): the plates still unpaired after phase 5 carry the
+//           bare PROJECTION in cb0 rows 4..7 (their vertices are written in view space every frame), so no matrix can name
+//           their vehicle. R of a node rigidly fixed on a body = the body's R exactly, so each unpaired draw takes the R and
+//           state of the draw it SITS ON, found by a GPU vote of its neighbouring pixels in the draw-id target (same depth
+//           within 2 %, a draw paired by its own pair, >= 32 votes and >= 60 %; through an unpaired neighbour for plate text
+//           on an unpaired plate) -- DrawIdMv CSParentList / CSParentVote / CSParentPick1 / CSParentPick2. Ctrl+F6: GREEN tint.
+//           Alt+F8: "parent -> id P" on the unpaired lines. Stats: "parent:" field of "MV draw-ids @blit".
+//           Phase 6c: MARCHING VOTE -- each sampled pixel of an unpaired / instanced draw marches up to 32 px in 8 directions
+//           across its own patch (its own pixels, motionless draws at its depth: plate background / text) to the first draw
+//           that HAS a motion; >= 8 votes and >= 50 % (depth within 4 %), a 2nd pass through listed neighbours that found one.
+//           (8) phase 7: THE PRE-TONEMAP STAGE NO LONGER FLIPS. In game the stage flipped per frame (18 + 19 times in 7 min,
+//           "the forward colour is not bound at the scene depth discard") and every flip rebuilt eye 0's NGX unit (history
+//           reset = whole-screen pulse). Now (a) each pass decides ONCE, at the first of its scene depth discard and its FORWARD
+//           LEAVE (the game binds other targets while the main forward binding is current: the forward colour is final and
+//           unread there; replays + depth snapshot run first) -- PreTonemapPoint / FwdOnLeave / FwdOnBind; (b) the preferred
+//           stage changes only after 60 passes in a row of the other condition (dlaa_stage.h DlaaStage; mode reasons such as
+//           Ctrl+F6 / DLSS / DLAA off switch at once); a single pass that cannot run before the tonemap uses the blit unit;
+//           (c) SceneDlaa keeps BOTH colour sets (HDR + LDR, own NGX features, own histories) -- a kind change swaps instead
+//           of rebuilding, and a coming post -> pre switch warms the HDR unit on the last 8 passes (SceneDlaa::Warm) so the
+//           switch costs no history reset. Logs: "DLAA stage:" lines once per switch, "stage switches N (auto A)" in the
+//           FIFO stats tag, "DLAA stage: WARNING ... automatic stage switches", "left its forward binding BEFORE the scene
+//           depth discard" (diagnosis, first 8).
+// v0.9.0 -- SHARPER TEXTURE TEXT: TEXTURE LOD BIAS. DLAA / DLSS remove shimmer, so the game can sample sharper texture
+//           mips (road signs, dashboard, GPS, decals); the game itself applies no negative bias. New PSSetSamplers hook
+//           (vtable 10): while the OM binding is a world scene pass (g_jitterPass: G-buffer + forward on the scene depth)
+//           or a menu / truck-preview pass (g_previewPass) and the jitter is live, every game sampler is replaced by a
+//           cached TWIN (MipLODBias = original + bias, optionally MaxAnisotropy raised / trilinear -> anisotropic).
+//           State leaks across passes are handled at the OM bind (LodOnBind): ENTER re-reads PS slots 0..15 and binds
+//           their twins, LEAVE puts the game's own samplers back, so shadow / mirror / lighting / post / UI passes never
+//           see a twin and the engine's state cache stays true. Never biased: comparison, min/max reduction, full point
+//           and single-mip (MaxLOD <= 0 / <= MinLOD) samplers. Twin cache = static open-addressing pointer hash (refs held
+//           on the game's samplers, reverse entries for twins), flushed only while no twin is bound (bias change, game
+//           context change, feature off). New dlaa.ini tex_lod_bias (-3..+1, default 0 = off), tex_lod_bias_auto (+
+//           log2(render width / output width) while DLSS upscales; new g_upRenderOverOutX at the blit), tex_aniso (0 /
+//           2..16); keys key_lod_bias_down Ctrl+F1 / key_lod_bias_up Ctrl+F2 (0.25 steps within -3..0, one beep, pitch
+//           rises with sharpness, low beep at a limit); the save key also writes tex_lod_bias. Logs: a "texture LOD bias"
+//           config line, one line per key change / auto-term change, one at the first twin, and " lod=... twins=...
+//           subst/frame=... enters/frame=..." in the FIFO stats tag (+ lod= on "rate after change").
+//        -- PER-OBJECT MOTION VECTORS (dlaa.ini mv_objects=1, default 0 until tested in game): moving things (AI traffic,
+//           wheels, the own trailer in the chase view) got the CAMERA's motion vector and shimmered under DLAA / DLSS. The
+//           game uses only the low stencil nibble of the scene depth (RenderDoc audit, scripts/rdc_stencil_audit.py), so
+//           the upper nibble carries up to 15 object ids: new OMSetDepthStencilState (vtable 36) + Map (14) hooks; inside
+//           the world G-buffer pass every depth-stencil state is replaced by a twin that writes the id (0 for static
+//           draws); every world DrawIndexed is recorded (identity, MVP offset in the VS cbuffer ring) and the ring's used
+//           range is copied once per pass; at the blit a new compute pass (mv_objects) pairs the draws with the eye's
+//           previous pass, computes one R per id and flags moving draws (async readback -> ObjIds assigns ids to rigid
+//           motion groups); pass B reads the stencil id and uses the id's R. Ctrl+F6 tints id pixels magenta (orange =
+//           id without a usable R this frame). Logs: "MV objects:" lines + "MV objects @blit" every 600 blits. A game
+//           state that uses the upper nibble disables the feature for the session (WARNING line).
+//           r2 (first in-game test: grass clumps, window grids, tree rows and own-truck parts were tagged): only TRUSTED
+//           pairs give verdicts / an R -- geometry key drawn <= mv_objects_max_dup times (3), pairing = the identity's own
+//           previous draw and unambiguous, origin >= mv_objects_ego_m (8 m) from the camera; an id needs
+//           mv_objects_hits (2) consecutive readbacks with coherent motion. Ctrl+F6: rejected identities CYAN (id 15
+//           reserved while the view is on). Logs: rejections per reason, missed draws per reason, "MV objects ids" dump.
+//           r3 (round-2 log: 70-375 world draws per pass "missed, 2nd-ring": their VS cbuffer slot 0 was a SECOND big
+//           dynamic buffer and only one ring was mirrored per pass): ObjRecord mirrors up to 3 distinct rings per pass
+//           (own used range + own copy each, one mirror buffer with per-ring bases: the GPU side is unchanged); a
+//           WRITE_DISCARD of a recorded ring flushes + seals THAT ring only (no torn pass any more). mv_objects_max_dup
+//           default 6 (was 3; the trusted-pairing rule is what filters grass); a duplicate-rejected draw (several
+//           vehicles of one model: wheels) whose hub follows a tagged vehicle joins its id as a FOLLOWER. Logs: rings
+//           per pass, copied KB / draws per ring, ring switches, ring re-use vs the previous pass, first multi-ring
+//           passes in detail; followers in the ids dump.
+//           r4 (round-3 log: distant traffic ghosting / wobbling; ids exhausted, over-budget +261..+7683 per 600 blits,
+//           32572 in total, r2: 0; the ids dump shows pairs / triples of ids with the same IndexCount, dup 2-3, the same
+//           depth and speed = the WHEELS of one vehicle, each anchoring its own id with a spinning R): the GPU measures each
+//           draw's spin (local axes turned beyond the camera's motion); a spinning part never takes, anchors or represents
+//           an id, it only joins its vehicle's id through the hub test. The id's representative is picked on the GPU per
+//           frame (biggest tagged draw with a trusted, non-spinning pairing THIS frame) and an id whose tagged draw is not
+//           where the id's motion says it was (identity swap of two identical vehicles) takes the camera R for that frame.
+//           A freed id rests 3 frames before reuse. mv_objects_max_dup default 3 again, followers off by default
+//           (mv_objects_followers, solid ids only when on), 256 moving entries per readback (r3: 128 overflowed). Logs:
+//           vetoed draws / ids without a trusted member per readback, spinners, spin joins / waits, quarantine.
+//           r7 STICKY OBJECT MVs (round-5 log captures/dlaa_inject_ets2_v090r6b_flat_driving.log + video, driving,
+//           Ctrl+F6 on: "the pink flickers often, it doesn't stay attached to the cars"; 4..27 tag losses per second, a
+//           passing truck's box cyan, tractor magenta, nearest wheel orange / magenta / cyan frame by frame): (1) own
+//           truck = origin < mv_objects_ego_m AND camera-locked (probe points moved <= mv_objects_lock_px, default 3,
+//           on screen in the frame; a spinning draw: its origin) -- r2..r6 rejected every new mover within 8 m, so a
+//           vehicle appearing or passing alongside never got an id there; the CPU gives no membership verdict for an
+//           origin behind the camera; (2) HOLD: an id without a usable R of its own this frame (no trusted
+//           representative: a second instance of its mesh, R not finite, or vetoed while the camera R fits the vetoed
+//           draw no better) keeps its last R for up to mv_objects_hold (default 3) frames instead of the camera R
+//           (CSResolve + new 4th dispatch CSHold; SlotR 160 entries: + the previous frame's rows / states); (3) FAST
+//           JOIN: a mover whose R equals an id's (or a spinning hub that the id's fresh R moves within 1 px), next to a
+//           member, joins on its first sighting (r9: reverted for non-spinning movers -- the static world joined ids
+//           through it, see r9). Logs: config line "(v0.9.0 r7 sticky object MVs)" with
+//           mv_objects_lock_px / mv_objects_hold; "MV objects @blit" + "r7: held/readback, hold-expired/readback,
+//           near-accepted/readback, near-locked/readback, fast-joined".
+//        -- r8 EGO SET + MASK HOLD (round-6 log captures/dlaa_inject_ets2_v090r7_flat_driving.log + video, flat,
+//           Ctrl+F6): (1) standing still, the own truck's exterior parts (all on the truck root, 1.1..1.3 m from the
+//           interior camera) held 4..6 of the 15 ids for the whole video (ids-without-trusted-member/readback 3.00
+//           constant, orange on the own truck): the idle shake moved them > 0.5 px and swung the probe points at +-2 m
+//           by > 3 px, so the r7 per-frame lock test let them in; driving, their pairing failed so they were never
+//           judged again. The own truck is now what stays PUT on screen over time: ObjIds keeps an EGO SET of near
+//           identities (origin < mv_objects_ego_m, on screen) fed by every readback's moving AND reject entries; one
+//           whose origin stayed within mv_objects_ego_px (new key, default 12 px of the full render) of its reference
+//           for mv_objects_ego_rb (new key, default 24) readbacks is flagged (Table.z bit 15: CSMain never makes it a
+//           mover or a representative -- reason 4, own truck), its members are released and an id left without members
+//           is freed; the flag goes when the origin drifts > mv_objects_ego_px from its (running-mean) reference in 2
+//           sightings in a row. The r7 GPU lock test stays as a pre-filter at the ORIGIN only (mv_objects_lock_px
+//           default 6, was 3; an origin that cannot be measured is not locked). (2) 5 one-frame dropouts of EVERY tag
+//           in 38 s: no cause in the log (passes - blits = 60 and fifo overflow = 58 constant since the loading screen
+//           -- no extra pass while playing; frames = readbacks = 600 per window, unusable 0), so CameraMv now logs a
+//           rate-limited "MV objects: mask dropout" line naming the path (record unusable / no draw tagged / no
+//           previous draw / pairing collapse / Generate early-out / Commit; masks, draws, paired, tagged, FIFO pass vs
+//           the pairing record's pass) and HOLDS THE MASK on a pairing failure (unusable record, or < 50 % of the last
+//           good frame's draws paired): the last good ids stay in Ids.x and get the r7 hold in CSResolve (a record-less
+//           frame runs CSResolve alone), within the mv_objects_hold budget; a good frame behaves exactly as r7. (3)
+//           diagnostic fast-joined-then-released. Logs: config line "(v0.9.0 r8 ego set + mask hold)" +
+//           mv_objects_ego_px / mv_objects_ego_rb; "MV objects @blit" + "r8: ego-set, ego-flagged, ego-dropped,
+//           ego-released, mask-held/readback, fast-joined-then-released"; an "ego set" line in the ids dump; the "MV
+//           objects: mask dropout" line.
+//        -- r9 NO FAST JOIN, WORLD-MISS HOLD (round-7 log captures/dlaa_inject_ets2_v090r8_flat_driving.log + video,
+//           flat, Ctrl+F6: "even trees had issues"; road, verges and trees magenta from 0:40 on; one id with 282
+//           members at 659 m; fast-joined +1063..+2545 per window): (1) the r7 non-spinning FAST JOIN is reverted -- a
+//           static draw that is a candidate for one frame has R = the camera R, so once any static draw held an id
+//           every other one joined it on sight (a non-spinning mover needs mv_objects_hits coherent readbacks again;
+//           the spinning-part fast join stays); plus a CAMERA-NOISE GUARD in CSMain: a trusted candidate whose
+//           deviation is not explained by any motion relative to the world (column 2 of its R = the camera origin's
+//           image vs the camera R's) is static -- reject reason 7, never a mover (the synthetic S13 showed hits = 2
+//           alone does not keep sub-2-px camera-solve noise out: 118 static draws tagged without the guard, 123 with
+//           r8, 0 with it).
+//           (2) WORLD-MISS HOLD: a frame whose camera candidates pair nothing (21 of 7200 in round 7, one per ~340
+//           frames) no longer resets the DLSS history (a whole-picture shimmer flash): CameraMv keeps the last good
+//           camera R (pass A skipped) for up to mv_objects_hold frames in a row (also with mv_objects = 0), the
+//           objects take the r8 mask hold on that frame and the dropout diagnostic names "world-miss"; FALLBACK
+//           PAIRING by (indexCount, startIndex, baseVertex) where the full key finds no previous draw and the loose key
+//           is unique in both records (pass A and the object record), plus an "unpaired-draw sample" line (first 5) to
+//           show what changed. (3) EGO SET BY GEOMETRY KEY (round 7: 0 flagged of 34, best run 1 of 24): one entry per
+//           physical copy (symmetric copies whose draw order flips keep their boxes), position at the copy's reference
+//           depth instead of the origin's projection (an origin far off screen at ~1 m swung by tens of px per mm),
+//           depth floor 1 m; the ego identities are the ones whose sighting matched a flagged copy. New dlaa.ini
+//           mv_objects_ego_trace (default 0). Logs: config line "(v0.9.0 r9 no fast join, world-miss hold)" +
+//           mv_objects_ego_trace; "MV objects @blit" + "r9: world-miss-held, pairs-by-fallback/readback,
+//           camera-noise/readback, ego-ids" (fast-joined-then-released is gone; fast-joined = spinning parts only);
+//           "MV: frame" + "r9: world-miss held, pairs by fallback key"; the ids dump's ego line by copies; "MV
+//           objects: ego trace" / "MV: unpaired-draw sample" / "MV objects: unpaired-draw sample" lines.
+//        -- r10 ORIGIN GATE, ATTACH, EGO VIEW-SPACE (round-8 log captures/dlaa_inject_ets2_v090r9_flat_driving.log +
+//           video, flat, Ctrl+F6: world-miss frames 3/16800, 341 fallback pairs -- the 5-s flashes are gone; but
+//           2:35..2:48 the road, the right verge and its trees magenta for 13 s: members 299, dup 13, diverged 12..28,
+//           "id 3: 28 member(s) ... jumps 1735", "id 1: 60 member(s) depth 240 m speed 0.00..0.35", released 1000..2400
+//           per window; licence plates untagged on tagged AI vehicles; ego set "0 flagged of 112 near copies ... best
+//           run 1 of 24"): (1) ORIGIN GATE -- a static draw that is a candidate in 2 coherent readbacks (camera-R noise
+//           with a TRANSLATION part, which the r9 devT guard does not catch) has R ~ the camera R, and so has a vehicle
+//           at our speed: it joined that id by R similarity, sticky membership kept it, and its origin (road / terrain
+//           / tree batches: anywhere, often behind the camera) never had a screen position, so the r7 "no verdict" rule
+//           never proved it out. A candidate is a mover / member only while its ORIGIN is on screen (clip w > 0.05,
+//           |x/w|, |y/w| <= mv_objects_origin_margin, new key, default 1.2): CSMain reason 8 (kRejOffscreen, counted),
+//           and every TAGGED draw with an off-screen origin is reported (candidate or not) so the CPU releases it; an
+//           off-screen draw never represents its id; the r7 "no verdict" branches are releases now. New movers (not
+//           spinning) found / join an id only from sightings with dev >= mv_objects_min_px (new key, default 1.0; a
+//           weaker sighting counts as drawn sub-threshold). (2) ATTACH (mv_objects_attach, default 1): a dup / pairing
+//           / ambiguous reject whose origin coincides with a non-spinning member's origin of the same readback (<= 0.5
+//           px, w within 1 %: the same world matrix -- a plate, a mirror, a lamp) in mv_objects_hits readbacks in a row
+//           joins its id as an ATTACHED member (never anchors / represents; released when its anchor leaves or the
+//           origins stop coinciding in 2 readbacks). (3) EGO SET IN VIEW SPACE: the position is the origin's view-space
+//           position (CSMain recovers it from the MVP: skew and focal from rows 0 / 1 / 3), the box
+//           mv_objects_ego_m_box (new key, default 0.05 m) per axis instead of mv_objects_ego_px (no longer used);
+//           mv_objects_ego_trace default 1. Reject entries are 80 B (+ view-space origin). Logs: config line "(v0.9.0
+//           r10 origin gate, attach, ego view-space)" + the new keys; "MV objects @blit" + "r10:
+//           offscreen-rejected/readback, offscreen-released, sub-min-px/readback, attached, attached-members"; the ids
+//           dump: "%d attached" per id, the r10 rules, the ego line in metres; the ego trace in metres.
+//        -- r11 OVERLAY DEPTH, CAMERA-ORIGIN, STATIC CLASS (round-9 log
+//           captures/dlaa_inject_ets2_v090r10_flat_driving.log + video, flat, Ctrl+F6, 2026-10-07 20:05-20:08): (1)
+//           1:10-1:43 the road, the side-window view and the near verge seen through the windscreen turned BLUE =
+//           cabin-classified with zero motion (sampled (125,124,253)), weather / light dependent ("trees had issues",
+//           "the road smears"): a world-layer alpha-blended overlay at the camera (windscreen drops / dirt / glare)
+//           qualified for the r5 forward re-draw and wrote NEAR depth (>= 0.9) over the glass; pass B's max() made
+//           everything behind it cabin. Pass B now lets the forward depth win only inside the world range [0.01, 0.9)
+//           (also the debug view's yellow tint) and counts the near-range pixels (1-in-16 grid); the re-draw skips a
+//           qualifying draw whose MVP origin lies within mv_fwd_min_m (new key, default 0.5 m) of the camera -- the MVP
+//           lives on the GPU, so every qualifying draw copies its 64 bytes into a staging slot of its pass, read back
+//           2-4 passes later, the verdict cached per forward-draw identity (geometry key + vertex shader + occurrence):
+//           a new overlay identity is skipped a few frames late (pass B's range rule covers it when it sits at the near
+//           plane); the first 5 near-camera identities are logged. (2) draws whose "MVP" has no object transform
+//           (origin AT the camera: the r10 ego trace's 35 near sightings per readback at view pos 0 0 0, w 0; 239 of
+//           240 near copies flagged) are CAMERA-ATTACHED: CSMain reason 9 kRejCamOrigin when the view-space origin is
+//           within mv_objects_cam_m (new key, default 0.3 m) -- never a candidate, mover, representative, ego sighting
+//           or attach anchor, a tagged one released; DrawIndexedInstanced is not hooked, so instanced draws were never
+//           recorded. (3) STATIC CLASS: an identity drawn in >= mv_objects_static_rb (new key, default 24) of the last
+//           48 readbacks with >= 50 % static sightings (drawn, no candidate) neither founds nor joins an id, a member
+//           that becomes static class is released; a stopped vehicle is static class (camera R right for it) and leaves
+//           it after ~24 readbacks of motion. mv_objects_min_px default 2.0 (r10: 1.0). (4) an "MV objects: attach
+//           diagnostics" line per 600 readbacks (why dup / pairing / ambiguous rejects did not attach; no behaviour
+//           change). Logs: config lines "(v0.9.0 r11 overlay depth, camera-origin, static class)" + mv_objects_cam_m /
+//           mv_objects_static_rb and the forward-depth line + mv_fwd_min_m; "MV objects @blit" + "r11:
+//           cam-origin/readback, static-class, static-blocked/readback, static-released"; the forward-depth per-pass
+//           line + "near-camera" and "near-range px"; "MV forward depth: near-camera draw" (first 5); the ready line /
+//           ids dump name the r11 rules.
+//        -- r5 FORWARD DEPTH FOR THE MOTION VECTORS (dlaa.ini mv_fwd_depth, default 1; user: static overhead / catenary
+//           wires trail in DLSS mode, not in DLAA; log captures/dlaa_inject_ets2_v090r2_dlss_ghost_flat.log). The DLSS
+//           inputs were checked against the SDK (MVs in render px with MVLowRes, scale 1, render-size depth / MVs, jitter
+//           in render px, subrects) -- no mismatch. Cause (RenderDoc, scripts/rdc_forward_depthwrite_audit.py): 188 of 190
+//           forward-pass draws test depth without writing it; wires / cables / fences are SRC_ALPHA / INV_SRC_ALPHA
+//           blended, so the depth snapshot holds the sky behind a wire and the wire got the sky's rotation-only motion.
+//           Qualifying world forward draws (depth test, no depth write, DestBlend INV_SRC_ALPHA, viewport = world layer)
+//           are re-drawn right after the game's DrawIndexed into a per-pass-slot D32 target (DepthTwin::fwd*: depth write
+//           GREATER_EQUAL, alpha-to-coverage, colour write mask 0, the game's states bound back); pass B uses
+//           max(snapshot, forward) for the MVs and NGX's depth. key_fwd_depth (Ctrl+F3) switches it live; Ctrl+F6 tints
+//           those pixels yellow. Logs: a config line, "MV forward depth: first re-draw", a per-pass stats line every
+//           1200 passes.
 // v0.8.2 -- STABLE SCENE DEPTH (ATS 1.61 drivable cars). The cars render extra 4-RTV G-buffer views (mirrors) into their
 //           own D32S8 depths, 2048x512 and 1024x512, every frame before the main 1920x1080 scene (log captures/
 //           dlaa_inject_ats_v081_car_drive_nodlaa.log: "scene depth G-buffer pass" change #1..#1473 in ~7 s). v0.8.1
@@ -144,7 +379,7 @@
 // v0.6.4 -- DLAA AREA. In the headset only the centre of each eye image is seen sharply (the lens blurs the outer
 //           part), but every DLAA stage (NGX 1.08 ms, MV+depth 0.31, sharpen 0.22, copies 0.14 ms per eye at
 //           4592x6496) scales with the pixel count. The whole pipeline now runs on a centred rect of each eye
-//           image: dlaa_area % (40..100, default 100 = whole image = v0.6.3 path) of width AND height, each
+//           image: dlaa_area % (40..100, v0.10.0 phase 15: 20..100; default 100 = whole image = v0.6.3 path) of width AND height, each
 //           rounded to a multiple of 8, centred on the eye's OPTICAL CENTRE and clamped into the image (origin
 //           snapped to even px). colorIn / R32F depth / MV / out / sharp and the NGX feature are crop-sized
 //           (CopySubresourceRegion in and back); the depth twins stay full-size and the merged MV+depth pass /
@@ -298,6 +533,8 @@
 //       USER  = Shift+F1..F4 DLAA model 1..4 (preset default/E/F/M, 1..4 beeps), Shift+F5/F6 DLAA area -/+10 %,
 //               Shift+F7/F8 sharpen strength -/+0.1, Shift+F9/F10 sharpen width -/+0.5, Shift+F11 DLAA on/off,
 //               Shift+F12 save dlss_preset/dlaa_area/sharpness/sharp_radius (v0.7.0 + dlss_upscale) to dlaa.ini
+//       TEXTURE = Ctrl+F1/F2 texture LOD bias -/+0.25 (v0.9.0; Shift+F12 also saves tex_lod_bias), Ctrl+Shift+F1/F2 the
+//                 alpha-tested (cut-out) draws' bias tex_lod_bias_cutout -/+0.25 (v0.10.0 phase 13, 2 beeps; saved too)
 //       DEBUG = Ctrl+F4 DLSS upscale on/off (v0.7.0),
 //               Ctrl+F5 MVs on/off, Ctrl+F6 MV debug view, Ctrl+F7 passive mode, Ctrl+F8 jitter-only debug,
 //               Ctrl+F9 self-test, Ctrl+F10 NGX input snapshot, Ctrl+F11 frame trace, Ctrl+F12 jitter sign cycle
@@ -309,6 +546,13 @@
 //       and classifies each bind as jitter pass / not
 //   ID3D11DeviceContext::DrawIndexed        -- (v0.4) G-buffer pass only: records the draw's MVP
 //       (VS cb slot 0, bytes 64..127 of its window) + geometry key for motion vectors
+//   ID3D11DeviceContext::PSSetSamplers      -- (v0.9.0) texture LOD bias: inside world scene / truck-preview passes
+//       the game's samplers are replaced by biased twins (see the "texture LOD bias" block); elsewhere pass-through
+//   ID3D11DeviceContext::OMSetDepthStencilState -- (v0.9.0, mv_objects) inside the world G-buffer pass the game's
+//       depth-stencil states are replaced by twins that write stencil object ids (upper nibble); elsewhere tracked only
+//   ID3D11DeviceContext::Map                -- (v0.9.0, mv_objects) a WRITE_DISCARD of a VS cbuffer ring while its MVPs
+//       are not yet copied flushes them first (r3: that ring only, then seals it; see the "STENCIL OBJECT IDS" block);
+//       everything else pass-through
 //   ID3D11DeviceContext::Draw               -- spots the SWAPCHAIN BLIT (full-screen
 //       3/4-vertex draw whose RT0 is the DXGI backbuffer and whose PS SRV0 is an
 //       R8G8B8A8 texture at scene dims = pre-UI LDR scene) and runs DLAA on that
@@ -335,10 +579,15 @@
 #include <intrin.h>
 #include <MinHook.h>
 #include "log.h"
+#include "dinput_wrap.h"                           // v0.10.0 tuning menu: its keys are hidden from the game while open
+#include "ofxr.h"                                  // v0.10.0 OFXR Bridge module-range pass-through
 #ifdef WITH_DLAA
 #include "scene_dlaa.h"
 #include "preview_blit.h"
+#include "menu.h"                                  // v0.10.0 in-game tuning menu panel
 #include "shader_cache.h"
+#include "dlaa_stage.h"
+#include "gpu_perf.h"
 #endif
 
 namespace {
@@ -377,8 +626,44 @@ bool     g_resetNext      = true;        // pass reset=true to NGX on the next e
 // v0.7.7: every hotkey is a re-bindable action (dlaa.ini key_*), see KeyBind / PollKeys below. One down-edge
 // state per virtual-key code (g_vkWasDown) replaces the F-key-only table of v0.6.5.
 bool     g_vkWasDown[256] = {};          // edge detect per VK, refreshed every top-level Present (PollKeys)
+// v0.10.0 IN-GAME TUNING MENU (see the "TUNING MENU" block after ToggleMirrors): open state (also read by the key-swallowing
+// window / DirectInput threads, dinput_wrap.cpp) and the panel placement (dlaa.ini menu_*; flat and VR have their own).
+std::atomic<bool> g_menuOpen{false};
+int      g_menuX = 2, g_menuY = 8;       // flat: % of the picture width / height to the panel's left / top edge (0..90)
+float    g_menuScale = 1.0f;             // flat: 0.5..2.0 (1 = 720 px wide at 1080 p, scales with the picture height)
+int      g_menuVrX = 0, g_menuVrY = -5;  // VR: % of the eye width / height, panel CENTRE from the eye's optical centre (-50..50)
+float    g_menuVrScale = 1.0f;           // VR: 0.5..2.0 (1 = 54 % of the eye width: the text of a 45 %-wide 720-px panel)
+int      g_menuVrDepth = 12;             // VR: px inward shift per eye (eye 0 right, eye 1 left), 0..200
+bool     g_menuExplicit = false;         // a menu_* value was changed in the menu -> SaveSettings writes the 7 menu_* keys
+// v0.10.0 live fps box (dlaa.ini fps_*; the tuning menu's FPS counter rows): drawn where the panel draws, also while the menu
+// is closed. Flat and VR have their own placement.
+bool     g_fpsShow = false;              // fps_show: the box is on
+int      g_fpsX = 1, g_fpsY = 1;         // flat: % of the picture width / height to the box's left / top edge (0..95)
+float    g_fpsScale = 1.0f;              // flat: 0.2..3.0 (1 = 92 x 44 px at 1080 p, scales with the picture height; phase 15: was 0.5..3.0)
+int      g_fpsVrX = 0, g_fpsVrY = -25;   // VR: % of the eye width / height, box CENTRE from the eye's optical centre (-50..50)
+// VR: 0.2..3.0 (1 = 8 % of the eye width, unchanged so a saved fps_vr_scale keeps its size). v0.10.0 phase 15: default 0.3
+// (was 1.0; range was 0.5..3.0): 1.0 = ~490 px on a 6120-px eye = about 4x the flat box's angle; 0.3 = ~150 px, about 1.5x
+// the flat box as seen in the headset (still readable after the headset's downsampling).
+constexpr float kFpsVrScaleDefault = 0.3f;
+float    g_fpsVrScale = kFpsVrScaleDefault;
+bool     g_fpsExplicit = false;          // an fps_* value was changed in the menu -> SaveSettings writes the 7 fps_* keys
+int      g_menuBlitEye = -1;             // VR: the eye blit this Draw is (HandlePossibleBlit), drawn on after it (hkDraw)
+void*    g_menuBlitRt  = nullptr;        // ... and its render target (identity only)
 std::atomic<bool> g_mvDebug{false};      // Ctrl+F6: blit source replaced by the MV visualization
 std::atomic<bool> g_mvOn{true};          // camera-reprojection MVs live switch (Ctrl+F5, dlaa.ini mv_enabled)
+// v0.9.0 r5 forward depth for the MVs (see the "FORWARD DEPTH" block above hkDrawIndexed): dlaa.ini mv_fwd_depth
+// (default 1) and its live switch (key_fwd_depth, Ctrl+F3; starts at the ini value).
+bool              g_fwdCfg = true;
+std::atomic<bool> g_fwdOn{true};
+float             g_fwdMinM = 0.5f;     // v0.9.0 r11 dlaa.ini mv_fwd_min_m (0.1..5): an origin nearer = an overlay
+// v0.10.0 phase 10 PERFORMANCE PROFILES (dlaa.ini perf_profile = high | medium | low, Alt+F9 cycles live, Shift+F12 saves): a
+// profile only gives DEFAULTS to the keys below; a key set in dlaa.ini -- or changed by its own hotkey this session (Alt+F6,
+// Ctrl+F3, Shift+F1..F4, Shift+F5 / F6) -- is EXPLICIT and keeps its value whatever the profile (ApplyProfile).
+enum ProfKey { PK_MIRROR_DLAA, PK_MIRROR_VR_MODE, PK_MIRROR_FLAT_MODE, PK_FWD_DEPTH, PK_FWD_RES, PK_VOTE_RES, PK_MARCH_CAP,
+               PK_INST_REPLAY, PK_PAR_LISTED, PK_PRESET, PK_AREA, PK_COUNT };
+bool              g_profExplicit[PK_COUNT] = {};
+int               g_profile = 0;        // 0 high (default), 1 medium, 2 low
+const char* const kProfName[3] = { "high", "medium", "low" };
 std::atomic<bool> g_snapRequest{false};       // set by Present on Ctrl+F10, consumed at the next DLAA blit
 std::atomic<bool> g_selfTestRequest{false};   // set by Present on Ctrl+F9, consumed in hkDraw
 std::atomic<bool> g_jitterOnly{false};   // Ctrl+F8: jitter stays on, DLAA evaluate skipped
@@ -464,6 +749,17 @@ float    g_jx = 0.0f, g_jy = 0.0f;       // viewport shift of the NEWEST pass (G
 std::atomic<bool> g_dlssUpscale{true};
 int      g_iniMode        = -1;          // v0.7.2 dlaa.ini `mode` (0 off, 1 DLAA, 2 DLSS; -1 = key absent)
 double   g_upAreaRatio    = 1.0;         // output / render pixel count of the last matched blit (1 = no upscale)
+double   g_upRenderOverOutX = 1.0;       // v0.9.0: render / output WIDTH of the last matched blit (1 = no upscale), for
+                                         // tex_lod_bias_auto (g_upAreaRatio is an AREA ratio; r_scale_x / _y may differ)
+// v0.9.0 texture LOD bias (dlaa.ini, see the "texture LOD bias" block at hkPSSetSamplers). Render thread / load only.
+float    g_lodBias        = 0.0f;        // tex_lod_bias, -3..+1 (keys: 0.25 steps within -3..0; the save key writes it)
+bool     g_lodAuto        = false;       // tex_lod_bias_auto: + log2(render width / output width) while DLSS upscales
+int      g_lodAniso       = 0;           // tex_aniso: 0 = leave the game's filtering, 2..16 = raise / switch to anisotropic
+// v0.10.0 phase 13: tex_lod_bias_cutout = the bias of the alpha-tested (discard) draws of the G-buffer / preview passes.
+constexpr int kLodCutAbsent = 0, kLodCutSame = 1, kLodCutValue = 2;
+int      g_lodCutMode     = kLodCutAbsent;   // key absent (= -0.50 with scope opaque, `same` with scope solid / all), same, value
+float    g_lodCutBias     = -0.5f;       // tex_lod_bias_cutout value, -3..+1 (keys Ctrl+Shift+F1 / F2: 0.25 steps within -3..0)
+void     LodCutoutText(char* buf, size_t cap);   // "same" / "-0.50" (the dlaa.ini form; defined with the LOD bias block)
 char     g_upTag[48]      = "off";       // "WxH->WxH" / "off" for the [preset=.. up=..] log tags (last blit)
 char     g_upBlocked[48]  = "";          // "WxH->WxH" whose NGX upscale init failed -> DLAA fallback (Ctrl+F4 ON clears)
 int      g_effPhases      = 8;           // v0.7.0: Halton phase count in use (EffectivePhases, logged on change)
@@ -509,8 +805,18 @@ bool IsForeground() {
 enum KeyAction {
     KA_MODE_CYCLE, KA_MODEL1, KA_MODEL2, KA_MODEL3, KA_MODEL4, KA_AREA_DOWN, KA_AREA_UP, KA_SHARPEN_DOWN,
     KA_SHARPEN_UP, KA_WIDTH_DOWN, KA_WIDTH_UP, KA_DLAA_TOGGLE, KA_SAVE, KA_UPSCALE_TOGGLE, KA_MV_TOGGLE,
-    KA_MV_DEBUG, KA_PASSIVE, KA_JITTER_ONLY, KA_SELFTEST, KA_SNAPSHOT, KA_TRACE, KA_JITTER_SIGN, KA_COUNT
+    KA_MV_DEBUG, KA_PASSIVE, KA_JITTER_ONLY, KA_SELFTEST, KA_SNAPSHOT, KA_TRACE, KA_JITTER_SIGN,
+    KA_LOD_DOWN, KA_LOD_UP,                                  // v0.9.0 texture LOD bias -/+0.25
+    KA_FWD_DEPTH,                                            // v0.9.0 r5 forward depth for the MVs on / off
+    KA_DRAWID_TOGGLE, KA_MIRROR_TOGGLE,                      // v0.10.0 phase 2: per-draw MVs (2 <-> 0) / mirror DLAA on / off
+    KA_PRE_TONEMAP, KA_MV_DUMP,                              // v0.10.0 phase 4: DLAA before / after the tonemap; per-draw dump
+    KA_PROFILE,                                              // v0.10.0 phase 10: perf_profile high -> medium -> low
+    KA_LOD_CUT_DOWN, KA_LOD_CUT_UP,                          // v0.10.0 phase 13: cut-out (alpha-tested) LOD bias -/+0.25
+    KA_MENU, KA_MENU_UP, KA_MENU_DOWN, KA_MENU_LEFT, KA_MENU_RIGHT,   // v0.10.0 tuning menu open / close + navigation
+    KA_COUNT
 };
+// v0.10.0: the 4 menu navigation actions repeat while held (PollKeys) and only fire while the menu is open
+inline bool IsMenuNavKey(int a) { return a == KA_MENU_UP || a == KA_MENU_DOWN || a == KA_MENU_LEFT || a == KA_MENU_RIGHT; }
 enum { MOD_SHIFT_BIT = 1, MOD_CTRL_BIT = 2, MOD_ALT_BIT = 4 };
 struct KeyBind {
     const char* ini;          // dlaa.ini key
@@ -543,9 +849,25 @@ KeyBind g_keys[KA_COUNT] = {
     { "key_snapshot",        "Ctrl+F10",  0, 0, "", false },
     { "key_trace",           "Ctrl+F11",  0, 0, "", false },
     { "key_jitter_sign",     "Ctrl+F12",  0, 0, "", false },
+    { "key_lod_bias_down",   "Ctrl+F1",   0, 0, "", false },   // v0.9.0
+    { "key_lod_bias_up",     "Ctrl+F2",   0, 0, "", false },   // v0.9.0
+    { "key_fwd_depth",       "Ctrl+F3",   0, 0, "", false },   // v0.9.0 r5
+    { "key_mv_drawids",      "Alt+F5",    0, 0, "", false },   // v0.10.0 phase 2: mv_objects 2 <-> 0 live
+    { "key_mirror_dlaa",     "Alt+F6",    0, 0, "", false },   // v0.10.0 phase 2: mirror DLAA on / off live
+    { "key_pre_tonemap",     "Alt+F7",    0, 0, "", false },   // v0.10.0 phase 4: main-scene DLAA before / after the tonemap
+    { "key_mv_dump",         "Alt+F8",    0, 0, "", false },   // v0.10.0 phase 4: log the per-draw MV state of the next frame
+    { "key_perf_profile",    "Alt+F9",    0, 0, "", false },   // v0.10.0 phase 10: perf_profile high -> medium -> low (1-3 beeps)
+    { "key_lod_cutout_down", "Ctrl+Shift+F1", 0, 0, "", false },   // v0.10.0 phase 13: tex_lod_bias_cutout -0.25 (2 beeps)
+    { "key_lod_cutout_up",   "Ctrl+Shift+F2", 0, 0, "", false },   // v0.10.0 phase 13: tex_lod_bias_cutout +0.25 (2 beeps)
+    { "key_menu",            "Delete",    0, 0, "", false },   // v0.10.0 tuning menu open / close
+    { "key_menu_up",         "Up",        0, 0, "", false },   // v0.10.0 menu: previous row (repeats while held; menu open only)
+    { "key_menu_down",       "Down",      0, 0, "", false },   // v0.10.0 menu: next row
+    { "key_menu_left",       "Left",      0, 0, "", false },   // v0.10.0 menu: value down / previous
+    { "key_menu_right",      "Right",     0, 0, "", false },   // v0.10.0 menu: value up / next
 };
 inline bool KeyHit(KeyAction a) { return g_keys[a].hit; }
 inline const char* KeyName(KeyAction a) { return g_keys[a].name; }
+bool g_keyRepeat[KA_COUNT] = {};         // v0.10.0: this Present's hit is an auto-repeat (menu navigation keys only)
 
 // Parses one binding ("Ctrl+Shift+F5", case-insensitive, spaces ignored). "" / "none" -> vk 0 (disabled), true.
 bool ParseBinding(const char* text, int* vkOut, unsigned* modsOut) {
@@ -643,11 +965,22 @@ void PollKeys() {
                           ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? MOD_CTRL_BIT  : 0u) |
                           ((GetAsyncKeyState(VK_MENU)    & 0x8000) ? MOD_ALT_BIT   : 0u);
     bool down[KA_COUNT];
+    // v0.10.0 tuning menu: the navigation keys fire only while the menu is open, and repeat while held (first repeat
+    // 350 ms after the press, then every 70 ms; at most one per Present).
+    const bool menuOpen = g_menuOpen.load(std::memory_order_relaxed);
+    const ULONGLONG now = GetTickCount64();
+    static ULONGLONG s_repeatAt[KA_COUNT] = {};          // 0 = not repeating
     for (int i = 0; i < KA_COUNT; ++i) {
         KeyBind& k = g_keys[i];
         k.hit = false;
         down[i] = k.vk && (GetAsyncKeyState(k.vk) & 0x8000) != 0;
         if (down[i] && !g_vkWasDown[k.vk & 0xFF] && fg && held == k.mods) k.hit = true;
+        if (IsMenuNavKey(i)) {
+            g_keyRepeat[i] = false;
+            if (!menuOpen || !down[i] || !fg || held != k.mods) { k.hit = k.hit && menuOpen; s_repeatAt[i] = 0; }
+            else if (k.hit) s_repeatAt[i] = now + 350;
+            else if (s_repeatAt[i] && now >= s_repeatAt[i]) { k.hit = true; g_keyRepeat[i] = true; s_repeatAt[i] = now + 70; }
+        }
     }
     for (int i = 0; i < KA_COUNT; ++i)                   // update after all edges are computed (bindings may share a VK)
         if (g_keys[i].vk) g_vkWasDown[g_keys[i].vk & 0xFF] = down[i];
@@ -763,18 +1096,34 @@ bool UpdateGameContext(IDXGISwapChain* sc, uint64_t n, void* caller); // v0.6.2:
 void LayerBackbufferAtBoundary(ID3D11DeviceContext* ctx, uint64_t n, bool fromRule); // v0.8.1 game-side backbuffer
 void ResetSpanWindow();                  // v0.6.2: restart the "GPU spans" averaging window
 void TogglePassive(uint64_t n);          // v0.6.2 (v0.6.5 Ctrl+F7)
+void StepLodBias(int dir, uint64_t n);   // v0.9.0 texture LOD bias keys (Ctrl+F1 -0.25 / Ctrl+F2 +0.25)
+void StepLodCutout(int dir, uint64_t n); // v0.10.0 phase 13 cut-out LOD bias keys (Ctrl+Shift+F1 -0.25 / Ctrl+Shift+F2 +0.25)
 #ifdef WITH_DLAA
 void SelectDlssPreset(int idx, uint64_t n); // v0.6.5 Shift+F1..F4 direct model select (0=default,1=E,2=F,3=M)
 void StepSharpness(int dir, uint64_t n); // v0.5.7 (v0.6.5 Shift+F7 -1 / Shift+F8 +1)
 void StepSharpRadius(int dir, uint64_t n); // v0.5.8 (v0.6.5 Shift+F9 -1 / Shift+F10 +1)
 void StepArea(int dir, uint64_t n);      // v0.6.4 (v0.6.5 Shift+F5 -1 / Shift+F6 +1)
-void CycleMode(uint64_t n);              // v0.7.2 plain End: DLAA -> DLSS -> off, saved to dlaa.ini (mode)
+void CycleMode(uint64_t n, int dir = +1); // v0.7.2 plain End: DLAA -> DLSS -> off, saved to dlaa.ini (mode); v0.10.0 dir -1 = back
 void SaveSettings(uint64_t n);           // v0.6.5 Shift+F12: write the 4 live values (v0.7.0: + dlss_upscale) to dlaa.ini
+void ToggleDlaa(uint64_t n);             // v0.10.0 (was inline): Shift+F11 DLAA on / off
+void ToggleUpscale(uint64_t n);          // v0.10.0 (was inline): Ctrl+F4 DLSS upscale on / off
+void ToggleFwdDepth(uint64_t n);         // v0.10.0 (was inline): Ctrl+F3 forward depth for the MVs on / off
+void MenuKeys(uint64_t n);               // v0.10.0 tuning menu: open / close + navigation (before the other user keys)
+void MenuDrawAtPresent(IDXGISwapChain* sc, ID3D11DeviceContext* bctx); // v0.10.0 tuning menu: flat / desktop-mirror panel
+void MenuDrawVr(ID3D11DeviceContext* ctx); // v0.10.0 tuning menu: VR panel into the eye texture after the game's eye blit
+void MenuDrawPreview(ID3D11DeviceContext* ctx, int idx, char trigger);   // v0.10.0 phase 15: ... onto a VR preview eye picture
+void FpsTick();                          // v0.10.0 fps meter (the fps box + the menu's fps figure), per Present while either is on
 void CheckPresetFallback(uint64_t n);    // v0.5.7: beep + log when a live preset fell back to default
 void OnLiveTuningChange();               // v0.5.7; v0.6.2 also DLAA toggle / passive / MV (restarts the GPU spans window)
 void PreviewInvalidate();                // v0.7.8 profile-screen preview slots: drop their MV / DLSS history
 void PreviewNextFrame(uint64_t n);       // v0.7.8 per-Present preview bookkeeping (slot counter, jitter, stats)
 void MaybePrewarmNgx();                  // v0.7.8 NGX pre-warm at the first Present with DLAA on
+void ToggleDrawIds(uint64_t n);          // v0.10.0 phase 2 Alt+F5: per-draw motion vectors (mv_objects 2 <-> 0) live
+void ToggleMirrors(uint64_t n);          // v0.10.0 phase 2 Alt+F6: mirror DLAA on / off live
+void TogglePreTonemap(uint64_t n);       // v0.10.0 phase 4 Alt+F7: main-scene DLAA before / after the tonemap
+void RequestMvDump(uint64_t n);          // v0.10.0 phase 4 Alt+F8: per-draw MV dump of the next frame
+void CycleProfile(uint64_t n, int dir = +1); // v0.10.0 phase 10 Alt+F9: perf_profile high -> medium -> low (dir -1: back)
+void ApplyProfile(bool live, char* changed, size_t cap);   // v0.10.0 phase 10: the profile's defaults for the non-explicit keys
 #endif
 
 // v0.7.10: the periodic log cadence -- by wall clock, not frame count (loading screens Present at 1000+ fps and flooded
@@ -827,6 +1176,7 @@ void RefreshBackbufferFromSwapchain(IDXGISwapChain* sc, uint64_t n) {
 // nullptr, bctx = the game context, fromRule = the boundary is the frame-end rule (between two frames, the frame's last
 // target still bound: the game-side backbuffer identity is taken from it).
 void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx, bool fromRule) {
+    Ofxr::OnPresent(n);                         // v0.10.0 OFXR Bridge: layer-module rescan cadence + pass-through stats
 #ifdef WITH_DLAA
     MaybePrewarmNgx();                          // v0.7.8: NGX init + first feature on the boot screen (once)
 #endif
@@ -841,23 +1191,14 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
         TraceAtPresent(sc, n);                   // F11 frame-trace state machine (v0.4.3)
 #ifdef WITH_DLAA
         CheckPresetFallback(n);                  // v0.5.7: a live preset create failed -> told by ear
+        if (g_fpsShow || g_menuOpen.load(std::memory_order_relaxed)) FpsTick();   // v0.10.0 fps meter (box / menu)
+        MenuKeys(n);                             // v0.10.0 tuning menu (Delete, arrows) -- before the other user keys
 #endif
 
         // ---- user keys -------------------------------------------------------------------------------
         if (KeyHit(KA_DLAA_TOGGLE)) {            // DLAA on/off (old plain-End behaviour + beeps)
 #ifdef WITH_DLAA
-            if (g_gameDeviceChanged && !g_dlaaOn.load()) {
-                Log("DLAA stays OFF (%s, Present #%llu): the game render device changed, our NGX feature / "
-                    "textures / queries belong to the old device -- restart the game", KeyName(KA_DLAA_TOGGLE), (unsigned long long)n);
-                PlayTones(1, 200, 400, 0);
-            } else {
-                const bool on = !g_dlaaOn.load();
-                g_dlaaOn = on;
-                if (on) { g_resetNext = true; MvInvalidate(); }   // drop DLSS history + stale MV candidates on re-enable
-                Log("DLAA %s (%s, Present #%llu)", on ? "ON" : "OFF", KeyName(KA_DLAA_TOGGLE), (unsigned long long)n);
-                PlayTones(1, on ? 1200 : 300, 150, 0);
-                OnLiveTuningChange();            // v0.6.2: restart the timing windows (GPU spans: on/off compare)
-            }
+            ToggleDlaa(n);                       // v0.10.0: a function (the tuning menu calls it too)
 #else
             Log("%s ignored: DLAA not compiled in", KeyName(KA_DLAA_TOGGLE));
 #endif
@@ -874,21 +1215,15 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
         else if (KeyHit(KA_SHARPEN_UP))   StepSharpness(+1, n);    // sharpen strength +0.1
         else if (KeyHit(KA_WIDTH_DOWN))   StepSharpRadius(-1, n);  // sharpen width -0.5
         else if (KeyHit(KA_WIDTH_UP))     StepSharpRadius(+1, n);  // sharpen width +0.5
-        else if (KeyHit(KA_SAVE))         SaveSettings(n);         // save the 4 live values + dlss_upscale to dlaa.ini
+        else if (KeyHit(KA_LOD_DOWN))     StepLodBias(-1, n);      // v0.9.0 texture LOD bias -0.25 (sharper)
+        else if (KeyHit(KA_LOD_UP))       StepLodBias(+1, n);      // v0.9.0 texture LOD bias +0.25 (max 0)
+        else if (KeyHit(KA_LOD_CUT_DOWN)) StepLodCutout(-1, n);    // phase 13 cut-out (alpha-tested) LOD bias -0.25
+        else if (KeyHit(KA_LOD_CUT_UP))   StepLodCutout(+1, n);    // phase 13 cut-out (alpha-tested) LOD bias +0.25 (max 0)
+        else if (KeyHit(KA_SAVE))         SaveSettings(n);         // save the 4 live values + dlss_upscale + tex_lod_bias
 
         // ---- debug keys ------------------------------------------------------------------------------
         {
-            if (KeyHit(KA_UPSCALE_TOGGLE)) {                         // v0.7.0 DLSS upscale on/off
-                const bool on = !g_dlssUpscale.load();
-                g_dlssUpscale = on;
-                if (on) g_upBlocked[0] = 0;      // a failed upscale size is retried
-                g_resetNext = true;              // each eye also rebuilds its textures + NGX feature at its next blit
-                Log("DLSS upscale %s (%s, Present #%llu)%s", on ? "ON" : "OFF", KeyName(KA_UPSCALE_TOGGLE), (unsigned long long)n,
-                    on ? " -- render (scene) res -> blit RT res whenever the blit RT is larger"
-                       : " -- DLAA at render res, copied back over the blit source (v0.6.5 path)");
-                PlayTones(1, on ? 1200 : 300, 150, 0);
-                OnLiveTuningChange();            // timing windows restart (new pipeline shape)
-            }
+            if (KeyHit(KA_UPSCALE_TOGGLE)) ToggleUpscale(n);         // v0.7.0 DLSS upscale on/off (v0.10.0: a function)
             if (KeyHit(KA_MV_TOGGLE)) {                         // motion vectors on/off (old HOME)
                 const bool on = !g_mvOn.load();
                 g_mvOn = on;
@@ -904,6 +1239,12 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
                 Log("MV debug view %s (%s, Present #%llu)", on ? "ON (R=mv.x G=mv.y B=cabin; gray = still)" : "OFF",
                     KeyName(KA_MV_DEBUG), (unsigned long long)n);
             }
+            if (KeyHit(KA_FWD_DEPTH)) ToggleFwdDepth(n);      // v0.9.0 r5 forward depth for the MVs (A/B switch; v0.10.0: a function)
+            if (KeyHit(KA_DRAWID_TOGGLE)) ToggleDrawIds(n);   // v0.10.0 phase 2 Alt+F5: per-draw motion vectors 2 <-> 0
+            if (KeyHit(KA_MIRROR_TOGGLE)) ToggleMirrors(n);   // v0.10.0 phase 2 Alt+F6: mirror DLAA on / off
+            if (KeyHit(KA_PRE_TONEMAP)) TogglePreTonemap(n);  // v0.10.0 phase 4 Alt+F7: DLAA before / after the tonemap
+            if (KeyHit(KA_MV_DUMP)) RequestMvDump(n);         // v0.10.0 phase 4 Alt+F8: per-draw MV dump of the next frame
+            if (KeyHit(KA_PROFILE)) CycleProfile(n);          // v0.10.0 phase 10 Alt+F9: perf_profile high -> medium -> low
             if (KeyHit(KA_PASSIVE)) TogglePassive(n);         // Ctrl+F7 passive mode (old Ctrl+End)
             if (KeyHit(KA_JITTER_ONLY)) {                         // jitter-only debug (old plain PageUp)
                 const bool jo = !g_jitterOnly.load();
@@ -932,6 +1273,8 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
                 Log("jitter sign now X=%+d Y=%+d (%s)", g_signX, g_signY, KeyName(KA_JITTER_SIGN));
             }
         }
+        if (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)
+            MenuDrawAtPresent(sc, bctx);         // v0.10.0 tuning menu panel + fps box (flat / mirror)
 #endif
     }
     // DLAA does NOT run here any more: it runs inside hkDraw on the tonemap
@@ -1007,6 +1350,18 @@ HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
     // ---- top level (depth 0) ----
     g_plPresentTid.store(tid, std::memory_order_relaxed);        // v0.8.1: present-layer evidence (who presents)
     g_plPresentCaller.store(caller, std::memory_order_relaxed);
+#ifdef WITH_DLAA
+    {   // v0.10.0 tuning menu: the game window is subclassed once (the menu keys' messages are dropped while the menu is open)
+        static std::atomic<bool> s_wndHooked{false};
+        if (!s_wndHooked.load(std::memory_order_relaxed)) {
+            DXGI_SWAP_CHAIN_DESC wd{};
+            if (SUCCEEDED(sc->GetDesc(&wd)) && wd.OutputWindow) {
+                s_wndHooked.store(true, std::memory_order_relaxed);
+                KeySwallow::HookWindow(wd.OutputWindow);
+            }
+        }
+    }
+#endif
     if (PresentLayerActive()) return LayerPresent(sc, sync, flags, caller, tid);   // v0.8.1: count + log only
     // v0.8.1: the per-frame work runs under g_plMx until present-layer mode starts (the adoption on the game thread
     // takes the same lock, so it never overlaps this). Uncontended in normal operation.
@@ -1116,6 +1471,8 @@ EyeRecState      g_eyeRec[kMaxEyes];
 constexpr int    kBadRunMax      = 2;            // the 3rd bad record in a row is accepted as the new baseline
 #ifdef WITH_DLAA
 SceneDlaa        g_dlaa[kMaxEyes];               // one per eye (flat uses [0] only)
+bool             g_ngxEverReady = false;         // v0.10.0: an NGX feature (DLAA / DLSS) has existed at some point in this session (sticky;
+                                                 // set from the periodic Present line's ngx-feature test and the tuning menu's snapshots)
 // v0.7.0 upscale composite, armed by HandlePossibleBlit (Run succeeded in upscale mode), executed by hkDraw right
 // after the game's blit Draw on the same RT0. Render thread only.
 int              g_compEye  = -1;                // eye whose result waits (-1 = none)
@@ -1123,8 +1480,10 @@ void*            g_compRt   = nullptr;           // RT0 resource of that blit (i
 uint32_t         g_compX = 0, g_compY = 0;       // output (viewport) origin inside RT0
 bool             g_compSrgb = false;             // the blit's SRV0 was an _SRGB view
 uint64_t         g_compSkipped = 0;              // armed composites dropped because RT0 changed
+void MirInvalidate();                            // v0.10.0 phase 2 mirror units (the "MIRROR UNITS" block)
 void MvInvalidate() {
     PreviewInvalidate();
+    MirInvalidate();                             // v0.10.0 phase 2: every mirror unit drops its MV / DLSS history too
     for (SceneDlaa& d : g_dlaa) d.Mv().Invalidate();
     for (EyeRecState& e : g_eyeRec) e = EyeRecState();    // v0.6.1 (the generation key would catch it too)
 }
@@ -1150,9 +1509,26 @@ struct PassSlot {
     bool     snap = false;           // scene depth of this pass was snapshotted into twin
     bool     consumed = true;
     bool     discarded = false;      // a Discard* of the scene depth was seen since this pass started
+    int      pre = 0;                // v0.10.0 phase 4: 1 = DLAA ran before the tonemap (in place on the forward colour), 2 =
+                                     // tried there but deferred / failed (v0.10.0 phase 7: the blit unit takes it), 0 = blit path
 #ifdef WITH_DLAA
     DepthTwin       twin;            // this pass's depth snapshot (v0.5.4: per pass, not per eye)
     CandidateRecord cand;            // this pass's MV candidates (committed to the eye's CameraMv at the blit)
+    // v0.10.0 phase 7 (PreTonemapPoint): the pre/post-tonemap decision of this pass
+    void*    fwdTex = nullptr;       // RTV0 of this pass's main forward binding (identity, the LAST such bind; FwdOnBind)
+    uint32_t fwdBinds = 0;           // main forward binds of this pass
+    bool     stageDone = false;      // the decision ran (scene depth discard, forward leave, or at the blit when neither came)
+    bool     stageAtLeave = false;   // ... at the forward leave (the game left the forward binding before the discard)
+    bool     fallback = false;       // pre-tonemap is the preferred stage but this pass runs the blit unit
+    bool     warmHdr = false;        // the blit warms the HDR unit with warmTex after its own run (post -> pre switch coming)
+    bool     candBad = false;        // ClassifyRecord's verdict at the decision (a blit that runs after a failed pre run reuses it)
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> warmTex;   // the forward colour for the warm-up (ref held until the blit)
+    uint16_t dropN[2] = {};          // v0.10.0 phase 8: camera candidates NOT copied this pass (layer dropped, up to its cap)
+    // v0.10.0 phase 9 (PassViewSetup at StartPass): the per-pixel work of this pass is clipped to clipRect (the DLAA area of
+    // every eye this pass may be + mv_area_margin); fwdShift 1 = its forward depth / forward ids at 1/2 resolution
+    bool       clip = false;
+    D3D11_RECT clipRect = { 0, 0, 0, 0 };
+    uint8_t    fwdShift = 0;
 #endif
     // ---- v0.6.1 flight recorder: plain counters on the NEWEST slot, reset in StartPass, logged at the blit
     // only for a bad record (PASS ANOMALY) or as a periodic reference (pass sample). Record counts = cand.
@@ -1187,11 +1563,121 @@ struct PassSlot {
 };
 constexpr int    kRing           = 4;
 PassSlot         g_ring[kRing];
+#ifdef WITH_DLAA
+// v0.9.0 per-object MVs (see the "STENCIL OBJECT IDS" block above hkDrawIndexed).
+ObjRecord        g_objRing[kRing];              // per pass slot, parallel to g_ring: the pass's world draws (object ids)
+// v0.10.0: dlaa.ini mv_objects = 0 off, 1 = the v0.9.0 stencil ids (legacy, kept for comparison), 2 = per-draw motion
+// vectors (default). g_objCfg = mode 1 only; g_didCfg = mode 2 only -- the two never run together.
+int              g_objMode = 2;
+bool             g_objCfg = false;              // mv_objects == 1 (v0.9.0 stencil ids)
+bool             g_objOn  = false;              // per frame: the feature is live (ObjFrameUpdate)
+// v0.10.0 per-draw MVs (see the "PER-DRAW MOTION VECTORS" block above hkDrawIndexed)
+DrawIdRecord     g_didRing[kRing];              // per pass slot, parallel to g_ring: the pass's G-buffer draws (replay + pairing)
+// v0.10.0 phase 3: per pass slot, the pass's FORWARD draws that were re-drawn into the forward depth (forward mode; replayed
+// into the GREEN channel of the same draw-id target, see DidFwdOnDraw / DidFwdReplay)
+DrawIdRecord     g_didFwdRing[kRing];
+bool             g_didCfg = true;               // mv_objects == 2
+bool             g_didOn  = false;              // per frame: the feature is live (ObjFrameUpdate)
+uint32_t         g_didOnLogs = 0;               // "MV draw-ids: ACTIVE / inactive" lines written (cap 20)
+// v0.10.0 phase 8 performance (the "phase 8 (v0.10.0)" config line, the "perf eye N" / "perf cuts" lines)
+int              g_perfCfg = -1;                // dlaa.ini perf_timers: -1 = on with debug = 1 (default), 0 off, 1 on
+bool             g_debugIni = false;            // dlaa.ini debug (the log is written)
+uint8_t          g_medoidDropBits = 0;          // layers whose camera candidates the next passes skip (mv_medoid_drop)
+uint8_t          g_eyeDropBits[2] = {};         // per eye (VR: both eyes must agree)
+uint64_t         g_cMedoidSaved = 0, g_cMedoidPasses = 0, g_cMedoidPassW = 0, g_cMedoidPassC = 0;   // stats window
+int              g_mirVrMode = 2;               // dlaa.ini mirror_vr_mode (VR only): 0 off, 1 every mirror view, 2 only the
+                                                // largest views (the main mirrors), 3 each unit every 2nd frame (held between)
+                                                // v0.10.0 phase 9: 2 = the mirror_vr_views largest views of the frame; 4 =
+                                                // every view, per-draw motion vectors off in the mirror units (camera MVs)
+int              g_mirVrViews = 2;              // v0.10.0 phase 9: dlaa.ini mirror_vr_views (mirror_vr_mode 2), 1..8
+                                                // v0.10.0 phase 10: VR default 1 -> 2 (job D, see the handoff)
+int              g_mirFlatMode = 1;             // v0.10.0 phase 10: dlaa.ini mirror_flat_mode (flat; same values as mirror_vr_mode)
+int MirMode();                                  // v0.10.0 phase 10: the mirror mode in force (VR: mirror_vr_mode, flat: _flat_)
+uint64_t         g_mirVrSkip = 0, g_mirAltHeld = 0, g_mirAltRaw = 0;   // stats window (mirror_vr_mode 2 / 3)
+bool             g_slotPool = true;             // dlaa.ini mv_slot_pool: pass-slot depth twin / forward depth / draw-id
+                                                // textures go back to a shared pool when their pass is consumed
+// v0.10.0 phase 9 VR cost (the "phase 9 (v0.10.0)" config line, the "perf view" line)
+bool             g_areaScissorCfg = true;       // dlaa.ini mv_area_scissor: per-pixel work only inside the DLAA area (+ margin)
+int              g_areaMarginCfg = -1;          // dlaa.ini mv_area_margin (px around the area rect; -1 = dlaa_area_feather + 32)
+int              g_fwdResCfg = 0;               // dlaa.ini mv_fwd_depth_res: 0 = auto (2 in VR, 1 flat), 1 = full, 2 = 1/2 resolution
+uint64_t         g_p9Passes = 0, g_p9Clipped = 0, g_p9Half = 0;   // stats window: passes / of them clipped / 1/2-res forward
+double           g_p9ClipShare = 0.0;           // stats window: sum of the clipped passes' rect share of the image
+D3D11_RECT       g_p9LastClip = { 0, 0, 0, 0 }; // the last clipped pass's rect (logged)
+bool             g_p9ClipLogged = false, g_p9HalfLogged = false;
+extern bool      g_fwdSkipArm;                  // v0.10.0 phase 5: Alt+F8 also logs one pass of skipped forward draws
+void DidOnLeave(ID3D11DeviceContext* ctx);
+void DidOnPassStart(ID3D11DeviceContext* ctx, uint64_t s);
+void DidOnDepthDiscard(ID3D11DeviceContext* ctx);
+void DidOnDiscardMap(ID3D11DeviceContext* ctx, ID3D11Resource* r);
+void DidOnContextReset();
+void DidStatsTag(char* buf, size_t cap, uint64_t passes);
+bool DidFwdOnDraw(ID3D11DeviceContext* ctx, UINT ic, UINT si, INT bv);   // v0.10.0 phase 3 (FwdOnDraw; phase 10: records only)
+void FwdOnPassEnd(ID3D11DeviceContext* ctx);   // v0.10.0 phase 10: the forward-depth batch of the newest pass (scene depth discard)
+void FwdBatch(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int why);   // v0.10.0 phase 10
+void DidFwdNoteDraw(ID3D11DeviceContext* ctx, UINT ic, bool instanced, int verdict, ID3D11DepthStencilState* dss,
+                    ID3D11BlendState* bs);                              // v0.10.0 phase 3: first-20 forward draws line
+// v0.10.0 phase 2 MIRROR UNITS (see the "MIRROR UNITS" block above hkDrawIndexed): the state the earlier hooks read.
+// dlaa.ini mirror_dlaa (default 1) / its live switch (key_mirror_dlaa, Alt+F6; starts at the ini value), mirror_min_px,
+// mirror_max_views.
+int              g_mirCfg       = 1;            // dlaa.ini mirror_dlaa
+std::atomic<bool> g_mirOn{true};                // live switch
+int              g_mirMinPx     = 128;          // dlaa.ini mirror_min_px: a mirror view's width AND height are >= this
+int              g_mirMaxViews  = 8;            // dlaa.ini mirror_max_views: units (1..kMirCap)
+int              g_mirCur       = -1;           // unit of the open mirror view (its G-buffer bind .. its depth discard)
+bool             g_mirGbuf      = false;        // the open view's G-buffer (4 RTVs + its own depth) is the current binding
+bool             g_mirJit       = false;        // the current binding is the open view's G-buffer or forward pass (shifted)
+float            g_mirShX = 0.0f, g_mirShY = 0.0f;   // the open view's viewport shift (px)
+UINT             g_mirW = 0, g_mirH = 0;        // the open view's size (the viewport the shift applies to)
+uint64_t         g_mirHandled = 0, g_mirNotHandled = 0;   // mirror views run as units / left to the game (FIFO stats)
+// v0.10.0 phase 4: DLAA BEFORE THE TONEMAP (see PreTonemapPoint; phase 7: once per pass + hysteresis)
+int              g_preCfg       = 1;            // dlaa.ini dlaa_pre_tonemap
+std::atomic<bool> g_preOn{true};                // live switch (key_pre_tonemap, Alt+F7)
+bool             g_preFailed    = false;        // latched: the HDR unit could not be built / kept failing (blit path)
+int              g_preFailRun   = 0;            // pre-tonemap evaluate failures in a row
+int              g_preStage     = -1;           // last logged stage: 1 pre-tonemap, 0 post-tonemap (blit), -1 none yet
+char             g_preWhy[128]  = "";           // reason of the last logged post-tonemap stage
+int              g_preStageLogs = 0;            // "DLAA stage" lines written (cap)
+uint64_t         g_preRuns = 0, g_preDeferred = 0, g_preFails = 0, g_prePostBlits = 0;   // stats window
+// v0.10.0 phase 7: one decision per pass + hysteresis (dlaa_stage.h), both units alive, forward leave as a decision point
+DlaaStage        g_stage;                       // preferred stage (pre / post) and its hysteresis
+constexpr uint64_t kResumeKeepRuns = 2;         // a colour set idle for more evaluations of its unit drops its history on take-over
+bool             g_fwdBound     = false;        // the current game binding is a main forward binding (1 RTV RGBA16F + scene DSV)
+void*            g_fwdBoundTex  = nullptr;      //   its RTV0 (identity)
+char             g_preLastMiss[128] = "";       // why the last pass could not run before the tonemap (stage lines)
+uint64_t         g_preAtLeave = 0, g_preWarms = 0, g_preResumeResets = 0, g_preFallbackBlits = 0, g_preMissed = 0;   // window
+uint64_t         g_fwdLeaveFirst = 0;           // passes that left the forward binding before the scene depth discard (total)
+uint64_t         g_fwdReentry = 0;              // main forward binds after the pass's decision at its forward leave (total)
+uint64_t         g_fwdTwoColours = 0;           // passes with two different forward colour textures (total)
+int              g_fwdLeaveLogs = 0, g_fwdReentryLogs = 0;
+struct PassSlot;
+void PreTonemapPoint(ID3D11DeviceContext1* ctx, PassSlot& slot, bool atLeave);
+void FwdOnBind(void* fwd);
+void FwdOnLeave(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* rtvs, ID3D11Resource* bindDepth);
+void MirOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* rtvs, ID3D11Resource* depthRes,
+               bool sceneGbuf);
+void MirOnDiscard(ID3D11DeviceContext* ctx, ID3D11Resource* res);
+void MirOnClearDsv(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v);
+void MirOnDiscardMap(ID3D11DeviceContext* ctx, ID3D11Resource* r);
+void MirNextFrame(uint64_t n);
+void MirOnContextReset();
+void MirStatsLog(uint64_t blit);
+UINT             g_objClearFlags = 0;           // ClearFlags of the ClearDSV being handled (OnSceneDepthClear)
+uint64_t         g_objTicks = 0;                // CPU time in ObjOnDraw (QPC ticks, FIFO stats window)
+void ObjOnPassStart(ID3D11DeviceContext* ctx, uint64_t s);
+void ObjOnBind(ID3D11DeviceContext* ctx, bool sceneDsv);
+void ObjFrameUpdate(uint64_t n);
+void ObjOnContextReset();
+void ObjStatsTag(char* buf, size_t cap, uint64_t passes);
+// v0.9.0 r5 forward depth: stats window (defined above hkDrawIndexed); r11: + the near-camera readback slots (ctx)
+void FwdOnPassStart(ID3D11DeviceContext* ctx);
+void FwdOnContextReset();
+#endif
 uint64_t         g_passSeq       = 0;            // passes started so far (= next s)
 uint64_t         g_fifoHead      = 0;            // oldest unconsumed pass (unconsumed = [g_fifoHead, g_passSeq))
 uint64_t         g_blitCount     = 0;            // matched blits (incl. underflow / DLAA off)
 uint64_t         g_cSnapUsed = 0, g_cLiveUsed = 0, g_cUnderflow = 0, g_cOverflow = 0, g_cMirrorIgnored = 0;
 uint64_t         g_cSnapAtDiscard = 0, g_cSnapAtClear = 0, g_cDiscardNoSnap = 0, g_cDiscardSeen = 0;
+uint64_t         g_cSnapAtLeave = 0;             // v0.10.0 phase 7: snapshots taken at a pass's forward leave (before its discard)
 bool             g_depthDirty    = false;        // G-buffer rendered into the scene depth since its last clear
 bool             g_eyeLogged[kMaxEyes] = {};     // "eye blit detected" logged per eye
 bool             g_flatMode      = false;        // a blit with RT0 == DXGI backbuffer was seen (flat, 1 eye)
@@ -1283,6 +1769,7 @@ void SelectDlssPreset(int idx, uint64_t n) {
     if (idx < 0 || idx > 3) return;
     static const char  kLetter[4] = { 0, 'E', 'F', 'M' };
     static const char* kName[4]   = { "default", "E", "F", "M" };
+    g_profExplicit[PK_PRESET] = true;                    // v0.10.0 phase 10: the user's choice (profiles keep it)
     const char* cur = SceneDlaa::DlssPresetName();
     if (!strcmp(cur, kName[idx])) {                      // already this model: re-beep only, no recreate
         Log("DLSS preset already %s (model key %d, Present #%llu) -- unchanged", kName[idx], idx + 1,
@@ -1336,7 +1823,8 @@ void StepSharpRadius(int dir, uint64_t n) {
     PlayBeeps(s);
 }
 
-// v0.6.4 (v0.6.5 Shift+F5 -1 / Shift+F6 +1): DLAA area in 10 % steps, clamped 40..100 (100 = whole image). Each
+// v0.6.4 (v0.6.5 Shift+F5 -1 / Shift+F6 +1): DLAA area in 10 % steps, clamped 20..100 (100 = whole image; v0.10.0 phase 15:
+// the lower limit was 40). Each
 // eye rebuilds its crop textures + NGX feature at its next blit (Ensure sees the new crop size; one hitch), with
 // a DLSS history reset.
 void StepArea(int dir, uint64_t n) {
@@ -1347,14 +1835,15 @@ void StepArea(int dir, uint64_t n) {
     }
     const int cur = SceneDlaa::Area();
     uint32_t cw = 0, ch = 0;
-    if (dir > 0 ? cur >= 100 : cur <= 40) {
+    if (dir > 0 ? cur >= 100 : cur <= SceneDlaa::kAreaMin) {
         SceneDlaa::CropSize(g_sceneW, g_sceneH, cur, &cw, &ch);
         Log("DLAA area now %d%% (%ux%u of %ux%u per eye, area keys, Present #%llu) -- already at the limit, unchanged",
             cur, cw, ch, g_sceneW, g_sceneH, (unsigned long long)n);
         PlayTones(1, 200, 150, 0);                       // low beep: clamp limit (same as the other limit tones)
         return;
     }
-    SceneDlaa::SetArea(cur + 10 * dir);                  // clamps 40..100
+    SceneDlaa::SetArea(cur + 10 * dir);                  // clamps kAreaMin (20)..100
+    g_profExplicit[PK_AREA] = true;                      // v0.10.0 phase 10: the user's choice (profiles keep it)
     const int a = SceneDlaa::Area();
     SceneDlaa::CropSize(g_sceneW, g_sceneH, a, &cw, &ch);
     g_resetNext = true;                                  // DLSS history of both eyes (the rebuild also resets)
@@ -1404,7 +1893,8 @@ bool WriteIniPreserving(const IniKV* kv, int nkv) {
 
     std::string out;
     out.reserve(in.size() + 256);
-    bool seen[8] = {};                                   // nkv <= 8
+    bool seen[32] = {};                                  // nkv <= 32 (v0.10.0 phase 4: was 8; tuning menu: was 16; fps box: was 24)
+    if (nkv > 32) return false;
     if (in.empty()) {
         out += "# dlaa.ini -- settings saved by the ETS2 DLAA injector";
         out += nl;
@@ -1465,22 +1955,67 @@ void SaveSettings(uint64_t n) {
     const float sharp  = SceneDlaa::Sharpness();
     const float radius = SceneDlaa::SharpRadius();
     const int   upscale = g_dlssUpscale.load() ? 1 : 0;   // v0.7.0 (Ctrl+F4)
-    IniKV kv[5] = { { "dlss_preset", {} }, { "dlaa_area", {} }, { "sharpness", {} }, { "sharp_radius", {} },
-                    { "dlss_upscale", {} } };
-    snprintf(kv[0].val, sizeof(kv[0].val), "%s", preset);
-    snprintf(kv[1].val, sizeof(kv[1].val), "%d", area);
-    snprintf(kv[2].val, sizeof(kv[2].val), "%.1f", (double)sharp);
-    snprintf(kv[3].val, sizeof(kv[3].val), "%.1f", (double)radius);
-    snprintf(kv[4].val, sizeof(kv[4].val), "%d", upscale);
-    if (WriteIniPreserving(kv, 5)) {
-        Log("settings saved to dlaa.ini: dlss_preset=%s dlaa_area=%d sharpness=%.1f sharp_radius=%.1f dlss_upscale=%d (save key, Present #%llu)",
-            preset, area, (double)sharp, (double)radius, upscale, (unsigned long long)n);
+    const float lodBias = g_lodBias;                      // v0.9.0 (Ctrl+F1 / Ctrl+F2)
+    const int   objMode = g_objMode;                      // v0.10.0 phase 2 (Alt+F5 switches 2 <-> 0)
+    const int   mirror  = g_mirOn.load() ? 1 : 0;         // v0.10.0 phase 2 (Alt+F6)
+    const int   preTm   = g_preOn.load() ? 1 : 0;         // v0.10.0 phase 4 (Alt+F7)
+    // v0.10.0 phase 10: + perf_profile; dlss_preset / dlaa_area / mirror_dlaa only when EXPLICIT (in dlaa.ini or changed by their
+    // own key) -- a value that only comes from the profile is not written, so the next profile switch still moves it
+    IniKV kv[32] = {};                                    // v0.10.0 tuning menu: was 11 (+ the 7 menu_* keys + the 7 fps_* keys)
+    int nkv = 0;
+    auto add = [&](const char* k) -> char* { kv[nkv].key = k; return kv[nkv++].val; };
+    if (g_profExplicit[PK_PRESET]) snprintf(add("dlss_preset"), sizeof(kv[0].val), "%s", preset);
+    if (g_profExplicit[PK_AREA]) snprintf(add("dlaa_area"), sizeof(kv[0].val), "%d", area);
+    snprintf(add("sharpness"), sizeof(kv[0].val), "%.1f", (double)sharp);
+    snprintf(add("sharp_radius"), sizeof(kv[0].val), "%.1f", (double)radius);
+    snprintf(add("dlss_upscale"), sizeof(kv[0].val), "%d", upscale);
+    snprintf(add("tex_lod_bias"), sizeof(kv[0].val), "%.2f", (double)lodBias);
+    char cutTxt[16];                                      // v0.10.0 phase 13 (Ctrl+Shift+F1 / F2): "same" or the value
+    LodCutoutText(cutTxt, sizeof(cutTxt));
+    snprintf(add("tex_lod_bias_cutout"), sizeof(kv[0].val), "%s", cutTxt);
+    snprintf(add("mv_objects"), sizeof(kv[0].val), "%d", objMode);
+    if (g_profExplicit[PK_MIRROR_DLAA]) snprintf(add("mirror_dlaa"), sizeof(kv[0].val), "%d", mirror);
+    snprintf(add("dlaa_pre_tonemap"), sizeof(kv[0].val), "%d", preTm);
+    snprintf(add("perf_profile"), sizeof(kv[0].val), "%s", kProfName[g_profile]);
+    if (g_menuExplicit) {                                 // v0.10.0 tuning menu: the panel placement, only once changed in the menu
+        snprintf(add("menu_x"), sizeof(kv[0].val), "%d", g_menuX);
+        snprintf(add("menu_y"), sizeof(kv[0].val), "%d", g_menuY);
+        snprintf(add("menu_scale"), sizeof(kv[0].val), "%.1f", (double)g_menuScale);
+        snprintf(add("menu_vr_x"), sizeof(kv[0].val), "%d", g_menuVrX);
+        snprintf(add("menu_vr_y"), sizeof(kv[0].val), "%d", g_menuVrY);
+        snprintf(add("menu_vr_scale"), sizeof(kv[0].val), "%.1f", (double)g_menuVrScale);
+        snprintf(add("menu_vr_depth"), sizeof(kv[0].val), "%d", g_menuVrDepth);
+    }
+    if (g_fpsExplicit) {                                  // v0.10.0 fps box: on / off + placement, only once changed in the menu
+        snprintf(add("fps_show"), sizeof(kv[0].val), "%d", g_fpsShow ? 1 : 0);
+        snprintf(add("fps_x"), sizeof(kv[0].val), "%d", g_fpsX);
+        snprintf(add("fps_y"), sizeof(kv[0].val), "%d", g_fpsY);
+        snprintf(add("fps_scale"), sizeof(kv[0].val), "%.1f", (double)g_fpsScale);
+        snprintf(add("fps_vr_x"), sizeof(kv[0].val), "%d", g_fpsVrX);
+        snprintf(add("fps_vr_y"), sizeof(kv[0].val), "%d", g_fpsVrY);
+        snprintf(add("fps_vr_scale"), sizeof(kv[0].val), "%.1f", (double)g_fpsVrScale);
+    }
+    char menuW[160] = "";
+    if (g_menuExplicit)
+        snprintf(menuW, sizeof(menuW), " -- menu panel: menu_x=%d menu_y=%d menu_scale=%.1f menu_vr_x=%d menu_vr_y=%d menu_vr_scale=%.1f "
+                 "menu_vr_depth=%d", g_menuX, g_menuY, (double)g_menuScale, g_menuVrX, g_menuVrY, (double)g_menuVrScale, g_menuVrDepth);
+    char fpsW[160] = "";
+    if (g_fpsExplicit)
+        snprintf(fpsW, sizeof(fpsW), " -- fps box: fps_show=%d fps_x=%d fps_y=%d fps_scale=%.1f fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f",
+                 g_fpsShow ? 1 : 0, g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY, (double)g_fpsVrScale);
+    char notW[96];
+    snprintf(notW, sizeof(notW), "%s%s%s", g_profExplicit[PK_PRESET] ? "" : " dlss_preset", g_profExplicit[PK_AREA] ? "" : " dlaa_area",
+             g_profExplicit[PK_MIRROR_DLAA] ? "" : " mirror_dlaa");
+    if (WriteIniPreserving(kv, nkv)) {
+        Log("settings saved to dlaa.ini: dlss_preset=%s dlaa_area=%d sharpness=%.1f sharp_radius=%.1f dlss_upscale=%d tex_lod_bias=%.2f tex_lod_bias_cutout=%s mv_objects=%d mirror_dlaa=%d dlaa_pre_tonemap=%d perf_profile=%s (save key, Present #%llu)%s%s%s%s",
+            preset, area, (double)sharp, (double)radius, upscale, (double)lodBias, cutTxt, objMode, mirror, preTm, kProfName[g_profile],
+            (unsigned long long)n, notW[0] ? " -- profile defaults not written:" : "", notW, menuW, fpsW);
         BeepSeq s;                                       // success: rising two-tone 600 -> 900 Hz, 120 ms each
         s.n = 2; s.freq[0] = 600; s.ms[0] = 120; s.freq[1] = 900; s.ms[1] = 120; s.gapMs = 40;
         PlayBeeps(s);
     } else {
-        Log("settings save FAILED (dlss_preset=%s dlaa_area=%d sharpness=%.1f sharp_radius=%.1f dlss_upscale=%d, save key, Present #%llu)",
-            preset, area, (double)sharp, (double)radius, upscale, (unsigned long long)n);
+        Log("settings save FAILED (dlss_preset=%s dlaa_area=%d sharpness=%.1f sharp_radius=%.1f dlss_upscale=%d tex_lod_bias=%.2f tex_lod_bias_cutout=%s mv_objects=%d mirror_dlaa=%d dlaa_pre_tonemap=%d, save key, Present #%llu)",
+            preset, area, (double)sharp, (double)radius, upscale, (double)lodBias, cutTxt, objMode, mirror, preTm, (unsigned long long)n);
         PlayTones(1, 200, 400, 0);                       // failure: one long 200 Hz tone (400 ms)
     }
 }
@@ -1490,10 +2025,11 @@ void SaveSettings(uint64_t n) {
 //   2 = DLSS (NGX upscales render res -> eye texture; dlss_upscale on)      -- 2 high beeps
 //   0 = off  (raw game picture)                                             -- 1 low beep
 // The render size itself is the game's r_scale: at 100 % scaling modes 1 and 2 give the same picture.
-void CycleMode(uint64_t n) {
+// v0.10.0: dir -1 walks the cycle backwards (the tuning menu's Left key); the End key is dir +1.
+void CycleMode(uint64_t n, int dir) {
     const bool wasOn = g_dlaaOn.load();
     const int cur = !wasOn ? 0 : (g_dlssUpscale.load() ? 2 : 1);
-    int next = cur == 0 ? 1 : (cur == 1 ? 2 : 0);
+    int next = dir < 0 ? (cur + 2) % 3 : (cur + 1) % 3;   // forward: off -> DLAA -> DLSS -> off
     if (next != 0 && !wasOn && g_gameDeviceChanged) {
         Log("mode stays OFF (mode key, Present #%llu): the game render device changed -- restart the game", (unsigned long long)n);
         PlayTones(1, 200, 400, 0);
@@ -1514,6 +2050,48 @@ void CycleMode(uint64_t n) {
     if (next == 0) PlayTones(1, 300, 150, 0);
     else           PlayTones(next, 1200, 150, 100);
     OnLiveTuningChange();
+}
+
+// v0.10.0: the three toggles that were written inline in the key handler (the tuning menu calls them too). Unchanged.
+// Shift+F11 (key_dlaa_toggle): DLAA on / off (keeps the mode).
+void ToggleDlaa(uint64_t n) {
+    if (g_gameDeviceChanged && !g_dlaaOn.load()) {
+        Log("DLAA stays OFF (%s, Present #%llu): the game render device changed, our NGX feature / "
+            "textures / queries belong to the old device -- restart the game", KeyName(KA_DLAA_TOGGLE), (unsigned long long)n);
+        PlayTones(1, 200, 400, 0);
+        return;
+    }
+    const bool on = !g_dlaaOn.load();
+    g_dlaaOn = on;
+    if (on) { g_resetNext = true; MvInvalidate(); }   // drop DLSS history + stale MV candidates on re-enable
+    Log("DLAA %s (%s, Present #%llu)", on ? "ON" : "OFF", KeyName(KA_DLAA_TOGGLE), (unsigned long long)n);
+    PlayTones(1, on ? 1200 : 300, 150, 0);
+    OnLiveTuningChange();                            // v0.6.2: restart the timing windows (GPU spans: on/off compare)
+}
+// Ctrl+F4 (key_upscale_toggle): v0.7.0 DLSS upscale on / off.
+void ToggleUpscale(uint64_t n) {
+    const bool on = !g_dlssUpscale.load();
+    g_dlssUpscale = on;
+    if (on) g_upBlocked[0] = 0;                      // a failed upscale size is retried
+    g_resetNext = true;                              // each eye also rebuilds its textures + NGX feature at its next blit
+    Log("DLSS upscale %s (%s, Present #%llu)%s", on ? "ON" : "OFF", KeyName(KA_UPSCALE_TOGGLE), (unsigned long long)n,
+        on ? " -- render (scene) res -> blit RT res whenever the blit RT is larger"
+           : " -- DLAA at render res, copied back over the blit source (v0.6.5 path)");
+    PlayTones(1, on ? 1200 : 300, 150, 0);
+    OnLiveTuningChange();                            // timing windows restart (new pipeline shape)
+}
+// Ctrl+F3 (key_fwd_depth): v0.9.0 r5 forward depth for the MVs (A/B switch).
+void ToggleFwdDepth(uint64_t n) {
+    const bool on = !g_fwdOn.load();
+    g_fwdOn = on;
+    g_profExplicit[PK_FWD_DEPTH] = true;             // v0.10.0 phase 10: the user's choice (no profile / VR budget)
+    Log("MV forward depth %s (%s, Present #%llu)%s", on ? "ON" : "OFF", KeyName(KA_FWD_DEPTH),
+        (unsigned long long)n,
+        !g_fwdCfg ? " -- no effect: dlaa.ini mv_fwd_depth = 0"
+        : (on ? " -- alpha-blended forward draws (wires, cables, fences) give their pixels their own depth for "
+                "the motion vectors (Ctrl+F6 view: yellow)"
+              : " -- motion vectors use the scene depth alone (wires over the sky move like the sky)"));
+    PlayTones(1, on ? 1200 : 300, 150, 0);
 }
 #endif
 // Adds the time from construction to scope exit to the blit CPU counters (every return path of the matched part).
@@ -1625,17 +2203,22 @@ struct OpticalCentre {
     uint32_t adopts = 0;
 };
 OpticalCentre    g_optC[kMaxEyes];
+// v0.10.0 phase 15: the same per eye for the VR menu / truck-preview PICTURE (main menu, garage / truck dealer screens), from
+// the preview eye verdict readbacks (PvPollEyeReadbacks): the reference tile's skew mapped through the tile layout into the
+// composited picture. Measured on the VR main menu before any world frame exists (g_optC is still unknown there).
+OpticalCentre    g_pvOptC[kMaxEyes];
 constexpr int    kOptMinSamples  = 4;
 uint32_t         g_cOptRejected  = 0;            // samples ignored by the sanity check (non-finite / |p|,|q| > 0.6)
 
-void NoteOpticalCentre(int eye, float p, float q) {
+// `set` = g_optC (tag "DLAA area", the world eyes, unchanged log lines) or g_pvOptC (tag "preview DLAA area", phase 15).
+void NoteOpticalCentreIn(OpticalCentre* set, const char* tag, int eye, float p, float q) {
     if (eye < 0 || eye >= kMaxEyes) return;
     if (!std::isfinite(p) || !std::isfinite(q) || std::fabs(p) > 0.6f || std::fabs(q) > 0.6f) {
         if (g_cOptRejected++ < 5)
-            Log("DLAA area: eye %d optical centre sample ignored (p=%.4f q=%.4f, sanity limit 0.6)", eye, (double)p, (double)q);
+            Log("%s: eye %d optical centre sample ignored (p=%.4f q=%.4f, sanity limit 0.6)", tag, eye, (double)p, (double)q);
         return;
     }
-    OpticalCentre& c = g_optC[eye];
+    OpticalCentre& c = set[eye];
     c.p[c.head] = p; c.q[c.head] = q;
     c.head = (c.head + 1) % OpticalCentre::kWin;
     if (c.n < OpticalCentre::kWin) ++c.n;
@@ -1647,7 +2230,20 @@ void NoteOpticalCentre(int eye, float p, float q) {
     if (c.have && std::fabs(u - c.u) <= 0.01f && std::fabs(v - c.v) <= 0.01f) return;
     c.have = true; c.u = u; c.v = v;
     if (c.adopts++ < 100)
-        Log("DLAA area: eye %d optical centre uv=(%.3f, %.3f) from p=%.4f q=%.4f", eye, (double)u, (double)v, mp, mq);
+        Log("%s: eye %d optical centre uv=(%.3f, %.3f) from p=%.4f q=%.4f", tag, eye, (double)u, (double)v, mp, mq);
+}
+void NoteOpticalCentre(int eye, float p, float q) { NoteOpticalCentreIn(g_optC, "DLAA area", eye, p, q); }
+
+// v0.10.0 phase 15: the optical centre of VR eye `eye` for the preview units' DLAA rect, the preview depth-assembly clip and
+// the VR menu panel / fps box: the world eye's (g_optC) when known, else the preview picture's own (g_pvOptC), else the
+// image centre. false = neither is known yet (the image centre is returned).
+bool VrEyeCentre(int eye, float* u, float* v) {
+    *u = 0.5f; *v = 0.5f;
+    if (eye < 0 || eye >= kMaxEyes) return false;
+    const OpticalCentre& c = g_optC[eye].have ? g_optC[eye] : g_pvOptC[eye];
+    if (!c.have) return false;
+    *u = c.u; *v = c.v;
+    return true;
 }
 
 // Sign of the projection x-skew of each usable MVP votes the absolute eye (cabin layer first, then world).
@@ -1820,6 +2416,9 @@ constexpr uint32_t kSpanEvery     = 300;         // scene samples per log line (
 double           g_spanSceneSum = 0.0, g_spanGbufSum = 0.0;
 uint32_t         g_spanSceneN = 0, g_spanGbufN = 0, g_spanSceneSkip = kSpanWarmup, g_spanGbufSkip = kSpanWarmup;
 uint32_t         g_spanSceneDropped = 0;         // scene spans discarded in the window (no clean pairing)
+double           g_spanSceneLast = -1.0;         // v0.10.0 phase 8: the last logged scene ms/frame (perf eye lines), -1 = none
+uint32_t         g_spanSceneLastN = 0;
+uint32_t         g_spanSceneLastSeq = 0;         // v0.10.0 tuning menu: bumped at every new g_spanSceneLast (fresh-figure test)
 // Window key: any change restarts the window (DLAA on/off / passive / preset / MV / sharpness / radius call
 // ResetSpanWindow via OnLiveTuningChange; the key also catches the Ctrl+F9 self-test and Ctrl+F8 jitter-only).
 struct SpanKey {
@@ -1865,7 +2464,11 @@ void SpanOnPassStart(ID3D11DeviceContext* ctx, uint64_t s, bool frameStart) {
     if (frameStart && g_sceneSpan >= 0) {          // previous frame never reached a clean last blit
         g_sceneRing.End(ctx, g_sceneSpan, false); g_sceneSpan = -1; ++g_spanSceneDropped;
     }
+#ifdef WITH_DLAA
+    const bool on = GpuTimingOn() || GpuPerf::On();      // v0.10.0 phase 8: the perf lines print the scene span next to them
+#else
     const bool on = GpuTimingOn();
+#endif
     g_spanPendGbuf = on;
     g_spanPendScene = on && frameStart;
     g_spanPendS = s;
@@ -1922,6 +2525,7 @@ void SpanPollAndLog(ID3D11DeviceContext* ctx) {
         g_spanSceneN ? g_spanSceneSum / g_spanSceneN : 0.0, g_spanGbufN ? g_spanGbufSum / g_spanGbufN : 0.0,
         g_spanSceneN, g_spanGbufN, g_spanSceneDropped, g_vrMode ? "VR" : "flat",
         (unsigned long long)g_frames.load());
+    if (g_spanSceneN) { g_spanSceneLast = g_spanSceneSum / g_spanSceneN; g_spanSceneLastN = g_spanSceneN; ++g_spanSceneLastSeq; }   // v0.10.0 phase 8
     g_spanSceneSum = g_spanGbufSum = 0.0;
     g_spanSceneN = g_spanGbufN = 0;
     g_spanSceneDropped = 0;
@@ -2200,29 +2804,35 @@ void TraceClearDsv(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v, UINT fl,
 }
 
 void STDMETHODCALLTYPE hkDispatch(ID3D11DeviceContext* ctx, UINT x, UINT y, UINT z) {
+    if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oDispatch(ctx, x, y, z); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     TraceDispatch(ctx, x, y, z);
     oDispatch(ctx, x, y, z);
 }
 void STDMETHODCALLTYPE hkCopyResource(ID3D11DeviceContext* ctx, ID3D11Resource* dst, ID3D11Resource* src) {
+    if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oCopyResource(ctx, dst, src); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     TraceCopyRes(ctx, dst, src);
     oCopyResource(ctx, dst, src);
 }
 void STDMETHODCALLTYPE hkCopySubresourceRegion(ID3D11DeviceContext* ctx, ID3D11Resource* dst, UINT dsub, UINT dx, UINT dy,
         UINT dz, ID3D11Resource* src, UINT ssub, const D3D11_BOX* box) {
+    if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oCopySubresourceRegion(ctx, dst, dsub, dx, dy, dz, src, ssub, box); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     TraceCopySub(ctx, "CopySubresourceRegion", dst, dsub, dx, dy, dz, src, ssub, box, 0, false);
     oCopySubresourceRegion(ctx, dst, dsub, dx, dy, dz, src, ssub, box);
 }
 void STDMETHODCALLTYPE hkCopySubresourceRegion1(ID3D11DeviceContext1* ctx, ID3D11Resource* dst, UINT dsub, UINT dx, UINT dy,
         UINT dz, ID3D11Resource* src, UINT ssub, const D3D11_BOX* box, UINT flags) {
+    if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oCopySubresourceRegion1(ctx, dst, dsub, dx, dy, dz, src, ssub, box, flags); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     TraceCopySub(ctx, "CopySubresourceRegion1", dst, dsub, dx, dy, dz, src, ssub, box, flags, true);
     oCopySubresourceRegion1(ctx, dst, dsub, dx, dy, dz, src, ssub, box, flags);
 }
 void STDMETHODCALLTYPE hkResolveSubresource(ID3D11DeviceContext* ctx, ID3D11Resource* dst, UINT dsub, ID3D11Resource* src,
         UINT ssub, DXGI_FORMAT f) {
+    if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oResolveSubresource(ctx, dst, dsub, src, ssub, f); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     TraceResolve(ctx, dst, dsub, src, ssub, f);
     oResolveSubresource(ctx, dst, dsub, src, ssub, f);
 }
 void STDMETHODCALLTYPE hkClearRTV(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* v, const FLOAT* c) {
+    if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oClearRTV(ctx, v, c); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     TraceClearRtv(ctx, v, c);
     oClearRTV(ctx, v, c);
 }
@@ -2287,6 +2897,10 @@ struct PvTarget {                                // per frame, indexed by compos
     int       unit = -1;                         // round 5: unit (= eye) it was given this frame (-1 = not resolved / none)
     int       flushes = 0;                       // v0.8.1 round 5: PreviewFlush calls on it this frame (DLAA attempts)
     int       maskAtFlush = 0;                   // ... slotMask at the first of them
+    // v0.10.0 phase 15: the game's own RTV of its last composite into this target (ref dropped at Present) -- the VR tuning
+    // menu panel / fps box is drawn through it after the flush (MenuDrawPreview), whatever is bound by then
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv;
+    bool      unitTried = false;                 // v0.10.0 phase 15: PvUnitOf ran for it this frame (unit = its answer)
 };
 struct PvUnit {                                  // round 5: one DLAA unit per EYE (flat: unit 0), persistent
     SceneDlaa dl;                                // instance tag (SetEye) 10 + unit in the logs ("eye 10" = eye 0)
@@ -2430,11 +3044,25 @@ bool PvIsBackbufferTarget(ID3D11Texture2D* tex) {
     return g_bbW && td.Width == g_bbW && td.Height == g_bbH && td.Format == g_bbFmt;
 }
 
+// v0.10.0 phase 15: the VR tuning menu panel / fps box must go onto the menu / truck-preview eye pictures (MenuDrawPreview).
+inline bool MenuVrPreviewWanted() {
+    return g_launchVr == 1 && (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow);
+}
+// v0.10.0 phase 15: the preview MV candidate collection and the tile-layout / eye-verdict readbacks run while the preview DLAA
+// runs -- and in VR also while the panel / fps box is up with DLAA off or passive: MenuDrawPreview needs the eye of each
+// preview picture (PvUnitOf, eye map) and its optical centre (g_pvOptC). Nothing else uses them then (PreviewFlush runs no
+// DLAA, the depth assembly stays off).
+inline bool PvReadbacksOn() {
+    return (g_dlaaOn.load(std::memory_order_relaxed) && !g_passive.load(std::memory_order_relaxed)) || MenuVrPreviewWanted();
+}
+uint64_t         g_pvVrPicFrame = 0;             // phase 15: Present of the last composite into a VR eye picture (MenuVr)
+
 // Unit of target `idx` for this frame (resolved once per frame), or -1 = leave the target untouched this frame.
 int PvUnitOf(int idx, uint64_t fr) {
     PvTarget& t = g_pt[idx];
     if (t.unit >= 0) return t.unit;
-    int u = idx;                                         // flat / not a VR launch: the order (one target)
+    t.unitTried = true;                                  // v0.10.0 phase 15 (MenuDrawPreview asks only once per frame)
+    int u = idx;                                       // flat / not a VR launch: the order (one target)
     if (g_launchVr == 1 && !PvIsBackbufferTarget(t.tex.Get())) {   // v0.7.9: a backbuffer target takes the flat route
         void* const rt = t.tex.Get();
         int e = PvEyeFind(rt);
@@ -2490,21 +3118,24 @@ bool PvEnsureEyeReadback(ID3D11DeviceContext* ctx) {
 }
 
 // Mean projection x skew over the finite MVPs of one half (n x 16 floats, rows). false = no usable MVP.
-bool PvMeanSkew(const float* data, int n, double* pOut) {
-    double sum = 0.0; int cnt = 0;
+// v0.10.0 phase 15: + the mean y skew q = -dot(row1.xyz, row3.xyz) / |row3.xyz|^2 over the same MVPs (EyeVerdict's q).
+bool PvMeanSkew(const float* data, int n, double* pOut, double* qOut) {
+    double sum = 0.0, sumQ = 0.0; int cnt = 0;
     for (int i = 0; i < n; ++i) {
         const float* m = data + (size_t)i * 16;
         bool finite = true;
         for (int k = 0; k < 16; ++k) if (!std::isfinite(m[k])) { finite = false; break; }
         if (!finite) continue;
-        const float* r0 = m; const float* r3 = m + 12;
+        const float* r0 = m; const float* r1 = m + 4; const float* r3 = m + 12;
         const double d33 = (double)r3[0] * r3[0] + (double)r3[1] * r3[1] + (double)r3[2] * r3[2];
         if (d33 <= 1e-12) continue;
         sum += -((double)r0[0] * r3[0] + (double)r0[1] * r3[1] + (double)r0[2] * r3[2]) / d33;
+        sumQ += -((double)r1[0] * r3[0] + (double)r1[1] * r3[1] + (double)r1[2] * r3[2]) / d33;
         ++cnt;
     }
     if (!cnt) return false;
     *pOut = sum / cnt;
+    *qOut = sumQ / cnt;
     return true;
 }
 
@@ -2533,6 +3164,8 @@ void PvApplyVerdict(void* rt, int eye, double p) {
     }
 }
 
+void PvNotePictureCentre(int eye, int order, double p, double q);   // v0.10.0 phase 15 (after the tile layout below)
+
 // Poll pending readbacks oldest-first (stop at the first the GPU has not finished) and turn each into a verdict.
 void PvPollEyeReadbacks(ID3D11DeviceContext* ctx) {
     while (g_pvRbPending > 0) {
@@ -2545,9 +3178,9 @@ void PvPollEyeReadbacks(ID3D11DeviceContext* ctx) {
             if (SUCCEEDED(hr)) ctx->Unmap(r.staging, 0);
             continue;
         }
-        double p[2] = {};
+        double p[2] = {}, q[2] = {};
         bool ok[2];
-        for (int i = 0; i < 2; ++i) ok[i] = PvMeanSkew((const float*)ms.pData + (size_t)i * kPvRbMvps * 16, r.n[i], &p[i]);
+        for (int i = 0; i < 2; ++i) ok[i] = PvMeanSkew((const float*)ms.pData + (size_t)i * kPvRbMvps * 16, r.n[i], &p[i], &q[i]);
         ctx->Unmap(r.staging, 0);
         ++g_pvVerdicts;
         if (!ok[0] || !ok[1] || r.rt[0] == r.rt[1] || std::fabs(p[0] - p[1]) < 0.05) {
@@ -2562,6 +3195,8 @@ void PvPollEyeReadbacks(ID3D11DeviceContext* ctx) {
                 (unsigned long long)r.frame, r.rt[0], p[0], r.rt[1], p[1], hi);
         PvApplyVerdict(r.rt[hi], 0, p[hi]);
         PvApplyVerdict(r.rt[1 - hi], 1, p[1 - hi]);
+        PvNotePictureCentre(0, hi, p[hi], q[hi]);       // v0.10.0 phase 15: each eye's optical centre in the picture
+        PvNotePictureCentre(1, 1 - hi, p[1 - hi], q[1 - hi]);
     }
 }
 
@@ -2821,6 +3456,21 @@ struct PvAsmTimer {
     }
 };
 PvAsmTimer       g_pvAsmTimer;
+
+// v0.10.0 phase 15: eye `eye`'s optical centre in the COMPOSITED picture of composite order `order` (the preview units' DLAA
+// rect, the VR panel / fps box on the menu screens), from a preview eye verdict's mean skews p / q of that order's reference
+// pass. They belong to the reference TILE's clip space; a tiled layout maps reference-tile ndc = h * picture ndc + c and the
+// optical axis lands at ndc (-p, -q), so in the picture p' = (p + c.x) / h.x, q' = (q + c.y) / h.y. (ATS VR log 18:10:
+// reference p = 1.4850 with x * 2 - 1 -> 0.2425 = the world eye 0's p exactly.) An unknown layout gives no sample; an untiled
+// one is the identity. Same window / adopt rule as the world eyes (NoteOpticalCentreIn).
+void PvNotePictureCentre(int eye, int order, double p, double q) {
+    if (order < 0 || order >= kPtMax) return;
+    const PvLayout& L = g_pvLay[order];
+    if (!L.known || (L.tiled && (!(L.hx > 0.0f) || !(L.hy > 0.0f)))) return;
+    const double pp = L.tiled ? (p + L.cx) / L.hx : p;
+    const double qq = L.tiled ? (q + L.cy) / L.hy : q;
+    NoteOpticalCentreIn(g_pvOptC, "preview DLAA area", eye, (float)pp, (float)qq);
+}
 
 // Viewport-shift factor of a tile pass (picture pixels -> tile pixels): a * h of its group's layout; 1 when untiled.
 void PvShiftScale(int slot, float* kx, float* ky) {
@@ -3087,30 +3737,109 @@ bool PvEnsureAsm(ID3D11DeviceContext* ctx, PvAsm& A, const PvLayout& L, int g) {
     return true;
 }
 
+// v0.10.0 phase 15: the picture-pixel rect [x0, x1) x [y0, y1) the preview units read the picture depth in: with dlaa_area < 100
+// in VR (PreviewFlush's vrArea rule) the union of BOTH eyes' DLAA rects (a tile pass's eye is only known at its composite,
+// the same reason as PassViewSetup's union for the world) + kPvAsmClipMargin px; otherwise the whole picture (false).
+// A backbuffer-sized picture is the flat route (PvIsBackbufferTarget) and never clipped.
+extern bool      g_pvCapActive;                  // (defined with the Ctrl+F10 preview capture below)
+extern bool      g_pvSmActive;                   // (defined with the seam capture below)
+constexpr UINT   kPvAsmClipMargin = 32;
+uint64_t         g_pvAsmSkipWin = 0;             // tile passes outside the clip this window (no DS copy, no reduce)
+uint64_t         g_pvAsmClipWin = 0;             // tile passes reduced inside the clip this window
+UINT             g_pvAsmClipW = 0, g_pvAsmClipH = 0;   // the last clip size (log)
+bool PvAsmClip(const PvLayout& L, UINT* x0, UINT* y0, UINT* x1, UINT* y1) {
+    *x0 = 0; *y0 = 0; *x1 = L.W; *y1 = L.H;
+    if (g_launchVr != 1 || g_pvCapActive || g_pvSmActive || !L.W || !L.H) return false;
+    const int area = SceneDlaa::Area();
+    if (area >= 100) return false;
+    if (g_bbW && L.W == g_bbW && L.H == g_bbH) return false;
+    UINT l = L.W, t = L.H, r = 0, b = 0;
+    for (int e = 0; e < 2; ++e) {
+        float u = 0.5f, v = 0.5f;
+        VrEyeCentre(e, &u, &v);
+        uint32_t rx = 0, ry = 0, rw = L.W, rh = L.H;
+        SceneDlaa::CropRect(L.W, L.H, area, u, v, &rx, &ry, &rw, &rh);
+        l = (std::min)(l, (UINT)rx); t = (std::min)(t, (UINT)ry);
+        r = (std::max)(r, (UINT)(rx + rw)); b = (std::max)(b, (UINT)(ry + rh));
+    }
+    *x0 = l > kPvAsmClipMargin ? l - kPvAsmClipMargin : 0u;
+    *y0 = t > kPvAsmClipMargin ? t - kPvAsmClipMargin : 0u;
+    *x1 = r + kPvAsmClipMargin < L.W ? r + kPvAsmClipMargin : L.W;
+    *y1 = b + kPvAsmClipMargin < L.H ? b + kPvAsmClipMargin : L.H;
+    return *x1 > *x0 && *y1 > *y0;
+}
+
+// The frame's clear of a group's picture depth to 0 (far, reversed-Z). v0.10.0 phase 15: only the clip rect when it is smaller
+// than the picture (ID3D11DeviceContext1::ClearView with one rect; the whole-view clear when the context has no 11.1
+// interface). Outside the rect the texture keeps old values nobody reads (the units read inside their rect, which lies in
+// the clip; the clip follows dlaa_area / the centres in the same frame as the units' rects).
+void PvAsmClear(ID3D11DeviceContext* ctx, PvAsm& A, UINT x0, UINT y0, UINT x1, UINT y1) {
+    const FLOAT zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    static int s_clearView = -1;                         // D3D11_FEATURE_D3D11_OPTIONS.ClearView of the driver (once)
+    if (s_clearView < 0) {
+        PcPtr<ID3D11Device> dev;
+        ctx->GetDevice(dev.GetAddressOf());
+        D3D11_FEATURE_DATA_D3D11_OPTIONS o{};
+        s_clearView = dev && SUCCEEDED(dev->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS, &o, sizeof(o))) && o.ClearView
+                      ? 1 : 0;
+        Log("preview depth assembly: ClearView %s (the DLAA-area clip clears %s)", s_clearView ? "supported" : "NOT supported",
+            s_clearView ? "only the clip rect" : "the whole picture depth");
+    }
+    if (s_clearView == 1 && (x0 > 0 || y0 > 0 || x1 < A.w || y1 < A.h)) {
+        PcPtr<ID3D11DeviceContext1> c1;
+        if (SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)c1.GetAddressOf())) && c1) {
+            const D3D11_RECT rc{ (LONG)x0, (LONG)y0, (LONG)x1, (LONG)y1 };
+            c1->ClearView(A.uav.Get(), zero, &rc, 1);
+            return;
+        }
+    }
+    ctx->ClearUnorderedAccessViewFloat(A.uav.Get(), zero);
+}
+
 // DiscardView of tile pass `slot` of group `g` (the shared DS holds it): copy + reduce into the picture depth.
+// v0.10.0 phase 15: with a clip (PvAsmClip) the frame's clear and every reduce stay inside it, and a tile whose picture rect
+// misses it entirely is skipped (no DS copy either) but still counts as assembled. The DS copy itself stays a whole-resource
+// copy: D3D11 copies a depth-stencil resource only whole (CopySubresourceRegion needs a null box for it), and the game's
+// D32_FLOAT_S8X24_UINT DS_P has no SRV to read the rect from.
 void PvAssembleTile(ID3D11DeviceContext* ctx, int g, int slot) {
     const PvLayout& L = g_pvLay[g];
     PvAsm& A = g_pvAsm[g];
     if (!PvEnsureAsm(ctx, A, L, g)) return;
+    UINT cx0 = 0, cy0 = 0, cx1 = L.W, cy1 = L.H;
+    const bool clip = PvAsmClip(L, &cx0, &cy0, &cx1, &cy1);
+    // the tile's picture-pixel rect (+1 px margin; the shader rejects pixels outside the tile), clipped (phase 15)
+    const PvTileFit& f = L.t[slot];
+    const double Ax = (double)f.ax * L.hx, Bx = (double)f.ax * L.cx + f.bx;
+    const double Ay = (double)f.ay * L.hy, By = (double)f.ay * L.cy + f.by;
+    const double xf0 = (-1.0 - Bx) / Ax, xf1 = (1.0 - Bx) / Ax, yf0 = (-1.0 - By) / Ay, yf1 = (1.0 - By) / Ay;
+    auto clampPx = [](double v, UINT lim) { return v < 0.0 ? 0u : (v > (double)lim ? lim : (UINT)v); };
+    UINT px0 = clampPx(std::floor((xf0 + 1.0) * 0.5 * L.W) - 1.0, L.W);
+    UINT px1 = clampPx(std::ceil((xf1 + 1.0) * 0.5 * L.W) + 1.0, L.W);
+    UINT py0 = clampPx(std::floor((1.0 - yf1) * 0.5 * L.H) - 1.0, L.H);
+    UINT py1 = clampPx(std::ceil((1.0 - yf0) * 0.5 * L.H) + 1.0, L.H);
+    if (clip) {
+        g_pvAsmClipW = cx1 - cx0; g_pvAsmClipH = cy1 - cy0;
+        px0 = (std::max)(px0, cx0); px1 = (std::min)(px1, cx1);
+        py0 = (std::max)(py0, cy0); py1 = (std::min)(py1, cy1);
+        if (px1 <= px0 || py1 <= py0) {                  // this tile shows nothing the units read: nothing to do
+            if (!A.frameMask) {                          // (the frame's clear still has to happen once)
+                t_inDlaa = true;
+                PvAsmClear(ctx, A, cx0, cy0, cx1, cy1);
+                t_inDlaa = false;
+            }
+            A.frameMask |= 1 << slot;
+            ++g_pvAsmSkipWin;
+            if (A.frameMask == L.slotMask) A.twin.valid = true;
+            return;
+        }
+        ++g_pvAsmClipWin;
+    }
     t_inDlaa = true;
     const int tq = g_pvAsmTimer.Begin(ctx);
-    if (!A.frameMask) {
-        const FLOAT zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };   // far (reversed-Z) where no tile writes
-        ctx->ClearUnorderedAccessViewFloat(A.uav.Get(), zero);
-    }
+    if (!A.frameMask) PvAsmClear(ctx, A, cx0, cy0, cx1, cy1);   // far (reversed-Z) where no tile writes
     const bool ok = g_pvTileTwin.Snapshot(ctx, g_pvDs.Get(), false);
     D3D11_MAPPED_SUBRESOURCE mp{};
     if (ok && SUCCEEDED(ctx->Map(g_pvAsmCb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) {
-        const PvTileFit& f = L.t[slot];
-        const double Ax = (double)f.ax * L.hx, Bx = (double)f.ax * L.cx + f.bx;
-        const double Ay = (double)f.ay * L.hy, By = (double)f.ay * L.cy + f.by;
-        // the tile's picture-pixel rect (+1 px margin; the shader rejects pixels outside the tile)
-        const double xf0 = (-1.0 - Bx) / Ax, xf1 = (1.0 - Bx) / Ax, yf0 = (-1.0 - By) / Ay, yf1 = (1.0 - By) / Ay;
-        auto clampPx = [](double v, UINT lim) { return v < 0.0 ? 0u : (v > (double)lim ? lim : (UINT)v); };
-        const UINT px0 = clampPx(std::floor((xf0 + 1.0) * 0.5 * L.W) - 1.0, L.W);
-        const UINT px1 = clampPx(std::ceil((xf1 + 1.0) * 0.5 * L.W) + 1.0, L.W);
-        const UINT py0 = clampPx(std::floor((1.0 - yf1) * 0.5 * L.H) - 1.0, L.H);
-        const UINT py1 = clampPx(std::ceil((1.0 - yf0) * 0.5 * L.H) + 1.0, L.H);
         struct { float map[4]; UINT fw, fh, tw, th, ox, oy, rw, rh; } cb =
             { { (float)Ax, (float)Ay, (float)Bx, (float)By }, L.W, L.H, g_pvTileTwin.w, g_pvTileTwin.h, px0, py0,
               px1 > px0 ? px1 - px0 : 0u, py1 > py0 ? py1 - py0 : 0u };
@@ -4559,8 +5288,38 @@ void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
     const bool noTileJit = !g_pvTileJitter && idx >= 0 && idx < kPtMax && g_pvLay[idx].tiled;
     const float njx = noTileJit ? 0.0f : (float)g_signX * g_pvJx, njy = noTileJit ? 0.0f : (float)g_signY * g_pvJy;
     const int64_t t0 = t.runs == 0 ? Qpc() : 0;          // wall time of the first Run (NGX create + textures)
-    const int areaNow = SceneDlaa::Area();               // preview targets always use the whole image (no dlaa_area crop)
-    if (areaNow != 100) SceneDlaa::SetArea(100);
+    // v0.10.0 phase 15: a VR menu / truck-preview target honours dlaa_area like the world eyes (until phase 14 every preview
+    // target ran on the whole 6120x6496 picture: ~2.3 ms per eye in the ATS VR log): the same rect of area % of the width AND
+    // height centred on this eye's optical centre (VrEyeCentre: the world eye's, else the picture's own from the preview eye
+    // verdicts, else the image centre), the feather blend at its edges and the raw picture outside -- SceneDlaa's crop path,
+    // unchanged (the depth -- tiled picture depth or reference snapshot -- is full-size and read at the rect origin; the MVs
+    // use full-picture uv, so TileXf stays valid). The flat route (flat launch, the VR fallback, a backbuffer target) keeps
+    // the whole picture as before (flat forces 100 anyway), and so do the two preview debug captures (pvcap / pvseam: their
+    // passes assume full-size unit textures).
+    const int areaNow = SceneDlaa::Area();
+    const bool vrArea = g_launchVr == 1 && !PvIsBackbufferTarget(tg.tex.Get()) && !g_pvCapActive && !g_pvSmActive;
+    const int areaRun = vrArea ? areaNow : 100;
+    float cu = 0.5f, cv = 0.5f;
+    const bool centreKnown = areaRun < 100 && VrEyeCentre(ui, &cu, &cv);
+    t.dl.SetOpticalCentre(cu, cv);                       // (a change moves the rect = one history reset inside Run)
+    {
+        static int lastArea[kPtMax] = { -1, -1 };
+        static float lastU[kPtMax] = {}, lastV[kPtMax] = {};
+        static int areaLogs = 0;
+        if ((lastArea[ui] != areaRun || std::fabs(lastU[ui] - cu) > 0.005f || std::fabs(lastV[ui] - cv) > 0.005f) &&
+            areaLogs < 24) {
+            ++areaLogs;
+            uint32_t rx = 0, ry = 0, rw = td.Width, rh = td.Height;
+            SceneDlaa::CropRect(td.Width, td.Height, areaRun, cu, cv, &rx, &ry, &rw, &rh);
+            Log("preview unit %d (eye tag %d): DLAA area %d%% -> rect (%u,%u) %ux%u of %ux%u, centre uv=(%.3f, %.3f) %s (%s, "
+                "Present #%llu)", ui, 10 + ui, areaRun, rx, ry, rw, rh, td.Width, td.Height, (double)cu, (double)cv,
+                areaRun >= 100 ? "(whole picture)" : (centreKnown ? "(optical centre)" : "(image centre: optical centre not known yet)"),
+                !vrArea ? (g_launchVr == 1 ? "debug capture / backbuffer target: whole picture" : "flat route: whole picture")
+                        : "VR: dlaa_area as for the world eyes, raw picture outside the rect", (unsigned long long)fr);
+        }
+        lastArea[ui] = areaRun; lastU[ui] = cu; lastV[ui] = cv;
+    }
+    if (areaRun != areaNow) SceneDlaa::SetArea(areaRun);
     // Round 6: MVs in picture space (pass B maps picture ndc into the reference tile's clip space and back).
     if (tiled) t.dl.Mv().SetTileXf(lay.hx, lay.hy, lay.cx, lay.cy);
     else       t.dl.Mv().SetTileXf(1.0f, 1.0f, 0.0f, 0.0f);
@@ -4576,7 +5335,7 @@ void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
         PreviewBlit::RestoreState(ctx);
     }
     t_inDlaa = false;
-    if (areaNow != 100) SceneDlaa::SetArea(areaNow);
+    if (areaRun != areaNow) SceneDlaa::SetArea(areaNow);
     if (!ok && t.dl.Deferred()) return;                  // v0.7.8: built at a later Present (one NGX create per Present)
     t.epoch = g_pvEpoch;
     if (t0) {
@@ -4683,14 +5442,24 @@ void PreviewNextFrame(uint64_t n) {
             // Round 6: the tiled-picture depth assembly cost (GPU, non-blocking timestamps) and its health.
             ID3D11DeviceContext* const tc = g_gameCtx.load(std::memory_order_acquire);
             if (tc) g_pvAsmTimer.Poll(tc);
-            if (g_pvAsmTilesWin > 0 || g_pvAsmMiss > 0) {
+            if (g_pvAsmTilesWin > 0 || g_pvAsmMiss > 0 || g_pvAsmSkipWin > 0) {
                 const double per = g_pvAsmTimer.n ? g_pvAsmTimer.sum / (double)g_pvAsmTimer.n : 0.0;
                 const double tpf = (double)g_pvAsmTilesWin / 600.0;
+                // v0.10.0 phase 15: the DLAA-area clip of the clear + reduce (VR, dlaa_area < 100) and the tiles skipped by it
+                char clipTag[200];
+                if (g_pvAsmClipWin > 0 || g_pvAsmSkipWin > 0)
+                    snprintf(clipTag, sizeof(clipTag), "clip ON (dlaa_area %d: clear + reduce inside %ux%u = both eyes' DLAA rects "
+                             "+ %u px; the DS copy stays whole), %.2f tile passes per frame skipped outside it", SceneDlaa::Area(),
+                             g_pvAsmClipW, g_pvAsmClipH, kPvAsmClipMargin, (double)g_pvAsmSkipWin / 600.0);
+                else
+                    snprintf(clipTag, sizeof(clipTag), "clip off (whole picture: dlaa_area 100, flat route or a debug capture)");
                 Log("preview depth assembly GPU cost: %.3f ms per tile pass (shared DS copy + reduce, %llu timed), %.2f tile "
-                    "passes per frame -> %.2f ms per frame | asm-miss (target left untouched) %llu in total | layout readbacks "
-                    "throttled %llu, layout changes %llu", per, (unsigned long long)g_pvAsmTimer.n, tpf, per * tpf,
-                    (unsigned long long)g_pvAsmMiss, (unsigned long long)g_pvLayThrottled, (unsigned long long)g_pvLayChanges);
+                    "passes per frame -> %.2f ms per frame | %s | asm-miss (target left untouched) %llu in total | layout "
+                    "readbacks throttled %llu, layout changes %llu", per, (unsigned long long)g_pvAsmTimer.n, tpf, per * tpf,
+                    clipTag, (unsigned long long)g_pvAsmMiss, (unsigned long long)g_pvLayThrottled,
+                    (unsigned long long)g_pvLayChanges);
                 g_pvAsmTimer.sum = 0.0; g_pvAsmTimer.n = 0; g_pvAsmTilesWin = 0;
+                g_pvAsmSkipWin = 0; g_pvAsmClipWin = 0;
             }
             // v0.8.1 (round 5: every window, also untiled -- the round 4 test never printed it on the main menu)
             Log("preview tile edge fix (v0.8.1): %llu uncovered tile edge column(s) / row(s) filled in total, %llu "
@@ -4752,8 +5521,7 @@ void PreviewNextFrame(uint64_t n) {
         }
     }
     // Round 6 tile layout: finished readbacks first, then this frame's passes (flat and VR).
-    if ((g_pvLayPending > 0 || g_ptCount > 0) && g_dlaaOn.load(std::memory_order_relaxed) &&
-        !g_passive.load(std::memory_order_relaxed)) {
+    if ((g_pvLayPending > 0 || g_ptCount > 0) && PvReadbacksOn()) {   // phase 15: also for the VR panel with DLAA off
         ID3D11DeviceContext* c = g_gameCtx.load(std::memory_order_acquire);
         if (c) {
             t_inDlaa = true;
@@ -4764,8 +5532,7 @@ void PreviewNextFrame(uint64_t n) {
     }
     for (PvAsm& a : g_pvAsm) { a.frameMask = 0; a.twin.valid = false; }
     // Round 5 VR eye map: finished verdicts first, then this frame's two reference records (see PvEyeEntry).
-    if (g_launchVr == 1 && (g_pvRbPending > 0 || g_ptCount == 2) && g_dlaaOn.load(std::memory_order_relaxed) &&
-        !g_passive.load(std::memory_order_relaxed)) {
+    if (g_launchVr == 1 && (g_pvRbPending > 0 || g_ptCount == 2) && PvReadbacksOn()) {   // phase 15: ... (as above)
         ID3D11DeviceContext* c = g_gameCtx.load(std::memory_order_acquire);
         if (c) {
             t_inDlaa = true;
@@ -4780,6 +5547,7 @@ void PreviewNextFrame(uint64_t n) {
     for (PvTarget& t : g_pt) {
         t.tex.Reset(); t.pending = false; t.curRef = 99; t.unit = -1; t.slotMask = 0;
         t.flushes = 0; t.maskAtFlush = 0;                // v0.8.1 round 5
+        t.rtv.Reset(); t.unitTried = false;              // v0.10.0 phase 15
     }
     g_pvDs.Reset();
     if (g_jitterEnabled) JitterOfPhase((int)((n + 1) % (uint64_t)(g_phases > 0 ? g_phases : 1)), &g_pvJx, &g_pvJy);
@@ -4868,7 +5636,10 @@ void PreviewOnBindTargets(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetVi
         if ((g_ptPendingMask >> i & 1) && res && res.Get() == (ID3D11Resource*)g_pt[i].tex.Get()) bound = i;
     if (!g_previewPass)
         for (int i = 0; i < kPtMax; ++i)
-            if ((g_ptPendingMask >> i & 1) && i != bound) PreviewFlush(ctx, i);
+            if ((g_ptPendingMask >> i & 1) && i != bound) {
+                PreviewFlush(ctx, i);
+                MenuDrawPreview(ctx, i, 'b');           // v0.10.0 phase 15: the VR menu panel on the finished eye picture
+            }
     g_ptBoundIdx = (bound >= 0 && (g_ptPendingMask >> bound & 1)) ? bound : -1;
 }
 
@@ -5135,6 +5906,60 @@ void PreviewOnDiscard(ID3D11DeviceContext* ctx, ID3D11Resource* res) {
 // depth still holds the previous pass) or, for the very first pass, from the first G-buffer bind.
 // If the newest existing pass has not been blitted yet, its depth is about to be destroyed: snapshot it
 // into that pass's eye twin first.
+#ifdef WITH_DLAA
+// v0.10.0 phase 9 VR COST (first VR log, ATS, Quest 3: eye 6120x6496, dlaa_area 40 -> NGX reads a 2448x2600 rect; the mod spent
+// 4.2-4.5 ms per eye, 2.5 ms of it re-drawing the forward pass's depth over the WHOLE eye). Decided once per pass at its start:
+//  * clip: dlaa_area < 100 and mv_area_scissor 1 -> the union of the DLAA rects of every eye this pass may become (flat: the
+//    centred rect; VR: both eyes' rects around their optical centres, the same rule as SceneDlaa::Run -- the pass's eye is only
+//    known at its blit) + mv_area_margin px (default dlaa_area_feather + 32: the vote's march reach). The G-buffer and forward
+//    draw-id replays, the forward-depth re-draw and the rigid-parent vote / pixel count are scissored to it; pass B, copy-in /
+//    out, NGX and RCAS already run on the DLAA rect. Outside the rect the picture is the raw frame as before (no AA there).
+//    The depth snapshot stays a whole-texture copy: D3D11 copies a depth-stencil resource only whole (CopySubresourceRegion
+//    needs a null box), and the game's depth has no SRV binding to copy it with a shader.
+//  * fwdShift: mv_fwd_depth_res 2 (auto: VR) -> the forward-depth target and the forward ids at 1/2 resolution.
+void PassViewSetup(PassSlot& n) {
+    n.clip = false;
+    n.clipRect = D3D11_RECT{ 0, 0, 0, 0 };
+    const int res = g_fwdResCfg == 0 ? (g_vrMode ? 2 : 1) : g_fwdResCfg;
+    n.fwdShift = res == 2 ? 1 : 0;
+    ++g_p9Passes;
+    if (n.fwdShift) ++g_p9Half;
+    const int area = SceneDlaa::Area();
+    if (!g_areaScissorCfg || area >= 100 || !g_sceneW || !g_sceneH) return;
+    const int margin = g_areaMarginCfg >= 0 ? g_areaMarginCfg : SceneDlaa::Feather() + 32;
+    LONG l = (LONG)g_sceneW, t = (LONG)g_sceneH, r = 0, b = 0;
+    const int eyes = g_vrMode ? 2 : 1;
+    for (int e = 0; e < eyes; ++e) {
+        const bool have = g_vrMode && g_optC[e].have;
+        uint32_t x = 0, y = 0, w = 0, h = 0;
+        SceneDlaa::CropRect(g_sceneW, g_sceneH, area, have ? g_optC[e].u : 0.5f, have ? g_optC[e].v : 0.5f, &x, &y, &w, &h);
+        if ((LONG)x < l) l = (LONG)x;
+        if ((LONG)y < t) t = (LONG)y;
+        if ((LONG)(x + w) > r) r = (LONG)(x + w);
+        if ((LONG)(y + h) > b) b = (LONG)(y + h);
+    }
+    l -= margin; t -= margin; r += margin; b += margin;
+    if (l < 0) l = 0;
+    if (t < 0) t = 0;
+    if (r > (LONG)g_sceneW) r = (LONG)g_sceneW;
+    if (b > (LONG)g_sceneH) b = (LONG)g_sceneH;
+    if (l >= r || t >= b) return;
+    n.clip = true;
+    n.clipRect = D3D11_RECT{ l, t, r, b };
+    ++g_p9Clipped;
+    const double share = (double)(r - l) * (double)(b - t) / ((double)g_sceneW * (double)g_sceneH);
+    g_p9ClipShare += share;
+    g_p9LastClip = n.clipRect;
+    if (!g_p9ClipLogged) {
+        g_p9ClipLogged = true;
+        Log("MV area scissor: ACTIVE (v0.10.0 phase 9) -- pass s=%llu: the draw-id replays, the forward-depth re-draw and the "
+            "rigid-parent vote run inside (%ld,%ld)-(%ld,%ld) of %ux%u = %.1f %% of the image (dlaa_area %d %% of %s + %d px margin; "
+            "mv_area_scissor 0 = the whole image)", (unsigned long long)n.s, (long)l, (long)t, (long)r, (long)b, g_sceneW,
+            g_sceneH, 100.0 * share, area, g_vrMode ? "both eyes' rects" : "the centred rect", margin);
+    }
+}
+#endif
+
 void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
     if (allowSnapshot && g_passSeq > g_fifoHead && !g_flatMode) {
         PassSlot& prev = g_ring[(g_passSeq - 1) % kRing];
@@ -5142,7 +5967,10 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
         if (!prev.snap && g_dlaaOn.load(std::memory_order_relaxed) && !g_jitterOnly.load(std::memory_order_relaxed) &&
             !g_passive.load(std::memory_order_relaxed) && g_sceneDepth) {
             t_inDlaa = true;
+            GpuPerf::SetPass(prev.s);                         // v0.10.0 phase 8
+            const int sq = GpuPerf::Begin(ctx, GpuPerf::kSnap);
             const bool ok = prev.twin.Snapshot(ctx, g_sceneDepth, GpuTimingOn());
+            GpuPerf::End(ctx, sq);
             t_inDlaa = false;
             prev.snap = ok;
             if (ok) ++g_cSnapAtClear;
@@ -5190,10 +6018,27 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
     else { n.jx = 0.0f; n.jy = 0.0f; }
     n.snap = false;
     n.discarded = false;
+    n.pre = 0;                                            // v0.10.0 phase 4
     n.consumed = false;
 #ifdef WITH_DLAA
     n.twin.valid = false;
+    n.twin.fwdValid = false;                              // v0.9.0 r5: this pass's forward depth is cleared at its first re-draw
+    n.twin.fwdDraws = 0;
+    n.twin.idValid = false;                               // v0.10.0: this pass's draw ids are written by its replay
     n.cand.Reset();
+    n.twin.pooled = g_slotPool;                           // v0.10.0 phase 8: this slot's textures come from / go to the pool
+    n.cand.SetDropped(g_medoidDropBits);                  // v0.10.0 phase 8: layers the per-draw consensus answers for
+    n.dropN[0] = n.dropN[1] = 0;
+    ++g_cMedoidPasses;
+    if (g_medoidDropBits & 1) ++g_cMedoidPassW;
+    if (g_medoidDropBits & 2) ++g_cMedoidPassC;
+    n.fwdTex = nullptr; n.fwdBinds = 0;                   // v0.10.0 phase 7
+    n.stageDone = false; n.stageAtLeave = false; n.fallback = false; n.warmHdr = false; n.candBad = false;
+    n.warmTex.Reset();
+    PassViewSetup(n);                                     // v0.10.0 phase 9: area clip + forward-depth resolution of this pass
+    ObjOnPassStart(ctx, s);                               // v0.9.0: the previous record flushed, this pass's record empty
+    DidOnPassStart(ctx, s);                               // v0.10.0: the previous pass replayed if it still waits, new record
+    FwdOnPassStart(ctx);                                  // v0.9.0 r5: stats window (r11: + near-camera readback)
 #endif
     g_phase = n.phase; g_jx = n.jx; g_jy = n.jy;          // ReconcileViewports uses these for this pass
     while (g_passSeq - g_fifoHead > 2) { ++g_fifoHead; ++g_cOverflow; }   // fifo overflow: drop the oldest
@@ -5214,6 +6059,18 @@ void OnSceneDepthClear(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v) {
     const bool match = r && r == (ID3D11Resource*)g_sceneDepth;
     if (r) r->Release();
     if (!match) return;
+#ifdef WITH_DLAA
+    // v0.9.0: the object ids live in the stencil; the game clears depth AND stencil (flags 0x3) in the capture. Without the
+    // stencil flag, pixels no G-buffer draw covers (sky) would keep old ids -- pass B ignores those (no world depth).
+    if (g_objOn && !(g_objClearFlags & D3D11_CLEAR_STENCIL)) {
+        static bool logged = false;
+        if (!logged) {
+            logged = true;
+            Log("MV objects: note -- a scene depth clear without D3D11_CLEAR_STENCIL (flags=0x%x); old ids can survive on "
+                "pixels no G-buffer draw covers (pass B only uses ids on world-depth pixels)", g_objClearFlags);
+        }
+    }
+#endif
     // A clear only starts a pass if the previous pass actually rendered into the G-buffer.
     if (g_depthDirty) {
         g_depthDirty = false;
@@ -5230,8 +6087,17 @@ void STDMETHODCALLTYPE hkClearDSV(ID3D11DeviceContext* ctx, ID3D11DepthStencilVi
     TraceClearDsv(ctx, v, fl, d, s);
     // v0.6.2: only the game's render context is tracked; every other context passes straight through.
     if (!IsGameCtx(ctx)) { oClearDSV(ctx, v, fl, d, s); return; }
-    if (v && !t_inDlaa && g_sceneDepth)
+    if (v && !t_inDlaa && g_sceneDepth) {
+#ifdef WITH_DLAA
+        g_objClearFlags = fl;                             // v0.9.0
+#endif
         OnSceneDepthClear(ctx, v);
+    }
+#ifdef WITH_DLAA
+    // v0.10.0 phase 2: a clear of the open mirror view's depth without its DiscardView first: that view ends here (its DLAA
+    // runs on the still intact depth, before the clear)
+    if (v && !t_inDlaa && g_mirCur >= 0) MirOnClearDsv(ctx, v);
+#endif
     oClearDSV(ctx, v, fl, d, s);
     if (g_spanPendGbuf || g_spanPendScene) SpanBeginPending(ctx);   // v0.6.2: spans start after the clear
 }
@@ -5255,10 +6121,14 @@ bool OnDepthDiscard(ID3D11DeviceContext1* ctx, ID3D11Resource* res, bool* snappe
     PassSlot& slot = g_ring[(g_passSeq - 1) % kRing];
     slot.discarded = true;
 #ifdef WITH_DLAA
+    DidOnDepthDiscard(ctx);                                          // v0.10.0: a pass without a G-buffer leave is replayed now
     if (!slot.snap && g_dlaaOn.load(std::memory_order_relaxed) && !g_jitterOnly.load(std::memory_order_relaxed) &&
         !g_passive.load(std::memory_order_relaxed)) {
         t_inDlaa = true;
+        GpuPerf::SetPass(slot.s);                         // v0.10.0 phase 8
+        const int sq = GpuPerf::Begin(ctx, GpuPerf::kSnap);
         const bool ok = slot.twin.Snapshot(ctx, g_sceneDepth, GpuTimingOn());
+        GpuPerf::End(ctx, sq);
         t_inDlaa = false;
         if (ok) {
             slot.snap = true; *snapped = true; ++g_cSnapAtDiscard;
@@ -5267,6 +6137,8 @@ bool OnDepthDiscard(ID3D11DeviceContext1* ctx, ID3D11Resource* res, bool* snappe
                     (unsigned long long)slot.s);
         }
     }
+    FwdOnPassEnd(ctx);                                               // v0.10.0 phase 10: forward depth batch + forward ids
+    PreTonemapPoint(ctx, slot, false);                               // v0.10.0 phase 4 / 7: the pass's stage decision
 #endif
     SpanOnDiscard(ctx);                                             // v0.6.2: gbuf span ends (snapshot included)
     return true;
@@ -5277,6 +6149,7 @@ void STDMETHODCALLTYPE hkDiscardResource(ID3D11DeviceContext1* ctx, ID3D11Resour
     const bool scene = IsGameCtx1(ctx) && OnDepthDiscard(ctx, res, &snapped);
 #ifdef WITH_DLAA
     if (g_pvCur >= 0 && IsGameCtx1(ctx)) PreviewOnDiscard(ctx, res);   // v0.7.8 profile-screen preview depth
+    if (g_mirCur >= 0 && IsGameCtx1(ctx)) MirOnDiscard(ctx, res);       // v0.10.0 phase 2: a mirror view ends (its DLAA)
 #endif
     TraceDiscard(ctx, "DiscardResource", res, nullptr, scene, snapped);
     oDiscardResource(ctx, res);
@@ -5290,6 +6163,7 @@ void STDMETHODCALLTYPE hkDiscardView(ID3D11DeviceContext1* ctx, ID3D11View* view
     const bool scene = game && OnDepthDiscard(ctx, r, &snapped);
 #ifdef WITH_DLAA
     if (game && g_pvCur >= 0) PreviewOnDiscard(ctx, r);                // v0.7.8 profile-screen preview depth
+    if (game && g_mirCur >= 0) MirOnDiscard(ctx, r);                   // v0.10.0 phase 2: a mirror view ends (its DLAA)
 #endif
     TraceDiscard(ctx, "DiscardView", r, view, scene, snapped);
     if (r) r->Release();
@@ -5304,6 +6178,7 @@ void STDMETHODCALLTYPE hkDiscardView1(ID3D11DeviceContext1* ctx, ID3D11View* vie
     const bool scene = game && OnDepthDiscard(ctx, r, &snapped);
 #ifdef WITH_DLAA
     if (game && g_pvCur >= 0) PreviewOnDiscard(ctx, r);                // v0.7.8 profile-screen preview depth
+    if (game && g_mirCur >= 0) MirOnDiscard(ctx, r);                   // v0.10.0 phase 2: a mirror view ends (its DLAA)
 #endif
     TraceDiscard(ctx, "DiscardView1", r, view, scene, snapped);
     if (r) r->Release();
@@ -5398,6 +6273,31 @@ int SdAspectClass(UINT w, UINT h) {
     return std::fabs(a - s) <= 0.02 * s ? 1 : 0;
 }
 
+// v0.10.0 phase 2: what the "secondary G-buffer view ... ignored" line says about mirror DLAA (MirOnBind)
+inline const char* MirSecondaryNote() {
+#ifdef WITH_DLAA
+    return g_mirOn.load(std::memory_order_relaxed) ? "handles it as a mirror unit when it has the mirror G-buffer shape (see "
+                                                     "the 'mirror view detected' lines)" : "off (mirror_dlaa / Alt+F6)";
+#else
+    return "not compiled in";
+#endif
+}
+// v0.10.0 phase 2: mirror views run as units / seen but left to the game (FIFO stats line; 0 without DLAA)
+inline uint64_t MirHandledCount() {
+#ifdef WITH_DLAA
+    return g_mirHandled;
+#else
+    return 0;
+#endif
+}
+inline uint64_t MirNotHandledCount() {
+#ifdef WITH_DLAA
+    return g_mirNotHandled;
+#else
+    return 0;
+#endif
+}
+
 // OMSetRenderTargets helper (4-RTV binds only): remember the main G-buffer depth.
 // `res` is the DSV's resource; borrowed (caller releases).
 // v0.8.2: returns true when the scene depth was REPLACED by one of a different size (the caller then starts a pass at
@@ -5481,12 +6381,15 @@ bool InspectDepth(ID3D11Resource* res) {
                 for (int i = 0; i < g_sdRejKeysN; ++i) seen = seen || g_sdRejKeys[i] == key;
                 if (!seen && g_sdRejKeysN < 4) {
                     g_sdRejKeys[g_sdRejKeysN++] = key;
+                    // v0.10.0 phase 2: "ignored" = not the scene depth; such a view may still be a mirror unit (MirOnBind)
                     if (cCls != sCls)
                         Log("secondary G-buffer view %ux%u ignored (not the screen's aspect ratio, the scene %ux%u is -- "
-                            "mirror / extra view)", d.Width, d.Height, g_sceneW, g_sceneH);
+                            "mirror / extra view; mirror DLAA %s)", d.Width, d.Height, g_sceneW, g_sceneH,
+                            MirSecondaryNote());
                     else
-                        Log("secondary G-buffer view %ux%u ignored (smaller than the scene %ux%u -- mirror / extra view)",
-                            d.Width, d.Height, g_sceneW, g_sceneH);
+                        Log("secondary G-buffer view %ux%u ignored (smaller than the scene %ux%u -- mirror / extra view; "
+                            "mirror DLAA %s)", d.Width, d.Height, g_sceneW, g_sceneH,
+                            MirSecondaryNote());
                 }
             }
         }
@@ -5510,6 +6413,18 @@ bool JitterLive() {
     // v0.7.8: no viewport jitter before the shader warm-up is done (no DLAA unit can run yet, a jittered raw frame would
     // just shimmer). Only the first seconds after the DLL load.
     if (!ShaderCache::Done()) return false;
+    // v0.10.0 phase 12: no viewport jitter while NGX cannot be initialised in this process (no NVIDIA GPU / driver, or a
+    // capture tool wrapping the device -- RenderDoc gives NVSDK_NGX_Result_FAIL_PlatformError): no DLAA / DLSS unit can
+    // ever evaluate, so a jittered frame would only shake. Seen in captures/dlaa_inject_ats_v0100p11_flat_fence.log: 4280
+    // jittered passes, every evaluate ok=0. Checked per call: a later successful NGX init brings the jitter back.
+    if (DlaaProcessor::NgxInitFailed()) {
+        static std::atomic<bool> s_logged{false};
+        if (!s_logged.exchange(true))
+            Log("jitter HELD: NGX could not be initialised (see the 'DLAA: NGX init failed' line) -- no DLAA / DLSS can run, "
+                "so the viewport jitter and the texture LOD bias stay off (a jittered frame without DLAA only shakes); they "
+                "come back by themselves if a later NGX init succeeds (v0.10.0 phase 12)");
+        return false;
+    }
 #endif
     return g_dlaaOn.load(std::memory_order_relaxed) && g_jitterEnabled && !g_passive.load(std::memory_order_relaxed);
 }
@@ -5625,7 +6540,12 @@ void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
     // (g_pvJx, g_pvJy), the offset NGX is told (PvShiftScale; 1 for an untiled pass).
     float pvKx = 1.0f, pvKy = 1.0f;
     if (pvShift) PvShiftScale(g_pvCur, &pvKx, &pvKy);
-    const float sx = pvShift ? g_pvJx * pvKx : g_jx, sy = pvShift ? g_pvJy * pvKy : g_jy;
+    // v0.10.0 phase 2: the open mirror view's G-buffer / forward pass (g_mirJit) shifts viewport 0 by ITS unit's jitter when
+    // the viewport is the mirror's full size (the lighting pass and the 256^2 down-sample are never g_mirJit)
+    const bool mirShift = !worldShift && !pvShift && g_mirJit && g_mirW && JitterLive() &&
+                          (UINT)g_gameVp[0].Width == g_mirW && (UINT)g_gameVp[0].Height == g_mirH;
+    const float sx = pvShift ? g_pvJx * pvKx : (mirShift ? g_mirShX : g_jx),
+                sy = pvShift ? g_pvJy * pvKy : (mirShift ? g_mirShY : g_jy);
     if (pvShift && g_pvCur >= 0) { PvSlot& ss = g_pv[g_pvCur]; ss.shX = sx; ss.shY = sy; ss.shOn = true; }   // round 4
     // v0.7.8 preview capture: record the decision for the current preview pass (proof the 4 passes get the same shift).
     if ((g_pvCapActive || g_pvSmActive) && g_previewPass && g_pvCur >= 0) {
@@ -5636,10 +6556,10 @@ void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
         }
     }
 #else
-    const bool pvShift = false;
+    const bool pvShift = false, mirShift = false;
     const float sx = g_jx, sy = g_jy;
 #endif
-    const bool shift = worldShift || pvShift;
+    const bool shift = worldShift || pvShift || mirShift;
     if (!gameJustSet && shift == g_vpShifted &&
         (!shift || (g_vpShiftX == sx && g_vpShiftY == sy))) return;
     if (shift) {
@@ -5655,6 +6575,7 @@ void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
 }
 
 void STDMETHODCALLTYPE hkRSSetViewports(ID3D11DeviceContext* ctx, UINT n, const D3D11_VIEWPORT* vps) {
+    if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oRSSetViewports(ctx, n, vps); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     TraceVp(ctx, n, vps);
     if (!IsGameCtx(ctx)) {                         // v0.6.2: other contexts never touch g_gameVp / ReconcileViewports
         CountForeign(ctx);
@@ -5676,9 +6597,900 @@ void STDMETHODCALLTYPE hkRSSetViewports(ID3D11DeviceContext* ctx, UINT n, const 
     ReconcileViewports(ctx, true);
 }
 
+// ---- v0.9.0 texture LOD bias ----------------------------------------------------------------------------------------
+// The standard companion of a temporal AA / upscaler is a NEGATIVE texture mip LOD bias: the game samples sharper mips
+// (road signs, dashboard, GPS, decals) and DLAA / DLSS removes the extra shimmer they bring. The game applies none. Its
+// sampler states carry their own MipLODBias (created once by the engine, deduplicated by D3D11), so the bias is applied by
+// binding a TWIN instead: a copy of the game's sampler with MipLODBias = original + bias (D3D11 range -16..15.99) and,
+// with tex_aniso, MaxAnisotropy raised (anisotropic) or trilinear switched to anisotropic. Twins are created once per
+// game sampler on the game device. NVIDIA's rule for DLSS is log2(render width / output width) - 1: tex_lod_bias_auto
+// adds the first term while DLSS upscales (cached per frame, LodFrameUpdate), tex_lod_bias is the rest.
+//
+// WHERE: only while the current OM binding is a world scene pass (g_jitterPass: the 4-RTV G-buffer and the 1-RTV RGBA16F
+// forward pass on the scene depth) or a menu / truck-preview pass (g_previewPass: jittered and DLAA'd the same way, and
+// decided by the same bind hook, so it is the same two lines here), and only while that jitter is live (JitterLive: DLAA
+// or DLSS on, not passive, jitter enabled). Everything else -- shadow maps, mirror / secondary views (their depth is not
+// the scene depth), the lighting pass, post, UI, menus -- keeps the game's own samplers: those are not followed by a
+// temporal AA, so a negative bias there would only add aliasing (UI text is sampled 1:1).
+//
+// STATE LEAKS ACROSS PASSES (why there is an enter / leave pair, not just a substitution in PSSetSamplers): D3D11 sampler
+// slots keep whatever was bound last, and the engine caches its own state -- it only calls PSSetSamplers when IT thinks a
+// slot changes. So (a) samplers bound BEFORE the scene pass's OMSetRenderTargets are used by its draws without another
+// PSSetSamplers call, and (b) a twin bound inside the pass would stay bound into the lighting / post / UI passes, because
+// the engine still believes its original is there. Hence:
+//   ENTER (bind hook: a scene bind while not in scene state): PSGetSamplers(0..15), each slot's sampler -> its twin, one
+//         PSSetSamplers over the changed range; the game's own sampler per slot is kept in g_lodShadow.
+//   IN SCENE (hkPSSetSamplers): the game's samplers go into g_lodShadow, their twins are bound instead.
+//   LEAVE (bind hook: a non-scene bind while in scene state): the slots holding a twin get the game's samplers back (one
+//         PSSetSamplers over that range) = exactly the state the engine believes is bound.
+// Outside scene state hkPSSetSamplers is one relaxed atomic load + the original call: no lookup, no tracking. Our own work
+// (t_inDlaa) and other contexts always pass straight through (our shaders never use PS samplers anyway).
+//
+// TWIN CACHE: open-addressing pointer hash, render thread only, no allocation (static table). Key = the game's sampler,
+// a ref HELD so the pointer cannot be freed and reused by another state while it is a key; value = its twin (our ref), or
+// the key itself when it is never biased. Each twin is ALSO a key (reverse entry, no ref) mapping back to its original:
+// if the engine ever reads a twin back inside a scene pass (PSGetSamplers) and binds it again, it resolves to the same
+// original / twin instead of a twin of the twin (bias applied twice), and the leave still restores the original. Not
+// handled: the engine re-binding a read-back twin OUTSIDE a scene pass (no lookup there). It caches its state and has no
+// reason to read it back; such a slot would stay biased only until the engine binds that slot again.
+// The cache is flushed (every ref released) only while no twin of ours is bound: at an ENTER when the bias / aniso changed,
+// after a game-context change (ResetPassTrackingCore) or for another context, and at a frame boundary outside scene state
+// when the feature is off or a reset was requested. Process exit releases nothing (no D3D under the loader lock, the same
+// as every other D3D object of ours).
+// NEVER BIASED (the "twin" is the original itself): comparison samplers (shadow-map PCF), MINIMUM / MAXIMUM reduction
+// samplers, full POINT samplers (G-buffer / lookup-table / noise fetches, pixel-exact on purpose), and samplers with
+// MaxLOD <= 0 or MaxLOD <= MinLOD (only one mip reachable: a bias cannot select a sharper level). Bilinear (mip point),
+// trilinear and anisotropic samplers are biased.
+// DEDUP: CreateSamplerState returns an EXISTING state for an identical desc. A twin whose desc equals one of the game's own
+// samplers would BE that game object (and its reverse entry would mis-resolve it), so a twin without a BORDER address mode
+// gets an odd BorderColor (ignored without BORDER addressing) that no game sampler has.
+// COST per call in scene state: one hash probe per sampler (no COM call); a miss costs GetDesc + CreateSamplerState once
+// per game sampler. Per scene enter: PSGetSamplers(16) + Release x16 + one PSSetSamplers. Counters only (stats line).
+//
+// SCOPE (v0.10.0 phase 11, dlaa.ini tex_lod_bias_scope / tex_aniso_scope = solid | all, default solid). User finding: a
+// bias of -1 makes sign text crisper but gives strong MOIRE on fences / wires / other see-through meshes at a distance
+// (structures thinner than a pixel sampled from a too-sharp mip). The game draws solid surfaces in the 4-RTV G-buffer
+// pass and the see-through things (fences, wires, glass, plates, decals) in the 1-RTV RGBA16F forward pass, plus some
+// alpha-to-coverage / blended draws inside the G-buffer. `solid` = the twins are bound ONLY for the draws of the world
+// G-buffer pass and of the menu truck-preview passes (one forward-lit pass, solids and see-through things mixed) whose
+// current blend state has BlendEnable off on RT0 and AlphaToCoverageEnable off; never in the world forward pass. `all` =
+// the v0.9.0 behaviour (every draw of the G-buffer, forward and preview passes). Mirror views keep the game's samplers
+// in both scopes (unchanged since v0.9.0). The two keys are independent: each game sampler has a FULL twin (bias + aniso:
+// what a solid draw gets) and a SEE-THROUGH member (only the parts whose scope is `all`: the original itself when both
+// scopes are solid, a bias-only or aniso-only twin when one of them is all, the full twin when both are all).
+//   SETS: in scene state the PS slots hold either the full set (g_lodFullS) or the see-through set (g_lodSeeS), g_lodSet.
+//         ENTER binds the set the pass starts with, hkPSSetSamplers binds the bound set's member for the game's new
+//         sampler, LEAVE restores the game's own samplers (g_lodShadow) where the bound set differs from them.
+//   PER DRAW (g_lodPerDraw: world G-buffer / preview pass while the scopes split solid from see-through draws):
+//         hkOMSetBlendState keeps the game's current blend state (identity only; resynced by one OMGetBlendState at every
+//         per-draw pass entry), classified once per state object (GetDesc, memoised in a pointer hash that holds a ref so
+//         the pointer cannot be reused by another state). hkDrawIndexed / hkDrawIndexedInstanced / hkDraw, right before the
+//         game's draw: a solid draw needs the full set, a see-through draw the see-through set. The bound set stays across
+//         consecutive draws of the same kind; a change is ONE PSSetSamplers over the slots where the two sets differ
+//         (counted as "set swaps" = the only extra D3D calls per draw). World forward pass: the see-through set for the
+//         whole pass, and no scene state at all (zero calls) when that set is the game's own samplers (both scopes solid).
+//         Without the OMSetBlendState hook: pass level (G-buffer / preview = full set, forward = see-through set).
+//   RISK: a sign / decal drawn WITH blending (or alpha-to-coverage) inside the G-buffer loses the bias; DrawInstanced /
+//         indirect draws (not hooked) use whichever set the previous hooked draw of the pass left bound.
+// CUT-OUTS (v0.10.0 phase 12, scope `opaque` = the new default of both keys): RenderDoc (captures/ats_flat_fence_frame1634.rdc,
+// scripts/rdc_fence_audit.py) showed the user's moire fence is an ALPHA-TESTED G-buffer draw -- opaque blend state, A2C off,
+// pixel shader `discard_nz` when alpha < 0.05 (wire-mesh / chain-link mask, 128x2048 BC3, 12 mips, anisotropic x16) -- so
+// phase 11's `solid` rule biased it. A per-pixel-shader flag now decides: CreatePixelShader (device vtable 15) scans the
+// game's DXBC once per shader object (DxbcPsClass: a discard / discard_z / discard_nz opcode anywhere = cut-out) into a
+// lock-free pointer table (g_lodPsTab, any thread inserts, a re-created shader at a reused address overwrites its entry),
+// hkPSSetShader (context vtable 9) keeps the current PS (identity, resynced by one PSGetShader at every per-draw pass
+// entry), LodOnDraw looks it up (memoised per pointer + table generation). Three draw classes in a per-draw pass:
+// solid (blend solid, no discard) -> FULL set; cut-out (blend solid, PS discards) -> the CUT-OUT member = the parts whose
+// scope is `solid` or `all`; see-through (blend / A2C) -> the SEE-THROUGH member = the parts whose scope is `all`. With the
+// default opaque / opaque the cut-out member is the game's own sampler (the cut-out draws share the see-through set, no
+// extra twin); a third twin per sampler exists only when the two scopes mix `solid` and `opaque` with both parts active.
+// Scopes: opaque = solid draws only; solid = solid + cut-out draws (the phase-11 rule); all = every draw (v0.9.0).
+// A pixel shader created before the hook (or not parsable) is "unknown" = treated as no discard (the phase-11 behaviour),
+// counted per frame in the stats line ("unknown-PS draws").
+// CUT-OUT BIAS (v0.10.0 phase 13, dlaa.ini tex_lod_bias_cutout, default -0.50; keys Ctrl+Shift+F1 / F2). User finding after
+// phase 12: the fence moire improved, but the GRASS in front of it (also an alpha-tested G-buffer draw: same class) went
+// soft because it lost the -1 it had. Fence wants 0, grass -1; one class, so the cut-out class gets a bias VALUE of its own,
+// independent of tex_lod_bias: the cut-out member is a twin with MipLODBias = tex_lod_bias_cutout (aniso per
+// tex_aniso_scope as before) = the phase-12 third set (g_lodCutS / kLodSetCut) with a value instead of 0 / the full bias.
+// `same` (or the key absent while tex_lod_bias_scope is solid / all) = the phase-12 rule (cut-outs get tex_lod_bias when the
+// scope is solid / all, nothing when it is opaque). A numeric value wins over the scope for the cut-out class (the scope
+// still decides the see-through class). The value is ABSOLUTE: the tex_lod_bias_auto term is not added (a cut-out at
+// render resolution is exactly what moires). tex_lod_bias = 0 (effective 0) still switches the bias off for every class,
+// cut-outs included (the default -0.50 must not bias anything for users who never enabled the LOD bias).
+// tex_lod_bias_cutout = 0 with the default opaque scope = phase 12 exactly (cut-outs keep the game's samplers).
+typedef void (STDMETHODCALLTYPE* PSSetSamplers_t)(ID3D11DeviceContext*, UINT, UINT, ID3D11SamplerState* const*);
+PSSetSamplers_t      oPSSetSamplers = nullptr;
+std::atomic<bool>    g_lodHooked{false};          // PSSetSamplers hook installed (oPSSetSamplers valid)
+constexpr UINT       kLodSlots   = D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT;   // 16 PS sampler slots
+constexpr uint32_t   kLodTabBits = 13;
+constexpr uint32_t   kLodTabSize = 1u << kLodTabBits;       // 8192 entries (D3D11: max 4096 sampler states per device)
+constexpr uint32_t   kLodTabMax  = kLodTabSize / 2;         // fill cap (load factor 0.5: probes stay short and terminate)
+constexpr float      kLodBorderTag = 0.0009765625f;         // twin BorderColor.a when no BORDER address mode (see DEDUP)
+struct LodEntry {
+    ID3D11SamplerState* key;      // null = empty slot
+    ID3D11SamplerState* val;      // kind 1: the FULL twin (or key itself = never biased); kind 2: the original
+    ID3D11SamplerState* val2;     // kind 1: the SEE-THROUGH member (key itself, val, or its own twin); kind 2: unused
+    ID3D11SamplerState* val3;     // kind 1 (phase 12): the CUT-OUT member (key, val, val2, or its own twin); kind 2: unused
+    uint32_t            kind;     // 1 = game sampler (ref on key, on val when val != key, on val2 / val3 when each is none
+                                  // of the members before it), 2 = twin (reverse, no ref)
+};
+LodEntry             g_lodTab[kLodTabSize] = {};
+uint32_t             g_lodFill = 0;               // entries in g_lodTab
+uint32_t             g_lodTwinN = 0;              // game samplers with a real (full) twin
+uint32_t             g_lodSeeTwinN = 0;           // ... with a see-through twin of their own (one scope all, the other solid)
+uint32_t             g_lodCutTwinN = 0;           // ... with a cut-out twin of their own (phase 12: mixed solid / opaque scopes)
+uint32_t             g_lodSkipCmp = 0, g_lodSkipPoint = 0, g_lodSkipMip0 = 0, g_lodSkipSame = 0;   // ... never biased, why
+std::atomic<bool>    g_lodInScene{false};         // twins applied (render thread writes; relaxed reads in the hook)
+ID3D11SamplerState*  g_lodShadow[kLodSlots] = {}; // the game's own sampler per PS slot while in scene state (no refs: each
+                                                  // is in the cache (ref) or bound itself (the runtime's ref))
+ID3D11SamplerState*  g_lodFullS[kLodSlots] = {};  // phase 11: per slot the full twin of g_lodShadow[i] (or the original)
+ID3D11SamplerState*  g_lodSeeS[kLodSlots] = {};   // phase 11: per slot its see-through member (no refs: cache values)
+ID3D11SamplerState*  g_lodCutS[kLodSlots] = {};   // phase 12: per slot its cut-out member (no refs: cache values)
+uint32_t             g_lodMaskFull = 0;           // phase 11: slots where the full set differs from the game's samplers
+uint32_t             g_lodMaskSee = 0;            // ... where the see-through set differs from them
+uint32_t             g_lodMaskCut = 0;            // ... where the cut-out set differs from them (phase 12)
+constexpr uint8_t    kLodSetFull = 1, kLodSetSee = 2, kLodSetCut = 3;
+uint8_t              g_lodSet = 0;                // phase 11: the set bound in scene state (0 = not in scene state)
+std::atomic<bool>    g_lodPerDraw{false};         // phase 11: per-draw decision live (render thread writes; draw hooks read)
+ID3D11DeviceContext* g_lodCtx = nullptr;          // context the cache was built on (identity)
+ID3D11Device*        g_lodDev = nullptr;          // its device (ref held while the cache is in use; CreateSamplerState)
+bool                 g_lodOn = false;             // per frame: bias or aniso set, jitter live, hook installed
+bool                 g_lodSplit = false;          // per frame (phase 11): solid and see-through draws need different samplers
+bool                 g_lodSeeTrivial = true;      // per frame (phase 11): the see-through set = the game's own samplers
+uint8_t              g_lodCutSet = kLodSetFull;   // per frame (phase 12): the set a cut-out draw binds (full / see / cut)
+float                g_lodEff = 0.0f;             // per frame: effective bias = tex_lod_bias + auto term
+float                g_lodCutEff = 0.0f;          // per frame (phase 13): the cut-out class's bias (LodCutEffective)
+float                g_lodAutoTerm = 0.0f;        // per frame: the tex_lod_bias_auto term (0 = off / no upscale)
+uint32_t             g_lodGen = 1;                // bumped when the effective bias changes (aniso is load-time only)
+uint32_t             g_lodTabGen = 0;             // generation the cached twins were built with ...
+float                g_lodTabBias = 0.0f;         // ... and their bias / aniso (full twins)
+int                  g_lodTabAniso = 0;
+float                g_lodTabSeeBias = 0.0f;      // phase 11: ... and the see-through members' bias / aniso
+int                  g_lodTabSeeAniso = 0;
+float                g_lodTabCutBias = 0.0f;      // phase 12: ... and the cut-out members' bias / aniso
+int                  g_lodTabCutAniso = 0;
+bool                 g_lodFlushReq = false;       // ResetPassTrackingCore: drop the cache (old device) at the next safe point
+bool                 g_lodFirstLogged = false;
+bool                 g_lodFullLogged = false;
+uint32_t             g_lodCreateFails = 0;
+uint64_t             g_lodSubst = 0;              // slot substitutions (a twin bound instead of the game's sampler)
+uint64_t             g_lodEnters = 0;             // scene-state enters
+uint64_t             g_lodSubst0 = 0, g_lodEnters0 = 0, g_lodFrames0 = 0;   // stats window start (FIFO stats line)
+uint32_t             g_lodAutoLogs = 0;
+// phase 11 scope: dlaa.ini (load time only), the blend-state classification and the per-draw counters
+// phase 12: three scopes per key (dlaa.ini, load time only). opaque = solid draws without discard (default), solid = the
+// phase-11 rule (+ alpha-tested cut-outs), all = every draw (v0.9.0).
+constexpr int        kLodScopeOpaque = 0, kLodScopeSolid = 1, kLodScopeAll = 2;
+int                  g_lodScope   = kLodScopeOpaque;   // tex_lod_bias_scope
+int                  g_anisoScope = kLodScopeOpaque;   // tex_aniso_scope
+inline const char* LodScopeName(int s) { return s == kLodScopeAll ? "all" : (s == kLodScopeSolid ? "solid" : "opaque"); }
+// phase 13: the cut-out class follows the phase-12 scope rule (`same`, or the key absent with scope solid / all) ...
+inline bool LodCutFollows() {
+    return g_lodCutMode == kLodCutSame || (g_lodCutMode == kLodCutAbsent && g_lodScope >= kLodScopeSolid);
+}
+// ... and the cut-out class's bias for the effective full bias `eff` (0 = the bias is off for every class).
+inline float LodCutEffective(float eff) {
+    if (eff == 0.0f) return 0.0f;
+    if (LodCutFollows()) return g_lodScope >= kLodScopeSolid ? eff : 0.0f;
+    return g_lodCutBias < -3.0f ? -3.0f : (g_lodCutBias > 1.0f ? 1.0f : g_lodCutBias);
+}
+// The value as the user sees it (keys, save): `same` -> what the scope rule gives with tex_lod_bias alone.
+inline float LodCutUserValue() {
+    return LodCutFollows() ? (g_lodScope >= kLodScopeSolid ? g_lodBias : 0.0f) : g_lodCutBias;
+}
+void LodCutoutText(char* buf, size_t cap) {
+    if (LodCutFollows()) snprintf(buf, cap, "same");
+    else                 snprintf(buf, cap, "%.2f", (double)g_lodCutBias);
+}
+typedef void (STDMETHODCALLTYPE* OMSetBlendState_t)(ID3D11DeviceContext*, ID3D11BlendState*, const FLOAT[4], UINT);
+OMSetBlendState_t    oOMSetBlendState = nullptr;
+std::atomic<bool>    g_lodBlendHooked{false};     // OMSetBlendState hook installed (per-draw scope possible)
+constexpr uint32_t   kLodBsSize = 4096;           // blend-state classification hash (D3D11: max 4096 blend states per device)
+constexpr uint32_t   kLodBsMax  = kLodBsSize / 2;
+struct LodBsEntry {
+    ID3D11BlendState* key;        // null = empty slot (ref held: the pointer cannot be reused while it is a key)
+    uint32_t          solid;      // 1 = BlendEnable off on RT0 and AlphaToCoverageEnable off
+};
+LodBsEntry           g_lodBsTab[kLodBsSize] = {};
+uint32_t             g_lodBsFill = 0, g_lodBsSolidN = 0, g_lodBsSeeN = 0;
+bool                 g_lodBsFullLogged = false;
+ID3D11BlendState*    g_lodBlendCur = nullptr;     // the game's current blend state (identity; hkOMSetBlendState, resync)
+ID3D11BlendState*    g_lodBlendKnown = nullptr;   // the state g_lodBlendSolid was classified for ...
+bool                 g_lodBlendKnownOk = false;   // ... valid
+bool                 g_lodBlendSolid = true;
+uint64_t             g_lodDrawSolid = 0, g_lodDrawSee = 0, g_lodSwaps = 0, g_lodResyncs = 0;   // per-draw counters
+uint64_t             g_lodDrawSolid0 = 0, g_lodDrawSee0 = 0, g_lodSwaps0 = 0;                  // stats window start
+// phase 12: alpha-tested (cut-out) pixel shaders, see CUT-OUTS. The DXBC flag per shader object, set at CreatePixelShader.
+typedef HRESULT (STDMETHODCALLTYPE* CreatePixelShader_t)(ID3D11Device*, const void*, SIZE_T, ID3D11ClassLinkage*,
+                                                          ID3D11PixelShader**);
+typedef void (STDMETHODCALLTYPE* PSSetShader_t)(ID3D11DeviceContext*, ID3D11PixelShader*, ID3D11ClassInstance* const*, UINT);
+CreatePixelShader_t  oCreatePixelShader = nullptr;
+PSSetShader_t        oPSSetShader = nullptr;
+std::atomic<bool>    g_lodPsHooked{false};        // CreatePixelShader + PSSetShader hooks installed (cut-out rule possible)
+constexpr uint32_t   kLodPsBits = 14;
+constexpr uint32_t   kLodPsSize = 1u << kLodPsBits;        // 16384 entries
+constexpr uint32_t   kLodPsMax  = kLodPsSize / 2;          // fill cap (load factor 0.5)
+constexpr uintptr_t  kLodPsScanned = 1, kLodPsDiscard = 2, kLodPsFlags = 7;   // low pointer bits (COM objects: 8+ aligned)
+std::atomic<uintptr_t> g_lodPsTab[kLodPsSize];    // shader pointer | flags; 0 = empty (zero-initialised: static storage)
+std::atomic<uint32_t> g_lodPsFill{0};
+std::atomic<uint32_t> g_lodPsGen{0};              // bumped by every insert / overwrite (invalidates the per-pointer memo)
+std::atomic<uint32_t> g_lodPsCreCut{0}, g_lodPsCrePlain{0}, g_lodPsCreBad{0};   // creations seen: discard / none / unparsed
+std::atomic<bool>    g_lodPsFullLogged{false};
+ID3D11PixelShader*   g_lodPsCur = nullptr;        // the game's current PS (identity; hkPSSetShader, resync at the entry)
+ID3D11PixelShader*   g_lodPsKnown = nullptr;      // the PS g_lodPsClassCur was looked up for ...
+uint32_t             g_lodPsKnownGen = 0;         // ... at this table generation
+bool                 g_lodPsKnownOk = false;
+int                  g_lodPsClassCur = 0;         // 0 = unknown, 1 = no discard, 2 = discard (cut-out)
+bool                 g_lodCutLogged = false;
+uint64_t             g_lodDrawCut = 0, g_lodDrawUnk = 0;      // per-draw counters: cut-out draws, draws with an unknown PS
+uint64_t             g_lodDrawCut0 = 0, g_lodDrawUnk0 = 0;    // stats window start
+
+inline uint32_t LodHash(const void* p) {
+    uint64_t x = (uint64_t)(uintptr_t)p;
+    x ^= x >> 33;
+    x *= 0x9E3779B97F4A7C15ull;
+    return (uint32_t)(x >> (64 - kLodTabBits));
+}
+inline LodEntry* LodFind(const ID3D11SamplerState* s) {
+    for (uint32_t i = LodHash(s);; i = (i + 1) & (kLodTabSize - 1)) {   // terminates: the table is never more than half full
+        LodEntry& e = g_lodTab[i];
+        if (e.key == s) return &e;
+        if (!e.key) return nullptr;
+    }
+}
+void LodInsert(ID3D11SamplerState* key, ID3D11SamplerState* val, ID3D11SamplerState* val2, ID3D11SamplerState* val3,
+               uint32_t kind) {
+    uint32_t i = LodHash(key);
+    while (g_lodTab[i].key) i = (i + 1) & (kLodTabSize - 1);
+    g_lodTab[i].key = key; g_lodTab[i].val = val; g_lodTab[i].val2 = val2; g_lodTab[i].val3 = val3; g_lodTab[i].kind = kind;
+    ++g_lodFill;
+}
+// phase 11: the blend-state classification cache (refs on the keys). Any time (nothing of ours is bound by it).
+void LodBlendFlush() {
+    if (g_lodBsFill) {
+        for (LodBsEntry& e : g_lodBsTab) if (e.key) e.key->Release();
+        memset(g_lodBsTab, 0, sizeof(g_lodBsTab));
+    }
+    g_lodBsFill = g_lodBsSolidN = g_lodBsSeeN = 0;
+    g_lodBlendKnown = nullptr;
+    g_lodBlendKnownOk = false;
+}
+// Releases every cached ref and empties the table. Only while no twin of ours is bound (not in scene state).
+void LodFlush() {
+    if (g_lodFill) {
+        for (LodEntry& e : g_lodTab) {
+            if (e.kind != 1) continue;
+            if (e.val && e.val != e.key) e.val->Release();
+            if (e.val2 && e.val2 != e.key && e.val2 != e.val) e.val2->Release();
+            if (e.val3 && e.val3 != e.key && e.val3 != e.val && e.val3 != e.val2) e.val3->Release();   // phase 12
+            e.key->Release();
+        }
+        memset(g_lodTab, 0, sizeof(g_lodTab));
+    }
+    g_lodFill = 0; g_lodTwinN = 0; g_lodSeeTwinN = 0; g_lodCutTwinN = 0;
+    g_lodSkipCmp = g_lodSkipPoint = g_lodSkipMip0 = g_lodSkipSame = 0;
+    LodBlendFlush();                                    // phase 11 (re-classified on demand: one GetDesc per state)
+    if (g_lodDev) { g_lodDev->Release(); g_lodDev = nullptr; }
+    g_lodCtx = nullptr;
+    g_lodFlushReq = false;
+}
+// The twin of game sampler `s` with this bias / aniso (a new ref), or nullptr = never biased (see NEVER BIASED) or nothing
+// changes. `stats`: the full twin (skip counters, first-twin line); the see-through twin (phase 11) counts nothing.
+ID3D11SamplerState* LodMakeTwin(ID3D11SamplerState* s, float bias, int aniso, bool stats) {
+    D3D11_SAMPLER_DESC d{};
+    s->GetDesc(&d);
+    if ((unsigned)d.Filter >= 0x80u) { if (stats) ++g_lodSkipCmp; return nullptr; }       // comparison / min / max reduction
+    if (d.Filter == D3D11_FILTER_MIN_MAG_MIP_POINT) { if (stats) ++g_lodSkipPoint; return nullptr; }
+    if (d.MaxLOD <= 0.0f || d.MaxLOD <= d.MinLOD) { if (stats) ++g_lodSkipMip0; return nullptr; }   // one mip reachable
+    D3D11_SAMPLER_DESC t = d;
+    const float b = d.MipLODBias + bias;
+    t.MipLODBias = b < D3D11_MIP_LOD_BIAS_MIN ? D3D11_MIP_LOD_BIAS_MIN : (b > D3D11_MIP_LOD_BIAS_MAX ? D3D11_MIP_LOD_BIAS_MAX : b);
+    if (aniso >= 2) {
+        if (d.Filter == D3D11_FILTER_ANISOTROPIC) {
+            if (t.MaxAnisotropy < (UINT)aniso) t.MaxAnisotropy = (UINT)aniso;
+        } else if (d.Filter == D3D11_FILTER_MIN_MAG_MIP_LINEAR) {                          // trilinear -> anisotropic
+            t.Filter = D3D11_FILTER_ANISOTROPIC;
+            t.MaxAnisotropy = (UINT)aniso;
+        }
+    }
+    if (t.MipLODBias == d.MipLODBias && t.Filter == d.Filter && t.MaxAnisotropy == d.MaxAnisotropy) {
+        if (stats) ++g_lodSkipSame;
+        return nullptr;
+    }
+    if (d.AddressU != D3D11_TEXTURE_ADDRESS_BORDER && d.AddressV != D3D11_TEXTURE_ADDRESS_BORDER &&
+        d.AddressW != D3D11_TEXTURE_ADDRESS_BORDER) {
+        t.BorderColor[0] = t.BorderColor[1] = t.BorderColor[2] = 0.0f;
+        t.BorderColor[3] = kLodBorderTag;                                                  // see DEDUP
+    }
+    ID3D11SamplerState* tw = nullptr;
+    const HRESULT hr = g_lodDev ? g_lodDev->CreateSamplerState(&t, &tw) : E_POINTER;
+    if (FAILED(hr) || !tw) {
+        if (g_lodCreateFails++ < 3)
+            Log("texture LOD bias: CreateSamplerState for a %s twin failed hr=0x%lx (filter 0x%x, %u twins so far) -- that "
+                "sampler stays unbiased", stats ? "full" : "see-through / cut-out", (unsigned long)hr, (unsigned)d.Filter,
+                g_lodTwinN);
+        return nullptr;
+    }
+    if (stats && !g_lodFirstLogged) {
+        g_lodFirstLogged = true;
+        Log("texture LOD bias: first sampler twin created (Present #%llu): filter 0x%x -> 0x%x, MipLODBias %.2f -> %.2f, "
+            "MaxAnisotropy %u -> %u, MinLOD %.1f MaxLOD %.1f, address %d/%d/%d -- the game's samplers in world scene (and "
+            "menu truck-preview) passes now carry the bias (tex_lod_bias_scope=%s tex_aniso_scope=%s)",
+            (unsigned long long)g_frames.load(std::memory_order_relaxed),
+            (unsigned)d.Filter, (unsigned)t.Filter, (double)d.MipLODBias, (double)t.MipLODBias, d.MaxAnisotropy,
+            t.MaxAnisotropy, (double)d.MinLOD, (double)d.MaxLOD, (int)d.AddressU, (int)d.AddressV, (int)d.AddressW,
+            LodScopeName(g_lodScope), LodScopeName(g_anisoScope));
+    }
+    return tw;
+}
+// Scene state: the FULL set's member for the game's sampler `s` (returned), *see = its see-through member, *cut = its
+// cut-out member (phase 12), *orig = the game's own sampler it stands for.
+ID3D11SamplerState* LodResolve(ID3D11SamplerState* s, ID3D11SamplerState** orig, ID3D11SamplerState** see,
+                               ID3D11SamplerState** cut) {
+    if (LodEntry* e = LodFind(s)) {
+        if (e->kind == 1) { *orig = s; *see = e->val2; *cut = e->val3; return e->val; }
+        ID3D11SamplerState* const o = e->val;           // a twin of ours, read back and bound again by the game
+        *orig = o;
+        if (LodEntry* oe = LodFind(o)) if (oe->kind == 1) { *see = oe->val2; *cut = oe->val3; return oe->val; }
+        *see = s;
+        *cut = s;
+        return s;
+    }
+    *orig = s;
+    *see = s;
+    *cut = s;
+    if (g_lodFill + 4 > kLodTabMax) {                   // cache full: unbiased (never expected, D3D11 dedups samplers)
+        if (!g_lodFullLogged) {
+            g_lodFullLogged = true;
+            Log("texture LOD bias: twin cache full (%u entries, %u twins) -- further samplers stay unbiased", g_lodFill, g_lodTwinN);
+        }
+        return s;
+    }
+    ID3D11SamplerState* const tw = LodMakeTwin(s, g_lodTabBias, g_lodTabAniso, true);
+    ID3D11SamplerState* const full = tw ? tw : s;
+    ID3D11SamplerState* sv = s;                         // phase 11: the see-through member
+    if (g_lodTabSeeBias == g_lodTabBias && g_lodTabSeeAniso == g_lodTabAniso) {
+        sv = full;                                      // both scopes all (or nothing differs): the full twin
+    } else if (g_lodTabSeeBias != 0.0f || g_lodTabSeeAniso >= 2) {
+        ID3D11SamplerState* t2 = LodMakeTwin(s, g_lodTabSeeBias, g_lodTabSeeAniso, false);
+        if (t2 && t2 == full) { t2->Release(); t2 = nullptr; sv = full; }   // D3D11 dedup: the same desc as the full twin
+        if (t2) sv = t2;
+    }
+    ID3D11SamplerState* cv = s;                         // phase 12: the cut-out member (an existing member when it can be)
+    if (g_lodTabCutBias == g_lodTabBias && g_lodTabCutAniso == g_lodTabAniso) {
+        cv = full;
+    } else if (g_lodTabCutBias == g_lodTabSeeBias && g_lodTabCutAniso == g_lodTabSeeAniso) {
+        cv = sv;
+    } else if (g_lodTabCutBias != 0.0f || g_lodTabCutAniso >= 2) {
+        ID3D11SamplerState* t3 = LodMakeTwin(s, g_lodTabCutBias, g_lodTabCutAniso, false);
+        if (t3 && (t3 == full || t3 == sv)) { cv = t3; t3->Release(); }   // D3D11 dedup: an existing member (its ref stays)
+        else if (t3) cv = t3;
+    }
+    s->AddRef();                                        // the key stays alive (no pointer reuse) while cached
+    LodInsert(s, full, sv, cv, 1);
+    if (tw) {
+        ++g_lodTwinN;
+        if (!LodFind(tw)) LodInsert(tw, s, nullptr, nullptr, 2);   // reverse entry (first original wins if D3D11 deduped)
+    }
+    if (sv != s && sv != full) {
+        ++g_lodSeeTwinN;
+        if (!LodFind(sv)) LodInsert(sv, s, nullptr, nullptr, 2);
+    }
+    if (cv != s && cv != full && cv != sv) {
+        ++g_lodCutTwinN;
+        if (!LodFind(cv)) LodInsert(cv, s, nullptr, nullptr, 2);
+    }
+    *see = sv;
+    *cut = cv;
+    return full;
+}
+// phase 11 (12: + the cut-out set): slot `i`'s bits in the set masks (each set vs the game's own samplers g_lodShadow).
+inline void LodSlotMasks(UINT i) {
+    const uint32_t bit = 1u << i;
+    if (g_lodFullS[i] != g_lodShadow[i]) g_lodMaskFull |= bit; else g_lodMaskFull &= ~bit;
+    if (g_lodSeeS[i] != g_lodShadow[i])  g_lodMaskSee |= bit;  else g_lodMaskSee &= ~bit;
+    if (g_lodCutS[i] != g_lodShadow[i])  g_lodMaskCut |= bit;  else g_lodMaskCut &= ~bit;
+}
+// phase 12: a set's per-slot members / the slots where it differs from the game's own samplers.
+inline ID3D11SamplerState* const* LodSetArr(uint8_t set) {
+    return set == kLodSetFull ? g_lodFullS : (set == kLodSetCut ? g_lodCutS : g_lodSeeS);
+}
+inline uint32_t LodSetMask(uint8_t set) {
+    return set == kLodSetFull ? g_lodMaskFull : (set == kLodSetSee ? g_lodMaskSee : (set == kLodSetCut ? g_lodMaskCut : 0u));
+}
+// Scene state on: re-read the PS sampler slots (bound before this pass, see STATE LEAKS) and bind the set `set` of them.
+void LodEnter(ID3D11DeviceContext* ctx, uint8_t set) {
+    if (g_lodFlushReq || ctx != g_lodCtx || g_lodTabGen != g_lodGen) {   // nothing of ours is bound here: safe to flush
+        LodFlush();
+        g_lodTabGen = g_lodGen; g_lodTabBias = g_lodEff; g_lodTabAniso = g_lodAniso;
+        g_lodTabSeeBias = g_lodScope == kLodScopeAll ? g_lodEff : 0.0f;     // phase 11: the see-through members
+        g_lodTabSeeAniso = g_anisoScope == kLodScopeAll ? g_lodAniso : 0;
+        g_lodTabCutBias = g_lodCutEff;                  // phase 12: the cut-out members (phase 13: tex_lod_bias_cutout)
+        g_lodTabCutAniso = g_anisoScope >= kLodScopeSolid ? g_lodAniso : 0;
+    }
+    g_lodCtx = ctx;
+    if (!g_lodDev) ctx->GetDevice(&g_lodDev);
+    ID3D11SamplerState* cur[kLodSlots] = {};
+    ctx->PSGetSamplers(0, kLodSlots, cur);
+    ID3D11SamplerState* const* const bind = LodSetArr(set);
+    g_lodMaskFull = g_lodMaskSee = g_lodMaskCut = 0;
+    int lo = -1, hi = -1;
+    for (UINT i = 0; i < kLodSlots; ++i) {
+        ID3D11SamplerState* o = nullptr;
+        ID3D11SamplerState* sv = nullptr;
+        ID3D11SamplerState* cv = nullptr;
+        g_lodFullS[i] = cur[i] ? LodResolve(cur[i], &o, &sv, &cv) : nullptr;
+        g_lodSeeS[i] = sv;
+        g_lodCutS[i] = cv;
+        g_lodShadow[i] = o;
+        LodSlotMasks(i);
+        if (bind[i] != cur[i]) { if (lo < 0) lo = (int)i; hi = (int)i; ++g_lodSubst; }
+    }
+    if (lo >= 0) oPSSetSamplers(ctx, (UINT)lo, (UINT)(hi - lo + 1), bind + lo);
+    for (ID3D11SamplerState* s : cur) if (s) s->Release();   // PSGetSamplers refs (bound ones stay referenced by the runtime)
+    g_lodSet = set;
+    ++g_lodEnters;
+    g_lodInScene.store(true, std::memory_order_relaxed);
+}
+// Scene state off: the slots holding a twin get the game's own samplers back (the slots in between get what they hold).
+void LodLeave(ID3D11DeviceContext* ctx) {
+    g_lodInScene.store(false, std::memory_order_relaxed);
+    g_lodPerDraw.store(false, std::memory_order_relaxed);
+    const uint32_t m = LodSetMask(g_lodSet);
+    g_lodSet = 0;
+    g_lodMaskFull = g_lodMaskSee = g_lodMaskCut = 0;
+    if (!m) return;
+    unsigned long lo = 0, hi = 0;
+    _BitScanForward(&lo, m);
+    _BitScanReverse(&hi, m);
+    oPSSetSamplers(ctx, (UINT)lo, (UINT)(hi - lo + 1), g_lodShadow + lo);
+}
+// phase 11, scene state: bind another set (one PSSetSamplers over the slots where the bound set and the new one differ,
+// none if they are equal). phase 12: three sets -- the differing slots are found per call (<= 16 pointer compares over the
+// slots where either set differs from the game's own samplers; a slot where both equal it is equal).
+void LodBindSet(ID3D11DeviceContext* ctx, uint8_t set) {
+    if (set == g_lodSet) return;
+    ID3D11SamplerState* const* const from = LodSetArr(g_lodSet);
+    ID3D11SamplerState* const* const to = LodSetArr(set);
+    uint32_t m = LodSetMask(g_lodSet) | LodSetMask(set), diff = 0;
+    while (m) {
+        unsigned long i = 0;
+        _BitScanForward(&i, m);
+        m &= m - 1;
+        if (from[i] != to[i]) diff |= 1u << i;
+    }
+    g_lodSet = set;
+    if (!diff) return;
+    unsigned long lo = 0, hi = 0;
+    _BitScanForward(&lo, diff);
+    _BitScanReverse(&hi, diff);
+    oPSSetSamplers(ctx, (UINT)lo, (UINT)(hi - lo + 1), to + lo);
+    ++g_lodSwaps;
+}
+// phase 11: BlendEnable off on RT0 and AlphaToCoverageEnable off (= a solid draw); memoised per state object.
+bool LodBlendSolid(ID3D11BlendState* bs) {
+    if (!bs) return true;                               // the default blend state: no blending, no A2C
+    for (uint32_t i = LodHash(bs) & (kLodBsSize - 1);; i = (i + 1) & (kLodBsSize - 1)) {   // never more than half full
+        const LodBsEntry& e = g_lodBsTab[i];
+        if (e.key == bs) return e.solid != 0;
+        if (!e.key) break;
+    }
+    D3D11_BLEND_DESC d{};
+    bs->GetDesc(&d);
+    const bool solid = !d.AlphaToCoverageEnable && !d.RenderTarget[0].BlendEnable;
+    if (g_lodBsFill < kLodBsMax) {
+        uint32_t i = LodHash(bs) & (kLodBsSize - 1);
+        while (g_lodBsTab[i].key) i = (i + 1) & (kLodBsSize - 1);
+        bs->AddRef();                                   // the key stays alive (no pointer reuse) while cached
+        g_lodBsTab[i].key = bs; g_lodBsTab[i].solid = solid ? 1u : 0u;
+        ++g_lodBsFill;
+        ++(solid ? g_lodBsSolidN : g_lodBsSeeN);
+    } else if (!g_lodBsFullLogged) {
+        g_lodBsFullLogged = true;
+        Log("texture LOD bias: blend-state cache full (%u states) -- further states are classified per change (GetDesc)",
+            g_lodBsFill);
+    }
+    return solid;
+}
+// phase 11: the current game blend state is solid (classified once per state change).
+inline bool LodCurBlendSolid() {
+    if (!g_lodBlendKnownOk || g_lodBlendKnown != g_lodBlendCur) {
+        g_lodBlendSolid = LodBlendSolid(g_lodBlendCur);
+        g_lodBlendKnown = g_lodBlendCur;
+        g_lodBlendKnownOk = true;
+    }
+    return g_lodBlendSolid;
+}
+// phase 12: DXBC pixel-shader scan. 1 = a pixel shader without discard, 2 = with a discard / discard_z / discard_nz opcode
+// anywhere (clip() in HLSL = an alpha-tested cut-out), 0 = not parsable (no SHDR / SHEX chunk, not a pixel shader, a
+// malformed or zero-length instruction) = "unknown". Pure function of the bytecode (any thread). Token format: the
+// instruction length is bits 24..30 of the opcode token, except customdata (opcode 0x35: the next token is the length).
+int DxbcPsClass(const void* code, SIZE_T len) {
+    if (!code || len < 32) return 0;
+    const uint8_t* const b = static_cast<const uint8_t*>(code);
+    auto rd = [b](SIZE_T off) { uint32_t v; memcpy(&v, b + off, 4); return v; };
+    if (rd(0) != 0x43425844u) return 0;                             // 'DXBC'
+    const uint32_t nChunks = rd(28);
+    if (nChunks > 64 || 32 + (SIZE_T)nChunks * 4 > len) return 0;
+    for (uint32_t c = 0; c < nChunks; ++c) {
+        const SIZE_T off = rd(32 + (SIZE_T)c * 4);
+        if (off + 8 > len) return 0;
+        const uint32_t fourcc = rd(off), size = rd(off + 4);
+        if (fourcc != 0x52444853u && fourcc != 0x58454853u) continue;   // 'SHDR' / 'SHEX'
+        if (size < 8 || off + 8 + size > len) return 0;
+        const SIZE_T base = off + 8;
+        if ((rd(base) >> 16) != 0) return 0;                        // program type 0 = pixel shader
+        const uint32_t nTok = size / 4, declared = rd(base + 4);
+        const uint32_t n = declared < nTok ? declared : nTok;
+        for (uint32_t i = 2; i < n;) {
+            const uint32_t op = rd(base + (SIZE_T)i * 4), opc = op & 0x7FFu;
+            uint32_t ilen = (op >> 24) & 0x7Fu;
+            if (opc == 0x35u) {                                     // customdata (immediate constant buffer, ...)
+                if (i + 1 >= n) return 0;
+                ilen = rd(base + (SIZE_T)(i + 1) * 4);
+            }
+            if (ilen == 0) return 0;
+            if (opc == 0x0Du) return 2;                             // discard (_z / _nz)
+            i += ilen;
+        }
+        return 1;
+    }
+    return 0;
+}
+inline uint32_t LodPsHash(const void* p) {
+    uint64_t x = (uint64_t)(uintptr_t)p;
+    x ^= x >> 33;
+    x *= 0x9E3779B97F4A7C15ull;
+    return (uint32_t)(x >> (64 - kLodPsBits));
+}
+// Any thread (CreatePixelShader): records `ps`'s class. A shader created at the address of a released one overwrites its
+// entry (a new generation); entries are never removed (bounded by the distinct addresses, cap kLodPsMax).
+void LodPsNote(ID3D11PixelShader* ps, int cls) {
+    const uintptr_t key = (uintptr_t)ps;
+    if (!key || (key & kLodPsFlags)) return;
+    const uintptr_t val = key | (cls == 2 ? (kLodPsScanned | kLodPsDiscard) : (cls == 1 ? kLodPsScanned : 0));
+    (cls == 2 ? g_lodPsCreCut : (cls == 1 ? g_lodPsCrePlain : g_lodPsCreBad)).fetch_add(1, std::memory_order_relaxed);
+    uint32_t i = LodPsHash(ps);
+    for (uint32_t probes = 0; probes < kLodPsSize; ++probes, i = (i + 1) & (kLodPsSize - 1)) {
+        uintptr_t e = g_lodPsTab[i].load(std::memory_order_acquire);
+        if (!e) {
+            if (g_lodPsFill.load(std::memory_order_relaxed) >= kLodPsMax) {
+                if (!g_lodPsFullLogged.exchange(true))
+                    Log("texture LOD bias: pixel-shader table full (%u shaders) -- further shaders count as unknown (no "
+                        "discard)", kLodPsMax);
+                return;
+            }
+            if (!g_lodPsTab[i].compare_exchange_strong(e, val, std::memory_order_acq_rel, std::memory_order_acquire)) {
+                if ((e & ~kLodPsFlags) != key) continue;            // another shader took this slot: keep probing
+            } else {
+                g_lodPsFill.fetch_add(1, std::memory_order_relaxed);
+                g_lodPsGen.fetch_add(1, std::memory_order_release);
+                return;
+            }
+        } else if ((e & ~kLodPsFlags) != key) {
+            continue;
+        }
+        g_lodPsTab[i].store(val, std::memory_order_release);        // the same address again (a re-created shader)
+        g_lodPsGen.fetch_add(1, std::memory_order_release);
+        return;
+    }
+}
+// Render thread: 0 = unknown, 1 = no discard, 2 = discard. No pixel shader (depth only) = 1.
+int LodPsLookup(const ID3D11PixelShader* ps) {
+    const uintptr_t key = (uintptr_t)ps;
+    if (!key) return 1;
+    uint32_t i = LodPsHash(ps);
+    for (uint32_t probes = 0; probes < kLodPsSize; ++probes, i = (i + 1) & (kLodPsSize - 1)) {
+        const uintptr_t e = g_lodPsTab[i].load(std::memory_order_acquire);
+        if (!e) return 0;
+        if ((e & ~kLodPsFlags) == key) return (e & kLodPsDiscard) ? 2 : ((e & kLodPsScanned) ? 1 : 0);
+    }
+    return 0;
+}
+// The current game PS's class (memoised per pointer and table generation: a pointer compare + one atomic load per draw).
+inline int LodCurPsClass() {
+    const uint32_t gen = g_lodPsGen.load(std::memory_order_acquire);
+    if (!g_lodPsKnownOk || g_lodPsKnown != g_lodPsCur || g_lodPsKnownGen != gen) {
+        g_lodPsClassCur = LodPsLookup(g_lodPsCur);
+        g_lodPsKnown = g_lodPsCur;
+        g_lodPsKnownGen = gen;
+        g_lodPsKnownOk = true;
+    }
+    return g_lodPsClassCur;
+}
+inline const char* LodSetName(uint8_t s) { return s == kLodSetFull ? "full" : (s == kLodSetCut ? "cut-out" : "see-through"); }
+// phase 11 (12: + cut-outs): the set the current draw needs in a per-draw pass. `count`: a draw (counters), not an entry.
+uint8_t LodWantSet(bool count) {
+    uint8_t want = kLodSetSee;
+    if (LodCurBlendSolid()) {
+        want = kLodSetFull;
+        if (g_lodPsHooked.load(std::memory_order_relaxed)) {
+            const int pc = LodCurPsClass();
+            if (pc == 2) {
+                want = g_lodCutSet;
+                if (count) {
+                    ++g_lodDrawCut;
+                    if (!g_lodCutLogged) {
+                        g_lodCutLogged = true;
+                        char cutTxt[16];
+                        LodCutoutText(cutTxt, sizeof(cutTxt));
+                        Log("texture LOD bias: first alpha-tested draw (pixel shader %p has a discard) in a %s pass -> the %s "
+                            "set, bias %.2f (tex_lod_bias_cutout=%s tex_lod_bias_scope=%s tex_aniso_scope=%s; v0.10.0 phase "
+                            "12/13 cut-out rule, Present #%llu)",
+                            (void*)g_lodPsCur, g_gbufPass ? "G-buffer" : "preview", LodSetName(want), (double)g_lodCutEff,
+                            cutTxt, LodScopeName(g_lodScope), LodScopeName(g_anisoScope),
+                            (unsigned long long)g_frames.load(std::memory_order_relaxed));
+                    }
+                }
+                return want;                            // phase 13: counted as its own class (g_lodDrawCut), not solid / see
+            } else if (pc == 0 && count) {
+                ++g_lodDrawUnk;
+            }
+        }
+    }
+    if (count) ++(want == kLodSetFull ? g_lodDrawSolid : g_lodDrawSee);   // phase 13: classes (solid / see-through)
+    return want;
+}
+// phase 11 draw hooks (game context, not our work, g_lodPerDraw): the set this draw needs, right before the game's draw.
+void LodOnDraw(ID3D11DeviceContext* ctx) {
+    const uint8_t want = LodWantSet(true);
+    if (g_lodSet != want) LodBindSet(ctx, want);
+}
+// hkOMSetRenderTargets (game context, not t_inDlaa), after g_jitterPass / g_previewPass were set for this bind.
+// phase 11: which set this binding needs, and whether its draws decide it one by one (see SCOPE).
+void LodOnBind(ID3D11DeviceContext* ctx) {
+#ifdef WITH_DLAA
+    const bool solidPass = g_gbufPass || g_previewPass;    // world G-buffer, menu truck-preview pass
+#else
+    const bool solidPass = g_gbufPass;
+#endif
+    const bool fwdPass = g_jitterPass && !g_gbufPass;      // world forward pass (1 RTV RGBA16F + scene depth)
+    uint8_t set = 0;
+    bool perDraw = false;
+    if (g_lodOn && (solidPass || fwdPass)) {
+        if (!g_lodSplit) set = kLodSetFull;                             // both scopes all / nothing differs: v0.9.0
+        else if (!solidPass) set = g_lodSeeTrivial ? 0 : kLodSetSee;    // forward pass: never the solid set
+        else if (g_lodBlendHooked.load(std::memory_order_relaxed)) perDraw = true;
+        else set = kLodSetFull;                                         // no blend hook: pass level
+    }
+    const bool in = g_lodInScene.load(std::memory_order_relaxed);
+    if (perDraw) {
+        if (!g_lodPerDraw.load(std::memory_order_relaxed)) {           // entering per-draw state: resync the blend state
+            ID3D11BlendState* bs = nullptr;
+            FLOAT bf[4] = {};
+            UINT sm = 0;
+            ctx->OMGetBlendState(&bs, bf, &sm);
+            g_lodBlendCur = bs;                         // identity; the runtime keeps it alive while it is bound
+            if (bs) bs->Release();
+            if (g_lodPsHooked.load(std::memory_order_relaxed)) {   // phase 12: and the pixel shader
+                ID3D11PixelShader* ps = nullptr;
+                ctx->PSGetShader(&ps, nullptr, nullptr);
+                g_lodPsCur = ps;                        // identity (bound = alive)
+                if (ps) ps->Release();
+            }
+            ++g_lodResyncs;
+        }
+        set = LodWantSet(false);
+    }
+    if (!set) {
+        if (in) LodLeave(ctx);
+        g_lodPerDraw.store(false, std::memory_order_relaxed);
+        return;
+    }
+    if (!in) LodEnter(ctx, set);
+    else     LodBindSet(ctx, set);
+    g_lodPerDraw.store(perDraw, std::memory_order_relaxed);
+}
+// ResetPassTrackingCore (game-context change): the old context's state is abandoned (never touched again), the cache
+// (old device) is dropped at the next safe point.
+void LodOnContextReset() {
+    g_lodInScene.store(false, std::memory_order_relaxed);
+    g_lodPerDraw.store(false, std::memory_order_relaxed);
+    g_lodSet = 0;
+    g_lodMaskFull = g_lodMaskSee = g_lodMaskCut = 0;
+    g_lodBlendCur = nullptr;
+    g_lodBlendKnownOk = false;
+    g_lodPsCur = nullptr;                               // phase 12
+    g_lodPsKnownOk = false;
+    g_lodFlushReq = true;
+}
+// The tex_lod_bias_auto term: log2(render width / output width) of the last matched blit while DLSS upscales, in 1/64 steps
+// (the ratio is constant for a given setting; the rounding keeps float noise from rebuilding the cache).
+float LodAutoTerm() {
+    if (!g_lodAuto || !g_dlssUpscale.load(std::memory_order_relaxed) || !(g_upRenderOverOutX > 0.0 && g_upRenderOverOutX < 1.0))
+        return 0.0f;
+    return std::floor((float)std::log2(g_upRenderOverOutX) * 64.0f + 0.5f) / 64.0f;
+}
+float LodEffective(float autoTerm) {
+    const float e = g_lodBias + autoTerm;
+    return e < -6.0f ? -6.0f : (e > 1.0f ? 1.0f : e);
+}
+// Once per frame (OnPresentBoundary, both frame drivers): effective bias, on/off, a flush outside scene state when needed.
+void LodFrameUpdate(uint64_t n) {
+    const float autoT = LodAutoTerm();
+    const float eff = LodEffective(autoT);
+    if (autoT != g_lodAutoTerm) {
+        g_lodAutoTerm = autoT;
+        if (g_lodAutoLogs++ < 20)
+            Log("texture LOD bias: auto term now %+.2f (DLSS render / output width %.3f) -> effective %.2f (tex_lod_bias %.2f, "
+                "Present #%llu)", (double)autoT, g_upRenderOverOutX, (double)eff, (double)g_lodBias, (unsigned long long)n);
+    }
+    const float cutEff = LodCutEffective(eff);          // phase 13: tex_lod_bias_cutout (0 while eff is 0)
+    if (eff != g_lodEff || cutEff != g_lodCutEff) { g_lodEff = eff; g_lodCutEff = cutEff; ++g_lodGen; }
+    g_lodOn = g_lodHooked.load(std::memory_order_acquire) && (eff != 0.0f || g_lodAniso >= 2) && JitterLive();
+    // phase 11: does a see-through draw need other samplers than a solid one / are its samplers the game's own?
+    // phase 12: which parts each class gets (f = full / solid draw, s = see-through, c = cut-out) and the set a cut-out
+    // draw binds: the full one or the see-through one when it carries the same parts, else the cut-out set.
+    // phase 13: compared as VALUES (bias, aniso) -- the cut-out bias is its own value (tex_lod_bias_cutout), not 0 / eff.
+    const float fb = eff, sb = g_lodScope == kLodScopeAll ? eff : 0.0f, cb = cutEff;
+    const int fa = g_lodAniso >= 2 ? g_lodAniso : 0;
+    const int sa = g_anisoScope == kLodScopeAll ? fa : 0, ca = g_anisoScope >= kLodScopeSolid ? fa : 0;
+    g_lodCutSet = (cb == fb && ca == fa) ? kLodSetFull : ((cb == sb && ca == sa) ? kLodSetSee : kLodSetCut);
+    g_lodSplit = sb != fb || sa != fa || g_lodCutSet != kLodSetFull;
+    g_lodSeeTrivial = sb == 0.0f && sa == 0;
+    if (!g_lodInScene.load(std::memory_order_relaxed) && (g_lodFlushReq || (!g_lodOn && (g_lodFill || g_lodDev))))
+        LodFlush();
+}
+// Ctrl+F1 (-1) / Ctrl+F2 (+1): tex_lod_bias in 0.25 steps within -3..0 (a +bias from dlaa.ini only steps down).
+void StepLodBias(int dir, uint64_t n) {
+    const float cur = g_lodBias;
+    const KeyAction ka = dir < 0 ? KA_LOD_DOWN : KA_LOD_UP;
+    if (dir < 0 ? cur <= -3.0f : cur >= 0.0f) {
+        Log("texture LOD bias now %.2f (%s, Present #%llu) -- already at the limit, unchanged", (double)cur, KeyName(ka),
+            (unsigned long long)n);
+        PlayTones(1, 200, 150, 0);                       // low beep: clamp limit (same as the sharpen keys)
+        return;
+    }
+    float v = std::floor((cur + 0.25f * (float)dir) * 4.0f + 0.5f) / 4.0f;
+    if (dir < 0) { if (v < -3.0f) v = -3.0f; } else { if (v > 0.0f) v = 0.0f; }
+    g_lodBias = v;
+    const float autoT = LodAutoTerm();
+    Log("texture LOD bias %.2f (%s, Present #%llu) -- effective %.2f (auto %+.2f) tex_aniso=%d, %s; %u twins cached (rebuilt "
+        "at the next scene pass)", (double)v, KeyName(ka), (unsigned long long)n, (double)LodEffective(autoT), (double)autoT,
+        g_lodAniso, (v == 0.0f && autoT == 0.0f && g_lodAniso < 2) ? "off" :
+        (!g_lodHooked.load(std::memory_order_relaxed) ? "INACTIVE: PSSetSamplers hook not installed" :
+        (JitterLive() ? "applied" : "waiting for DLAA / DLSS")), g_lodTwinN);
+    PlayTones(1, (DWORD)(400.0f - 200.0f * v + 0.5f), 150, 0);   // one beep, pitch rises with sharpness: 400 Hz at 0 .. 1000 Hz at -3
+#ifdef WITH_DLAA
+    OnLiveTuningChange();                                // timing windows restart (sharper mips = more texture bandwidth)
+#endif
+}
+// phase 13, Ctrl+Shift+F1 (-1) / Ctrl+Shift+F2 (+1): tex_lod_bias_cutout in 0.25 steps within -3..0 (a +value from dlaa.ini
+// only steps down). From `same` the first press starts at the value the scope rule gives and switches to a value of its own.
+// Two beeps (the Ctrl+F1 / F2 pitch rule) so the cut-out keys are told apart from the main bias by ear.
+void StepLodCutout(int dir, uint64_t n) {
+    const float cur = LodCutUserValue();
+    const KeyAction ka = dir < 0 ? KA_LOD_CUT_DOWN : KA_LOD_CUT_UP;
+    if (dir < 0 ? cur <= -3.0f : cur >= 0.0f) {
+        char t[16];
+        LodCutoutText(t, sizeof(t));
+        Log("texture LOD bias cut-out (alpha-tested draws) now %.2f (tex_lod_bias_cutout=%s, %s, Present #%llu) -- already at the "
+            "limit, unchanged", (double)cur, t, KeyName(ka), (unsigned long long)n);
+        PlayTones(1, 200, 150, 0);                       // low beep: clamp limit (same as the other step keys)
+        return;
+    }
+    float v = std::floor((cur + 0.25f * (float)dir) * 4.0f + 0.5f) / 4.0f;
+    if (dir < 0) { if (v < -3.0f) v = -3.0f; } else { if (v > 0.0f) v = 0.0f; }
+    g_lodCutBias = v;
+    g_lodCutMode = kLodCutValue;
+    const float eff = LodEffective(LodAutoTerm());
+    Log("texture LOD bias cut-out (alpha-tested G-buffer / preview draws) %.2f (%s, Present #%llu) -- solid draws keep "
+        "tex_lod_bias %.2f (effective %.2f), %s; rebuilt at the next scene pass", (double)v, KeyName(ka), (unsigned long long)n,
+        (double)g_lodBias, (double)eff,
+        eff == 0.0f ? "INACTIVE while tex_lod_bias is 0 (the cut-out bias only applies while the LOD bias is on)" :
+        (!g_lodHooked.load(std::memory_order_relaxed) ? "INACTIVE: PSSetSamplers hook not installed" :
+        (!g_lodPsHooked.load(std::memory_order_relaxed) ? "INACTIVE: no CreatePixelShader / PSSetShader hook (no cut-out class)" :
+        (JitterLive() ? "applied" : "waiting for DLAA / DLSS"))));
+    PlayTones(2, (DWORD)(400.0f - 200.0f * v + 0.5f), 90, 60);   // two beeps, pitch rises with sharpness (as Ctrl+F1 / F2)
+#ifdef WITH_DLAA
+    OnLiveTuningChange();
+#endif
+}
+// " lod=... twins=..." for the FIFO stats tag; restarts the per-frame window.
+// phase 11: with split scopes "subst/frame=solid S / see-through skipped T" = draws per frame of the per-draw passes
+// that got the full set / kept the see-through set, + the set swaps (= extra PSSetSamplers calls) per frame.
+// phase 13: three classes, each with the set it binds and that set's bias / aniso: "subst/frame=solid S (full set: bias
+// b aniso a) / alpha-tested C (-> <set> set: bias b aniso a, tex_lod_bias_cutout=v) / see-through T (see-through set: ...)".
+// The classes are disjoint (S + C + T = the draws of the per-draw passes).
+void LodStatsTag(char* buf, size_t cap) {
+    const uint64_t fr = g_frames.load(std::memory_order_relaxed);
+    const double frames = fr > g_lodFrames0 ? (double)(fr - g_lodFrames0) : 1.0;
+    if (g_lodEff == 0.0f && g_lodAniso < 2 && !g_lodFill) {
+        snprintf(buf, cap, " lod=off");
+    } else {
+        const int fa = g_lodAniso >= 2 ? g_lodAniso : 0;
+        const float sb = g_lodScope == kLodScopeAll ? g_lodEff : 0.0f;
+        const int sa = g_anisoScope == kLodScopeAll ? fa : 0, ca = g_anisoScope >= kLodScopeSolid ? fa : 0;
+        char cutTxt[16];
+        LodCutoutText(cutTxt, sizeof(cutTxt));
+        char sub[760];
+        char cut[240];
+        if (g_lodPsHooked.load(std::memory_order_relaxed))      // phase 12/13: the cut-out (alpha-tested) class
+            snprintf(cut, sizeof(cut), "alpha-tested %.0f (-> %s set: bias %.2f aniso %d, tex_lod_bias_cutout=%s) / ",
+                     (double)(g_lodDrawCut - g_lodDrawCut0) / frames, LodSetName(g_lodCutSet), (double)g_lodCutEff, ca, cutTxt);
+        else
+            snprintf(cut, sizeof(cut), "alpha-tested n/a (no CreatePixelShader / PSSetShader hook: counted as solid) / ");
+        char ps[160] = "";
+        if (g_lodPsHooked.load(std::memory_order_relaxed))
+            snprintf(ps, sizeof(ps), "unknown-PS draws %.0f/frame, pixel shaders %u with discard / %u without / %u unparsed; ",
+                     (double)(g_lodDrawUnk - g_lodDrawUnk0) / frames, g_lodPsCreCut.load(std::memory_order_relaxed),
+                     g_lodPsCrePlain.load(std::memory_order_relaxed), g_lodPsCreBad.load(std::memory_order_relaxed));
+        if (g_lodSplit && g_lodBlendHooked.load(std::memory_order_relaxed))
+            snprintf(sub, sizeof(sub), "subst/frame=solid %.0f (full set: bias %.2f aniso %d) / %ssee-through %.0f (see-through "
+                     "set: bias %.2f aniso %d) (draws; %sset swaps %.1f/frame, slot subst %.0f/frame, blend states %u solid / "
+                     "%u see-through, resyncs %llu)",
+                     (double)(g_lodDrawSolid - g_lodDrawSolid0) / frames, (double)g_lodEff, fa, cut,
+                     (double)(g_lodDrawSee - g_lodDrawSee0) / frames, (double)sb, sa, ps,
+                     (double)(g_lodSwaps - g_lodSwaps0) / frames, (double)(g_lodSubst - g_lodSubst0) / frames, g_lodBsSolidN,
+                     g_lodBsSeeN, (unsigned long long)g_lodResyncs);
+        else
+            snprintf(sub, sizeof(sub), "subst/frame=%.0f%s", (double)(g_lodSubst - g_lodSubst0) / frames,
+                     g_lodSplit ? " (no OMSetBlendState hook: pass level, G-buffer / preview biased, forward not)" : "");
+        snprintf(buf, cap, " lod=%.2f%s aniso=%d scope=%s/%s cutout=%s twins=%u (see-through %u, cut-out %u) plain=%u(cmp %u "
+                 "point %u mip0 %u same %u) %s enters/frame=%.1f", (double)g_lodEff, g_lodOn ? "" : "(idle)", g_lodAniso,
+                 LodScopeName(g_lodScope), LodScopeName(g_anisoScope), cutTxt, g_lodTwinN, g_lodSeeTwinN, g_lodCutTwinN,
+                 g_lodSkipCmp + g_lodSkipPoint + g_lodSkipMip0 + g_lodSkipSame, g_lodSkipCmp, g_lodSkipPoint, g_lodSkipMip0,
+                 g_lodSkipSame, sub, (double)(g_lodEnters - g_lodEnters0) / frames);
+    }
+    g_lodSubst0 = g_lodSubst; g_lodEnters0 = g_lodEnters; g_lodFrames0 = fr;
+    g_lodDrawSolid0 = g_lodDrawSolid; g_lodDrawSee0 = g_lodDrawSee; g_lodSwaps0 = g_lodSwaps;
+    g_lodDrawCut0 = g_lodDrawCut; g_lodDrawUnk0 = g_lodDrawUnk;
+}
+
+// PSSetSamplers (v0.9.0): outside scene state (and for other contexts / our own work) the original call, nothing else.
+// phase 11: in scene state the bound set's member of each new sampler (both members and the original are tracked).
+void STDMETHODCALLTYPE hkPSSetSamplers(ID3D11DeviceContext* ctx, UINT start, UINT num, ID3D11SamplerState* const* pp) {
+    if (!g_lodInScene.load(std::memory_order_relaxed) || !IsGameCtx(ctx) || t_inDlaa || !pp || start >= kLodSlots ||
+        num == 0 || num > kLodSlots - start) {
+        oPSSetSamplers(ctx, start, num, pp);
+        return;
+    }
+    ID3D11SamplerState* bind[kLodSlots];
+    const uint8_t set = g_lodSet;
+    bool changed = false;
+    for (UINT k = 0; k < num; ++k) {
+        const UINT slot = start + k;
+        ID3D11SamplerState* const s = pp[k];
+        ID3D11SamplerState* o = nullptr;
+        ID3D11SamplerState* sv = nullptr;
+        ID3D11SamplerState* cv = nullptr;
+        ID3D11SamplerState* const f = s ? LodResolve(s, &o, &sv, &cv) : nullptr;
+        g_lodShadow[slot] = o;
+        g_lodFullS[slot] = f;
+        g_lodSeeS[slot] = sv;
+        g_lodCutS[slot] = cv;
+        LodSlotMasks(slot);
+        ID3D11SamplerState* const b = set == kLodSetFull ? f : (set == kLodSetCut ? cv : sv);
+        bind[k] = b;
+        if (b != s) { changed = true; ++g_lodSubst; }
+    }
+    oPSSetSamplers(ctx, start, num, changed ? bind : pp);
+}
+
+// phase 11: OMSetBlendState (vtable 35) -- the game's current blend state for the per-draw scope (identity only).
+void STDMETHODCALLTYPE hkOMSetBlendState(ID3D11DeviceContext* ctx, ID3D11BlendState* bs, const FLOAT f[4], UINT mask) {
+    if (!t_inDlaa && IsGameCtx(ctx)) g_lodBlendCur = bs;
+    oOMSetBlendState(ctx, bs, f, mask);
+}
+
+// phase 12: PSSetShader (context vtable 9) -- the game's current pixel shader for the cut-out rule (identity only).
+void STDMETHODCALLTYPE hkPSSetShader(ID3D11DeviceContext* ctx, ID3D11PixelShader* ps, ID3D11ClassInstance* const* ci, UINT n) {
+    if (!t_inDlaa && IsGameCtx(ctx)) g_lodPsCur = ps;
+    oPSSetShader(ctx, ps, ci, n);
+}
+// phase 12: CreatePixelShader (device vtable 15, any thread) -- one DXBC scan per created shader (a few hundred tokens).
+// A validation-only call (ppPixelShader null) and failures pass through untouched.
+HRESULT STDMETHODCALLTYPE hkCreatePixelShader(ID3D11Device* dev, const void* code, SIZE_T len, ID3D11ClassLinkage* cl,
+                                              ID3D11PixelShader** pp) {
+    const HRESULT hr = oCreatePixelShader(dev, code, len, cl, pp);
+    if (SUCCEEDED(hr) && pp && *pp) LodPsNote(*pp, DxbcPsClass(code, len));
+    return hr;
+}
+
 void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
                                             ID3D11RenderTargetView* const* rtvs,
                                             ID3D11DepthStencilView* dsv) {
+    if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oOMSetRenderTargets(ctx, n, rtvs, dsv); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     TraceOM(ctx, n, rtvs, dsv);
     if (!IsGameCtx(ctx)) {                         // v0.6.2: other contexts never touch g_gbufPass / g_jitterPass
         MaybeEarlyPrewarm(ctx, _ReturnAddress());   // v0.8.1: NGX pre-warm on the game's thread before the adoption
@@ -5704,13 +7516,17 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
     // InspectDepth runs first so a scene depth discovered in this very call counts.
     // v0.8.2: InspectDepth may reject the depth (a secondary G-buffer view: mirror, extra view) -> dres != g_sceneDepth
     // below, so that bind is no pass of any kind; sdResized = it replaced the scene depth with one of another size.
-    bool pass = false, sdResized = false;
+    bool pass = false, sdResized = false, sceneDsv = false;
+    ID3D11Resource* bindDepth = nullptr;              // v0.10.0 phase 2: this bind's depth (identity only; the DSV holds it)
+    void* fwdNow = nullptr;                           // v0.10.0 phase 7: this bind is a main forward bind of this colour
     if (dsv) {
         ID3D11Resource* dres = nullptr;
         dsv->GetResource(&dres);
         if (dres) {
+            bindDepth = dres;
             if (n == 4) sdResized = InspectDepth(dres);
             if (dres == g_sceneDepth) {
+                sceneDsv = true;                         // v0.9.0 (object ids: later-pass stencil watch)
                 if (n == 4) {
                     pass = true;
                     if (!(g_passLogged & 1)) { g_passLogged |= 1; Log("jitter pass: G-buffer (4 RTVs + scene DSV) detected on the game context %p", (void*)ctx); }
@@ -5726,6 +7542,7 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
                                    d.Width == g_sceneW && d.Height == g_sceneH;
                             if (pass && !(g_passLogged & 2)) { g_passLogged |= 2; Log("jitter pass: forward (1 RTV RGBA16F + scene DSV) detected"); }
                             if (pass) g_fwdColorTex = (void*)rres;   // v0.8.0 HDR blit rule: the forward colour (identity)
+                            if (pass) fwdNow = (void*)rres;          // v0.10.0 phase 7
                             rt->Release();
                         }
                         rres->Release();
@@ -5735,14 +7552,38 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
             dres->Release();
         }
     }
+#ifdef WITH_DLAA
+    // v0.10.0 per-draw MVs: the game leaves the world G-buffer -> its recorded draws are replayed into the pass's draw-id
+    // target now, while the scene depth is final and intact (before the game's next targets are bound; the replay
+    // restores every other piece of state it touches)
+    if (g_gbufPass && !(pass && n == 4)) DidOnLeave(ctx);
+    // v0.10.0 phase 7: the game leaves the main FORWARD binding (its next targets are not bound yet: the forward colour is final
+    // and nothing has read it) -> the pass's stage decision runs here unless its scene depth discard came first (FwdOnLeave);
+    // a main forward bind remembers the pass's forward colour (FwdOnBind)
+    if (g_fwdBound && fwdNow != g_fwdBoundTex) FwdOnLeave(ctx, n, rtvs, bindDepth);
+    if (fwdNow) FwdOnBind(fwdNow);
+    // v0.10.0 phase 2 mirror units: a mirror view's G-buffer / forward / lighting bind, its G-buffer leave (draw-id replay
+    // before the game's next bind) and the fallback end of a view whose depth was not discarded; sets g_mirGbuf / g_mirJit
+    // for this binding (ReconcileViewports below). Never touches the main pass state.
+    MirOnBind(ctx, n, rtvs, bindDepth, pass && n == 4);
+#else
+    (void)bindDepth;
+#endif
     oOMSetRenderTargets(ctx, n, rtvs, dsv);
     g_jitterPass = pass;
+#ifdef WITH_DLAA
+    g_fwdBound = fwdNow != nullptr;                // v0.10.0 phase 7
+    g_fwdBoundTex = fwdNow;
+#else
+    (void)fwdNow;
+#endif
     const bool wasGbuf = g_gbufPass;
     g_gbufPass = pass && n == 4;
 #ifdef WITH_DLAA
     PreviewOnBind(n, rtvs, dsv, g_gbufPass);       // v0.7.8 profile-screen preview pass (flat + VR), sets g_previewPass
     if (g_ptPendingMask) PreviewOnBindTargets(ctx, n, rtvs);   // v0.7.8 round 4 trigger (b) + bound-target tracking
 #endif
+    LodOnBind(ctx);                                // v0.9.0 texture LOD bias: enter / leave scene state (sampler twins)
     if (g_gbufPass) {
         // The very first pass: its clear ran before the scene depth was known, so start it here.
         // v0.6.2: also the first pass after a game-context change (g_needFirstPass, was g_passSeq == 0).
@@ -5755,6 +7596,11 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
         g_depthDirty = true;                          // scene depth now holds G-buffer content
         ++g_ring[(g_passSeq - 1) % kRing].gbufBinds;  // v0.6.1 (g_passSeq >= 1 here): every qualifying bind
     }
+#ifdef WITH_DLAA
+    ObjOnBind(ctx, sceneDsv);                      // v0.9.0 per-object MVs: enter / leave the stencil-id state
+#else
+    (void)sceneDsv;
+#endif
     ReconcileViewports(ctx, false);       // no-op unless the shift state changed
 }
 
@@ -6144,7 +7990,9 @@ bool ClassifyRecord(int eye, const PassSlot& slot, uint64_t gen, int64_t now, do
     if (st.have && st.gen != gen) st = EyeRecState();     // CameraMv invalidated since (resize, Init, ...)
     const int w = slot.cand.Count(0), c = slot.cand.Count(1);
     const int lgW = st.world, lgC = st.cabin;
-    const bool rawBad = st.have && ((lgW > 0 && 2 * w < lgW) || (lgC > 0 && 2 * c < lgC));
+    // v0.10.0 phase 8: a layer whose candidates were not collected ON PURPOSE (mv_medoid_drop) is not judged and keeps its baseline
+    const bool dW = slot.cand.Dropped(0), dC = slot.cand.Dropped(1);
+    const bool rawBad = st.have && ((!dW && lgW > 0 && 2 * w < lgW) || (!dC && lgC > 0 && 2 * c < lgC));
     // A persistent drop (e.g. a camera / view change) must not freeze R forever: the (kBadRunMax+1)th bad
     // record in a row becomes the new baseline (it is then handled as "first good after bad").
     const bool forced = rawBad && st.badRun >= kBadRunMax;
@@ -6152,7 +8000,7 @@ bool ClassifyRecord(int eye, const PassSlot& slot, uint64_t gen, int64_t now, do
     if (bad) {
         ++st.badRun;
     } else {
-        st.have = true; st.world = w; st.cabin = c; st.badRun = 0; st.gen = gen;
+        st.have = true; if (!dW) st.world = w; if (!dC) st.cabin = c; st.badRun = 0; st.gen = gen;
     }
     if (rawBad) {
         if (g_cAnomalyLogs < kAnomalyLogCap) {
@@ -6167,6 +8015,76 @@ bool ClassifyRecord(int eye, const PassSlot& slot, uint64_t gen, int64_t now, do
         LogPassRecord("pass sample", eye, slot, lgW, lgC, now, eyeIvMs, "");
     }
     return bad;
+}
+
+// v0.10.0 phase 8 (dlaa.ini mv_medoid_drop): after a Run of `eye`, which layers the NEXT passes collect no camera candidates for
+// -- every eye's per-draw consensus of that layer is healthy (CameraMv::MedoidDropBits; VR: both eyes, and only once the eye map
+// is settled: the eye verdicts read those candidates). A failed consensus clears its bit at the next Run (re-arm).
+void UpdateMedoidDrop(int eye, SceneDlaa& dl) {
+    if (eye < 0 || eye > 1) return;
+    g_eyeDropBits[eye] = (g_didCfg && g_mvOn.load(std::memory_order_relaxed)) ? dl.Mv().MedoidDropBits() : 0;
+    uint8_t bits = g_vrMode ? (uint8_t)(g_eyeDropBits[0] & g_eyeDropBits[1]) : g_eyeDropBits[0];
+    if (g_vrMode && bits) {
+        bool settled = g_eyeMapN >= 6;
+        for (int i = 0; settled && i < g_eyeMapN; ++i)
+            if (g_eyeMap[i].score != 6 && g_eyeMap[i].score != -6) settled = false;
+        if (!settled) bits = 0;
+    }
+    if (bits != g_medoidDropBits) {
+        static int logs = 0;
+        if (logs++ < 40)
+            Log("MV medoid path: world candidates %s, cabin candidates %s from the next pass on (eye %d, Present #%llu) -- %s",
+                (bits & 1) ? "DROPPED" : "collected", (bits & 2) ? "DROPPED" : "collected", eye,
+                (unsigned long long)g_frames.load(std::memory_order_relaxed),
+                bits ? "the per-draw consensus camera R was used in the last mv_medoid_drop readbacks in a row (no candidate copies, "
+                       "no pass A for that layer; a failed consensus re-arms it)"
+                     : "a layer's consensus failed / per-draw motion vectors off: the medoid path is back (re-arm)");
+        if (logs == 40) Log("MV medoid path: (log cap reached)");
+    }
+    g_medoidDropBits = bits;
+}
+
+// v0.10.0 phase 8, every 600 blits (the FIFO stats window): the "perf eye N" lines (GpuPerf, debug = 1 / perf_timers) and one
+// "perf cuts" line with the state of every phase-8 cut -- what the lead reads to judge the per-eye budget
+extern bool g_didInstancedCfg;                    // (the per-draw block below)
+extern uint64_t g_didInstGated;
+void PerfStatsLog(uint64_t blit) {
+    GpuPerf::LogWindow(blit, g_spanSceneLastN ? g_spanSceneLast : -1.0, g_spanSceneLastN);
+    const DrawIdMv::Stats& d0 = g_dlaa[0].Mv().DrawIds().GetStats();
+    const DrawIdMv::Stats& d1 = g_dlaa[1].Mv().DrawIds().GetStats();
+    const DepthTwin::PoolStats ps = DepthTwin::GetPoolStats();
+    const double pw = g_cMedoidPasses ? (double)g_cMedoidPasses : 1.0;
+    Log("perf cuts @blit %llu: mv_vote_res %u, mv_vote_march_cap %u, mv_cons_cands %u | medoid (mv_medoid_drop %u): world "
+        "candidates dropped in %llu / cabin in %llu of %llu passes, %.1f candidate copies saved per pass, re-armed world %llu / "
+        "cabin %llu (eye 0) + %llu / %llu (eye 1) in total, now %s | mirror_vr_mode %d%s | mv_slot_pool %d: pass-slot textures "
+        "alive: depth twins %d, forward depths %d, id targets %d = %.0f MB (of them pooled, idle: %d / %d / %d); created %llu, "
+        "reused %llu in total | instanced replay (mv_drawid_instanced %d, mv_inst_replay %d): %.1f instanced draws per pass not "
+        "replayed, %d keys took a moving parent lately, %llu instanced draws with a moving parent (eye 0, total); the cost of "
+        "replaying them all: replay-inst* in the perf eye line",
+        (unsigned long long)blit, DrawIdMv::VoteRes(), DrawIdMv::MarchCap(), DrawIdMv::ConsCands(), DrawIdMv::MedoidDrop(),
+        (unsigned long long)g_cMedoidPassW, (unsigned long long)g_cMedoidPassC, (unsigned long long)g_cMedoidPasses,
+        (double)g_cMedoidSaved / pw, (unsigned long long)d0.medoidRearms[0], (unsigned long long)d0.medoidRearms[1],
+        (unsigned long long)d1.medoidRearms[0], (unsigned long long)d1.medoidRearms[1],
+        g_medoidDropBits == 3 ? "both layers dropped" : (g_medoidDropBits == 1 ? "world dropped"
+                                                         : (g_medoidDropBits == 2 ? "cabin dropped" : "medoid path on")),
+        MirMode(), g_vrMode ? "" : " (flat: mirror_flat_mode)", (int)g_slotPool, ps.depthAlive, ps.fwdAlive, ps.idAlive,
+        ps.mbAlive, ps.depthPooled, ps.fwdPooled, ps.idPooled, (unsigned long long)ps.created, (unsigned long long)ps.reused,
+        (int)g_didInstancedCfg, DrawIdMv::InstReplay(), (double)g_didInstGated / pw, DrawIdMv::InstancedKnown(),
+        (unsigned long long)d0.instMoverDraws);
+    g_cMedoidSaved = g_cMedoidPasses = g_cMedoidPassW = g_cMedoidPassC = 0;
+    g_didInstGated = 0;
+    // v0.10.0 phase 9: the VR-cost settings as they ran in this window
+    Log("perf view @blit %llu: area scissor (mv_area_scissor %d, dlaa_area %d): %llu of %llu passes clipped, rect %.1f %% of the "
+        "image on average (last (%ld,%ld)-(%ld,%ld) of %ux%u) | forward depth at %s in %llu of %llu passes | dispatch chain %s | "
+        "scissor RS copies failed %llu (total; > 0 = some draws replayed unclipped)",
+        (unsigned long long)blit, (int)g_areaScissorCfg, SceneDlaa::Area(), (unsigned long long)g_p9Clipped,
+        (unsigned long long)g_p9Passes, g_p9Clipped ? 100.0 * g_p9ClipShare / (double)g_p9Clipped : 100.0,
+        (long)g_p9LastClip.left, (long)g_p9LastClip.top, (long)g_p9LastClip.right, (long)g_p9LastClip.bottom, g_sceneW, g_sceneH,
+        "1/2 resolution", (unsigned long long)g_p9Half, (unsigned long long)g_p9Passes,
+        DrawIdMv::Fold() ? "folded (pick+res, list+twin)" : "separate (phase 8)",
+        (unsigned long long)DrawIdRecord::ScissorRsFails());
+    g_p9Passes = g_p9Clipped = g_p9Half = 0;
+    g_p9ClipShare = 0.0;
 }
 #endif
 
@@ -6222,6 +8140,300 @@ void BackToVr(const D3D11_TEXTURE2D_DESC& bd) {
         "behaviour again (dlaa_area %d, the backbuffer is the mirror window); this blit is skipped", bd.Width, bd.Height,
         (int)bd.Format, (unsigned long long)g_frames.load(), g_vrArea);
 }
+
+#ifdef WITH_DLAA
+// ---- v0.10.0 phase 4: DLAA BEFORE THE TONEMAP (flat DLAA mode; dlaa.ini dlaa_pre_tonemap = 1, key_pre_tonemap Alt+F7) -------
+// WHY: the blit-time DLAA (v0.3.1 design) works on the tone-mapped 8-bit sRGB picture; NGX is trained for LINEAR HDR input,
+// and post-tonemap input is the known cause of the remaining thin bright line shimmer (lane paint, wires, rail edges, far
+// signs). The mirror units (phase 2) already run DLAA in place on their RGBA16F forward colour.
+// WHERE (RenderDoc, scripts/rdc_fwdcolour_audit.py on captures/ets2_flat_frame1969.rdc): the main forward colour F is one
+// RGBA16F scene-size texture; the forward pass writes it, then the game DiscardViews the scene depth WITH F STILL BOUND, then
+// a bloom down-sample and the tonemap read F (nothing copies, clears or discards F). So at the scene depth discard (here,
+// after the draw-id replays and the depth snapshot OnDepthDiscard already does) F is final and unread: SceneDlaa::Run on F
+// = an HDR unit (NGX IsHDR unless dlss_hdr = 0, AutoExposure -- the game's exposure for this frame is computed later, after
+// the bloom down-sample), RCAS in HDR inside Run (the v0.8.0 reversible mapping, as in the mirror units), result copied back
+// into F. Same jitter (the pass slot's), same depth snapshot, same per-draw MVs as the blit path would use. The blit that
+// consumes the slot then skips its own DLAA (slot.pre).
+// WHEN: flat confirmed (FALLBACK flat counts), the last blit did not upscale (mode DLAA, or DLSS at output == render), no
+// HDR output, DLAA on (not jitter-only / passive), the Ctrl+F6 view off (its colours must not go through the game's
+// tonemap: post-tonemap while it is on), shaders ready, the forward colour bound and of the expected shape. Otherwise the
+// blit path exactly as before. A deferred unit build (one NGX create per Present) leaves that frame alone at the blit too
+// (running the LDR path there would rebuild the unit back to LDR = flip-flop); a unit that cannot be built or fails 60
+// times in a row latches the blit path until Alt+F7 is pressed twice.
+// v0.10.0 phase 7: the stage is decided ONCE per pass (PreTonemapPoint) by g_stage (dlaa_stage.h: mode reasons switch at once,
+// per-pass conditions only after DlaaStage::kHyst passes in a row; both units stay alive, a coming post -> pre switch warms the
+// HDR unit first) and logged only when the preferred stage / its mode reason changes. `how` = what the switch cost (or null).
+void PreStage(bool pre, const char* why, uint32_t w, uint32_t h, const char* how = nullptr) {
+    if (pre) {
+        if (g_preStage == 1) return;
+        g_preStage = 1; g_preWhy[0] = 0;
+        if (g_preStageLogs++ < 80)
+            Log("DLAA stage: pre-tonemap (HDR, in place on the RGBA16F scene colour %ux%u at the scene depth discard / forward "
+                "leave; NGX IsHDR=%d, AutoExposure, RCAS in HDR) -- the game's bloom / tonemap / UI now see the anti-aliased picture"
+                "%s%s (stage switch #%llu, Present #%llu)", w, h, (int)SceneDlaa::HdrLinear(), how ? " -- " : "", how ? how : "",
+                (unsigned long long)g_stage.totalSwitches(), (unsigned long long)g_frames.load(std::memory_order_relaxed));
+        return;
+    }
+    if (g_preStage == 0 && !strcmp(g_preWhy, why)) return;
+    g_preStage = 0;
+    snprintf(g_preWhy, sizeof(g_preWhy), "%s", why);
+    if (g_preStageLogs++ < 80)
+        Log("DLAA stage: post-tonemap (blit) -- %s%s%s (Present #%llu)", why, how ? " -- " : "", how ? how : "",
+            (unsigned long long)g_frames.load(std::memory_order_relaxed));
+}
+
+// nullptr = eligible, else the MODE reason it is not (for the stage line). Per-pass conditions (forward colour, depth snapshot,
+// the HDR run itself) are NOT here: they go through the hysteresis in PreTonemapPoint.
+const char* PreIneligible() {
+    if (!g_preCfg) return "dlaa_pre_tonemap = 0";
+    if (!g_preOn.load(std::memory_order_relaxed)) return "pre-tonemap switched off (key_pre_tonemap)";
+    if (g_preFailed) return "the pre-tonemap HDR unit could not be built (latched; key_pre_tonemap twice retries)";
+    if (g_vrMode || !g_flatMode) return g_vrMode ? "VR (eye textures: blit path)" : "flat not confirmed yet";
+    if (g_hdrOut) return "HDR output (the game's RGBA16F output path: blit path)";
+    if (strcmp(g_upTag, "off") != 0) return "DLSS upscaling (render < output: the blit path upscales)";
+    if (!g_dlaaOn.load(std::memory_order_relaxed)) return "DLAA off";
+    if (g_jitterOnly.load(std::memory_order_relaxed) || g_passive.load(std::memory_order_relaxed)) return "jitter-only / passive";
+    if (g_mvDebug.load(std::memory_order_relaxed)) return "Ctrl+F6 debug view on (exact colours after the tonemap)";
+    if (g_gameDeviceChanged.load(std::memory_order_relaxed)) return "game device changed";
+    if (!SceneDlaa::ShadersReady()) return "shader warm-up";
+    if (g_blitCount == 0) return "no blit matched yet";
+    return nullptr;
+}
+
+// v0.10.0 phase 7: THE STAGE DECISION OF A PASS, once, at the FIRST of
+//  (a) the scene depth discard (OnDepthDiscard, the depth snapshot + draw-id replays already ran) -- the phase-4 hook point; in
+//      the RenderDoc frame (scripts/rdc_fwdstage_audit.py) the discard comes with the forward binding still in place, and
+//  (b) the FORWARD LEAVE (FwdOnLeave: the game binds other targets while the main forward binding is current) -- the forward
+//      colour F is final there and NOTHING has read it yet (the bloom down-sample / tonemap / anything else come after this
+//      bind). In game (log v0100p6c) some passes bound other targets BEFORE the scene depth discard ("the forward colour is
+//      not bound at the scene depth discard", up to 3.5 s in a row, also alternating per frame); such a pass now decides at
+//      its forward leave: the draw-id replays and the depth snapshot run here first (the depth is still intact).
+// F = the RTV0 bound at that moment, accepted only if it is THIS pass's forward colour (PassSlot::fwdTex, remembered at its
+// forward bind), RGBA16F, scene size, 1 mip, 1 sample. Then g_stage decides: run the HDR unit in place on F now (slot.pre 1),
+// or leave the pass to the blit unit (slot.pre 0; a FALLBACK while pre-tonemap stays preferred), possibly warming the HDR unit
+// at the blit (slot.warmHdr). Both units stay alive (SceneDlaa keeps two colour sets) -- no rebuild, no forced reset.
+void PreTonemapPoint(ID3D11DeviceContext1* ctx, PassSlot& slot, bool atLeave) {
+    if (slot.stageDone) return;
+    slot.stageDone = true;
+    slot.stageAtLeave = atLeave;
+    slot.pre = 0;
+    slot.warmHdr = false;
+    slot.warmTex.Reset();
+    slot.fallback = false;
+    const char* inel = PreIneligible();
+    if (inel) {
+        DlaaStageIn in;
+        in.ineligible = inel;
+        const DlaaStageOut o = g_stage.Decide(in);
+        PreStage(false, inel, 0, 0, o.switched < 0 ? "at once (a mode change; the HDR unit stays alive with its history)" : nullptr);
+        return;
+    }
+    // the forward colour = the RTV0 bound right now, if it is this pass's forward colour
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> F;
+    {
+        ID3D11RenderTargetView* rtv = nullptr;
+        ctx->OMGetRenderTargets(1, &rtv, nullptr);
+        if (rtv) {
+            Microsoft::WRL::ComPtr<ID3D11Resource> r;
+            rtv->GetResource(&r);
+            rtv->Release();
+            if (r && slot.fwdTex && (void*)r.Get() == slot.fwdTex) r.As(&F);
+        }
+    }
+    const char* whyNot = nullptr;
+    D3D11_TEXTURE2D_DESC td{};
+    if (!F) {
+        whyNot = slot.fwdTex ? "the forward colour is not bound at the scene depth discard (and no forward leave came before it)"
+                             : "no main forward pass (1 RTV RGBA16F scene colour + scene depth) in this pass";
+    } else {
+        F->GetDesc(&td);
+        if (td.Format != DXGI_FORMAT_R16G16B16A16_FLOAT || td.Width != g_sceneW || td.Height != g_sceneH ||
+            td.MipLevels != 1 || td.ArraySize != 1 || td.SampleDesc.Count != 1)
+            whyNot = "the forward colour is not one RGBA16F scene-size texture (1 mip, 1 sample)";
+    }
+    if (!whyNot && atLeave && !slot.snap) {
+        // the forward pass ends before the scene depth discard: the pending draw-id replays (G-buffer, forward) and the depth
+        // snapshot run now, as OnDepthDiscard would (the scene depth is intact; the discard later finds them done)
+        DidOnDepthDiscard(ctx);
+        t_inDlaa = true;
+        GpuPerf::SetPass(slot.s);                         // v0.10.0 phase 8
+        const int sq = GpuPerf::Begin(ctx, GpuPerf::kSnap);
+        const bool snapOk = slot.twin.Snapshot(ctx, g_sceneDepth, GpuTimingOn());
+        GpuPerf::End(ctx, sq);
+        t_inDlaa = false;
+        if (snapOk) {
+            slot.snap = true; ++g_cSnapAtLeave;
+            if (g_cSnapAtLeave == 1)
+                Log("depth snapshot: captured for pass s=%llu at its FORWARD LEAVE (the game bound other targets before the scene "
+                    "depth discard; first occurrence)", (unsigned long long)slot.s);
+        }
+        FwdOnPassEnd(ctx);                                // v0.10.0 phase 10: forward depth batch + forward ids (after the snapshot)
+    }
+    if (!whyNot && (!slot.snap || !slot.twin.valid)) whyNot = "no depth snapshot at the scene depth discard / forward leave";
+    if (whyNot) snprintf(g_preLastMiss, sizeof(g_preLastMiss), "%s", whyNot);
+    SceneDlaa& dl = g_dlaa[0];
+    DlaaStageIn in;
+    in.possible = whyNot == nullptr;
+    in.hdrWarm = dl.KindIdleRuns(true) <= 1;
+    const DlaaStageOut o = g_stage.Decide(in);
+    if (o.fallback) slot.fallback = true;
+    if (o.switched < 0) {
+        char why[200];
+        snprintf(why, sizeof(why), "the pre-tonemap path was not possible for %d passes in a row (last: %s)", DlaaStage::kHyst,
+                 g_preLastMiss);
+        PreStage(false, why, 0, 0, "the blit unit ran in all of them: no history reset, the HDR unit stays alive");
+    } else if (g_preStage != 1 && in.possible && !o.runPre) {
+        char why[200];
+        snprintf(why, sizeof(why), "pre-tonemap possible: switching after %d passes in a row (the HDR unit warms up during "
+                 "the last %d)", DlaaStage::kHyst, DlaaStage::kWarm);
+        PreStage(false, why, 0, 0, nullptr);
+    }
+    if (o.warmHdr && F) { slot.warmHdr = true; slot.warmTex = F; }
+    if (!o.runPre) return;
+    if (g_resetNext) { g_resetEyes = (1 << kMaxEyes) - 1; g_resetNext = false; }
+    bool reset = (g_resetEyes & 1) != 0;
+    g_resetEyes &= ~1;
+    // a stale HDR history (the unit did not evaluate for > kResumeKeepRuns evaluations: a mode change / forced switch) starts over
+    const uint64_t idle = dl.KindIdleRuns(true);
+    if (idle != UINT64_MAX && idle > kResumeKeepRuns && !reset) { reset = true; ++g_preResumeResets; }
+    dl.SetEye(0);
+    dl.SetTiming(GpuTimingOn());
+    dl.SetOpticalCentre(0.5f, 0.5f);
+    dl.Mv().SetObjPassInfo(slot.s, (int)(g_passSeq - g_fifoHead), g_cOverflow, g_passSeq);
+    const int64_t now = Qpc();
+    const double ivMs = g_eyeLastBlitT[0] && g_qpcFreq > 0 ? (double)(now - g_eyeLastBlitT[0]) * 1000.0 / (double)g_qpcFreq : 0.0;
+    const bool candBad = ClassifyRecord(0, slot, dl.Mv().InvalidateCount(), now, ivMs);
+    slot.candBad = candBad;
+    const float njx = (float)g_signX * slot.jx, njy = (float)g_signY * slot.jy;
+    const size_t k = (size_t)(slot.s % kRing);
+    GpuPerf::SetPass(slot.s);                             // v0.10.0 phase 8: flat = eye 0
+    GpuPerf::NoteEye(slot.s, 0);
+    t_inDlaa = true;
+    const bool ok = dl.Run(ctx, F.Get(), g_sceneDepth, &slot.twin, &slot.cand, njx, njy, reset, g_mvOn.load(), false, candBad,
+                           0, 0, g_objCfg ? &g_objRing[k] : nullptr, g_didCfg ? &g_didRing[k] : nullptr,
+                           g_didCfg ? &g_didFwdRing[k] : nullptr);
+    t_inDlaa = false;
+    UpdateMedoidDrop(0, dl);                              // v0.10.0 phase 8
+    if (o.switched > 0)
+        PreStage(true, nullptr, td.Width, td.Height,
+                 o.forced ? "switched after 2 x the hysteresis without a warm HDR unit (its history starts over)"
+                          : "switched after the hysteresis; the HDR unit was warmed on the last passes: no history reset");
+    if (ok) {
+        slot.pre = 1;
+        ++g_preRuns;
+        if (atLeave) ++g_preAtLeave;
+        g_preFailRun = 0;
+        g_stage.OnPreRun(true);
+        PreStage(true, nullptr, td.Width, td.Height);
+        t_inDlaa = true;
+        SnapshotStep(ctx, 0, F.Get(), SnapInfo{ g_blitCount + 1, slot.phase, slot.jx, slot.jy, njx, njy, reset, g_mvOn.load(), true });
+        t_inDlaa = false;
+        return;
+    }
+    // not evaluated: this pass goes to the blit unit (a fallback; the HDR unit is NOT torn down)
+    slot.pre = 2;
+    slot.fallback = true;
+    if (dl.Deferred()) ++g_preDeferred; else ++g_preFails;
+    snprintf(g_preLastMiss, sizeof(g_preLastMiss), "%s", dl.Deferred() ? "the HDR unit waited for an NGX create budget"
+                                                                        : "the HDR run failed");
+    if (!dl.Deferred() && (dl.InitFailed() || ++g_preFailRun >= 2 * DlaaStage::kHyst)) {
+        g_preFailed = true;                               // a mode reason from the next pass on (latched)
+        Log("DLAA pre-tonemap: WARNING the HDR unit %s (%ux%u) -- the blit path (post-tonemap) until key_pre_tonemap is pressed "
+            "twice; see the DLAA lines above", dl.InitFailed() ? "could not be built" : "failed its evaluate 120 times in a row",
+            td.Width, td.Height);
+    }
+    if (g_stage.OnPreRun(false) < 0) {
+        char why[200];
+        snprintf(why, sizeof(why), "the pre-tonemap path was not possible for %d passes in a row (last: %s)", DlaaStage::kHyst,
+                 g_preLastMiss);
+        PreStage(false, why, 0, 0, "the blit unit ran in all of them: no history reset, the HDR unit stays alive");
+    }
+}
+
+// v0.10.0 phase 7: hkOMSetRenderTargets, a main forward bind (1 RTV RGBA16F scene-size + the scene depth) of the newest pass:
+// its forward colour is remembered (the LAST such bind of the pass). A bind after the pass's stage decision ran at its forward
+// leave = a second forward segment (its draws land on top of the anti-aliased picture): counted + logged.
+void FwdOnBind(void* fwd) {
+    if (g_passSeq <= g_fifoHead) return;
+    PassSlot& slot = g_ring[(g_passSeq - 1) % kRing];
+    if (slot.stageDone && slot.stageAtLeave) {
+        ++g_fwdReentry;
+        if (g_fwdReentryLogs++ < 5)
+            Log("DLAA pre-tonemap: WARNING pass s=%llu bound its forward colour again after its stage decision at the forward "
+                "leave (%s) -- forward draws after this are not in the anti-aliased picture (re-entry #%llu, Present #%llu)",
+                (unsigned long long)slot.s, slot.pre == 1 ? "pre-tonemap ran there" : "the blit unit takes it",
+                (unsigned long long)g_fwdReentry, (unsigned long long)g_frames.load(std::memory_order_relaxed));
+    }
+    if (slot.fwdTex && slot.fwdTex != fwd) ++g_fwdTwoColours;
+    slot.fwdTex = fwd;
+    ++slot.fwdBinds;
+}
+
+// v0.10.0 phase 7: hkOMSetRenderTargets, BEFORE the game's next bind goes through, while the main forward binding is still the
+// current one: the forward pass is over. When the scene depth discard has not decided the pass yet (normal frames: it has), the
+// decision runs here (PreTonemapPoint at the leave). The first leaves are logged with the binding that follows (diagnosis).
+void FwdOnLeave(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* rtvs, ID3D11Resource* bindDepth) {
+    if (g_passSeq <= g_fifoHead) return;
+    PassSlot& slot = g_ring[(g_passSeq - 1) % kRing];
+    if (slot.stageDone || !slot.fwdTex) return;
+    ++g_fwdLeaveFirst;
+    if (g_fwdLeaveLogs < 8) {
+        ++g_fwdLeaveLogs;
+        char rt0[160] = "none";
+        if (n && rtvs && rtvs[0]) {
+            ID3D11Resource* r = nullptr;
+            rtvs[0]->GetResource(&r);
+            if (r) {
+                ID3D11Texture2D* t = nullptr;
+                D3D11_TEXTURE2D_DESC d{};
+                if (SUCCEEDED(r->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&t)) && t) { t->GetDesc(&d); t->Release(); }
+                snprintf(rt0, sizeof(rt0), "fmt %d %ux%u%s", (int)d.Format, d.Width, d.Height,
+                         (void*)r == slot.fwdTex ? " (the forward colour itself)" : "");
+                r->Release();
+            }
+        }
+        Log("DLAA pre-tonemap: pass s=%llu left its forward binding BEFORE the scene depth discard (leave #%llu) -- next binding: "
+            "%u RTV(s), RTV0 %s, DSV %s (Present #%llu); its stage decision runs at this forward leave (forward colour final, "
+            "nothing has read it yet)", (unsigned long long)slot.s, (unsigned long long)g_fwdLeaveFirst, n, rt0,
+            !bindDepth ? "none" : (bindDepth == (ID3D11Resource*)g_sceneDepth ? "the scene depth" : "another depth"),
+            (unsigned long long)g_frames.load(std::memory_order_relaxed));
+    }
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext1> c1;
+    if (FAILED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)c1.GetAddressOf())) || !c1) return;
+    PreTonemapPoint(c1.Get(), slot, true);
+}
+
+void TogglePreTonemap(uint64_t n) {
+    const bool on = !g_preOn.load();
+    g_preOn = on;
+    if (on) { g_preFailed = false; g_preFailRun = 0; }
+    g_preStage = -1;                                      // the next frame logs its stage again
+    Log("DLAA pre-tonemap %s (%s, Present #%llu) -- %s%s", on ? "ON" : "OFF", KeyName(KA_PRE_TONEMAP), (unsigned long long)n,
+        on ? "flat DLAA mode runs the main scene's DLAA in place on the RGBA16F scene colour before the game's tonemap"
+           : "the main scene's DLAA runs at the blit on the tone-mapped picture (v0.3.1 path)",
+        g_preCfg ? "" : " -- no effect: dlaa.ini dlaa_pre_tonemap = 0");
+    PlayTones(1, on ? 1200 : 300, 150, 0);
+}
+
+void RequestMvDump(uint64_t n) {
+    char why[64];
+    snprintf(why, sizeof(why), "%s, Present #%llu", KeyName(KA_MV_DUMP), (unsigned long long)n);
+    if (!g_didCfg || !g_didOn) {
+        Log("MV draw-ids dump (%s): not available -- the per-draw motion vectors are off (mv_objects != 2 / Alt+F5)", why);
+        PlayTones(1, 200, 300, 0);
+        return;
+    }
+    if (!g_dlaa[0].Mv().DrawIds().RequestDump(why)) {
+        Log("MV draw-ids dump (%s): the previous dump is still in flight", why);
+        return;
+    }
+    g_fwdSkipArm = true;                                  // v0.10.0 phase 5: + the next pass's skipped forward draws
+    Log("MV draw-ids dump requested (%s): the next main-scene frame's forward draws, G-buffer draws with IndexCount <= 36 and "
+        "every unpaired / inherited draw are logged as 'MV dump n/N' lines 2-4 frames from now; the next pass's forward draws "
+        "without a forward depth / id as 'MV dump fwd-skip' lines", why);
+    PlayTones(1, 900, 80, 0);
+}
+#endif
 
 void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     // 1. RT0: the backbuffer (flat) or an eye-sized RGBA/BGRA texture (VR).
@@ -6409,6 +8621,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         const bool up = g_dlssUpscale.load(std::memory_order_relaxed) && sizeUp && !blocked;
         if (up) { upX = ox; upY = oy; upW = ow; upH = oh; }
         g_upAreaRatio = up ? ((double)ow * (double)oh) / ((double)d.Width * (double)d.Height) : 1.0;
+        g_upRenderOverOutX = up ? (double)d.Width / (double)ow : 1.0;   // v0.9.0 tex_lod_bias_auto (width, not area)
         char tag[48];
         if (up) snprintf(tag, sizeof(tag), "%s", sizes);
         else    snprintf(tag, sizeof(tag), "off");
@@ -6459,9 +8672,9 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
             const double qf   = g_qpcFreq > 0 ? (double)g_qpcFreq : 1.0;
             const double secs = g_rateChgT0 ? (double)(cpuT.t0 - g_rateChgT0) / qf : 0.0;
             const double bps  = secs > 0.0 ? (double)(kRateChgAt - kRateChgSkip) / secs : 0.0;
-            Log("rate after change: blits/s=%.1f fps=%.1f [preset=%s sharp=%.1f r=%.1f area=%d up=%s]",
+            Log("rate after change: blits/s=%.1f fps=%.1f [preset=%s sharp=%.1f r=%.1f area=%d up=%s lod=%.2f]",
                 bps, g_vrMode ? bps / 2.0 : bps, SceneDlaa::DlssPresetName(), (double)SceneDlaa::Sharpness(),
-                (double)SceneDlaa::SharpRadius(), SceneDlaa::Area(), g_upTag);
+                (double)SceneDlaa::SharpRadius(), SceneDlaa::Area(), g_upTag, (double)g_lodEff);
             g_rateChgBlit = 0;
         }
     }
@@ -6485,6 +8698,11 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         const double cpuBlitMs = g_cpuBlitN ? (double)g_cpuBlitTicks * 1000.0 / qf / (double)g_cpuBlitN : 0.0;
         const double cpuMvMs   = wPasses ? (double)g_cpuMvTicks * 1000.0 / qf / (double)wPasses : 0.0;
         const double recPass   = wPasses ? (double)g_cMvRecords / (double)wPasses : 0.0;
+#ifdef WITH_DLAA
+        const double cpuObjMs  = wPasses ? (double)g_objTicks * 1000.0 / qf / (double)wPasses : 0.0;   // v0.9.0
+#else
+        const double cpuObjMs  = 0.0;
+#endif
         const double wSecs     = (double)(cpuT.t0 - g_rateT0) / qf;
         const double blitsPerS = wSecs > 0.0 ? (double)(g_blitCount - g_rateBlit0) / wSecs : 0.0;
         const double fps       = g_vrMode ? blitsPerS / 2.0 : blitsPerS;   // VR: 2 eye blits per frame
@@ -6499,24 +8717,69 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         const double stRadius  = 0.0;
         const int    stArea    = 100;
 #endif
+        char lodTag[2048];                                                 // v0.9.0 texture LOD bias + twin counters
+        LodStatsTag(lodTag, sizeof(lodTag));                               // (v0.10.0 phase 7: 400 -> 1200, stage fields; phase 13: 2048)
+#ifdef WITH_DLAA
+        uint64_t stageAutoWin = 0;                                         // v0.10.0 phase 7: WARNING below
+        {                                                                  // v0.10.0 phase 4: where the main DLAA ran
+            const size_t lu = strlen(lodTag);
+            stageAutoWin = g_stage.autoSwitches();
+            snprintf(lodTag + lu, sizeof(lodTag) - lu, " stage=%s (pre-tonemap runs %llu (at the forward leave %llu), deferred "
+                     "%llu, failed %llu; post-tonemap blit runs %llu (fallbacks while pre-tonemap is preferred %llu, passes without "
+                     "a decision point %llu); stage switches %llu (auto %llu), HDR warm-ups %llu, resume resets %llu, colour sets: "
+                     "swaps %llu builds %llu; forward leaves before the discard %llu, re-entries %llu, two forward colours %llu%s%s)",
+                     g_preStage == 1 ? "pre-tonemap" : "post-tonemap",
+                     (unsigned long long)g_preRuns, (unsigned long long)g_preAtLeave, (unsigned long long)g_preDeferred,
+                     (unsigned long long)g_preFails, (unsigned long long)g_prePostBlits, (unsigned long long)g_preFallbackBlits,
+                     (unsigned long long)g_preMissed, (unsigned long long)g_stage.switches(),
+                     (unsigned long long)g_stage.autoSwitches(), (unsigned long long)g_preWarms,
+                     (unsigned long long)g_preResumeResets, (unsigned long long)g_dlaa[0].SetSwaps(),
+                     (unsigned long long)g_dlaa[0].SetBuilds(), (unsigned long long)g_fwdLeaveFirst,
+                     (unsigned long long)g_fwdReentry, (unsigned long long)g_fwdTwoColours, g_preStage == 0 ? ": " : "",
+                     g_preStage == 0 ? g_preWhy : "");
+            g_preRuns = g_preAtLeave = g_preDeferred = g_preFails = g_prePostBlits = g_preFallbackBlits = g_preMissed = 0;
+            g_preWarms = g_preResumeResets = 0;
+            g_stage.ClearWindow();
+        }
+#endif
         Log("FIFO stats @blit %llu: passes=%llu blits=%llu depth snapshot used=%llu live used=%llu fifo underflow=%llu "
-            "fifo overflow=%llu mirror ignored=%llu secondary gbuf ignored=%llu | snapshots: at discard=%llu at clear=%llu live used=%llu discarded-without-snapshot=%llu (scene depth discards seen=%llu) | eye map: %s entries=%d rt-parity-mismatch=%llu verdicts=%llu no-vote=%llu corrections=%llu rb-skipped-full=%llu rb-failed=%llu rb-throttled=%llu | R |x|>0.25: e0=%llu/%llu e1=%llu/%llu | dlaa frames e0=%llu e1=%llu | "
-            "cpu: blit %.3f ms/blit, mv-collect %.3f ms/pass (%.0f records/pass) | rate: blits/s=%.1f fps=%.1f (%s) [preset=%s sharp=%.1f r=%.1f area=%d up=%s] | Present #%llu",
+            "fifo overflow=%llu mirror ignored=%llu secondary gbuf ignored=%llu mirror views handled=%llu not handled=%llu | snapshots: at discard=%llu at forward leave=%llu at clear=%llu live used=%llu discarded-without-snapshot=%llu (scene depth discards seen=%llu) | eye map: %s entries=%d rt-parity-mismatch=%llu verdicts=%llu no-vote=%llu corrections=%llu rb-skipped-full=%llu rb-failed=%llu rb-throttled=%llu | R |x|>0.25: e0=%llu/%llu e1=%llu/%llu | dlaa frames e0=%llu e1=%llu | "
+            "cpu: blit %.3f ms/blit, mv-collect %.3f ms/pass (%.0f records/pass), obj-ids %.3f ms/pass | rate: blits/s=%.1f fps=%.1f (%s) [profile=%s preset=%s sharp=%.1f r=%.1f area=%d up=%s%s] | Present #%llu",
             (unsigned long long)g_blitCount, (unsigned long long)g_passSeq, (unsigned long long)g_blitCount,
             (unsigned long long)g_cSnapUsed, (unsigned long long)g_cLiveUsed, (unsigned long long)g_cUnderflow,
             (unsigned long long)g_cOverflow, (unsigned long long)g_cMirrorIgnored,
             (unsigned long long)g_cSecondaryGbuf,                         // v0.8.2: rejected secondary G-buffer views
-            (unsigned long long)g_cSnapAtDiscard, (unsigned long long)g_cSnapAtClear, (unsigned long long)g_cLiveUsed,
-            (unsigned long long)g_cDiscardNoSnap, (unsigned long long)g_cDiscardSeen,
+            (unsigned long long)MirHandledCount(), (unsigned long long)MirNotHandledCount(),   // v0.10.0 phase 2
+            (unsigned long long)g_cSnapAtDiscard, (unsigned long long)g_cSnapAtLeave, (unsigned long long)g_cSnapAtClear,
+            (unsigned long long)g_cLiveUsed, (unsigned long long)g_cDiscardNoSnap, (unsigned long long)g_cDiscardSeen,
             g_vrMode ? "RT map" : "flat", g_eyeMapN, (unsigned long long)g_cRtParityMismatch,
             (unsigned long long)g_cVerdicts, (unsigned long long)g_cVerdictNoVote, (unsigned long long)g_cEyeCorrections,
             (unsigned long long)g_cRbSkipFull, (unsigned long long)g_cRbFailed, (unsigned long long)g_cRbThrottled,
             (unsigned long long)g_rBig[0], (unsigned long long)g_rReads[0],
             (unsigned long long)g_rBig[1], (unsigned long long)g_rReads[1],
             (unsigned long long)g_dlaaFrames[0], (unsigned long long)g_dlaaFrames[1],
-            cpuBlitMs, cpuMvMs, recPass, blitsPerS, fps,
-            g_vrMode ? "VR: fps = blits/s / 2" : "flat: fps = blits/s", stPreset, stSharp, stRadius, stArea,
-            g_upTag, (unsigned long long)frame);
+            cpuBlitMs, cpuMvMs, recPass, cpuObjMs, blitsPerS, fps,
+            g_vrMode ? "VR: fps = blits/s / 2" : "flat: fps = blits/s", kProfName[g_profile], stPreset, stSharp, stRadius, stArea,
+            g_upTag, lodTag, (unsigned long long)frame);
+#ifdef WITH_DLAA
+        if (stageAutoWin > 2)                                              // v0.10.0 phase 7
+            Log("DLAA stage: WARNING %llu automatic stage switches in this stats window (> 2; the hysteresis is %d passes) -- "
+                "last reason: %s", (unsigned long long)stageAutoWin, DlaaStage::kHyst,
+                g_preStage == 0 ? g_preWhy : "pre-tonemap possible again");
+        if (g_objCfg) {                                                    // v0.9.0 per-object MVs (same window)
+            char objTag[4096];                                // v0.9.0 r3: was 1024 (ring fields); ... r11: 4096
+            ObjStatsTag(objTag, sizeof(objTag), wPasses);
+            Log("MV objects @blit %llu:%s", (unsigned long long)g_blitCount, objTag);
+            if (g_objOn) ObjIds::LogIds(g_blitCount);                      // v0.9.0 r2: per-id dump (<= 8 ids)
+        }
+        if (g_didCfg) {                                                    // v0.10.0 per-draw MVs (same window)
+            char didTag[6144];                                // v0.10.0 phase 3: was 2048 (+ camR / forward fields); phase 14: 6144
+            DidStatsTag(didTag, sizeof(didTag), wPasses);
+            Log("MV draw-ids @blit %llu%s", (unsigned long long)g_blitCount, didTag);
+        }
+        MirStatsLog(g_blitCount);                                          // v0.10.0 phase 2 mirror units (same window)
+        PerfStatsLog(g_blitCount);                                         // v0.10.0 phase 8 (same window)
+#endif
         g_cpuBlitTicks = 0; g_cpuBlitN = 0; g_cpuMvTicks = 0; g_cMvRecords = 0; g_cpuPass0 = g_passSeq;
         g_rateBlit0 = g_blitCount; g_rateT0 = cpuT.t0;
     }
@@ -6527,10 +8790,21 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         if (g_cUnderflow++ < 5)
             Log("fifo underflow: blit #%llu has no unconsumed pass (skipping DLAA for it)", (unsigned long long)g_blitCount);
         SpanOnUnderflow(ctx);                            // v0.6.2: no clean frame pairing
+#ifdef WITH_DLAA
+        DrawIdMv::StaticClear(DrawIdMv::kStatClrFifo);   // v0.10.0 phase 14: the pass / blit pairing slipped -> replay everything
+#endif
+        if (!isBackbuffer && (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow))   // v0.10.0 menu / fps box: still drawn on a known eye RT
+            for (int i = 0; i < g_eyeMapN; ++i)
+                if (g_eyeMap[i].rt == rtPtr) { g_menuBlitEye = g_eyeMap[i].eye; g_menuBlitRt = rtPtr; break; }
         tex->Release();
         return;
     }
     PassSlot& slot = g_ring[g_fifoHead % kRing];
+#ifdef WITH_DLAA
+    ObjRecord* const objRec = &g_objRing[g_fifoHead % kRing];   // v0.9.0 the same pass's object record
+    DrawIdRecord* const didRec = &g_didRing[g_fifoHead % kRing]; // v0.10.0 the same pass's draw record
+    DrawIdRecord* const didFwdRec = &g_didFwdRing[g_fifoHead % kRing];   // v0.10.0 phase 3: its forward draws
+#endif
     slot.consumed = true;
     ++g_fifoHead;
     // v0.6.2 GPU spans: this pass's gbuf span ends (if no discard ended it) before any of our work; the frame's
@@ -6542,6 +8816,11 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     // Eye identity is authoritative from the blit render target (flat backbuffer = eye 0).
     int eye = isBackbuffer ? 0 : EyeOfRT(rtPtr, (int)(slot.s & 1));
     if (eye < 0 || eye >= kMaxEyes) eye = 0;
+    if (!isBackbuffer && (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)) { g_menuBlitEye = eye; g_menuBlitRt = rtPtr; }   // v0.10.0 menu / fps box
+#ifdef WITH_DLAA
+    GpuPerf::SetPass(slot.s);                             // v0.10.0 phase 8: this pass's sections belong to `eye`
+    GpuPerf::NoteEye(slot.s, eye);
+#endif
     if (slot.discarded && !slot.snap) {
         static int warned = 0;
         ++g_cDiscardNoSnap;
@@ -6586,7 +8865,32 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     const double eyeIvMs = g_eyeLastBlitT[eye] && g_qpcFreq > 0
                                ? (double)(cpuT.t0 - g_eyeLastBlitT[eye]) * 1000.0 / (double)g_qpcFreq : 0.0;
     g_eyeLastBlitT[eye] = cpuT.t0;
-    const bool candBad = ClassifyRecord(eye, slot, dl.Mv().InvalidateCount(), cpuT.t0, eyeIvMs);
+    // v0.10.0 phase 4: a slot whose DLAA ran before the tonemap was classified there
+    // v0.10.0 phase 7: a pass that reached its blit without a stage decision (no forward leave / scene depth discard for it):
+    // decided now, as a pass that cannot run before the tonemap (the blit unit takes it; counts towards the hysteresis)
+    if (eye == 0 && !slot.stageDone && !passive) {
+        slot.stageDone = true;
+        const char* inel = PreIneligible();
+        DlaaStageIn sin;
+        sin.ineligible = inel;
+        const DlaaStageOut so = g_stage.Decide(sin);
+        if (inel) {
+            PreStage(false, inel, 0, 0, so.switched < 0 ? "at once (a mode change; the HDR unit stays alive with its history)"
+                                                        : nullptr);
+        } else {
+            ++g_preMissed;
+            slot.fallback = so.fallback;
+            snprintf(g_preLastMiss, sizeof(g_preLastMiss), "%s", "the pass reached its blit without a forward leave / scene depth discard");
+            if (so.switched < 0) {
+                char why[200];
+                snprintf(why, sizeof(why), "the pre-tonemap path was not possible for %d passes in a row (last: %s)",
+                         DlaaStage::kHyst, g_preLastMiss);
+                PreStage(false, why, 0, 0, "the blit unit ran in all of them: no history reset, the HDR unit stays alive");
+            }
+        }
+    }
+    // v0.10.0 phase 4: a slot whose pre-tonemap run was tried was classified there (phase 7: its verdict is reused)
+    const bool candBad = slot.pre ? slot.candBad : ClassifyRecord(eye, slot, dl.Mv().InvalidateCount(), cpuT.t0, eyeIvMs);
     // We run between the game's blit state setup and its Draw. Do NOT use
     // SwapDeviceContextState here: NGX evaluates fine once, then fails with
     // PlatformError and the device is removed (tested 2026-10-03). NGX and our
@@ -6609,11 +8913,48 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         if (waits++ == 0)
             Log("DLAA waits for the shader warm-up (eye %d, blit #%llu) -- frames pass through untouched until it is done",
                 eye, (unsigned long long)g_blitCount);
+    } else if (g_dlaaOn.load() && slot.pre == 2 && !slot.twin.valid) {
+        // v0.10.0 phase 7: the pre-tonemap run was tried and consumed the depth snapshot without a result (evaluate failed):
+        // no depth for the blit unit -> this frame passes un-anti-aliased (rare; logged as failed in the stats)
+    } else if (g_dlaaOn.load() && slot.pre == 1) {
+        // v0.10.0 phase 4: this pass's DLAA already ran before the tonemap, in place on its RGBA16F colour. Nothing to do at the
+        // blit but the bookkeeping. (phase 7: slot.pre 2 = tried there and deferred / failed -> the blit unit below takes it;
+        // the two units are separate colour sets now, so that costs no rebuild.)
+        {
+            if (g_dlaaFrames[eye] < 4)
+                Log("DLAA eval: eye=%d pass s=%llu phase=%d viewport shift=(%+.4f,%+.4f) NGX jitter=(%+.4f,%+.4f) depth=snapshot "
+                    "ok=1 (pre-tonemap, at the scene depth discard / forward leave)", eye, (unsigned long long)slot.s, slot.phase, stVx, stVy,
+                    stNx, stNy);
+            static bool s_firstPreLogged = false;
+            if (!s_firstPreLogged) {
+                s_firstPreLogged = true;
+                Log("first DLAA evaluate OK BEFORE THE TONEMAP: eye=%d mode=%s native-res HDR (RGBA16F scene colour, %s) at Present "
+                    "#%llu -- the blit leaves the tone-mapped picture alone", eye, DlaaModeStr(),
+                    SceneDlaa::HdrLinear() ? "NGX IsHDR" : "dlss_hdr=0: no IsHDR",
+                    (unsigned long long)g_frames.load(std::memory_order_relaxed));
+            }
+            ++g_dlaaFrames[eye];
+            float rw[16];
+            if (dl.Mv().TakeSolve(rw)) {
+                ++g_rReads[eye];
+                if (std::fabs(rw[3]) > 0.25f && g_rBig[eye]++ < 5)
+                    Log("R_world |R[0][3]|=%.3f > 0.25 on eye %d (wrong-eye pairing signature; blit #%llu)",
+                        (double)std::fabs(rw[3]), eye, (unsigned long long)g_blitCount);
+            }
+        }
     } else if (g_dlaaOn.load()) {
+        ++g_prePostBlits;                                // v0.10.0 phase 4: the blit (post-tonemap) path ran
+        if (eye == 0 && slot.fallback) ++g_preFallbackBlits;   // v0.10.0 phase 7
         // A global reset request (g_resetNext) applies to every eye: latch it at the next blit.
         if (g_resetNext) { g_resetEyes = (1 << kMaxEyes) - 1; g_resetNext = false; }
-        const bool resetUsed = (g_resetEyes & (1 << eye)) != 0;
+        bool resetUsed = (g_resetEyes & (1 << eye)) != 0;
         g_resetEyes &= ~(1 << eye);
+        // v0.10.0 phase 7: the colour set that takes this blit did not evaluate for > kResumeKeepRuns evaluations of this unit
+        // (eye 0 after a run of pre-tonemap passes: a fallback pass / a mode switch) -> its old history is dropped once
+        if (eye == 0 && !resetUsed) {
+            const uint64_t idle = dl.KindIdleRuns(SceneDlaa::IsHdrFormat(d.Format));
+            if (idle != UINT64_MAX && idle > kResumeKeepRuns) { resetUsed = true; ++g_preResumeResets; }
+        }
         // Jitter this pass was rasterized with (viewport shift * sign) goes to NGX.
         const float njx = stNx, njy = stNy;
         // Depth: this pass's own snapshot twin (taken at the discard / next clear) or live depth.
@@ -6624,10 +8965,22 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         // NoteOpticalCentre only changes it on a > 0.01 re-adopt; Run resets the eye's history if the rect moved.
         if (isBackbuffer || !g_optC[eye].have) dl.SetOpticalCentre(0.5f, 0.5f);
         else dl.SetOpticalCentre(g_optC[eye].u, g_optC[eye].v);
+        // v0.9.0 r8: which FIFO pass this blit consumed (only the "MV objects: mask dropout" diagnostic prints it)
+        dl.Mv().SetObjPassInfo(slot.s, (int)(g_passSeq - g_fifoHead), g_cOverflow, g_passSeq);
         t_inDlaa = true;
         const bool ok = dl.Run(ctx, tex, g_sceneDepth, &slot.twin, &slot.cand, njx, njy, resetUsed, g_mvOn.load(),
-                               g_mvDebug.load(), candBad, upW, upH);
+                               g_mvDebug.load(), candBad, upW, upH, g_objCfg ? objRec : nullptr,
+                               g_didCfg ? didRec : nullptr, g_didCfg ? didFwdRec : nullptr);
         t_inDlaa = false;
+        UpdateMedoidDrop(eye, dl);                       // v0.10.0 phase 8
+        // v0.10.0 phase 7: a post -> pre switch is coming -> the HDR unit evaluates the same pass on its forward colour (same MV /
+        // depth / jitter, nothing written back) so it takes over with a continuous history
+        if (ok && eye == 0 && slot.warmHdr && slot.warmTex) {
+            t_inDlaa = true;
+            if (dl.Warm(ctx, slot.warmTex.Get(), njx, njy)) ++g_preWarms;
+            t_inDlaa = false;
+        }
+        slot.warmTex.Reset();
         static bool s_firstEvalLogged = false;   // v0.7.10: one line the first time NGX actually processed a frame
         static bool s_firstHdrEvalLogged = false;   // v0.8.0: and once more for the first HDR unit (HDR toggled later)
         if (ok && (!s_firstEvalLogged || (dl.IsHdr() && !s_firstHdrEvalLogged))) {
@@ -6682,6 +9035,9 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         SelfTestStep(ctx, stTex, slot.phase, stVx, stVy, stNx, stNy);
         t_inDlaa = false;
     }
+    // v0.10.0 phase 8 (mv_slot_pool): the pass is consumed -- its depth twin / forward depth / draw-id textures go back to the
+    // shared pool (the next pass that needs them takes them; VR keeps ~2 sets alive instead of one per FIFO slot)
+    if (g_slotPool) slot.twin.ReleaseToPool();
 
 #endif
     tex->Release();
@@ -6728,7 +9084,11 @@ void RunPendingComposite(ID3D11DeviceContext* ctx) {
 // it as the "something else drew into the pending target" trigger).
 bool PreviewComposite(ID3D11DeviceContext* ctx) {
     if (g_pvCount <= 0 || !g_pvDs) return false;
-    if (!g_dlaaOn.load(std::memory_order_relaxed) || g_passive.load(std::memory_order_relaxed)) return false;
+    // v0.10.0 phase 15: with DLAA off / passive the composites are still matched while the VR tuning menu panel or the fps box
+    // is up (MenuVrPreviewWanted): the flush then runs no DLAA (PreviewFlush returns at its DLAA-off test), only the panel is
+    // drawn on the eye picture -- so the menu stays visible in the VR main menu / garage after switching DLAA off.
+    if ((!g_dlaaOn.load(std::memory_order_relaxed) || g_passive.load(std::memory_order_relaxed)) && !MenuVrPreviewWanted())
+        return false;
     // PS SRV0 -> the oldest uncomposited slot of the frame with that RT.
     ID3D11ShaderResourceView* srv = nullptr;
     ctx->PSGetShaderResources(0, 1, &srv);
@@ -6744,12 +9104,11 @@ bool PreviewComposite(ID3D11DeviceContext* ctx) {
     if (slot < 0) return false;
     // RT0: the backbuffer (pointer, or the size-and-format rule of HandlePossibleBlit) or a Texture2D with the preview
     // RT's width / height (the VR eye RT, any format).
-    ID3D11RenderTargetView* rtv = nullptr;
-    ctx->OMGetRenderTargets(1, &rtv, nullptr);
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv;  // v0.10.0 phase 15: kept on the target (the VR menu panel)
+    ctx->OMGetRenderTargets(1, rtv.GetAddressOf(), nullptr);
     if (!rtv) return false;
     Microsoft::WRL::ComPtr<ID3D11Resource> rres;
     rtv->GetResource(&rres);
-    rtv->Release();
     if (!rres) return false;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> tex;
     rres.As(&tex);
@@ -6760,6 +9119,8 @@ bool PreviewComposite(ID3D11DeviceContext* ctx) {
                         (g_bbW && bd.Width == g_bbW && bd.Height == g_bbH && bd.Format == g_bbFmt && bd.SampleDesc.Count == 1) ||
                         (bd.Width == g_pvW && bd.Height == g_pvH && bd.SampleDesc.Count == 1);
     if (!target) return false;
+    if (g_launchVr == 1 && !PvIsBackbufferTarget(tex.Get()))   // v0.10.0 phase 15: a VR eye picture is on screen (MenuVr)
+        g_pvVrPicFrame = g_frames.load(std::memory_order_relaxed);
     g_pv[slot].composited = true;                        // this pass's composite is handled now
     int idx = -1;
     for (int i = 0; i < g_ptCount; ++i)
@@ -6781,6 +9142,7 @@ bool PreviewComposite(ID3D11DeviceContext* ctx) {
                 slot, t.maskAtFlush, (unsigned long long)g_frames.load(std::memory_order_relaxed));
     }
     if (slot < t.curRef) t.curRef = slot;
+    t.rtv = rtv;                                         // v0.10.0 phase 15: the game's view of the target (VR menu panel)
     t.slotMask |= 1 << slot;                             // v0.7.8: all passes of this target (round 6: the tile layout)
     if (g_gameVpN > 0) g_pv[slot].compVp = g_gameVp[0]; // round 6: where the game's composite draws it (layout log)
     t.pending = true;
@@ -6793,6 +9155,7 @@ bool PreviewComposite(ID3D11DeviceContext* ctx) {
 // Draw: detect the swapchain / eye blit and run DLAA on its source texture before it executes.
 // v0.7.0: in upscale mode the DLSS result is drawn into the blit RT right AFTER the game's blit Draw.
 void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT startVertex) {
+    if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oDraw(ctx, vertexCount, startVertex); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     TraceDraw(ctx, vertexCount, startVertex);
     if (!IsGameCtx(ctx)) {                         // v0.6.2: other contexts are counted / sanity-logged only
         NoteForeignDraw(ctx, vertexCount);
@@ -6803,17 +9166,21 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
 #ifdef WITH_DLAA
     // v0.7.8 profile-screen preview: a matched composite only marks its target pending; any other Draw while a pending
     // target is the current RT0 (trigger (a): flat UI, VR verts=96 Draw) runs that target's DLAA before the Draw.
+    int pvMenuIdx = -1;                                  // v0.10.0 phase 15: the target flushed here gets the VR menu panel after the Draw
     {
         const bool pvMatched = vertexCount == 3 && g_pvCount > 0 && !t_inDlaa && PreviewComposite(ctx);
-        if (!pvMatched && g_ptBoundIdx >= 0 && !t_inDlaa) PreviewFlush(ctx, g_ptBoundIdx);
+        if (!pvMatched && g_ptBoundIdx >= 0 && !t_inDlaa) { pvMenuIdx = g_ptBoundIdx; PreviewFlush(ctx, pvMenuIdx); }
     }
 #endif
     if (vertexCount - 3u <= 1u && !t_inDlaa && g_sceneDepth && g_backbuffer.load(std::memory_order_relaxed)) {
         HandlePossibleBlit(ctx, vertexCount);
     }
+    if (!t_inDlaa && g_lodPerDraw.load(std::memory_order_relaxed)) LodOnDraw(ctx);   // v0.10.0 phase 11 LOD bias scope
     oDraw(ctx, vertexCount, startVertex);
 #ifdef WITH_DLAA
     if (g_compEye >= 0 && !t_inDlaa) RunPendingComposite(ctx);   // v0.7.0 (before the scene span closes)
+    if (g_menuBlitEye >= 0 && !t_inDlaa) MenuDrawVr(ctx);         // v0.10.0 tuning menu: VR panel + fps box over this eye's picture
+    if (pvMenuIdx >= 0 && !t_inDlaa) MenuDrawPreview(ctx, pvMenuIdx, 'a');   // v0.10.0 phase 15: ... on a VR menu-screen eye
 #endif
     // v0.6.2: scene span ends after the game's Draw of the frame's last blit (never on a Draw of our own / NGX work)
     if (g_sceneEndAfterDraw && !t_inDlaa) SpanAfterDraw(ctx);
@@ -6856,8 +9223,15 @@ void MaybePrewarmNgx() {
 void LogFrameEndCheck(uint64_t n);      // v0.8.1, defined with the frame-end rule
 void OnPresentBoundary(uint64_t n) {
 #ifdef WITH_DLAA
+    GpuPerf::SetFrame(n);                              // v0.10.0 phase 8: the next timed section opens the next frame's query set
+    DrawIdMv::SetFrame(n);                             // v0.10.0 phase 8 (mv_inst_replay keep window)
     PreviewNextFrame(n);                               // v0.7.8 profile-screen preview: log, reset slots, next jitter
+    MirNextFrame(n);                                   // v0.10.0 phase 2: a still open mirror view ends, per-frame tables reset
     DlaaProcessor::BeginFrame();                       // v0.7.8: a fresh NGX feature-create budget for the next frame
+#endif
+    LodFrameUpdate(n);                                 // v0.9.0 texture LOD bias: effective value + on/off for the next frame
+#ifdef WITH_DLAA
+    ObjFrameUpdate(n);                                 // v0.9.0 per-object MVs: on / off for the next frame
 #endif
     // v0.7.10: also every 10 s (g_logTick, the Present line's cadence) so a single periodic line shows whether the scene /
     // blits ever started and the live DLAA state. mode = the detection (VR/flat/undetected); dlaa / dlaa-mode = the
@@ -6865,6 +9239,7 @@ void OnPresentBoundary(uint64_t n) {
     if (n < 6 || g_logTick) {
 #ifdef WITH_DLAA
         const int ngxFeature = (int)g_dlaa[0].FeatureReady();
+        if (ngxFeature) g_ngxEverReady = true;
 #else
         const int ngxFeature = -1;
 #endif
@@ -6967,6 +9342,12 @@ void CollectMvCandidate(ID3D11DeviceContext* ctx, UINT indexCount, UINT startInd
     }
     if (!g_ctx1 || g_gameVpN == 0) { ++ps.skNoCtx; return; }
     const int layer = g_gameVp[0].MinDepth >= 0.85f ? 1 : 0;     // cabin [0.9,1.0] vs world [0.01,0.9]
+    if (mv.Dropped(layer)) {                                     // v0.10.0 phase 8: the per-draw consensus answers for this layer
+        if (ps.dropN[layer] < (uint16_t)(layer == 0 ? (worldCap > 0 ? worldCap : g_mvWorldSlots) : g_mvCabinSlots)) {
+            ++ps.dropN[layer]; ++g_cMedoidSaved;
+        }
+        return;
+    }
     // v0.6.3: per-layer caps replace the kSlots (128) LayerFull limit (both clamped 1..kSlots in LoadConfig).
     if (mv.Count(layer) >= (layer == 0 ? (worldCap > 0 ? worldCap : g_mvWorldSlots) : g_mvCabinSlots)) { ++ps.skFull; return; }
 
@@ -6987,7 +9368,12 @@ void CollectMvCandidate(ID3D11DeviceContext* ctx, UINT indexCount, UINT startInd
         key.indexCount = indexCount; key.startIndex = startIndex; key.baseVertex = baseVertex;
         if (ib) ib->Release();
         if (vb) vb->Release();
+        // v0.10.0 phase 8: the copies of a SAMPLED main pass are timed one by one ("cand-copy*": an upper bound)
+        const bool timed = &ps >= g_ring && &ps < g_ring + kRing && GpuPerf::Sampled(ps.s);
+        if (timed) GpuPerf::SetPass(ps.s);
+        const int pq = timed ? GpuPerf::Begin(ctx, GpuPerf::kCandCopy) : -1;
         mv.Record(ctx, layer, cb, byteOff, key);
+        GpuPerf::End(ctx, pq);
         ++g_cMvRecords;                                          // v0.5.6 stats
     } else {
         ++ps.skRange;
@@ -6995,9 +9381,3474 @@ void CollectMvCandidate(ID3D11DeviceContext* ctx, UINT indexCount, UINT startInd
     cb->Release();
 }
 
+// ---- v0.9.0 per-object motion vectors: STENCIL OBJECT IDS -------------------------------------------------------------
+// WHY: CameraMv reprojects every pixel with ONE matrix per depth layer (the camera's motion). Everything that moves on its
+// own -- AI traffic, its wheels, the own trailer in the chase view -- gets the camera's MV, which is wrong for it: other
+// trucks shimmer / lose detail under DLAA / DLSS. Per-object MVs need, per PIXEL, which object it shows. The engine has
+// no ID buffer, but the scene depth is D32_FLOAT_S8X24_UINT and the RenderDoc audit (scripts/rdc_stencil_audit.py,
+// docs/CAPTURE_FINDINGS.md) shows the game only ever uses the LOW nibble of that stencil: the G-buffer writes ref 1 / 2
+// with StencilWriteMask 0x0F, the lighting / forward passes test with StencilReadMask 0x0F. The upper nibble is free:
+// 15 object ids.
+// HOW (render thread, game context only, never for our own work):
+//  * hkOMSetDepthStencilState tracks the state the GAME believes is bound. While the world G-buffer pass is bound (ENTER
+//    at its OM bind, LEAVE at the next non-G-buffer bind -- the same enter / leave pattern as the LOD sampler twins) every
+//    game DSS is replaced by a cached TWIN that also writes the upper nibble: static draws write id 0 (so a moving
+//    object's id is cleared where something static covers it later), a TAGGED draw writes its id. Twin of a state that
+//    REPLACEs the stencil: write mask | 0xF0, ref = id << 4 | game ref & 0x0F (the low nibble is written exactly as the
+//    game writes it). Twin of a state with stencil off / KEEP: stencil on, pass op REPLACE, write mask 0xF0 (the low
+//    nibble is never touched), the game's funcs / read mask kept. LEAVE binds the game's own state back, so the lighting
+//    / forward / post passes see exactly what the engine set.
+//  * hkDrawIndexed (world layer of the G-buffer pass): identity = geometry key (IB, VB0, offsets, counts) + occurrence
+//    index within the pass; ObjIds::Lookup gives its id (0 = static). A tagged draw gets the twin with ref id << 4 for
+//    that one draw (OMSetDepthStencilState before and after: 2 state calls per tagged draw, none for the rest). Every
+//    world draw is recorded in the pass's ObjRecord (identity, key hash, MVP byte offset in the VS cbuffer ring, index
+//    count, id); its MVP is NOT copied per draw: the ring holds the whole frame's constants (one Map WRITE_DISCARD per
+//    frame in the capture), so ObjRecord::Flush copies the used byte range ONCE at the LEAVE.
+//  * hkMap: a WRITE_DISCARD of that ring while the pass still draws (not seen in the capture) flushes what was recorded
+//    and marks the record torn (no per-object MVs for that pass).
+//    v0.9.0 r3: up to ObjRecord::kRings (3) DIFFERENT ring buffers per pass are mirrored (round 2: up to 375 world draws
+//    per pass came from a second big cbuffer and were never recorded). A WRITE_DISCARD of one of them flushes THAT ring
+//    and seals its slot (the draws so far keep their copied MVPs, later draws from the same buffer open a new slot)
+//    instead of tearing the whole pass. Identity (geometry key + occurrence) and pairing (recorded MVP values) never
+//    depend on the ring, so rings that alternate per frame / per pass need nothing special.
+//  * At the blit, CameraMv (motion_vectors.cpp) gathers the MVPs, pairs them with the eye's previous pass, computes R per
+//    id (from the biggest tagged draw of that id) and pass B reprojects id pixels with it. Eye 0's GPU verdict list
+//    ("moving" draws: deviation from the camera R > 0.5 px, plausible, not the own truck) comes back asynchronously
+//    (2-3 frames) and ObjIds assigns the ids for the next passes (rigid-motion groups: a wheel joins its vehicle).
+//    v0.9.0 r2: the record also keeps each draw's occurrence index; the GPU trusts a pair only when the nearest previous
+//    draw IS the identity's own previous occurrence (and the key is not drawn more than mv_objects_max_dup times, and
+//    the choice is unambiguous); draws filtered by these rules come back in a reject list (stats, Ctrl+F6 cyan).
+// SAFETY: a G-buffer state that cannot be twinned without changing the game's low nibble, or ANY state bound on the scene
+// depth outside the G-buffer that reads (read mask & 0xF0 with a real test) or writes the upper nibble, disables the
+// feature for the session (one WARNING line) -- that would be a game build that uses the upper nibble itself. Off unless
+// dlaa.ini mv_objects=1 (v0.9.0 default 0, not yet tested in game). Never SwapDeviceContextState, no compute in the
+// game's passes (only one CopySubresourceRegion at the LEAVE).
+typedef void (STDMETHODCALLTYPE* OMSetDepthStencilState_t)(ID3D11DeviceContext*, ID3D11DepthStencilState*, UINT);
+typedef HRESULT (STDMETHODCALLTYPE* Map_t)(ID3D11DeviceContext*, ID3D11Resource*, UINT, D3D11_MAP, UINT, D3D11_MAPPED_SUBRESOURCE*);
+OMSetDepthStencilState_t oOMSetDepthStencilState = nullptr;
+Map_t                    oMap = nullptr;
+std::atomic<bool>        g_objHooked{false};        // both hooks installed (gates every use of the originals)
+bool                     g_objDisabled = false;      // a conflict was seen: off for the session
+bool                     g_objInScene = false;       // twins applied (inside the world G-buffer pass)
+bool                     g_objSceneDsv = false;      // the current OM binding has the scene depth as DSV (any pass)
+ID3D11DepthStencilState* g_objGameDss = nullptr;     // the state the GAME bound last (identity; no ref)
+UINT                     g_objGameRef = 0;
+bool                     g_objGameKnown = false;     // g_objGameDss is from a tracked call (else OMGet at the next use)
+bool                     g_objFlushReq = false;      // drop the twin cache (old device) at the next safe point
+ID3D11Device*            g_objDev = nullptr;         // device the twins were created on (ref)
+uint64_t                 g_objRecDraws = 0, g_objTagDraws = 0, g_objMissDraws = 0, g_objPassN = 0;   // stats window (g_objOn passes: total)
+uint64_t                 g_objMissWhy[ObjRecord::kMissKinds] = {};   // v0.9.0 r2: missed draws by reason (stats window)
+uint64_t                 g_objTwinBinds = 0, g_objTornN = 0, g_objTornTotal = 0;   // r3: Torn = a ring sealed in the pass
+// v0.9.0 r3: rings per pass (stats window): sum / max / passes counted, bytes copied + draws per ring slot, ring switches
+// between consecutive recorded draws, and whether ring 0 of a pass is ring 0 / another ring / none of the previous pass
+uint64_t                 g_objRingSum = 0, g_objRingPasses = 0, g_objRingSwitch = 0;
+int                      g_objRingMax = 0;
+uint64_t                 g_objRingBytes[ObjRecord::kRings] = {}, g_objRingDraws[ObjRecord::kRings] = {};
+uint64_t                 g_objRing0Same = 0, g_objRing0Other = 0, g_objRing0New = 0;
+const void*              g_objLastRings[ObjRecord::kRings] = {};   // identities only (no refs)
+int                      g_objLastRingN = 0;
+uint32_t                 g_objRingLogs = 0;
+uint32_t                 g_objOnLogs = 0;
+bool                     g_objFirstTagLogged = false, g_objClearNoStencilLogged = false;
+
+enum : uint8_t { kObjDssKeep = 0, kObjDssTwin = 1, kObjDssConflict = 2 };
+struct ObjDss {
+    ID3D11DepthStencilState* key;     // the game's state (ref held); unused for the null (default) entry
+    ID3D11DepthStencilState* twin;    // our twin (ref), null unless gbuf == kObjDssTwin
+    uint8_t gbuf;                     // what a G-buffer bind of this state does
+    bool    later;                    // bound on the scene depth outside the G-buffer it would read / write the upper nibble
+    bool    refLow;                   // the twin keeps the game's ref low nibble (the game's stencil was on)
+    char    desc[160];                // for the WARNING line
+};
+constexpr int kObjDssMax = 128;
+ObjDss   g_objDss[kObjDssMax];
+int      g_objDssN = 0;
+ObjDss   g_objDssNull;                 // the default state (OMSetDepthStencilState(nullptr))
+bool     g_objDssNullSet = false;
+ObjDss*  g_objCur = nullptr;           // entry of the game's state while in scene state
+
+void ObjDssFlush() {
+    for (int i = 0; i < g_objDssN; ++i) {
+        if (g_objDss[i].twin) g_objDss[i].twin->Release();
+        if (g_objDss[i].key) g_objDss[i].key->Release();
+    }
+    g_objDssN = 0;
+    if (g_objDssNullSet && g_objDssNull.twin) g_objDssNull.twin->Release();
+    g_objDssNullSet = false;
+    memset(&g_objDssNull, 0, sizeof(g_objDssNull));
+    g_objCur = nullptr;
+    if (g_objDev) { g_objDev->Release(); g_objDev = nullptr; }
+    g_objFlushReq = false;
+}
+
+const char* ObjCmpName(D3D11_COMPARISON_FUNC f) {
+    static const char* n[] = { "?", "NEVER", "LESS", "EQUAL", "LESS_EQUAL", "GREATER", "NOT_EQUAL", "GREATER_EQUAL", "ALWAYS" };
+    return (unsigned)f < 9 ? n[f] : "?";
+}
+
+// Classifies `d` (the game's state) and builds its twin. See the block comment above.
+void ObjClassify(const D3D11_DEPTH_STENCIL_DESC& d, ObjDss& e) {
+    e.twin = nullptr; e.gbuf = kObjDssKeep; e.later = false; e.refLow = false;
+    snprintf(e.desc, sizeof(e.desc), "depth=%d write=%d func=%s stencil=%d read=0x%02x write=0x%02x front %d/%d/%d %s back %d/%d/%d %s",
+             (int)d.DepthEnable, (int)d.DepthWriteMask, ObjCmpName(d.DepthFunc), (int)d.StencilEnable, d.StencilReadMask,
+             d.StencilWriteMask, (int)d.FrontFace.StencilFailOp, (int)d.FrontFace.StencilDepthFailOp, (int)d.FrontFace.StencilPassOp,
+             ObjCmpName(d.FrontFace.StencilFunc), (int)d.BackFace.StencilFailOp, (int)d.BackFace.StencilDepthFailOp,
+             (int)d.BackFace.StencilPassOp, ObjCmpName(d.BackFace.StencilFunc));
+    auto tests  = [](const D3D11_DEPTH_STENCILOP_DESC& f) { return f.StencilFunc != D3D11_COMPARISON_ALWAYS && f.StencilFunc != D3D11_COMPARISON_NEVER; };
+    auto writes = [](const D3D11_DEPTH_STENCILOP_DESC& f) {
+        return f.StencilFailOp != D3D11_STENCIL_OP_KEEP || f.StencilDepthFailOp != D3D11_STENCIL_OP_KEEP || f.StencilPassOp != D3D11_STENCIL_OP_KEEP; };
+    if (d.StencilEnable) {
+        const bool readsUpper  = (d.StencilReadMask & 0xF0) && (tests(d.FrontFace) || tests(d.BackFace));
+        const bool writesUpper = (d.StencilWriteMask & 0xF0) && (writes(d.FrontFace) || writes(d.BackFace));
+        e.later = readsUpper || writesUpper;
+    }
+    if (!d.DepthEnable || d.DepthWriteMask != D3D11_DEPTH_WRITE_MASK_ALL) return;   // writes no depth: owns no pixel, keep
+    if (e.later) { e.gbuf = kObjDssConflict; return; }                                  // the game uses the upper nibble itself
+    D3D11_DEPTH_STENCIL_DESC t = d;
+    t.StencilEnable = TRUE;
+    if (!d.StencilEnable) {
+        t.StencilReadMask = 0xFF;
+        t.StencilWriteMask = 0xF0;
+        const D3D11_DEPTH_STENCILOP_DESC op{ D3D11_STENCIL_OP_KEEP, D3D11_STENCIL_OP_KEEP, D3D11_STENCIL_OP_REPLACE, D3D11_COMPARISON_ALWAYS };
+        t.FrontFace = op; t.BackFace = op;
+    } else {
+        auto keepFails = [](const D3D11_DEPTH_STENCILOP_DESC& f) {
+            return f.StencilFailOp == D3D11_STENCIL_OP_KEEP && f.StencilDepthFailOp == D3D11_STENCIL_OP_KEEP; };
+        const D3D11_STENCIL_OP pf = d.FrontFace.StencilPassOp, pb = d.BackFace.StencilPassOp;
+        if (!keepFails(d.FrontFace) || !keepFails(d.BackFace) || pf != pb ||
+            (pf != D3D11_STENCIL_OP_REPLACE && pf != D3D11_STENCIL_OP_KEEP)) { e.gbuf = kObjDssConflict; return; }
+        if (pf == D3D11_STENCIL_OP_REPLACE) t.StencilWriteMask = (UINT8)(d.StencilWriteMask | 0xF0);
+        else { t.StencilWriteMask = 0xF0; t.FrontFace.StencilPassOp = t.BackFace.StencilPassOp = D3D11_STENCIL_OP_REPLACE; }
+        e.refLow = true;
+    }
+    HRESULT hr = E_POINTER;
+    if (!g_objDev || FAILED(hr = g_objDev->CreateDepthStencilState(&t, &e.twin)) || !e.twin) {
+        Log("MV objects: CreateDepthStencilState for a twin failed hr=0x%lx (%s)", (unsigned long)hr, e.desc);
+        e.twin = nullptr;
+        e.gbuf = kObjDssConflict;
+        return;
+    }
+    e.gbuf = kObjDssTwin;
+}
+
+// The cache entry of the game's state `s` (created on first use). nullptr = cache full (treated as "keep").
+ObjDss* ObjResolve(ID3D11DeviceContext* ctx, ID3D11DepthStencilState* s) {
+    if (!g_objDev) ctx->GetDevice(&g_objDev);
+    if (!s) {
+        if (!g_objDssNullSet) {
+            D3D11_DEPTH_STENCIL_DESC d{};                     // the D3D11 default state
+            d.DepthEnable = TRUE; d.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL; d.DepthFunc = D3D11_COMPARISON_LESS;
+            d.StencilEnable = FALSE; d.StencilReadMask = 0xFF; d.StencilWriteMask = 0xFF;
+            const D3D11_DEPTH_STENCILOP_DESC op{ D3D11_STENCIL_OP_KEEP, D3D11_STENCIL_OP_KEEP, D3D11_STENCIL_OP_KEEP, D3D11_COMPARISON_ALWAYS };
+            d.FrontFace = op; d.BackFace = op;
+            ObjClassify(d, g_objDssNull);
+            g_objDssNull.key = nullptr;
+            g_objDssNullSet = true;
+        }
+        return &g_objDssNull;
+    }
+    for (int i = 0; i < g_objDssN; ++i) if (g_objDss[i].key == s) return &g_objDss[i];
+    if (g_objDssN >= kObjDssMax) return nullptr;
+    ObjDss& e = g_objDss[g_objDssN];
+    D3D11_DEPTH_STENCIL_DESC d{};
+    s->GetDesc(&d);
+    ObjClassify(d, e);
+    s->AddRef();                                          // the key stays alive (no pointer reuse) while cached
+    e.key = s;
+    ++g_objDssN;
+    return &e;
+}
+
+void ObjLeave(ID3D11DeviceContext* ctx);
+// Feature off for the session (conflict). Restores the game's state if twins are bound.
+void ObjDisable(ID3D11DeviceContext* ctx, const char* why, const ObjDss* e) {
+    if (g_objDisabled) return;
+    g_objDisabled = true;
+    Log("WARNING: MV objects DISABLED for this session -- %s (%s). Per-object motion vectors need the upper stencil nibble "
+        "to be unused by the game; everything else keeps working (camera motion vectors as before).", why, e ? e->desc : "?");
+    if (g_objInScene) ObjLeave(ctx);
+    g_objOn = false;
+    ObjIds::Clear();
+}
+
+inline UINT ObjStaticRef() { return (g_objCur && g_objCur->refLow) ? (g_objGameRef & 0x0Fu) : 0u; }
+
+// In scene state: bind what stands for the game's current state (its twin with the static ref, or the state itself).
+void ObjBindForGame(ID3D11DeviceContext* ctx) {
+    ObjDss* e = ObjResolve(ctx, g_objGameDss);
+    g_objCur = e;
+    if (e && e->gbuf == kObjDssConflict) {
+        ObjDisable(ctx, "the game binds a depth-stencil state in the G-buffer pass that cannot carry object ids", e);
+        oOMSetDepthStencilState(ctx, g_objGameDss, g_objGameRef);
+        return;
+    }
+    if (e && e->twin) { oOMSetDepthStencilState(ctx, e->twin, ObjStaticRef()); ++g_objTwinBinds; }
+    else oOMSetDepthStencilState(ctx, g_objGameDss, g_objGameRef);
+}
+
+void ObjEnter(ID3D11DeviceContext* ctx) {
+    ID3D11DepthStencilState* cur = nullptr;
+    UINT ref = 0;
+    ctx->OMGetDepthStencilState(&cur, &ref);              // what is bound now = the game's state (we restore at LEAVE)
+    g_objGameDss = cur; g_objGameRef = ref; g_objGameKnown = true;
+    g_objInScene = true;
+    ObjBindForGame(ctx);
+    if (cur) cur->Release();                              // the cache holds its own ref (ObjResolve)
+}
+
+void ObjLeave(ID3D11DeviceContext* ctx) {
+    g_objInScene = false;
+    g_objCur = nullptr;
+    oOMSetDepthStencilState(ctx, g_objGameDss, g_objGameRef);   // exactly what the engine believes is bound
+    if (g_passSeq) {
+        ObjRecord& rec = g_objRing[(g_passSeq - 1) % kRing];
+        t_inDlaa = true;
+        rec.Flush(ctx);                                   // the pass's MVPs: one copy of the used ring range
+        t_inDlaa = false;
+    }
+}
+
+// Outside the G-buffer, with the scene depth bound: a state that reads / writes the upper nibble = conflict.
+void ObjWatch(ID3D11DeviceContext* ctx) {
+    if (!g_objGameKnown) {
+        ID3D11DepthStencilState* cur = nullptr;
+        UINT ref = 0;
+        ctx->OMGetDepthStencilState(&cur, &ref);
+        g_objGameDss = cur; g_objGameRef = ref; g_objGameKnown = true;
+        if (cur) cur->Release();                          // still bound (runtime ref); ObjResolve takes its own
+    }
+    const ObjDss* e = ObjResolve(ctx, g_objGameDss);
+    if (e && e->later) ObjDisable(ctx, "a pass after the G-buffer reads or writes the stencil upper nibble on the scene depth", e);
+}
+
+// hkOMSetRenderTargets (game context, not our work), after g_gbufPass and the pass start for this bind.
+void ObjOnBind(ID3D11DeviceContext* ctx, bool sceneDsv) {
+    g_objSceneDsv = sceneDsv;
+    const bool want = g_gbufPass && g_objOn && g_passSeq > 0;
+    if (want && !g_objInScene) ObjEnter(ctx);
+    else if (!want && g_objInScene) ObjLeave(ctx);
+    if (!g_gbufPass && sceneDsv && g_objOn) ObjWatch(ctx);
+}
+
+void STDMETHODCALLTYPE hkOMSetDepthStencilState(ID3D11DeviceContext* ctx, ID3D11DepthStencilState* dss, UINT ref) {
+    if (t_inDlaa || !IsGameCtx(ctx)) { oOMSetDepthStencilState(ctx, dss, ref); return; }
+    g_objGameDss = dss; g_objGameRef = ref; g_objGameKnown = true;
+    if (g_objInScene) { ObjBindForGame(ctx); return; }
+    oOMSetDepthStencilState(ctx, dss, ref);
+    if (g_objSceneDsv && g_objOn) ObjWatch(ctx);
+}
+
+HRESULT STDMETHODCALLTYPE hkMap(ID3D11DeviceContext* ctx, ID3D11Resource* r, UINT sub, D3D11_MAP type, UINT flags,
+                                D3D11_MAPPED_SUBRESOURCE* out) {
+    if (type == D3D11_MAP_WRITE_DISCARD && r && g_passSeq && !t_inDlaa && IsGameCtx(ctx)) {
+        ObjRecord& rec = g_objRing[(g_passSeq - 1) % kRing];
+        if (rec.HasOpenRing(r)) {                         // v0.9.0 r3: any of the pass's (up to 3) rings
+            t_inDlaa = true;
+            const bool sealed = rec.OnDiscard(ctx, r);    // THAT ring's copy, queued before the discard (old contents)
+            t_inDlaa = false;
+            if (sealed && g_objInScene) {                 // later draws from this buffer go to a new ring slot
+                ++g_objTornN; ++g_objTornTotal;
+                if (g_objTornTotal <= 3)
+                    Log("MV objects: a VS constant-buffer ring was DISCARD-mapped inside the G-buffer pass (pass s=%llu) -- "
+                        "its draws so far were copied, the ring slot is sealed and later draws from it use a new slot "
+                        "(v0.9.0 r3; r2 dropped the whole pass)", (unsigned long long)(g_passSeq - 1));
+            }
+        }
+        // v0.10.0 per-draw MVs: draws waiting for their replay that read this buffer are replayed first (capped per pass),
+        // and a ring of the pass is flushed into its mirror + sealed
+        DidOnDiscardMap(ctx, r);                          // v0.10.0 phase 10: always (the forward-depth record exists with ids off)
+    }
+    // v0.10.0 phase 2: the same for the open mirror view's own draw record (independent of the main pass FIFO)
+    if (type == D3D11_MAP_WRITE_DISCARD && r && g_mirCur >= 0 && !t_inDlaa && IsGameCtx(ctx)) MirOnDiscardMap(ctx, r);
+    return oMap(ctx, r, sub, type, flags, out);
+}
+
+// v0.9.0 r3: ring statistics of a finished pass record (ObjOnPassStart, after its last flush). The first multi-ring passes
+// are logged in detail: ring 0's used range vs its size tells "the engine moved on because ring 0 was full" (used up to
+// the end) from "two rings used side by side" (switches > 1); "ring 0 = ring k of the previous pass" tells whether the
+// rings alternate between passes / frames.
+void ObjNoteRings(const ObjRecord& rec, uint64_t s) {
+    const int nr = rec.Rings();
+    ++g_objRingPasses;
+    g_objRingSum += (uint64_t)nr;
+    if (nr > g_objRingMax) g_objRingMax = nr;
+    g_objRingSwitch += (uint64_t)rec.Switches();
+    for (int k = 0; k < nr; ++k) {
+        const ObjRecord::RingInfo ri = rec.GetRing(k);
+        g_objRingBytes[k] += ri.copied;
+        g_objRingDraws[k] += (uint64_t)ri.draws;
+    }
+    int prevIdx = -1;
+    const ObjRecord::RingInfo r0 = rec.GetRing(0);
+    for (int j = 0; j < g_objLastRingN; ++j) if (nr > 0 && g_objLastRings[j] == r0.buf) { prevIdx = j; break; }
+    if (nr > 0) {
+        if (prevIdx == 0) ++g_objRing0Same; else if (prevIdx > 0) ++g_objRing0Other; else ++g_objRing0New;
+    }
+    if (nr >= 2 && g_objRingLogs < 4) {
+        ++g_objRingLogs;
+        char line[640];
+        int len = snprintf(line, sizeof(line), "MV objects: pass s=%llu draws from %d VS cbuffer rings (all mirrored, v0.9.0 "
+                           "r3), %d ring switch(es), %d recorded draws, %d sealed by a discard |", (unsigned long long)s, nr,
+                           rec.Switches(), rec.Count(), rec.Seals());
+        for (int k = 0; k < nr && len > 0 && len < (int)sizeof(line); ++k) {
+            const ObjRecord::RingInfo ri = rec.GetRing(k);
+            len += snprintf(line + len, sizeof(line) - (size_t)len, " ring %d: %u KB, used %u..%u KB, %d draws from #%d%s |",
+                            k, ri.bytes / 1024u, ri.usedLo / 1024u, (ri.usedHi + 1023u) / 1024u, ri.draws, ri.firstDraw,
+                            ri.sealed ? " (sealed)" : "");
+        }
+        if (len > 0 && len < (int)sizeof(line))
+            snprintf(line + len, sizeof(line) - (size_t)len, " ring 0 was %s of the previous pass", prevIdx < 0 ? "no ring" :
+                     (prevIdx == 0 ? "ring 0" : (prevIdx == 1 ? "ring 1" : "ring 2")));
+        Log("%s", line);
+    }
+    g_objLastRingN = nr;
+    for (int k = 0; k < nr; ++k) g_objLastRings[k] = rec.GetRing(k).buf;
+}
+
+// ---- per-pass identity: geometry key hash + occurrence index ----
+inline uint64_t ObjMix(uint64_t x) {
+    x ^= x >> 33; x *= 0xff51afd7ed558ccdull; x ^= x >> 33; x *= 0xc4ceb9fe1a85ec53ull; x ^= x >> 33;
+    return x;
+}
+struct ObjOcc { uint64_t kh; uint32_t gen; uint32_t n; };
+constexpr uint32_t kObjOccBits = 13;
+constexpr uint32_t kObjOcc = 1u << kObjOccBits;          // 8192 (open addressing, filled at most half)
+ObjOcc   g_objOcc[kObjOcc];
+uint32_t g_objOccGen = 1, g_objOccFill = 0;
+uint32_t ObjOccNext(uint64_t kh) {
+    if (g_objOccFill >= kObjOcc / 2) return 0xFFFFu;      // more than 4096 distinct keys in one pass: occurrence unknown
+    for (uint32_t i = (uint32_t)(kh >> (64 - kObjOccBits));; i = (i + 1) & (kObjOcc - 1)) {
+        ObjOcc& o = g_objOcc[i];
+        if (o.gen != g_objOccGen) { o.gen = g_objOccGen; o.kh = kh; o.n = 1; ++g_objOccFill; return 0; }
+        if (o.kh == kh) return o.n++;
+    }
+}
+
+// StartPass (pass s): the previous pass's record is flushed if it is still open, the new slot's record starts empty.
+void ObjOnPassStart(ID3D11DeviceContext* ctx, uint64_t s) {
+    if (s > 0) {
+        ObjRecord& prev = g_objRing[(s - 1) % kRing];
+        if (prev.Pending()) { t_inDlaa = true; prev.Flush(ctx); t_inDlaa = false; }
+        if (g_objOn && prev.Count() > 0) ObjNoteRings(prev, s - 1);   // v0.9.0 r3 ring statistics
+    }
+    g_objRing[s % kRing].Reset();
+    if (++g_objOccGen == 0) { memset(g_objOcc, 0, sizeof(g_objOcc)); g_objOccGen = 1; }
+    g_objOccFill = 0;
+    if (g_objOn) ++g_objPassN;
+}
+
+// hkDrawIndexed, world G-buffer pass in scene state: records the draw, returns its id (0 = untagged).
+// v0.9.0 r11: only DrawIndexed is recorded -- DrawIndexedInstanced is not hooked at all (its rows 4..7 are not the
+// instances' MVP, v0.9.0 stencil audit), so instanced draws never enter the record; draws whose rows 4..7 carry the
+// view-projection only (origin at the camera) are caught on the GPU (CSMain reason 9, mv_objects_cam_m).
+int ObjOnDraw(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex) {
+    if (g_gameVpN == 0 || g_gameVp[0].MinDepth >= 0.85f) return 0;   // cabin layer: the cabin R handles it
+    if (g_ctx1Owner != ctx) {
+        if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
+        ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&g_ctx1);
+        g_ctx1Owner = ctx;
+    }
+    ObjRecord& rec = g_objRing[(g_passSeq - 1) % kRing];
+    ID3D11Buffer* ib = nullptr; DXGI_FORMAT ibFmt = DXGI_FORMAT_UNKNOWN; UINT ibOff = 0;
+    ID3D11Buffer* vb = nullptr; UINT vbStride = 0, vbOff = 0;
+    ctx->IAGetIndexBuffer(&ib, &ibFmt, &ibOff);
+    ctx->IAGetVertexBuffers(0, 1, &vb, &vbStride, &vbOff);
+    uint64_t kh = ObjMix((uint64_t)(uintptr_t)ib + 0x9E3779B97F4A7C15ull);
+    kh = ObjMix(kh ^ (uint64_t)(uintptr_t)vb);
+    kh = ObjMix(kh ^ ((uint64_t)ibOff | ((uint64_t)vbOff << 32)));
+    kh = ObjMix(kh ^ ((uint64_t)indexCount | ((uint64_t)startIndex << 32)));
+    kh = ObjMix(kh ^ (uint64_t)(uint32_t)baseVertex);
+    if (!kh) kh = 1;
+    // v0.9.0 r9: the raw key (identity only, no refs) for CameraMv's fallback pairing and unpaired-draw diagnostic
+    const ObjRecord::Geo geo{ ib, vb, ibOff, vbOff, startIndex, baseVertex };
+    if (ib) ib->Release();
+    if (vb) vb->Release();
+    const uint32_t occ = ObjOccNext(kh);
+    const uint64_t id = ObjMix(kh + 0x9E3779B97F4A7C15ull * ((uint64_t)occ + 1));
+    bool follower = false;                                // v0.9.0 r3: a follower never represents its id (no own R)
+    int slot = ObjIds::Lookup(id, &follower);
+    if (slot > ObjIds::Max() && slot != ObjIds::DebugSlot()) slot = 0;   // v0.9.0 r2: + the debug view's "rejected" id
+    if (slot && !(g_objCur && g_objCur->twin)) slot = 0;  // this draw's state cannot carry an id
+    ID3D11Buffer* cb = nullptr;
+    UINT first = 0, num = 0;
+    if (g_ctx1) g_ctx1->VSGetConstantBuffers1(0, 1, &cb, &first, &num);
+    if (cb && num * 16 >= 128) {
+        // v0.9.0 r2: the occurrence index goes into the record (the GPU checks pairing == identity); misses by reason
+        // v0.9.0 r3: cb may be any of up to 3 rings of the pass (the same VSGetConstantBuffers1 result, no extra call)
+        const ObjRecord::Miss why = rec.Add(cb, first * 16 + 64, id, kh, occ, indexCount, slot, !follower, &geo);
+        if (why == ObjRecord::kMissNone) ++g_objRecDraws;
+        else { ++g_objMissDraws; ++g_objMissWhy[why]; }
+    } else {
+        rec.NoteMissed();
+        ++g_objMissDraws;
+        ++g_objMissWhy[ObjRecord::kMissNoCb];
+    }
+    if (cb) cb->Release();
+    if (slot) {
+        rec.NoteTagged();
+        ++g_objTagDraws;
+        if (!g_objFirstTagLogged) {
+            g_objFirstTagLogged = true;
+            Log("MV objects: first stencil-tagged draw (id %d, IndexCount %u, pass s=%llu) -- moving objects now carry their "
+                "own motion vectors", slot, indexCount, (unsigned long long)(g_passSeq - 1));
+        }
+    }
+    return slot;
+}
+
+// Once per frame (OnPresentBoundary): on / off, cache flush outside scene state.
+void ObjFrameUpdate(uint64_t n) {
+    const bool on = g_objCfg && !g_objDisabled && g_objHooked.load(std::memory_order_acquire) &&
+                    g_dlaaOn.load(std::memory_order_relaxed) && g_mvOn.load(std::memory_order_relaxed) &&
+                    !g_passive.load(std::memory_order_relaxed) && !g_jitterOnly.load(std::memory_order_relaxed) &&
+                    !g_gameDeviceChanged.load(std::memory_order_relaxed);
+    if (on != g_objOn) {
+        g_objOn = on;
+        if (!on) ObjIds::Clear();
+        if (g_objOnLogs++ < 20)
+            Log("MV objects: %s (Present #%llu)", on ? "ACTIVE -- world G-buffer draws carry stencil object ids" :
+                (g_objDisabled ? "off (disabled after a conflict)" : "inactive (DLAA / MV off, passive or jitter-only)"),
+                (unsigned long long)n);
+    }
+    // v0.9.0 r2: the Ctrl+F6 view shows rejected identities (cyan) through a reserved id 15 (real ids 1..14 meanwhile).
+    // Only switched here, between frames (never inside a G-buffer pass).
+    if (!g_objInScene) ObjIds::SetDebug(on && g_mvDebug.load(std::memory_order_relaxed));
+    if (!g_objInScene && (g_objFlushReq || (!g_objCfg && g_objDssN)))
+        ObjDssFlush();
+    // v0.10.0 per-draw MVs (mv_objects = 2): the same gates, no stencil twins, no hooks required beyond DrawIndexed (the
+    // Map / DrawIndexedInstanced hooks only add the forced replays / the instanced records). Switched between frames.
+    const bool didOn = g_didCfg && g_dlaaOn.load(std::memory_order_relaxed) && g_mvOn.load(std::memory_order_relaxed) &&
+                       !g_passive.load(std::memory_order_relaxed) && !g_jitterOnly.load(std::memory_order_relaxed) &&
+                       !g_gameDeviceChanged.load(std::memory_order_relaxed);
+    if (didOn != g_didOn) {
+        g_didOn = didOn;
+        if (g_didOnLogs++ < 20)
+            Log("MV draw-ids: %s (Present #%llu)", didOn ? "ACTIVE -- every world G-buffer draw is recorded, replayed into a "
+                "draw-id target (depth EQUAL) and gets its own motion vector when it moves" :
+                "inactive (DLAA / MV off, passive or jitter-only)", (unsigned long long)n);
+    }
+}
+
+// ResetPassTrackingCore (game-context change): the old context's state is abandoned, the cache (old device) dropped later.
+void ObjOnContextReset() {
+    g_objInScene = false;
+    g_objCur = nullptr;
+    g_objGameDss = nullptr; g_objGameRef = 0; g_objGameKnown = false;
+    g_objSceneDsv = false;
+    g_objFlushReq = true;
+    for (ObjRecord& r : g_objRing) r.Reset();
+    g_objLastRingN = 0;                                   // v0.9.0 r3
+    ObjIds::Clear();
+    DidOnContextReset();                                  // v0.10.0: records, read-only DSV, replay device objects
+}
+
+// " | objects: ..." for the FIFO stats line; restarts the window.
+// v0.9.0 r2: + missed draws by reason, the r2 rejections per readback by reason, over-budget of this window.
+void ObjStatsTag(char* buf, size_t cap, uint64_t passes) {
+    static CameraMv::ObjStats s0;
+    static ObjIds::Stats i0;
+    if (!g_objCfg) { snprintf(buf, cap, " | objects: off (mv_objects=0)"); return; }
+    const ObjIds::Stats is = ObjIds::GetStats();
+    const CameraMv::ObjStats& cs = g_dlaa[0].Mv().GetObjStats();
+    const double p = passes ? (double)passes : 1.0;
+    const double fr = cs.frames > s0.frames ? (double)(cs.frames - s0.frames) : 0.0;
+    const double qf = g_qpcFreq > 0 ? (double)g_qpcFreq : 1.0;
+    const double rb = cs.rbRead > s0.rbRead ? (double)(cs.rbRead - s0.rbRead) : 0.0;
+    auto perRb = [&](uint64_t a, uint64_t b) { return rb > 0.0 ? (double)(a - b) / rb : 0.0; };
+    const double tc = cs.tagCmp > s0.tagCmp ? (double)(cs.tagCmp - s0.tagCmp) : 0.0;   // v0.9.0 r6: compared readbacks
+    // v0.9.0 r3: rings per recorded pass, copied KB and draws per ring slot, ring switches, ring 0 vs the previous pass
+    const double rp = g_objRingPasses ? (double)g_objRingPasses : 1.0;
+    const double r0n = (double)(g_objRing0Same + g_objRing0Other + g_objRing0New);
+    auto r0pct = [&](uint64_t v) { return r0n > 0.0 ? 100.0 * (double)v / r0n : 0.0; };
+    // v0.9.0 r3: "extra-ring" (was "2nd-ring") = a big buffer while all 3 ring slots of the pass were taken
+    snprintf(buf, cap, " | objects: %s ids=%d/%d members=%d (followers %d) waiting=%d over-budget=+%llu (total %llu) | per pass: "
+             "recorded=%.0f tagged=%.1f missed=%.1f (no-cb %.1f, small-cb %.1f, extra-ring %.1f, full %.1f) cpu=%.3f ms | "
+             "rings/pass=%.2f (max %d) switches/pass=%.1f copied KB/pass r0=%.0f r1=%.0f r2=%.0f draws/pass r0=%.0f "
+             "r1=%.0f r2=%.0f ring0-vs-prev-pass same=%.0f%% other=%.0f%% new=%.0f%% sealed-in-pass=%llu | twins=%d "
+             "twin-binds/pass=%.1f | eye0: frames=%.0f valid-ids/frame=%.2f paired=%.0f%% moving/readback=%.1f "
+             "unusable=%llu | r2 rejected/readback: dup=%.1f pairing=%.1f ambiguous=%.1f own-truck=%.1f incoherent=%.1f "
+             "dropped=%llu lists-full=%llu/%llu | r3 followers: joined=+%llu kept/readback=%.1f | r4: vetoed draws/readback=%.2f "
+             "ids-without-trusted-member/readback=%.2f spinners=%d spin-joined=+%llu spin-waits/readback=%.1f "
+             "diverged=+%llu quarantined=+%llu solid-blocked=+%llu | r6: tag-switches/readback=%.2f (on %.2f, off %.2f; "
+             "id-changes %.2f) readbacks=%.0f still-seen/readback=%.1f moved=+%llu own-id=+%llu left-to-camera=+%llu "
+             "released=+%llu | id ages (readbacks): now min %d median %d max %d, freed=+%llu (short-lived < %d: +%llu, "
+             "mean age %.0f) | r7: held/readback=%.2f hold-expired/readback=%.2f near-accepted/readback=%.2f "
+             "near-locked/readback=%.2f fast-joined=+%llu | r8: ego-set=%d ego-flagged=+%llu ego-dropped=+%llu "
+             "ego-released=+%llu mask-held/readback=%.2f | r9: world-miss-held=+%llu pairs-by-fallback/readback=%.2f "
+             "camera-noise/readback=%.2f ego-ids=%d | r10: offscreen-rejected/readback=%.2f offscreen-released=+%llu "
+             "sub-min-px/readback=%.2f attached=+%llu attached-members=%d | r11: cam-origin/readback=%.2f "
+             "static-class=%d static-blocked/readback=%.2f static-released=+%llu | game stencil use of the upper "
+             "nibble: %s",
+             g_objDisabled ? "DISABLED" : (g_objOn ? "on" : "idle"), is.idsInUse, ObjIds::Max(), is.members, is.followers,
+             is.waiting, (unsigned long long)(is.overBudget - i0.overBudget), (unsigned long long)is.overBudget,
+             (double)g_objRecDraws / p, (double)g_objTagDraws / p, (double)g_objMissDraws / p,
+             (double)g_objMissWhy[ObjRecord::kMissNoCb] / p, (double)g_objMissWhy[ObjRecord::kMissSmallCb] / p,
+             (double)g_objMissWhy[ObjRecord::kMissOtherRing] / p, (double)g_objMissWhy[ObjRecord::kMissFull] / p,
+             (double)g_objTicks * 1000.0 / qf / p,
+             (double)g_objRingSum / rp, g_objRingMax, (double)g_objRingSwitch / rp,
+             (double)g_objRingBytes[0] / 1024.0 / rp, (double)g_objRingBytes[1] / 1024.0 / rp,
+             (double)g_objRingBytes[2] / 1024.0 / rp, (double)g_objRingDraws[0] / rp, (double)g_objRingDraws[1] / rp,
+             (double)g_objRingDraws[2] / rp, r0pct(g_objRing0Same), r0pct(g_objRing0Other), r0pct(g_objRing0New),
+             (unsigned long long)g_objTornN,
+             g_objDssN + (g_objDssNullSet ? 1 : 0), (double)g_objTwinBinds / p, fr,
+             fr > 0.0 ? (double)(cs.maskBits - s0.maskBits) / fr : 0.0,
+             cs.draws > s0.draws ? 100.0 * (double)(cs.paired - s0.paired) / (double)(cs.draws - s0.draws) : 0.0,
+             perRb(cs.moving, s0.moving),
+             (unsigned long long)(cs.unusable - s0.unusable),
+             perRb(cs.rej[ObjIds::kRejDup], s0.rej[ObjIds::kRejDup]), perRb(cs.rej[ObjIds::kRejPair], s0.rej[ObjIds::kRejPair]),
+             perRb(cs.rej[ObjIds::kRejAmbig], s0.rej[ObjIds::kRejAmbig]), perRb(cs.rej[ObjIds::kRejEgo], s0.rej[ObjIds::kRejEgo]),
+             perRb(is.incoherent, i0.incoherent), (unsigned long long)(is.dropped - i0.dropped),
+             (unsigned long long)(cs.movFull - s0.movFull), (unsigned long long)(cs.rejFull - s0.rejFull),
+             (unsigned long long)(is.followJoined - i0.followJoined), perRb(is.followKept, i0.followKept),
+             perRb(cs.vetoDraws, s0.vetoDraws), perRb(cs.noRepIds, s0.noRepIds), is.spinners,           // v0.9.0 r4
+             (unsigned long long)(is.spinJoined - i0.spinJoined), perRb(is.spinWait, i0.spinWait),
+             (unsigned long long)(is.diverged - i0.diverged),
+             (unsigned long long)(is.quarantined - i0.quarantined), (unsigned long long)(is.solidBlocked - i0.solidBlocked),
+             // v0.9.0 r6: tag switches per compared readback (THE number to watch: near 0 except vehicles entering /
+             // leaving the view), sticky-membership counters, id ages
+             tc > 0.0 ? (double)((cs.tagOn - s0.tagOn) + (cs.tagOff - s0.tagOff)) / tc : 0.0,
+             tc > 0.0 ? (double)(cs.tagOn - s0.tagOn) / tc : 0.0, tc > 0.0 ? (double)(cs.tagOff - s0.tagOff) / tc : 0.0,
+             tc > 0.0 ? (double)(cs.tagIdChange - s0.tagIdChange) / tc : 0.0, rb,
+             perRb(is.seenStill, i0.seenStill), (unsigned long long)(is.moved - i0.moved),
+             (unsigned long long)(is.ownId - i0.ownId), (unsigned long long)(is.leftToCam - i0.leftToCam),
+             (unsigned long long)(is.released - i0.released),
+             is.ageMin, is.ageMed, is.ageMax, (unsigned long long)(is.freed - i0.freed), ObjIds::kShortRb,
+             (unsigned long long)(is.freedShort - i0.freedShort),
+             is.freed > i0.freed ? (double)(is.freedAgeSum - i0.freedAgeSum) / (double)(is.freed - i0.freed) : 0.0,
+             // v0.9.0 r7: ids that kept their last R / whose hold ran out, near trusted movers accepted / own truck,
+             // joins on the first sighting
+             perRb(cs.heldIds, s0.heldIds), perRb(cs.holdExpired, s0.holdExpired),
+             perRb(cs.nearAccepted, s0.nearAccepted), perRb(cs.nearLocked, s0.nearLocked),
+             (unsigned long long)(is.fastJoined - i0.fastJoined),
+             // v0.9.0 r8: the ego set now (identities flagged as the own truck; r9: flagged copies) and its changes,
+             // members it released, frames whose id mask was held through a pairing failure
+             is.egoSet, (unsigned long long)(is.egoFlagged - i0.egoFlagged),
+             (unsigned long long)(is.egoDropped - i0.egoDropped), (unsigned long long)(is.egoReleased - i0.egoReleased),
+             perRb(cs.maskHeld, s0.maskHeld),
+             // v0.9.0 r9: world-miss frames answered with the last good camera R (no history reset), object-record
+             // draws paired through the fallback key, trusted candidates rejected as camera noise (reason 7),
+             // identities in the ego set now (fast-joined = spinning parts only)
+             (unsigned long long)(cs.worldMissHeld - s0.worldMissHeld), perRb(cs.fallbackPairs, s0.fallbackPairs),
+             perRb(cs.rej[ObjIds::kRejNoise], s0.rej[ObjIds::kRejNoise]), is.egoIds,
+             // v0.9.0 r10: candidates whose origin was off screen (reason 8), members released for it, new-mover
+             // sightings under mv_objects_min_px, plates / mirrors attached to a member's id (joins, now)
+             perRb(cs.rej[ObjIds::kRejOffscreen], s0.rej[ObjIds::kRejOffscreen]),
+             (unsigned long long)(is.offscreenReleased - i0.offscreenReleased), perRb(is.subMinPx, i0.subMinPx),
+             (unsigned long long)(is.attached - i0.attached), is.attachedMembers,
+             // v0.9.0 r11: camera-attached draws per readback (origin within mv_objects_cam_m: no object transform),
+             // identities in the static class now, sightings refused for it, members released for it
+             perRb(cs.camOrigin, s0.camOrigin), is.staticClass, perRb(is.staticBlocked, i0.staticBlocked),
+             (unsigned long long)(is.staticReleased - i0.staticReleased),
+             g_objDisabled ? "SEEN (see WARNING)" : "none seen");
+    s0 = cs;
+    i0 = is;
+    g_objRecDraws = g_objTagDraws = g_objMissDraws = 0; g_objTicks = 0; g_objTwinBinds = 0; g_objTornN = 0;
+    for (uint64_t& m : g_objMissWhy) m = 0;
+    g_objRingSum = g_objRingPasses = g_objRingSwitch = 0; g_objRingMax = 0;                    // v0.9.0 r3
+    g_objRing0Same = g_objRing0Other = g_objRing0New = 0;
+    for (int k = 0; k < ObjRecord::kRings; ++k) { g_objRingBytes[k] = 0; g_objRingDraws[k] = 0; }
+}
+
+#endif
+
+#ifdef WITH_DLAA
+// ---- v0.9.0 r5 FORWARD DEPTH for the motion vectors -------------------------------------------------------------------
+// WHY: CameraMv reprojects every pixel through the depth it finds in the pass's depth snapshot (the scene depth at the
+// discard, after the forward pass). The forward pass draws the alpha-blended world geometry -- overhead / catenary wires,
+// power cables, chain-link fences, lane paint, glass -- with depth TEST on but depth WRITE off (RenderDoc frame 1969,
+// scripts/rdc_forward_depthwrite_audit.py: 188 of 190 forward draws write no depth; every thin wire / fence draw is
+// SRC_ALPHA / INV_SRC_ALPHA blended). So at a wire pixel the snapshot holds what is BEHIND the wire: in front of the sky
+// that is depth 0 = infinitely far = rotation-only reprojection, no parallax. A wire 10 m overhead that sweeps across the
+// screen while the truck drives under it gets the sky's (near zero) motion; DLSS keeps the wire's history where the wire
+// no longer is -> a trail. DLAA (render = output res, a fresh sample per output pixel) mostly hides it; DLSS upscale
+// leans on history and dilates the MVs by depth (the wire's sky depth never wins), so the trail shows.
+// HOW (render thread, game context only, world forward pass only): after the game's own DrawIndexed of a forward draw
+//  * qualifying = the game's bound depth-stencil state tests depth but writes none, its blend state blends RT0 with
+//    DestBlend = INV_SRC_ALPHA ("over" / premultiplied over: wires, fences, paint, glass; NOT additive glows / light cones,
+//    NOT multiplicative decals), and the viewport is the WORLD layer (MinDepth >= 0.005, MaxDepth <= 0.95: the sky / sun /
+//    cloud layer [0, 0.009] and the cabin layer [0.9, 1] are skipped -- a windscreen must never own the world's depth).
+//  * the draw is issued ONCE MORE, unchanged (same shaders, buffers, viewport, rasterizer state), with three states
+//    swapped for that one call: DSV = this pass slot's forward-depth target (DepthTwin::fwdDsv, cleared to 0 = far at the
+//    pass's first re-draw), depth-stencil = depth on / write ALL / GREATER_EQUAL (reversed-Z) / stencil off, blend =
+//    alpha-to-coverage on with every RT write mask 0. The game's RT0 stays bound but receives nothing; the depth target
+//    gets the draw's depth wherever its pixel shader's alpha >= 0.5 (single-sample alpha-to-coverage). Then the game's
+//    RTV + DSV, depth-stencil state + ref and blend state + factor + mask are bound back exactly.
+//  * at the blit SceneDlaa::Run hands the target to pass B, which uses max(snapshot, forward) per pixel: the nearer
+//    surface (reversed-Z). A wire behind a building loses to the building; a wire in front of the sky wins.
+// COST: one extra DrawIndexed + 6 state calls per qualifying draw (~110 in the audited frame; the pixel work is the
+// game's own transparent shading again, colour writes off) and one ClearDSV per pass. Logged as 'MV forward depth'.
+// SAFETY: nothing the game sees changes (own DSV, RT write mask 0, every state restored); off with mv_fwd_depth = 0 or
+// live with key_fwd_depth (Ctrl+F3); only while DLAA / DLSS runs with MVs on (not passive / jitter-only); single-sample
+// scene depth only (else off for the session, one line).
+// v0.9.0 r11 NEAR-CAMERA DRAWS (round-9 log + video: the road / verge / trees seen through the windscreen were cabin-
+// classified, weather / light dependent): a world-layer "over"-blended overlay right at the camera (windscreen drops /
+// dirt / glare / a reflection quad) qualifies like a wire and wrote NEAR depth over the whole glass. Two answers: pass
+// B lets the forward depth win only inside the world range [0.01, 0.9) (motion_vectors.cpp, immediate), and the re-draw
+// skips a qualifying draw whose MVP origin (rows 4..7 of VS cbuffer slot 0, the G-buffer layout) lies within
+// mv_fwd_min_m of the camera (ObjIds::CamAttached: view-space length, or clip |w|, |x|, |y| all below it) -- an overlay
+// / glass / drop layer, never a wire or a fence, whose origin is on it. The MVP is on the GPU only: every qualifying
+// draw copies its 64 bytes (one CopySubresourceRegion) into its pass's staging slot (kFwdRbSlots, kFwdRbMax draws per
+// pass), read back without waiting at a later pass start; the verdict is cached per forward-draw IDENTITY (geometry key
+// + vertex shader + occurrence index in the pass) and a near-camera identity is skipped from then on -- a new one 2-4
+// passes late (pass B's range rule covers those frames when it sits at the near plane). A skipped draw keeps copying,
+// so its verdict follows it. The first 5 near-camera identities are logged ("MV forward depth: near-camera draw").
+ID3D11Device*            g_fwdDev = nullptr;        // device of the two states below (ref)
+ID3D11DepthStencilState* g_fwdDss = nullptr;        // depth on, write ALL, GREATER_EQUAL, stencil off
+ID3D11BlendState*        g_fwdBs  = nullptr;        // alpha-to-coverage, every render target write mask 0
+bool                     g_fwdFailed = false;       // state creation failed / MSAA scene depth: off for the session
+const void*              g_fwdSdChecked = nullptr;  // scene depth whose sample count was checked (identity)
+bool                     g_fwdFirstLogged = false;
+uint64_t                 g_fwdTicks = 0;            // CPU time in FwdOnDraw (QPC ticks, stats window)
+uint64_t                 g_fwdSeen = 0, g_fwdRedrawn = 0, g_fwdSkLayer = 0, g_fwdSkState = 0, g_fwdSkFail = 0;
+uint64_t                 g_fwdPassesLive = 0;       // stats window: passes with at least one live forward draw
+bool                     g_fwdLivePass = false;     // FwdOnDraw ran during the pass now closing
+uint32_t                 g_fwdStatLogs = 0;
+struct FwdMemo { IUnknown* key; bool ok; };         // classification of a game state object (key ref held)
+constexpr int kFwdMemo = 64;
+FwdMemo                  g_fwdDssMemo[kFwdMemo];
+FwdMemo                  g_fwdBsMemo[kFwdMemo];
+int                      g_fwdDssMemoN = 0, g_fwdBsMemoN = 0;
+// v0.9.0 r11 near-camera draws (see the block above)
+constexpr int kFwdRbSlots = 4;                      // staging slots (passes in flight)
+constexpr int kFwdRbMax = 256;                      // MVP copies per pass
+struct FwdRbEnt { uint64_t id; UINT ic; float vpMin, vpMax; int srcB, dstB, wMask, dFunc; };
+struct FwdRbSlot { ID3D11Buffer* stage; bool pending, open; uint64_t pass; int n; FwdRbEnt e[kFwdRbMax]; };
+FwdRbSlot                g_fwdRbs[kFwdRbSlots] = {};
+int                      g_fwdRbOpen = -1;          // slot collecting the current pass (-1 = none)
+struct FwdNearEnt { uint64_t id; bool nearCam; };   // verdict cache: near-camera identities (id 0 = empty)
+constexpr int kFwdNearN = 4096;                     // open addressing, cleared when half full
+FwdNearEnt               g_fwdNear[kFwdNearN] = {};
+int                      g_fwdNearFill = 0, g_fwdNearLogged = 0;
+struct FwdOccEnt { uint64_t kh; uint32_t gen, n; };   // per-pass occurrence index of a forward key
+constexpr int kFwdOcc = 1024;
+FwdOccEnt                g_fwdOcc[kFwdOcc] = {};
+uint32_t                 g_fwdOccGen = 1, g_fwdOccFill = 0;
+const void*              g_fwdLastCb = nullptr;     // last VS cbuffer seen (identity) and its size
+UINT                     g_fwdLastCbBytes = 0;
+// stats window: skipped as near-camera, MVP copies / verdicts read back / near among them, passes without a slot
+uint64_t                 g_fwdSkNear = 0, g_fwdMvpCopies = 0, g_fwdVerdicts = 0, g_fwdVerdictsNear = 0, g_fwdNoSlot = 0;
+uint64_t                 g_fwdNearPx0 = 0, g_fwdNearFr0 = 0;   // CameraMv near-range pixel counter at the window start
+// v0.10.0 phase 10 forward-depth batch (see the FORWARD-DEPTH BATCH block above DidFwdOnDraw)
+GpuSpanTimer             g_fwdBatchTimer;
+bool                     g_fwdCullCfg = true;       // dlaa.ini mv_fwd_depth_cull
+float                    g_fwdBudgetMs = 0.30f;     // dlaa.ini mv_fwd_depth_budget_ms (VR, profile default only; 0 = off)
+bool                     g_fwdAutoOff = false;      // the VR budget switched the forward depth off this session
+uint64_t                 g_fwdBatches = 0, g_fwdBatchSegs = 0, g_fwdBatchDraws = 0, g_fwdBatchInit = 0, g_fwdBatchNoSnap = 0;
+uint64_t                 g_fwdBatchFail = 0, g_fwdBatchTicks = 0, g_fwdBatchForced = 0;
+double                   g_fwdGuardAvg = 0.0, g_fwdGuardMax = 0.0;   // the last landed timer window (ms per pass)
+uint64_t                 g_fwdGuardN = 0, g_fwdGuardWin = 0;
+bool                     g_fwdBatchLogged = false;
+
+inline bool FwdLive() {
+    return g_fwdCfg && g_fwdOn.load(std::memory_order_relaxed) && !g_fwdFailed && g_passSeq > g_fifoHead &&
+           g_dlaaOn.load(std::memory_order_relaxed) && g_mvOn.load(std::memory_order_relaxed) &&
+           !g_passive.load(std::memory_order_relaxed) && !g_jitterOnly.load(std::memory_order_relaxed) &&
+           !g_gameDeviceChanged.load(std::memory_order_relaxed) && g_sceneDepth && g_sceneW && g_sceneH &&
+           SceneDlaa::ShadersReady();
+}
+
+void FwdFlush() {
+    for (int i = 0; i < g_fwdDssMemoN; ++i) if (g_fwdDssMemo[i].key) g_fwdDssMemo[i].key->Release();
+    for (int i = 0; i < g_fwdBsMemoN; ++i) if (g_fwdBsMemo[i].key) g_fwdBsMemo[i].key->Release();
+    g_fwdDssMemoN = g_fwdBsMemoN = 0;
+    if (g_fwdDss) { g_fwdDss->Release(); g_fwdDss = nullptr; }
+    if (g_fwdBs)  { g_fwdBs->Release();  g_fwdBs = nullptr; }
+    if (g_fwdDev) { g_fwdDev->Release(); g_fwdDev = nullptr; }
+    g_fwdSdChecked = nullptr;
+    for (FwdRbSlot& S : g_fwdRbs) {                       // v0.9.0 r11 (old device: the staging copies are dropped)
+        if (S.stage) S.stage->Release();
+        S.stage = nullptr; S.pending = S.open = false; S.n = 0;
+    }
+    g_fwdRbOpen = -1;
+    memset(g_fwdNear, 0, sizeof(g_fwdNear)); g_fwdNearFill = 0;
+    g_fwdLastCb = nullptr; g_fwdLastCbBytes = 0;
+}
+void FwdOnContextReset() { FwdFlush(); g_fwdFailed = false; }
+
+// Depth tested, no depth written. Null = the D3D11 default state (writes depth) -> no.
+bool FwdDssQualifies(ID3D11DepthStencilState* s) {
+    if (!s) return false;
+    for (int i = 0; i < g_fwdDssMemoN; ++i) if (g_fwdDssMemo[i].key == s) return g_fwdDssMemo[i].ok;
+    D3D11_DEPTH_STENCIL_DESC d{};
+    s->GetDesc(&d);
+    const bool ok = d.DepthEnable && d.DepthWriteMask == D3D11_DEPTH_WRITE_MASK_ZERO;
+    if (g_fwdDssMemoN < kFwdMemo) { s->AddRef(); g_fwdDssMemo[g_fwdDssMemoN++] = { s, ok }; }
+    return ok;
+}
+// RT0 "over" blending (DestBlend INV_SRC_ALPHA) that writes colour. Null = blending off -> no.
+bool FwdBlendQualifies(ID3D11BlendState* s) {
+    if (!s) return false;
+    for (int i = 0; i < g_fwdBsMemoN; ++i) if (g_fwdBsMemo[i].key == s) return g_fwdBsMemo[i].ok;
+    D3D11_BLEND_DESC d{};
+    s->GetDesc(&d);
+    const D3D11_RENDER_TARGET_BLEND_DESC& r = d.RenderTarget[0];
+    const bool ok = r.BlendEnable && r.DestBlend == D3D11_BLEND_INV_SRC_ALPHA && (r.RenderTargetWriteMask & 7) != 0;
+    if (g_fwdBsMemoN < kFwdMemo) { s->AddRef(); g_fwdBsMemo[g_fwdBsMemoN++] = { s, ok }; }
+    return ok;
+}
+
+// Our two states (created once per device) + the single-sample check of the current scene depth.
+bool FwdEnsureStates(ID3D11DeviceContext* ctx) {
+    if (g_fwdSdChecked != (const void*)g_sceneDepth) {
+        D3D11_TEXTURE2D_DESC sd{};
+        g_sceneDepth->GetDesc(&sd);
+        g_fwdSdChecked = (const void*)g_sceneDepth;
+        if (sd.SampleDesc.Count != 1) {
+            g_fwdFailed = true;
+            Log("MV forward depth: OFF for this session -- the scene depth is multisampled (%u samples); the forward-depth "
+                "target is single-sample", sd.SampleDesc.Count);
+            return false;
+        }
+    }
+    if (g_fwdDss && g_fwdBs) return true;
+    if (!g_fwdDev) ctx->GetDevice(&g_fwdDev);
+    if (!g_fwdDev) return false;
+    D3D11_DEPTH_STENCIL_DESC dd{};
+    dd.DepthEnable = TRUE;
+    dd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+    dd.DepthFunc = D3D11_COMPARISON_GREATER_EQUAL;    // reversed-Z: nearer = larger; the target starts at 0 (far)
+    dd.StencilEnable = FALSE;
+    dd.StencilReadMask = 0xFF; dd.StencilWriteMask = 0xFF;
+    const D3D11_DEPTH_STENCILOP_DESC op{ D3D11_STENCIL_OP_KEEP, D3D11_STENCIL_OP_KEEP, D3D11_STENCIL_OP_KEEP, D3D11_COMPARISON_ALWAYS };
+    dd.FrontFace = op; dd.BackFace = op;
+    D3D11_BLEND_DESC bd{};
+    bd.AlphaToCoverageEnable = TRUE;                   // single-sample: coverage = alpha >= 0.5 -> the depth write follows it
+    bd.IndependentBlendEnable = FALSE;
+    bd.RenderTarget[0].BlendEnable = FALSE;
+    bd.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;  bd.RenderTarget[0].DestBlend = D3D11_BLEND_ZERO;
+    bd.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    bd.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE; bd.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
+    bd.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    bd.RenderTarget[0].RenderTargetWriteMask = 0;      // the game's RT0 receives nothing
+    HRESULT hr1 = S_OK, hr2 = S_OK;
+    if (!g_fwdDss) hr1 = g_fwdDev->CreateDepthStencilState(&dd, &g_fwdDss);
+    if (!g_fwdBs)  hr2 = g_fwdDev->CreateBlendState(&bd, &g_fwdBs);
+    if (FAILED(hr1) || FAILED(hr2) || !g_fwdDss || !g_fwdBs) {
+        g_fwdFailed = true;
+        Log("MV forward depth: OFF for this session -- state creation failed (depth-stencil hr=0x%lx, blend hr=0x%lx)",
+            (unsigned long)hr1, (unsigned long)hr2);
+        return false;
+    }
+    return true;
+}
+
+// v0.9.0 r11: the verdict cache (near-camera identities)
+inline uint32_t FwdNearHash(uint64_t id) { return (uint32_t)((id * 0x9E3779B97F4A7C15ull) >> 52) & (kFwdNearN - 1); }
+bool FwdIsNear(uint64_t id) {
+    if (!g_fwdNearFill) return false;
+    for (uint32_t h = FwdNearHash(id);; h = (h + 1) & (kFwdNearN - 1)) {   // terminates: at most half full
+        if (!g_fwdNear[h].id) return false;
+        if (g_fwdNear[h].id == id) return g_fwdNear[h].nearCam;
+    }
+}
+// a verdict read back: near ones are entered, a far one only clears an existing entry. true = a NEW near identity
+bool FwdSetNear(uint64_t id, bool nearCam) {
+    if (!nearCam && !g_fwdNearFill) return false;
+    if (nearCam && g_fwdNearFill >= kFwdNearN / 2) { memset(g_fwdNear, 0, sizeof(g_fwdNear)); g_fwdNearFill = 0; }
+    uint32_t h = FwdNearHash(id);
+    while (g_fwdNear[h].id && g_fwdNear[h].id != id) h = (h + 1) & (kFwdNearN - 1);
+    if (g_fwdNear[h].id) {
+        const bool was = g_fwdNear[h].nearCam;
+        g_fwdNear[h].nearCam = nearCam;
+        return nearCam && !was;
+    }
+    if (!nearCam) return false;
+    g_fwdNear[h].id = id; g_fwdNear[h].nearCam = true; ++g_fwdNearFill;
+    return true;
+}
+// a forward draw's identity: geometry key + vertex shader + occurrence index of that key in this pass
+uint64_t FwdIdentity(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex) {
+    ID3D11Buffer* ib = nullptr; DXGI_FORMAT ibFmt = DXGI_FORMAT_UNKNOWN; UINT ibOff = 0;
+    ID3D11Buffer* vb = nullptr; UINT vbStride = 0, vbOff = 0;
+    ID3D11VertexShader* vs = nullptr;
+    ctx->IAGetIndexBuffer(&ib, &ibFmt, &ibOff);
+    ctx->IAGetVertexBuffers(0, 1, &vb, &vbStride, &vbOff);
+    ctx->VSGetShader(&vs, nullptr, nullptr);
+    uint64_t kh = ObjMix((uint64_t)(uintptr_t)ib + 0x51ED270B27BF4D3Bull);
+    kh = ObjMix(kh ^ (uint64_t)(uintptr_t)vb);
+    kh = ObjMix(kh ^ (uint64_t)(uintptr_t)vs);
+    kh = ObjMix(kh ^ ((uint64_t)ibOff | ((uint64_t)vbOff << 32)));
+    kh = ObjMix(kh ^ ((uint64_t)indexCount | ((uint64_t)startIndex << 32)));
+    kh = ObjMix(kh ^ (uint64_t)(uint32_t)baseVertex);
+    if (ib) ib->Release();
+    if (vb) vb->Release();
+    if (vs) vs->Release();
+    uint32_t occ = 0xFFFFu;
+    if (g_fwdOccFill < kFwdOcc / 2) {
+        for (uint32_t i = (uint32_t)(kh >> 54) & (kFwdOcc - 1);; i = (i + 1) & (kFwdOcc - 1)) {
+            FwdOccEnt& o = g_fwdOcc[i];
+            if (o.gen != g_fwdOccGen) { o.gen = g_fwdOccGen; o.kh = kh; o.n = 1; ++g_fwdOccFill; occ = 0; break; }
+            if (o.kh == kh) { occ = o.n++; break; }
+        }
+    }
+    const uint64_t id = ObjMix(kh + 0x9E3779B97F4A7C15ull * ((uint64_t)occ + 1));
+    return id ? id : 1;
+}
+// the draw's MVP (VS cbuffer slot 0, rows 4..7) -> the open staging slot (+ what the near-camera log line names)
+void FwdNoteMvp(ID3D11DeviceContext* ctx, uint64_t id, UINT indexCount, ID3D11DepthStencilState* dss,
+                ID3D11BlendState* bs) {
+    if (g_fwdRbOpen < 0 || !g_fwdDev) return;
+    FwdRbSlot& S = g_fwdRbs[g_fwdRbOpen];
+    if (S.n >= kFwdRbMax) return;
+    if (g_ctx1Owner != ctx) {
+        if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
+        ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&g_ctx1);
+        g_ctx1Owner = ctx;
+    }
+    if (!g_ctx1) return;
+    ID3D11Buffer* cb = nullptr;
+    UINT first = 0, num = 0;
+    g_ctx1->VSGetConstantBuffers1(0, 1, &cb, &first, &num);
+    if (!cb) return;
+    if ((const void*)cb != g_fwdLastCb) {
+        D3D11_BUFFER_DESC bd{};
+        cb->GetDesc(&bd);
+        g_fwdLastCb = cb; g_fwdLastCbBytes = bd.ByteWidth;
+    }
+    const UINT off = first * 16u + 64u;
+    if (num * 16u >= 128u && off + 64u <= g_fwdLastCbBytes) {
+        if (!S.stage) {
+            D3D11_BUFFER_DESC sd{};
+            sd.ByteWidth = kFwdRbMax * 64u;
+            sd.Usage = D3D11_USAGE_STAGING;
+            sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+            if (FAILED(g_fwdDev->CreateBuffer(&sd, nullptr, &S.stage))) S.stage = nullptr;
+        }
+        if (S.stage) {
+            const D3D11_BOX box{ off, 0, 0, off + 64u, 1, 1 };
+            oCopySubresourceRegion(ctx, S.stage, 0, (UINT)S.n * 64u, 0, 0, cb, 0, &box);   // the hook is bypassed
+            FwdRbEnt& E = S.e[S.n++];
+            E.id = id; E.ic = indexCount;
+            E.vpMin = g_gameVpN ? g_gameVp[0].MinDepth : 0.0f; E.vpMax = g_gameVpN ? g_gameVp[0].MaxDepth : 0.0f;
+            E.srcB = E.dstB = E.wMask = E.dFunc = -1;
+            if (g_fwdNearLogged < 5) {                    // only while the first near-camera draws can still be logged
+                D3D11_BLEND_DESC b{}; D3D11_DEPTH_STENCIL_DESC d{};
+                if (bs) {
+                    bs->GetDesc(&b);
+                    E.srcB = (int)b.RenderTarget[0].SrcBlend; E.dstB = (int)b.RenderTarget[0].DestBlend;
+                    E.wMask = (int)b.RenderTarget[0].RenderTargetWriteMask;
+                }
+                if (dss) { dss->GetDesc(&d); E.dFunc = (int)d.DepthFunc; }
+            }
+            ++g_fwdMvpCopies;
+        }
+    }
+    cb->Release();
+}
+// pass start: the open slot is sealed (pending), landed slots are judged (without waiting), a free slot opens
+void FwdRbStep(ID3D11DeviceContext* ctx) {
+    if (g_fwdRbOpen >= 0) {
+        FwdRbSlot& S = g_fwdRbs[g_fwdRbOpen];
+        S.open = false;
+        S.pending = S.n > 0;
+        g_fwdRbOpen = -1;
+    }
+    for (FwdRbSlot& S : g_fwdRbs) {
+        if (!S.pending || !S.stage || !ctx) continue;
+        D3D11_MAPPED_SUBRESOURCE mp{};
+        const HRESULT hr = oMap(ctx, S.stage, 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mp);
+        if (hr == DXGI_ERROR_WAS_STILL_DRAWING) continue;
+        S.pending = false;
+        if (FAILED(hr)) continue;
+        for (int k = 0; k < S.n; ++k) {
+            const float* m = (const float*)((const uint8_t*)mp.pData + (size_t)k * 64u);
+            float dist = 0.0f;
+            const bool nearCam = ObjIds::CamAttached(m, g_fwdMinM, &dist);
+            ++g_fwdVerdicts;
+            if (nearCam) ++g_fwdVerdictsNear;
+            if (FwdSetNear(S.e[k].id, nearCam) && g_fwdNearLogged < 5) {
+                const FwdRbEnt& E = S.e[k];
+                float v[3] = { 0.0f, 0.0f, 0.0f };
+                const bool vok = ObjIds::MvpViewOrigin(m, v);
+                ++g_fwdNearLogged;
+                Log("MV forward depth: near-camera draw #%d (v0.9.0 r11, not re-drawn from now on) -- IndexCount %u, "
+                    "MVP origin %.3f m from the camera (%s view %.3f %.3f %.3f m, clip w %.3f; mv_fwd_min_m %.2f) | "
+                    "blend RT0 src %d dest %d write mask 0x%x | depth func %d | viewport depth %.3f..%.3f | pass s=%llu",
+                    g_fwdNearLogged, E.ic, (double)dist, vok ? "recovered:" : "NOT recoverable, |w| instead;",
+                    (double)v[0], (double)v[1], (double)v[2], (double)m[15], (double)g_fwdMinM, E.srcB, E.dstB,
+                    (unsigned)(E.wMask < 0 ? 0 : E.wMask), E.dFunc, (double)E.vpMin, (double)E.vpMax,
+                    (unsigned long long)S.pass);
+            }
+        }
+        ctx->Unmap(S.stage, 0);
+        S.n = 0;
+    }
+    if (++g_fwdOccGen == 0) { memset(g_fwdOcc, 0, sizeof(g_fwdOcc)); g_fwdOccGen = 1; }
+    g_fwdOccFill = 0;
+    if (!g_fwdCfg || g_fwdFailed) return;
+    for (int k = 0; k < kFwdRbSlots; ++k) {
+        FwdRbSlot& S = g_fwdRbs[k];
+        if (S.pending) continue;
+        S.open = true; S.n = 0; S.pass = g_passSeq ? g_passSeq - 1 : 0;
+        g_fwdRbOpen = k;
+        return;
+    }
+    ++g_fwdNoSlot;
+}
+
+// Stats window: called at every pass start (closes the previous pass). One line every 1200 live passes.
+// v0.9.0 r11: + the near-camera readback step, near-camera skips, the near-range forward-depth pixels of pass B
+void FwdOnPassStart(ID3D11DeviceContext* ctx) {
+    FwdRbStep(ctx);
+    if (g_fwdLivePass) ++g_fwdPassesLive;
+    g_fwdLivePass = false;
+    if (g_fwdPassesLive < 1200) return;
+    const double p = (double)g_fwdPassesLive;
+    const double qf = g_qpcFreq > 0 ? (double)g_qpcFreq : 1.0;
+    const CameraMv& mv0 = g_dlaa[0].Mv();
+    const uint64_t npx = mv0.FwdNearPx(), nfr = mv0.FwdNearFrames();
+    const double nearPx = nfr > g_fwdNearFr0 ? (double)(npx - g_fwdNearPx0) / (double)(nfr - g_fwdNearFr0) : 0.0;
+    if (g_fwdStatLogs++ < 200)
+        Log("MV forward depth: per pass over %llu passes -- forward draws %.1f, recorded for the batch %.1f (over-blended, depth test "
+            "without depth write, world layer), skipped: sky / cabin layer %.1f, other states %.1f, near-camera %.1f, "
+            "not recorded %.1f | CPU %.3f ms/pass (recording, in the game's draws) | r11: near-camera = MVP origin < %.2f m "
+            "(mv_fwd_min_m): MVP copies %.1f, verdicts %.1f (near %.1f), passes without a readback slot %llu; "
+            "near-range px %.0f (forward depth >= 0.9, ignored by the MV pass; per frame, 1-in-16 estimate)",
+            (unsigned long long)g_fwdPassesLive, (double)g_fwdSeen / p,
+            (double)g_fwdRedrawn / p, (double)g_fwdSkLayer / p, (double)g_fwdSkState / p, (double)g_fwdSkNear / p,
+            (double)g_fwdSkFail / p, (double)g_fwdTicks * 1000.0 / qf / p, (double)g_fwdMinM,
+            (double)g_fwdMvpCopies / p, (double)g_fwdVerdicts / p, (double)g_fwdVerdictsNear / p,
+            (unsigned long long)g_fwdNoSlot, nearPx);
+    if (g_fwdStatLogs <= 200) {                           // v0.10.0 phase 10: the batch
+        const double pb = g_fwdBatches ? (double)g_fwdBatches : 1.0;
+        Log("MV forward depth batch (v0.10.0 phase 10) over %llu passes: %.1f draws re-drawn per pass in %.2f segments, occlusion "
+            "init in %llu (no snapshot for it %llu; mv_fwd_depth_cull %d), forced %llu, failed %llu | CPU %.3f ms/pass | GPU %.3f ms "
+            "avg / %.3f max per pass over the last %llu timed (init + re-draws; VR budget %.2f ms%s)%s",
+            (unsigned long long)g_fwdBatches, (double)g_fwdBatchDraws / pb, (double)g_fwdBatchSegs / pb,
+            (unsigned long long)g_fwdBatchInit, (unsigned long long)g_fwdBatchNoSnap, (int)g_fwdCullCfg,
+            (unsigned long long)g_fwdBatchForced, (unsigned long long)g_fwdBatchFail,
+            (double)g_fwdBatchTicks * 1000.0 / qf / pb, g_fwdGuardAvg, g_fwdGuardMax, (unsigned long long)g_fwdGuardN,
+            (double)g_fwdBudgetMs, g_profExplicit[PK_FWD_DEPTH] ? ", not applied: mv_fwd_depth explicit" : "",
+            g_fwdAutoOff ? " | SWITCHED OFF by the VR budget" : "");
+    }
+    g_fwdBatches = g_fwdBatchSegs = g_fwdBatchDraws = g_fwdBatchInit = g_fwdBatchNoSnap = 0;
+    g_fwdBatchFail = g_fwdBatchTicks = g_fwdBatchForced = 0;
+    g_fwdSeen = g_fwdRedrawn = g_fwdSkLayer = g_fwdSkState = g_fwdSkFail = 0;
+    g_fwdSkNear = g_fwdMvpCopies = g_fwdVerdicts = g_fwdVerdictsNear = g_fwdNoSlot = 0;   // v0.9.0 r11
+    g_fwdNearPx0 = npx; g_fwdNearFr0 = nfr;
+    g_fwdTicks = 0;
+    g_fwdPassesLive = 0;
+}
+
+// One world forward-pass DrawIndexed, right after the game's own call (see the block comment).
+void FwdOnDraw(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex) {
+    g_fwdLivePass = true;
+    ++g_fwdSeen;
+    if (g_gameVpN == 0 || g_gameVp[0].MinDepth < 0.005f || g_gameVp[0].MaxDepth > 0.95f) {
+        ++g_fwdSkLayer;
+        if (g_didOn) DidFwdNoteDraw(ctx, indexCount, false, 1, nullptr, nullptr);   // v0.10.0 phase 3 diagnostic
+        return;
+    }
+    ID3D11DepthStencilState* dss = nullptr; UINT ref = 0;
+    ctx->OMGetDepthStencilState(&dss, &ref);
+    ID3D11BlendState* bs = nullptr; FLOAT bf[4] = {}; UINT mask = 0;
+    ctx->OMGetBlendState(&bs, bf, &mask);
+    const bool qualifies = FwdDssQualifies(dss) && FwdBlendQualifies(bs);
+    const bool statesOk = qualifies && FwdEnsureStates(ctx);   // once per draw (r11: the near-camera step needs it)
+    bool nearCam = false;                                 // v0.9.0 r11: a near-camera identity (overlay): no re-draw
+    if (statesOk) {
+        const uint64_t fid = FwdIdentity(ctx, indexCount, startIndex, baseVertex);
+        FwdNoteMvp(ctx, fid, indexCount, dss, bs);        // every qualifying draw: its verdict stays fresh
+        nearCam = FwdIsNear(fid);
+    }
+    if (!qualifies) {
+        ++g_fwdSkState;
+    } else if (nearCam) {
+        ++g_fwdSkNear;
+    } else if (statesOk) {
+        // v0.10.0 phase 10: no re-draw here any more -- the draw's whole state (IA, VS, PS + their resources, RS, viewport) goes
+        // into the pass's forward record and the pass's forward depth is re-drawn in ONE batch at its end (FwdBatch, at the scene
+        // depth discard after the snapshot): one exact GPU timer, an occlusion init from the snapshot, no per-draw state churn
+        // inside the game's pass. The record is the same one the forward-id replay uses (ids off: released after the batch).
+        if (DidFwdOnDraw(ctx, indexCount, startIndex, baseVertex)) ++g_fwdRedrawn;
+        else ++g_fwdSkFail;
+    } else {
+        ++g_fwdSkFail;
+    }
+    if (g_didOn)                                          // v0.10.0 phase 3: first-20 forward draws line (one pass)
+        DidFwdNoteDraw(ctx, indexCount, false, !qualifies ? 2 : (nearCam ? 3 : (statesOk ? 0 : 4)), dss, bs);
+    if (dss) dss->Release();
+    if (bs) bs->Release();
+}
+
+// ---- v0.10.0 PER-DRAW MOTION VECTORS (mv_objects = 2, the default) --------------------------------------------------
+// WHY: v0.9.0's 15 stencil ids were handed out by CPU heuristics ("which draws move?") and failed in game (the road tagged
+// as a mover, tags blinking, plates untagged, own-truck parts with ids). Here every pixel learns WHICH G-buffer draw owns
+// it, and every draw gets its own exact R = MVP_prev * inverse(MVP_cur): nothing is guessed. RenderDoc audit
+// (scripts/rdc_drawid_audit.py, captures/v010_handoff.md): the G-buffer draws read only VS cb0 (the per-frame ring, D3D11.1
+// offsets), VS SRVs (bone matrices) and their VBs / IB -- none of them is written inside the pass; no GS / HS / DS; one
+// depth-stencil state (GREATER, depth write on); two RS states (scissor on); one viewport per draw; the scene depth is a
+// D32_FLOAT_S8X24_UINT texture with DSV binding only (a read-only DSV of it is legal).
+// HOW (render thread, game context only, never for our own work):
+//  * hkDrawIndexed / hkDrawIndexedInstanced while the world G-buffer is bound: DrawIdRecord::Record keeps the draw's whole
+//    input state (getters, refs held) and its MVP's byte offset in the pass's ring mirror (draw_ids.h).
+//  * hkOMSetRenderTargets LEAVING the G-buffer (before the game's next targets are bound: the scene depth is final and
+//    intact): DidReplay draws every recorded draw again with the game's own VS / IA / cbuffers / RS / viewport (the same
+//    jitter) and our 1-instruction PS into the pass slot's R16_UINT draw-id target, depth EQUAL against a read-only DSV of
+//    the scene depth, stencil off. Every piece of state it touches is saved and restored; the game then binds its next
+//    targets itself. A draw whose depth IS the final depth at a pixel owns it; alpha-tested holes and occluded pixels fail.
+//  * A replay also runs (render targets restored) when a pass ends without a G-buffer leave (the next pass's depth clear,
+//    the scene depth discard) and, at most kDidForcedMax times per pass, right before a WRITE_DISCARD of a buffer that a
+//    recorded-but-not-replayed draw reads (hkMap: the discard would hand the replay new contents). Draws recorded after a
+//    replay are always replayed, instanced / no-MVP ones too (a later draw must never leave a stale id under it).
+//  * At the blit, SceneDlaa::Run -> CameraMv::Generate pairs the record with the eye's previous one on the GPU (DrawIdMv)
+//    and pass B reprojects the pixels of MOVER draws with their own R; every other pixel keeps the camera path.
+// SAFETY: never SwapDeviceContextState, no compute inside the game's passes, the stencil is never written (read-only DSV,
+// stencil test off). A replay that cannot run (no target / DSV / shader) leaves the pass without ids (camera path).
+// Mode 1 (the v0.9.0 stencil ids) stays compiled for comparison; mode 2 never enables it (ObjFrameUpdate).
+typedef void (STDMETHODCALLTYPE* DrawIndexedInstanced_t)(ID3D11DeviceContext*, UINT, UINT, UINT, INT, UINT);
+DrawIndexedInstanced_t   oDrawIndexedInstanced = nullptr;
+std::atomic<bool>        g_didHooked{false};        // DrawIndexedInstanced hooked (instanced G-buffer draws recorded)
+bool                     g_didInstancedCfg = true;   // dlaa.ini mv_drawid_instanced (v0.10.0 phase 6b: default 1): replay
+                                                     // instanced / no-MVP draws always, and let them join the rigid-parent vote
+constexpr int            kDidForcedMax = 2;          // forced (hkMap) replays per pass
+ID3D11DepthStencilView*  g_didRoDsv = nullptr;       // read-only DSV of the scene depth (ref held)
+const void*              g_didRoDsvTex = nullptr;    // the scene depth it was made for (identity)
+UINT                     g_didDepthW = 0, g_didDepthH = 0;
+int                      g_didForcedPass = 0;        // forced replays in the newest pass
+GpuSpanTimer             g_didReplayTimer;           // GPU time of the replays (all passes)
+// stats window (the FIFO stats line, every 600 blits)
+uint64_t g_didRecDraws = 0, g_didRecInst = 0, g_didRecFull = 0, g_didReplayed = 0, g_didSkipped = 0, g_didPasses = 0;
+uint64_t g_didSegMulti = 0, g_didForced = 0, g_didForcedCapped = 0, g_didEndReplays = 0, g_didNoTarget = 0;
+uint64_t g_didTicksRec = 0, g_didTicksReplay = 0;
+uint64_t g_didInstGated = 0;                          // v0.10.0 phase 8 (mv_inst_replay 1): instanced draws not replayed (window)
+uint64_t g_didStaticSkipped = 0;                      // v0.10.0 phase 14 (mv_replay_static_*): static draws not replayed (window)
+bool     g_didFirstReplayLogged = false, g_didRoDsvLogged = false;
+// v0.10.0 phase 3 forward-pass draw ids (stats window + one-time lines)
+GpuSpanTimer g_didFwdReplayTimer;
+int      g_didFwdForcedPass = 0;
+uint64_t g_didFwdRec = 0, g_didFwdRecFull = 0, g_didFwdReplayed = 0, g_didFwdOverflow = 0, g_didFwdPasses = 0;
+uint64_t g_didFwdForced = 0, g_didFwdForcedCapped = 0, g_didFwdNoTarget = 0, g_didFwdTicks = 0, g_didFwdInst = 0;
+bool     g_didFwdFirstLogged = false;
+int      g_didFwdNoteN = 0;                          // first-20 forward draws line: entries written
+uint64_t g_didFwdNotePass = ~0ull;                   // the pass they belong to
+// v0.10.0 phase 5 (Alt+F8): every forward draw of ONE pass that gets no forward depth / id is logged with its state ("MV dump
+// fwd-skip n" lines), then a summary of the distinct state combinations (in-game: "other states" 17-158 per pass)
+bool     g_fwdSkipArm = false;                       // armed by RequestMvDump, taken by the next pass start
+uint64_t g_fwdSkipPass = ~0ull;                      // g_passSeq of the logged pass (~0 = none)
+int      g_fwdSkipN = 0, g_fwdSkipAll = 0, g_fwdSkipCapped = 0;
+struct FwdSkipCombo {                                // one distinct state combination of the logged pass
+    int verdict; const void* dss; const void* bs; bool inst; float vpMin, vpMax;
+    int n; UINT icMin, icMax; int firstLine;
+    char desc[200];
+};
+constexpr int kFwdSkipCombos = 48;
+FwdSkipCombo g_fwdSkipCombo[kFwdSkipCombos];
+int      g_fwdSkipComboN = 0, g_fwdSkipComboOver = 0;
+
+// The read-only DSV of the current scene depth (created once per scene depth texture; nullptr = unsupported / failed).
+ID3D11DepthStencilView* DidRoDsv(ID3D11Device* dev) {
+    if (!g_sceneDepth || !dev) return nullptr;
+    if (g_didRoDsvTex == (const void*)g_sceneDepth) return g_didRoDsv;
+    if (g_didRoDsv) { g_didRoDsv->Release(); g_didRoDsv = nullptr; }
+    g_didRoDsvTex = g_sceneDepth;
+    D3D11_TEXTURE2D_DESC td{};
+    g_sceneDepth->GetDesc(&td);
+    DXGI_FORMAT f = DXGI_FORMAT_UNKNOWN;
+    UINT flags = D3D11_DSV_READ_ONLY_DEPTH;
+    switch (td.Format) {
+    case DXGI_FORMAT_D32_FLOAT_S8X24_UINT: case DXGI_FORMAT_R32G8X24_TYPELESS:
+        f = DXGI_FORMAT_D32_FLOAT_S8X24_UINT; flags |= D3D11_DSV_READ_ONLY_STENCIL; break;
+    case DXGI_FORMAT_D24_UNORM_S8_UINT: case DXGI_FORMAT_R24G8_TYPELESS:
+        f = DXGI_FORMAT_D24_UNORM_S8_UINT; flags |= D3D11_DSV_READ_ONLY_STENCIL; break;
+    case DXGI_FORMAT_D32_FLOAT: case DXGI_FORMAT_R32_TYPELESS: f = DXGI_FORMAT_D32_FLOAT; break;
+    case DXGI_FORMAT_D16_UNORM: case DXGI_FORMAT_R16_TYPELESS: f = DXGI_FORMAT_D16_UNORM; break;
+    default: break;
+    }
+    if (f == DXGI_FORMAT_UNKNOWN || td.SampleDesc.Count != 1 || td.ArraySize != 1) {
+        Log("MV draw-ids: the scene depth (%ux%u fmt=%d, %u samples, %u slices) has no read-only view this build can make -- "
+            "no per-draw motion vectors (camera motion vectors as before)", td.Width, td.Height, (int)td.Format,
+            td.SampleDesc.Count, td.ArraySize);
+        return nullptr;
+    }
+    D3D11_DEPTH_STENCIL_VIEW_DESC dd{};
+    dd.Format = f;
+    dd.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+    dd.Flags = flags;
+    dd.Texture2D.MipSlice = 0;
+    const HRESULT hr = dev->CreateDepthStencilView(g_sceneDepth, &dd, &g_didRoDsv);
+    if (FAILED(hr)) {
+        g_didRoDsv = nullptr;
+        Log("MV draw-ids: read-only scene depth view create hr=0x%lx (%ux%u fmt=%d) -- no per-draw motion vectors",
+            (unsigned long)hr, td.Width, td.Height, (int)td.Format);
+        return nullptr;
+    }
+    g_didDepthW = td.Width; g_didDepthH = td.Height;
+    if (!g_didRoDsvLogged) {
+        g_didRoDsvLogged = true;
+        Log("MV draw-ids: read-only view of the scene depth created (%ux%u, view fmt=%d, flags 0x%x) -- the G-buffer replay "
+            "tests depth EQUAL against it", td.Width, td.Height, (int)f, flags);
+    }
+    return g_didRoDsv;
+}
+
+// Replays the pending draws of pass `pass` (its FIFO slot's record) into that slot's draw-id target. why: 0 = G-buffer
+// leave, 1 = forced (hkMap discard), 2 = the next pass started, 3 = scene depth discard.
+void DidReplay(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int why) {
+    DrawIdRecord& rec = g_didRing[pass % kRing];
+    if (rec.PendingReplay() <= 0) return;
+    PassSlot& ps = g_ring[pass % kRing];
+    if (g_ctx1Owner != ctx) {
+        if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
+        ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&g_ctx1);
+        g_ctx1Owner = ctx;
+    }
+    if (!g_ctx1) return;
+    const int64_t t0 = Qpc();
+    ID3D11Device* dev = nullptr;
+    ctx->GetDevice(&dev);
+    ID3D11DepthStencilView* ro = dev ? DidRoDsv(dev) : nullptr;
+    // v0.10.0 phase 3: a two-channel (R16G16_UINT) target while forward ids are possible; decided at the pass's first replay
+    // and kept for the pass (a format change would drop the ids of an earlier forced replay)
+    // v0.10.0 phase 9: a 1/2-resolution forward pass has its own forward-id target (the id target stays one channel)
+    const bool twoCh = rec.Cleared() ? ps.twin.idTwoCh : (FwdLive() && !ps.fwdShift);
+    const bool ok = ro && DrawIdRecord::InitDevice(dev) && ps.twin.EnsureIds(dev, g_didDepthW, g_didDepthH, twoCh);
+    if (dev) dev->Release();
+    if (!ok) ++g_didNoTarget;
+    t_inDlaa = true;                                      // our draws / binds pass straight through the hooks
+    DrawIdMv::PollMain(ctx);                              // v0.10.0 phase 14: verdicts that landed since the last blit count now
+    const int tq = ok ? g_didReplayTimer.Begin(ctx) : -1;
+    GpuPerf::SetPass(ps.s);                               // v0.10.0 phase 8
+    const int pq = ok ? GpuPerf::Begin(ctx, GpuPerf::kReplay) : -1;
+    DrawIdRecord::SetInstancedProbe((ps.s % 7u) == 0u);   // v0.10.0 phase 8 (mv_inst_replay 1): every 7th pass replays them all
+    const int gated0 = rec.GatedDraws();
+    const int static0 = rec.StaticSkipped();
+    rec.SetView(ps.clip ? &ps.clipRect : nullptr, 0);     // v0.10.0 phase 9: the pass's area clip
+    // v0.10.0 phase 14 (mv_replay_static_*): long-static world draws are not replayed here (main G-buffer passes only; the
+    // mirror units' replays never set the gate)
+    DrawIdRecord::SetStaticGate(true);
+    const DrawIdRecord::ReplayResult rr = rec.Replay(g_ctx1, ok ? ps.twin.idRtv.Get() : nullptr, ok ? ro : nullptr,
+                                                     restoreTargets, g_didInstancedCfg);
+    DrawIdRecord::SetStaticGate(false);
+    g_didInstGated += (uint64_t)(rec.GatedDraws() - gated0);
+    g_didStaticSkipped += (uint64_t)(rec.StaticSkipped() - static0);
+    GpuPerf::End(ctx, pq);
+    g_didReplayTimer.End(ctx, tq);
+    t_inDlaa = false;
+    ps.twin.idValid = rec.Cleared() && !rec.ReplayFailed();
+    g_didReplayed += (uint64_t)rr.replayed;
+    g_didSkipped += (uint64_t)rr.skipped;
+    if (why >= 2) ++g_didEndReplays;
+    g_didTicksReplay += (uint64_t)(Qpc() - t0);
+    if (!g_didFirstReplayLogged && rr.ok && rr.replayed > 0) {
+        g_didFirstReplayLogged = true;
+        Log("MV draw-ids: first replay (pass s=%llu, %s): %d draws replayed into the %ux%u draw-id target, %d skipped "
+            "(instanced / no MVP), depth EQUAL against the read-only scene depth", (unsigned long long)ps.s,
+            why == 0 ? "G-buffer leave" : (why == 1 ? "forced by a discard" : (why == 2 ? "next pass" : "depth discard")),
+            rr.replayed, ps.twin.idW, ps.twin.idH, rr.skipped);
+    }
+}
+
+// v0.10.0 phase 3: replays the pending FORWARD draws of pass `pass` into the GREEN channel of that slot's draw-id target,
+// depth EQUAL against the slot's forward-depth target (DrawIdRecord::ReplayForward), ids after the pass's G-buffer draws.
+// Needs the pass's G-buffer replay (it cleared the two-channel target) and the forward depth. why: 1 = forced (hkMap
+// discard), 2 = the next pass started, 3 = scene depth discard.
+void DidFwdReplay(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int why) {
+    DrawIdRecord& rec = g_didFwdRing[pass % kRing];
+    if (rec.PendingReplay() <= 0) return;
+    PassSlot& ps = g_ring[pass % kRing];
+    const DrawIdRecord& gb = g_didRing[pass % kRing];
+    if (g_ctx1Owner != ctx) {
+        if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
+        ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&g_ctx1);
+        g_ctx1Owner = ctx;
+    }
+    if (!g_ctx1) return;
+    const int64_t t0 = Qpc();
+    // v0.10.0 phase 9: a 1/2-resolution forward depth -> the forward ids go to its own 1/2-size R16_UINT target
+    const UINT sh = ps.twin.fwdValid ? ps.twin.fwdShift : 0u;
+    ID3D11RenderTargetView* fidRtv = sh ? ps.twin.fwdIdRtv.Get() : ps.twin.idRtv.Get();
+    const bool ok = DrawIdRecord::DeviceReady() && gb.Cleared() && !gb.ReplayFailed() && gb.PendingReplay() == 0 &&
+                    (sh ? true : ps.twin.idTwoCh) && fidRtv && ps.twin.fwdValid && ps.twin.fwdDsv;
+    if (!ok) ++g_didFwdNoTarget;
+    t_inDlaa = true;                                      // our draws / binds pass straight through the hooks
+    const int tq = ok ? g_didFwdReplayTimer.Begin(ctx) : -1;
+    GpuPerf::SetPass(ps.s);                               // v0.10.0 phase 8
+    const int pq = ok ? GpuPerf::Begin(ctx, GpuPerf::kFwdReplay) : -1;
+    rec.SetView(ps.clip ? &ps.clipRect : nullptr, sh);    // v0.10.0 phase 9: the area clip + the forward resolution
+    const DrawIdRecord::ReplayResult rr = rec.ReplayForward(g_ctx1, ok ? fidRtv : nullptr,
+                                                            ok ? ps.twin.fwdDsv.Get() : nullptr, restoreTargets,
+                                                            (UINT)gb.Count());
+    GpuPerf::End(ctx, pq);
+    g_didFwdReplayTimer.End(ctx, tq);
+    t_inDlaa = false;
+    ps.twin.fwdIdValid = rec.Cleared() && !rec.ReplayFailed();
+    g_didFwdReplayed += (uint64_t)rr.replayed;
+    g_didFwdTicks += (uint64_t)(Qpc() - t0);
+    if (!g_didFwdFirstLogged && rr.ok && rr.replayed > 0) {
+        g_didFwdFirstLogged = true;
+        Log("MV draw-ids: first FORWARD replay (pass s=%llu, %s): %d forward draws replayed into %s %ux%u (ids %u + 1..), "
+            "depth EQUAL against the forward depth -- plates / decals / glass / wires get their own motion vectors where the "
+            "forward depth won", (unsigned long long)ps.s,
+            why == 1 ? "forced by a discard" : (why == 2 ? "next pass" : "depth discard"), rr.replayed,
+            sh ? "the 1/2-resolution forward-id target" : "the GREEN channel of the draw-id target", sh ? ps.twin.fwdW : ps.twin.idW,
+            sh ? ps.twin.fwdH : ps.twin.idH, (unsigned)gb.Count());
+    }
+}
+
+// v0.10.0 phase 3, FwdOnDraw (game context, after our forward-depth re-draw, t_inDlaa off): the draw's whole input state
+// goes into the pass's forward record (the same Record as the G-buffer draws).
+// ---- v0.10.0 phase 10 FORWARD-DEPTH BATCH ---------------------------------------------------------------------------------
+// WHY: phase 9's VR log measured "fwd-depth*" 2.1 / 1.9 ms per eye -- but every one of the ~290 re-draws was bracketed by its own
+// timestamp pair (serialising the GPU around each) and interleaved with the game's forward draws, and the forward-depth target
+// started EMPTY, so every forward fragment behind a building ran the game's pixel shader again. RenderDoc (frame 1969,
+// scripts/rdc_fwdbatch_audit.py): the 111 qualifying draws cost the GAME 0.22 ms at 2880x2160 with its depth culling, and
+// nothing they read (VS / PS cbuffers, VBs, IB, SRVs) is written between them and the end of the forward pass.
+// HOW: FwdOnDraw only records (DidFwdOnDraw). FwdBatch (the scene depth discard after the snapshot; the next pass start;
+// forced by a WRITE_DISCARD of a buffer a pending draw reads) re-draws the pending draws in one go:
+//  * first segment of the pass: the forward depth (and its 1/2-res id target) is created / cleared to 0 (far), then -- with the
+//    pass's own depth snapshot available and dlaa.ini mv_fwd_depth_cull 1 -- initialised from it (DrawIdRecord::InitFwdDepth:
+//    min of the texels it covers x (1 - 1e-6), world range only): forward fragments behind the scene at every pixel they cover
+//    are rejected by the depth test (they could never win pass B / the vote, which test fw > dt strictly; the init never wins);
+//  * DrawIdRecord::ReplayDepth: draw order, the game's VS / IA / PS + resources / RS, our GREATER_EQUAL + write / A2C + mask 0
+//    states, the pass view (area clip, 1/2 resolution), RT0 = the target's R8 dummy; then the forward-id replay of the same
+//    draws (ids on) or their release (ids off).
+// TIMING: g_fwdBatchTimer (always on, the 'MV forward depth' line) and GpuPerf 'fwd-init' + 'fwd-depth' (exact, every pass).
+// VR BUDGET (dlaa.ini mv_fwd_depth_budget_ms, default 0.30; 0 = off): when mv_fwd_depth is not set in dlaa.ini (a profile
+// default) and the batch averages above the budget over a window of 300 timed passes in VR, the forward depth is switched off
+// for the session (one line; Ctrl+F3 brings it back and makes it the user's choice).
+// (its globals: next to the other forward-depth globals, "v0.10.0 phase 10 forward-depth batch")
+
+void FwdGuardStep() {
+    if (++g_fwdGuardWin < 300) return;
+    g_fwdGuardWin = 0;
+    double avg = 0.0, mx = 0.0; uint64_t n = 0;
+    g_fwdBatchTimer.Take(&avg, &mx, &n);
+    g_fwdGuardAvg = avg; g_fwdGuardMax = mx; g_fwdGuardN = n;
+    if (!g_vrMode || g_fwdBudgetMs <= 0.0f || g_profExplicit[PK_FWD_DEPTH] || g_fwdAutoOff || n < 120) return;
+    if (avg <= (double)g_fwdBudgetMs || !g_fwdOn.load()) return;
+    g_fwdAutoOff = true;
+    g_fwdOn = false;
+    Log("MV forward depth: OFF for this session (v0.10.0 phase 10 VR budget) -- the batched forward-depth re-draw measured %.3f ms "
+        "avg / %.3f max per eye pass over %llu timed passes, above mv_fwd_depth_budget_ms %.2f; mv_fwd_depth is not set in dlaa.ini "
+        "(the profile default). Wires / fences keep the depth behind them. %s brings it back (and keeps it); mv_fwd_depth = 1 in "
+        "dlaa.ini always keeps it", avg, mx, (unsigned long long)n, (double)g_fwdBudgetMs, KeyName(KA_FWD_DEPTH));
+}
+
+// why: 1 = forced (hkMap discard), 2 = the next pass started, 3 = the pass end (scene depth discard / forward leave)
+void FwdBatch(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int why) {
+    DrawIdRecord& rec = g_didFwdRing[pass % kRing];
+    if (rec.PendingDepth() <= 0 && rec.PendingReplay() <= 0) return;
+    PassSlot& ps = g_ring[pass % kRing];
+    DepthTwin& t = ps.twin;
+    if (g_ctx1Owner != ctx) {
+        if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
+        ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&g_ctx1);
+        g_ctx1Owner = ctx;
+    }
+    if (!g_ctx1) return;
+    const int64_t t0 = Qpc();
+    if (rec.PendingDepth() > 0) {
+        ++g_fwdBatchSegs;
+        if (why == 1) ++g_fwdBatchForced;
+        const bool first = !t.fwdValid;
+        const bool ok = g_fwdDss && g_fwdBs && g_fwdDev && rec.CapturePs() &&
+                        (t.fwdValid || t.EnsureFwd(g_fwdDev, g_sceneW, g_sceneH, ps.fwdShift)) && t.fwdDsv && t.fwdDummyRtv;
+        if (!ok) {
+            ++g_fwdBatchFail;
+            t_inDlaa = true;
+            rec.ReplayDepth(g_ctx1, nullptr, nullptr, nullptr, nullptr, restoreTargets);   // moves the cursor (nothing drawn)
+            t_inDlaa = false;
+        } else {
+            t_inDlaa = true;                                  // our own calls: every hook passes straight through
+            const int tq = g_fwdBatchTimer.Begin(ctx);
+            GpuPerf::SetPass(ps.s);
+            int pq = -1;
+            bool inited = false;
+            if (first) {
+                pq = GpuPerf::Begin(ctx, GpuPerf::kFwdInit);
+                oClearDSV(ctx, t.fwdDsv.Get(), D3D11_CLEAR_DEPTH, 0.0f, 0);   // 0 = far (reversed-Z); the hook is bypassed
+                if (t.fwdShift && t.fwdIdRtv) {
+                    const FLOAT zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                    oClearRTV(ctx, t.fwdIdRtv.Get(), zero);
+                }
+                t.fwdValid = true;
+                t.fwdDraws = 0;
+                // the occlusion init needs THIS pass's snapshot (taken right before at the discard / leave / next clear)
+                if (g_fwdCullCfg && ps.snap && t.valid && t.srv && t.w == g_sceneW && t.h == g_sceneH)
+                    inited = DrawIdRecord::InitFwdDepth(g_ctx1, t.fwdDsv.Get(), t.fwdW, t.fwdH, t.srv.Get(), t.fwdShift,
+                                                        ps.clip ? &ps.clipRect : nullptr);
+                if (inited) ++g_fwdBatchInit;
+                else if (g_fwdCullCfg) ++g_fwdBatchNoSnap;
+                pq = GpuPerf::Next(ctx, pq, GpuPerf::kFwdDepth);
+            } else {
+                pq = GpuPerf::Begin(ctx, GpuPerf::kFwdDepth);
+            }
+            rec.SetView(ps.clip ? &ps.clipRect : nullptr, t.fwdShift);   // the area clip + the forward resolution
+            const DrawIdRecord::ReplayResult rr = rec.ReplayDepth(g_ctx1, t.fwdDummyRtv.Get(), t.fwdDsv.Get(), g_fwdDss, g_fwdBs,
+                                                                  restoreTargets);
+            GpuPerf::End(ctx, pq);
+            g_fwdBatchTimer.End(ctx, tq);
+            t_inDlaa = false;
+            t.fwdDraws += (uint32_t)rr.replayed;
+            g_fwdBatchDraws += (uint64_t)rr.replayed;
+            if (first) { ++g_fwdBatches; FwdGuardStep(); }
+            if (!g_fwdBatchLogged && rr.replayed > 0) {
+                g_fwdBatchLogged = true;
+                Log("MV forward depth: first BATCH (v0.10.0 phase 10, pass s=%llu, %s): %d forward draws re-drawn in one go into %ux%u%s "
+                    "(scene %ux%u), occlusion init from the depth snapshot %s -- one exact GPU timer per pass ('fwd-init' + "
+                    "'fwd-depth' in the perf eye line, GPU ms in the 'MV forward depth' line)", (unsigned long long)ps.s,
+                    why == 1 ? "forced by a discard" : (why == 2 ? "next pass" : "pass end"), rr.replayed, t.fwdW, t.fwdH,
+                    t.fwdShift ? " (1/2 resolution: viewport / scissor halved, R8 dummy RT0)" : "", g_sceneW, g_sceneH,
+                    inited ? "ON (mv_fwd_depth_cull 1)" : (g_fwdCullCfg ? "NOT possible for this pass (no snapshot yet)"
+                                                                         : "off (mv_fwd_depth_cull 0)"));
+            }
+        }
+    }
+    // the forward ids of the same draws (ids on) -- or their release (ids off)
+    if (g_didOn) DidFwdReplay(ctx, pass, restoreTargets, why);
+    else if (rec.PendingReplay() > 0) { t_inDlaa = true; rec.DropIds(); t_inDlaa = false; }
+    g_fwdBatchTicks += (uint64_t)(Qpc() - t0);
+}
+
+void FwdOnPassEnd(ID3D11DeviceContext* ctx) {
+    if (g_passSeq) FwdBatch(ctx, g_passSeq - 1, true, 3);
+}
+
+// v0.10.0 phase 10: called for every qualifying forward draw (ids on or off): the record (+ its pixel-shader state) is the input
+// of the pass-end forward-depth batch AND of the forward-id replay. false = not recorded (record full / no context).
+bool DidFwdOnDraw(ID3D11DeviceContext* ctx, UINT ic, UINT si, INT bv) {
+    if (!g_passSeq) return false;
+    if (g_ctx1Owner != ctx) {
+        if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
+        ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&g_ctx1);
+        g_ctx1Owner = ctx;
+    }
+    if (!g_ctx1) return false;
+    DrawIdRecord& rec = g_didFwdRing[(g_passSeq - 1) % kRing];
+    if (!rec.Forward()) rec.SetForward(true);
+    if (!rec.CapturePs() && rec.Count() == 0) rec.SetCapturePs(true);   // v0.10.0 phase 10
+    if (rec.Record(g_ctx1, ic, 1, si, bv, 0, false)) { ++g_didFwdRec; return true; }
+    ++g_didFwdRecFull;
+    return false;
+}
+
+// v0.10.0 phase 5 (Alt+F8): one forward draw of the logged pass that gets no forward depth / no id (verdict != 0 of
+// DidFwdNoteDraw), with every state field that decides it, + the per-combination summary (DidFwdSkipClose).
+static const char* const kFwdVerdict[] = { "RECORDED (gets a forward id)", "skipped: sky / cabin layer viewport",
+                                           "skipped: not over-blended without depth write", "skipped: near-camera overlay",
+                                           "skipped: no forward-depth state / target", "instanced: never re-drawn, no id" };
+void DidFwdSkipDraw(ID3D11DeviceContext* ctx, UINT ic, bool instanced, int verdict, ID3D11DepthStencilState* dss,
+                    ID3D11BlendState* bs) {
+    ++g_fwdSkipAll;
+    ID3D11DepthStencilState* d = dss;
+    UINT ref = 0;
+    if (!d) ctx->OMGetDepthStencilState(&d, &ref);
+    D3D11_DEPTH_STENCIL_DESC dd{};
+    const bool haveD = d != nullptr;
+    if (d) d->GetDesc(&dd);
+    ID3D11BlendState* b = bs;
+    FLOAT bf[4] = {}; UINT smask = 0;
+    if (!b) ctx->OMGetBlendState(&b, bf, &smask);
+    D3D11_BLEND_DESC bd{};
+    const bool haveB = b != nullptr;
+    if (b) b->GetDesc(&bd);
+    const void* dId = d; const void* bId = b;            // identities only (the refs are dropped below)
+    if (d && d != dss) d->Release();
+    if (b && b != bs) b->Release();
+    ID3D11Buffer* cb = nullptr; UINT cf = 0, cn = 0;
+    if (g_ctx1Owner == ctx && g_ctx1) g_ctx1->VSGetConstantBuffers1(0, 1, &cb, &cf, &cn);
+    UINT cbBytes = 0;
+    if (cb) { D3D11_BUFFER_DESC cd{}; cb->GetDesc(&cd); cbBytes = cd.ByteWidth; cb->Release(); }
+    const D3D11_RENDER_TARGET_BLEND_DESC& r0 = bd.RenderTarget[0];
+    const float vMin = g_gameVpN ? g_gameVp[0].MinDepth : -1.0f, vMax = g_gameVpN ? g_gameVp[0].MaxDepth : -1.0f;
+    char desc[200];
+    snprintf(desc, sizeof(desc), "viewport depth %.3f..%.3f, depth %s write %s func %d, stencil %s, blend %s src %d dest %d op %d "
+             "| alpha src %d dest %d op %d, A2C %d, write mask 0x%x",
+             (double)vMin, (double)vMax, haveD ? (dd.DepthEnable ? "on" : "off") : "default(null)",
+             haveD ? (dd.DepthWriteMask ? "ALL" : "none") : "ALL", haveD ? (int)dd.DepthFunc : (int)D3D11_COMPARISON_LESS,
+             haveD ? (dd.StencilEnable ? "on" : "off") : "off", haveB ? (r0.BlendEnable ? "on" : "off") : "off(null)",
+             haveB ? (int)r0.SrcBlend : 2, haveB ? (int)r0.DestBlend : 1, haveB ? (int)r0.BlendOp : 1,
+             haveB ? (int)r0.SrcBlendAlpha : 2, haveB ? (int)r0.DestBlendAlpha : 1, haveB ? (int)r0.BlendOpAlpha : 1,
+             haveB ? (int)bd.AlphaToCoverageEnable : 0, haveB ? (unsigned)r0.RenderTargetWriteMask : 0xFu);
+    // summary bucket: verdict + state objects + layer + instanced
+    int k = 0;
+    for (; k < g_fwdSkipComboN; ++k) {
+        const FwdSkipCombo& c = g_fwdSkipCombo[k];
+        if (c.verdict == verdict && c.dss == dId && c.bs == bId && c.inst == instanced && c.vpMin == vMin && c.vpMax == vMax) break;
+    }
+    if (k == g_fwdSkipComboN) {
+        if (g_fwdSkipComboN < kFwdSkipCombos) {
+            FwdSkipCombo& c = g_fwdSkipCombo[g_fwdSkipComboN++];
+            c.verdict = verdict; c.dss = dId; c.bs = bId; c.inst = instanced; c.vpMin = vMin; c.vpMax = vMax;
+            c.n = 0; c.icMin = ic; c.icMax = ic; c.firstLine = g_fwdSkipN + 1;
+            snprintf(c.desc, sizeof(c.desc), "%s", desc);
+        } else {
+            ++g_fwdSkipComboOver;
+            k = -1;
+        }
+    }
+    if (k >= 0) {
+        FwdSkipCombo& c = g_fwdSkipCombo[k];
+        ++c.n;
+        if (ic < c.icMin) c.icMin = ic;
+        if (ic > c.icMax) c.icMax = ic;
+    }
+    if (g_fwdSkipN >= 512) { ++g_fwdSkipCapped; return; }
+    ++g_fwdSkipN;
+    Log("MV dump fwd-skip %d (pass s=%llu): IndexCount %u%s, %s, VS cb0 %u bytes at constant %u (+%u) -> %s", g_fwdSkipN,
+        (unsigned long long)(g_passSeq - 1), ic, instanced ? " (instanced)" : "", desc, cbBytes, cf, cn,
+        kFwdVerdict[verdict >= 0 && verdict <= 5 ? verdict : 4]);
+}
+
+// The logged pass is over (the next pass start): one summary line per distinct state combination.
+void DidFwdSkipClose() {
+    if (g_fwdSkipPass == ~0ull) return;
+    Log("MV dump fwd-skip (pass s=%llu): done -- %d forward draws without a forward depth / id (%d logged%s); %d distinct state "
+        "combinations%s:", (unsigned long long)(g_fwdSkipPass - 1), g_fwdSkipAll, g_fwdSkipN,
+        g_fwdSkipCapped ? ", cap 512" : "", g_fwdSkipComboN, g_fwdSkipComboOver ? " (more than 48: the rest not grouped)" : "");
+    for (int k = 0; k < g_fwdSkipComboN; ++k) {
+        const FwdSkipCombo& c = g_fwdSkipCombo[k];
+        Log("MV dump fwd-skip combo %d/%d: %d draws, IndexCount %u..%u%s, %s -> %s (first: line %d)", k + 1, g_fwdSkipComboN,
+            c.n, c.icMin, c.icMax, c.inst ? " (instanced)" : "", c.desc, kFwdVerdict[c.verdict >= 0 && c.verdict <= 5 ? c.verdict : 4],
+            c.firstLine);
+    }
+    g_fwdSkipPass = ~0ull;
+    g_fwdSkipN = g_fwdSkipAll = g_fwdSkipCapped = g_fwdSkipComboN = g_fwdSkipComboOver = 0;
+}
+
+// v0.10.0 phase 3 diagnostic: the first 20 forward-pass draws of ONE pass after the per-draw MVs went live, with what
+// decides whether they get an id (verdict 0 = recorded, 1 = sky / cabin layer, 2 = not "over"-blended without depth write,
+// 3 = near-camera overlay, 4 = no forward-depth state, 5 = instanced: never re-drawn). The brief asked for it: a plate
+// that is instanced or has no MVP would show here.
+void DidFwdNoteDraw(ID3D11DeviceContext* ctx, UINT ic, bool instanced, int verdict, ID3D11DepthStencilState* dss,
+                    ID3D11BlendState* bs) {
+    if (verdict != 0 && g_passSeq && g_passSeq == g_fwdSkipPass) DidFwdSkipDraw(ctx, ic, instanced, verdict, dss, bs);   // phase 5
+    if (g_didFwdNoteN >= 20 || !g_passSeq) return;
+    if (g_didFwdNotePass == ~0ull) g_didFwdNotePass = g_passSeq;
+    if (g_didFwdNotePass != g_passSeq) { g_didFwdNoteN = 20; return; }   // only one pass
+    D3D11_DEPTH_STENCIL_DESC dd{};
+    bool haveD = false;
+    ID3D11DepthStencilState* d = dss;
+    UINT ref = 0;
+    if (!d) ctx->OMGetDepthStencilState(&d, &ref);
+    if (d) { d->GetDesc(&dd); haveD = true; }
+    if (d && d != dss) d->Release();
+    D3D11_BLEND_DESC bd{};
+    bool haveB = false;
+    ID3D11BlendState* b = bs;
+    FLOAT bf[4] = {}; UINT mask = 0;
+    if (!b) ctx->OMGetBlendState(&b, bf, &mask);
+    if (b) { b->GetDesc(&bd); haveB = true; }
+    if (b && b != bs) b->Release();
+    ID3D11Buffer* cb = nullptr; UINT cf = 0, cn = 0;
+    if (g_ctx1Owner == ctx && g_ctx1) g_ctx1->VSGetConstantBuffers1(0, 1, &cb, &cf, &cn);
+    UINT cbBytes = 0;
+    if (cb) { D3D11_BUFFER_DESC cd{}; cb->GetDesc(&cd); cbBytes = cd.ByteWidth; cb->Release(); }
+    const char* const* kWhy = kFwdVerdict;
+    ++g_didFwdNoteN;
+    Log("MV forward draw %d/20 (pass s=%llu): IndexCount %u%s, viewport depth %.3f..%.3f, depth %s write %s func %d, blend "
+        "%s src %d dest %d mask 0x%x, VS cb0 %u bytes at constant %u (+%u) -> %s", g_didFwdNoteN,
+        (unsigned long long)(g_passSeq - 1), ic, instanced ? " (instanced)" : "",
+        g_gameVpN ? (double)g_gameVp[0].MinDepth : -1.0, g_gameVpN ? (double)g_gameVp[0].MaxDepth : -1.0,
+        haveD ? (dd.DepthEnable ? "on" : "off") : "?", haveD ? (dd.DepthWriteMask ? "ALL" : "none") : "?",
+        haveD ? (int)dd.DepthFunc : -1, haveB ? (bd.RenderTarget[0].BlendEnable ? "on" : "off") : "?",
+        haveB ? (int)bd.RenderTarget[0].SrcBlend : -1, haveB ? (int)bd.RenderTarget[0].DestBlend : -1,
+        haveB ? (unsigned)bd.RenderTarget[0].RenderTargetWriteMask : 0u, cbBytes, cf, cn,
+        kWhy[verdict >= 0 && verdict <= 5 ? verdict : 4]);
+}
+
+void DidOnDraw(ID3D11DeviceContext* ctx, UINT ic, UINT inst, UINT si, INT bv, UINT sinst, bool instanced) {
+    if (g_ctx1Owner != ctx) {
+        if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
+        ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&g_ctx1);
+        g_ctx1Owner = ctx;
+    }
+    if (!g_ctx1) return;
+    const int64_t t0 = Qpc();
+    DrawIdRecord& rec = g_didRing[(g_passSeq - 1) % kRing];
+    if (rec.Record(g_ctx1, ic, inst, si, bv, sinst, instanced)) { ++g_didRecDraws; if (instanced) ++g_didRecInst; }
+    else ++g_didRecFull;
+    g_didTicksRec += (uint64_t)(Qpc() - t0);
+}
+
+// hkOMSetRenderTargets: the game leaves the world G-buffer (its next targets are not bound yet).
+void DidOnLeave(ID3D11DeviceContext* ctx) {
+    if (g_passSeq) DidReplay(ctx, g_passSeq - 1, false, 0);
+}
+
+// StartPass (pass s, before the game's clear runs): the previous pass's pending draws are replayed now (no G-buffer leave
+// happened since), its mirror flushed; the new slot's record starts empty.
+void DidOnPassStart(ID3D11DeviceContext* ctx, uint64_t s) {
+    if (s > 0) {
+        DrawIdRecord& prev = g_didRing[(s - 1) % kRing];
+        if (prev.PendingReplay() > 0) DidReplay(ctx, s - 1, true, 2);
+        else if (prev.Count() > 0) { t_inDlaa = true; prev.Flush(ctx); t_inDlaa = false; }
+        if (prev.Count() > 0) { ++g_didPasses; if (prev.Segments() > 1) ++g_didSegMulti; }
+        // v0.10.0 phase 3: the previous pass's forward draws (no depth discard came: replayed now)
+        DrawIdRecord& pf = g_didFwdRing[(s - 1) % kRing];
+        if (pf.PendingDepth() > 0 || pf.PendingReplay() > 0) FwdBatch(ctx, s - 1, true, 2);   // v0.10.0 phase 10: + the depth
+        else if (pf.Count() > 0) { t_inDlaa = true; pf.Flush(ctx); t_inDlaa = false; }
+        if (pf.Count() > 0) { ++g_didFwdPasses; g_didFwdOverflow += (uint64_t)pf.OverflowDraws(); }
+    }
+    // v0.10.0 phase 5 (Alt+F8): the logged forward pass is over -> its summary; an armed request logs this new pass
+    if (g_fwdSkipPass != ~0ull && g_fwdSkipPass != s + 1) DidFwdSkipClose();
+    if (g_fwdSkipArm) { g_fwdSkipArm = false; g_fwdSkipPass = s + 1; }   // = g_passSeq during pass s
+    g_didRing[s % kRing].Reset();
+    g_didFwdRing[s % kRing].Reset();
+    g_didFwdRing[s % kRing].SetForward(true);
+    g_didFwdRing[s % kRing].SetCapturePs(true);          // v0.10.0 phase 10: the forward-depth batch re-draws from it
+    g_didForcedPass = 0;
+    g_didFwdForcedPass = 0;
+}
+
+// OnDepthDiscard (before the discard runs): a pass that ends without a G-buffer leave is replayed while the depth exists.
+// v0.10.0 phase 10: the forward draws are no longer replayed here -- FwdOnPassEnd (after the snapshot) re-draws their depth in one
+// batch and then replays their ids.
+void DidOnDepthDiscard(ID3D11DeviceContext* ctx) {
+    if (g_passSeq && g_didRing[(g_passSeq - 1) % kRing].PendingReplay() > 0) DidReplay(ctx, g_passSeq - 1, true, 3);
+}
+
+// hkMap WRITE_DISCARD (game context, not our work): a buffer a pending draw reads is about to get new contents.
+void DidOnDiscardMap(ID3D11DeviceContext* ctx, ID3D11Resource* r) {
+    if (!g_passSeq) return;
+    DrawIdRecord& rec = g_didRing[(g_passSeq - 1) % kRing];
+    if (rec.PendingReplay() > 0 && rec.ReferencesPending(r)) {
+        if (g_didForcedPass < kDidForcedMax) {
+            ++g_didForcedPass; ++g_didForced;
+            if (g_didForced <= 3)
+                Log("MV draw-ids: a buffer read by recorded G-buffer draws is WRITE_DISCARDed before their replay (pass "
+                    "s=%llu, %d pending) -- replaying them now (forced replay %llu)", (unsigned long long)(g_passSeq - 1),
+                    rec.PendingReplay(), (unsigned long long)g_didForced);
+            DidReplay(ctx, g_passSeq - 1, true, 1);
+        } else {
+            ++g_didForcedCapped;
+        }
+    }
+    if (rec.HasOpenRing(r)) { t_inDlaa = true; rec.OnDiscard(ctx, r); t_inDlaa = false; }
+    // v0.10.0 phase 3: the same for the pending forward draws (replayed into the forward ids first)
+    // v0.10.0 phase 10: their forward depth too (FwdBatch: the depth batch of the pending draws, then their ids); the pixel
+    // shader's cbuffers / SRVs are in the pending set as well
+    DrawIdRecord& fr = g_didFwdRing[(g_passSeq - 1) % kRing];
+    if (fr.PendingReplay() > 0 && fr.ReferencesPending(r)) {
+        if (g_didFwdForcedPass < kDidForcedMax) {
+            ++g_didFwdForcedPass; ++g_didFwdForced;
+            FwdBatch(ctx, g_passSeq - 1, true, 1);
+        } else {
+            ++g_didFwdForcedCapped;
+        }
+    }
+    if (fr.HasOpenRing(r)) { t_inDlaa = true; fr.OnDiscard(ctx, r); t_inDlaa = false; }
+}
+
+void DidOnContextReset() {
+    for (DrawIdRecord& r : g_didRing) r.Reset();
+    for (DrawIdRecord& r : g_didFwdRing) r.Reset();       // v0.10.0 phase 3
+    g_didFwdForcedPass = 0;
+    g_didFwdReplayTimer.Reset();
+    g_fwdBatchTimer.Reset();                              // v0.10.0 phase 10
+    if (g_didRoDsv) { g_didRoDsv->Release(); g_didRoDsv = nullptr; }
+    g_didRoDsvTex = nullptr;
+    g_didForcedPass = 0;
+    g_didReplayTimer.Reset();
+    DrawIdRecord::ShutdownDevice();                       // recreated on the new device at the next replay
+}
+
+// " | ..." for the "MV draw-ids @blit" line; restarts the window. Eye 0's unit (flat: the only one) for the GPU side.
+void DidStatsTag(char* buf, size_t cap, uint64_t passes) {
+    static DrawIdMv::Stats s0;
+    const double qf = g_qpcFreq > 0 ? (double)g_qpcFreq : 1.0;
+    const double p = passes ? (double)passes : 1.0;
+    DrawIdMv& u = g_dlaa[0].Mv().DrawIds();
+    const DrawIdMv::Stats& s = u.GetStats();
+    double rAvg = 0, rMax = 0, pAvg = 0, pMax = 0, bAvg = 0, bMax = 0;
+    uint64_t rN = 0, pN = 0, bN = 0;
+    g_didReplayTimer.Take(&rAvg, &rMax, &rN);
+    u.PairTimer().Take(&pAvg, &pMax, &pN);
+    u.PassBTimer().Take(&bAvg, &bMax, &bN);
+    const double fr = s.frames > s0.frames ? (double)(s.frames - s0.frames) : 0.0;
+    const double frd = fr > 0 ? fr : 1.0;
+    const double rb = s.rbFrames > s0.rbFrames ? (double)(s.rbFrames - s0.rbFrames) : 0.0;
+    const double rbd = rb > 0 ? rb : 1.0;
+    const uint64_t stD[6] = { 0, s.st[1] - s0.st[1], s.st[2] - s0.st[2], s.st[3] - s0.st[3], s.st[4] - s0.st[4],
+                              s.st[5] - s0.st[5] };
+    const uint64_t elig = stD[1] + stD[2] + stD[3];
+    const uint64_t wpx = s.worldPx - s0.worldPx;
+    const double wpxd = wpx ? (double)wpx : 1.0;
+    snprintf(buf, cap, " | %s, %s | record: %.0f draws/pass (%.1f instanced), %.1f full/pass, CPU %.3f ms/pass | replay: "
+             "%.0f draws/pass, %.0f skipped (instanced / no MVP), multi-segment passes %llu, end-of-pass replays %llu, "
+             "forced %llu (capped %llu), no target %llu, CPU %.3f ms/pass, GPU %.3f ms avg / %.3f max (%llu timed) | "
+             "pairing (eye 0, %.0f frames, %.0f read back): paired %.1f %% of %.0f draws/frame (movers %.1f, static %.1f, "
+             "unpaired %.1f, instanced %.1f, no-MVP %.1f), via the pointer-free key %.1f draws/frame (%.1f paired), no "
+             "partner group %.1f/frame, oversized groups %.1f/frame, unconfirmed tracks %.1f/frame, frames < 50 %% paired %llu, "
+             "CPU %.3f ms/frame, GPU "
+             "%.3f ms avg / %.3f max | pass B GPU %.3f ms avg / %.3f max | id coverage %.1f %% of world px (movers %.2f %%, "
+             "unpaired %.2f %%)",
+             g_didOn ? "ACTIVE" : "inactive", g_didHooked.load() ? "instanced hooked" : "instanced NOT hooked",
+             (double)g_didRecDraws / p, (double)g_didRecInst / p, (double)g_didRecFull / p,
+             (double)g_didTicksRec * 1000.0 / qf / p,
+             (double)g_didReplayed / p, (double)g_didSkipped / p, (unsigned long long)g_didSegMulti,
+             (unsigned long long)g_didEndReplays, (unsigned long long)g_didForced, (unsigned long long)g_didForcedCapped,
+             (unsigned long long)g_didNoTarget, (double)g_didTicksReplay * 1000.0 / qf / p, rAvg, rMax,
+             (unsigned long long)rN,
+             fr, rb, elig ? 100.0 * (double)(stD[2] + stD[3]) / (double)elig : 0.0,
+             (double)(s.draws - s0.draws) / frd, (double)stD[3] / rbd, (double)stD[2] / rbd, (double)stD[1] / rbd,
+             (double)stD[4] / rbd, (double)stD[5] / rbd, (double)(s.looseDraws - s0.looseDraws) / frd,
+             (double)(s.loosePaired - s0.loosePaired) / rbd, (double)(s.noGroup - s0.noGroup) / frd,
+             (double)(s.bigGroup - s0.bigGroup) / frd, (double)(s.trackRejects - s0.trackRejects) / rbd,
+             (unsigned long long)(s.lowPairFrames - s0.lowPairFrames),
+             (double)(s.cpuTicks - s0.cpuTicks) * 1000.0 / qf / frd, pAvg, pMax, bAvg, bMax,
+             100.0 * (double)(s.idPx - s0.idPx) / wpxd, 100.0 * (double)(s.moverPx - s0.moverPx) / wpxd,
+             100.0 * (double)(s.unpairedPx - s0.unpairedPx) / wpxd);
+    // v0.10.0 phase 3: consensus camera R (eye 0) + forward-pass ids
+    {
+        const size_t used = strlen(buf);
+        const uint64_t cF = s.consFrames[0] - s0.consFrames[0], cB = s.consFallback[0] - s0.consFallback[0];
+        const uint64_t cN = s.consCluster[0] - s0.consCluster[0], dF = s.consDisFrames[0] - s0.consDisFrames[0];
+        const uint64_t dO = s.consDisOver1[0] - s0.consDisOver1[0];
+        const uint64_t cNv = s.consNearVoters - s0.consNearVoters;
+        const double dS = s.consDisSum[0] - s0.consDisSum[0];
+        const uint64_t kF = s.consFrames[1] - s0.consFrames[1], kB = s.consFallback[1] - s0.consFallback[1];
+        const double dMax = (double)u.TakeConsDisMax(0), kMax = (double)u.TakeConsDisMax(1);
+        const double fp = g_didFwdPasses ? (double)g_didFwdPasses : 1.0;
+        double fAvg = 0, fMax = 0; uint64_t fN = 0;
+        g_didFwdReplayTimer.Take(&fAvg, &fMax, &fN);
+        const uint64_t fwdPx = s.fwdPx - s0.fwdPx;
+        const double fwdPxd = fwdPx ? (double)fwdPx : 1.0;
+        if (used < cap)
+            snprintf(buf + used, cap - used, " | camR (eye 0): consensus %llu / medoid fallback %llu frames (%llu with near "
+                     "voters), cluster avg %.0f draws, |consensus - medoid| avg %.3f / max %.3f px (%llu compared, %llu frames > 1 "
+                     "px); cabin: consensus "
+                     "%llu / fallback %llu, |c - m| max %.3f px | forward ids (%s): recorded %.1f/pass (%.1f full), replayed "
+                     "%.1f/pass, id overflow %llu, forced %llu (capped %llu), no target %llu, CPU %.3f ms/pass, GPU %.3f ms "
+                     "avg / %.3f max | forward pairing (eye 0): %.1f draws/frame in the table, paired %.1f, movers %.1f, "
+                     "records dropped %llu | forward px (forward depth won) with a forward id %.1f %% (movers %.2f %%), %.0f "
+                     "forward px/frame (1-in-64 estimate), instanced forward draws %llu | attach (mv_fwd_attach_m %.2f): "
+                     "forward draws on a G-buffer mover's origin took its R %.2f/frame, kept their own (agreed) %.2f/frame; "
+                     "forward px on a mover's surface that took its R %.2f %% of forward px | dumps %llu",
+                     (unsigned long long)cF, (unsigned long long)cB, (unsigned long long)cNv, cF ? (double)cN / (double)cF : 0.0,
+                     dF ? dS / (double)dF : 0.0, dMax, (unsigned long long)dF, (unsigned long long)dO,
+                     (unsigned long long)kF, (unsigned long long)kB, kMax,
+                     (g_fwdCfg && g_fwdOn.load()) ? "on" : "off (mv_fwd_depth 0 / Ctrl+F3)",
+                     (double)g_didFwdRec / fp, (double)g_didFwdRecFull / fp, (double)g_didFwdReplayed / fp,
+                     (unsigned long long)g_didFwdOverflow, (unsigned long long)g_didFwdForced,
+                     (unsigned long long)g_didFwdForcedCapped, (unsigned long long)g_didFwdNoTarget,
+                     (double)g_didFwdTicks * 1000.0 / qf / fp, fAvg, fMax,
+                     (double)(s.fwdDraws - s0.fwdDraws) / frd, (double)(s.fwdPaired - s0.fwdPaired) / rbd,
+                     (double)(s.fwdMovers - s0.fwdMovers) / rbd, (unsigned long long)(s.fwdDropped - s0.fwdDropped),
+                     100.0 * (double)(s.fwdIdPx - s0.fwdIdPx) / fwdPxd, 100.0 * (double)(s.fwdMoverPx - s0.fwdMoverPx) / fwdPxd,
+                     (double)fwdPx * 64.0 / rbd, (unsigned long long)g_didFwdInst,
+                     (double)DrawIdMv::AttachM(), (double)(s.fwdAttached - s0.fwdAttached) / rbd,   // v0.10.0 phase 4
+                     (double)(s.fwdAttachKept - s0.fwdAttachKept) / rbd,
+                     100.0 * (double)(s.fwdAttachPx - s0.fwdAttachPx) / fwdPxd, (unsigned long long)s.dumps);
+        // v0.10.0 phase 5: unpaired draws that inherited their matrix twin's R / a G-buffer mover's R by origin
+        const size_t used2 = strlen(buf);
+        const uint64_t tL = s.twinLookups - s0.twinLookups, tT = s.twins - s0.twins, tM = s.twinMovers - s0.twinMovers;
+        const uint64_t tF = s.twinFwd - s0.twinFwd, gA = s.gbufAttached - s0.gbufAttached;
+        const uint64_t left = tL > tT + gA ? tL - tT - gA : 0;
+        if (used2 < cap)
+            snprintf(buf + used2, cap - used2, " | twin: inherited %.2f/frame (movers %.2f, forward %.2f) of %.2f unpaired/frame "
+                     "(mv_drawid_twin %d); G-buffer origin attach %.2f/frame (mv_fwd_attach_m %.2f, same orientation); left "
+                     "unpaired %.2f/frame", (double)tT / rbd, (double)tM / rbd, (double)tF / rbd, (double)tL / rbd,
+                     (int)DrawIdMv::Twin(), (double)gA / rbd, (double)DrawIdMv::AttachM(), (double)left / rbd);
+        // v0.10.0 phase 6: unpaired draws that took their rigid parent's R (the pixel-neighbour vote)
+        const size_t used3 = strlen(buf);
+        const uint64_t pL = s.parListed - s0.parListed, pO = s.parOver - s0.parOver, pN = s.parents - s0.parents;
+        // v0.10.0 phase 6c: "no parent" = every draw that took part (genuine unpaired + instanced/no-MVP listed + over the cap)
+        // minus the parents (phase 6/6b counted only the genuine ones, so "inherited" could exceed "of ... unpaired"); "no votes"
+        // split into no source within the march reach / depth-rejected; avg votes over all listed draws; marched avg px
+        const uint64_t pI = s.parInstListed - s0.parInstListed, pU = pL + pO, pAll = pL + pI + pO, pK = pAll > pN ? pAll - pN : 0;
+        const uint64_t pM = s.parMarches - s0.parMarches;
+        if (used3 < cap)
+            snprintf(buf + used3, cap - used3, " | parent: inherited %.2f/frame (movers %.2f) of %.2f unpaired + %.2f instanced/no-MVP "
+                     "listed, no parent %.2f/frame (mv_drawid_parent %d; forward %.2f, 2nd pass via a listed neighbour %.2f; no votes "
+                     "(no source within 32 px) %.2f, depth-rejected %.2f, no majority %.2f, no pixel sampled (hidden / sub-pixel) "
+                     "%.2f, over the 64 cap %.2f; avg %.1f votes per "
+                     "listed draw, marched avg %.1f px over %.0f marches/frame (%.0f depth-rejected, %.0f without a source)); overrode "
+                     "a twin / origin attach %.2f/frame (%.2f with another "
+                     "state); left at the camera R %.2f/frame (+ over the cap); twin lookups skipped (MVP = projection only) "
+                     "%.2f/frame; instanced/no-MVP with a parent %.2f/frame (of %.2f listed, %.2f with pixels; mv_drawid_instanced "
+                     "%d)", (double)pN / rbd, (double)(s.parMovers - s0.parMovers) / rbd, (double)pU / rbd, (double)pI / rbd,
+                     (double)pK / rbd, (int)DrawIdMv::Parent(), (double)(s.parFwd - s0.parFwd) / rbd,
+                     (double)(s.parChain - s0.parChain) / rbd, (double)(s.parNoVotes - s0.parNoVotes) / rbd,
+                     (double)(s.parDepthRej - s0.parDepthRej) / rbd,
+                     (double)(s.parNoWinner - s0.parNoWinner) / rbd, (double)(s.parNoPixel - s0.parNoPixel) / rbd,
+                     (double)pO / rbd, (pL + pI) ? (double)(s.parVotes - s0.parVotes) / (double)(pL + pI) : 0.0,
+                     pM ? (double)(s.parMarchPx - s0.parMarchPx) / (double)pM : 0.0, (double)pM / rbd,
+                     (double)(s.parRejMarches - s0.parRejMarches) / rbd, (double)(s.parNoSrcMarches - s0.parNoSrcMarches) / rbd,
+                     (double)(s.parOverrode - s0.parOverrode) / rbd, (double)(s.parOverrodeDiff - s0.parOverrodeDiff) / rbd,
+                     (double)(s.parLeft - s0.parLeft) / rbd, (double)(s.twinViewSkip - s0.twinViewSkip) / rbd,
+                     (double)(s.parInst - s0.parInst) / rbd, (double)(s.parInstListed - s0.parInstListed) / rbd,
+                     (double)(s.parInstVis - s0.parInstVis) / rbd, (int)g_didInstancedCfg);
+        if (dO > 30)
+            Log("MV camera R: WARNING the medoid camera R (pass A) was off by > 1 px in %llu of %llu compared frames of this "
+                "window (avg %.3f px, max %.3f px) -- the consensus camera R replaced it in %llu frames", (unsigned long long)dO,
+                (unsigned long long)dF, dF ? dS / (double)dF : 0.0, dMax, (unsigned long long)cF);
+    }
+    // v0.10.0 phase 14: the static replay skip (mv_replay_static_frames / _every) -- the 'replay' figure of the perf eye line is
+    // the proof of its gain
+    {
+        const size_t used4 = strlen(buf);
+        static uint64_t clr0[DrawIdMv::kStatClrN] = {};
+        uint64_t clr[DrawIdMv::kStatClrN];
+        for (int w = 0; w < DrawIdMv::kStatClrN; ++w) { clr[w] = DrawIdMv::StaticClears(w) - clr0[w]; clr0[w] = DrawIdMv::StaticClears(w); }
+        int atThr = 0, held = 0;
+        const int keys = DrawIdMv::StaticKeys(&atThr, &held);
+        const uint64_t fd = s.statFeeds - s0.statFeeds;
+        const double fdd = fd ? (double)fd : 1.0;
+        // round 6: instanced draws per readback by instance count as the shaders saw them (all / 1 / 2..4)
+        uint64_t instAll = 0, inst24 = 0;
+        for (int q = 0; q < 8; ++q) instAll += s.instHist[q] - s0.instHist[q];
+        for (int q = 2; q <= 4; ++q) inst24 += s.instHist[q] - s0.instHist[q];
+        float ofd[5];                                     // round 7: max |x| |y| |w| of the origin-free draws, min mover |w|,
+        u.TakeOriginDiag(ofd);                            //   the nearest lateral miss (-1 = none)
+        if (used4 < cap)
+            snprintf(buf + used4, cap - used4, " | static skip (mv_replay_static_frames %u, mv_replay_static_every %u): replay: drawn "
+                     "%.0f / skipped %.0f per pass (static table %d keys, re-check every %u); %d keys at the %u-frame streak, %d held "
+                     "as a rigid parent; eye 0 verdicts: %.0f world draws/readback, %.0f deep static (eps %.3f px), %.1f moving (of them "
+                     "%.1f static within the snap but not deep), %.0f without a "
+                     "partner (neutral), %.2f rigid parents (%llu readbacks); rigid-parent vote: plate holds %.2f/frame, moving parents refused "
+                     "by the temporal check %.2f/frame / to clutter batches %.2f/frame; round 6: camera-relative (origin-free MVP) "
+                     "paired draws held static %.1f/frame, instanced draws %.1f/frame (1 instance %.1f, 2..4 %.1f; more than 1 = "
+                     "never a parent); round 7 origin-free split: depth ok (|w| <= 0.20 m) but lateral over 0.50 clip %.1f/frame "
+                     "(nearest lateral miss max(|x|,|y|) %.4f), origin-free max |x| %.5f |y| %.5f |w| %.5f, own-pair movers with "
+                     "origin |w| < 0.5 m %.1f/frame (min mover |w| %.4f m); table "
+                     "clears: history %llu, camera R %llu, record %llu, "
+                     "FIFO %llu, config %llu",
+                     DrawIdMv::ReplayStaticFrames(), DrawIdMv::ReplayStaticEvery(), (double)g_didReplayed / p,
+                     (double)g_didStaticSkipped / p, keys, DrawIdMv::ReplayStaticEvery(), atThr, DrawIdMv::ReplayStaticFrames(),
+                     held, (double)(s.statDraws - s0.statDraws) / fdd, (double)(s.statStatic - s0.statStatic) / fdd,
+                     (double)DrawIdMv::ReplayStaticEps(),
+                     (double)(s.statMoving - s0.statMoving) / fdd, (double)(s.statShallow - s0.statShallow) / fdd,
+                     (double)(s.statNeutral - s0.statNeutral) / fdd,
+                     (double)(s.statParents - s0.statParents) / fdd, (unsigned long long)fd,
+                     (double)(s.parHolds - s0.parHolds) / rbd, (double)(s.parVetoes - s0.parVetoes) / rbd,   // round 4
+                     (double)(s.parClutter - s0.parClutter) / rbd,
+                     (double)(s.originFree - s0.originFree) / rbd, (double)instAll / rbd,                     // round 6
+                     (double)(s.instHist[1] - s0.instHist[1]) / rbd, (double)inst24 / rbd,
+                     (double)(s.originDepthOnly - s0.originDepthOnly) / rbd, (double)ofd[4],                // round 7
+                     (double)ofd[0], (double)ofd[1], (double)ofd[2],
+                     (double)(s.originMoverNear - s0.originMoverNear) / rbd, (double)ofd[3],
+                     (unsigned long long)clr[DrawIdMv::kStatClrHistory], (unsigned long long)clr[DrawIdMv::kStatClrCamR],
+                     (unsigned long long)clr[DrawIdMv::kStatClrRecord], (unsigned long long)clr[DrawIdMv::kStatClrFifo],
+                     (unsigned long long)clr[DrawIdMv::kStatClrConfig]);
+    }
+    s0 = s;
+    g_didRecDraws = g_didRecInst = g_didRecFull = g_didReplayed = g_didSkipped = g_didPasses = 0;
+    g_didSegMulti = g_didForced = g_didForcedCapped = g_didEndReplays = g_didNoTarget = 0;
+    g_didTicksRec = g_didTicksReplay = 0;
+    g_didStaticSkipped = 0;                               // v0.10.0 phase 14
+    g_didFwdRec = g_didFwdRecFull = g_didFwdReplayed = g_didFwdOverflow = g_didFwdPasses = 0;   // v0.10.0 phase 3
+    g_didFwdForced = g_didFwdForcedCapped = g_didFwdNoTarget = g_didFwdTicks = g_didFwdInst = 0;
+}
+
+// ---- v0.10.0 phase 2: MIRROR UNITS (dlaa.ini mirror_dlaa = 1, the default) -----------------------------------------------
+// WHY: the truck mirrors (ATS: also the car mirrors) are separate small views the game renders every frame BEFORE the main
+// scene, each a complete miniature deferred render (captures/mirror_dlaa_plan.md, RenderDoc ets2_flat_frame1969.rdc):
+// clear -> 4-RTV G-buffer (RGBA16F x3 + RGBA16_UINT, its OWN D32S8 depth, world layer [0.01, 0.9], ~150-750 draws, the
+// MVP in VS cb0 rows 4..7 like the main pass) -> lighting (2 RTVs) -> forward (1 RTV RGBA16F, sky + world layers) ->
+// DiscardView of its depth -> a 256^2 down-sample of the RGBA16F forward colour. Since v0.8.2 they were left alone and were
+// the one large area without anti-aliasing (shimmer). Sizes and counts vary (ETS2 flat: 512x1024 x2, 512x512, 512x256;
+// ATS cars: 2048x512, 1024x512): nothing here hardcodes a size.
+// HOW (render thread, game context only, never for our own work; nothing here touches g_sceneDepth, the pass FIFO, the
+// eye map or the main DLAA units -- the mirror units are self-contained, so the eye identity does not matter for them):
+//  * MirOnBind (hkOMSetRenderTargets, before the game's bind goes through): a 4-RTV bind with the mirror G-buffer shape
+//    (MirIsGbuf) starts a VIEW and gets a UNIT (MirBeginView): the unit whose last view had the same (RT0, depth, size,
+//    occurrence of that pair within the frame); else the unit that had the same size + the same order among the views of
+//    that size LAST frame (re-home: the pool moved it to other textures; history reset); else a free unit; else the least
+//    recently used one (history reset); else the view is left to the game ("not handled", mirror_max_views). The
+//    occurrence splits one pooled RT rendered twice per frame (two mirrors of one size, VR eyes) into separate units, so
+//    no unit's history alternates between two cameras.
+//  * Jitter: the view's G-buffer and its 1-RTV RGBA16F forward pass on the same depth are shifted by the unit's own Halton
+//    phase (ReconcileViewports, g_mirJit); never the lighting pass or the down-sample.
+//  * Its G-buffer draws (hkDrawIndexed / DrawIndexedInstanced while g_mirGbuf): the unit's camera candidates
+//    (CollectMvCandidate, world layer) and its DrawIdRecord. The G-buffer LEAVE replays them into the unit's R16_UINT
+//    draw-id target against a read-only DSV of the MIRROR depth -- the phase-1 per-draw path: the own trailer / truck are
+//    static relative to the mirror camera and get R ~ identity while the world moves. hkMap WRITE_DISCARD of a buffer the
+//    pending draws read -> forced replay (kMirForcedMax per view) + ring flush / seal, as for the main pass.
+//  * The view's DiscardView of its depth (MirOnDiscard) -> MirEndView: depth snapshot into the unit's twin + MirFlush =
+//    SceneDlaa::Run IN PLACE on the forward colour (an HDR unit: RGBA16F colour, NGX IsHDR unless dlss_hdr = 0; output =
+//    input size), before the game's down-sample reads it. Fallbacks (logged, counted "late"): a ClearDSV of its depth, the
+//    next mirror / scene G-buffer bind, the frame boundary.
+//  * History reset: the unit's first run, a re-home / take-over / size change, a frame in which it did not run (throttled
+//    mirrors), MvInvalidate (DLAA / MV keys), the mirror key.
+//  * Ctrl+F6: every handled mirror shows the MV debug view (hue per draw, magenta movers) inside a frame in its unit's
+//    colour (MirDebugFrame); a mirror without the frame is not handled.
+// COST: DLAA scales with the pixel count -- the ETS2 flat set (~1.4 MP) is about a fifth of a 2880x2160 main pass; VR
+// renders the views per eye. Per-unit GPU ms (DLAA incl. the depth snapshot; the replay) in the "mirror units @blit" line;
+// a unit above kMirBudgetMs per view gets a WARNING line and keeps running.
+constexpr int      kMirCap         = 16;           // unit array (dlaa.ini mirror_max_views 1..16, default 8)
+constexpr int      kMirSeenCap     = 32;           // views remembered per frame (occurrence / size order)
+constexpr int      kMirForcedMax   = 2;            // forced (hkMap) replays per view
+constexpr uint64_t kMirStaleFrames = 120;          // a unit without a view for this long drops its refs on game textures
+constexpr double   kMirBudgetMs    = 1.0;          // GPU ms per view (DLAA + snapshot) above -> WARNING (never dropped)
+constexpr int      kMirFailWarn    = 60;           // failed Runs in a row -> WARNING
+struct MirUnit {
+    SceneDlaa    dl;                               // log tag "eye 20 + unit"
+    PassSlot     ps;                               // depth twin (+ draw-id target) + camera candidates + collector counters
+    DrawIdRecord rec;                              // this view's G-buffer draws (per-draw motion vectors)
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> rt0, depth;   // identity of its last view (G-buffer RT0, own depth), refs held
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> color;        // this view's forward colour (the texture DLAA runs on)
+    Microsoft::WRL::ComPtr<ID3D11DepthStencilView> roDsv; // read-only view of `depth` (the draw-id replay)
+    const void* roDsvTex = nullptr;                // the depth it was made for (identity)
+    UINT     w = 0, h = 0;
+    int      occ = 0, sord = 0;                    // occurrence of (rt0, depth) / order among views of this size, in its frame
+    uint64_t viewFrame = 0;                        // g_frames of its last view
+    uint64_t lastRunFrame = 0, epoch = 0, runs = 0;
+    uint32_t phaseCtr = 0;
+    int      phase = 0;
+    float    jx = 0.0f, jy = 0.0f;                 // this view's viewport shift (px)
+    bool     jitOn = false;                        // this view is jittered
+    bool     used = false;                         // ever given a view
+    bool     open = false;                         // its view is open (G-buffer bound .. depth discard)
+    bool     fwdSeen = false, lightSeen = false;
+    bool     resetPending = true;                  // the next Run drops the history (new / re-homed / taken over)
+    bool     inited = false, unsupported = false;
+    bool     altSkip = false;                      // v0.10.0 phase 8 (mirror_vr_mode 3): this view is the unit's off frame
+    int      forcedView = 0;                       // forced replays in this view
+    int      failRun = 0;                          // failed Runs in a row
+    UINT     failW = 0, failH = 0;                 // a size whose unit build failed (InitFailed): no jitter, no retry there
+    // Ctrl+F6 frame strips in the unit's colour (MirDebugFrame)
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> dbgH, dbgV;
+    UINT     dbgW = 0, dbgHt = 0, dbgT = 0;
+    // stats window (MirStatsLog) + totals
+    uint64_t sViews = 0, sOk = 0, sFail = 0, sDeferred = 0, sResets = 0, sRehome = 0, sSteal = 0, sLate = 0;
+    uint64_t sNoColor = 0, sSnap = 0, sNoSnap = 0, sJit = 0, sCand = 0, sFwd2 = 0;
+    uint64_t sRecDraws = 0, sRecFull = 0, sReplayed = 0, sSkipped = 0, sForced = 0, sForcedCapped = 0, sNoTarget = 0;
+    uint64_t tOk = 0, tFail = 0;
+    GpuSpanTimer gpuRun, gpuReplay;
+    DrawIdMv::Stats ds0;                           // its DrawIdMv statistics at the window start
+    // DLL unload / process exit: the refs on the game's textures (and the view on one) are left alone, never Released
+    // there -- the same rule as ~DrawIdRecord (the game's device may be gone by then)
+    ~MirUnit() { rt0.Detach(); depth.Detach(); color.Detach(); roDsv.Detach(); }
+};
+MirUnit          g_mir[kMirCap];
+struct MirSeen { const void* rt0; const void* depth; UINT w, h; };
+MirSeen          g_mirSeen[kMirSeenCap];           // the views of the current frame (occurrence / size order)
+int              g_mirSeenN = 0;
+uint64_t         g_mirFrame = ~0ull;               // g_frames g_mirSeen belongs to
+uint64_t         g_mirEpoch = 1;                   // bumped by MirInvalidate: every unit resets its history at its next run
+// stats window (MirStatsLog) + one-time / capped log lines
+uint64_t         g_mirWinViews = 0, g_mirWinFrames = 0, g_mirWinPresents = 0, g_mirWinCap = 0;
+bool             g_mirActiveLogged = false, g_mirCapLogged = false, g_mirFirstReplayLogged = false;
+int              g_mirAssignLogs = 0, g_mirLateLogs = 0, g_mirFirstOkLogs = 0, g_mirRoFailLogs = 0, g_mirBudgetLogs = 0;
+
+// v0.10.0 phase 9: mirror_vr_mode 4 (VR) = every view keeps DLAA, without per-draw motion vectors (no record / replay / pairing:
+// the unit's camera R = the medoid of its camera candidates) -- the cheapest DLAA mirror
+int MirMode() { return g_vrMode ? g_mirVrMode : g_mirFlatMode; }   // v0.10.0 phase 10
+inline bool MirIdsOff() { return MirMode() == 4; }
+// v0.10.0 phase 9 (mirror_vr_mode 2): the views this frame handles = the mirror_vr_views largest of the previous frame
+struct MirSel { UINT w, h; int sord; };
+constexpr int    kMirSelCap = 8;
+MirSel           g_mirSel[kMirSelCap];
+int              g_mirSelN = 0, g_mirSelUsed = 0;
+inline bool MirPathLive() {
+    if (MirMode() == 0) return false;                    // v0.10.0 phase 8: mirror_vr_mode 0 = no mirror units in VR (10: flat too)
+    return g_mirOn.load(std::memory_order_relaxed) && g_dlaaOn.load(std::memory_order_relaxed) &&
+           !g_passive.load(std::memory_order_relaxed) && !g_gameDeviceChanged.load(std::memory_order_relaxed) &&
+           ShaderCache::Done();
+}
+
+// The mirror G-buffer shape (see the block comment). rt0 / depth come back with a ref.
+bool MirIsGbuf(UINT n, ID3D11RenderTargetView* const* rtvs, ID3D11Resource* depthRes,
+               Microsoft::WRL::ComPtr<ID3D11Texture2D>& rt0, Microsoft::WRL::ComPtr<ID3D11Texture2D>& depth, UINT* w,
+               UINT* h) {
+    if (n != 4 || !rtvs || !depthRes || depthRes == (ID3D11Resource*)g_sceneDepth) return false;
+    for (UINT i = 0; i < 4; ++i) {
+        if (!rtvs[i]) return false;
+        D3D11_RENDER_TARGET_VIEW_DESC rd{};
+        rtvs[i]->GetDesc(&rd);
+        const DXGI_FORMAT want = i < 3 ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R16G16B16A16_UINT;
+        if (rd.ViewDimension != D3D11_RTV_DIMENSION_TEXTURE2D || rd.Format != want) return false;
+    }
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> dt;
+    if (FAILED(depthRes->QueryInterface(__uuidof(ID3D11Texture2D), (void**)dt.GetAddressOf())) || !dt) return false;
+    D3D11_TEXTURE2D_DESC dd{};
+    dt->GetDesc(&dd);
+    if ((dd.Format != DXGI_FORMAT_D32_FLOAT_S8X24_UINT && dd.Format != DXGI_FORMAT_R32G8X24_TYPELESS) ||
+        dd.SampleDesc.Count != 1 || dd.MipLevels != 1 || dd.ArraySize != 1) return false;
+    if ((int)dd.Width < g_mirMinPx || (int)dd.Height < g_mirMinPx) return false;
+    // a screen-shaped (flat) or scene-shaped view >= 1024 wide is a scene candidate (a resolution / Scaling change that
+    // InspectDepth adopts after its 30-frame expiry), not a mirror
+    if (dd.Width >= 1024 && SdAspectClass(dd.Width, dd.Height) == 1) return false;
+    if (dd.Width >= 1024 && g_sceneW && g_sceneH) {
+        const double a = (double)dd.Width / (double)dd.Height, s = (double)g_sceneW / (double)g_sceneH;
+        if (std::fabs(a - s) <= 0.02 * s) return false;
+    }
+    Microsoft::WRL::ComPtr<ID3D11Resource> rr;
+    rtvs[0]->GetResource(&rr);
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> rt;
+    if (!rr || FAILED(rr.As(&rt)) || !rt) return false;
+    D3D11_TEXTURE2D_DESC td{};
+    rt->GetDesc(&td);
+    if (td.Width != dd.Width || td.Height != dd.Height || td.SampleDesc.Count != 1) return false;
+    rt0 = rt; depth = dt; *w = dd.Width; *h = dd.Height;
+    return true;
+}
+
+// A new mirror view (its G-buffer bind): pick its unit, start the unit's view (record, candidates, jitter).
+void MirBeginView(const Microsoft::WRL::ComPtr<ID3D11Texture2D>& rt0, const Microsoft::WRL::ComPtr<ID3D11Texture2D>& depth,
+                  UINT w, UINT h) {
+    const uint64_t fr = g_frames.load(std::memory_order_relaxed);
+    if (fr != g_mirFrame) {
+        // v0.10.0 phase 9 (mirror_vr_mode 2): the mirror_vr_views largest views of the frame that just ended (by area; equal areas
+        // in their order) are the ones this frame handles -- identified by (size, order among the views of that size)
+        if (MirMode() == 2 && g_mirSeenN > 0) {
+            g_mirSelN = 0;
+            bool taken[kMirSeenCap] = {};
+            const int want = g_mirVrViews < 1 ? 1 : (g_mirVrViews > kMirSelCap ? kMirSelCap : g_mirVrViews);
+            for (int k = 0; k < want; ++k) {
+                int best = -1;
+                for (int i = 0; i < g_mirSeenN; ++i)
+                    if (!taken[i] && (best < 0 || g_mirSeen[i].w * g_mirSeen[i].h > g_mirSeen[best].w * g_mirSeen[best].h))
+                        best = i;
+                if (best < 0) break;
+                taken[best] = true;
+                int so = 0;
+                for (int i = 0; i < best; ++i) if (g_mirSeen[i].w == g_mirSeen[best].w && g_mirSeen[i].h == g_mirSeen[best].h) ++so;
+                g_mirSel[g_mirSelN++] = { g_mirSeen[best].w, g_mirSeen[best].h, so };
+            }
+        }
+        g_mirFrame = fr; g_mirSeenN = 0; g_mirSelUsed = 0;
+    }
+    int occ = 0, sord = 0;
+    for (int i = 0; i < g_mirSeenN; ++i) {
+        if (g_mirSeen[i].rt0 == rt0.Get() && g_mirSeen[i].depth == depth.Get()) ++occ;
+        if (g_mirSeen[i].w == w && g_mirSeen[i].h == h) ++sord;
+    }
+    if (g_mirSeenN < kMirSeenCap) g_mirSeen[g_mirSeenN++] = { rt0.Get(), depth.Get(), w, h };
+    ++g_mirWinViews;
+    // v0.10.0 phase 8 (mirror_vr_mode 2, VR): only the largest mirror views (the main mirrors) get a unit
+    // v0.10.0 phase 9: the mirror_vr_views largest views of the previous frame (g_mirSel); before the first selection the first
+    // mirror_vr_views views of the frame
+    if (MirMode() == 2) {
+        bool sel = false;
+        if (g_mirSelN > 0) {
+            for (int i = 0; i < g_mirSelN && !sel; ++i)
+                sel = g_mirSel[i].w == w && g_mirSel[i].h == h && g_mirSel[i].sord == sord;
+        } else {
+            sel = g_mirSelUsed < g_mirVrViews;
+        }
+        if (!sel) { ++g_mirNotHandled; ++g_mirVrSkip; g_mirCur = -1; return; }
+        ++g_mirSelUsed;
+    }
+    const int nU = g_mirMaxViews < 1 ? 1 : (g_mirMaxViews > kMirCap ? kMirCap : g_mirMaxViews);
+    int u = -1, how = 0;                                 // 0 = its own unit, 1 = re-home, 2 = new unit, 3 = taken over
+    for (int i = 0; i < nU && u < 0; ++i) {
+        const MirUnit& m = g_mir[i];
+        if (m.used && m.viewFrame != fr && m.rt0.Get() == rt0.Get() && m.depth.Get() == depth.Get() && m.w == w &&
+            m.h == h && m.occ == occ) u = i;
+    }
+    for (int i = 0; i < nU && u < 0; ++i) {
+        const MirUnit& m = g_mir[i];
+        if (m.used && m.viewFrame + 1 == fr && m.w == w && m.h == h && m.sord == sord) { u = i; how = 1; }
+    }
+    for (int i = 0; i < nU && u < 0; ++i)
+        if (!g_mir[i].used) { u = i; how = 2; }
+    if (u < 0) {
+        uint64_t best = ~0ull;
+        for (int i = 0; i < nU; ++i)
+            if (g_mir[i].viewFrame != fr && g_mir[i].viewFrame < best) { best = g_mir[i].viewFrame; u = i; }
+        if (u >= 0) how = 3;
+    }
+    if (u < 0) {                                          // every unit already has a view this frame
+        ++g_mirNotHandled; ++g_mirWinCap;
+        g_mirCur = -1;
+        if (!g_mirCapLogged) {
+            g_mirCapLogged = true;
+            Log("mirror units: more mirror views in one frame than mirror_max_views=%d (Present #%llu) -- the extra views "
+                "are left to the game (not anti-aliased); raise mirror_max_views in dlaa.ini (max %d)", nU,
+                (unsigned long long)fr, kMirCap);
+        }
+        return;
+    }
+    MirUnit& m = g_mir[u];
+    if (how != 0) {
+        m.resetPending = true;
+        m.unsupported = false;                           // a property of the view it had (its forward colour), not the unit
+        if (how == 1) ++m.sRehome; else if (how == 3) ++m.sSteal;
+        if (m.depth.Get() != depth.Get()) { m.roDsv.Reset(); m.roDsvTex = nullptr; }
+        if (g_mirAssignLogs < 24) {
+            ++g_mirAssignLogs;
+            Log("mirror view detected: unit %d (eye tag %d) %ux%u -- %s; G-buffer RT0 %p, depth %p, occurrence %d of this "
+                "pair, view %d of this size in the frame (Present #%llu) -- 4-RTV G-buffer RGBA16F x3 + RGBA16_UINT with its "
+                "own D32S8 depth", u, 20 + u, w, h,
+                how == 1 ? "re-homed (same size and order as last frame, other textures: history reset)"
+                : (how == 2 ? "new unit" : "taken over from an older view (history reset)"),
+                (void*)rt0.Get(), (void*)depth.Get(), occ, sord, (unsigned long long)fr);
+        }
+    }
+    m.rt0 = rt0; m.depth = depth; m.w = w; m.h = h; m.occ = occ; m.sord = sord; m.viewFrame = fr; m.used = true;
+    m.open = true; m.fwdSeen = false; m.lightSeen = false; m.color.Reset(); m.forcedView = 0;
+    m.ps.cand.Reset(); m.ps.twin.valid = false; m.ps.twin.idValid = false; m.ps.snap = false;
+    m.ps.cand.SetDropped((uint8_t)(m.dl.Mv().MedoidDropBits() & 1u));   // v0.10.0 phase 8: mirrors have the world layer only
+    if (MirIdsOff()) m.ps.cand.SetDropped(0);            // v0.10.0 phase 9 (mirror_vr_mode 4): the camera R IS the medoid
+    m.ps.dropN[0] = m.ps.dropN[1] = 0;
+    // v0.10.0 phase 8 (mirror_vr_mode 3, VR): each unit runs every 2nd frame (units alternate by index); on its off frame the view
+    // is not jittered / recorded and gets the unit's last picture (MirFlush)
+    m.altSkip = MirMode() == 3 && ((fr + (uint64_t)u) & 1u) != 0;
+    m.ps.skSampled = m.ps.skNoCtx = m.ps.skFull = m.ps.skNoCb = m.ps.skRange = 0;
+    m.rec.Reset();
+    // no jitter where this unit cannot anti-alias (unsupported colour, a size whose build failed, kMirFailWarn failed Runs
+    // in a row): a jittered picture without DLAA would only shimmer more
+    m.jitOn = JitterLive() && !m.unsupported && m.failRun < kMirFailWarn && !(m.failW == w && m.failH == h) && !m.altSkip;
+    if (m.jitOn) {
+        m.phase = (int)(m.phaseCtr++ % (uint32_t)(g_phases > 0 ? g_phases : 1));
+        JitterOfPhase(m.phase, &m.jx, &m.jy);
+        ++m.sJit;
+    } else {
+        m.jx = m.jy = 0.0f;
+    }
+    ++m.sViews; ++g_mirHandled;
+    g_mirCur = u; g_mirGbuf = true; g_mirJit = m.jitOn; g_mirShX = m.jx; g_mirShY = m.jy; g_mirW = w; g_mirH = h;
+}
+
+// The read-only DSV of a unit's mirror depth (created once per depth texture; nullptr = unsupported / failed).
+ID3D11DepthStencilView* MirRoDsv(ID3D11Device* dev, MirUnit& m) {
+    if (!m.depth || !dev) return nullptr;
+    if (m.roDsvTex == (const void*)m.depth.Get()) return m.roDsv.Get();
+    m.roDsv.Reset();
+    m.roDsvTex = m.depth.Get();
+    D3D11_DEPTH_STENCIL_VIEW_DESC dd{};
+    dd.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;          // MirIsGbuf: D32_FLOAT_S8X24_UINT / R32G8X24_TYPELESS only
+    dd.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+    dd.Flags = D3D11_DSV_READ_ONLY_DEPTH | D3D11_DSV_READ_ONLY_STENCIL;
+    const HRESULT hr = dev->CreateDepthStencilView(m.depth.Get(), &dd, m.roDsv.GetAddressOf());
+    if (FAILED(hr)) {
+        m.roDsv.Reset();
+        if (g_mirRoFailLogs++ < 4)
+            Log("mirror draw-ids: read-only view of a mirror depth (%ux%u) create hr=0x%lx -- that unit keeps camera motion "
+                "vectors", m.w, m.h, (unsigned long)hr);
+    }
+    return m.roDsv.Get();
+}
+
+// Replays the unit's pending G-buffer draws into its draw-id target. why: 0 = G-buffer leave, 1 = forced (hkMap discard),
+// 3 = view end without a leave (restoreTargets).
+void MirReplay(ID3D11DeviceContext* ctx, MirUnit& m, bool restoreTargets, int why) {
+    if (m.rec.PendingReplay() <= 0) return;
+    if (g_ctx1Owner != ctx) {
+        if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
+        ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&g_ctx1);
+        g_ctx1Owner = ctx;
+    }
+    if (!g_ctx1) return;
+    ID3D11Device* dev = nullptr;
+    ctx->GetDevice(&dev);
+    ID3D11DepthStencilView* ro = dev ? MirRoDsv(dev, m) : nullptr;
+    const bool ok = ro && DrawIdRecord::InitDevice(dev) && m.ps.twin.EnsureIds(dev, m.w, m.h);
+    if (dev) dev->Release();
+    if (!ok) ++m.sNoTarget;
+    t_inDlaa = true;                                      // our draws / binds pass straight through the hooks
+    const int tq = ok ? m.gpuReplay.Begin(ctx) : -1;
+    GpuPerf::SetMirror(true);                             // v0.10.0 phase 8: mirror work -> "mirrors" (tagged with the next pass)
+    GpuPerf::SetPass(g_passSeq);
+    DrawIdRecord::SetInstancedProbe(true);                // (mv_inst_replay: mirror units always replay every instanced draw)
+    const int pq = ok ? GpuPerf::Begin(ctx, GpuPerf::kReplay) : -1;
+    const DrawIdRecord::ReplayResult rr = m.rec.Replay(g_ctx1, ok ? m.ps.twin.idRtv.Get() : nullptr, ok ? ro : nullptr,
+                                                       restoreTargets, g_didInstancedCfg);
+    GpuPerf::End(ctx, pq);
+    GpuPerf::SetMirror(false);
+    m.gpuReplay.End(ctx, tq);
+    t_inDlaa = false;
+    m.ps.twin.idValid = m.rec.Cleared() && !m.rec.ReplayFailed();
+    m.sReplayed += (uint64_t)rr.replayed;
+    m.sSkipped += (uint64_t)rr.skipped;
+    if (why == 1) ++m.sForced;
+    if (!g_mirFirstReplayLogged && rr.ok && rr.replayed > 0) {
+        g_mirFirstReplayLogged = true;
+        Log("mirror draw-ids: first replay (unit %d, %s): %d draws replayed into the %ux%u draw-id target, %d skipped "
+            "(instanced / no MVP), depth EQUAL against a read-only view of the MIRROR depth", (int)(&m - g_mir),
+            why == 0 ? "mirror G-buffer leave" : (why == 1 ? "forced by a discard" : "view end"), rr.replayed, m.w, m.h,
+            rr.skipped);
+    }
+}
+
+// hkDrawIndexed / hkDrawIndexedInstanced while the open mirror view's G-buffer is bound (game context, not our work).
+void MirOnDraw(ID3D11DeviceContext* ctx, UINT ic, UINT inst, UINT si, INT bv, UINT sinst, bool instanced) {
+    if (g_mirCur < 0) return;
+    MirUnit& m = g_mir[g_mirCur];
+    if (!m.open || m.altSkip) return;                     // v0.10.0 phase 8: nothing recorded on a mirror_vr_mode 3 off frame
+    if (!instanced && g_mvOn.load(std::memory_order_relaxed))
+        CollectMvCandidate(ctx, ic, si, bv, m.ps);       // the unit's camera candidates (world layer: no cabin in mirrors)
+    if (!g_didOn) return;                                 // per-draw motion vectors off (Alt+F5 / mv_objects != 2)
+    if (MirIdsOff()) return;                              // v0.10.0 phase 9 (mirror_vr_mode 4): camera motion vectors only
+    if (g_ctx1Owner != ctx) {
+        if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
+        ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&g_ctx1);
+        g_ctx1Owner = ctx;
+    }
+    if (!g_ctx1) return;
+    if (m.rec.Record(g_ctx1, ic, inst, si, bv, sinst, instanced)) ++m.sRecDraws; else ++m.sRecFull;
+}
+
+// hkMap WRITE_DISCARD (game context, not our work) while a mirror view is open: as DidOnDiscardMap, for its own record.
+void MirOnDiscardMap(ID3D11DeviceContext* ctx, ID3D11Resource* r) {
+    if (g_mirCur < 0 || !g_didCfg) return;
+    MirUnit& m = g_mir[g_mirCur];
+    if (!m.open) return;
+    if (m.rec.PendingReplay() > 0 && m.rec.ReferencesPending(r)) {
+        if (m.forcedView < kMirForcedMax) { ++m.forcedView; MirReplay(ctx, m, true, 1); }
+        else ++m.sForcedCapped;
+    }
+    if (m.rec.HasOpenRing(r)) { t_inDlaa = true; m.rec.OnDiscard(ctx, r); t_inDlaa = false; }
+}
+
+uint16_t MirF2H(float f) {                                // positive normal floats only (the debug colours)
+    if (!(f > 6.2e-5f)) return 0;
+    uint32_t b;
+    memcpy(&b, &f, sizeof(b));
+    const int e = (int)((b >> 23) & 0xFFu) - 127 + 15;
+    if (e >= 31) return 0x7BFF;
+    return (uint16_t)(((uint32_t)e << 10) | ((b >> 13) & 0x3FFu));
+}
+bool MirMakeStrip(ID3D11Device* dev, UINT w, UINT h, const float rgb[3], Microsoft::WRL::ComPtr<ID3D11Texture2D>& out) {
+    std::vector<uint16_t> px((size_t)w * h * 4);
+    const uint16_t c[4] = { MirF2H(rgb[0]), MirF2H(rgb[1]), MirF2H(rgb[2]), MirF2H(1.0f) };
+    for (size_t i = 0; i < (size_t)w * h; ++i) memcpy(&px[i * 4], c, sizeof(c));
+    D3D11_TEXTURE2D_DESC td{};
+    td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_R16G16B16A16_FLOAT; td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_IMMUTABLE; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    D3D11_SUBRESOURCE_DATA sd{ px.data(), w * 8u, 0 };
+    return SUCCEEDED(dev->CreateTexture2D(&td, &sd, out.ReleaseAndGetAddressOf()));
+}
+// Ctrl+F6: a frame in the unit's colour around the mirror picture (the MV debug view Run just wrote), so every handled mirror
+// can be told apart on the glass. Unit colours (20 + u): red, green, blue, yellow, cyan, orange, white, purple; units 8..15
+// the same at half intensity.
+void MirDebugFrame(ID3D11DeviceContext* ctx, MirUnit& m, int u) {
+    if (!m.color) return;
+    const UINT mn = m.w < m.h ? m.w : m.h;
+    const UINT t = mn / 32u > 6u ? mn / 32u : 6u;
+    if (m.dbgW != m.w || m.dbgHt != m.h) {
+        m.dbgW = m.w; m.dbgHt = m.h; m.dbgT = t;
+        static const float kCol[8][3] = { { 1.0f, 0.15f, 0.1f }, { 0.15f, 1.0f, 0.15f }, { 0.2f, 0.35f, 1.0f },
+                                          { 1.0f, 0.9f, 0.1f }, { 0.1f, 0.9f, 1.0f }, { 1.0f, 0.5f, 0.05f },
+                                          { 1.0f, 1.0f, 1.0f }, { 0.55f, 0.2f, 1.0f } };
+        const float k = u < 8 ? 1.0f : 0.5f;
+        const float rgb[3] = { kCol[u & 7][0] * k, kCol[u & 7][1] * k, kCol[u & 7][2] * k };
+        Microsoft::WRL::ComPtr<ID3D11Device> dev;
+        ctx->GetDevice(&dev);
+        if (!dev || !MirMakeStrip(dev.Get(), m.w, t, rgb, m.dbgH) || !MirMakeStrip(dev.Get(), t, m.h, rgb, m.dbgV)) {
+            m.dbgH.Reset(); m.dbgV.Reset();               // no retry at this size (debug only)
+        }
+    }
+    if (!m.dbgH || !m.dbgV || m.dbgT * 2u >= m.w || m.dbgT * 2u >= m.h) return;
+    const D3D11_BOX bh{ 0, 0, 0, m.w, m.dbgT, 1 }, bv{ 0, 0, 0, m.dbgT, m.h, 1 };
+    ctx->CopySubresourceRegion(m.color.Get(), 0, 0, 0, 0, m.dbgH.Get(), 0, &bh);
+    ctx->CopySubresourceRegion(m.color.Get(), 0, 0, m.h - m.dbgT, 0, m.dbgH.Get(), 0, &bh);
+    ctx->CopySubresourceRegion(m.color.Get(), 0, 0, 0, 0, m.dbgV.Get(), 0, &bv);
+    ctx->CopySubresourceRegion(m.color.Get(), 0, m.w - m.dbgT, 0, 0, m.dbgV.Get(), 0, &bv);
+}
+
+// The view's DLAA (MirEndView, the mirror depth intact): depth snapshot + SceneDlaa::Run in place on the forward colour.
+void MirFlush(ID3D11DeviceContext* ctx, MirUnit& m) {
+    const int u = (int)(&m - g_mir);
+    const uint64_t fr = g_frames.load(std::memory_order_relaxed);
+    if (m.unsupported || !SceneDlaa::ShadersReady() || (m.failW == m.w && m.failH == m.h)) return;
+    if (m.altSkip) {                                      // v0.10.0 phase 8 (mirror_vr_mode 3): the unit's off frame
+        // the unit's last anti-aliased picture (it ran in the previous frame) replaces this frame's raw one -- same size / format
+        // only; else the raw (un-jittered) picture stays
+        ID3D11Texture2D* res = m.dl.ResultTex();
+        bool held = false;
+        if (res && m.color && m.runs && m.lastRunFrame + 1 == fr) {
+            D3D11_TEXTURE2D_DESC a{}, b{};
+            res->GetDesc(&a); m.color->GetDesc(&b);
+            if (a.Width == b.Width && a.Height == b.Height && a.Format == b.Format && a.SampleDesc.Count == b.SampleDesc.Count) {
+                t_inDlaa = true;
+                GpuPerf::SetMirror(true);
+                GpuPerf::SetPass(g_passSeq);
+                const int pq = GpuPerf::Begin(ctx, GpuPerf::kCopyOut);
+                ctx->CopyResource(m.color.Get(), res);
+                GpuPerf::End(ctx, pq);
+                GpuPerf::SetMirror(false);
+                t_inDlaa = false;
+                held = true;
+            }
+        }
+        if (held) ++g_mirAltHeld; else ++g_mirAltRaw;
+        return;
+    }
+    if (g_jitterOnly.load(std::memory_order_relaxed)) {  // jitter-only debug: no evaluate, the MV history rolls on
+        t_inDlaa = true;
+        if (m.dl.Mv().Ready() && m.ps.cand.Ready()) m.dl.Mv().Commit(ctx, m.ps.cand);
+        t_inDlaa = false;
+        return;
+    }
+    D3D11_TEXTURE2D_DESC td{};
+    m.color->GetDesc(&td);
+    if (!SceneDlaa::IsHdrFormat(td.Format) || td.Width != m.w || td.Height != m.h || td.MipLevels != 1 ||
+        td.ArraySize != 1 || td.SampleDesc.Count != 1) {
+        m.unsupported = true;
+        static int unsupLogs = 0;
+        if (unsupLogs++ < 8)
+            Log("mirror unit %d: forward colour %ux%u fmt=%d mips=%u array=%u samples=%u is not one RGBA16F texture of the "
+                "view's size %ux%u -- that view is left to the game (no jitter from its next frame on)", u, td.Width,
+                td.Height, (int)td.Format, td.MipLevels, td.ArraySize, td.SampleDesc.Count, m.w, m.h);
+        return;
+    }
+    if (!m.inited) {
+        m.inited = true;
+        m.dl.SetEye(20 + u);                             // log tag "eye 20 .. 35" = mirror unit 0 .. 15
+        m.dl.Mv().SetNearReject(g_dlaa[0].Mv().NearReject());   // the own trailer / truck never drive the camera medoid
+        m.dl.Mv().SetEgoOrigin(0.0f);                    // no ego split: per-draw R handles the own truck / trailer
+        m.dl.Mv().SetEgoPixel(0.0f);
+        m.dl.Mv().SetQuiet(true);                        // its numbers are in the "mirror units @blit" line
+        m.dl.SetOpticalCentre(0.5f, 0.5f);
+    }
+    m.dl.SetTiming(GpuTimingOn());
+    // (v0.10.0 phase 8: with mirror_vr_mode 3 in VR the unit's previous run is 2 frames back -- its history is kept)
+    const uint64_t runGap = MirMode() == 3 ? 2u : 1u;
+    const bool reset = m.resetPending || m.runs == 0 || m.lastRunFrame + runGap != fr || m.epoch != g_mirEpoch;
+    const float njx = (float)g_signX * m.jx, njy = (float)g_signY * m.jy;
+    const int64_t t0 = m.runs == 0 ? Qpc() : 0;          // wall time of the run that builds the unit
+    const int areaNow = SceneDlaa::Area();               // a mirror always uses the whole picture (no dlaa_area crop)
+    if (areaNow != 100) SceneDlaa::SetArea(100);
+    t_inDlaa = true;
+    const int tq = m.gpuRun.Begin(ctx);
+    GpuPerf::SetMirror(true);                             // v0.10.0 phase 8: mirror work -> "mirrors" / "mirror-NGX"
+    GpuPerf::SetPass(g_passSeq);
+    if (!m.ps.snap) {
+        const int sq = GpuPerf::Begin(ctx, GpuPerf::kSnap);
+        m.ps.snap = m.ps.twin.Snapshot(ctx, m.depth.Get(), false);
+        GpuPerf::End(ctx, sq);
+        if (m.ps.snap) ++m.sSnap; else ++m.sNoSnap;
+    }
+    bool ok = false;
+    if (m.ps.snap)
+        ok = m.dl.Run(ctx, m.color.Get(), nullptr, &m.ps.twin, &m.ps.cand, njx, njy, reset, g_mvOn.load(),
+                      g_mvDebug.load(), false, 0, 0, nullptr, (g_didCfg && !MirIdsOff()) ? &m.rec : nullptr);
+    const bool deferred = !ok && m.dl.Deferred();
+    if (g_mvDebug.load(std::memory_order_relaxed) && m.ps.snap && !deferred) MirDebugFrame(ctx, m, u);
+    GpuPerf::SetMirror(false);
+    m.gpuRun.End(ctx, tq);
+    t_inDlaa = false;
+    if (areaNow != 100) SceneDlaa::SetArea(areaNow);
+    if (ok) {
+        ++m.runs; ++m.sOk; ++m.tOk;
+        if (reset) ++m.sResets;
+        m.lastRunFrame = fr; m.epoch = g_mirEpoch; m.resetPending = false; m.failRun = 0;
+        if (m.tOk == 1 && g_mirFirstOkLogs < kMirCap) {
+            ++g_mirFirstOkLogs;
+            Log("first mirror DLAA evaluate OK: unit %d (eye tag %d) %ux%u %s, preset=%s, NGX jitter=(%+.4f,%+.4f), "
+                "reset=%d, depth=snapshot at its discard, per-draw MVs %s, at Present #%llu (unit built in %.1f ms)", u,
+                20 + u, m.w, m.h,
+                !m.dl.IsHdr() ? "LDR" : (SceneDlaa::HdrLinear() ? "HDR (RGBA16F, IsHDR=1)" : "HDR (RGBA16F, IsHDR=0: dlss_hdr=0)"),
+                SceneDlaa::DlssPresetName(), (double)njx, (double)njy, (int)reset, g_didCfg ? "on" : "off",
+                (unsigned long long)fr, t0 && g_qpcFreq > 0 ? (double)(Qpc() - t0) * 1000.0 / (double)g_qpcFreq : 0.0);
+        }
+        if (!g_mirActiveLogged) {
+            g_mirActiveLogged = true;
+            Log("mirror DLAA: ACTIVE -- every mirror view (a 4-RTV G-buffer with its own depth) gets its own DLAA unit: own "
+                "jitter, depth snapshot at its discard, %s, DLAA in place on its RGBA16F colour before the game "
+                "down-samples it (Present #%llu)", g_didCfg ? "per-draw motion vectors (draw-id replay on the mirror depth)"
+                : "camera motion vectors (mv_objects != 2)", (unsigned long long)fr);
+        }
+    } else if (deferred) {
+        ++m.sDeferred;                                    // built at a later Present (one NGX create per Present)
+    } else {
+        ++m.sFail; ++m.tFail; ++m.failRun;
+        if (m.dl.InitFailed()) {                          // NGX / textures failed at this size: never retried there
+            m.failW = m.w; m.failH = m.h;
+            Log("mirror DLAA: WARNING unit %d could not be built at %ux%u (see the DLAA lines above) -- that mirror size is "
+                "left to the game (no jitter)", u, m.w, m.h);
+        }
+        if (m.tFail <= 3)
+            Log("mirror DLAA: unit %d (%ux%u) Run failed (init failed=%d, depth snapshot=%d, Present #%llu) -- that view is "
+                "left untouched", u, m.w, m.h, (int)m.dl.InitFailed(), (int)m.ps.snap, (unsigned long long)fr);
+        if (m.failRun == kMirFailWarn)
+            Log("mirror DLAA: WARNING unit %d (%ux%u) failed %d times in a row (init failed=%d, depth snapshot=%d) -- that "
+                "mirror stays un-anti-aliased; see the DLAA lines above (Present #%llu)", u, m.w, m.h, kMirFailWarn,
+                (int)m.dl.InitFailed(), (int)m.ps.snap, (unsigned long long)fr);
+    }
+}
+
+// The open view ends: its depth is discarded (lateWhy = nullptr) or a fallback trigger fired (lateWhy names it). A pending
+// replay runs first (the depth is still intact), then the DLAA; the record's refs go.
+void MirEndView(ID3D11DeviceContext* ctx, MirUnit& m, const char* lateWhy) {
+    const int u = (int)(&m - g_mir);
+    if (!m.open) return;
+    if (m.rec.PendingReplay() > 0) MirReplay(ctx, m, true, 3);   // no G-buffer leave since: the game's targets restored
+    m.open = false;
+    if (g_mirCur == u) { g_mirCur = -1; g_mirGbuf = false; g_mirJit = false; }
+    m.sCand += (uint64_t)m.ps.cand.Count(0);
+    if (MirPathLive()) {
+        if (lateWhy) {
+            ++m.sLate;
+            if (g_mirLateLogs < 6) {
+                ++g_mirLateLogs;
+                Log("mirror unit %d (%ux%u): no DiscardView of its depth -- the view ended at %s (Present #%llu)", u, m.w,
+                    m.h, lateWhy, (unsigned long long)g_frames.load(std::memory_order_relaxed));
+            }
+        }
+        if (!m.fwdSeen || !m.color) ++m.sNoColor;        // no forward pass on its depth: nothing to anti-alias
+        else MirFlush(ctx, m);
+    }
+    m.color.Reset();
+    m.rec.Reset();                                        // (the unit's DrawIdMv keeps its own copy as the history)
+}
+
+// hkOMSetRenderTargets (game context, not our work), BEFORE the game's bind goes through. depthRes = the bind's depth
+// (identity), sceneGbuf = the bind is the main G-buffer.
+void MirOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* rtvs, ID3D11Resource* depthRes,
+               bool sceneGbuf) {
+    MirUnit* cu = g_mirCur >= 0 ? &g_mir[g_mirCur] : nullptr;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> rt0, depth;
+    UINT w = 0, h = 0;
+    const bool gbuf = n == 4 && depthRes && depthRes != (ID3D11Resource*)g_sceneDepth && !sceneGbuf &&
+                      !g_gameDeviceChanged.load(std::memory_order_relaxed) && MirIsGbuf(n, rtvs, depthRes, rt0, depth, &w, &h);
+    // the open view's own G-buffer again before its forward pass (a second G-buffer segment): the same view
+    const bool sameView = cu && cu->open && gbuf && rt0.Get() == cu->rt0.Get() && depth.Get() == cu->depth.Get() &&
+                          !cu->fwdSeen;
+    if (cu && cu->open && g_mirGbuf && !sameView) MirReplay(ctx, *cu, false, 0);   // its G-buffer leave
+    if (cu && cu->open && !sameView && (gbuf || sceneGbuf)) MirEndView(ctx, *cu, "the next G-buffer bind");
+    g_mirGbuf = false;
+    g_mirJit = false;
+    if (gbuf && sameView) {
+        g_mirGbuf = true; g_mirJit = cu->jitOn; g_mirShX = cu->jx; g_mirShY = cu->jy; g_mirW = cu->w; g_mirH = cu->h;
+        return;
+    }
+    if (gbuf) {
+        if (MirPathLive()) MirBeginView(rt0, depth, w, h);
+        else ++g_mirNotHandled;                           // mirror DLAA off / DLAA off / passive: left to the game
+        return;
+    }
+    cu = g_mirCur >= 0 ? &g_mir[g_mirCur] : nullptr;
+    if (!cu || !cu->open || !depthRes || depthRes != (ID3D11Resource*)cu->depth.Get()) return;   // outside the view
+    if (n == 1 && rtvs && rtvs[0]) {                      // the forward pass: 1 RTV RGBA16F of the view's size, its depth
+        Microsoft::WRL::ComPtr<ID3D11Resource> rr;
+        rtvs[0]->GetResource(&rr);
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> ct;
+        if (rr && SUCCEEDED(rr.As(&ct)) && ct) {
+            D3D11_TEXTURE2D_DESC td{};
+            ct->GetDesc(&td);
+            if (td.Format == DXGI_FORMAT_R16G16B16A16_FLOAT && td.Width == cu->w && td.Height == cu->h) {
+                if (cu->color && cu->color.Get() != ct.Get()) ++cu->sFwd2;   // a second forward target: the last one wins
+                cu->color = ct;
+                cu->fwdSeen = true;
+                g_mirJit = cu->jitOn; g_mirShX = cu->jx; g_mirShY = cu->jy; g_mirW = cu->w; g_mirH = cu->h;
+            }
+        }
+    } else if (n == 2) {
+        cu->lightSeen = true;                             // the lighting pass (never shifted)
+    }
+}
+
+// hkDiscardView / DiscardView1 / DiscardResource (game context): the open view's depth is discarded -> the view ends.
+void MirOnDiscard(ID3D11DeviceContext* ctx, ID3D11Resource* res) {
+    if (t_inDlaa || !res || g_mirCur < 0) return;
+    MirUnit& m = g_mir[g_mirCur];
+    if (!m.open || res != (ID3D11Resource*)m.depth.Get()) return;
+    MirEndView(ctx, m, nullptr);
+}
+
+// hkClearDSV (game context, not our work): a clear of the open view's depth before its discard -> the view ends first.
+void MirOnClearDsv(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v) {
+    if (g_mirCur < 0 || !v) return;
+    MirUnit& m = g_mir[g_mirCur];
+    if (!m.open || !m.depth) return;
+    ID3D11Resource* r = nullptr;
+    v->GetResource(&r);
+    const bool match = r && r == (ID3D11Resource*)m.depth.Get();
+    if (r) r->Release();
+    if (match) MirEndView(ctx, m, "a ClearDepthStencilView of its depth");
+}
+
+// Frame boundary (OnPresentBoundary): a still open view ends, the per-frame tables restart, units without a view for
+// kMirStaleFrames drop their refs on the game's textures (their DLAA resources stay for a quick return).
+void MirNextFrame(uint64_t n) {
+    (void)n;
+    if (g_mirCur >= 0) {
+        MirUnit& m = g_mir[g_mirCur];
+        ID3D11DeviceContext* c = g_gameCtx.load(std::memory_order_acquire);
+        if (m.open && c) MirEndView(c, m, "the frame boundary");
+        m.open = false;
+    }
+    g_mirCur = -1; g_mirGbuf = false; g_mirJit = false;
+    ++g_mirWinPresents;
+    if (g_mirSeenN > 0) ++g_mirWinFrames;
+    g_mirSeenN = 0;
+    g_mirFrame = g_frames.load(std::memory_order_relaxed);
+    for (MirUnit& m : g_mir) {
+        if (m.used && (m.rt0 || m.depth) && m.viewFrame + kMirStaleFrames < g_mirFrame) {
+            m.rt0.Reset(); m.depth.Reset(); m.roDsv.Reset(); m.roDsvTex = nullptr; m.color.Reset(); m.rec.Reset();
+        }
+    }
+}
+
+// MvInvalidate (DLAA / MV keys, context reset, ...) and the mirror key: every unit restarts its history at its next run.
+void MirInvalidate() {
+    ++g_mirEpoch;
+    for (MirUnit& m : g_mir) m.dl.Mv().Invalidate();
+}
+
+// ResetPassTrackingCore (game context change): the old context's views are abandoned (DLAA is forced off after a device
+// change; the units' DLAA resources belong to the old device and are never used again).
+void MirOnContextReset() {
+    g_mirCur = -1; g_mirGbuf = false; g_mirJit = false; g_mirSeenN = 0;
+    for (MirUnit& m : g_mir) {
+        m.open = false; m.rec.Reset(); m.color.Reset(); m.rt0.Reset(); m.depth.Reset();
+        m.roDsv.Reset(); m.roDsvTex = nullptr;
+        m.dbgH.Reset(); m.dbgV.Reset(); m.dbgW = m.dbgHt = 0;
+        m.gpuRun.Reset(); m.gpuReplay.Reset();
+        m.resetPending = true;
+    }
+}
+
+// Alt+F5 (key_mv_drawids): per-draw motion vectors on / off live (mv_objects 2 <-> 0). OFF: nothing is recorded or replayed
+// any more, every draw record (main pass slots and mirror units) is dropped and its draw ids marked invalid, so pass B uses
+// the camera path from the next blit on; the DLSS history is kept. ON: recording starts with the next draws (the first
+// frame has no partner pass: camera R). mv_objects = 1 (the legacy stencil ids) is not switched by this key.
+void ToggleDrawIds(uint64_t n) {
+    if (g_objMode == 1) {
+        Log("per-draw motion vectors: %s ignored -- dlaa.ini mv_objects = 1 (the v0.9.0 stencil ids); this key switches "
+            "mv_objects 2 <-> 0 only (Present #%llu)", KeyName(KA_DRAWID_TOGGLE), (unsigned long long)n);
+        PlayTones(1, 200, 400, 0);
+        return;
+    }
+    const bool on = g_objMode != 2;
+    g_objMode = on ? 2 : 0;
+    g_didCfg = on;
+    if (!on) {
+        g_didOn = false;                                  // no draw of the rest of this frame is recorded (ObjFrameUpdate agrees)
+        for (DrawIdRecord& r : g_didRing) r.Reset();
+        for (DrawIdRecord& r : g_didFwdRing) r.Reset();   // v0.10.0 phase 3
+        for (PassSlot& p : g_ring) { p.twin.idValid = false; p.twin.fwdIdValid = false; }
+        for (MirUnit& m : g_mir) { m.rec.Reset(); m.ps.twin.idValid = false; }
+        g_medoidDropBits = 0; g_eyeDropBits[0] = g_eyeDropBits[1] = 0;   // v0.10.0 phase 8: the medoid path is needed again
+    }
+    Log("per-draw motion vectors %s (%s, Present #%llu) -- %s", on ? "ON (mv_objects = 2)" : "OFF (mv_objects = 0)",
+        KeyName(KA_DRAWID_TOGGLE), (unsigned long long)n,
+        on ? "G-buffer draws are recorded and replayed into draw-id targets again (main view and mirrors); moving draws get "
+             "their own motion vector from the next frame on"
+           : "every pixel uses the camera motion vector of its depth layer (main view and mirrors); draw records dropped");
+    PlayTones(1, on ? 1200 : 300, 150, 0);
+}
+
+// Alt+F6 (key_mirror_dlaa): mirror DLAA on / off live. OFF: the mirror views are left to the game (no jitter, no DLAA) from
+// the next view on; the units keep their resources. Either way every unit restarts its history.
+// ---- v0.10.0 phase 10 PERFORMANCE PROFILES ----------------------------------------------------------------------------------
+// What each profile gives the keys that are NOT explicit (see ProfKey). high = the built-in defaults; medium / low cut the per-draw
+// motion-vector work for weaker GPUs; low also drops the mirror DLAA and the forward depth and shrinks the VR DLAA area.
+struct ProfVals { int mirDlaa, mirVr, mirFlat, fwd, fwdRes, voteRes, marchCap, instReplay, parListed; char preset; int area; };
+const ProfVals kProf[3] = {
+    // mirror  vr  flat  fwd  res  vote  march  inst  listed  preset  area
+    { 1,       2,  1,    1,   0,   4,    48000, 0,    64,     0,      100 },   // high   (built-in defaults; preset 0 = driver pick)
+    { 1,       2,  4,    1,   2,   4,    24000, 1,    64,     'E',    100 },   // medium
+    { 0,       2,  4,    0,   2,   4,    24000, 1,    32,     'E',    60  },   // low    (area: VR only; flat is always 100)
+};
+const char* const kProfKeyName[PK_COUNT] = { "mirror_dlaa", "mirror_vr_mode", "mirror_flat_mode", "mv_fwd_depth", "mv_fwd_depth_res",
+                                             "mv_vote_res", "mv_vote_march_cap", "mv_inst_replay", "mv_parent_max_listed",
+                                             "dlss_preset", "dlaa_area" };
+
+// Sets the profile's value of every non-explicit key (live: with the side effects a change needs -- mirror units restart, a new
+// NGX preset / DLAA area resets the DLSS history). `changed` gets "key old -> new, ..." (or "nothing").
+void ApplyProfile(bool live, char* changed, size_t cap) {
+    const ProfVals& P = kProf[g_profile < 0 || g_profile > 2 ? 0 : g_profile];
+    int len = 0;
+    if (changed && cap) changed[0] = 0;
+    auto note = [&](int k, const char* from, const char* to) {
+        if (changed && len < (int)cap - 1)
+            len += snprintf(changed + len, cap - (size_t)len, "%s%s %s -> %s", len ? ", " : "", kProfKeyName[k], from, to);
+    };
+    auto noteI = [&](int k, long from, long to) {
+        char a[24], b[24];
+        snprintf(a, sizeof(a), "%ld", from); snprintf(b, sizeof(b), "%ld", to);
+        note(k, a, b);
+    };
+    bool mirReset = false, dlssReset = false;
+    if (!g_profExplicit[PK_MIRROR_DLAA] && (g_mirCfg != P.mirDlaa || (int)g_mirOn.load() != P.mirDlaa)) {
+        noteI(PK_MIRROR_DLAA, (long)(g_mirCfg && g_mirOn.load()), P.mirDlaa);
+        g_mirCfg = P.mirDlaa; g_mirOn = P.mirDlaa != 0; mirReset = true;
+    }
+    if (!g_profExplicit[PK_MIRROR_VR_MODE] && g_mirVrMode != P.mirVr) {
+        noteI(PK_MIRROR_VR_MODE, g_mirVrMode, P.mirVr); g_mirVrMode = P.mirVr; mirReset = true;
+    }
+    if (!g_profExplicit[PK_MIRROR_FLAT_MODE] && g_mirFlatMode != P.mirFlat) {
+        noteI(PK_MIRROR_FLAT_MODE, g_mirFlatMode, P.mirFlat); g_mirFlatMode = P.mirFlat; mirReset = true;
+    }
+    if (!g_profExplicit[PK_FWD_DEPTH]) {
+        const int cur = (g_fwdCfg && g_fwdOn.load()) ? 1 : 0;
+        if (cur != P.fwd || (int)g_fwdCfg != P.fwd) {
+            noteI(PK_FWD_DEPTH, cur, P.fwd);
+            g_fwdCfg = P.fwd != 0; g_fwdOn = P.fwd != 0;
+            g_fwdAutoOff = false;                         // a profile switch re-arms the VR budget measurement
+        }
+    }
+    if (!g_profExplicit[PK_FWD_RES] && g_fwdResCfg != P.fwdRes) { noteI(PK_FWD_RES, g_fwdResCfg, P.fwdRes); g_fwdResCfg = P.fwdRes; }
+    if (!g_profExplicit[PK_VOTE_RES] && (int)DrawIdMv::VoteRes() != P.voteRes) {
+        noteI(PK_VOTE_RES, (long)DrawIdMv::VoteRes(), P.voteRes); DrawIdMv::SetVoteRes((unsigned)P.voteRes);
+    }
+    if (!g_profExplicit[PK_MARCH_CAP] && (int)DrawIdMv::MarchCap() != P.marchCap) {
+        noteI(PK_MARCH_CAP, (long)DrawIdMv::MarchCap(), P.marchCap); DrawIdMv::SetMarchCap((unsigned)P.marchCap);
+    }
+    if (!g_profExplicit[PK_INST_REPLAY] && DrawIdMv::InstReplay() != P.instReplay) {
+        noteI(PK_INST_REPLAY, DrawIdMv::InstReplay(), P.instReplay); DrawIdMv::SetInstReplay(P.instReplay);
+    }
+    if (!g_profExplicit[PK_PAR_LISTED] && (int)DrawIdMv::ParentMaxListed() != P.parListed) {
+        noteI(PK_PAR_LISTED, (long)DrawIdMv::ParentMaxListed(), P.parListed); DrawIdMv::SetParentMaxListed((unsigned)P.parListed);
+    }
+    if (!g_profExplicit[PK_PRESET]) {
+        const char* cur = SceneDlaa::DlssPresetName();
+        const bool same = P.preset ? (cur[0] == P.preset && cur[1] == 0) : !strcmp(cur, "default");
+        if (!same) {
+            char from[16], to[16];
+            snprintf(from, sizeof(from), "%s", cur);
+            SceneDlaa::SetDlssPreset(P.preset);
+            snprintf(to, sizeof(to), "%s", SceneDlaa::DlssPresetName());
+            note(PK_PRESET, from, to);
+            dlssReset = true;
+        }
+    }
+    // dlaa_area: VR only (flat always uses the whole picture). At load the launch mode is not known yet: the value is set and
+    // StartInjection keeps it as the VR value (g_vrArea) while flat forces 100, exactly as for an ini value.
+    if (!g_profExplicit[PK_AREA] && (!live || g_launchVr) && SceneDlaa::Area() != P.area) {
+        noteI(PK_AREA, SceneDlaa::Area(), P.area);
+        SceneDlaa::SetArea(P.area);
+        if (live) g_vrArea = P.area;
+        dlssReset = true;
+    }
+    if (changed && !len) snprintf(changed, cap, "nothing (every key already at the profile value or explicit)");
+    if (!live) return;
+    if (mirReset) MirInvalidate();                        // the mirror units restart with the new mode
+    if (dlssReset) { g_resetNext = true; OnLiveTuningChange(); }
+}
+
+// " a, b, c" of the explicit keys (or " none")
+void ProfExplicitList(char* out, size_t cap) {
+    int len = 0;
+    out[0] = 0;
+    for (int k = 0; k < PK_COUNT; ++k)
+        if (g_profExplicit[k] && len < (int)cap - 1)
+            len += snprintf(out + len, cap - (size_t)len, "%s%s", len ? ", " : "", kProfKeyName[k]);
+    if (!len) snprintf(out, cap, "none");
+}
+
+void CycleProfile(uint64_t n, int dir) {
+    g_profile = dir < 0 ? (g_profile + 2) % 3 : (g_profile + 1) % 3;   // v0.10.0: dir -1 = back (the tuning menu's Left)
+    char changed[700], kept[300];
+    ApplyProfile(true, changed, sizeof(changed));
+    ProfExplicitList(kept, sizeof(kept));
+    Log("perf profile now %s (%s, Present #%llu) -- changed: %s | kept (set in dlaa.ini or by their own key): %s | %s saves it "
+        "(perf_profile)", kProfName[g_profile], KeyName(KA_PROFILE), (unsigned long long)n, changed, kept, KeyName(KA_SAVE));
+    PlayTones(g_profile + 1, 660, 120, 100);              // 1 beep high, 2 medium, 3 low
+}
+
+void ToggleMirrors(uint64_t n) {
+    const bool on = !g_mirOn.load();
+    g_mirOn = on;
+    g_profExplicit[PK_MIRROR_DLAA] = true;               // v0.10.0 phase 10: the user's choice (profiles keep it)
+    MirInvalidate();
+    Log("mirror DLAA %s (%s, Present #%llu) -- %s", on ? "ON" : "OFF", KeyName(KA_MIRROR_TOGGLE), (unsigned long long)n,
+        on ? "every mirror view gets its own DLAA unit again (histories restart)"
+           : "mirror views are left to the game (no jitter, no DLAA); the units keep their resources");
+    PlayTones(1, on ? 1200 : 300, 150, 0);
+}
+
+// ---- v0.10.0 IN-GAME TUNING MENU ----------------------------------------------------------------------------------------------
+// key_menu (Delete) opens / closes a panel over the game picture; key_menu_up / _down (Up / Down) select a row, key_menu_left /
+// _right (Left / Right) change it. Every row calls the SAME function as its hotkey (which logs and beeps; the hotkeys keep working
+// while the menu is open). The panel is drawn (TuningMenu::Draw, menu.cpp) at Present over the backbuffer (flat, and the VR
+// desktop mirror; under a present layer: over the game-side backbuffer while it is still bound at the frame-end boundary) and,
+// in VR, into each eye texture right after the game's eye blit (and the DLSS upscale composite), centred on the eye's optical
+// centre. While open, the 5 menu keys are hidden from the game (MenuSwallowKeys -> dinput_wrap.cpp). Closed: one branch per
+// Present and per blit Draw, nothing else.
+#ifndef DLAA_INJECTOR_VERSION
+#define DLAA_INJECTOR_VERSION "0.0.0-dev"
+#endif
+enum MenuRowId {
+    MR_MODE, MR_PROFILE, MR_MODEL, MR_SHARP, MR_WIDTH, MR_LOD, MR_LODCUT, MR_AREA, MR_DRAWIDS, MR_MIRROR, MR_PRETM, MR_FWD,
+    MR_UPSCALE, MR_DLAA, MR_OFXR, MR_POSX, MR_POSY, MR_SIZE, MR_DEPTH, MR_FPS, MR_FPSX, MR_FPSY, MR_FPSSIZE, MR_SAVE, MR_CLOSE,
+    MR_COUNT
+};
+static_assert(MR_COUNT <= TuningMenu::kMaxRows, "tuning menu: too many rows");
+const wchar_t* const kMenuDesc[MR_COUNT] = {
+    L"DLAA = anti-aliasing at the game's render size. DLSS = also upscales when the render scale is below 100 %. "
+    L"off = the game's own picture. Saved at once.",
+    L"high = everything on. medium = for mid-range cards. low = for weak cards (+ VR area 60 %). Only changes settings "
+    L"you never set yourself.",
+    L"The DLSS network preset. default = the driver's pick. Try E or F if thin lines shimmer; M is the newest.",
+    L"Sharpening after DLAA. 0 = off. Too high = halos on edges.",
+    L"How wide the sharpening looks. VR's 2x-supersampled eye picture needs more than 1 px.",
+    L"Sharper texture text (road signs, dashboard, GPS). More negative = sharper but more shimmer on fences. 0 = off.",
+    L"The same for wire fences, grass and leaf cut-outs. 0 = the game's own filtering. Only acts while texture sharpness "
+    L"is not 0.",
+    L"VR: anti-alias only the middle of each eye to save GPU time (20 .. 100; also the garage / main menu truck). "
+    L"100 = the whole picture.",
+    L"Moving traffic gets its exact motion so it stays sharp; static objects are not redrawn (mv_replay_static_*). "
+    L"Off = every pixel moves with the camera.",
+    L"Each truck mirror gets its own anti-aliasing. Off = mirrors as the game draws them (cheaper).",
+    L"Flat DLAA mode: anti-alias the HDR picture before the game's bloom / tonemap: calmer lane paint, wires, rails. "
+    L"Takes ~60 frames to switch on.",
+    L"Wires, fences and glass move with their own distance instead of what is behind them. Off saves GPU time.",
+    L"When the render scale is below 100 %, DLSS upscales to the output size instead of the game's blur.",
+    L"The whole mod on or off (keeps the mode).",
+    L"OFXR Bridge = VR frame generation by djules75, a separate download (github.com/djules75/OFXR-Bridge). found = its layer "
+    L"is loaded in this game and the mod lets its work pass through. Start its tray app before the game.",
+    L"Moves this panel sideways. Flat and VR each keep their own position.",
+    L"Moves this panel up / down. Flat and VR each keep their own position.",
+    L"Makes this panel bigger or smaller.",
+    L"VR: shifts the panel inward per eye so it sits closer than infinity; raise it if the panel is tiring to look at.",
+    L"A small live fps / frame-time box, shown also while this menu is closed. Flat and VR each keep their own position. "
+    L"The Save row keeps it for the next start.",
+    L"Moves the fps box sideways. Flat and VR each keep their own position.",
+    L"Moves the fps box up / down. Flat and VR each keep their own position.",
+    L"Makes the fps box bigger or smaller (0.2 .. 3.0).",
+    L"Writes the live values above into dlaa.ini, keeps every other line.",
+    nullptr,                                              // MR_CLOSE: "<key_menu> also closes it." (built with the key name)
+};
+int   g_menuSel     = 0;                                  // selected row (kept while closed: the menu reopens where it was)
+bool  g_menuMoved   = false;                              // the panel placement changed since the menu was opened (close line)
+float g_menuVrBuild = 0.0f;                               // VR: panel scale of eye 0 (the texture is built at it; 0 = none yet)
+float g_fpsVrBuild  = 0.0f;                               // VR: fps box scale of eye 0 (the same for the box; 0 = none yet)
+bool  g_fpsMoved    = false;                              // an fps box row changed since the menu was opened (close line)
+
+// VR = an eye-texture blit has been seen (the panel is then drawn into the eye textures and the rows edit the VR placement).
+// A VR launch whose headset picture never came (menu screen, no session) shows the panel on the monitor at the FLAT placement,
+// so the rows must edit the flat values there -- the launch guess alone is not enough (ATS 2026-10-09: X / Y "did not move").
+// v0.10.0 phase 15: also a VR launch whose menu / truck-preview pictures go into VR eye textures (the VR main menu before the
+// first world eye blit: g_vrMode is only set at that blit; MenuDrawPreview draws the panel into those pictures at the VR
+// placement) -- a composite into an eye-sized, non-backbuffer target within the last 120 Presents (PreviewComposite). A VR
+// launch without a headset composites into the backbuffer and keeps the flat rows, as before.
+inline bool MenuVr() {
+    return g_vrMode || (g_launchVr == 1 && g_pvVrPicFrame != 0 &&
+                        g_frames.load(std::memory_order_relaxed) - g_pvVrPicFrame < 120);
+}
+inline int  MenuClampI(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+// How the panel colours go into a target of view format f (TuningMenu::OutMode): an sRGB view encodes / scRGB float is linear
+// -> decoded; the HDR10 screen (R10G10B10A2 with Windows HDR on, g_hdrOut) -> PQ; anything else -> the bytes as they are.
+inline int MenuOutMode(DXGI_FORMAT f, bool screen) {
+    if (f == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB || f == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB || f == DXGI_FORMAT_B8G8R8X8_UNORM_SRGB ||
+        f == DXGI_FORMAT_R16G16B16A16_FLOAT || f == DXGI_FORMAT_R11G11B10_FLOAT || f == DXGI_FORMAT_R32G32B32A32_FLOAT)
+        return TuningMenu::kOutLinear;
+    if (screen && g_hdrOut && (f == DXGI_FORMAT_R10G10B10A2_UNORM || f == DXGI_FORMAT_R10G10B10A2_TYPELESS)) return TuningMenu::kOutPq;
+    return TuningMenu::kOutRaw;
+}
+void MenuWiden(wchar_t* dst, size_t cap, const char* src) {
+    if (!cap) return;
+    dst[0] = 0;
+    if (src && src[0] && !MultiByteToWideChar(CP_UTF8, 0, src, -1, dst, (int)cap)) dst[0] = 0;
+    dst[cap - 1] = 0;
+}
+// ---- v0.10.0 fps meter: the ONE fps source (the fps box and the menu's "fps" figure) ----
+// Per Present while the fps box is on or the menu is open (PresentFrameWork; nothing runs while both are off): Presents are
+// counted, and every >= 0.5 s (QPC) fps = Presents / seconds and the frame time = seconds / Presents of that interval. The
+// box shows the two lines (text changes only then, so its texture is rebuilt at most twice a second); the menu copies the
+// figures at its own once-a-second snapshot (MenuPerfTick). FpsStop (both off) forgets them: the next start measures afresh.
+struct FpsMeter {
+    bool          running = false;
+    bool          have = false;                  // a full interval has been measured since the start
+    LARGE_INTEGER t0{};                          // start of the current interval
+    LONGLONG      freq = 0;
+    uint32_t      count = 0;                     // Presents in the current interval
+    double        fps = 0.0, frameMs = 0.0;      // the last interval
+    wchar_t       line1[24] = L"-- fps";         // the box's two lines
+    wchar_t       line2[24] = L"-- ms";
+};
+FpsMeter g_fps;
+constexpr double kFpsEvery = 0.5;                // s between two updates
+
+void FpsTick() {
+    FpsMeter& f = g_fps;
+    LARGE_INTEGER now{};
+    QueryPerformanceCounter(&now);
+    if (!f.running) {
+        if (!f.freq) {
+            LARGE_INTEGER q{};
+            QueryPerformanceFrequency(&q);
+            f.freq = q.QuadPart;
+        }
+        f.running = true;
+        f.t0 = now;
+        f.count = 0;
+        return;
+    }
+    ++f.count;
+    const double sec = f.freq > 0 ? (double)(now.QuadPart - f.t0.QuadPart) / (double)f.freq : 0.0;
+    if (sec < kFpsEvery || !f.count) return;
+    f.fps = (double)f.count / sec;
+    f.frameMs = sec * 1000.0 / (double)f.count;
+    f.have = true;
+    f.t0 = now;
+    f.count = 0;
+    swprintf(f.line1, 24, L"%.0f fps", f.fps);
+    swprintf(f.line2, 24, L"%.1f ms", f.frameMs);
+}
+void FpsStop() {
+    const LONGLONG freq = g_fps.freq;
+    g_fps = FpsMeter();
+    g_fps.freq = freq;
+}
+// The fps box switched on / off (the menu's FPS counter row): logged + beeped like the other toggles; off drops its texture.
+void ToggleFpsBox(uint64_t n) {
+    g_fpsShow = !g_fpsShow;
+    g_fpsExplicit = g_fpsMoved = true;
+    if (!g_fpsShow) {
+        TuningMenu::ReleaseWidget();
+        g_fpsVrBuild = 0.0f;
+        if (!g_menuOpen.load(std::memory_order_relaxed)) FpsStop();   // (the menu row: the menu is open, the meter keeps running)
+    }
+    Log("fps box %s (tuning menu, Present #%llu) -- flat fps_x=%d fps_y=%d fps_scale=%.1f, VR fps_vr_x=%d fps_vr_y=%d "
+        "fps_vr_scale=%.1f", g_fpsShow ? "ON" : "OFF", (unsigned long long)n, g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX,
+        g_fpsVrY, (double)g_fpsVrScale);
+    PlayTones(1, g_fpsShow ? 1200 : 300, 150, 0);
+}
+// ---- tuning menu: live GPU figures (the GPU block under the title, the "GPU cost" column, the cost sentence) ----
+// GpuPerf (gpu_perf.h) times every sub-pass of the mod per eye; it is OFF for a normal user (debug = 0), so the menu switches it
+// on while open (MenuPerfOpen / MenuPerfClose; the GPU spans' scene figure follows GpuPerf::On, SpanOnPassStart). The menu keeps
+// its OWN ~1-s figures: every kMenuPerfEvery Presents the per-eye window sums are read back from GpuPerf::Stats and the
+// difference to the previous read is the last interval (a LogWindow restart in between -- debug = 1, every 600 blits -- shows in
+// GpuPerf::Restarts: that interval then counts from the restart). The panel texts change only at these snapshots, so the panel
+// texture is rebuilt at most once per second. "game" = the GPU spans' scene ms/frame (both eyes; updated every ~300 frames)
+// MINUS the mod's own total of the eyes (the scene span contains the mod's work: the DLAA evaluates, the per-pass work, ...).
+enum MenuCostGrp { MG_NGX, MG_PART, MG_CAM, MG_FWD, MG_MIR, MG_SHARP, MG_COPY, MG_COUNT };
+int MenuCostGroup(int sec) {
+    switch (sec) {
+    case GpuPerf::kNgx:      return MG_NGX;
+    case GpuPerf::kReplay:   case GpuPerf::kFwdReplay: case GpuPerf::kGather:   case GpuPerf::kMatch:   case GpuPerf::kPair:
+    case GpuPerf::kVote:     case GpuPerf::kPick:      case GpuPerf::kResolve:  case GpuPerf::kInherit: case GpuPerf::kParCount:
+    case GpuPerf::kParList:  case GpuPerf::kTwin:      case GpuPerf::kAttach:   case GpuPerf::kParVote1:
+    case GpuPerf::kParPick1: case GpuPerf::kParVote2:  case GpuPerf::kParPick2: case GpuPerf::kPickRes: case GpuPerf::kListTwin:
+                             return MG_PART;
+    case GpuPerf::kSnap:     case GpuPerf::kCandCopy:  case GpuPerf::kConvert:  case GpuPerf::kMedoid:  case GpuPerf::kPassB:
+    case GpuPerf::kMvMisc:   return MG_CAM;
+    case GpuPerf::kFwdDepth: case GpuPerf::kFwdInit:   return MG_FWD;
+    case GpuPerf::kMirror:   case GpuPerf::kMirNgx:    return MG_MIR;
+    case GpuPerf::kRcas:     return MG_SHARP;
+    case GpuPerf::kCopyIn:   case GpuPerf::kCopyOut:   case GpuPerf::kDbgView:  return MG_COPY;
+    default:                 return -1;          // kReplayInst / kReplayRest: a sampled breakdown of kReplay (counted there)
+    }
+}
+constexpr uint64_t kMenuPerfEvery = 60;          // Presents between two snapshots (~1 s)
+constexpr uint64_t kMenuPerfBase  = 10;          // the baseline read, 10 Presents after the open (sets in flight have landed)
+struct MenuPerfRaw {                             // one eye's GpuPerf window sums at the last read
+    bool     have = false;
+    uint32_t gen = 0;                            // GpuPerf::Restarts() then
+    uint64_t passes = 0;
+    double   sum[GpuPerf::kCount] = {};
+    uint64_t n[GpuPerf::kCount] = {};
+};
+struct MenuPerfEye { bool have = false; double grp[MG_COUNT] = {}; double total = 0.0; };   // ms per pass (= per eye)
+struct MenuPerfState {
+    bool          forced = false;                // the menu switched the timers on (back to the dlaa.ini state at the close)
+    bool          spanFresh = false;             // g_spanSceneLast belongs to this menu session (or the spans were on anyway)
+    uint32_t      spanSeq0 = 0;                  // g_spanSceneLastSeq at the open
+    uint64_t      presents = 0;                  // Presents since the open
+    LARGE_INTEGER tOpen{}, tLast{};
+    MenuPerfRaw   raw[2];
+    MenuPerfEye   eye[2];                        // the figures on the panel (eye 1: VR only)
+    bool          haveFps = false;
+    double        fps = 0.0, frameMs = 0.0;      // the fps meter's (FpsTick) last figures, copied at each snapshot
+    double        gameMs = -1.0;                 // the game's GPU frame without the mod, -1 = none yet
+    bool          gameNa = false;                // still none 30 s after the open: "n/a"
+    bool          noAa = false;                  // no DLAA / DLSS feature has ever existed this session: the mod anti-aliases nothing -> "game n/a" at once
+    bool          nothing = false;               // 3 s after the open and no pass of the mod has landed since: nothing to measure on this screen
+};
+MenuPerfState g_menuPerf;
+
+// Menu opened: the timers on (when dlaa.ini has them off) + a fresh window; the figures restart.
+void MenuPerfOpen() {
+    MenuPerfState& m = g_menuPerf;
+    m = MenuPerfState();
+    const bool spansOn = GpuTimingOn() || GpuPerf::On();   // the scene span was running: its last figure is current
+    if (!GpuPerf::On()) {
+        GpuPerf::SetOn(true);
+        GpuPerf::Restart();
+        m.forced = true;
+        Log("tuning menu: GPU timers on while the menu is open");
+    }
+    m.spanSeq0 = g_spanSceneLastSeq;
+    m.spanFresh = spansOn && g_spanSceneLastN > 0;
+    QueryPerformanceCounter(&m.tOpen);
+    m.tLast = m.tOpen;
+}
+// Menu closed: the timers back to the dlaa.ini state (perf_timers / debug), as at the start.
+void MenuPerfClose() {
+    if (g_menuPerf.forced) GpuPerf::SetOn(g_perfCfg > 0 || (g_perfCfg < 0 && g_debugIni));
+    g_menuPerf.forced = false;
+}
+// Eye `eye`'s figures since the previous read (false = no pass of that eye landed in between). Always advances the baseline.
+bool MenuPerfEyeDelta(int eye, MenuPerfEye& out) {
+    GpuPerf::EyeStats st;
+    GpuPerf::Stats(eye, &st);                    // false = nothing landed: all zero (a valid baseline)
+    MenuPerfRaw cur;
+    cur.have = true;
+    cur.gen = GpuPerf::Restarts();
+    cur.passes = st.passes;
+    for (int c = 0; c < GpuPerf::kCount; ++c) {   // back to sums: sampled sections average per sample, the rest per pass
+        cur.n[c] = st.n[c];
+        cur.sum[c] = st.avg[c] * (double)(GpuPerf::IsSampled(c) ? st.n[c] : st.passes);
+    }
+    MenuPerfRaw& prev = g_menuPerf.raw[eye];
+    const bool cont = prev.have && prev.gen == cur.gen && cur.passes >= prev.passes;
+    const uint64_t dp = cont ? cur.passes - prev.passes : cur.passes;
+    MenuPerfEye e;
+    e.have = dp > 0;
+    for (int c = 0; c < GpuPerf::kCount && e.have; ++c) {
+        const int g = MenuCostGroup(c);
+        if (g < 0) continue;
+        const uint64_t dn = cont && cur.n[c] >= prev.n[c] ? cur.n[c] - prev.n[c] : cur.n[c];
+        const double ds = cont ? cur.sum[c] - prev.sum[c] : cur.sum[c];
+        const uint64_t div = GpuPerf::IsSampled(c) ? dn : dp;
+        if (div && ds > 0.0) e.grp[g] += ds / (double)div;
+    }
+    for (int g = 0; g < MG_COUNT; ++g) e.total += e.grp[g];
+    prev = cur;
+    if (!e.have) return false;
+    out = e;
+    return true;
+}
+// Per Present while the menu is open (MenuKeys): a snapshot every kMenuPerfEvery Presents, nothing in between.
+void MenuPerfTick() {
+    MenuPerfState& m = g_menuPerf;
+    ++m.presents;
+    if (m.presents < kMenuPerfBase || (m.presents - kMenuPerfBase) % kMenuPerfEvery) return;
+    const bool base = m.presents == kMenuPerfBase;
+    LARGE_INTEGER now{}, freq{};
+    QueryPerformanceCounter(&now);
+    QueryPerformanceFrequency(&freq);
+    const int eyes = MenuVr() ? 2 : 1;
+    for (int e = 0; e < 2; ++e) {
+        MenuPerfEye pe;
+        if (MenuPerfEyeDelta(e, pe) && !base && e < eyes) m.eye[e] = pe;   // no pass of the eye landed: the last figures stay
+    }
+    if (g_fps.have) {                                  // v0.10.0: the fps meter (FpsTick) is the one fps source
+        m.fps = g_fps.fps;
+        m.frameMs = g_fps.frameMs;
+        m.haveFps = true;
+    }
+    m.tLast = now;
+    if (!m.spanFresh && g_spanSceneLastSeq != m.spanSeq0) m.spanFresh = true;
+    if (m.spanFresh && g_spanSceneLastN && m.eye[0].have) {
+        double mod = 0.0;
+        for (int e = 0; e < eyes; ++e) mod += m.eye[e].total;
+        m.gameMs = g_spanSceneLast > mod ? g_spanSceneLast - mod : 0.0;
+    }
+    const double open = freq.QuadPart ? (double)(now.QuadPart - m.tOpen.QuadPart) / (double)freq.QuadPart : 0.0;
+    m.gameNa = m.gameMs < 0.0 && open > 30.0;          // (the scene figure needs ~330 clean frames after the spans start)
+    // The mod's timed sections run only in the driving 3-D scene (not on the menu / garage / profile screens): no pass landed
+    // in the first 3 s = nothing to measure here. The flag clears by itself as soon as a pass lands (eye[0].have is sticky).
+    m.nothing = !m.eye[0].have && open > 3.0;
+    if (!g_ngxEverReady && (g_dlaa[0].FeatureReady() || g_dlaa[1].FeatureReady())) g_ngxEverReady = true;
+    m.noAa = !g_ngxEverReady;
+}
+// "1.2 ms" (the cost column; "<0.1 ms" below 0.05)
+void MenuMs(wchar_t* d, size_t cap, double ms) {
+    if (ms < 0.05) swprintf(d, cap, L"<0.1 ms");
+    else           swprintf(d, cap, L"%.1f ms", ms);
+}
+// The GPU block: line 0 = the game's frame + fps, then the mod per eye (VR: eye 0, eye 1; flat: one line + what the numbers are).
+void MenuPerfLines(TuningMenu::Panel& p, bool vr) {
+    const MenuPerfState& m = g_menuPerf;
+    constexpr size_t kP = sizeof(p.perf[0]) / sizeof(wchar_t);
+    wchar_t game[48], fps[48];
+    if (m.gameMs >= 0.0) swprintf(game, 48, vr ? L"%.1f ms (both eyes)" : L"%.1f ms", m.gameMs);
+    else                 swprintf(game, 48, L"%ls", (m.gameNa || m.noAa) ? L"n/a" : L"measuring...");
+    if (m.haveFps) swprintf(fps, 48, L"%.0f (frame %.1f ms)", m.fps, m.frameMs);
+    else           swprintf(fps, 48, L"measuring...");
+    swprintf(p.perf[0], kP, L"GPU per frame: game %ls | fps %ls", game, fps);
+    if (!GpuPerf::On()) {
+        swprintf(p.perf[1], kP, L"this mod: n/a (the GPU timers could not start: timestamp queries failed)");
+        return;
+    }
+    if (m.nothing && !m.eye[0].have) {                 // no pass of the mod ever landed since the open (3 s+): say so, one line
+        swprintf(p.perf[1], kP, L"this mod: nothing to measure on this screen - it works while you drive; open this menu on the road");
+        if (!vr)
+            swprintf(p.perf[2], kP, L"GPU ms per frame, live. A part can include GPU waiting time (idle); judge gains by the frame time.");
+        return;
+    }
+    for (int e = 0; e < (vr ? 2 : 1); ++e) {
+        wchar_t* const d = p.perf[1 + e];
+        const wchar_t* const pre = vr ? (e ? L"eye 1: " : L"eye 0: ") : L"";
+        const MenuPerfEye& pe = m.eye[e];
+        if (!pe.have) { swprintf(d, kP, L"%lsthis mod: measuring...", pre); continue; }
+        swprintf(d, kP, L"%lsthis mod %.1f ms = NGX %.1f + per-part motion %.1f + camera %.1f + see-through "
+                 L"%.1f + mirrors %.1f + sharpen %.1f + copies %.1f", pre, pe.total, pe.grp[MG_NGX], pe.grp[MG_PART],
+                 pe.grp[MG_CAM], pe.grp[MG_FWD], pe.grp[MG_MIR], pe.grp[MG_SHARP], pe.grp[MG_COPY]);
+    }
+    if (!vr)
+        swprintf(p.perf[2], kP, L"GPU ms per frame, live. A part can include GPU waiting time (idle); judge gains by the frame time.");
+}
+// The "GPU cost" column and the one cost sentence of the selected row (appended to its description).
+void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t sentCap) {
+    const MenuPerfEye& e0 = g_menuPerf.eye[0];   // VR: eye 0's figures
+    const bool timers = GpuPerf::On();
+    constexpr size_t kC = sizeof(p.rows[0].cost) / sizeof(wchar_t);
+    const bool dlaaOn = g_dlaaOn.load();
+    const bool upOn = g_dlssUpscale.load();
+    const bool sharpOn = SceneDlaa::Sharpness() > 0.0f;
+    const bool partOn = g_objMode != 0;
+    const bool mirOn = g_mirOn.load() && MirMode() != 0;
+    const bool fwdOn = g_fwdCfg && g_fwdOn.load() && !g_fwdAutoOff;
+    const int area = SceneDlaa::Area();
+    const wchar_t* const unit = vr ? L"per eye" : L"per frame";
+    auto txt = [&](int row, const wchar_t* t) { swprintf(p.rows[row].cost, kC, L"%ls", t); };
+    auto ms = [&](int row, int g) {
+        if (!timers)        txt(row, L"n/a");
+        else if (!e0.have)  txt(row, g_menuPerf.nothing ? L"-" : L"...");
+        else                MenuMs(p.rows[row].cost, kC, e0.grp[g]);
+    };
+    ms(MR_MODE, MG_NGX);                         if (!dlaaOn) txt(MR_MODE, L"off");
+    txt(MR_PROFILE, L"-");
+    txt(MR_MODEL, L"same");
+    ms(MR_SHARP, MG_SHARP);                      if (!sharpOn) txt(MR_SHARP, L"off");
+    ms(MR_WIDTH, MG_SHARP);                      if (!sharpOn) txt(MR_WIDTH, L"off");
+    txt(MR_LOD, g_lodBias == 0.0f ? L"off" : L"~0 (memory)");
+    txt(MR_LODCUT, LodCutEffective(g_lodBias) == 0.0f ? L"off" : L"~0 (memory)");
+    if (!vr)          txt(MR_AREA, L"-");
+    else if (!dlaaOn) txt(MR_AREA, L"off");
+    else {
+        ms(MR_AREA, MG_NGX);
+        if (timers && e0.have) {
+            wchar_t f[24];
+            MenuMs(f, 24, e0.grp[MG_NGX]);
+            swprintf(p.rows[MR_AREA].cost, kC, L"%ls at %d %%", f, area);
+        }
+    }
+    ms(MR_DRAWIDS, MG_PART);                     if (!partOn) txt(MR_DRAWIDS, L"off");
+    ms(MR_MIRROR, MG_MIR);                       if (!mirOn) txt(MR_MIRROR, L"off");
+    txt(MR_PRETM, vr ? L"-" : L"same");
+    ms(MR_FWD, MG_FWD);                          if (!fwdOn) txt(MR_FWD, L"off");
+    ms(MR_UPSCALE, MG_NGX);                      if (!dlaaOn || !upOn) txt(MR_UPSCALE, L"off");
+    ms(MR_DLAA, MG_NGX);                         if (!dlaaOn) txt(MR_DLAA, L"off");
+    for (int r = MR_OFXR; r < MR_COUNT; ++r) txt(r, L"-");
+
+    // the sentence: "Costs 1.3 ms per eye now; ..." (numbers from the same snapshot as the column)
+    sent[0] = 0;
+    wchar_t f[24] = L"";
+    auto fig = [&](int g) { MenuMs(f, 24, e0.grp[g]); return (const wchar_t*)f; };
+    const bool live = timers && e0.have;
+    // (timers on but no pass landed yet: append nothing -- not "Costs ... ms", not even "measuring...")
+    const wchar_t* const wait = timers ? L"" : L"GPU cost: n/a (the GPU timers could not start).";
+    switch (sel) {
+    case MR_MODE: case MR_DLAA: case MR_UPSCALE:
+        if (!dlaaOn)    swprintf(sent, sentCap, L"Off now: DLAA/DLSS costs nothing.");
+        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
+        else            swprintf(sent, sentCap, L"DLAA/DLSS itself costs %ls %ls now; the DLAA area (VR) and the render scale "
+                                 L"change it.", fig(MG_NGX), unit);
+        break;
+    case MR_PROFILE: swprintf(sent, sentCap, L"high / medium / low change the rows below; watch the GPU line."); break;
+    case MR_MODEL:   swprintf(sent, sentCap, L"All models cost about the same GPU time."); break;
+    case MR_SHARP: case MR_WIDTH:
+        if (!sharpOn)   swprintf(sent, sentCap, L"Off now: sharpening costs nothing.");
+        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
+        else            swprintf(sent, sentCap, L"Costs %ls %ls now; 0 = off saves it.", fig(MG_SHARP), unit);
+        break;
+    case MR_LOD: case MR_LODCUT:
+        swprintf(sent, sentCap, L"No GPU pass of its own: only a little texture bandwidth (~0 ms).");
+        break;
+    case MR_AREA:
+        if (!vr)        break;
+        if (!dlaaOn)    swprintf(sent, sentCap, L"Off now: DLAA/DLSS costs nothing.");
+        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
+        else            swprintf(sent, sentCap, L"DLAA/DLSS costs %ls per eye at %d %%; a smaller area costs less.",
+                                 fig(MG_NGX), area);
+        break;
+    case MR_DRAWIDS:
+        if (!partOn)    swprintf(sent, sentCap, L"Off now: costs nothing.");
+        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
+        else            swprintf(sent, sentCap, L"Costs %ls %ls now; the performance profile medium / low cut it.",
+                                 fig(MG_PART), unit);
+        break;
+    case MR_MIRROR:
+        if (!mirOn)     swprintf(sent, sentCap, L"Off now: costs nothing.");
+        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
+        else            swprintf(sent, sentCap, L"Costs %ls %ls now; mirror_vr_mode / mirror_flat_mode (dlaa.ini) and profile "
+                                 L"low change it.", fig(MG_MIR), unit);
+        break;
+    case MR_PRETM:
+        if (!vr) swprintf(sent, sentCap, L"Costs about the same as DLAA after the tonemap.");
+        break;
+    case MR_FWD:
+        if (!fwdOn)     swprintf(sent, sentCap, L"Off now: costs nothing.");
+        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
+        else            swprintf(sent, sentCap, L"Costs %ls %ls now; off saves it (wires then move with what is behind them).",
+                                 fig(MG_FWD), unit);
+        break;
+    default: break;
+    }
+}
+
+// One row: name, the hotkey text (+ "  (VR only)" / "  (flat only)" tag), greyed = not applicable now. The value is set by the caller.
+void MenuRow(TuningMenu::Panel& p, int id, const wchar_t* name, const char* keys, const char* tag, bool greyed) {
+    TuningMenu::Row& r = p.rows[id];
+    wcsncpy_s(r.name, name, _TRUNCATE);
+    char kb[128];
+    if (tag) snprintf(kb, sizeof(kb), "%s  (%s)", keys, tag);
+    else     snprintf(kb, sizeof(kb), "%s", keys);
+    MenuWiden(r.keys, sizeof(r.keys) / sizeof(r.keys[0]), kb);
+    r.greyed = greyed ? 1 : 0;
+}
+// The panel as it is now (built at every draw while open: a few dozen snprintf, nothing per frame when closed).
+void MenuBuildPanel(TuningMenu::Panel& p) {
+    memset(&p, 0, sizeof(p));
+    const bool vr = MenuVr();
+    constexpr size_t kV = sizeof(p.rows[0].value) / sizeof(wchar_t);
+    swprintf(p.title, sizeof(p.title) / sizeof(wchar_t), L"ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu", DLAA_INJECTOR_VERSION);
+    p.nRows = MR_COUNT;
+    p.sel = g_menuSel;
+    char k[128];
+    auto pair = [&](KeyAction a, KeyAction b) { snprintf(k, sizeof(k), "%s / %s", KeyName(a), KeyName(b)); return k; };
+    const wchar_t* const onOff[2] = { L"off", L"on" };
+
+    MenuRow(p, MR_MODE, L"Mode", KeyName(KA_MODE_CYCLE), nullptr, false);
+    swprintf(p.rows[MR_MODE].value, kV, L"%ls", !g_dlaaOn.load() ? L"off" : (g_dlssUpscale.load() ? L"DLSS" : L"DLAA"));
+    MenuRow(p, MR_PROFILE, L"Performance profile", KeyName(KA_PROFILE), nullptr, false);
+    swprintf(p.rows[MR_PROFILE].value, kV, L"%hs", kProfName[g_profile < 0 || g_profile > 2 ? 0 : g_profile]);
+    snprintf(k, sizeof(k), "%s .. %s", KeyName(KA_MODEL1), KeyName(KA_MODEL4));
+    MenuRow(p, MR_MODEL, L"DLAA model", k, nullptr, false);
+    swprintf(p.rows[MR_MODEL].value, kV, L"%hs", SceneDlaa::DlssPresetName());
+    MenuRow(p, MR_SHARP, L"Sharpen strength", pair(KA_SHARPEN_DOWN, KA_SHARPEN_UP), nullptr, false);
+    const float sharp = SceneDlaa::Sharpness();
+    swprintf(p.rows[MR_SHARP].value, kV, sharp <= 0.0f ? L"%.1f (off)" : L"%.1f", (double)sharp);
+    MenuRow(p, MR_WIDTH, L"Sharpen width", pair(KA_WIDTH_DOWN, KA_WIDTH_UP), nullptr, false);
+    swprintf(p.rows[MR_WIDTH].value, kV, L"%.1f px", (double)SceneDlaa::SharpRadius());
+    MenuRow(p, MR_LOD, L"Texture sharpness", pair(KA_LOD_DOWN, KA_LOD_UP), nullptr, false);
+    swprintf(p.rows[MR_LOD].value, kV, g_lodBias == 0.0f ? L"%.2f (off)" : L"%.2f", (double)g_lodBias);
+    MenuRow(p, MR_LODCUT, L"Cut-out texture sharpness", pair(KA_LOD_CUT_DOWN, KA_LOD_CUT_UP), nullptr, false);
+    if (LodCutFollows()) swprintf(p.rows[MR_LODCUT].value, kV, L"same (%.2f)", (double)LodCutUserValue());
+    else                 swprintf(p.rows[MR_LODCUT].value, kV, L"%.2f", (double)g_lodCutBias);
+    MenuRow(p, MR_AREA, L"DLAA area (VR)", pair(KA_AREA_DOWN, KA_AREA_UP), vr ? nullptr : "VR only", !vr);
+    if (vr) swprintf(p.rows[MR_AREA].value, kV, L"%d %%", SceneDlaa::Area());
+    else    swprintf(p.rows[MR_AREA].value, kV, L"100 %% (flat)");
+    MenuRow(p, MR_DRAWIDS, L"Per-part motion vectors", KeyName(KA_DRAWID_TOGGLE), nullptr, false);
+    swprintf(p.rows[MR_DRAWIDS].value, kV, L"%ls", g_objMode == 2 ? L"on" : (g_objMode == 1 ? L"stencil ids (1)" : L"off"));
+    MenuRow(p, MR_MIRROR, L"Mirror DLAA", KeyName(KA_MIRROR_TOGGLE), nullptr, false);
+    swprintf(p.rows[MR_MIRROR].value, kV, L"%ls", onOff[g_mirOn.load() ? 1 : 0]);
+    MenuRow(p, MR_PRETM, L"DLAA before tonemap (flat)", KeyName(KA_PRE_TONEMAP), vr ? "flat only" : nullptr, vr);
+    swprintf(p.rows[MR_PRETM].value, kV, L"%ls", !g_preCfg ? L"off (dlaa.ini 0)" : onOff[g_preOn.load() ? 1 : 0]);
+    MenuRow(p, MR_FWD, L"See-through depth", KeyName(KA_FWD_DEPTH), nullptr, false);
+    swprintf(p.rows[MR_FWD].value, kV, L"%ls", !g_fwdCfg ? L"off (dlaa.ini 0)"
+                                              : (!g_fwdOn.load() ? L"off" : (g_fwdAutoOff ? L"on (GPU budget: off)" : L"on")));
+    MenuRow(p, MR_UPSCALE, L"DLSS upscale", KeyName(KA_UPSCALE_TOGGLE), nullptr, false);
+    swprintf(p.rows[MR_UPSCALE].value, kV, L"%ls", onOff[g_dlssUpscale.load() ? 1 : 0]);
+    MenuRow(p, MR_DLAA, L"DLAA on / off", KeyName(KA_DLAA_TOGGLE), nullptr, false);
+    swprintf(p.rows[MR_DLAA].value, kV, L"%ls", onOff[g_dlaaOn.load() ? 1 : 0]);
+    MenuRow(p, MR_OFXR, L"OFXR Bridge (VR frame gen)", "dlaa.ini ofxr_bridge", nullptr, !Ofxr::g_on.load());   // info row
+    if (!Ofxr::g_on.load())      swprintf(p.rows[MR_OFXR].value, kV, L"off (dlaa.ini 0)");
+    else if (Ofxr::Detected())   swprintf(p.rows[MR_OFXR].value, kV, L"found");   // (no live counter: it would rebuild the panel every frame)
+    else                         swprintf(p.rows[MR_OFXR].value, kV, L"not found");
+    MenuRow(p, MR_POSX, L"Panel position X", vr ? "dlaa.ini menu_vr_x" : "dlaa.ini menu_x", nullptr, false);
+    if (vr) swprintf(p.rows[MR_POSX].value, kV, L"%+d %%", g_menuVrX);
+    else    swprintf(p.rows[MR_POSX].value, kV, L"%d %%", g_menuX);
+    MenuRow(p, MR_POSY, L"Panel position Y", vr ? "dlaa.ini menu_vr_y" : "dlaa.ini menu_y", nullptr, false);
+    if (vr) swprintf(p.rows[MR_POSY].value, kV, L"%+d %%", g_menuVrY);
+    else    swprintf(p.rows[MR_POSY].value, kV, L"%d %%", g_menuY);
+    MenuRow(p, MR_SIZE, L"Panel size", vr ? "dlaa.ini menu_vr_scale" : "dlaa.ini menu_scale", nullptr, false);
+    swprintf(p.rows[MR_SIZE].value, kV, L"%.1f", (double)(vr ? g_menuVrScale : g_menuScale));
+    MenuRow(p, MR_DEPTH, L"Panel VR depth", "dlaa.ini menu_vr_depth", vr ? nullptr : "VR only", !vr);
+    swprintf(p.rows[MR_DEPTH].value, kV, L"%d px", g_menuVrDepth);
+    MenuRow(p, MR_FPS, L"FPS counter", "dlaa.ini fps_show", nullptr, false);
+    swprintf(p.rows[MR_FPS].value, kV, L"%ls", onOff[g_fpsShow ? 1 : 0]);
+    MenuRow(p, MR_FPSX, L"FPS counter X", vr ? "dlaa.ini fps_vr_x" : "dlaa.ini fps_x", nullptr, false);
+    if (vr) swprintf(p.rows[MR_FPSX].value, kV, L"%+d %%", g_fpsVrX);
+    else    swprintf(p.rows[MR_FPSX].value, kV, L"%d %%", g_fpsX);
+    MenuRow(p, MR_FPSY, L"FPS counter Y", vr ? "dlaa.ini fps_vr_y" : "dlaa.ini fps_y", nullptr, false);
+    if (vr) swprintf(p.rows[MR_FPSY].value, kV, L"%+d %%", g_fpsVrY);
+    else    swprintf(p.rows[MR_FPSY].value, kV, L"%d %%", g_fpsY);
+    MenuRow(p, MR_FPSSIZE, L"FPS counter size", vr ? "dlaa.ini fps_vr_scale" : "dlaa.ini fps_scale", nullptr, false);
+    swprintf(p.rows[MR_FPSSIZE].value, kV, L"%.1f", (double)(vr ? g_fpsVrScale : g_fpsScale));
+    MenuRow(p, MR_SAVE, L"Save to dlaa.ini", KeyName(KA_SAVE), nullptr, false);
+    swprintf(p.rows[MR_SAVE].value, kV, L"-");
+    MenuRow(p, MR_CLOSE, L"Close menu", KeyName(KA_MENU), nullptr, false);
+    swprintf(p.rows[MR_CLOSE].value, kV, L"-");
+
+    const int sel = g_menuSel < 0 || g_menuSel >= MR_COUNT ? 0 : g_menuSel;
+    MenuPerfLines(p, vr);                                 // v0.10.0: the GPU block + the GPU cost column (once-a-second figures)
+    swprintf(p.costHead, sizeof(p.costHead) / sizeof(wchar_t), L"%ls", vr ? L"GPU cost (eye 0)" : L"GPU cost");
+    wchar_t sent[200];
+    MenuPerfCosts(p, vr, sel, sent, sizeof(sent) / sizeof(sent[0]));
+    constexpr size_t kD = sizeof(p.desc) / sizeof(wchar_t);
+    if (kMenuDesc[sel]) swprintf(p.desc, kD, L"%ls%ls%ls", kMenuDesc[sel], sent[0] ? L" " : L"", sent);
+    else                swprintf(p.desc, kD, L"%hs also closes it.", KeyName(KA_MENU));
+    swprintf(p.footer, sizeof(p.footer) / sizeof(wchar_t), L"%hs / %hs select     %hs / %hs change     %hs close",
+             KeyName(KA_MENU_UP), KeyName(KA_MENU_DOWN), KeyName(KA_MENU_LEFT), KeyName(KA_MENU_RIGHT), KeyName(KA_MENU));
+}
+
+void MenuClose(uint64_t n, const char* why) {
+    g_menuOpen = false;
+    g_menuBlitEye = -1; g_menuBlitRt = nullptr;
+    PlayTones(1, 300, 120, 0);
+    char placed[200] = "";
+    if (g_menuMoved)
+        snprintf(placed, sizeof(placed), " -- panel now flat x=%d%% y=%d%% size %.1f, VR x=%+d%% y=%+d%% size %.1f depth %d px (%s or "
+                 "the Save row writes it)", g_menuX, g_menuY, (double)g_menuScale, g_menuVrX, g_menuVrY, (double)g_menuVrScale,
+                 g_menuVrDepth, KeyName(KA_SAVE));
+    char fpsPlaced[200] = "";
+    if (g_fpsMoved)
+        snprintf(fpsPlaced, sizeof(fpsPlaced), " -- fps box now %s, flat x=%d%% y=%d%% size %.1f, VR x=%+d%% y=%+d%% size %.1f (%s or "
+                 "the Save row writes it)", g_fpsShow ? "on" : "off", g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY,
+                 (double)g_fpsVrScale, KeyName(KA_SAVE));
+    Log("tuning menu closed (%s, Present #%llu)%s%s", why, (unsigned long long)n, placed, fpsPlaced);
+    g_menuMoved = false;
+    g_fpsMoved = false;
+    MenuPerfClose();                                      // the GPU timers back to the dlaa.ini state
+    TuningMenu::ReleaseTargets();                         // the panel texture goes; the shaders / states stay (small)
+    if (!g_fpsShow) FpsStop();                            // the fps meter runs on only for the fps box
+}
+
+// Left / Right on row `row`. The step rows accept auto-repeat; the cycle / toggle / action rows act on a fresh press only.
+void MenuChange(int row, int dir, bool repeat, uint64_t n) {
+    const bool stepRow = row == MR_SHARP || row == MR_WIDTH || row == MR_LOD || row == MR_LODCUT || row == MR_AREA ||
+                         row == MR_POSX || row == MR_POSY || row == MR_SIZE || row == MR_DEPTH || row == MR_FPSX ||
+                         row == MR_FPSY || row == MR_FPSSIZE;
+    if (repeat && !stepRow) return;
+    const bool vr = MenuVr();
+    switch (row) {
+    case MR_MODE:    CycleMode(n, dir); break;
+    case MR_PROFILE: CycleProfile(n, dir); break;
+    case MR_MODEL: {
+        const char* cur = SceneDlaa::DlssPresetName();
+        const int idx = !strcmp(cur, "default") ? 0 : (!strcmp(cur, "E") ? 1 : (!strcmp(cur, "F") ? 2 : (!strcmp(cur, "M") ? 3 : -1)));
+        SelectDlssPreset(idx < 0 ? (dir > 0 ? 0 : 3) : (idx + dir + 4) % 4, n);   // J / K / L from dlaa.ini: Right -> default
+        break;
+    }
+    case MR_SHARP:   StepSharpness(dir, n); break;
+    case MR_WIDTH:   StepSharpRadius(dir, n); break;
+    case MR_LOD:     StepLodBias(dir, n); break;
+    case MR_LODCUT:  StepLodCutout(dir, n); break;
+    case MR_AREA:    StepArea(dir, n); break;               // flat: refuses with its low beep
+    case MR_DRAWIDS: ToggleDrawIds(n); break;
+    case MR_MIRROR:  ToggleMirrors(n); break;
+    case MR_PRETM:   TogglePreTonemap(n); break;
+    case MR_FWD:     ToggleFwdDepth(n); break;
+    case MR_UPSCALE: ToggleUpscale(n); break;
+    case MR_DLAA:    ToggleDlaa(n); break;
+    case MR_OFXR:    break;                                 // information only (dlaa.ini ofxr_bridge, read at start)
+    case MR_POSX:
+        if (vr) g_menuVrX = MenuClampI(g_menuVrX + dir, -50, 50); else g_menuX = MenuClampI(g_menuX + dir, 0, 90);
+        g_menuExplicit = g_menuMoved = true;
+        break;
+    case MR_POSY:
+        if (vr) g_menuVrY = MenuClampI(g_menuVrY + dir, -50, 50); else g_menuY = MenuClampI(g_menuY + dir, 0, 90);
+        g_menuExplicit = g_menuMoved = true;
+        break;
+    case MR_SIZE: {
+        float& s = vr ? g_menuVrScale : g_menuScale;
+        float v = std::floor((s + 0.1f * (float)dir) * 10.0f + 0.5f) / 10.0f;
+        s = v < 0.5f ? 0.5f : (v > 2.0f ? 2.0f : v);
+        g_menuExplicit = g_menuMoved = true;
+        break;
+    }
+    case MR_DEPTH:
+        g_menuVrDepth = MenuClampI(g_menuVrDepth + 2 * dir, 0, 200);
+        g_menuExplicit = g_menuMoved = true;
+        break;
+    case MR_FPS:     ToggleFpsBox(n); break;                // Left and Right both switch it
+    case MR_FPSX:
+        if (vr) g_fpsVrX = MenuClampI(g_fpsVrX + dir, -50, 50); else g_fpsX = MenuClampI(g_fpsX + dir, 0, 95);
+        g_fpsExplicit = g_fpsMoved = true;
+        break;
+    case MR_FPSY:
+        if (vr) g_fpsVrY = MenuClampI(g_fpsVrY + dir, -50, 50); else g_fpsY = MenuClampI(g_fpsY + dir, 0, 95);
+        g_fpsExplicit = g_fpsMoved = true;
+        break;
+    case MR_FPSSIZE: {
+        float& s = vr ? g_fpsVrScale : g_fpsScale;
+        float v = std::floor((s + 0.1f * (float)dir) * 10.0f + 0.5f) / 10.0f;
+        s = v < 0.2f ? 0.2f : (v > 3.0f ? 3.0f : v);         // phase 15: 0.2..3.0 (was 0.5..3.0)
+        g_fpsExplicit = g_fpsMoved = true;
+        break;
+    }
+    case MR_SAVE:    SaveSettings(n); break;
+    case MR_CLOSE:   MenuClose(n, "Close row"); break;
+    default: break;
+    }
+}
+
+// Per Present, before the other user keys (PresentFrameWork).
+void MenuKeys(uint64_t n) {
+    if (KeyHit(KA_MENU)) {
+        if (!g_menuOpen.load()) {
+            g_menuOpen = true;
+            g_menuMoved = false;
+            MenuPerfOpen();                               // GPU timers on while open (debug = 0) + fresh figures
+            PlayTones(2, 880, 60, 60);
+            Log("tuning menu opened (%s, Present #%llu) -- %s / %s select a row, %s / %s change it; the game does not see these "
+                "keys while the menu is open", KeyName(KA_MENU), (unsigned long long)n, KeyName(KA_MENU_UP), KeyName(KA_MENU_DOWN),
+                KeyName(KA_MENU_LEFT), KeyName(KA_MENU_RIGHT));
+        } else {
+            MenuClose(n, KeyName(KA_MENU));
+        }
+        return;                                           // the open / close press does nothing else this frame
+    }
+    if (!g_menuOpen.load(std::memory_order_relaxed)) return;
+    if (KeyHit(KA_MENU_UP))   g_menuSel = (g_menuSel + MR_COUNT - 1) % MR_COUNT;
+    if (KeyHit(KA_MENU_DOWN)) g_menuSel = (g_menuSel + 1) % MR_COUNT;
+    if (KeyHit(KA_MENU_RIGHT))     MenuChange(g_menuSel, +1, g_keyRepeat[KA_MENU_RIGHT], n);
+    else if (KeyHit(KA_MENU_LEFT)) MenuChange(g_menuSel, -1, g_keyRepeat[KA_MENU_LEFT], n);
+    if (g_menuOpen.load(std::memory_order_relaxed)) MenuPerfTick();   // (the Close row may have closed it just now)
+}
+
+// The Present-time target of the panel and the fps box. Flat (and the VR desktop mirror): the backbuffer of the presenting
+// swapchain (its device must be the game's); present-layer mode (sc == null, bctx = the game context at the frame boundary):
+// the bound RT0 when it is the game-side backbuffer, else none this frame. False = nothing to draw on.
+bool MenuPresentTarget(IDXGISwapChain* sc, ID3D11DeviceContext* bctx, ID3D11DeviceContext*& ctxOut,
+                       Microsoft::WRL::ComPtr<ID3D11RenderTargetView>& rtv, D3D11_TEXTURE2D_DESC& td, int& outMode) {
+    ID3D11DeviceContext* const ctx = sc ? g_gameCtx.load(std::memory_order_acquire) : bctx;
+    if (!ctx || !IsGameCtx(ctx)) return false;
+    outMode = TuningMenu::kOutRaw;
+    if (sc) {
+        Microsoft::WRL::ComPtr<ID3D11Device> scDev, ctxDev;
+        if (FAILED(sc->GetDevice(__uuidof(ID3D11Device), (void**)scDev.GetAddressOf())) || !scDev) return false;
+        ctx->GetDevice(ctxDev.GetAddressOf());
+        if (scDev.Get() != ctxDev.Get()) return false;    // another device presents (adoption pending): not ours to draw on
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> bb;
+        if (FAILED(sc->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)bb.GetAddressOf())) || !bb) return false;
+        bb->GetDesc(&td);
+        // a view for this Present only (no reference on the backbuffer is kept: ResizeBuffers must stay possible)
+        const HRESULT hr = scDev->CreateRenderTargetView(bb.Get(), nullptr, rtv.GetAddressOf());
+        if (FAILED(hr) || !rtv) {
+            static int logs = 0;
+            if (logs++ < 3) Log("tuning menu: backbuffer RTV create failed hr=0x%lx (%ux%u fmt=%d) -- panel / fps box not drawn",
+                                (unsigned long)hr, td.Width, td.Height, (int)td.Format);
+            return false;
+        }
+        outMode = MenuOutMode(td.Format, true);
+    } else {
+        ctx->OMGetRenderTargets(1, rtv.GetAddressOf(), nullptr);
+        if (!rtv) return false;
+        Microsoft::WRL::ComPtr<ID3D11Resource> res;
+        rtv->GetResource(res.GetAddressOf());
+        if (!res || (void*)res.Get() != g_backbuffer.load(std::memory_order_relaxed)) return false;
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> t;
+        if (FAILED(res.As(&t)) || !t) return false;
+        t->GetDesc(&td);
+        D3D11_RENDER_TARGET_VIEW_DESC rd{};
+        rtv->GetDesc(&rd);
+        outMode = MenuOutMode(rd.Format, true);
+    }
+    if (!td.Width || !td.Height) return false;
+    ctxOut = ctx;
+    return true;
+}
+
+// At Present (flat, and the VR desktop mirror at the FLAT placement): the panel while the menu is open, then the fps box while
+// it is on (on top of the panel).
+void MenuDrawAtPresent(IDXGISwapChain* sc, ID3D11DeviceContext* bctx) {
+    if (t_inDlaa) return;
+    ID3D11DeviceContext* ctx = nullptr;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv;
+    D3D11_TEXTURE2D_DESC td{};
+    int outMode = TuningMenu::kOutRaw;
+    if (!MenuPresentTarget(sc, bctx, ctx, rtv, td, outMode)) return;
+    const float W = (float)td.Width, H = (float)td.Height;
+    t_inDlaa = true;
+    if (g_menuOpen.load(std::memory_order_relaxed)) {
+        TuningMenu::Panel p;
+        MenuBuildPanel(p);
+        const float scale = H / 1080.0f * g_menuScale;
+        const float build = (MenuVr() && g_menuVrBuild > 0.0f) ? g_menuVrBuild : scale;   // VR: the eyes' texture, scaled
+        TuningMenu::Draw(ctx, rtv.Get(), td.Width, td.Height, (float)g_menuX / 100.0f * W, (float)g_menuY / 100.0f * H, scale,
+                         build, outMode, p);
+    }
+    if (g_fpsShow) {
+        const float scale = H / 1080.0f * g_fpsScale;
+        const float build = (MenuVr() && g_fpsVrBuild > 0.0f) ? g_fpsVrBuild : scale;     // VR: the eyes' texture, scaled
+        // kept inside the picture (fps_x / fps_y up to 95 % with a large box would push it off the edge)
+        const float bw = TuningMenu::kWidgetRefW * scale, bh = TuningMenu::kWidgetRefH * scale;
+        float x0 = (float)g_fpsX / 100.0f * W, y0 = (float)g_fpsY / 100.0f * H;
+        if (x0 > W - bw) x0 = W - bw;
+        if (y0 > H - bh) y0 = H - bh;
+        if (x0 < 0.0f) x0 = 0.0f;
+        if (y0 < 0.0f) y0 = 0.0f;
+        TuningMenu::DrawWidget(ctx, rtv.Get(), td.Width, td.Height, x0, y0, scale, build, outMode, g_fps.line1, g_fps.line2);
+    }
+    t_inDlaa = false;
+}
+
+// VR: the panel while the menu is open, then the fps box while it is on, into `rtv` (an eye texture view); both centred on the
+// eye's optical centre + their own offsets, shifted inward by the same menu_vr_depth. v0.10.0 phase 15: split out of MenuDrawVr
+// for the menu / truck-preview eye pictures (MenuDrawPreview); the centre comes from VrEyeCentre (the world eye's, else the
+// preview picture's own -- the VR main menu has no world eye yet).
+void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv) {
+    const bool menuOpen = g_menuOpen.load(std::memory_order_relaxed);
+    if (eye < 0 || eye >= kMaxEyes || t_inDlaa || !rtv || !(menuOpen || g_fpsShow)) return;
+    Microsoft::WRL::ComPtr<ID3D11Resource> res;
+    rtv->GetResource(res.GetAddressOf());
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> t;
+    if (!res || FAILED(res.As(&t)) || !t) return;
+    D3D11_TEXTURE2D_DESC td{};
+    t->GetDesc(&td);                                      // the eye texture's own size (never the backbuffer's)
+    if (!td.Width || !td.Height) return;
+    D3D11_RENDER_TARGET_VIEW_DESC rd{};
+    rtv->GetDesc(&rd);
+    const float W = (float)td.Width, H = (float)td.Height;
+    float u = 0.5f, v = 0.5f;
+    VrEyeCentre(eye, &u, &v);
+    const float shift = (float)g_menuVrDepth * (eye == 0 ? 1.0f : -1.0f);   // inward: eye 0 right, eye 1 left
+    const int outMode = MenuOutMode(rd.Format, false);
+    t_inDlaa = true;
+    if (menuOpen) {
+        // text size as with the 720-px panel at 45 % of the eye width (the GPU cost column made the panel 860 px wide: ~54 %)
+        const float scale = W * 0.45f / 720.0f * g_menuVrScale;
+        if (eye == 0 || g_menuVrBuild <= 0.0f) g_menuVrBuild = scale;   // one build scale for both eyes and the mirror
+        const float cx = u * W + (float)g_menuVrX / 100.0f * W + shift;
+        const float cy = v * H + (float)g_menuVrY / 100.0f * H;
+        TuningMenu::Panel p;
+        MenuBuildPanel(p);
+        const float pw = TuningMenu::kRefWidth * scale, ph = TuningMenu::RefHeight(p.nRows) * scale;
+        TuningMenu::Draw(ctx, rtv, td.Width, td.Height, cx - 0.5f * pw, cy - 0.5f * ph, scale, g_menuVrBuild, outMode, p);
+    }
+    if (g_fpsShow) {
+        const float scale = W * 0.08f / TuningMenu::kWidgetRefW * g_fpsVrScale;   // 1 = 8 % of the eye width
+        if (eye == 0 || g_fpsVrBuild <= 0.0f) g_fpsVrBuild = scale;     // one build scale for both eyes and the mirror
+        const float cx = u * W + (float)g_fpsVrX / 100.0f * W + shift;
+        const float cy = v * H + (float)g_fpsVrY / 100.0f * H;
+        const float bw = TuningMenu::kWidgetRefW * scale, bh = TuningMenu::kWidgetRefH * scale;
+        TuningMenu::DrawWidget(ctx, rtv, td.Width, td.Height, cx - 0.5f * bw, cy - 0.5f * bh, scale, g_fpsVrBuild, outMode,
+                               g_fps.line1, g_fps.line2);
+    }
+    t_inDlaa = false;
+}
+
+// VR world: right after the game's eye blit Draw (and the DLSS upscale composite), hkDraw. RT0 must still be the blit's eye
+// texture.
+void MenuDrawVr(ID3D11DeviceContext* ctx) {
+    const int eye = g_menuBlitEye;
+    void* const rt = g_menuBlitRt;
+    g_menuBlitEye = -1; g_menuBlitRt = nullptr;
+    if (eye < 0 || eye >= kMaxEyes || t_inDlaa || !(g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)) return;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv;
+    ctx->OMGetRenderTargets(1, rtv.GetAddressOf(), nullptr);
+    if (!rtv) return;
+    Microsoft::WRL::ComPtr<ID3D11Resource> res;
+    rtv->GetResource(res.GetAddressOf());
+    if (!res || (void*)res.Get() != rt) return;
+    MenuDrawVrOn(ctx, eye, rtv.Get());
+}
+
+// v0.10.0 phase 15: VR menu / truck-preview screens (the main menu before a save is loaded, the garage / truck dealer): the
+// eye pictures are not world eye blits but the preview composites (PreviewComposite), so MenuDrawVr never ran there. Called
+// right after preview target `idx` was flushed -- trigger (a): after the game's first non-composite Draw / DrawIndexed into
+// it (the VR verts=96 Draw; the panel goes on top of it, as on top of the world blit), trigger (b): at the bind that leaves it
+// -- through the game's own RTV of its composites (PvTarget::rtv), so the panel lands on the finished, anti-aliased picture
+// (DLAA never sees it). Not at Present (trigger (c)): the eye images are handed to the runtime before the mirror Present.
+// Eye: the target's preview unit of this frame (PvUnitOf: the RT's eye map entry from the projection verdicts, the same eye
+// the DLAA unit uses). PreviewFlush resolves it while DLAA runs; with DLAA off / passive (or an early return there) it is
+// asked here, once per target and frame -- PvReadbacksOn keeps the verdicts coming while the panel / box is up. An eye not
+// known yet (a new RT, the first frames of a screen) gets no panel this frame: the composite order is NOT a usable guess, the
+// game renders the two eyes in either order (the 18:10 log: order != eye in a third of the runs), and a panel that jumps
+// between the eyes' placements is worse than none for a few frames. The flat route (backbuffer target) is
+// MenuDrawAtPresent's.
+uint64_t g_menuPvDraws = 0;                               // panel / fps box draws onto preview eye pictures (log)
+uint64_t g_menuPvNoEye = 0;                               // ... skipped: the eye of the picture is not known yet (log)
+void MenuDrawPreview(ID3D11DeviceContext* ctx, int idx, char trigger) {
+    if (idx < 0 || idx >= kPtMax || t_inDlaa || !MenuVrPreviewWanted()) return;
+    PvTarget& tg = g_pt[idx];
+    if (!tg.tex || !tg.rtv || PvIsBackbufferTarget(tg.tex.Get())) return;
+    const uint64_t fr = g_frames.load(std::memory_order_relaxed);
+    const bool askedHere = tg.unit < 0 && !tg.unitTried;
+    const int eye = askedHere ? PvUnitOf(idx, fr) : tg.unit;
+    if (eye < 0 || eye >= kMaxEyes) {
+        if (g_menuPvNoEye++ < 4)
+            Log("tuning menu: VR panel / fps box NOT drawn on menu / truck-preview target order %d -- its eye is not known yet "
+                "(eye map: waiting for a projection verdict, or a map conflict; trigger (%c), Present #%llu)", idx, trigger,
+                (unsigned long long)fr);
+        return;
+    }
+    if (g_menuPvDraws++ < 4) {
+        float u = 0.5f, v = 0.5f;
+        const bool known = VrEyeCentre(eye, &u, &v);
+        Log("tuning menu: VR panel / fps box drawn on a menu / truck-preview eye picture (target order %d -> eye %d, %s, "
+            "trigger (%c), centre uv=(%.3f, %.3f)%s, DLAA %s, Present #%llu)", idx, eye,
+            askedHere ? "eye map asked by the menu" : "the DLAA unit's eye", trigger, (double)u, (double)v,
+            known ? "" : " = image centre, optical centre not known yet",
+            (g_dlaaOn.load(std::memory_order_relaxed) && !g_passive.load(std::memory_order_relaxed)) ? "on" : "off / passive",
+            (unsigned long long)fr);
+    }
+    MenuDrawVrOn(ctx, eye, tg.rtv.Get());
+}
+
+// "mirror units @blit N" (the FIFO stats window, every 600 blits): one line for all units + a WARNING per unit above its
+// GPU budget. Restarts the window.
+void MirStatsLog(uint64_t blit) {
+    bool any = false;
+    for (const MirUnit& m : g_mir) any = any || m.used;
+    if (!any && !g_mirOn.load(std::memory_order_relaxed)) return;   // never on, never used: no line (old logs unchanged)
+    std::string s;
+    char b[1024];
+    const double pres = g_mirWinPresents ? (double)g_mirWinPresents : 1.0;
+    snprintf(b, sizeof(b), "mirror units @blit %llu: %s | views/frame %.2f (frames with mirror views %llu of %llu), handled "
+             "%llu, not handled %llu in total (this window over mirror_max_views=%d: %llu) |", (unsigned long long)blit,
+             MirPathLive() ? "ACTIVE" : (g_mirOn.load() ? "inactive (DLAA off / passive / warm-up)" : "OFF (mirror key / mirror_dlaa)"),
+             (double)g_mirWinViews / pres, (unsigned long long)g_mirWinFrames, (unsigned long long)g_mirWinPresents,
+             (unsigned long long)g_mirHandled, (unsigned long long)g_mirNotHandled, g_mirMaxViews,
+             (unsigned long long)g_mirWinCap);
+    s += b;
+    int units = 0;
+    double gpuFrame = 0.0;
+    for (int u = 0; u < kMirCap; ++u) {
+        MirUnit& m = g_mir[u];
+        if (!m.used) continue;
+        ++units;
+        double rAvg = 0, rMax = 0, pAvg = 0, pMax = 0;
+        uint64_t rN = 0, pN = 0;
+        m.gpuRun.Take(&rAvg, &rMax, &rN);
+        m.gpuReplay.Take(&pAvg, &pMax, &pN);
+        const DrawIdMv::Stats& ds = m.dl.Mv().DrawIds().GetStats();
+        const uint64_t st1 = ds.st[1] - m.ds0.st[1], st2 = ds.st[2] - m.ds0.st[2], st3 = ds.st[3] - m.ds0.st[3];
+        const uint64_t elig = st1 + st2 + st3;
+        const double rb = ds.rbFrames > m.ds0.rbFrames ? (double)(ds.rbFrames - m.ds0.rbFrames) : 0.0;
+        const double rbd = rb > 0 ? rb : 1.0;
+        const uint64_t wpx = ds.worldPx - m.ds0.worldPx;
+        const double v = m.sViews ? (double)m.sViews : 1.0;
+        snprintf(b, sizeof(b), " [unit %d (eye %d) %ux%u: views %llu, dlaa ok %llu fail %llu deferred %llu, resets %llu "
+                 "(re-home %llu, take-over %llu), late %llu, no-colour %llu, jitter %llu, snapshot %llu / missing %llu | "
+                 "candidates %.1f/view | draw-ids: recorded %.0f/view (full %llu), replayed %.0f/view (%.0f skipped), forced "
+                 "%llu (capped %llu), no target %llu, paired %.1f %% (movers %.1f, static %.1f, unpaired %.1f per frame; twin "
+                 "%.1f, origin %.1f, parent %.1f), id "
+                 "coverage %.1f %% of world px, low-pair frames %llu, camR consensus %llu / medoid fallback %llu frames | GPU: "
+                 "DLAA %.3f ms avg / %.3f max (%llu timed), replay %.3f ms avg / %.3f max]", u, 20 + u, m.w, m.h, (unsigned long long)m.sViews, (unsigned long long)m.sOk,
+                 (unsigned long long)m.sFail, (unsigned long long)m.sDeferred, (unsigned long long)m.sResets,
+                 (unsigned long long)m.sRehome, (unsigned long long)m.sSteal, (unsigned long long)m.sLate,
+                 (unsigned long long)m.sNoColor, (unsigned long long)m.sJit, (unsigned long long)m.sSnap,
+                 (unsigned long long)m.sNoSnap, (double)m.sCand / v, (double)m.sRecDraws / v,
+                 (unsigned long long)m.sRecFull, (double)m.sReplayed / v, (double)m.sSkipped / v,
+                 (unsigned long long)m.sForced, (unsigned long long)m.sForcedCapped, (unsigned long long)m.sNoTarget,
+                 elig ? 100.0 * (double)(st2 + st3) / (double)elig : 0.0, (double)st3 / rbd, (double)st2 / rbd,
+                 (double)st1 / rbd, (double)(ds.twins - m.ds0.twins) / rbd,                       // v0.10.0 phase 5
+                 (double)(ds.gbufAttached - m.ds0.gbufAttached) / rbd,
+                 (double)(ds.parents - m.ds0.parents) / rbd,                                       // v0.10.0 phase 6
+                 wpx ? 100.0 * (double)(ds.idPx - m.ds0.idPx) / (double)wpx : 0.0,
+                 (unsigned long long)(ds.lowPairFrames - m.ds0.lowPairFrames),
+                 (unsigned long long)(ds.consFrames[0] - m.ds0.consFrames[0]),
+                 (unsigned long long)(ds.consFallback[0] - m.ds0.consFallback[0]), rAvg, rMax, (unsigned long long)rN, pAvg,
+                 pMax);
+        s += b;
+        gpuFrame += (rAvg + pAvg) * (double)m.sOk / pres;
+        if (rN && rAvg > kMirBudgetMs && g_mirBudgetLogs < 20) {
+            ++g_mirBudgetLogs;
+            Log("mirror DLAA: WARNING unit %d (%ux%u) averaged %.3f ms GPU per view in this window (budget %.2f ms; max %.3f "
+                "ms) -- it keeps running", u, m.w, m.h, rAvg, kMirBudgetMs, rMax);
+        }
+        m.ds0 = ds;
+        m.sViews = m.sOk = m.sFail = m.sDeferred = m.sResets = m.sRehome = m.sSteal = m.sLate = 0;
+        m.sNoColor = m.sSnap = m.sNoSnap = m.sJit = m.sCand = m.sFwd2 = 0;
+        m.sRecDraws = m.sRecFull = m.sReplayed = m.sSkipped = m.sForced = m.sForcedCapped = m.sNoTarget = 0;
+    }
+    snprintf(b, sizeof(b), " | units %d of mirror_max_views=%d, mirror GPU ~%.3f ms per frame (DLAA + replay, runs / Presents)",
+             units, g_mirMaxViews, gpuFrame);
+    s += b;
+    {                                                     // v0.10.0 phase 8 (phase 10: flat too)
+        snprintf(b, sizeof(b), " | %s %d (mirror_vr_views %d%s): views left to the game as not among the largest %llu, "
+                 "off-frame views held %llu / raw %llu", g_vrMode ? "mirror_vr_mode" : "mirror_flat_mode", MirMode(), g_mirVrViews,
+                 MirMode() == 4 ? ", per-draw ids off in the mirrors" : "", (unsigned long long)g_mirVrSkip, (unsigned long long)g_mirAltHeld,
+                 (unsigned long long)g_mirAltRaw);
+        s += b;
+    }
+    g_mirVrSkip = g_mirAltHeld = g_mirAltRaw = 0;
+    Log("%s", s.c_str());
+    g_mirWinViews = g_mirWinFrames = g_mirWinPresents = g_mirWinCap = 0;
+}
+
+void STDMETHODCALLTYPE hkDrawIndexedInstanced(ID3D11DeviceContext* ctx, UINT ic, UINT inst, UINT si, INT bv, UINT sinst) {
+    if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oDrawIndexedInstanced(ctx, ic, inst, si, bv, sinst); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
+    // v0.10.0: only recorded (world G-buffer, per-draw MVs live, not our own work); every other call passes straight through
+    if (g_didOn && g_gbufPass && g_passSeq && !t_inDlaa && IsGameCtx(ctx)) DidOnDraw(ctx, ic, inst, si, bv, sinst, true);
+    else if (g_mirGbuf && g_didOn && !t_inDlaa && IsGameCtx(ctx)) MirOnDraw(ctx, ic, inst, si, bv, sinst, true);   // v0.10.0 phase 2
+    else if (g_didOn && g_jitterPass && !g_gbufPass && !t_inDlaa && IsGameCtx(ctx) && FwdLive()) {
+        ++g_didFwdInst;                                   // v0.10.0 phase 3: an instanced forward draw (no forward id)
+        DidFwdNoteDraw(ctx, ic, true, 5, nullptr, nullptr);
+    }
+    // v0.10.0 phase 11 LOD bias scope: the sampler set this draw needs (solid / see-through blend state)
+    if (!t_inDlaa && g_lodPerDraw.load(std::memory_order_relaxed) && IsGameCtx(ctx)) LodOnDraw(ctx);
+    oDrawIndexedInstanced(ctx, ic, inst, si, bv, sinst);
+}
 #endif
 
 void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex) {
+    if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oDrawIndexed(ctx, indexCount, startIndex, baseVertex); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     TraceDrawIndexed(ctx, indexCount);
     // v0.6.1: every call is counted on the newest pass (flight recorder).
     // v0.6.2: only the game context is tracked (identity compare, no GetType); for any other context the type is
@@ -7011,6 +12862,9 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
     } else {
         CountGameDraw(t_inDlaa, ctx, 0, true);     // v0.8.1: frame-end rule + present-layer bookkeeping
     }
+#ifdef WITH_DLAA
+    int objSlot = 0;                                      // v0.9.0: stencil object id of this draw (0 = untagged)
+#endif
     if (gameCtx && g_passSeq) {
         PassSlot& ps = g_ring[(g_passSeq - 1) % kRing];
         if (!g_gbufPass) {
@@ -7030,10 +12884,19 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
                 CollectMvCandidate(ctx, indexCount, startIndex, baseVertex, ps);
                 g_cpuMvTicks += Qpc() - t0;
             }
+            if (g_objInScene && !t_inDlaa) {                   // v0.9.0 per-object MVs: record + id lookup
+                const int64_t t1 = Qpc();
+                objSlot = ObjOnDraw(ctx, indexCount, startIndex, baseVertex);
+                g_objTicks += (uint64_t)(Qpc() - t1);
+            }
+            if (g_didOn && !t_inDlaa)                          // v0.10.0 per-draw MVs: the draw's whole input state
+                DidOnDraw(ctx, indexCount, 1, startIndex, baseVertex, 0, false);
 #endif
         }
     }
 #ifdef WITH_DLAA
+    // v0.10.0 phase 2: a mirror view's G-buffer draw -> its unit's camera candidates + draw record (MirOnDraw)
+    if (g_mirGbuf && gameCtx && !t_inDlaa) MirOnDraw(ctx, indexCount, 1, startIndex, baseVertex, 0, false);
     // v0.7.8 profile-screen preview: the truck's draws feed the current slot's own candidate record (same
     // CollectMvCandidate, same gates as the world path; the viewport MinDepth 0.01 makes it the world layer).
     // v0.7.8 round 4: only for the learned reference slots (the others' candidates are never used).
@@ -7046,15 +12909,31 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
     // instance, the first one of a tile is often another instance of the reference's first mesh (see PvLayout).
     if (g_previewPass && g_pvCur >= 0 && !t_inDlaa && IsGameCtx(ctx)) {
         ++g_pv[g_pvCur].diCount;                                  // round 6 diagnostics (no-candidate report)
-        if (g_dlaaOn.load(std::memory_order_relaxed) && !g_passive.load(std::memory_order_relaxed)) {
+        if (PvReadbacksOn()) {                                    // phase 15: also for the VR panel with DLAA off
             const bool full = ((g_ptRefMask >> g_pvCur) & 1) || g_pvCapActive;
             CollectMvCandidate(ctx, indexCount, startIndex, baseVertex, g_pv[g_pvCur].ps, full ? 0 : kPvLayCands);
         }
     }
     // Trigger (a): a DrawIndexed (flat: the UI) while a pending composite target is the current RT0 runs its DLAA first.
-    if (g_ptBoundIdx >= 0 && !t_inDlaa && IsGameCtx(ctx)) PreviewFlush(ctx, g_ptBoundIdx);
+    int pvMenuIdx = -1;                                  // v0.10.0 phase 15: ... and gets the VR menu panel after this draw
+    if (g_ptBoundIdx >= 0 && !t_inDlaa && IsGameCtx(ctx)) { pvMenuIdx = g_ptBoundIdx; PreviewFlush(ctx, pvMenuIdx); }
+    // v0.9.0: a tagged draw writes its id into the stencil upper nibble (the twin with ref id << 4 for this one draw)
+    const bool objTag = objSlot && g_objInScene && g_objCur && g_objCur->twin;
+    if (objTag) oOMSetDepthStencilState(ctx, g_objCur->twin, ObjStaticRef() | ((UINT)objSlot << 4));
 #endif
+    // v0.10.0 phase 11 LOD bias scope: the sampler set this draw needs (solid / see-through blend state)
+    if (gameCtx && !t_inDlaa && g_lodPerDraw.load(std::memory_order_relaxed)) LodOnDraw(ctx);
     oDrawIndexed(ctx, indexCount, startIndex, baseVertex);
+#ifdef WITH_DLAA
+    if (objTag) oOMSetDepthStencilState(ctx, g_objCur->twin, ObjStaticRef());   // back to the static ref
+    if (pvMenuIdx >= 0 && !t_inDlaa) MenuDrawPreview(ctx, pvMenuIdx, 'a');      // v0.10.0 phase 15 (VR menu-screen eye)
+    // v0.9.0 r5: a world FORWARD-pass draw (1 RTV RGBA16F + scene DSV, not the G-buffer) -> forward depth re-draw
+    if (gameCtx && g_jitterPass && !g_gbufPass && !t_inDlaa && FwdLive()) {
+        const int64_t t2 = Qpc();
+        FwdOnDraw(ctx, indexCount, startIndex, baseVertex);
+        g_fwdTicks += (uint64_t)(Qpc() - t2);
+    }
+#endif
 }
 
 // ---- v0.6.2 game render context (hkPresent, depth 0) -------------------------------------------------------------
@@ -7085,6 +12964,17 @@ void ResetPassTrackingCore(bool forceDlaaOff) {
     g_tonemapTex = nullptr;
     g_fwdColorTex = nullptr; g_hdrCompTex = nullptr; g_hdrCompLogged = false;   // v0.8.0 HDR blit rule
     g_gbufPass = false; g_jitterPass = false; g_depthDirty = false;
+    LodOnContextReset();                                       // v0.9.0: sampler twins belong to the old device
+#ifdef WITH_DLAA
+    ObjOnContextReset();                                       // v0.9.0: depth-stencil twins / object records too
+    FwdOnContextReset();                                       // v0.9.0 r5: forward-depth states (old device)
+    MirOnContextReset();                                       // v0.10.0 phase 2: mirror views / units' game refs
+    DepthTwin::PoolShutdown();                                 // v0.10.0 phase 8: pooled pass-slot textures (old device)
+    GpuPerf::Shutdown();                                       // v0.10.0 phase 8: the perf queries belong to the old device
+    g_fwdBound = false; g_fwdBoundTex = nullptr;               // v0.10.0 phase 7
+    for (PassSlot& p : g_ring) { p.warmTex.Reset(); p.fwdTex = nullptr; p.warmHdr = false; }
+    g_stage.Restart();
+#endif
     g_gameVpN = 0; g_vpShifted = false; g_vpShiftX = g_vpShiftY = 0.0f;
     while (g_fifoHead < g_passSeq) g_ring[g_fifoHead++ % kRing].consumed = true;   // drop outstanding passes
     g_needFirstPass = true;                                    // next G-buffer bind starts a pass
@@ -7714,6 +13604,72 @@ bool DlaaOffFilePresent() {
 //                                  (hash(indexCount,startIndex,baseVertex) & ((1<<s)-1)) == 0 (0 = every draw)
 //   mv_world_slots                 int 1..128 (default 40, v0.6.3): world (layer 0) candidate cap per pass
 //   mv_cabin_slots                 int 1..128 (default 24, v0.6.3): cabin (layer 1) candidate cap per pass
+//   mv_objects                     0/1 (default 0, v0.9.0): per-object motion vectors -- moving world objects (AI traffic,
+//                                  wheels, the own trailer in the chase view) are tagged with stencil ids (upper nibble of
+//                                  the scene stencil, unused by the game) and reprojected with their own motion
+//   mv_objects_max                 int 1..15 (default 15, v0.9.0): object ids in use at once (a vehicle and its wheels
+//                                  share one id while they move alike)
+//   mv_objects_max_dup             int 1..8 (default 3; v0.9.0 r3: 6, r4: back to 3): a geometry key drawn more often than
+//                                  this in a pass (grass clumps, windows, trees, street lamps) never gets an object id of its
+//                                  own (r3: it can still FOLLOW a tagged vehicle when mv_objects_followers = 1)
+//   mv_objects_followers           0/1 (default 0, v0.9.0 r4): the r3 follower rule (a duplicate-rejected draw whose hub
+//                                  follows a SOLID vehicle id joins it: wheels of several vehicles of one model)
+//   mv_objects_ego_m               float metres 0..30 (default 8, v0.9.0 r2): world draws whose origin is closer to the
+//                                  camera than this are the own truck and never get an object id (0 = off)
+//   mv_objects_hits                int 2..8 (default 2, v0.9.0 r2): consecutive "moving" readbacks with coherent motion
+//                                  (roughly constant velocity) before an object gets an id
+//   mv_objects_lock_px             float px 0.5..20 (default 3, v0.9.0 r7; r8: default 6, measured at the ORIGIN only):
+//   a
+//                                  draw whose origin is nearer than mv_objects_ego_m is the own truck only when its
+//                                  origin moved at most this far on screen in the frame (camera-locked; r7: the 5 probe
+//                                  points); a vehicle passing close is a normal mover. r8: a pre-filter -- the own
+//                                  truck is the ego set
+//   mv_objects_ego_px              float px 2..64 (default 12, v0.9.0 r8): a near identity (origin < mv_objects_ego_m)
+//                                  whose origin stayed within this many pixels (full render size) of its reference over
+//                                  mv_objects_ego_rb readbacks is the own truck (ego set: never an object id); its flag
+//                                  goes when the origin drifts farther than this. r10: no longer used (the box is in
+//                                  metres of view space, mv_objects_ego_m_box); still accepted
+//   mv_objects_ego_rb              int 4..200 (default 24, v0.9.0 r8): readbacks a near identity must stay put on
+//   screen
+//                                  before it joins the ego set
+//   mv_objects_hold                int 0..8 (default 3, v0.9.0 r7): frames in a row an object id without a usable
+//                                  motion of its own (pairing hiccup, veto) keeps its last one instead of the camera's
+//                                  (0 = r6; r8: also the budget of the mask hold -- a frame whose record is unusable or
+//                                  pairs < 50 % of the last good frame's draws keeps the last good ids; r9: also the
+//                                  budget of the WORLD-MISS hold -- a frame whose camera candidates pair nothing keeps
+//                                  the last good camera R instead of resetting the DLSS history; this one applies with
+//                                  mv_objects = 0 too)
+//   mv_objects_ego_trace           0/1 (default 0, v0.9.0 r9 debug; r10: default 1): log up to 4 near sightings per
+//                                  readback (geometry key, identity, copy, position, box, flag) for the first 150
+//                                  readbacks that have one
+//   mv_objects_origin_margin       float 1.0..3.0 (default 1.2, v0.9.0 r10): a draw is a mover / id member only while
+//                                  its ORIGIN is on screen: clip w > 0.05 and |x / w|, |y / w| <= this (1.2 = 20 %
+//                                  beyond the edge); a member whose origin leaves it is released (road / terrain / tree
+//                                  batches have their origin anywhere, a vehicle's is on the vehicle)
+//   mv_objects_min_px              float px 0.5..4 (default 1.0, v0.9.0 r10; r11: default 2.0): a new non-spinning
+//                                  mover founds or joins an id only from sightings that deviate at least this much from
+//                                  the camera motion (full render px; weaker ones count as drawn sub-threshold, members
+//                                  keep their id)
+//   mv_objects_attach              0/1 (default 1, v0.9.0 r10): a repeated draw (licence plate, mirror, lamp) whose
+//                                  origin coincides with a tagged vehicle part's origin (<= 0.5 px, depth within 1 %)
+//                                  in mv_objects_hits readbacks in a row joins that vehicle's id as an attached member
+//   mv_objects_ego_m_box           float metres 0.01..0.5 (default 0.05, v0.9.0 r10): the ego set's box per axis in
+//                                  view space (replaces mv_objects_ego_px): a near part whose view-space origin stayed
+//                                  within this of its reference for mv_objects_ego_rb readbacks is the own truck
+//   mv_objects_cam_m               float metres 0.05..2 (default 0.3, v0.9.0 r11): a draw whose MVP origin lies within
+//                                  this of the camera has no object transform (batched / instanced, view-projection
+//                                  only): camera-attached, never a mover, member or ego sighting
+//   mv_objects_static_rb           int 8..48 (default 24, v0.9.0 r11): an identity drawn in at least this many of the
+//                                  last 48 readbacks, at least half of them without own motion (static), is STATIC
+//                                  CLASS: it never founds or joins an object id, a member that becomes one is released
+//                                  (0 = the static class off)
+//   mv_fwd_depth                   0/1 (default 1, v0.9.0 r5): re-draw the world forward pass's blended no-depth-write
+//                                  draws (wires, cables, fences, lane paint) depth-only into a per-pass target; the MV pass
+//                                  uses the nearer of it and the scene depth (key_fwd_depth = Ctrl+F3 switches it live)
+//                                  r11: only a forward depth inside the world range [0.01, 0.9) wins
+//   mv_fwd_min_m                   float metres 0.1..5 (default 0.5, v0.9.0 r11): a qualifying forward draw whose MVP
+//                                  origin lies within this of the camera (a windscreen drop / dirt / glare overlay) is
+//                                  not re-drawn (verdict read back from the GPU, cached per draw identity)
 //   preview_dlaa                   0/1 (default 1, v0.7.8): DLAA on the profile / truck-preview screen (flat and VR);
 //                                  0 = that path never activates (the screen stays un-anti-aliased as before v0.7.8)
 //   preview_capture_at             int >= 0 (default 0 = off, v0.7.8 debug): one Ctrl+F10-style preview capture this many
@@ -7729,7 +13685,8 @@ bool DlaaOffFilePresent() {
 //                                  sharpen texture now always exists; Shift+F12 saves)
 //   sharp_radius                   float 1..4 (default 1.5): RCAS ring-tap radius in texels, bilinear (v0.5.8).
 //                                  Start state; v0.6.5 Shift+F9/F10 change it live in 0.5 steps (Shift+F12 saves)
-//   dlaa_area                      int 40..100 (default 100 = whole image, v0.6.4): DLAA runs on a rect of this % of
+//   dlaa_area                      int 20..100 (default 100 = whole image, v0.6.4; 40..100 before v0.10.0 phase 15; VR
+//                                  only, also the VR menu / truck-preview units since phase 15): DLAA runs on a rect of this % of
 //                                  the eye image's width AND height, centred on the eye's optical centre. Start
 //                                  state; v0.6.5 Shift+F5/F6 change it live in 10 % steps (Shift+F12 saves)
 //   dlaa_area_feather              int 0..512 px (default 96, v0.6.4): blend ramp at the rect edges inside the image
@@ -7744,7 +13701,27 @@ bool DlaaOffFilePresent() {
 //                                  g_keys[] (key_mode_cycle, key_model_1..4, key_area_down/up, key_sharpen_down/up,
 //                                  key_width_down/up, key_dlaa_toggle, key_save, key_upscale_toggle, key_mv_toggle,
 //                                  key_mv_debug, key_passive, key_jitter_only, key_selftest, key_snapshot, key_trace,
-//                                  key_jitter_sign)
+//                                  key_jitter_sign, v0.9.0 key_lod_bias_down / key_lod_bias_up, v0.10.0 phase 13
+//                                  key_lod_cutout_down / key_lod_cutout_up)
+//   tex_lod_bias                   float -3..+1 (default 0 = off, v0.9.0): texture mip LOD bias added to the game's samplers
+//                                  in world scene + menu truck-preview passes while DLAA / DLSS runs (negative = sharper
+//                                  textures). Start state; Ctrl+F1 / Ctrl+F2 change it live in 0.25 steps within -3..0
+//                                  (Shift+F12 saves)
+//   tex_lod_bias_auto              0/1 (default 0, v0.9.0): + log2(render width / output width) while DLSS upscales
+//   tex_aniso                      int 0 or 2..16 (default 0 = leave, v0.9.0): in those passes anisotropic samplers get at
+//                                  least this MaxAnisotropy, trilinear ones become anisotropic with it
+//   tex_lod_bias_scope             opaque | solid | all (default opaque, v0.10.0 phase 12): opaque = the bias only for the
+//                                  G-buffer / preview draws whose blend state has BlendEnable (RT0) and AlphaToCoverage off
+//                                  AND whose pixel shader has no discard (no alpha-tested fences / wire mesh / foliage),
+//                                  never in the forward pass; solid = the phase-11 rule (alpha-tested draws biased too, 0 =
+//                                  its old alias); all = every draw of those passes (v0.9.0, 1 = its old alias)
+//   tex_aniso_scope                opaque | solid | all (default opaque, v0.10.0 phase 12): the same for tex_aniso
+//   tex_lod_bias_cutout            same | float -3..+1 (default -0.5, v0.10.0 phase 13): the bias of the ALPHA-TESTED
+//                                  G-buffer / preview draws (pixel shader with a discard: fences, wire mesh, grass,
+//                                  foliage) as a value of its own, independent of tex_lod_bias (no auto term added);
+//                                  `same` (or the key absent with tex_lod_bias_scope solid / all) = the phase-12 scope rule.
+//                                  Applies only while tex_lod_bias is non-zero. Ctrl+Shift+F1 / F2 change it live in 0.25
+//                                  steps within -3..0 (Shift+F12 saves); 0 with scope opaque = phase 12
 //   beeps                          0/1 (default 1): v0.5.7 audible feedback for the Shift+F-key user controls
 //                                  (model select, area, sharpen strength/width, DLAA on/off, save) and the
 //                                  Ctrl+F7 passive / v0.7.0 Ctrl+F4 upscale toggles (kernel32 Beep on a worker thread)
@@ -7804,6 +13781,7 @@ bool FindNvngxDlss(wchar_t* out, DWORD cap) {
 
 void LoadConfig() {
     InitKeyBinds();                                      // v0.7.7: defaults first, key_* lines below override
+    for (bool& x : g_profExplicit) x = false;            // v0.10.0 phase 10: set below for every profile key the ini names
     wchar_t path[MAX_PATH];
     FILE* f = nullptr;
     if (PathNextToDll(L"dlaa.ini", path)) _wfopen_s(&f, path, L"r");
@@ -7823,6 +13801,7 @@ void LoadConfig() {
             else if (!strcmp(key, "jitter_sign_y"))  g_signY = v < 0 ? -1 : 1;
             else if (!strcmp(key, "jitter_enabled")) g_jitterEnabled = v != 0;
             else if (!strcmp(key, "mv_enabled"))     g_mvOn = v != 0;
+            else if (!strcmp(key, "ofxr_bridge"))    Ofxr::Configure(v != 0 ? 1 : 0);          // v0.10.0 OFXR Bridge pass-through, 0/1 (default 1)
             else if (!strcmp(key, "mv_near_reject_m")) {
 #ifdef WITH_DLAA
                 const double m = strtod(eq + 1, nullptr);
@@ -7859,6 +13838,199 @@ void LoadConfig() {
                 g_mvCabinSlots = v < 1 ? 1 : (v > CandidateRecord::kSlots ? CandidateRecord::kSlots : (int)v);
 #endif
             }
+            else if (!strcmp(key, "mv_objects")) {                         // v0.9.0 per-object MVs (stencil ids)
+#ifdef WITH_DLAA
+                // v0.10.0: 0 off, 1 = the v0.9.0 stencil ids (legacy), 2 = per-draw motion vectors (default)
+                g_objMode = v < 0 ? 0 : (v > 2 ? 2 : (int)v);
+                g_objCfg = g_objMode == 1;
+                g_didCfg = g_objMode == 2;
+#endif
+            }
+            else if (!strcmp(key, "mv_drawid_instanced")) {                // v0.10.0, 0/1 (default 1 since phase 6b)
+#ifdef WITH_DLAA
+                g_didInstancedCfg = v != 0;
+#endif
+            }
+            else if (!strcmp(key, "mv_drawid_max_m")) {                    // v0.10.0, 0.5..100 (default 8)
+#ifdef WITH_DLAA
+                DrawIdMv::SetParams((float)strtod(eq + 1, nullptr), DrawIdMv::SnapPx());
+#endif
+            }
+            else if (!strcmp(key, "mv_drawid_snap_px")) {                  // v0.10.0, 0..4 px (default 0.1)
+#ifdef WITH_DLAA
+                DrawIdMv::SetParams(DrawIdMv::MaxM(), (float)strtod(eq + 1, nullptr));
+#endif
+            }
+            else if (!strcmp(key, "mv_camr_consensus")) {                  // v0.10.0 phase 3, 0/1 (default 1)
+#ifdef WITH_DLAA
+                DrawIdMv::SetConsensus(v != 0);
+#endif
+            }
+            else if (!strcmp(key, "mv_fwd_attach_m")) {                    // v0.10.0 phase 4, 0..5 m (default 0.5; 0 = off)
+#ifdef WITH_DLAA
+                DrawIdMv::SetAttach((float)strtod(eq + 1, nullptr));
+#endif
+            }
+            else if (!strcmp(key, "mv_drawid_twin")) {                     // v0.10.0 phase 5, 0/1 (default 1)
+#ifdef WITH_DLAA
+                DrawIdMv::SetTwin(v != 0);
+#endif
+            }
+            else if (!strcmp(key, "mv_drawid_parent")) {                   // v0.10.0 phase 6, 0/1 (default 1)
+#ifdef WITH_DLAA
+                DrawIdMv::SetParent(v != 0);
+#endif
+            }
+#ifdef WITH_DLAA
+            // v0.10.0 phase 8 performance (the fast setting is the default)
+            else if (!strcmp(key, "perf_timers"))       g_perfCfg = v < 0 ? -1 : (v ? 1 : 0);
+            else if (!strcmp(key, "debug")) {
+                const char* p = eq + 1;
+                while (*p == ' ' || *p == '\t') ++p;
+                g_debugIni = *p == '1' || !_strnicmp(p, "true", 4) || !_strnicmp(p, "yes", 3) || !_strnicmp(p, "on", 2);
+            }
+            else if (!strcmp(key, "mv_vote_res"))       { DrawIdMv::SetVoteRes(v >= 4 ? 4u : 2u); g_profExplicit[PK_VOTE_RES] = true; }
+            else if (!strcmp(key, "mv_vote_march_cap")) {
+                DrawIdMv::SetMarchCap(v <= 0 ? 0u : (unsigned)v); g_profExplicit[PK_MARCH_CAP] = true;
+            }
+            else if (!strcmp(key, "mv_cons_cands"))     DrawIdMv::SetConsCands(v <= 0 ? 64u : (unsigned)v);
+            else if (!strcmp(key, "mv_medoid_drop"))    DrawIdMv::SetMedoidDrop(v <= 0 ? 0u : (unsigned)v);
+            else if (!strcmp(key, "mirror_vr_mode")) {  // (phase 9: + 4; phase 10: default 2, explicit)
+                g_mirVrMode = v < 0 ? 2 : (v > 4 ? 2 : (int)v); g_profExplicit[PK_MIRROR_VR_MODE] = true;
+            }
+            else if (!strcmp(key, "mirror_flat_mode")) { // v0.10.0 phase 10: the same modes in flat (default 1)
+                g_mirFlatMode = v < 0 ? 1 : (v > 4 ? 1 : (int)v); g_profExplicit[PK_MIRROR_FLAT_MODE] = true;
+            }
+            else if (!strcmp(key, "mv_slot_pool"))      g_slotPool = v != 0;
+            else if (!strcmp(key, "mv_inst_replay"))    { DrawIdMv::SetInstReplay(v != 0 ? 1 : 0); g_profExplicit[PK_INST_REPLAY] = true; }
+            // v0.10.0 phase 14: the static replay skip (0 = off, 1..60 frames; re-check every 1..16 frames, 1 = never skipped)
+            else if (!strcmp(key, "mv_replay_static_frames"))
+                DrawIdMv::SetReplayStatic(v <= 0 ? 0u : (v > 60 ? 60u : (unsigned)v), DrawIdMv::ReplayStaticEvery());
+            else if (!strcmp(key, "mv_replay_static_every"))
+                DrawIdMv::SetReplayStatic(DrawIdMv::ReplayStaticFrames(), v < 1 ? 1u : (v > 16 ? 16u : (unsigned)v));
+            else if (!strcmp(key, "mv_replay_static_eps_px"))   // round 3: deep-static epsilon, 0..0.1 px (default 0.02)
+                DrawIdMv::SetReplayStaticEps((float)strtod(eq + 1, nullptr));
+            // v0.10.0 phase 9 VR cost
+            else if (!strcmp(key, "mirror_vr_views"))   g_mirVrViews = v < 1 ? 1 : (v > 8 ? 8 : (int)v);
+            else if (!strcmp(key, "mv_area_scissor"))   g_areaScissorCfg = v != 0;
+            else if (!strcmp(key, "mv_area_margin"))    g_areaMarginCfg = v < 0 ? -1 : (v > 1024 ? 1024 : (int)v);
+            else if (!strcmp(key, "mv_fwd_depth_res"))  { g_fwdResCfg = (v == 1 || v == 2) ? (int)v : 0; g_profExplicit[PK_FWD_RES] = true; }
+            else if (!strcmp(key, "mv_fold_dispatch"))  DrawIdMv::SetFold(v != 0);
+            // v0.10.0 phase 10: forward-depth batch, profiles
+            else if (!strcmp(key, "mv_fwd_depth_cull"))  g_fwdCullCfg = v != 0;
+            else if (!strcmp(key, "mv_fwd_depth_budget_ms")) {
+                const double m = strtod(eq + 1, nullptr);
+                g_fwdBudgetMs = !(m >= 0.0) ? 0.0f : (m > 10.0 ? 10.0f : (float)m);
+            }
+            else if (!strcmp(key, "mv_parent_max_listed")) {
+                DrawIdMv::SetParentMaxListed(v < 8 ? 8u : (unsigned)v); g_profExplicit[PK_PAR_LISTED] = true;
+            }
+            else if (!strcmp(key, "perf_profile")) {
+                char tok[16] = {}; int n = 0;
+                const char* s = eq + 1;
+                while (*s == ' ' || *s == '\t') ++s;
+                while (*s && *s != ' ' && *s != '\t' && *s != '\r' && *s != '\n' && *s != '#' && *s != ';' && n < (int)sizeof(tok) - 1)
+                    tok[n++] = (char)tolower((unsigned char)*s++);
+                if (!strcmp(tok, "high") || !strcmp(tok, "0")) g_profile = 0;
+                else if (!strcmp(tok, "medium") || !strcmp(tok, "1")) g_profile = 1;
+                else if (!strcmp(tok, "low") || !strcmp(tok, "2")) g_profile = 2;
+                else Log("dlaa.ini: perf_profile '%s' not recognised (high, medium or low) -- keeping %s", tok, kProfName[g_profile]);
+            }
+#endif
+            else if (!strcmp(key, "dlaa_pre_tonemap")) {                   // v0.10.0 phase 4, 0/1 (default 1)
+#ifdef WITH_DLAA
+                g_preCfg = v != 0 ? 1 : 0;
+#endif
+            }
+            else if (!strcmp(key, "mv_fwd_depth")) {                       // v0.9.0 r5 forward depth for the MVs
+                g_fwdCfg = v != 0;
+                g_fwdOn = g_fwdCfg;
+                g_profExplicit[PK_FWD_DEPTH] = true;                       // v0.10.0 phase 10
+            }
+            else if (!strcmp(key, "mv_fwd_min_m")) {                       // v0.9.0 r11, 0.1..5 m (default 0.5)
+                const double m = strtod(eq + 1, nullptr);
+                g_fwdMinM = !(m >= 0.1) ? 0.1f : (m > 5.0 ? 5.0f : (float)m);
+            }
+            else if (!strcmp(key, "mv_objects_max")) {                     // v0.9.0, 1..15 (upper stencil nibble)
+#ifdef WITH_DLAA
+                ObjIds::SetMax(v < 1 ? 1 : (v > 15 ? 15 : (int)v));
+#endif
+            }
+            else if (!strcmp(key, "mv_objects_max_dup")) {                 // v0.9.0 r2, 1..8
+#ifdef WITH_DLAA
+                ObjIds::SetMaxDup((int)(v < 1 ? 1 : (v > 8 ? 8 : v)));
+#endif
+            }
+            else if (!strcmp(key, "mv_objects_ego_m")) {                   // v0.9.0 r2, 0..30 m
+#ifdef WITH_DLAA
+                ObjIds::SetEgoM((float)strtod(eq + 1, nullptr));
+#endif
+            }
+            else if (!strcmp(key, "mv_objects_hits")) {                    // v0.9.0 r2, 2..8
+#ifdef WITH_DLAA
+                ObjIds::SetHits((int)(v < 2 ? 2 : (v > 8 ? 8 : v)));
+#endif
+            }
+            else if (!strcmp(key, "mv_objects_followers")) {               // v0.9.0 r4, 0/1 (default 0)
+#ifdef WITH_DLAA
+                ObjIds::SetFollowers(v != 0);
+#endif
+            }
+            else if (!strcmp(key, "mv_objects_lock_px")) {                 // v0.9.0 r7, 0.5..20 px (default 3; r8: 6)
+#ifdef WITH_DLAA
+                ObjIds::SetLockPx((float)strtod(eq + 1, nullptr));
+#endif
+            }
+            else if (!strcmp(key, "mv_objects_ego_px")) {                  // v0.9.0 r8, 2..64 px (default 12)
+#ifdef WITH_DLAA
+                ObjIds::SetEgoPx((float)strtod(eq + 1, nullptr));
+#endif
+            }
+            else if (!strcmp(key, "mv_objects_ego_rb")) {                  // v0.9.0 r8, 4..200 readbacks (default 24)
+#ifdef WITH_DLAA
+                ObjIds::SetEgoRb((int)(v < 4 ? 4 : (v > 200 ? 200 : v)));
+#endif
+            }
+            else if (!strcmp(key, "mv_objects_hold")) {                    // v0.9.0 r7, 0..8 frames (default 3)
+#ifdef WITH_DLAA
+                ObjIds::SetHold((int)(v < 0 ? 0 : (v > 8 ? 8 : v)));
+#endif
+            }
+            else if (!strcmp(key, "mv_objects_ego_trace")) {               // v0.9.0 r9, 0/1 (default 0; r10: 1)
+#ifdef WITH_DLAA
+                ObjIds::SetEgoTrace(v != 0 ? 1 : 0);
+#endif
+            }
+            else if (!strcmp(key, "mv_objects_origin_margin")) {           // v0.9.0 r10, 1.0..3.0 (default 1.2)
+#ifdef WITH_DLAA
+                ObjIds::SetOriginMargin((float)strtod(eq + 1, nullptr));
+#endif
+            }
+            else if (!strcmp(key, "mv_objects_min_px")) {                  // v0.9.0 r10, 0.5..4 px (r11: default 2.0)
+#ifdef WITH_DLAA
+                ObjIds::SetMinPx((float)strtod(eq + 1, nullptr));
+#endif
+            }
+            else if (!strcmp(key, "mv_objects_attach")) {                  // v0.9.0 r10, 0/1 (default 1)
+#ifdef WITH_DLAA
+                ObjIds::SetAttach(v != 0);
+#endif
+            }
+            else if (!strcmp(key, "mv_objects_ego_m_box")) {               // v0.9.0 r10, 0.01..0.5 m (default 0.05)
+#ifdef WITH_DLAA
+                ObjIds::SetEgoMBox((float)strtod(eq + 1, nullptr));
+#endif
+            }
+            else if (!strcmp(key, "mv_objects_cam_m")) {                   // v0.9.0 r11, 0.05..2 m (default 0.3)
+#ifdef WITH_DLAA
+                ObjIds::SetCamM((float)strtod(eq + 1, nullptr));
+#endif
+            }
+            else if (!strcmp(key, "mv_objects_static_rb")) {               // v0.9.0 r11, 0 / 8..48 (default 24)
+#ifdef WITH_DLAA
+                ObjIds::SetStaticRb((int)(v <= 0 ? 0 : (v > 48 ? 48 : v)));   // 0 = the static class off
+#endif
+            }
             else if (!strcmp(key, "gpu_timing"))     g_gpuTiming = v < 0 ? -1 : (v ? 1 : 0);
 #ifdef WITH_DLAA
             else if (!strcmp(key, "preview_dlaa"))   g_previewDlaa = v != 0 ? 1 : 0;   // v0.7.8
@@ -7868,11 +14040,71 @@ void LoadConfig() {
             else if (!strcmp(key, "preview_layout_recheck")) g_pvLayRecheck = v < 0 ? 0 : (v > 600 ? 600 : (int)v);
             else if (!strcmp(key, "preview_sharpen"))      g_pvSharpen = v != 0 ? 1 : 0;         // v0.8.1 round 5 debug
             else if (!strcmp(key, "preview_seam_capture")) g_pvSeamAlways = v != 0 ? 1 : 0;      // v0.8.1 round 5 debug
+            else if (!strcmp(key, "mirror_dlaa"))      { g_mirCfg = v != 0 ? 1 : 0; g_profExplicit[PK_MIRROR_DLAA] = true; }   // phase 2
+            else if (!strcmp(key, "mirror_min_px"))    g_mirMinPx = v < 16 ? 16 : (v > 4096 ? 4096 : (int)v);
+            else if (!strcmp(key, "mirror_max_views")) g_mirMaxViews = v < 1 ? 1 : (v > kMirCap ? kMirCap : (int)v);
 #endif
             else if (!strcmp(key, "trace_auto_frame")) g_traceAutoFrame = v < 0 ? 0 : (int)v;
             else if (!strcmp(key, "vr_eye_alternate")) Log("dlaa.ini: vr_eye_alternate is ignored since v0.5.4 (eye identity comes from the blit render target)");
             else if (!strcmp(key, "jitter_phases"))  g_phases = v < 1 ? 8 : (v > 256 ? 256 : (int)v);
             else if (!strcmp(key, "beeps"))          g_beeps = v != 0;
+            // v0.10.0 tuning menu panel placement (the menu's Panel rows change them; the save key writes them once changed there)
+            else if (!strcmp(key, "menu_x"))         g_menuX = v < 0 ? 0 : (v > 90 ? 90 : (int)v);
+            else if (!strcmp(key, "menu_y"))         g_menuY = v < 0 ? 0 : (v > 90 ? 90 : (int)v);
+            else if (!strcmp(key, "menu_vr_x"))      g_menuVrX = v < -50 ? -50 : (v > 50 ? 50 : (int)v);
+            else if (!strcmp(key, "menu_vr_y"))      g_menuVrY = v < -50 ? -50 : (v > 50 ? 50 : (int)v);
+            else if (!strcmp(key, "menu_vr_depth"))  g_menuVrDepth = v < 0 ? 0 : (v > 200 ? 200 : (int)v);
+            else if (!strcmp(key, "menu_scale") || !strcmp(key, "menu_vr_scale")) {
+                const double s = strtod(eq + 1, nullptr);
+                const float c = (s != s) ? 1.0f : (float)(s < 0.5 ? 0.5 : (s > 2.0 ? 2.0 : s));
+                if (key[5] == 'v') g_menuVrScale = c; else g_menuScale = c;
+            }
+            // v0.10.0 live fps box (the menu's FPS counter rows change them; the save key writes them once changed there)
+            else if (!strcmp(key, "fps_show"))       g_fpsShow = v != 0;
+            else if (!strcmp(key, "fps_x"))          g_fpsX = v < 0 ? 0 : (v > 95 ? 95 : (int)v);
+            else if (!strcmp(key, "fps_y"))          g_fpsY = v < 0 ? 0 : (v > 95 ? 95 : (int)v);
+            else if (!strcmp(key, "fps_vr_x"))       g_fpsVrX = v < -50 ? -50 : (v > 50 ? 50 : (int)v);
+            else if (!strcmp(key, "fps_vr_y"))       g_fpsVrY = v < -50 ? -50 : (v > 50 ? 50 : (int)v);
+            else if (!strcmp(key, "fps_scale") || !strcmp(key, "fps_vr_scale")) {
+                const double s = strtod(eq + 1, nullptr);
+                const float def = key[4] == 'v' ? kFpsVrScaleDefault : 1.0f;   // phase 15: 0.2..3.0 (was 0.5..3.0)
+                const float c = (s != s) ? def : (float)(s < 0.2 ? 0.2 : (s > 3.0 ? 3.0 : s));
+                if (key[4] == 'v') g_fpsVrScale = c; else g_fpsScale = c;
+            }
+            else if (!strcmp(key, "tex_lod_bias")) {                       // v0.9.0, clamped to -3..+1
+                const double b = strtod(eq + 1, nullptr);
+                g_lodBias = (b != b) ? 0.0f : (float)(b < -3.0 ? -3.0 : (b > 1.0 ? 1.0 : b));
+            }
+            else if (!strcmp(key, "tex_lod_bias_cutout")) {                // v0.10.0 phase 13: same | -3..+1
+                char tok[16] = {}; int n = 0;
+                const char* s = eq + 1;
+                while (*s == ' ' || *s == '\t') ++s;
+                while (*s && *s != ' ' && *s != '\t' && *s != '\r' && *s != '\n' && *s != '#' && *s != ';' && n < (int)sizeof(tok) - 1)
+                    tok[n++] = (char)tolower((unsigned char)*s++);
+                char* endp = nullptr;
+                const double b = strtod(tok, &endp);
+                if (!strcmp(tok, "same")) g_lodCutMode = kLodCutSame;
+                else if (n && endp && *endp == 0 && b == b) {
+                    g_lodCutMode = kLodCutValue;
+                    g_lodCutBias = (float)(b < -3.0 ? -3.0 : (b > 1.0 ? 1.0 : b));
+                }
+                else Log("dlaa.ini: tex_lod_bias_cutout '%s' not recognised (same, or a number -3..+1) -- keeping the default", tok);
+            }
+            else if (!strcmp(key, "tex_lod_bias_auto")) g_lodAuto = v != 0;   // v0.9.0
+            else if (!strcmp(key, "tex_aniso"))      g_lodAniso = v < 2 ? 0 : (v > 16 ? 16 : (int)v);   // v0.9.0
+            else if (!strcmp(key, "tex_lod_bias_scope") || !strcmp(key, "tex_aniso_scope")) {   // phase 11 / 12: opaque | solid | all
+                const bool lodKey = !strcmp(key, "tex_lod_bias_scope");
+                int& dst = lodKey ? g_lodScope : g_anisoScope;
+                char tok[16] = {}; int n = 0;
+                const char* s = eq + 1;
+                while (*s == ' ' || *s == '\t') ++s;
+                while (*s && *s != ' ' && *s != '\t' && *s != '\r' && *s != '\n' && *s != '#' && *s != ';' && n < (int)sizeof(tok) - 1)
+                    tok[n++] = (char)tolower((unsigned char)*s++);
+                if (!strcmp(tok, "opaque")) dst = kLodScopeOpaque;                      // phase 12 (default)
+                else if (!strcmp(tok, "solid") || !strcmp(tok, "0")) dst = kLodScopeSolid;   // phase 11 (0 = its legacy alias)
+                else if (!strcmp(tok, "all") || !strcmp(tok, "1")) dst = kLodScopeAll;
+                else Log("dlaa.ini: %s '%s' not recognised (opaque, solid or all) -- keeping %s", key, tok, LodScopeName(dst));
+            }
             else if (!strcmp(key, "dlss_upscale"))   g_dlssUpscale = v != 0;   // v0.7.0
             else if (!strcmp(key, "mode"))           g_iniMode = (v >= 0 && v <= 2) ? (int)v : -1;   // v0.7.2 (End)
             else if (!strcmp(key, "dlss_preset")) {
@@ -7889,6 +14121,7 @@ void LoadConfig() {
                 if (!okPreset)
                     Log("dlaa.ini: dlss_preset '%s' not recognised (use default, J, K, L, M, E or F) -- keeping %s",
                         tok, SceneDlaa::DlssPresetName());
+                else g_profExplicit[PK_PRESET] = true;                     // v0.10.0 phase 10
 #endif
             }
             else if (!strcmp(key, "sharpness")) {
@@ -7903,7 +14136,8 @@ void LoadConfig() {
             }
             else if (!strcmp(key, "dlaa_area")) {
 #ifdef WITH_DLAA
-                SceneDlaa::SetArea(v < 40 ? 40 : (v > 100 ? 100 : (int)v));   // v0.6.4, clamped to 40..100
+                SceneDlaa::SetArea(v < SceneDlaa::kAreaMin ? SceneDlaa::kAreaMin : (v > 100 ? 100 : (int)v));   // v0.6.4; phase 15: 20..100
+                g_profExplicit[PK_AREA] = true;                                // v0.10.0 phase 10
 #endif
             }
             else if (!strcmp(key, "dlaa_area_feather")) {
@@ -7920,6 +14154,8 @@ void LoadConfig() {
         fclose(f);
     }
 #ifdef WITH_DLAA
+    char profChanged[700] = "";                          // v0.10.0 phase 10: the profile's defaults for the non-explicit keys
+    ApplyProfile(false, profChanged, sizeof(profChanged));
     const float nearRej = g_dlaa[0].Mv().NearReject();
     const float egoOrigin = g_dlaa[0].Mv().EgoOrigin();
     const float egoPixel = g_dlaa[0].Mv().EgoPixel();
@@ -7947,6 +14183,193 @@ void LoadConfig() {
         (int)g_mvOn.load(), nearRej, (double)egoOrigin, (double)egoPixel, mvShift, mvWorldSlots, mvCabinSlots,
         g_gpuTiming, g_traceAutoFrame, preset, (double)sharp, (double)sharpRadius, area, feather,
         (int)g_dlssUpscale.load(), (int)g_beeps, previewDlaa, dlssHdr);
+    Log("OFXR Bridge support: ofxr_bridge=%d (%s)", (int)Ofxr::g_on.load(),
+        Ofxr::g_on.load() ? "on: the layer's calls pass through the hooks" : "off");
+#ifdef WITH_DLAA
+    Log("tuning menu (v0.10.0): %s opens / closes it, %s / %s select a row, %s / %s change it; panel flat menu_x=%d menu_y=%d "
+        "menu_scale=%.1f, VR menu_vr_x=%d menu_vr_y=%d menu_vr_scale=%.1f menu_vr_depth=%d", KeyName(KA_MENU), KeyName(KA_MENU_UP),
+        KeyName(KA_MENU_DOWN), KeyName(KA_MENU_LEFT), KeyName(KA_MENU_RIGHT), g_menuX, g_menuY, (double)g_menuScale, g_menuVrX,
+        g_menuVrY, (double)g_menuVrScale, g_menuVrDepth);
+    Log("fps box (v0.10.0): fps_show=%d (%s), flat fps_x=%d fps_y=%d fps_scale=%.1f, VR fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f "
+        "(the tuning menu's FPS counter rows move it)", g_fpsShow ? 1 : 0, g_fpsShow ? "on: shown also while the menu is closed" : "off",
+        g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY, (double)g_fpsVrScale);
+    // v0.10.0 phase 6b: the vote participation of instanced / no-MVP draws follows mv_drawid_instanced (default 1, even when the
+    // key is absent) -- set it here, after the whole ini is parsed, so both the replay and the vote agree.
+    DrawIdMv::SetInstanced(g_didInstancedCfg);
+    Log("per-object motion vectors (v0.9.0 r11 overlay depth, camera-origin, static class): mv_objects=%d "
+        "mv_objects_max=%d mv_objects_max_dup=%d mv_objects_ego_m=%.1f mv_objects_hits=%d mv_objects_followers=%d "
+        "mv_objects_lock_px=%.1f mv_objects_hold=%d mv_objects_ego_m_box=%.3f mv_objects_ego_rb=%d "
+        "mv_objects_ego_trace=%d mv_objects_origin_margin=%.2f mv_objects_min_px=%.1f mv_objects_attach=%d "
+        "mv_objects_cam_m=%.2f mv_objects_static_rb=%d -- %s",
+        g_objMode, ObjIds::Max(), ObjIds::MaxDup(), (double)ObjIds::EgoM(), ObjIds::Hits(), (int)ObjIds::Followers(),
+        (double)ObjIds::LockPx(), ObjIds::Hold(), (double)ObjIds::EgoMBox(), ObjIds::EgoRb(), ObjIds::EgoTrace(),
+        (double)ObjIds::OriginMargin(), (double)ObjIds::MinPx(), (int)ObjIds::Attach(), (double)ObjIds::CamM(),
+        ObjIds::StaticRb(),
+        g_objCfg ? "moving world objects get their own motion vectors through stencil ids (upper nibble), see the 'MV objects' lines"
+                 : (g_didCfg ? "off (mv_objects=2 uses the per-draw motion vectors below instead)"
+                             : "off (moving objects use the camera motion vector as before)"));
+    Log("per-draw motion vectors (v0.10.0): mv_objects=%d mv_drawid_instanced=%d mv_drawid_max_m=%.1f mv_drawid_snap_px=%.2f "
+        "-- %s", g_objMode, (int)g_didInstancedCfg, (double)DrawIdMv::MaxM(), (double)DrawIdMv::SnapPx(),
+        g_didCfg ? "every world G-buffer draw is replayed into a draw-id target (depth EQUAL) and paired with the previous "
+                   "frame on the GPU; moving draws get R = MVP_prev * inverse(MVP_cur), see the 'MV draw-ids' lines"
+                 : (g_objMode == 1 ? "off (mv_objects=1: the v0.9.0 stencil ids)" : "off (mv_objects=0)"));
+    Log("per-draw motion vectors phase 3 (v0.10.0): mv_camr_consensus=%d (consensus cluster >= %d draws, agreement %.2f px, "
+        "%d world / %d cabin candidates); forward-pass draw ids %s -- %s", (int)DrawIdMv::Consensus(), DrawIdMv::kConsMin,
+        (double)(DrawIdMv::SnapPx() > 0.05f ? DrawIdMv::SnapPx() : 0.05f), DrawIdMv::kCandWorld, DrawIdMv::kCandCabin,
+        (g_didCfg && g_fwdCfg) ? "ON (with mv_fwd_depth)" : "off (needs mv_objects=2 and mv_fwd_depth=1)",
+        DrawIdMv::Consensus() ? "the camera R of each layer is the largest cluster of agreeing per-draw R's (the medoid of the "
+                                "sampled candidates is only the fallback), see 'MV camera R' and the camR field of the "
+                                "'MV draw-ids @blit' lines"
+                              : "the camera R is the medoid of the sampled candidates (as before phase 3)");
+    g_preOn = g_preCfg != 0;                             // v0.10.0 phase 4: the live switch starts at the ini value
+    Log("phase 4 (v0.10.0): dlaa_pre_tonemap=%d (%s live switch) mv_fwd_attach_m=%.2f (%s dumps the per-draw state) -- %s; "
+        "forward draws / forward pixels on a G-buffer mover take its motion within %.2f m (plates, decals)", g_preCfg,
+        KeyName(KA_PRE_TONEMAP), (double)DrawIdMv::AttachM(), KeyName(KA_MV_DUMP),
+        g_preCfg ? "flat DLAA mode runs the main scene's DLAA in place on the RGBA16F scene colour BEFORE the game's tonemap "
+                   "(HDR unit, see the 'DLAA stage' lines); DLSS upscaling / VR / HDR output keep the blit path"
+                 : "the main scene's DLAA runs at the blit on the tone-mapped picture (as before phase 4)",
+        (double)DrawIdMv::AttachM());
+    Log("phase 5 (v0.10.0): mv_drawid_twin=%d -- %s; G-buffer draws still unpaired take a G-buffer mover's motion when their "
+        "origin lies within mv_fwd_attach_m=%.2f m of its origin with the same orientation (Ctrl+F6: cyan tint = twin, orange = "
+        "by origin; the 'twin:' field of 'MV draw-ids @blit'; Alt+F8 lists every unpaired draw and the forward draws without a "
+        "forward id)", (int)DrawIdMv::Twin(),
+        DrawIdMv::Twin() ? "a draw left unpaired (keys new every frame, identical copies, oversized group) takes the motion of "
+                           "the paired draw that carries the bit-identical MVP (a plate / lamp drawn with its vehicle's matrix)"
+                         : "off: unpaired draws keep the camera motion (as before phase 5)",
+        (double)DrawIdMv::AttachM());
+    Log("phase 6b (v0.10.0): mv_drawid_instanced=%d -- %s (Ctrl+F6: green tint; the 'instanced/no-MVP with a parent' count in the "
+        "'parent:' field of 'MV draw-ids @blit')", (int)g_didInstancedCfg,
+        g_didInstancedCfg ? "a close car's licence plate is a DrawIndexedInstanced draw (no own matrix): it is replayed into the "
+                            "draw-id target and joins the rigid-parent vote like an unpaired draw, so it takes the car's motion; "
+                            "the 64 vote slots go to the instanced draws that cover the screen, most pixels first (~180 extra small "
+                            "replay draws / pass)"
+                          : "off: instanced / no-MVP draws keep the camera motion and are not replayed (as before phase 6b)");
+    Log("phase 6 (v0.10.0): mv_drawid_parent=%d -- %s (Ctrl+F6: green tint = took its rigid parent's motion; the 'parent:' field "
+        "of 'MV draw-ids @blit'; Alt+F8: 'parent -> id P (votes V/T, rigid)' on the unpaired lines)", (int)DrawIdMv::Parent(),
+        DrawIdMv::Parent() ? "a draw left unpaired by its own pairing (plates whose vertices the CPU writes in view space every "
+                             "frame: their matrix is the bare projection) takes the motion of the draw it sits on -- R of a node "
+                             "rigidly fixed on a body = the body's R -- found by a GPU vote of its neighbouring pixels in the "
+                             "draw-id target (phase 6c: marching vote, see the next line); it decides over the matrix twin / "
+                             "origin attach of the same draw"
+                           : "off: unpaired draws keep the phase-5 twin / origin attach / camera motion");
+    if (DrawIdMv::Parent())
+        Log("phase 6c (v0.10.0): rigid-parent vote = MARCHING: every 2nd pixel of an unpaired / instanced draw marches up to 32 px "
+            "in 8 directions across its own patch (its own pixels, motionless draws at its depth: plate background / text) to the "
+            "first draw that HAS a motion (own pair, twin, origin attach) = 1 vote (depth within 4 %%); winner >= 8 votes and >= "
+            "50 %% (tie: nearer in depth); a 2nd pass for the rest through listed neighbours that found one; <= 8192 marches per "
+            "draw and pass (the 'parent:' field: no votes / depth-rejected / no majority, marched avg px)");
+    Log("phase 7 (v0.10.0): pre-tonemap stage = ONE decision per pass at the first of its scene depth discard and its forward "
+        "leave; the preferred stage changes only after %d passes in a row of the other condition (mode reasons -- %s off, DLAA "
+        "off, Ctrl+F6, DLSS upscaling, VR, HDR output -- at once); a pass that cannot run before the tonemap uses the blit unit; "
+        "eye 0 keeps BOTH units (HDR + LDR colour sets, own NGX features and histories: a change swaps, no rebuild); a post -> "
+        "pre switch warms the HDR unit on the last %d passes (no history reset); 'stage switches N (auto A)' in the FIFO stats "
+        "tag", DlaaStage::kHyst, KeyName(KA_PRE_TONEMAP), DlaaStage::kWarm);
+    // v0.10.0 phase 8: performance -- per-sub-pass GPU timers + the cuts (each behind its ini key)
+    GpuPerf::SetOn(g_perfCfg > 0 || (g_perfCfg < 0 && g_debugIni));
+    Log("phase 8 (v0.10.0): perf_timers=%d (%s) mv_vote_res=%u mv_vote_march_cap=%u mv_cons_cands=%u mv_medoid_drop=%u "
+        "mirror_vr_mode=%d mv_slot_pool=%d mv_inst_replay=%d (instanced draws: %s) -- %s; rigid-parent vote on every %u%s pixel in x / y with %u px march steps "
+        "(listed draws with < 64 coarse samples: every 2nd pixel, 2 px steps), <= %u marches per frame, vote grid skipped when no "
+        "listed draw has pixels; consensus %u world / %u cabin candidates; %s; mirrors in VR: %s; pass-slot textures %s",
+        g_perfCfg, GpuPerf::On() ? "on: 'perf eye N' lines every 600 blits" : "off", DrawIdMv::VoteRes(), DrawIdMv::MarchCap(),
+        DrawIdMv::ConsCands(), DrawIdMv::MedoidDrop(), g_mirVrMode, (int)g_slotPool, DrawIdMv::InstReplay(),
+        DrawIdMv::InstReplay() ? "only the shapes that took a moving parent lately, all of them every 7th pass"
+                               : "all replayed every pass",
+        "every sub-pass of the mod has its own GPU timer per eye (gpu_perf.h); the 'perf cuts' line shows each cut's state",
+        DrawIdMv::VoteRes(), DrawIdMv::VoteRes() == 4 ? "th" : "nd", DrawIdMv::VoteRes(), DrawIdMv::MarchCap(),
+        DrawIdMv::ConsCands(), DrawIdMv::ConsCands() / 2 < 64 ? DrawIdMv::ConsCands() / 2 : 64,
+        DrawIdMv::MedoidDrop() ? "the old medoid path (camera candidate copies, pass A) stops per layer while that layer's "
+                                 "per-draw consensus is healthy for mv_medoid_drop readbacks in a row, and re-arms when it fails"
+                               : "the medoid path always runs",
+        g_mirVrMode == 0 ? "off" : (g_mirVrMode == 2 ? "only the largest views (main mirrors)"
+                                    : (g_mirVrMode == 3 ? "each unit every 2nd frame (held in between)"
+                                       : (g_mirVrMode == 4 ? "every view, per-draw ids off (camera motion vectors)" : "every view"))),
+        g_slotPool ? "pooled (alive = passes in flight)" : "one set per FIFO slot");
+    // v0.10.0 phase 9: VR cost -- area scissor, 1/2-resolution forward depth, mirror modes, folded dispatches
+    {
+        const int marginNow = g_areaMarginCfg >= 0 ? g_areaMarginCfg : SceneDlaa::Feather() + 32;
+        Log("phase 9 (v0.10.0): mv_area_scissor=%d mv_area_margin=%d (%d px) mv_fwd_depth_res=%d (%s) mirror_vr_mode=%d "
+            "mirror_vr_views=%d mv_fold_dispatch=%d -- %s; forward depth %s; mirrors in VR: %s; the per-draw chain runs %s (see the "
+            "'perf view' line every 600 blits)",
+            (int)g_areaScissorCfg, g_areaMarginCfg, marginNow, g_fwdResCfg,
+            g_fwdResCfg == 0 ? "auto: 1/2 resolution in VR, full flat" : (g_fwdResCfg == 2 ? "1/2 resolution" : "full resolution"),
+            g_mirVrMode, g_mirVrViews, (int)DrawIdMv::Fold(),
+            g_areaScissorCfg ? "with dlaa_area < 100 the draw-id replays, the forward-depth re-draw and the rigid-parent vote run "
+                               "only inside the DLAA rect of the pass's eye(s) + the margin (the raw picture outside, as before)"
+                             : "the per-pixel work covers the whole image (phase 8)",
+            g_fwdResCfg == 1 ? "re-drawn at full resolution" : (g_fwdResCfg == 2 ? "re-drawn at 1/2 resolution (pass B reads pixel >> 1)"
+                                                                                 : "at 1/2 resolution in VR, full resolution flat"),
+            g_mirVrMode == 2 ? "the mirror_vr_views largest views keep DLAA, the rest are left to the game"
+                             : (g_mirVrMode == 4 ? "every view keeps DLAA with camera motion vectors (no per-draw ids)"
+                                                 : "see mirror_vr_mode"),
+            DrawIdMv::Fold() ? "as 11 dispatches per eye (pick + resolve + inherit and list + twin + attach folded)"
+                             : "as 15 dispatches per eye (phase 8)");
+    }
+    {                                                    // v0.10.0 phase 10
+        char kept[300];
+        ProfExplicitList(kept, sizeof(kept));
+        Log("phase 10 (v0.10.0): perf_profile=%s (%s cycles high -> medium -> low, %s saves) -- set by the profile: %s | kept (set in "
+            "dlaa.ini): %s | mv_fwd_depth_cull=%d mv_fwd_depth_budget_ms=%.2f mirror_flat_mode=%d mirror_vr_mode=%d "
+            "mv_parent_max_listed=%u -- the forward depth is re-drawn in ONE batch per pass at its end (exact GPU timer 'fwd-init' + "
+            "'fwd-depth'; %s); %s",
+            kProfName[g_profile], KeyName(KA_PROFILE), KeyName(KA_SAVE), profChanged, kept, (int)g_fwdCullCfg,
+            (double)g_fwdBudgetMs, g_mirFlatMode, g_mirVrMode, DrawIdMv::ParentMaxListed(),
+            g_fwdCullCfg ? "occlusion init from the depth snapshot: forward fragments behind the scene are rejected"
+                         : "no occlusion init: the target starts empty",
+            g_fwdBudgetMs > 0.0f ? "VR: the forward depth switches itself off when it costs more than the budget per eye and "
+                                   "mv_fwd_depth is not set in dlaa.ini"
+                                 : "no VR budget");
+    }
+    {                                                    // v0.10.0 phase 14
+        const unsigned sf = DrawIdMv::ReplayStaticFrames(), se = DrawIdMv::ReplayStaticEvery();
+        Log("phase 14 (v0.10.0): mv_replay_static_frames=%u mv_replay_static_every=%u mv_replay_static_eps_px=%.3f (only draws whose "
+            "own motion stays within it of the camera's build a streak -- a vehicle at the player's speed is never skipped -- and "
+            "a key that moved in the last 60 frames is not skipped) -- %s", sf, se, (double)DrawIdMv::ReplayStaticEps(),
+            (sf == 0u || se <= 1u)
+                ? "off: every world draw is re-drawn into the draw-id target every frame (the 'replay' figure of the perf eye line)"
+                : "the G-buffer draw-id replay skips a world draw whose geometry key was paired and static by its own pair in the "
+                  "last mv_replay_static_frames frames in a row (read back from the GPU, 2-3 frames late), except on its re-check "
+                  "frame (1 frame of every mv_replay_static_every, staggered per key); it stays recorded and paired (its pixels = the "
+                  "camera motion, as for any static draw); a key that was a rigid parent (a plate sits on it) in the last 30 frames, "
+                  "cabin, instanced and see-through draws are always re-drawn; a moving draw (own pair, track reject, moving twin / "
+                  "attach / parent) resets its key, a draw without a partner (new, culled back in) neither builds nor breaks it but "
+                  "keeps its key re-drawn, an unhealthy camera R (no consensus, history reset, FIFO underflow) clears the table; the "
+                  "rigid-parent vote counts a world pixel left without an id as a static source, so plates do not depend on which "
+                  "static objects were re-drawn this frame ('static skip' field of the 'MV draw-ids' line)");
+    }
+    g_mirOn = g_mirCfg != 0;                            // v0.10.0 phase 2: the live switch starts at the ini value
+    Log("mirror units (v0.10.0 phase 2): mirror_dlaa=%d mirror_min_px=%d mirror_max_views=%d (%s live switch; %s switches the "
+        "per-draw motion vectors 2 <-> 0) -- %s", g_mirCfg, g_mirMinPx, g_mirMaxViews, KeyName(KA_MIRROR_TOGGLE),
+        KeyName(KA_DRAWID_TOGGLE),
+        g_mirCfg ? "every mirror view (a 4-RTV RGBA16F G-buffer with its own depth, not the scene) gets its own DLAA unit: own "
+                   "jitter, depth snapshot, per-draw motion vectors, DLAA in place on its RGBA16F colour (see the 'mirror' lines)"
+                 : "off (mirror views are left to the game, as before v0.10.0)");
+    Log("forward depth for motion vectors (v0.9.0 r5; r11 overlay depth): mv_fwd_depth=%d (%s live switch) "
+        "mv_fwd_min_m=%.2f -- %s", (int)g_fwdCfg, KeyName(KA_FWD_DEPTH), (double)g_fwdMinM,
+        g_fwdCfg ? "alpha-blended world forward draws that write no depth (wires, cables, fences, lane paint) are re-drawn "
+                   "depth-only (alpha >= 0.5) into a per-pass depth target; the MV pass uses the nearer of it and the scene "
+                   "depth inside the world range only (r11), a draw whose MVP origin lies within mv_fwd_min_m of the "
+                   "camera (an overlay) is not re-drawn, see the 'MV forward depth' lines"
+                 : "off (those pixels keep the depth behind them, e.g. the sky behind a wire)");
+#endif
+    char lodCutTxt[16];
+    LodCutoutText(lodCutTxt, sizeof(lodCutTxt));
+    Log("texture LOD bias (v0.9.0): tex_lod_bias=%.2f tex_lod_bias_auto=%d tex_aniso=%d tex_lod_bias_scope=%s tex_aniso_scope=%s "
+        "tex_lod_bias_cutout=%s%s -- %s%s%s", (double)g_lodBias, (int)g_lodAuto, g_lodAniso, LodScopeName(g_lodScope),
+        LodScopeName(g_anisoScope), lodCutTxt, g_lodCutMode == kLodCutAbsent ? " (default)" : "",
+        (g_lodBias == 0.0f && !g_lodAuto && g_lodAniso < 2)
+            ? "off (PSSetSamplers passes straight through; the LOD bias keys switch it on live)"
+            : "world scene + menu truck-preview passes while DLAA / DLSS runs (sampler twins, see the 'texture LOD bias' lines)",
+        (g_lodScope == kLodScopeAll && g_anisoScope == kLodScopeAll)
+            ? "; scope all: every draw of the G-buffer, forward and preview passes (v0.9.0)"
+            : "; v0.10.0 phase 11/12 scope, decided per draw: opaque = G-buffer / preview draws with blending and alpha-to-"
+              "coverage off whose pixel shader has no discard (alpha-tested fences, wire mesh, foliage excluded: the pixel "
+              "shader bytecode is scanned once at CreatePixelShader), solid = the same incl. the alpha-tested ones (phase 11), "
+              "never the forward pass (fences, wires, glass, decals) unless all",
+        LodCutFollows()
+            ? "; alpha-tested draws: the scope rule above (tex_lod_bias_cutout same)"
+            : "; v0.10.0 phase 13: alpha-tested G-buffer / preview draws (pixel shader with a discard) get tex_lod_bias_cutout "
+              "as their own bias (a third sampler twin set, aniso per tex_aniso_scope; no auto term; off while tex_lod_bias is "
+              "0; Ctrl+Shift+F1 / F2 change it live)");
 #ifdef WITH_DLAA
     if (g_pvEdgeFix != 1 || g_pvTileJitter != 1 || g_pvLayRecheck != 0 || g_pvSharpen != 1 || g_pvSeamAlways != 0)
         Log("dlaa.ini: preview_edge_fix=%d preview_tile_jitter=%d preview_layout_recheck=%d preview_sharpen=%d "
@@ -8002,6 +14425,7 @@ bool HookFn(const char* name, void* target, void* hook, void** orig) {
 }
 
 DWORD WINAPI SetupThread(LPVOID) {
+    Ofxr::Rescan();                                      // v0.10.0 OFXR Bridge: layer modules already loaded (later ones: every 300 Presents)
 #ifdef WITH_DLAA
     // v0.7.8: compile every embedded shader once, on ShaderCache's own worker thread, while the game boots (was a
     // D3DCompile per unit inside its first Run on the render thread: ~2 s freeze per CameraMv). Not under the
@@ -8009,6 +14433,7 @@ DWORD WINAPI SetupThread(LPVOID) {
     CameraMv::RegisterShaders();
     SceneDlaa::RegisterShaders();
     PreviewBlit::RegisterShaders();
+    TuningMenu::RegisterShaders();                       // v0.10.0 tuning menu panel quad
     PvCapRegisterShaders();                              // Ctrl+F10 preview capture metrics shader
     PvAsmRegisterShaders();                              // round 6 tiled preview: picture depth assembly
     PvEdgeRegisterShaders();                             // v0.8.1 round 5: zero-guarded tile edge fill
@@ -8055,6 +14480,14 @@ DWORD WINAPI SetupThread(LPVOID) {
     if (st != MH_OK && st != MH_ERROR_ALREADY_INITIALIZED) {
         Log("MH_Initialize failed: %s", MH_StatusToString(st));
     } else {
+        // v0.10.0 phase 12: CreatePixelShader (ID3D11Device vtable 15) FIRST -- the game creates its pixel shaders while it
+        // boots; a shader created before this hook is "unknown" for the cut-out rule (treated as no discard).
+        bool psCreateHooked = false;
+        {
+            void** dvtbl = *reinterpret_cast<void***>(dev);
+            psCreateHooked = HookFn("CreatePixelShader", dvtbl[15], reinterpret_cast<void*>(&hkCreatePixelShader),
+                                    reinterpret_cast<void**>(&oCreatePixelShader));
+        }
         HookFn("Present", present, reinterpret_cast<void*>(&hkPresent),
                reinterpret_cast<void**>(&oPresent));
         // ID3D11DeviceContext vtable: DrawIndexed = 12, Draw = 13, OMSetRenderTargets = 33, RSSetViewports = 44.
@@ -8065,6 +14498,33 @@ DWORD WINAPI SetupThread(LPVOID) {
                reinterpret_cast<void**>(&oRSSetViewports));
         HookFn("DrawIndexed", cvtbl[12], reinterpret_cast<void*>(&hkDrawIndexed),
                reinterpret_cast<void**>(&oDrawIndexed));
+        // v0.9.0 texture LOD bias: PSSetSamplers = 10. g_lodHooked gates every use of oPSSetSamplers (LodFrameUpdate).
+        if (HookFn("PSSetSamplers", cvtbl[10], reinterpret_cast<void*>(&hkPSSetSamplers),
+                   reinterpret_cast<void**>(&oPSSetSamplers)))
+            g_lodHooked.store(true, std::memory_order_release);
+        // v0.10.0 phase 11: OMSetBlendState = 35 (tex_lod_bias_scope / tex_aniso_scope = solid: the per-draw blend state).
+        if (HookFn("OMSetBlendState", cvtbl[35], reinterpret_cast<void*>(&hkOMSetBlendState),
+                   reinterpret_cast<void**>(&oOMSetBlendState)))
+            g_lodBlendHooked.store(true, std::memory_order_release);
+        // v0.10.0 phase 12: PSSetShader = 9 (the cut-out rule needs both PS hooks; without them: the phase-11 blend rule).
+        if (psCreateHooked && HookFn("PSSetShader", cvtbl[9], reinterpret_cast<void*>(&hkPSSetShader),
+                                     reinterpret_cast<void**>(&oPSSetShader)))
+            g_lodPsHooked.store(true, std::memory_order_release);
+#ifdef WITH_DLAA
+        // v0.9.0 per-object MVs: OMSetDepthStencilState = 36 (stencil-id twins), Map = 14 (ring discard inside the pass).
+        // g_objHooked gates the feature (both originals valid).
+        {
+            const bool a = HookFn("OMSetDepthStencilState", cvtbl[36], reinterpret_cast<void*>(&hkOMSetDepthStencilState),
+                                  reinterpret_cast<void**>(&oOMSetDepthStencilState));
+            const bool b = HookFn("Map", cvtbl[14], reinterpret_cast<void*>(&hkMap), reinterpret_cast<void**>(&oMap));
+            if (a && b) g_objHooked.store(true, std::memory_order_release);
+        }
+        // v0.10.0 per-draw MVs: DrawIndexedInstanced = 20 (instanced G-buffer draws are recorded; without the hook they
+        // simply keep the camera motion vector)
+        if (HookFn("DrawIndexedInstanced", cvtbl[20], reinterpret_cast<void*>(&hkDrawIndexedInstanced),
+                   reinterpret_cast<void**>(&oDrawIndexedInstanced)))
+            g_didHooked.store(true, std::memory_order_release);
+#endif
         // v0.4.3 trace-only hooks (log-only, pass through).
         HookFn("Dispatch", cvtbl[41], reinterpret_cast<void*>(&hkDispatch),
                reinterpret_cast<void**>(&oDispatch));
@@ -8173,4 +14633,20 @@ void OnProcessDetach(bool processTerminating) {
         (unsigned long long)g_passSeq, (unsigned long long)g_blitCount,
         g_vrMode ? "VR" : (g_flatMode ? "flat" : "undetected"),
         g_dlaaOn.load(std::memory_order_relaxed) ? "on" : "off", DlaaModeStr(), plTail);
+    // v0.10.0 tuning menu: on a DLL unload (FreeLibrary) the game window must not keep calling into unmapped code -- the
+    // original window procedure goes back if the window still exists and still points at ours. At process exit no message
+    // is dispatched any more: nothing is touched.
+    g_menuOpen.store(false, std::memory_order_relaxed);
+    if (!processTerminating) KeySwallow::UnhookWindow();
+}
+
+// v0.10.0 tuning menu: the virtual keys the game must not see right now (dinput_wrap.cpp; input / window threads). The 5 bound
+// menu keys while the menu is open, else none. g_keys is written only by LoadConfig (before any game input exists).
+int MenuSwallowKeys(int* vks, int cap) {
+    if (!vks || cap <= 0 || !g_menuOpen.load(std::memory_order_relaxed)) return 0;
+    static const KeyAction kMenuKeys[] = { KA_MENU, KA_MENU_UP, KA_MENU_DOWN, KA_MENU_LEFT, KA_MENU_RIGHT };
+    int n = 0;
+    for (KeyAction a : kMenuKeys)
+        if (g_keys[a].vk && n < cap) vks[n++] = g_keys[a].vk;
+    return n;
 }

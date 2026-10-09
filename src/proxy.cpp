@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <unknwn.h>
 #include "log.h"
+#include "dinput_wrap.h"                       // v0.10.0 tuning menu: keyboard keys hidden from the game
 
 void StartInjection();                         // inject.cpp
 void OnProcessDetach(bool processTerminating); // inject.cpp (v0.7.10 exit log line)
@@ -39,7 +40,8 @@ void LoadReal() {
 extern "C" {
 
 HRESULT WINAPI DirectInput8Create(HINSTANCE h, DWORD v, REFIID r, LPVOID* o, LPUNKNOWN u) {
-    return p_DirectInput8Create ? p_DirectInput8Create(h, v, r, o, u) : E_FAIL;
+    // v0.10.0: the keyboard device is wrapped so the tuning menu's keys can be hidden from the game (dinput_wrap.cpp)
+    return p_DirectInput8Create ? KeySwallow::CreateDirectInput8(p_DirectInput8Create, h, v, r, o, u) : E_FAIL;
 }
 HRESULT WINAPI DllGetClassObject(REFCLSID c, REFIID r, LPVOID* o) {
     return p_DllGetClassObject ? p_DllGetClassObject(c, r, o) : CLASS_E_CLASSNOTAVAILABLE;

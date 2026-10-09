@@ -18,6 +18,7 @@
 #include "log.h"
 #include <nvsdk_ngx.h>
 #include <nvsdk_ngx_helpers.h>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 
@@ -50,6 +51,9 @@ uint64_t           g_createFrame = 0;         // g_frameNo of the last CreateFea
 // first Present. NGX therefore never shuts down when the last unit lets go (a rebuild / area / upscale change no
 // longer pays the ~0.7 s re-init), and every unit's Init only shares it.
 bool               g_ngxPinned  = false;
+// v0.10.0 phase 12: the outcome of the last NGX init attempt (0 = none yet, 1 = OK, -1 = failed). Read by the injector's
+// JitterLive (no jitter while NGX cannot run); written on the render thread by NgxAcquire.
+std::atomic<int>   g_ngxInitState{0};
 
 inline int64_t QpcNow() { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t.QuadPart; }
 inline double  QpcMs(int64_t a, int64_t b) {
@@ -144,10 +148,12 @@ bool NgxAcquire(ID3D11Device* dev, bool quiet) {
         dllDir, dev, &fci, NVSDK_NGX_Version_API);
     if (NVSDK_NGX_FAILED(r)) {
         Log("DLAA: NGX init failed %s (non-NVIDIA GPU or driver too old?)", NgxErr(r));
+        g_ngxInitState.store(-1, std::memory_order_relaxed);   // phase 12
         return false;
     }
     g_ngxDev = dev;
     g_ngxRefs = 1;
+    g_ngxInitState.store(1, std::memory_order_relaxed);
     return true;
 }
 
@@ -155,6 +161,7 @@ bool NgxAcquire(ID3D11Device* dev, bool quiet) {
 
 void DlaaProcessor::BeginFrame() { ++g_frameNo; }
 void* DlaaProcessor::NgxDevice() { return (void*)g_ngxDev; }
+bool DlaaProcessor::NgxInitFailed() { return g_ngxInitState.load(std::memory_order_relaxed) < 0; }
 bool DlaaProcessor::CreateBudgetFree() { return g_createFrame != g_frameNo; }
 
 // v0.7.8: see dlaa.h. The pin is taken once; a failed NGX init is not retried (no NVIDIA GPU: Init fails the same way

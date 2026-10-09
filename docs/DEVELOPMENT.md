@@ -106,6 +106,46 @@ cmake --build build --config Release
 
 Output: `build/Release/dinput8.dll`.
 
+v0.10.0 WARP harness for the per-draw motion vectors (no game needed): `tests\build_drawid_harness.bat` builds
+`build\tests\drawid_harness.exe` with `cl` (Visual Studio 2022) from `tests/drawid_harness.cpp` + the injector's
+`motion_vectors.cpp`, `draw_ids.cpp`, `shader_cache.cpp` (phase 7: + `scene_dlaa.cpp` and `tests/fake_dlaa.cpp`, a stand-in
+NGX). Run it with no arguments (all scenes) or `[scene 1..12] [snap
+px] [debug | nocons | nofwd | noattach | notwin | noinherit | noparent | parentconj | nodepth]`; exit code 0 = every check
+passed (77804 checks at v0.10.0 phase 6: S1-S4 46740 + the mirror scene S5 9277 + the consensus / forward-id scene S6 15895 +
+the plate / attach / twin scene S7 3687 + the rigid-parent scene S8 2205; 81011 checks at phase 6c: S1-S7 unchanged, S8 2706
+(+ the far 24x8 px plate, instanced background + text, bottom-edge plate) and a second S8 run with a 6 px march reach, "S8 short
+reach", 2706 (plate text only through the 2nd pass); 81033 checks at phase 7: S1-S8 unchanged + the pre / post-tonemap stage
+scene S9 22 (DlaaStage hysteresis, SceneDlaa's two colour sets, the per-pass flow); 81041 checks at phase 8: S1-S9 unchanged
+(with the phase-8 defaults) + the pass-slot texture pool S10 8; phase-8 knobs from the 3rd argument on: `legacy` (every phase-8 cut
+off = the phase-7 behaviour), `vres=2|4`, `cap=N`, `cands=N`, `drop=N`, `inst=0|1`, and the COMPARISON mode `cmpdump=FILE` (write
+every frame's motion vectors) / `cmp=FILE` (compare with them, per pixel: run the reference with `legacy`); every scene also prints
+its phase-8 counters and a "WARP perf" line (per-sub-pass timers on WARP = CPU figures, not GPU numbers); 100066 checks at phase 9:
+S1-S10 unchanged (bit-identical motion vectors to the phase-8 binary's `cmpdump` with the folded dispatches) + the view unit
+checks 10 + S11 16102 (= S6 + two SHADOW pipelines: the DLAA-area clip around an off-centre optical centre, full / 1/2-resolution
+forward depth, compared with the whole-image pipeline every frame) + S12 2913 (= S8 + the same shadows); phase-9 knobs: `nofold`
+(the phase-8 chain of separate dispatches), `mutclip` / `mutview` (S11 / S12 mutations: the G-buffer replay without its clip / the
+1/2-resolution forward re-draw without the halved viewport -- they must FAIL); `debug` = under the D3D11 debug layer; `nocons` /
+`nofwd` = S6 with the consensus camera R / the forward ids switched off, `noattach` = S7 with mv_fwd_attach_m = 0, `notwin` =
+S7 with mv_drawid_twin = 0, `noinherit` = both (these three also switch the rigid parents off), `noparent` = S8 with
+mv_drawid_parent = 0, `parentconj` = S8 with the row-vector formula typed into the column-vector code, `nodepth` = S8 without
+the vote's depth test -- mutations, they must FAIL); 100686 checks at phase 10: S11 / S12 gain three BATCH shadows each (+620
+checks: the forward depth only recorded during the forward pass and re-drawn in one go after the snapshot, as inject.cpp's
+FwdBatch -- full resolution without the occlusion init must be bit-identical to the interleaved re-draw, full / 1/2 resolution WITH
+the init (`DrawIdRecord::InitFwdDepth`) must keep every RED id and motion vector and the GREEN ids where the forward depth won);
+phase-10 knobs: `listed=N` (mv_parent_max_listed), `medium` / `low` (the per-draw parts of those perf profiles: vote res 4, march
+cap 24000, mv_inst_replay 1, listed 64 / 32 -- informational, `inst=1` alone already changes S8's instanced-plate checks).
+Phase 14 (static replay skip): `rstatic=E` runs S1-S4 and the new S13 (S1 with every vehicle parked until frame 40, then
+accelerating) through the static gate -- skipped draws must own no id pixel, keep the camera R and their state, a skipped MOVER
+may keep the camera R for at most 2 frames in a row, and the gate must skip something; S13 also runs in the plain set (111238
+checks without rstatic). S6, S7 and S8 (consensus convoy, plates by twin / attach, view-space + instanced plates on a turning
+trailer that moves from frame 0) also run gated (their own id / parent / MV checks + "the gate must skip something"). `cmpdump`
+without / `cmp` with `rstatic=4`: S1-S4 and S6-S8 0 px differ; S13 785 px in 2 frames (max 0.24 px: the start lag). Run this
+comparison after any change to the gate or the vote.
+What it covers: `docs/DLAA_INTEGRATION.md`, "Per-draw motion vectors
+(v0.10.0)" (+ "Phase 3", "Phase 4", "Phase 5", "Phase 6", "Phase 6b", "Phase 6c", "Phase 9", "Phase 10") and "Mirror units (v0.10.0)". The pre-tonemap DLAA (phase 4 job B) is
+inject.cpp plumbing around SceneDlaa::Run and is not covered by the harness (game only); phase 7's stage logic and SceneDlaa's
+two colour sets are (S9), the forward-leave / discard hooks are not.
+
 The version string in the load-log line comes from `project(... VERSION x.y.z)` in
 `CMakeLists.txt` via the `DLAA_INJECTOR_VERSION` compile definition — bump it there
 (and in the doc headers) only.
@@ -157,7 +197,7 @@ cheat sheet.)
 | `Shift+F2` | DLAA model 2 = preset `E` | 2 × 880 Hz |
 | `Shift+F3` | DLAA model 3 = preset `F` | 3 × 880 Hz |
 | `Shift+F4` | DLAA model 4 = preset `M` | 4 × 880 Hz |
-| `Shift+F5` | DLAA area −10 % (40..100) | 3 beeps at `300 + 6·area` Hz; low 200 Hz at the 40 limit |
+| `Shift+F5` | DLAA area −10 % (20..100; 40..100 before v0.10.0 phase 15) | 3 beeps at `300 + 6·area` Hz; low 200 Hz at the 20 limit |
 | `Shift+F6` | DLAA area +10 % | 3 beeps at `300 + 6·area` Hz; low 200 Hz at the 100 limit |
 | `Shift+F7` | Sharpen strength −0.1 (0..1) | 1 beep at `400 + 800·sharpness` Hz; low 200 Hz at a limit |
 | `Shift+F8` | Sharpen strength +0.1 | 1 beep at `400 + 800·sharpness` Hz; low 200 Hz at a limit |
@@ -181,7 +221,7 @@ timed frames, and one `rate after change: ...` line 300 blits later).
 |-----|--------|----------|
 | `Ctrl+F4` | DLSS upscale on/off (v0.7.0; off = DLAA at render res, the v0.6.5 path). Both eyes rebuild their textures + NGX feature at the next blit, history reset | 1200 Hz = ON, 300 Hz = OFF |
 | `Ctrl+F5` | Motion vectors on/off (off = zero MVs) | — (log + DLSS history reset) |
-| `Ctrl+F6` | MV debug view (blit source = `(0.5+mv.x/16, 0.5+mv.y/16, cabin?1:0)`; gray = still, blue = cabin; needs DLAA on; v0.7.0 upscale: drawn by the composite, render-size MVs scaled up to output size) | — |
+| `Ctrl+F6` | MV debug view (blit source = `(0.5+mv.x/16, 0.5+mv.y/16, cabin?1:0)`; gray = still, blue = cabin; needs DLAA on; v0.7.0 upscale: drawn by the composite, render-size MVs scaled up to output size; v0.9.0 `mv_objects=1`: magenta = pixel of a stencil object id with its own R this frame, orange = id without a usable R (camera R used; r4: no trusted non-spinning member this frame, or vetoed: a tagged draw contradicted the id's motion); v0.9.0 r2: cyan = identity rejected by the r2 rules in the last readbacks (stencil id 15 reserved while the view is on, camera R)) | — |
 | `Ctrl+F7` | Passive mode on/off (no jitter / MV copies / depth snapshot / evaluate / readbacks; tracking + GPU timers only) | 1 low tone = ON, 2 = OFF |
 | `Ctrl+F8` | Jitter-only debug (jitter on, DLAA evaluate skipped = raw jittered image) | — (DLSS history reset) |
 | `Ctrl+F9` | Self-test (cycles OFF, the 4 jitter signs, jitter-only; dumps lossless BMP frames to `dlaa_selftest\`; v0.7.0 upscale: the DLAA modes dump the DLSS output at output res, OFF / jitter-only the raw render-res frame) | — |
@@ -213,7 +253,7 @@ The self-test dumps eye 0 only in VR (~89 MB per BMP at 4592×6496); snapshots a
   | `dlss_preset` | `default` | DLSS render preset for DLAA (`default`, `J`, `K`, `L`, `M`, `E`, `F`); models 1–4 (`Shift+F1`..`F4`) select `default`/`E`/`F`/`M`; written by `Shift+F12`. v0.7.0: applied to every DLSS quality mode (all hint parameters), so it also picks the model while upscaling |
   | `sharpness` | `0.4` | RCAS sharpen strength after DLAA, 0..1 (`0` = pass skipped); `Shift+F7`/`F8` adjust; written by `Shift+F12` |
   | `sharp_radius` | `1.5` | RCAS ring-tap radius in texels, 1..4 (bilinear taps); `Shift+F9`/`F10` adjust (v0.5.8); written by `Shift+F12` |
-  | `dlaa_area` | `100` | int 40..100 (v0.6.4): DLAA runs on a rect of this % of each eye image's width AND height (pixel count ~ area²), centred on the eye's optical centre; `100` = whole image (v0.6.3 behaviour); `Shift+F5`/`F6` adjust; written by `Shift+F12` |
+  | `dlaa_area` | `100` | int 20..100 (v0.6.4; 40..100 before v0.10.0 phase 15): DLAA runs on a rect of this % of each eye image's width AND height (pixel count ~ area²), centred on the eye's optical centre; `100` = whole image (v0.6.3 behaviour); `Shift+F5`/`F6` adjust; written by `Shift+F12` |
   | `dlaa_area_feather` | `96` | int 0..512 px (v0.6.4): blend ramp from the raw frame to the DLAA result at the rect edges that lie inside the image; `0` = hard edge (render px; v0.7.0 upscale: scaled per axis to output px) |
   | `dlss_upscale` | `1` | `0`/`1` (v0.7.0): DLSS upscaling from the scene size to the eye texture / backbuffer size whenever that is larger (see "DLSS upscaling"); `0` = always DLAA at render res (v0.6.5 path); `Ctrl+F4` toggles; written by `Shift+F12` |
   | `mode` | *(absent)* | `0`/`1`/`2` (v0.7.2): start mode written by the plain `End` key — `1` DLAA, `2` DLSS, `0` off. When present (and no `dlaa_off.txt`) it wins over `dlss_upscale` at startup. `End` cycles and rewrites it |
@@ -329,6 +369,125 @@ origin closer than `mv_ego_origin_m`, default 8 m) whose motion differs from `R_
 nothing left: `R_ego = R_world`). World-layer pixels closer than `mv_ego_pixel_m` (default 3 m, `0` = off)
 use `R_ego`; the INSERT debug view shows them with blue = 0.5 (cabin = 1).
 
+**Static replay skip (v0.10.0 phase 14, `mv_replay_static_frames` 6 / `mv_replay_static_every` 4).** The per-draw id replay
+(`DrawIdRecord::Replay` at the G-buffer leave) was 2.1-3.0 ms per frame at 4K in ATS, nearly all of it static scenery. Design:
+- *Key:* the draw's `FullKey` (IB, VB0, offsets, counts, base vertex, VS -- the key the GPU pairing groups by first). Identical
+  copies share it, so a key is skipped only while none of its draws moves (conservative: a parked truck of the same model as a
+  driving one is never skipped). A buffer-pool rotation gives a new key = a fresh streak (6 frames of full replay).
+- *Readback:* the verdict is already on the GPU (`ResolveDraw`). Three more bitmasks in DrawIdMv's `Cnt` buffer ride the existing
+  non-blocking diagnostics readback (3 staging slots, `DO_NOT_WAIT`): own-pair STATIC (dwords 384..511), RIGID PARENT this pass
+  (512..639, `ParApply`), MOVES (640..767: own-pair mover, track reject, moving twin / attach / parent). `Finish` stores the
+  pass's keys with the slot; `Poll` (and `DrawIdMv::PollMain`, called right before each gated replay) feeds a global 8192-slot
+  table: STATIC raises the streak once per frame (two VR eyes count once), MOVES resets it, a draw in neither (no partner: new,
+  culled back in) is neutral -- it neither builds nor breaks the streak but holds the key (an unpaired copy needs its pixels for
+  its own rigid-parent vote). A rigid-parent mark holds the key for 30 frames.
+- *Deep static only (round 3):* STATIC means own-pair state 2 AND `dev < mv_replay_static_eps_px` (default 0.02 px; `FoldU.z`).
+  A draw static by the 0.1 px snap but above the epsilon (a truck followed at the player's speed: near the focus of expansion its
+  own motion stays sub-snap but wobbles) sets the MOVES bit (Cnt [210] counts them) and stamps its key "moved"; a key that moved
+  within 60 frames is never skipped. In game (2026-10-09 13:16 DLL) such a truck's plate alternated sharp / blurred with the 4-frame
+  re-check cadence: its parts were skipped like world geometry and had no own pixels on the frames their motion crossed the snap.
+  Harness S14 (vehicle + plate exactly static, then 0.04 px / frame of its own, then accelerating 0.05 px / frame per frame):
+  skipped only while exactly static, never after; `cmp` with / without `rstatic=4` bit-identical.
+- *The vote does not see the stagger:* in a gated pass (`ParU.x` bit 4) the marching rigid-parent vote counts a world pixel without a
+  G-buffer id as a STATIC source (`kParPseudo`, state 2, the layer's camera R) -- what the skipped draw is. Without it the vote's
+  inputs changed with the re-check frames (first in-game test, 2026-10-09: a moving SUV's plate lost its parent -- white in Ctrl+F6
+  -- on every ~4th frame). Harness `cmpdump` / `cmp` with `rstatic=4`: S1-S4 and S6-S8 (every plate path: own matrix, twin /
+  attach, view-space and instanced plates on a turning trailer) bit-identical motion vectors.
+- *Rigid-parent vote, round 4 (in game 2026-10-09 13:48 DLL):* (1) a plate lost its parent for ONE frame (white in Ctrl+F6) in a
+  frame where many draws were unpaired at once; (3) roadside grass took an overtaking SUV's motion (wobbly / blurry). Both are
+  properties of the phase-6 vote, not of the gate: the harness reproduces (3) with the gate off (S8: four grass clumps 10 cm in
+  front of the passing truck's side took its motion in 64 clump-frames). Fixes: every pass keeps a 64-entry table of its listed
+  draws (IndexCount + instance count, pixel centroid on a 2 px sub-grid minus the viewport jitter, final parent, size;
+  `UHoldW` / `UHoldR`). PLATE HOLD (`ParHold`, end of `CSParentPick2`): no parent this pass (or only the pseudo static source) ->
+  last pass's parent is kept for up to 3 frames when the centroid, carried back by that parent's own R, lands within 6 px of last
+  pass's entry (and nearer than the camera motion puts it when the two differ by >= 2.5 px; a static parent is kept by the camera
+  motion -- only the label). TEMPORAL CHECK (`ParMotionOk`, in `ParBest`): a moving candidate is refused when last pass's entry lies
+  clearly where the CAMERA motion puts the draw, not the candidate's (only >= 2.5 px apart: below that a 2 px-grid centroid is
+  noise). CLUTTER RULE: a draw of > 4 instances never takes a moving parent (close-car plates are 1-instance draws). Stats: "plate
+  holds / refused by the temporal check / to clutter batches" in the static-skip field. Harness S8: + the grass beside the truck
+  (8-instance batches: 0 mover frames) and the trailer left out of the replay in frame 50 (`DrawIdRecord::SetTestSkipKey`, harness
+  only): its 7 plates keep its motion (a mutation without the hold fails all 7).
+- *Round 5 (static smear report, 14:47 DLL):* an id-0 world pixel and a pixel of a static draw take the SAME camera R in pass B
+  (`kReprojDepthShader`: only a state-3 mover uses its own R; everything else `Solve[base]`, which `CSPick` overwrites with the
+  per-draw consensus when one is found -- the log shows the consensus in 598-600 of every 600 frames). Harness `drop=5` (the
+  medoid dropped after 5 healthy readbacks, as in game) `cmpdump` / `cmp` with and without `rstatic=4`: bit-identical. The low-pair
+  frames of that run (8-31 per 600 in some windows, 11-26 % paired) come from the phase-8 medoid drop: without pass A, `CSGather`
+  predicts with LAST frame's camera R, and an abrupt change of the rotation speed pushes far draws over `mv_drawid_max_m` /
+  mis-pairs identical copies (harness `jerk=X`, S1-S4 / S13 / S14: a yaw-rate step at frame 60). A low-pair readback now re-arms
+  the medoid (counted as a re-arm), so pass A predicts again until the consensus has been healthy for `mv_medoid_drop` readbacks.
+- *Round 6 (ATS 15:29 clip, gate OFF, Ctrl+F6: roadside grass / vegetation solid magenta while driving; "smudgy, even the fence"):*
+  the magenta was NOT the rigid-parent path -- its pixels carry no green / cyan / orange tint, i.e. state 3 by the draws' OWN pairs
+  (log: 200-210 own-pair movers per frame vs 2-4 parent movers in those windows; the 12:36 clip already shows the same magenta tufts
+  where the roadside has grass). Root cause, from the user capture `captures/ats_flat_fence_frame1634.rdc` (cb0 of all 1554
+  G-buffer draws, RenderDoc replay): ATS draws its roadside grass CAMERA-RELATIVE -- all 79 non-instanced grass batches (PS 12755),
+  all 131 instanced grass draws and 37 other draws: cb0 rows 0..3 = the view ROTATION, rows 4..7 = projection * view rotation,
+  column 3 = (~1e-9, ~2e-6, near 0.1, ~-1e-7); the camera translation is in the vertices / another cbuffer. Such a draw's own pair
+  gives R = the camera rotation only; with the camera driving it deviated from the camera R by the translation's parallax and
+  became a MOVER with that rotation-only R (wrong motion vectors on all its pixels; its matrix twins spread it). Fix
+  (`OriginFree`): a paired draw whose MVP column 3 is (~0, ~0, near, ~0) is STATIC (the layer's camera R), never a mover, never a
+  skip streak, never a consensus voter (Cnt [214], "camera-relative ... held static" in the static-skip field). Also: an instanced
+  draw of more than 1 instance is never counted / listed for the vote (no parent, no hold -- the round-4 clutter rule passed the
+  31 of 135 ATS instanced draws with 2..4 instances), and the plate hold applies only when exactly one entry of last pass matches.
+  The instance count path is verified end to end (Cnt [215..223]: the counts the shaders saw). Harness S15 (roadside: 16
+  camera-relative clumps through VSSkin bones, 12 instanced 2 / 3-instance batches + one of 8, a car overtaking 25-55 cm from the
+  clumps, an oncoming car, a parked van): every clump pixel exactly the camera motion in all 100 frames; `mutcr` (the rule off)
+  fails it with 620891 clump px off by up to 118 px, `mutinst` (round-4 listing) with 389 parent draw-frames and 302 px.
+- *Round 7 (first in-game test of round 6, ATS VR, `captures/dlaa_inject_ats_v0100p14r6_vr.log`):* every 'MV draw-ids @blit'
+  window shows `camera-relative (origin-free MVP) paired draws held static 0.0/frame` while the own-pair movers climb to 200-220
+  per frame on a grassy roadside (`paired 99.9 % of 1272 draws/frame (movers 212.9 ...`); the grass stayed a mover, still smudged.
+  Cause (algebra, column vectors, `mul(M, p)`): a VR eye's view = T(eye offset) * head view, and the grass vertices are relative
+  to the HEAD, so the MVP column 3 = P * (ex, ey, ez, 1) = (p00 ex + p02 ez, p11 ey + p12 ez, p22 ez + p23, w = ez as view depth).
+  With ex = IPD / 2 ~ 0.032 m and p00 1.3-1.5, |x| ~ 0.04-0.05 clip, far over round 6's |x|, |y|, |w| <= 1e-4 |near| (~1e-5). The
+  off-centre eye projection (log: `optical centre uv=(0.379, 0.403) from p=0.2425 q=-0.1932`) changes column 2, not column 3 (it
+  only adds p02 ez ~ 1e-3). Fix (`OriginFreeCol`, `kOFreeW` / `kOFreeXY`): DEPTH part |w| <= 0.03 m (an eye-to-head transform
+  carries a few mm, on some headsets 1-2 cm, of z; the old |w| <= 1e-4 |z| form needs |w| <= 1e-5 m and is dropped) AND LATERAL part
+  |x|, |y| <= 0.25 clip (15 cm of lateral offset at p00 1.7, 17-19 cm at the VR eyes' 1.3-1.5, 25 cm at 1.0) AND |z| > 1e-6. An
+  object whose origin is within 3 cm of the eye plane and ~15-25 cm of the eye laterally is only ever camera-attached (wants the
+  camera R anyway); world geometry crossing the eye plane (a roadside post) fails the lateral part by metres. Diagnostics (Cnt
+  [224..230], `OriginDiag` / `OriginMoverDiag`, mutation bits ignored), appended to the static-skip field as `round 7 origin-free
+  split: depth ok (|w| <= 0.03 m) but lateral over 0.25 clip X/frame (nearest lateral miss max(|x|,|y|) M), origin-free max |x| A
+  |y| B |w| C, own-pair movers with origin |w| < 0.5 m N/frame (min mover |w| W m)`; the Alt+F8 `MV dump` lines also print
+  `col3 x .. y .. z .. w .. origin-free yes | depth only, lateral over 0.25 | no` (every mover is dumped). Harness: S15 runs as
+  the two VR eyes (scene 16; also in the full run): every draw's view = T(eye offset) * head view, eye offset (-0.032 / +0.032,
+  0.002, -0.004) m, a fixed eye per 100-frame run on its own unit (as the DLL: one unit per eye; alternating the sign per frame
+  would be an eye swap), the clumps' cb0 = P * T(eye offset) * head rotation. Same criterion as flat: every clump pixel exactly
+  the camera motion in all 100 frames (0 of 1357409 / 1354059 px off), 16 origin-free draws per readback, and the read-back
+  origin-free max |x| |y| |w| = 0.0216 / 0.002402 / 0.00400012 = p00 |ex|, p11 |ey|, |ez| exactly (flat: the residues 3.5e-9 /
+  2e-6 / 1.2e-7). New mutation `mutr6` (the round-6 rule, FoldU.w bit 3): flat S15 passes, both VR eyes FAIL (618928 / 619372
+  clump px off by up to 118.9 px, 1568 clump draw-frames a mover, 0.00 origin-free per readback) -- the harness reproduces the
+  in-game miss; `mutcr` fails flat (620891 px, 1379 / 2948) and both eyes (1379 / 2948 each); `mutinst` unchanged on flat (389
+  parent draw-frames, 302 px) and fails both eyes (397 / 375, 594 / 556 px). Full run 133103 checks (127205 before: + 2 flat S15
+  diagnostics checks + 2 x 2948 VR eyes), `rstatic=4` 133115. `cmp` of the round-6 binary's `cmpdump` vs this one (no rstatic):
+  S1-S4, S6-S8, S13, S14, S15 0 px differ, max 0.0000 px (the wider rule changes nothing outside the camera-relative draws);
+  `cmpdump` without / `cmp` with `rstatic=4` (this binary): S1-S4, S6-S8, S14, S15, S16 0 px; S13 7-778 px in 1 frame (max
+  0.09-0.24 px, the start lag; it varies run to run with the non-blocking readback timing, the round-6 binary gives the same range).
+  Next VR log: `held static` must be ~200+/frame on a grassy roadside, the own-pair movers back to the vehicle count, `origin-free
+  max |x|` ~ p00 * IPD / 2 (~0.04-0.05), `|w|` a few mm; `own-pair movers with origin |w| < 0.5 m` near 0 (only a
+  vehicle right beside the eye or a moving cabin part; the mutation shows 16 per frame = every missed clump, min mover |w| =
+  |ez|). If the movers stay high: a `nearest lateral miss` just over 0.25 or a min mover |w| over 0.03 m names which threshold to
+  move (Alt+F8 then gives the exact column 3 of each missed draw).
+- *Round 7b (ATS flat 17:57, round-7 DLL, `captures/dlaa_inject_ats_v0100p14r7_flat.log`):* the rule fired (33-75 held static per
+  frame) but 30-90 own-pair movers per frame kept an origin |w| < 0.5 m, with `min mover |w|` 0.0300-0.0307 m and `origin-free max
+  |w|` 0.0296-0.0299 m in every window, max |x| up to 0.235: the camera-relative draws' origin sits at w ~ 0.03 m (and x ~ 0.04-0.24),
+  right at the round-7 limits, so each grass batch flipped static <-> mover with its frame-to-frame jitter = the smudge stayed. Fix:
+  `kOFreeW` 0.03 -> 0.20 m, `kOFreeXY` 0.25 -> 0.50 clip (the dump / log texts follow). Next log: `min mover |w|` well above 0.2 m,
+  near-origin movers ~0/frame, held static ~100-250/frame on a grassy roadside.
+- *Perf reading:* the per-section GPU timers are timestamp pairs; when the GPU runs out of queued work it waits for the CPU, and that
+  wait lands in whichever section brackets it (in-game logs from before this change already show `fwd-replay` 0.01 <-> 6.9 ms and
+  `fwd-depth` 0.05 <-> 4.9 ms between 600-pass windows with the same draws and CPU time). Judge the gain by the `replay` figure,
+  the frame time and the `GPU spans scene` figure, not by the mod total of one window.
+- *Gate + stagger:* `DrawIdRecord::SetStaticGate(true)` around `DidReplay` (main passes only); a world, non-instanced, non-cabin,
+  non-late draw whose key has streak >= frames, a verdict <= 16 frames old and no parent hold is skipped unless
+  `frame % every == hash(key) % every`. Only the REPLAY is skipped: the draw is still recorded, so its MVP is gathered, paired,
+  votes in the consensus and gets its state every frame (that is what keeps its partner and its verdict alive); its pixels hold
+  id 0 = the camera R of their layer in pass B, which is what a static draw gets anyway (harness `cmp`: bit-identical motion
+  vectors). Late draws (after a forced / segment replay) are never skipped: a stale id of an earlier segment would survive under
+  them.
+- *Safety:* the table is cleared on `Forget` (history reset, `MvInvalidate`), an unusable record, a readback without a used world
+  consensus (with `mv_camr_consensus` on), a FIFO underflow and a change of the two ini values. Stats: the `static skip` field of the `MV draw-ids`
+  line; the Ctrl+F6 view shows id-0 world pixels olive while the gate runs. Harness: `rstatic=E` (S1-S4, S6-S8 and S13, parked
+  vehicles that start at frame 40: lag <= 2 frames).
+
 ## VR / per-eye (v0.5.0)
 
 VR frame structure (ETS2 `-openxr`, Virtual Desktop; facts in [`CAPTURE_FINDINGS.md`](CAPTURE_FINDINGS.md)): per Present
@@ -374,6 +533,82 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   frames, and `DLAA GPU cost eye N: avg X ms` every 600 frames (timestamp queries, read back late, never
   blocking). `dlaa.ini` `gpu_timing`: -1 (default) = VR only, 0 off, 1 on.
 - **Cost.** About 30 MP per eye: expect a heavy GPU hit and ~1.5 GB extra VRAM with both eyes live.
+
+## OFXR Bridge pass-through (v0.10.0)
+
+- OFXR Bridge's D3D11 bridge opens shared textures on the game's device and copies / draws the eye pictures on the game's own immediate
+  context (inside `xrReleaseSwapchainImage` / `xrEndFrame`, game render thread). `IsGameCtx` cannot separate those calls from the
+  game's, so the filter is the return address, not the context: `src/ofxr.cpp` records the address range of every `ofxr*` module
+  (`EnumProcessModules`, rescanned from the setup thread, then every 300 frames for 10 minutes, then every 3000).
+- First statement of Draw / DrawIndexed / DrawIndexedInstanced / Dispatch / CopyResource / CopySubresourceRegion(1) /
+  ResolveSubresource / OMSetRenderTargets / RSSetViewports / ClearRenderTargetView: `if (Ofxr::FromOfxr(_ReturnAddress()))` -> call the
+  original and return, no counting, no blit test. Readers never lock (fixed array, atomic count written last). `ofxr_bridge = 0` disables it.
+
+## Tuning menu overlay (v0.10.0)
+
+- **State** lives in `inject.cpp` (the "TUNING MENU" block after `ToggleMirrors`): `g_menuOpen` (atomic), the selected row, the
+  `menu_*` placement. `MenuKeys` runs in `PresentFrameWork` before the other user keys; every row calls the hotkey's own function
+  (`CycleMode` / `CycleProfile` got a direction, the Shift+F11 / Ctrl+F4 / Ctrl+F3 toggles became `ToggleDlaa` / `ToggleUpscale` /
+  `ToggleFwdDepth`). The navigation keys repeat in `PollKeys` (350 ms, then 70 ms) and fire only while the menu is open; repeats
+  act on the number rows only.
+- **Panel** (`src/menu.cpp`, `TuningMenu`): the panel text is drawn with GDI (Segoe UI, `ANTIALIASED_QUALITY`) into a 32-bit DIB,
+  only when the panel's text or its build scale changes (the whole `Panel` struct is compared), and uploaded with
+  `UpdateSubresource` into an R8G8B8A8_UNORM texture. One textured quad (VS from `SV_VertexID`, rect in a constant buffer; PS alpha =
+  max(0.88, luminance), SrcAlpha / InvSrcAlpha, RGB write mask), drawn under `t_inDlaa` with a full save / restore of the state it
+  touches (the `PreviewBlit` set + VS / PS constant buffer 0 and PS sampler 0). An `_SRGB` view or a float (scRGB) target gets the
+  colours decoded to linear first (white = 1.0, SDR white); the HDR10 screen (R10G10B10A2 with `g_hdrOut`) gets them PQ-encoded
+  (Rec.2020, white at 200 nits). Device objects are made per device (a new device recreates them); the texture is dropped when the menu closes.
+- **Where it draws.** Flat: at Present, into a per-Present RTV of `GetBuffer(0)` (no reference kept, so `ResizeBuffers` stays
+  possible), only when the swapchain's device is the game's. Present-layer mode: at the frame boundary, into the bound RT0 when it is
+  the game-side backbuffer. VR: `HandlePossibleBlit` notes the eye and its RT (`g_menuBlitEye` / `g_menuBlitRt`), and `hkDraw` draws
+  into the still-bound eye RTV right after the game's blit Draw and `RunPendingComposite`, centred on `g_optC[eye]` + `menu_vr_x/y`,
+  shifted inward by `menu_vr_depth`; the VR desktop mirror also gets the flat panel at Present (scaled from the eye texture, so the
+  texture is built once per change). Closed: one branch per Present and per blit Draw.
+- **GPU figures** (`MenuPerfOpen` / `MenuPerfTick` / `MenuPerfClose`): opening the menu switches `GpuPerf` on when dlaa.ini has it
+  off (back at the close); every 60 Presents the menu turns `GpuPerf::Stats` back into window sums and shows the difference to its
+  last read (`GpuPerf::Restarts` catches a `LogWindow` restart in between), grouped per feature (`MenuCostGroup`, NGX + mirror NGX
+  included). `game` = the GPU spans' scene ms/frame minus the mod's total of both eyes. Texts change only at these snapshots, so
+  the panel texture is rebuilt at most once a second.
+- **FPS box** (`fps_*`, `g_fpsShow`): `FpsTick` (the one fps source: Presents counted, QPC, figures every 0.5 s) runs per Present
+  only while the box is on or the menu is open (`MenuPerfTick` copies its figures); `TuningMenu::DrawWidget` draws it after the panel
+  at the same two places (`MenuPresentTarget` at Present, `MenuDrawVr` per eye; the eye blit is noted while menu open || box on) from
+  its own texture cache (rebuilt only when its text or build scale changes), dropped by `ReleaseWidget` when switched off.
+- **Key swallowing** (`src/dinput_wrap.cpp`, `KeySwallow`), only while the menu is open and only for the 5 bound menu keys
+  (`MenuSwallowKeys`): `DirectInput8Create` (proxy.cpp) wraps `IDirectInput8A/W`; `CreateDevice` of a keyboard returns a full
+  forwarding `IDirectInputDevice8A/W` whose `GetDeviceState` clears the keys' DIK bytes and whose `GetDeviceData` drops their key-down
+  entries. The game window (the swapchain's `OutputWindow`, first top-level Present) is subclassed once: `WM_KEYDOWN` /
+  `WM_SYSKEYDOWN` / `WM_CHAR` / `WM_SYSCHAR` and `WM_INPUT` keyboard make events of those keys are dropped. Key releases always pass
+  (a key held when the menu opened must reach the game as released). The menu itself reads `GetAsyncKeyState`. A DLL unload puts the
+  original window procedure back if the window still points at ours.
+
+### Phase 15 (v0.10.0): VR menu screens -- panel, DLAA area, limits
+
+- **Panel / fps box on the VR menu screens.** The VR main menu (before a save is loaded) and the garage / truck dealer screens
+  have no world eye blit, so `MenuDrawVr` never ran there (ATS VR log 18:10: menu opened at 18:10:30, `VR detected at blit`
+  only at 18:10:49). Their eye pictures are the preview composites: `MenuDrawPreview` draws the panel + fps box through the
+  game's own composite RTV (`PvTarget::rtv`) right after the target's flush -- trigger (a) after the game's first
+  non-composite Draw / DrawIndexed into it (the VR verts=96 Draw), trigger (b) at the bind that leaves it; not at Present.
+  Eye = `PvUnitOf` (the eye map from the preview projection verdicts); an eye not known yet gets no panel that frame (the
+  composite order is not usable: the game renders the eyes in either order). With DLAA off / passive the composites are still
+  matched and the candidate / layout / verdict readbacks keep running while the panel or the box is up (`PvReadbacksOn`), no
+  DLAA runs. Centre = `VrEyeCentre`: the world eye's optical centre, else the preview picture's own (`g_pvOptC`, tag `preview
+  DLAA area`: the reference tile's skew mapped through the tile layout, p' = (p + c.x) / h.x), else the image centre.
+  `MenuVr()` (rows edit the VR placement) = an eye blit was seen, or a VR launch composited into a non-backbuffer eye picture
+  in the last 120 Presents (a VR launch without a headset keeps the flat rows).
+- **Limits.** `dlaa_area` 20..100 (was 40..100; `SceneDlaa::kAreaMin`; ini, keys, menu row). `fps_scale` / `fps_vr_scale`
+  0.2..3.0 (was 0.5..3.0); the meaning of the scale is unchanged (VR 1 = 8 % of the eye width, so a saved value keeps its
+  size), the VR default is 0.3 (was 1.0, ~490 px on a 6120-px eye).
+- **Menu units honour `dlaa_area` in VR.** `PreviewFlush` runs the preview units (eye tags 10 / 11) on the same centred rect
+  as the world eyes (SceneDlaa's crop path: feather blend, raw picture outside); flat, the VR-without-headset backbuffer route
+  and the two preview debug captures keep the whole picture. The tiled depth assembly clears and reduces only inside the union
+  of both eyes' rects + 32 px (`PvAsmClip`; a tile pass's eye is only known at its composite); a tile outside it is skipped.
+  The per-tile DS copy stays whole (D3D11 copies a depth-stencil resource only whole; DS_P has no SRV).
+- **Next VR log, look for:** `tuning menu: VR panel / fps box drawn on a menu / truck-preview eye picture (target order N ->
+  eye E, ...)` before `VR detected at blit` (and no `... NOT drawn ...` lines after the first frames); `preview DLAA area: eye
+  0 optical centre uv=(0.379, 0.403) ...`; `preview unit 0 (eye tag 10): DLAA area 40% -> rect (...) 2448x2600 of 6120x6496`;
+  `DLAA GPU cost eye 10: ... [preset=E ... area=40 up=off rect=2448x2600 of 6120x6496]` (was total 2.32 ms, ngx 1.48 at
+  area=100); `preview depth assembly GPU cost: ... | clip ON (dlaa_area 40: clear + reduce inside WxH ...)` (was 0.32-0.39 ms
+  per tile pass); `preview depth assembly: ClearView supported`; `DLAA area now 20%` at the new limit.
 
 ## Roadmap / history
 

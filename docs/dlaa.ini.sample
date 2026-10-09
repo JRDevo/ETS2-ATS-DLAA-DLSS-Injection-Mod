@@ -1,12 +1,45 @@
 ; dlaa.ini -- optional, next to dinput8.dll. Template for v0.7.0: every supported key, commented out, set to
 ; its built-in default. Remove the leading '#' to change a value. Format: key = value, one per line; lines
 ; starting with '#' or ';' are comments. Read once when the game starts (the log's "config (...)" line shows
-; what was used). The live-tunable keys (dlss_preset, dlaa_area, sharpness, sharp_radius, v0.7.0 dlss_upscale) can
-; be written back from the headset with Shift+F12, which rewrites this file in place and keeps every other line.
+; what was used). The live-tunable keys (dlss_preset, dlaa_area, sharpness, sharp_radius, v0.7.0 dlss_upscale,
+; v0.9.0 tex_lod_bias, v0.10.0 tex_lod_bias_cutout, mv_objects, mirror_dlaa, dlaa_pre_tonemap and perf_profile) can be written back with Shift+F12,
+; which rewrites this file in place and keeps every other line. v0.10.0: the in-game tuning menu (Delete) changes the same
+; values and its Save row does the same as Shift+F12 (+ the menu_* panel keys once you moved the panel, + the fps_* box
+; keys once you changed the fps box there).
+
+# ---- v0.10.0 PERFORMANCE PROFILE (Alt+F9 cycles high -> medium -> low live: 1 / 2 / 3 beeps; Shift+F12 saves it here) ----
+# A profile only gives a DEFAULT to the keys in the table below. Any of those keys you set in this file -- or change with its own
+# key while playing (Alt+F6 mirrors, Ctrl+F3 see-through depth, Shift+F1..F4 model, Shift+F5 / F6 area) -- keeps your value
+# whatever the profile. The log's "phase 10 (v0.10.0): perf_profile=..." line lists what the profile set and what it kept.
+#   high   = everything on (default): DLAA in the mirrors with per-part motion (VR: the 2 largest mirror pictures), the see-through
+#            depth for wires / fences / glass, every per-part motion step at full quality
+#   medium = for mid-range GPUs: model E, the see-through depth at half resolution also in flat, flat mirrors with camera motion
+#            only (VR as high), the plate search with half the work budget, instanced parts re-drawn only when seen moving
+#   low    = for weak GPUs: medium + no mirror DLAA, no see-through depth, the plate search limited to 32 parts per frame, and in
+#            VR the DLAA area 60 % (unless you set dlaa_area yourself)
+#                         high      medium    low
+#   mirror_dlaa           1         1         0
+#   mirror_vr_mode        2         2         2      (VR; low: no mirror DLAA anyway)
+#   mirror_flat_mode      1         4         4      (flat; low: no mirror DLAA anyway)
+#   mv_fwd_depth          1         1         0
+#   mv_fwd_depth_res      0 (auto)  2 (half)  2
+#   mv_vote_res           4         4         4
+#   mv_vote_march_cap     48000     24000     24000
+#   mv_inst_replay        0         1         1
+#   mv_parent_max_listed  64        64        32
+#   dlss_preset           default   E         E
+#   dlaa_area (VR only)   100       100       60
+# perf_profile = high
 
 # Log file dlaa_inject.log (next to dinput8.dll): 0 = no log (default), 1 = write the log. Needed for bug reports.
 # This line has no '#' in front: just change the 0 to 1.
 debug = 0
+
+# OFXR Bridge (VR frame generation, https://github.com/djules75/OFXR-Bridge) support, 0 / 1 (v0.10.0). 1 = default: the mod finds the
+# bridge's layer module (ofxr*.dll) in the game and lets that module's own D3D11 copies and draws pass through the hooks without
+# counting them as game draws, so they cannot be mistaken for the eye picture. 0 = no search, no pass-through (only for ruling
+# the handling out). Nothing to change when you do not use the bridge: with no ofxr*.dll in the game it does nothing.
+# ofxr_bridge = 1
 
 # NGX jitter = sign * viewport shift, per axis: -1 or +1 (+1/+1 won the self-test; Ctrl+F12 cycles live)
 # jitter_sign_x = 1
@@ -38,6 +71,215 @@ debug = 0
 # mv_world_slots = 40
 # mv_cabin_slots = 24
 
+# Per-object motion vectors: moving things (traffic and its wheels, trailers, licence plates, wipers, your trailer in
+# the outside view) get their own motion vectors instead of the camera's -- other vehicles stay sharp under DLAA / DLSS
+# instead of ghosting.
+#   2 = per-draw motion vectors (v0.10.0, default): every world draw of a frame is drawn once more into a "which draw owns
+#       this pixel" target and matched with the previous frame on the graphics card; whatever moves on its own gets its
+#       exact motion, everything else keeps the camera motion. No guessing, no object limit.
+#   1 = the v0.9.0 stencil object ids (legacy, kept for comparison; the mv_objects_* keys further down are for 1 only)
+#   0 = off (camera motion only)
+# mv_objects = 2
+# v0.10.0 (phase 6b): 1 = also draw the instanced draws (a close car's licence plate is one, plus vegetation and small props)
+# into the draw-id target, AND let them take the motion of the part they sit on (the rigid-parent vote below) -- so a plate on a
+# moving car moves with it instead of ghosting; roadside grass stays still. Costs ~180 extra tiny replay draws per pass. 1 =
+# default; 0 = instanced / no-MVP draws keep the camera motion and are not replayed (as before phase 6b)
+# mv_drawid_instanced = 1
+# v0.10.0: the largest move of an object's centre in one frame that still counts as the same object (metres, 0.5..100)
+# mv_drawid_max_m = 8
+# v0.10.0: an object that moves less than this many pixels against the camera motion (measured 4 m around its centre)
+# keeps the camera motion exactly (0..4; 0 = every matched object uses its own motion)
+# mv_drawid_snap_px = 0.1
+# v0.10.0: the camera motion itself is taken from the largest group of matched objects that agree with each other (the
+# scenery: hundreds of objects) instead of a small sample that could pick a moving truck -- that made grass, wires and the
+# sky smear for seconds. 1 = default; 0 = the old sample (for comparison only)
+# mv_camr_consensus = 1
+# (v0.10.0: licence plates, decals, glass and wires drawn after the scene get their own motion too -- part of
+#  mv_fwd_depth = 1 further down; mv_fwd_depth = 0 / Ctrl+F3 switches both off)
+# v0.10.0 phase 4: a see-through part drawn after the scene (licence plate, decal, sticker) that sits on a moving part takes
+# that part's motion when it lies within this many metres of it (its centre on the part's centre, or its pixel in front of
+# the part's surface). In game a bus plate kept the camera motion and stayed jagged. 0..5; 0 = off
+# mv_fwd_attach_m = 0.5
+# v0.10.0 phase 5: a part that finds no partner in the previous frame (in game: licence plates on moving trucks -- the game
+# rebuilds their geometry every frame, so they stayed white in Ctrl+F6 and jagged) takes the motion of the part drawn with
+# EXACTLY the same placement (its vehicle's body); a solid part without such a twin takes a moving part's motion when its
+# centre lies within mv_fwd_attach_m of that part's centre and it faces the same way. 1 = default; 0 = off (comparison only)
+# mv_drawid_twin = 1
+# v0.10.0 phase 6: a part that finds no partner in the previous frame takes the motion of the part it SITS ON (found by its
+# neighbouring pixels at the same depth): the licence plates the game rebuilds every frame in camera space (no placement of
+# their own -- phase 5 could not name their truck, they stayed white in Ctrl+F6 and jagged) move with their trailer / truck;
+# on a parked vehicle they stay still. It wins over the phase-5 rule above when both apply. Since phase 6c each plate pixel
+# looks outward (up to 32 px, across the plate's own background / text) for the first surface that moves or stands still on
+# its own, so the whole plate -- not only its border -- finds the body. 1 = default; 0 = off (comparison only)
+# mv_drawid_parent = 1
+# (v0.10.0: key_mv_drawids, Alt+F5, switches 2 <-> 0 live; Shift+F12 saves the state here)
+
+# v0.10.0 MIRRORS: every truck / car mirror is a small picture the game draws on its own before the main view, and it
+# was the one big area without anti-aliasing (shimmering edges in the mirror). 1 = each mirror gets its own DLAA (own
+# jitter, own motion vectors -- your own trailer moves with the mirror and stays sharp --, DLAA on the mirror picture
+# itself; default), 0 = mirrors are left as the game draws them. key_mirror_dlaa (Alt+F6) switches it live, Shift+F12
+# saves it here.
+# mirror_dlaa = 1
+# v0.10.0 phase 4 DLAA BEFORE THE TONEMAP (flat, DLAA mode): 1 = the main picture's DLAA runs on the game's own HDR colours
+# (the RGBA16F scene picture) right after the 3-D scene is drawn, before the game's brightness / bloom / tonemap step --
+# what NGX is trained for; thin bright lines (lane paint, wires, rail edges) shimmer less. The sharpening (sharpness /
+# sharp_radius) then also runs on the HDR picture. 0 = DLAA on the finished 8-bit picture at the end of the frame (before
+# v0.10.0). DLSS upscaling, VR and Windows HDR always use the end-of-frame path; so does the Ctrl+F6 view. key_pre_tonemap
+# (Alt+F7) switches it live, Shift+F12 saves it here. Phase 7: the place is decided once per frame and changes only after
+# 60 frames in a row of the other condition (a single frame that cannot use it takes the end-of-frame unit); both units stay
+# alive, so a change costs no rebuild and no blur pulse (switching ON after Alt+F7 / Ctrl+F6 takes about 60 frames).
+# dlaa_pre_tonemap = 1
+# the smallest mirror picture handled: width AND height in pixels (16..4096; smaller views are left alone)
+# mirror_min_px = 128
+# how many mirror pictures per frame get their own DLAA (1..16; ETS2: 4 per frame, VR: per eye). More are left alone.
+# mirror_max_views = 8
+# v0.10.0 phase 8, VR only (flat: mirror_flat_mode): 1 = every mirror picture gets its DLAA, 2 = only the largest mirror
+# pictures (phase 9: the mirror_vr_views largest of each frame; v0.10.0 phase 10: the VR default), 3 = each mirror every 2nd
+# frame (in between it shows its last anti-aliased picture), 4 = every mirror picture, but without the per-part motion (camera
+# motion only: the cheapest DLAA mirror), 0 = no mirror DLAA in VR. For the VR frame budget; the perf eye lines of the log
+# ("mirrors") show the cost. (The default follows perf_profile unless you set it.)
+# mirror_vr_mode = 2
+# v0.10.0 phase 10: the same choice in flat (0..4 as above; default 1 = every mirror with per-part motion; perf_profile medium /
+# low: 4)
+# mirror_flat_mode = 1
+# v0.10.0 phase 9: with mirror_vr_mode = 2, how many mirror pictures per frame keep their DLAA (1..8, the largest ones)
+# mirror_vr_views = 2
+
+# ---- v0.10.0 phase 8 PERFORMANCE (each one has the fast setting as its default; the other value is the phase-7 behaviour) ----
+# with debug = 1 the log gets "perf eye N" lines every 600 frames: the GPU time of every part of the mod per eye (NGX itself
+# listed apart), next to the game's whole frame. -1 = with debug = 1 (default), 0 = off, 1 = on
+# perf_timers = -1
+# how finely the "which vehicle does this plate sit on" search looks at the picture: 4 = every 4th pixel, small plates every
+# 2nd (default), 2 = every 2nd pixel for everything (before phase 8)
+# mv_vote_res = 4
+# the most searches of that kind per frame (0 = no frame limit, before phase 8)
+# mv_vote_march_cap = 48000
+# how many candidate camera motions the consensus tries per frame (16..128; 64 default, 128 before phase 8)
+# mv_cons_cands = 64
+# the old camera-motion estimate (64 small copies per frame inside the game's drawing) stops while the per-draw consensus has
+# been healthy for this many frames, and comes back by itself when it fails; 0 = always run it (before phase 8)
+# mv_medoid_drop = 120
+# 1 = the big per-frame helper pictures (depth copy, draw ids, see-through depth) are shared between frames in flight -- about
+# 1 GB less video memory in VR, 200 MB in flat (default); 0 = one set per queued frame (before phase 8)
+# mv_slot_pool = 1
+# 1 = re-draw only the instanced parts (licence plates, vegetation) whose kind was seen on a moving vehicle lately, all of them
+# every 7th frame; 0 = all of them every frame (default until the VR cost is measured: the "replay-inst*" figure)
+# mv_inst_replay = 0
+# (v0.10.0) the per-part motion vectors redraw every world object once more each frame to learn which object owns which pixel.
+# An object that did not move for this many frames in a row (road, buildings, trees, parked trucks) is no longer redrawn every
+# frame: its pixels keep the camera motion, exactly what a still object gets anyway. 0 = redraw everything every frame (before),
+# 1..60, default 6. This is the "replay" figure in the "perf eye" lines (2-3 ms at 4K before it). Every perf_profile keeps it on.
+# mv_replay_static_frames = 6
+# ... such an object is still redrawn on 1 frame of every this many (spread evenly, so the cost is the same each frame): a parked
+# truck that starts to move is picked up within this many frames at most (4 = 1/18 s at 72 fps). 1..16, default 4; 1 = every
+# frame (the same as mv_replay_static_frames = 0)
+# mv_replay_static_every = 4
+# ... "did not move" means: its own motion stays within this many pixels of the camera's (0..0.1, default 0.02). Road and
+# buildings move with the camera exactly; a truck you follow at the same speed is "almost still" but wobbles -- it is never skipped
+# (its licence plate flickered with the re-check rhythm before this). Raise it (0.05) only if the "deep static" count of the
+# "static skip" field in the log is far below the "paired + static" count; 0 = only bit-exact stillness
+# mv_replay_static_eps_px = 0.02
+
+# ---- v0.10.0 phase 9 VR COST (each one has the fast setting as its default; the other value is the phase-8 behaviour) ----
+# 1 = with dlaa_area below 100 the helper work behind the motion vectors (the per-part re-draws, the see-through depth, the
+# "which vehicle does this plate sit on" search) runs only inside the anti-aliased area plus a margin -- outside it the picture
+# is the raw frame anyway (default); 0 = over the whole picture (before phase 9)
+# mv_area_scissor = 1
+# the margin around the anti-aliased area in pixels (0..1024); -1 = dlaa_area_feather + 32 (default)
+# mv_area_margin = -1
+# the see-through depth (wires, fences, glass) at: 0 = half resolution in VR, full resolution in flat (default), 1 = full
+# resolution (before phase 9), 2 = half resolution (about 4x cheaper; a wire one pixel wide can lose a few pixels of its own motion)
+# mv_fwd_depth_res = 0
+# 1 = some of the small GPU steps of the per-part motion run together (fewer passes per eye, same result; default), 0 = one
+# pass each (before phase 9)
+# mv_fold_dispatch = 1
+
+# ---- v0.10.0 phase 10 ----
+# the see-through depth (mv_fwd_depth) is now drawn in ONE batch at the end of the game's see-through pass. 1 = it first copies
+# the scene's own depth into it, so see-through parts hidden behind buildings / trucks are skipped by the GPU (same result,
+# less work; default), 0 = it starts empty (every hidden part is drawn too)
+# mv_fwd_depth_cull = 1
+# VR only: when mv_fwd_depth is NOT set in this file and the see-through depth costs more than this many ms per eye (measured
+# over 300 frames), it switches itself off for the session (one log line; Ctrl+F3 brings it back). 0 = never
+# mv_fwd_depth_budget_ms = 0.30
+# how many parts without a motion of their own (licence plates, ...) the "which vehicle does this sit on" search looks at per
+# frame (8..64; perf_profile low: 32)
+# mv_parent_max_listed = 64
+
+# ---- legacy: the v0.9.0 stencil object ids (mv_objects = 1 only) ----
+# object ids in use at once (1..15); a vehicle and its wheels share one id while they move alike
+# mv_objects_max = 15
+# v0.9.0 r2 filters against false "moving" objects (grass, windows, trees, your own truck):
+# a mesh drawn more often than this per frame (grass clumps, windows, street lamps) never gets an object id of its own
+# (1..8; default 3 -- v0.9.0 r3 tried 6: wheel meshes then used up all object ids and distant traffic ghosted)
+# mv_objects_max_dup = 3
+# v0.9.0 r4: 1 = a repeated mesh (wheels of several trucks of one model) whose hub moves with an established vehicle
+# joins that vehicle's id ("followers"); 0 = off (default)
+# mv_objects_followers = 0
+# objects whose origin is closer to the camera than this (metres, 0..30) are your own truck: never an object id (0 = off)
+# mv_objects_ego_m = 8
+# readbacks in a row with steady motion before an object gets an id (2..8; higher = slower to react, fewer mistakes)
+# mv_objects_hits = 2
+# v0.9.0 r7: something that close (mv_objects_ego_m) only counts as your own truck when it also stays put on screen: it
+# moved at most this many pixels in the frame (0.5..20). A truck passing right next to you moves much more and now keeps
+# its own motion. v0.9.0 r8: measured at the object's origin only, default 6 (was 3) -- a quick first check; the real
+# own-truck test is the one below
+# mv_objects_lock_px = 6
+# v0.9.0 r8: something that close whose position on screen stays within this many pixels (2..64, of the game's render
+# size) over mv_objects_ego_rb readbacks (4..200, about one per frame) is your own truck and never gets an object id,
+# however much the cab shakes. Raise mv_objects_ego_px if parts of your own truck still show up pink / orange in the
+# Ctrl+F6 view on a rough road; lower it if a car driving right next to you at your speed loses its pink
+# (v0.9.0 r10: no longer used -- see mv_objects_ego_m_box)
+# mv_objects_ego_px = 12
+# mv_objects_ego_rb = 24
+# v0.9.0 r10: the same own-truck test measured in metres around the camera instead of pixels: a near part that stays
+# within this many metres (per direction, 0.01..0.5) of where it was for mv_objects_ego_rb checks is your own truck.
+# Raise it if parts of your own truck still show up pink / orange in the Ctrl+F6 view on a rough road
+# mv_objects_ego_m_box = 0.05
+# v0.9.0 r9 debug: 1 = write what the own-truck test sees (near parts, their positions, how long they stayed put) into
+# the log for the first 150 checks that have one ("MV objects: ego trace" lines); 0 = off. v0.9.0 r10: default 1
+# mv_objects_ego_trace = 1
+# v0.9.0 r10: something only counts as a moving object while its centre point (origin) is on screen: |x|, |y| within
+# this many half-screens of the middle (1.0..3.0; 1.2 = 20 % beyond the edge). Roads, terrain and tree batches have
+# their centre anywhere (often behind you) and no longer pick up a vehicle's motion (the pink road / trees of r9)
+# mv_objects_origin_margin = 1.2
+# v0.9.0 r10: a NEW moving object needs to move at least this many pixels (0.5..4, of the game's render size) against the
+# camera motion in each of its first checks; smaller motion is camera noise and never starts an object.
+# v0.9.0 r11: default 2.0 (r10: 1.0) -- a far vehicle that moves less than that keeps the camera motion (error < 2 px)
+# mv_objects_min_px = 2.0
+# v0.9.0 r10: 1 = parts drawn on a tagged vehicle's own position (licence plates, mirrors, lamps) join that vehicle's
+# object id, so they no longer smear while the body is sharp; 0 = off
+# mv_objects_attach = 1
+# v0.9.0 r11: a draw whose centre point (origin) lies within this many metres of the camera has no position of its own
+# (batched / instanced geometry, overlays: the game puts their position elsewhere) and is never a moving object, never
+# part of your own truck (0.05..2)
+# mv_objects_cam_m = 0.3
+# v0.9.0 r11: something drawn in at least this many of the last 48 checks, at least half of them without own motion, is
+# part of the static world (or a parked / stopped vehicle): it never starts or joins a moving object and drops out of
+# one (the pink road / verge / trees of r10). 8..48; 0 = off. A stopped vehicle gets its object back ~24 checks after
+# it drives on
+# mv_objects_static_rb = 24
+# v0.9.0 r7: frames in a row a tagged object keeps its last motion when this frame's could not be measured (a second
+# copy of its model appeared, a part did not fit) instead of falling back to the camera's motion (0..8; 0 = off = r6).
+# v0.9.0 r8: the same budget covers a whole frame whose draws could not be matched with the previous frame's (all
+# objects keep their motion instead of all blinking to the camera's for a frame). v0.9.0 r9: also a frame whose camera
+# motion could not be measured at all keeps the last one for this many frames instead of restarting the anti-aliasing
+# history (a short shimmer flash over the whole picture every few seconds while driving); this part applies with
+# every mv_objects setting (0, 1 and 2)
+# mv_objects_hold = 3
+
+# v0.9.0 r5 forward depth for the motion vectors: overhead wires, power cables, fences and lane paint are drawn
+# see-through (blended) and leave no depth of their own, so they used to move like whatever is behind them (a wire in
+# front of the sky moved like the sky -> trails behind wires in DLSS mode while driving). 1 = those draws are drawn once
+# more, depth only (nothing visible changes), so their pixels move with their own depth; 0 = off. Ctrl+F3 switches it
+# live for an A/B check (Ctrl+F6 view: yellow = pixels that took that depth)
+# v0.9.0 r11: only a depth inside the world range counts (a rain / dirt / glare layer on the windscreen used to make the
+# road and trees behind the glass move like the cabin)
+# mv_fwd_depth = 1
+# v0.9.0 r11: a see-through draw whose centre point (origin) lies within this many metres of the camera (windscreen
+# drops, dirt, glare) is not drawn into that depth at all (0.1..5)
+# mv_fwd_min_m = 0.5
+
 # GPU timing logs (per-stage DLAA cost + depth snapshot cost, every 600): -1 auto (VR only), 0 off, 1 on
 # gpu_timing = -1
 
@@ -65,9 +307,11 @@ debug = 0
 # sharpening. Start state; Shift+F9 / Shift+F10 change it live in 0.5 steps (Shift+F12 saves)
 # sharp_radius = 1.5
 
-# v0.6.4 DLAA area: run DLAA only on a rect of this % of each eye image's width AND height (40..100; pixel count
-# ~ area^2, e.g. 70 -> 49 %), centred on the eye's optical centre. 100 = whole image (v0.6.3 behaviour). Outside
-# the rect the image is the raw jittered frame. Start state; Shift+F5 / Shift+F6 change it live in 10 % steps (Shift+F12 saves)
+# v0.6.4 DLAA area: run DLAA only on a rect of this % of each eye image's width AND height (20..100, v0.10.0; was
+# 40..100; pixel count ~ area^2, e.g. 70 -> 49 %, 20 -> 4 %), centred on the eye's optical centre. 100 = whole image
+# (v0.6.3 behaviour). Outside the rect the image is the raw jittered frame. VR only (flat always uses 100); v0.10.0: also
+# the truck picture of the VR main menu / garage / truck dealer screens. Start state; Shift+F5 / Shift+F6 change it live
+# in 10 % steps (Shift+F12 saves)
 # dlaa_area = 100
 # blend ramp (px, 0..512) from the raw frame to the DLAA result at the rect edges inside the image; 0 = hard edge
 # (render px; with DLSS upscaling it is scaled to output px per axis)
@@ -85,9 +329,73 @@ debug = 0
 # HDR on looks wrong (washed out / too dark / clipped highlights / flicker on bright areas). No effect without HDR.
 # dlss_hdr = 1
 
+# v0.9.0 Sharper texture text (road signs, dashboard, GPS, truck decals): texture mip LOD bias. Negative = the game
+# samples sharper texture mips; DLAA / DLSS removes the extra shimmer that brings. Applied only to the 3-D world (and the
+# menu truck-preview) while DLAA or DLSS runs; shadows, mirrors' own views, post effects and the UI keep the game's own
+# filtering. -3..+1, 0 = off (default). Good start: -0.5 to -1. More negative = sharper text but more shimmer on fine
+# patterns (grilles, fences). Start state; Ctrl+F1 / Ctrl+F2 change it live in 0.25 steps (Shift+F12 saves)
+# tex_lod_bias = 0
+# 1 = while DLSS upscales, add log2(render width / output width) on top of tex_lod_bias (e.g. render 75 % of the
+# output width -> -0.42), so the textures match the output resolution. 0 = tex_lod_bias alone (default)
+# tex_lod_bias_auto = 0
+# Anisotropic filtering for the world textures in those passes: 0 = leave the game's own setting (default); 2..16 =
+# anisotropic textures get at least this level, trilinear-filtered ones become anisotropic with it
+# tex_aniso = 0
+# v0.10.0 Where tex_lod_bias / tex_aniso apply. opaque (default) = only the SOLID surfaces: the world's opaque draws (and the
+# menu truck-preview's) -- road signs, buildings, the road, the dashboard. See-through things keep the game's own
+# filtering: fences, wire mesh, wires, glass, licence plates, decals, foliage cut-outs (the game's blended / alpha-to-
+# coverage draws, its alpha-TESTED draws -- a pixel shader that discards pixels -- and its whole see-through pass), so a
+# negative bias brings no extra moire on fences and wires at a distance. solid = the same but alpha-tested draws (wire-mesh
+# fences, grass / leaf cut-outs) get the bias too (the first v0.10.0 rule). all = every draw of those passes (the v0.9.0
+# behaviour: also sharper plates / decals, but moire on fences). Read at start only (no hotkey)
+# (With the default tex_lod_bias_cutout below, the alpha-tested draws get a bias of their own instead.)
+# tex_lod_bias_scope = opaque
+# tex_aniso_scope = opaque
+# v0.10.0 The bias of the ALPHA-TESTED world draws (a pixel shader that discards pixels: wire-mesh fences, chain-link,
+# grass, leaf and bush cut-outs) as a value of its own, independent of tex_lod_bias: wire-mesh fences moire with a
+# negative bias, grass goes soft without one, and the game draws both the same way, so they share this one value.
+# -3..+1, default -0.5 (a middle: grass mostly crisp, little extra fence crawl). 0 = these draws keep the game's own
+# filtering (the first v0.10.0 opaque rule); same = follow tex_lod_bias_scope (solid / all: tex_lod_bias, opaque: 0).
+# When tex_lod_bias_scope is set to solid or all and this key is absent, it acts as same. The tex_lod_bias_auto term is
+# not added to it; tex_aniso still follows tex_aniso_scope. Only active while tex_lod_bias is not 0 (tex_lod_bias = 0
+# turns every texture LOD bias off). Ctrl+Shift+F1 / Ctrl+Shift+F2 change it live in 0.25 steps (Shift+F12 saves)
+# tex_lod_bias_cutout = -0.5
+
 # Audible feedback for the Shift+F-key user controls (model select, area, sharpen strength/width, DLAA on/off,
-# save) and the Ctrl+F7 passive / Ctrl+F4 upscale toggles: 1 on, 0 off
+# save), the Ctrl+F1 / Ctrl+F2 texture LOD bias keys and the Ctrl+F7 passive / Ctrl+F4 upscale toggles: 1 on, 0 off
 # beeps = 1
+
+# ---- v0.10.0 TUNING MENU panel (Delete opens it; its Panel rows change these live, Shift+F12 / the Save row writes them
+# here once you moved the panel in the menu) ----
+# Flat: left / top edge of the panel in % of the picture width / height (0..90), size 0.5..2.0 (1 = 720 px wide at a
+# 1080 p picture, scales with the picture height)
+# menu_x = 2
+# menu_y = 8
+# menu_scale = 1.0
+# VR: the panel CENTRE relative to the eye's optical centre, in % of the eye width / height (-50..50; negative y = up),
+# size 0.5..2.0 (1 = 54 % of the eye width), and the inward shift per eye in px (0..200: the left eye's panel moves
+# right, the right eye's left, so the panel sits nearer than infinity -- raise it if the panel is tiring to look at)
+# menu_vr_x = 0
+# menu_vr_y = -5
+# menu_vr_scale = 1.0
+# menu_vr_depth = 12
+
+# ---- v0.10.0 FPS BOX: a small live fps / frame-time box ("60 fps" / "16.7 ms", updated twice a second), shown also
+# while the menu is closed. The menu's FPS counter rows switch and move it live; Shift+F12 / the Save row writes these
+# here once you changed them in the menu ----
+# 1 = show the box, 0 = off (nothing is measured or drawn then)
+# fps_show = 0
+# Flat: left / top edge of the box in % of the picture width / height (0..95; kept inside the picture), size 0.2..3.0
+# (1 = 92 x 44 px at a 1080 p picture, scales with the picture height)
+# fps_x = 1
+# fps_y = 1
+# fps_scale = 1.0
+# VR: the box CENTRE relative to the eye's optical centre, in % of the eye width / height (-50..50; negative y = up),
+# size 0.2..3.0 (1 = 8 % of the eye width; default 0.3 = about 2.4 %). It uses the same inward shift as the panel
+# (menu_vr_depth).
+# fps_vr_x = 0
+# fps_vr_y = -25
+# fps_vr_scale = 0.3
 
 # ---- Hotkeys (v0.7.7) -------------------------------------------------------------------------------------------
 # key_<action> = [Shift+][Ctrl+][Alt+]Key, or none to disable the action. The values below are the defaults:
@@ -116,6 +424,14 @@ key_dlaa_toggle = Shift+F11
 key_save = Shift+F12
 # DLSS upscale on / off
 key_upscale_toggle = Ctrl+F4
+# Texture LOD bias -0.25 (sharper textures) / +0.25 (v0.9.0)
+key_lod_bias_down = Ctrl+F1
+key_lod_bias_up = Ctrl+F2
+# Texture LOD bias of the alpha-tested draws (fences, grass, foliage) -0.25 / +0.25 (v0.10.0, tex_lod_bias_cutout)
+key_lod_cutout_down = Ctrl+Shift+F1
+key_lod_cutout_up = Ctrl+Shift+F2
+# Forward depth for the motion vectors on / off (v0.9.0 r5, mv_fwd_depth live switch)
+key_fwd_depth = Ctrl+F3
 # Debug: motion vectors on/off, MV debug view, passive mode, jitter-only, self-test, NGX snapshot, frame trace,
 # cycle NGX jitter sign
 key_mv_toggle = Ctrl+F5
@@ -126,3 +442,18 @@ key_selftest = Ctrl+F9
 key_snapshot = Ctrl+F10
 key_trace = Ctrl+F11
 key_jitter_sign = Ctrl+F12
+# v0.10.0 A/B switches: per-draw motion vectors on / off (mv_objects 2 <-> 0), mirror DLAA on / off, DLAA before / after the
+# tonemap (dlaa_pre_tonemap), and the per-draw motion-vector dump of the next frame (diagnostic, needs debug = 1)
+key_mv_drawids = Alt+F5
+key_mirror_dlaa = Alt+F6
+key_pre_tonemap = Alt+F7
+key_mv_dump = Alt+F8
+# Performance profile high -> medium -> low (v0.10.0, perf_profile)
+key_perf_profile = Alt+F9
+# v0.10.0 tuning menu: open / close, and (only while it is open) select a row up / down and change it left / right.
+# The game does not see these 5 keys while the menu is open; closed, they belong to the game.
+key_menu = Delete
+key_menu_up = Up
+key_menu_down = Down
+key_menu_left = Left
+key_menu_right = Right
