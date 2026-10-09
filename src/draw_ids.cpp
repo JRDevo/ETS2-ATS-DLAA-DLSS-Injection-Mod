@@ -2582,6 +2582,7 @@ bool DrawIdRecord::Record(ID3D11DeviceContext1* ctx, UINT ic, UINT inst, UINT si
     sh = Mix(sh ^ (uint64_t)(uintptr_t)s.vs);
     sh = Mix(sh ^ (uint64_t)(uintptr_t)s.il);
     k.shape = sh ? sh : 1;
+    k.ps = s_gamePs;                                     // v0.10.0 phase 21 (dump / pixel probe): identity only
 
     // pending-resource set (hkMap): only pointers that changed since the previous draw of this pass
     for (int t = 0; t < kVb; ++t) if (s.vb[t] != m_lastRes[t]) { m_lastRes[t] = s.vb[t]; NoteRes(s.vb[t]); }
@@ -2925,6 +2926,9 @@ void     DrawIdRecord::CbWindow(int i, UINT* first, UINT* num) const {
     *first = (i >= 0 && i < m_n) ? m_key[i].cbFirst : 0;
     *num = (i >= 0 && i < m_n) ? m_key[i].cbNum : 0;
 }
+const void* DrawIdRecord::Ps(int i) const { return (i >= 0 && i < m_n) ? m_key[i].ps : nullptr; }   // v0.10.0 phase 21
+const void*             DrawIdRecord::s_gamePs = nullptr;   // v0.10.0 phase 21: inject.cpp hkPSSetShader (NoteGamePs)
+DrawIdRecord::PsInfoFn  DrawIdRecord::s_psInfo = nullptr;   //   inject.cpp (SetPsInfoFn); null in the harness = unknown
 
 void DrawIdRecord::RegisterShaders() {
     ShaderCache::Add(ShaderCache::kDrawIdPs, kDrawIdPs, sizeof(kDrawIdPs) - 1, "drawid_ps", "PSMain", "ps_5_0");
@@ -3916,6 +3920,37 @@ uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ui
             d.gPrev = d.group != kNone ? m_groupData[d.group * 4u + 3u] : 0u;
             d.full = m_curFull[i]; d.loose = m_curLoose[i];
             d.flags = (uint8_t)(m_curFlags[i] | (m_curLooseG[i] ? 0x80 : 0));
+            d.ps = r->Ps(k); d.psInfo = DrawIdRecord::PsInfo(d.ps);   // v0.10.0 phase 21
+            d.vpMin = r->VpMin(k); d.vpMax = r->VpMax(k); d.inst = r->InstanceCount(k);
+        }
+        // v0.10.0 phase 21 PIXEL PROBE: the probe buffer (made once) and the packed centre for pass B of this pass
+        m_probePacked = 0; m_probeBound = false; m_probeStaged = false;
+        if (m_probeU >= 0.0f && m_probeV >= 0.0f && fullW && fullH && !m_probeFailed) {
+            if (!m_probeBuf) {
+                ComPtr<ID3D11Device> dev;
+                ctx->GetDevice(&dev);
+                D3D11_BUFFER_DESC bd{};
+                bd.ByteWidth = (UINT)kProbeN * kProbeStride; bd.Usage = D3D11_USAGE_DEFAULT;
+                bd.BindFlags = D3D11_BIND_UNORDERED_ACCESS; bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
+                D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};
+                ud.Format = DXGI_FORMAT_R32_TYPELESS; ud.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+                ud.Buffer.NumElements = bd.ByteWidth / 4u; ud.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW;
+                if (!dev || FAILED(dev->CreateBuffer(&bd, nullptr, &m_probeBuf)) ||
+                    FAILED(dev->CreateUnorderedAccessView(m_probeBuf.Get(), &ud, &m_probeUav))) {
+                    m_probeBuf.Reset(); m_probeUav.Reset(); m_probeFailed = true;
+                    Log("MV probe: probe buffer could not be created -- the dump runs without the pixel probe");
+                }
+            }
+            if (m_probeUav) {
+                const float fu = m_probeU > 1.0f ? 1.0f : m_probeU, fv = m_probeV > 1.0f ? 1.0f : m_probeV;
+                uint32_t cx = (uint32_t)(fu * (float)fullW + 0.5f), cy = (uint32_t)(fv * (float)fullH + 0.5f);
+                if (cx >= fullW) cx = fullW - 1u;
+                if (cy >= fullH) cy = fullH - 1u;
+                if (cx > 0xFFFFu) cx = 0xFFFFu;
+                if (cy > 0xFFFFu) cy = 0xFFFFu;
+                m_probeCx = cx; m_probeCy = cy;
+                m_probePacked = (cx | (cy << 16)) ? (cx | (cy << 16)) : 1u;   // (0, 0) = off for the shader: never the centre
+            }
         }
     }
     m_prepN = n;
@@ -4176,7 +4211,7 @@ void DrawIdMv::Finish(ID3D11DeviceContext* ctx) {
         ctx->GetDevice(&dev);
         const UINT kM = (UINT)kMax;
         // phase 5: + the twin column; phase 6: + the parent and votes columns
-        const UINT sizes[4] = { kM * 80u, kM * kRStride * 16u, kM * 84u, 512u };
+        const UINT sizes[5] = { kM * 80u, kM * kRStride * 16u, kM * 84u, 512u, (UINT)kProbeN * kProbeStride };
         bool ok = dev && m_dumpSolve;
         for (int k = 0; ok && k < 4; ++k) {
             if (m_dumpSt[k]) continue;
@@ -4184,6 +4219,19 @@ void DrawIdMv::Finish(ID3D11DeviceContext* ctx) {
             bd.ByteWidth = sizes[k]; bd.Usage = D3D11_USAGE_STAGING; bd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
             ok = SUCCEEDED(dev->CreateBuffer(&bd, nullptr, &m_dumpSt[k]));
         }
+        // v0.10.0 phase 21: the probe records of pass B (only when pass B bound the probe buffer this pass)
+        m_probeStaged = false;
+        if (ok && m_probeBound && m_probeBuf) {
+            if (!m_dumpSt[4]) {
+                D3D11_BUFFER_DESC bd{};
+                bd.ByteWidth = sizes[4]; bd.Usage = D3D11_USAGE_STAGING; bd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+                if (FAILED(dev->CreateBuffer(&bd, nullptr, &m_dumpSt[4]))) m_dumpSt[4].Reset();
+            }
+            if (m_dumpSt[4]) { ctx->CopyResource(m_dumpSt[4].Get(), m_probeBuf.Get()); m_probeStaged = true; }
+        }
+        m_probeBound = false;
+        m_probeU = m_probeV = -1.0f;                     // v0.10.0 phase 21: one probe per request (a dump re-armed because its
+                                                         // pass never finished keeps it: cleared only here, once staged)
         if (ok) {
             const UINT n = m_prepN;
             D3D11_BOX b{ 0, 0, 0, n * 80u, 1, 1 };
@@ -4225,7 +4273,7 @@ void DrawIdMv::Finish(ID3D11DeviceContext* ctx) {
 }
 
 // ---- v0.10.0 phase 4 DUMP ----------------------------------------------------------------------------------------------
-bool DrawIdMv::RequestDump(const char* why) {
+bool DrawIdMv::RequestDump(const char* why, float probeU, float probeV) {
     if (DumpBusy()) return false;
     if (!m_dump) {
         m_dump = new (std::nothrow) DumpEnt[kMax];       // v0.10.0 phase 5: every draw of the pass
@@ -4233,18 +4281,31 @@ bool DrawIdMv::RequestDump(const char* why) {
     }
     snprintf(m_dumpWhy, sizeof(m_dumpWhy), "%s", why ? why : "");
     m_dumpArm = true;
+    m_probeU = probeU; m_probeV = probeV;               // v0.10.0 phase 21 (< 0 = no probe)
     return true;
+}
+
+// v0.10.0 phase 21: pass B of the dumped pass binds the probe buffer at u4 (cleared here: a pixel outside pass B's crop keeps
+// a zero record = "not computed")
+ID3D11UnorderedAccessView* DrawIdMv::ProbeUav(ID3D11DeviceContext* ctx, uint32_t x0, uint32_t y0, uint32_t w, uint32_t h) {
+    if (!ctx || !ProbePacked() || !m_probeUav) return nullptr;
+    const UINT zero4[4] = { 0, 0, 0, 0 };
+    ctx->ClearUnorderedAccessViewUint(m_probeUav.Get(), zero4);
+    m_probeCrop[0] = x0; m_probeCrop[1] = y0; m_probeCrop[2] = w; m_probeCrop[3] = h;
+    m_probeBound = true;
+    return m_probeUav.Get();
 }
 
 // Reads the staged tables of the dumped pass without waiting (retried at the next Prepare) and writes the lines.
 void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
-    D3D11_MAPPED_SUBRESOURCE mp[4] = {};
+    D3D11_MAPPED_SUBRESOURCE mp[5] = {};
+    const int nMap = m_probeStaged ? 5 : 4;              // v0.10.0 phase 21: + the probe records
     int mapped = 0;
-    for (; mapped < 4; ++mapped) {
+    for (; mapped < nMap; ++mapped) {
         const HRESULT hr = ctx->Map(m_dumpSt[mapped].Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mp[mapped]);
         if (hr != S_OK) break;
     }
-    if (mapped < 4) {
+    if (mapped < nMap) {
         for (int k = 0; k < mapped; ++k) ctx->Unmap(m_dumpSt[k].Get(), 0);
         if (++m_dumpPolls > 600) { m_dumpPending = false; Log("MV draw-ids dump: the readback never landed -- dropped"); }
         return;
@@ -4271,13 +4332,22 @@ void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
     };
     // (v0.10.0 phase 14 round 6: + every MOVER of any IndexCount -- a false mover names itself in the next in-game dump)
     // (v0.10.0 phase 19: + every draw resolved "no MVP" without the CPU's no-MVP flag = its cb0 rows 4..7 failed the MVP shape)
+    // (v0.10.0 phase 21: + every draw whose pixel shader writes SV_Depth -- its depth is not the one its viewport implies)
     auto selected = [&](const DumpEnt& d) {
         return d.i >= m_dumpNG || d.ic <= 36u || wasUnpaired(d.i) || col(kM * 68u, d.i) != 0xFFFFFFFFu || stateOf(d.i) == 3u ||
-               (stateOf(d.i) == 5u && (d.flags & DrawIdRecord::kFNoMvp) == 0);
+               (stateOf(d.i) == 5u && (d.flags & DrawIdRecord::kFNoMvp) == 0) || (d.psInfo & DrawIdRecord::kPsDepth) != 0;
     };
     uint32_t nSel = 0, nUnp = 0, nTwin = 0, nAtt = 0, nLeft = 0, nPar = 0;
+    uint32_t nDepthPs = 0, nDepthPsCab = 0, nCutPs = 0, nPsUnk = 0, nCabVp = 0;   // v0.10.0 phase 21 (G-buffer draws)
     for (uint32_t q = 0; q < m_dumpN; ++q) {
         const uint32_t i = m_dump[q].i;
+        if (i < m_dumpNG) {
+            const uint8_t pi = m_dump[q].psInfo;
+            if (pi & DrawIdRecord::kPsDepth) { ++nDepthPs; if (m_dump[q].flags & DrawIdRecord::kFCabin) ++nDepthPsCab; }
+            if (pi & DrawIdRecord::kPsDiscard) ++nCutPs;
+            if (!(pi & DrawIdRecord::kPsScanned)) ++nPsUnk;
+            if (m_dump[q].vpMin >= 0.85f) ++nCabVp;
+        }
         if (wasUnpaired(i)) {
             ++nUnp;
             if (col(kM * 76u, i) != 0xFFFFFFFFu) ++nPar;           // phase 6: the vote decides over a twin / origin attach
@@ -4297,6 +4367,10 @@ void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
         m_dumpSkipped ? " -- more skipped, table cap" : "", nUnp, nPar, (int)g_parent, nTwin, (int)g_twin, nAtt, nLeft,
         (double)g_attachM,
         (double)g_snapPx, S[0], S[1], S[2], S[3], S[4], S[5], S[6], S[7], S[8], S[9], S[10], S[11], S[12], S[13], S[14], S[15]);
+    Log("MV draw-ids dump (%s): G-buffer pixel shaders (v0.10.0 phase 21, DXBC scan at CreatePixelShader): %u of %u draws write "
+        "SV_Depth (%u of them with the cabin viewport) -- every one is listed below, %u alpha-tested (discard), %u unknown (created "
+        "before the hook / no PS lookup); %u G-buffer draws with the cabin viewport (MinDepth >= 0.85)", m_dumpWhy, nDepthPs,
+        m_dumpNG, nDepthPsCab, nCutPs, nPsUnk, nCabVp);
     static const char* const kSt[] = { "?", "UNPAIRED (camera R)", "static (camera R)", "MOVER (own R)", "instanced (camera R)",
                                        "no MVP (camera R)" };
     static const char* const kStShort[] = { "?", "unpaired", "static", "mover", "instanced", "no MVP" };
@@ -4396,10 +4470,16 @@ void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
         const bool notMvp = rlm > 1e-20 && !(rl[3] > 0.02 * rlm);
         char shTxt[96];
         snprintf(shTxt, sizeof(shTxt), "%s (|row3.xyz| %.4g, longest row %.4g)", notMvp ? "NOT AN MVP" : "ok", rl[3], rlm);
+        char psTxt[160];                                 // v0.10.0 phase 21: viewport depth range + the pixel shader's DXBC flags
+        snprintf(psTxt, sizeof(psTxt), " | vp depth [%.3f, %.3f] | PS %p: %s", (double)d.vpMin, (double)d.vpMax, d.ps,
+                 !d.ps ? "none" : !(d.psInfo & DrawIdRecord::kPsScanned) ? "unknown (no DXBC scan)"
+                 : (d.psInfo & DrawIdRecord::kPsDepth) ? ((d.psInfo & DrawIdRecord::kPsDiscard) ? "WRITES SV_Depth, discard"
+                                                                                                 : "WRITES SV_Depth")
+                 : ((d.psInfo & DrawIdRecord::kPsDiscard) ? "no SV_Depth, discard" : "no SV_Depth"));
         Log("MV dump %u/%u: id %u %s ic %u flags 0x%02x%s%s | full %016llx loose %016llx | cb0 first %u num %u -> mirror +%u | "
             "group %d (%u cur / %u prev) | origin clip %.3f %.3f %.3f w %.3f%s px %.1f %.1f | col3 x %.4e y %.4e z %.4e w %.4e "
             "origin-free %s | mvp-shape %s | %s%s | probe dev %.3f px%s | state %u "
-            "%s%s%s",
+            "%s%s%s%s",
             line, nSel, i + 1u, i < m_dumpNG ? "GBUF" : "FWD", d.ic, d.flags & 0x7Fu, cab ? " cabin" : "",
             (d.flags & 0x80) ? " loose-key" : "", (unsigned long long)d.full, (unsigned long long)d.loose, d.cbFirst, d.cbNum,
             d.mirrorOff, d.group == kNone ? -1 : (int)d.group, d.gCur, d.gPrev, o[0], o[1], o[2], o[3],
@@ -4407,10 +4487,169 @@ void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
             o[0], o[1], o[2], o[3], ofTxt, shTxt, pairTxt,
             devTxt, info[3] < 0.0f ? 0.0 : (double)info[3],
             (st == 2u && partner != 0xFFFFFFFFu && twin == 0xFFFFFFFFu) ? " (snapped to the camera R)" : "", st,
-            st <= 5u ? kSt[st] : "?", unpTxt, attTxt);
+            st <= 5u ? kSt[st] : "?", unpTxt, attTxt, psTxt);
     }
-    for (int k = 0; k < 4; ++k) ctx->Unmap(m_dumpSt[k].Get(), 0);
+    if (m_probeStaged) {                                 // v0.10.0 phase 21: the pixel probe of the same pass
+        const void* mpp[5] = { mp[0].pData, mp[1].pData, mp[2].pData, mp[3].pData, mp[4].pData };
+        ProbeLog(mpp);
+    }
+    for (int k = 0; k < nMap; ++k) ctx->Unmap(m_dumpSt[k].Get(), 0);
+    m_probeStaged = false;
     Log("MV draw-ids dump (%s): done", m_dumpWhy);
+}
+
+// ---- v0.10.0 phase 21 PIXEL PROBE ------------------------------------------------------------------------------------------
+// The 'MV probe' lines (DumpPoll, same pass as the dump): one per probe pixel of pass B (kReprojDepthShader writes a
+// kProbeStride-byte record per pixel of the 5 x 5 grid, see its PIXEL PROBE block; keep the layout in step):
+//   +0 magic 'PROB' | +4 x | y << 16 | +8 scene depth (the pass's depth twin) | +12 forward depth as read (before the world-range
+//   filter) | +16 merged d | +20 G-buffer id (RED) | +24 forward id (GREEN / the 1/2-res forward ids) | +28 flags | +32 the id pass
+//   B used (0 = none) | +36 its state | +40 the G-buffer id's state | +44 R base (0 world, 4 cabin, 12 ego) | stencil id << 8 |
+//   +48 z | +52 zd | +56 mv x | +60 mv y | +64 clip w | +68 view distance (m, -1 unknown) | +72 / +76 the camera path's mv |
+//   +80 / +84 ndc | +88 G-buffer ids (ObjInfo.w) | +92 all ids (ObjInfo.z)
+// flags: 1 forward won, 2 the id is valid, 4 a mover R was used, 8 that R = the G-buffer mover under a forward pixel (per-pixel
+// attach), 16 cabin layer (d >= 0.9), 32 per-draw ids on, 64 ego R, 128 stencil id R (mode 1), 256 forward depth >= 0.9 (ignored)
+void DrawIdMv::ProbeLog(const void* const* mapped) {
+    const uint8_t* M = (const uint8_t*)mapped[0];
+    const float* RT = (const float*)mapped[1];
+    const uint8_t* P = (const uint8_t*)mapped[4];
+    const uint32_t kM = (uint32_t)kMax;
+    static const char* const kStS[] = { "?", "unpaired", "static", "MOVER", "instanced", "no MVP" };
+    auto u32 = [&](uint32_t k, uint32_t off) { uint32_t v = 0; memcpy(&v, P + (size_t)k * kProbeStride + off, 4); return v; };
+    auto f32 = [&](uint32_t k, uint32_t off) { float v = 0; memcpy(&v, P + (size_t)k * kProbeStride + off, 4); return v; };
+    auto entOf = [&](uint32_t i) -> const DumpEnt* {     // table index -> its dump entry (in order unless the cap skipped)
+        if (i < m_dumpN && m_dump[i].i == i) return &m_dump[i];
+        for (uint32_t q = 0; q < m_dumpN; ++q) if (m_dump[q].i == i) return &m_dump[q];
+        return nullptr;
+    };
+    // where a draw's R / state came from (RTab .w marker, see CSAttach / CSTwin / ParApply)
+    auto srcOf = [&](uint32_t i, char* out, size_t cap) {
+        const float* info = RT + ((size_t)i * 5u + 4u) * 4u;
+        const uint32_t st = (uint32_t)(info[0] + 0.5f);
+        if (info[3] < -0.5f) {
+            const uint32_t m = (uint32_t)(-info[3] - 1.0f + 0.5f);
+            if (m >= 2u * kM)  snprintf(out, cap, "rigid parent id %u", m - 2u * kM + 1u);
+            else if (m >= kM)  snprintf(out, cap, "matrix twin id %u", m - kM + 1u);
+            else               snprintf(out, cap, "attached to G-buffer mover id %u", m + 1u);
+        } else {
+            snprintf(out, cap, "%s", st == 3u ? "own pair" : (st == 2u ? "own pair, snapped to the camera R"
+                                                         : (st == 1u ? "no pair" : "no own R")));
+        }
+    };
+    auto desc = [&](uint32_t id, char* out, size_t cap) {
+        if (id == 0u) { snprintf(out, cap, "none"); return; }
+        const uint32_t i = id - 1u;
+        if (i >= m_dumpNAll) { snprintf(out, cap, "id %u (outside the table of %u draws)", id, m_dumpNAll); return; }
+        const DumpEnt* d = entOf(i);
+        const float* info = RT + ((size_t)i * 5u + 4u) * 4u;
+        const uint32_t st = (uint32_t)(info[0] + 0.5f);
+        const float* m = (const float*)(M + (size_t)i * 80u);
+        double rl[4];
+        for (int r = 0; r < 4; ++r) rl[r] = std::sqrt((double)m[r * 4] * m[r * 4] + (double)m[r * 4 + 1] * m[r * 4 + 1] +
+                                                      (double)m[r * 4 + 2] * m[r * 4 + 2]);
+        const double rlm01 = rl[0] > rl[1] ? rl[0] : rl[1], rlm = rlm01 > rl[2] ? rlm01 : rl[2];
+        const bool notMvp = rlm > 1e-20 && !(rl[3] > 0.02 * rlm);
+        char src[64];
+        srcOf(i, src, sizeof(src));
+        if (!d) {
+            snprintf(out, cap, "id %u %s state %u %s (%s), no CPU facts (dump table cap)", id, i < m_dumpNG ? "GBUF" : "FWD", st,
+                     kStS[st <= 5u ? st : 0u], src);
+            return;
+        }
+        const uint8_t pi = d->psInfo;
+        snprintf(out, cap, "id %u %s ic %u x%u flags 0x%02x%s vp depth [%.3f, %.3f] state %u %s (%s) mvp-shape %s col3 w %.4g | "
+                 "PS %p %s", id, i < m_dumpNG ? "GBUF" : "FWD", d->ic, d->inst, d->flags & 0x7Fu,
+                 (d->flags & DrawIdRecord::kFCabin) ? " CABIN" : " world", (double)d->vpMin, (double)d->vpMax, st,
+                 kStS[st <= 5u ? st : 0u], src, (d->flags & DrawIdRecord::kFNoMvp) ? "no MVP" : (notMvp ? "NOT AN MVP" : "ok"),
+                 (double)m[15], d->ps,
+                 !d->ps ? "(none)" : !(pi & DrawIdRecord::kPsScanned) ? "(DXBC unknown)"
+                 : (pi & DrawIdRecord::kPsDepth) ? ((pi & DrawIdRecord::kPsDiscard) ? "WRITES SV_Depth + discard" : "WRITES SV_Depth")
+                 : ((pi & DrawIdRecord::kPsDiscard) ? "no SV_Depth, discard" : "no SV_Depth"));
+    };
+    Log("MV probe (%s): eye 0 pass, %d pixels = 5 x 5 grid %d px apart centred on px (%u, %u) of the %ux%u image (the eye's "
+        "optical centre; rows top to bottom, columns left to right) | pass B crop at (%u, %u) %ux%u | draw ids: %u G-buffer + %u "
+        "forward | per pixel: scene depth (the pass's depth twin) / forward depth -> which won -> merged d -> layer (cabin = d "
+        ">= 0.9) -> the R pass B used -> the final MV (and the camera path's MV) | the G-buffer and forward draws under it",
+        m_dumpWhy, kProbeN, kProbeStep, m_probeCx, m_probeCy, m_dumpW, m_dumpH, m_probeCrop[0], m_probeCrop[1], m_probeCrop[2],
+        m_probeCrop[3], m_dumpNG, m_dumpNAll - m_dumpNG);
+    uint32_t nRun = 0, nCab = 0, nCabNoId = 0, nCabWorldVp = 0, nCabCabVp = 0, nCabDepthPs = 0, nFwd = 0, nMov = 0, nPosX = 0;
+    for (uint32_t k = 0; k < (uint32_t)kProbeN; ++k) {
+        const int row = (int)(k / 5u) - 2, colI = (int)(k % 5u) - 2;
+        const int px = (int)m_probeCx + colI * kProbeStep, py = (int)m_probeCy + row * kProbeStep;
+        if (u32(k, 0) != 0x50524F42u) {
+            Log("MV probe [%d,%d] px (%d, %d): not computed -- outside the image or pass B's crop (the DLAA area rect + margin)",
+                row + 2, colI + 2, px, py);
+            continue;
+        }
+        ++nRun;
+        const float dt = f32(k, 8), fwr = f32(k, 12), d = f32(k, 16);
+        const uint32_t gid = u32(k, 20), fid = u32(k, 24), fl = u32(k, 28), did = u32(k, 32);
+        const uint32_t base = u32(k, 44) & 0xFFu, sid = u32(k, 44) >> 8;
+        const float zz = f32(k, 48), zd = f32(k, 52), mvx = f32(k, 56), mvy = f32(k, 60), cw = f32(k, 64), dist = f32(k, 68);
+        const float cmx = f32(k, 72), cmy = f32(k, 76);
+        const bool fwWin = (fl & 1u) != 0, mover = (fl & 4u) != 0, att = (fl & 8u) != 0, cab = (fl & 16u) != 0;
+        const bool ids = (fl & 32u) != 0;
+        char depTxt[160];
+        if (fl & 256u)
+            snprintf(depTxt, sizeof(depTxt), "forward %.6f >= 0.9 (an overlay at the camera: ignored) -> SCENE", (double)fwr);
+        else if (fwr >= 0.01f)
+            snprintf(depTxt, sizeof(depTxt), "forward %.6f -> %s", (double)fwr, fwWin ? "FORWARD won" : "scene won (forward behind)");
+        else
+            snprintf(depTxt, sizeof(depTxt), "no forward depth -> SCENE");
+        char rTxt[192];
+        if (mover && att) {
+            snprintf(rTxt, sizeof(rTxt), "the G-buffer MOVER under the forward pixel (per-pixel attach): own R of id %u, zd %.4f",
+                     gid, (double)zd);
+        } else if (mover && did) {
+            char src[64];
+            srcOf(did - 1u, src, sizeof(src));
+            snprintf(rTxt, sizeof(rTxt), "own-mover R of id %u (%s), zd %.4f", did, src, (double)zd);
+        } else if (fl & 128u) {
+            snprintf(rTxt, sizeof(rTxt), "stencil object id %u R (mode 1)", sid);
+        } else if (base == 12u) {
+            snprintf(rTxt, sizeof(rTxt), "EGO R (view distance %.2f m < mv_ego_pixel_m)", (double)dist);
+        } else if (base == 4u) {
+            snprintf(rTxt, sizeof(rTxt), "CABIN camera R (z %.4f in [0.9, 1])", (double)zz);
+        } else {
+            snprintf(rTxt, sizeof(rTxt), "WORLD camera R (z %.4f in [0.01, 0.9])", (double)zz);
+        }
+        char gTxt[320], fTxt[320];
+        desc(ids ? gid : 0u, gTxt, sizeof(gTxt));
+        desc(ids ? fid : 0u, fTxt, sizeof(fTxt));
+        const DumpEnt* ge = (ids && gid && gid - 1u < m_dumpNAll) ? entOf(gid - 1u) : nullptr;
+        const char* note = "";
+        if (cab) {
+            ++nCab;
+            if (!ids) {
+                note = " | NOTE: cabin-range depth, per-draw ids off this pass";
+            } else if (!gid) {
+                ++nCabNoId;
+                note = " | NOTE: cabin-range depth WITHOUT a G-buffer id: no recorded G-buffer draw reproduces this depth (a PS "
+                       "writing SV_Depth, a draw outside the G-buffer pass, or the depth changed after the id replay)";
+            } else if (ge && ge->vpMin < 0.85f) {
+                ++nCabWorldVp;
+                note = " | NOTE: cabin-range depth on a WORLD-viewport G-buffer draw: its depth cannot exceed its viewport "
+                       "MaxDepth unless its PS writes SV_Depth or the depth was rewritten after the replay";
+            } else if (ge) {
+                ++nCabCabVp;
+                note = " | NOTE: the G-buffer draw under it has the CABIN viewport [0.9, 1]: the game draws this surface in the "
+                       "cabin layer";
+            }
+            if (ge && (ge->psInfo & DrawIdRecord::kPsDepth)) ++nCabDepthPs;
+        }
+        if (fwWin) ++nFwd;
+        if (mover) ++nMov;
+        if (mvx > 0.5f) ++nPosX;
+        Log("MV probe [%d,%d] px (%u, %u) (%+d, %+d): scene depth %.6f, %s, d %.6f = %s | R: %s | MV (%.3f, %.3f) px, camera "
+            "path (%.3f, %.3f), clip w %.4g | GBUF %s | FWD %s%s%s",
+            row + 2, colI + 2, u32(k, 4) & 0xFFFFu, u32(k, 4) >> 16, colI * kProbeStep, row * kProbeStep, (double)dt, depTxt,
+            (double)d, cab ? "CABIN layer (d >= 0.9)" : (d >= 0.01f ? "world layer" : "sky / no depth (d < 0.01, world camera R)"),
+            rTxt, (double)mvx, (double)mvy, (double)cmx, (double)cmy, (double)cw, gTxt, fTxt,
+            (!fwWin && fid) ? " (behind the scene)" : "", note);
+    }
+    Log("MV probe (%s): %u of %d pixels computed | cabin layer %u (no G-buffer id %u, a world-viewport G-buffer draw %u, a "
+        "cabin-viewport G-buffer draw %u; under a PS writing SV_Depth %u) | forward won %u | mover R %u | mv.x > 0.5 px %u "
+        "(Ctrl+F6: red channel up = magenta on a cabin pixel)", m_dumpWhy, nRun, kProbeN, nCab, nCabNoId, nCabWorldVp, nCabCabVp,
+        nCabDepthPs, nFwd, nMov, nPosX);
 }
 
 #endif // WITH_DLAA

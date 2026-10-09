@@ -7063,6 +7063,7 @@ constexpr uint32_t   kLodPsBits = 14;
 constexpr uint32_t   kLodPsSize = 1u << kLodPsBits;        // 16384 entries
 constexpr uint32_t   kLodPsMax  = kLodPsSize / 2;          // fill cap (load factor 0.5)
 constexpr uintptr_t  kLodPsScanned = 1, kLodPsDiscard = 2, kLodPsFlags = 7;   // low pointer bits (COM objects: 8+ aligned)
+constexpr uintptr_t  kLodPsDepth = 4;             // v0.10.0 phase 21: the shader writes SV_Depth (the dump / pixel probe)
 std::atomic<uintptr_t> g_lodPsTab[kLodPsSize];    // shader pointer | flags; 0 = empty (zero-initialised: static storage)
 std::atomic<uint32_t> g_lodPsFill{0};
 std::atomic<uint32_t> g_lodPsGen{0};              // bumped by every insert / overwrite (invalidates the per-pointer memo)
@@ -7357,7 +7358,12 @@ inline bool LodCurBlendSolid() {
 // anywhere (clip() in HLSL = an alpha-tested cut-out), 0 = not parsable (no SHDR / SHEX chunk, not a pixel shader, a
 // malformed or zero-length instruction) = "unknown". Pure function of the bytecode (any thread). Token format: the
 // instruction length is bits 24..30 of the opcode token, except customdata (opcode 0x35: the next token is the length).
-int DxbcPsClass(const void* code, SIZE_T len) {
+// v0.10.0 phase 21: *writesDepth (nullable) = the shader declares a depth output -- dcl_output (opcode 0x65) of operand type
+// OUTPUT_DEPTH (12), OUTPUT_DEPTH_GREATER_EQUAL (38) or OUTPUT_DEPTH_LESS_EQUAL (39) = SV_Depth / SV_DepthGreaterEqual /
+// SV_DepthLessEqual (operand type = bits 12..19 of the operand token; checked against fxc output: oDepth 0x0000c001, oDepthGE
+// 0x00026001, oDepthLE 0x00027001). Declarations precede the code, so it is known before the first discard returns.
+int DxbcPsClass(const void* code, SIZE_T len, bool* writesDepth = nullptr) {
+    if (writesDepth) *writesDepth = false;
     if (!code || len < 32) return 0;
     const uint8_t* const b = static_cast<const uint8_t*>(code);
     auto rd = [b](SIZE_T off) { uint32_t v; memcpy(&v, b + off, 4); return v; };
@@ -7382,6 +7388,10 @@ int DxbcPsClass(const void* code, SIZE_T len) {
                 ilen = rd(base + (SIZE_T)(i + 1) * 4);
             }
             if (ilen == 0) return 0;
+            if (opc == 0x65u && ilen >= 2 && i + 1 < n && writesDepth) {   // v0.10.0 phase 21: dcl_output oDepth / GE / LE
+                const uint32_t ot = (rd(base + (SIZE_T)(i + 1) * 4) >> 12) & 0xFFu;
+                if (ot == 12u || ot == 38u || ot == 39u) *writesDepth = true;
+            }
             if (opc == 0x0Du) return 2;                             // discard (_z / _nz)
             i += ilen;
         }
@@ -7397,10 +7407,12 @@ inline uint32_t LodPsHash(const void* p) {
 }
 // Any thread (CreatePixelShader): records `ps`'s class. A shader created at the address of a released one overwrites its
 // entry (a new generation); entries are never removed (bounded by the distinct addresses, cap kLodPsMax).
-void LodPsNote(ID3D11PixelShader* ps, int cls) {
+// v0.10.0 phase 21: + writesDepth (DxbcPsClass) -> kLodPsDepth (only with a parsed class)
+void LodPsNote(ID3D11PixelShader* ps, int cls, bool writesDepth = false) {
     const uintptr_t key = (uintptr_t)ps;
     if (!key || (key & kLodPsFlags)) return;
-    const uintptr_t val = key | (cls == 2 ? (kLodPsScanned | kLodPsDiscard) : (cls == 1 ? kLodPsScanned : 0));
+    const uintptr_t val = key | (cls == 2 ? (kLodPsScanned | kLodPsDiscard) : (cls == 1 ? kLodPsScanned : 0)) |
+                          ((cls == 1 || cls == 2) && writesDepth ? kLodPsDepth : 0);
     (cls == 2 ? g_lodPsCreCut : (cls == 1 ? g_lodPsCrePlain : g_lodPsCreBad)).fetch_add(1, std::memory_order_relaxed);
     uint32_t i = LodPsHash(ps);
     for (uint32_t probes = 0; probes < kLodPsSize; ++probes, i = (i + 1) & (kLodPsSize - 1)) {
@@ -7439,6 +7451,23 @@ int LodPsLookup(const ID3D11PixelShader* ps) {
     }
     return 0;
 }
+#ifdef WITH_DLAA
+// v0.10.0 phase 21: DrawIdRecord::PsInfo (the dump / pixel probe): bit 0 scanned, bit 1 discard, bit 2 writes SV_Depth; 0 =
+// unknown (created before the CreatePixelShader hook / not parsable / table full). Identity only, any time.
+uint8_t DidPsInfo(const void* ps) {
+    const uintptr_t key = (uintptr_t)ps;
+    if (!key) return 0;
+    uint32_t i = LodPsHash(ps);
+    for (uint32_t probes = 0; probes < kLodPsSize; ++probes, i = (i + 1) & (kLodPsSize - 1)) {
+        const uintptr_t e = g_lodPsTab[i].load(std::memory_order_acquire);
+        if (!e) return 0;
+        if ((e & ~kLodPsFlags) == key)
+            return (uint8_t)(((e & kLodPsScanned) ? DrawIdRecord::kPsScanned : 0) | ((e & kLodPsDiscard) ? DrawIdRecord::kPsDiscard : 0) |
+                             ((e & kLodPsDepth) ? DrawIdRecord::kPsDepth : 0));
+    }
+    return 0;
+}
+#endif
 // The current game PS's class (memoised per pointer and table generation: a pointer compare + one atomic load per draw).
 inline int LodCurPsClass() {
     const uint32_t gen = g_lodPsGen.load(std::memory_order_acquire);
@@ -7522,6 +7551,9 @@ void LodOnBind(ID3D11DeviceContext* ctx) {
                 ID3D11PixelShader* ps = nullptr;
                 ctx->PSGetShader(&ps, nullptr, nullptr);
                 g_lodPsCur = ps;                        // identity (bound = alive)
+#ifdef WITH_DLAA
+                DrawIdRecord::NoteGamePs(ps);           // v0.10.0 phase 21 (dump / probe)
+#endif
                 if (ps) ps->Release();
             }
             ++g_lodResyncs;
@@ -7733,7 +7765,12 @@ void STDMETHODCALLTYPE hkOMSetBlendState(ID3D11DeviceContext* ctx, ID3D11BlendSt
 
 // phase 12: PSSetShader (context vtable 9) -- the game's current pixel shader for the cut-out rule (identity only).
 void STDMETHODCALLTYPE hkPSSetShader(ID3D11DeviceContext* ctx, ID3D11PixelShader* ps, ID3D11ClassInstance* const* ci, UINT n) {
-    if (!t_inDlaa && IsGameCtx(ctx)) g_lodPsCur = ps;
+    if (!t_inDlaa && IsGameCtx(ctx)) {
+        g_lodPsCur = ps;
+#ifdef WITH_DLAA
+        DrawIdRecord::NoteGamePs(ps);                    // v0.10.0 phase 21: every recorded draw keeps its PS (dump / probe)
+#endif
+    }
     oPSSetShader(ctx, ps, ci, n);
 }
 // phase 12: CreatePixelShader (device vtable 15, any thread) -- one DXBC scan per created shader (a few hundred tokens).
@@ -7741,7 +7778,11 @@ void STDMETHODCALLTYPE hkPSSetShader(ID3D11DeviceContext* ctx, ID3D11PixelShader
 HRESULT STDMETHODCALLTYPE hkCreatePixelShader(ID3D11Device* dev, const void* code, SIZE_T len, ID3D11ClassLinkage* cl,
                                               ID3D11PixelShader** pp) {
     const HRESULT hr = oCreatePixelShader(dev, code, len, cl, pp);
-    if (SUCCEEDED(hr) && pp && *pp) LodPsNote(*pp, DxbcPsClass(code, len));
+    if (SUCCEEDED(hr) && pp && *pp) {
+        bool dep = false;                                // v0.10.0 phase 21: + the SV_Depth output flag
+        const int cls = DxbcPsClass(code, len, &dep);
+        LodPsNote(*pp, cls, dep);
+    }
     return hr;
 }
 
@@ -8702,14 +8743,20 @@ void RequestMvDump(uint64_t n) {
         PlayTones(1, 200, 300, 0);
         return;
     }
-    if (!g_dlaa[0].Mv().DrawIds().RequestDump(why)) {
+    // v0.10.0 phase 21 PIXEL PROBE: pass B of the same pass records a 5 x 5 pixel grid (48 px apart) around eye 0's optical
+    // centre (VR: the DLAA-area centre from the verdicts, image centre until known; flat: the image centre)
+    const bool optKnown = g_vrMode && g_optC[0].have;
+    const float pu = optKnown ? g_optC[0].u : 0.5f, pv = optKnown ? g_optC[0].v : 0.5f;
+    if (!g_dlaa[0].Mv().DrawIds().RequestDump(why, pu, pv)) {
         Log("MV draw-ids dump (%s): the previous dump is still in flight", why);
         return;
     }
     g_fwdSkipArm = true;                                  // v0.10.0 phase 5: + the next pass's skipped forward draws
     Log("MV draw-ids dump requested (%s): the next main-scene frame's forward draws, G-buffer draws with IndexCount <= 36 and "
         "every unpaired / inherited draw are logged as 'MV dump n/N' lines 2-4 frames from now; the next pass's forward draws "
-        "without a forward depth / id as 'MV dump fwd-skip' lines", why);
+        "without a forward depth / id as 'MV dump fwd-skip' lines; phase 21: + 'MV probe' lines for 5 x 5 pixels 48 px apart "
+        "around eye 0's %s uv (%.3f, %.3f)", why, optKnown ? "optical centre" : (g_vrMode ? "image centre (optical centre not "
+        "known yet)" : "image centre"), (double)pu, (double)pv);
     PlayTones(1, 900, 80, 0);
 }
 #endif
@@ -11538,7 +11585,7 @@ struct MirUnit {
     ~MirUnit() { rt0.Detach(); depth.Detach(); color.Detach(); roDsv.Detach(); }
 };
 MirUnit          g_mir[kMirCap];
-struct MirSeen { const void* rt0; const void* depth; UINT w, h; };
+struct MirSeen { const void* rt0; const void* depth; UINT w, h; int sord; };   // phase 21: + sord (the mode-2 key)
 MirSeen          g_mirSeen[kMirSeenCap];           // the views of the current frame (occurrence / size order)
 int              g_mirSeenN = 0;
 uint64_t         g_mirFrame = ~0ull;               // g_frames g_mirSeen belongs to
@@ -11553,10 +11600,30 @@ int              g_mirAssignLogs = 0, g_mirLateLogs = 0, g_mirFirstOkLogs = 0, g
 int MirMode() { return g_vrMode ? g_mirVrMode : g_mirFlatMode; }   // v0.10.0 phase 10
 inline bool MirIdsOff() { return MirMode() == 4; }
 // v0.10.0 phase 9 (mirror_vr_mode 2): the views this frame handles = the mirror_vr_views largest of the previous frame
+// v0.10.0 phase 21 FIX: the phase-9 selection was built in MirBeginView "at the frame change" from g_mirSeen -- but
+// MirNextFrame (the Present boundary) had already emptied g_mirSeen and moved g_mirFrame to the new frame, so that block never
+// ran: g_mirSelN stayed 0 and g_mirSelUsed was never reset, the "first mirror_vr_views views" rule handled the first 2 views of
+// the SESSION and every later view was left to the game (ATS VR log p19: handled 4, not handled 63072). The selection is now
+// built in MirSelEndFrame, called by MirNextFrame BEFORE the frame's table is cleared (and by MirBeginView when a frame
+// boundary was missed), and it is learnt from a table of view KEYS (size + order among the views of that size in the frame)
+// seen in the last kMirKeyKeep frames with mirror views, not only from the frame that just ended: the game renders some mirror
+// views on some frames only (ATS VR mode 1 log: 1024x512 every frame, 2048x512 most frames, a 256x512 / second 1024x512 now
+// and then), and a selection from one frame would drop the main mirror on every frame after one that skipped it.
 struct MirSel { UINT w, h; int sord; };
 constexpr int    kMirSelCap = 8;
 MirSel           g_mirSel[kMirSelCap];
 int              g_mirSelN = 0, g_mirSelUsed = 0;
+struct MirKey { UINT w, h; int sord; uint64_t last, frames; };   // last = g_mirKeyClock of its last frame, frames = frames seen
+constexpr int    kMirKeyCap = 16;
+constexpr uint64_t kMirKeyKeep = 120;            // frames with mirror views a key stays known without being seen
+MirKey           g_mirKey[kMirKeyCap];
+int              g_mirKeyN = 0;
+uint64_t         g_mirKeyClock = 0;              // frames with mirror views (mode 2)
+// phase 21 stats window (MirSelLog, every 600 blits in mode 2)
+uint64_t         g_mirSelMatch = 0, g_mirSelSkip = 0, g_mirSelPre = 0, g_mirSelBuilds = 0, g_mirSelChanges = 0;
+uint64_t         g_mirSelFramesW = 0, g_mirSelAbsent = 0;
+uint64_t         g_mirSelHit[kMirSelCap] = {};   // frames each selected entry appeared in (since the window start / its change)
+int              g_mirSelChangeLogs = 0;
 inline bool MirPathLive() {
     if (MirMode() == 0) return false;                    // v0.10.0 phase 8: mirror_vr_mode 0 = no mirror units in VR (10: flat too)
     return g_mirOn.load(std::memory_order_relaxed) && g_dlaaOn.load(std::memory_order_relaxed) &&
@@ -11601,50 +11668,144 @@ bool MirIsGbuf(UINT n, ID3D11RenderTargetView* const* rtvs, ID3D11Resource* dept
     return true;
 }
 
+// v0.10.0 phase 21 (mirror_vr_mode 2): the end of a frame's mirror views -- MirNextFrame (before g_mirSeen is cleared) or
+// MirBeginView (a frame boundary that never reached MirNextFrame). Merges the frame's view keys into g_mirKey, forgets keys not
+// seen for kMirKeyKeep frames with views, and selects the mirror_vr_views largest known keys (by area; equal areas: the lower
+// order first, then the wider) for the next frame. A frame without mirror views changes nothing (menus, loading).
+void MirSelEndFrame() {
+    g_mirSelUsed = 0;
+    if (MirMode() != 2 || g_mirSeenN <= 0) return;
+    ++g_mirKeyClock; ++g_mirSelFramesW;
+    for (int s = 0; s < g_mirSelN; ++s) {                // window stats: did each selected entry appear in this frame?
+        bool seen = false;
+        for (int i = 0; i < g_mirSeenN && !seen; ++i)
+            seen = g_mirSeen[i].w == g_mirSel[s].w && g_mirSeen[i].h == g_mirSel[s].h && g_mirSeen[i].sord == g_mirSel[s].sord;
+        if (seen) ++g_mirSelHit[s]; else ++g_mirSelAbsent;
+    }
+    for (int i = 0; i < g_mirSeenN; ++i) {
+        const MirSeen& v = g_mirSeen[i];
+        int k = -1;
+        for (int j = 0; j < g_mirKeyN && k < 0; ++j)
+            if (g_mirKey[j].w == v.w && g_mirKey[j].h == v.h && g_mirKey[j].sord == v.sord) k = j;
+        if (k < 0) {
+            if (g_mirKeyN < kMirKeyCap) k = g_mirKeyN++;
+            else {                                       // full: the key seen longest ago makes room
+                k = 0;
+                for (int j = 1; j < g_mirKeyN; ++j) if (g_mirKey[j].last < g_mirKey[k].last) k = j;
+            }
+            g_mirKey[k] = { v.w, v.h, v.sord, g_mirKeyClock, 0 };
+        }
+        ++g_mirKey[k].frames;                            // (w, h, sord) is unique within a frame
+        g_mirKey[k].last = g_mirKeyClock;
+    }
+    for (int j = 0; j < g_mirKeyN;) {                    // forget keys not seen for kMirKeyKeep frames with views
+        if (g_mirKey[j].last + kMirKeyKeep < g_mirKeyClock) g_mirKey[j] = g_mirKey[--g_mirKeyN];
+        else ++j;
+    }
+    const int want = g_mirVrViews < 1 ? 1 : (g_mirVrViews > kMirSelCap ? kMirSelCap : g_mirVrViews);
+    MirSel ns[kMirSelCap];
+    int nn = 0;
+    bool taken[kMirKeyCap] = {};
+    for (; nn < want; ++nn) {
+        int best = -1;
+        for (int j = 0; j < g_mirKeyN; ++j) {
+            if (taken[j]) continue;
+            if (best < 0) { best = j; continue; }
+            const uint64_t a = (uint64_t)g_mirKey[j].w * g_mirKey[j].h, b = (uint64_t)g_mirKey[best].w * g_mirKey[best].h;
+            if (a > b || (a == b && (g_mirKey[j].sord < g_mirKey[best].sord ||
+                                     (g_mirKey[j].sord == g_mirKey[best].sord && g_mirKey[j].w > g_mirKey[best].w))))
+                best = j;
+        }
+        if (best < 0) break;
+        taken[best] = true;
+        ns[nn] = { g_mirKey[best].w, g_mirKey[best].h, g_mirKey[best].sord };
+    }
+    ++g_mirSelBuilds;
+    bool changed = nn != g_mirSelN;
+    for (int s = 0; s < nn && !changed; ++s)
+        changed = ns[s].w != g_mirSel[s].w || ns[s].h != g_mirSel[s].h || ns[s].sord != g_mirSel[s].sord;
+    if (!changed) return;
+    ++g_mirSelChanges;
+    for (int s = 0; s < nn; ++s) {
+        g_mirSel[s] = ns[s];
+        g_mirSelHit[s] = 0;
+    }
+    g_mirSelN = nn;
+    if (g_mirSelChangeLogs < 24) {
+        ++g_mirSelChangeLogs;
+        char sel[256] = "", known[512] = "";
+        size_t o = 0;
+        for (int s = 0; s < nn && o < sizeof(sel); ++s)
+            o += (size_t)snprintf(sel + o, sizeof(sel) - o, "%s%ux%u #%d", s ? ", " : "", ns[s].w, ns[s].h, ns[s].sord);
+        o = 0;
+        for (int j = 0; j < g_mirKeyN && o < sizeof(known); ++j)
+            o += (size_t)snprintf(known + o, sizeof(known) - o, "%s%ux%u #%d (%llu frames)", j ? ", " : "", g_mirKey[j].w,
+                                  g_mirKey[j].h, g_mirKey[j].sord, (unsigned long long)g_mirKey[j].frames);
+        Log("mirror units (%s 2): selection now [%s] -- the %d largest of the known view keys [%s] (size #order among the views "
+            "of that size in a frame; keys forgotten after %llu frames with mirror views without them; Present #%llu)",
+            g_vrMode ? "mirror_vr_mode" : "mirror_flat_mode", sel, want, known, (unsigned long long)kMirKeyKeep,
+            (unsigned long long)g_frames.load(std::memory_order_relaxed));
+    }
+}
+
+// v0.10.0 phase 21 (mirror_vr_mode 2): one line per stats window (MirStatsLog) -- the selection in force, how many views it
+// matched / left to the game, how often each selected entry appeared, the known keys
+void MirSelLog(uint64_t blit) {
+    char sel[512] = "", known[768] = "";
+    size_t o = 0;
+    for (int s = 0; s < g_mirSelN && o < sizeof(sel); ++s)
+        o += (size_t)snprintf(sel + o, sizeof(sel) - o, "%s%ux%u #%d (in %llu of %llu frames)", s ? ", " : "", g_mirSel[s].w,
+                              g_mirSel[s].h, g_mirSel[s].sord, (unsigned long long)g_mirSelHit[s],
+                              (unsigned long long)g_mirSelFramesW);
+    o = 0;
+    for (int j = 0; j < g_mirKeyN && o < sizeof(known); ++j)
+        o += (size_t)snprintf(known + o, sizeof(known) - o, "%s%ux%u #%d (%llu frames, last seen %llu frames ago)", j ? ", " : "",
+                              g_mirKey[j].w, g_mirKey[j].h, g_mirKey[j].sord, (unsigned long long)g_mirKey[j].frames,
+                              (unsigned long long)(g_mirKeyClock - g_mirKey[j].last));
+    Log("mirror units %s 2 selection @blit %llu: mirror_vr_views %d, selected %d: [%s] | views matched %llu (handled), not "
+        "selected %llu (left to the game), handled before the first selection %llu | selected entries absent from their frame "
+        "%llu | selection rebuilt %llu times, changed %llu | known view keys %d: [%s]",
+        g_vrMode ? "mirror_vr_mode" : "mirror_flat_mode", (unsigned long long)blit, g_mirVrViews, g_mirSelN,
+        g_mirSelN ? sel : "none yet", (unsigned long long)g_mirSelMatch, (unsigned long long)g_mirSelSkip,
+        (unsigned long long)g_mirSelPre, (unsigned long long)g_mirSelAbsent, (unsigned long long)g_mirSelBuilds,
+        (unsigned long long)g_mirSelChanges, g_mirKeyN, g_mirKeyN ? known : "none");
+    g_mirSelMatch = g_mirSelSkip = g_mirSelPre = g_mirSelBuilds = g_mirSelChanges = g_mirSelFramesW = g_mirSelAbsent = 0;
+    for (uint64_t& h : g_mirSelHit) h = 0;
+}
+
 // A new mirror view (its G-buffer bind): pick its unit, start the unit's view (record, candidates, jitter).
 void MirBeginView(const Microsoft::WRL::ComPtr<ID3D11Texture2D>& rt0, const Microsoft::WRL::ComPtr<ID3D11Texture2D>& depth,
                   UINT w, UINT h) {
     const uint64_t fr = g_frames.load(std::memory_order_relaxed);
     if (fr != g_mirFrame) {
-        // v0.10.0 phase 9 (mirror_vr_mode 2): the mirror_vr_views largest views of the frame that just ended (by area; equal areas
-        // in their order) are the ones this frame handles -- identified by (size, order among the views of that size)
-        if (MirMode() == 2 && g_mirSeenN > 0) {
-            g_mirSelN = 0;
-            bool taken[kMirSeenCap] = {};
-            const int want = g_mirVrViews < 1 ? 1 : (g_mirVrViews > kMirSelCap ? kMirSelCap : g_mirVrViews);
-            for (int k = 0; k < want; ++k) {
-                int best = -1;
-                for (int i = 0; i < g_mirSeenN; ++i)
-                    if (!taken[i] && (best < 0 || g_mirSeen[i].w * g_mirSeen[i].h > g_mirSeen[best].w * g_mirSeen[best].h))
-                        best = i;
-                if (best < 0) break;
-                taken[best] = true;
-                int so = 0;
-                for (int i = 0; i < best; ++i) if (g_mirSeen[i].w == g_mirSeen[best].w && g_mirSeen[i].h == g_mirSeen[best].h) ++so;
-                g_mirSel[g_mirSelN++] = { g_mirSeen[best].w, g_mirSeen[best].h, so };
-            }
-        }
-        g_mirFrame = fr; g_mirSeenN = 0; g_mirSelUsed = 0;
+        // a frame boundary that did not pass MirNextFrame (which normally ends the frame's views and moves g_mirFrame):
+        // v0.10.0 phase 21: the mode-2 selection is learnt here then (MirSelEndFrame), before the table restarts
+        MirSelEndFrame();
+        g_mirFrame = fr; g_mirSeenN = 0;
     }
     int occ = 0, sord = 0;
     for (int i = 0; i < g_mirSeenN; ++i) {
         if (g_mirSeen[i].rt0 == rt0.Get() && g_mirSeen[i].depth == depth.Get()) ++occ;
         if (g_mirSeen[i].w == w && g_mirSeen[i].h == h) ++sord;
     }
-    if (g_mirSeenN < kMirSeenCap) g_mirSeen[g_mirSeenN++] = { rt0.Get(), depth.Get(), w, h };
+    if (g_mirSeenN < kMirSeenCap) g_mirSeen[g_mirSeenN++] = { rt0.Get(), depth.Get(), w, h, sord };
     ++g_mirWinViews;
     // v0.10.0 phase 8 (mirror_vr_mode 2, VR): only the largest mirror views (the main mirrors) get a unit
     // v0.10.0 phase 9: the mirror_vr_views largest views of the previous frame (g_mirSel); before the first selection the first
     // mirror_vr_views views of the frame
+    // v0.10.0 phase 21: the selection = the mirror_vr_views largest keys seen lately (MirSelEndFrame); the first-views rule
+    // only until the first frame with mirror views has ended (g_mirSelUsed now restarts every frame)
     if (MirMode() == 2) {
         bool sel = false;
         if (g_mirSelN > 0) {
             for (int i = 0; i < g_mirSelN && !sel; ++i)
                 sel = g_mirSel[i].w == w && g_mirSel[i].h == h && g_mirSel[i].sord == sord;
+            if (sel) ++g_mirSelMatch;
         } else {
             sel = g_mirSelUsed < g_mirVrViews;
+            if (sel) ++g_mirSelPre;
         }
-        if (!sel) { ++g_mirNotHandled; ++g_mirVrSkip; g_mirCur = -1; return; }
+        if (!sel) { ++g_mirNotHandled; ++g_mirVrSkip; ++g_mirSelSkip; g_mirCur = -1; return; }
         ++g_mirSelUsed;
     }
     const int nU = g_mirMaxViews < 1 ? 1 : (g_mirMaxViews > kMirCap ? kMirCap : g_mirMaxViews);
@@ -12082,6 +12243,7 @@ void MirNextFrame(uint64_t n) {
     g_mirCur = -1; g_mirGbuf = false; g_mirJit = false;
     ++g_mirWinPresents;
     if (g_mirSeenN > 0) ++g_mirWinFrames;
+    MirSelEndFrame();                                    // v0.10.0 phase 21: the mode-2 selection, BEFORE the table is cleared
     g_mirSeenN = 0;
     g_mirFrame = g_frames.load(std::memory_order_relaxed);
     for (MirUnit& m : g_mir) {
@@ -13889,6 +14051,7 @@ void MirStatsLog(uint64_t blit) {
     }
     g_mirVrSkip = g_mirAltHeld = g_mirAltRaw = 0;
     Log("%s", s.c_str());
+    if (MirMode() == 2) MirSelLog(blit);                 // v0.10.0 phase 21: the mode-2 selection line
     g_mirWinViews = g_mirWinFrames = g_mirWinPresents = g_mirWinCap = 0;
 }
 
@@ -15532,6 +15695,7 @@ DWORD WINAPI SetupThread(LPVOID) {
     // D3DCompile per unit inside its first Run on the render thread: ~2 s freeze per CameraMv). Not under the
     // loader lock here (StartInjection only spawned this thread).
     CameraMv::RegisterShaders();
+    DrawIdRecord::SetPsInfoFn(&DidPsInfo);              // v0.10.0 phase 21: the PS DXBC flags for the dump / pixel probe
     SceneDlaa::RegisterShaders();
     PreviewBlit::RegisterShaders();
     TuningMenu::RegisterShaders();                       // v0.10.0 tuning menu panel quad

@@ -923,6 +923,8 @@ private:
     bool     m_didInitTried = false;
     bool     m_didStaticGate = false;                                     // v0.10.0 phase 14: the pass's replay ran with the
                                                                           // static gate (FwdMode.z: the Ctrl+F6 view's id-0 olive)
+    uint32_t m_dimsX0 = 0, m_dimsY0 = 0, m_dimsW = 0, m_dimsH = 0;       // v0.10.0 phase 21: pass B's crop (WriteDims; the probe)
+    uint32_t m_probePacked = 0;                                           // v0.10.0 phase 21: FwdMode.w of this pass B (0 = no probe)
     // prepares the record (CPU grouping + uploads); sets m_didN when pass B can use the ids. Returns the draws prepared.
     // v0.10.0 phase 3: + the forward record and whether pass A wrote this frame's medoid (the consensus statistic).
     uint32_t DidPrepare(ID3D11DeviceContext* ctx, const DrawIdRecord* did, ID3D11ShaderResourceView* idSrv,

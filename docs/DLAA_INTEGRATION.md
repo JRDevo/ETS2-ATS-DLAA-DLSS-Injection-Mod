@@ -702,7 +702,8 @@ Goal: <= 1 ms per eye for everything except the NGX evaluation itself, VR (2 eye
   15 m of a paired mover" is not computable for instanced draws (their cb0 rows 4..7 are not the instances' MVP). The input for
   the decision is `replay-inst*` in the perf eye line.
 - **Cut 5, `mirror_vr_mode` (VR only; default 1):** 0 off, 1 every mirror view, 2 only the views with the largest area (the
-  main mirrors; re-learnt after 600 frames without one), 3 each unit every 2nd frame (units alternate by index; on its off
+  main mirrors; re-learnt after 600 frames without one; v0.10.0 phase 21: this selection never ran before -- now the
+  mirror_vr_views largest view keys seen in the last 120 frames with mirror views, see DEVELOPMENT.md "Phase 21"), 3 each unit every 2nd frame (units alternate by index; on its off
   frame the view is neither jittered nor recorded and gets the unit's last AA'd picture copied in -- same size / format only;
   the history continues over the 2-frame gap).
 - **Cut 6 (pass B / depth convert):** nothing redundant left to merge: the depth convert is already inside pass B (v0.5.7), the

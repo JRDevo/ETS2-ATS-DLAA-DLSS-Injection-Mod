@@ -269,6 +269,16 @@ public:
     UINT     InstanceCount(int i) const;         // v0.10.0 phase 14 round 4: 1 for DrawIndexed
     UINT     IndexCount(int i) const;            // v0.10.0 phase 4 (dump): the draw's IndexCount
     void     CbWindow(int i, UINT* first, UINT* num) const;   // v0.10.0 phase 4 (dump): VS cb0 first / num constants
+    // v0.10.0 phase 21 (dump / pixel probe): the game's pixel shader of draw i (identity only, never dereferenced; null = none /
+    // unknown). inject.cpp hkPSSetShader keeps the game's current PS in NoteGamePs; every Record copies it. PsInfo = the DXBC
+    // flags of a shader through the lookup inject.cpp registers (SetPsInfoFn): bit 0 scanned, bit 1 discard (cut-out), bit 2
+    // writes SV_Depth (oDepth / oDepthGE / oDepthLE); 0 = unknown (created before the hook, not parsable, no lookup: harness)
+    const void* Ps(int i) const;
+    enum : uint8_t { kPsScanned = 1, kPsDiscard = 2, kPsDepth = 4 };
+    typedef uint8_t (*PsInfoFn)(const void* ps);
+    static void NoteGamePs(const void* ps) { s_gamePs = ps; }
+    static void SetPsInfoFn(PsInfoFn fn) { s_psInfo = fn; }
+    static uint8_t PsInfo(const void* ps) { return s_psInfo ? s_psInfo(ps) : 0; }
     ID3D11ShaderResourceView* MirrorSrv() const { return m_mirrorSrv.Get(); }
     bool Usable() const { return m_n > 0 && !m_flushFail && !FlushPending() && m_mirrorSrv; }
     int  Instanced() const { return m_nInst; }
@@ -299,7 +309,10 @@ private:
     struct State;                                // per-draw captured state (draw_ids.cpp)
     struct Key { uint64_t full, loose; UINT off; uint8_t flags; float vpMin, vpMax; UINT ic, cbFirst, cbNum;   // v0.10.0 phase 4: + ic / cb0 (dump)
                  uint64_t shape;                 // v0.10.0 phase 8: ShapeKey
-                 UINT jit, inst; };              // v0.10.0 phase 14 round 4: VpJitterPacked, InstanceCount
+                 UINT jit, inst;                 // v0.10.0 phase 14 round 4: VpJitterPacked, InstanceCount
+                 const void* ps; };              // v0.10.0 phase 21: the game's PS at Record (identity; dump / probe)
+    static const void* s_gamePs;                 // v0.10.0 phase 21: NoteGamePs
+    static PsInfoFn    s_psInfo;                 //   SetPsInfoFn
     bool FlushPending() const {
         for (int k = 0; k < m_nRings; ++k) if (m_rings[k].hi > m_rings[k].lo) return true;
         return false;
@@ -509,7 +522,17 @@ public:
     bool ConsHealthy(int layer) const;
     // v0.10.0 phase 4: log the per-draw state of the NEXT prepared pass (forward draws + G-buffer draws with IndexCount
     // <= 36), see the header. The lines land 2-4 frames later (non-blocking readback). false = a dump is still in flight.
-    bool RequestDump(const char* why);
+    // v0.10.0 phase 21 PIXEL PROBE: probeU / probeV in [0, 1] (uv of the full image; < 0 = no probe) -- pass B of the dumped
+    // pass also records, for a 5 x 5 grid of pixels kProbeStep px apart around that point, its inputs and decisions (scene /
+    // forward depth, which won, the layer, the R it took, the draw ids, the final MV); DumpPoll logs one 'MV probe' line per
+    // pixel with the facts of both draws (CameraMv binds the probe buffer through ProbePacked / ProbeUav)
+    bool RequestDump(const char* why, float probeU = -1.0f, float probeV = -1.0f);
+    static constexpr int  kProbeN = 25, kProbeStep = 48;
+    static constexpr UINT kProbeStride = 128u;   // bytes per probe pixel record (pass B, kReprojDepthShader)
+    // pass B of the prepared pass: the probe centre packed for the shader (x | y << 16), 0 = no probe this pass
+    uint32_t ProbePacked() const { return m_dumpPrep ? m_probePacked : 0u; }
+    // pass B (CameraMv::DispatchReproj): the probe buffer, cleared, for u4 (null = none); x0 / y0 / w / h = pass B's crop
+    ID3D11UnorderedAccessView* ProbeUav(ID3D11DeviceContext* ctx, uint32_t x0, uint32_t y0, uint32_t w, uint32_t h);
     bool DumpBusy() const { return m_dumpArm || m_dumpPrep || m_dumpPending; }
     void SetQuiet(bool on) { m_quiet = on; }     // v0.10.0 phase 2 (mirror units): no low-pair WARNING lines (counted only)
     uint32_t PreparedN() const { return m_prepN; }
@@ -729,14 +752,24 @@ private:
     GpuSpanTimer m_pairTimer, m_passBTimer;
     // v0.10.0 phase 4 dump (RequestDump): CPU facts of the chosen draws at Prepare, GPU tables copied at Finish, logged by Poll
     // (phase 5: every draw of the pass is kept -- kMax entries --; DumpPoll chooses the lines once the states are known)
-    struct DumpEnt { uint32_t i, ic, cbFirst, cbNum, mirrorOff, group, gCur, gPrev; uint64_t full, loose; uint8_t flags, big; };
+    struct DumpEnt { uint32_t i, ic, cbFirst, cbNum, mirrorOff, group, gCur, gPrev; uint64_t full, loose; uint8_t flags, big;
+                     const void* ps; uint8_t psInfo; float vpMin, vpMax; uint32_t inst; };   // v0.10.0 phase 21
     void DumpPoll(ID3D11DeviceContext* ctx);
     DumpEnt*  m_dump = nullptr;                 // kMax entries, allocated by the first RequestDump
     uint32_t  m_dumpN = 0, m_dumpNG = 0, m_dumpNAll = 0, m_dumpM = 0, m_dumpW = 0, m_dumpH = 0, m_dumpSkipped = 0;
     bool      m_dumpArm = false, m_dumpPrep = false, m_dumpPending = false, m_dumpHist = false;
     int       m_dumpPolls = 0;
     char      m_dumpWhy[64] = {};
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_dumpSt[4];            // CurM, RTab, Work (partner | R_draw | attach | twin), Solve
+    Microsoft::WRL::ComPtr<ID3D11Buffer> m_dumpSt[5];            // CurM, RTab, Work (partner | R_draw | attach | twin), Solve,
+                                                                 // v0.10.0 phase 21: the probe records
+    // v0.10.0 phase 21 pixel probe (RequestDump probeU / probeV): the centre asked for, the packed centre of the prepared pass,
+    // pass B's crop, the probe buffer (raw UAV, kProbeN * kProbeStride bytes) and whether pass B wrote it this pass
+    float     m_probeU = -1.0f, m_probeV = -1.0f;
+    uint32_t  m_probePacked = 0, m_probeCx = 0, m_probeCy = 0, m_probeCrop[4] = {};
+    bool      m_probeBound = false, m_probeStaged = false, m_probeFailed = false;
+    Microsoft::WRL::ComPtr<ID3D11Buffer> m_probeBuf;
+    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_probeUav;
+    void ProbeLog(const void* const* mapped);   // DumpPoll: the 'MV probe' lines
     Microsoft::WRL::ComPtr<ID3D11Resource> m_dumpSolve;          // the solve buffer of the dumped pass (Dispatch)
 };
 

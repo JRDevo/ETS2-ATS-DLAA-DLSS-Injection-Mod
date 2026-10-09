@@ -319,6 +319,7 @@ cbuffer DimsCB : register(b0) {
     uint4  FwdMode;      // v0.10.0 phase 9: x = the forward depth (t4) is at 1/2^x of the image (read at src >> x); y = 1: the
                          // forward ids come from FwdIdsH (t7, the forward depth's size), not the GREEN channel of t5
                          // (v0.10.0 phase 14: z = the static replay gate ran -- read by the Ctrl+F6 view only)
+                         // v0.10.0 phase 21: w = the PIXEL PROBE centre (x | y << 16, full-image px), 0 = off (see the end)
 };
 Texture2D<float>           DepthIn   : register(t0);
 StructuredBuffer<float4>   Solve     : register(t1);
@@ -332,6 +333,7 @@ RWTexture2D<float2>        MvOut     : register(u0);
 RWTexture2D<float>         DepthOut  : register(u1);
 RWByteAddressBuffer        FwdCnt    : register(u2);   // v0.9.0 r11: near-range forward-depth px (64 dwords)
 RWByteAddressBuffer        DidCnt    : register(u3);   // v0.10.0: coverage counters at dword 64 + counter * 16 + stripe
+RWByteAddressBuffer        Probe     : register(u4);   // v0.10.0 phase 21: Alt+F8 pixel probe records (FwdMode.w != 0 only)
 
 // v0.10.0 phase 4: view distance (m) of a world-layer depth value through InvRow3; -1 = unknown (no InvRow3)
 float ViewDist(float2 ndc, float dep) {
@@ -375,6 +377,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     bool didMover = false;
     float4x4 Rd = float4x4(1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1);
     float zd = 0.0;
+    bool attached = false;                              // (v0.10.0 phase 21: declared here, the probe reads it)
     if (ObjInfo.z != 0u) {
         bool fwWin = fw > dt;                           // v0.10.0 phase 3: the forward surface is what this pixel shows
         uint2 ids = DrawIds[src];
@@ -393,7 +396,6 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
             }
         } else did = 0u;
         // v0.10.0 phase 4 ATTACH per pixel (see the header): the forward surface on a G-buffer mover takes the mover's R
-        bool attached = false;
         if (fwWin && AttachM > 0.0 && ids.x != 0u && ids.x <= ObjInfo.w) {
             uint og = (ids.x - 1u) * 5u;
             float4 gi = DrawR[og + 4u];
@@ -458,6 +460,52 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         mv = clamp(mv, -4096.0, 4096.0);
     }
     MvOut[id.xy] = mv;
+    // v0.10.0 phase 21 PIXEL PROBE (Alt+F8 with the dump, FwdMode.w = centre x | y << 16): the pixels of a 5 x 5 grid 48 px apart
+    // around the centre write their inputs and decisions -- 128-byte record k = row * 5 + column at Probe[k * 128] (layout:
+    // DrawIdMv::ProbeLog in draw_ids.cpp; keep in step). Nothing above depends on it: the MVs are the same with or without it.
+    if (FwdMode.w != 0u) {
+        int2 po = int2(src) - int2(FwdMode.w & 0xFFFFu, FwdMode.w >> 16) + int2(96, 96);
+        if (all(po >= int2(0, 0)) && all(po <= int2(192, 192))) {
+            uint2 pu = uint2(po);
+            if (all((pu % 48u) == uint2(0u, 0u))) {
+                uint pa = ((pu.y / 48u) * 5u + pu.x / 48u) * 128u;
+                uint2 pIds = uint2(0u, 0u);
+                uint pDid = 0u, pSt = 0u, pGst = 0u;
+                bool pFw = fw > dt;
+                if (ObjInfo.z != 0u) {
+                    pIds = DrawIds[src];
+                    if (FwdMode.y != 0u) pIds.y = FwdIdsH[src >> FwdMode.x];
+                    pDid = pFw ? pIds.y : pIds.x;
+                    bool pOk = pFw ? (pDid > ObjInfo.w && pDid <= ObjInfo.z) : (pDid != 0u && pDid <= ObjInfo.w);
+                    if (pOk) pSt = (uint)(DrawR[(pDid - 1u) * 5u + 4u].x + 0.5); else pDid = 0u;
+                    if (pIds.x != 0u && pIds.x <= ObjInfo.w) pGst = (uint)(DrawR[(pIds.x - 1u) * 5u + 4u].x + 0.5);
+                }
+                float pDist = -1.0;
+                float4 pIr = Solve[16];
+                if (any(pIr != 0.0)) {
+                    float pIw = dot(pIr, float4(ndc, z, 1.0));
+                    pDist = (abs(pIw) > 1e-9) ? 1.0 / pIw : 1e9;
+                }
+                float4 pc = mul(R, float4(ndc, z, 1.0));             // the camera path (the R of the layer / ego / stencil id)
+                float2 pMv = float2(0.0, 0.0);
+                if (pc.w > 1e-6) {
+                    float2 ppn = (pc.xy / pc.w - TileXf.zw) / TileXf.xy;
+                    pMv = (float2(ppn.x * 0.5 + 0.5, 0.5 - ppn.y * 0.5) - uv) * FullSize;
+                    if (!all(isfinite(pMv))) pMv = float2(0.0, 0.0);
+                }
+                float pFwRaw = FwdDepth[src >> FwdMode.x];
+                uint pFl = (pFw ? 1u : 0u) | (pDid != 0u ? 2u : 0u) | (didMover ? 4u : 0u) | (attached ? 8u : 0u) |
+                           (cabin ? 16u : 0u) | (ObjInfo.z != 0u ? 32u : 0u) | (base == 12u ? 64u : 0u) | (sid != 0u ? 128u : 0u) |
+                           (pFwRaw >= 0.9 ? 256u : 0u);
+                Probe.Store4(pa,        uint4(0x50524F42u, src.x | (src.y << 16), asuint(dt), asuint(pFwRaw)));
+                Probe.Store4(pa + 16u,  uint4(asuint(d), pIds.x, pIds.y, pFl));
+                Probe.Store4(pa + 32u,  uint4(pDid, pSt, pGst, base | (sid << 8)));
+                Probe.Store4(pa + 48u,  uint4(asuint(z), asuint(zd), asuint(mv.x), asuint(mv.y)));
+                Probe.Store4(pa + 64u,  uint4(asuint(c.w), asuint(pDist), asuint(pMv.x), asuint(pMv.y)));
+                Probe.Store4(pa + 80u,  uint4(asuint(ndc.x), asuint(ndc.y), ObjInfo.w, ObjInfo.z));
+            }
+        }
+    }
 }
 )";
 // kReprojDepthShader-END
@@ -1302,8 +1350,11 @@ bool CameraMv::WriteDims(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, uint3
     // v0.10.0 phase 9 FwdMode: x = the forward depth's resolution shift (only with a forward depth), y = the forward ids are in t7
     // v0.10.0 phase 14: z = 1 when the pass's G-buffer replay ran with the static gate (mv_replay_static_*): world pixels without a
     // G-buffer id may be a static draw that was not re-drawn -- the Ctrl+F6 view shows them olive (pass B does not read z)
+    // v0.10.0 phase 21: w = the pixel probe centre of a dumped pass (DrawIdMv::ProbePacked; 0 = off)
+    m_probePacked = m_didN ? m_did.ProbePacked() : 0u;
+    m_dimsX0 = x0; m_dimsY0 = y0; m_dimsW = w; m_dimsH = h;
     const uint32_t fwdMode[4] = { m_fwdDepth ? m_fwdShift : 0u, (m_didN && m_fwdShift && m_fwdIds) ? 1u : 0u,
-                                  (m_didN && m_didStaticGate) ? 1u : 0u, 0u };
+                                  (m_didN && m_didStaticGate) ? 1u : 0u, m_probePacked };
     memcpy(mp.pData, dims, sizeof(dims));
     memcpy((uint8_t*)mp.pData + sizeof(dims), obj, sizeof(obj));
     memcpy((uint8_t*)mp.pData + sizeof(dims) + sizeof(obj), fwdMode, sizeof(fwdMode));
@@ -1332,20 +1383,23 @@ void CameraMv::DispatchReproj(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, 
         const UINT zero4[4] = { 0, 0, 0, 0 };
         ctx->ClearUnorderedAccessViewUint(m_fwdCntUav.Get(), zero4);
     }
-    ID3D11UnorderedAccessView* uavs[4] = { mvUav, depthR32Uav, cntSlot >= 0 ? m_fwdCntUav.Get() : nullptr,
-                                           m_didN ? m_did.CntUav() : nullptr };
-    ID3D11UnorderedAccessView* nullUavs[4] = {};
-    const UINT keep4[4] = { (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1 };
+    // v0.10.0 phase 21: u4 = the pixel probe records, only for a dumped pass with a probe (FwdMode.w); otherwise 4 UAVs as before
+    ID3D11UnorderedAccessView* probeUav = m_probePacked ? m_did.ProbeUav(ctx, m_dimsX0, m_dimsY0, m_dimsW, m_dimsH) : nullptr;
+    ID3D11UnorderedAccessView* uavs[5] = { mvUav, depthR32Uav, cntSlot >= 0 ? m_fwdCntUav.Get() : nullptr,
+                                           m_didN ? m_did.CntUav() : nullptr, probeUav };
+    ID3D11UnorderedAccessView* nullUavs[5] = {};
+    const UINT keep4[5] = { (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1 };
+    const UINT nUav = probeUav ? 5u : 4u;
     const int tq = m_didN ? m_did.PassBTimer().Begin(ctx) : -1;   // v0.10.0: pass B GPU time in mode 2
     const int pq = GpuPerf::Begin(ctx, GpuPerf::kPassB);          // v0.10.0 phase 8
     ctx->CSSetShader(m_csReproj.Get(), nullptr, 0);
     ctx->CSSetConstantBuffers(0, 1, &cbs);
     ctx->CSSetShaderResources(0, 8, srvs);
-    ctx->CSSetUnorderedAccessViews(0, 4, uavs, keep4);
+    ctx->CSSetUnorderedAccessViews(0, nUav, uavs, keep4);
     ctx->Dispatch((w + 7) / 8, (h + 7) / 8, 1);
-    // Unbind t0..t7/u0/u1 (r11: u2, v0.10.0: u3): NGX reads the R32F depth and the MV texture as SRVs next.
+    // Unbind t0..t7/u0/u1 (r11: u2, v0.10.0: u3, phase 21: u4): NGX reads the R32F depth and the MV texture as SRVs next.
     ctx->CSSetShaderResources(0, 8, nullSrv);
-    ctx->CSSetUnorderedAccessViews(0, 4, nullUavs, keep4);
+    ctx->CSSetUnorderedAccessViews(0, nUav, nullUavs, keep4);
     GpuPerf::End(ctx, pq);
     m_did.PassBTimer().End(ctx, tq);
     if (cntSlot >= 0) {                                 // v0.9.0 r11: read back without waiting (FwdCountPoll)

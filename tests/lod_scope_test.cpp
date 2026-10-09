@@ -326,6 +326,23 @@ int main(int argc, char** argv) {
                                  (const uint8_t*)bClip->GetBufferPointer() + bClip->GetBufferSize());
         bad[0] = 'X';
         CHECK(DxbcPsClass(bad.data(), bad.size()) == 0, "scan: wrong magic = 0");
+        // v0.10.0 phase 21: the SV_Depth output flag (dcl_output oDepth / oDepthGE / oDepthLE)
+        const char* kDep   = "float4 main(float4 p : SV_Position, out float d : SV_Depth) : SV_Target { d = p.z * 0.5; return p; }";
+        const char* kDepGe = "float4 main(float4 c : COLOR, out float d : SV_DepthGreaterEqual) : SV_Target { d = c.z; return c; }";
+        const char* kDepLe = "float4 main(float4 c : COLOR, out float d : SV_DepthLessEqual) : SV_Target {\n"
+                             "  if (c.a < 0.5) discard; d = c.z; return c; }";
+        ID3DBlob *bDep = CompilePs(kDep), *bDepGe = CompilePs(kDepGe), *bDepLe = CompilePs(kDepLe);
+        CHECK(bDep && bDepGe && bDepLe, "SV_Depth test pixel shaders compiled");
+        bool dep = true;
+        CHECK(DxbcPsClass(bPlain->GetBufferPointer(), bPlain->GetBufferSize(), &dep) == 1 && !dep, "scan: plain PS writes no depth");
+        dep = true;
+        CHECK(DxbcPsClass(bClip->GetBufferPointer(), bClip->GetBufferSize(), &dep) == 2 && !dep, "scan: clip() PS writes no depth");
+        if (bDep)   { dep = false; CHECK(DxbcPsClass(bDep->GetBufferPointer(), bDep->GetBufferSize(), &dep) == 1 && dep, "scan: SV_Depth"); }
+        if (bDepGe) { dep = false; CHECK(DxbcPsClass(bDepGe->GetBufferPointer(), bDepGe->GetBufferSize(), &dep) == 1 && dep, "scan: SV_DepthGreaterEqual"); }
+        if (bDepLe) { dep = false; CHECK(DxbcPsClass(bDepLe->GetBufferPointer(), bDepLe->GetBufferSize(), &dep) == 2 && dep, "scan: SV_DepthLessEqual + discard"); }
+        if (bDep) bDep->Release();
+        if (bDepGe) bDepGe->Release();
+        if (bDepLe) bDepLe->Release();
         ID3DBlob* vs = nullptr;
         const char* kVs = "float4 main(float4 p : POSITION) : SV_Position { return p; }";
         if (SUCCEEDED(D3DCompile(kVs, strlen(kVs), "vs", nullptr, nullptr, "main", "vs_5_0", 0, 0, &vs, nullptr)) && vs) {

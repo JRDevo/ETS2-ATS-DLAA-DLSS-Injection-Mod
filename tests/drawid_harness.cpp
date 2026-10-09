@@ -803,7 +803,12 @@ int RunScene(Env& E, const SceneCfg& sc, float snapPx, Totals& tot) {
         // build\tests\dlaa.ini with debug = 1; the lines land in build\tests\dlaa_inject.log)
         {
             char ev[16] = {};
-            if (GetEnvironmentVariableA("HDUMP", ev, sizeof(ev)) && atoi(ev) == f) cam.DrawIds().RequestDump("harness HDUMP");
+            if (GetEnvironmentVariableA("HDUMP", ev, sizeof(ev)) && atoi(ev) == f) {
+                // v0.10.0 phase 21: HPROBE=1 adds the pixel probe around the image centre ('MV probe' lines)
+                char pv[16] = {};
+                const bool probe = GetEnvironmentVariableA("HPROBE", pv, sizeof(pv)) && atoi(pv) != 0;
+                cam.DrawIds().RequestDump("harness HDUMP", probe ? 0.5f : -1.0f, probe ? 0.5f : -1.0f);
+            }
         }
         const bool ok = cam.Generate(ctx, W, H, 0, 0, W, H, cand, E.twinSrv.Get(), E.dUav.Get(), E.mvUav.Get(), &fs, false,
                                      nullptr, nullptr, nullptr, &rec, rec.ReplayFailed() ? nullptr : E.idSrv.Get());

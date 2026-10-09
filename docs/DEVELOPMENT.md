@@ -882,6 +882,92 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   next log shows the garage read). (3) The game's own fps meter "duplicating" was assumed to be the same double draw; not proven.
   (4) The pattern rule can drop the panel for one Present when an eye's picture count falls (a screen change): `noPanel` counts it.
 
+### Phase 21 (v0.10.0): mirror_vr_mode 2 handled no mirror at all; Alt+F8 pixel probe (pink shop windows)
+
+- **Mirror evidence** (ATS VR, `captures/dlaa_inject_ats_v0100p19_vr.log`, `mirror_vr_mode 2`, `mirror_vr_views 2`): every
+  `mirror units @blit` line says `handled 4, not handled 63072 in total`, all three units `views 0, dlaa ok 0`, and
+  `views left to the game as not among the largest ~1444` per window. So every mirror (the car's interior mirror sits on the
+  right side of the left eye) showed the raw jittered picture = the flicker there; `mirror_vr_mode 1` was the workaround.
+- **Cause:** the phase-9 selection ("the `mirror_vr_views` largest views of the previous frame") was built in `MirBeginView`
+  inside `if (fr != g_mirFrame)`, from `g_mirSeen`. But `MirNextFrame` (the Present boundary, `OnPresentBoundary`) runs first:
+  it already sets `g_mirFrame = g_frames` (the NEW frame number, `g_frames` was incremented before) and empties `g_mirSeen`.
+  So the block never ran in a normal frame: `g_mirSelN` stayed 0 for the whole session and `g_mirSelUsed` (the "first N views
+  before the first selection" counter) was never reset -- the first 2 views of the session were handled, every later view
+  was left to the game. (The 4 instead of 2: most likely the block ran on a rare frame boundary that did not pass
+  `MirNextFrame`, with an empty table -- it reset the counter but built nothing; not proven.) Not VR-specific:
+  `mirror_flat_mode 2` had the same bug. The VR timing candidates (two eyes per Present, eye 1's views after eye 0's main pass)
+  were not the cause: the mode-1 log shows ~2-3 mirror views per Present for both eyes together (the mirrors are rendered once
+  per frame, not per eye).
+- **Fix** (`MirSelEndFrame`, inject.cpp MIRROR UNITS): called by `MirNextFrame` BEFORE the frame's table is cleared (and by
+  `MirBeginView` when a frame boundary was missed). `g_mirSelUsed` restarts every frame. The selection is learnt from a table
+  of view KEYS (size + order among the views of that size in the frame, `MirSeen.sord`), each with the frame it was last seen
+  in; a key not seen for 120 frames with mirror views is forgotten (16 keys max). The selection = the `mirror_vr_views`
+  largest known keys (area; ties: lower order, then wider). Why not "the largest of the previous frame" only: the mode-1 log
+  (`v0100p19_vr2`) shows the game renders some views on some frames only (1024x512 every frame, 2048x512 most frames, a 256x512
+  / second 1024x512 now and then) -- a one-frame selection would drop the main mirror on every frame after one that skipped
+  it. Frames without mirror views (menus, loading) change nothing. Before the first frame with views has ended, the old
+  "first `mirror_vr_views` views of the frame" rule applies (now per frame, counted as `handled before the first selection`).
+- **New log lines (mode 2 only):** `mirror units (mirror_vr_mode 2): selection now [2048x512 #0, 1024x512 #0] -- the 2
+  largest of the known view keys [...]` on every change (first 24), and after every `mirror units @blit N` line: `mirror units
+  mirror_vr_mode 2 selection @blit N: mirror_vr_views 2, selected 2: [WxH #o (in F of W frames), ...] | views matched M
+  (handled), not selected U (left to the game), handled before the first selection P | selected entries absent from their
+  frame A | selection rebuilt B times, changed C | known view keys K: [WxH #o (n frames, last seen k frames ago), ...]`.
+- **Pixel probe (Alt+F8, same key, same dump; "pink shop windows").** In the `Ctrl+F6` view magenta = blue (cabin class,
+  d >= 0.9 in pass B's merged depth) + red (mv.x > 0); the `v0100p19_vr2` dumps show ~0 movers, so the windows are NOT movers
+  but pixels that pass B classifies as cabin depth (cabin camera R = wrong motion = wobble). Why a facade at 30-100 m reads
+  d >= 0.9 is the open question; the probe names the draw and the reason:
+  - `RequestMvDump` passes eye 0's optical centre (VR: `g_optC[0]`, image centre until known; flat: image centre) to
+    `DrawIdMv::RequestDump(why, u, v)`. At the dumped pass's `Prepare` the centre is packed (x | y << 16) into pass B's
+    `FwdMode.w` (`CameraMv::WriteDims`, `DrawIdMv::ProbePacked`; 0 = off, every other pass) and `DispatchReproj` binds a
+    3200-byte raw buffer at u4 (`DrawIdMv::ProbeUav`, cleared). `kReprojDepthShader` (end of CSMain, after `MvOut` is written --
+    the MVs are unchanged): the pixels of a 5 x 5 grid 48 px apart around the centre write a 128-byte record each (scene depth
+    of the pass's twin, the forward depth as read, merged d, G-buffer / forward ids, flags: forward won / id valid / mover R /
+    per-pixel attach / cabin / ids on / ego / stencil id / forward >= 0.9 overlay, the id used + its state, the G-buffer id's
+    state, R base, z, zd, mv, clip w, view distance, the camera path's mv, ndc). `Finish` copies it to a staging buffer with
+    the dump tables; `DumpPoll` logs it with the CPU facts of both draws (`DrawIdMv::ProbeLog`).
+  - Every recorded draw now keeps the game's pixel shader (identity: `hkPSSetShader` -> `DrawIdRecord::NoteGamePs`, copied by
+    `Record`); `DxbcPsClass` (phase 12 scan at `CreatePixelShader`) also reports a depth output -- `dcl_output` (opcode 0x65)
+    of operand type 12 / 38 / 39 = `oDepth` / `oDepthGE` / `oDepthLE` (token values checked against fxc output) -- stored as
+    bit 4 of the shader table entry (`kLodPsDepth`), read through `DrawIdRecord::PsInfo` (`DidPsInfo`). The existing
+    `MV dump n/N` lines end with ` | vp depth [min, max] | PS <ptr>: no SV_Depth | WRITES SV_Depth (, discard) | unknown (no
+    DXBC scan)`; every G-buffer draw whose PS writes SV_Depth gets a line; a new header line counts them (`G-buffer pixel
+    shaders ...: N of M draws write SV_Depth (C of them with the cabin viewport) ..., D alpha-tested (discard), U unknown ...;
+    V G-buffer draws with the cabin viewport`).
+  - **Probe log format:** `MV probe (<why>): eye 0 pass, 25 pixels = 5 x 5 grid 48 px apart centred on px (cx, cy) of the WxH
+    image ... | pass B crop at (x0, y0) wxh | draw ids: G G-buffer + F forward ...`, then per pixel `MV probe [r,c] px (x, y)
+    (+dx, +dy): scene depth 0.xxxxxx, <forward 0.xxxxxx -> FORWARD won | scene won (forward behind) | no forward depth -> SCENE
+    | forward ... >= 0.9 (an overlay at the camera: ignored) -> SCENE>, d 0.xxxxxx = <CABIN layer (d >= 0.9) | world layer |
+    sky> | R: <own-mover R of id N (own pair | rigid parent id P | matrix twin id T | attached to G-buffer mover id M) | the
+    G-buffer MOVER under the forward pixel (per-pixel attach) | CABIN camera R | WORLD camera R | EGO R> | MV (x, y) px, camera
+    path (x, y), clip w W | GBUF id N GBUF ic I xK flags 0x.. <CABIN | world> vp depth [a, b] state S <state> (<source>)
+    mvp-shape <ok | NOT AN MVP | no MVP> col3 w .. | PS <ptr> <no SV_Depth | WRITES SV_Depth | ...> | FWD <same, or none>`,
+    plus for a cabin-layer pixel a NOTE: `cabin-range depth WITHOUT a G-buffer id` (no recorded G-buffer draw reproduces the
+    depth: SV_Depth PS / not a G-buffer draw / depth rewritten after the replay), `cabin-range depth on a WORLD-viewport
+    G-buffer draw` (impossible without SV_Depth or a later depth write), or `the G-buffer draw under it has the CABIN viewport
+    [0.9, 1]` (the game draws that surface in the cabin layer). A pixel outside pass B's crop: `not computed`. Last: `MV probe
+    (<why>): N of 25 pixels computed | cabin layer C (no G-buffer id a, a world-viewport G-buffer draw b, a cabin-viewport
+    G-buffer draw c; under a PS writing SV_Depth d) | forward won f | mover R m | mv.x > 0.5 px x`.
+- **Verified:** Release build, 0 warnings, fxc validates `kReprojDepthShader`; WARP harness `drawid_harness.exe` 134981 /
+  134981 (the probe is off in every scene: `FwdMode.w = 0`, u4 unbound, 4 UAVs as before); a manual S1 run with `HDUMP=40
+  HPROBE=1` (new debugging aid; needs `build\tests\dlaa.ini` with `debug = 1`) wrote 25 probe lines (a cabin mover pixel, world
+  movers, static world pixels, sky) whose values agree with the dump lines of the same pass; `lod_scope_test` 239 / 239 with 7
+  new SV_Depth scan checks (built by hand: `tests\build_lod_scope_test.bat` does not link at HEAD -- it lacks `src\ofxr.cpp`,
+  `src\dinput_wrap.cpp`, `dxguid.lib`, `dinput8.lib`; pre-existing, not changed here).
+- **Not verified (needs the game):** the mirror selection in game (the next ATS VR log); the probe on real game data (VR
+  crop, 1/2-resolution forward depth, forward ids); the SV_Depth flag on the game's shaders (shaders created before the
+  `CreatePixelShader` hook read "unknown").
+- **Next VR log, read:** `mirror units (mirror_vr_mode 2): selection now [...]` once or a few times, then the `mirror units
+  mirror_vr_mode 2 selection @blit` line every 600 blits with `views matched` ~ 2 per frame (the selected keys `in ~F of F
+  frames`), `not selected` = the small views only; the `mirror units @blit` line: `handled` growing, the units of the
+  selected sizes with `dlaa ok` ~ their views. Pink window: look at it, press Alt+F8, then read the `MV probe` block: the
+  pixels on the window should say `CABIN layer`, and the NOTE / GBUF part says which draw (vp depth, PS SV_Depth) put the
+  cabin depth there; the `MV draw-ids dump ...: G-buffer pixel shaders` header says whether any G-buffer PS writes SV_Depth.
+- **Risks:** the key selection assumes a view's size + order identify the same mirror every frame (true in the mode-1 log;
+  a game that swaps the order of two equal-size mirrors between frames would swap their units -- the same as before for the
+  unit match). A key that disappears stays selected for up to 120 frames with views (a mirror the game stopped drawing: the
+  next largest is not promoted until then). The probe costs nothing outside the dumped pass (one uniform branch on
+  `FwdMode.w`).
+
 ## Roadmap / history
 
 | Ver  | Goal | Key work |
