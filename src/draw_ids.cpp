@@ -303,6 +303,7 @@ static const uint kParMaxU = 64u;
 static const uint kChainBit = 0x80000000u;          // kParVT: won in the 2nd pass (no parent: depth-rejected)
 static const uint kParSum = kMaxDraws * 200u + 24576u;  // v0.10.0 phase 14 round 4: per draw (sum x, sum y, n) of its pixels on
                                                         // a 2 px sub-grid (CSParentCount: its centroid -- the plate hold)
+static const uint kVoteW = kMaxDraws * 212u + 24576u;  // v0.10.0 phase 19: per candidate the agreeing voters' summed IndexCount
 
 // (v0.10.0 phase 14 round 4: one more C++ raw-string split here, MSVC's 16380-byte literal cap): )" R"(
 float4x4 LoadM(ByteAddressBuffer b, uint a) {
@@ -377,6 +378,21 @@ void OriginMoverDiag(float4 c) {
     if (abs(c.w) < 0.5) Cnt.InterlockedAdd(229u * 4u, 1u, o);
 }
 bool OriginFree(float4x4 m) { return OriginFreeCol(Col3(m)); }
+// v0.10.0 phase 19 MVP SHAPE (ATS VR car, captures/dlaa_inject_ats_v0100p17_vr.log, three Alt+F8 dumps): the car interior's four
+// big cabin draws printed column 3 = (1.0000, a, b, c) in every dump while the camera-locked cabin draws beside them printed (a, b,
+// c, w) -- cb0 rows 4..7 of that shader are NOT its MVP (they read as one row early: a row with .w = 1, then the MVP's rows 0..2).
+// Such a "matrix" still inverts, pairs and gives an R, but in the wrong coordinates: a MOVER whose R throws pass B's vectors far
+// away (the see-through hole in the car's cabin wall that grows with the head turn). A real MVP's clip-w row 3 is the view axis
+// in object space (|row3.xyz| = the object's scale, ~ the x / y rows' length / p00); the misread row 3 is the clip-z row (|xyz| =
+// |projection z scale|: 0 for the infinite world projection, ~0.007 for the cabin's). |row3.xyz| < kShapeMin of the longest row
+// = not an MVP: never paired / a voter / a candidate (pass A too), state 5 (no MVP: the layer's camera R). FoldU.w bit 4 =
+// HARNESS mutation: the rule off. Cnt [232] / [233] = such G-buffer draws (all / cabin).
+static const float kShapeMin = 0.02;
+bool NotMvp(float4x4 m) {
+    if ((FoldU.w & 16u) != 0u) return false;
+    float lm = max(length(m[0].xyz), max(length(m[1].xyz), length(m[2].xyz)));
+    return lm > 1e-20 && !(length(m[3].xyz) > kShapeMin * lm);
+}
 uint CandAt(uint c) {
     uint4 v = Cand[c >> 2];
     uint k = c & 3u;
@@ -546,20 +562,33 @@ void CSPair(uint3 tid : SV_DispatchThreadID) {
     if (i >= Counts.x) return;
     uint4 e = Tab[i * 2u];
     uint partner = kNone;
-    if ((e.z & (kFInst | kFNoMvp)) == 0u && e.x != kNone && e.y != kNone && Counts.y != 0u) {
+    bool shapeOk = true;                                 // v0.10.0 phase 19: rows 4..7 have the shape of an MVP (NotMvp)
+    if ((e.z & (kFInst | kFNoMvp)) == 0u && e.x != kNone && NotMvp(LoadMW(CurM, i * kMStride))) {
+        shapeOk = false;
+        uint o2;
+        if ((e.z & kFFwd) == 0u) {
+            Cnt.InterlockedAdd(232u * 4u, 1u, o2);
+            if ((e.z & kFCabin) != 0u) Cnt.InterlockedAdd(233u * 4u, 1u, o2);
+        }
+    }
+    if (shapeOk && (e.z & (kFInst | kFNoMvp)) == 0u && e.x != kNone && e.y != kNone && Counts.y != 0u) {
         uint4 b = Work.Load4(kBestCur + i * 16u);
         if (b.x != kNone && b.x < Counts.y && Work.Load(kBestPrev + b.x * 16u) == i && asfloat(b.y) < Params.x) {
             float4x4 Mc = LoadMW(CurM, i * kMStride);
             float4x4 Mp = LoadM(PrevM, b.x * kMStride);
             float4x4 Ic;
-            if (Inv4(Mc, Ic)) {
+            if (!NotMvp(Mp) && Inv4(Mc, Ic)) {
                 float4x4 Rd = mul(Mp, Ic);
                 if (Finite4(Rd)) {
                     partner = b.x;
                     StoreM(Work, kRd + i * 64u, Rd);
                     uint old;
                     if ((e.z & kFFwd) == 0u) {
-                        if ((e.z & kFCabin) != 0u) Cnt.InterlockedAdd(18u * 4u, 1u, old);
+                        // (phase 19: [231] = the cabin layer's VOTERS -- paired, not camera-relative; the small-cabin rule)
+                        if ((e.z & kFCabin) != 0u) {
+                            Cnt.InterlockedAdd(18u * 4u, 1u, old);
+                            if (!OriginFreeCol(Col3(Mc))) Cnt.InterlockedAdd(231u * 4u, 1u, old);
+                        }
                         else {
                             Cnt.InterlockedAdd(16u * 4u, 1u, old);
                             if (abs(Mc[3][3]) >= Params2.z) Cnt.InterlockedAdd(17u * 4u, 1u, old);
@@ -589,7 +618,9 @@ uint VoterLayer(uint i, bool useFar, out uint partner) {
 
 groupshared uint  gVoteN[64];
 groupshared float gVoteD[64];
+groupshared uint  gVoteW[64];                       // v0.10.0 phase 19: the agreeing draws' IndexCounts (small cabin layer)
 // one group per candidate: the paired draws of its layer whose probes agree with the candidate's R within Params2.y px
+// (phase 19: + their summed IndexCount, each capped at 65535 -> Work [kVoteW + c * 4])
 [numthreads(64, 1, 1)]
 void CSVote(uint3 gid : SV_GroupID, uint gi : SV_GroupIndex) {
     uint c = gid.x;
@@ -601,7 +632,7 @@ void CSVote(uint3 gid : SV_GroupID, uint gi : SV_GroupIndex) {
     if (ci < Counts.x) ok = VoterLayer(ci, useFar, pc) == want;
     float4x4 Rc = float4x4(1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1);
     if (ok) Rc = LoadMW(Work, kRd + ci * 64u);
-    uint cnt = 0u;
+    uint cnt = 0u, wsum = 0u;
     float sdev = 0.0;
     if (ok) {
         for (uint i = gi; i < Counts.x; i += 64u) {
@@ -610,23 +641,38 @@ void CSVote(uint3 gid : SV_GroupID, uint gi : SV_GroupIndex) {
             float4x4 Mc = LoadMW(CurM, i * kMStride);
             float4x4 Mp = LoadM(PrevM, p * kMStride);
             float dv = ProbeDev(Mp, mul(Rc, Mc));
-            if (dv < Params2.y) { ++cnt; sdev += dv; }
+            if (dv < Params2.y) { ++cnt; sdev += dv; wsum += min(Tab[i * 2u + 1u].z & 0xFFFFFFu, 65535u); }
         }
     }
     gVoteN[gi] = cnt;
     gVoteD[gi] = sdev;
+    gVoteW[gi] = wsum;
     GroupMemoryBarrierWithGroupSync();
     [unroll] for (uint s = 32u; s > 0u; s >>= 1u) {
-        if (gi < s) { gVoteN[gi] += gVoteN[gi + s]; gVoteD[gi] += gVoteD[gi + s]; }
+        if (gi < s) { gVoteN[gi] += gVoteN[gi + s]; gVoteD[gi] += gVoteD[gi + s]; gVoteW[gi] += gVoteW[gi + s]; }
         GroupMemoryBarrierWithGroupSync();
     }
-    if (gi == 0u) Work.Store4(kVote + c * 16u, uint4(gVoteN[0], asuint(gVoteD[0]), ok ? 1u : 0u, ci));
+    if (gi == 0u) {
+        Work.Store4(kVote + c * 16u, uint4(gVoteN[0], asuint(gVoteD[0]), ok ? 1u : 0u, ci));
+        Work.Store(kVoteW + c * 4u, gVoteW[0]);
+    }
 }
 
 // thread 0 = world, 1 = cabin: the winning cluster's R replaces the medoid in the solve buffer (>= Cons.z draws)
 // v0.10.0 phase 18: split into PickHead (the choice) / PickDm (the statistic per candidate) / PickTail (the writes), so CSPickPar
 // can spread the statistic's loop (64 candidates x 2 probe tests, one thread before) over a group -- same values, same order
-// returns (the winning candidate -- kNone = the layer keeps its medoid, Cnt has why --, its cluster size, small = below Cons.z)
+// returns (the winning candidate -- kNone = the layer keeps its medoid, Cnt has why --, its cluster size, mode: 0 = a consensus,
+// 1 = a small cluster without a medoid (below Cons.z), 2 = v0.10.0 phase 19 SMALL CABIN LAYER (see CabinSmall))
+// v0.10.0 phase 19 SMALL CABIN LAYER (ATS VR car, captures/dlaa_inject_ats_v0100p17_vr.log: 7 cabin draws, `cabin: consensus 0 /
+// fallback N` in every window): a car's cabin layer has a handful of draws, so its camera R was pass A's medoid of them -- and
+// the medoid of 3 identical camera-relative overlays (their own R: the head ROTATION only) and 1-2 real cabin parts is an
+// overlay's R. When the cabin layer has fewer than FwdMode.z (dlaa.ini mv_cabin_small, 0 = off) paired draws, its candidates
+// are ranked by the summed IndexCount of the voters that agree with them (Work kVoteW; a cluster of 1 is enough: the largest
+// real cabin part decides) -- not by the count. The medoid is KEPT when it agrees with that cluster (every member's probes
+// within kCabKeepPx = 0.01 px: bit-identical to before in a normal cabin); else the cluster's R replaces it (Cnt [28] = 5; 6 = kept).
+// Cnt [234] / [235] = the winner's IndexCount / weight, [231] = the cabin layer's voters, [18] its paired draws.
+bool CabinSmall() { uint np = Cnt.Load(18u * 4u); return FwdMode.z != 0u && np != 0u && np < FwdMode.z; }
+static const float kCabKeepPx = 0.01;                // the medoid is kept only this close to the heaviest cluster (PickTail)
 uint3 PickHead(uint L) {
     uint c0 = L == 0u ? 0u : Cons.x;
     uint c1 = L == 0u ? Cons.x : Cons.x + Cons.y;
@@ -650,7 +696,23 @@ uint3 PickHead(uint L) {
         // v0.10.0 phase 8: a layer WITHOUT a medoid this frame (dropped) takes a smaller cluster (>= 8 draws) rather than keeping
         // the last frame's R; it is still a failed consensus (state 4: the medoid re-arms)
         bool small = bc < ((L == 1u && FwdMode.y != 0u) ? FwdMode.y : Cons.z);   // (phase 18: mv_cons_min_cabin)
-        if (small && ((Cons.w & (8u << L)) == 0u || bc < 8u)) { Cnt.Store(o, 2u); r.z = 1u; }
+        if (small && L == 1u && CabinSmall()) {
+            // phase 19: the heaviest cluster (summed IndexCount; tie: more draws, then the smaller mean deviation)
+            uint bw = 0u, b2 = kNone, bn = 0u;
+            float bd2 = 0.0;
+            for (uint c2 = c0; c2 < c1; ++c2) {
+                uint4 v = Work.Load4(kVote + c2 * 16u);
+                if (v.z == 0u || v.x == 0u) continue;
+                uint w = Work.Load(kVoteW + c2 * 4u);
+                float md = asfloat(v.y) / (float)v.x;
+                if (b2 == kNone || w > bw || (w == bw && (v.x > bn || (v.x == bn && md < bd2)))) { b2 = c2; bw = w; bn = v.x; bd2 = md; }
+            }
+            if (b2 != kNone) {
+                r = uint3(b2, bn, 2u);
+                Cnt.Store(234u * 4u, Tab[Work.Load(kVote + b2 * 16u + 12u) * 2u + 1u].z & 0xFFFFFFu);
+                Cnt.Store(235u * 4u, bw);
+            } else Cnt.Store(o, 2u);
+        } else if (small && ((Cons.w & (8u << L)) == 0u || bc < 8u)) { Cnt.Store(o, 2u); r.z = 1u; }
         else r = uint3(best, bc, small ? 1u : 0u);
     }
     return r;
@@ -666,11 +728,11 @@ float PickDm(uint c2, float4x4 Rw, float4x4 Rm) {      // candidate c2's |medoid
     if (!(ProbeDev(Mp, mul(Rw, Mc)) < Params2.y)) return -1.0;       // not a member of the winning cluster
     return min(ProbeDev(Mp, mul(Rm, Mc)), 1e6);
 }
-void PickTail(uint L, uint bc, bool small, uint ci, float4x4 Rw, float dsum, float dmax, uint dn);
+void PickTail(uint L, uint bc, uint mode, uint ci, float4x4 Rw, float dsum, float dmax, uint dn);
 void PickLayer(uint L) {
     uint3 h = PickHead(L);
     uint best = h.x, bc = h.y;
-    bool small = h.z != 0u;
+    uint small = h.z;                                    // (phase 19: the mode, see PickHead)
     if (best == kNone) return;
     uint c0 = L == 0u ? 0u : Cons.x;
     uint c1 = L == 0u ? Cons.x : Cons.x + Cons.y;
@@ -689,8 +751,16 @@ void PickLayer(uint L) {
     }
     PickTail(L, bc, small, ci, Rw, dsum, dmax, dn);
 }
-void PickTail(uint L, uint bc, bool small, uint ci, float4x4 Rw, float dsum, float dmax, uint dn) {
+void PickTail(uint L, uint bc, uint mode, uint ci, float4x4 Rw, float dsum, float dmax, uint dn) {
     uint o = (L == 0u ? 20u : 28u) * 4u;
+    Cnt.Store(o + 8u, asuint(dn != 0u ? dsum / (float)dn : 0.0));
+    Cnt.Store(o + 12u, asuint(dmax));
+    Cnt.Store(o + 20u, dn != 0u ? 1u : 0u);
+    // phase 19: a small cabin layer keeps a fresh medoid that agrees with the heaviest cluster at every member within kCabKeepPx (no
+    // write at all: bit-identical where the medoid already is such a draw's R -- a truck cab). Not the 0.1 px snap: the members' probes
+    // sit 0.5-4 m away, a cabin pixel 0.3 m from the eye sees the head-bob parallax of a rotation-only medoid 2-3x larger (harness
+    // S17b: 0.27 px at an overlay while the body's probes were within 0.1 px)
+    if (mode == 2u && PickStatOn(L) && dn != 0u && dmax < kCabKeepPx) { Cnt.Store(o, 6u); return; }
     uint base = L * 4u;
     [unroll] for (uint r = 0u; r < 4u; ++r) SolveRW[base + r] = Rw[r];
     float4 inf = SolveRW[8u + L];
@@ -709,10 +779,7 @@ void PickTail(uint L, uint bc, bool small, uint ci, float4x4 Rw, float dsum, flo
             SolveRW[17u] = float4(0.0, 0.0, 1.0, 0.0);
         }
     }
-    Cnt.Store(o, small ? 4u : 1u);
-    Cnt.Store(o + 8u, asuint(dn != 0u ? dsum / (float)dn : 0.0));
-    Cnt.Store(o + 12u, asuint(dmax));
-    Cnt.Store(o + 20u, dn != 0u ? 1u : 0u);
+    Cnt.Store(o, mode == 2u ? 5u : (mode != 0u ? 4u : 1u));
 }
 [numthreads(2, 1, 1)]
 void CSPick(uint3 tid : SV_DispatchThreadID) {
@@ -758,7 +825,7 @@ void CSPickPar(uint gi : SV_GroupIndex) {
             if (d < 0.0) continue;
             dsum += d; dmax = max(dmax, d); ++dn;
         }
-        PickTail(L, gPkBc[L], gPkSmall[L] != 0u, ci, Rw, dsum, dmax, dn);
+        PickTail(L, gPkBc[L], gPkSmall[L], ci, Rw, dsum, dmax, dn);
     }
 }
 
@@ -772,6 +839,7 @@ void ResolveDraw(uint i, float4x4 R) {
     bool oFree = false;                                 // v0.10.0 phase 14 round 6 (OriginFree): paired, but camera-relative
     if ((e.z & kFInst) != 0u) state = 4u;
     else if ((e.z & kFNoMvp) != 0u || e.x == kNone) state = 5u;
+    else if (NotMvp(LoadMW(CurM, i * kMStride))) state = 5u;   // v0.10.0 phase 19: rows 4..7 are not its MVP (CSPair)
     else {
         uint p = Work.Load(kPartner + i * 4u);
         bool paired = p != kNone && p < Counts.y;
@@ -1975,7 +2043,8 @@ float g_attachM = 0.5f;       // v0.10.0 phase 4: dlaa.ini mv_fwd_attach_m (0 = 
 bool  g_twin = true;          // v0.10.0 phase 5: dlaa.ini mv_drawid_twin (unpaired draws inherit their matrix twin's R)
 bool  g_parent = true;        // v0.10.0 phase 6: dlaa.ini mv_drawid_parent (unpaired draws take their rigid parent's R)
 int   g_parentMut = 0;        // v0.10.0 phase 6: harness mutations only (bit 0 conjugated formula, bit 1 no depth test; phase 14
-                              // round 6: bit 2 origin-free rule off, bit 3 multi-instance draws listed / held again)
+                              // round 6: bit 2 origin-free rule off, bit 3 multi-instance draws listed / held again; round 7:
+                              // bit 4 the round-6 origin-free rule; phase 19: bit 5 the MVP-shape rule off, here and in pass A)
 bool  g_instancedVote = false;// v0.10.0 phase 6b: replayed instanced / no-MVP draws take part in the rigid-parent vote
                               // (dlaa.ini mv_drawid_instanced; set by DrawIdMv::SetInstanced -- in game it follows the ini key,
                               // the harness turns it on for S8 only so S1-S7 are unchanged)
@@ -2082,6 +2151,9 @@ bool  g_voteCompact = true;
 // v0.10.0 phase 18: dlaa.ini mv_cons_min_cabin (0 = kConsMin, as the world layer; 8..64): the cabin layer's consensus needs this many
 // agreeing draws -- below kConsMin it can be used (and its medoid / candidate copies dropped after mv_medoid_drop healthy readbacks)
 UINT  g_consMinCabin = 0u;
+// v0.10.0 phase 19: dlaa.ini mv_cabin_small (0 = off; default 12, 2..64): a cabin layer with fewer paired draws takes the R of its
+// heaviest agreeing cluster (summed IndexCount, a cluster of 1 is enough) when pass A's medoid disagrees with it (see CabinSmall)
+UINT  g_cabinSmall = 12u;
 constexpr UINT kParTileCap = 65536u, kParItemCap = 131072u;   // = the shader's kTileCap / kItemCap
 constexpr UINT kParListBytes = kParTileCap * 4u + kParItemCap * 16u;
 // v0.10.0 phase 9: scissor-enabled copies of the game's rasterizer states (DrawIdRecord::ScissorRs). Key ref held (no pointer
@@ -2109,7 +2181,8 @@ constexpr UINT kCbBytes = 64u + 48u * 16u + 96u;     // v0.10.0 phase 9: + Clip,
 // phase 6: + U slot / parent / votes per draw, the U list and 64 vote tables; phase 6b: + the instanced pixel count per draw;
 // phase 6c: the vote tables grow to 64 x 192 B (kParTab = kMax * 200 + 8704, end kMax * 200 + 20992)
 // phase 14 round 4: + the per-draw centroid sums (kParSum = kMax * 200 + 24576, kMax * 12 B)
-constexpr UINT kWorkBytes = (UINT)DrawIdRecord::kMax * 212u + 24576u;
+// phase 19: + the candidates' summed voter IndexCounts (kVoteW = kMax * 212 + 24576, 256 x 4 B)
+constexpr UINT kWorkBytes = (UINT)DrawIdRecord::kMax * 212u + 24576u + 1024u;
 constexpr UINT kCntBytes = 3328u;               // v0.10.0 phase 8: + dwords 256..383 = instanced draws with a moving parent
                                                  // v0.10.0 phase 18: + dwords 768..772 (compact vote: tiles, items, overflows)
                                                 // phase 14: + 384..511 own-pair static G-buffer draws, 512..639 rigid parents,
@@ -3055,6 +3128,9 @@ void DrawIdMv::SetVoteCompact(bool on) { g_voteCompact = on; }   // v0.10.0 phas
 bool DrawIdMv::VoteCompact() { return g_voteCompact; }
 void DrawIdMv::SetConsMinCabin(unsigned n) { g_consMinCabin = n == 0u ? 0u : (n < 8u ? 8u : (n > 64u ? 64u : n)); }
 unsigned DrawIdMv::ConsMinCabin() { return g_consMinCabin; }
+void DrawIdMv::SetCabinSmall(unsigned n) { g_cabinSmall = n == 0u ? 0u : (n < 2u ? 2u : (n > 64u ? 64u : n)); }   // phase 19
+unsigned DrawIdMv::CabinSmall() { return g_cabinSmall; }
+bool DrawIdMv::MvpShapeOff() { return (g_parentMut & 32) != 0; }
 
 void DrawIdMv::SetConsensus(bool on) { g_consensus = on; }
 bool DrawIdMv::Consensus() { return g_consensus; }
@@ -3463,8 +3539,24 @@ void DrawIdMv::Poll(ID3D11DeviceContext* ctx) {
                 if (q[0] == 4) ++m_stats.consSmall[L];
                 ++m_stats.consFallback[L];
                 m_stats.consFallCluster[L] += q[1];      // v0.10.0 phase 18 (the cabin layer's cluster size, for the log)
+            } else if (L == 1 && (q[0] == 5 || q[0] == 6)) {   // v0.10.0 phase 19: small cabin layer (CabinSmall)
+                ++m_stats.consFallback[L];               // (still no consensus: the medoid stays armed)
+                m_stats.consFallCluster[L] += q[1];
+                float dmax = 0.0f;
+                memcpy(&dmax, &q[3], 4);
+                if (!(dmax >= 0.0f) || dmax > 1e6f) dmax = 1e6f;
+                if (q[0] == 5) {
+                    ++m_stats.cabSmallUsed;
+                    m_stats.cabSmallIc = c[234]; m_stats.cabSmallW = c[235];
+                    m_stats.cabSmallDev = q[5] ? dmax : -1.0f;
+                    if (q[5] && dmax > m_cabSmallDevMax) m_cabSmallDevMax = dmax;
+                } else ++m_stats.cabSmallKept;
             }
         }
+        m_stats.cabVoters += c[231];                     // v0.10.0 phase 19: cabin voters / paired cabin draws, not-MVP draws
+        m_stats.cabPaired += c[18];
+        m_stats.notMvp += c[232];
+        m_stats.notMvpCabin += c[233];
         // v0.10.0 phase 14 (mv_replay_static_*): this pass's verdicts -> the static streak per FullKey. The camera R the verdicts
         // were measured against must be healthy: with the consensus on, a readback whose world layer did not use one (fallback,
         // small cluster, no pick) clears the table instead (every key is replayed again until it re-earns its streak).
@@ -3766,7 +3858,8 @@ uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ui
             if (clip[2] < clip[0]) clip[2] = clip[0];
             if (clip[3] < clip[1]) clip[3] = clip[1];
         }
-        const uint32_t fwdMode[4] = { (nF && fwd) ? fwd->Shift() : 0u, g_consMinCabin, 0u, 0u };   // phase 18: y (cabin min)
+        // phase 18: y = the cabin min cluster; phase 19: z = mv_cabin_small (CabinSmall: fewer paired cabin draws = a small cabin layer)
+        const uint32_t fwdMode[4] = { (nF && fwd) ? fwd->Shift() : 0u, g_consMinCabin, g_cabinSmall, 0u };
         const bool pickOn = m && m_nGroups && (candW + candC) && g_consensus;
         const bool twinOn = g_twin && m, attachOn = g_attachM > 0.0f && m;
         const bool parentOn = g_parent && m && idsBound && fullW && fullH;
@@ -3789,7 +3882,8 @@ uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ui
         // listed for the vote again) -- never set by the DLL; round 7: bit 3 = HARNESS mutation (SetParentMutation bit 4: the
         // round-6 origin-free rule, |x|, |y|, |w| <= 1e-4 |z|)
         const uint32_t holdBits = ((parentOn && m_uhold[0] && m_uholdValid[1 - m_ping]) ? 1u : 0u) |
-                                  ((g_parentMut & 4) ? 2u : 0u) | ((g_parentMut & 8) ? 4u : 0u) | ((g_parentMut & 16) ? 8u : 0u);
+                                  ((g_parentMut & 4) ? 2u : 0u) | ((g_parentMut & 8) ? 4u : 0u) | ((g_parentMut & 16) ? 8u : 0u) |
+                                  ((g_parentMut & 32) ? 16u : 0u);   // phase 19: bit 4 = HARNESS mutation, the MVP-shape rule off
         const uint32_t foldU[4] = { fold, g_parMaxListed, epsBits, holdBits };   // v0.10.0 phase 10: y = the listed-draw cap
         memcpy((uint8_t*)mp.pData + 64 + sizeof(cand) + 48, clip, sizeof(clip));
         memcpy((uint8_t*)mp.pData + 64 + sizeof(cand) + 64, fwdMode, sizeof(fwdMode));
@@ -4176,8 +4270,10 @@ void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
                col(kM * 76u, i) != 0xFFFFFFFFu;
     };
     // (v0.10.0 phase 14 round 6: + every MOVER of any IndexCount -- a false mover names itself in the next in-game dump)
+    // (v0.10.0 phase 19: + every draw resolved "no MVP" without the CPU's no-MVP flag = its cb0 rows 4..7 failed the MVP shape)
     auto selected = [&](const DumpEnt& d) {
-        return d.i >= m_dumpNG || d.ic <= 36u || wasUnpaired(d.i) || col(kM * 68u, d.i) != 0xFFFFFFFFu || stateOf(d.i) == 3u;
+        return d.i >= m_dumpNG || d.ic <= 36u || wasUnpaired(d.i) || col(kM * 68u, d.i) != 0xFFFFFFFFu || stateOf(d.i) == 3u ||
+               (stateOf(d.i) == 5u && (d.flags & DrawIdRecord::kFNoMvp) == 0);
     };
     uint32_t nSel = 0, nUnp = 0, nTwin = 0, nAtt = 0, nLeft = 0, nPar = 0;
     for (uint32_t q = 0; q < m_dumpN; ++q) {
@@ -4291,15 +4387,24 @@ void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
         const bool ofDepth = std::fabs(o[2]) > 1e-6 && std::fabs(o[3]) <= 0.20;
         const bool ofLat = std::fabs(o[0]) <= 0.50 && std::fabs(o[1]) <= 0.50;
         const char* ofTxt = ofDepth ? (ofLat ? "yes" : "depth only, lateral over 0.50") : "no";
+        // v0.10.0 phase 19: the MVP-shape rule of the shader (NotMvp, kShapeMin 0.02; keep in step): |row 3 .xyz| vs the longest
+        // of rows 0..2
+        double rl[4];
+        for (int r = 0; r < 4; ++r) rl[r] = std::sqrt((double)m[r * 4] * m[r * 4] + (double)m[r * 4 + 1] * m[r * 4 + 1] +
+                                                      (double)m[r * 4 + 2] * m[r * 4 + 2]);
+        const double rlm01 = rl[0] > rl[1] ? rl[0] : rl[1], rlm = rlm01 > rl[2] ? rlm01 : rl[2];
+        const bool notMvp = rlm > 1e-20 && !(rl[3] > 0.02 * rlm);
+        char shTxt[96];
+        snprintf(shTxt, sizeof(shTxt), "%s (|row3.xyz| %.4g, longest row %.4g)", notMvp ? "NOT AN MVP" : "ok", rl[3], rlm);
         Log("MV dump %u/%u: id %u %s ic %u flags 0x%02x%s%s | full %016llx loose %016llx | cb0 first %u num %u -> mirror +%u | "
             "group %d (%u cur / %u prev) | origin clip %.3f %.3f %.3f w %.3f%s px %.1f %.1f | col3 x %.4e y %.4e z %.4e w %.4e "
-            "origin-free %s | %s%s | probe dev %.3f px%s | state %u "
+            "origin-free %s | mvp-shape %s | %s%s | probe dev %.3f px%s | state %u "
             "%s%s%s",
             line, nSel, i + 1u, i < m_dumpNG ? "GBUF" : "FWD", d.ic, d.flags & 0x7Fu, cab ? " cabin" : "",
             (d.flags & 0x80) ? " loose-key" : "", (unsigned long long)d.full, (unsigned long long)d.loose, d.cbFirst, d.cbNum,
             d.mirrorOff, d.group == kNone ? -1 : (int)d.group, d.gCur, d.gPrev, o[0], o[1], o[2], o[3],
             viewSpace ? " (view space: MVP = projection only)" : (oOn ? "" : " (behind)"), oOn ? ox : -1.0, oOn ? oy : -1.0,
-            o[0], o[1], o[2], o[3], ofTxt, pairTxt,
+            o[0], o[1], o[2], o[3], ofTxt, shTxt, pairTxt,
             devTxt, info[3] < 0.0f ? 0.0 : (double)info[3],
             (st == 2u && partner != 0xFFFFFFFFu && twin == 0xFFFFFFFFu) ? " (snapped to the camera R)" : "", st,
             st <= 5u ? kSt[st] : "?", unpTxt, attTxt);

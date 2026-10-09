@@ -48,6 +48,7 @@ cbuffer PairCB : register(b0) {
     uint4  Counts;       // x = world pairs, y = cabin pairs, z = all matched world pairs (AllPairs, v0.6.0)
     float4 Params;       // x = near_reject_m (world layer only), y = ego_origin_m (v0.6.0), z = v0.10.0 phase 8: bit L = layer L
                          // has no medoid this frame (its candidates were dropped): this pass writes nothing for it
+                         // w = v0.10.0 phase 19: 1 = HARNESS mutation, the MVP-shape rule off (NotMvp)
     uint4  AllPairs[128];// v0.6.0: every matched world pair (prevByteAddr, curByteAddr, indexCount, 0)
 };
 ByteAddressBuffer          CandPrev : register(t0);
@@ -92,6 +93,15 @@ bool Inv4(float4x4 mm, out float4x4 r) {
     return true;
 }
 
+// v0.10.0 phase 19 MVP SHAPE (= draw_ids.cpp NotMvp, keep in step): cb0 rows 4..7 whose clip-w row 3 has a negligible xyz part
+// (< 0.02 of the longest of rows 0..2) are not an MVP -- in game the ATS car interior's shader holds its MVP one row later, and
+// such a pair's R is in the wrong coordinates. Never a medoid / ego candidate.
+bool NotMvp(float4x4 m) {
+    if (Params.w > 0.5) return false;
+    float lm = max(length(m[0].xyz), max(length(m[1].xyz), length(m[2].xyz)));
+    return lm > 1e-20 && !(length(m[3].xyz) > 0.02 * lm);
+}
+
 float Frob(float4x4 a, float4x4 b) {
     float d = 0;
     [unroll] for (int i = 0; i < 4; ++i)
@@ -125,7 +135,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
             float4x4 Mp = LoadM(CandPrev, pc.x);
             float4x4 Mc = LoadM(CandCur,  pc.y);
             float4x4 ic;
-            if (Inv4(Mc, ic)) {
+            if (!NotMvp(Mc) && !NotMvp(Mp) && Inv4(Mc, ic)) {   // (phase 19: the MVP shape)
                 float4x4 r = mul(Mp, ic);
                 float s = 0;
                 [unroll] for (int i = 0; i < 4; ++i)
@@ -204,7 +214,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
             float4x4 Mp = LoadM(CandPrev, pa.x);
             float4x4 Mc = LoadM(CandCur,  pa.y);
             float4x4 ic;
-            if (!Inv4(Mc, ic)) continue;
+            if (NotMvp(Mc) || NotMvp(Mp) || !Inv4(Mc, ic)) continue;   // (phase 19: the MVP shape)
             float4x4 r = mul(Mp, ic);
             float s = 0;
             [unroll] for (int i = 0; i < 4; ++i)
@@ -1652,7 +1662,8 @@ bool CameraMv::Generate(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, uint32
     memcpy(mp.pData, pairData, sizeof(pairData));
     memcpy((uint8_t*)mp.pData + sizeof(pairData), counts, sizeof(counts));
     {
-        const float params[4] = { m_nearReject, m_egoOrigin, (float)noMed, 0.0f };   // v0.10.0 phase 8: z = layers without a medoid
+        // v0.10.0 phase 8: z = layers without a medoid; phase 19: w = the harness mutation "MVP-shape rule off"
+        const float params[4] = { m_nearReject, m_egoOrigin, (float)noMed, DrawIdMv::MvpShapeOff() ? 1.0f : 0.0f };
         memcpy((uint8_t*)mp.pData + sizeof(pairData) + sizeof(counts), params, sizeof(params));
         memcpy((uint8_t*)mp.pData + sizeof(pairData) + sizeof(counts) + sizeof(params), allPairs, sizeof(allPairs));
     }

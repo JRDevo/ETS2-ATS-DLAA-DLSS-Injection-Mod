@@ -484,6 +484,14 @@ public:
     // copies per pass stayed; the 'cabin: consensus' field of the MV draw-ids line shows the largest cluster it had
     static void SetConsMinCabin(unsigned n);
     static unsigned ConsMinCabin();
+    // v0.10.0 phase 19 (dlaa.ini mv_cabin_small, 0 = off, default 12, else 2..64): a cabin layer with fewer PAIRED draws than this
+    // (a car: 7 cabin draws, 3 of them camera-relative overlays whose own R is the head rotation only) ranks its candidates by
+    // the summed IndexCount of the voters that agree with them (a cluster of 1 is enough: the largest real cabin part decides)
+    // and uses that R when pass A's medoid disagrees with it at any member (> 0.01 px); else the medoid stays (bit-identical)
+    static void SetCabinSmall(unsigned n);
+    static unsigned CabinSmall();
+    // v0.10.0 phase 19: the harness mutation "the MVP-shape rule off" (SetParentMutation bit 5) -- pass A reads it too
+    static bool MvpShapeOff();
     // after pass B: commits the prepared pass as this eye's previous one, queues the diagnostics readback
     void Finish(ID3D11DeviceContext* ctx);
     void Forget() { m_prevN = 0; m_prepN = 0; m_consRun[0] = m_consRun[1] = 0;     // no history (the next pass pairs nothing;
@@ -582,10 +590,20 @@ public:
         // v0.10.0 phase 18 (read back, mv_vote_compact): readbacks of a compact vote, vote-grid tiles listed (sum) / of the grid
         // (sum), march items of the 1st / 2nd pass (sum), items over the cap (marched in place), passes whose tiles overflowed
         uint64_t cvFrames = 0, cvTiles = 0, cvGrid = 0, cvItems1 = 0, cvItems2 = 0, cvItemOver = 0, cvTileOver = 0;
+        // v0.10.0 phase 19 (read back): small cabin layer (mv_cabin_small) -- readbacks whose cabin R came from the heaviest
+        // cluster / that kept the medoid (it agreed); the last such winner's IndexCount, weight (summed IndexCount) and its
+        // max |cluster R - medoid| px at the members (-1 = not compared); cabin voters (paired, not camera-relative) / paired
+        // cabin draws (sums); G-buffer draws whose cb0 rows 4..7 are not an MVP (MVP-shape rule; of them cabin) -- sums
+        uint64_t cabSmallUsed = 0, cabSmallKept = 0;
+        uint32_t cabSmallIc = 0, cabSmallW = 0;
+        float    cabSmallDev = -1.0f;
+        uint64_t cabVoters = 0, cabPaired = 0, notMvp = 0, notMvpCabin = 0;
     };
     const Stats& GetStats() const { return m_stats; }
     // v0.10.0 phase 3: largest per-frame avg |consensus - medoid| (px, layer 0 / 1) since the last call (restarts it)
     float TakeConsDisMax(int layer) { const float v = m_consDisMax[layer & 1]; m_consDisMax[layer & 1] = 0.0f; return v; }
+    // v0.10.0 phase 19: largest |small-cluster cabin R - medoid| px of the readbacks that used it, since the last call (restarts it)
+    float TakeCabSmallDevMax() { const float v = m_cabSmallDevMax; m_cabSmallDevMax = 0.0f; return v; }
     // v0.10.0 phase 14 round 7: since the last call (restarts it): o[0..2] = the largest |x|, |y|, |w| of MVP column 3 among the
     // paired draws that pass the whole origin-free rule (0 = none), o[3] = the smallest origin |w| of an own-pair mover (-1 = no
     // mover), o[4] = the smallest max(|x|, |y|) among the paired draws that passed the DEPTH part but failed the lateral one (-1 =
@@ -681,6 +699,7 @@ private:
     bool     m_prepIds = false;                 // v0.10.0 phase 9: Prepare was told the id target will be bound
     bool     m_prepHist = false;
     float    m_consDisMax[2] = {};
+    float    m_cabSmallDevMax = 0.0f;           // v0.10.0 phase 19 (TakeCabSmallDevMax)
     float    m_ofMax[3] = {};                   // v0.10.0 phase 14 round 7 (TakeOriginDiag)
     float    m_ofMoverMinW = -1.0f;
     float    m_ofMissMin = -1.0f;

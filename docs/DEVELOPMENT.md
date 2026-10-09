@@ -143,6 +143,9 @@ without / `cmp` with `rstatic=4`: S1-S4 and S6-S8 0 px differ; S13 785 px in 2 f
 comparison after any change to the gate or the vote.
 Phase 18 knobs: `fold=0|1|2` (mv_fold_dispatch; `nofold` = 0), `nocompact` (mv_vote_compact 0), `cabmin=N` (mv_cons_min_cabin) and
 `hw` (the hardware adapter instead of WARP: the per-scene perf line then shows real GPU ms; the checks still pass on an RTX 5090).
+Phase 19: scene 17 = S17 (car, the interior's big draws with their MVP one cb0 row later, the in-game signature) + S17b (car with a
+valid interior: one big body draw against a 2-draw swinging tag); knobs `cabsmall=N` (mv_cabin_small, 0 = off) and the mutation
+`mutshape` (the MVP-shape rule off, here and in pass A). Full run 134981 checks (133103 + S17 1184 + S17b 694).
 What it covers: `docs/DLAA_INTEGRATION.md`, "Per-draw motion vectors
 (v0.10.0)" (+ "Phase 3", "Phase 4", "Phase 5", "Phase 6", "Phase 6b", "Phase 6c", "Phase 9", "Phase 10") and "Mirror units (v0.10.0)". The pre-tonemap DLAA (phase 4 job B) is
 inject.cpp plumbing around SceneDlaa::Run and is not covered by the harness (game only); phase 7's stage logic and SceneDlaa's
@@ -753,6 +756,65 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   `perf vote @blit N: ... X of Y vote groups per pass hold a countable pixel (P %) ...` (P a few %; items over the cap and tile
   overflows 0); the `cabin: consensus 0 / fallback N (largest agreeing cluster avg C draws there; 24 needed)` field (C >= 8 steady
   = `mv_cons_min_cabin` can be tried).
+
+### Phase 19 (v0.10.0): the car's cabin -- interior draws whose cb0 rows 4..7 are not their MVP, a small cabin layer
+
+- **Evidence** (ATS VR, driving a car, `captures/dlaa_inject_ats_v0100p17_vr.log`, Alt+F8 dumps 21:49:41 / :43 / :49): the cabin layer
+  has 7 draws. The four big ones (ic 6168 / 642 / 4614 / 2517, the interior) are state 3 MOVERS (probe dev 10.5-17.4 px, 2.5-2.9 px
+  in dump 3) and print `col3 x 1.0000e+00 y a z b w c` in EVERY dump, while the camera-locked ic 18 / ic 6 beside them print
+  `col3 x a y b z c w ...` with the same a, b, c (dump 1: 0.11267 / 9.4642e-04 / 0.10092 for ic 6168 / 642 and the pair). A real
+  MVP's clip x of an origin cannot stay at exactly 1.0000 through three head poses: that shader keeps its MVP one row later, the
+  injector's rows 4..7 read is (a row with .w = 1, MVP rows 0..2). Such a "matrix" still inverts and pairs; its R lives in the wrong
+  coordinates, the probe deviation is meaningless, and pass B throws those pixels' vectors far away (harness: 1644 px) = the
+  see-through hole in the cabin wall that grows with the head turn. `cabin: consensus 0 / fallback N` in every window: the cabin R
+  was pass A's medoid of those 7 pairs -- 4 garbage, 2 identical camera-relative overlays (their own R: the head rotation only) and
+  ic 24. (The phase-18 debug frames show the interior flat cabin-blue = static while the head was still.)
+- **What pass B does for cabin-depth mover pixels** (`kReprojDepthShader`): a pixel owned by a state-3 draw uses THAT draw's R
+  whatever its depth (`didMover`: `c = Rd * (ndc, zd, 1)`, zd from the draw's own viewport range [0.9, 1] for a cabin draw); only a
+  non-mover pixel picks `Solve[cabin]` (d >= 0.9) or `Solve[world]`. So the hole sat on the four movers' own pixels; the junk-R
+  idea (non-mover cabin pixels with a bad cabin R) is the second, smaller effect below.
+- **MVP shape (`NotMvp`, draw_ids.cpp + pass A):** a real MVP's clip-w row 3 is the view axis in object space (|row3.xyz| = the
+  object's scale, about the x / y rows' length / p00); the misread row 3 is the clip-z row (|xyz| = the projection's z scale: 0 for
+  the infinite world projection, ~0.007 for the cabin's finite one). |row3.xyz| < 0.02 x the longest of rows 0..2 = not an MVP:
+  never paired (CSPair), never a voter / candidate, state 5 (no MVP: the layer's camera R; grey in Ctrl+F6), and never a pass-A
+  medoid / ego candidate. Cnt [232] / [233] count them (all / cabin); the Alt+F8 lines print `mvp-shape ok | NOT AN MVP (|row3.xyz|
+  X, longest row Y)` and every such draw gets a line. Harness mutation `mutshape`.
+- **Small cabin layer (`mv_cabin_small`, default 12; 0 = off, 2..64):** fewer paired cabin draws than this (a car; a truck cab has
+  dozens) -> the cabin candidates are ranked by the summed IndexCount of the voters that agree with them (CSVote also sums the
+  agreeing voters' IndexCount into Work `kVoteW`; a cluster of 1 is enough: the largest real cabin part decides) instead of
+  falling back to the medoid. Pass A's medoid is KEPT when it agrees with that cluster within 0.01 px at every member's probes
+  (`kCabKeepPx`; no write at all -- S1-S4's 8-draw cab keeps it in every readback); else the cluster's R replaces it (Cnt [28] = 5;
+  6 = kept). Not counted as a healthy consensus: the cabin medoid and its candidate copies stay armed. Movers relative to the cab (a
+  swinging freshener) keep the normal own-pair mover rule against the better reference. Without the shape rule this rule makes the
+  car WORSE: the heaviest cluster is then the garbage dashboard + console pair (harness `mutshape`: the cabin R itself 1805 px off).
+- **Harness S17 / S17b** (`drawid_harness.exe 17`; last in the full run so an older binary's full-run `cmpdump` still lines up): a
+  car driving 0.5 m / frame over a static world, VR-like head motion inside it (yaw +-0.35 rad, pitch +-0.12 rad, 2 / 1.5 cm head
+  bob), a finite reversed-Z cabin projection (0.05..15 m), three camera-relative overlays (projection * head rotation + per-frame
+  offsets), the hood as a world-layer draw moving with the car, an oncoming car. S17: the interior's 4 big draws with the MVP in cb0
+  rows 5..8 (row 4 = (0, 0, 0, 1); `VSShift` / `PSMain9`), 2 small real parts, a swinging freshener; S17b: one big body draw (1440
+  indices) against a 2-draw swinging tag (6 indices each: more draws, far less IndexCount). Checks per frame: every cabin-depth pixel
+  = the exact cabin motion (<= 0.05 px + fp16), the freshener / tag their own R, the hood its own, world pixels the camera R, the
+  cabin R of the solve buffer vs the exact one on a grid (<= 0.05 px), the draw states (S17 big draws state 5, overlays / small parts
+  2, hood 3), the shape count (4 / 0 per readback), the rule used. Result: S17 1184 / 1184 (0 of 13.3 M interior px off, worst
+  0.035 px, cabin R worst 0.0003 px), S17b 694 / 694; `fold=0` / `fold=1` / `nocompact` / `legacy` the same; under the debug layer
+  0 messages. Mutations: `mutshape` fails S17 (12.8 M of 13.3 M interior px off by up to 1817 px, cabin R off by up to 1805 px, the
+  big draws movers); `cabsmall=0` fails both (the medoid = an overlay's rotation-only R, cabin R off by up to 6 px: S17 12.8 M of
+  13.3 M interior px off by up to 4.9 px; S17b's body turns mover with its own R, its overlays off by up to 3.9 px).
+- **Bit-identical:** the full run's `cmpdump` of S1-S16 (1598 frames) is byte-identical to HEAD 2d14fa7's (rebuilt from `git archive`);
+  `rstatic=4` passes (134994; HEAD itself varies 133116-133121 with the readback timing). Full suite 134981 / 134981 (WARP).
+- **Next ATS car log, read:** `phase 19 (v0.10.0): mv_cabin_small=12 ...`; in `MV draw-ids @blit`: `cabin: consensus 0 / fallback N
+  (...) ...; small cabin layer (mv_cabin_small 12): small-cluster R F frames, last from draw ic X (cluster weight W IndexCount, dev to
+  medoid D px) (max dev to medoid M px), medoid agreed K; cabin paired P / voters V per frame; rows 4..7 not an MVP S draws/frame
+  (cabin C)` -- expected in the car: C ~ 4 (the interior), paired ~3, voters ~1 (ic 24), X = 24; an Alt+F8 dump shows the four big
+  draws `mvp-shape NOT AN MVP ... state 5 no MVP (camera R)` and no cabin movers. In a truck: C 0, `medoid agreed` in most frames.
+  Ctrl+F6: the car interior grey (state 5), not magenta, while the head turns; the hole must be gone. If C stays 0 with the
+  interior still magenta, the shape rule does not see that layout: the dump's `|row3.xyz|` vs `longest row` says by how much.
+- **Risks:** (1) a real MVP of a mesh scaled very unevenly (one axis < 2 % of another) seen along that axis fails the shape rule ->
+  camera R for it (a moving one would lose its own motion; none seen so far). (2) The interior draws now take the cabin R, which in
+  the car comes from ic 24 alone (the only paired, non-camera-relative cabin voter): if ic 24 is not cab-fixed, the cabin R follows
+  it. (3) IndexCount weighting: a big cabin part that moves (a steering wheel while steering) outweighs a few small static voters
+  and becomes the cabin R while it moves. (4) The interior's real motion is the cabin R, not its own: correct for a cab-fixed
+  interior, wrong for an interior part that moves (doors, wheel) -- those parts' real MVP is not read.
 
 ## Roadmap / history
 

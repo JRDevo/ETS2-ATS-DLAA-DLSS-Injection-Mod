@@ -11278,13 +11278,35 @@ void DidStatsTag(char* buf, size_t cap, uint64_t passes) {
         const double fp = g_didFwdPasses ? (double)g_didFwdPasses : 1.0;
         double fAvg = 0, fMax = 0; uint64_t fN = 0;
         g_didFwdReplayTimer.Take(&fAvg, &fMax, &fN);
+        // v0.10.0 phase 19: the small-cabin rule (mv_cabin_small) and the MVP-shape rule, eye 0
+        char cabTxt[420];
+        {
+            const uint64_t su = s.cabSmallUsed - s0.cabSmallUsed, sk = s.cabSmallKept - s0.cabSmallKept;
+            const double rbx = rbd;
+            const double dmx = (double)u.TakeCabSmallDevMax();
+            char lastTxt[160] = "";
+            if (su) {
+                if (s.cabSmallDev >= 0.0f)
+                    snprintf(lastTxt, sizeof(lastTxt), ", last from draw ic %u (cluster weight %u IndexCount, dev to medoid %.3f px)",
+                             s.cabSmallIc, s.cabSmallW, (double)s.cabSmallDev);
+                else
+                    snprintf(lastTxt, sizeof(lastTxt), ", last from draw ic %u (cluster weight %u IndexCount, no fresh medoid to "
+                             "compare)", s.cabSmallIc, s.cabSmallW);
+            }
+            snprintf(cabTxt, sizeof(cabTxt), "; small cabin layer (mv_cabin_small %u): small-cluster R %llu frames%s (max dev to "
+                     "medoid %.3f px), medoid agreed %llu; cabin paired %.1f / voters %.1f per frame; rows 4..7 not an MVP %.1f "
+                     "draws/frame (cabin %.1f)", DrawIdMv::CabinSmall(), (unsigned long long)su, lastTxt, dmx,
+                     (unsigned long long)sk, (double)(s.cabPaired - s0.cabPaired) / rbx,
+                     (double)(s.cabVoters - s0.cabVoters) / rbx, (double)(s.notMvp - s0.notMvp) / rbx,
+                     (double)(s.notMvpCabin - s0.notMvpCabin) / rbx);
+        }
         const uint64_t fwdPx = s.fwdPx - s0.fwdPx;
         const double fwdPxd = fwdPx ? (double)fwdPx : 1.0;
         if (used < cap)
             snprintf(buf + used, cap - used, " | camR (eye 0): consensus %llu / medoid fallback %llu frames (%llu with near "
                      "voters), cluster avg %.0f draws, |consensus - medoid| avg %.3f / max %.3f px (%llu compared, %llu frames > 1 "
                      "px); cabin: consensus "
-                     "%llu / fallback %llu (largest agreeing cluster avg %.1f draws there; %d needed), |c - m| max %.3f px | "
+                     "%llu / fallback %llu (largest agreeing cluster avg %.1f draws there; %d needed), |c - m| max %.3f px%s | "
                      "forward ids (%s): recorded %.1f/pass (%.1f full), replayed "
                      "%.1f/pass, id overflow %llu, forced %llu (capped %llu), no target %llu, CPU %.3f ms/pass, GPU %.3f ms "
                      "avg / %.3f max | forward pairing (eye 0): %.1f draws/frame in the table, paired %.1f, movers %.1f, "
@@ -11296,6 +11318,7 @@ void DidStatsTag(char* buf, size_t cap, uint64_t passes) {
                      dF ? dS / (double)dF : 0.0, dMax, (unsigned long long)dF, (unsigned long long)dO,
                      (unsigned long long)kF, (unsigned long long)kB,
                      kB ? (double)(s.consFallCluster[1] - s0.consFallCluster[1]) / (double)kB : 0.0, DrawIdMv::kConsMin, kMax,
+                     cabTxt,
                      (g_fwdCfg && g_fwdOn.load()) ? "on" : "off (mv_fwd_depth 0 / Ctrl+F3)",
                      (double)g_didFwdRec / fp, (double)g_didFwdRecFull / fp, (double)g_didFwdReplayed / fp,
                      (unsigned long long)g_didFwdOverflow, (unsigned long long)g_didFwdForced,
@@ -14614,6 +14637,7 @@ void LoadConfig() {
             else if (!strcmp(key, "mv_fold_dispatch"))  DrawIdMv::SetFold(v <= 0 ? 0 : (v >= 2 ? 2 : 1));   // phase 18: 2
             else if (!strcmp(key, "mv_vote_compact"))   DrawIdMv::SetVoteCompact(v != 0);                   // v0.10.0 phase 18
             else if (!strcmp(key, "mv_cons_min_cabin")) DrawIdMv::SetConsMinCabin(v <= 0 ? 0u : (unsigned)v);   // phase 18
+            else if (!strcmp(key, "mv_cabin_small"))    DrawIdMv::SetCabinSmall(v <= 0 ? 0u : (unsigned)v);      // phase 19
             // v0.10.0 phase 10: forward-depth batch, profiles
             else if (!strcmp(key, "mv_fwd_depth_cull"))  g_fwdCullCfg = v != 0;
             else if (!strcmp(key, "mv_fwd_depth_budget_ms")) {
@@ -15017,6 +15041,14 @@ void LoadConfig() {
         DrawIdMv::ConsMinCabin() ? "a cluster of mv_cons_min_cabin agreeing cabin draws replaces the cabin medoid (after "
                                    "mv_medoid_drop healthy readbacks the cabin candidate copies stop)"
                                  : "as the world layer (24 draws; the cabin medoid and its candidate copies stay when it has fewer)");
+    Log("phase 19 (v0.10.0): mv_cabin_small=%u -- %s; MVP shape: a draw whose cb0 rows 4..7 have no clip-w row (|row3.xyz| < 0.02 "
+        "of the longest row: the ATS car interior's shader keeps its MVP one row later) is never paired / a voter / a medoid "
+        "candidate and keeps its layer's camera R (state 5, grey in Ctrl+F6; the 'MV draw-ids' cabin field counts them, Alt+F8 "
+        "prints 'mvp-shape NOT AN MVP')", DrawIdMv::CabinSmall(),
+        DrawIdMv::CabinSmall() ? "a cabin layer with fewer paired draws takes the R of its heaviest agreeing cluster (summed "
+                                 "IndexCount, a cluster of 1 is enough) when the medoid disagrees with it; a medoid that agrees "
+                                 "stays (bit-identical)"
+                               : "off: the cabin layer keeps the medoid below the consensus size (before)");
     }
     {                                                    // v0.10.0 phase 10
         char kept[300];

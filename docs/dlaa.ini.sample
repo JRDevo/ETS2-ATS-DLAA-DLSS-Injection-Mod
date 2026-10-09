@@ -216,6 +216,14 @@ debug = 0
 # the interior estimate has been steady for mv_medoid_drop frames (the log's "cabin: consensus" field shows how many agree)
 # mv_cons_min_cabin = 0
 
+# ---- v0.10.0 phase 19 ----
+# a car's interior has only a handful of parts (a truck cab dozens). When the interior has fewer than this many parts that
+# can be followed from frame to frame, its motion comes from the biggest group of parts that move together (weighted by
+# their size; one big part is enough) whenever the old estimate disagrees with it -- in an ATS car the old estimate followed
+# small head-locked overlays and the interior smeared / showed a see-through hole while turning the head. 0 = off (before),
+# 2..64, default 12
+# mv_cabin_small = 12
+
 # ---- legacy: the v0.9.0 stencil object ids (mv_objects = 1 only) ----
 # object ids in use at once (1..15); a vehicle and its wheels share one id while they move alike
 # mv_objects_max = 15
