@@ -25,3 +25,6 @@ sl.*.dll
 
 # NVIDIA SDK clone (license: not redistributable)
 /external/
+
+# shader bytecode cache the injector writes next to the game exe (and the harness under build/)
+dlaa_shader_cache/

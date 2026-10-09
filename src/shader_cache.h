@@ -8,6 +8,14 @@
 // for the process life; D3DCompile needs no device. Units create their shader OBJECTS from the blobs (fast,
 // per device). Until Done() is true a unit simply does not run (the frame passes through untouched, nothing is
 // marked failed): callers test SceneDlaa::ShadersReady() / ShaderCache::Done() and retry next frame.
+// v0.10.0 phase 17: the worker compiles the CORE group (ids 0..kCoreLast: everything a menu / truck-preview unit needs) first,
+// then the tuning menu quad, then the per-object / per-draw world set, and publishes every blob as soon as it is compiled
+// (Ready / Code per id). CoreDone() = the core group is through (~2.1 s after Start; Done() = all, ~20 s at phase 16). The
+// world / mirror units keep waiting for Done(); the menu / truck-preview units, their jitter and the tuning menu do not.
+// v0.10.0 phase 17 also: several workers (hardware threads / 2, 2..8; the extra ones below normal priority) take the entries
+// in that order, and every compiled DXBC is kept on disk next to the game exe (dlaa_shader_cache\<name>_<key>.dxbc, key =
+// hash of source / entry / profile / flags / compiler version, header + payload hash checked at load; a bad or stale file is
+// ignored, recompiled and rewritten) -- later starts load instead of compiling. Still never on the render thread.
 // Compiled only when WITH_DLAA=1.
 #pragma once
 #ifdef WITH_DLAA
@@ -29,6 +37,7 @@ enum Id : int {
     kPvStats,              // inject.cpp         kPvStatsShader          cs_5_0 (Ctrl+F10 preview capture metrics)
     kPvDepthAsm,           // inject.cpp         kPvDepthAsmShader       cs_5_0 (tiled preview: picture depth assembly)
     kPvEdgeFill,           // inject.cpp         kPvEdgeFillShader       cs_5_0 (v0.8.1: preview tile edge, zero-guarded fill)
+                           // ^ v0.10.0 phase 17: the last id of the CORE group (kCoreLast): new world-only shaders go after it
     kMvObjects,            // motion_vectors.cpp kObjShader              cs_5_0 (v0.9.0 per-object MVs: gather + verdict + id R)
     kMvObjResolve,         // motion_vectors.cpp kObjShader / CSResolve  cs_5_0 (v0.9.0 r4: per-id representative R)
     kMvObjVeto,            // motion_vectors.cpp kObjShader / CSVeto     cs_5_0 (v0.9.0 r4: same-frame id veto)
@@ -55,7 +64,8 @@ enum Id : int {
     kFwdInitPs1,           // draw_ids.cpp       kFwdInitShader / PSInit1  ps_5_0 (1/2 resolution: min of 2x2)
     kMenuVs,               // menu.cpp           kMenuVs                 vs_5_0 (v0.10.0 tuning menu panel quad)
     kMenuPs,               // menu.cpp           kMenuPs                 ps_5_0
-    kCount
+    kCount,
+    kCoreLast = kPvEdgeFill  // v0.10.0 phase 17: ids 0..kCoreLast = the core group (compiled first, CoreDone)
 };
 
 // Registers one source (before Start; later calls are ignored). `src` / `name` / `entry` / `profile` must stay
@@ -66,9 +76,14 @@ void Add(Id id, const char* src, size_t len, const char* name, const char* entry
 void Start();
 // True once every registered shader has been attempted (success or failure). Acquire: the blobs are visible.
 bool Done();
-// Bytecode of `id` once Done(); nullptr (size 0) while not done, when not registered or when the compile failed.
+// v0.10.0 phase 17: true once the core group (ids 0..kCoreLast) has been attempted. Acquire: their blobs are visible.
+bool CoreDone();
+// v0.10.0 phase 17: true once `id` has been attempted (success or failure), or Done().
+bool Ready(Id id);
+// Bytecode of `id` once Ready(id) (phase 16: once Done()); nullptr (size 0) while not ready, when not registered or when
+// the compile failed.
 const void* Code(Id id, size_t* size);
-// D3DCompile error text of a failed shader ("" when it compiled / is not done yet).
+// D3DCompile error text of a failed shader ("" when it compiled / is not ready yet).
 const char* Error(Id id);
 // Debug name given to Add ("?" when not registered).
 const char* Name(Id id);

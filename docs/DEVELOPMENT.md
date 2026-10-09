@@ -654,6 +654,51 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   point (stays: no reliable read)` (then no read of the picture exists in this setup: a Ctrl+F11 trace on the garage screen
   with the menu open shows what the game does after its menu draws).
 
+### Phase 17 (v0.10.0): menu / garage DLAA starts at once, shader warm-up on several threads + disk cache
+
+- **Why it started ~20 s late** (ATS VR logs `captures/dlaa_inject_ats_v0100p15_vr2.log`, `_p16_vr.log`): load 20:44:48.05,
+  preview targets at Present #31 (20:44:53.4), but `shader warm-up: 38 shader(s) ... in 20283.3 ms` only at 20:45:08.34 and
+  the menu units' `DLAA: ready` 10 ms later. `PreviewFlush` (`SceneDlaa::ShadersReady`), the preview jitter (`JitterLive`)
+  and `CameraMv::Init` all waited for the LAST of 38 shaders compiled in series on one thread (the draw-id set: ~18 s,
+  `drawid_parent_pick1` ~7.4 s). Second gate, hidden behind it: on the VR main menu the preview pass had ONE DrawIndexed for
+  ~9 s (`DrawIndexed=1, collector skips: sampled=1`, p14r6 / p8 logs) and the MV sampling hash rejected it -- no candidate
+  record, so no eye verdict / tile layout (both need a candidate in every pass; first verdict at #599, 20:45:02) and, once
+  DLAA ran, a history reset EVERY frame (`Generate` early-out -> `reset = true`). The readback throttle was not a gate: it
+  only starts after the layout / eye map has settled.
+- **Shader warm-up** (`src/shader_cache.*`): the core group (ids 0..`kCoreLast` = `kPvEdgeFill`: camera MVs, depth, RCAS,
+  composite, MV debug, preview blit / depth assembly / edge fill) first, then the menu quad, then the world set; hardware
+  threads / 2 workers (2..8, the extra ones below normal priority) take entries in that order; every blob is published at once
+  (`Ready(id)`, `Code`), `CoreDone()` after the core group, `Done()` after all. DXBC disk cache next to the game exe:
+  `dlaa_shader_cache\<name>_<key>.dxbc`, key = FNV-1a 64 of source / name / entry / profile / flags / compiler version;
+  header (magic, version, key, size) + payload hash + "DXBC" checked at load; a bad file is ignored, recompiled, rewritten
+  (temp file + rename); a changed shader gets a new key and its old file is deleted. Never on the render thread.
+- **Who waits for what now:** menu / truck-preview units (`SceneDlaa::SetMenuUnit`), their viewport jitter (`PvJitterLive`),
+  the preview depth assembly, edge fill, preview blit and the texture LOD bias on preview passes: the core group.
+  `CameraMv::Init`: its two shaders. World / mirror units, world jitter, LOD bias on world passes: `Done()` as before
+  (`CameraMv::InitObjects` now also waits for `Done()` instead of failing). Tuning menu: its two shaders.
+- **Preview MV candidates:** the first DrawIndexed of every preview pass is collected even when the sampling hash rejects it
+  (`CollectMvCandidate(..., force)`): eye verdict + tile layout get their readbacks from the screen's first frame.
+- **Still-camera fallback** (menu units only): a frame whose record has no candidate runs with R = identity (MVs 0) and keeps
+  the history; while that lasts a world miss keeps it too; the first solve with pairs takes over without a reset.
+- **Tile layout wait:** while the layout of a target order is unknown its flush leaves the picture untouched for at most 8
+  flushes per episode (`kPvLayWaitFrames`), then the reference-slot path runs as before (a TILED picture run as untiled =
+  one tile's depth stretched + half the jitter, and the verdict resets the history anyway).
+- **Start of the game:** the 30-Present "no world G-buffer" wait before a preview pass counts only once a world G-buffer bind
+  was ever seen (it delayed the first menu frames by 31 Presents).
+- **Next log, look for:** `shader warm-up: N shader slot(s), T worker thread(s) ...`; `shader warm-up: core set ... ready
+  after X ms`; `shader warm-up: N from the disk cache, M compiled in X ms on T thread(s) ...` (first start after an update:
+  N = 0; later starts: N = 38, well under a second); `preview MV (v0.10.0 phase 17): the first DrawIndexed of a preview pass is
+  collected ...`; `preview DLAA: started N Presents / S s after the first preview target (R identity until candidates |
+  real camera R from the first run, layout TILED|single after K frames) ... | first eye verdict after E frames | ... held: H
+  flush(es) waiting for the tile layout ...`; if the fallback ran: `preview DLAA: unit U (eye tag T) runs with R = identity`
+  and `... real camera R takes over at Present #P (S s after the first preview target) ...`.
+- **Preview unit vs scene eye unit** (for the garage-door shimmer): same Halton phases (8, one phase per frame for both eyes),
+  same preset rule (menu units always E), same RCAS (strength / radius, `preview_sharpen`), same LOD bias sets. Different:
+  the picture is the game's 2x2-supersampled tile composite in LDR (post-tonemap, 8-bit), the tile passes are shifted by
+  2x the jitter in tile px (+ the edge fix); depth = nearest of each 2x2 tile footprint (tiled) or the reference tile's
+  snapshot (untiled), no forward-depth pass; MVs = camera-only medoid R of <= 40 hash-sampled draws of the reference pass
+  (no per-draw / per-object MVs, near-reject 0, no ego); no pre-tonemap HDR unit.
+
 ## Roadmap / history
 
 | Ver  | Goal | Key work |

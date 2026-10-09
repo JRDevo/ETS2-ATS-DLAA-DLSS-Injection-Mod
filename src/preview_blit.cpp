@@ -75,7 +75,8 @@ void RegisterShaders() {
 bool Ensure(ID3D11Device* dev) {
     if (g_dev == dev && g_vs && g_ps && g_blend && g_rs && g_dss) return true;
     if (g_failed && g_dev == dev) return false;
-    if (!ShaderCache::Done()) return false;               // v0.7.8: warm-up still running (callers gate on it first)
+    // v0.7.8: warm-up still running (callers gate on it first). v0.10.0 phase 17: the blit shaders are in the core group.
+    if (!ShaderCache::Ready(ShaderCache::kPvBlitVs) || !ShaderCache::Ready(ShaderCache::kPvBlitPs)) return false;
     g_failed = true; g_dev = dev;
     g_vs.Reset(); g_ps.Reset(); g_blend.Reset(); g_rs.Reset(); g_dss.Reset();
     HRESULT hr;

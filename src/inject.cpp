@@ -3063,6 +3063,22 @@ bool             g_pvDetectLogged = false, g_pvRunLogged = false;
 bool             g_pvHdrTarget  = false;         // v0.8.0: the last flushed preview target was RGBA16F (HDR output)
 int              g_pvOkFrame    = 0;             // targets that ran OK this frame
 uint64_t         g_pvFrames     = 0, g_pvRunsTotal = 0;   // frames with >= 1 OK target / OK runs in total
+// v0.10.0 phase 17 (menu / garage DLAA started ~20 s after the load, ATS VR log captures/dlaa_inject_ats_v0100p15_vr2.log):
+// the start time per preview EPISODE (preview targets after >= kPvQuietFrames Presents without one) and what it waited for.
+uint64_t         g_pvEpStart    = 0;             // Present of the episode's first preview target
+uint64_t         g_pvEpLastTgt  = 0;             // Present of the latest preview target (0 = none yet)
+int64_t          g_pvEpQpc      = 0;             // QPC at the episode's first preview target
+bool             g_pvEpRunLogged = true;         // the episode's start line was logged (true = no episode open)
+bool             g_pvEpStill    = false;         // a unit's first runs of the episode used R = identity (no candidates)
+uint64_t         g_pvEpLayoutAt = 0;             // Present the layout of order 0 became known (0 = not yet)
+bool             g_pvEpLayoutBefore = false;     // ... it was known from an earlier episode already
+uint64_t         g_pvEpVerdictAt = 0;            // VR: Present of the episode's first preview eye verdict (0 = none yet)
+int              g_pvEpLogs     = 0;
+uint64_t         g_pvForcedCands = 0;            // first DrawIndexed of a preview pass collected past the MV sampling hash
+constexpr int    kPvLayWaitFrames = 8;           // flushes per target order left untouched while the tile layout is unknown
+int              g_pvLayWait[kPtMax] = {};       // ... used of them in this episode (per target order)
+uint64_t         g_pvLayWaitFlushes = 0;
+bool             g_pvGbufSeen   = false;         // a world G-buffer bind was seen in this process (kPvQuietFrames gate)
 
 // v0.8.1 round 3: the CPU time of our preview work per frame (PreviewFlush, PreviewOnDiscard incl. the tile depth assembly
 // and depth snapshots, PreviewNextFrame incl. the layout readback / verdict) and one line per tile-layout switch with
@@ -3306,6 +3322,7 @@ void PvPollEyeReadbacks(ID3D11DeviceContext* ctx) {
             continue;
         }
         const int hi = p[0] > p[1] ? 0 : 1;              // larger x skew = eye 0
+        if (!g_pvEpVerdictAt) g_pvEpVerdictAt = g_frames.load(std::memory_order_relaxed);   // v0.10.0 phase 17 (start line)
         if (g_pvVerdicts <= 6)
             Log("preview eye verdict (Present #%llu): order 0 RT %p p=%.4f, order 1 RT %p p=%.4f -> eye 0 = order %d",
                 (unsigned long long)r.frame, r.rt[0], p[0], r.rt[1], p[1], hi);
@@ -3704,6 +3721,7 @@ void PvSolveLayout(int g, const PvLayRb& r, const float* data, uint64_t now) {
         g_pvSw.inv0 = g_pvInvalidates; g_pvSw.create0 = g_pvCreateMs;
     }
     cur = L;
+    if (g == 0 && !g_pvEpLayoutAt) g_pvEpLayoutAt = now; // v0.10.0 phase 17 (start line)
     ++g_pvLayChanges;
     PreviewInvalidate();                                 // depth / MV / jitter space changed: no history across it
     if (g_pvLayChanges > 20) return;
@@ -5292,6 +5310,23 @@ bool PvPrepareBgra(ID3D11Device* dev, PvUnit& t, ID3D11Texture2D* tex, int idx, 
     return true;
 }
 
+// v0.10.0 phase 17: a composite target appeared this frame (PreviewComposite, first target of the frame): opens a new
+// episode after >= kPvQuietFrames Presents without one (the start line in PreviewNextFrame measures from here).
+void PvEpisodeNote() {
+    const uint64_t fr = g_frames.load(std::memory_order_relaxed);
+    if (g_pvEpLastTgt == 0 || fr - g_pvEpLastTgt > kPvQuietFrames) {
+        g_pvEpStart = fr;
+        g_pvEpQpc = Qpc();
+        g_pvEpRunLogged = false;
+        g_pvEpStill = false;
+        g_pvEpVerdictAt = 0;
+        g_pvEpLayoutBefore = g_pvLay[0].known;
+        g_pvEpLayoutAt = g_pvLay[0].known ? fr : 0;
+        g_pvLayWait[0] = g_pvLayWait[1] = 0;
+    }
+    g_pvEpLastTgt = fr;
+}
+
 // Runs target `idx`'s DLAA now (it is pending): see the block comment. Always clears `pending`.
 // Round 5: the work is done by the target's EYE unit (PvUnitOf); a target whose eye is not known yet (or that collides
 // with the frame's other target) is left untouched this frame.
@@ -5305,7 +5340,9 @@ void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
     if (g_ptBoundIdx == idx) g_ptBoundIdx = -1;
     if (!tg.tex) return;
     if (!g_dlaaOn.load(std::memory_order_relaxed) || g_passive.load(std::memory_order_relaxed)) return;
-    if (!SceneDlaa::ShadersReady()) return;              // v0.7.8 warm-up still running: untouched, nothing built yet
+    // v0.7.8 warm-up still running: untouched, nothing built yet. v0.10.0 phase 17: the core group is enough for a
+    // preview unit (~2.1 s after the load; the whole set took ~20 s and held the menu / garage DLAA back that long).
+    if (!SceneDlaa::CoreShadersReady()) return;
     const int ref = tg.curRef;
     if (ref < 0 || ref >= kPvSlots) return;
     PvSlot& rs = g_pv[ref];
@@ -5340,6 +5377,11 @@ void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
     // Round 6: the depth NGX gets. A TILED group (PvLayout): the picture depth assembled from every tile pass of this frame;
     // otherwise (untiled, or the layout not known yet) the reference pass's own pre-discard snapshot, as in round 5.
     const PvLayout& lay = g_pvLay[idx];
+    // v0.10.0 phase 17: the screen's first frames -- the tile layout readback comes back within a few frames now (every pass
+    // has its first draw as an MV candidate, see CollectMvCandidate's `force`). Until it does, the target stays untouched for
+    // at most kPvLayWaitFrames flushes: a TILED picture run as untiled gets one tile's depth stretched over it and half the
+    // jitter NGX is told, and the verdict resets the history anyway. After that the reference-slot path runs as before.
+    if (!lay.known && g_pvLayWait[idx] < kPvLayWaitFrames) { ++g_pvLayWait[idx]; ++g_pvLayWaitFlushes; return; }
     const bool tiled = lay.tiled;
     DepthTwin* depth = nullptr;
     if (tiled) {
@@ -5396,6 +5438,7 @@ void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
         t.dl.Mv().SetEgoOrigin(0.0f);                    // no ego split: the whole truck is one rigid object
         t.dl.Mv().SetEgoPixel(0.0f);
         t.dl.SetOpticalCentre(0.5f, 0.5f);
+        t.dl.SetMenuUnit(true);                          // v0.10.0 phase 17: core shaders only + still-camera fallback
     }
     // Cost visibility: the instance's own non-blocking GPU timestamp queries ("DLAA GPU cost eye 10 / 11" lines, every
     // 600 timed frames). Flat: only with gpu_timing = 1 (the flat default stays as before); VR: also in auto mode.
@@ -5443,6 +5486,7 @@ void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
     // Round 6: MVs in picture space (pass B maps picture ndc into the reference tile's clip space and back).
     if (tiled) t.dl.Mv().SetTileXf(lay.hx, lay.hy, lay.cx, lay.cy);
     else       t.dl.Mv().SetTileXf(1.0f, 1.0f, 0.0f, 0.0f);
+    const bool wasStill = t.dl.StillActive();            // v0.10.0 phase 17 (the "real R takes over" line)
     t_inDlaa = true;
     bool ok = false;
     if (rgba || f16) {                                   // v0.8.0: RGBA16F in place too (HDR unit)
@@ -5473,6 +5517,26 @@ void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
             Log("preview DLAA eval: unit %d (eye tag %d) target order %d Present #%llu viewport shift=(%+.4f,%+.4f) NGX "
                 "jitter=(%+.4f,%+.4f) reset=%d ref slot %d (MV prev from slot %d, order %d) depth=snapshot", ui, 10 + ui, idx,
                 (unsigned long long)fr, g_pvJx, g_pvJy, njx, njy, (int)reset, ref, t.lastRef, t.lastOrder);
+        // v0.10.0 phase 17: the still-camera fallback (no MV candidate yet: R = identity, history kept) and its end
+        {
+            const bool stillNow = t.dl.StillActive();
+            static int stillLogs = 0;
+            const double since = (g_qpcFreq > 0 && g_pvEpQpc) ? (double)(Qpc() - g_pvEpQpc) / (double)g_qpcFreq : 0.0;
+            if (stillNow && !g_pvEpRunLogged) g_pvEpStill = true;
+            if (stillNow && !wasStill && stillLogs < 16) {
+                ++stillLogs;
+                Log("preview DLAA: unit %d (eye tag %d) runs with R = identity (still camera) -- the reference pass (slot %d) "
+                    "has no MV candidate yet (record ready=%d world=%d); history kept, MVs 0 (Present #%llu, %.2f s after the "
+                    "first preview target)", ui, 10 + ui, ref, (int)rs.ps.cand.Ready(),
+                    rs.ps.cand.Ready() ? rs.ps.cand.Count(0) : 0, (unsigned long long)fr, since);
+            } else if (!stillNow && wasStill && stillLogs < 16) {
+                ++stillLogs;
+                Log("preview DLAA: unit %d (eye tag %d) real camera R takes over at Present #%llu (%.2f s after the first "
+                    "preview target) after %llu frame(s) on R = identity -- reference slot %d world candidates %d, no history "
+                    "reset", ui, 10 + ui, (unsigned long long)fr, since, (unsigned long long)t.dl.StillFrames(), ref,
+                    rs.ps.cand.Ready() ? rs.ps.cand.Count(0) : 0);
+            }
+        }
         t.lastFrame = fr; t.lastRef = ref; t.lastOrder = idx; ++t.runs; ++g_pvOkFrame; ++g_pvRunsTotal;
         if (g_pvCapActive && !f16) PvCapAfterRun(ctx, ui, idx, tg, ref, njx, njy, bgra, td.Width, td.Height, fr);   // Ctrl+F10 capture (v0.8.0: 8-bit only)
         if (g_pvSmActive) PvSmAfterRun(ctx, ui, idx, tg, ref, njx, njy, bgra ? t.scratch.Get() : tg.tex.Get(), fr);   // v0.8.1 round 5
@@ -5593,6 +5657,37 @@ void PreviewNextFrame(uint64_t n) {
         }
     }
     if (g_pvOkFrame > 0 && !g_pvFirstRunPresent) g_pvFirstRunPresent = n;
+    if (g_pvOkFrame > 0 && !g_pvEpRunLogged) {           // v0.10.0 phase 17: when the preview DLAA started (per episode)
+        g_pvEpRunLogged = true;
+        if (g_pvEpLogs++ < 20) {
+            const double secs = (g_qpcFreq > 0 && g_pvEpQpc) ? (double)(Qpc() - g_pvEpQpc) / (double)g_qpcFreq : 0.0;
+            const PvLayout& L0 = g_pvLay[0];
+            char lay[96], eye[96];
+            if (!L0.known)
+                snprintf(lay, sizeof(lay), "layout not known yet: reference-slot path after the %d-frame wait", kPvLayWaitFrames);
+            else if (g_pvEpLayoutBefore)
+                snprintf(lay, sizeof(lay), "layout %s known from an earlier visit", L0.tiled ? "TILED" : "single");
+            else
+                snprintf(lay, sizeof(lay), "layout %s after %llu frames", L0.tiled ? "TILED" : "single",
+                         (unsigned long long)(g_pvEpLayoutAt >= g_pvEpStart ? g_pvEpLayoutAt - g_pvEpStart : 0));
+            if (g_launchVr != 1 || g_pvEyeN == 0)
+                snprintf(eye, sizeof(eye), "one target, no eye map");
+            else if (g_pvEpVerdictAt)
+                snprintf(eye, sizeof(eye), "first eye verdict after %llu frames",
+                         (unsigned long long)(g_pvEpVerdictAt >= g_pvEpStart ? g_pvEpVerdictAt - g_pvEpStart : 0));
+            else
+                snprintf(eye, sizeof(eye), "no eye verdict yet (composite-order guess after %llu Presents)",
+                         (unsigned long long)kPvGuessFrames);
+            Log("preview DLAA: started %llu Presents / %.2f s after the first preview target (%s, %s) -- first target at "
+                "Present #%llu, first run at #%llu | %s | %d target(s) ran | held: %llu flush(es) waiting for the tile layout, "
+                "%llu first draw(s) collected past the MV sampling hash | shaders: core %s, all %s (v0.10.0 phase 17)",
+                (unsigned long long)(n - g_pvEpStart), secs,
+                g_pvEpStill ? "R identity until candidates" : "real camera R from the first run", lay,
+                (unsigned long long)g_pvEpStart, (unsigned long long)n, eye, g_pvOkFrame,
+                (unsigned long long)g_pvLayWaitFlushes, (unsigned long long)g_pvForcedCands,
+                ShaderCache::CoreDone() ? "ready" : "NOT ready", ShaderCache::Done() ? "ready" : "still compiling");
+        }
+    }
     {   // v0.7.8 Ctrl+F10 on the preview screen: measuring capture (see PvCap); the world F10 snapshot is untouched.
         // dlaa.ini preview_capture_at = N (debug): the same capture once, N Presents after the preview DLAA first ran.
         ID3D11DeviceContext* c = g_gameCtx.load(std::memory_order_acquire);
@@ -5685,10 +5780,12 @@ void PreviewNextFrame(uint64_t n) {
 // ignored (no jitter, no DLAA).
 void PreviewOnBind(UINT n, ID3D11RenderTargetView* const* rtvs, ID3D11DepthStencilView* dsv, bool gbuf) {
     const uint64_t fr = g_frames.load(std::memory_order_relaxed);
-    if (gbuf) { g_lastGbufFrame = fr; g_pvCur = -1; g_pvCount = 0; }
+    if (gbuf) { g_lastGbufFrame = fr; g_pvCur = -1; g_pvCount = 0; g_pvGbufSeen = true; }
     bool pv = false;
+    // v0.10.0 phase 17: the kPvQuietFrames wait only after a world G-buffer bind was ever seen -- at the game's start (no
+    // world yet in this process) it only delayed the first menu frames by 31 Presents (ATS VR log: Present #31, ~0.4 s)
     if (n == 1 && rtvs && rtvs[0] && dsv && g_previewDlaa &&
-        !g_gameDeviceChanged.load(std::memory_order_relaxed) && fr - g_lastGbufFrame > kPvQuietFrames &&
+        !g_gameDeviceChanged.load(std::memory_order_relaxed) && (!g_pvGbufSeen || fr - g_lastGbufFrame > kPvQuietFrames) &&
         PreviewFramesOk()) {                                     // v0.8.1: exact frames needed (present layer)
         Microsoft::WRL::ComPtr<ID3D11Resource> rres, dres;
         Microsoft::WRL::ComPtr<ID3D11Texture2D> rt, ds;
@@ -5842,7 +5939,7 @@ bool PvEnsureEdgeGuard(ID3D11DeviceContext* ctx, const D3D11_TEXTURE2D_DESC& d, 
     HRESULT hr = S_OK;
     const char* what = "";
     if (!g_pvEgCs) {
-        if (!ShaderCache::Done()) return false;
+        if (!ShaderCache::Ready(ShaderCache::kPvEdgeFill)) return false;   // v0.10.0 phase 17: core group (was Done)
         size_t size = 0;
         const void* code = ShaderCache::Code(ShaderCache::kPvEdgeFill, &size);
         D3D11_BUFFER_DESC bd{};
@@ -6003,7 +6100,7 @@ void PreviewOnDiscard(ID3D11DeviceContext* ctx, ID3D11Resource* res) {
     // slot's own snapshot below is only the untiled / not-yet-known path.
     const int grp = g_pvSlotGroup[g_pvCur];
     if (grp >= 0 && grp < kPtMax && g_pvLay[grp].tiled && ((g_pvLay[grp].slotMask >> g_pvCur) & 1)) {
-        if (SceneDlaa::ShadersReady() && !((g_pvAsm[grp].frameMask >> g_pvCur) & 1)) PvAssembleTile(ctx, grp, g_pvCur);
+        if (SceneDlaa::CoreShadersReady() && !((g_pvAsm[grp].frameMask >> g_pvCur) & 1)) PvAssembleTile(ctx, grp, g_pvCur);
         return;
     }
     if (!((g_ptRefMask >> g_pvCur) & 1)) return;
@@ -6528,11 +6625,25 @@ float          g_vpShiftX = 0.0f, g_vpShiftY = 0.0f;   // ...and which one
 int            g_passLogged   = 0;         // bit0 = G-buffer logged, bit1 = forward logged
 
 // Jitter only while DLAA is live and the jitter is enabled in dlaa.ini (v0.6.2: and not in passive mode).
+// v0.10.0 phase 17: split -- JitterLiveBase = everything but the shader warm-up; JitterLive (world, mirrors) = + every shader
+// compiled (Done); PvJitterLive (menu / truck-preview passes) = + the core group (CoreDone, ~2.1 s after the load).
+bool JitterLiveBase();
 bool JitterLive() {
 #ifdef WITH_DLAA
     // v0.7.8: no viewport jitter before the shader warm-up is done (no DLAA unit can run yet, a jittered raw frame would
     // just shimmer). Only the first seconds after the DLL load.
     if (!ShaderCache::Done()) return false;
+#endif
+    return JitterLiveBase();
+}
+bool PvJitterLive() {
+#ifdef WITH_DLAA
+    if (!ShaderCache::CoreDone()) return false;          // v0.10.0 phase 17: a preview unit needs only the core group
+#endif
+    return JitterLiveBase();
+}
+bool JitterLiveBase() {
+#ifdef WITH_DLAA
     // v0.10.0 phase 12: no viewport jitter while NGX cannot be initialised in this process (no NVIDIA GPU / driver, or a
     // capture tool wrapping the device -- RenderDoc gives NVSDK_NGX_Result_FAIL_PlatformError): no DLAA / DLSS unit can
     // ever evaluate, so a jittered frame would only shake. Seen in captures/dlaa_inject_ats_v0100p11_flat_fence.log: 4280
@@ -6654,7 +6765,7 @@ void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
     // v0.7.8: the profile-screen preview pass shifts viewport 0 too (when its size is the preview RT's size, g_pvW x
     // g_pvH), by the frame's own jitter (g_pvJx / g_pvJy: no G-buffer pass advances g_jx / g_jy on that screen).
 #ifdef WITH_DLAA
-    const bool pvShift = !worldShift && g_previewPass && JitterLive() && g_pvW &&
+    const bool pvShift = !worldShift && g_previewPass && PvJitterLive() && g_pvW &&   // v0.10.0 phase 17: PvJitterLive
                          (UINT)g_gameVp[0].Width == g_pvW && (UINT)g_gameVp[0].Height == g_pvH;
     // Round 6: a tile pass is shrunk by a * h into the picture -- its shift is scaled up so the PICTURE moves by exactly
     // (g_pvJx, g_pvJy), the offset NGX is told (PvShiftScale; 1 for an untiled pass).
@@ -7360,11 +7471,15 @@ void LodOnDraw(ID3D11DeviceContext* ctx) {
 // phase 11: which set this binding needs, and whether its draws decide it one by one (see SCOPE).
 void LodOnBind(ID3D11DeviceContext* ctx) {
 #ifdef WITH_DLAA
-    const bool solidPass = g_gbufPass || g_previewPass;    // world G-buffer, menu truck-preview pass
+    // v0.10.0 phase 17: g_lodOn follows the preview jitter (PvJitterLive: core shaders); the world passes still need the
+    // world jitter (JitterLive: every shader compiled) -- no bias on a world pass that is not jittered yet
+    const bool worldLive = (g_gbufPass || g_jitterPass) && JitterLive();
+    const bool solidPass = (g_gbufPass && worldLive) || g_previewPass;   // world G-buffer, menu truck-preview pass
 #else
+    const bool worldLive = true;
     const bool solidPass = g_gbufPass;
 #endif
-    const bool fwdPass = g_jitterPass && !g_gbufPass;      // world forward pass (1 RTV RGBA16F + scene depth)
+    const bool fwdPass = g_jitterPass && !g_gbufPass && worldLive;   // world forward pass (1 RTV RGBA16F + scene depth)
     uint8_t set = 0;
     bool perDraw = false;
     if (g_lodOn && (solidPass || fwdPass)) {
@@ -7437,7 +7552,9 @@ void LodFrameUpdate(uint64_t n) {
     }
     const float cutEff = LodCutEffective(eff);          // phase 13: tex_lod_bias_cutout (0 while eff is 0)
     if (eff != g_lodEff || cutEff != g_lodCutEff) { g_lodEff = eff; g_lodCutEff = cutEff; ++g_lodGen; }
-    g_lodOn = g_lodHooked.load(std::memory_order_acquire) && (eff != 0.0f || g_lodAniso >= 2) && JitterLive();
+    // v0.10.0 phase 17: PvJitterLive (core shaders) -- the preview passes get the bias with their jitter; LodOnBind keeps the
+    // world passes on JitterLive (JitterLive implies PvJitterLive)
+    g_lodOn = g_lodHooked.load(std::memory_order_acquire) && (eff != 0.0f || g_lodAniso >= 2) && PvJitterLive();
     // phase 11: does a see-through draw need other samplers than a solid one / are its samplers the game's own?
     // phase 12: which parts each class gets (f = full / solid draw, s = see-through, c = cut-out) and the set a cut-out
     // draw binds: the full one or the see-through one when it carries the same parts, else the cut-out set.
@@ -9247,6 +9364,7 @@ bool PreviewComposite(ID3D11DeviceContext* ctx) {
     for (int i = 0; i < g_ptCount; ++i)
         if (g_pt[i].tex.Get() == tex.Get()) { idx = i; break; }
     if (idx < 0 && g_ptCount < kPtMax) {
+        if (g_ptCount == 0) PvEpisodeNote();             // v0.10.0 phase 17: the frame's first preview target
         idx = g_ptCount++;
         g_pt[idx].tex = tex;
         g_pt[idx].curRef = 99;
@@ -9440,8 +9558,11 @@ int g_mvCabinSlots  = 24;                           // cabin (layer 1) cap, 1..C
 // v0.6.1: `ps` = the newest pass slot (caller guarantees g_passSeq > 0); every early return counts its reason.
 // v0.7.8: `worldCap` > 0 overrides the world-layer cap (the preview's non-reference tile passes only need their FIRST
 // candidate: the tile-layout readback compares it with the reference pass's first one).
+// v0.10.0 phase 17: `force` = collect this draw even when the sampling hash rejects it (the FIRST DrawIndexed of a menu /
+// truck-preview pass: on the VR main menu the pass had a single DrawIndexed for ~9-13 s -- ATS logs: "DrawIndexed=1,
+// collector skips: sampled=1" -- so no record, no eye verdict, no tile layout and no camera R until the truck was loaded).
 void CollectMvCandidate(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex, PassSlot& ps,
-                        int worldCap = 0) {
+                        int worldCap = 0, bool force = false) {
     // v0.5.4: candidates go to the record of the NEWEST pass (the one being rendered); the eye is only known
     // at the blit, where the record is matched/committed against that eye's CameraMv.
     CandidateRecord& mv = ps.cand;
@@ -9454,7 +9575,14 @@ void CollectMvCandidate(ID3D11DeviceContext* ctx, UINT indexCount, UINT startInd
     h = h * 0xc2b2ae35u + (uint32_t)baseVertex;
     h ^= h >> 16; h *= 0x85ebca6bu; h ^= h >> 13; h *= 0xc2b2ae35u; h ^= h >> 16;
     const uint32_t mask = (1u << g_mvSampleShift) - 1u;
-    if ((h & mask) != 0u) { ++ps.skSampled; return; }
+    if ((h & mask) != 0u) {
+        if (!force) { ++ps.skSampled; return; }
+        if (g_pvForcedCands++ == 0)                      // v0.10.0 phase 17 (see `force`)
+            Log("preview MV (v0.10.0 phase 17): the first DrawIndexed of a preview pass is collected although the MV sampling "
+                "hash (mv_sample_shift=%d) rejects it (ic=%u si=%u bv=%d, Present #%llu) -- the eye verdict, the tile layout "
+                "and the camera R get a candidate from the screen's first frame", g_mvSampleShift, indexCount, startIndex,
+                baseVertex, (unsigned long long)g_frames.load(std::memory_order_relaxed));
+    }
 
     if (!mv.Ready()) {
         ID3D11Device* dev = nullptr;
@@ -13450,7 +13578,9 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
         ++g_pv[g_pvCur].diCount;                                  // round 6 diagnostics (no-candidate report)
         if (PvReadbacksOn()) {                                    // phase 15: also for the VR panel with DLAA off
             const bool full = ((g_ptRefMask >> g_pvCur) & 1) || g_pvCapActive;
-            CollectMvCandidate(ctx, indexCount, startIndex, baseVertex, g_pv[g_pvCur].ps, full ? 0 : kPvLayCands);
+            // v0.10.0 phase 17: the pass's first DrawIndexed always (force), the rest through the sampling hash as before
+            CollectMvCandidate(ctx, indexCount, startIndex, baseVertex, g_pv[g_pvCur].ps, full ? 0 : kPvLayCands,
+                               g_pv[g_pvCur].diCount == 1);
         }
     }
     // Trigger (a): a DrawIndexed (flat: the UI) while a pending composite target is the current RT0 runs its DLAA first.

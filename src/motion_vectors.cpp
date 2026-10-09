@@ -1011,7 +1011,10 @@ void CameraMv::RegisterShaders() {
 bool CameraMv::Init(ID3D11Device* dev) {
     if (m_ready) return true;
     if (m_failed || !dev) return false;
-    if (!ShaderCache::Done()) return false;            // v0.7.8: warm-up still running -> not yet (NOT failed), retried
+    // v0.7.8: warm-up still running -> not yet (NOT failed), retried. v0.10.0 phase 17: only the two shaders created here
+    // (mv_solve, mv_reproject_depth: the core group, ~2.1 s) -- the per-object / per-draw parts wait for their own (InitObjects,
+    // DrawIdMv::Init); a menu / truck-preview unit never uses them.
+    if (!ShaderCache::Ready(ShaderCache::kMvSolve) || !ShaderCache::Ready(ShaderCache::kMvReprojDepth)) return false;
     m_failed = true;                                   // cleared on full success
     m_dev = dev;
 
@@ -3462,6 +3465,7 @@ void LogIds(uint64_t blit) {
 bool CameraMv::InitObjects() {
     if (m_objReady) return true;
     if (m_objFailed || !m_ready || !m_dev) return false;
+    if (!ShaderCache::Done()) return false;             // v0.10.0 phase 17: Init no longer waits for every shader: retried
     m_objFailed = true;                                 // cleared on full success
     ID3D11Device* dev = m_dev.Get();
     if (!CreateCs(dev, ShaderCache::kMvObjects, &m_csObj)) return false;

@@ -201,7 +201,9 @@ void DropWidget() {
 bool Ensure(ID3D11Device* dev) {
     if (g_dev == dev && g_vs && g_ps && g_cb && g_smp && g_blend && g_rs && g_dss) return true;
     if (g_failed && g_dev == dev) return false;
-    if (!ShaderCache::Done()) return false;                 // warm-up still running: try again next frame
+    // warm-up still running: try again next frame. v0.10.0 phase 17: the two menu shaders are compiled right after the core
+    // group (~2.1 s), no longer after the whole per-draw set (~20 s): the panel works on the first menu screens.
+    if (!ShaderCache::Ready(ShaderCache::kMenuVs) || !ShaderCache::Ready(ShaderCache::kMenuPs)) return false;
     g_failed = true; g_dev = dev;
     g_vs.Reset(); g_ps.Reset(); g_cb.Reset(); g_smp.Reset(); g_blend.Reset(); g_rs.Reset(); g_dss.Reset();
     DropTexture();

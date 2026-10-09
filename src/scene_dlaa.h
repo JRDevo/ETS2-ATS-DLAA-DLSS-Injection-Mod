@@ -180,6 +180,9 @@ public:
     //    game's immediate context, first Present). Returns whether NGX is pinned.
     static void RegisterShaders();
     static bool ShadersReady();
+    // v0.10.0 phase 17: the core shader group is compiled (ShaderCache::CoreDone, ~2.1 s after the start instead of ~20 s):
+    // enough for a menu / truck-preview unit (SetMenuUnit) -- camera MVs, depth, RCAS, composite, MV debug.
+    static bool CoreShadersReady();
     static bool PrewarmNgx(ID3D11DeviceContext* ctx);
     // v0.7.0 output-space rect of the last Run (origin in the full output, size = m_out / m_sharp / NGX target).
     uint32_t OutRectX() const { return m_oxc; }
@@ -237,6 +240,15 @@ public:
     // v0.8.1: per instance -- true = this unit runs as if the sharpness were 0 (preview units with dlaa.ini
     // preview_sharpen = 0; the RCAS pass is then skipped exactly like at sharpness 0). Default false.
     void SetNoSharpen(bool on) { m_noSharpen = on; }
+    // v0.10.0 phase 17: a menu / truck-preview unit (eye tags 10 / 11; default false = world / mirror units, unchanged):
+    //  * runs once the CORE shader group is compiled (CoreShadersReady; it never uses the per-object / per-draw shaders);
+    //  * STILL-CAMERA FALLBACK: a frame whose candidate record has no MV candidate (the screen's first frames) runs with
+    //    R = identity (MVs 0) and KEEPS the history -- until phase 16 such a frame forced a reset, so every frame was a
+    //    fresh jittered picture. While that lasts, a world miss (no pair: the first record with candidates has no previous
+    //    one) keeps it too; the first real camera solve takes over without a reset (StillActive() goes false).
+    void SetMenuUnit(bool on) { m_menuUnit = on; }
+    bool StillActive() const { return m_stillActive; }      // the last Run used the still-camera fallback
+    uint64_t StillFrames() const { return m_stillFrames; }   // Runs on the fallback since the unit was created
     // v0.6.4 DLAA area: percentage kAreaMin..100 of width AND height (pixel count ~ area^2; 100 = whole image = the
     // v0.6.3 path). dlaa.ini dlaa_area + live Shift+F5 / F6; a change recreates each eye's crop textures and
     // NGX feature at its next Run (history reset). Feather = border blend width in px (0..512, dlaa.ini only).
@@ -425,6 +437,9 @@ private:
     bool     m_failed = false;     // init failed for these dims; no retry until dims change
     bool     m_deferred = false;   // v0.7.8: the last Run waited (shader warm-up / creation budget), see Deferred()
     bool     m_lastMvDone = false, m_lastReset = false, m_lastSharpened = false;   // v0.7.8 capture info of the last Run
+    bool     m_menuUnit = false;       // v0.10.0 phase 17: SetMenuUnit (core shaders only + still-camera fallback)
+    bool     m_stillActive = false;    // v0.10.0 phase 17: the last Run ran on R = identity (no candidates yet)
+    uint64_t m_stillFrames = 0;        // v0.10.0 phase 17: Runs on the still-camera fallback in total
 
     // ---- v0.10.0 phase 7: the parked colour set (the other kind, same sizes; see the header comment) ----
     struct ColourSet {

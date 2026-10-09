@@ -588,6 +588,7 @@ void SceneDlaa::RegisterShaders() {
 }
 
 bool SceneDlaa::ShadersReady() { return ShaderCache::Done(); }
+bool SceneDlaa::CoreShadersReady() { return ShaderCache::CoreDone(); }   // v0.10.0 phase 17
 
 bool SceneDlaa::PrewarmNgx(ID3D11DeviceContext* ctx) {
     if (!ctx) return false;
@@ -1441,7 +1442,8 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
     m_deferred = false;
     m_altFailed = false;                               // v0.10.0 phase 7
     m_warmable = false;                                // v0.10.0 phase 7: set again by a successful Run below
-    if (!ShaderCache::Done()) { m_deferred = true; return false; }   // v0.7.8: warm-up running (callers gate first)
+    // v0.7.8: warm-up running (callers gate first). v0.10.0 phase 17: a menu unit only needs the core group.
+    if (!(m_menuUnit ? ShaderCache::CoreDone() : ShaderCache::Done())) { m_deferred = true; return false; }
     D3D11_TEXTURE2D_DESC td{};
     tonemap->GetDesc(&td);
     // v0.8.0: the colour format decides the unit kind. R8G8B8A8 family = LDR (the v0.7.x path, unchanged), RGBA16F =
@@ -1577,21 +1579,31 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
     // GPU stamps: merged path -> stamp 2 right after stamp 1 (depth ~0 ms), "mv" = merged pass (+ the
     // fallback convert if Generate failed); old path -> depth = convert pass, mv = clear / commit only.
     bool mvDone = false;
+    bool still = false;                                // v0.10.0 phase 17: still-camera fallback this frame (menu units)
     if (useMv && cand && m_cam.Init(dev.Get())) {
         if (m_timing) GpuMark(ctx, 2);                 // (merged) nothing between stamps 1 and 2
         CameraMv::FrameStats fs;
+        // v0.10.0 phase 17: no candidate in this frame's record (not even initialised: no draw was sampled yet)
+        const bool noCand = !cand->Ready() || cand->Count(0) + cand->Count(1) == 0;
         mvDone = m_cam.Generate(ctx, m_w, m_h, m_rx, m_ry, m_fullW, m_fullH, *cand, twinSrv,
                                 m_depthR32Uav.Get(), m_mvUav.Get(), &fs, candBad, objs, objs ? stencilSrv : nullptr,
                                 fwdSrv, didRec, didSrv, didFwd, fwdShiftRun, fwdIdSrv);
         if (!mvDone) { GpuPerfScope gp(ctx, GpuPerf::kConvert); DepthConvert(ctx, twinSrv); }   // Generate wrote nothing: depth must not stay stale
-        // No world pair = scene change / first frame / camera cut: history is unusable.
-        // v0.6.1: a bad record (and the first good one after it) reuses the last good R: fs.worldMiss is false
-        // there, so no reset is forced (an incomplete candidate record is not a camera cut).
-        // v0.9.0 r9: nor a world miss that CameraMv answered with the last good camera R (fs.missHeld, within
-        // mv_objects_hold frames in a row): round 7 had one per ~340 frames while driving, each a whole-picture
-        // re-accumulation (aliasing / shimmer flash on trees and fences); only a miss beyond that budget resets.
-        if (mvDone && fs.worldMiss && !fs.missHeld) reset = true;
-        if (!mvDone) reset = true;
+        // v0.10.0 phase 17 STILL-CAMERA FALLBACK (menu units, see SetMenuUnit): no candidates -> Generate either wrote
+        // nothing (record not initialised: the MV texture is cleared to 0 below) or solved with 0 pairs (pass A writes
+        // R = identity) -- both = a still camera. The history is kept. While the fallback is active a world miss with
+        // candidates (no previous record to pair with yet) keeps it as well; a solve with pairs ends it.
+        still = m_menuUnit && (noCand || (m_stillActive && (!mvDone || (fs.worldMiss && !fs.missHeld))));
+        if (!still) {
+            // No world pair = scene change / first frame / camera cut: history is unusable.
+            // v0.6.1: a bad record (and the first good one after it) reuses the last good R: fs.worldMiss is false
+            // there, so no reset is forced (an incomplete candidate record is not a camera cut).
+            // v0.9.0 r9: nor a world miss that CameraMv answered with the last good camera R (fs.missHeld, within
+            // mv_objects_hold frames in a row): round 7 had one per ~340 frames while driving, each a whole-picture
+            // re-accumulation (aliasing / shimmer flash on trees and fences); only a miss beyond that budget resets.
+            if (mvDone && fs.worldMiss && !fs.missHeld) reset = true;
+            if (!mvDone) reset = true;
+        }
     } else {
         { GpuPerfScope gp(ctx, GpuPerf::kConvert); DepthConvert(ctx, twinSrv); }
         if (m_timing) GpuMark(ctx, 2);                 // after depth convert
@@ -1603,6 +1615,8 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
         const float zero[4] = { 0, 0, 0, 0 };
         ctx->ClearUnorderedAccessViewFloat(m_mvUav.Get(), zero);
     }
+    m_stillActive = still;                             // v0.10.0 phase 17
+    if (still) ++m_stillFrames;
     if (m_timing) GpuMark(ctx, 3);                     // after MV
 
     // d. evaluate: injected viewport jitter, depth is reversed-Z
