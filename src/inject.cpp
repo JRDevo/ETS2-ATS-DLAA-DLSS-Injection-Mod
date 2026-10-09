@@ -12471,42 +12471,57 @@ enum MenuRowId {
 };
 static_assert(MR_COUNT <= TuningMenu::kMaxRows, "tuning menu: too many rows");
 const wchar_t* const kMenuDesc[MR_COUNT] = {
-    L"DLAA = anti-aliasing at the game's render size. DLSS = also upscales when the render scale is below 100 %. "
-    L"off = the game's own picture. Saved at once.",
-    L"high = everything on. medium = for mid-range cards. low = for weak cards (+ VR area 60 %). Only changes settings "
-    L"you never set yourself.",
+    // v0.10.0: every row = what it does, when a player would change it, what it costs. The panel shows 3 lines of about 105
+    // characters (menu.cpp kDescH) = the description + the cost sentence MenuPerfCosts appends: keep both within ~320 characters.
+    L"DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's Scaling is below 100 %. "
+    L"off = the game's own picture: use it to compare. Saved at once.",
+    L"Presets for your GPU. high = everything on (model 1). medium = model 2, half-size see-through depth, flat mirrors without "
+    L"part motion, lighter part-motion search. low = also no mirror DLAA, no see-through depth, VR area 60 %. Never changes a "
+    L"setting you set yourself.",
     L"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, least ghosting behind traffic: start here. "
     L"3 (F) = calmest on fences and wires, can smear moving detail, same cost as 2. 4 (M) = heaviest (about 5x), flat tests only.",
-    L"Sharpening after DLAA. 0 = off. Too high = halos on edges.",
-    L"How wide the sharpening looks. VR's 2x-supersampled eye picture needs more than 1 px.",
-    L"Sharper texture text (road signs, dashboard, GPS). More negative = sharper but more shimmer on fences. 0 = off.",
-    L"The same for wire fences, grass and leaf cut-outs. 0 = the game's own filtering. Only acts while texture sharpness "
-    L"is not 0.",
-    L"VR: anti-alias only the middle of each eye to save GPU time (20 .. 100; also the garage / main menu truck). "
-    L"100 = the whole picture.",
-    L"Moving traffic gets its exact motion so it stays sharp; static objects are not redrawn (mv_replay_static_*). "
-    L"Off = every pixel moves with the camera.",
-    L"Each truck mirror gets its own anti-aliasing. Off = mirrors as the game draws them (cheaper).",
-    L"Flat DLAA mode: anti-alias the HDR picture before the game's bloom / tonemap: calmer lane paint, wires, rails. "
-    L"Takes ~60 frames to switch on.",
-    L"Wires, fences and glass move with their own distance instead of what is behind them. Off saves GPU time.",
-    L"When the render scale is below 100 %, DLSS upscales to the output size instead of the game's blur.",
-    L"The whole mod on or off (keeps the mode).",
+    L"Sharpens the picture after DLAA, 0 (off) to 1.0. Raise it if the picture looks soft; too high gives bright halos on edges. "
+    L"Costs about 0.1 ms; 0 skips the pass.",
+    L"How far the sharpening reaches, 1 to 4 px: small = fine detail, large = bolder edges. Change it if the sharpening looks too "
+    L"fine or too coarse; a picture drawn larger than the screen, as in VR, needs more than 1 px.",
+    L"Sharper texture text (road signs, dashboard, GPS). 0 = off; more negative = sharper but more shimmer on fences; try -0.5 to "
+    L"-1 if text is blurry. No GPU time, only a little memory bandwidth.",
+    L"The same for wire fences, grass and leaf cut-outs: raise it toward 0 if fences shimmer, lower it if grass looks soft. same = "
+    L"follows the row above. Acts only while Texture sharpness is not 0. No GPU time, a little memory.",
+    L"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower it to afford a heavier "
+    L"model or win frame rate; 40 % costs about 40 % of the model. Also sets the garage / main-menu truck.",
+    L"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and does not ghost. Turn it off "
+    L"only to save about 0.5 ms per eye or to test: every pixel then moves with the camera and traffic smears.",
+    L"Gives each truck mirror its own DLAA so mirrors do not shimmer. Off = mirrors as the game draws them: do it if you rarely "
+    L"look in them. About 0.3 ms per mirror view; VR draws the 2 largest.",
+    L"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. Change it only to compare. "
+    L"Not used with DLSS upscale or Windows HDR. Same cost either way; takes ~60 frames to switch.",
+    L"Gives wires, fences and glass their own distance instead of what is behind them, so they do not smear when you move. Turn "
+    L"it off if you see no smearing there: saves 0.02 - 0.06 ms per eye.",
+    L"DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and "
+    L"fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %.",
+    L"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for comparing. Off saves the cost "
+    L"of every part together.",
     L"OFXR Bridge = VR frame generation by djules75, a separate download (github.com/djules75/OFXR-Bridge). found = its layer "
     L"is loaded in this game and the mod lets its work pass through. Start its tray app before the game.",
-    L"Moves this panel sideways. Flat and VR each keep their own position.",
-    L"Moves this panel up / down. Flat and VR each keep their own position.",
-    L"Makes this panel bigger or smaller.",
-    L"VR: shifts the panel inward per eye so it sits closer than infinity; raise it if the panel is tiring to look at.",
-    L"VR: on = the panel turns to face you when you move it to the side (a tilted 3-D panel, same size from every angle); "
-    L"off = a flat picture.",
-    L"A small live fps / frame-time box, shown also while this menu is closed. Flat and VR each keep their own position. "
-    L"The Save row keeps it for the next start.",
-    L"Moves the fps box sideways. Flat and VR each keep their own position.",
-    L"Moves the fps box up / down. Flat and VR each keep their own position.",
-    L"Makes the fps box bigger or smaller (0.2 .. 3.0).",
-    L"Writes the live values above into dlaa.ini, keeps every other line.",
-    nullptr,                                              // MR_CLOSE: "<key_menu> also closes it." (built with the key name)
+    L"Moves this panel sideways, in % of the screen. Flat and VR each keep their own position. Use it if the panel covers "
+    L"something you need. No cost.",
+    L"Moves this panel up / down, in % of the screen. Flat and VR each keep their own position. Use it if the panel covers "
+    L"something you need. No cost.",
+    L"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too much. Flat and VR each keep "
+    L"their own size. No cost.",
+    L"VR only, so greyed in flat. Shifts the panel inward per eye so it floats closer than infinity. Raise it if the panel is "
+    L"tiring to look at. No cost.",
+    L"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same size from every angle; "
+    L"off = a flat picture. No cost.",
+    L"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see what a setting gains. "
+    L"Negligible cost, none when off. Save keeps it for the next start.",
+    L"Moves the fps box sideways, in % of the screen. Flat and VR each keep their own position. No cost.",
+    L"Moves the fps box up / down, in % of the screen. Flat and VR each keep their own position. No cost.",
+    L"Makes the fps box bigger or smaller (0.2 .. 3.0). Raise it if you cannot read it in the headset or on a big screen. No cost.",
+    L"Writes everything shown here into dlaa.ini (settings, and the panel / fps box positions once you moved them), keeping every "
+    L"other line. Do it once you like what you see, or the changes are gone at the next start. Mode saves itself.",
+    nullptr,                                              // MR_CLOSE: "Closes the menu ..." (built with the key name)
 };
 int   g_menuSel     = 0;                                  // selected row (kept while closed: the menu reopens where it was)
 bool  g_menuMoved   = false;                              // the panel placement changed since the menu was opened (close line)
@@ -12792,7 +12807,7 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
     const bool sharpOn = SceneDlaa::Sharpness() > 0.0f;
     const bool partOn = g_objMode != 0;
     const bool mirOn = g_mirOn.load() && MirMode() != 0;
-    const bool fwdOn = g_fwdCfg && g_fwdOn.load() && !g_fwdAutoOff;
+    const bool fwdOn = g_fwdCfg && g_fwdOn.load();   // (the VR budget guard clears g_fwdOn; its key turns it back on)
     const int area = SceneDlaa::Area();
     const wchar_t* const unit = vr ? L"per eye" : L"per frame";
     auto txt = [&](int row, const wchar_t* t) { swprintf(p.rows[row].cost, kC, L"%ls", t); };
@@ -12801,13 +12816,19 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         else if (!e0.have)  txt(row, g_menuPerf.nothing ? L"-" : L"...");
         else                MenuMs(p.rows[row].cost, kC, e0.grp[g]);
     };
-    ms(MR_MODE, MG_NGX);                         if (!dlaaOn) txt(MR_MODE, L"off");
+    // Mode / DLAA on-off: the WHOLE mod (what switching it off saves) = the "this mod" total of the GPU line
+    auto msTotal = [&](int row) {
+        if (!timers)        txt(row, L"n/a");
+        else if (!e0.have)  txt(row, g_menuPerf.nothing ? L"-" : L"...");
+        else                MenuMs(p.rows[row].cost, kC, e0.total);
+    };
+    msTotal(MR_MODE);                            if (!dlaaOn) txt(MR_MODE, L"off");
     txt(MR_PROFILE, L"-");
     ms(MR_MODEL, MG_NGX);                        if (!dlaaOn) txt(MR_MODEL, L"off");   // the model IS the NGX cost
     ms(MR_SHARP, MG_SHARP);                      if (!sharpOn) txt(MR_SHARP, L"off");
     ms(MR_WIDTH, MG_SHARP);                      if (!sharpOn) txt(MR_WIDTH, L"off");
-    txt(MR_LOD, g_lodBias == 0.0f ? L"off" : L"~0 (memory)");
-    txt(MR_LODCUT, LodCutEffective(g_lodBias) == 0.0f ? L"off" : L"~0 (memory)");
+    txt(MR_LOD, g_lodBias == 0.0f ? L"off" : L"~0 ms");                           // memory only, no GPU pass of its own
+    txt(MR_LODCUT, LodCutEffective(g_lodBias) == 0.0f ? L"off" : L"~0 ms");
     if (!vr)          txt(MR_AREA, L"-");
     else if (!dlaaOn) txt(MR_AREA, L"off");
     else {
@@ -12815,18 +12836,20 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         if (timers && e0.have) {
             wchar_t f[24];
             MenuMs(f, 24, e0.grp[MG_NGX]);
-            swprintf(p.rows[MR_AREA].cost, kC, L"%ls at %d %%", f, area);
+            swprintf(p.rows[MR_AREA].cost, kC, L"%ls (%d %%)", f, area);   // "0.6 ms (100 %)" (fits the 104 px column)
         }
     }
     ms(MR_DRAWIDS, MG_PART);                     if (!partOn) txt(MR_DRAWIDS, L"off");
     ms(MR_MIRROR, MG_MIR);                       if (!mirOn) txt(MR_MIRROR, L"off");
     txt(MR_PRETM, vr ? L"-" : L"same");
     ms(MR_FWD, MG_FWD);                          if (!fwdOn) txt(MR_FWD, L"off");
-    ms(MR_UPSCALE, MG_NGX);                      if (!dlaaOn || !upOn) txt(MR_UPSCALE, L"off");
-    ms(MR_DLAA, MG_NGX);                         if (!dlaaOn) txt(MR_DLAA, L"off");
+    txt(MR_UPSCALE, dlaaOn && upOn ? L"no extra" : L"off");   // the upscale is the same NGX pass; the game draws fewer pixels
+    msTotal(MR_DLAA);                            if (!dlaaOn) txt(MR_DLAA, L"off");
     for (int r = MR_OFXR; r < MR_COUNT; ++r) txt(r, L"-");
 
-    // the sentence: "Costs 1.3 ms per eye now; ..." (numbers from the same snapshot as the column)
+    // the sentence: "Costs 1.3 ms per eye now; ..." (numbers from the same snapshot as the column). The description already
+    // says what the row does and its typical cost; this adds the LIVE figure, or WHY a greyed row is greyed. The panel shows 3
+    // lines of ~105 characters for the description + this sentence (menu.cpp kDescH): keep the sentence under ~100.
     sent[0] = 0;
     wchar_t f[24] = L"";
     auto fig = [&](int g) { MenuMs(f, 24, e0.grp[g]); return (const wchar_t*)f; };
@@ -12834,32 +12857,36 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
     // (timers on but no pass landed yet: append nothing -- not "Costs ... ms", not even "measuring...")
     const wchar_t* const wait = timers ? L"" : L"GPU cost: n/a (the GPU timers could not start).";
     switch (sel) {
-    case MR_MODE: case MR_DLAA: case MR_UPSCALE:
-        if (!dlaaOn)    swprintf(sent, sentCap, L"Off now: DLAA/DLSS costs nothing.");
+    case MR_MODE: case MR_DLAA:
+        if (!dlaaOn)    swprintf(sent, sentCap, L"Off now: the mod costs nothing.");
         else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"DLAA/DLSS itself costs %ls %ls now; the DLAA area (VR) and the render scale "
-                                 L"change it.", fig(MG_NGX), unit);
+        else            { MenuMs(f, 24, e0.total);
+                          swprintf(sent, sentCap, L"The whole mod costs %ls %ls now; off saves all of it.", f, unit); }
         break;
-    case MR_PROFILE: swprintf(sent, sentCap, L"high / medium / low change the rows below; watch the GPU line."); break;
+    case MR_PROFILE: swprintf(sent, sentCap, L"Costs nothing itself; watch the GPU line for what it saves."); break;
     case MR_MODEL:
         if (!dlaaOn)    swprintf(sent, sentCap, L"Off now.");
         else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"This model costs %ls %ls now. Measured per eye in VR: 1 (K) 1.0 ms, 2 (E) and 3 (F) 0.6 ms, "
-                                 L"4 (M) about 3 ms. A smaller DLAA area (VR) cuts it in step.", fig(MG_NGX), unit);
+        else            swprintf(sent, sentCap, L"Costs %ls %ls now (VR per eye: 1 (K) 1.0, 2 (E) / 3 (F) 0.6, 4 (M) ~3 ms).",
+                                 fig(MG_NGX), unit);
         break;
-    case MR_SHARP: case MR_WIDTH:
+    case MR_SHARP:
         if (!sharpOn)   swprintf(sent, sentCap, L"Off now: sharpening costs nothing.");
         else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"Costs %ls %ls now; 0 = off saves it.", fig(MG_SHARP), unit);
+        else            swprintf(sent, sentCap, L"Costs %ls %ls now; 0 saves it.", fig(MG_SHARP), unit);
+        break;
+    case MR_WIDTH:
+        if (!sharpOn)   swprintf(sent, sentCap, L"Off now (Sharpen strength is 0): sharpening costs nothing.");
+        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
+        else            swprintf(sent, sentCap, L"Same pass as Sharpen strength: costs %ls %ls now.", fig(MG_SHARP), unit);
         break;
     case MR_LOD: case MR_LODCUT:
-        swprintf(sent, sentCap, L"No GPU pass of its own: only a little texture bandwidth (~0 ms).");
-        break;
+        break;                                            // the description says it all: no GPU pass of its own
     case MR_AREA:
-        if (!vr)        break;
-        if (!dlaaOn)    swprintf(sent, sentCap, L"Off now: DLAA/DLSS costs nothing.");
+        if (!vr)        swprintf(sent, sentCap, L"Greyed in flat: flat mode always uses the whole picture.");
+        else if (!dlaaOn) swprintf(sent, sentCap, L"Off now: DLAA/DLSS costs nothing.");
         else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"DLAA/DLSS costs %ls per eye at %d %%; a smaller area costs less.",
+        else            swprintf(sent, sentCap, L"DLAA costs %ls per eye at %d %%; a smaller area costs less.",
                                  fig(MG_NGX), area);
         break;
     case MR_DRAWIDS:
@@ -12871,17 +12898,23 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
     case MR_MIRROR:
         if (!mirOn)     swprintf(sent, sentCap, L"Off now: costs nothing.");
         else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"Costs %ls %ls now; mirror_vr_mode / mirror_flat_mode (dlaa.ini) and profile "
-                                 L"low change it.", fig(MG_MIR), unit);
+        else            swprintf(sent, sentCap, L"Costs %ls %ls now; dlaa.ini mirror_vr_mode / mirror_flat_mode set how many "
+                                 L"mirrors.", fig(MG_MIR), unit);
         break;
     case MR_PRETM:
-        if (!vr) swprintf(sent, sentCap, L"Costs about the same as DLAA after the tonemap.");
+        if (vr) swprintf(sent, sentCap, L"Greyed in VR: VR always runs DLAA on the finished picture.");
         break;
     case MR_FWD:
-        if (!fwdOn)     swprintf(sent, sentCap, L"Off now: costs nothing.");
+        if (g_fwdCfg && g_fwdAutoOff && !g_fwdOn.load())
+                        swprintf(sent, sentCap, L"Switched off by the mod: it cost more than %.1f ms per eye (VR budget). "
+                                 L"Press its key to try again.", (double)g_fwdBudgetMs);
+        else if (!fwdOn) swprintf(sent, sentCap, L"Off now: costs nothing.");
         else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"Costs %ls %ls now; off saves it (wires then move with what is behind them).",
-                                 fig(MG_FWD), unit);
+        else            swprintf(sent, sentCap, L"Costs %ls %ls now; off saves it.", fig(MG_FWD), unit);
+        break;
+    case MR_UPSCALE:
+        if (!dlaaOn)    swprintf(sent, sentCap, L"Off now (the mod is off).");
+        else if (!upOn) swprintf(sent, sentCap, L"Off now: the game's own stretch is used below Scaling 100 %%.");
         break;
     default: break;
     }
@@ -12918,8 +12951,9 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     {   // v0.10.0: show the model number the keys use + the preset letter (1 (K) / 2 (E) / 3 (F) / 4 (M))
         const char* pn = SceneDlaa::DlssPresetName();
         const char* num = !strcmp(pn, "E") ? "2" : (!strcmp(pn, "F") ? "3" : (!strcmp(pn, "M") ? "4" : (!strcmp(pn, "default") ? "1" : "?")));
-        if (!strcmp(pn, "default")) swprintf(p.rows[MR_MODEL].value, kV, L"1 (K, default)");
-        else                        swprintf(p.rows[MR_MODEL].value, kV, L"%hs (%hs)", num, pn);
+        if (!strcmp(pn, "default"))      swprintf(p.rows[MR_MODEL].value, kV, L"1 (K)");     // "default" = the driver's pick = K
+        else if (num[0] == '?')          swprintf(p.rows[MR_MODEL].value, kV, L"%hs (dlaa.ini)", pn);   // J / L set in dlaa.ini
+        else                             swprintf(p.rows[MR_MODEL].value, kV, L"%hs (%hs)", num, pn);
     }
     MenuRow(p, MR_SHARP, L"Sharpen strength", pair(KA_SHARPEN_DOWN, KA_SHARPEN_UP), nullptr, false);
     const float sharp = SceneDlaa::Sharpness();
@@ -12935,14 +12969,14 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     if (vr) swprintf(p.rows[MR_AREA].value, kV, L"%d %%", SceneDlaa::Area());
     else    swprintf(p.rows[MR_AREA].value, kV, L"100 %% (flat)");
     MenuRow(p, MR_DRAWIDS, L"Per-part motion vectors", KeyName(KA_DRAWID_TOGGLE), nullptr, false);
-    swprintf(p.rows[MR_DRAWIDS].value, kV, L"%ls", g_objMode == 2 ? L"on" : (g_objMode == 1 ? L"stencil ids (1)" : L"off"));
+    swprintf(p.rows[MR_DRAWIDS].value, kV, L"%ls", g_objMode == 2 ? L"on" : (g_objMode == 1 ? L"old stencil ids" : L"off"));
     MenuRow(p, MR_MIRROR, L"Mirror DLAA", KeyName(KA_MIRROR_TOGGLE), nullptr, false);
     swprintf(p.rows[MR_MIRROR].value, kV, L"%ls", onOff[g_mirOn.load() ? 1 : 0]);
     MenuRow(p, MR_PRETM, L"DLAA before tonemap (flat)", KeyName(KA_PRE_TONEMAP), vr ? "flat only" : nullptr, vr);
     swprintf(p.rows[MR_PRETM].value, kV, L"%ls", !g_preCfg ? L"off (dlaa.ini 0)" : onOff[g_preOn.load() ? 1 : 0]);
     MenuRow(p, MR_FWD, L"See-through depth", KeyName(KA_FWD_DEPTH), nullptr, false);
     swprintf(p.rows[MR_FWD].value, kV, L"%ls", !g_fwdCfg ? L"off (dlaa.ini 0)"
-                                              : (!g_fwdOn.load() ? L"off" : (g_fwdAutoOff ? L"on (GPU budget: off)" : L"on")));
+                                              : (!g_fwdOn.load() ? (g_fwdAutoOff ? L"off (VR budget)" : L"off") : L"on"));
     MenuRow(p, MR_UPSCALE, L"DLSS upscale", KeyName(KA_UPSCALE_TOGGLE), nullptr, false);
     swprintf(p.rows[MR_UPSCALE].value, kV, L"%ls", onOff[g_dlssUpscale.load() ? 1 : 0]);
     MenuRow(p, MR_DLAA, L"DLAA on / off", KeyName(KA_DLAA_TOGGLE), nullptr, false);
@@ -12985,7 +13019,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     MenuPerfCosts(p, vr, sel, sent, sizeof(sent) / sizeof(sent[0]));
     constexpr size_t kD = sizeof(p.desc) / sizeof(wchar_t);
     if (kMenuDesc[sel]) swprintf(p.desc, kD, L"%ls%ls%ls", kMenuDesc[sel], sent[0] ? L" " : L"", sent);
-    else                swprintf(p.desc, kD, L"%hs also closes it.", KeyName(KA_MENU));
+    else                swprintf(p.desc, kD, L"Closes the menu; the arrow keys go back to the game. %hs does the same from any row.", KeyName(KA_MENU));
     swprintf(p.footer, sizeof(p.footer) / sizeof(wchar_t), L"%hs / %hs select     %hs / %hs change     %hs close",
              KeyName(KA_MENU_UP), KeyName(KA_MENU_DOWN), KeyName(KA_MENU_LEFT), KeyName(KA_MENU_RIGHT), KeyName(KA_MENU));
 }

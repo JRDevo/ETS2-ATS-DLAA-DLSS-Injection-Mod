@@ -50,8 +50,11 @@ menu and the garage / truck dealer screens, before a save is loaded).
   the game as usual (the arrow keys do nothing for the mod then).
 - **Every row names its hotkey**, so you can learn the keys from the menu. The hotkeys keep working while the menu is
   open, and the menu shows their changes at once. Each change logs and beeps like its key.
-- The selected row shows a short description under the list. A greyed row does not apply to the current mode
-  (`DLAA area` is VR only, `DLAA before tonemap` is flat only); it stays in the list.
+- The selected row shows a description under the list, in plain words: what the row does, when you would change it, and
+  what it costs or saves (the measured figure is added while the GPU timers run). A greyed row does not apply to the
+  current mode and says why (`DLAA area`, `Panel VR depth` and `Panel faces you` are VR only; `DLAA before tonemap` is flat
+  only; `OFXR Bridge` is greyed when `ofxr_bridge = 0`); it stays in the list. The **Performance profile** description
+  lists what `medium` and `low` change; **Save to dlaa.ini** says what it writes.
 - **Panel position X / Y, Panel size** move and size the panel (repeat makes it fast); flat and VR each keep their own
   values. **Panel VR depth** (VR only) shifts the panel inward per eye so it sits nearer than infinity: raise it if the
   panel is tiring to look at. **Panel faces you (VR)** (on by default, `menu_vr_face`): moved off the centre, the panel
@@ -71,7 +74,9 @@ menu and the garage / truck dealer screens, before a save is loaded).
   refreshed once a second: `game` (the game's own GPU frame, without the mod), `this mod` split into its parts (DLAA/DLSS
   itself, per-part motion, camera motion, see-through depth, mirrors, sharpen, copies; in VR one line per eye) and the fps.
   The `GPU cost` column shows what each row costs right now in GPU milliseconds per frame (VR: per eye, eye 0), `off` when
-  that feature is off; the description of the selected row says what changes it. The mod's GPU timers switch on while the
+  that feature is off; the description of the selected row says what changes it. `Mode` and `DLAA on / off` show the whole
+  mod (what switching it off saves), `DLSS upscale` shows `no extra` (it is the same pass; the game just draws fewer
+  pixels), the two texture sharpness rows show `~0 ms` (memory only, no GPU pass), `-` = no cost of its own. The mod's GPU timers switch on while the
   menu is open and off again when it closes (they stay on with `debug = 1`).
 - The menu costs nothing while it is closed.
 

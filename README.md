@@ -346,7 +346,8 @@ The full sheet with every beep pattern is in [`docs/KEYS.md`](docs/KEYS.md).
 ## The tuning menu
 
 New in v0.10.0. Press **`Delete`** in game and a panel with every setting opens over the picture: name, current
-value, the hotkey for it, and for the selected row a short description. **`Up` / `Down`** select a row,
+value, the hotkey for it, the GPU cost, and for the selected row a description: what it does, when you would change
+it, what it costs or saves. **`Up` / `Down`** select a row,
 **`Left` / `Right`** change it, `Delete` closes it again (two short beeps on open, one low beep on close).
 
 - **Flat:** the panel sits near the top-left corner of the screen.
@@ -373,7 +374,8 @@ value, the hotkey for it, and for the selected row a short description. **`Up` /
 - **Where your GPU time goes:** under the title, a GPU line shows the game's own GPU time per frame, what this mod costs
   (split into DLAA/DLSS itself, per-part motion, camera motion, see-through depth, mirrors, sharpen and copies; in VR per
   eye) and the fps. The `GPU cost` column shows each row's share right now (`off` = that feature is off and costs
-  nothing). All figures are GPU milliseconds per frame (VR: per eye), measured live and refreshed once a second. The
+  nothing; `Mode` and `DLAA on / off` show the whole mod, `DLSS upscale` shows `no extra`, the texture sharpness rows
+  `~0 ms`). All figures are GPU milliseconds per frame (VR: per eye), measured live and refreshed once a second. The
   mod's timers switch on while the menu is open and off again when it closes (unless `debug = 1`).
 - Different keys: `key_menu`, `key_menu_up`, `key_menu_down`, `key_menu_left`, `key_menu_right` in `dlaa.ini`
   (see [`docs/KEYS.md`](docs/KEYS.md)).
