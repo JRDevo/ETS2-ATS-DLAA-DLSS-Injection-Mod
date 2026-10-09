@@ -12475,7 +12475,8 @@ const wchar_t* const kMenuDesc[MR_COUNT] = {
     L"off = the game's own picture. Saved at once.",
     L"high = everything on. medium = for mid-range cards. low = for weak cards (+ VR area 60 %). Only changes settings "
     L"you never set yourself.",
-    L"The DLSS network preset. default = the driver's pick. Try E or F if thin lines shimmer; M is the newest.",
+    L"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, least ghosting behind traffic: start here. "
+    L"3 (F) = calmest on fences and wires, can smear moving detail, same cost as 2. 4 (M) = heaviest (about 5x), flat tests only.",
     L"Sharpening after DLAA. 0 = off. Too high = halos on edges.",
     L"How wide the sharpening looks. VR's 2x-supersampled eye picture needs more than 1 px.",
     L"Sharper texture text (road signs, dashboard, GPS). More negative = sharper but more shimmer on fences. 0 = off.",
@@ -12802,7 +12803,7 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
     };
     ms(MR_MODE, MG_NGX);                         if (!dlaaOn) txt(MR_MODE, L"off");
     txt(MR_PROFILE, L"-");
-    txt(MR_MODEL, L"same");
+    ms(MR_MODEL, MG_NGX);                        if (!dlaaOn) txt(MR_MODEL, L"off");   // the model IS the NGX cost
     ms(MR_SHARP, MG_SHARP);                      if (!sharpOn) txt(MR_SHARP, L"off");
     ms(MR_WIDTH, MG_SHARP);                      if (!sharpOn) txt(MR_WIDTH, L"off");
     txt(MR_LOD, g_lodBias == 0.0f ? L"off" : L"~0 (memory)");
@@ -12840,7 +12841,12 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
                                  L"change it.", fig(MG_NGX), unit);
         break;
     case MR_PROFILE: swprintf(sent, sentCap, L"high / medium / low change the rows below; watch the GPU line."); break;
-    case MR_MODEL:   swprintf(sent, sentCap, L"All models cost about the same GPU time."); break;
+    case MR_MODEL:
+        if (!dlaaOn)    swprintf(sent, sentCap, L"Off now.");
+        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
+        else            swprintf(sent, sentCap, L"This model costs %ls %ls now. Measured per eye in VR: 1 (K) 1.0 ms, 2 (E) and 3 (F) 0.6 ms, "
+                                 L"4 (M) about 3 ms. A smaller DLAA area (VR) cuts it in step.", fig(MG_NGX), unit);
+        break;
     case MR_SHARP: case MR_WIDTH:
         if (!sharpOn)   swprintf(sent, sentCap, L"Off now: sharpening costs nothing.");
         else if (!live) swprintf(sent, sentCap, L"%ls", wait);
@@ -12909,7 +12915,12 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     swprintf(p.rows[MR_PROFILE].value, kV, L"%hs", kProfName[g_profile < 0 || g_profile > 2 ? 0 : g_profile]);
     snprintf(k, sizeof(k), "%s .. %s", KeyName(KA_MODEL1), KeyName(KA_MODEL4));
     MenuRow(p, MR_MODEL, L"DLAA model", k, nullptr, false);
-    swprintf(p.rows[MR_MODEL].value, kV, L"%hs", SceneDlaa::DlssPresetName());
+    {   // v0.10.0: show the model number the keys use + the preset letter (1 (K) / 2 (E) / 3 (F) / 4 (M))
+        const char* pn = SceneDlaa::DlssPresetName();
+        const char* num = !strcmp(pn, "E") ? "2" : (!strcmp(pn, "F") ? "3" : (!strcmp(pn, "M") ? "4" : (!strcmp(pn, "default") ? "1" : "?")));
+        if (!strcmp(pn, "default")) swprintf(p.rows[MR_MODEL].value, kV, L"1 (K, default)");
+        else                        swprintf(p.rows[MR_MODEL].value, kV, L"%hs (%hs)", num, pn);
+    }
     MenuRow(p, MR_SHARP, L"Sharpen strength", pair(KA_SHARPEN_DOWN, KA_SHARPEN_UP), nullptr, false);
     const float sharp = SceneDlaa::Sharpness();
     swprintf(p.rows[MR_SHARP].value, kV, sharp <= 0.0f ? L"%.1f (off)" : L"%.1f", (double)sharp);
