@@ -153,7 +153,7 @@ debug colours).
 | `Ctrl+F7`  | Passive mode on / off                  | 1 low tone = ON, 2 low tones = OFF |
 | `Ctrl+F8`  | Jitter-only debug on / off             | — |
 | `Ctrl+F9`  | Self-test (dumps frames)               | — |
-| `Ctrl+F10` | NGX input snapshot (on the menu / truck-preview screen: a measuring capture, short freeze) | — |
+| `Ctrl+F10` | NGX input snapshot, each press into its own folder `dlaa_snap\<n>_blit<blit>\` (on the menu / truck-preview screen: a measuring capture, short freeze) | — |
 | `Ctrl+F11` | Frame trace                            | — |
 | `Ctrl+F12` | Cycle NGX jitter sign                  | — |
 
