@@ -10,7 +10,7 @@
 # ---- v0.10.0 PERFORMANCE PROFILE (Alt+F9 cycles high -> medium -> low live: 1 / 2 / 3 beeps; Shift+F12 saves it here) ----
 # A profile only gives a DEFAULT to the keys in the table below. Any of those keys you set in this file -- or change with its own
 # key while playing (Alt+F6 mirrors, Ctrl+F3 see-through depth, Shift+F1..F4 model, Shift+F5 / F6 area) -- keeps your value
-# whatever the profile. The log's "phase 10 (v0.10.0): perf_profile=..." line lists what the profile set and what it kept.
+# whatever the profile. The log's "phase 10: perf_profile=..." line lists what the profile set and what it kept.
 #   high   = everything on (default): DLAA in the mirrors with per-part motion (VR: the 2 largest mirror pictures), the see-through
 #            depth for wires / fences / glass, every per-part motion step at full quality
 #   medium = for mid-range GPUs: model E, the see-through depth at half resolution also in flat, flat mirrors with camera motion
@@ -35,7 +35,7 @@
 # This line has no '#' in front: just change the 0 to 1.
 debug = 0
 
-# OFXR Bridge (VR frame generation, https://github.com/djules75/OFXR-Bridge) support, 0 / 1 (v0.10.0). 1 = default: the mod finds the
+# OFXR Bridge (VR frame generation, https://github.com/djules75/OFXR-Bridge) support, 0 / 1. 1 = default: the mod finds the
 # bridge's layer module (ofxr*.dll) in the game and lets that module's own D3D11 copies and draws pass through the hooks without
 # counting them as game draws, so they cannot be mistaken for the eye picture. 0 = no search, no pass-through (only for ruling
 # the handling out). Nothing to change when you do not use the bridge: with no ofxr*.dll in the game it does nothing.
@@ -81,7 +81,7 @@ debug = 0
 # Per-object motion vectors: moving things (traffic and its wheels, trailers, licence plates, wipers, your trailer in
 # the outside view) get their own motion vectors instead of the camera's -- other vehicles stay sharp under DLAA / DLSS
 # instead of ghosting.
-#   2 = per-draw motion vectors (v0.10.0, default): every world draw of a frame is drawn once more into a "which draw owns
+#   2 = per-draw motion vectors (default): every world draw of a frame is drawn once more into a "which draw owns
 #       this pixel" target and matched with the previous frame on the graphics card; whatever moves on its own gets its
 #       exact motion, everything else keeps the camera motion. No guessing, no object limit.
 #   1 = the v0.9.0 stencil object ids (legacy, kept for comparison; the mv_objects_* keys further down are for 1 only)
@@ -172,7 +172,7 @@ debug = 0
 # 1 = re-draw only the instanced parts (licence plates, vegetation) whose kind was seen on a moving vehicle lately, all of them
 # every 7th frame; 0 = all of them every frame (default until the VR cost is measured: the "replay-inst*" figure)
 # mv_inst_replay = 0
-# (v0.10.0) the per-part motion vectors redraw every world object once more each frame to learn which object owns which pixel.
+# the per-part motion vectors redraw every world object once more each frame to learn which object owns which pixel.
 # An object that did not move for this many frames in a row (road, buildings, trees, parked trucks) is no longer redrawn every
 # frame: its pixels keep the camera motion, exactly what a still object gets anyway. 0 = redraw everything every frame (before),
 # 1..60, default 6. This is the "replay" figure in the "perf eye" lines (2-3 ms at 4K before it). Every perf_profile keeps it on.
@@ -312,7 +312,7 @@ debug = 0
 # never touched it). 1 = on (default), 0 = that screen is never touched (no extra GPU cost / memory there)
 # preview_dlaa = 1
 
-# Debug (v0.7.8): one measuring capture of the profile / truck-preview DLAA (the same as Ctrl+F10 on that screen) this
+# Debug: one measuring capture of the profile / truck-preview DLAA (the same as Ctrl+F10 on that screen) this
 # many Presents after the preview DLAA first runs; files in dlaa_selftest\, "pvcap:" lines in the log. 0 = off (default)
 # preview_capture_at = 0
 
@@ -327,12 +327,12 @@ debug = 0
 # live in 0.1 steps (v0.5.7: the sharpen texture always exists, ~120 MB per eye in VR; Shift+F12 saves)
 # sharpness = 0.4
 
-# RCAS ring-tap radius ("sharpen width") in texels, 1..4 (v0.5.8). The 4 taps are bilinear, so a fractional
+# RCAS ring-tap radius ("sharpen width") in texels, 1..4. The 4 taps are bilinear, so a fractional
 # radius (e.g. 1.5) averages two neighbours. The 2x-supersampled VR eye image needs > 1 px to show any
 # sharpening. Start state; Shift+F9 / Shift+F10 change it live in 0.5 steps (Shift+F12 saves)
 # sharp_radius = 1.5
 
-# v0.6.4 DLAA area: run DLAA only on a rect of this % of each eye image's width AND height (20..100, v0.10.0; was
+# v0.6.4 DLAA area: run DLAA only on a rect of this % of each eye image's width AND height (10..100, v0.10.0; was
 # 40..100; pixel count ~ area^2, e.g. 70 -> 49 %, 20 -> 4 %), centred on the eye's optical centre. 100 = whole image
 # (v0.6.3 behaviour). Outside the rect the image is the raw jittered frame. VR only (flat always uses 100); v0.10.0: also
 # the truck picture of the VR main menu / garage / truck dealer screens. Start state; Shift+F5 / Shift+F6 change it live
@@ -426,7 +426,7 @@ debug = 0
 # fps_vr_y = -25
 # fps_vr_scale = 0.3
 
-# ---- Hotkeys (v0.7.7) -------------------------------------------------------------------------------------------
+# ---- Hotkeys -------------------------------------------------------------------------------------------
 # key_<action> = [Shift+][Ctrl+][Alt+]Key, or none to disable the action. The values below are the defaults:
 # just edit the value. Keys: F1-F24, A-Z, 0-9, Home, End, Insert, Delete, PageUp, PageDown, Up, Down, Left, Right,
 # Space, Tab, Backspace, Enter, Pause, Numpad0-Numpad9, NumpadAdd, NumpadSubtract, NumpadMultiply, NumpadDivide,
@@ -453,13 +453,13 @@ key_dlaa_toggle = Shift+F11
 key_save = Shift+F12
 # DLSS upscale on / off
 key_upscale_toggle = Ctrl+F4
-# Texture LOD bias -0.25 (sharper textures) / +0.25 (v0.9.0)
+# Texture LOD bias -0.25 (sharper textures) / +0.25
 key_lod_bias_down = Ctrl+F1
 key_lod_bias_up = Ctrl+F2
-# Texture LOD bias of the alpha-tested draws (fences, grass, foliage) -0.25 / +0.25 (v0.10.0, tex_lod_bias_cutout)
+# Texture LOD bias of the alpha-tested draws (fences, grass, foliage) -0.25 / +0.25 (tex_lod_bias_cutout)
 key_lod_cutout_down = Ctrl+Shift+F1
 key_lod_cutout_up = Ctrl+Shift+F2
-# Forward depth for the motion vectors on / off (v0.9.0 r5, mv_fwd_depth live switch)
+# Forward depth for the motion vectors on / off (mv_fwd_depth live switch)
 key_fwd_depth = Ctrl+F3
 # Debug: motion vectors on/off, MV debug view, passive mode, jitter-only, self-test, NGX snapshot, frame trace,
 # cycle NGX jitter sign
@@ -477,7 +477,7 @@ key_mv_drawids = Alt+F5
 key_mirror_dlaa = Alt+F6
 key_pre_tonemap = Alt+F7
 key_mv_dump = Alt+F8
-# Performance profile high -> medium -> low (v0.10.0, perf_profile)
+# Performance profile high -> medium -> low (perf_profile)
 key_perf_profile = Alt+F9
 # v0.10.0 tuning menu: open / close, and (only while it is open) select a row up / down and change it left / right.
 # The game does not see these 5 keys while the menu is open; closed, they belong to the game.

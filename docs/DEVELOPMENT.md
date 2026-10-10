@@ -202,7 +202,7 @@ cheat sheet.)
 | `Shift+F2` | DLAA model 2 = preset `E` | 2 × 880 Hz |
 | `Shift+F3` | DLAA model 3 = preset `F` | 3 × 880 Hz |
 | `Shift+F4` | DLAA model 4 = preset `M` | 4 × 880 Hz |
-| `Shift+F5` | DLAA area −10 % (20..100; 40..100 before v0.10.0 phase 15) | 3 beeps at `300 + 6·area` Hz; low 200 Hz at the 20 limit |
+| `Shift+F5` | DLAA area −10 % (10..100; 40..100 before v0.10.0 phase 15, 20..100 until phase 24) | 3 beeps at `300 + 6·area` Hz; low 200 Hz at the 10 limit |
 | `Shift+F6` | DLAA area +10 % | 3 beeps at `300 + 6·area` Hz; low 200 Hz at the 100 limit |
 | `Shift+F7` | Sharpen strength −0.1 (0..1) | 1 beep at `400 + 800·sharpness` Hz; low 200 Hz at a limit |
 | `Shift+F8` | Sharpen strength +0.1 | 1 beep at `400 + 800·sharpness` Hz; low 200 Hz at a limit |
@@ -258,7 +258,7 @@ The self-test dumps eye 0 only in VR (~89 MB per BMP at 4592×6496); snapshots a
   | `dlss_preset` | `default` | DLSS render preset for DLAA (`default`, `J`, `K`, `L`, `M`, `E`, `F`); models 1–4 (`Shift+F1`..`F4`) select `default`/`E`/`F`/`M`; written by `Shift+F12`. v0.7.0: applied to every DLSS quality mode (all hint parameters), so it also picks the model while upscaling |
   | `sharpness` | `0.4` | RCAS sharpen strength after DLAA, 0..1 (`0` = pass skipped); `Shift+F7`/`F8` adjust; written by `Shift+F12` |
   | `sharp_radius` | `1.5` | RCAS ring-tap radius in texels, 1..4 (bilinear taps); `Shift+F9`/`F10` adjust (v0.5.8); written by `Shift+F12` |
-  | `dlaa_area` | `100` | int 20..100 (v0.6.4; 40..100 before v0.10.0 phase 15): DLAA runs on a rect of this % of each eye image's width AND height (pixel count ~ area²), centred on the eye's optical centre; `100` = whole image (v0.6.3 behaviour); `Shift+F5`/`F6` adjust; written by `Shift+F12` |
+  | `dlaa_area` | `100` | int 10..100 (v0.6.4; 40..100 before v0.10.0 phase 15, 20..100 until phase 24): DLAA runs on a rect of this % of each eye image's width AND height (pixel count ~ area²), centred on the eye's optical centre; `100` = whole image (v0.6.3 behaviour); `Shift+F5`/`F6` adjust; written by `Shift+F12` |
   | `dlaa_area_feather` | `96` | int 0..512 px (v0.6.4): blend ramp from the raw frame to the DLAA result at the rect edges that lie inside the image; `0` = hard edge (render px; v0.7.0 upscale: scaled per axis to output px) |
   | `dlss_upscale` | `1` | `0`/`1` (v0.7.0): DLSS upscaling from the scene size to the eye texture / backbuffer size whenever that is larger (see "DLSS upscaling"); `0` = always DLAA at render res (v0.6.5 path); `Ctrl+F4` toggles; written by `Shift+F12` |
   | `mode` | *(absent)* | `0`/`1`/`2` (v0.7.2): start mode written by the plain `End` key — `1` DLAA, `2` DLSS, `0` off. When present (and no `dlaa_off.txt`) it wins over `dlss_upscale` at startup. `End` cycles and rewrites it |
@@ -602,7 +602,7 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   DLAA area`: the reference tile's skew mapped through the tile layout, p' = (p + c.x) / h.x), else the image centre.
   `MenuVr()` (rows edit the VR placement) = an eye blit was seen, or a VR launch composited into a non-backbuffer eye picture
   in the last 120 Presents (a VR launch without a headset keeps the flat rows).
-- **Limits.** `dlaa_area` 20..100 (was 40..100; `SceneDlaa::kAreaMin`; ini, keys, menu row). `fps_scale` / `fps_vr_scale`
+- **Limits.** `dlaa_area` 10..100 (was 40..100, then 20..100; `SceneDlaa::kAreaMin`; ini, keys, menu row). `fps_scale` / `fps_vr_scale`
   0.2..3.0 (was 0.5..3.0); the meaning of the scale is unchanged (VR 1 = 8 % of the eye width, so a saved value keeps its
   size), the VR default is 0.3 (was 1.0, ~490 px on a 6120-px eye).
 - **Menu units honour `dlaa_area` in VR.** `PreviewFlush` runs the preview units (eye tags 10 / 11) on the same centred rect

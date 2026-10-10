@@ -31,31 +31,33 @@ account — a few hotkeys, an in-game tuning menu (`Delete`) and an optional tex
   fences, power lines, road markings and shadows that the game's own AA leaves behind.
 - **DLSS upscaling** — render fewer pixels and let DLSS rebuild the full picture, for more frame rate.
 - **Flat and VR** — one DLL and one `dlaa.ini` for both. VR runs one pass per eye (OpenXR).
-- **In-game tuning menu** — new in v0.10.0: press `Delete` for a panel with every setting, its value, its hotkey
-  and a short description; `Up` / `Down` select, `Left` / `Right` change. Flat and VR (both eyes); the game does
+- **In-game tuning menu** — press `Delete` for a panel with every setting, its value, its hotkey, what it
+  costs on the GPU and a short description; `Up` / `Down` select, `Left` / `Right` change. Flat and VR (both eyes); the game does
   not see those keys while the menu is open. See [The tuning menu](#the-tuning-menu).
-- **Windows HDR** — works with HDR on in flat mode (new in v0.8.0).
-- **NVIDIA Smooth Motion** — works with the driver's frame generation switched on, in flat mode
-  (new in v0.8.1).
+- **Movable widgets** — the tuning panel and the live fps counter can both be moved and resized from the menu
+  (position X / Y and size), flat and VR each with their own place. In VR the panel turns to face you.
+- **Live GPU cost** — the menu shows the game's GPU time per frame and what each part of this mod costs, in ms.
+- **Windows HDR** — works with HDR on in flat mode.
+- **NVIDIA Smooth Motion** — works with the driver's frame generation switched on, in flat mode.
 - **OFXR Bridge (VR frame generation)** — runs together with the bridge, which adds in-between frames to the
-  finished eye pictures (new in v0.10.0, see [OFXR Bridge](#ofxr-bridge-vr-frame-generation)).
-- **Drivable cars (ATS)** — DLAA / DLSS also runs while you drive a car (new in v0.8.2).
+  finished eye pictures (see [OFXR Bridge](#ofxr-bridge-vr-frame-generation)).
+- **Drivable cars (ATS)** — DLAA / DLSS also runs while you drive a car.
 - **Menu and truck-preview screens** get anti-aliasing too, not only the drive.
 - **Four DLSS models** to pick from, switched live with a key, from light to heavy.
-- **Exact motion for moving traffic** — new in v0.10.0: every part of the 3-D world is matched with the
+- **Exact motion for moving traffic** — every part of the 3-D world is matched with the
   previous frame, so traffic, wheels, trailers and licence plates get their own motion vectors and stay
   sharp under DLAA / DLSS instead of ghosting; everything static keeps the camera motion, which is taken from
   the scenery as a whole (a moving truck can no longer pass for the camera). See-through parts drawn after
   the scene (plates, decals, glass, wires) get their own motion too, and parts the game rebuilds every frame
   (licence plates) take the motion of the vehicle they sit on. On by default (`mv_objects = 2`).
-- **Mirrors anti-aliased too** — new in v0.10.0: every truck / car mirror gets its own DLAA with its own
+- **Mirrors anti-aliased too** — every truck / car mirror gets its own DLAA with its own
   jitter and motion vectors (your trailer in the mirror stays sharp), on by default (`mirror_dlaa = 1`,
   `Alt+F6` switches it live).
-- **DLAA on the game's HDR colours** — new in v0.10.0: in flat DLAA mode the main picture is anti-aliased
+- **DLAA on the game's HDR colours** — in flat DLAA mode the main picture is anti-aliased
   before the game's own tone-mapping, the input NGX is made for, so thin bright lines shimmer less. On by
   default (`dlaa_pre_tonemap = 1`, `Alt+F7` switches it live); DLSS upscaling, VR and Windows HDR keep the
   end-of-frame path.
-- **Sharper texture text** — texture LOD bias, new in v0.9.0: road signs, dashboard, GPS and truck decals
+- **Sharper texture text** — texture LOD bias: road signs, dashboard, GPS and truck decals
   get sharper textures while DLAA / DLSS keeps them from shimmering. Off by default, adjust live with
   `Ctrl+F1` / `Ctrl+F2`.
 - **Adjustable sharpening** — strength and width, live.
@@ -76,10 +78,9 @@ This is an unofficial fan project. It is not affiliated with, or endorsed by, SC
 Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
-> Status: v0.10.0. Exact per-part motion vectors for moving traffic and DLAA on the truck / car mirrors (both new in v0.10.0, on by default; first tested in ETS2 flat, the camera motion is now taken from the scenery as a whole and licence plates / decals / glass get their own motion; plates that take their vehicle's motion and DLAA before the game's tonemap in flat DLAA mode were tested in ETS2 flat; parts that take the motion of the part drawn with the same placement were tested in ETS2 flat; the newest round -- licence plates the game rebuilds every frame take the motion of the vehicle part they sit on -- is not yet tested in game). Sharper texture text with the texture LOD bias (since v0.9.0, off by default). Works while you drive a car in ATS (since v0.8.2). Works with NVIDIA Smooth Motion on in flat mode (new in v0.8.1). Windows HDR works in flat mode (since v0.8.0). DLAA has been run in ETS2 (VR) and ATS (flat and VR). The DLSS
+> Status: v0.10.0. Per-part motion vectors, mirror DLAA, DLAA before the game's tonemap, the tuning menu and the fps counter were tested in ETS2 flat. DLAA itself has been run in ETS2 (VR) and ATS (flat and VR); the newest VR fixes (jitter phase, menu panel in VR) are only partly tested. The DLSS
 > *upscaling* path (render below native, reconstruct up) runs in VR but is still
-> being tuned. Treat upscaling as experimental.
-
+> being tuned. Treat upscaling as experimental. The OFXR Bridge handling is not yet tested in a headset with the bridge armed.
 ---
 
 ## Requirements
@@ -144,7 +145,7 @@ notices after about one second of driving and switches to flat mode by itself (`
 ## OFXR Bridge (VR frame generation)
 
 [OFXR Bridge](https://github.com/djules75/OFXR-Bridge) is a separate program that adds in-between frames in VR: it takes the finished
-picture of each eye and generates the frames between them from optical flow. From v0.10.0 the mod runs together with it. The mod
+picture of each eye and generates the frames between them from optical flow. The mod runs together with it. The mod
 anti-aliases / upscales each eye as usual; the bridge then works on the finished eye pictures. It needs no motion vectors from
 the mod. The mod only makes sure the bridge's own copies inside the game are left alone (they are not counted as game drawing).
 
@@ -158,7 +159,7 @@ the mod. The mod only makes sure the bridge's own copies inside the game are lef
   game starts its VR session, so it can appear a little after start), `OFXR Bridge: tray.ini found` / `not installed`, and
   `OFXR Bridge: N calls passed through so far`.
 
-Status: v0.10.0 — the handling is built but not yet tested in a headset with the bridge armed; report what you see with `debug = 1`.
+Status: the handling is built but not yet tested in a headset with the bridge armed; report what you see with `debug = 1`.
 
 ## How render scale works
 
@@ -285,7 +286,7 @@ and the defaults are tuned already.
 | `End` | Mode: DLAA → DLSS → off (saved at once) |
 | `Alt+F9` | Performance profile: high → medium → low. high = everything on; medium = for mid-range GPUs (model E, cheaper mirror / see-through / plate work); low = for weak GPUs (also no mirror DLAA, no see-through depth, VR DLAA area 60 %) |
 | `Shift+F12` | Save the current live settings to `dlaa.ini` |
-| `Delete` | Tuning menu (v0.10.0): every setting with its hotkey; arrow keys select and change, see [The tuning menu](#the-tuning-menu) |
+| `Delete` | Tuning menu: every setting with its hotkey; arrow keys select and change, see [The tuning menu](#the-tuning-menu) |
 
 Everything else is tuning. The defaults are tuned already; you can ignore the rest.
 
@@ -310,8 +311,8 @@ the value); a long low tone means "already at the limit" or "save failed". Turn 
 | `Shift+F7` / `F8` | Sharpening strength − / + 0.1. Touch it if the picture looks too soft or too crunchy |
 | `Shift+F9` / `F10` | Sharpening width − / + 0.5. Touch it together with strength, only if you changed the sharpening |
 | `Shift+F11` | DLAA on / off. Touch it to compare with and without |
-| `Ctrl+F1` / `F2` | Texture sharpness: LOD bias − / + 0.25 on the solid surfaces (road signs, dashboard, GPS), `−3`..`0`; only while DLAA / DLSS is on. Touch it if sign and dashboard text looks soft; try −0.5 to −1 (new in v0.9.0) |
-| `Ctrl+Shift+F1` / `F2` | Cut-out sharpness: LOD bias − / + 0.25 of the see-through draws (wire-mesh fences, grass, leaf cut-outs), `−3`..`0`. Touch it if fences moire or grass looks soft (new in v0.10.0) |
+| `Ctrl+F1` / `F2` | Texture sharpness: LOD bias − / + 0.25 on the solid surfaces (road signs, dashboard, GPS), `−3`..`0`; only while DLAA / DLSS is on. Touch it if sign and dashboard text looks soft; try −0.5 to −1 |
+| `Ctrl+Shift+F1` / `F2` | Cut-out sharpness: LOD bias − / + 0.25 of the see-through draws (wire-mesh fences, grass, leaf cut-outs), `−3`..`0`. Touch it if fences moire or grass looks soft |
 | `Alt+F5` | Per-part motion vectors on / off. Touch it only to compare traffic ghosting with and without |
 | `Alt+F6` | Mirror DLAA on / off. Touch it if the mirrors look wrong or cost too much GPU time |
 | `Alt+F7` | DLAA before / after the game's tone-mapping (flat mode). Touch it only to compare thin bright lines (lane paint, wires, rails) |
@@ -345,10 +346,23 @@ The full sheet with every beep pattern is in [`docs/KEYS.md`](docs/KEYS.md).
 
 ## The tuning menu
 
-New in v0.10.0. Press **`Delete`** in game and a panel with every setting opens over the picture: name, current
+![The tuning menu](docs/images/tuning-menu.png)
+
+Press **`Delete`** in game and a panel with every setting opens over the picture: name, current
 value, the hotkey for it, the GPU cost, and for the selected row a description: what it does, when you would change
 it, what it costs or saves. **`Up` / `Down`** select a row,
 **`Left` / `Right`** change it, `Delete` closes it again (two short beeps on open, one low beep on close).
+
+**The columns:**
+
+| Column | What it shows |
+|--------|---------------|
+| **Setting** | The name of the setting. A greyed row does not apply right now (for example VR-only rows in flat mode). |
+| **Value** | The current value. `Left` / `Right` change it. |
+| **Hotkey** | The key that does the same thing without the menu, or the `dlaa.ini` key for rows that have no hotkey. |
+| **GPU cost** | What this row costs on the GPU right now, in ms per frame (`-` = nothing to measure, `off` = switched off, `same` = no extra cost). |
+
+The three green lines under the title show the game's GPU time per frame, what this mod costs, and the fps. The line at the bottom explains the selected row.
 
 - **Flat:** the panel sits near the top-left corner of the screen.
 - **VR:** the panel shows in both eyes, centred in front of you, and on the desktop mirror window -- also on the
@@ -357,14 +371,14 @@ it, what it costs or saves. **`Up` / `Down`** select a row,
   layout), so the truck does not react while you tune. Closed, the keys belong to the game again.
 - Every row calls the same function as its hotkey: the hotkeys keep working while the menu is open, and every change
   beeps and logs exactly like its key. Number rows repeat while you hold `Left` / `Right`.
-- **Move the panel:** the `Panel position X`, `Panel position Y` and `Panel size` rows (and `Panel VR depth` in VR,
+- **Move the widgets:** the panel and the fps counter both move. For the panel use the `Panel position X`, `Panel position Y` and `Panel size` rows (and `Panel VR depth` in VR,
   which brings the panel nearer). Flat and VR keep their own position (`menu_x`, `menu_y`, `menu_scale`,
   `menu_vr_x`, `menu_vr_y`, `menu_vr_scale`, `menu_vr_depth`, `menu_vr_face` in `dlaa.ini`).
 - **VR: the panel faces you.** Move it to the side or up / down and it turns towards your eye like a real screen,
   keeping its size from every angle (`Panel faces you (VR)` row, `menu_vr_face`, on by default; off = a flat picture).
   On the garage / truck dealer screens the panel and the fps box are drawn on top of the game's own menu, not under it
   (the mod finds where the game hands each eye picture to the headset in the first frames after the menu opens).
-- **Live fps counter:** the `FPS counter` row switches on a small fps box: the fps and the frame time as text with a dark outline, no background (`60 fps` /
+- **Live fps counter:** ![fps counter](docs/images/fps-counter.png) the `FPS counter` row switches on a small fps box: the fps and the frame time as text with a dark outline, no background (`60 fps` /
   `16.7 ms`, updated twice a second) that stays on screen also when the menu is closed (flat, and in VR in both eyes).
   `FPS counter X`, `FPS counter Y` and `FPS counter size` move it; flat and VR keep their own position (`fps_show`,
   `fps_x`, `fps_y`, `fps_scale`, `fps_vr_x`, `fps_vr_y`, `fps_vr_scale` in `dlaa.ini`). Off, it costs nothing.
@@ -399,23 +413,23 @@ The table below lists the commonly used keys:
 | `dlss_preset` | `default` | DLSS model: `default`, `J`, `K`, `L`, `M`, `E`, `F` |
 | `sharpness` | `0.4` | sharpening after DLAA, `0`..`1` (`0` = off) |
 | `sharp_radius` | `1.5` | sharpening width in texels, `1`..`4` |
-| `dlaa_area` | `100` | run DLAA on the centre `N` % of each eye image (VR performance), `20`..`100`. VR only: in flat mode the whole picture is always used. Also used for the truck on the VR main menu / garage screens |
-| `mv_objects` | `2` | motion vectors for moving traffic (v0.10.0): `2` = every moving part gets its own exact motion (default), `0` = camera motion only (`1` = the older v0.9.0 method, for comparison) |
-| `mirror_dlaa` | `1` | DLAA on the truck / car mirrors (v0.10.0): `1` = each mirror gets its own DLAA (default), `0` = mirrors are left as the game draws them. `Alt+F6` switches it live, `Shift+F12` saves |
-| `dlaa_pre_tonemap` | `1` | DLAA before the game's tonemap (v0.10.0, flat DLAA mode): `1` = on the game's HDR colours (default), `0` = on the finished picture at the end of the frame. `Alt+F7` switches it live, `Shift+F12` saves |
-| `tex_lod_bias` | `0` | sharper texture text (v0.9.0): texture mip LOD bias for the 3-D world while DLAA / DLSS runs, `-3`..`1`, `0` = off. Try `-0.5` to `-1`; more negative = sharper but more shimmer on fine patterns. `Ctrl+F1` / `F2` change it live, `Shift+F12` saves |
+| `dlaa_area` | `100` | run DLAA on the centre `N` % of each eye image (VR performance), `10`..`100`. VR only: in flat mode the whole picture is always used. Also used for the truck on the VR main menu / garage screens |
+| `mv_objects` | `2` | motion vectors for moving traffic: `2` = every moving part gets its own exact motion (default), `0` = camera motion only (`1` = the older method, for comparison) |
+| `mirror_dlaa` | `1` | DLAA on the truck / car mirrors: `1` = each mirror gets its own DLAA (default), `0` = mirrors are left as the game draws them. `Alt+F6` switches it live, `Shift+F12` saves |
+| `dlaa_pre_tonemap` | `1` | DLAA before the game's tonemap (flat DLAA mode): `1` = on the game's HDR colours (default), `0` = on the finished picture at the end of the frame. `Alt+F7` switches it live, `Shift+F12` saves |
+| `tex_lod_bias` | `0` | sharper texture text: texture mip LOD bias for the 3-D world while DLAA / DLSS runs, `-3`..`1`, `0` = off. Try `-0.5` to `-1`; more negative = sharper but more shimmer on fine patterns. `Ctrl+F1` / `F2` change it live, `Shift+F12` saves |
 | `tex_lod_bias_auto` | `0` | `1` = while DLSS upscales, add log2(render width / output width) on top of `tex_lod_bias` (e.g. 75 % render width → −0.42) |
 | `tex_aniso` | `0` | anisotropic filtering for the world textures: `0` = the game's own setting; `2`..`16` = at least this level (trilinear textures become anisotropic) |
 | `preview_dlaa` | `1` | `1` = also anti-alias the profile / truck-preview screen (flat and VR); `0` = leave that screen untouched. VR at eye resolution needs a lot of GPU memory and time there, turn it off if that screen stutters. That screen always uses model 2 (preset E); the model keys change the drive only |
 | `jitter_sign_x` / `jitter_sign_y` | `1` | flip if the image shimmers or looks doubled (try the 4 combinations) |
 | `dlss_hdr` | `1` | HDR only: `1` = tell DLSS the picture is HDR (normal); `0` = try this if HDR brightness or colours look wrong with DLAA on |
 | `beeps` | `1` | `0` = silence the hotkey beeps |
-| `menu_x` / `menu_y` / `menu_scale` | `2` / `8` / `1.0` | tuning menu panel, flat (v0.10.0): left / top edge in % of the picture, size `0.5`..`2.0`. The menu's Panel rows change them live |
-| `menu_vr_x` / `menu_vr_y` / `menu_vr_scale` / `menu_vr_depth` | `0` / `-5` / `1.0` / `12` | tuning menu panel, VR (v0.10.0): centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size (1 = 54 % of the eye width), inward shift per eye in px |
-| `menu_vr_face` | `1` | tuning menu panel, VR (v0.10.0): `1` = the panel turns to face your eye when moved off the centre (a tilted 3-D panel, same size from every angle), `0` = a flat picture. The menu's `Panel faces you (VR)` row switches it live |
-| `fps_show` | `0` | live fps box (v0.10.0): `1` = a small fps / frame-time box stays on screen, also while the menu is closed. The menu's `FPS counter` row switches it live |
-| `fps_x` / `fps_y` / `fps_scale` | `1` / `1` / `1.0` | fps box, flat (v0.10.0): left / top edge in % of the picture (`0`..`95`), size `0.2`..`3.0` (1 = 92 x 44 px at 1080 p) |
-| `fps_vr_x` / `fps_vr_y` / `fps_vr_scale` | `0` / `-25` / `0.3` | fps box, VR (v0.10.0): centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size `0.2`..`3.0` (1 = 8 % of the eye width) |
+| `menu_x` / `menu_y` / `menu_scale` | `2` / `8` / `1.0` | tuning menu panel, flat: left / top edge in % of the picture, size `0.5`..`2.0`. The menu's Panel rows change them live |
+| `menu_vr_x` / `menu_vr_y` / `menu_vr_scale` / `menu_vr_depth` | `0` / `-5` / `1.0` / `12` | tuning menu panel, VR: centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size (1 = 54 % of the eye width), inward shift per eye in px |
+| `menu_vr_face` | `1` | tuning menu panel, VR: `1` = the panel turns to face your eye when moved off the centre (a tilted 3-D panel, same size from every angle), `0` = a flat picture. The menu's `Panel faces you (VR)` row switches it live |
+| `fps_show` | `0` | live fps box: `1` = a small fps / frame-time box stays on screen, also while the menu is closed. The menu's `FPS counter` row switches it live |
+| `fps_x` / `fps_y` / `fps_scale` | `1` / `1` / `1.0` | fps box, flat: left / top edge in % of the picture (`0`..`95`), size `0.2`..`3.0` (1 = 92 x 44 px at 1080 p) |
+| `fps_vr_x` / `fps_vr_y` / `fps_vr_scale` | `0` / `-25` / `0.3` | fps box, VR: centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size `0.2`..`3.0` (1 = 8 % of the eye width) |
 | `key_<action>` | *(see KEYS.md)* | re-bind any hotkey, e.g. `key_dlaa_toggle = Ctrl+D`, or `none` to disable it. Full list and format: [`docs/KEYS.md`](docs/KEYS.md) |
 | `debug` | `0` | `1` = write the log file `dlaa_inject.log` (off by default) |
 
@@ -442,7 +456,7 @@ The game held its 72 fps cap the whole time.
 |---|---|---|
 | Render scale (`Scaling` in the game, `r_scale_x/y`) | biggest lever: everything scales with pixels | DLSS mode renders lower and upscales; DLAA mode = native |
 | Model (`Shift+F1..F4`, `dlss_preset`) | 1 = 2.4 ms, 2 (E) = 1.0 ms, 3 (F) = 1.0 ms, 4 (M) = 9.4 ms per eye at 4592x6496 | measured in VR; E is the default |
-| DLAA area (`dlaa_area`, `Shift+F5/F6`, VR only) | 40 % = about 0.45 ms per eye instead of 1.0 | NGX runs on the centre only; the edge keeps the raw picture. `20`..`100`; also applies to the VR main menu / garage truck picture |
+| DLAA area (`dlaa_area`, `Shift+F5/F6`, VR only) | 40 % = about 0.45 ms per eye instead of 1.0 | NGX runs on the centre only; the edge keeps the raw picture. `10`..`100`; also applies to the VR main menu / garage truck picture |
 | Mirror DLAA (`mirror_dlaa`, `Alt+F6`) | 1.7 ms per frame flat with 4 mirrors | the second-biggest item after DLAA itself |
 | Per-part motion vectors (`mv_objects`, `Alt+F5`) | about 0.8 ms per frame flat | 0 = camera-only motion: traffic ghosts again |
 | Static redraw skip (`mv_replay_static_frames`, `mv_replay_static_every`) | saves most of the per-part `replay` (2-3 ms at 4K in ATS before it) | on by default; `mv_replay_static_frames = 0` = redraw everything every frame |
@@ -457,7 +471,7 @@ The game held its 72 fps cap the whole time.
 Everything except DLAA itself adds up to about 4 ms per frame on this card in flat. VRAM: about 410 MB for the
 per-frame textures in flat (pooled), roughly 2.5x that in VR.
 
-**Static redraw skip (v0.10.0):** the per-part motion vectors redraw every world object once more each frame to learn which
+**Static redraw skip:** the per-part motion vectors redraw every world object once more each frame to learn which
 object owns which pixel; for road, buildings, trees and parked trucks that only ever says "it did not move". An object that was
 static for `mv_replay_static_frames` frames in a row (default 6) is now redrawn only on 1 frame of every `mv_replay_static_every`
 (default 4), staggered; its pixels keep the camera motion, exactly as before. Expected: the `replay` figure of the `perf eye` line
@@ -496,8 +510,7 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   screen). Older versions do nothing with Smooth Motion on (the log shows `passes=0 blits=0` and
   `caller=NvPresent64.dll`): update. Smooth Motion only adds frames on the monitor; it does nothing for
   the headset picture in VR, so switch it off for VR.
-- **OFXR Bridge (VR frame generation):** supported from v0.10.0 — see the section above; older versions may double-process the
-  bridge's copies.
+- **OFXR Bridge (VR frame generation):** see the section above.
 - **Faint dark line down the middle of the menu / truck-preview screen:** fixed in v0.8.1: update.
 - **No DLAA / DLSS while you drive a car (ATS):** fixed in v0.8.2: update. Older versions work in the menu
   but do nothing in the car (the log shows many `fifo underflow` lines).

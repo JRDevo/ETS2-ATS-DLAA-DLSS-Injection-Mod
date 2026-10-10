@@ -254,7 +254,7 @@ public:
     // NGX feature at its next Run (history reset). Feather = border blend width in px (0..512, dlaa.ini only).
     // v0.10.0 phase 15: the lower limit is 20 (was 40): 20 % of a 4592x6496 eye = 920x1296, of a 6120x6496 menu eye =
     // 1224x1296 -- far above NGX's minimum input and above 2 x the 96 px feather.
-    static constexpr int kAreaMin = 20;
+    static constexpr int kAreaMin = 10;   // v0.10.0: 10 (was 20; 40 before phase 15)
     static void SetArea(int a) { s_area = a < kAreaMin ? kAreaMin : (a > 100 ? 100 : a); }
     static int  Area() { return s_area; }
     static void SetFeather(int f) { s_feather = f < 0 ? 0 : (f > 512 ? 512 : f); }
@@ -378,7 +378,7 @@ private:
     bool                                              m_noSharpen = false;   // v0.8.1 SetNoSharpen (sharpness treated as 0)
     static float                                      s_sharpness;
     static float                                      s_sharpRadius;  // v0.5.8: RCAS ring-tap radius in texels (1..4)
-    static int                                        s_area;         // v0.6.4 dlaa_area (kAreaMin..100; phase 15: 20..100)
+    static int                                        s_area;         // v0.6.4 dlaa_area (kAreaMin..100; phase 15: 20..100; now 10..100)
     static int                                        s_feather;      // v0.6.4 dlaa_area_feather (0..512 px)
     static bool                                       s_hdrLinear;    // v0.8.0 dlaa.ini dlss_hdr (IsHDR for HDR units)
 

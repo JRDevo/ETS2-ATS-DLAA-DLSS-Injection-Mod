@@ -379,7 +379,7 @@
 // v0.6.4 -- DLAA AREA. In the headset only the centre of each eye image is seen sharply (the lens blurs the outer
 //           part), but every DLAA stage (NGX 1.08 ms, MV+depth 0.31, sharpen 0.22, copies 0.14 ms per eye at
 //           4592x6496) scales with the pixel count. The whole pipeline now runs on a centred rect of each eye
-//           image: dlaa_area % (40..100, v0.10.0 phase 15: 20..100; default 100 = whole image = v0.6.3 path) of width AND height, each
+//           image: dlaa_area % (40..100, v0.10.0 phase 15: 20..100, now 10..100; default 100 = whole image = v0.6.3 path) of width AND height, each
 //           rounded to a multiple of 8, centred on the eye's OPTICAL CENTRE and clamped into the image (origin
 //           snapped to even px). colorIn / R32F depth / MV / out / sharp and the NGX feature are crop-sized
 //           (CopySubresourceRegion in and back); the depth twins stay full-size and the merged MV+depth pass /
@@ -1873,7 +1873,7 @@ void StepSharpRadius(int dir, uint64_t n) {
     PlayBeeps(s);
 }
 
-// v0.6.4 (v0.6.5 Shift+F5 -1 / Shift+F6 +1): DLAA area in 10 % steps, clamped 20..100 (100 = whole image; v0.10.0 phase 15:
+// v0.6.4 (v0.6.5 Shift+F5 -1 / Shift+F6 +1): DLAA area in 10 % steps, clamped 10..100 (100 = whole image; v0.10.0 phase 15:
 // the lower limit was 40). Each
 // eye rebuilds its crop textures + NGX feature at its next blit (Ensure sees the new crop size; one hitch), with
 // a DLSS history reset.
@@ -1892,7 +1892,7 @@ void StepArea(int dir, uint64_t n) {
         PlayTones(1, 200, 150, 0);                       // low beep: clamp limit (same as the other limit tones)
         return;
     }
-    SceneDlaa::SetArea(cur + 10 * dir);                  // clamps kAreaMin (20)..100
+    SceneDlaa::SetArea(cur + 10 * dir);                  // clamps kAreaMin (10)..100
     g_profExplicit[PK_AREA] = true;                      // v0.10.0 phase 10: the user's choice (profiles keep it)
     const int a = SceneDlaa::Area();
     SceneDlaa::CropSize(g_sceneW, g_sceneH, a, &cw, &ch);
@@ -15075,7 +15075,7 @@ bool DlaaOffFilePresent() {
 //                                  sharpen texture now always exists; Shift+F12 saves)
 //   sharp_radius                   float 1..4 (default 1.5): RCAS ring-tap radius in texels, bilinear (v0.5.8).
 //                                  Start state; v0.6.5 Shift+F9/F10 change it live in 0.5 steps (Shift+F12 saves)
-//   dlaa_area                      int 20..100 (default 100 = whole image, v0.6.4; 40..100 before v0.10.0 phase 15; VR
+//   dlaa_area                      int 10..100 (default 100 = whole image, v0.6.4; 40..100 before v0.10.0 phase 15, 20..100 until phase 24; VR
 //                                  only, also the VR menu / truck-preview units since phase 15): DLAA runs on a rect of this % of
 //                                  the eye image's width AND height, centred on the eye's optical centre. Start
 //                                  state; v0.6.5 Shift+F5/F6 change it live in 10 % steps (Shift+F12 saves)
@@ -15531,7 +15531,7 @@ void LoadConfig() {
             }
             else if (!strcmp(key, "dlaa_area")) {
 #ifdef WITH_DLAA
-                SceneDlaa::SetArea(v < SceneDlaa::kAreaMin ? SceneDlaa::kAreaMin : (v > 100 ? 100 : (int)v));   // v0.6.4; phase 15: 20..100
+                SceneDlaa::SetArea(v < SceneDlaa::kAreaMin ? SceneDlaa::kAreaMin : (v > 100 ? 100 : (int)v));   // v0.6.4; phase 15: 20..100, now 10..100
                 g_profExplicit[PK_AREA] = true;                                // v0.10.0 phase 10
 #endif
             }
