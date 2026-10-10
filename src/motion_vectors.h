@@ -925,8 +925,13 @@ private:
                                                                           // static gate (FwdMode.z: the Ctrl+F6 view's id-0 olive)
     uint32_t m_dimsX0 = 0, m_dimsY0 = 0, m_dimsW = 0, m_dimsH = 0;       // v0.10.0 phase 21: pass B's crop (WriteDims; the probe)
     uint32_t m_probePacked = 0;                                           // v0.10.0 phase 21: FwdMode.w of this pass B (0 = no probe)
+    bool     m_didPrepPending = false;                                     // DrawIdMv::PrepareBegin ran, DrawIdMv::PrepareEnd pending
     // prepares the record (CPU grouping + uploads); sets m_didN when pass B can use the ids. Returns the draws prepared.
     // v0.10.0 phase 3: + the forward record and whether pass A wrote this frame's medoid (the consensus statistic).
+    bool     DidPrepareBegin(ID3D11DeviceContext* ctx, const DrawIdRecord* did, ID3D11ShaderResourceView* idSrv,
+                             uint32_t fullW, uint32_t fullH, const DrawIdRecord* didFwd, bool freshMedoid,
+                             uint32_t noMedoid = 0);
+    uint32_t DidPrepareEnd(ID3D11DeviceContext* ctx, ID3D11ShaderResourceView* idSrv);
     uint32_t DidPrepare(ID3D11DeviceContext* ctx, const DrawIdRecord* did, ID3D11ShaderResourceView* idSrv,
                         uint32_t fullW, uint32_t fullH, const DrawIdRecord* didFwd, bool freshMedoid, uint32_t noMedoid = 0);
 };

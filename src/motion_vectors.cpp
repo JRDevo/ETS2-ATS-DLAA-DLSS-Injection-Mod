@@ -1533,10 +1533,11 @@ bool CameraMv::Generate(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, uint32
         // v0.9.0 (sets m_objMask for WriteDims; 0 = off). R_world = the last good frame's camera motion, not this frame's:
         // r2: no "moving" verdicts from it (camOk false -- while the camera turns every static draw would deviate); the ids'
         // own R (MVP_prev * inverse(MVP_cur)) does not depend on it and is still computed.
-        ObjPrepare(ctx, objs, fullW, fullH, false);
         // v0.10.0: per-draw pairs need no camera solve of this frame (R = MVP_prev * inverse(MVP_cur)); the camera R only
         // predicts duplicates' partners and decides "static", so the last good one is fine here.
-        const uint32_t didPrep = DidPrepare(ctx, did, didIdSrv, fullW, fullH, didFwd, false);   // no fresh medoid
+        const bool didPrepBegun = DidPrepareBegin(ctx, did, didIdSrv, fullW, fullH, didFwd, false);   // no fresh medoid
+        ObjPrepare(ctx, objs, fullW, fullH, false);
+        const uint32_t didPrep = didPrepBegun ? DidPrepareEnd(ctx, didIdSrv) : 0;
         if (!WriteDims(ctx, w, h, x0, y0, fullW, fullH)) {   // nothing dispatched: same contract as below
             ObjNoRun("Generate (reuse path): the dims cbuffer could not be mapped", objs);   // v0.9.0 r8
             if (candBad) m_prevStale = true; else Commit(ctx, cur);
@@ -1730,11 +1731,14 @@ bool CameraMv::Generate(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, uint32
     ctx->Unmap(m_cbPairs.Get(), 0);
     // v0.9.0 (sets m_objMask for WriteDims; 0 = off). r9: a world miss is a pairing failure for the objects too (mask
     // hold)
+    bool didPrepBegun = false;
+    if ((noMed & 1u) == 0u)
+        didPrepBegun = DidPrepareBegin(ctx, did, didIdSrv, fullW, fullH, didFwd, !fs.missHeld, noMed);
     ObjPrepare(ctx, objs, fullW, fullH, !fs.worldMiss, fs.worldMiss, missWhy);
     // v0.10.0 per-draw MVs: CPU grouping + uploads (sets m_didN for WriteDims); never a history reset for them
     // (phase 3: + the forward record; pass A writes a fresh medoid unless the world miss is held)
     const uint32_t didPrep = (noMed & 1u) ? didPrepEarly
-                                          : DidPrepare(ctx, did, didIdSrv, fullW, fullH, didFwd, !fs.missHeld, noMed);
+                                          : (didPrepBegun ? DidPrepareEnd(ctx, didIdSrv) : 0u);
     if (!WriteDims(ctx, w, h, x0, y0, fullW, fullH)) {
         ObjNoRun("Generate: the dims cbuffer could not be mapped", objs);   // v0.9.0 r8 diagnostic
         m_didN = 0;
@@ -1787,26 +1791,40 @@ bool CameraMv::Generate(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, uint32
 // v0.10.0: the pass's draw record -> this eye's DrawIdMv (created lazily: a failure leaves per-draw MVs off, the camera
 // path is untouched). m_didN = the draw count when pass B can use the ids (the pass's draw-id target is complete); the
 // record still becomes the eye's history without it. Returns the prepared draw count (0 = no dispatch / no commit).
-uint32_t CameraMv::DidPrepare(ID3D11DeviceContext* ctx, const DrawIdRecord* did, ID3D11ShaderResourceView* idSrv,
-                              uint32_t fullW, uint32_t fullH, const DrawIdRecord* didFwd, bool freshMedoid, uint32_t noMedoid) {
+bool CameraMv::DidPrepareBegin(ID3D11DeviceContext* ctx, const DrawIdRecord* did, ID3D11ShaderResourceView* idSrv,
+                               uint32_t fullW, uint32_t fullH, const DrawIdRecord* didFwd, bool freshMedoid,
+                               uint32_t noMedoid) {
     m_didN = 0;
     m_didNG = 0;
     m_didIdSrv = nullptr;
     m_didStaticGate = false;                           // v0.10.0 phase 14
-    if (!did || !ctx) { m_did.Forget(); return 0; }
+    m_didPrepPending = false;
+    if (!did || !ctx) { m_did.Forget(); return false; }
     if (!m_did.Ready() && !m_did.Init(m_dev.Get())) {
         if (!m_didInitTried && ShaderCache::Done()) {
             m_didInitTried = true;
             Log("MV draw-ids: the pairing unit could not be created -- per-draw motion vectors off for this unit");
         }
         m_did.Forget();
-        return 0;
+        return false;
     }
-    // v0.10.0 phase 3: forward draws only with the ids (idSrv): without the target their pairing would be pointless
-    const uint32_t n = m_did.Prepare(ctx, did, fullW, fullH, idSrv ? didFwd : nullptr, m_nearReject, freshMedoid, noMedoid,
-                                     idSrv != nullptr);   // v0.10.0 phase 9: the folded dispatch's rigid-parent bit
-    if (n && idSrv) { m_didN = n; m_didNG = m_did.PreparedG(); m_didIdSrv = idSrv; m_didStaticGate = did->StaticGated(); }
+    m_didPrepPending = m_did.PrepareBegin(ctx, did, fullW, fullH, idSrv ? didFwd : nullptr, m_nearReject, freshMedoid,
+                                          noMedoid, idSrv != nullptr);
+    return m_didPrepPending;
+}
+
+uint32_t CameraMv::DidPrepareEnd(ID3D11DeviceContext* ctx, ID3D11ShaderResourceView* idSrv) {
+    if (!m_didPrepPending) return 0;
+    m_didPrepPending = false;
+    const uint32_t n = m_did.PrepareEnd(ctx);
+    if (n && idSrv) { m_didN = n; m_didNG = m_did.PreparedG(); m_didIdSrv = idSrv; m_didStaticGate = m_didN != 0; }
     return n;
+}
+
+uint32_t CameraMv::DidPrepare(ID3D11DeviceContext* ctx, const DrawIdRecord* did, ID3D11ShaderResourceView* idSrv,
+                              uint32_t fullW, uint32_t fullH, const DrawIdRecord* didFwd, bool freshMedoid, uint32_t noMedoid) {
+    if (!DidPrepareBegin(ctx, did, idSrv, fullW, fullH, didFwd, freshMedoid, noMedoid)) return 0;
+    return DidPrepareEnd(ctx, idSrv);
 }
 
 // ===========================================================================================================

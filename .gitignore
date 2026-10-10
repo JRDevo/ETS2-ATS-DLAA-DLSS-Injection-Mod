@@ -1,4 +1,5 @@
 /build/
+/build-x64/
 *.log
 *.user
 *.suo

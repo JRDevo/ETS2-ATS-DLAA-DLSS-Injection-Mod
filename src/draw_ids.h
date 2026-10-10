@@ -102,7 +102,10 @@
 
 #include <d3d11_1.h>
 #include <wrl/client.h>
+#include <condition_variable>
 #include <cstdint>
+#include <mutex>
+#include <thread>
 
 // Non-blocking GPU timestamp span (same pattern as SceneDlaa's SnapTimer): Begin / End around GPU work, polled with
 // DONOTFLUSH; Take() returns the window average since the last Take.
@@ -482,6 +485,10 @@ public:
     // ConsHealthy): pass A wrote nothing for it, so a consensus found here also writes that layer's info rows (world: R_ego =
     // the camera R, InvRow3 from the winning draw); no consensus = the solve buffer keeps the last frame's R of that layer.
     // v0.10.0 phase 9: `idsBound` = Dispatch will get the pass's draw-id target (the rigid-parent bit of the folded dispatch)
+    bool PrepareBegin(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, uint32_t fullW, uint32_t fullH,
+                      const DrawIdRecord* fwd = nullptr, float nearM = 30.0f, bool freshMedoid = true,
+                      uint32_t noMedoid = 0, bool idsBound = true);
+    uint32_t PrepareEnd(ID3D11DeviceContext* ctx);
     uint32_t Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, uint32_t fullW, uint32_t fullH,
                      const DrawIdRecord* fwd = nullptr, float nearM = 30.0f, bool freshMedoid = true, uint32_t noMedoid = 0,
                      bool idsBound = true);
@@ -537,7 +544,7 @@ public:
     static void VsLayoutClear();                  // device change (VS pointers are not stable across devices)
     // after pass B: commits the prepared pass as this eye's previous one, queues the diagnostics readback
     void Finish(ID3D11DeviceContext* ctx);
-    void Forget() { m_prevN = 0; m_prepN = 0; m_consRun[0] = m_consRun[1] = 0;     // no history (the next pass pairs nothing;
+    void Forget() { PrepWait(); m_prevN = 0; m_prepN = 0; m_consRun[0] = m_consRun[1] = 0;     // no history (the next pass pairs nothing;
                     m_uholdValid[0] = m_uholdValid[1] = false;      // v0.10.0 phase 8: the consensus health restarts too;
                     if (!m_quiet) StaticClear(kStatClrHistory); }  // phase 14: a main unit's lost history also forgets every
                                                  // static streak; round 4: and the plate-hold table)
@@ -583,7 +590,13 @@ public:
         uint64_t trackRejects = 0;               // mover verdicts of ambiguous groups without a consistent track
         uint64_t worldPx = 0, idPx = 0, moverPx = 0, unpairedPx = 0;   // pass B, 1-in-64 grid
         uint64_t lowPairFrames = 0;              // landed frames with history whose paired share was < 50 %
-        uint64_t cpuTicks = 0;                   // QPC ticks in Prepare
+        uint64_t cpuTicks = 0;                   // QPC ticks in Prepare visible on the render thread
+        uint64_t pollTicks = 0;                  // QPC ticks in Poll (all callers)
+        uint64_t prepScanTicks = 0;              // QPC ticks in Prepare before the key sorts (record scan / setup)
+        uint64_t prepWaitTicks = 0;              // QPC ticks spent waiting for the worker in PrepareEnd
+        uint64_t prepFullTicks = 0;              // QPC ticks in Prepare full-key sort + grouping
+        uint64_t prepLooseTicks = 0;             // QPC ticks in Prepare loose-key sort + regrouping
+        uint64_t prepUploadTicks = 0;            // QPC ticks in Prepare upload maps / cbuffer fill
         // v0.10.0 phase 3: consensus camera R per layer (0 world, 1 cabin; read back with the diagnostics, frames that landed)
         uint64_t consFrames[2] = {}, consFallback[2] = {}, consCluster[2] = {};
         uint64_t consFallCluster[2] = {};        // v0.10.0 phase 18: the largest agreeing cluster in the fallback frames (sum)
@@ -679,6 +692,11 @@ public:
 
 private:
     void Poll(ID3D11DeviceContext* ctx);
+    bool PrepEnsureThread();
+    void PrepStopThread();
+    void PrepWorkerLoop();
+    void PrepWorker(uint32_t ne);
+    void PrepWait();
     bool m_ready = false, m_failed = false;
     Microsoft::WRL::ComPtr<ID3D11ComputeShader> m_csGather, m_csMatch, m_csResolve;
     Microsoft::WRL::ComPtr<ID3D11ComputeShader> m_csPair, m_csVote, m_csPick;   // v0.10.0 phase 3 (consensus camera R)
@@ -745,6 +763,26 @@ private:
     bool      m_prepLay = false;                 // m_prepVs / m_prepHint hold the prepared pass (layout detection on)
     bool      m_statReg = false;                 // registered for PollMain (the destructor unregisters)
     uint64_t m_rbCtr = 0;
+    const DrawIdRecord* m_prepRec = nullptr;
+    const DrawIdRecord* m_prepFwd = nullptr;
+    uint32_t m_prepReqW = 0, m_prepReqH = 0;
+    float    m_prepNearM = 30.0f;
+    uint32_t m_prepNoMedoid = 0;
+    bool     m_prepFreshMedoid = true;
+    bool     m_prepPending = false;
+    bool     m_prepIdsBoundReq = false;
+    bool     m_prepThreadFailed = false;
+    bool     m_prepJobReady = false;
+    bool     m_prepJobRunning = false;
+    bool     m_prepStop = false;
+    uint32_t m_prepWorkN = 0;
+    uint64_t m_prepCpuBaseTicks = 0;
+    uint64_t m_prepFullTicksLast = 0, m_prepLooseTicksLast = 0;
+    uint64_t m_prepBigGroupLast = 0;
+    std::thread m_prepThread;
+    std::mutex m_prepMutex;
+    std::condition_variable m_prepKickCv;
+    std::condition_variable m_prepDoneCv;
     // previous committed pass of this eye (CPU keys)
     uint32_t m_prevN = 0;
     uint64_t* m_prevFull = nullptr;

@@ -3398,6 +3398,8 @@ float DrawIdMv::SnapPx() { return g_snapPx; }
 
 DrawIdMv::DrawIdMv() {}
 DrawIdMv::~DrawIdMv() {
+    PrepWait();
+    PrepStopThread();
     delete[] m_prevFull; delete[] m_prevLoose; delete[] m_prevFlags;
     delete[] m_curFull; delete[] m_curLoose; delete[] m_curFlags;
     delete[] m_ent; delete[] m_orph;
@@ -3410,6 +3412,51 @@ DrawIdMv::~DrawIdMv() {
     delete[] m_rbVs; delete[] m_rbHint; delete[] m_prepVs; delete[] m_prepHint;   // v0.10.0 phase 22
     if (m_statReg) for (DrawIdMv*& u : g_statUnit) if (u == this) u = nullptr;
     delete[] m_dump;
+}
+
+bool DrawIdMv::PrepEnsureThread() {
+    if (m_prepThread.joinable()) return true;
+    if (m_prepThreadFailed) return false;
+    try {
+        m_prepStop = false;
+        m_prepJobReady = false;
+        m_prepJobRunning = false;
+        m_prepThread = std::thread([this]() { PrepWorkerLoop(); });
+        return true;
+    } catch (...) {
+        m_prepThreadFailed = true;
+        Log("MV draw-ids: prepare worker thread create failed -- prepare stays on the render thread");
+        return false;
+    }
+}
+
+void DrawIdMv::PrepStopThread() {
+    {
+        std::lock_guard<std::mutex> lock(m_prepMutex);
+        m_prepStop = true;
+        m_prepKickCv.notify_one();
+    }
+    if (m_prepThread.joinable()) m_prepThread.join();
+    m_prepStop = false;
+    m_prepJobReady = false;
+    m_prepJobRunning = false;
+    m_prepWorkN = 0;
+}
+
+void DrawIdMv::PrepWorkerLoop() {
+    std::unique_lock<std::mutex> lock(m_prepMutex);
+    for (;;) {
+        m_prepKickCv.wait(lock, [this]() { return m_prepStop || m_prepJobReady; });
+        if (m_prepStop) break;
+        const uint32_t ne = m_prepWorkN;
+        m_prepJobReady = false;
+        m_prepJobRunning = true;
+        lock.unlock();
+        PrepWorker(ne);
+        lock.lock();
+        m_prepJobRunning = false;
+        m_prepDoneCv.notify_all();
+    }
 }
 
 bool DrawIdMv::Init(ID3D11Device* dev) {
@@ -3814,6 +3861,362 @@ void DrawIdMv::Poll(ID3D11DeviceContext* ctx) {
             }
         }
     }
+}
+
+void DrawIdMv::PrepWorker(uint32_t ne) {
+    auto byKey = [](const Ent& a, const Ent& b) { return a.key < b.key || (a.key == b.key && a.sideIdx < b.sideIdx); };
+    constexpr uint32_t kGroupCap = 1024;
+    const int64_t tFull = Qpc();
+    std::sort(m_ent, m_ent + ne, byKey);
+    m_nGroups = 0; m_nList = 0;
+    uint32_t no = 0;
+    m_prepBigGroupLast = 0;
+    auto emit = [&](const Ent* e, uint32_t a, uint32_t b, bool loose) {
+        uint32_t c = 0, p = 0;
+        for (uint32_t q = a; q < b; ++q) { if (e[q].sideIdx & 0x80000000u) ++p; else ++c; }
+        if (!c || !p) return false;
+        if (c > kGroupCap || p > kGroupCap) {
+            m_prepBigGroupLast += c;
+            for (uint32_t q = a; q < b; ++q) if (!(e[q].sideIdx & 0x80000000u)) m_curBig[e[q].sideIdx] = 1;
+            return true;
+        }
+        uint32_t* g = &m_groupData[m_nGroups * 4u];
+        g[0] = m_nList; g[1] = c;
+        uint32_t r = 0;
+        for (uint32_t q = a; q < b; ++q) {
+            if (e[q].sideIdx & 0x80000000u) continue;
+            const uint32_t i = e[q].sideIdx;
+            m_listData[m_nList++] = i;
+            m_curGroup[i] = m_nGroups; m_curRank[i] = r++; m_curLooseG[i] = loose ? 1u : 0u;
+        }
+        g[2] = m_nList; g[3] = p;
+        r = 0;
+        for (uint32_t q = a; q < b; ++q) {
+            if (!(e[q].sideIdx & 0x80000000u)) continue;
+            const uint32_t j = e[q].sideIdx & 0x7FFFFFFFu;
+            m_listData[m_nList++] = j;
+            m_prevGroup[j] = m_nGroups; m_prevRank[j] = r++;
+        }
+        ++m_nGroups;
+        return true;
+    };
+    for (uint32_t a = 0; a < ne;) {
+        uint32_t b = a + 1;
+        while (b < ne && m_ent[b].key == m_ent[a].key) ++b;
+        if (!emit(m_ent, a, b, false)) {
+            for (uint32_t q = a; q < b; ++q) {
+                const uint32_t si = m_ent[q].sideIdx;
+                const uint64_t lk = (si & 0x80000000u) ? m_prevLoose[si & 0x7FFFFFFFu] : m_curLoose[si];
+                m_orph[no++] = { lk, si };
+            }
+        }
+        a = b;
+    }
+    m_prepFullTicksLast = (uint64_t)(Qpc() - tFull);
+    const int64_t tLoose = Qpc();
+    std::sort(m_orph, m_orph + no, byKey);
+    for (uint32_t a = 0; a < no;) {
+        uint32_t b = a + 1;
+        while (b < no && m_orph[b].key == m_orph[a].key) ++b;
+        emit(m_orph, a, b, true);
+        a = b;
+    }
+    m_prepLooseTicksLast = (uint64_t)(Qpc() - tLoose);
+}
+
+void DrawIdMv::PrepWait() {
+    std::unique_lock<std::mutex> lock(m_prepMutex);
+    if (!m_prepThread.joinable()) return;
+    m_prepDoneCv.wait(lock, [this]() { return !m_prepJobReady && !m_prepJobRunning; });
+}
+
+bool DrawIdMv::PrepareBegin(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, uint32_t fullW, uint32_t fullH,
+                            const DrawIdRecord* fwd, float nearM, bool freshMedoid, uint32_t noMedoid, bool idsBound) {
+    PrepWait();
+    m_prepPending = false;
+    m_prepN = 0; m_prepNG = 0; m_prepNF = 0;
+    if (m_dumpPrep) { m_dumpPrep = false; m_dumpArm = true; }
+    if (!ctx || !m_ready) return false;
+    const int64_t tPoll = Qpc();
+    Poll(ctx);
+    m_stats.pollTicks += (uint64_t)(Qpc() - tPoll);
+    const int64_t t0 = Qpc();
+    if (!rec || !rec->Usable()) {
+        m_prevN = 0;
+        if (!m_quiet) StaticClear(kStatClrRecord);
+        return false;
+    }
+    const uint32_t nG = (uint32_t)rec->Count();
+    m_prepStatN = 0;
+    if (!m_quiet && g_statFrames > 0u) {
+        if (!m_prepStatKey) {
+            m_prepStatKey = new (std::nothrow) uint64_t[kMax];
+            m_rbStatKey = new (std::nothrow) uint64_t[(size_t)kRb * kMax];
+            if (!m_prepStatKey || !m_rbStatKey) { delete[] m_prepStatKey; delete[] m_rbStatKey; m_prepStatKey = m_rbStatKey = nullptr; }
+        }
+        if (m_prepStatKey && !m_statReg)
+            for (DrawIdMv*& u : g_statUnit) if (!u) { u = this; m_statReg = true; break; }
+        if (m_prepStatKey) {
+            const uint8_t notCand = DrawIdRecord::kFInstanced | DrawIdRecord::kFNoMvp | DrawIdRecord::kFCabin;
+            for (uint32_t i = 0; i < nG; ++i) m_prepStatKey[i] = (rec->Flags((int)i) & notCand) ? 0ull : rec->FullKey((int)i);
+            m_prepStatN = nG;
+        }
+    }
+    uint32_t nF = 0;
+    if (fwd && fwd->Count() > 0) {
+        if (fwd->Usable() && fwd->Segments() > 0 && fwd->PendingReplay() == 0 && !fwd->ReplayFailed() &&
+            fwd->IdBase() == nG && nG < (uint32_t)kMax) {
+            nF = (uint32_t)fwd->Count();
+            if (nF > (uint32_t)kMax - nG) nF = (uint32_t)kMax - nG;
+        } else ++m_stats.fwdDropped;
+    }
+    const uint32_t n = nG + nF;
+    auto src = [&](uint32_t i) -> const DrawIdRecord* { return i < nG ? rec : fwd; };
+    auto idx = [&](uint32_t i) -> int { return i < nG ? (int)i : (int)(i - nG); };
+    const uint32_t m = m_prevN;
+    const uint8_t kNoPair = DrawIdRecord::kFInstanced | DrawIdRecord::kFNoMvp;
+    uint32_t elig = 0, ne = 0;
+    m_prepInstN = 0;
+    for (uint32_t i = 0; i < n; ++i) {
+        if (g_instReplay && i < nG && (rec->Flags((int)i) & kNoPair) && m_prepInstN < (uint32_t)kRbInst) {
+            m_prepInstIdx[m_prepInstN] = i; m_prepInstKey[m_prepInstN] = rec->ShapeKey((int)i); ++m_prepInstN;
+        }
+        m_curFull[i] = src(i)->FullKey(idx(i));
+        m_curLoose[i] = src(i)->LooseKey(idx(i));
+        m_curFlags[i] = (uint8_t)(src(i)->Flags(idx(i)) | (i >= nG ? DrawIdRecord::kFFwd : 0));
+        m_curGroup[i] = kNone; m_curRank[i] = 0; m_curLooseG[i] = 0; m_curBig[i] = 0;
+        if (m_curFlags[i] & kNoPair) continue;
+        ++elig;
+        m_ent[ne++] = { m_curFull[i], i };
+    }
+    for (uint32_t j = 0; j < m; ++j) {
+        m_prevGroup[j] = kNone; m_prevRank[j] = 0;
+        if (m_prevFlags[j] & kNoPair) continue;
+        m_ent[ne++] = { m_prevFull[j], 0x80000000u | j };
+    }
+    const uint64_t scanTicks = (uint64_t)(Qpc() - t0);
+    m_stats.prepScanTicks += scanTicks;
+    m_prepRec = rec; m_prepFwd = fwd;
+    m_prepReqW = fullW; m_prepReqH = fullH;
+    m_prepNearM = nearM; m_prepFreshMedoid = freshMedoid; m_prepNoMedoid = noMedoid;
+    m_prepIdsBoundReq = idsBound;
+    m_prepCpuBaseTicks = scanTicks;
+    m_prepFullTicksLast = 0; m_prepLooseTicksLast = 0; m_prepBigGroupLast = 0;
+    m_prepN = n; m_prepNG = nG; m_prepNF = nF; m_prepElig = elig; m_prepHist = m != 0;
+    m_prepPending = true;
+    if (PrepEnsureThread()) {
+        std::lock_guard<std::mutex> lock(m_prepMutex);
+        m_prepWorkN = ne;
+        m_prepJobReady = true;
+        m_prepKickCv.notify_one();
+    } else {
+        PrepWorker(ne);
+    }
+    return true;
+}
+
+uint32_t DrawIdMv::PrepareEnd(ID3D11DeviceContext* ctx) {
+    if (!m_prepPending || !ctx || !m_ready) return 0;
+    const int64_t t0 = Qpc();
+    const int64_t tWait = Qpc();
+    PrepWait();
+    m_stats.prepWaitTicks += (uint64_t)(Qpc() - tWait);
+    m_prepPending = false;
+    m_stats.prepFullTicks += m_prepFullTicksLast;
+    m_stats.prepLooseTicks += m_prepLooseTicksLast;
+    m_stats.bigGroup += m_prepBigGroupLast;
+    const DrawIdRecord* rec = m_prepRec;
+    const DrawIdRecord* fwd = m_prepFwd;
+    const uint32_t fullW = m_prepReqW, fullH = m_prepReqH;
+    const float nearM = m_prepNearM;
+    const bool freshMedoid = m_prepFreshMedoid;
+    const uint32_t noMedoid = m_prepNoMedoid;
+    const bool idsBound = m_prepIdsBoundReq;
+    const uint32_t n = m_prepN, nG = m_prepNG, nF = m_prepNF, m = m_prevN, elig = m_prepElig;
+    const uint8_t kNoPair = DrawIdRecord::kFInstanced | DrawIdRecord::kFNoMvp;
+    auto src = [&](uint32_t i) -> const DrawIdRecord* { return i < nG ? rec : fwd; };
+    auto idx = [&](uint32_t i) -> int { return i < nG ? (int)i : (int)(i - nG); };
+    if (!rec || !rec->Usable()) { m_prevN = 0; return 0; }
+    if (!m_prepVs) {
+        m_prepVs = new (std::nothrow) const void*[kMax];
+        m_prepHint = new (std::nothrow) uint8_t[kMax];
+        m_rbVs = new (std::nothrow) const void*[(size_t)kRb * kMax];
+        m_rbHint = new (std::nothrow) uint8_t[(size_t)kRb * kMax];
+        if (!m_prepVs || !m_prepHint || !m_rbVs || !m_rbHint) {
+            delete[] m_prepVs; delete[] m_prepHint; delete[] m_rbVs; delete[] m_rbHint;
+            m_prepVs = nullptr; m_prepHint = nullptr; m_rbVs = nullptr; m_rbHint = nullptr;
+        }
+    }
+    const bool layOn = !LayoutOff() && m_prepVs;
+    const int64_t tUpload = Qpc();
+    D3D11_MAPPED_SUBRESOURCE mp{};
+    if (FAILED(ctx->Map(m_tab.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) { m_prevN = 0; return 0; }
+    {
+        uint32_t* t = (uint32_t*)mp.pData;
+        uint64_t looseN = 0, noGroup = 0;
+        const void* lastVs = nullptr;
+        uint32_t lastHint = 0;
+        for (uint32_t i = 0; i < n; ++i) {
+            const uint8_t fl = m_curFlags[i];
+            uint32_t f = 0;
+            if (fl & DrawIdRecord::kFInstanced) f |= 1u;
+            if (fl & DrawIdRecord::kFNoMvp) f |= 2u;
+            if (fl & DrawIdRecord::kFCabin) f |= 4u;
+            if (m_curLooseG[i]) { f |= 256u; ++looseN; }
+            if (fl & DrawIdRecord::kFFwd) f |= 512u;
+            if (layOn) {
+                const void* vs = (fl & kNoPair) ? nullptr : src(i)->Vs(idx(i));
+                if (vs != lastVs) {
+                    const VsLay* le = VsLayFind(vs, false);
+                    lastHint = (le && le->row >= 4u && le->row <= 8u) ? le->row : 0u;
+                    lastVs = vs;
+                }
+                const uint32_t hint = vs ? lastHint : 0u;
+                const UINT rows = src(i)->MirrorRows(idx(i));
+                f |= ((rows < 15u ? rows : 15u) << 16) | (hint << 20);
+                m_prepVs[i] = vs; m_prepHint[i] = (uint8_t)hint;
+            }
+            if (!(fl & kNoPair) && m_curGroup[i] == kNone) ++noGroup;
+            const float vmin = src(i)->VpMin(idx(i)), vmax = src(i)->VpMax(idx(i));
+            t[i * 8 + 0] = src(i)->MirrorOff(idx(i));
+            t[i * 8 + 1] = m_curGroup[i];
+            t[i * 8 + 2] = f;
+            t[i * 8 + 3] = m_curRank[i];
+            memcpy(&t[i * 8 + 4], &vmin, 4);
+            memcpy(&t[i * 8 + 5], &vmax, 4);
+            t[i * 8 + 6] = (src(i)->IndexCount(idx(i)) & 0xFFFFFFu) | ((src(i)->InstanceCount(idx(i)) < 255u ? src(i)->InstanceCount(idx(i)) : 255u) << 24);
+            t[i * 8 + 7] = src(i)->VpJitterPacked(idx(i));
+        }
+        m_stats.looseDraws += looseN;
+        m_stats.noGroup += m != 0 ? noGroup : 0;
+    }
+    ctx->Unmap(m_tab.Get(), 0);
+    if (m) {
+        if (FAILED(ctx->Map(m_ptab.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) { m_prevN = 0; return 0; }
+        uint32_t* t = (uint32_t*)mp.pData;
+        for (uint32_t j = 0; j < m; ++j) { t[j * 4 + 0] = m_prevGroup[j]; t[j * 4 + 1] = m_prevFlags[j]; t[j * 4 + 2] = m_prevRank[j]; t[j * 4 + 3] = 0; }
+        ctx->Unmap(m_ptab.Get(), 0);
+    }
+    if (m_nGroups) {
+        if (FAILED(ctx->Map(m_groups.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) { m_prevN = 0; return 0; }
+        memcpy(mp.pData, m_groupData, (size_t)m_nGroups * 16u);
+        ctx->Unmap(m_groups.Get(), 0);
+        if (FAILED(ctx->Map(m_lists.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) { m_prevN = 0; return 0; }
+        memcpy(mp.pData, m_listData, (size_t)m_nList * 4u);
+        ctx->Unmap(m_lists.Get(), 0);
+    }
+    uint32_t cand[kCandWorld + kCandCabin] = {};
+    uint32_t candW = 0, candC = 0;
+    if (m && m_nGroups) {
+        uint32_t* tmp = m_candTmp;
+        for (int L = 0; L < 2; ++L) {
+            uint32_t ne2 = 0;
+            for (uint32_t i = 0; i < nG; ++i) {
+                const uint8_t fl = m_curFlags[i];
+                if ((fl & kNoPair) || m_curGroup[i] == kNone) continue;
+                if (((fl & DrawIdRecord::kFCabin) != 0) != (L == 1)) continue;
+                tmp[ne2++] = i;
+            }
+            const uint32_t capC = g_consCands / 2u < (uint32_t)kCandCabin ? g_consCands / 2u : (uint32_t)kCandCabin;
+            const uint32_t cap = L == 0 ? g_consCands : capC;
+            const uint32_t take = ne2 < cap ? ne2 : cap;
+            for (uint32_t j = 0; j < take; ++j) cand[(L == 0 ? 0 : candW) + j] = tmp[(uint32_t)(((uint64_t)j * ne2) / take)];
+            if (L == 0) candW = take; else candC = take;
+        }
+    }
+    if (FAILED(ctx->Map(m_cb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) { m_prevN = 0; return 0; }
+    {
+        const uint32_t counts[4] = { n, m, m_nGroups, nG };
+        const float params[4] = { g_maxM, g_snapPx, (float)fullW, (float)fullH };
+        const float params2[4] = { g_trackM, g_snapPx > 0.05f ? g_snapPx : 0.05f, nearM, g_attachM };
+        const uint32_t cons[4] = { candW, candC, (uint32_t)kConsMin,
+                                   (g_consensus ? 1u : 0u) | (freshMedoid ? 2u : 0u) | (g_twin ? 4u : 0u) | ((noMedoid & 3u) << 3) };
+        memcpy(mp.pData, counts, sizeof(counts));
+        memcpy((uint8_t*)mp.pData + 16, params, sizeof(params));
+        memcpy((uint8_t*)mp.pData + 32, params2, sizeof(params2));
+        memcpy((uint8_t*)mp.pData + 48, cons, sizeof(cons));
+        memcpy((uint8_t*)mp.pData + 64, cand, sizeof(cand));
+        const float par[4] = { (g_parentMut & 2) ? 1e30f : kParDepthTol, kParMinVotes, kParMinShare, kParVoteCap };
+        const uint32_t parU[4] = { (g_parent ? 1u : 0u) | ((g_parentMut & 1) ? 2u : 0u) | (g_instancedVote ? 4u : 0u) |
+                                       (g_voteRes > kParStride ? 8u : 0u) | (rec->StaticSkipped() > 0 ? 16u : 0u),
+                                   g_voteRes, g_parReach ? g_parReach : kParReachPx, kParMarchBudget };
+        memcpy((uint8_t*)mp.pData + 64 + sizeof(cand), par, sizeof(par));
+        memcpy((uint8_t*)mp.pData + 64 + sizeof(cand) + 16, parU, sizeof(parU));
+        const float par2[4] = { (g_parentMut & 2) ? 1e30f : kParEdgeTol, kParFineSamples,
+                                g_marchCap ? (float)g_marchCap * (5.0f / 6.0f) : 0.0f,
+                                g_marchCap ? (float)g_marchCap * (1.0f / 6.0f) : 0.0f };
+        memcpy((uint8_t*)mp.pData + 64 + sizeof(cand) + 32, par2, sizeof(par2));
+        uint32_t clip[4] = { 0u, 0u, fullW, fullH };
+        if (rec->Clipped()) {
+            const D3D11_RECT r = rec->ClipRect();
+            const uint32_t x0 = r.left > 0 ? (uint32_t)r.left : 0u, y0 = r.top > 0 ? (uint32_t)r.top : 0u;
+            const uint32_t x1 = r.right > 0 ? (uint32_t)r.right : 0u, y1 = r.bottom > 0 ? (uint32_t)r.bottom : 0u;
+            clip[0] = (x0 < fullW ? x0 : fullW) & ~3u; clip[1] = (y0 < fullH ? y0 : fullH) & ~3u;
+            clip[2] = x1 < fullW ? x1 : fullW; clip[3] = y1 < fullH ? y1 : fullH;
+            if (clip[2] < clip[0]) clip[2] = clip[0];
+            if (clip[3] < clip[1]) clip[3] = clip[1];
+        }
+        const uint32_t fwdMode[4] = { (nF && fwd) ? fwd->Shift() : 0u, g_consMinCabin, g_cabinSmall, 0u };
+        const bool pickOn = m && m_nGroups && (candW + candC) && g_consensus;
+        const bool twinOn = g_twin && m, attachOn = g_attachM > 0.0f && m;
+        const bool parentOn = g_parent && m && idsBound && fullW && fullH;
+        ID3D11Device* devC = nullptr;
+        if (parentOn && g_voteCompact && m_csParCollect && m_csParMarch && !m_parListUav && !m_parListFailed) ctx->GetDevice(&devC);
+        if (devC) { EnsureParList(devC); devC->Release(); }
+        const bool compact = parentOn && g_voteCompact && m_parListUav && m_marchArgsUav;
+        const uint32_t fold = (pickOn ? 1u : 0u) | ((twinOn || attachOn) ? 2u : 0u) | (parentOn ? 4u : 0u) | (twinOn ? 8u : 0u) |
+                              (attachOn ? 16u : 0u) | (compact ? 32u : 0u);
+        m_prepCompact = compact;
+        const uint32_t S = g_voteRes, cw = clip[2] - clip[0], chh = clip[3] - clip[1];
+        m_prepGrid = ((cw + S - 1u) / S + 7u) / 8u * (((chh + S - 1u) / S + 7u) / 8u);
+        uint32_t epsBits = 0;
+        memcpy(&epsBits, &g_statEps, 4);
+        const uint32_t holdBits = ((parentOn && m_uhold[0] && m_uholdValid[1 - m_ping]) ? 1u : 0u) |
+                                  ((g_parentMut & 4) ? 2u : 0u) | ((g_parentMut & 8) ? 4u : 0u) | ((g_parentMut & 16) ? 8u : 0u) |
+                                  ((g_parentMut & 32) ? 16u : 0u) | ((g_parentMut & 64) ? 32u : 0u);
+        const uint32_t foldU[4] = { fold, g_parMaxListed, epsBits, holdBits };
+        memcpy((uint8_t*)mp.pData + 64 + sizeof(cand) + 48, clip, sizeof(clip));
+        memcpy((uint8_t*)mp.pData + 64 + sizeof(cand) + 64, fwdMode, sizeof(fwdMode));
+        memcpy((uint8_t*)mp.pData + 64 + sizeof(cand) + 80, foldU, sizeof(foldU));
+        memcpy(m_prepClip, clip, sizeof(clip));
+        m_prepFold = fold;
+        m_prepIds = idsBound;
+    }
+    ctx->Unmap(m_cb.Get(), 0);
+    m_stats.prepUploadTicks += (uint64_t)(Qpc() - tUpload);
+    m_prepW = fullW; m_prepH = fullH;
+    if (m_dumpArm && !m_dumpPending && m_dump) {
+        m_dumpArm = false; m_dumpPrep = true; m_dumpN = 0; m_dumpSkipped = 0;
+        m_dumpNG = nG; m_dumpNAll = n; m_dumpM = m; m_dumpW = fullW; m_dumpH = fullH; m_dumpHist = m != 0;
+        for (uint32_t i = 0; i < n; ++i) {
+            const DrawIdRecord* r = src(i);
+            const int k = idx(i);
+            const UINT ic = r->IndexCount(k);
+            if (m_dumpN >= (uint32_t)kMax) { ++m_dumpSkipped; continue; }
+            DumpEnt& d = m_dump[m_dumpN++];
+            d.big = m_curBig[i]; d.i = i; d.ic = ic; r->CbWindow(k, &d.cbFirst, &d.cbNum);
+            d.mirrorOff = r->MirrorOff(k); d.group = m_curGroup[i];
+            d.gCur = d.group != kNone ? m_groupData[d.group * 4u + 1u] : 0u;
+            d.gPrev = d.group != kNone ? m_groupData[d.group * 4u + 3u] : 0u;
+            d.full = m_curFull[i]; d.loose = m_curLoose[i];
+            d.flags = (uint8_t)(m_curFlags[i] | (m_curLooseG[i] ? 0x80 : 0));
+            d.ps = r->Ps(k); d.psInfo = DrawIdRecord::PsInfo(d.ps);
+            d.vpMin = r->VpMin(k); d.vpMax = r->VpMax(k); d.inst = r->InstanceCount(k);
+            d.vs = r->Vs(k); d.rows = (uint8_t)r->MirrorRows(k); d.hint = layOn ? m_prepHint[i] : 0u;
+        }
+    }
+    m_prepLay = layOn;
+    m_prepCandW = candW; m_prepCandC = candC; m_prepElig = elig; m_prepHist = m != 0;
+    if (noMedoid & 1u) ++m_stats.noMedoidFrames[0];
+    if (noMedoid & 2u) ++m_stats.noMedoidFrames[1];
+    ++m_stats.frames;
+    m_stats.draws += n;
+    m_stats.fwdDraws += nF;
+    m_stats.instanced += (uint64_t)rec->Instanced();
+    m_stats.noMvp += (uint64_t)rec->NoMvp();
+    if (m) ++m_stats.histFrames;
+    m_stats.cpuTicks += m_prepCpuBaseTicks + (uint64_t)(Qpc() - t0);
+    return n;
 }
 
 uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, uint32_t fullW, uint32_t fullH,

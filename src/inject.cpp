@@ -11497,6 +11497,12 @@ void DidStatsTag(char* buf, size_t cap, uint64_t passes) {
     const double frd = fr > 0 ? fr : 1.0;
     const double rb = s.rbFrames > s0.rbFrames ? (double)(s.rbFrames - s0.rbFrames) : 0.0;
     const double rbd = rb > 0 ? rb : 1.0;
+    const double pollCpu = (double)(s.pollTicks - s0.pollTicks) * 1000.0 / qf / frd;
+    const double prepScanCpu = (double)(s.prepScanTicks - s0.prepScanTicks) * 1000.0 / qf / frd;
+    const double prepWaitCpu = (double)(s.prepWaitTicks - s0.prepWaitTicks) * 1000.0 / qf / frd;
+    const double prepFullCpu = (double)(s.prepFullTicks - s0.prepFullTicks) * 1000.0 / qf / frd;
+    const double prepLooseCpu = (double)(s.prepLooseTicks - s0.prepLooseTicks) * 1000.0 / qf / frd;
+    const double prepUploadCpu = (double)(s.prepUploadTicks - s0.prepUploadTicks) * 1000.0 / qf / frd;
     const uint64_t stD[6] = { 0, s.st[1] - s0.st[1], s.st[2] - s0.st[2], s.st[3] - s0.st[3], s.st[4] - s0.st[4],
                               s.st[5] - s0.st[5] };
     const uint64_t elig = stD[1] + stD[2] + stD[3];
@@ -11508,7 +11514,7 @@ void DidStatsTag(char* buf, size_t cap, uint64_t passes) {
              "pairing (eye 0, %.0f frames, %.0f read back): paired %.1f %% of %.0f draws/frame (movers %.1f, static %.1f, "
              "unpaired %.1f, instanced %.1f, no-MVP %.1f), via the pointer-free key %.1f draws/frame (%.1f paired), no "
              "partner group %.1f/frame, oversized groups %.1f/frame, unconfirmed tracks %.1f/frame, frames < 50 %% paired %llu, "
-             "CPU %.3f ms/frame, GPU "
+             "CPU %.3f ms/frame (poll %.3f, scan %.3f, wait %.3f, full %.3f, loose %.3f, upload %.3f), GPU "
              "%.3f ms avg / %.3f max | pass B GPU %.3f ms avg / %.3f max | id coverage %.1f %% of world px (movers %.2f %%, "
              "unpaired %.2f %%)",
              g_didOn ? "ACTIVE" : "inactive", g_didHooked.load() ? "instanced hooked" : "instanced NOT hooked",
@@ -11524,7 +11530,8 @@ void DidStatsTag(char* buf, size_t cap, uint64_t passes) {
              (double)(s.loosePaired - s0.loosePaired) / rbd, (double)(s.noGroup - s0.noGroup) / frd,
              (double)(s.bigGroup - s0.bigGroup) / frd, (double)(s.trackRejects - s0.trackRejects) / rbd,
              (unsigned long long)(s.lowPairFrames - s0.lowPairFrames),
-             (double)(s.cpuTicks - s0.cpuTicks) * 1000.0 / qf / frd, pAvg, pMax, bAvg, bMax,
+             (double)(s.cpuTicks - s0.cpuTicks) * 1000.0 / qf / frd, pollCpu, prepScanCpu, prepWaitCpu, prepFullCpu, prepLooseCpu,
+             prepUploadCpu, pAvg, pMax, bAvg, bMax,
              100.0 * (double)(s.idPx - s0.idPx) / wpxd, 100.0 * (double)(s.moverPx - s0.moverPx) / wpxd,
              100.0 * (double)(s.unpairedPx - s0.unpairedPx) / wpxd);
     // v0.10.0 phase 3: consensus camera R (eye 0) + forward-pass ids
