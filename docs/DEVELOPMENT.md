@@ -1112,7 +1112,7 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
 
 ### Phase 24 (v0.10.0): the VR jitter phase parity -- a parked truck wobbled, each eye saw only half of the Halton positions
 
-- **Evidence** (ATS VR 2026-10-10, `E:\OpenXR-EyeCapture\capturesmtrucks_20261010_101035_SBS.mkv`, Ctrl+F10 `dlaa_snap\`): the user
+- **Evidence** (ATS VR 2026-10-10, `E:\OpenXR-EyeCapture\captures\amtrucks_20261010_101035_SBS.mkv`, Ctrl+F10 `dlaa_snap\`): the user
   saw a parked pickup in front wobble slightly, no magenta. The four snapshot frames (passes e0 e1 e1 e0) showed the per-draw motion
   vectors on the truck CORRECT (the previous frame warped by `mv - jitter delta` lands on the current one, best of a 2D search; the
   DLAA output follows the same shift), but the Halton phases were eye 0: 0, 2 and eye 1: 1, 1. `n.phase = (s >> 1) % 8` pairs the
