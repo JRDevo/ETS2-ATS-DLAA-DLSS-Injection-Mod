@@ -752,6 +752,16 @@ bool     g_jitterEnabled  = true;        // dlaa.ini: jitter_enabled
 int      g_phases         = 8;           // dlaa.ini: jitter_phases (v0.5.7: 16 -> 8 = NVIDIA's 8 x ratio for DLAA)
 int      g_phase          = 0;           // Halton phase of the NEWEST pass (logging)
 float    g_jx = 0.0f, g_jy = 0.0f;       // viewport shift of the NEWEST pass (G-buffer rasterization), px
+// v0.10.0 phase 23: dlaa.ini jitter_overscan (default 1). A jittered viewport (world eye passes, mirror units) is issued
+// (W+1) x (H+1) with its top-left at the shift instead of W x H. Measured (scratch vpedge test, WARP and RTX 5090, 64x48
+// and 3832x4064): with W x H the rasterizer clips to [TopLeftX, floor(TopLeftX + W)) -- ANY negative shift leaves the last
+// pixel column (x) / bottom row (y) unrendered, a shift above +0.5 the first one: the safe domain is [0, +0.5], half the
+// Halton span, so no constant bias can fit the jitter into it. One extra pixel of viewport on the right / bottom makes
+// [-1, +0.5] safe, which holds the whole [-0.5, +0.5) Halton range. The shift (TopLeftX / Y), and therefore the NGX jitter
+// and the draw-id jitter, are unchanged; the picture is scaled by (W+1)/W about its top-left corner, the same on every
+// frame (at most 1 px at the right / bottom edge: invisible, and DLSS sees the per-frame offset as exactly the shift).
+// 0 = the phase-22 viewport (W x H): the sun-shaft / bloom haze blinks on the right / bottom edge with a negative shift.
+int      g_jitterOverscan = 1;
 // v0.7.0 DLSS upscaling (dlaa.ini dlss_upscale, Ctrl+F4 live): render at the scene size (r_scale_x / r_scale_y),
 // NGX outputs at the blit RT (viewport) size and the result is composited into the eye RT after the game's blit.
 // Only when the blit output is larger than the scene in at least one axis; otherwise the v0.6.5 DLAA path.
@@ -5910,6 +5920,9 @@ void PreviewOnBindTargets(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetVi
 // R11G11B10 texels are practically never exactly 0 (and a true black one gets its neighbour = no visible change), so on a
 // GPU that follows the rule this changes nothing; on one that drops the fractional edge it removes the black column.
 // The seam capture (pvseam, snapshot key) logs the zero texels of every tile edge BEFORE this fix = the proof either way.
+// v0.10.0 phase 23 settled it (scratch vpedge test, WARP + RTX 5090): the FAR edge is cut at floor(TopLeft + size), so ANY
+// negative shift loses the last column / row; the near edge follows the centre rule (lost above +0.5). The world / mirror
+// passes now use a 1 px larger viewport instead (g_jitterOverscan); the preview keeps this fix.
 // |shift| > 0.49 keeps the unconditional copy above (provably uncovered). Both off with dlaa.ini preview_edge_fix = 0.
 // kPvEdgeFillShader-BEGIN (the build validates this block with fxc)
 const char kPvEdgeFillShader[] = R"(
@@ -6643,6 +6656,7 @@ UINT           g_gameVpN      = 0;
 bool           g_jitterPass   = false;     // current OM binding is a jitter pass
 bool           g_vpShifted    = false;     // last issued viewports carried a shift
 float          g_vpShiftX = 0.0f, g_vpShiftY = 0.0f;   // ...and which one
+bool           g_vpOver       = false;     // v0.10.0 phase 23: ...and was 1 px larger (jitter_overscan)
 int            g_passLogged   = 0;         // bit0 = G-buffer logged, bit1 = forward logged
 
 // Jitter only while DLAA is live and the jitter is enabled in dlaa.ini (v0.6.2: and not in passive mode).
@@ -6812,18 +6826,24 @@ void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
     const float sx = g_jx, sy = g_jy;
 #endif
     const bool shift = worldShift || pvShift || mirShift;
-    if (!gameJustSet && shift == g_vpShifted &&
+    // v0.10.0 phase 23: the world / mirror viewport is 1 px larger on the right and bottom (g_jitterOverscan): a negative shift
+    // no longer drops the last column / bottom row. Every jittered world / mirror pass gets it, whatever the sign, so the
+    // (tiny) scale of the picture is the same on every frame. The preview passes keep W x H: their tiles are shifted by up to
+    // +-0.875 px and the round 4/5 edge fix (PvFixTileEdges) repairs the edge they lose.
+    const bool over = g_jitterOverscan && (worldShift || mirShift);
+    if (!gameJustSet && shift == g_vpShifted && over == g_vpOver &&
         (!shift || (g_vpShiftX == sx && g_vpShiftY == sy))) return;
     if (shift) {
         D3D11_VIEWPORT v[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
         memcpy(v, g_gameVp, g_gameVpN * sizeof(D3D11_VIEWPORT));
         v[0].TopLeftX += sx;
         v[0].TopLeftY += sy;
+        if (over) { v[0].Width += 1.0f; v[0].Height += 1.0f; }
         oRSSetViewports(ctx, g_gameVpN, v);
     } else {
         oRSSetViewports(ctx, g_gameVpN, g_gameVp);
     }
-    g_vpShifted = shift; g_vpShiftX = sx; g_vpShiftY = sy;
+    g_vpShifted = shift; g_vpShiftX = sx; g_vpShiftY = sy; g_vpOver = over;
 }
 
 void STDMETHODCALLTYPE hkRSSetViewports(ID3D11DeviceContext* ctx, UINT n, const D3D11_VIEWPORT* vps) {
@@ -8122,7 +8142,9 @@ float HalfToFloat(uint16_t h) {
 }
 
 // Reads `tex` (R32_FLOAT or R16G16_FLOAT) back and writes uint32 w, h + w*h*comps float32.
-bool WriteFloatBin(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int comps, const wchar_t* path) {
+// v0.10.0 phase 23: texels exactly 0 on each edge of a 1-component readback (the snapshot's depth: 0 = reversed-Z clear / sky)
+struct EdgeZeros { UINT w = 0, h = 0, c0 = 0, cN = 0, r0 = 0, rN = 0; };
+bool WriteFloatBin(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int comps, const wchar_t* path, EdgeZeros* ez = nullptr) {
     D3D11_TEXTURE2D_DESC d{}; tex->GetDesc(&d);
     ID3D11Device* dev = nullptr; tex->GetDevice(&dev);
     if (!dev) return false;
@@ -8148,8 +8170,17 @@ bool WriteFloatBin(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int comps, co
                 const uint8_t* s = (const uint8_t*)mp.pData + (size_t)y * mp.RowPitch;
                 if (d.Format == DXGI_FORMAT_R32_FLOAT) memcpy(row, s, (size_t)d.Width * 4);
                 else for (UINT i = 0; i < d.Width * (UINT)comps; ++i) row[i] = HalfToFloat(((const uint16_t*)s)[i]);
+                if (ez && comps == 1 && d.Width >= 2 && d.Height >= 2) {
+                    ez->c0 += row[0] == 0.0f; ez->cN += row[d.Width - 1] == 0.0f;
+                    if (y == 0 || y == d.Height - 1) {
+                        UINT z = 0;
+                        for (UINT x = 0; x < d.Width; ++x) z += row[x] == 0.0f;
+                        (y == 0 ? ez->r0 : ez->rN) = z;
+                    }
+                }
                 ok = fwrite(row, sizeof(float) * comps, d.Width, f) == d.Width;
             }
+            if (ez && comps == 1 && d.Width >= 2 && d.Height >= 2) { ez->w = d.Width; ez->h = d.Height; }
             free(row);
             fclose(f);
         }
@@ -8188,7 +8219,8 @@ void SnapshotStep(ID3D11DeviceContext* ctx, int eye, ID3D11Texture2D* blitTex, c
     P("mv", "bin");
     Log("snapshot: %s %s", WriteFloatBin(ctx, dl.MvTex(), 2, path) ? "wrote" : "FAILED to write", nm);
     P("depth", "bin");
-    Log("snapshot: %s %s", WriteFloatBin(ctx, dl.DepthTex(), 1, path) ? "wrote" : "FAILED to write", nm);
+    EdgeZeros dEdge;                             // v0.10.0 phase 23: sky texels on the depth edges (info: depth_edge_sky)
+    Log("snapshot: %s %s", WriteFloatBin(ctx, dl.DepthTex(), 1, path, &dEdge) ? "wrote" : "FAILED to write", nm);
 
     float sol[CameraMv::kSolveFloats] = {};      // v0.6.0: 72 floats (R_ego, InvRow3, ego info appended)
     const bool haveSolve = si.mvOn && dl.Mv().ReadSolveBlocking(ctx, sol);
@@ -8198,11 +8230,21 @@ void SnapshotStep(ID3D11DeviceContext* ctx, int eye, ID3D11Texture2D* blitTex, c
     const bool ok = _wfopen_s(&f, path, L"w") == 0 && f;
     if (ok) {
         fprintf(f, "frame=%llu\neye=%d\nhalton_phase=%d of %d\nviewport_shift=(%+.5f,%+.5f)\nngx_jitter_passed=(%+.5f,%+.5f)\n"
+                   "viewport_overscan=%d (v0.10.0 phase 23 jitter_overscan: 1 = the jittered viewport is (W+1)x(H+1), top-left = "
+                   "the shift)\n"
                    "reset_flag=%d (as passed in; Run() may force reset on world-miss)\nmv_enabled=%d\n"
                    "world_pairs=%d\ncabin_pairs=%d\nworld_miss=%d\ndepth_source=%s\n",
-                (unsigned long long)si.frame, eye, si.phase, g_phases, si.vx, si.vy, si.njx, si.njy,
+                (unsigned long long)si.frame, eye, si.phase, g_phases, si.vx, si.vy, si.njx, si.njy, g_jitterOverscan,
                 (int)si.reset, (int)si.mvOn, fs.pairs[0], fs.pairs[1], (int)fs.worldMiss,
                 si.depthSnap ? "per-eye snapshot (taken before the scene depth clear)" : "live scene depth");
+        // v0.10.0 phase 23: the depth texels still at 0 (reversed-Z clear = far / sky) on each edge of depth.bin. A WHOLE edge at
+        // 0 (n of n) is the unrendered column / row of a negative shift with jitter_overscan=0; with 1 it must never happen
+        // (an edge partly at 0 is real sky). Edges of the DLAA rect (= the picture with dlaa_area 100).
+        if (dEdge.w)
+            fprintf(f, "depth_edge_sky=col0 %u/%u, col%u %u/%u, row0 %u/%u, row%u %u/%u%s\n", dEdge.c0, dEdge.h, dEdge.w - 1,
+                    dEdge.cN, dEdge.h, dEdge.r0, dEdge.w, dEdge.h - 1, dEdge.rN, dEdge.w,
+                    (dEdge.cN == dEdge.h || dEdge.rN == dEdge.w || dEdge.c0 == dEdge.h || dEdge.r0 == dEdge.w)
+                        ? " -- a WHOLE edge is sky: unrendered (phase 23 bug) unless the view really is all sky there" : "");
         // v0.6.4 DLAA area: color_in / mv / depth are crop-sized (the rect); out is the whole blit source.
         fprintf(f, "dlaa_area=%d%% feather=%d px\nrect_origin=(%u,%u)\nrect_size=%ux%u\nfull_size=%ux%u\n"
                    "optical_centre_uv=(%.4f,%.4f)%s\n",
@@ -14287,7 +14329,7 @@ void ResetPassTrackingCore(bool forceDlaaOff) {
     for (PassSlot& p : g_ring) { p.warmTex.Reset(); p.fwdTex = nullptr; p.warmHdr = false; }
     g_stage.Restart();
 #endif
-    g_gameVpN = 0; g_vpShifted = false; g_vpShiftX = g_vpShiftY = 0.0f;
+    g_gameVpN = 0; g_vpShifted = false; g_vpShiftX = g_vpShiftY = 0.0f; g_vpOver = false;
     while (g_fifoHead < g_passSeq) g_ring[g_fifoHead++ % kRing].consumed = true;   // drop outstanding passes
     g_needFirstPass = true;                                    // next G-buffer bind starts a pass
     g_flatMode = false; g_vrMode = false;                      // re-detected at the next matched blit
@@ -14898,6 +14940,7 @@ bool DlaaOffFilePresent() {
 // Optional dlaa.ini next to the DLL: key=value lines (# or ; comments).
 //   jitter_sign_x / jitter_sign_y  -1 or +1 (default +1, see g_signX; template: docs/dlaa.ini.sample)
 //   jitter_enabled                 0/1 (default 1)
+//   jitter_overscan                0/1 (default 1, v0.10.0 phase 23): jittered world / mirror viewport 1 px larger right / bottom
 //   jitter_phases                  Halton phase count (default 8 since v0.5.7, was 16; NVIDIA: 8 x render ratio)
 //   mv_enabled                     0/1 camera-reprojection motion vectors (default 1; Ctrl+F5 toggles)
 //   gpu_timing                     -1 auto (VR only, default) / 0 off / 1 on: timestamp queries around each
@@ -15112,6 +15155,7 @@ void LoadConfig() {
             if      (!strcmp(key, "jitter_sign_x"))  g_signX = v < 0 ? -1 : 1;
             else if (!strcmp(key, "jitter_sign_y"))  g_signY = v < 0 ? -1 : 1;
             else if (!strcmp(key, "jitter_enabled")) g_jitterEnabled = v != 0;
+            else if (!strcmp(key, "jitter_overscan")) g_jitterOverscan = v != 0 ? 1 : 0;   // v0.10.0 phase 23 (default 1)
             else if (!strcmp(key, "mv_enabled"))     g_mvOn = v != 0;
             else if (!strcmp(key, "ofxr_bridge"))    Ofxr::Configure(v != 0 ? 1 : 0);          // v0.10.0 OFXR Bridge pass-through, 0/1 (default 1)
             else if (!strcmp(key, "mv_near_reject_m")) {
@@ -15499,6 +15543,14 @@ void LoadConfig() {
         (int)g_mvOn.load(), nearRej, (double)egoOrigin, (double)egoPixel, mvShift, mvWorldSlots, mvCabinSlots,
         g_gpuTiming, g_traceAutoFrame, preset, (double)sharp, (double)sharpRadius, area, feather,
         (int)g_dlssUpscale.load(), (int)g_beeps, previewDlaa, dlssHdr);
+    if (g_jitterOverscan)
+        Log("jitter (v0.10.0 phase 23): viewport shift in [-0.5, +0.5) px with the jittered world / mirror viewport 1 px larger "
+            "right and bottom (jitter_overscan=1): every shift in [-1, +0.5] now renders the whole picture (W x H alone: only "
+            "[0, +0.5]) -- a negative shift left the last pixel column / bottom row of the picture unrendered (sky in the depth): "
+            "the sun-shaft / bloom haze blinked on those frames. NGX jitter = sign x shift, unchanged");
+    else
+        Log("jitter (v0.10.0 phase 23): jitter_overscan=0 -- the phase-22 W x H viewport: a negative shift leaves the last pixel "
+            "column / bottom row of the picture unrendered (sky in the depth), the sun-shaft / bloom haze blinks on those frames");
     Log("OFXR Bridge support: ofxr_bridge=%d (%s)", (int)Ofxr::g_on.load(),
         Ofxr::g_on.load() ? "on: the layer's calls pass through the hooks" : "off");
 #ifdef WITH_DLAA

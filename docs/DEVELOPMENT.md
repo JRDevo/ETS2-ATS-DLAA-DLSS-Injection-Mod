@@ -352,6 +352,8 @@ during the scene G-buffer and forward passes only, the first viewport's
 take floats, so this jitters rasterization exactly, with no cbuffer patching). The
 same offset (times the configured sign) is passed to NGX. v0.5.0: the Halton phase advances once per
 Present frame, so both VR eyes use the same phase. See [`DLAA_INTEGRATION.md`](DLAA_INTEGRATION.md).
+v0.10.0 phase 23: the shifted world / mirror viewport is issued 1 px larger on the right and bottom (`jitter_overscan`, default
+1): with the game's W x H a negative shift left the last pixel column / bottom row unrendered (see "Phase 23" below).
 
 ## Motion vectors
 
@@ -1067,6 +1069,33 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   3-row shape rejects a misread shifted layout). (5) The interior's real MVP now makes car-interior parts that move (doors, wheel)
   movers with their own motion -- correct, but the small-cabin rule's heaviest cluster can now include more draws; a big moving part
   (a steering wheel while steering) is excluded as a mover only when it disagrees with the cluster.
+
+### Phase 23 (v0.10.0): the jitter's unrendered edge column / row (sun haze blinking on the right side)
+
+- **Bug** (Ctrl+F10 depth snapshots, ATS VR, eye 3832x4064): on frames with a negative Halton shift in x the whole last pixel
+  column of the scene depth stayed at the clear value (sky), with a negative shift in y the whole bottom row. The game's sun-shaft
+  sky mask (1 where depth == 0) and bloom read it as a bright sky line and smeared it toward the sun: the haze blinked on about
+  half of the 8 phases.
+- **Edge rule, measured** (scratch D3D11 test, WARP and RTX 5090, 64x48 and 3832x4064, full-screen draw, x and y separately):
+  the rasterizer cuts the far edge at floor(TopLeft + size) and the near edge by the pixel-centre rule. W x H viewport: any
+  shift < 0 (even -0.001) loses the last column / row, any shift > +0.5 the first; safe domain [0, +0.5] -- half the Halton span,
+  so a constant bias cannot fit the offsets in ([0, 1) would blink on the left / top edge instead). (W+1) x (H+1) viewport with
+  the same top-left: safe domain [-1, +0.5], which holds the whole [-0.5, +0.5) range. Table: `captures/phase23_jitter_edge.md`.
+- **Fix:** `ReconcileViewports` adds 1 px to Width / Height of viewport 0 of every jittered world and mirror pass
+  (`g_jitterOverscan`, dlaa.ini `jitter_overscan`, default 1; 0 = phase 22). TopLeft = the shift, unchanged, so the NGX jitter
+  (sign x shift, inside the DLSS guide's [-0.5, 0.5]), the draw-id jitter key and the replays are unchanged; the picture is scaled
+  by (W+1)/W about its top-left corner, identically on every frame (<= 1 px at the right / bottom edge; MVs from the matrices are
+  off by MV / W). The preview passes keep W x H and their round 4/5 edge fix (tile shifts up to +-0.875 px).
+- **Logs:** startup `jitter (v0.10.0 phase 23): viewport shift in [-0.5, +0.5) px with the jittered world / mirror viewport 1 px
+  larger ...`; Ctrl+F10 `info_*.txt`: `viewport_overscan=1` and `depth_edge_sky=col0 a/H, colW-1 b/H, row0 c/W, rowH-1 d/W`
+  (texels at 0 per edge of the snapshot depth; a whole edge at 0 = the bug).
+- **Harness:** knob `overscan` = all jittered scene viewports (W+1) x (H+1). Default run unchanged 136218 / 136218. With
+  `overscan` 136206 / 136215: S1-S3 fail one draw-frame (frame 34, an unpaired culled grass clump next to a spinning wheel within
+  ~4 % depth wins a 34/34 rigid-parent vote for the wheel; W x H: 0 of 46, no parent). Not an overscan defect: the same failure
+  appears with the W x H viewport when the whole raster is offset by a constant (0.48, 0.57) or (0.05, 0.4) px (a temporary
+  `HJOFF` experiment, not kept); offsets (0.25, 0.25), (0.1, 0.1), (-0.3, -0.3) pass. Pairing is identical in both modes
+  (`HDUMP=34` dumps). A sub-pixel sensitivity of the phase-6c vote for that scene.
+- **Not verified (needs the game):** that the haze no longer blinks; mirrors with the overscan; ETS2.
 
 ## Roadmap / history
 

@@ -51,6 +51,13 @@ debug = 0
 # Number of Halton jitter phases (1..256). v0.5.7: default 8 (was 16) = NVIDIA's 8 x (output/render ratio) for DLAA
 # jitter_phases = 8
 
+# v0.10.0 phase 23: the jittered scene viewport (world eye passes, mirrors) is 1 px larger on the right and bottom, 1 / 0.
+# 1 = default: every Halton shift renders the whole picture. 0 = the old W x H viewport: on every frame with a negative shift
+# (about half of them) the last pixel column / bottom row stays unrendered = sky in the depth, and the game's sun-shaft /
+# bloom haze blinks on the right / bottom edge when the sun is on that side. The picture is scaled by (W+1)/W, the same on
+# every frame (at most 1 px at the right / bottom edge).
+# jitter_overscan = 1
+
 # Camera-reprojection motion vectors: 1 on, 0 = zero MVs (Ctrl+F5 toggles live)
 # mv_enabled = 1
 

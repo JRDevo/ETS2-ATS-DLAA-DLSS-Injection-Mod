@@ -102,6 +102,7 @@ namespace {
 constexpr int W = 960, H = 540;
 bool g_debugLayer = false;
 bool g_hw = false;        // v0.10.0 phase 18: "hw" = the hardware adapter (GPU timings in the perf lines; the checks are WARP-tuned)
+int  g_vpOver = 0;        // v0.10.0 phase 23 "overscan": the jittered scene viewports are (W+1) x (H+1) like the DLL's jitter_overscan=1
 unsigned g_rstatic = 0;     // v0.10.0 phase 14: "rstatic=E" -- S1-S4 / S13 replay with the static gate (0 = off)
 double   g_yawJerk = 0.0;   // phase 14 round 5 "jerk=X": S1-S4 / S13 / S14 camera yaw rate + X rad / frame from frame 60
 constexpr int kLagMax = 2;  // most frames in a row a skipped MOVER may keep the camera R (readback latency + the stagger)
@@ -724,8 +725,8 @@ int RunScene(Env& E, const SceneCfg& sc, float snapPx, Totals& tot) {
         // jittered viewports (Halton 2/3), as the injector shifts them
         auto halton = [](int i, int b) { double r = 0, fct = 1; while (i > 0) { fct /= b; r += fct * (i % b); i /= b; } return r; };
         const float jx = (float)(halton(f % 8 + 1, 2) - 0.5), jy = (float)(halton(f % 8 + 1, 3) - 0.5);
-        const D3D11_VIEWPORT vpW = { jx, jy, (float)W, (float)H, 0.01f, 0.9f };
-        const D3D11_VIEWPORT vpC = { jx, jy, (float)W, (float)H, 0.9f, 1.0f };
+        const D3D11_VIEWPORT vpW = { jx, jy, (float)(W + g_vpOver), (float)(H + g_vpOver), 0.01f, 0.9f };
+        const D3D11_VIEWPORT vpC = { jx, jy, (float)(W + g_vpOver), (float)(H + g_vpOver), 0.9f, 1.0f };
         const D3D11_RECT sc0 = { 0, 0, W, H };
         ctx->RSSetScissorRects(1, &sc0);
         ctx->PSSetShader(E.ps.Get(), nullptr, 0);
@@ -1305,7 +1306,7 @@ int RunMirrorScene(Env& E, float snapPx, Totals& tot) {
             // its own jitter: the unit's own Halton phase (inject.cpp: MirUnit::phaseCtr; the main pass: the FIFO's)
             const int ph = u.phase++ % 8;
             const float jx = (float)(halton(ph + 1, 2) - 0.5), jy = (float)(halton(ph + 1, 3) - 0.5);
-            const D3D11_VIEWPORT vp = { jx, jy, (float)u.v.w, (float)u.v.h, 0.01f, 0.9f };
+            const D3D11_VIEWPORT vp = { jx, jy, (float)(u.v.w + g_vpOver), (float)(u.v.h + g_vpOver), 0.01f, 0.9f };
             ctx->RSSetScissorRects(1, &sc0big);
             ctx->PSSetShader(E.ps.Get(), nullptr, 0);
             u.rec.Reset();
@@ -2147,7 +2148,7 @@ int RunConvoyScene(Env& E, float snapPx, Totals& tot, bool mutNoCons, bool mutNo
         }
         auto halton = [](int i, int b) { double q = 0, fct = 1; while (i > 0) { fct /= b; q += fct * (i % b); i /= b; } return q; };
         const float jx = (float)(halton(f % 8 + 1, 2) - 0.5), jy = (float)(halton(f % 8 + 1, 3) - 0.5);
-        const D3D11_VIEWPORT vpW = { jx, jy, (float)W, (float)H, 0.01f, 0.9f };
+        const D3D11_VIEWPORT vpW = { jx, jy, (float)(W + g_vpOver), (float)(H + g_vpOver), 0.01f, 0.9f };
         auto bindDraw = [&](int o, int d) {
             const Obj& ob = objs[o];
             ctx->RSSetViewports(1, &vpW);
@@ -2835,7 +2836,7 @@ int RunPlateScene(Env& E, float snapPx, Totals& tot, bool mutNoAttach, bool mutN
         }
         auto halton = [](int i, int b) { double q = 0, fct = 1; while (i > 0) { fct /= b; q += fct * (i % b); i /= b; } return q; };
         const float jx = (float)(halton(f % 8 + 1, 2) - 0.5), jy = (float)(halton(f % 8 + 1, 3) - 0.5);
-        const D3D11_VIEWPORT vpW = { jx, jy, (float)W, (float)H, 0.01f, 0.9f };
+        const D3D11_VIEWPORT vpW = { jx, jy, (float)(W + g_vpOver), (float)(H + g_vpOver), 0.01f, 0.9f };
         auto bindDraw = [&](int o, int d) {
             const Obj& ob = objs[o];
             ctx->RSSetViewports(1, &vpW);
@@ -3495,7 +3496,7 @@ int RunParentScene(Env& E, float snapPx, Totals& tot, int mut, unsigned reachPx 
         }
         auto halton = [](int i, int b) { double q = 0, fct = 1; while (i > 0) { fct /= b; q += fct * (i % b); i /= b; } return q; };
         const float jx = (float)(halton(f % 8 + 1, 2) - 0.5), jy = (float)(halton(f % 8 + 1, 3) - 0.5);
-        const D3D11_VIEWPORT vpW = { jx, jy, (float)W, (float)H, 0.01f, 0.9f };
+        const D3D11_VIEWPORT vpW = { jx, jy, (float)(W + g_vpOver), (float)(H + g_vpOver), 0.01f, 0.9f };
         auto bindDraw = [&](int o, int d) {
             const Obj& ob = objs[o];
             ctx->RSSetViewports(1, &vpW);
@@ -4609,7 +4610,7 @@ int RunRoadsideScene(Env& E, float snapPx, Totals& tot, int mut, int eye) {
         ctx->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFFu);
         auto halton = [](int i, int b) { double q = 0, fct = 1; while (i > 0) { fct /= b; q += fct * (i % b); i /= b; } return q; };
         const float jx = (float)(halton(f % 8 + 1, 2) - 0.5), jy = (float)(halton(f % 8 + 1, 3) - 0.5);
-        const D3D11_VIEWPORT vpW = { jx, jy, (float)W, (float)H, 0.01f, 0.9f };
+        const D3D11_VIEWPORT vpW = { jx, jy, (float)(W + g_vpOver), (float)(H + g_vpOver), 0.01f, 0.9f };
         ctx->PSSetShader(E.ps.Get(), nullptr, 0);
         rec.Reset();
         cand.Reset();
@@ -5050,8 +5051,8 @@ int RunCarScene(Env& E, float snapPx, Totals& tot, int variant) {
         ctx->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFFu);
         auto halton = [](int i, int b) { double q = 0, fct = 1; while (i > 0) { fct /= b; q += fct * (i % b); i /= b; } return q; };
         const float jx = (float)(halton(f % 8 + 1, 2) - 0.5), jy = (float)(halton(f % 8 + 1, 3) - 0.5);
-        const D3D11_VIEWPORT vpW = { jx, jy, (float)W, (float)H, 0.01f, 0.9f };
-        const D3D11_VIEWPORT vpC = { jx, jy, (float)W, (float)H, 0.9f, 1.0f };
+        const D3D11_VIEWPORT vpW = { jx, jy, (float)(W + g_vpOver), (float)(H + g_vpOver), 0.01f, 0.9f };
+        const D3D11_VIEWPORT vpC = { jx, jy, (float)(W + g_vpOver), (float)(H + g_vpOver), 0.9f, 1.0f };
         rec.Reset();
         cand.Reset();
         cand.SetDropped(cam.MedoidDropBits());
@@ -5500,7 +5501,7 @@ int RunShopScene(Env& E, float snapPx, Totals& tot) {
         }
         auto halton = [](int i, int b) { double q = 0, fct = 1; while (i > 0) { fct /= b; q += fct * (i % b); i /= b; } return q; };
         const float jx = (float)(halton(f % 8 + 1, 2) - 0.5), jy = (float)(halton(f % 8 + 1, 3) - 0.5);
-        const D3D11_VIEWPORT vpW = { jx, jy, (float)W, (float)H, 0.01f, 0.9f };
+        const D3D11_VIEWPORT vpW = { jx, jy, (float)(W + g_vpOver), (float)(H + g_vpOver), 0.01f, 0.9f };
         auto bindDraw = [&](int o, int d) {
             const SO& ob = objs[o];
             ctx->RSSetViewports(1, &vpW);
@@ -5804,6 +5805,7 @@ int main(int argc, char** argv) {
         else if (!strcmp(s, "nocompact")) DrawIdMv::SetVoteCompact(false);  // v0.10.0 phase 18: the full-grid vote (phase 8)
         else if (!strncmp(s, "cabmin=", 7)) DrawIdMv::SetConsMinCabin((unsigned)atoi(s + 7));   // phase 18: mv_cons_min_cabin
         else if (!strcmp(s, "hw")) g_hw = true;                    // v0.10.0 phase 18: hardware adapter (GPU timings)
+        else if (!strcmp(s, "overscan")) g_vpOver = 1;             // v0.10.0 phase 23: jittered viewports 1 px larger right / bottom
         else if (!strncmp(s, "rstatic=", 8)) {                       // v0.10.0 phase 14: S1-S4 / S13 with the static replay skip
             const int e = atoi(s + 8);
             g_rstatic = e < 2 ? 2u : (e > 16 ? 16u : (unsigned)e);
@@ -5818,12 +5820,12 @@ int main(int argc, char** argv) {
     }
     printf("phase 8 knobs: mv_vote_res %u, mv_vote_march_cap %u, mv_cons_cands %u, mv_medoid_drop %u, mv_inst_replay %d, "
            "mv_parent_max_listed %u%s%s; phase 14: static replay skip %s (S1-S4, S6-S8, S13); phase 18: mv_fold_dispatch %d, "
-           "mv_vote_compact %d%s\n",
+           "mv_vote_compact %d%s%s\n",
            DrawIdMv::VoteRes(), DrawIdMv::MarchCap(), DrawIdMv::ConsCands(), DrawIdMv::MedoidDrop(), DrawIdMv::InstReplay(),
            DrawIdMv::ParentMaxListed(),
            g_cmpOut ? ", writing the comparison file" : "", g_cmpIn ? ", comparing with the reference file" : "",
            g_rstatic ? "ON (rstatic)" : "off", DrawIdMv::Fold(), (int)DrawIdMv::VoteCompact(),
-           g_hw ? "; HARDWARE adapter (hw)" : "");
+           g_hw ? "; HARDWARE adapter (hw)" : "", g_vpOver ? "; phase 23: jittered viewports (W+1) x (H+1) (overscan)" : "");
     if (FAILED(D3D11CreateDevice(nullptr, g_hw ? D3D_DRIVER_TYPE_HARDWARE : D3D_DRIVER_TYPE_WARP, nullptr, g_debugLayer ? D3D11_CREATE_DEVICE_DEBUG : 0, fls, 2,
                                  D3D11_SDK_VERSION, &E.dev, &got, &E.ctx))) {
         printf("no WARP device%s\n", g_debugLayer ? " with the debug layer (Graphics Tools installed?)" : ""); return 1;
