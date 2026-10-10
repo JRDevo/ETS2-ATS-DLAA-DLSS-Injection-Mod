@@ -1,3 +1,4 @@
+> [!CAUTION]
 > ## THIS GITHUB PAGE IS THE ONLY PLACE THIS MOD EXISTS
 > **`https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod` is the only source of truth for this mod: the only place it is
 > published, the only place it is documented, and the only place to download it (its [Releases](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/releases) page).**
