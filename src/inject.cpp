@@ -1,3 +1,8 @@
+// v0.10.1 -- (1) phase 25: full-screen draws inside a jittered pass (the forward-pass FOG TRIANGLE: Draw verts=3, UV-sampled)
+//           get the game's own viewport back for that draw and the shift after it; with the shifted + overscanned viewport
+//           the fog sampled the neighbour texel = a dark 1 px line on every silhouette in flat (hkDraw).
+//           (2) phase 26: the Ctrl+F9 self-test also dumps the presented back buffer of the same frame as
+//           final_<mode>_<n>.bmp (SelfTestFinalDump in hkPresent; DumpFrameWith). Proved the game adds nothing after the mod.
 // v0.10.0 -- (1) PER-DRAW MOTION VECTORS (dlaa.ini mv_objects = 2, default): every world G-buffer draw is recorded and
 //           replayed into a draw-id target (depth EQUAL), paired with the previous pass on the GPU and moving draws get
 //           R = MVP_prev * inverse(MVP_cur); see the "PER-DRAW MOTION VECTORS" block above hkDrawIndexed.

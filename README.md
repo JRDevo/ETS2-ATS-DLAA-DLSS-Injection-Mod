@@ -78,7 +78,7 @@ This is an unofficial fan project. It is not affiliated with, or endorsed by, SC
 Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
-> Status: v0.10.0. Per-part motion vectors, mirror DLAA, DLAA before the game's tonemap, the tuning menu and the fps counter were tested in ETS2 flat. DLAA itself has been run in ETS2 (VR) and ATS (flat and VR); the newest VR fixes (jitter phase, menu panel in VR) are only partly tested. The DLSS
+> Status: v0.10.1. Fixes the dark 1 px line on every silhouette in flat mode (v0.10.0), and `Ctrl+F9` now also saves the picture as it reached the screen. Per-part motion vectors, mirror DLAA, DLAA before the game's tonemap, the tuning menu and the fps counter were tested in ETS2 flat. DLAA itself has been run in ETS2 (VR) and ATS (flat and VR); the newest VR fixes (jitter phase, menu panel in VR) are only partly tested. The DLSS
 > *upscaling* path (render below native, reconstruct up) runs in VR but is still
 > being tuned. Treat upscaling as experimental. The OFXR Bridge handling is not yet tested in a headset with the bridge armed.
 ---
@@ -512,6 +512,8 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   the headset picture in VR, so switch it off for VR.
 - **OFXR Bridge (VR frame generation):** see the section above.
 - **Faint dark line down the middle of the menu / truck-preview screen:** fixed in v0.8.1: update.
+- **Dark 1 px line on every silhouette (trees, poles, trucks) in flat mode:** fixed in v0.10.1: update. v0.10.0
+  drew the game's fog pass one texel off.
 - **No DLAA / DLSS while you drive a car (ATS):** fixed in v0.8.2: update. Older versions work in the menu
   but do nothing in the car (the log shows many `fifo underflow` lines).
 - **No log file with `debug = 1`:** the line must not start with `#`. From v0.8.2 the packaged `dlaa.ini`
