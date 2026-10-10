@@ -751,6 +751,17 @@ int      g_signX = +1, g_signY = +1;     // dlaa.ini: NGX jitter = sign * viewpo
 bool     g_jitterEnabled  = true;        // dlaa.ini: jitter_enabled
 int      g_phases         = 8;           // dlaa.ini: jitter_phases (v0.5.7: 16 -> 8 = NVIDIA's 8 x ratio for DLAA)
 int      g_phase          = 0;           // Halton phase of the NEWEST pass (logging)
+// v0.10.0 phase 24: VR JITTER PHASE PARITY. In VR the two eye passes of one frame share a Halton phase (phase = (s + off) >> 1:
+// the serial pair (s, s+1) is a frame only when s + off is even). The eye order of a frame flips between frames (e0 e1 | e1 e0,
+// the PPBB / PBPB variation), so a pair that straddles two frames gives one eye the same phase twice in a row and the other eye
+// only every second phase (ATS VR 2026-10-10 Ctrl+F10: eye 0 phases 0, 2; eye 1 phases 1, 1 -- each eye saw 4 of the 8 Halton
+// positions, in x all of one sign, each twice: a parked truck wobbled). The blit knows the eye of a pass: two consecutive passes
+// of the SAME eye belong to two frames, so the frame boundary sits between them -> off = s & 1 (the parity of the frame's first
+// pass). Learned again at every such pair, so an odd pass anywhere (menu, loading) cannot leave the parity wrong.
+int      g_vrPhaseOff     = 0;           // 0 / 1: added to the pass serial before the >> 1
+uint64_t g_vrPhaseFlips   = 0;           // parity corrections so far (first 8 logged)
+uint64_t g_vrLastBlitS    = ~0ull;       // pass serial of the last eye blit ...
+int      g_vrLastBlitEye  = -1;          // ... and its eye
 float    g_jx = 0.0f, g_jy = 0.0f;       // viewport shift of the NEWEST pass (G-buffer rasterization), px
 // v0.10.0 phase 23: dlaa.ini jitter_overscan (default 1). A jittered viewport (world eye passes, mirror units) is issued
 // (W+1) x (H+1) with its top-left at the shift instead of W x H. Measured (scratch vpedge test, WARP and RTX 5090, 64x48
@@ -6264,7 +6275,7 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
         Log("jitter: %d Halton phases now (jitter_phases %d, upscale pixel ratio %.3f)", phases, g_phases, g_upAreaRatio);
         g_effPhases = phases;
     }
-    n.phase = (int)((g_vrMode ? (s >> 1) : s) % (uint64_t)phases);
+    n.phase = (int)((g_vrMode ? ((s + (uint64_t)g_vrPhaseOff) >> 1) : s) % (uint64_t)phases);   // v0.10.0 phase 24: parity
     if (g_jitterEnabled && !WorldJitterHeld()) JitterOfPhase(n.phase, &n.jx, &n.jy);   // v0.7.9: held until VR is real
     else { n.jx = 0.0f; n.jy = 0.0f; }
     n.snap = false;
@@ -9129,6 +9140,10 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
             cpuBlitMs, cpuMvMs, recPass, cpuObjMs, blitsPerS, fps,
             g_vrMode ? "VR: fps = blits/s / 2" : "flat: fps = blits/s", kProfName[g_profile], stPreset, stSharp, stRadius, stArea,
             g_upTag, lodTag, (unsigned long long)frame);
+        if (g_vrMode)                                      // v0.10.0 phase 24
+            Log("jitter (VR) @blit %llu: phase parity %d, corrections %llu (both eyes of a frame share one Halton phase; a "
+                "correction means a serial pair straddled two frames)", (unsigned long long)g_blitCount, g_vrPhaseOff,
+                (unsigned long long)g_vrPhaseFlips);
 #ifdef WITH_DLAA
         if (stageAutoWin > 2)                                              // v0.10.0 phase 7
             Log("DLAA stage: WARNING %llu automatic stage switches in this stats window (> 2; the hysteresis is %d passes) -- "
@@ -9185,6 +9200,19 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     // Eye identity is authoritative from the blit render target (flat backbuffer = eye 0).
     int eye = isBackbuffer ? 0 : EyeOfRT(rtPtr, (int)(slot.s & 1));
     if (eye < 0 || eye >= kMaxEyes) eye = 0;
+    if (!isBackbuffer) {                                  // v0.10.0 phase 24: VR jitter phase parity from the eye order
+        if (g_vrLastBlitS != ~0ull && slot.s == g_vrLastBlitS + 1 && eye == g_vrLastBlitEye) {
+            const int off = (int)(slot.s & 1);            // passes s-1 and s are the same eye = two frames: s starts a frame
+            if (off != g_vrPhaseOff) {
+                g_vrPhaseOff = off; ++g_vrPhaseFlips;
+                if (g_vrPhaseFlips <= 8)
+                    Log("jitter (VR): phase parity -> %d at pass s=%llu (passes s-1 and s are both eye %d = two frames; from the next "
+                        "pass both eyes of a frame share one Halton phase; correction #%llu)", off, (unsigned long long)slot.s, eye,
+                        (unsigned long long)g_vrPhaseFlips);
+            }
+        }
+        g_vrLastBlitS = slot.s; g_vrLastBlitEye = eye;
+    }
     if (!isBackbuffer && (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)) { g_menuBlitEye = eye; g_menuBlitRt = rtPtr; }   // v0.10.0 menu / fps box
 #ifdef WITH_DLAA
     GpuPerf::SetPass(slot.s);                             // v0.10.0 phase 8: this pass's sections belong to `eye`

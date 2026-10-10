@@ -1110,6 +1110,29 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
 | v0.6 | Overlay | ImGui tuning UI (sharpness, preset, on/off), persisted |
 | v0.7 | DLSS upscaling 🔧 (built, needs in-game test) | render at `r_scale` size, NGX to the eye texture size, composited after the game's blit; see "DLSS upscaling"; v0.7.2 adds the plain-`End` mode cycle |
 
+### Phase 24 (v0.10.0): the VR jitter phase parity -- a parked truck wobbled, each eye saw only half of the Halton positions
+
+- **Evidence** (ATS VR 2026-10-10, `E:\OpenXR-EyeCapture\capturesmtrucks_20261010_101035_SBS.mkv`, Ctrl+F10 `dlaa_snap\`): the user
+  saw a parked pickup in front wobble slightly, no magenta. The four snapshot frames (passes e0 e1 e1 e0) showed the per-draw motion
+  vectors on the truck CORRECT (the previous frame warped by `mv - jitter delta` lands on the current one, best of a 2D search; the
+  DLAA output follows the same shift), but the Halton phases were eye 0: 0, 2 and eye 1: 1, 1. `n.phase = (s >> 1) % 8` pairs the
+  pass serials (2k, 2k+1) as one frame; the eye order flips between frames (e0 e1 | e1 e0), so once the serial parity is off by one
+  (any odd pass: menu, loading) the pairs straddle two frames: each eye gets only the even or only the odd phases (in x all of one
+  sign), each twice in a row -- half the sample positions and a 2-frame rhythm on every bright edge.
+- **Fix** (`g_vrPhaseOff`, inject.cpp pass start + the blit's eye site): `phase = ((s + off) >> 1) % phases`. The blit knows the eye of
+  pass s; two consecutive passes of the SAME eye belong to two frames, so the boundary sits between them and `off = s & 1`. Learned
+  again at every such pair (no state to get stuck). Log: `jitter (VR): phase parity -> N at pass s=...` (first 8) and
+  `jitter (VR) @blit N: phase parity P, corrections C` every 600 blits. In the 10:47 log: ~150 corrections while the loading
+  screens had both passes on eye 0, then stable; Ctrl+F10 at 10:48: eye 0 / eye 1 phases 4 / 4 then 5 / 5. User: the truck is good.
+- **Not the mod: pole edges crawl / sparkle in VR** (same run): the user sees it unchanged in passive mode (Ctrl+F7 = no mod work),
+  so it is the game's own aliasing of sub-pixel poles; a 2-frame lamp-post check (driving, 8.75 px/frame) showed the per-draw
+  motion vectors right within 0.15 px and the output following. Levers: a stronger model (Shift+F1), less RCAS (Shift+F7), the
+  texture LOD bias back toward 0 (Ctrl+F2).
+- **Static replay skip** (`mv_replay_static_frames = 0` test in the ATS ini): the user "thinks" the ghosting was less. Not proven;
+  left off in the ATS ini for now (GPU +0.15..0.3 ms / pass, 72 fps held).
+- **RenderDoc is blind to all of this**: under RenderDoc NGX fails (PlatformError) and phase 12 holds the jitter, so a capture has
+  no mod work in it.
+
 ### The RenderDoc oracle (done in v0.2)
 
 Capture a frame of the unmodified game to learn empirically: which pass writes
