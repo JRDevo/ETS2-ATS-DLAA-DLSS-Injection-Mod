@@ -21,7 +21,7 @@
 
 namespace TuningMenu {
 
-constexpr int   kMaxRows  = 26;                      // (was 24 before the 4 fps box rows)
+constexpr int   kMaxRows  = 27;                      // (was 24 before the 4 fps box rows, 26 before the Reset row)
 constexpr int   kPerfLines = 3;                      // the GPU block under the title (small font, one line each)
 constexpr float kRefWidth = 760.0f;                  // panel width in reference px (scale 1; was 720 before the GPU cost column)
 constexpr float kWidgetRefW = 92.0f;                 // the fps box in reference px (scale 1)

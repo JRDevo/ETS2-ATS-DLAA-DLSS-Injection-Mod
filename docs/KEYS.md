@@ -66,10 +66,27 @@ menu and the garage / truck dealer screens, before a save is loaded).
   (both eyes + the desktop mirror). Flat and VR each keep their own position (`fps_show`, `fps_x`, `fps_y`, `fps_scale`,
   `fps_vr_x`, `fps_vr_y`, `fps_vr_scale` in `dlaa.ini`); off, it costs nothing. **FPS counter size** goes from `0.2` to
   `3.0` (flat default `1.0`; VR default `0.3`, a saved `fps_vr_scale` keeps its size).
+- **Mirror DLAA** (v0.10.2) has seven states, `Left` / `Right` step through them (wrapping around): `off` -> `1 mirror
+  (largest)` -> `1 mirror, camera` -> `2 mirrors (largest)` -> `2 mirrors, camera` -> `all mirrors` -> `all, camera
+  motion`. `1 mirror` keeps DLAA only on the largest mirror picture (the main mirror next to you), `2 mirrors` on the two
+  largest, `all` on every mirror. Without `camera` each moving part (traffic, wheels) moves exactly in the glass (about
+  0.4 ms per mirror in VR); with `camera` the mirror uses the camera motion only: the cheapest per mirror (about 0.15 ms),
+  but moving traffic can ghost in the glass. The row sets `mirror_dlaa` plus, for the mode you are in, `mirror_vr_mode`
+  (VR) or `mirror_flat_mode` (flat), `mirror_vr_views` and `mirror_mv`: `1 mirror` = mode 2 with `mirror_vr_views = 1`,
+  `2 mirrors` = mode 2 with `mirror_vr_views = 2` (each with `mirror_mv = parts`, or `camera` for the `, camera` state),
+  `all mirrors` = mode 1 with `mirror_mv = parts`, `all, camera motion` = mode 4; `off` = `mirror_dlaa` off (the mode
+  stays). `mirror_mv` is one key for VR and flat. Beeps: 1 short beep = 1 mirror, 2 = 2 mirrors, 3 = all; high (1200 Hz)
+  = per-part motion, lower (800 Hz) = camera motion only; one low tone = off. `Alt+F6` still switches mirror DLAA on / off
+  with the state it had; a `dlaa.ini` / profile value that is none of the seven shows as it is (`3 largest`, `3 largest,
+  camera`, `all, every 2nd frame`, `all, 2nd fr., camera`, `off (mode 0)`) and `Left` / `Right` go to the nearest state on
+  that side.
 - **Save to dlaa.ini** (or `Shift+F12`) writes the live values, and the panel position once you changed it
   (`menu_x`, `menu_y`, `menu_scale`, `menu_vr_x`, `menu_vr_y`, `menu_vr_scale`, `menu_vr_depth`, `menu_vr_face`) and the fps box once you
   changed it (the 7 `fps_*` keys), keeping every other line.
   The `Mode` row saves itself at once, like `End`.
+- **Reset to defaults** puts every row back to the fresh-install values, live and in `dlaa.ini` (the keys are removed
+  from the file; hotkeys and other lines stay). It beeps like Save (rising two-tone = done, one long low tone = the file
+  could not be written).
 - **GPU line and GPU cost column.** Under the title the panel shows what the GPU spends per frame, measured live and
   refreshed once a second: `game` (the game's own GPU frame, without the mod), `this mod` split into its parts (DLAA/DLSS
   itself, per-part motion, camera motion, see-through depth, mirrors, sharpen, copies; in VR one line per eye) and the fps.
@@ -103,6 +120,9 @@ Model select is direct: pressing the model that is already active just re-beeps 
 `Alt+F7` state) and `perf_profile` (the `Alt+F9` state) and leaves every other line of `dlaa.ini` untouched.
 v0.10.0: `dlss_preset`, `dlaa_area` and `mirror_dlaa` are only written when you set them yourself (in `dlaa.ini` or with
 their own key) -- a value that only comes from the performance profile is not written, so the next profile still moves it.
+v0.10.2: the same for `mirror_vr_mode` / `mirror_flat_mode` (set in `dlaa.ini` or with the menu's Mirror DLAA row);
+`mirror_vr_views` is written with `mirror_vr_mode`, and with `mirror_flat_mode` when that is `2`; `mirror_mv` (`parts` /
+`camera`) is written with either mode. The menu's Reset row removes all four.
 
 ## Texture sharpness keys — Ctrl+F1 / Ctrl+F2
 
@@ -219,7 +239,8 @@ the save failed.
 ## Change a key
 
 Put a `key_<action>` line in `dlaa.ini` (next to `dinput8.dll`, read when the game starts). The value is
-zero or more modifiers `Shift`, `Ctrl`, `Alt` joined with `+`, then one key. Not case-sensitive, spaces are
+zero or more modifiers `Shift`, `Ctrl`, `Alt` joined with `+`, then one key (and optionally a wheel / gamepad button after
+a comma, see [below](#wheel-gamepad-and-joystick-buttons)). Not case-sensitive, spaces are
 ignored. `none` (or an empty value) turns the action off. A value that is not understood is logged
 (with `debug = 1`) and the default stays. Write the binding alone on the line, no comment after it.
 
@@ -266,3 +287,46 @@ Keys: `F1`-`F24`, `A`-`Z`, `0`-`9`, `Home`, `End`, `Insert`, `Delete`, `PageUp`,
 
 If two actions get the same combination the log warns and both fire. At most one of the user keys (models,
 area, sharpen, width, texture LOD bias, save) acts per frame.
+
+### Wheel, gamepad and joystick buttons
+
+Every action can also be bound to a **button or the D-pad of a wheel / gamepad / joystick**, for example to open and drive
+the tuning menu from a Thrustmaster wheel. Put a second binding after a **comma**: `key_menu = Delete, Wheel10` opens the
+menu with `Delete` **or** wheel button 10. A value may hold one keyboard binding, one controller binding, or one of each.
+
+- `Wheel1` … `Wheel128` = button 1 … 128 of the controller (DirectInput button index N−1 in the game's data format;
+  the same N as the game's `bN` button id in `game.log`).
+- `WheelUp`, `WheelDown`, `WheelLeft`, `WheelRight` = the D-pad (the first POV hat). A diagonal counts for both of its
+  neighbours (up-right = `WheelUp` and `WheelRight`).
+- Controller bindings ignore `Shift` / `Ctrl` / `Alt` (held or not does not matter); `Shift+Wheel3` is not accepted.
+- Not case-sensitive, spaces ignored. `none` still turns the whole action off. If one part is not understood the whole
+  line is ignored (logged) and the default stays.
+- A comma right after a `+` or at the start of a binding is the comma **key** (`Shift+,` still works).
+
+**Finding the button number:** set `debug = 1`, start the game and press each button once. The first press of every
+button / D-pad direction is written to `dlaa_inject.log`, e.g.
+`controller 'Thrustmaster T300RS Racing Wheel': button 10 pressed -- bind it in dlaa.ini as Wheel10`
+(at most 24 such lines per run). The game's own `game.log` lists the same numbers as `[di8] Button input 'b10'` for the
+device. `WheelN` fires on button N of **every** DirectInput controller the game opens: a T300RS wheel and a shifter both
+have a button 1, so pick a number your shifter / button box does not use (or check the log lines, they name the device).
+
+If a shifter or a second controller shares button numbers, set `controller_name = T300` in `dlaa.ini` (part of the
+device name as `game.log` / the mod log shows it, not case-sensitive). Then only controllers whose name contains that text
+are read; every other controller goes to the game untouched (the log says `DirectInput: controller '...' not tapped`).
+Empty (the default) = every controller.
+
+Only controllers the game opens through DirectInput are seen (wheels, most joysticks and button boxes; the log lists each
+one as `DirectInput: controller device wrapped`). XInput-only gamepads (Xbox controllers) are not.
+
+While the tuning menu is open the game does not see the controller parts of the 5 menu bindings either (button reads as
+released, D-pad as centred), so the D-pad does not also change the game's camera or menu. The press that **opens** the menu
+does reach the game (the menu is still closed at that moment), as with `Delete`: bind `key_menu` to a button the game does
+not use. Releases always reach the game.
+
+```
+key_menu = Delete, Wheel10
+key_menu_up = Up, WheelUp
+key_menu_down = Down, WheelDown
+key_menu_left = Left, WheelLeft
+key_menu_right = Right, WheelRight
+```

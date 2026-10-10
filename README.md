@@ -79,7 +79,7 @@ This is an unofficial fan project. It is not affiliated with, or endorsed by, SC
 Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
-> Status: v0.10.1. Fixes the dark 1 px line on every silhouette in flat mode (v0.10.0), and `Ctrl+F9` now also saves the picture as it reached the screen. Per-part motion vectors, mirror DLAA, DLAA before the game's tonemap, the tuning menu and the fps counter were tested in ETS2 flat. DLAA itself has been run in ETS2 (VR) and ATS (flat and VR); the newest VR fixes (jitter phase, menu panel in VR) are only partly tested. The DLSS
+> Status: v0.10.2. Performance pass for VR: the old camera path stops once the per-part consensus is healthy (`mv_cons_fail_tol`), mirror DLAA units are built on the loading screen from a size cache (no 10-35 ms hitch when a mirror first appears), the tuning menu's Mirror DLAA row has 7 choices (off, 1 or 2 largest mirrors with part or camera motion, all), a Reset row, wheel / D-pad bindings for the menu (`WheelN`, `WheelUp`...), the panel goes down to size 0.3, and the rigid-parent vote grid is clipped to the eye's DLAA rect. Tested in ATS VR on 2026-10-10 (the camera-only mirrors and the vote clip only in the harness). v0.10.1 fixed the dark 1 px line on every silhouette in flat mode (v0.10.0), and `Ctrl+F9` also saves the picture as it reached the screen. Per-part motion vectors, mirror DLAA, DLAA before the game's tonemap, the tuning menu and the fps counter were tested in ETS2 flat. DLAA itself has been run in ETS2 (VR) and ATS (flat and VR); the newest VR fixes (jitter phase, menu panel in VR) are only partly tested. The DLSS
 > *upscaling* path (render below native, reconstruct up) runs in VR but is still
 > being tuned. Treat upscaling as experimental. The OFXR Bridge handling is not yet tested in a headset with the bridge armed.
 ---
@@ -293,7 +293,8 @@ Everything else is tuning. The defaults are tuned already; you can ignore the re
 
 **Every key can be changed.** Open `dlaa.ini`, find the `key_<action>` line for the
 action and edit the key, e.g. `key_dlaa_toggle = Ctrl+D` (or `none` to turn it
-off). Restart the game. Full list: [`docs/KEYS.md`](docs/KEYS.md).
+off). Restart the game. Full list: [`docs/KEYS.md`](docs/KEYS.md). A wheel / gamepad button or D-pad can be added after a
+comma (`key_menu = Delete, Wheel10`), so the tuning menu can be driven from the wheel.
 
 By default every control except `End` and the menu keys (`Delete`, arrows) is an **F-key with one modifier**, so it can be used
 blind in a headset. The game window must be focused. Each key beeps to confirm (pitch tracks
@@ -384,8 +385,15 @@ The three green lines under the title show the game's GPU time per frame, what t
   `FPS counter X`, `FPS counter Y` and `FPS counter size` move it; flat and VR keep their own position (`fps_show`,
   `fps_x`, `fps_y`, `fps_scale`, `fps_vr_x`, `fps_vr_y`, `fps_vr_scale` in `dlaa.ini`). Off, it costs nothing.
   The size goes from `0.2` to `3.0`; in VR it starts at `0.3` (small but readable in the headset).
+- **Mirror DLAA** picks how many mirrors get DLAA and how they move: `off`, `1 mirror (largest)` (only the main mirror
+  next to you), `1 mirror, camera`, `2 mirrors (largest)`, `2 mirrors, camera`, `all mirrors`, `all, camera motion`.
+  Without `camera` each moving part moves exactly in the glass (about 0.4 ms per mirror in VR); with `camera` the mirror
+  uses the camera motion only: the cheapest per mirror (about 0.15 ms), but moving traffic can ghost in the glass
+  (`mirror_mv` in `dlaa.ini`). `Alt+F6` still switches it on / off.
 - **Save to dlaa.ini** (the same as `Shift+F12`) writes the live values, and the panel position / fps box once you
   changed them.
+- **Reset to defaults** puts every row back to the fresh-install values, live and in `dlaa.ini` (the keys are removed
+  from the file; your hotkeys and every other line stay). Use it when you have changed too much.
 - **Where your GPU time goes:** under the title, a GPU line shows the game's own GPU time per frame, what this mod costs
   (split into DLAA/DLSS itself, per-part motion, camera motion, see-through depth, mirrors, sharpen and copies; in VR per
   eye) and the fps. The `GPU cost` column shows each row's share right now (`off` = that feature is off and costs
@@ -394,6 +402,9 @@ The three green lines under the title show the game's GPU time per frame, what t
   mod's timers switch on while the menu is open and off again when it closes (unless `debug = 1`).
 - Different keys: `key_menu`, `key_menu_up`, `key_menu_down`, `key_menu_left`, `key_menu_right` in `dlaa.ini`
   (see [`docs/KEYS.md`](docs/KEYS.md)).
+- **From the wheel:** the menu (and every other hotkey) can also be driven from a wheel's D-pad and buttons, e.g.
+  `key_menu = Delete, Wheel10` and `key_menu_up = Up, WheelUp`; see
+  [`docs/KEYS.md`](docs/KEYS.md#wheel-gamepad-and-joystick-buttons) for how to find the button number.
 
 ## `dlaa.ini`
 
@@ -417,6 +428,7 @@ The table below lists the commonly used keys:
 | `dlaa_area` | `100` | run DLAA on the centre `N` % of each eye image (VR performance), `10`..`100`. VR only: in flat mode the whole picture is always used. Also used for the truck on the VR main menu / garage screens |
 | `mv_objects` | `2` | motion vectors for moving traffic: `2` = every moving part gets its own exact motion (default), `0` = camera motion only (`1` = the older method, for comparison) |
 | `mirror_dlaa` | `1` | DLAA on the truck / car mirrors: `1` = each mirror gets its own DLAA (default), `0` = mirrors are left as the game draws them. `Alt+F6` switches it live, `Shift+F12` saves |
+| `mirror_mv` | `parts` | motion in the mirrors (v0.10.2, VR and flat): `parts` = each moving part gets its own exact motion in the glass (default, about 0.4 ms per mirror in VR), `camera` = camera motion only (about 0.15 ms per mirror, moving traffic can ghost in the glass). Used with `mirror_vr_mode` / `mirror_flat_mode` 1, 2 and 3; mode 4 is always camera motion. The menu's Mirror DLAA row sets it live, `Shift+F12` saves |
 | `dlaa_pre_tonemap` | `1` | DLAA before the game's tonemap (flat DLAA mode): `1` = on the game's HDR colours (default), `0` = on the finished picture at the end of the frame. `Alt+F7` switches it live, `Shift+F12` saves |
 | `tex_lod_bias` | `0` | sharper texture text: texture mip LOD bias for the 3-D world while DLAA / DLSS runs, `-3`..`1`, `0` = off. Try `-0.5` to `-1`; more negative = sharper but more shimmer on fine patterns. `Ctrl+F1` / `F2` change it live, `Shift+F12` saves |
 | `tex_lod_bias_auto` | `0` | `1` = while DLSS upscales, add log2(render width / output width) on top of `tex_lod_bias` (e.g. 75 % render width → −0.42) |
@@ -425,12 +437,13 @@ The table below lists the commonly used keys:
 | `jitter_sign_x` / `jitter_sign_y` | `1` | flip if the image shimmers or looks doubled (try the 4 combinations) |
 | `dlss_hdr` | `1` | HDR only: `1` = tell DLSS the picture is HDR (normal); `0` = try this if HDR brightness or colours look wrong with DLAA on |
 | `beeps` | `1` | `0` = silence the hotkey beeps |
-| `menu_x` / `menu_y` / `menu_scale` | `2` / `8` / `1.0` | tuning menu panel, flat: left / top edge in % of the picture, size `0.5`..`2.0`. The menu's Panel rows change them live |
+| `menu_x` / `menu_y` / `menu_scale` | `2` / `8` / `1.0` | tuning menu panel, flat: left / top edge in % of the picture, size `0.3`..`2.0`. The menu's Panel rows change them live |
 | `menu_vr_x` / `menu_vr_y` / `menu_vr_scale` / `menu_vr_depth` | `0` / `-5` / `1.0` / `12` | tuning menu panel, VR: centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size (1 = 54 % of the eye width), inward shift per eye in px |
 | `menu_vr_face` | `1` | tuning menu panel, VR: `1` = the panel turns to face your eye when moved off the centre (a tilted 3-D panel, same size from every angle), `0` = a flat picture. The menu's `Panel faces you (VR)` row switches it live |
 | `fps_show` | `0` | live fps box: `1` = a small fps / frame-time box stays on screen, also while the menu is closed. The menu's `FPS counter` row switches it live |
 | `fps_x` / `fps_y` / `fps_scale` | `1` / `1` / `1.0` | fps box, flat: left / top edge in % of the picture (`0`..`95`), size `0.2`..`3.0` (1 = 92 x 44 px at 1080 p) |
 | `fps_vr_x` / `fps_vr_y` / `fps_vr_scale` | `0` / `-25` / `0.3` | fps box, VR: centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size `0.2`..`3.0` (1 = 8 % of the eye width) |
+| `controller_name` | *(empty)* | only read the wheels / gamepads whose name contains this text for `WheelN` / `WheelUp` hotkey bindings, e.g. `T300` when a shifter shares the wheel's button numbers; empty = every controller ([`docs/KEYS.md`](docs/KEYS.md#wheel-gamepad-and-joystick-buttons)) |
 | `key_<action>` | *(see KEYS.md)* | re-bind any hotkey, e.g. `key_dlaa_toggle = Ctrl+D`, or `none` to disable it. Full list and format: [`docs/KEYS.md`](docs/KEYS.md) |
 | `debug` | `0` | `1` = write the log file `dlaa_inject.log` (off by default) |
 
@@ -483,7 +496,9 @@ switches it off.
 
 VR: not measured yet with v0.10. Both eyes run the whole chain at 4592x6496 each (stereo buffer scale 2.0), so expect
 roughly double. `mirror_vr_mode` (0 off, 1 all mirrors, 2 only the two largest, 3 every mirror every 2nd frame) and
-`mirror_dlaa = 0` are the first knobs to turn if VR drops below the headset rate.
+`mirror_dlaa = 0` are the first knobs to turn if VR drops below the headset rate (the menu's Mirror DLAA row sets them live:
+`1 mirror (largest)` is the cheapest clean choice; v0.10.2: `1 mirror, camera` / `mirror_mv = camera` drops the per-part
+motion in the mirrors, about 0.15 ms per mirror instead of 0.4 ms).
 
 **Test rig** (all numbers above): AMD Ryzen 9 9950X3D, 62 GB RAM, NVIDIA GeForce RTX 5090 (driver 32.0.16.1692),
 Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR); ATS 1.61, ETS2 current.

@@ -624,6 +624,62 @@ void SceneDlaa::CropRect(uint32_t fullW, uint32_t fullH, int area, float cu, flo
     if (h) *h = ch;
 }
 
+// v0.10.2: the sizes a Run on a fullW x fullH colour derives (was inline in Run; Prebuild / ReadyFor use the same numbers).
+// v0.6.4 DLAA area: crop size from the area (recomputed every Run, cheap; a change rebuilds in Ensure), origin centred on this
+// eye's optical centre, clamped into the image, even pixels. Area 100 = whole image, origin (0,0) = the v0.6.3 path. Outside
+// the rect the game image stays the raw jittered frame.
+// v0.7.0 upscale: only when the output is >= the tonemap in both axes and larger in one (else v0.6.5 path). Output rect = the
+// crop mapped into output space: size = round(crop * out / full) per axis (depends on the crop size only, so a rect move never
+// rebuilds), origin = round(origin * out / full), clamped so the rect stays inside the output. Area 100 -> (0, 0, outW, outH).
+SceneDlaa::RunGeom SceneDlaa::Geometry(uint32_t fullW, uint32_t fullH, uint32_t outW, uint32_t outH, int area) const {
+    RunGeom g{};
+    g.cw = fullW; g.ch = fullH;
+    CropSize(fullW, fullH, area, &g.cw, &g.ch);
+    g.rx = RectOrigin(fullW, g.cw, m_cu);
+    g.ry = RectOrigin(fullH, g.ch, m_cv);
+    g.up = outW && outH && outW >= fullW && outH >= fullH && (outW > fullW || outH > fullH);
+    g.ofw = 0; g.ofh = 0; g.ow = g.cw; g.oh = g.ch; g.oxc = g.rx; g.oyc = g.ry;
+    if (g.up) {
+        g.ofw = outW; g.ofh = outH;
+        g.ow = ScaleRound(g.cw, outW, fullW);  if (g.ow > outW) g.ow = outW;
+        g.oh = ScaleRound(g.ch, outH, fullH);  if (g.oh > outH) g.oh = outH;
+        g.oxc = ScaleRound(g.rx, outW, fullW); if (g.oxc > outW - g.ow) g.oxc = outW - g.ow;
+        g.oyc = ScaleRound(g.ry, outH, fullH); if (g.oyc > outH - g.oh) g.oyc = outH - g.oh;
+    }
+    return g;
+}
+
+// v0.10.2: Run's "no build" test (was inline in Run): textures + NGX feature exist for exactly these sizes, the colour kind
+// active or parked (v0.10.0 phase 7: a swap of the parked colour set is no build).
+bool SceneDlaa::BuiltFor(const RunGeom& g, uint32_t fullW, uint32_t fullH, bool hdr) const {
+    return m_ready && g.cw == m_w && g.ch == m_h && fullW == m_fullW && fullH == m_fullH && g.ofw == m_outFullW &&
+           g.ofh == m_outFullH && g.ow == m_ow && g.oh == m_oh && (hdr == m_hdr || (m_park.valid && m_park.hdr == hdr));
+}
+
+bool SceneDlaa::ReadyFor(uint32_t fullW, uint32_t fullH, bool hdr, int area) const {
+    return BuiltFor(Geometry(fullW, fullH, 0, 0, area), fullW, fullH, hdr);
+}
+
+// v0.10.2: see scene_dlaa.h. Exactly the Ensure call of Run (same Geometry, outW = outH = 0, the DLAA area in force).
+bool SceneDlaa::Prebuild(ID3D11DeviceContext* ctx, uint32_t fullW, uint32_t fullH, bool hdr) {
+    m_deferred = false;
+    if (!ctx || !fullW || !fullH) return false;
+    if (!(m_menuUnit ? ShaderCache::CoreDone() : ShaderCache::Done())) { m_deferred = true; return false; }   // as Run
+    const RunGeom g = Geometry(fullW, fullH, 0, 0, s_area);
+    if (BuiltFor(g, fullW, fullH, hdr)) return true;
+    ComPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    if (!dev) return false;
+    CsState saved;                                     // NGX may bind compute state while creating the feature (PrewarmNgx)
+    saved.Save(ctx);
+    m_budgetBypass = true;                             // the boot screen: several creates in one Present are invisible
+    const bool ok = Ensure(dev.Get(), fullW, fullH, g.cw, g.ch, g.rx, g.ry, g.ofw, g.ofh, g.ow, g.oh, hdr);
+    m_budgetBypass = false;
+    saved.Restore(ctx);
+    if (!ok) Shutdown();                               // not "failed at these sizes": the live Run tries once more
+    return ok;
+}
+
 bool SceneDlaa::Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32_t w, uint32_t h,
                        uint32_t rx, uint32_t ry, uint32_t outFullW, uint32_t outFullH, uint32_t ow, uint32_t oh, bool hdr) {
     const bool sameSize = w == m_w && h == m_h && fullW == m_fullW && fullH == m_fullH &&
@@ -646,7 +702,7 @@ bool SceneDlaa::Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32
             return true;
         }
         if (m_parkFailed[k]) { m_altFailed = true; return false; }
-        if (!DlaaProcessor::CreateBudgetFree()) { m_deferred = true; return false; }
+        if (!m_budgetBypass && !DlaaProcessor::CreateBudgetFree()) { m_deferred = true; return false; }   // (v0.10.2 Prebuild)
         ShutdownParked();                    // (holds nothing here: a parked set of this kind was swapped in above)
         SwapParked();                        // the current set is parked with its history; the active slots are empty
         if (!BuildColourSet(dev, hdr, true)) {
@@ -665,7 +721,8 @@ bool SceneDlaa::Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32
     }
     // v0.7.8: a (re)build creates an NGX feature (~10-40 ms with textures): at most one per Present, so two units
     // never build in the same frame. Nothing is torn down here; the next Present retries.
-    if (!DlaaProcessor::CreateBudgetFree()) { m_deferred = true; return false; }
+    // v0.10.2: a mirror-unit pre-build on the boot screen (Prebuild) does not wait for the budget.
+    if (!m_budgetBypass && !DlaaProcessor::CreateBudgetFree()) { m_deferred = true; return false; }
 
     // Dims changed (or first use, or v0.6.4 the DLAA area changed, or v0.7.0 upscale on/off / output size):
     // tear down and rebuild everything.
@@ -1460,36 +1517,18 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
         return false;
     }
 
-    // v0.6.4 DLAA area: crop size from the area (recomputed every Run, cheap; a change rebuilds in Ensure),
-    // origin centred on this eye's optical centre, clamped into the image, even pixels. Area 100 = whole image,
-    // origin (0,0) = the v0.6.3 path. Outside the rect the game image stays the raw jittered frame.
-    uint32_t cw = td.Width, ch = td.Height;
-    CropSize(td.Width, td.Height, s_area, &cw, &ch);
-    const uint32_t rx = RectOrigin(td.Width, cw, m_cu);
-    const uint32_t ry = RectOrigin(td.Height, ch, m_cv);
-
-    // v0.7.0 upscale: only when the output is >= the tonemap in both axes and larger in one (else v0.6.5 path).
-    // Output rect = the crop mapped into output space: size = round(crop * out / full) per axis (depends on the
-    // crop size only, so a rect move never rebuilds), origin = round(origin * out / full), clamped so the rect
-    // stays inside the output. Area 100 -> (0, 0, outW, outH) exactly.
-    const bool up = outW && outH && outW >= td.Width && outH >= td.Height && (outW > td.Width || outH > td.Height);
-    uint32_t ofw = 0, ofh = 0, ow = cw, oh = ch, oxc = rx, oyc = ry;
-    if (up) {
-        ofw = outW; ofh = outH;
-        ow = ScaleRound(cw, outW, td.Width);  if (ow > outW) ow = outW;
-        oh = ScaleRound(ch, outH, td.Height); if (oh > outH) oh = outH;
-        oxc = ScaleRound(rx, outW, td.Width); if (oxc > outW - ow) oxc = outW - ow;
-        oyc = ScaleRound(ry, outH, td.Height); if (oyc > outH - oh) oyc = outH - oh;
-    }
+    // v0.6.4 DLAA area crop + v0.7.0 upscale output rect (v0.10.2: computed in Geometry, shared with Prebuild / ReadyFor)
+    const RunGeom g = Geometry(td.Width, td.Height, outW, outH, s_area);
+    const uint32_t cw = g.cw, ch = g.ch, rx = g.rx, ry = g.ry;
+    const uint32_t ofw = g.ofw, ofh = g.ofh, ow = g.ow, oh = g.oh, oxc = g.oxc, oyc = g.oyc;
+    const bool up = g.up;
 
     ComPtr<ID3D11Device> dev;
     ctx->GetDevice(&dev);
     // v0.7.8: a Run that (re)builds the unit is timed and logged (proof that no build costs more than its textures +
     // its own NGX feature any more: shaders come from ShaderCache, NGX is pre-warmed).
     // v0.10.0 phase 7: a swap of the parked colour set is no build
-    const bool building = !(m_ready && cw == m_w && ch == m_h && td.Width == m_fullW && td.Height == m_fullH &&
-                            ofw == m_outFullW && ofh == m_outFullH && ow == m_ow && oh == m_oh &&
-                            (hdr == m_hdr || (m_park.valid && m_park.hdr == hdr)));
+    const bool building = !BuiltFor(g, td.Width, td.Height, hdr);
     LARGE_INTEGER runT0{}, ensT1{};
     if (building) QueryPerformanceCounter(&runT0);
     if (!dev || !Ensure(dev.Get(), td.Width, td.Height, cw, ch, rx, ry, ofw, ofh, ow, oh, hdr)) return false;

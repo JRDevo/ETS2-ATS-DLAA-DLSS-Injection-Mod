@@ -117,10 +117,15 @@ void PerfFrame() {
 }
 // the phase-8 counters of a scene's DrawIdMv + the WARP perf line (restarts the perf window)
 void PrintPhase8(ID3D11DeviceContext* ctx, const DrawIdMv::Stats& ds, const char* tag) {
-    printf("   %s phase 8: frames without a world / cabin medoid %llu / %llu (medoid re-armed %llu / %llu); rigid-parent vote: listed "
+    printf("   %s phase 8: frames without a world / cabin medoid %llu / %llu (medoid re-armed %llu / %llu; v0.10.2 consensus failure "
+           "streaks by length 1 / 2 / 3-5 / 6+: world %llu / %llu / %llu / %llu, cabin %llu / %llu / %llu / %llu); rigid-parent vote: listed "
            "draws with pixels %llu, of them fine %llu, frames whose vote grid was skipped %llu, 1st-pass marches %llu (%.0f / frame)\n",
            tag, (unsigned long long)ds.noMedoidFrames[0], (unsigned long long)ds.noMedoidFrames[1],
-           (unsigned long long)ds.medoidRearms[0], (unsigned long long)ds.medoidRearms[1], (unsigned long long)ds.parVis,
+           (unsigned long long)ds.medoidRearms[0], (unsigned long long)ds.medoidRearms[1],
+           (unsigned long long)ds.consFailRuns[0][0], (unsigned long long)ds.consFailRuns[0][1],
+           (unsigned long long)ds.consFailRuns[0][2], (unsigned long long)ds.consFailRuns[0][3],
+           (unsigned long long)ds.consFailRuns[1][0], (unsigned long long)ds.consFailRuns[1][1],
+           (unsigned long long)ds.consFailRuns[1][2], (unsigned long long)ds.consFailRuns[1][3], (unsigned long long)ds.parVis,
            (unsigned long long)ds.parFine, (unsigned long long)ds.parSkipped, (unsigned long long)ds.parMarches,
            ds.rbFrames ? (double)ds.parMarches / (double)ds.rbFrames : 0.0);
     if (ds.cvFrames)                                     // v0.10.0 phase 18
@@ -1635,18 +1640,34 @@ struct Shadow {
     long long clipPx = 0;
     double mvMax = 0.0, fMax = 0.0;
     int frames = 0, badFrames = 0, edgeFrames = 0, genFails = 0, replayFails = 0;
+    // v0.10.2 (mv_area_clip): VR model -- the replay clip is the UNION of this eye's rect and the OTHER eye's (optical centre cu2)
+    // + the margin, as inject.cpp PassViewSetup; eyeClip -1 = leave DrawIdMv's setting, 0 / 1 = mv_area_clip for this shadow's
+    // Generate (the vote grid then covers this eye's rect + margin n the union). Vote grid px summed per Generate (the log line).
+    int eyeClip = -1, marginPx = 0;
+    bool unionClip = false;
+    long long vgPx = 0, vgFrames = 0;
 
     bool Init(Env& E, UINT w, UINT h, int areaPct, int margin, UINT sh, const char* nm, float cu = 0.5f, float cv = 0.5f,
-              bool batchMode = false, bool cullMode = false) {
+              bool batchMode = false, bool cullMode = false, float cu2 = -1.0f, int eyeClipMode = -1) {
         ID3D11Device* d = E.dev.Get();
         name = nm; shift = sh; W = w; H = h;
         batch = batchMode; cull = batchMode && cullMode;
+        eyeClip = eyeClipMode; marginPx = margin; unionClip = cu2 >= 0.0f;
         fw = (w + (1u << sh) - 1u) >> sh; fh = (h + (1u << sh) - 1u) >> sh;
         uint32_t x = 0, y = 0, cww = 0, chh = 0;
         SceneDlaa::CropRect(w, h, areaPct, cu, cv, &x, &y, &cww, &chh);   // (cu, cv): the eye's optical centre
         cx = x; cy = y; cw = cww; ch = chh;
-        clip.left = (LONG)cx - margin; clip.top = (LONG)cy - margin;
-        clip.right = (LONG)(cx + cw) + margin; clip.bottom = (LONG)(cy + ch) + margin;
+        LONG ul = (LONG)cx, ut = (LONG)cy, ur = (LONG)(cx + cw), ub = (LONG)(cy + ch);
+        if (unionClip) {                                 // v0.10.2: + the other eye's rect (inject.cpp PassViewSetup in VR)
+            uint32_t x2 = 0, y2 = 0, w2 = 0, h2 = 0;
+            SceneDlaa::CropRect(w, h, areaPct, cu2, cv, &x2, &y2, &w2, &h2);
+            if ((LONG)x2 < ul) ul = (LONG)x2;
+            if ((LONG)y2 < ut) ut = (LONG)y2;
+            if ((LONG)(x2 + w2) > ur) ur = (LONG)(x2 + w2);
+            if ((LONG)(y2 + h2) > ub) ub = (LONG)(y2 + h2);
+        }
+        clip.left = ul - margin; clip.top = ut - margin;
+        clip.right = ur + margin; clip.bottom = ub + margin;
         if (clip.left < 0) clip.left = 0;
         if (clip.top < 0) clip.top = 0;
         if (clip.right > (LONG)w) clip.right = (LONG)w;
@@ -1793,9 +1814,18 @@ struct Shadow {
     }
     bool Generate(ID3D11DeviceContext* ctx, ID3D11ShaderResourceView* twinSrv, bool useFwd) {
         CameraMv::FrameStats fs;
+        const bool clipWas = DrawIdMv::AreaClip();
+        const int marginWas = DrawIdMv::AreaMargin();
+        if (eyeClip >= 0) DrawIdMv::SetAreaClip(eyeClip != 0, marginPx);   // v0.10.2 (inject.cpp PassViewSetup sets it per pass)
         const bool ok = cam.Generate(ctx, cw, ch, cx, cy, W, H, cand, twinSrv, dUav.Get(), mvUav.Get(), &fs, false, nullptr, nullptr,
                                      fwdSrv.Get(), &rec, idSrv.Get(), useFwd ? &fwdRec : nullptr, shift,
                                      shift ? fwdIdSrv.Get() : nullptr);
+        if (eyeClip >= 0) DrawIdMv::SetAreaClip(clipWas, marginWas);
+        if (ok) {                                        // v0.10.2: the vote grid rect this Generate used
+            const uint32_t* pc = cam.DrawIds().PreparedClip();
+            vgPx += (long long)(pc[2] > pc[0] ? pc[2] - pc[0] : 0u) * (long long)(pc[3] > pc[1] ? pc[3] - pc[1] : 0u);
+            ++vgFrames;
+        }
         if (!ok) ++genFails;
         return ok;
     }
@@ -1976,8 +2006,11 @@ struct Shadow {
         if (batch) printf("; BATCH%s (occlusion init %lld frames; GREEN where the forward depth lost: %lld px, %lld differ -- "
                           "not compared)", cull ? " + cull" : "", cullInit, gSkipNoWin, gDiffNoWin);
         printf("; per-draw states differing from the main pipeline %lld of %lld; a mover crossed the crop edge in %d of %d frames; "
-               "clip = %.1f %% of the image\n", stateDiff, stateCmp, edgeFrames, frames,
-               frames ? 100.0 * (double)clipPx / ((double)frames * W * H) : 0.0);
+               "clip = %.1f %% of the image; vote grid = %.1f %% of the image (%s, mv_area_clip %s)\n", stateDiff, stateCmp,
+               edgeFrames, frames, frames ? 100.0 * (double)clipPx / ((double)frames * W * H) : 0.0,
+               vgFrames ? 100.0 * (double)vgPx / ((double)vgFrames * W * H) : 0.0,
+               unionClip ? "VR model: replay clip = both eyes' rects + margin" : "one rect",
+               eyeClip < 0 ? "as set" : (eyeClip ? "1" : "0"));
         return fl;
     }
 };
@@ -5785,6 +5818,7 @@ int main(int argc, char** argv) {
             DrawIdMv::SetInstReplay(0);
         }
         else if (!strncmp(s, "drop=", 5)) DrawIdMv::SetMedoidDrop((unsigned)atoi(s + 5));
+        else if (!strncmp(s, "failtol=", 8)) DrawIdMv::SetConsFailTol((unsigned)atoi(s + 8));   // v0.10.2: mv_cons_fail_tol
         else if (!strncmp(s, "jerk=", 5)) g_yawJerk = atof(s + 5);   // phase 14 round 5
         else if (!strcmp(s, "mutcr")) g_s15Mut = 4;                  // phase 14 round 6: S15 with the origin-free rule off (must FAIL)
         else if (!strcmp(s, "mutinst")) g_s15Mut = 8;                //   S15 with multi-instance draws listed again (round-4 rule)
@@ -5818,10 +5852,11 @@ int main(int argc, char** argv) {
             DrawIdMv::SetParentMaxListed(!strcmp(s, "low") ? 32u : 64u);
         }
     }
-    printf("phase 8 knobs: mv_vote_res %u, mv_vote_march_cap %u, mv_cons_cands %u, mv_medoid_drop %u, mv_inst_replay %d, "
-           "mv_parent_max_listed %u%s%s; phase 14: static replay skip %s (S1-S4, S6-S8, S13); phase 18: mv_fold_dispatch %d, "
-           "mv_vote_compact %d%s%s\n",
-           DrawIdMv::VoteRes(), DrawIdMv::MarchCap(), DrawIdMv::ConsCands(), DrawIdMv::MedoidDrop(), DrawIdMv::InstReplay(),
+    printf("phase 8 knobs: mv_vote_res %u, mv_vote_march_cap %u, mv_cons_cands %u, mv_medoid_drop %u (v0.10.2 mv_cons_fail_tol %u), "
+           "mv_inst_replay %d, mv_parent_max_listed %u%s%s; phase 14: static replay skip %s (S1-S4, S6-S8, S13); phase 18: "
+           "mv_fold_dispatch %d, mv_vote_compact %d%s%s\n",
+           DrawIdMv::VoteRes(), DrawIdMv::MarchCap(), DrawIdMv::ConsCands(), DrawIdMv::MedoidDrop(), DrawIdMv::ConsFailTol(),
+           DrawIdMv::InstReplay(),
            DrawIdMv::ParentMaxListed(),
            g_cmpOut ? ", writing the comparison file" : "", g_cmpIn ? ", comparing with the reference file" : "",
            g_rstatic ? "ON (rstatic)" : "off", DrawIdMv::Fold(), (int)DrawIdMv::VoteCompact(),
@@ -6138,15 +6173,25 @@ int main(int argc, char** argv) {
         Shadow& c = *pc; Shadow& d = *pd; Shadow& g = *pe;
         // S6's vehicles drive near the image centre: the crop is OFF-centre like a VR eye's (optical centre u 0.70), its left edge
         // runs through the plate carrier, the convoy and the cars
+        // v0.10.2 (mv_area_clip): three VR-model shadows -- the replay clip is the union of this eye's rect (u 0.70) and the other
+        // eye's (u 0.30) + 40 px; eye clip ON (the vote grid over this eye's rect + 40 px, full / 1/2-res) and OFF (phase 9)
+        std::unique_ptr<Shadow> pu1(new Shadow), pu2(new Shadow), pu3(new Shadow);
+        Shadow& u1 = *pu1; Shadow& u2 = *pu2; Shadow& u3 = *pu3;
         if (!a.Init(E, W, H, 40, 40, 0, "S11 clip, full-res forward", 0.70f, 0.5f) ||
             !b.Init(E, W, H, 40, 40, 1, "S11 clip, 1/2-res forward", 0.70f, 0.5f) ||
             !c.Init(E, W, H, 40, 40, 0, "S11 clip, full-res forward BATCH", 0.70f, 0.5f, true, false) ||
             !d.Init(E, W, H, 40, 40, 0, "S11 clip, full-res forward BATCH + cull", 0.70f, 0.5f, true, true) ||
-            !g.Init(E, W, H, 40, 40, 1, "S11 clip, 1/2-res forward BATCH + cull", 0.70f, 0.5f, true, true)) {
+            !g.Init(E, W, H, 40, 40, 1, "S11 clip, 1/2-res forward BATCH + cull", 0.70f, 0.5f, true, true) ||
+            !u1.Init(E, W, H, 40, 40, 0, "S11 VR union clip, eye clip ON, full-res forward BATCH + cull", 0.70f, 0.5f, true, true,
+                     0.30f, 1) ||
+            !u2.Init(E, W, H, 40, 40, 1, "S11 VR union clip, eye clip ON, 1/2-res forward BATCH + cull", 0.70f, 0.5f, true, true,
+                     0.30f, 1) ||
+            !u3.Init(E, W, H, 40, 40, 1, "S11 VR union clip, eye clip OFF, 1/2-res forward BATCH + cull", 0.70f, 0.5f, true, true,
+                     0.30f, 0)) {
             ++tot.checks; ++tot.fails; res.push_back({ "S11 shadow init", 1 });
         } else {
-            Shadow* const sh[5] = { &a, &b, &c, &d, &g };
-            const int fl = RunConvoyScene(E, snapPx, tot, false, false, sh, 5);
+            Shadow* const sh[8] = { &a, &b, &c, &d, &g, &u1, &u2, &u3 };
+            const int fl = RunConvoyScene(E, snapPx, tot, false, false, sh, 8);
             res.push_back({ "S11 = S6 + DLAA-area clip shadows (full / 1/2-resolution forward depth) vs the whole-image pipeline", fl });
         }
     }
@@ -6156,15 +6201,24 @@ int main(int argc, char** argv) {
         std::unique_ptr<Shadow> pc(new Shadow), pd(new Shadow), pe(new Shadow);   // v0.10.0 phase 10: batch shadows
         Shadow& c = *pc; Shadow& d = *pd; Shadow& g = *pe;
         // the crop's left edge (optical centre u 0.70) runs through the turning trailer and its plates (the vote near the clip)
+        // v0.10.2 (mv_area_clip): the VR-model shadows as in S11 (the other eye's rect at u 0.30 in the replay clip)
+        std::unique_ptr<Shadow> pu1(new Shadow), pu2(new Shadow), pu3(new Shadow);
+        Shadow& u1 = *pu1; Shadow& u2 = *pu2; Shadow& u3 = *pu3;
         if (!a.Init(E, W, H, 40, 40, 0, "S12 clip, full-res forward", 0.70f, 0.5f) ||
             !b.Init(E, W, H, 40, 40, 1, "S12 clip, 1/2-res forward", 0.70f, 0.5f) ||
             !c.Init(E, W, H, 40, 40, 0, "S12 clip, full-res forward BATCH", 0.70f, 0.5f, true, false) ||
             !d.Init(E, W, H, 40, 40, 0, "S12 clip, full-res forward BATCH + cull", 0.70f, 0.5f, true, true) ||
-            !g.Init(E, W, H, 40, 40, 1, "S12 clip, 1/2-res forward BATCH + cull", 0.70f, 0.5f, true, true)) {
+            !g.Init(E, W, H, 40, 40, 1, "S12 clip, 1/2-res forward BATCH + cull", 0.70f, 0.5f, true, true) ||
+            !u1.Init(E, W, H, 40, 40, 0, "S12 VR union clip, eye clip ON, full-res forward BATCH + cull", 0.70f, 0.5f, true, true,
+                     0.30f, 1) ||
+            !u2.Init(E, W, H, 40, 40, 1, "S12 VR union clip, eye clip ON, 1/2-res forward BATCH + cull", 0.70f, 0.5f, true, true,
+                     0.30f, 1) ||
+            !u3.Init(E, W, H, 40, 40, 1, "S12 VR union clip, eye clip OFF, 1/2-res forward BATCH + cull", 0.70f, 0.5f, true, true,
+                     0.30f, 0)) {
             ++tot.checks; ++tot.fails; res.push_back({ "S12 shadow init", 1 });
         } else {
-            Shadow* const sh[5] = { &a, &b, &c, &d, &g };
-            const int fl = RunParentScene(E, snapPx, tot, 0, 0, sh, 5);
+            Shadow* const sh[8] = { &a, &b, &c, &d, &g, &u1, &u2, &u3 };
+            const int fl = RunParentScene(E, snapPx, tot, 0, 0, sh, 8);
             res.push_back({ "S12 = S8 + DLAA-area clip shadows (full / 1/2-resolution forward depth) vs the whole-image pipeline", fl });
         }
     }

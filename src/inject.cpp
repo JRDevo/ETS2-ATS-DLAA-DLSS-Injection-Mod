@@ -837,6 +837,10 @@ bool IsForeground() {
 // Every action has a binding "[Shift+][Ctrl+][Alt+]Key" (dlaa.ini key_<action>, defaults below = the v0.7.6 keys).
 // A binding fires on the key's DOWN-EDGE only, game in the foreground, with EXACTLY its modifiers held (a binding
 // without modifiers fires only when none of Shift/Ctrl/Alt is down). vk == 0 = disabled ("none").
+// v0.10.1: a value may hold a second binding after a comma, and a binding may be a CONTROLLER button / POV direction of a
+// DirectInput wheel / gamepad the game opened ("Wheel7" = button 7, "WheelUp/Right/Down/Left" = POV hat 1; dinput_wrap.cpp
+// taps it). E.g. "Delete, Wheel10": the keyboard part (exact modifiers, as before) OR the controller part (modifiers
+// ignored) down = the action is down; the down-edge / foreground / menu-repeat rules apply to that combined state.
 enum KeyAction {
     KA_MODE_CYCLE, KA_MODEL1, KA_MODEL2, KA_MODEL3, KA_MODEL4, KA_AREA_DOWN, KA_AREA_UP, KA_SHARPEN_DOWN,
     KA_SHARPEN_UP, KA_WIDTH_DOWN, KA_WIDTH_UP, KA_DLAA_TOGGLE, KA_SAVE, KA_UPSCALE_TOGGLE, KA_MV_TOGGLE,
@@ -858,8 +862,10 @@ struct KeyBind {
     const char* def;          // default binding text
     int         vk;           // 0 = disabled
     unsigned    mods;         // MOD_*_BIT
-    char        name[48];     // binding as shown in logs
+    char        name[64];     // binding as shown in logs / the menu's Hotkey column (v0.10.1: was 48; the trimmed raw text)
     bool        hit;          // down-edge this Present (PollKeys)
+    int         joy;          // v0.10.1 controller part: 0 none, 1..128 button N, 129..132 POV up / right / down / left
+                              //   (KeySwallow::kJoy*, dinput_wrap.h); last member so the table below needs no change
 };
 KeyBind g_keys[KA_COUNT] = {
     { "key_mode_cycle",      "End",       0, 0, "", false },
@@ -901,17 +907,74 @@ KeyBind g_keys[KA_COUNT] = {
     { "key_menu_right",      "Right",     0, 0, "", false },   // v0.10.0 menu: value up / next
 };
 inline bool KeyHit(KeyAction a) { return g_keys[a].hit; }
+// v0.10.1 dlaa.ini controller_name: non-empty = only DirectInput controllers whose product name CONTAINS this text
+// (ASCII case-insensitive; stored lower case) are tapped / filtered (dinput_wrap.cpp CreateDevice via ControllerNameAllowed),
+// so a shifter sharing button numbers with the wheel cannot fire a WheelN binding. Empty = every controller. Written only by
+// LoadConfig (DllMain attach, before the game can create a device).
+char g_controllerName[64] = "";
 inline const char* KeyName(KeyAction a) { return g_keys[a].name; }
 bool g_keyRepeat[KA_COUNT] = {};         // v0.10.0: this Present's hit is an auto-repeat (menu navigation keys only)
 
-// Parses one binding ("Ctrl+Shift+F5", case-insensitive, spaces ignored). "" / "none" -> vk 0 (disabled), true.
-bool ParseBinding(const char* text, int* vkOut, unsigned* modsOut) {
-    char buf[64]; int n = 0;
+// v0.10.1: one controller token (lower case, no spaces): "wheel1".."wheel128" -> 1..128, "wheelup" / "wheelright" /
+// "wheeldown" / "wheelleft" -> KeySwallow::kJoyPovUp..kJoyPovLeft. Modifiers are not allowed in front of it.
+bool ParseJoyToken(const char* p, int* joyOut) {
+    if (strncmp(p, "wheel", 5)) return false;
+    p += 5;
+    if (!strcmp(p, "up"))    { *joyOut = KeySwallow::kJoyPovUp;    return true; }
+    if (!strcmp(p, "right")) { *joyOut = KeySwallow::kJoyPovRight; return true; }
+    if (!strcmp(p, "down"))  { *joyOut = KeySwallow::kJoyPovDown;  return true; }
+    if (!strcmp(p, "left"))  { *joyOut = KeySwallow::kJoyPovLeft;  return true; }
+    const size_t len = strlen(p);
+    if (len < 1 || len > 3) return false;
+    for (size_t i = 0; i < len; ++i) if (!isdigit((unsigned char)p[i])) return false;
+    const int b = atoi(p);
+    if (b < 1 || b > KeySwallow::kJoyMaxButton) return false;
+    *joyOut = b;
+    return true;
+}
+bool ParseKeyChord(const char* p, int* vkOut, unsigned* modsOut);   // below
+// Parses one key_* value ("Ctrl+Shift+F5", case-insensitive, spaces ignored). "" / "none" -> vk 0 + joy 0 (disabled), true.
+// v0.10.1: up to TWO bindings separated by a comma, at most one keyboard chord and one controller token ("Delete, Wheel10",
+// "WheelUp, Up"). A comma right after a '+' or at the start of a part is the comma KEY ("Shift+,", ",, Wheel3"). Any part
+// not understood (or two of the same kind, or "none" in a pair) rejects the whole value.
+bool ParseBinding(const char* text, int* vkOut, unsigned* modsOut, int* joyOut) {
+    char buf[80]; int n = 0;
     for (const char* c = text; *c && n < (int)sizeof(buf) - 1; ++c)
         if (*c != ' ' && *c != '\t' && *c != '\r' && *c != '\n') buf[n++] = (char)tolower((unsigned char)*c);
     buf[n] = 0;
-    *vkOut = 0; *modsOut = 0;
+    *vkOut = 0; *modsOut = 0; *joyOut = 0;
     if (!n || !strcmp(buf, "none")) return true;
+    char part[2][80] = {};
+    int parts = 0, start = 0;
+    for (int i = 0; i <= n; ++i) {
+        const bool sep = i < n && buf[i] == ',' && i > start && buf[i - 1] != '+';
+        if (i < n && !sep) continue;
+        if (parts == 2) return false;                    // a third binding
+        memcpy(part[parts], buf + start, (size_t)(i - start));
+        part[parts][i - start] = 0;
+        ++parts;
+        start = i + 1;
+    }
+    int vk = 0, joy = 0; unsigned mods = 0;
+    for (int k = 0; k < parts; ++k) {
+        if (!part[k][0]) return false;                   // "Delete," / ",Wheel3" with nothing on one side
+        int j = 0, v = 0; unsigned m = 0;
+        if (ParseJoyToken(part[k], &j)) {
+            if (joy) return false;                       // two controller parts
+            joy = j;
+        } else if (ParseKeyChord(part[k], &v, &m)) {
+            if (vk) return false;                        // two keyboard parts
+            vk = v; mods = m;
+        } else {
+            return false;
+        }
+    }
+    *vkOut = vk; *modsOut = mods; *joyOut = joy;
+    return true;
+}
+// One keyboard chord, already lower case without spaces ("ctrl+shift+f5"). False = not a key ("none" included).
+bool ParseKeyChord(const char* buf, int* vkOut, unsigned* modsOut) {
+    *vkOut = 0; *modsOut = 0;
     unsigned mods = 0;
     const char* p = buf;
     for (;;) {                                           // peel leading "shift+" / "ctrl+" / "alt+" (the key stays last)
@@ -952,7 +1015,7 @@ bool ParseBinding(const char* text, int* vkOut, unsigned* modsOut) {
 // Resets every binding to its default (called first in LoadConfig).
 void InitKeyBinds() {
     for (KeyBind& k : g_keys) {
-        ParseBinding(k.def, &k.vk, &k.mods);
+        ParseBinding(k.def, &k.vk, &k.mods, &k.joy);
         snprintf(k.name, sizeof(k.name), "%s", k.def);
     }
 }
@@ -960,18 +1023,19 @@ void InitKeyBinds() {
 void SetKeyBindFromIni(const char* key, const char* value) {
     for (KeyBind& k : g_keys) {
         if (strcmp(key, k.ini)) continue;
-        char trimmed[48] = {}; int n = 0;                // trimmed raw text, used as the display name
+        char trimmed[64] = {}; int n = 0;                // trimmed raw text, used as the display name (v0.10.1: was 48)
         const char* s = value;
         while (*s == ' ' || *s == '\t') ++s;
         for (; *s && *s != '\r' && *s != '\n' && n < (int)sizeof(trimmed) - 1; ++s) trimmed[n++] = *s;
         while (n > 0 && (trimmed[n - 1] == ' ' || trimmed[n - 1] == '\t')) trimmed[--n] = 0;
-        int vk; unsigned mods;
-        if (ParseBinding(trimmed, &vk, &mods)) {
-            k.vk = vk; k.mods = mods;
-            snprintf(k.name, sizeof(k.name), "%s", vk ? trimmed : "none");
+        int vk, joy; unsigned mods;
+        if (ParseBinding(trimmed, &vk, &mods, &joy)) {
+            k.vk = vk; k.mods = mods; k.joy = joy;
+            snprintf(k.name, sizeof(k.name), "%s", (vk || joy) ? trimmed : "none");
         } else {
-            Log("dlaa.ini: %s '%s' not recognised (modifiers Shift/Ctrl/Alt + one key, or none) -- keeping %s",
-                k.ini, trimmed, k.name);
+            Log("dlaa.ini: %s '%s' not recognised (one or two bindings separated by a comma: modifiers Shift/Ctrl/Alt + one "
+                "key, and/or one controller button Wheel1..Wheel128 or D-pad WheelUp / WheelDown / WheelLeft / WheelRight; "
+                "or none) -- keeping %s", k.ini, trimmed, k.name);
         }
         return;
     }
@@ -979,27 +1043,49 @@ void SetKeyBindFromIni(const char* key, const char* value) {
 // Logs the final binding table once and warns about two actions on the same combo.
 void LogKeyBinds() {
     char line[512]; int len = 0;
+    int nJoy = 0;
     for (int i = 0; i < KA_COUNT; ++i) {
         char item[96];
-        const int w = snprintf(item, sizeof(item), "%s=%s", g_keys[i].ini + 4, g_keys[i].vk ? g_keys[i].name : "none");
+        const int w = snprintf(item, sizeof(item), "%s=%s", g_keys[i].ini + 4,
+                               (g_keys[i].vk || g_keys[i].joy) ? g_keys[i].name : "none");
         if (len + w + 2 >= (int)sizeof(line)) { Log("hotkeys: %s", line); len = 0; }
         len += snprintf(line + len, sizeof(line) - (size_t)len, "%s%s", len ? " " : "", item);
+        if (g_keys[i].joy) ++nJoy;
     }
     if (len) Log("hotkeys: %s", line);
     for (int i = 0; i < KA_COUNT; ++i)
-        for (int j = i + 1; j < KA_COUNT; ++j)
+        for (int j = i + 1; j < KA_COUNT; ++j) {
             if (g_keys[i].vk && g_keys[i].vk == g_keys[j].vk && g_keys[i].mods == g_keys[j].mods)
                 Log("dlaa.ini: WARNING %s and %s share the binding %s -- both will fire", g_keys[i].ini, g_keys[j].ini,
                     g_keys[i].name);
+            if (g_keys[i].joy && g_keys[i].joy == g_keys[j].joy)     // v0.10.1 the controller part
+                Log("dlaa.ini: WARNING %s and %s share the controller binding (%s / %s) -- both will fire", g_keys[i].ini,
+                    g_keys[j].ini, g_keys[i].name, g_keys[j].name);
+        }
+    if (nJoy)                                                        // v0.10.1
+        Log("hotkeys: %d action(s) bound to a controller button / D-pad (WheelN = button N of ANY DirectInput controller the "
+            "game opens, modifiers ignored; the first press of each button is logged as 'controller ...: button N pressed')", nJoy);
 }
 // Once per top-level Present: fills KeyBind::hit. The per-VK was-down state is refreshed every call for every bound
 // key, foreground or not, so a key released while the game is not focused is not later seen as a fresh press.
+// v0.10.1: an action is ACTIVE when its keyboard part is down with exact modifiers OR its controller part is down
+// (KeySwallow::ControllerState, modifiers ignored). A hit = a down-edge of either part while the action was not active
+// the Present before (so holding the key and then pressing the wheel button does not fire twice); the controller part's
+// was-down is kept per action. A keyboard-only binding behaves exactly as before (its edge implies it was not active).
+inline bool JoyPartDown(int joy, const uint32_t btn[4], unsigned pov) {
+    if (joy >= 1 && joy <= KeySwallow::kJoyMaxButton) return (btn[(joy - 1) >> 5] & (1u << ((joy - 1) & 31))) != 0;
+    return (pov & KeySwallow::JoyPovBit(joy)) != 0;
+}
 void PollKeys() {
     const bool fg = IsForeground();
     const unsigned held = ((GetAsyncKeyState(VK_SHIFT)   & 0x8000) ? MOD_SHIFT_BIT : 0u) |
                           ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? MOD_CTRL_BIT  : 0u) |
                           ((GetAsyncKeyState(VK_MENU)    & 0x8000) ? MOD_ALT_BIT   : 0u);
-    bool down[KA_COUNT];
+    uint32_t joyBtn[4]; unsigned joyPov = 0;             // v0.10.1 every tapped DirectInput controller, OR'd
+    KeySwallow::ControllerState(joyBtn, &joyPov);
+    bool down[KA_COUNT], joyDown[KA_COUNT], active[KA_COUNT];
+    static bool s_joyWasDown[KA_COUNT] = {};             // v0.10.1 the controller part, per action
+    static bool s_wasActive[KA_COUNT] = {};              // v0.10.1 keyboard part (exact mods) OR controller part, per action
     // v0.10.0 tuning menu: the navigation keys fire only while the menu is open, and repeat while held (first repeat
     // 350 ms after the press, then every 70 ms; at most one per Present).
     const bool menuOpen = g_menuOpen.load(std::memory_order_relaxed);
@@ -1009,16 +1095,23 @@ void PollKeys() {
         KeyBind& k = g_keys[i];
         k.hit = false;
         down[i] = k.vk && (GetAsyncKeyState(k.vk) & 0x8000) != 0;
-        if (down[i] && !g_vkWasDown[k.vk & 0xFF] && fg && held == k.mods) k.hit = true;
+        joyDown[i] = k.joy && JoyPartDown(k.joy, joyBtn, joyPov);
+        active[i] = (down[i] && held == k.mods) || joyDown[i];
+        const bool kbEdge  = down[i] && !g_vkWasDown[k.vk & 0xFF] && held == k.mods;
+        const bool joyEdge = joyDown[i] && !s_joyWasDown[i];
+        if ((kbEdge || joyEdge) && fg && !s_wasActive[i]) k.hit = true;
         if (IsMenuNavKey(i)) {
             g_keyRepeat[i] = false;
-            if (!menuOpen || !down[i] || !fg || held != k.mods) { k.hit = k.hit && menuOpen; s_repeatAt[i] = 0; }
+            if (!menuOpen || !active[i] || !fg) { k.hit = k.hit && menuOpen; s_repeatAt[i] = 0; }
             else if (k.hit) s_repeatAt[i] = now + 350;
             else if (s_repeatAt[i] && now >= s_repeatAt[i]) { k.hit = true; g_keyRepeat[i] = true; s_repeatAt[i] = now + 70; }
         }
     }
-    for (int i = 0; i < KA_COUNT; ++i)                   // update after all edges are computed (bindings may share a VK)
+    for (int i = 0; i < KA_COUNT; ++i) {                 // update after all edges are computed (bindings may share a VK)
         if (g_keys[i].vk) g_vkWasDown[g_keys[i].vk & 0xFF] = down[i];
+        s_joyWasDown[i] = joyDown[i];
+        s_wasActive[i] = active[i];
+    }
 }
 
 // Writes "module.dll+0xOFFSET" for the module containing addr (or "?" + addr).
@@ -1141,6 +1234,7 @@ void StepSharpRadius(int dir, uint64_t n); // v0.5.8 (v0.6.5 Shift+F9 -1 / Shift
 void StepArea(int dir, uint64_t n);      // v0.6.4 (v0.6.5 Shift+F5 -1 / Shift+F6 +1)
 void CycleMode(uint64_t n, int dir = +1); // v0.7.2 plain End: DLAA -> DLSS -> off, saved to dlaa.ini (mode); v0.10.0 dir -1 = back
 void SaveSettings(uint64_t n);           // v0.6.5 Shift+F12: write the 4 live values (v0.7.0: + dlss_upscale) to dlaa.ini
+void ResetSettings(uint64_t n);          // v0.10.0 tuning menu Reset row: every menu value back to the fresh-install state, live + dlaa.ini
 void ToggleDlaa(uint64_t n);             // v0.10.0 (was inline): Shift+F11 DLAA on / off
 void ToggleUpscale(uint64_t n);          // v0.10.0 (was inline): Ctrl+F4 DLSS upscale on / off
 void ToggleFwdDepth(uint64_t n);         // v0.10.0 (was inline): Ctrl+F3 forward depth for the MVs on / off
@@ -1173,6 +1267,7 @@ void OnLiveTuningChange();               // v0.5.7; v0.6.2 also DLAA toggle / pa
 void PreviewInvalidate();                // v0.7.8 profile-screen preview slots: drop their MV / DLSS history
 void PreviewNextFrame(uint64_t n);       // v0.7.8 per-Present preview bookkeeping (slot counter, jitter, stats)
 void MaybePrewarmNgx();                  // v0.7.8 NGX pre-warm at the first Present with DLAA on
+void MirPrebuild();                      // v0.10.2 mirror units from the size cache built on the boot screen (once)
 void ToggleDrawIds(uint64_t n);          // v0.10.0 phase 2 Alt+F5: per-draw motion vectors (mv_objects 2 <-> 0) live
 void ToggleMirrors(uint64_t n);          // v0.10.0 phase 2 Alt+F6: mirror DLAA on / off live
 void TogglePreTonemap(uint64_t n);       // v0.10.0 phase 4 Alt+F7: main-scene DLAA before / after the tonemap
@@ -1234,6 +1329,7 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
     Ofxr::OnPresent(n);                         // v0.10.0 OFXR Bridge: layer-module rescan cadence + pass-through stats
 #ifdef WITH_DLAA
     MaybePrewarmNgx();                          // v0.7.8: NGX init + first feature on the boot screen (once)
+    MirPrebuild();                              // v0.10.2: the cached mirror unit sizes, once NGX + the shaders are ready (once)
 #endif
     {                                           // v0.7.7 re-bindable hotkeys (dlaa.ini key_*, see PollKeys)
         PollKeys();                              // down-edges for this Present (exact modifiers, foreground only)
@@ -1652,13 +1748,18 @@ int              g_mirVrMode = 2;               // dlaa.ini mirror_vr_mode (VR o
 int              g_mirVrViews = 2;              // v0.10.0 phase 9: dlaa.ini mirror_vr_views (mirror_vr_mode 2), 1..8
                                                 // v0.10.0 phase 10: VR default 1 -> 2 (job D, see the handoff)
 int              g_mirFlatMode = 1;             // v0.10.0 phase 10: dlaa.ini mirror_flat_mode (flat; same values as mirror_vr_mode)
-int MirMode();                                  // v0.10.0 phase 10: the mirror mode in force (VR: mirror_vr_mode, flat: _flat_)
+bool             g_mirCamOnly = false;          // v0.10.2: dlaa.ini mirror_mv (camera = true, parts = false, default parts): the
+                                                // views modes 1 / 2 / 3 handle use camera motion vectors only (no per-draw ids,
+                                                // as mode 4); one key for VR and flat (as mirror_vr_views). MirIdsOff()
+int MirMode();                                 // v0.10.0 phase 10: the mirror mode in force (VR: mirror_vr_mode, flat: _flat_)
 uint64_t         g_mirVrSkip = 0, g_mirAltHeld = 0, g_mirAltRaw = 0;   // stats window (mirror_vr_mode 2 / 3)
 bool             g_slotPool = true;             // dlaa.ini mv_slot_pool: pass-slot depth twin / forward depth / draw-id
                                                 // textures go back to a shared pool when their pass is consumed
 // v0.10.0 phase 9 VR cost (the "phase 9 (v0.10.0)" config line, the "perf view" line)
 bool             g_areaScissorCfg = true;       // dlaa.ini mv_area_scissor: per-pixel work only inside the DLAA area (+ margin)
 int              g_areaMarginCfg = -1;          // dlaa.ini mv_area_margin (px around the area rect; -1 = dlaa_area_feather + 32)
+bool             g_areaClipCfg = true;          // v0.10.2 dlaa.ini mv_area_clip: the rigid-parent vote grid / pixel count over the
+                                                // blit's OWN eye rect + margin (VR: not the union of both eyes' rects)
 int              g_fwdResCfg = 0;               // dlaa.ini mv_fwd_depth_res: 0 = auto (2 in VR, 1 flat), 1 = full, 2 = 1/2 resolution
 uint64_t         g_p9Passes = 0, g_p9Clipped = 0, g_p9Half = 0;   // stats window: passes / of them clipped / 1/2-res forward
 double           g_p9ClipShare = 0.0;           // stats window: sum of the clipped passes' rect share of the image
@@ -1934,8 +2035,10 @@ bool PathNextToDll(const wchar_t* name, wchar_t* path);   // defined below
 // terminator); every other line (comments, blanks, other keys) is kept byte-for-byte; a key not present is
 // appended at the end. A missing file is created with a one-line '#' header plus the keys. The new text is
 // written to dlaa.ini.tmp and MoveFileExW'd over the original, so a failed write cannot destroy the file.
+// v0.10.0 (Reset row): an entry with an EMPTY val ("") means "remove this key": every matching line is dropped (not replaced), and
+// the key is never appended. A missing file with only removals is left missing (nothing to write).
 // Returns true only if the temp was fully written AND the replace succeeded.
-struct IniKV { const char* key; char val[32]; };
+struct IniKV { const char* key; char val[32]; };   // val[0] == 0: delete the key's line(s) (WriteIniPreserving)
 bool WriteIniPreserving(const IniKV* kv, int nkv) {
     wchar_t path[MAX_PATH], tmp[MAX_PATH];
     if (!PathNextToDll(L"dlaa.ini", path) || !PathNextToDll(L"dlaa.ini.tmp", tmp)) return false;
@@ -1950,6 +2053,9 @@ bool WriteIniPreserving(const IniKV* kv, int nkv) {
         fclose(f);
     }
     const char* nl = (in.find("\r\n") != std::string::npos) ? "\r\n" : "\n";   // match the file's ending
+    bool anyWrite = false;                               // at least one key with a value (else a missing file stays missing)
+    for (int k = 0; k < nkv && k < 32; ++k) if (kv[k].val[0]) anyWrite = true;
+    if (in.empty() && !anyWrite) return true;            // only removals and no file: nothing to do
 
     std::string out;
     out.reserve(in.size() + 256);
@@ -1983,7 +2089,9 @@ bool WriteIniPreserving(const IniKV* kv, int nkv) {
                     }
                 }
             }
-            if (match >= 0) {                             // replace, keeping this line's own terminator
+            if (match >= 0 && !kv[match].val[0]) {        // v0.10.0: empty value = remove the key's line (terminator included)
+                seen[match] = true;
+            } else if (match >= 0) {                      // replace, keeping this line's own terminator
                 out += kv[match].key; out += " = "; out += kv[match].val;
                 out.append(in, pe, rawEnd - pe);
                 seen[match] = true;
@@ -1995,7 +2103,7 @@ bool WriteIniPreserving(const IniKV* kv, int nkv) {
     }
     bool needNl = !out.empty() && out[out.size() - 1] != '\n';   // ensure a break before appended keys
     for (int k = 0; k < nkv; ++k) {
-        if (seen[k]) continue;
+        if (seen[k] || !kv[k].val[0]) continue;          // (a removal is never appended)
         if (needNl) { out += nl; needNl = false; }
         out += kv[k].key; out += " = "; out += kv[k].val; out += nl;
     }
@@ -2022,6 +2130,8 @@ void SaveSettings(uint64_t n) {
     // v0.10.0 phase 10: + perf_profile; dlss_preset / dlaa_area / mirror_dlaa only when EXPLICIT (in dlaa.ini or changed by their
     // own key) -- a value that only comes from the profile is not written, so the next profile switch still moves it
     IniKV kv[32] = {};                                    // v0.10.0 tuning menu: was 11 (+ the 8 menu_* keys + the 7 fps_* keys)
+                                                          // v0.10.2: + mirror_vr_mode / mirror_flat_mode / mirror_vr_views = 29
+                                                          // v0.10.2: + mirror_mv = 30
     int nkv = 0;
     auto add = [&](const char* k) -> char* { kv[nkv].key = k; return kv[nkv++].val; };
     if (g_profExplicit[PK_PRESET]) snprintf(add("dlss_preset"), sizeof(kv[0].val), "%s", preset);
@@ -2035,6 +2145,16 @@ void SaveSettings(uint64_t n) {
     snprintf(add("tex_lod_bias_cutout"), sizeof(kv[0].val), "%s", cutTxt);
     snprintf(add("mv_objects"), sizeof(kv[0].val), "%d", objMode);
     if (g_profExplicit[PK_MIRROR_DLAA]) snprintf(add("mirror_dlaa"), sizeof(kv[0].val), "%d", mirror);
+    // v0.10.2 the menu's Mirror DLAA row: the mode of a kind only when EXPLICIT (dlaa.ini or the row), + mirror_vr_views with the
+    // VR mode, or with the flat mode when that is 2 (the view count of mode 2 is shared by both kinds)
+    const bool mirVrW = g_profExplicit[PK_MIRROR_VR_MODE], mirFlatW = g_profExplicit[PK_MIRROR_FLAT_MODE];
+    const bool mirViewsW = mirVrW || (mirFlatW && g_mirFlatMode == 2);
+    if (mirVrW) snprintf(add("mirror_vr_mode"), sizeof(kv[0].val), "%d", g_mirVrMode);
+    if (mirFlatW) snprintf(add("mirror_flat_mode"), sizeof(kv[0].val), "%d", g_mirFlatMode);
+    if (mirViewsW) snprintf(add("mirror_vr_views"), sizeof(kv[0].val), "%d", g_mirVrViews);
+    // v0.10.2: mirror_mv (parts / camera, one key for both kinds) with either mode (the row sets it with the mode it shows)
+    const bool mirMvW = mirVrW || mirFlatW;
+    if (mirMvW) snprintf(add("mirror_mv"), sizeof(kv[0].val), "%s", g_mirCamOnly ? "camera" : "parts");
     snprintf(add("dlaa_pre_tonemap"), sizeof(kv[0].val), "%d", preTm);
     snprintf(add("perf_profile"), sizeof(kv[0].val), "%s", kProfName[g_profile]);
     if (g_menuExplicit) {                                 // v0.10.0 tuning menu: the panel placement, only once changed in the menu
@@ -2065,19 +2185,27 @@ void SaveSettings(uint64_t n) {
     if (g_fpsExplicit)
         snprintf(fpsW, sizeof(fpsW), " -- fps box: fps_show=%d fps_x=%d fps_y=%d fps_scale=%.1f fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f",
                  g_fpsShow ? 1 : 0, g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY, (double)g_fpsVrScale);
-    char notW[96];
-    snprintf(notW, sizeof(notW), "%s%s%s", g_profExplicit[PK_PRESET] ? "" : " dlss_preset", g_profExplicit[PK_AREA] ? "" : " dlaa_area",
-             g_profExplicit[PK_MIRROR_DLAA] ? "" : " mirror_dlaa");
+    char notW[128];
+    snprintf(notW, sizeof(notW), "%s%s%s%s%s", g_profExplicit[PK_PRESET] ? "" : " dlss_preset", g_profExplicit[PK_AREA] ? "" : " dlaa_area",
+             g_profExplicit[PK_MIRROR_DLAA] ? "" : " mirror_dlaa", mirVrW ? "" : " mirror_vr_mode", mirFlatW ? "" : " mirror_flat_mode");
+    char mirW[128] = "";                                  // v0.10.2: the mirror modes written (the menu's Mirror DLAA row)
+    {
+        int o = 0;
+        if (mirVrW) o += snprintf(mirW + o, sizeof(mirW) - (size_t)o, " mirror_vr_mode=%d", g_mirVrMode);
+        if (mirFlatW) o += snprintf(mirW + o, sizeof(mirW) - (size_t)o, " mirror_flat_mode=%d", g_mirFlatMode);
+        if (mirViewsW) o += snprintf(mirW + o, sizeof(mirW) - (size_t)o, " mirror_vr_views=%d", g_mirVrViews);
+        if (mirMvW) snprintf(mirW + o, sizeof(mirW) - (size_t)o, " mirror_mv=%s", g_mirCamOnly ? "camera" : "parts");
+    }
     if (WriteIniPreserving(kv, nkv)) {
-        Log("settings saved to dlaa.ini: dlss_preset=%s dlaa_area=%d sharpness=%.1f sharp_radius=%.1f dlss_upscale=%d tex_lod_bias=%.2f tex_lod_bias_cutout=%s mv_objects=%d mirror_dlaa=%d dlaa_pre_tonemap=%d perf_profile=%s (save key, Present #%llu)%s%s%s%s",
-            preset, area, (double)sharp, (double)radius, upscale, (double)lodBias, cutTxt, objMode, mirror, preTm, kProfName[g_profile],
+        Log("settings saved to dlaa.ini: dlss_preset=%s dlaa_area=%d sharpness=%.1f sharp_radius=%.1f dlss_upscale=%d tex_lod_bias=%.2f tex_lod_bias_cutout=%s mv_objects=%d mirror_dlaa=%d%s dlaa_pre_tonemap=%d perf_profile=%s (save key, Present #%llu)%s%s%s%s",
+            preset, area, (double)sharp, (double)radius, upscale, (double)lodBias, cutTxt, objMode, mirror, mirW, preTm, kProfName[g_profile],
             (unsigned long long)n, notW[0] ? " -- profile defaults not written:" : "", notW, menuW, fpsW);
         BeepSeq s;                                       // success: rising two-tone 600 -> 900 Hz, 120 ms each
         s.n = 2; s.freq[0] = 600; s.ms[0] = 120; s.freq[1] = 900; s.ms[1] = 120; s.gapMs = 40;
         PlayBeeps(s);
     } else {
-        Log("settings save FAILED (dlss_preset=%s dlaa_area=%d sharpness=%.1f sharp_radius=%.1f dlss_upscale=%d tex_lod_bias=%.2f tex_lod_bias_cutout=%s mv_objects=%d mirror_dlaa=%d dlaa_pre_tonemap=%d, save key, Present #%llu)",
-            preset, area, (double)sharp, (double)radius, upscale, (double)lodBias, cutTxt, objMode, mirror, preTm, (unsigned long long)n);
+        Log("settings save FAILED (dlss_preset=%s dlaa_area=%d sharpness=%.1f sharp_radius=%.1f dlss_upscale=%d tex_lod_bias=%.2f tex_lod_bias_cutout=%s mv_objects=%d mirror_dlaa=%d%s dlaa_pre_tonemap=%d, save key, Present #%llu)",
+            preset, area, (double)sharp, (double)radius, upscale, (double)lodBias, cutTxt, objMode, mirror, mirW, preTm, (unsigned long long)n);
         PlayTones(1, 200, 400, 0);                       // failure: one long 200 Hz tone (400 ms)
     }
 }
@@ -6188,10 +6316,15 @@ void PreviewOnDiscard(ID3D11DeviceContext* ctx, ID3D11Resource* res) {
 //    out, NGX and RCAS already run on the DLAA rect. Outside the rect the picture is the raw frame as before (no AA there).
 //    The depth snapshot stays a whole-texture copy: D3D11 copies a depth-stencil resource only whole (CopySubresourceRegion
 //    needs a null box), and the game's depth has no SRV binding to copy it with a shader.
+//    (v0.10.2: re-checked on the RTX 5090 driver and WARP -- a boxed CopySubresourceRegion of a D32_FLOAT_S8X24_UINT depth
+//    texture copies NOTHING, with or without the debug layer, any box alignment; the debug layer names the rule.)
+//  * v0.10.2 mv_area_clip 1: the rigid-parent pixel count / vote grid at the BLIT (where the eye is known) cover only that eye's
+//    rect + the margin n this clip (DrawIdMv::SetAreaClip, set here every pass) -- in VR ~2/3 of the union's area.
 //  * fwdShift: mv_fwd_depth_res 2 (auto: VR) -> the forward-depth target and the forward ids at 1/2 resolution.
 void PassViewSetup(PassSlot& n) {
     n.clip = false;
     n.clipRect = D3D11_RECT{ 0, 0, 0, 0 };
+    DrawIdMv::SetAreaClip(g_areaClipCfg, g_areaMarginCfg >= 0 ? g_areaMarginCfg : SceneDlaa::Feather() + 32);   // v0.10.2
     const int res = g_fwdResCfg == 0 ? (g_vrMode ? 2 : 1) : g_fwdResCfg;
     n.fwdShift = res == 2 ? 1 : 0;
     ++g_p9Passes;
@@ -8492,9 +8625,14 @@ void PerfStatsLog(uint64_t blit) {
     const DrawIdMv::Stats& d1 = g_dlaa[1].Mv().DrawIds().GetStats();
     const DepthTwin::PoolStats ps = DepthTwin::GetPoolStats();
     const double pw = g_cMedoidPasses ? (double)g_cMedoidPasses : 1.0;
+    unsigned long long cf[2][4];                         // v0.10.2: ended consensus failure streaks by length, eyes 0 + 1
+    for (int L = 0; L < 2; ++L)
+        for (int b = 0; b < 4; ++b) cf[L][b] = (unsigned long long)(d0.consFailRuns[L][b] + d1.consFailRuns[L][b]);
     Log("perf cuts @blit %llu: mv_vote_res %u, mv_vote_march_cap %u, mv_cons_cands %u | medoid (mv_medoid_drop %u): world "
         "candidates dropped in %llu / cabin in %llu of %llu passes, %.1f candidate copies saved per pass, re-armed world %llu / "
-        "cabin %llu (eye 0) + %llu / %llu (eye 1) in total, now %s | mirror_vr_mode %d%s | mv_slot_pool %d: pass-slot textures "
+        "cabin %llu (eye 0) + %llu / %llu (eye 1) in total, consensus failure streaks (mv_cons_fail_tol %u: up to that many in a "
+        "row keep the streak; by length 1 / 2 / 3-5 / 6+, eyes 0 + 1, in total): world %llu / %llu / %llu / %llu, cabin %llu / "
+        "%llu / %llu / %llu, now %s | mirror_vr_mode %d%s | mv_slot_pool %d: pass-slot textures "
         "alive: depth twins %d, forward depths %d, id targets %d = %.0f MB (of them pooled, idle: %d / %d / %d); created %llu, "
         "reused %llu in total | instanced replay (mv_drawid_instanced %d, mv_inst_replay %d): %.1f instanced draws per pass not "
         "replayed, %d keys took a moving parent lately, %llu instanced draws with a moving parent (eye 0, total); the cost of "
@@ -8502,7 +8640,8 @@ void PerfStatsLog(uint64_t blit) {
         (unsigned long long)blit, DrawIdMv::VoteRes(), DrawIdMv::MarchCap(), DrawIdMv::ConsCands(), DrawIdMv::MedoidDrop(),
         (unsigned long long)g_cMedoidPassW, (unsigned long long)g_cMedoidPassC, (unsigned long long)g_cMedoidPasses,
         (double)g_cMedoidSaved / pw, (unsigned long long)d0.medoidRearms[0], (unsigned long long)d0.medoidRearms[1],
-        (unsigned long long)d1.medoidRearms[0], (unsigned long long)d1.medoidRearms[1],
+        (unsigned long long)d1.medoidRearms[0], (unsigned long long)d1.medoidRearms[1], DrawIdMv::ConsFailTol(),
+        cf[0][0], cf[0][1], cf[0][2], cf[0][3], cf[1][0], cf[1][1], cf[1][2], cf[1][3],
         g_medoidDropBits == 3 ? "both layers dropped" : (g_medoidDropBits == 1 ? "world dropped"
                                                          : (g_medoidDropBits == 2 ? "cabin dropped" : "medoid path on")),
         MirMode(), g_vrMode ? "" : " (flat: mirror_flat_mode)", (int)g_slotPool, ps.depthAlive, ps.fwdAlive, ps.idAlive,
@@ -8512,16 +8651,48 @@ void PerfStatsLog(uint64_t blit) {
     g_cMedoidSaved = g_cMedoidPasses = g_cMedoidPassW = g_cMedoidPassC = 0;
     g_didInstGated = 0;
     // v0.10.0 phase 9: the VR-cost settings as they ran in this window
+    // v0.10.2: + what every per-eye per-pixel step covers (mv_area_clip): the vote grid per eye (window deltas of the DrawIdMv
+    // stats), pass B & co. = the DLAA rect of the eye's last Run, the snapshot always whole
+    struct VgWin { uint64_t f, e, px, pass, full; };
+    static VgWin s_vg[2] = {};
+    double vgShare[2] = { -1.0, -1.0 }, vgPass[2] = { -1.0, -1.0 }, rectShare[2] = { -1.0, -1.0 };
+    unsigned long long vgN = 0, vgEyeN = 0;
+    for (int e = 0; e < 2; ++e) {
+        const DrawIdMv::Stats& d = e ? d1 : d0;
+        if (d.vgFrames < s_vg[e].f) s_vg[e] = VgWin{};   // (a new unit: counts restarted)
+        const uint64_t f = d.vgFrames - s_vg[e].f, full = d.vgFullPx - s_vg[e].full;
+        if (f && full) {
+            vgShare[e] = 100.0 * (double)(d.vgPx - s_vg[e].px) / (double)full;
+            vgPass[e] = 100.0 * (double)(d.vgPassPx - s_vg[e].pass) / (double)full;
+        }
+        vgN += f; vgEyeN += d.vgEye - s_vg[e].e;
+        s_vg[e] = VgWin{ d.vgFrames, d.vgEye, d.vgPx, d.vgPassPx, d.vgFullPx };
+        if ((e == 0 || g_vrMode) && g_sceneW && g_sceneH && g_dlaa[e].RectW() && g_dlaa[e].RectH())
+            rectShare[e] = 100.0 * (double)g_dlaa[e].RectW() * (double)g_dlaa[e].RectH() / ((double)g_sceneW * (double)g_sceneH);
+    }
+    char vgTag[160], rcTag[96];
+    if (vgShare[0] < 0.0 && vgShare[1] < 0.0) snprintf(vgTag, sizeof(vgTag), "no clipped vote pass in this window");
+    else snprintf(vgTag, sizeof(vgTag), "%.1f %% of the image (eye 0) / %.1f %% (eye 1) vs the pass clip %.1f %% / %.1f %%",
+                  vgShare[0] < 0.0 ? 0.0 : vgShare[0], vgShare[1] < 0.0 ? 0.0 : vgShare[1], vgPass[0] < 0.0 ? 0.0 : vgPass[0],
+                  vgPass[1] < 0.0 ? 0.0 : vgPass[1]);
+    if (rectShare[1] >= 0.0) snprintf(rcTag, sizeof(rcTag), "%.1f %% (eye 0) / %.1f %% (eye 1)", rectShare[0], rectShare[1]);
+    else snprintf(rcTag, sizeof(rcTag), "%.1f %%", rectShare[0] < 0.0 ? 100.0 : rectShare[0]);
     Log("perf view @blit %llu: area scissor (mv_area_scissor %d, dlaa_area %d): %llu of %llu passes clipped, rect %.1f %% of the "
         "image on average (last (%ld,%ld)-(%ld,%ld) of %ux%u) | forward depth at %s in %llu of %llu passes | dispatch chain %s | "
-        "scissor RS copies failed %llu (total; > 0 = some draws replayed unclipped)",
+        "scissor RS copies failed %llu (total; > 0 = some draws replayed unclipped) | v0.10.2 per-eye coverage: rigid-parent pixel "
+        "count + vote grid (mv_area_clip %d, eye rect + %d px n the pass clip; %llu of %llu vote passes clipped to their eye): %s | "
+        "pass B, copy-in, NGX, RCAS, copy-out = the DLAA rect: %s | replay, forward replay, forward-depth init + re-draw = the pass "
+        "clip above (the eye is unknown at pass time; the forward target's clear is a whole-target fast clear) | depth snapshot: "
+        "100 %% (whole D32S8 copy -- D3D11 copies a depth-stencil resource only whole) | gather .. resolve, list+twin, picks, "
+        "cand-copy, medoid: per draw (no pixel size)",
         (unsigned long long)blit, (int)g_areaScissorCfg, SceneDlaa::Area(), (unsigned long long)g_p9Clipped,
         (unsigned long long)g_p9Passes, g_p9Clipped ? 100.0 * g_p9ClipShare / (double)g_p9Clipped : 100.0,
         (long)g_p9LastClip.left, (long)g_p9LastClip.top, (long)g_p9LastClip.right, (long)g_p9LastClip.bottom, g_sceneW, g_sceneH,
         "1/2 resolution", (unsigned long long)g_p9Half, (unsigned long long)g_p9Passes,
         DrawIdMv::Fold() >= 2 ? "pick (spread) + res+inh (wide), list+twin folded (mv_fold_dispatch 2)"
                               : (DrawIdMv::Fold() ? "folded (pick+res, list+twin)" : "separate (phase 8)"),
-        (unsigned long long)DrawIdRecord::ScissorRsFails());
+        (unsigned long long)DrawIdRecord::ScissorRsFails(), (int)DrawIdMv::AreaClip(), DrawIdMv::AreaMargin(), vgEyeN, vgN, vgTag,
+        rcTag);
     g_p9Passes = g_p9Clipped = g_p9Half = 0;
     g_p9ClipShare = 0.0;
     // v0.10.0 phase 18: the compact rigid-parent vote of eye 0 in this window
@@ -11774,6 +11945,7 @@ struct MirUnit {
     int      forcedView = 0;                       // forced replays in this view
     int      failRun = 0;                          // failed Runs in a row
     UINT     failW = 0, failH = 0;                 // a size whose unit build failed (InitFailed): no jitter, no retry there
+    UINT     preW = 0, preH = 0;                   // v0.10.2: built ahead at boot for this size (MirPrebuild; 0 = not)
     // Ctrl+F6 frame strips in the unit's colour (MirDebugFrame)
     Microsoft::WRL::ComPtr<ID3D11Texture2D> dbgH, dbgV;
     UINT     dbgW = 0, dbgHt = 0, dbgT = 0;
@@ -11798,11 +11970,35 @@ uint64_t         g_mirEpoch = 1;                   // bumped by MirInvalidate: e
 uint64_t         g_mirWinViews = 0, g_mirWinFrames = 0, g_mirWinPresents = 0, g_mirWinCap = 0;
 bool             g_mirActiveLogged = false, g_mirCapLogged = false, g_mirFirstReplayLogged = false;
 int              g_mirAssignLogs = 0, g_mirLateLogs = 0, g_mirFirstOkLogs = 0, g_mirRoFailLogs = 0, g_mirBudgetLogs = 0;
+// v0.10.2 unit builds off the drive (ATS VR log v0.10.1: every new unit was built on the render thread at its first view, 9.6 -
+// 35.7 ms each = a dropped frame in VR, six in 8 minutes):
+//  * SIZE CACHE <game exe folder>\dlaa_shader_cache\mirror_sizes.txt: one line "W H N" per mirror unit size that was built and
+//    evaluated OK (N = the most units of that size built at once), written when such a build succeeds (MirSizesNote);
+//  * MirPrebuild (a Present after the NGX pre-warm, the shader warm-up done, no mirror view seen yet = boot / loading screen):
+//    one free unit per cached size (N of them; kMirPrebuildCap in all) gets its textures + NGX feature (SceneDlaa::Prebuild);
+//    MirBeginView gives a new view the free unit built for exactly its size, whose first Run then builds nothing;
+//  * ONE unit build per frame (MirBeginView): a view whose unit would build after an NGX feature was already created since the
+//    last Present is left to the game for that frame (no jitter, no DLAA; "unit builds deferred") and gets its unit later.
+struct MirSize { UINT w, h; int n; };
+constexpr int    kMirSizeCap     = 12;           // entries in mirror_sizes.txt
+constexpr int    kMirPrebuildCap = 6;            // units built ahead at boot
+MirSize          g_mirSizes[kMirSizeCap];
+int              g_mirSizesN = 0;
+bool             g_mirSizesLoaded = false;
+uint64_t         g_mirBuildDefer = 0, g_mirWinBuildDefer = 0;   // views left to the game: a build already ran this frame
+int              g_mirBuildDeferLogs = 0;
 
 // v0.10.0 phase 9: mirror_vr_mode 4 (VR) = every view keeps DLAA, without per-draw motion vectors (no record / replay / pairing:
 // the unit's camera R = the medoid of its camera candidates) -- the cheapest DLAA mirror
+// v0.10.2: also with mirror_mv = camera in modes 1 / 2 / 3 (the handled views get the same camera-only path: ~0.15 ms per unit
+// instead of ~0.4 ms with the per-draw chain); mode 4 stays "every view, camera" whatever mirror_mv says
 int MirMode() { return g_vrMode ? g_mirVrMode : g_mirFlatMode; }   // v0.10.0 phase 10
-inline bool MirIdsOff() { return MirMode() == 4; }
+inline bool MirIdsOff() { return MirMode() == 4 || g_mirCamOnly; }
+// v0.10.2: the mirror motion of a mirror mode (default: the one in force), for the log lines ("parts" / "camera" /
+// "camera (mode 4)")
+inline const char* MirMvName(int mode = MirMode()) {
+    return mode == 4 && !g_mirCamOnly ? "camera (mode 4)" : (g_mirCamOnly ? "camera" : "parts");
+}
 // v0.10.0 phase 9 (mirror_vr_mode 2): the views this frame handles = the mirror_vr_views largest of the previous frame
 // v0.10.0 phase 21 FIX: the phase-9 selection was built in MirBeginView "at the frame change" from g_mirSeen -- but
 // MirNextFrame (the Present boundary) had already emptied g_mirSeen and moved g_mirFrame to the new frame, so that block never
@@ -11833,6 +12029,200 @@ inline bool MirPathLive() {
     return g_mirOn.load(std::memory_order_relaxed) && g_dlaaOn.load(std::memory_order_relaxed) &&
            !g_passive.load(std::memory_order_relaxed) && !g_gameDeviceChanged.load(std::memory_order_relaxed) &&
            ShaderCache::Done();
+}
+
+// v0.10.2: the unit's one-time SceneDlaa set-up (was in MirFlush; MirPrebuild does it before the unit's first Run, so the boot
+// build already carries the unit's eye tag and settings).
+void MirUnitSetup(MirUnit& m, int u) {
+    if (m.inited) return;
+    m.inited = true;
+    m.dl.SetEye(20 + u);                                 // log tag "eye 20 .. 35" = mirror unit 0 .. 15
+    m.dl.Mv().SetNearReject(g_dlaa[0].Mv().NearReject());   // the own trailer / truck never drive the camera medoid
+    m.dl.Mv().SetEgoOrigin(0.0f);                        // no ego split: per-draw R handles the own truck / trailer
+    m.dl.Mv().SetEgoPixel(0.0f);
+    m.dl.Mv().SetQuiet(true);                            // its numbers are in the "mirror units @blit" line
+    m.dl.SetOpticalCentre(0.5f, 0.5f);
+}
+
+// v0.10.2 size cache (see g_mirSizes): <game exe folder>\dlaa_shader_cache\mirror_sizes.txt -- the shader cache's folder
+// (shader_cache.cpp Start), created here when the shader cache could not make it.
+bool MirSizesPath(std::wstring& out, bool makeDir) {
+    wchar_t exe[MAX_PATH];
+    const DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    wchar_t* slash = (n > 0 && n < MAX_PATH) ? wcsrchr(exe, L'\\') : nullptr;
+    if (!slash) return false;
+    slash[1] = 0;
+    const std::wstring dir = std::wstring(exe) + L"dlaa_shader_cache\\";
+    if (makeDir && !CreateDirectoryW(dir.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) return false;
+    out = dir + L"mirror_sizes.txt";
+    return true;
+}
+
+// Reads the file once (a missing file = an empty cache). Lines "W H N"; '#' lines are comments; a duplicate size keeps the
+// larger N; at most kMirSizeCap sizes.
+void MirSizesLoad() {
+    if (g_mirSizesLoaded) return;
+    g_mirSizesLoaded = true;
+    std::wstring path;
+    FILE* f = nullptr;
+    if (!MirSizesPath(path, false) || _wfopen_s(&f, path.c_str(), L"rb") != 0 || !f) return;
+    char line[128];
+    while (fgets(line, sizeof(line), f)) {
+        if (line[0] == '#') continue;
+        unsigned w = 0, h = 0;
+        int n = 1;
+        const int got = sscanf_s(line, "%u %u %d", &w, &h, &n);
+        if (got < 2 || w < 16 || h < 16 || w > 16384 || h > 16384) continue;
+        if (got < 3 || n < 1) n = 1;
+        if (n > kMirCap) n = kMirCap;
+        int k = -1;
+        for (int i = 0; i < g_mirSizesN && k < 0; ++i)
+            if (g_mirSizes[i].w == w && g_mirSizes[i].h == h) k = i;
+        if (k >= 0) { if (n > g_mirSizes[k].n) g_mirSizes[k].n = n; continue; }
+        if (g_mirSizesN < kMirSizeCap) g_mirSizes[g_mirSizesN++] = { (UINT)w, (UINT)h, n };
+    }
+    fclose(f);
+}
+
+// Rewrites the file (temp file + rename). false = not written.
+bool MirSizesSave() {
+    std::wstring path;
+    if (!MirSizesPath(path, true)) return false;
+    const std::wstring tmp = path + L".tmp";
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, tmp.c_str(), L"wb") != 0 || !f) return false;
+    fprintf(f, "# ETS2 / ATS DLAA mod: mirror DLAA unit sizes built in earlier sessions (width height units), built ahead on the\r\n"
+               "# boot screen at the next start so no mirror unit is built while driving. Written by the mod; safe to delete.\r\n");
+    for (int i = 0; i < g_mirSizesN; ++i) fprintf(f, "%u %u %d\r\n", g_mirSizes[i].w, g_mirSizes[i].h, g_mirSizes[i].n);
+    const bool wrote = !ferror(f);
+    const bool closed = fclose(f) == 0;
+    if (!wrote || !closed || !MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        _wremove(tmp.c_str());
+        return false;
+    }
+    return true;
+}
+
+// A unit was built at w x h and evaluated OK (MirFlush): the cache keeps the size and how many units of it exist now (the
+// free units built for it at boot included -- a new view takes one of those before it builds, so this is the session's need).
+void MirSizesNote(UINT w, UINT h) {
+    MirSizesLoad();
+    // N = the units of this size IN VIEW now (this frame or the last one), not every unit that holds a feature of it: idle units
+    // of a size the game stopped using (another truck's mirrors after a garage visit) would otherwise count up (log 2026-10-10:
+    // "512x1024 x6 units" after 6 garage visits -- 6 pre-builds of a size seen 1-2 at a time, the real sizes pushed out by the cap)
+    const uint64_t fr = g_frames.load(std::memory_order_relaxed);
+    int n = 0;
+    for (const MirUnit& m : g_mir) if (m.used && m.w == w && m.h == h && m.viewFrame + 1 >= fr) ++n;
+    if (n < 1) n = 1;
+    int k = -1;
+    for (int i = 0; i < g_mirSizesN && k < 0; ++i)
+        if (g_mirSizes[i].w == w && g_mirSizes[i].h == h) k = i;
+    if (k >= 0 && g_mirSizes[k].n >= n) return;          // known (with as many units): nothing to write
+    if (k >= 0) {
+        g_mirSizes[k].n = n;
+    } else {
+        if (g_mirSizesN == kMirSizeCap) {                // full: the oldest entry (the first line) makes room
+            memmove(&g_mirSizes[0], &g_mirSizes[1], sizeof(MirSize) * (size_t)(kMirSizeCap - 1));
+            --g_mirSizesN;
+        }
+        g_mirSizes[g_mirSizesN++] = { w, h, n };
+    }
+    const bool ok = MirSizesSave();
+    static int noteLogs = 0;
+    if (noteLogs++ < 16)
+        Log("mirror units: size cache %s %ux%u x%d unit%s (%d size%s) -- %s (Present #%llu)", ok ? "now has" : "could NOT save",
+            w, h, n, n == 1 ? "" : "s", g_mirSizesN, g_mirSizesN == 1 ? "" : "s",
+            ok ? "built ahead on the boot screen at the next start (dlaa_shader_cache\\mirror_sizes.txt next to the game exe)"
+               : "dlaa_shader_cache\\mirror_sizes.txt next to the game exe is not writable; mirror units keep being built at their "
+                 "first view",
+            (unsigned long long)g_frames.load(std::memory_order_relaxed));
+}
+
+// v0.10.2: the units of the size cache built ahead (see g_mirSizes). Called at every Present (PresentFrameWork, right after
+// MaybePrewarmNgx); works once: at the first Present with NGX pre-warmed ON the game's device, the shader warm-up done, DLAA on,
+// and no mirror view seen yet -- the boot / loading screen or the main menu, where a ~10-35 ms build per unit is not seen while
+// driving. A mirror view first: it gives up (the one-build-per-frame limit spreads the builds instead). Largest sizes first,
+// N units per size, kMirPrebuildCap (and mirror_max_views) units at most; units 0, 1, ... in that order. Each unit gets exactly
+// the build its first Run would do (SceneDlaa::Prebuild: area 100 as in MirFlush, RGBA16F / IsHDR as every mirror unit), stays
+// free (used = false) and is marked pre-built for its size; MirBeginView gives it to the first view of that size.
+void MirPrebuild() {
+    static bool done = false;
+    if (done || !g_prewarmDone.load(std::memory_order_acquire)) return;
+    if (g_mirHandled + g_mirNotHandled > 0) {            // mirror views run already: too late for a hidden build
+        done = true;
+        Log("mirror units: no pre-build from the size cache -- mirror views were seen before NGX and the shaders were ready "
+            "(Present #%llu); new units are built at their first view, one per frame",
+            (unsigned long long)g_frames.load(std::memory_order_relaxed));
+        return;
+    }
+    if (!g_dlaaOn.load(std::memory_order_relaxed) || g_passive.load(std::memory_order_relaxed) ||
+        g_gameDeviceChanged.load(std::memory_order_relaxed) || !ShaderCache::Done()) return;
+    ID3D11DeviceContext* const c = g_gameCtx.load(std::memory_order_acquire);
+    if (!c) return;
+    void* const ngxDev = DlaaProcessor::NgxDevice();
+    if (!ngxDev) {                                       // the pre-warm failed: units initialise NGX themselves
+        done = true;
+        Log("mirror units: no pre-build from the size cache -- NGX is not initialised (see the pre-warm line)");
+        return;
+    }
+    {
+        ID3D11Device* dev = nullptr;
+        c->GetDevice(&dev);
+        if (!dev) return;
+        const bool same = (void*)dev == ngxDev;
+        dev->Release();
+        if (!same) return;                               // present layer before the adoption: wait for the game's context
+    }
+    done = true;
+    if (!g_mirOn.load(std::memory_order_relaxed) || (g_mirVrMode == 0 && g_mirFlatMode == 0)) {
+        Log("mirror units: no pre-build from the size cache -- mirror DLAA is off (mirror_dlaa / mirror_vr_mode / "
+            "mirror_flat_mode / profile)");
+        return;
+    }
+    MirSizesLoad();
+    if (g_mirSizesN == 0) {
+        Log("mirror units: size cache empty (no dlaa_shader_cache\\mirror_sizes.txt yet) -- nothing pre-built; this session's "
+            "mirror units are built at their first view (one per frame) and their sizes are cached for the next start");
+        return;
+    }
+    const int nU = g_mirMaxViews < 1 ? 1 : (g_mirMaxViews > kMirCap ? kMirCap : g_mirMaxViews);
+    const int cap = nU < kMirPrebuildCap ? nU : kMirPrebuildCap;
+    int order[kMirSizeCap];                              // largest area first (the main mirrors)
+    for (int i = 0; i < g_mirSizesN; ++i) {
+        int j = i;
+        const uint64_t a = (uint64_t)g_mirSizes[i].w * g_mirSizes[i].h;
+        while (j > 0 && (uint64_t)g_mirSizes[order[j - 1]].w * g_mirSizes[order[j - 1]].h < a) { order[j] = order[j - 1]; --j; }
+        order[j] = i;
+    }
+    const int64_t t0 = Qpc();
+    const int areaNow = SceneDlaa::Area();               // a mirror unit always uses the whole picture (as MirFlush)
+    if (areaNow != 100) SceneDlaa::SetArea(100);
+    t_inDlaa = true;                                     // our D3D11 / NGX calls pass straight through the hooks
+    int u = 0, built = 0, failed = 0;
+    char list[512] = "";
+    size_t o = 0;
+    for (int oi = 0; oi < g_mirSizesN && u < cap; ++oi) {
+        const MirSize& s = g_mirSizes[order[oi]];
+        for (int k = 0; k < s.n && u < cap; ++k, ++u) {
+            MirUnit& m = g_mir[u];
+            MirUnitSetup(m, u);
+            const int64_t t1 = Qpc();
+            const bool ok = m.dl.Prebuild(c, s.w, s.h, true);
+            const double ms = g_qpcFreq > 0 ? (double)(Qpc() - t1) * 1000.0 / (double)g_qpcFreq : 0.0;
+            if (ok) { m.preW = s.w; m.preH = s.h; ++built; } else ++failed;
+            if (o < sizeof(list))
+                o += (size_t)snprintf(list + o, sizeof(list) - o, "%s%ux%u unit %d %.1f ms%s", o ? ", " : "", s.w, s.h, u, ms,
+                                      ok ? "" : " FAILED");
+        }
+    }
+    t_inDlaa = false;
+    if (areaNow != 100) SceneDlaa::SetArea(areaNow);
+    const double total = g_qpcFreq > 0 ? (double)(Qpc() - t0) * 1000.0 / (double)g_qpcFreq : 0.0;
+    Log("mirror units: pre-built %d unit%s from the size cache (%s) in %.1f ms (boot, Present #%llu)%s -- %d cached size%s, "
+        "largest first, at most %d units; a new mirror view of one of these sizes takes its unit without a build",
+        built, built == 1 ? "" : "s", list, total, (unsigned long long)g_frames.load(std::memory_order_relaxed),
+        failed ? " -- a FAILED unit is built at its first view instead (see the DLAA lines above)" : "", g_mirSizesN,
+        g_mirSizesN == 1 ? "" : "s", cap);
 }
 
 // The mirror G-buffer shape (see the block comment). rt0 / depth come back with a ref.
@@ -11966,10 +12356,10 @@ void MirSelLog(uint64_t blit) {
         o += (size_t)snprintf(known + o, sizeof(known) - o, "%s%ux%u #%d (%llu frames, last seen %llu frames ago)", j ? ", " : "",
                               g_mirKey[j].w, g_mirKey[j].h, g_mirKey[j].sord, (unsigned long long)g_mirKey[j].frames,
                               (unsigned long long)(g_mirKeyClock - g_mirKey[j].last));
-    Log("mirror units %s 2 selection @blit %llu: mirror_vr_views %d, selected %d: [%s] | views matched %llu (handled), not "
-        "selected %llu (left to the game), handled before the first selection %llu | selected entries absent from their frame "
-        "%llu | selection rebuilt %llu times, changed %llu | known view keys %d: [%s]",
-        g_vrMode ? "mirror_vr_mode" : "mirror_flat_mode", (unsigned long long)blit, g_mirVrViews, g_mirSelN,
+    Log("mirror units %s 2 selection @blit %llu: mirror_vr_views %d, mirror_mv %s, selected %d: [%s] | views matched %llu "
+        "(handled), not selected %llu (left to the game), handled before the first selection %llu | selected entries absent from "
+        "their frame %llu | selection rebuilt %llu times, changed %llu | known view keys %d: [%s]",
+        g_vrMode ? "mirror_vr_mode" : "mirror_flat_mode", (unsigned long long)blit, g_mirVrViews, MirMvName(), g_mirSelN,
         g_mirSelN ? sel : "none yet", (unsigned long long)g_mirSelMatch, (unsigned long long)g_mirSelSkip,
         (unsigned long long)g_mirSelPre, (unsigned long long)g_mirSelAbsent, (unsigned long long)g_mirSelBuilds,
         (unsigned long long)g_mirSelChanges, g_mirKeyN, g_mirKeyN ? known : "none");
@@ -12023,8 +12413,20 @@ void MirBeginView(const Microsoft::WRL::ComPtr<ID3D11Texture2D>& rt0, const Micr
         const MirUnit& m = g_mir[i];
         if (m.used && m.viewFrame + 1 == fr && m.w == w && m.h == h && m.sord == sord) { u = i; how = 1; }
     }
-    for (int i = 0; i < nU && u < 0; ++i)
-        if (!g_mir[i].used) { u = i; how = 2; }
+    if (u < 0) {                                         // a new unit (v0.10.2: which free one)
+        // the free unit built at boot for exactly this size (MirPrebuild: its first Run builds nothing), else a free unit
+        // without a pre-built size (the others stay for their size), else any free unit (its pre-built size is rebuilt)
+        int plain = -1, other = -1;
+        for (int i = 0; i < nU && u < 0; ++i) {
+            const MirUnit& m = g_mir[i];
+            if (m.used) continue;
+            if (m.preW == w && m.preH == h && m.dl.ReadyFor(w, h, true, 100)) u = i;
+            else if (!m.preW) { if (plain < 0) plain = i; }
+            else if (other < 0) other = i;
+        }
+        if (u < 0) u = plain >= 0 ? plain : other;
+        if (u >= 0) how = 2;
+    }
     if (u < 0) {
         uint64_t best = ~0ull;
         for (int i = 0; i < nU; ++i)
@@ -12042,6 +12444,30 @@ void MirBeginView(const Microsoft::WRL::ComPtr<ID3D11Texture2D>& rt0, const Micr
         }
         return;
     }
+    // v0.10.2: ONE unit build per frame. The views of a frame run one after another (a view ends before the next one's
+    // G-buffer bind), so a build of an earlier view of this frame has already used the NGX creation budget (one feature create
+    // per Present, DlaaProcessor::CreateBudgetFree) when this view begins. A view whose unit would build now (its first Run,
+    // or a take-over at another size) would only defer its Run and show a jittered picture without DLAA: it is left to the game
+    // for this frame instead (no jitter, nothing recorded) and gets its unit at a later frame. The unit is not touched. Views
+    // whose Run cannot build this frame anyway (a mirror_vr_mode 3 off frame, a failed / unsupported size, the jitter-only
+    // debug key) never wait.
+    {
+        const MirUnit& mb = g_mir[u];
+        const bool runs = !g_jitterOnly.load(std::memory_order_relaxed) && !(MirMode() == 3 && ((fr + (uint64_t)u) & 1u)) &&
+                          !(how == 0 && mb.unsupported) && !(mb.failW == w && mb.failH == h);
+        if (runs && !mb.dl.ReadyFor(w, h, true, 100) && !DlaaProcessor::CreateBudgetFree()) {
+            ++g_mirNotHandled; ++g_mirBuildDefer; ++g_mirWinBuildDefer;
+            g_mirCur = -1;
+            if (g_mirBuildDeferLogs < 8) {
+                ++g_mirBuildDeferLogs;
+                Log("mirror units: %ux%u view left to the game for this frame -- unit %d would build now (textures + NGX feature) "
+                    "but an NGX feature was already created since the last Present (an earlier unit build); one unit build per "
+                    "frame, its unit comes at a later frame (Present #%llu, deferred builds so far %llu)", w, h, u,
+                    (unsigned long long)fr, (unsigned long long)g_mirBuildDefer);
+            }
+            return;
+        }
+    }
     MirUnit& m = g_mir[u];
     if (how != 0) {
         m.resetPending = true;
@@ -12054,7 +12480,9 @@ void MirBeginView(const Microsoft::WRL::ComPtr<ID3D11Texture2D>& rt0, const Micr
                 "pair, view %d of this size in the frame (Present #%llu) -- 4-RTV G-buffer RGBA16F x3 + RGBA16_UINT with its "
                 "own D32S8 depth", u, 20 + u, w, h,
                 how == 1 ? "re-homed (same size and order as last frame, other textures: history reset)"
-                : (how == 2 ? "new unit" : "taken over from an older view (history reset)"),
+                : (how == 2 ? (m.preW == w && m.preH == h && m.dl.ReadyFor(w, h, true, 100)
+                               ? "new unit, pre-built at boot for this size (no build)" : "new unit")
+                            : "taken over from an older view (history reset)"),
                 (void*)rt0.Get(), (void*)depth.Get(), occ, sord, (unsigned long long)fr);
         }
     }
@@ -12062,7 +12490,7 @@ void MirBeginView(const Microsoft::WRL::ComPtr<ID3D11Texture2D>& rt0, const Micr
     m.open = true; m.fwdSeen = false; m.lightSeen = false; m.color.Reset(); m.forcedView = 0;
     m.ps.cand.Reset(); m.ps.twin.valid = false; m.ps.twin.idValid = false; m.ps.snap = false;
     m.ps.cand.SetDropped((uint8_t)(m.dl.Mv().MedoidDropBits() & 1u));   // v0.10.0 phase 8: mirrors have the world layer only
-    if (MirIdsOff()) m.ps.cand.SetDropped(0);            // v0.10.0 phase 9 (mirror_vr_mode 4): the camera R IS the medoid
+    if (MirIdsOff()) m.ps.cand.SetDropped(0);            // v0.10.0 phase 9 (mode 4; v0.10.2: + mirror_mv camera): the camera R IS the medoid
     m.ps.dropN[0] = m.ps.dropN[1] = 0;
     // v0.10.0 phase 8 (mirror_vr_mode 3, VR): each unit runs every 2nd frame (units alternate by index); on its off frame the view
     // is not jittered / recorded and gets the unit's last picture (MirFlush)
@@ -12152,7 +12580,7 @@ void MirOnDraw(ID3D11DeviceContext* ctx, UINT ic, UINT inst, UINT si, INT bv, UI
     if (!instanced && g_mvOn.load(std::memory_order_relaxed))
         CollectMvCandidate(ctx, ic, si, bv, m.ps);       // the unit's camera candidates (world layer: no cabin in mirrors)
     if (!g_didOn) return;                                 // per-draw motion vectors off (Alt+F5 / mv_objects != 2)
-    if (MirIdsOff()) return;                              // v0.10.0 phase 9 (mirror_vr_mode 4): camera motion vectors only
+    if (MirIdsOff()) return;                              // v0.10.0 phase 9 (mode 4; v0.10.2: + mirror_mv camera): camera MVs only
     if (g_ctx1Owner != ctx) {
         if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
         ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&g_ctx1);
@@ -12267,21 +12695,16 @@ void MirFlush(ID3D11DeviceContext* ctx, MirUnit& m) {
                 td.Height, (int)td.Format, td.MipLevels, td.ArraySize, td.SampleDesc.Count, m.w, m.h);
         return;
     }
-    if (!m.inited) {
-        m.inited = true;
-        m.dl.SetEye(20 + u);                             // log tag "eye 20 .. 35" = mirror unit 0 .. 15
-        m.dl.Mv().SetNearReject(g_dlaa[0].Mv().NearReject());   // the own trailer / truck never drive the camera medoid
-        m.dl.Mv().SetEgoOrigin(0.0f);                    // no ego split: per-draw R handles the own truck / trailer
-        m.dl.Mv().SetEgoPixel(0.0f);
-        m.dl.Mv().SetQuiet(true);                        // its numbers are in the "mirror units @blit" line
-        m.dl.SetOpticalCentre(0.5f, 0.5f);
-    }
+    MirUnitSetup(m, u);
     m.dl.SetTiming(GpuTimingOn());
     // (v0.10.0 phase 8: with mirror_vr_mode 3 in VR the unit's previous run is 2 frames back -- its history is kept)
     const uint64_t runGap = MirMode() == 3 ? 2u : 1u;
     const bool reset = m.resetPending || m.runs == 0 || m.lastRunFrame + runGap != fr || m.epoch != g_mirEpoch;
     const float njx = (float)g_signX * m.jx, njy = (float)g_signY * m.jy;
     const int64_t t0 = m.runs == 0 ? Qpc() : 0;          // wall time of the run that builds the unit
+    // v0.10.2: this Run builds the unit (textures + NGX feature at this size: the same test as Run's, area 100, RGBA16F)
+    const bool builds = !m.dl.ReadyFor(m.w, m.h, true, 100);
+    const bool fromCache = !builds && m.runs == 0 && m.preW == m.w && m.preH == m.h;   // built at boot (MirPrebuild)
     const int areaNow = SceneDlaa::Area();               // a mirror always uses the whole picture (no dlaa_area crop)
     if (areaNow != 100) SceneDlaa::SetArea(100);
     t_inDlaa = true;
@@ -12311,18 +12734,24 @@ void MirFlush(ID3D11DeviceContext* ctx, MirUnit& m) {
         if (m.tOk == 1 && g_mirFirstOkLogs < kMirCap) {
             ++g_mirFirstOkLogs;
             Log("first mirror DLAA evaluate OK: unit %d (eye tag %d) %ux%u %s, preset=%s, NGX jitter=(%+.4f,%+.4f), "
-                "reset=%d, depth=snapshot at its discard, per-draw MVs %s, at Present #%llu (unit built in %.1f ms)", u,
+                "reset=%d, depth=snapshot at its discard, per-draw MVs %s, at Present #%llu (unit built in %.1f ms%s)", u,
                 20 + u, m.w, m.h,
                 !m.dl.IsHdr() ? "LDR" : (SceneDlaa::HdrLinear() ? "HDR (RGBA16F, IsHDR=1)" : "HDR (RGBA16F, IsHDR=0: dlss_hdr=0)"),
-                SceneDlaa::DlssPresetName(), (double)njx, (double)njy, (int)reset, g_didCfg ? "on" : "off",
-                (unsigned long long)fr, t0 && g_qpcFreq > 0 ? (double)(Qpc() - t0) * 1000.0 / (double)g_qpcFreq : 0.0);
+                SceneDlaa::DlssPresetName(), (double)njx, (double)njy, (int)reset,
+                !g_didCfg ? "off" : (MirIdsOff() ? "off (camera motion: mirror_mv camera / mode 4)" : "on"),   // v0.10.2
+                (unsigned long long)fr, t0 && g_qpcFreq > 0 ? (double)(Qpc() - t0) * 1000.0 / (double)g_qpcFreq : 0.0,
+                fromCache ? ", pre-built: textures + NGX feature made at boot from the size cache, this Run only its first "
+                            "evaluate" : "");
         }
+        if (builds) MirSizesNote(m.w, m.h);              // v0.10.2: the size cache learns it for the next start
         if (!g_mirActiveLogged) {
             g_mirActiveLogged = true;
             Log("mirror DLAA: ACTIVE -- every mirror view (a 4-RTV G-buffer with its own depth) gets its own DLAA unit: own "
                 "jitter, depth snapshot at its discard, %s, DLAA in place on its RGBA16F colour before the game "
-                "down-samples it (Present #%llu)", g_didCfg ? "per-draw motion vectors (draw-id replay on the mirror depth)"
-                : "camera motion vectors (mv_objects != 2)", (unsigned long long)fr);
+                "down-samples it (Present #%llu)",
+                !g_didCfg ? "camera motion vectors (mv_objects != 2)"
+                : (MirIdsOff() ? "camera motion vectors (mirror_mv camera / mirror mode 4: no per-draw ids)"   // v0.10.2
+                               : "per-draw motion vectors (draw-id replay on the mirror depth)"), (unsigned long long)fr);
         }
     } else if (deferred) {
         ++m.sDeferred;                                    // built at a later Present (one NGX create per Present)
@@ -12640,7 +13069,7 @@ void ToggleMirrors(uint64_t n) {
 enum MenuRowId {
     MR_MODE, MR_PROFILE, MR_MODEL, MR_SHARP, MR_WIDTH, MR_LOD, MR_LODCUT, MR_AREA, MR_DRAWIDS, MR_MIRROR, MR_PRETM, MR_FWD,
     MR_UPSCALE, MR_DLAA, MR_OFXR, MR_POSX, MR_POSY, MR_SIZE, MR_DEPTH, MR_FACE, MR_FPS, MR_FPSX, MR_FPSY, MR_FPSSIZE, MR_SAVE,
-    MR_CLOSE,
+    MR_RESET, MR_CLOSE,
     MR_COUNT
 };
 static_assert(MR_COUNT <= TuningMenu::kMaxRows, "tuning menu: too many rows");
@@ -12666,8 +13095,8 @@ const wchar_t* const kMenuDesc[MR_COUNT] = {
     L"model or win frame rate; 40 % costs about 40 % of the model. Also sets the garage / main-menu truck.",
     L"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and does not ghost. Turn it off "
     L"only to save about 0.5 ms per eye or to test: every pixel then moves with the camera and traffic smears.",
-    L"Gives each truck mirror its own DLAA so mirrors do not shimmer. Off = mirrors as the game draws them: do it if you rarely "
-    L"look in them. About 0.3 ms per mirror view; VR draws the 2 largest.",
+    L"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main mirror next to you). "
+    L"all = every mirror. camera = cheapest per mirror, moving traffic can ghost in the glass; else each part moves exactly in the glass.",
     L"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. Change it only to compare. "
     L"Not used with DLSS upscale or Windows HDR. Same cost either way; takes ~60 frames to switch.",
     L"Gives wires, fences and glass their own distance instead of what is behind them, so they do not smear when you move. Turn "
@@ -12695,6 +13124,8 @@ const wchar_t* const kMenuDesc[MR_COUNT] = {
     L"Makes the fps box bigger or smaller (0.2 .. 3.0). Raise it if you cannot read it in the headset or on a big screen. No cost.",
     L"Writes everything shown here into dlaa.ini (settings, and the panel / fps box positions once you moved them), keeping every "
     L"other line. Do it once you like what you see, or the changes are gone at the next start. Mode saves itself.",
+    L"Puts every setting in this menu back to how the mod ships (model, sharpen, texture sharpness, DLAA area, motion, mirrors, "
+    L"profile, panel and fps box), live and in dlaa.ini, keeping your hotkeys and every other line. Use it when you have changed too much.",
     nullptr,                                              // MR_CLOSE: "Closes the menu ..." (built with the key name)
 };
 int   g_menuSel     = 0;                                  // selected row (kept while closed: the menu reopens where it was)
@@ -12793,6 +13224,107 @@ void ToggleFpsBox(uint64_t n) {
         "fps_vr_scale=%.1f", g_fpsShow ? "ON" : "OFF", (unsigned long long)n, g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX,
         g_fpsVrY, (double)g_fpsVrScale);
     PlayTones(1, g_fpsShow ? 1200 : 300, 150, 0);
+}
+
+// ---- v0.10.0 tuning menu "Reset to defaults" row ---------------------------------------------------------------------------------
+// Every value the menu edits goes back to a FRESH INSTALL, live and in dlaa.ini. Fresh install = the shipped dlaa.ini (docs/
+// dlaa.ini.sample: every value commented out = the built-in default): no `mode` key, so StartInjection leaves DLAA ON (unless
+// dlaa_off.txt) and g_dlssUpscale at its built-in true -- the Mode row reads "DLSS" (the same picture as DLAA at Scaling 100 %,
+// the upscale below it); dlss_preset default (driver pick), dlaa_area 100, sharpness 0.4, sharp_radius 1.5, tex_lod_bias 0 with the
+// cut-out key absent (g_lodCutMode = kLodCutAbsent, -0.50), mv_objects 2, mirror_dlaa 1, dlaa_pre_tonemap 1, perf_profile high,
+// mv_fwd_depth 1, the panel and the fps box at their default placement (fps box off). Each live change uses the side effects of
+// the Step* / Toggle* function of the row. On disk the 32 keys are REMOVED (WriteIniPreserving, empty value): key_* hotkeys, debug,
+// every other key and all comments stay. Only the profile keys that dlaa.ini sets AND this reset removes (dlss_preset, dlaa_area,
+// mirror_dlaa, mv_fwd_depth) lose their "explicit" mark; the other profile keys (mirror_vr_mode, mv_vote_res, ...) stay in the file,
+// so they stay explicit exactly as at the next start.
+void ResetSettings(uint64_t n) {
+    // mode: DLAA on + DLSS upscale on (what a start without a `mode` / `dlss_upscale` key gives), as CycleMode does it
+    const bool wasOn = g_dlaaOn.load();
+    const bool wantOn = !g_dlaaDisabled;                  // dlaa_off.txt next to the DLL = the fresh start is OFF
+    if (wantOn && !wasOn && g_gameDeviceChanged) {
+        Log("settings reset: DLAA stays OFF (the game render device changed -- restart the game)");   // as CycleMode / ToggleDlaa
+    } else {
+        g_dlaaOn = wantOn;
+    }
+    g_dlssUpscale = true;
+    g_upBlocked[0] = 0;                                   // a failed upscale size is retried
+    g_resetNext = true;                                   // textures + NGX feature rebuild at the next blit, DLSS history dropped
+    if (!wasOn && g_dlaaOn.load()) MvInvalidate();        // stale MV candidates from before the off period
+    // sharpen strength / width (StepSharpness / StepSharpRadius)
+    SceneDlaa::SetSharpness(0.4f);
+    SceneDlaa::SetSharpRadius(1.5f);
+    // texture LOD: the sampler twins are re-derived from g_lodBias / g_lodCutMode at the next scene pass (g_lodGen), as the keys do
+    g_lodBias = 0.0f;
+    g_lodCutMode = kLodCutAbsent;
+    g_lodCutBias = -0.5f;
+    // per-part motion vectors (ToggleDrawIds: mv_objects 2); 1 = the legacy stencil ids go off too (g_objCfg; the hooks flush)
+    g_objMode = 2;
+    g_objCfg = false;
+    g_didCfg = true;
+    // DLAA before tonemap (TogglePreTonemap): dlaa_pre_tonemap 1
+    if (g_preCfg != 1 || !g_preOn.load()) { g_preCfg = 1; g_preOn = true; g_preFailed = false; g_preFailRun = 0; }
+    g_preStage = -1;                                      // the next frame logs its stage again
+    // preset / area / mirror DLAA / see-through depth follow the profile again; the profile is high (perf_profile removed)
+    g_profExplicit[PK_PRESET] = g_profExplicit[PK_AREA] = g_profExplicit[PK_MIRROR_DLAA] = g_profExplicit[PK_FWD_DEPTH] = false;
+    // v0.10.2: the mirror modes too (the Mirror DLAA row); mirror_vr_views back to its built-in 2 (no profile value)
+    g_profExplicit[PK_MIRROR_VR_MODE] = g_profExplicit[PK_MIRROR_FLAT_MODE] = false;
+    g_mirVrViews = 2;
+    g_mirCamOnly = false;                                 // mirror_mv back to its built-in parts (no profile value)
+    g_profile = 0;
+    g_fwdAutoOff = false;                                 // re-arms the VR budget measurement (ToggleFwdDepth / ApplyProfile)
+    g_vrArea = 100;                                       // flat keeps the VR value in dlaa.ini; the fresh value is 100 too
+    char changed[700];
+    ApplyProfile(true, changed, sizeof(changed));         // preset default, area 100, mirror 1, forward depth 1 (+ their side effects)
+    MirInvalidate();                                      // every mirror unit restarts its history (ToggleMirrors)
+    // panel placement (the menu's Panel rows); g_menuMoved: the close line logs the new placement
+    g_menuX = 2; g_menuY = 8; g_menuScale = 1.0f;
+    g_menuVrX = 0; g_menuVrY = -5; g_menuVrScale = 1.0f; g_menuVrDepth = 12; g_menuVrFace = 1;
+    g_menuExplicit = false;
+    g_menuMoved = true;
+    // fps box: off (ToggleFpsBox's off path) + default placement
+    if (g_fpsShow) {
+        g_fpsShow = false;
+        TuningMenu::ReleaseWidget();
+        g_fpsVrBuild = 0.0f;
+        if (!g_menuOpen.load(std::memory_order_relaxed)) MenuLateReset("fps box off");
+        if (!g_menuOpen.load(std::memory_order_relaxed)) FpsStop();
+    }
+    g_fpsX = 1; g_fpsY = 1; g_fpsScale = 1.0f;
+    g_fpsVrX = 0; g_fpsVrY = -25; g_fpsVrScale = kFpsVrScaleDefault;
+    g_fpsExplicit = false;
+    g_fpsMoved = true;
+    OnLiveTuningChange();                                 // the timing windows restart (new pipeline state)
+
+    // dlaa.ini: remove the 32 keys (empty value); everything else stays byte-for-byte (v0.10.2: + mirror_mv = 32, the cap)
+    static const char* const kKeys[] = {
+        "mode", "dlss_preset", "dlaa_area", "sharpness", "sharp_radius", "dlss_upscale", "tex_lod_bias", "tex_lod_bias_cutout",
+        "mv_objects", "mirror_dlaa", "mirror_vr_mode", "mirror_flat_mode", "mirror_vr_views", "mirror_mv", "dlaa_pre_tonemap",
+        "perf_profile", "mv_fwd_depth",
+        "menu_x", "menu_y", "menu_scale", "menu_vr_x", "menu_vr_y", "menu_vr_scale", "menu_vr_depth", "menu_vr_face",
+        "fps_show", "fps_x", "fps_y", "fps_scale", "fps_vr_x", "fps_vr_y", "fps_vr_scale",
+    };
+    constexpr int kNKeys = (int)(sizeof(kKeys) / sizeof(kKeys[0]));
+    static_assert(kNKeys <= 32, "WriteIniPreserving handles at most 32 keys");
+    IniKV kv[32] = {};                                    // val[0] == 0 on every entry = remove the key
+    for (int i = 0; i < kNKeys; ++i) kv[i].key = kKeys[i];
+    const bool written = WriteIniPreserving(kv, kNKeys);
+    if (written) {
+        Log("settings RESET to defaults (Reset row, Present #%llu): mode = %s (no key: DLAA on + dlss_upscale on) dlss_preset = default "
+            "dlaa_area = 100 sharpness = 0.4 sharp_radius = 1.5 dlss_upscale = 1 tex_lod_bias = 0.00 tex_lod_bias_cutout = absent "
+            "(-0.50) mv_objects = 2 mirror_dlaa = 1 mirror_vr_mode = 2 mirror_flat_mode = 1 mirror_vr_views = 2 mirror_mv = parts "
+            "dlaa_pre_tonemap = 1 "
+            "perf_profile = high mv_fwd_depth = 1 menu_x = 2 menu_y = 8 "
+            "menu_scale = 1.0 menu_vr_x = 0 menu_vr_y = -5 menu_vr_scale = 1.0 menu_vr_depth = 12 menu_vr_face = 1 fps_show = 0 "
+            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f -- profile: %s -- dlaa.ini: %d keys "
+            "removed (hotkeys and other lines kept)", (unsigned long long)n, g_dlaaOn.load() ? "DLSS" : "off", (double)kFpsVrScaleDefault,
+            changed, kNKeys);
+        BeepSeq b;                                        // success: rising two-tone 600 -> 900 Hz, 120 ms each (as SaveSettings)
+        b.n = 2; b.freq[0] = 600; b.ms[0] = 120; b.freq[1] = 900; b.ms[1] = 120; b.gapMs = 40;
+        PlayBeeps(b);
+    } else {
+        Log("settings reset: dlaa.ini write FAILED (live values reset, Present #%llu)", (unsigned long long)n);
+        PlayTones(1, 200, 400, 0);                        // failure: one long 200 Hz tone (400 ms)
+    }
 }
 // ---- tuning menu: live GPU figures (the GPU block under the title, the "GPU cost" column, the cost sentence) ----
 // GpuPerf (gpu_perf.h) times every sub-pass of the mod per eye; it is OFF for a normal user (debug = 0), so the menu switches it
@@ -13072,8 +13604,7 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
     case MR_MIRROR:
         if (!mirOn)     swprintf(sent, sentCap, L"Off now: costs nothing.");
         else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"Costs %ls %ls now; dlaa.ini mirror_vr_mode / mirror_flat_mode set how many "
-                                 L"mirrors.", fig(MG_MIR), unit);
+        else            swprintf(sent, sentCap, L"Costs %ls %ls now; fewer mirrors cost less.", fig(MG_MIR), unit);
         break;
     case MR_PRETM:
         if (vr) swprintf(sent, sentCap, L"Greyed in VR: VR always runs DLAA on the finished picture.");
@@ -13092,6 +13623,105 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         break;
     default: break;
     }
+}
+
+// v0.10.2 the "Mirror DLAA" row: seven states (Left / Right, wrap-around) over mirror_dlaa (the live switch, as Alt+F6), the
+// mirror mode of the kind the menu shows (VR: mirror_vr_mode, flat: mirror_flat_mode), mirror_vr_views (the view count of
+// mode 2, VR and flat -- MirBeginView / MirSelEndFrame read MirMode() and g_mirVrViews for both kinds) and mirror_mv (parts /
+// camera, g_mirCamOnly -- one key for both kinds, as mirror_vr_views):
+//   0 off                       mirror DLAA off (g_mirOn false; the modes stay, Alt+F6 turns it back on with them)
+//   1 1 mirror (largest)        mode 2, mirror_vr_views 1, mirror_mv parts (the main mirror next to the driver)
+//   2 1 mirror, camera          mode 2, mirror_vr_views 1, mirror_mv camera (no per-draw ids: ~0.15 ms instead of ~0.4 ms)
+//   3 2 mirrors (largest)       mode 2, mirror_vr_views 2, mirror_mv parts
+//   4 2 mirrors, camera         mode 2, mirror_vr_views 2, mirror_mv camera
+//   5 all mirrors               mode 1, mirror_mv parts (mirror_vr_views unchanged)
+//   6 all, camera motion only   mode 4 (mirror_vr_views and mirror_mv unchanged: mode 4 is camera motion whatever mirror_mv
+//                               says -- the same state as before for a dlaa.ini with mode 4)
+const char* const kMirStateLog[7] = { "off", "1 mirror (largest)", "1 mirror (largest), camera motion only",
+                                      "2 mirrors (largest)", "2 mirrors (largest), camera motion only", "all mirrors",
+                                      "all, camera motion only" };
+// row values: the 144-px value column fits ~20 characters ("all, camera motion only" would end in "..."); measured at Segoe UI
+// 15 px: "all, camera motion" 122 px, "2 mirrors, camera" 115, "all, every 2nd frame" 130, "all, 2nd fr., camera" 121
+const wchar_t* const kMirStateRow[7] = { L"off", L"1 mirror (largest)", L"1 mirror, camera", L"2 mirrors (largest)",
+                                         L"2 mirrors, camera", L"all mirrors", L"all, camera motion" };
+// The state in force as TWICE its index: even = one of the seven; odd = a dlaa.ini / profile combination between two of them,
+// so Left / Right go to the nearest state on that side -- mode 2 with mirror_vr_views 3..8 = 9 (between 2 mirrors, camera and
+// all; either mirror_mv), mode 3 (each unit every 2nd frame) = 11 (between all and all, camera; either mirror_mv). Mode 1 with
+// mirror_mv camera = 12 (all, camera: the same work as mode 4). Mode 0 (no mirror units) counts as off.
+int MirMenuPos(bool vr) {
+    if (!g_mirOn.load()) return 0;
+    const bool cam = g_mirCamOnly;
+    switch (vr ? g_mirVrMode : g_mirFlatMode) {
+    case 0:  return 0;
+    case 2:  return g_mirVrViews <= 1 ? (cam ? 4 : 2) : (g_mirVrViews == 2 ? (cam ? 8 : 6) : 9);
+    case 1:  return cam ? 12 : 10;
+    case 3:  return 11;
+    default: return 12;
+    }
+}
+void MirMenuValue(wchar_t* out, size_t cap, bool vr) {
+    const int mode = vr ? g_mirVrMode : g_mirFlatMode;
+    const bool cam = g_mirCamOnly;
+    if (g_mirOn.load() && mode == 0)                 swprintf(out, cap, L"off (mode 0)");
+    else if (g_mirOn.load() && mode == 2 && g_mirVrViews > 2)
+        swprintf(out, cap, cam ? L"%d largest, camera" : L"%d largest", g_mirVrViews);
+    else if (g_mirOn.load() && mode == 3)            swprintf(out, cap, cam ? L"all, 2nd fr., camera" : L"all, every 2nd frame");
+    else                                             swprintf(out, cap, L"%ls", kMirStateRow[MirMenuPos(vr) / 2]);
+}
+// Left / Right on the row (dir -1 / +1): the next state on that side, wrap-around. Marks mirror_dlaa and the mode of this kind
+// explicit (profiles keep them; Shift+F12 / the Save row writes them with mirror_mv), restarts the mirror histories (as Alt+F6;
+// a mirror_mv change needs it too: the units' MV history was built with / without per-draw ids), logs, beeps: off = Alt+F6's
+// low "off" tone; 1 mirror = 1, 2 mirrors = 2, all = 3 short beeps, high (1200 Hz) with per-draw ids, lower (800 Hz) with camera
+// motion only.
+void CycleMirrors(uint64_t n, int dir, bool vr) {
+    const int pos = MirMenuPos(vr);
+    int s = dir < 0 ? (pos + 1) / 2 - 1 : pos / 2 + 1;
+    if (s < 0) s = 6;
+    if (s > 6) s = 0;
+    const int oldMode = vr ? g_mirVrMode : g_mirFlatMode, oldViews = g_mirVrViews;
+    const bool wasOn = g_mirOn.load(), oldCam = g_mirCamOnly;
+    const char* const oldMv = MirMvName(oldMode);        // the motion of the kind this row shows
+    if (s == 0) {
+        g_mirOn = false;
+    } else {
+        g_mirOn = true;
+        int& mode = vr ? g_mirVrMode : g_mirFlatMode;
+        mode = s <= 4 ? 2 : (s == 5 ? 1 : 4);
+        if (s <= 4) g_mirVrViews = (s + 1) / 2;
+        if (s <= 4) g_mirCamOnly = (s & 1) == 0;         // 2 / 4 = camera, 1 / 3 = parts
+        else if (s == 5) g_mirCamOnly = false;           // all mirrors = per-draw ids (all, camera = mode 4: mirror_mv kept)
+        // entering mode 2: the selection is learnt afresh (the key table only ages in mode 2 -- keys from an earlier mode-2
+        // stretch, e.g. another truck's mirrors, would stay selected for up to kMirKeyKeep frames with views)
+        if (mode == 2 && (oldMode != 2 || !wasOn)) { g_mirKeyN = 0; g_mirSelN = 0; g_mirSelUsed = 0; }
+        g_profExplicit[vr ? PK_MIRROR_VR_MODE : PK_MIRROR_FLAT_MODE] = true;
+    }
+    g_profExplicit[PK_MIRROR_DLAA] = true;               // the user's choice (profiles keep it), as Alt+F6
+    MirInvalidate();
+    static const char* const kWhat[7] = {
+        "mirror views are left to the game (no jitter, no DLAA); the units keep their resources",
+        "only the largest mirror view keeps DLAA (the main mirror next to you), the others are left to the game; per-draw "
+        "motion vectors (each part moves exactly in the glass)",
+        "only the largest mirror view keeps DLAA (the main mirror next to you), the others are left to the game; camera motion "
+        "vectors only (no per-draw ids: the cheapest per mirror, moving traffic can ghost in the glass)",
+        "the 2 largest mirror views keep DLAA, the others are left to the game; per-draw motion vectors (each part moves exactly "
+        "in the glass)",
+        "the 2 largest mirror views keep DLAA, the others are left to the game; camera motion vectors only (no per-draw ids: the "
+        "cheapest per mirror, moving traffic can ghost in the glass)",
+        "every mirror view gets its own DLAA unit (per-draw motion vectors)",
+        "every mirror view gets its own DLAA unit with camera motion vectors only (no per-draw ids: the cheapest per mirror, "
+        "moving traffic can ghost in the glass)" };
+    const bool partsState = s == 1 || s == 3 || s == 5;
+    Log("mirror DLAA now %s (tuning menu %s, %s %d -> %d, mirror_vr_views %d -> %d, mirror_mv %s -> %s, mirror DLAA was %s, "
+        "Present #%llu) -- %s%s%s%s",
+        kMirStateLog[s], dir < 0 ? "Left" : "Right", vr ? "mirror_vr_mode" : "mirror_flat_mode", oldMode,
+        vr ? g_mirVrMode : g_mirFlatMode, oldViews, g_mirVrViews, oldMv, MirMvName(vr ? g_mirVrMode : g_mirFlatMode),
+        wasOn ? "on" : "off",
+        (unsigned long long)n, kWhat[s], s ? " (histories restart)" : "",
+        partsState && !g_didCfg ? " -- per-draw motion vectors are off (mv_objects != 2): the mirrors use camera motion anyway" : "",
+        s && g_mirCamOnly != oldCam ? " -- mirror_mv is one key for VR and flat: the other kind's mirrors follow it in modes 1 / 2 / 3"
+                                    : "");
+    if (s == 0) PlayTones(1, 300, 150, 0);
+    else        PlayTones((s + 1) / 2, partsState ? 1200 : 800, 90, 60);
 }
 
 // One row: name, the hotkey text (+ "  (VR only)" / "  (flat only)" tag), greyed = not applicable now. The value is set by the caller.
@@ -13145,7 +13775,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     MenuRow(p, MR_DRAWIDS, L"Per-part motion vectors", KeyName(KA_DRAWID_TOGGLE), nullptr, false);
     swprintf(p.rows[MR_DRAWIDS].value, kV, L"%ls", g_objMode == 2 ? L"on" : (g_objMode == 1 ? L"old stencil ids" : L"off"));
     MenuRow(p, MR_MIRROR, L"Mirror DLAA", KeyName(KA_MIRROR_TOGGLE), nullptr, false);
-    swprintf(p.rows[MR_MIRROR].value, kV, L"%ls", onOff[g_mirOn.load() ? 1 : 0]);
+    MirMenuValue(p.rows[MR_MIRROR].value, kV, vr);       // v0.10.2: the seven states (CycleMirrors)
     MenuRow(p, MR_PRETM, L"DLAA before tonemap (flat)", KeyName(KA_PRE_TONEMAP), vr ? "flat only" : nullptr, vr);
     swprintf(p.rows[MR_PRETM].value, kV, L"%ls", !g_preCfg ? L"off (dlaa.ini 0)" : onOff[g_preOn.load() ? 1 : 0]);
     MenuRow(p, MR_FWD, L"See-through depth", KeyName(KA_FWD_DEPTH), nullptr, false);
@@ -13183,6 +13813,8 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     swprintf(p.rows[MR_FPSSIZE].value, kV, L"%.1f", (double)(vr ? g_fpsVrScale : g_fpsScale));
     MenuRow(p, MR_SAVE, L"Save to dlaa.ini", KeyName(KA_SAVE), nullptr, false);
     swprintf(p.rows[MR_SAVE].value, kV, L"-");
+    MenuRow(p, MR_RESET, L"Reset to defaults", "dlaa.ini", nullptr, false);
+    swprintf(p.rows[MR_RESET].value, kV, L"-");
     MenuRow(p, MR_CLOSE, L"Close menu", KeyName(KA_MENU), nullptr, false);
     swprintf(p.rows[MR_CLOSE].value, kV, L"-");
 
@@ -13243,7 +13875,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_LODCUT:  StepLodCutout(dir, n); break;
     case MR_AREA:    StepArea(dir, n); break;               // flat: refuses with its low beep
     case MR_DRAWIDS: ToggleDrawIds(n); break;
-    case MR_MIRROR:  ToggleMirrors(n); break;
+    case MR_MIRROR:  CycleMirrors(n, dir, vr); break;       // v0.10.2: seven states (Alt+F6 stays on / off)
     case MR_PRETM:   TogglePreTonemap(n); break;
     case MR_FWD:     ToggleFwdDepth(n); break;
     case MR_UPSCALE: ToggleUpscale(n); break;
@@ -13260,7 +13892,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_SIZE: {
         float& s = vr ? g_menuVrScale : g_menuScale;
         float v = std::floor((s + 0.1f * (float)dir) * 10.0f + 0.5f) / 10.0f;
-        s = v < 0.5f ? 0.5f : (v > 2.0f ? 2.0f : v);
+        s = v < 0.3f ? 0.3f : (v > 2.0f ? 2.0f : v);   // v0.10.2: down to 0.3 (a small panel in VR)
         g_menuExplicit = g_menuMoved = true;
         break;
     }
@@ -13291,6 +13923,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
         break;
     }
     case MR_SAVE:    SaveSettings(n); break;
+    case MR_RESET:   ResetSettings(n); break;                // a fresh press only (not a stepRow: auto-repeat is ignored above)
     case MR_CLOSE:   MenuClose(n, "Close row"); break;
     default: break;
     }
@@ -14230,12 +14863,17 @@ void MirStatsLog(uint64_t blit) {
     std::string s;
     char b[1024];
     const double pres = g_mirWinPresents ? (double)g_mirWinPresents : 1.0;
+    int preIdle = 0;                                      // v0.10.2: units built at boot that no view has taken yet
+    for (const MirUnit& m : g_mir) if (!m.used && m.preW) ++preIdle;
     snprintf(b, sizeof(b), "mirror units @blit %llu: %s | views/frame %.2f (frames with mirror views %llu of %llu), handled "
-             "%llu, not handled %llu in total (this window over mirror_max_views=%d: %llu) |", (unsigned long long)blit,
+             "%llu, not handled %llu in total (this window over mirror_max_views=%d: %llu; unit builds deferred to a later "
+             "frame %llu, %llu in total -- one build per frame) | pre-built units not taken yet %d |", (unsigned long long)blit,
              MirPathLive() ? "ACTIVE" : (g_mirOn.load() ? "inactive (DLAA off / passive / warm-up)" : "OFF (mirror key / mirror_dlaa)"),
              (double)g_mirWinViews / pres, (unsigned long long)g_mirWinFrames, (unsigned long long)g_mirWinPresents,
              (unsigned long long)g_mirHandled, (unsigned long long)g_mirNotHandled, g_mirMaxViews,
-             (unsigned long long)g_mirWinCap);
+             (unsigned long long)g_mirWinCap, (unsigned long long)g_mirWinBuildDefer, (unsigned long long)g_mirBuildDefer,
+             preIdle);
+    g_mirWinBuildDefer = 0;
     s += b;
     int units = 0;
     double gpuFrame = 0.0;
@@ -14292,9 +14930,11 @@ void MirStatsLog(uint64_t blit) {
              units, g_mirMaxViews, gpuFrame);
     s += b;
     {                                                     // v0.10.0 phase 8 (phase 10: flat too)
-        snprintf(b, sizeof(b), " | %s %d (mirror_vr_views %d%s): views left to the game as not among the largest %llu, "
-                 "off-frame views held %llu / raw %llu", g_vrMode ? "mirror_vr_mode" : "mirror_flat_mode", MirMode(), g_mirVrViews,
-                 MirMode() == 4 ? ", per-draw ids off in the mirrors" : "", (unsigned long long)g_mirVrSkip, (unsigned long long)g_mirAltHeld,
+        // v0.10.2: + mirror_mv (parts / camera / camera (mode 4)); ids off with mirror_mv camera in modes 1 / 2 / 3 too
+        snprintf(b, sizeof(b), " | %s %d (mirror_vr_views %d, mirror_mv %s%s): views left to the game as not among the largest "
+                 "%llu, off-frame views held %llu / raw %llu", g_vrMode ? "mirror_vr_mode" : "mirror_flat_mode", MirMode(),
+                 g_mirVrViews, MirMvName(), MirIdsOff() ? ", per-draw ids off in the mirrors" : "",
+                 (unsigned long long)g_mirVrSkip, (unsigned long long)g_mirAltHeld,
                  (unsigned long long)g_mirAltRaw);
         s += b;
     }
@@ -15270,6 +15910,7 @@ bool FindNvngxDlss(wchar_t* out, DWORD cap) {
 
 void LoadConfig() {
     InitKeyBinds();                                      // v0.7.7: defaults first, key_* lines below override
+    g_controllerName[0] = 0;                             // v0.10.1 controller_name default: every controller
     for (bool& x : g_profExplicit) x = false;            // v0.10.0 phase 10: set below for every profile key the ini names
     wchar_t path[MAX_PATH];
     FILE* f = nullptr;
@@ -15286,6 +15927,17 @@ void LoadConfig() {
             for (char* e = eq - 1; e >= key && (*e == ' ' || *e == '\t'); --e) *e = 0;
             const long v = strtol(eq + 1, nullptr, 10);
             if (!strncmp(key, "key_", 4)) { SetKeyBindFromIni(key, eq + 1); continue; }   // v0.7.7 hotkeys
+            if (!strcmp(key, "controller_name")) {       // v0.10.1: trimmed, inner spaces kept, a "..." pair stripped, lower case
+                const char* b = eq + 1;
+                while (*b == ' ' || *b == '\t') ++b;
+                size_t len = strlen(b);
+                while (len && (b[len - 1] == ' ' || b[len - 1] == '\t' || b[len - 1] == '\r' || b[len - 1] == '\n')) --len;
+                if (len >= 2 && b[0] == '"' && b[len - 1] == '"') { ++b; len -= 2; }
+                if (len >= sizeof(g_controllerName)) len = sizeof(g_controllerName) - 1;
+                for (size_t i = 0; i < len; ++i) g_controllerName[i] = (char)tolower((unsigned char)b[i]);
+                g_controllerName[len] = 0;
+                continue;
+            }
             if      (!strcmp(key, "jitter_sign_x"))  g_signX = v < 0 ? -1 : 1;
             else if (!strcmp(key, "jitter_sign_y"))  g_signY = v < 0 ? -1 : 1;
             else if (!strcmp(key, "jitter_enabled")) g_jitterEnabled = v != 0;
@@ -15385,11 +16037,17 @@ void LoadConfig() {
             }
             else if (!strcmp(key, "mv_cons_cands"))     DrawIdMv::SetConsCands(v <= 0 ? 64u : (unsigned)v);
             else if (!strcmp(key, "mv_medoid_drop"))    DrawIdMv::SetMedoidDrop(v <= 0 ? 0u : (unsigned)v);
+            else if (!strcmp(key, "mv_cons_fail_tol"))  DrawIdMv::SetConsFailTol(v <= 0 ? 0u : (unsigned)v);   // v0.10.2
             else if (!strcmp(key, "mirror_vr_mode")) {  // (phase 9: + 4; phase 10: default 2, explicit)
                 g_mirVrMode = v < 0 ? 2 : (v > 4 ? 2 : (int)v); g_profExplicit[PK_MIRROR_VR_MODE] = true;
             }
             else if (!strcmp(key, "mirror_flat_mode")) { // v0.10.0 phase 10: the same modes in flat (default 1)
                 g_mirFlatMode = v < 0 ? 1 : (v > 4 ? 1 : (int)v); g_profExplicit[PK_MIRROR_FLAT_MODE] = true;
+            }
+            else if (!strcmp(key, "mirror_mv")) {        // v0.10.2: parts (default) / camera -- the views of modes 1 / 2 / 3
+                const char* p = eq + 1;
+                while (*p == ' ' || *p == '\t') ++p;
+                g_mirCamOnly = !_strnicmp(p, "camera", 6);
             }
             else if (!strcmp(key, "mv_slot_pool"))      g_slotPool = v != 0;
             else if (!strcmp(key, "mv_inst_replay"))    { DrawIdMv::SetInstReplay(v != 0 ? 1 : 0); g_profExplicit[PK_INST_REPLAY] = true; }
@@ -15404,6 +16062,7 @@ void LoadConfig() {
             else if (!strcmp(key, "mirror_vr_views"))   g_mirVrViews = v < 1 ? 1 : (v > 8 ? 8 : (int)v);
             else if (!strcmp(key, "mv_area_scissor"))   g_areaScissorCfg = v != 0;
             else if (!strcmp(key, "mv_area_margin"))    g_areaMarginCfg = v < 0 ? -1 : (v > 1024 ? 1024 : (int)v);
+            else if (!strcmp(key, "mv_area_clip"))      g_areaClipCfg = v != 0;                             // v0.10.2
             else if (!strcmp(key, "mv_fwd_depth_res"))  { g_fwdResCfg = (v == 1 || v == 2) ? (int)v : 0; g_profExplicit[PK_FWD_RES] = true; }
             else if (!strcmp(key, "mv_fold_dispatch"))  DrawIdMv::SetFold(v <= 0 ? 0 : (v >= 2 ? 2 : 1));   // phase 18: 2
             else if (!strcmp(key, "mv_vote_compact"))   DrawIdMv::SetVoteCompact(v != 0);                   // v0.10.0 phase 18
@@ -15550,7 +16209,7 @@ void LoadConfig() {
             else if (!strcmp(key, "menu_vr_face"))   g_menuVrFace = v != 0 ? 1 : 0;         // v0.10.0 phase 16
             else if (!strcmp(key, "menu_scale") || !strcmp(key, "menu_vr_scale")) {
                 const double s = strtod(eq + 1, nullptr);
-                const float c = (s != s) ? 1.0f : (float)(s < 0.5 ? 0.5 : (s > 2.0 ? 2.0 : s));
+                const float c = (s != s) ? 1.0f : (float)(s < 0.3 ? 0.3 : (s > 2.0 ? 2.0 : s));   // v0.10.2: 0.3..2.0
                 if (key[5] == 'v') g_menuVrScale = c; else g_menuScale = c;
             }
             // v0.10.0 live fps box (the menu's FPS counter rows change them; the save key writes them once changed there)
@@ -15687,6 +16346,11 @@ void LoadConfig() {
             "column / bottom row of the picture unrendered (sky in the depth), the sun-shaft / bloom haze blinks on those frames");
     Log("OFXR Bridge support: ofxr_bridge=%d (%s)", (int)Ofxr::g_on.load(),
         Ofxr::g_on.load() ? "on: the layer's calls pass through the hooks" : "off");
+    if (g_controllerName[0])                             // v0.10.1
+        Log("controller_name = \"%s\" (only controllers whose name contains it are read for WheelN / WheelUp ... bindings; "
+            "the others go to the game untouched)", g_controllerName);
+    else
+        Log("controller_name empty = every DirectInput controller the game opens is read for WheelN / WheelUp ... bindings");
 #ifdef WITH_DLAA
     Log("tuning menu (v0.10.0): %s opens / closes it, %s / %s select a row, %s / %s change it; panel flat menu_x=%d menu_y=%d "
         "menu_scale=%.1f, VR menu_vr_x=%d menu_vr_y=%d menu_vr_scale=%.1f menu_vr_depth=%d menu_vr_face=%d (%s); VR: drawn last on "
@@ -15771,11 +16435,12 @@ void LoadConfig() {
     // v0.10.0 phase 8: performance -- per-sub-pass GPU timers + the cuts (each behind its ini key)
     GpuPerf::SetOn(g_perfCfg > 0 || (g_perfCfg < 0 && g_debugIni));
     Log("phase 8 (v0.10.0): perf_timers=%d (%s) mv_vote_res=%u mv_vote_march_cap=%u mv_cons_cands=%u mv_medoid_drop=%u "
-        "mirror_vr_mode=%d mv_slot_pool=%d mv_inst_replay=%d (instanced draws: %s) -- %s; rigid-parent vote on every %u%s pixel in x / y with %u px march steps "
+        "mv_cons_fail_tol=%u mirror_vr_mode=%d mirror_mv=%s mv_slot_pool=%d mv_inst_replay=%d (instanced draws: %s) -- %s; rigid-parent vote on every %u%s pixel in x / y with %u px march steps "
         "(listed draws with < 64 coarse samples: every 2nd pixel, 2 px steps), <= %u marches per frame, vote grid skipped when no "
-        "listed draw has pixels; consensus %u world / %u cabin candidates; %s; mirrors in VR: %s; pass-slot textures %s",
+        "listed draw has pixels; consensus %u world / %u cabin candidates; %s; mirrors in VR: %s%s; pass-slot textures %s",
         g_perfCfg, GpuPerf::On() ? "on: 'perf eye N' lines every 600 blits" : "off", DrawIdMv::VoteRes(), DrawIdMv::MarchCap(),
-        DrawIdMv::ConsCands(), DrawIdMv::MedoidDrop(), g_mirVrMode, (int)g_slotPool, DrawIdMv::InstReplay(),
+        DrawIdMv::ConsCands(), DrawIdMv::MedoidDrop(), DrawIdMv::ConsFailTol(), g_mirVrMode, g_mirCamOnly ? "camera" : "parts",
+        (int)g_slotPool, DrawIdMv::InstReplay(),
         DrawIdMv::InstReplay() ? "only the shapes that took a moving parent lately, all of them every 7th pass"
                                : "all replayed every pass",
         "every sub-pass of the mod has its own GPU timer per eye (gpu_perf.h); the 'perf cuts' line shows each cut's state",
@@ -15787,16 +16452,20 @@ void LoadConfig() {
         g_mirVrMode == 0 ? "off" : (g_mirVrMode == 2 ? "only the largest views (main mirrors)"
                                     : (g_mirVrMode == 3 ? "each unit every 2nd frame (held in between)"
                                        : (g_mirVrMode == 4 ? "every view, per-draw ids off (camera motion vectors)" : "every view"))),
+        g_mirCamOnly && g_mirVrMode >= 1 && g_mirVrMode <= 3 ? ", per-draw ids off (mirror_mv camera: camera motion vectors)" : "",
         g_slotPool ? "pooled (alive = passes in flight)" : "one set per FIFO slot");
     // v0.10.0 phase 9: VR cost -- area scissor, 1/2-resolution forward depth, mirror modes, folded dispatches
     {
         const int marginNow = g_areaMarginCfg >= 0 ? g_areaMarginCfg : SceneDlaa::Feather() + 32;
-        Log("phase 9 (v0.10.0): mv_area_scissor=%d mv_area_margin=%d (%d px) mv_fwd_depth_res=%d (%s) mirror_vr_mode=%d "
-            "mirror_vr_views=%d mv_fold_dispatch=%d -- %s; forward depth %s; mirrors in VR: %s; the per-draw chain runs %s (see the "
-            "'perf view' line every 600 blits)",
-            (int)g_areaScissorCfg, g_areaMarginCfg, marginNow, g_fwdResCfg,
+        Log("phase 9 (v0.10.0): mv_area_scissor=%d mv_area_margin=%d (%d px) mv_area_clip=%d (v0.10.2: %s) mv_fwd_depth_res=%d (%s) "
+            "mirror_vr_mode=%d mirror_vr_views=%d mirror_mv=%s mv_fold_dispatch=%d -- %s; forward depth %s; mirrors in VR: %s%s; the "
+            "per-draw chain runs %s (see the 'perf view' line every 600 blits)",
+            (int)g_areaScissorCfg, g_areaMarginCfg, marginNow, (int)g_areaClipCfg,
+            g_areaClipCfg ? "the rigid-parent pixel count / vote grid cover only the blit's own eye rect + the margin, inside the "
+                            "pass clip" : "the rigid-parent vote grid covers the whole pass clip (VR: both eyes' rects)",
+            g_fwdResCfg,
             g_fwdResCfg == 0 ? "auto: 1/2 resolution in VR, full flat" : (g_fwdResCfg == 2 ? "1/2 resolution" : "full resolution"),
-            g_mirVrMode, g_mirVrViews, DrawIdMv::Fold(),
+            g_mirVrMode, g_mirVrViews, g_mirCamOnly ? "camera" : "parts", DrawIdMv::Fold(),
             g_areaScissorCfg ? "with dlaa_area < 100 the draw-id replays, the forward-depth re-draw and the rigid-parent vote run "
                                "only inside the DLAA rect of the pass's eye(s) + the margin (the raw picture outside, as before)"
                              : "the per-pixel work covers the whole image (phase 8)",
@@ -15805,6 +16474,9 @@ void LoadConfig() {
             g_mirVrMode == 2 ? "the mirror_vr_views largest views keep DLAA, the rest are left to the game"
                              : (g_mirVrMode == 4 ? "every view keeps DLAA with camera motion vectors (no per-draw ids)"
                                                  : "see mirror_vr_mode"),
+            g_mirCamOnly && g_mirVrMode >= 1 && g_mirVrMode <= 3
+                ? " -- mirror_mv camera: the handled views use camera motion vectors only (no per-draw ids: no record / replay / "
+                  "pairing in the mirror units, ~0.15 ms per unit instead of ~0.4 ms)" : "",
             DrawIdMv::Fold() >= 2 ? "as 12 dispatches per eye, 14 with mv_vote_compact (phase 18: the pick spread over a group, "
                                     "resolve + inherit in one wide dispatch, list + twin + attach folded)"
             : (DrawIdMv::Fold() ? "as 11 dispatches per eye (pick + resolve + inherit and list + twin + attach folded)"
@@ -16180,5 +16852,28 @@ int MenuSwallowKeys(int* vks, int cap) {
     int n = 0;
     for (KeyAction a : kMenuKeys)
         if (g_keys[a].vk && n < cap) vks[n++] = g_keys[a].vk;
+    return n;
+}
+// v0.10.1 dlaa.ini controller_name filter (dinput_wrap.cpp CreateDevice, the game's thread): true = tap / filter this
+// controller. Empty filter = every controller; else the product name must contain it (ASCII case-insensitive).
+bool ControllerNameAllowed(const char* product) {
+    if (!g_controllerName[0]) return true;
+    if (!product) return false;
+    char low[260];
+    size_t n = 0;
+    for (; product[n] && n < sizeof(low) - 1; ++n) low[n] = (char)tolower((unsigned char)product[n]);
+    low[n] = 0;
+    return strstr(low, g_controllerName) != nullptr;
+}
+const char* ControllerNameFilter() { return g_controllerName; }   // v0.10.1 for dinput_wrap.cpp's "not tapped" log line
+// v0.10.1: the same for the controller parts of the 5 menu actions (KeySwallow::kJoy* codes; dinput_wrap.cpp's controller
+// wrap, the game's input thread): their buttons read as up / the POV as centred in the game's reads while the menu is open.
+// The press that OPENS the menu is not hidden (the menu is closed at that moment), as for the keys.
+int MenuSwallowJoy(int* joys, int cap) {
+    if (!joys || cap <= 0 || !g_menuOpen.load(std::memory_order_relaxed)) return 0;
+    static const KeyAction kMenuKeys[] = { KA_MENU, KA_MENU_UP, KA_MENU_DOWN, KA_MENU_LEFT, KA_MENU_RIGHT };
+    int n = 0;
+    for (KeyAction a : kMenuKeys)
+        if (g_keys[a].joy && n < cap) joys[n++] = g_keys[a].joy;
     return n;
 }

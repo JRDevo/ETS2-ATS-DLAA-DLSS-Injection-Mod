@@ -185,6 +185,9 @@ float PSInit1(float4 pos : SV_Position) : SV_Depth { return InitDepth(pos, 1u); 
 //             margin; everything outside holds id 0, so a march that leaves it ends there like at the sky). x0 / y0 are aligned
 //             down to 4 px, so every sample sits on the same global grid as in phase 8 (ParVoter's decimation is unchanged);
 //             CSParentList sizes the indirect vote grid from it. Without a clip it is the whole image = phase 8 exactly.
+//             v0.10.2 (dlaa.ini mv_area_clip 1): Clip = the replay clip n THIS eye's DLAA rect + mv_area_margin (Prepare; VR: the
+//             replay clip is the union of both eyes' rects). Clip bounds only the samples (count, centroids, march starts); the
+//             marches themselves are bounded by the image (Params.zw) and read whatever the replay wrote, as before.
 //  FwdMode.x: 1 = the forward depth (PFwd) and the forward ids (PFwdIds, R16_UINT, t11) are at 1/2 resolution (dlaa.ini
 //             mv_fwd_depth_res 2): read at pixel >> 1 (FwdIdAt / FwdDepthAt); 0 = GREEN channel + full-size depth (phase 8).
 //  FOLDED   : every dispatch has a fixed GPU floor (+ the barrier the driver puts between dependent dispatches); the per-eye
@@ -2197,6 +2200,14 @@ UINT  g_consCands = 64u;
 //   mv_medoid_drop     a layer whose consensus was used (>= kConsMin draws) in this many landed readbacks in a row drops the old
 //                      medoid path (camera candidate copies + pass A); 0 = never (phase 7)
 UINT  g_medoidDrop = 120u;
+//   mv_cons_fail_tol   (v0.10.2) failed consensus readbacks IN A ROW a layer may have before its mv_medoid_drop streak restarts
+//                      (0 = the first failure restarts it, phase 8). In game (ATS VR 2026-10-10) the consensus failed at least once
+//                      per 120 readbacks most of the time: the world medoid was dropped in ~20 % of the passes, the cabin's never,
+//                      ~0.35-0.4 ms per VR frame of candidate copies + pass A for nothing. A tolerated failure costs nothing on its
+//                      own frame (the layer keeps the last frame's R -- a re-arm only brings pass A back from the NEXT pass on),
+//                      the next ones a slightly stale R; a longer streak re-arms as before. A pairing collapse still restarts it at
+//                      once. 0..100, default 2; the 'perf cuts' line counts the failure streaks by length (1 / 2 / 3-5 / 6+).
+UINT  g_consFailTol = 2u;
 //   mv_inst_replay     0 = every instanced / no-MVP draw replayed every pass; 1 = only keys that took a moving parent lately
 int      g_instReplay = 0;
 //   mv_parent_max_listed (v0.10.0 phase 10) unpaired / instanced draws listed per pass for the rigid-parent vote (8..64)
@@ -2273,6 +2284,10 @@ constexpr float kParFineSamples = 64.0f;   // < 64 coarse samples (~1000 px at m
 int   g_foldMode = 2;
 // v0.10.0 phase 18: dlaa.ini mv_vote_compact (1 = the rigid-parent vote over the listed tiles, one thread per march direction)
 bool  g_voteCompact = true;
+// v0.10.2: dlaa.ini mv_area_clip (1 = the vote grid / pixel count over this eye's DLAA rect + g_areaMargin n the replay clip; see
+// DrawIdMv::SetAreaClip) -- inject.cpp sets both at every pass start; the default margin = dlaa_area_feather 96 + 32
+bool  g_areaClip = true;
+int   g_areaMargin = 128;
 // v0.10.0 phase 18: dlaa.ini mv_cons_min_cabin (0 = kConsMin, as the world layer; 8..64): the cabin layer's consensus needs this many
 // agreeing draws -- below kConsMin it can be used (and its medoid / candidate copies dropped after mv_medoid_drop healthy readbacks)
 UINT  g_consMinCabin = 0u;
@@ -3274,6 +3289,11 @@ void DrawIdMv::SetFold(int mode) { g_foldMode = mode <= 0 ? 0 : (mode >= 2 ? 2 :
 int  DrawIdMv::Fold() { return g_foldMode; }
 void DrawIdMv::SetVoteCompact(bool on) { g_voteCompact = on; }   // v0.10.0 phase 18
 bool DrawIdMv::VoteCompact() { return g_voteCompact; }
+void DrawIdMv::SetAreaClip(bool on, int marginPx) {               // v0.10.2 (mv_area_clip)
+    g_areaClip = on; g_areaMargin = marginPx < 0 ? 0 : (marginPx > 4096 ? 4096 : marginPx);
+}
+bool DrawIdMv::AreaClip() { return g_areaClip; }
+int  DrawIdMv::AreaMargin() { return g_areaMargin; }
 void DrawIdMv::SetConsMinCabin(unsigned n) { g_consMinCabin = n == 0u ? 0u : (n < 8u ? 8u : (n > 64u ? 64u : n)); }
 unsigned DrawIdMv::ConsMinCabin() { return g_consMinCabin; }
 void DrawIdMv::SetCabinSmall(unsigned n) { g_cabinSmall = n == 0u ? 0u : (n < 2u ? 2u : (n > 64u ? 64u : n)); }   // phase 19
@@ -3316,6 +3336,8 @@ void DrawIdMv::SetMarchCap(unsigned n) { g_marchCap = n == 0u ? 0u : (n < 4096u 
 unsigned DrawIdMv::MarchCap() { return g_marchCap; }
 void DrawIdMv::SetMedoidDrop(unsigned frames) { g_medoidDrop = frames > 100000u ? 100000u : frames; }   // v0.10.0 phase 8
 unsigned DrawIdMv::MedoidDrop() { return g_medoidDrop; }
+void DrawIdMv::SetConsFailTol(unsigned n) { g_consFailTol = n > 100u ? 100u : n; }   // v0.10.2
+unsigned DrawIdMv::ConsFailTol() { return g_consFailTol; }
 bool DrawIdMv::ConsHealthy(int layer) const {
     return g_medoidDrop != 0u && g_consensus && m_ready && m_consRun[layer & 1] >= g_medoidDrop;
 }
@@ -3674,11 +3696,22 @@ void DrawIdMv::Poll(ID3D11DeviceContext* ctx) {
             m_lastCons[L] = (int)q[0];
             m_lastConsN[L] = q[1];
             // v0.10.0 phase 8: consensus health (mv_medoid_drop); a failure after a healthy run re-arms that layer's medoid
+            // v0.10.2 (mv_cons_fail_tol): only a failure streak LONGER than the tolerance does; a shorter one leaves the health
+            // streak where it was (neither counted nor reset). Every ended failure streak goes into the length histogram.
             const uint32_t minL = (L == 1 && g_consMinCabin) ? g_consMinCabin : (uint32_t)kConsMin;   // (phase 18)
-            if (q[0] == 1 && q[1] >= minL) { if (m_consRun[L] < 0x7FFFFFFFu) ++m_consRun[L]; }
-            else {
-                if (g_medoidDrop && m_consRun[L] >= g_medoidDrop) ++m_stats.medoidRearms[L];
-                m_consRun[L] = 0;
+            if (q[0] == 1 && q[1] >= minL) {
+                if (m_consFail[L]) {
+                    const uint32_t f = m_consFail[L];
+                    ++m_stats.consFailRuns[L][f <= 2u ? f - 1u : (f <= 5u ? 2u : 3u)];
+                    m_consFail[L] = 0;
+                }
+                if (m_consRun[L] < 0x7FFFFFFFu) ++m_consRun[L];
+            } else {
+                if (m_consFail[L] < 0x7FFFFFFFu) ++m_consFail[L];
+                if (m_consFail[L] > g_consFailTol) {
+                    if (g_medoidDrop && m_consRun[L] >= g_medoidDrop) ++m_stats.medoidRearms[L];
+                    m_consRun[L] = 0;
+                }
             }
             if (q[0] == 1) {
                 ++m_stats.consFrames[L];
@@ -4066,10 +4099,29 @@ uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ui
         // v0.10.0 phase 9: Clip = the vote grid / pixel count rect (the G-buffer replay's clip, x0 / y0 down to a multiple of 4: the
         // samples stay on the global grid), FwdMode.x = the forward targets' resolution shift, FoldU.x = the folded-dispatch bits
         uint32_t clip[4] = { 0u, 0u, fullW, fullH };
+        uint64_t passPx = (uint64_t)fullW * fullH;       // v0.10.2: the replay clip's px (stats)
+        bool eyeClipped = false;
         if (rec->Clipped()) {
             const D3D11_RECT r = rec->ClipRect();
-            const uint32_t x0 = r.left > 0 ? (uint32_t)r.left : 0u, y0 = r.top > 0 ? (uint32_t)r.top : 0u;
-            const uint32_t x1 = r.right > 0 ? (uint32_t)r.right : 0u, y1 = r.bottom > 0 ? (uint32_t)r.bottom : 0u;
+            uint32_t x0 = r.left > 0 ? (uint32_t)r.left : 0u, y0 = r.top > 0 ? (uint32_t)r.top : 0u;
+            uint32_t x1 = r.right > 0 ? (uint32_t)r.right : 0u, y1 = r.bottom > 0 ? (uint32_t)r.bottom : 0u;
+            {
+                const uint32_t px0 = x0 < fullW ? x0 : fullW, py0 = y0 < fullH ? y0 : fullH;
+                const uint32_t px1 = x1 < fullW ? x1 : fullW, py1 = y1 < fullH ? y1 : fullH;
+                passPx = (uint64_t)(px1 > px0 ? px1 - px0 : 0u) * (uint64_t)(py1 > py0 ? py1 - py0 : 0u);
+            }
+            // v0.10.2 (mv_area_clip): the sample grid only over THIS eye's DLAA rect + the margin, n the replay clip (VR: the union
+            // of both eyes' rects). Ids / depth outside the grid stay what the replay wrote: the marches read them as before.
+            if (g_areaClip && m_eyeRectOn) {
+                const int64_t mg = g_areaMargin;
+                const int64_t ex0 = (int64_t)m_eyeRect[0] - mg, ey0 = (int64_t)m_eyeRect[1] - mg;
+                const int64_t ex1 = (int64_t)m_eyeRect[2] + mg, ey1 = (int64_t)m_eyeRect[3] + mg;
+                if (ex0 > (int64_t)x0) x0 = (uint32_t)(ex0 < 0xFFFFFFFFll ? ex0 : 0xFFFFFFFFll);
+                if (ey0 > (int64_t)y0) y0 = (uint32_t)(ey0 < 0xFFFFFFFFll ? ey0 : 0xFFFFFFFFll);
+                if (ex1 < (int64_t)x1) x1 = ex1 > 0 ? (uint32_t)ex1 : 0u;
+                if (ey1 < (int64_t)y1) y1 = ey1 > 0 ? (uint32_t)ey1 : 0u;
+                eyeClipped = true;
+            }
             clip[0] = (x0 < fullW ? x0 : fullW) & ~3u; clip[1] = (y0 < fullH ? y0 : fullH) & ~3u;
             clip[2] = x1 < fullW ? x1 : fullW;         clip[3] = y1 < fullH ? y1 : fullH;
             if (clip[2] < clip[0]) clip[2] = clip[0];
@@ -4091,6 +4143,13 @@ uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ui
         {
             const uint32_t S = g_voteRes, cw = clip[2] - clip[0], chh = clip[3] - clip[1];
             m_prepGrid = ((cw + S - 1u) / S + 7u) / 8u * (((chh + S - 1u) / S + 7u) / 8u);
+            if (parentOn && rec->Clipped()) {            // v0.10.2: the 'perf view' line (mv_area_clip)
+                ++m_stats.vgFrames;
+                if (eyeClipped) ++m_stats.vgEye;
+                m_stats.vgPx += (uint64_t)cw * chh;
+                m_stats.vgPassPx += passPx;
+                m_stats.vgFullPx += (uint64_t)fullW * fullH;
+            }
         }
         uint32_t epsBits = 0;                            // v0.10.0 phase 14: z = the deep-static epsilon (px, float bits)
         memcpy(&epsBits, &g_statEps, 4);
