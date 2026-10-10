@@ -6668,6 +6668,7 @@ bool           g_jitterPass   = false;     // current OM binding is a jitter pas
 bool           g_vpShifted    = false;     // last issued viewports carried a shift
 float          g_vpShiftX = 0.0f, g_vpShiftY = 0.0f;   // ...and which one
 bool           g_vpOver       = false;     // v0.10.0 phase 23: ...and was 1 px larger (jitter_overscan)
+uint64_t       g_cFsUnshift   = 0;         // v0.10.0 phase 25: full-screen draws inside a jittered pass issued with the game's own viewport
 int            g_passLogged   = 0;         // bit0 = G-buffer logged, bit1 = forward logged
 
 // Jitter only while DLAA is live and the jitter is enabled in dlaa.ini (v0.6.2: and not in passive mode).
@@ -9591,7 +9592,26 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
     // swapchain image) gets the panel into that picture first
     if (g_menuLateN && !t_inDlaa && vertexCount <= 6) MenuLateOnDraw(ctx, "Draw", vertexCount, _ReturnAddress());
 #endif
+    // v0.10.0 phase 25: a FULL-SCREEN draw (3 / 4 vertices, viewport depth range 0..1) inside a jittered world / mirror pass --
+    // the game's fog triangle in the forward pass -- samples the scene (depth, colour) by its interpolated UV, so it must be
+    // rasterised texel-aligned. With the shifted viewport (and, since phase 23, the 1 px larger one) its samples drift off the
+    // pixel it writes: the jitter shift plus up to 1 px of scale at the far edge, so over much of the picture it reads the
+    // NEIGHBOUR texel -- at every silhouette the neighbour's depth (sky vs hill) = a dark 1 px line on the horizon and around
+    // every bush against water / sky (ATS flat 2026-10-10, Ctrl+F10 color_in: sky 204, line 25, hill 120; gone with DLAA off).
+    // Such a draw gets the game's own viewport; the shifted one is re-issued right after it (never a preview tile: those are
+    // composited by their own rule, and never our own draws).
+    const bool fsUnshift = !t_inDlaa && g_vpShifted && (g_jitterPass || g_mirJit) && !g_previewPass && vertexCount <= 4 &&
+                           g_gameVpN > 0 && g_gameVp[0].MinDepth == 0.0f && g_gameVp[0].MaxDepth == 1.0f;
+    if (fsUnshift) {
+        oRSSetViewports(ctx, g_gameVpN, g_gameVp);
+        if (g_cFsUnshift++ == 0)
+            Log("jitter (v0.10.0 phase 25): full-screen draw (verts=%u, viewport depth 0..1) inside a jittered %s pass issued with the "
+                "game's own viewport %.0fx%.0f (no shift, no overscan) -- the fog / screen-space pass samples the scene texel-aligned; "
+                "the shifted viewport is re-issued after it", vertexCount, g_mirJit ? "mirror" : "world", g_gameVp[0].Width,
+                g_gameVp[0].Height);
+    }
     oDraw(ctx, vertexCount, startVertex);
+    if (fsUnshift) { g_vpShifted = false; g_vpOver = false; ReconcileViewports(ctx, false); }   // back to the pass's shift
 #ifdef WITH_DLAA
     if (g_compEye >= 0 && !t_inDlaa) RunPendingComposite(ctx);   // v0.7.0 (before the scene span closes)
     if (g_menuBlitEye >= 0 && !t_inDlaa) MenuDrawVr(ctx);         // v0.10.0 tuning menu: VR panel + fps box over this eye's picture

@@ -354,6 +354,11 @@ same offset (times the configured sign) is passed to NGX. v0.5.0: the Halton pha
 Present frame, so both VR eyes use the same phase. See [`DLAA_INTEGRATION.md`](DLAA_INTEGRATION.md).
 v0.10.0 phase 23: the shifted world / mirror viewport is issued 1 px larger on the right and bottom (`jitter_overscan`, default
 1): with the game's W x H a negative shift left the last pixel column / bottom row unrendered (see "Phase 23" below).
+v0.10.0 phase 25: a FULL-SCREEN draw inside a jittered world / mirror pass (3 / 4 vertices, viewport depth range 0..1: the
+game's fog triangle in the forward pass, which samples the scene by interpolated UV) is issued with the game's OWN viewport
+(`hkDraw`, no shift, no overscan) and the shifted one is re-issued after it. Shifted, it read the neighbour texel over much of the
+picture (shift + the phase-23 scale), at every silhouette the neighbour's depth: a dark 1 px line on the horizon and around bushes
+(ATS flat 2026-10-10, `Ctrl+F10` color_in: sky 204 / line 25 / hill 120; gone with DLAA off). Log line `jitter (v0.10.0 phase 25)`.
 
 ## Motion vectors
 
