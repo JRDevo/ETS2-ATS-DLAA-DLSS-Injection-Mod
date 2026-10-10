@@ -8211,6 +8211,13 @@ void SnapshotStep(ID3D11DeviceContext* ctx, int eye, ID3D11Texture2D* blitTex, c
         if (!g_snapRequest.exchange(false)) return;
         if (!PathNextToDll(L"dlaa_snap\\", g_snapDir)) { Log("snapshot: cannot resolve DLL path"); return; }
         CreateDirectoryW(g_snapDir, nullptr);
+        // v0.10.0 phase 24b: every Ctrl+F10 gets its own sub-folder dlaa_snap\<n>_blit<blit>\ (n counts up per process), so
+        // several snapshots of one run all survive (before: fixed file names, every press overwrote the last one).
+        static int s_snapRun = 0;
+        wchar_t sub[48]; swprintf_s(sub, L"%03d_blit%llu\\", ++s_snapRun, (unsigned long long)si.frame);
+        wcscat_s(g_snapDir, sub);
+        CreateDirectoryW(g_snapDir, nullptr);
+        Log("snapshot: folder dlaa_snap\\%03d_blit%llu", s_snapRun, (unsigned long long)si.frame);
         g_snapLeft = 2 * (g_vrMode ? kMaxEyes : 1); g_snapIdx = 0;
     }
     SceneDlaa& dl = g_dlaa[eye];

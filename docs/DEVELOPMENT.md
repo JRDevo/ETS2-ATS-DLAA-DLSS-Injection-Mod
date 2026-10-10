@@ -230,7 +230,7 @@ timed frames, and one `rate after change: ...` line 300 blits later).
 | `Ctrl+F7` | Passive mode on/off (no jitter / MV copies / depth snapshot / evaluate / readbacks; tracking + GPU timers only) | 1 low tone = ON, 2 = OFF |
 | `Ctrl+F8` | Jitter-only debug (jitter on, DLAA evaluate skipped = raw jittered image) | — (DLSS history reset) |
 | `Ctrl+F9` | Self-test (cycles OFF, the 4 jitter signs, jitter-only; dumps lossless BMP frames to `dlaa_selftest\`; v0.7.0 upscale: the DLAA modes dump the DLSS output at output res, OFF / jitter-only the raw render-res frame) | — |
-| `Ctrl+F10` | NGX input snapshot (2 frames to `dlaa_snap\`: color-in / out BMP, MV / depth `.bin`, info txt; needs DLAA on; v0.7.0 upscale: `out` = the DLSS output rect at output res) | — |
+| `Ctrl+F10` | NGX input snapshot (2 frames to `dlaa_snap\<n>_blit<blit>\` (one folder per press, phase 24b): color-in / out BMP, MV / depth `.bin`, info txt; needs DLAA on; v0.7.0 upscale: `out` = the DLSS output rect at output res) | — |
 | `Ctrl+F11` | Frame trace (~2 frames of RT binds / viewports / draws / copies / clears to `dlaa_trace.txt`) | — |
 | `Ctrl+F12` | Cycle NGX jitter sign (−1,−1) → (+1,+1) → (+1,−1) → (−1,+1) | — (DLSS history reset) |
 
