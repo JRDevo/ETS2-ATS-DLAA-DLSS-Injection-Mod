@@ -565,7 +565,7 @@ the game has exited (or at least after the problem has happened).
 - **`dlaa.ini`** — **required** (your settings).
 - Only when asked, or for visual problems:
   - **`dlaa_trace.txt`** — frame trace, written after you press `Ctrl+F11` in game.
-  - **`dlaa_selftest\`** folder — `Ctrl+F9` dumps lossless BMPs there. Zip the folder.
+  - **`dlaa_selftest\`** folder — `Ctrl+F9` dumps lossless BMPs there (`final_*.bmp` = the same frames as they reached the screen). Zip the folder.
   - **`dlaa_snap\`** folder — `Ctrl+F10` writes an NGX input snapshot there. Zip the folder.
 - A **screenshot or short video** of the problem. Video compression hides anti-aliasing
   detail, so for AA-quality problems the `Ctrl+F9` self-test files are far more useful.

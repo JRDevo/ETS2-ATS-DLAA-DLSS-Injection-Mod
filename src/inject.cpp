@@ -1129,6 +1129,7 @@ void TogglePassive(uint64_t n);          // v0.6.2 (v0.6.5 Ctrl+F7)
 void StepLodBias(int dir, uint64_t n);   // v0.9.0 texture LOD bias keys (Ctrl+F1 -0.25 / Ctrl+F2 +0.25)
 void StepLodCutout(int dir, uint64_t n); // v0.10.0 phase 13 cut-out LOD bias keys (Ctrl+Shift+F1 -0.25 / Ctrl+Shift+F2 +0.25)
 #ifdef WITH_DLAA
+void SelfTestFinalDump(IDXGISwapChain* sc);  // v0.10.0 phase 26: Ctrl+F9 self-test, dumps the back buffer of the frame SelfTestStep just dumped
 void SelectDlssPreset(int idx, uint64_t n); // v0.6.5 Shift+F1..F4 direct model select (0=default,1=E,2=F,3=M)
 void StepSharpness(int dir, uint64_t n); // v0.5.7 (v0.6.5 Shift+F7 -1 / Shift+F8 +1)
 void StepSharpRadius(int dir, uint64_t n); // v0.5.8 (v0.6.5 Shift+F9 -1 / Shift+F10 +1)
@@ -1411,6 +1412,10 @@ HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
             }
         }
     }
+#endif
+#ifdef WITH_DLAA
+    // v0.10.0 phase 26: self-test only -- the back buffer still holds the finished frame here (before the original Present)
+    if (sc) SelfTestFinalDump(sc);
 #endif
     if (PresentLayerActive()) return LayerPresent(sc, sync, flags, caller, tid);   // v0.8.1: count + log only
     // v0.8.1: the per-frame work runs under g_plMx until present-layer mode starts (the adoption on the game thread
@@ -7961,6 +7966,14 @@ wchar_t g_testDir[MAX_PATH] = {};
 ID3D11Texture2D* g_staging = nullptr;
 UINT g_stagW = 0, g_stagH = 0;
 DXGI_FORMAT g_stagFmt = DXGI_FORMAT_UNKNOWN;   // v0.8.0: the staging twin must match the format too (8-bit vs RGBA16F)
+// v0.10.0 phase 26: the final presented back buffer of the same frame (final_<mode>_<n>.bmp). Own staging twin: the back
+// buffer may differ in size / format from the DLAA texture, sharing g_staging would recreate it twice per frame.
+bool g_testFinalPending = false;
+wchar_t g_testFinalPath[MAX_PATH] = {};
+ID3D11Texture2D* g_stagingBb = nullptr;
+UINT g_stagBbW = 0, g_stagBbH = 0;
+DXGI_FORMAT g_stagBbFmt = DXGI_FORMAT_UNKNOWN;
+int g_testFinalFmtLogs = 0;                     // "back buffer fmt not dumpable" is logged once per self-test run
 
 void ApplyTestMode(int i) {
     const TestMode& m = kModes[i];
@@ -8041,7 +8054,10 @@ bool WriteBmpRgba16f(const wchar_t* path, const uint8_t* src, UINT pitch, UINT w
     return ok;
 }
 
-bool DumpFrame(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, const wchar_t* path) {
+// v0.10.0 phase 26: the staging slot is a parameter (DLAA texture -> g_staging, final back buffer -> g_stagingBb).
+// swapRb: the source is B8G8R8A8 (WriteBmp reads RGBA byte order) -- only the final back-buffer dump asks for it.
+bool DumpFrameWith(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, const wchar_t* path,
+                   ID3D11Texture2D*& staging, UINT& sw, UINT& sh, DXGI_FORMAT& sfmt, bool swapRb = false) {
     D3D11_TEXTURE2D_DESC d{};
     tex->GetDesc(&d);
     // v0.8.0: 8-bit RGBA family (bytes as-is, the v0.7.x dump) or RGBA16F (tone-compressed, see above); anything else
@@ -8053,26 +8069,77 @@ bool DumpFrame(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, const wchar_t* pa
     }
     // (8-bit: the staging twin is reused across the R8G8B8A8 views of one typeless group exactly as before; only an
     // 8-bit <-> RGBA16F change recreates it.)
-    if (!g_staging || g_stagW != d.Width || g_stagH != d.Height || (g_stagFmt == DXGI_FORMAT_R16G16B16A16_FLOAT) != f16) {
-        if (g_staging) { g_staging->Release(); g_staging = nullptr; }
+    if (!staging || sw != d.Width || sh != d.Height || (sfmt == DXGI_FORMAT_R16G16B16A16_FLOAT) != f16) {
+        if (staging) { staging->Release(); staging = nullptr; }
         ID3D11Device* dev = nullptr;
         tex->GetDevice(&dev);
         if (!dev) return false;
         D3D11_TEXTURE2D_DESC sd = d;
         sd.Usage = D3D11_USAGE_STAGING; sd.BindFlags = 0; sd.MiscFlags = 0;
         sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ; sd.MipLevels = 1; sd.ArraySize = 1;
-        const HRESULT hr = dev->CreateTexture2D(&sd, nullptr, &g_staging);
+        const HRESULT hr = dev->CreateTexture2D(&sd, nullptr, &staging);
         dev->Release();
-        if (FAILED(hr) || !g_staging) { Log("self-test: staging create failed hr=0x%lx", (unsigned long)hr); g_staging = nullptr; return false; }
-        g_stagW = d.Width; g_stagH = d.Height; g_stagFmt = d.Format;
+        if (FAILED(hr) || !staging) { Log("self-test: staging create failed hr=0x%lx", (unsigned long)hr); staging = nullptr; return false; }
+        sw = d.Width; sh = d.Height; sfmt = d.Format;
     }
-    ctx->CopyResource(g_staging, tex);
+    ctx->CopyResource(staging, tex);
     D3D11_MAPPED_SUBRESOURCE mp{};
-    if (FAILED(ctx->Map(g_staging, 0, D3D11_MAP_READ, 0, &mp))) { Log("self-test: Map failed"); return false; }
-    const bool ok = f16 ? WriteBmpRgba16f(path, (const uint8_t*)mp.pData, mp.RowPitch, d.Width, d.Height)   // v0.8.0
-                        : WriteBmp(path, (const uint8_t*)mp.pData, mp.RowPitch, d.Width, d.Height);
-    ctx->Unmap(g_staging, 0);
+    if (FAILED(ctx->Map(staging, 0, D3D11_MAP_READ, 0, &mp))) { Log("self-test: Map failed"); return false; }
+    bool ok;
+    if (f16) {
+        ok = WriteBmpRgba16f(path, (const uint8_t*)mp.pData, mp.RowPitch, d.Width, d.Height);   // v0.8.0
+    } else if (swapRb) {
+        // v0.10.0 phase 26: BGRA -> RGBA byte order in a temp copy so the BMP colours match the RGBA dumps
+        uint8_t* tmp = (uint8_t*)malloc((size_t)d.Width * d.Height * 4);
+        ok = false;
+        if (tmp) {
+            for (UINT y = 0; y < d.Height; ++y) {
+                const uint8_t* s = (const uint8_t*)mp.pData + (size_t)y * mp.RowPitch;
+                uint8_t* o = tmp + (size_t)y * d.Width * 4;
+                for (UINT x = 0; x < d.Width; ++x) { o[x*4+0] = s[x*4+2]; o[x*4+1] = s[x*4+1]; o[x*4+2] = s[x*4+0]; o[x*4+3] = s[x*4+3]; }
+            }
+            ok = WriteBmp(path, tmp, d.Width * 4, d.Width, d.Height);
+            free(tmp);
+        }
+    } else {
+        ok = WriteBmp(path, (const uint8_t*)mp.pData, mp.RowPitch, d.Width, d.Height);
+    }
+    ctx->Unmap(staging, 0);
     return ok;
+}
+
+bool DumpFrame(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, const wchar_t* path) {
+    return DumpFrameWith(ctx, tex, path, g_staging, g_stagW, g_stagH, g_stagFmt);
+}
+
+// v0.10.0 phase 26: called by hkPresent BEFORE the original Present. When SelfTestStep armed g_testFinalPending (same frame,
+// at the game's blit), dump the presenting swap chain's back buffer as final_<mode>_<n>.bmp. No reference on the back
+// buffer is kept (ResizeBuffers must stay possible).
+void SelfTestFinalDump(IDXGISwapChain* sc) {
+    if (!g_testFinalPending) return;
+    g_testFinalPending = false;
+    ID3D11DeviceContext* const ctx = g_gameCtx.load(std::memory_order_acquire);
+    if (!ctx || !IsGameCtx(ctx)) return;
+    Microsoft::WRL::ComPtr<ID3D11Device> scDev, ctxDev;
+    if (FAILED(sc->GetDevice(__uuidof(ID3D11Device), (void**)scDev.GetAddressOf())) || !scDev) return;
+    ctx->GetDevice(ctxDev.GetAddressOf());
+    if (scDev.Get() != ctxDev.Get()) return;              // another device presents: not the frame SelfTestStep dumped
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> bb;
+    if (FAILED(sc->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)bb.GetAddressOf())) || !bb) return;
+    D3D11_TEXTURE2D_DESC bd{}; bb->GetDesc(&bd);
+    if (bd.Format != DXGI_FORMAT_R16G16B16A16_FLOAT && !IsRgbaBgraFamily(bd.Format)) {
+        if (g_testFinalFmtLogs++ < 1)
+            Log("self-test final: back buffer fmt=%d not dumpable (HDR output?)", (int)bd.Format);
+        return;
+    }
+    const bool bgra = bd.Format == DXGI_FORMAT_B8G8R8A8_UNORM || bd.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB ||
+                      bd.Format == DXGI_FORMAT_B8G8R8A8_TYPELESS;
+    const wchar_t* nmW = wcsrchr(g_testFinalPath, L'\\');
+    char nm[64]; WideCharToMultiByte(CP_UTF8, 0, nmW ? nmW + 1 : g_testFinalPath, -1, nm, sizeof(nm), nullptr, nullptr);
+    t_inDlaa = true;                                       // our own work: keep context hooks passive
+    const bool ok = DumpFrameWith(ctx, bb.Get(), g_testFinalPath, g_stagingBb, g_stagBbW, g_stagBbH, g_stagBbFmt, bgra);
+    t_inDlaa = false;
+    Log("self-test: %s %s (back buffer %ux%u fmt=%d)", ok ? "wrote" : "FAILED to write", nm, bd.Width, bd.Height, (int)bd.Format);
 }
 
 void FinishSelfTest() {
@@ -8107,6 +8174,7 @@ void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
             fclose(f);
         }
         g_testRunning = true; g_testMode = 0;
+        g_testFinalFmtLogs = 0; g_testFinalPending = false;   // v0.10.0 phase 26
         Log("self-test: started, dumping to dlaa_selftest\\ (%ux%u); saved state dlaa=%d jo=%d sign=%+d,%+d",
             d.Width, d.Height, (int)g_savedOn, (int)g_savedJo, g_savedSx, g_savedSy);
         ApplyTestMode(0);
@@ -8121,6 +8189,10 @@ void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
     wchar_t path[MAX_PATH]; wcscpy_s(path, g_testDir); wcscat_s(path, wn);
     const bool ok = DumpFrame(ctx, tex, path);
     Log("self-test: %s %s", ok ? "wrote" : "FAILED to write", nm);
+    if (ok) {   // v0.10.0 phase 26: the back buffer of this same frame is dumped by hkPresent (first Present after this blit)
+        wcscpy_s(g_testFinalPath, g_testDir); wcscat_s(g_testFinalPath, L"final_"); wcscat_s(g_testFinalPath, wn);
+        g_testFinalPending = true;
+    }
     // jitter actually applied this frame: none in OFF; NGX value only when DLAA evaluated
     const bool jit = m.dlaaOn && g_jitterEnabled;
     wchar_t ip[MAX_PATH]; wcscpy_s(ip, g_testDir); wcscat_s(ip, L"info.txt");
@@ -14407,6 +14479,8 @@ void ResetPassTrackingCore(bool forceDlaaOff) {
     if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
     g_ctx1Owner = nullptr;
     if (g_staging) { g_staging->Release(); g_staging = nullptr; g_stagW = g_stagH = 0; g_stagFmt = DXGI_FORMAT_UNKNOWN; }
+    if (g_stagingBb) { g_stagingBb->Release(); g_stagingBb = nullptr; g_stagBbW = g_stagBbH = 0; g_stagBbFmt = DXGI_FORMAT_UNKNOWN; }   // v0.10.0 phase 26
+    g_testFinalPending = false;
 #endif
 }
 
