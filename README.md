@@ -307,7 +307,7 @@ the value); a long low tone means "already at the limit" or "save failed". Turn 
 | Default key | What it changes, and when you would touch it |
 |-----|--------|
 | `Shift+F1`..`F4` | DLAA model / preset: 1 = default (driver pick), 2 = `E`, 3 = `F`, 4 = `M`. Touch it if the picture shows ghosting or smearing and you want to try another model |
-| `Shift+F5` / `F6` | DLAA area − / + 10 %, `20`..`100` % (shrinks the processed region; VR only, flat always uses the whole picture). Touch it in VR to trade picture quality for GPU time |
+| `Shift+F5` / `F6` | DLAA area − / + 10 %, `10`..`100` % (shrinks the processed region; VR only, flat always uses the whole picture). Touch it in VR to trade picture quality for GPU time |
 | `Shift+F7` / `F8` | Sharpening strength − / + 0.1. Touch it if the picture looks too soft or too crunchy |
 | `Shift+F9` / `F10` | Sharpening width − / + 0.5. Touch it together with strength, only if you changed the sharpening |
 | `Shift+F11` | DLAA on / off. Touch it to compare with and without |
