@@ -9,8 +9,6 @@
 > - Updates, release notes, the hotkey list and the troubleshooting guide live here and only here. If someone tells you to get the mod
 >   somewhere else, they are wrong.
 
-**I've removed my post from Reddit, you can't be constructive there.**
-
 # ETS2 & ATS: DLAA & DLSS Injection Mod
 
 An **ETS2 DLSS mod** and **ATS DLSS mod**: NVIDIA DLAA and DLSS upscaling for
@@ -79,7 +77,7 @@ This is an unofficial fan project. It is not affiliated with, or endorsed by, SC
 Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
-> Status: v0.10.2. Performance pass for VR: the old camera path stops once the per-part consensus is healthy (`mv_cons_fail_tol`), mirror DLAA units are built on the loading screen from a size cache (no 10-35 ms hitch when a mirror first appears), the tuning menu's Mirror DLAA row has 7 choices (off, 1 or 2 largest mirrors with part or camera motion, all), a Reset row, wheel / D-pad bindings for the menu (`WheelN`, `WheelUp`...), the panel goes down to size 0.3, and the rigid-parent vote grid is clipped to the eye's DLAA rect. Tested in ATS VR on 2026-10-10 (the camera-only mirrors and the vote clip only in the harness). v0.10.1 fixed the dark 1 px line on every silhouette in flat mode (v0.10.0), and `Ctrl+F9` also saves the picture as it reached the screen. Per-part motion vectors, mirror DLAA, DLAA before the game's tonemap, the tuning menu and the fps counter were tested in ETS2 flat. DLAA itself has been run in ETS2 (VR) and ATS (flat and VR); the newest VR fixes (jitter phase, menu panel in VR) are only partly tested. The DLSS
+> Status: v0.10.3. In VR the tuning menu and the fps box are OpenXR quad layers placed by the headset (`menu_vr_layer`): steady, never covered by the game's menus, at a real distance (`menu_vr_dist`), with the fps box optionally fixed in the cab (`fps_vr_lock`). Hold a key or wheel button on a menu row to bind it; Reset to defaults is a 5 s hold; Panel / FPS settings are collapsible groups. v0.10.2 (unpublished): VR performance pass (`mv_cons_fail_tol`, mirror units pre-built on the loading screen, `mv_area_clip`, camera-only mirrors `mirror_mv`), the 7-choice Mirror DLAA row, wheel / D-pad bindings. The DLSS
 > *upscaling* path (render below native, reconstruct up) runs in VR but is still
 > being tuned. Treat upscaling as experimental. The OFXR Bridge handling is not yet tested in a headset with the bridge armed.
 ---

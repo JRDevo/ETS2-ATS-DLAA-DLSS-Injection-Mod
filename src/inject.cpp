@@ -1,3 +1,12 @@
+// v0.10.3 -- (1) phase 27: XrHook (xr_hook.cpp) detours GetProcAddress to wrap the OpenXR runtime / API layers; the VR panel
+//           was drawn right before xrReleaseSwapchainImage (fixed the game UI painting over it). (2) phase 28/28b: fps_vr_lock,
+//           the VR fps box fixed in the cab (located poses corrected to the submitted ones). (3) phase 29: the panel + fps box
+//           as OpenXR QUAD layers appended at xrEndFrame (menu_vr_layer; menu_vr_dist, menu_vr_face as a true 3-D turn, the
+//           fixed box in the game's LOCAL space; fps box cost = GpuPerf kOverlay). 29c-e: collapsible Panel / FPS groups,
+//           short footer, 3-line description fit, Reset = hold Right (bind_hold_ms), one bar square per second.
+// v0.10.2 -- VR perf pass (mv_cons_fail_tol, mirror units pre-built from mirror_sizes.txt, mv_area_clip, mirror_mv camera-only
+//           mirrors), 7-state Mirror DLAA row, Reset row, wheel / D-pad bindings (dinput_wrap.cpp JoyTap), HOLD TO BIND
+//           (MenuBindTick; the open menu hides every key / button from the game).
 // v0.10.1 -- (1) phase 25: full-screen draws inside a jittered pass (the forward-pass FOG TRIANGLE: Draw verts=3, UV-sampled)
 //           get the game's own viewport back for that draw and the shift after it; with the shifted + overscanned viewport
 //           the fog sampled the neighbour texel = a dark 1 px line on every silhouette in flat (hkDraw).
