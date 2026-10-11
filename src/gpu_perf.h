@@ -55,6 +55,9 @@ enum Sec : int {
     kDbgView,         // Ctrl+F6 debug view
     kMirror,          // mirror units: everything except their NGX evaluation (replay, snapshot, MV, copies, RCAS)
     kMirNgx,          // mirror units' NGX evaluation (NOT in the mod total)
+    kOverlay,         // v0.10.3 phase 29b: the fps box draws (TuningMenu::DrawWidget: the VR quad image, each eye picture, the
+                      // flat / desktop-mirror backbuffer) -- PER FRAME, not per pass: not tagged with an eye (FrameStats), NOT in
+                      // the per-eye mod total
     kCount
 };
 
@@ -63,6 +66,7 @@ bool On();
 const char* Name(int sec);
 bool InTotal(int sec);                  // false: NGX / mirror NGX / the sampled replay breakdown
 bool IsSampled(int sec);
+bool IsPerFrame(int sec);               // v0.10.3 phase 29b: kOverlay -- summed per landed query set (= per Present), not per eye
 
 void SetFrame(uint64_t frame);          // the Present counter (a new value rolls the set over at the next Begin; no D3D call)
 void SetPass(uint64_t tag);             // the pass the following sections belong to
@@ -90,6 +94,10 @@ struct EyeStats {
 bool Stats(int eye, EyeStats* out);
 uint64_t Unattributed();                // landed sections whose pass never reached a blit (window)
 uint64_t Dropped();                     // sections not timed because a set was full / a set was lost (window)
+// v0.10.3 phase 29b: a per-frame section's window sums since the last Restart: its ms, the largest one-frame sum, the query sets
+// (= Present frames) it ran in, and every set that landed (the per-frame average = sumMs / sets: a frame without it counts 0)
+struct FrameStat { double sumMs = 0.0, maxMs = 0.0; uint64_t n = 0, sets = 0; };
+FrameStat FrameStats(int sec);
 void Restart();                         // restarts the window
 uint32_t Restarts();                    // window restarts so far (the tuning menu's own 1-s deltas see a restart in between)
 // "perf eye N: ..." lines (one per eye with data); sceneMs < 0 = no GPU spans figure. Restarts the window.

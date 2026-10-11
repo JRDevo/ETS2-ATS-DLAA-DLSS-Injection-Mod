@@ -43,11 +43,27 @@ menu and the garage / truck dealer screens, before a save is loaded).
 |-----|-------------|
 | `Delete` | Open / close the menu |
 | `Up` / `Down` | Select a row (hold to scroll) |
-| `Left` / `Right` | Change the selected row. Number rows step and repeat while held; switches, the mode, the profile and the model change once per press |
+| `Left` / `Right` | Change the selected row. Number rows step and repeat while held; switches, the mode, the profile and the model change once per press. On a group row (`Panel settings`, `FPS counter settings`) `Right` opens the group, `Left` closes it |
 
-- **The game does not see these 5 keys while the menu is open** — the arrow keys steer, accelerate and brake in the
-  default ETS2 / ATS layout, so the truck does not move while you change a value. When the menu is closed the keys go to
-  the game as usual (the arrow keys do nothing for the mod then).
+- **Two groups keep the list short** (v0.10.3): **Panel settings** (`Panel position X`, `Panel position Y`, `Panel size`,
+  `Panel VR depth`, `Panel faces you (VR)`, `Menu keys`) and **FPS counter settings** (`FPS counter lock`, `FPS counter X`,
+  `FPS counter Y`, `FPS counter size`; the `FPS counter` on / off row itself stays in the main list, right above the
+  group). Both are **closed every time the menu opens** (the value shows `...`): select the group row and press `Right` to
+  show its rows (`shown`), `Left` on the group row hides them again. `Up` / `Down` skip the rows of a closed group, and
+  the panel gets shorter while a group is closed. If the menu was closed on a row inside a group, it reopens on that
+  group's row. The group rows hold no setting (nothing to save or reset).
+- **The line at the bottom** names the menu keys by their keyboard key only (`Up / Down select   Left / Right change
+  Delete close   hold: rebind`), whatever wheel buttons are bound too; it is the same on every row (a running hold shows
+  its bar in the row itself). With long key names the rebind hint is shortened or left out so the line fits.
+
+- **The game gets no keys and no wheel / gamepad buttons at all while the menu is open** (v0.10.2; before only these 5
+  keys were hidden) — the arrow keys steer, accelerate and brake in the default ETS2 / ATS layout, and a key held for
+  [hold to bind](#bind-a-key-in-the-menu) must not honk the horn or change the camera. Steering, pedals and other axes
+  still reach the game. `Escape` / pause and every game key are off too: **close the menu first**. Key and button
+  releases always reach the game. When the menu is closed every key goes to the game as usual (the arrow keys do
+  nothing for the mod then).
+- **Bind a key in the menu:** hold a key or a wheel button on a row for 5 s, see
+  [Bind a key in the menu](#bind-a-key-in-the-menu).
 - **Every row names its hotkey**, so you can learn the keys from the menu. The hotkeys keep working while the menu is
   open, and the menu shows their changes at once. Each change logs and beeps like its key.
 - The selected row shows a description under the list, in plain words: what the row does, when you would change it, and
@@ -60,16 +76,48 @@ menu and the garage / truck dealer screens, before a save is loaded).
   panel is tiring to look at. **Panel faces you (VR)** (on by default, `menu_vr_face`): moved off the centre, the panel
   turns towards your eye like a real screen and keeps its size from every angle; off = a flat picture. In VR the panel and
   the fps box are drawn on top of the game's own menu (garage / truck dealer screens) once the mod has confirmed where the
-  game hands each eye picture on (a few frames after the menu opens).
+  game hands each eye picture on (a few frames after the menu opens). **v0.10.3, `menu_vr_layer = 1` (default):** in VR
+  the panel and the fps box are separate OpenXR quad layers the headset's compositor places itself -- steady (no swimming
+  with the reprojection), the panel 1 m (default) and the fps box 0.8 m away, never covered by the game's menus. There
+  **Panel VR depth** is the panel's real distance, shown in metres (`menu_vr_dist`, 0.30 - 3.00 m in 5 cm steps; the panel
+  keeps its size, only its depth changes), and **Panel faces you (VR)** turns the panel -- and the fps box while it
+  follows your head -- towards you as a true 3-D layer (off = parallel to your view, a flat picture seen at an angle).
+  With `menu_vr_layer = 0` (the panel drawn into the picture; also the automatic fallback when the layers are not
+  possible) **Panel VR depth** is the inward shift in px (`menu_vr_depth`) as above.
 - **FPS counter** (on / off), **FPS counter X / Y, FPS counter size**: a small live fps box: the fps and the frame time as text with a dark outline, no background
   (`60 fps` / `16.7 ms`, updated twice a second) that stays on screen also while the menu is closed, in flat and in VR
   (both eyes + the desktop mirror). Flat and VR each keep their own position (`fps_show`, `fps_x`, `fps_y`, `fps_scale`,
-  `fps_vr_x`, `fps_vr_y`, `fps_vr_scale` in `dlaa.ini`); off, it costs nothing. **FPS counter size** goes from `0.2` to
+  `fps_vr_x`, `fps_vr_y`, `fps_vr_scale` in `dlaa.ini`); off, it costs nothing. On, its GPU cost is measured and shown in
+  the row's cost column, per frame (every picture it is drawn into that frame together). **FPS counter size** goes from `0.2` to
   `3.0` (flat default `1.0`; VR default `0.3`, a saved `fps_vr_scale` keeps its size).
+- **FPS counter lock** (v0.10.3, VR only, greyed in flat): `Follow head` (default) = the fps box moves with the headset;
+  `Fixed in cab` = it stays at one spot in the cab, 0.8 m from your seat position, like a cab instrument (`fps_vr_lock` in
+  `dlaa.ini`). While fixed, **FPS counter X / Y** turn it around you in degrees (X + = right, Y + = down) and **FPS counter
+  size** is its size at 0.8 m. It follows the headset again by itself while the game's VR view poses are not available.
+- **Mirror DLAA** (v0.10.2) has seven states, `Left` / `Right` step through them (wrapping around): `off` -> `1 mirror
+  (largest)` -> `1 mirror, camera` -> `2 mirrors (largest)` -> `2 mirrors, camera` -> `all mirrors` -> `all, camera
+  motion`. `1 mirror` keeps DLAA only on the largest mirror picture (the main mirror next to you), `2 mirrors` on the two
+  largest, `all` on every mirror. Without `camera` each moving part (traffic, wheels) moves exactly in the glass (about
+  0.4 ms per mirror in VR); with `camera` the mirror uses the camera motion only: the cheapest per mirror (about 0.15 ms),
+  but moving traffic can ghost in the glass. The row sets `mirror_dlaa` plus, for the mode you are in, `mirror_vr_mode`
+  (VR) or `mirror_flat_mode` (flat), `mirror_vr_views` and `mirror_mv`: `1 mirror` = mode 2 with `mirror_vr_views = 1`,
+  `2 mirrors` = mode 2 with `mirror_vr_views = 2` (each with `mirror_mv = parts`, or `camera` for the `, camera` state),
+  `all mirrors` = mode 1 with `mirror_mv = parts`, `all, camera motion` = mode 4; `off` = `mirror_dlaa` off (the mode
+  stays). `mirror_mv` is one key for VR and flat. Beeps: 1 short beep = 1 mirror, 2 = 2 mirrors, 3 = all; high (1200 Hz)
+  = per-part motion, lower (800 Hz) = camera motion only; one low tone = off. `Alt+F6` still switches mirror DLAA on / off
+  with the state it had; a `dlaa.ini` / profile value that is none of the seven shows as it is (`3 largest`, `3 largest,
+  camera`, `all, every 2nd frame`, `all, 2nd fr., camera`, `off (mode 0)`) and `Left` / `Right` go to the nearest state on
+  that side.
 - **Save to dlaa.ini** (or `Shift+F12`) writes the live values, and the panel position once you changed it
-  (`menu_x`, `menu_y`, `menu_scale`, `menu_vr_x`, `menu_vr_y`, `menu_vr_scale`, `menu_vr_depth`, `menu_vr_face`) and the fps box once you
+  (`menu_x`, `menu_y`, `menu_scale`, `menu_vr_x`, `menu_vr_y`, `menu_vr_scale`, `menu_vr_depth`, `menu_vr_dist`, `menu_vr_face`) and the fps box once you
   changed it (the 7 `fps_*` keys), keeping every other line.
   The `Mode` row saves itself at once, like `End`.
+- **Reset to defaults** puts every row back to the fresh-install values, live and in `dlaa.ini` (the keys are removed
+  from the file; hotkeys and other lines stay). v0.10.3: **hold `Right` 5 s** on the row (the menu right key, keyboard or
+  its wheel button; the time is `bind_hold_ms`): the Hotkey column reads `hold Right 5 s`, fills the same progress bar as
+  a bind hold, then resets once (`reset done` until you let go; press and hold again for another reset). Let go earlier =
+  nothing happens; `Left` and a plain tap of `Right` do nothing. It beeps like Save (rising two-tone = done, one long low tone = the file
+  could not be written).
 - **GPU line and GPU cost column.** Under the title the panel shows what the GPU spends per frame, measured live and
   refreshed once a second: `game` (the game's own GPU frame, without the mod), `this mod` split into its parts (DLAA/DLSS
   itself, per-part motion, camera motion, see-through depth, mirrors, sharpen, copies; in VR one line per eye) and the fps.
@@ -79,6 +127,52 @@ menu and the garage / truck dealer screens, before a save is loaded).
   pixels), the two texture sharpness rows show `~0 ms` (memory only, no GPU pass), `-` = no cost of its own. The mod's GPU timers switch on while the
   menu is open and off again when it closes (they stay on with `debug = 1`).
 - The menu costs nothing while it is closed.
+
+## Bind a key in the menu
+
+(v0.10.2) Instead of editing `dlaa.ini`, open the menu, select a row and **hold the new key (or wheel / gamepad button,
+or D-pad direction) for 5 seconds**. The Hotkey column shows a filling bar, one square per second, e.g. `hold ■■■□□ F5`; when it is full
+the mod beeps twice (rising, like Save), the row's hotkey is the new key at once and the `key_<action>` line in
+`dlaa.ini` is rewritten (every other line stays). The log says what changed, e.g.
+`hotkey key_sharpen_up = Shift+F8, Wheel5 (bound in the menu: held Wheel5 for 2.0 s on row "Sharpen strength" step 2/2; was "Shift+F8")`.
+
+- **The hold:** exactly one key or one button must be held the whole time. It counts from the moment you press it: a key
+  that was already down when you reached the row does not count, and a hold ends without binding if you let go early or
+  press a second key / button. Anything already held when the menu opened (a pedal key, an engaged H-shifter gear) is
+  ignored until you let go of it once, so it does not block a bind. `Shift`, `Ctrl` and `Alt` do not count as keys: they are
+  read when the bar is full, so holding `Ctrl` + `F5` binds `Ctrl+F5`. Only keys from the key list in
+  [Change a key](#change-a-key) can be bound (not `Escape`, `Caps Lock`, the Windows keys or the mouse). The time is
+  `bind_hold_ms` in `dlaa.ini` (default `5000`, `500` to `10000`).
+- **Keyboard and wheel stay separate:** a key replaces the row's keyboard key and keeps its wheel button; a wheel button
+  replaces the wheel button and keeps the key (`key_menu = Delete, Wheel10` + holding `Wheel12` = `Delete, Wheel12`).
+- **`Backspace` clears:** holding `Backspace` sets the row's hotkey to `none` (keyboard key and wheel button; one low beep).
+  So `Backspace` itself cannot be bound in the menu (it can in `dlaa.ini`).
+- **Taken from another hotkey:** if the key (with the same `Shift` / `Ctrl` / `Alt`) or the button already belongs to
+  another action, it is taken away from that one (its key or button becomes empty, also written to `dlaa.ini`); the row
+  shows `taken from key_...` for 3 seconds and the log names it.
+- **Rows with more than one key** ask for them one after the other: `DLAA model` 4 holds (model 1, 2, 3, 4); `Sharpen
+  strength`, `Sharpen width`, `Texture sharpness`, `Cut-out texture sharpness` and `DLAA area (VR)` 2 holds (minus, then
+  plus). The Value column says which step comes next (`step 2/2: plus`); let go and hold the next key. Moving to another
+  row or closing the menu ends the sequence; the steps already done stay bound.
+- **The held key still does its old job once** when you press it (holding `Shift+F11` on a row switches DLAA off first,
+  holding a key that changes a value changes it once), like any hotkey. Pick a key, wait for the beeps, done.
+- **The menu's own keys** (`Delete`, `Up`, `Down`, `Left`, `Right`, or whatever they are bound to, also with modifiers, and
+  their wheel buttons) cannot be bound on the normal rows: holding `Down` there keeps scrolling. They are set on the
+  **Menu keys** row instead.
+- **Menu keys row** (v0.10.3: the last row of the **Panel settings** group, open it with `Right` first): the value is the
+  open key, the Hotkey column shows up / down / left / right (keyboard keys only; the full bindings, wheel buttons
+  included, are in `dlaa.ini` and the log). Five holds in a row: **open / close, up, down, left, right**. On this row:
+  - the open key (`Delete`) does **not** close the menu (it may be what you are binding); close with the `Close menu` row or
+    move off the row first;
+  - a **short tap** (under 0.3 s) of `Up` / `Down` moves to the next row when you let go (and ends the sequence); held
+    longer, `Up` / `Down` are bound instead. Scrolling with `Up` / `Down` held stops on this row; `Left` / `Right` do
+    nothing here;
+  - `Backspace` does not clear the menu keys, and a hold that would take the **only** open key away from `key_menu` is
+    refused (one long low tone): the menu must stay reachable. Bind a new open key in step 1 first.
+- **Rows without a hotkey** (OFXR Bridge, the panel and fps counter rows, the two group rows, Reset, Close) ignore a hold
+  (the Reset row's hold of the menu `Right` key is its own reset action, not a bind).
+- While the menu is open the game gets no keys or buttons (see [The tuning menu](#the-tuning-menu)), so a 2-second hold of
+  the horn button only binds it, the truck does not honk.
 
 ## User keys — Shift + F-key (Ctrl and Alt NOT held)
 
@@ -103,6 +197,9 @@ Model select is direct: pressing the model that is already active just re-beeps 
 `Alt+F7` state) and `perf_profile` (the `Alt+F9` state) and leaves every other line of `dlaa.ini` untouched.
 v0.10.0: `dlss_preset`, `dlaa_area` and `mirror_dlaa` are only written when you set them yourself (in `dlaa.ini` or with
 their own key) -- a value that only comes from the performance profile is not written, so the next profile still moves it.
+v0.10.2: the same for `mirror_vr_mode` / `mirror_flat_mode` (set in `dlaa.ini` or with the menu's Mirror DLAA row);
+`mirror_vr_views` is written with `mirror_vr_mode`, and with `mirror_flat_mode` when that is `2`; `mirror_mv` (`parts` /
+`camera`) is written with either mode. The menu's Reset row removes all four.
 
 ## Texture sharpness keys — Ctrl+F1 / Ctrl+F2
 
@@ -218,8 +315,10 @@ the save failed.
 
 ## Change a key
 
-Put a `key_<action>` line in `dlaa.ini` (next to `dinput8.dll`, read when the game starts). The value is
-zero or more modifiers `Shift`, `Ctrl`, `Alt` joined with `+`, then one key. Not case-sensitive, spaces are
+Put a `key_<action>` line in `dlaa.ini` (next to `dinput8.dll`, read when the game starts), or bind it in the game:
+[Bind a key in the menu](#bind-a-key-in-the-menu). The value is
+zero or more modifiers `Shift`, `Ctrl`, `Alt` joined with `+`, then one key (and optionally a wheel / gamepad button after
+a comma, see [below](#wheel-gamepad-and-joystick-buttons)). Not case-sensitive, spaces are
 ignored. `none` (or an empty value) turns the action off. A value that is not understood is logged
 (with `debug = 1`) and the default stays. Write the binding alone on the line, no comment after it.
 
@@ -266,3 +365,47 @@ Keys: `F1`-`F24`, `A`-`Z`, `0`-`9`, `Home`, `End`, `Insert`, `Delete`, `PageUp`,
 
 If two actions get the same combination the log warns and both fire. At most one of the user keys (models,
 area, sharpen, width, texture LOD bias, save) acts per frame.
+
+### Wheel, gamepad and joystick buttons
+
+Every action can also be bound to a **button or the D-pad of a wheel / gamepad / joystick**, for example to open and drive
+the tuning menu from a Thrustmaster wheel. Put a second binding after a **comma**: `key_menu = Delete, Wheel10` opens the
+menu with `Delete` **or** wheel button 10. A value may hold one keyboard binding, one controller binding, or one of each.
+
+- `Wheel1` … `Wheel128` = button 1 … 128 of the controller (DirectInput button index N−1 in the game's data format;
+  the same N as the game's `bN` button id in `game.log`).
+- `WheelUp`, `WheelDown`, `WheelLeft`, `WheelRight` = the D-pad (the first POV hat). A diagonal counts for both of its
+  neighbours (up-right = `WheelUp` and `WheelRight`).
+- Controller bindings ignore `Shift` / `Ctrl` / `Alt` (held or not does not matter); `Shift+Wheel3` is not accepted.
+- Not case-sensitive, spaces ignored. `none` still turns the whole action off. If one part is not understood the whole
+  line is ignored (logged) and the default stays.
+- A comma right after a `+` or at the start of a binding is the comma **key** (`Shift+,` still works).
+
+**Finding the button number:** set `debug = 1`, start the game and press each button once. The first press of every
+button / D-pad direction is written to `dlaa_inject.log`, e.g.
+`controller 'Thrustmaster T300RS Racing Wheel': button 10 pressed -- bind it in dlaa.ini as Wheel10`
+(at most 24 such lines per run). The game's own `game.log` lists the same numbers as `[di8] Button input 'b10'` for the
+device. `WheelN` fires on button N of **every** DirectInput controller the game opens: a T300RS wheel and a shifter both
+have a button 1, so pick a number your shifter / button box does not use (or check the log lines, they name the device).
+
+If a shifter or a second controller shares button numbers, set `controller_name = T300` in `dlaa.ini` (part of the
+device name as `game.log` / the mod log shows it, not case-sensitive). Then only controllers whose name contains that text
+are read; every other controller goes to the game untouched (the log says `DirectInput: controller '...' not tapped`).
+Empty (the default) = every controller.
+
+Only controllers the game opens through DirectInput are seen (wheels, most joysticks and button boxes; the log lists each
+one as `DirectInput: controller device wrapped`). XInput-only gamepads (Xbox controllers) are not.
+
+While the tuning menu is open the game sees no controller button and no D-pad at all (v0.10.2; before only the 5 menu
+bindings were hidden): buttons read as released, the D-pad as centred, so the D-pad does not also change the game's camera
+or menu. Steering, pedals and other axes still pass. The press that **opens** the menu does reach the game (the menu is
+still closed at that moment), as with `Delete`: bind `key_menu` to a button the game does not use. Releases always reach
+the game. You can also bind the buttons in the menu itself: [Bind a key in the menu](#bind-a-key-in-the-menu).
+
+```
+key_menu = Delete, Wheel10
+key_menu_up = Up, WheelUp
+key_menu_down = Down, WheelDown
+key_menu_left = Left, WheelLeft
+key_menu_right = Right, WheelRight
+```

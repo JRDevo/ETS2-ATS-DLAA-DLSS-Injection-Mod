@@ -5,7 +5,8 @@
 ; v0.9.0 tex_lod_bias, v0.10.0 tex_lod_bias_cutout, mv_objects, mirror_dlaa, dlaa_pre_tonemap and perf_profile) can be written back with Shift+F12,
 ; which rewrites this file in place and keeps every other line. v0.10.0: the in-game tuning menu (Delete) changes the same
 ; values and its Save row does the same as Shift+F12 (+ the menu_* panel keys once you moved the panel, + the fps_* box
-; keys once you changed the fps box there).
+; keys once you changed the fps box there). Its Reset to defaults row puts all of them back to the built-in defaults, live,
+; and REMOVES those keys from this file (the key_* hotkeys and every other line stay).
 
 # ---- v0.10.0 PERFORMANCE PROFILE (Alt+F9 cycles high -> medium -> low live: 1 / 2 / 3 beeps; Shift+F12 saves it here) ----
 # A profile only gives a DEFAULT to the keys in the table below. Any of those keys you set in this file -- or change with its own
@@ -150,7 +151,19 @@ debug = 0
 # low: 4)
 # mirror_flat_mode = 1
 # v0.10.0 phase 9: with mirror_vr_mode = 2, how many mirror pictures per frame keep their DLAA (1..8, the largest ones)
+# (also mirror_flat_mode = 2). v0.10.2: the tuning menu's Mirror DLAA row sets it (1 mirror = 1, 2 mirrors = 2) together with
+# mirror_vr_mode / mirror_flat_mode (all = 1, all camera motion only = 4); Shift+F12 / the Save row writes them.
 # mirror_vr_views = 2
+# v0.10.2: the motion of the mirrors that modes 1, 2 and 3 handle (one key for VR and flat): parts = each moving part (traffic,
+# wheels) gets its own motion in the glass (default; about 0.4 ms per mirror in VR), camera = camera motion only, no per-part
+# ids (about 0.15 ms per mirror; moving traffic can ghost in the glass). Mode 4 is always camera motion. The tuning menu's
+# Mirror DLAA row (Left / Right) cycles 7 states:
+#   off -> 1 mirror -> 1 mirror, camera -> 2 mirrors -> 2 mirrors, camera -> all mirrors -> all, camera motion -> off
+#   1 mirror = mode 2, mirror_vr_views 1, parts      1 mirror, camera = mode 2, mirror_vr_views 1, camera
+#   2 mirrors = mode 2, mirror_vr_views 2, parts     2 mirrors, camera = mode 2, mirror_vr_views 2, camera
+#   all mirrors = mode 1, parts                      all, camera motion = mode 4
+# Shift+F12 / the Save row writes mirror_mv with the mode; the Reset row removes it.
+# mirror_mv = parts
 
 # ---- v0.10.0 phase 8 PERFORMANCE (each one has the fast setting as its default; the other value is the phase-7 behaviour) ----
 # with debug = 1 the log gets "perf eye N" lines every 600 frames: the GPU time of every part of the mod per eye (NGX itself
@@ -166,6 +179,12 @@ debug = 0
 # the old camera-motion estimate (64 small copies per frame inside the game's drawing) stops while the per-draw consensus has
 # been healthy for this many frames, and comes back by itself when it fails; 0 = always run it (before phase 8)
 # mv_medoid_drop = 120
+# v0.10.2: how many failed consensus frames IN A ROW that count is allowed to have before it starts again from 0 (0..100,
+# default 2; 0 = a single failed frame restarts it, before v0.10.2). A failed frame keeps the last frame's camera motion either
+# way, so a short hiccup costs nothing -- with 0 the old estimate hardly ever stopped (in VR ~0.35 ms per frame for nothing).
+# The "perf cuts" log line counts the failure runs by length (1 / 2 / 3-5 / 6+): set it to 0 if you see smearing right after
+# fast head turns / camera cuts, raise it (3..5) only if the 3-5 count is large and the picture stays clean
+# mv_cons_fail_tol = 2
 # 1 = the big per-frame helper pictures (depth copy, draw ids, see-through depth) are shared between frames in flight -- about
 # 1 GB less video memory in VR, 200 MB in flat (default); 0 = one set per queued frame (before phase 8)
 # mv_slot_pool = 1
@@ -194,6 +213,11 @@ debug = 0
 # mv_area_scissor = 1
 # the margin around the anti-aliased area in pixels (0..1024); -1 = dlaa_area_feather + 32 (default)
 # mv_area_margin = -1
+# v0.10.2, VR: the part of that work that runs when the eye is already known (the "which vehicle does this plate sit on" search:
+# p-count / p-col / p-vote in the "perf eye" lines) covers only THAT eye's anti-aliased area plus the margin -- about 2/3 of the
+# area of both eyes' rects together at dlaa_area 40 (default 1); 0 = both eyes' rects (v0.10.1). Flat: no difference (one rect).
+# Needs mv_area_scissor = 1. The "perf view" log line shows what each step covers.
+# mv_area_clip = 1
 # the see-through depth (wires, fences, glass) at: 0 = half resolution in VR, full resolution in flat (default), 1 = full
 # resolution (before phase 9), 2 = half resolution (about 4x cheaper; a wire one pixel wide can lose a few pixels of its own motion)
 # mv_fwd_depth_res = 0
@@ -392,22 +416,38 @@ debug = 0
 
 # ---- v0.10.0 TUNING MENU panel (Delete opens it; its Panel rows change these live, Shift+F12 / the Save row writes them
 # here once you moved the panel in the menu) ----
-# Flat: left / top edge of the panel in % of the picture width / height (0..90), size 0.5..2.0 (1 = 720 px wide at a
+# Flat: left / top edge of the panel in % of the picture width / height (0..90), size 0.3..2.0 (1 = 720 px wide at a
 # 1080 p picture, scales with the picture height)
 # menu_x = 2
 # menu_y = 8
 # menu_scale = 1.0
 # VR: the panel CENTRE relative to the eye's optical centre, in % of the eye width / height (-50..50; negative y = up),
-# size 0.5..2.0 (1 = 54 % of the eye width), and the inward shift per eye in px (0..200: the left eye's panel moves
+# size 0.3..2.0 (1 = 54 % of the eye width), and the inward shift per eye in px (0..200: the left eye's panel moves
 # right, the right eye's left, so the panel sits nearer than infinity -- raise it if the panel is tiring to look at)
 # menu_vr_x = 0
 # menu_vr_y = -5
 # menu_vr_scale = 1.0
 # menu_vr_depth = 12
+# VR layer (v0.10.3, menu_vr_layer = 1): the panel's distance in cm (30..300). The panel keeps the same size at every
+# distance (it grows with it), only its stereo depth changes. The menu's "Panel VR depth" row sets it in 5 cm steps there
+# (menu_vr_depth above is the in-picture shift, used with menu_vr_layer = 0).
+# menu_vr_dist = 100
 # VR (v0.10.0 phase 16): 1 = the panel turns to FACE you when it is moved off the centre (a tilted 3-D panel that keeps the
 # same apparent size from every angle; menu_vr_x / menu_vr_y / menu_vr_scale / menu_vr_depth keep their meaning: they place
-# the panel's centre), 0 = a flat picture as before. The menu's "Panel faces you (VR)" row switches it live.
+# the panel's centre), 0 = a flat picture as before. With menu_vr_layer = 1 (v0.10.3) also the fps box while it follows
+# the headset; the compositor turns the layers. The menu's "Panel faces you (VR)" row switches it live.
 # menu_vr_face = 1
+# VR (v0.10.3): 1 = the panel and the fps box are separate OpenXR QUAD LAYERS: the headset's compositor shows them on top of
+# the game picture itself, so they stay rock-steady (no swimming with the reprojection), sit at a real distance (the
+# panel menu_vr_dist, the fps box 0.8 m) and are never covered by the game's own menus. menu_vr_x / menu_vr_y /
+# menu_vr_scale, menu_vr_face and the fps_vr_* keys keep their meaning; menu_vr_depth is then unused (the depth is the
+# real distance, menu_vr_dist). 0 = drawn into the eye picture as before (menu_vr_depth, no menu_vr_dist). The mod falls
+# back to the picture by itself when the layers are not possible (no OpenXR session, the runtime refuses them).
+# menu_vr_layer = 1
+# v0.10.2 HOLD TO BIND: hold a key or a wheel / gamepad button this long (ms, 500..10000) on a menu row and it becomes that
+# row's hotkey (written to the key_* line below at once; Backspace held = none). While the menu is open the game gets no
+# keys and no buttons at all (axes / pedals still pass): close the menu before you press Escape or drive.
+# bind_hold_ms = 5000
 
 # ---- v0.10.0 FPS BOX: a small live fps / frame-time box ("60 fps" / "16.7 ms", updated twice a second), shown also
 # while the menu is closed. The menu's FPS counter rows switch and move it live; Shift+F12 / the Save row writes these
@@ -420,17 +460,29 @@ debug = 0
 # fps_y = 1
 # fps_scale = 1.0
 # VR: the box CENTRE relative to the eye's optical centre, in % of the eye width / height (-50..50; negative y = up),
-# size 0.2..3.0 (1 = 8 % of the eye width; default 0.3 = about 2.4 %). It uses the same inward shift as the panel
-# (menu_vr_depth).
+# size 0.2..3.0 (1 = 8 % of the eye width; default 0.3 = about 2.4 %). Drawn into the picture it uses the same inward
+# shift as the panel (menu_vr_depth); as a VR layer (menu_vr_layer = 1) it sits 0.8 m away.
 # fps_vr_x = 0
 # fps_vr_y = -25
 # fps_vr_scale = 0.3
+# v0.10.3 VR: 0 = the box follows the headset (as above), 1 = FIXED IN THE CAB: it stays at one spot 0.8 m from your seat
+# position (the origin of the game's VR tracking space) and you look at it like at a cab instrument. fps_vr_x / fps_vr_y
+# then are DEGREES around you (x + = right, y + = down; default -25 = 25 degrees up) and fps_vr_scale the size it has at
+# 0.8 m. No inward shift (each eye sees it from its own position). Falls back to following the headset while the game's
+# OpenXR view poses are not available. The menu's FPS counter lock row switches it live.
+# fps_vr_lock = 0
 
 # ---- Hotkeys -------------------------------------------------------------------------------------------
 # key_<action> = [Shift+][Ctrl+][Alt+]Key, or none to disable the action. The values below are the defaults:
 # just edit the value. Keys: F1-F24, A-Z, 0-9, Home, End, Insert, Delete, PageUp, PageDown, Up, Down, Left, Right,
 # Space, Tab, Backspace, Enter, Pause, Numpad0-Numpad9, NumpadAdd, NumpadSubtract, NumpadMultiply, NumpadDivide,
 # NumpadDecimal, [ ] ; ' , . / \ - = `   Modifiers must match exactly; put nothing after the value on the line.
+# v0.10.1: a wheel / gamepad button or D-pad can be added after a comma: Wheel1..Wheel128 (button N, see the
+# "controller: button N pressed" lines in the log with debug = 1) or WheelUp / WheelDown / WheelLeft / WheelRight, e.g.
+# key_menu = Delete, Wheel10   or   key_menu_up = Up, WheelUp   (docs/KEYS.md, "Wheel, gamepad and joystick buttons")
+# controller_name: only read the controllers whose name contains this text (not case-sensitive), e.g. T300 when a shifter
+# shares the wheel's button numbers. Empty (default) = every DirectInput controller the game opens.
+# controller_name =
 # Mode cycle DLAA -> DLSS -> off (saved to the `mode` key at once)
 key_mode_cycle = End
 # DLAA model 1..4 = preset default / E / F / M
@@ -480,7 +532,8 @@ key_mv_dump = Alt+F8
 # Performance profile high -> medium -> low (perf_profile)
 key_perf_profile = Alt+F9
 # v0.10.0 tuning menu: open / close, and (only while it is open) select a row up / down and change it left / right.
-# The game does not see these 5 keys while the menu is open; closed, they belong to the game.
+# v0.10.2: the game sees no key / button at all while the menu is open; closed, they belong to the game. The menu's
+# Menu keys row binds these 5 by holding the new keys (docs/KEYS.md, "Bind a key in the menu").
 key_menu = Delete
 key_menu_up = Up
 key_menu_down = Down

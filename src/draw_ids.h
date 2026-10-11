@@ -537,6 +537,21 @@ public:
     static int  Fold();
     static void SetVoteCompact(bool on);          // v0.10.0 phase 18 (dlaa.ini mv_vote_compact)
     static bool VoteCompact();
+    // v0.10.2 EYE CLIP of the rigid-parent vote (dlaa.ini mv_area_clip, default 1; inject.cpp PassViewSetup sets it at every pass
+    // start with the pass's margin, mv_area_margin / dlaa_area_feather + 32): in VR the replay clip of a pass is the UNION of both
+    // eyes' DLAA rects (+ margin) -- the eye of a pass is only known at its blit, i.e. here. The pixel count, the centroid sums and
+    // the vote grid (the march START samples) then cover only THIS eye's DLAA rect + marginPx, n the replay clip; the marches
+    // still read ids / depth up to their reach anywhere in the replayed region, as before. Flat (one rect) and area 100 / mirror
+    // units (no replay clip) are unchanged. Off = the whole replay clip (v0.10.0 phase 9). The eye rect comes from
+    // SetEyeRect (CameraMv::Generate: pass B's crop) before each Prepare.
+    static void SetAreaClip(bool on, int marginPx);
+    static bool AreaClip();
+    static int  AreaMargin();
+    void SetEyeRect(uint32_t x0, uint32_t y0, uint32_t w, uint32_t h) {
+        m_eyeRect[0] = x0; m_eyeRect[1] = y0; m_eyeRect[2] = x0 + w; m_eyeRect[3] = y0 + h; m_eyeRectOn = w != 0u && h != 0u;
+    }
+    // the vote grid rect of the prepared pass (x0 aligned to 4, y0 aligned to 4, x1, y1; full-image px) -- the harness reads it
+    const uint32_t* PreparedClip() const { return m_prepClip; }
     // v0.10.0 phase 18 (dlaa.ini mv_cons_min_cabin, 0 = kConsMin as the world layer, else 8..64): the cabin layer's consensus
     // camera R needs this many agreeing draws. In game the cabin never reached kConsMin (24) -- its medoid and its 24 candidate
     // copies per pass stayed; the 'cabin: consensus' field of the MV draw-ids line shows the largest cluster it had
@@ -566,7 +581,8 @@ public:
     static void VsLayoutClear();                  // device change (VS pointers are not stable across devices)
     // after pass B: commits the prepared pass as this eye's previous one, queues the diagnostics readback
     void Finish(ID3D11DeviceContext* ctx);
-    void Forget() { PrepWait(); m_prevN = 0; m_prepN = 0; m_consRun[0] = m_consRun[1] = 0;     // no history (the next pass pairs nothing;
+    void Forget() { m_prevN = 0; m_prepN = 0; m_consRun[0] = m_consRun[1] = 0;     // no history (the next pass pairs nothing;
+                    m_consFail[0] = m_consFail[1] = 0;              // (v0.10.2: + the failure streak)
                     m_uholdValid[0] = m_uholdValid[1] = false;      // v0.10.0 phase 8: the consensus health restarts too;
                     if (!m_quiet) StaticClear(kStatClrHistory); }  // phase 14: a main unit's lost history also forgets every
                                                  // static streak; round 4: and the plate-hold table)
@@ -578,6 +594,11 @@ public:
     // first readback without it re-arms the medoid (counted in Stats::medoidRearms)
     static void SetMedoidDrop(unsigned frames);
     static unsigned MedoidDrop();
+    // v0.10.2 (dlaa.ini mv_cons_fail_tol, 0..100, default 2; 0 = phase 8): failed consensus readbacks of a layer IN A ROW that do
+    // not restart its mv_medoid_drop streak (the layer keeps the last frame's R meanwhile); one more re-arms as above. Ended
+    // failure streaks are counted by length in Stats::consFailRuns. A pairing collapse still restarts both streaks at once.
+    static void SetConsFailTol(unsigned n);
+    static unsigned ConsFailTol();
     bool ConsHealthy(int layer) const;
     // v0.10.0 phase 4: log the per-draw state of the NEXT prepared pass (forward draws + G-buffer draws with IndexCount
     // <= 36), see the header. The lines land 2-4 frames later (non-blocking readback). false = a dump is still in flight.
@@ -659,6 +680,9 @@ public:
         // v0.10.0 phase 8: the medoid of a layer re-armed (its consensus failed after being healthy), prepared frames without a
         // world / cabin medoid
         uint64_t medoidRearms[2] = {}, noMedoidFrames[2] = {};
+        // v0.10.2 (mv_cons_fail_tol): ended streaks of failed consensus readbacks per layer by length: 1, 2, 3-5, 6+ (read back;
+        // counted when the next healthy readback lands; a streak cut by Forget is not counted)
+        uint64_t consFailRuns[2][4] = {};
         uint64_t instMoverDraws = 0;
         uint64_t consSmall[2] = {};              // frames without a medoid whose camera R came from a cluster of 8..23 draws             // instanced / no-MVP draws that took a MOVING parent (read back; mv_inst_replay)
         // v0.10.0 phase 14 (read back, mv_replay_static_*): readbacks that fed the static table, G-buffer world draws judged in
@@ -690,6 +714,9 @@ public:
         // 8..11), none MVP-shaped (VS not cached yet), cached block failed (state 5), forward draws with a shifted block, draws
         // that scanned the rows (VS not cached / cached block failed) -- sums
         uint64_t lay[5] = {}, layNone = 0, layHintFail = 0, layFwdShift = 0, layScanned = 0;
+        // v0.10.2 (mv_area_clip, Prepare of a pass with a replay clip and the vote on): passes, of them clipped to the eye rect, and
+        // the summed px of the vote grid rect / of the replay clip / of the whole image (the 'perf view' line's percentages)
+        uint64_t vgFrames = 0, vgEye = 0, vgPx = 0, vgPassPx = 0, vgFullPx = 0;
     };
     const Stats& GetStats() const { return m_stats; }
     // v0.10.0 phase 3: largest per-frame avg |consensus - medoid| (px, layer 0 / 1) since the last call (restarts it)
@@ -816,6 +843,8 @@ private:
     uint32_t m_prepCandW = 0, m_prepCandC = 0;  // consensus candidates (world / cabin) uploaded for this pass
     uint32_t m_prepW = 0, m_prepH = 0;          // v0.10.0 phase 6: full image size of the prepared pass (the vote grid)
     uint32_t m_prepClip[4] = {};                // v0.10.0 phase 9: the vote grid rect (x0 aligned to 4, y0 aligned, x1, y1)
+    uint32_t m_eyeRect[4] = {};                 // v0.10.2: this eye's DLAA rect (x0, y0, x1, y1) of the coming Prepare (SetEyeRect)
+    bool     m_eyeRectOn = false;
     uint32_t m_prepFold = 0;                    // v0.10.0 phase 9: FoldU.x of the prepared pass
     bool     m_prepCompact = false;             // v0.10.0 phase 18: the prepared pass runs the compact vote (FoldU.x bit 5)
     uint32_t m_prepGrid = 0;                    // v0.10.0 phase 18: vote-grid groups of the prepared pass (stats)
@@ -829,6 +858,7 @@ private:
     float    m_ofMoverMinW = -1.0f;
     float    m_ofMissMin = -1.0f;
     uint32_t m_consRun[2] = {};                 // v0.10.0 phase 8: landed readbacks in a row with a used consensus (>= kConsMin)
+    uint32_t m_consFail[2] = {};                // v0.10.2: landed readbacks in a row WITHOUT one (mv_cons_fail_tol)
     int      m_lastCons[2] = {};
     uint32_t m_lastConsN[2] = {};
     uint32_t* m_candTmp = nullptr;              // kMax: consensus candidate scratch (Prepare)

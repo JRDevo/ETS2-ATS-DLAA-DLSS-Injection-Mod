@@ -184,6 +184,18 @@ public:
     // enough for a menu / truck-preview unit (SetMenuUnit) -- camera MVs, depth, RCAS, composite, MV debug.
     static bool CoreShadersReady();
     static bool PrewarmNgx(ID3D11DeviceContext* ctx);
+    // v0.10.2 mirror units built ahead (the injector's mirror size cache, at boot):
+    //  ReadyFor(fullW, fullH, hdr, area): a Run on a fullW x fullH colour of that kind (RGBA16F = hdr), without upscaling
+    //    (outW = outH = 0), at DLAA area `area`, would NOT (re)build -- its textures + NGX feature exist for exactly those
+    //    sizes (a parked colour set of that kind counts, as in Run).
+    //  Prebuild(ctx, fullW, fullH, hdr): the build the first such Run would do -- the same Ensure call with the same sizes
+    //    (Geometry, the DLAA area in force: the caller sets it as it does around Run), without a frame or a colour texture.
+    //    Render thread, the game's immediate context, compute state saved / restored. It ignores the one-create-per-Present
+    //    budget (meant for the boot / loading screen). The unit's first Run then finds it built (no CreateFeature). false =
+    //    not built: shaders not ready (Deferred) or the build failed -- the unit is left empty (Shutdown), so the live Run
+    //    tries once more instead of finding the size marked failed.
+    bool ReadyFor(uint32_t fullW, uint32_t fullH, bool hdr, int area) const;
+    bool Prebuild(ID3D11DeviceContext* ctx, uint32_t fullW, uint32_t fullH, bool hdr);
     // v0.7.0 output-space rect of the last Run (origin in the full output, size = m_out / m_sharp / NGX target).
     uint32_t OutRectX() const { return m_oxc; }
     uint32_t OutRectY() const { return m_oyc; }
@@ -315,6 +327,12 @@ private:
     // v0.8.0: hdr = build RGBA16F colour textures + an IsHDR feature (part of the "same unit" test).
     bool Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32_t cw, uint32_t ch, uint32_t rx, uint32_t ry,
                 uint32_t outFullW, uint32_t outFullH, uint32_t ow, uint32_t oh, bool hdr);
+    // v0.10.2: the sizes Run derives for a fullW x fullH colour (crop rect at `area`, upscale output rect; outW = outH = 0 =
+    // no upscale) -- the Ensure arguments -- and Run's "already built for them" test. Shared by Run, Prebuild and ReadyFor.
+    struct RunGeom { uint32_t cw, ch, rx, ry, ofw, ofh, ow, oh, oxc, oyc; bool up; };
+    RunGeom Geometry(uint32_t fullW, uint32_t fullH, uint32_t outW, uint32_t outH, int area) const;
+    bool BuiltFor(const RunGeom& g, uint32_t fullW, uint32_t fullH, bool hdr) const;
+    bool m_budgetBypass = false;                       // v0.10.2: Prebuild's Ensure skips the one-create-per-Present budget
     // v0.10.0 phase 7: the colour-kind part of Ensure (colorIn / m_out / m_sharp + the NGX feature) for the CURRENT sizes into
     // the active slots; logs like Ensure. false = failed (the caller tidies up).
     bool BuildColourSet(ID3D11Device* dev, bool hdr, bool keepsOther);

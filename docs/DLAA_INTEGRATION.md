@@ -772,6 +772,33 @@ rigid-parent vote and the mirrors made most of the rest. The user's 72 Hz target
   vectors inside the crop are bit-identical (max 0.0000 px; half resolution: every pixel the forward depth does not touch);
   every half-resolution forward-depth pixel has a forward id. Mutations `mutclip` / `mutview` fail it. The phase-8 comparison
   file of S1-S10 is reproduced exactly (0 px differ) with the folded dispatches.
+- **v0.10.2: what each per-eye step covers, and the eye clip of the vote (`mv_area_clip = 1`, 0 = v0.10.1).** Audit at
+  `dlaa_area` < 100 (VR log 2026-10-10, area 40: the pass clip = both eyes' rects + 128 px = 30.1 % of the 6120x6496 eye):
+  pass B, copy-in / copy-out, the depth convert, NGX and RCAS run on the DLAA rect only (pass B reads the CURRENT depth twin at
+  its own pixel, no neighbours, no previous depth -- no margin needed); the G-buffer / forward replays, the forward-depth occlusion
+  init and re-draw run in the pass clip (the eye of a pass is only known at its blit; the id target's and the forward target's
+  clears are whole-target fast clears -- a DSV cannot be rect-cleared in D3D11, and the ids outside the clip must read 0 for the
+  marches); gather / match / pair / vote / pick / resolve / list+twin / the parent picks, the candidate copies and pass A are per
+  DRAW (no pixel size). The rigid-parent pixel count, centroid sums and vote grid ran over the whole pass clip -- in VR the union
+  of BOTH eyes' rects -- although they run at the blit, where the eye is known. Now `DrawIdMv::Prepare` intersects their sample
+  rect (`Clip`) with THIS eye's DLAA rect (`SetEyeRect` from `CameraMv::Generate` = pass B's crop) grown by `mv_area_margin`
+  (inject.cpp `PassViewSetup` hands the margin over every pass: `DrawIdMv::SetAreaClip`). Only the march START samples shrink;
+  the marches still read ids / depth up to their reach in the replayed region. Flat (one rect: eye rect + margin = the pass clip)
+  and mirror units (no pass clip) are bit-identical to v0.10.1. Expected in VR at area 40: the vote grid ~19 % of the eye
+  instead of ~30 % (p-count and p-col scale with it; p-vote is bounded by the march budget, so it shrinks less).
+- **The depth snapshot stays whole (re-checked in v0.10.2):** a boxed `CopySubresourceRegion` of a `D32_FLOAT_S8X24_UINT`
+  DEPTH_STENCIL texture into the `R32G8X24_TYPELESS` twin copies NOTHING on the RTX 5090 driver and on WARP, with or without the
+  debug layer, for a 4-px-aligned and an unaligned box (debug layer: "If CopySubresourceRegion is used with Multisampled or
+  D3D11_BIND_DEPTH_STENCIL Resources, then the whole Subresource must be copied"). Its readers would allow a clip -- pass B
+  (eye rect), the vote marches (pass clip + 32 px reach), the occlusion init (pass clip), the Ctrl+F6 view (eye rect) -- but
+  only a game depth with a shader-resource binding (the phase-10 "own typeless depth" idea, not built) could copy less.
+- **Log:** the `phase 9` config line prints `mv_area_clip`; the `perf view` line gains `v0.10.2 per-eye coverage: rigid-parent
+  pixel count + vote grid (mv_area_clip 1, eye rect + M px n the pass clip; N of P vote passes clipped to their eye): A % of the
+  image (eye 0) / B % (eye 1) vs the pass clip C % / D % | pass B, copy-in, NGX, RCAS, copy-out = the DLAA rect: E % (eye 0) /
+  F % (eye 1) | replay, forward replay, forward-depth init + re-draw = the pass clip above ... | depth snapshot: 100 % ...`.
+- **WARP harness (v0.10.2):** S11 / S12 gain three VR-model shadows each -- the replay clip is the union of the eye's rect (u
+  0.70) and the other eye's (u 0.30) + 40 px (48.4 % of the image), eye clip ON at full / 1/2 resolution (vote grid 26.7 %) and
+  OFF (48.7 %): ids inside the clip identical, every motion vector inside the crop bit-identical to the whole-image pipeline.
 
 #### Phase 10: the forward depth in one batch, performance profiles (v0.10.0)
 
@@ -989,6 +1016,23 @@ in `captures/mirror_dlaa_plan.md`.
   re-home / take-over, a frame in which the unit did not run (throttled mirrors), `MvInvalidate` (DLAA / MV keys),
   `Alt+F6`. Units are self-contained: the eye identity does not matter for them and nothing touches `g_sceneDepth`, the
   pass FIFO, the eye map or the main units.
+- **Unit builds (v0.10.2).** A unit's first Run builds its textures + NGX feature on the render thread (ATS VR v0.10.1:
+  9.6 - 35.7 ms each, a dropped frame per new unit while driving). Now: (1) **size cache** `<game exe folder>\
+  dlaa_shader_cache\mirror_sizes.txt`, one line `W H N` per size whose build succeeded (N = units of that size at once;
+  12 sizes max), written at that moment (`MirSizesNote`); (2) **boot pre-build** (`MirPrebuild`, at a Present after the
+  NGX pre-warm, NGX on the game device, the shader warm-up done, no mirror view seen yet): largest sizes first, up to 6
+  units (and `mirror_max_views`) get exactly the build their first Run would do (`SceneDlaa::Prebuild` = Run's `Ensure`
+  call with Run's own `Geometry`, area 100, RGBA16F / IsHDR; the one-create-per-Present budget is skipped there); the unit
+  stays free and marked pre-built for its size; a new view takes the free unit built for exactly its size first
+  (`MirBeginView`), whose first Run then finds `BuiltFor` true and creates nothing; (3) **one build per frame**: a view
+  whose unit would build (`!ReadyFor`) after an NGX feature was already created since the last Present is left to the
+  game for that frame (no jitter, no DLAA; before, it was jittered and its Run deferred = a jittered mirror without DLAA)
+  and counted `unit builds deferred`. Logs: `mirror units: pre-built N units from the size cache (WxH unit U X ms, ...) in
+  X ms (boot, ...)` (or why not: cache empty, mirror DLAA off, NGX not initialised, views already seen); `mirror units:
+  size cache now has WxH xN units ...`; `mirror view detected: ... new unit, pre-built at boot for this size (no build)`;
+  the first-OK line ends `(unit built in X ms, pre-built: ...)` for such a unit (X = its first Run, MV init + evaluate
+  only); `mirror units: WxH view left to the game for this frame -- unit U would build now ...` (first 8); the `@blit`
+  line: `unit builds deferred to a later frame W, T in total` and `pre-built units not taken yet K`.
 - **Keys:** `Alt+F6` (`key_mirror_dlaa`) mirror DLAA on / off live (off = the views are left to the game, no jitter; the
   units keep their resources). `Alt+F5` (`key_mv_drawids`) per-draw motion vectors on / off live (`mv_objects` 2 <-> 0,
   main view and mirrors; off drops every draw record and marks the draw ids invalid, so pass B uses the camera path from

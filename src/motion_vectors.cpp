@@ -1498,6 +1498,7 @@ bool CameraMv::Generate(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, uint32
     m_didN = 0;                                        // v0.10.0 (set by DidPrepare when pass B can use the ids)
     m_didNG = 0;
     m_didIdSrv = nullptr;
+    m_did.SetEyeRect(x0, y0, w, h);                    // v0.10.2 (mv_area_clip): the vote grid follows this eye's DLAA rect
     if (ctx && m_fwdCnt) FwdCountPoll(ctx);            // v0.9.0 r11: near-range forward-depth counts that landed
     if (!m_ready || !ctx || !depthTwinSrv || !depthR32Uav || !mvUav || !cur.Ready()) {
         ObjNoRun(!cur.Ready() ? "Generate early-out: the candidate record is not ready"

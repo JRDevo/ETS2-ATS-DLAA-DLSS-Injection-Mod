@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cwchar>
 #include <vector>
 
 using Microsoft::WRL::ComPtr;
@@ -73,6 +74,7 @@ ComPtr<ID3D11PixelShader>       g_ps;
 ComPtr<ID3D11Buffer>            g_cb;
 ComPtr<ID3D11SamplerState>      g_smp;
 ComPtr<ID3D11BlendState>        g_blend;     // SrcAlpha / InvSrcAlpha, RGB write mask (alpha untouched)
+ComPtr<ID3D11BlendState>        g_blendOv;   // v0.10.3 phase 29 (kOutOverlay): blend off, RGBA written as the shader outputs it
 ComPtr<ID3D11RasterizerState>   g_rs;        // solid, no cull, no scissor
 ComPtr<ID3D11DepthStencilState> g_dss;       // depth + stencil off
 ID3D11Device*                   g_dev = nullptr;
@@ -199,13 +201,13 @@ void DropWidget() {
 
 // Shaders + states for `dev` (once per device; a new device drops the old one's objects and both textures).
 bool Ensure(ID3D11Device* dev) {
-    if (g_dev == dev && g_vs && g_ps && g_cb && g_smp && g_blend && g_rs && g_dss) return true;
+    if (g_dev == dev && g_vs && g_ps && g_cb && g_smp && g_blend && g_blendOv && g_rs && g_dss) return true;
     if (g_failed && g_dev == dev) return false;
     // warm-up still running: try again next frame. v0.10.0 phase 17: the two menu shaders are compiled right after the core
     // group (~2.1 s), no longer after the whole per-draw set (~20 s): the panel works on the first menu screens.
     if (!ShaderCache::Ready(ShaderCache::kMenuVs) || !ShaderCache::Ready(ShaderCache::kMenuPs)) return false;
     g_failed = true; g_dev = dev;
-    g_vs.Reset(); g_ps.Reset(); g_cb.Reset(); g_smp.Reset(); g_blend.Reset(); g_rs.Reset(); g_dss.Reset();
+    g_vs.Reset(); g_ps.Reset(); g_cb.Reset(); g_smp.Reset(); g_blend.Reset(); g_blendOv.Reset(); g_rs.Reset(); g_dss.Reset();
     DropTexture();
     DropWidget();
     HRESULT hr;
@@ -244,6 +246,14 @@ bool Ensure(ID3D11Device* dev) {
                                                              D3D11_COLOR_WRITE_ENABLE_BLUE) : 0;
     }
     if (FAILED(hr = dev->CreateBlendState(&bd, &g_blend))) { Log("tuning menu CreateBlendState hr=0x%lx", hr); return false; }
+    D3D11_BLEND_DESC bo{};                                   // v0.10.3 phase 29: the overlay image (kOutOverlay)
+    bo.RenderTarget[0].BlendEnable = FALSE;
+    bo.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;       bo.RenderTarget[0].DestBlend = D3D11_BLEND_ZERO;
+    bo.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    bo.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;  bo.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
+    bo.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    bo.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    if (FAILED(hr = dev->CreateBlendState(&bo, &g_blendOv))) { Log("tuning menu CreateBlendState (overlay) hr=0x%lx", hr); return false; }
     D3D11_RASTERIZER_DESC rd{};
     rd.FillMode = D3D11_FILL_SOLID;
     rd.CullMode = D3D11_CULL_NONE;
@@ -271,12 +281,22 @@ constexpr float kTitleY = 8.0f,  kTitleH = 24.0f;
 constexpr float kPerfY  = 33.0f, kPerfLineH = 15.0f; // TuningMenu::kPerfLines lines (the GPU block)
 constexpr float kHeadY  = 82.0f, kHeadH  = 18.0f;
 constexpr float kRowsY  = 102.0f, kRowH  = 19.0f;
-constexpr float kDescGap = 6.0f,  kDescH = 54.0f;   // 3 lines
+// v0.10.3 phase 29d: kDescH = 3 FULL lines of the 14 px description font at every build scale (was 54: one line of Segoe UI at
+// 14 px is 19 px (tmHeight = DrawText's line step), so the 3rd line ended at 57 and was cut off above the footer). The line step
+// rounds per scale (7 px font: 10 px = 20 ref px a line at 0.5; 20 px: 28 = 20 ref px at 1.4) and both rect edges round, so 3
+// lines need up to 62 ref px; 64 fits them at every scale 0.30 .. 5.00 for every row count (measured with GDI). RenderPanel also
+// draws only as many WHOLE lines as fit (<= kDescLines) and ellipsises what does not: never a cut or 4th line over the footer.
+constexpr float kDescGap = 6.0f,  kDescH = 64.0f;   // kDescLines lines
+constexpr int   kDescLines = 3;
 constexpr float kFootGap = 2.0f,  kFootH = 18.0f, kBottom = 4.0f;
 constexpr float kNameX0 = 14.0f,  kNameX1 = 236.0f;
 constexpr float kValX0  = 240.0f, kValX1  = 384.0f;
 constexpr float kKeyX0  = 388.0f, kKeyX1  = 640.0f;
 constexpr float kCostX0 = 644.0f, kCostX1 = 748.0f;
+// v0.10.3 phase 29c: the footer and the licence line share the bottom line (the footer left, the licence right-aligned); the
+// footer ends kFootGapX left of the licence text (it used to run under it: "overflows" in VR). TuningMenu::FooterFits tests it.
+constexpr float kFootX0 = 14.0f, kFootGapX = 12.0f;
+const wchar_t kLicence[] = L"(c) JRDevo - All rights reserved - github.com/JRDevo";
 static_assert(kPerfY + kPerfLineH * (float)TuningMenu::kPerfLines <= kHeadY, "tuning menu: GPU block overlaps the header");
 
 const COLORREF kBg       = RGB(20, 20, 24);
@@ -337,6 +357,36 @@ void DibFinish(Dib& d, uint32_t w, uint32_t h, std::vector<uint32_t>& out) {
     DeleteObject(d.bmp);
     DeleteDC(d.dc);
     d = Dib();
+}
+
+// v0.10.3 phase 29d: the description as DrawText lays it out (word-wrapped) in a box w px wide and at most maxH px high (whole
+// lines, the font selected in dc): `t` itself when it fits, else the longest prefix ending at a word (binary search, then back
+// to its last space) + U+2026 "..." that fits, built in out[cap]. Only at a texture rebuild, so the few measurements cost nothing.
+constexpr UINT kDescFlags = DT_WORDBREAK | DT_END_ELLIPSIS | DT_NOPREFIX;
+const wchar_t* DescFit(HDC dc, const wchar_t* t, LONG w, LONG maxH, wchar_t* out, size_t cap) {
+    auto fits = [&](const wchar_t* s, int len) {
+        RECT r{ 0, 0, w, 0 };
+        DrawTextW(dc, s, len, &r, kDescFlags | DT_CALCRECT);
+        return r.bottom <= maxH;
+    };
+    const int len = (int)wcsnlen(t, cap - 2);
+    if (fits(t, len)) return t;
+    auto build = [&](int n) {                                // t[0..n) without trailing blanks / commas + "..."
+        while (n > 0 && (t[n - 1] == L' ' || t[n - 1] == L',' || t[n - 1] == L';')) --n;
+        wmemcpy(out, t, (size_t)n);
+        out[n] = L'\u2026';
+        out[n + 1] = 0;
+        return n + 1;
+    };
+    int lo = 0, hi = len;                                    // the longest prefix that fits (the empty one assumed)
+    while (lo < hi) {
+        const int mid = (lo + hi + 1) / 2;
+        if (fits(out, build(mid))) lo = mid; else hi = mid - 1;
+    }
+    int cut = lo;
+    while (cut > 0 && t[cut] != L' ') --cut;                 // end at a word (a prefix of one long word: keep the cut)
+    build(cut > 0 ? cut : lo);
+    return out;
 }
 
 // GDI -> g_pixels (RGBA, w x h). False = GDI failed (logged once).
@@ -400,12 +450,32 @@ bool RenderPanel(const TuningMenu::Panel& p, float s, uint32_t w, uint32_t h) {
     const float rowsEnd = kRowsY + kRowH * (float)n;
     fill(kLine, 10.0f, rowsEnd + 4.0f, W - 10.0f, rowsEnd + 5.0f);
     const float descY = rowsEnd + kDescGap;
-    text(fDesc, kDesc, p.desc, 14.0f, descY, W - 14.0f, descY + kDescH, DT_WORDBREAK | DT_END_ELLIPSIS);
+    if (p.desc[0]) {
+        // v0.10.3 phase 29d: the description gets as many WHOLE lines as its box holds (kDescLines at every scale, see kDescH),
+        // the box ends at the last one; a text that needs more lines is cut at a word and ends in "..." (DescFit)
+        SelectObject(dc, pick(fDesc));
+        SetTextColor(dc, kDesc);
+        TEXTMETRICW tm{};
+        RECT r{ px(14.0f), px(descY), px(W - 14.0f), px(descY + kDescH) };
+        const LONG lineH = GetTextMetricsW(dc, &tm) && tm.tmHeight > 0 ? tm.tmHeight : (r.bottom - r.top) / kDescLines;
+        LONG lines = lineH > 0 ? (r.bottom - r.top) / lineH : 0;
+        if (lines > kDescLines) lines = kDescLines;
+        if (lines > 0) {
+            r.bottom = r.top + lines * lineH;
+            wchar_t fit[sizeof(p.desc) / sizeof(p.desc[0]) + 2];
+            DrawTextW(dc, DescFit(dc, p.desc, r.right - r.left, r.bottom - r.top, fit, sizeof(fit) / sizeof(fit[0])), -1, &r,
+                      kDescFlags);
+        }
+    }
     const float footY = descY + kDescH + kFootGap;
-    text(fSmall, kHead, p.footer, 14.0f, footY, W - 14.0f, footY + kFootH, one);
+    // v0.10.3 phase 29c: the footer is clipped (end ellipsis) kFootGapX left of the licence text, never under it
+    SelectObject(dc, pick(fSmall));
+    SIZE lic{};
+    if (!GetTextExtentPoint32W(dc, kLicence, (int)(sizeof(kLicence) / sizeof(kLicence[0]) - 1), &lic)) lic.cx = 0;
+    const float footX1 = (std::max)(W * 0.25f, W - kFootX0 - (float)lic.cx / s - kFootGapX);
+    text(fSmall, kHead, p.footer, kFootX0, footY, footX1, footY + kFootH, one);
     // licence line, bottom right: the GitHub page is the only place this mod exists
-    text(fSmall, kHead, L"(c) JRDevo - All rights reserved - github.com/JRDevo",
-         W * 0.5f, footY, W - 14.0f, footY + kFootH, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_END_ELLIPSIS);
+    text(fSmall, kHead, kLicence, W * 0.5f, footY, W - kFootX0, footY + kFootH, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_END_ELLIPSIS);
     SelectObject(dc, oldFont);
     DibFinish(d, w, h, g_pixels);
     if (fBody) DeleteObject(fBody);
@@ -540,6 +610,8 @@ bool EnsureWidgetTexture(ID3D11Device* dev, ID3D11DeviceContext* ctx, const wcha
 // touched state saved and restored (SaveState / RestoreState). The device objects must exist (Ensure).
 void DrawCb(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, CbData& cb, int outMode,
             ID3D11ShaderResourceView* srv, bool textureAlpha) {
+    const bool overlay = (outMode & TuningMenu::kOutOverlay) != 0;   // v0.10.3 phase 29: blend off, RGBA written
+    outMode &= ~TuningMenu::kOutOverlay;
     cb.opt[0] = (float)(outMode < TuningMenu::kOutRaw ? TuningMenu::kOutRaw : (outMode > TuningMenu::kOutPq ? TuningMenu::kOutPq : outMode));
     cb.opt[1] = 0.88f;
     cb.opt[2] = textureAlpha ? 1.0f : 0.0f;                  // 1 = the fps box: alpha comes from the texture
@@ -567,7 +639,7 @@ void DrawCb(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW,
     ctx->PSSetSamplers(0, 1, &smp);
     ctx->RSSetState(g_rs.Get());
     ctx->RSSetViewports(1, &vp);
-    ctx->OMSetBlendState(g_blend.Get(), bf, 0xffffffffu);
+    ctx->OMSetBlendState(overlay ? g_blendOv.Get() : g_blend.Get(), bf, 0xffffffffu);
     ctx->OMSetDepthStencilState(g_dss.Get(), 0);
     ctx->Draw(4, 0);                                         // (hooked: passes straight through inside t_inDlaa)
     RestoreState(ctx);
@@ -599,6 +671,27 @@ float RefHeight(int nRows) {
     if (nRows < 0) nRows = 0;
     if (nRows > kMaxRows) nRows = kMaxRows;
     return kRowsY + kRowH * (float)nRows + kDescGap + kDescH + kFootGap + kFootH + kBottom;
+}
+
+// v0.10.3 phase 29c: measured at scale 1 (the small font = 13 px there): the widest case relative to the panel -- the size is
+// rounded up from 12.5 and the hinting widens small text (Segoe UI: the default footer is 430 px at 13 px, 403 at 50 px / 4),
+// so what fits here fits at every larger build scale (VR quad 1.6+). The room = the panel width - both margins - the licence
+// text - the gap, as RenderPanel lays the line out. No GDI = "no".
+bool FooterFits(const wchar_t* footer) {
+    if (!footer || !footer[0]) return true;
+    constexpr float kM = 1.0f;
+    HDC dc = CreateCompatibleDC(nullptr);
+    if (!dc) return false;
+    HFONT f = MakeFont(12.5f * kM, FW_NORMAL);
+    if (!f) { DeleteDC(dc); return false; }
+    HGDIOBJ old = SelectObject(dc, f);
+    SIZE a{}, b{};
+    const bool ok = GetTextExtentPoint32W(dc, footer, (int)wcslen(footer), &a) &&
+                    GetTextExtentPoint32W(dc, kLicence, (int)(sizeof(kLicence) / sizeof(kLicence[0]) - 1), &b);
+    SelectObject(dc, old);
+    DeleteObject(f);
+    DeleteDC(dc);
+    return ok && (float)a.cx / kM <= kRefWidth - 2.0f * kFootX0 - (float)b.cx / kM - kFootGapX;
 }
 
 bool Draw(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
