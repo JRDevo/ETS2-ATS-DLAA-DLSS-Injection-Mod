@@ -199,6 +199,10 @@ float PSInit1(float4 pos : SV_Position) : SV_Depth { return InitDepth(pos, 1u); 
 //             the vote passes stay separate (each needs every draw or pixel of the step before: a grid-wide dependency).
 //             ParentListGroup also ranks the instanced candidates in a compact groupshared list (was: each candidate looped
 //             over all n draws in device memory, "p-list 0.2 ms" per eye in VR); more than kInstCap = the old loop.
+//  PHASE 37 : mv_fold_dispatch 3 (default) runs CSListTwin's three steps again as CSParentList (1 group) -> CSTwin -> CSAttach
+//             (one thread per draw): AttachDraw loops over every mover per draw, on the one SM of CSListTwin that was 0.62 ms avg /
+//             1.8 ms max per eye and pass in an ETS2 VR city. CSParentCount sums each group into a groupshared table first and
+//             does one global atomic per word and draw (gPcKey, see there). Both: the same results bit for bit.
 // v0.10.0 phase 14 STATIC REPLAY SKIP (draw_ids.h step 11): three more Cnt bitmasks, read back with the diagnostics -- dwords
 // 384..511 bit i = G-buffer draw i is PAIRED AND STATIC by its own pair (ResolveDraw state 2; nothing later changes a state-2
 // G-buffer draw), dwords 512..639 bit p = G-buffer draw p was a rigid parent this pass (ParApply), dwords 640..767 bit i = draw i
@@ -1181,6 +1185,32 @@ bool ParCountable(uint j) {
         return (ParU.x & 4u) != 0u && ((e.z & kFInst) == 0u || (Tab[j * 2u + 1u].z >> 24) <= 1u || (FoldU.w & 4u) != 0u);
     return e.x != kNone && (uint)(RTab[j * 5u + 4u].x + 0.5) == 1u && Work.Load(kPartner + j * 4u) == kNone;
 }
+// v0.10.0 phase 37 GROUP AGGREGATION (in game, ETS2 VR city, 336 movers: 0.51 ms avg / 0.78 ms max per eye and pass -- every grid
+// sample of one plate / truck did its 2 + 4 x 3 global atomics on the SAME kParPix / kParSum words, one serialised chain): an 8 x 8
+// group first sums into a groupshared table of up to kPcSlots draws (linear probe keyed by the draw index; only a sample that
+// counts a draw inserts it, so a group without a countable draw does no table work at all), then ONE global add per word and draw
+// (thread gi flushes slot gi). A draw that finds no free slot (> kPcSlots distinct countable draws in one group) takes the direct
+// global atomics exactly as before. The tests per sample (ParCountable, the RED-before-forward order) are unchanged; integer sums
+// are order-independent: kParPix / kParSum (and the tile list) are bit-identical to phase 18.
+static const uint kPcSlots = 64u;                          // = the group size: thread gi clears / flushes slot gi
+groupshared uint gPcKey[kPcSlots], gPcPix[kPcSlots], gPcSx[kPcSlots], gPcSy[kPcSlots], gPcN[kPcSlots];
+// the slot of draw j (inserted when free), kNone = the table is full (j takes the direct global atomics)
+uint PcSlot(uint j) {
+    uint s = j % kPcSlots;
+    [loop] for (uint k = 0u; k < kPcSlots; ++k) {
+        uint cur = gPcKey[s];                                  // keys never change once set: a plain read finds a set key
+        if (cur == kNone) InterlockedCompareExchange(gPcKey[s], kNone, j, cur);
+        if (cur == kNone || cur == j) return s;
+        s = (s + 1u) % kPcSlots;
+    }
+    return kNone;
+}
+// phase 37: + 1 coarse pixel of draw j (kParPix) -- into the group's table, or directly when it is full
+void PcAddPix(uint j) {
+    uint s = PcSlot(j), o0;
+    if (s != kNone) InterlockedAdd(gPcPix[s], 1u);
+    else Work.InterlockedAdd(kParPix + j * 4u, 1u, o0);
+}
 // v0.10.0 phase 14 round 4: the centroid sums (x, y, n) of a countable draw over a 2x2 sub-grid of each vote-grid cell (a centroid
 // on the 4 px grid jitters by a pixel as a small draw moves over the grid -- the temporal check / plate hold compare centroids)
 bool ParSumAt(int2 q) {                                            // (phase 18: true = q holds a countable draw)
@@ -1193,9 +1223,14 @@ bool ParSumAt(int2 q) {                                            // (phase 18:
         if (fy > Counts.w && fy <= Counts.x && (Tab[(fy - 1u) * 2u].z & (kFInst | kFNoMvp)) == 0u && ParCountable(fy - 1u)) j = fy - 1u;
     }
     if (j == kNone) return false;
-    Work.InterlockedAdd(kParSum + j * 12u, (uint)q.x, o0);
-    Work.InterlockedAdd(kParSum + j * 12u + 4u, (uint)q.y, o0);
-    Work.InterlockedAdd(kParSum + j * 12u + 8u, 1u, o0);
+    uint s = PcSlot(j);                                            // phase 37: into the group's table first
+    if (s != kNone) {
+        InterlockedAdd(gPcSx[s], (uint)q.x); InterlockedAdd(gPcSy[s], (uint)q.y); InterlockedAdd(gPcN[s], 1u);
+    } else {
+        Work.InterlockedAdd(kParSum + j * 12u, (uint)q.x, o0);
+        Work.InterlockedAdd(kParSum + j * 12u + 4u, (uint)q.y, o0);
+        Work.InterlockedAdd(kParSum + j * 12u + 8u, 1u, o0);
+    }
     return true;
 }
 // v0.10.0 phase 18 COMPACT VOTE: the count's group (8 x 8 grid samples) is exactly a vote group (same clip origin, same stride);
@@ -1206,17 +1241,17 @@ groupshared uint gTileAny;
 [numthreads(8, 8, 1)]
 void CSParentCount(uint3 tid : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint gi : SV_GroupIndex) {
     if (gi == 0u) gTileAny = 0u;
+    gPcKey[gi] = kNone; gPcPix[gi] = 0u; gPcSx[gi] = 0u; gPcSy[gi] = 0u; gPcN[gi] = 0u;   // phase 37: the group's table
     GroupMemoryBarrierWithGroupSync();
     uint st = max(ParU.y, 1u);
     int2 p = int2(Clip.xy) + int2(tid.xy * st);                    // v0.10.0 phase 9: the replay's clip only
     if (p.x < (int)Clip.z && p.y < (int)Clip.w) {
         uint2 ids = PIds[p];
-        uint o0;
-        if (ids.x != 0u && ids.x <= Counts.w && ParCountable(ids.x - 1u)) Work.InterlockedAdd(kParPix + (ids.x - 1u) * 4u, 1u, o0);
+        if (ids.x != 0u && ids.x <= Counts.w && ParCountable(ids.x - 1u)) PcAddPix(ids.x - 1u);   // (phase 37: via the table)
         uint fy = FwdIdAt(p, ids);
         if (fy > Counts.w && fy <= Counts.x) {
             uint j = fy - 1u;
-            if ((Tab[j * 2u].z & (kFInst | kFNoMvp)) == 0u && ParCountable(j)) Work.InterlockedAdd(kParPix + j * 4u, 1u, o0);
+            if ((Tab[j * 2u].z & (kFInst | kFNoMvp)) == 0u && ParCountable(j)) PcAddPix(j);
         }
         int h = (int)max(st / 2u, 1u);                              // phase 14 round 4: centroid sub-grid
         bool a0 = ParSumAt(p);
@@ -1226,6 +1261,16 @@ void CSParentCount(uint3 tid : SV_DispatchThreadID, uint3 gid : SV_GroupID, uint
         if (a0 || a1 || a2 || a3) InterlockedOr(gTileAny, 1u);
     }
     GroupMemoryBarrierWithGroupSync();
+    uint key = gPcKey[gi];                                          // phase 37: one global add per word and draw
+    if (key != kNone) {
+        uint o1, c = gPcPix[gi], nS = gPcN[gi];
+        if (c != 0u) Work.InterlockedAdd(kParPix + key * 4u, c, o1);
+        if (nS != 0u) {
+            Work.InterlockedAdd(kParSum + key * 12u, gPcSx[gi], o1);
+            Work.InterlockedAdd(kParSum + key * 12u + 4u, gPcSy[gi], o1);
+            Work.InterlockedAdd(kParSum + key * 12u + 8u, nS, o1);
+        }
+    }
     if (gi == 0u && gTileAny != 0u && (FoldU.x & 32u) != 0u) {
         uint at;
         Cnt.InterlockedAdd(kCntTiles * 4u, 1u, at);
@@ -2280,8 +2325,9 @@ StatEnt* StatFind(uint64_t key, bool insert) {
 }
 constexpr float kParFineSamples = 64.0f;   // < 64 coarse samples (~1000 px at mv_vote_res 4) = a FINE listed draw
 // v0.10.0 phase 9: dlaa.ini mv_fold_dispatch (1 = CSPickResolve / CSListTwin, 0 = the phase-8 chain of separate dispatches)
-// v0.10.0 phase 18: 2 (default) = CSListTwin + CSPickPar + the wide CSResolveInherit (see the header)
-int   g_foldMode = 2;
+// v0.10.0 phase 18: 2 = CSListTwin + CSPickPar + the wide CSResolveInherit (see the header)
+// v0.10.0 phase 37: 3 (default) = mode 2 with the list + twin + attach split again: CSParentList (1 group) + CSTwin / CSAttach wide
+int   g_foldMode = 3;
 // v0.10.0 phase 18: dlaa.ini mv_vote_compact (1 = the rigid-parent vote over the listed tiles, one thread per march direction)
 bool  g_voteCompact = true;
 // v0.10.2: dlaa.ini mv_area_clip (1 = the vote grid / pixel count over this eye's DLAA rect + g_areaMargin n the replay clip; see
@@ -3803,7 +3849,7 @@ void DrawIdMv::RegisterShaders() {
                      "cs_5_0");
 }
 
-void DrawIdMv::SetFold(int mode) { g_foldMode = mode <= 0 ? 0 : (mode >= 2 ? 2 : 1); }   // v0.10.0 phase 9 / 18
+void DrawIdMv::SetFold(int mode) { g_foldMode = mode <= 0 ? 0 : (mode >= 3 ? 3 : mode); }   // v0.10.0 phase 9 / 18 / 37
 int  DrawIdMv::Fold() { return g_foldMode; }
 void DrawIdMv::SetVoteCompact(bool on) { g_voteCompact = on; }   // v0.10.0 phase 18
 bool DrawIdMv::VoteCompact() { return g_voteCompact; }
@@ -4000,7 +4046,7 @@ bool DrawIdMv::Init(ID3D11Device* dev) {
     if (!CreateCsFromCache(dev, ShaderCache::kDrawIdPickPar, &m_csPickPar) ||
         !CreateCsFromCache(dev, ShaderCache::kDrawIdResInh, &m_csResInh)) {
         m_csPickPar.Reset(); m_csResInh.Reset();
-        Log("MV draw-ids: phase-18 pick / resolve shaders unavailable -- mv_fold_dispatch 2 runs as 1");
+        Log("MV draw-ids: phase-18 pick / resolve shaders unavailable -- mv_fold_dispatch 2 runs as 1 (3: the phase-9 pick + resolve)");
     }
     if (!CreateCsFromCache(dev, ShaderCache::kDrawIdParentCollect, &m_csParCollect) ||
         !CreateCsFromCache(dev, ShaderCache::kDrawIdParentMarch, &m_csParMarch)) {
@@ -4807,6 +4853,12 @@ void DrawIdMv::Dispatch(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ID3D1
     // v0.10.0 phase 18 (mv_fold_dispatch 2): the list + twin + attach group as in phase 9, but the pick (statistic spread over a
     // group) and resolve + inherit (one thread per draw, one wide dispatch) in place of the single-group CSPickResolve
     const bool wide = fold && g_foldMode >= 2 && m_csPickPar && m_csResInh;
+    // v0.10.0 phase 37 (mv_fold_dispatch 3, default): as mode 2 up to and including resolve + inherit, then the rigid-parent list
+    // (1 group), the twins and the origin attach as the phase-8 dispatches (CSTwin / CSAttach one thread per draw) in place of the
+    // single group of CSListTwin -- its AttachDraw loop (every unpaired / forward draw over all ~336 movers of a city, a matrix per
+    // mover) ran on ONE SM: 0.62 ms avg / 1.8 ms max per eye and pass. Same functions, same order (the dispatch boundaries are the
+    // group's device barriers), same results.
+    const bool split = fold && g_foldMode >= 3;
     if (pickOn) {
         pt = GpuPerf::Next(ctx, pt, GpuPerf::kVote);
         ctx->CSSetShader(m_csVote.Get(), nullptr, 0);
@@ -4887,14 +4939,14 @@ void DrawIdMv::Dispatch(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ID3D1
         ctx->CSSetShaderResources(8, 1, nullSrv);
         ctx->CSSetShaderResources(11, 1, nullSrv);
     }
-    if (fold && (parentOn || twinOn || attachOn)) {      // v0.10.0 phase 9: list + twin + attach in one group
+    if (fold && !split && (parentOn || twinOn || attachOn)) {   // v0.10.0 phase 9: list + twin + attach in one group
         pt = GpuPerf::Next(ctx, pt, GpuPerf::kListTwin);
         ID3D11UnorderedAccessView* argsUav = m_parArgsUav.Get();
         if (parentOn) ctx->CSSetUnorderedAccessViews(5, 1, &argsUav, keep);
         ctx->CSSetShader(m_csListTwin.Get(), nullptr, 0);
         ctx->Dispatch(1, 1, 1);
         if (parentOn) ctx->CSSetUnorderedAccessViews(5, 1, nullUav, keep);
-    } else if (!fold) {
+    } else if (!fold || split) {                         // (v0.10.0 phase 37: + mv_fold_dispatch 3)
         if (parentOn) {
             // v0.10.0 phase 8: CSParentList also writes the DispatchIndirect args of the votes (u5, bound for this dispatch only)
             pt = GpuPerf::Next(ctx, pt, GpuPerf::kParList);

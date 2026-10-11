@@ -6321,7 +6321,7 @@ int main(int argc, char** argv) {
         else if (!strcmp(s, "mutclip")) g_shadowMut = 1;     // v0.10.0 phase 9 (S11 / S12 must FAIL)
         else if (!strcmp(s, "mutview")) g_shadowMut = 2;
         else if (!strcmp(s, "nofold")) DrawIdMv::SetFold(0);       // v0.10.0 phase 9: the phase-8 dispatch chain
-        else if (!strncmp(s, "fold=", 5)) DrawIdMv::SetFold(atoi(s + 5));   // v0.10.0 phase 18: 0 / 1 (phase 9) / 2 (default)
+        else if (!strncmp(s, "fold=", 5)) DrawIdMv::SetFold(atoi(s + 5));   // v0.10.0 phase 18: 0 / 1 (phase 9) / 2; phase 37: 3 (default)
         else if (!strcmp(s, "nocompact")) DrawIdMv::SetVoteCompact(false);  // v0.10.0 phase 18: the full-grid vote (phase 8)
         else if (!strncmp(s, "cabmin=", 7)) DrawIdMv::SetConsMinCabin((unsigned)atoi(s + 7));   // phase 18: mv_cons_min_cabin
         else if (!strcmp(s, "hw")) g_hw = true;                    // v0.10.0 phase 18: hardware adapter (GPU timings)

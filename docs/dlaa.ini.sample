@@ -262,8 +262,10 @@ debug = 0
 # mv_fwd_depth_res = 0
 # 1 = some of the small GPU steps of the per-part motion run together (fewer passes per eye, same result), 0 = one pass each
 # (before phase 9), 2 = like 1, but the steps that touch every part run spread over the whole GPU (v0.10.0 phase 18: about
-# 0.13 ms less per eye in VR, same result; default)
-# mv_fold_dispatch = 2
+# 0.13 ms less per eye in VR, same result), 3 = like 2, but the step that matches plates / parts to the vehicle they sit on
+# (twin + attach) also runs spread over the whole GPU (v0.10.0 phase 37: cheaper in a busy city with many moving vehicles, same
+# result; default)
+# mv_fold_dispatch = 3
 
 # ---- v0.10.0 phase 10 ----
 # the see-through depth (mv_fwd_depth) is now drawn in ONE batch at the end of the game's see-through pass. 1 = it first copies

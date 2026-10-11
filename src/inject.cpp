@@ -1,3 +1,13 @@
+// (next) -- phase 37: CHEAPER PER-DRAW MV STEPS (draw_ids.cpp; the motion vectors are bit-identical, harness cmp max 0 px).
+//           ETS2 VR city (2995 draws, 336 movers) had "p-count" 0.51 ms avg / 0.78 max and "list+twin" 0.62 / 1.8 ms per eye
+//           and pass. (1) CSParentCount sums each 8 x 8 group into a groupshared table first (up to 64 countable draws, linear
+//           probe by draw index) and does ONE global atomic per word and draw (was: 2 + 4 x 3 global atomics per countable grid
+//           sample, all samples of a plate / truck on the same words); a draw without a free slot takes the direct atomics as
+//           before (scratch micro-bench, RTX 5090, 1530 x 1624 grid: 0.04-7.6 ms direct -> 0.02-0.07 ms grouped, same sums;
+//           the harness scenes are too small to gain, +0.005 ms). (2) dlaa.ini mv_fold_dispatch 3 (NEW DEFAULT; 0 / 1 / 2
+//           unchanged): as 2 up to and including resolve + inherit, then CSParentList (1 group) -> CSTwin -> CSAttach one thread
+//           per draw (GPU sections 'p-list' / 'twin' / 'attach') in place of the single group of CSListTwin, whose AttachDraw
+//           loop (every unpaired / forward draw over all movers, a matrix per mover) ran on one SM. Harness: fold=3.
 // (next) -- phase 36: GPU TIME PER PASS TYPE (gpu_pass.h; measurement only, on with debug = 1 / perf_timers). hkOMSetRenderTargets
 //           stamps two GPU timestamps per game bind (top, and end after the mod's bind-time work); the interval after a bind is
 //           charged to its class: shadow / gbuffer / lighting / forward / post / mirror / other (+ "bindwork" = the mod's own
@@ -9487,7 +9497,8 @@ void PerfStatsLog(uint64_t blit) {
         (unsigned long long)g_p9Passes, g_p9Clipped ? 100.0 * g_p9ClipShare / (double)g_p9Clipped : 100.0,
         (long)g_p9LastClip.left, (long)g_p9LastClip.top, (long)g_p9LastClip.right, (long)g_p9LastClip.bottom, g_sceneW, g_sceneH,
         "1/2 resolution", (unsigned long long)g_p9Half, (unsigned long long)g_p9Passes,
-        DrawIdMv::Fold() >= 2 ? "pick (spread) + res+inh (wide), list+twin folded (mv_fold_dispatch 2)"
+        DrawIdMv::Fold() >= 3 ? "pick (spread) + res+inh (wide), list 1 group + twin / attach wide (mv_fold_dispatch 3)"
+        : DrawIdMv::Fold() >= 2 ? "pick (spread) + res+inh (wide), list+twin folded (mv_fold_dispatch 2)"
                               : (DrawIdMv::Fold() ? "folded (pick+res, list+twin)" : "separate (phase 8)"),
         (unsigned long long)DrawIdRecord::ScissorRsFails(), (int)DrawIdMv::AreaClip(), DrawIdMv::AreaMargin(), vgEyeN, vgN, vgTag,
         rcTag);
@@ -18146,7 +18157,7 @@ void LoadConfig() {
             else if (!strcmp(key, "mv_area_margin"))    g_areaMarginCfg = v < 0 ? -1 : (v > 1024 ? 1024 : (int)v);
             else if (!strcmp(key, "mv_area_clip"))      g_areaClipCfg = v != 0;                             // v0.10.2
             else if (!strcmp(key, "mv_fwd_depth_res"))  { g_fwdResCfg = (v == 1 || v == 2) ? (int)v : 0; g_profExplicit[PK_FWD_RES] = true; }
-            else if (!strcmp(key, "mv_fold_dispatch"))  DrawIdMv::SetFold(v <= 0 ? 0 : (v >= 2 ? 2 : 1));   // phase 18: 2
+            else if (!strcmp(key, "mv_fold_dispatch"))  DrawIdMv::SetFold(v <= 0 ? 0 : (v >= 3 ? 3 : (int)v));   // phase 37: 3
             else if (!strcmp(key, "mv_vote_compact"))   DrawIdMv::SetVoteCompact(v != 0);                   // v0.10.0 phase 18
             else if (!strcmp(key, "mv_cons_min_cabin")) DrawIdMv::SetConsMinCabin(v <= 0 ? 0u : (unsigned)v);   // phase 18
             else if (!strcmp(key, "mv_cabin_small"))    DrawIdMv::SetCabinSmall(v <= 0 ? 0u : (unsigned)v);      // phase 19
@@ -18595,7 +18606,10 @@ void LoadConfig() {
             g_mirCamOnly && g_mirVrMode >= 1 && g_mirVrMode <= 3
                 ? " -- mirror_mv camera: the handled views use camera motion vectors only (no per-draw ids: no record / replay / "
                   "pairing in the mirror units, ~0.15 ms per unit instead of ~0.4 ms)" : "",
-            DrawIdMv::Fold() >= 2 ? "as 12 dispatches per eye, 14 with mv_vote_compact (phase 18: the pick spread over a group, "
+            DrawIdMv::Fold() >= 3 ? "as 14 dispatches per eye, 16 with mv_vote_compact (phase 37: as mode 2, but the rigid-parent "
+                                    "list as one group and the twins / origin attach one thread per draw, no single-group "
+                                    "list + twin + attach)"
+            : DrawIdMv::Fold() >= 2 ? "as 12 dispatches per eye, 14 with mv_vote_compact (phase 18: the pick spread over a group, "
                                     "resolve + inherit in one wide dispatch, list + twin + attach folded)"
             : (DrawIdMv::Fold() ? "as 11 dispatches per eye (pick + resolve + inherit and list + twin + attach folded)"
                                 : "as 15 dispatches per eye (phase 8)"));

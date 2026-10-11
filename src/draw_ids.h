@@ -583,8 +583,11 @@ public:
     // depth (fwdDepthSrv) and its forward ids (fwdIdSrv, R16_UINT, nullable otherwise) at 1/2 size -- read at pixel >> 1.
     // Fewer dispatches (dlaa.ini mv_fold_dispatch): 1 (phase 9) = pick + resolve + inherit run as ONE single-group dispatch
     // (CSPickResolve) and the rigid-parent list + twin + attach as another (CSListTwin); 0 = the phase-8 chain; 2 (phase 18,
-    // default) = the list + twin + attach group of 1, the pick with its statistic spread over a group (CSPickPar) and resolve +
-    // inherit as ONE wide dispatch (CSResolveInherit) -- the single group resolved ~2200 draws 9 per thread (0.15-0.18 ms / eye).
+    // default until phase 37) = the list + twin + attach group of 1, the pick with its statistic spread over a group (CSPickPar)
+    // and resolve + inherit as ONE wide dispatch (CSResolveInherit) -- the single group resolved ~2200 draws 9 per thread
+    // (0.15-0.18 ms / eye); 3 (phase 37, default) = 2 with the list (CSParentList, 1 group), the twins (CSTwin) and the origin
+    // attach (CSAttach, one thread per draw) as separate dispatches again (AttachDraw loops over every mover: 0.62 ms / eye on
+    // the single group in a city).
     // v0.10.0 phase 18 (dlaa.ini mv_vote_compact, default 1): the rigid-parent vote runs over the vote-grid tiles that hold a
     // countable pixel (CSParentCount lists them) and marches one thread per (sample, direction) (CSParentCollect + CSParentMarch);
     // 0 = the phase-8 vote grid (one thread marches a sample's 8 directions in a row). Same marches, same vote tables.
@@ -592,7 +595,7 @@ public:
                   const DrawIdRecord* fwd = nullptr, ID3D11UnorderedAccessView* solveUav = nullptr,
                   ID3D11ShaderResourceView* idSrv = nullptr, ID3D11ShaderResourceView* depthSrv = nullptr,
                   ID3D11ShaderResourceView* fwdDepthSrv = nullptr, ID3D11ShaderResourceView* fwdIdSrv = nullptr);
-    static void SetFold(int mode);                // v0.10.0 phase 9 (dlaa.ini mv_fold_dispatch 0 / 1 / 2; phase 18: 2 = default)
+    static void SetFold(int mode);                // v0.10.0 phase 9 (dlaa.ini mv_fold_dispatch 0 / 1 / 2 / 3; phase 37: 3 = default)
     static int  Fold();
     static void SetVoteCompact(bool on);          // v0.10.0 phase 18 (dlaa.ini mv_vote_compact)
     static bool VoteCompact();

@@ -141,7 +141,7 @@ checks without rstatic). S6, S7 and S8 (consensus convoy, plates by twin / attac
 trailer that moves from frame 0) also run gated (their own id / parent / MV checks + "the gate must skip something"). `cmpdump`
 without / `cmp` with `rstatic=4`: S1-S4 and S6-S8 0 px differ; S13 785 px in 2 frames (max 0.24 px: the start lag). Run this
 comparison after any change to the gate or the vote.
-Phase 18 knobs: `fold=0|1|2` (mv_fold_dispatch; `nofold` = 0), `nocompact` (mv_vote_compact 0), `cabmin=N` (mv_cons_min_cabin) and
+Phase 18 knobs: `fold=0|1|2|3` (mv_fold_dispatch, phase 37: 3 = default; `nofold` = 0), `nocompact` (mv_vote_compact 0), `cabmin=N` (mv_cons_min_cabin) and
 `hw` (the hardware adapter instead of WARP: the per-scene perf line then shows real GPU ms; the checks still pass on an RTX 5090).
 Phase 19: scene 17 = S17 (car, the interior's big draws with their MVP one cb0 row later, the in-game signature) + S17b (car with a
 valid interior: one big body draw against a 2-draw swinging tag); knobs `cabsmall=N` (mv_cabin_small, 0 = off) and the mutation
