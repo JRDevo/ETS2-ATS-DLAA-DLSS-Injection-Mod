@@ -2433,6 +2433,120 @@ struct DrawIdRecord::PsState {
     ID3D11SamplerState* smp[kPsSmp];
 };
 
+enum : uint32_t {
+    kShadowIl   = 1u << 0,
+    kShadowVb   = 1u << 1,
+    kShadowIb   = 1u << 2,
+    kShadowTopo = 1u << 3,
+    kShadowVs   = 1u << 4,
+    kShadowCb   = 1u << 5,
+    kShadowSrv  = 1u << 6,
+    kShadowSmp  = 1u << 7,
+    kShadowRs   = 1u << 8,
+    kShadowVp   = 1u << 9,
+    kShadowSc   = 1u << 10,
+};
+
+struct DrawShadowState {
+    uint32_t bits = 0;
+    uint32_t vbMask = 0, cbMask = 0, srvMask = 0, smpMask = 0;
+    ID3D11InputLayout* il = nullptr;
+    ID3D11Buffer* vb[DrawIdRecord::kVb] = {}; UINT vbStride[DrawIdRecord::kVb] = {}, vbOff[DrawIdRecord::kVb] = {};
+    ID3D11Buffer* ib = nullptr; DXGI_FORMAT ibFmt = DXGI_FORMAT_UNKNOWN; UINT ibOff = 0;
+    D3D11_PRIMITIVE_TOPOLOGY topo = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
+    ID3D11VertexShader* vs = nullptr;
+    ID3D11Buffer* cb[DrawIdRecord::kVsCb] = {}; UINT cbFirst[DrawIdRecord::kVsCb] = {}, cbNum[DrawIdRecord::kVsCb] = {};
+    ID3D11ShaderResourceView* srv[DrawIdRecord::kVsSrv] = {};
+    ID3D11SamplerState* smp[DrawIdRecord::kVsSmp] = {};
+    ID3D11RasterizerState* rs = nullptr;
+    UINT nVp = 0, nSc = 0;
+    D3D11_VIEWPORT vp[DrawIdRecord::kVp] = {};
+    D3D11_RECT sc[DrawIdRecord::kSc] = {};
+};
+
+DrawShadowState g_drawShadow;
+constexpr uint32_t kShadowVbFull = (1u << DrawIdRecord::kVb) - 1u;
+constexpr uint32_t kShadowCbFull = (1u << DrawIdRecord::kVsCb) - 1u;
+constexpr uint32_t kShadowSrvFull = (1u << DrawIdRecord::kVsSrv) - 1u;
+constexpr uint32_t kShadowSmpFull = (1u << DrawIdRecord::kVsSmp) - 1u;
+DrawIdRecord::ShadowWindow g_shadowWin;
+enum : int { kShIl = 0, kShVb, kShIb, kShTopo, kShVs, kShCb, kShSrv, kShSmp, kShRs, kShVp, kShSc };
+
+template <class T> void AddRefShadow(T* p) { if (p) p->AddRef(); }
+
+uint32_t DrawIdRecord::ShadowCapture(State* out) {
+    uint32_t got = 0;
+    if (g_drawShadow.bits & kShadowIl) {
+        out->il = g_drawShadow.il; AddRefShadow(out->il); got |= kShadowIl;
+    }
+    if (g_drawShadow.vbMask == kShadowVbFull) {
+        memcpy(out->vb, g_drawShadow.vb, sizeof(out->vb));
+        memcpy(out->vbStride, g_drawShadow.vbStride, sizeof(out->vbStride));
+        memcpy(out->vbOff, g_drawShadow.vbOff, sizeof(out->vbOff));
+        for (auto* p : out->vb) AddRefShadow(p);
+        got |= kShadowVb;
+    }
+    if (g_drawShadow.bits & kShadowIb) {
+        out->ib = g_drawShadow.ib; out->ibFmt = g_drawShadow.ibFmt; out->ibOff = g_drawShadow.ibOff;
+        AddRefShadow(out->ib); got |= kShadowIb;
+    }
+    if (g_drawShadow.bits & kShadowTopo) { out->topo = g_drawShadow.topo; got |= kShadowTopo; }
+    if (g_drawShadow.bits & kShadowVs) {
+        out->vs = g_drawShadow.vs; AddRefShadow(out->vs); got |= kShadowVs;
+    }
+    if (g_drawShadow.cbMask == kShadowCbFull) {
+        memcpy(out->cb, g_drawShadow.cb, sizeof(out->cb));
+        memcpy(out->cbFirst, g_drawShadow.cbFirst, sizeof(out->cbFirst));
+        memcpy(out->cbNum, g_drawShadow.cbNum, sizeof(out->cbNum));
+        for (auto* p : out->cb) AddRefShadow(p);
+        got |= kShadowCb;
+    }
+    if (g_drawShadow.srvMask == kShadowSrvFull) {
+        memcpy(out->srv, g_drawShadow.srv, sizeof(out->srv));
+        for (auto* p : out->srv) AddRefShadow(p);
+        got |= kShadowSrv;
+    }
+    if (g_drawShadow.smpMask == kShadowSmpFull) {
+        memcpy(out->smp, g_drawShadow.smp, sizeof(out->smp));
+        for (auto* p : out->smp) AddRefShadow(p);
+        got |= kShadowSmp;
+    }
+    if (g_drawShadow.bits & kShadowRs) {
+        out->rs = g_drawShadow.rs; AddRefShadow(out->rs); got |= kShadowRs;
+    }
+    if (g_drawShadow.bits & kShadowVp) {
+        out->nVp = g_drawShadow.nVp;
+        memcpy(out->vp, g_drawShadow.vp, sizeof(out->vp));
+        got |= kShadowVp;
+    }
+    if (g_drawShadow.bits & kShadowSc) {
+        out->nSc = g_drawShadow.nSc;
+        memcpy(out->sc, g_drawShadow.sc, sizeof(out->sc));
+        got |= kShadowSc;
+    }
+    return got;
+}
+
+void DrawIdRecord::ShadowSeed(const State& s) {
+    g_drawShadow.il = s.il; g_drawShadow.bits |= kShadowIl;
+    memcpy(g_drawShadow.vb, s.vb, sizeof(g_drawShadow.vb));
+    memcpy(g_drawShadow.vbStride, s.vbStride, sizeof(g_drawShadow.vbStride));
+    memcpy(g_drawShadow.vbOff, s.vbOff, sizeof(g_drawShadow.vbOff));
+    g_drawShadow.vbMask = kShadowVbFull;
+    g_drawShadow.ib = s.ib; g_drawShadow.ibFmt = s.ibFmt; g_drawShadow.ibOff = s.ibOff; g_drawShadow.bits |= kShadowIb;
+    g_drawShadow.topo = s.topo; g_drawShadow.bits |= kShadowTopo;
+    g_drawShadow.vs = s.vs; g_drawShadow.bits |= kShadowVs;
+    memcpy(g_drawShadow.cb, s.cb, sizeof(g_drawShadow.cb));
+    memcpy(g_drawShadow.cbFirst, s.cbFirst, sizeof(g_drawShadow.cbFirst));
+    memcpy(g_drawShadow.cbNum, s.cbNum, sizeof(g_drawShadow.cbNum));
+    g_drawShadow.cbMask = kShadowCbFull;
+    memcpy(g_drawShadow.srv, s.srv, sizeof(g_drawShadow.srv)); g_drawShadow.srvMask = kShadowSrvFull;
+    memcpy(g_drawShadow.smp, s.smp, sizeof(g_drawShadow.smp)); g_drawShadow.smpMask = kShadowSmpFull;
+    g_drawShadow.rs = s.rs; g_drawShadow.bits |= kShadowRs;
+    g_drawShadow.nVp = s.nVp; memcpy(g_drawShadow.vp, s.vp, sizeof(g_drawShadow.vp)); g_drawShadow.bits |= kShadowVp;
+    g_drawShadow.nSc = s.nSc; memcpy(g_drawShadow.sc, s.sc, sizeof(g_drawShadow.sc)); g_drawShadow.bits |= kShadowSc;
+}
+
 void DrawIdRecord::ReleasePs(int from, int to) {
     if (!m_ps) return;
     for (int i = from; i < to; ++i) {
@@ -2493,6 +2607,115 @@ void DrawIdRecord::Reset() {
     memset(m_srvKey, 0, sizeof(m_srvKey));
     memset(m_srvRes, 0, sizeof(m_srvRes));
     m_srvNext = 0;
+}
+
+DrawIdRecord::ShadowWindow DrawIdRecord::TakeShadowWindow() {
+    ShadowWindow out = g_shadowWin;
+    g_shadowWin = ShadowWindow{};
+    return out;
+}
+
+void DrawIdRecord::ShadowInvalidate() {
+    g_drawShadow = DrawShadowState{};
+}
+
+void DrawIdRecord::NoteInputLayout(ID3D11InputLayout* il) {
+    g_drawShadow.il = il;
+    g_drawShadow.bits |= kShadowIl;
+}
+
+void DrawIdRecord::NoteVertexBuffers(UINT start, UINT num, ID3D11Buffer* const* vb, const UINT* stride, const UINT* off) {
+    if (!vb || !stride || !off || start >= (UINT)kVb) return;
+    if (num > (UINT)kVb - start) num = (UINT)kVb - start;
+    for (UINT i = 0; i < num; ++i) {
+        const UINT slot = start + i;
+        g_drawShadow.vb[slot] = vb[i];
+        g_drawShadow.vbStride[slot] = stride[i];
+        g_drawShadow.vbOff[slot] = off[i];
+        g_drawShadow.vbMask |= 1u << slot;
+    }
+}
+
+void DrawIdRecord::NoteIndexBuffer(ID3D11Buffer* ib, DXGI_FORMAT fmt, UINT off) {
+    g_drawShadow.ib = ib; g_drawShadow.ibFmt = fmt; g_drawShadow.ibOff = off;
+    g_drawShadow.bits |= kShadowIb;
+}
+
+void DrawIdRecord::NotePrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY topo) {
+    g_drawShadow.topo = topo;
+    g_drawShadow.bits |= kShadowTopo;
+}
+
+void DrawIdRecord::NoteVsShader(ID3D11VertexShader* vs) {
+    g_drawShadow.vs = vs;
+    g_drawShadow.bits |= kShadowVs;
+}
+
+void DrawIdRecord::NoteVsConstantBuffers(UINT start, UINT num, ID3D11Buffer* const* cb) {
+    if (start >= (UINT)kVsCb) return;
+    if (num > (UINT)kVsCb - start) num = (UINT)kVsCb - start;
+    for (UINT i = 0; i < num; ++i) {
+        const UINT slot = start + i;
+        ID3D11Buffer* const buf = cb ? cb[i] : nullptr;
+        g_drawShadow.cb[slot] = buf;
+        g_drawShadow.cbFirst[slot] = 0u;
+        g_drawShadow.cbNum[slot] = buf ? 4096u : 0u;
+        g_drawShadow.cbMask |= 1u << slot;
+    }
+}
+
+void DrawIdRecord::NoteVsConstantBuffers1(UINT start, UINT num, ID3D11Buffer* const* cb, const UINT* first, const UINT* count) {
+    if (start >= (UINT)kVsCb) return;
+    if (num > (UINT)kVsCb - start) num = (UINT)kVsCb - start;
+    for (UINT i = 0; i < num; ++i) {
+        const UINT slot = start + i;
+        ID3D11Buffer* const buf = cb ? cb[i] : nullptr;
+        g_drawShadow.cb[slot] = buf;
+        g_drawShadow.cbFirst[slot] = buf && first ? first[i] : 0u;
+        g_drawShadow.cbNum[slot] = buf ? (count ? count[i] : 4096u) : 0u;
+        g_drawShadow.cbMask |= 1u << slot;
+    }
+}
+
+void DrawIdRecord::NoteVsShaderResources(UINT start, UINT num, ID3D11ShaderResourceView* const* srv) {
+    if (!srv || start >= (UINT)kVsSrv) return;
+    if (num > (UINT)kVsSrv - start) num = (UINT)kVsSrv - start;
+    for (UINT i = 0; i < num; ++i) {
+        const UINT slot = start + i;
+        g_drawShadow.srv[slot] = srv[i];
+        g_drawShadow.srvMask |= 1u << slot;
+    }
+}
+
+void DrawIdRecord::NoteVsSamplers(UINT start, UINT num, ID3D11SamplerState* const* smp) {
+    if (!smp || start >= (UINT)kVsSmp) return;
+    if (num > (UINT)kVsSmp - start) num = (UINT)kVsSmp - start;
+    for (UINT i = 0; i < num; ++i) {
+        const UINT slot = start + i;
+        g_drawShadow.smp[slot] = smp[i];
+        g_drawShadow.smpMask |= 1u << slot;
+    }
+}
+
+void DrawIdRecord::NoteRsState(ID3D11RasterizerState* rs) {
+    g_drawShadow.rs = rs;
+    g_drawShadow.bits |= kShadowRs;
+}
+
+void DrawIdRecord::NoteViewports(UINT n, const D3D11_VIEWPORT* vp) {
+    if (n > (UINT)kVp) n = (UINT)kVp;
+    g_drawShadow.nVp = n;
+    if (n) memcpy(g_drawShadow.vp, vp, sizeof(D3D11_VIEWPORT) * n);
+    if (n < (UINT)kVp) memset(g_drawShadow.vp + n, 0, sizeof(D3D11_VIEWPORT) * ((UINT)kVp - n));
+    g_drawShadow.bits |= kShadowVp;
+}
+
+void DrawIdRecord::NoteScissorRects(UINT n, const D3D11_RECT* sc) {
+    if (n > (UINT)kSc) n = (UINT)kSc;
+    g_drawShadow.nSc = n;
+    if (n) memcpy(g_drawShadow.sc, sc, sizeof(D3D11_RECT) * n);
+    if (n < (UINT)kSc) memset(g_drawShadow.sc + n, 0, sizeof(D3D11_RECT) * ((UINT)kSc - n));
+    g_drawShadow.bits |= kShadowSc;
 }
 
 void DrawIdRecord::Shutdown() {
@@ -2637,29 +2860,52 @@ bool DrawIdRecord::Record(ID3D11DeviceContext1* ctx, UINT ic, UINT inst, UINT si
         memset(m_st, 0, sizeof(State) * kMax);
     }
     State& s = m_st[m_n];
-    ctx->IAGetInputLayout(&s.il);
-    ctx->IAGetVertexBuffers(0, kVb, s.vb, s.vbStride, s.vbOff);
-    ctx->IAGetIndexBuffer(&s.ib, &s.ibFmt, &s.ibOff);
-    ctx->IAGetPrimitiveTopology(&s.topo);
-    ctx->VSGetShader(&s.vs, nullptr, nullptr);
-    ctx->VSGetConstantBuffers1(0, kVsCb, s.cb, s.cbFirst, s.cbNum);
-    ctx->VSGetShaderResources(0, kVsSrv, s.srv);
-    ctx->VSGetSamplers(0, kVsSmp, s.smp);
-    ctx->RSGetState(&s.rs);
-    {
+    memset(&s, 0, sizeof(s));
+    const uint32_t shadow = ShadowCapture(&s);
+    ++g_shadowWin.calls;
+    auto markShadow = [&](int field, bool hit) {
+        if (hit) ++g_shadowWin.shadow[field];
+        else ++g_shadowWin.fallback[field];
+    };
+    markShadow(kShIl, (shadow & kShadowIl) != 0);
+    markShadow(kShVb, (shadow & kShadowVb) != 0);
+    markShadow(kShIb, (shadow & kShadowIb) != 0);
+    markShadow(kShTopo, (shadow & kShadowTopo) != 0);
+    markShadow(kShVs, (shadow & kShadowVs) != 0);
+    markShadow(kShCb, (shadow & kShadowCb) != 0);
+    markShadow(kShSrv, (shadow & kShadowSrv) != 0);
+    markShadow(kShSmp, (shadow & kShadowSmp) != 0);
+    markShadow(kShRs, (shadow & kShadowRs) != 0);
+    markShadow(kShVp, (shadow & kShadowVp) != 0);
+    markShadow(kShSc, (shadow & kShadowSc) != 0);
+    if (!(shadow & kShadowIl)) ctx->IAGetInputLayout(&s.il);
+    if (!(shadow & kShadowVb)) ctx->IAGetVertexBuffers(0, kVb, s.vb, s.vbStride, s.vbOff);
+    if (!(shadow & kShadowIb)) ctx->IAGetIndexBuffer(&s.ib, &s.ibFmt, &s.ibOff);
+    if (!(shadow & kShadowTopo)) ctx->IAGetPrimitiveTopology(&s.topo);
+    if (!(shadow & kShadowVs)) ctx->VSGetShader(&s.vs, nullptr, nullptr);
+    if (!(shadow & kShadowCb)) ctx->VSGetConstantBuffers1(0, kVsCb, s.cb, s.cbFirst, s.cbNum);
+    if (!(shadow & kShadowSrv)) ctx->VSGetShaderResources(0, kVsSrv, s.srv);
+    if (!(shadow & kShadowSmp)) ctx->VSGetSamplers(0, kVsSmp, s.smp);
+    if (!(shadow & kShadowRs)) ctx->RSGetState(&s.rs);
+    if (!(shadow & kShadowVp) || !(shadow & kShadowSc)) {
         D3D11_VIEWPORT vps[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
         UINT nv = D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
-        ctx->RSGetViewports(&nv, vps);
-        if (nv > (UINT)kVp) nv = kVp;
-        s.nVp = nv;
-        memcpy(s.vp, vps, sizeof(D3D11_VIEWPORT) * nv);
+        if (!(shadow & kShadowVp)) {
+            ctx->RSGetViewports(&nv, vps);
+            if (nv > (UINT)kVp) nv = kVp;
+            s.nVp = nv;
+            memcpy(s.vp, vps, sizeof(D3D11_VIEWPORT) * nv);
+        }
         D3D11_RECT scs[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
         UINT ns = D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
-        ctx->RSGetScissorRects(&ns, scs);
-        if (ns > (UINT)kSc) ns = kSc;
-        s.nSc = ns;
-        memcpy(s.sc, scs, sizeof(D3D11_RECT) * ns);
+        if (!(shadow & kShadowSc)) {
+            ctx->RSGetScissorRects(&ns, scs);
+            if (ns > (UINT)kSc) ns = kSc;
+            s.nSc = ns;
+            memcpy(s.sc, scs, sizeof(D3D11_RECT) * ns);
+        }
     }
+    ShadowSeed(s);
     s.ic = ic; s.inst = inst; s.si = si; s.sinst = sinst; s.bv = bv; s.instanced = instanced;
     // v0.10.0 phase 10: the pixel-shader state of a forward draw (the batched forward-depth re-draw needs the game's alpha)
     if (m_capPs && !m_ps && m_n == 0) {

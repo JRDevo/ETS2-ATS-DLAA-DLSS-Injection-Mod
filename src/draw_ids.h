@@ -292,9 +292,29 @@ public:
     const void* Ps(int i) const;
     enum : uint8_t { kPsScanned = 1, kPsDiscard = 2, kPsDepth = 4 };
     typedef uint8_t (*PsInfoFn)(const void* ps);
+    enum : int { kShadowFieldCount = 11 };
+    struct ShadowWindow {
+        uint64_t calls = 0;
+        uint64_t shadow[kShadowFieldCount] = {};
+        uint64_t fallback[kShadowFieldCount] = {};
+    };
     static void NoteGamePs(const void* ps) { s_gamePs = ps; }
     static void SetPsInfoFn(PsInfoFn fn) { s_psInfo = fn; }
     static uint8_t PsInfo(const void* ps) { return s_psInfo ? s_psInfo(ps) : 0; }
+    static ShadowWindow TakeShadowWindow();
+    static void ShadowInvalidate();
+    static void NoteInputLayout(ID3D11InputLayout* il);
+    static void NoteVertexBuffers(UINT start, UINT num, ID3D11Buffer* const* vb, const UINT* stride, const UINT* off);
+    static void NoteIndexBuffer(ID3D11Buffer* ib, DXGI_FORMAT fmt, UINT off);
+    static void NotePrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY topo);
+    static void NoteVsShader(ID3D11VertexShader* vs);
+    static void NoteVsConstantBuffers(UINT start, UINT num, ID3D11Buffer* const* cb);
+    static void NoteVsConstantBuffers1(UINT start, UINT num, ID3D11Buffer* const* cb, const UINT* first, const UINT* count);
+    static void NoteVsShaderResources(UINT start, UINT num, ID3D11ShaderResourceView* const* srv);
+    static void NoteVsSamplers(UINT start, UINT num, ID3D11SamplerState* const* smp);
+    static void NoteRsState(ID3D11RasterizerState* rs);
+    static void NoteViewports(UINT n, const D3D11_VIEWPORT* vp);
+    static void NoteScissorRects(UINT n, const D3D11_RECT* sc);
     ID3D11ShaderResourceView* MirrorSrv() const { return m_mirrorSrv.Get(); }
     bool Usable() const { return m_n > 0 && !m_flushFail && !FlushPending() && m_mirrorSrv; }
     int  Instanced() const { return m_nInst; }
@@ -337,6 +357,8 @@ private:
     // v0.10.0 phase 22: copies cb0 rows 0 .. min(want, the ring's end) / 16 - 1 of the window at rowBase (row 4..7 must exist);
     // returns the mirror byte offset of row 4 (or 0xFFFFFFFF) and *rows = the rows mirrored from row 0
     UINT AddRing(ID3D11Buffer* cb, UINT rowBase, UINT wantBytes, UINT* rows);
+    uint32_t ShadowCapture(State* out);
+    void ShadowSeed(const State& s);
     bool FlushRing(ID3D11DeviceContext* ctx, int k);
     bool EnsureMirror(ID3D11DeviceContext* ctx, UINT need);
     void ReleaseRange(int from, int to);

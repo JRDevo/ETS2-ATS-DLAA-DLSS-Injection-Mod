@@ -1485,9 +1485,31 @@ HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
 
 // ---- scene detection + DLAA ------------------------------------------------
 typedef void (STDMETHODCALLTYPE* RSSetViewports_t)(ID3D11DeviceContext*, UINT, const D3D11_VIEWPORT*);
+typedef void (STDMETHODCALLTYPE* IASetInputLayout_t)(ID3D11DeviceContext*, ID3D11InputLayout*);
+typedef void (STDMETHODCALLTYPE* IASetVertexBuffers_t)(ID3D11DeviceContext*, UINT, UINT, ID3D11Buffer* const*, const UINT*, const UINT*);
+typedef void (STDMETHODCALLTYPE* IASetIndexBuffer_t)(ID3D11DeviceContext*, ID3D11Buffer*, DXGI_FORMAT, UINT);
+typedef void (STDMETHODCALLTYPE* IASetPrimitiveTopology_t)(ID3D11DeviceContext*, D3D11_PRIMITIVE_TOPOLOGY);
+typedef void (STDMETHODCALLTYPE* VSSetConstantBuffers_t)(ID3D11DeviceContext*, UINT, UINT, ID3D11Buffer* const*);
+typedef void (STDMETHODCALLTYPE* VSSetConstantBuffers1_t)(ID3D11DeviceContext1*, UINT, UINT, ID3D11Buffer* const*, const UINT*, const UINT*);
+typedef void (STDMETHODCALLTYPE* VSSetShader_t)(ID3D11DeviceContext*, ID3D11VertexShader*, ID3D11ClassInstance* const*, UINT);
+typedef void (STDMETHODCALLTYPE* VSSetShaderResources_t)(ID3D11DeviceContext*, UINT, UINT, ID3D11ShaderResourceView* const*);
+typedef void (STDMETHODCALLTYPE* VSSetSamplers_t)(ID3D11DeviceContext*, UINT, UINT, ID3D11SamplerState* const*);
+typedef void (STDMETHODCALLTYPE* RSSetState_t)(ID3D11DeviceContext*, ID3D11RasterizerState*);
+typedef void (STDMETHODCALLTYPE* RSSetScissorRects_t)(ID3D11DeviceContext*, UINT, const D3D11_RECT*);
 typedef void (STDMETHODCALLTYPE* Draw_t)(ID3D11DeviceContext*, UINT, UINT);
 typedef void (STDMETHODCALLTYPE* OMSetRenderTargets_t)(ID3D11DeviceContext*, UINT,
         ID3D11RenderTargetView* const*, ID3D11DepthStencilView*);
+IASetInputLayout_t   oIASetInputLayout = nullptr;
+IASetVertexBuffers_t oIASetVertexBuffers = nullptr;
+IASetIndexBuffer_t   oIASetIndexBuffer = nullptr;
+IASetPrimitiveTopology_t oIASetPrimitiveTopology = nullptr;
+VSSetConstantBuffers_t oVSSetConstantBuffers = nullptr;
+VSSetConstantBuffers1_t oVSSetConstantBuffers1 = nullptr;
+VSSetShader_t        oVSSetShader = nullptr;
+VSSetShaderResources_t oVSSetShaderResources = nullptr;
+VSSetSamplers_t      oVSSetSamplers = nullptr;
+RSSetState_t         oRSSetState = nullptr;
+RSSetScissorRects_t  oRSSetScissorRects = nullptr;
 Draw_t               oDraw = nullptr;
 OMSetRenderTargets_t oOMSetRenderTargets = nullptr;
 RSSetViewports_t     oRSSetViewports = nullptr;
@@ -6862,10 +6884,97 @@ void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
         v[0].TopLeftY += sy;
         if (over) { v[0].Width += 1.0f; v[0].Height += 1.0f; }
         oRSSetViewports(ctx, g_gameVpN, v);
+#ifdef WITH_DLAA
+        DrawIdRecord::NoteViewports(g_gameVpN, v);
+#endif
     } else {
         oRSSetViewports(ctx, g_gameVpN, g_gameVp);
+#ifdef WITH_DLAA
+        DrawIdRecord::NoteViewports(g_gameVpN, g_gameVp);
+#endif
     }
     g_vpShifted = shift; g_vpShiftX = sx; g_vpShiftY = sy; g_vpOver = over;
+}
+
+void STDMETHODCALLTYPE hkIASetInputLayout(ID3D11DeviceContext* ctx, ID3D11InputLayout* il) {
+#ifdef WITH_DLAA
+    if (!t_inDlaa && IsGameCtx(ctx)) DrawIdRecord::NoteInputLayout(il);
+#endif
+    oIASetInputLayout(ctx, il);
+}
+
+void STDMETHODCALLTYPE hkIASetVertexBuffers(ID3D11DeviceContext* ctx, UINT start, UINT num, ID3D11Buffer* const* vb,
+                                            const UINT* stride, const UINT* off) {
+#ifdef WITH_DLAA
+    if (!t_inDlaa && IsGameCtx(ctx)) DrawIdRecord::NoteVertexBuffers(start, num, vb, stride, off);
+#endif
+    oIASetVertexBuffers(ctx, start, num, vb, stride, off);
+}
+
+void STDMETHODCALLTYPE hkIASetIndexBuffer(ID3D11DeviceContext* ctx, ID3D11Buffer* ib, DXGI_FORMAT fmt, UINT off) {
+#ifdef WITH_DLAA
+    if (!t_inDlaa && IsGameCtx(ctx)) DrawIdRecord::NoteIndexBuffer(ib, fmt, off);
+#endif
+    oIASetIndexBuffer(ctx, ib, fmt, off);
+}
+
+void STDMETHODCALLTYPE hkIASetPrimitiveTopology(ID3D11DeviceContext* ctx, D3D11_PRIMITIVE_TOPOLOGY topo) {
+#ifdef WITH_DLAA
+    if (!t_inDlaa && IsGameCtx(ctx)) DrawIdRecord::NotePrimitiveTopology(topo);
+#endif
+    oIASetPrimitiveTopology(ctx, topo);
+}
+
+void STDMETHODCALLTYPE hkVSSetShader(ID3D11DeviceContext* ctx, ID3D11VertexShader* vs,
+                                     ID3D11ClassInstance* const* ci, UINT n) {
+#ifdef WITH_DLAA
+    if (!t_inDlaa && IsGameCtx(ctx)) DrawIdRecord::NoteVsShader(vs);
+#endif
+    oVSSetShader(ctx, vs, ci, n);
+}
+
+void STDMETHODCALLTYPE hkVSSetConstantBuffers(ID3D11DeviceContext* ctx, UINT start, UINT num, ID3D11Buffer* const* cb) {
+#ifdef WITH_DLAA
+    if (!t_inDlaa && IsGameCtx(ctx)) DrawIdRecord::NoteVsConstantBuffers(start, num, cb);
+#endif
+    oVSSetConstantBuffers(ctx, start, num, cb);
+}
+
+void STDMETHODCALLTYPE hkVSSetConstantBuffers1(ID3D11DeviceContext1* ctx, UINT start, UINT num,
+                                               ID3D11Buffer* const* cb, const UINT* first, const UINT* count) {
+#ifdef WITH_DLAA
+    if (!t_inDlaa && IsGameCtx1(ctx)) DrawIdRecord::NoteVsConstantBuffers1(start, num, cb, first, count);
+#endif
+    oVSSetConstantBuffers1(ctx, start, num, cb, first, count);
+}
+
+void STDMETHODCALLTYPE hkVSSetShaderResources(ID3D11DeviceContext* ctx, UINT start, UINT num,
+                                              ID3D11ShaderResourceView* const* srv) {
+#ifdef WITH_DLAA
+    if (!t_inDlaa && IsGameCtx(ctx)) DrawIdRecord::NoteVsShaderResources(start, num, srv);
+#endif
+    oVSSetShaderResources(ctx, start, num, srv);
+}
+
+void STDMETHODCALLTYPE hkVSSetSamplers(ID3D11DeviceContext* ctx, UINT start, UINT num, ID3D11SamplerState* const* smp) {
+#ifdef WITH_DLAA
+    if (!t_inDlaa && IsGameCtx(ctx)) DrawIdRecord::NoteVsSamplers(start, num, smp);
+#endif
+    oVSSetSamplers(ctx, start, num, smp);
+}
+
+void STDMETHODCALLTYPE hkRSSetState(ID3D11DeviceContext* ctx, ID3D11RasterizerState* rs) {
+#ifdef WITH_DLAA
+    if (!t_inDlaa && IsGameCtx(ctx)) DrawIdRecord::NoteRsState(rs);
+#endif
+    oRSSetState(ctx, rs);
+}
+
+void STDMETHODCALLTYPE hkRSSetScissorRects(ID3D11DeviceContext* ctx, UINT n, const D3D11_RECT* sc) {
+#ifdef WITH_DLAA
+    if (!t_inDlaa && IsGameCtx(ctx) && sc) DrawIdRecord::NoteScissorRects(n, sc);
+#endif
+    oRSSetScissorRects(ctx, n, sc);
 }
 
 void STDMETHODCALLTYPE hkRSSetViewports(ID3D11DeviceContext* ctx, UINT n, const D3D11_VIEWPORT* vps) {
@@ -11503,6 +11612,7 @@ void DidStatsTag(char* buf, size_t cap, uint64_t passes) {
     const double prepFullCpu = (double)(s.prepFullTicks - s0.prepFullTicks) * 1000.0 / qf / frd;
     const double prepLooseCpu = (double)(s.prepLooseTicks - s0.prepLooseTicks) * 1000.0 / qf / frd;
     const double prepUploadCpu = (double)(s.prepUploadTicks - s0.prepUploadTicks) * 1000.0 / qf / frd;
+    const DrawIdRecord::ShadowWindow sh = DrawIdRecord::TakeShadowWindow();
     const uint64_t stD[6] = { 0, s.st[1] - s0.st[1], s.st[2] - s0.st[2], s.st[3] - s0.st[3], s.st[4] - s0.st[4],
                               s.st[5] - s0.st[5] };
     const uint64_t elig = stD[1] + stD[2] + stD[3];
@@ -11534,6 +11644,19 @@ void DidStatsTag(char* buf, size_t cap, uint64_t passes) {
              prepUploadCpu, pAvg, pMax, bAvg, bMax,
              100.0 * (double)(s.idPx - s0.idPx) / wpxd, 100.0 * (double)(s.moverPx - s0.moverPx) / wpxd,
              100.0 * (double)(s.unpairedPx - s0.unpairedPx) / wpxd);
+    if (sh.calls > 0) {
+        static const char* const kName[DrawIdRecord::kShadowFieldCount] = {
+            "il", "vb", "ib", "topo", "vs", "cb", "srv", "smp", "rs", "vp", "sc"
+        };
+        char sbuf[512];
+        int off = snprintf(sbuf, sizeof(sbuf), "MV draw-ids shadow @blit: Record shadow hit %% over %llu draw(s):",
+                           (unsigned long long)sh.calls);
+        for (int i = 0; i < DrawIdRecord::kShadowFieldCount && off > 0 && off < (int)sizeof(sbuf) - 24; ++i) {
+            const double pct = 100.0 * (double)sh.shadow[i] / (double)sh.calls;
+            off += snprintf(sbuf + off, sizeof(sbuf) - (size_t)off, " %s %.0f", kName[i], pct);
+        }
+        Log("%s", sbuf);
+    }
     // v0.10.0 phase 3: consensus camera R (eye 0) + forward-pass ids
     {
         const size_t used = strlen(buf);
@@ -14555,9 +14678,15 @@ bool UpdateGameContext(IDXGISwapChain* sc, uint64_t n, void* caller) {
     g_gameDev = dev;
     g_candDev = nullptr; g_candPresents = 0;
     if (first) {
+#ifdef WITH_DLAA
+        DrawIdRecord::ShadowInvalidate();
+#endif
         Log("game render context = %p (device %p, ID3D11DeviceContext1 %p, Present #%llu tid=%lu)",
             (void*)ic, (void*)dev, (void*)ic1, (unsigned long long)n, GetCurrentThreadId());
     } else {
+#ifdef WITH_DLAA
+        DrawIdRecord::ShadowInvalidate();
+#endif
         if (g_cCtxChanges < 5) {
             ++g_cCtxChanges;
             Log("game render context changed %p -> %p (device %p -> %p, ID3D11DeviceContext1 %p, Present #%llu tid=%lu)",
@@ -14762,6 +14891,9 @@ void AdoptFromPresentLayer(ID3D11DeviceContext* ctx, const PlEvidence& ev, const
     g_plDraws = 0;
     g_plGameTid.store(tid, std::memory_order_relaxed);   // every frame boundary runs on this thread from now on
     FrameEndReset();                                     // the rule's state was the presenting context's until now
+#ifdef WITH_DLAA
+    DrawIdRecord::ShadowInvalidate();
+#endif
     g_plActiveQpc.store(now, std::memory_order_relaxed);
     g_plAdopted.store(true, std::memory_order_relaxed);
     g_plActive.store(true, std::memory_order_release);   // hkPresent: count + log only from now on
@@ -16035,6 +16167,28 @@ DWORD WINAPI SetupThread(LPVOID) {
                reinterpret_cast<void**>(&oOMSetRenderTargets));
         HookFn("RSSetViewports", cvtbl[44], reinterpret_cast<void*>(&hkRSSetViewports),
                reinterpret_cast<void**>(&oRSSetViewports));
+    #ifdef WITH_DLAA
+         HookFn("IASetInputLayout", cvtbl[17], reinterpret_cast<void*>(&hkIASetInputLayout),
+             reinterpret_cast<void**>(&oIASetInputLayout));
+         HookFn("IASetVertexBuffers", cvtbl[18], reinterpret_cast<void*>(&hkIASetVertexBuffers),
+             reinterpret_cast<void**>(&oIASetVertexBuffers));
+         HookFn("IASetIndexBuffer", cvtbl[19], reinterpret_cast<void*>(&hkIASetIndexBuffer),
+             reinterpret_cast<void**>(&oIASetIndexBuffer));
+         HookFn("IASetPrimitiveTopology", cvtbl[24], reinterpret_cast<void*>(&hkIASetPrimitiveTopology),
+             reinterpret_cast<void**>(&oIASetPrimitiveTopology));
+         HookFn("VSSetConstantBuffers", cvtbl[7], reinterpret_cast<void*>(&hkVSSetConstantBuffers),
+             reinterpret_cast<void**>(&oVSSetConstantBuffers));
+         HookFn("VSSetShader", cvtbl[11], reinterpret_cast<void*>(&hkVSSetShader),
+             reinterpret_cast<void**>(&oVSSetShader));
+         HookFn("VSSetShaderResources", cvtbl[25], reinterpret_cast<void*>(&hkVSSetShaderResources),
+             reinterpret_cast<void**>(&oVSSetShaderResources));
+         HookFn("VSSetSamplers", cvtbl[26], reinterpret_cast<void*>(&hkVSSetSamplers),
+             reinterpret_cast<void**>(&oVSSetSamplers));
+         HookFn("RSSetState", cvtbl[43], reinterpret_cast<void*>(&hkRSSetState),
+             reinterpret_cast<void**>(&oRSSetState));
+         HookFn("RSSetScissorRects", cvtbl[45], reinterpret_cast<void*>(&hkRSSetScissorRects),
+             reinterpret_cast<void**>(&oRSSetScissorRects));
+    #endif
         HookFn("DrawIndexed", cvtbl[12], reinterpret_cast<void*>(&hkDrawIndexed),
                reinterpret_cast<void**>(&oDrawIndexed));
         // v0.9.0 texture LOD bias: PSSetSamplers = 10. g_lodHooked gates every use of oPSSetSamplers (LodFrameUpdate).
@@ -16087,6 +16241,8 @@ DWORD WINAPI SetupThread(LPVOID) {
                    reinterpret_cast<void**>(&oDiscardResource));
             HookFn("DiscardView", c1vtbl[118], reinterpret_cast<void*>(&hkDiscardView),
                    reinterpret_cast<void**>(&oDiscardView));
+             HookFn("VSSetConstantBuffers1", c1vtbl[119], reinterpret_cast<void*>(&hkVSSetConstantBuffers1),
+                 reinterpret_cast<void**>(&oVSSetConstantBuffers1));
             HookFn("DiscardView1", c1vtbl[133], reinterpret_cast<void*>(&hkDiscardView1),
                    reinterpret_cast<void**>(&oDiscardView1));
             ctx1->Release();
