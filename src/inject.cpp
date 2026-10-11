@@ -1,8 +1,12 @@
-// v0.10.4 -- issue #8 OPTISCALER: DetectOptiScaler (startup) looks for OptiScaler.ini / .log / .asi / folder or nvngx_dlssnr.dll next
+// v0.11.0 -- issue #8 OPTISCALER: DetectOptiScaler (startup) looks for OptiScaler.ini / .log / .asi / folder or nvngx_dlssnr.dll next
 //           to the game exe; found = mirror DLAA starts OFF unless dlaa.ini sets mirror_dlaa (its DLSS 5 "Neural Rendering" DX12
 //           bridge loses the device on the small HDR mirror DLSS frames, the picture freezes). Alt+F6 / mirror_dlaa = 1 still force
 //           it on; the perf profile leaves it alone; log line "env: OptiScaler detected".
-// (next) -- phase 39: LOG LEVELS (log.h). dlaa.ini log_level: 0 off, 1 errors (NEW DEFAULT), 2 warnings, 3 info, 4 debug (a
+// v0.11.0 -- issue #9: SCENE DEPTH ALIASES (the block above SdAlias, ~1800): after a VR minimize / restore the game draws each eye
+//           on its own same-size D32S8 scene depth; both are tracked (aliases, SdUse switches at the clear / G-buffer bind), each
+//           pass keeps its own depth (PassDepth) for its snapshot / replay / DLAA run; one read-only DSV per texture. Before: no
+//           clear matched, passes froze, no DLSS on the eyes until a restart. CI (build.yml) now runs the unit tests.
+// v0.11.0 -- phase 39: LOG LEVELS (log.h). dlaa.ini log_level: 0 off, 1 errors (NEW DEFAULT), 2 warnings, 3 info, 4 debug (a
 //           number or the name); `debug = 1` without a log_level key = 4 (= what debug = 1 logged until now), debug = 0 has no
 //           effect. Every Log call has a level: LogErr (failures; "ERROR " after the timestamp), LogWarn (degraded but running;
 //           "WARN  "), Log (info: one-time state lines), LogDbg (periodic statistics, verbose tracing, dumps); a call above the
@@ -13,7 +17,7 @@
 //           off / errors / warnings / info / debug, live, + what logging costs: CPU ms per frame inside LogImpl (two TSC reads
 //           per written line) and lines / s, at level 4 + the CPU profiler's own cost (CpuProf::SelfMsPerFrame); SaveSettings
 //           writes log_level once changed there, the Reset row removes it.
-// (next) -- phase 37: CHEAPER PER-DRAW MV STEPS (draw_ids.cpp; the motion vectors are bit-identical, harness cmp max 0 px).
+// v0.11.0 -- phase 37: CHEAPER PER-DRAW MV STEPS (draw_ids.cpp; the motion vectors are bit-identical, harness cmp max 0 px).
 //           ETS2 VR city (2995 draws, 336 movers) had "p-count" 0.51 ms avg / 0.78 max and "list+twin" 0.62 / 1.8 ms per eye
 //           and pass. (1) CSParentCount sums each 8 x 8 group into a groupshared table first (up to 64 countable draws, linear
 //           probe by draw index) and does ONE global atomic per word and draw (was: 2 + 4 x 3 global atomics per countable grid
@@ -23,13 +27,13 @@
 //           unchanged): as 2 up to and including resolve + inherit, then CSParentList (1 group) -> CSTwin -> CSAttach one thread
 //           per draw (GPU sections 'p-list' / 'twin' / 'attach') in place of the single group of CSListTwin, whose AttachDraw
 //           loop (every unpaired / forward draw over all movers, a matrix per mover) ran on one SM. Harness: fold=3.
-// (next) -- phase 36: GPU TIME PER PASS TYPE (gpu_pass.h; measurement only, on with debug = 1 / perf_timers). hkOMSetRenderTargets
+// v0.11.0 -- phase 36: GPU TIME PER PASS TYPE (gpu_pass.h; measurement only, on with debug = 1 / perf_timers). hkOMSetRenderTargets
 //           stamps two GPU timestamps per game bind (top, and end after the mod's bind-time work); the interval after a bind is
 //           charged to its class: shadow / gbuffer / lighting / forward / post / mirror / other (+ "bindwork" = the mod's own
 //           bind-time work). New log lines "GPU pass signature #k (phase 36)" (first 16 distinct bind signatures with the class
 //           assigned) and "GPU per pass (phase 36): shadow a | gbuffer b | lighting c | ... ms/frame (sum S vs scene span T)"
 //           every ~5 s. Purpose: is extending VRS to the lighting pass worth it. CPU: counted in the "gpu-perf" profiler row.
-// (next) -- phase 35: CHEAPER DRAW-ID RECORD (draw_ids.h DidShadow, 13.). dlaa.ini did_shadow (1 default, startup only): hooks
+// v0.11.0 -- phase 35: CHEAPER DRAW-ID RECORD (draw_ids.h DidShadow, 13.). dlaa.ini did_shadow (1 default, startup only): hooks
 //           on IASetInputLayout / VSSetShader / VSSetConstantBuffers(1) / VSSetSamplers / RSSetState (+ ClearState /
 //           ExecuteCommandList / SwapDeviceContextState drop it; 2 = + IASetVertexBuffers / IASetIndexBuffer) keep a shadow of the
 //           input state with its own references; DrawIdRecord::Record copies it and AddRefs only what differs from the record's
@@ -40,7 +44,7 @@
 //           20) + the getters for the rest of the frame (8 such frames: off for the session); "state shadow" field in the "MV
 //           draw-ids" line, CPU profiler row "StateSet". The per-draw CPU timers read the TSC instead of QPC (TscToQpc).
 //           Harness: S19 (tests/drawid_harness.cpp didshadow=1|2).
-// (next) -- phase 34b: VRS EYE SELECTION. The ETS2 VR drive of 2026-10-11 18:37 had "eye prediction misses" 701 of 1403 and
+// v0.11.0 -- phase 34b: VRS EYE SELECTION. The ETS2 VR drive of 2026-10-11 18:37 had "eye prediction misses" 701 of 1403 and
 //           eye 0 entered twice as often as eye 1: the eye ORDER of a frame is not fixed (e0 e1 | e0 e1 | e1 e0 -- every third
 //           frame swapped, with the game's 3-deep ring of eye blit textures; passes / blits interleave PPBB or PBPB), so phase
 //           34's "last blit's eye, flipped by pass parity" gave half the passes the other eye's ring centre (the 2:1 count is
@@ -52,7 +56,7 @@
 //           at full rate. The blit still checks every entered pass ("eye misses", target 0). New log lines: "VRS eye source:
 //           blit-RT cycle learned", "VRS bind #n" (the first 16 decisions, every source), "VRS: eye order of the last 24 eye
 //           blits" (once), and the "VRS @" line's "eye sources (entered binds)" / "sources disagree" fields.
-// (next) -- phase 34: VRS FIXED FOVEATED RENDERING, VR only (vrs.h / vrs.cpp; NVIDIA Variable Rate Shading through NVAPI, ideas
+// v0.11.0 -- phase 34: VRS FIXED FOVEATED RENDERING, VR only (vrs.h / vrs.cpp; NVIDIA Variable Rate Shading through NVAPI, ideas
 //           ported from OpenXR Toolkit, MIT). dlaa.ini vrs (0 default), vrs_inner / vrs_outer (55 / 80 % of the NDC half-size
 //           around each eye's optical centre), vrs_quality (1 default: 1x1 inside vrs_outer; 0: 2x1 in the middle ring), vrs_debug
 //           (with debug = 1: 2x2 / 4x4 to show the pattern); menu rows "Foveated (VRS)" + "Foveated size" (wide / balanced /
@@ -62,16 +66,16 @@
 //           neither do alpha-tested cut-outs, SV_Depth writers or shaders of unknown class (VrsOnDraw, one table switch per
 //           change). The eye of a pass is predicted from the last eye blit (passes alternate eyes), checked at the blit
 //           ("eye prediction misses" in the "VRS @" line every 10 s). CPU profiler row "vrs".
-// (next) -- phase 33: (1) OpenXR session lifecycle + event log (xr_hook.cpp: xrPollEvent / xrCreateSession / xrBeginSession /
+// v0.11.0 -- phase 33: (1) OpenXR session lifecycle + event log (xr_hook.cpp: xrPollEvent / xrCreateSession / xrBeginSession /
 //           xrEndSession / xrRequestExitSession / xrDestroySession, "OpenXR session:" / "OpenXR event #n:" lines say whether the
 //           RUNTIME or the GAME started a session restart; non-XR_SUCCESS frame-loop results as "OpenXR result:" lines). (2) Turbo
 //           for a game that waits on its main thread and ends frames on its render thread (ETS2 / ATS): the first async wait is
 //           armed right after a real xrBeginFrame of the game (no 1-s freeze at the switch-on / in a new session), REAL / TURBO
 //           frame tags from xrBeginFrame to xrEndFrame, a clean switch-off, made-up times at most 2 periods ahead. (3) cpu_prof.h
 //           registers every busy thread: the "CPU prof" report has one line per thread (render / main / turbo / other).
-// (next) -- phase 32: cpu_pin.h keeps the process on the 3D V-Cache cores of a mixed-L3 CPU (AMD X3D dual-CCD, e.g. 7950X3D /
+// v0.11.0 -- phase 32: cpu_pin.h keeps the process on the 3D V-Cache cores of a mixed-L3 CPU (AMD X3D dual-CCD, e.g. 7950X3D /
 //           9950X3D): affinity = the logical processors of the biggest L3, once at startup; dlaa.ini cpu_cache_pin (0 default = off, 1 = on; opt-in, no gain measured).
-// (next) -- phase 31: render-thread CPU. cpu_prof.h profiler (a "CPU prof" line every 10 s: the mod's CPU per hook / block,
+// v0.11.0 -- phase 31: render-thread CPU. cpu_prof.h profiler (a "CPU prof" line every 10 s: the mod's CPU per hook / block,
 //           the game's own D3D11 calls, Present + OpenXR, the rest of the frame; dlaa.ini cpu_prof, on with debug = 1); log.h writes
 //           the file on a writer thread (no lock at all with debug = 0); the OFXR module rescan runs on a pool thread; PollKeys
 //           reads each key once; the frame-end rule is skipped where nothing reads it (normal mode, VR launch or debug = 0).
@@ -18332,7 +18336,7 @@ bool FindNvngxDlss(wchar_t* out, DWORD cap) {
 }
 
 #ifdef WITH_DLAA
-// v0.10.4 issue #8: OptiScaler (a DLSS swapper DLL in the game folder, here as winmm.dll / dxgi.dll ..., with the DLSS 5
+// v0.11.0 issue #8: OptiScaler (a DLSS swapper DLL in the game folder, here as winmm.dll / dxgi.dll ..., with the DLSS 5
 // "Neural Rendering" model on a private DX12 bridge) loses its DX12 device (DXGI_ERROR_DEVICE_REMOVED) on the small wide HDR
 // mirror DLAA frames. Looks for its files next to the game exe; the first hit sets g_optiScaler / g_optiScalerHit. Startup only.
 void DetectOptiScaler() {

@@ -161,7 +161,7 @@ log_level = 1
 # jitter, own motion vectors -- your own trailer moves with the mirror and stays sharp --, DLAA on the mirror picture
 # itself; default), 0 = mirrors are left as the game draws them. key_mirror_dlaa (Alt+F6) switches it live, Shift+F12
 # saves it here.
-# v0.10.4 issue #8: with OptiScaler next to the game exe the mod starts with mirror DLAA off unless this key is set (its
+# v0.11.0 issue #8: with OptiScaler next to the game exe the mod starts with mirror DLAA off unless this key is set (its
 # DLSS 5 bridge crashes on the mirror frames); 1 here forces it on.
 # mirror_dlaa = 1
 # v0.10.0 phase 4 DLAA BEFORE THE TONEMAP (flat, DLAA mode): 1 = the main picture's DLAA runs on the game's own HDR colours

@@ -79,7 +79,7 @@ This is an unofficial fan project. It is not affiliated with, or endorsed by, SC
 Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
-> Status: v0.10.3. In VR the tuning menu and the fps box are OpenXR quad layers placed by the headset (`menu_vr_layer`): steady, never covered by the game's menus, at a real distance (`menu_vr_dist`), with the fps box optionally fixed in the cab (`fps_vr_lock`). Hold a key or wheel button on a menu row to bind it; Reset to defaults is a 5 s hold; Panel / FPS settings are collapsible groups. v0.10.2 (unpublished): VR performance pass (`mv_cons_fail_tol`, mirror units pre-built on the loading screen, `mv_area_clip`, camera-only mirrors `mirror_mv`), the 7-choice Mirror DLAA row, wheel / D-pad bindings. The DLSS
+> Status: v0.11.0-rc1 (test build from the `v0.11-dev` branch). New: Turbo mode (VR), foveated rendering (VRS), logging levels in the menu, about half the GPU cost for the per-part motion vectors in busy cities, fixes for issue #8 (OptiScaler: mirror DLAA starts off) and issue #9 (DLSS stopped on the eyes after a VR minimize / restore). v0.10.3: in VR the tuning menu and the fps box are OpenXR quad layers placed by the headset (`menu_vr_layer`): steady, never covered by the game's menus, at a real distance (`menu_vr_dist`), with the fps box optionally fixed in the cab (`fps_vr_lock`). Hold a key or wheel button on a menu row to bind it; Reset to defaults is a 5 s hold; Panel / FPS settings are collapsible groups. v0.10.2 (unpublished): VR performance pass (`mv_cons_fail_tol`, mirror units pre-built on the loading screen, `mv_area_clip`, camera-only mirrors `mirror_mv`), the 7-choice Mirror DLAA row, wheel / D-pad bindings. The DLSS
 > *upscaling* path (render below native, reconstruct up) runs in VR but is still
 > being tuned. Treat upscaling as experimental. The OFXR Bridge handling is not yet tested in a headset with the bridge armed.
 ---
@@ -508,7 +508,7 @@ The table below lists the commonly used keys:
 | `sharp_radius` | `1.5` | sharpening width in texels, `1`..`4` |
 | `dlaa_area` | `100` | run DLAA on the centre `N` % of each eye image (VR performance), `10`..`100`. VR only: in flat mode the whole picture is always used. Also used for the truck on the VR main menu / garage screens |
 | `mv_objects` | `2` | motion vectors for moving traffic: `2` = every moving part gets its own exact motion (default), `0` = camera motion only (`1` = the older method, for comparison) |
-| `mirror_dlaa` | `1` | DLAA on the truck / car mirrors: `1` = each mirror gets its own DLAA (default), `0` = mirrors are left as the game draws them. `Alt+F6` switches it live, `Shift+F12` saves. With OptiScaler next to the game exe (v0.10.4) it starts off by itself unless this key is set: its DLSS 5 bridge crashes on the mirror frames (issue #8). |
+| `mirror_dlaa` | `1` | DLAA on the truck / car mirrors: `1` = each mirror gets its own DLAA (default), `0` = mirrors are left as the game draws them. `Alt+F6` switches it live, `Shift+F12` saves. With OptiScaler next to the game exe (v0.11.0) it starts off by itself unless this key is set: its DLSS 5 bridge crashes on the mirror frames (issue #8). |
 | `mirror_mv` | `parts` | motion in the mirrors (v0.10.2, VR and flat): `parts` = each moving part gets its own exact motion in the glass (default, about 0.4 ms per mirror in VR), `camera` = camera motion only (about 0.15 ms per mirror, moving traffic can ghost in the glass). Used with `mirror_vr_mode` / `mirror_flat_mode` 1, 2 and 3; mode 4 is always camera motion. The menu's Mirror DLAA row sets it live, `Shift+F12` saves |
 | `dlaa_pre_tonemap` | `1` | DLAA before the game's tonemap (flat DLAA mode): `1` = on the game's HDR colours (default), `0` = on the finished picture at the end of the frame. `Alt+F7` switches it live, `Shift+F12` saves |
 | `tex_lod_bias` | `0` | sharper texture text: texture mip LOD bias for the 3-D world while DLAA / DLSS runs, `-3`..`1`, `0` = off. Try `-0.5` to `-1`; more negative = sharper but more shimmer on fine patterns. `Ctrl+F1` / `F2` change it live, `Shift+F12` saves |
@@ -631,7 +631,7 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   the headset picture in VR, so switch it off for VR.
 - **OFXR Bridge (VR frame generation):** see the section above.
 - **Picture freezes in the interior camera with OptiScaler (DLSS 5 / Neural Rendering):** OptiScaler's DX12
-  bridge loses its device on the small HDR mirror DLSS frames that appear with the mirrors in view. Since v0.10.4
+  bridge loses its device on the small HDR mirror DLSS frames that appear with the mirrors in view. Since v0.11.0
   the mod sees OptiScaler next to the game exe and starts with mirror DLAA off (look for `env: OptiScaler
   detected` in the log). On v0.10.3 set `mirror_dlaa = 0` in `dlaa.ini` or press `Alt+F6`. OptiScaler is not
   supported or tested by this mod; it happens to work for the main picture.
