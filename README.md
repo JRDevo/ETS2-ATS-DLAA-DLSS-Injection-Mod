@@ -95,6 +95,9 @@ trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
 ## Install
 
+<details>
+<summary><b>Show</b></summary>
+
 1. **Make a backup** of the game's `bin\win_x64\` folder first.
 2. [Download the latest release zip](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/releases/latest)
    and unzip it.
@@ -120,7 +123,12 @@ trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
 To uninstall, delete `dinput8.dll` (and `dlaa.ini`) from `bin\win_x64\`.
 
+</details>
+
 ## Modes — the `End` key
+
+<details>
+<summary><b>Show</b></summary>
 
 Press **`End`** in game (no modifier) to cycle the mode. The choice is saved to
 `dlaa.ini` immediately and used again next launch.
@@ -134,7 +142,12 @@ Press **`End`** in game (no modifier) to cycle the mode. The choice is saved to
 At 100 % render scale DLAA and DLSS produce the same picture; the difference only
 shows once you render below native (see render scale below).
 
+</details>
+
 ## Flat or VR
+
+<details>
+<summary><b>Show</b></summary>
 
 The mod reads the game's launch options at start. With `-openxr` or `-oculus` it runs in VR mode
 (one DLAA / DLSS pass per eye; the desktop mirror window is left alone). Without them it runs in flat mode.
@@ -143,7 +156,12 @@ The log says which: `launch mode: VR` or `launch mode: FLAT`. One `dlaa.ini` ser
 If the launch options say VR but no headset session starts (the game then runs on the monitor), the mod
 notices after about one second of driving and switches to flat mode by itself (`launch mode FALLBACK` in the log).
 
+</details>
+
 ## OFXR Bridge (VR frame generation)
+
+<details>
+<summary><b>Show</b></summary>
 
 [OFXR Bridge](https://github.com/djules75/OFXR-Bridge) is a separate program that adds in-between frames in VR: it takes the finished
 picture of each eye and generates the frames between them from optical flow. The mod runs together with it. The mod
@@ -162,7 +180,12 @@ the mod. The mod only makes sure the bridge's own copies inside the game are lef
 
 Status: the handling is built but not yet tested in a headset with the bridge armed; report what you see with `debug = 1`.
 
+</details>
+
 ## How render scale works
+
+<details>
+<summary><b>Show</b></summary>
 
 The game renders the 3-D scene at `r_scale_x` × `r_scale_y` of the output size and
 then stretches it up. In **DLSS** mode this injector replaces that stretch with DLSS
@@ -188,7 +211,12 @@ upscaling).
 `r_scale_y` then shrink the render below that eye size for DLSS to reconstruct back
 up to it.
 
+</details>
+
 ## Models (presets) — which one to use
+
+<details>
+<summary><b>Show</b></summary>
 
 A "model" (NVIDIA calls it a *render preset*) is the neural network that cleans
 the picture. All four remove jagged edges. They differ in detail, in how they
@@ -275,7 +303,12 @@ What to expect:
   decides *what resolution* the model works from; the model decides *how* it
   cleans the picture.
 
+</details>
+
 ## Controls
+
+<details>
+<summary><b>Show</b></summary>
 
 **You only need three keys** — or the `Delete` menu, which has every setting on one panel. Everything else is tuning,
 and the defaults are tuned already.
@@ -346,7 +379,12 @@ These need `debug = 1` in `dlaa.ini`. They are for diagnostics and bug reports; 
 
 The full sheet with every beep pattern is in [`docs/KEYS.md`](docs/KEYS.md).
 
+</details>
+
 ## The tuning menu
+
+<details>
+<summary><b>Show</b></summary>
 
 ![The tuning menu](docs/images/tuning-menu.png)
 
@@ -432,7 +470,12 @@ The three green lines under the title show the game's GPU time per frame, what t
   `key_menu = Delete, Wheel10` and `key_menu_up = Up, WheelUp`; see
   [`docs/KEYS.md`](docs/KEYS.md#wheel-gamepad-and-joystick-buttons) for how to find the button number.
 
+</details>
+
 ## `dlaa.ini`
+
+<details>
+<summary><b>Show</b></summary>
 
 Optional, placed next to `dinput8.dll`. One `key = value` per line; `#` or `;` start
 a comment. It is read once at launch (the `config (...)` line in the log shows what
@@ -477,7 +520,12 @@ The table below lists the commonly used keys:
 | `key_<action>` | *(see KEYS.md)* | re-bind any hotkey, e.g. `key_dlaa_toggle = Ctrl+D`, or `none` to disable it. Full list and format: [`docs/KEYS.md`](docs/KEYS.md) |
 | `debug` | `0` | `1` = write the log file `dlaa_inject.log` (off by default) |
 
+</details>
+
 ## Performance
+
+<details>
+<summary><b>Show</b></summary>
 
 Measured with the mod's own GPU timers (`debug = 1` writes a `perf eye` line to the log every 10 seconds). ETS2 flat,
 render 2880x2160 (Scaling 75 % of 3840x2160), model E, sharpen on, texture LOD bias -1.0, 4 mirrors, dense traffic.
@@ -533,7 +581,12 @@ motion in the mirrors, about 0.15 ms per mirror instead of 0.4 ms).
 **Test rig** (all numbers above): AMD Ryzen 9 9950X3D, 62 GB RAM, NVIDIA GeForce RTX 5090 (driver 32.0.16.1692),
 Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR); ATS 1.61, ETS2 current.
 
+</details>
+
 ## Troubleshooting
+
+<details>
+<summary><b>Show</b></summary>
 
 - **Traffic, trailers or buildings look wrong (wobble, smear, pink in the `Ctrl+F6`
   view)?** Press `Alt+F5` (or set `mv_objects = 0` in `dlaa.ini`). That turns off
@@ -571,13 +624,23 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   `dlaa.ini` (4 combinations).
 - **Uninstall:** delete `dinput8.dll` (and `dlaa.ini`).
 
+</details>
+
 ## Multiplayer
+
+<details>
+<summary><b>Show</b></summary>
 
 ETS2/ATS single-player has no anti-cheat, so this works fine there. **TruckersMP and
 Convoy multiplayer have their own rules about third-party DLLs — check what each
 allows before using it online.**
 
+</details>
+
 ## Build from source
+
+<details>
+<summary><b>Show</b></summary>
 
 Visual Studio 2022 (MSVC, x64) and CMake ≥ 3.20. MinHook is fetched automatically by
 CMake (needs git + internet on the first configure). DLAA is compiled in when the
@@ -593,7 +656,12 @@ Output: `build/Release/dinput8.dll`. Without `external/DLSS` the build is a
 logging-only injector (no DLAA). `scripts/package.ps1` builds Release and assembles
 the release zip. Architecture and internals: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
 
+</details>
+
 ## Reporting a problem (what to upload)
+
+<details>
+<summary><b>Show</b></summary>
 
 If something goes wrong, [open an issue](../../issues/new/choose) (**New issue** >
 **Bug report**) and attach the files below. Without the log I usually can't tell what
@@ -642,6 +710,8 @@ check (or edit it) before uploading.
 
 **Never attach `nvngx_dlss.dll` or any other NVIDIA DLL** — their license doesn't allow
 redistribution. Just give the version number.
+
+</details>
 
 ## License and credits
 
