@@ -67,6 +67,8 @@ account — a few hotkeys, an in-game tuning menu (`Delete`) and an optional tex
   to uninstall.
 - **Debug log** for bug reports (off by default).
 
+![The tuning menu (v0.10.3)](docs/images/tuning-menu.png)
+
 ## ⬇ Download
 
 **[Download the latest release here](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/releases/latest)**
