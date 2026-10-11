@@ -585,13 +585,20 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   only while the box is on or the menu is open (`MenuPerfTick` copies its figures); `TuningMenu::DrawWidget` draws it after the panel
   at the same two places (`MenuPresentTarget` at Present, `MenuDrawVr` per eye; the eye blit is noted while menu open || box on) from
   its own texture cache (rebuilt only when its text or build scale changes), dropped by `ReleaseWidget` when switched off.
-- **Key swallowing** (`src/dinput_wrap.cpp`, `KeySwallow`), only while the menu is open and only for the 5 bound menu keys
-  (`MenuSwallowKeys`): `DirectInput8Create` (proxy.cpp) wraps `IDirectInput8A/W`; `CreateDevice` of a keyboard returns a full
-  forwarding `IDirectInputDevice8A/W` whose `GetDeviceState` clears the keys' DIK bytes and whose `GetDeviceData` drops their key-down
-  entries. The game window (the swapchain's `OutputWindow`, first top-level Present) is subclassed once: `WM_KEYDOWN` /
-  `WM_SYSKEYDOWN` / `WM_CHAR` / `WM_SYSCHAR` and `WM_INPUT` keyboard make events of those keys are dropped. Key releases always pass
-  (a key held when the menu opened must reach the game as released). The menu itself reads `GetAsyncKeyState`. A DLL unload puts the
-  original window procedure back if the window still points at ours.
+- **Input hiding** (`src/dinput_wrap.cpp`, `KeySwallow`), only while the menu is open (`MenuHidesInput`; v0.10.2: EVERY key and
+  controller button -- v0.10.0 / v0.10.1 hid only the 5 bound menu inputs via `MenuSwallowKeys` / `MenuSwallowJoy`, both removed):
+  `DirectInput8Create` (proxy.cpp) wraps `IDirectInput8A/W`; `CreateDevice` of a keyboard returns a full forwarding
+  `IDirectInputDevice8A/W` whose `GetDeviceState` clears all 256 DIK bytes and whose `GetDeviceData` drops every key-down entry; a
+  controller's wrap clears every button byte / centres the POV and drops every button-down / non-centred POV entry (axes untouched).
+  The game window (the swapchain's `OutputWindow`, first top-level Present) is subclassed once: every `WM_KEYDOWN` /
+  `WM_SYSKEYDOWN` / `WM_CHAR` / `WM_SYSCHAR` and every `WM_INPUT` keyboard make event is dropped. Key / button releases always pass
+  (a key held when the menu opened must reach the game as released). The menu itself reads `GetAsyncKeyState` and the tapped
+  controller state. A DLL unload puts the original window procedure back if the window still points at ours.
+- **Hold to bind** (v0.10.2, `MenuBindTick` / `MenuBindComplete` / `MenuBindDecorate`, `kMenuBindRows`): per Present while open,
+  `MenuBindScan` finds the single held input (a key `KeyChordName` can name, or one controller button / POV direction from
+  `PollKeys`' copy); a down-edge on a row with actions starts a hold, `bind_hold_ms` later it replaces that part of the step's
+  `KeyBind` (Backspace = none), takes it from any other action, writes `key_*` via `WriteIniPreserving` and sets
+  `g_keyWasActive` so the still-held input does not fire the new binding. Rules: docs/KEYS.md "Bind a key in the menu".
 
 ### Phase 15 (v0.10.0): VR menu screens -- panel, DLAA area, limits
 
@@ -1137,6 +1144,68 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   left off in the ATS ini for now (GPU +0.15..0.3 ms / pass, 72 fps held).
 - **RenderDoc is blind to all of this**: under RenderDoc NGX fails (PlatformError) and phase 12 holds the jitter, so a capture has
   no mod work in it.
+
+### Phase 29 (v0.10.3): the VR panel and fps box as OpenXR quad layers (`menu_vr_layer`, default 1)
+
+- **Why**: drawn into the eye picture (phases 16 / 27, `MenuDrawVrOn`) a head-locked overlay is part of the projection layer the
+  runtime (Virtual Desktop) timewarps with the game's submitted pose every frame -- the panel swims / flickers by the head motion
+  between that pose and the display ("jittery, not solid"); the phase 28 "fixed in cab" box needed pose maths with one frame of lag.
+- **How** (`src/xr_hook.cpp`, OpenXR side only; `src/inject.cpp` `MenuOverlaySet` / `MenuOverlayDraw`, D3D side): `xrEndFrame` and
+  `xrDestroySession` are wrapped (outermost = the game's call). The functions we call (`xrEnumerateSwapchainFormats`,
+  `xrCreateSwapchain`, `xrEnumerateSwapchainImages`, `xrAcquire` / `xrWait` / `xrReleaseSwapchainImage`, `xrCreateReferenceSpace`,
+  the destroys) are resolved through the real `xrGetInstanceProcAddr` of the component whose thunk handles the outermost
+  `xrEndFrame`, with the `XrInstance` its GIPA was last asked with; every call of ours runs inside `++t_depth` (our images never reach
+  the image map or the phase 27 release callback). Per session, at the first frame that wants a quad: two D3D11 swapchains
+  (`R8G8B8A8_UNORM_SRGB` preferred, else `B8G8R8A8_UNORM_SRGB`, `R8G8B8A8_UNORM`, `B8G8R8A8_UNORM` -- OpenXR reads non-sRGB 8-bit
+  images as linear), the panel 1824 x 1769 and the fps box 736 x 352, and one VIEW reference space. Each frame: acquire, wait
+  (infinite), the callback clears the image and draws the panel / fps box into its top-left corner (`TuningMenu::kOutOverlay`:
+  blend off, RGBA written; panel alpha `max(0.88, luminance)`, the fps box its outline alpha), release; an
+  `XrCompositionLayerQuad` per quad (sub-image = the drawn part, `BLEND_TEXTURE_SOURCE_ALPHA | UNPREMULTIPLIED_ALPHA`, both eyes)
+  is appended after the game's layers in a copy of its `XrFrameEndInfo` (cap 16 layers). A runtime that rejects it gets the game's
+  frame again unchanged, and the quad path stays off for that session.
+- **Placement**: panel in our VIEW space at 1 m, width `fov_w * 0.54 * menu_vr_scale` (fov_w = tan R - tan L of the submitted view 0
+  fov), centre `(fov_w * menu_vr_x %, -fov_h * menu_vr_y %)`; fps box "Follow head" the same at 0.8 m with 8 % per `fps_vr_scale`;
+  "Fixed in cab": in the game's projection-layer space (LOCAL: its origin = the seat; another type: a pivot = the submitted eyes'
+  midpoint + head yaw, captured at lock-on), position `pivot + 0.8 (sin y cos p, sin p, -cos y cos p)`, orientation
+  `rot_y(-yaw) * rot_x(pitch)` so the quad's +z points back at the pivot (checked once with `QRot`, logged). `menu_vr_depth` /
+  `menu_vr_face` are ignored on the quad path (the compositor gives real depth and facing) -- phase 29b below brings both rows back.
+- **Draw resolution**: image px per reference px = 1.6 x `menu_vr_scale` (panel; 1216 px wide at 1.0) and 4.0 x `fps_vr_scale`
+  (fps box), capped by the image; the texture caches build at that scale and `g_menuVrBuild` / `g_fpsVrBuild` follow it (the
+  desktop mirror reuses the texture).
+- **Thread**: the draw needs the game's immediate context: at `xrEndFrame` when it runs on the render thread (the late panel's arm
+  thread, else the Present thread), else at the game's first `xrReleaseSwapchainImage` of the frame on the render thread (the layers
+  still go in at `xrEndFrame`). Logged once: `OpenXR overlay: the game's xrEndFrame runs on tid=..., the render thread is tid=...`.
+- **Fallback**: `XrHook::OverlayActive(which)` = that quad went to the compositor at the last `xrEndFrame` (within 0.5 s), or the
+  path is up and the quad is not wanted; otherwise `MenuDrawVrOn` draws it into the eye picture exactly as before (each of the two
+  separately). `menu_vr_layer = 0` = always the old path.
+- **Log**: `OpenXR overlay: ...` (resolve, the swapchains + format, the first quad of each kind with its pose / size, the
+  orientation check), `tuning menu: VR <panel | fps box> drawn into its OpenXR quad image ...`, and a `VR overlay quads` line with
+  every VR late panel stats line (quads submitted, failures, rejects, the fixed box's space).
+- **29b: Depth / Facing rows on the quad path + the fps box's own cost.** Phase 29 left `Panel VR depth` / `Panel faces you (VR)`
+  doing nothing on the quad path. Now: (1) new key `menu_vr_dist` (cm, 30..300, default 100) = the panel quad's distance in our
+  VIEW space (`OverlayParams::menuDist`; was a fixed 1 m); the width is `d * fov_w * 0.54 * menu_vr_scale` and the centre scales with
+  `d` too, so only the stereo depth changes. The Depth row edits it in 5 cm steps and shows `1.00 m` while the panel IS a quad
+  (`MenuVrQuad()` = `menu_vr_layer` && VR && `XrHook::OverlayActive(0)`), else `menu_vr_depth` px as before; both keys are saved,
+  reset (34 keys) and logged. A panel nearer than the fps box (< 0.8 m) is appended after it (the later quad layer is on top). (2) `menu_vr_face = 1` (`OverlayParams::menuFace`): the panel quad and the head-following fps box quad
+  are turned to face the VIEW origin with the fixed-in-cab construction, now one helper `OvFacingQuat` (dir = pos / |pos|,
+  yaw = atan2(dir.x, -dir.z), pitch = asin(dir.y), q = rot_y(-yaw) * rot_x(pitch); `QRot` check once per kind at its first
+  off-axis use, logged `OpenXR overlay: <panel facing the head | fps box fixed-in-cab ...> quad orientation check: ... dot +1.000
+  -> OK (faces it)`; 180 deg about y if it ever points away), and their size times |pos| / d (the same angle as straight ahead,
+  phase 16's "same size from every angle"); 0 = identity (parallel to the view plane). The fixed-in-cab box is unchanged.
+  (3) GpuPerf section `kOverlay` ("fps-box", a new PER-FRAME kind: not tagged with a pass / eye, summed per landed query set =
+  per Present, `GpuPerf::FrameStats`) around every fps box `DrawWidget` (the VR quad image's clear + draw in `MenuOverlayDraw`, each
+  eye picture in `MenuDrawVrOn`, the flat / desktop-mirror backbuffer in `MenuDrawAtPresent`); the `FPS counter` row's cost column
+  shows ms per frame (`MenuPerfTick` deltas, frames without a box draw count 0), not in the per-eye "this mod" total (that is per
+  pass, and the box is drawn after the scene -- at xrEndFrame, the eye picture's release or Present -- so mostly outside the scene span the "game" figure is derived from). `debug = 1` logs `perf @blit N: fps-box ...
+  ms per frame`. The box texture is rebuilt only when its text changes: `FpsTick` updates the two lines every 0.5 s (2x/s). The desktop mirror at Present now builds at the quad's scale whenever that quad is active (also before `MenuVr()` is set, the VR main menu): two different build scales would rebuild the panel / box texture twice per frame.
+- **29c: menu groups + short footer.** Header rows `MR_PANELGRP` (children `MR_POSX` .. `MR_MENUKEYS`, Menu keys moved into it) and
+  `MR_FPSGRP` (`MR_FPSLOCK` .. `MR_FPSSIZE`), 31 rows (`kMaxRows`); both collapse at every open, Right / Left open / close (fresh press),
+  Up / Down step over hidden rows (`MenuStepRow`), and `MenuBuildPanel` compacts the visible rows to the front (`nRows` / `sel` = visible;
+  the panel shrinks; the VR quad image is now 1824 x 1860). The footer is one constant line of `KeyShortName`s (keyboard chord only), its
+  rebind hint shortened / dropped when `TuningMenu::FooterFits` (GDI, scale 1) says it would reach the licence line; Draw clips it there.
+- **29d: description fits 3 lines + Reset is a hold.** `kDescH` 54 -> 64 ref px (one 14 px Segoe UI line is 19 px, 3 lines need up to 62
+  at some scales; the VR quad image is now 1824 x 1884) and `RenderPanel` draws only whole lines, cut at a word + `...` (`DescFit`); the Reset row
+  resets after a `bind_hold_ms` hold of the menu Right (`MenuResetTick`, the bind bar, `hold Right 5 s`), no longer on a Left / Right press.
 
 ### The RenderDoc oracle (done in v0.2)
 

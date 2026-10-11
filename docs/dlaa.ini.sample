@@ -428,10 +428,26 @@ debug = 0
 # menu_vr_y = -5
 # menu_vr_scale = 1.0
 # menu_vr_depth = 12
+# VR layer (v0.10.3, menu_vr_layer = 1): the panel's distance in cm (30..300). The panel keeps the same size at every
+# distance (it grows with it), only its stereo depth changes. The menu's "Panel VR depth" row sets it in 5 cm steps there
+# (menu_vr_depth above is the in-picture shift, used with menu_vr_layer = 0).
+# menu_vr_dist = 100
 # VR (v0.10.0 phase 16): 1 = the panel turns to FACE you when it is moved off the centre (a tilted 3-D panel that keeps the
 # same apparent size from every angle; menu_vr_x / menu_vr_y / menu_vr_scale / menu_vr_depth keep their meaning: they place
-# the panel's centre), 0 = a flat picture as before. The menu's "Panel faces you (VR)" row switches it live.
+# the panel's centre), 0 = a flat picture as before. With menu_vr_layer = 1 (v0.10.3) also the fps box while it follows
+# the headset; the compositor turns the layers. The menu's "Panel faces you (VR)" row switches it live.
 # menu_vr_face = 1
+# VR (v0.10.3): 1 = the panel and the fps box are separate OpenXR QUAD LAYERS: the headset's compositor shows them on top of
+# the game picture itself, so they stay rock-steady (no swimming with the reprojection), sit at a real distance (the
+# panel menu_vr_dist, the fps box 0.8 m) and are never covered by the game's own menus. menu_vr_x / menu_vr_y /
+# menu_vr_scale, menu_vr_face and the fps_vr_* keys keep their meaning; menu_vr_depth is then unused (the depth is the
+# real distance, menu_vr_dist). 0 = drawn into the eye picture as before (menu_vr_depth, no menu_vr_dist). The mod falls
+# back to the picture by itself when the layers are not possible (no OpenXR session, the runtime refuses them).
+# menu_vr_layer = 1
+# v0.10.2 HOLD TO BIND: hold a key or a wheel / gamepad button this long (ms, 500..10000) on a menu row and it becomes that
+# row's hotkey (written to the key_* line below at once; Backspace held = none). While the menu is open the game gets no
+# keys and no buttons at all (axes / pedals still pass): close the menu before you press Escape or drive.
+# bind_hold_ms = 5000
 
 # ---- v0.10.0 FPS BOX: a small live fps / frame-time box ("60 fps" / "16.7 ms", updated twice a second), shown also
 # while the menu is closed. The menu's FPS counter rows switch and move it live; Shift+F12 / the Save row writes these
@@ -444,11 +460,17 @@ debug = 0
 # fps_y = 1
 # fps_scale = 1.0
 # VR: the box CENTRE relative to the eye's optical centre, in % of the eye width / height (-50..50; negative y = up),
-# size 0.2..3.0 (1 = 8 % of the eye width; default 0.3 = about 2.4 %). It uses the same inward shift as the panel
-# (menu_vr_depth).
+# size 0.2..3.0 (1 = 8 % of the eye width; default 0.3 = about 2.4 %). Drawn into the picture it uses the same inward
+# shift as the panel (menu_vr_depth); as a VR layer (menu_vr_layer = 1) it sits 0.8 m away.
 # fps_vr_x = 0
 # fps_vr_y = -25
 # fps_vr_scale = 0.3
+# v0.10.3 VR: 0 = the box follows the headset (as above), 1 = FIXED IN THE CAB: it stays at one spot 0.8 m from your seat
+# position (the origin of the game's VR tracking space) and you look at it like at a cab instrument. fps_vr_x / fps_vr_y
+# then are DEGREES around you (x + = right, y + = down; default -25 = 25 degrees up) and fps_vr_scale the size it has at
+# 0.8 m. No inward shift (each eye sees it from its own position). Falls back to following the headset while the game's
+# OpenXR view poses are not available. The menu's FPS counter lock row switches it live.
+# fps_vr_lock = 0
 
 # ---- Hotkeys -------------------------------------------------------------------------------------------
 # key_<action> = [Shift+][Ctrl+][Alt+]Key, or none to disable the action. The values below are the defaults:
@@ -510,7 +532,8 @@ key_mv_dump = Alt+F8
 # Performance profile high -> medium -> low (perf_profile)
 key_perf_profile = Alt+F9
 # v0.10.0 tuning menu: open / close, and (only while it is open) select a row up / down and change it left / right.
-# The game does not see these 5 keys while the menu is open; closed, they belong to the game.
+# v0.10.2: the game sees no key / button at all while the menu is open; closed, they belong to the game. The menu's
+# Menu keys row binds these 5 by holding the new keys (docs/KEYS.md, "Bind a key in the menu").
 key_menu = Delete
 key_menu_up = Up
 key_menu_down = Down

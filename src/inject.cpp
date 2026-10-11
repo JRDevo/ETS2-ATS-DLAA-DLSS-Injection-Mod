@@ -586,6 +586,7 @@
 #include "log.h"
 #include "dinput_wrap.h"                           // v0.10.0 tuning menu: its keys are hidden from the game while open
 #include "ofxr.h"                                  // v0.10.0 OFXR Bridge module-range pass-through
+#include "xr_hook.h"                               // v0.10.3 phase 27: OpenXR xrReleaseSwapchainImage (VR panel draw point)
 #ifdef WITH_DLAA
 #include "scene_dlaa.h"
 #include "preview_blit.h"
@@ -631,17 +632,25 @@ bool     g_resetNext      = true;        // pass reset=true to NGX on the next e
 // v0.7.7: every hotkey is a re-bindable action (dlaa.ini key_*), see KeyBind / PollKeys below. One down-edge
 // state per virtual-key code (g_vkWasDown) replaces the F-key-only table of v0.6.5.
 bool     g_vkWasDown[256] = {};          // edge detect per VK, refreshed every top-level Present (PollKeys)
-// v0.10.0 IN-GAME TUNING MENU (see the "TUNING MENU" block after ToggleMirrors): open state (also read by the key-swallowing
-// window / DirectInput threads, dinput_wrap.cpp) and the panel placement (dlaa.ini menu_*; flat and VR have their own).
+// v0.10.0 IN-GAME TUNING MENU (see the "TUNING MENU" block after ToggleMirrors): open state (also read by the input-hiding
+// window / DirectInput threads, dinput_wrap.cpp MenuHidesInput) and the panel placement (dlaa.ini menu_*; flat and VR have
+// their own).
 std::atomic<bool> g_menuOpen{false};
 int      g_menuX = 2, g_menuY = 8;       // flat: % of the picture width / height to the panel's left / top edge (0..90)
 float    g_menuScale = 1.0f;             // flat: 0.5..2.0 (1 = 720 px wide at 1080 p, scales with the picture height)
 int      g_menuVrX = 0, g_menuVrY = -5;  // VR: % of the eye width / height, panel CENTRE from the eye's optical centre (-50..50)
 float    g_menuVrScale = 1.0f;           // VR: 0.5..2.0 (1 = 54 % of the eye width: the text of a 45 %-wide 720-px panel)
-int      g_menuVrDepth = 12;             // VR: px inward shift per eye (eye 0 right, eye 1 left), 0..200
+int      g_menuVrDepth = 12;             // VR: px inward shift per eye (towards the nose: crossed = nearer), 0..200
+int      g_menuVrDist = 100;             // v0.10.3 phase 29b, VR: dlaa.ini menu_vr_dist -- cm, 30..300: the panel QUAD's distance
+                                         //   (menu_vr_layer = 1; the Depth row there; menu_vr_depth is the in-picture shift)
 int      g_menuVrFace = 1;               // v0.10.0 phase 16, VR: 1 = the panel is a 3-D quad turned to FACE the eye (dlaa.ini
                                          //   menu_vr_face, MenuFacingGeom), 0 = a flat picture as before
-bool     g_menuExplicit = false;         // a menu_* value was changed in the menu -> SaveSettings writes the 8 menu_* keys
+// v0.10.3 phase 29, VR: dlaa.ini menu_vr_layer -- 1 (default) = the panel and the fps box are OpenXR QUAD composition layers the
+// compositor places itself (no swim in the runtime's reprojection; XrHook::OverlaySet / MenuOverlayDraw); 0 = drawn into the eye
+// picture as before (also the fallback whenever the quad path is not up: no OpenXR session / swapchain / xrEndFrame seen).
+int      g_menuVrLayer = 1;
+bool     g_menuExplicit = false;        // a menu_* value was changed in the menu -> SaveSettings writes the 9 menu_* keys
+int      g_bindHoldMs = 5000;            // v0.10.2 dlaa.ini bind_hold_ms (500..10000): the menu's hold-to-bind time (MenuBindTick)
 // v0.10.0 live fps box (dlaa.ini fps_*; the tuning menu's FPS counter rows): drawn where the panel draws, also while the menu
 // is closed. Flat and VR have their own placement.
 bool     g_fpsShow = false;              // fps_show: the box is on
@@ -653,7 +662,12 @@ int      g_fpsVrX = 0, g_fpsVrY = -25;   // VR: % of the eye width / height, box
 // the flat box as seen in the headset (still readable after the headset's downsampling).
 constexpr float kFpsVrScaleDefault = 0.3f;
 float    g_fpsVrScale = kFpsVrScaleDefault;
-bool     g_fpsExplicit = false;          // an fps_* value was changed in the menu -> SaveSettings writes the 7 fps_* keys
+// v0.10.3 phase 28, VR: dlaa.ini fps_vr_lock -- 0 = the box follows the headset (drawn at fps_vr_x / fps_vr_y % from each eye's
+// optical centre, as before), 1 = FIXED IN THE CAB: a point 0.8 m from the origin of the game's OpenXR reference space, in the
+// direction yaw = fps_vr_x degrees (+ right), pitch = -fps_vr_y degrees (fps_vr_y + = down, as the head-locked %), projected
+// into each eye picture with that eye's located pose + fov (FpsVrLockedPlace; XrHook::LatestViews).
+int      g_fpsVrLock = 0;
+bool     g_fpsExplicit = false;          // an fps_* value was changed in the menu -> SaveSettings writes the 8 fps_* keys
 int      g_menuBlitEye = -1;             // VR: the eye blit this Draw is (HandlePossibleBlit), drawn on after it (hkDraw)
 void*    g_menuBlitRt  = nullptr;        // ... and its render target (identity only)
 // v0.10.0 phase 16 VR LATE PANEL (see that block after MenuDrawPreview): the panel / fps box go LAST onto each eye picture.
@@ -914,6 +928,14 @@ inline bool KeyHit(KeyAction a) { return g_keys[a].hit; }
 char g_controllerName[64] = "";
 inline const char* KeyName(KeyAction a) { return g_keys[a].name; }
 bool g_keyRepeat[KA_COUNT] = {};         // v0.10.0: this Present's hit is an auto-repeat (menu navigation keys only)
+// v0.10.2: the action was ACTIVE at the last PollKeys (keyboard part with exact modifiers or controller part down; was
+// PollKeys' s_wasActive). The menu's hold-to-bind sets it for a freshly bound action, so the input still held from the hold
+// does not fire the action at once (a hit needs "not active the Present before"); the Menu keys row's tap test reads it.
+bool g_keyWasActive[KA_COUNT] = {};
+// v0.10.2: the controller state PollKeys read this Present (KeySwallow::ControllerState consumes its press latches, so the
+// menu's hold-to-bind scan uses this copy instead of a second call). Render thread.
+uint32_t g_pollJoyBtn[4] = {};
+unsigned g_pollJoyPov = 0;
 
 // v0.10.1: one controller token (lower case, no spaces): "wheel1".."wheel128" -> 1..128, "wheelup" / "wheelright" /
 // "wheeldown" / "wheelleft" -> KeySwallow::kJoyPovUp..kJoyPovLeft. Modifiers are not allowed in front of it.
@@ -972,6 +994,20 @@ bool ParseBinding(const char* text, int* vkOut, unsigned* modsOut, int* joyOut) 
     *vkOut = vk; *modsOut = mods; *joyOut = joy;
     return true;
 }
+// The named keys of a chord (letters, digits, F1..F24 and Numpad0..Numpad9 are handled in code). v0.10.2: one table in the
+// CANONICAL spelling -- ParseKeyChord compares case-insensitively, KeyChordName writes this spelling back (a binding made in
+// the menu's hold-to-bind reads like the defaults: "PageUp", "NumpadAdd", "[").
+const struct { const char* name; int vk; } kKeyChordNames[] = {
+    { "Home", VK_HOME }, { "End", VK_END }, { "Insert", VK_INSERT }, { "Delete", VK_DELETE },
+    { "PageUp", VK_PRIOR }, { "PageDown", VK_NEXT }, { "Up", VK_UP }, { "Down", VK_DOWN },
+    { "Left", VK_LEFT }, { "Right", VK_RIGHT }, { "Space", VK_SPACE }, { "Tab", VK_TAB },
+    { "Backspace", VK_BACK }, { "Enter", VK_RETURN }, { "Pause", VK_PAUSE },
+    { "NumpadAdd", VK_ADD }, { "NumpadSubtract", VK_SUBTRACT }, { "NumpadMultiply", VK_MULTIPLY },
+    { "NumpadDivide", VK_DIVIDE }, { "NumpadDecimal", VK_DECIMAL },
+    { "[", VK_OEM_4 }, { "]", VK_OEM_6 }, { ";", VK_OEM_1 }, { "'", VK_OEM_7 }, { ",", VK_OEM_COMMA },
+    { ".", VK_OEM_PERIOD }, { "/", VK_OEM_2 }, { "\\", VK_OEM_5 }, { "-", VK_OEM_MINUS },
+    { "=", VK_OEM_PLUS }, { "`", VK_OEM_3 },
+};
 // One keyboard chord, already lower case without spaces ("ctrl+shift+f5"). False = not a key ("none" included).
 bool ParseKeyChord(const char* buf, int* vkOut, unsigned* modsOut) {
     *vkOut = 0; *modsOut = 0;
@@ -994,22 +1030,50 @@ bool ParseKeyChord(const char* buf, int* vkOut, unsigned* modsOut) {
     }
     else if (!strncmp(p, "numpad", 6) && len == 7 && isdigit((unsigned char)p[6])) vk = VK_NUMPAD0 + (p[6] - '0');
     else {
-        static const struct { const char* name; int vk; } kNames[] = {
-            { "home", VK_HOME }, { "end", VK_END }, { "insert", VK_INSERT }, { "delete", VK_DELETE },
-            { "pageup", VK_PRIOR }, { "pagedown", VK_NEXT }, { "up", VK_UP }, { "down", VK_DOWN },
-            { "left", VK_LEFT }, { "right", VK_RIGHT }, { "space", VK_SPACE }, { "tab", VK_TAB },
-            { "backspace", VK_BACK }, { "enter", VK_RETURN }, { "pause", VK_PAUSE },
-            { "numpadadd", VK_ADD }, { "numpadsubtract", VK_SUBTRACT }, { "numpadmultiply", VK_MULTIPLY },
-            { "numpaddivide", VK_DIVIDE }, { "numpaddecimal", VK_DECIMAL },
-            { "[", VK_OEM_4 }, { "]", VK_OEM_6 }, { ";", VK_OEM_1 }, { "'", VK_OEM_7 }, { ",", VK_OEM_COMMA },
-            { ".", VK_OEM_PERIOD }, { "/", VK_OEM_2 }, { "\\", VK_OEM_5 }, { "-", VK_OEM_MINUS },
-            { "=", VK_OEM_PLUS }, { "`", VK_OEM_3 },
-        };
-        for (const auto& k : kNames) if (!strcmp(p, k.name)) { vk = k.vk; break; }
+        for (const auto& k : kKeyChordNames) if (!_stricmp(p, k.name)) { vk = k.vk; break; }
     }
     if (!vk) return false;
     *vkOut = vk; *modsOut = mods;
     return true;
+}
+// v0.10.2: the inverse of ParseKeyChord's key part -- the canonical name of a virtual key ("F5", "Numpad3", "PageUp", "[",
+// "A", "0"). False (out = "") = the parser has no name for it: such a key cannot be bound (the hold-to-bind ignores it).
+bool KeyChordName(int vk, char* out, size_t cap) {
+    if (!cap) return false;
+    out[0] = 0;
+    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) snprintf(out, cap, "%c", (char)vk);
+    else if (vk >= VK_F1 && vk <= VK_F24)                     snprintf(out, cap, "F%d", vk - VK_F1 + 1);
+    else if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9)            snprintf(out, cap, "Numpad%d", vk - VK_NUMPAD0);
+    else for (const auto& k : kKeyChordNames) if (k.vk == vk) { snprintf(out, cap, "%s", k.name); break; }
+    return out[0] != 0;
+}
+// v0.10.2: the dlaa.ini token of a controller code ("Wheel7", "WheelUp"); "" for 0 / an unknown code.
+void JoyTokenName(int joy, char* out, size_t cap) {
+    if (!cap) return;
+    static const char* const kPov[4] = { "WheelUp", "WheelRight", "WheelDown", "WheelLeft" };
+    if (joy >= 1 && joy <= KeySwallow::kJoyMaxButton)                  snprintf(out, cap, "Wheel%d", joy);
+    else if (joy >= KeySwallow::kJoyPovUp && joy <= KeySwallow::kJoyPovLeft) snprintf(out, cap, "%s", kPov[joy - KeySwallow::kJoyPovUp]);
+    else                                                                 out[0] = 0;
+}
+// v0.10.2: the canonical binding text ParseBinding reads back: "Ctrl+Shift+F5", "Wheel7", "Ctrl+F5, Wheel7", "none".
+void KeyBindText(int vk, unsigned mods, int joy, char* out, size_t cap) {
+    if (!cap) return;
+    char key[24] = "", pad[16] = "";
+    JoyTokenName(joy, pad, sizeof(pad));
+    if (vk && KeyChordName(vk, key, sizeof(key)))
+        snprintf(out, cap, "%s%s%s%s%s%s", (mods & MOD_CTRL_BIT) ? "Ctrl+" : "", (mods & MOD_SHIFT_BIT) ? "Shift+" : "",
+                 (mods & MOD_ALT_BIT) ? "Alt+" : "", key, pad[0] ? ", " : "", pad);
+    else
+        snprintf(out, cap, "%s", pad[0] ? pad : "none");
+}
+// v0.10.3 phase 29c: the SHORT name of an action's binding for the tuning menu's footer / Menu keys row (one line in VR): the
+// keyboard chord only ("Delete", "Up", "Ctrl+F5"); with no keyboard key the controller token ("Wheel7"); "none" with neither.
+// The user's own binding, only without its second part (KeyName = the full text "Up, WheelUp").
+void KeyShortName(KeyAction a, char* out, size_t cap) {
+    const KeyBind& k = g_keys[a];
+    char key[24];
+    if (k.vk && KeyChordName(k.vk, key, sizeof(key))) KeyBindText(k.vk, k.mods, 0, out, cap);
+    else                                              KeyBindText(0, 0, k.joy, out, cap);
 }
 
 // Resets every binding to its default (called first in LoadConfig).
@@ -1083,9 +1147,12 @@ void PollKeys() {
                           ((GetAsyncKeyState(VK_MENU)    & 0x8000) ? MOD_ALT_BIT   : 0u);
     uint32_t joyBtn[4]; unsigned joyPov = 0;             // v0.10.1 every tapped DirectInput controller, OR'd
     KeySwallow::ControllerState(joyBtn, &joyPov);
+    for (int w = 0; w < 4; ++w) g_pollJoyBtn[w] = joyBtn[w];   // v0.10.2 for the menu's hold-to-bind scan (MenuBindScan)
+    g_pollJoyPov = joyPov;
     bool down[KA_COUNT], joyDown[KA_COUNT], active[KA_COUNT];
     static bool s_joyWasDown[KA_COUNT] = {};             // v0.10.1 the controller part, per action
-    static bool s_wasActive[KA_COUNT] = {};              // v0.10.1 keyboard part (exact mods) OR controller part, per action
+    bool* const s_wasActive = g_keyWasActive;            // v0.10.1 keyboard part (exact mods) OR controller part, per action
+                                                         //   (v0.10.2: file scope, the hold-to-bind sets it)
     // v0.10.0 tuning menu: the navigation keys fire only while the menu is open, and repeat while held (first repeat
     // 350 ms after the press, then every 70 ms; at most one per Present).
     const bool menuOpen = g_menuOpen.load(std::memory_order_relaxed);
@@ -1261,7 +1328,9 @@ void MenuLateCountDraw();
 void MenuLateReset(const char* why);
 void MenuLateArm(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv, char kind);   // (MenuDrawVr / MenuDrawPreview)
 void MenuLateAtPresent(uint64_t n);
-void FpsTick();                          // v0.10.0 fps meter (the fps box + the menu's fps figure), per Present while either is on
+void MenuLateOnXrRelease(void* swapchain, void* tex);   // v0.10.3 phase 27: XrHook callback, right before xrReleaseSwapchainImage
+void MenuOverlaySet();                  // v0.10.3 phase 29: the VR quad layers' parameters for XrHook, per Present
+void FpsTick();                        // v0.10.0 fps meter (the fps box + the menu's fps figure), per Present while either is on
 void CheckPresetFallback(uint64_t n);    // v0.5.7: beep + log when a live preset fell back to default
 void OnLiveTuningChange();               // v0.5.7; v0.6.2 also DLAA toggle / passive / MV (restarts the GPU spans window)
 void PreviewInvalidate();                // v0.7.8 profile-screen preview slots: drop their MV / DLSS history
@@ -1425,6 +1494,7 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
             }
         }
         if (g_menuLateN) MenuLateAtPresent(n);   // v0.10.0 phase 16 VR late panel: finished eye pictures end here
+        MenuOverlaySet();                        // v0.10.3 phase 29: the VR quad layers (XrHook; VR launches only)
         if (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)
             MenuDrawAtPresent(sc, bctx);         // v0.10.0 tuning menu panel + fps box (flat / mirror)
 #endif
@@ -2038,7 +2108,9 @@ bool PathNextToDll(const wchar_t* name, wchar_t* path);   // defined below
 // v0.10.0 (Reset row): an entry with an EMPTY val ("") means "remove this key": every matching line is dropped (not replaced), and
 // the key is never appended. A missing file with only removals is left missing (nothing to write).
 // Returns true only if the temp was fully written AND the replace succeeded.
-struct IniKV { const char* key; char val[32]; };   // val[0] == 0: delete the key's line(s) (WriteIniPreserving)
+constexpr int kIniMaxKeys = 40;                    // v0.10.3 phase 28: WriteIniPreserving's key cap (was 32)
+struct IniKV { const char* key; char val[48]; };   // val[0] == 0: delete the key's line(s) (WriteIniPreserving)
+                                                   // (v0.10.2: was 32 -- "Ctrl+Shift+Alt+NumpadSubtract, Wheel128" is 39)
 bool WriteIniPreserving(const IniKV* kv, int nkv) {
     wchar_t path[MAX_PATH], tmp[MAX_PATH];
     if (!PathNextToDll(L"dlaa.ini", path) || !PathNextToDll(L"dlaa.ini.tmp", tmp)) return false;
@@ -2054,13 +2126,14 @@ bool WriteIniPreserving(const IniKV* kv, int nkv) {
     }
     const char* nl = (in.find("\r\n") != std::string::npos) ? "\r\n" : "\n";   // match the file's ending
     bool anyWrite = false;                               // at least one key with a value (else a missing file stays missing)
-    for (int k = 0; k < nkv && k < 32; ++k) if (kv[k].val[0]) anyWrite = true;
+    for (int k = 0; k < nkv && k < kIniMaxKeys; ++k) if (kv[k].val[0]) anyWrite = true;
     if (in.empty() && !anyWrite) return true;            // only removals and no file: nothing to do
 
     std::string out;
     out.reserve(in.size() + 256);
-    bool seen[32] = {};                                  // nkv <= 32 (v0.10.0 phase 4: was 8; tuning menu: was 16; fps box: was 24)
-    if (nkv > 32) return false;
+    bool seen[kIniMaxKeys] = {};                         // nkv <= kIniMaxKeys (v0.10.0 phase 4: was 8; tuning menu: was 16; fps box:
+                                                         //   was 24; v0.10.3 phase 28: was 32, the Reset row needs 33)
+    if (nkv > kIniMaxKeys) return false;
     if (in.empty()) {
         out += "# dlaa.ini -- settings saved by the ETS2 DLAA injector";
         out += nl;
@@ -2129,9 +2202,11 @@ void SaveSettings(uint64_t n) {
     const int   preTm   = g_preOn.load() ? 1 : 0;         // v0.10.0 phase 4 (Alt+F7)
     // v0.10.0 phase 10: + perf_profile; dlss_preset / dlaa_area / mirror_dlaa only when EXPLICIT (in dlaa.ini or changed by their
     // own key) -- a value that only comes from the profile is not written, so the next profile switch still moves it
-    IniKV kv[32] = {};                                    // v0.10.0 tuning menu: was 11 (+ the 8 menu_* keys + the 7 fps_* keys)
+    IniKV kv[kIniMaxKeys] = {};                           // v0.10.0 tuning menu: was 11 (+ the 8 menu_* keys + the 7 fps_* keys)
+                                                          // v0.10.3 phase 28: + fps_vr_lock = 31
                                                           // v0.10.2: + mirror_vr_mode / mirror_flat_mode / mirror_vr_views = 29
                                                           // v0.10.2: + mirror_mv = 30
+                                                          // v0.10.3 phase 29b: + menu_vr_dist = 32
     int nkv = 0;
     auto add = [&](const char* k) -> char* { kv[nkv].key = k; return kv[nkv++].val; };
     if (g_profExplicit[PK_PRESET]) snprintf(add("dlss_preset"), sizeof(kv[0].val), "%s", preset);
@@ -2165,6 +2240,7 @@ void SaveSettings(uint64_t n) {
         snprintf(add("menu_vr_y"), sizeof(kv[0].val), "%d", g_menuVrY);
         snprintf(add("menu_vr_scale"), sizeof(kv[0].val), "%.1f", (double)g_menuVrScale);
         snprintf(add("menu_vr_depth"), sizeof(kv[0].val), "%d", g_menuVrDepth);
+        snprintf(add("menu_vr_dist"), sizeof(kv[0].val), "%d", g_menuVrDist);   // v0.10.3 phase 29b
         snprintf(add("menu_vr_face"), sizeof(kv[0].val), "%d", g_menuVrFace);   // v0.10.0 phase 16
     }
     if (g_fpsExplicit) {                                  // v0.10.0 fps box: on / off + placement, only once changed in the menu
@@ -2175,16 +2251,18 @@ void SaveSettings(uint64_t n) {
         snprintf(add("fps_vr_x"), sizeof(kv[0].val), "%d", g_fpsVrX);
         snprintf(add("fps_vr_y"), sizeof(kv[0].val), "%d", g_fpsVrY);
         snprintf(add("fps_vr_scale"), sizeof(kv[0].val), "%.1f", (double)g_fpsVrScale);
+        snprintf(add("fps_vr_lock"), sizeof(kv[0].val), "%d", g_fpsVrLock);   // v0.10.3 phase 28
     }
-    char menuW[200] = "";
+    char menuW[224] = "";                                 // (v0.10.3 phase 29b: was 200, + menu_vr_dist)
     if (g_menuExplicit)
         snprintf(menuW, sizeof(menuW), " -- menu panel: menu_x=%d menu_y=%d menu_scale=%.1f menu_vr_x=%d menu_vr_y=%d menu_vr_scale=%.1f "
-                 "menu_vr_depth=%d menu_vr_face=%d", g_menuX, g_menuY, (double)g_menuScale, g_menuVrX, g_menuVrY, (double)g_menuVrScale,
-                 g_menuVrDepth, g_menuVrFace);
+                 "menu_vr_depth=%d menu_vr_dist=%d menu_vr_face=%d", g_menuX, g_menuY, (double)g_menuScale, g_menuVrX, g_menuVrY,
+                 (double)g_menuVrScale, g_menuVrDepth, g_menuVrDist, g_menuVrFace);
     char fpsW[160] = "";
     if (g_fpsExplicit)
-        snprintf(fpsW, sizeof(fpsW), " -- fps box: fps_show=%d fps_x=%d fps_y=%d fps_scale=%.1f fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f",
-                 g_fpsShow ? 1 : 0, g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY, (double)g_fpsVrScale);
+        snprintf(fpsW, sizeof(fpsW), " -- fps box: fps_show=%d fps_x=%d fps_y=%d fps_scale=%.1f fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f "
+                 "fps_vr_lock=%d", g_fpsShow ? 1 : 0, g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY, (double)g_fpsVrScale,
+                 g_fpsVrLock);
     char notW[128];
     snprintf(notW, sizeof(notW), "%s%s%s%s%s", g_profExplicit[PK_PRESET] ? "" : " dlss_preset", g_profExplicit[PK_AREA] ? "" : " dlaa_area",
              g_profExplicit[PK_MIRROR_DLAA] ? "" : " mirror_dlaa", mirVrW ? "" : " mirror_vr_mode", mirFlatW ? "" : " mirror_flat_mode");
@@ -13061,19 +13139,30 @@ void ToggleMirrors(uint64_t n) {
 // while the menu is open). The panel is drawn (TuningMenu::Draw, menu.cpp) at Present over the backbuffer (flat, and the VR
 // desktop mirror; under a present layer: over the game-side backbuffer while it is still bound at the frame-end boundary) and,
 // in VR, into each eye texture right after the game's eye blit (and the DLSS upscale composite), centred on the eye's optical
-// centre. While open, the 5 menu keys are hidden from the game (MenuSwallowKeys -> dinput_wrap.cpp). Closed: one branch per
-// Present and per blit Draw, nothing else.
+// centre. While open, NO key and NO controller button reaches the game (v0.10.2 MenuHidesInput -> dinput_wrap.cpp; v0.10.0 /
+// v0.10.1: only the 5 menu keys), and a key / button held on a row for bind_hold_ms binds it to that row's hotkey (v0.10.2
+// HOLD TO BIND, MenuBindTick). Closed: one branch per Present and per blit Draw, nothing else.
 #ifndef DLAA_INJECTOR_VERSION
 #define DLAA_INJECTOR_VERSION "0.0.0-dev"
 #endif
 enum MenuRowId {
     MR_MODE, MR_PROFILE, MR_MODEL, MR_SHARP, MR_WIDTH, MR_LOD, MR_LODCUT, MR_AREA, MR_DRAWIDS, MR_MIRROR, MR_PRETM, MR_FWD,
-    MR_UPSCALE, MR_DLAA, MR_OFXR, MR_POSX, MR_POSY, MR_SIZE, MR_DEPTH, MR_FACE, MR_FPS, MR_FPSX, MR_FPSY, MR_FPSSIZE, MR_SAVE,
-    MR_RESET, MR_CLOSE,
+    MR_UPSCALE, MR_DLAA, MR_OFXR,
+    MR_PANELGRP,                                          // v0.10.3 phase 29c: group header "Panel settings" (collapsible)
+    MR_POSX, MR_POSY, MR_SIZE, MR_DEPTH, MR_FACE,
+    MR_MENUKEYS,                                          // v0.10.2: the 5 menu keys, bound by 5 holds in sequence (29c: in the panel group)
+    MR_FPS,
+    MR_FPSGRP,                                            // v0.10.3 phase 29c: group header "FPS counter settings" (collapsible)
+    MR_FPSLOCK,                                           // v0.10.3 phase 28: VR fps box follows the head / fixed in the cab
+    MR_FPSX, MR_FPSY, MR_FPSSIZE,
+    MR_SAVE, MR_RESET, MR_CLOSE,
     MR_COUNT
 };
 static_assert(MR_COUNT <= TuningMenu::kMaxRows, "tuning menu: too many rows");
-const wchar_t* const kMenuDesc[MR_COUNT] = {
+// v0.10.3 phase 29c: each group = its header + the rows right after it up to its last child (MenuRowGroup relies on it)
+static_assert(MR_PANELGRP + 1 == MR_POSX && MR_FACE + 1 == MR_MENUKEYS && MR_FPSGRP + 1 == MR_FPSLOCK,
+              "tuning menu: a group's children must follow its header");
+const wchar_t* const kMenuDesc[] = {
     // v0.10.0: every row = what it does, when a player would change it, what it costs. The panel shows 3 lines of about 105
     // characters (menu.cpp kDescH) = the description + the cost sentence MenuPerfCosts appends: keep both within ~320 characters.
     L"DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's Scaling is below 100 %. "
@@ -13107,28 +13196,62 @@ const wchar_t* const kMenuDesc[MR_COUNT] = {
     L"of every part together.",
     L"OFXR Bridge = VR frame generation by djules75, a separate download (github.com/djules75/OFXR-Bridge). found = its layer "
     L"is loaded in this game and the mod lets its work pass through. Start its tray app before the game.",
+    // v0.10.3 phase 29c (MR_PANELGRP)
+    L"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes it; it starts closed "
+    L"every time the menu opens.",
     L"Moves this panel sideways, in % of the screen. Flat and VR each keep their own position. Use it if the panel covers "
     L"something you need. No cost.",
     L"Moves this panel up / down, in % of the screen. Flat and VR each keep their own position. Use it if the panel covers "
     L"something you need. No cost.",
     L"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too much. Flat and VR each keep "
     L"their own size. No cost.",
-    L"VR only, so greyed in flat. Shifts the panel inward per eye so it floats closer than infinity. Raise it if the panel is "
-    L"tiring to look at. No cost.",
-    L"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same size from every angle; "
-    L"off = a flat picture. No cost.",
+    L"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, the default; in px of "
+    L"inward shift per eye with menu_vr_layer = 0. Same size at every depth. Change it if the panel is tiring to look at. No cost.",
+    L"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same size from every angle "
+    L"(as a VR layer, the default, the head-following fps box too); off = a flat picture. No cost.",
+    nullptr,                                              // MR_MENUKEYS: built with the hold time and the key names (MenuBuildPanel)
     L"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see what a setting gains. "
-    L"Negligible cost, none when off. Save keeps it for the next start.",
-    L"Moves the fps box sideways, in % of the screen. Flat and VR each keep their own position. No cost.",
-    L"Moves the fps box up / down, in % of the screen. Flat and VR each keep their own position. No cost.",
+    L"Its GPU cost is measured: per frame, every picture it is drawn into; none when off. Save keeps it for the next start.",
+    // v0.10.3 phase 29c (MR_FPSGRP)
+    L"The fps box's lock, position and size. Right opens the group, Left closes it; it starts closed every time the menu "
+    L"opens.",
+    // v0.10.3 phase 28 (MR_FPSLOCK)
+    L"VR only, so greyed in flat. Follow head = the fps box moves with the headset. Fixed in cab = it stays at one spot in the "
+    L"cab, 0.8 m from your seat; X / Y then turn it around you in degrees. No cost.",
+    L"Moves the fps box sideways, in % of the screen (VR fixed in cab: degrees around you). Flat and VR each keep their own "
+    L"position. No cost.",
+    L"Moves the fps box up / down, in % of the screen (VR fixed in cab: degrees, minus = up). Flat and VR each keep their own "
+    L"position. No cost.",
     L"Makes the fps box bigger or smaller (0.2 .. 3.0). Raise it if you cannot read it in the headset or on a big screen. No cost.",
     L"Writes everything shown here into dlaa.ini (settings, and the panel / fps box positions once you moved them), keeping every "
     L"other line. Do it once you like what you see, or the changes are gone at the next start. Mode saves itself.",
+    // v0.10.3 phase 29d (MR_RESET): MenuBuildPanel puts "Hold <menu Right> for <bind_hold_ms> s to reset. " in front of it
     L"Puts every setting in this menu back to how the mod ships (model, sharpen, texture sharpness, DLAA area, motion, mirrors, "
-    L"profile, panel and fps box), live and in dlaa.ini, keeping your hotkeys and every other line. Use it when you have changed too much.",
+    L"profile, panel and fps box), live and in dlaa.ini, keeping your hotkeys and every other line.",
     nullptr,                                              // MR_CLOSE: "Closes the menu ..." (built with the key name)
 };
+static_assert(sizeof(kMenuDesc) / sizeof(kMenuDesc[0]) == MR_COUNT, "tuning menu: kMenuDesc must have one entry per row (MR_* order)");
 int   g_menuSel     = 0;                                  // selected row (kept while closed: the menu reopens where it was)
+// v0.10.3 phase 29c: the two collapsible groups -- [0] "Panel settings" (MR_PANELGRP: MR_POSX .. MR_MENUKEYS), [1] "FPS
+// counter settings" (MR_FPSGRP: MR_FPSLOCK .. MR_FPSSIZE). Both collapse at every open (MenuKeys); a collapsed group's rows
+// are not in the Panel handed to Draw (MenuBuildPanel compacts), Up / Down skip them (MenuStepRow). g_menuSel stays an MR id.
+bool  g_menuGrpOpen[2] = {};
+inline int  MenuRowGroup(int id) {                       // the header of the group `id` is a child of; -1 = top level (headers too)
+    if (id > MR_PANELGRP && id <= MR_MENUKEYS) return MR_PANELGRP;
+    if (id > MR_FPSGRP && id <= MR_FPSSIZE)    return MR_FPSGRP;
+    return -1;
+}
+inline bool& MenuGrpOpen(int header) { return g_menuGrpOpen[header == MR_FPSGRP ? 1 : 0]; }
+inline bool MenuRowVisible(int id) { const int g = MenuRowGroup(id); return g < 0 || MenuGrpOpen(g); }
+// The next VISIBLE row from `from` in direction dir (-1 / +1), wrapping around; `from` itself when nothing else is visible.
+int MenuStepRow(int from, int dir) {
+    int r = from;
+    for (int i = 0; i < MR_COUNT; ++i) {
+        r = (r + MR_COUNT + dir) % MR_COUNT;
+        if (MenuRowVisible(r)) return r;
+    }
+    return from;
+}
 bool  g_menuMoved   = false;                              // the panel placement changed since the menu was opened (close line)
 float g_menuVrBuild = 0.0f;                               // VR: panel scale of eye 0 (the texture is built at it; 0 = none yet)
 float g_fpsVrBuild  = 0.0f;                               // VR: fps box scale of eye 0 (the same for the box; 0 = none yet)
@@ -13146,6 +13269,10 @@ inline bool MenuVr() {
                         g_frames.load(std::memory_order_relaxed) - g_pvVrPicFrame < 120);
 }
 inline int  MenuClampI(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+// v0.10.3 phase 29b: the VR panel goes to the compositor as an OpenXR QUAD layer now (menu_vr_layer = 1 and its quad went out
+// at the last xrEndFrame -- XrHook::OverlayActive(0)): the Depth row then edits menu_vr_dist (the quad's distance) instead of
+// menu_vr_depth (the in-picture fallback's shift, also the path while the quad path is not up / failed this session).
+inline bool MenuVrQuad() { return g_menuVrLayer && MenuVr() && XrHook::OverlayActive(0); }
 // How the panel colours go into a target of view format f (TuningMenu::OutMode): an sRGB view encodes / scRGB float is linear
 // -> decoded; the HDR10 screen (R10G10B10A2 with Windows HDR on, g_hdrOut) -> PQ; anything else -> the bytes as they are.
 inline int MenuOutMode(DXGI_FORMAT f, bool screen) {
@@ -13210,6 +13337,15 @@ void FpsStop() {
     g_fps = FpsMeter();
     g_fps.freq = freq;
 }
+// v0.10.3 phase 29: how the VR panel / fps box reach the headset now (the toggle logs)
+const char* MenuVrPathName() {
+    if (!g_menuVrLayer) return "VR: drawn into the eye picture (menu_vr_layer=0)";
+    const XrHook::OverlayStats os = XrHook::GetOverlayStats();
+    if (os.ready) return "VR: an OpenXR quad layer (menu_vr_layer=1; the compositor places it)";
+    return os.createFails || os.rejects ? "VR: drawn into the eye picture (menu_vr_layer=1, but the quad path FAILED this session)"
+                                        : "VR: an OpenXR quad layer once the session ends a frame with it (menu_vr_layer=1; in the eye "
+                                          "picture until then)";
+}
 // The fps box switched on / off (the menu's FPS counter row): logged + beeped like the other toggles; off drops its texture.
 void ToggleFpsBox(uint64_t n) {
     g_fpsShow = !g_fpsShow;
@@ -13221,9 +13357,26 @@ void ToggleFpsBox(uint64_t n) {
         if (!g_menuOpen.load(std::memory_order_relaxed)) FpsStop();   // (the menu row: the menu is open, the meter keeps running)
     }
     Log("fps box %s (tuning menu, Present #%llu) -- flat fps_x=%d fps_y=%d fps_scale=%.1f, VR fps_vr_x=%d fps_vr_y=%d "
-        "fps_vr_scale=%.1f", g_fpsShow ? "ON" : "OFF", (unsigned long long)n, g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX,
-        g_fpsVrY, (double)g_fpsVrScale);
+        "fps_vr_scale=%.1f; %s", g_fpsShow ? "ON" : "OFF", (unsigned long long)n, g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX,
+        g_fpsVrY, (double)g_fpsVrScale, MenuVrPathName());
     PlayTones(1, g_fpsShow ? 1200 : 300, 150, 0);
+}
+// v0.10.3 phase 28: the menu's FPS counter lock row -- the VR fps box follows the headset (0) / stays fixed in the cab (1).
+// Logged + beeped like ToggleFpsBox. Also switchable in flat (kept for VR; the row is greyed there).
+void FpsVrLockReset();                                    // (FpsVrLockedPlace's once-logs + the captured pivot: after MenuDrawVrOn)
+void ToggleFpsVrLock(uint64_t n) {
+    g_fpsVrLock = g_fpsVrLock ? 0 : 1;
+    g_fpsExplicit = g_fpsMoved = true;
+    FpsVrLockReset();
+    const XrHook::PoseStats ps = XrHook::GetPoseStats();
+    Log("fps box VR lock: %s (fps_vr_lock=%d, tuning menu, Present #%llu) -- fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f are now %s; "
+        "OpenXR: hook %s, %llu stereo xrLocateViews seen, %llu xrEndFrame projection layers, layer space type %d (2 = LOCAL); %s",
+        g_fpsVrLock ? "FIXED IN THE CAB" : "follows the headset", g_fpsVrLock, (unsigned long long)n, g_fpsVrX, g_fpsVrY,
+        (double)g_fpsVrScale, g_fpsVrLock ? "yaw / pitch degrees at 0.8 m (+ right, + down) and the size at 0.8 m"
+                                          : "% of the eye picture from its optical centre",
+        XrHook::Hooked() ? "installed" : "NOT installed", (unsigned long long)ps.locates, (unsigned long long)ps.endFrames,
+        ps.layerSpaceType, MenuVrPathName());
+    PlayTones(1, g_fpsVrLock ? 1200 : 300, 150, 0);
 }
 
 // ---- v0.10.0 tuning menu "Reset to defaults" row ---------------------------------------------------------------------------------
@@ -13233,7 +13386,7 @@ void ToggleFpsBox(uint64_t n) {
 // the upscale below it); dlss_preset default (driver pick), dlaa_area 100, sharpness 0.4, sharp_radius 1.5, tex_lod_bias 0 with the
 // cut-out key absent (g_lodCutMode = kLodCutAbsent, -0.50), mv_objects 2, mirror_dlaa 1, dlaa_pre_tonemap 1, perf_profile high,
 // mv_fwd_depth 1, the panel and the fps box at their default placement (fps box off). Each live change uses the side effects of
-// the Step* / Toggle* function of the row. On disk the 32 keys are REMOVED (WriteIniPreserving, empty value): key_* hotkeys, debug,
+// the Step* / Toggle* function of the row. On disk the 34 keys are REMOVED (WriteIniPreserving, empty value): key_* hotkeys, debug,
 // every other key and all comments stay. Only the profile keys that dlaa.ini sets AND this reset removes (dlss_preset, dlaa_area,
 // mirror_dlaa, mv_fwd_depth) lose their "explicit" mark; the other profile keys (mirror_vr_mode, mv_vote_res, ...) stay in the file,
 // so they stay explicit exactly as at the next start.
@@ -13279,6 +13432,7 @@ void ResetSettings(uint64_t n) {
     // panel placement (the menu's Panel rows); g_menuMoved: the close line logs the new placement
     g_menuX = 2; g_menuY = 8; g_menuScale = 1.0f;
     g_menuVrX = 0; g_menuVrY = -5; g_menuVrScale = 1.0f; g_menuVrDepth = 12; g_menuVrFace = 1;
+    g_menuVrDist = 100;                                   // v0.10.3 phase 29b
     g_menuExplicit = false;
     g_menuMoved = true;
     // fps box: off (ToggleFpsBox's off path) + default placement
@@ -13291,21 +13445,24 @@ void ResetSettings(uint64_t n) {
     }
     g_fpsX = 1; g_fpsY = 1; g_fpsScale = 1.0f;
     g_fpsVrX = 0; g_fpsVrY = -25; g_fpsVrScale = kFpsVrScaleDefault;
+    g_fpsVrLock = 0;                                      // v0.10.3 phase 28: follows the headset again
     g_fpsExplicit = false;
     g_fpsMoved = true;
     OnLiveTuningChange();                                 // the timing windows restart (new pipeline state)
 
-    // dlaa.ini: remove the 32 keys (empty value); everything else stays byte-for-byte (v0.10.2: + mirror_mv = 32, the cap)
+    // dlaa.ini: remove the 34 keys (empty value); everything else stays byte-for-byte (v0.10.2: + mirror_mv = 32; v0.10.3 phase 28:
+    // + fps_vr_lock = 33, the cap raised to kIniMaxKeys; v0.10.3 phase 29b: + menu_vr_dist = 34)
     static const char* const kKeys[] = {
         "mode", "dlss_preset", "dlaa_area", "sharpness", "sharp_radius", "dlss_upscale", "tex_lod_bias", "tex_lod_bias_cutout",
         "mv_objects", "mirror_dlaa", "mirror_vr_mode", "mirror_flat_mode", "mirror_vr_views", "mirror_mv", "dlaa_pre_tonemap",
         "perf_profile", "mv_fwd_depth",
         "menu_x", "menu_y", "menu_scale", "menu_vr_x", "menu_vr_y", "menu_vr_scale", "menu_vr_depth", "menu_vr_face",
-        "fps_show", "fps_x", "fps_y", "fps_scale", "fps_vr_x", "fps_vr_y", "fps_vr_scale",
+        "menu_vr_dist",                                                                                 // phase 29b
+        "fps_show", "fps_x", "fps_y", "fps_scale", "fps_vr_x", "fps_vr_y", "fps_vr_scale", "fps_vr_lock",   // phase 28: + fps_vr_lock
     };
     constexpr int kNKeys = (int)(sizeof(kKeys) / sizeof(kKeys[0]));
-    static_assert(kNKeys <= 32, "WriteIniPreserving handles at most 32 keys");
-    IniKV kv[32] = {};                                    // val[0] == 0 on every entry = remove the key
+    static_assert(kNKeys <= kIniMaxKeys, "WriteIniPreserving handles at most kIniMaxKeys keys");
+    IniKV kv[kIniMaxKeys] = {};                                    // val[0] == 0 on every entry = remove the key
     for (int i = 0; i < kNKeys; ++i) kv[i].key = kKeys[i];
     const bool written = WriteIniPreserving(kv, kNKeys);
     if (written) {
@@ -13314,8 +13471,9 @@ void ResetSettings(uint64_t n) {
             "(-0.50) mv_objects = 2 mirror_dlaa = 1 mirror_vr_mode = 2 mirror_flat_mode = 1 mirror_vr_views = 2 mirror_mv = parts "
             "dlaa_pre_tonemap = 1 "
             "perf_profile = high mv_fwd_depth = 1 menu_x = 2 menu_y = 8 "
-            "menu_scale = 1.0 menu_vr_x = 0 menu_vr_y = -5 menu_vr_scale = 1.0 menu_vr_depth = 12 menu_vr_face = 1 fps_show = 0 "
-            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f -- profile: %s -- dlaa.ini: %d keys "
+            "menu_scale = 1.0 menu_vr_x = 0 menu_vr_y = -5 menu_vr_scale = 1.0 menu_vr_depth = 12 menu_vr_dist = 100 menu_vr_face = 1 "
+            "fps_show = 0 "
+            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 -- profile: %s -- dlaa.ini: %d keys "
             "removed (hotkeys and other lines kept)", (unsigned long long)n, g_dlaaOn.load() ? "DLSS" : "off", (double)kFpsVrScaleDefault,
             changed, kNKeys);
         BeepSeq b;                                        // success: rising two-tone 600 -> 900 Hz, 120 ms each (as SaveSettings)
@@ -13377,6 +13535,13 @@ struct MenuPerfState {
     bool          gameNa = false;                // still none 30 s after the open: "n/a"
     bool          noAa = false;                  // no DLAA / DLSS feature has ever existed this session: the mod anti-aliases nothing -> "game n/a" at once
     bool          nothing = false;               // 3 s after the open and no pass of the mod has landed since: nothing to measure on this screen
+    // v0.10.3 phase 29b: the fps box's own GPU cost (GpuPerf::kOverlay, a PER-FRAME section: every DrawWidget of a Present frame
+    // -- the VR quad image once at xrEndFrame, or each eye picture, + the flat / desktop-mirror backbuffer -- summed, NOT per
+    // eye; not in the eye totals above). boxMs = ms per frame over the last interval (frames without a box draw count 0).
+    GpuPerf::FrameStat boxRaw;                   // the window sums at the last read
+    uint32_t      boxGen = 0;                    // GpuPerf::Restarts() then
+    bool          haveBox = false;
+    double        boxMs = 0.0;
 };
 MenuPerfState g_menuPerf;
 
@@ -13445,6 +13610,25 @@ void MenuPerfTick() {
     for (int e = 0; e < 2; ++e) {
         MenuPerfEye pe;
         if (MenuPerfEyeDelta(e, pe) && !base && e < eyes) m.eye[e] = pe;   // no pass of the eye landed: the last figures stay
+    }
+    {                                                  // v0.10.3 phase 29b: the fps box, ms per frame (its own per-frame sums)
+        const GpuPerf::FrameStat cur = GpuPerf::FrameStats(GpuPerf::kOverlay);
+        const uint32_t gen = GpuPerf::Restarts();
+        const bool cont = gen == m.boxGen && cur.sets >= m.boxRaw.sets && !base;
+        const uint64_t dSets = cont ? cur.sets - m.boxRaw.sets : cur.sets;
+        const uint64_t dN = cont && cur.n >= m.boxRaw.n ? cur.n - m.boxRaw.n : cur.n;
+        const double dSum = cont ? cur.sumMs - m.boxRaw.sumMs : cur.sumMs;
+        if (!base && dSets && dN) { m.boxMs = dSum > 0.0 ? dSum / (double)dSets : 0.0; m.haveBox = true; }
+        m.boxRaw = cur;
+        m.boxGen = gen;
+        static bool s_logged = false;
+        if (m.haveBox && !s_logged) {
+            s_logged = true;
+            Log("tuning menu: fps box GPU cost %.4f ms per frame (GpuPerf fps-box: %llu of %llu timed frames drew it; every picture "
+                "it went into that frame, %s; not in the per-eye mod total)", m.boxMs, (unsigned long long)dN,
+                (unsigned long long)dSets, MenuVr() ? (g_menuVrLayer ? "VR: the quad image + the desktop mirror, or both eye "
+                "pictures + the mirror on the in-picture path" : "VR: both eye pictures + the desktop mirror") : "flat: the backbuffer");
+        }
     }
     if (g_fps.have) {                                  // v0.10.0: the fps meter (FpsTick) is the one fps source
         m.fps = g_fps.fps;
@@ -13551,7 +13735,14 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
     ms(MR_FWD, MG_FWD);                          if (!fwdOn) txt(MR_FWD, L"off");
     txt(MR_UPSCALE, dlaaOn && upOn ? L"no extra" : L"off");   // the upscale is the same NGX pass; the game draws fewer pixels
     msTotal(MR_DLAA);                            if (!dlaaOn) txt(MR_DLAA, L"off");
-    for (int r = MR_OFXR; r < MR_COUNT; ++r) txt(r, L"-");
+    for (int r = MR_OFXR; r < MR_COUNT; ++r) txt(r, L"-");   // (v0.10.3 phase 29c: the two group headers are in this range too)
+    // v0.10.3 phase 29b: the fps box's own measured cost, ms PER FRAME (GpuPerf::kOverlay; not per eye: one quad image or the
+    // eye pictures + the desktop mirror together)
+    const MenuPerfState& mp = g_menuPerf;
+    if (!g_fpsShow)       txt(MR_FPS, L"off");
+    else if (!timers)     txt(MR_FPS, L"n/a");
+    else if (!mp.haveBox) txt(MR_FPS, L"...");
+    else                  MenuMs(p.rows[MR_FPS].cost, kC, mp.boxMs);
 
     // the sentence: "Costs 1.3 ms per eye now; ..." (numbers from the same snapshot as the column). The description already
     // says what the row does and its typical cost; this adds the LIVE figure, or WHY a greyed row is greyed. The panel shows 3
@@ -13616,6 +13807,13 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         else if (!fwdOn) swprintf(sent, sentCap, L"Off now: costs nothing.");
         else if (!live) swprintf(sent, sentCap, L"%ls", wait);
         else            swprintf(sent, sentCap, L"Costs %ls %ls now; off saves it.", fig(MG_FWD), unit);
+        break;
+    case MR_FPS:                                          // v0.10.3 phase 29b
+        if (!g_fpsShow)       swprintf(sent, sentCap, L"Off now: costs nothing.");
+        else if (!timers)     swprintf(sent, sentCap, L"%ls", wait);
+        else if (mp.haveBox)  { wchar_t b[24];
+                                swprintf(b, 24, mp.boxMs < 0.001 ? L"<0.001 ms" : L"%.3f ms", mp.boxMs);
+                                swprintf(sent, sentCap, L"Costs %ls per frame now (all pictures together).", b); }
         break;
     case MR_UPSCALE:
         if (!dlaaOn)    swprintf(sent, sentCap, L"Off now (the mod is off).");
@@ -13724,6 +13922,350 @@ void CycleMirrors(uint64_t n, int dir, bool vr) {
     else        PlayTones((s + 1) / 2, partsState ? 1200 : 800, 90, 60);
 }
 
+// ---- v0.10.2 HOLD TO BIND ----------------------------------------------------------------------------------------------------
+// While the menu is open, holding ONE key (any key ParseKeyChord can name) or ONE controller button / D-pad direction on a row
+// for bind_hold_ms (default 2000) binds it to that row's hotkey action, live and in dlaa.ini (key_<action>) at once:
+//  - the hold starts at the input's DOWN-EDGE (an input already held when the row was reached does not count; one held since
+//    the menu opened -- the open key, an engaged shifter gear -- is ignored until released once), is cancelled when it is released or a second key / button joins (Shift / Ctrl / Alt do not count: they are read
+//    when the hold completes, so holding Ctrl+F5 binds "Ctrl+F5"), completes once, and runs only with the game in front.
+//  - a keyboard hold replaces the action's keyboard part and keeps its controller part; a controller hold the reverse.
+//    Backspace (any modifiers) clears both parts ("none"), so Backspace itself cannot be bound in the menu.
+//  - an input already bound to ANOTHER action (same key + modifiers, or the same controller code) is taken from it (that part
+//    becomes empty there and is written too) -- but never the last binding of key_menu: that hold is refused (low tone).
+//  - rows with several actions (model 1..4, the minus / plus pairs, Menu keys) ask one hold per action in sequence; the next
+//    step needs a fresh press (the down-edge rule: release first), moving to another row or closing the menu ends the
+//    sequence (completed steps stay bound). The Menu keys row cannot be cleared with Backspace.
+//  - on every row but Menu keys the 5 current menu inputs (their key with ANY modifiers, their controller code) are no
+//    candidates: holding Down keeps scrolling. On the Menu keys row they are: the open key does not close the menu there, the
+//    menu Up / Down move the selection on RELEASE when tapped (shorter than kMenuTapMs), held longer they bind instead; no
+//    auto-repeat, Left / Right do nothing there.
+//  - the held input still does its current job once at the press (holding Shift+F11 toggles DLAA first), as any hotkey.
+// Render thread only (MenuKeys / MenuBuildPanel). The input-hiding threads never read g_keys (MenuHidesInput), so g_keys may
+// change here.
+constexpr ULONGLONG kMenuTapMs = 300;          // shorter = a tap (Menu keys row: navigates); also when the progress bar shows
+constexpr int       kMenuBindBar = 10;         // progress bar: the buffer (max squares); drawn = MenuBarSteps() = ONE PER SECOND of
+                                               //   bind_hold_ms (v0.10.3 phase 29e; was a fixed 8: "5 s shows more than 5 blocks")
+inline int MenuBarSteps() { const int s = (g_bindHoldMs + 500) / 1000; return s < 1 ? 1 : (s > kMenuBindBar ? kMenuBindBar : s); }
+constexpr int       kSigJoy = 0x100;           // input signature: 1..255 = a key (VK), kSigJoy + code = a controller code
+struct MenuBindRow {
+    int         row;
+    int         n;                             // actions = holds in sequence (1..5)
+    KeyAction   a[5];
+    const char* step[5];                       // the step label ("step 2/2: plus"); unused when n == 1
+    const char* name;                          // the row name for the log line
+};
+const MenuBindRow kMenuBindRows[] = {
+    { MR_MODE,     1, { KA_MODE_CYCLE },                                     { "" },                         "Mode" },
+    { MR_PROFILE,  1, { KA_PROFILE },                                        { "" },                         "Performance profile" },
+    { MR_MODEL,    4, { KA_MODEL1, KA_MODEL2, KA_MODEL3, KA_MODEL4 },        { "model 1", "model 2", "model 3", "model 4" },
+                                                                                                             "DLAA model" },
+    { MR_SHARP,    2, { KA_SHARPEN_DOWN, KA_SHARPEN_UP },                    { "minus", "plus" },            "Sharpen strength" },
+    { MR_WIDTH,    2, { KA_WIDTH_DOWN, KA_WIDTH_UP },                        { "minus", "plus" },            "Sharpen width" },
+    { MR_LOD,      2, { KA_LOD_DOWN, KA_LOD_UP },                            { "minus", "plus" },            "Texture sharpness" },
+    { MR_LODCUT,   2, { KA_LOD_CUT_DOWN, KA_LOD_CUT_UP },                    { "minus", "plus" },            "Cut-out texture sharpness" },
+    { MR_AREA,     2, { KA_AREA_DOWN, KA_AREA_UP },                          { "minus", "plus" },            "DLAA area (VR)" },
+    { MR_DRAWIDS,  1, { KA_DRAWID_TOGGLE },                                  { "" },                         "Per-part motion vectors" },
+    { MR_MIRROR,   1, { KA_MIRROR_TOGGLE },                                  { "" },                         "Mirror DLAA" },
+    { MR_PRETM,    1, { KA_PRE_TONEMAP },                                    { "" },                         "DLAA before tonemap (flat)" },
+    { MR_FWD,      1, { KA_FWD_DEPTH },                                      { "" },                         "See-through depth" },
+    { MR_UPSCALE,  1, { KA_UPSCALE_TOGGLE },                                 { "" },                         "DLSS upscale" },
+    { MR_DLAA,     1, { KA_DLAA_TOGGLE },                                    { "" },                         "DLAA on / off" },
+    { MR_MENUKEYS, 5, { KA_MENU, KA_MENU_UP, KA_MENU_DOWN, KA_MENU_LEFT, KA_MENU_RIGHT },
+                      { "open", "up", "down", "left", "right" },                                             "Menu keys" },
+    { MR_SAVE,     1, { KA_SAVE },                                           { "" },                         "Save to dlaa.ini" },
+};
+// The bind actions of a row; null = the row takes no hold (OFXR, the panel / fps box rows, the 29c group headers, Reset, Close).
+const MenuBindRow* MenuBindOf(int row) {
+    for (const MenuBindRow& b : kMenuBindRows) if (b.row == row) return &b;
+    return nullptr;
+}
+struct MenuBindState {
+    int       prevSig = 0;                     // the single input held at the previous Present: 0 none, -1 several, else a sig
+    int       sig = 0;                         // the input of the running hold (0 = none)
+    ULONGLONG t0 = 0;                          // its down-edge (GetTickCount64)
+    int       bar = 0;                         // progress steps shown (0..kMenuBindBar - 1; refreshed at most every 100 ms)
+    ULONGLONG barAt = 0;
+    int       row = -1;                        // the row of the sequence
+    int       step = 0;                        // its next step (0-based)
+    wchar_t   note[48] = L"";                  // "taken from key_x" ... in the row's Hotkey column until noteUntil
+    int       noteRow = -1;
+    ULONGLONG noteUntil = 0;
+    int       navDir = 0;                      // Menu keys row: the menu Up (-1) / Down (+1) pressed, waiting for its release
+    ULONGLONG navAt = 0;
+    // inputs already held when the menu opened (the Delete that opened it, a held accelerator key, an engaged H-shifter gear =
+    // a button held for minutes): ignored by the scan until released once, so they neither start a hold nor block one
+    uint32_t  ignKey[8] = {};                  // bit vk
+    uint32_t  ignBtn[4] = {};                  // bit = button - 1
+    unsigned  ignPov = 0;
+};
+MenuBindState g_mb;
+inline unsigned HeldMods() {
+    return ((GetAsyncKeyState(VK_SHIFT)   & 0x8000) ? MOD_SHIFT_BIT : 0u) |
+           ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? MOD_CTRL_BIT  : 0u) |
+           ((GetAsyncKeyState(VK_MENU)    & 0x8000) ? MOD_ALT_BIT   : 0u);
+}
+// The single input held now (game in front only): 0 none, -1 several (keys and / or controller inputs), else its signature.
+// Keys: only those KeyChordName can name (the list is built once; modifiers, mouse buttons and the Windows keys are not
+// among them). Controller: the state PollKeys read this Present; a D-pad diagonal is two directions = several. Inputs in the
+// ignore set (held since the menu opened) do not count; a released one leaves the set. adopt = put every input held now
+// into the ignore set (MenuBindReset at the open).
+int MenuBindScan(bool adopt = false) {
+    static int s_vks[256];
+    static int s_nVk = -1;
+    if (s_nVk < 0) {
+        s_nVk = 0;
+        char nm[24];
+        for (int vk = 0x08; vk <= 0xFE; ++vk) if (KeyChordName(vk, nm, sizeof(nm))) s_vks[s_nVk++] = vk;
+    }
+    if (!IsForeground()) return 0;                        // (the ignore set is kept while the game is in the background)
+    uint32_t key[8] = {};
+    for (int i = 0; i < s_nVk; ++i)
+        if (GetAsyncKeyState(s_vks[i]) & 0x8000) key[s_vks[i] >> 5] |= 1u << (s_vks[i] & 31);
+    MenuBindState& m = g_mb;
+    for (int w = 0; w < 8; ++w) m.ignKey[w] = adopt ? key[w] : (m.ignKey[w] & key[w]);
+    for (int w = 0; w < 4; ++w) m.ignBtn[w] = adopt ? g_pollJoyBtn[w] : (m.ignBtn[w] & g_pollJoyBtn[w]);
+    m.ignPov = adopt ? g_pollJoyPov : (m.ignPov & g_pollJoyPov);
+    int sig = 0, count = 0;
+    for (int w = 0; w < 8; ++w) {
+        uint32_t b = key[w] & ~m.ignKey[w];
+        for (int i = 0; b && i < 32; ++i, b >>= 1)
+            if (b & 1u) { sig = w * 32 + i; if (++count > 1) return -1; }
+    }
+    for (int w = 0; w < 4; ++w) {
+        uint32_t b = g_pollJoyBtn[w] & ~m.ignBtn[w];
+        for (int i = 0; b && i < 32; ++i, b >>= 1)
+            if (b & 1u) { sig = kSigJoy + w * 32 + i + 1; if (++count > 1) return -1; }
+    }
+    const unsigned pov = g_pollJoyPov & ~m.ignPov;
+    for (int d = 0; d < 4; ++d)
+        if (pov & (1u << d)) { sig = kSigJoy + KeySwallow::kJoyPovUp + d; if (++count > 1) return -1; }
+    return sig;
+}
+// The text of an input signature ("Ctrl+F5" with the given modifiers, "Wheel7", "WheelUp").
+void MenuBindSigName(int sig, unsigned mods, char* out, size_t cap) {
+    if (sig >= kSigJoy) KeyBindText(0, 0, sig - kSigJoy, out, cap);
+    else                KeyBindText(sig, mods, 0, out, cap);
+}
+// One of the 5 current menu inputs (keyboard: the key with any modifiers; controller: the same code)?
+bool MenuBindIsMenuInput(int sig) {
+    static const KeyAction kMenuActs[] = { KA_MENU, KA_MENU_UP, KA_MENU_DOWN, KA_MENU_LEFT, KA_MENU_RIGHT };
+    for (KeyAction m : kMenuActs)
+        if (sig >= kSigJoy ? g_keys[m].joy == sig - kSigJoy : g_keys[m].vk == sig) return true;
+    return false;
+}
+// A fresh state at the open; every input held right now is ignored until released (the Delete that opened the menu starts no
+// hold, an engaged shifter gear blocks none).
+void MenuBindReset() {
+    g_mb = MenuBindState();
+    g_mb.row = g_menuSel;
+    g_mb.prevSig = MenuBindScan(true);
+}
+void MenuBindNote(int row, const char* text) {
+    MenuWiden(g_mb.note, sizeof(g_mb.note) / sizeof(g_mb.note[0]), text);
+    g_mb.noteRow = row;
+    g_mb.noteUntil = GetTickCount64() + 3000;
+}
+// A completed hold: binds `sig` to the row's current step (or clears it: Backspace), takes it from any other action, writes
+// dlaa.ini, logs, beeps, and moves the sequence on. A refused hold (Backspace on Menu keys / the last key_menu binding)
+// keeps the step.
+void MenuBindComplete(const MenuBindRow& br, int sig, ULONGLONG heldMs, uint64_t n) {
+    const int step = g_mb.step < br.n ? g_mb.step : 0;
+    const KeyAction a = br.a[step];
+    KeyBind& k = g_keys[a];
+    const bool isKey = sig < kSigJoy;
+    const bool clear = isKey && sig == VK_BACK;
+    const unsigned mods = isKey ? HeldMods() : 0u;
+    char held[64];
+    MenuBindSigName(sig, mods, held, sizeof(held));
+    char stepTxt[24] = "";
+    if (br.n > 1) snprintf(stepTxt, sizeof(stepTxt), " step %d/%d", step + 1, br.n);
+    if (clear && br.row == MR_MENUKEYS) {
+        Log("hotkey %s NOT cleared (held %s for %.1f s on row \"%s\"%s, Present #%llu): the 5 menu keys cannot be cleared in the "
+            "menu (dlaa.ini key_menu* can)", k.ini, held, (double)heldMs / 1000.0, br.name, stepTxt, (unsigned long long)n);
+        MenuBindNote(br.row, "menu keys: no clear");
+        PlayTones(1, 200, 400, 0);
+        return;
+    }
+    int nvk = k.vk, njoy = k.joy;
+    unsigned nmods = k.mods;
+    if (clear)      { nvk = 0; nmods = 0; njoy = 0; }
+    else if (isKey) { nvk = sig; nmods = mods; }
+    else            { njoy = sig - kSigJoy; }
+    int taken[KA_COUNT];
+    int nt = 0;
+    if (!clear)
+        for (int i = 0; i < KA_COUNT; ++i) {
+            if (i == (int)a) continue;
+            const KeyBind& o = g_keys[i];
+            if (isKey ? (o.vk == nvk && o.mods == nmods) : (o.joy == njoy)) taken[nt++] = i;
+        }
+    for (int t = 0; t < nt; ++t)
+        if (taken[t] == KA_MENU && (isKey ? !g_keys[KA_MENU].joy : !g_keys[KA_MENU].vk)) {
+            Log("hotkey %s NOT bound to %s (held for %.1f s on row \"%s\"%s, Present #%llu): it is the only binding of key_menu -- "
+                "the menu must stay reachable (bind another open key in step 1 first)", held, k.ini, (double)heldMs / 1000.0,
+                br.name, stepTxt, (unsigned long long)n);
+            MenuBindNote(br.row, "key_menu needs it");
+            PlayTones(1, 200, 400, 0);
+            return;
+        }
+    char was[64];
+    snprintf(was, sizeof(was), "%s", (k.vk || k.joy) ? k.name : "none");
+    k.vk = nvk; k.mods = nmods; k.joy = njoy;
+    KeyBindText(k.vk, k.mods, k.joy, k.name, sizeof(k.name));
+    g_keyWasActive[a] = true;                             // the still-held input does not fire the new binding at once
+    IniKV kv[32] = {};
+    int nkv = 0;
+    kv[nkv].key = k.ini;
+    snprintf(kv[nkv].val, sizeof(kv[0].val), "%s", k.name);
+    ++nkv;
+    char takenTxt[320] = "";
+    size_t tl = 0;
+    for (int t = 0; t < nt; ++t) {
+        KeyBind& o = g_keys[taken[t]];
+        if (isKey) { o.vk = 0; o.mods = 0; } else { o.joy = 0; }
+        KeyBindText(o.vk, o.mods, o.joy, o.name, sizeof(o.name));
+        if (nkv < 32) { kv[nkv].key = o.ini; snprintf(kv[nkv].val, sizeof(kv[0].val), "%s", o.name); ++nkv; }
+        if (tl < sizeof(takenTxt)) {
+            const int w = snprintf(takenTxt + tl, sizeof(takenTxt) - tl, "%s%s (now %s)", t ? ", " : "; taken from ", o.ini, o.name);
+            if (w > 0) tl += (size_t)w;
+        }
+    }
+    const bool written = WriteIniPreserving(kv, nkv);     // "none" is written as such (an empty value would delete the line)
+    Log("hotkey %s = %s (%s in the menu: held %s for %.1f s on row \"%s\"%s; was \"%s\"%s) -- %s, Present #%llu", k.ini, k.name,
+        clear ? "cleared" : "bound", held, (double)heldMs / 1000.0, br.name, stepTxt, was, takenTxt,
+        written ? "dlaa.ini written" : "dlaa.ini write FAILED (live until the game closes)", (unsigned long long)n);
+    if (!written) {
+        MenuBindNote(br.row, "dlaa.ini write FAILED");
+        PlayTones(1, 200, 400, 0);                        // failure: one long 200 Hz tone (as a failed save)
+    } else if (clear) {
+        MenuBindNote(br.row, "cleared (none)");
+        PlayTones(1, 300, 150, 0);                        // clear: one low 300 Hz tone
+    } else {
+        if (nt) {
+            char nb[64];
+            snprintf(nb, sizeof(nb), "taken from %s%s", g_keys[taken[0]].ini, nt > 1 ? " +more" : "");
+            MenuBindNote(br.row, nb);
+        }
+        BeepSeq b;                                        // bound: the Save two-tone 600 -> 900 Hz
+        b.n = 2; b.freq[0] = 600; b.ms[0] = 120; b.freq[1] = 900; b.ms[1] = 120; b.gapMs = 40;
+        PlayBeeps(b);
+    }
+    g_mb.step = step + 1 < br.n ? step + 1 : 0;           // the next step is asked at once (a fresh press starts it)
+}
+// Per Present while the menu is open (MenuKeys, after the navigation): the hold state machine of the selected row.
+void MenuBindTick(uint64_t n) {
+    const ULONGLONG now = GetTickCount64();
+    const int sel = g_menuSel;
+    if (g_mb.row != sel) { g_mb.row = sel; g_mb.step = 0; g_mb.sig = 0; g_mb.bar = 0; }   // another row: the sequence ends
+    const MenuBindRow* br = MenuBindOf(sel);
+    const int raw = MenuBindScan();
+    if (raw != g_mb.prevSig) {                            // an edge (or a change): any running hold ends, a new one may start
+        g_mb.sig = 0; g_mb.bar = 0;
+        if (raw > 0 && br && (sel == MR_MENUKEYS || !MenuBindIsMenuInput(raw))) { g_mb.sig = raw; g_mb.t0 = now; g_mb.barAt = now; }
+    } else if (g_mb.sig && br) {
+        const ULONGLONG el = now - g_mb.t0;
+        if (el >= (ULONGLONG)g_bindHoldMs) {
+            const int sig = g_mb.sig;
+            g_mb.sig = 0; g_mb.bar = 0;                   // completes once: the input stays held, no new edge
+            MenuBindComplete(*br, sig, el, n);
+        } else {
+            const int bar = (int)(el * MenuBarSteps() / (ULONGLONG)g_bindHoldMs);
+            if (bar != g_mb.bar && now - g_mb.barAt >= 100) { g_mb.bar = bar; g_mb.barAt = now; }   // <= 10 panel rebuilds / s
+        }
+    }
+    g_mb.prevSig = raw;
+}
+// The hold progress bar: `steps` of MenuBarSteps() squares filled, ONE SQUARE PER SECOND of the hold (v0.10.3 phase 29d: shared by
+// the bind hold and the Reset hold; 29e: one per second, was a fixed 8).
+void MenuHoldBar(int steps, wchar_t (&bar)[kMenuBindBar + 1]) {
+    const int n = MenuBarSteps();
+    const int fill = steps < 0 ? 0 : (steps > n ? n : steps);
+    for (int i = 0; i < n; ++i) bar[i] = i < fill ? L'\u25A0' : L'\u25A1';   // filled / empty square (WGL4)
+    bar[n] = 0;
+}
+// The selected row's hold feedback on the panel: progress bar / note in the Hotkey column, the step in the Value column of a
+// multi-step row. MenuBuildPanel, after the rows.
+void MenuBindDecorate(TuningMenu::Panel& p, int sel) {
+    const MenuBindRow* br = MenuBindOf(sel);
+    if (!br) return;
+    TuningMenu::Row& r = p.rows[sel];
+    constexpr size_t kV = sizeof(r.value) / sizeof(wchar_t), kK = sizeof(r.keys) / sizeof(wchar_t);
+    const ULONGLONG now = GetTickCount64();
+    const bool mine = g_mb.row == sel;
+    const bool holding = mine && g_mb.sig && now - g_mb.t0 >= kMenuTapMs;   // a tap shows nothing
+    if (br->n > 1 && mine && (holding || g_mb.step > 0)) {
+        const int st = g_mb.step < br->n ? g_mb.step : 0;
+        swprintf(r.value, kV, L"step %d/%d: %hs", st + 1, br->n, br->step[st]);
+    }
+    if (holding) {
+        wchar_t bar[kMenuBindBar + 1];
+        MenuHoldBar(g_mb.bar, bar);
+        char nm[64];
+        MenuBindSigName(g_mb.sig, g_mb.sig < kSigJoy ? HeldMods() : 0u, nm, sizeof(nm));
+        swprintf(r.keys, kK, L"hold %ls %hs", bar, nm);
+    } else if (g_mb.noteRow == sel && now < g_mb.noteUntil) {
+        swprintf(r.keys, kK, L"%ls", g_mb.note);
+    } else if (br->n > 1 && mine && g_mb.step > 0) {
+        swprintf(r.keys, kK, L"hold a key for: %hs", br->step[g_mb.step < br->n ? g_mb.step : 0]);
+    }
+    // (v0.10.3 phase 29c: the footer is no longer rewritten here -- one constant footer, MenuBuildPanel; the hold time and the
+    // step count overflowed its line in VR. The progress is the row's bar / step text above.)
+}
+
+// ---- v0.10.3 phase 29d: "Reset to defaults" = a HOLD of the menu Right key ----------------------------------------------------
+// Left / Right reset at once before (MenuChange): one stray press lost every setting. Now a FRESH press of the menu Right on the
+// Reset row (KeyHit without g_keyRepeat: an auto-repeat hit neither starts nor restarts it) starts a hold; while the action stays
+// active (g_keyWasActive[KA_MENU_RIGHT] = its key with its exact modifiers or its wheel button down, as PollKeys read it this
+// Present) for bind_hold_ms, the Hotkey column fills the hold-to-bind bar (MenuHoldBar, shown after kMenuTapMs as that bar), then
+// ResetSettings runs ONCE (its beeps / log) and the hold is consumed: "reset done" until the release, a new press for another.
+// Released early, another row, the game in the background or the menu closed / opened = nothing happens, the state clears.
+// Left does nothing on the row. Kept apart from g_mb (hold to bind): the Reset row has no MenuBindRow (MenuBindOf = null, so
+// MenuBindTick starts no bind there) and the 5 menu inputs are bind candidates only on the Menu keys row (MenuBindIsMenuInput).
+struct MenuResetHold {
+    ULONGLONG t0 = 0;                          // the fresh press (GetTickCount64); 0 = no hold
+    int       bar = 0;                         // progress steps shown (as MenuBindState: refreshed at most every 100 ms)
+    ULONGLONG barAt = 0;
+    bool      done = false;                    // ResetSettings ran for this press: nothing more until the release
+};
+MenuResetHold g_mrh;
+// The hold time as the Reset row shows it: "5", "2.5" (one decimal only when not whole).
+void MenuHoldSecs(char* out, size_t cap) {
+    if (g_bindHoldMs % 1000 == 0) snprintf(out, cap, "%d", g_bindHoldMs / 1000);
+    else                          snprintf(out, cap, "%.1f", (double)g_bindHoldMs / 1000.0);
+}
+// Per Present while the menu is open (MenuKeys, after the navigation and MenuChange).
+void MenuResetTick(uint64_t n) {
+    MenuResetHold& h = g_mrh;
+    if (g_menuSel != MR_RESET || !g_keyWasActive[KA_MENU_RIGHT] || !IsForeground()) { h = MenuResetHold(); return; }
+    const ULONGLONG now = GetTickCount64();
+    if (!h.t0) {
+        if (KeyHit(KA_MENU_RIGHT) && !g_keyRepeat[KA_MENU_RIGHT]) { h.t0 = now; h.barAt = now; }
+        return;
+    }
+    if (h.done) return;
+    const ULONGLONG el = now - h.t0;
+    if (el >= (ULONGLONG)g_bindHoldMs) {
+        h.done = true;                                    // once per press
+        ResetSettings(n);
+    } else {
+        const int bar = (int)(el * MenuBarSteps() / (ULONGLONG)g_bindHoldMs);
+        if (bar != h.bar && now - h.barAt >= 100) { h.bar = bar; h.barAt = now; }   // <= 10 panel rebuilds / s
+    }
+}
+// The Reset row's Hotkey column while held (MenuBuildPanel, after the rows; else it keeps "hold Right 5 s").
+void MenuResetDecorate(TuningMenu::Panel& p, int sel) {
+    if (sel != MR_RESET || !g_mrh.t0) return;
+    TuningMenu::Row& r = p.rows[MR_RESET];
+    constexpr size_t kK = sizeof(r.keys) / sizeof(wchar_t);
+    if (g_mrh.done) { swprintf(r.keys, kK, L"reset done"); return; }
+    if (GetTickCount64() - g_mrh.t0 < kMenuTapMs) return; // a tap shows nothing (as the bind bar)
+    wchar_t bar[kMenuBindBar + 1];
+    MenuHoldBar(g_mrh.bar, bar);
+    char sn[40];
+    KeyShortName(KA_MENU_RIGHT, sn, sizeof(sn));
+    swprintf(r.keys, kK, L"hold %ls %hs", bar, sn);
+}
+
 // One row: name, the hotkey text (+ "  (VR only)" / "  (flat only)" tag), greyed = not applicable now. The value is set by the caller.
 void MenuRow(TuningMenu::Panel& p, int id, const wchar_t* name, const char* keys, const char* tag, bool greyed) {
     TuningMenu::Row& r = p.rows[id];
@@ -13745,6 +14287,22 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     char k[128];
     auto pair = [&](KeyAction a, KeyAction b) { snprintf(k, sizeof(k), "%s / %s", KeyName(a), KeyName(b)); return k; };
     const wchar_t* const onOff[2] = { L"off", L"on" };
+    // v0.10.3 phase 29c: the SHORT names of the 5 menu keys (footer, Menu keys row, group headers, the two built descriptions)
+    char snMenu[40], snUp[40], snDown[40], snLeft[40], snRight[40];
+    KeyShortName(KA_MENU, snMenu, sizeof(snMenu));
+    KeyShortName(KA_MENU_UP, snUp, sizeof(snUp));
+    KeyShortName(KA_MENU_DOWN, snDown, sizeof(snDown));
+    KeyShortName(KA_MENU_LEFT, snLeft, sizeof(snLeft));
+    KeyShortName(KA_MENU_RIGHT, snRight, sizeof(snRight));
+    char holdS[16];                                       // v0.10.3 phase 29d: the Reset hold time ("5", "2.5")
+    MenuHoldSecs(holdS, sizeof(holdS));
+    // a group header row: "..." collapsed / "shown" expanded; the Hotkey column says what opens / closes it
+    auto groupRow = [&](int id, const wchar_t* name) {
+        const bool o = MenuGrpOpen(id);
+        snprintf(k, sizeof(k), "%s: %s", o ? snLeft : snRight, o ? "close" : "open");
+        MenuRow(p, id, name, k, nullptr, false);
+        swprintf(p.rows[id].value, kV, L"%ls", o ? L"shown" : L"...");
+    };
 
     MenuRow(p, MR_MODE, L"Mode", KeyName(KA_MODE_CYCLE), nullptr, false);
     swprintf(p.rows[MR_MODE].value, kV, L"%ls", !g_dlaaOn.load() ? L"off" : (g_dlssUpscale.load() ? L"DLSS" : L"DLAA"));
@@ -13789,6 +14347,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     if (!Ofxr::g_on.load())      swprintf(p.rows[MR_OFXR].value, kV, L"off (dlaa.ini 0)");
     else if (Ofxr::Detected())   swprintf(p.rows[MR_OFXR].value, kV, L"found");   // (no live counter: it would rebuild the panel every frame)
     else                         swprintf(p.rows[MR_OFXR].value, kV, L"not found");
+    groupRow(MR_PANELGRP, L"Panel settings");             // v0.10.3 phase 29c
     MenuRow(p, MR_POSX, L"Panel position X", vr ? "dlaa.ini menu_vr_x" : "dlaa.ini menu_x", nullptr, false);
     if (vr) swprintf(p.rows[MR_POSX].value, kV, L"%+d %%", g_menuVrX);
     else    swprintf(p.rows[MR_POSX].value, kV, L"%d %%", g_menuX);
@@ -13797,12 +14356,22 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     else    swprintf(p.rows[MR_POSY].value, kV, L"%d %%", g_menuY);
     MenuRow(p, MR_SIZE, L"Panel size", vr ? "dlaa.ini menu_vr_scale" : "dlaa.ini menu_scale", nullptr, false);
     swprintf(p.rows[MR_SIZE].value, kV, L"%.1f", (double)(vr ? g_menuVrScale : g_menuScale));
-    MenuRow(p, MR_DEPTH, L"Panel VR depth", "dlaa.ini menu_vr_depth", vr ? nullptr : "VR only", !vr);
-    swprintf(p.rows[MR_DEPTH].value, kV, L"%d px", g_menuVrDepth);
+    const bool vrQuad = vr && MenuVrQuad();               // v0.10.3 phase 29b: the quad path -> the quad's distance
+    MenuRow(p, MR_DEPTH, L"Panel VR depth", vrQuad ? "dlaa.ini menu_vr_dist" : "dlaa.ini menu_vr_depth", vr ? nullptr : "VR only",
+            !vr);
+    if (vrQuad) swprintf(p.rows[MR_DEPTH].value, kV, L"%.2f m", (double)g_menuVrDist / 100.0);
+    else        swprintf(p.rows[MR_DEPTH].value, kV, L"%d px", g_menuVrDepth);
     MenuRow(p, MR_FACE, L"Panel faces you (VR)", "dlaa.ini menu_vr_face", vr ? nullptr : "VR only", !vr);   // phase 16
     swprintf(p.rows[MR_FACE].value, kV, L"%ls", onOff[g_menuVrFace ? 1 : 0]);
+    // v0.10.2: the open key is the value, the 4 others the Hotkey column (v0.10.3 phase 29c: their short names; in the group)
+    snprintf(k, sizeof(k), "%s / %s / %s / %s", snUp, snDown, snLeft, snRight);
+    MenuRow(p, MR_MENUKEYS, L"Menu keys", k, nullptr, false);
+    MenuWiden(p.rows[MR_MENUKEYS].value, kV, snMenu);
     MenuRow(p, MR_FPS, L"FPS counter", "dlaa.ini fps_show", nullptr, false);
     swprintf(p.rows[MR_FPS].value, kV, L"%ls", onOff[g_fpsShow ? 1 : 0]);
+    groupRow(MR_FPSGRP, L"FPS counter settings");         // v0.10.3 phase 29c
+    MenuRow(p, MR_FPSLOCK, L"FPS counter lock", "dlaa.ini fps_vr_lock", vr ? nullptr : "VR only", !vr);   // v0.10.3 phase 28
+    swprintf(p.rows[MR_FPSLOCK].value, kV, L"%ls", g_fpsVrLock ? L"Fixed in cab" : L"Follow head");
     MenuRow(p, MR_FPSX, L"FPS counter X", vr ? "dlaa.ini fps_vr_x" : "dlaa.ini fps_x", nullptr, false);
     if (vr) swprintf(p.rows[MR_FPSX].value, kV, L"%+d %%", g_fpsVrX);
     else    swprintf(p.rows[MR_FPSX].value, kV, L"%d %%", g_fpsX);
@@ -13813,7 +14382,8 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     swprintf(p.rows[MR_FPSSIZE].value, kV, L"%.1f", (double)(vr ? g_fpsVrScale : g_fpsScale));
     MenuRow(p, MR_SAVE, L"Save to dlaa.ini", KeyName(KA_SAVE), nullptr, false);
     swprintf(p.rows[MR_SAVE].value, kV, L"-");
-    MenuRow(p, MR_RESET, L"Reset to defaults", "dlaa.ini", nullptr, false);
+    snprintf(k, sizeof(k), "hold %s %s s", snRight, holdS);   // v0.10.3 phase 29d: was "dlaa.ini" (MenuResetTick)
+    MenuRow(p, MR_RESET, L"Reset to defaults", k, nullptr, false);
     swprintf(p.rows[MR_RESET].value, kV, L"-");
     MenuRow(p, MR_CLOSE, L"Close menu", KeyName(KA_MENU), nullptr, false);
     swprintf(p.rows[MR_CLOSE].value, kV, L"-");
@@ -13824,26 +14394,71 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     wchar_t sent[200];
     MenuPerfCosts(p, vr, sel, sent, sizeof(sent) / sizeof(sent[0]));
     constexpr size_t kD = sizeof(p.desc) / sizeof(wchar_t);
-    if (kMenuDesc[sel]) swprintf(p.desc, kD, L"%ls%ls%ls", kMenuDesc[sel], sent[0] ? L" " : L"", sent);
-    else                swprintf(p.desc, kD, L"Closes the menu; the arrow keys go back to the game. %hs does the same from any row.", KeyName(KA_MENU));
-    swprintf(p.footer, sizeof(p.footer) / sizeof(wchar_t), L"%hs / %hs select     %hs / %hs change     %hs close",
-             KeyName(KA_MENU_UP), KeyName(KA_MENU_DOWN), KeyName(KA_MENU_LEFT), KeyName(KA_MENU_RIGHT), KeyName(KA_MENU));
+    if (sel == MR_RESET)                                  // v0.10.3 phase 29d: the hold first (no cost sentence on this row)
+        swprintf(p.desc, kD, L"Hold %hs for %hs s to reset. %ls", snRight, holdS, kMenuDesc[sel]);
+    else if (kMenuDesc[sel]) swprintf(p.desc, kD, L"%ls%ls%ls", kMenuDesc[sel], sent[0] ? L" " : L"", sent);
+    else if (sel == MR_MENUKEYS)                          // v0.10.2
+        swprintf(p.desc, kD, L"The 5 keys that open and drive this menu. Hold a key or wheel button %.1f s, 5 times in a row: open "
+                 L"/ close, up, down, left, right. Backspace cannot clear them here. A short tap of %hs / %hs moves to another row "
+                 L"(ends the sequence); %hs does not close the menu on this row: use Close menu.", (double)g_bindHoldMs / 1000.0,
+                 snUp, snDown, snMenu);
+    else                swprintf(p.desc, kD, L"Closes the menu; every key and button goes back to the game. %hs does the same from "
+                                 L"any row but Menu keys.", snMenu);
+    // v0.10.3 phase 29c: ONE footer for every state (the hold / bind progress is in the row), from the short key names. It shares
+    // its line with the licence line (menu.cpp), so the rebind hint is shortened, then dropped, when the text does not fit left of
+    // it (TuningMenu::FooterFits, measured with the panel's font; only when a menu key name changed: cached by the full text).
+    {
+        constexpr size_t kF = sizeof(p.footer) / sizeof(wchar_t);
+        static const wchar_t* const kHint[] = { L"   hold a key: rebind", L"   hold: rebind", L"" };
+        constexpr size_t kT = 256;                        // (5 x 39 + the words: never truncated before the fit test)
+        static wchar_t s_full[kT] = L"", s_shown[kT] = L"";
+        wchar_t full[kT];
+        swprintf(full, kT, L"%hs / %hs select   %hs / %hs change   %hs close%ls", snUp, snDown, snLeft, snRight, snMenu, kHint[0]);
+        if (wcscmp(full, s_full)) {
+            for (const wchar_t* h : kHint) {
+                swprintf(s_shown, kT, L"%hs / %hs select   %hs / %hs change   %hs close%ls", snUp, snDown, snLeft, snRight, snMenu, h);
+                if (!h[0] || TuningMenu::FooterFits(s_shown)) break;
+            }
+            wcscpy_s(s_full, full);
+        }
+        wcsncpy_s(p.footer, kF, s_shown, _TRUNCATE);
+    }
+    MenuBindDecorate(p, sel);                             // v0.10.2 hold to bind: bar / step / note (by MR id: before the compaction)
+    MenuResetDecorate(p, sel);                            // v0.10.3 phase 29d: the Reset hold's bar (by MR id too)
+
+    // v0.10.3 phase 29c: the rows of a collapsed group are not drawn -- the visible rows move to the front in MR order, nRows =
+    // their count (RefHeight: the panel shrinks), sel = the visible index of g_menuSel (a hidden selection -- not reachable,
+    // the open resets it -- would show its header). The vacated tail is zeroed: Draw compares the whole Panel to rebuild.
+    const int shown = MenuRowVisible(sel) ? sel : MenuRowGroup(sel);
+    int nv = 0, vsel = 0;
+    for (int id = 0; id < MR_COUNT; ++id) {
+        if (!MenuRowVisible(id)) continue;
+        if (id == shown) vsel = nv;
+        if (nv != id) memcpy(&p.rows[nv], &p.rows[id], sizeof(p.rows[0]));
+        ++nv;
+    }
+    if (nv < TuningMenu::kMaxRows) memset(&p.rows[nv], 0, sizeof(p.rows[0]) * (size_t)(TuningMenu::kMaxRows - nv));
+    p.nRows = nv;
+    p.sel = vsel;
 }
 
 void MenuClose(uint64_t n, const char* why) {
     g_menuOpen = false;
+    g_mb = MenuBindState();                               // v0.10.2: a running hold / bind sequence ends with the menu
+    g_mrh = MenuResetHold();                              // v0.10.3 phase 29d: so does a Reset hold
     g_menuBlitEye = -1; g_menuBlitRt = nullptr;
     PlayTones(1, 300, 120, 0);
     char placed[240] = "";
     if (g_menuMoved)
-        snprintf(placed, sizeof(placed), " -- panel now flat x=%d%% y=%d%% size %.1f, VR x=%+d%% y=%+d%% size %.1f depth %d px %s (%s "
-                 "or the Save row writes it)", g_menuX, g_menuY, (double)g_menuScale, g_menuVrX, g_menuVrY, (double)g_menuVrScale,
-                 g_menuVrDepth, g_menuVrFace ? "facing" : "flat", KeyName(KA_SAVE));
-    char fpsPlaced[200] = "";
+        snprintf(placed, sizeof(placed), " -- panel now flat x=%d%% y=%d%% size %.1f, VR x=%+d%% y=%+d%% size %.1f depth %d px / "
+                 "quad %.2f m %s (%s or the Save row writes it)", g_menuX, g_menuY, (double)g_menuScale, g_menuVrX, g_menuVrY,
+                 (double)g_menuVrScale, g_menuVrDepth, (double)g_menuVrDist / 100.0, g_menuVrFace ? "facing" : "flat",
+                 KeyName(KA_SAVE));
+    char fpsPlaced[256] = "";                             // (v0.10.3 phase 28: was 200, + the VR lock state)
     if (g_fpsMoved)
-        snprintf(fpsPlaced, sizeof(fpsPlaced), " -- fps box now %s, flat x=%d%% y=%d%% size %.1f, VR x=%+d%% y=%+d%% size %.1f (%s or "
+        snprintf(fpsPlaced, sizeof(fpsPlaced), " -- fps box now %s, flat x=%d%% y=%d%% size %.1f, VR x=%+d y=%+d (%s) size %.1f (%s or "
                  "the Save row writes it)", g_fpsShow ? "on" : "off", g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY,
-                 (double)g_fpsVrScale, KeyName(KA_SAVE));
+                 g_fpsVrLock ? "degrees, fixed in the cab" : "%, follows the head", (double)g_fpsVrScale, KeyName(KA_SAVE));
     Log("tuning menu closed (%s, Present #%llu)%s%s", why, (unsigned long long)n, placed, fpsPlaced);
     g_menuMoved = false;
     g_fpsMoved = false;
@@ -13881,6 +14496,9 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_UPSCALE: ToggleUpscale(n); break;
     case MR_DLAA:    ToggleDlaa(n); break;
     case MR_OFXR:    break;                                 // information only (dlaa.ini ofxr_bridge, read at start)
+    case MR_PANELGRP: case MR_FPSGRP:                       // v0.10.3 phase 29c: Right opens the group, Left closes it (a fresh
+        MenuGrpOpen(row) = dir > 0;                         // press only: not a stepRow, so auto-repeat is ignored above)
+        break;
     case MR_POSX:
         if (vr) g_menuVrX = MenuClampI(g_menuVrX + dir, -50, 50); else g_menuX = MenuClampI(g_menuX + dir, 0, 90);
         g_menuExplicit = g_menuMoved = true;
@@ -13897,16 +14515,27 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
         break;
     }
     case MR_DEPTH:
-        g_menuVrDepth = MenuClampI(g_menuVrDepth + 2 * dir, 0, 200);
+        if (MenuVrQuad()) {                                 // v0.10.3 phase 29b: the quad path -> its distance, 5 cm steps
+            g_menuVrDist = MenuClampI(g_menuVrDist + 5 * dir, 30, 300);
+            if (!repeat)
+                Log("tuning menu: VR panel quad distance %.2f m (menu_vr_dist=%d; the quad path: the same angular size, only the "
+                    "stereo depth changes; Present #%llu)", (double)g_menuVrDist / 100.0, g_menuVrDist, (unsigned long long)n);
+        } else {
+            g_menuVrDepth = MenuClampI(g_menuVrDepth + 2 * dir, 0, 200);
+        }
         g_menuExplicit = g_menuMoved = true;
         break;
     case MR_FACE:                                           // v0.10.0 phase 16: Left and Right both switch it (also flat: kept for VR)
         g_menuVrFace = g_menuVrFace ? 0 : 1;
         g_menuExplicit = g_menuMoved = true;
-        Log("tuning menu: VR panel %s (menu_vr_face=%d, Present #%llu)", g_menuVrFace ? "faces the eye (a 3-D quad turned towards it)"
-            : "flat (a plain picture)", g_menuVrFace, (unsigned long long)n);
+        Log("tuning menu: VR panel %s (menu_vr_face=%d, %s; Present #%llu)", g_menuVrFace ? "faces the eye (a 3-D quad turned towards it)"
+            : "flat (a plain picture)", g_menuVrFace,
+            MenuVrQuad() ? "the quad path: the panel quad and the head-following fps box quad turned by the compositor (phase 29b)"
+                         : "the in-picture path: the panel drawn as a turned quad (phase 16); the fps box stays flat",
+            (unsigned long long)n);
         break;
     case MR_FPS:     ToggleFpsBox(n); break;                // Left and Right both switch it
+    case MR_FPSLOCK: ToggleFpsVrLock(n); break;             // v0.10.3 phase 28: Left and Right both switch it (also flat: kept for VR)
     case MR_FPSX:
         if (vr) g_fpsVrX = MenuClampI(g_fpsVrX + dir, -50, 50); else g_fpsX = MenuClampI(g_fpsX + dir, 0, 95);
         g_fpsExplicit = g_fpsMoved = true;
@@ -13923,7 +14552,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
         break;
     }
     case MR_SAVE:    SaveSettings(n); break;
-    case MR_RESET:   ResetSettings(n); break;                // a fresh press only (not a stepRow: auto-repeat is ignored above)
+    case MR_RESET:   break;                                  // v0.10.3 phase 29d: a HOLD of Right resets (MenuResetTick), no press
     case MR_CLOSE:   MenuClose(n, "Close row"); break;
     default: break;
     }
@@ -13931,25 +14560,57 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
 
 // Per Present, before the other user keys (PresentFrameWork).
 void MenuKeys(uint64_t n) {
-    if (KeyHit(KA_MENU)) {
-        if (!g_menuOpen.load()) {
+    const bool open = g_menuOpen.load(std::memory_order_relaxed);
+    // v0.10.2: on the Menu keys row the open key does not close the menu (the row binds it; Close menu closes from there)
+    if (KeyHit(KA_MENU) && !(open && g_menuSel == MR_MENUKEYS)) {
+        if (!open) {
             g_menuOpen = true;
             g_menuMoved = false;
+            // v0.10.3 phase 29c: both groups start collapsed at every open; a selection inside one moves to its header
+            g_menuGrpOpen[0] = g_menuGrpOpen[1] = false;
+            if (g_menuSel < 0 || g_menuSel >= MR_COUNT) g_menuSel = 0;
+            if (!MenuRowVisible(g_menuSel)) g_menuSel = MenuRowGroup(g_menuSel);
             MenuPerfOpen();                               // GPU timers on while open (debug = 0) + fresh figures
+            MenuBindReset();                              // v0.10.2 hold to bind: the held open key starts no hold (after the
+                                                          // selection fix above: it records g_menuSel as the bind row)
+            g_mrh = MenuResetHold();                      // v0.10.3 phase 29d: no Reset hold carried over
             PlayTones(2, 880, 60, 60);
-            Log("tuning menu opened (%s, Present #%llu) -- %s / %s select a row, %s / %s change it; the game does not see these "
-                "keys while the menu is open", KeyName(KA_MENU), (unsigned long long)n, KeyName(KA_MENU_UP), KeyName(KA_MENU_DOWN),
-                KeyName(KA_MENU_LEFT), KeyName(KA_MENU_RIGHT));
+            Log("tuning menu opened (%s, Present #%llu) -- %s / %s select a row, %s / %s change it, hold a key or button %.1f s "
+                "on a row to bind it (bind_hold_ms); the game sees no key / button while the menu is open", KeyName(KA_MENU),
+                (unsigned long long)n, KeyName(KA_MENU_UP), KeyName(KA_MENU_DOWN), KeyName(KA_MENU_LEFT),
+                KeyName(KA_MENU_RIGHT), (double)g_bindHoldMs / 1000.0);
         } else {
             MenuClose(n, KeyName(KA_MENU));
         }
         return;                                           // the open / close press does nothing else this frame
     }
-    if (!g_menuOpen.load(std::memory_order_relaxed)) return;
-    if (KeyHit(KA_MENU_UP))   g_menuSel = (g_menuSel + MR_COUNT - 1) % MR_COUNT;
-    if (KeyHit(KA_MENU_DOWN)) g_menuSel = (g_menuSel + 1) % MR_COUNT;
-    if (KeyHit(KA_MENU_RIGHT))     MenuChange(g_menuSel, +1, g_keyRepeat[KA_MENU_RIGHT], n);
-    else if (KeyHit(KA_MENU_LEFT)) MenuChange(g_menuSel, -1, g_keyRepeat[KA_MENU_LEFT], n);
+    if (!open) return;
+    if (g_menuSel == MR_MENUKEYS) {
+        // v0.10.2 Menu keys row: the menu Up / Down act on RELEASE after a tap (< kMenuTapMs); held longer they are a bind hold.
+        // No auto-repeat here (a scroll arriving with the key held stops on this row); Left / Right do nothing on this row.
+        const ULONGLONG now = GetTickCount64();
+        if (KeyHit(KA_MENU_UP) && !g_keyRepeat[KA_MENU_UP])          { g_mb.navDir = -1; g_mb.navAt = now; }
+        else if (KeyHit(KA_MENU_DOWN) && !g_keyRepeat[KA_MENU_DOWN]) { g_mb.navDir = +1; g_mb.navAt = now; }
+        else if (g_mb.navDir) {
+            const KeyAction na = g_mb.navDir < 0 ? KA_MENU_UP : KA_MENU_DOWN;
+            if (!g_keyWasActive[na]) {                    // released
+                if (now - g_mb.navAt < kMenuTapMs) g_menuSel = MenuStepRow(g_menuSel, g_mb.navDir);   // 29c: visible rows
+                g_mb.navDir = 0;
+            } else if (now - g_mb.navAt >= kMenuTapMs) {
+                g_mb.navDir = 0;                          // held: a bind hold, not a step
+            }
+        }
+    } else {
+        g_mb.navDir = 0;
+        if (KeyHit(KA_MENU_UP))   g_menuSel = MenuStepRow(g_menuSel, -1);   // v0.10.3 phase 29c: the next VISIBLE row
+        if (KeyHit(KA_MENU_DOWN)) g_menuSel = MenuStepRow(g_menuSel, +1);   // (a collapsed group's rows are skipped, wraps)
+        if (g_menuSel != MR_MENUKEYS) {                   // (arriving on Menu keys: Left / Right do nothing there)
+            if (KeyHit(KA_MENU_RIGHT))     MenuChange(g_menuSel, +1, g_keyRepeat[KA_MENU_RIGHT], n);
+            else if (KeyHit(KA_MENU_LEFT)) MenuChange(g_menuSel, -1, g_keyRepeat[KA_MENU_LEFT], n);
+        }
+    }
+    if (g_menuOpen.load(std::memory_order_relaxed)) MenuResetTick(n);  // v0.10.3 phase 29d: the Reset row's hold of Right
+    if (g_menuOpen.load(std::memory_order_relaxed)) MenuBindTick(n);   // v0.10.2 hold to bind (the Close row may have closed it)
     if (g_menuOpen.load(std::memory_order_relaxed)) MenuPerfTick();   // (the Close row may have closed it just now)
 }
 
@@ -14011,13 +14672,17 @@ void MenuDrawAtPresent(IDXGISwapChain* sc, ID3D11DeviceContext* bctx) {
         TuningMenu::Panel p;
         MenuBuildPanel(p);
         const float scale = H / 1080.0f * g_menuScale;
-        const float build = (MenuVr() && g_menuVrBuild > 0.0f) ? g_menuVrBuild : scale;   // VR: the eyes' texture, scaled
+        // VR: the eyes' / quad's texture, scaled (v0.10.3 phase 29b: also while the panel IS a quad layer and MenuVr() is not
+        // set yet -- the VR main menu -- else the two build scales alternate and the texture is rebuilt twice per frame)
+        const bool vrTex = MenuVr() || (g_menuVrLayer && XrHook::OverlayActive(0));
+        const float build = (vrTex && g_menuVrBuild > 0.0f) ? g_menuVrBuild : scale;
         TuningMenu::Draw(ctx, rtv.Get(), td.Width, td.Height, (float)g_menuX / 100.0f * W, (float)g_menuY / 100.0f * H, scale,
                          build, outMode, p);
     }
     if (g_fpsShow) {
         const float scale = H / 1080.0f * g_fpsScale;
-        const float build = (MenuVr() && g_fpsVrBuild > 0.0f) ? g_fpsVrBuild : scale;     // VR: the eyes' texture, scaled
+        const bool vrTex = MenuVr() || (g_menuVrLayer && XrHook::OverlayActive(1));   // (phase 29b: as the panel above)
+        const float build = (vrTex && g_fpsVrBuild > 0.0f) ? g_fpsVrBuild : scale;     // VR: the eyes' / quad's texture, scaled
         // kept inside the picture (fps_x / fps_y up to 95 % with a large box would push it off the edge)
         const float bw = TuningMenu::kWidgetRefW * scale, bh = TuningMenu::kWidgetRefH * scale;
         float x0 = (float)g_fpsX / 100.0f * W, y0 = (float)g_fpsY / 100.0f * H;
@@ -14025,6 +14690,7 @@ void MenuDrawAtPresent(IDXGISwapChain* sc, ID3D11DeviceContext* bctx) {
         if (y0 > H - bh) y0 = H - bh;
         if (x0 < 0.0f) x0 = 0.0f;
         if (y0 < 0.0f) y0 = 0.0f;
+        GpuPerfScope gp(ctx, GpuPerf::kOverlay);          // v0.10.3 phase 29b: the fps box's own GPU cost (per frame)
         TuningMenu::DrawWidget(ctx, rtv.Get(), td.Width, td.Height, x0, y0, scale, build, outMode, g_fps.line1, g_fps.line2);
     }
     t_inDlaa = false;
@@ -14104,14 +14770,222 @@ void MenuFacingLog(int eye, const MenuFacing& g, bool facing, float pw, float ph
         (double)u, (double)v, (double)shift);
 }
 
+// ---- v0.10.3 phase 28: the VR fps box FIXED IN THE CAB (dlaa.ini fps_vr_lock = 1, the menu's FPS counter lock row) ----------
+// The anchor is a point in the game's OpenXR reference space (the seated / tracking space: it does not move with the head, and
+// the game maps it to the cab): kFpsLockDist (0.8 m) from the space origin in the direction yaw = fps_vr_x degrees (+ right),
+// pitch = -fps_vr_y degrees (fps_vr_y + = down, the head-locked sign kept). The origin of a LOCAL space (type 2) is the
+// recentred seat head position and its -z is the seat's forward, used as they are; any other / unknown space type (STAGE: the
+// origin is on the floor) uses a PIVOT captured from the first located views after the lock went on (the eyes' midpoint and
+// the head's yaw), logged. Each eye picture: the view of that picture -- from the game's last xrEndFrame projection layer (the
+// swapchain image -> view, with its sub-image rect: side-by-side / array layouts handled), else view index = eye (an
+// intermediate eye texture: eye 0 = the right eye = view 1, cross-checked against the measured optical centre) over the full texture.
+// The anchor goes into that view's space with the located pose (inverse rotation; OpenXR view space: +x right, +y up, -z
+// forward), its view tangents (tx, ty) = (x, y) / depth land in the picture rect through the view's asymmetric fov:
+//   px = rx + rw (tx - tan L) / (tan R - tan L),   py = ry + rh (tan U - ty) / (tan U - tan D)
+// -- the same mapping the compositor uses to show the picture, so with the pose the game submits the picture with (phase 28b:
+// XrHook::LatestViews hands out the located pose CORRECTED to the submitted one, in the layer space, with the submitted fov;
+// see xr_hook.h) the box stays put in the reference space through the runtime's reprojection. Size: the head-locked box
+// (fps_vr_scale = 8 % of the eye width per 1.0) at 0.8 m, times 0.8 / depth (a quad parallel to the eye's image plane: the
+// same angle as the head-locked box when it is 0.8 m straight ahead, bigger when you lean in). The box stays upright in the
+// picture (no roll with the head). No depth shift (menu_vr_depth): the per-eye projection gives the stereo depth itself.
+// Result 1 = placed (*cx, *cy = the box centre px, *scale = the draw scale), 0 = no usable OpenXR views (the caller draws the
+// head-locked box; logged once per reason), -1 = not on this eye (behind it / fully outside its picture: nothing drawn).
+constexpr float  kFpsLockDist = 0.8f;                     // m from the reference space origin (or the captured pivot)
+constexpr double kFpsLockStale = 0.5;                     // s: older locate = no usable views (the game paused / no session)
+struct FpsVrLockState {
+    bool  pivotHave = false;                              // non-LOCAL spaces: the captured pivot
+    float pivot[3] = {};
+    float yaw0 = 0.0f;                                    // rad, the head's yaw at the capture
+    int   why = -1;                                       // last fallback reason logged (0 = placed)
+    int   lines = 0;                                      // fallback / eye log lines (capped)
+    bool  eyeLogged[kMaxEyes] = {};
+    ULONGLONG diagStart = 0, diagNext = 0;                // phase 28b: the once-a-second eye-0 log for 10 s after the lock-on
+    int   dirOk = 0, dirBad = 0;                          // phase 28b: the direction self-check (see FpsVrLockedPlace)
+};
+FpsVrLockState g_fpsLock;
+void FpsVrLockReset() {                                   // the lock toggled / Reset: re-capture the pivot, log again
+    g_fpsLock = FpsVrLockState();
+}
+// v' = conj(q) v q (the reference-space vector `v` in the view's axes) for a unit quaternion q = (x, y, z, w).
+void QuatRotInv(const XrHook::View& q, const double v[3], double out[3]) {
+    const double qx = -q.qx, qy = -q.qy, qz = -q.qz, qw = q.qw;
+    const double t[3] = { 2.0 * (qy * v[2] - qz * v[1]), 2.0 * (qz * v[0] - qx * v[2]), 2.0 * (qx * v[1] - qy * v[0]) };
+    out[0] = v[0] + qw * t[0] + (qy * t[2] - qz * t[1]);
+    out[1] = v[1] + qw * t[1] + (qz * t[0] - qx * t[2]);
+    out[2] = v[2] + qw * t[2] + (qx * t[1] - qy * t[0]);
+}
+int FpsVrLockedPlace(int eye, ID3D11Texture2D* tex, const D3D11_RENDER_TARGET_VIEW_DESC& rd, float W, float H, float scaleHead,
+                     float* cx, float* cy, float* scale) {
+    FpsVrLockState& st = g_fpsLock;
+    XrHook::Views vs;
+    int why = 0;
+    if (!XrHook::Hooked())                           why = 1;
+    else if (!XrHook::LatestViews(&vs))              why = 2;
+    else if (vs.ageSec > kFpsLockStale)              why = 3;
+    else if ((vs.flags & 3) != 3)                    why = 4;   // orientation + position not both valid
+    else if (vs.spaceType == 1)                      why = 5;   // VIEW space: located relative to the head itself
+    if (why) {
+        if (why != st.why && st.lines < 24) {
+            ++st.lines;
+            static const char* const kWhy[6] = { "", "the OpenXR hook is not installed", "no stereo xrLocateViews + xrEndFrame "
+                                                 "pose correction yet",
+                                                 "the newest xrLocateViews is older than 0.5 s", "the located poses are not valid "
+                                                 "(tracking lost)", "the views are located in a VIEW space (head-relative)" };
+            Log("fps box VR lock: drawn FOLLOWING THE HEAD for now -- %s (eye %d; locate age %.0f ms, flags 0x%llx, space type %d)",
+                kWhy[why], eye, why >= 3 ? vs.ageSec * 1000.0 : 0.0, why >= 3 ? (unsigned long long)vs.flags : 0ull,
+                why >= 3 ? vs.spaceType : 0);
+        }
+        st.why = why;
+        return 0;
+    }
+    if (st.why != 0 && st.why != -1 && st.lines < 24) {
+        ++st.lines;
+        Log("fps box VR lock: OpenXR views usable again -- the box is fixed in the cab (locate #%llu, age %.1f ms)",
+            (unsigned long long)vs.seq, vs.ageSec * 1000.0);
+    }
+    st.why = 0;
+    // the view of this picture + its rect
+    const uint32_t slice = rd.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE2DARRAY ? rd.Texture2DArray.FirstArraySlice : 0;
+    int32_t rect[4] = { 0, 0, (int32_t)W, (int32_t)H };
+    int view = XrHook::ViewForImage(tex, slice, rect);
+    const bool mapped = view >= 0;
+    if (!mapped || rect[2] <= 0 || rect[3] <= 0 || rect[0] < 0 || rect[1] < 0 || (float)(rect[0] + rect[2]) > W ||
+        (float)(rect[1] + rect[3]) > H) {
+        rect[0] = 0; rect[1] = 0; rect[2] = (int32_t)W; rect[3] = (int32_t)H;
+    }
+    auto tanOf = [](float a) { return (double)std::tan((double)a); };
+    auto uOf = [&](int k) {                               // the view's optical axis in the rect, as uv of the whole texture
+        const XrHook::View& w = vs.v[k];
+        const double tl = tanOf(w.angleLeft), tr = tanOf(w.angleRight);
+        return (rect[0] + rect[2] * (-tl) / (tr - tl)) / (double)W;
+    };
+    auto vOf = [&](int k) {
+        const XrHook::View& w = vs.v[k];
+        const double tu = tanOf(w.angleUp), tdn = tanOf(w.angleDown);
+        return (rect[1] + rect[3] * tu / (tu - tdn)) / (double)H;
+    };
+    float mu = 0.5f, mv = 0.5f;
+    const bool measured = VrEyeCentre(eye, &mu, &mv);
+    bool swapped = false;
+    if (!mapped) {
+        view = (eye & 1) ^ 1;                             // eye 0 = the RIGHT eye (optical centre u < 0.5) = OpenXR view 1
+        if (measured && std::fabs(uOf(view) - mu) > 0.05 && std::fabs(uOf(view ^ 1) - mu) < 0.03) { view ^= 1; swapped = true; }
+    }
+    const XrHook::View& w = vs.v[view];
+    // the anchor in the reference space
+    const double kRad = 0.017453292519943295;
+    double pivot[3] = { 0.0, 0.0, 0.0 }, yaw0 = 0.0;
+    if (vs.spaceType != 2) {                              // not LOCAL: a pivot captured from the head (once per lock-on)
+        if (!st.pivotHave) {
+            st.pivot[0] = 0.5f * (vs.v[0].px + vs.v[1].px);
+            st.pivot[1] = 0.5f * (vs.v[0].py + vs.v[1].py);
+            st.pivot[2] = 0.5f * (vs.v[0].pz + vs.v[1].pz);
+            const double f0[3] = { 0.0, 0.0, -1.0 };      // the head's forward in the reference space = q f q* (q not inverted)
+            XrHook::View qf = vs.v[0];
+            qf.qx = -qf.qx; qf.qy = -qf.qy; qf.qz = -qf.qz;
+            double fw[3];
+            QuatRotInv(qf, f0, fw);
+            st.yaw0 = (float)std::atan2(fw[0], -fw[2]);
+            st.pivotHave = true;
+            Log("fps box VR lock: reference space type %d (%s) -- the anchor turns around a PIVOT captured now: the eyes' midpoint "
+                "(%.2f, %.2f, %.2f) m, head yaw %+.1f deg", vs.spaceType, vs.spaceType ? "not LOCAL" : "unknown: not created "
+                "through the hook", (double)st.pivot[0], (double)st.pivot[1], (double)st.pivot[2], (double)st.yaw0 / kRad);
+        }
+        pivot[0] = st.pivot[0]; pivot[1] = st.pivot[1]; pivot[2] = st.pivot[2];
+        yaw0 = st.yaw0;
+    }
+    const double yaw = yaw0 + (double)g_fpsVrX * kRad, pitch = -(double)g_fpsVrY * kRad;
+    const double A[3] = { pivot[0] + kFpsLockDist * std::sin(yaw) * std::cos(pitch), pivot[1] + kFpsLockDist * std::sin(pitch),
+                          pivot[2] - kFpsLockDist * std::cos(yaw) * std::cos(pitch) };
+    // into the view's space, then through its fov into the picture rect
+    const double d[3] = { A[0] - w.px, A[1] - w.py, A[2] - w.pz };
+    double p[3];
+    QuatRotInv(w, d, p);
+    const double depth = -p[2];
+    const double tl = tanOf(w.angleLeft), tr = tanOf(w.angleRight), tu = tanOf(w.angleUp), tdn = tanOf(w.angleDown);
+    if (!(tr - tl > 1e-3) || !(tu - tdn > 1e-3)) return 0;
+    const bool behind = !(depth > 0.05);
+    double px = 0.0, py = 0.0, k = 0.0, tx = 0.0, ty = 0.0;
+    if (!behind) {
+        tx = p[0] / depth; ty = p[1] / depth;
+        px = rect[0] + rect[2] * (tx - tl) / (tr - tl);
+        py = rect[1] + rect[3] * (tu - ty) / (tu - tdn);
+        k = (double)rect[2] / (double)W * (double)kFpsLockDist / depth;   // the rect's own width (side-by-side: half the texture)
+        if (k > 6.0) k = 6.0;                             // (the head right at the box: keep it sane)
+    }
+    if (eye >= 0 && eye < kMaxEyes && !st.eyeLogged[eye] && st.lines < 24) {
+        st.eyeLogged[eye] = true;
+        ++st.lines;
+        Log("fps box VR lock: eye %d -> OpenXR view %d (%s%s), picture rect (%d,%d) %dx%d of %.0fx%.0f slice %u; view fov L%+.1f "
+            "R%+.1f U%+.1f D%+.1f deg -> optical centre uv=(%.3f, %.3f) vs measured %s(%.3f, %.3f); layer space type %d, located "
+            "in space type %d (%s), age %.1f ms; anchor yaw %+d pitch %+d deg at %.1f m -> depth %.2f m, centre (%.0f, %.0f) px, "
+            "draw scale x%.2f%s",
+            eye, view, mapped ? "the swapchain image of that view in the last xrEndFrame" : "assumed: eye index",
+            swapped ? ", SWAPPED: the other view's optical centre matches the measured one" : "", rect[0], rect[1], rect[2],
+            rect[3], (double)W, (double)H, slice, (double)w.angleLeft / kRad, (double)w.angleRight / kRad,
+            (double)w.angleUp / kRad, (double)w.angleDown / kRad, uOf(view), vOf(view), measured ? "" : "(not measured yet) ",
+            (double)mu, (double)mv, vs.spaceType, vs.locSpaceType, vs.corrected ? "corrected to the submitted pose" : "raw",
+            vs.ageSec * 1000.0, g_fpsVrX,
+            -g_fpsVrY, (double)kFpsLockDist, depth, px, py, k, behind ? " -- BEHIND the eye now: not drawn" : "");
+    }
+    // phase 28b: the direction self-check + the once-a-second log for 10 s after the lock-on (eye 0 only). Head yaw / pitch =
+    // this view's forward (-z) in the layer space; the anchor's direction FROM THIS EYE; rel = anchor - head. A point to the
+    // RIGHT of where the eye looks (rel yaw > 0) must land right of the optical axis (tx > 0), above it (rel pitch > 0) at
+    // ty > 0 -- a sign mismatch = the pose / quaternion direction is wrong.
+    if (eye == 0 && !behind) {
+        const ULONGLONG nowMs = GetTickCount64();
+        if (!st.diagStart) { st.diagStart = nowMs; st.diagNext = nowMs; XrHook::PoseDiagArm(10); }
+        const XrHook::View hq = { -w.qx, -w.qy, -w.qz, w.qw, 0, 0, 0, 0, 0, 0, 0 };   // QuatRotInv(conj q) = R(q)
+        const double f0[3] = { 0.0, 0.0, -1.0 };
+        double fw[3];
+        QuatRotInv(hq, f0, fw);
+        const double kDeg = 57.29577951308232;
+        const double hYaw = std::atan2(fw[0], -fw[2]) * kDeg, hPitch = std::asin(fw[1] < -1 ? -1 : (fw[1] > 1 ? 1 : fw[1])) * kDeg;
+        const double dn = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        const double aYaw = std::atan2(d[0], -d[2]) * kDeg, aPitch = dn > 1e-6 ? std::asin(d[1] / dn) * kDeg : 0.0;
+        double rYaw = aYaw - hYaw;
+        while (rYaw > 180.0) rYaw -= 360.0;
+        while (rYaw < -180.0) rYaw += 360.0;
+        const double rPitch = aPitch - hPitch;
+        const bool checkable = std::fabs(rYaw) > 3.0 && std::fabs(hPitch) < 45.0;
+        const bool ok = !checkable || ((rYaw > 0.0) == (tx > 0.0));
+        if (checkable) (ok ? st.dirOk : st.dirBad)++;
+        if (nowMs - st.diagStart <= 10500 && nowMs >= st.diagNext) {
+            st.diagNext = nowMs + 1000;
+            Log("fps box VR lock diag (eye 0 = view %d): head yaw %+.1f pitch %+.1f pos (%+.3f %+.3f %+.3f) [located: yaw %+.1f, "
+                "space type %d] | anchor from this eye yaw %+.1f pitch %+.1f -> relative yaw %+.1f pitch %+.1f | view tangents "
+                "tx %+.3f ty %+.3f -> box (%.0f, %.0f) px, optical centre (%.0f, %.0f) px | direction check %s (so far %d ok / %d "
+                "WRONG)", view, hYaw, hPitch, (double)w.px, (double)w.py, (double)w.pz,
+                [&] { const XrHook::View& r = vs.raw[view]; const XrHook::View rq = { -r.qx, -r.qy, -r.qz, r.qw, 0, 0, 0, 0, 0, 0, 0 };
+                      double g[3]; QuatRotInv(rq, f0, g); return std::atan2(g[0], -g[2]) * kDeg; }(), vs.locSpaceType,
+                aYaw, aPitch, rYaw, rPitch, tx, ty, px, py, rect[0] + rect[2] * (-tl) / (tr - tl), rect[1] + rect[3] * tu / (tu - tdn),
+                checkable ? (ok ? "OK" : "WRONG: tx sign != relative yaw sign") : "n/a (|relative yaw| <= 3 deg)", st.dirOk, st.dirBad);
+        }
+    }
+    if (behind) return -1;
+    const float s = scaleHead * (float)k;
+    const float bw = TuningMenu::kWidgetRefW * s, bh = TuningMenu::kWidgetRefH * s;
+    if (px + 0.5 * bw < rect[0] || px - 0.5 * bw > rect[0] + rect[2] || py + 0.5 * bh < rect[1] || py - 0.5 * bh > rect[1] + rect[3])
+        return -1;                                        // fully outside this eye's picture
+    *cx = (float)px;
+    *cy = (float)py;
+    *scale = s;
+    return 1;
+}
+
 // VR: the panel while the menu is open, then the fps box while it is on, into `rtv` (an eye texture view); both centred on the
 // eye's optical centre + their own offsets, shifted inward by the same menu_vr_depth. v0.10.0 phase 15: split out of MenuDrawVr
 // for the menu / truck-preview eye pictures (MenuDrawPreview); the centre comes from VrEyeCentre (the world eye's, else the
 // preview picture's own -- the VR main menu has no world eye yet). Phase 16: the panel faces the eye (MenuFacingGeom) with
 // menu_vr_face = 1; the fps box stays flat. Called from the VR late panel (MenuLateArm / MenuLateOnRead).
+// v0.10.3 phase 28: fps_vr_lock = 1 places the fps box fixed in the cab instead (FpsVrLockedPlace) -- every VR eye-picture
+// path (the arm point, the late read, the OpenXR release MenuLateOnXrRelease, MenuDrawPreview) draws through here.
+// v0.10.3 phase 29: a panel / fps box that went to the compositor as an OpenXR quad layer (menu_vr_layer = 1, XrHook::
+// OverlayActive) is NOT drawn into the eye picture -- each one separately (the other may still need the in-picture fallback).
 void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv) {
-    const bool menuOpen = g_menuOpen.load(std::memory_order_relaxed);
-    if (eye < 0 || eye >= kMaxEyes || t_inDlaa || !rtv || !(menuOpen || g_fpsShow)) return;
+    const bool menuOpen = g_menuOpen.load(std::memory_order_relaxed) && !(g_menuVrLayer && XrHook::OverlayActive(0));
+    const bool fpsShow = g_fpsShow && !(g_menuVrLayer && XrHook::OverlayActive(1));
+    if (eye < 0 || eye >= kMaxEyes || t_inDlaa || !rtv || !(menuOpen || fpsShow)) return;
     Microsoft::WRL::ComPtr<ID3D11Resource> res;
     rtv->GetResource(res.GetAddressOf());
     Microsoft::WRL::ComPtr<ID3D11Texture2D> t;
@@ -14124,7 +14998,13 @@ void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv
     const float W = (float)td.Width, H = (float)td.Height;
     float u = 0.5f, v = 0.5f;
     VrEyeCentre(eye, &u, &v);
-    const float shift = (float)g_menuVrDepth * (eye == 0 ? 1.0f : -1.0f);   // inward: eye 0 right, eye 1 left
+    // inward = towards the nose: the left eye's panel moves right, the right eye's left (crossed disparity = nearer). v0.10.3:
+    // the side comes from the optical centre (it sits on the NASAL side of each eye picture: the left eye's u > 0.5), not from
+    // the eye index -- eye 0 is the RIGHT eye (logs: eye 0 u = 0.379, eye 1 u = 0.621), so the old "eye 0 right" shift pushed
+    // the panel BEYOND infinity (divergent: menu_vr_depth only split the two pictures apart, no depth). Unknown centre: eye 0 =
+    // the right eye.
+    const float inward = std::fabs(u - 0.5f) > 0.01f ? (u > 0.5f ? 1.0f : -1.0f) : (eye == 0 ? -1.0f : 1.0f);
+    const float shift = (float)g_menuVrDepth * inward;
     const int outMode = MenuOutMode(rd.Format, false);
     t_inDlaa = true;
     if (menuOpen) {
@@ -14147,14 +15027,22 @@ void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv
         if (!drawn)
             TuningMenu::Draw(ctx, rtv, td.Width, td.Height, cx0 + shift - 0.5f * pw, cy - 0.5f * ph, scale, g_menuVrBuild, outMode, p);
     }
-    if (g_fpsShow) {
+    if (fpsShow) {
         const float scale = W * 0.08f / TuningMenu::kWidgetRefW * g_fpsVrScale;   // 1 = 8 % of the eye width
         if (eye == 0 || g_fpsVrBuild <= 0.0f) g_fpsVrBuild = scale;     // one build scale for both eyes and the mirror
-        const float cx = u * W + (float)g_fpsVrX / 100.0f * W + shift;
-        const float cy = v * H + (float)g_fpsVrY / 100.0f * H;
-        const float bw = TuningMenu::kWidgetRefW * scale, bh = TuningMenu::kWidgetRefH * scale;
-        TuningMenu::DrawWidget(ctx, rtv, td.Width, td.Height, cx - 0.5f * bw, cy - 0.5f * bh, scale, g_fpsVrBuild, outMode,
-                               g_fps.line1, g_fps.line2);
+        float cx = u * W + (float)g_fpsVrX / 100.0f * W + shift;
+        float cy = v * H + (float)g_fpsVrY / 100.0f * H;
+        float s = scale;
+        // v0.10.3 phase 28: fps_vr_lock = 1 -> the box fixed in the cab (FpsVrLockedPlace; 0 = no usable OpenXR views: the
+        // head-locked placement above, -1 = not on this eye). The build scale stays the head-locked one (the texture is not
+        // rebuilt as the distance changes; DrawWidget scales it).
+        const int locked = g_fpsVrLock ? FpsVrLockedPlace(eye, t.Get(), rd, W, H, scale, &cx, &cy, &s) : 0;
+        if (locked >= 0) {
+            const float bw = TuningMenu::kWidgetRefW * s, bh = TuningMenu::kWidgetRefH * s;
+            GpuPerfScope gp(ctx, GpuPerf::kOverlay);      // v0.10.3 phase 29b: the fps box's own GPU cost (per frame: both eyes)
+            TuningMenu::DrawWidget(ctx, rtv, td.Width, td.Height, cx - 0.5f * bw, cy - 0.5f * bh, s, g_fpsVrBuild, outMode,
+                                   g_fps.line1, g_fps.line2);
+        }
     }
     t_inDlaa = false;
 }
@@ -14266,6 +15154,12 @@ void MenuDrawPreview(ID3D11DeviceContext* ctx, int idx, char trigger) {
 //  * One picture recorded for both eyes in the same Present (a mono screen / an eye-map flip): kept for the first eye only.
 //  * Reads by another context (another thread / device; the log shows a Draw(4) on one reading a 3064x3248 picture) are
 //    counted and logged, never used: nothing is drawn from another thread.
+// v0.10.3 phase 27 (ATS VR log 2026-10-10 22:17, stereo scale 2.0, eye picture 6120x6496): the game never reads the eye
+// picture on the D3D11 side -- it IS the OpenXR swapchain image, handed over at xrReleaseSwapchainImage -- and the only reads
+// were eye_capture.dll's copies (accepted as "the eye read": the world category went late, missed 3 times, stuck at the arm
+// point, where the garage / dealer UI is drawn over the panel = the flicker). Now: XrHook (xr_hook.h) wraps the release and
+// the panel goes on right before it (mode 2, checked first: MenuLateOnXrRelease); reads by any module but the game exe are
+// rejected (MenuLateOnRead). Without a release of the recorded picture the phase 16 / 20 behaviour stays as it was.
 enum { kLrNone = 0, kLrWait, kLrWatch };
 // kLrWait  = mode late: recorded, the panel goes on right before the game's (pattern's) read of the picture
 // kLrWatch = learning: the panel went on at the (pattern's) arm point, the record watches for a read
@@ -14282,6 +15176,8 @@ struct MenuLateRec {
     uint32_t panelAt = 0;                        // `draws` when the panel was drawn (draws over the panel = draws - panelAt)
     uint64_t frame = 0;                          // Present counter at the arm (a re-arm of the same picture in it is no miss)
     uint32_t w = 0, h = 0;                       // the picture's size (the read's written rect is measured against it)
+    bool     xrWait = false;                     // v0.10.3 phase 27: armed in mode "at the OpenXR release" (no arm-point draw)
+    bool     xrDone = false;                     // ... its xrReleaseSwapchainImage came (the panel went on right before it)
 };
 MenuLateRec g_menuLate[kMaxEyes];
 static_assert(kMaxEyes <= 2, "g_menuLateTexA holds 2 eyes");
@@ -14291,13 +15187,22 @@ constexpr int kLateForgive = 3600;               // ~25 s of VR frames without a
 // phase 20: the mode per arm-point category: 0 = world eye blit ('w'), 1 = menu / truck-preview / loading screens ('a', 'b')
 inline int MenuLateCat(char kind) { return kind == 'w' ? 0 : 1; }
 const char* const kLateCatName[2] = { "world", "menu / loading screens" };
+// v0.10.3 phase 27: mode 2 = right before the game's xrReleaseSwapchainImage of the picture (XrHook). Checked FIRST: the
+// first release of a recorded picture (its swapchain image, from the xrEnumerateSwapchainImages map) switches the category to
+// it at once (no learning run: the release IS the hand-over to the runtime, nothing the game draws can follow it); from the
+// next arm on the arm point only records. A picture of that mode never released before its eye's next arm = an xr miss ->
+// back to mode 0 (arm point, phase 16 / 20 learning intact); kLateMaxFallbacks of those and the category stays off the
+// release (no OpenXR / an OpenVR session / a layer that releases elsewhere).
 struct MenuLateMode {
-    int mode = 0;                                // 0 = draw at the arm point (+ watch), 1 = late (right before the game's read)
+    int mode = 0;                                // 0 = arm point (+ watch), 1 = late (before the game's read), 2 = OpenXR release
     int run = 0;                                 // mode 0: pictures in a row whose read was seen
     int fallbacks = 0;
     int good = 0;                                // mode late: pictures drawn late in a row (kLateForgive -> fallbacks forgiven)
+    int xrFallbacks = 0;                         // phase 27: mode 2 -> 0 fallbacks (xr misses)
+    int xrGood = 0;                              // phase 27: pictures drawn at the release in a row (kLateForgive -> forgiven)
 };
 MenuLateMode g_menuLateM[2];
+std::atomic<unsigned long> g_menuLateTid{0};      // phase 27: the thread of the last arm (the game render thread; XrHook checks it)
 // phase 20: events per eye per Present interval (distinct pictures armed / accepted reads) -> which one gets the panel
 constexpr uint64_t kLateNoFr = ~0ull;
 struct MenuLatePat {
@@ -14335,8 +15240,13 @@ struct MenuLateStats {
     uint64_t dupSkips = 0;                       // phase 20: arm / read skipped: the eye had its panel this Present already
     uint64_t noPanel = 0;                        // phase 20: eye-Presents with a picture armed but no panel drawn
     uint64_t shared = 0;                         // phase 20: arms of a picture the other eye recorded in the same Present
+    uint64_t foreignMod = 0;                     // phase 27: reads by another module (eye_capture.dll ...): never the eye read
+    uint64_t xrDraws = 0;                        // phase 27: panel drawn right before xrReleaseSwapchainImage
+    uint64_t xrMisses = 0;                       // phase 27: mode-2 pictures never released before their eye's next arm
+    uint64_t xrUnmatched = 0;                    // phase 27: game-thread releases while a picture was recorded: image not recorded
 };
 MenuLateStats g_menuLateSt;
+std::atomic<uint64_t> g_menuLateXrOther{0};      // phase 27: releases on another thread than the arms' (never drawn from)
 uint64_t g_menuLateStArms0 = 0;                  // arms at the last stats line
 std::atomic<uint64_t> g_menuLateForeignReads{0}; // phase 20: reads of a recorded picture by another context (counted only)
 // phase 20: every distinct read target (destination resource + verdict), logged once; the stats line names the accepted one
@@ -14369,6 +15279,7 @@ void MenuLateUpdateN() {
 }
 const char* MenuLateModeName(int cat) {
     const MenuLateMode& m = g_menuLateM[cat];
+    if (m.mode == 2) return "at the OpenXR release (right before xrReleaseSwapchainImage)";   // phase 27
     return m.mode ? "late (right before the game reads the picture)"
                   : (m.fallbacks >= kLateMaxFallbacks ? "at the arm point (stays: no reliable read)" : "at the arm point (learning)");
 }
@@ -14399,6 +15310,45 @@ void MenuLateStatsLog(const char* why) {
         (unsigned long long)s.stale, (unsigned long long)s.superseded, (unsigned long long)s.shared, g_menuLateM[0].fallbacks,
         g_menuLateM[1].fallbacks,
         kLateMaxFallbacks, (unsigned long long)s.over, (unsigned long long)s.overPics);
+    // v0.10.3 phase 27: the OpenXR release path + the reads by other modules
+    Log("tuning menu: VR late panel stats (%s), OpenXR release: hook %s, %d component(s) wrapped, %llu release(s) seen (%llu "
+        "with a mapped D3D11 image, %llu on another thread than the panel's, never drawn from) | panel drawn at the release "
+        "%llu, release misses %llu, releases of an image not recorded %llu, xr fallbacks world %d / menu %d of %d | reads by "
+        "another module (capture / overlay tools: never the eye read) %llu", why,
+        XrHook::Hooked() ? "installed" : "NOT installed", XrHook::Components(), (unsigned long long)XrHook::Releases(),
+        (unsigned long long)XrHook::ReleasesMapped(), (unsigned long long)g_menuLateXrOther.load(std::memory_order_relaxed),
+        (unsigned long long)s.xrDraws, (unsigned long long)s.xrMisses, (unsigned long long)s.xrUnmatched,
+        g_menuLateM[0].xrFallbacks, g_menuLateM[1].xrFallbacks, kLateMaxFallbacks, (unsigned long long)s.foreignMod);
+    {                                                     // v0.10.3 phase 29: the OpenXR quad layers
+        const XrHook::OverlayStats os = XrHook::GetOverlayStats();
+        static const char* const kFixed[4] = { "not used yet", "the game's layer space (LOCAL: origin = the seat)",
+                                               "the game's layer space around a pivot captured at lock-on",
+                                               "head-locked (the layer space is a VIEW space)" };
+        Log("tuning menu: VR overlay quads (%s): menu_vr_layer=%d, %s, drawn %s, swapchain format %lld | %llu xrEndFrame(s) with our "
+            "quads (panel %llu, fps box %llu; now panel %s / fps box %s) | failures: create %llu, acquire %llu, wait %llu, release "
+            "%llu, draw %llu, runtime rejects %llu | fps box fixed in the cab: %s (space type %d)", why, g_menuVrLayer,
+            os.ready ? "swapchains up" : "no swapchains (yet)", os.mode == 1 ? "at xrEndFrame" : os.mode == 2 ?
+            "at the game's xrReleaseSwapchainImage (xrEndFrame on another thread)" : "nowhere yet", (long long)os.format,
+            (unsigned long long)os.frames, (unsigned long long)os.panelQuads, (unsigned long long)os.fpsQuads,
+            XrHook::OverlayActive(0) ? "quad" : "in-picture", XrHook::OverlayActive(1) ? "quad" : "in-picture",
+            (unsigned long long)os.createFails, (unsigned long long)os.acquireFails, (unsigned long long)os.waitFails,
+            (unsigned long long)os.releaseFails, (unsigned long long)os.drawFails, (unsigned long long)os.rejects,
+            kFixed[os.fixedHow >= 0 && os.fixedHow < 4 ? os.fixedHow : 0], os.fixedSpaceType);
+    }
+    if (g_fpsVrLock) {                                   // v0.10.3 phase 28: the fps box fixed in the cab -- pose timing
+        const XrHook::PoseStats ps = XrHook::GetPoseStats();
+        char sp[200] = "";                                // phase 28b: the spaces the game locates its views in
+        int o = 0;
+        for (int k = 0; k < ps.nSpaces && o < (int)sizeof(sp) - 48; ++k)
+            o += snprintf(sp + o, sizeof(sp) - (size_t)o, "%s%p type %d: %llu", k ? ", " : "", ps.spaces[k].space, ps.spaces[k].type,
+                          (unsigned long long)ps.spaces[k].count);
+        Log("tuning menu: VR fps box fixed in the cab (%s): %llu stereo xrLocateViews (by space: %s), %llu xrEndFrame projection "
+            "layers (layer space type %d), submitted pose = a located one %llu / none %llu | correction S (x) L^-1: residual of the "
+            "previous frame's on this frame mean %.2f deg / %.1f mm, max %.2f deg over %llu frames (= how far the box is off in the "
+            "compositor)", why, (unsigned long long)ps.locates, sp[0] ? sp : "none", (unsigned long long)ps.endFrames,
+            ps.layerSpaceType, (unsigned long long)ps.matched, (unsigned long long)ps.unmatched, ps.resMeanDeg, ps.resMeanMm,
+            ps.resMaxDeg, (unsigned long long)ps.resFrames);
+    }
 }
 // The panel + fps box into eye `eye`'s picture now; the eye is stamped for this Present (phase 20: once per eye per Present).
 void MenuLateDrawEye(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv, uint64_t fr) {
@@ -14423,7 +15373,8 @@ void MenuLateRetire(int eye, bool reset) {
                 r.late ? "late" : "at the arm point", r.kind);
     }
     const uint64_t fr = g_frames.load(std::memory_order_relaxed);
-    if (!reset && !r.readSeen) {
+    const bool done = r.xrWait ? r.xrDone : r.readSeen;   // phase 27: a mode-2 picture is done at its OpenXR release
+    if (!reset && !done) {
         if (fr == r.frame) {                             // phase 20: another picture of this eye in the same Present
             ++s.superseded;                              // (an intermediate picture: the loading screen writes several)
             static int logs = 0;
@@ -14438,6 +15389,22 @@ void MenuLateRetire(int eye, bool reset) {
             if (logs++ < 3)
                 Log("tuning menu: VR late panel: eye %d's picture recorded at Present #%llu was never read (now #%llu: a screen "
                     "change or pause) -- not counted as a miss", eye, (unsigned long long)r.frame, (unsigned long long)fr);
+        } else if (r.state == kLrWait && r.xrWait) {     // phase 27: mode 2 and no xrReleaseSwapchainImage of the picture
+            ++s.xrMisses;
+            m.xrGood = 0;
+            static int logs = 0;
+            if (logs++ < 6)
+                Log("tuning menu: VR late panel MISSED eye %d's picture at the OpenXR release: no xrReleaseSwapchainImage of it "
+                    "before its next arm (arm point %c, %s, %u game draw(s) into it since the arm, Present #%llu)", eye, r.kind,
+                    kLateCatName[MenuLateCat(r.kind)], r.draws, (unsigned long long)fr);
+            if (m.mode == 2) {
+                m.mode = 0;
+                m.run = 0;
+                ++m.xrFallbacks;
+                Log("tuning menu: VR panel / fps box on the %s back to the arm point from the OpenXR release (xr fallback %d of "
+                    "%d%s)", kLateCatName[MenuLateCat(r.kind)], m.xrFallbacks, kLateMaxFallbacks,
+                    m.xrFallbacks >= kLateMaxFallbacks ? ": this category stays off the release" : ", the next release switches back");
+            }
         } else if (r.state == kLrWait) {                 // mode late and the picture was never read: the panel missed it
             ++s.misses;
             m.good = 0;
@@ -14480,7 +15447,8 @@ void MenuLateAtPresent(uint64_t n) {
                     MenuLateModeName(cat));
             }
         }
-        if (g_menuLate[e].state != kLrNone && g_menuLate[e].readSeen) MenuLateRetire(e, false);
+        const MenuLateRec& r = g_menuLate[e];            // phase 27: a mode-2 picture ends at its release, not at a read
+        if (r.state != kLrNone && (r.xrWait ? r.xrDone : (r.readSeen || r.xrDone))) MenuLateRetire(e, false);
     }
     MenuLateUpdateN();
 }
@@ -14535,9 +15503,11 @@ void MenuLateArm(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv,
                 (unsigned long long)fr, o, o);
         return;
     }
+    g_menuLateTid.store(GetCurrentThreadId(), std::memory_order_relaxed);   // phase 27: XrHook draws on this thread only
     // the same picture armed again in the same Present (a second flush / blit into it, also after a read): keep the record (no
-    // miss, no second panel); the panel still goes on at the read (late) or is there already (learning)
-    if (r.state != kLrNone && r.tex == (void*)res.Get() && r.frame == fr) {
+    // miss, no second panel); the panel still goes on at the read (late) or is there already (learning). Phase 27: not after
+    // its OpenXR release -- the image came back for a NEW frame (several game frames per mirror Present): a new record.
+    if (r.state != kLrNone && r.tex == (void*)res.Get() && r.frame == fr && !r.xrDone) {
         r.rtv = rtv;
         r.kind = kind;
         return;
@@ -14558,8 +15528,9 @@ void MenuLateArm(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv,
     ey.kind = kind;
     const int idx = ey.arm.Tick(fr);                     // phase 20: this eye's idx-th distinct picture in this Present
     const MenuLateMode& m = g_menuLateM[MenuLateCat(kind)];
-    if (m.mode == 1) {
-        r.state = kLrWait;
+    if (m.mode == 1 || m.mode == 2) {
+        r.state = kLrWait;                               // late: at the game's read; phase 27 mode 2: at the OpenXR release
+        r.xrWait = m.mode == 2;
     } else {
         r.state = kLrWatch;
         const int tgt = ey.arm.Target();
@@ -14599,7 +15570,8 @@ void MenuLateArm(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv,
         Log("tuning menu: VR late panel: first eye picture recorded (eye %d, arm point %c = %s, %ux%u, Present #%llu) -- drawn %s; "
             "the game's read of the picture (a Draw / copy into the OpenXR swapchain / stream image) is watched for", eye, kind,
             kind == 'w' ? "after the world eye blit" : "menu / truck-preview target flushed", r.w, r.h, (unsigned long long)fr,
-            m.mode ? "right before that read" : "at the arm point until that read is confirmed");
+            m.mode == 2 ? "right before its xrReleaseSwapchainImage" : m.mode ? "right before that read"
+                        : "at the arm point until that read / the OpenXR release is confirmed");
     }
 }
 // phase 20: the rectangle a read writes into its destination `dd` (copy: the source box / subresource at DstX / DstY, clipped;
@@ -14678,7 +15650,18 @@ void MenuLateOnRead(ID3D11DeviceContext* ctx, ID3D11Resource* src, ID3D11Resourc
     const double asOff = (asP > 0.0 && asR > 0.0) ? (std::max)(asR / asP, asP / asR) : 1e9;
     const bool bigEnough = areaP > 0.0 && areaR >= 0.5 * areaP;
     const bool shapeOk = asOff <= 1.4;
-    const bool accept = isTex && !toBb && bigEnough && shapeOk;
+    // v0.10.3 phase 27: the read must come from the GAME exe -- a capture / overlay tool on the game context (the 22:22 ATS log:
+    // eye_capture.dll+0x1f203 CopySubresourceRegion of each eye picture into a 12240x6496 target) flipped the world category
+    // into "late", then missed 3 times = stuck at the arm point. Cached per caller address (reads are rare: recorded source only).
+    static void* s_modCaller = nullptr;
+    static bool  s_modGame = true;
+    if (caller != s_modCaller) {
+        char mb[MAX_PATH] = "";
+        s_modGame = ModuleBaseOf(caller, mb, sizeof(mb)) && _stricmp(mb, GameExeBase()) == 0;
+        s_modCaller = caller;
+    }
+    const bool fromGame = s_modGame;
+    const bool accept = isTex && !toBb && bigEnough && shapeOk && fromGame;
     const uint64_t fr = g_frames.load(std::memory_order_relaxed);
     // every distinct target (destination + verdict) once in the log, then counted
     int ti = -1;
@@ -14701,6 +15684,7 @@ void MenuLateOnRead(ID3D11DeviceContext* ctx, ID3D11Resource* src, ID3D11Resourc
         DescribeAddr(caller, where, sizeof(where));
         strncpy_s(t.caller, where, _TRUNCATE);
         const char* verdict = accept ? "ACCEPTED as the eye read (the late panel's draw point)"
+                            : !fromGame ? "rejected: the caller is not the game exe (a capture / overlay tool)"
                             : !isTex ? "rejected: no 2D texture target"
                             : toBb ? "rejected: the mirror window / backbuffer (it can come after the OpenXR release)"
                             : !bigEnough ? "rejected: written rect under 50 % of the picture (an effect / mirror texture)"
@@ -14717,6 +15701,7 @@ void MenuLateOnRead(ID3D11DeviceContext* ctx, ID3D11Resource* src, ID3D11Resourc
     }
     if (ti >= 0) ++g_menuLateTgt[ti].n;
     else ++g_menuLateTgtMore;
+    if (!fromGame) { ++s.foreignMod; return; }           // phase 27: never the eye read
     if (toBb) { ++s.mirrorReads; return; }
     if (!accept) { ++s.otherReads; return; }
     ++s.reads;
@@ -14727,6 +15712,7 @@ void MenuLateOnRead(ID3D11DeviceContext* ctx, ID3D11Resource* src, ID3D11Resourc
     MenuLateEye& ey = g_menuLateEye[eye];
     const int idx = ey.read.Tick(fr);                    // phase 20: this eye's idx-th accepted read in this Present
     MenuLateMode& m = g_menuLateM[MenuLateCat(r.kind)];
+    if (r.xrWait) return;                                // phase 27: mode 2 draws at the OpenXR release only (reads: counted)
     if (r.state == kLrWait) {
         const int tgt = ey.read.Target();
         if (idx < tgt) { ++s.notLast; return; }          // more reads of this eye follow in this frame (pattern)
@@ -14798,6 +15784,172 @@ void MenuLateOnDraw(ID3D11DeviceContext* ctx, const char* what, UINT n, void* ca
     MenuLateOnRead(ctx, hit, dres, what, n, caller, h);
     if (dres) dres->Release();
     hit->Release();
+}
+// v0.10.3 phase 27: XrHook callback -- the game is about to call xrReleaseSwapchainImage for the swapchain image `tex` (the
+// D3D11 texture from its xrEnumerateSwapchainImages map; null = not mapped). The eye picture IS that image here (ATS VR at
+// stereo scale 2.0: the 6120x6496 picture, 0 D3D11 reads of it in ~22000 Presents), so this is the last moment the panel can
+// go in: everything the game draws into the picture (its garage / dealer menu UI too) is in, and the runtime takes it right
+// after. Only on the thread of the arms (the game render thread, owner of the immediate context; any other thread: counted,
+// nothing drawn). A recorded picture whose image is released gets the panel now (MenuLateDrawEye: TuningMenu::Draw saves /
+// restores the context state it touches) and its category switches to mode 2 (MenuLateMode): the arm point only records
+// from then on, so the panel is drawn ONCE per picture (the arm-point draw + the game's partial cover = the flicker).
+void MenuLateOnXrRelease(void* swapchain, void* tex) {
+    if (t_inDlaa) return;
+    const unsigned long armTid = g_menuLateTid.load(std::memory_order_relaxed);
+    if (!armTid) return;                                 // nothing armed yet (menu closed, fps box off since the start)
+    if (GetCurrentThreadId() != armTid) {
+        g_menuLateXrOther.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    if (!g_menuLateN) return;                            // no picture recorded (menu closed and fps box off)
+    MenuLateStats& s = g_menuLateSt;
+    ID3D11DeviceContext* const ctx = g_gameCtx.load(std::memory_order_acquire);
+    if (!ctx || !tex) { ++s.xrUnmatched; return; }
+    const uint64_t fr = g_frames.load(std::memory_order_relaxed);
+    bool hit = false;
+    for (int e = 0; e < kMaxEyes; ++e) {
+        MenuLateRec& r = g_menuLate[e];
+        if (r.state == kLrNone || r.tex != tex || r.xrDone || !r.rtv) continue;
+        hit = true;
+        const int cat = MenuLateCat(r.kind);
+        MenuLateMode& m = g_menuLateM[cat];
+        if (m.mode != 2) {
+            if (m.xrFallbacks >= kLateMaxFallbacks) continue;   // this category stays off the release (see MenuLateRetire)
+            const char* const was = MenuLateModeName(cat);
+            Log("tuning menu: VR panel / fps box on the %s now drawn at the OpenXR release -- right before the game's "
+                "xrReleaseSwapchainImage of the eye picture (swapchain %p, image %p; was: %s; %llu game draw(s) went over the "
+                "panel at the arm point so far in %llu picture(s)), Present #%llu", kLateCatName[cat], swapchain, tex, was,
+                (unsigned long long)s.over, (unsigned long long)s.overPics, (unsigned long long)fr);
+            m.mode = 2;
+            m.run = 0;
+        }
+        r.xrDone = true;
+        MenuLateDrawEye(ctx, e, r.rtv.Get(), fr);
+        r.drawn = true;
+        r.panelAt = r.draws;
+        ++s.xrDraws;
+        if (++m.xrGood >= kLateForgive && m.xrFallbacks > 0) {
+            m.xrFallbacks = 0;
+            Log("tuning menu: VR late panel: %d pictures in a row drawn at the OpenXR release on the %s since the last miss -- "
+                "earlier xr fallbacks forgiven", m.xrGood, kLateCatName[cat]);
+        }
+        static bool s_logged = false;
+        if (!s_logged) {
+            s_logged = true;
+            Log("tuning menu: VR panel drawn at xrReleaseSwapchainImage (eye %d, image %ux%u, arm point %c, swapchain %p, tid=%lu, "
+                "Present #%llu)", e, r.w, r.h, r.kind, swapchain, GetCurrentThreadId(), (unsigned long long)fr);
+        }
+    }
+    if (!hit) ++s.xrUnmatched;
+}
+// ---- v0.10.3 phase 29: the VR panel / fps box as OpenXR QUAD layers (dlaa.ini menu_vr_layer = 1; XrHook::OverlaySet) ---------
+// XrHook owns the OpenXR side (our two swapchains, the VIEW space, the quad poses, the layers appended at xrEndFrame); this side
+// hands it the placement every Present and draws the swapchain images through MenuOverlayDraw. The image px per reference px:
+// the panel 1.6 x menu_vr_scale (1216 px wide at 1.0 = ~1.4 x the headset's own pixels over the panel's ~62 deg), the fps box
+// 4.0 x fps_vr_scale (368 x 176 at 1.0; twice the panel's density: its text is small), capped by the swapchain size (the panel
+// 2.4 = full density up to menu_vr_scale 1.5, the fps box 8.0 = up to fps_vr_scale 2.0; above that the compositor scales up).
+// The quad shows only the drawn top-left part of the image (its sub-image), so the image size never changes with the scale.
+constexpr float kOvPanelDensity = 1.6f, kOvPanelMax = 2.4f;
+constexpr float kOvFpsDensity   = 4.0f, kOvFpsMax   = 8.0f;
+void MenuOverlaySet() {
+    if (g_launchVr != 1) return;                         // (XrHook is installed for VR launches only)
+    XrHook::OverlayParams p;
+    p.enabled   = g_menuVrLayer != 0;
+    p.menuOpen  = g_menuOpen.load(std::memory_order_relaxed);
+    p.fpsShow   = g_fpsShow;
+    p.fpsLock   = g_fpsVrLock;
+    p.menuX     = g_menuVrX;  p.menuY = g_menuVrY;  p.menuScale = g_menuVrScale;
+    p.menuDist  = (float)g_menuVrDist / 100.0f;          // v0.10.3 phase 29b (cm -> m)
+    p.menuFace  = g_menuVrFace != 0;                     // v0.10.3 phase 29b: the panel / head-following fps box quads
+    p.fpsX      = g_fpsVrX;   p.fpsY  = g_fpsVrY;   p.fpsScale  = g_fpsVrScale;
+    // the render thread: the late panel's arm thread (the game's draws on its immediate context), else this Present's thread
+    // (the per-frame work runs on the game render thread, also in present-layer mode)
+    const unsigned long armTid = g_menuLateTid.load(std::memory_order_relaxed);
+    p.drawTid   = armTid ? armTid : GetCurrentThreadId();
+    p.panelW    = (uint32_t)std::lround(TuningMenu::kRefWidth * kOvPanelMax);
+    p.panelH    = (uint32_t)std::ceil(TuningMenu::RefHeight(TuningMenu::kMaxRows) * kOvPanelMax);
+    p.fpsW      = (uint32_t)std::lround(TuningMenu::kWidgetRefW * kOvFpsMax);
+    p.fpsH      = (uint32_t)std::lround(TuningMenu::kWidgetRefH * kOvFpsMax);
+    XrHook::OverlaySet(p);
+}
+// XrHook's draw callback (on the render thread, inside xrEndFrame or the game's xrReleaseSwapchainImage): clear the swapchain
+// image to (0, 0, 0, 0), then the panel (MenuBuildPanel + TuningMenu::Draw) or the fps box (DrawWidget) into its top-left
+// corner, 1:1 texels (draw scale = build scale; g_menuVrBuild / g_fpsVrBuild = it, so the desktop mirror reuses the texture),
+// TuningMenu::kOutOverlay (blend off, RGBA: the compositor blends with that alpha). Colour: kOutLinear for every format -- an
+// _SRGB view encodes, and OpenXR reads a non-sRGB 8-bit swapchain image as LINEAR (XrHook picks an _SRGB format first).
+bool MenuOverlayDraw(XrHook::OverlayDraw* d) {
+    if (!d || !d->tex || t_inDlaa || !d->w || !d->h) return false;
+    const unsigned long armTid = g_menuLateTid.load(std::memory_order_relaxed);
+    if (armTid && GetCurrentThreadId() != armTid) return false;   // the immediate context: the render thread only
+    ID3D11DeviceContext* const ctx = g_gameCtx.load(std::memory_order_acquire);
+    if (!ctx) return false;
+    ID3D11Texture2D* const tex = static_cast<ID3D11Texture2D*>(d->tex);
+    Microsoft::WRL::ComPtr<ID3D11Device> dev, tdev;
+    ctx->GetDevice(dev.GetAddressOf());
+    tex->GetDevice(tdev.GetAddressOf());
+    if (!dev || dev.Get() != tdev.Get()) {
+        static int logs = 0;
+        if (logs++ < 3) Log("tuning menu: VR overlay image %p is not on the game context's device -- not drawn", d->tex);
+        return false;
+    }
+    D3D11_TEXTURE2D_DESC td{};
+    tex->GetDesc(&td);
+    D3D11_RENDER_TARGET_VIEW_DESC rd{};
+    rd.Format = (DXGI_FORMAT)d->format;                  // (the runtime's texture may be typeless)
+    if (td.ArraySize > 1) {
+        rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
+        rd.Texture2DArray.MipSlice = 0; rd.Texture2DArray.FirstArraySlice = 0; rd.Texture2DArray.ArraySize = 1;
+    } else {
+        rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+        rd.Texture2D.MipSlice = 0;
+    }
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv;  // a view for this draw only (no reference on the image is kept)
+    HRESULT hr = dev->CreateRenderTargetView(tex, &rd, rtv.GetAddressOf());
+    if (FAILED(hr) || !rtv) hr = dev->CreateRenderTargetView(tex, nullptr, rtv.GetAddressOf());   // a typed texture: its own format
+    if (FAILED(hr) || !rtv) {
+        static int logs = 0;
+        if (logs++ < 3)
+            Log("tuning menu: VR overlay image RTV create failed hr=0x%lx (%ux%u texture fmt=%d, swapchain fmt=%lld)", (unsigned long)hr,
+                td.Width, td.Height, (int)td.Format, (long long)d->format);
+        return false;
+    }
+    const int outMode = TuningMenu::kOutLinear | TuningMenu::kOutOverlay;
+    const FLOAT clear[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    bool ok = false;
+    float s = 0.0f;
+    t_inDlaa = true;
+    // v0.10.3 phase 29b: the fps box's own GPU cost (GpuPerf::kOverlay, per frame: its image's clear + draw, once per frame here)
+    const int gpTok = d->which ? GpuPerf::Begin(ctx, GpuPerf::kOverlay) : -1;
+    ctx->ClearRenderTargetView(rtv.Get(), clear);
+    if (d->which == 0) {
+        TuningMenu::Panel p;
+        MenuBuildPanel(p);
+        const float refH = TuningMenu::RefHeight(p.nRows);
+        s = (std::min)(kOvPanelDensity * g_menuVrScale, (std::min)((float)d->w / TuningMenu::kRefWidth, (float)d->h / refH));
+        g_menuVrBuild = s;                               // one build scale for the quad and the desktop mirror
+        ok = TuningMenu::Draw(ctx, rtv.Get(), d->w, d->h, 0.0f, 0.0f, s, s, outMode, p);
+        d->usedW = (uint32_t)std::lround(TuningMenu::kRefWidth * s);
+        d->usedH = (uint32_t)std::lround(refH * s);
+    } else {
+        s = (std::min)(kOvFpsDensity * g_fpsVrScale, (std::min)((float)d->w / TuningMenu::kWidgetRefW,
+                                                              (float)d->h / TuningMenu::kWidgetRefH));
+        g_fpsVrBuild = s;
+        ok = TuningMenu::DrawWidget(ctx, rtv.Get(), d->w, d->h, 0.0f, 0.0f, s, s, outMode, g_fps.line1, g_fps.line2);
+        d->usedW = (uint32_t)std::lround(TuningMenu::kWidgetRefW * s);
+        d->usedH = (uint32_t)std::lround(TuningMenu::kWidgetRefH * s);
+    }
+    GpuPerf::End(ctx, gpTok);                            // (-1 = not timed: a no-op)
+    t_inDlaa = false;
+    static bool s_logged[2] = {};
+    const int k = d->which ? 1 : 0;
+    if (ok && !s_logged[k]) {
+        s_logged[k] = true;
+        Log("tuning menu: VR %s drawn into its OpenXR quad image %p (%ux%u, texture fmt=%d, view fmt=%lld, array %u) at %.2f px per "
+            "reference px -> %ux%u px used (tid=%lu, Present #%llu)", k ? "fps box" : "panel", d->tex, d->w, d->h, (int)td.Format,
+            (long long)d->format, td.ArraySize, (double)s, d->usedW, d->usedH, GetCurrentThreadId(),
+            (unsigned long long)g_frames.load(std::memory_order_relaxed));
+    }
+    return ok;
 }
 // phase 20: a small Draw / DrawIndexed on ANOTHER context (another thread) reading a recorded picture: counted + logged only
 // (who reads the eye picture besides the game context -- the runtime's compositor?). Reads only the atomics; draws nothing.
@@ -16206,7 +17358,10 @@ void LoadConfig() {
             else if (!strcmp(key, "menu_vr_x"))      g_menuVrX = v < -50 ? -50 : (v > 50 ? 50 : (int)v);
             else if (!strcmp(key, "menu_vr_y"))      g_menuVrY = v < -50 ? -50 : (v > 50 ? 50 : (int)v);
             else if (!strcmp(key, "menu_vr_depth"))  g_menuVrDepth = v < 0 ? 0 : (v > 200 ? 200 : (int)v);
+            else if (!strcmp(key, "menu_vr_dist"))   g_menuVrDist = v < 30 ? 30 : (v > 300 ? 300 : (int)v);   // v0.10.3 phase 29b
             else if (!strcmp(key, "menu_vr_face"))   g_menuVrFace = v != 0 ? 1 : 0;         // v0.10.0 phase 16
+            else if (!strcmp(key, "menu_vr_layer"))  g_menuVrLayer = v != 0 ? 1 : 0;        // v0.10.3 phase 29
+            else if (!strcmp(key, "bind_hold_ms"))   g_bindHoldMs = v < 500 ? 500 : (v > 10000 ? 10000 : (int)v);   // v0.10.2
             else if (!strcmp(key, "menu_scale") || !strcmp(key, "menu_vr_scale")) {
                 const double s = strtod(eq + 1, nullptr);
                 const float c = (s != s) ? 1.0f : (float)(s < 0.3 ? 0.3 : (s > 2.0 ? 2.0 : s));   // v0.10.2: 0.3..2.0
@@ -16218,6 +17373,7 @@ void LoadConfig() {
             else if (!strcmp(key, "fps_y"))          g_fpsY = v < 0 ? 0 : (v > 95 ? 95 : (int)v);
             else if (!strcmp(key, "fps_vr_x"))       g_fpsVrX = v < -50 ? -50 : (v > 50 ? 50 : (int)v);
             else if (!strcmp(key, "fps_vr_y"))       g_fpsVrY = v < -50 ? -50 : (v > 50 ? 50 : (int)v);
+            else if (!strcmp(key, "fps_vr_lock"))    g_fpsVrLock = v != 0 ? 1 : 0;   // v0.10.3 phase 28: 1 = fixed in the cab
             else if (!strcmp(key, "fps_scale") || !strcmp(key, "fps_vr_scale")) {
                 const double s = strtod(eq + 1, nullptr);
                 const float def = key[4] == 'v' ? kFpsVrScaleDefault : 1.0f;   // phase 15: 0.2..3.0 (was 0.5..3.0)
@@ -16353,14 +17509,24 @@ void LoadConfig() {
         Log("controller_name empty = every DirectInput controller the game opens is read for WheelN / WheelUp ... bindings");
 #ifdef WITH_DLAA
     Log("tuning menu (v0.10.0): %s opens / closes it, %s / %s select a row, %s / %s change it; panel flat menu_x=%d menu_y=%d "
-        "menu_scale=%.1f, VR menu_vr_x=%d menu_vr_y=%d menu_vr_scale=%.1f menu_vr_depth=%d menu_vr_face=%d (%s); VR: drawn last on "
-        "each eye picture once the game's read of it is confirmed (phase 16)", KeyName(KA_MENU), KeyName(KA_MENU_UP),
+        "menu_scale=%.1f, VR menu_vr_x=%d menu_vr_y=%d menu_vr_scale=%.1f menu_vr_depth=%d menu_vr_dist=%d menu_vr_face=%d (%s); "
+        "v0.10.3 phase 29 "
+        "menu_vr_layer=%d (%s); VR in the picture: drawn last on each eye picture once the game's read of it is confirmed (phase "
+        "16); v0.10.2 bind_hold_ms=%d (hold a key / button that long on a row to bind it; no key / button reaches the game while "
+        "the menu is open)", KeyName(KA_MENU), KeyName(KA_MENU_UP),
         KeyName(KA_MENU_DOWN), KeyName(KA_MENU_LEFT), KeyName(KA_MENU_RIGHT), g_menuX, g_menuY, (double)g_menuScale, g_menuVrX,
-        g_menuVrY, (double)g_menuVrScale, g_menuVrDepth, g_menuVrFace,
-        g_menuVrFace ? "the VR panel turns to face the eye" : "flat VR panel");
+        g_menuVrY, (double)g_menuVrScale, g_menuVrDepth, g_menuVrDist, g_menuVrFace,
+        g_menuVrFace ? "the VR panel turns to face the eye" : "flat VR panel", g_menuVrLayer,
+        g_menuVrLayer ? "the VR panel / fps box are OpenXR quad layers placed by the compositor; phase 29b: the panel quad at "
+                        "menu_vr_dist cm, menu_vr_face turns the panel / head-following fps box quads to face the head; "
+                        "menu_vr_depth = the in-picture fallback's shift" : "the VR panel / fps box are drawn into the eye picture "
+                        "(menu_vr_depth / menu_vr_face; menu_vr_dist unused)",
+        g_bindHoldMs);
     Log("fps box (v0.10.0): fps_show=%d (%s), flat fps_x=%d fps_y=%d fps_scale=%.1f, VR fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f "
-        "(the tuning menu's FPS counter rows move it)", g_fpsShow ? 1 : 0, g_fpsShow ? "on: shown also while the menu is closed" : "off",
-        g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY, (double)g_fpsVrScale);
+        "fps_vr_lock=%d (%s) (the tuning menu's FPS counter rows move it)", g_fpsShow ? 1 : 0,
+        g_fpsShow ? "on: shown also while the menu is closed" : "off", g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY,
+        (double)g_fpsVrScale, g_fpsVrLock, g_fpsVrLock ? "VR: fixed in the cab, fps_vr_x / fps_vr_y = yaw / pitch degrees at 0.8 m"
+                                                       : "VR: follows the headset");
     // v0.10.0 phase 6b: the vote participation of instanced / no-MVP draws follows mv_drawid_instanced (default 1, even when the
     // key is absent) -- set it here, after the whole ini is parsed, so both the replay and the vote agree.
     DrawIdMv::SetInstanced(g_didInstancedCfg);
@@ -16628,7 +17794,16 @@ bool HookFn(const char* name, void* target, void* hook, void** orig) {
 }
 
 DWORD WINAPI SetupThread(LPVOID) {
-    Ofxr::Rescan();                                      // v0.10.0 OFXR Bridge: layer modules already loaded (later ones: every 300 Presents)
+#ifdef WITH_DLAA
+    // v0.10.3 phase 27: the OpenXR release hook FIRST -- it must be in before the game creates its XrInstance (the static
+    // loader in the exe negotiates with the runtime / API layers through GetProcAddress); VR launches only.
+    if (g_launchVr == 1) {
+        XrHook::SetReleaseCallback(&MenuLateOnXrRelease);
+        XrHook::SetOverlayDrawCallback(&MenuOverlayDraw);   // v0.10.3 phase 29: the quad layers' images (menu_vr_layer)
+        XrHook::Install();
+    }
+#endif
+    Ofxr::Rescan();                                     // v0.10.0 OFXR Bridge: layer modules already loaded (later ones: every 300 Presents)
 #ifdef WITH_DLAA
     // v0.7.8: compile every embedded shader once, on ShaderCache's own worker thread, while the game boots (was a
     // D3DCompile per unit inside its first Run on the render thread: ~2 s freeze per CameraMv). Not under the
@@ -16844,16 +18019,10 @@ void OnProcessDetach(bool processTerminating) {
     if (!processTerminating) KeySwallow::UnhookWindow();
 }
 
-// v0.10.0 tuning menu: the virtual keys the game must not see right now (dinput_wrap.cpp; input / window threads). The 5 bound
-// menu keys while the menu is open, else none. g_keys is written only by LoadConfig (before any game input exists).
-int MenuSwallowKeys(int* vks, int cap) {
-    if (!vks || cap <= 0 || !g_menuOpen.load(std::memory_order_relaxed)) return 0;
-    static const KeyAction kMenuKeys[] = { KA_MENU, KA_MENU_UP, KA_MENU_DOWN, KA_MENU_LEFT, KA_MENU_RIGHT };
-    int n = 0;
-    for (KeyAction a : kMenuKeys)
-        if (g_keys[a].vk && n < cap) vks[n++] = g_keys[a].vk;
-    return n;
-}
+// v0.10.2 tuning menu: true while the menu is open = NO key and NO controller button reaches the game (dinput_wrap.cpp: the
+// keyboard / controller device wraps and the window subclass, the game's input / window threads; replaces v0.10.0's
+// MenuSwallowKeys / v0.10.1's MenuSwallowJoy, which listed only the 5 menu inputs). Releases always pass there.
+bool MenuHidesInput() { return g_menuOpen.load(std::memory_order_relaxed); }
 // v0.10.1 dlaa.ini controller_name filter (dinput_wrap.cpp CreateDevice, the game's thread): true = tap / filter this
 // controller. Empty filter = every controller; else the product name must contain it (ASCII case-insensitive).
 bool ControllerNameAllowed(const char* product) {
@@ -16866,14 +18035,3 @@ bool ControllerNameAllowed(const char* product) {
     return strstr(low, g_controllerName) != nullptr;
 }
 const char* ControllerNameFilter() { return g_controllerName; }   // v0.10.1 for dinput_wrap.cpp's "not tapped" log line
-// v0.10.1: the same for the controller parts of the 5 menu actions (KeySwallow::kJoy* codes; dinput_wrap.cpp's controller
-// wrap, the game's input thread): their buttons read as up / the POV as centred in the game's reads while the menu is open.
-// The press that OPENS the menu is not hidden (the menu is closed at that moment), as for the keys.
-int MenuSwallowJoy(int* joys, int cap) {
-    if (!joys || cap <= 0 || !g_menuOpen.load(std::memory_order_relaxed)) return 0;
-    static const KeyAction kMenuKeys[] = { KA_MENU, KA_MENU_UP, KA_MENU_DOWN, KA_MENU_LEFT, KA_MENU_RIGHT };
-    int n = 0;
-    for (KeyAction a : kMenuKeys)
-        if (g_keys[a].joy && n < cap) joys[n++] = g_keys[a].joy;
-    return n;
-}

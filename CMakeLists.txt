@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(ets2_ats_dlaa VERSION 0.10.2 LANGUAGES C CXX)
+project(ets2_ats_dlaa VERSION 0.10.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,6 +11,7 @@ add_library(dinput8 SHARED
     src/inject.cpp
     src/ofxr.cpp      # v0.10.0: OFXR Bridge module-range pass-through (compiles with or without WITH_DLAA)
     src/dinput_wrap.cpp   # v0.10.0: tuning menu keys hidden from the game (DirectInput keyboard wrap + window subclass)
+    src/xr_hook.cpp       # v0.10.3 phase 27: OpenXR xrReleaseSwapchainImage hook (VR panel drawn right before the release)
 )
 set_target_properties(dinput8 PROPERTIES PREFIX "" OUTPUT_NAME "dinput8")
 # Single source of the version string: project(... VERSION 0.10.0) above feeds the

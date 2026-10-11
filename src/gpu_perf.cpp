@@ -9,7 +9,7 @@
 namespace GpuPerf {
 namespace {
 
-struct SecInfo { const char* name; bool inTotal; bool sampled; };
+struct SecInfo { const char* name; bool inTotal; bool sampled; bool perFrame; };   // perFrame: v0.10.3 phase 29b
 const SecInfo kInfo[kCount] = {
     { "replay", true, false },        { "fwd-replay", true, false },   { "snapshot", true, false },
     { "cand-copy*", true, true },     { "fwd-depth", true, false },    { "fwd-init", true, false },   // phase 10: exact
@@ -25,6 +25,7 @@ const SecInfo kInfo[kCount] = {
     { "pass-B", true, false },        { "mv-misc", true, false },
     { "NGX", false, false },          { "rcas", true, false },         { "copy-out", true, false },
     { "dbg-view", true, false },      { "mirrors", true, false },      { "mirror-NGX", false, false },
+    { "fps-box", false, false, true },                                                             // v0.10.3 phase 29b
 };
 static_assert(sizeof(kInfo) / sizeof(kInfo[0]) == kCount, "section table");
 
@@ -68,6 +69,9 @@ struct Win {
     uint64_t n[2][kCount] = {};
     double   totMax[2] = {};
     uint64_t unattributed = 0, dropped = 0;
+    double   fsum[kCount] = {}, fmx[kCount] = {};   // v0.10.3 phase 29b: per-frame sections (perFrame): ms, largest set sum
+    uint64_t fn[kCount] = {};                        // ... sets they ran in
+    uint64_t sets = 0;                               // ... landed (non-disjoint) sets
 } g_w;
 
 int EyeOf(uint64_t tag) {
@@ -139,7 +143,7 @@ Set* Cur(ID3D11DeviceContext* ctx) {
 }
 
 int MapSec(int sec) {
-    if (!g_mirror) return sec;
+    if (!g_mirror || kInfo[sec].perFrame) return sec;   // (phase 29b: a per-frame section is never a mirror's)
     return sec == kNgx ? kMirNgx : kMirror;
 }
 
@@ -167,6 +171,7 @@ bool On() { return g_on && !g_broken; }
 const char* Name(int sec) { return sec >= 0 && sec < kCount ? kInfo[sec].name : "?"; }
 bool InTotal(int sec) { return sec >= 0 && sec < kCount && kInfo[sec].inTotal; }
 bool IsSampled(int sec) { return sec >= 0 && sec < kCount && kInfo[sec].sampled; }
+bool IsPerFrame(int sec) { return sec >= 0 && sec < kCount && kInfo[sec].perFrame; }
 void SetFrame(uint64_t frame) { g_frame = frame; }
 void SetPass(uint64_t tag) { g_tag = tag; }
 uint64_t Pass() { return g_tag; }
@@ -234,9 +239,17 @@ void Poll(ID3D11DeviceContext* ctx) {
         // per (tag) accumulation inside this set
         uint64_t tags[kTags]; int nTags = 0; double secSum[kTags][kCount]; bool seen[kTags][kCount];
         memset(secSum, 0, sizeof(secSum)); memset(seen, 0, sizeof(seen));
+        double fSet[kCount] = {};                        // v0.10.3 phase 29b: the per-frame sections of this set (no tag / eye)
+        bool fSeen[kCount] = {};
+        ++g_w.sets;
         for (int e = 0; e < s.nEnt; ++e) {
             const Ent& en = s.ent[e];
             if (en.sec < 0 || en.t1 < 0) continue;
+            if (kInfo[en.sec].perFrame) {
+                fSet[en.sec] += t[en.t1] >= t[en.t0] ? (double)(t[en.t1] - t[en.t0]) * toMs : 0.0;
+                fSeen[en.sec] = true;
+                continue;
+            }
             int ti = -1;
             for (int q = 0; q < nTags; ++q) if (tags[q] == en.tag) { ti = q; break; }
             if (ti < 0) {
@@ -264,6 +277,12 @@ void Poll(ID3D11DeviceContext* ctx) {
             }
             if (tot > g_w.totMax[eye]) g_w.totMax[eye] = tot;
         }
+        for (int c = 0; c < kCount; ++c) {
+            if (!fSeen[c]) continue;
+            g_w.fsum[c] += fSet[c];
+            ++g_w.fn[c];
+            if (fSet[c] > g_w.fmx[c]) g_w.fmx[c] = fSet[c];
+        }
     }
 }
 
@@ -283,6 +302,13 @@ bool Stats(int eye, EyeStats* out) {
     }
     out->totalMax = g_w.totMax[eye];
     return true;
+}
+
+FrameStat FrameStats(int sec) {
+    FrameStat f;
+    if (sec < 0 || sec >= kCount) return f;
+    f.sumMs = g_w.fsum[sec]; f.maxMs = g_w.fmx[sec]; f.n = g_w.fn[sec]; f.sets = g_w.sets;
+    return f;
 }
 
 uint64_t Unattributed() { return g_w.unattributed; }
@@ -312,6 +338,12 @@ void LogWindow(uint64_t blit, double sceneMs, uint32_t sceneN) {
                 o += snprintf(buf + o, sizeof(buf) - (size_t)o, " %s %.3f/%.3f", kInfo[c].name, st.avg[c], st.mx[c]);
         }
         Log("%s", buf);
+    }
+    for (int c = 0; c < kCount; ++c) {               // v0.10.3 phase 29b: the per-frame sections (the fps box)
+        if (!kInfo[c].perFrame || !g_w.fn[c]) continue;
+        Log("perf @blit %llu: %s %.3f avg / %.3f max ms per frame (%llu of %llu timed frames; per frame, both eyes / every target "
+            "together; not in the eye lines' mod total)", (unsigned long long)blit, kInfo[c].name,
+            g_w.sets ? g_w.fsum[c] / (double)g_w.sets : 0.0, g_w.fmx[c], (unsigned long long)g_w.fn[c], (unsigned long long)g_w.sets);
     }
     if (g_w.unattributed || g_w.dropped)
         Log("perf @blit %llu: %llu sections of passes that never reached a blit (not in the eye lines), %llu sections not timed "

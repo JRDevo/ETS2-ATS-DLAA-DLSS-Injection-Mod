@@ -1,4 +1,5 @@
-// KeySwallow implementation (v0.10.0; v0.10.1 + the controller tap). See dinput_wrap.h.
+// KeySwallow implementation (v0.10.0; v0.10.1 + the controller tap; v0.10.2: the open menu hides ALL keys / buttons).
+// See dinput_wrap.h.
 #define DIRECTINPUT_VERSION 0x0800
 #include "dinput_wrap.h"
 #include <dinput.h>
@@ -11,50 +12,8 @@
 
 namespace {
 
-// ---- which keys --------------------------------------------------------------------------------------------------
-constexpr int kMaxSwallow = 8;
-
-inline bool VkSwallowed(int vk, const int* vks, int n) {
-    for (int i = 0; i < n; ++i) if (vks[i] == vk) return true;
-    return false;
-}
-// DirectInput key code (DIK_*) of a virtual key: the scan code, + 0x80 for an extended key. The navigation block keys
-// map to their numpad twins without the extended flag, so they are listed (DIK_UP 0xC8 ... DIK_DELETE 0xD3).
-DWORD DikOfVk(int vk) {
-    switch (vk) {
-    case VK_UP:     return 0xC8;
-    case VK_DOWN:   return 0xD0;
-    case VK_LEFT:   return 0xCB;
-    case VK_RIGHT:  return 0xCD;
-    case VK_DELETE: return 0xD3;
-    case VK_INSERT: return 0xD2;
-    case VK_HOME:   return 0xC7;
-    case VK_END:    return 0xCF;
-    case VK_PRIOR:  return 0xC9;
-    case VK_NEXT:   return 0xD1;
-    case VK_DIVIDE: return 0xB5;
-    default: break;
-    }
-    const UINT sc = MapVirtualKeyW((UINT)vk, MAPVK_VK_TO_VSC_EX);
-    if (!sc) return 0;
-    DWORD d = sc & 0xFFu;
-    if ((sc & 0xFF00u) == 0xE000u || (sc & 0xFF00u) == 0xE100u) d |= 0x80u;
-    return d;
-}
-// The DIK codes to swallow now (0 = none).
-int SwallowDiks(DWORD* diks) {
-    int vks[kMaxSwallow];
-    const int n = MenuSwallowKeys(vks, kMaxSwallow);
-    int m = 0;
-    for (int i = 0; i < n; ++i) {
-        const DWORD d = DikOfVk(vks[i]);
-        if (d && d < 256) diks[m++] = d;
-    }
-    return m;
-}
-
 // ---- v0.10.1 controller tap: per-device state slots (input thread writes, render thread reads) ---------------------
-// One slot per wrapped controller (max 8; a 9th is still wrapped for the swallow, its presses are not seen). Every field
+// One slot per wrapped controller (max 8; a 9th is still wrapped for the menu's hiding, its presses are not seen). Every field
 // is an atomic: the game's input thread publishes in GetDeviceState / GetDeviceData, PollKeys reads via ControllerState
 // on the render thread. No locks, nothing blocks in the device methods (the discovery log lines are written by the render
 // thread). The slot is claimed when the device is wrapped and freed at the wrapper's last Release.
@@ -124,20 +83,6 @@ unsigned PovDirs(DWORD v) {
     return d;
 }
 
-// The controller parts of the menu actions to hide from the game right now (menu open only).
-struct JoySwallowSet { uint32_t btn[4]; unsigned pov; };
-bool JoySwallowNow(JoySwallowSet& sw) {
-    sw = {};
-    int joys[kMaxSwallow];
-    const int n = MenuSwallowJoy(joys, kMaxSwallow);
-    for (int i = 0; i < n; ++i) {
-        const int j = joys[i];
-        if (j >= 1 && j <= KeySwallow::kJoyMaxButton) sw.btn[(j - 1) >> 5] |= 1u << ((j - 1) & 31);
-        else sw.pov |= KeySwallow::JoyPovBit(j);
-    }
-    return (sw.btn[0] | sw.btn[1] | sw.btn[2] | sw.btn[3] | sw.pov) != 0;
-}
-
 const char* DevTypeName(DWORD t) {
     switch (t) {
     case DI8DEVTYPE_DEVICE:        return "device";
@@ -161,42 +106,34 @@ void ProductName(const DIDEVICEINSTANCEW& di, char* out, size_t cap) {
 }
 
 // ---- device read filters (the Tap policy of DevWrap) ---------------------------------------------------------------
-// Keyboard (v0.10.0, unchanged): GetDeviceState clears the DIK bytes of the menu keys, GetDeviceData drops their DOWN entries.
+// Keyboard: v0.10.2 while the menu is open GetDeviceState clears ALL 256 key bytes and GetDeviceData drops EVERY key-DOWN
+// entry (v0.10.0 / v0.10.1: only the 5 menu keys). Key-up entries always pass.
 struct KbTap {
     void OnFormat(LPCDIDATAFORMAT) {}
     void OnActionMap() {}
     void OnUnacquire() {}
     void OnState(HRESULT hr, DWORD cb, LPVOID data) {
-        if (SUCCEEDED(hr) && data && cb >= 256) {          // c_dfDIKeyboard: 256 key bytes
-            DWORD diks[kMaxSwallow];
-            const int n = SwallowDiks(diks);
-            for (int i = 0; i < n; ++i) static_cast<BYTE*>(data)[diks[i]] = 0;
-        }
+        if (SUCCEEDED(hr) && data && cb >= 256 && MenuHidesInput())   // c_dfDIKeyboard: 256 key bytes
+            memset(data, 0, 256);
     }
     void OnData(HRESULT hr, DWORD cbObj, LPDIDEVICEOBJECTDATA rg, LPDWORD inOut) {
-        if (SUCCEEDED(hr) && rg && inOut && *inOut && cbObj >= sizeof(DIDEVICEOBJECTDATA_DX3)) {
-            DWORD diks[kMaxSwallow];
-            const int n = SwallowDiks(diks);
-            if (n) {
-                BYTE* const base = reinterpret_cast<BYTE*>(rg);
-                DWORD kept = 0;
-                for (DWORD i = 0; i < *inOut; ++i) {
-                    const DIDEVICEOBJECTDATA_DX3* e = reinterpret_cast<const DIDEVICEOBJECTDATA_DX3*>(base + (size_t)i * cbObj);
-                    bool drop = false;
-                    if (e->dwData & 0x80u)                    // key DOWN entries only (releases always pass)
-                        for (int k = 0; k < n; ++k) if (e->dwOfs == diks[k]) { drop = true; break; }
-                    if (drop) continue;
-                    if (kept != i) memmove(base + (size_t)kept * cbObj, base + (size_t)i * cbObj, cbObj);
-                    ++kept;
-                }
-                *inOut = kept;
+        if (SUCCEEDED(hr) && rg && inOut && *inOut && cbObj >= sizeof(DIDEVICEOBJECTDATA_DX3) && MenuHidesInput()) {
+            BYTE* const base = reinterpret_cast<BYTE*>(rg);
+            DWORD kept = 0;
+            for (DWORD i = 0; i < *inOut; ++i) {
+                const DIDEVICEOBJECTDATA_DX3* e = reinterpret_cast<const DIDEVICEOBJECTDATA_DX3*>(base + (size_t)i * cbObj);
+                if (e->dwData & 0x80u) continue;              // key DOWN entry: dropped (releases always pass)
+                if (kept != i) memmove(base + (size_t)kept * cbObj, base + (size_t)i * cbObj, cbObj);
+                ++kept;
             }
+            *inOut = kept;
         }
     }
 };
 
-// v0.10.1 controller (wheel / gamepad / joystick / shifter): taps the button / POV state into its JoySlot, then hides the
-// menu actions' controller parts from the game while the menu is open. The layout comes from the game's SetDataFormat:
+// v0.10.1 controller (wheel / gamepad / joystick / shifter): taps the button / POV state into its JoySlot, then (v0.10.2)
+// hides EVERY button and the POV from the game while the menu is open (v0.10.1: only the menu actions' controller parts);
+// axes and sliders are never touched. The layout comes from the game's SetDataFormat:
 // the i-th button object in rgodf order is button i (GUID_Button, or a NULL guid with a DIDFT_BUTTON type, which is how
 // c_dfDIJoystick / c_dfDIJoystick2 list their buttons), the first GUID_POV / DIDFT_POV object is the hat. Until a
 // SetDataFormat is seen the c_dfDIJoystick2 layout is assumed (buttons at DIJOFS_BUTTON(0..127), POV 1 at DIJOFS_POV(0)).
@@ -296,7 +233,7 @@ struct JoyTap {
         const bool havePov = povOfs != kNoOfs && povOfs <= cb && cb - povOfs >= sizeof(DWORD);
         DWORD pv = 0xFFFFFFFFu;
         if (havePov) memcpy(&pv, d + povOfs, sizeof(pv));
-        if (slot) {                                         // tap BEFORE the swallow: PollKeys needs the real state
+        if (slot) {                                         // tap BEFORE the hiding: PollKeys needs the real state
             uint32_t b[4] = {};
             for (int i = 0; i < nBtn; ++i) {
                 const DWORD o = btnOfs[i];
@@ -305,14 +242,12 @@ struct JoyTap {
             const unsigned pd = havePov ? PovDirs(pv) : 0u;
             Publish(b, pd, b, pd);                          // held = pressed for the latch (a short tap between Presents)
         }
-        JoySwallowSet sw;
-        if (!JoySwallowNow(sw)) return;
-        for (int i = 0; i < nBtn; ++i) {
-            if (!(sw.btn[i >> 5] & (1u << (i & 31)))) continue;
+        if (!MenuHidesInput()) return;
+        for (int i = 0; i < nBtn; ++i) {                    // v0.10.2: every button
             const DWORD o = btnOfs[i];
             if (o < cb) d[o] = 0;                           // the game sees the button up (a held one: released)
         }
-        if (sw.pov && havePov && (PovDirs(pv) & sw.pov)) {
+        if (havePov && PovDirs(pv)) {                       // the POV centred (an already centred one is left as it is)
             const DWORD centred = 0xFFFFFFFFu;
             memcpy(d + povOfs, &centred, sizeof(centred));
         }
@@ -327,8 +262,7 @@ struct JoyTap {
             for (int w = 0; w < 4; ++w) b[w] = slot->btn[w].load(std::memory_order_relaxed);
             pd = slot->pov.load(std::memory_order_relaxed);
         }
-        JoySwallowSet sw;
-        const bool swallow = entries && JoySwallowNow(sw);
+        const bool hide = entries && MenuHidesInput();     // v0.10.2: every button-down / non-centred POV entry
         if (entries) {
             BYTE* const base = reinterpret_cast<BYTE*>(rg);
             DWORD kept = 0;
@@ -340,14 +274,14 @@ struct JoyTap {
                     const uint32_t bit = 1u << (bi & 31);
                     if (e->dwData & 0x80u) {
                         b[bi >> 5] |= bit; pressed[bi >> 5] |= bit;
-                        drop = swallow && (sw.btn[bi >> 5] & bit);     // button DOWN entries only (releases always pass)
+                        drop = hide;                                    // button DOWN entries only (releases always pass)
                     } else {
                         b[bi >> 5] &= ~bit;
                     }
                 } else if (povOfs != kNoOfs && e->dwOfs == povOfs) {
                     const unsigned dirs = PovDirs(e->dwData);
                     pd = dirs; povPressed |= dirs;
-                    drop = swallow && (dirs & sw.pov);                  // a centred entry (dirs 0) = release, passes
+                    drop = hide && dirs != 0;                           // a centred entry (dirs 0) = release, passes
                 }
                 if (drop) continue;
                 if (kept != i) memmove(base + (size_t)kept * cbObj, base + (size_t)i * cbObj, cbObj);
@@ -532,7 +466,8 @@ public:
             const int k = g_joyWraps.fetch_add(1, std::memory_order_relaxed);
             if (g_joySetupLogs.fetch_add(1, std::memory_order_relaxed) < kJoySetupLogMax)
                 Log("DirectInput: controller device wrapped (%s, #%d): '%s', type %s (0x%02lX) -- its buttons / D-pad can be bound "
-                    "to the mod's hotkeys (dlaa.ini key_* = WheelN / WheelUp ...), hidden from the game while the menu is open%s",
+                    "to the mod's hotkeys (dlaa.ini key_* = WheelN / WheelUp ...); its buttons / D-pad are hidden from the game while "
+                    "the menu is open (axes pass)%s",
                     T::DevName(), k + 1, product, DevTypeName(GET_DIDEVICE_TYPE(di.dwDevType)),
                     (unsigned long)GET_DIDEVICE_TYPE(di.dwDevType),
                     jw->tap().slot ? "" : " -- NO STATE SLOT LEFT (8 controllers): its presses are not seen by the mod");
@@ -543,8 +478,8 @@ public:
         *out = w;
         const int k = g_kbWraps.fetch_add(1);
         if (k < 4)
-            Log("DirectInput: keyboard device wrapped (%s, #%d) -- the tuning menu keys are hidden from the game while the "
-                "menu is open", T::DevName(), k + 1);
+            Log("DirectInput: keyboard device wrapped (%s, #%d) -- no key reaches the game while the tuning menu is open "
+                "(releases pass)", T::DevName(), k + 1);
         return hr;
     }
     HRESULT STDMETHODCALLTYPE EnumDevices(DWORD t, typename T::EnumDevCb cb, LPVOID ref, DWORD fl) override {
@@ -573,32 +508,19 @@ std::atomic<HWND>     g_hwnd{nullptr};
 std::atomic<LONG_PTR> g_origProc{0};
 std::atomic<bool>     g_hookTried{false};
 
-// The virtual key of a WM_CHAR / WM_SYSCHAR (its scan code + extended bit -> VK).
-int VkOfCharMsg(LPARAM l) {
-    const UINT sc = (UINT)((l >> 16) & 0xFF) | (((l >> 24) & 1) ? 0xE000u : 0u);
-    return (int)MapVirtualKeyW(sc, MAPVK_VSC_TO_VK_EX);
-}
-
+// v0.10.2: while the menu is open EVERY key-down / character message and every WM_INPUT keyboard make event is dropped
+// (v0.10.0 / v0.10.1: only those of the 5 menu keys). Key-up messages, WM_INPUT break events and WM_INPUT mouse pass.
 LRESULT CALLBACK SubProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     const WNDPROC orig = reinterpret_cast<WNDPROC>(g_origProc.load(std::memory_order_acquire));
-    if (m == WM_KEYDOWN || m == WM_SYSKEYDOWN || m == WM_CHAR || m == WM_SYSCHAR || m == WM_INPUT) {
-        int vks[kMaxSwallow];
-        const int n = MenuSwallowKeys(vks, kMaxSwallow);
-        if (n) {
-            if (m == WM_KEYDOWN || m == WM_SYSKEYDOWN) {
-                if (VkSwallowed((int)w, vks, n)) return 0;
-            } else if (m == WM_CHAR || m == WM_SYSCHAR) {
-                if (VkSwallowed(VkOfCharMsg(l), vks, n)) return 0;
-            } else {                                           // WM_INPUT: keyboard make events of the menu keys
-                alignas(8) BYTE buf[sizeof(RAWINPUT)];
-                UINT size = sizeof(buf);
-                if (GetRawInputData(reinterpret_cast<HRAWINPUT>(l), RID_INPUT, buf, &size, sizeof(RAWINPUTHEADER)) != (UINT)-1) {
-                    const RAWINPUT* ri = reinterpret_cast<const RAWINPUT*>(buf);
-                    if (ri->header.dwType == RIM_TYPEKEYBOARD && !(ri->data.keyboard.Flags & RI_KEY_BREAK) &&
-                        VkSwallowed((int)ri->data.keyboard.VKey, vks, n))
-                        return DefWindowProcW(h, m, w, l);        // the system's raw-input cleanup, the game never sees it
-                }
-            }
+    if ((m == WM_KEYDOWN || m == WM_SYSKEYDOWN || m == WM_CHAR || m == WM_SYSCHAR || m == WM_INPUT) && MenuHidesInput()) {
+        if (m == WM_SYSKEYDOWN && w == VK_F4) return orig ? CallWindowProcW(orig, h, m, w, l) : DefWindowProcW(h, m, w, l);   // Alt+F4 (close the game) always passes
+        if (m != WM_INPUT) return 0;
+        alignas(8) BYTE buf[sizeof(RAWINPUT)];                 // WM_INPUT: keyboard make events only
+        UINT size = sizeof(buf);
+        if (GetRawInputData(reinterpret_cast<HRAWINPUT>(l), RID_INPUT, buf, &size, sizeof(RAWINPUTHEADER)) != (UINT)-1) {
+            const RAWINPUT* ri = reinterpret_cast<const RAWINPUT*>(buf);
+            if (ri->header.dwType == RIM_TYPEKEYBOARD && !(ri->data.keyboard.Flags & RI_KEY_BREAK))
+                return DefWindowProcW(h, m, w, l);            // the system's raw-input cleanup, the game never sees it
         }
     }
     return orig ? CallWindowProcW(orig, h, m, w, l) : DefWindowProcW(h, m, w, l);
@@ -638,8 +560,8 @@ void HookWindow(HWND hwnd) {
     }
     if (prev != cur) g_origProc.store(prev, std::memory_order_release);   // changed in between: chain to what was really there
     g_hwnd.store(hwnd, std::memory_order_release);
-    Log("tuning menu: game window %p subclassed (key messages of the menu keys are dropped while the menu is open; key "
-        "releases always pass)", (void*)hwnd);
+    Log("tuning menu: game window %p subclassed (every key-down / character message is dropped while the menu is open; "
+        "key releases always pass)", (void*)hwnd);
 }
 
 void UnhookWindow() {

@@ -369,20 +369,44 @@ The three green lines under the title show the game's GPU time per frame, what t
 - **Flat:** the panel sits near the top-left corner of the screen.
 - **VR:** the panel shows in both eyes, centred in front of you, and on the desktop mirror window -- also on the
   VR main menu and the garage / truck dealer screens, before a save is loaded.
-- **The game does not see `Delete` and the arrow keys while the menu is open** (they steer and drive in the default
-  layout), so the truck does not react while you tune. Closed, the keys belong to the game again.
+- **While the menu is open the game gets no keys and no wheel / gamepad buttons at all** (the arrow keys steer and drive
+  in the default layout, and a held key must not honk the horn), so the truck does not react while you tune. Steering,
+  pedals and other axes still reach the game. `Escape` / pause and every game key are off too: close the menu first.
+  Closed, every key and button belongs to the game again.
+- **Bind a key in the menu:** select a row and **hold a key or a wheel button for 5 s** (`bind_hold_ms`): a bar in the
+  Hotkey column fills up, two rising beeps, and the key is that row's hotkey from now on, written to `dlaa.ini` at once.
+  Hold `Ctrl` / `Shift` / `Alt` with it for a combination. A key replaces the row's keyboard key and keeps its wheel
+  button, a wheel button the other way round; **holding `Backspace` clears** the row's hotkey (`none`). A key that
+  already belongs to another hotkey is taken away from it (the row says `taken from key_...` for 3 s). Rows with two
+  keys (minus / plus) or four (the models) ask for one hold per key, one after the other.
+- **Menu keys** row (in the `Panel settings` group): the five keys that open and drive the menu, bound by five holds in
+  a row (open / close, up, down, left, right). On this row the open key does not close the menu and a short tap of `Up` /
+  `Down` moves to the next row; hold longer to bind. See [`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu).
+- **Groups (v0.10.3):** the panel rows (`Panel position X` / `Y`, `Panel size`, `Panel VR depth`, `Panel faces you`,
+  `Menu keys`) sit in the **Panel settings** group and the fps box rows (`FPS counter lock`, `X`, `Y`, `size`) in the
+  **FPS counter settings** group, right under the `FPS counter` on / off row. Both groups are closed every time the menu
+  opens: select the group row and press `Right` to show its rows, `Left` to hide them again.
 - Every row calls the same function as its hotkey: the hotkeys keep working while the menu is open, and every change
   beeps and logs exactly like its key. Number rows repeat while you hold `Left` / `Right`.
-- **Move the widgets:** the panel and the fps counter both move. For the panel use the `Panel position X`, `Panel position Y` and `Panel size` rows (and `Panel VR depth` in VR,
+- **Move the widgets:** the panel and the fps counter both move. For the panel open `Panel settings` and use the `Panel position X`, `Panel position Y` and `Panel size` rows (and `Panel VR depth` in VR,
   which brings the panel nearer). Flat and VR keep their own position (`menu_x`, `menu_y`, `menu_scale`,
-  `menu_vr_x`, `menu_vr_y`, `menu_vr_scale`, `menu_vr_depth`, `menu_vr_face` in `dlaa.ini`).
+  `menu_vr_x`, `menu_vr_y`, `menu_vr_scale`, `menu_vr_dist` / `menu_vr_depth`, `menu_vr_face` in `dlaa.ini`).
 - **VR: the panel faces you.** Move it to the side or up / down and it turns towards your eye like a real screen,
   keeping its size from every angle (`Panel faces you (VR)` row, `menu_vr_face`, on by default; off = a flat picture).
   On the garage / truck dealer screens the panel and the fps box are drawn on top of the game's own menu, not under it
   (the mod finds where the game hands each eye picture to the headset in the first frames after the menu opens).
+- **VR: rock-steady panel (v0.10.3).** By default (`menu_vr_layer = 1`) the panel and the fps box are separate OpenXR
+  layers: the headset's compositor shows them itself, on top of the game picture, so they do not swim or jitter with
+  the reprojection, sit at a real distance (the panel 1 m away by default, the fps box 0.8 m) and are never covered by
+  the game's menus. `Panel VR depth` then sets the panel's distance in metres (`menu_vr_dist`, 0.30 - 3.00 m, 5 cm
+  steps; it keeps its size, only the depth changes) and `Panel faces you` turns the panel -- and the fps box when it
+  follows your head -- towards you as a true 3-D layer. With `menu_vr_layer = 0` (the panel drawn into the picture, as
+  before; also the automatic fallback when the layers are not possible) `Panel VR depth` is the inward shift in px
+  (`menu_vr_depth`).
 - **Live fps counter:** ![fps counter](docs/images/fps-counter.png) the `FPS counter` row switches on a small fps box: the fps and the frame time as text with a dark outline, no background (`60 fps` /
   `16.7 ms`, updated twice a second) that stays on screen also when the menu is closed (flat, and in VR in both eyes).
-  `FPS counter X`, `FPS counter Y` and `FPS counter size` move it; flat and VR keep their own position (`fps_show`,
+  Its own GPU cost is measured and shown in the row's cost column, per frame (all the pictures it is drawn into together).
+  `FPS counter X`, `FPS counter Y` and `FPS counter size` (in the `FPS counter settings` group) move it; flat and VR keep their own position (`fps_show`,
   `fps_x`, `fps_y`, `fps_scale`, `fps_vr_x`, `fps_vr_y`, `fps_vr_scale` in `dlaa.ini`). Off, it costs nothing.
   The size goes from `0.2` to `3.0`; in VR it starts at `0.3` (small but readable in the headset).
 - **Mirror DLAA** picks how many mirrors get DLAA and how they move: `off`, `1 mirror (largest)` (only the main mirror
@@ -393,7 +417,9 @@ The three green lines under the title show the game's GPU time per frame, what t
 - **Save to dlaa.ini** (the same as `Shift+F12`) writes the live values, and the panel position / fps box once you
   changed them.
 - **Reset to defaults** puts every row back to the fresh-install values, live and in `dlaa.ini` (the keys are removed
-  from the file; your hotkeys and every other line stay). Use it when you have changed too much.
+  from the file; your hotkeys and every other line stay). Use it when you have changed too much. It is a **hold**: keep
+  `Right` held on the row for 5 s (`bind_hold_ms`; the Hotkey column reads `hold Right 5 s` and fills a progress bar);
+  let go earlier and nothing happens, `Left` does nothing there.
 - **Where your GPU time goes:** under the title, a GPU line shows the game's own GPU time per frame, what this mod costs
   (split into DLAA/DLSS itself, per-part motion, camera motion, see-through depth, mirrors, sharpen and copies; in VR per
   eye) and the fps. The `GPU cost` column shows each row's share right now (`off` = that feature is off and costs
@@ -439,10 +465,14 @@ The table below lists the commonly used keys:
 | `beeps` | `1` | `0` = silence the hotkey beeps |
 | `menu_x` / `menu_y` / `menu_scale` | `2` / `8` / `1.0` | tuning menu panel, flat: left / top edge in % of the picture, size `0.3`..`2.0`. The menu's Panel rows change them live |
 | `menu_vr_x` / `menu_vr_y` / `menu_vr_scale` / `menu_vr_depth` | `0` / `-5` / `1.0` / `12` | tuning menu panel, VR: centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size (1 = 54 % of the eye width), inward shift per eye in px |
-| `menu_vr_face` | `1` | tuning menu panel, VR: `1` = the panel turns to face your eye when moved off the centre (a tilted 3-D panel, same size from every angle), `0` = a flat picture. The menu's `Panel faces you (VR)` row switches it live |
+| `menu_vr_dist` | `100` | tuning menu panel, VR layer (v0.10.3, `menu_vr_layer = 1`): the panel's distance in cm (`30`..`300`); it keeps the same size at every distance, only the stereo depth changes. The menu's `Panel VR depth` row sets it in 5 cm steps on the layer path (`menu_vr_depth` is the in-picture shift) |
+| `menu_vr_face` | `1` | tuning menu panel, VR: `1` = the panel turns to face your eye when moved off the centre (a tilted 3-D panel, same size from every angle), `0` = a flat picture. On the VR layer path (default) also the fps box when it follows your head, turned by the compositor. The menu's `Panel faces you (VR)` row switches it live |
+| `menu_vr_layer` | `1` | VR (v0.10.3): `1` = the panel and the fps box are separate OpenXR quad layers the headset's compositor places itself: rock-steady (no swimming with the reprojection), at a real distance (panel `menu_vr_dist`, default 1 m; fps box 0.8 m), facing you with `menu_vr_face = 1`, never covered by the game's menus; `menu_vr_depth` is then unused. `0` = drawn into the eye picture as before (also the automatic fallback; `menu_vr_dist` unused) |
 | `fps_show` | `0` | live fps box: `1` = a small fps / frame-time box stays on screen, also while the menu is closed. The menu's `FPS counter` row switches it live |
 | `fps_x` / `fps_y` / `fps_scale` | `1` / `1` / `1.0` | fps box, flat: left / top edge in % of the picture (`0`..`95`), size `0.2`..`3.0` (1 = 92 x 44 px at 1080 p) |
 | `fps_vr_x` / `fps_vr_y` / `fps_vr_scale` | `0` / `-25` / `0.3` | fps box, VR: centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size `0.2`..`3.0` (1 = 8 % of the eye width) |
+| `fps_vr_lock` | `0` | fps box, VR (v0.10.3): `0` = follows the headset, `1` = fixed in the cab 0.8 m from your seat; `fps_vr_x` / `fps_vr_y` are then degrees around you (+ = right / down). The menu's `FPS counter lock` row switches it |
+| `bind_hold_ms` | `5000` | tuning menu: how long (ms, `500`..`10000`) a key or wheel button must be held on a row to bind it to that row ([`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu)) |
 | `controller_name` | *(empty)* | only read the wheels / gamepads whose name contains this text for `WheelN` / `WheelUp` hotkey bindings, e.g. `T300` when a shifter shares the wheel's button numbers; empty = every controller ([`docs/KEYS.md`](docs/KEYS.md#wheel-gamepad-and-joystick-buttons)) |
 | `key_<action>` | *(see KEYS.md)* | re-bind any hotkey, e.g. `key_dlaa_toggle = Ctrl+D`, or `none` to disable it. Full list and format: [`docs/KEYS.md`](docs/KEYS.md) |
 | `debug` | `0` | `1` = write the log file `dlaa_inject.log` (off by default) |

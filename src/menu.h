@@ -21,7 +21,9 @@
 
 namespace TuningMenu {
 
-constexpr int   kMaxRows  = 27;                      // (was 24 before the 4 fps box rows, 26 before the Reset row)
+constexpr int   kMaxRows  = 31;                      // (was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
+                                                     //  28 before the v0.10.3 phase 28 FPS counter lock row, 29 before the phase 29c
+                                                     //  group header rows; a Panel holds only the VISIBLE rows, nRows <= this)
 constexpr int   kPerfLines = 3;                      // the GPU block under the title (small font, one line each)
 constexpr float kRefWidth = 760.0f;                  // panel width in reference px (scale 1; was 720 before the GPU cost column)
 constexpr float kWidgetRefW = 92.0f;                 // the fps box in reference px (scale 1)
@@ -49,6 +51,10 @@ struct Panel {
 
 void  RegisterShaders();                             // VS + PS into ShaderCache (setup thread, before ShaderCache::Start)
 float RefHeight(int nRows);                          // panel height in reference px
+// v0.10.3 phase 29c: does `footer` fit on the footer line LEFT of the licence line (which shares it, right-aligned)? Measured
+// with GDI in the panel's small font (no device objects; a memory DC for the call). The caller shortens the text if not; Draw
+// clips the footer at the licence line anyway (end ellipsis), so a wrong answer never overlaps the two.
+bool  FooterFits(const wchar_t* footer);
 // Draws `p` into `rtv` (a target of rtW x rtH px) with its top-left corner at (x0, y0) px and `scale` px per reference
 // px. The texture is rendered at `buildScale` (the GPU scales it by scale / buildScale) so two targets of different
 // sizes in one frame (VR eyes + the desktop mirror) do not rebuild it twice per frame. outMode = how the target stores
@@ -57,6 +63,10 @@ enum OutMode : int {
     kOutRaw    = 0,                                  // 8-bit UNORM view: the sRGB panel bytes as they are
     kOutLinear = 1,                                  // _SRGB view (the hardware encodes) or scRGB float: decoded to linear (white = 1.0)
     kOutPq     = 2,                                  // HDR10 (R10G10B10A2, PQ / Rec.2020): white at 200 nits, PQ-encoded
+    // v0.10.3 phase 29: OR-ed into any of the above = an OVERLAY image (the OpenXR quad layer's swapchain image): blend OFF,
+    // RGBA written as the shader outputs it (colour + alpha: the panel max(0.88, luminance), the fps box its own outline
+    // alpha), so the compositor gets the alpha. Without the flag every draw is as before (blend, RGB write mask).
+    kOutOverlay = 0x100,
 };
 bool  Draw(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
            float scale, float buildScale, int outMode, const Panel& p);
