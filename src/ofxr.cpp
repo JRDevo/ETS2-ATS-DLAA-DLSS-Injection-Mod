@@ -68,6 +68,8 @@ void Rescan() {
         }
     }
 
+    LARGE_INTEGER t0, t1, fq;                     // phase 31: the cost of one rescan (first 3 logged)
+    QueryPerformanceCounter(&t0);
     HMODULE mods[1024];
     DWORD needed = 0;
     if (!EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &needed)) return;
@@ -91,6 +93,15 @@ void Rescan() {
         Log("OFXR Bridge: layer module %ls loaded @ %p size %u KB -- its D3D11 calls on the game context pass through the "
             "mod's hooks", name, mi.lpBaseOfDll, (unsigned)(mi.SizeOfImage / 1024));
     }
+    static int s_timedLogs = 0;
+    if (s_timedLogs < 3) {
+        ++s_timedLogs;
+        QueryPerformanceCounter(&t1);
+        QueryPerformanceFrequency(&fq);
+        Log("OFXR Bridge: module rescan took %.3f ms for %lu modules (tid=%lu; phase 31: off the render thread after the first)",
+            fq.QuadPart > 0 ? (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)fq.QuadPart : 0.0, count,
+            GetCurrentThreadId());
+    }
 }
 
 void OnPresent(uint64_t n) {
@@ -100,7 +111,14 @@ void OnPresent(uint64_t n) {
     const uint64_t interval = (now - s_startTick < 10ull * 60ull * 1000ull) ? 300 : 3000;
     if (n - s_lastScanN >= interval) {
         s_lastScanN = n;
-        Rescan();
+        // phase 31: the rescan runs on a thread-pool thread, not on the render thread. EnumProcessModules + a base name + a full
+        // path per loaded module (GetModuleFileNameExW reads the loader list through ReadProcessMemory) is a few hundred
+        // microseconds to milliseconds with the ~150-250 modules of a VR session -- a stall of one frame every 300 frames (4 s
+        // at 72 fps) for the first 10 minutes, then every 3000. Rescan already serialises itself (s_scanLock try-lock) and
+        // publishes the ranges lock-free (count written last), so it may run on any thread; a module found a few ms later
+        // than before changes nothing (the cadence was already 300 frames). Falls back to the old inline call when the pool
+        // refuses the work item.
+        if (!TrySubmitThreadpoolCallback([](PTP_CALLBACK_INSTANCE, void*) { Rescan(); }, nullptr, nullptr)) Rescan();
     }
     if (n - s_lastStatN >= 600) {
         s_lastStatN = n;

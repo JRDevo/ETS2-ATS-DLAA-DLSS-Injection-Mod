@@ -96,12 +96,27 @@
 //      vertex shader (DrawIdMv::MvpRow: decided by the VS's first read-back draw, re-checked when its cached block fails); every
 //      reader of "the MVP" (pairing, consensus, twins, attach, parent vote, origin-free rule, forward ids, dump, pass A) uses it.
 //      No MVP-shaped block = state 5 (camera R), phase 19's fallback.
+// Phase 35 SHADOWED INPUT STATE (DidShadow below; dlaa.ini did_shadow / did_shadow_verify):
+//  13. Record's getters cost ~140 ns per draw (microbenchmark, RTX 5090 runtime: ~89 ns in Record + ~52 ns of Releases at the
+//      replay), almost all of it COM reference counting (an AddRef + Release pair ~9.5 ns, x 10 bound objects). With did_shadow = 1
+//      the hooked IA / VS / RS Set calls of the tracked context keep a shadow copy of the input layout, vertex buffers 0..3,
+//      index buffer, vertex shader, VS cbuffers 0..3 (+ D3D11.1 first / count, the runtime's own normalisation), VS samplers 0..1
+//      and rasterizer state; Record copies them and AddRefs only the pointers that differ from the record's previous draw (the
+//      `own` bits; ReleaseRange releases only owned refs, and hands ownership to the first unreleased draw before a partial
+//      release). EXACT BY CONSTRUCTION: the shadow owns a reference on everything it names (no address can be reused while it is
+//      named); a buffer with an output bind flag (UAV / stream-out / render target / depth: the only ones the runtime's hazard
+//      tracking can unbind) makes its group read through the getter; topology, VS SRVs, viewports and scissors always use the
+//      getter (hazard-prone or not worth a hook); the shadow is dropped and re-read at every pass start, G-buffer leave and frame
+//      start, on ClearState / ExecuteCommandList / SwapDeviceContextState, on any Set from another thread, on an unusual call
+//      (slot range past the API limit, half-null first / count arrays) and on a context change. Verify mode compares both paths
+//      every Nth record and falls back to the getters for the rest of the frame on any difference.
 // Compiled only when WITH_DLAA=1. Render thread only (the game's immediate context).
 #pragma once
 #ifdef WITH_DLAA
 
 #include <d3d11_1.h>
 #include <wrl/client.h>
+#include <atomic>
 #include <cstdint>
 
 // Non-blocking GPU timestamp span (same pattern as SceneDlaa's SnapTimer): Begin / End around GPU work, polled with
@@ -123,6 +138,69 @@ private:
     double   m_sum = 0.0, m_max = 0.0;
     uint64_t m_n = 0;
 };
+
+// ---- phase 35 SHADOWED INPUT STATE (see 13. in the header comment) ----
+// inject.cpp installs the Set / invalidation hooks only when did_shadow = 1 at startup and calls Configure(true, N) once they are
+// all in; the harness patches the WARP context's vtable with the same calls. Every Note* runs AFTER the original call, for ANY
+// context and thread (the tracked context and owner thread are checked inside); while the shadow is not armed (no Record since
+// the last drop) a Note is one relaxed load + a not-taken branch.
+namespace DidShadow {
+enum Field : int { kFIl = 0, kFVb, kFIb, kFVs, kFCb, kFSmp, kFRs, kFieldN };
+const char* FieldName(int f);
+// why the shadow was dropped (stats)
+enum Kill : int { kKFrame = 0, kKPass, kKClearState, kKExecCmd, kKSwapState, kKThread, kKCtx, kKVerify, kKVtable, kKOther, kKillN };
+inline std::atomic<bool> g_armed{false};
+// once, before the first Record (on = every hook is in); groups = the Field bits the shadow keeps (a group left out is read by
+// its getter at every Record and its Note calls are ignored)
+void Configure(bool on, int verifyEvery, uint32_t groups = (1u << kFieldN) - 1u);
+bool Configured();                               // on and not disabled for the session (repeated verify mismatches)
+int  VerifyEvery();
+uint32_t Groups();                               // the Field bits the shadow keeps (Configure)
+void NoteIlSlow(void* ctx, ID3D11InputLayout* il);
+void NoteVbSlow(void* ctx, UINT start, UINT num, ID3D11Buffer* const* b, const UINT* strides, const UINT* offs);
+void NoteIbSlow(void* ctx, ID3D11Buffer* b, DXGI_FORMAT fmt, UINT off);
+void NoteVsSlow(void* ctx, ID3D11VertexShader* vs);
+// legacy = VSSetConstantBuffers (no first / count: the runtime reports 0 / 4096)
+void NoteCbSlow(void* ctx, UINT start, UINT num, ID3D11Buffer* const* b, const UINT* first, const UINT* count, bool legacy);
+void NoteSmpSlow(void* ctx, UINT start, UINT num, ID3D11SamplerState* const* s);
+void NoteRsSlow(void* ctx, ID3D11RasterizerState* rs);
+void InvalidateSlow(void* ctx, int why);         // ClearState / ExecuteCommandList / SwapDeviceContextState (why = Kill)
+inline void NoteIl(void* c, ID3D11InputLayout* il) { if (g_armed.load(std::memory_order_relaxed)) NoteIlSlow(c, il); }
+inline void NoteVb(void* c, UINT s, UINT n, ID3D11Buffer* const* b, const UINT* st, const UINT* of) {
+    if (g_armed.load(std::memory_order_relaxed)) NoteVbSlow(c, s, n, b, st, of);
+}
+inline void NoteIb(void* c, ID3D11Buffer* b, DXGI_FORMAT f, UINT o) { if (g_armed.load(std::memory_order_relaxed)) NoteIbSlow(c, b, f, o); }
+inline void NoteVs(void* c, ID3D11VertexShader* vs) { if (g_armed.load(std::memory_order_relaxed)) NoteVsSlow(c, vs); }
+inline void NoteCb(void* c, UINT s, UINT n, ID3D11Buffer* const* b, const UINT* f, const UINT* k, bool legacy) {
+    if (g_armed.load(std::memory_order_relaxed)) NoteCbSlow(c, s, n, b, f, k, legacy);
+}
+inline void NoteSmp(void* c, UINT s, UINT n, ID3D11SamplerState* const* p) { if (g_armed.load(std::memory_order_relaxed)) NoteSmpSlow(c, s, n, p); }
+inline void NoteRs(void* c, ID3D11RasterizerState* rs) { if (g_armed.load(std::memory_order_relaxed)) NoteRsSlow(c, rs); }
+inline void Invalidate(void* c, int why) { if (g_armed.load(std::memory_order_relaxed)) InvalidateSlow(c, why); }
+// The context the game calls the hooks with when it differs from the one Record is given (inject.cpp: the game's
+// ID3D11DeviceContext next to its QueryInterface'd ID3D11DeviceContext1; normally the same address).
+void SetAlias(void* ctx);
+// HOOK LIVENESS: the D3D11 immediate context keeps a per-object, WRITABLE vtable that the runtime rewrites (measured: WARP's
+// SwapDeviceContextState put the original entry back over a patched one). Every Record compares the tracked context's entries
+// at `idx` with `expect` (inject.cpp: the function bodies MinHook detoured; the harness: its patch functions); any difference =
+// a Set could bypass the hooks -> the shadow is dropped and that Record reads the getters (counted, logged).
+void SetHookTargets(const int* idx, void* const* expect, int n);
+void Drop(int why);                              // pass boundary: the owner thread releases now, another thread only marks it
+void FrameStart();                               // any thread: dropped at the next use + the verify fallback of the frame ends
+void Shutdown();                                 // the owner (harness / device change on the render thread): release everything
+struct Stats {
+    uint64_t recShadow = 0, recGet = 0;          // records filled from the shadow / entirely through the getters (fallback)
+    uint64_t hazGet[kFieldN] = {};               // vb / ib / cb read through the getter: a bound buffer is output-capable
+    uint64_t groupSeed[kFieldN] = {};            // a group re-read into the shadow after an unusual call (not a full reseed)
+    uint64_t reseeds = 0, kills[kKillN] = {};    // full reseeds (every group re-read) / drops by reason
+    uint64_t verified = 0, mismatchRecs = 0, mismatch[kFieldN] = {};
+    uint64_t fallbackFrames = 0, refsTaken = 0, refsSkipped = 0;   // record AddRefs taken / avoided (same as the previous draw)
+    uint64_t notes = 0;                          // Set calls applied to the shadow
+    uint64_t vtMiss = 0;                         // records that found a hooked vtable entry changed (getters used)
+    bool     disabled = false;
+};
+void TakeStats(Stats* out);                      // the window since the last call (+ restarts it)
+}
 
 class DrawIdRecord {
 public:
@@ -177,6 +255,9 @@ public:
     bool Record(ID3D11DeviceContext1* ctx, UINT indexCount, UINT instanceCount, UINT startIndex, INT baseVertex,
                 UINT startInstance, bool instanced);
     int  Count() const { return m_n; }
+    // HARNESS ONLY (phase 35): what a Record would take from DidShadow right now, compared with the getters -- the DidShadow::Field
+    // bits that differ (0 = exact). Arms / re-reads the shadow exactly like a Record; counts nothing, logs nothing.
+    static uint32_t ShadowCheck(ID3D11DeviceContext1* ctx);
     int  PendingReplay() const { return m_n - m_replayedTo; }
     // hkMap (WRITE_DISCARD): true when a draw that still waits for its replay reads `res` (VS cbuffer, VB, IB or a VS SRV's
     // resource) -- the caller replays first (the discard would hand the replay new contents)
@@ -313,13 +394,19 @@ private:
                                                  // depthDss != null = the forward-depth batch (ReplayDepth)
     struct PsState;                              // v0.10.0 phase 10: per-draw pixel-shader state (draw_ids.cpp)
     void ReleasePs(int from, int to);
+    struct State;                                // per-draw captured state (draw_ids.cpp)
+    // phase 35: fills the IA / VS / RS part of `s` from DidShadow (+ the always-read fields); false = not available (the caller
+    // reads everything through the getters). prev = the record's previous unreleased draw (null: none)
+    // testBits (the harness' ShadowCheck): compare with the getters, return the mismatching DidShadow::Field bits there
+    static bool CaptureShadow(ID3D11DeviceContext1* ctx, State& s, const State* prev, uint32_t* testBits = nullptr);
+    static void CaptureGet(ID3D11DeviceContext1* ctx, State& s);   // the pre-phase-35 getters (every ref owned)
+    static void ReleaseState(State& s);          // phase 35: the owned refs of one captured state (+ zeroes it)
     struct Ring {
         ID3D11Buffer* buf;                       // ref held between the slot's first use and Reset
         UINT bytes, base, lo, hi;                // [lo, hi) still to copy
         int  draws;
         bool sealed;
     };
-    struct State;                                // per-draw captured state (draw_ids.cpp)
     struct Key { uint64_t full, loose; UINT off; uint8_t flags; float vpMin, vpMax; UINT ic, cbFirst, cbNum;   // v0.10.0 phase 4: + ic / cb0 (dump)
                  uint64_t shape;                 // v0.10.0 phase 8: ShapeKey
                  UINT jit, inst;                 // v0.10.0 phase 14 round 4: VpJitterPacked, InstanceCount
@@ -336,7 +423,8 @@ private:
     UINT AddRing(ID3D11Buffer* cb, UINT rowBase, UINT wantBytes, UINT* rows);
     bool FlushRing(ID3D11DeviceContext* ctx, int k);
     bool EnsureMirror(ID3D11DeviceContext* ctx, UINT need);
-    void ReleaseRange(int from, int to);
+    void ReleaseRange(int from, int to);         // phase 35: releases owned refs only; draw `to` (< m_n) is made to own first
+    void OwnAll(int i);                          // phase 35: draw i AddRefs every pointer it does not own yet
     void NoteRes(const void* p);                 // pending-resource set (hkMap check)
     State*   m_st = nullptr;                     // kMax entries, allocated on first Record
     Key*     m_key = nullptr;

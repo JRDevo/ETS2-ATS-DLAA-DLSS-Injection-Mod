@@ -2438,7 +2438,16 @@ struct DrawIdRecord::State {
     UINT ic, inst, si, sinst;
     INT  bv;
     bool instanced;
+    uint32_t own;                                // phase 35: the pointers this draw holds a reference on (kO* bits)
 };
+
+// phase 35: State::own bits, one per captured pointer slot
+namespace {
+constexpr uint32_t kOIl = 1u << 0, kOVb0 = 1u << 1, kOIb = 1u << 5, kOVs = 1u << 6, kOCb0 = 1u << 7, kOSrv0 = 1u << 11,
+                   kOSmp0 = 1u << 19, kORs = 1u << 21, kOwnAll = (1u << 22) - 1u;
+static_assert(DrawIdRecord::kVb == 4 && DrawIdRecord::kVsCb == 4 && DrawIdRecord::kVsSrv == 8 && DrawIdRecord::kVsSmp == 2,
+              "phase 35 own bits assume 4 VB / 4 cbuffer / 8 SRV / 2 sampler slots");
+}
 
 // v0.10.0 phase 10: the pixel-shader state of a forward draw (SetCapturePs), for the batched forward-depth re-draw
 struct DrawIdRecord::PsState {
@@ -2469,21 +2478,53 @@ DrawIdRecord::~DrawIdRecord() {
     delete[] m_ps; m_ps = nullptr;                       // v0.10.0 phase 10
 }
 
+// phase 35: a draw recorded from the shadow does not hold a reference on a pointer its previous draw (same record) already
+// names -- that draw (or the chain of equal pointers before it) holds it. Every release is a prefix [m_releasedTo, to): before
+// it, draw `to` takes a reference on everything it names, so the draws after it never depend on a released one.
+void DrawIdRecord::OwnAll(int i) {
+    if (!m_st || i < 0 || i >= m_n) return;
+    State& s = m_st[i];
+    const uint32_t miss = kOwnAll & ~s.own;
+    if (!miss) return;
+    auto take = [&](IUnknown* p, uint32_t bit) { if (p && (miss & bit)) { p->AddRef(); s.own |= bit; } };
+    take(s.il, kOIl);
+    for (int t = 0; t < kVb; ++t) take(s.vb[t], kOVb0 << t);
+    take(s.ib, kOIb);
+    take(s.vs, kOVs);
+    for (int t = 0; t < kVsCb; ++t) take(s.cb[t], kOCb0 << t);
+    for (int t = 0; t < kVsSrv; ++t) take(s.srv[t], kOSrv0 << t);
+    for (int t = 0; t < kVsSmp; ++t) take(s.smp[t], kOSmp0 << t);
+    take(s.rs, kORs);
+}
+
 void DrawIdRecord::ReleaseRange(int from, int to) {
     if (!m_st) return;
-    for (int i = from; i < to; ++i) {
-        State& s = m_st[i];
-        if (s.il) s.il->Release();
-        for (auto* p : s.vb) if (p) p->Release();
-        if (s.ib) s.ib->Release();
-        if (s.vs) s.vs->Release();
-        for (auto* p : s.cb) if (p) p->Release();
-        for (auto* p : s.srv) if (p) p->Release();
-        for (auto* p : s.smp) if (p) p->Release();
-        if (s.rs) s.rs->Release();
-        memset(&s, 0, sizeof(s));
-    }
+    if (from < to && to < m_n) OwnAll(to);               // phase 35: before the release (see OwnAll)
+    for (int i = from; i < to; ++i) ReleaseState(m_st[i]);
     ReleasePs(from, to);                                 // v0.10.0 phase 10
+}
+
+void DrawIdRecord::ReleaseState(State& s) {
+    const uint32_t o = s.own;
+    auto rel = [o](IUnknown* p, uint32_t bit) { if (p && (o & bit)) p->Release(); };
+    rel(s.il, kOIl);
+    for (int t = 0; t < kVb; ++t) rel(s.vb[t], kOVb0 << t);
+    rel(s.ib, kOIb);
+    rel(s.vs, kOVs);
+    for (int t = 0; t < kVsCb; ++t) rel(s.cb[t], kOCb0 << t);
+    for (int t = 0; t < kVsSrv; ++t) rel(s.srv[t], kOSrv0 << t);
+    for (int t = 0; t < kVsSmp; ++t) rel(s.smp[t], kOSmp0 << t);
+    rel(s.rs, kORs);
+    memset(&s, 0, sizeof(s));
+}
+
+uint32_t DrawIdRecord::ShadowCheck(ID3D11DeviceContext1* ctx) {
+    if (!ctx || !DidShadow::Configured()) return 0;
+    State s;
+    memset(&s, 0, sizeof(s));
+    uint32_t bits = 0;
+    if (CaptureShadow(ctx, s, nullptr, &bits)) ReleaseState(s);
+    return bits;
 }
 
 void DrawIdRecord::Reset() {
@@ -2642,16 +2683,235 @@ bool DrawIdRecord::OnDiscard(ID3D11DeviceContext* ctx, ID3D11Resource* res) {
     return false;
 }
 
-bool DrawIdRecord::Record(ID3D11DeviceContext1* ctx, UINT ic, UINT inst, UINT si, INT bv, UINT sinst, bool instanced) {
-    if (!ctx) return false;
-    if (m_n >= kMax) { ++m_full; return false; }
-    if (!m_st) {
-        m_st = new (std::nothrow) State[kMax];
-        m_key = new (std::nothrow) Key[kMax];
-        if (!m_st || !m_key) { delete[] m_st; delete[] m_key; m_st = nullptr; m_key = nullptr; ++m_full; return false; }
-        memset(m_st, 0, sizeof(State) * kMax);
+// =====================================================================================================================
+// phase 35: DidShadow -- the shadowed IA / VS / RS input state (see draw_ids.h, 13.)
+// =====================================================================================================================
+namespace DidShadow {
+namespace {
+constexpr int kVbN = DrawIdRecord::kVb, kCbN = DrawIdRecord::kVsCb, kSmpN = DrawIdRecord::kVsSmp;
+// a buffer with one of these can be bound as an OUTPUT -- the only kind the runtime's hazard tracking ever unbinds from an input
+// slot (measured on the RTX 5090 runtime: a raw VB / IB bound as a CS UAV reads back null, stride / offset 0; WARP does not)
+constexpr UINT kOutBind = D3D11_BIND_STREAM_OUTPUT | D3D11_BIND_RENDER_TARGET | D3D11_BIND_DEPTH_STENCIL |
+                          D3D11_BIND_UNORDERED_ACCESS;
+struct Sh {
+    uint32_t valid;                              // Field bits: the group is known exactly
+    uint32_t hazVb, hazCb;                       // slot bits: the bound buffer is output-capable (the group is read by the getter)
+    bool     hazIb;
+    ID3D11InputLayout* il;
+    ID3D11Buffer* vb[kVbN]; UINT vbStride[kVbN], vbOff[kVbN];
+    ID3D11Buffer* ib; DXGI_FORMAT ibFmt; UINT ibOff;
+    ID3D11VertexShader* vs;
+    ID3D11Buffer* cb[kCbN]; UINT cbFirst[kCbN], cbNum[kCbN];
+    ID3D11SamplerState* smp[kSmpN];
+    ID3D11RasterizerState* rs;
+};
+Sh                    s_h = {};                  // the owner thread only (every pointer in it carries one reference of ours)
+std::atomic<void*>    s_ctx{nullptr}, s_alias{nullptr};
+std::atomic<uint32_t> s_tid{0};
+std::atomic<bool>     s_kill{false};             // dropped: the next Record releases + re-reads (any thread sets it)
+std::atomic<bool>     s_fallback{false};         // a verify mismatch this frame: the getters until FrameStart
+std::atomic<bool>     s_disabled{false};         // 8 frames with mismatches: the getters for the rest of the session
+std::atomic<uint64_t> s_kills[kKillN];
+std::atomic<uint64_t> s_fallbackFrames{0};
+std::atomic<bool> s_on{false};                  // Configure (the setup thread) -> every Record (release / acquire)
+int      s_verifyEvery = 0;
+uint32_t s_groups = (1u << kFieldN) - 1u;        // Field bits the shadow keeps (the rest: always the getters, Notes ignored)
+uint64_t s_verifyCtr = 0, s_recSerial = 0;
+int      s_mismatchLogs = 0;
+int      s_badFrames = 0;                        // (FrameStart's thread)
+int      s_vtN = 0;                              // hook liveness (SetHookTargets)
+int      s_vtIdx[16] = {};
+void*    s_vtExp[16] = {};
+int      s_vtLogs = 0;
+Stats    s_st;                                   // the owner thread's counters (TakeStats reads them on the same thread)
+
+inline uint32_t Tid() { return (uint32_t)__readgsdword(0x48); }   // TEB ClientId.UniqueThread (x64) = GetCurrentThreadId
+inline bool OutCap(ID3D11Buffer* b) {
+    if (!b) return false;
+    D3D11_BUFFER_DESC d{};
+    b->GetDesc(&d);
+    return (d.BindFlags & kOutBind) != 0;
+}
+template <class T> inline bool Put(T*& slot, T* p) {   // our reference moves to p; true = another object
+    if (slot == p) return false;
+    if (p) p->AddRef();
+    if (slot) slot->Release();
+    slot = p;
+    return true;
+}
+template <class T> inline void Adopt(T*& slot, T* p) {   // p already carries a reference (a getter's)
+    if (slot) slot->Release();
+    slot = p;
+}
+void ReleaseAll() {
+    Sh& h = s_h;
+    if (h.il) h.il->Release();
+    for (auto* p : h.vb) if (p) p->Release();
+    if (h.ib) h.ib->Release();
+    if (h.vs) h.vs->Release();
+    for (auto* p : h.cb) if (p) p->Release();
+    for (auto* p : h.smp) if (p) p->Release();
+    if (h.rs) h.rs->Release();
+    memset(&h, 0, sizeof(h));
+}
+inline void KillNow(int why) {
+    g_armed.store(false, std::memory_order_relaxed);   // the hooks go idle; the owner's next Record drops + re-reads
+    s_kill.store(true, std::memory_order_relaxed);
+    s_kills[why].fetch_add(1, std::memory_order_relaxed);
+}
+// The call was made on the tracked context by the owner thread and the shadow is live: apply it. Another thread: drop.
+inline bool Mine(void* ctx) {
+    if (!ctx || (ctx != s_ctx.load(std::memory_order_relaxed) && ctx != s_alias.load(std::memory_order_relaxed))) return false;
+    if (Tid() != s_tid.load(std::memory_order_relaxed)) { KillNow(kKThread); return false; }
+    return !s_kill.load(std::memory_order_relaxed);
+}
+inline void Unknown(int f) { s_h.valid &= ~(1u << f); }   // an unusual call: the group is re-read at the next Record
+} // namespace
+
+const char* FieldName(int f) {
+    static const char* const kN[kFieldN] = { "il", "vb", "ib", "vs", "cb", "smp", "rs" };
+    return f >= 0 && f < kFieldN ? kN[f] : "?";
+}
+void Configure(bool on, int verifyEvery, uint32_t groups) {
+    s_verifyEvery = verifyEvery < 0 ? 0 : verifyEvery;
+    s_groups = groups & ((1u << kFieldN) - 1u);
+    s_on.store(on, std::memory_order_release);           // (after the hook targets and the verify period)
+}
+bool Configured() { return s_on.load(std::memory_order_acquire) && !s_disabled.load(std::memory_order_relaxed); }
+int  VerifyEvery() { return s_verifyEvery; }
+uint32_t Groups() { return s_groups; }
+void SetAlias(void* ctx) { s_alias.store(ctx, std::memory_order_relaxed); }
+void SetHookTargets(const int* idx, void* const* expect, int n) {
+    s_vtN = 0;
+    for (int i = 0; i < n && i < 16; ++i) { s_vtIdx[i] = idx[i]; s_vtExp[i] = expect[i]; s_vtN = i + 1; }
+}
+
+void NoteIlSlow(void* ctx, ID3D11InputLayout* il) {
+    if (!(s_groups & (1u << kFIl))) return;
+    if (!Mine(ctx)) return;
+    ++s_st.notes;
+    Put(s_h.il, il);
+    s_h.valid |= 1u << kFIl;
+}
+void NoteVbSlow(void* ctx, UINT start, UINT num, ID3D11Buffer* const* b, const UINT* strides, const UINT* offs) {
+    if (!(s_groups & (1u << kFVb))) return;
+    if (!Mine(ctx) || num == 0) return;                  // (num 0: the runtime changes nothing)
+    if (start >= D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT || num > D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT - start || !b ||
+        !strides || !offs) { Unknown(kFVb); return; }    // (the runtime drops a call past slot 31)
+    ++s_st.notes;
+    Sh& h = s_h;
+    for (UINT j = 0; j < num && start + j < (UINT)kVbN; ++j) {
+        const UINT i = start + j;
+        if (Put(h.vb[i], b[j])) { if (OutCap(b[j])) h.hazVb |= 1u << i; else h.hazVb &= ~(1u << i); }
+        h.vbStride[i] = strides[j];                      // kept as given, also for a null buffer (what the getter returns)
+        h.vbOff[i] = offs[j];
     }
-    State& s = m_st[m_n];
+    if (start == 0 && num >= (UINT)kVbN) h.valid |= 1u << kFVb;   // (a partial call keeps an unknown group unknown)
+}
+void NoteIbSlow(void* ctx, ID3D11Buffer* b, DXGI_FORMAT fmt, UINT off) {
+    if (!(s_groups & (1u << kFIb))) return;
+    if (!Mine(ctx)) return;
+    ++s_st.notes;
+    Sh& h = s_h;
+    if (Put(h.ib, b)) h.hazIb = OutCap(b);
+    h.ibFmt = fmt;                                       // kept as given (null buffer / any format: what the getter returns)
+    h.ibOff = off;
+    h.valid |= 1u << kFIb;
+}
+void NoteVsSlow(void* ctx, ID3D11VertexShader* vs) {
+    if (!(s_groups & (1u << kFVs))) return;
+    if (!Mine(ctx)) return;
+    ++s_st.notes;
+    Put(s_h.vs, vs);
+    s_h.valid |= 1u << kFVs;
+}
+void NoteCbSlow(void* ctx, UINT start, UINT num, ID3D11Buffer* const* b, const UINT* first, const UINT* count, bool legacy) {
+    if (!(s_groups & (1u << kFCb))) return;
+    if (!Mine(ctx) || num == 0) return;
+    if (start >= D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT ||
+        num > D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT - start || !b ||
+        (!legacy && ((first == nullptr) != (count == nullptr)))) { Unknown(kFCb); return; }
+    // the runtime reports a null slot, a legacy bind and null first / count arrays as 0 / 4096; it NORMALISES a window whose
+    // first or count is not a multiple of 16 or whose count exceeds 4096 (measured) -- such a call is left to the getter
+    if (!legacy && first)
+        for (UINT j = 0; j < num; ++j)
+            if (b[j] && ((first[j] & 15u) || (count[j] & 15u) || count[j] > 4096u)) { Unknown(kFCb); return; }
+    ++s_st.notes;
+    Sh& h = s_h;
+    for (UINT j = 0; j < num && start + j < (UINT)kCbN; ++j) {
+        const UINT i = start + j;
+        ID3D11Buffer* p = b[j];
+        if (Put(h.cb[i], p)) { if (OutCap(p)) h.hazCb |= 1u << i; else h.hazCb &= ~(1u << i); }
+        const bool win = p && !legacy && first;
+        h.cbFirst[i] = win ? first[j] : 0u;
+        h.cbNum[i] = win ? count[j] : 4096u;
+    }
+    if (start == 0 && num >= (UINT)kCbN) h.valid |= 1u << kFCb;
+}
+void NoteSmpSlow(void* ctx, UINT start, UINT num, ID3D11SamplerState* const* s) {
+    if (!(s_groups & (1u << kFSmp))) return;
+    if (!Mine(ctx) || num == 0) return;
+    if (start >= D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT || num > D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT - start || !s) {
+        Unknown(kFSmp); return;
+    }
+    ++s_st.notes;
+    for (UINT j = 0; j < num && start + j < (UINT)kSmpN; ++j) Put(s_h.smp[start + j], s[j]);
+    if (start == 0 && num >= (UINT)kSmpN) s_h.valid |= 1u << kFSmp;
+}
+void NoteRsSlow(void* ctx, ID3D11RasterizerState* rs) {
+    if (!(s_groups & (1u << kFRs))) return;
+    if (!Mine(ctx)) return;
+    ++s_st.notes;
+    Put(s_h.rs, rs);
+    s_h.valid |= 1u << kFRs;
+}
+void InvalidateSlow(void* ctx, int why) {
+    if (ctx && (ctx == s_ctx.load(std::memory_order_relaxed) || ctx == s_alias.load(std::memory_order_relaxed)))
+        KillNow(why >= 0 && why < kKillN ? why : kKOther);
+}
+void Drop(int why) {
+    if (!s_on.load(std::memory_order_relaxed)) return;
+    const bool was = g_armed.exchange(false, std::memory_order_relaxed);
+    if (Tid() == s_tid.load(std::memory_order_relaxed)) ReleaseAll();     // the next Record re-reads (not armed)
+    else if (was) s_kill.store(true, std::memory_order_relaxed);
+    if (was) s_kills[why >= 0 && why < kKillN ? why : kKOther].fetch_add(1, std::memory_order_relaxed);
+}
+void FrameStart() {
+    if (!s_on.load(std::memory_order_relaxed)) return;
+    if (g_armed.exchange(false, std::memory_order_relaxed)) {
+        s_kill.store(true, std::memory_order_relaxed);
+        s_kills[kKFrame].fetch_add(1, std::memory_order_relaxed);
+    }
+    if (s_fallback.exchange(false, std::memory_order_relaxed)) {
+        s_fallbackFrames.fetch_add(1, std::memory_order_relaxed);
+        if (++s_badFrames >= 8 && !s_disabled.load(std::memory_order_relaxed)) {
+            s_disabled.store(true, std::memory_order_relaxed);
+            Log("MV draw-ids shadow: verify mismatches in %d frames -- did_shadow is OFF for the rest of the session (the getters "
+                "read every draw's state, as with did_shadow = 0)", s_badFrames);
+        }
+    }
+}
+void Shutdown() {
+    g_armed.store(false, std::memory_order_relaxed);
+    ReleaseAll();
+    s_ctx.store(nullptr, std::memory_order_relaxed);
+    s_alias.store(nullptr, std::memory_order_relaxed);
+    s_tid.store(0, std::memory_order_relaxed);
+    s_kill.store(false, std::memory_order_relaxed);
+    s_fallback.store(false, std::memory_order_relaxed);
+}
+void TakeStats(Stats* out) {
+    if (!out) return;
+    *out = s_st;
+    s_st = Stats{};
+    for (int k = 0; k < kKillN; ++k) out->kills[k] = s_kills[k].exchange(0, std::memory_order_relaxed);
+    out->fallbackFrames = s_fallbackFrames.exchange(0, std::memory_order_relaxed);
+    out->disabled = s_disabled.load(std::memory_order_relaxed);
+}
+} // namespace DidShadow
+
+// The pre-phase-35 capture: every field through its getter (each pointer AddRef'd by the getter = owned).
+void DrawIdRecord::CaptureGet(ID3D11DeviceContext1* ctx, State& s) {
     ctx->IAGetInputLayout(&s.il);
     ctx->IAGetVertexBuffers(0, kVb, s.vb, s.vbStride, s.vbOff);
     ctx->IAGetIndexBuffer(&s.ib, &s.ibFmt, &s.ibOff);
@@ -2675,6 +2935,264 @@ bool DrawIdRecord::Record(ID3D11DeviceContext1* ctx, UINT ic, UINT inst, UINT si
         s.nSc = ns;
         memcpy(s.sc, scs, sizeof(D3D11_RECT) * ns);
     }
+    s.own = kOwnAll;
+}
+
+bool DrawIdRecord::CaptureShadow(ID3D11DeviceContext1* ctx, State& s, const State* prev, uint32_t* testBits) {
+    using namespace DidShadow;
+    if (s_fallback.load(std::memory_order_relaxed)) { if (!testBits) ++s_st.recGet; return false; }
+    // hook liveness: every hooked entry of this context's (writable) vtable must still be the one the hooks sit on
+    if (s_vtN) {
+        void* const* vt = *reinterpret_cast<void* const* const*>(ctx);
+        for (int i = 0; i < s_vtN; ++i)
+            if (vt[s_vtIdx[i]] != s_vtExp[i]) {
+                if (g_armed.load(std::memory_order_relaxed)) KillNow(kKVtable);
+                if (!testBits) {
+                    ++s_st.vtMiss;
+                    ++s_st.recGet;
+                    if (s_vtLogs < 5) {
+                        ++s_vtLogs;
+                        Log("MV draw-ids shadow: the context's vtable entry %d is %p, not the hooked %p (%d/5) -- a Set could bypass "
+                            "the hooks: this draw's state is read through the getters", s_vtIdx[i], vt[s_vtIdx[i]], s_vtExp[i],
+                            s_vtLogs);
+                    }
+                }
+                return false;
+            }
+    }
+    Sh& h = s_h;
+    void* const id = static_cast<ID3D11DeviceContext*>(ctx);
+    const uint32_t tid = Tid();
+    // ---- drop + re-arm: dropped (kill), not armed (pass / frame start, draw-ids switched on), another context or thread ----
+    if (s_kill.load(std::memory_order_relaxed) || !g_armed.load(std::memory_order_relaxed) ||
+        s_ctx.load(std::memory_order_relaxed) != id || s_tid.load(std::memory_order_relaxed) != tid) {
+        void* const was = s_ctx.load(std::memory_order_relaxed);
+        if (was && was != id) s_kills[kKCtx].fetch_add(1, std::memory_order_relaxed);
+        ReleaseAll();                                    // (valid = 0: every group is re-read below)
+        s_ctx.store(id, std::memory_order_relaxed);
+        s_tid.store(tid, std::memory_order_relaxed);
+        s_kill.store(false, std::memory_order_relaxed);
+        g_armed.store(true, std::memory_order_relaxed);
+        ++s_st.reseeds;
+    }
+    // ---- unknown groups: read into the shadow (the getter's reference becomes the shadow's) ----
+    if ((h.valid & s_groups) != s_groups) {
+        const bool full = h.valid == 0;
+        auto seeded = [&](int f) { h.valid |= 1u << f; if (!full) ++s_st.groupSeed[f]; };
+        if ((s_groups & (1u << kFIl)) && !(h.valid & (1u << kFIl))) { ID3D11InputLayout* p = nullptr; ctx->IAGetInputLayout(&p); Adopt(h.il, p); seeded(kFIl); }
+        if ((s_groups & (1u << kFVb)) && !(h.valid & (1u << kFVb))) {
+            ID3D11Buffer* p[kVbN] = {};
+            ctx->IAGetVertexBuffers(0, kVbN, p, h.vbStride, h.vbOff);
+            h.hazVb = 0;
+            for (int t = 0; t < kVbN; ++t) { Adopt(h.vb[t], p[t]); if (OutCap(p[t])) h.hazVb |= 1u << t; }
+            seeded(kFVb);
+        }
+        if ((s_groups & (1u << kFIb)) && !(h.valid & (1u << kFIb))) {
+            ID3D11Buffer* p = nullptr;
+            ctx->IAGetIndexBuffer(&p, &h.ibFmt, &h.ibOff);
+            Adopt(h.ib, p);
+            h.hazIb = OutCap(p);
+            seeded(kFIb);
+        }
+        if ((s_groups & (1u << kFVs)) && !(h.valid & (1u << kFVs))) { ID3D11VertexShader* p = nullptr; ctx->VSGetShader(&p, nullptr, nullptr); Adopt(h.vs, p); seeded(kFVs); }
+        if ((s_groups & (1u << kFCb)) && !(h.valid & (1u << kFCb))) {
+            ID3D11Buffer* p[kCbN] = {};
+            ctx->VSGetConstantBuffers1(0, kCbN, p, h.cbFirst, h.cbNum);
+            h.hazCb = 0;
+            for (int t = 0; t < kCbN; ++t) { Adopt(h.cb[t], p[t]); if (OutCap(p[t])) h.hazCb |= 1u << t; }
+            seeded(kFCb);
+        }
+        if ((s_groups & (1u << kFSmp)) && !(h.valid & (1u << kFSmp))) {
+            ID3D11SamplerState* p[kSmpN] = {};
+            ctx->VSGetSamplers(0, kSmpN, p);
+            for (int t = 0; t < kSmpN; ++t) Adopt(h.smp[t], p[t]);
+            seeded(kFSmp);
+        }
+        if ((s_groups & (1u << kFRs)) && !(h.valid & (1u << kFRs))) { ID3D11RasterizerState* p = nullptr; ctx->RSGetState(&p); Adopt(h.rs, p); seeded(kFRs); }
+    }
+    // ---- always through the getters (owned): topology (1 ns), VS SRVs (hazard-prone), viewports + scissors (no refs) ----
+    uint32_t own = 0, fromSh = 0;
+    ctx->IAGetPrimitiveTopology(&s.topo);
+    ctx->VSGetShaderResources(0, kVsSrv, s.srv);
+    for (int t = 0; t < kVsSrv; ++t) if (s.srv[t]) own |= kOSrv0 << t;
+    {
+        D3D11_VIEWPORT vps[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
+        UINT nv = D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
+        ctx->RSGetViewports(&nv, vps);
+        if (nv > (UINT)kVp) nv = kVp;
+        s.nVp = nv;
+        memcpy(s.vp, vps, sizeof(D3D11_VIEWPORT) * nv);
+        D3D11_RECT scs[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
+        UINT ns = D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
+        ctx->RSGetScissorRects(&ns, scs);
+        if (ns > (UINT)kSc) ns = kSc;
+        s.nSc = ns;
+        memcpy(s.sc, scs, sizeof(D3D11_RECT) * ns);
+    }
+    // ---- the shadowed groups (a group naming an output-capable buffer is read by its getter: the hazard tracking may have
+    // unbound it) ----
+    constexpr uint32_t kVbBits = 0xFu * kOVb0, kCbBits = 0xFu * kOCb0, kSmpBits = 0x3u * kOSmp0;
+    const uint32_t gk = s_groups;
+    if (gk & (1u << kFIl)) { s.il = h.il; fromSh |= kOIl; }
+    else { ctx->IAGetInputLayout(&s.il); if (s.il) own |= kOIl; }
+    if (h.hazVb || !(gk & (1u << kFVb))) {
+        ctx->IAGetVertexBuffers(0, kVb, s.vb, s.vbStride, s.vbOff);
+        for (int t = 0; t < kVb; ++t) if (s.vb[t]) own |= kOVb0 << t;
+        if (h.hazVb) ++s_st.hazGet[kFVb];
+    } else {
+        memcpy(s.vb, h.vb, sizeof(s.vb)); memcpy(s.vbStride, h.vbStride, sizeof(s.vbStride)); memcpy(s.vbOff, h.vbOff, sizeof(s.vbOff));
+        fromSh |= kVbBits;
+    }
+    if (h.hazIb || !(gk & (1u << kFIb))) {
+        ctx->IAGetIndexBuffer(&s.ib, &s.ibFmt, &s.ibOff);
+        if (s.ib) own |= kOIb;
+        if (h.hazIb) ++s_st.hazGet[kFIb];
+    } else {
+        s.ib = h.ib; s.ibFmt = h.ibFmt; s.ibOff = h.ibOff;
+        fromSh |= kOIb;
+    }
+    if (gk & (1u << kFVs)) { s.vs = h.vs; fromSh |= kOVs; }
+    else { ctx->VSGetShader(&s.vs, nullptr, nullptr); if (s.vs) own |= kOVs; }
+    if (h.hazCb || !(gk & (1u << kFCb))) {
+        ctx->VSGetConstantBuffers1(0, kVsCb, s.cb, s.cbFirst, s.cbNum);
+        for (int t = 0; t < kVsCb; ++t) if (s.cb[t]) own |= kOCb0 << t;
+        if (h.hazCb) ++s_st.hazGet[kFCb];
+    } else {
+        memcpy(s.cb, h.cb, sizeof(s.cb)); memcpy(s.cbFirst, h.cbFirst, sizeof(s.cbFirst)); memcpy(s.cbNum, h.cbNum, sizeof(s.cbNum));
+        fromSh |= kCbBits;
+    }
+    if (gk & (1u << kFSmp)) { memcpy(s.smp, h.smp, sizeof(s.smp)); fromSh |= kSmpBits; }
+    else { ctx->VSGetSamplers(0, kVsSmp, s.smp); for (int t = 0; t < kVsSmp; ++t) if (s.smp[t]) own |= kOSmp0 << t; }
+    if (gk & (1u << kFRs)) { s.rs = h.rs; fromSh |= kORs; }
+    else { ctx->RSGetState(&s.rs); if (s.rs) own |= kORs; }
+    if (!testBits) ++s_recSerial;
+    // ---- verify (did_shadow_verify = N): every Nth record also reads the shadowed groups through the getters ----
+    // (testBits, the harness' ShadowCheck: every call, the mismatching fields returned, nothing counted / logged / switched)
+    if (testBits || (s_verifyEvery > 0 && ++s_verifyCtr >= (uint64_t)s_verifyEvery)) {
+        if (!testBits) { s_verifyCtr = 0; ++s_st.verified; }
+        State g;
+        memset(&g, 0, sizeof(g));
+        if (fromSh & kOIl) ctx->IAGetInputLayout(&g.il);
+        if (fromSh & kVbBits) ctx->IAGetVertexBuffers(0, kVb, g.vb, g.vbStride, g.vbOff);
+        if (fromSh & kOIb) ctx->IAGetIndexBuffer(&g.ib, &g.ibFmt, &g.ibOff);
+        if (fromSh & kOVs) ctx->VSGetShader(&g.vs, nullptr, nullptr);
+        if (fromSh & kCbBits) ctx->VSGetConstantBuffers1(0, kVsCb, g.cb, g.cbFirst, g.cbNum);
+        if (fromSh & kSmpBits) ctx->VSGetSamplers(0, kVsSmp, g.smp);
+        if (fromSh & kORs) ctx->RSGetState(&g.rs);
+        char txt[700];
+        int len = 0;
+        uint32_t bad = 0;
+        txt[0] = 0;
+#define DID_SH_NOTE(f, ...) do {                                                                              \
+            bad |= 1u << (f);                                                                                 \
+            if (s_mismatchLogs < 20 && len >= 0 && len < (int)sizeof(txt) - 8) {                              \
+                const int w_ = snprintf(txt + len, sizeof(txt) - (size_t)len, __VA_ARGS__);                  \
+                if (w_ > 0) len += w_ < (int)sizeof(txt) - len ? w_ : (int)sizeof(txt) - len - 1;             \
+            }                                                                                                 \
+        } while (0)
+        if ((fromSh & kOIl) && g.il != s.il) DID_SH_NOTE(kFIl, " il shadow %p runtime %p;", (void*)s.il, (void*)g.il);
+        if (fromSh & kVbBits)
+            for (int t = 0; t < kVb; ++t)
+                if (g.vb[t] != s.vb[t] || g.vbStride[t] != s.vbStride[t] || g.vbOff[t] != s.vbOff[t])
+                    DID_SH_NOTE(kFVb, " vb%d shadow %p/%u/%u runtime %p/%u/%u;", t, (void*)s.vb[t], s.vbStride[t], s.vbOff[t],
+                         (void*)g.vb[t], g.vbStride[t], g.vbOff[t]);
+        if ((fromSh & kOIb) && (g.ib != s.ib || g.ibFmt != s.ibFmt || g.ibOff != s.ibOff))
+            DID_SH_NOTE(kFIb, " ib shadow %p/%d/%u runtime %p/%d/%u;", (void*)s.ib, (int)s.ibFmt, s.ibOff, (void*)g.ib, (int)g.ibFmt, g.ibOff);
+        if ((fromSh & kOVs) && g.vs != s.vs) DID_SH_NOTE(kFVs, " vs shadow %p runtime %p;", (void*)s.vs, (void*)g.vs);
+        if (fromSh & kCbBits)
+            for (int t = 0; t < kVsCb; ++t)
+                if (g.cb[t] != s.cb[t] || g.cbFirst[t] != s.cbFirst[t] || g.cbNum[t] != s.cbNum[t])
+                    DID_SH_NOTE(kFCb, " cb%d shadow %p/%u/%u runtime %p/%u/%u;", t, (void*)s.cb[t], s.cbFirst[t], s.cbNum[t],
+                         (void*)g.cb[t], g.cbFirst[t], g.cbNum[t]);
+        for (int t = 0; t < kVsSmp && (fromSh & kSmpBits); ++t)
+            if (g.smp[t] != s.smp[t]) DID_SH_NOTE(kFSmp, " smp%d shadow %p runtime %p;", t, (void*)s.smp[t], (void*)g.smp[t]);
+        if ((fromSh & kORs) && g.rs != s.rs) DID_SH_NOTE(kFRs, " rs shadow %p runtime %p;", (void*)s.rs, (void*)g.rs);
+#undef DID_SH_NOTE
+        if (testBits) *testBits = bad;
+        if (bad && testBits) {
+            // (the harness' check: the temporary state takes the runtime's values, like a record would)
+            if (fromSh & kOIl) s.il = g.il;
+            if (fromSh & kOVs) s.vs = g.vs;
+            if (fromSh & kORs) s.rs = g.rs;
+            if (fromSh & kSmpBits) memcpy(s.smp, g.smp, sizeof(s.smp));
+            if (fromSh & kVbBits) {
+                memcpy(s.vb, g.vb, sizeof(s.vb)); memcpy(s.vbStride, g.vbStride, sizeof(s.vbStride)); memcpy(s.vbOff, g.vbOff, sizeof(s.vbOff));
+            }
+            if (fromSh & kOIb) { s.ib = g.ib; s.ibFmt = g.ibFmt; s.ibOff = g.ibOff; }
+            if (fromSh & kCbBits) {
+                memcpy(s.cb, g.cb, sizeof(s.cb)); memcpy(s.cbFirst, g.cbFirst, sizeof(s.cbFirst)); memcpy(s.cbNum, g.cbNum, sizeof(s.cbNum));
+            }
+            own |= fromSh;
+            fromSh = 0;
+        } else if (bad) {
+            ++s_st.mismatchRecs;
+            for (int f = 0; f < kFieldN; ++f) if (bad & (1u << f)) ++s_st.mismatch[f];
+            if (s_mismatchLogs < 20) {
+                ++s_mismatchLogs;
+                Log("MV draw-ids shadow: MISMATCH %d/20 (record #%llu, verify every %d):%s -- this record takes the runtime's state, "
+                    "the getters read every draw for the rest of the frame", s_mismatchLogs, (unsigned long long)s_recSerial,
+                    s_verifyEvery, txt);
+            }
+            // the record keeps the RUNTIME's values of every compared group (g's references move to s)
+            if (fromSh & kOIl) s.il = g.il;
+            if (fromSh & kOVs) s.vs = g.vs;
+            if (fromSh & kORs) s.rs = g.rs;
+            if (fromSh & kSmpBits) memcpy(s.smp, g.smp, sizeof(s.smp));
+            if (fromSh & kVbBits) {
+                memcpy(s.vb, g.vb, sizeof(s.vb)); memcpy(s.vbStride, g.vbStride, sizeof(s.vbStride)); memcpy(s.vbOff, g.vbOff, sizeof(s.vbOff));
+            }
+            if (fromSh & kOIb) { s.ib = g.ib; s.ibFmt = g.ibFmt; s.ibOff = g.ibOff; }
+            if (fromSh & kCbBits) {
+                memcpy(s.cb, g.cb, sizeof(s.cb)); memcpy(s.cbFirst, g.cbFirst, sizeof(s.cbFirst)); memcpy(s.cbNum, g.cbNum, sizeof(s.cbNum));
+            }
+            own |= fromSh;                               // (a null pointer's own bit is never used)
+            fromSh = 0;
+            s_fallback.store(true, std::memory_order_relaxed);
+            KillNow(kKVerify);
+        } else {
+            if (g.il) g.il->Release();
+            for (auto* p : g.vb) if (p) p->Release();
+            if (g.ib) g.ib->Release();
+            if (g.vs) g.vs->Release();
+            for (auto* p : g.cb) if (p) p->Release();
+            for (auto* p : g.smp) if (p) p->Release();
+            if (g.rs) g.rs->Release();
+        }
+    }
+    // ---- references: a shadow pointer the previous draw of this record already names is held through that draw ----
+    if (fromSh) {
+        auto take = [&](IUnknown* p, const IUnknown* pp, uint32_t bit) {
+            if (!(fromSh & bit) || !p) return;
+            if (p == pp) { ++s_st.refsSkipped; return; }
+            p->AddRef();
+            own |= bit;
+            ++s_st.refsTaken;
+        };
+        take(s.il, prev ? prev->il : nullptr, kOIl);
+        for (int t = 0; t < kVb; ++t) take(s.vb[t], prev ? prev->vb[t] : nullptr, kOVb0 << t);
+        take(s.ib, prev ? prev->ib : nullptr, kOIb);
+        take(s.vs, prev ? prev->vs : nullptr, kOVs);
+        for (int t = 0; t < kVsCb; ++t) take(s.cb[t], prev ? prev->cb[t] : nullptr, kOCb0 << t);
+        for (int t = 0; t < kVsSmp; ++t) take(s.smp[t], prev ? prev->smp[t] : nullptr, kOSmp0 << t);
+        take(s.rs, prev ? prev->rs : nullptr, kORs);
+    }
+    s.own = own;
+    if (!testBits) ++s_st.recShadow;
+    return true;
+}
+
+bool DrawIdRecord::Record(ID3D11DeviceContext1* ctx, UINT ic, UINT inst, UINT si, INT bv, UINT sinst, bool instanced) {
+    if (!ctx) return false;
+    if (m_n >= kMax) { ++m_full; return false; }
+    if (!m_st) {
+        m_st = new (std::nothrow) State[kMax];
+        m_key = new (std::nothrow) Key[kMax];
+        if (!m_st || !m_key) { delete[] m_st; delete[] m_key; m_st = nullptr; m_key = nullptr; ++m_full; return false; }
+        memset(m_st, 0, sizeof(State) * kMax);
+    }
+    State& s = m_st[m_n];
+    // phase 35: the IA / VS / RS input state from DidShadow (did_shadow = 1) or through the getters (the pre-phase-35 path)
+    if (!DidShadow::Configured() || !CaptureShadow(ctx, s, m_n > m_releasedTo ? &m_st[m_n - 1] : nullptr)) CaptureGet(ctx, s);
     s.ic = ic; s.inst = inst; s.si = si; s.sinst = sinst; s.bv = bv; s.instanced = instanced;
     // v0.10.0 phase 10: the pixel-shader state of a forward draw (the batched forward-depth re-draw needs the game's alpha)
     if (m_capPs && !m_ps && m_n == 0) {

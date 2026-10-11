@@ -136,6 +136,7 @@ Set* Cur(ID3D11DeviceContext* ctx) {
     if (!g_on || g_broken || !ctx) return nullptr;
     if (g_cur >= 0 && g_set[g_cur].frame != g_frame) CloseCur(ctx);
     if (g_cur < 0) {
+        CpuProf::Block cpb(CpuProf::kBGpuPerf);        // phase 31 CPU profiler: landing the old sets + opening a new one
         Poll(ctx);
         if (!OpenCur(ctx)) { ++g_w.dropped; return nullptr; }
     }
@@ -158,6 +159,7 @@ inline bool TokOk(int tok, int* ent) {
 
 int Stamp(ID3D11DeviceContext* ctx, Set& s) {
     if (s.nTs >= kTs) return -1;
+    CpuProf::Block cpb(CpuProf::kBGpuPerf);            // phase 31 CPU profiler: the timestamp End (+ its query create)
     ID3D11Query* q = Ts(ctx, s, s.nTs);
     if (!q) return -1;
     ctx->End(q);

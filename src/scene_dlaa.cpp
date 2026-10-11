@@ -1495,6 +1495,7 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
                     DepthTwin* depthTwin, const CandidateRecord* cand, float jitterX, float jitterY, bool reset, bool useMv, bool mvDebug, bool candBad,
                     uint32_t outW, uint32_t outH, const ObjRecord* objs, const DrawIdRecord* didRec,
                     const DrawIdRecord* didFwdRec) {
+    CpuProf::Block cpb(CpuProf::kBDlaaRun);            // phase 31 CPU profiler (cpu_prof.h)
     if (m_compPending) CancelComposite(ctx);           // v0.7.0: never left open (Composite always follows Run)
     m_deferred = false;
     m_altFailed = false;                               // v0.10.0 phase 7
@@ -1624,9 +1625,12 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
         CameraMv::FrameStats fs;
         // v0.10.0 phase 17: no candidate in this frame's record (not even initialised: no draw was sampled yet)
         const bool noCand = !cand->Ready() || cand->Count(0) + cand->Count(1) == 0;
-        mvDone = m_cam.Generate(ctx, m_w, m_h, m_rx, m_ry, m_fullW, m_fullH, *cand, twinSrv,
-                                m_depthR32Uav.Get(), m_mvUav.Get(), &fs, candBad, objs, objs ? stencilSrv : nullptr,
-                                fwdSrv, didRec, didSrv, didFwd, fwdShiftRun, fwdIdSrv);
+        {
+            CpuProf::Block cpbMv(CpuProf::kBMvGen);    // phase 31 CPU profiler
+            mvDone = m_cam.Generate(ctx, m_w, m_h, m_rx, m_ry, m_fullW, m_fullH, *cand, twinSrv,
+                                    m_depthR32Uav.Get(), m_mvUav.Get(), &fs, candBad, objs, objs ? stencilSrv : nullptr,
+                                    fwdSrv, didRec, didSrv, didFwd, fwdShiftRun, fwdIdSrv);
+        }
         if (!mvDone) { GpuPerfScope gp(ctx, GpuPerf::kConvert); DepthConvert(ctx, twinSrv); }   // Generate wrote nothing: depth must not stay stale
         // v0.10.0 phase 17 STILL-CAMERA FALLBACK (menu units, see SetMenuUnit): no candidates -> Generate either wrote
         // nothing (record not initialised: the MV texture is cleared to 0 below) or solved with 0 pairs (pass A writes

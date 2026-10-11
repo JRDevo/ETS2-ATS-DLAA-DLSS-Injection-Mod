@@ -452,6 +452,14 @@ The three green lines under the title show the game's GPU time per frame, what t
   Without `camera` each moving part moves exactly in the glass (about 0.4 ms per mirror in VR); with `camera` the mirror
   uses the camera motion only: the cheapest per mirror (about 0.15 ms), but moving traffic can ghost in the glass
   (`mirror_mv` in `dlaa.ini`). `Alt+F6` still switches it on / off.
+- **Turbo mode (VR)** (`xr_turbo`, off by default; from OpenXR Toolkit): the game stops waiting for the headset each
+  frame. More fps only when the CPU is the limit. Warning: frame smoothing (ASW, Motion Smoothing, Motion Reprojection,
+  SSW) does not work while it is on. Switch it off again if the picture judders.
+- **Foveated (VRS)** (`vrs`, off by default; VR only, NVIDIA RTX only; from OpenXR Toolkit): sharp centre, lower detail
+  at the edge. The outer ring of each eye picture is shaded once per 2 x 2 pixels, which saves GPU time at a high in-game
+  Scaling. Fences, grass and leaves keep full detail, and so does everything the mod draws itself. **Foveated size** picks
+  how big the sharp centre is: `wide`, `balanced` (default) or `narrow` (`vrs_inner` / `vrs_outer`). On another GPU the
+  row says `not supported`. Look for blocky edges at the side of your view; switch it off if they bother you.
 - **Save to dlaa.ini** (the same as `Shift+F12`) writes the live values, and the panel position / fps box once you
   changed them.
 - **Reset to defaults** puts every row back to the fresh-install values, live and in `dlaa.ini` (the keys are removed
@@ -515,6 +523,14 @@ The table below lists the commonly used keys:
 | `fps_x` / `fps_y` / `fps_scale` | `1` / `1` / `1.0` | fps box, flat: left / top edge in % of the picture (`0`..`95`), size `0.2`..`3.0` (1 = 92 x 44 px at 1080 p) |
 | `fps_vr_x` / `fps_vr_y` / `fps_vr_scale` | `0` / `-25` / `0.3` | fps box, VR: centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size `0.2`..`3.0` (1 = 8 % of the eye width) |
 | `fps_vr_lock` | `0` | fps box, VR (v0.10.3): `0` = follows the headset, `1` = fixed in the cab 0.8 m from your seat; `fps_vr_x` / `fps_vr_y` are then degrees around you (+ = right / down). The menu's `FPS counter lock` row switches it |
+| `xr_turbo` | `0` | VR: `1` = **Turbo mode** (from OpenXR Toolkit): the game no longer waits for the headset each frame, so it can start the next frame sooner. **It turns off the headset's frame smoothing**: ASW (Meta / Oculus), Motion Smoothing, Motion Reprojection (Windows Mixed Reality) and SSW (Virtual Desktop) cannot work with it. It helps only when the CPU is the limit (busy cities, heavy traffic); when the GPU is the limit it gains nothing. The menu's `Turbo mode (VR)` row switches it live, `Shift+F12` saves |
+| `vrs` | `0` | VR, NVIDIA RTX only: `1` = **foveated rendering** (from OpenXR Toolkit): the outer ring of each eye picture is shaded once per 2 x 2 pixels, the centre stays sharp; saves GPU time at a high in-game Scaling. Fences, grass, leaves and the mod's own passes keep full detail. The menu's `Foveated (VRS)` row switches it live, `Shift+F12` saves |
+| `vrs_inner` / `vrs_outer` | `55` / `80` | foveated rendering: ring sizes in % of the half picture around each eye's centre (`10`..`150`); full detail inside `vrs_outer` (with `vrs_quality = 1`), 2 x 2 outside. The menu's `Foveated size` row: `wide` = 65 / 90, `balanced` = 55 / 80, `narrow` = 40 / 65 |
+| `vrs_quality` | `1` | foveated rendering: `1` = full detail inside `vrs_outer`; `0` = the ring between `vrs_inner` and `vrs_outer` is shaded per 2 x 1 pixels too (more saving) |
+| `vrs_debug` | `0` | foveated rendering, test only (needs `debug = 1`): `1` = middle ring 2 x 2, outer ring 4 x 4, to see the pattern |
+| `cpu_cache_pin` | `0` | `1` = on AMD X3D CPUs with V-Cache on one half only (e.g. 7950X3D / 9950X3D) the game is kept on the V-Cache cores (read at game start only). Does nothing on other CPUs. Off by default: no fps gain was measured yet, try it and compare |
+| `did_shadow` | `1` | CPU saving for the per-part motion vectors (read at game start only): `1` = the mod remembers the game's drawing settings as the game sets them instead of asking the graphics driver for them at every draw (input layout, vertex shader, its constant buffers and samplers, rasterizer state); `2` = also the vertex / index buffers (faster only when the game reuses buffers between draws); `0` = ask at every draw (as before). The log's `did_shadow=` line at startup says which one ran |
+| `did_shadow_verify` | `-1` | test only: every Nth draw the remembered settings are compared with the driver's; a difference is logged (`MISMATCH`) and the mod asks the driver for the rest of that frame. `-1` = every 64th draw with `debug = 1`, off otherwise; `0` = off |
 | `bind_hold_ms` | `5000` | tuning menu: how long (ms, `500`..`10000`) a key or wheel button must be held on a row to bind it to that row ([`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu)) |
 | `controller_name` | *(empty)* | only read the wheels / gamepads whose name contains this text for `WheelN` / `WheelUp` hotkey bindings, e.g. `T300` when a shifter shares the wheel's button numbers; empty = every controller ([`docs/KEYS.md`](docs/KEYS.md#wheel-gamepad-and-joystick-buttons)) |
 | `key_<action>` | *(see KEYS.md)* | re-bind any hotkey, e.g. `key_dlaa_toggle = Ctrl+D`, or `none` to disable it. Full list and format: [`docs/KEYS.md`](docs/KEYS.md) |
@@ -648,12 +664,15 @@ NVIDIA DLSS SDK is present:
 
 ```bash
 git clone --depth 1 https://github.com/NVIDIA/DLSS external/DLSS
+git clone --depth 1 https://github.com/NVIDIA/nvapi external/nvapi
 cmake -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ```
 
 Output: `build/Release/dinput8.dll`. Without `external/DLSS` the build is a
-logging-only injector (no DLAA). `scripts/package.ps1` builds Release and assembles
+logging-only injector (no DLAA). Without `external/nvapi` (NVIDIA NVAPI, MIT; its
+`nvapi64.lib` is linked statically) the build has no VR foveated rendering (the
+`Foveated (VRS)` row says `not supported`). `scripts/package.ps1` builds Release and assembles
 the release zip. Architecture and internals: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
 
 </details>
@@ -727,6 +746,8 @@ the lead, with Claude Opus 5.5, Opus 4.8 and Sonnet 5.5 agents doing the buildin
 JRDevo gains nothing from this mod except a fixed problem and a shared solution: no money, no donations,
 no paid versions. Made with love.
 
+**Thanks** to [Breno Assis](https://github.com/breno-assis) for the idea of the draw-id state shadow (`did_shadow`, the cheaper per-part motion vector record): his pull request showed the way, the version in the mod is a rewrite with extra safety checks.
+
 **Third-party parts** — each has its own terms, see [`THIRD_PARTY.md`](THIRD_PARTY.md):
 
 | Part | License | Shipped with this mod? |
@@ -734,5 +755,7 @@ no paid versions. Made with love.
 | MinHook (function hooking) | BSD 2-Clause | Compiled into `dinput8.dll` |
 | NVIDIA DLSS / NGX SDK | NVIDIA RTX SDK license (proprietary) | Only the small SDK link stub inside `dinput8.dll`. **No NVIDIA DLL** — you supply your own `nvngx_dlss.dll` |
 | RCAS sharpening method (AMD FidelityFX FSR 1.0) | MIT | Own implementation of the published method |
+| NVIDIA NVAPI (VR foveated rendering, `vrs`) | MIT | Static `nvapi64.lib` compiled into `dinput8.dll`; it uses the driver's own `nvapi64.dll` |
+| OpenXR Toolkit (Turbo mode and foveated rendering ideas) | MIT | Nothing shipped: the logic was rewritten for this mod |
 
 Unofficial fan project: not affiliated with, or endorsed by, SCS Software, NVIDIA or AMD.

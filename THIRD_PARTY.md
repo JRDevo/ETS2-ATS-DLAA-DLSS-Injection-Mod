@@ -2,13 +2,15 @@
 
 This project's own source is under the PolyForm Noncommercial License 1.0.0
 (see `LICENSE.md`) — free for noncommercial use only. The binary
-`dinput8.dll` it produces, and the build, link against the two third-party
-components below, and the sharpening pass follows a published AMD algorithm (last
-section). Their own license terms govern those parts.
+`dinput8.dll` it produces, and the build, link against the three third-party
+components below (MinHook, the NVIDIA DLSS SDK, NVIDIA NVAPI), the sharpening pass
+follows a published AMD algorithm, and the VR Turbo mode and the VR foveated
+rendering (VRS) are ported from OpenXR Toolkit (last two sections). Their own
+license terms govern those parts.
 
-Neither component is committed to this repository: MinHook is fetched by CMake at
-configure time, and the NVIDIA DLSS SDK must be cloned into `external/DLSS`
-yourself (both are `.gitignore`d).
+None of these components is committed to this repository: MinHook is fetched by
+CMake at configure time, and the NVIDIA DLSS SDK and NVAPI must be cloned into
+`external/DLSS` and `external/nvapi` yourself (all `.gitignore`d).
 
 ---
 
@@ -98,7 +100,50 @@ This project ships **no** NVIDIA binaries. `nvngx_dlss.dll` (and any Streamline
 end up in the zip. The user supplies `nvngx_dlss.dll` themselves (from the NVIDIA
 DLSS SDK, or any game that already ships it) and places it next to `dinput8.dll`.
 The only NVIDIA code that leaves this project is the statically linked
-`nvsdk_ngx_d` import stub compiled into `dinput8.dll`.
+`nvsdk_ngx_d` import stub and the statically linked NVAPI library (`nvapi64.lib`,
+MIT, next section) compiled into `dinput8.dll`.
+
+---
+
+## NVIDIA NVAPI (MIT)
+
+- **What it is / how used:** NVIDIA's driver API. The VR **foveated rendering**
+  (`dlaa.ini` `vrs`, the tuning menu's `Foveated (VRS)` row; `src/vrs.cpp`) calls
+  its Variable Rate Shading functions for Direct3D 11
+  (`NvAPI_D3D1x_GetGraphicsCapabilities`, `NvAPI_D3D11_CreateShadingRateResourceView`,
+  `NvAPI_D3D11_RSSetViewportsPixelShadingRates`,
+  `NvAPI_D3D11_RSSetShadingRateResourceView`). The SDK header `nvapi.h` is compiled
+  against and its **static** library `amd64/nvapi64.lib` is linked into
+  `dinput8.dll`; at runtime it loads the driver's own `nvapi64.dll`. No NVAPI file
+  is shipped separately. Without `external/nvapi` the build has no VRS (the menu
+  row says "not supported").
+- **Source:** <https://github.com/NVIDIA/nvapi> — clone into `external/nvapi`
+  yourself (see the README build section). Full terms: `external/nvapi/License.txt`.
+- **License:** MIT (the SDK's `License.txt` covers the headers and `nvapi.lib`,
+  `nvapi64.lib`, `nvapia64.lib`, `nvapia64ec.lib`).
+
+```
+SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: MIT
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
 
 ---
 
@@ -135,4 +180,52 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
+
+---
+
+## OpenXR Toolkit (MIT)
+
+- **What it is / how used:** the VR **Turbo mode** (`dlaa.ini` `xr_turbo`, the
+  tuning menu's `Turbo mode (VR)` row; `src/xr_hook.cpp`, the "TURBO MODE" block)
+  ports the frame-pacing logic of OpenXR Toolkit's Turbo mode: the real
+  `xrWaitFrame` runs on a separate thread after each `xrEndFrame`, the game gets a
+  made-up frame state, its `xrBeginFrame` is skipped and the frame is begun at
+  `xrEndFrame`. No OpenXR Toolkit file is included and none of its framework is
+  used; the logic was rewritten for this project's OpenXR hook.
+  The VR **foveated rendering** (`dlaa.ini` `vrs`, the tuning menu's
+  `Foveated (VRS)` row; `src/vrs.cpp`) ports the ideas of OpenXR Toolkit's
+  Variable Rate Shading: the ring pattern (circles in NDC around each eye's
+  projection centre, radii in % of the half-size), the 16 x 16-pixel tile mask of
+  shading-rate table indices, the per-viewport shading-rate table and the NVAPI
+  calls that bind them. The mask is filled on the CPU instead of by its compute
+  shader, and where VRS applies is this project's own rule (only the game's world
+  scene passes, never alpha-tested draws or the mod's own passes).
+- **Source:** <https://github.com/mbucchia/OpenXR-Toolkit>
+  (`XR_APILAYER_MBUCCHIA_toolkit/layer.cpp`; for VRS `vrs.cpp` and `VRS.hlsl`).
+- **License:** MIT. The notice is also in the source above the ported code.
+
+```
+MIT License
+
+Copyright (c) 2021-2022 Matthieu Bucchianeri
+Copyright (c) 2021-2022 Jean-Luc Dupiot - Reality XP
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```

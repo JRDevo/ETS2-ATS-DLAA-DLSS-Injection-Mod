@@ -42,6 +42,32 @@ debug = 0
 # the handling out). Nothing to change when you do not use the bridge: with no ofxr*.dll in the game it does nothing.
 # ofxr_bridge = 1
 
+# VR TURBO MODE (from OpenXR Toolkit), 0 / 1, default 0. 1 = the game no longer waits for the headset in each frame (the
+# wait runs on a thread of the mod), so it can start the next frame sooner. WARNING: it turns off the headset's frame
+# smoothing -- ASW (Meta / Oculus), Motion Smoothing, Motion Reprojection (Windows Mixed Reality) and SSW (Virtual Desktop)
+# cannot work with it. It helps only when the CPU is the limit (busy cities, heavy traffic); when the GPU is the limit it
+# gains nothing. The tuning menu's Turbo mode (VR) row switches it live; Shift+F12 / the Save row writes it here.
+# xr_turbo = 0
+
+# VR FOVEATED RENDERING (VRS, NVIDIA RTX only; from OpenXR Toolkit), 0 / 1, default 0. 1 = the outer ring of each eye picture is
+# shaded once per 2 x 2 pixels (the centre stays sharp), which saves GPU time at high in-game Scaling. Fences, grass and leaves
+# (alpha-tested) and everything the mod draws itself keep full detail. The tuning menu's Foveated (VRS) row switches it live;
+# Shift+F12 / the Save row writes it here. Not available on other GPUs (the menu row then says "not supported").
+# vrs = 0
+# Ring sizes in % of the half picture around each eye's centre: inside vrs_inner full detail; with vrs_quality = 0 the ring
+# between vrs_inner and vrs_outer is shaded per 2 x 1 pixels; outside vrs_outer per 2 x 2. The menu's Foveated size row:
+# wide = 65 / 90, balanced = 55 / 80 (default), narrow = 40 / 65.
+# vrs_inner = 55
+# vrs_outer = 80
+# 1 (default) = full detail everywhere inside vrs_outer; 0 = also save in the middle ring (2 x 1).
+# vrs_quality = 1
+# Test only, needs debug = 1: 1 = middle ring 2 x 2 and outer ring 4 x 4, so the pattern is easy to see in the headset.
+# vrs_debug = 0
+
+# 1 = on AMD X3D CPUs with V-Cache on one half only (e.g. 7950X3D / 9950X3D) the game is kept on the V-Cache cores (read at game
+# start only). Does nothing on other CPUs. 0 (default) = off: no fps gain was measured yet, try it and compare.
+# cpu_cache_pin = 0
+
 # NGX jitter = sign * viewport shift, per axis: -1 or +1 (+1/+1 won the self-test; Ctrl+F12 cycles live)
 # jitter_sign_x = 1
 # jitter_sign_y = 1
@@ -169,6 +195,19 @@ debug = 0
 # with debug = 1 the log gets "perf eye N" lines every 600 frames: the GPU time of every part of the mod per eye (NGX itself
 # listed apart), next to the game's whole frame. -1 = with debug = 1 (default), 0 = off, 1 = on
 # perf_timers = -1
+# with debug = 1 the log also gets a "CPU prof" line every 10 s: the mod's own CPU time on the game's render thread per hook and
+# per part of the mod, the game's own D3D11 calls, Present + OpenXR waits and the rest of the frame (the profiler itself costs
+# ~0.1-0.3 ms per frame while on; the line says how much). -1 = with debug = 1 (default), 0 = off, 1 = on
+# cpu_prof = -1
+# phase 35: the per-draw record of the motion vectors copies the game's input state (input layout, vertex shader, its cbuffers
+# and samplers, rasterizer state) from hooked Set calls instead of ~10 getter calls per draw (startup only). 1 = default,
+# 2 = also the vertex / index buffers (wins only when draws share buffers), 0 = the getters at every draw (before phase 35).
+# The log's startup line "did_shadow=N" says which mode ran; the "MV draw-ids" line has a "state shadow" field.
+# did_shadow = 1
+# test only: every Nth record also reads the getters and compares; a difference logs "MV draw-ids shadow: MISMATCH" (first 20)
+# and the getters are used for the rest of that frame (after 8 such frames: for the rest of the session).
+# -1 = 64 with debug = 1, else 0 (default); 0 = off
+# did_shadow_verify = -1
 # how finely the "which vehicle does this plate sit on" search looks at the picture: 4 = every 4th pixel, small plates every
 # 2nd (default), 2 = every 2nd pixel for everything (before phase 8)
 # mv_vote_res = 4

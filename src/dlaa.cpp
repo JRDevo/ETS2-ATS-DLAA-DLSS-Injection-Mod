@@ -415,7 +415,11 @@ bool DlaaProcessor::Evaluate(ID3D11DeviceContext* ctx,
     ep.InReset           = (p.reset || recreated) ? 1 : 0;   // a fresh feature has no history anyway
     ep.InRenderSubrectDimensions = { m_width, m_height };   // v0.7.0: render size (output size = the feature's target)
 
-    NVSDK_NGX_Result r = NGX_D3D11_EVALUATE_DLSS_EXT(ctx, m_feature, m_params, &ep);
+    NVSDK_NGX_Result r;
+    {
+        CpuProf::Block cpb(CpuProf::kBNgx);              // phase 31 CPU profiler: the evaluate's own CPU time
+        r = NGX_D3D11_EVALUATE_DLSS_EXT(ctx, m_feature, m_params, &ep);
+    }
 
     colorRes->Release(); depthRes->Release(); mvRes->Release(); outRes->Release();
 
