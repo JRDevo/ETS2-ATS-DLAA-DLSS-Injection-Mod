@@ -8,7 +8,10 @@ rem mutations, noparent / parentconj / nodepth = S8 mutations: they must FAIL; S
 rem the trailer takes its motion, an instanced roadside grass clump stays static; phase 6c: scene 8 also runs a second time
 rem with a 6 px march reach, "S8 short reach"; S9 = phase 7 pre / post-tonemap stage: DlaaStage hysteresis + the real
 rem SceneDlaa with two colour sets, NGX replaced by tests\fake_dlaa.cpp)
-call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul
+rem vswhere finds any Visual Studio edition (Community here, Enterprise on the GitHub runner)
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+for /f "usebackq delims=" %%i in (`call "%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSDIR=%%i"
+call "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" >nul
 cd /d "%~dp0.."
 if not exist build\tests\obj mkdir build\tests\obj
 cl /nologo /std:c++17 /EHsc /O2 /W3 /DWITH_DLAA=1 /DNOMINMAX /I src tests\drawid_harness.cpp src\motion_vectors.cpp src\draw_ids.cpp src\shader_cache.cpp src\scene_dlaa.cpp src\gpu_perf.cpp tests\fake_dlaa.cpp /Fe:build\tests\drawid_harness.exe /Fo:build\tests\obj\ /link d3d11.lib d3dcompiler.lib dxgi.lib > build\tests\build_drawid_harness.txt 2>&1

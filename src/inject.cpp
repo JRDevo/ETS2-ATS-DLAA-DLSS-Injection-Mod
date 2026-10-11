@@ -681,9 +681,9 @@
 #include "dlaa_stage.h"
 #include "gpu_perf.h"
 #include "gpu_pass.h"                                // phase 36: GPU time per pass type (measurement only)
-#include "cpu_pin.h"                                // phase 32: keep the game on the V-Cache cores (cpu_cache_pin)
 #include "vrs.h"                                    // phase 34: VRS fixed foveated rendering (NVAPI; VR world scene only)
 #endif
+#include "cpu_pin.h"                                // phase 32: keep the game on the V-Cache cores (cpu_cache_pin; both builds)
 
 namespace {
 
@@ -1801,6 +1801,80 @@ RSSetViewports_t     oRSSetViewports = nullptr;
 ID3D11Texture2D* g_sceneDepth = nullptr;
 UINT             g_sceneW = 0, g_sceneH = 0;
 uint64_t         g_depthChanges = 0;
+// v0.10.3 issue #9: SCENE DEPTH ALIASES. After a minimize / restore of the game window (VR, OpenXR) the game renders each eye
+// on its OWN D32S8 scene depth of the same size (before: one depth served both eyes) -- or it recreates the depth. A same-size
+// candidate has equal rank, so InspectDepth adopted each eye's texture in turn: g_sceneDepth flipped twice per frame, and each
+// eye's scene depth clear (it runs BEFORE that eye's G-buffer bind) still saw the OTHER eye's texture -> no clear matched, no
+// pass ever started again (passes frozen, fifo underflow at every blit, no DLSS on the eyes until a restart; the mirrors kept
+// working). Now the replaced same-size depth stays known as an ALIAS (ref held): a clear or G-buffer bind of an alias SWITCHES
+// g_sceneDepth to it (= the depth of the pass being drawn) without the size-change side effects (no FIFO drop, no history
+// reset), and every pass remembers its own depth (PassSlot::depth -> PassDepth) for its snapshot, draw-id replay and DLAA run.
+// An alias always has exactly the scene size (a mirror / other view never qualifies: it is not adopted in the first place); one
+// not cleared / bound as the G-buffer / discarded for kSdAliasExpire game frames is released; all are dropped at a scene size
+// change and at a context reset. A single scene depth (flat, normal VR) never has an alias: everything as before.
+struct SdAlias { ID3D11Texture2D* tex; uint64_t seen; };   // tex: ref held; seen = g_frames at its last clear / bind / discard
+constexpr int      kSdAliasMax    = 3;                     // + g_sceneDepth = up to 4 same-size scene depths
+constexpr uint64_t kSdAliasExpire = 120;                   // game frames without a clear / G-buffer bind / discard
+SdAlias          g_sdAlias[kSdAliasMax] = {};
+int              g_sdAliasN = 0;
+uint64_t         g_sdAliasAdds = 0;              // same-size depths that became an alias (stats)
+uint64_t         g_sdAliasSwitches = 0;          // g_sceneDepth switched to an alias (clear / G-buffer bind; 2 per frame per-eye)
+uint64_t         g_sdAliasBindStarts = 0;        // passes started at a G-buffer bind on another scene depth (its clear was missed)
+uint64_t         g_sdAliasOtherDiscards = 0;     // discards of a scene depth that is not the newest pass's
+uint64_t         g_sdAliasOtherBinds = 0;        // non-G-buffer binds (forward / lighting) on an alias that is not current
+int              g_sdAliasLogs = 0;              // the "a second ... depth texture is in use" warning (cap)
+#ifdef WITH_DLAA
+void DidRoDsvForget(const void* tex);            // the draw-id read-only DSV of a released scene depth goes too
+#else
+inline void DidRoDsvForget(const void*) {}
+#endif
+inline int SdAliasFind(const void* r) {
+    for (int i = 0; i < g_sdAliasN; ++i) if ((const void*)g_sdAlias[i].tex == r) return i;
+    return -1;
+}
+// "is this THE scene depth" for the main pass: the current one or an alias (identity; r may be any resource)
+inline bool IsSceneDepth(const void* r) {
+    return r && (r == (const void*)g_sceneDepth || (g_sdAliasN && SdAliasFind(r) >= 0));
+}
+void SdAliasDrop(int i) {
+    ID3D11Texture2D* t = g_sdAlias[i].tex;
+    g_sdAlias[i] = g_sdAlias[--g_sdAliasN];
+    g_sdAlias[g_sdAliasN] = SdAlias{ nullptr, 0 };
+    if (t) { DidRoDsvForget(t); t->Release(); }
+}
+void SdAliasClear() { while (g_sdAliasN) SdAliasDrop(g_sdAliasN - 1); }
+// aliases unused for kSdAliasExpire game frames are released (a recreated depth: the old one is never seen again)
+void SdAliasExpire() {
+    if (!g_sdAliasN) return;
+    const uint64_t now = g_frames.load(std::memory_order_relaxed);
+    for (int i = g_sdAliasN - 1; i >= 0; --i) {
+        if (now - g_sdAlias[i].seen <= kSdAliasExpire) continue;
+        LogDbg("scene depth: alias %p released (not cleared / bound / discarded for %llu game frames; %d alias(es) left)",
+            (void*)g_sdAlias[i].tex, (unsigned long long)(now - g_sdAlias[i].seen), g_sdAliasN - 1);
+        SdAliasDrop(i);
+    }
+}
+// The game uses scene depth r now (clear / G-buffer bind): true = r is the scene depth. An alias becomes g_sceneDepth (the
+// previous one an alias, seen now) -- same size by construction: no resize work, no FIFO drop, no history reset.
+bool SdUse(const void* r) {
+    if (!r) return false;
+    if (r == (const void*)g_sceneDepth) return true;
+    if (!g_sdAliasN) return false;
+    const int i = SdAliasFind(r);
+    if (i < 0) return false;
+    ID3D11Texture2D* t = g_sdAlias[i].tex;
+    g_sdAlias[i].tex = g_sceneDepth;
+    g_sdAlias[i].seen = g_frames.load(std::memory_order_relaxed);
+    g_sceneDepth = t;
+    ++g_sdAliasSwitches;
+    return true;
+}
+// a discard / other touch of an alias that does not switch: keeps it from expiring
+inline void SdAliasSeen(const void* r) {
+    if (!g_sdAliasN) return;
+    const int i = SdAliasFind(r);
+    if (i >= 0) g_sdAlias[i].seen = g_frames.load(std::memory_order_relaxed);
+}
 bool             g_tonemapLogged = false;
 void*            g_tonemapTex = nullptr;         // v0.7.1: RT of the last tonemap draw (identity only, no ref)
 // ---- v0.8.0 HDR blit rule (only evaluated while g_hdrOut; identities only, no refs) ----------------------------------
@@ -1827,7 +1901,12 @@ uint64_t         g_dlaaFrames[kMaxEyes] = {};    // frames DLAA actually ran OK,
 struct InDlaaFlag {
     bool v;
     InDlaaFlag& operator=(bool b) {
-        if (b != v) { v = b; if (Vrs::g_want) Vrs::OnModWork(b); }
+        if (b != v) {
+            v = b;
+#ifdef WITH_DLAA
+            if (Vrs::g_want) Vrs::OnModWork(b);        // (VRS needs the eye map: DLAA build only)
+#endif
+        }
         return *this;
     }
     operator bool() const { return v; }
@@ -1885,6 +1964,8 @@ struct PassSlot {
     bool     snap = false;           // scene depth of this pass was snapshotted into twin
     bool     consumed = true;
     bool     discarded = false;      // a Discard* of the scene depth was seen since this pass started
+    ID3D11Texture2D* depth = nullptr;   // v0.10.3 issue #9: g_sceneDepth at StartPass = this pass's scene depth (identity, no
+                                        // ref; read through PassDepth, which falls back to g_sceneDepth once it is released)
     int      pre = 0;                // v0.10.0 phase 4: 1 = DLAA ran before the tonemap (in place on the forward colour), 2 =
                                      // tried there but deferred / failed (v0.10.0 phase 7: the blit unit takes it), 0 = blit path
 #ifdef WITH_DLAA
@@ -1939,6 +2020,9 @@ struct PassSlot {
 };
 constexpr int    kRing           = 4;
 PassSlot         g_ring[kRing];
+// v0.10.3 issue #9: the scene depth pass s was drawn on -- its own while it is still the scene depth or an alias (per-eye depths:
+// the other eye's pass may have switched g_sceneDepth since), else g_sceneDepth (single depth: always the same texture).
+inline ID3D11Texture2D* PassDepth(const PassSlot& s) { return s.depth && IsSceneDepth(s.depth) ? s.depth : g_sceneDepth; }
 #ifdef WITH_DLAA
 // v0.9.0 per-object MVs (see the "STENCIL OBJECT IDS" block above hkDrawIndexed).
 ObjRecord        g_objRing[kRing];              // per pass slot, parallel to g_ring: the pass's world draws (object ids)
@@ -2060,6 +2144,8 @@ void ObjStatsTag(char* buf, size_t cap, uint64_t passes);
 // v0.9.0 r5 forward depth: stats window (defined above hkDrawIndexed); r11: + the near-camera readback slots (ctx)
 void FwdOnPassStart(ID3D11DeviceContext* ctx);
 void FwdOnContextReset();
+#else
+constexpr bool   g_mirJit = false;              // (no mirror jitter without WITH_DLAA; hkDraw's full-screen unshift reads it)
 #endif
 uint64_t         g_passSeq       = 0;            // passes started so far (= next s)
 uint64_t         g_fifoHead      = 0;            // oldest unconsumed pass (unconsumed = [g_fifoHead, g_passSeq))
@@ -6801,6 +6887,8 @@ void PreviewOnDiscard(ID3D11DeviceContext* ctx, ID3D11Resource* res) {
         LogErr("preview depth snapshot slot %d: %s (before the DS_P discard)", g_pvCur, ok ? "captured" : "FAILED");
     }
 }
+#else
+constexpr bool   g_previewPass = false;          // (no preview passes without WITH_DLAA; hkDraw's full-screen unshift reads it)
 #endif
 
 // ---- v0.5.2 pass FIFO ----------------------------------------------------------------------
@@ -6880,7 +6968,7 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
             t_inDlaa = true;
             GpuPerf::SetPass(prev.s);                         // v0.10.0 phase 8
             const int sq = GpuPerf::Begin(ctx, GpuPerf::kSnap);
-            const bool ok = prev.twin.Snapshot(ctx, g_sceneDepth, GpuTimingOn());
+            const bool ok = prev.twin.Snapshot(ctx, PassDepth(prev), GpuTimingOn());   // v0.10.3 issue #9: ITS depth
             GpuPerf::End(ctx, sq);
             t_inDlaa = false;
             prev.snap = ok;
@@ -6929,6 +7017,7 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
     else { n.jx = 0.0f; n.jy = 0.0f; }
     n.snap = false;
     n.discarded = false;
+    n.depth = g_sceneDepth;                               // v0.10.3 issue #9 (per-eye depths: switched by the clear / bind)
     n.pre = 0;                                            // v0.10.0 phase 4
     n.consumed = false;
 #ifdef WITH_DLAA
@@ -6968,9 +7057,12 @@ void OnSceneDepthClear(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v) {
     CpuProf::Block cpb(CpuProf::kBSnap);               // phase 31 CPU profiler (cpu_prof.h)
     ID3D11Resource* r = nullptr;
     v->GetResource(&r);
-    const bool match = r && r == (ID3D11Resource*)g_sceneDepth;
+    // v0.10.3 issue #9: an alias (the other eye's same-size depth) matches too and becomes g_sceneDepth BEFORE StartPass below:
+    // the new pass is drawn on it, the previous pass keeps its own depth (PassSlot::depth) for its snapshot / replay
+    const bool match = SdUse(r);
     if (r) r->Release();
     if (!match) return;
+    SdAliasExpire();
 #ifdef WITH_DLAA
     // v0.9.0: the object ids live in the stencil; the game clears depth AND stencil (flags 0x3) in the capture. Without the
     // stencil flag, pixels no G-buffer draw covers (sky) would keep old ids -- pass B ignores those (no world depth).
@@ -7029,10 +7121,36 @@ void TraceDiscard(ID3D11DeviceContext* ctx, const char* name, ID3D11Resource* re
 bool OnDepthDiscard(ID3D11DeviceContext1* ctx, ID3D11Resource* res, bool* snapped) {
     CpuProf::Block cpb(CpuProf::kBSnap);               // phase 31 CPU profiler (cpu_prof.h)
     *snapped = false;
-    if (t_inDlaa || !res || !g_sceneDepth || res != (ID3D11Resource*)g_sceneDepth) return false;
+    if (t_inDlaa || !res || !g_sceneDepth || !IsSceneDepth(res)) return false;   // v0.10.3 issue #9: + aliases
     ++g_cDiscardSeen;
+    SdAliasSeen(res);
     if (g_passSeq <= g_fifoHead) return true;                       // no unconsumed pass
     PassSlot& slot = g_ring[(g_passSeq - 1) % kRing];
+    // v0.10.3 issue #9: per-eye depths -- the discard of a scene depth that is NOT the newest pass's (an older pass's eye, e.g.
+    // both discards at the frame end) ends that older pass only: its snapshot if it has none yet (its draw ids were replayed at
+    // the newer pass's start). The newest pass's work below (replays, forward batch, stage decision) waits for its own discard.
+    if (g_sdAliasN && res != (ID3D11Resource*)PassDepth(slot)) {
+        ++g_sdAliasOtherDiscards;
+        for (uint64_t q = g_passSeq - 1; q-- > g_fifoHead;) {
+            PassSlot& o = g_ring[q % kRing];
+            if (res != (ID3D11Resource*)PassDepth(o)) continue;
+            o.discarded = true;
+#ifdef WITH_DLAA
+            if (!o.snap && g_dlaaOn.load(std::memory_order_relaxed) && !g_jitterOnly.load(std::memory_order_relaxed) &&
+                !g_passive.load(std::memory_order_relaxed)) {
+                t_inDlaa = true;
+                GpuPerf::SetPass(o.s);
+                const int sq = GpuPerf::Begin(ctx, GpuPerf::kSnap);
+                const bool ok = o.twin.Snapshot(ctx, PassDepth(o), GpuTimingOn());
+                GpuPerf::End(ctx, sq);
+                t_inDlaa = false;
+                if (ok) { o.snap = true; *snapped = true; ++g_cSnapAtDiscard; }
+            }
+#endif
+            break;
+        }
+        return true;
+    }
     slot.discarded = true;
 #ifdef WITH_DLAA
     DidOnDepthDiscard(ctx);                                          // v0.10.0: a pass without a G-buffer leave is replayed now
@@ -7041,7 +7159,7 @@ bool OnDepthDiscard(ID3D11DeviceContext1* ctx, ID3D11Resource* res, bool* snappe
         t_inDlaa = true;
         GpuPerf::SetPass(slot.s);                         // v0.10.0 phase 8
         const int sq = GpuPerf::Begin(ctx, GpuPerf::kSnap);
-        const bool ok = slot.twin.Snapshot(ctx, g_sceneDepth, GpuTimingOn());
+        const bool ok = slot.twin.Snapshot(ctx, PassDepth(slot), GpuTimingOn());   // v0.10.3 issue #9: = res
         GpuPerf::End(ctx, sq);
         t_inDlaa = false;
         if (ok) {
@@ -7227,6 +7345,8 @@ inline uint64_t MirNotHandledCount() {
 // g_depthDirty, no MV candidates, and its clear / discard never match the scene depth.
 bool InspectDepth(ID3D11Resource* res) {
     if (res == g_sceneDepth) { g_sdStaleSince = kSdNotStale; return false; }   // same as remembered (bound: not stale)
+    // v0.10.3 issue #9: an alias (the other eye's same-size scene depth) -> it is the scene depth of this G-buffer bind
+    if (g_sdAliasN && SdUse(res)) { g_sdStaleSince = kSdNotStale; SdAliasExpire(); return false; }
     bool resized = false;
     ID3D11Texture2D* tex = nullptr;
     if (SUCCEEDED(res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&tex)) && tex) {
@@ -7266,11 +7386,32 @@ bool InspectDepth(ID3D11Resource* res) {
                     Log("scene depth %ux%u not bound as the G-buffer for %llu game frames while other G-buffer views were "
                         "-- adopting %ux%u as the scene depth (resolution / Scaling change)", oldW, oldH,
                         (unsigned long long)staleFrames, d.Width, d.Height);
-                if (g_sceneDepth) g_sceneDepth->Release();
+                // v0.10.3 issue #9: a SAME-size replacement keeps the old depth as an alias (ref moves to the alias set): per-eye
+                // depths alternate (SdUse switches between them from now on), a recreated depth's old texture expires. A size
+                // change drops every alias with the old depth.
+                const bool sameSize = had && oldW == d.Width && oldH == d.Height;
+                if (sameSize) {
+                    SdAliasExpire();
+                    if (g_sdAliasN == kSdAliasMax) {               // full: the least recently used alias goes
+                        int lru = 0;
+                        for (int i = 1; i < g_sdAliasN; ++i) if (g_sdAlias[i].seen < g_sdAlias[lru].seen) lru = i;
+                        SdAliasDrop(lru);
+                    }
+                    g_sdAlias[g_sdAliasN++] = SdAlias{ g_sceneDepth, g_frames.load(std::memory_order_relaxed) };
+                    ++g_sdAliasAdds;
+                    if (g_sdAliasLogs++ < 4)
+                        LogWarn("scene depth: a second %ux%u depth texture is in use (per-eye depths / recreated after a window "
+                            "restore) -- both are tracked as the scene depth (%d alias(es), unused ones are released after %llu "
+                            "game frames; Present #%llu)", d.Width, d.Height, g_sdAliasN, (unsigned long long)kSdAliasExpire,
+                            (unsigned long long)g_frames.load(std::memory_order_relaxed));
+                } else {
+                    SdAliasClear();
+                    if (g_sceneDepth) { DidRoDsvForget(g_sceneDepth); g_sceneDepth->Release(); }
+                }
                 g_sceneDepth = tex; tex = nullptr;              // keep our ref
                 g_sceneW = d.Width; g_sceneH = d.Height;
                 g_sdStaleSince = kSdNotStale;
-                if (g_depthChanges++ < 10)
+                if (g_depthChanges++ < 16)                     // v0.10.3 issue #9: 10 -> 16 (alias switches are not changes)
                     Log("scene depth G-buffer pass: %ux%u fmt=%d (change #%llu)",
                         d.Width, d.Height, (int)d.Format, (unsigned long long)g_depthChanges);
                 // v0.8.2: a SIZE change (start-up: the first 4-RTV bind was a mirror and the real scene comes now; or a
@@ -8481,6 +8622,7 @@ HRESULT STDMETHODCALLTYPE hkCreatePixelShader(ID3D11Device* dev, const void* cod
     return hr;
 }
 
+#ifdef WITH_DLAA   // VRS: DLAA build only (the eye of a pass comes from the DLAA eye map / blit tracking)
 // ---- phase 34: VRS FIXED FOVEATED RENDERING -- the bracket and the per-draw rule (the NVAPI side: vrs.h / vrs.cpp) ----------
 // WHERE coarse shading may happen: only while the game's binding is an eye's WORLD SCENE pass -- g_jitterPass (the 4-RTV G-buffer
 // or the main 1-RTV RGBA16F forward pass, both on the scene depth) and not a menu / truck-preview pass -- in VR. Never shadow maps,
@@ -8801,6 +8943,10 @@ void VrsOnBind(ID3D11DeviceContext* ctx) {
 // The ini / menu values -> vrs.cpp (any thread; read at the next bracket). vrs_debug only with debug = 1 (phase 39: log level 4,
 // live: StepLogLevel calls this again).
 void VrsApplyConfig() { Vrs::Configure(g_vrsOn, g_vrsInner, g_vrsOuter, g_vrsQuality, g_vrsDebug && LogDebugLevel() ? 1 : 0); }
+#else
+inline void VrsOnBind(ID3D11DeviceContext*) {}       // (no VRS without WITH_DLAA)
+inline void VrsNoteBlit(uint64_t, int, void*, void*) {}
+#endif
 
 void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
                                             ID3D11RenderTargetView* const* rtvs,
@@ -8824,7 +8970,9 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
     if (gpOn) GpuPass::BindTop(ctx);                  // ... timestamp 1: the game's work under the previous bind ends here
 #endif
     // phase 34: the game leaves its binding -> a VRS bracket (an eye's world scene pass) ends HERE, before any mod work below
+#ifdef WITH_DLAA
     if (Vrs::g_want) { CpuProf::Block cpv(CpuProf::kBVrs); Vrs::Leave(ctx); }
+#endif
     // v0.8.1: the frame-end rule (both modes; under a present layer it runs the game-thread frame boundary right here,
     // before this bind -- the previous frame's last target is still bound), then the IDLE fallback boundary (no rule
     // frame end for 1 s and no boundary of any kind for 30 ms). LayerFrameBoundary returns at once unless that holds.
@@ -8871,6 +9019,11 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
                         rres->Release();
                     }
                 }
+            } else if (g_sdAliasN && SdAliasFind(dres) >= 0) {
+                // v0.10.3 issue #9: a bind on a scene depth alias that is not the newest pass's (only a G-buffer bind or a clear
+                // switches; a forward / lighting bind on the OTHER eye's depth is no pass of this one) -- counted for triage
+                ++g_sdAliasOtherBinds;
+                SdAliasSeen(dres);
             }
             dres->Release();
         }
@@ -8917,6 +9070,22 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
             g_needFirstPass = false;
             StartPass(ctx, false);
             SpanBeginPending(ctx);                    // no clear follows: the spans start at this bind
+        } else if (g_sdAliasN && g_passSeq && g_ring[(g_passSeq - 1) % kRing].depth != g_sceneDepth) {
+            // v0.10.3 issue #9: a G-buffer bind on ANOTHER same-size scene depth than the newest pass's (the first frame with a
+            // second / recreated depth: its clear ran before it was known, so no clear started its pass). The newest pass
+            // already drew its G-buffer (g_depthDirty) -> this bind starts the new pass (the previous one is snapshotted on
+            // its own, still intact depth); else the newest pass just moves to this depth (nothing drawn on the old one).
+            if (g_depthDirty) {
+                ++g_sdAliasBindStarts;
+                if (g_sdAliasBindStarts <= 3)
+                    Log("scene depth: a new pass starts at a G-buffer bind on another %ux%u scene depth (its clear was not "
+                        "recognised; #%llu, Present #%llu)", g_sceneW, g_sceneH, (unsigned long long)g_sdAliasBindStarts,
+                        (unsigned long long)g_frames.load(std::memory_order_relaxed));
+                StartPass(ctx, true);
+                SpanBeginPending(ctx);
+            } else {
+                g_ring[(g_passSeq - 1) % kRing].depth = g_sceneDepth;
+            }
         }
         g_depthDirty = true;                          // scene depth now holds G-buffer content
         ++g_ring[(g_passSeq - 1) % kRing].gbufBinds;  // v0.6.1 (g_passSeq >= 1 here): every qualifying bind
@@ -9746,7 +9915,7 @@ void PreTonemapPoint(ID3D11DeviceContext1* ctx, PassSlot& slot, bool atLeave) {
         t_inDlaa = true;
         GpuPerf::SetPass(slot.s);                         // v0.10.0 phase 8
         const int sq = GpuPerf::Begin(ctx, GpuPerf::kSnap);
-        const bool snapOk = slot.twin.Snapshot(ctx, g_sceneDepth, GpuTimingOn());
+        const bool snapOk = slot.twin.Snapshot(ctx, PassDepth(slot), GpuTimingOn());   // v0.10.3 issue #9
         GpuPerf::End(ctx, sq);
         t_inDlaa = false;
         if (snapOk) {
@@ -9797,7 +9966,7 @@ void PreTonemapPoint(ID3D11DeviceContext1* ctx, PassSlot& slot, bool atLeave) {
     GpuPerf::SetPass(slot.s);                             // v0.10.0 phase 8: flat = eye 0
     GpuPerf::NoteEye(slot.s, 0);
     t_inDlaa = true;
-    const bool ok = dl.Run(ctx, F.Get(), g_sceneDepth, &slot.twin, &slot.cand, njx, njy, reset, g_mvOn.load(), false, candBad,
+    const bool ok = dl.Run(ctx, F.Get(), PassDepth(slot), &slot.twin, &slot.cand, njx, njy, reset, g_mvOn.load(), false, candBad,
                            0, 0, g_objCfg ? &g_objRing[k] : nullptr, g_didCfg ? &g_didRing[k] : nullptr,
                            g_didCfg ? &g_didFwdRing[k] : nullptr);
     t_inDlaa = false;
@@ -9883,7 +10052,7 @@ void FwdOnLeave(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const*
         Log("DLAA pre-tonemap: pass s=%llu left its forward binding BEFORE the scene depth discard (leave #%llu) -- next binding: "
             "%u RTV(s), RTV0 %s, DSV %s (Present #%llu); its stage decision runs at this forward leave (forward colour final, "
             "nothing has read it yet)", (unsigned long long)slot.s, (unsigned long long)g_fwdLeaveFirst, n, rt0,
-            !bindDepth ? "none" : (bindDepth == (ID3D11Resource*)g_sceneDepth ? "the scene depth" : "another depth"),
+            !bindDepth ? "none" : (IsSceneDepth(bindDepth) ? "the scene depth" : "another depth"),   // v0.10.3 #9: + aliases
             (unsigned long long)g_frames.load(std::memory_order_relaxed));
     }
     Microsoft::WRL::ComPtr<ID3D11DeviceContext1> c1;
@@ -10238,7 +10407,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         }
 #endif
         LogDbg("FIFO stats @blit %llu: passes=%llu blits=%llu depth snapshot used=%llu live used=%llu fifo underflow=%llu "
-            "fifo overflow=%llu mirror ignored=%llu secondary gbuf ignored=%llu mirror views handled=%llu not handled=%llu | snapshots: at discard=%llu at forward leave=%llu at clear=%llu live used=%llu discarded-without-snapshot=%llu (scene depth discards seen=%llu) | eye map: %s entries=%d rt-parity-mismatch=%llu verdicts=%llu no-vote=%llu corrections=%llu rb-skipped-full=%llu rb-failed=%llu rb-throttled=%llu | R |x|>0.25: e0=%llu/%llu e1=%llu/%llu | dlaa frames e0=%llu e1=%llu | "
+            "fifo overflow=%llu mirror ignored=%llu secondary gbuf ignored=%llu mirror views handled=%llu not handled=%llu | snapshots: at discard=%llu at forward leave=%llu at clear=%llu live used=%llu discarded-without-snapshot=%llu (scene depth discards seen=%llu) | scene depth aliases=%d (added %llu, switches %llu, bind starts %llu, other-depth discards %llu / binds %llu) | eye map: %s entries=%d rt-parity-mismatch=%llu verdicts=%llu no-vote=%llu corrections=%llu rb-skipped-full=%llu rb-failed=%llu rb-throttled=%llu | R |x|>0.25: e0=%llu/%llu e1=%llu/%llu | dlaa frames e0=%llu e1=%llu | "
             "cpu: blit %.3f ms/blit, mv-collect %.3f ms/pass (%.0f records/pass), obj-ids %.3f ms/pass | rate: blits/s=%.1f fps=%.1f (%s) [profile=%s preset=%s sharp=%.1f r=%.1f area=%d up=%s%s] | Present #%llu",
             (unsigned long long)g_blitCount, (unsigned long long)g_passSeq, (unsigned long long)g_blitCount,
             (unsigned long long)g_cSnapUsed, (unsigned long long)g_cLiveUsed, (unsigned long long)g_cUnderflow,
@@ -10247,6 +10416,9 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
             (unsigned long long)MirHandledCount(), (unsigned long long)MirNotHandledCount(),   // v0.10.0 phase 2
             (unsigned long long)g_cSnapAtDiscard, (unsigned long long)g_cSnapAtLeave, (unsigned long long)g_cSnapAtClear,
             (unsigned long long)g_cLiveUsed, (unsigned long long)g_cDiscardNoSnap, (unsigned long long)g_cDiscardSeen,
+            g_sdAliasN, (unsigned long long)g_sdAliasAdds, (unsigned long long)g_sdAliasSwitches,   // v0.10.3 issue #9
+            (unsigned long long)g_sdAliasBindStarts, (unsigned long long)g_sdAliasOtherDiscards,
+            (unsigned long long)g_sdAliasOtherBinds,
             g_vrMode ? "RT map" : "flat", g_eyeMapN, (unsigned long long)g_cRtParityMismatch,
             (unsigned long long)g_cVerdicts, (unsigned long long)g_cVerdictNoVote, (unsigned long long)g_cEyeCorrections,
             (unsigned long long)g_cRbSkipFull, (unsigned long long)g_cRbFailed, (unsigned long long)g_cRbThrottled,
@@ -10486,7 +10658,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         // v0.9.0 r8: which FIFO pass this blit consumed (only the "MV objects: mask dropout" diagnostic prints it)
         dl.Mv().SetObjPassInfo(slot.s, (int)(g_passSeq - g_fifoHead), g_cOverflow, g_passSeq);
         t_inDlaa = true;
-        const bool ok = dl.Run(ctx, tex, g_sceneDepth, &slot.twin, &slot.cand, njx, njy, resetUsed, g_mvOn.load(),
+        const bool ok = dl.Run(ctx, tex, PassDepth(slot), &slot.twin, &slot.cand, njx, njy, resetUsed, g_mvOn.load(),
                                g_mvDebug.load(), candBad, upW, upH, g_objCfg ? objRec : nullptr,
                                g_didCfg ? didRec : nullptr, g_didCfg ? didFwdRec : nullptr);
         t_inDlaa = false;
@@ -10726,7 +10898,9 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
                 "the shifted viewport is re-issued after it", vertexCount, g_mirJit ? "mirror" : "world", g_gameVp[0].Width,
                 g_gameVp[0].Height);
     }
+#ifdef WITH_DLAA
     if (Vrs::g_want && !t_inDlaa) VrsOnDraw(ctx);   // phase 34: full rate for a cut-out / SV_Depth / unknown PS
+#endif
     CPU_ORIG(oDraw(ctx, vertexCount, startVertex));
     if (fsUnshift) { g_vpShifted = false; g_vpOver = false; ReconcileViewports(ctx, false); }   // back to the pass's shift
 #ifdef WITH_DLAA
@@ -11989,8 +12163,12 @@ std::atomic<bool>        g_didHooked{false};        // DrawIndexedInstanced hook
 bool                     g_didInstancedCfg = true;   // dlaa.ini mv_drawid_instanced (v0.10.0 phase 6b: default 1): replay
                                                      // instanced / no-MVP draws always, and let them join the rigid-parent vote
 constexpr int            kDidForcedMax = 2;          // forced (hkMap) replays per pass
-ID3D11DepthStencilView*  g_didRoDsv = nullptr;       // read-only DSV of the scene depth (ref held)
-const void*              g_didRoDsvTex = nullptr;    // the scene depth it was made for (identity)
+// v0.10.3 issue #9: one read-only DSV per scene depth texture (per-eye depths: the two alternate every pass -- one cached view
+// each instead of a re-create at every switch); an entry goes with its texture (DidRoDsvForget) or at a context reset
+struct DidRoDsvEnt { const void* tex; ID3D11DepthStencilView* dsv; UINT w, h; };   // dsv: ref held (nullptr = failed, kept)
+constexpr int            kDidRoDsvN = kSdAliasMax + 1;
+DidRoDsvEnt              g_didRoDsvs[kDidRoDsvN] = {};
+int                      g_didRoDsvNext = 0;         // the entry replaced next when all are in use
 UINT                     g_didDepthW = 0, g_didDepthH = 0;
 int                      g_didForcedPass = 0;        // forced replays in the newest pass
 GpuSpanTimer             g_didReplayTimer;           // GPU time of the replays (all passes)
@@ -12023,14 +12201,34 @@ constexpr int kFwdSkipCombos = 48;
 FwdSkipCombo g_fwdSkipCombo[kFwdSkipCombos];
 int      g_fwdSkipComboN = 0, g_fwdSkipComboOver = 0;
 
-// The read-only DSV of the current scene depth (created once per scene depth texture; nullptr = unsupported / failed).
-ID3D11DepthStencilView* DidRoDsv(ID3D11Device* dev) {
-    if (!g_sceneDepth || !dev) return nullptr;
-    if (g_didRoDsvTex == (const void*)g_sceneDepth) return g_didRoDsv;
-    if (g_didRoDsv) { g_didRoDsv->Release(); g_didRoDsv = nullptr; }
-    g_didRoDsvTex = g_sceneDepth;
+void DidRoDsvForget(const void* tex) {
+    for (DidRoDsvEnt& e : g_didRoDsvs)
+        if (e.tex && e.tex == tex) { if (e.dsv) e.dsv->Release(); e = DidRoDsvEnt{}; }
+}
+void DidRoDsvClear() {
+    for (DidRoDsvEnt& e : g_didRoDsvs) { if (e.dsv) e.dsv->Release(); e = DidRoDsvEnt{}; }
+    g_didRoDsvNext = 0;
+}
+
+// The read-only DSV of scene depth `depth` (created once per scene depth texture; nullptr = unsupported / failed).
+// v0.10.3 issue #9: of the PASS's depth (PassDepth), not always g_sceneDepth: per-eye depths.
+ID3D11DepthStencilView* DidRoDsv(ID3D11Device* dev, ID3D11Texture2D* depth) {
+    if (!depth || !dev) return nullptr;
+    int slot = -1;
+    for (int i = 0; i < kDidRoDsvN; ++i) {
+        const DidRoDsvEnt& e = g_didRoDsvs[i];
+        if (e.tex == (const void*)depth) {
+            if (e.dsv) { g_didDepthW = e.w; g_didDepthH = e.h; }
+            return e.dsv;
+        }
+        if (!e.tex && slot < 0) slot = i;
+    }
+    if (slot < 0) { slot = g_didRoDsvNext; g_didRoDsvNext = (g_didRoDsvNext + 1) % kDidRoDsvN; }
+    DidRoDsvEnt& ent = g_didRoDsvs[slot];
+    if (ent.dsv) ent.dsv->Release();
+    ent = DidRoDsvEnt{ depth, nullptr, 0, 0 };
     D3D11_TEXTURE2D_DESC td{};
-    g_sceneDepth->GetDesc(&td);
+    depth->GetDesc(&td);
     DXGI_FORMAT f = DXGI_FORMAT_UNKNOWN;
     UINT flags = D3D11_DSV_READ_ONLY_DEPTH;
     switch (td.Format) {
@@ -12053,20 +12251,21 @@ ID3D11DepthStencilView* DidRoDsv(ID3D11Device* dev) {
     dd.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
     dd.Flags = flags;
     dd.Texture2D.MipSlice = 0;
-    const HRESULT hr = dev->CreateDepthStencilView(g_sceneDepth, &dd, &g_didRoDsv);
+    const HRESULT hr = dev->CreateDepthStencilView(depth, &dd, &ent.dsv);
     if (FAILED(hr)) {
-        g_didRoDsv = nullptr;
+        ent.dsv = nullptr;
         LogErr("MV draw-ids: read-only scene depth view create hr=0x%lx (%ux%u fmt=%d) -- no per-draw motion vectors",
             (unsigned long)hr, td.Width, td.Height, (int)td.Format);
         return nullptr;
     }
     g_didDepthW = td.Width; g_didDepthH = td.Height;
+    ent.w = td.Width; ent.h = td.Height;
     if (!g_didRoDsvLogged) {
         g_didRoDsvLogged = true;
         Log("MV draw-ids: read-only view of the scene depth created (%ux%u, view fmt=%d, flags 0x%x) -- the G-buffer replay "
             "tests depth EQUAL against it", td.Width, td.Height, (int)f, flags);
     }
-    return g_didRoDsv;
+    return ent.dsv;
 }
 
 // Replays the pending draws of pass `pass` (its FIFO slot's record) into that slot's draw-id target. why: 0 = G-buffer
@@ -12084,7 +12283,7 @@ void DidReplay(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int
     const int64_t t0 = Qpc();
     ID3D11Device* dev = nullptr;
     ctx->GetDevice(&dev);
-    ID3D11DepthStencilView* ro = dev ? DidRoDsv(dev) : nullptr;
+    ID3D11DepthStencilView* ro = dev ? DidRoDsv(dev, PassDepth(ps)) : nullptr;   // v0.10.3 issue #9: this pass's depth
     // v0.10.0 phase 3: a two-channel (R16G16_UINT) target while forward ids are possible; decided at the pass's first replay
     // and kept for the pass (a format change would drop the ids of an earlier forced replay)
     // v0.10.0 phase 9: a 1/2-resolution forward pass has its own forward-id target (the id target stays one channel)
@@ -12533,8 +12732,7 @@ void DidOnContextReset() {
     g_didFwdForcedPass = 0;
     g_didFwdReplayTimer.Reset();
     g_fwdBatchTimer.Reset();                              // v0.10.0 phase 10
-    if (g_didRoDsv) { g_didRoDsv->Release(); g_didRoDsv = nullptr; }
-    g_didRoDsvTex = nullptr;
+    DidRoDsvClear();                                      // v0.10.3 issue #9: every cached read-only scene depth view
     g_didForcedPass = 0;
     g_didReplayTimer.Reset();
     DrawIdRecord::ShutdownDevice();                       // recreated on the new device at the next replay
@@ -13152,7 +13350,7 @@ void MirPrebuild() {
 bool MirIsGbuf(UINT n, ID3D11RenderTargetView* const* rtvs, ID3D11Resource* depthRes,
                Microsoft::WRL::ComPtr<ID3D11Texture2D>& rt0, Microsoft::WRL::ComPtr<ID3D11Texture2D>& depth, UINT* w,
                UINT* h) {
-    if (n != 4 || !rtvs || !depthRes || depthRes == (ID3D11Resource*)g_sceneDepth) return false;
+    if (n != 4 || !rtvs || !depthRes || IsSceneDepth(depthRes)) return false;   // v0.10.3 issue #9: + aliases
     for (UINT i = 0; i < 4; ++i) {
         if (!rtvs[i]) return false;
         D3D11_RENDER_TARGET_VIEW_DESC rd{};
@@ -13731,7 +13929,7 @@ void MirOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* 
     MirUnit* cu = g_mirCur >= 0 ? &g_mir[g_mirCur] : nullptr;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> rt0, depth;
     UINT w = 0, h = 0;
-    const bool gbuf = n == 4 && depthRes && depthRes != (ID3D11Resource*)g_sceneDepth && !sceneGbuf &&
+    const bool gbuf = n == 4 && depthRes && !IsSceneDepth(depthRes) && !sceneGbuf &&   // v0.10.3 #9: + aliases
                       !g_gameDeviceChanged.load(std::memory_order_relaxed) && MirIsGbuf(n, rtvs, depthRes, rt0, depth, &w, &h);
     // the open view's own G-buffer again before its forward pass (a second G-buffer segment): the same view
     const bool sameView = cu && cu->open && gbuf && rt0.Get() == cu->rt0.Get() && depth.Get() == cu->depth.Get() &&
@@ -17243,8 +17441,8 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
     if (gameCtx && !t_inDlaa && g_lodPerDraw.load(std::memory_order_relaxed)) LodOnDraw(ctx);
 #ifdef WITH_DLAA
     if (g_menuLateN && gameCtx && !t_inDlaa && indexCount <= 6) MenuLateOnDraw(ctx, "DrawIndexed", indexCount, _ReturnAddress());
-#endif
     if (Vrs::g_want && gameCtx && !t_inDlaa) VrsOnDraw(ctx);   // phase 34: full rate for a cut-out / SV_Depth / unknown PS
+#endif
     CPU_ORIG(oDrawIndexed(ctx, indexCount, startIndex, baseVertex));
 #ifdef WITH_DLAA
     if (objTag) oOMSetDepthStencilState(ctx, g_objCur->twin, ObjStaticRef());   // back to the static ref
@@ -17281,19 +17479,20 @@ void ResetPassTracking(uint64_t n) {
 }
 void ResetPassTrackingCore(bool forceDlaaOff) {
     if (g_sceneDepth) { g_sceneDepth->Release(); g_sceneDepth = nullptr; }   // rediscovered by InspectDepth
+    SdAliasClear();                                            // v0.10.3 issue #9: the scene depth aliases too (refs released)
     g_sceneW = g_sceneH = 0;
     g_sdStaleSince = kSdNotStale;                              // v0.8.2
     g_tonemapTex = nullptr;
     g_fwdColorTex = nullptr; g_hdrCompTex = nullptr; g_hdrCompLogged = false;   // v0.8.0 HDR blit rule
     g_gbufPass = false; g_jitterPass = false; g_depthDirty = false;
     LodOnContextReset();                                       // v0.9.0: sampler twins belong to the old device
-    Vrs::Abandon();                                            // phase 34: the old context's bracket is forgotten (not touched)
+#ifdef WITH_DLAA
+    Vrs::Abandon();                                           // phase 34: the old context's bracket is forgotten (not touched)
     g_vrsPsOk = false;
     g_vrsRing.Clear(); g_vrsFwd.Clear(); g_vrLastBlitRt = nullptr; g_vrsRingLogged = false;   // phase 34b: eye sources relearned
     for (VrsPred& b : g_vrsBlitEye) b = { ~0ull, -1 };
     for (VrsPred& b : g_vrsPred) b = { ~0ull, -1 };
-#ifdef WITH_DLAA
-    ObjOnContextReset();                                       // v0.9.0: depth-stencil twins / object records too
+    ObjOnContextReset();                                      // v0.9.0: depth-stencil twins / object records too
     FwdOnContextReset();                                       // v0.9.0 r5: forward-depth states (old device)
     MirOnContextReset();                                       // v0.10.0 phase 2: mirror views / units' game refs
     MenuLateReset("game context change");                      // v0.10.0 phase 16: recorded eye pictures (game refs)
@@ -18198,8 +18397,10 @@ void LoadConfig() {
                 continue;
             }
             // phase 35 (outside the else-if chain below: MSVC's nesting limit, C1061)
+#ifdef WITH_DLAA
             if (!strcmp(key, "did_shadow"))        { g_didShadowCfg = v >= 2 ? 2 : (v == 1 ? 1 : 0); continue; }   // startup only
             if (!strcmp(key, "did_shadow_verify")) { g_didShadowVerify = v < 0 ? -1 : (int)(v > 100000 ? 100000 : v); continue; }
+#endif
             // phase 39 (here for the same reason; debug moved out of the WITH_DLAA chain: the log-only build reads it too)
             if (!_stricmp(key, "log_level")) {           // (case-insensitive as log.h's reader)
                 const int lv = LogParseLevel(eq + 1);     // log.h: the same parser as its own early read
