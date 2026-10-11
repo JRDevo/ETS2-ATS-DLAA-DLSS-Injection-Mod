@@ -22,7 +22,7 @@ account — a few hotkeys, an in-game tuning menu (`Delete`) and an optional tex
 
 **An NVIDIA RTX GPU is required** (DLAA and DLSS only run on RTX cards).
 
-**Menu:** [Features](#features) · [Download](#-download) · [Requirements](#requirements) · [Install](#install) · [Modes](#modes--the-end-key) · [Flat or VR](#flat-or-vr) · [OFXR Bridge](#ofxr-bridge-vr-frame-generation) · [Render scale](#how-render-scale-works) · [Models](#models-presets--which-one-to-use) · [Controls](#controls) · [Tuning menu](#the-tuning-menu) · [`dlaa.ini`](#dlaaini) · [Performance](#performance) · [Troubleshooting](#troubleshooting) · [Multiplayer](#multiplayer) · [Build](#build-from-source) · [Report a problem](#reporting-a-problem-what-to-upload) · [License](#license-and-credits)
+**Menu:** [Features](#features) · [Download](#-download) · [Requirements](#requirements) · [Install](#install) · [Modes](#modes--the-end-key) · [Flat or VR](#flat-or-vr) · [OFXR Bridge](#ofxr-bridge-vr-frame-generation) · [Render scale](#how-render-scale-works) · [Models](#models-presets--which-one-to-use) · [Controls](#controls) · [Tuning menu](#the-tuning-menu) · [dlaa.ini](#dlaaini) · [Performance](#performance) · [Troubleshooting](#troubleshooting) · [Multiplayer](#multiplayer) · [Build](#build-from-source) · [Report a problem](#reporting-a-problem-what-to-upload) · [License](#license-and-credits)
 
 ## Features
 
@@ -118,8 +118,8 @@ trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
    You can drop in a **newer** `nvngx_dlss.dll` at any time to update the DLSS model
    — just replace the file.
-7. Launch the game. DLAA starts on. No log file is written unless you set
-   `debug = 1` in `dlaa.ini` (see Troubleshooting).
+7. Launch the game. DLAA starts on. The log file only gets errors unless you set
+   `log_level = 4` in `dlaa.ini` (see Troubleshooting).
 
 To uninstall, delete `dinput8.dll` (and `dlaa.ini`) from `bin\win_x64\`.
 
@@ -174,11 +174,11 @@ the mod. The mod only makes sure the bridge's own copies inside the game are lef
   program that runs as administrator, so the bridge would silently do nothing.
 - **Switch off:** `ofxr_bridge = 0` in `dlaa.ini` switches the mod's handling off (default 1). It does nothing when the bridge is not
   there.
-- **In the log** (`debug = 1`): `OFXR Bridge: layer module ... loaded` when the bridge's layer shows up in the game (it loads when the
+- **In the log** (`log_level = 3` or `4`): `OFXR Bridge: layer module ... loaded` when the bridge's layer shows up in the game (it loads when the
   game starts its VR session, so it can appear a little after start), `OFXR Bridge: tray.ini found` / `not installed`, and
   `OFXR Bridge: N calls passed through so far`.
 
-Status: the handling is built but not yet tested in a headset with the bridge armed; report what you see with `debug = 1`.
+Status: the handling is built but not yet tested in a headset with the bridge armed; report what you see with `log_level = 4`.
 
 </details>
 
@@ -361,7 +361,7 @@ the value); a long low tone means "already at the limit" or "save failed". Turn 
 <details>
 <summary>Show the debug keys</summary>
 
-These need `debug = 1` in `dlaa.ini`. They are for diagnostics and bug reports; you can ignore them when playing.
+These need `log_level = 4` in `dlaa.ini`. They are for diagnostics and bug reports; you can ignore them when playing.
 
 | Default key | Action |
 |-----|--------|
@@ -460,6 +460,10 @@ The three green lines under the title show the game's GPU time per frame, what t
   Scaling. Fences, grass and leaves keep full detail, and so does everything the mod draws itself. **Foveated size** picks
   how big the sharp centre is: `wide`, `balanced` (default) or `narrow` (`vrs_inner` / `vrs_outer`). On another GPU the
   row says `not supported`. Look for blocky edges at the side of your view; switch it off if they bother you.
+- **Logging** (`log_level`, `errors` by default): how much goes into `dlaa_inject.log` -- `off`, `errors`, `warnings`,
+  `info` or `debug`, live. The row shows what the logging costs: CPU milliseconds per frame (and in its description the
+  lines per second; at `debug` also what the CPU profiler costs). `debug` also runs the mod's GPU timers and CPU
+  profiler; use it for bug reports, `errors` for play.
 - **Save to dlaa.ini** (the same as `Shift+F12`) writes the live values, and the panel position / fps box once you
   changed them.
 - **Reset to defaults** puts every row back to the fresh-install values, live and in `dlaa.ini` (the keys are removed
@@ -471,7 +475,7 @@ The three green lines under the title show the game's GPU time per frame, what t
   eye) and the fps. The `GPU cost` column shows each row's share right now (`off` = that feature is off and costs
   nothing; `Mode` and `DLAA on / off` show the whole mod, `DLSS upscale` shows `no extra`, the texture sharpness rows
   `~0 ms`). All figures are GPU milliseconds per frame (VR: per eye), measured live and refreshed once a second. The
-  mod's timers switch on while the menu is open and off again when it closes (unless `debug = 1`).
+  mod's timers switch on while the menu is open and off again when it closes (unless `log_level = 4`).
 - Different keys: `key_menu`, `key_menu_up`, `key_menu_down`, `key_menu_left`, `key_menu_right` in `dlaa.ini`
   (see [`docs/KEYS.md`](docs/KEYS.md)).
 - **From the wheel:** the menu (and every other hotkey) can also be driven from a wheel's D-pad and buttons, e.g.
@@ -490,7 +494,7 @@ a comment. It is read once at launch (the `config (...)` line in the log shows w
 was used). The full template with every key and its default is in
 [`docs/dlaa.ini.sample`](docs/dlaa.ini.sample). The keys most users care about:
 
-**The five settings that matter:** `mode`, `perf_profile`, `dlss_preset`, `dlaa_area` (VR), `debug`.
+**The five settings that matter:** `mode`, `perf_profile`, `dlss_preset`, `dlaa_area` (VR), `log_level`.
 Everything else has a tuned default; see [`docs/dlaa.ini.sample`](docs/dlaa.ini.sample) for the full list.
 
 The table below lists the commonly used keys:
@@ -527,14 +531,14 @@ The table below lists the commonly used keys:
 | `vrs` | `0` | VR, NVIDIA RTX only: `1` = **foveated rendering** (from OpenXR Toolkit): the outer ring of each eye picture is shaded once per 2 x 2 pixels, the centre stays sharp; saves GPU time at a high in-game Scaling. Fences, grass, leaves and the mod's own passes keep full detail. The menu's `Foveated (VRS)` row switches it live, `Shift+F12` saves |
 | `vrs_inner` / `vrs_outer` | `55` / `80` | foveated rendering: ring sizes in % of the half picture around each eye's centre (`10`..`150`); full detail inside `vrs_outer` (with `vrs_quality = 1`), 2 x 2 outside. The menu's `Foveated size` row: `wide` = 65 / 90, `balanced` = 55 / 80, `narrow` = 40 / 65 |
 | `vrs_quality` | `1` | foveated rendering: `1` = full detail inside `vrs_outer`; `0` = the ring between `vrs_inner` and `vrs_outer` is shaded per 2 x 1 pixels too (more saving) |
-| `vrs_debug` | `0` | foveated rendering, test only (needs `debug = 1`): `1` = middle ring 2 x 2, outer ring 4 x 4, to see the pattern |
+| `vrs_debug` | `0` | foveated rendering, test only (needs `log_level = 4`): `1` = middle ring 2 x 2, outer ring 4 x 4, to see the pattern |
 | `cpu_cache_pin` | `0` | `1` = on AMD X3D CPUs with V-Cache on one half only (e.g. 7950X3D / 9950X3D) the game is kept on the V-Cache cores (read at game start only). Does nothing on other CPUs. Off by default: no fps gain was measured yet, try it and compare |
 | `did_shadow` | `1` | CPU saving for the per-part motion vectors (read at game start only): `1` = the mod remembers the game's drawing settings as the game sets them instead of asking the graphics driver for them at every draw (input layout, vertex shader, its constant buffers and samplers, rasterizer state); `2` = also the vertex / index buffers (faster only when the game reuses buffers between draws); `0` = ask at every draw (as before). The log's `did_shadow=` line at startup says which one ran |
-| `did_shadow_verify` | `-1` | test only: every Nth draw the remembered settings are compared with the driver's; a difference is logged (`MISMATCH`) and the mod asks the driver for the rest of that frame. `-1` = every 64th draw with `debug = 1`, off otherwise; `0` = off |
+| `did_shadow_verify` | `-1` | test only: every Nth draw the remembered settings are compared with the driver's; a difference is logged (`MISMATCH`) and the mod asks the driver for the rest of that frame. `-1` = every 64th draw with `log_level = 4`, off otherwise; `0` = off |
 | `bind_hold_ms` | `5000` | tuning menu: how long (ms, `500`..`10000`) a key or wheel button must be held on a row to bind it to that row ([`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu)) |
 | `controller_name` | *(empty)* | only read the wheels / gamepads whose name contains this text for `WheelN` / `WheelUp` hotkey bindings, e.g. `T300` when a shifter shares the wheel's button numbers; empty = every controller ([`docs/KEYS.md`](docs/KEYS.md#wheel-gamepad-and-joystick-buttons)) |
 | `key_<action>` | *(see KEYS.md)* | re-bind any hotkey, e.g. `key_dlaa_toggle = Ctrl+D`, or `none` to disable it. Full list and format: [`docs/KEYS.md`](docs/KEYS.md) |
-| `debug` | `0` | `1` = write the log file `dlaa_inject.log` (off by default) |
+| `log_level` | `1` | how much goes into the log file `dlaa_inject.log`: `0` = off, `1` = errors only (without an error no file is created), `2` = + warnings (problems the mod works around), `3` = + info (start-up and every setting change), `4` = debug: + statistics every few seconds, and the mod's GPU timers and CPU profiler run. Bug reports need `4`. The names work too (`off`, `errors`, `warnings`, `info`, `debug`). The menu's `Logging` row changes it live. The old `debug = 1` still means `4`, but only when there is no `log_level` line |
 
 </details>
 
@@ -543,7 +547,7 @@ The table below lists the commonly used keys:
 <details>
 <summary><b>Show</b></summary>
 
-Measured with the mod's own GPU timers (`debug = 1` writes a `perf eye` line to the log every 10 seconds). ETS2 flat,
+Measured with the mod's own GPU timers (`log_level = 4` writes a `perf eye` line to the log every 10 seconds). ETS2 flat,
 render 2880x2160 (Scaling 75 % of 3840x2160), model E, sharpen on, texture LOD bias -1.0, 4 mirrors, dense traffic.
 The game held its 72 fps cap the whole time.
 
@@ -572,7 +576,7 @@ The game held its 72 fps cap the whole time.
 | Sharpen (`sharpness`, `Shift+F7/F8`) | 0.1 ms | 0 = the pass is skipped |
 | Texture LOD bias (`tex_lod_bias`, `Ctrl+F1/F2`) | none measurable | sharper textures can shimmer more on fine meshes |
 | DLAA before the tone-map (`dlaa_pre_tonemap`, `Alt+F7`) | none measurable | same NGX work, different input |
-| Debug log + timers (`debug = 1`) | 0.1 - 0.3 ms CPU | `debug = 0` for play, 1 for bug reports |
+| Debug log + timers (`log_level = 4`) | 0.1 - 0.3 ms CPU | `log_level = 1` for play, 4 for bug reports; the menu's `Logging` row shows what it costs |
 | Colour view (`Ctrl+F6`) | small | debug only |
 | Stereo buffer scale 2.0 (VR, `r_manual_stereo_buffer_scale`) | 4x the pixels of 1.0 | the user setting that decides most of the VR cost |
 
@@ -609,7 +613,7 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   the per-object motion and leaves the camera motion only, the way v0.8.x worked.
   Then please send the log, see *Reporting a problem*.
 
-- **The log is off by default.** Put `debug = 1` in `dlaa.ini` (next to `dinput8.dll`)
+- **The log has only errors by default.** Put `log_level = 4` in `dlaa.ini` (next to `dinput8.dll`)
   and start the game again: `dlaa_inject.log` is then written next to the DLL. It
   records the version, which hooks installed, and whether DLAA/DLSS started. It is
   opened share-read, so you can tail it while the game runs. Check it first.
@@ -631,8 +635,9 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   drew the game's fog pass one texel off.
 - **No DLAA / DLSS while you drive a car (ATS):** fixed in v0.8.2: update. Older versions work in the menu
   but do nothing in the car (the log shows many `fifo underflow` lines).
-- **No log file with `debug = 1`:** the line must not start with `#`. From v0.8.2 the packaged `dlaa.ini`
-  has a plain `debug = 0` line: change the 0 to 1.
+- **No log file with `log_level = 4`:** the line must not start with `#`. The packaged `dlaa.ini` has a plain
+  `log_level = 1` line: change the 1 to 4. An older `dlaa.ini` with `debug = 1` works too, as long as it has no
+  `log_level` line.
 - **Start with DLAA off** (detect + log only): put an empty file named
   `dlaa_off.txt` next to `dinput8.dll` before launch. `Shift+F11` / `End` still
   switch it on.
@@ -686,7 +691,7 @@ If something goes wrong, [open an issue](../../issues/new/choose) (**New issue**
 **Bug report**) and attach the files below. Without the log I usually can't tell what
 happened.
 
-**Steps first:** put `debug = 1` in `dlaa.ini` (the log is off without it), start the game, reproduce the problem, then **quit the game** and
+**Steps first:** put `log_level = 4` in `dlaa.ini` (without it the log has errors only), start the game, reproduce the problem, then **quit the game** and
 only then collect the files. Load a save and drive for about a minute before quitting, so the log covers the 3D scene and not just the menu. The log is written while the game runs, so grab it after
 the game has exited (or at least after the problem has happened).
 
@@ -695,8 +700,8 @@ the game has exited (or at least after the problem has happened).
 `...\steamapps\common\Euro Truck Simulator 2\bin\win_x64\` or
 `...\steamapps\common\American Truck Simulator\bin\win_x64\`:
 
-- **`dlaa_inject.log`** — **required, always.** It only exists when `dlaa.ini` has
-  `debug = 1`; if there is no log file, that line is missing.
+- **`dlaa_inject.log`** — **required, always.** Use it with `log_level = 4` in `dlaa.ini`; if there is no
+  log file, that line is missing.
 - **`dlaa.ini`** — **required** (your settings).
 - Only when asked, or for visual problems:
   - **`dlaa_trace.txt`** — frame trace, written after you press `Ctrl+F11` in game.

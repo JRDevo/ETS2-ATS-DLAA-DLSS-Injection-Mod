@@ -40,6 +40,9 @@
 #include "log.h"
 #else
 #define Log(...) ((void)0)
+#define LogErr(...) ((void)0)                       // phase 39: the level macros too
+#define LogWarn(...) ((void)0)
+#define LogDbg(...) ((void)0)
 #endif
 #ifdef WITH_VRS
 #include <nvapi.h>                                    // external/nvapi (NVIDIA NVAPI SDK, MIT), nvapi64.lib linked statically
@@ -132,7 +135,7 @@ bool NvOk(NvAPI_Status st, const char* what) {
     ++s_stats.nvFails;
     NvAPI_ShortString msg = {};
     NvAPI_GetErrorMessage(st, msg);
-    Log("VRS: %s FAILED (NvAPI status %d: %s) -- VRS off for this session", what, (int)st, msg);
+    LogErr("VRS: %s FAILED (NvAPI status %d: %s) -- VRS off for this session", what, (int)st, msg);
     return false;
 }
 
@@ -167,7 +170,7 @@ Mask* FindOrBuild(ID3D11Device* dev, ID3D11DeviceContext* ctx, uint32_t w, uint3
     ID3D11Texture2D* tex = nullptr;
     HRESULT hr = dev->CreateTexture2D(&td, nullptr, &tex);
     if (FAILED(hr) || !tex) {
-        Log("VRS: mask texture %ux%u tiles FAILED (hr=0x%08lX)", tw, th, (unsigned long)hr);
+        LogErr("VRS: mask texture %ux%u tiles FAILED (hr=0x%08lX)", tw, th, (unsigned long)hr);
         return nullptr;
     }
     ctx->UpdateSubresource(tex, 0, nullptr, bytes.data(), tw, 0);
@@ -262,7 +265,7 @@ int Probe(ID3D11Device* dev) {
         NvAPI_GetErrorMessage(st, msg);
         s_support = 0;
         s_supportText = "no NVIDIA driver (NvAPI_Initialize failed)";
-        Log("VRS (foveated rendering): NOT available -- NvAPI_Initialize failed (status %d: %s; not an NVIDIA GPU / driver)",
+        LogErr("VRS (foveated rendering): NOT available -- NvAPI_Initialize failed (status %d: %s; not an NVIDIA GPU / driver)",
             (int)st, msg);
         return s_support;
     }
@@ -271,7 +274,7 @@ int Probe(ID3D11Device* dev) {
     if (st != NVAPI_OK || !caps.bVariablePixelRateShadingSupported) {
         s_support = 0;
         s_supportText = "this GPU has no variable rate shading (needs NVIDIA RTX / GTX 16xx)";
-        Log("VRS (foveated rendering): NOT available -- NvAPI_D3D1x_GetGraphicsCapabilities status %d, "
+        LogWarn("VRS (foveated rendering): NOT available -- NvAPI_D3D1x_GetGraphicsCapabilities status %d, "
             "bVariablePixelRateShadingSupported %u (needs Turing or newer)", (int)st, (unsigned)caps.bVariablePixelRateShadingSupported);
         return s_support;
     }
@@ -288,7 +291,7 @@ int Probe(ID3D11Device* dev) {
     if (s_support < 0) {
         s_support = 0;
         s_supportText = "not built in (no external/nvapi at build time)";
-        Log("VRS (foveated rendering): NOT available -- this build has no NVAPI (external/nvapi missing at build time)");
+        LogWarn("VRS (foveated rendering): NOT available -- this build has no NVAPI (external/nvapi missing at build time)");
     }
     return s_support;
 #endif
@@ -391,7 +394,7 @@ void MaybeLogStats(uint64_t frame) {
     const uint64_t vrs = c.drawsVrs - p.drawsVrs, cut = c.drawsSkip[kSkipCutout] - p.drawsSkip[kSkipCutout];
     const uint64_t dep = c.drawsSkip[kSkipDepth] - p.drawsSkip[kSkipDepth], unk = c.drawsSkip[kSkipUnknown] - p.drawsSkip[kSkipUnknown];
     const uint64_t all = vrs + cut + dep + unk;
-    Log("VRS @%.0f s (Present #%llu): %llu scene binds entered (eye 0 %llu / eye 1 %llu), draws coarse-capable %llu (%.1f %%), "
+    LogDbg("VRS @%.0f s (Present #%llu): %llu scene binds entered (eye 0 %llu / eye 1 %llu), draws coarse-capable %llu (%.1f %%), "
         "full rate: cut-out %llu / SV_Depth %llu / unknown shader %llu; mod-work pauses %llu, table switches %llu, eye prediction "
         "misses %llu of %llu checked blits, masks %llu, NVAPI failures %llu; eye sources (entered binds): blit-RT cycle %llu / "
         "forward colour %llu / frame pair %llu / own blit %llu; binds left alone: no certain eye %llu, sources disagree %llu, "

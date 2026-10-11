@@ -221,7 +221,7 @@ struct JoyTap {
         povOfs = kNoOfs;
         if (slot) JoyClearLive(*slot);
         if (g_joySetupLogs.fetch_add(1, std::memory_order_relaxed) < kJoySetupLogMax)
-            Log("controller '%s': the game uses a DirectInput action map -- its buttons cannot be bound (Wheel* bindings "
+            LogWarn("controller '%s': the game uses a DirectInput action map -- its buttons cannot be bound (Wheel* bindings "
                 "ignore this device)", name);
     }
     void OnUnacquire() { if (slot) JoyClearLive(*slot); }
@@ -548,14 +548,14 @@ void HookWindow(HWND hwnd) {
     if (!hwnd || g_hookTried.exchange(true)) return;
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
-    if (pid != GetCurrentProcessId()) { Log("tuning menu: window %p belongs to another process -- key messages not filtered", (void*)hwnd); return; }
+    if (pid != GetCurrentProcessId()) { LogWarn("tuning menu: window %p belongs to another process -- key messages not filtered", (void*)hwnd); return; }
     const LONG_PTR cur = GetWindowLongPtrW(hwnd, GWLP_WNDPROC);
-    if (!cur) { Log("tuning menu: window %p has no window procedure (%lu) -- key messages not filtered", (void*)hwnd, GetLastError()); return; }
+    if (!cur) { LogWarn("tuning menu: window %p has no window procedure (%lu) -- key messages not filtered", (void*)hwnd, GetLastError()); return; }
     g_origProc.store(cur, std::memory_order_release);          // before the swap: SubProc may run at once
     SetLastError(0);
     const LONG_PTR prev = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&SubProc));
     if (!prev && GetLastError() != 0) {
-        Log("tuning menu: subclassing window %p failed (%lu) -- key messages not filtered", (void*)hwnd, GetLastError());
+        LogErr("tuning menu: subclassing window %p failed (%lu) -- key messages not filtered", (void*)hwnd, GetLastError());
         return;
     }
     if (prev != cur) g_origProc.store(prev, std::memory_order_release);   // changed in between: chain to what was really there

@@ -39,12 +39,12 @@ inline void Apply(int enabled) {
     DWORD len = 0;
     GetLogicalProcessorInformationEx(RelationCache, nullptr, &len);
     if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || len == 0) {
-        Log("cpu_cache_pin (phase 32): cache topology not readable (error %lu) -- nothing done", GetLastError());
+        LogErr("cpu_cache_pin (phase 32): cache topology not readable (error %lu) -- nothing done", GetLastError());
         return;
     }
     std::vector<unsigned char> buf(len);
     if (!GetLogicalProcessorInformationEx(RelationCache, (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)buf.data(), &len)) {
-        Log("cpu_cache_pin (phase 32): cache topology not readable (error %lu) -- nothing done", GetLastError());
+        LogErr("cpu_cache_pin (phase 32): cache topology not readable (error %lu) -- nothing done", GetLastError());
         return;
     }
     if (GetActiveProcessorGroupCount() > 1) {
@@ -81,7 +81,7 @@ inline void Apply(int enabled) {
 
     DWORD_PTR procMask = 0, sysMask = 0;
     if (!GetProcessAffinityMask(GetCurrentProcess(), &procMask, &sysMask)) {
-        Log("cpu_cache_pin (phase 32): GetProcessAffinityMask failed (error %lu) -- nothing done", GetLastError());
+        LogErr("cpu_cache_pin (phase 32): GetProcessAffinityMask failed (error %lu) -- nothing done", GetLastError());
         return;
     }
     const int keep = PopCount64(want);
@@ -98,7 +98,7 @@ inline void Apply(int enabled) {
         Log("cpu_cache_pin (phase 32): process affinity 0x%llx -> 0x%llx (the biggest L3 only: %d logical processors kept)",
             (unsigned long long)procMask, want, keep);
     else
-        Log("cpu_cache_pin (phase 32): SetProcessAffinityMask(0x%llx) failed (error %lu) -- affinity unchanged", want, GetLastError());
+        LogErr("cpu_cache_pin (phase 32): SetProcessAffinityMask(0x%llx) failed (error %lu) -- affinity unchanged", want, GetLastError());
 }
 
 } // namespace CpuPin

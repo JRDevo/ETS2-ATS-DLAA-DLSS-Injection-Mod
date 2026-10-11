@@ -2202,7 +2202,7 @@ void VsLayEvidence(VsLay* e, uint32_t row, bool cachedFailed) {
         if (!e->logged && ((!normal && g_vsLayLogN < 64) || (normal && g_vsLayLogNormal < 16))) {
             e->logged = 1;
             if (normal) ++g_vsLayLogNormal; else ++g_vsLayLogN;
-            Log("MV draw-ids: MVP rows %u..%u for VS %p (layout: %s) -- decided from its first read-back draw (v0.10.0 phase 22; VS "
+            LogDbg("MV draw-ids: MVP rows %u..%u for VS %p (layout: %s) -- decided from its first read-back draw (v0.10.0 phase 22; VS "
                 "layouts known: normal %u, +1 %u, +2 %u, +3 %u, +4 %u, undecided %u%s)", row, row + 3u, e->vs, LayName(row), c[0],
                 c[1], c[2], c[3], c[4], c[5], (normal && g_vsLayLogNormal == 16) ? "; further normal-layout VSes are counted in the "
                 "'MVP layout' field of the 'MV draw-ids @blit' line, not logged" : "");
@@ -2216,7 +2216,7 @@ void VsLayEvidence(VsLay* e, uint32_t row, bool cachedFailed) {
         e->row = (uint8_t)row; e->altN = 0;
         ++g_vsLaySwitches;
         if (g_vsLaySwitches <= 32)
-            Log("MV draw-ids: MVP rows of VS %p CHANGED %u..%u -> %u..%u (layout %s -> %s): %d draws in a row failed the cached "
+            LogWarn("MV draw-ids: MVP rows of VS %p CHANGED %u..%u -> %u..%u (layout %s -> %s): %d draws in a row failed the cached "
                 "block and found this one (v0.10.0 phase 22; switches so far %llu)", e->vs, old, old + 3u, row, row + 3u,
                 LayName(old), LayName(row), kLayRecheck, (unsigned long long)g_vsLaySwitches);
     }
@@ -2387,9 +2387,9 @@ static_assert(8704u + 64u * 192u <= 24576u, "v0.10.0 phase 6c: 64 vote tables of
 bool CreateCsFromCache(ID3D11Device* dev, ShaderCache::Id id, ID3D11ComputeShader** out) {
     size_t size = 0;
     const void* code = ShaderCache::Code(id, &size);
-    if (!code) { Log("MV draw-ids: %s compile failed %s", ShaderCache::Name(id), ShaderCache::Error(id)); return false; }
+    if (!code) { LogErr("MV draw-ids: %s compile failed %s", ShaderCache::Name(id), ShaderCache::Error(id)); return false; }
     const HRESULT hr = dev->CreateComputeShader(code, size, nullptr, out);
-    if (FAILED(hr)) { Log("MV draw-ids: %s CreateComputeShader hr=0x%lx", ShaderCache::Name(id), (unsigned long)hr); return false; }
+    if (FAILED(hr)) { LogErr("MV draw-ids: %s CreateComputeShader hr=0x%lx", ShaderCache::Name(id), (unsigned long)hr); return false; }
     return true;
 }
 
@@ -2682,7 +2682,7 @@ bool DrawIdRecord::EnsureMirror(ID3D11DeviceContext* ctx, UINT need) {
         !MakeBuf(dev.Get(), bytes, D3D11_BIND_SHADER_RESOURCE, D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS, 0, false, &nb) ||
         FAILED(dev->CreateShaderResourceView(nb.Get(), &sd, &nsrv))) {
         static int fails = 0;
-        if (fails++ < 3) Log("MV draw-ids: ring mirror (%u bytes, %d ring(s)) create failed", bytes, m_nRings);
+        if (fails++ < 3) LogErr("MV draw-ids: ring mirror (%u bytes, %d ring(s)) create failed", bytes, m_nRings);
         return false;
     }
     if (m_mirror && m_copiedAny && m_mirrorBytes) {
@@ -2932,7 +2932,7 @@ void FrameStart() {
         s_fallbackFrames.fetch_add(1, std::memory_order_relaxed);
         if (++s_badFrames >= 8 && !s_disabled.load(std::memory_order_relaxed)) {
             s_disabled.store(true, std::memory_order_relaxed);
-            Log("MV draw-ids shadow: verify mismatches in %d frames -- did_shadow is OFF for the rest of the session (the getters "
+            LogWarn("MV draw-ids shadow: verify mismatches in %d frames -- did_shadow is OFF for the rest of the session (the getters "
                 "read every draw's state, as with did_shadow = 0)", s_badFrames);
         }
     }
@@ -2998,7 +2998,7 @@ bool DrawIdRecord::CaptureShadow(ID3D11DeviceContext1* ctx, State& s, const Stat
                     ++s_st.recGet;
                     if (s_vtLogs < 5) {
                         ++s_vtLogs;
-                        Log("MV draw-ids shadow: the context's vtable entry %d is %p, not the hooked %p (%d/5) -- a Set could bypass "
+                        LogWarn("MV draw-ids shadow: the context's vtable entry %d is %p, not the hooked %p (%d/5) -- a Set could bypass "
                             "the hooks: this draw's state is read through the getters", s_vtIdx[i], vt[s_vtIdx[i]], s_vtExp[i],
                             s_vtLogs);
                     }
@@ -3175,7 +3175,7 @@ bool DrawIdRecord::CaptureShadow(ID3D11DeviceContext1* ctx, State& s, const Stat
             for (int f = 0; f < kFieldN; ++f) if (bad & (1u << f)) ++s_st.mismatch[f];
             if (s_mismatchLogs < 20) {
                 ++s_mismatchLogs;
-                Log("MV draw-ids shadow: MISMATCH %d/20 (record #%llu, verify every %d):%s -- this record takes the runtime's state, "
+                LogWarn("MV draw-ids shadow: MISMATCH %d/20 (record #%llu, verify every %d):%s -- this record takes the runtime's state, "
                     "the getters read every draw for the rest of the frame", s_mismatchLogs, (unsigned long long)s_recSerial,
                     s_verifyEvery, txt);
             }
@@ -3675,7 +3675,7 @@ static bool FwdInitObjects(ID3D11Device* dev) {
     if (!c0 || !c1 || !c2 || FAILED(dev->CreateVertexShader(c0, n0, nullptr, &s_initVs)) ||
         FAILED(dev->CreatePixelShader(c1, n1, nullptr, &s_initPs[0])) ||
         FAILED(dev->CreatePixelShader(c2, n2, nullptr, &s_initPs[1]))) {
-        Log("MV forward depth: occlusion-init shaders unavailable (%s) -- the forward depth starts empty (as mv_fwd_depth_cull 0)",
+        LogErr("MV forward depth: occlusion-init shaders unavailable (%s) -- the forward depth starts empty (as mv_fwd_depth_cull 0)",
             ShaderCache::Error(!c0 ? ShaderCache::kFwdInitVs : (!c1 ? ShaderCache::kFwdInitPs0 : ShaderCache::kFwdInitPs1)));
         return false;
     }
@@ -3690,7 +3690,7 @@ static bool FwdInitObjects(ID3D11Device* dev) {
     D3D11_RASTERIZER_DESC rd{};
     rd.FillMode = D3D11_FILL_SOLID; rd.CullMode = D3D11_CULL_NONE; rd.DepthClipEnable = TRUE; rd.ScissorEnable = TRUE;
     if (FAILED(dev->CreateDepthStencilState(&dd, &s_initDss)) || FAILED(dev->CreateRasterizerState(&rd, &s_initRs))) {
-        Log("MV forward depth: occlusion-init states create failed -- the forward depth starts empty (as mv_fwd_depth_cull 0)");
+        LogErr("MV forward depth: occlusion-init states create failed -- the forward depth starts empty (as mv_fwd_depth_cull 0)");
         return false;
     }
     s_initFailed = false;
@@ -3745,7 +3745,7 @@ bool DrawIdRecord::InitDevice(ID3D11Device* dev) {
     const void* code = ShaderCache::Code(ShaderCache::kDrawIdPs, &size);
     HRESULT hr = E_FAIL;
     if (!code || FAILED(hr = dev->CreatePixelShader(code, size, nullptr, &s_ps))) {
-        Log("MV draw-ids: replay pixel shader unavailable (%s, hr=0x%lx) -- per-draw motion vectors off",
+        LogErr("MV draw-ids: replay pixel shader unavailable (%s, hr=0x%lx) -- per-draw motion vectors off",
             ShaderCache::Error(ShaderCache::kDrawIdPs), (unsigned long)hr);
         s_ps.Reset();
         return false;
@@ -3759,7 +3759,7 @@ bool DrawIdRecord::InitDevice(ID3D11Device* dev) {
     dd.FrontFace = { D3D11_STENCIL_OP_KEEP, D3D11_STENCIL_OP_KEEP, D3D11_STENCIL_OP_KEEP, D3D11_COMPARISON_ALWAYS };
     dd.BackFace = dd.FrontFace;
     if (FAILED(hr = dev->CreateDepthStencilState(&dd, &s_dss))) {
-        Log("MV draw-ids: EQUAL depth state create hr=0x%lx -- per-draw motion vectors off", (unsigned long)hr);
+        LogErr("MV draw-ids: EQUAL depth state create hr=0x%lx -- per-draw motion vectors off", (unsigned long)hr);
         ShutdownDevice(); s_dev = dev;
         return false;
     }
@@ -3773,7 +3773,7 @@ bool DrawIdRecord::InitDevice(ID3D11Device* dev) {
         bd.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
         bd.RenderTarget[0].RenderTargetWriteMask = ch == 0 ? D3D11_COLOR_WRITE_ENABLE_RED : D3D11_COLOR_WRITE_ENABLE_GREEN;
         if (FAILED(hr = dev->CreateBlendState(&bd, ch == 0 ? &s_bsR : &s_bsG))) {
-            Log("MV draw-ids: id write-mask blend state create hr=0x%lx -- per-draw motion vectors off", (unsigned long)hr);
+            LogErr("MV draw-ids: id write-mask blend state create hr=0x%lx -- per-draw motion vectors off", (unsigned long)hr);
             ShutdownDevice(); s_dev = dev;
             return false;
         }
@@ -3792,7 +3792,7 @@ bool DrawIdRecord::InitDevice(ID3D11Device* dev) {
     hr = dev->CreateBuffer(&bd, &sd, &s_idCb);
     delete[] init;
     if (FAILED(hr)) {
-        Log("MV draw-ids: id cbuffer (%u bytes) create hr=0x%lx -- per-draw motion vectors off", bd.ByteWidth,
+        LogErr("MV draw-ids: id cbuffer (%u bytes) create hr=0x%lx -- per-draw motion vectors off", bd.ByteWidth,
             (unsigned long)hr);
         ShutdownDevice(); s_dev = dev;
         return false;
@@ -4023,7 +4023,7 @@ bool DrawIdMv::Init(ID3D11Device* dev) {
     if (!m_prevFull || !m_prevLoose || !m_prevFlags || !m_curFull || !m_curLoose || !m_curFlags || !m_ent || !m_orph ||
         !m_curGroup || !m_curRank || !m_curLooseG || !m_prevGroup || !m_prevRank || !m_groupData || !m_listData ||
         !m_candTmp || !m_curBig || !m_rbInstIdx || !m_rbInstKey || !m_prepInstIdx || !m_prepInstKey) {
-        Log("MV draw-ids: out of memory for the pairing tables");
+        LogErr("MV draw-ids: out of memory for the pairing tables");
         return false;
     }
     if (!CreateCsFromCache(dev, ShaderCache::kDrawIdGather, &m_csGather) ||
@@ -4046,12 +4046,12 @@ bool DrawIdMv::Init(ID3D11Device* dev) {
     if (!CreateCsFromCache(dev, ShaderCache::kDrawIdPickPar, &m_csPickPar) ||
         !CreateCsFromCache(dev, ShaderCache::kDrawIdResInh, &m_csResInh)) {
         m_csPickPar.Reset(); m_csResInh.Reset();
-        Log("MV draw-ids: phase-18 pick / resolve shaders unavailable -- mv_fold_dispatch 2 runs as 1 (3: the phase-9 pick + resolve)");
+        LogErr("MV draw-ids: phase-18 pick / resolve shaders unavailable -- mv_fold_dispatch 2 runs as 1 (3: the phase-9 pick + resolve)");
     }
     if (!CreateCsFromCache(dev, ShaderCache::kDrawIdParentCollect, &m_csParCollect) ||
         !CreateCsFromCache(dev, ShaderCache::kDrawIdParentMarch, &m_csParMarch)) {
         m_csParCollect.Reset(); m_csParMarch.Reset();
-        Log("MV draw-ids: phase-18 compact vote shaders unavailable -- the vote runs on the full grid (mv_vote_compact 0)");
+        LogErr("MV draw-ids: phase-18 compact vote shaders unavailable -- the vote runs on the full grid (mv_vote_compact 0)");
     }
     const UINT kM = (UINT)kMax;
     bool ok = MakeBuf(dev, kCbBytes, D3D11_BIND_CONSTANT_BUFFER, 0, 0, true, &m_cb) &&
@@ -4067,7 +4067,7 @@ bool DrawIdMv::Init(ID3D11Device* dev) {
          MakeBuf(dev, kM * kRStride * 16u, D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS,
                  D3D11_RESOURCE_MISC_BUFFER_STRUCTURED, 16, false, &m_rtab) &&
          MakeBuf(dev, kCntBytes, D3D11_BIND_UNORDERED_ACCESS, D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS, 0, false, &m_cnt);
-    if (!ok) { Log("MV draw-ids: pairing buffers create failed"); return false; }
+    if (!ok) { LogErr("MV draw-ids: pairing buffers create failed"); return false; }
     auto srvStruct = [&](ID3D11Buffer* b, UINT n, ID3D11ShaderResourceView** out) {
         D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
         sd.Format = DXGI_FORMAT_UNKNOWN;
@@ -4121,7 +4121,7 @@ bool DrawIdMv::Init(ID3D11Device* dev) {
         }
         if (!hk) {
             for (int q = 0; q < 2; ++q) { m_uhold[q].Reset(); m_uholdSrv[q].Reset(); m_uholdUav[q].Reset(); }
-            Log("MV draw-ids: plate-hold tables create failed -- no plate hold");
+            LogErr("MV draw-ids: plate-hold tables create failed -- no plate hold");
             break;
         }
     }
@@ -4130,7 +4130,7 @@ bool DrawIdMv::Init(ID3D11Device* dev) {
         bd.ByteWidth = kCntBytes; bd.Usage = D3D11_USAGE_STAGING; bd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
         ok = SUCCEEDED(dev->CreateBuffer(&bd, nullptr, &m_rb[k]));
     }
-    if (!ok) { Log("MV draw-ids: pairing views create failed"); return false; }
+    if (!ok) { LogErr("MV draw-ids: pairing views create failed"); return false; }
     m_failed = false;
     m_ready = true;
     return true;
@@ -4158,7 +4158,7 @@ bool DrawIdMv::EnsureParList(ID3D11Device* dev) {
          SUCCEEDED(dev->CreateUnorderedAccessView(m_marchArgs.Get(), &ud, &m_marchArgsUav));
     if (!ok) {
         m_parList.Reset(); m_parListUav.Reset(); m_marchArgs.Reset(); m_marchArgsUav.Reset();
-        Log("MV draw-ids: compact vote buffers create failed -- the vote runs on the full grid for this unit");
+        LogErr("MV draw-ids: compact vote buffers create failed -- the vote runs on the full grid for this unit");
         return false;
     }
     m_parListFailed = false;
@@ -4403,7 +4403,7 @@ void DrawIdMv::Poll(ID3D11DeviceContext* ctx) {
                 }
                 if (!m_quiet && (m_lowPairLogs < 10 || (m_stats.lowPairFrames % 1000) == 0)) {
                     ++m_lowPairLogs;
-                    Log("MV draw-ids: WARNING paired %u of %u draws (%.0f %%, < 50 %%) in one frame (%u unpaired, %u movers) "
+                    LogWarn("MV draw-ids: WARNING paired %u of %u draws (%.0f %%, < 50 %%) in one frame (%u unpaired, %u movers) "
                         "-- these draws use the camera motion vector (low-pair frames so far: %llu)", paired, elig,
                         100.0 * (double)paired / (double)elig, c[kStUnpaired], c[kStMover],
                         (unsigned long long)m_stats.lowPairFrames);
@@ -4777,7 +4777,7 @@ uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ui
                 if (!dev || FAILED(dev->CreateBuffer(&bd, nullptr, &m_probeBuf)) ||
                     FAILED(dev->CreateUnorderedAccessView(m_probeBuf.Get(), &ud, &m_probeUav))) {
                     m_probeBuf.Reset(); m_probeUav.Reset(); m_probeFailed = true;
-                    Log("MV probe: probe buffer could not be created -- the dump runs without the pixel probe");
+                    LogErr("MV probe: probe buffer could not be created -- the dump runs without the pixel probe");
                 }
             }
             if (m_probeUav) {
@@ -5113,7 +5113,7 @@ void DrawIdMv::Finish(ID3D11DeviceContext* ctx) {
             m_dumpPending = true;
             m_dumpPolls = 0;
         } else {
-            Log("MV draw-ids dump: staging buffers unavailable -- no dump");
+            LogErr("MV draw-ids dump: staging buffers unavailable -- no dump");
         }
         m_dumpSolve.Reset();
     }
@@ -5162,7 +5162,7 @@ void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
     }
     if (mapped < nMap) {
         for (int k = 0; k < mapped; ++k) ctx->Unmap(m_dumpSt[k].Get(), 0);
-        if (++m_dumpPolls > 600) { m_dumpPending = false; Log("MV draw-ids dump: the readback never landed -- dropped"); }
+        if (++m_dumpPolls > 600) { m_dumpPending = false; LogWarn("MV draw-ids dump: the readback never landed -- dropped"); }
         return;
     }
     m_dumpPending = false;
@@ -5231,7 +5231,7 @@ void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
         }
         if (selected(m_dump[q])) ++nSel;
     }
-    Log("MV draw-ids dump (%s): %u draws in the table (%u G-buffer + %u forward, previous pass %u draws%s) -- the %u forward draws, "
+    LogDbg("MV draw-ids dump (%s): %u draws in the table (%u G-buffer + %u forward, previous pass %u draws%s) -- the %u forward draws, "
         "the G-buffer draws with IndexCount <= 36, every mover and every unpaired / inherited draw follow (%u lines%s); unpaired after the "
         "pairing %u: %u took their rigid parent's R by the pixel-neighbour vote (mv_drawid_parent %d), %u their matrix twin's R "
         "(mv_drawid_twin %d), %u a G-buffer mover's by origin, %u left unpaired (camera R); attach radius %.2f m, snap %.2f px | "
@@ -5241,14 +5241,14 @@ void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
         m_dumpSkipped ? " -- more skipped, table cap" : "", nUnp, nPar, (int)g_parent, nTwin, (int)g_twin, nAtt, nLeft,
         (double)g_attachM,
         (double)g_snapPx, S[0], S[1], S[2], S[3], S[4], S[5], S[6], S[7], S[8], S[9], S[10], S[11], S[12], S[13], S[14], S[15]);
-    Log("MV draw-ids dump (%s): G-buffer pixel shaders (v0.10.0 phase 21, DXBC scan at CreatePixelShader): %u of %u draws write "
+    LogDbg("MV draw-ids dump (%s): G-buffer pixel shaders (v0.10.0 phase 21, DXBC scan at CreatePixelShader): %u of %u draws write "
         "SV_Depth (%u of them with the cabin viewport) -- every one is listed below, %u alpha-tested (discard), %u unknown (created "
         "before the hook / no PS lookup); %u G-buffer draws with the cabin viewport (MinDepth >= 0.85)", m_dumpWhy, nDepthPs,
         m_dumpNG, nDepthPsCab, nCutPs, nPsUnk, nCabVp);
     {
         uint32_t vc[6] = {};
         VsLayoutCounts(vc);
-        Log("MV draw-ids dump (%s): MVP layout (v0.10.0 phase 22) of the G-buffer draws with an MVP window: rows 4..7 (normal) %u, "
+        LogDbg("MV draw-ids dump (%s): MVP layout (v0.10.0 phase 22) of the G-buffer draws with an MVP window: rows 4..7 (normal) %u, "
             "5..8 (+1) %u, 6..9 (+2) %u, 7..10 %u, 8..11 %u, no MVP-shaped block %u, the VS's cached block failed %u%s -- every draw "
             "not in rows 4..7 is listed below | VS table: normal %u, +1 %u, +2 %u, +3 %u, +4 %u, undecided %u (switches %llu, table "
             "full %llu)", m_dumpWhy, nLay[0], nLay[1], nLay[2], nLay[3], nLay[4], nLayNone, nLayFail,
@@ -5386,7 +5386,7 @@ void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
                  : (d.psInfo & DrawIdRecord::kPsDepth) ? ((d.psInfo & DrawIdRecord::kPsDiscard) ? "WRITES SV_Depth, discard"
                                                                                                  : "WRITES SV_Depth")
                  : ((d.psInfo & DrawIdRecord::kPsDiscard) ? "no SV_Depth, discard" : "no SV_Depth"));
-        Log("MV dump %u/%u: id %u %s ic %u flags 0x%02x%s%s | full %016llx loose %016llx | cb0 first %u num %u -> mirror +%u | "
+        LogDbg("MV dump %u/%u: id %u %s ic %u flags 0x%02x%s%s | full %016llx loose %016llx | cb0 first %u num %u -> mirror +%u | "
             "%s | group %d (%u cur / %u prev) | origin clip %.3f %.3f %.3f w %.3f%s px %.1f %.1f | col3 x %.4e y %.4e z %.4e w %.4e "
             "origin-free %s | mvp-shape %s | %s%s | probe dev %.3f px%s | state %u "
             "%s%s%s%s",
@@ -5405,7 +5405,7 @@ void DrawIdMv::DumpPoll(ID3D11DeviceContext* ctx) {
     }
     for (int k = 0; k < nMap; ++k) ctx->Unmap(m_dumpSt[k].Get(), 0);
     m_probeStaged = false;
-    Log("MV draw-ids dump (%s): done", m_dumpWhy);
+    LogDbg("MV draw-ids dump (%s): done", m_dumpWhy);
 }
 
 // ---- v0.10.0 phase 21 PIXEL PROBE ------------------------------------------------------------------------------------------
@@ -5476,7 +5476,7 @@ void DrawIdMv::ProbeLog(const void* const* mapped) {
                  : (pi & DrawIdRecord::kPsDepth) ? ((pi & DrawIdRecord::kPsDiscard) ? "WRITES SV_Depth + discard" : "WRITES SV_Depth")
                  : ((pi & DrawIdRecord::kPsDiscard) ? "no SV_Depth, discard" : "no SV_Depth"));
     };
-    Log("MV probe (%s): eye 0 pass, %d pixels = 5 x 5 grid %d px apart centred on px (%u, %u) of the %ux%u image (the eye's "
+    LogDbg("MV probe (%s): eye 0 pass, %d pixels = 5 x 5 grid %d px apart centred on px (%u, %u) of the %ux%u image (the eye's "
         "optical centre; rows top to bottom, columns left to right) | pass B crop at (%u, %u) %ux%u | draw ids: %u G-buffer + %u "
         "forward | per pixel: scene depth (the pass's depth twin) / forward depth -> which won -> merged d -> layer (cabin = d "
         ">= 0.9) -> the R pass B used -> the final MV (and the camera path's MV) | the G-buffer and forward draws under it",
@@ -5487,7 +5487,7 @@ void DrawIdMv::ProbeLog(const void* const* mapped) {
         const int row = (int)(k / 5u) - 2, colI = (int)(k % 5u) - 2;
         const int px = (int)m_probeCx + colI * kProbeStep, py = (int)m_probeCy + row * kProbeStep;
         if (u32(k, 0) != 0x50524F42u) {
-            Log("MV probe [%d,%d] px (%d, %d): not computed -- outside the image or pass B's crop (the DLAA area rect + margin)",
+            LogDbg("MV probe [%d,%d] px (%d, %d): not computed -- outside the image or pass B's crop (the DLAA area rect + margin)",
                 row + 2, colI + 2, px, py);
             continue;
         }
@@ -5550,14 +5550,14 @@ void DrawIdMv::ProbeLog(const void* const* mapped) {
         if (fwWin) ++nFwd;
         if (mover) ++nMov;
         if (mvx > 0.5f) ++nPosX;
-        Log("MV probe [%d,%d] px (%u, %u) (%+d, %+d): scene depth %.6f, %s, d %.6f = %s | R: %s | MV (%.3f, %.3f) px, camera "
+        LogDbg("MV probe [%d,%d] px (%u, %u) (%+d, %+d): scene depth %.6f, %s, d %.6f = %s | R: %s | MV (%.3f, %.3f) px, camera "
             "path (%.3f, %.3f), clip w %.4g | GBUF %s | FWD %s%s%s",
             row + 2, colI + 2, u32(k, 4) & 0xFFFFu, u32(k, 4) >> 16, colI * kProbeStep, row * kProbeStep, (double)dt, depTxt,
             (double)d, cab ? "CABIN layer (d >= 0.9)" : (d >= 0.01f ? "world layer" : "sky / no depth (d < 0.01, world camera R)"),
             rTxt, (double)mvx, (double)mvy, (double)cmx, (double)cmy, (double)cw, gTxt, fTxt,
             (!fwWin && fid) ? " (behind the scene)" : "", note);
     }
-    Log("MV probe (%s): %u of %d pixels computed | cabin layer %u (no G-buffer id %u, a world-viewport G-buffer draw %u, a "
+    LogDbg("MV probe (%s): %u of %d pixels computed | cabin layer %u (no G-buffer id %u, a world-viewport G-buffer draw %u, a "
         "cabin-viewport G-buffer draw %u; under a PS writing SV_Depth %u) | forward won %u | mover R %u | mv.x > 0.5 px %u "
         "(Ctrl+F6: red channel up = magenta on a cabin pixel)", m_dumpWhy, nRun, kProbeN, nCab, nCabNoId, nCabWorldVp, nCabCabVp,
         nCabDepthPs, nFwd, nMov, nPosX);

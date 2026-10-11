@@ -161,7 +161,7 @@ inline Set* Cur(ID3D11DeviceContext* ctx) {
             qd.Query = D3D11_QUERY_TIMESTAMP_DISJOINT;
             const bool ok = dev && SUCCEEDED(dev->CreateQuery(&qd, &s.dis));
             if (dev) dev->Release();
-            if (!ok) { s.dis = nullptr; g_broken = true; Log("GPU per pass (phase 36): query creation failed -- off"); return nullptr; }
+            if (!ok) { s.dis = nullptr; g_broken = true; LogErr("GPU per pass (phase 36): query creation failed -- off"); return nullptr; }
         }
         ctx->Begin(s.dis);
         s.open = true; s.nTs = 0; s.binds = 0; s.gbufBinds = 0; s.frame = g_frame;
@@ -247,7 +247,7 @@ inline int Classify(UINT n, ID3D11RenderTargetView* const* rtvs, ID3D11DepthSten
         for (int i = 0; i < g_sigN; ++i) if (g_sigHash[i] == h) { seen = true; break; }
         if (!seen) {
             g_sigHash[g_sigN++] = h;
-            Log("GPU pass signature #%d (phase 36): class=%s | %u RTV, rt0 %ux%u %s, rt1 %s | dsv %s %ux%u %s | stage %d%s", g_sigN,
+            LogDbg("GPU pass signature #%d (phase 36): class=%s | %u RTV, rt0 %ux%u %s, rt1 %s | dsv %s %ux%u %s | stage %d%s", g_sigN,
                 ClsName(cls), n, c.w0, c.h0, FmtName(c.f0), FmtName(c.f1), !c.hasDsv ? "none" : (sceneDsv ? "SCENE-DEPTH" : "other"),
                 c.dw, c.dh, FmtName(c.df), g_stage, mirror ? " | mirror view open" : "");
         }
@@ -271,7 +271,7 @@ inline void Report(double sceneMs, uint32_t sceneN) {
     const ULONGLONG now = GetTickCount64();
     if (g_nextReport == 0) { g_nextReport = now + 5000; return; }       // first call arms the window
     g_nextReport = now + 5000;
-    if (!g_frames) { Log("GPU per pass (phase 36): no landed frames yet (%llu dropped)", (unsigned long long)g_dropped); return; }
+    if (!g_frames) { LogDbg("GPU per pass (phase 36): no landed frames yet (%llu dropped)", (unsigned long long)g_dropped); return; }
     const double f = (double)g_frames;
     double mod = 0.0; bool haveMod = false;
     for (int e = 0; e < 2; ++e) {
@@ -284,7 +284,7 @@ inline void Report(double sceneMs, uint32_t sceneN) {
     if (sceneMs >= 0.0) snprintf(scene, sizeof(scene), "%.2f", sceneMs); else snprintf(scene, sizeof(scene), "n/a");
     char modS[24];
     if (haveMod) snprintf(modS, sizeof(modS), "%.2f", mod); else snprintf(modS, sizeof(modS), "n/a");
-    Log("GPU per pass (phase 36): shadow %.2f | gbuffer %.2f | lighting %.2f | forward %.2f | post %.2f | mirror %.2f | other %.2f | "
+    LogDbg("GPU per pass (phase 36): shadow %.2f | gbuffer %.2f | lighting %.2f | forward %.2f | post %.2f | mirror %.2f | other %.2f | "
         "mod %s ms/frame (sum S %.2f vs scene span T %s; n %llu frames) | mod bind-time work %.2f (in S), binds/frame %.1f, "
         "G-buffer binds/frame %.2f, dropped %llu | classes include the GPU waiting time between binds; mod overlaps post/other",
         g_sum[kShadow] / f, g_sum[kGbuffer] / f, g_sum[kLighting] / f, g_sum[kForward] / f, g_sum[kPost] / f,

@@ -125,7 +125,7 @@ void OnPresent(uint64_t n) {
         const uint64_t p = g_passed.load(std::memory_order_relaxed);
         if (p > 0 && p != s_lastStatPassed) {
             s_lastStatPassed = p;
-            Log("OFXR Bridge: %llu calls passed through so far", (unsigned long long)p);
+            LogDbg("OFXR Bridge: %llu calls passed through so far", (unsigned long long)p);
         }
     }
 }

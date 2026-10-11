@@ -126,6 +126,7 @@ struct Tls {
     uint64_t frameT0;            // TSC of the last frame mark (0 = none yet)
     uint64_t frameModAt;         // `mod` at the last frame mark
     uint32_t winSeen;            // g_winSeq at the last frame mark
+    uint32_t onSeen;             // phase 39: g_onSeq at the last frame mark (a live switch-on drops the stale frame start)
 };
 
 inline std::atomic<bool>      g_on{false};
@@ -138,6 +139,11 @@ inline thread_local Tls*      t_p = nullptr;            // this thread's block (
 inline thread_local bool      t_noSlot = false;
 
 inline bool On() { return g_on.load(std::memory_order_relaxed); }
+// phase 39: the profiler's own cost in its last report (inject.cpp CpuProfReport: the sum of the reported threads' "profiler ~x
+// ms/frame"), ms per frame; -1 = no report yet (also right after a live switch-on). The tuning menu's Logging row shows it.
+inline std::atomic<double>    g_selfMs{-1.0};
+inline std::atomic<uint32_t>  g_onSeq{0};               // phase 39: bumped at each live switch-on (inject.cpp CpuProfSetOn)
+inline double SelfMsPerFrame() { return g_selfMs.load(std::memory_order_relaxed); }
 
 // The calling thread's block, made + registered at its first use (cold path; never logs: Log() itself opens a scope).
 inline Tls* RegisterSlow() {

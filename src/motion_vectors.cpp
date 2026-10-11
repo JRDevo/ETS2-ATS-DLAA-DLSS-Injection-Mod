@@ -1042,11 +1042,11 @@ bool CreateCs(ID3D11Device* dev, ShaderCache::Id id, ID3D11ComputeShader** out) 
     size_t size = 0;
     const void* code = ShaderCache::Code(id, &size);
     if (!code) {
-        Log("MV: %s D3DCompile failed %s", ShaderCache::Name(id), ShaderCache::Error(id));
+        LogErr("MV: %s D3DCompile failed %s", ShaderCache::Name(id), ShaderCache::Error(id));
         return false;
     }
     const HRESULT hr = dev->CreateComputeShader(code, size, nullptr, out);
-    if (FAILED(hr)) { Log("MV: %s CreateComputeShader hr=0x%lx", ShaderCache::Name(id), hr); return false; }
+    if (FAILED(hr)) { LogErr("MV: %s CreateComputeShader hr=0x%lx", ShaderCache::Name(id), hr); return false; }
     return true;
 }
 
@@ -1090,7 +1090,7 @@ bool CameraMv::Init(ID3D11Device* dev) {
     if (!CreateCs(dev, ShaderCache::kMvSolve, &m_csSolve)) return false;
     if (!CreateCs(dev, ShaderCache::kMvReprojDepth, &m_csReproj)) return false;
 
-    if (!m_prev.Init(dev)) { Log("MV: prev candidate record create failed"); return false; }
+    if (!m_prev.Init(dev)) { LogErr("MV: prev candidate record create failed"); return false; }
     HRESULT hr;
 
     // Solve buffer: structured float4 x kSolveElems (v0.6.0: 18), UAV (pass A) + SRV (pass B).
@@ -1111,7 +1111,7 @@ bool CameraMv::Init(ID3D11Device* dev) {
     if (FAILED(hr = dev->CreateBuffer(&sb, nullptr, &m_solve)) ||
         FAILED(hr = dev->CreateUnorderedAccessView(m_solve.Get(), &ud, &m_solveUav)) ||
         FAILED(hr = dev->CreateShaderResourceView(m_solve.Get(), &ss, &m_solveSrv))) {
-        Log("MV: solve buffer create hr=0x%lx", hr); return false;
+        LogErr("MV: solve buffer create hr=0x%lx", hr); return false;
     }
 
     // Dynamic constant buffers.
@@ -1120,21 +1120,21 @@ bool CameraMv::Init(ID3D11Device* dev) {
     cb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     cb.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     cb.ByteWidth = (34 + kSlots) * 16;                 // v0.6.0: + AllPairs[128] (2592 bytes)
-    if (FAILED(hr = dev->CreateBuffer(&cb, nullptr, &m_cbPairs))) { Log("MV: pair cbuffer hr=0x%lx", hr); return false; }
+    if (FAILED(hr = dev->CreateBuffer(&cb, nullptr, &m_cbPairs))) { LogErr("MV: pair cbuffer hr=0x%lx", hr); return false; }
     cb.ByteWidth = 80;                                 // v0.6.4: + Origin, FullSize (was 16); v0.7.8: + TileXf; v0.9.0: + ObjInfo
                                                        // v0.10.0 phase 9: + FwdMode
-    if (FAILED(hr = dev->CreateBuffer(&cb, nullptr, &m_cbDims))) { Log("MV: dims cbuffer hr=0x%lx", hr); return false; }
+    if (FAILED(hr = dev->CreateBuffer(&cb, nullptr, &m_cbDims))) { LogErr("MV: dims cbuffer hr=0x%lx", hr); return false; }
 
     // Staging buffers for the one-time CB-copy check and the 600-frame R log.
     D3D11_BUFFER_DESC st{};
     st.Usage = D3D11_USAGE_STAGING;
     st.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
     st.ByteWidth = 2 * kSlotBytes;
-    if (FAILED(hr = dev->CreateBuffer(&st, nullptr, &m_stageDbg))) { Log("MV: staging(dbg) hr=0x%lx", hr); return false; }
+    if (FAILED(hr = dev->CreateBuffer(&st, nullptr, &m_stageDbg))) { LogErr("MV: staging(dbg) hr=0x%lx", hr); return false; }
     st.ByteWidth = kSolveElems * 16;
-    if (FAILED(hr = dev->CreateBuffer(&st, nullptr, &m_stageSolve))) { Log("MV: staging(solve) hr=0x%lx", hr); return false; }
+    if (FAILED(hr = dev->CreateBuffer(&st, nullptr, &m_stageSolve))) { LogErr("MV: staging(solve) hr=0x%lx", hr); return false; }
     for (int i = 0; i < kRing; ++i)
-        if (FAILED(hr = dev->CreateBuffer(&st, nullptr, &m_ring[i]))) { Log("MV: staging(ring %d) hr=0x%lx", i, hr); return false; }
+        if (FAILED(hr = dev->CreateBuffer(&st, nullptr, &m_ring[i]))) { LogErr("MV: staging(ring %d) hr=0x%lx", i, hr); return false; }
 
     m_ready = true; m_failed = false;
     Invalidate();
@@ -1163,7 +1163,7 @@ bool CandidateRecord::Init(ID3D11Device* dev) {
     HRESULT hr;
     if (FAILED(hr = dev->CreateBuffer(&bd, nullptr, &m_buf)) ||
         FAILED(hr = dev->CreateShaderResourceView(m_buf.Get(), &sd, &m_srv))) {
-        Log("MV: candidate record create hr=0x%lx", (unsigned long)hr);
+        LogErr("MV: candidate record create hr=0x%lx", (unsigned long)hr);
         m_srv.Reset(); m_buf.Reset();
         return false;
     }
@@ -1262,14 +1262,14 @@ void CameraMv::DebugReadback(ID3D11DeviceContext* ctx, const CandidateRecord& cu
     if (!got) return;                                   // retry next frame
     m_dbgDone = true;
     D3D11_MAPPED_SUBRESOURCE mp{};
-    if (FAILED(ctx->Map(m_stageDbg.Get(), 0, D3D11_MAP_READ, 0, &mp))) { Log("MV: debug readback Map failed"); return; }
+    if (FAILED(ctx->Map(m_stageDbg.Get(), 0, D3D11_MAP_READ, 0, &mp))) { LogErr("MV: debug readback Map failed"); return; }
     const float* f = (const float*)mp.pData;
     for (int l = 0; l < kLayers; ++l) {
-        if (cur.Count(l) <= 0) { Log("MV: CB-copy check layer %d: no candidates", l); continue; }
+        if (cur.Count(l) <= 0) { LogDbg("MV: CB-copy check layer %d: no candidates", l); continue; }
         const float* m = f + l * 16;
         bool allZero = true;
         for (int i = 0; i < 16; ++i) if (m[i] != 0.0f) allZero = false;
-        Log("MV: CB-copy check layer %d slot0 MVP rows: [%.4f %.4f %.4f %.4f] [%.4f %.4f %.4f %.4f] "
+        LogDbg("MV: CB-copy check layer %d slot0 MVP rows: [%.4f %.4f %.4f %.4f] [%.4f %.4f %.4f %.4f] "
             "[%.4f %.4f %.4f %.4f] [%.4f %.4f %.4f %.4f]%s", l,
             m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11],
             m[12], m[13], m[14], m[15],
@@ -1292,7 +1292,7 @@ void CameraMv::SolveReadback(ID3D11DeviceContext* ctx) {
         D3D11_MAPPED_SUBRESOURCE mp{};
         const HRESULT hr = ctx->Map(m_stageSolve.Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mp);
         if (hr == DXGI_ERROR_WAS_STILL_DRAWING) { m_solvePending = 1; return; }
-        if (FAILED(hr)) { Log("MV: solve readback Map hr=0x%lx", (unsigned long)hr); return; }
+        if (FAILED(hr)) { LogErr("MV: solve readback Map hr=0x%lx", (unsigned long)hr); return; }
         const float* f = (const float*)mp.pData;
         float dev = 0.0f;
         for (int r = 0; r < 4; ++r)
@@ -1309,7 +1309,7 @@ void CameraMv::SolveReadback(ID3D11DeviceContext* ctx) {
             char camR[48];
             if (f[35] > 0.5f) snprintf(camR, sizeof(camR), "camR=consensus (%.0f draws)", f[35]);
             else snprintf(camR, sizeof(camR), "camR=medoid");
-            Log("MV: %s frame %llu R_world [%.5f %.5f %.5f %.5f] [%.5f %.5f %.5f %.5f] [%.5f %.5f %.5f %.5f] [%.5f %.5f %.5f %.5f]"
+            LogDbg("MV: %s frame %llu R_world [%.5f %.5f %.5f %.5f] [%.5f %.5f %.5f %.5f] [%.5f %.5f %.5f %.5f] [%.5f %.5f %.5f %.5f]"
                 " maxdev=%.4f %s (medoid: pairs=%.0f valid=%.0f pick=%.0f) | medoid's world pair |w|=%.1f m IndexCount=%.0f, "
                 "near-rejected %.0f/%.0f valid%s | ego: cand=%.0f used=%.0f fallback=%.0f |R_ego-R_world|=%.4f",
                 periodic ? "R" : "R(moving)", (unsigned long long)m_solveFrame,
@@ -1437,7 +1437,7 @@ bool CameraMv::FwdCountInit() {
     st.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
     for (int k = 0; k < kFwdCntRb && SUCCEEDED(hr); ++k) hr = m_dev->CreateBuffer(&st, nullptr, &m_fwdCntRb[k]);
     if (FAILED(hr)) {
-        Log("MV forward depth: near-range pixel counter unavailable (hr=0x%lx) -- the statistic stays 0",
+        LogErr("MV forward depth: near-range pixel counter unavailable (hr=0x%lx) -- the statistic stays 0",
             (unsigned long)hr);
         m_fwdCntUav.Reset(); m_fwdCnt.Reset();
         for (int k = 0; k < kFwdCntRb; ++k) m_fwdCntRb[k].Reset();
@@ -1468,7 +1468,7 @@ void CameraMv::LogFrameLine(const FrameStats& fs, const CandidateRecord& cur) {
     if (m_quiet || m_frame % 600 != 0) return;           // v0.10.0 phase 2: quiet units (mirrors) report elsewhere
     const double g = (double)m_genFrames;
     // v0.9.0 r9: + world-miss frames held (the last good R, no history reset) and pairs found through the loose key
-    Log("MV: frame %llu pairs this frame world=%d cabin=%d%s | avg world=%.2f cabin=%.2f | "
+    LogDbg("MV: frame %llu pairs this frame world=%d cabin=%d%s | avg world=%.2f cabin=%.2f | "
         "world-miss frames %llu/%llu bad=%llu stale-reuse=%llu (candidates cur: world=%d cabin=%d) | r9: world-miss "
         "held=%llu (no reset), pairs by fallback key=%llu",
         (unsigned long long)m_frame, fs.pairs[0], fs.pairs[1],
@@ -1630,7 +1630,7 @@ bool CameraMv::Generate(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, uint32
                 }
                 ++shown;
             }
-            Log("%s", s);
+            LogDbg("%s", s);
         }
         m_candFallback += (uint64_t)nfb;
         if (l == 0) {
@@ -1798,7 +1798,7 @@ uint32_t CameraMv::DidPrepare(ID3D11DeviceContext* ctx, const DrawIdRecord* did,
     if (!m_did.Ready() && !m_did.Init(m_dev.Get())) {
         if (!m_didInitTried && ShaderCache::Done()) {
             m_didInitTried = true;
-            Log("MV draw-ids: the pairing unit could not be created -- per-draw motion vectors off for this unit");
+            LogErr("MV draw-ids: the pairing unit could not be created -- per-draw motion vectors off for this unit");
         }
         m_did.Forget();
         return 0;
@@ -1917,7 +1917,7 @@ bool ObjRecord::EnsureMirror(ID3D11DeviceContext* ctx, UINT need) {
         FAILED(hr = dev->CreateBuffer(&bd, nullptr, &nb)) ||
         FAILED(hr = dev->CreateShaderResourceView(nb.Get(), &sd, &nsrv))) {
         static int fails = 0;
-        if (fails++ < 3) Log("MV objects: ring mirror (%u bytes, %d ring(s)) create failed hr=0x%lx", bytes, m_nRings,
+        if (fails++ < 3) LogErr("MV objects: ring mirror (%u bytes, %d ring(s)) create failed hr=0x%lx", bytes, m_nRings,
                              (unsigned long)hr);
         return false;
     }
@@ -2800,7 +2800,7 @@ void Update(const Moving* e, int n, const Reject* r, int nr, uint64_t frame, flo
                               (double)T.sy, (double)T.w, T.n, (double)T.lo[0], (double)T.hi[0], (double)T.lo[1],
                               (double)T.hi[1], (double)T.lo[2], (double)T.hi[2], (int)T.flag);
             }
-            Log("%s", s);
+            LogDbg("%s", s);
         }
         if (g_nEgoId) {
             int out = 0;
@@ -3451,7 +3451,7 @@ void Update(const Moving* e, int n, const Reject* r, int nr, uint64_t frame, flo
     // 10. v0.9.0 r11 attach diagnostics: one line per 600 readbacks (no behaviour)
     if (++g_attD.rb >= 600) {
         const AttDiag& A = g_attD;
-        Log("MV objects: attach diagnostics over %llu readbacks (v0.9.0 r11, attach %s) -- rejects %llu: not dup / "
+        LogDbg("MV objects: attach diagnostics over %llu readbacks (v0.9.0 r11, attach %s) -- rejects %llu: not dup / "
             "pairing / ambiguous %llu (own truck %llu, camera noise %llu, origin off screen %llu, other %llu) | dup / "
             "pairing / ambiguous %llu: already a member %llu, ego %llu, origin off screen %llu, no member listed in "
             "the readback %llu, nearest member origin > %.1f px %llu (< 2 px %llu, < 8 px %llu, < 32 px %llu, >= 32 px "
@@ -3477,7 +3477,7 @@ void Update(const Moving* e, int n, const Reject* r, int nr, uint64_t frame, flo
 void LogIds(uint64_t blit) {
     int used = 0;
     for (int s = 1; s < ObjRecord::kIds; ++s) if (g_slotUsed[s]) ++used;
-    Log("MV objects ids @blit %llu: %d in use (max %d%s) | rules: max-dup %d, own truck < %.1f m, %d coherent readbacks, "
+    LogDbg("MV objects ids @blit %llu: %d in use (max %d%s) | rules: max-dup %d, own truck < %.1f m, %d coherent readbacks, "
         "r4: spin > %.2f never anchors, quarantine %llu frames, followers %s | r6: sticky -- a member leaves when not drawn "
         "for %d readbacks or proven elsewhere (misfit > max(%.0f px, %.0f%%) in %d readbacks), jumps > max(r2 tolerance, "
         "%.0f px footprint) | speed = the anchor's origin displacement vs the camera-only prediction (clip units, ~m per "
@@ -3506,7 +3506,7 @@ void LogIds(uint64_t blit) {
             // v0.9.0 r4: + spinning members (wheels: never represent the id), solid = coherent anchor refreshes in a row
             // v0.9.0 r6: + the reference R's age (readbacks since a member last moved > 0.5 px: sub-threshold = kept)
             // v0.9.0 r10: + attached members (plates / mirrors on a member's world matrix)
-            Log("  id %2d: %d member(s) (%d follower(s), %d spinning, %d attached) | biggest IndexCount %.0f dup %d "
+            LogDbg("  id %2d: %d member(s) (%d follower(s), %d spinning, %d attached) | biggest IndexCount %.0f dup %d "
                 "(members max dup %d) | depth %.1f m | speed %.2f (window %.2f..%.2f) | held %llu readbacks | "
                 "jumps %d | re-anchored %d | solid %d | reference %llu readback(s) old",
                 s, members, followers, spinners, attached,
@@ -3518,13 +3518,13 @@ void LogIds(uint64_t blit) {
         ++shown;
         S.spSeen = false;                               // the window restarts
     }
-    if (shown > 8) Log("  (+%d more ids not shown)", shown - 8);
+    if (shown > 8) LogDbg("  (+%d more ids not shown)", shown - 8);
     if (g_nEgo) {                                       // v0.9.0 r8: the own truck as the CPU sees it
         int nearestN = 0, ids = 0;
         for (int k = 0; k < g_nEgo; ++k) if (!g_ego[k].flag && g_ego[k].n > nearestN) nearestN = g_ego[k].n;
         for (int k = 0; k < g_nEgoId; ++k) if (g_egoId[k].lastU) ++ids;
         // v0.9.0 r9: copies of geometry keys (r8: identities), + the ego identities they gave; r10: in view space (m)
-        Log("  ego set (own truck, r10 by geometry key, view space): %d flagged of %d near copies tracked, %d ego "
+        LogDbg("  ego set (own truck, r10 by geometry key, view space): %d flagged of %d near copies tracked, %d ego "
             "identities | flagged sightings deviated up to %.3f m from their reference (box %.3f m per axis, "
             "mv_objects_ego_m_box) | best unflagged run %d of %d readbacks (mv_objects_ego_rb)", g_egoSetN, g_nEgo, ids,
             (double)g_egoMaxDev, (double)g_egoMBox, nearestN, g_egoRb);
@@ -3564,7 +3564,7 @@ bool CameraMv::InitObjects() {
         if (FAILED(hr = dev->CreateBuffer(&bd, nullptr, &m_objMvp[k])) ||
             FAILED(hr = dev->CreateShaderResourceView(m_objMvp[k].Get(), &sd, &m_objMvpSrv[k])) ||
             FAILED(hr = dev->CreateUnorderedAccessView(m_objMvp[k].Get(), &ud, &m_objMvpUav[k]))) {
-            Log("MV objects: MVP buffer create hr=0x%lx", (unsigned long)hr); return false;
+            LogErr("MV objects: MVP buffer create hr=0x%lx", (unsigned long)hr); return false;
         }
     }
     {                                                   // CPU -> GPU tables (dynamic structured)
@@ -3580,12 +3580,12 @@ bool CameraMv::InitObjects() {
         bd.ByteWidth = (UINT)kObjMax * 16; bd.StructureByteStride = 16;
         if (FAILED(hr = dev->CreateBuffer(&bd, nullptr, &m_objTable)) ||
             FAILED(hr = dev->CreateShaderResourceView(m_objTable.Get(), &sd, &m_objTableSrv))) {
-            Log("MV objects: table create hr=0x%lx", (unsigned long)hr); return false;
+            LogErr("MV objects: table create hr=0x%lx", (unsigned long)hr); return false;
         }
         bd.ByteWidth = (UINT)kObjMax * 4; bd.StructureByteStride = 4;
         if (FAILED(hr = dev->CreateBuffer(&bd, nullptr, &m_objPrevList)) ||
             FAILED(hr = dev->CreateShaderResourceView(m_objPrevList.Get(), &sd, &m_objPrevListSrv))) {
-            Log("MV objects: prev list create hr=0x%lx", (unsigned long)hr); return false;
+            LogErr("MV objects: prev list create hr=0x%lx", (unsigned long)hr); return false;
         }
     }
     // per-id R table (structured float4; v0.9.0 r7: x 160 = + the previous frame's rows / states for the holds).
@@ -3611,7 +3611,7 @@ bool CameraMv::InitObjects() {
         if (FAILED(hr = dev->CreateBuffer(&bd, &init, &m_objSlot)) ||
             FAILED(hr = dev->CreateShaderResourceView(m_objSlot.Get(), &sd, &m_objSlotSrv)) ||
             FAILED(hr = dev->CreateUnorderedAccessView(m_objSlot.Get(), &ud, &m_objSlotUav))) {
-            Log("MV objects: id table create hr=0x%lx", (unsigned long)hr); return false;
+            LogErr("MV objects: id table create hr=0x%lx", (unsigned long)hr); return false;
         }
     }
     const UINT movBytes = kObjTailBase + kObjTailBytes;  // v0.9.0 r2: header + moving + reject list; r7: + tail
@@ -3628,7 +3628,7 @@ bool CameraMv::InitObjects() {
         ud.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW;
         if (FAILED(hr = dev->CreateBuffer(&bd, nullptr, &m_objMov)) ||
             FAILED(hr = dev->CreateUnorderedAccessView(m_objMov.Get(), &ud, &m_objMovUav))) {
-            Log("MV objects: moving list create hr=0x%lx", (unsigned long)hr); return false;
+            LogErr("MV objects: moving list create hr=0x%lx", (unsigned long)hr); return false;
         }
         D3D11_BUFFER_DESC st{};
         st.ByteWidth = movBytes;
@@ -3636,7 +3636,7 @@ bool CameraMv::InitObjects() {
         st.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
         for (int k = 0; k < kObjRb; ++k)
             if (FAILED(hr = dev->CreateBuffer(&st, nullptr, &m_objRbBuf[k]))) {
-                Log("MV objects: readback staging create hr=0x%lx", (unsigned long)hr); return false;
+                LogErr("MV objects: readback staging create hr=0x%lx", (unsigned long)hr); return false;
             }
     }
     {
@@ -3645,7 +3645,7 @@ bool CameraMv::InitObjects() {
         cb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
         cb.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
         cb.ByteWidth = 80;                              // v0.9.0 r4: + Ids (was 48); r10: + Ext
-        if (FAILED(hr = dev->CreateBuffer(&cb, nullptr, &m_objCb))) { Log("MV objects: cbuffer hr=0x%lx", (unsigned long)hr); return false; }
+        if (FAILED(hr = dev->CreateBuffer(&cb, nullptr, &m_objCb))) { LogErr("MV objects: cbuffer hr=0x%lx", (unsigned long)hr); return false; }
     }
     {                                                   // v0.9.0 r4: CSMain -> CSResolve scratch (raw UAV)
         D3D11_BUFFER_DESC bd{};
@@ -3660,7 +3660,7 @@ bool CameraMv::InitObjects() {
         ud.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW;
         if (FAILED(hr = dev->CreateBuffer(&bd, nullptr, &m_objScratch)) ||
             FAILED(hr = dev->CreateUnorderedAccessView(m_objScratch.Get(), &ud, &m_objScratchUav))) {
-            Log("MV objects: scratch create hr=0x%lx", (unsigned long)hr); return false;
+            LogErr("MV objects: scratch create hr=0x%lx", (unsigned long)hr); return false;
         }
     }
     m_objReady = true; m_objFailed = false;
@@ -3760,7 +3760,7 @@ void CameraMv::ObjDiag(const char* why, const ObjRecord* objs, int n, int paired
                  "overflows %llu), pairing record from pass %s%llu", (unsigned long long)m_objPassS,
                  (unsigned long long)(m_objPassNewest - 1), m_objPassOut, (unsigned long long)m_objPassOvf,
                  m_objPrevPassKnown ? "s=" : "?", (unsigned long long)(m_objPrevPassKnown ? m_objPrevPassS : 0));
-    Log("MV objects: mask dropout #%llu at frame %llu -- %s | mask 0x%04x -> 0x%04x | record %s: %d draws, %d paired "
+    LogWarn("MV objects: mask dropout #%llu at frame %llu -- %s | mask 0x%04x -> 0x%04x | record %s: %d draws, %d paired "
         "(%.0f%%; last good frame %d), tagged %u (last committed record %u), previous record %d draws | ids in use %d, "
         "members %d, ego set %d | %s | mask hold: %s",
         (unsigned long long)k, (unsigned long long)m_frame, why, m_objDiagPrevMask, mask,
@@ -3953,7 +3953,7 @@ uint32_t CameraMv::ObjPrepare(ID3D11DeviceContext* ctx, const ObjRecord* objs, u
             }
             ++shown;
         }
-        Log("%s", s);
+        LogDbg("%s", s);
     }
     // v0.9.0 r8 rule B, MASK HOLD: a PAIRING FAILURE (fewer than half the draws of the last good -- not held -- frame
     // paired) keeps the last good frame's ids in the mask: those without a representative now get the r7 hold in

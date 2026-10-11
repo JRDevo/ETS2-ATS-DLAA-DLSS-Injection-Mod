@@ -29,7 +29,7 @@ Everything else is tuning. The defaults are tuned already; you can ignore the re
 `Ctrl+Shift+F1`/`F2` (cut-out sharpness), `Alt+F5` (per-part motion vectors), `Alt+F6` (mirror DLAA),
 `Alt+F7` (DLAA before tone-map), `Ctrl+F3` (wire depth), `Ctrl+F4` (DLSS upscale).
 
-**Debug keys** (need `debug = 1`; diagnostics and bug reports only): `Ctrl+F5`..`Ctrl+F12`, `Alt+F8` (motion dump).
+**Debug keys** (need `log_level = 4`; diagnostics and bug reports only): `Ctrl+F5`..`Ctrl+F12`, `Alt+F8` (motion dump).
 
 The detailed tables below describe every key; they are grouped by modifier, not by how often you need them.
 
@@ -125,7 +125,7 @@ menu and the garage / truck dealer screens, before a save is loaded).
   that feature is off; the description of the selected row says what changes it. `Mode` and `DLAA on / off` show the whole
   mod (what switching it off saves), `DLSS upscale` shows `no extra` (it is the same pass; the game just draws fewer
   pixels), the two texture sharpness rows show `~0 ms` (memory only, no GPU pass), `-` = no cost of its own. The mod's GPU timers switch on while the
-  menu is open and off again when it closes (they stay on with `debug = 1`).
+  menu is open and off again when it closes (they stay on with `log_level = 4`).
 - The menu costs nothing while it is closed.
 
 ## Bind a key in the menu
@@ -320,7 +320,7 @@ Put a `key_<action>` line in `dlaa.ini` (next to `dinput8.dll`, read when the ga
 zero or more modifiers `Shift`, `Ctrl`, `Alt` joined with `+`, then one key (and optionally a wheel / gamepad button after
 a comma, see [below](#wheel-gamepad-and-joystick-buttons)). Not case-sensitive, spaces are
 ignored. `none` (or an empty value) turns the action off. A value that is not understood is logged
-(with `debug = 1`) and the default stays. Write the binding alone on the line, no comment after it.
+(with `log_level = 2` or more) and the default stays. Write the binding alone on the line, no comment after it.
 
 ```
 key_dlaa_toggle = Ctrl+D
@@ -381,7 +381,7 @@ menu with `Delete` **or** wheel button 10. A value may hold one keyboard binding
   line is ignored (logged) and the default stays.
 - A comma right after a `+` or at the start of a binding is the comma **key** (`Shift+,` still works).
 
-**Finding the button number:** set `debug = 1`, start the game and press each button once. The first press of every
+**Finding the button number:** set `log_level = 3` (or 4), start the game and press each button once. The first press of every
 button / D-pad direction is written to `dlaa_inject.log`, e.g.
 `controller 'Thrustmaster T300RS Racing Wheel': button 10 pressed -- bind it in dlaa.ini as Wheel10`
 (at most 24 such lines per run). The game's own `game.log` lists the same numbers as `[di8] Button input 'b10'` for the

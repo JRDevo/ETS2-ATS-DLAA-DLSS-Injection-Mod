@@ -84,13 +84,13 @@ bool Ensure(ID3D11Device* dev) {
     size_t vsSize = 0, psSize = 0;
     const void* vsCode = ShaderCache::Code(ShaderCache::kPvBlitVs, &vsSize);
     const void* psCode = ShaderCache::Code(ShaderCache::kPvBlitPs, &psSize);
-    if (!vsCode) { Log("preview blit VS D3DCompile failed %s", ShaderCache::Error(ShaderCache::kPvBlitVs)); return false; }
+    if (!vsCode) { LogErr("preview blit VS D3DCompile failed %s", ShaderCache::Error(ShaderCache::kPvBlitVs)); return false; }
     if (FAILED(hr = dev->CreateVertexShader(vsCode, vsSize, nullptr, &g_vs))) {
-        Log("preview blit CreateVertexShader hr=0x%lx", hr); return false;
+        LogErr("preview blit CreateVertexShader hr=0x%lx", hr); return false;
     }
-    if (!psCode) { Log("preview blit PS D3DCompile failed %s", ShaderCache::Error(ShaderCache::kPvBlitPs)); return false; }
+    if (!psCode) { LogErr("preview blit PS D3DCompile failed %s", ShaderCache::Error(ShaderCache::kPvBlitPs)); return false; }
     if (FAILED(hr = dev->CreatePixelShader(psCode, psSize, nullptr, &g_ps))) {
-        Log("preview blit CreatePixelShader hr=0x%lx", hr); return false;
+        LogErr("preview blit CreatePixelShader hr=0x%lx", hr); return false;
     }
     D3D11_BLEND_DESC bd{};
     bd.IndependentBlendEnable = TRUE;
@@ -103,12 +103,12 @@ bool Ensure(ID3D11Device* dev) {
         bd.RenderTarget[i].RenderTargetWriteMask = i == 0 ? (D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN |
                                                              D3D11_COLOR_WRITE_ENABLE_BLUE) : 0;
     }
-    if (FAILED(hr = dev->CreateBlendState(&bd, &g_blend))) { Log("preview blit CreateBlendState hr=0x%lx", hr); return false; }
+    if (FAILED(hr = dev->CreateBlendState(&bd, &g_blend))) { LogErr("preview blit CreateBlendState hr=0x%lx", hr); return false; }
     D3D11_RASTERIZER_DESC rd{};
     rd.FillMode = D3D11_FILL_SOLID;
     rd.CullMode = D3D11_CULL_NONE;
     rd.DepthClipEnable = TRUE;
-    if (FAILED(hr = dev->CreateRasterizerState(&rd, &g_rs))) { Log("preview blit CreateRasterizerState hr=0x%lx", hr); return false; }
+    if (FAILED(hr = dev->CreateRasterizerState(&rd, &g_rs))) { LogErr("preview blit CreateRasterizerState hr=0x%lx", hr); return false; }
     D3D11_DEPTH_STENCIL_DESC dd{};
     dd.DepthEnable = FALSE;
     dd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
@@ -119,7 +119,7 @@ bool Ensure(ID3D11Device* dev) {
     dd.FrontFace.StencilFailOp = dd.FrontFace.StencilDepthFailOp = dd.FrontFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
     dd.FrontFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
     dd.BackFace = dd.FrontFace;
-    if (FAILED(hr = dev->CreateDepthStencilState(&dd, &g_dss))) { Log("preview blit CreateDepthStencilState hr=0x%lx", hr); return false; }
+    if (FAILED(hr = dev->CreateDepthStencilState(&dd, &g_dss))) { LogErr("preview blit CreateDepthStencilState hr=0x%lx", hr); return false; }
     g_failed = false;
     return true;
 }

@@ -419,7 +419,7 @@ void OvResolveLocked(int i) {
     XrInstance inst = s_slot[i].instance.load(std::memory_order_acquire);
     if (!gipa || !inst) {
         if (s_ov.resolveTries <= 3)
-            Log("OpenXR overlay: cannot resolve the swapchain functions yet at the %s %s (GIPA %p, instance %p) -- the VR panel "
+            LogWarn("OpenXR overlay: cannot resolve the swapchain functions yet at the %s %s (GIPA %p, instance %p) -- the VR panel "
                 "stays in the eye picture", kKindName[s_slot[i].kind], s_slot[i].module, reinterpret_cast<void*>(gipa), inst);
         return;
     }
@@ -438,7 +438,7 @@ void OvResolveLocked(int i) {
     }
     if (missing >= 0) {
         if (s_ov.resolveTries <= 3)
-            Log("OpenXR overlay: %s not resolved at the %s %s (instance %p) -- the VR panel stays in the eye picture",
+            LogWarn("OpenXR overlay: %s not resolved at the %s %s (instance %p) -- the VR panel stays in the eye picture",
                 kNames[missing], kKindName[s_slot[i].kind], s_slot[i].module, inst);
         return;
     }
@@ -477,7 +477,7 @@ bool OvCreateLocked(XrSession ses, const OverlayParams& par) {
     const OvFns& o = s_ov.fn;
     auto fail = [&](const char* what, XrResult r) {
         s_ovCreateFails.fetch_add(1, std::memory_order_relaxed);
-        Log("OpenXR overlay: %s failed (result %d) -- the VR panel / fps box stay in the eye picture for this session", what, r);
+        LogErr("OpenXR overlay: %s failed (result %d) -- the VR panel / fps box stay in the eye picture for this session", what, r);
         OvDropLocked(true);
         s_ov.dead = true;
         return false;
@@ -501,7 +501,7 @@ bool OvCreateLocked(XrSession ses, const OverlayParams& par) {
     for (uint32_t k = 0, at = 0; k < nf && at < sizeof(list) - 24; ++k)
         at += (uint32_t)snprintf(list + at, sizeof(list) - at, "%s%lld", k ? " " : "", (long long)fmts[k]);
     if (!pick) {
-        Log("OpenXR overlay: the runtime offers none of the 8-bit RGBA swapchain formats (offered: %s)", list);
+        LogWarn("OpenXR overlay: the runtime offers none of the 8-bit RGBA swapchain formats (offered: %s)", list);
         return fail("picking a swapchain format", 0);
     }
     const uint32_t sw[2] = { par.panelW, par.fpsW }, sh[2] = { par.panelH, par.fpsH };
@@ -558,7 +558,7 @@ bool OvDrawLocked(int which) {
     XrResult r = o.acquire(c.sc, &ai, &idx);
     if (r < 0) {
         const uint64_t n = s_ovAcqFails.fetch_add(1, std::memory_order_relaxed);
-        if (n < 4) Log("OpenXR overlay: xrAcquireSwapchainImage of our %s swapchain failed (result %d)", which ? "fps box" : "panel", r);
+        if (n < 4) LogErr("OpenXR overlay: xrAcquireSwapchainImage of our %s swapchain failed (result %d)", which ? "fps box" : "panel", r);
         if (r == kErrSessionLost) s_ov.dead = true;
         return false;
     }
@@ -566,7 +566,7 @@ bool OvDrawLocked(int which) {
     r = o.wait(c.sc, &wi);
     if (r < 0 || r == kTimeoutExpired) {                 // an acquired image we may not release: the session is given up
         s_ovWaitFails.fetch_add(1, std::memory_order_relaxed);
-        Log("OpenXR overlay: xrWaitSwapchainImage of our %s swapchain failed (result %d) -- the quad path is off for this session",
+        LogErr("OpenXR overlay: xrWaitSwapchainImage of our %s swapchain failed (result %d) -- the quad path is off for this session",
             which ? "fps box" : "panel", r);
         s_ov.dead = true;
         return false;
@@ -589,7 +589,7 @@ bool OvDrawLocked(int which) {
     r = o.release(c.sc, &ri);
     if (r < 0) {
         s_ovRelFails.fetch_add(1, std::memory_order_relaxed);
-        Log("OpenXR overlay: xrReleaseSwapchainImage of our %s swapchain failed (result %d) -- the quad path is off for this session",
+        LogErr("OpenXR overlay: xrReleaseSwapchainImage of our %s swapchain failed (result %d) -- the quad path is off for this session",
             which ? "fps box" : "panel", r);
         s_ov.dead = true;
         return false;
@@ -611,7 +611,7 @@ void OvDrawWantedLocked(const OverlayParams& par) {
     s_ov.acqRun = acqFail ? s_ov.acqRun + 1 : 0;
     if (s_ov.acqRun >= 60 && !s_ov.dead) {
         s_ov.dead = true;
-        Log("OpenXR overlay: 60 frames in a row without an image of our swapchains -- the quad path is off for this session");
+        LogWarn("OpenXR overlay: 60 frames in a row without an image of our swapchains -- the quad path is off for this session");
     }
 }
 // rotation of `ang` rad about the +y / +x axis as a quaternion (x, y, z, w)
@@ -640,7 +640,7 @@ void OvFacingQuat(int k, const char* what, const char* to, const double dir[3], 
         const double dot = -(zr[0] * dir[0] + zr[1] * dir[1] + zr[2] * dir[2]);
         s_ov.zChecked[k] = true;
         s_ov.zFlip[k] = dot < 0.0;
-        Log("OpenXR overlay: %s quad orientation check: yaw %+.1f pitch %+.1f deg, R(q)(0,0,1) = (%+.3f %+.3f %+.3f) vs back-to-%s "
+        LogDbg("OpenXR overlay: %s quad orientation check: yaw %+.1f pitch %+.1f deg, R(q)(0,0,1) = (%+.3f %+.3f %+.3f) vs back-to-%s "
             "(%+.3f %+.3f %+.3f): dot %+.3f -> %s; R(q)(0,1,0) = (%+.3f %+.3f %+.3f)", what, yaw / kRad, pitch / kRad, zr[0], zr[1],
             zr[2], to, -dir[0], -dir[1], -dir[2], dot,
             dot > 0.999 ? "OK (faces it)" : (dot < 0.0 ? "POINTS AWAY: turned 180 deg about its y axis from now on" : "NOT exact (kept)"),
@@ -664,7 +664,7 @@ bool OvBuildQuadLocked(int which, const OverlayParams& par, const XrCompositionL
     if (!(fw > 0.1 && fw < 20.0) || !(fh > 0.1 && fh < 20.0)) {
         if (!s_ov.fovBadLogged) {
             s_ov.fovBadLogged = true;
-            Log("OpenXR overlay: the submitted view 0 fov (L%+.1f R%+.1f U%+.1f D%+.1f deg) is not usable -- no quads",
+            LogWarn("OpenXR overlay: the submitted view 0 fov (L%+.1f R%+.1f U%+.1f D%+.1f deg) is not usable -- no quads",
                 f.angleLeft * 57.29578, f.angleRight * 57.29578, f.angleUp * 57.29578, f.angleDown * 57.29578);
         }
         return false;
@@ -823,7 +823,7 @@ bool OvEndFrame(int i, XrSession ses, const XrFrameEndInfo* fe, const XrComposit
     if (nGame + 2 > kOvMaxLayers) {
         if (!s_ov.capLogged) {
             s_ov.capLogged = true;
-            Log("OpenXR overlay: the game submits %d layers (we append ours up to %d in all) -- no quads in such frames", nGame,
+            LogWarn("OpenXR overlay: the game submits %d layers (we append ours up to %d in all) -- no quads in such frames", nGame,
                 kOvMaxLayers);
         }
         OvSetOk(ok[0], ok[1]);
@@ -854,7 +854,7 @@ bool OvEndFrame(int i, XrSession ses, const XrFrameEndInfo* fe, const XrComposit
 void OvRejected(XrResult r) {
     std::lock_guard<std::mutex> lk(s_ovMx);
     s_ovRejects.fetch_add(1, std::memory_order_relaxed);
-    Log("OpenXR overlay: the runtime REJECTED xrEndFrame with our quad layers (result %d) -- the frame was submitted again without "
+    LogErr("OpenXR overlay: the runtime REJECTED xrEndFrame with our quad layers (result %d) -- the frame was submitted again without "
         "them; the VR panel / fps box go back into the eye picture for this session", r);
     s_ov.dead = true;
     OvSetOk(false, false);
@@ -961,7 +961,7 @@ void NoteResult(int kind, XrResult r, XrSession ses) {
     if (k >= 20) return;
     char tb[400];
     TbDescribe(tb, sizeof(tb));
-    Log("OpenXR result: %s(session %p) returned %d = %s (#%llu of this kind%s; tid=%lu) | %s", kNsName[kind], ses, r, XrResultName(r),
+    LogWarn("OpenXR result: %s(session %p) returned %d = %s (#%llu of this kind%s; tid=%lu) | %s", kNsName[kind], ses, r, XrResultName(r),
         (unsigned long long)k + 1, k == 19 ? "; the rest are only counted in the turbo stats line" : "", GetCurrentThreadId(), tb);
 }
 
@@ -1173,7 +1173,7 @@ bool TbStartLocked(XrSession ses, PFN_xrWaitFrame fn, bool claimed) {
         HANDLE h = CreateThread(nullptr, 0, &TbWorkerMain, nullptr, 0, nullptr);
         if (!h) {
             static bool s_logged = false;
-            if (!s_logged) { s_logged = true; Log("OpenXR turbo: the wait thread could not be created (error %lu) -- turbo stays off", GetLastError()); }
+            if (!s_logged) { s_logged = true; LogErr("OpenXR turbo: the wait thread could not be created (error %lu) -- turbo stays off", GetLastError()); }
             return false;
         }
         CloseHandle(h);
@@ -1241,7 +1241,7 @@ void TbLogStatsLocked(const char* why) {         // under s_tbMx
         if (c) at += snprintf(ns + at, sizeof(ns) - (size_t)at, "%s%s %llu", at ? ", " : "", kNsName[k], (unsigned long long)c);
     }
     s_tb.nsPrev = nsAll;
-    Log("OpenXR turbo stats (%s): %llu async xrWaitFrame (%llu in all), %llu made-up frame states, %llu xrBeginFrame skipped, "
+    LogDbg("OpenXR turbo stats (%s): %llu async xrWaitFrame (%llu in all), %llu made-up frame states, %llu xrBeginFrame skipped, "
         "%llu second-poll blocks, 1-s timeouts %llu at xrEndFrame / %llu at xrWaitFrame, %llu failures | phase 33: %llu first waits "
         "armed at the game's xrBeginFrame, %llu turbo frames waited for at xrEndFrame (no wait pending), made-up time up to %.2f ms "
         "ahead of the newest real one, %llu nudged to stay increasing, %llu real times kept although earlier, %llu frame tags "
@@ -1282,7 +1282,7 @@ void TbArmLocked(int i, XrSession ses) {
         static bool s_logged = false;
         if (!s_logged) {
             s_logged = true;
-            Log("OpenXR turbo: xrWaitFrame / xrEndFrame not resolved at the %s %s (the component that begins the game's frame) "
+            LogErr("OpenXR turbo: xrWaitFrame / xrEndFrame not resolved at the %s %s (the component that begins the game's frame) "
                 "-- turbo cannot run", kKindName[s_slot[i].kind], s_slot[i].module);
         }
         return;
@@ -1308,7 +1308,7 @@ void TbBeginForGameLocked(int i, XrSession ses) {
                 char tb[400];
                 TbMirrorLocked();
                 TbDescribe(tb, sizeof(tb));
-                Log("OpenXR turbo: the async xrWaitFrame did not finish within 1 s at xrEndFrame -- the frame is begun and ended "
+                LogWarn("OpenXR turbo: the async xrWaitFrame did not finish within 1 s at xrEndFrame -- the frame is begun and ended "
                     "anyway; the wait stays pending for the next turbo frame (phase 33: not expected any more -- the first wait "
                     "is armed only when no game wait is outstanding) | %s", tb);
             }
@@ -1318,7 +1318,7 @@ void TbBeginForGameLocked(int i, XrSession ses) {
             s_tb.broken = true;
             s_tb.brokenSes = ses;
             s_tbFailed.store(true, std::memory_order_relaxed);
-            Log("OpenXR turbo: the async xrWaitFrame FAILED (result %d = %s) -- turbo is off for this session (session %p)", wr,
+            LogErr("OpenXR turbo: the async xrWaitFrame FAILED (result %d = %s) -- turbo is off for this session (session %p)", wr,
                 XrResultName(wr), ses);
             return;
         }
@@ -1333,7 +1333,7 @@ void TbBeginForGameLocked(int i, XrSession ses) {
         if (s_tb.gameWaits || s_tb.gameWaited) {
             const uint64_t n = s_tbSyncWaits.fetch_add(1, std::memory_order_relaxed);
             if (n < 8)
-                Log("OpenXR turbo: a turbo frame reached xrEndFrame with no async wait pending while the game has a real xrWaitFrame "
+                LogWarn("OpenXR turbo: a turbo frame reached xrEndFrame with no async wait pending while the game has a real xrWaitFrame "
                     "%s -- the frame is NOT begun (its xrEndFrame will fail; a wait here could hang the game) (tid=%lu)",
                     s_tb.gameWaits ? "running" : "done and not begun", GetCurrentThreadId());
             return;
@@ -1345,7 +1345,7 @@ void TbBeginForGameLocked(int i, XrSession ses) {
         --t_depth;
         const uint64_t n = s_tbSyncWaits.fetch_add(1, std::memory_order_relaxed);
         if (n < 8)
-            Log("OpenXR turbo: a turbo frame reached xrEndFrame with no async wait pending (turbo %s) -- waited for it for real "
+            LogWarn("OpenXR turbo: a turbo frame reached xrEndFrame with no async wait pending (turbo %s) -- waited for it for real "
                 "here (result %d = %s), then begun (tid=%lu)", s_tbWant.load(std::memory_order_relaxed) ? "on" : "switched off",
                 wr, XrResultName(wr), GetCurrentThreadId());
         if (wr != 0) NoteResult(kNsTbSyncWait, wr, ses);
@@ -1366,7 +1366,7 @@ void TbBeginForGameLocked(int i, XrSession ses) {
         s_tb.broken = true;
         s_tb.brokenSes = ses;
         s_tbFailed.store(true, std::memory_order_relaxed);
-        Log("OpenXR turbo: the real xrBeginFrame FAILED (result %d = %s%s) -- turbo is off for this session (session %p)", rb,
+        LogErr("OpenXR turbo: the real xrBeginFrame FAILED (result %d = %s%s) -- turbo is off for this session (session %p)", rb,
             XrResultName(rb), realBegin ? "" : ", not resolved", ses);
     }
 }
@@ -1591,7 +1591,7 @@ XrResult WaitFrameImpl(int i, XrSession ses, const XrFrameWaitInfo* wi, XrFrameS
     if (s_tb.pending && fs && ses != s_tb.ses) {
         static std::atomic<int> s_other{0};
         if (s_other.fetch_add(1, std::memory_order_relaxed) < 4)
-            Log("OpenXR turbo: xrWaitFrame of session %p while an async wait of session %p is pending -- passed to the runtime",
+            LogWarn("OpenXR turbo: xrWaitFrame of session %p while an async wait of session %p is pending -- passed to the runtime",
                 ses, s_tb.ses);
     }
     // phase 33: turbo switched off while the pending wait is already claimed by a made-up frame: this frame must not be made
@@ -1608,7 +1608,7 @@ XrResult WaitFrameImpl(int i, XrSession ses, const XrFrameWaitInfo* wi, XrFrameS
                 char tb[400];
                 TbMirrorLocked();
                 TbDescribe(tb, sizeof(tb));
-                Log("OpenXR turbo: switched off, but the pending async wait was not consumed within 1 s at the game's xrWaitFrame "
+                LogWarn("OpenXR turbo: switched off, but the pending async wait was not consumed within 1 s at the game's xrWaitFrame "
                     "-- a made-up frame state is returned once more | %s", tb);
             }
         }
@@ -1624,7 +1624,7 @@ XrResult WaitFrameImpl(int i, XrSession ses, const XrFrameWaitInfo* wi, XrFrameS
                     char tb[400];
                     TbMirrorLocked();
                     TbDescribe(tb, sizeof(tb));
-                    Log("OpenXR turbo: the async xrWaitFrame did not finish within 1 s at the game's second xrWaitFrame -- a "
+                    LogWarn("OpenXR turbo: the async xrWaitFrame did not finish within 1 s at the game's second xrWaitFrame -- a "
                         "made-up frame state is returned anyway | %s", tb);
                 }
             }
@@ -1685,7 +1685,7 @@ XrResult WaitFrameImpl(int i, XrSession ses, const XrFrameWaitInfo* wi, XrFrameS
             } else {
                 const uint64_t n = s_tbBackJumps.fetch_add(1, std::memory_order_relaxed);
                 if (n < 8)
-                    Log("OpenXR turbo: the runtime's predicted display time is %.2f ms EARLIER than the last one handed to the game "
+                    LogWarn("OpenXR turbo: the runtime's predicted display time is %.2f ms EARLIER than the last one handed to the game "
                         "-- kept as it is (phase 33: only nudged within 2 frame periods)", (double)back / 1e6);
             }
         }
@@ -1927,7 +1927,7 @@ XrResult PollEventImpl(int i, XrInstance inst, void* ev) {
         else if (r < 0) {
             static std::atomic<int> s_errs{0};
             if (s_errs.fetch_add(1, std::memory_order_relaxed) < 20)
-                Log("OpenXR event: xrPollEvent(instance %p) FAILED -> %d = %s (tid=%lu)", inst, r, XrResultName(r), GetCurrentThreadId());
+                LogErr("OpenXR event: xrPollEvent(instance %p) FAILED -> %d = %s (tid=%lu)", inst, r, XrResultName(r), GetCurrentThreadId());
         }
     }
     return r;
@@ -2025,7 +2025,7 @@ XrResult EndFrameImpl(int i, XrSession ses, const XrFrameEndInfo* fe) {
                 YawPitch(S0.q, &sy, &spt);
                 YawPitch(C0.q, &cy, &cp);
                 const double cAng = AngleBetween(C0.q, Pose{ { 0, 0, 0, 1 }, {} }.q);
-                Log("OpenXR hook pose diag: view 0 LOCATED (space %p %s) yaw %+.1f pitch %+.1f pos (%+.3f %+.3f %+.3f) | SUBMITTED "
+                LogDbg("OpenXR hook pose diag: view 0 LOCATED (space %p %s) yaw %+.1f pitch %+.1f pos (%+.3f %+.3f %+.3f) | SUBMITTED "
                     "(layer space %p %s) yaw %+.1f pitch %+.1f pos (%+.3f %+.3f %+.3f) | correction C = S (x) L^-1: rotation %.1f deg "
                     "(yaw %+.1f pitch %+.1f) offset (%+.3f %+.3f %+.3f) m | mean residual of the previous C %.2f deg over %llu frames",
                     bestSpace, SpaceTypeName(bestType), ly, lp, L0.p[0], L0.p[1], L0.p[2], proj->space, SpaceTypeName(layerType), sy,
@@ -2332,7 +2332,7 @@ FARPROC Filter(HMODULE mod, LPCSTR name, FARPROC p) {
     if (i < 0) {
         static std::atomic<bool> s_full{false};
         if (!s_full.exchange(true))
-            Log("OpenXR hook: WARNING more than %d OpenXR components -- %s not wrapped (the VR panel falls back to the arm "
+            LogWarn("OpenXR hook: WARNING more than %d OpenXR components -- %s not wrapped (the VR panel falls back to the arm "
                 "point if the release is not seen)", kSlots, name);
         return p;
     }
@@ -2352,7 +2352,7 @@ bool HookOne(const wchar_t* dll, void* hook, PFN_GetProcAddress* orig) {
     HMODULE m = GetModuleHandleW(dll);
     void* target = m ? reinterpret_cast<void*>(GetProcAddress(m, "GetProcAddress")) : nullptr;
     if (!target) {
-        Log("OpenXR hook: %ls!GetProcAddress not found", dll);
+        LogErr("OpenXR hook: %ls!GetProcAddress not found", dll);
         return false;
     }
     MH_STATUS st = MH_CreateHook(target, hook, reinterpret_cast<void**>(orig));
@@ -2362,7 +2362,7 @@ bool HookOne(const wchar_t* dll, void* hook, PFN_GetProcAddress* orig) {
     }
     if (st == MH_OK) st = MH_EnableHook(target);
     if (st != MH_OK) {
-        Log("OpenXR hook: detour of %ls!GetProcAddress (%p) failed: %s", dll, target, MH_StatusToString(st));
+        LogErr("OpenXR hook: detour of %ls!GetProcAddress (%p) failed: %s", dll, target, MH_StatusToString(st));
         return false;
     }
     Log("OpenXR hook: %ls!GetProcAddress detoured (%p)", dll, target);
@@ -2375,7 +2375,7 @@ bool Install() {
     if (s_hooked.load()) return true;
     MH_STATUS st = MH_Initialize();
     if (st != MH_OK && st != MH_ERROR_ALREADY_INITIALIZED) {
-        Log("OpenXR hook: MH_Initialize failed: %s -- VR panel stays at the arm point", MH_StatusToString(st));
+        LogErr("OpenXR hook: MH_Initialize failed: %s -- VR panel stays at the arm point", MH_StatusToString(st));
         return false;
     }
     Sets();                                      // the thunk table before the first lookup can need it
