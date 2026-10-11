@@ -1,3 +1,7 @@
+// v0.10.4 -- issue #8 OPTISCALER: DetectOptiScaler (startup) looks for OptiScaler.ini / .log / .asi / folder or nvngx_dlssnr.dll next
+//           to the game exe; found = mirror DLAA starts OFF unless dlaa.ini sets mirror_dlaa (its DLSS 5 "Neural Rendering" DX12
+//           bridge loses the device on the small HDR mirror DLSS frames, the picture freezes). Alt+F6 / mirror_dlaa = 1 still force
+//           it on; the perf profile leaves it alone; log line "env: OptiScaler detected".
 // (next) -- phase 39: LOG LEVELS (log.h). dlaa.ini log_level: 0 off, 1 errors (NEW DEFAULT), 2 warnings, 3 info, 4 debug (a
 //           number or the name); `debug = 1` without a log_level key = 4 (= what debug = 1 logged until now), debug = 0 has no
 //           effect. Every Log call has a level: LogErr (failures; "ERROR " after the timestamp), LogWarn (degraded but running;
@@ -2004,6 +2008,8 @@ void DidFwdNoteDraw(ID3D11DeviceContext* ctx, UINT ic, bool instanced, int verdi
 // mirror_max_views.
 int              g_mirCfg       = 1;            // dlaa.ini mirror_dlaa
 std::atomic<bool> g_mirOn{true};                // live switch
+bool             g_optiScaler   = false;        // issue #8: OptiScaler (DLSS swapper, DLSS 5 "NR" bridge) found next to the game exe
+char             g_optiScalerHit[64] = "";      // which file / folder matched (DetectOptiScaler), for the log
 int              g_mirMinPx     = 128;          // dlaa.ini mirror_min_px: a mirror view's width AND height are >= this
 int              g_mirMaxViews  = 8;            // dlaa.ini mirror_max_views: units (1..kMirCap)
 int              g_mirCur       = -1;           // unit of the open mirror view (its G-buffer bind .. its depth discard)
@@ -13890,7 +13896,8 @@ void ApplyProfile(bool live, char* changed, size_t cap) {
         note(k, a, b);
     };
     bool mirReset = false, dlssReset = false;
-    if (!g_profExplicit[PK_MIRROR_DLAA] && (g_mirCfg != P.mirDlaa || (int)g_mirOn.load() != P.mirDlaa)) {
+    if (!g_profExplicit[PK_MIRROR_DLAA] && !g_optiScaler &&   // issue #8: with OptiScaler the auto-off stands
+        (g_mirCfg != P.mirDlaa || (int)g_mirOn.load() != P.mirDlaa)) {
         noteI(PK_MIRROR_DLAA, (long)(g_mirCfg && g_mirOn.load()), P.mirDlaa);
         g_mirCfg = P.mirDlaa; g_mirOn = P.mirDlaa != 0; mirReset = true;
     }
@@ -18125,6 +18132,41 @@ bool FindNvngxDlss(wchar_t* out, DWORD cap) {
     return false;
 }
 
+#ifdef WITH_DLAA
+// v0.10.4 issue #8: OptiScaler (a DLSS swapper DLL in the game folder, here as winmm.dll / dxgi.dll ..., with the DLSS 5
+// "Neural Rendering" model on a private DX12 bridge) loses its DX12 device (DXGI_ERROR_DEVICE_REMOVED) on the small wide HDR
+// mirror DLAA frames. Looks for its files next to the game exe; the first hit sets g_optiScaler / g_optiScalerHit. Startup only.
+void DetectOptiScaler() {
+    g_optiScaler = false;
+    g_optiScalerHit[0] = 0;
+    wchar_t dir[MAX_PATH];
+    const DWORD n = GetModuleFileNameW(nullptr, dir, MAX_PATH);
+    if (!n || n >= MAX_PATH) return;
+    wchar_t* slash = wcsrchr(dir, L'\\');
+    if (!slash) return;
+    *(slash + 1) = 0;
+    struct Probe { const wchar_t* w; const char* a; bool dirOnly; };
+    static const Probe kProbes[] = {
+        { L"OptiScaler.ini",       "OptiScaler.ini",       false },
+        { L"OptiScaler.log",       "OptiScaler.log",       false },
+        { L"OptiScaler",           "OptiScaler\\",         true  },
+        { L"OptiScaler.asi",       "OptiScaler.asi",       false },
+        { L"nvngx_dlssnr.dll",     "nvngx_dlssnr.dll",     false },
+        { L"nvngx.dll_dlssnr.dll", "nvngx.dll_dlssnr.dll", false },
+    };
+    for (const Probe& p : kProbes) {
+        wchar_t cand[MAX_PATH];
+        if (_snwprintf_s(cand, _TRUNCATE, L"%s%s", dir, p.w) <= 0) continue;
+        const DWORD attr = GetFileAttributesW(cand);
+        if (attr == INVALID_FILE_ATTRIBUTES) continue;
+        if (p.dirOnly && !(attr & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        g_optiScaler = true;
+        snprintf(g_optiScalerHit, sizeof(g_optiScalerHit), "%s", p.a);
+        return;
+    }
+}
+#endif
+
 void LoadConfig() {
     InitKeyBinds();                                      // v0.7.7: defaults first, key_* lines below override
     g_controllerName[0] = 0;                             // v0.10.1 controller_name default: every controller
@@ -18809,6 +18851,8 @@ void LoadConfig() {
                   "rigid-parent vote counts a world pixel left without an id as a static source, so plates do not depend on which "
                   "static objects were re-drawn this frame ('static skip' field of the 'MV draw-ids' line)");
     }
+    DetectOptiScaler();                                 // issue #8 (before the env: lines, which log the verdict)
+    if (g_optiScaler && !g_profExplicit[PK_MIRROR_DLAA]) g_mirCfg = 0;   // issue #8: OptiScaler found, mirror DLAA starts off unless dlaa.ini says otherwise
     g_mirOn = g_mirCfg != 0;                            // v0.10.0 phase 2: the live switch starts at the ini value
     Log("mirror units (v0.10.0 phase 2): mirror_dlaa=%d mirror_min_px=%d mirror_max_views=%d (%s live switch; %s switches the "
         "per-draw motion vectors 2 <-> 0) -- %s", g_mirCfg, g_mirMinPx, g_mirMaxViews, KeyName(KA_MIRROR_TOGGLE),
@@ -18876,6 +18920,15 @@ void LoadConfig() {
             LogErr("env: nvngx_dlss.dll NOT found next to dinput8.dll or the game exe -- DLAA/DLSS init will fail unless "
                 "it is elsewhere on the DLL search path");
         }
+#ifdef WITH_DLAA
+        if (g_optiScaler)
+            LogWarn("env: OptiScaler detected (%s next to the game exe) -- mirror DLAA starts %s: OptiScaler's DLSS 5 (Neural Rendering) "
+                "bridge crashes its DX12 device on the small HDR mirror frames (issue #8; DXGI_ERROR_DEVICE_REMOVED, the picture then "
+                "freezes). mirror_dlaa = 1 in dlaa.ini forces it on, Alt+F6 switches it live; the perf profile leaves it alone",
+                g_optiScalerHit, g_profExplicit[PK_MIRROR_DLAA]
+                                     ? (g_mirCfg ? "ON (mirror_dlaa = 1 set in dlaa.ini)" : "OFF (mirror_dlaa = 0 set in dlaa.ini)")
+                                     : "OFF");
+#endif
     }
     LogKeyBinds();
 }

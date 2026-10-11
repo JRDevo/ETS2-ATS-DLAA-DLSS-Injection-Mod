@@ -508,7 +508,7 @@ The table below lists the commonly used keys:
 | `sharp_radius` | `1.5` | sharpening width in texels, `1`..`4` |
 | `dlaa_area` | `100` | run DLAA on the centre `N` % of each eye image (VR performance), `10`..`100`. VR only: in flat mode the whole picture is always used. Also used for the truck on the VR main menu / garage screens |
 | `mv_objects` | `2` | motion vectors for moving traffic: `2` = every moving part gets its own exact motion (default), `0` = camera motion only (`1` = the older method, for comparison) |
-| `mirror_dlaa` | `1` | DLAA on the truck / car mirrors: `1` = each mirror gets its own DLAA (default), `0` = mirrors are left as the game draws them. `Alt+F6` switches it live, `Shift+F12` saves |
+| `mirror_dlaa` | `1` | DLAA on the truck / car mirrors: `1` = each mirror gets its own DLAA (default), `0` = mirrors are left as the game draws them. `Alt+F6` switches it live, `Shift+F12` saves. With OptiScaler next to the game exe (v0.10.4) it starts off by itself unless this key is set: its DLSS 5 bridge crashes on the mirror frames (issue #8). |
 | `mirror_mv` | `parts` | motion in the mirrors (v0.10.2, VR and flat): `parts` = each moving part gets its own exact motion in the glass (default, about 0.4 ms per mirror in VR), `camera` = camera motion only (about 0.15 ms per mirror, moving traffic can ghost in the glass). Used with `mirror_vr_mode` / `mirror_flat_mode` 1, 2 and 3; mode 4 is always camera motion. The menu's Mirror DLAA row sets it live, `Shift+F12` saves |
 | `dlaa_pre_tonemap` | `1` | DLAA before the game's tonemap (flat DLAA mode): `1` = on the game's HDR colours (default), `0` = on the finished picture at the end of the frame. `Alt+F7` switches it live, `Shift+F12` saves |
 | `tex_lod_bias` | `0` | sharper texture text: texture mip LOD bias for the 3-D world while DLAA / DLSS runs, `-3`..`1`, `0` = off. Try `-0.5` to `-1`; more negative = sharper but more shimmer on fine patterns. `Ctrl+F1` / `F2` change it live, `Shift+F12` saves |
@@ -630,6 +630,11 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   `caller=NvPresent64.dll`): update. Smooth Motion only adds frames on the monitor; it does nothing for
   the headset picture in VR, so switch it off for VR.
 - **OFXR Bridge (VR frame generation):** see the section above.
+- **Picture freezes in the interior camera with OptiScaler (DLSS 5 / Neural Rendering):** OptiScaler's DX12
+  bridge loses its device on the small HDR mirror DLSS frames that appear with the mirrors in view. Since v0.10.4
+  the mod sees OptiScaler next to the game exe and starts with mirror DLAA off (look for `env: OptiScaler
+  detected` in the log). On v0.10.3 set `mirror_dlaa = 0` in `dlaa.ini` or press `Alt+F6`. OptiScaler is not
+  supported or tested by this mod; it happens to work for the main picture.
 - **Faint dark line down the middle of the menu / truck-preview screen:** fixed in v0.8.1: update.
 - **Dark 1 px line on every silhouette (trees, poles, trucks) in flat mode:** fixed in v0.10.1: update. v0.10.0
   drew the game's fog pass one texel off.
