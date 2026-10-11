@@ -472,7 +472,7 @@ The three green lines under the title show the game's GPU time per frame, what t
 
 </details>
 
-## `dlaa.ini`
+## dlaa.ini
 
 <details>
 <summary><b>Show</b></summary>
