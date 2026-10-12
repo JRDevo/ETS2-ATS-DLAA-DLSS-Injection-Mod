@@ -80,6 +80,51 @@ static void TestMakeLayout() {
       CHECK(FlatViews::MakeLayout(b, 2, &L) == FlatViews::kBadRect, "an empty viewport is not a layout"); }
 }
 
+static void TestPlaceBlit() {
+    printf("PlaceBlit (round 2: viewport clip + scissor)\n");
+    using FlatViews::PlaceBlit;
+    using FlatViews::Placement;
+    // the first in-game test: full-backbuffer viewport, views confined by the scissor (the hypothesis this round tests)
+    Placement p = PlaceBlit(5760, 1080, true, 0.0, 0.0, 5760.0, 1080.0, true, true, 1920, 0, 3840, 1080);
+    CHECK(p.eff.x == 1920 && p.eff.y == 0 && p.eff.w == 1920 && p.eff.h == 1080 && (p.flags & FlatViews::kPlScissor),
+          "full viewport + scissor (1920..3840) -> the centre screen");
+    p = PlaceBlit(5760, 1080, true, 0.0, 0.0, 5760.0, 1080.0, false, true, 1920, 0, 3840, 1080);
+    CHECK(p.eff.x == 0 && p.eff.w == 5760 && p.flags == 0, "scissor rect bound but the test off -> the whole viewport");
+    p = PlaceBlit(5760, 1080, true, 0.0, 0.0, 5760.0, 1080.0, true, true, 0, 0, 8192, 8192);
+    CHECK(p.eff.w == 5760 && !(p.flags & FlatViews::kPlScissor), "a scissor larger than the RT changes nothing");
+    p = PlaceBlit(5760, 1080, true, 0.0, 0.0, 5760.0, 1080.0, true, true, 6000, 0, 7000, 1080);
+    CHECK(p.eff.w == 5760 && (p.flags & FlatViews::kPlScEmpty), "a scissor outside the viewport is ignored (flagged)");
+    p = PlaceBlit(5760, 1080, true, 3840.0, 0.0, 1920.0, 1080.0, false, false, 0, 0, 0, 0);
+    CHECK(p.eff.x == 3840 && p.eff.w == 1920 && p.flags == 0, "a per-screen viewport is used as it is");
+    p = PlaceBlit(5760, 1080, true, 3840.0, 0.0, 2000.0, 1080.0, false, false, 0, 0, 0, 0);
+    CHECK(p.eff.x == 3840 && p.eff.w == 1920 && (p.flags & FlatViews::kPlVpClipped), "a viewport reaching past RT0 is clipped (not the whole RT)");
+    p = PlaceBlit(5760, 1080, true, -10.0, 0.0, 1930.0, 1080.0, false, false, 0, 0, 0, 0);
+    CHECK(p.eff.x == 0 && p.eff.w == 1920 && (p.flags & FlatViews::kPlVpClipped), "a negative-x viewport is clipped");
+    p = PlaceBlit(5760, 1080, true, 6000.0, 0.0, 100.0, 100.0, false, false, 0, 0, 0, 0);
+    CHECK(p.eff.x == 0 && p.eff.w == 5760 && (p.flags & FlatViews::kPlVpOutside), "a viewport outside RT0 -> the whole RT (flagged)");
+    p = PlaceBlit(5760, 1080, false, 0, 0, 0, 0, false, false, 0, 0, 0, 0);
+    CHECK(p.eff.w == 5760 && (p.flags & FlatViews::kPlVpNone), "no viewport -> the whole RT");
+    p = PlaceBlit(5760, 1080, true, 1919.6, 0.0, 1920.4, 1080.0, true, true, 1920, 0, 3840, 1080);
+    CHECK(p.eff.x == 1920 && p.eff.w == 1920, "float viewport rounding + scissor");
+    // three scissored full-screen blits make a 3-view layout through the detector
+    Detector d;
+    const int sx[3][2] = { { 0, 1920 }, { 1920, 3840 }, { 3840, 5760 } };
+    int at = -1;
+    for (int pr = 0; pr < 40 && at < 0; ++pr) {
+        for (int k = 0; k < 3; ++k)
+            d.OnBlit(PlaceBlit(5760, 1080, true, 0.0, 0.0, 5760.0, 1080.0, true, true, sx[k][0], 0, sx[k][1], 1080).eff);
+        if (d.OnPresent() == Detector::kConfirmed) at = pr + 1;
+    }
+    CHECK(at == FlatViews::kConfirmPresents && d.Views() == 3, "scissor-placed views confirm as 3 views");
+    // without the scissor (the round-1 rule) the same blits are 3 full-screen rects: not a layout
+    Detector d2;
+    for (int pr = 0; pr < 40; ++pr) {
+        for (int k = 0; k < 3; ++k) d2.OnBlit(PlaceBlit(5760, 1080, true, 0.0, 0.0, 5760.0, 1080.0, false, false, 0, 0, 0, 0).eff);
+        d2.OnPresent();
+    }
+    CHECK(d2.Views() == 1 && d2.LastWhy() == FlatViews::kOverlap, "3 unscissored full-screen blits stay single-view (the round-1 log)");
+}
+
 static void TestPhase() {
     printf("PhaseOffset / PhaseOf\n");
     for (int n = 1; n <= FlatViews::kMaxBlits; ++n) {
@@ -271,6 +316,7 @@ static void TestDetectorFiveAndCap() {
 
 int main() {
     TestMakeLayout();
+    TestPlaceBlit();
     TestPhase();
     TestDetectorSingle();
     TestDetectorTriple();

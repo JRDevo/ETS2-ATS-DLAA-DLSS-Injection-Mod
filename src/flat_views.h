@@ -99,6 +99,54 @@ inline bool SameOrder(const Layout& a, const Layout& b) {
     return true;
 }
 
+// PLACEMENT of one blit (v0.12.0 issue #12, 2nd round): the pixels a draw can touch = viewport 0 (rounded) INTERSECTED with RT0,
+// and with scissor rect 0 when the rasterizer state enables the scissor test. The first in-game test (ATS, 3 x 1920x1080 Surround,
+// r_scale_x 0.75) showed all three blits with the FULL-backbuffer viewport (0,0 5760x1080, 3 vertices): the views are not
+// placed by the viewport. The scissor is the next place a full-screen triangle can be confined by; the diagnostics lines show
+// the rest (VS / PS cbuffer 0) if it is not that either.
+enum PlaceFlags : int {
+    kPlVpNone    = 1,    // no viewport bound: the whole RT
+    kPlVpClipped = 2,    // the viewport reaches outside RT0: clipped to it (before v0.12 round 2 the whole RT was used then)
+    kPlVpOutside = 4,    // the viewport lies wholly outside RT0 / is empty: the whole RT
+    kPlScissor   = 8,    // the scissor test is on and made the rect smaller
+    kPlScEmpty   = 16,   // the scissor test is on but its rect misses the viewport (the draw writes nothing): ignored
+};
+struct Placement { Rect vp; Rect eff; int flags = 0; };
+inline Rect Intersect(const Rect& a, const Rect& b) {
+    const int32_t x0 = a.x > b.x ? a.x : b.x, y0 = a.y > b.y ? a.y : b.y;
+    const int32_t x1 = a.x + a.w < b.x + b.w ? a.x + a.w : b.x + b.w, y1 = a.y + a.h < b.y + b.h ? a.y + a.h : b.y + b.h;
+    Rect r; r.x = x0; r.y = y0; r.w = x1 - x0; r.h = y1 - y0;
+    return r;
+}
+inline bool IsEmpty(const Rect& r) { return r.w <= 0 || r.h <= 0; }
+// rtW x rtH = RT0; (vx, vy, vw, vh) = viewport 0 as floats (haveVp false: none bound); scissor rect 0 as D3D11_RECT
+// (left, top, right, bottom; scOn = the rasterizer state's ScissorEnable, haveSc = a rect is bound)
+inline Placement PlaceBlit(int32_t rtW, int32_t rtH, bool haveVp, double vx, double vy, double vw, double vh,
+                           bool scOn, bool haveSc, int32_t sl, int32_t st, int32_t sr, int32_t sb) {
+    Placement p;
+    Rect rt; rt.w = rtW; rt.h = rtH;
+    p.vp = rt;
+    if (!haveVp) p.flags |= kPlVpNone;
+    else {
+        auto rnd = [](double v) { return (int32_t)(v >= 0.0 ? (int64_t)(v + 0.5) : -(int64_t)(-v + 0.5)); };
+        Rect v; v.x = rnd(vx); v.y = rnd(vy); v.w = rnd(vw); v.h = rnd(vh);
+        const Rect c = Intersect(v, rt);
+        if (IsEmpty(v) || IsEmpty(c)) p.flags |= kPlVpOutside;
+        else {
+            if (c.x != v.x || c.y != v.y || c.w != v.w || c.h != v.h) p.flags |= kPlVpClipped;
+            p.vp = c;
+        }
+    }
+    p.eff = p.vp;
+    if (scOn && haveSc) {
+        Rect s; s.x = sl; s.y = st; s.w = sr - sl; s.h = sb - st;
+        const Rect c = Intersect(s, p.vp);
+        if (IsEmpty(s) || IsEmpty(c)) p.flags |= kPlScEmpty;
+        else if (c.x != p.vp.x || c.y != p.vp.y || c.w != p.vp.w || c.h != p.vp.h) { p.eff = c; p.flags |= kPlScissor; }
+    }
+    return p;
+}
+
 // JITTER PHASE (all views of a frame share one Halton phase, as both VR eyes do): pass s of n views per frame has phase
 // ((s + off) / n) % phases, where off makes the frame's FIRST pass a multiple of n. The blit that consumes pass s is the Present's
 // k-th blit (k = 0 first) and passes / blits keep their order (the FIFO) -> (s + off) % n == k -> off = (k - s) mod n.

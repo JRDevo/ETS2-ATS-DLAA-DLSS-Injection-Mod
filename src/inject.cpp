@@ -10297,6 +10297,133 @@ void BackToVr(const D3D11_TEXTURE2D_DESC& bd) {
         (int)bd.Format, (unsigned long long)g_frames.load(), g_vrArea);
 }
 
+// ---- v0.12.0 issue #12 round 2: FLAT BLIT PLACEMENT + DIAGNOSTICS ------------------------------------------------------------------
+// The first in-game test (ATS 1.61-era build, 3 x 1920x1080 Surround = 5760x1080, r_multimon_mode 2, r_scale_x 0.75 -> scene
+// 1440x1080) had 3 matched backbuffer blits per Present, each a 3-vertex full-screen draw with viewport 0 = (0,0) 5760x1080:
+// the viewport does not place the views. ReadBlitPlacement adds the scissor (FlatViews::PlaceBlit); FlatBlitDiag logs the raw
+// state of the first kFvDiagBlits flat blits (+ one Present more after the first layout verdict) so the next log is conclusive
+// whatever the game uses: every viewport, every scissor rect + ScissorEnable, the draw, and the first 64 bytes of VS / PS cbuffer 0.
+UINT             g_blitStartVertex = 0;          // hkDraw: StartVertexLocation of the Draw being matched (diagnostics only)
+constexpr int    kFvDiagBlits     = 12;
+int              g_fvDiagLeft     = kFvDiagBlits; // flat blits still to log in full
+bool             g_fvDiagRearmed  = false;        // the "after the layout verdict" round was armed
+uint64_t         g_fvVpFallbacks  = 0;            // flat blits whose viewport reached outside RT0 / was empty (total)
+FlatViews::Placement ReadBlitPlacement(ID3D11DeviceContext* ctx, UINT rtW, UINT rtH) {
+    D3D11_VIEWPORT vp0{};
+    UINT nvp = 0;
+    ctx->RSGetViewports(&nvp, nullptr);                   // bound count (0 = none)
+    if (nvp >= 1) { nvp = 1; ctx->RSGetViewports(&nvp, &vp0); }
+    bool scOn = false;
+    {
+        ID3D11RasterizerState* rs = nullptr;
+        ctx->RSGetState(&rs);                             // null = the default state (ScissorEnable FALSE)
+        if (rs) { D3D11_RASTERIZER_DESC rd{}; rs->GetDesc(&rd); scOn = rd.ScissorEnable != FALSE; rs->Release(); }
+    }
+    D3D11_RECT sc{};
+    UINT nsc = 0;
+    if (scOn) {
+        ctx->RSGetScissorRects(&nsc, nullptr);
+        if (nsc >= 1) { nsc = 1; ctx->RSGetScissorRects(&nsc, &sc); }
+    }
+    const FlatViews::Placement p = FlatViews::PlaceBlit((int32_t)rtW, (int32_t)rtH, nvp >= 1, vp0.TopLeftX, vp0.TopLeftY, vp0.Width,
+                                                        vp0.Height, scOn, nsc >= 1, (int32_t)sc.left, (int32_t)sc.top,
+                                                        (int32_t)sc.right, (int32_t)sc.bottom);
+    if ((p.flags & (FlatViews::kPlVpClipped | FlatViews::kPlVpOutside)) && g_fvVpFallbacks++ < 5)
+        LogWarn("flat blit placement: viewport 0 (%.1f,%.1f %.1fx%.1f) %s RT0 %ux%u -- %s (Present #%llu; #%llu)", (double)vp0.TopLeftX,
+            (double)vp0.TopLeftY, (double)vp0.Width, (double)vp0.Height,
+            (p.flags & FlatViews::kPlVpOutside) ? "lies outside / is empty in" : "reaches outside", rtW, rtH,
+            (p.flags & FlatViews::kPlVpOutside) ? "the whole RT is used" : "clipped to RT0 (v0.11 used the whole RT here)",
+            (unsigned long long)g_frames.load(std::memory_order_relaxed), (unsigned long long)g_fvVpFallbacks);
+    return p;
+}
+// " 16 floats" of the first 64 bytes cbuffer slot 0 of the VS (ps false) / PS reads at its D3D11.1 offset. A staging copy + a
+// blocking Map: only for the few diagnostics blits.
+void DiagCb0(ID3D11DeviceContext* ctx, bool ps, char* out, size_t cap) {
+    snprintf(out, cap, "none");
+    ID3D11Buffer* cb = nullptr;
+    UINT first = 0, num = 0;
+    ID3D11DeviceContext1* c1 = nullptr;                   // (raw: this block builds without WITH_DLAA too, no WRL there)
+    if (SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&c1)) && c1) {
+        if (ps) c1->PSGetConstantBuffers1(0, 1, &cb, &first, &num); else c1->VSGetConstantBuffers1(0, 1, &cb, &first, &num);
+        c1->Release();
+    } else {
+        if (ps) ctx->PSGetConstantBuffers(0, 1, &cb); else ctx->VSGetConstantBuffers(0, 1, &cb);
+    }
+    if (!cb) return;
+    D3D11_BUFFER_DESC bd{};
+    cb->GetDesc(&bd);
+    const UINT off = first * 16u;
+    const UINT len = off < bd.ByteWidth ? (bd.ByteWidth - off < 64u ? bd.ByteWidth - off : 64u) : 0u;
+    int o = snprintf(out, cap, "%u bytes, offset %u (constants %u+%u):", bd.ByteWidth, off, first, num);
+    ID3D11Device* dev = nullptr;
+    cb->GetDevice(&dev);
+    if (dev && len) {
+        D3D11_BUFFER_DESC sd{};
+        sd.ByteWidth = 64; sd.Usage = D3D11_USAGE_STAGING; sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        ID3D11Buffer* stg = nullptr;
+        if (SUCCEEDED(dev->CreateBuffer(&sd, nullptr, &stg)) && stg) {
+            const D3D11_BOX box{ off, 0, 0, off + len, 1, 1 };
+            const bool was = t_inDlaa;
+            t_inDlaa = true;
+            ctx->CopySubresourceRegion(stg, 0, 0, 0, 0, cb, 0, &box);
+            D3D11_MAPPED_SUBRESOURCE m{};
+            if (SUCCEEDED(ctx->Map(stg, 0, D3D11_MAP_READ, 0, &m)) && m.pData) {
+                const float* f = (const float*)m.pData;
+                for (UINT i = 0; i < len / 4u && o > 0 && o < (int)cap; ++i) o += snprintf(out + o, cap - (size_t)o, " %g", (double)f[i]);
+                ctx->Unmap(stg, 0);
+            } else if (o > 0 && o < (int)cap) {
+                snprintf(out + o, cap - (size_t)o, " (Map failed)");
+            }
+            t_inDlaa = was;
+            stg->Release();
+        }
+    }
+    if (dev) dev->Release();
+    cb->Release();
+}
+void FlatBlitDiag(ID3D11DeviceContext* ctx, const D3D11_TEXTURE2D_DESC& rt, const D3D11_TEXTURE2D_DESC& src,
+                  const FlatViews::Placement& p, UINT verts, int view) {
+    if (g_fvDiagLeft <= 0) return;
+    --g_fvDiagLeft;
+    D3D11_VIEWPORT vps[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE] = {};
+    UINT nvp = 0;
+    ctx->RSGetViewports(&nvp, nullptr);
+    if (nvp > 4) nvp = 4;
+    if (nvp) ctx->RSGetViewports(&nvp, vps);
+    D3D11_RECT scs[4] = {};
+    UINT nsc = 0;
+    ctx->RSGetScissorRects(&nsc, nullptr);
+    if (nsc > 4) nsc = 4;
+    if (nsc) ctx->RSGetScissorRects(&nsc, scs);
+    int scOn = -1;                                        // -1 = default rasterizer state (null)
+    {
+        ID3D11RasterizerState* rs = nullptr;
+        ctx->RSGetState(&rs);
+        if (rs) { D3D11_RASTERIZER_DESC rd{}; rs->GetDesc(&rd); scOn = rd.ScissorEnable != FALSE ? 1 : 0; rs->Release(); }
+    }
+    char vt[384] = "", st[256] = "";
+    int o = 0;
+    for (UINT i = 0; i < nvp && o >= 0 && o < (int)sizeof(vt); ++i)
+        o += snprintf(vt + o, sizeof(vt) - (size_t)o, " [%u] %.2f,%.2f %.2fx%.2f z %.2f..%.2f", i, (double)vps[i].TopLeftX,
+                      (double)vps[i].TopLeftY, (double)vps[i].Width, (double)vps[i].Height, (double)vps[i].MinDepth, (double)vps[i].MaxDepth);
+    o = 0;
+    for (UINT i = 0; i < nsc && o >= 0 && o < (int)sizeof(st); ++i)
+        o += snprintf(st + o, sizeof(st) - (size_t)o, " [%u] (%ld,%ld)-(%ld,%ld)", i, (long)scs[i].left, (long)scs[i].top,
+                      (long)scs[i].right, (long)scs[i].bottom);
+    char vsCb[512], psCb[512];
+    DiagCb0(ctx, false, vsCb, sizeof(vsCb));
+    DiagCb0(ctx, true, psCb, sizeof(psCb));
+    Log("flat blit diag (v0.12.0 #12, %d left): Present #%llu blit %d of this Present: Draw(%u verts, start %u), src %ux%u -> RT %ux%u | "
+        "viewports %u:%s | ScissorEnable %s, scissor rects %u:%s | rect for the detector (%d,%d) %dx%d [flags 0x%x:%s%s%s%s%s] -> view %d "
+        "(detector: %d view(s), candidate run %d) | VS cb0 %s | PS cb0 %s", g_fvDiagLeft,
+        (unsigned long long)g_frames.load(std::memory_order_relaxed), g_fv.BlitIndex(), verts, g_blitStartVertex, src.Width, src.Height,
+        rt.Width, rt.Height, nvp, nvp ? vt : " none", scOn < 0 ? "default (off)" : (scOn ? "ON" : "off"), nsc, nsc ? st : " none",
+        p.eff.x, p.eff.y, p.eff.w, p.eff.h, p.flags, (p.flags & FlatViews::kPlVpNone) ? " no-viewport" : "",
+        (p.flags & FlatViews::kPlVpClipped) ? " viewport-clipped" : "", (p.flags & FlatViews::kPlVpOutside) ? " viewport-outside" : "",
+        (p.flags & FlatViews::kPlScissor) ? " scissor" : "", (p.flags & FlatViews::kPlScEmpty) ? " scissor-empty" : "", view,
+        g_fv.Views(), g_fv.Stable(), vsCb, psCb);
+}
+
 #ifdef WITH_DLAA
 // ---- v0.10.0 phase 4: DLAA BEFORE THE TONEMAP (flat DLAA mode; dlaa.ini dlaa_pre_tonemap = 1, key_pre_tonemap Alt+F7) -------
 // WHY: the blit-time DLAA (v0.3.1 design) works on the tone-mapped 8-bit sRGB picture; NGX is trained for LINEAR HDR input,
@@ -10758,26 +10885,19 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         Log("VR detected at blit: eye identity from the blit render target (RT map)");
     }
     if (hdrBlit) ++g_hdrBlitCount;                       // v0.8.0 (matched and not skipped as mirror / fallback)
-    // v0.12.0 issue #12: flat multi-view. The blit's viewport rect inside the backbuffer (rounded; the whole RT when none is bound or
-    // it is not inside RT0 -- the same rule as the DLSS output rect below) goes to the detector; with a confirmed layout it returns
-    // this blit's VIEW (its viewport's position, left = 0), -1 = not in the layout (left alone below). flat_multiview 0: not called,
-    // every backbuffer blit is view 0 exactly as before.
+    // v0.12.0 issue #12: flat multi-view. The pixels this blit can write (viewport 0 clipped to RT0, intersected with scissor rect 0
+    // when the rasterizer state enables the scissor test -- FlatViews::PlaceBlit; round 2: the first in-game test had the full-
+    // backbuffer viewport on all three blits) go to the detector; with a confirmed layout it returns this blit's VIEW (its rect's
+    // position, x then y), -1 = not in the layout, kBeyondCap = past the 8-view cap (both left alone below). flat_multiview 0: not
+    // called, every backbuffer blit is view 0 exactly as before. The first blits log their raw placement state (FlatBlitDiag).
     int flatView = 0;
     FlatViews::Rect flatVp;
+    FlatViews::Placement flatPl;
     if (isBackbuffer && g_flatMvCfg) {
-        flatVp.x = 0; flatVp.y = 0; flatVp.w = (int32_t)bd.Width; flatVp.h = (int32_t)bd.Height;
-        D3D11_VIEWPORT vp0{};
-        UINT nvp0 = 0;
-        ctx->RSGetViewports(&nvp0, nullptr);             // bound count (0 = none)
-        if (nvp0 >= 1) { nvp0 = 1; ctx->RSGetViewports(&nvp0, &vp0); }   // only viewport 0 is read
-        if (nvp0 >= 1) {
-            const double x = std::floor((double)vp0.TopLeftX + 0.5), y = std::floor((double)vp0.TopLeftY + 0.5);
-            const double w = std::floor((double)vp0.Width + 0.5),    h = std::floor((double)vp0.Height + 0.5);
-            if (x >= 0.0 && y >= 0.0 && w >= 1.0 && h >= 1.0 && x + w <= (double)bd.Width && y + h <= (double)bd.Height) {
-                flatVp.x = (int32_t)x; flatVp.y = (int32_t)y; flatVp.w = (int32_t)w; flatVp.h = (int32_t)h;
-            }
-        }
+        flatPl = ReadBlitPlacement(ctx, bd.Width, bd.Height);
+        flatVp = flatPl.eff;
         flatView = g_fv.OnBlit(flatVp);
+        FlatBlitDiag(ctx, bd, d, flatPl, vertexCount, flatView);
     }
     const bool viewUnknown = flatView < 0;
 #ifdef WITH_DLAA
@@ -10802,6 +10922,13 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
                 ox = (uint32_t)x; oy = (uint32_t)y; ow = (uint32_t)w; oh = (uint32_t)h;
                 vpUsed = true;
             }
+        }
+        // v0.12.0 issue #12 round 2: a flat blit confined by the scissor (multi-monitor: one full-backbuffer triangle per screen) or
+        // with a viewport reaching outside RT0 outputs into ITS rect (FlatViews::PlaceBlit), not the whole backbuffer -- else DLSS
+        // would upscale each 1440x1080 view to 5760x1080. flat_multiview 0: unchanged.
+        if (isBackbuffer && g_flatMvCfg && (flatPl.flags & (FlatViews::kPlScissor | FlatViews::kPlVpClipped))) {
+            ox = (uint32_t)flatPl.eff.x; oy = (uint32_t)flatPl.eff.y; ow = (uint32_t)flatPl.eff.w; oh = (uint32_t)flatPl.eff.h;
+            vpUsed = true;
         }
         const bool sizeUp = ow >= d.Width && oh >= d.Height && (ow > d.Width || oh > d.Height);
         char sizes[48];
@@ -11461,6 +11588,7 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
     }
 #endif
     if (vertexCount - 3u <= 1u && !t_inDlaa && g_sceneDepth && g_backbuffer.load(std::memory_order_relaxed)) {
+        g_blitStartVertex = startVertex;                 // v0.12.0 issue #12: diagnostics (FlatBlitDiag)
         HandlePossibleBlit(ctx, vertexCount);
     }
     if (!t_inDlaa && g_lodPerDraw.load(std::memory_order_relaxed)) LodOnDraw(ctx);   // v0.10.0 phase 11 LOD bias scope
@@ -11562,6 +11690,16 @@ void FlatViewsOnPresent(uint64_t n) {
     if (!g_flatMvCfg) return;
     const FlatViews::Detector::Event ev = g_fv.OnPresent();   // (VR / undetected: nothing was fed -> kNone)
     SetRingSize(FlatMvSeen() ? g_fv.FifoDepth() + 1 : kRingBase, n);
+    // round 2 diagnostics: the blits of one more Present are logged in full after the first verdict on a multi-blit Present, and
+    // after a confirm (the rects the views were confirmed with)
+    static bool s_diagAfterConfirm = false;
+    if (g_flatMode && g_fv.LastN() >= 2 && !g_fvDiagRearmed) {
+        g_fvDiagRearmed = true;
+        g_fvDiagLeft = g_fv.LastN();
+        Log("flat multi-view: first Present with %d world blits evaluated (%s) -- the next Present's blits are logged in full ('flat blit "
+            "diag' lines)", g_fv.LastN(), FlatViews::WhyName(g_fv.LastWhy()));
+    }
+    if (ev == FlatViews::Detector::kConfirmed && !s_diagAfterConfirm) { s_diagAfterConfirm = true; g_fvDiagLeft = g_fv.Views(); }
     if (!g_flatMode || ev == FlatViews::Detector::kNone) return;
     char vt[1024], ord[64];
     if (ev == FlatViews::Detector::kConfirmed) {
