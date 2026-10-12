@@ -118,6 +118,10 @@ struct OverlayParams {
                                              //   turned to FACE the head (false: parallel to the view plane)
     int           fpsX = 0, fpsY = 0;        // fps_vr_x / fps_vr_y (% as the panel; fixed in the cab: yaw / pitch degrees)
     float         fpsScale = 0.3f;           // fps_vr_scale (1 = 8 % of the eye fov width at 0.8 m)
+    float         fpsDist = 0.8f;            // phase 44: fps_vr_dist / 100 -- the fps box quad's distance (m; 0.3..3.0). Its
+                                             //   angular size stays (the width scales with it), in both lock modes
+    int           fpsYaw = 0, fpsPitch = 0, fpsRoll = 0;   // phase 44: fps_vr_yaw / _pitch / _roll (degrees): the box's own turn
+                                             //   on top of its normal facing (FpsPose::ComposeTurn; 0 / 0 / 0 = as before)
     unsigned long drawTid = 0;               // the game render thread (owner of the immediate context); 0 = none yet
     uint32_t      panelW = 0, panelH = 0;    // the panel swapchain size (px; read at its creation)
     uint32_t      fpsW = 0, fpsH = 0;        // the fps box swapchain size (px)
@@ -169,5 +173,42 @@ struct TurboStats {
     uint64_t asyncWaits = 0, madeUp = 0, blocks = 0, timeouts = 0, failures = 0;
 };
 TurboStats GetTurboStats();
+// phase 45: the headset's frame period (ns) from the runtime's last real xrWaitFrame (predictedDisplayPeriod; turbo's own waits
+// too); 0 = none yet. The tuning menu's Limit line (once a second; takes the turbo worker's lock briefly).
+int64_t DisplayPeriodNs();
+
+// ---- phase 40: HIDDEN AREA MASK (XR_KHR_visibility_mask; dlaa.ini xr_hidden_mask, inject.cpp draws it) ---------------------
+// The runtime knows which pixels of each eye picture the lenses never show. ETS2 / ATS do not enable XR_KHR_visibility_mask, so
+// the runtime's xrCreateInstance is wrapped too (the loader resolves it through the runtime's xrGetInstanceProcAddr = our thunk,
+// layers or not): when HiddenMaskRequest(true) was called before and the runtime lists the extension, it is added to a COPY of
+// the game's extension list (the game's array is never touched); a refused create is retried with the game's own create info.
+// At the game's outermost xrEndFrame (its session) the HIDDEN triangle mesh of both PRIMARY_STEREO views is fetched with
+// xrGetVisibilityMaskKHR (two-call idiom), again after an XrEventDataVisibilityMaskChangedKHR (swallowed when only we enabled the
+// extension: the game never asked for it). Any failure: logged once, no mesh (inject.cpp draws nothing). The vertices are the
+// runtime's (view tangent space, on the z = -1 plane); the fov is the one the game SUBMITS for that view (the compositor shows
+// the picture with it). HiddenMaskRaw hands out a copy; `gen` changes when the mesh or the submitted fov changes.
+void HiddenMaskRequest(bool want);           // before the game's xrCreateInstance (SetupThread): ask for the extension
+void HiddenMaskActive(bool on);              // live (dlaa.ini / menu): fetch the meshes while on (nothing is queried while off)
+struct HiddenRaw {
+    uint64_t gen = 0;                        // 0 = no mesh
+    uint32_t nv = 0, ni = 0;                 // vertices / indices
+    float    xy[2 * 1024] = {};              // the vertices (x, y), at most kHiddenMaxVerts
+    uint32_t idx[3 * 1024] = {};             // the triangle list indices, at most kHiddenMaxIdx
+    float    fov[4] = {};                    // the submitted fov of the view (L, R, U, D radians)
+};
+constexpr uint32_t kHiddenMaxVerts = 1024, kHiddenMaxIdx = 3 * 1024;
+// The newest mesh of OpenXR view `view` (0 / 1) when its gen differs from `haveGen` (any thread; copied under a lock).
+// False = no mesh, or the same gen (out untouched).
+bool HiddenMaskRaw(int view, uint64_t haveGen, HiddenRaw* out);
+struct HiddenStats {
+    int      ext = 0;                        // 0 not asked (xr_hidden_mask 0 at start / no xrCreateInstance seen), 1 the runtime
+                                             //   does not offer it, 2 enabled by the game itself, 3 enabled by us, 4 the create
+                                             //   with it failed (retried without it)
+    bool     fn = false;                     // xrGetVisibilityMaskKHR resolved
+    bool     failed = false;                 // a query failed for the current session (given up until the next session)
+    uint32_t nv[2] = {}, ni[2] = {};         // the meshes held per view
+    uint64_t queries = 0, events = 0;        // successful view queries, mask-changed events seen
+};
+HiddenStats GetHiddenStats();
 
 } // namespace XrHook

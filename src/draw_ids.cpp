@@ -2426,8 +2426,8 @@ void GpuSpanTimer::Poll(ID3D11DeviceContext* ctx) {
     }
 }
 
-int GpuSpanTimer::Begin(ID3D11DeviceContext* ctx) {
-    if (m_broken || !ctx) return -1;
+int GpuSpanTimer::Begin(ID3D11DeviceContext* ctx, bool force) {
+    if (m_broken || !ctx || (!force && !s_on.load(std::memory_order_relaxed))) return -1;   // phase 45: only while measuring
     Poll(ctx);
     Q& s = m_q[m_head];
     if (s.inFlight) return -1;

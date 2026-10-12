@@ -1278,9 +1278,14 @@ bool MakeView(Env& E, View& v, int w, int h) {
 }
 M4 ProjA(double nearM, double aspect) { M4 r{}; r.m[0][0] = kF / aspect; r.m[1][1] = kF; r.m[2][3] = nearM; r.m[3][2] = 1; return r; }
 
-int RunMirrorScene(Env& E, float snapPx, Totals& tot) {
-    const int frames = 110, skipEvery = 37;
-    printf("\n===== S5 mirror view + main view, two units interleaved (%d frames, snap %.3f px) =====\n", frames, (double)snapPx);
+// phase 41 (turns = true, scene 20): the mirror unit runs IN TURNS (inject.cpp mirror_turns) -- only on even frames plus every
+// frame f % 13 == 7 (a forced run out of turn: gaps of 1 and 2 frames mixed), 220 frames. On the other frames the game renders
+// the mirror but the unit records / generates nothing (its view holds its last DLAA picture): every motion vector of a run
+// must point back to the unit's LAST RUN (its previous record / matrices), no world miss over the 2-frame gaps.
+int RunMirrorScene(Env& E, float snapPx, Totals& tot, bool turns = false) {
+    const int frames = turns ? 220 : 110, skipEvery = 37;
+    printf("\n===== %s mirror view + main view, two units interleaved (%d frames, snap %.3f px)%s =====\n", turns ? "S20" : "S5",
+           frames, (double)snapPx, turns ? ", mirror IN TURNS (every 2nd frame + forced runs)" : "");
     DrawIdMv::SetParams(8.0f, snapPx);
     // ---- objects (world space; the truck drives along +z) ----
     std::vector<Obj> objs;
@@ -1350,7 +1355,8 @@ int RunMirrorScene(Env& E, float snapPx, Totals& tot) {
         for (int k = 0; k < 4; ++k)
             world[oWheel[k]] = Mul(car, Mul(T(wheelPos[k][0], wheelPos[k][1], wheelPos[k][2]), RotX(0.8 / 0.45 * f)));
         // ---- per view: MVPs, draw order (clumps shuffled, 2 culled per view) ----
-        U[0]->rendered = (f % skipEvery) != skipEvery - 1;     // the throttled mirror: not rendered every 37th frame
+        U[0]->rendered = turns ? ((f % 2) == 0 || (f % 13) == 7)   // phase 41: in turns (+ forced runs out of turn)
+                               : (f % skipEvery) != skipEvery - 1;     // the throttled mirror: not rendered every 37th frame
         U[1]->rendered = true;
         for (auto& up : U) { if (up->rendered) ++up->sinceSkip; else up->sinceSkip = 0; }
         std::vector<int> order[2];
@@ -1402,6 +1408,9 @@ int RunMirrorScene(Env& E, float snapPx, Totals& tot) {
             ID3D11RenderTargetView* rtvs[2] = { u.v.truthRtv.Get(), u.v.colorRtv.Get() };
             ctx->OMSetRenderTargets(2, rtvs, u.v.dsv.Get());
             ctx->OMSetDepthStencilState(E.dss.Get(), 1);
+            // phase 41: S20 runs last in the full run, after S17 / S18 left their own blend state bound (S5 keeps the state it
+            // always ran with: its comparison stream stays the same)
+            if (turns) ctx->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFFu);
             // its own jitter: the unit's own Halton phase (inject.cpp: MirUnit::phaseCtr; the main pass: the FIFO's)
             const int ph = u.phase++ % 8;
             const float jx = (float)(halton(ph + 1, 2) - 0.5), jy = (float)(halton(ph + 1, 3) - 0.5);
@@ -6733,6 +6742,12 @@ int main(int argc, char** argv) {
         const int fl = RunShopScene(E, snapPx, tot);
         res.push_back({ "S18 shop windows: glass + forward reflection draws with the MVP in cb0 rows 6..9 keep the camera motion while "
                         "the camera drives and yaws", fl });
+    }
+    // phase 41: S20 = S5 with the mirror unit IN TURNS (mirror_turns): runs on even frames + forced runs, the MVs of every run vs
+    // its last run -- after S18, so an older binary's full-run cmpdump still lines up for S1-S18
+    if ((only < 0 || only == 20) && !mutNoCons && !mutNoFwd && !mutNoAttach && !mutNoTwin && !mutPar) {
+        const int fl = RunMirrorScene(E, snapPx, tot, true);
+        res.push_back({ "S20 = S5 with the mirror unit in turns (mirror_turns: every 2nd frame + forced runs; MVs vs its last run)", fl });
     }
     // phase 35: S19 state shadow (didshadow=1 only; last in the full run); the verify mode's mismatches of S1-S18 are failures
     if (g_didShadow) {

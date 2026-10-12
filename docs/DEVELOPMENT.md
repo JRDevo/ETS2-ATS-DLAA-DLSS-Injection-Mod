@@ -254,7 +254,7 @@ The self-test dumps eye 0 only in VR (~89 MB per BMP at 4592×6496); snapshots a
   | `mv_sample_shift` | `2` | int 0..4 (v0.6.3); a G-buffer draw is an MV candidate only when `hash(indexCount,startIndex,baseVertex) & ((1<<shift)-1) == 0` (same draws every frame); `0` = every draw (old behaviour), `2` = ~1/4 |
   | `mv_world_slots` | `40` | int 1..128 (v0.6.3); world (layer 0) MV-candidate cap per pass (replaces the old 128 limit) |
   | `mv_cabin_slots` | `24` | int 1..128 (v0.6.3); cabin (layer 1) MV-candidate cap per pass (replaces the old 128 limit) |
-  | `gpu_timing` | `-1` | `-1` = GPU timestamp queries around each eye's DLAA work in VR only, `0` = off, `1` = on (flat too); logs avg ms per eye every 600 frames. v0.6.2: also the whole-frame `GPU spans [...]: scene .. ms/frame \| gbuf .. ms/pass` line every 300 frames, with DLAA ON, OFF or passive |
+  | `gpu_timing` | `-1` | `-1` = GPU timestamp queries around each eye's DLAA work at log level 4 (phase 45; was: VR only), `0` = off, `1` = on (flat too); logs avg ms per eye every 600 frames. v0.6.2: also the whole-frame `GPU spans [...]: scene .. ms/frame \| gbuf .. ms/pass` line every 300 frames, with DLAA ON, OFF or passive |
   | `trace_auto_frame` | `0` | auto-run the frame trace once when the Present count reaches this; `0` = off (`Ctrl+F11` always works) |
   | `dlss_preset` | `default` | DLSS render preset for DLAA (`default`, `J`, `K`, `L`, `M`, `E`, `F`); models 1–4 (`Shift+F1`..`F4`) select `default`/`E`/`F`/`M`; written by `Shift+F12`. v0.7.0: applied to every DLSS quality mode (all hint parameters), so it also picks the model while upscaling |
   | `sharpness` | `0.4` | RCAS sharpen strength after DLAA, 0..1 (`0` = pass skipped); `Shift+F7`/`F8` adjust; written by `Shift+F12` |
@@ -264,7 +264,7 @@ The self-test dumps eye 0 only in VR (~89 MB per BMP at 4592×6496); snapshots a
   | `dlss_upscale` | `1` | `0`/`1` (v0.7.0): DLSS upscaling from the scene size to the eye texture / backbuffer size whenever that is larger (see "DLSS upscaling"); `0` = always DLAA at render res (v0.6.5 path); `Ctrl+F4` toggles; written by `Shift+F12` |
   | `mode` | *(absent)* | `0`/`1`/`2` (v0.7.2): start mode written by the plain `End` key — `1` DLAA, `2` DLSS, `0` off. When present (and no `dlaa_off.txt`) it wins over `dlss_upscale` at startup. `End` cycles and rewrites it |
   | `beeps` | `1` | `0` = no audible feedback for the hotkeys |
-  | `log_level` | `1` | phase 39: `0` off, `1` errors (`LogErr`, "ERROR " in the file), `2` + warnings (`LogWarn`, "WARN  "), `3` + info (`Log`: one-time state lines), `4` + debug (`LogDbg`: periodic statistics, tracing, dumps; also `perf_timers` / `cpu_prof` = -1 on, `vrs_debug`, `did_shadow_verify` -1 = 64, the frame-end rule's counting); a number or the name. The file is created at the first line that passes. A filtered call = one atomic load. Live: the menu's `Logging` row (`LogSetLevel`), which also shows the logging cost (CPU ms per frame inside `LogImpl`, lines/s, + the CPU profiler's own cost at 4) |
+  | `log_level` | `1` | phase 39: `0` off, `1` errors (`LogErr`, "ERROR " in the file), `2` + warnings (`LogWarn`, "WARN  "), `3` + info (`Log`: one-time state lines), `4` + debug (`LogDbg`: periodic statistics, tracing, dumps; also `perf_timers` / `cpu_prof` = -1 on, `vrs_debug`, `did_shadow_verify` -1 = 64, the frame-end rule's counting); a number or the name. The file is created at the first line that passes. A filtered call = one atomic load. Live: the menu's `Logging` row (`LogSetLevel`); its cost column shows the logging cost (CPU ms per frame inside `LogImpl`; the sentence: lines/s, + the CPU profiler's own cost at 4) |
   | `debug` | `0` | v0.7.5: `1` / `true` / `yes` / `on` = write `dlaa_inject.log`; default off (no file is created). Phase 39: `1` = `log_level` 4 when there is no `log_level` line; `0` has no effect |
 
   The values in use are logged at startup. If the image shimmers or looks doubled
@@ -545,7 +545,7 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   `frame #n summary: ...` (first 5 Presents: G-buffer pass entries, depth clears, eye blits, snapshots),
   `DLAA: NGX feature created for eye N`, heartbeat with per-eye frame counts and snapshot counts every 600
   frames, and `DLAA GPU cost eye N: avg X ms` every 600 frames (timestamp queries, read back late, never
-  blocking). `dlaa.ini` `gpu_timing`: -1 (default) = VR only, 0 off, 1 on.
+  blocking). `dlaa.ini` `gpu_timing`: -1 (default) = VR only (phase 45: log level 4), 0 off, 1 on.
 - **Cost.** About 30 MP per eye: expect a heavy GPU hit and ~1.5 GB extra VRAM with both eyes live.
 
 ## OFXR Bridge pass-through (v0.10.0)
@@ -1208,6 +1208,383 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
 - **29d: description fits 3 lines + Reset is a hold.** `kDescH` 54 -> 64 ref px (one 14 px Segoe UI line is 19 px, 3 lines need up to 62
   at some scales; the VR quad image is now 1824 x 1884) and `RenderPanel` draws only whole lines, cut at a word + `...` (`DescFit`); the Reset row
   resets after a `bind_hold_ms` hold of the menu Right (`MenuResetTick`, the bind bar, `hold Right 5 s`), no longer on a Left / Right press.
+
+### Phase 41: mirrors in turns (`mirror_turns`, default 0)
+
+- **Investigation.** Mirror views per frame: ETS2 flat 4 (512x1024 x2, 512x512, 512x256, ~1.44 MP), ATS 2-3 (2048x512,
+  1024x512, now and then a 256x512 / second 1024x512). VR: the game renders the mirrors ONCE per frame, not per eye (phase 21:
+  ~2-3 mirror views per Present for both eyes together) -- so "one DLAA for both eyes" has nothing to share. Everything a mirror
+  unit costs is per view and per run: the draw-id replay (`MirReplay`, GPU `replay`), the depth snapshot, the camera / per-draw
+  MV chain + pass B, copy-in, NGX (`mirror-NGX`), copy-out (README: 1.3 ms MV + ids + 0.4 ms NGX for the 4 flat views; VR ~0.4 ms
+  per mirror with per-part motion, ~0.15 ms camera-only). A skipped mirror without anything put in shows the game's raw aliased
+  picture (not jittered: `jitOn` needs a run) -- every 2nd frame aliased = a 36 Hz edge flicker over the glass (phase 21's
+  "raw jittered picture = the flicker").
+- **What it does** (`src/mirror_turns.h` = the decisions, `inject.cpp` MIRROR UNITS = the plumbing). Each unit has a turn slot
+  0 / 1; on frame fr the slot with (fr + slot) even runs the full path, the other HOLDS: no jitter, nothing recorded / replayed,
+  no snapshot, no Run, and at its depth discard (`MirFlush`) its last DLAA output (`SceneDlaa::ResultTex`) is copied over the
+  game's raw mirror colour before the game down-samples it (the existing mode-3 hold, now timed: `gpuHold`). Held, not raw:
+  edges stay clean, only moving things in the glass update at half rate (own trailer / cab are static to the mirror camera).
+  A cheap path instead (camera-only MVs + NGX every frame) would keep NGX + pass B + copies and break the per-draw pairing
+  (the record of a camera-only frame is missing for the next full run). Out of turn (`MirTurns::Runs`): first run / reset
+  pending / epoch change (`MirInvalidate`), no run in the previous frame (never 2 frames stale), no last output of this size,
+  a camera cut (`MirTurnsNoteCut`: the main view's `dl.LastReset()` after its Run, or a mirror unit's own reset after a run
+  without one -- a mirror that resets every run is not a cut each time; covers this frame and the next), the jitter-only key.
+  Slots: a new unit takes the lighter slot (`PickSlot`), and `MirTurnsEndFrame` re-balances all units in view (last 8 frames)
+  by area, largest first (`AssignSlots`) whenever that set changes -- ETS2 flat: 0.79 / 0.66 MP per slot of 1.44 MP, so the
+  PEAK per frame drops too. Mode 3 (`mirror_vr_mode` / `mirror_flat_mode` 3, each unit every 2nd frame by index parity) now
+  takes this path (`MirTurnsOn() = mirror_turns || mode 3`).
+- **History.** Everything temporal is per unit and moves only on its runs: the Halton phase (`phaseCtr` counts jittered views;
+  a held view is not jittered), the camera record / previous matrices and the per-draw record pairing (CameraMv / DrawIdMv commit
+  inside `Run`), NGX's history. So a run's motion vectors point back to the unit's LAST RUN. `MirFlush` keeps the history over a
+  gap of 1, or 2 with turns on or when the frame between was the unit's hold (`GapKeepsHistory`; was: mode 3 only, gap exactly 2).
+  WARP harness S20 (= S5 with the mirror unit running on even frames + every f % 13 == 7: gaps of 1 and 2 mixed, 220 frames):
+  0 of 7.97 M mirror pixels outside the MV tolerance vs the unit's last run, no world miss / reset, the own trailer a mover with
+  R = I in 118 of 118 frames. `tests/mirror_turns_test.cpp` (594 checks): never a hold after a non-run, exactly one slot per
+  steady frame, longest gap 2, no history reset over a gap, every forced case, slot moves, 51 % of the mirror pixels per frame.
+- **Menu / ini / log.** Row `Mirrors in turns` (`MR_MIRTURNS`, under Mirror DLAA; greyed while mirror DLAA is off or in mode 3;
+  cost column = the mirrors' live cost), `ToggleMirTurns`, `mirror_turns` saved when explicit, removed by Reset (40 keys =
+  `kIniMaxKeys`), `kMaxRows` 36. Config line `phase 41: mirror_turns=...`; log level 4: the first 24 frames with mirror views
+  after turns switch on get `mirror turns @Present N: R ran, H held -- unit u WxH slot s turn / HELD / <forced reason>`;
+  `mirror turns: slots balanced for N units [...]` on a re-balance (first 16); the `mirror units @blit` line gains per unit
+  `{turns unit u: slot, ran on its turn + forced, held (copy ms)}` and `mirrors in turns (...): views on their turn, held,
+  forced [reasons] | camera cuts: main view, mirror | slot balances | ~X ms GPU per frame saved by the held views | last frames
+  (units): #fr ran [..] held [..]` (saved = held views x (that unit's DLAA + replay ms per run - its copy ms) / Presents, from the
+  per-unit GPU span timers).
+- **Not verified (needs the game):** the saving in the `perf eye` lines / menu GPU line; how the half-rate traffic in the glass
+  looks (flat and VR); how often the main view's reset forces a full frame while driving.
+
+### Phase 44: fps box colours, VR distance and turn; Foveated size scaler; "attached to truck" investigated, NOT built (built in phase 47)
+
+- **Colours (`fps_color`, 0..19, default 0).** `src/fps_pose.h` `FpsPose::ColorOf`: 20 named presets (text + outline colour;
+  0 = white text / RGB 8,8,8 outline = the box before phase 44; 19 = black text, white outline). `TuningMenu::SetWidgetColors`
+  (menu.cpp) feeds `RenderWidget`; the colours are part of the widget texture cache key (a change rebuilds it once).
+  `FpsSyncColor` runs before every `DrawWidget` (flat Present, VR eye pictures, the quad layer image). Menu row `FPS colour`
+  (fresh presses, wraps).
+- **VR distance (`fps_vr_dist`, cm 30..300, default 80).** Quad layer (`OvBuildQuadLocked`): the fps quad's `d` (was 0.8 m) in
+  both lock modes; its width scales with `d` (same angle at every distance); the panel / fps layer order compares
+  `menu_vr_dist` with `fps_vr_dist`. Drawn-in, fixed in the play space (`FpsVrLockedPlace`): the anchor distance, size factor
+  `dA / depth` (same angle). Drawn-in, following the head: the box keeps its angular size (it is placed in % of the picture)
+  and gets an EXTRA inward stereo shift `ipd/2 * fx * (1/d - 1/0.8)` on top of `menu_vr_depth` (`FpsPose::ExtraShiftPx`; ipd
+  from the located views when 40..90 mm, else 63 mm; fx from `VrEyeScale`), so 80 cm draws exactly as before.
+- **The box's own turn (`fps_vr_yaw` -90..90, `fps_vr_pitch` -90..90, `fps_vr_roll` -180..180, degrees, default 0).**
+  `FpsPose::TurnQuat` = Ry(+yaw) Rx(-pitch) Rz(-roll) in the box's local OpenXR frame (+z = its front): yaw + = the front
+  turns right, pitch + = the top leans away (lying back on a dashboard), roll + = clockwise. Quad layer: `ComposeTurn`
+  (base facing * turn) for both lock modes (follow head: on top of the `menu_vr_face` facing; fixed: on top of facing the
+  pivot). Drawn-in fallback: all three angles work -- `FpsPose::TurnedCorners` builds the box as a quad parallel to the
+  picture at unit depth through its placed centre, turns it about its centre and projects it with the eye's pinhole
+  (`VrEyeCentre` + `VrEyeScale`) into clip corners (w = depth, perspective-correct), drawn by the new
+  `TuningMenu::DrawWidgetCorners`; a corner at / behind 0.05 (edge-on) falls back to the flat box. The flat (non-VR) box is
+  never turned. Menu rows `FPS turn` / `FPS tilt` / `FPS rotate`, 5 degree steps, auto-repeat.
+- **Lock row renamed:** `Fixed in cab` -> `Fixed in play space` (it is fixed in the game's OpenXR reference space, phase 28).
+  Logs / descriptions follow.
+- **Foveated size scaler (user request).** The row was 3 presets; now `vrs_outer` 10..100 in 5 % steps (`Right` = bigger,
+  auto-repeat), `vrs_inner = max(10, vrs_outer - 25)` (the presets' gap). Value `80 %`, + `(balanced)` / `(wide)` / `(narrow)`
+  when it matches a preset; custom `dlaa.ini` radii (not on that scale, or 101..150) keep working and show `inner / outer %`
+  -- the first step snaps to the nearest 5 % on the pressed side. Reset = balanced (55 / 80) as before.
+- **Menu / ini plumbing:** 5 new rows in the FPS counter settings group (`kMaxRows` 42 -> 47, the group's last row
+  `MR_FPSROLL`, static_asserts extended, `kMenuDesc` in enum order); 5 new keys (Save under `g_fpsExplicit`, Reset removes them;
+  `kIniMaxKeys` 48 -> 56); LoadConfig reads them as standalone `if (...) { ...; continue; }` lines (C1061).
+- **Logs:** level 3: the startup `fps box (v0.10.0): ... phase 44: fps_color=.. fps_vr_dist=.. fps_vr_yaw/pitch/roll=..` line,
+  each menu change (`fps box colour:`, `fps box VR distance`, `fps box VR turn:`, `Foveated size (VRS): 80 % = balanced ...`),
+  Save / Reset lines list the keys. Level 4: `OpenXR overlay: fps box quad (...) -- fps_vr_dist .. turn .. -> pose q=.. p=..`
+  whenever the quad's lock / distance / turn changes; `fps box VR (drawn into eye N, ...)` per eye when the drawn-in settings
+  change (+ the extra stereo shift in px, ipd, fx).
+- **Test:** `tests/fps_pose_test.cpp` (`tests\build_fps_pose_test.bat`, in CI): the presets (20 unique names, preset 0 =
+  the old colours, a text / outline luminance gap > 80), the turn conventions (yaw / pitch / roll signs, unit quaternion,
+  `ComposeTurn` = base * turn), `TurnedCorners` (0/0/0 = the flat box exactly, shift, roll 90 swaps the edges clockwise,
+  yaw / pitch shorten the far edge, edge-on refused), `ExtraShiftPx` (0 at 80 cm, signs, value). 289 checks.
+
+#### "Attached to truck" (`fps_vr_lock = 2`): investigation, why it was not built then (phase 47 built the GPU plan below)
+
+- **How the cab moves in VR.** The mod's own motion-vector design already shows it: the game draws its cab interior as a
+  separate CABIN LAYER (viewport depth range [0.9, 1], its own finite projection, cab-relative coordinates) with its own
+  camera, and the per-eye reprojection needs a separate cabin camera R (`R_cabin`, solve buffer floats 16..31) because cab
+  content does not move like the world. The OpenXR side carries no cab information: the game locates the head in its
+  reference space (LOCAL / the seat) and SUBMITS the head pose it rendered with; the cab sway (suspension, braking pitch,
+  bumps, the game's head / seat physics) is only inside the rendered pictures, as a change of the cabin camera
+  (eye-in-cab = seat * sway(t) * head(t)). So a box fixed in the play space (mode 1) is still against the cab whenever the
+  game sways the cab around the seated head -- the user's report on hills / bumps. Not measured in a log yet (nothing logs
+  the cab's motion against the play space today).
+- **What the mod has per frame.** (a) The located / submitted view poses on the CPU (`XrHook::LatestViews`): head in the play
+  space, no cab. (b) Every G-buffer draw's MVP -- but only on the GPU: the game writes its constants into a WRITE_DISCARD ring
+  on the CPU once per frame, the mod copies the used range GPU-to-GPU at the pass LEAVE (`ObjRecord::Flush`) and the pairing /
+  consensus run as compute. (c) `R_cabin` per eye, a frame-to-frame CLIP-SPACE delta (current -> previous clip of static cab
+  content), read back to the CPU through a 3-slot `DO_NOT_WAIT` staging ring: 2-3 frames late, and frames can be skipped.
+- **Why no source is good enough for the quad layer (the default path, `menu_vr_layer = 1`).** The quad pose must be on the
+  CPU before the game's `xrEndFrame`. Option (c) is late by 2-3 frames (~30-45 ms at 72-90 Hz); tracking a motion with a
+  delay t leaves 2 sin(pi f t) of it, which is WORSE than not tracking at all above ~1 / (6 t) = 4 Hz -- exactly the bump
+  band the user complains about (the slow hill pitch would improve). It is also relative: the anchor would be a chain of
+  per-frame deltas, so every skipped readback or bad-consensus frame (car interiors: camera-relative overlays, a moving
+  steering wheel winning the small-cabin rule, phase 19) shifts it for good; and turning a clip-space R into a metric pose
+  needs the cabin projection's depth terms (near / far + the [0.9, 1] viewport mapping), which the mod does not know. Reading
+  the CPU ring directly (keeping the mapped WRITE_DISCARD pointer past Unmap) is undefined behaviour in D3D11: not done.
+- **What a robust version needs (the plan, if wanted):** a ZERO-LAG GPU path, drawn into the eye picture (it then behaves
+  exactly like the dashboard under the runtime's reprojection; no quad layer): (1) pick a reference cab draw per eye by its
+  geometry key from the verdicts (static cab-layer draw, MVP-shaped per the phase 22 layout, not origin-free / camera-relative,
+  biggest IndexCount, never a mover); (2) at lock-on, a compute pass stores the anchor in that draw's MODEL space,
+  a = MVP(t0)^-1 * c0 (c0 = the box centre in that eye's clip space); (3) every frame a vertex-shader variant of the widget draw
+  reads that draw's CURRENT MVP from the ring mirror at its byte offset (known on the CPU at the draw) and places the box at
+  MVP(t) * a (+ the turn as model-space corners); (4) re-acquire: when the key disappears (LOD, buffer pool rotation, truck
+  change) carry a to the new reference draw in a frame where both exist (a' = MVP'(t)^-1 MVP(t) a); no reference (exterior
+  camera, menus, loading) = mode 1 + a once-log; (5) per-10-s stats from a lagged readback of MVP(t) * a. Harness work: a
+  cab-sway scene in `drawid_harness` (the S17 cabin + a swaying cab camera) to check the box stays on the cab to < 0.1 px.
+  A diagnostic first would also settle how big the sway is: log R_cabin vs the head-only prediction from the located poses.
+- **Not verified (needs the game):** colours in flat / VR (quad and drawn-in); fps_vr_dist in both lock modes (the quad's
+  depth, the drawn-in follow-head extra shift feels right, the drawn-in fixed box keeps its angle); the turn signs as seen in
+  the headset on the quad path (the unit test covers the maths and the drawn-in projection, not the runtime); layer order
+  with the panel when both distances are close; the Foveated size scaler's steps.
+
+### Phase 45: the menu's cost column shows CPU | GPU, a Limit line; measuring only while the menu is open
+
+- **Cost column.** Each row's cell is `<CPU> | <GPU>` in ms PER FRAME (VR: the GPU side = both eyes summed; before: eye 0's
+  ms per eye), the CPU text in blue (RGB 86,180,233) and the GPU text in orange (RGB 230,159,0) -- Okabe-Ito, not red / green.
+  `-` = that side does not apply / is not measured, `...` = no complete ~1-s interval yet (warm-up after the open), `off`,
+  `same`, `no extra` as before. The colours are control characters in the strings (`TuningMenu::kInkCpu` 0x01, `kInkGpu` 0x02,
+  `kInkEnd` 0x03, built with `%lc`); `menu.cpp` `inkText` draws the segments left to right (greyed rows: inks dimmed halfway
+  to the background); a string without marks draws as before. Header `CPU | GPU ms` in the same inks. `Row::cost` 24 -> 32.
+- **Row -> CPU block** (`cpu_prof.h`, the RENDER thread, ms per frame): Mode / DLAA = every mod hook + block except the
+  menu's own (`menu`, `gpu-timers`, `prof`) | GPU the mod total; Model, DLAA area = `ngx-eval` | NGX; Sharpen strength /
+  width = `-` (inside `dlaa-run`) | sharpen; Texture sharpness rows = `lod` | `-`; See-through depth = `fwd-depth` |
+  see-through; Per-part motion = `mv-gen + did-rec + did-replay + mv-collect + obj-ids` | per-part; Mirror DLAA, Mirrors in
+  turns = `mirror` | mirrors; Foveated rows = `vrs` | `-` (the saving is in the game's own GPU time); Hidden area mask =
+  `hmask` | `-`; FPS counter = `-` (inside `menu`) | the fps box (`kOverlay`); Logging = `LogCost` (every thread, per
+  Present; was in the value column) | `-`. Rows without either: `-`.
+- **CPU data (`MenuCpuRead`).** At the menu's ~1-s snapshots (`MenuPerfTick`, the Present thread) the profiler registry is
+  read lock-free (single-writer relaxed counters; the 10-s log report keeps its own baseline). Render thread = the slot with
+  the most game D3D11 hook calls in the interval (Present / OpenXR excluded) -- the per-thread handling of phase 33: the
+  rows use that thread only; the mod on all other threads together is shown in the perf lines (`other threads`). Frames =
+  the profiler's frame marks (the game's xrEndFrame in VR, Present in flat), the same divisor as the report. **Profiler cost
+  taken out:** each entry of a category minus one calibrated transition (`g_transTicks`; hook bodies two: their push + the
+  pop of the game's call inside), clamped at 0; `measuring` (perf line 2) = every thread's transitions x `g_transTicks` + the
+  `gpu-timers` and `prof` blocks. `CpuProf::Calibrate` now takes the best of 8 rounds (a cold first round read 58 instead of
+  29 TSC ticks on the 9950X3D).
+- **Limit line (`MenuLimit`, perf line 0).** T = wall ms per frame; P = the budget (VR: the runtime's
+  `predictedDisplayPeriod`, new `XrHook::DisplayPeriodNs`; flat: T); B = the frame loop's CPU busy time = per thread with a
+  Present / xrWaitFrame / xrEndFrame role, T minus its time inside the original Present / OpenXR calls minus measuring, the
+  SMALLEST of them (a thread waiting for the other one outside the hooks looks busy); G = the whole-frame scene span (game
+  + mod, both eyes; reads a little low: no UI / post / compositor). Rules in order: VR and T <= 1.04 P -> `headset (N Hz)`;
+  B >= 0.90 P and G >= 0.85 P -> `CPU and GPU`; B >= 0.90 P -> `CPU` (flat: `CPU (or a game fps cap)` -- the game's own
+  limiter sleeps outside the hooks); G >= 0.85 P -> `GPU`; flat with >= 10 % of the frame inside Present -> `vsync / fps
+  cap`; G not there yet -> `...`; else `unknown`. Never a guess.
+- **Perf lines.** 0: `Limit: ..   fps N (T ms[, headset N Hz])   frame busy B | G ms`; 1: `this mod: CPU | GPU ms -- GPU:
+  NGX .., part motion .., camera .., see-through .., mirrors .., sharpen .., copies ..` (VR: both eyes, was one line per
+  eye); 2: the legend (`CPU` blue | `GPU` orange), `CPU = the game's render thread, other threads x; measuring costs y ms
+  CPU (taken out)`.
+- **Measuring only while asked (user requirement: nothing while the menu is closed).** The CPU profiler is switched on by
+  `MenuPerfOpen` like the GPU timers (`cpuForced`), back at `MenuPerfClose` (`cpu_prof` 1 / level 4 keep it on);
+  `ApplyLogLevelGates` with the menu open leaves both on and only updates the forced flags (it used to switch the profiler
+  OFF on a level drop with the menu open). New `g_measure` (`MeasureOn` / `MeasureUpdate`: menu open or log level 4) gates
+  the legacy debug-line timers that ran ALWAYS: the per-draw TSC pairs (collector, object ids, draw record, forward depth --
+  phase 35 measured the QPC version at ~0.13 ms per VR frame), the per-pass QPC timers (replay, forward replay, forward
+  batch, blit), the per-Present `TscCalibrate`, the preview depth-assembly GPU timer, and every `GpuSpanTimer` (new static
+  `s_on`; replay, forward replay, pairing, pass B, mirror run / replay / hold, forward batch). Exception (a feature, not a
+  statistic): the forward-batch timer stays on while the VR forward-depth budget guard can still act (VR, budget > 0,
+  `mv_fwd_depth` not explicit, not switched off yet, on). `gpu_timing = -1` (DLAA stage timestamps, depth snapshot timer,
+  whole-frame spans) now means log level 4 instead of "always in VR"; the menu does not need it (its spans run under
+  `GpuPerf::On`). Closed menu below level 4: each profiler scope = one relaxed load + a not-taken branch, each GPU section =
+  one call + a flag test, each legacy timer = one relaxed load.
+- **Measured (micro-benchmark, Ryzen 9 9950X3D, `cpu_prof.h` as built):** profiler OFF: +0.2 ns per hooked call or block
+  (one load + branch); ON: 26.6 ns per hooked game call (4 timer transitions) and 12.8 ns per mod block entry (2); one
+  transition = 29.3 TSC ticks (~6.7 ns). So the menu's profiler costs about 0.27 ms per 10,000 hooked game calls per frame;
+  the menu shows the live figure (`measuring costs .. ms`) and takes it out of its numbers.
+- **Not verified (needs the game):** the figures and the Limit line in flat / VR (headset / GPU / CPU cases; Turbo mode;
+  reprojection at half rate), the render-thread pick in flat, the inks' readability in the headset, the warm-up, that the
+  `CPU prof` log line and the `perf eye` lines still appear at level 4, that a closed menu below level 4 really shows no
+  `GPU spans` / `DLAA GPU cost` lines in VR any more.
+
+### Phase 46: menu_shot -- the README pictures are rendered offline from the real menu code
+
+- `tests/menu_shot.cpp` (`tests\build_menu_shot.bat` -> `build\tests\menu_shot.exe <dir>`) renders the tuning menu and the fps
+  box to PNG without the game: a WARP D3D11 device, a render target over a generated dark blurred-road background (no game
+  assets), then the REAL `src/menu.cpp` (`TuningMenu::Draw`, `DrawWidget`, `SetWidgetColors`; linked, not copied), read back and
+  saved with WIC. Writes `tuning-menu.png` (all groups closed, `Mode` selected), `tuning-menu-vr-performance.png` (`VR
+  performance` open), `tuning-menu-picture.png` (`Picture` open), `fps-counter.png` and `fps-counter-colours.png` (the 20
+  `src/fps_pose.h` presets with their names). Run it as `build\tests\menu_shot.exe docs\images` to refresh the README images.
+- **The panel is filled by hand**, from ONE table (`kRows` at the top of the file): the rows of `MenuBuildPanel`, the
+  descriptions of `kMenuDesc`, the perf lines of `MenuPerfLines` and the CPU | GPU cost cells (ink marks `<c>..</>` blue /
+  `<g>..</>` orange), for a VR session at 72 Hz with plausible figures. `inject.cpp` cannot be linked without the whole mod. **When
+  a menu row is added, renamed or reordered, update `kRows` and re-run the tool**, then commit the new PNGs.
+- CI runs it as a smoke test only (the exe must exist, exit 0, the five files must exist); the CI outputs are not committed.
+- Not changed: `src/menu.cpp` is used as it is.
+
+### Phase 47: fps box lock mode 2 "Attached to vehicle" (GPU-placed from a cab draw's MVP, zero lag)
+
+- **What.** `fps_vr_lock = 2` (menu row `FPS counter lock`: `Follow head` -> `Fixed in play space` -> `Attached to vehicle`,
+  Right = next, Left = previous). The box is a sticker in the cab: it sways with it (braking pitch, bumps, hills, the game's
+  head / seat physics), in trucks and cars. It is placed where lock 1 would put it at the moment of the lock-on
+  (`fps_vr_x` / `fps_vr_y` degrees at `fps_vr_dist` around the seat, facing it, + `fps_vr_yaw` / `_pitch` / `_roll`,
+  `fps_vr_scale`), and a later change of those settings moves / turns / resizes it INSIDE the cab (same lock frame).
+  No new ini key (a new value), no new menu row (`kMaxRows`, `kIniMaxKeys`, `kMenuDesc` count unchanged; LoadConfig's
+  existing `fps_vr_lock` line clamps 0..2).
+- **How (the phase 44 plan; `src/fps_cab.h` = the maths + the design comment, `src/fps_cab.cpp` = the runtime).**
+  1. *Lock-on (CPU, lagged on purpose: it is the picture of ONE moment t0).* At a VR eye blit that starts a frame (the
+     phase 24 pass parity; the other eye = serial + 1) the biggest 16 cabin-layer draws of that pass's `DrawIdRecord`
+     (`kFCabin`, not instanced, an MVP window, the same full key never twice) have their cb0 rows 4..11 copied from the
+     record's GPU mirror into a staging buffer, with both eyes' OpenXR poses (`XrHook::LatestViews`, corrected to the
+     submitted pose). On the readback (`DO_NOT_WAIT`, ~1-3 frames): the MVP block per draw (the CSGather scan on the CPU:
+     the first ShapeOk block from row 4, so the ATS car interior's rows 5..8 work), rejected: no MVP block,
+     camera-relative (`OriginFree`, the car's head-locked overlays), degenerate, scale out of 1e-3..1e3, origin > 30 m.
+     **Reference rule:** the biggest IndexCount usable in BOTH eyes, else in one eye. From the reference's MVP M = P V W
+     the eye's frame in its MODEL space is exact (`EyeFrameOf`: C = where rows x, y, w vanish, right / up / forward, k =
+     metres per model unit = |row 3 xyz|, 2 / p00 = the fov width); with the eyes' poses that gives the affine map play
+     space -> model space at t0 (`PlayToModel`; the scale from the eyes' separation in the model vs in the play space
+     when within 2x of 1 / k; the eye order checked: the eye that is right in the model must be right in the play space,
+     else the OpenXR views are swapped). The box is built in the play space as the lock-1 quad (`BoxPlay` = the
+     `OvBuildQuadLocked` fixed pose and size `d fw 0.08 scale`) and mapped: 4 corners in the reference's model space. Every
+     other usable part c gets them in ITS model space: `a_c = M_c(t0)^-1 M_ref(t0) a_ref` (= model_c^-1 model_ref; view and
+     projection cancel exactly; the other eye's product is compared and logged at level 4 as a check).
+  2. *Draw (every eye picture, zero lag).* `FpsCabBlit` (HandlePossibleBlit, the VR eye blit, after the pass's replay
+     flushed the mirror) finds the parts of the lock in THIS pass's record (full key, else a unique loose key: buffer-pool
+     rotation) and takes the best-ranked one that is not demoted: its mirror SRV + the byte offset of its MVP block.
+     `FpsCabDraw` (MenuDrawVrOn, the late draw point) calls `TuningMenu::DrawWidgetMvp`: the `kMenuVs` entry `VSCab`
+     (ShaderCache `kMenuCabVs`, fxc-validated) reads that MVP from the mirror (`ByteAddressBuffer` at VS t0, saved /
+     restored with the other state) and outputs `clip = M(t) a_k` (z = 0.5 w; not MVP-shaped / not finite = nothing drawn).
+     Same eye, same pass, same frame as the cab pixels in that picture: the box and the dashboard are one picture, and the
+     runtime's reprojection treats them the same. NDC map: the whole eye texture, or the view's sub-rect when the target is
+     a side-by-side / array swapchain image (`XrHook::ViewForImage`).
+  3. *Monitor (lagged, every 72 eye blits ~0.5 s).* The present parts' MVPs are read back the same way; each part's
+     predicted box centre `M_c(t) a_c`, brought into part d's model space, must equal d's (`Disagree`, metres). The group
+     that agrees (< 1.5 cm) with the biggest summed IndexCount is the cab; a part > 3 cm off it MOVES (steering wheel, door,
+     wiper) and is demoted for this lock (level 3 line) -- the next draw uses the next part (a re-acquire). The same
+     readback puts the attached box centre into the play space with that frame's pose (`PlayOf`): how far the cab moved
+     against the play space (level 4, per 10 s: max / rms / largest change between two readbacks).
+- **Depth: none (decision).** The box is drawn over the finished eye picture with depth off, like the other drawn-in paths.
+  The eye picture has no depth buffer of its own (the scene depth belongs to the scene render target, before the blit /
+  DLAA / upscale); testing against it would need the scene depth resampled to the eye picture and the cab layer's [0.9, 1]
+  range -- for a HUD box that the user places in free air (default 80 cm ahead), occlusion by the steering wheel would
+  mostly hide it. Not worth the cost / risk now.
+- **Fallbacks (the box is drawn as lock 1, fixed in the play space, until it can attach; `FpsCab::Why`, level 3 line per
+  change, counted per 10 s):** no world blit of that eye this frame (VR main menu / garage preview pictures, loading); no
+  flushed draw record (DLAA off, passive, motion vectors or `Per-part motion vectors` off, a jitter-only mode) -- the
+  feature needs the per-draw record and its GPU mirror; locking on (the first readback, ~1-3 frames); no cabin-layer draw
+  in the pass (exterior camera): the lock is KEPT and the box comes back to the same spot in the cab; none of the lock's
+  parts in the pass while it has cab draws: after 90 such blits of an eye (~1.25 s at 72 Hz) a NEW lock (truck change /
+  a different cab), placed like lock 1 at that moment; the VSCab shader not ready / failed. No OpenXR poses at the lock:
+  the box is placed from the eye's own view (straight ahead + the offsets), logged. The quad-layer path (menu_vr_layer = 1)
+  never shows the box in mode 2 (`MenuOverlaySet` asks for no fps quad); the panel stays a quad.
+- **Logs.** Level 3: `fps box attached to vehicle: ON / off`, `LOCKED ON (lock #n) -- reference cab draw IndexCount ..
+  (MVP in cb0 rows ..), seen in .., N cab part(s) can carry the box; play -> cab map from ..; game IPD / headset IPD ..`,
+  `cab part IndexCount .. MOVES against the cab ..`, `eye N re-acquired -- ..`, `.. none of the lock's parts for 90
+  frames -- a new cab ..`, `drawn FIXED IN THE PLAY SPACE for now -- <reason>` / `ATTACHED to the cab again`, the lock row
+  change. Level 4: the lock-on candidate list (IndexCount, verdict / MVP rows per eye), the both-eyes transform check (mm),
+  and every 10 s `fps box attached to vehicle (10 s): N eye picture(s) attached, M fixed instead (reasons) | lock #.. part
+  in use eye 0 / 1, parts, moving, re-acquires | THE CAB AGAINST THE PLAY SPACE ..: max .. cm, rms .. cm; largest change
+  between two readbacks .. cm`.
+- **Cost.** CPU: one pass over the pass's draw flags + keys per eye blit (a few us); a staging copy of <= 16 x 128 B per eye
+  every ~0.5 s. GPU: the same one textured quad as the other drawn-in boxes (`kOverlay` in the menu's cost column).
+- **Test: `tests/fps_cab_test.cpp`** (`tests\build_fps_cab_test.bat`, in CI). Part A (maths): the eye frame of an MVP, the
+  box through 3 parts x 3 moments x 2 eyes = the cab-fixed truth (1e-12 px), at t0 = the lock-1 box, the size rule, the
+  MVP-block rules (rows 4..7, car rows 5..8), the eye-order swap, the moving-part test. Part B (WARP, the REAL
+  `DrawIdRecord` Record / Flush through a WRITE_DISCARD cbuffer ring, the REAL FpsCab runtime and `menu.cpp` VSCab draw),
+  2 eyes x 360 frames of a cab that sways 4 deg pitch / 2 deg roll / 3 cm bounce against the play space with a moving head;
+  each attached eye picture is compared with the box drawn at the TRUE corners of the SAME frame (`DrawWidgetCorners`):
+  max centroid error 0.004 px, 0 % of the box pixels different, while a 1-frame lag would be off by 3.6 px on average.
+  Events: the biggest usable part is a steering wheel that turns from frame 60 (it carries the box off the truth until the
+  monitor demotes it, then the cab body takes over), a camera-relative overlay with the biggest IndexCount and a world draw
+  (never used), a car-layout part (MVP in rows 5..8), an exterior camera (no attach, lock kept), a buffer-pool rotation
+  (loose keys, no new lock), a truck change (one new lock after 90 blits, then exact again), the logged cab-vs-play-space
+  figure = the scene's own sway (15.2 cm). Three variants: right eye first, left eye first, OpenXR views handed swapped;
+  178 checks.
+- **Not verified (needs the game, VR):** that the cabin layer's biggest usable draw in ETS2 / ATS trucks and cars is a
+  rigid cab part (the lock-on line at level 4 lists them) and that the monitor's demotions catch the real steering wheel;
+  that the eye picture's NDC is the scene's NDC in every setup (DLSS upscale, side-by-side swapchains); the look in the
+  headset (the box should now ride the dashboard on bumps, braking and hills, in a car too); the logged cab sway figures;
+  the fallback in the exterior camera / menus and the new lock after a truck change.
+
+#### Phase 47b: fixes after the first VR test (ATS 2026-10-12 14:32, captures/ats_2026-10-12_1432_p47_vr.log)
+
+- **Report:** the box flickers in menus, triples on loading screens; white number plates in some flicker frames.
+- **Flicker / triples (menus, loading).** Mode 2 had forced the box into the eye pictures everywhere (no quad); the user runs
+  `menu_vr_layer = 1`, where lock 1 is a stable quad in menus and loading (the log: `0 xrEndFrame(s) with our quads ... fps box
+  in-picture`). On loading screens the drawn-in box lands on the game's intermediate / preview pictures and the views are
+  located in a VIEW space, so the drawn-in fallback followed the head; the attach decision was also made per eye picture
+  (`no world blit` / `none of the lock's parts` alternated every 40 ms). Now: ONE decision per frame (`FpsCab::Latch`, at
+  Present in `MenuOverlaySet`, with hysteresis): attached after `kOnFrames` (8) frames in a row where both eyes had their blit
+  with the attached placement; fixed again when `kOffFrames` (3) of the last 8 frames were not (scattered misses count: a
+  loading screen whose every 3rd frame looks attachable does not flap). Attached frame = the drawn-in attached box in both eyes,
+  an eye that cannot have it this frame gets NO box (`held`, never the other kind); fixed frame = lock 1 exactly (the quad
+  with `menu_vr_layer = 1`, `MenuOverlaySet` asks for it; else drawn in). One box per eye picture, one kind per frame, and the
+  quad and the drawn-in decision read the same latched value (set at Present for the next frame).
+- **Stale mirror.** `Get` now takes `g_passSeq`: the eye's pass must be one of the two newest (`passSeq <= serial + 2`), else
+  `kStale` -- a newer pass may have reset the record slot / overwritten the mirror. The old check (Present count + 1) allowed a
+  1-frame-old pass on frames without that eye's blit. "Since this eye's blit": `latchAge` <= 1 (a Present between the eyes'
+  blits is tolerated).
+- **Lock gate.** Lock #1 of the test was taken on a loading picture with eye 0 absent (`game IPD / headset IPD 0.000`), lock #2
+  with no OpenXR pose (VIEW-space views during loading). Now a lock needs: `kLockSteady` (72) blits in a row with cab draws in a
+  flushed record and usable poses, the reference usable in BOTH eyes, both eyes' poses -- else refused (logged), tried again.
+- **Monitor "0 readbacks".** The monitor ran (it demoted IndexCount 13200 of lock #2), but the play-space figure needs the lock's
+  OpenXR pose and lock #2 had none; with the lock gate every lock has one. The 10-s line now also prints the monitor readbacks
+  and lock refusals, frames attached / fixed, eye pictures drawn / held.
+- **284 "no flushed draw record" (14:34:41-43):** the user pressed `Ctrl+F5` (motion vectors OFF, `MV draw-ids: inactive`) --
+  the per-draw record is off, the box is fixed for those frames. As designed.
+- **White number plates:** no phase-47 path writes a game resource: the GPU work is a copy FROM the record's own mirror into
+  our staging buffer, a Map of our staging buffer, and the box draw into the eye picture with the full state save / restore
+  (VS t0 included). The pre-47b stale case used a pass at most one frame old (its slot not yet reused with 4 ring slots), so a
+  garbage MVP was not possible either. Not explained by this code; the frames were loading transitions (FIFO underflows, eye
+  map corrections in the same seconds). To check in game: the same loading screens with lock 1 / the box off.
+- **Test** (`tests/fps_cab_test.cpp`, 261 checks): the timeline now has eye 0 without a record (frames 0-29: no lock), VIEW-space
+  views (30-44: no lock), a loading screen (260-299: eye 0 without a blit, other cabin draws in eye 1, every 3rd frame
+  attachable: at most 1 switch, <= 2 x kOffFrames attached boxes in it), a stale pass refused, never an attached placement on a
+  fixed frame, <= 8 switches in the whole run, > 40 monitor readbacks, the first lock with both eyes + poses; variant 3 = a
+  Present between the two eyes' blits. Zero lag unchanged (0.002 px vs 3.65 px for a 1-frame lag).
+- **Not verified (needs the game):** the box in menus / loading = the lock-1 quad; the transitions (a few eye pictures without a
+  box when the attach drops); the white plates.
+
+#### Phase 47c: the lock-on reference = the largest RIGID CAB GROUP (never the steering wheel)
+
+- **Why:** 47b's VR test (captures/ats_2026-10-12_1458_p47b_vr.log) was clean, but after a car -> truck change the new lock took
+  the biggest draw, the STEERING WHEEL, and the box rode the wheel until the 0.5 s monitor demoted it.
+- **Rule (`ProcessLock`, every lock: the first one, a new lock after a cab change):** the candidates usable in both eyes are
+  grouped by identical MVP in both eyes (`FpsCab::SameTransform`: max |a - b| <= 1e-5 of the largest entry; parts fixed to the
+  cab share one model transform, so their MVPs in one pass are the same matrix; the wheel, doors, wipers and needles have
+  their own). The group with the largest SUMMED IndexCount is the cab (summed, not counted: the shell / dashboard outweigh a
+  cluster of tiny gauge draws; a part's size is what makes it the cab), its biggest member is the reference, and ONLY its members
+  carry the box (re-acquires stay inside the group). Parts with their own transform are never carriers -- not even after a
+  monitor check. The both-eye + pose gate and the monitor (it can still demote a group member) are unchanged. The LOCKED ON
+  line names the group (parts, IndexCount sum, groups, parts left out).
+- **Test:** the dashboard and the car-layout console now share the body's transform; the wheel (the single biggest draw, 3000
+  vs 2400) has its own. The first lock and the lock after the truck change both use the body (3 carriers), the wheel turns
+  for 50 frames: 0 re-acquires, 0 demotions, every attached eye picture exact (no settling window any more). Part A: the
+  transform groups. 263 checks.
+- **Not verified (needs the game):** that ETS2 / ATS cab parts really share one transform per pass (the level-4 lock-on line lists
+  the candidates; the level-3 line the group sizes).
+
+#### Phase 47d: moving cab parts remembered per session; the monitor every ~0.08 s
+
+- **Why:** the 15:06 ATS log (captures/ats_2026-10-12_1506_p47c_vr.log ~693): only 3 usable candidates (the big cab draws are
+  camera-relative), 3 different transforms, so 47c's group rule fell back to the biggest single part, IndexCount 13200 -- the
+  steering wheel (the 14:58 log line 717: it moved 43.9 cm).
+- **Memory:** a part the monitor demotes is remembered (`Remember`: full key + loose key -- IndexCount, start index, base vertex,
+  VS -- so it survives the buffer-pool rotation; up to 64, the oldest dropped). One list for the session rather than one per
+  truck: a key is the geometry of one draw of one cab, so another truck's parts never match it, and going back to a truck
+  finds its wheel again without any truck identity. Every lock-on (the first, after the exterior camera / menus, a Reset, a
+  cab change, a return to the truck) refuses remembered parts (`a remembered MOVING part` in the level-4 candidate list,
+  level 3 `lock-on SKIPS N remembered moving part(s)`); level 3 `REMEMBERED as moving for this session` on each new one. A
+  device change clears it (the keys hold VS pointers).
+- **Carriers when nothing shares a transform:** a best group of ONE part proves nothing, so then every usable part carries the box
+  (ranked by IndexCount) and the monitor drops the moving one; with a real group (>= 2 parts) only its members (47c). When every
+  carrier is demoted, a new lock starts at once (not after 90 blits).
+- **Monitor every 12 eye blits (6 frames, ~0.08 s at 72 Hz; was 72 = 0.5 s).** Cost: the staging copy is <= 16 parts x 128 B x 2
+  eyes = 4 KB per readback (~12 per second, a ring of 4 staging buffers, `Map` with `DO_NOT_WAIT`: never a stall), the CPU side
+  `ProcessMonitor` 4-9 us per readback in the WARP test (16 x 16 pair checks at most; ~0.1 ms per second). The cab-vs-play
+  figure stays per 10 s (more samples).
+- **Test (variant 4, 640 frames, every part its own transform):** the first lock takes the wheel (the biggest), it is found
+  moving 5 frames after it starts to turn (the box exact again 2 frames later), the re-lock after a Reset takes the body, truck B
+  locks (its own wheel is not remembered: it never moved), back on truck A the body again -- the wheel stays remembered (1).
+  Variants 0-3 unchanged (the cab group: the wheel never a carrier). 324 checks.
+
+### Phase 48: fps box brightness (`fps_brightness` 10..100 %)
+
+- `fps_brightness` (default 100 = the colour as it is). `FpsPose::Dimmed(ColorOf(g_fpsColor), g_fpsBright)` scales the glyph
+  colour by pct / 100 toward black (outline kept); a preset with a LIGHTER outline than text (19, black on white) scales the
+  outline instead, so the box still dims. `FpsSyncColor()` (inject.cpp) pushes the result into `SetWidgetColors` before every
+  `DrawWidget` -- flat, VR quad layer, VR drawn-in and phase 47 "Attached to vehicle" all go through it, and the widget texture
+  cache already compares the colours, so a change rebuilds once; no separate cache key.
+- Menu: row `FPS brightness` (`MR_FPSBRIGHT`, after `FPS colour`, Left / Right 10 % steps, fresh presses, live; Shift+F12 saves
+  with the other fps_* keys under `g_fpsExplicit`; Reset removes the key). `kMaxRows` 47 -> 48; the group's last row stays
+  `MR_FPSROLL`; 48 reset keys (cap 56). LoadConfig reads it as a standalone `if (...) { ...; continue; }` line (C1061).
+- Test: `tests/fps_pose_test.cpp` (clamp / step, 100 % unchanged for all 20 presets, outline kept, 50 % white = 128, preset 19
+  dims the outline, amber at 10 %).
 
 ### The RenderDoc oracle (done in v0.2)
 

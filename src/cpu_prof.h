@@ -73,6 +73,7 @@ enum Cat : uint8_t {
     kBLog,                 // Log() (formatting + the queue push)
     kBProf,                // this profiler's own report
     kBVrs,                 // phase 34: VRS bracket enter / leave + the per-draw full-rate rule (vrs.cpp NVAPI calls included)
+    kBHmask,               // phase 40: VR hidden area mask (the eye / mesh decision + the depth-only draw at the scene clear)
     kModEnd,
     // ---- outside the mod: the game's own call inside each hook ----
     kDrvFirst = kModEnd,
@@ -86,7 +87,7 @@ inline const char* Name(int c) {
         "Map", "Dispatch", "CopyRes", "CopySub", "Resolve", "ClearRtv", "ClearDsv", "Discard", "CreatePS", "xrWaitFrame",
         "xrBeginFrame", "xrEndFrame", "xrAcquire", "xrRelease", "xrLocateViews", "xrOther", "StateSet",
         "blit", "dlaa-run", "ngx-eval", "mv-gen", "did-rec", "did-replay", "fwd-depth", "mv-collect", "obj-ids", "snapshot",
-        "lod", "frame-end", "mirror", "menu", "preview", "frame-work", "keys", "gpu-timers", "log", "prof", "vrs" };
+        "lod", "frame-end", "mirror", "menu", "preview", "frame-work", "keys", "gpu-timers", "log", "prof", "vrs", "hmask" };
     if (c < 0 || c >= kCount) return "?";
     return c < kModEnd ? kN[c] : kN[c - kDrvFirst];
 }
@@ -248,16 +249,23 @@ struct Block {
 
 // Cost of one timer transition in TSC ticks (measured once by Calibrate; the report's self-cost estimate).
 inline double g_transTicks = 0.0;
+// phase 45: the best of 8 rounds (one cold round read 2x the warm figure on a Zen 4 test: 58 vs 29 ticks); the tuning menu
+// subtracts entries x this from its CPU figures, so a cold outlier would over-correct them.
 inline void Calibrate() {
     static Tls* dummy = new (std::nothrow) Tls();          // (not registered: never reported)
     if (!dummy) return;
-    dummy->depth = 0; dummy->overflow = 0;
-    const uint64_t t0 = __rdtsc();
-    for (int i = 0; i < 4096; ++i) { Push(*dummy, kBProf); Pop(*dummy); }
-    const uint64_t t1 = __rdtsc();
+    double best = 0.0;
+    for (int round = 0; round < 8; ++round) {
+        dummy->depth = 0; dummy->overflow = 0;
+        const uint64_t t0 = __rdtsc();
+        for (int i = 0; i < 4096; ++i) { Push(*dummy, kBProf); Pop(*dummy); }
+        const uint64_t t1 = __rdtsc();
+        const double r = (double)(t1 - t0) / 8192.0;
+        if (round == 0 || r < best) best = r;
+    }
     volatile uint64_t sink = Get(dummy->ticks[kBProf]) + Get(dummy->transitions);
     (void)sink;
-    g_transTicks = (double)(t1 - t0) / 8192.0;
+    g_transTicks = best;
 }
 
 } // namespace CpuProf

@@ -68,6 +68,8 @@ enum Id : int {
     kFwdInitPs1,           // draw_ids.cpp       kFwdInitShader / PSInit1  ps_5_0 (1/2 resolution: min of 2x2)
     kMenuVs,               // menu.cpp           kMenuVs                 vs_5_0 (v0.10.0 tuning menu panel quad)
     kMenuPs,               // menu.cpp           kMenuPs                 ps_5_0
+    kHiddenMaskVs,         // hidden_mask.cpp    kHmVs                   vs_5_0 (phase 40: VR hidden area mask, depth only)
+    kMenuCabVs,            // menu.cpp           kMenuVs / VSCab         vs_5_0 (phase 47: the fps box attached to the vehicle)
     kCount,
     kCoreLast = kPvEdgeFill  // v0.10.0 phase 17: ids 0..kCoreLast = the core group (compiled first, CoreDone)
 };

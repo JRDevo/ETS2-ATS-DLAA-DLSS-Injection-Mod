@@ -25,6 +25,9 @@ cbuffer MenuCb : register(b0) {
     float4 Rect;                                     // x0, y0 (top), x1, y1 (bottom) in NDC
     float4 Opt;                                      // x: 1 = decode sRGB -> linear, y: panel opacity, w: 1 = Corner[] (clip space)
     float4 Corner[4];                                // phase 16: top-left, top-right, bottom-left, bottom-right (Opt.w = 1)
+                                                     // phase 47 (VSCab): the same corners in a cab draw's MODEL space
+    uint4  Cab;                                      // phase 47 (VSCab): x = byte offset of that draw's MVP (4 rows) in CabMirror
+    float4 Map;                                      // phase 47 (VSCab): picture NDC = the draw's NDC * Map.xy + Map.zw
 };
 struct VOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
 VOut VSMain(uint id : SV_VertexID) {
@@ -33,6 +36,26 @@ VOut VSMain(uint id : SV_VertexID) {
     if (Opt.w > 0.5) o.pos = Corner[id & 3u];
     else             o.pos = float4(lerp(Rect.x, Rect.z, t.x), lerp(Rect.y, Rect.w, t.y), 0.0, 1.0);
     o.uv = t;
+    return o;
+}
+// phase 47: the fps box ATTACHED TO THE VEHICLE (src/fps_cab.h). CabMirror = the draw-id record's copy of the game's cbuffer
+// ring(s) for THIS eye's pass; the reference cab draw's MVP (rows = clip x, y, z, w; clip = M p) is read at Cab.x, so the box's
+// model-space corners land where that draw's geometry lands in this very picture. A block that is not MVP-shaped (DrawIdMv
+// ShapeOk) or not finite puts every corner at one point outside the picture (nothing drawn).
+ByteAddressBuffer CabMirror : register(t0);
+VOut VSCab(uint id : SV_VertexID) {
+    const float2 t = float2((float)(id & 1u), (float)(id >> 1));
+    VOut o;
+    o.uv = t;
+    const uint a = Cab.x;
+    const float4 r0 = asfloat(CabMirror.Load4(a)), r1 = asfloat(CabMirror.Load4(a + 16u));
+    const float4 r2 = asfloat(CabMirror.Load4(a + 32u)), r3 = asfloat(CabMirror.Load4(a + 48u));
+    const float4 p = Corner[id & 3u];
+    const float4 c = float4(dot(r0, p), dot(r1, p), dot(r2, p), dot(r3, p));
+    const float l0 = length(r0.xyz), l1 = length(r1.xyz), l3 = length(r3.xyz);
+    const float lm = max(l0, max(l1, length(r2.xyz)));
+    const bool ok = all(isfinite(c)) && lm > 1e-20 && l0 > 0.02 * lm && l1 > 0.02 * lm && l3 > 0.02 * lm;
+    o.pos = ok ? float4(c.xy * Map.xy + Map.zw * c.w, 0.5 * c.w, c.w) : float4(2.0, 2.0, 0.5, 1.0);
     return o;
 }
 )";
@@ -67,9 +90,14 @@ float4 PSMain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
 )";
 // kMenuPs-END
 
-struct CbData { float rect[4]; float opt[4]; float corner[4][4]; };   // (phase 16: + the 4 clip-space corners)
+struct CbData { float rect[4]; float opt[4]; float corner[4][4]; uint32_t cab[4]; float map[4]; };   // (phase 16: + the 4
+                                                                                                     //  clip-space corners;
+                                                                                                     //  phase 47: + cab / map)
+static_assert(sizeof(CbData) == 128, "MenuCb layout");
 
 ComPtr<ID3D11VertexShader>      g_vs;
+ComPtr<ID3D11VertexShader>      g_vsCab;     // phase 47: VSCab (the fps box attached to the vehicle), made on its first use
+bool                            g_vsCabFailed = false;
 ComPtr<ID3D11PixelShader>       g_ps;
 ComPtr<ID3D11Buffer>            g_cb;
 ComPtr<ID3D11SamplerState>      g_smp;
@@ -96,6 +124,9 @@ uint32_t                         g_wTexW = 0, g_wTexH = 0;
 float                            g_wBuild = 0.0f;
 wchar_t                          g_wLast1[kWLine] = {}, g_wLast2[kWLine] = {};
 bool                             g_wHave = false;
+// phase 44 (dlaa.ini fps_color): the text / outline colours of the fps box (SetWidgetColors) and those of the cached texture
+COLORREF                         g_wText = RGB(255, 255, 255), g_wLine = RGB(8, 8, 8);
+COLORREF                         g_wLastText = 0, g_wLastLine = 0;
 std::vector<uint32_t>            g_wPixels;
 
 constexpr UINT kInst = 256;
@@ -113,6 +144,8 @@ struct Saved {
     ID3D11GeometryShader*     gs = nullptr; ID3D11ClassInstance* gsI[kInst] = {}; UINT gsN = kInst;
     ID3D11PixelShader*        ps = nullptr; ID3D11ClassInstance* psI[kInst] = {}; UINT psN = kInst;
     ID3D11Buffer*             vsCb0 = nullptr;
+    ID3D11ShaderResourceView* vsSrv0 = nullptr;      // phase 47: VSCab reads its mirror at VS t0
+    bool                      vsSrvSaved = false;
     ID3D11Buffer*             psCb0 = nullptr;
     ID3D11ShaderResourceView* srv[kSrvSave] = {};
     ID3D11SamplerState*       smp0 = nullptr;
@@ -129,9 +162,11 @@ Saved g_saved;
 template <class T> void Rel(T*& p) { if (p) { p->Release(); p = nullptr; } }
 void RelInst(ID3D11ClassInstance** a, UINT n) { for (UINT i = 0; i < n && i < kInst; ++i) Rel(a[i]); }
 
-void SaveState(ID3D11DeviceContext* ctx) {
+void SaveState(ID3D11DeviceContext* ctx, bool vsSrv = false) {
     Saved& s = g_saved;
     s.vsN = s.hsN = s.dsN = s.gsN = s.psN = kInst;
+    s.vsSrvSaved = vsSrv;                                    // phase 47: only the VSCab draw binds a VS SRV
+    if (vsSrv) ctx->VSGetShaderResources(0, 1, &s.vsSrv0);
     ctx->IAGetInputLayout(&s.il);
     ctx->IAGetPrimitiveTopology(&s.topo);
     ctx->VSGetShader(&s.vs, s.vsI, &s.vsN);
@@ -166,6 +201,7 @@ void RestoreState(ID3D11DeviceContext* ctx) {
     ctx->GSSetShader(s.gs, s.gsI, s.gsN);
     ctx->PSSetShader(s.ps, s.psI, s.psN);
     ctx->VSSetConstantBuffers(0, 1, &s.vsCb0);
+    if (s.vsSrvSaved) { ctx->VSSetShaderResources(0, 1, &s.vsSrv0); Rel(s.vsSrv0); s.vsSrvSaved = false; }   // phase 47
     ctx->PSSetConstantBuffers(0, 1, &s.psCb0);
     ctx->PSSetShaderResources(0, kSrvSave, s.srv);
     ctx->PSSetSamplers(0, 1, &s.smp0);
@@ -207,6 +243,7 @@ bool Ensure(ID3D11Device* dev) {
     // group (~2.1 s), no longer after the whole per-draw set (~20 s): the panel works on the first menu screens.
     if (!ShaderCache::Ready(ShaderCache::kMenuVs) || !ShaderCache::Ready(ShaderCache::kMenuPs)) return false;
     g_failed = true; g_dev = dev;
+    g_vsCab.Reset(); g_vsCabFailed = false;                  // phase 47 (made again on its first use on this device)
     g_vs.Reset(); g_ps.Reset(); g_cb.Reset(); g_smp.Reset(); g_blend.Reset(); g_blendOv.Reset(); g_rs.Reset(); g_dss.Reset();
     DropTexture();
     DropWidget();
@@ -309,7 +346,14 @@ const COLORREF kGrey     = RGB(112, 112, 122);
 const COLORREF kSelGrey  = RGB(168, 148, 72);
 const COLORREF kHead     = RGB(140, 140, 152);
 const COLORREF kDesc     = RGB(214, 214, 220);
-const COLORREF kPerf     = RGB(150, 210, 160);   // the GPU block (soft green: measured figures, not settings)
+const COLORREF kPerf     = RGB(150, 210, 160);   // the perf block (soft green: measured figures, not settings)
+// phase 45: the CPU / GPU inks (TuningMenu::kInkCpu / kInkGpu marks): Okabe-Ito sky blue and orange -- a pair that stays apart
+// for protan / deutan / tritan vision (no red / green), both bright on the dark panel. Greyed rows: halfway to the background.
+const COLORREF kInkCpuC  = RGB(86, 180, 233);
+const COLORREF kInkGpuC  = RGB(230, 159, 0);
+COLORREF Dim(COLORREF c) {
+    return RGB((GetRValue(c) + GetRValue(kBg)) / 2, (GetGValue(c) + GetGValue(kBg)) / 2, (GetBValue(c) + GetBValue(kBg)) / 2);
+}
 
 HFONT MakeFont(float px, int weight) {
     HFONT f = CreateFontW(-(int)std::lround(px), 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_TT_PRECIS,
@@ -420,18 +464,49 @@ bool RenderPanel(const TuningMenu::Panel& p, float s, uint32_t w, uint32_t h) {
     };
     const float W = (float)w / s, H = (float)h / s;          // reference px
     const UINT one = DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS;
+    // phase 45: single-line text with ink marks (TuningMenu::kInkCpu / kInkGpu / kInkEnd): the segments are drawn left to right,
+    // each in its colour (base = the text's own colour; dim = a greyed row: the inks dimmed too); the last visible segment ends
+    // in "..." when the box is too narrow. A text without marks = text() (same flags).
+    auto inkText = [&](HFONT f, COLORREF base, const wchar_t* t, float x0, float y0, float x1, float y1, bool dim) {
+        if (!t || !t[0]) return;
+        bool marks = false;
+        for (const wchar_t* q = t; *q; ++q) if (*q >= TuningMenu::kInkCpu && *q <= TuningMenu::kInkEnd) { marks = true; break; }
+        if (!marks) { text(f, base, t, x0, y0, x1, y1, one); return; }
+        SelectObject(dc, pick(f));
+        LONG x = px(x0);
+        const LONG right = px(x1), top = px(y0), bottom = px(y1);
+        COLORREF cur = base;
+        const wchar_t* seg = t;
+        for (const wchar_t* q = t;; ++q) {
+            const wchar_t ch = *q;
+            const bool mark = ch >= TuningMenu::kInkCpu && ch <= TuningMenu::kInkEnd;
+            if (!mark && ch) continue;
+            const int len = (int)(q - seg);
+            if (len > 0 && x < right) {
+                SetTextColor(dc, cur);
+                RECT r{ x, top, right, bottom };
+                DrawTextW(dc, seg, len, &r, one | DT_NOPREFIX);
+                SIZE sz{};
+                if (GetTextExtentPoint32W(dc, seg, len, &sz)) x += sz.cx;
+            }
+            if (!ch) break;
+            cur = ch == TuningMenu::kInkCpu ? (dim ? Dim(kInkCpuC) : kInkCpuC)
+                : ch == TuningMenu::kInkGpu ? (dim ? Dim(kInkGpuC) : kInkGpuC) : base;
+            seg = q + 1;
+        }
+    };
     fill(kBg, 0.0f, 0.0f, W, H);
     fill(kLine, 0.0f, 0.0f, W, 1.0f); fill(kLine, 0.0f, H - 1.0f, W, H);   // 1-px frame
     fill(kLine, 0.0f, 0.0f, 1.0f, H); fill(kLine, W - 1.0f, 0.0f, W, H);
     text(fTitle, kText, p.title, 12.0f, kTitleY, W - 12.0f, kTitleY + kTitleH, one);
     for (int l = 0; l < TuningMenu::kPerfLines; ++l) {
         const float y = kPerfY + kPerfLineH * (float)l;
-        text(fPerf, kPerf, p.perf[l], 14.0f, y, W - 14.0f, y + kPerfLineH, one);
+        inkText(fPerf, kPerf, p.perf[l], 14.0f, y, W - 14.0f, y + kPerfLineH, false);   // phase 45: CPU / GPU inks
     }
     text(fSmall, kHead, L"Setting", kNameX0 + 14.0f, kHeadY, kNameX1, kHeadY + kHeadH, one);
     text(fSmall, kHead, L"Value", kValX0, kHeadY, kValX1, kHeadY + kHeadH, one);
     text(fSmall, kHead, L"Hotkey", kKeyX0, kHeadY, kKeyX1, kHeadY + kHeadH, one);
-    text(fSmall, kHead, p.costHead[0] ? p.costHead : L"GPU cost", kCostX0, kHeadY, kCostX1, kHeadY + kHeadH, one);
+    inkText(fSmall, kHead, p.costHead[0] ? p.costHead : L"Cost", kCostX0, kHeadY, kCostX1, kHeadY + kHeadH, false);
     fill(kLine, 10.0f, kRowsY - 2.0f, W - 10.0f, kRowsY - 1.0f);
     const int n = p.nRows < 0 ? 0 : (p.nRows > TuningMenu::kMaxRows ? TuningMenu::kMaxRows : p.nRows);
     for (int i = 0; i < n; ++i) {
@@ -445,7 +520,7 @@ bool RenderPanel(const TuningMenu::Panel& p, float s, uint32_t w, uint32_t h) {
         text(fBody, cName, r.name, kNameX0 + 14.0f, y0, kNameX1, y1, one);
         text(fBody, cName, r.value, kValX0, y0, kValX1, y1, one);
         text(fBody, cKey, r.keys, kKeyX0, y0, kKeyX1, y1, one);
-        text(fBody, cKey, r.cost, kCostX0, y0, kCostX1, y1, one);
+        inkText(fBody, cKey, r.cost, kCostX0, y0, kCostX1, y1, r.greyed != 0);   // phase 45: "<cpu> | <gpu>" in blue / orange
     }
     const float rowsEnd = kRowsY + kRowH * (float)n;
     fill(kLine, 10.0f, rowsEnd + 4.0f, W - 10.0f, rowsEnd + 5.0f);
@@ -513,14 +588,14 @@ bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t 
             if (!t || !t[0]) return;
             SelectObject(dc, pick(f));
             const UINT fl = DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_END_ELLIPSIS | DT_NOPREFIX;
-            SetTextColor(dc, mask ? RGB(255, 255, 255) : RGB(8, 8, 8));
+            SetTextColor(dc, mask ? RGB(255, 255, 255) : g_wLine);   // phase 44: fps_color's outline (was RGB 8,8,8)
             for (LONG dy = -o; dy <= o; dy += o)
                 for (LONG dx = -o; dx <= o; dx += o) {
                     if (!dx && !dy) continue;
                     RECT r{ px(3.0f) + dx, px(y0) + dy, px(W - 3.0f) + dx, px(y1) + dy };
                     DrawTextW(dc, t, -1, &r, fl);
                 }
-            SetTextColor(dc, RGB(255, 255, 255));
+            SetTextColor(dc, mask ? RGB(255, 255, 255) : g_wText);   // phase 44: fps_color's text (was white)
             RECT r{ px(3.0f), px(y0), px(W - 3.0f), px(y1) };
             DrawTextW(dc, t, -1, &r, fl);
         };
@@ -592,7 +667,8 @@ bool EnsureWidgetTexture(ID3D11Device* dev, ID3D11DeviceContext* ctx, const wcha
     wchar_t l1[kWLine], l2[kWLine];
     CopyLine(l1, line1);
     CopyLine(l2, line2);
-    if (g_wTex && g_wHave && std::fabs(g_wBuild - buildScale) < 0.001f && !wcscmp(l1, g_wLast1) && !wcscmp(l2, g_wLast2))
+    if (g_wTex && g_wHave && std::fabs(g_wBuild - buildScale) < 0.001f && !wcscmp(l1, g_wLast1) && !wcscmp(l2, g_wLast2) &&
+        g_wLastText == g_wText && g_wLastLine == g_wLine)    // phase 44: + the colours
         return true;
     const uint32_t w = (uint32_t)std::lround(TuningMenu::kWidgetRefW * buildScale);
     const uint32_t h = (uint32_t)std::lround(TuningMenu::kWidgetRefH * buildScale);
@@ -602,21 +678,25 @@ bool EnsureWidgetTexture(ID3D11Device* dev, ID3D11DeviceContext* ctx, const wcha
     g_wBuild = buildScale;
     memcpy(g_wLast1, l1, sizeof(l1));
     memcpy(g_wLast2, l2, sizeof(l2));
+    g_wLastText = g_wText;
+    g_wLastLine = g_wLine;
     g_wHave = true;
     return true;
 }
 
 // One textured quad of `srv` into `rtv` from `cb` (its rect / corners filled by the caller; the options are set here), every
 // touched state saved and restored (SaveState / RestoreState). The device objects must exist (Ensure).
+// phase 47: vsCab != null = that vertex shader (VSCab) with `vsSrv` at VS t0 instead of VSMain (saved / restored as well).
 void DrawCb(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, CbData& cb, int outMode,
-            ID3D11ShaderResourceView* srv, bool textureAlpha) {
+            ID3D11ShaderResourceView* srv, bool textureAlpha, ID3D11VertexShader* vsCab = nullptr,
+            ID3D11ShaderResourceView* vsSrv = nullptr) {
     const bool overlay = (outMode & TuningMenu::kOutOverlay) != 0;   // v0.10.3 phase 29: blend off, RGBA written
     outMode &= ~TuningMenu::kOutOverlay;
     cb.opt[0] = (float)(outMode < TuningMenu::kOutRaw ? TuningMenu::kOutRaw : (outMode > TuningMenu::kOutPq ? TuningMenu::kOutPq : outMode));
     cb.opt[1] = 0.88f;
     cb.opt[2] = textureAlpha ? 1.0f : 0.0f;                  // 1 = the fps box: alpha comes from the texture
     ctx->UpdateSubresource(g_cb.Get(), 0, nullptr, &cb, 0, 0);
-    SaveState(ctx);
+    SaveState(ctx, vsCab != nullptr);
     ID3D11ShaderResourceView* nullSrv = nullptr;
     ctx->PSSetShaderResources(0, 1, &nullSrv);
     ID3D11RenderTargetView* rt = rtv;
@@ -628,7 +708,8 @@ void DrawCb(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW,
     ID3D11SamplerState* smp = g_smp.Get();
     ctx->IASetInputLayout(nullptr);
     ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-    ctx->VSSetShader(g_vs.Get(), nullptr, 0);
+    ctx->VSSetShader(vsCab ? vsCab : g_vs.Get(), nullptr, 0);
+    if (vsCab) ctx->VSSetShaderResources(0, 1, &vsSrv);     // phase 47: the record's cbuffer mirror
     ctx->HSSetShader(nullptr, nullptr, 0);
     ctx->DSSetShader(nullptr, nullptr, 0);
     ctx->GSSetShader(nullptr, nullptr, 0);
@@ -665,6 +746,7 @@ namespace TuningMenu {
 void RegisterShaders() {
     ShaderCache::Add(ShaderCache::kMenuVs, kMenuVs, sizeof(kMenuVs) - 1, "menu_vs", "VSMain", "vs_5_0");
     ShaderCache::Add(ShaderCache::kMenuPs, kMenuPs, sizeof(kMenuPs) - 1, "menu_ps", "PSMain", "ps_5_0");
+    ShaderCache::Add(ShaderCache::kMenuCabVs, kMenuVs, sizeof(kMenuVs) - 1, "menu_cab_vs", "VSCab", "vs_5_0");   // phase 47
 }
 
 float RefHeight(int nRows) {
@@ -741,6 +823,65 @@ bool DrawWidget(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t 
     const float k = scale / g_wBuild;
     DrawQuad(ctx, rtv, rtW, rtH, x0, y0, (float)g_wTexW * k, (float)g_wTexH * k, outMode, g_wSrv.Get(), true);
     return true;
+}
+
+// phase 44: the fps box turned (fps_vr_yaw / pitch / roll) in the drawn-in VR fallback -- DrawCorners with the box's texture.
+bool DrawWidgetCorners(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, const float clip[4][4],
+                       float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2) {
+    if (!ctx || !rtv || !rtW || !rtH || !clip || !(buildScale > 0.0f)) return false;
+    for (int i = 0; i < 4; ++i) {
+        for (int k = 0; k < 4; ++k)
+            if (!std::isfinite(clip[i][k])) return false;
+        if (!(clip[i][3] > 0.0f)) return false;              // every corner in front of the eye
+    }
+    ComPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    if (!dev || !Ensure(dev.Get())) return false;
+    if (!EnsureWidgetTexture(dev.Get(), ctx, line1, line2, buildScale)) return false;
+    CbData cb{};
+    memcpy(cb.corner, clip, sizeof(cb.corner));
+    cb.opt[3] = 1.0f;                                        // the corners
+    DrawCb(ctx, rtv, rtW, rtH, cb, outMode, g_wSrv.Get(), true);
+    return true;
+}
+
+// phase 47: the fps box attached to the vehicle -- VSCab places `model` (4 model-space corners of the reference cab draw) with
+// that draw's MVP read on the GPU from `mirror` at `mvpByteOff` (see fps_cab.h). Texture / states as DrawWidget.
+bool DrawWidgetMvp(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, ID3D11ShaderResourceView* mirror,
+                   uint32_t mvpByteOff, const float model[4][4], const float map[4], float buildScale, int outMode,
+                   const wchar_t* line1, const wchar_t* line2) {
+    if (!ctx || !rtv || !rtW || !rtH || !mirror || !model || !map || !(buildScale > 0.0f) || (mvpByteOff & 3u)) return false;
+    for (int i = 0; i < 4; ++i)
+        for (int k = 0; k < 4; ++k)
+            if (!std::isfinite(model[i][k])) return false;
+    ComPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    if (!dev || !Ensure(dev.Get())) return false;
+    if (!g_vsCab) {
+        if (g_vsCabFailed || !ShaderCache::Ready(ShaderCache::kMenuCabVs)) return false;
+        size_t n = 0;
+        const void* code = ShaderCache::Code(ShaderCache::kMenuCabVs, &n);
+        HRESULT hr = E_FAIL;
+        if (!code || FAILED(hr = dev->CreateVertexShader(code, n, nullptr, &g_vsCab))) {
+            g_vsCabFailed = true;
+            LogErr("tuning menu: fps box (attached to vehicle) VS not available -- %s hr=0x%lx", code ? "CreateVertexShader failed"
+                   : ShaderCache::Error(ShaderCache::kMenuCabVs), (unsigned long)hr);
+            return false;
+        }
+    }
+    if (!EnsureWidgetTexture(dev.Get(), ctx, line1, line2, buildScale)) return false;
+    CbData cb{};
+    memcpy(cb.corner, model, sizeof(cb.corner));
+    cb.opt[3] = 1.0f;
+    cb.cab[0] = mvpByteOff;
+    memcpy(cb.map, map, sizeof(cb.map));
+    DrawCb(ctx, rtv, rtW, rtH, cb, outMode, g_wSrv.Get(), true, g_vsCab.Get(), mirror);
+    return true;
+}
+
+void SetWidgetColors(uint8_t tr, uint8_t tg, uint8_t tb, uint8_t lr, uint8_t lg, uint8_t lb) {
+    g_wText = RGB(tr, tg, tb);                               // the cache compares them (EnsureWidgetTexture): a change rebuilds once
+    g_wLine = RGB(lr, lg, lb);
 }
 
 void ReleaseWidget() {

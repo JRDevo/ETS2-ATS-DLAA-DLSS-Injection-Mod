@@ -46,6 +46,18 @@ jobs:
           if not exist build\tests\drawid_harness.exe exit /b 1
           call tests\build_lod_scope_test.bat
           if not exist build\tests\lod_scope_test.exe exit /b 1
+          call tests\build_mirror_turns_test.bat
+          if not exist build\tests\mirror_turns_test.exe exit /b 1
+          call tests\build_hidden_mask_test.bat
+          if not exist build\tests\hidden_mask_test.exe exit /b 1
+          call tests\build_fps_pose_test.bat
+          if not exist build\tests\fps_pose_test.exe exit /b 1
+          call tests\build_menu_shot.bat
+          if not exist build\tests\menu_shot.exe exit /b 1
+          call tests\build_flat_views_test.bat
+          if not exist build\tests\flat_views_test.exe exit /b 1
+          call tests\build_fps_cab_test.bat
+          if not exist build\tests\fps_cab_test.exe exit /b 1
 
       - name: Test draw-id harness (did_shadow off)
         run: build\tests\drawid_harness.exe -1 0.1
@@ -55,3 +67,20 @@ jobs:
 
       - name: Test LOD bias scope (inject.cpp without WITH_DLAA)
         run: build\tests\lod_scope_test.exe
+
+      - name: Test mirrors in turns (src/mirror_turns.h decisions)
+        run: build\tests\mirror_turns_test.exe
+      - name: Test VR hidden area mask (mapping, depth-only draw, state restore)
+        run: build\tests\hidden_mask_test.exe
+      - name: Test fps box pose (src/fps_pose.h colours, VR turn, distance shift)
+        run: build\tests\fps_pose_test.exe
+      - name: Test flat multi-view (src/flat_views.h layout, view index, confirm / drop, shared jitter phase)
+        run: build\tests\flat_views_test.exe
+      - name: Test fps box attached to the vehicle (src/fps_cab.h maths; DrawIdRecord + FpsCab + the VSCab draw, zero-lag cab sway)
+        run: build\tests\fps_cab_test.exe
+      - name: Smoke test menu_shot (renders the real tuning menu + fps box to PNG; outputs are not committed)
+        shell: cmd
+        run: |
+          build\tests\menu_shot.exe build\menu_shot_out
+          if errorlevel 1 exit /b 1
+          for %%f in (tuning-menu tuning-menu-vr-performance tuning-menu-picture fps-counter fps-counter-colours) do if not exist build\menu_shot_out\%%f.png exit /b 1

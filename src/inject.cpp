@@ -1,3 +1,52 @@
+// v0.12.0 -- phases 40-48 (below, newest first) + issue #12 flat multi-monitor (FlatViewCount / r_multimon_mode 2).
+// phase 47 -- FPS BOX "ATTACHED TO VEHICLE" (dlaa.ini fps_vr_lock = 2; the FPS counter lock row's 3rd value; src/fps_cab.h /
+//           fps_cab.cpp, menu.cpp VSCab / TuningMenu::DrawWidgetMvp). At each VR eye blit FpsCabBlit hands the pass's DrawIdRecord to
+//           FpsCab::OnBlit: a lock-on readback of the biggest cabin-layer draws' cb0 rows (+ the OpenXR poses) maps the play-space
+//           box (built as lock 1 builds it) into those draws' MODEL spaces; every frame the box is drawn into the eye picture
+//           (FpsCabDraw from MenuDrawVrOn) by a vertex shader that reads the reference draw's CURRENT MVP of that very pass from the
+//           record's GPU mirror -- zero lag, it sways with the cab. Lagged monitor readbacks drop moving parts (steering wheel) and
+//           measure the cab against the play space (level 4). No record / no cab draw (DLAA or per-part motion off, exterior camera,
+//           menus) = drawn as lock 1. Never a quad layer (MenuOverlaySet). docs/DEVELOPMENT.md phase 47; tests\fps_cab_test.cpp.
+//           47b: one attach decision per frame (FpsCab::Latch at Present, hysteresis 8 on / 3 of 8 off); a fixed frame is lock 1
+//           exactly (the quad with menu_vr_layer = 1), an attached frame the attached box or none; Get refuses a pass older than
+//           this frame's two (g_passSeq); a lock needs both eyes, poses and 72 steady blits.
+// phase 45 -- MENU COST COLUMN "CPU | GPU" + LIMIT LINE; MEASURING ONLY WHILE ASKED. The cost column shows CPU (blue) | GPU
+//           (orange) ms per frame per row (VR: GPU = both eyes; ink marks TuningMenu::kInkCpu / kInkGpu / kInkEnd, menu.cpp
+//           inkText); CPU from the cpu_prof.h profiler, now also on while the menu is open (MenuPerfOpen / MenuPerfClose,
+//           MenuCpuRead: the render thread's blocks, the profiler's own timer reads taken out). Perf line 0 = "Limit: headset /
+//           GPU / CPU / CPU and GPU / vsync / fps cap / unknown" (MenuLimit; XrHook::DisplayPeriodNs). g_measure (MeasureOn:
+//           menu open or log level 4) gates the legacy per-draw / per-pass CPU timers, GpuSpanTimer (s_on) and the per-Present
+//           TSC calibration; gpu_timing -1 = log level 4 (was: always in VR). The VR forward-depth budget guard keeps its timer
+//           while it can act. docs/DEVELOPMENT.md phase 45.
+// phase 44 -- FPS BOX COLOURS / VR DISTANCE / TURN (dlaa.ini fps_color 0..19, fps_vr_dist cm 30..300, fps_vr_yaw / fps_vr_pitch /
+//           fps_vr_roll degrees; fps_pose.h; menu rows "FPS colour", "FPS distance (VR)", "FPS turn", "FPS tilt", "FPS rotate", live,
+//           Shift+F12 saves, Reset removes). Quad layer: the fps quad at fps_vr_dist (same angle), turned by base * turn. Drawn
+//           in: the fixed box's anchor distance, the head-following box's extra stereo shift, the turn as a perspective quad
+//           (TuningMenu::DrawWidgetCorners). "Fixed in cab" renamed "Fixed in play space". Foveated size row = a 10..100 % scaler
+//           (vrs_outer, vrs_inner = max(10, outer - 25)). "Attached to truck" (fps_vr_lock = 2) investigated, not built then:
+//           docs/DEVELOPMENT.md phase 44 (built in phase 47). Test: tests\fps_pose_test.cpp.
+// phase 40 -- VR HIDDEN AREA MASK (dlaa.ini xr_hidden_mask, 0 default; menu row "Hidden area mask (VR)"; hidden_mask.h, xr_hook.h,
+//           the block above HmOnSceneClear). XrHook wraps the runtime's xrCreateInstance and adds XR_KHR_visibility_mask to a copy
+//           of the game's extension list when the runtime offers it (only when xr_hidden_mask = 1 at the game's start), fetches the
+//           HIDDEN triangle mesh per view at the game's xrEndFrame (again after a mask-changed event, which the game never sees).
+//           Right after the game clears an eye scene depth that starts a world pass, the mesh -- mapped to the picture's NDC with
+//           the fov the game submits for that view -- is drawn depth-only at the NEAREST value (1.0: reversed Z, the clear is 0.0),
+//           so every game pass rejects those pixels early. Eye = the VRS sources (certain only), eye -> view = the swapchain image
+//           of its blit, checked against the eye's measured optical centre / projection scale; anything unknown = no mask.
+//           Log: "hidden area mask:" lines (enable / meshes / eye checks / FIRST mask), "hidden area mask @" every 10 s at level 4.
+//           CPU profiler row "hmask". Test: tests\hidden_mask_test.cpp (WARP).
+// phase 42 -- VRS ON MORE PASSES (dlaa.ini vrs_passes, 0 default; menu row "Foveated passes": scene / scene + lighting, live,
+//           Shift+F12 saves, Reset removes). The game's per-eye work at eye size (ATS flat trace + the phase 36 "GPU per pass"
+//           lines of captures/ats_2026-10-11_p37_vr.log, ms per frame for both eyes at 4592 x 6496): shadow maps 0-1.9 (depth only:
+//           nothing to shade), G-buffer 2.1-3.3 and forward 2.2-4.1 (VRS since phase 34; the forward bind also holds the fog
+//           triangle, sky, transparents and particles), LIGHTING 1.8-3.6 (2 RTV RGBA16F scene size on the scene depth: a full-screen
+//           sun / ambient / shadow triangle + light volumes), post 0.9-2.3 (bloom chain at 1/4 size and smaller, the HDR composite,
+//           the tonemap / eye blit = the DLAA input: never coarse), mirrors (never), UI / menus (never). vrs_passes = 1 adds the
+//           lighting bind (VrsIsLightingBind: exact shape, inside the lighting stage = after a world G-buffer bind and before the
+//           forward bind of the same pass, no mirror view open, not a preview pass) with an OUTER-ONLY table (middle ring 1 x 1
+//           even at vrs_quality 0; outer 2 x 2, 2 x 1 while DLSS upscales from below 75 %). Same eye logic (VrsDecideEye), same
+//           per-draw rule and mod-work pause. Log level 4: "VRS passes @" line every 10 s = binds / coarse-capable / full-rate
+//           draws per frame for G-buffer, forward and lighting + lighting-stage binds that did not match the shape.
 // v0.11.0 -- issue #8 OPTISCALER: DetectOptiScaler (startup) looks for OptiScaler.ini / .log / .asi / folder or nvngx_dlssnr.dll next
 //           to the game exe; found = mirror DLAA starts OFF unless dlaa.ini sets mirror_dlaa (its DLSS 5 "Neural Rendering" DX12
 //           bridge loses the device on the small HDR mirror DLSS frames, the picture freezes). Alt+F6 / mirror_dlaa = 1 still force
@@ -669,6 +718,7 @@
 #include <cstring>
 #include <mutex>
 #include <new>
+#include <initializer_list>                         // phase 45: MenuCpuOf
 #include <string>
 #include <vector>
 #include <intrin.h>
@@ -677,6 +727,7 @@
 #include "dinput_wrap.h"                           // v0.10.0 tuning menu: its keys are hidden from the game while open
 #include "ofxr.h"                                  // v0.10.0 OFXR Bridge module-range pass-through
 #include "xr_hook.h"                               // v0.10.3 phase 27: OpenXR xrReleaseSwapchainImage (VR panel draw point)
+#include "fps_pose.h"                              // phase 44: fps box colours, VR distance, turn (pure maths)
 #ifdef WITH_DLAA
 #include "scene_dlaa.h"
 #include "preview_blit.h"
@@ -685,9 +736,13 @@
 #include "dlaa_stage.h"
 #include "gpu_perf.h"
 #include "gpu_pass.h"                                // phase 36: GPU time per pass type (measurement only)
+#include "mirror_turns.h"                            // phase 41: mirrors in turns (mirror_turns; pure decisions)
 #include "vrs.h"                                    // phase 34: VRS fixed foveated rendering (NVAPI; VR world scene only)
+#include "hidden_mask.h"                            // phase 40: VR hidden area mask (XR_KHR_visibility_mask into the eye depth)
+#include "fps_cab.h"                                // phase 47: the VR fps box attached to the vehicle (GPU-placed from a cab draw)
 #endif
 #include "cpu_pin.h"                                // phase 32: keep the game on the V-Cache cores (cpu_cache_pin; both builds)
+#include "flat_views.h"                             // v0.12.0 issue #12: flat multi-view (multi-monitor) detection (both builds)
 
 namespace {
 
@@ -748,6 +803,13 @@ int      g_menuVrLayer = 1;
 // switches it live (takes effect at the next xrEndFrame).
 int      g_xrTurbo = 0;
 bool     g_xrTurboExplicit = false;      // set in dlaa.ini or changed in the menu -> SaveSettings writes xr_turbo
+// phase 40, VR: dlaa.ini xr_hidden_mask -- 1 = HIDDEN AREA MASK (hidden_mask.h, xr_hook.h, the block above HmOnSceneClear): the
+// lens corners the runtime reports as never visible (XR_KHR_visibility_mask) are filled into each eye's scene depth at the nearest
+// depth right after the game clears it, so the game shades nothing there. Default 0. The OpenXR extension is only requested at the
+// game's xrCreateInstance when it is 1 at the start (g_xrHiddenMaskAtStart); after that the menu row switches it live.
+int      g_xrHiddenMask = 0;
+bool     g_xrHiddenMaskExplicit = false; // set in dlaa.ini or changed in the menu -> SaveSettings writes xr_hidden_mask
+int      g_xrHiddenMaskAtStart = 0;
 // phase 39: LOG LEVELS (log.h) -- dlaa.ini log_level (0 off, 1 errors = default, 2 warnings, 3 info, 4 debug), debug = 1 without a
 // log_level key = 4. LoadConfig reads both keys with log.h's LogParseLevel / LogParseOn (log.h reads the same dlaa.ini at the
 // first Log call: both agree); the menu's Logging row changes the level live (StepLogLevel), SaveSettings writes log_level once
@@ -757,6 +819,23 @@ bool     g_logDebugKey = false;          // dlaa.ini debug = 1 (true / yes / on)
 int      g_logLevelIni = 1;              // the start level LoadConfig decided
 bool     g_logLevelExplicit = false;     // set in dlaa.ini or changed in the menu -> SaveSettings writes log_level
 inline bool LogDebugLevel() { return LogLevel() >= 4; }   // phase 39: the "debug = 1" diagnostics (was g_debugIni)
+// phase 45: MEASURE ONLY WHEN ASKED. g_measure = the tuning menu is open OR the log level is 4 (debug). The mod's own per-draw /
+// per-pass CPU timers of the debug statistics lines (collector, object ids, draw record, forward depth: TSC; replay, forward
+// replay, forward batch, blit: QPC) read the clock only while it is set -- menu closed below level 4 = ONE relaxed load + a
+// not-taken branch per timed scope, no clock read. The same flag gates the per-pass GPU span timers (draw_ids.h GpuSpanTimer:
+// replay, forward replay, pairing, pass B, mirror units, forward batch -- the last one stays on while the VR forward-depth budget
+// guard can still act: a feature, not a statistic) and the preview depth-assembly timer. The CPU profiler (cpu_prof.h g_on) and the GPU timers (GpuPerf / GpuPass,
+// the whole-frame spans, gpu_timing -1) have their own flags with the same rule (MenuPerfOpen / MenuPerfClose /
+// ApplyLogLevelGates). MeasureUpdate: at the start, the menu's open / close, a log level change.
+std::atomic<bool> g_measure{false};
+inline bool MeasureOn() { return g_measure.load(std::memory_order_relaxed); }
+inline void MeasureUpdate() {
+    const bool on = g_menuOpen.load(std::memory_order_relaxed) || LogDebugLevel();
+    g_measure.store(on, std::memory_order_relaxed);
+#ifdef WITH_DLAA
+    GpuSpanTimer::s_on.store(on, std::memory_order_relaxed);   // the per-pass GPU span timers (replays, pairing, pass B, mirrors)
+#endif
+}
 // phase 34, VR: dlaa.ini vrs -- 1 = FIXED FOVEATED RENDERING (NVIDIA VRS, vrs.cpp): the eye's world scene passes shade the outer
 // ring of the picture once per 2 x 2 pixels. vrs_inner / vrs_outer = ring radii in % of the NDC half-size around the eye's optical
 // centre; vrs_quality 1 (default) = 1 x 1 inside vrs_outer, 0 = 2 x 1 between the radii; vrs_debug (+ debug = 1) = 2 x 2 / 4 x 4
@@ -767,6 +846,12 @@ int      g_vrsInner = 55, g_vrsOuter = 80;
 int      g_vrsQuality = 1;
 int      g_vrsDebug = 0;
 bool     g_vrsExplicit = false;          // set in dlaa.ini or changed in the menu -> SaveSettings writes vrs / vrs_inner / vrs_outer
+// phase 42: dlaa.ini vrs_passes -- 0 (default) = VRS on the world scene binds only (G-buffer + main forward, phase 34); 1 = + the
+// eye's deferred LIGHTING bind (2 RTV RGBA16F scene size + scene depth, between the G-buffer and the forward bind), outer ring
+// only. The menu's Foveated passes row switches it live; SaveSettings writes it once explicit (own flag: a saved 0 is not written
+// just because another Foveated row was touched).
+int      g_vrsPasses = 0;
+bool     g_vrsPassesExplicit = false;
 // phase 32: dlaa.ini cpu_cache_pin -- 0 (default) = never touch the affinity; 1 = on a CPU whose L3 caches differ in size (AMD X3D: V-Cache on one CCD only)
 // the process affinity is set to the logical processors of the biggest L3, once at startup (cpu_pin.h). Opt-in: no gain was measured.
 // Startup only: no menu row, so SaveSettings / ResetSettings have nothing to write or remove (the key stays as the user left it).
@@ -788,8 +873,18 @@ float    g_fpsVrScale = kFpsVrScaleDefault;
 // optical centre, as before), 1 = FIXED IN THE CAB: a point 0.8 m from the origin of the game's OpenXR reference space, in the
 // direction yaw = fps_vr_x degrees (+ right), pitch = -fps_vr_y degrees (fps_vr_y + = down, as the head-locked %), projected
 // into each eye picture with that eye's located pose + fov (FpsVrLockedPlace; XrHook::LatestViews).
+// Phase 47: 2 = ATTACHED TO THE VEHICLE -- drawn into each eye picture and placed on the GPU from a cab draw's MVP of that very
+// picture (src/fps_cab.h, FpsCabDraw); no quad layer; no cab draw / no draw record = drawn as 1 until there is one.
 int      g_fpsVrLock = 0;
-bool     g_fpsExplicit = false;          // an fps_* value was changed in the menu -> SaveSettings writes the 8 fps_* keys
+// phase 44: dlaa.ini fps_color (0..19, FpsPose::ColorOf: 0 = white = the colour before phase 44), fps_vr_dist (cm 30..300, 80 =
+// the phase 28 0.8 m: the quad's distance in both lock modes, the drawn-in fixed box's anchor distance, the drawn-in
+// head-following box's extra stereo shift), fps_vr_yaw / fps_vr_pitch / fps_vr_roll (degrees: the VR box's own turn on top of
+// its normal facing; FpsPose::TurnQuat). The menu's FPS colour / distance / turn / tilt / rotate rows; saved with the fps_* keys.
+int      g_fpsColor = 0;
+int      g_fpsBright = FpsPose::kBrightDefault;   // phase 48: dlaa.ini fps_brightness 10..100 % (the colour * pct / 100)
+int      g_fpsVrDist = FpsPose::kDistDefault;
+int      g_fpsVrYaw = 0, g_fpsVrPitch = 0, g_fpsVrRoll = 0;
+bool     g_fpsExplicit = false;          // an fps_* value was changed in the menu -> SaveSettings writes the 13 fps_* keys
 int      g_menuBlitEye = -1;             // VR: the eye blit this Draw is (HandlePossibleBlit), drawn on after it (hkDraw)
 void*    g_menuBlitRt  = nullptr;        // ... and its render target (identity only)
 // v0.10.0 phase 16 VR LATE PANEL (see that block after MenuDrawPreview): the panel / fps box go LAST onto each eye picture.
@@ -1897,7 +1992,12 @@ bool             g_hdrCompLogged = false;        // "HDR scene composite recogni
 uint64_t         g_hdrBlitCount = 0;             // matched HDR blits (log / triage only)
 bool             g_dlaaDisabled = false;        // dlaa_off.txt next to our DLL (start state = OFF)
 constexpr int    kMaxEyes = 2;
-uint64_t         g_dlaaFrames[kMaxEyes] = {};    // frames DLAA actually ran OK, per eye
+// v0.12.0 issue #12: per-VIEW state (the DLAA units and what belongs to one unit's history) is kMaxViews big: VR uses views 0..1
+// (= the eyes, unchanged), flat multi-view (multi-monitor, flat_views.h) 0..min(N, 8)-1, normal flat 0. Everything VR-only (eye map,
+// optical centres, hidden mask, VRS, menu eye pictures) keeps kMaxEyes.
+constexpr int    kMaxViews = FlatViews::kMaxViews;
+static_assert(kMaxViews >= kMaxEyes, "the per-view arrays hold both VR eyes");
+uint64_t         g_dlaaFrames[kMaxViews] = {};   // frames DLAA actually ran OK, per eye / view
 // Re-entrancy guard for our own work. phase 34: a flag TYPE (reads as a bool exactly as before) whose writes tell VRS when the
 // mod's own work starts / ends on this thread: inside the eye's world scene bracket (Vrs::g_want) the shading-rate table is
 // switched off for every pass of ours (draw-id replay, forward depth, snapshots, NGX, composite, menu, ...) and back on after.
@@ -1926,10 +2026,11 @@ struct EyeRecState {
     int      badRun = 0;             // consecutive bad records since
     uint64_t gen = 0;                // CameraMv::InvalidateCount() when last-good was taken
 };
-EyeRecState      g_eyeRec[kMaxEyes];
+EyeRecState      g_eyeRec[kMaxViews];            // v0.12.0 issue #12: per view
 constexpr int    kBadRunMax      = 2;            // the 3rd bad record in a row is accepted as the new baseline
 #ifdef WITH_DLAA
-SceneDlaa        g_dlaa[kMaxEyes];               // one per eye (flat uses [0] only)
+SceneDlaa        g_dlaa[kMaxViews];              // one per eye (VR) / view (v0.12.0 issue #12: flat multi-view); flat: [0]
+static_assert(GpuPerf::kViews == kMaxViews, "v0.12.0 issue #12: GpuPerf keeps statistics for every view");
 bool             g_ngxEverReady = false;         // v0.10.0: an NGX feature (DLAA / DLSS) has existed at some point in this session (sticky;
                                                  // set from the periodic Present line's ngx-feature test and the tuning menu's snapshots)
 // v0.7.0 upscale composite, armed by HandlePossibleBlit (Run succeeded in upscale mode), executed by hkDraw right
@@ -1965,11 +2066,21 @@ struct PassSlot {
     uint64_t s = 0;                  // pass sequence number
     float    jx = 0.0f, jy = 0.0f;   // viewport shift this pass was rasterized with (0 when jitter disabled)
     int      phase = 0;
+    bool     rastSeen = false;       // v0.12.0 issue #12 round 4: the first G-buffer draw of this pass was checked: rasterized with
+    bool     rastShifted = false;    //   a shifted viewport? by (rastJx, rastJy) px (g_vpShiftX / Y at that draw) -- vs jx / jy above
+    float    rastJx = 0.0f, rastJy = 0.0f;
     bool     snap = false;           // scene depth of this pass was snapshotted into twin
     bool     consumed = true;
     bool     discarded = false;      // a Discard* of the scene depth was seen since this pass started
     ID3D11Texture2D* depth = nullptr;   // v0.10.3 issue #9: g_sceneDepth at StartPass = this pass's scene depth (identity, no
                                         // ref; read through PassDepth, which falls back to g_sceneDepth once it is released)
+    uint64_t frameN = 0;             // v0.12.0 issue #12 round 5: the Present counter at this pass's start ...
+    int      framePos = -1;          //   ... and its position among the world passes of that frame (0 = first after the Present)
+    const void* toneRt = nullptr;    //   the LDR RT the tonemap of this pass's forward colour wrote (identity; the blit that samples it
+                                     //   takes this pass -- flat multi-view pairing), nullptr = none yet
+    int      pickHow = 0;            //   how its blit found it (FlatViews::PickHow; logs)
+    int      predView = -1;          // v0.12.0 issue #12: flat multi-view: the view this pass is expected to belong to at StartPass
+                                     // (round 5: framePos -> the learned permutation -> the blit order); -1 = unknown / not multi-view
     int      pre = 0;                // v0.10.0 phase 4: 1 = DLAA ran before the tonemap (in place on the forward colour), 2 =
                                      // tried there but deferred / failed (v0.10.0 phase 7: the blit unit takes it), 0 = blit path
 #ifdef WITH_DLAA
@@ -2022,7 +2133,16 @@ struct PassSlot {
         tStart = now;
     }
 };
-constexpr int    kRing           = 4;
+// v0.12.0 issue #12: the ring is kRing slots BIG but only g_ringN of them are USED (pass s -> slot (s - g_ringBase) % g_ringN, SlotOf):
+// 4 as before in VR / single-view flat (every used slot lazily keeps per-slot GPU buffers -- the draw-id cbuffer mirrors -- so
+// the slot count must not grow there), N views + 1 while flat multi-view is confirmed / being confirmed (all N passes may be
+// drawn before their blits). SetRingSize switches only with no pass outstanding and keeps the newest pass in its slot (base).
+constexpr int    kRingBase       = 4;
+constexpr int    kRing           = FlatViews::kMaxBlits + 1;
+static_assert(FlatViews::kMaxBlits < kRing && kRingBase <= kRing, "N outstanding passes + the newest one fit the ring");
+int              g_ringN         = kRingBase;
+uint64_t         g_ringBase      = 0;
+inline size_t SlotOf(uint64_t s) { return (size_t)((s - g_ringBase) % (uint64_t)g_ringN); }
 PassSlot         g_ring[kRing];
 // v0.10.3 issue #9: the scene depth pass s was drawn on -- its own while it is still the scene depth or an alias (per-eye depths:
 // the other eye's pass may have switched g_sceneDepth since), else g_sceneDepth (single depth: always the same texture).
@@ -2053,7 +2173,7 @@ uint32_t         g_didOnLogs = 0;               // "MV draw-ids: ACTIVE / inacti
 int              g_perfCfg = -1;                // dlaa.ini perf_timers: -1 = on with debug = 1 (default), 0 off, 1 on
                                                 // (phase 39: -1 = on at log level 4, live; g_debugIni is gone, LogDebugLevel)
 uint8_t          g_medoidDropBits = 0;          // layers whose camera candidates the next passes skip (mv_medoid_drop)
-uint8_t          g_eyeDropBits[2] = {};         // per eye (VR: both eyes must agree)
+uint8_t          g_eyeDropBits[kMaxViews] = {}; // per eye (VR: both eyes must agree) / view (v0.12.0 issue #12: all views)
 uint64_t         g_cMedoidSaved = 0, g_cMedoidPasses = 0, g_cMedoidPassW = 0, g_cMedoidPassC = 0;   // stats window
 int              g_mirVrMode = 2;               // dlaa.ini mirror_vr_mode (VR only): 0 off, 1 every mirror view, 2 only the
                                                 // largest views (the main mirrors), 3 each unit every 2nd frame (held between)
@@ -2066,7 +2186,11 @@ bool             g_mirCamOnly = false;          // v0.10.2: dlaa.ini mirror_mv (
                                                 // views modes 1 / 2 / 3 handle use camera motion vectors only (no per-draw ids,
                                                 // as mode 4); one key for VR and flat (as mirror_vr_views). MirIdsOff()
 int MirMode();                                 // v0.10.0 phase 10: the mirror mode in force (VR: mirror_vr_mode, flat: _flat_)
-uint64_t         g_mirVrSkip = 0, g_mirAltHeld = 0, g_mirAltRaw = 0;   // stats window (mirror_vr_mode 2 / 3)
+uint64_t         g_mirVrSkip = 0, g_mirAltHeld = 0, g_mirAltRaw = 0;   // stats window (mirror_vr_mode 2 / 3; phase 41: + turns)
+int              g_mirTurns = 0;                // phase 41: dlaa.ini mirror_turns (0 = off, 1 = each mirror every 2nd frame,
+                                                // its last DLAA picture in between; mirror_turns.h). The menu row sets it live
+bool             g_mirTurnsExplicit = false;    // set in dlaa.ini or changed in the menu -> SaveSettings writes mirror_turns
+void MirTurnsNoteCut(int why);                  // phase 41: a camera cut -> every mirror unit runs this frame and the next
 bool             g_slotPool = true;             // dlaa.ini mv_slot_pool: pass-slot depth twin / forward depth / draw-id
                                                 // textures go back to a shared pool when their pass is consumed
 // v0.10.0 phase 9 VR cost (the "phase 9 (v0.10.0)" config line, the "perf view" line)
@@ -2081,6 +2205,7 @@ D3D11_RECT       g_p9LastClip = { 0, 0, 0, 0 }; // the last clipped pass's rect 
 bool             g_p9ClipLogged = false, g_p9HalfLogged = false;
 extern bool      g_fwdSkipArm;                  // v0.10.0 phase 5: Alt+F8 also logs one pass of skipped forward draws
 void DidOnLeave(ID3D11DeviceContext* ctx);
+void FpsCabBlit(ID3D11DeviceContext* ctx, int eye, DrawIdRecord& rec, uint64_t serial, uint64_t frame);   // phase 47
 void DidOnPassStart(ID3D11DeviceContext* ctx, uint64_t s);
 void DidOnDepthDiscard(ID3D11DeviceContext* ctx);
 void DidOnDiscardMap(ID3D11DeviceContext* ctx, ID3D11Resource* r);
@@ -2158,9 +2283,48 @@ uint64_t         g_cSnapUsed = 0, g_cLiveUsed = 0, g_cUnderflow = 0, g_cOverflow
 uint64_t         g_cSnapAtDiscard = 0, g_cSnapAtClear = 0, g_cDiscardNoSnap = 0, g_cDiscardSeen = 0;
 uint64_t         g_cSnapAtLeave = 0;             // v0.10.0 phase 7: snapshots taken at a pass's forward leave (before its discard)
 bool             g_depthDirty    = false;        // G-buffer rendered into the scene depth since its last clear
-bool             g_eyeLogged[kMaxEyes] = {};     // "eye blit detected" logged per eye
+bool             g_eyeLogged[kMaxViews] = {};    // "eye blit detected" logged per eye / view (v0.12.0 issue #12)
 bool             g_flatMode      = false;        // a blit with RT0 == DXGI backbuffer was seen (flat, 1 eye)
 bool             g_vrMode        = false;        // a blit into a non-backbuffer RT was seen
+// ---- v0.12.0 issue #12: FLAT MULTI-VIEW (multi-monitor; the WHY / HOW is in flat_views.h) -------------------------------------------
+// dlaa.ini flat_multiview (startup only): 1 (default) = detect several non-overlapping backbuffer blits per Present (r_multimon_mode 2)
+// and give every view (up to kMaxViews) its own DLAA unit; 0 = the v0.11 behaviour EXACTLY (every backbuffer blit is eye 0, no detection, pass FIFO
+// depth 2) -- the kill switch if the detection ever misfires on a single screen.
+int              g_flatMvCfg     = 1;
+FlatViews::Detector g_fv;                        // render thread: OnBlit at each matched flat backbuffer blit, OnPresent per Present
+int              g_fvPhaseOff    = 0;            // (round 5: unused for the phase -- it is (s - framePos) / n now; kept 0 for the logs)
+int              g_fvPassInFrame = 0;            // round 5: world passes started since the last Present (PassSlot::framePos)
+FlatViews::PermLearner g_fvPerm;                 // round 5: blit index -> pass position of the frame, learned from linked blits
+uint64_t         g_fvPickLink = 0, g_fvPickPerm = 0, g_fvPickFifo = 0;   // round 5: how flat multi-view blits found their pass
+uint64_t         g_fvToneMismatch = 0, g_fvToneNone = 0;   // round 5 check: the pass a blit took was tonemapped into ANOTHER RT than
+                                                 // the blit samples (colour of one camera, depth / MVs of another) / into none
+uint64_t         g_fvTonemaps = 0, g_fvToneUnlinked = 0;   // round 5: tonemap draws linked to a pass / with no pass of that forward colour
+uint64_t         g_fvPhaseFlips  = 0;            // offset corrections (first 8 logged)
+uint64_t         g_fvSkipped     = 0;            // blits whose viewport is not in the confirmed layout (DLAA left alone; total)
+uint64_t         g_fvOrderLogs   = 0;            // "blit order changed" lines written (cap)
+uint64_t         g_fvPredMiss    = 0;            // round 3: passes whose StartPass view prediction (PassSlot::predView) was not the
+uint64_t         g_fvPredN       = 0;            //   view that consumed it / passes checked (total; the per-view stats line)
+int              g_fvJitLogLeft  = 0;            // round 3: one-shot "flat multi-view jitter" lines (armed at the confirm: 2 frames)
+// views per frame of the CURRENT mode: VR 2 (the eyes), flat multi-view N (confirmed), else 1. Divides blits -> frames.
+inline int FlatViewCount() { return g_flatMode && g_flatMvCfg ? g_fv.Views() : 1; }
+inline int ViewCount() { return g_vrMode ? 2 : FlatViewCount(); }
+// ... of them with their own DLAA unit (per-view arrays are kMaxViews big; views past the cap pass through untouched)
+inline int FlatDlaaViewCount() { return g_flatMode && g_flatMvCfg ? g_fv.DlaaViews() : 1; }
+// log text: " v0 (x,y) wxh, v1 ..." of a layout / "1 0 2" = the view of blit 0, 1, ... (sizes are free: equal widths not assumed)
+void FvLayoutStr(char* buf, size_t cap, const FlatViews::Layout& L) {
+    int o = 0;
+    buf[0] = 0;
+    for (int v = 0; v < L.n && o >= 0 && o < (int)cap; ++v)
+        o += snprintf(buf + o, cap - (size_t)o, "%s view %d = (%d,%d) %dx%d%s", v ? "," : "", v, L.v[v].x, L.v[v].y, L.v[v].w, L.v[v].h,
+                      v >= FlatViews::kMaxViews ? " [past the cap: untouched]" : "");
+}
+void FvOrderStr(char* buf, size_t cap, const FlatViews::Layout& L) {
+    int o = 0;
+    buf[0] = 0;
+    for (int k = 0; k < L.n && o >= 0 && o < (int)cap; ++k) o += snprintf(buf + o, cap - (size_t)o, "%s%d", k ? " " : "", L.order[k]);
+}
+// flat multi-view confirmed or being confirmed: the single-view-only paths (pre-tonemap on unit 0) stay off, the FIFO holds N
+inline bool FlatMvSeen() { return g_flatMode && g_flatMvCfg && g_fv.MultiSeen(); }
 // v0.7.4: mode from the game's launch options, set once at load: 1 = VR (-openvr / -openxr / -oculus on the
 // command line), 0 = flat. Flat: dlaa_area is forced to 100 (outside the area the picture is the raw jittered
 // frame, which flickers on a monitor); g_vrArea keeps the dlaa.ini value so a save in flat does not lose it.
@@ -2187,8 +2351,8 @@ EyeMapEntry      g_eyeMap[kEyeMapCap];
 int              g_eyeMapN       = 0;
 bool             g_eyeMapLogged  = false;
 uint64_t         g_cRtParityMismatch = 0;        // same RT arrived with the opposite pair index
-uint64_t         g_rReads[kMaxEyes] = {};        // R_world readbacks per eye
-uint64_t         g_rBig[kMaxEyes]   = {};        // ... with |R[0][3]| > 0.25 (wrong-eye pairing signature; expect ~0)
+uint64_t         g_rReads[kMaxViews] = {};       // R_world readbacks per eye / view (v0.12.0 issue #12)
+uint64_t         g_rBig[kMaxViews]   = {};        // ... with |R[0][3]| > 0.25 (wrong-eye pairing signature; expect ~0)
 uint64_t         g_snapCount     = 0;            // total depth snapshots taken
 // ---- v0.5.5 eye verdict from the pass's projection (async MVP readback) ----------------------------------
 uint64_t         g_cVerdicts     = 0;            // readbacks that arrived and were evaluated
@@ -2597,7 +2761,7 @@ bool PathNextToDll(const wchar_t* name, wchar_t* path);   // defined below
 // v0.10.0 (Reset row): an entry with an EMPTY val ("") means "remove this key": every matching line is dropped (not replaced), and
 // the key is never appended. A missing file with only removals is left missing (nothing to write).
 // Returns true only if the temp was fully written AND the replace succeeded.
-constexpr int kIniMaxKeys = 40;                    // v0.10.3 phase 28: WriteIniPreserving's key cap (was 32)
+constexpr int kIniMaxKeys = 56;                    // v0.10.3 phase 28: WriteIniPreserving's key cap (was 32; phase 44: 48 -> 56)
 struct IniKV { const char* key; char val[48]; };   // val[0] == 0: delete the key's line(s) (WriteIniPreserving)
                                                    // (v0.10.2: was 32 -- "Ctrl+Shift+Alt+NumpadSubtract, Wheel128" is 39)
 bool WriteIniPreserving(const IniKV* kv, int nkv) {
@@ -2699,6 +2863,7 @@ void SaveSettings(uint64_t n) {
                                                           // phase 30: + xr_turbo = 33
                                                           // phase 34: + vrs / vrs_inner / vrs_outer = 36
                                                           // phase 39: + log_level = 37
+                                                          // phase 41: + mirror_turns = 38
     int nkv = 0;
     auto add = [&](const char* k) -> char* { kv[nkv].key = k; return kv[nkv++].val; };
     if (g_profExplicit[PK_PRESET]) snprintf(add("dlss_preset"), sizeof(kv[0].val), "%s", preset);
@@ -2722,6 +2887,7 @@ void SaveSettings(uint64_t n) {
     // v0.10.2: mirror_mv (parts / camera, one key for both kinds) with either mode (the row sets it with the mode it shows)
     const bool mirMvW = mirVrW || mirFlatW;
     if (mirMvW) snprintf(add("mirror_mv"), sizeof(kv[0].val), "%s", g_mirCamOnly ? "camera" : "parts");
+    if (g_mirTurnsExplicit) snprintf(add("mirror_turns"), sizeof(kv[0].val), "%d", g_mirTurns);   // phase 41 (Mirrors in turns row)
     snprintf(add("dlaa_pre_tonemap"), sizeof(kv[0].val), "%d", preTm);
     snprintf(add("perf_profile"), sizeof(kv[0].val), "%s", kProfName[g_profile]);
     if (g_menuExplicit) {                                 // v0.10.0 tuning menu: the panel placement, only once changed in the menu
@@ -2744,16 +2910,32 @@ void SaveSettings(uint64_t n) {
         snprintf(add("fps_vr_y"), sizeof(kv[0].val), "%d", g_fpsVrY);
         snprintf(add("fps_vr_scale"), sizeof(kv[0].val), "%.1f", (double)g_fpsVrScale);
         snprintf(add("fps_vr_lock"), sizeof(kv[0].val), "%d", g_fpsVrLock);   // v0.10.3 phase 28
+        snprintf(add("fps_color"), sizeof(kv[0].val), "%d", g_fpsColor);      // phase 44
+        snprintf(add("fps_brightness"), sizeof(kv[0].val), "%d", g_fpsBright);   // phase 48
+        snprintf(add("fps_vr_dist"), sizeof(kv[0].val), "%d", g_fpsVrDist);
+        snprintf(add("fps_vr_yaw"), sizeof(kv[0].val), "%d", g_fpsVrYaw);
+        snprintf(add("fps_vr_pitch"), sizeof(kv[0].val), "%d", g_fpsVrPitch);
+        snprintf(add("fps_vr_roll"), sizeof(kv[0].val), "%d", g_fpsVrRoll);
     }
     if (g_xrTurboExplicit) snprintf(add("xr_turbo"), sizeof(kv[0].val), "%d", g_xrTurbo);   // phase 30 (Turbo mode row)
+    if (g_xrHiddenMaskExplicit) snprintf(add("xr_hidden_mask"), sizeof(kv[0].val), "%d", g_xrHiddenMask);   // phase 40
     if (g_logLevelExplicit) snprintf(add("log_level"), sizeof(kv[0].val), "%d", LogLevel());  // phase 39 (Logging row)
     if (g_vrsExplicit) {                                  // phase 34 (the Foveated rows)
         snprintf(add("vrs"), sizeof(kv[0].val), "%d", g_vrsOn);
         snprintf(add("vrs_inner"), sizeof(kv[0].val), "%d", g_vrsInner);
         snprintf(add("vrs_outer"), sizeof(kv[0].val), "%d", g_vrsOuter);
     }
-    char vrsW[80] = "";                                   // (phase 39: was 64, + log_level)
+    if (g_vrsPassesExplicit) snprintf(add("vrs_passes"), sizeof(kv[0].val), "%d", g_vrsPasses);   // phase 42 (Foveated passes)
+    char vrsW[128] = "";                                  // (phase 39: was 64, + log_level; phase 40: + xr_hidden_mask; phase 42: + vrs_passes)
     if (g_vrsExplicit) snprintf(vrsW, sizeof(vrsW), " vrs=%d vrs_inner=%d vrs_outer=%d", g_vrsOn, g_vrsInner, g_vrsOuter);
+    if (g_xrHiddenMaskExplicit) {
+        const size_t vl = strlen(vrsW);
+        snprintf(vrsW + vl, sizeof(vrsW) - vl, " xr_hidden_mask=%d", g_xrHiddenMask);
+    }
+    if (g_vrsPassesExplicit) {
+        const size_t vl = strlen(vrsW);
+        snprintf(vrsW + vl, sizeof(vrsW) - vl, " vrs_passes=%d", g_vrsPasses);
+    }
     if (g_logLevelExplicit) {
         const size_t vl = strlen(vrsW);
         snprintf(vrsW + vl, sizeof(vrsW) - vl, " log_level=%d", LogLevel());
@@ -2763,21 +2945,24 @@ void SaveSettings(uint64_t n) {
         snprintf(menuW, sizeof(menuW), " -- menu panel: menu_x=%d menu_y=%d menu_scale=%.1f menu_vr_x=%d menu_vr_y=%d menu_vr_scale=%.1f "
                  "menu_vr_depth=%d menu_vr_dist=%d menu_vr_face=%d", g_menuX, g_menuY, (double)g_menuScale, g_menuVrX, g_menuVrY,
                  (double)g_menuVrScale, g_menuVrDepth, g_menuVrDist, g_menuVrFace);
-    char fpsW[160] = "";
+    char fpsW[320] = "";                                  // (phase 44: was 160, + fps_color / fps_vr_dist / the turn)
     if (g_fpsExplicit)
         snprintf(fpsW, sizeof(fpsW), " -- fps box: fps_show=%d fps_x=%d fps_y=%d fps_scale=%.1f fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f "
-                 "fps_vr_lock=%d", g_fpsShow ? 1 : 0, g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY, (double)g_fpsVrScale,
-                 g_fpsVrLock);
+                 "fps_vr_lock=%d fps_color=%d (%ls) fps_brightness=%d fps_vr_dist=%d fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d", g_fpsShow ? 1 : 0,
+                 g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY, (double)g_fpsVrScale, g_fpsVrLock, g_fpsColor,
+                 FpsPose::ColorOf(g_fpsColor).name, g_fpsBright, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll);
     char notW[128];
     snprintf(notW, sizeof(notW), "%s%s%s%s%s", g_profExplicit[PK_PRESET] ? "" : " dlss_preset", g_profExplicit[PK_AREA] ? "" : " dlaa_area",
              g_profExplicit[PK_MIRROR_DLAA] ? "" : " mirror_dlaa", mirVrW ? "" : " mirror_vr_mode", mirFlatW ? "" : " mirror_flat_mode");
-    char mirW[128] = "";                                  // v0.10.2: the mirror modes written (the menu's Mirror DLAA row)
+    char mirW[160] = "";                                  // v0.10.2: the mirror modes written (the menu's Mirror DLAA row; phase 41: 128 -> 160)
     {
         int o = 0;
         if (mirVrW) o += snprintf(mirW + o, sizeof(mirW) - (size_t)o, " mirror_vr_mode=%d", g_mirVrMode);
         if (mirFlatW) o += snprintf(mirW + o, sizeof(mirW) - (size_t)o, " mirror_flat_mode=%d", g_mirFlatMode);
         if (mirViewsW) o += snprintf(mirW + o, sizeof(mirW) - (size_t)o, " mirror_vr_views=%d", g_mirVrViews);
-        if (mirMvW) snprintf(mirW + o, sizeof(mirW) - (size_t)o, " mirror_mv=%s", g_mirCamOnly ? "camera" : "parts");
+        if (mirMvW) o += snprintf(mirW + o, sizeof(mirW) - (size_t)o, " mirror_mv=%s", g_mirCamOnly ? "camera" : "parts");
+        if (g_mirTurnsExplicit && o < (int)sizeof(mirW))  // phase 41
+            snprintf(mirW + o, sizeof(mirW) - (size_t)o, " mirror_turns=%d", g_mirTurns);
     }
     if (WriteIniPreserving(kv, nkv)) {
         Log("settings saved to dlaa.ini: dlss_preset=%s dlaa_area=%d sharpness=%.1f sharp_radius=%.1f dlss_upscale=%d tex_lod_bias=%.2f tex_lod_bias_cutout=%s mv_objects=%d mirror_dlaa=%d%s dlaa_pre_tonemap=%d perf_profile=%s%s%s (save key, Present #%llu)%s%s%s%s",
@@ -2870,8 +3055,8 @@ void ToggleFwdDepth(uint64_t n) {
 #endif
 // Adds the time from construction to scope exit to the blit CPU counters (every return path of the matched part).
 struct BlitCpuTimer {
-    const int64_t t0 = Qpc();
-    ~BlitCpuTimer() { g_cpuBlitTicks += Qpc() - t0; ++g_cpuBlitN; }
+    const int64_t t0 = MeasureOn() ? Qpc() : 0;          // phase 45: the clock only while measuring (g_measure)
+    ~BlitCpuTimer() { if (t0) g_cpuBlitTicks += Qpc() - t0; ++g_cpuBlitN; }
 };
 
 void LogEyeMap() {
@@ -3176,9 +3361,11 @@ void QueueEyeReadback(ID3D11DeviceContext* ctx, const CandidateRecord& cand, voi
     ++g_rbPending;
 }
 #endif
-int              g_gpuTiming     = -1;           // dlaa.ini gpu_timing: -1 auto (VR only), 0 off, 1 on
-// GPU timestamp queries wanted right now (DLAA stages and, v0.5.6, the depth snapshot copy).
-inline bool GpuTimingOn() { return g_gpuTiming > 0 || (g_gpuTiming < 0 && g_vrMode); }
+int              g_gpuTiming     = -1;           // dlaa.ini gpu_timing: -1 = at log level 4 (phase 45; was: VR always), 0 off, 1 on
+// GPU timestamp queries wanted right now (DLAA stages and, v0.5.6, the depth snapshot copy). phase 45: -1 followed VR (the queries
+// ran in every VR session for log lines only written at level 4); now -1 = log level 4 (debug), live. The menu's own GPU figures
+// do not need it (they use GpuPerf, on while the menu is open; the whole-frame spans run under GpuTimingOn() || GpuPerf::On()).
+inline bool GpuTimingOn() { return g_gpuTiming > 0 || (g_gpuTiming < 0 && LogDebugLevel()); }
 
 // ---- v0.6.2 whole-frame GPU spans (game context, render thread, log only) -----------------------------------
 // Two timestamp spans, same pattern as SnapTimer (scene_dlaa.cpp): a small query ring per span type, read with
@@ -3350,8 +3537,10 @@ void SpanOnDiscard(ID3D11DeviceContext* ctx) {
 // Matched blit that consumed pass `s` (called after the FIFO advanced, before any DLAA work).
 void SpanOnBlit(ID3D11DeviceContext* ctx, uint64_t s) {
     if (g_gbufSpan >= 0 && g_gbufSpanS == s) { g_gbufRing.End(ctx, g_gbufSpan, true); g_gbufSpan = -1; }
+    // v0.12.0 issue #12 round 3: flat multi-view PBPBPB -- an earlier view's blit of the frame leaves the scene span open
+    if (g_sceneSpan >= 0 && !g_vrMode && FlatViewCount() >= 2 && s >= g_sceneS0 && s + 1 < g_sceneS0 + (uint64_t)FlatViewCount()) return;
     if (g_sceneSpan < 0 || g_fifoHead != g_passSeq) return;        // more passes of this frame still to blit
-    const uint64_t passes = g_vrMode ? 2 : (g_flatMode ? 1 : 0);
+    const uint64_t passes = (g_vrMode || g_flatMode) ? (uint64_t)ViewCount() : 0;   // v0.12.0 issue #12: flat multi-view N
     if (passes && s == g_sceneS0 + passes - 1 && g_passSeq == g_sceneS0 + passes &&
         g_cUnderflow == g_sceneUnd0 && g_cOverflow == g_sceneOvf0) {
         g_sceneEndAfterDraw = true;                                 // closed in hkDraw after the game's Draw
@@ -4743,7 +4932,7 @@ void PvAssembleTile(ID3D11DeviceContext* ctx, int g, int slot) {
         ++g_pvAsmClipWin;
     }
     t_inDlaa = true;
-    const int tq = g_pvAsmTimer.Begin(ctx);
+    const int tq = MeasureOn() ? g_pvAsmTimer.Begin(ctx) : -1;   // phase 45: only while measuring (menu / level 4)
     if (!A.frameMask) PvAsmClear(ctx, A, cx0, cy0, cx1, cy1);   // far (reversed-Z) where no tile writes
     const bool ok = g_pvTileTwin.Snapshot(ctx, g_pvDs.Get(), false);
     D3D11_MAPPED_SUBRESOURCE mp{};
@@ -6213,7 +6402,7 @@ void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
     }
     // Cost visibility: the instance's own non-blocking GPU timestamp queries ("DLAA GPU cost eye 10 / 11" lines, every
     // 600 timed frames). Flat: only with gpu_timing = 1 (the flat default stays as before); VR: also in auto mode.
-    t.dl.SetTiming(g_gpuTiming > 0 || (g_gpuTiming < 0 && g_launchVr == 1));
+    t.dl.SetTiming(GpuTimingOn());                       // phase 45: -1 = log level 4 (was: VR launches)
     t.dl.SetNoSharpen(!g_pvSharpen);                     // v0.8.1 round 5: dlaa.ini preview_sharpen = 0 (A/B)
     // Round 5: no reset on a reference-slot change any more -- the unit is the eye, so slot 0 vs 4 only reflects which eye
     // the game rendered first this frame (round 4 reset on it, but its units were order-bound, see the block comment).
@@ -6964,8 +7153,10 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
 #ifdef WITH_DLAA
     DidShadow::Drop(DidShadow::kKPass);                // phase 35: a new pass re-reads the shadow at its first Record
 #endif
-    if (allowSnapshot && g_passSeq > g_fifoHead && !g_flatMode) {
-        PassSlot& prev = g_ring[(g_passSeq - 1) % kRing];
+    // v0.12.0 issue #12: flat multi-view too -- if the game draws all views' passes before their blits (PPPBBB), the next view's
+    // clear would overwrite this pass's depth before its blit (a shared scene depth that is not discarded per pass)
+    if (allowSnapshot && g_passSeq > g_fifoHead && (!g_flatMode || FlatMvSeen())) {
+        PassSlot& prev = g_ring[SlotOf(g_passSeq - 1)];
 #ifdef WITH_DLAA
         if (!prev.snap && g_dlaaOn.load(std::memory_order_relaxed) && !g_jitterOnly.load(std::memory_order_relaxed) &&
             !g_passive.load(std::memory_order_relaxed) && g_sceneDepth) {
@@ -6989,14 +7180,19 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
     }
     // v0.6.2 GPU spans: the previous pass's gbuf span ends here (after its snapshot above, before the game's
     // clear); the new pass's spans begin after the clear (SpanBeginPending). No unconsumed pass = frame start.
-    SpanOnPassStart(ctx, g_passSeq, g_fifoHead == g_passSeq);
+    // v0.12.0 issue #12 round 3: flat multi-view interleaves pass, blit, pass, blit (the ATS log: no FIFO overflow after the confirm),
+    // so "no unconsumed pass" is true before EVERY view's pass and the frame's scene span was restarted per pass and always dropped
+    // ("GPU spans scene n/a", "scene spans dropped=400"). There the frame starts at its first world pass after the Present (round 5: framePos 0).
+    const int spanViews = g_vrMode ? 0 : FlatViewCount();
+    const int framePos = g_fvPassInFrame++;            // v0.12.0 issue #12 round 5: position among this frame's world passes
+    SpanOnPassStart(ctx, g_passSeq, spanViews >= 2 ? framePos == 0 : g_fifoHead == g_passSeq);
     // v0.6.1: the previous newest pass ends here -> freeze its deferred-context DrawIndexed delta.
     // v0.6.2: same for the foreign-context and game-context-other-thread counters.
     const uint32_t defNow = g_diDeferred.load(std::memory_order_relaxed);
     const uint32_t fgnNow = g_foreignCtx.load(std::memory_order_relaxed);
     const uint32_t otNow  = g_gameOtherThread.load(std::memory_order_relaxed);
     if (g_passSeq) {
-        PassSlot& last = g_ring[(g_passSeq - 1) % kRing];
+        PassSlot& last = g_ring[SlotOf(g_passSeq - 1)];
         if (!last.defClosed) {
             last.diDeferred = defNow - last.defStart;
             last.fgnCtx = fgnNow - last.fgnStart;
@@ -7008,18 +7204,29 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
     if (s == 0)   // v0.7.10: first scene pass recognised this process -- the G-buffer / scene render path is now tracked
         Log("first scene pass recognised: s=0 at Present #%llu (the 3D scene render is being tracked)",
             (unsigned long long)g_frames.load(std::memory_order_relaxed));
-    PassSlot& n = g_ring[s % kRing];
+    PassSlot& n = g_ring[SlotOf(s)];
     n.s = s;
+    n.frameN = g_frames.load(std::memory_order_relaxed); n.framePos = framePos; n.toneRt = nullptr; n.pickHow = 0;   // round 5
     n.ResetRecorder(defNow, fgnNow, otNow, Qpc());
     const int phases = EffectivePhases();                 // v0.7.0: more phases while upscaling
     if (phases != g_effPhases) {
         Log("jitter: %d Halton phases now (jitter_phases %d, upscale pixel ratio %.3f)", phases, g_phases, g_upAreaRatio);
         g_effPhases = phases;
     }
-    n.phase = (int)((g_vrMode ? ((s + (uint64_t)g_vrPhaseOff) >> 1) : s) % (uint64_t)phases);   // v0.10.0 phase 24: parity
-    if (g_jitterEnabled && !WorldJitterHeld()) JitterOfPhase(n.phase, &n.jx, &n.jy);   // v0.7.9: held until VR is real
+    // v0.12.0 issue #12: flat multi-view -- all N views of a frame share one phase too ((s + off) / N, flat_views.h PhaseOf)
+    const int fvN = g_vrMode ? 0 : FlatViewCount();
+    // round 5: the frame's first pass serial = s - framePos (passes and blits do NOT share an order: ATS draws L C R, blits C L R)
+    if (fvN >= 2) n.phase = FlatViews::PhaseOf(s - (uint64_t)(n.framePos > 0 ? n.framePos : 0), 0, fvN, phases);
+    else n.phase = (int)((g_vrMode ? ((s + (uint64_t)g_vrPhaseOff) >> 1) : s) % (uint64_t)phases);   // v0.10.0 phase 24: parity
+    // v0.12.0 issue #12: a view past kMaxViews (its blit passes through untouched) is not jittered -- a raw jittered picture would
+    // shimmer. Its view is predicted from the frame position of the pass and the last Present's blit order.
+    n.predView = fvN >= 2 ? g_fv.ViewOfBlitIndex(g_fvPerm.BlitOfPos(n.framePos)) : -1;   // round 5: via the learned permutation
+    const bool fvBeyondCap = fvN > FlatViews::kMaxViews &&
+                             n.predView >= FlatViews::kMaxViews;
+    if (g_jitterEnabled && !WorldJitterHeld() && !fvBeyondCap) JitterOfPhase(n.phase, &n.jx, &n.jy);   // v0.7.9: held until VR is real
     else { n.jx = 0.0f; n.jy = 0.0f; }
     n.snap = false;
+    n.rastSeen = false; n.rastShifted = false; n.rastJx = n.rastJy = 0.0f;   // v0.12.0 issue #12 round 4
     n.discarded = false;
     n.depth = g_sceneDepth;                               // v0.10.3 issue #9 (per-eye depths: switched by the clear / bind)
     n.pre = 0;                                            // v0.10.0 phase 4
@@ -7045,7 +7252,13 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
     FwdOnPassStart(ctx);                                  // v0.9.0 r5: stats window (r11: + near-camera readback)
 #endif
     g_phase = n.phase; g_jx = n.jx; g_jy = n.jy;          // ReconcileViewports uses these for this pass
-    while (g_passSeq - g_fifoHead > 2) { ++g_fifoHead; ++g_cOverflow; }   // fifo overflow: drop the oldest
+    // fifo overflow: drop the oldest. v0.12.0 issue #12: flat multi-view keeps up to N outstanding passes (all views' passes may
+    // come before their blits; never more than the used ring slots - 1, SetRingSize grows the ring first); VR / single-view flat: 2
+    uint64_t fifoCap = FlatMvSeen() && g_fv.FifoDepth() > 2 ? (uint64_t)g_fv.FifoDepth() : 2;
+    if (fifoCap > (uint64_t)(g_ringN - 1)) fifoCap = (uint64_t)(g_ringN - 1);
+    while (g_passSeq - g_fifoHead > fifoCap) { ++g_fifoHead; ++g_cOverflow; }
+    // round 5: passes consumed out of order (flat multi-view) right behind a dropped one are not outstanding either
+    g_fifoHead = FlatViews::AdvanceHead(g_fifoHead, g_passSeq, [](uint64_t q) { return g_ring[SlotOf(q)].consumed; });
     static int logged = 0;
     if (logged < 12) {
         ++logged;
@@ -7057,7 +7270,14 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
 
 // v0.6.1: called for EVERY immediate-context ClearDSV (was: only while g_depthDirty) so the flight recorder
 // also counts the scene-depth clears that do not start a pass.
-void OnSceneDepthClear(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v) {
+// phase 40: returns true when this clear STARTED a pass (the hidden area mask is drawn only after such a clear).
+void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet);   // (defined with the viewport hooks below)
+extern bool g_jitterPass;                      // (defined with the viewport hooks below)
+uint64_t g_cClearReshift = 0;                  // v0.12.0 issue #12 round 4: passes started by a clear while a jittered binding was bound
+uint64_t g_cRastJitPasses = 0, g_cRastJitMismatch = 0;   // round 4: passes whose first G-buffer draw was rasterized with a
+                                               // different viewport shift than the jitter NGX is told (checked / mismatched)
+int      g_rastJitLogs = 0;
+bool OnSceneDepthClear(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v) {
     CpuProf::Block cpb(CpuProf::kBSnap);               // phase 31 CPU profiler (cpu_prof.h)
     ID3D11Resource* r = nullptr;
     v->GetResource(&r);
@@ -7065,7 +7285,8 @@ void OnSceneDepthClear(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v) {
     // the new pass is drawn on it, the previous pass keeps its own depth (PassSlot::depth) for its snapshot / replay
     const bool match = SdUse(r);
     if (r) r->Release();
-    if (!match) return;
+    if (!match) return false;
+    bool started = false;
     SdAliasExpire();
 #ifdef WITH_DLAA
     // v0.9.0: the object ids live in the stencil; the game clears depth AND stencil (flags 0x3) in the capture. Without the
@@ -7086,21 +7307,34 @@ void OnSceneDepthClear(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v) {
         // the clear that starts a world pass = a new frame in flat. Runs the per-frame work before the pass starts.
         if (g_plActive.load(std::memory_order_relaxed)) LayerFrameBoundary(ctx, kPlbSceneClear);
         StartPass(ctx, true);
+        started = true;
+        // v0.12.0 issue #12 round 4: the clear that starts a pass may come while the G-buffer is ALREADY bound (the bind hook's
+        // ReconcileViewports then ran with the PREVIOUS pass's g_jx). The pass's draws must be rasterized with ITS jitter -- the
+        // one NGX is told (slot.jx / jy) -- so the shifted viewport is re-issued now (no-op when the binding is not a jittered
+        // world pass or the shift did not change). Before: such a pass drew with the previous pass's shift until the game's next
+        // RSSetViewports / OMSetRenderTargets.
+        if (g_jitterPass) { ReconcileViewports(ctx, false); ++g_cClearReshift; }
     }
-    if (g_passSeq) ++g_ring[(g_passSeq - 1) % kRing].sceneClears;   // lands on the pass it started, if any
+    if (g_passSeq) ++g_ring[SlotOf(g_passSeq - 1)].sceneClears;   // lands on the pass it started, if any
+    return started;
 }
 
+#ifdef WITH_DLAA
+// phase 40: the hidden area mask after the game's clear of an eye scene depth (defined below the VRS eye sources it uses).
+void HmOnSceneClear(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v, UINT fl, FLOAT d, bool started);
+#endif
 
 void STDMETHODCALLTYPE hkClearDSV(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v, UINT fl, FLOAT d, UINT8 s) {
     CPU_HOOK(kHkClearDsv);                                 // phase 31 CPU profiler (cpu_prof.h)
     TraceClearDsv(ctx, v, fl, d, s);
     // v0.6.2: only the game's render context is tracked; every other context passes straight through.
     if (!IsGameCtx(ctx)) { CPU_ORIG(oClearDSV(ctx, v, fl, d, s)); return; }
+    bool sceneStart = false;                              // phase 40: this clear started a world pass on the scene depth
     if (v && !t_inDlaa && g_sceneDepth) {
 #ifdef WITH_DLAA
         g_objClearFlags = fl;                             // v0.9.0
 #endif
-        OnSceneDepthClear(ctx, v);
+        sceneStart = OnSceneDepthClear(ctx, v);
     }
 #ifdef WITH_DLAA
     // v0.10.0 phase 2: a clear of the open mirror view's depth without its DiscardView first: that view ends here (its DLAA
@@ -7108,6 +7342,11 @@ void STDMETHODCALLTYPE hkClearDSV(ID3D11DeviceContext* ctx, ID3D11DepthStencilVi
     if (v && !t_inDlaa && g_mirCur >= 0) MirOnClearDsv(ctx, v);
 #endif
     CPU_ORIG(oClearDSV(ctx, v, fl, d, s));
+#ifdef WITH_DLAA
+    if (g_xrHiddenMask && v && !t_inDlaa && g_vrMode) HmOnSceneClear(ctx, v, fl, d, sceneStart);   // phase 40 (VR only)
+#else
+    (void)sceneStart;
+#endif
     if (g_spanPendGbuf || g_spanPendScene) SpanBeginPending(ctx);   // v0.6.2: spans start after the clear
 }
 
@@ -7129,14 +7368,14 @@ bool OnDepthDiscard(ID3D11DeviceContext1* ctx, ID3D11Resource* res, bool* snappe
     ++g_cDiscardSeen;
     SdAliasSeen(res);
     if (g_passSeq <= g_fifoHead) return true;                       // no unconsumed pass
-    PassSlot& slot = g_ring[(g_passSeq - 1) % kRing];
+    PassSlot& slot = g_ring[SlotOf(g_passSeq - 1)];
     // v0.10.3 issue #9: per-eye depths -- the discard of a scene depth that is NOT the newest pass's (an older pass's eye, e.g.
     // both discards at the frame end) ends that older pass only: its snapshot if it has none yet (its draw ids were replayed at
     // the newer pass's start). The newest pass's work below (replays, forward batch, stage decision) waits for its own discard.
     if (g_sdAliasN && res != (ID3D11Resource*)PassDepth(slot)) {
         ++g_sdAliasOtherDiscards;
         for (uint64_t q = g_passSeq - 1; q-- > g_fifoHead;) {
-            PassSlot& o = g_ring[q % kRing];
+            PassSlot& o = g_ring[SlotOf(q)];
             if (res != (ID3D11Resource*)PassDepth(o)) continue;
             o.discarded = true;
 #ifdef WITH_DLAA
@@ -7426,7 +7665,7 @@ bool InspectDepth(ID3D11Resource* res) {
                 if (had && (oldW != d.Width || oldH != d.Height)) {
                     resized = true;
                     const uint64_t dropped = g_passSeq - g_fifoHead;
-                    while (g_fifoHead < g_passSeq) g_ring[g_fifoHead++ % kRing].consumed = true;
+                    while (g_fifoHead < g_passSeq) g_ring[SlotOf(g_fifoHead++)].consumed = true;
                     g_depthDirty = false;
                     g_needFirstPass = true;
                     g_fwdColorTex = nullptr; g_hdrCompTex = nullptr; g_tonemapTex = nullptr;
@@ -8640,6 +8879,7 @@ HRESULT STDMETHODCALLTYPE hkCreatePixelShader(ID3D11Device* dev, const void* cod
 //          (alpha-tested foliage / fences: coarse shading would cut their edges in 2 x 2 blocks), one that writes SV_Depth (the
 //          depth would go coarse: depth, MVs and draw ids must stay exact) or one never scanned (created before the hook) keeps
 //          full rate; the table is switched only when the class changes from the previous draw (counted: "table switches").
+// PHASE 42 (vrs_passes = 1): + the eye's LIGHTING bind of the same pass (VrsIsLightingBind / g_vrsLitS), outer ring only.
 // Rasterised depth, stencil and coverage stay per pixel under VRS, so the scene depth, the per-draw MVs (draw-id replay: mod
 // work = full rate) and the DLAA inputs are exactly what they were; only the colour of the outer ring is shaded per block.
 // EYE (phase 34b): the eye of a pass is certain only at its blit (the blit RT -> eye map, corrected by projection verdicts).
@@ -8732,7 +8972,7 @@ int VrsKnownEye(uint64_t q) {
     const VrsPred& b = g_vrsBlitEye[q & 7];
     if (b.s == q) return b.eye;
 #ifdef WITH_DLAA
-    const PassSlot& sl = g_ring[q % kRing];
+    const PassSlot& sl = g_ring[SlotOf(q)];
     if (sl.s == q) return VrsFwdEye(sl.fwdTex);
 #endif
     return -1;
@@ -8880,10 +9120,49 @@ void VrsLogOrder() {
         "map entry) %s -- the eye order of a frame is not fixed, so the eye of a pass is never guessed from its parity (phase 34b)",
         n, (unsigned long long)first.s, g_vrPhaseOff, eyes, rts);
 }
+// phase 42: the LIGHTING STAGE of pass s -- set at a world G-buffer bind (not a preview pass), ended by the pass's forward bind
+// (or any other jitter / preview bind). Only a bind inside it can be the eye's lighting bind.
+uint64_t g_vrsLitS = ~0ull;
+bool     g_vrsLitLogged = false;
+// phase 42: is this bind the eye's deferred lighting bind? Shape (ATS flat trace dlaa_trace_ats_flat_hdr_scale125.txt [3678],
+// mirror_dlaa_plan.md for ETS2): exactly 2 RTVs, both R16G16B16A16_FLOAT single-sample textures of the scene size, on the scene
+// depth of this pass (a mirror view has its own depth; the other eye's depth alias is not g_sceneDepth). Its draws: a full-screen
+// sun / ambient / shadow triangle + light volumes, read the G-buffer, write light accumulation the forward pass reads -- no motion
+// vectors, no ids, no depth (the mod's draw-id / depth work runs as mod work, at full rate).
+bool VrsIsLightingBind(UINT n, ID3D11RenderTargetView* const* rtvs, const void* bindDepth) {
+    if (n != 2 || !rtvs || !rtvs[0] || !rtvs[1] || !bindDepth || bindDepth != (const void*)g_sceneDepth) return false;
+    for (UINT i = 0; i < 2; ++i) {
+        ID3D11Resource* r = nullptr;
+        rtvs[i]->GetResource(&r);
+        if (!r) return false;
+        ID3D11Texture2D* t = nullptr;
+        D3D11_TEXTURE2D_DESC d{};
+        const bool tex = SUCCEEDED(r->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&t)) && t;
+        if (tex) { t->GetDesc(&d); t->Release(); }
+        r->Release();
+        if (!tex || d.Format != DXGI_FORMAT_R16G16B16A16_FLOAT || d.Width != g_sceneW || d.Height != g_sceneH ||
+            d.SampleDesc.Count != 1)
+            return false;
+    }
+    return true;
+}
 // hkOMSetRenderTargets (game context, not our work), the end of the hook: enter the bracket for this binding if it is an eye's
-// world scene pass. Vrs::g_want is false here (the top of the hook left the previous one).
-void VrsOnBind(ID3D11DeviceContext* ctx) {
-    if (!g_vrsOn || !g_vrMode || !g_jitterPass || g_previewPass || !g_passSeq || !g_sceneW || !g_sceneH) return;
+// world scene pass (or, vrs_passes = 1, its lighting bind). Vrs::g_want is false here (the top of the hook left the previous one).
+// n / rtvs / bindDepth = this bind (bindDepth: identity only, the bound DSV keeps it alive).
+void VrsOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* rtvs, const void* bindDepth) {
+    if (!g_vrsOn || !g_vrMode || !g_passSeq || !g_sceneW || !g_sceneH) return;
+    int cls;
+    if (g_jitterPass) {
+        // phase 42: a world G-buffer bind opens the lighting stage of its pass, every other jitter bind (forward, preview) ends it
+        g_vrsLitS = (g_gbufPass && !g_previewPass) ? g_passSeq - 1 : ~0ull;
+        if (g_previewPass) return;
+        cls = g_gbufPass ? Vrs::kClsGbuf : Vrs::kClsFwd;
+    } else {
+        if (!g_vrsPasses || g_vrsLitS != g_passSeq - 1 || g_previewPass || g_mirCur >= 0) return;
+        ++Vrs::GetStats().litStageBinds;
+        if (!VrsIsLightingBind(n, rtvs, bindDepth)) { ++Vrs::GetStats().litShapeMiss; return; }
+        cls = Vrs::kClsLight;
+    }
     CpuProf::Block cpb(CpuProf::kBVrs);               // phase 34 CPU profiler row "vrs"
     if (!g_lodPsHooked.load(std::memory_order_relaxed)) {
         if (!g_vrsNoPsLogged) {
@@ -8897,7 +9176,7 @@ void VrsOnBind(ID3D11DeviceContext* ctx) {
     const uint64_t s = g_passSeq - 1;
     void* fwdTex = nullptr;                            // this bind's forward colour (FWD eye source; nullptr = G-buffer bind)
 #ifdef WITH_DLAA
-    if (!g_gbufPass && g_fwdBound) fwdTex = g_fwdBoundTex;
+    if (cls == Vrs::kClsFwd && g_fwdBound) fwdTex = g_fwdBoundTex;
 #endif
     int src = 0, srcEye[4] = { -1, -1, -1, -1 };
     bool disagree = false;
@@ -8906,7 +9185,7 @@ void VrsOnBind(ID3D11DeviceContext* ctx) {
         ++g_vrsBindLogs;
         LogDbg("VRS bind #%d: pass s=%llu %s bind, last eye blit s=%llu (k=%lld) -- blit %d / RT cycle %d / forward colour %d / frame "
             "pair %d (-1 = not certain) -> %s%d (Present #%llu)", g_vrsBindLogs, (unsigned long long)s,
-            g_gbufPass ? "G-buffer" : "forward", (unsigned long long)g_vrLastBlitS,
+            Vrs::ClsName(cls), (unsigned long long)g_vrLastBlitS,
             g_vrLastBlitS == ~0ull ? -1LL : (long long)(s - g_vrLastBlitS), srcEye[0], srcEye[1], srcEye[2], srcEye[3],
             disagree ? "DISAGREE, full rate, " : (eye < 0 ? "no certain eye, full rate, " : "eye "), eye,
             (unsigned long long)g_frames.load(std::memory_order_relaxed));
@@ -8926,7 +9205,7 @@ void VrsOnBind(ID3D11DeviceContext* ctx) {
     const double up = g_upRenderOverOutX;
     const float ratio = (g_dlaaOn.load(std::memory_order_relaxed) && g_dlssUpscale.load(std::memory_order_relaxed) && up > 0.0 &&
                          up < 1.0) ? (float)up : 1.0f;
-    if (Vrs::Enter(ctx, g_sceneW, g_sceneH, eye, u, v, ratio)) {
+    if (Vrs::Enter(ctx, g_sceneW, g_sceneH, eye, u, v, ratio, cls)) {
         Vrs::Stats& st = Vrs::GetStats();
         for (int i = 0; i < 4; ++i) if (src & (1 << i)) ++st.eyeSrc[i];
         VrsPred& p = g_vrsPred[s & 7];
@@ -8936,19 +9215,295 @@ void VrsOnBind(ID3D11DeviceContext* ctx) {
             g_vrsFirstLogged = true;
             Log("VRS: first scene bind with foveated rendering -- pass s=%llu, %s pass, eye %d (sources:%s%s%s%s; last eye blit pass "
                 "s=%llu), %ux%u, ring centre uv (%.3f, %.3f), DLSS render / output %.3f (Present #%llu)", (unsigned long long)s,
-                g_gbufPass ? "G-buffer" : "forward", eye, (src & kVrsSrcBlit) ? " blit" : "", (src & kVrsSrcRing) ? " RT-cycle" : "",
+                Vrs::ClsName(cls), eye, (src & kVrsSrcBlit) ? " blit" : "", (src & kVrsSrcRing) ? " RT-cycle" : "",
                 (src & kVrsSrcFwd) ? " forward-colour" : "", (src & kVrsSrcPair) ? " frame-pair" : "",
                 (unsigned long long)g_vrLastBlitS, g_sceneW, g_sceneH, (double)u, (double)v,
                 (double)ratio, (unsigned long long)g_frames.load(std::memory_order_relaxed));
             VrsLogOrder();
         }
+        if (cls == Vrs::kClsLight && !g_vrsLitLogged) {   // phase 42: once, the first lighting bind with VRS
+            g_vrsLitLogged = true;
+            Log("VRS: first LIGHTING bind with foveated rendering (vrs_passes=1, phase 42) -- pass s=%llu, eye %d, 2 RTV RGBA16F %ux%u "
+                "on the scene depth, outer ring only (Present #%llu)", (unsigned long long)s, eye, g_sceneW, g_sceneH,
+                (unsigned long long)g_frames.load(std::memory_order_relaxed));
+        }
     }
 }
 // The ini / menu values -> vrs.cpp (any thread; read at the next bracket). vrs_debug only with debug = 1 (phase 39: log level 4,
 // live: StepLogLevel calls this again).
-void VrsApplyConfig() { Vrs::Configure(g_vrsOn, g_vrsInner, g_vrsOuter, g_vrsQuality, g_vrsDebug && LogDebugLevel() ? 1 : 0); }
+
+// ---- phase 40: the VR HIDDEN AREA MASK (dlaa.ini xr_hidden_mask; hidden_mask.h = the D3D draw, xr_hook.h = the OpenXR side) ----
+// WHEN: right after the game's ClearDepthStencilView of an eye scene depth that STARTED a world pass (OnSceneDepthClear: the
+// previous pass drew its G-buffer; the trace shows one clear per eye pass, flags 0x3, depth 0.0, right before the 4-RTV G-buffer
+// bind), VR only, the depth bit cleared to 0 or 1. Never a mirror (own depths, never the scene depth), the menu / truck preview
+// (its 1-RTV passes never set g_depthDirty, and no world G-buffer bind within the last 2 Presents = no mask), flat (g_vrMode).
+// DEPTH: the game uses REVERSED Z (clear 0.0 = far; the trace and the mod's own GREATER_EQUAL forward depth), so the nearest
+// value is 1.0 -- taken as "the other end of the clear value": a clear to 1.0 would get 0.0. Any other clear value: no mask.
+// EYE: the same sources as VRS (VrsDecideEye at clear time: the learned blit-RT cycle / the frame pair -- certain only; no eye or
+// two sources that disagree = no mask for that pass). eye -> OpenXR VIEW: learned at the eye blits (XrHook::ViewForImage of the
+// blit RT = the swapchain image the game submits for that view; kVrsTrust blits in a row); without it, the view whose submitted fov
+// centre matches the eye's measured optical centre (unambiguous only). Then the mapping is CHECKED once per (eye, mesh): the
+// view's fov centre (tan L / R / U / D) must sit within 0.03 uv of the eye's measured optical centre (and the fov scale within
+// 5 % of the measured projection scale, when measured), else that eye gets no mask (logged). The blit checks every masked pass's
+// eye again ("eye misses", expected 0).
+// CONSUMERS of the masked depth (1.0 = nearest = the cabin layer's near end): the depth snapshot / DLAA depth input / pass B MVs
+// see near-plane depth there and the camera R of the cabin layer -- garbage only inside the masked area, which nobody sees. The
+// camera R itself never comes from depth pixels (per-draw consensus / medoid of draw MVPs); the draw-id replay (depth EQUAL)
+// finds no draw there (id 0 = the camera path); pass B's coverage counters only feed the log; the forward depth is the mod's
+// own target. So nothing global is computed from masked pixels.
+struct HmPred { uint64_t s; int eye; };
+struct HmState {
+    uint64_t gen[2] = {};                  // XrHook mesh gen held per view
+    bool     usable[2] = {};               // the mapped mesh passed MapToNdc's checks and is uploaded
+    uint32_t tris[2] = {};
+    float    tri[2][6 * HiddenMask::kMaxTris] = {};   // the mapped NDC triangles per view (for a re-upload)
+    HiddenMask::MapInfo info[2];
+    float    fov[2][4] = {};
+    float    depth = -1.0f;                // the depth value the vertex buffers carry
+    ID3D11Device* dev = nullptr;           // the device they were made on
+    int      eyeView[kMaxEyes] = { -1, -1 }, eyeRun[kMaxEyes] = {};   // eye -> view learned at the blits
+    uint64_t checkedGen[kMaxEyes] = {};    // the (eye, mesh gen) the centre check ran for ...
+    int      checkedView[kMaxEyes] = { -1, -1 };
+    bool     checkOk[kMaxEyes] = {};       // ... and its verdict
+    HmPred   pred[8] = { { ~0ull, -1 }, { ~0ull, -1 }, { ~0ull, -1 }, { ~0ull, -1 },
+                         { ~0ull, -1 }, { ~0ull, -1 }, { ~0ull, -1 }, { ~0ull, -1 } };
+    bool     firstLogged = false, depthValLogged = false;
+    // statistics (cumulative; the stats line prints the deltas)
+    uint64_t drawn[kMaxEyes] = {}, noEye = 0, disagree = 0, noView = 0, noMesh = 0, notChecked = 0, checkBad = 0, notWorld = 0;
+    uint64_t depthVal = 0, notReady = 0, eyeChecks = 0, eyeMisses = 0, reCleared = 0;
+    uint64_t lastLogMs = 0;
+    uint64_t last[16] = {};
+};
+HmState g_hm;
+XrHook::HiddenRaw g_hmRaw;                 // (20 KB: not on the stack)
+
+// the fov centre of `fov` (L, R, U, D radians) in uv of the whole picture (v down)
+void HmFovCentre(const float fov[4], double* u, double* v) {
+    const double tl = std::tan((double)fov[0]), tr = std::tan((double)fov[1]);
+    const double tu = std::tan((double)fov[2]), td = std::tan((double)fov[3]);
+    *u = (tr - tl) != 0.0 ? -tl / (tr - tl) : 0.5;
+    *v = (tu - td) != 0.0 ? tu / (tu - td) : 0.5;
+}
+// The view of `eye` (-1 = not known): learned at the blits, else the unambiguous optical-centre match.
+int HmViewOfEye(int eye) {
+    if (eye < 0 || eye >= kMaxEyes) return -1;
+    if (g_hm.eyeView[eye] >= 0 && g_hm.eyeRun[eye] >= kVrsTrust) return g_hm.eyeView[eye];
+    float mu = 0.5f, mv = 0.5f;
+    if (!VrEyeCentre(eye, &mu, &mv) || !g_hm.gen[0] || !g_hm.gen[1]) return -1;
+    double u0, v0, u1, v1;
+    HmFovCentre(g_hm.fov[0], &u0, &v0);
+    HmFovCentre(g_hm.fov[1], &u1, &v1);
+    const double d0 = std::fabs(u0 - mu), d1 = std::fabs(u1 - mu);
+    if (d0 <= 0.03 && d1 > 0.06) return 0;
+    if (d1 <= 0.03 && d0 > 0.06) return 1;
+    return -1;
+}
+// The eye blit of pass s (HandlePossibleBlit, VR): learn eye -> view from the swapchain image, check the masked pass's eye.
+void HmNoteBlit(uint64_t s, int eye, void* rt, uint32_t slice, uint32_t sceneClears) {
+    if (eye < 0 || eye >= kMaxEyes) return;
+    int32_t rect[4] = {};
+    const int view = XrHook::ViewForImage(rt, slice, rect);
+    if (view >= 0) {
+        if (view == g_hm.eyeView[eye]) { if (g_hm.eyeRun[eye] < (1 << 30)) ++g_hm.eyeRun[eye]; }
+        else {
+            if (g_hm.eyeView[eye] >= 0)
+                LogWarn("hidden area mask: eye %d is now blitted to OpenXR view %d (was view %d) -- relearning (%d blits)", eye, view,
+                    g_hm.eyeView[eye], kVrsTrust);
+            g_hm.eyeView[eye] = view;
+            g_hm.eyeRun[eye] = 1;
+        }
+        if (g_hm.eyeRun[eye] == kVrsTrust)
+            Log("hidden area mask: eye %d = OpenXR view %d (%s eye; its blit target is that view's swapchain image, rect (%d,%d) "
+                "%dx%d; seen %d times in a row)", eye, view, view == 0 ? "left" : "right", rect[0], rect[1], rect[2], rect[3], kVrsTrust);
+    }
+    HmPred& p = g_hm.pred[s & 7];
+    if (p.s != s) return;
+    ++g_hm.eyeChecks;
+    if (sceneClears > 1) ++g_hm.reCleared;                // the game cleared the depth again after the mask (mask lost, no harm)
+    if (p.eye != eye) {
+        ++g_hm.eyeMisses;
+        if (g_hm.eyeMisses <= 8)
+            LogWarn("hidden area mask: eye MISS #%llu -- pass s=%llu got eye %d's mask, its blit says eye %d (expected never: the "
+                "eye sources are the VRS ones, certain only)", (unsigned long long)g_hm.eyeMisses, (unsigned long long)s, p.eye, eye);
+    }
+    p.s = ~0ull;
+}
+// A new mesh for view `view` from XrHook (gen changed): map, check, upload. Render thread.
+void HmTakeMesh(int view, ID3D11Device* dev) {
+    const XrHook::HiddenRaw& r = g_hmRaw;
+    g_hm.gen[view] = r.gen;
+    memcpy(g_hm.fov[view], r.fov, sizeof(r.fov));
+    g_hm.usable[view] = false;
+    g_hm.tris[view] = 0;
+    HiddenMask::Upload(dev, view, nullptr, 0, 0.0f);      // (drops the old buffer)
+    if (!r.nv) {
+        LogDbg("hidden area mask: view %d -- no hidden mesh (gen %llu): no mask for it", view, (unsigned long long)r.gen);
+        return;
+    }
+    HiddenMask::MapInfo& mi = g_hm.info[view];
+    const bool ok = HiddenMask::MapToNdc(r.xy, r.nv, r.idx, r.ni, r.fov, g_hm.tri[view], &mi);
+    double u, v;
+    HmFovCentre(r.fov, &u, &v);
+    if (!ok) {
+        LogErr("hidden area mask: view %d mesh NOT used -- %s (%u vertices, %u triangles, mapped x %+.3f..%+.3f y %+.3f..%+.3f, "
+            "covers %.1f %%; fov L%+.1f R%+.1f U%+.1f D%+.1f deg)", view, mi.why, r.nv, r.ni / 3, (double)mi.ndcMin[0],
+            (double)mi.ndcMax[0], (double)mi.ndcMin[1], (double)mi.ndcMax[1], 100.0 * mi.coverage, r.fov[0] * 57.29578,
+            r.fov[1] * 57.29578, r.fov[2] * 57.29578, r.fov[3] * 57.29578);
+        return;
+    }
+    g_hm.tris[view] = mi.tris;
+    if (!HiddenMask::Upload(dev, view, g_hm.tri[view], mi.tris, g_hm.depth)) return;
+    g_hm.usable[view] = true;
+    for (int e = 0; e < kMaxEyes; ++e) g_hm.checkedGen[e] = 0;   // the centre check runs again for this mesh
+    LogDbg("hidden area mask: view %d mesh ready (gen %llu): %u vertices, %u triangles -> NDC x %+.3f..%+.3f y %+.3f..%+.3f, covers "
+        "%.1f %% of the eye picture; fov L%+.1f R%+.1f U%+.1f D%+.1f deg, fov centre uv (%.3f, %.3f); depth value %.1f",
+        view, (unsigned long long)r.gen, r.nv, mi.tris, (double)mi.ndcMin[0], (double)mi.ndcMax[0], (double)mi.ndcMin[1],
+        (double)mi.ndcMax[1], 100.0 * mi.coverage, r.fov[0] * 57.29578, r.fov[1] * 57.29578, r.fov[2] * 57.29578,
+        r.fov[3] * 57.29578, u, v, (double)g_hm.depth);
+}
+// The (eye, view) check against the eye's measured projection (once per mesh gen). True = this eye may get that view's mask.
+bool HmCheckEye(int eye, int view) {
+    if (g_hm.checkedGen[eye] == g_hm.gen[view] && g_hm.checkedView[eye] == view) return g_hm.checkOk[eye];
+    float mu = 0.5f, mv = 0.5f;
+    if (!VrEyeCentre(eye, &mu, &mv)) { ++g_hm.notChecked; return false; }   // not measured yet: no mask (checked again next pass)
+    double u, v;
+    HmFovCentre(g_hm.fov[view], &u, &v);
+    const double du = u - mu, dv = v - mv;
+    bool ok = std::fabs(du) <= 0.03 && std::fabs(dv) <= 0.03;
+    char scaleTxt[160] = "projection scale not measured";
+    const EyeScale& es = g_eyeScale[eye];
+    if (es.have) {
+        const double sx = 2.0 / (std::tan((double)g_hm.fov[view][1]) - std::tan((double)g_hm.fov[view][0]));
+        const double sy = 2.0 / (std::tan((double)g_hm.fov[view][2]) - std::tan((double)g_hm.fov[view][3]));
+        const double rx = sx / (double)es.x, ry = sy / (double)es.y;
+        const bool sOk = std::fabs(rx - 1.0) <= 0.05 && std::fabs(ry - 1.0) <= 0.05;
+        snprintf(scaleTxt, sizeof(scaleTxt), "fov scale %.3f / %.3f vs measured |P00| %.3f / |P11| %.3f (ratio %.3f / %.3f)%s", sx, sy,
+                 (double)es.x, (double)es.y, rx, ry, sOk ? "" : " -- MISMATCH");
+        ok = ok && sOk;
+    }
+    g_hm.checkedGen[eye] = g_hm.gen[view];
+    g_hm.checkedView[eye] = view;
+    g_hm.checkOk[eye] = ok;
+    if (ok) {
+        Log("hidden area mask: eye %d / OpenXR view %d checked -- the view's fov centre uv (%.3f, %.3f) = the eye's optical centre "
+            "(%.3f, %.3f) (off by %+.3f, %+.3f); %s", eye, view, u, v, (double)mu, (double)mv, du, dv, scaleTxt);
+    } else {
+        ++g_hm.checkBad;
+        LogErr("hidden area mask: eye %d / OpenXR view %d does NOT match -- the view's fov centre uv (%.3f, %.3f) vs the eye's optical "
+            "centre (%.3f, %.3f) (off by %+.3f, %+.3f; limit 0.03); %s -- no mask for this eye (the game's picture is not the "
+            "submitted fov, or the eye -> view map is wrong)", eye, view, u, v, (double)mu, (double)mv, du, dv, scaleTxt);
+    }
+    return ok;
+}
+// Every >= 10 s (log level 4): one "hidden area mask @" line.
+void HmMaybeLogStats() {
+    if (!LogDebugLevel()) return;
+    const uint64_t now = GetTickCount64();
+    if (!g_hm.lastLogMs) { g_hm.lastLogMs = now; return; }
+    if (now - g_hm.lastLogMs < 10000) return;
+    const uint64_t cur[16] = { g_hm.drawn[0], g_hm.drawn[1], g_hm.noEye, g_hm.disagree, g_hm.noView, g_hm.noMesh, g_hm.notChecked,
+                               g_hm.checkBad, g_hm.notWorld, g_hm.depthVal, g_hm.notReady, g_hm.eyeChecks, g_hm.eyeMisses,
+                               g_hm.reCleared, 0, 0 };
+    uint64_t dl[16];
+    for (int i = 0; i < 16; ++i) dl[i] = cur[i] - g_hm.last[i];
+    const XrHook::HiddenStats xs = XrHook::GetHiddenStats();
+    LogDbg("hidden area mask @%.0f s: masks drawn eye 0 %llu / eye 1 %llu; passes without: no certain eye %llu, eye sources disagree "
+        "%llu, eye -> view not known %llu, no usable mesh %llu, optical centre not measured %llu, eye / view mismatch %llu, no world "
+        "pass %llu, other clear value %llu, shader not ready %llu; blit check: eye misses %llu of %llu, depth cleared again after the "
+        "mask %llu | meshes: view 0 %u tris (%.1f %%), view 1 %u tris (%.1f %%); eye 0 = view %d (run %d), eye 1 = view %d (run %d); "
+        "OpenXR: extension state %d, function %s, %llu queries, %llu mask-changed events%s",
+        (double)(now - g_hm.lastLogMs) / 1000.0, (unsigned long long)dl[0], (unsigned long long)dl[1], (unsigned long long)dl[2],
+        (unsigned long long)dl[3], (unsigned long long)dl[4], (unsigned long long)dl[5], (unsigned long long)dl[6],
+        (unsigned long long)dl[7], (unsigned long long)dl[8], (unsigned long long)dl[9], (unsigned long long)dl[10],
+        (unsigned long long)dl[12], (unsigned long long)dl[11], (unsigned long long)dl[13],
+        g_hm.usable[0] ? g_hm.tris[0] : 0u, g_hm.usable[0] ? 100.0 * g_hm.info[0].coverage : 0.0,
+        g_hm.usable[1] ? g_hm.tris[1] : 0u, g_hm.usable[1] ? 100.0 * g_hm.info[1].coverage : 0.0,
+        g_hm.eyeView[0], g_hm.eyeRun[0], g_hm.eyeView[1], g_hm.eyeRun[1], xs.ext, xs.fn ? "resolved" : "not resolved",
+        (unsigned long long)xs.queries, (unsigned long long)xs.events, xs.failed ? ", query FAILED for this session" : "");
+    g_hm.lastLogMs = now;
+    memcpy(g_hm.last, cur, sizeof(cur));
+}
+void HmOnSceneClear(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v, UINT fl, FLOAT d, bool started) {
+    if (!started || !(fl & D3D11_CLEAR_DEPTH) || g_flatMode || !g_passSeq) return;
+    CpuProf::Block cpb(CpuProf::kBHmask);              // phase 40 CPU profiler row "hmask"
+    HmMaybeLogStats();
+    float nearest;
+    if (d == 0.0f) nearest = 1.0f;                     // reversed Z (ETS2 / ATS): 0 = far, 1 = near
+    else if (d == 1.0f) nearest = 0.0f;
+    else {
+        ++g_hm.depthVal;
+        if (!g_hm.depthValLogged) {
+            g_hm.depthValLogged = true;
+            LogWarn("hidden area mask: the scene depth is cleared to %.4f (neither 0 nor 1) -- no mask for such passes", (double)d);
+        }
+        return;
+    }
+    const uint64_t fr = g_frames.load(std::memory_order_relaxed);
+    if (fr > g_lastGbufFrame + 2) { ++g_hm.notWorld; return; }   // no world G-buffer bind lately (menu / preview screens)
+    const uint64_t s = g_passSeq - 1;                  // the pass this clear started
+    int src = 0, srcEye[4] = { -1, -1, -1, -1 };
+    bool disagree = false;
+    const int eye = VrsDecideEye(s, nullptr, &src, srcEye, &disagree);
+    if (disagree) { ++g_hm.disagree; return; }
+    if (eye < 0 || eye >= kMaxEyes) { ++g_hm.noEye; return; }
+    ID3D11Device* dev = nullptr;
+    ctx->GetDevice(&dev);
+    if (!dev) return;
+    dev->Release();                                    // identity only: the context keeps its device alive
+    if (g_hm.dev != dev) {                             // (first use / device change: the buffers belong to the old device;
+        HiddenMask::Reset();                           //  the eye -> view map and the statistics stay)
+        for (int k = 0; k < 2; ++k) { g_hm.gen[k] = 0; g_hm.usable[k] = false; g_hm.tris[k] = 0; }
+        for (int e = 0; e < kMaxEyes; ++e) g_hm.checkedGen[e] = 0;
+        g_hm.depth = -1.0f;
+        g_hm.dev = dev;
+    }
+    if (!HiddenMask::Ensure(dev)) {
+        ++g_hm.notReady;
+        return;
+    }
+    // the newest meshes (both views: the centre-match fallback of HmViewOfEye compares them) + the depth value they carry
+    if (g_hm.depth != nearest) {
+        g_hm.depth = nearest;
+        for (int k = 0; k < 2; ++k)
+            if (g_hm.usable[k]) g_hm.usable[k] = HiddenMask::Upload(dev, k, g_hm.tri[k], g_hm.tris[k], nearest);
+    }
+    for (int k = 0; k < 2; ++k)
+        if (XrHook::HiddenMaskRaw(k, g_hm.gen[k], &g_hmRaw)) HmTakeMesh(k, dev);
+    const int view = HmViewOfEye(eye);
+    if (view < 0) { ++g_hm.noView; return; }
+    if (!g_hm.usable[view] || !HiddenMask::HasMesh(view)) { ++g_hm.noMesh; return; }
+    if (!HmCheckEye(eye, view)) return;                // (counted inside)
+    ID3D11Resource* res = nullptr;
+    v->GetResource(&res);
+    D3D11_TEXTURE2D_DESC td{};
+    bool texOk = false;
+    if (res) {
+        ID3D11Texture2D* t2 = nullptr;
+        if (SUCCEEDED(res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&t2)) && t2) { t2->GetDesc(&td); t2->Release(); texOk = true; }
+        res->Release();
+    }
+    if (!texOk || td.SampleDesc.Count != 1 || !td.Width || !td.Height) { ++g_hm.noMesh; return; }
+    t_inDlaa = true;                                   // the mod's own work (hooks pass through; VRS pauses)
+    const bool drew = HiddenMask::Draw(ctx, v, td.Width, td.Height, view);
+    t_inDlaa = false;
+    if (!drew) { ++g_hm.notReady; return; }
+    ++g_hm.drawn[eye];
+    g_hm.pred[s & 7] = { s, eye };
+    if (!g_hm.firstLogged) {
+        g_hm.firstLogged = true;
+        Log("hidden area mask: FIRST mask drawn -- pass s=%llu, eye %d = OpenXR view %d (eye sources:%s%s), scene depth %ux%u fmt %d "
+            "cleared to %.1f -> mask depth %.1f, %u triangles covering %.1f %% of the picture (Present #%llu)", (unsigned long long)s,
+            eye, view, (src & kVrsSrcRing) ? " RT-cycle" : "", (src & kVrsSrcPair) ? " frame-pair" : "", td.Width, td.Height,
+            (int)td.Format, (double)d, (double)nearest, g_hm.tris[view], 100.0 * g_hm.info[view].coverage, (unsigned long long)fr);
+    }
+}
+// the ini / menu value -> XrHook (the meshes are fetched only while on)
+void HmApplyConfig() { XrHook::HiddenMaskActive(g_xrHiddenMask != 0); }
+void VrsApplyConfig() {
+    Vrs::Configure(g_vrsOn, g_vrsInner, g_vrsOuter, g_vrsQuality, g_vrsDebug && LogDebugLevel() ? 1 : 0, g_vrsPasses);
+}
 #else
-inline void VrsOnBind(ID3D11DeviceContext*) {}       // (no VRS without WITH_DLAA)
+inline void VrsOnBind(ID3D11DeviceContext*, UINT, ID3D11RenderTargetView* const*, const void*) {}   // (no VRS without WITH_DLAA)
 inline void VrsNoteBlit(uint64_t, int, void*, void*) {}
 #endif
 
@@ -9074,7 +9629,7 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
             g_needFirstPass = false;
             StartPass(ctx, false);
             SpanBeginPending(ctx);                    // no clear follows: the spans start at this bind
-        } else if (g_sdAliasN && g_passSeq && g_ring[(g_passSeq - 1) % kRing].depth != g_sceneDepth) {
+        } else if (g_sdAliasN && g_passSeq && g_ring[SlotOf(g_passSeq - 1)].depth != g_sceneDepth) {
             // v0.10.3 issue #9: a G-buffer bind on ANOTHER same-size scene depth than the newest pass's (the first frame with a
             // second / recreated depth: its clear ran before it was known, so no clear started its pass). The newest pass
             // already drew its G-buffer (g_depthDirty) -> this bind starts the new pass (the previous one is snapshotted on
@@ -9088,11 +9643,11 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
                 StartPass(ctx, true);
                 SpanBeginPending(ctx);
             } else {
-                g_ring[(g_passSeq - 1) % kRing].depth = g_sceneDepth;
+                g_ring[SlotOf(g_passSeq - 1)].depth = g_sceneDepth;
             }
         }
         g_depthDirty = true;                          // scene depth now holds G-buffer content
-        ++g_ring[(g_passSeq - 1) % kRing].gbufBinds;  // v0.6.1 (g_passSeq >= 1 here): every qualifying bind
+        ++g_ring[SlotOf(g_passSeq - 1)].gbufBinds;  // v0.6.1 (g_passSeq >= 1 here): every qualifying bind
     }
 #ifdef WITH_DLAA
     ObjOnBind(ctx, sceneDsv);                      // v0.9.0 per-object MVs: enter / leave the stencil-id state
@@ -9100,7 +9655,7 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
     (void)sceneDsv;
 #endif
     ReconcileViewports(ctx, false);       // no-op unless the shift state changed
-    VrsOnBind(ctx);                       // phase 34: an eye's world scene pass -> VRS bracket (no-op unless vrs = 1 in VR)
+    VrsOnBind(ctx, n, rtvs, bindDepth);   // phase 34: an eye's world scene pass (phase 42: + lighting) -> VRS bracket (no-op unless vrs = 1 in VR)
 #ifdef WITH_DLAA
     if (gpOn) {                           // phase 36: timestamp 2 = this bind's class starts after the mod's bind-time work
         GpuPass::BindEnd(ctx, gpCls);
@@ -9459,12 +10014,13 @@ void SnapshotStep(ID3D11DeviceContext* ctx, int eye, ID3D11Texture2D* blitTex, c
         wcscat_s(g_snapDir, sub);
         CreateDirectoryW(g_snapDir, nullptr);
         LogDbg("snapshot: folder dlaa_snap\\%03d_blit%llu", s_snapRun, (unsigned long long)si.frame);
-        g_snapLeft = 2 * (g_vrMode ? kMaxEyes : 1); g_snapIdx = 0;
+        g_snapLeft = 2 * (g_vrMode ? 2 : FlatDlaaViewCount()); g_snapIdx = 0;   // v0.12.0 issue #12: VR 2 eyes, flat N views (<= cap), flat 1
     }
     SceneDlaa& dl = g_dlaa[eye];
     const int i = g_snapIdx;
     char sfx[8] = "";
     if (g_vrMode) snprintf(sfx, sizeof(sfx), "_e%d", eye);
+    else if (FlatViewCount() >= 2) snprintf(sfx, sizeof(sfx), "_v%d", eye);   // v0.12.0 issue #12
     wchar_t path[MAX_PATH]; char nm[96];
     auto P = [&](const char* base, const char* ext) {
         snprintf(nm, sizeof(nm), "%s_%d%s.%s", base, i, sfx, ext);
@@ -9556,7 +10112,7 @@ constexpr uint32_t kAnomalyLogCap = 80;
 bool             g_sampleDone    = false;        // first "pass sample" line written
 uint64_t         g_nextSampleBlit = 0;           // next "pass sample" at this g_blitCount
 constexpr uint64_t kSampleEvery  = 3000;
-int64_t          g_eyeLastBlitT[kMaxEyes] = {};  // QPC of the previous matched blit per eye
+int64_t          g_eyeLastBlitT[kMaxViews] = {}; // QPC of the previous matched blit per eye / view (v0.12.0 issue #12)
 
 void LogPassRecord(const char* prefix, int eye, const PassSlot& slot, int lgW, int lgC, int64_t now,
                    double eyeIvMs, const char* note) {
@@ -9622,9 +10178,10 @@ bool ClassifyRecord(int eye, const PassSlot& slot, uint64_t gen, int64_t now, do
 // -- every eye's per-draw consensus of that layer is healthy (CameraMv::MedoidDropBits; VR: both eyes, and only once the eye map
 // is settled: the eye verdicts read those candidates). A failed consensus clears its bit at the next Run (re-arm).
 void UpdateMedoidDrop(int eye, SceneDlaa& dl) {
-    if (eye < 0 || eye > 1) return;
+    if (eye < 0 || eye >= kMaxViews) return;
     g_eyeDropBits[eye] = (g_didCfg && g_mvOn.load(std::memory_order_relaxed)) ? dl.Mv().MedoidDropBits() : 0;
     uint8_t bits = g_vrMode ? (uint8_t)(g_eyeDropBits[0] & g_eyeDropBits[1]) : g_eyeDropBits[0];
+    for (int v = 1, nv = g_vrMode ? 0 : FlatDlaaViewCount(); v < nv; ++v) bits &= g_eyeDropBits[v];   // v0.12.0 issue #12: all views
     if (g_vrMode && bits) {
         bool settled = g_eyeMapN >= 6;
         for (int i = 0; settled && i < g_eyeMapN; ++i)
@@ -9757,8 +10314,9 @@ bool IsRgbaBgraFamily(DXGI_FORMAT f) {
 // v0.7.9 launch-mode fallback (see g_eyeBlitEver). Both switches drop the outstanding passes (they belong to the old
 // mode's pairing), every DLSS / MV history and the per-mode detection, exactly like a fresh start in the new mode.
 void DropPassesForModeSwitch() {
-    while (g_fifoHead < g_passSeq) g_ring[g_fifoHead++ % kRing].consumed = true;
+    while (g_fifoHead < g_passSeq) g_ring[SlotOf(g_fifoHead++)].consumed = true;
     g_flatMode = false; g_vrMode = false;                // re-detected at the next matched blit
+    g_fv.Reset(); g_fvPhaseOff = 0; g_fvPerm.Reset();                    // v0.12.0 issue #12: flat multi-view detected again
     g_eyeMapN = 0; g_eyeMapLogged = false; g_prevBlitRt = nullptr; g_lastUnderflowBlit = 0;
     for (EyeMapEntry& e : g_eyeMap) e.score = 0;
     for (bool& b : g_eyeLogged) b = false;
@@ -9801,7 +10359,153 @@ void BackToVr(const D3D11_TEXTURE2D_DESC& bd) {
         (int)bd.Format, (unsigned long long)g_frames.load(), g_vrArea);
 }
 
+// ---- v0.12.0 issue #12 round 2: FLAT BLIT PLACEMENT + DIAGNOSTICS ------------------------------------------------------------------
+// The first in-game test (ATS 1.61-era build, 3 x 1920x1080 Surround = 5760x1080, r_multimon_mode 2, r_scale_x 0.75 -> scene
+// 1440x1080) had 3 matched backbuffer blits per Present, each a 3-vertex full-screen draw with viewport 0 = (0,0) 5760x1080:
+// the viewport does not place the views. ReadBlitPlacement adds the scissor (FlatViews::PlaceBlit); FlatBlitDiag logs the raw
+// state of the first kFvDiagBlits flat blits (+ one Present more after the first layout verdict) so the next log is conclusive
+// whatever the game uses: every viewport, every scissor rect + ScissorEnable, the draw, and the first 64 bytes of VS / PS cbuffer 0.
+UINT             g_blitStartVertex = 0;          // hkDraw: StartVertexLocation of the Draw being matched (diagnostics only)
+constexpr int    kFvDiagBlits     = 12;
+int              g_fvDiagLeft     = kFvDiagBlits; // flat blits still to log in full
+bool             g_fvDiagRearmed  = false;        // the "after the layout verdict" round was armed
+uint64_t         g_fvVpFallbacks  = 0;            // flat blits whose viewport reached outside RT0 / was empty (total)
+FlatViews::Placement ReadBlitPlacement(ID3D11DeviceContext* ctx, UINT rtW, UINT rtH) {
+    D3D11_VIEWPORT vp0{};
+    UINT nvp = 0;
+    ctx->RSGetViewports(&nvp, nullptr);                   // bound count (0 = none)
+    if (nvp >= 1) { nvp = 1; ctx->RSGetViewports(&nvp, &vp0); }
+    bool scOn = false;
+    {
+        ID3D11RasterizerState* rs = nullptr;
+        ctx->RSGetState(&rs);                             // null = the default state (ScissorEnable FALSE)
+        if (rs) { D3D11_RASTERIZER_DESC rd{}; rs->GetDesc(&rd); scOn = rd.ScissorEnable != FALSE; rs->Release(); }
+    }
+    D3D11_RECT sc{};
+    UINT nsc = 0;
+    if (scOn) {
+        ctx->RSGetScissorRects(&nsc, nullptr);
+        if (nsc >= 1) { nsc = 1; ctx->RSGetScissorRects(&nsc, &sc); }
+    }
+    const FlatViews::Placement p = FlatViews::PlaceBlit((int32_t)rtW, (int32_t)rtH, nvp >= 1, vp0.TopLeftX, vp0.TopLeftY, vp0.Width,
+                                                        vp0.Height, scOn, nsc >= 1, (int32_t)sc.left, (int32_t)sc.top,
+                                                        (int32_t)sc.right, (int32_t)sc.bottom);
+    if ((p.flags & (FlatViews::kPlVpClipped | FlatViews::kPlVpOutside)) && g_fvVpFallbacks++ < 5)
+        LogWarn("flat blit placement: viewport 0 (%.1f,%.1f %.1fx%.1f) %s RT0 %ux%u -- %s (Present #%llu; #%llu)", (double)vp0.TopLeftX,
+            (double)vp0.TopLeftY, (double)vp0.Width, (double)vp0.Height,
+            (p.flags & FlatViews::kPlVpOutside) ? "lies outside / is empty in" : "reaches outside", rtW, rtH,
+            (p.flags & FlatViews::kPlVpOutside) ? "the whole RT is used" : "clipped to RT0 (v0.11 used the whole RT here)",
+            (unsigned long long)g_frames.load(std::memory_order_relaxed), (unsigned long long)g_fvVpFallbacks);
+    return p;
+}
+// " 16 floats" of the first 64 bytes cbuffer slot 0 of the VS (ps false) / PS reads at its D3D11.1 offset. A staging copy + a
+// blocking Map: only for the few diagnostics blits.
+void DiagCb0(ID3D11DeviceContext* ctx, bool ps, char* out, size_t cap) {
+    snprintf(out, cap, "none");
+    ID3D11Buffer* cb = nullptr;
+    UINT first = 0, num = 0;
+    ID3D11DeviceContext1* c1 = nullptr;                   // (raw: this block builds without WITH_DLAA too, no WRL there)
+    if (SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&c1)) && c1) {
+        if (ps) c1->PSGetConstantBuffers1(0, 1, &cb, &first, &num); else c1->VSGetConstantBuffers1(0, 1, &cb, &first, &num);
+        c1->Release();
+    } else {
+        if (ps) ctx->PSGetConstantBuffers(0, 1, &cb); else ctx->VSGetConstantBuffers(0, 1, &cb);
+    }
+    if (!cb) return;
+    D3D11_BUFFER_DESC bd{};
+    cb->GetDesc(&bd);
+    const UINT off = first * 16u;
+    const UINT len = off < bd.ByteWidth ? (bd.ByteWidth - off < 64u ? bd.ByteWidth - off : 64u) : 0u;
+    int o = snprintf(out, cap, "%u bytes, offset %u (constants %u+%u):", bd.ByteWidth, off, first, num);
+    ID3D11Device* dev = nullptr;
+    cb->GetDevice(&dev);
+    if (dev && len) {
+        D3D11_BUFFER_DESC sd{};
+        sd.ByteWidth = 64; sd.Usage = D3D11_USAGE_STAGING; sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        ID3D11Buffer* stg = nullptr;
+        if (SUCCEEDED(dev->CreateBuffer(&sd, nullptr, &stg)) && stg) {
+            const D3D11_BOX box{ off, 0, 0, off + len, 1, 1 };
+            const bool was = t_inDlaa;
+            t_inDlaa = true;
+            ctx->CopySubresourceRegion(stg, 0, 0, 0, 0, cb, 0, &box);
+            D3D11_MAPPED_SUBRESOURCE m{};
+            if (SUCCEEDED(ctx->Map(stg, 0, D3D11_MAP_READ, 0, &m)) && m.pData) {
+                const float* f = (const float*)m.pData;
+                for (UINT i = 0; i < len / 4u && o > 0 && o < (int)cap; ++i) o += snprintf(out + o, cap - (size_t)o, " %g", (double)f[i]);
+                ctx->Unmap(stg, 0);
+            } else if (o > 0 && o < (int)cap) {
+                snprintf(out + o, cap - (size_t)o, " (Map failed)");
+            }
+            t_inDlaa = was;
+            stg->Release();
+        }
+    }
+    if (dev) dev->Release();
+    cb->Release();
+}
+void FlatBlitDiag(ID3D11DeviceContext* ctx, const D3D11_TEXTURE2D_DESC& rt, const D3D11_TEXTURE2D_DESC& src,
+                  const FlatViews::Placement& p, UINT verts, int view) {
+    if (g_fvDiagLeft <= 0) return;
+    --g_fvDiagLeft;
+    D3D11_VIEWPORT vps[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE] = {};
+    UINT nvp = 0;
+    ctx->RSGetViewports(&nvp, nullptr);
+    if (nvp > 4) nvp = 4;
+    if (nvp) ctx->RSGetViewports(&nvp, vps);
+    D3D11_RECT scs[4] = {};
+    UINT nsc = 0;
+    ctx->RSGetScissorRects(&nsc, nullptr);
+    if (nsc > 4) nsc = 4;
+    if (nsc) ctx->RSGetScissorRects(&nsc, scs);
+    int scOn = -1;                                        // -1 = default rasterizer state (null)
+    {
+        ID3D11RasterizerState* rs = nullptr;
+        ctx->RSGetState(&rs);
+        if (rs) { D3D11_RASTERIZER_DESC rd{}; rs->GetDesc(&rd); scOn = rd.ScissorEnable != FALSE ? 1 : 0; rs->Release(); }
+    }
+    char vt[384] = "", st[256] = "";
+    int o = 0;
+    for (UINT i = 0; i < nvp && o >= 0 && o < (int)sizeof(vt); ++i)
+        o += snprintf(vt + o, sizeof(vt) - (size_t)o, " [%u] %.2f,%.2f %.2fx%.2f z %.2f..%.2f", i, (double)vps[i].TopLeftX,
+                      (double)vps[i].TopLeftY, (double)vps[i].Width, (double)vps[i].Height, (double)vps[i].MinDepth, (double)vps[i].MaxDepth);
+    o = 0;
+    for (UINT i = 0; i < nsc && o >= 0 && o < (int)sizeof(st); ++i)
+        o += snprintf(st + o, sizeof(st) - (size_t)o, " [%u] (%ld,%ld)-(%ld,%ld)", i, (long)scs[i].left, (long)scs[i].top,
+                      (long)scs[i].right, (long)scs[i].bottom);
+    char vsCb[512], psCb[512];
+    DiagCb0(ctx, false, vsCb, sizeof(vsCb));
+    DiagCb0(ctx, true, psCb, sizeof(psCb));
+    Log("flat blit diag (v0.12.0 #12, %d left): Present #%llu blit %d of this Present: Draw(%u verts, start %u), src %ux%u -> RT %ux%u | "
+        "viewports %u:%s | ScissorEnable %s, scissor rects %u:%s | rect for the detector (%d,%d) %dx%d [flags 0x%x:%s%s%s%s%s] -> view %d "
+        "(detector: %d view(s), candidate run %d) | VS cb0 %s | PS cb0 %s", g_fvDiagLeft,
+        (unsigned long long)g_frames.load(std::memory_order_relaxed), g_fv.BlitIndex(), verts, g_blitStartVertex, src.Width, src.Height,
+        rt.Width, rt.Height, nvp, nvp ? vt : " none", scOn < 0 ? "default (off)" : (scOn ? "ON" : "off"), nsc, nsc ? st : " none",
+        p.eff.x, p.eff.y, p.eff.w, p.eff.h, p.flags, (p.flags & FlatViews::kPlVpNone) ? " no-viewport" : "",
+        (p.flags & FlatViews::kPlVpClipped) ? " viewport-clipped" : "", (p.flags & FlatViews::kPlVpOutside) ? " viewport-outside" : "",
+        (p.flags & FlatViews::kPlScissor) ? " scissor" : "", (p.flags & FlatViews::kPlScEmpty) ? " scissor-empty" : "", view,
+        g_fv.Views(), g_fv.Stable(), vsCb, psCb);
+}
+
 #ifdef WITH_DLAA
+// v0.12.0 issue #12 round 5 (flat_views.h "BLIT <-> PASS PAIRING"): a tonemap draw (scene-sized RGBA16F SRV0 -> scene-sized LDR RT0)
+// reads the forward colour of a pass. The NEWEST outstanding pass whose forward colour (PassSlot::fwdTex, FwdOnBind) is that SRV
+// now owns the RT: its toneRt = rt, and every other outstanding pass that had this RT loses it (the RT is re-used inside a frame:
+// ATS tonemaps pass L and later pass R into the same RT). The blit that samples rt takes that pass (HandlePossibleBlit).
+void FvNoteTonemap(const void* src, const void* rt) {
+    if (!src || !rt) return;
+    PassSlot* owner = nullptr;
+    for (uint64_t q = g_passSeq; q-- > g_fifoHead;) {
+        PassSlot& p = g_ring[SlotOf(q)];
+        if (!p.consumed && p.fwdTex == src) { owner = &p; break; }
+    }
+    for (uint64_t q = g_fifoHead; q < g_passSeq; ++q) {
+        PassSlot& p = g_ring[SlotOf(q)];
+        if (&p != owner && p.toneRt == rt) p.toneRt = nullptr;
+    }
+    if (owner) { owner->toneRt = rt; ++g_fvTonemaps; }
+    else ++g_fvToneUnlinked;
+}
+
 // ---- v0.10.0 phase 4: DLAA BEFORE THE TONEMAP (flat DLAA mode; dlaa.ini dlaa_pre_tonemap = 1, key_pre_tonemap Alt+F7) -------
 // WHY: the blit-time DLAA (v0.3.1 design) works on the tone-mapped 8-bit sRGB picture; NGX is trained for LINEAR HDR input,
 // and post-tonemap input is the known cause of the remaining thin bright line shimmer (lane paint, wires, rail edges, far
@@ -9849,6 +10553,9 @@ const char* PreIneligible() {
     if (!g_preOn.load(std::memory_order_relaxed)) return "pre-tonemap switched off (key_pre_tonemap)";
     if (g_preFailed) return "the pre-tonemap HDR unit could not be built (latched; key_pre_tonemap twice retries)";
     if (g_vrMode || !g_flatMode) return g_vrMode ? "VR (eye textures: blit path)" : "flat not confirmed yet";
+    // v0.12.0 issue #12: the pre-tonemap run happens before the pass's blit, i.e. before its VIEW is known, on unit 0 -- with several
+    // views (or while a layout is being confirmed) the blit path runs each view's own unit
+    if (FlatMvSeen()) return "flat multi-view (several screens: the blit path, one DLAA unit per view)";
     if (g_hdrOut) return "HDR output (the game's RGBA16F output path: blit path)";
     if (strcmp(g_upTag, "off") != 0) return "DLSS upscaling (render < output: the blit path upscales)";
     if (!g_dlaaOn.load(std::memory_order_relaxed)) return "DLAA off";
@@ -9951,7 +10658,7 @@ void PreTonemapPoint(ID3D11DeviceContext1* ctx, PassSlot& slot, bool atLeave) {
     }
     if (o.warmHdr && F) { slot.warmHdr = true; slot.warmTex = F; }
     if (!o.runPre) return;
-    if (g_resetNext) { g_resetEyes = (1 << kMaxEyes) - 1; g_resetNext = false; }
+    if (g_resetNext) { g_resetEyes = (1 << kMaxViews) - 1; g_resetNext = false; }
     bool reset = (g_resetEyes & 1) != 0;
     g_resetEyes &= ~1;
     // a stale HDR history (the unit did not evaluate for > kResumeKeepRuns evaluations: a mode change / forced switch) starts over
@@ -9966,7 +10673,7 @@ void PreTonemapPoint(ID3D11DeviceContext1* ctx, PassSlot& slot, bool atLeave) {
     const bool candBad = ClassifyRecord(0, slot, dl.Mv().InvalidateCount(), now, ivMs);
     slot.candBad = candBad;
     const float njx = (float)g_signX * slot.jx, njy = (float)g_signY * slot.jy;
-    const size_t k = (size_t)(slot.s % kRing);
+    const size_t k = SlotOf(slot.s);
     GpuPerf::SetPass(slot.s);                             // v0.10.0 phase 8: flat = eye 0
     GpuPerf::NoteEye(slot.s, 0);
     t_inDlaa = true;
@@ -9975,6 +10682,7 @@ void PreTonemapPoint(ID3D11DeviceContext1* ctx, PassSlot& slot, bool atLeave) {
                            g_didCfg ? &g_didFwdRing[k] : nullptr);
     t_inDlaa = false;
     UpdateMedoidDrop(0, dl);                              // v0.10.0 phase 8
+    if (ok && dl.LastReset()) MirTurnsNoteCut(0);         // phase 41: a camera cut -> the mirrors run out of turn (if in turns)
     if (o.switched > 0)
         PreStage(true, nullptr, td.Width, td.Height,
                  o.forced ? "switched after 2 x the hysteresis without a warm HDR unit (its history starts over)"
@@ -10016,7 +10724,7 @@ void PreTonemapPoint(ID3D11DeviceContext1* ctx, PassSlot& slot, bool atLeave) {
 // leave = a second forward segment (its draws land on top of the anti-aliased picture): counted + logged.
 void FwdOnBind(void* fwd) {
     if (g_passSeq <= g_fifoHead) return;
-    PassSlot& slot = g_ring[(g_passSeq - 1) % kRing];
+    PassSlot& slot = g_ring[SlotOf(g_passSeq - 1)];
     if (slot.stageDone && slot.stageAtLeave) {
         ++g_fwdReentry;
         if (g_fwdReentryLogs++ < 5)
@@ -10035,7 +10743,7 @@ void FwdOnBind(void* fwd) {
 // decision runs here (PreTonemapPoint at the leave). The first leaves are logged with the binding that follows (diagnosis).
 void FwdOnLeave(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* rtvs, ID3D11Resource* bindDepth) {
     if (g_passSeq <= g_fifoHead) return;
-    PassSlot& slot = g_ring[(g_passSeq - 1) % kRing];
+    PassSlot& slot = g_ring[SlotOf(g_passSeq - 1)];
     if (slot.stageDone || !slot.fwdTex) return;
     ++g_fwdLeaveFirst;
     if (g_fwdLeaveLogs < 8) {
@@ -10206,6 +10914,9 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         if (rtSceneSized) {
             if (d.Format == DXGI_FORMAT_R16G16B16A16_FLOAT && d.Width == g_sceneW && d.Height == g_sceneH) {
                 g_tonemapTex = rtPtr;
+#ifdef WITH_DLAA
+                if (g_flatMvCfg) FvNoteTonemap(srcPtr, rtPtr);   // v0.12.0 issue #12 round 5: which pass this LDR RT now shows
+#endif
                 tex->Release();
                 return;
             }
@@ -10258,6 +10969,21 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         Log("VR detected at blit: eye identity from the blit render target (RT map)");
     }
     if (hdrBlit) ++g_hdrBlitCount;                       // v0.8.0 (matched and not skipped as mirror / fallback)
+    // v0.12.0 issue #12: flat multi-view. The pixels this blit can write (viewport 0 clipped to RT0, intersected with scissor rect 0
+    // when the rasterizer state enables the scissor test -- FlatViews::PlaceBlit; round 2: the first in-game test had the full-
+    // backbuffer viewport on all three blits) go to the detector; with a confirmed layout it returns this blit's VIEW (its rect's
+    // position, x then y), -1 = not in the layout, kBeyondCap = past the 8-view cap (both left alone below). flat_multiview 0: not
+    // called, every backbuffer blit is view 0 exactly as before. The first blits log their raw placement state (FlatBlitDiag).
+    int flatView = 0;
+    FlatViews::Rect flatVp;
+    FlatViews::Placement flatPl;
+    if (isBackbuffer && g_flatMvCfg) {
+        flatPl = ReadBlitPlacement(ctx, bd.Width, bd.Height);
+        flatVp = flatPl.eff;
+        flatView = g_fv.OnBlit(flatVp);
+        FlatBlitDiag(ctx, bd, d, flatPl, vertexCount, flatView);
+    }
+    const bool viewUnknown = flatView < 0;
 #ifdef WITH_DLAA
     // v0.7.0 DLSS upscale decision. Output = the blit's viewport 0 inside RT0 (rounded; the whole RT if the
     // viewport is missing or not inside it). Upscale only with dlss_upscale on (Ctrl+F4) AND output >= the scene
@@ -10281,6 +11007,13 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
                 vpUsed = true;
             }
         }
+        // v0.12.0 issue #12 round 2: a flat blit confined by the scissor (multi-monitor: one full-backbuffer triangle per screen) or
+        // with a viewport reaching outside RT0 outputs into ITS rect (FlatViews::PlaceBlit), not the whole backbuffer -- else DLSS
+        // would upscale each 1440x1080 view to 5760x1080. flat_multiview 0: unchanged.
+        if (isBackbuffer && g_flatMvCfg && (flatPl.flags & (FlatViews::kPlScissor | FlatViews::kPlVpClipped))) {
+            ox = (uint32_t)flatPl.eff.x; oy = (uint32_t)flatPl.eff.y; ow = (uint32_t)flatPl.eff.w; oh = (uint32_t)flatPl.eff.h;
+            vpUsed = true;
+        }
         const bool sizeUp = ow >= d.Width && oh >= d.Height && (ow > d.Width || oh > d.Height);
         char sizes[48];
         snprintf(sizes, sizeof(sizes), "%ux%u->%ux%u", d.Width, d.Height, ow, oh);
@@ -10293,9 +11026,15 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         if (up) snprintf(tag, sizeof(tag), "%s", sizes);
         else    snprintf(tag, sizeof(tag), "off");
         static bool upLogged = false;
-        if (!upLogged || strcmp(tag, g_upTag) != 0) {
+        // v0.12.0 issue #12: flat multi-view views of different sizes have different tags -- logged per view on a change of THAT
+        // view's tag (not on every switch between views); g_upTag keeps the last blit's tag as before
+        static char s_upTagView[kMaxViews][48] = {};
+        const int upView = isBackbuffer && flatView > 0 ? flatView : 0;
+        const bool upChanged = FlatViewCount() >= 2 ? strcmp(tag, s_upTagView[upView]) != 0 : strcmp(tag, g_upTag) != 0;
+        if (FlatViewCount() >= 2) strncpy_s(s_upTagView[upView], tag, _TRUNCATE);
+        strncpy_s(g_upTag, tag, _TRUNCATE);
+        if (!upLogged || upChanged) {
             upLogged = true;
-            strncpy_s(g_upTag, tag, _TRUNCATE);
             Log("DLSS upscale %s at blit #%llu: render (scene) %ux%u -> output %ux%u at (%u,%u) in RT %ux%u fmt=%d "
                 "(viewport %s: %.1f,%.1f %.1fx%.1f) | blit SRV0 view fmt=%d%s | RTV view fmt=%d%s | dlss_upscale=%d",
                 up ? "ACTIVE" : (!sizeUp ? "not applicable (output not larger than the scene)"
@@ -10341,7 +11080,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
             const double secs = g_rateChgT0 ? (double)(cpuT.t0 - g_rateChgT0) / qf : 0.0;
             const double bps  = secs > 0.0 ? (double)(kRateChgAt - kRateChgSkip) / secs : 0.0;
             Log("rate after change: blits/s=%.1f fps=%.1f [preset=%s sharp=%.1f r=%.1f area=%d up=%s lod=%.2f]",
-                bps, g_vrMode ? bps / 2.0 : bps, SceneDlaa::DlssPresetName(), (double)SceneDlaa::Sharpness(),
+                bps, bps / (double)ViewCount(), SceneDlaa::DlssPresetName(), (double)SceneDlaa::Sharpness(),   // v0.12.0 #12: / views
                 (double)SceneDlaa::SharpRadius(), SceneDlaa::Area(), g_upTag, (double)g_lodEff);
             g_rateChgBlit = 0;
         }
@@ -10373,7 +11112,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
 #endif
         const double wSecs     = (double)(cpuT.t0 - g_rateT0) / qf;
         const double blitsPerS = wSecs > 0.0 ? (double)(g_blitCount - g_rateBlit0) / wSecs : 0.0;
-        const double fps       = g_vrMode ? blitsPerS / 2.0 : blitsPerS;   // VR: 2 eye blits per frame
+        const double fps       = blitsPerS / (double)ViewCount();   // VR: 2 eye blits per frame; v0.12.0 issue #12: flat multi-view N
 #ifdef WITH_DLAA
         const char*  stPreset  = SceneDlaa::DlssPresetName();             // v0.5.7: state the rate belongs to
         const double stSharp   = (double)SceneDlaa::Sharpness();
@@ -10430,12 +11169,45 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
             (unsigned long long)g_rBig[1], (unsigned long long)g_rReads[1],
             (unsigned long long)g_dlaaFrames[0], (unsigned long long)g_dlaaFrames[1],
             cpuBlitMs, cpuMvMs, recPass, cpuObjMs, blitsPerS, fps,
-            g_vrMode ? "VR: fps = blits/s / 2" : "flat: fps = blits/s", kProfName[g_profile], stPreset, stSharp, stRadius, stArea,
+            g_vrMode ? "VR: fps = blits/s / 2" : (FlatViewCount() >= 2 ? "flat multi-view: fps = blits/s / views" : "flat: fps = blits/s"), kProfName[g_profile], stPreset, stSharp, stRadius, stArea,
             g_upTag, lodTag, (unsigned long long)frame);
         if (g_vrMode)                                      // v0.10.0 phase 24
             LogDbg("jitter (VR) @blit %llu: phase parity %d, corrections %llu (both eyes of a frame share one Halton phase; a "
                 "correction means a serial pair straddled two frames)", (unsigned long long)g_blitCount, g_vrPhaseOff,
                 (unsigned long long)g_vrPhaseFlips);
+        // v0.12.0 issue #12 round 4 (every mode): the rasterized-vs-told jitter check of the passes' first G-buffer draws
+        LogDbg("jitter check @blit %llu: %llu of %llu passes drew their first G-buffer draw with a different viewport shift than the "
+            "jitter DLSS is told (expect 0); passes started by a scene depth clear while a jittered binding was bound (viewport "
+            "re-shifted there): %llu", (unsigned long long)g_blitCount, (unsigned long long)g_cRastJitMismatch,
+            (unsigned long long)g_cRastJitPasses, (unsigned long long)g_cClearReshift);
+        if (FlatViewCount() >= 2) {                        // v0.12.0 issue #12: the per-view figures the FIFO stats line has for 2 eyes
+            const FlatViews::Layout& L = g_fv.Current();
+            char vt[1024], ord[64];
+            FvLayoutStr(vt, sizeof(vt), L);
+            FvOrderStr(ord, sizeof(ord), L);
+            char pv[1024] = "";
+            int o = 0;
+            for (int v = 0; v < FlatDlaaViewCount() && o >= 0 && o < (int)sizeof(pv); ++v)
+                o += snprintf(pv + o, sizeof(pv) - (size_t)o, "%s v%d: dlaa frames %llu, R |x|>0.25 %llu/%llu", v ? " |" : "", v,
+                              (unsigned long long)g_dlaaFrames[v], (unsigned long long)g_rBig[v], (unsigned long long)g_rReads[v]);
+            char pm[96] = "unknown";                       // round 5: the learned blit -> pass-position permutation
+            if (g_fvPerm.Known()) {
+                int po = 0;
+                for (int k = 0; k < g_fvPerm.N() && po >= 0 && po < (int)sizeof(pm); ++k)
+                    po += snprintf(pm + po, sizeof(pm) - (size_t)po, "%s%d", k ? " " : "", g_fvPerm.PosOfBlit(k));
+            }
+            LogDbg("flat multi-view @blit %llu: %d views (%d with DLAA):%s | blit order (view of blit 0..): %s | %s | blit -> pass: by "
+                "tonemap link %llu, by learned order %llu, FIFO %llu; pass positions of blit 0..: %s (order changes %llu); tonemaps linked "
+                "%llu / without a pass %llu | CHECK colour source != the pass's tonemap RT %llu (expect 0), pass without a tonemap RT %llu "
+                "| pass -> view predictions wrong %llu of %llu | blits outside the layout %llu, past the %d-view cap %llu, order mismatches "
+                "%llu, order changes %llu (R |x|>0.25 should stay near 0 per view: each view pairs only with itself)",
+                (unsigned long long)g_blitCount, L.n, FlatDlaaViewCount(), vt, ord, pv, (unsigned long long)g_fvPickLink,
+                (unsigned long long)g_fvPickPerm, (unsigned long long)g_fvPickFifo, pm, (unsigned long long)g_fvPerm.Changes(),
+                (unsigned long long)g_fvTonemaps, (unsigned long long)g_fvToneUnlinked, (unsigned long long)g_fvToneMismatch,
+                (unsigned long long)g_fvToneNone, (unsigned long long)g_fvPredMiss, (unsigned long long)g_fvPredN,
+                (unsigned long long)g_fvSkipped, FlatViews::kMaxViews, (unsigned long long)g_fv.BeyondCap(),
+                (unsigned long long)g_fv.OrderMismatch(), (unsigned long long)g_fv.OrderChanges());
+        }
 #ifdef WITH_DLAA
         if (stageAutoWin > 2)                                              // v0.10.0 phase 7
             LogWarn("DLAA stage: WARNING %llu automatic stage switches in this stats window (> 2; the hysteresis is %d passes) -- "
@@ -10475,14 +11247,59 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         tex->Release();
         return;
     }
-    PassSlot& slot = g_ring[g_fifoHead % kRing];
+    // v0.12.0 issue #12 round 5: in flat multi-view (confirmed or being confirmed) the blit takes the pass whose tonemapped picture it
+    // SAMPLES (FlatViews::PickPass: PassSlot::toneRt == SRV0), else the learned pass-position permutation, else the FIFO -- the
+    // passes run L C R but the blits C L R (RenderDoc), the FIFO paired the centre blit with the left pass. Out of order: the slot is
+    // consumed, the head moves past every consumed pass at the front (an older pass stays outstanding for its own blit; the window
+    // [head, seq) keeps every slot in it from being re-used). VR / single view: the FIFO exactly as before.
+    const uint64_t headBefore = g_fifoHead;              // the oldest outstanding pass (logs)
+    uint64_t cs = g_fifoHead;                            // the serial this blit consumes
+    int pickHow = FlatViews::kPickFifo;
 #ifdef WITH_DLAA
-    ObjRecord* const objRec = &g_objRing[g_fifoHead % kRing];   // v0.9.0 the same pass's object record
-    DrawIdRecord* const didRec = &g_didRing[g_fifoHead % kRing]; // v0.10.0 the same pass's draw record
-    DrawIdRecord* const didFwdRec = &g_didFwdRing[g_fifoHead % kRing];   // v0.10.0 phase 3: its forward draws
+    if (isBackbuffer && FlatMvSeen()) {
+        FlatViews::PassInfo win[kRing];
+        int wn = 0;
+        for (uint64_t q = g_fifoHead; q < g_passSeq && wn < kRing; ++q, ++wn) {
+            const PassSlot& p = g_ring[SlotOf(q)];
+            win[wn].s = p.s; win[wn].consumed = p.consumed; win[wn].frame = p.frameN; win[wn].pos = p.framePos; win[wn].toneRt = p.toneRt;
+        }
+        const int k = g_fv.BlitIndex();
+        const int i = FlatViews::PickPass(win, wn, srcPtr, frame, g_fvPerm.PosOfBlit(k), &pickHow);
+        if (i >= 0) cs = g_fifoHead + (uint64_t)i;
+        if (pickHow == FlatViews::kPickLink) { ++g_fvPickLink; g_fvPerm.Note(k, g_ring[SlotOf(cs)].framePos); }
+        else if (pickHow == FlatViews::kPickPerm) ++g_fvPickPerm;
+        else {
+            static int s_fifoWarn = 0;
+            ++g_fvPickFifo;
+            if (s_fifoWarn++ < 5)
+                LogWarn("flat multi-view: blit #%llu (blit %d of Present #%llu) found no pass by its tonemap source and no learned pass order "
+                    "-- the oldest outstanding pass s=%llu is used (FIFO; colour and depth may be of different cameras)",
+                    (unsigned long long)g_blitCount, k, (unsigned long long)frame, (unsigned long long)cs);
+        }
+    }
+#endif
+    PassSlot& slot = g_ring[SlotOf(cs)];
+#ifdef WITH_DLAA
+    ObjRecord* const objRec = &g_objRing[SlotOf(cs)];   // v0.9.0 the same pass's object record
+    DrawIdRecord* const didRec = &g_didRing[SlotOf(cs)]; // v0.10.0 the same pass's draw record
+    DrawIdRecord* const didFwdRec = &g_didFwdRing[SlotOf(cs)];   // v0.10.0 phase 3: its forward draws
 #endif
     slot.consumed = true;
-    ++g_fifoHead;
+    slot.pickHow = pickHow;
+    if (cs == g_fifoHead) ++g_fifoHead;
+    g_fifoHead = FlatViews::AdvanceHead(g_fifoHead, g_passSeq, [](uint64_t q) { return g_ring[SlotOf(q)].consumed; });
+    // round 5 CHECK (would have caught the bug): the pass this blit took must have been tonemapped into the RT the blit samples
+    if (isBackbuffer && FlatMvSeen()) {
+        if (!slot.toneRt) ++g_fvToneNone;
+        else if (slot.toneRt != srcPtr) {
+            static int s_toneWarn = 0;
+            ++g_fvToneMismatch;
+            if (s_toneWarn++ < 5)
+                LogWarn("flat multi-view: blit #%llu samples %p but its pass s=%llu was tonemapped into %p -- colour and depth / MVs of "
+                    "different cameras (pick %d; mismatch #%llu)", (unsigned long long)g_blitCount, srcPtr, (unsigned long long)slot.s,
+                    slot.toneRt, pickHow, (unsigned long long)g_fvToneMismatch);
+        }
+    }
     // v0.6.2 GPU spans: this pass's gbuf span ends (if no discard ended it) before any of our work; the frame's
     // scene span is marked to close after the game's Draw of this blit when it is the frame's clean last blit.
     SpanOnBlit(ctx, slot.s);
@@ -10490,8 +11307,49 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     const bool passive = g_passive.load(std::memory_order_relaxed);
     (void)passive;
     // Eye identity is authoritative from the blit render target (flat backbuffer = eye 0).
-    int eye = isBackbuffer ? 0 : EyeOfRT(rtPtr, (int)(slot.s & 1));
-    if (eye < 0 || eye >= kMaxEyes) eye = 0;
+    // v0.12.0 issue #12: flat multi-view -- the view from the blit's viewport (flatView above; an unknown view runs as 0 for the
+    // bookkeeping but is not evaluated, see viewUnknown below)
+    int eye = isBackbuffer ? (flatView > 0 ? flatView : 0) : EyeOfRT(rtPtr, (int)(slot.s & 1));
+    if (eye < 0 || eye >= (isBackbuffer ? kMaxViews : kMaxEyes)) eye = 0;
+    if (viewUnknown) {
+        // v0.12.0 issue #12: a backbuffer blit whose viewport is not one of the confirmed layout's views (the layout is changing:
+        // the detector drops it after kDropPresents such Presents). Its pass is consumed (the FIFO pairing stays intact) but no
+        // unit evaluates it -- feeding it to a view's unit would mix two cameras in that view's history (the issue #12 bug).
+        // A view past kMaxViews (flatView == kBeyondCap, logged once at the confirm) is skipped the same way, without a line.
+        if (flatView != FlatViews::kBeyondCap && g_fvSkipped++ < 5)
+            LogWarn("flat multi-view: blit #%llu viewport (%d,%d) %dx%d is not one of the %d confirmed views -- pass s=%llu consumed, "
+                "DLAA left alone for it (Present #%llu)", (unsigned long long)g_blitCount, flatVp.x, flatVp.y, flatVp.w, flatVp.h,
+                g_fv.Views(), (unsigned long long)slot.s, (unsigned long long)frame);
+#ifdef WITH_DLAA
+        if (g_slotPool) slot.twin.ReleaseToPool();
+#endif
+        tex->Release();
+        return;
+    }
+    if (isBackbuffer && g_fv.Views() >= 2) {
+        // round 5: the jitter phase is per frame from the pass's frame position (StartPass); the old blit-order offset learning was
+        // circular (it assumed the k-th pass of a frame = its k-th blit) and is gone. predView now comes from the learned
+        // permutation (-1 until it is known): checked against the view that consumed the pass.
+        if (slot.predView >= 0) {
+            ++g_fvPredN;
+            if (slot.predView != eye) ++g_fvPredMiss;
+        }
+        if (g_fvJitLogLeft > 0) {
+            --g_fvJitLogLeft;
+            static const char* const kHow[] = { "none", "tonemap link", "learned order", "FIFO" };
+            Log("flat multi-view jitter: blit %d of %d (view %d, Present #%llu) took pass s=%llu (frame position %d, by %s; the oldest "
+                "outstanding pass was s=%llu) phase %d, predicted view %d | pass jitter (%+.4f,%+.4f) px of the %ux%u scene | ACTUALLY "
+                "RASTERIZED at its first G-buffer draw: %s(%+.4f,%+.4f)%s | NGX jitter (%+.4f,%+.4f) (sign %+d,%+d) | its tonemap RT %s "
+                "the blit's source | the blit stretches %ux%u -> %dx%d", g_fv.BlitIndex(), g_fv.Views(), eye, (unsigned long long)frame,
+                (unsigned long long)slot.s, slot.framePos, kHow[slot.pickHow >= 0 && slot.pickHow < 4 ? slot.pickHow : 0],
+                (unsigned long long)headBefore, slot.phase,
+                slot.predView, (double)slot.jx, (double)slot.jy, g_sceneW, g_sceneH,
+                slot.rastSeen ? (slot.rastShifted ? "" : "NOT shifted ") : "no G-buffer draw seen ", (double)slot.rastJx, (double)slot.rastJy,
+                slot.rastSeen && slot.rastShifted && slot.rastJx == slot.jx && slot.rastJy == slot.jy ? " = the pass jitter" : " -- MISMATCH",
+                (double)((float)g_signX * slot.jx), (double)((float)g_signY * slot.jy), g_signX, g_signY,
+                !slot.toneRt ? "unknown --" : (slot.toneRt == srcPtr ? "IS" : "is NOT"), d.Width, d.Height, flatVp.w, flatVp.h);
+        }
+    }
     if (!isBackbuffer) {                                  // v0.10.0 phase 24: VR jitter phase parity from the eye order
         if (g_vrLastBlitS != ~0ull && slot.s == g_vrLastBlitS + 1 && eye == g_vrLastBlitEye) {
             const int off = (int)(slot.s & 1);            // passes s-1 and s are the same eye = two frames: s starts a frame
@@ -10505,6 +11363,9 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         }
 #ifdef WITH_DLAA
         VrsNoteBlit(slot.s, eye, rtPtr, slot.fwdTex);     // phase 34b: learn the RT cycle / forward colours, check the entered eye
+        if (g_xrHiddenMask)                               // phase 40: eye -> OpenXR view (the swapchain image), the masked eye check
+            HmNoteBlit(slot.s, eye, rtPtr, rvd.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE2DARRAY ? rvd.Texture2DArray.FirstArraySlice : 0,
+                       slot.sceneClears);
 #else
         VrsNoteBlit(slot.s, eye, rtPtr, nullptr);
 #endif
@@ -10512,6 +11373,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     }
     if (!isBackbuffer && (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)) { g_menuBlitEye = eye; g_menuBlitRt = rtPtr; }   // v0.10.0 menu / fps box
 #ifdef WITH_DLAA
+    if (!isBackbuffer) FpsCabBlit(ctx, eye, *didRec, slot.s, frame);   // phase 47: the fps box attached to the vehicle (mode 2 only)
     GpuPerf::SetPass(slot.s);                             // v0.10.0 phase 8: this pass's sections belong to `eye`
     GpuPerf::NoteEye(slot.s, eye);
 #endif
@@ -10524,10 +11386,14 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     }
     if (!g_eyeLogged[eye]) {
         g_eyeLogged[eye] = true;
-        Log("eye blit detected: eye=%d (pass s=%llu) src %ux%u -> RT %ux%u fmt=%d (%s, Present #%llu)",
+        char viewTag[96] = "";                            // v0.12.0 issue #12: flat multi-view -> which screen
+        if (isBackbuffer && g_fv.Views() >= 2)
+            snprintf(viewTag, sizeof(viewTag), ", flat view %d of %d at viewport (%d,%d) %dx%d", eye, g_fv.Views(), flatVp.x, flatVp.y,
+                     flatVp.w, flatVp.h);
+        Log("eye blit detected: eye=%d (pass s=%llu) src %ux%u -> RT %ux%u fmt=%d (%s%s, Present #%llu)",
             eye, (unsigned long long)slot.s, d.Width, d.Height, bd.Width, bd.Height, (int)bd.Format,
             hdrBlit ? "flat HDR output target" : (isBackbuffer ? "flat backbuffer" : "VR eye texture"),   // v0.8.0
-            (unsigned long long)frame);
+            viewTag, (unsigned long long)frame);
     }
 #ifdef WITH_DLAA
     // v0.5.5: VR only -- collect finished projection verdicts (may correct the RT map for the NEXT blits),
@@ -10640,7 +11506,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         ++g_prePostBlits;                                // v0.10.0 phase 4: the blit (post-tonemap) path ran
         if (eye == 0 && slot.fallback) ++g_preFallbackBlits;   // v0.10.0 phase 7
         // A global reset request (g_resetNext) applies to every eye: latch it at the next blit.
-        if (g_resetNext) { g_resetEyes = (1 << kMaxEyes) - 1; g_resetNext = false; }
+        if (g_resetNext) { g_resetEyes = (1 << kMaxViews) - 1; g_resetNext = false; }
         bool resetUsed = (g_resetEyes & (1 << eye)) != 0;
         g_resetEyes &= ~(1 << eye);
         // v0.10.0 phase 7: the colour set that takes this blit did not evaluate for > kResumeKeepRuns evaluations of this unit
@@ -10667,6 +11533,9 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
                                g_didCfg ? didRec : nullptr, g_didCfg ? didFwdRec : nullptr);
         t_inDlaa = false;
         UpdateMedoidDrop(eye, dl);                       // v0.10.0 phase 8
+        // phase 41: the main view's history reset (a camera cut, a teleport, a DLAA key) -> the mirrors run out of turn this frame
+        // and the next (MirTurnsNoteCut: only while mirror_turns / mode 3 is on)
+        if (ok && dl.LastReset()) MirTurnsNoteCut(0);
         // v0.10.0 phase 7: a post -> pre switch is coming -> the HDR unit evaluates the same pass on its forward colour (same MV /
         // depth / jitter, nothing written back) so it takes over with a continuous history
         if (ok && eye == 0 && slot.warmHdr && slot.warmTex) {
@@ -10746,7 +11615,7 @@ void RunPendingComposite(ID3D11DeviceContext* ctx) {
     CpuProf::Block cpb(CpuProf::kBBlit);               // phase 31 CPU profiler (cpu_prof.h)
     const int eye = g_compEye;
     g_compEye = -1;
-    if (eye < 0 || eye >= kMaxEyes) return;
+    if (eye < 0 || eye >= kMaxViews) return;                 // v0.12.0 issue #12: flat views too
     SceneDlaa& dl = g_dlaa[eye];
     t_inDlaa = true;
     ID3D11RenderTargetView* rtv = nullptr;
@@ -10876,6 +11745,7 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
     }
 #endif
     if (vertexCount - 3u <= 1u && !t_inDlaa && g_sceneDepth && g_backbuffer.load(std::memory_order_relaxed)) {
+        g_blitStartVertex = startVertex;                 // v0.12.0 issue #12: diagnostics (FlatBlitDiag)
         HandlePossibleBlit(ctx, vertexCount);
     }
     if (!t_inDlaa && g_lodPerDraw.load(std::memory_order_relaxed)) LodOnDraw(ctx);   // v0.10.0 phase 11 LOD bias scope
@@ -10951,8 +11821,100 @@ void MaybePrewarmNgx() {
 // Top-level Present boundary (called from hkPresent before oPresent). v0.5.2: nothing here drives frame logic
 // any more (passes/blits are matched by the FIFO); logging only.
 void LogFrameEndCheck(uint64_t n);      // v0.8.1, defined with the frame-end rule
+// v0.12.0 issue #12: the used pass-ring size (see kRingBase / SlotOf). Only with NO pass outstanding (normally true at a Present
+// boundary: every pass of the frame met its blit); the newest pass keeps its slot (g_ringBase is chosen so SlotOf(P-1) is unchanged:
+// DidOnPassStart / StartPass still find it). A shrink whose newest slot lies past the new size waits for a later Present.
+bool SetRingSize(int want, uint64_t n) {
+    if (want < kRingBase) want = kRingBase;
+    if (want > kRing) want = kRing;
+    if (want == g_ringN || g_fifoHead != g_passSeq) return false;
+    if (g_passSeq) {
+        const size_t last = SlotOf(g_passSeq - 1);
+        if ((int)last >= want) return false;
+        g_ringBase = (g_passSeq - 1) - (uint64_t)last;
+    }
+    static int s_logs = 0;
+    if (s_logs++ < 16)
+        Log("flat multi-view: pass ring %d -> %d slots (up to %d passes may wait for their blits; Present #%llu)", g_ringN, want, want - 1,
+            (unsigned long long)n);
+    g_ringN = want;
+    return true;
+}
+// v0.12.0 issue #12: the flat multi-view detector's per-Present step (flat_views.h): the blits of the Present that just ended
+// confirm / keep / drop the layout. A confirm or a drop resets every DLAA history (the views' units start clean; before the confirm
+// unit 0 had all views mixed) and the phase offset is learned again.
+void FlatViewsOnPresent(uint64_t n) {
+    if (!g_flatMvCfg) return;
+    const FlatViews::Detector::Event ev = g_fv.OnPresent();   // (VR / undetected: nothing was fed -> kNone)
+    SetRingSize(FlatMvSeen() ? g_fv.FifoDepth() + 1 : kRingBase, n);
+    // round 5: one frame of blit -> pass links for the permutation learner (flat multi-view only); logged once when it is known
+    if (g_flatMode && FlatMvSeen() && g_fvPerm.OnFrame(g_fv.LastN())) {
+        char pm[160] = "";
+        int o = 0;
+        for (int k = 0; k < g_fvPerm.N() && o >= 0 && o < (int)sizeof(pm); ++k)
+            o += snprintf(pm + o, sizeof(pm) - (size_t)o, "%s%d", k ? " " : "", g_fvPerm.PosOfBlit(k));
+        char ord[64];
+        FvOrderStr(ord, sizeof(ord), g_fv.Views() >= 2 ? g_fv.Current() : g_fv.Candidate());
+        Log("flat multi-view: blit<->pass link by tonemap source: blit 0, 1, ... (views %s) take the passes at frame positions %s "
+            "(stable for %d frames; passes run in a different order than the blits -- each blit now gets the depth / motion vectors of "
+            "the pass whose picture it shows; Present #%llu)", ord, pm, FlatViews::kPermConfirm, (unsigned long long)n);
+    }
+    // round 2 diagnostics: the blits of one more Present are logged in full after the first verdict on a multi-blit Present, and
+    // after a confirm (the rects the views were confirmed with)
+    static bool s_diagAfterConfirm = false;
+    if (g_flatMode && g_fv.LastN() >= 2 && !g_fvDiagRearmed) {
+        g_fvDiagRearmed = true;
+        g_fvDiagLeft = g_fv.LastN();
+        Log("flat multi-view: first Present with %d world blits evaluated (%s) -- the next Present's blits are logged in full ('flat blit "
+            "diag' lines)", g_fv.LastN(), FlatViews::WhyName(g_fv.LastWhy()));
+    }
+    if (ev == FlatViews::Detector::kConfirmed && !s_diagAfterConfirm) { s_diagAfterConfirm = true; g_fvDiagLeft = g_fv.Views(); }
+    // round 3: the jitter trace (2 frames) once, 10 Presents after the first confirm (the phase offset is learned again at the confirm)
+    static int s_jitArmIn = -1;
+    if (ev == FlatViews::Detector::kConfirmed && s_jitArmIn == -1) s_jitArmIn = 10;
+    if (s_jitArmIn > 0 && --s_jitArmIn == 0) { s_jitArmIn = -2; g_fvJitLogLeft = 2 * g_fv.DlaaViews(); }
+    if (!g_flatMode || ev == FlatViews::Detector::kNone) return;
+    char vt[1024], ord[64];
+    if (ev == FlatViews::Detector::kConfirmed) {
+        const FlatViews::Layout& L = g_fv.Current();
+        FvLayoutStr(vt, sizeof(vt), L);
+        FvOrderStr(ord, sizeof(ord), L);
+        g_fvPhaseOff = 0;
+        for (int v = 0; v < kMaxViews; ++v) { g_eyeLogged[v] = false; g_dlaaFrames[v] = 0; g_rBig[v] = 0; g_rReads[v] = 0; }
+        g_resetNext = true;
+        MvInvalidate();
+        Log("flat multi-view detected: %d views per frame, viewports in the %ux%u backbuffer (sorted by x, then y):%s; blit order (the "
+            "view of blit 0, 1, ... in a Present): %s -- each view gets its own DLAA unit, history, jitter phase and motion-vector "
+            "pairing from now on (confirmed after %d Presents in a row; Present #%llu; flat_multiview = 0 turns this off)", L.n, g_bbW,
+            g_bbH, vt, ord, FlatViews::kConfirmPresents, (unsigned long long)n);
+        if (L.n > FlatViews::kMaxViews)
+            LogWarn("flat multi-view: %d views, more than the %d the mod gives a DLAA unit -- views %d..%d (by position) pass through "
+                "untouched and unjittered", L.n, FlatViews::kMaxViews, FlatViews::kMaxViews, L.n - 1);
+    } else if (ev == FlatViews::Detector::kDropped) {
+        g_fvPhaseOff = 0;
+        g_fvPerm.Reset();                                // round 5: the pass order is learned again with the next layout
+        g_resetNext = true;
+        MvInvalidate();
+        Log("flat multi-view ENDED: the %d-view layout was missing in %d Presents with world blits in a row (last: %d blit(s), %s) -- "
+            "back to one view (every backbuffer blit = view 0; Present #%llu)", g_fv.PrevViews(), FlatViews::kDropPresents,
+            g_fv.LastN(), FlatViews::WhyName(g_fv.LastWhy()), (unsigned long long)n);
+    } else if (ev == FlatViews::Detector::kOrderChanged) {
+        if (g_fvOrderLogs++ < 8) {
+            FvOrderStr(ord, sizeof(ord), g_fv.Current());
+            Log("flat multi-view: blit order changed to %s (the view of blit 0, 1, ...; views are told apart by their viewport, so this "
+                "is only a note -- change #%llu, Present #%llu)", ord, (unsigned long long)g_fv.OrderChanges(), (unsigned long long)n);
+        }
+    } else if (ev == FlatViews::Detector::kNotDistinct) {
+        Log("flat multi-view: %d world blits in Present #%llu, but not one per screen (%s) -- staying single-view (logged once)",
+            g_fv.LastN(), (unsigned long long)n, FlatViews::WhyName(g_fv.LastWhy()));
+    }
+}
+
 void OnPresentBoundary(uint64_t n) {
-    TscCalibrate();                                    // phase 35: the TSC -> QPC ratio of the per-draw timers
+    FlatViewsOnPresent(n);                             // v0.12.0 issue #12 (the blits of the Present that just ended)
+    g_fvPassInFrame = 0;                               // round 5: the next world pass is frame position 0
+    if (MeasureOn()) TscCalibrate();                   // phase 35: the TSC -> QPC ratio of the per-draw timers (phase 45: only
+                                                       // while measuring; anchored at startup, so a late update is exact)
 #ifdef WITH_DLAA
     DidShadow::FrameStart();                           // phase 35: re-read at the next Record; a verify fallback ends
     GpuPerf::SetFrame(n);                              // v0.10.0 phase 8: the next timed section opens the next frame's query set
@@ -11352,7 +12314,7 @@ void ObjLeave(ID3D11DeviceContext* ctx) {
     g_objCur = nullptr;
     oOMSetDepthStencilState(ctx, g_objGameDss, g_objGameRef);   // exactly what the engine believes is bound
     if (g_passSeq) {
-        ObjRecord& rec = g_objRing[(g_passSeq - 1) % kRing];
+        ObjRecord& rec = g_objRing[SlotOf(g_passSeq - 1)];
         t_inDlaa = true;
         rec.Flush(ctx);                                   // the pass's MVPs: one copy of the used ring range
         t_inDlaa = false;
@@ -11395,7 +12357,7 @@ HRESULT STDMETHODCALLTYPE hkMap(ID3D11DeviceContext* ctx, ID3D11Resource* r, UIN
                                 D3D11_MAPPED_SUBRESOURCE* out) {
     CPU_HOOK(kHkMap);                                 // phase 31 CPU profiler (cpu_prof.h)
     if (type == D3D11_MAP_WRITE_DISCARD && r && g_passSeq && !t_inDlaa && IsGameCtx(ctx)) {
-        ObjRecord& rec = g_objRing[(g_passSeq - 1) % kRing];
+        ObjRecord& rec = g_objRing[SlotOf(g_passSeq - 1)];
         if (rec.HasOpenRing(r)) {                         // v0.9.0 r3: any of the pass's (up to 3) rings
             t_inDlaa = true;
             const bool sealed = rec.OnDiscard(ctx, r);    // THAT ring's copy, queued before the discard (old contents)
@@ -11483,11 +12445,11 @@ uint32_t ObjOccNext(uint64_t kh) {
 // StartPass (pass s): the previous pass's record is flushed if it is still open, the new slot's record starts empty.
 void ObjOnPassStart(ID3D11DeviceContext* ctx, uint64_t s) {
     if (s > 0) {
-        ObjRecord& prev = g_objRing[(s - 1) % kRing];
+        ObjRecord& prev = g_objRing[SlotOf(s - 1)];
         if (prev.Pending()) { t_inDlaa = true; prev.Flush(ctx); t_inDlaa = false; }
         if (g_objOn && prev.Count() > 0) ObjNoteRings(prev, s - 1);   // v0.9.0 r3 ring statistics
     }
-    g_objRing[s % kRing].Reset();
+    g_objRing[SlotOf(s)].Reset();
     if (++g_objOccGen == 0) { memset(g_objOcc, 0, sizeof(g_objOcc)); g_objOccGen = 1; }
     g_objOccFill = 0;
     if (g_objOn) ++g_objPassN;
@@ -11505,7 +12467,7 @@ int ObjOnDraw(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT ba
         ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&g_ctx1);
         g_ctx1Owner = ctx;
     }
-    ObjRecord& rec = g_objRing[(g_passSeq - 1) % kRing];
+    ObjRecord& rec = g_objRing[SlotOf(g_passSeq - 1)];
     ID3D11Buffer* ib = nullptr; DXGI_FORMAT ibFmt = DXGI_FORMAT_UNKNOWN; UINT ibOff = 0;
     ID3D11Buffer* vb = nullptr; UINT vbStride = 0, vbOff = 0;
     ctx->IAGetIndexBuffer(&ib, &ibFmt, &ibOff);
@@ -12275,16 +13237,16 @@ ID3D11DepthStencilView* DidRoDsv(ID3D11Device* dev, ID3D11Texture2D* depth) {
 // Replays the pending draws of pass `pass` (its FIFO slot's record) into that slot's draw-id target. why: 0 = G-buffer
 // leave, 1 = forced (hkMap discard), 2 = the next pass started, 3 = scene depth discard.
 void DidReplay(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int why) {
-    DrawIdRecord& rec = g_didRing[pass % kRing];
+    DrawIdRecord& rec = g_didRing[SlotOf(pass)];
     if (rec.PendingReplay() <= 0) return;
-    PassSlot& ps = g_ring[pass % kRing];
+    PassSlot& ps = g_ring[SlotOf(pass)];
     if (g_ctx1Owner != ctx) {
         if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
         ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&g_ctx1);
         g_ctx1Owner = ctx;
     }
     if (!g_ctx1) return;
-    const int64_t t0 = Qpc();
+    const int64_t t0 = MeasureOn() ? Qpc() : 0;           // phase 45: the clock only while measuring (g_measure)
     ID3D11Device* dev = nullptr;
     ctx->GetDevice(&dev);
     ID3D11DepthStencilView* ro = dev ? DidRoDsv(dev, PassDepth(ps)) : nullptr;   // v0.10.3 issue #9: this pass's depth
@@ -12300,7 +13262,10 @@ void DidReplay(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int
     const int tq = ok ? g_didReplayTimer.Begin(ctx) : -1;
     GpuPerf::SetPass(ps.s);                               // v0.10.0 phase 8
     const int pq = ok ? GpuPerf::Begin(ctx, GpuPerf::kReplay) : -1;
-    DrawIdRecord::SetInstancedProbe((ps.s % 7u) == 0u);   // v0.10.0 phase 8 (mv_inst_replay 1): every 7th pass replays them all
+    // v0.10.0 phase 8 (mv_inst_replay 1): every 7th pass replays them all. v0.12.0 issue #12: with 7 / 14 flat views every 7th pass
+    // would always be the same view -- then every 11th (coprime to both; any view count up to 16 is coprime to 7 or 11)
+    const uint64_t probeEvery = (FlatViewCount() % 7) == 0 ? 11u : 7u;
+    DrawIdRecord::SetInstancedProbe((ps.s % probeEvery) == 0u);
     const int gated0 = rec.GatedDraws();
     const int static0 = rec.StaticSkipped();
     rec.SetView(ps.clip ? &ps.clipRect : nullptr, 0);     // v0.10.0 phase 9: the pass's area clip
@@ -12319,7 +13284,7 @@ void DidReplay(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int
     g_didReplayed += (uint64_t)rr.replayed;
     g_didSkipped += (uint64_t)rr.skipped;
     if (why >= 2) ++g_didEndReplays;
-    g_didTicksReplay += (uint64_t)(Qpc() - t0);
+    if (t0) g_didTicksReplay += (uint64_t)(Qpc() - t0);
     if (!g_didFirstReplayLogged && rr.ok && rr.replayed > 0) {
         g_didFirstReplayLogged = true;
         Log("MV draw-ids: first replay (pass s=%llu, %s): %d draws replayed into the %ux%u draw-id target, %d skipped "
@@ -12334,17 +13299,17 @@ void DidReplay(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int
 // Needs the pass's G-buffer replay (it cleared the two-channel target) and the forward depth. why: 1 = forced (hkMap
 // discard), 2 = the next pass started, 3 = scene depth discard.
 void DidFwdReplay(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int why) {
-    DrawIdRecord& rec = g_didFwdRing[pass % kRing];
+    DrawIdRecord& rec = g_didFwdRing[SlotOf(pass)];
     if (rec.PendingReplay() <= 0) return;
-    PassSlot& ps = g_ring[pass % kRing];
-    const DrawIdRecord& gb = g_didRing[pass % kRing];
+    PassSlot& ps = g_ring[SlotOf(pass)];
+    const DrawIdRecord& gb = g_didRing[SlotOf(pass)];
     if (g_ctx1Owner != ctx) {
         if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
         ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&g_ctx1);
         g_ctx1Owner = ctx;
     }
     if (!g_ctx1) return;
-    const int64_t t0 = Qpc();
+    const int64_t t0 = MeasureOn() ? Qpc() : 0;           // phase 45: the clock only while measuring (g_measure)
     // v0.10.0 phase 9: a 1/2-resolution forward depth -> the forward ids go to its own 1/2-size R16_UINT target
     const UINT sh = ps.twin.fwdValid ? ps.twin.fwdShift : 0u;
     ID3D11RenderTargetView* fidRtv = sh ? ps.twin.fwdIdRtv.Get() : ps.twin.idRtv.Get();
@@ -12364,7 +13329,7 @@ void DidFwdReplay(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, 
     t_inDlaa = false;
     ps.twin.fwdIdValid = rec.Cleared() && !rec.ReplayFailed();
     g_didFwdReplayed += (uint64_t)rr.replayed;
-    g_didFwdTicks += (uint64_t)(Qpc() - t0);
+    if (t0) g_didFwdTicks += (uint64_t)(Qpc() - t0);
     if (!g_didFwdFirstLogged && rr.ok && rr.replayed > 0) {
         g_didFwdFirstLogged = true;
         Log("MV draw-ids: first FORWARD replay (pass s=%llu, %s): %d forward draws replayed into %s %ux%u (ids %u + 1..), "
@@ -12417,9 +13382,9 @@ void FwdGuardStep() {
 
 // why: 1 = forced (hkMap discard), 2 = the next pass started, 3 = the pass end (scene depth discard / forward leave)
 void FwdBatch(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int why) {
-    DrawIdRecord& rec = g_didFwdRing[pass % kRing];
+    DrawIdRecord& rec = g_didFwdRing[SlotOf(pass)];
     if (rec.PendingDepth() <= 0 && rec.PendingReplay() <= 0) return;
-    PassSlot& ps = g_ring[pass % kRing];
+    PassSlot& ps = g_ring[SlotOf(pass)];
     DepthTwin& t = ps.twin;
     if (g_ctx1Owner != ctx) {
         if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
@@ -12427,7 +13392,7 @@ void FwdBatch(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int 
         g_ctx1Owner = ctx;
     }
     if (!g_ctx1) return;
-    const int64_t t0 = Qpc();
+    const int64_t t0 = MeasureOn() ? Qpc() : 0;           // phase 45: the clock only while measuring (g_measure)
     if (rec.PendingDepth() > 0) {
         ++g_fwdBatchSegs;
         if (why == 1) ++g_fwdBatchForced;
@@ -12441,7 +13406,9 @@ void FwdBatch(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int 
             t_inDlaa = false;
         } else {
             t_inDlaa = true;                                  // our own calls: every hook passes straight through
-            const int tq = g_fwdBatchTimer.Begin(ctx);
+            // phase 45: timed while measuring (menu / level 4), or while the VR budget guard below can still act (FwdGuardStep)
+            const int tq = g_fwdBatchTimer.Begin(ctx, g_vrMode && g_fwdBudgetMs > 0.0f && !g_profExplicit[PK_FWD_DEPTH] &&
+                                                      !g_fwdAutoOff && g_fwdOn.load(std::memory_order_relaxed));
             GpuPerf::SetPass(ps.s);
             int pq = -1;
             bool inited = false;
@@ -12488,7 +13455,7 @@ void FwdBatch(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int 
     // the forward ids of the same draws (ids on) -- or their release (ids off)
     if (g_didOn) DidFwdReplay(ctx, pass, restoreTargets, why);
     else if (rec.PendingReplay() > 0) { t_inDlaa = true; rec.DropIds(); t_inDlaa = false; }
-    g_fwdBatchTicks += (uint64_t)(Qpc() - t0);
+    if (t0) g_fwdBatchTicks += (uint64_t)(Qpc() - t0);
 }
 
 void FwdOnPassEnd(ID3D11DeviceContext* ctx) {
@@ -12506,7 +13473,7 @@ bool DidFwdOnDraw(ID3D11DeviceContext* ctx, UINT ic, UINT si, INT bv) {
         g_ctx1Owner = ctx;
     }
     if (!g_ctx1) return false;
-    DrawIdRecord& rec = g_didFwdRing[(g_passSeq - 1) % kRing];
+    DrawIdRecord& rec = g_didFwdRing[SlotOf(g_passSeq - 1)];
     if (!rec.Forward()) rec.SetForward(true);
     if (!rec.CapturePs() && rec.Count() == 0) rec.SetCapturePs(true);   // v0.10.0 phase 10
     DidShadow::SetAlias(ctx);                             // phase 35
@@ -12648,12 +13615,12 @@ void DidOnDraw(ID3D11DeviceContext* ctx, UINT ic, UINT inst, UINT si, INT bv, UI
         g_ctx1Owner = ctx;
     }
     if (!g_ctx1) return;
-    const uint64_t t0 = __rdtsc();                        // phase 35: TSC (was QPC, see TscToQpc)
+    const uint64_t t0 = MeasureOn() ? __rdtsc() : 0;      // phase 35: TSC (was QPC, see TscToQpc); phase 45: only while measuring
     DidShadow::SetAlias(ctx);                             // phase 35: the context the game's Set calls name
-    DrawIdRecord& rec = g_didRing[(g_passSeq - 1) % kRing];
+    DrawIdRecord& rec = g_didRing[SlotOf(g_passSeq - 1)];
     if (rec.Record(g_ctx1, ic, inst, si, bv, sinst, instanced)) { ++g_didRecDraws; if (instanced) ++g_didRecInst; }
     else ++g_didRecFull;
-    g_didTicksRec += TscToQpc(__rdtsc() - t0);
+    if (t0) g_didTicksRec += TscToQpc(__rdtsc() - t0);
 }
 
 // hkOMSetRenderTargets: the game leaves the world G-buffer (its next targets are not bound yet).
@@ -12667,12 +13634,12 @@ void DidOnLeave(ID3D11DeviceContext* ctx) {
 // happened since), its mirror flushed; the new slot's record starts empty.
 void DidOnPassStart(ID3D11DeviceContext* ctx, uint64_t s) {
     if (s > 0) {
-        DrawIdRecord& prev = g_didRing[(s - 1) % kRing];
+        DrawIdRecord& prev = g_didRing[SlotOf(s - 1)];
         if (prev.PendingReplay() > 0) DidReplay(ctx, s - 1, true, 2);
         else if (prev.Count() > 0) { t_inDlaa = true; prev.Flush(ctx); t_inDlaa = false; }
         if (prev.Count() > 0) { ++g_didPasses; if (prev.Segments() > 1) ++g_didSegMulti; }
         // v0.10.0 phase 3: the previous pass's forward draws (no depth discard came: replayed now)
-        DrawIdRecord& pf = g_didFwdRing[(s - 1) % kRing];
+        DrawIdRecord& pf = g_didFwdRing[SlotOf(s - 1)];
         if (pf.PendingDepth() > 0 || pf.PendingReplay() > 0) FwdBatch(ctx, s - 1, true, 2);   // v0.10.0 phase 10: + the depth
         else if (pf.Count() > 0) { t_inDlaa = true; pf.Flush(ctx); t_inDlaa = false; }
         if (pf.Count() > 0) { ++g_didFwdPasses; g_didFwdOverflow += (uint64_t)pf.OverflowDraws(); }
@@ -12680,10 +13647,10 @@ void DidOnPassStart(ID3D11DeviceContext* ctx, uint64_t s) {
     // v0.10.0 phase 5 (Alt+F8): the logged forward pass is over -> its summary; an armed request logs this new pass
     if (g_fwdSkipPass != ~0ull && g_fwdSkipPass != s + 1) DidFwdSkipClose();
     if (g_fwdSkipArm) { g_fwdSkipArm = false; g_fwdSkipPass = s + 1; }   // = g_passSeq during pass s
-    g_didRing[s % kRing].Reset();
-    g_didFwdRing[s % kRing].Reset();
-    g_didFwdRing[s % kRing].SetForward(true);
-    g_didFwdRing[s % kRing].SetCapturePs(true);          // v0.10.0 phase 10: the forward-depth batch re-draws from it
+    g_didRing[SlotOf(s)].Reset();
+    g_didFwdRing[SlotOf(s)].Reset();
+    g_didFwdRing[SlotOf(s)].SetForward(true);
+    g_didFwdRing[SlotOf(s)].SetCapturePs(true);          // v0.10.0 phase 10: the forward-depth batch re-draws from it
     g_didForcedPass = 0;
     g_didFwdForcedPass = 0;
 }
@@ -12693,14 +13660,14 @@ void DidOnPassStart(ID3D11DeviceContext* ctx, uint64_t s) {
 // batch and then replays their ids.
 void DidOnDepthDiscard(ID3D11DeviceContext* ctx) {
     CpuProf::Block cpb(CpuProf::kBDidReplay);               // phase 31 CPU profiler (cpu_prof.h)
-    if (g_passSeq && g_didRing[(g_passSeq - 1) % kRing].PendingReplay() > 0) DidReplay(ctx, g_passSeq - 1, true, 3);
+    if (g_passSeq && g_didRing[SlotOf(g_passSeq - 1)].PendingReplay() > 0) DidReplay(ctx, g_passSeq - 1, true, 3);
 }
 
 // hkMap WRITE_DISCARD (game context, not our work): a buffer a pending draw reads is about to get new contents.
 void DidOnDiscardMap(ID3D11DeviceContext* ctx, ID3D11Resource* r) {
     CpuProf::Block cpb(CpuProf::kBDidReplay);               // phase 31 CPU profiler (cpu_prof.h)
     if (!g_passSeq) return;
-    DrawIdRecord& rec = g_didRing[(g_passSeq - 1) % kRing];
+    DrawIdRecord& rec = g_didRing[SlotOf(g_passSeq - 1)];
     if (rec.PendingReplay() > 0 && rec.ReferencesPending(r)) {
         if (g_didForcedPass < kDidForcedMax) {
             ++g_didForcedPass; ++g_didForced;
@@ -12717,7 +13684,7 @@ void DidOnDiscardMap(ID3D11DeviceContext* ctx, ID3D11Resource* r) {
     // v0.10.0 phase 3: the same for the pending forward draws (replayed into the forward ids first)
     // v0.10.0 phase 10: their forward depth too (FwdBatch: the depth batch of the pending draws, then their ids); the pixel
     // shader's cbuffers / SRVs are in the pending set as well
-    DrawIdRecord& fr = g_didFwdRing[(g_passSeq - 1) % kRing];
+    DrawIdRecord& fr = g_didFwdRing[SlotOf(g_passSeq - 1)];
     if (fr.PendingReplay() > 0 && fr.ReferencesPending(r)) {
         if (g_didFwdForcedPass < kDidForcedMax) {
             ++g_didFwdForcedPass; ++g_didFwdForced;
@@ -12740,6 +13707,7 @@ void DidOnContextReset() {
     g_didForcedPass = 0;
     g_didReplayTimer.Reset();
     DrawIdRecord::ShutdownDevice();                       // recreated on the new device at the next replay
+    FpsCab::Shutdown();                                   // phase 47: staging buffers / mirror refs of the old device; a fresh lock
 }
 
 // " | ..." for the "MV draw-ids @blit" line; restarts the window. Eye 0's unit (flat: the only one) for the GPU side.
@@ -13066,6 +14034,14 @@ struct MirUnit {
     bool     resetPending = true;                  // the next Run drops the history (new / re-homed / taken over)
     bool     inited = false, unsupported = false;
     bool     altSkip = false;                      // v0.10.0 phase 8 (mirror_vr_mode 3): this view is the unit's off frame
+                                                   // phase 41: = the view HOLDS (mirror_turns or mode 3): no jitter / record /
+                                                   // DLAA, its last DLAA output is copied in (MirFlush)
+    int      turnSlot = -1;                        // phase 41: its turn slot 0 / 1 (-1 = not placed yet; MirTurnsEndFrame)
+    int      turnWhy = 0;                          // phase 41: MirTurns::Why of its current view
+    uint64_t heldFrame = 0;                        // phase 41: g_frames of its last held view
+    bool     lastRunReset = true;                  // phase 41: its last run ended with a history reset (MirTurnsNoteCut filter)
+    uint64_t sTurnRun = 0, sTurnHeld = 0, sTurnForced = 0;   // phase 41 stats window: views run on their turn / held / forced
+    GpuSpanTimer gpuHold;                          // phase 41: the held copy
     int      forcedView = 0;                       // forced replays in this view
     int      failRun = 0;                          // failed Runs in a row
     UINT     failW = 0, failH = 0;                 // a size whose unit build failed (InitFailed): no jitter, no retry there
@@ -13153,6 +14129,85 @@ inline bool MirPathLive() {
     return g_mirOn.load(std::memory_order_relaxed) && g_dlaaOn.load(std::memory_order_relaxed) &&
            !g_passive.load(std::memory_order_relaxed) && !g_gameDeviceChanged.load(std::memory_order_relaxed) &&
            ShaderCache::Done();
+}
+
+// ---- phase 41: MIRRORS IN TURNS (dlaa.ini mirror_turns; the decisions and the WHY are in mirror_turns.h) ----------------------
+// mirror_vr_mode / mirror_flat_mode 3 (each unit every 2nd frame, v0.10.0 phase 8) is now "every view, in turns": the same path.
+inline bool MirTurnsOn() { return g_mirTurns != 0 || MirMode() == 3; }
+uint64_t g_mirForceFrame = 0;                            // frames <= this run every unit (a camera cut; MirTurnsNoteCut)
+uint64_t g_mirTurnCuts[3] = {};                          // stats window: cuts noted (0 main view reset, 1 mirror reset, 2 other)
+uint64_t g_mirTurnWhy[MirTurns::kWhyN] = {};             // stats window: views by reason
+uint64_t g_mirTurnFrames = 0, g_mirTurnBalances = 0;     // stats window: frames with turns on and mirror views, slot re-balances
+uint32_t g_mirTurnMask = 0;                              // the units in view (last 8 frames) the slots were balanced for
+uint32_t g_mirTurnRunMask = 0, g_mirTurnHeldMask = 0;    // this frame: units that ran / held (bit = unit)
+int      g_mirTurnFrameLogs = 0;                         // per-frame log lines left (log level 4; re-armed when turns switch on)
+struct MirTurnFrame { uint64_t fr; uint32_t run, held; };
+MirTurnFrame g_mirTurnHist[8] = {};                      // the last 8 frames with mirror views (MirStatsLog prints them)
+int      g_mirTurnHistN = 0;
+// A camera cut (the main view's DLAA history reset, or a mirror unit's own Run reset): every unit runs on this frame and the
+// next -- a held picture would show the old place for one more frame.
+void MirTurnsNoteCut(int why) {
+    if (!MirTurnsOn()) return;
+    const uint64_t f = g_frames.load(std::memory_order_relaxed) + 1;
+    if (f > g_mirForceFrame) g_mirForceFrame = f;
+    ++g_mirTurnCuts[why < 0 || why > 2 ? 2 : why];
+}
+// MirNextFrame (before the frame's tables restart): the frame's run / held units go into the history ring (+ the first per-frame
+// log lines at level 4), and the slots are re-balanced (largest first onto the lighter slot, MirTurns::AssignSlots) whenever the
+// set of units in view in the last 8 frames changed -- rare (a mirror appears / goes); a moved slot costs at most one forced run.
+void MirTurnsEndFrame(uint64_t fr) {
+    const uint32_t run = g_mirTurnRunMask, held = g_mirTurnHeldMask;
+    g_mirTurnRunMask = g_mirTurnHeldMask = 0;
+    if (!MirTurnsOn()) { g_mirTurnMask = 0; return; }
+    if (run | held) {
+        ++g_mirTurnFrames;
+        g_mirTurnHist[g_mirTurnHistN & 7] = { fr, run, held };
+        ++g_mirTurnHistN;
+        if (g_mirTurnFrameLogs > 0 && LogDebugLevel()) {
+            --g_mirTurnFrameLogs;
+            char b[640] = "";
+            size_t o = 0;
+            for (int u = 0; u < kMirCap && o < sizeof(b); ++u) {
+                if (!((run | held) & (1u << u))) continue;
+                const MirUnit& m = g_mir[u];
+                o += (size_t)snprintf(b + o, sizeof(b) - o, "%sunit %d %ux%u slot %d %s", o ? ", " : "", u, m.w, m.h, m.turnSlot,
+                                      (held & (1u << u)) ? "HELD (last DLAA picture)" : MirTurns::WhyName(m.turnWhy));
+            }
+            LogDbg("mirror turns @Present %llu: %d ran, %d held -- %s%s", (unsigned long long)fr, (int)__popcnt(run), (int)__popcnt(held), b,
+                   fr <= g_mirForceFrame ? " (camera cut: every unit runs)" : "");
+        }
+    }
+    uint32_t mask = 0;
+    for (int u = 0; u < kMirCap; ++u) {
+        const MirUnit& m = g_mir[u];
+        if (m.used && m.viewFrame + 8 >= fr && m.viewFrame <= fr) mask |= 1u << u;
+    }
+    if (mask == g_mirTurnMask) return;
+    g_mirTurnMask = mask;
+    uint64_t area[kMirCap];
+    int idx[kMirCap], slot[kMirCap], n = 0;
+    for (int u = 0; u < kMirCap; ++u) {
+        if (!(mask & (1u << u))) continue;
+        idx[n] = u; area[n] = (uint64_t)g_mir[u].w * g_mir[u].h; ++n;
+    }
+    MirTurns::AssignSlots(area, n, slot);
+    char b[512] = "";
+    size_t o = 0;
+    uint64_t sum[2] = { 0, 0 };
+    for (int k = 0; k < n; ++k) {
+        g_mir[idx[k]].turnSlot = slot[k];
+        sum[slot[k] & 1] += area[k];
+        if (o < sizeof(b))
+            o += (size_t)snprintf(b + o, sizeof(b) - o, "%sunit %d %ux%u -> slot %d", o ? ", " : "", idx[k], g_mir[idx[k]].w,
+                                  g_mir[idx[k]].h, slot[k]);
+    }
+    ++g_mirTurnBalances;
+    static int balLogs = 0;
+    if (balLogs < 16 && n > 0) {
+        ++balLogs;
+        LogDbg("mirror turns: slots balanced for %d unit%s in view [%s] -- slot 0 %.2f MP, slot 1 %.2f MP (each frame runs one slot; "
+               "Present #%llu)", n, n == 1 ? "" : "s", b, (double)sum[0] / 1e6, (double)sum[1] / 1e6, (unsigned long long)fr);
+    }
 }
 
 // v0.10.2: the unit's one-time SceneDlaa set-up (was in MirFlush; MirPrebuild does it before the unit's first Run, so the boot
@@ -13576,9 +14631,40 @@ void MirBeginView(const Microsoft::WRL::ComPtr<ID3D11Texture2D>& rt0, const Micr
     // for this frame instead (no jitter, nothing recorded) and gets its unit at a later frame. The unit is not touched. Views
     // whose Run cannot build this frame anyway (a mirror_vr_mode 3 off frame, a failed / unsupported size, the jitter-only
     // debug key) never wait.
+    // phase 41 (mirror_turns / mode 3): does this view run its DLAA on this frame or hold its last output (mirror_turns.h)?
+    bool hold = false;
+    int turnWhy = MirTurns::kTurn;
+    if (MirTurnsOn()) {
+        MirUnit& mt = g_mir[u];
+        if (how == 2 || how == 3) mt.turnSlot = -1;      // a new / taken-over view: placed afresh
+        if (mt.turnSlot < 0) {                           // the lighter slot next to the units in view (re-balanced at the frame end)
+            uint64_t sum[2] = { 0, 0 };
+            int cnt[2] = { 0, 0 };
+            for (int i = 0; i < kMirCap; ++i) {
+                const MirUnit& o = g_mir[i];
+                if (i == u || !o.used || o.turnSlot < 0 || o.viewFrame + 8 < fr) continue;
+                sum[o.turnSlot & 1] += (uint64_t)o.w * o.h;
+                ++cnt[o.turnSlot & 1];
+            }
+            mt.turnSlot = MirTurns::PickSlot(sum[0], sum[1], cnt[0], cnt[1]);
+        }
+        MirTurns::UnitState st;
+        st.lastRunFrame = mt.lastRunFrame;
+        st.runs = mt.runs;
+        st.resetPending = mt.resetPending || how != 0;
+        st.epochStale = mt.epoch != g_mirEpoch;
+        ID3D11Texture2D* const res = mt.dl.ResultTex();
+        if (res) {
+            D3D11_TEXTURE2D_DESC rd{};
+            res->GetDesc(&rd);
+            st.haveResult = rd.Width == w && rd.Height == h && mt.w == w && mt.h == h && !mt.unsupported;
+        }
+        st.slot = mt.turnSlot;
+        hold = !MirTurns::Runs(fr, st, fr <= g_mirForceFrame, g_jitterOnly.load(std::memory_order_relaxed), &turnWhy);
+    }
     {
         const MirUnit& mb = g_mir[u];
-        const bool runs = !g_jitterOnly.load(std::memory_order_relaxed) && !(MirMode() == 3 && ((fr + (uint64_t)u) & 1u)) &&
+        const bool runs = !g_jitterOnly.load(std::memory_order_relaxed) && !hold &&
                           !(how == 0 && mb.unsupported) && !(mb.failW == w && mb.failH == h);
         if (runs && !mb.dl.ReadyFor(w, h, true, 100) && !DlaaProcessor::CreateBudgetFree()) {
             ++g_mirNotHandled; ++g_mirBuildDefer; ++g_mirWinBuildDefer;
@@ -13619,7 +14705,17 @@ void MirBeginView(const Microsoft::WRL::ComPtr<ID3D11Texture2D>& rt0, const Micr
     m.ps.dropN[0] = m.ps.dropN[1] = 0;
     // v0.10.0 phase 8 (mirror_vr_mode 3, VR): each unit runs every 2nd frame (units alternate by index); on its off frame the view
     // is not jittered / recorded and gets the unit's last picture (MirFlush)
-    m.altSkip = MirMode() == 3 && ((fr + (uint64_t)u) & 1u) != 0;
+    // phase 41: mirror_turns (and mode 3) decide it above -- balanced slots, forced runs (mirror_turns.h)
+    m.altSkip = hold;
+    m.turnWhy = turnWhy;
+    if (MirTurnsOn()) {
+        ++g_mirTurnWhy[turnWhy];
+        if (hold) { ++m.sTurnHeld; g_mirTurnHeldMask |= 1u << u; }
+        else {
+            if (turnWhy == MirTurns::kTurn) ++m.sTurnRun; else ++m.sTurnForced;
+            g_mirTurnRunMask |= 1u << u;
+        }
+    }
     m.ps.skSampled = m.ps.skNoCtx = m.ps.skFull = m.ps.skNoCb = m.ps.skRange = 0;
     m.rec.Reset();
     // no jitter where this unit cannot anti-alias (unsupported colour, a size whose build failed, kMirFailWarn failed Runs
@@ -13785,6 +14881,7 @@ void MirFlush(ID3D11DeviceContext* ctx, MirUnit& m) {
     if (m.altSkip) {                                      // v0.10.0 phase 8 (mirror_vr_mode 3): the unit's off frame
         // the unit's last anti-aliased picture (it ran in the previous frame) replaces this frame's raw one -- same size / format
         // only; else the raw (un-jittered) picture stays
+        // phase 41: the same for mirror_turns (MirBeginView decided it: the unit ran in the previous frame, a result of this size)
         ID3D11Texture2D* res = m.dl.ResultTex();
         bool held = false;
         if (res && m.color && m.runs && m.lastRunFrame + 1 == fr) {
@@ -13792,14 +14889,17 @@ void MirFlush(ID3D11DeviceContext* ctx, MirUnit& m) {
             res->GetDesc(&a); m.color->GetDesc(&b);
             if (a.Width == b.Width && a.Height == b.Height && a.Format == b.Format && a.SampleDesc.Count == b.SampleDesc.Count) {
                 t_inDlaa = true;
+                const int hq = m.gpuHold.Begin(ctx);
                 GpuPerf::SetMirror(true);
                 GpuPerf::SetPass(g_passSeq);
                 const int pq = GpuPerf::Begin(ctx, GpuPerf::kCopyOut);
                 ctx->CopyResource(m.color.Get(), res);
                 GpuPerf::End(ctx, pq);
                 GpuPerf::SetMirror(false);
+                m.gpuHold.End(ctx, hq);
                 t_inDlaa = false;
                 held = true;
+                m.heldFrame = fr;
             }
         }
         if (held) ++g_mirAltHeld; else ++g_mirAltRaw;
@@ -13826,8 +14926,11 @@ void MirFlush(ID3D11DeviceContext* ctx, MirUnit& m) {
     MirUnitSetup(m, u);
     m.dl.SetTiming(GpuTimingOn());
     // (v0.10.0 phase 8: with mirror_vr_mode 3 in VR the unit's previous run is 2 frames back -- its history is kept)
-    const uint64_t runGap = MirMode() == 3 ? 2u : 1u;
-    const bool reset = m.resetPending || m.runs == 0 || m.lastRunFrame + runGap != fr || m.epoch != g_mirEpoch;
+    // phase 41: a run 1 frame after the last one, or 2 frames after it with turns on / after a hold, keeps the history: the unit's
+    // MV history (CameraMv / DrawIdMv), its Halton phase and NGX's history all moved only on its runs, so its motion vectors refer
+    // to its LAST RUN (mirror_turns.h; WARP harness S20)
+    const bool gapOk = MirTurns::GapKeepsHistory(fr, m.lastRunFrame, MirTurnsOn(), m.heldFrame + 1 == fr);
+    const bool reset = m.resetPending || m.runs == 0 || !gapOk || m.epoch != g_mirEpoch;
     const float njx = (float)g_signX * m.jx, njy = (float)g_signY * m.jy;
     const int64_t t0 = m.runs == 0 ? Qpc() : 0;          // wall time of the run that builds the unit
     // v0.10.2: this Run builds the unit (textures + NGX feature at this size: the same test as Run's, area 100, RGBA16F)
@@ -13858,6 +14961,10 @@ void MirFlush(ID3D11DeviceContext* ctx, MirUnit& m) {
     if (ok) {
         ++m.runs; ++m.sOk; ++m.tOk;
         if (reset) ++m.sResets;
+        // phase 41: the unit's Run reset on its own (no world pair: a camera cut in the mirror) -> every unit runs now and next frame;
+        // only after a run WITHOUT a reset: a mirror that resets on every run (no usable world in it) is not a cut each time
+        if (!reset && m.dl.LastReset() && !m.lastRunReset) MirTurnsNoteCut(1);
+        m.lastRunReset = m.dl.LastReset();
         m.lastRunFrame = fr; m.epoch = g_mirEpoch; m.resetPending = false; m.failRun = 0;
         if (m.tOk == 1 && g_mirFirstOkLogs < kMirCap) {
             ++g_mirFirstOkLogs;
@@ -14007,6 +15114,7 @@ void MirNextFrame(uint64_t n) {
     g_mirCur = -1; g_mirGbuf = false; g_mirJit = false;
     ++g_mirWinPresents;
     if (g_mirSeenN > 0) ++g_mirWinFrames;
+    MirTurnsEndFrame(g_mirFrame);                        // phase 41: the frame's run / held units, the slot balance
     MirSelEndFrame();                                    // v0.10.0 phase 21: the mode-2 selection, BEFORE the table is cleared
     g_mirSeenN = 0;
     g_mirFrame = g_frames.load(std::memory_order_relaxed);
@@ -14018,6 +15126,7 @@ void MirNextFrame(uint64_t n) {
 }
 
 // MvInvalidate (DLAA / MV keys, context reset, ...) and the mirror key: every unit restarts its history at its next run.
+// (phase 41: MirBeginView sees the epoch change -> every unit runs at its next view, out of turn)
 void MirInvalidate() {
     ++g_mirEpoch;
     for (MirUnit& m : g_mir) m.dl.Mv().Invalidate();
@@ -14032,6 +15141,7 @@ void MirOnContextReset() {
         m.roDsv.Reset(); m.roDsvTex = nullptr;
         m.dbgH.Reset(); m.dbgV.Reset(); m.dbgW = m.dbgHt = 0;
         m.gpuRun.Reset(); m.gpuReplay.Reset();
+        m.gpuHold.Reset(); m.turnSlot = -1;              // phase 41
         m.resetPending = true;
     }
 }
@@ -14200,11 +15310,21 @@ void ToggleMirrors(uint64_t n) {
 #define DLAA_INJECTOR_VERSION "0.0.0-dev"
 #endif
 enum MenuRowId {
-    MR_MODE, MR_PROFILE, MR_MODEL, MR_SHARP, MR_WIDTH, MR_LOD, MR_LODCUT, MR_AREA, MR_DRAWIDS, MR_MIRROR, MR_PRETM, MR_FWD,
+    // phase 43: menu categories -- top level Mode / Profile / Model, then six collapsible groups (header + contiguous children,
+    // kMenuGroups below), then FPS counter (top level, as before), Logging, Save, Reset, Close. kMenuDesc is in THIS order.
+    MR_MODE, MR_PROFILE, MR_MODEL,
+    MR_PICGRP,                                            // phase 43: group "Picture"
+    MR_SHARP, MR_WIDTH, MR_LOD, MR_LODCUT, MR_AREA, MR_PRETM, MR_FWD,
+    MR_MOTGRP,                                            // phase 43: group "Motion and mirrors"
+    MR_DRAWIDS, MR_MIRROR,
+    MR_MIRTURNS,                                          // phase 41: mirrors in turns (dlaa.ini mirror_turns)
+    MR_UPGRP,                                             // phase 43: group "Upscaling and VR"
     MR_UPSCALE, MR_DLAA, MR_OFXR,
+    MR_VRPGRP,                                            // phase 43: group "VR performance"
     MR_TURBO,                                             // phase 30: VR Turbo mode (dlaa.ini xr_turbo; OpenXR Toolkit port)
     MR_VRS, MR_VRSSIZE,                                   // phase 34: VR foveated rendering (dlaa.ini vrs; vrs_inner / vrs_outer preset)
-    MR_LOG,                                               // phase 39: Logging (dlaa.ini log_level) + what logging costs
+    MR_VRSPASS,                                           // phase 42: Foveated passes (dlaa.ini vrs_passes: scene / scene + lighting)
+    MR_HMASK,                                             // phase 40: VR hidden area mask (dlaa.ini xr_hidden_mask)
     MR_PANELGRP,                                          // v0.10.3 phase 29c: group header "Panel settings" (collapsible)
     MR_POSX, MR_POSY, MR_SIZE, MR_DEPTH, MR_FACE,
     MR_MENUKEYS,                                          // v0.10.2: the 5 menu keys, bound by 5 holds in sequence (29c: in the panel group)
@@ -14212,13 +15332,38 @@ enum MenuRowId {
     MR_FPSGRP,                                            // v0.10.3 phase 29c: group header "FPS counter settings" (collapsible)
     MR_FPSLOCK,                                           // v0.10.3 phase 28: VR fps box follows the head / fixed in the cab
     MR_FPSX, MR_FPSY, MR_FPSSIZE,
+    MR_FPSCOLOR,                                          // phase 44: fps box colour (dlaa.ini fps_color)
+    MR_FPSBRIGHT,                                         // phase 48: fps box brightness (dlaa.ini fps_brightness)
+    MR_FPSDIST,                                           // phase 44: VR distance (dlaa.ini fps_vr_dist)
+    MR_FPSYAW, MR_FPSPITCH, MR_FPSROLL,                   // phase 44: VR turn / tilt / rotate (dlaa.ini fps_vr_yaw / _pitch / _roll)
+    MR_LOG,                                               // phase 39: Logging (dlaa.ini log_level) + what logging costs
     MR_SAVE, MR_RESET, MR_CLOSE,
     MR_COUNT
 };
 static_assert(MR_COUNT <= TuningMenu::kMaxRows, "tuning menu: too many rows");
-// v0.10.3 phase 29c: each group = its header + the rows right after it up to its last child (MenuRowGroup relies on it)
-static_assert(MR_PANELGRP + 1 == MR_POSX && MR_FACE + 1 == MR_MENUKEYS && MR_FPSGRP + 1 == MR_FPSLOCK,
-              "tuning menu: a group's children must follow its header");
+// phase 43: menu categories -- ONE table for all collapsible groups: each group = its header + the rows right after it up to
+// `last` (v0.10.3 phase 29c layout). MenuRowGroup / MenuGrpOpen / MenuRowVisible / MenuChange / the open-state array use it.
+struct MenuGroupDef { int header, last; const wchar_t* title; };
+constexpr MenuGroupDef kMenuGroups[] = {
+    { MR_PICGRP,   MR_FWD,      L"Picture" },
+    { MR_MOTGRP,   MR_MIRTURNS, L"Motion and mirrors" },
+    { MR_UPGRP,    MR_OFXR,     L"Upscaling and VR" },
+    { MR_VRPGRP,   MR_HMASK,    L"VR performance" },
+    { MR_PANELGRP, MR_MENUKEYS, L"Panel settings" },
+    { MR_FPSGRP,   MR_FPSROLL,  L"FPS counter settings" },     // phase 44: last row MR_FPSSIZE -> MR_FPSROLL (phase 48: + FPS brightness inside)
+};
+constexpr int kMenuGroupCount = (int)(sizeof(kMenuGroups) / sizeof(kMenuGroups[0]));
+static_assert(MR_PICGRP + 1 == MR_SHARP && MR_FWD + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_MIRTURNS + 1 == MR_UPGRP &&
+              MR_UPGRP + 1 == MR_UPSCALE && MR_OFXR + 1 == MR_VRPGRP && MR_VRPGRP + 1 == MR_TURBO && MR_HMASK + 1 == MR_PANELGRP &&
+              MR_PANELGRP + 1 == MR_POSX && MR_MENUKEYS + 1 == MR_FPS && MR_FPSGRP + 1 == MR_FPSLOCK && MR_FPSROLL + 1 == MR_LOG,
+              "tuning menu: a group's children must follow its header and fill it up to its last row");
+static_assert(MR_SHARP < MR_WIDTH && MR_WIDTH < MR_LOD && MR_LOD < MR_LODCUT && MR_LODCUT < MR_AREA && MR_AREA < MR_PRETM &&
+              MR_PRETM < MR_FWD && MR_DRAWIDS < MR_MIRROR && MR_MIRROR < MR_MIRTURNS && MR_UPSCALE < MR_DLAA && MR_DLAA < MR_OFXR &&
+              MR_TURBO < MR_VRS && MR_VRS < MR_VRSSIZE && MR_VRSSIZE < MR_VRSPASS && MR_VRSPASS < MR_HMASK &&
+              MR_POSX < MR_POSY && MR_POSY < MR_SIZE && MR_SIZE < MR_DEPTH && MR_DEPTH < MR_FACE && MR_FACE < MR_MENUKEYS &&
+              MR_FPSLOCK < MR_FPSX && MR_FPSX < MR_FPSY && MR_FPSY < MR_FPSSIZE && MR_FPSSIZE < MR_FPSCOLOR &&
+              MR_FPSCOLOR < MR_FPSBRIGHT && MR_FPSBRIGHT < MR_FPSDIST && MR_FPSDIST < MR_FPSYAW && MR_FPSYAW < MR_FPSPITCH && MR_FPSPITCH < MR_FPSROLL,
+              "tuning menu: group children out of order");
 const wchar_t* const kMenuDesc[] = {
     // v0.10.0: every row = what it does, when a player would change it, what it costs. The panel shows 3 lines of about 105
     // characters (menu.cpp kDescH) = the description + the cost sentence MenuPerfCosts appends: keep both within ~320 characters.
@@ -14229,6 +15374,9 @@ const wchar_t* const kMenuDesc[] = {
     L"setting you set yourself.",
     L"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, least ghosting behind traffic: start here. "
     L"3 (F) = calmest on fences and wires, can smear moving detail, same cost as 2. 4 (M) = heaviest (about 5x), flat tests only.",
+    // phase 43: menu categories (Picture)
+    L"Picture quality: sharpening, texture sharpness, the DLAA area and the see-through depth. Right opens the group, Left closes it; it "
+    L"starts closed every time the menu opens.",
     L"Sharpens the picture after DLAA, 0 (off) to 1.0. Raise it if the picture looks soft; too high gives bright halos on edges. "
     L"Costs about 0.1 ms; 0 skips the pass.",
     L"How far the sharpening reaches, 1 to 4 px: small = fine detail, large = bolder edges. Change it if the sharpening looks too "
@@ -14239,31 +15387,46 @@ const wchar_t* const kMenuDesc[] = {
     L"follows the row above. Acts only while Texture sharpness is not 0. No GPU time, a little memory.",
     L"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower it to afford a heavier "
     L"model or win frame rate; 40 % costs about 40 % of the model. Also sets the garage / main-menu truck.",
-    L"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and does not ghost. Turn it off "
-    L"only to save about 0.5 ms per eye or to test: every pixel then moves with the camera and traffic smears.",
-    L"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main mirror next to you). "
-    L"all = every mirror. camera = cheapest per mirror, moving traffic can ghost in the glass; else each part moves exactly in the glass.",
     L"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. Change it only to compare. "
     L"Not used with DLSS upscale or Windows HDR. Same cost either way; takes ~60 frames to switch.",
     L"Gives wires, fences and glass their own distance instead of what is behind them, so they do not smear when you move. Turn "
     L"it off if you see no smearing there: saves 0.02 - 0.06 ms per eye.",
+    // phase 43: menu categories (Motion and mirrors)
+    L"How moving parts and truck mirrors are handled by DLAA. Right opens the group, Left closes it; it starts closed every time the "
+    L"menu opens.",
+    L"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and does not ghost. Turn it off "
+    L"only to save about 0.5 ms per eye or to test: every pixel then moves with the camera and traffic smears.",
+    L"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main mirror next to you). "
+    L"all = every mirror. camera = cheapest per mirror, moving traffic can ghost in the glass; else each part moves exactly in the glass.",
+    L"on = each mirror gets its DLAA every 2nd frame and shows its last clean picture in between: about half the mirror cost. Edges "
+    L"stay clean; moving things in the glass update at half rate. off = every mirror every frame.",
+    // phase 43: menu categories (Upscaling and VR)
+    L"DLSS upscale, the DLAA on / off switch and the OFXR Bridge info. Right opens the group, Left closes it; it starts closed every "
+    L"time the menu opens.",
     L"DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and "
     L"fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %.",
     L"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for comparing. Off saves the cost "
     L"of every part together.",
     L"OFXR Bridge = VR frame generation by djules75, a separate download (github.com/djules75/OFXR-Bridge). found = its layer "
     L"is loaded in this game and the mod lets its work pass through. Start its tray app before the game.",
+    // phase 43: menu categories (VR performance)
+    L"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every "
+    L"time the menu opens.",
     // phase 30 (MR_TURBO): the warning first (the description shows while the row is selected)
     L"Turbo: no ASW / Motion Smoothing / SSW / reprojection. VR only. On = the game stops waiting for the headset each frame: "
     L"more fps only when the CPU is the limit (busy cities, traffic). Turn it off if the picture judders. From OpenXR Toolkit.",
     // phase 34 (MR_VRS, MR_VRSSIZE)
     L"Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR only. The outer ring is shaded "
     L"once per 2 x 2 pixels; fences, grass and leaves keep full detail. Turn it off if the edge looks blocky.",
-    L"How big the sharp centre of Foveated (VRS) is: wide = the largest sharp area, the smallest saving; narrow = the biggest "
-    L"saving, lower detail starts closer to the middle. balanced is the default.",
-    // phase 39 (MR_LOG)
-    L"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + problems worked around; "
-    L"info = + start-up and changes; debug = + statistics, and debug also runs the GPU timers and the CPU profiler.",
+    L"How big the sharp centre of Foveated (VRS) is, 10 - 100 % in 5 % steps: bigger = more of the view sharp, less saving; "
+    L"smaller = more saving, lower detail starts closer to the middle. 80 % (balanced) is the default; 90 = wide, 65 = narrow.",
+    // phase 42 (MR_VRSPASS)
+    L"Which of the game's passes Foveated (VRS) acts on. scene = the 3D world only (default). scene + lighting = also the game's "
+    L"lighting pass, at the very edge only: more saving. Test it: look for blocky light or shadow edges at the side of your view.",
+    // phase 40 (MR_HMASK)
+    L"VR only. The game skips the lens corners you never see (the headset reports them), so it draws fewer pixels: more GPU "
+    L"headroom, the picture you see stays the same. The first switch-on needs a game restart. Turn it off if the edge of the view "
+    L"looks wrong.",
     // v0.10.3 phase 29c (MR_PANELGRP)
     L"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes it; it starts closed "
     L"every time the menu opens.",
@@ -14281,16 +15444,31 @@ const wchar_t* const kMenuDesc[] = {
     L"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see what a setting gains. "
     L"Its GPU cost is measured: per frame, every picture it is drawn into; none when off. Save keeps it for the next start.",
     // v0.10.3 phase 29c (MR_FPSGRP)
-    L"The fps box's lock, position and size. Right opens the group, Left closes it; it starts closed every time the menu "
-    L"opens.",
+    L"The fps box's lock, position, size, colour, VR distance and turn. Right opens the group, Left closes it; it starts closed "
+    L"every time the menu opens.",
     // v0.10.3 phase 28 (MR_FPSLOCK)
-    L"VR only, so greyed in flat. Follow head = the fps box moves with the headset. Fixed in cab = it stays at one spot in the "
-    L"cab, 0.8 m from your seat; X / Y then turn it around you in degrees. No cost.",
-    L"Moves the fps box sideways, in % of the screen (VR fixed in cab: degrees around you). Flat and VR each keep their own "
-    L"position. No cost.",
-    L"Moves the fps box up / down, in % of the screen (VR fixed in cab: degrees, minus = up). Flat and VR each keep their own "
-    L"position. No cost.",
+    L"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, ignores the cab's sway. "
+    L"Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Per-part motion vectors). No cost.",
+    L"Moves the fps box sideways, in % of the screen (VR fixed / attached: degrees around you). Flat and VR each keep their "
+    L"own position. No cost.",
+    L"Moves the fps box up / down, in % of the screen (VR fixed / attached: degrees, minus = up). Flat and VR each keep their "
+    L"own position. No cost.",
     L"Makes the fps box bigger or smaller (0.2 .. 3.0). Raise it if you cannot read it in the headset or on a big screen. No cost.",
+    // phase 44 (MR_FPSCOLOR, MR_FPSDIST, MR_FPSYAW, MR_FPSPITCH, MR_FPSROLL)
+    L"The colour of the fps box's text: 20 colours, each with an outline so it reads on any picture (black on white = dark text, "
+    L"white outline). Flat and VR. No cost.",
+    L"How bright the fps box is, 10 - 100 %: 100 = the colour as it is, lower dims the text (the outline stays) toward black. Use it "
+    L"to tone the counter down at night or in the headset. Flat and VR. No cost.",
+    L"VR only, so greyed in flat. How far away the fps box floats, 0.30 - 3.00 m. It keeps the same size in your view at every "
+    L"distance; only the depth changes. Put it near the depth you look at to read it without refocusing. No cost.",
+    L"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face turns to the right). Use it "
+    L"to angle the box when it sits at the side. 0 = it faces you. No cost.",
+    L"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if lying on the dashboard). "
+    L"0 = it faces you. No cost.",
+    L"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = upright. No cost.",
+    // phase 39 (MR_LOG)
+    L"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + problems worked around; "
+    L"info = + start-up and changes; debug = + statistics, and debug also runs the GPU timers and the CPU profiler.",
     L"Writes everything shown here into dlaa.ini (settings, and the panel / fps box positions once you moved them), keeping every "
     L"other line. Do it once you like what you see, or the changes are gone at the next start. Mode saves itself.",
     // v0.10.3 phase 29d (MR_RESET): MenuBuildPanel puts "Hold <menu Right> for <bind_hold_ms> s to reset. " in front of it
@@ -14300,16 +15478,20 @@ const wchar_t* const kMenuDesc[] = {
 };
 static_assert(sizeof(kMenuDesc) / sizeof(kMenuDesc[0]) == MR_COUNT, "tuning menu: kMenuDesc must have one entry per row (MR_* order)");
 int   g_menuSel     = 0;                                  // selected row (kept while closed: the menu reopens where it was)
-// v0.10.3 phase 29c: the two collapsible groups -- [0] "Panel settings" (MR_PANELGRP: MR_POSX .. MR_MENUKEYS), [1] "FPS
-// counter settings" (MR_FPSGRP: MR_FPSLOCK .. MR_FPSSIZE). Both collapse at every open (MenuKeys); a collapsed group's rows
-// are not in the Panel handed to Draw (MenuBuildPanel compacts), Up / Down skip them (MenuStepRow). g_menuSel stays an MR id.
-bool  g_menuGrpOpen[2] = {};
-inline int  MenuRowGroup(int id) {                       // the header of the group `id` is a child of; -1 = top level (headers too)
-    if (id > MR_PANELGRP && id <= MR_MENUKEYS) return MR_PANELGRP;
-    if (id > MR_FPSGRP && id <= MR_FPSSIZE)    return MR_FPSGRP;
+// v0.10.3 phase 29c / phase 43: the collapsible groups (kMenuGroups). All collapse at every open (MenuKeys); a collapsed
+// group's rows are not in the Panel handed to Draw (MenuBuildPanel compacts), Up / Down skip them (MenuStepRow). g_menuSel
+// stays an MR id.
+bool  g_menuGrpOpen[kMenuGroupCount] = {};
+inline int  MenuGroupIndex(int header) {                 // index of the group whose header row is `header`; -1 = not a header
+    for (int i = 0; i < kMenuGroupCount; ++i) if (kMenuGroups[i].header == header) return i;
     return -1;
 }
-inline bool& MenuGrpOpen(int header) { return g_menuGrpOpen[header == MR_FPSGRP ? 1 : 0]; }
+inline int  MenuRowGroup(int id) {                       // the header of the group `id` is a child of; -1 = top level (headers too)
+    for (int i = 0; i < kMenuGroupCount; ++i)
+        if (id > kMenuGroups[i].header && id <= kMenuGroups[i].last) return kMenuGroups[i].header;
+    return -1;
+}
+inline bool& MenuGrpOpen(int header) { const int i = MenuGroupIndex(header); return g_menuGrpOpen[i < 0 ? 0 : i]; }
 inline bool MenuRowVisible(int id) { const int g = MenuRowGroup(id); return g < 0 || MenuGrpOpen(g); }
 // The next VISIBLE row from `from` in direction dir (-1 / +1), wrapping around; `from` itself when nothing else is visible.
 int MenuStepRow(int from, int dir) {
@@ -14323,6 +15505,11 @@ int MenuStepRow(int from, int dir) {
 bool  g_menuMoved   = false;                              // the panel placement changed since the menu was opened (close line)
 float g_menuVrBuild = 0.0f;                               // VR: panel scale of eye 0 (the texture is built at it; 0 = none yet)
 float g_fpsVrBuild  = 0.0f;                               // VR: fps box scale of eye 0 (the same for the box; 0 = none yet)
+// phase 44: the fps box colours (fps_color) into the widget cache before each DrawWidget (a compare there; a change rebuilds once)
+inline void FpsSyncColor() {
+    const FpsPose::Color c = FpsPose::Dimmed(FpsPose::ColorOf(g_fpsColor), g_fpsBright);   // phase 48: + brightness (the widget cache compares the colours)
+    TuningMenu::SetWidgetColors(c.tr, c.tg, c.tb, c.lr, c.lg, c.lb);
+}
 bool  g_fpsMoved    = false;                              // an fps box row changed since the menu was opened (close line)
 
 // VR = an eye-texture blit has been seen (the panel is then drawn into the eye textures and the rows edit the VR placement).
@@ -14433,19 +15620,23 @@ void ToggleFpsBox(uint64_t n) {
 // v0.10.3 phase 28: the menu's FPS counter lock row -- the VR fps box follows the headset (0) / stays fixed in the cab (1).
 // Logged + beeped like ToggleFpsBox. Also switchable in flat (kept for VR; the row is greyed there).
 void FpsVrLockReset();                                    // (FpsVrLockedPlace's once-logs + the captured pivot: after MenuDrawVrOn)
-void ToggleFpsVrLock(uint64_t n) {
-    g_fpsVrLock = g_fpsVrLock ? 0 : 1;
+// Phase 47: three values -- Right = the next (follow head -> fixed in play space -> attached to vehicle -> follow head), Left =
+// the previous one.
+void ToggleFpsVrLock(uint64_t n, int dir) {
+    g_fpsVrLock = ((g_fpsVrLock + (dir < 0 ? -1 : 1)) % 3 + 3) % 3;
     g_fpsExplicit = g_fpsMoved = true;
     FpsVrLockReset();
     const XrHook::PoseStats ps = XrHook::GetPoseStats();
     Log("fps box VR lock: %s (fps_vr_lock=%d, tuning menu, Present #%llu) -- fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f are now %s; "
-        "OpenXR: hook %s, %llu stereo xrLocateViews seen, %llu xrEndFrame projection layers, layer space type %d (2 = LOCAL); %s",
-        g_fpsVrLock ? "FIXED IN THE CAB" : "follows the headset", g_fpsVrLock, (unsigned long long)n, g_fpsVrX, g_fpsVrY,
-        (double)g_fpsVrScale, g_fpsVrLock ? "yaw / pitch degrees at 0.8 m (+ right, + down) and the size at 0.8 m"
+        "OpenXR: hook %s, %llu stereo xrLocateViews seen, %llu xrEndFrame projection layers, layer space type %d (2 = LOCAL); %s%s",
+        g_fpsVrLock == 2 ? "ATTACHED TO THE VEHICLE" : g_fpsVrLock ? "FIXED IN THE PLAY SPACE" : "follows the headset", g_fpsVrLock,
+        (unsigned long long)n, g_fpsVrX, g_fpsVrY,
+        (double)g_fpsVrScale, g_fpsVrLock ? "yaw / pitch degrees at fps_vr_dist (+ right, + down) and the size as at 0.8 m"
                                           : "% of the eye picture from its optical centre",
         XrHook::Hooked() ? "installed" : "NOT installed", (unsigned long long)ps.locates, (unsigned long long)ps.endFrames,
-        ps.layerSpaceType, MenuVrPathName());
-    PlayTones(1, g_fpsVrLock ? 1200 : 300, 150, 0);
+        ps.layerSpaceType, MenuVrPathName(), g_fpsVrLock == 2 ? " -- attached: the fps box is drawn into the eye pictures (never a "
+        "quad layer), placed from a cab draw's MVP of each picture" : "");
+    PlayTones(1, g_fpsVrLock == 2 ? 1600 : g_fpsVrLock ? 1200 : 300, 150, 0);
 }
 // phase 30: the menu's Turbo mode row -- dlaa.ini xr_turbo live (XrHook::SetTurbo: takes effect at the next xrEndFrame). Logged +
 // beeped like the other toggles. Also switchable in flat (kept for VR; the row is greyed there, no OpenXR frame loop).
@@ -14471,6 +15662,15 @@ int VrsSizeIndex() {                                      // -1 = custom radii f
     for (int i = 0; i < 3; ++i) if (kVrsSizes[i].inner == g_vrsInner && kVrsSizes[i].outer == g_vrsOuter) return i;
     return -1;
 }
+// phase 44: the Foveated size row is a size SCALER -- value = vrs_outer (the full-detail radius, % of the half picture) in 5 %
+// steps from 100 down to 10; vrs_inner = max(10, value - 25) (the 25-point gap of every preset). True = the radii are on that
+// scale (the row shows "80 %"); false = custom dlaa.ini radii (shown "inner / outer %", the first step snaps to the scale).
+constexpr int kVrsSizeMin = 10, kVrsSizeMax = 100, kVrsSizeStep = 5, kVrsSizeGap = 25;
+inline int VrsInnerFor(int outer) { return outer - kVrsSizeGap < kVrsSizeMin ? kVrsSizeMin : outer - kVrsSizeGap; }
+bool VrsSizeOnScale() {
+    return g_vrsOuter >= kVrsSizeMin && g_vrsOuter <= kVrsSizeMax && g_vrsOuter % kVrsSizeStep == 0 &&
+           g_vrsInner == VrsInnerFor(g_vrsOuter);
+}
 void ToggleVrs(uint64_t n) {
     g_vrsOn = g_vrsOn ? 0 : 1;
     g_vrsExplicit = true;
@@ -14483,18 +15683,64 @@ void ToggleVrs(uint64_t n) {
         (unsigned long long)st.masksBuilt);
     PlayTones(1, g_vrsOn ? 1200 : 300, 150, 0);
 }
-void StepVrsSize(int dir, uint64_t n) {
-    const int cur = VrsSizeIndex();
-    const int next = cur < 0 ? 1 : (cur + (dir > 0 ? 1 : -1));
-    if (next < 0 || next > 2) { PlayTones(1, 200, 120, 0); return; }   // at the end of the list (low beep, as a step row)
-    g_vrsInner = kVrsSizes[next].inner;
-    g_vrsOuter = kVrsSizes[next].outer;
+// phase 44: Right = a bigger sharp centre, Left = a smaller one (5 % steps, 10..100 %; was the three presets wide / balanced /
+// narrow with Right = narrower). Off the scale (custom dlaa.ini radii): the first step goes to the nearest 5 % of vrs_outer in
+// the pressed direction, clamped. Auto-repeat is accepted (a step row). `repeat` only quiets the log.
+void StepVrsSize(int dir, uint64_t n, bool repeat) {
+    const int step = dir > 0 ? kVrsSizeStep : -kVrsSizeStep;
+    int next;
+    if (VrsSizeOnScale()) next = g_vrsOuter + step;
+    else {
+        // the nearest grid value on the pressed side (vrs_outer >= 10 here: LoadConfig clamps it)
+        next = dir > 0 ? (g_vrsOuter / kVrsSizeStep + 1) * kVrsSizeStep : (g_vrsOuter - 1) / kVrsSizeStep * kVrsSizeStep;
+        if (next < kVrsSizeMin) next = kVrsSizeMin;
+        if (next > kVrsSizeMax) next = kVrsSizeMax;
+    }
+    if (next < kVrsSizeMin || next > kVrsSizeMax) { if (!repeat) PlayTones(1, 200, 120, 0); return; }   // at the end (low beep)
+    const int oldIn = g_vrsInner, oldOut = g_vrsOuter;
+    g_vrsOuter = next;
+    g_vrsInner = VrsInnerFor(next);
     g_vrsExplicit = true;
     VrsApplyConfig();
-    Log("Foveated size (VRS): %s -- vrs_inner=%d vrs_outer=%d (%% of the NDC half-size around each eye's optical centre; tuning "
-        "menu, Present #%llu)%s", kVrsSizes[next].logName, g_vrsInner, g_vrsOuter, (unsigned long long)n,
+    const int si = VrsSizeIndex();
+    if (!repeat)
+        Log("Foveated size (VRS): %d %%%s%s -- vrs_inner=%d vrs_outer=%d (was %d / %d; %% of the NDC half-size around each eye's "
+            "optical centre: 2 x 2 shading only past vrs_outer (vrs_quality 1), vrs_inner = max(10, size - 25); tuning menu, Present "
+            "#%llu)%s", g_vrsOuter, si >= 0 ? " = " : "", si >= 0 ? kVrsSizes[si].logName : "", g_vrsInner, g_vrsOuter, oldIn, oldOut,
+            (unsigned long long)n, g_vrsOn ? "" : " -- Foveated (VRS) is off: used once it is on");
+    else
+        LogDbg("Foveated size (VRS): %d %% (vrs_inner=%d vrs_outer=%d, auto-repeat)", g_vrsOuter, g_vrsInner, g_vrsOuter);
+    PlayTones(1, 300 + 9 * g_vrsOuter, 60, 0);
+}
+// phase 40: the menu's Hidden area mask (VR) row -- dlaa.ini xr_hidden_mask live (the next eye scene clear draws / skips it). The
+// OpenXR extension is only requested when it was on at the game's start: switched on later, it waits for a restart (logged; the
+// row says so). Logged + beeped like the other toggles; also switchable in flat (kept for VR; the row is greyed there).
+void ToggleHiddenMask(uint64_t n) {
+    g_xrHiddenMask = g_xrHiddenMask ? 0 : 1;
+    g_xrHiddenMaskExplicit = true;
+    HmApplyConfig();
+    const XrHook::HiddenStats hs = XrHook::GetHiddenStats();
+    Log("Hidden area mask (VR): %s (xr_hidden_mask=%d, tuning menu, Present #%llu) -- %s; OpenXR extension state %d (0 not asked, "
+        "1 not offered by the runtime, 2 / 3 enabled, 4 refused), meshes %u / %u triangles, %llu masks drawn so far",
+        g_xrHiddenMask ? "ON" : "OFF", g_xrHiddenMask, (unsigned long long)n,
+        !g_xrHiddenMask ? "from the next eye scene clear the game shades the whole picture again"
+        : (!g_xrHiddenMaskAtStart ? "the OpenXR extension was not requested at this start: save (Shift+F12) and restart the game"
+                                  : "from the next eye scene clear"),
+        hs.ext, hs.ni[0] / 3, hs.ni[1] / 3, (unsigned long long)(g_hm.drawn[0] + g_hm.drawn[1]));
+    PlayTones(1, g_xrHiddenMask ? 1200 : 300, 150, 0);
+}
+// phase 42: the menu's Foveated passes row -- dlaa.ini vrs_passes live (0 = scene binds only, 1 = + the lighting bind, outer ring
+// only). The next game bind uses it (VrsOnBind reads g_vrsPasses; Vrs::Enter refuses a lighting bracket at 0).
+void ToggleVrsPasses(uint64_t n) {
+    g_vrsPasses = g_vrsPasses ? 0 : 1;
+    g_vrsPassesExplicit = true;
+    VrsApplyConfig();
+    Log("Foveated passes (VRS): %s (vrs_passes=%d, tuning menu, Present #%llu) -- %s%s", g_vrsPasses ? "scene + lighting" : "scene",
+        g_vrsPasses, (unsigned long long)n,
+        g_vrsPasses ? "from the next frame the eye's lighting bind is shaded coarse in the outer ring too (middle ring stays 1x1)"
+                    : "from the next frame only the world scene binds (G-buffer, forward)",
         g_vrsOn ? "" : " -- Foveated (VRS) is off: used once it is on");
-    PlayTones(1, 600 + 300 * next, 120, 0);
+    PlayTones(1, g_vrsPasses ? 1200 : 300, 150, 0);
 }
 // phase 39: what followed debug = 1 follows log level 4 -- live: the GPU timers (perf_timers -1) and the CPU profiler (cpu_prof -1;
 // explicit 0 / 1 stay as set), vrs_debug. Called by StepLogLevel / ResetSettings (LoadConfig + SetupThread set the start state).
@@ -14502,11 +15748,13 @@ void StepVrsSize(int dir, uint64_t n) {
 void MenuPerfLevelChanged();                              // (the menu's GPU figures: defined with MenuPerfOpen)
 void ApplyLogLevelGates() {
     const bool dbg = LogDebugLevel();
-    if (g_perfCfg < 0) {
-        if (g_menuOpen.load(std::memory_order_relaxed)) MenuPerfLevelChanged();
-        else if (GpuPerf::On() != dbg) { GpuPerf::SetOn(dbg); if (dbg) GpuPerf::Restart(); }
+    if (g_menuOpen.load(std::memory_order_relaxed)) {
+        MenuPerfLevelChanged();                  // phase 45: the menu keeps the GPU timers AND the CPU profiler on until its close
+    } else {
+        if (g_perfCfg < 0 && GpuPerf::On() != dbg) { GpuPerf::SetOn(dbg); if (dbg) GpuPerf::Restart(); }
+        if (g_cpuProfCfg < 0) CpuProfSetOn(dbg);
     }
-    if (g_cpuProfCfg < 0) CpuProfSetOn(dbg);
+    MeasureUpdate();                             // phase 45: the legacy CPU timers (g_measure)
     VrsApplyConfig();
 }
 // phase 39: the menu's Logging row -- dlaa.ini log_level live (log.h LogSetLevel: raising writes "log level -> N (name)", lowering
@@ -14532,7 +15780,7 @@ void StepLogLevel(int dir, uint64_t n) {
 // cut-out key absent (g_lodCutMode = kLodCutAbsent, -0.50), mv_objects 2, mirror_dlaa 1, dlaa_pre_tonemap 1, perf_profile high,
 // mv_fwd_depth 1, the panel and the fps box at their default placement (fps box off), Turbo and foveated rendering off, logging
 // at errors (phase 39; debug = 1 in dlaa.ini: debug, as the next start gives without log_level). Each live
-// change uses the side effects of the Step* / Toggle* function of the row. On disk the 39 keys are REMOVED (WriteIniPreserving, empty value): key_* hotkeys, debug,
+// change uses the side effects of the Step* / Toggle* function of the row. On disk the 40 keys (phase 42: + vrs_passes) are REMOVED (WriteIniPreserving, empty value): key_* hotkeys, debug,
 // every other key and all comments stay. Only the profile keys that dlaa.ini sets AND this reset removes (dlss_preset, dlaa_area,
 // mirror_dlaa, mv_fwd_depth) lose their "explicit" mark; the other profile keys (mirror_vr_mode, mv_vote_res, ...) stay in the file,
 // so they stay explicit exactly as at the next start.
@@ -14569,6 +15817,8 @@ void ResetSettings(uint64_t n) {
     g_profExplicit[PK_MIRROR_VR_MODE] = g_profExplicit[PK_MIRROR_FLAT_MODE] = false;
     g_mirVrViews = 2;
     g_mirCamOnly = false;                                 // mirror_mv back to its built-in parts (no profile value)
+    g_mirTurns = 0;                                       // phase 41: mirrors in turns off (every mirror every frame)
+    g_mirTurnsExplicit = false;
     g_profile = 0;
     g_fwdAutoOff = false;                                 // re-arms the VR budget measurement (ToggleFwdDepth / ApplyProfile)
     g_vrArea = 100;                                       // flat keeps the VR value in dlaa.ini; the fresh value is 100 too
@@ -14592,6 +15842,11 @@ void ResetSettings(uint64_t n) {
     g_fpsX = 1; g_fpsY = 1; g_fpsScale = 1.0f;
     g_fpsVrX = 0; g_fpsVrY = -25; g_fpsVrScale = kFpsVrScaleDefault;
     g_fpsVrLock = 0;                                      // v0.10.3 phase 28: follows the headset again
+    g_fpsColor = 0;                                       // phase 44: white, 0.8 m, not turned
+    g_fpsBright = FpsPose::kBrightDefault;                // phase 48
+    g_fpsVrDist = FpsPose::kDistDefault;
+    g_fpsVrYaw = g_fpsVrPitch = g_fpsVrRoll = 0;
+    FpsVrLockReset();
     g_fpsExplicit = false;
     g_fpsMoved = true;
     g_xrTurbo = 0;                                        // phase 30: Turbo mode off (the pending wait ends at the next xrEndFrame)
@@ -14599,7 +15854,12 @@ void ResetSettings(uint64_t n) {
     XrHook::SetTurbo(false);
     g_vrsOn = 0; g_vrsInner = 55; g_vrsOuter = 80;        // phase 34: foveated rendering off, balanced radii (vrs_quality /
     g_vrsExplicit = false;                                //   vrs_debug are dlaa.ini-only: left as they are)
+    g_vrsPasses = 0;                                      // phase 42: scene binds only
+    g_vrsPassesExplicit = false;
     VrsApplyConfig();
+    g_xrHiddenMask = 0;                                   // phase 40: hidden area mask off
+    g_xrHiddenMaskExplicit = false;
+    HmApplyConfig();
     // phase 39: logging back to the level dlaa.ini gives without log_level (the key is removed below; `debug` stays in the file,
     // so debug = 1 there = level 4, as at the next start; else 1 = errors)
     g_logLevelKey = -1;
@@ -14610,7 +15870,9 @@ void ResetSettings(uint64_t n) {
 
     // dlaa.ini: remove the 35 keys (empty value); everything else stays byte-for-byte (v0.10.2: + mirror_mv = 32; v0.10.3 phase 28:
     // + fps_vr_lock = 33, the cap raised to kIniMaxKeys; v0.10.3 phase 29b: + menu_vr_dist = 34; phase 30: + xr_turbo = 35;
-    // phase 34: + vrs / vrs_inner / vrs_outer = 38; phase 39: + log_level = 39)
+    // phase 34: + vrs / vrs_inner / vrs_outer = 38; phase 39: + log_level = 39; phase 41: + mirror_turns = 40;
+    // phase 40: + xr_hidden_mask = 41; kIniMaxKeys raised 40 -> 48 at the dev merge;
+    // phase 42: + vrs_passes = 42; phase 44: + fps_color / fps_vr_dist / fps_vr_yaw / fps_vr_pitch / fps_vr_roll = 47, cap 56)
     static const char* const kKeys[] = {
         "mode", "dlss_preset", "dlaa_area", "sharpness", "sharp_radius", "dlss_upscale", "tex_lod_bias", "tex_lod_bias_cutout",
         "mv_objects", "mirror_dlaa", "mirror_vr_mode", "mirror_flat_mode", "mirror_vr_views", "mirror_mv", "dlaa_pre_tonemap",
@@ -14618,9 +15880,14 @@ void ResetSettings(uint64_t n) {
         "menu_x", "menu_y", "menu_scale", "menu_vr_x", "menu_vr_y", "menu_vr_scale", "menu_vr_depth", "menu_vr_face",
         "menu_vr_dist",                                                                                 // phase 29b
         "fps_show", "fps_x", "fps_y", "fps_scale", "fps_vr_x", "fps_vr_y", "fps_vr_scale", "fps_vr_lock",   // phase 28: + fps_vr_lock
+        "fps_color", "fps_vr_dist", "fps_vr_yaw", "fps_vr_pitch", "fps_vr_roll",                        // phase 44
+        "fps_brightness",                                                                               // phase 48
         "xr_turbo",                                                                                     // phase 30
         "vrs", "vrs_inner", "vrs_outer",                                                                // phase 34
+        "vrs_passes",                                                                                   // phase 42
         "log_level",                                                                                    // phase 39
+        "mirror_turns",                                                                                 // phase 41
+        "xr_hidden_mask",                                                                               // phase 40
     };
     constexpr int kNKeys = (int)(sizeof(kKeys) / sizeof(kKeys[0]));
     static_assert(kNKeys <= kIniMaxKeys, "WriteIniPreserving handles at most kIniMaxKeys keys");
@@ -14631,11 +15898,11 @@ void ResetSettings(uint64_t n) {
         Log("settings RESET to defaults (Reset row, Present #%llu): mode = %s (no key: DLAA on + dlss_upscale on) dlss_preset = default "
             "dlaa_area = 100 sharpness = 0.4 sharp_radius = 1.5 dlss_upscale = 1 tex_lod_bias = 0.00 tex_lod_bias_cutout = absent "
             "(-0.50) mv_objects = 2 mirror_dlaa = 1 mirror_vr_mode = 2 mirror_flat_mode = 1 mirror_vr_views = 2 mirror_mv = parts "
-            "dlaa_pre_tonemap = 1 "
+            "mirror_turns = 0 dlaa_pre_tonemap = 1 "
             "perf_profile = high mv_fwd_depth = 1 menu_x = 2 menu_y = 8 "
             "menu_scale = 1.0 menu_vr_x = 0 menu_vr_y = -5 menu_vr_scale = 1.0 menu_vr_depth = 12 menu_vr_dist = 100 menu_vr_face = 1 "
             "fps_show = 0 "
-            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 xr_turbo = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 log_level = %d (%s) -- profile: %s -- "
+            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 xr_turbo = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 xr_hidden_mask = 0 log_level = %d (%s) -- profile: %s -- "
             "dlaa.ini: %d keys removed (hotkeys and other lines kept)", (unsigned long long)n, g_dlaaOn.load() ? "DLSS" : "off",
             (double)kFpsVrScaleDefault, LogLevel(), g_logDebugKey ? "no key: debug = 1 in dlaa.ini" : "no key", changed, kNKeys);
         BeepSeq b;                                        // success: rising two-tone 600 -> 900 Hz, 120 ms each (as SaveSettings)
@@ -14646,14 +15913,24 @@ void ResetSettings(uint64_t n) {
         PlayTones(1, 200, 400, 0);                        // failure: one long 200 Hz tone (400 ms)
     }
 }
-// ---- tuning menu: live GPU figures (the GPU block under the title, the "GPU cost" column, the cost sentence) ----
-// GpuPerf (gpu_perf.h) times every sub-pass of the mod per eye; it is OFF for a normal user (debug = 0), so the menu switches it
-// on while open (MenuPerfOpen / MenuPerfClose; the GPU spans' scene figure follows GpuPerf::On, SpanOnPassStart). The menu keeps
-// its OWN ~1-s figures: every kMenuPerfEvery Presents the per-eye window sums are read back from GpuPerf::Stats and the
-// difference to the previous read is the last interval (a LogWindow restart in between -- debug = 1, every 600 blits -- shows in
+// ---- tuning menu: live figures (the perf block under the title, the cost column "CPU | GPU", the cost sentence) -------------
+// GPU: GpuPerf (gpu_perf.h) times every sub-pass of the mod per eye; it is OFF below log level 4, so the menu switches it on while
+// open (MenuPerfOpen / MenuPerfClose; the GPU spans' scene figure follows GpuPerf::On, SpanOnPassStart). The menu keeps its OWN
+// ~1-s figures: every kMenuPerfEvery Presents the per-eye window sums are read back from GpuPerf::Stats and the difference to
+// the previous read is the last interval (a LogWindow restart in between -- level 4, every 600 blits -- shows in
 // GpuPerf::Restarts: that interval then counts from the restart). The panel texts change only at these snapshots, so the panel
-// texture is rebuilt at most once per second. "game" = the GPU spans' scene ms/frame (both eyes; updated every ~300 frames)
-// MINUS the mod's own total of the eyes (the scene span contains the mod's work: the DLAA evaluates, the per-pass work, ...).
+// texture is rebuilt at most once per second. gpuFrameMs = the GPU spans' scene ms/frame (game + mod, both eyes; updated every
+// ~300 frames); "game" = that MINUS the mod's own total of the eyes.
+// phase 45 -- CPU: the cpu_prof.h profiler (phase 31 / 33) is switched on the same way while the menu is open (cpu_prof = -1 below
+// level 4, or cpu_prof = 0: on for the menu only; level 4 / cpu_prof = 1 keep it on anyway). At the same snapshots MenuCpuRead
+// reads every profiled thread's cumulative counters (single-writer relaxed atomics; the 10-s log report keeps its own baseline)
+// and keeps per-frame deltas: the RENDER thread (the thread with the most game D3D11 calls in the interval = the one that draws)
+// per mod category, the mod on all other threads together, the profiler's own cost, and the frame loop's busy time for the Limit
+// line (MenuLimit). Frame = the game's xrEndFrame in VR, its Present in flat (the profiler's frame marks), so both sides of the
+// cost column are ms PER FRAME (VR: the GPU side = both eyes). The profiler's own timer reads are taken out of every figure.
+// COST WHILE CLOSED: nothing of this runs (MenuPerfTick is called only while open); the profiler / GPU timers / g_measure go back
+// to the dlaa.ini + log level state at the close (MenuPerfClose): below level 4 every profiler scope is one relaxed load + a
+// not-taken branch, every GPU timer section one call + a flag test, every legacy CPU timer one relaxed load (MeasureOn).
 enum MenuCostGrp { MG_NGX, MG_PART, MG_CAM, MG_FWD, MG_MIR, MG_SHARP, MG_COPY, MG_COUNT };
 int MenuCostGroup(int sec) {
     switch (sec) {
@@ -14683,14 +15960,32 @@ struct MenuPerfRaw {                             // one eye's GpuPerf window sum
     uint64_t n[GpuPerf::kCount] = {};
 };
 struct MenuPerfEye { bool have = false; double grp[MG_COUNT] = {}; double total = 0.0; };   // ms per pass (= per eye)
+// phase 45: one profiler registry slot as MenuCpuRead read it last (heap, [CpuProf::kMaxThreads]; the Present thread only)
+struct MenuCpuSlot {
+    CpuProf::Tls* tp;                            // the slot's thread block then (another one = no baseline: one interval skipped)
+    uint64_t      ticks[CpuProf::kCount], calls[CpuProf::kCount], trans;
+};
+MenuCpuSlot* g_menuCpuPrev = nullptr;
+// phase 45: the menu's CPU figures over the last interval, ms PER FRAME, the profiler's own cost taken out
+struct MenuCpu {
+    bool     have = false;
+    double   blk[CpuProf::kModEnd] = {};         // the render thread, per mod category (hook bodies + blocks)
+    double   modMs = 0.0;                        // the render thread: every mod category but the menu's own (menu, gpu-timers, prof)
+    double   otherMs = 0.0;                      // the same on every other thread together (main / Present thread: keys, frame work)
+    double   profMs = 0.0;                       // measuring: the profiler + the GPU timers' CPU, every thread (NOT in the figures above)
+    double   frameMs = 0.0;                      // wall time per frame over the interval
+    double   busyMs = -1.0;                      // the frame loop's CPU busy time per frame (MenuLimit); -1 = no frame-loop thread
+    double   waitMs = 0.0;                       // that thread's time inside Present / OpenXR per frame
+    uint32_t renderTid = 0;
+};
 struct MenuPerfState {
     bool          forced = false;                // the menu switched the timers on (back to the dlaa.ini state at the close)
     bool          spanFresh = false;             // g_spanSceneLast belongs to this menu session (or the spans were on anyway)
     uint32_t      spanSeq0 = 0;                  // g_spanSceneLastSeq at the open
     uint64_t      presents = 0;                  // Presents since the open
     LARGE_INTEGER tOpen{}, tLast{};
-    MenuPerfRaw   raw[2];
-    MenuPerfEye   eye[2];                        // the figures on the panel (eye 1: VR only)
+    MenuPerfRaw   raw[kMaxViews];                // v0.12.0 issue #12: per eye / view (was 2)
+    MenuPerfEye   eye[kMaxViews];                // the figures on the panel (eye 1: VR only; v0.12.0: views 1.. flat multi-view)
     bool          haveFps = false;
     double        fps = 0.0, frameMs = 0.0;      // the fps meter's (FpsTick) last figures, copied at each snapshot
     double        gameMs = -1.0;                 // the game's GPU frame without the mod, -1 = none yet
@@ -14712,6 +16007,15 @@ struct MenuPerfState {
     uint64_t      logPres = 0;                   // `presents` then
     bool          haveLog = false;
     double        logMs = 0.0, logLps = 0.0;
+    // phase 45: CPU (MenuCpuRead) + the Limit line (MenuLimit)
+    bool          cpuForced = false;             // the menu switched the CPU profiler on (back to the dlaa.ini / level state at the close)
+    bool          cpuBase = false;               // MenuCpuRead has its baseline
+    uint64_t      cpuPres = 0, cpuXre = 0;       // the profiler's frame-mark counts (Presents, the game's xrEndFrame) then
+    int64_t       cpuQpc = 0;                    // ... and the time
+    MenuCpu       cpu;
+    double        gpuFrameMs = -1.0;             // the GPU spans' scene figure (game + mod, both eyes), -1 = none this menu session
+    double        periodMs = 0.0;                // VR: the headset's frame period (XrHook::DisplayPeriodNs), 0 = unknown / flat
+    wchar_t       limit[80] = L"Limit: ...";     // the Limit line's text (MenuLimit)
 };
 MenuPerfState g_menuPerf;
 
@@ -14726,6 +16030,14 @@ void MenuPerfOpen() {
         m.forced = true;
         Log("tuning menu: GPU timers on while the menu is open");
     }
+    if (!CpuProf::On()) {                        // phase 45: the CPU profiler too (cpu_prof 0, or -1 below log level 4)
+        CpuProfSetOn(true);
+        m.cpuForced = true;
+        Log("tuning menu: CPU profiler on while the menu is open");
+    }
+    if (g_menuCpuPrev)                           // phase 45: fresh baselines (the next read only takes the snapshot)
+        for (int i = 0; i < CpuProf::kMaxThreads; ++i) g_menuCpuPrev[i].tp = nullptr;
+    MeasureUpdate();                             // phase 45: the legacy CPU timers too (g_menuOpen is set already)
     m.spanSeq0 = g_spanSceneLastSeq;
     m.spanFresh = spansOn && g_spanSceneLastN > 0;
     QueryPerformanceCounter(&m.tOpen);
@@ -14736,11 +16048,132 @@ void MenuPerfOpen() {
 void MenuPerfClose() {
     if (g_menuPerf.forced) GpuPerf::SetOn(g_perfCfg > 0 || (g_perfCfg < 0 && LogDebugLevel()));
     g_menuPerf.forced = false;
+    if (g_menuPerf.cpuForced) CpuProfSetOn(g_cpuProfCfg > 0 || (g_cpuProfCfg < 0 && LogDebugLevel()));   // phase 45
+    g_menuPerf.cpuForced = false;
+    MeasureUpdate();                             // phase 45 (g_menuOpen is false already: MenuClose)
 }
-// phase 39: the Logging row changed the level while the menu is open (perf_timers -1): the timers stay on for the menu; the close
-// puts them where the new level says (MenuPerfClose) -- "forced" = they are on for the menu, not for the level.
+// phase 39: the Logging row changed the level while the menu is open: the timers (perf_timers -1) and, phase 45, the CPU profiler
+// (cpu_prof -1) stay on for the menu; the close puts them where the new level says (MenuPerfClose) -- "forced" = on for the menu,
+// not for the level. Explicit 0 / 1 in dlaa.ini: unchanged (0 = forced by the menu until the close, 1 = on anyway).
 void MenuPerfLevelChanged() {
-    if (GpuPerf::On()) g_menuPerf.forced = !LogDebugLevel();
+    const bool dbg = LogDebugLevel();
+    if (g_perfCfg < 0 && GpuPerf::On()) g_menuPerf.forced = !dbg;
+    if (g_cpuProfCfg < 0 && CpuProf::On()) g_menuPerf.cpuForced = !dbg;
+}
+// phase 45: the CPU figures since the previous read (see the block comment above MenuCostGrp). base = the first read after the
+// open: the baseline only. The profiler's own cost is taken out: entering a scope charges about ONE timer transition of overhead
+// to the category it enters (the push's counter updates after its TSC read + the pop's work before its TSC read), a hook body
+// about TWO (its own push + the pop of the game's call inside it), so a category's ticks minus its entries x that x the
+// calibrated cost of one transition (CpuProf::Calibrate, g_transTicks) ~ its time with the profiler off (clamped at 0); a
+// thread's busy time loses ALL of its transitions. "measuring" (profMs) = every thread's transitions + the GPU timers' own CPU
+// (gpu-timers block) + the profiler's 10-s report (prof block): what the closed menu does not pay. Reads other threads' counters lock-free
+// (cpu_prof.h: single-writer relaxed atomics; a snapshot may be torn across fields by a few ns: fine for 1-s figures).
+void MenuCpuRead(MenuPerfState& m, bool base, int64_t q) {
+    using namespace CpuProf;
+    if (!On()) { m.cpuBase = false; return; }   // (switched on at the open; off only if that failed)
+    if (!g_menuCpuPrev) g_menuCpuPrev = new (std::nothrow) MenuCpuSlot[kMaxThreads]();
+    if (!g_menuCpuPrev) return;
+    const uint64_t pres = g_cpPresents.load(std::memory_order_relaxed), xre = g_cpXrEnds.load(std::memory_order_relaxed);
+    const bool cont = m.cpuBase && !base;
+    const uint64_t dP = pres - m.cpuPres, dX = xre - m.cpuXre;
+    const double secs = cont && g_qpcFreq > 0 ? (double)(q - m.cpuQpc) / (double)g_qpcFreq : 0.0;
+    m.cpuPres = pres; m.cpuXre = xre; m.cpuQpc = q; m.cpuBase = true;
+    const uint64_t F = dX ? dX : dP;             // VR: the game's xrEndFrame calls; flat: Presents (as the 10-s report)
+    const double msPerTick = g_qpcFreq > 0 ? g_qpcPerTsc.load(std::memory_order_relaxed) * 1000.0 / (double)g_qpcFreq : 0.0;
+    const double trMs = g_transTicks * msPerTick; // one timer transition, ms
+    const bool ok = cont && F > 0 && secs > 0.0 && msPerTick > 0.0;
+    const double fr = (double)(F ? F : 1);
+    const int nReg = (std::min)(g_nThreads.load(std::memory_order_acquire), kMaxThreads);
+    // the render thread: the most game D3D11 calls (draws, binds, copies; not Present / OpenXR) since the last read
+    int render = -1;
+    uint64_t best = 0;
+    for (int i = 0; i < nReg; ++i) {
+        Tls* const tp = g_threads[i].load(std::memory_order_acquire);
+        const MenuCpuSlot& p = g_menuCpuPrev[i];
+        if (!tp || p.tp != tp) continue;
+        uint64_t n = 0;
+        for (int h = 0; h < kHookCount; ++h)
+            if (h != kHkPresent && !(h >= kHkXrWait && h <= kHkXrOther)) n += Get(tp->calls[h]) - p.calls[h];
+        if (n > best) { best = n; render = i; }
+    }
+    MenuCpu c;
+    c.frameMs = ok ? secs * 1000.0 / fr : 0.0;
+    double busyMin = -1.0, busyWait = 0.0;
+    for (int i = 0; i < nReg; ++i) {
+        Tls* const tp = g_threads[i].load(std::memory_order_acquire);
+        if (!tp) continue;                       // (a slot being filled right now)
+        MenuCpuSlot& p = g_menuCpuPrev[i];
+        const bool have = p.tp == tp;            // a baseline of this thread exists
+        if (!have) { memset(&p, 0, sizeof(p)); p.tp = tp; }
+        double mod = 0.0, wait = 0.0, meas = 0.0;
+        for (int k = 0; k < kCount; ++k) {
+            const uint64_t tk = Get(tp->ticks[k]), cl = Get(tp->calls[k]);
+            const uint64_t dt = tk - p.ticks[k], dc = cl - p.calls[k];
+            p.ticks[k] = tk; p.calls[k] = cl;
+            if (!have || !ok) continue;
+            if (k < kModEnd) {
+                const double v = (std::max)(0.0, (double)dt * msPerTick - (double)dc * trMs * (k < kHookCount ? 2.0 : 1.0));
+                if (i == render) c.blk[k] = v / fr;
+                if (k != kBMenu && k != kBGpuPerf && k != kBProf) mod += v;
+                else if (k != kBMenu) meas += v;   // the GPU timers' CPU + the profiler's report: measuring, not the mod
+            } else {
+                const int h = k - kDrvFirst;     // the game's own call inside hook h: Present / OpenXR = blocked (waiting)
+                if (h == kHkPresent || (h >= kHkXrWait && h <= kHkXrOther)) wait += (double)dt * msPerTick;
+            }
+        }
+        const uint64_t tr = Get(tp->transitions), dTr = tr - p.trans;
+        p.trans = tr;
+        if (!have || !ok) continue;
+        const double prof = (double)dTr * trMs;
+        c.profMs += (prof + meas) / fr;
+        if (i == render) { c.modMs += mod / fr; c.renderTid = tp->tid; }
+        else             c.otherMs += mod / fr;
+        const uint32_t roles = tp->roles.load(std::memory_order_relaxed);
+        if (roles & (kRolePresent | kRoleXrWait | kRoleXrEnd)) {   // a thread of the game's frame loop (not our turbo wait thread)
+            const double busy = (std::max)(0.0, c.frameMs - (wait + prof + meas) / fr);   // (measuring taken out)
+            if (busyMin < 0.0 || busy < busyMin) { busyMin = busy; busyWait = wait / fr; }
+        }
+    }
+    if (!ok) return;                             // the baseline only: the last figures stay
+    c.busyMs = busyMin;
+    c.waitMs = busyWait;
+    c.have = true;
+    m.cpu = c;
+}
+// phase 45: the LIMIT LINE -- what holds the frame rate back, from data the mod has anyway while the menu is open:
+//   T = wall time per frame (the profiler's frame marks: VR the game's xrEndFrame, flat its Present);
+//   P = the budget: VR = the headset's frame period (the runtime's predictedDisplayPeriod at xrWaitFrame), flat = T;
+//   B = the frame loop's CPU busy time per frame: for each thread of the game's frame loop (Present / xrWaitFrame / xrEndFrame),
+//       T minus its time blocked inside the original Present / OpenXR calls minus the profiler's own reads; the SMALLEST of them
+//       (a thread that waits for the other one outside the hooks -- an event, a sleep -- looks busy; the other one does not);
+//   G = the GPU time of the frame = the whole-frame scene span (game + mod, both eyes; it misses the game's UI / post work after
+//       the scene and the VR compositor, so it reads a little LOW: hence 0.85 below).
+//   1. VR and T <= 1.04 P         -> "headset (N Hz)": the game keeps the headset's rate, nothing else limits it.
+//   2. B >= 0.90 P and G >= 0.85 P -> "CPU and GPU".
+//   3. B >= 0.90 P                -> "CPU" (the loop is busy the whole frame and does not wait for the GPU or the display; flat:
+//                                    "or a game fps cap" -- the game's own limiter sleeps outside the hooks and looks the same).
+//   4. G >= 0.85 P                -> "GPU".
+//   5. flat, the loop waits >= 10 % of the frame inside Present -> "vsync / fps cap" (waits for the display, the GPU is not full).
+//   6. G not measured yet (the span needs ~330 clean frames) -> "Limit: ..." (30 s after the open: "unknown").
+//   7. anything else -> "unknown" (never a guess).
+void MenuLimit(MenuPerfState& m, bool vr) {
+    constexpr size_t kL = sizeof(m.limit) / sizeof(m.limit[0]);
+    const MenuCpu& c = m.cpu;
+    if (!c.have || c.frameMs <= 0.0) { swprintf(m.limit, kL, L"Limit: ..."); return; }
+    const double T = c.frameMs, B = c.busyMs, G = m.gpuFrameMs;
+    double P = T;
+    if (vr) {
+        if (m.periodMs <= 0.0) { swprintf(m.limit, kL, L"Limit: unknown"); return; }
+        P = m.periodMs;
+        if (T <= 1.04 * P) { swprintf(m.limit, kL, L"Limit: headset (%.0f Hz)", 1000.0 / P); return; }
+    }
+    const bool cpu = B >= 0.0 && B >= 0.90 * P, gpu = G >= 0.0 && G >= 0.85 * P;
+    if (cpu && gpu)      swprintf(m.limit, kL, L"Limit: CPU and GPU");
+    else if (cpu)        swprintf(m.limit, kL, L"%ls", vr ? L"Limit: CPU" : L"Limit: CPU (or a game fps cap)");
+    else if (gpu)        swprintf(m.limit, kL, L"Limit: GPU");
+    else if (!vr && G >= 0.0 && B >= 0.0 && c.waitMs >= 0.10 * T) swprintf(m.limit, kL, L"Limit: vsync / fps cap");
+    else if (G < 0.0 && !m.gameNa && !m.noAa) swprintf(m.limit, kL, L"Limit: ...");
+    else                 swprintf(m.limit, kL, L"Limit: unknown");
 }
 // Eye `eye`'s figures since the previous read (false = no pass of that eye landed in between). Always advances the baseline.
 bool MenuPerfEyeDelta(int eye, MenuPerfEye& out) {
@@ -14782,8 +16215,9 @@ void MenuPerfTick() {
     LARGE_INTEGER now{}, freq{};
     QueryPerformanceCounter(&now);
     QueryPerformanceFrequency(&freq);
-    const int eyes = MenuVr() ? 2 : 1;
-    for (int e = 0; e < 2; ++e) {
+    const bool vrEyes = MenuVr();
+    const int eyes = vrEyes ? 2 : FlatDlaaViewCount();   // v0.12.0 issue #12: flat multi-view = N pictures per frame (<= cap)
+    for (int e = 0; e < kMaxViews; ++e) {
         MenuPerfEye pe;
         if (MenuPerfEyeDelta(e, pe) && !base && e < eyes) m.eye[e] = pe;   // no pass of the eye landed: the last figures stay
     }
@@ -14836,49 +16270,119 @@ void MenuPerfTick() {
     // The mod's timed sections run only in the driving 3-D scene (not on the menu / garage / profile screens): no pass landed
     // in the first 3 s = nothing to measure here. The flag clears by itself as soon as a pass lands (eye[0].have is sticky).
     m.nothing = !m.eye[0].have && open > 3.0;
-    if (!g_ngxEverReady && (g_dlaa[0].FeatureReady() || g_dlaa[1].FeatureReady())) g_ngxEverReady = true;
+    for (const SceneDlaa& d : g_dlaa) if (!g_ngxEverReady && d.FeatureReady()) g_ngxEverReady = true;   // v0.12.0: every view
     m.noAa = !g_ngxEverReady;
+    // phase 45: the CPU figures, the frame's GPU time, the headset period and the Limit line (same ~1-s snapshots)
+    MenuCpuRead(m, base, now.QuadPart);
+    m.gpuFrameMs = m.spanFresh && g_spanSceneLastN ? g_spanSceneLast : -1.0;
+    const int64_t per = vrEyes ? XrHook::DisplayPeriodNs() : 0;
+    m.periodMs = per > 0 ? (double)per / 1.0e6 : 0.0;
+    MenuLimit(m, vrEyes);
 }
-// "1.2 ms" (the cost column; "<0.1 ms" below 0.05)
-void MenuMs(wchar_t* d, size_t cap, double ms) {
-    if (ms < 0.05) swprintf(d, cap, L"<0.1 ms");
-    else           swprintf(d, cap, L"%.1f ms", ms);
+// phase 45: a figure of the cost column / the perf lines: "<0.01", "0.42" (under 1 ms), "1.3", "12.4"
+void MenuNum(wchar_t* d, size_t cap, double ms) {
+    if (ms < 0.005)     swprintf(d, cap, L"<0.01");
+    else if (ms < 1.0)  swprintf(d, cap, L"%.2f", ms);
+    else if (ms < 100.) swprintf(d, cap, L"%.1f", ms);
+    else                swprintf(d, cap, L"%.0f", ms);
 }
-// The GPU block: line 0 = the game's frame + fps, then the mod per eye (VR: eye 0, eye 1; flat: one line + what the numbers are).
-void MenuPerfLines(TuningMenu::Panel& p, bool vr) {
+// phase 45: a cost column cell "<cpu> | <gpu>", the CPU text in blue and the GPU text in orange (TuningMenu ink marks, drawn by
+// menu.cpp); nullptr = "-" in the row's own colour (that side does not apply / is not measured). Both nullptr = "-".
+void MenuCell(wchar_t* d, size_t cap, const wchar_t* cpu, const wchar_t* gpu) {
+    using namespace TuningMenu;
+    if (!cpu && !gpu) { swprintf(d, cap, L"-"); return; }
+    wchar_t c[16], g[16];
+    if (cpu) swprintf(c, 16, L"%lc%ls%lc", kInkCpu, cpu, kInkEnd); else swprintf(c, 16, L"-");
+    if (gpu) swprintf(g, 16, L"%lc%ls%lc", kInkGpu, gpu, kInkEnd); else swprintf(g, 16, L"-");
+    swprintf(d, cap, L"%ls | %ls", c, g);
+}
+// phase 45: the GPU groups of the last interval, ms PER FRAME (VR: the eyes that landed, summed; flat: the one picture)
+struct MenuGpuFrame { bool have = false; double grp[MG_COUNT] = {}; double total = 0.0; };
+MenuGpuFrame MenuGpuPerFrame(bool vr) {
     const MenuPerfState& m = g_menuPerf;
-    constexpr size_t kP = sizeof(p.perf[0]) / sizeof(wchar_t);
-    wchar_t game[48], fps[48];
-    if (m.gameMs >= 0.0) swprintf(game, 48, vr ? L"%.1f ms (both eyes)" : L"%.1f ms", m.gameMs);
-    else                 swprintf(game, 48, L"%ls", (m.gameNa || m.noAa) ? L"n/a" : L"measuring...");
-    if (m.haveFps) swprintf(fps, 48, L"%.0f (frame %.1f ms)", m.fps, m.frameMs);
-    else           swprintf(fps, 48, L"measuring...");
-    swprintf(p.perf[0], kP, L"GPU per frame: game %ls | fps %ls", game, fps);
-    if (!GpuPerf::On()) {
-        swprintf(p.perf[1], kP, L"this mod: n/a (the GPU timers could not start: timestamp queries failed)");
-        return;
+    MenuGpuFrame f;
+    for (int e = 0, ne = vr ? 2 : FlatDlaaViewCount(); e < ne; ++e) {   // v0.12.0 issue #12: flat multi-view: every view
+        if (!m.eye[e].have) continue;
+        f.have = true;
+        for (int g = 0; g < MG_COUNT; ++g) f.grp[g] += m.eye[e].grp[g];
+        f.total += m.eye[e].total;
     }
-    if (m.nothing && !m.eye[0].have) {                 // no pass of the mod ever landed since the open (3 s+): say so, one line
-        swprintf(p.perf[1], kP, L"this mod: nothing to measure on this screen - it works while you drive; open this menu on the road");
-        if (!vr)
-            swprintf(p.perf[2], kP, L"GPU ms per frame, live. A part can include GPU waiting time (idle); judge gains by the frame time.");
-        return;
-    }
-    for (int e = 0; e < (vr ? 2 : 1); ++e) {
-        wchar_t* const d = p.perf[1 + e];
-        const wchar_t* const pre = vr ? (e ? L"eye 1: " : L"eye 0: ") : L"";
-        const MenuPerfEye& pe = m.eye[e];
-        if (!pe.have) { swprintf(d, kP, L"%lsthis mod: measuring...", pre); continue; }
-        swprintf(d, kP, L"%lsthis mod %.1f ms = NGX %.1f + per-part motion %.1f + camera %.1f + see-through "
-                 L"%.1f + mirrors %.1f + sharpen %.1f + copies %.1f", pre, pe.total, pe.grp[MG_NGX], pe.grp[MG_PART],
-                 pe.grp[MG_CAM], pe.grp[MG_FWD], pe.grp[MG_MIR], pe.grp[MG_SHARP], pe.grp[MG_COPY]);
-    }
-    if (!vr)
-        swprintf(p.perf[2], kP, L"GPU ms per frame, live. A part can include GPU waiting time (idle); judge gains by the frame time.");
+    return f;
 }
-// The "GPU cost" column and the one cost sentence of the selected row (appended to its description).
+// phase 45: the CPU of a row = the render thread's mod blocks, ms per frame (MenuCpuRead)
+double MenuCpuOf(std::initializer_list<int> cats) {
+    double s = 0.0;
+    for (int c : cats) s += g_menuPerf.cpu.blk[c];
+    return s;
+}
+double MenuCpuParts() {                          // per-part motion: the per-draw MV work (record, replay, ids, candidates, dispatch)
+    using namespace CpuProf;
+    return MenuCpuOf({ kBMvGen, kBDidRec, kBDidReplay, kBMvCollect, kBObj });
+}
+// The perf block (3 lines): line 0 = the Limit line + fps + the frame's CPU / GPU busy time; line 1 = the mod's CPU | GPU per
+// frame + the GPU parts; line 2 = the colour legend, what the CPU figure covers and what measuring costs (taken out).
+void MenuPerfLines(TuningMenu::Panel& p, bool vr) {
+    using namespace TuningMenu;
+    const MenuPerfState& m = g_menuPerf;
+    const MenuCpu& c = m.cpu;
+    constexpr size_t kP = sizeof(p.perf[0]) / sizeof(wchar_t);
+    wchar_t fps[64], cb[16], gb[16];
+    if (!m.haveFps)                    swprintf(fps, 64, L"...");
+    else if (vr && m.periodMs > 0.0)   swprintf(fps, 64, L"%.0f (%.1f ms, headset %.0f Hz)", m.fps, m.frameMs, 1000.0 / m.periodMs);
+    else                               swprintf(fps, 64, L"%.0f (%.1f ms)", m.fps, m.frameMs);
+    if (c.have && c.busyMs >= 0.0) MenuNum(cb, 16, c.busyMs); else swprintf(cb, 16, c.have ? L"-" : L"...");
+    if (m.gpuFrameMs >= 0.0)       MenuNum(gb, 16, m.gpuFrameMs);
+    else                           swprintf(gb, 16, (m.gameNa || m.noAa) ? L"-" : L"...");
+    swprintf(p.perf[0], kP, L"%ls      fps %ls      frame busy %lc%ls%lc | %lc%ls%lc ms", m.limit, fps, kInkCpu, cb, kInkEnd,
+             kInkGpu, gb, kInkEnd);
+    // line 1: the mod
+    const MenuGpuFrame g = MenuGpuPerFrame(vr);
+    if (c.have) MenuNum(cb, 16, c.modMs); else swprintf(cb, 16, L"...");
+    if (!GpuPerf::On()) {
+        swprintf(p.perf[1], kP, L"this mod: %lc%ls%lc | GPU n/a (the GPU timers could not start: timestamp queries failed)", kInkCpu,
+                 cb, kInkEnd);
+    } else if (m.nothing && !g.have) {             // no pass of the mod ever landed since the open (3 s+): say so
+        swprintf(p.perf[1], kP, L"this mod: %lc%ls%lc | - ms -- nothing for the GPU on this screen; it works while you drive",
+                 kInkCpu, cb, kInkEnd);
+    } else if (!g.have) {
+        swprintf(p.perf[1], kP, L"this mod: %lc%ls%lc | %lc...%lc ms", kInkCpu, cb, kInkEnd, kInkGpu, kInkEnd);
+    } else {
+        MenuNum(gb, 16, g.total);
+        swprintf(p.perf[1], kP, L"this mod: %lc%ls%lc | %lc%ls%lc ms -- GPU: NGX %.1f, part motion %.1f, camera %.1f, see-through %.1f, "
+                 L"mirrors %.1f, sharpen %.1f, copies %.1f", kInkCpu, cb, kInkEnd, kInkGpu, gb, kInkEnd, g.grp[MG_NGX],
+                 g.grp[MG_PART], g.grp[MG_CAM], g.grp[MG_FWD], g.grp[MG_MIR], g.grp[MG_SHARP], g.grp[MG_COPY]);
+    }
+    // line 2: legend + what the CPU figure is + the profiler's own cost (already taken out of every figure)
+    wchar_t oth[48] = L"", prof[64] = L"";
+    if (c.have) {
+        wchar_t f[16];
+        MenuNum(f, 16, c.otherMs);
+        swprintf(oth, 48, L", other threads %ls", f);
+        MenuNum(f, 16, c.profMs);
+        swprintf(prof, 64, L"; measuring costs %ls ms CPU (taken out)", f);
+    }
+    swprintf(p.perf[2], kP, L"%lcCPU%lc | %lcGPU%lc ms per frame%ls. CPU = the game's render thread%ls%ls.", kInkCpu, kInkEnd, kInkGpu,
+             kInkEnd, vr ? L" (GPU: both eyes)" : L"", oth, prof);
+}
+// The cost column (CPU | GPU per row) and the one cost sentence of the selected row (appended to its description).
+// Row -> CPU block(s) of cpu_prof.h (the render thread, ms per frame) / GPU group (MG_*, ms per frame):
+//   Mode, DLAA (whole mod)  CPU: every mod hook + block but the menu's own (menu, gpu-timers, prof) | GPU: the mod total
+//   Model, DLAA area        CPU: ngx-eval                                    | GPU: NGX
+//   Sharpen strength / width CPU: - (inside dlaa-run, not separable)         | GPU: sharpen
+//   Texture sharpness rows  CPU: lod                                         | GPU: - (no pass of its own)
+//   See-through depth       CPU: fwd-depth                                   | GPU: see-through
+//   Per-part motion         CPU: mv-gen + did-rec + did-replay + mv-collect + obj-ids | GPU: per-part motion
+//   Mirror DLAA, in turns   CPU: mirror                                      | GPU: mirrors
+//   Foveated rows           CPU: vrs                                         | GPU: - (the saving is in the game's own time)
+//   Hidden area mask        CPU: hmask                                       | GPU: - (as Foveated; its small depth draw is not timed)
+//   FPS counter             CPU: - (inside the menu block)                   | GPU: the fps box (GpuPerf kOverlay)
+//   Logging                 CPU: the log's own cost (log.h LogCost, every thread, per Present) | GPU: -
+//   everything else: "-" (no cost of its own), "off", "same", "no extra" as before.
 void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t sentCap) {
-    const MenuPerfEye& e0 = g_menuPerf.eye[0];   // VR: eye 0's figures
+    using namespace CpuProf;
+    const MenuPerfState& mp = g_menuPerf;
+    const MenuCpu& c = mp.cpu;
+    const MenuGpuFrame gf = MenuGpuPerFrame(vr);
     const bool timers = GpuPerf::On();
     constexpr size_t kC = sizeof(p.rows[0].cost) / sizeof(wchar_t);
     const bool dlaaOn = g_dlaaOn.load();
@@ -14888,103 +16392,119 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
     const bool mirOn = g_mirOn.load() && MirMode() != 0;
     const bool fwdOn = g_fwdCfg && g_fwdOn.load();   // (the VR budget guard clears g_fwdOn; its key turns it back on)
     const int area = SceneDlaa::Area();
-    const wchar_t* const unit = vr ? L"per eye" : L"per frame";
+    const double cpuAll = c.modMs, cpuNgx = c.blk[kBNgx], cpuParts = MenuCpuParts(), cpuFwd = c.blk[kBFwd],
+                 cpuMir = c.blk[kBMirror], cpuLod = c.blk[kBLod], cpuVrs = c.blk[kBVrs], cpuHm = c.blk[kBHmask];
     auto txt = [&](int row, const wchar_t* t) { swprintf(p.rows[row].cost, kC, L"%ls", t); };
-    auto ms = [&](int row, int g) {
-        if (!timers)        txt(row, L"n/a");
-        else if (!e0.have)  txt(row, g_menuPerf.nothing ? L"-" : L"...");
-        else                MenuMs(p.rows[row].cost, kC, e0.grp[g]);
+    wchar_t cs[16], gs[16];
+    auto cpuS = [&](double v) -> const wchar_t* { if (!c.have) return L"..."; MenuNum(cs, 16, v); return cs; };
+    auto gpuS = [&](int g) -> const wchar_t* {     // g = an MG_* group, -1 = the mod total
+        if (!timers)   return L"n/a";
+        if (!gf.have)  return mp.nothing ? nullptr : L"...";
+        MenuNum(gs, 16, g < 0 ? gf.total : gf.grp[g]);
+        return gs;
     };
-    // Mode / DLAA on-off: the WHOLE mod (what switching it off saves) = the "this mod" total of the GPU line
-    auto msTotal = [&](int row) {
-        if (!timers)        txt(row, L"n/a");
-        else if (!e0.have)  txt(row, g_menuPerf.nothing ? L"-" : L"...");
-        else                MenuMs(p.rows[row].cost, kC, e0.total);
-    };
-    msTotal(MR_MODE);                            if (!dlaaOn) txt(MR_MODE, L"off");
-    txt(MR_PROFILE, L"-");
-    ms(MR_MODEL, MG_NGX);                        if (!dlaaOn) txt(MR_MODEL, L"off");   // the model IS the NGX cost
-    ms(MR_SHARP, MG_SHARP);                      if (!sharpOn) txt(MR_SHARP, L"off");
-    ms(MR_WIDTH, MG_SHARP);                      if (!sharpOn) txt(MR_WIDTH, L"off");
-    txt(MR_LOD, g_lodBias == 0.0f ? L"off" : L"~0 ms");                           // memory only, no GPU pass of its own
-    txt(MR_LODCUT, LodCutEffective(g_lodBias) == 0.0f ? L"off" : L"~0 ms");
+    auto cell = [&](int row, const wchar_t* cpu, const wchar_t* gpu) { MenuCell(p.rows[row].cost, kC, cpu, gpu); };
+    for (int r = 0; r < MR_COUNT; ++r) txt(r, L"-");   // default for every row (phase 43: order-independent; headers included); set below
+    if (dlaaOn) cell(MR_MODE, cpuS(cpuAll), gpuS(-1));  else txt(MR_MODE, L"off");
+    if (dlaaOn) cell(MR_MODEL, cpuS(cpuNgx), gpuS(MG_NGX)); else txt(MR_MODEL, L"off");   // the model IS the NGX cost
+    if (sharpOn) cell(MR_SHARP, nullptr, gpuS(MG_SHARP)); else txt(MR_SHARP, L"off");
+    if (sharpOn) cell(MR_WIDTH, nullptr, gpuS(MG_SHARP)); else txt(MR_WIDTH, L"off");
+    if (g_lodBias != 0.0f) cell(MR_LOD, cpuS(cpuLod), nullptr); else txt(MR_LOD, L"off");   // CPU only: no GPU pass of its own
+    if (LodCutEffective(g_lodBias) != 0.0f) cell(MR_LODCUT, cpuS(cpuLod), nullptr); else txt(MR_LODCUT, L"off");
     if (!vr)          txt(MR_AREA, L"-");
     else if (!dlaaOn) txt(MR_AREA, L"off");
-    else {
-        ms(MR_AREA, MG_NGX);
-        if (timers && e0.have) {
-            wchar_t f[24];
-            MenuMs(f, 24, e0.grp[MG_NGX]);
-            swprintf(p.rows[MR_AREA].cost, kC, L"%ls (%d %%)", f, area);   // "0.6 ms (100 %)" (fits the 104 px column)
-        }
-    }
-    ms(MR_DRAWIDS, MG_PART);                     if (!partOn) txt(MR_DRAWIDS, L"off");
-    ms(MR_MIRROR, MG_MIR);                       if (!mirOn) txt(MR_MIRROR, L"off");
+    else              cell(MR_AREA, cpuS(cpuNgx), gpuS(MG_NGX));   // (the area % is in the value column)
+    if (partOn) cell(MR_DRAWIDS, cpuS(cpuParts), gpuS(MG_PART)); else txt(MR_DRAWIDS, L"off");
+    if (mirOn) cell(MR_MIRROR, cpuS(cpuMir), gpuS(MG_MIR));      else txt(MR_MIRROR, L"off");
+    // phase 41: the mirrors' cost as it is now (in turns: about half of the same row's figure without)
+    if (mirOn) cell(MR_MIRTURNS, cpuS(cpuMir), gpuS(MG_MIR));    else txt(MR_MIRTURNS, L"off");
     txt(MR_PRETM, vr ? L"-" : L"same");
-    ms(MR_FWD, MG_FWD);                          if (!fwdOn) txt(MR_FWD, L"off");
+    if (fwdOn) cell(MR_FWD, cpuS(cpuFwd), gpuS(MG_FWD));         else txt(MR_FWD, L"off");
     txt(MR_UPSCALE, dlaaOn && upOn ? L"no extra" : L"off");   // the upscale is the same NGX pass; the game draws fewer pixels
-    msTotal(MR_DLAA);                            if (!dlaaOn) txt(MR_DLAA, L"off");
-    for (int r = MR_OFXR; r < MR_COUNT; ++r) txt(r, L"-");   // (v0.10.3 phase 29c: the two group headers are in this range too)
-    // v0.10.3 phase 29b: the fps box's own measured cost, ms PER FRAME (GpuPerf::kOverlay; not per eye: one quad image or the
-    // eye pictures + the desktop mirror together)
-    const MenuPerfState& mp = g_menuPerf;
-    if (!g_fpsShow)       txt(MR_FPS, L"off");
-    else if (!timers)     txt(MR_FPS, L"n/a");
-    else if (!mp.haveBox) txt(MR_FPS, L"...");
-    else                  MenuMs(p.rows[MR_FPS].cost, kC, mp.boxMs);
+    if (dlaaOn) cell(MR_DLAA, cpuS(cpuAll), gpuS(-1));           else txt(MR_DLAA, L"off");
+    // v0.10.3 phase 29b: the fps box's own measured GPU cost, ms PER FRAME (GpuPerf::kOverlay: the quad image or the eye pictures +
+    // the desktop mirror together); its CPU is inside the menu block (not separable)
+    if (!g_fpsShow)        txt(MR_FPS, L"off");
+    else if (!timers)      cell(MR_FPS, nullptr, L"n/a");
+    else if (!mp.haveBox)  cell(MR_FPS, nullptr, L"...");
+    else                   { MenuNum(gs, 16, mp.boxMs); cell(MR_FPS, nullptr, gs); }
+    // phase 34 / 42 / 40: VR-only rows -- the CPU of the per-draw rule / the mask; the GPU they SAVE is in the game's own time
+    const bool vrsLive = vr && Vrs::Support() != 0 && g_vrsOn;
+    for (int r : { (int)MR_VRS, (int)MR_VRSSIZE, (int)MR_VRSPASS }) {
+        if (vrsLive)                       cell(r, cpuS(cpuVrs), nullptr);
+        else if (vr && !g_vrsOn)           txt(r, L"off");
+    }
+    if (vr && g_xrHiddenMask)  cell(MR_HMASK, cpuS(cpuHm), nullptr);
+    else if (vr)               txt(MR_HMASK, L"off");
+    // phase 39: the Logging row -- the log's own CPU (log.h LogCost: every thread, per Present), the same ~1-s snapshots
+    const int lv = LogLevel();
+    if (lv == 0)             txt(MR_LOG, L"off");
+    else if (!mp.haveLog)    cell(MR_LOG, L"...", nullptr);
+    else                     { MenuNum(cs, 16, mp.logMs); cell(MR_LOG, cs, nullptr); }
 
-    // the sentence: "Costs 1.3 ms per eye now; ..." (numbers from the same snapshot as the column). The description already
-    // says what the row does and its typical cost; this adds the LIVE figure, or WHY a greyed row is greyed. The panel shows 3
-    // lines of ~105 characters for the description + this sentence (menu.cpp kDescH): keep the sentence under ~100.
+    // the sentence: "Costs 0.12 ms CPU + 0.62 ms GPU per frame now; ..." (numbers from the same snapshot as the column). The
+    // description already says what the row does and its typical cost; this adds the LIVE figures, or WHY a greyed row is
+    // greyed. The panel shows 3 lines of ~105 characters for the description + this sentence (menu.cpp kDescH): keep the
+    // sentence under ~100.
     sent[0] = 0;
-    wchar_t f[24] = L"";
-    auto fig = [&](int g) { MenuMs(f, 24, e0.grp[g]); return (const wchar_t*)f; };
-    const bool live = timers && e0.have;
-    // (timers on but no pass landed yet: append nothing -- not "Costs ... ms", not even "measuring...")
-    const wchar_t* const wait = timers ? L"" : L"GPU cost: n/a (the GPU timers could not start).";
+    wchar_t f[64] = L"";
+    // "0.12 ms CPU + 0.62 ms GPU" -- a side that is not measured yet / not available is left out; nullptr = neither
+    auto both = [&](double cpuMs, int g) -> const wchar_t* {
+        wchar_t a[16], b[16];
+        const bool hc = c.have, hg = timers && gf.have;
+        if (hc) MenuNum(a, 16, cpuMs);
+        if (hg) MenuNum(b, 16, g < 0 ? gf.total : gf.grp[g]);
+        if (hc && hg)  swprintf(f, 64, L"%ls ms CPU + %ls ms GPU", a, b);
+        else if (hc)   swprintf(f, 64, L"%ls ms CPU", a);
+        else if (hg)   swprintf(f, 64, L"%ls ms GPU", b);
+        else           return nullptr;
+        return f;
+    };
+    const wchar_t* fig = nullptr;
     switch (sel) {
     case MR_MODE: case MR_DLAA:
-        if (!dlaaOn)    swprintf(sent, sentCap, L"Off now: the mod costs nothing.");
-        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            { MenuMs(f, 24, e0.total);
-                          swprintf(sent, sentCap, L"The whole mod costs %ls %ls now; off saves all of it.", f, unit); }
+        if (!dlaaOn)                       swprintf(sent, sentCap, L"Off now: the mod's DLAA / DLSS work costs nothing.");
+        else if ((fig = both(cpuAll, -1))) swprintf(sent, sentCap, L"The whole mod costs %ls per frame now; off saves most of it.", fig);
         break;
-    case MR_PROFILE: swprintf(sent, sentCap, L"Costs nothing itself; watch the GPU line for what it saves."); break;
+    case MR_PROFILE: swprintf(sent, sentCap, L"Costs nothing itself; watch the perf lines for what it saves."); break;
     case MR_MODEL:
-        if (!dlaaOn)    swprintf(sent, sentCap, L"Off now.");
-        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"Costs %ls %ls now (VR per eye: 1 (K) 1.0, 2 (E) / 3 (F) 0.6, 4 (M) ~3 ms).",
-                                 fig(MG_NGX), unit);
+        if (!dlaaOn)                       swprintf(sent, sentCap, L"Off now.");
+        else if ((fig = both(cpuNgx, MG_NGX)))
+            swprintf(sent, sentCap, L"Costs %ls per frame now (GPU per eye: 1 (K) 1.0, 2 (E) / 3 (F) 0.6, 4 (M) ~3 ms).", fig);
         break;
     case MR_SHARP:
-        if (!sharpOn)   swprintf(sent, sentCap, L"Off now: sharpening costs nothing.");
-        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"Costs %ls %ls now; 0 saves it.", fig(MG_SHARP), unit);
+        if (!sharpOn)                      swprintf(sent, sentCap, L"Off now: sharpening costs nothing.");
+        else if (timers && gf.have)
+            swprintf(sent, sentCap, L"Costs %ls GPU per frame now; 0 saves it.", (MenuNum(f, 64, gf.grp[MG_SHARP]), f));
         break;
     case MR_WIDTH:
-        if (!sharpOn)   swprintf(sent, sentCap, L"Off now (Sharpen strength is 0): sharpening costs nothing.");
-        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"Same pass as Sharpen strength: costs %ls %ls now.", fig(MG_SHARP), unit);
+        if (!sharpOn)                      swprintf(sent, sentCap, L"Off now (Sharpen strength is 0): sharpening costs nothing.");
+        else if (timers && gf.have)
+            swprintf(sent, sentCap, L"Same pass as Sharpen strength: costs %ls ms GPU per frame now.", (MenuNum(f, 64, gf.grp[MG_SHARP]), f));
         break;
     case MR_LOD: case MR_LODCUT:
-        break;                                            // the description says it all: no GPU pass of its own
+        if (g_lodBias != 0.0f && c.have)
+            swprintf(sent, sentCap, L"CPU %ls ms per frame now (the sampler swaps).", (MenuNum(f, 64, cpuLod), f));
+        break;
     case MR_AREA:
-        if (!vr)        swprintf(sent, sentCap, L"Greyed in flat: flat mode always uses the whole picture.");
-        else if (!dlaaOn) swprintf(sent, sentCap, L"Off now: DLAA/DLSS costs nothing.");
-        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"DLAA costs %ls per eye at %d %%; a smaller area costs less.",
-                                 fig(MG_NGX), area);
+        if (!vr)                           swprintf(sent, sentCap, L"Greyed in flat: flat mode always uses the whole picture.");
+        else if (!dlaaOn)                  swprintf(sent, sentCap, L"Off now: DLAA/DLSS costs nothing.");
+        else if ((fig = both(cpuNgx, MG_NGX)))
+            swprintf(sent, sentCap, L"DLAA costs %ls per frame at %d %%; a smaller area costs less.", fig, area);
         break;
     case MR_DRAWIDS:
-        if (!partOn)    swprintf(sent, sentCap, L"Off now: costs nothing.");
-        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"Costs %ls %ls now; the performance profile medium / low cut it.",
-                                 fig(MG_PART), unit);
+        if (!partOn)                       swprintf(sent, sentCap, L"Off now: costs nothing.");
+        else if ((fig = both(cpuParts, MG_PART)))
+            swprintf(sent, sentCap, L"Costs %ls per frame now; the profiles medium / low cut it.", fig);
         break;
     case MR_MIRROR:
-        if (!mirOn)     swprintf(sent, sentCap, L"Off now: costs nothing.");
-        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"Costs %ls %ls now; fewer mirrors cost less.", fig(MG_MIR), unit);
+        if (!mirOn)                        swprintf(sent, sentCap, L"Off now: costs nothing.");
+        else if ((fig = both(cpuMir, MG_MIR))) swprintf(sent, sentCap, L"Costs %ls per frame now; fewer mirrors cost less.", fig);
+        break;
+    case MR_MIRTURNS:                                     // phase 41
+        if (!mirOn)                        swprintf(sent, sentCap, L"Greyed: Mirror DLAA is off.");
+        else if (MirMode() == 3)           swprintf(sent, sentCap, L"Always on: dlaa.ini mirror mode 3 is in turns already.");
+        else if ((fig = both(cpuMir, MG_MIR))) swprintf(sent, sentCap, L"The mirrors cost %ls per frame now.", fig);
         break;
     case MR_PRETM:
         if (vr) swprintf(sent, sentCap, L"Greyed in VR: VR always runs DLAA on the finished picture.");
@@ -14994,38 +16514,48 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
                         swprintf(sent, sentCap, L"Switched off by the mod: it cost more than %.1f ms per eye (VR budget). "
                                  L"Press its key to try again.", (double)g_fwdBudgetMs);
         else if (!fwdOn) swprintf(sent, sentCap, L"Off now: costs nothing.");
-        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"Costs %ls %ls now; off saves it.", fig(MG_FWD), unit);
+        else if ((fig = both(cpuFwd, MG_FWD))) swprintf(sent, sentCap, L"Costs %ls per frame now; off saves it.", fig);
         break;
     case MR_FPS:                                          // v0.10.3 phase 29b
         if (!g_fpsShow)       swprintf(sent, sentCap, L"Off now: costs nothing.");
-        else if (!timers)     swprintf(sent, sentCap, L"%ls", wait);
+        else if (!timers)     swprintf(sent, sentCap, L"GPU cost: n/a (the GPU timers could not start).");
         else if (mp.haveBox)  { wchar_t b[24];
                                 swprintf(b, 24, mp.boxMs < 0.001 ? L"<0.001 ms" : L"%.3f ms", mp.boxMs);
-                                swprintf(sent, sentCap, L"Costs %ls per frame now (all pictures together).", b); }
+                                swprintf(sent, sentCap, L"Costs %ls GPU per frame now (all pictures together).", b); }
         break;
     case MR_TURBO:                                        // phase 30
         if (!vr)                     swprintf(sent, sentCap, L"Greyed in flat: it changes the VR frame loop only.");
         else if (g_xrTurbo && XrHook::GetTurboStats().failed)
                                      swprintf(sent, sentCap, L"Stopped for this VR session: the runtime refused it (see the log).");
         break;
-    case MR_LOG: {                                        // phase 39: CPU, not GPU (the row's value has the ms too)
-        const int lv = LogLevel();
+    case MR_LOG: {                                        // phase 39: CPU, not GPU
         if (lv == 0)          swprintf(sent, sentCap, L"Off now: nothing is written.");
         else if (mp.haveLog) {
-            wchar_t pr[48] = L"";
-            const double pms = CpuProf::SelfMsPerFrame();
-            if (lv >= 4 && CpuProf::On() && pms >= 0.0) swprintf(pr, 48, L", + %.2f ms the CPU profiler", pms);
+            wchar_t pr[56] = L"";
+            const double pms = CpuProf::SelfMsPerFrame();   // (level 4 keeps the profiler on after the menu closes)
+            if (lv >= 4 && pms >= 0.0) swprintf(pr, 56, L"; at debug the CPU profiler adds %.2f ms", pms);
             swprintf(sent, sentCap, L"Costs %.2f ms CPU per frame now, %.0f lines/s%ls.", mp.logMs, mp.logLps, pr);
         }
         break;
     }
-    case MR_VRS: case MR_VRSSIZE:                         // phase 34
+    case MR_VRS: case MR_VRSSIZE: case MR_VRSPASS:        // phase 34 (phase 42: + Foveated passes)
         if (Vrs::Support() == 0)     swprintf(sent, sentCap, L"Not available here: %hs.", Vrs::SupportText());
         else if (!vr)                swprintf(sent, sentCap, L"Greyed in flat: VR only.");
         else if (!g_vrsOn)           swprintf(sent, sentCap, L"Off now: every pixel is shaded.");
+        else if (c.have)             swprintf(sent, sentCap, L"CPU %ls ms per frame; it saves GPU time in the game's own figure.",
+                                              (MenuNum(f, 64, cpuVrs), f));
         else                         swprintf(sent, sentCap, L"It saves time in the game's own GPU figure, not in the mod's.");
         break;
+    case MR_HMASK: {                                      // phase 40
+        const XrHook::HiddenStats hs = XrHook::GetHiddenStats();
+        if (hs.ext == 1)             swprintf(sent, sentCap, L"Not available: this VR runtime reports no hidden area.");
+        else if (!vr)                swprintf(sent, sentCap, L"Greyed in flat: VR only.");
+        else if (!g_xrHiddenMask)    swprintf(sent, sentCap, L"Off now: every pixel is drawn.");
+        else if (c.have)             swprintf(sent, sentCap, L"CPU %ls ms per frame; it saves GPU time in the game's own figure.",
+                                              (MenuNum(f, 64, cpuHm), f));
+        else                         swprintf(sent, sentCap, L"It saves time in the game's own GPU figure, not in the mod's.");
+        break;
+    }
     case MR_UPSCALE:
         if (!dlaaOn)    swprintf(sent, sentCap, L"Off now (the mod is off).");
         else if (!upOn) swprintf(sent, sentCap, L"Off now: the game's own stretch is used below Scaling 100 %%.");
@@ -15131,6 +16661,24 @@ void CycleMirrors(uint64_t n, int dir, bool vr) {
                                     : "");
     if (s == 0) PlayTones(1, 300, 150, 0);
     else        PlayTones((s + 1) / 2, partsState ? 1200 : 800, 90, 60);
+}
+
+// phase 41: the menu's "Mirrors in turns" row -- dlaa.ini mirror_turns live (on: each mirror unit runs its DLAA every 2nd frame
+// and holds its last output in between, mirror_turns.h). No history restart either way: a unit that held keeps its history over
+// the 2-frame gap (GapKeepsHistory), the slots are placed at the next views. Logged + beeped like the other toggles.
+void ToggleMirTurns(uint64_t n) {
+    g_mirTurns = g_mirTurns ? 0 : 1;
+    g_mirTurnsExplicit = true;
+    g_mirTurnFrameLogs = g_mirTurns ? 24 : 0;            // level 4: the first 24 frames with mirror views get a line each
+    g_mirTurnMask = 0;                                    // the slots are re-balanced at the next frame end
+    Log("Mirrors in turns: %s (mirror_turns=%d, tuning menu, Present #%llu) -- %s%s", g_mirTurns ? "ON" : "OFF", g_mirTurns,
+        (unsigned long long)n,
+        g_mirTurns ? "each mirror gets its DLAA every 2nd frame (half of them per frame, balanced by size) and shows its last DLAA "
+                     "picture in between; out of turn after a reset, a camera cut or a frame without a run"
+                   : "every mirror view gets its DLAA every frame again",
+        !g_mirOn.load() || MirMode() == 0 ? " (mirror DLAA is off now: used once it is on)"
+        : (MirMode() == 3 ? " (the mirror mode is 3: every view stays in turns whatever this says)" : ""));
+    PlayTones(1, g_mirTurns ? 1200 : 300, 150, 0);
 }
 
 // ---- v0.10.2 HOLD TO BIND ----------------------------------------------------------------------------------------------------
@@ -15480,7 +17028,8 @@ void MenuResetDecorate(TuningMenu::Panel& p, int sel) {
 // One row: name, the hotkey text (+ "  (VR only)" / "  (flat only)" tag), greyed = not applicable now. The value is set by the caller.
 void MenuRow(TuningMenu::Panel& p, int id, const wchar_t* name, const char* keys, const char* tag, bool greyed) {
     TuningMenu::Row& r = p.rows[id];
-    wcsncpy_s(r.name, name, _TRUNCATE);
+    if (MenuRowGroup(id) >= 0) swprintf(r.name, sizeof(r.name) / sizeof(r.name[0]), L"    %ls", name);   // phase 46b: a group's
+    else                       wcsncpy_s(r.name, name, _TRUNCATE);                                             // rows are indented
     char kb[128];
     if (tag) snprintf(kb, sizeof(kb), "%s  (%s)", keys, tag);
     else     snprintf(kb, sizeof(kb), "%s", keys);
@@ -15511,8 +17060,12 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     auto groupRow = [&](int id, const wchar_t* name) {
         const bool o = MenuGrpOpen(id);
         snprintf(k, sizeof(k), "%s: %s", o ? snLeft : snRight, o ? "close" : "open");
-        MenuRow(p, id, name, k, nullptr, false);
-        swprintf(p.rows[id].value, kV, L"%ls", o ? L"shown" : L"...");
+        wchar_t hn[48];                                   // phase 46b: an arrow shows the state (WGL4 glyphs: in Segoe UI)
+        swprintf(hn, 48, L"%lc %ls", o ? (wchar_t)0x25BC : (wchar_t)0x25BA, name);
+        MenuRow(p, id, hn, k, nullptr, false);
+        const int gi = MenuGroupIndex(id);                // closed = "closed (N)" (the group's size), open = "open"
+        if (o || gi < 0) swprintf(p.rows[id].value, kV, L"%ls", o ? L"open" : L"closed");
+        else             swprintf(p.rows[id].value, kV, L"closed (%d)", kMenuGroups[gi].last - kMenuGroups[gi].header);
     };
 
     MenuRow(p, MR_MODE, L"Mode", KeyName(KA_MODE_CYCLE), nullptr, false);
@@ -15528,6 +17081,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         else if (num[0] == '?')          swprintf(p.rows[MR_MODEL].value, kV, L"%hs (dlaa.ini)", pn);   // J / L set in dlaa.ini
         else                             swprintf(p.rows[MR_MODEL].value, kV, L"%hs (%hs)", num, pn);
     }
+    groupRow(MR_PICGRP, kMenuGroups[MenuGroupIndex(MR_PICGRP)].title);   // phase 43: menu categories
     MenuRow(p, MR_SHARP, L"Sharpen strength", pair(KA_SHARPEN_DOWN, KA_SHARPEN_UP), nullptr, false);
     const float sharp = SceneDlaa::Sharpness();
     swprintf(p.rows[MR_SHARP].value, kV, sharp <= 0.0f ? L"%.1f (off)" : L"%.1f", (double)sharp);
@@ -15541,15 +17095,22 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     MenuRow(p, MR_AREA, L"DLAA area (VR)", pair(KA_AREA_DOWN, KA_AREA_UP), vr ? nullptr : "VR only", !vr);
     if (vr) swprintf(p.rows[MR_AREA].value, kV, L"%d %%", SceneDlaa::Area());
     else    swprintf(p.rows[MR_AREA].value, kV, L"100 %% (flat)");
+    groupRow(MR_MOTGRP, kMenuGroups[MenuGroupIndex(MR_MOTGRP)].title);   // phase 43: menu categories
     MenuRow(p, MR_DRAWIDS, L"Per-part motion vectors", KeyName(KA_DRAWID_TOGGLE), nullptr, false);
     swprintf(p.rows[MR_DRAWIDS].value, kV, L"%ls", g_objMode == 2 ? L"on" : (g_objMode == 1 ? L"old stencil ids" : L"off"));
     MenuRow(p, MR_MIRROR, L"Mirror DLAA", KeyName(KA_MIRROR_TOGGLE), nullptr, false);
     MirMenuValue(p.rows[MR_MIRROR].value, kV, vr);       // v0.10.2: the seven states (CycleMirrors)
+    {   // phase 41: greyed while mirror DLAA is off; mode 3 is in turns anyway
+        const bool mirLive = g_mirOn.load() && MirMode() != 0;
+        MenuRow(p, MR_MIRTURNS, L"Mirrors in turns", "dlaa.ini mirror_turns", nullptr, !mirLive || MirMode() == 3);
+        swprintf(p.rows[MR_MIRTURNS].value, kV, L"%ls", MirMode() == 3 ? L"on (mode 3)" : onOff[g_mirTurns ? 1 : 0]);
+    }
     MenuRow(p, MR_PRETM, L"DLAA before tonemap (flat)", KeyName(KA_PRE_TONEMAP), vr ? "flat only" : nullptr, vr);
     swprintf(p.rows[MR_PRETM].value, kV, L"%ls", !g_preCfg ? L"off (dlaa.ini 0)" : onOff[g_preOn.load() ? 1 : 0]);
     MenuRow(p, MR_FWD, L"See-through depth", KeyName(KA_FWD_DEPTH), nullptr, false);
     swprintf(p.rows[MR_FWD].value, kV, L"%ls", !g_fwdCfg ? L"off (dlaa.ini 0)"
                                               : (!g_fwdOn.load() ? (g_fwdAutoOff ? L"off (VR budget)" : L"off") : L"on"));
+    groupRow(MR_UPGRP, kMenuGroups[MenuGroupIndex(MR_UPGRP)].title);   // phase 43: menu categories
     MenuRow(p, MR_UPSCALE, L"DLSS upscale", KeyName(KA_UPSCALE_TOGGLE), nullptr, false);
     swprintf(p.rows[MR_UPSCALE].value, kV, L"%ls", onOff[g_dlssUpscale.load() ? 1 : 0]);
     MenuRow(p, MR_DLAA, L"DLAA on / off", KeyName(KA_DLAA_TOGGLE), nullptr, false);
@@ -15558,6 +17119,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     if (!Ofxr::g_on.load())      swprintf(p.rows[MR_OFXR].value, kV, L"off (dlaa.ini 0)");
     else if (Ofxr::Detected())   swprintf(p.rows[MR_OFXR].value, kV, L"found");   // (no live counter: it would rebuild the panel every frame)
     else                         swprintf(p.rows[MR_OFXR].value, kV, L"not found");
+    groupRow(MR_VRPGRP, kMenuGroups[MenuGroupIndex(MR_VRPGRP)].title);   // phase 43: menu categories
     MenuRow(p, MR_TURBO, L"Turbo mode (VR)", "dlaa.ini xr_turbo", vr ? nullptr : "VR only", !vr);   // phase 30
     {
         const XrHook::TurboStats ts = XrHook::GetTurboStats();   // (no live counter: it would rebuild the panel every frame)
@@ -15569,15 +17131,29 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         if (noVrs) swprintf(p.rows[MR_VRS].value, kV, L"%ls", g_vrsOn ? L"on (not supported)" : L"not supported");
         else       swprintf(p.rows[MR_VRS].value, kV, L"%ls", onOff[g_vrsOn ? 1 : 0]);
         MenuRow(p, MR_VRSSIZE, L"Foveated size", "dlaa.ini vrs_inner / vrs_outer", vr ? nullptr : "VR only", !vr || noVrs || !g_vrsOn);
+        // phase 44: the size scaler ("80 %", + the preset name when it is one); custom dlaa.ini radii: "inner / outer %"
         const int si = VrsSizeIndex();
-        if (si >= 0) swprintf(p.rows[MR_VRSSIZE].value, kV, L"%ls", kVrsSizes[si].name);
-        else         swprintf(p.rows[MR_VRSSIZE].value, kV, L"%d / %d %%", g_vrsInner, g_vrsOuter);
+        if (si >= 0)               swprintf(p.rows[MR_VRSSIZE].value, kV, L"%d %% (%ls)", g_vrsOuter, kVrsSizes[si].name);
+        else if (VrsSizeOnScale()) swprintf(p.rows[MR_VRSSIZE].value, kV, L"%d %%", g_vrsOuter);
+        else                       swprintf(p.rows[MR_VRSSIZE].value, kV, L"%d / %d %%", g_vrsInner, g_vrsOuter);
+        MenuRow(p, MR_VRSPASS, L"Foveated passes", "dlaa.ini vrs_passes", vr ? nullptr : "VR only", !vr || noVrs || !g_vrsOn);   // phase 42
+        swprintf(p.rows[MR_VRSPASS].value, kV, L"%ls", g_vrsPasses ? L"scene + lighting" : L"scene");
+    }
+    {   // phase 40: hidden area mask; "not supported" once the runtime said it has no XR_KHR_visibility_mask (no live counter)
+        const XrHook::HiddenStats hs = XrHook::GetHiddenStats();
+        const bool noExt = hs.ext == 1 || hs.ext == 4;
+        MenuRow(p, MR_HMASK, L"Hidden area mask (VR)", "dlaa.ini xr_hidden_mask", vr ? nullptr : "VR only", !vr || noExt);
+        const wchar_t* val = !g_xrHiddenMask ? L"off"
+                           : noExt ? L"on (not supported)"
+                           : !g_xrHiddenMaskAtStart ? L"on (restart the game)"
+                           : hs.ext == 0 ? L"on (no OpenXR instance yet)"
+                           : (hs.failed ? L"on (failed, see log)" : L"on");
+        swprintf(p.rows[MR_HMASK].value, kV, L"%ls", (!g_xrHiddenMask && noExt) ? L"not supported" : val);
     }
     {   // phase 39: the level + what logging costs (CPU ms per frame; changes only at the ~1-s snapshots: no rebuild per frame)
         MenuRow(p, MR_LOG, L"Logging", "dlaa.ini log_level", nullptr, false);
         const int lv = LogLevel();
-        if (lv == 0 || !g_menuPerf.haveLog) swprintf(p.rows[MR_LOG].value, kV, L"%hs", LogLevelName(lv));
-        else swprintf(p.rows[MR_LOG].value, kV, L"%hs  %.2f ms", LogLevelName(lv), g_menuPerf.logMs);
+        swprintf(p.rows[MR_LOG].value, kV, L"%hs", LogLevelName(lv));   // phase 45: its CPU ms is in the cost column
     }
     groupRow(MR_PANELGRP, L"Panel settings");             // v0.10.3 phase 29c
     MenuRow(p, MR_POSX, L"Panel position X", vr ? "dlaa.ini menu_vr_x" : "dlaa.ini menu_x", nullptr, false);
@@ -15603,7 +17179,8 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     swprintf(p.rows[MR_FPS].value, kV, L"%ls", onOff[g_fpsShow ? 1 : 0]);
     groupRow(MR_FPSGRP, L"FPS counter settings");         // v0.10.3 phase 29c
     MenuRow(p, MR_FPSLOCK, L"FPS counter lock", "dlaa.ini fps_vr_lock", vr ? nullptr : "VR only", !vr);   // v0.10.3 phase 28
-    swprintf(p.rows[MR_FPSLOCK].value, kV, L"%ls", g_fpsVrLock ? L"Fixed in cab" : L"Follow head");
+    swprintf(p.rows[MR_FPSLOCK].value, kV, L"%ls", g_fpsVrLock == 2 ? L"Attached to vehicle"   // phase 47
+                                                   : g_fpsVrLock ? L"Fixed in play space" : L"Follow head");   // phase 44: was "Fixed in cab"
     MenuRow(p, MR_FPSX, L"FPS counter X", vr ? "dlaa.ini fps_vr_x" : "dlaa.ini fps_x", nullptr, false);
     if (vr) swprintf(p.rows[MR_FPSX].value, kV, L"%+d %%", g_fpsVrX);
     else    swprintf(p.rows[MR_FPSX].value, kV, L"%d %%", g_fpsX);
@@ -15612,6 +17189,19 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     else    swprintf(p.rows[MR_FPSY].value, kV, L"%d %%", g_fpsY);
     MenuRow(p, MR_FPSSIZE, L"FPS counter size", vr ? "dlaa.ini fps_vr_scale" : "dlaa.ini fps_scale", nullptr, false);
     swprintf(p.rows[MR_FPSSIZE].value, kV, L"%.1f", (double)(vr ? g_fpsVrScale : g_fpsScale));
+    // phase 44: colour (flat and VR), VR distance and the VR turn
+    MenuRow(p, MR_FPSCOLOR, L"FPS colour", "dlaa.ini fps_color", nullptr, false);
+    swprintf(p.rows[MR_FPSCOLOR].value, kV, L"%ls", FpsPose::ColorOf(g_fpsColor).name);
+    MenuRow(p, MR_FPSBRIGHT, L"FPS brightness", "dlaa.ini fps_brightness", nullptr, false);   // phase 48
+    swprintf(p.rows[MR_FPSBRIGHT].value, kV, L"%d %%", g_fpsBright);
+    MenuRow(p, MR_FPSDIST, L"FPS distance (VR)", "dlaa.ini fps_vr_dist", vr ? nullptr : "VR only", !vr);
+    swprintf(p.rows[MR_FPSDIST].value, kV, L"%.2f m", (double)g_fpsVrDist / 100.0);
+    MenuRow(p, MR_FPSYAW, L"FPS turn", "dlaa.ini fps_vr_yaw", vr ? nullptr : "VR only", !vr);
+    swprintf(p.rows[MR_FPSYAW].value, kV, L"%+d deg", g_fpsVrYaw);
+    MenuRow(p, MR_FPSPITCH, L"FPS tilt", "dlaa.ini fps_vr_pitch", vr ? nullptr : "VR only", !vr);
+    swprintf(p.rows[MR_FPSPITCH].value, kV, L"%+d deg", g_fpsVrPitch);
+    MenuRow(p, MR_FPSROLL, L"FPS rotate", "dlaa.ini fps_vr_roll", vr ? nullptr : "VR only", !vr);
+    swprintf(p.rows[MR_FPSROLL].value, kV, L"%+d deg", g_fpsVrRoll);
     MenuRow(p, MR_SAVE, L"Save to dlaa.ini", KeyName(KA_SAVE), nullptr, false);
     swprintf(p.rows[MR_SAVE].value, kV, L"-");
     snprintf(k, sizeof(k), "hold %s %s s", snRight, holdS);   // v0.10.3 phase 29d: was "dlaa.ini" (MenuResetTick)
@@ -15622,7 +17212,8 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
 
     const int sel = g_menuSel < 0 || g_menuSel >= MR_COUNT ? 0 : g_menuSel;
     MenuPerfLines(p, vr);                                 // v0.10.0: the GPU block + the GPU cost column (once-a-second figures)
-    swprintf(p.costHead, sizeof(p.costHead) / sizeof(wchar_t), L"%ls", vr ? L"GPU cost (eye 0)" : L"GPU cost");
+    swprintf(p.costHead, sizeof(p.costHead) / sizeof(wchar_t), L"%lcCPU%lc | %lcGPU%lc ms", TuningMenu::kInkCpu, TuningMenu::kInkEnd,
+             TuningMenu::kInkGpu, TuningMenu::kInkEnd);   // phase 45: both per frame (VR: GPU = both eyes)
     wchar_t sent[200];
     MenuPerfCosts(p, vr, sel, sent, sizeof(sent) / sizeof(sent[0]));
     constexpr size_t kD = sizeof(p.desc) / sizeof(wchar_t);
@@ -15690,7 +17281,8 @@ void MenuClose(uint64_t n, const char* why) {
     if (g_fpsMoved)
         snprintf(fpsPlaced, sizeof(fpsPlaced), " -- fps box now %s, flat x=%d%% y=%d%% size %.1f, VR x=%+d y=%+d (%s) size %.1f (%s or "
                  "the Save row writes it)", g_fpsShow ? "on" : "off", g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY,
-                 g_fpsVrLock ? "degrees, fixed in the cab" : "%, follows the head", (double)g_fpsVrScale, KeyName(KA_SAVE));
+                 g_fpsVrLock == 2 ? "degrees, attached to the vehicle" : g_fpsVrLock ? "degrees, fixed in the play space"
+                 : "%, follows the head", (double)g_fpsVrScale, KeyName(KA_SAVE));
     Log("tuning menu closed (%s, Present #%llu)%s%s", why, (unsigned long long)n, placed, fpsPlaced);
     g_menuMoved = false;
     g_fpsMoved = false;
@@ -15704,7 +17296,9 @@ void MenuClose(uint64_t n, const char* why) {
 void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     const bool stepRow = row == MR_SHARP || row == MR_WIDTH || row == MR_LOD || row == MR_LODCUT || row == MR_AREA ||
                          row == MR_POSX || row == MR_POSY || row == MR_SIZE || row == MR_DEPTH || row == MR_FPSX ||
-                         row == MR_FPSY || row == MR_FPSSIZE;
+                         row == MR_FPSY || row == MR_FPSSIZE || row == MR_FPSDIST || row == MR_FPSYAW || row == MR_FPSPITCH ||
+                         row == MR_FPSROLL || row == MR_VRSSIZE;   // phase 44: + the VR distance / turn rows, Foveated size (the
+                                                    //   colour row: fresh presses)
     if (repeat && !stepRow) return;
     const bool vr = MenuVr();
     switch (row) {
@@ -15723,6 +17317,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_AREA:    StepArea(dir, n); break;               // flat: refuses with its low beep
     case MR_DRAWIDS: ToggleDrawIds(n); break;
     case MR_MIRROR:  CycleMirrors(n, dir, vr); break;       // v0.10.2: seven states (Alt+F6 stays on / off)
+    case MR_MIRTURNS: ToggleMirTurns(n); break;             // phase 41: Left and Right both switch it (also while greyed: kept)
     case MR_PRETM:   TogglePreTonemap(n); break;
     case MR_FWD:     ToggleFwdDepth(n); break;
     case MR_UPSCALE: ToggleUpscale(n); break;
@@ -15730,8 +17325,11 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_OFXR:    break;                                 // information only (dlaa.ini ofxr_bridge, read at start)
     case MR_TURBO:   ToggleXrTurbo(n); break;               // phase 30: Left and Right both switch it (also flat: kept for VR)
     case MR_VRS:     ToggleVrs(n); break;                   // phase 34: Left and Right both switch it (also flat: kept for VR)
-    case MR_VRSSIZE: StepVrsSize(dir, n); break;            // phase 34: Right = narrower (more saving), Left = wider
+    case MR_VRSSIZE: StepVrsSize(dir, n, repeat); break;    // phase 44: Right = bigger sharp centre, Left = smaller (5 % steps)
+    case MR_HMASK:   ToggleHiddenMask(n); break;            // phase 40: Left and Right both switch it (also flat: kept for VR)
+    case MR_VRSPASS: ToggleVrsPasses(n); break;             // phase 42: two choices, Left and Right both switch
     case MR_LOG:     StepLogLevel(dir, n); break;           // phase 39: Right = more, Left = less (clamped)
+    case MR_PICGRP: case MR_MOTGRP: case MR_UPGRP: case MR_VRPGRP:   // phase 43: the four new groups
     case MR_PANELGRP: case MR_FPSGRP:                       // v0.10.3 phase 29c: Right opens the group, Left closes it (a fresh
         MenuGrpOpen(row) = dir > 0;                         // press only: not a stepRow, so auto-repeat is ignored above)
         break;
@@ -15771,7 +17369,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
             (unsigned long long)n);
         break;
     case MR_FPS:     ToggleFpsBox(n); break;                // Left and Right both switch it
-    case MR_FPSLOCK: ToggleFpsVrLock(n); break;             // v0.10.3 phase 28: Left and Right both switch it (also flat: kept for VR)
+    case MR_FPSLOCK: ToggleFpsVrLock(n, dir); break;        // phase 47: 3 values, Right = next, Left = previous (also flat: kept for VR)
     case MR_FPSX:
         if (vr) g_fpsVrX = MenuClampI(g_fpsVrX + dir, -50, 50); else g_fpsX = MenuClampI(g_fpsX + dir, 0, 95);
         g_fpsExplicit = g_fpsMoved = true;
@@ -15785,6 +17383,34 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
         float v = std::floor((s + 0.1f * (float)dir) * 10.0f + 0.5f) / 10.0f;
         s = v < 0.2f ? 0.2f : (v > 3.0f ? 3.0f : v);         // phase 15: 0.2..3.0 (was 0.5..3.0)
         g_fpsExplicit = g_fpsMoved = true;
+        break;
+    }
+    case MR_FPSCOLOR:                                       // phase 44: Left / Right walk the 20 presets (wraps)
+        g_fpsColor = FpsPose::StepColor(g_fpsColor, dir);
+        g_fpsExplicit = g_fpsMoved = true;
+        Log("fps box colour: %d = %ls (fps_color, tuning menu, Present #%llu)", g_fpsColor, FpsPose::ColorOf(g_fpsColor).name,
+            (unsigned long long)n);
+        break;
+    case MR_FPSBRIGHT:                                      // phase 48: 10 % steps, live (a fresh press each: not a stepRow)
+        g_fpsBright = FpsPose::StepBright(g_fpsBright, dir);
+        g_fpsExplicit = g_fpsMoved = true;
+        Log("fps box brightness: %d %% (fps_brightness, tuning menu, Present #%llu)", g_fpsBright, (unsigned long long)n);
+        break;
+    case MR_FPSDIST:                                        // phase 44: 5 cm steps (also flat: kept for VR; the row is greyed)
+        g_fpsVrDist = FpsPose::ClampI(g_fpsVrDist + 5 * dir, FpsPose::kDistMin, FpsPose::kDistMax);
+        g_fpsExplicit = g_fpsMoved = true;                  // (no FpsVrLockReset: that would re-capture a non-LOCAL pivot)
+        if (!repeat)
+            Log("fps box VR distance %.2f m (fps_vr_dist=%d, tuning menu, Present #%llu; the same angular size at every distance)",
+                (double)g_fpsVrDist / 100.0, g_fpsVrDist, (unsigned long long)n);
+        break;
+    case MR_FPSYAW: case MR_FPSPITCH: case MR_FPSROLL: {    // phase 44 (1-degree steps since 47c; hold = auto-repeat)
+        int& a = row == MR_FPSYAW ? g_fpsVrYaw : (row == MR_FPSPITCH ? g_fpsVrPitch : g_fpsVrRoll);
+        const int lim = row == MR_FPSYAW ? FpsPose::kYawMax : (row == MR_FPSPITCH ? FpsPose::kPitchMax : FpsPose::kRollMax);
+        a = FpsPose::ClampI(a + dir, -lim, lim);
+        g_fpsExplicit = g_fpsMoved = true;
+        if (!repeat)
+            Log("fps box VR turn: yaw %+d pitch %+d roll %+d deg (fps_vr_yaw / fps_vr_pitch / fps_vr_roll, tuning menu, Present #%llu)",
+                g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll, (unsigned long long)n);
         break;
     }
     case MR_SAVE:    SaveSettings(n); break;
@@ -15803,8 +17429,8 @@ void MenuKeys(uint64_t n) {
         if (!open) {
             g_menuOpen = true;
             g_menuMoved = false;
-            // v0.10.3 phase 29c: both groups start collapsed at every open; a selection inside one moves to its header
-            g_menuGrpOpen[0] = g_menuGrpOpen[1] = false;
+            // v0.10.3 phase 29c: all groups start collapsed at every open; a selection inside one moves to its header
+            for (bool& o : g_menuGrpOpen) o = false;
             if (g_menuSel < 0 || g_menuSel >= MR_COUNT) g_menuSel = 0;
             if (!MenuRowVisible(g_menuSel)) g_menuSel = MenuRowGroup(g_menuSel);
             MenuPerfOpen();                               // GPU timers on while open (debug = 0) + fresh figures
@@ -15928,6 +17554,7 @@ void MenuDrawAtPresent(IDXGISwapChain* sc, ID3D11DeviceContext* bctx) {
         if (x0 < 0.0f) x0 = 0.0f;
         if (y0 < 0.0f) y0 = 0.0f;
         GpuPerfScope gp(ctx, GpuPerf::kOverlay);          // v0.10.3 phase 29b: the fps box's own GPU cost (per frame)
+        FpsSyncColor();                                   // phase 44
         TuningMenu::DrawWidget(ctx, rtv.Get(), td.Width, td.Height, x0, y0, scale, build, outMode, g_fps.line1, g_fps.line2);
     }
     t_inDlaa = false;
@@ -16027,7 +17654,9 @@ void MenuFacingLog(int eye, const MenuFacing& g, bool facing, float pw, float ph
 // picture (no roll with the head). No depth shift (menu_vr_depth): the per-eye projection gives the stereo depth itself.
 // Result 1 = placed (*cx, *cy = the box centre px, *scale = the draw scale), 0 = no usable OpenXR views (the caller draws the
 // head-locked box; logged once per reason), -1 = not on this eye (behind it / fully outside its picture: nothing drawn).
-constexpr float  kFpsLockDist = 0.8f;                     // m from the reference space origin (or the captured pivot)
+constexpr float  kFpsLockDist = 0.8f;                     // m: the size reference (the head-locked box's angle at 0.8 m)
+// phase 44: the anchor's distance from the space origin / pivot = fps_vr_dist (default 80 cm = kFpsLockDist)
+inline double FpsLockDistM() { return (double)g_fpsVrDist / 100.0; }
 constexpr double kFpsLockStale = 0.5;                     // s: older locate = no usable views (the game paused / no session)
 struct FpsVrLockState {
     bool  pivotHave = false;                              // non-LOCAL spaces: the captured pivot
@@ -16042,6 +17671,7 @@ struct FpsVrLockState {
 FpsVrLockState g_fpsLock;
 void FpsVrLockReset() {                                   // the lock toggled / Reset: re-capture the pivot, log again
     g_fpsLock = FpsVrLockState();
+    FpsCab::Reset("the lock row / Reset");               // phase 47: a fresh lock-on (attached to the vehicle)
 }
 // v' = conj(q) v q (the reference-space vector `v` in the view's axes) for a unit quaternion q = (x, y, z, w).
 void QuatRotInv(const XrHook::View& q, const double v[3], double out[3]) {
@@ -16132,8 +17762,9 @@ int FpsVrLockedPlace(int eye, ID3D11Texture2D* tex, const D3D11_RENDER_TARGET_VI
         yaw0 = st.yaw0;
     }
     const double yaw = yaw0 + (double)g_fpsVrX * kRad, pitch = -(double)g_fpsVrY * kRad;
-    const double A[3] = { pivot[0] + kFpsLockDist * std::sin(yaw) * std::cos(pitch), pivot[1] + kFpsLockDist * std::sin(pitch),
-                          pivot[2] - kFpsLockDist * std::cos(yaw) * std::cos(pitch) };
+    const double dA = FpsLockDistM();                    // phase 44: fps_vr_dist (was kFpsLockDist)
+    const double A[3] = { pivot[0] + dA * std::sin(yaw) * std::cos(pitch), pivot[1] + dA * std::sin(pitch),
+                          pivot[2] - dA * std::cos(yaw) * std::cos(pitch) };
     // into the view's space, then through its fov into the picture rect
     const double d[3] = { A[0] - w.px, A[1] - w.py, A[2] - w.pz };
     double p[3];
@@ -16147,7 +17778,8 @@ int FpsVrLockedPlace(int eye, ID3D11Texture2D* tex, const D3D11_RENDER_TARGET_VI
         tx = p[0] / depth; ty = p[1] / depth;
         px = rect[0] + rect[2] * (tx - tl) / (tr - tl);
         py = rect[1] + rect[3] * (tu - ty) / (tu - tdn);
-        k = (double)rect[2] / (double)W * (double)kFpsLockDist / depth;   // the rect's own width (side-by-side: half the texture)
+        // the rect's own width (side-by-side: half the texture); phase 44: x dA / depth = the same angle at every fps_vr_dist
+        k = (double)rect[2] / (double)W * dA / depth;
         if (k > 6.0) k = 6.0;                             // (the head right at the box: keep it sane)
     }
     if (eye >= 0 && eye < kMaxEyes && !st.eyeLogged[eye] && st.lines < 24) {
@@ -16163,7 +17795,7 @@ int FpsVrLockedPlace(int eye, ID3D11Texture2D* tex, const D3D11_RENDER_TARGET_VI
             (double)w.angleUp / kRad, (double)w.angleDown / kRad, uOf(view), vOf(view), measured ? "" : "(not measured yet) ",
             (double)mu, (double)mv, vs.spaceType, vs.locSpaceType, vs.corrected ? "corrected to the submitted pose" : "raw",
             vs.ageSec * 1000.0, g_fpsVrX,
-            -g_fpsVrY, (double)kFpsLockDist, depth, px, py, k, behind ? " -- BEHIND the eye now: not drawn" : "");
+            -g_fpsVrY, dA, depth, px, py, k, behind ? " -- BEHIND the eye now: not drawn" : "");
     }
     // phase 28b: the direction self-check + the once-a-second log for 10 s after the lock-on (eye 0 only). Head yaw / pitch =
     // this view's forward (-z) in the layer space; the anchor's direction FROM THIS EYE; rel = anchor - head. A point to the
@@ -16210,6 +17842,78 @@ int FpsVrLockedPlace(int eye, ID3D11Texture2D* tex, const D3D11_RENDER_TARGET_VI
     return 1;
 }
 
+// ---- phase 47: the VR fps box ATTACHED TO THE VEHICLE (fps_vr_lock = 2; src/fps_cab.h) ------------------------------------
+// The OpenXR side for FpsCab: the poses the eye pictures are shown with (XrHook::LatestViews, corrected to the submitted pose),
+// per DLAA eye index -- eye 0 = OpenXR view 1 (the right eye) as FpsVrLockedPlace assumes; FpsCab's lock checks that order
+// against the eyes' positions in the cab draw's model space and swaps it if needed. Not usable (stale, untracked, a VIEW space)
+// = ok false (the lock then places the box from the eye's own view).
+FpsCab::XrIn FpsCabXr() {
+    FpsCab::XrIn x;
+    XrHook::Views vs;
+    if (!XrHook::Hooked() || !XrHook::LatestViews(&vs) || vs.ageSec > kFpsLockStale || (vs.flags & 3) != 3 || vs.spaceType == 1)
+        return x;
+    x.ok = true;
+    x.local = vs.spaceType == 2;
+    for (int e = 0; e < 2; ++e) {
+        const XrHook::View& w = vs.v[(e & 1) ^ 1];
+        x.eye[e] = FpsCab::Pose{ { w.px, w.py, w.pz }, { w.qx, w.qy, w.qz, w.qw } };
+        x.fw[e] = std::tan((double)w.angleRight) - std::tan((double)w.angleLeft);
+    }
+    return x;
+}
+// FpsCab follows the menu state: on = VR, the box shown, lock 2; the fps_vr_* settings (a change moves the box in the cab).
+void FpsCabSync(uint64_t frame) {
+    FpsCab::SetActive(g_launchVr == 1 && g_fpsShow && g_fpsVrLock == 2, frame);
+    if (!FpsCab::Active()) return;
+    FpsCab::Settings s;
+    s.x = g_fpsVrX; s.y = g_fpsVrY; s.distCm = g_fpsVrDist;
+    s.yaw = g_fpsVrYaw; s.pitch = g_fpsVrPitch; s.roll = g_fpsVrRoll;
+    s.scale = (double)g_fpsVrScale;
+    FpsCab::SetSettings(s);
+}
+// HandlePossibleBlit, a VR eye blit (render thread): this eye's pass record -> the reference cab draw's MVP offset for the box
+// drawn into this picture later this frame (zero lag), the lock / monitor readbacks.
+void FpsCabBlit(ID3D11DeviceContext* ctx, int eye, DrawIdRecord& rec, uint64_t serial, uint64_t frame) {
+    FpsCabSync(frame);
+    if (!FpsCab::Active()) return;
+    CpuProf::Block cpb(CpuProf::kBMenu);               // (the fps box's CPU side, like the menu's)
+    const FpsCab::XrIn xr = FpsCabXr();
+    const bool frameStart = ((serial + (uint64_t)g_vrPhaseOff) & 1) == 0;   // phase 24 parity: this pass starts a VR frame
+    const bool was = t_inDlaa;
+    t_inDlaa = true;                                      // (our staging copies / maps pass straight through the hooks)
+    FpsCab::OnBlit(ctx, eye, rec, serial, frame, frameStart, xr);
+    t_inDlaa = was;
+}
+// MenuDrawVrOn: the box attached to the cab in eye `eye`'s picture `rtv` (texture `tex`). False = not attached now (the caller
+// draws the mode-1 box: fixed in the play space); the reason is counted / logged by FpsCab::NoteDraw.
+bool FpsCabDraw(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv, ID3D11Texture2D* tex,
+                const D3D11_RENDER_TARGET_VIEW_DESC& rd, UINT W, UINT H, int outMode) {
+    FpsCabSync(g_frames.load(std::memory_order_relaxed));
+    FpsCab::Place pl;
+    int why = FpsCab::kInactive;
+    bool ok = FpsCab::Get(eye, g_passSeq, &pl, &why);   // phase 47b: only this frame's newest passes (never a stale mirror)
+    if (ok) {
+        // the draw's NDC covers the eye's picture: the whole texture, or (a side-by-side / array swapchain image) its sub-rect
+        float map[4] = { 1.0f, 1.0f, 0.0f, 0.0f };
+        const uint32_t slice = rd.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE2DARRAY ? rd.Texture2DArray.FirstArraySlice : 0;
+        int32_t rect[4] = { 0, 0, (int32_t)W, (int32_t)H };
+        if (XrHook::ViewForImage(tex, slice, rect) >= 0 && rect[2] > 0 && rect[3] > 0 && rect[0] >= 0 && rect[1] >= 0 &&
+            (UINT)(rect[0] + rect[2]) <= W && (UINT)(rect[1] + rect[3]) <= H) {
+            map[0] = (float)rect[2] / (float)W;
+            map[1] = (float)rect[3] / (float)H;
+            map[2] = (float)(2 * rect[0] + rect[2]) / (float)W - 1.0f;
+            map[3] = 1.0f - (float)(2 * rect[1] + rect[3]) / (float)H;
+        }
+        GpuPerfScope gp(ctx, GpuPerf::kOverlay);          // (the fps box's own GPU cost, as the other drawn-in paths)
+        FpsSyncColor();
+        ok = TuningMenu::DrawWidgetMvp(ctx, rtv, W, H, pl.srv, pl.off, pl.corner, map, g_fpsVrBuild, outMode, g_fps.line1,
+                                       g_fps.line2);
+        if (!ok) why = FpsCab::kShader;
+    }
+    FpsCab::NoteDraw(ok, why);
+    return ok;
+}
+
 // VR: the panel while the menu is open, then the fps box while it is on, into `rtv` (an eye texture view); both centred on the
 // eye's optical centre + their own offsets, shifted inward by the same menu_vr_depth. v0.10.0 phase 15: split out of MenuDrawVr
 // for the menu / truck-preview eye pictures (MenuDrawPreview); the centre comes from VrEyeCentre (the world eye's, else the
@@ -16219,9 +17923,32 @@ int FpsVrLockedPlace(int eye, ID3D11Texture2D* tex, const D3D11_RENDER_TARGET_VI
 // path (the arm point, the late read, the OpenXR release MenuLateOnXrRelease, MenuDrawPreview) draws through here.
 // v0.10.3 phase 29: a panel / fps box that went to the compositor as an OpenXR quad layer (menu_vr_layer = 1, XrHook::
 // OverlayActive) is NOT drawn into the eye picture -- each one separately (the other may still need the in-picture fallback).
+// phase 44: the drawn-in VR fps box's distance / turn, per eye at level 4 whenever the settings change (24 lines in all)
+void FpsDrawnInLog(int eye, int locked, double extra, double ipd, double fx, bool wantTurn, bool turned) {
+    static int s_lines = 0;
+    static int s_key[kMaxEyes][6] = {};
+    static bool s_have[kMaxEyes] = {};
+    if (eye < 0 || eye >= kMaxEyes || s_lines >= 24) return;
+    const int key[6] = { locked, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll, (wantTurn ? 1 : 0) | (turned ? 2 : 0) };
+    if (s_have[eye] && !memcmp(key, s_key[eye], sizeof(key))) return;
+    s_have[eye] = true;
+    memcpy(s_key[eye], key, sizeof(key));
+    ++s_lines;
+    LogDbg("fps box VR (drawn into eye %d, %s): fps_vr_dist %.2f m -> %s; turn yaw %+d pitch %+d roll %+d deg -> %s",
+        eye, locked ? "fixed in the play space" : "following the head", (double)g_fpsVrDist / 100.0,
+        locked ? "the anchor distance (the per-eye projection gives the depth)" : (g_fpsVrDist == FpsPose::kDistDefault
+        ? "the menu_vr_depth shift only (0.8 m)" : "an extra stereo shift"), g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll,
+        !wantTurn ? "flat (not turned)" : (turned ? "a turned perspective quad" : "NOT turned (edge-on to the eye / not drawable: flat box)"));
+    if (!locked && g_fpsVrDist != FpsPose::kDistDefault)
+        LogDbg("fps box VR (eye %d): extra stereo shift %+.1f px (ipd %.1f mm, fx %.0f px)", eye, extra, ipd * 1000.0, fx);
+}
 void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv) {
     const bool menuOpen = g_menuOpen.load(std::memory_order_relaxed) && !(g_menuVrLayer && XrHook::OverlayActive(0));
-    const bool fpsShow = g_fpsShow && !(g_menuVrLayer && XrHook::OverlayActive(1));
+    // phase 47: attached to the vehicle = never a quad (MenuOverlaySet does not ask for one): always drawn in here
+    // phase 47b: but only on the frames FpsCab decided to show attached (Latch, at Present, with hysteresis); the others are lock 1
+    // exactly (the quad with menu_vr_layer = 1, MenuOverlaySet asks for it then) -- one box per eye picture, one kind per frame
+    const bool cabOn = g_fpsVrLock == 2 && FpsCab::Attached();
+    const bool fpsShow = g_fpsShow && (cabOn || !(g_menuVrLayer && XrHook::OverlayActive(1)));
     if (eye < 0 || eye >= kMaxEyes || t_inDlaa || !rtv || !(menuOpen || fpsShow)) return;
     Microsoft::WRL::ComPtr<ID3D11Resource> res;
     rtv->GetResource(res.GetAddressOf());
@@ -16267,6 +17994,14 @@ void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv
     if (fpsShow) {
         const float scale = W * 0.08f / TuningMenu::kWidgetRefW * g_fpsVrScale;   // 1 = 8 % of the eye width
         if (eye == 0 || g_fpsVrBuild <= 0.0f) g_fpsVrBuild = scale;     // one build scale for both eyes and the mirror
+        // phase 47: attached to the vehicle -- placed on the GPU from this picture's cab draw (FpsCabDraw); not possible now (no
+        // cab draw / record / lock yet) = the fixed-in-play-space box below (FpsVrLockedPlace treats lock 2 as 1)
+        // phase 47b: an attached frame draws the attached box or (this eye cannot have it now) NOTHING -- never the fixed one too
+        if (cabOn) {
+            FpsCabDraw(ctx, eye, rtv, t.Get(), rd, td.Width, td.Height, outMode);
+            t_inDlaa = false;
+            return;
+        }
         float cx = u * W + (float)g_fpsVrX / 100.0f * W + shift;
         float cy = v * H + (float)g_fpsVrY / 100.0f * H;
         float s = scale;
@@ -16274,11 +18009,43 @@ void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv
         // head-locked placement above, -1 = not on this eye). The build scale stays the head-locked one (the texture is not
         // rebuilt as the distance changes; DrawWidget scales it).
         const int locked = g_fpsVrLock ? FpsVrLockedPlace(eye, t.Get(), rd, W, H, scale, &cx, &cy, &s) : 0;
+        // phase 44: following the head, fps_vr_dist changes the stereo depth -- the extra inward shift of a point at that
+        // distance against the 0.8 m the menu_vr_depth shift stands for (the ipd from the located views, else 63 mm; fx from
+        // this eye's measured projection scale). 80 cm = exactly as before. Fixed in the play space needs none (the per-eye
+        // projection of FpsVrLockedPlace gives the depth itself).
+        float fsx = 0.0f, fsy = 0.0f;
+        VrEyeScale(eye, &fsx, &fsy);
+        const double ffx = 0.5 * (double)W * (double)fsx, ffy = 0.5 * (double)H * (double)fsy;
+        double extra = 0.0, ipd = 0.063;
+        if (locked == 0 && g_fpsVrDist != FpsPose::kDistDefault) {
+            XrHook::Views xv;
+            if (XrHook::LatestViews(&xv) && (xv.flags & 2)) {
+                const double dx = (double)xv.raw[0].px - xv.raw[1].px, dy = (double)xv.raw[0].py - xv.raw[1].py,
+                             dz = (double)xv.raw[0].pz - xv.raw[1].pz;
+                const double m = std::sqrt(dx * dx + dy * dy + dz * dz);
+                if (m > 0.04 && m < 0.09) ipd = m;
+            }
+            extra = FpsPose::ExtraShiftPx(ipd, ffx, (double)g_fpsVrDist / 100.0, (double)kFpsLockDist) * (double)inward;
+            cx += (float)extra;
+        }
         if (locked >= 0) {
             const float bw = TuningMenu::kWidgetRefW * s, bh = TuningMenu::kWidgetRefH * s;
             GpuPerfScope gp(ctx, GpuPerf::kOverlay);      // v0.10.3 phase 29b: the fps box's own GPU cost (per frame: both eyes)
-            TuningMenu::DrawWidget(ctx, rtv, td.Width, td.Height, cx - 0.5f * bw, cy - 0.5f * bh, s, g_fpsVrBuild, outMode,
-                                   g_fps.line1, g_fps.line2);
+            FpsSyncColor();                               // phase 44
+            // phase 44: the box's own turn (fps_vr_yaw / _pitch / _roll) -- a perspective quad about its centre (parallel to the
+            // picture = its normal facing in this path), through this eye's pinhole; not usable (edge-on) = the flat box
+            bool turned = false;
+            float clip[4][4];
+            const bool wantTurn = !FpsPose::TurnIsZero(g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll);
+            if (wantTurn &&
+                FpsPose::TurnedCorners(W, H, (double)u * W, (double)v * H, ffx, ffy, cx, cy, bw, bh, g_fpsVrYaw, g_fpsVrPitch,
+                                       g_fpsVrRoll, 0.0, clip))
+                turned = TuningMenu::DrawWidgetCorners(ctx, rtv, td.Width, td.Height, clip, g_fpsVrBuild, outMode, g_fps.line1,
+                                                       g_fps.line2);
+            if (!turned)
+                TuningMenu::DrawWidget(ctx, rtv, td.Width, td.Height, cx - 0.5f * bw, cy - 0.5f * bh, s, g_fpsVrBuild, outMode,
+                                       g_fps.line1, g_fps.line2);
+            FpsDrawnInLog(eye, locked, extra, ipd, ffx, wantTurn, turned);
         }
     }
     t_inDlaa = false;
@@ -17097,12 +18864,16 @@ void MenuOverlaySet() {
     XrHook::OverlayParams p;
     p.enabled   = g_menuVrLayer != 0;
     p.menuOpen  = g_menuOpen.load(std::memory_order_relaxed);
-    p.fpsShow   = g_fpsShow;
-    p.fpsLock   = g_fpsVrLock;
+    FpsCabSync(g_frames.load(std::memory_order_relaxed));   // phase 47b: this frame's attach verdict -> the next frame's box kind
+    FpsCab::Latch();
+    p.fpsShow   = g_fpsShow && !(g_fpsVrLock == 2 && FpsCab::Attached());   // phase 47 / 47b: attached = drawn in only, else the quad
+    p.fpsLock   = g_fpsVrLock ? 1 : 0;
     p.menuX     = g_menuVrX;  p.menuY = g_menuVrY;  p.menuScale = g_menuVrScale;
     p.menuDist  = (float)g_menuVrDist / 100.0f;          // v0.10.3 phase 29b (cm -> m)
     p.menuFace  = g_menuVrFace != 0;                     // v0.10.3 phase 29b: the panel / head-following fps box quads
     p.fpsX      = g_fpsVrX;   p.fpsY  = g_fpsVrY;   p.fpsScale  = g_fpsVrScale;
+    p.fpsDist   = (float)g_fpsVrDist / 100.0f;           // phase 44 (cm -> m)
+    p.fpsYaw    = g_fpsVrYaw; p.fpsPitch = g_fpsVrPitch; p.fpsRoll = g_fpsVrRoll;
     // the render thread: the late panel's arm thread (the game's draws on its immediate context), else this Present's thread
     // (the per-frame work runs on the game render thread, also in present-layer mode)
     const unsigned long armTid = g_menuLateTid.load(std::memory_order_relaxed);
@@ -17176,6 +18947,7 @@ bool MenuOverlayDraw(XrHook::OverlayDraw* d) {
         s = (std::min)(kOvFpsDensity * g_fpsVrScale, (std::min)((float)d->w / TuningMenu::kWidgetRefW,
                                                               (float)d->h / TuningMenu::kWidgetRefH));
         g_fpsVrBuild = s;
+        FpsSyncColor();                                  // phase 44
         ok = TuningMenu::DrawWidget(ctx, rtv.Get(), d->w, d->h, 0.0f, 0.0f, s, s, outMode, g_fps.line1, g_fps.line2);
         d->usedW = (uint32_t)std::lround(TuningMenu::kWidgetRefW * s);
         d->usedH = (uint32_t)std::lround(TuningMenu::kWidgetRefH * s);
@@ -17271,6 +19043,8 @@ void MirStatsLog(uint64_t blit) {
     s += b;
     int units = 0;
     double gpuFrame = 0.0;
+    double turnSaved = 0.0;                               // phase 41: GPU ms per frame the held views did not spend
+    bool turnTimed = false;
     for (int u = 0; u < kMirCap; ++u) {
         MirUnit& m = g_mir[u];
         if (!m.used) continue;
@@ -17310,6 +19084,25 @@ void MirStatsLog(uint64_t blit) {
                  pMax);
         s += b;
         gpuFrame += (rAvg + pAvg) * (double)m.sOk / pres;
+        {                                                 // phase 41: this unit's turns + what its held views saved
+            double hAvg = 0, hMax = 0;
+            uint64_t hN = 0;
+            m.gpuHold.Take(&hAvg, &hMax, &hN);
+            if (MirTurnsOn() || m.sTurnHeld) {
+                const double perRun = rAvg + pAvg;        // DLAA (snapshot + MV + NGX + copies) + replay of one run
+                if (rN && m.sTurnHeld) {
+                    turnSaved += (double)m.sTurnHeld * (perRun - hAvg) / pres;
+                    turnTimed = true;
+                }
+                gpuFrame += hAvg * (double)m.sTurnHeld / pres;
+                b[0] = 0;
+                snprintf(b, sizeof(b), "{turns unit %d: slot %d, ran %llu on its turn + %llu forced, held %llu (copy %.3f ms avg, %llu "
+                         "timed)}", u, m.turnSlot, (unsigned long long)m.sTurnRun, (unsigned long long)m.sTurnForced,
+                         (unsigned long long)m.sTurnHeld, hAvg, (unsigned long long)hN);
+                s += b;
+            }
+            m.sTurnRun = m.sTurnHeld = m.sTurnForced = 0;
+        }
         if (rN && rAvg > kMirBudgetMs && g_mirBudgetLogs < 20) {
             ++g_mirBudgetLogs;
             LogWarn("mirror DLAA: WARNING unit %d (%ux%u) averaged %.3f ms GPU per view in this window (budget %.2f ms; max %.3f "
@@ -17333,6 +19126,45 @@ void MirStatsLog(uint64_t blit) {
         s += b;
     }
     g_mirVrSkip = g_mirAltHeld = g_mirAltRaw = 0;
+    {                                                     // phase 41: mirrors in turns
+        if (MirTurnsOn()) {
+            uint64_t forced = 0;
+            for (int w = MirTurns::kForceFirst; w < MirTurns::kWhyN; ++w) forced += g_mirTurnWhy[w];
+            char hist[400] = "";
+            size_t o = 0;
+            const int nh = g_mirTurnHistN < 8 ? g_mirTurnHistN : 8;
+            for (int k = nh; k >= 1 && o < sizeof(hist); --k) {
+                const MirTurnFrame& t = g_mirTurnHist[(g_mirTurnHistN - k) & 7];
+                char r[48] = "", h[48] = "";
+                size_t ro = 0, ho = 0;
+                for (int u = 0; u < kMirCap; ++u) {
+                    if ((t.run & (1u << u)) && ro < sizeof(r)) ro += (size_t)snprintf(r + ro, sizeof(r) - ro, "%s%d", ro ? "," : "", u);
+                    if ((t.held & (1u << u)) && ho < sizeof(h)) ho += (size_t)snprintf(h + ho, sizeof(h) - ho, "%s%d", ho ? "," : "", u);
+                }
+                o += (size_t)snprintf(hist + o, sizeof(hist) - o, "%s#%llu ran [%s] held [%s]", o ? " " : "",
+                                      (unsigned long long)t.fr, r, h);
+            }
+            char saved[96];
+            if (turnTimed) snprintf(saved, sizeof(saved), "~%.3f ms GPU per frame saved by the held views", turnSaved);
+            else           snprintf(saved, sizeof(saved), "ms saved: not timed yet");
+            snprintf(b, sizeof(b), " | mirrors in turns (mirror_turns %d%s): views on their turn %llu, held %llu, forced %llu "
+                     "[first / reset %llu, no run last frame %llu, no output %llu, camera cut %llu, debug %llu] | camera cuts: main "
+                     "view %llu, mirror %llu | slot balances %llu | frames with views %llu | %s | last frames (units): %s",
+                     g_mirTurns, MirMode() == 3 ? ", mode 3 = every view in turns" : "",
+                     (unsigned long long)g_mirTurnWhy[MirTurns::kTurn], (unsigned long long)g_mirTurnWhy[MirTurns::kHold],
+                     (unsigned long long)forced, (unsigned long long)g_mirTurnWhy[MirTurns::kForceFirst],
+                     (unsigned long long)g_mirTurnWhy[MirTurns::kForceGap], (unsigned long long)g_mirTurnWhy[MirTurns::kForceNoResult],
+                     (unsigned long long)g_mirTurnWhy[MirTurns::kForceCut], (unsigned long long)g_mirTurnWhy[MirTurns::kForceDebug],
+                     (unsigned long long)g_mirTurnCuts[0], (unsigned long long)g_mirTurnCuts[1],
+                     (unsigned long long)g_mirTurnBalances, (unsigned long long)g_mirTurnFrames, saved, nh ? hist : "none");
+            s += b;
+        } else {
+            s += " | mirrors in turns off (mirror_turns 0)";
+        }
+        for (uint64_t& w : g_mirTurnWhy) w = 0;
+        for (uint64_t& c : g_mirTurnCuts) c = 0;
+        g_mirTurnBalances = g_mirTurnFrames = 0;
+    }
     LogDbg("%s", s.c_str());
     if (MirMode() == 2) MirSelLog(blit);                 // v0.10.0 phase 21: the mode-2 selection line
     g_mirWinViews = g_mirWinFrames = g_mirWinPresents = g_mirWinCap = 0;
@@ -17383,11 +19215,33 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
     int objSlot = 0;                                      // v0.9.0: stencil object id of this draw (0 = untagged)
 #endif
     if (gameCtx && g_passSeq) {
-        PassSlot& ps = g_ring[(g_passSeq - 1) % kRing];
+        PassSlot& ps = g_ring[SlotOf(g_passSeq - 1)];
         if (!g_gbufPass) {
             ++ps.diOther;
         } else {
             ++ps.diGbuf;
+            // v0.12.0 issue #12 round 4: what the rasterizer really uses for this pass (the shift last issued by ReconcileViewports)
+            // vs the jitter NGX will be told (ps.jx / jy), at the pass's first G-buffer draw. A mismatch = DLSS is fed the wrong
+            // jitter for the whole pass (smudge on camera motion). Counted always; the first 8 logged.
+            if (!ps.rastSeen && !t_inDlaa) {
+                ps.rastSeen = true;
+                ps.rastShifted = g_vpShifted; ps.rastJx = g_vpShiftX; ps.rastJy = g_vpShiftY;
+                if (g_dlaaOn.load(std::memory_order_relaxed)) {
+                    ++g_cRastJitPasses;
+                    const float ax = g_vpShifted ? g_vpShiftX : 0.0f, ay = g_vpShifted ? g_vpShiftY : 0.0f;
+                    if (std::fabs(ax - ps.jx) > 1e-4f || std::fabs(ay - ps.jy) > 1e-4f) {
+                        ++g_cRastJitMismatch;
+                        if (g_rastJitLogs++ < 8)
+                            LogWarn("jitter MISMATCH: pass s=%llu drew its first G-buffer draw with viewport shift (%+.4f,%+.4f)%s but its "
+                                "jitter (told to DLSS) is (%+.4f,%+.4f) phase %d -- mode %s, views %d, clear re-shifts %llu (#%llu of %llu "
+                                "passes, Present #%llu)", (unsigned long long)ps.s, (double)ax, (double)ay,
+                                g_vpShifted ? "" : " (not shifted)", (double)ps.jx, (double)ps.jy, ps.phase,
+                                g_vrMode ? "VR" : (g_flatMode ? "flat" : "undetected"), ViewCount(),
+                                (unsigned long long)g_cClearReshift, (unsigned long long)g_cRastJitMismatch,
+                                (unsigned long long)g_cRastJitPasses, (unsigned long long)g_frames.load(std::memory_order_relaxed));
+                    }
+                }
+            }
 #ifdef WITH_DLAA
             // v0.5.5: VR collects candidates even with MV off (the projection eye verdict reads them).
             if (t_inDlaa) {
@@ -17397,15 +19251,15 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
                        g_passive.load(std::memory_order_relaxed)) {   // v0.6.2 passive: no candidate copies
                 ++ps.skGate;
             } else {
-                const uint64_t t0 = __rdtsc();                   // v0.5.6: CPU cost of the collector (phase 35: TSC)
+                const uint64_t t0 = MeasureOn() ? __rdtsc() : 0; // v0.5.6: CPU cost of the collector (phase 35: TSC; 45: g_measure)
                 CpuProf::Block cpb(CpuProf::kBMvCollect);        // phase 31
                 CollectMvCandidate(ctx, indexCount, startIndex, baseVertex, ps);
-                g_cpuMvTicks += (int64_t)TscToQpc(__rdtsc() - t0);
+                if (t0) g_cpuMvTicks += (int64_t)TscToQpc(__rdtsc() - t0);
             }
             if (g_objInScene && !t_inDlaa) {                   // v0.9.0 per-object MVs: record + id lookup
-                const uint64_t t1 = __rdtsc();                   // (phase 35: TSC)
+                const uint64_t t1 = MeasureOn() ? __rdtsc() : 0; // (phase 35: TSC; phase 45: only while measuring)
                 objSlot = ObjOnDraw(ctx, indexCount, startIndex, baseVertex);
-                g_objTicks += TscToQpc(__rdtsc() - t1);
+                if (t1) g_objTicks += TscToQpc(__rdtsc() - t1);
             }
             if (g_didOn && !t_inDlaa)                          // v0.10.0 per-draw MVs: the draw's whole input state
                 DidOnDraw(ctx, indexCount, 1, startIndex, baseVertex, 0, false);
@@ -17453,9 +19307,9 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
     if (pvMenuIdx >= 0 && !t_inDlaa) MenuDrawPreview(ctx, pvMenuIdx, 'a');      // v0.10.0 phase 15 (VR menu-screen eye)
     // v0.9.0 r5: a world FORWARD-pass draw (1 RTV RGBA16F + scene DSV, not the G-buffer) -> forward depth re-draw
     if (gameCtx && g_jitterPass && !g_gbufPass && !t_inDlaa && FwdLive()) {
-        const uint64_t t2 = __rdtsc();                    // (phase 35: TSC)
+        const uint64_t t2 = MeasureOn() ? __rdtsc() : 0;  // (phase 35: TSC; phase 45: only while measuring)
         FwdOnDraw(ctx, indexCount, startIndex, baseVertex);
-        g_fwdTicks += TscToQpc(__rdtsc() - t2);
+        if (t2) g_fwdTicks += TscToQpc(__rdtsc() - t2);
     }
 #endif
 }
@@ -17508,9 +19362,10 @@ void ResetPassTrackingCore(bool forceDlaaOff) {
     g_stage.Restart();
 #endif
     g_gameVpN = 0; g_vpShifted = false; g_vpShiftX = g_vpShiftY = 0.0f; g_vpOver = false;
-    while (g_fifoHead < g_passSeq) g_ring[g_fifoHead++ % kRing].consumed = true;   // drop outstanding passes
+    while (g_fifoHead < g_passSeq) g_ring[SlotOf(g_fifoHead++)].consumed = true;   // drop outstanding passes
     g_needFirstPass = true;                                    // next G-buffer bind starts a pass
     g_flatMode = false; g_vrMode = false;                      // re-detected at the next matched blit
+    g_fv.Reset(); g_fvPhaseOff = 0; g_fvPerm.Reset();                          // v0.12.0 issue #12: flat multi-view detected again
     g_eyeMapN = 0; g_eyeMapLogged = false; g_prevBlitRt = nullptr; g_lastUnderflowBlit = 0;
     for (EyeMapEntry& e : g_eyeMap) e.score = 0;
     for (bool& b : g_eyeLogged) b = false;
@@ -18281,6 +20136,9 @@ bool DlaaOffFilePresent() {
 //   vrs_quality                    0/1 (default 1): 1 = 1 x 1 inside vrs_outer, 2 x 2 outside; 0 = 2 x 1 between the radii.
 //                                  While DLSS upscales from below 75 % of the output width the outer ring is 2 x 1 instead
 //   vrs_debug                      0/1 (default 0; needs debug = 1): middle ring 2 x 2, outer ring 4 x 4 -- shows the pattern
+//   vrs_passes                     0/1 (default 0, phase 42): 1 = VRS also on the eye's deferred lighting bind (2 RTV RGBA16F
+//                                  scene size + scene depth, after the G-buffer, before the forward bind), outer ring only
+//                                  (the middle ring stays 1 x 1). Menu row Foveated passes (live)
 
 // v0.7.10: "a.b.c.d" file version from a module's PE version resource, for the startup "env:" lines. "no version info"
 // if the resource is absent, "unavailable" on a read error. Startup only (GetFileVersionInfo is not on any hot path).
@@ -18404,7 +20262,18 @@ void LoadConfig() {
 #ifdef WITH_DLAA
             if (!strcmp(key, "did_shadow"))        { g_didShadowCfg = v >= 2 ? 2 : (v == 1 ? 1 : 0); continue; }   // startup only
             if (!strcmp(key, "did_shadow_verify")) { g_didShadowVerify = v < 0 ? -1 : (int)(v > 100000 ? 100000 : v); continue; }
+            // phase 40 / 41 / 42 (outside the else-if chain too: C1061 at the dev merge)
+            if (!strcmp(key, "mirror_turns"))       { g_mirTurns = v > 0 ? 1 : 0; g_mirTurnsExplicit = true; continue; }   // phase 41
 #endif
+            if (!strcmp(key, "xr_hidden_mask"))     { g_xrHiddenMask = v != 0 ? 1 : 0; g_xrHiddenMaskExplicit = true; continue; }   // phase 40
+            if (!strcmp(key, "vrs_passes"))         { g_vrsPasses = v != 0 ? 1 : 0; g_vrsPassesExplicit = true; continue; }   // phase 42
+            // phase 44: the fps box colour / VR distance / VR turn (outside the else-if chain: C1061)
+            if (!strcmp(key, "fps_color"))          { g_fpsColor = FpsPose::ClampColor(v); continue; }
+            if (!strcmp(key, "fps_brightness"))     { g_fpsBright = FpsPose::ClampBright(v); continue; }   // phase 48
+            if (!strcmp(key, "fps_vr_dist"))        { g_fpsVrDist = FpsPose::ClampI(v, FpsPose::kDistMin, FpsPose::kDistMax); continue; }
+            if (!strcmp(key, "fps_vr_yaw"))         { g_fpsVrYaw = FpsPose::ClampI(v, -FpsPose::kYawMax, FpsPose::kYawMax); continue; }
+            if (!strcmp(key, "fps_vr_pitch"))       { g_fpsVrPitch = FpsPose::ClampI(v, -FpsPose::kPitchMax, FpsPose::kPitchMax); continue; }
+            if (!strcmp(key, "fps_vr_roll"))        { g_fpsVrRoll = FpsPose::ClampI(v, -FpsPose::kRollMax, FpsPose::kRollMax); continue; }
             // phase 39 (here for the same reason; debug moved out of the WITH_DLAA chain: the log-only build reads it too)
             if (!_stricmp(key, "log_level")) {           // (case-insensitive as log.h's reader)
                 const int lv = LogParseLevel(eq + 1);     // log.h: the same parser as its own early read
@@ -18559,6 +20428,7 @@ void LoadConfig() {
                 else LogWarn("dlaa.ini: perf_profile '%s' not recognised (high, medium or low) -- keeping %s", tok, kProfName[g_profile]);
             }
 #endif
+            else if (!strcmp(key, "flat_multiview")) g_flatMvCfg = v != 0 ? 1 : 0;   // v0.12.0 issue #12, 0/1 (default 1; startup only)
             else if (!strcmp(key, "dlaa_pre_tonemap")) {                   // v0.10.0 phase 4, 0/1 (default 1)
 #ifdef WITH_DLAA
                 g_preCfg = v != 0 ? 1 : 0;
@@ -18699,7 +20569,8 @@ void LoadConfig() {
             else if (!strcmp(key, "fps_y"))          g_fpsY = v < 0 ? 0 : (v > 95 ? 95 : (int)v);
             else if (!strcmp(key, "fps_vr_x"))       g_fpsVrX = v < -50 ? -50 : (v > 50 ? 50 : (int)v);
             else if (!strcmp(key, "fps_vr_y"))       g_fpsVrY = v < -50 ? -50 : (v > 50 ? 50 : (int)v);
-            else if (!strcmp(key, "fps_vr_lock"))    g_fpsVrLock = v != 0 ? 1 : 0;   // v0.10.3 phase 28: 1 = fixed in the cab
+            else if (!strcmp(key, "fps_vr_lock"))    g_fpsVrLock = v <= 0 ? 0 : (v >= 2 ? 2 : 1);   // phase 28: 1 = fixed in the
+                                                                                                    // play space; phase 47: 2 = attached
             else if (!strcmp(key, "fps_scale") || !strcmp(key, "fps_vr_scale")) {
                 const double s = strtod(eq + 1, nullptr);
                 const float def = key[4] == 'v' ? kFpsVrScaleDefault : 1.0f;   // phase 15: 0.2..3.0 (was 0.5..3.0)
@@ -18857,10 +20728,14 @@ void LoadConfig() {
                         "(menu_vr_depth / menu_vr_face; menu_vr_dist unused)",
         g_bindHoldMs);
     Log("fps box (v0.10.0): fps_show=%d (%s), flat fps_x=%d fps_y=%d fps_scale=%.1f, VR fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f "
-        "fps_vr_lock=%d (%s) (the tuning menu's FPS counter rows move it)", g_fpsShow ? 1 : 0,
+        "fps_vr_lock=%d (%s); phase 44: fps_color=%d (%ls) fps_brightness=%d %% fps_vr_dist=%d cm fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d deg (the "
+        "tuning menu's FPS counter rows change them)", g_fpsShow ? 1 : 0,
         g_fpsShow ? "on: shown also while the menu is closed" : "off", g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY,
-        (double)g_fpsVrScale, g_fpsVrLock, g_fpsVrLock ? "VR: fixed in the cab, fps_vr_x / fps_vr_y = yaw / pitch degrees at 0.8 m"
-                                                       : "VR: follows the headset");
+        (double)g_fpsVrScale, g_fpsVrLock, g_fpsVrLock == 2 ? "VR: ATTACHED TO THE VEHICLE (phase 47: drawn in, placed from a cab "
+                                                         "draw's MVP on the GPU), fps_vr_x / fps_vr_y = yaw / pitch degrees at "
+                                                         "fps_vr_dist at the lock-on" : g_fpsVrLock ? "VR: fixed in the play space, "
+                                                         "fps_vr_x / fps_vr_y = yaw / pitch degrees at fps_vr_dist" : "VR: follows the headset",
+        g_fpsColor, FpsPose::ColorOf(g_fpsColor).name, g_fpsBright, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll);
     // v0.10.0 phase 6b: the vote participation of instanced / no-MVP draws follows mv_drawid_instanced (default 1, even when the
     // key is absent) -- set it here, after the whole ini is parsed, so both the replay and the vote agree.
     DrawIdMv::SetInstanced(g_didInstancedCfg);
@@ -18897,6 +20772,10 @@ void LoadConfig() {
                    "(HDR unit, see the 'DLAA stage' lines); DLSS upscaling / VR / HDR output keep the blit path"
                  : "the main scene's DLAA runs at the blit on the tone-mapped picture (as before phase 4)",
         (double)DrawIdMv::AttachM());
+    Log("v0.12.0 issue #12: flat_multiview=%d -- %s", g_flatMvCfg,
+        g_flatMvCfg ? "flat multi-monitor (r_multimon_mode 2): several non-overlapping scene->backbuffer blits per frame are detected "
+                      "(the 'flat multi-view detected' line) and every screen (up to 8) gets its own DLAA unit, history and jitter phase"
+                    : "off: every backbuffer blit is view 0 (the v0.11 behaviour; a multi-monitor setup mixes the views' cameras)");
     Log("phase 5 (v0.10.0): mv_drawid_twin=%d -- %s; G-buffer draws still unpaired take a G-buffer mover's motion when their "
         "origin lies within mv_fwd_attach_m=%.2f m of its origin with the same orientation (Ctrl+F6: cyan tint = twin, orange = "
         "by origin; the 'twin:' field of 'MV draw-ids @blit'; Alt+F8 lists every unpaired draw and the forward draws without a "
@@ -18938,14 +20817,16 @@ void LoadConfig() {
         CpuProf::Calibrate();
         CpuProf::g_markFn.store(&CpuProfFrameMark, std::memory_order_relaxed);   // phase 33: the xrEndFrame marks (xr_hook.cpp)
         CpuProf::g_on.store(g_cpuProfCfg > 0 || (g_cpuProfCfg < 0 && LogDebugLevel()), std::memory_order_relaxed);
+        MeasureUpdate();                                    // phase 45: the legacy CPU timers follow level 4 / the menu (g_measure)
         Log("phase 31: cpu_prof=%d (%s) -- one timer read ~%.0f TSC ticks per scope transition", g_cpuProfCfg,
             CpuProf::On() ? "on: 'CPU prof' lines every 10 s, one per busy thread (phase 33: render / main / turbo / other): the mod's CPU "
                             "time per hook / block, the game's own D3D11 calls, Present + OpenXR, and the rest of the frame"
                           : "off: every scope is one flag test", CpuProf::g_transTicks);
     }
     VrsApplyConfig();                                       // phase 34: VRS fixed foveated rendering (dlaa.ini vrs*)
-    Log("phase 34: VRS foveated rendering vrs=%d vrs_inner=%d vrs_outer=%d vrs_quality=%d vrs_debug=%d%s -- %s", g_vrsOn, g_vrsInner,
-        g_vrsOuter, g_vrsQuality, g_vrsDebug, g_vrsDebug && !LogDebugLevel() ? " (ignored: needs debug = 1)" : "",
+    Log("phase 34: VRS foveated rendering vrs=%d vrs_inner=%d vrs_outer=%d vrs_quality=%d vrs_debug=%d%s vrs_passes=%d (%s) -- %s",
+        g_vrsOn, g_vrsInner, g_vrsOuter, g_vrsQuality, g_vrsDebug, g_vrsDebug && !LogDebugLevel() ? " (ignored: needs debug = 1)" : "",
+        g_vrsPasses, g_vrsPasses ? "phase 42: + the lighting bind, outer ring only" : "world scene binds only",
         g_vrsOn ? "VR only: the outer ring of each eye's world scene passes is shaded per 2 x 2 px (NVIDIA RTX; checked at the first "
                   "VR scene pass)" : "off (the menu's Foveated (VRS) row switches it live in VR)");
     Log("phase 8 (v0.10.0): perf_timers=%d (%s) mv_vote_res=%u mv_vote_march_cap=%u mv_cons_cands=%u mv_medoid_drop=%u "
@@ -18968,6 +20849,13 @@ void LoadConfig() {
                                        : (g_mirVrMode == 4 ? "every view, per-draw ids off (camera motion vectors)" : "every view"))),
         g_mirCamOnly && g_mirVrMode >= 1 && g_mirVrMode <= 3 ? ", per-draw ids off (mirror_mv camera: camera motion vectors)" : "",
         g_slotPool ? "pooled (alive = passes in flight)" : "one set per FIFO slot");
+    // phase 41: mirrors in turns
+    g_mirTurnFrameLogs = g_mirTurns ? 24 : 0;
+    Log("phase 41: mirror_turns=%d (%s) -- %s", g_mirTurns, g_mirTurnsExplicit ? "dlaa.ini" : "default",
+        g_mirTurns ? "each mirror view gets its DLAA every 2nd frame (half of the mirrors per frame, balanced by size) and shows its "
+                     "last DLAA picture in between; a reset / camera cut / frame without a run makes it run out of turn; the "
+                     "'mirror units @blit' line (log level 4) has the counts and the ms saved"
+                   : "every mirror view gets its DLAA every frame (the menu's Mirrors in turns row switches it live)");
     // v0.10.0 phase 9: VR cost -- area scissor, 1/2-resolution forward depth, mirror modes, folded dispatches
     {
         const int marginNow = g_areaMarginCfg >= 0 ? g_areaMarginCfg : SceneDlaa::Feather() + 32;
@@ -19253,7 +21141,13 @@ DWORD WINAPI SetupThread(LPVOID) {
         XrHook::SetReleaseCallback(&MenuLateOnXrRelease);
         XrHook::SetOverlayDrawCallback(&MenuOverlayDraw);   // v0.10.3 phase 29: the quad layers' images (menu_vr_layer)
         XrHook::SetTurbo(g_xrTurbo != 0);                   // phase 30: dlaa.ini xr_turbo (the menu row switches it live)
+        g_xrHiddenMaskAtStart = g_xrHiddenMask;             // phase 40: the extension is asked for only when on at the start
+        XrHook::HiddenMaskRequest(g_xrHiddenMask != 0);
+        XrHook::HiddenMaskActive(g_xrHiddenMask != 0);
         XrHook::Install();
+        Log("hidden area mask (phase 40): xr_hidden_mask=%d (%s)", g_xrHiddenMask, g_xrHiddenMask
+            ? "ON: XR_KHR_visibility_mask is added at the game's xrCreateInstance when the runtime offers it"
+            : "off: the OpenXR extension is not requested; switching it on needs a game restart");
         Log("Turbo mode (phase 30, from OpenXR Toolkit): xr_turbo=%d (%s)", g_xrTurbo,
             g_xrTurbo ? "ON: the game does not wait for the headset in xrWaitFrame; ASW / Motion Smoothing / SSW / reprojection "
                         "cannot work" : "off: the game's own xrWaitFrame paces it");
@@ -19268,6 +21162,7 @@ DWORD WINAPI SetupThread(LPVOID) {
     DrawIdRecord::SetPsInfoFn(&DidPsInfo);              // v0.10.0 phase 21: the PS DXBC flags for the dump / pixel probe
     SceneDlaa::RegisterShaders();
     PreviewBlit::RegisterShaders();
+    HiddenMask::RegisterShaders();                      // phase 40
     TuningMenu::RegisterShaders();                       // v0.10.0 tuning menu panel quad
     PvCapRegisterShaders();                              // Ctrl+F10 preview capture metrics shader
     PvAsmRegisterShaders();                              // round 6 tiled preview: picture depth assembly

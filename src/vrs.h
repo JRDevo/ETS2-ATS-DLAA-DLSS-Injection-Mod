@@ -24,6 +24,13 @@
 //
 // Threading: Enter / Leave / OnDraw / OnModWork run on the game's render thread (the thread that issues the scene draws);
 // Configure and the reads for the menu may come from any thread (atomics).
+//
+// Phase 42 (dlaa.ini vrs_passes, 0 default): which game binds may be a bracket. 0 = the world scene binds only (the G-buffer and
+// the main forward bind, phase 34). 1 = + the eye's deferred LIGHTING bind (2 RTV RGBA16F scene size on the scene depth, between
+// the G-buffer and the forward bind of the same pass: a full-screen sun / ambient / shadow triangle + light volumes; ~1-1.7 ms
+// per eye in ATS VR at 4592 x 6496, the "lighting" class of the phase 36 GPU-per-pass line). An extra pass gets the OUTER-ONLY
+// table: the middle ring stays 1 x 1 even with vrs_quality = 0 (only the outer ring may go coarse there). The per-draw rule
+// (cut-out / SV_Depth / unknown PS = full rate) and the mod-work pause are the same as in the scene binds.
 #pragma once
 #include <d3d11.h>
 #include <atomic>
@@ -35,9 +42,14 @@ namespace Vrs {
 // Render thread writes; other threads only read it as a hint (OnModWork re-checks the thread id).
 extern bool g_want;
 
-// dlaa.ini vrs / vrs_inner / vrs_outer / vrs_quality / vrs_debug (any thread; Enter reads them). Clamped here.
-void Configure(int on, int innerPct, int outerPct, int quality, int debug);
+// dlaa.ini vrs / vrs_inner / vrs_outer / vrs_quality / vrs_debug / vrs_passes (any thread; Enter reads them). Clamped here.
+void Configure(int on, int innerPct, int outerPct, int quality, int debug, int passes);
 bool On();                     // vrs = 1
+int  Passes();                 // vrs_passes: 0 = scene binds only, 1 = + the lighting bind (phase 42)
+
+// The kind of game bind a bracket is (phase 42): the stats per kind, and the table (kClsLight = outer ring only).
+enum PassCls { kClsGbuf = 0, kClsFwd = 1, kClsLight = 2, kNCls = 3 };
+const char* ClsName(int cls);
 
 // Support state: -1 = not probed yet, 0 = not available (reason in SupportText), 1 = available.
 int         Support();
@@ -52,8 +64,10 @@ void FillMask(uint8_t* dst, uint32_t tw, uint32_t th, uint32_t rtW, uint32_t rtH
               float rOuter, uint32_t counts[3]);
 
 // Bracket. Enter: `eye` only for the log / stats; `renderOverOutput` = render width / output width while DLSS upscales
-// (1 = no upscale). false = not entered (off, unsupported, mask failed): no state was touched.
-bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, float cv, float renderOverOutput);
+// (1 = no upscale); `cls` = the bind kind (PassCls; kClsLight takes the outer-only table). false = not entered (off,
+// unsupported, mask failed): no state was touched.
+bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, float cv, float renderOverOutput,
+           int cls = kClsGbuf);
 void Leave(ID3D11DeviceContext* ctx);
 // A game draw inside the bracket: `exclude` = this draw keeps full-rate shading. Render thread, only while g_want.
 void OnDraw(ID3D11DeviceContext* ctx, bool exclude, int why);
@@ -74,6 +88,11 @@ struct Stats {
     // phase 34b (inject.cpp VrsDecideEye): entered binds per eye source (0 own blit, 1 blit-RT cycle, 2 forward colour,
     // 3 frame pair; a bind may count in several) and binds left alone because two sources disagreed
     uint64_t eyeSrc[4] = {}, bindDisagree = 0;
+    // phase 42: per bind kind (PassCls) -- brackets entered, draws that may shade coarse, draws kept at full rate
+    uint64_t entersCls[kNCls] = {}, drawsVrsCls[kNCls] = {}, drawsFullCls[kNCls] = {};
+    // phase 42 (inject.cpp): binds of the lighting stage (after a world G-buffer bind, before its forward bind) seen with
+    // vrs_passes = 1, and those left alone because their shape is not the lighting bind's (2 RTV RGBA16F scene size + scene depth)
+    uint64_t litStageBinds = 0, litShapeMiss = 0;
 };
 Stats& GetStats();
 void NoteEyeCheck(bool ok);    // the blit's eye vs the eye predicted at Enter (inject.cpp)

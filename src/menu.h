@@ -12,7 +12,7 @@
 // save / restore, from its OWN texture cache (rebuilt only when one of its two lines or its build scale changes; the panel's
 // cache is separate). It has NO background and NO frame: white text with a dark (near-black) outline, so it reads over any
 // picture (the texture carries its own alpha, the shader uses it as it is). ReleaseWidget drops that texture (the fps box
-// switched off).
+// switched off). Phase 44: the text / outline colours are set by SetWidgetColors (dlaa.ini fps_color presets).
 #pragma once
 #ifdef WITH_DLAA
 
@@ -21,12 +21,20 @@
 
 namespace TuningMenu {
 
-constexpr int   kMaxRows  = 35;                      // (was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
+constexpr int   kMaxRows  = 48;                      // (was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
                                                      //  28 before the v0.10.3 phase 28 FPS counter lock row, 29 before the phase 29c
                                                      //  group header rows, 31 before the phase 30 Turbo mode row, 32 before the
-                                                     //  phase 34 Foveated rows, 34 before the phase 39 Logging row; a Panel holds
+                                                     //  phase 34 Foveated rows, 34 before the phase 39 Logging row, 35 before the
+                                                     //  phase 41 Mirrors in turns row, 36 before the phase 40 Hidden area mask row,
+                                                     //  37 before the phase 42 Foveated passes row, 38 before the 4 phase 43 category headers, 42 before the
+                                                     //  5 phase 44 fps box rows (colour, distance, turn, tilt, rotate); a Panel holds
                                                      //  only the VISIBLE rows, nRows <= this)
-constexpr int   kPerfLines = 3;                      // the GPU block under the title (small font, one line each)
+constexpr int   kPerfLines = 3;                      // the perf block under the title (small font, one line each)
+// phase 45: INK MARKS in the perf lines, the cost column cells and its header: kInkCpu / kInkGpu switch the text colour to the
+// CPU blue / the GPU orange (blue / orange, not red / green: readable with the common colour-vision deficiencies), kInkEnd back
+// to the line's own colour. Control characters, never drawn; a text without them draws exactly as before. (Build the strings
+// with %lc -- an "" literal followed by a hex digit would swallow it.)
+constexpr wchar_t kInkCpu = 0x01, kInkGpu = 0x02, kInkEnd = 0x03;
 constexpr float kRefWidth = 760.0f;                  // panel width in reference px (scale 1; was 720 before the GPU cost column)
 constexpr float kWidgetRefW = 92.0f;                 // the fps box in reference px (scale 1)
 constexpr float kWidgetRefH = 44.0f;
@@ -35,15 +43,15 @@ struct Row {
     wchar_t name[48];
     wchar_t value[40];
     wchar_t keys[72];                                // the hotkey(s) of the row + a "VR only" / "flat only" tag
-    wchar_t cost[24];                                // the "GPU cost" column ("1.2 ms", "off", "same", "-")
+    wchar_t cost[32];                                // the cost column: "<cpu> | <gpu>" with ink marks (phase 45), "off", "same", "-"
     unsigned char greyed;                            // 1 = not applicable in the current mode (drawn grey)
 };
 // Fill with memset 0 first: Draw compares the whole struct to decide whether the texture must be rebuilt (the caller keeps
 // every text stable between its once-a-second GPU snapshots, so the texture is not rebuilt every frame).
 struct Panel {
     wchar_t title[112];
-    wchar_t perf[kPerfLines][224];                   // the GPU block (game / fps, the mod's cost per eye)
-    wchar_t costHead[24];                            // the 4th column's header ("GPU cost" / "GPU cost (eye 0)")
+    wchar_t perf[kPerfLines][224];                   // the perf block (Limit / fps / frame busy, the mod's CPU | GPU, the legend)
+    wchar_t costHead[24];                            // the 4th column's header ("CPU | GPU ms" with ink marks, phase 45)
     Row     rows[kMaxRows];
     int     nRows;
     int     sel;
@@ -83,6 +91,21 @@ void  ReleaseTargets();                              // drops the panel texture 
 bool  DrawWidget(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
                  float scale, float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2);
 void  ReleaseWidget();                               // drops the fps box texture (the box switched off)
+// phase 44: the fps box as a turned quad (fps_vr_yaw / fps_vr_pitch / fps_vr_roll, the drawn-in VR fallback): `clip` = its 4
+// corners in clip space as DrawCorners (top-left, top-right, bottom-left, bottom-right; w > 0). Texture / states as DrawWidget.
+bool  DrawWidgetCorners(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, const float clip[4][4],
+                        float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2);
+// phase 47: the fps box ATTACHED TO THE VEHICLE (fps_vr_lock = 2, src/fps_cab.h): `model` = its 4 corners (top-left, top-right,
+// bottom-left, bottom-right; homogeneous) in the model space of a cab draw; the vertex shader reads that draw's CURRENT MVP from
+// `mirror` (a raw buffer SRV: the draw-id record's cbuffer mirror of this eye's pass) at byte `mvpByteOff` (4 rows = clip x, y, z,
+// w) and draws the box where the draw's geometry is in this picture. map = (sx, sy, ox, oy): picture NDC = the draw's NDC * s + o
+// ((1, 1, 0, 0) = the whole picture). Texture / states as DrawWidget (+ VS SRV slot 0 saved / restored). False = not drawn.
+bool  DrawWidgetMvp(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, ID3D11ShaderResourceView* mirror,
+                    uint32_t mvpByteOff, const float model[4][4], const float map[4], float buildScale, int outMode,
+                    const wchar_t* line1, const wchar_t* line2);
+// phase 44 (dlaa.ini fps_color): the fps box's text and outline colours (sRGB bytes). Default white text, RGB 8,8,8 outline (the
+// colours before phase 44). A change rebuilds the box texture once (the cache key includes them).
+void  SetWidgetColors(uint8_t tr, uint8_t tg, uint8_t tb, uint8_t lr, uint8_t lg, uint8_t lb);
 
 }  // namespace TuningMenu
 

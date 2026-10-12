@@ -63,14 +63,24 @@ log_level = 1
 # Shift+F12 / the Save row writes it here. Not available on other GPUs (the menu row then says "not supported").
 # vrs = 0
 # Ring sizes in % of the half picture around each eye's centre: inside vrs_inner full detail; with vrs_quality = 0 the ring
-# between vrs_inner and vrs_outer is shaded per 2 x 1 pixels; outside vrs_outer per 2 x 2. The menu's Foveated size row:
-# wide = 65 / 90, balanced = 55 / 80 (default), narrow = 40 / 65.
+# between vrs_inner and vrs_outer is shaded per 2 x 1 pixels; outside vrs_outer per 2 x 2. The menu's Foveated size row
+# (phase 44) sets vrs_outer from 100 down to 10 in 5 % steps and vrs_inner = max(10, vrs_outer - 25): wide = 65 / 90,
+# balanced = 55 / 80 (default), narrow = 40 / 65. Other values (10..150) set here keep working.
 # vrs_inner = 55
 # vrs_outer = 80
 # 1 (default) = full detail everywhere inside vrs_outer; 0 = also save in the middle ring (2 x 1).
 # vrs_quality = 1
+# What foveated rendering acts on: 0 (default) = the 3D world only; 1 = also the game's lighting pass, outer ring only
+# (more saving; test it first: look for blocky light or shadow edges at the side). The menu's Foveated passes row.
+# vrs_passes = 0
 # Test only, needs log_level = 4: 1 = middle ring 2 x 2 and outer ring 4 x 4, so the pattern is easy to see in the headset.
 # vrs_debug = 0
+
+# VR HIDDEN AREA MASK, 0 / 1, default 0. 1 = the game skips the corners of each eye picture that the headset lenses never show
+# (the VR runtime reports them), so it draws fewer pixels; what you see stays the same. The mod asks the runtime for the mask when
+# the game starts, so the first switch-on needs a game restart; after that the tuning menu's Hidden area mask (VR) row switches it
+# live and Shift+F12 / the Save row writes it here. If the runtime has no mask the row says "not supported".
+# xr_hidden_mask = 0
 
 # 1 = on AMD X3D CPUs with V-Cache on one half only (e.g. 7950X3D / 9950X3D) the game is kept on the V-Cache cores (read at game
 # start only). Does nothing on other CPUs. 0 (default) = off: no fps gain was measured yet, try it and compare.
@@ -173,6 +183,13 @@ log_level = 1
 # 60 frames in a row of the other condition (a single frame that cannot use it takes the end-of-frame unit); both units stay
 # alive, so a change costs no rebuild and no blur pulse (switching ON after Alt+F7 / Ctrl+F6 takes about 60 frames).
 # dlaa_pre_tonemap = 1
+# v0.12.0 issue #12 FLAT MULTI-MONITOR (r_multimon_mode 2: one picture per screen, e.g. 3 x 1920x1080 in a 5760x1080 window):
+# 1 = the mod finds the screens (one scene->screen copy per screen per frame, side by side or stacked, any sizes) and gives each
+# screen its own DLAA / DLSS with its own history, so the screens' cameras are never mixed (the log says "flat multi-view
+# detected: N views ..." after about 30 frames). Up to 8 screens get DLAA; more pass through untouched. One screen is unaffected.
+# Multi-view always uses the end-of-frame DLAA (dlaa_pre_tonemap does not apply). 0 = the v0.11 behaviour (all screens share
+# one DLAA: a multi-monitor setup looks worse with DLAA than without). Read at the game start.
+# flat_multiview = 1
 # the smallest mirror picture handled: width AND height in pixels (16..4096; smaller views are left alone)
 # mirror_min_px = 128
 # how many mirror pictures per frame get their own DLAA (1..16; ETS2: 4 per frame, VR: per eye). More are left alone.
@@ -200,6 +217,12 @@ log_level = 1
 #   all mirrors = mode 1, parts                      all, camera motion = mode 4
 # Shift+F12 / the Save row writes mirror_mv with the mode; the Reset row removes it.
 # mirror_mv = parts
+# phase 41: mirrors in turns (VR and flat). 1 = each mirror gets its DLAA every 2nd frame and shows its last clean picture in
+# between (half of the mirrors per frame, big and small ones split evenly): about half the mirror GPU cost, also at its peak.
+# Edges stay clean; moving things in the glass update at half the frame rate. A reset, a big camera jump or a frame without a
+# run updates a mirror at once. 0 = every mirror every frame (default). mirror_vr_mode / mirror_flat_mode 3 = every mirror in
+# turns whatever this says. The tuning menu's "Mirrors in turns" row switches it live; Shift+F12 / the Save row writes it.
+# mirror_turns = 0
 
 # ---- v0.10.0 phase 8 PERFORMANCE (each one has the fast setting as its default; the other value is the phase-7 behaviour) ----
 # with log_level = 4 the log gets "perf eye N" lines every 600 frames: the GPU time of every part of the mod per eye (NGX itself
@@ -208,7 +231,8 @@ log_level = 1
 # with log_level = 4 the log also gets a "CPU prof" line every 10 s: the mod's own CPU time on the game's render thread per hook and
 # per part of the mod, the game's own D3D11 calls, Present + OpenXR waits and the rest of the frame (the profiler itself costs
 # ~0.1-0.3 ms per frame while on; the line says how much). -1 = with log_level = 4 (default; follows the menu's Logging row),
-# 0 = off, 1 = on
+# 0 = off, 1 = on. Both perf_timers and cpu_prof also run while the tuning menu is open (its cost column), whatever is set here,
+# and stop again when it closes.
 # cpu_prof = -1
 # phase 35: the per-draw record of the motion vectors copies the game's input state (input layout, vertex shader, its cbuffers
 # and samplers, rasterizer state) from hooked Set calls instead of ~10 getter calls per draw (startup only). 1 = default,
@@ -381,7 +405,8 @@ log_level = 1
 # drops, dirt, glare) is not drawn into that depth at all (0.1..5)
 # mv_fwd_min_m = 0.5
 
-# GPU timing logs (per-stage DLAA cost + depth snapshot cost, every 600): -1 auto (VR only), 0 off, 1 on
+# GPU timing logs (per-stage DLAA cost + depth snapshot cost, every 600): -1 = with log_level = 4 (phase 45; before: always in
+# VR), 0 off, 1 on
 # gpu_timing = -1
 
 # v0.7.8: DLAA on the profile / truck-preview screen (flat and VR; it has no world G-buffer, so the normal path
@@ -513,7 +538,7 @@ log_level = 1
 # fps_scale = 1.0
 # VR: the box CENTRE relative to the eye's optical centre, in % of the eye width / height (-50..50; negative y = up),
 # size 0.2..3.0 (1 = 8 % of the eye width; default 0.3 = about 2.4 %). Drawn into the picture it uses the same inward
-# shift as the panel (menu_vr_depth); as a VR layer (menu_vr_layer = 1) it sits 0.8 m away.
+# shift as the panel (menu_vr_depth); as a VR layer (menu_vr_layer = 1) it sits fps_vr_dist away (default 0.8 m).
 # fps_vr_x = 0
 # fps_vr_y = -25
 # fps_vr_scale = 0.3
@@ -521,8 +546,30 @@ log_level = 1
 # position (the origin of the game's VR tracking space) and you look at it like at a cab instrument. fps_vr_x / fps_vr_y
 # then are DEGREES around you (x + = right, y + = down; default -25 = 25 degrees up) and fps_vr_scale the size it has at
 # 0.8 m. No inward shift (each eye sees it from its own position). Falls back to following the headset while the game's
-# OpenXR view poses are not available. The menu's FPS counter lock row switches it live.
+# OpenXR view poses are not available. The menu's FPS counter lock row switches it live ("Fixed in play space": it is
+# fixed in the VR play space, so it does NOT follow the cab when the game sways the cab on bumps / hills).
+# Phase 47: 2 = ATTACHED TO THE VEHICLE: placed like 1 at the moment it is switched on, then it sways with the cab (bumps,
+# braking, hills; trucks and cars) like a sticker on the dashboard. It is drawn into the eye pictures (never an OpenXR quad
+# layer, also with menu_vr_layer = 1) and placed on the GPU from a cab part's position in the same picture, so it has no
+# lag. Needs DLAA on with per-part motion vectors (mv_objects = 2, the default); without them, in the outside camera, in
+# menus and while loading it is drawn like 1 until the cab is back. The menu's FPS counter lock row: "Attached to vehicle".
 # fps_vr_lock = 0
+# Phase 44: the box's text colour, 0..19 = white (default, as before), yellow, amber, orange, red, pink, magenta, purple,
+# violet, blue, sky blue, cyan, teal, mint, green, lime, olive, gold, silver, black on white. Flat and VR. Menu: FPS colour.
+# fps_color = 0
+# Phase 48: the box's brightness in % (10..100, default 100 = the colour as it is). Dims the text colour toward black (the
+# outline stays; "black on white" dims its white outline). Flat and VR. Menu: FPS brightness.
+# fps_brightness = 100
+# Phase 44, VR: the box's distance in cm (30..300, default 80). It keeps the same size in your view at every distance (the
+# VR layer and the fixed box: a real distance; drawn into the picture and following the head: an extra stereo shift on top
+# of menu_vr_depth). Menu: FPS distance (VR).
+# fps_vr_dist = 80
+# Phase 44, VR: the box's own turn in degrees, on top of its normal facing (0 / 0 / 0 = it faces you, as before):
+# fps_vr_yaw -90..90 (+ = its face turns to the right), fps_vr_pitch -90..90 (+ = its top leans away from you, like lying on
+# the dashboard), fps_vr_roll -180..180 (+ = clockwise). Menu: FPS turn / FPS tilt / FPS rotate (1 degree steps).
+# fps_vr_yaw = 0
+# fps_vr_pitch = 0
+# fps_vr_roll = 0
 
 # ---- Hotkeys -------------------------------------------------------------------------------------------
 # key_<action> = [Shift+][Ctrl+][Alt+]Key, or none to disable the action. The values below are the defaults:
