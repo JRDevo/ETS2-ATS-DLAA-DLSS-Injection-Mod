@@ -21,12 +21,12 @@
 
 namespace TuningMenu {
 
-constexpr int   kMaxRows  = 38;                      // (was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
+constexpr int   kMaxRows  = 42;                      // (was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
                                                      //  28 before the v0.10.3 phase 28 FPS counter lock row, 29 before the phase 29c
                                                      //  group header rows, 31 before the phase 30 Turbo mode row, 32 before the
                                                      //  phase 34 Foveated rows, 34 before the phase 39 Logging row, 35 before the
                                                      //  phase 41 Mirrors in turns row, 36 before the phase 40 Hidden area mask row,
-                                                     //  37 before the phase 42 Foveated passes row; a Panel holds
+                                                     //  37 before the phase 42 Foveated passes row, 38 before the 4 phase 43 category headers; a Panel holds
                                                      //  only the VISIBLE rows, nRows <= this)
 constexpr int   kPerfLines = 3;                      // the GPU block under the title (small font, one line each)
 constexpr float kRefWidth = 760.0f;                  // panel width in reference px (scale 1; was 720 before the GPU cost column)

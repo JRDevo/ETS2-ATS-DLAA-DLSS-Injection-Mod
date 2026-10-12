@@ -14734,15 +14734,21 @@ void ToggleMirrors(uint64_t n) {
 #define DLAA_INJECTOR_VERSION "0.0.0-dev"
 #endif
 enum MenuRowId {
-    MR_MODE, MR_PROFILE, MR_MODEL, MR_SHARP, MR_WIDTH, MR_LOD, MR_LODCUT, MR_AREA, MR_DRAWIDS, MR_MIRROR,
+    // phase 43: menu categories -- top level Mode / Profile / Model, then six collapsible groups (header + contiguous children,
+    // kMenuGroups below), then FPS counter (top level, as before), Logging, Save, Reset, Close. kMenuDesc is in THIS order.
+    MR_MODE, MR_PROFILE, MR_MODEL,
+    MR_PICGRP,                                            // phase 43: group "Picture"
+    MR_SHARP, MR_WIDTH, MR_LOD, MR_LODCUT, MR_AREA, MR_PRETM, MR_FWD,
+    MR_MOTGRP,                                            // phase 43: group "Motion and mirrors"
+    MR_DRAWIDS, MR_MIRROR,
     MR_MIRTURNS,                                          // phase 41: mirrors in turns (dlaa.ini mirror_turns)
-    MR_PRETM, MR_FWD,
+    MR_UPGRP,                                             // phase 43: group "Upscaling and VR"
     MR_UPSCALE, MR_DLAA, MR_OFXR,
+    MR_VRPGRP,                                            // phase 43: group "VR performance"
     MR_TURBO,                                             // phase 30: VR Turbo mode (dlaa.ini xr_turbo; OpenXR Toolkit port)
     MR_VRS, MR_VRSSIZE,                                   // phase 34: VR foveated rendering (dlaa.ini vrs; vrs_inner / vrs_outer preset)
     MR_VRSPASS,                                           // phase 42: Foveated passes (dlaa.ini vrs_passes: scene / scene + lighting)
     MR_HMASK,                                             // phase 40: VR hidden area mask (dlaa.ini xr_hidden_mask)
-    MR_LOG,                                               // phase 39: Logging (dlaa.ini log_level) + what logging costs
     MR_PANELGRP,                                          // v0.10.3 phase 29c: group header "Panel settings" (collapsible)
     MR_POSX, MR_POSY, MR_SIZE, MR_DEPTH, MR_FACE,
     MR_MENUKEYS,                                          // v0.10.2: the 5 menu keys, bound by 5 holds in sequence (29c: in the panel group)
@@ -14750,13 +14756,32 @@ enum MenuRowId {
     MR_FPSGRP,                                            // v0.10.3 phase 29c: group header "FPS counter settings" (collapsible)
     MR_FPSLOCK,                                           // v0.10.3 phase 28: VR fps box follows the head / fixed in the cab
     MR_FPSX, MR_FPSY, MR_FPSSIZE,
+    MR_LOG,                                               // phase 39: Logging (dlaa.ini log_level) + what logging costs
     MR_SAVE, MR_RESET, MR_CLOSE,
     MR_COUNT
 };
 static_assert(MR_COUNT <= TuningMenu::kMaxRows, "tuning menu: too many rows");
-// v0.10.3 phase 29c: each group = its header + the rows right after it up to its last child (MenuRowGroup relies on it)
-static_assert(MR_PANELGRP + 1 == MR_POSX && MR_FACE + 1 == MR_MENUKEYS && MR_FPSGRP + 1 == MR_FPSLOCK,
-              "tuning menu: a group's children must follow its header");
+// phase 43: menu categories -- ONE table for all collapsible groups: each group = its header + the rows right after it up to
+// `last` (v0.10.3 phase 29c layout). MenuRowGroup / MenuGrpOpen / MenuRowVisible / MenuChange / the open-state array use it.
+struct MenuGroupDef { int header, last; const wchar_t* title; };
+constexpr MenuGroupDef kMenuGroups[] = {
+    { MR_PICGRP,   MR_FWD,      L"Picture" },
+    { MR_MOTGRP,   MR_MIRTURNS, L"Motion and mirrors" },
+    { MR_UPGRP,    MR_OFXR,     L"Upscaling and VR" },
+    { MR_VRPGRP,   MR_HMASK,    L"VR performance" },
+    { MR_PANELGRP, MR_MENUKEYS, L"Panel settings" },
+    { MR_FPSGRP,   MR_FPSSIZE,  L"FPS counter settings" },
+};
+constexpr int kMenuGroupCount = (int)(sizeof(kMenuGroups) / sizeof(kMenuGroups[0]));
+static_assert(MR_PICGRP + 1 == MR_SHARP && MR_FWD + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_MIRTURNS + 1 == MR_UPGRP &&
+              MR_UPGRP + 1 == MR_UPSCALE && MR_OFXR + 1 == MR_VRPGRP && MR_VRPGRP + 1 == MR_TURBO && MR_HMASK + 1 == MR_PANELGRP &&
+              MR_PANELGRP + 1 == MR_POSX && MR_MENUKEYS + 1 == MR_FPS && MR_FPSGRP + 1 == MR_FPSLOCK && MR_FPSSIZE + 1 == MR_LOG,
+              "tuning menu: a group's children must follow its header and fill it up to its last row");
+static_assert(MR_SHARP < MR_WIDTH && MR_WIDTH < MR_LOD && MR_LOD < MR_LODCUT && MR_LODCUT < MR_AREA && MR_AREA < MR_PRETM &&
+              MR_PRETM < MR_FWD && MR_DRAWIDS < MR_MIRROR && MR_MIRROR < MR_MIRTURNS && MR_UPSCALE < MR_DLAA && MR_DLAA < MR_OFXR &&
+              MR_TURBO < MR_VRS && MR_VRS < MR_VRSSIZE && MR_VRSSIZE < MR_VRSPASS && MR_VRSPASS < MR_HMASK &&
+              MR_POSX < MR_POSY && MR_POSY < MR_SIZE && MR_SIZE < MR_DEPTH && MR_DEPTH < MR_FACE && MR_FACE < MR_MENUKEYS &&
+              MR_FPSLOCK < MR_FPSX && MR_FPSX < MR_FPSY && MR_FPSY < MR_FPSSIZE, "tuning menu: group children out of order");
 const wchar_t* const kMenuDesc[] = {
     // v0.10.0: every row = what it does, when a player would change it, what it costs. The panel shows 3 lines of about 105
     // characters (menu.cpp kDescH) = the description + the cost sentence MenuPerfCosts appends: keep both within ~320 characters.
@@ -14767,6 +14792,9 @@ const wchar_t* const kMenuDesc[] = {
     L"setting you set yourself.",
     L"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, least ghosting behind traffic: start here. "
     L"3 (F) = calmest on fences and wires, can smear moving detail, same cost as 2. 4 (M) = heaviest (about 5x), flat tests only.",
+    // phase 43: menu categories (Picture)
+    L"Picture quality: sharpening, texture sharpness, the DLAA area and the see-through depth. Right opens the group, Left closes it; it "
+    L"starts closed every time the menu opens.",
     L"Sharpens the picture after DLAA, 0 (off) to 1.0. Raise it if the picture looks soft; too high gives bright halos on edges. "
     L"Costs about 0.1 ms; 0 skips the pass.",
     L"How far the sharpening reaches, 1 to 4 px: small = fine detail, large = bolder edges. Change it if the sharpening looks too "
@@ -14777,22 +14805,31 @@ const wchar_t* const kMenuDesc[] = {
     L"follows the row above. Acts only while Texture sharpness is not 0. No GPU time, a little memory.",
     L"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower it to afford a heavier "
     L"model or win frame rate; 40 % costs about 40 % of the model. Also sets the garage / main-menu truck.",
+    L"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. Change it only to compare. "
+    L"Not used with DLSS upscale or Windows HDR. Same cost either way; takes ~60 frames to switch.",
+    L"Gives wires, fences and glass their own distance instead of what is behind them, so they do not smear when you move. Turn "
+    L"it off if you see no smearing there: saves 0.02 - 0.06 ms per eye.",
+    // phase 43: menu categories (Motion and mirrors)
+    L"How moving parts and truck mirrors are handled by DLAA. Right opens the group, Left closes it; it starts closed every time the "
+    L"menu opens.",
     L"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and does not ghost. Turn it off "
     L"only to save about 0.5 ms per eye or to test: every pixel then moves with the camera and traffic smears.",
     L"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main mirror next to you). "
     L"all = every mirror. camera = cheapest per mirror, moving traffic can ghost in the glass; else each part moves exactly in the glass.",
     L"on = each mirror gets its DLAA every 2nd frame and shows its last clean picture in between: about half the mirror cost. Edges "
     L"stay clean; moving things in the glass update at half rate. off = every mirror every frame.",
-    L"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. Change it only to compare. "
-    L"Not used with DLSS upscale or Windows HDR. Same cost either way; takes ~60 frames to switch.",
-    L"Gives wires, fences and glass their own distance instead of what is behind them, so they do not smear when you move. Turn "
-    L"it off if you see no smearing there: saves 0.02 - 0.06 ms per eye.",
+    // phase 43: menu categories (Upscaling and VR)
+    L"DLSS upscale, the DLAA on / off switch and the OFXR Bridge info. Right opens the group, Left closes it; it starts closed every "
+    L"time the menu opens.",
     L"DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and "
     L"fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %.",
     L"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for comparing. Off saves the cost "
     L"of every part together.",
     L"OFXR Bridge = VR frame generation by djules75, a separate download (github.com/djules75/OFXR-Bridge). found = its layer "
     L"is loaded in this game and the mod lets its work pass through. Start its tray app before the game.",
+    // phase 43: menu categories (VR performance)
+    L"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every "
+    L"time the menu opens.",
     // phase 30 (MR_TURBO): the warning first (the description shows while the row is selected)
     L"Turbo: no ASW / Motion Smoothing / SSW / reprojection. VR only. On = the game stops waiting for the headset each frame: "
     L"more fps only when the CPU is the limit (busy cities, traffic). Turn it off if the picture judders. From OpenXR Toolkit.",
@@ -14808,9 +14845,6 @@ const wchar_t* const kMenuDesc[] = {
     L"VR only. The game skips the lens corners you never see (the headset reports them), so it draws fewer pixels: more GPU "
     L"headroom, the picture you see stays the same. The first switch-on needs a game restart. Turn it off if the edge of the view "
     L"looks wrong.",
-    // phase 39 (MR_LOG)
-    L"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + problems worked around; "
-    L"info = + start-up and changes; debug = + statistics, and debug also runs the GPU timers and the CPU profiler.",
     // v0.10.3 phase 29c (MR_PANELGRP)
     L"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes it; it starts closed "
     L"every time the menu opens.",
@@ -14838,6 +14872,9 @@ const wchar_t* const kMenuDesc[] = {
     L"Moves the fps box up / down, in % of the screen (VR fixed in cab: degrees, minus = up). Flat and VR each keep their own "
     L"position. No cost.",
     L"Makes the fps box bigger or smaller (0.2 .. 3.0). Raise it if you cannot read it in the headset or on a big screen. No cost.",
+    // phase 39 (MR_LOG)
+    L"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + problems worked around; "
+    L"info = + start-up and changes; debug = + statistics, and debug also runs the GPU timers and the CPU profiler.",
     L"Writes everything shown here into dlaa.ini (settings, and the panel / fps box positions once you moved them), keeping every "
     L"other line. Do it once you like what you see, or the changes are gone at the next start. Mode saves itself.",
     // v0.10.3 phase 29d (MR_RESET): MenuBuildPanel puts "Hold <menu Right> for <bind_hold_ms> s to reset. " in front of it
@@ -14847,16 +14884,20 @@ const wchar_t* const kMenuDesc[] = {
 };
 static_assert(sizeof(kMenuDesc) / sizeof(kMenuDesc[0]) == MR_COUNT, "tuning menu: kMenuDesc must have one entry per row (MR_* order)");
 int   g_menuSel     = 0;                                  // selected row (kept while closed: the menu reopens where it was)
-// v0.10.3 phase 29c: the two collapsible groups -- [0] "Panel settings" (MR_PANELGRP: MR_POSX .. MR_MENUKEYS), [1] "FPS
-// counter settings" (MR_FPSGRP: MR_FPSLOCK .. MR_FPSSIZE). Both collapse at every open (MenuKeys); a collapsed group's rows
-// are not in the Panel handed to Draw (MenuBuildPanel compacts), Up / Down skip them (MenuStepRow). g_menuSel stays an MR id.
-bool  g_menuGrpOpen[2] = {};
-inline int  MenuRowGroup(int id) {                       // the header of the group `id` is a child of; -1 = top level (headers too)
-    if (id > MR_PANELGRP && id <= MR_MENUKEYS) return MR_PANELGRP;
-    if (id > MR_FPSGRP && id <= MR_FPSSIZE)    return MR_FPSGRP;
+// v0.10.3 phase 29c / phase 43: the collapsible groups (kMenuGroups). All collapse at every open (MenuKeys); a collapsed
+// group's rows are not in the Panel handed to Draw (MenuBuildPanel compacts), Up / Down skip them (MenuStepRow). g_menuSel
+// stays an MR id.
+bool  g_menuGrpOpen[kMenuGroupCount] = {};
+inline int  MenuGroupIndex(int header) {                 // index of the group whose header row is `header`; -1 = not a header
+    for (int i = 0; i < kMenuGroupCount; ++i) if (kMenuGroups[i].header == header) return i;
     return -1;
 }
-inline bool& MenuGrpOpen(int header) { return g_menuGrpOpen[header == MR_FPSGRP ? 1 : 0]; }
+inline int  MenuRowGroup(int id) {                       // the header of the group `id` is a child of; -1 = top level (headers too)
+    for (int i = 0; i < kMenuGroupCount; ++i)
+        if (id > kMenuGroups[i].header && id <= kMenuGroups[i].last) return kMenuGroups[i].header;
+    return -1;
+}
+inline bool& MenuGrpOpen(int header) { const int i = MenuGroupIndex(header); return g_menuGrpOpen[i < 0 ? 0 : i]; }
 inline bool MenuRowVisible(int id) { const int g = MenuRowGroup(id); return g < 0 || MenuGrpOpen(g); }
 // The next VISIBLE row from `from` in direction dir (-1 / +1), wrapping around; `from` itself when nothing else is visible.
 int MenuStepRow(int from, int dir) {
@@ -15490,6 +15531,7 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         else if (!e0.have)  txt(row, g_menuPerf.nothing ? L"-" : L"...");
         else                MenuMs(p.rows[row].cost, kC, e0.total);
     };
+    for (int r = 0; r < MR_COUNT; ++r) txt(r, L"-");   // default for every row (phase 43: order-independent; headers included); set below
     msTotal(MR_MODE);                            if (!dlaaOn) txt(MR_MODE, L"off");
     txt(MR_PROFILE, L"-");
     ms(MR_MODEL, MG_NGX);                        if (!dlaaOn) txt(MR_MODEL, L"off");   // the model IS the NGX cost
@@ -15515,7 +15557,6 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
     ms(MR_FWD, MG_FWD);                          if (!fwdOn) txt(MR_FWD, L"off");
     txt(MR_UPSCALE, dlaaOn && upOn ? L"no extra" : L"off");   // the upscale is the same NGX pass; the game draws fewer pixels
     msTotal(MR_DLAA);                            if (!dlaaOn) txt(MR_DLAA, L"off");
-    for (int r = MR_OFXR; r < MR_COUNT; ++r) txt(r, L"-");   // (v0.10.3 phase 29c: the two group headers are in this range too)
     // v0.10.3 phase 29b: the fps box's own measured cost, ms PER FRAME (GpuPerf::kOverlay; not per eye: one quad image or the
     // eye pictures + the desktop mirror together)
     const MenuPerfState& mp = g_menuPerf;
@@ -16135,7 +16176,9 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         const bool o = MenuGrpOpen(id);
         snprintf(k, sizeof(k), "%s: %s", o ? snLeft : snRight, o ? "close" : "open");
         MenuRow(p, id, name, k, nullptr, false);
-        swprintf(p.rows[id].value, kV, L"%ls", o ? L"shown" : L"...");
+        const int gi = MenuGroupIndex(id);                // phase 43: closed = "N rows" (the group's size), open = "shown"
+        if (o || gi < 0) swprintf(p.rows[id].value, kV, L"%ls", o ? L"shown" : L"...");
+        else             swprintf(p.rows[id].value, kV, L"%d rows", kMenuGroups[gi].last - kMenuGroups[gi].header);
     };
 
     MenuRow(p, MR_MODE, L"Mode", KeyName(KA_MODE_CYCLE), nullptr, false);
@@ -16151,6 +16194,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         else if (num[0] == '?')          swprintf(p.rows[MR_MODEL].value, kV, L"%hs (dlaa.ini)", pn);   // J / L set in dlaa.ini
         else                             swprintf(p.rows[MR_MODEL].value, kV, L"%hs (%hs)", num, pn);
     }
+    groupRow(MR_PICGRP, kMenuGroups[MenuGroupIndex(MR_PICGRP)].title);   // phase 43: menu categories
     MenuRow(p, MR_SHARP, L"Sharpen strength", pair(KA_SHARPEN_DOWN, KA_SHARPEN_UP), nullptr, false);
     const float sharp = SceneDlaa::Sharpness();
     swprintf(p.rows[MR_SHARP].value, kV, sharp <= 0.0f ? L"%.1f (off)" : L"%.1f", (double)sharp);
@@ -16164,6 +16208,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     MenuRow(p, MR_AREA, L"DLAA area (VR)", pair(KA_AREA_DOWN, KA_AREA_UP), vr ? nullptr : "VR only", !vr);
     if (vr) swprintf(p.rows[MR_AREA].value, kV, L"%d %%", SceneDlaa::Area());
     else    swprintf(p.rows[MR_AREA].value, kV, L"100 %% (flat)");
+    groupRow(MR_MOTGRP, kMenuGroups[MenuGroupIndex(MR_MOTGRP)].title);   // phase 43: menu categories
     MenuRow(p, MR_DRAWIDS, L"Per-part motion vectors", KeyName(KA_DRAWID_TOGGLE), nullptr, false);
     swprintf(p.rows[MR_DRAWIDS].value, kV, L"%ls", g_objMode == 2 ? L"on" : (g_objMode == 1 ? L"old stencil ids" : L"off"));
     MenuRow(p, MR_MIRROR, L"Mirror DLAA", KeyName(KA_MIRROR_TOGGLE), nullptr, false);
@@ -16178,6 +16223,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     MenuRow(p, MR_FWD, L"See-through depth", KeyName(KA_FWD_DEPTH), nullptr, false);
     swprintf(p.rows[MR_FWD].value, kV, L"%ls", !g_fwdCfg ? L"off (dlaa.ini 0)"
                                               : (!g_fwdOn.load() ? (g_fwdAutoOff ? L"off (VR budget)" : L"off") : L"on"));
+    groupRow(MR_UPGRP, kMenuGroups[MenuGroupIndex(MR_UPGRP)].title);   // phase 43: menu categories
     MenuRow(p, MR_UPSCALE, L"DLSS upscale", KeyName(KA_UPSCALE_TOGGLE), nullptr, false);
     swprintf(p.rows[MR_UPSCALE].value, kV, L"%ls", onOff[g_dlssUpscale.load() ? 1 : 0]);
     MenuRow(p, MR_DLAA, L"DLAA on / off", KeyName(KA_DLAA_TOGGLE), nullptr, false);
@@ -16186,6 +16232,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     if (!Ofxr::g_on.load())      swprintf(p.rows[MR_OFXR].value, kV, L"off (dlaa.ini 0)");
     else if (Ofxr::Detected())   swprintf(p.rows[MR_OFXR].value, kV, L"found");   // (no live counter: it would rebuild the panel every frame)
     else                         swprintf(p.rows[MR_OFXR].value, kV, L"not found");
+    groupRow(MR_VRPGRP, kMenuGroups[MenuGroupIndex(MR_VRPGRP)].title);   // phase 43: menu categories
     MenuRow(p, MR_TURBO, L"Turbo mode (VR)", "dlaa.ini xr_turbo", vr ? nullptr : "VR only", !vr);   // phase 30
     {
         const XrHook::TurboStats ts = XrHook::GetTurboStats();   // (no live counter: it would rebuild the panel every frame)
@@ -16376,6 +16423,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_HMASK:   ToggleHiddenMask(n); break;            // phase 40: Left and Right both switch it (also flat: kept for VR)
     case MR_VRSPASS: ToggleVrsPasses(n); break;             // phase 42: two choices, Left and Right both switch
     case MR_LOG:     StepLogLevel(dir, n); break;           // phase 39: Right = more, Left = less (clamped)
+    case MR_PICGRP: case MR_MOTGRP: case MR_UPGRP: case MR_VRPGRP:   // phase 43: the four new groups
     case MR_PANELGRP: case MR_FPSGRP:                       // v0.10.3 phase 29c: Right opens the group, Left closes it (a fresh
         MenuGrpOpen(row) = dir > 0;                         // press only: not a stepRow, so auto-repeat is ignored above)
         break;
@@ -16447,8 +16495,8 @@ void MenuKeys(uint64_t n) {
         if (!open) {
             g_menuOpen = true;
             g_menuMoved = false;
-            // v0.10.3 phase 29c: both groups start collapsed at every open; a selection inside one moves to its header
-            g_menuGrpOpen[0] = g_menuGrpOpen[1] = false;
+            // v0.10.3 phase 29c: all groups start collapsed at every open; a selection inside one moves to its header
+            for (bool& o : g_menuGrpOpen) o = false;
             if (g_menuSel < 0 || g_menuSel >= MR_COUNT) g_menuSel = 0;
             if (!MenuRowVisible(g_menuSel)) g_menuSel = MenuRowGroup(g_menuSel);
             MenuPerfOpen();                               // GPU timers on while open (debug = 0) + fresh figures

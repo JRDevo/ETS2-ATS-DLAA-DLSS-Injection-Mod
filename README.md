@@ -402,6 +402,13 @@ it, what it costs or saves. **`Up` / `Down`** select a row,
 | **Hotkey** | The key that does the same thing without the menu, or the `dlaa.ini` key for rows that have no hotkey. |
 | **GPU cost** | What this row costs on the GPU right now, in ms per frame (`-` = nothing to measure, `off` = switched off, `same` = no extra cost). |
 
+**Categories (phase 43):** the menu is in groups you open and close. `Mode`, `Performance profile` and `DLAA model` are
+always shown. Then come the groups: `Picture` (sharpening, texture sharpness, DLAA area, tonemap, see-through depth),
+`Motion and mirrors`, `Upscaling and VR` (DLSS upscale, DLAA on / off, OFXR Bridge), `VR performance` (Turbo, foveated
+rendering, hidden area mask), `Panel settings` and `FPS counter settings`. After them: `FPS counter`, `Logging`,
+`Save`, `Reset` and `Close`. Select a group and press `Right` to open it, `Left` to close it. A closed group shows how
+many rows it holds. All groups are closed again each time you open the menu.
+
 The three green lines under the title show the game's GPU time per frame, what this mod costs, and the fps. The line at the bottom explains the selected row.
 
 - **Flat:** the panel sits near the top-left corner of the screen.
