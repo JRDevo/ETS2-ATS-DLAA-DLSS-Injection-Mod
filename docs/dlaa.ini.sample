@@ -566,7 +566,7 @@ log_level = 1
 # fps_vr_dist = 80
 # Phase 44, VR: the box's own turn in degrees, on top of its normal facing (0 / 0 / 0 = it faces you, as before):
 # fps_vr_yaw -90..90 (+ = its face turns to the right), fps_vr_pitch -90..90 (+ = its top leans away from you, like lying on
-# the dashboard), fps_vr_roll -180..180 (+ = clockwise). Menu: FPS turn / FPS tilt / FPS rotate (5 degree steps).
+# the dashboard), fps_vr_roll -180..180 (+ = clockwise). Menu: FPS turn / FPS tilt / FPS rotate (1 degree steps).
 # fps_vr_yaw = 0
 # fps_vr_pitch = 0
 # fps_vr_roll = 0

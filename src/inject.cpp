@@ -17402,10 +17402,10 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
             Log("fps box VR distance %.2f m (fps_vr_dist=%d, tuning menu, Present #%llu; the same angular size at every distance)",
                 (double)g_fpsVrDist / 100.0, g_fpsVrDist, (unsigned long long)n);
         break;
-    case MR_FPSYAW: case MR_FPSPITCH: case MR_FPSROLL: {    // phase 44: 5-degree steps
+    case MR_FPSYAW: case MR_FPSPITCH: case MR_FPSROLL: {    // phase 44 (1-degree steps since 47c; hold = auto-repeat)
         int& a = row == MR_FPSYAW ? g_fpsVrYaw : (row == MR_FPSPITCH ? g_fpsVrPitch : g_fpsVrRoll);
         const int lim = row == MR_FPSYAW ? FpsPose::kYawMax : (row == MR_FPSPITCH ? FpsPose::kPitchMax : FpsPose::kRollMax);
-        a = FpsPose::ClampI(a + 5 * dir, -lim, lim);
+        a = FpsPose::ClampI(a + dir, -lim, lim);
         g_fpsExplicit = g_fpsMoved = true;
         if (!repeat)
             Log("fps box VR turn: yaw %+d pitch %+d roll %+d deg (fps_vr_yaw / fps_vr_pitch / fps_vr_roll, tuning menu, Present #%llu)",
