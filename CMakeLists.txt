@@ -109,7 +109,8 @@ if (WITH_DLAA)
     target_sources(dinput8 PRIVATE src/dlaa.cpp src/motion_vectors.cpp src/scene_dlaa.cpp src/preview_blit.cpp
                                    src/shader_cache.cpp src/draw_ids.cpp    # v0.10.0: draw_ids = per-draw MVs
                                    src/gpu_perf.cpp                         # v0.10.0 phase 8: per-sub-pass GPU timers
-                                   src/menu.cpp)                            # v0.10.0 in-game tuning menu (GDI panel quad)
+                                   src/menu.cpp                             # v0.10.0 in-game tuning menu (GDI panel quad)
+                                   src/hidden_mask.cpp)                     # phase 40: VR hidden area mask (depth-only draw)
     target_include_directories(dinput8 PRIVATE "${NGX_SDK_DIR}/include")
     target_compile_definitions(dinput8 PRIVATE WITH_DLAA=1)
     # d3dcompiler: runtime HLSL compile for the depth + motion-vector passes (OS DLL).
@@ -149,6 +150,7 @@ if (WITH_DLAA)
             "src/scene_dlaa.cpp@kRcasShader"
             "src/preview_blit.cpp@kPvBlitVs@vs_5_0@VSMain"      # v0.7.8 profile-screen preview format-converting copy
             "src/preview_blit.cpp@kPvBlitPs@ps_5_0@PSMain"
+            "src/hidden_mask.cpp@kHmVs@vs_5_0@VSMain"           # phase 40 VR hidden area mask (depth only)
             "src/menu.cpp@kMenuVs@vs_5_0@VSMain"                # v0.10.0 tuning menu panel quad
             "src/menu.cpp@kMenuPs@ps_5_0@PSMain"
             "src/scene_dlaa.cpp@kCompositeVs@vs_5_0@VSMain"     # v0.7.0 upscale composite (graphics)
@@ -200,6 +202,7 @@ if (WITH_DLAA)
             DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/scene_dlaa.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/motion_vectors.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/preview_blit.cpp"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/src/hidden_mask.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/menu.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/inject.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/draw_ids.cpp"

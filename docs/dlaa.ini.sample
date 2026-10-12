@@ -72,6 +72,12 @@ log_level = 1
 # Test only, needs log_level = 4: 1 = middle ring 2 x 2 and outer ring 4 x 4, so the pattern is easy to see in the headset.
 # vrs_debug = 0
 
+# VR HIDDEN AREA MASK, 0 / 1, default 0. 1 = the game skips the corners of each eye picture that the headset lenses never show
+# (the VR runtime reports them), so it draws fewer pixels; what you see stays the same. The mod asks the runtime for the mask when
+# the game starts, so the first switch-on needs a game restart; after that the tuning menu's Hidden area mask (VR) row switches it
+# live and Shift+F12 / the Save row writes it here. If the runtime has no mask the row says "not supported".
+# xr_hidden_mask = 0
+
 # 1 = on AMD X3D CPUs with V-Cache on one half only (e.g. 7950X3D / 9950X3D) the game is kept on the V-Cache cores (read at game
 # start only). Does nothing on other CPUs. 0 (default) = off: no fps gain was measured yet, try it and compare.
 # cpu_cache_pin = 0

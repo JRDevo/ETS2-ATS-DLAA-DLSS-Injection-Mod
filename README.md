@@ -460,6 +460,10 @@ The three green lines under the title show the game's GPU time per frame, what t
   Scaling. Fences, grass and leaves keep full detail, and so does everything the mod draws itself. **Foveated size** picks
   how big the sharp centre is: `wide`, `balanced` (default) or `narrow` (`vrs_inner` / `vrs_outer`). On another GPU the
   row says `not supported`. Look for blocky edges at the side of your view; switch it off if they bother you.
+- **Hidden area mask (VR)** (`xr_hidden_mask`, off by default; VR only): the game stops drawing the corners of each eye
+  picture that the headset lenses never show (the VR runtime reports them). Fewer pixels drawn = more GPU headroom; what
+  you see stays the same. The first time you switch it on, save (`Shift+F12`) and restart the game; after that the row
+  switches it live. If your VR runtime has no such mask the row says `not supported`.
 - **Logging** (`log_level`, `errors` by default): how much goes into `dlaa_inject.log` -- `off`, `errors`, `warnings`,
   `info` or `debug`, live. The row shows what the logging costs: CPU milliseconds per frame (and in its description the
   lines per second; at `debug` also what the CPU profiler costs). `debug` also runs the mod's GPU timers and CPU
@@ -532,6 +536,7 @@ The table below lists the commonly used keys:
 | `vrs_inner` / `vrs_outer` | `55` / `80` | foveated rendering: ring sizes in % of the half picture around each eye's centre (`10`..`150`); full detail inside `vrs_outer` (with `vrs_quality = 1`), 2 x 2 outside. The menu's `Foveated size` row: `wide` = 65 / 90, `balanced` = 55 / 80, `narrow` = 40 / 65 |
 | `vrs_quality` | `1` | foveated rendering: `1` = full detail inside `vrs_outer`; `0` = the ring between `vrs_inner` and `vrs_outer` is shaded per 2 x 1 pixels too (more saving) |
 | `vrs_debug` | `0` | foveated rendering, test only (needs `log_level = 4`): `1` = middle ring 2 x 2, outer ring 4 x 4, to see the pattern |
+| `xr_hidden_mask` | `0` | VR: `1` = **hidden area mask**: the game skips the corners of each eye picture that the lenses never show (the VR runtime reports them), so it draws fewer pixels. What you see stays the same. Needs a game restart the first time (the mod asks the runtime for the mask when the game starts); after that the menu's `Hidden area mask (VR)` row switches it live, `Shift+F12` saves |
 | `cpu_cache_pin` | `0` | `1` = on AMD X3D CPUs with V-Cache on one half only (e.g. 7950X3D / 9950X3D) the game is kept on the V-Cache cores (read at game start only). Does nothing on other CPUs. Off by default: no fps gain was measured yet, try it and compare |
 | `did_shadow` | `1` | CPU saving for the per-part motion vectors (read at game start only): `1` = the mod remembers the game's drawing settings as the game sets them instead of asking the graphics driver for them at every draw (input layout, vertex shader, its constant buffers and samplers, rasterizer state); `2` = also the vertex / index buffers (faster only when the game reuses buffers between draws); `0` = ask at every draw (as before). The log's `did_shadow=` line at startup says which one ran |
 | `did_shadow_verify` | `-1` | test only: every Nth draw the remembered settings are compared with the driver's; a difference is logged (`MISMATCH`) and the mod asks the driver for the rest of that frame. `-1` = every 64th draw with `log_level = 4`, off otherwise; `0` = off |

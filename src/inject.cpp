@@ -1,3 +1,13 @@
+// phase 40 -- VR HIDDEN AREA MASK (dlaa.ini xr_hidden_mask, 0 default; menu row "Hidden area mask (VR)"; hidden_mask.h, xr_hook.h,
+//           the block above HmOnSceneClear). XrHook wraps the runtime's xrCreateInstance and adds XR_KHR_visibility_mask to a copy
+//           of the game's extension list when the runtime offers it (only when xr_hidden_mask = 1 at the game's start), fetches the
+//           HIDDEN triangle mesh per view at the game's xrEndFrame (again after a mask-changed event, which the game never sees).
+//           Right after the game clears an eye scene depth that starts a world pass, the mesh -- mapped to the picture's NDC with
+//           the fov the game submits for that view -- is drawn depth-only at the NEAREST value (1.0: reversed Z, the clear is 0.0),
+//           so every game pass rejects those pixels early. Eye = the VRS sources (certain only), eye -> view = the swapchain image
+//           of its blit, checked against the eye's measured optical centre / projection scale; anything unknown = no mask.
+//           Log: "hidden area mask:" lines (enable / meshes / eye checks / FIRST mask), "hidden area mask @" every 10 s at level 4.
+//           CPU profiler row "hmask". Test: tests\hidden_mask_test.cpp (WARP).
 // v0.11.0 -- issue #8 OPTISCALER: DetectOptiScaler (startup) looks for OptiScaler.ini / .log / .asi / folder or nvngx_dlssnr.dll next
 //           to the game exe; found = mirror DLAA starts OFF unless dlaa.ini sets mirror_dlaa (its DLSS 5 "Neural Rendering" DX12
 //           bridge loses the device on the small HDR mirror DLSS frames, the picture freezes). Alt+F6 / mirror_dlaa = 1 still force
@@ -686,6 +696,7 @@
 #include "gpu_perf.h"
 #include "gpu_pass.h"                                // phase 36: GPU time per pass type (measurement only)
 #include "vrs.h"                                    // phase 34: VRS fixed foveated rendering (NVAPI; VR world scene only)
+#include "hidden_mask.h"                            // phase 40: VR hidden area mask (XR_KHR_visibility_mask into the eye depth)
 #endif
 #include "cpu_pin.h"                                // phase 32: keep the game on the V-Cache cores (cpu_cache_pin; both builds)
 
@@ -748,6 +759,13 @@ int      g_menuVrLayer = 1;
 // switches it live (takes effect at the next xrEndFrame).
 int      g_xrTurbo = 0;
 bool     g_xrTurboExplicit = false;      // set in dlaa.ini or changed in the menu -> SaveSettings writes xr_turbo
+// phase 40, VR: dlaa.ini xr_hidden_mask -- 1 = HIDDEN AREA MASK (hidden_mask.h, xr_hook.h, the block above HmOnSceneClear): the
+// lens corners the runtime reports as never visible (XR_KHR_visibility_mask) are filled into each eye's scene depth at the nearest
+// depth right after the game clears it, so the game shades nothing there. Default 0. The OpenXR extension is only requested at the
+// game's xrCreateInstance when it is 1 at the start (g_xrHiddenMaskAtStart); after that the menu row switches it live.
+int      g_xrHiddenMask = 0;
+bool     g_xrHiddenMaskExplicit = false; // set in dlaa.ini or changed in the menu -> SaveSettings writes xr_hidden_mask
+int      g_xrHiddenMaskAtStart = 0;
 // phase 39: LOG LEVELS (log.h) -- dlaa.ini log_level (0 off, 1 errors = default, 2 warnings, 3 info, 4 debug), debug = 1 without a
 // log_level key = 4. LoadConfig reads both keys with log.h's LogParseLevel / LogParseOn (log.h reads the same dlaa.ini at the
 // first Log call: both agree); the menu's Logging row changes the level live (StepLogLevel), SaveSettings writes log_level once
@@ -2746,14 +2764,19 @@ void SaveSettings(uint64_t n) {
         snprintf(add("fps_vr_lock"), sizeof(kv[0].val), "%d", g_fpsVrLock);   // v0.10.3 phase 28
     }
     if (g_xrTurboExplicit) snprintf(add("xr_turbo"), sizeof(kv[0].val), "%d", g_xrTurbo);   // phase 30 (Turbo mode row)
+    if (g_xrHiddenMaskExplicit) snprintf(add("xr_hidden_mask"), sizeof(kv[0].val), "%d", g_xrHiddenMask);   // phase 40
     if (g_logLevelExplicit) snprintf(add("log_level"), sizeof(kv[0].val), "%d", LogLevel());  // phase 39 (Logging row)
     if (g_vrsExplicit) {                                  // phase 34 (the Foveated rows)
         snprintf(add("vrs"), sizeof(kv[0].val), "%d", g_vrsOn);
         snprintf(add("vrs_inner"), sizeof(kv[0].val), "%d", g_vrsInner);
         snprintf(add("vrs_outer"), sizeof(kv[0].val), "%d", g_vrsOuter);
     }
-    char vrsW[80] = "";                                   // (phase 39: was 64, + log_level)
+    char vrsW[112] = "";                                  // (phase 39: was 64, + log_level; phase 40: + xr_hidden_mask)
     if (g_vrsExplicit) snprintf(vrsW, sizeof(vrsW), " vrs=%d vrs_inner=%d vrs_outer=%d", g_vrsOn, g_vrsInner, g_vrsOuter);
+    if (g_xrHiddenMaskExplicit) {
+        const size_t vl = strlen(vrsW);
+        snprintf(vrsW + vl, sizeof(vrsW) - vl, " xr_hidden_mask=%d", g_xrHiddenMask);
+    }
     if (g_logLevelExplicit) {
         const size_t vl = strlen(vrsW);
         snprintf(vrsW + vl, sizeof(vrsW) - vl, " log_level=%d", LogLevel());
@@ -7057,7 +7080,8 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
 
 // v0.6.1: called for EVERY immediate-context ClearDSV (was: only while g_depthDirty) so the flight recorder
 // also counts the scene-depth clears that do not start a pass.
-void OnSceneDepthClear(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v) {
+// phase 40: returns true when this clear STARTED a pass (the hidden area mask is drawn only after such a clear).
+bool OnSceneDepthClear(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v) {
     CpuProf::Block cpb(CpuProf::kBSnap);               // phase 31 CPU profiler (cpu_prof.h)
     ID3D11Resource* r = nullptr;
     v->GetResource(&r);
@@ -7065,7 +7089,8 @@ void OnSceneDepthClear(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v) {
     // the new pass is drawn on it, the previous pass keeps its own depth (PassSlot::depth) for its snapshot / replay
     const bool match = SdUse(r);
     if (r) r->Release();
-    if (!match) return;
+    if (!match) return false;
+    bool started = false;
     SdAliasExpire();
 #ifdef WITH_DLAA
     // v0.9.0: the object ids live in the stencil; the game clears depth AND stencil (flags 0x3) in the capture. Without the
@@ -7086,21 +7111,28 @@ void OnSceneDepthClear(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v) {
         // the clear that starts a world pass = a new frame in flat. Runs the per-frame work before the pass starts.
         if (g_plActive.load(std::memory_order_relaxed)) LayerFrameBoundary(ctx, kPlbSceneClear);
         StartPass(ctx, true);
+        started = true;
     }
     if (g_passSeq) ++g_ring[(g_passSeq - 1) % kRing].sceneClears;   // lands on the pass it started, if any
+    return started;
 }
 
+#ifdef WITH_DLAA
+// phase 40: the hidden area mask after the game's clear of an eye scene depth (defined below the VRS eye sources it uses).
+void HmOnSceneClear(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v, UINT fl, FLOAT d, bool started);
+#endif
 
 void STDMETHODCALLTYPE hkClearDSV(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v, UINT fl, FLOAT d, UINT8 s) {
     CPU_HOOK(kHkClearDsv);                                 // phase 31 CPU profiler (cpu_prof.h)
     TraceClearDsv(ctx, v, fl, d, s);
     // v0.6.2: only the game's render context is tracked; every other context passes straight through.
     if (!IsGameCtx(ctx)) { CPU_ORIG(oClearDSV(ctx, v, fl, d, s)); return; }
+    bool sceneStart = false;                              // phase 40: this clear started a world pass on the scene depth
     if (v && !t_inDlaa && g_sceneDepth) {
 #ifdef WITH_DLAA
         g_objClearFlags = fl;                             // v0.9.0
 #endif
-        OnSceneDepthClear(ctx, v);
+        sceneStart = OnSceneDepthClear(ctx, v);
     }
 #ifdef WITH_DLAA
     // v0.10.0 phase 2: a clear of the open mirror view's depth without its DiscardView first: that view ends here (its DLAA
@@ -7108,6 +7140,11 @@ void STDMETHODCALLTYPE hkClearDSV(ID3D11DeviceContext* ctx, ID3D11DepthStencilVi
     if (v && !t_inDlaa && g_mirCur >= 0) MirOnClearDsv(ctx, v);
 #endif
     CPU_ORIG(oClearDSV(ctx, v, fl, d, s));
+#ifdef WITH_DLAA
+    if (g_xrHiddenMask && v && !t_inDlaa && g_vrMode) HmOnSceneClear(ctx, v, fl, d, sceneStart);   // phase 40 (VR only)
+#else
+    (void)sceneStart;
+#endif
     if (g_spanPendGbuf || g_spanPendScene) SpanBeginPending(ctx);   // v0.6.2: spans start after the clear
 }
 
@@ -8947,6 +8984,274 @@ void VrsOnBind(ID3D11DeviceContext* ctx) {
 // The ini / menu values -> vrs.cpp (any thread; read at the next bracket). vrs_debug only with debug = 1 (phase 39: log level 4,
 // live: StepLogLevel calls this again).
 void VrsApplyConfig() { Vrs::Configure(g_vrsOn, g_vrsInner, g_vrsOuter, g_vrsQuality, g_vrsDebug && LogDebugLevel() ? 1 : 0); }
+
+// ---- phase 40: the VR HIDDEN AREA MASK (dlaa.ini xr_hidden_mask; hidden_mask.h = the D3D draw, xr_hook.h = the OpenXR side) ----
+// WHEN: right after the game's ClearDepthStencilView of an eye scene depth that STARTED a world pass (OnSceneDepthClear: the
+// previous pass drew its G-buffer; the trace shows one clear per eye pass, flags 0x3, depth 0.0, right before the 4-RTV G-buffer
+// bind), VR only, the depth bit cleared to 0 or 1. Never a mirror (own depths, never the scene depth), the menu / truck preview
+// (its 1-RTV passes never set g_depthDirty, and no world G-buffer bind within the last 2 Presents = no mask), flat (g_vrMode).
+// DEPTH: the game uses REVERSED Z (clear 0.0 = far; the trace and the mod's own GREATER_EQUAL forward depth), so the nearest
+// value is 1.0 -- taken as "the other end of the clear value": a clear to 1.0 would get 0.0. Any other clear value: no mask.
+// EYE: the same sources as VRS (VrsDecideEye at clear time: the learned blit-RT cycle / the frame pair -- certain only; no eye or
+// two sources that disagree = no mask for that pass). eye -> OpenXR VIEW: learned at the eye blits (XrHook::ViewForImage of the
+// blit RT = the swapchain image the game submits for that view; kVrsTrust blits in a row); without it, the view whose submitted fov
+// centre matches the eye's measured optical centre (unambiguous only). Then the mapping is CHECKED once per (eye, mesh): the
+// view's fov centre (tan L / R / U / D) must sit within 0.03 uv of the eye's measured optical centre (and the fov scale within
+// 5 % of the measured projection scale, when measured), else that eye gets no mask (logged). The blit checks every masked pass's
+// eye again ("eye misses", expected 0).
+// CONSUMERS of the masked depth (1.0 = nearest = the cabin layer's near end): the depth snapshot / DLAA depth input / pass B MVs
+// see near-plane depth there and the camera R of the cabin layer -- garbage only inside the masked area, which nobody sees. The
+// camera R itself never comes from depth pixels (per-draw consensus / medoid of draw MVPs); the draw-id replay (depth EQUAL)
+// finds no draw there (id 0 = the camera path); pass B's coverage counters only feed the log; the forward depth is the mod's
+// own target. So nothing global is computed from masked pixels.
+struct HmPred { uint64_t s; int eye; };
+struct HmState {
+    uint64_t gen[2] = {};                  // XrHook mesh gen held per view
+    bool     usable[2] = {};               // the mapped mesh passed MapToNdc's checks and is uploaded
+    uint32_t tris[2] = {};
+    float    tri[2][6 * HiddenMask::kMaxTris] = {};   // the mapped NDC triangles per view (for a re-upload)
+    HiddenMask::MapInfo info[2];
+    float    fov[2][4] = {};
+    float    depth = -1.0f;                // the depth value the vertex buffers carry
+    ID3D11Device* dev = nullptr;           // the device they were made on
+    int      eyeView[kMaxEyes] = { -1, -1 }, eyeRun[kMaxEyes] = {};   // eye -> view learned at the blits
+    uint64_t checkedGen[kMaxEyes] = {};    // the (eye, mesh gen) the centre check ran for ...
+    int      checkedView[kMaxEyes] = { -1, -1 };
+    bool     checkOk[kMaxEyes] = {};       // ... and its verdict
+    HmPred   pred[8] = { { ~0ull, -1 }, { ~0ull, -1 }, { ~0ull, -1 }, { ~0ull, -1 },
+                         { ~0ull, -1 }, { ~0ull, -1 }, { ~0ull, -1 }, { ~0ull, -1 } };
+    bool     firstLogged = false, depthValLogged = false;
+    // statistics (cumulative; the stats line prints the deltas)
+    uint64_t drawn[kMaxEyes] = {}, noEye = 0, disagree = 0, noView = 0, noMesh = 0, notChecked = 0, checkBad = 0, notWorld = 0;
+    uint64_t depthVal = 0, notReady = 0, eyeChecks = 0, eyeMisses = 0, reCleared = 0;
+    uint64_t lastLogMs = 0;
+    uint64_t last[16] = {};
+};
+HmState g_hm;
+XrHook::HiddenRaw g_hmRaw;                 // (20 KB: not on the stack)
+
+// the fov centre of `fov` (L, R, U, D radians) in uv of the whole picture (v down)
+void HmFovCentre(const float fov[4], double* u, double* v) {
+    const double tl = std::tan((double)fov[0]), tr = std::tan((double)fov[1]);
+    const double tu = std::tan((double)fov[2]), td = std::tan((double)fov[3]);
+    *u = (tr - tl) != 0.0 ? -tl / (tr - tl) : 0.5;
+    *v = (tu - td) != 0.0 ? tu / (tu - td) : 0.5;
+}
+// The view of `eye` (-1 = not known): learned at the blits, else the unambiguous optical-centre match.
+int HmViewOfEye(int eye) {
+    if (eye < 0 || eye >= kMaxEyes) return -1;
+    if (g_hm.eyeView[eye] >= 0 && g_hm.eyeRun[eye] >= kVrsTrust) return g_hm.eyeView[eye];
+    float mu = 0.5f, mv = 0.5f;
+    if (!VrEyeCentre(eye, &mu, &mv) || !g_hm.gen[0] || !g_hm.gen[1]) return -1;
+    double u0, v0, u1, v1;
+    HmFovCentre(g_hm.fov[0], &u0, &v0);
+    HmFovCentre(g_hm.fov[1], &u1, &v1);
+    const double d0 = std::fabs(u0 - mu), d1 = std::fabs(u1 - mu);
+    if (d0 <= 0.03 && d1 > 0.06) return 0;
+    if (d1 <= 0.03 && d0 > 0.06) return 1;
+    return -1;
+}
+// The eye blit of pass s (HandlePossibleBlit, VR): learn eye -> view from the swapchain image, check the masked pass's eye.
+void HmNoteBlit(uint64_t s, int eye, void* rt, uint32_t slice, uint32_t sceneClears) {
+    if (eye < 0 || eye >= kMaxEyes) return;
+    int32_t rect[4] = {};
+    const int view = XrHook::ViewForImage(rt, slice, rect);
+    if (view >= 0) {
+        if (view == g_hm.eyeView[eye]) { if (g_hm.eyeRun[eye] < (1 << 30)) ++g_hm.eyeRun[eye]; }
+        else {
+            if (g_hm.eyeView[eye] >= 0)
+                LogWarn("hidden area mask: eye %d is now blitted to OpenXR view %d (was view %d) -- relearning (%d blits)", eye, view,
+                    g_hm.eyeView[eye], kVrsTrust);
+            g_hm.eyeView[eye] = view;
+            g_hm.eyeRun[eye] = 1;
+        }
+        if (g_hm.eyeRun[eye] == kVrsTrust)
+            Log("hidden area mask: eye %d = OpenXR view %d (%s eye; its blit target is that view's swapchain image, rect (%d,%d) "
+                "%dx%d; seen %d times in a row)", eye, view, view == 0 ? "left" : "right", rect[0], rect[1], rect[2], rect[3], kVrsTrust);
+    }
+    HmPred& p = g_hm.pred[s & 7];
+    if (p.s != s) return;
+    ++g_hm.eyeChecks;
+    if (sceneClears > 1) ++g_hm.reCleared;                // the game cleared the depth again after the mask (mask lost, no harm)
+    if (p.eye != eye) {
+        ++g_hm.eyeMisses;
+        if (g_hm.eyeMisses <= 8)
+            LogWarn("hidden area mask: eye MISS #%llu -- pass s=%llu got eye %d's mask, its blit says eye %d (expected never: the "
+                "eye sources are the VRS ones, certain only)", (unsigned long long)g_hm.eyeMisses, (unsigned long long)s, p.eye, eye);
+    }
+    p.s = ~0ull;
+}
+// A new mesh for view `view` from XrHook (gen changed): map, check, upload. Render thread.
+void HmTakeMesh(int view, ID3D11Device* dev) {
+    const XrHook::HiddenRaw& r = g_hmRaw;
+    g_hm.gen[view] = r.gen;
+    memcpy(g_hm.fov[view], r.fov, sizeof(r.fov));
+    g_hm.usable[view] = false;
+    g_hm.tris[view] = 0;
+    HiddenMask::Upload(dev, view, nullptr, 0, 0.0f);      // (drops the old buffer)
+    if (!r.nv) {
+        LogDbg("hidden area mask: view %d -- no hidden mesh (gen %llu): no mask for it", view, (unsigned long long)r.gen);
+        return;
+    }
+    HiddenMask::MapInfo& mi = g_hm.info[view];
+    const bool ok = HiddenMask::MapToNdc(r.xy, r.nv, r.idx, r.ni, r.fov, g_hm.tri[view], &mi);
+    double u, v;
+    HmFovCentre(r.fov, &u, &v);
+    if (!ok) {
+        LogErr("hidden area mask: view %d mesh NOT used -- %s (%u vertices, %u triangles, mapped x %+.3f..%+.3f y %+.3f..%+.3f, "
+            "covers %.1f %%; fov L%+.1f R%+.1f U%+.1f D%+.1f deg)", view, mi.why, r.nv, r.ni / 3, (double)mi.ndcMin[0],
+            (double)mi.ndcMax[0], (double)mi.ndcMin[1], (double)mi.ndcMax[1], 100.0 * mi.coverage, r.fov[0] * 57.29578,
+            r.fov[1] * 57.29578, r.fov[2] * 57.29578, r.fov[3] * 57.29578);
+        return;
+    }
+    g_hm.tris[view] = mi.tris;
+    if (!HiddenMask::Upload(dev, view, g_hm.tri[view], mi.tris, g_hm.depth)) return;
+    g_hm.usable[view] = true;
+    for (int e = 0; e < kMaxEyes; ++e) g_hm.checkedGen[e] = 0;   // the centre check runs again for this mesh
+    LogDbg("hidden area mask: view %d mesh ready (gen %llu): %u vertices, %u triangles -> NDC x %+.3f..%+.3f y %+.3f..%+.3f, covers "
+        "%.1f %% of the eye picture; fov L%+.1f R%+.1f U%+.1f D%+.1f deg, fov centre uv (%.3f, %.3f); depth value %.1f",
+        view, (unsigned long long)r.gen, r.nv, mi.tris, (double)mi.ndcMin[0], (double)mi.ndcMax[0], (double)mi.ndcMin[1],
+        (double)mi.ndcMax[1], 100.0 * mi.coverage, r.fov[0] * 57.29578, r.fov[1] * 57.29578, r.fov[2] * 57.29578,
+        r.fov[3] * 57.29578, u, v, (double)g_hm.depth);
+}
+// The (eye, view) check against the eye's measured projection (once per mesh gen). True = this eye may get that view's mask.
+bool HmCheckEye(int eye, int view) {
+    if (g_hm.checkedGen[eye] == g_hm.gen[view] && g_hm.checkedView[eye] == view) return g_hm.checkOk[eye];
+    float mu = 0.5f, mv = 0.5f;
+    if (!VrEyeCentre(eye, &mu, &mv)) { ++g_hm.notChecked; return false; }   // not measured yet: no mask (checked again next pass)
+    double u, v;
+    HmFovCentre(g_hm.fov[view], &u, &v);
+    const double du = u - mu, dv = v - mv;
+    bool ok = std::fabs(du) <= 0.03 && std::fabs(dv) <= 0.03;
+    char scaleTxt[160] = "projection scale not measured";
+    const EyeScale& es = g_eyeScale[eye];
+    if (es.have) {
+        const double sx = 2.0 / (std::tan((double)g_hm.fov[view][1]) - std::tan((double)g_hm.fov[view][0]));
+        const double sy = 2.0 / (std::tan((double)g_hm.fov[view][2]) - std::tan((double)g_hm.fov[view][3]));
+        const double rx = sx / (double)es.x, ry = sy / (double)es.y;
+        const bool sOk = std::fabs(rx - 1.0) <= 0.05 && std::fabs(ry - 1.0) <= 0.05;
+        snprintf(scaleTxt, sizeof(scaleTxt), "fov scale %.3f / %.3f vs measured |P00| %.3f / |P11| %.3f (ratio %.3f / %.3f)%s", sx, sy,
+                 (double)es.x, (double)es.y, rx, ry, sOk ? "" : " -- MISMATCH");
+        ok = ok && sOk;
+    }
+    g_hm.checkedGen[eye] = g_hm.gen[view];
+    g_hm.checkedView[eye] = view;
+    g_hm.checkOk[eye] = ok;
+    if (ok) {
+        Log("hidden area mask: eye %d / OpenXR view %d checked -- the view's fov centre uv (%.3f, %.3f) = the eye's optical centre "
+            "(%.3f, %.3f) (off by %+.3f, %+.3f); %s", eye, view, u, v, (double)mu, (double)mv, du, dv, scaleTxt);
+    } else {
+        ++g_hm.checkBad;
+        LogErr("hidden area mask: eye %d / OpenXR view %d does NOT match -- the view's fov centre uv (%.3f, %.3f) vs the eye's optical "
+            "centre (%.3f, %.3f) (off by %+.3f, %+.3f; limit 0.03); %s -- no mask for this eye (the game's picture is not the "
+            "submitted fov, or the eye -> view map is wrong)", eye, view, u, v, (double)mu, (double)mv, du, dv, scaleTxt);
+    }
+    return ok;
+}
+// Every >= 10 s (log level 4): one "hidden area mask @" line.
+void HmMaybeLogStats() {
+    if (!LogDebugLevel()) return;
+    const uint64_t now = GetTickCount64();
+    if (!g_hm.lastLogMs) { g_hm.lastLogMs = now; return; }
+    if (now - g_hm.lastLogMs < 10000) return;
+    const uint64_t cur[16] = { g_hm.drawn[0], g_hm.drawn[1], g_hm.noEye, g_hm.disagree, g_hm.noView, g_hm.noMesh, g_hm.notChecked,
+                               g_hm.checkBad, g_hm.notWorld, g_hm.depthVal, g_hm.notReady, g_hm.eyeChecks, g_hm.eyeMisses,
+                               g_hm.reCleared, 0, 0 };
+    uint64_t dl[16];
+    for (int i = 0; i < 16; ++i) dl[i] = cur[i] - g_hm.last[i];
+    const XrHook::HiddenStats xs = XrHook::GetHiddenStats();
+    LogDbg("hidden area mask @%.0f s: masks drawn eye 0 %llu / eye 1 %llu; passes without: no certain eye %llu, eye sources disagree "
+        "%llu, eye -> view not known %llu, no usable mesh %llu, optical centre not measured %llu, eye / view mismatch %llu, no world "
+        "pass %llu, other clear value %llu, shader not ready %llu; blit check: eye misses %llu of %llu, depth cleared again after the "
+        "mask %llu | meshes: view 0 %u tris (%.1f %%), view 1 %u tris (%.1f %%); eye 0 = view %d (run %d), eye 1 = view %d (run %d); "
+        "OpenXR: extension state %d, function %s, %llu queries, %llu mask-changed events%s",
+        (double)(now - g_hm.lastLogMs) / 1000.0, (unsigned long long)dl[0], (unsigned long long)dl[1], (unsigned long long)dl[2],
+        (unsigned long long)dl[3], (unsigned long long)dl[4], (unsigned long long)dl[5], (unsigned long long)dl[6],
+        (unsigned long long)dl[7], (unsigned long long)dl[8], (unsigned long long)dl[9], (unsigned long long)dl[10],
+        (unsigned long long)dl[12], (unsigned long long)dl[11], (unsigned long long)dl[13],
+        g_hm.usable[0] ? g_hm.tris[0] : 0u, g_hm.usable[0] ? 100.0 * g_hm.info[0].coverage : 0.0,
+        g_hm.usable[1] ? g_hm.tris[1] : 0u, g_hm.usable[1] ? 100.0 * g_hm.info[1].coverage : 0.0,
+        g_hm.eyeView[0], g_hm.eyeRun[0], g_hm.eyeView[1], g_hm.eyeRun[1], xs.ext, xs.fn ? "resolved" : "not resolved",
+        (unsigned long long)xs.queries, (unsigned long long)xs.events, xs.failed ? ", query FAILED for this session" : "");
+    g_hm.lastLogMs = now;
+    memcpy(g_hm.last, cur, sizeof(cur));
+}
+void HmOnSceneClear(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v, UINT fl, FLOAT d, bool started) {
+    if (!started || !(fl & D3D11_CLEAR_DEPTH) || g_flatMode || !g_passSeq) return;
+    CpuProf::Block cpb(CpuProf::kBHmask);              // phase 40 CPU profiler row "hmask"
+    HmMaybeLogStats();
+    float nearest;
+    if (d == 0.0f) nearest = 1.0f;                     // reversed Z (ETS2 / ATS): 0 = far, 1 = near
+    else if (d == 1.0f) nearest = 0.0f;
+    else {
+        ++g_hm.depthVal;
+        if (!g_hm.depthValLogged) {
+            g_hm.depthValLogged = true;
+            LogWarn("hidden area mask: the scene depth is cleared to %.4f (neither 0 nor 1) -- no mask for such passes", (double)d);
+        }
+        return;
+    }
+    const uint64_t fr = g_frames.load(std::memory_order_relaxed);
+    if (fr > g_lastGbufFrame + 2) { ++g_hm.notWorld; return; }   // no world G-buffer bind lately (menu / preview screens)
+    const uint64_t s = g_passSeq - 1;                  // the pass this clear started
+    int src = 0, srcEye[4] = { -1, -1, -1, -1 };
+    bool disagree = false;
+    const int eye = VrsDecideEye(s, nullptr, &src, srcEye, &disagree);
+    if (disagree) { ++g_hm.disagree; return; }
+    if (eye < 0 || eye >= kMaxEyes) { ++g_hm.noEye; return; }
+    ID3D11Device* dev = nullptr;
+    ctx->GetDevice(&dev);
+    if (!dev) return;
+    dev->Release();                                    // identity only: the context keeps its device alive
+    if (g_hm.dev != dev) {                             // (first use / device change: the buffers belong to the old device;
+        HiddenMask::Reset();                           //  the eye -> view map and the statistics stay)
+        for (int k = 0; k < 2; ++k) { g_hm.gen[k] = 0; g_hm.usable[k] = false; g_hm.tris[k] = 0; }
+        for (int e = 0; e < kMaxEyes; ++e) g_hm.checkedGen[e] = 0;
+        g_hm.depth = -1.0f;
+        g_hm.dev = dev;
+    }
+    if (!HiddenMask::Ensure(dev)) {
+        ++g_hm.notReady;
+        return;
+    }
+    // the newest meshes (both views: the centre-match fallback of HmViewOfEye compares them) + the depth value they carry
+    if (g_hm.depth != nearest) {
+        g_hm.depth = nearest;
+        for (int k = 0; k < 2; ++k)
+            if (g_hm.usable[k]) g_hm.usable[k] = HiddenMask::Upload(dev, k, g_hm.tri[k], g_hm.tris[k], nearest);
+    }
+    for (int k = 0; k < 2; ++k)
+        if (XrHook::HiddenMaskRaw(k, g_hm.gen[k], &g_hmRaw)) HmTakeMesh(k, dev);
+    const int view = HmViewOfEye(eye);
+    if (view < 0) { ++g_hm.noView; return; }
+    if (!g_hm.usable[view] || !HiddenMask::HasMesh(view)) { ++g_hm.noMesh; return; }
+    if (!HmCheckEye(eye, view)) return;                // (counted inside)
+    ID3D11Resource* res = nullptr;
+    v->GetResource(&res);
+    D3D11_TEXTURE2D_DESC td{};
+    bool texOk = false;
+    if (res) {
+        ID3D11Texture2D* t2 = nullptr;
+        if (SUCCEEDED(res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&t2)) && t2) { t2->GetDesc(&td); t2->Release(); texOk = true; }
+        res->Release();
+    }
+    if (!texOk || td.SampleDesc.Count != 1 || !td.Width || !td.Height) { ++g_hm.noMesh; return; }
+    t_inDlaa = true;                                   // the mod's own work (hooks pass through; VRS pauses)
+    const bool drew = HiddenMask::Draw(ctx, v, td.Width, td.Height, view);
+    t_inDlaa = false;
+    if (!drew) { ++g_hm.notReady; return; }
+    ++g_hm.drawn[eye];
+    g_hm.pred[s & 7] = { s, eye };
+    if (!g_hm.firstLogged) {
+        g_hm.firstLogged = true;
+        Log("hidden area mask: FIRST mask drawn -- pass s=%llu, eye %d = OpenXR view %d (eye sources:%s%s), scene depth %ux%u fmt %d "
+            "cleared to %.1f -> mask depth %.1f, %u triangles covering %.1f %% of the picture (Present #%llu)", (unsigned long long)s,
+            eye, view, (src & kVrsSrcRing) ? " RT-cycle" : "", (src & kVrsSrcPair) ? " frame-pair" : "", td.Width, td.Height,
+            (int)td.Format, (double)d, (double)nearest, g_hm.tris[view], 100.0 * g_hm.info[view].coverage, (unsigned long long)fr);
+    }
+}
+// the ini / menu value -> XrHook (the meshes are fetched only while on)
+void HmApplyConfig() { XrHook::HiddenMaskActive(g_xrHiddenMask != 0); }
 #else
 inline void VrsOnBind(ID3D11DeviceContext*) {}       // (no VRS without WITH_DLAA)
 inline void VrsNoteBlit(uint64_t, int, void*, void*) {}
@@ -10505,6 +10810,9 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         }
 #ifdef WITH_DLAA
         VrsNoteBlit(slot.s, eye, rtPtr, slot.fwdTex);     // phase 34b: learn the RT cycle / forward colours, check the entered eye
+        if (g_xrHiddenMask)                               // phase 40: eye -> OpenXR view (the swapchain image), the masked eye check
+            HmNoteBlit(slot.s, eye, rtPtr, rvd.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE2DARRAY ? rvd.Texture2DArray.FirstArraySlice : 0,
+                       slot.sceneClears);
 #else
         VrsNoteBlit(slot.s, eye, rtPtr, nullptr);
 #endif
@@ -14204,7 +14512,8 @@ enum MenuRowId {
     MR_UPSCALE, MR_DLAA, MR_OFXR,
     MR_TURBO,                                             // phase 30: VR Turbo mode (dlaa.ini xr_turbo; OpenXR Toolkit port)
     MR_VRS, MR_VRSSIZE,                                   // phase 34: VR foveated rendering (dlaa.ini vrs; vrs_inner / vrs_outer preset)
-    MR_LOG,                                               // phase 39: Logging (dlaa.ini log_level) + what logging costs
+    MR_HMASK,                                             // phase 40: VR hidden area mask (dlaa.ini xr_hidden_mask)
+    MR_LOG,                                              // phase 39: Logging (dlaa.ini log_level) + what logging costs
     MR_PANELGRP,                                          // v0.10.3 phase 29c: group header "Panel settings" (collapsible)
     MR_POSX, MR_POSY, MR_SIZE, MR_DEPTH, MR_FACE,
     MR_MENUKEYS,                                          // v0.10.2: the 5 menu keys, bound by 5 holds in sequence (29c: in the panel group)
@@ -14261,6 +14570,10 @@ const wchar_t* const kMenuDesc[] = {
     L"once per 2 x 2 pixels; fences, grass and leaves keep full detail. Turn it off if the edge looks blocky.",
     L"How big the sharp centre of Foveated (VRS) is: wide = the largest sharp area, the smallest saving; narrow = the biggest "
     L"saving, lower detail starts closer to the middle. balanced is the default.",
+    // phase 40 (MR_HMASK)
+    L"VR only. The game skips the lens corners you never see (the headset reports them), so it draws fewer pixels: more GPU "
+    L"headroom, the picture you see stays the same. The first switch-on needs a game restart. Turn it off if the edge of the view "
+    L"looks wrong.",
     // phase 39 (MR_LOG)
     L"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + problems worked around; "
     L"info = + start-up and changes; debug = + statistics, and debug also runs the GPU timers and the CPU profiler.",
@@ -14496,6 +14809,23 @@ void StepVrsSize(int dir, uint64_t n) {
         g_vrsOn ? "" : " -- Foveated (VRS) is off: used once it is on");
     PlayTones(1, 600 + 300 * next, 120, 0);
 }
+// phase 40: the menu's Hidden area mask (VR) row -- dlaa.ini xr_hidden_mask live (the next eye scene clear draws / skips it). The
+// OpenXR extension is only requested when it was on at the game's start: switched on later, it waits for a restart (logged; the
+// row says so). Logged + beeped like the other toggles; also switchable in flat (kept for VR; the row is greyed there).
+void ToggleHiddenMask(uint64_t n) {
+    g_xrHiddenMask = g_xrHiddenMask ? 0 : 1;
+    g_xrHiddenMaskExplicit = true;
+    HmApplyConfig();
+    const XrHook::HiddenStats hs = XrHook::GetHiddenStats();
+    Log("Hidden area mask (VR): %s (xr_hidden_mask=%d, tuning menu, Present #%llu) -- %s; OpenXR extension state %d (0 not asked, "
+        "1 not offered by the runtime, 2 / 3 enabled, 4 refused), meshes %u / %u triangles, %llu masks drawn so far",
+        g_xrHiddenMask ? "ON" : "OFF", g_xrHiddenMask, (unsigned long long)n,
+        !g_xrHiddenMask ? "from the next eye scene clear the game shades the whole picture again"
+        : (!g_xrHiddenMaskAtStart ? "the OpenXR extension was not requested at this start: save (Shift+F12) and restart the game"
+                                  : "from the next eye scene clear"),
+        hs.ext, hs.ni[0] / 3, hs.ni[1] / 3, (unsigned long long)(g_hm.drawn[0] + g_hm.drawn[1]));
+    PlayTones(1, g_xrHiddenMask ? 1200 : 300, 150, 0);
+}
 // phase 39: what followed debug = 1 follows log level 4 -- live: the GPU timers (perf_timers -1) and the CPU profiler (cpu_prof -1;
 // explicit 0 / 1 stay as set), vrs_debug. Called by StepLogLevel / ResetSettings (LoadConfig + SetupThread set the start state).
 // While the menu is open the GPU timers stay on (its own figures need them): MenuPerfClose puts them where the level says.
@@ -14600,6 +14930,9 @@ void ResetSettings(uint64_t n) {
     g_vrsOn = 0; g_vrsInner = 55; g_vrsOuter = 80;        // phase 34: foveated rendering off, balanced radii (vrs_quality /
     g_vrsExplicit = false;                                //   vrs_debug are dlaa.ini-only: left as they are)
     VrsApplyConfig();
+    g_xrHiddenMask = 0;                                   // phase 40: hidden area mask off
+    g_xrHiddenMaskExplicit = false;
+    HmApplyConfig();
     // phase 39: logging back to the level dlaa.ini gives without log_level (the key is removed below; `debug` stays in the file,
     // so debug = 1 there = level 4, as at the next start; else 1 = errors)
     g_logLevelKey = -1;
@@ -14610,7 +14943,7 @@ void ResetSettings(uint64_t n) {
 
     // dlaa.ini: remove the 35 keys (empty value); everything else stays byte-for-byte (v0.10.2: + mirror_mv = 32; v0.10.3 phase 28:
     // + fps_vr_lock = 33, the cap raised to kIniMaxKeys; v0.10.3 phase 29b: + menu_vr_dist = 34; phase 30: + xr_turbo = 35;
-    // phase 34: + vrs / vrs_inner / vrs_outer = 38; phase 39: + log_level = 39)
+    // phase 34: + vrs / vrs_inner / vrs_outer = 38; phase 39: + log_level = 39; phase 40: + xr_hidden_mask = 40 = kIniMaxKeys)
     static const char* const kKeys[] = {
         "mode", "dlss_preset", "dlaa_area", "sharpness", "sharp_radius", "dlss_upscale", "tex_lod_bias", "tex_lod_bias_cutout",
         "mv_objects", "mirror_dlaa", "mirror_vr_mode", "mirror_flat_mode", "mirror_vr_views", "mirror_mv", "dlaa_pre_tonemap",
@@ -14621,6 +14954,7 @@ void ResetSettings(uint64_t n) {
         "xr_turbo",                                                                                     // phase 30
         "vrs", "vrs_inner", "vrs_outer",                                                                // phase 34
         "log_level",                                                                                    // phase 39
+        "xr_hidden_mask",                                                                               // phase 40
     };
     constexpr int kNKeys = (int)(sizeof(kKeys) / sizeof(kKeys[0]));
     static_assert(kNKeys <= kIniMaxKeys, "WriteIniPreserving handles at most kIniMaxKeys keys");
@@ -14635,7 +14969,7 @@ void ResetSettings(uint64_t n) {
             "perf_profile = high mv_fwd_depth = 1 menu_x = 2 menu_y = 8 "
             "menu_scale = 1.0 menu_vr_x = 0 menu_vr_y = -5 menu_vr_scale = 1.0 menu_vr_depth = 12 menu_vr_dist = 100 menu_vr_face = 1 "
             "fps_show = 0 "
-            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 xr_turbo = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 log_level = %d (%s) -- profile: %s -- "
+            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 xr_turbo = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 xr_hidden_mask = 0 log_level = %d (%s) -- profile: %s -- "
             "dlaa.ini: %d keys removed (hotkeys and other lines kept)", (unsigned long long)n, g_dlaaOn.load() ? "DLSS" : "off",
             (double)kFpsVrScaleDefault, LogLevel(), g_logDebugKey ? "no key: debug = 1 in dlaa.ini" : "no key", changed, kNKeys);
         BeepSeq b;                                        // success: rising two-tone 600 -> 900 Hz, 120 ms each (as SaveSettings)
@@ -15026,6 +15360,14 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         else if (!g_vrsOn)           swprintf(sent, sentCap, L"Off now: every pixel is shaded.");
         else                         swprintf(sent, sentCap, L"It saves time in the game's own GPU figure, not in the mod's.");
         break;
+    case MR_HMASK: {                                      // phase 40
+        const XrHook::HiddenStats hs = XrHook::GetHiddenStats();
+        if (hs.ext == 1)             swprintf(sent, sentCap, L"Not available: this VR runtime reports no hidden area.");
+        else if (!vr)                swprintf(sent, sentCap, L"Greyed in flat: VR only.");
+        else if (!g_xrHiddenMask)    swprintf(sent, sentCap, L"Off now: every pixel is drawn.");
+        else                         swprintf(sent, sentCap, L"It saves time in the game's own GPU figure, not in the mod's.");
+        break;
+    }
     case MR_UPSCALE:
         if (!dlaaOn)    swprintf(sent, sentCap, L"Off now (the mod is off).");
         else if (!upOn) swprintf(sent, sentCap, L"Off now: the game's own stretch is used below Scaling 100 %%.");
@@ -15573,6 +15915,17 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         if (si >= 0) swprintf(p.rows[MR_VRSSIZE].value, kV, L"%ls", kVrsSizes[si].name);
         else         swprintf(p.rows[MR_VRSSIZE].value, kV, L"%d / %d %%", g_vrsInner, g_vrsOuter);
     }
+    {   // phase 40: hidden area mask; "not supported" once the runtime said it has no XR_KHR_visibility_mask (no live counter)
+        const XrHook::HiddenStats hs = XrHook::GetHiddenStats();
+        const bool noExt = hs.ext == 1 || hs.ext == 4;
+        MenuRow(p, MR_HMASK, L"Hidden area mask (VR)", "dlaa.ini xr_hidden_mask", vr ? nullptr : "VR only", !vr || noExt);
+        const wchar_t* val = !g_xrHiddenMask ? L"off"
+                           : noExt ? L"on (not supported)"
+                           : !g_xrHiddenMaskAtStart ? L"on (restart the game)"
+                           : hs.ext == 0 ? L"on (no OpenXR instance yet)"
+                           : (hs.failed ? L"on (failed, see log)" : L"on");
+        swprintf(p.rows[MR_HMASK].value, kV, L"%ls", (!g_xrHiddenMask && noExt) ? L"not supported" : val);
+    }
     {   // phase 39: the level + what logging costs (CPU ms per frame; changes only at the ~1-s snapshots: no rebuild per frame)
         MenuRow(p, MR_LOG, L"Logging", "dlaa.ini log_level", nullptr, false);
         const int lv = LogLevel();
@@ -15731,6 +16084,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_TURBO:   ToggleXrTurbo(n); break;               // phase 30: Left and Right both switch it (also flat: kept for VR)
     case MR_VRS:     ToggleVrs(n); break;                   // phase 34: Left and Right both switch it (also flat: kept for VR)
     case MR_VRSSIZE: StepVrsSize(dir, n); break;            // phase 34: Right = narrower (more saving), Left = wider
+    case MR_HMASK:   ToggleHiddenMask(n); break;            // phase 40: Left and Right both switch it (also flat: kept for VR)
     case MR_LOG:     StepLogLevel(dir, n); break;           // phase 39: Right = more, Left = less (clamped)
     case MR_PANELGRP: case MR_FPSGRP:                       // v0.10.3 phase 29c: Right opens the group, Left closes it (a fresh
         MenuGrpOpen(row) = dir > 0;                         // press only: not a stepRow, so auto-repeat is ignored above)
@@ -18681,6 +19035,7 @@ void LoadConfig() {
             else if (!strcmp(key, "menu_vr_layer"))  g_menuVrLayer = v != 0 ? 1 : 0;        // v0.10.3 phase 29
             else if (!strcmp(key, "cpu_cache_pin"))  g_cpuCachePin = v != 0 ? 1 : 0;        // phase 32
             else if (!strcmp(key, "xr_turbo"))       { g_xrTurbo = v != 0 ? 1 : 0; g_xrTurboExplicit = true; }   // phase 30
+            else if (!strcmp(key, "xr_hidden_mask")) { g_xrHiddenMask = v != 0 ? 1 : 0; g_xrHiddenMaskExplicit = true; }   // phase 40
             // phase 34: VRS fixed foveated rendering (VR; the menu's Foveated rows switch vrs and the radii preset)
             else if (!strcmp(key, "vrs"))            { g_vrsOn = v != 0 ? 1 : 0; g_vrsExplicit = true; }
             else if (!strcmp(key, "vrs_inner"))      { g_vrsInner = v < 10 ? 10 : (v > 150 ? 150 : (int)v); g_vrsExplicit = true; }
@@ -19253,7 +19608,13 @@ DWORD WINAPI SetupThread(LPVOID) {
         XrHook::SetReleaseCallback(&MenuLateOnXrRelease);
         XrHook::SetOverlayDrawCallback(&MenuOverlayDraw);   // v0.10.3 phase 29: the quad layers' images (menu_vr_layer)
         XrHook::SetTurbo(g_xrTurbo != 0);                   // phase 30: dlaa.ini xr_turbo (the menu row switches it live)
+        g_xrHiddenMaskAtStart = g_xrHiddenMask;             // phase 40: the extension is asked for only when on at the start
+        XrHook::HiddenMaskRequest(g_xrHiddenMask != 0);
+        XrHook::HiddenMaskActive(g_xrHiddenMask != 0);
         XrHook::Install();
+        Log("hidden area mask (phase 40): xr_hidden_mask=%d (%s)", g_xrHiddenMask, g_xrHiddenMask
+            ? "ON: XR_KHR_visibility_mask is added at the game's xrCreateInstance when the runtime offers it"
+            : "off: the OpenXR extension is not requested; switching it on needs a game restart");
         Log("Turbo mode (phase 30, from OpenXR Toolkit): xr_turbo=%d (%s)", g_xrTurbo,
             g_xrTurbo ? "ON: the game does not wait for the headset in xrWaitFrame; ASW / Motion Smoothing / SSW / reprojection "
                         "cannot work" : "off: the game's own xrWaitFrame paces it");
@@ -19268,6 +19629,7 @@ DWORD WINAPI SetupThread(LPVOID) {
     DrawIdRecord::SetPsInfoFn(&DidPsInfo);              // v0.10.0 phase 21: the PS DXBC flags for the dump / pixel probe
     SceneDlaa::RegisterShaders();
     PreviewBlit::RegisterShaders();
+    HiddenMask::RegisterShaders();                      // phase 40
     TuningMenu::RegisterShaders();                       // v0.10.0 tuning menu panel quad
     PvCapRegisterShaders();                              // Ctrl+F10 preview capture metrics shader
     PvAsmRegisterShaders();                              // round 6 tiled preview: picture depth assembly
