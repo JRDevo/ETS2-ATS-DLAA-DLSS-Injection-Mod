@@ -183,6 +183,13 @@ log_level = 1
 # 60 frames in a row of the other condition (a single frame that cannot use it takes the end-of-frame unit); both units stay
 # alive, so a change costs no rebuild and no blur pulse (switching ON after Alt+F7 / Ctrl+F6 takes about 60 frames).
 # dlaa_pre_tonemap = 1
+# v0.12.0 issue #12 FLAT MULTI-MONITOR (r_multimon_mode 2: one picture per screen, e.g. 3 x 1920x1080 in a 5760x1080 window):
+# 1 = the mod finds the screens (one scene->screen copy per screen per frame, side by side or stacked, any sizes) and gives each
+# screen its own DLAA / DLSS with its own history, so the screens' cameras are never mixed (the log says "flat multi-view
+# detected: N views ..." after about 30 frames). Up to 8 screens get DLAA; more pass through untouched. One screen is unaffected.
+# Multi-view always uses the end-of-frame DLAA (dlaa_pre_tonemap does not apply). 0 = the v0.11 behaviour (all screens share
+# one DLAA: a multi-monitor setup looks worse with DLAA than without). Read at the game start.
+# flat_multiview = 1
 # the smallest mirror picture handled: width AND height in pixels (16..4096; smaller views are left alone)
 # mirror_min_px = 128
 # how many mirror pictures per frame get their own DLAA (1..16; ETS2: 4 per frame, VR: per eye). More are left alone.

@@ -274,7 +274,7 @@ inline void Report(double sceneMs, uint32_t sceneN) {
     if (!g_frames) { LogDbg("GPU per pass (phase 36): no landed frames yet (%llu dropped)", (unsigned long long)g_dropped); return; }
     const double f = (double)g_frames;
     double mod = 0.0; bool haveMod = false;
-    for (int e = 0; e < 2; ++e) {
+    for (int e = 0; e < GpuPerf::kViews; ++e) {                      // v0.12.0 issue #12: every eye / view
         GpuPerf::EyeStats st;
         if (GpuPerf::Stats(e, &st)) { mod += st.total + st.avg[GpuPerf::kNgx] + st.avg[GpuPerf::kMirNgx]; haveMod = true; }
     }

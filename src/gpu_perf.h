@@ -73,7 +73,10 @@ void SetPass(uint64_t tag);             // the pass the following sections belon
 uint64_t Pass();
 void SetMirror(bool on);                // mirror scope: every section -> kMirror (NGX -> kMirNgx)
 bool Mirror();
-constexpr uint64_t kSampleEvery = 31;   // sampled sections: 1 pass in 31 (odd: in VR both eyes' passes get sampled)
+constexpr uint64_t kSampleEvery = 31;   // sampled sections: 1 pass in 31 (odd: in VR both eyes' passes get sampled; v0.12.0: 31 is
+                                        // prime, so every flat multi-view view gets sampled for any view count up to 30)
+constexpr int kViews = 8;               // v0.12.0 issue #12: eyes / views with their own statistics (VR 0..1, flat multi-view 0..7;
+                                        // = FlatViews::kMaxViews in inject.cpp)
 bool Sampled(uint64_t tag);
 
 // Timed section: Begin -> token (-1 = not timed: off / set full), Next = End(tok) + Begin(sec) sharing one timestamp.
@@ -90,7 +93,7 @@ struct EyeStats {
     uint64_t n[kCount] = {};            // passes in which the section ran (sampled sections: their sample count)
     double   total = 0.0, totalMax = 0.0;   // mod total per pass (sections InTotal; sampled ones by their own average)
 };
-// window statistics of eye 0..1 since the last Restart (false = nothing landed for that eye)
+// window statistics of eye / view 0..kViews-1 since the last Restart (false = nothing landed for that eye / view)
 bool Stats(int eye, EyeStats* out);
 uint64_t Unattributed();                // landed sections whose pass never reached a blit (window)
 uint64_t Dropped();                     // sections not timed because a set was full / a set was lost (window)
