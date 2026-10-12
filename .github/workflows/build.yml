@@ -50,6 +50,8 @@ jobs:
           if not exist build\tests\mirror_turns_test.exe exit /b 1
           call tests\build_hidden_mask_test.bat
           if not exist build\tests\hidden_mask_test.exe exit /b 1
+          call tests\build_fps_pose_test.bat
+          if not exist build\tests\fps_pose_test.exe exit /b 1
 
       - name: Test draw-id harness (did_shadow off)
         run: build\tests\drawid_harness.exe -1 0.1
@@ -64,3 +66,5 @@ jobs:
         run: build\tests\mirror_turns_test.exe
       - name: Test VR hidden area mask (mapping, depth-only draw, state restore)
         run: build\tests\hidden_mask_test.exe
+      - name: Test fps box pose (src/fps_pose.h colours, VR turn, distance shift)
+        run: build\tests\fps_pose_test.exe

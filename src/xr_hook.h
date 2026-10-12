@@ -118,6 +118,10 @@ struct OverlayParams {
                                              //   turned to FACE the head (false: parallel to the view plane)
     int           fpsX = 0, fpsY = 0;        // fps_vr_x / fps_vr_y (% as the panel; fixed in the cab: yaw / pitch degrees)
     float         fpsScale = 0.3f;           // fps_vr_scale (1 = 8 % of the eye fov width at 0.8 m)
+    float         fpsDist = 0.8f;            // phase 44: fps_vr_dist / 100 -- the fps box quad's distance (m; 0.3..3.0). Its
+                                             //   angular size stays (the width scales with it), in both lock modes
+    int           fpsYaw = 0, fpsPitch = 0, fpsRoll = 0;   // phase 44: fps_vr_yaw / _pitch / _roll (degrees): the box's own turn
+                                             //   on top of its normal facing (FpsPose::ComposeTurn; 0 / 0 / 0 = as before)
     unsigned long drawTid = 0;               // the game render thread (owner of the immediate context); 0 = none yet
     uint32_t      panelW = 0, panelH = 0;    // the panel swapchain size (px; read at its creation)
     uint32_t      fpsW = 0, fpsH = 0;        // the fps box swapchain size (px)

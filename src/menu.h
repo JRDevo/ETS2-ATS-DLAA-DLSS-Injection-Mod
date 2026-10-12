@@ -12,7 +12,7 @@
 // save / restore, from its OWN texture cache (rebuilt only when one of its two lines or its build scale changes; the panel's
 // cache is separate). It has NO background and NO frame: white text with a dark (near-black) outline, so it reads over any
 // picture (the texture carries its own alpha, the shader uses it as it is). ReleaseWidget drops that texture (the fps box
-// switched off).
+// switched off). Phase 44: the text / outline colours are set by SetWidgetColors (dlaa.ini fps_color presets).
 #pragma once
 #ifdef WITH_DLAA
 
@@ -21,12 +21,13 @@
 
 namespace TuningMenu {
 
-constexpr int   kMaxRows  = 42;                      // (was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
+constexpr int   kMaxRows  = 47;                      // (was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
                                                      //  28 before the v0.10.3 phase 28 FPS counter lock row, 29 before the phase 29c
                                                      //  group header rows, 31 before the phase 30 Turbo mode row, 32 before the
                                                      //  phase 34 Foveated rows, 34 before the phase 39 Logging row, 35 before the
                                                      //  phase 41 Mirrors in turns row, 36 before the phase 40 Hidden area mask row,
-                                                     //  37 before the phase 42 Foveated passes row, 38 before the 4 phase 43 category headers; a Panel holds
+                                                     //  37 before the phase 42 Foveated passes row, 38 before the 4 phase 43 category headers, 42 before the
+                                                     //  5 phase 44 fps box rows (colour, distance, turn, tilt, rotate); a Panel holds
                                                      //  only the VISIBLE rows, nRows <= this)
 constexpr int   kPerfLines = 3;                      // the GPU block under the title (small font, one line each)
 constexpr float kRefWidth = 760.0f;                  // panel width in reference px (scale 1; was 720 before the GPU cost column)
@@ -85,6 +86,13 @@ void  ReleaseTargets();                              // drops the panel texture 
 bool  DrawWidget(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
                  float scale, float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2);
 void  ReleaseWidget();                               // drops the fps box texture (the box switched off)
+// phase 44: the fps box as a turned quad (fps_vr_yaw / fps_vr_pitch / fps_vr_roll, the drawn-in VR fallback): `clip` = its 4
+// corners in clip space as DrawCorners (top-left, top-right, bottom-left, bottom-right; w > 0). Texture / states as DrawWidget.
+bool  DrawWidgetCorners(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, const float clip[4][4],
+                        float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2);
+// phase 44 (dlaa.ini fps_color): the fps box's text and outline colours (sRGB bytes). Default white text, RGB 8,8,8 outline (the
+// colours before phase 44). A change rebuilds the box texture once (the cache key includes them).
+void  SetWidgetColors(uint8_t tr, uint8_t tg, uint8_t tb, uint8_t lr, uint8_t lg, uint8_t lb);
 
 }  // namespace TuningMenu
 

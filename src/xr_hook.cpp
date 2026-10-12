@@ -13,6 +13,7 @@
 #include <utility>
 #include "MinHook.h"
 #include "log.h"
+#include "fps_pose.h"                                 // phase 44: the fps box turn (ComposeTurn)
 
 namespace XrHook {
 
@@ -736,7 +737,9 @@ bool OvBuildQuadLocked(int which, const OverlayParams& par, const XrCompositionL
         faceHead(d, "panel facing the head");
         q.space = s_ov.viewSpace;
     } else {
-        const double d = 0.8;                            // the fps box: 0.8 m (the phase 28 anchor distance)
+        // the fps box: fps_vr_dist (phase 44; was 0.8 m = the phase 28 anchor distance, still the default). wM scales with d:
+        // the same angular size at every distance, in both lock modes.
+        const double d = par.fpsDist >= 0.3f && par.fpsDist <= 3.0f ? (double)par.fpsDist : 0.8;
         wM = d * fw * 0.08 * (double)par.fpsScale;
         if (par.fpsLock) {
             AcquireSRWLockShared(&s_poseLock);
@@ -783,6 +786,12 @@ bool OvBuildQuadLocked(int which, const OverlayParams& par, const XrCompositionL
             q.space = s_ov.viewSpace;
         }
         if (par.fpsLock) { s_ovFixedHow.store(how, std::memory_order_relaxed); s_ovFixedType.store(lt, std::memory_order_relaxed); }
+        // phase 44: the box's own turn (fps_vr_yaw / _pitch / _roll) in its local frame, on top of the facing above
+        if (!FpsPose::TurnIsZero(par.fpsYaw, par.fpsPitch, par.fpsRoll)) {
+            double t[4];
+            FpsPose::ComposeTurn(rq, par.fpsYaw, par.fpsPitch, par.fpsRoll, t);
+            memcpy(rq, t, sizeof(t));
+        }
     }
     q.pose.orientation.x = (float)rq[0]; q.pose.orientation.y = (float)rq[1];
     q.pose.orientation.z = (float)rq[2]; q.pose.orientation.w = (float)rq[3];
@@ -792,7 +801,7 @@ bool OvBuildQuadLocked(int which, const OverlayParams& par, const XrCompositionL
     if (!s_ov.firstLog[logIdx]) {
         s_ov.firstLog[logIdx] = true;
         static const char* const kWhat[3] = { "panel (VIEW space, ours)", "fps box following the head (VIEW space, ours)",
-                                              "fps box FIXED IN THE CAB (the game's projection-layer space)" };
+                                              "fps box FIXED IN THE PLAY SPACE (the game's projection-layer space)" };
         Log("OpenXR overlay: first %s quad -- space %p, pose q=(%+.3f %+.3f %+.3f %+.3f) p=(%+.3f %+.3f %+.3f) m, size %.3f x %.3f m, "
             "sub-image %dx%d of %ux%u px; view 0 fov tangents L%+.3f R%+.3f U%+.3f D%+.3f%s%s", kWhat[logIdx], q.space,
             rq[0], rq[1], rq[2], rq[3], pos[0], pos[1], pos[2], wM, wM * aspect, q.subImage.w, q.subImage.h, s_ov.sc[which].w,
@@ -800,6 +809,20 @@ bool OvBuildQuadLocked(int which, const OverlayParams& par, const XrCompositionL
             how == 3 ? " (fixed in the cab asked, but the layer space is a VIEW space: head-locked)" : "",
             logIdx == 2 ? "" : (par.menuFace ? "; menu_vr_face=1: turned to face the head (phase 29b)"
                                              : "; menu_vr_face=0: parallel to the view plane"));
+    }
+    // phase 44: the fps box quad again whenever its lock / distance / turn changes (level 4; 32 lines at most)
+    if (which == 1) {
+        static int s_key[5] = { -1, -1, -999, -999, -999 }, s_lines = 0;
+        const int key[5] = { logIdx, (int)std::lround(par.fpsDist * 100.0f), par.fpsYaw, par.fpsPitch, par.fpsRoll };
+        if (memcmp(key, s_key, sizeof(key)) && s_lines < 32) {
+            ++s_lines;
+            memcpy(s_key, key, sizeof(key));
+            LogDbg("OpenXR overlay: fps box quad (%s) -- fps_vr_dist %.2f m, turn yaw %+d pitch %+d roll %+d deg -> pose q=(%+.3f %+.3f "
+                "%+.3f %+.3f) p=(%+.3f %+.3f %+.3f) m, size %.3f x %.3f m (~%.2f deg wide at that distance)", logIdx == 2 ? "fixed in the play space" :
+                "following the head", (double)par.fpsDist, par.fpsYaw, par.fpsPitch, par.fpsRoll, rq[0], rq[1], rq[2], rq[3], pos[0],
+                pos[1], pos[2], wM, wM * aspect,
+                2.0 * std::atan(0.5 * wM / (par.fpsDist >= 0.3f ? (double)par.fpsDist : 0.8)) * 57.29578);
+        }
     }
     return true;
 }
@@ -864,8 +887,8 @@ bool OvEndFrame(int i, XrSession ses, const XrFrameEndInfo* fe, const XrComposit
         OvSetOk(ok[0], ok[1]);
         return false;
     }
-    // phase 29b: the later layer is drawn on top -- the panel last when it sits nearer than the fps box's 0.8 m (menu_vr_dist)
-    const bool panelTop = par.menuDist < 0.8f;
+    // phase 29b: the later layer is drawn on top -- the panel last when it sits nearer than the fps box (menu_vr_dist vs fps_vr_dist)
+    const bool panelTop = par.menuDist < par.fpsDist;     // phase 44: the fps box's own distance (was its fixed 0.8 m)
     for (int k = 0; k < 2; ++k) {
         const int w = panelTop ? 1 - k : k;
         if (!want[w] || !have[w]) continue;

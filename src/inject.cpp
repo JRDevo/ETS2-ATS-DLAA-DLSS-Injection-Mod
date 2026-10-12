@@ -1,3 +1,10 @@
+// phase 44 -- FPS BOX COLOURS / VR DISTANCE / TURN (dlaa.ini fps_color 0..19, fps_vr_dist cm 30..300, fps_vr_yaw / fps_vr_pitch /
+//           fps_vr_roll degrees; fps_pose.h; menu rows "FPS colour", "FPS distance (VR)", "FPS turn", "FPS tilt", "FPS rotate", live,
+//           Shift+F12 saves, Reset removes). Quad layer: the fps quad at fps_vr_dist (same angle), turned by base * turn. Drawn
+//           in: the fixed box's anchor distance, the head-following box's extra stereo shift, the turn as a perspective quad
+//           (TuningMenu::DrawWidgetCorners). "Fixed in cab" renamed "Fixed in play space". Foveated size row = a 10..100 % scaler
+//           (vrs_outer, vrs_inner = max(10, outer - 25)). "Attached to truck" (fps_vr_lock = 2) investigated and NOT built:
+//           docs/DEVELOPMENT.md phase 44. Test: tests\fps_pose_test.cpp.
 // phase 40 -- VR HIDDEN AREA MASK (dlaa.ini xr_hidden_mask, 0 default; menu row "Hidden area mask (VR)"; hidden_mask.h, xr_hook.h,
 //           the block above HmOnSceneClear). XrHook wraps the runtime's xrCreateInstance and adds XR_KHR_visibility_mask to a copy
 //           of the game's extension list when the runtime offers it (only when xr_hidden_mask = 1 at the game's start), fetches the
@@ -699,6 +706,7 @@
 #include "dinput_wrap.h"                           // v0.10.0 tuning menu: its keys are hidden from the game while open
 #include "ofxr.h"                                  // v0.10.0 OFXR Bridge module-range pass-through
 #include "xr_hook.h"                               // v0.10.3 phase 27: OpenXR xrReleaseSwapchainImage (VR panel draw point)
+#include "fps_pose.h"                              // phase 44: fps box colours, VR distance, turn (pure maths)
 #ifdef WITH_DLAA
 #include "scene_dlaa.h"
 #include "preview_blit.h"
@@ -826,7 +834,14 @@ float    g_fpsVrScale = kFpsVrScaleDefault;
 // direction yaw = fps_vr_x degrees (+ right), pitch = -fps_vr_y degrees (fps_vr_y + = down, as the head-locked %), projected
 // into each eye picture with that eye's located pose + fov (FpsVrLockedPlace; XrHook::LatestViews).
 int      g_fpsVrLock = 0;
-bool     g_fpsExplicit = false;          // an fps_* value was changed in the menu -> SaveSettings writes the 8 fps_* keys
+// phase 44: dlaa.ini fps_color (0..19, FpsPose::ColorOf: 0 = white = the colour before phase 44), fps_vr_dist (cm 30..300, 80 =
+// the phase 28 0.8 m: the quad's distance in both lock modes, the drawn-in fixed box's anchor distance, the drawn-in
+// head-following box's extra stereo shift), fps_vr_yaw / fps_vr_pitch / fps_vr_roll (degrees: the VR box's own turn on top of
+// its normal facing; FpsPose::TurnQuat). The menu's FPS colour / distance / turn / tilt / rotate rows; saved with the fps_* keys.
+int      g_fpsColor = 0;
+int      g_fpsVrDist = FpsPose::kDistDefault;
+int      g_fpsVrYaw = 0, g_fpsVrPitch = 0, g_fpsVrRoll = 0;
+bool     g_fpsExplicit = false;          // an fps_* value was changed in the menu -> SaveSettings writes the 13 fps_* keys
 int      g_menuBlitEye = -1;             // VR: the eye blit this Draw is (HandlePossibleBlit), drawn on after it (hkDraw)
 void*    g_menuBlitRt  = nullptr;        // ... and its render target (identity only)
 // v0.10.0 phase 16 VR LATE PANEL (see that block after MenuDrawPreview): the panel / fps box go LAST onto each eye picture.
@@ -2638,7 +2653,7 @@ bool PathNextToDll(const wchar_t* name, wchar_t* path);   // defined below
 // v0.10.0 (Reset row): an entry with an EMPTY val ("") means "remove this key": every matching line is dropped (not replaced), and
 // the key is never appended. A missing file with only removals is left missing (nothing to write).
 // Returns true only if the temp was fully written AND the replace succeeded.
-constexpr int kIniMaxKeys = 48;                    // v0.10.3 phase 28: WriteIniPreserving's key cap (was 32)
+constexpr int kIniMaxKeys = 56;                    // v0.10.3 phase 28: WriteIniPreserving's key cap (was 32; phase 44: 48 -> 56)
 struct IniKV { const char* key; char val[48]; };   // val[0] == 0: delete the key's line(s) (WriteIniPreserving)
                                                    // (v0.10.2: was 32 -- "Ctrl+Shift+Alt+NumpadSubtract, Wheel128" is 39)
 bool WriteIniPreserving(const IniKV* kv, int nkv) {
@@ -2787,6 +2802,11 @@ void SaveSettings(uint64_t n) {
         snprintf(add("fps_vr_y"), sizeof(kv[0].val), "%d", g_fpsVrY);
         snprintf(add("fps_vr_scale"), sizeof(kv[0].val), "%.1f", (double)g_fpsVrScale);
         snprintf(add("fps_vr_lock"), sizeof(kv[0].val), "%d", g_fpsVrLock);   // v0.10.3 phase 28
+        snprintf(add("fps_color"), sizeof(kv[0].val), "%d", g_fpsColor);      // phase 44
+        snprintf(add("fps_vr_dist"), sizeof(kv[0].val), "%d", g_fpsVrDist);
+        snprintf(add("fps_vr_yaw"), sizeof(kv[0].val), "%d", g_fpsVrYaw);
+        snprintf(add("fps_vr_pitch"), sizeof(kv[0].val), "%d", g_fpsVrPitch);
+        snprintf(add("fps_vr_roll"), sizeof(kv[0].val), "%d", g_fpsVrRoll);
     }
     if (g_xrTurboExplicit) snprintf(add("xr_turbo"), sizeof(kv[0].val), "%d", g_xrTurbo);   // phase 30 (Turbo mode row)
     if (g_xrHiddenMaskExplicit) snprintf(add("xr_hidden_mask"), sizeof(kv[0].val), "%d", g_xrHiddenMask);   // phase 40
@@ -2816,11 +2836,12 @@ void SaveSettings(uint64_t n) {
         snprintf(menuW, sizeof(menuW), " -- menu panel: menu_x=%d menu_y=%d menu_scale=%.1f menu_vr_x=%d menu_vr_y=%d menu_vr_scale=%.1f "
                  "menu_vr_depth=%d menu_vr_dist=%d menu_vr_face=%d", g_menuX, g_menuY, (double)g_menuScale, g_menuVrX, g_menuVrY,
                  (double)g_menuVrScale, g_menuVrDepth, g_menuVrDist, g_menuVrFace);
-    char fpsW[160] = "";
+    char fpsW[288] = "";                                  // (phase 44: was 160, + fps_color / fps_vr_dist / the turn)
     if (g_fpsExplicit)
         snprintf(fpsW, sizeof(fpsW), " -- fps box: fps_show=%d fps_x=%d fps_y=%d fps_scale=%.1f fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f "
-                 "fps_vr_lock=%d", g_fpsShow ? 1 : 0, g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY, (double)g_fpsVrScale,
-                 g_fpsVrLock);
+                 "fps_vr_lock=%d fps_color=%d (%ls) fps_vr_dist=%d fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d", g_fpsShow ? 1 : 0,
+                 g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY, (double)g_fpsVrScale, g_fpsVrLock, g_fpsColor,
+                 FpsPose::ColorOf(g_fpsColor).name, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll);
     char notW[128];
     snprintf(notW, sizeof(notW), "%s%s%s%s%s", g_profExplicit[PK_PRESET] ? "" : " dlss_preset", g_profExplicit[PK_AREA] ? "" : " dlaa_area",
              g_profExplicit[PK_MIRROR_DLAA] ? "" : " mirror_dlaa", mirVrW ? "" : " mirror_vr_mode", mirFlatW ? "" : " mirror_flat_mode");
@@ -14756,6 +14777,9 @@ enum MenuRowId {
     MR_FPSGRP,                                            // v0.10.3 phase 29c: group header "FPS counter settings" (collapsible)
     MR_FPSLOCK,                                           // v0.10.3 phase 28: VR fps box follows the head / fixed in the cab
     MR_FPSX, MR_FPSY, MR_FPSSIZE,
+    MR_FPSCOLOR,                                          // phase 44: fps box colour (dlaa.ini fps_color)
+    MR_FPSDIST,                                           // phase 44: VR distance (dlaa.ini fps_vr_dist)
+    MR_FPSYAW, MR_FPSPITCH, MR_FPSROLL,                   // phase 44: VR turn / tilt / rotate (dlaa.ini fps_vr_yaw / _pitch / _roll)
     MR_LOG,                                               // phase 39: Logging (dlaa.ini log_level) + what logging costs
     MR_SAVE, MR_RESET, MR_CLOSE,
     MR_COUNT
@@ -14770,18 +14794,20 @@ constexpr MenuGroupDef kMenuGroups[] = {
     { MR_UPGRP,    MR_OFXR,     L"Upscaling and VR" },
     { MR_VRPGRP,   MR_HMASK,    L"VR performance" },
     { MR_PANELGRP, MR_MENUKEYS, L"Panel settings" },
-    { MR_FPSGRP,   MR_FPSSIZE,  L"FPS counter settings" },
+    { MR_FPSGRP,   MR_FPSROLL,  L"FPS counter settings" },     // phase 44: last row MR_FPSSIZE -> MR_FPSROLL
 };
 constexpr int kMenuGroupCount = (int)(sizeof(kMenuGroups) / sizeof(kMenuGroups[0]));
 static_assert(MR_PICGRP + 1 == MR_SHARP && MR_FWD + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_MIRTURNS + 1 == MR_UPGRP &&
               MR_UPGRP + 1 == MR_UPSCALE && MR_OFXR + 1 == MR_VRPGRP && MR_VRPGRP + 1 == MR_TURBO && MR_HMASK + 1 == MR_PANELGRP &&
-              MR_PANELGRP + 1 == MR_POSX && MR_MENUKEYS + 1 == MR_FPS && MR_FPSGRP + 1 == MR_FPSLOCK && MR_FPSSIZE + 1 == MR_LOG,
+              MR_PANELGRP + 1 == MR_POSX && MR_MENUKEYS + 1 == MR_FPS && MR_FPSGRP + 1 == MR_FPSLOCK && MR_FPSROLL + 1 == MR_LOG,
               "tuning menu: a group's children must follow its header and fill it up to its last row");
 static_assert(MR_SHARP < MR_WIDTH && MR_WIDTH < MR_LOD && MR_LOD < MR_LODCUT && MR_LODCUT < MR_AREA && MR_AREA < MR_PRETM &&
               MR_PRETM < MR_FWD && MR_DRAWIDS < MR_MIRROR && MR_MIRROR < MR_MIRTURNS && MR_UPSCALE < MR_DLAA && MR_DLAA < MR_OFXR &&
               MR_TURBO < MR_VRS && MR_VRS < MR_VRSSIZE && MR_VRSSIZE < MR_VRSPASS && MR_VRSPASS < MR_HMASK &&
               MR_POSX < MR_POSY && MR_POSY < MR_SIZE && MR_SIZE < MR_DEPTH && MR_DEPTH < MR_FACE && MR_FACE < MR_MENUKEYS &&
-              MR_FPSLOCK < MR_FPSX && MR_FPSX < MR_FPSY && MR_FPSY < MR_FPSSIZE, "tuning menu: group children out of order");
+              MR_FPSLOCK < MR_FPSX && MR_FPSX < MR_FPSY && MR_FPSY < MR_FPSSIZE && MR_FPSSIZE < MR_FPSCOLOR &&
+              MR_FPSCOLOR < MR_FPSDIST && MR_FPSDIST < MR_FPSYAW && MR_FPSYAW < MR_FPSPITCH && MR_FPSPITCH < MR_FPSROLL,
+              "tuning menu: group children out of order");
 const wchar_t* const kMenuDesc[] = {
     // v0.10.0: every row = what it does, when a player would change it, what it costs. The panel shows 3 lines of about 105
     // characters (menu.cpp kDescH) = the description + the cost sentence MenuPerfCosts appends: keep both within ~320 characters.
@@ -14836,8 +14862,8 @@ const wchar_t* const kMenuDesc[] = {
     // phase 34 (MR_VRS, MR_VRSSIZE)
     L"Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR only. The outer ring is shaded "
     L"once per 2 x 2 pixels; fences, grass and leaves keep full detail. Turn it off if the edge looks blocky.",
-    L"How big the sharp centre of Foveated (VRS) is: wide = the largest sharp area, the smallest saving; narrow = the biggest "
-    L"saving, lower detail starts closer to the middle. balanced is the default.",
+    L"How big the sharp centre of Foveated (VRS) is, 10 - 100 % in 5 % steps: bigger = more of the view sharp, less saving; "
+    L"smaller = more saving, lower detail starts closer to the middle. 80 % (balanced) is the default; 90 = wide, 65 = narrow.",
     // phase 42 (MR_VRSPASS)
     L"Which of the game's passes Foveated (VRS) acts on. scene = the 3D world only (default). scene + lighting = also the game's "
     L"lighting pass, at the very edge only: more saving. Test it: look for blocky light or shadow edges at the side of your view.",
@@ -14862,16 +14888,26 @@ const wchar_t* const kMenuDesc[] = {
     L"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see what a setting gains. "
     L"Its GPU cost is measured: per frame, every picture it is drawn into; none when off. Save keeps it for the next start.",
     // v0.10.3 phase 29c (MR_FPSGRP)
-    L"The fps box's lock, position and size. Right opens the group, Left closes it; it starts closed every time the menu "
-    L"opens.",
+    L"The fps box's lock, position, size, colour, VR distance and turn. Right opens the group, Left closes it; it starts closed "
+    L"every time the menu opens.",
     // v0.10.3 phase 28 (MR_FPSLOCK)
-    L"VR only, so greyed in flat. Follow head = the fps box moves with the headset. Fixed in cab = it stays at one spot in the "
-    L"cab, 0.8 m from your seat; X / Y then turn it around you in degrees. No cost.",
-    L"Moves the fps box sideways, in % of the screen (VR fixed in cab: degrees around you). Flat and VR each keep their own "
-    L"position. No cost.",
-    L"Moves the fps box up / down, in % of the screen (VR fixed in cab: degrees, minus = up). Flat and VR each keep their own "
-    L"position. No cost.",
+    L"VR only, so greyed in flat. Follow head = the fps box moves with the headset. Fixed in play space = it stays at one spot "
+    L"around your seat (FPS distance away); X / Y then move it around you in degrees. It does not follow the cab's sway. No cost.",
+    L"Moves the fps box sideways, in % of the screen (VR fixed in play space: degrees around you). Flat and VR each keep their "
+    L"own position. No cost.",
+    L"Moves the fps box up / down, in % of the screen (VR fixed in play space: degrees, minus = up). Flat and VR each keep their "
+    L"own position. No cost.",
     L"Makes the fps box bigger or smaller (0.2 .. 3.0). Raise it if you cannot read it in the headset or on a big screen. No cost.",
+    // phase 44 (MR_FPSCOLOR, MR_FPSDIST, MR_FPSYAW, MR_FPSPITCH, MR_FPSROLL)
+    L"The colour of the fps box's text: 20 colours, each with an outline so it reads on any picture (black on white = dark text, "
+    L"white outline). Flat and VR. No cost.",
+    L"VR only, so greyed in flat. How far away the fps box floats, 0.30 - 3.00 m. It keeps the same size in your view at every "
+    L"distance; only the depth changes. Put it near the depth you look at to read it without refocusing. No cost.",
+    L"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face turns to the right). Use it "
+    L"to angle the box when it sits at the side. 0 = it faces you. No cost.",
+    L"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if lying on the dashboard). "
+    L"0 = it faces you. No cost.",
+    L"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = upright. No cost.",
     // phase 39 (MR_LOG)
     L"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + problems worked around; "
     L"info = + start-up and changes; debug = + statistics, and debug also runs the GPU timers and the CPU profiler.",
@@ -14911,6 +14947,11 @@ int MenuStepRow(int from, int dir) {
 bool  g_menuMoved   = false;                              // the panel placement changed since the menu was opened (close line)
 float g_menuVrBuild = 0.0f;                               // VR: panel scale of eye 0 (the texture is built at it; 0 = none yet)
 float g_fpsVrBuild  = 0.0f;                               // VR: fps box scale of eye 0 (the same for the box; 0 = none yet)
+// phase 44: the fps box colours (fps_color) into the widget cache before each DrawWidget (a compare there; a change rebuilds once)
+inline void FpsSyncColor() {
+    const FpsPose::Color& c = FpsPose::ColorOf(g_fpsColor);
+    TuningMenu::SetWidgetColors(c.tr, c.tg, c.tb, c.lr, c.lg, c.lb);
+}
 bool  g_fpsMoved    = false;                              // an fps box row changed since the menu was opened (close line)
 
 // VR = an eye-texture blit has been seen (the panel is then drawn into the eye textures and the rows edit the VR placement).
@@ -15028,8 +15069,8 @@ void ToggleFpsVrLock(uint64_t n) {
     const XrHook::PoseStats ps = XrHook::GetPoseStats();
     Log("fps box VR lock: %s (fps_vr_lock=%d, tuning menu, Present #%llu) -- fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f are now %s; "
         "OpenXR: hook %s, %llu stereo xrLocateViews seen, %llu xrEndFrame projection layers, layer space type %d (2 = LOCAL); %s",
-        g_fpsVrLock ? "FIXED IN THE CAB" : "follows the headset", g_fpsVrLock, (unsigned long long)n, g_fpsVrX, g_fpsVrY,
-        (double)g_fpsVrScale, g_fpsVrLock ? "yaw / pitch degrees at 0.8 m (+ right, + down) and the size at 0.8 m"
+        g_fpsVrLock ? "FIXED IN THE PLAY SPACE" : "follows the headset", g_fpsVrLock, (unsigned long long)n, g_fpsVrX, g_fpsVrY,
+        (double)g_fpsVrScale, g_fpsVrLock ? "yaw / pitch degrees at fps_vr_dist (+ right, + down) and the size as at 0.8 m"
                                           : "% of the eye picture from its optical centre",
         XrHook::Hooked() ? "installed" : "NOT installed", (unsigned long long)ps.locates, (unsigned long long)ps.endFrames,
         ps.layerSpaceType, MenuVrPathName());
@@ -15059,6 +15100,15 @@ int VrsSizeIndex() {                                      // -1 = custom radii f
     for (int i = 0; i < 3; ++i) if (kVrsSizes[i].inner == g_vrsInner && kVrsSizes[i].outer == g_vrsOuter) return i;
     return -1;
 }
+// phase 44: the Foveated size row is a size SCALER -- value = vrs_outer (the full-detail radius, % of the half picture) in 5 %
+// steps from 100 down to 10; vrs_inner = max(10, value - 25) (the 25-point gap of every preset). True = the radii are on that
+// scale (the row shows "80 %"); false = custom dlaa.ini radii (shown "inner / outer %", the first step snaps to the scale).
+constexpr int kVrsSizeMin = 10, kVrsSizeMax = 100, kVrsSizeStep = 5, kVrsSizeGap = 25;
+inline int VrsInnerFor(int outer) { return outer - kVrsSizeGap < kVrsSizeMin ? kVrsSizeMin : outer - kVrsSizeGap; }
+bool VrsSizeOnScale() {
+    return g_vrsOuter >= kVrsSizeMin && g_vrsOuter <= kVrsSizeMax && g_vrsOuter % kVrsSizeStep == 0 &&
+           g_vrsInner == VrsInnerFor(g_vrsOuter);
+}
 void ToggleVrs(uint64_t n) {
     g_vrsOn = g_vrsOn ? 0 : 1;
     g_vrsExplicit = true;
@@ -15071,18 +15121,34 @@ void ToggleVrs(uint64_t n) {
         (unsigned long long)st.masksBuilt);
     PlayTones(1, g_vrsOn ? 1200 : 300, 150, 0);
 }
-void StepVrsSize(int dir, uint64_t n) {
-    const int cur = VrsSizeIndex();
-    const int next = cur < 0 ? 1 : (cur + (dir > 0 ? 1 : -1));
-    if (next < 0 || next > 2) { PlayTones(1, 200, 120, 0); return; }   // at the end of the list (low beep, as a step row)
-    g_vrsInner = kVrsSizes[next].inner;
-    g_vrsOuter = kVrsSizes[next].outer;
+// phase 44: Right = a bigger sharp centre, Left = a smaller one (5 % steps, 10..100 %; was the three presets wide / balanced /
+// narrow with Right = narrower). Off the scale (custom dlaa.ini radii): the first step goes to the nearest 5 % of vrs_outer in
+// the pressed direction, clamped. Auto-repeat is accepted (a step row). `repeat` only quiets the log.
+void StepVrsSize(int dir, uint64_t n, bool repeat) {
+    const int step = dir > 0 ? kVrsSizeStep : -kVrsSizeStep;
+    int next;
+    if (VrsSizeOnScale()) next = g_vrsOuter + step;
+    else {
+        // the nearest grid value on the pressed side (vrs_outer >= 10 here: LoadConfig clamps it)
+        next = dir > 0 ? (g_vrsOuter / kVrsSizeStep + 1) * kVrsSizeStep : (g_vrsOuter - 1) / kVrsSizeStep * kVrsSizeStep;
+        if (next < kVrsSizeMin) next = kVrsSizeMin;
+        if (next > kVrsSizeMax) next = kVrsSizeMax;
+    }
+    if (next < kVrsSizeMin || next > kVrsSizeMax) { if (!repeat) PlayTones(1, 200, 120, 0); return; }   // at the end (low beep)
+    const int oldIn = g_vrsInner, oldOut = g_vrsOuter;
+    g_vrsOuter = next;
+    g_vrsInner = VrsInnerFor(next);
     g_vrsExplicit = true;
     VrsApplyConfig();
-    Log("Foveated size (VRS): %s -- vrs_inner=%d vrs_outer=%d (%% of the NDC half-size around each eye's optical centre; tuning "
-        "menu, Present #%llu)%s", kVrsSizes[next].logName, g_vrsInner, g_vrsOuter, (unsigned long long)n,
-        g_vrsOn ? "" : " -- Foveated (VRS) is off: used once it is on");
-    PlayTones(1, 600 + 300 * next, 120, 0);
+    const int si = VrsSizeIndex();
+    if (!repeat)
+        Log("Foveated size (VRS): %d %%%s%s -- vrs_inner=%d vrs_outer=%d (was %d / %d; %% of the NDC half-size around each eye's "
+            "optical centre: 2 x 2 shading only past vrs_outer (vrs_quality 1), vrs_inner = max(10, size - 25); tuning menu, Present "
+            "#%llu)%s", g_vrsOuter, si >= 0 ? " = " : "", si >= 0 ? kVrsSizes[si].logName : "", g_vrsInner, g_vrsOuter, oldIn, oldOut,
+            (unsigned long long)n, g_vrsOn ? "" : " -- Foveated (VRS) is off: used once it is on");
+    else
+        LogDbg("Foveated size (VRS): %d %% (vrs_inner=%d vrs_outer=%d, auto-repeat)", g_vrsOuter, g_vrsInner, g_vrsOuter);
+    PlayTones(1, 300 + 9 * g_vrsOuter, 60, 0);
 }
 // phase 40: the menu's Hidden area mask (VR) row -- dlaa.ini xr_hidden_mask live (the next eye scene clear draws / skips it). The
 // OpenXR extension is only requested when it was on at the game's start: switched on later, it waits for a restart (logged; the
@@ -15212,6 +15278,10 @@ void ResetSettings(uint64_t n) {
     g_fpsX = 1; g_fpsY = 1; g_fpsScale = 1.0f;
     g_fpsVrX = 0; g_fpsVrY = -25; g_fpsVrScale = kFpsVrScaleDefault;
     g_fpsVrLock = 0;                                      // v0.10.3 phase 28: follows the headset again
+    g_fpsColor = 0;                                       // phase 44: white, 0.8 m, not turned
+    g_fpsVrDist = FpsPose::kDistDefault;
+    g_fpsVrYaw = g_fpsVrPitch = g_fpsVrRoll = 0;
+    FpsVrLockReset();
     g_fpsExplicit = false;
     g_fpsMoved = true;
     g_xrTurbo = 0;                                        // phase 30: Turbo mode off (the pending wait ends at the next xrEndFrame)
@@ -15237,7 +15307,7 @@ void ResetSettings(uint64_t n) {
     // + fps_vr_lock = 33, the cap raised to kIniMaxKeys; v0.10.3 phase 29b: + menu_vr_dist = 34; phase 30: + xr_turbo = 35;
     // phase 34: + vrs / vrs_inner / vrs_outer = 38; phase 39: + log_level = 39; phase 41: + mirror_turns = 40;
     // phase 40: + xr_hidden_mask = 41; kIniMaxKeys raised 40 -> 48 at the dev merge;
-    // phase 42: + vrs_passes = 42)
+    // phase 42: + vrs_passes = 42; phase 44: + fps_color / fps_vr_dist / fps_vr_yaw / fps_vr_pitch / fps_vr_roll = 47, cap 56)
     static const char* const kKeys[] = {
         "mode", "dlss_preset", "dlaa_area", "sharpness", "sharp_radius", "dlss_upscale", "tex_lod_bias", "tex_lod_bias_cutout",
         "mv_objects", "mirror_dlaa", "mirror_vr_mode", "mirror_flat_mode", "mirror_vr_views", "mirror_mv", "dlaa_pre_tonemap",
@@ -15245,6 +15315,7 @@ void ResetSettings(uint64_t n) {
         "menu_x", "menu_y", "menu_scale", "menu_vr_x", "menu_vr_y", "menu_vr_scale", "menu_vr_depth", "menu_vr_face",
         "menu_vr_dist",                                                                                 // phase 29b
         "fps_show", "fps_x", "fps_y", "fps_scale", "fps_vr_x", "fps_vr_y", "fps_vr_scale", "fps_vr_lock",   // phase 28: + fps_vr_lock
+        "fps_color", "fps_vr_dist", "fps_vr_yaw", "fps_vr_pitch", "fps_vr_roll",                        // phase 44
         "xr_turbo",                                                                                     // phase 30
         "vrs", "vrs_inner", "vrs_outer",                                                                // phase 34
         "vrs_passes",                                                                                   // phase 42
@@ -15265,7 +15336,7 @@ void ResetSettings(uint64_t n) {
             "perf_profile = high mv_fwd_depth = 1 menu_x = 2 menu_y = 8 "
             "menu_scale = 1.0 menu_vr_x = 0 menu_vr_y = -5 menu_vr_scale = 1.0 menu_vr_depth = 12 menu_vr_dist = 100 menu_vr_face = 1 "
             "fps_show = 0 "
-            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 xr_turbo = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 xr_hidden_mask = 0 log_level = %d (%s) -- profile: %s -- "
+            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 xr_turbo = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 xr_hidden_mask = 0 log_level = %d (%s) -- profile: %s -- "
             "dlaa.ini: %d keys removed (hotkeys and other lines kept)", (unsigned long long)n, g_dlaaOn.load() ? "DLSS" : "off",
             (double)kFpsVrScaleDefault, LogLevel(), g_logDebugKey ? "no key: debug = 1 in dlaa.ini" : "no key", changed, kNKeys);
         BeepSeq b;                                        // success: rising two-tone 600 -> 900 Hz, 120 ms each (as SaveSettings)
@@ -16244,9 +16315,11 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         if (noVrs) swprintf(p.rows[MR_VRS].value, kV, L"%ls", g_vrsOn ? L"on (not supported)" : L"not supported");
         else       swprintf(p.rows[MR_VRS].value, kV, L"%ls", onOff[g_vrsOn ? 1 : 0]);
         MenuRow(p, MR_VRSSIZE, L"Foveated size", "dlaa.ini vrs_inner / vrs_outer", vr ? nullptr : "VR only", !vr || noVrs || !g_vrsOn);
+        // phase 44: the size scaler ("80 %", + the preset name when it is one); custom dlaa.ini radii: "inner / outer %"
         const int si = VrsSizeIndex();
-        if (si >= 0) swprintf(p.rows[MR_VRSSIZE].value, kV, L"%ls", kVrsSizes[si].name);
-        else         swprintf(p.rows[MR_VRSSIZE].value, kV, L"%d / %d %%", g_vrsInner, g_vrsOuter);
+        if (si >= 0)               swprintf(p.rows[MR_VRSSIZE].value, kV, L"%d %% (%ls)", g_vrsOuter, kVrsSizes[si].name);
+        else if (VrsSizeOnScale()) swprintf(p.rows[MR_VRSSIZE].value, kV, L"%d %%", g_vrsOuter);
+        else                       swprintf(p.rows[MR_VRSSIZE].value, kV, L"%d / %d %%", g_vrsInner, g_vrsOuter);
         MenuRow(p, MR_VRSPASS, L"Foveated passes", "dlaa.ini vrs_passes", vr ? nullptr : "VR only", !vr || noVrs || !g_vrsOn);   // phase 42
         swprintf(p.rows[MR_VRSPASS].value, kV, L"%ls", g_vrsPasses ? L"scene + lighting" : L"scene");
     }
@@ -16291,7 +16364,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     swprintf(p.rows[MR_FPS].value, kV, L"%ls", onOff[g_fpsShow ? 1 : 0]);
     groupRow(MR_FPSGRP, L"FPS counter settings");         // v0.10.3 phase 29c
     MenuRow(p, MR_FPSLOCK, L"FPS counter lock", "dlaa.ini fps_vr_lock", vr ? nullptr : "VR only", !vr);   // v0.10.3 phase 28
-    swprintf(p.rows[MR_FPSLOCK].value, kV, L"%ls", g_fpsVrLock ? L"Fixed in cab" : L"Follow head");
+    swprintf(p.rows[MR_FPSLOCK].value, kV, L"%ls", g_fpsVrLock ? L"Fixed in play space" : L"Follow head");   // phase 44: was "Fixed in cab"
     MenuRow(p, MR_FPSX, L"FPS counter X", vr ? "dlaa.ini fps_vr_x" : "dlaa.ini fps_x", nullptr, false);
     if (vr) swprintf(p.rows[MR_FPSX].value, kV, L"%+d %%", g_fpsVrX);
     else    swprintf(p.rows[MR_FPSX].value, kV, L"%d %%", g_fpsX);
@@ -16300,6 +16373,17 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     else    swprintf(p.rows[MR_FPSY].value, kV, L"%d %%", g_fpsY);
     MenuRow(p, MR_FPSSIZE, L"FPS counter size", vr ? "dlaa.ini fps_vr_scale" : "dlaa.ini fps_scale", nullptr, false);
     swprintf(p.rows[MR_FPSSIZE].value, kV, L"%.1f", (double)(vr ? g_fpsVrScale : g_fpsScale));
+    // phase 44: colour (flat and VR), VR distance and the VR turn
+    MenuRow(p, MR_FPSCOLOR, L"FPS colour", "dlaa.ini fps_color", nullptr, false);
+    swprintf(p.rows[MR_FPSCOLOR].value, kV, L"%ls", FpsPose::ColorOf(g_fpsColor).name);
+    MenuRow(p, MR_FPSDIST, L"FPS distance (VR)", "dlaa.ini fps_vr_dist", vr ? nullptr : "VR only", !vr);
+    swprintf(p.rows[MR_FPSDIST].value, kV, L"%.2f m", (double)g_fpsVrDist / 100.0);
+    MenuRow(p, MR_FPSYAW, L"FPS turn", "dlaa.ini fps_vr_yaw", vr ? nullptr : "VR only", !vr);
+    swprintf(p.rows[MR_FPSYAW].value, kV, L"%+d deg", g_fpsVrYaw);
+    MenuRow(p, MR_FPSPITCH, L"FPS tilt", "dlaa.ini fps_vr_pitch", vr ? nullptr : "VR only", !vr);
+    swprintf(p.rows[MR_FPSPITCH].value, kV, L"%+d deg", g_fpsVrPitch);
+    MenuRow(p, MR_FPSROLL, L"FPS rotate", "dlaa.ini fps_vr_roll", vr ? nullptr : "VR only", !vr);
+    swprintf(p.rows[MR_FPSROLL].value, kV, L"%+d deg", g_fpsVrRoll);
     MenuRow(p, MR_SAVE, L"Save to dlaa.ini", KeyName(KA_SAVE), nullptr, false);
     swprintf(p.rows[MR_SAVE].value, kV, L"-");
     snprintf(k, sizeof(k), "hold %s %s s", snRight, holdS);   // v0.10.3 phase 29d: was "dlaa.ini" (MenuResetTick)
@@ -16378,7 +16462,7 @@ void MenuClose(uint64_t n, const char* why) {
     if (g_fpsMoved)
         snprintf(fpsPlaced, sizeof(fpsPlaced), " -- fps box now %s, flat x=%d%% y=%d%% size %.1f, VR x=%+d y=%+d (%s) size %.1f (%s or "
                  "the Save row writes it)", g_fpsShow ? "on" : "off", g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY,
-                 g_fpsVrLock ? "degrees, fixed in the cab" : "%, follows the head", (double)g_fpsVrScale, KeyName(KA_SAVE));
+                 g_fpsVrLock ? "degrees, fixed in the play space" : "%, follows the head", (double)g_fpsVrScale, KeyName(KA_SAVE));
     Log("tuning menu closed (%s, Present #%llu)%s%s", why, (unsigned long long)n, placed, fpsPlaced);
     g_menuMoved = false;
     g_fpsMoved = false;
@@ -16392,7 +16476,9 @@ void MenuClose(uint64_t n, const char* why) {
 void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     const bool stepRow = row == MR_SHARP || row == MR_WIDTH || row == MR_LOD || row == MR_LODCUT || row == MR_AREA ||
                          row == MR_POSX || row == MR_POSY || row == MR_SIZE || row == MR_DEPTH || row == MR_FPSX ||
-                         row == MR_FPSY || row == MR_FPSSIZE;
+                         row == MR_FPSY || row == MR_FPSSIZE || row == MR_FPSDIST || row == MR_FPSYAW || row == MR_FPSPITCH ||
+                         row == MR_FPSROLL || row == MR_VRSSIZE;   // phase 44: + the VR distance / turn rows, Foveated size (the
+                                                    //   colour row: fresh presses)
     if (repeat && !stepRow) return;
     const bool vr = MenuVr();
     switch (row) {
@@ -16419,7 +16505,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_OFXR:    break;                                 // information only (dlaa.ini ofxr_bridge, read at start)
     case MR_TURBO:   ToggleXrTurbo(n); break;               // phase 30: Left and Right both switch it (also flat: kept for VR)
     case MR_VRS:     ToggleVrs(n); break;                   // phase 34: Left and Right both switch it (also flat: kept for VR)
-    case MR_VRSSIZE: StepVrsSize(dir, n); break;            // phase 34: Right = narrower (more saving), Left = wider
+    case MR_VRSSIZE: StepVrsSize(dir, n, repeat); break;    // phase 44: Right = bigger sharp centre, Left = smaller (5 % steps)
     case MR_HMASK:   ToggleHiddenMask(n); break;            // phase 40: Left and Right both switch it (also flat: kept for VR)
     case MR_VRSPASS: ToggleVrsPasses(n); break;             // phase 42: two choices, Left and Right both switch
     case MR_LOG:     StepLogLevel(dir, n); break;           // phase 39: Right = more, Left = less (clamped)
@@ -16477,6 +16563,29 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
         float v = std::floor((s + 0.1f * (float)dir) * 10.0f + 0.5f) / 10.0f;
         s = v < 0.2f ? 0.2f : (v > 3.0f ? 3.0f : v);         // phase 15: 0.2..3.0 (was 0.5..3.0)
         g_fpsExplicit = g_fpsMoved = true;
+        break;
+    }
+    case MR_FPSCOLOR:                                       // phase 44: Left / Right walk the 20 presets (wraps)
+        g_fpsColor = FpsPose::StepColor(g_fpsColor, dir);
+        g_fpsExplicit = g_fpsMoved = true;
+        Log("fps box colour: %d = %ls (fps_color, tuning menu, Present #%llu)", g_fpsColor, FpsPose::ColorOf(g_fpsColor).name,
+            (unsigned long long)n);
+        break;
+    case MR_FPSDIST:                                        // phase 44: 5 cm steps (also flat: kept for VR; the row is greyed)
+        g_fpsVrDist = FpsPose::ClampI(g_fpsVrDist + 5 * dir, FpsPose::kDistMin, FpsPose::kDistMax);
+        g_fpsExplicit = g_fpsMoved = true;                  // (no FpsVrLockReset: that would re-capture a non-LOCAL pivot)
+        if (!repeat)
+            Log("fps box VR distance %.2f m (fps_vr_dist=%d, tuning menu, Present #%llu; the same angular size at every distance)",
+                (double)g_fpsVrDist / 100.0, g_fpsVrDist, (unsigned long long)n);
+        break;
+    case MR_FPSYAW: case MR_FPSPITCH: case MR_FPSROLL: {    // phase 44: 5-degree steps
+        int& a = row == MR_FPSYAW ? g_fpsVrYaw : (row == MR_FPSPITCH ? g_fpsVrPitch : g_fpsVrRoll);
+        const int lim = row == MR_FPSYAW ? FpsPose::kYawMax : (row == MR_FPSPITCH ? FpsPose::kPitchMax : FpsPose::kRollMax);
+        a = FpsPose::ClampI(a + 5 * dir, -lim, lim);
+        g_fpsExplicit = g_fpsMoved = true;
+        if (!repeat)
+            Log("fps box VR turn: yaw %+d pitch %+d roll %+d deg (fps_vr_yaw / fps_vr_pitch / fps_vr_roll, tuning menu, Present #%llu)",
+                g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll, (unsigned long long)n);
         break;
     }
     case MR_SAVE:    SaveSettings(n); break;
@@ -16620,6 +16729,7 @@ void MenuDrawAtPresent(IDXGISwapChain* sc, ID3D11DeviceContext* bctx) {
         if (x0 < 0.0f) x0 = 0.0f;
         if (y0 < 0.0f) y0 = 0.0f;
         GpuPerfScope gp(ctx, GpuPerf::kOverlay);          // v0.10.3 phase 29b: the fps box's own GPU cost (per frame)
+        FpsSyncColor();                                   // phase 44
         TuningMenu::DrawWidget(ctx, rtv.Get(), td.Width, td.Height, x0, y0, scale, build, outMode, g_fps.line1, g_fps.line2);
     }
     t_inDlaa = false;
@@ -16719,7 +16829,9 @@ void MenuFacingLog(int eye, const MenuFacing& g, bool facing, float pw, float ph
 // picture (no roll with the head). No depth shift (menu_vr_depth): the per-eye projection gives the stereo depth itself.
 // Result 1 = placed (*cx, *cy = the box centre px, *scale = the draw scale), 0 = no usable OpenXR views (the caller draws the
 // head-locked box; logged once per reason), -1 = not on this eye (behind it / fully outside its picture: nothing drawn).
-constexpr float  kFpsLockDist = 0.8f;                     // m from the reference space origin (or the captured pivot)
+constexpr float  kFpsLockDist = 0.8f;                     // m: the size reference (the head-locked box's angle at 0.8 m)
+// phase 44: the anchor's distance from the space origin / pivot = fps_vr_dist (default 80 cm = kFpsLockDist)
+inline double FpsLockDistM() { return (double)g_fpsVrDist / 100.0; }
 constexpr double kFpsLockStale = 0.5;                     // s: older locate = no usable views (the game paused / no session)
 struct FpsVrLockState {
     bool  pivotHave = false;                              // non-LOCAL spaces: the captured pivot
@@ -16824,8 +16936,9 @@ int FpsVrLockedPlace(int eye, ID3D11Texture2D* tex, const D3D11_RENDER_TARGET_VI
         yaw0 = st.yaw0;
     }
     const double yaw = yaw0 + (double)g_fpsVrX * kRad, pitch = -(double)g_fpsVrY * kRad;
-    const double A[3] = { pivot[0] + kFpsLockDist * std::sin(yaw) * std::cos(pitch), pivot[1] + kFpsLockDist * std::sin(pitch),
-                          pivot[2] - kFpsLockDist * std::cos(yaw) * std::cos(pitch) };
+    const double dA = FpsLockDistM();                    // phase 44: fps_vr_dist (was kFpsLockDist)
+    const double A[3] = { pivot[0] + dA * std::sin(yaw) * std::cos(pitch), pivot[1] + dA * std::sin(pitch),
+                          pivot[2] - dA * std::cos(yaw) * std::cos(pitch) };
     // into the view's space, then through its fov into the picture rect
     const double d[3] = { A[0] - w.px, A[1] - w.py, A[2] - w.pz };
     double p[3];
@@ -16839,7 +16952,8 @@ int FpsVrLockedPlace(int eye, ID3D11Texture2D* tex, const D3D11_RENDER_TARGET_VI
         tx = p[0] / depth; ty = p[1] / depth;
         px = rect[0] + rect[2] * (tx - tl) / (tr - tl);
         py = rect[1] + rect[3] * (tu - ty) / (tu - tdn);
-        k = (double)rect[2] / (double)W * (double)kFpsLockDist / depth;   // the rect's own width (side-by-side: half the texture)
+        // the rect's own width (side-by-side: half the texture); phase 44: x dA / depth = the same angle at every fps_vr_dist
+        k = (double)rect[2] / (double)W * dA / depth;
         if (k > 6.0) k = 6.0;                             // (the head right at the box: keep it sane)
     }
     if (eye >= 0 && eye < kMaxEyes && !st.eyeLogged[eye] && st.lines < 24) {
@@ -16855,7 +16969,7 @@ int FpsVrLockedPlace(int eye, ID3D11Texture2D* tex, const D3D11_RENDER_TARGET_VI
             (double)w.angleUp / kRad, (double)w.angleDown / kRad, uOf(view), vOf(view), measured ? "" : "(not measured yet) ",
             (double)mu, (double)mv, vs.spaceType, vs.locSpaceType, vs.corrected ? "corrected to the submitted pose" : "raw",
             vs.ageSec * 1000.0, g_fpsVrX,
-            -g_fpsVrY, (double)kFpsLockDist, depth, px, py, k, behind ? " -- BEHIND the eye now: not drawn" : "");
+            -g_fpsVrY, dA, depth, px, py, k, behind ? " -- BEHIND the eye now: not drawn" : "");
     }
     // phase 28b: the direction self-check + the once-a-second log for 10 s after the lock-on (eye 0 only). Head yaw / pitch =
     // this view's forward (-z) in the layer space; the anchor's direction FROM THIS EYE; rel = anchor - head. A point to the
@@ -16911,6 +17025,25 @@ int FpsVrLockedPlace(int eye, ID3D11Texture2D* tex, const D3D11_RENDER_TARGET_VI
 // path (the arm point, the late read, the OpenXR release MenuLateOnXrRelease, MenuDrawPreview) draws through here.
 // v0.10.3 phase 29: a panel / fps box that went to the compositor as an OpenXR quad layer (menu_vr_layer = 1, XrHook::
 // OverlayActive) is NOT drawn into the eye picture -- each one separately (the other may still need the in-picture fallback).
+// phase 44: the drawn-in VR fps box's distance / turn, per eye at level 4 whenever the settings change (24 lines in all)
+void FpsDrawnInLog(int eye, int locked, double extra, double ipd, double fx, bool wantTurn, bool turned) {
+    static int s_lines = 0;
+    static int s_key[kMaxEyes][6] = {};
+    static bool s_have[kMaxEyes] = {};
+    if (eye < 0 || eye >= kMaxEyes || s_lines >= 24) return;
+    const int key[6] = { locked, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll, (wantTurn ? 1 : 0) | (turned ? 2 : 0) };
+    if (s_have[eye] && !memcmp(key, s_key[eye], sizeof(key))) return;
+    s_have[eye] = true;
+    memcpy(s_key[eye], key, sizeof(key));
+    ++s_lines;
+    LogDbg("fps box VR (drawn into eye %d, %s): fps_vr_dist %.2f m -> %s; turn yaw %+d pitch %+d roll %+d deg -> %s",
+        eye, locked ? "fixed in the play space" : "following the head", (double)g_fpsVrDist / 100.0,
+        locked ? "the anchor distance (the per-eye projection gives the depth)" : (g_fpsVrDist == FpsPose::kDistDefault
+        ? "the menu_vr_depth shift only (0.8 m)" : "an extra stereo shift"), g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll,
+        !wantTurn ? "flat (not turned)" : (turned ? "a turned perspective quad" : "NOT turned (edge-on to the eye / not drawable: flat box)"));
+    if (!locked && g_fpsVrDist != FpsPose::kDistDefault)
+        LogDbg("fps box VR (eye %d): extra stereo shift %+.1f px (ipd %.1f mm, fx %.0f px)", eye, extra, ipd * 1000.0, fx);
+}
 void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv) {
     const bool menuOpen = g_menuOpen.load(std::memory_order_relaxed) && !(g_menuVrLayer && XrHook::OverlayActive(0));
     const bool fpsShow = g_fpsShow && !(g_menuVrLayer && XrHook::OverlayActive(1));
@@ -16966,11 +17099,43 @@ void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv
         // head-locked placement above, -1 = not on this eye). The build scale stays the head-locked one (the texture is not
         // rebuilt as the distance changes; DrawWidget scales it).
         const int locked = g_fpsVrLock ? FpsVrLockedPlace(eye, t.Get(), rd, W, H, scale, &cx, &cy, &s) : 0;
+        // phase 44: following the head, fps_vr_dist changes the stereo depth -- the extra inward shift of a point at that
+        // distance against the 0.8 m the menu_vr_depth shift stands for (the ipd from the located views, else 63 mm; fx from
+        // this eye's measured projection scale). 80 cm = exactly as before. Fixed in the play space needs none (the per-eye
+        // projection of FpsVrLockedPlace gives the depth itself).
+        float fsx = 0.0f, fsy = 0.0f;
+        VrEyeScale(eye, &fsx, &fsy);
+        const double ffx = 0.5 * (double)W * (double)fsx, ffy = 0.5 * (double)H * (double)fsy;
+        double extra = 0.0, ipd = 0.063;
+        if (locked == 0 && g_fpsVrDist != FpsPose::kDistDefault) {
+            XrHook::Views xv;
+            if (XrHook::LatestViews(&xv) && (xv.flags & 2)) {
+                const double dx = (double)xv.raw[0].px - xv.raw[1].px, dy = (double)xv.raw[0].py - xv.raw[1].py,
+                             dz = (double)xv.raw[0].pz - xv.raw[1].pz;
+                const double m = std::sqrt(dx * dx + dy * dy + dz * dz);
+                if (m > 0.04 && m < 0.09) ipd = m;
+            }
+            extra = FpsPose::ExtraShiftPx(ipd, ffx, (double)g_fpsVrDist / 100.0, (double)kFpsLockDist) * (double)inward;
+            cx += (float)extra;
+        }
         if (locked >= 0) {
             const float bw = TuningMenu::kWidgetRefW * s, bh = TuningMenu::kWidgetRefH * s;
             GpuPerfScope gp(ctx, GpuPerf::kOverlay);      // v0.10.3 phase 29b: the fps box's own GPU cost (per frame: both eyes)
-            TuningMenu::DrawWidget(ctx, rtv, td.Width, td.Height, cx - 0.5f * bw, cy - 0.5f * bh, s, g_fpsVrBuild, outMode,
-                                   g_fps.line1, g_fps.line2);
+            FpsSyncColor();                               // phase 44
+            // phase 44: the box's own turn (fps_vr_yaw / _pitch / _roll) -- a perspective quad about its centre (parallel to the
+            // picture = its normal facing in this path), through this eye's pinhole; not usable (edge-on) = the flat box
+            bool turned = false;
+            float clip[4][4];
+            const bool wantTurn = !FpsPose::TurnIsZero(g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll);
+            if (wantTurn &&
+                FpsPose::TurnedCorners(W, H, (double)u * W, (double)v * H, ffx, ffy, cx, cy, bw, bh, g_fpsVrYaw, g_fpsVrPitch,
+                                       g_fpsVrRoll, 0.0, clip))
+                turned = TuningMenu::DrawWidgetCorners(ctx, rtv, td.Width, td.Height, clip, g_fpsVrBuild, outMode, g_fps.line1,
+                                                       g_fps.line2);
+            if (!turned)
+                TuningMenu::DrawWidget(ctx, rtv, td.Width, td.Height, cx - 0.5f * bw, cy - 0.5f * bh, s, g_fpsVrBuild, outMode,
+                                       g_fps.line1, g_fps.line2);
+            FpsDrawnInLog(eye, locked, extra, ipd, ffx, wantTurn, turned);
         }
     }
     t_inDlaa = false;
@@ -17795,6 +17960,8 @@ void MenuOverlaySet() {
     p.menuDist  = (float)g_menuVrDist / 100.0f;          // v0.10.3 phase 29b (cm -> m)
     p.menuFace  = g_menuVrFace != 0;                     // v0.10.3 phase 29b: the panel / head-following fps box quads
     p.fpsX      = g_fpsVrX;   p.fpsY  = g_fpsVrY;   p.fpsScale  = g_fpsVrScale;
+    p.fpsDist   = (float)g_fpsVrDist / 100.0f;           // phase 44 (cm -> m)
+    p.fpsYaw    = g_fpsVrYaw; p.fpsPitch = g_fpsVrPitch; p.fpsRoll = g_fpsVrRoll;
     // the render thread: the late panel's arm thread (the game's draws on its immediate context), else this Present's thread
     // (the per-frame work runs on the game render thread, also in present-layer mode)
     const unsigned long armTid = g_menuLateTid.load(std::memory_order_relaxed);
@@ -17868,6 +18035,7 @@ bool MenuOverlayDraw(XrHook::OverlayDraw* d) {
         s = (std::min)(kOvFpsDensity * g_fpsVrScale, (std::min)((float)d->w / TuningMenu::kWidgetRefW,
                                                               (float)d->h / TuningMenu::kWidgetRefH));
         g_fpsVrBuild = s;
+        FpsSyncColor();                                  // phase 44
         ok = TuningMenu::DrawWidget(ctx, rtv.Get(), d->w, d->h, 0.0f, 0.0f, s, s, outMode, g_fps.line1, g_fps.line2);
         d->usedW = (uint32_t)std::lround(TuningMenu::kWidgetRefW * s);
         d->usedH = (uint32_t)std::lround(TuningMenu::kWidgetRefH * s);
@@ -19164,6 +19332,12 @@ void LoadConfig() {
 #endif
             if (!strcmp(key, "xr_hidden_mask"))     { g_xrHiddenMask = v != 0 ? 1 : 0; g_xrHiddenMaskExplicit = true; continue; }   // phase 40
             if (!strcmp(key, "vrs_passes"))         { g_vrsPasses = v != 0 ? 1 : 0; g_vrsPassesExplicit = true; continue; }   // phase 42
+            // phase 44: the fps box colour / VR distance / VR turn (outside the else-if chain: C1061)
+            if (!strcmp(key, "fps_color"))          { g_fpsColor = FpsPose::ClampColor(v); continue; }
+            if (!strcmp(key, "fps_vr_dist"))        { g_fpsVrDist = FpsPose::ClampI(v, FpsPose::kDistMin, FpsPose::kDistMax); continue; }
+            if (!strcmp(key, "fps_vr_yaw"))         { g_fpsVrYaw = FpsPose::ClampI(v, -FpsPose::kYawMax, FpsPose::kYawMax); continue; }
+            if (!strcmp(key, "fps_vr_pitch"))       { g_fpsVrPitch = FpsPose::ClampI(v, -FpsPose::kPitchMax, FpsPose::kPitchMax); continue; }
+            if (!strcmp(key, "fps_vr_roll"))        { g_fpsVrRoll = FpsPose::ClampI(v, -FpsPose::kRollMax, FpsPose::kRollMax); continue; }
             // phase 39 (here for the same reason; debug moved out of the WITH_DLAA chain: the log-only build reads it too)
             if (!_stricmp(key, "log_level")) {           // (case-insensitive as log.h's reader)
                 const int lv = LogParseLevel(eq + 1);     // log.h: the same parser as its own early read
@@ -19616,10 +19790,12 @@ void LoadConfig() {
                         "(menu_vr_depth / menu_vr_face; menu_vr_dist unused)",
         g_bindHoldMs);
     Log("fps box (v0.10.0): fps_show=%d (%s), flat fps_x=%d fps_y=%d fps_scale=%.1f, VR fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f "
-        "fps_vr_lock=%d (%s) (the tuning menu's FPS counter rows move it)", g_fpsShow ? 1 : 0,
+        "fps_vr_lock=%d (%s); phase 44: fps_color=%d (%ls) fps_vr_dist=%d cm fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d deg (the "
+        "tuning menu's FPS counter rows change them)", g_fpsShow ? 1 : 0,
         g_fpsShow ? "on: shown also while the menu is closed" : "off", g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY,
-        (double)g_fpsVrScale, g_fpsVrLock, g_fpsVrLock ? "VR: fixed in the cab, fps_vr_x / fps_vr_y = yaw / pitch degrees at 0.8 m"
-                                                       : "VR: follows the headset");
+        (double)g_fpsVrScale, g_fpsVrLock, g_fpsVrLock ? "VR: fixed in the play space, fps_vr_x / fps_vr_y = yaw / pitch degrees "
+                                                         "at fps_vr_dist" : "VR: follows the headset",
+        g_fpsColor, FpsPose::ColorOf(g_fpsColor).name, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll);
     // v0.10.0 phase 6b: the vote participation of instanced / no-MVP draws follows mv_drawid_instanced (default 1, even when the
     // key is absent) -- set it here, after the whole ini is parsed, so both the replay and the vote agree.
     DrawIdMv::SetInstanced(g_didInstancedCfg);

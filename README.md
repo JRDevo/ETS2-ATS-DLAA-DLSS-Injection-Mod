@@ -428,7 +428,8 @@ The three green lines under the title show the game's GPU time per frame, what t
   a row (open / close, up, down, left, right). On this row the open key does not close the menu and a short tap of `Up` /
   `Down` moves to the next row; hold longer to bind. See [`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu).
 - **Groups (v0.10.3):** the panel rows (`Panel position X` / `Y`, `Panel size`, `Panel VR depth`, `Panel faces you`,
-  `Menu keys`) sit in the **Panel settings** group and the fps box rows (`FPS counter lock`, `X`, `Y`, `size`) in the
+  `Menu keys`) sit in the **Panel settings** group and the fps box rows (`FPS counter lock`, `X`, `Y`, `size`, `colour`,
+  `distance`, `turn`, `tilt`, `rotate`) in the
   **FPS counter settings** group, right under the `FPS counter` on / off row. Both groups are closed every time the menu
   opens: select the group row and press `Right` to show its rows, `Left` to hide them again.
 - Every row calls the same function as its hotkey: the hotkeys keep working while the menu is open, and every change
@@ -454,6 +455,17 @@ The three green lines under the title show the game's GPU time per frame, what t
   `FPS counter X`, `FPS counter Y` and `FPS counter size` (in the `FPS counter settings` group) move it; flat and VR keep their own position (`fps_show`,
   `fps_x`, `fps_y`, `fps_scale`, `fps_vr_x`, `fps_vr_y`, `fps_vr_scale` in `dlaa.ini`). Off, it costs nothing.
   The size goes from `0.2` to `3.0`; in VR it starts at `0.3` (small but readable in the headset).
+  - **FPS colour:** 20 colours (white, yellow, amber, orange, red, pink, magenta, purple, violet, blue, sky blue, cyan,
+    teal, mint, green, lime, olive, gold, silver, black on white). Each has an outline, so it reads on any picture
+    (`fps_color`, 0 = white).
+  - **FPS distance (VR):** how far away the box floats, 0.30 - 3.00 m (`fps_vr_dist` in cm, default 80). It keeps the
+    same size in your view at every distance; only the depth changes.
+  - **FPS turn / tilt / rotate (VR):** turn the box itself, in 5 degree steps: turn = left / right, tilt = lean it back
+    like a sticker on the dashboard, rotate = in its own plane (`fps_vr_yaw`, `fps_vr_pitch`, `fps_vr_roll`; 0 = it
+    faces you, as before).
+  - **FPS counter lock (VR):** `Follow head` or `Fixed in play space` (was called `Fixed in cab`). Fixed in play space
+    stays at one spot around your seat. It does NOT follow the truck cab when the cab sways on bumps or hills: the mod
+    has no way yet to know the cab's sway in time (see `docs/DEVELOPMENT.md`, phase 44).
 - **Mirror DLAA** picks how many mirrors get DLAA and how they move: `off`, `1 mirror (largest)` (only the main mirror
   next to you), `1 mirror, camera`, `2 mirrors (largest)`, `2 mirrors, camera`, `all mirrors`, `all, camera motion`.
   Without `camera` each moving part moves exactly in the glass (about 0.4 ms per mirror in VR); with `camera` the mirror
@@ -468,8 +480,9 @@ The three green lines under the title show the game's GPU time per frame, what t
   SSW) does not work while it is on. Switch it off again if the picture judders.
 - **Foveated (VRS)** (`vrs`, off by default; VR only, NVIDIA RTX only; from OpenXR Toolkit): sharp centre, lower detail
   at the edge. The outer ring of each eye picture is shaded once per 2 x 2 pixels, which saves GPU time at a high in-game
-  Scaling. Fences, grass and leaves keep full detail, and so does everything the mod draws itself. **Foveated size** picks
-  how big the sharp centre is: `wide`, `balanced` (default) or `narrow` (`vrs_inner` / `vrs_outer`). On another GPU the
+  Scaling. Fences, grass and leaves keep full detail, and so does everything the mod draws itself. **Foveated size** sets
+  how big the sharp centre is, from 100 % down to 10 % in 5 % steps (`Right` = bigger). 80 % is the default (`balanced`);
+  90 % = `wide`, 65 % = `narrow` (`vrs_outer` = the size, `vrs_inner` = 25 less, at least 10). On another GPU the
   row says `not supported`. Look for blocky edges at the side of your view; switch it off if they bother you.
   **Foveated passes** (`vrs_passes`) picks what it acts on: `scene` (default) = the 3D world only; `scene + lighting`
   = also the game's lighting pass, at the very edge only, for more saving. Test it before you keep it: look for blocky
@@ -545,10 +558,13 @@ The table below lists the commonly used keys:
 | `fps_show` | `0` | live fps box: `1` = a small fps / frame-time box stays on screen, also while the menu is closed. The menu's `FPS counter` row switches it live |
 | `fps_x` / `fps_y` / `fps_scale` | `1` / `1` / `1.0` | fps box, flat: left / top edge in % of the picture (`0`..`95`), size `0.2`..`3.0` (1 = 92 x 44 px at 1080 p) |
 | `fps_vr_x` / `fps_vr_y` / `fps_vr_scale` | `0` / `-25` / `0.3` | fps box, VR: centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size `0.2`..`3.0` (1 = 8 % of the eye width) |
-| `fps_vr_lock` | `0` | fps box, VR (v0.10.3): `0` = follows the headset, `1` = fixed in the cab 0.8 m from your seat; `fps_vr_x` / `fps_vr_y` are then degrees around you (+ = right / down). The menu's `FPS counter lock` row switches it |
+| `fps_vr_lock` | `0` | fps box, VR (v0.10.3): `0` = follows the headset, `1` = fixed in the play space, `fps_vr_dist` from your seat; `fps_vr_x` / `fps_vr_y` are then degrees around you (+ = right / down). It does not follow the cab's sway. The menu's `FPS counter lock` row switches it |
+| `fps_color` | `0` | fps box colour (phase 44): `0`..`19` = white, yellow, amber, orange, red, pink, magenta, purple, violet, blue, sky blue, cyan, teal, mint, green, lime, olive, gold, silver, black on white. The menu's `FPS colour` row |
+| `fps_vr_dist` | `80` | fps box, VR (phase 44): distance in cm (`30`..`300`), same angular size at every distance. The menu's `FPS distance (VR)` row |
+| `fps_vr_yaw` / `fps_vr_pitch` / `fps_vr_roll` | `0` / `0` / `0` | fps box, VR (phase 44): the box's own turn in degrees: yaw `-90`..`90` (+ = its face turns right), pitch `-90`..`90` (+ = its top leans away), roll `-180`..`180` (+ = clockwise). The menu's `FPS turn` / `FPS tilt` / `FPS rotate` rows (5 degree steps) |
 | `xr_turbo` | `0` | VR: `1` = **Turbo mode** (from OpenXR Toolkit): the game no longer waits for the headset each frame, so it can start the next frame sooner. **It turns off the headset's frame smoothing**: ASW (Meta / Oculus), Motion Smoothing, Motion Reprojection (Windows Mixed Reality) and SSW (Virtual Desktop) cannot work with it. It helps only when the CPU is the limit (busy cities, heavy traffic); when the GPU is the limit it gains nothing. The menu's `Turbo mode (VR)` row switches it live, `Shift+F12` saves |
 | `vrs` | `0` | VR, NVIDIA RTX only: `1` = **foveated rendering** (from OpenXR Toolkit): the outer ring of each eye picture is shaded once per 2 x 2 pixels, the centre stays sharp; saves GPU time at a high in-game Scaling. Fences, grass, leaves and the mod's own passes keep full detail. The menu's `Foveated (VRS)` row switches it live, `Shift+F12` saves |
-| `vrs_inner` / `vrs_outer` | `55` / `80` | foveated rendering: ring sizes in % of the half picture around each eye's centre (`10`..`150`); full detail inside `vrs_outer` (with `vrs_quality = 1`), 2 x 2 outside. The menu's `Foveated size` row: `wide` = 65 / 90, `balanced` = 55 / 80, `narrow` = 40 / 65 |
+| `vrs_inner` / `vrs_outer` | `55` / `80` | foveated rendering: ring sizes in % of the half picture around each eye's centre (`10`..`150`); full detail inside `vrs_outer` (with `vrs_quality = 1`), 2 x 2 outside. The menu's `Foveated size` row sets `vrs_outer` 10..100 in 5 % steps and `vrs_inner` = max(10, `vrs_outer` - 25): `wide` = 65 / 90, `balanced` = 55 / 80, `narrow` = 40 / 65; other values from `dlaa.ini` keep working (shown as inner / outer) |
 | `vrs_quality` | `1` | foveated rendering: `1` = full detail inside `vrs_outer`; `0` = the ring between `vrs_inner` and `vrs_outer` is shaded per 2 x 1 pixels too (more saving) |
 | `vrs_passes` | `0` | foveated rendering: what it acts on. `0` = the 3D world only; `1` = also the game's lighting pass, outer ring only (the middle ring stays sharp even with `vrs_quality = 0`). More saving; test it first. The menu's `Foveated passes` row switches it live, `Shift+F12` saves |
 | `vrs_debug` | `0` | foveated rendering, test only (needs `log_level = 4`): `1` = middle ring 2 x 2, outer ring 4 x 4, to see the pattern |

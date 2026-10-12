@@ -63,8 +63,9 @@ log_level = 1
 # Shift+F12 / the Save row writes it here. Not available on other GPUs (the menu row then says "not supported").
 # vrs = 0
 # Ring sizes in % of the half picture around each eye's centre: inside vrs_inner full detail; with vrs_quality = 0 the ring
-# between vrs_inner and vrs_outer is shaded per 2 x 1 pixels; outside vrs_outer per 2 x 2. The menu's Foveated size row:
-# wide = 65 / 90, balanced = 55 / 80 (default), narrow = 40 / 65.
+# between vrs_inner and vrs_outer is shaded per 2 x 1 pixels; outside vrs_outer per 2 x 2. The menu's Foveated size row
+# (phase 44) sets vrs_outer from 100 down to 10 in 5 % steps and vrs_inner = max(10, vrs_outer - 25): wide = 65 / 90,
+# balanced = 55 / 80 (default), narrow = 40 / 65. Other values (10..150) set here keep working.
 # vrs_inner = 55
 # vrs_outer = 80
 # 1 (default) = full detail everywhere inside vrs_outer; 0 = also save in the middle ring (2 x 1).
@@ -528,7 +529,7 @@ log_level = 1
 # fps_scale = 1.0
 # VR: the box CENTRE relative to the eye's optical centre, in % of the eye width / height (-50..50; negative y = up),
 # size 0.2..3.0 (1 = 8 % of the eye width; default 0.3 = about 2.4 %). Drawn into the picture it uses the same inward
-# shift as the panel (menu_vr_depth); as a VR layer (menu_vr_layer = 1) it sits 0.8 m away.
+# shift as the panel (menu_vr_depth); as a VR layer (menu_vr_layer = 1) it sits fps_vr_dist away (default 0.8 m).
 # fps_vr_x = 0
 # fps_vr_y = -25
 # fps_vr_scale = 0.3
@@ -536,8 +537,22 @@ log_level = 1
 # position (the origin of the game's VR tracking space) and you look at it like at a cab instrument. fps_vr_x / fps_vr_y
 # then are DEGREES around you (x + = right, y + = down; default -25 = 25 degrees up) and fps_vr_scale the size it has at
 # 0.8 m. No inward shift (each eye sees it from its own position). Falls back to following the headset while the game's
-# OpenXR view poses are not available. The menu's FPS counter lock row switches it live.
+# OpenXR view poses are not available. The menu's FPS counter lock row switches it live ("Fixed in play space": it is
+# fixed in the VR play space, so it does NOT follow the cab when the game sways the cab on bumps / hills).
 # fps_vr_lock = 0
+# Phase 44: the box's text colour, 0..19 = white (default, as before), yellow, amber, orange, red, pink, magenta, purple,
+# violet, blue, sky blue, cyan, teal, mint, green, lime, olive, gold, silver, black on white. Flat and VR. Menu: FPS colour.
+# fps_color = 0
+# Phase 44, VR: the box's distance in cm (30..300, default 80). It keeps the same size in your view at every distance (the
+# VR layer and the fixed box: a real distance; drawn into the picture and following the head: an extra stereo shift on top
+# of menu_vr_depth). Menu: FPS distance (VR).
+# fps_vr_dist = 80
+# Phase 44, VR: the box's own turn in degrees, on top of its normal facing (0 / 0 / 0 = it faces you, as before):
+# fps_vr_yaw -90..90 (+ = its face turns to the right), fps_vr_pitch -90..90 (+ = its top leans away from you, like lying on
+# the dashboard), fps_vr_roll -180..180 (+ = clockwise). Menu: FPS turn / FPS tilt / FPS rotate (5 degree steps).
+# fps_vr_yaw = 0
+# fps_vr_pitch = 0
+# fps_vr_roll = 0
 
 # ---- Hotkeys -------------------------------------------------------------------------------------------
 # key_<action> = [Shift+][Ctrl+][Alt+]Key, or none to disable the action. The values below are the defaults:

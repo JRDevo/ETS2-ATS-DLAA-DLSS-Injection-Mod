@@ -96,6 +96,9 @@ uint32_t                         g_wTexW = 0, g_wTexH = 0;
 float                            g_wBuild = 0.0f;
 wchar_t                          g_wLast1[kWLine] = {}, g_wLast2[kWLine] = {};
 bool                             g_wHave = false;
+// phase 44 (dlaa.ini fps_color): the text / outline colours of the fps box (SetWidgetColors) and those of the cached texture
+COLORREF                         g_wText = RGB(255, 255, 255), g_wLine = RGB(8, 8, 8);
+COLORREF                         g_wLastText = 0, g_wLastLine = 0;
 std::vector<uint32_t>            g_wPixels;
 
 constexpr UINT kInst = 256;
@@ -513,14 +516,14 @@ bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t 
             if (!t || !t[0]) return;
             SelectObject(dc, pick(f));
             const UINT fl = DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_END_ELLIPSIS | DT_NOPREFIX;
-            SetTextColor(dc, mask ? RGB(255, 255, 255) : RGB(8, 8, 8));
+            SetTextColor(dc, mask ? RGB(255, 255, 255) : g_wLine);   // phase 44: fps_color's outline (was RGB 8,8,8)
             for (LONG dy = -o; dy <= o; dy += o)
                 for (LONG dx = -o; dx <= o; dx += o) {
                     if (!dx && !dy) continue;
                     RECT r{ px(3.0f) + dx, px(y0) + dy, px(W - 3.0f) + dx, px(y1) + dy };
                     DrawTextW(dc, t, -1, &r, fl);
                 }
-            SetTextColor(dc, RGB(255, 255, 255));
+            SetTextColor(dc, mask ? RGB(255, 255, 255) : g_wText);   // phase 44: fps_color's text (was white)
             RECT r{ px(3.0f), px(y0), px(W - 3.0f), px(y1) };
             DrawTextW(dc, t, -1, &r, fl);
         };
@@ -592,7 +595,8 @@ bool EnsureWidgetTexture(ID3D11Device* dev, ID3D11DeviceContext* ctx, const wcha
     wchar_t l1[kWLine], l2[kWLine];
     CopyLine(l1, line1);
     CopyLine(l2, line2);
-    if (g_wTex && g_wHave && std::fabs(g_wBuild - buildScale) < 0.001f && !wcscmp(l1, g_wLast1) && !wcscmp(l2, g_wLast2))
+    if (g_wTex && g_wHave && std::fabs(g_wBuild - buildScale) < 0.001f && !wcscmp(l1, g_wLast1) && !wcscmp(l2, g_wLast2) &&
+        g_wLastText == g_wText && g_wLastLine == g_wLine)    // phase 44: + the colours
         return true;
     const uint32_t w = (uint32_t)std::lround(TuningMenu::kWidgetRefW * buildScale);
     const uint32_t h = (uint32_t)std::lround(TuningMenu::kWidgetRefH * buildScale);
@@ -602,6 +606,8 @@ bool EnsureWidgetTexture(ID3D11Device* dev, ID3D11DeviceContext* ctx, const wcha
     g_wBuild = buildScale;
     memcpy(g_wLast1, l1, sizeof(l1));
     memcpy(g_wLast2, l2, sizeof(l2));
+    g_wLastText = g_wText;
+    g_wLastLine = g_wLine;
     g_wHave = true;
     return true;
 }
@@ -741,6 +747,31 @@ bool DrawWidget(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t 
     const float k = scale / g_wBuild;
     DrawQuad(ctx, rtv, rtW, rtH, x0, y0, (float)g_wTexW * k, (float)g_wTexH * k, outMode, g_wSrv.Get(), true);
     return true;
+}
+
+// phase 44: the fps box turned (fps_vr_yaw / pitch / roll) in the drawn-in VR fallback -- DrawCorners with the box's texture.
+bool DrawWidgetCorners(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, const float clip[4][4],
+                       float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2) {
+    if (!ctx || !rtv || !rtW || !rtH || !clip || !(buildScale > 0.0f)) return false;
+    for (int i = 0; i < 4; ++i) {
+        for (int k = 0; k < 4; ++k)
+            if (!std::isfinite(clip[i][k])) return false;
+        if (!(clip[i][3] > 0.0f)) return false;              // every corner in front of the eye
+    }
+    ComPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    if (!dev || !Ensure(dev.Get())) return false;
+    if (!EnsureWidgetTexture(dev.Get(), ctx, line1, line2, buildScale)) return false;
+    CbData cb{};
+    memcpy(cb.corner, clip, sizeof(cb.corner));
+    cb.opt[3] = 1.0f;                                        // the corners
+    DrawCb(ctx, rtv, rtW, rtH, cb, outMode, g_wSrv.Get(), true);
+    return true;
+}
+
+void SetWidgetColors(uint8_t tr, uint8_t tg, uint8_t tb, uint8_t lr, uint8_t lg, uint8_t lb) {
+    g_wText = RGB(tr, tg, tb);                               // the cache compares them (EnsureWidgetTexture): a change rebuilds once
+    g_wLine = RGB(lr, lg, lb);
 }
 
 void ReleaseWidget() {

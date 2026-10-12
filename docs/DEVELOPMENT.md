@@ -1253,6 +1253,87 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
 - **Not verified (needs the game):** the saving in the `perf eye` lines / menu GPU line; how the half-rate traffic in the glass
   looks (flat and VR); how often the main view's reset forces a full frame while driving.
 
+### Phase 44: fps box colours, VR distance and turn; Foveated size scaler; "attached to truck" investigated, NOT built
+
+- **Colours (`fps_color`, 0..19, default 0).** `src/fps_pose.h` `FpsPose::ColorOf`: 20 named presets (text + outline colour;
+  0 = white text / RGB 8,8,8 outline = the box before phase 44; 19 = black text, white outline). `TuningMenu::SetWidgetColors`
+  (menu.cpp) feeds `RenderWidget`; the colours are part of the widget texture cache key (a change rebuilds it once).
+  `FpsSyncColor` runs before every `DrawWidget` (flat Present, VR eye pictures, the quad layer image). Menu row `FPS colour`
+  (fresh presses, wraps).
+- **VR distance (`fps_vr_dist`, cm 30..300, default 80).** Quad layer (`OvBuildQuadLocked`): the fps quad's `d` (was 0.8 m) in
+  both lock modes; its width scales with `d` (same angle at every distance); the panel / fps layer order compares
+  `menu_vr_dist` with `fps_vr_dist`. Drawn-in, fixed in the play space (`FpsVrLockedPlace`): the anchor distance, size factor
+  `dA / depth` (same angle). Drawn-in, following the head: the box keeps its angular size (it is placed in % of the picture)
+  and gets an EXTRA inward stereo shift `ipd/2 * fx * (1/d - 1/0.8)` on top of `menu_vr_depth` (`FpsPose::ExtraShiftPx`; ipd
+  from the located views when 40..90 mm, else 63 mm; fx from `VrEyeScale`), so 80 cm draws exactly as before.
+- **The box's own turn (`fps_vr_yaw` -90..90, `fps_vr_pitch` -90..90, `fps_vr_roll` -180..180, degrees, default 0).**
+  `FpsPose::TurnQuat` = Ry(+yaw) Rx(-pitch) Rz(-roll) in the box's local OpenXR frame (+z = its front): yaw + = the front
+  turns right, pitch + = the top leans away (lying back on a dashboard), roll + = clockwise. Quad layer: `ComposeTurn`
+  (base facing * turn) for both lock modes (follow head: on top of the `menu_vr_face` facing; fixed: on top of facing the
+  pivot). Drawn-in fallback: all three angles work -- `FpsPose::TurnedCorners` builds the box as a quad parallel to the
+  picture at unit depth through its placed centre, turns it about its centre and projects it with the eye's pinhole
+  (`VrEyeCentre` + `VrEyeScale`) into clip corners (w = depth, perspective-correct), drawn by the new
+  `TuningMenu::DrawWidgetCorners`; a corner at / behind 0.05 (edge-on) falls back to the flat box. The flat (non-VR) box is
+  never turned. Menu rows `FPS turn` / `FPS tilt` / `FPS rotate`, 5 degree steps, auto-repeat.
+- **Lock row renamed:** `Fixed in cab` -> `Fixed in play space` (it is fixed in the game's OpenXR reference space, phase 28).
+  Logs / descriptions follow.
+- **Foveated size scaler (user request).** The row was 3 presets; now `vrs_outer` 10..100 in 5 % steps (`Right` = bigger,
+  auto-repeat), `vrs_inner = max(10, vrs_outer - 25)` (the presets' gap). Value `80 %`, + `(balanced)` / `(wide)` / `(narrow)`
+  when it matches a preset; custom `dlaa.ini` radii (not on that scale, or 101..150) keep working and show `inner / outer %`
+  -- the first step snaps to the nearest 5 % on the pressed side. Reset = balanced (55 / 80) as before.
+- **Menu / ini plumbing:** 5 new rows in the FPS counter settings group (`kMaxRows` 42 -> 47, the group's last row
+  `MR_FPSROLL`, static_asserts extended, `kMenuDesc` in enum order); 5 new keys (Save under `g_fpsExplicit`, Reset removes them;
+  `kIniMaxKeys` 48 -> 56); LoadConfig reads them as standalone `if (...) { ...; continue; }` lines (C1061).
+- **Logs:** level 3: the startup `fps box (v0.10.0): ... phase 44: fps_color=.. fps_vr_dist=.. fps_vr_yaw/pitch/roll=..` line,
+  each menu change (`fps box colour:`, `fps box VR distance`, `fps box VR turn:`, `Foveated size (VRS): 80 % = balanced ...`),
+  Save / Reset lines list the keys. Level 4: `OpenXR overlay: fps box quad (...) -- fps_vr_dist .. turn .. -> pose q=.. p=..`
+  whenever the quad's lock / distance / turn changes; `fps box VR (drawn into eye N, ...)` per eye when the drawn-in settings
+  change (+ the extra stereo shift in px, ipd, fx).
+- **Test:** `tests/fps_pose_test.cpp` (`tests\build_fps_pose_test.bat`, in CI): the presets (20 unique names, preset 0 =
+  the old colours, a text / outline luminance gap > 80), the turn conventions (yaw / pitch / roll signs, unit quaternion,
+  `ComposeTurn` = base * turn), `TurnedCorners` (0/0/0 = the flat box exactly, shift, roll 90 swaps the edges clockwise,
+  yaw / pitch shorten the far edge, edge-on refused), `ExtraShiftPx` (0 at 80 cm, signs, value). 289 checks.
+
+#### "Attached to truck" (`fps_vr_lock = 2`): investigation, why it is not built
+
+- **How the cab moves in VR.** The mod's own motion-vector design already shows it: the game draws its cab interior as a
+  separate CABIN LAYER (viewport depth range [0.9, 1], its own finite projection, cab-relative coordinates) with its own
+  camera, and the per-eye reprojection needs a separate cabin camera R (`R_cabin`, solve buffer floats 16..31) because cab
+  content does not move like the world. The OpenXR side carries no cab information: the game locates the head in its
+  reference space (LOCAL / the seat) and SUBMITS the head pose it rendered with; the cab sway (suspension, braking pitch,
+  bumps, the game's head / seat physics) is only inside the rendered pictures, as a change of the cabin camera
+  (eye-in-cab = seat * sway(t) * head(t)). So a box fixed in the play space (mode 1) is still against the cab whenever the
+  game sways the cab around the seated head -- the user's report on hills / bumps. Not measured in a log yet (nothing logs
+  the cab's motion against the play space today).
+- **What the mod has per frame.** (a) The located / submitted view poses on the CPU (`XrHook::LatestViews`): head in the play
+  space, no cab. (b) Every G-buffer draw's MVP -- but only on the GPU: the game writes its constants into a WRITE_DISCARD ring
+  on the CPU once per frame, the mod copies the used range GPU-to-GPU at the pass LEAVE (`ObjRecord::Flush`) and the pairing /
+  consensus run as compute. (c) `R_cabin` per eye, a frame-to-frame CLIP-SPACE delta (current -> previous clip of static cab
+  content), read back to the CPU through a 3-slot `DO_NOT_WAIT` staging ring: 2-3 frames late, and frames can be skipped.
+- **Why no source is good enough for the quad layer (the default path, `menu_vr_layer = 1`).** The quad pose must be on the
+  CPU before the game's `xrEndFrame`. Option (c) is late by 2-3 frames (~30-45 ms at 72-90 Hz); tracking a motion with a
+  delay t leaves 2 sin(pi f t) of it, which is WORSE than not tracking at all above ~1 / (6 t) = 4 Hz -- exactly the bump
+  band the user complains about (the slow hill pitch would improve). It is also relative: the anchor would be a chain of
+  per-frame deltas, so every skipped readback or bad-consensus frame (car interiors: camera-relative overlays, a moving
+  steering wheel winning the small-cabin rule, phase 19) shifts it for good; and turning a clip-space R into a metric pose
+  needs the cabin projection's depth terms (near / far + the [0.9, 1] viewport mapping), which the mod does not know. Reading
+  the CPU ring directly (keeping the mapped WRITE_DISCARD pointer past Unmap) is undefined behaviour in D3D11: not done.
+- **What a robust version needs (the plan, if wanted):** a ZERO-LAG GPU path, drawn into the eye picture (it then behaves
+  exactly like the dashboard under the runtime's reprojection; no quad layer): (1) pick a reference cab draw per eye by its
+  geometry key from the verdicts (static cab-layer draw, MVP-shaped per the phase 22 layout, not origin-free / camera-relative,
+  biggest IndexCount, never a mover); (2) at lock-on, a compute pass stores the anchor in that draw's MODEL space,
+  a = MVP(t0)^-1 * c0 (c0 = the box centre in that eye's clip space); (3) every frame a vertex-shader variant of the widget draw
+  reads that draw's CURRENT MVP from the ring mirror at its byte offset (known on the CPU at the draw) and places the box at
+  MVP(t) * a (+ the turn as model-space corners); (4) re-acquire: when the key disappears (LOD, buffer pool rotation, truck
+  change) carry a to the new reference draw in a frame where both exist (a' = MVP'(t)^-1 MVP(t) a); no reference (exterior
+  camera, menus, loading) = mode 1 + a once-log; (5) per-10-s stats from a lagged readback of MVP(t) * a. Harness work: a
+  cab-sway scene in `drawid_harness` (the S17 cabin + a swaying cab camera) to check the box stays on the cab to < 0.1 px.
+  A diagnostic first would also settle how big the sway is: log R_cabin vs the head-only prediction from the located poses.
+- **Not verified (needs the game):** colours in flat / VR (quad and drawn-in); fps_vr_dist in both lock modes (the quad's
+  depth, the drawn-in follow-head extra shift feels right, the drawn-in fixed box keeps its angle); the turn signs as seen in
+  the headset on the quad path (the unit test covers the maths and the drawn-in projection, not the runtime); layer order
+  with the panel when both distances are close; the Foveated size scaler's steps.
+
 ### The RenderDoc oracle (done in v0.2)
 
 Capture a frame of the unmodified game to learn empirically: which pass writes
