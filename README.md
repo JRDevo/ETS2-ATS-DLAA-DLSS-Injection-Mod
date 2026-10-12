@@ -11,20 +11,52 @@
 
 # ETS2 & ATS: DLAA & DLSS Injection Mod
 
-An **ETS2 DLSS mod** and **ATS DLSS mod**: NVIDIA DLAA and DLSS upscaling for
-**Euro Truck Simulator 2 (ETS2)** and **American Truck Simulator (ATS)**, on a flat
-screen and in VR, with Windows HDR support. It replaces the game's own anti-aliasing with
-DLAA (NVIDIA's native-resolution AA) and can optionally upscale with DLSS so the
-game renders fewer pixels and the GPU has an easier time.
+An **ETS2 DLSS mod** and **ATS DLSS mod**: NVIDIA DLAA and DLSS for
+**Euro Truck Simulator 2** and **American Truck Simulator**, on a flat screen and in VR, with Windows HDR.
+It replaces the game's own anti-aliasing with DLAA (anti-aliasing at native resolution) and can
+upscale with DLSS for more frame rate.
 
-It installs as a small `dinput8.dll` proxy in the game folder. No launcher, no
-account — a few hotkeys, an in-game tuning menu (`Delete`) and an optional text config.
+It is one small `dinput8.dll` in the game folder. No launcher, no account: a few hotkeys,
+an in-game menu (`Delete`) and an optional text config.
 
 **An NVIDIA RTX GPU is required** (DLAA and DLSS only run on RTX cards).
 
 **Menu:** [Features](#features) · [Download](#-download) · [Requirements](#requirements) · [Install](#install) · [Modes](#modes--the-end-key) · [Flat or VR](#flat-or-vr) · [OFXR Bridge](#ofxr-bridge-vr-frame-generation) · [Render scale](#how-render-scale-works) · [Models](#models-presets--which-one-to-use) · [Controls](#controls) · [Tuning menu](#the-tuning-menu) · [dlaa.ini](#dlaaini) · [Performance](#performance) · [Troubleshooting](#troubleshooting) · [Multiplayer](#multiplayer) · [Build](#build-from-source) · [Report a problem](#reporting-a-problem-what-to-upload) · [License](#license-and-credits)
 
 ## Features
+
+**Picture quality**
+- **DLAA / DLSS** on the whole picture: no shimmer on fences, wires, road marks and shadows.
+- **Mirrors anti-aliased too**, trailer included.
+- **Exact motion for traffic**, wheels, trailers and plates: sharp, no ghosting.
+- Menu and truck-preview screens get anti-aliasing as well.
+- Four DLSS models, switched live with a key.
+- Sharper texture text and adjustable sharpening.
+
+**Flat and VR**
+- One DLL and one `dlaa.ini` for both; VR renders one pass per eye (OpenXR).
+- **Triple screens** in flat: every screen gets its own DLAA. **new**
+- Windows HDR and NVIDIA Smooth Motion work in flat mode.
+- OFXR Bridge (VR frame generation) works alongside.
+- Drivable cars (ATS) get DLAA / DLSS too.
+
+**VR extras and speed**
+- **VR fps counter attached to the vehicle**: rides with the cab; 20 colours. **new**
+- Three VR speed-ups: hidden area mask, foveated lighting, mirrors in turns. **new**
+- DLAA area: process only the middle of each eye.
+
+**Menu**
+- **In-game menu** (`Delete`): every setting, its hotkey, its GPU cost, a short description.
+- Panel and fps counter can be moved and resized, flat and VR.
+- Live CPU and GPU cost per part, and what limits your frame rate.
+
+**Setup**
+- A single `dinput8.dll`; delete it to uninstall.
+- Hotkeys with beeps, usable blind in a headset; every key can be re-bound.
+- Drop in a newer `nvngx_dlss.dll` any time for NVIDIA's newer models.
+- Debug log for bug reports (off by default).
+
+<details><summary><b>More detail on each feature</b></summary>
 
 - **DLAA** — NVIDIA anti-aliasing at the game's render resolution. It removes the shimmer and flicker on
   fences, power lines, road markings and shadows that the game's own AA leaves behind.
@@ -73,6 +105,8 @@ account — a few hotkeys, an in-game tuning menu (`Delete`) and an optional tex
   to uninstall.
 - **Debug log** for bug reports (off by default).
 
+</details>
+
 | Tuning menu, groups closed | Tuning menu, groups open | FPS counter colours |
 |---|---|---|
 | ![The tuning menu, all groups closed](docs/images/tuning-menu.png) | ![The tuning menu, all groups open](docs/images/tuning-menu-all-open.png) | ![The fps counter in its 20 colours](docs/images/fps-counter-colours.png) |
@@ -87,9 +121,18 @@ This is an unofficial fan project. It is not affiliated with, or endorsed by, SC
 Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
-> Status: v0.12.0. New: triple screens / multi-monitor in flat (issue #12), the VR fps counter attached to the vehicle, fps counter colours / brightness / distance / turn, the menu in categories with a CPU | GPU cost column, and three VR speed-ups (hidden area mask, foveated lighting pass, mirrors in turns). v0.11.0: Turbo mode (VR), foveated rendering (VRS), logging levels in the menu, about half the GPU cost for the per-part motion vectors in busy cities, fixes for issue #8 (OptiScaler: mirror DLAA starts off) and issue #9 (DLSS stopped on the eyes after a VR minimize / restore). v0.10.3: in VR the tuning menu and the fps box are OpenXR quad layers placed by the headset (`menu_vr_layer`): steady, never covered by the game's menus, at a real distance (`menu_vr_dist`), with the fps box optionally fixed in the cab (`fps_vr_lock`). Hold a key or wheel button on a menu row to bind it; Reset to defaults is a 5 s hold; Panel / FPS settings are collapsible groups. v0.10.2 (unpublished): VR performance pass (`mv_cons_fail_tol`, mirror units pre-built on the loading screen, `mv_area_clip`, camera-only mirrors `mirror_mv`), the 7-choice Mirror DLAA row, wheel / D-pad bindings. The DLSS
-> *upscaling* path (render below native, reconstruct up) runs in VR but is still
-> being tuned. Treat upscaling as experimental. The OFXR Bridge handling is not yet tested in a headset with the bridge armed.
+> Status: v0.12.0. New: triple screens in flat, the VR fps counter attached to the vehicle, a menu in categories with a CPU | GPU cost column, and three VR speed-ups.
+> See the [Releases page](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/releases) for every version.
+> DLSS upscaling in VR is still being tuned; treat it as experimental.
+
+<details><summary>Older versions</summary>
+
+v0.11.0: Turbo mode (VR), foveated rendering (VRS), logging levels in the menu, about half the GPU cost for the per-part motion vectors in busy cities, fixes for issue #8 (OptiScaler: mirror DLAA starts off) and issue #9 (DLSS stopped on the eyes after a VR minimize / restore). v0.10.3: in VR the tuning menu and the fps box are OpenXR quad layers placed by the headset (`menu_vr_layer`): steady, never covered by the game's menus, at a real distance (`menu_vr_dist`), with the fps box optionally fixed in the cab (`fps_vr_lock`). Hold a key or wheel button on a menu row to bind it; Reset to defaults is a 5 s hold; Panel / FPS settings are collapsible groups. v0.10.2 (unpublished): VR performance pass (`mv_cons_fail_tol`, mirror units pre-built on the loading screen, `mv_area_clip`, camera-only mirrors `mirror_mv`), the 7-choice Mirror DLAA row, wheel / D-pad bindings. The DLSS
+*upscaling* path (render below native, reconstruct up) runs in VR but is still
+being tuned. Treat upscaling as experimental. The OFXR Bridge handling is not yet tested in a headset with the bridge armed.
+
+</details>
+
 ---
 
 ## Requirements
