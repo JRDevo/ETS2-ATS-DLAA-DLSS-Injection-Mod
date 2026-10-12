@@ -481,8 +481,9 @@ The three green lines under the title show the game's GPU time per frame, what t
     - `Attached to vehicle`: the box sits on the cab like a sticker and sways with it, in trucks and in cars. It is
       placed where it was when you picked this choice (`X` / `Y` / distance / turn still move it, inside the cab).
       It needs DLAA on with `Per-part motion vectors` on (the defaults). Without them, in the outside camera, in menus
-      and while loading it acts like `Fixed in play space` until the cab is back. After a truck change it finds the
-      new cab by itself after about a second.
+      and while loading it is exactly the `Fixed in play space` box (also as a quad layer) until you are steadily back
+      in the cab. It only takes its spot when both eyes see the cab and the headset position is known. After a truck
+      change it finds the new cab by itself after about a second.
 
     Which to pick: `Attached to vehicle` if you want it to look like part of the dashboard; `Fixed in play space` if
     you want it calm while the cab shakes; `Follow head` if you always want to see it.

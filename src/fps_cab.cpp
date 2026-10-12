@@ -21,6 +21,10 @@ constexpr int  kRelockBlits = 90;                       // blits of an eye with 
 constexpr int  kLockRetryBlits = 144;                   // a lock that found no usable part: try again after ~1 s (2 eyes x 72 Hz)
 constexpr double kAgreeM = 0.015, kDemoteM = 0.03;      // monitor: parts agree within 1.5 cm; a part 3 cm off the group moves
 constexpr int  kLogLines = 32;                          // level-3 / level-4 event lines per kind (no flood)
+// phase 47b: lock on only after this many blits in a row (both eyes) with cab draws in a flushed record and usable OpenXR poses (~0.5 s at 72 Hz):
+// never during a loading screen / its first frames (ATS 14:32 test: lock #1 on a loading picture, eye 1 only, no pose)
+constexpr int  kLockSteady = 72;
+constexpr int  kLockRefuseRetry = 36;                   // a refused lock (one eye only / no pose): try again after ~0.25 s
 
 struct Cand {
     int i = -1;                                         // index in the record
@@ -78,6 +82,8 @@ struct EyeCur {
     int why = kNoBlit;
     uint32_t noMatch = 0;
     bool noCabLogged = false;
+    int latchAge = 99;                                  // phase 47b: Latches (Presents) since this eye's last blit (0 = this frame;
+                                                        // 1 is accepted too: a Present between the two eyes' blits)
 };
 struct St {
     bool active = false;
@@ -94,9 +100,16 @@ struct St {
     int lockFails = 0;
     int linesLock = 0, linesWhy = 0, linesReacq = 0, linesDemote = 0, linesRelock = 0;
     int lastWhy = -1;
+    // phase 47b: the per-frame attach decision (Latch) + the lock gate
+    bool latched = false;
+    int onRun = 0, offRun = 0;
+    uint32_t hist = 0;                                  // bit i = frame -i was NOT attachable (the last 8 frames)
+    uint64_t steady = 0;                                // blits in a row with cab draws + usable poses (the lock gate)
+    uint64_t latchOn = 0, latchOff = 0, held = 0, monitors = 0, lockRefusals = 0;
+    int linesLatch = 0;
     // the 10-s window (level 4)
     ULONGLONG winT0 = 0;
-    uint64_t wAttached = 0, wFallback = 0, wWhy[kWhyCount] = {}, wReacq = 0, wMon = 0;
+    uint64_t wAttached = 0, wFallback = 0, wWhy[kWhyCount] = {}, wReacq = 0, wMon = 0, wHeld = 0, wFrOn = 0, wFrOff = 0;
     double maxDev = 0.0, sumDev2 = 0.0, maxJump = 0.0;
     int nDev = 0;
     double lastPlay[3] = {};
@@ -108,7 +121,8 @@ const char* const kWhyNames[kWhyCount] = {
     "attached", "mode 2 not active", "no world blit of this eye this frame (menu / loading / preview picture)",
     "no flushed draw record (DLAA / motion vectors / per-part motion off or passive)", "locking on (waiting for the readback)",
     "no cab draw in this picture (exterior camera / no cabin layer)", "none of the lock's cab parts in this picture",
-    "the attached-box shader is not ready / failed",
+    "the attached-box shader is not ready / failed", "settling (the attach must hold 8 frames in a row first)",
+    "stale (a newer pass started since this eye's blit)",
 };
 
 int Gather(DrawIdRecord& rec, Cand* out, int cap) {
@@ -196,7 +210,7 @@ void BuildCorners() {
 
 void ResetWindow() {
     g.winT0 = GetTickCount64();
-    g.wAttached = g.wFallback = g.wReacq = g.wMon = 0;
+    g.wAttached = g.wFallback = g.wReacq = g.wMon = g.wHeld = g.wFrOn = g.wFrOff = 0;
     memset(g.wWhy, 0, sizeof(g.wWhy));
     g.maxDev = g.sumDev2 = g.maxJump = 0.0;
     g.nDev = 0;
@@ -294,7 +308,8 @@ void ProcessLock(Snap& sn, const float* data) {
         for (int b = a; b > 0 && ics[ord[b]] > ics[ord[b - 1]]; --b) { const int t = ord[b]; ord[b] = ord[b - 1]; ord[b - 1] = t; }
     int ref = -1;
     for (int q = 0; q < nk && ref < 0; ++q) if (v[ord[q]][0].ok && v[ord[q]][1].ok) ref = ord[q];   // in both eyes first
-    for (int q = 0; q < nk && ref < 0; ++q) if (v[ord[q]][0].ok || v[ord[q]][1].ok) ref = ord[q];
+    // phase 47b: BOTH eyes or no lock (the ATS 14:32 lock #1 was eye 1 only: a loading picture, no IPD, no pose) -- one eye is
+    // refused below, the lock is tried again
     const bool lg4 = (LogLevel() >= 4);
     if (lg4 && g.linesLock < kLogLines) {
         ++g.linesLock;
@@ -310,15 +325,28 @@ void ProcessLock(Snap& sn, const float* data) {
         }
         LogDbg("fps box attached to vehicle: lock-on readback -- %d cab draw(s) (eye 0: %d, eye 1: %d; biggest IndexCount first): %s -> "
                "reference: %s", nk, sn.eye[0].n, sn.eye[1].n, nk ? buf : "none",
-               ref < 0 ? "NONE usable" : "the biggest part usable in both eyes (else in one)");
+               ref < 0 ? "NONE usable in both eyes" : "the biggest part usable in both eyes");
+    }
+    // phase 47b: no OpenXR pose of either eye = refused too (the box would be placed from the eye's own view: not where lock 1 is)
+    const bool posesOk = sn.eye[0].xrOk && sn.eye[1].xrOk;
+    if (ref >= 0 && !posesOk) {
+        ++g.lockRefusals;
+        g.nextLock = g.blits + kLockRefuseRetry;
+        if (g.linesLock < kLogLines) {
+            ++g.linesLock;
+            Log("fps box attached to vehicle: lock-on REFUSED -- no usable OpenXR pose of %s (the views located in a VIEW space / "
+                "untracked: a loading screen?); trying again", !sn.eye[0].xrOk && !sn.eye[1].xrOk ? "either eye" : (!sn.eye[0].xrOk ? "eye 0" : "eye 1"));
+        }
+        return;
     }
     if (ref < 0) {
         ++g.lockFails;
-        g.nextLock = g.blits + kLockRetryBlits;
+        if (sn.eye[0].n == 0 || sn.eye[1].n == 0) ++g.lockRefusals;
+        g.nextLock = g.blits + ((sn.eye[0].n == 0 || sn.eye[1].n == 0) ? kLockRefuseRetry : kLockRetryBlits);
         if (g.linesLock < kLogLines) {
             ++g.linesLock;
-            Log("fps box attached to vehicle: no usable cab draw in the lock-on readback (%d candidate(s); try %d) -- the box stays "
-                "fixed in the play space, trying again in ~1 s", nk, g.lockFails);
+            Log("fps box attached to vehicle: no cab draw usable in BOTH eyes in the lock-on readback (%d candidate(s), eye 0: %d, eye 1: "
+                "%d; try %d) -- the box stays fixed in the play space, trying again", nk, sn.eye[0].n, sn.eye[1].n, g.lockFails);
         }
         return;
     }
@@ -430,6 +458,7 @@ void ProcessLock(Snap& sn, const float* data) {
 void ProcessMonitor(Snap& sn, const float* data) {
     LockSt& L = g.lk;
     ++g.wMon;
+    ++g.monitors;
     for (int e = 0; e < 2; ++e) {
         const SnapEye& se = sn.eye[e];
         if (!se.done || se.n < 1) continue;
@@ -540,12 +569,14 @@ void LogWindow() {
         int dem = 0;
         for (int e = 0; e < g.lk.n; ++e) if (g.lk.e[e].demoted) ++dem;
         const int r0 = g.eye[0].lastEntry, r1 = g.eye[1].lastEntry;
-        LogDbg("fps box attached to vehicle (%.0f s): %llu eye picture(s) attached, %llu drawn fixed in the play space instead%s%s%s | "
+        LogDbg("fps box attached to vehicle (%.0f s): %llu frame(s) attached (%llu eye pictures drawn, %llu held without a box), %llu frame(s) "
+               "fixed in the play space%s%s%s | monitor readbacks %llu, lock refusals %llu (total) | "
                "lock #%llu %s: part in use eye 0 %d (IndexCount %u), eye 1 %d (IndexCount %u); %d part(s), %d moving; re-acquires %llu "
                "(total %llu), new locks after a cab change %llu | THE CAB AGAINST THE PLAY SPACE (the attached box vs its spot at the lock, %llu "
                "readbacks ~0.5 s apart in this window): max %.1f cm, rms %.1f cm; largest change between two readbacks %.1f cm",
-               (double)(now - g.winT0) / 1000.0, (unsigned long long)g.wAttached, (unsigned long long)g.wFallback, o ? " (" : "",
-               o ? wh : "", o ? ")" : "", (unsigned long long)g.locks, g.lk.have ? "held" : "NOT held (locking / none)", r0,
+               (double)(now - g.winT0) / 1000.0, (unsigned long long)g.wFrOn, (unsigned long long)g.wAttached, (unsigned long long)g.wHeld,
+               (unsigned long long)g.wFrOff, o ? " (" : "",
+               o ? wh : "", o ? ")" : "", (unsigned long long)g.wMon, (unsigned long long)g.lockRefusals, (unsigned long long)g.locks, g.lk.have ? "held" : "NOT held (locking / none)", r0,
                r0 >= 0 && r0 < g.lk.n ? g.lk.e[r0].ic : 0u, r1, r1 >= 0 && r1 < g.lk.n ? g.lk.e[r1].ic : 0u, g.lk.n, dem,
                (unsigned long long)g.wReacq, (unsigned long long)g.reacq, (unsigned long long)g.relocks, (unsigned long long)g.nDev,
                g.maxDev * 100.0, g.nDev ? std::sqrt(g.sumDev2 / g.nDev) * 100.0 : 0.0, g.maxJump * 100.0);
@@ -572,8 +603,9 @@ void SetActive(bool on, uint64_t frame) {
     if (on == g.active) return;
     g.active = on;
     DropLock();
-    for (EyeCur& c : g.eye) { c.srv.Reset(); c.frame = ~0ull; c.why = kNoBlit; c.noCabLogged = false; }
+    for (EyeCur& c : g.eye) { c.srv.Reset(); c.frame = ~0ull; c.why = kNoBlit; c.noCabLogged = false; c.latchAge = 99; }
     g.lastWhy = -1;
+    g.latched = false; g.onRun = g.offRun = 0; g.hist = 0; g.steady = 0;   // phase 47b
     ResetWindow();
     Log("fps box attached to vehicle: %s (Present #%llu)", on ? "ON -- locking on to the cab at the next world frame" : "off",
         (unsigned long long)frame);
@@ -595,6 +627,7 @@ void OnBlit(ID3D11DeviceContext* ctx, int eye, DrawIdRecord& rec, uint64_t seria
     cur.frame = frame;
     cur.srv.Reset();
     cur.entry = -1;
+    cur.latchAge = 0;
     PollSnaps(ctx);
     // the open snapshot: only the frame's second eye pass (serial + 1) joins it; anything else closes it (the opener's eye only)
     if (g.open >= 0) {
@@ -603,14 +636,17 @@ void OnBlit(ID3D11DeviceContext* ctx, int eye, DrawIdRecord& rec, uint64_t seria
     }
     if (!rec.Usable()) {
         cur.why = kNoRecord;
+        g.steady = 0;
         LogWindow();
         return;
     }
+    // phase 47b: the lock gate -- cab draws in a flushed record + usable poses, kLockSteady blits in a row
+    if (xr.ok && AnyCab(rec)) ++g.steady; else g.steady = 0;
     if (!g.lk.have) {
         Cand c[kCand];
         const int n = Gather(rec, c, kCand);
         cur.why = n ? kLocking : kNoCab;
-        if (n && g.open < 0 && frameStart && g.blits >= g.nextLock) {
+        if (n && g.open < 0 && frameStart && g.blits >= g.nextLock && g.steady >= (uint64_t)kLockSteady) {
             bool pending = false;
             for (const Snap& s : g.snap) if (s.state == 2 && s.kind == 1 && s.gen == g.lk.gen) pending = true;
             if (!pending) OpenSnap(ctx, 1, xr.local, frame, serial);
@@ -687,12 +723,14 @@ void OnBlit(ID3D11DeviceContext* ctx, int eye, DrawIdRecord& rec, uint64_t seria
     LogWindow();
 }
 
-bool Get(int eye, uint64_t frame, Place* out, int* why) {
+bool Get(int eye, uint64_t passSeq, Place* out, int* why) {
     int w = kOk;
     if (!g.active) w = kInactive;
-    else if (eye < 0 || eye > 1 || g.eye[eye].frame == ~0ull || frame > g.eye[eye].frame + 1) w = kNoBlit;
+    else if (eye < 0 || eye > 1 || g.eye[eye].frame == ~0ull || g.eye[eye].latchAge > 1) w = kNoBlit;
+    else if (passSeq > g.eye[eye].serial + 2) w = kStale;           // a newer pass than this frame's two may have reset the slot
     else w = g.eye[eye].why;
     if (w == kOk && (!g.eye[eye].srv || g.eye[eye].entry < 0 || g.eye[eye].entry >= g.lk.n)) w = kNotFound;
+    if (w == kOk && !g.latched) w = kSettling;                         // phase 47b: the frame's verdict decides, not the eye
     if (why) *why = w;
     if (w != kOk || !out) return false;
     const EyeCur& c = g.eye[eye];
@@ -703,23 +741,48 @@ bool Get(int eye, uint64_t frame, Place* out, int* why) {
     return true;
 }
 
-void NoteDraw(bool attached, int why) {
-    if (attached) { ++g.attached; ++g.wAttached; why = kOk; }
-    else { ++g.fallback; ++g.wFallback; if (why > 0 && why < kWhyCount) ++g.wWhy[why]; }
-    if (why != g.lastWhy) {
-        if (g.lastWhy != -1 && g.linesWhy < kLogLines) {
-            ++g.linesWhy;
-            Log("fps box attached to vehicle: %s%s", why == kOk ? "ATTACHED to the cab again" : "drawn FIXED IN THE PLAY SPACE for now -- ",
-                why == kOk ? "" : kWhyNames[why]);
-        } else if (g.lastWhy == -1 && g.linesWhy < kLogLines) {
-            ++g.linesWhy;
-            Log("fps box attached to vehicle: first draw -- %s%s", why == kOk ? "attached to the cab" : "fixed in the play space for now: ",
-                why == kOk ? "" : kWhyNames[why]);
+// phase 47b: the frame's verdict at Present -> the hysteresis. A frame is attachable when both eyes had their blit with the attached
+// placement available; the reason of the first eye that had not is kept for the log.
+void Latch() {
+    if (!g.active) { g.latched = false; g.onRun = g.offRun = 0; g.hist = 0; return; }
+    int why = kOk;
+    for (int e = 0; e < 2 && why == kOk; ++e) {
+        const EyeCur& c = g.eye[e];
+        if (c.latchAge > 1) why = kNoBlit;
+        else if (c.why != kOk || !c.srv || c.entry < 0) why = c.why != kOk ? c.why : kNotFound;
+    }
+    for (EyeCur& c : g.eye) if (c.latchAge < 99) ++c.latchAge;
+    if (why == kOk) { ++g.onRun; g.offRun = 0; } else { ++g.offRun; g.onRun = 0; }
+    g.hist = ((g.hist << 1) | (why == kOk ? 0u : 1u)) & 0xFFu;
+    int misses = 0;
+    for (uint32_t h = g.hist; h; h &= h - 1) ++misses;
+    const bool was = g.latched;
+    // on: kOnFrames attachable frames in a row; off: kOffFrames of the last 8 frames not attachable (in a row or not: a loading
+    // screen whose every 3rd frame looks attachable must not flap -- ATS 14:32 test)
+    if (!g.latched && g.onRun >= kOnFrames) g.latched = true;
+    else if (g.latched && misses >= kOffFrames) g.latched = false;
+    if (g.latched) ++g.wFrOn; else { ++g.wFrOff; if (why > 0 && why < kWhyCount) ++g.wWhy[why]; }
+    if (was != g.latched) {
+        (g.latched ? g.latchOn : g.latchOff)++;
+        if (g.linesLatch < kLogLines) {
+            ++g.linesLatch;
+            if (g.latched)
+                Log("fps box attached to vehicle: ATTACHED to the cab (%d frames in a row with both eyes attachable; switch #%llu)",
+                    kOnFrames, (unsigned long long)(g.latchOn + g.latchOff));
+            else
+                Log("fps box attached to vehicle: drawn FIXED IN THE PLAY SPACE (as lock 1: the quad layer / drawn in) -- %d of the last 8 frames without "
+                    "the attach, last reason: %s (switch #%llu)", kOffFrames, kWhyNames[why], (unsigned long long)(g.latchOn + g.latchOff));
         }
-        g.lastWhy = why;
     }
 }
 
+bool Attached() { return g.active && g.latched; }
+
+void NoteDraw(bool attached, int why) {
+    (void)why;
+    if (attached) { ++g.attached; ++g.wAttached; }
+    else { ++g.held; ++g.wHeld; }                                     // attached frame, this eye could not: no box (never the other kind)
+}
 void Shutdown() {
     for (Snap& s : g.snap) { s.buf.Reset(); s.state = 0; }
     for (EyeCur& c : g.eye) { c.srv.Reset(); c.frame = ~0ull; c.why = kNoBlit; }
@@ -735,6 +798,9 @@ Stats GetStats() {
     s.refEntry[0] = g.eye[0].lastEntry; s.refEntry[1] = g.eye[1].lastEntry;
     s.lockFrame = g.lk.frame;
     s.devMaxM = g.maxDev; s.devN = g.nDev;
+    s.lockEyes = g.lk.have ? g.lk.eyesUsed : 0; s.lockXr = g.lk.have && g.lk.xr;
+    s.monitors = g.monitors; s.latchOn = g.latchOn; s.latchOff = g.latchOff; s.held = g.held; s.lockRefusals = g.lockRefusals;
+    s.latched = g.latched;
     return s;
 }
 

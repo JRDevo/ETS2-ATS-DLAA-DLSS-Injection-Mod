@@ -6,6 +6,9 @@
 //           record's GPU mirror -- zero lag, it sways with the cab. Lagged monitor readbacks drop moving parts (steering wheel) and
 //           measure the cab against the play space (level 4). No record / no cab draw (DLAA or per-part motion off, exterior camera,
 //           menus) = drawn as lock 1. Never a quad layer (MenuOverlaySet). docs/DEVELOPMENT.md phase 47; tests\fps_cab_test.cpp.
+//           47b: one attach decision per frame (FpsCab::Latch at Present, hysteresis 8 on / 3 of 8 off); a fixed frame is lock 1
+//           exactly (the quad with menu_vr_layer = 1), an attached frame the attached box or none; Get refuses a pass older than
+//           this frame's two (g_passSeq); a lock needs both eyes, poses and 72 steady blits.
 // phase 45 -- MENU COST COLUMN "CPU | GPU" + LIMIT LINE; MEASURING ONLY WHILE ASKED. The cost column shows CPU (blue) | GPU
 //           (orange) ms per frame per row (VR: GPU = both eyes; ink marks TuningMenu::kInkCpu / kInkGpu / kInkEnd, menu.cpp
 //           inkText); CPU from the cpu_prof.h profiler, now also on while the menu is open (MenuPerfOpen / MenuPerfClose,
@@ -17887,7 +17890,7 @@ bool FpsCabDraw(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv, 
     FpsCabSync(g_frames.load(std::memory_order_relaxed));
     FpsCab::Place pl;
     int why = FpsCab::kInactive;
-    bool ok = FpsCab::Get(eye, g_frames.load(std::memory_order_relaxed), &pl, &why);
+    bool ok = FpsCab::Get(eye, g_passSeq, &pl, &why);   // phase 47b: only this frame's newest passes (never a stale mirror)
     if (ok) {
         // the draw's NDC covers the eye's picture: the whole texture, or (a side-by-side / array swapchain image) its sub-rect
         float map[4] = { 1.0f, 1.0f, 0.0f, 0.0f };
@@ -17941,7 +17944,10 @@ void FpsDrawnInLog(int eye, int locked, double extra, double ipd, double fx, boo
 void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv) {
     const bool menuOpen = g_menuOpen.load(std::memory_order_relaxed) && !(g_menuVrLayer && XrHook::OverlayActive(0));
     // phase 47: attached to the vehicle = never a quad (MenuOverlaySet does not ask for one): always drawn in here
-    const bool fpsShow = g_fpsShow && (g_fpsVrLock == 2 || !(g_menuVrLayer && XrHook::OverlayActive(1)));
+    // phase 47b: but only on the frames FpsCab decided to show attached (Latch, at Present, with hysteresis); the others are lock 1
+    // exactly (the quad with menu_vr_layer = 1, MenuOverlaySet asks for it then) -- one box per eye picture, one kind per frame
+    const bool cabOn = g_fpsVrLock == 2 && FpsCab::Attached();
+    const bool fpsShow = g_fpsShow && (cabOn || !(g_menuVrLayer && XrHook::OverlayActive(1)));
     if (eye < 0 || eye >= kMaxEyes || t_inDlaa || !rtv || !(menuOpen || fpsShow)) return;
     Microsoft::WRL::ComPtr<ID3D11Resource> res;
     rtv->GetResource(res.GetAddressOf());
@@ -17989,7 +17995,9 @@ void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv
         if (eye == 0 || g_fpsVrBuild <= 0.0f) g_fpsVrBuild = scale;     // one build scale for both eyes and the mirror
         // phase 47: attached to the vehicle -- placed on the GPU from this picture's cab draw (FpsCabDraw); not possible now (no
         // cab draw / record / lock yet) = the fixed-in-play-space box below (FpsVrLockedPlace treats lock 2 as 1)
-        if (g_fpsVrLock == 2 && FpsCabDraw(ctx, eye, rtv, t.Get(), rd, td.Width, td.Height, outMode)) {
+        // phase 47b: an attached frame draws the attached box or (this eye cannot have it now) NOTHING -- never the fixed one too
+        if (cabOn) {
+            FpsCabDraw(ctx, eye, rtv, t.Get(), rd, td.Width, td.Height, outMode);
             t_inDlaa = false;
             return;
         }
@@ -18855,7 +18863,9 @@ void MenuOverlaySet() {
     XrHook::OverlayParams p;
     p.enabled   = g_menuVrLayer != 0;
     p.menuOpen  = g_menuOpen.load(std::memory_order_relaxed);
-    p.fpsShow   = g_fpsShow && g_fpsVrLock != 2;         // phase 47: attached to the vehicle = drawn into the eye pictures only
+    FpsCabSync(g_frames.load(std::memory_order_relaxed));   // phase 47b: this frame's attach verdict -> the next frame's box kind
+    FpsCab::Latch();
+    p.fpsShow   = g_fpsShow && !(g_fpsVrLock == 2 && FpsCab::Attached());   // phase 47 / 47b: attached = drawn in only, else the quad
     p.fpsLock   = g_fpsVrLock ? 1 : 0;
     p.menuX     = g_menuVrX;  p.menuY = g_menuVrY;  p.menuScale = g_menuVrScale;
     p.menuDist  = (float)g_menuVrDist / 100.0f;          // v0.10.3 phase 29b (cm -> m)

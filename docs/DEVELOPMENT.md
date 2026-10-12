@@ -1491,6 +1491,45 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   headset (the box should now ride the dashboard on bumps, braking and hills, in a car too); the logged cab sway figures;
   the fallback in the exterior camera / menus and the new lock after a truck change.
 
+#### Phase 47b: fixes after the first VR test (ATS 2026-10-12 14:32, captures/ats_2026-10-12_1432_p47_vr.log)
+
+- **Report:** the box flickers in menus, triples on loading screens; white number plates in some flicker frames.
+- **Flicker / triples (menus, loading).** Mode 2 had forced the box into the eye pictures everywhere (no quad); the user runs
+  `menu_vr_layer = 1`, where lock 1 is a stable quad in menus and loading (the log: `0 xrEndFrame(s) with our quads ... fps box
+  in-picture`). On loading screens the drawn-in box lands on the game's intermediate / preview pictures and the views are
+  located in a VIEW space, so the drawn-in fallback followed the head; the attach decision was also made per eye picture
+  (`no world blit` / `none of the lock's parts` alternated every 40 ms). Now: ONE decision per frame (`FpsCab::Latch`, at
+  Present in `MenuOverlaySet`, with hysteresis): attached after `kOnFrames` (8) frames in a row where both eyes had their blit
+  with the attached placement; fixed again when `kOffFrames` (3) of the last 8 frames were not (scattered misses count: a
+  loading screen whose every 3rd frame looks attachable does not flap). Attached frame = the drawn-in attached box in both eyes,
+  an eye that cannot have it this frame gets NO box (`held`, never the other kind); fixed frame = lock 1 exactly (the quad
+  with `menu_vr_layer = 1`, `MenuOverlaySet` asks for it; else drawn in). One box per eye picture, one kind per frame, and the
+  quad and the drawn-in decision read the same latched value (set at Present for the next frame).
+- **Stale mirror.** `Get` now takes `g_passSeq`: the eye's pass must be one of the two newest (`passSeq <= serial + 2`), else
+  `kStale` -- a newer pass may have reset the record slot / overwritten the mirror. The old check (Present count + 1) allowed a
+  1-frame-old pass on frames without that eye's blit. "Since this eye's blit": `latchAge` <= 1 (a Present between the eyes'
+  blits is tolerated).
+- **Lock gate.** Lock #1 of the test was taken on a loading picture with eye 0 absent (`game IPD / headset IPD 0.000`), lock #2
+  with no OpenXR pose (VIEW-space views during loading). Now a lock needs: `kLockSteady` (72) blits in a row with cab draws in a
+  flushed record and usable poses, the reference usable in BOTH eyes, both eyes' poses -- else refused (logged), tried again.
+- **Monitor "0 readbacks".** The monitor ran (it demoted IndexCount 13200 of lock #2), but the play-space figure needs the lock's
+  OpenXR pose and lock #2 had none; with the lock gate every lock has one. The 10-s line now also prints the monitor readbacks
+  and lock refusals, frames attached / fixed, eye pictures drawn / held.
+- **284 "no flushed draw record" (14:34:41-43):** the user pressed `Ctrl+F5` (motion vectors OFF, `MV draw-ids: inactive`) --
+  the per-draw record is off, the box is fixed for those frames. As designed.
+- **White number plates:** no phase-47 path writes a game resource: the GPU work is a copy FROM the record's own mirror into
+  our staging buffer, a Map of our staging buffer, and the box draw into the eye picture with the full state save / restore
+  (VS t0 included). The pre-47b stale case used a pass at most one frame old (its slot not yet reused with 4 ring slots), so a
+  garbage MVP was not possible either. Not explained by this code; the frames were loading transitions (FIFO underflows, eye
+  map corrections in the same seconds). To check in game: the same loading screens with lock 1 / the box off.
+- **Test** (`tests/fps_cab_test.cpp`, 261 checks): the timeline now has eye 0 without a record (frames 0-29: no lock), VIEW-space
+  views (30-44: no lock), a loading screen (260-299: eye 0 without a blit, other cabin draws in eye 1, every 3rd frame
+  attachable: at most 1 switch, <= 2 x kOffFrames attached boxes in it), a stale pass refused, never an attached placement on a
+  fixed frame, <= 8 switches in the whole run, > 40 monitor readbacks, the first lock with both eyes + poses; variant 3 = a
+  Present between the two eyes' blits. Zero lag unchanged (0.002 px vs 3.65 px for a 1-frame lag).
+- **Not verified (needs the game):** the box in menus / loading = the lock-1 quad; the transitions (a few eye pictures without a
+  box when the attach drops); the white plates.
+
 ### Phase 48: fps box brightness (`fps_brightness` 10..100 %)
 
 - `fps_brightness` (default 100 = the colour as it is). `FpsPose::Dimmed(ColorOf(g_fpsColor), g_fpsBright)` scales the glyph

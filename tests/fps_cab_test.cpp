@@ -305,10 +305,12 @@ static bool Centroid(const std::vector<uint8_t>& px, double* cx, double* cy, dou
 }
 static void Clear(Gpu& g) { const float c[4] = { 128.f / 255.f, 128.f / 255.f, 128.f / 255.f, 1.0f }; g.ctx->ClearRenderTargetView(g.rtv.Get(), c); }
 
-// variant 0: eye 0 (right) is rendered first in each frame; 1: the left eye first; 2: + the OpenXR views in the wrong order
+// variant 0: eye 0 (right) is rendered first in each frame; 1: the left eye first; 2: + the OpenXR views in the wrong order;
+// 3 (phase 47b): the Present (Latch) between the two eyes' blits
 static int PartB(int variant) {
-    printf("Part B variant %d (%s): WARP -- DrawIdRecord + FpsCab + menu.cpp VSCab, 2 eyes x 360 frames\n", variant,
-           variant == 0 ? "right eye first" : variant == 1 ? "left eye first" : "left eye first, OpenXR views swapped");
+    printf("Part B variant %d (%s): WARP -- DrawIdRecord + FpsCab + menu.cpp VSCab, 2 eyes x 480 frames\n", variant,
+           variant == 0 ? "right eye first" : variant == 1 ? "left eye first" : variant == 2 ? "left eye first, OpenXR views swapped"
+           : "a Present between the two eyes' blits");
     Gpu g;
     const D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_11_0;
     if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, &fl, 1, D3D11_SDK_VERSION, &g.dev, nullptr, &g.ctx)) ||
@@ -337,7 +339,13 @@ static int PartB(int variant) {
     SetActive(true, 0);
     SetSettings(set);
     const Stats s0 = GetStats();                          // (the totals run on over the variants)
-    const int kFrames = 360, kExtFrom = 120, kExtTo = 140, kPoolAt = 160, kTruckAt = 190;
+    // phase 47b timeline: 0-29 eye 0 has no usable record (the lock must wait for both eyes), 30-44 the OpenXR views are in a VIEW
+    // space (no lock without poses), the steering wheel turns 120-170, exterior camera 190-209, buffer-pool rotation at 230, a
+    // LOADING screen 260-299 (eye 0 has no world blit, eye 1 shows other cabin-layer draws, VIEW-space views, and every 3rd frame
+    // looks attachable: the decision must not flap), a truck change at 320.
+    const int kFrames = 480, kNoEye0To = 30, kNoXrTo = 45, kExtFrom = 190, kExtTo = 210, kPoolAt = 230, kLoadFrom = 260, kLoadTo = 300,
+              kTruckAt = 320;
+    g_steerFrom = 120.0;
     const float build = (float)(kW * 0.08 / TuningMenu::kWidgetRefW * set.scale);
     const wchar_t* l1 = L"72 fps";
     const wchar_t* l2 = L"13.9 ms";
@@ -345,21 +353,36 @@ static int PartB(int variant) {
     std::vector<uint8_t> pxA, pxB, pxC;
     int attached = 0, compared = 0, lagMeasured = 0, badFrames = 0, attachedExt = 0, attachedAfterSteer = 0;
     double maxErr = 0.0, sumLag = 0.0, maxDiffShare = 0.0;
-    uint64_t locksBeforeTruck = 0, reacqBeforeExt = 0;
-    int firstBadAfterSteer = -1;
+    uint64_t locksBeforeTruck = 0, reacqBeforeExt = 0, locksEarly = 0;
+    int firstBadAfterSteer = -1, twoKinds = 0, loadAttachedDraws = 0, staleChecked = 0;
+    uint64_t switches0 = 0, switchesLoad0 = 0, switchesLoad = 0;
+    int firstLockEyes = -1;
+    bool firstLockXr = false;
     for (int f = 0; f < kFrames; ++f) {
         const double t = f / kHz;
         const bool ext = f >= kExtFrom && f < kExtTo;     // exterior camera: no cabin layer
+        const bool load = f >= kLoadFrom && f < kLoadTo;  // loading screen
+        const bool loadAttachable = load && (f % 3 == 0); // (a normal-looking frame in the middle of it)
         const int ibi = f >= kTruckAt ? 2 : (f >= kPoolAt ? 1 : 0);
         const UINT siAdd = f >= kTruckAt ? 100u : 0u;     // the new truck's parts: new loose keys too
         if (f == kTruckAt) locksBeforeTruck = GetStats().locks - s0.locks;
         if (f == kExtFrom) reacqBeforeExt = GetStats().reacquires - s0.reacquires;
-        const XrIn xr = Xr(t, variant == 2);
+        if (f == kNoXrTo) locksEarly = GetStats().locks - s0.locks;
+        if (f == kLoadFrom) { const Stats q = GetStats(); switchesLoad0 = q.latchOn + q.latchOff; }
+        XrIn xr = Xr(t, variant == 2);
+        if ((f >= kNoEye0To && f < kNoXrTo) || (load && !loadAttachable)) xr.ok = false;   // VIEW-space views
+        uint64_t serials[2] = {};
+        bool blitted[2] = {};
         for (int k = 0; k < 2; ++k) {
-            const int e = variant ? 1 - k : k;
+            const int e = (variant == 1 || variant == 2) ? 1 - k : k;
             const uint64_t serial = (uint64_t)f * 2 + (uint64_t)k;
+            serials[e] = serial;
+            if (variant == 3 && k == 1) Latch();          // variant 3: the Present comes BETWEEN the two eyes' blits
             DrawIdRecord& rec = ring[serial % 4];
             rec.Reset();
+            if (load && !loadAttachable && e == 0) continue;   // loading: no world blit of eye 0 this frame
+            const bool noRecord = f < kNoEye0To && e == 0;
+            const bool loadScene = load && !loadAttachable;   // eye 1: other cabin-layer draws (the loading picture)
             // the cbuffer ring: one 16-row (256 B) window per part; normal: rows 0..3 model-view, 4..7 MVP; car: row 4 = 0 0 0 1, 5..8 MVP
             D3D11_MAPPED_SUBRESOURCE ms{};
             g.ctx->Map(g.cb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms);
@@ -375,7 +398,7 @@ static int PartB(int variant) {
                 for (int r = 0; r < 4; ++r) for (int c = 0; c < 4; ++c) w[(r0 + r) * 4 + c] = (float)M.m[r][c];
             }
             g.ctx->Unmap(g.cb.Get(), 0);
-            for (int p = 0; p < PN; ++p) {
+            for (int p = 0; p < PN && !noRecord; ++p) {
                 const bool cabin = p != PWorld && !ext;
                 D3D11_VIEWPORT vp{ 0.0f, 0.0f, (float)kW, (float)kH, cabin ? 0.9f : 0.0f, cabin ? 1.0f : 0.9f };
                 g.ctx->RSSetViewports(1, &vp);
@@ -383,20 +406,35 @@ static int PartB(int variant) {
                 const UINT first = (UINT)p * 16u, num = 16u;
                 g.ctx1->VSSetConstantBuffers1(0, 1, &cbs, &first, &num);
                 g.ctx->IASetIndexBuffer(g.ib[ibi].Get(), DXGI_FORMAT_R16_UINT, 0);
-                rec.Record(g.ctx1.Get(), kIc[p], 1, (UINT)p * 10u + siAdd, 0, 0, false);
+                rec.Record(g.ctx1.Get(), kIc[p] + (loadScene ? 7u : 0u), 1, (UINT)p * 10u + siAdd + (loadScene ? 500u : 0u), 0, 0, false);
             }
             rec.Flush(g.ctx.Get());
             OnBlit(g.ctx.Get(), e, rec, serial, (uint64_t)f, k == 0, xr);
-            // our box
+            blitted[e] = true;
+        }
+        if (firstLockEyes < 0 && GetStats().locks > s0.locks) { const Stats q = GetStats(); firstLockEyes = q.lockEyes; firstLockXr = q.lockXr; }
+        // the late draw of both eye pictures (after both blits, as at the OpenXR release): ONE box per picture -- the attached one on
+        // an attached frame (or none), else the lock-1 box (here only counted: it is inject.cpp's drawn-in / quad path)
+        const uint64_t passSeq = (uint64_t)f * 2 + 2;
+        const bool on = Attached();
+        for (int e = 0; e < 2; ++e) {
             Clear(g);
             Place pl;
             int why = 0;
-            const bool got = Get(e, (uint64_t)f, &pl, &why);
+            const bool got = Get(e, passSeq, &pl, &why);
+            if (got && !on) ++twoKinds;                    // an attached placement on a fixed frame = two kinds in one frame
+            if (on && got && f == 180 && !staleChecked) {  // a pass started since this blit: the mirror may be reused -> never used
+                Place p2;
+                int w2 = 0;
+                ++staleChecked;
+                CHECK(!Get(e, serials[e] + 3, &p2, &w2) && w2 == kStale, "a stale pass was not refused (why %d)", w2);
+            }
             bool drew = false;
-            if (got) drew = TuningMenu::DrawWidgetMvp(g.ctx.Get(), g.rtv.Get(), kW, kH, pl.srv, pl.off, pl.corner, ident, build,
-                                                      TuningMenu::kOutRaw, l1, l2);
-            NoteDraw(drew, got ? (drew ? 0 : kShader) : why);
-            if (ext) { CHECK(!got && why == kNoCab, "frame %d eye %d exterior: got %d why %d (want kNoCab)", f, e, got, why); if (got) ++attachedExt; }
+            if (on && got) drew = TuningMenu::DrawWidgetMvp(g.ctx.Get(), g.rtv.Get(), kW, kH, pl.srv, pl.off, pl.corner, ident, build,
+                                                             TuningMenu::kOutRaw, l1, l2);
+            if (on) NoteDraw(drew, got ? (drew ? 0 : kShader) : why);
+            if (ext) { CHECK(!got, "frame %d eye %d exterior: attached placement given (why %d)", f, e, why); if (got) ++attachedExt; }
+            if (load && drew) ++loadAttachedDraws;
             if (!drew) continue;
             ++attached;
             Readback(g, pxA);
@@ -439,10 +477,16 @@ static int PartB(int variant) {
                 if (Centroid(pxC, &cx, &cy, &cm)) { sumLag += std::hypot(cx - bx, cy - by); ++lagMeasured; }
             }
         }
+        (void)blitted;
+        if (variant != 3) Latch();                        // Present: this frame's verdict -> the next frame's box kind
+        if (f == kLoadTo - 1) { const Stats q = GetStats(); switchesLoad = q.latchOn + q.latchOff - switchesLoad0; }
         g.ctx->Flush();
         Sleep(1);                                         // (frame pacing: the lagged readbacks land as in a game)
     }
-    Stats st = GetStats();
+    {
+        const Stats q = GetStats();
+        switches0 = q.latchOn + q.latchOff - s0.latchOn - s0.latchOff;
+    }    Stats st = GetStats();
     st.locks -= s0.locks; st.relocks -= s0.relocks; st.reacquires -= s0.reacquires;
     printf("  attached in %d of %d eye pictures, compared %d: max centroid error %.4f px, max %.2f %% of the box pixels differ; a 1-frame "
            "lag would be off by %.2f px on average\n", attached, kFrames * 2, compared, maxErr, maxDiffShare * 100.0,
@@ -468,6 +512,18 @@ static int PartB(int variant) {
         CHECK(st.devN >= 8 && st.devMaxM <= tmax + 1e-3 && st.devMaxM >= 0.6 * tmax, "cab-vs-play figure %.4f m (n %d), scene max %.4f m",
               st.devMaxM, st.devN, tmax);
     }
+    printf("  attach decisions: %llu switches in all, %llu during the loading screen (40 frames, every 3rd attachable), %d attached boxes drawn in "
+           "it; first lock: %d eye(s), poses %s; monitor readbacks %llu; held pictures %llu\n", (unsigned long long)switches0,
+           (unsigned long long)switchesLoad, loadAttachedDraws, firstLockEyes, firstLockXr ? "yes" : "NO",
+           (unsigned long long)st.monitors, (unsigned long long)st.held);
+    CHECK(locksEarly == 0, "a lock was taken with eye 0 absent / without poses (%llu)", (unsigned long long)locksEarly);
+    CHECK(firstLockEyes == 2 && firstLockXr, "the first lock used %d eye(s), poses %d", firstLockEyes, (int)firstLockXr);
+    CHECK(twoKinds == 0, "%d eye pictures got an attached placement on a fixed frame (two kinds in one frame)", twoKinds);
+    CHECK(switchesLoad <= 1 && loadAttachedDraws <= 2 * kOffFrames, "loading screen: %llu switches, %d attached boxes (flicker)",
+          (unsigned long long)switchesLoad, loadAttachedDraws);
+    CHECK(switches0 <= 8, "%llu attach switches in all (flapping)", (unsigned long long)switches0);
+    CHECK(st.monitors - s0.monitors > 40, "monitor readbacks %llu", (unsigned long long)(st.monitors - s0.monitors));
+    CHECK(staleChecked == 1, "stale check not reached");
     CHECK(badFrames == 0, "%d attached eye pictures not at the cab-fixed truth of the same frame", badFrames);
     CHECK(compared > 400, "only %d eye pictures compared", compared);
     CHECK(lagMeasured > 0 && sumLag / lagMeasured > 1.0, "the sway is too small to show a 1-frame lag (%.2f px)", lagMeasured ? sumLag / lagMeasured : 0.0);
@@ -492,7 +548,7 @@ int main() {
     while (!ShaderCache::Done()) Sleep(10);
     if (!ShaderCache::Ready(ShaderCache::kMenuCabVs)) { printf("VSCab not compiled: %s\n", ShaderCache::Error(ShaderCache::kMenuCabVs)); return 1; }
     int r = 0;
-    for (int v = 0; v < 3; ++v) r |= PartB(v);
+    for (int v = 0; v < 4; ++v) r |= PartB(v);
     printf("fps_cab_test: %d checks, %d failed\n", g_checks, g_fail);
     return (r || g_fail) ? 1 : 0;
 }

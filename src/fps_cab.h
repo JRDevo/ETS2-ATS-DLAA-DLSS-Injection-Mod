@@ -317,9 +317,12 @@ struct XrIn {
     Pose eye[2] = {};
     double fw[2] = { 1.6, 1.6 };                        // tan R - tan L of each eye's fov
 };
-// Why Get gave no attached placement (the caller draws the mode-1 box and logs the reason once per change).
+// Why Get gave no attached placement. Phase 47b: whether the frame shows the attached box at all is decided ONCE per frame
+// (Latch, at Present, with hysteresis), never per eye picture: attached = the attached box in both eyes (an eye that cannot
+// have it this frame gets NO box); not attached = the lock-1 box for both eyes (the quad layer with menu_vr_layer = 1, else
+// drawn in) -- exactly one box per eye picture, never two kinds in one frame.
 enum Why : int {
-    kOk = 0, kInactive, kNoBlit, kNoRecord, kLocking, kNoCab, kNotFound, kShader, kWhyCount
+    kOk = 0, kInactive, kNoBlit, kNoRecord, kLocking, kNoCab, kNotFound, kShader, kSettling, kStale, kWhyCount
 };
 const char* WhyName(int why);
 
@@ -332,14 +335,25 @@ bool Active();
 void OnBlit(ID3D11DeviceContext* ctx, int eye, DrawIdRecord& rec, uint64_t serial, uint64_t frame, bool frameStart, const XrIn& xr);
 // The box for eye `eye` now: the record's cbuffer mirror (raw SRV, a reference kept until the eye's next blit), the byte offset of
 // the reference draw's MVP block in it, its four model-space corners. False -> *why.
+// Phase 47b: passSeq = the passes started so far (inject.cpp g_passSeq): the eye's pass must be one of the two newest (a pass
+// that started since may already have reset its record slot / overwritten the mirror -- a stale MVP is never used), and the
+// eye must have had its blit since the last Latch or the one before (this frame; a Present between the eyes tolerated).
 struct Place { ID3D11ShaderResourceView* srv = nullptr; uint32_t off = 0; float corner[4][4] = {}; int entry = -1; };
-bool Get(int eye, uint64_t frame, Place* out, int* why);
-void NoteDraw(bool attached, int why);                  // per eye picture (stats)
+bool Get(int eye, uint64_t passSeq, Place* out, int* why);
+// Phase 47b, once per frame (inject.cpp MenuOverlaySet, at Present): this frame's verdict -- both eyes had a blit with the
+// attached placement available -- into the hysteresis: Attached() turns on after kOnFrames such frames in a row, off when
+// kOffFrames of the last 8 frames were without (in a row or scattered: no flapping). Attached() is what the next frame shows (the drawn-in attached box) and what the quad layer
+// leaves out (MenuOverlaySet: no fps quad while attached).
+void Latch();
+bool Attached();
+constexpr int kOnFrames = 8, kOffFrames = 3;
+void NoteDraw(bool attached, int why);                  // per eye picture drawn while Attached() (attached, or held = no box)
 void Shutdown();                                        // device change / exit: every D3D object dropped
 // Test hooks (tests/fps_cab_test.cpp): the monitor snapshot period in eye blits (both eyes; default 72 = ~0.5 s at 72 Hz), state.
 void SetMonitorEvery(int blits);
 struct Stats { int state; int entries; int demoted; uint64_t reacquires, relocks, locks, attached, fallback; int refEntry[2];
-               uint64_t lockFrame; double devMaxM; int devN; };   // devMaxM: the cab vs the play space (log window / lock)
+               uint64_t lockFrame; double devMaxM; int devN;   // devMaxM: the cab vs the play space (log window / lock)
+               int lockEyes; bool lockXr; uint64_t monitors, latchOn, latchOff, held, lockRefusals; bool latched; };
 Stats GetStats();
 
 }  // namespace FpsCab
