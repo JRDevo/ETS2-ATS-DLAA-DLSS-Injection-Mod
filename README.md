@@ -472,9 +472,18 @@ The three green lines under the title show the game's GPU time per frame, what t
   - **FPS turn / tilt / rotate (VR):** turn the box itself, in 5 degree steps: turn = left / right, tilt = lean it back
     like a sticker on the dashboard, rotate = in its own plane (`fps_vr_yaw`, `fps_vr_pitch`, `fps_vr_roll`; 0 = it
     faces you, as before).
-  - **FPS counter lock (VR):** `Follow head` or `Fixed in play space` (was called `Fixed in cab`). Fixed in play space
-    stays at one spot around your seat. It does NOT follow the truck cab when the cab sways on bumps or hills: the mod
-    has no way yet to know the cab's sway in time (see `docs/DEVELOPMENT.md`, phase 44).
+  - **FPS counter lock (VR):** where the box stays (`fps_vr_lock`). Right / Left step through the three choices:
+    - `Follow head`: the box moves with your headset, always in the same spot of your view.
+    - `Fixed in play space`: the box stays at one spot around your seat. It does not move when the cab sways on bumps,
+      hills or when you brake, so the cab moves under it.
+    - `Attached to vehicle`: the box sits on the cab like a sticker and sways with it, in trucks and in cars. It is
+      placed where it was when you picked this choice (`X` / `Y` / distance / turn still move it, inside the cab).
+      It needs DLAA on with `Per-part motion vectors` on (the defaults). Without them, in the outside camera, in menus
+      and while loading it acts like `Fixed in play space` until the cab is back. After a truck change it finds the
+      new cab by itself after about a second.
+
+    Which to pick: `Attached to vehicle` if you want it to look like part of the dashboard; `Fixed in play space` if
+    you want it calm while the cab shakes; `Follow head` if you always want to see it.
 - **Mirror DLAA** picks how many mirrors get DLAA and how they move: `off`, `1 mirror (largest)` (only the main mirror
   next to you), `1 mirror, camera`, `2 mirrors (largest)`, `2 mirrors, camera`, `all mirrors`, `all, camera motion`.
   Without `camera` each moving part moves exactly in the glass (about 0.4 ms per mirror in VR); with `camera` the mirror
@@ -578,7 +587,7 @@ The table below lists the commonly used keys:
 | `fps_show` | `0` | live fps box: `1` = a small fps / frame-time box stays on screen, also while the menu is closed. The menu's `FPS counter` row switches it live |
 | `fps_x` / `fps_y` / `fps_scale` | `1` / `1` / `1.0` | fps box, flat: left / top edge in % of the picture (`0`..`95`), size `0.2`..`3.0` (1 = 92 x 44 px at 1080 p) |
 | `fps_vr_x` / `fps_vr_y` / `fps_vr_scale` | `0` / `-25` / `0.3` | fps box, VR: centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size `0.2`..`3.0` (1 = 8 % of the eye width) |
-| `fps_vr_lock` | `0` | fps box, VR (v0.10.3): `0` = follows the headset, `1` = fixed in the play space, `fps_vr_dist` from your seat; `fps_vr_x` / `fps_vr_y` are then degrees around you (+ = right / down). It does not follow the cab's sway. The menu's `FPS counter lock` row switches it |
+| `fps_vr_lock` | `0` | fps box, VR (v0.10.3): `0` = follows the headset, `1` = fixed in the play space, `fps_vr_dist` from your seat; `fps_vr_x` / `fps_vr_y` are then degrees around you (+ = right / down). It does not follow the cab's sway. `2` = attached to the vehicle (phase 47): placed like `1` when picked, then it moves with the cab (needs DLAA + per-part motion vectors; otherwise it acts like `1`). The menu's `FPS counter lock` row switches it |
 | `fps_color` | `0` | fps box colour (phase 44): `0`..`19` = white, yellow, amber, orange, red, pink, magenta, purple, violet, blue, sky blue, cyan, teal, mint, green, lime, olive, gold, silver, black on white. The menu's `FPS colour` row |
 | `fps_vr_dist` | `80` | fps box, VR (phase 44): distance in cm (`30`..`300`), same angular size at every distance. The menu's `FPS distance (VR)` row |
 | `fps_vr_yaw` / `fps_vr_pitch` / `fps_vr_roll` | `0` / `0` / `0` | fps box, VR (phase 44): the box's own turn in degrees: yaw `-90`..`90` (+ = its face turns right), pitch `-90`..`90` (+ = its top leans away), roll `-180`..`180` (+ = clockwise). The menu's `FPS turn` / `FPS tilt` / `FPS rotate` rows (5 degree steps) |

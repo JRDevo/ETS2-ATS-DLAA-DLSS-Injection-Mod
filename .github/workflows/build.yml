@@ -56,6 +56,8 @@ jobs:
           if not exist build\tests\menu_shot.exe exit /b 1
           call tests\build_flat_views_test.bat
           if not exist build\tests\flat_views_test.exe exit /b 1
+          call tests\build_fps_cab_test.bat
+          if not exist build\tests\fps_cab_test.exe exit /b 1
 
       - name: Test draw-id harness (did_shadow off)
         run: build\tests\drawid_harness.exe -1 0.1
@@ -74,6 +76,8 @@ jobs:
         run: build\tests\fps_pose_test.exe
       - name: Test flat multi-view (src/flat_views.h layout, view index, confirm / drop, shared jitter phase)
         run: build\tests\flat_views_test.exe
+      - name: Test fps box attached to the vehicle (src/fps_cab.h maths; DrawIdRecord + FpsCab + the VSCab draw, zero-lag cab sway)
+        run: build\tests\fps_cab_test.exe
       - name: Smoke test menu_shot (renders the real tuning menu + fps box to PNG; outputs are not committed)
         shell: cmd
         run: |

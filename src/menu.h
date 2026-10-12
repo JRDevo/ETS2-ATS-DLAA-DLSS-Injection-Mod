@@ -95,6 +95,14 @@ void  ReleaseWidget();                               // drops the fps box textur
 // corners in clip space as DrawCorners (top-left, top-right, bottom-left, bottom-right; w > 0). Texture / states as DrawWidget.
 bool  DrawWidgetCorners(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, const float clip[4][4],
                         float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2);
+// phase 47: the fps box ATTACHED TO THE VEHICLE (fps_vr_lock = 2, src/fps_cab.h): `model` = its 4 corners (top-left, top-right,
+// bottom-left, bottom-right; homogeneous) in the model space of a cab draw; the vertex shader reads that draw's CURRENT MVP from
+// `mirror` (a raw buffer SRV: the draw-id record's cbuffer mirror of this eye's pass) at byte `mvpByteOff` (4 rows = clip x, y, z,
+// w) and draws the box where the draw's geometry is in this picture. map = (sx, sy, ox, oy): picture NDC = the draw's NDC * s + o
+// ((1, 1, 0, 0) = the whole picture). Texture / states as DrawWidget (+ VS SRV slot 0 saved / restored). False = not drawn.
+bool  DrawWidgetMvp(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, ID3D11ShaderResourceView* mirror,
+                    uint32_t mvpByteOff, const float model[4][4], const float map[4], float buildScale, int outMode,
+                    const wchar_t* line1, const wchar_t* line2);
 // phase 44 (dlaa.ini fps_color): the fps box's text and outline colours (sRGB bytes). Default white text, RGB 8,8,8 outline (the
 // colours before phase 44). A change rebuilds the box texture once (the cache key includes them).
 void  SetWidgetColors(uint8_t tr, uint8_t tg, uint8_t tb, uint8_t lr, uint8_t lg, uint8_t lb);

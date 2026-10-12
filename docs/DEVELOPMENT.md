@@ -1253,7 +1253,7 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
 - **Not verified (needs the game):** the saving in the `perf eye` lines / menu GPU line; how the half-rate traffic in the glass
   looks (flat and VR); how often the main view's reset forces a full frame while driving.
 
-### Phase 44: fps box colours, VR distance and turn; Foveated size scaler; "attached to truck" investigated, NOT built
+### Phase 44: fps box colours, VR distance and turn; Foveated size scaler; "attached to truck" investigated, NOT built (built in phase 47)
 
 - **Colours (`fps_color`, 0..19, default 0).** `src/fps_pose.h` `FpsPose::ColorOf`: 20 named presets (text + outline colour;
   0 = white text / RGB 8,8,8 outline = the box before phase 44; 19 = black text, white outline). `TuningMenu::SetWidgetColors`
@@ -1294,7 +1294,7 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   `ComposeTurn` = base * turn), `TurnedCorners` (0/0/0 = the flat box exactly, shift, roll 90 swaps the edges clockwise,
   yaw / pitch shorten the far edge, edge-on refused), `ExtraShiftPx` (0 at 80 cm, signs, value). 289 checks.
 
-#### "Attached to truck" (`fps_vr_lock = 2`): investigation, why it is not built
+#### "Attached to truck" (`fps_vr_lock = 2`): investigation, why it was not built then (phase 47 built the GPU plan below)
 
 - **How the cab moves in VR.** The mod's own motion-vector design already shows it: the game draws its cab interior as a
   separate CABIN LAYER (viewport depth range [0.9, 1], its own finite projection, cab-relative coordinates) with its own
@@ -1406,6 +1406,90 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   a menu row is added, renamed or reordered, update `kRows` and re-run the tool**, then commit the new PNGs.
 - CI runs it as a smoke test only (the exe must exist, exit 0, the five files must exist); the CI outputs are not committed.
 - Not changed: `src/menu.cpp` is used as it is.
+
+### Phase 47: fps box lock mode 2 "Attached to vehicle" (GPU-placed from a cab draw's MVP, zero lag)
+
+- **What.** `fps_vr_lock = 2` (menu row `FPS counter lock`: `Follow head` -> `Fixed in play space` -> `Attached to vehicle`,
+  Right = next, Left = previous). The box is a sticker in the cab: it sways with it (braking pitch, bumps, hills, the game's
+  head / seat physics), in trucks and cars. It is placed where lock 1 would put it at the moment of the lock-on
+  (`fps_vr_x` / `fps_vr_y` degrees at `fps_vr_dist` around the seat, facing it, + `fps_vr_yaw` / `_pitch` / `_roll`,
+  `fps_vr_scale`), and a later change of those settings moves / turns / resizes it INSIDE the cab (same lock frame).
+  No new ini key (a new value), no new menu row (`kMaxRows`, `kIniMaxKeys`, `kMenuDesc` count unchanged; LoadConfig's
+  existing `fps_vr_lock` line clamps 0..2).
+- **How (the phase 44 plan; `src/fps_cab.h` = the maths + the design comment, `src/fps_cab.cpp` = the runtime).**
+  1. *Lock-on (CPU, lagged on purpose: it is the picture of ONE moment t0).* At a VR eye blit that starts a frame (the
+     phase 24 pass parity; the other eye = serial + 1) the biggest 16 cabin-layer draws of that pass's `DrawIdRecord`
+     (`kFCabin`, not instanced, an MVP window, the same full key never twice) have their cb0 rows 4..11 copied from the
+     record's GPU mirror into a staging buffer, with both eyes' OpenXR poses (`XrHook::LatestViews`, corrected to the
+     submitted pose). On the readback (`DO_NOT_WAIT`, ~1-3 frames): the MVP block per draw (the CSGather scan on the CPU:
+     the first ShapeOk block from row 4, so the ATS car interior's rows 5..8 work), rejected: no MVP block,
+     camera-relative (`OriginFree`, the car's head-locked overlays), degenerate, scale out of 1e-3..1e3, origin > 30 m.
+     **Reference rule:** the biggest IndexCount usable in BOTH eyes, else in one eye. From the reference's MVP M = P V W
+     the eye's frame in its MODEL space is exact (`EyeFrameOf`: C = where rows x, y, w vanish, right / up / forward, k =
+     metres per model unit = |row 3 xyz|, 2 / p00 = the fov width); with the eyes' poses that gives the affine map play
+     space -> model space at t0 (`PlayToModel`; the scale from the eyes' separation in the model vs in the play space
+     when within 2x of 1 / k; the eye order checked: the eye that is right in the model must be right in the play space,
+     else the OpenXR views are swapped). The box is built in the play space as the lock-1 quad (`BoxPlay` = the
+     `OvBuildQuadLocked` fixed pose and size `d fw 0.08 scale`) and mapped: 4 corners in the reference's model space. Every
+     other usable part c gets them in ITS model space: `a_c = M_c(t0)^-1 M_ref(t0) a_ref` (= model_c^-1 model_ref; view and
+     projection cancel exactly; the other eye's product is compared and logged at level 4 as a check).
+  2. *Draw (every eye picture, zero lag).* `FpsCabBlit` (HandlePossibleBlit, the VR eye blit, after the pass's replay
+     flushed the mirror) finds the parts of the lock in THIS pass's record (full key, else a unique loose key: buffer-pool
+     rotation) and takes the best-ranked one that is not demoted: its mirror SRV + the byte offset of its MVP block.
+     `FpsCabDraw` (MenuDrawVrOn, the late draw point) calls `TuningMenu::DrawWidgetMvp`: the `kMenuVs` entry `VSCab`
+     (ShaderCache `kMenuCabVs`, fxc-validated) reads that MVP from the mirror (`ByteAddressBuffer` at VS t0, saved /
+     restored with the other state) and outputs `clip = M(t) a_k` (z = 0.5 w; not MVP-shaped / not finite = nothing drawn).
+     Same eye, same pass, same frame as the cab pixels in that picture: the box and the dashboard are one picture, and the
+     runtime's reprojection treats them the same. NDC map: the whole eye texture, or the view's sub-rect when the target is
+     a side-by-side / array swapchain image (`XrHook::ViewForImage`).
+  3. *Monitor (lagged, every 72 eye blits ~0.5 s).* The present parts' MVPs are read back the same way; each part's
+     predicted box centre `M_c(t) a_c`, brought into part d's model space, must equal d's (`Disagree`, metres). The group
+     that agrees (< 1.5 cm) with the biggest summed IndexCount is the cab; a part > 3 cm off it MOVES (steering wheel, door,
+     wiper) and is demoted for this lock (level 3 line) -- the next draw uses the next part (a re-acquire). The same
+     readback puts the attached box centre into the play space with that frame's pose (`PlayOf`): how far the cab moved
+     against the play space (level 4, per 10 s: max / rms / largest change between two readbacks).
+- **Depth: none (decision).** The box is drawn over the finished eye picture with depth off, like the other drawn-in paths.
+  The eye picture has no depth buffer of its own (the scene depth belongs to the scene render target, before the blit /
+  DLAA / upscale); testing against it would need the scene depth resampled to the eye picture and the cab layer's [0.9, 1]
+  range -- for a HUD box that the user places in free air (default 80 cm ahead), occlusion by the steering wheel would
+  mostly hide it. Not worth the cost / risk now.
+- **Fallbacks (the box is drawn as lock 1, fixed in the play space, until it can attach; `FpsCab::Why`, level 3 line per
+  change, counted per 10 s):** no world blit of that eye this frame (VR main menu / garage preview pictures, loading); no
+  flushed draw record (DLAA off, passive, motion vectors or `Per-part motion vectors` off, a jitter-only mode) -- the
+  feature needs the per-draw record and its GPU mirror; locking on (the first readback, ~1-3 frames); no cabin-layer draw
+  in the pass (exterior camera): the lock is KEPT and the box comes back to the same spot in the cab; none of the lock's
+  parts in the pass while it has cab draws: after 90 such blits of an eye (~1.25 s at 72 Hz) a NEW lock (truck change /
+  a different cab), placed like lock 1 at that moment; the VSCab shader not ready / failed. No OpenXR poses at the lock:
+  the box is placed from the eye's own view (straight ahead + the offsets), logged. The quad-layer path (menu_vr_layer = 1)
+  never shows the box in mode 2 (`MenuOverlaySet` asks for no fps quad); the panel stays a quad.
+- **Logs.** Level 3: `fps box attached to vehicle: ON / off`, `LOCKED ON (lock #n) -- reference cab draw IndexCount ..
+  (MVP in cb0 rows ..), seen in .., N cab part(s) can carry the box; play -> cab map from ..; game IPD / headset IPD ..`,
+  `cab part IndexCount .. MOVES against the cab ..`, `eye N re-acquired -- ..`, `.. none of the lock's parts for 90
+  frames -- a new cab ..`, `drawn FIXED IN THE PLAY SPACE for now -- <reason>` / `ATTACHED to the cab again`, the lock row
+  change. Level 4: the lock-on candidate list (IndexCount, verdict / MVP rows per eye), the both-eyes transform check (mm),
+  and every 10 s `fps box attached to vehicle (10 s): N eye picture(s) attached, M fixed instead (reasons) | lock #.. part
+  in use eye 0 / 1, parts, moving, re-acquires | THE CAB AGAINST THE PLAY SPACE ..: max .. cm, rms .. cm; largest change
+  between two readbacks .. cm`.
+- **Cost.** CPU: one pass over the pass's draw flags + keys per eye blit (a few us); a staging copy of <= 16 x 128 B per eye
+  every ~0.5 s. GPU: the same one textured quad as the other drawn-in boxes (`kOverlay` in the menu's cost column).
+- **Test: `tests/fps_cab_test.cpp`** (`tests\build_fps_cab_test.bat`, in CI). Part A (maths): the eye frame of an MVP, the
+  box through 3 parts x 3 moments x 2 eyes = the cab-fixed truth (1e-12 px), at t0 = the lock-1 box, the size rule, the
+  MVP-block rules (rows 4..7, car rows 5..8), the eye-order swap, the moving-part test. Part B (WARP, the REAL
+  `DrawIdRecord` Record / Flush through a WRITE_DISCARD cbuffer ring, the REAL FpsCab runtime and `menu.cpp` VSCab draw),
+  2 eyes x 360 frames of a cab that sways 4 deg pitch / 2 deg roll / 3 cm bounce against the play space with a moving head;
+  each attached eye picture is compared with the box drawn at the TRUE corners of the SAME frame (`DrawWidgetCorners`):
+  max centroid error 0.004 px, 0 % of the box pixels different, while a 1-frame lag would be off by 3.6 px on average.
+  Events: the biggest usable part is a steering wheel that turns from frame 60 (it carries the box off the truth until the
+  monitor demotes it, then the cab body takes over), a camera-relative overlay with the biggest IndexCount and a world draw
+  (never used), a car-layout part (MVP in rows 5..8), an exterior camera (no attach, lock kept), a buffer-pool rotation
+  (loose keys, no new lock), a truck change (one new lock after 90 blits, then exact again), the logged cab-vs-play-space
+  figure = the scene's own sway (15.2 cm). Three variants: right eye first, left eye first, OpenXR views handed swapped;
+  178 checks.
+- **Not verified (needs the game, VR):** that the cabin layer's biggest usable draw in ETS2 / ATS trucks and cars is a
+  rigid cab part (the lock-on line at level 4 lists them) and that the monitor's demotions catch the real steering wheel;
+  that the eye picture's NDC is the scene's NDC in every setup (DLSS upscale, side-by-side swapchains); the look in the
+  headset (the box should now ride the dashboard on bumps, braking and hills, in a car too); the logged cab sway figures;
+  the fallback in the exterior camera / menus and the new lock after a truck change.
 
 ### The RenderDoc oracle (done in v0.2)
 

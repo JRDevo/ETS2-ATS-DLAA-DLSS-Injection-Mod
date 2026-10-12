@@ -1,3 +1,11 @@
+// phase 47 -- FPS BOX "ATTACHED TO VEHICLE" (dlaa.ini fps_vr_lock = 2; the FPS counter lock row's 3rd value; src/fps_cab.h /
+//           fps_cab.cpp, menu.cpp VSCab / TuningMenu::DrawWidgetMvp). At each VR eye blit FpsCabBlit hands the pass's DrawIdRecord to
+//           FpsCab::OnBlit: a lock-on readback of the biggest cabin-layer draws' cb0 rows (+ the OpenXR poses) maps the play-space
+//           box (built as lock 1 builds it) into those draws' MODEL spaces; every frame the box is drawn into the eye picture
+//           (FpsCabDraw from MenuDrawVrOn) by a vertex shader that reads the reference draw's CURRENT MVP of that very pass from the
+//           record's GPU mirror -- zero lag, it sways with the cab. Lagged monitor readbacks drop moving parts (steering wheel) and
+//           measure the cab against the play space (level 4). No record / no cab draw (DLAA or per-part motion off, exterior camera,
+//           menus) = drawn as lock 1. Never a quad layer (MenuOverlaySet). docs/DEVELOPMENT.md phase 47; tests\fps_cab_test.cpp.
 // phase 45 -- MENU COST COLUMN "CPU | GPU" + LIMIT LINE; MEASURING ONLY WHILE ASKED. The cost column shows CPU (blue) | GPU
 //           (orange) ms per frame per row (VR: GPU = both eyes; ink marks TuningMenu::kInkCpu / kInkGpu / kInkEnd, menu.cpp
 //           inkText); CPU from the cpu_prof.h profiler, now also on while the menu is open (MenuPerfOpen / MenuPerfClose,
@@ -11,8 +19,8 @@
 //           Shift+F12 saves, Reset removes). Quad layer: the fps quad at fps_vr_dist (same angle), turned by base * turn. Drawn
 //           in: the fixed box's anchor distance, the head-following box's extra stereo shift, the turn as a perspective quad
 //           (TuningMenu::DrawWidgetCorners). "Fixed in cab" renamed "Fixed in play space". Foveated size row = a 10..100 % scaler
-//           (vrs_outer, vrs_inner = max(10, outer - 25)). "Attached to truck" (fps_vr_lock = 2) investigated and NOT built:
-//           docs/DEVELOPMENT.md phase 44. Test: tests\fps_pose_test.cpp.
+//           (vrs_outer, vrs_inner = max(10, outer - 25)). "Attached to truck" (fps_vr_lock = 2) investigated, not built then:
+//           docs/DEVELOPMENT.md phase 44 (built in phase 47). Test: tests\fps_pose_test.cpp.
 // phase 40 -- VR HIDDEN AREA MASK (dlaa.ini xr_hidden_mask, 0 default; menu row "Hidden area mask (VR)"; hidden_mask.h, xr_hook.h,
 //           the block above HmOnSceneClear). XrHook wraps the runtime's xrCreateInstance and adds XR_KHR_visibility_mask to a copy
 //           of the game's extension list when the runtime offers it (only when xr_hidden_mask = 1 at the game's start), fetches the
@@ -727,6 +735,7 @@
 #include "mirror_turns.h"                            // phase 41: mirrors in turns (mirror_turns; pure decisions)
 #include "vrs.h"                                    // phase 34: VRS fixed foveated rendering (NVAPI; VR world scene only)
 #include "hidden_mask.h"                            // phase 40: VR hidden area mask (XR_KHR_visibility_mask into the eye depth)
+#include "fps_cab.h"                                // phase 47: the VR fps box attached to the vehicle (GPU-placed from a cab draw)
 #endif
 #include "cpu_pin.h"                                // phase 32: keep the game on the V-Cache cores (cpu_cache_pin; both builds)
 #include "flat_views.h"                             // v0.12.0 issue #12: flat multi-view (multi-monitor) detection (both builds)
@@ -860,6 +869,8 @@ float    g_fpsVrScale = kFpsVrScaleDefault;
 // optical centre, as before), 1 = FIXED IN THE CAB: a point 0.8 m from the origin of the game's OpenXR reference space, in the
 // direction yaw = fps_vr_x degrees (+ right), pitch = -fps_vr_y degrees (fps_vr_y + = down, as the head-locked %), projected
 // into each eye picture with that eye's located pose + fov (FpsVrLockedPlace; XrHook::LatestViews).
+// Phase 47: 2 = ATTACHED TO THE VEHICLE -- drawn into each eye picture and placed on the GPU from a cab draw's MVP of that very
+// picture (src/fps_cab.h, FpsCabDraw); no quad layer; no cab draw / no draw record = drawn as 1 until there is one.
 int      g_fpsVrLock = 0;
 // phase 44: dlaa.ini fps_color (0..19, FpsPose::ColorOf: 0 = white = the colour before phase 44), fps_vr_dist (cm 30..300, 80 =
 // the phase 28 0.8 m: the quad's distance in both lock modes, the drawn-in fixed box's anchor distance, the drawn-in
@@ -2189,6 +2200,7 @@ D3D11_RECT       g_p9LastClip = { 0, 0, 0, 0 }; // the last clipped pass's rect 
 bool             g_p9ClipLogged = false, g_p9HalfLogged = false;
 extern bool      g_fwdSkipArm;                  // v0.10.0 phase 5: Alt+F8 also logs one pass of skipped forward draws
 void DidOnLeave(ID3D11DeviceContext* ctx);
+void FpsCabBlit(ID3D11DeviceContext* ctx, int eye, DrawIdRecord& rec, uint64_t serial, uint64_t frame);   // phase 47
 void DidOnPassStart(ID3D11DeviceContext* ctx, uint64_t s);
 void DidOnDepthDiscard(ID3D11DeviceContext* ctx);
 void DidOnDiscardMap(ID3D11DeviceContext* ctx, ID3D11Resource* r);
@@ -11355,6 +11367,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     }
     if (!isBackbuffer && (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)) { g_menuBlitEye = eye; g_menuBlitRt = rtPtr; }   // v0.10.0 menu / fps box
 #ifdef WITH_DLAA
+    if (!isBackbuffer) FpsCabBlit(ctx, eye, *didRec, slot.s, frame);   // phase 47: the fps box attached to the vehicle (mode 2 only)
     GpuPerf::SetPass(slot.s);                             // v0.10.0 phase 8: this pass's sections belong to `eye`
     GpuPerf::NoteEye(slot.s, eye);
 #endif
@@ -13688,6 +13701,7 @@ void DidOnContextReset() {
     g_didForcedPass = 0;
     g_didReplayTimer.Reset();
     DrawIdRecord::ShutdownDevice();                       // recreated on the new device at the next replay
+    FpsCab::Shutdown();                                   // phase 47: staging buffers / mirror refs of the old device; a fresh lock
 }
 
 // " | ..." for the "MV draw-ids @blit" line; restarts the window. Eye 0's unit (flat: the only one) for the GPU side.
@@ -15426,11 +15440,11 @@ const wchar_t* const kMenuDesc[] = {
     L"The fps box's lock, position, size, colour, VR distance and turn. Right opens the group, Left closes it; it starts closed "
     L"every time the menu opens.",
     // v0.10.3 phase 28 (MR_FPSLOCK)
-    L"VR only, so greyed in flat. Follow head = the fps box moves with the headset. Fixed in play space = it stays at one spot "
-    L"around your seat (FPS distance away); X / Y then move it around you in degrees. It does not follow the cab's sway. No cost.",
-    L"Moves the fps box sideways, in % of the screen (VR fixed in play space: degrees around you). Flat and VR each keep their "
+    L"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, ignores the cab's sway. "
+    L"Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Per-part motion vectors). No cost.",
+    L"Moves the fps box sideways, in % of the screen (VR fixed / attached: degrees around you). Flat and VR each keep their "
     L"own position. No cost.",
-    L"Moves the fps box up / down, in % of the screen (VR fixed in play space: degrees, minus = up). Flat and VR each keep their "
+    L"Moves the fps box up / down, in % of the screen (VR fixed / attached: degrees, minus = up). Flat and VR each keep their "
     L"own position. No cost.",
     L"Makes the fps box bigger or smaller (0.2 .. 3.0). Raise it if you cannot read it in the headset or on a big screen. No cost.",
     // phase 44 (MR_FPSCOLOR, MR_FPSDIST, MR_FPSYAW, MR_FPSPITCH, MR_FPSROLL)
@@ -15597,19 +15611,23 @@ void ToggleFpsBox(uint64_t n) {
 // v0.10.3 phase 28: the menu's FPS counter lock row -- the VR fps box follows the headset (0) / stays fixed in the cab (1).
 // Logged + beeped like ToggleFpsBox. Also switchable in flat (kept for VR; the row is greyed there).
 void FpsVrLockReset();                                    // (FpsVrLockedPlace's once-logs + the captured pivot: after MenuDrawVrOn)
-void ToggleFpsVrLock(uint64_t n) {
-    g_fpsVrLock = g_fpsVrLock ? 0 : 1;
+// Phase 47: three values -- Right = the next (follow head -> fixed in play space -> attached to vehicle -> follow head), Left =
+// the previous one.
+void ToggleFpsVrLock(uint64_t n, int dir) {
+    g_fpsVrLock = ((g_fpsVrLock + (dir < 0 ? -1 : 1)) % 3 + 3) % 3;
     g_fpsExplicit = g_fpsMoved = true;
     FpsVrLockReset();
     const XrHook::PoseStats ps = XrHook::GetPoseStats();
     Log("fps box VR lock: %s (fps_vr_lock=%d, tuning menu, Present #%llu) -- fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f are now %s; "
-        "OpenXR: hook %s, %llu stereo xrLocateViews seen, %llu xrEndFrame projection layers, layer space type %d (2 = LOCAL); %s",
-        g_fpsVrLock ? "FIXED IN THE PLAY SPACE" : "follows the headset", g_fpsVrLock, (unsigned long long)n, g_fpsVrX, g_fpsVrY,
+        "OpenXR: hook %s, %llu stereo xrLocateViews seen, %llu xrEndFrame projection layers, layer space type %d (2 = LOCAL); %s%s",
+        g_fpsVrLock == 2 ? "ATTACHED TO THE VEHICLE" : g_fpsVrLock ? "FIXED IN THE PLAY SPACE" : "follows the headset", g_fpsVrLock,
+        (unsigned long long)n, g_fpsVrX, g_fpsVrY,
         (double)g_fpsVrScale, g_fpsVrLock ? "yaw / pitch degrees at fps_vr_dist (+ right, + down) and the size as at 0.8 m"
                                           : "% of the eye picture from its optical centre",
         XrHook::Hooked() ? "installed" : "NOT installed", (unsigned long long)ps.locates, (unsigned long long)ps.endFrames,
-        ps.layerSpaceType, MenuVrPathName());
-    PlayTones(1, g_fpsVrLock ? 1200 : 300, 150, 0);
+        ps.layerSpaceType, MenuVrPathName(), g_fpsVrLock == 2 ? " -- attached: the fps box is drawn into the eye pictures (never a "
+        "quad layer), placed from a cab draw's MVP of each picture" : "");
+    PlayTones(1, g_fpsVrLock == 2 ? 1600 : g_fpsVrLock ? 1200 : 300, 150, 0);
 }
 // phase 30: the menu's Turbo mode row -- dlaa.ini xr_turbo live (XrHook::SetTurbo: takes effect at the next xrEndFrame). Logged +
 // beeped like the other toggles. Also switchable in flat (kept for VR; the row is greyed there, no OpenXR frame loop).
@@ -17150,7 +17168,8 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     swprintf(p.rows[MR_FPS].value, kV, L"%ls", onOff[g_fpsShow ? 1 : 0]);
     groupRow(MR_FPSGRP, L"FPS counter settings");         // v0.10.3 phase 29c
     MenuRow(p, MR_FPSLOCK, L"FPS counter lock", "dlaa.ini fps_vr_lock", vr ? nullptr : "VR only", !vr);   // v0.10.3 phase 28
-    swprintf(p.rows[MR_FPSLOCK].value, kV, L"%ls", g_fpsVrLock ? L"Fixed in play space" : L"Follow head");   // phase 44: was "Fixed in cab"
+    swprintf(p.rows[MR_FPSLOCK].value, kV, L"%ls", g_fpsVrLock == 2 ? L"Attached to vehicle"   // phase 47
+                                                   : g_fpsVrLock ? L"Fixed in play space" : L"Follow head");   // phase 44: was "Fixed in cab"
     MenuRow(p, MR_FPSX, L"FPS counter X", vr ? "dlaa.ini fps_vr_x" : "dlaa.ini fps_x", nullptr, false);
     if (vr) swprintf(p.rows[MR_FPSX].value, kV, L"%+d %%", g_fpsVrX);
     else    swprintf(p.rows[MR_FPSX].value, kV, L"%d %%", g_fpsX);
@@ -17249,7 +17268,8 @@ void MenuClose(uint64_t n, const char* why) {
     if (g_fpsMoved)
         snprintf(fpsPlaced, sizeof(fpsPlaced), " -- fps box now %s, flat x=%d%% y=%d%% size %.1f, VR x=%+d y=%+d (%s) size %.1f (%s or "
                  "the Save row writes it)", g_fpsShow ? "on" : "off", g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY,
-                 g_fpsVrLock ? "degrees, fixed in the play space" : "%, follows the head", (double)g_fpsVrScale, KeyName(KA_SAVE));
+                 g_fpsVrLock == 2 ? "degrees, attached to the vehicle" : g_fpsVrLock ? "degrees, fixed in the play space"
+                 : "%, follows the head", (double)g_fpsVrScale, KeyName(KA_SAVE));
     Log("tuning menu closed (%s, Present #%llu)%s%s", why, (unsigned long long)n, placed, fpsPlaced);
     g_menuMoved = false;
     g_fpsMoved = false;
@@ -17336,7 +17356,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
             (unsigned long long)n);
         break;
     case MR_FPS:     ToggleFpsBox(n); break;                // Left and Right both switch it
-    case MR_FPSLOCK: ToggleFpsVrLock(n); break;             // v0.10.3 phase 28: Left and Right both switch it (also flat: kept for VR)
+    case MR_FPSLOCK: ToggleFpsVrLock(n, dir); break;        // phase 47: 3 values, Right = next, Left = previous (also flat: kept for VR)
     case MR_FPSX:
         if (vr) g_fpsVrX = MenuClampI(g_fpsVrX + dir, -50, 50); else g_fpsX = MenuClampI(g_fpsX + dir, 0, 95);
         g_fpsExplicit = g_fpsMoved = true;
@@ -17633,6 +17653,7 @@ struct FpsVrLockState {
 FpsVrLockState g_fpsLock;
 void FpsVrLockReset() {                                   // the lock toggled / Reset: re-capture the pivot, log again
     g_fpsLock = FpsVrLockState();
+    FpsCab::Reset("the lock row / Reset");               // phase 47: a fresh lock-on (attached to the vehicle)
 }
 // v' = conj(q) v q (the reference-space vector `v` in the view's axes) for a unit quaternion q = (x, y, z, w).
 void QuatRotInv(const XrHook::View& q, const double v[3], double out[3]) {
@@ -17803,6 +17824,78 @@ int FpsVrLockedPlace(int eye, ID3D11Texture2D* tex, const D3D11_RENDER_TARGET_VI
     return 1;
 }
 
+// ---- phase 47: the VR fps box ATTACHED TO THE VEHICLE (fps_vr_lock = 2; src/fps_cab.h) ------------------------------------
+// The OpenXR side for FpsCab: the poses the eye pictures are shown with (XrHook::LatestViews, corrected to the submitted pose),
+// per DLAA eye index -- eye 0 = OpenXR view 1 (the right eye) as FpsVrLockedPlace assumes; FpsCab's lock checks that order
+// against the eyes' positions in the cab draw's model space and swaps it if needed. Not usable (stale, untracked, a VIEW space)
+// = ok false (the lock then places the box from the eye's own view).
+FpsCab::XrIn FpsCabXr() {
+    FpsCab::XrIn x;
+    XrHook::Views vs;
+    if (!XrHook::Hooked() || !XrHook::LatestViews(&vs) || vs.ageSec > kFpsLockStale || (vs.flags & 3) != 3 || vs.spaceType == 1)
+        return x;
+    x.ok = true;
+    x.local = vs.spaceType == 2;
+    for (int e = 0; e < 2; ++e) {
+        const XrHook::View& w = vs.v[(e & 1) ^ 1];
+        x.eye[e] = FpsCab::Pose{ { w.px, w.py, w.pz }, { w.qx, w.qy, w.qz, w.qw } };
+        x.fw[e] = std::tan((double)w.angleRight) - std::tan((double)w.angleLeft);
+    }
+    return x;
+}
+// FpsCab follows the menu state: on = VR, the box shown, lock 2; the fps_vr_* settings (a change moves the box in the cab).
+void FpsCabSync(uint64_t frame) {
+    FpsCab::SetActive(g_launchVr == 1 && g_fpsShow && g_fpsVrLock == 2, frame);
+    if (!FpsCab::Active()) return;
+    FpsCab::Settings s;
+    s.x = g_fpsVrX; s.y = g_fpsVrY; s.distCm = g_fpsVrDist;
+    s.yaw = g_fpsVrYaw; s.pitch = g_fpsVrPitch; s.roll = g_fpsVrRoll;
+    s.scale = (double)g_fpsVrScale;
+    FpsCab::SetSettings(s);
+}
+// HandlePossibleBlit, a VR eye blit (render thread): this eye's pass record -> the reference cab draw's MVP offset for the box
+// drawn into this picture later this frame (zero lag), the lock / monitor readbacks.
+void FpsCabBlit(ID3D11DeviceContext* ctx, int eye, DrawIdRecord& rec, uint64_t serial, uint64_t frame) {
+    FpsCabSync(frame);
+    if (!FpsCab::Active()) return;
+    CpuProf::Block cpb(CpuProf::kBMenu);               // (the fps box's CPU side, like the menu's)
+    const FpsCab::XrIn xr = FpsCabXr();
+    const bool frameStart = ((serial + (uint64_t)g_vrPhaseOff) & 1) == 0;   // phase 24 parity: this pass starts a VR frame
+    const bool was = t_inDlaa;
+    t_inDlaa = true;                                      // (our staging copies / maps pass straight through the hooks)
+    FpsCab::OnBlit(ctx, eye, rec, serial, frame, frameStart, xr);
+    t_inDlaa = was;
+}
+// MenuDrawVrOn: the box attached to the cab in eye `eye`'s picture `rtv` (texture `tex`). False = not attached now (the caller
+// draws the mode-1 box: fixed in the play space); the reason is counted / logged by FpsCab::NoteDraw.
+bool FpsCabDraw(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv, ID3D11Texture2D* tex,
+                const D3D11_RENDER_TARGET_VIEW_DESC& rd, UINT W, UINT H, int outMode) {
+    FpsCabSync(g_frames.load(std::memory_order_relaxed));
+    FpsCab::Place pl;
+    int why = FpsCab::kInactive;
+    bool ok = FpsCab::Get(eye, g_frames.load(std::memory_order_relaxed), &pl, &why);
+    if (ok) {
+        // the draw's NDC covers the eye's picture: the whole texture, or (a side-by-side / array swapchain image) its sub-rect
+        float map[4] = { 1.0f, 1.0f, 0.0f, 0.0f };
+        const uint32_t slice = rd.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE2DARRAY ? rd.Texture2DArray.FirstArraySlice : 0;
+        int32_t rect[4] = { 0, 0, (int32_t)W, (int32_t)H };
+        if (XrHook::ViewForImage(tex, slice, rect) >= 0 && rect[2] > 0 && rect[3] > 0 && rect[0] >= 0 && rect[1] >= 0 &&
+            (UINT)(rect[0] + rect[2]) <= W && (UINT)(rect[1] + rect[3]) <= H) {
+            map[0] = (float)rect[2] / (float)W;
+            map[1] = (float)rect[3] / (float)H;
+            map[2] = (float)(2 * rect[0] + rect[2]) / (float)W - 1.0f;
+            map[3] = 1.0f - (float)(2 * rect[1] + rect[3]) / (float)H;
+        }
+        GpuPerfScope gp(ctx, GpuPerf::kOverlay);          // (the fps box's own GPU cost, as the other drawn-in paths)
+        FpsSyncColor();
+        ok = TuningMenu::DrawWidgetMvp(ctx, rtv, W, H, pl.srv, pl.off, pl.corner, map, g_fpsVrBuild, outMode, g_fps.line1,
+                                       g_fps.line2);
+        if (!ok) why = FpsCab::kShader;
+    }
+    FpsCab::NoteDraw(ok, why);
+    return ok;
+}
+
 // VR: the panel while the menu is open, then the fps box while it is on, into `rtv` (an eye texture view); both centred on the
 // eye's optical centre + their own offsets, shifted inward by the same menu_vr_depth. v0.10.0 phase 15: split out of MenuDrawVr
 // for the menu / truck-preview eye pictures (MenuDrawPreview); the centre comes from VrEyeCentre (the world eye's, else the
@@ -17833,7 +17926,8 @@ void FpsDrawnInLog(int eye, int locked, double extra, double ipd, double fx, boo
 }
 void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv) {
     const bool menuOpen = g_menuOpen.load(std::memory_order_relaxed) && !(g_menuVrLayer && XrHook::OverlayActive(0));
-    const bool fpsShow = g_fpsShow && !(g_menuVrLayer && XrHook::OverlayActive(1));
+    // phase 47: attached to the vehicle = never a quad (MenuOverlaySet does not ask for one): always drawn in here
+    const bool fpsShow = g_fpsShow && (g_fpsVrLock == 2 || !(g_menuVrLayer && XrHook::OverlayActive(1)));
     if (eye < 0 || eye >= kMaxEyes || t_inDlaa || !rtv || !(menuOpen || fpsShow)) return;
     Microsoft::WRL::ComPtr<ID3D11Resource> res;
     rtv->GetResource(res.GetAddressOf());
@@ -17879,6 +17973,12 @@ void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv
     if (fpsShow) {
         const float scale = W * 0.08f / TuningMenu::kWidgetRefW * g_fpsVrScale;   // 1 = 8 % of the eye width
         if (eye == 0 || g_fpsVrBuild <= 0.0f) g_fpsVrBuild = scale;     // one build scale for both eyes and the mirror
+        // phase 47: attached to the vehicle -- placed on the GPU from this picture's cab draw (FpsCabDraw); not possible now (no
+        // cab draw / record / lock yet) = the fixed-in-play-space box below (FpsVrLockedPlace treats lock 2 as 1)
+        if (g_fpsVrLock == 2 && FpsCabDraw(ctx, eye, rtv, t.Get(), rd, td.Width, td.Height, outMode)) {
+            t_inDlaa = false;
+            return;
+        }
         float cx = u * W + (float)g_fpsVrX / 100.0f * W + shift;
         float cy = v * H + (float)g_fpsVrY / 100.0f * H;
         float s = scale;
@@ -18741,8 +18841,8 @@ void MenuOverlaySet() {
     XrHook::OverlayParams p;
     p.enabled   = g_menuVrLayer != 0;
     p.menuOpen  = g_menuOpen.load(std::memory_order_relaxed);
-    p.fpsShow   = g_fpsShow;
-    p.fpsLock   = g_fpsVrLock;
+    p.fpsShow   = g_fpsShow && g_fpsVrLock != 2;         // phase 47: attached to the vehicle = drawn into the eye pictures only
+    p.fpsLock   = g_fpsVrLock ? 1 : 0;
     p.menuX     = g_menuVrX;  p.menuY = g_menuVrY;  p.menuScale = g_menuVrScale;
     p.menuDist  = (float)g_menuVrDist / 100.0f;          // v0.10.3 phase 29b (cm -> m)
     p.menuFace  = g_menuVrFace != 0;                     // v0.10.3 phase 29b: the panel / head-following fps box quads
@@ -20443,7 +20543,8 @@ void LoadConfig() {
             else if (!strcmp(key, "fps_y"))          g_fpsY = v < 0 ? 0 : (v > 95 ? 95 : (int)v);
             else if (!strcmp(key, "fps_vr_x"))       g_fpsVrX = v < -50 ? -50 : (v > 50 ? 50 : (int)v);
             else if (!strcmp(key, "fps_vr_y"))       g_fpsVrY = v < -50 ? -50 : (v > 50 ? 50 : (int)v);
-            else if (!strcmp(key, "fps_vr_lock"))    g_fpsVrLock = v != 0 ? 1 : 0;   // v0.10.3 phase 28: 1 = fixed in the cab
+            else if (!strcmp(key, "fps_vr_lock"))    g_fpsVrLock = v <= 0 ? 0 : (v >= 2 ? 2 : 1);   // phase 28: 1 = fixed in the
+                                                                                                    // play space; phase 47: 2 = attached
             else if (!strcmp(key, "fps_scale") || !strcmp(key, "fps_vr_scale")) {
                 const double s = strtod(eq + 1, nullptr);
                 const float def = key[4] == 'v' ? kFpsVrScaleDefault : 1.0f;   // phase 15: 0.2..3.0 (was 0.5..3.0)
@@ -20604,8 +20705,10 @@ void LoadConfig() {
         "fps_vr_lock=%d (%s); phase 44: fps_color=%d (%ls) fps_vr_dist=%d cm fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d deg (the "
         "tuning menu's FPS counter rows change them)", g_fpsShow ? 1 : 0,
         g_fpsShow ? "on: shown also while the menu is closed" : "off", g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY,
-        (double)g_fpsVrScale, g_fpsVrLock, g_fpsVrLock ? "VR: fixed in the play space, fps_vr_x / fps_vr_y = yaw / pitch degrees "
-                                                         "at fps_vr_dist" : "VR: follows the headset",
+        (double)g_fpsVrScale, g_fpsVrLock, g_fpsVrLock == 2 ? "VR: ATTACHED TO THE VEHICLE (phase 47: drawn in, placed from a cab "
+                                                         "draw's MVP on the GPU), fps_vr_x / fps_vr_y = yaw / pitch degrees at "
+                                                         "fps_vr_dist at the lock-on" : g_fpsVrLock ? "VR: fixed in the play space, "
+                                                         "fps_vr_x / fps_vr_y = yaw / pitch degrees at fps_vr_dist" : "VR: follows the headset",
         g_fpsColor, FpsPose::ColorOf(g_fpsColor).name, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll);
     // v0.10.0 phase 6b: the vote participation of instanced / no-MVP draws follows mv_drawid_instanced (default 1, even when the
     // key is absent) -- set it here, after the whole ini is parsed, so both the replay and the vote agree.

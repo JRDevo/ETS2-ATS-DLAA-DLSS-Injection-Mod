@@ -25,6 +25,9 @@ cbuffer MenuCb : register(b0) {
     float4 Rect;                                     // x0, y0 (top), x1, y1 (bottom) in NDC
     float4 Opt;                                      // x: 1 = decode sRGB -> linear, y: panel opacity, w: 1 = Corner[] (clip space)
     float4 Corner[4];                                // phase 16: top-left, top-right, bottom-left, bottom-right (Opt.w = 1)
+                                                     // phase 47 (VSCab): the same corners in a cab draw's MODEL space
+    uint4  Cab;                                      // phase 47 (VSCab): x = byte offset of that draw's MVP (4 rows) in CabMirror
+    float4 Map;                                      // phase 47 (VSCab): picture NDC = the draw's NDC * Map.xy + Map.zw
 };
 struct VOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
 VOut VSMain(uint id : SV_VertexID) {
@@ -33,6 +36,26 @@ VOut VSMain(uint id : SV_VertexID) {
     if (Opt.w > 0.5) o.pos = Corner[id & 3u];
     else             o.pos = float4(lerp(Rect.x, Rect.z, t.x), lerp(Rect.y, Rect.w, t.y), 0.0, 1.0);
     o.uv = t;
+    return o;
+}
+// phase 47: the fps box ATTACHED TO THE VEHICLE (src/fps_cab.h). CabMirror = the draw-id record's copy of the game's cbuffer
+// ring(s) for THIS eye's pass; the reference cab draw's MVP (rows = clip x, y, z, w; clip = M p) is read at Cab.x, so the box's
+// model-space corners land where that draw's geometry lands in this very picture. A block that is not MVP-shaped (DrawIdMv
+// ShapeOk) or not finite puts every corner at one point outside the picture (nothing drawn).
+ByteAddressBuffer CabMirror : register(t0);
+VOut VSCab(uint id : SV_VertexID) {
+    const float2 t = float2((float)(id & 1u), (float)(id >> 1));
+    VOut o;
+    o.uv = t;
+    const uint a = Cab.x;
+    const float4 r0 = asfloat(CabMirror.Load4(a)), r1 = asfloat(CabMirror.Load4(a + 16u));
+    const float4 r2 = asfloat(CabMirror.Load4(a + 32u)), r3 = asfloat(CabMirror.Load4(a + 48u));
+    const float4 p = Corner[id & 3u];
+    const float4 c = float4(dot(r0, p), dot(r1, p), dot(r2, p), dot(r3, p));
+    const float l0 = length(r0.xyz), l1 = length(r1.xyz), l3 = length(r3.xyz);
+    const float lm = max(l0, max(l1, length(r2.xyz)));
+    const bool ok = all(isfinite(c)) && lm > 1e-20 && l0 > 0.02 * lm && l1 > 0.02 * lm && l3 > 0.02 * lm;
+    o.pos = ok ? float4(c.xy * Map.xy + Map.zw * c.w, 0.5 * c.w, c.w) : float4(2.0, 2.0, 0.5, 1.0);
     return o;
 }
 )";
@@ -67,9 +90,14 @@ float4 PSMain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
 )";
 // kMenuPs-END
 
-struct CbData { float rect[4]; float opt[4]; float corner[4][4]; };   // (phase 16: + the 4 clip-space corners)
+struct CbData { float rect[4]; float opt[4]; float corner[4][4]; uint32_t cab[4]; float map[4]; };   // (phase 16: + the 4
+                                                                                                     //  clip-space corners;
+                                                                                                     //  phase 47: + cab / map)
+static_assert(sizeof(CbData) == 128, "MenuCb layout");
 
 ComPtr<ID3D11VertexShader>      g_vs;
+ComPtr<ID3D11VertexShader>      g_vsCab;     // phase 47: VSCab (the fps box attached to the vehicle), made on its first use
+bool                            g_vsCabFailed = false;
 ComPtr<ID3D11PixelShader>       g_ps;
 ComPtr<ID3D11Buffer>            g_cb;
 ComPtr<ID3D11SamplerState>      g_smp;
@@ -116,6 +144,8 @@ struct Saved {
     ID3D11GeometryShader*     gs = nullptr; ID3D11ClassInstance* gsI[kInst] = {}; UINT gsN = kInst;
     ID3D11PixelShader*        ps = nullptr; ID3D11ClassInstance* psI[kInst] = {}; UINT psN = kInst;
     ID3D11Buffer*             vsCb0 = nullptr;
+    ID3D11ShaderResourceView* vsSrv0 = nullptr;      // phase 47: VSCab reads its mirror at VS t0
+    bool                      vsSrvSaved = false;
     ID3D11Buffer*             psCb0 = nullptr;
     ID3D11ShaderResourceView* srv[kSrvSave] = {};
     ID3D11SamplerState*       smp0 = nullptr;
@@ -132,9 +162,11 @@ Saved g_saved;
 template <class T> void Rel(T*& p) { if (p) { p->Release(); p = nullptr; } }
 void RelInst(ID3D11ClassInstance** a, UINT n) { for (UINT i = 0; i < n && i < kInst; ++i) Rel(a[i]); }
 
-void SaveState(ID3D11DeviceContext* ctx) {
+void SaveState(ID3D11DeviceContext* ctx, bool vsSrv = false) {
     Saved& s = g_saved;
     s.vsN = s.hsN = s.dsN = s.gsN = s.psN = kInst;
+    s.vsSrvSaved = vsSrv;                                    // phase 47: only the VSCab draw binds a VS SRV
+    if (vsSrv) ctx->VSGetShaderResources(0, 1, &s.vsSrv0);
     ctx->IAGetInputLayout(&s.il);
     ctx->IAGetPrimitiveTopology(&s.topo);
     ctx->VSGetShader(&s.vs, s.vsI, &s.vsN);
@@ -169,6 +201,7 @@ void RestoreState(ID3D11DeviceContext* ctx) {
     ctx->GSSetShader(s.gs, s.gsI, s.gsN);
     ctx->PSSetShader(s.ps, s.psI, s.psN);
     ctx->VSSetConstantBuffers(0, 1, &s.vsCb0);
+    if (s.vsSrvSaved) { ctx->VSSetShaderResources(0, 1, &s.vsSrv0); Rel(s.vsSrv0); s.vsSrvSaved = false; }   // phase 47
     ctx->PSSetConstantBuffers(0, 1, &s.psCb0);
     ctx->PSSetShaderResources(0, kSrvSave, s.srv);
     ctx->PSSetSamplers(0, 1, &s.smp0);
@@ -210,6 +243,7 @@ bool Ensure(ID3D11Device* dev) {
     // group (~2.1 s), no longer after the whole per-draw set (~20 s): the panel works on the first menu screens.
     if (!ShaderCache::Ready(ShaderCache::kMenuVs) || !ShaderCache::Ready(ShaderCache::kMenuPs)) return false;
     g_failed = true; g_dev = dev;
+    g_vsCab.Reset(); g_vsCabFailed = false;                  // phase 47 (made again on its first use on this device)
     g_vs.Reset(); g_ps.Reset(); g_cb.Reset(); g_smp.Reset(); g_blend.Reset(); g_blendOv.Reset(); g_rs.Reset(); g_dss.Reset();
     DropTexture();
     DropWidget();
@@ -652,15 +686,17 @@ bool EnsureWidgetTexture(ID3D11Device* dev, ID3D11DeviceContext* ctx, const wcha
 
 // One textured quad of `srv` into `rtv` from `cb` (its rect / corners filled by the caller; the options are set here), every
 // touched state saved and restored (SaveState / RestoreState). The device objects must exist (Ensure).
+// phase 47: vsCab != null = that vertex shader (VSCab) with `vsSrv` at VS t0 instead of VSMain (saved / restored as well).
 void DrawCb(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, CbData& cb, int outMode,
-            ID3D11ShaderResourceView* srv, bool textureAlpha) {
+            ID3D11ShaderResourceView* srv, bool textureAlpha, ID3D11VertexShader* vsCab = nullptr,
+            ID3D11ShaderResourceView* vsSrv = nullptr) {
     const bool overlay = (outMode & TuningMenu::kOutOverlay) != 0;   // v0.10.3 phase 29: blend off, RGBA written
     outMode &= ~TuningMenu::kOutOverlay;
     cb.opt[0] = (float)(outMode < TuningMenu::kOutRaw ? TuningMenu::kOutRaw : (outMode > TuningMenu::kOutPq ? TuningMenu::kOutPq : outMode));
     cb.opt[1] = 0.88f;
     cb.opt[2] = textureAlpha ? 1.0f : 0.0f;                  // 1 = the fps box: alpha comes from the texture
     ctx->UpdateSubresource(g_cb.Get(), 0, nullptr, &cb, 0, 0);
-    SaveState(ctx);
+    SaveState(ctx, vsCab != nullptr);
     ID3D11ShaderResourceView* nullSrv = nullptr;
     ctx->PSSetShaderResources(0, 1, &nullSrv);
     ID3D11RenderTargetView* rt = rtv;
@@ -672,7 +708,8 @@ void DrawCb(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW,
     ID3D11SamplerState* smp = g_smp.Get();
     ctx->IASetInputLayout(nullptr);
     ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-    ctx->VSSetShader(g_vs.Get(), nullptr, 0);
+    ctx->VSSetShader(vsCab ? vsCab : g_vs.Get(), nullptr, 0);
+    if (vsCab) ctx->VSSetShaderResources(0, 1, &vsSrv);     // phase 47: the record's cbuffer mirror
     ctx->HSSetShader(nullptr, nullptr, 0);
     ctx->DSSetShader(nullptr, nullptr, 0);
     ctx->GSSetShader(nullptr, nullptr, 0);
@@ -709,6 +746,7 @@ namespace TuningMenu {
 void RegisterShaders() {
     ShaderCache::Add(ShaderCache::kMenuVs, kMenuVs, sizeof(kMenuVs) - 1, "menu_vs", "VSMain", "vs_5_0");
     ShaderCache::Add(ShaderCache::kMenuPs, kMenuPs, sizeof(kMenuPs) - 1, "menu_ps", "PSMain", "ps_5_0");
+    ShaderCache::Add(ShaderCache::kMenuCabVs, kMenuVs, sizeof(kMenuVs) - 1, "menu_cab_vs", "VSCab", "vs_5_0");   // phase 47
 }
 
 float RefHeight(int nRows) {
@@ -804,6 +842,40 @@ bool DrawWidgetCorners(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, ui
     memcpy(cb.corner, clip, sizeof(cb.corner));
     cb.opt[3] = 1.0f;                                        // the corners
     DrawCb(ctx, rtv, rtW, rtH, cb, outMode, g_wSrv.Get(), true);
+    return true;
+}
+
+// phase 47: the fps box attached to the vehicle -- VSCab places `model` (4 model-space corners of the reference cab draw) with
+// that draw's MVP read on the GPU from `mirror` at `mvpByteOff` (see fps_cab.h). Texture / states as DrawWidget.
+bool DrawWidgetMvp(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, ID3D11ShaderResourceView* mirror,
+                   uint32_t mvpByteOff, const float model[4][4], const float map[4], float buildScale, int outMode,
+                   const wchar_t* line1, const wchar_t* line2) {
+    if (!ctx || !rtv || !rtW || !rtH || !mirror || !model || !map || !(buildScale > 0.0f) || (mvpByteOff & 3u)) return false;
+    for (int i = 0; i < 4; ++i)
+        for (int k = 0; k < 4; ++k)
+            if (!std::isfinite(model[i][k])) return false;
+    ComPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    if (!dev || !Ensure(dev.Get())) return false;
+    if (!g_vsCab) {
+        if (g_vsCabFailed || !ShaderCache::Ready(ShaderCache::kMenuCabVs)) return false;
+        size_t n = 0;
+        const void* code = ShaderCache::Code(ShaderCache::kMenuCabVs, &n);
+        HRESULT hr = E_FAIL;
+        if (!code || FAILED(hr = dev->CreateVertexShader(code, n, nullptr, &g_vsCab))) {
+            g_vsCabFailed = true;
+            LogErr("tuning menu: fps box (attached to vehicle) VS not available -- %s hr=0x%lx", code ? "CreateVertexShader failed"
+                   : ShaderCache::Error(ShaderCache::kMenuCabVs), (unsigned long)hr);
+            return false;
+        }
+    }
+    if (!EnsureWidgetTexture(dev.Get(), ctx, line1, line2, buildScale)) return false;
+    CbData cb{};
+    memcpy(cb.corner, model, sizeof(cb.corner));
+    cb.opt[3] = 1.0f;
+    cb.cab[0] = mvpByteOff;
+    memcpy(cb.map, map, sizeof(cb.map));
+    DrawCb(ctx, rtv, rtW, rtH, cb, outMode, g_wSrv.Get(), true, g_vsCab.Get(), mirror);
     return true;
 }
 

@@ -548,6 +548,11 @@ log_level = 1
 # 0.8 m. No inward shift (each eye sees it from its own position). Falls back to following the headset while the game's
 # OpenXR view poses are not available. The menu's FPS counter lock row switches it live ("Fixed in play space": it is
 # fixed in the VR play space, so it does NOT follow the cab when the game sways the cab on bumps / hills).
+# Phase 47: 2 = ATTACHED TO THE VEHICLE: placed like 1 at the moment it is switched on, then it sways with the cab (bumps,
+# braking, hills; trucks and cars) like a sticker on the dashboard. It is drawn into the eye pictures (never an OpenXR quad
+# layer, also with menu_vr_layer = 1) and placed on the GPU from a cab part's position in the same picture, so it has no
+# lag. Needs DLAA on with per-part motion vectors (mv_objects = 2, the default); without them, in the outside camera, in
+# menus and while loading it is drawn like 1 until the cab is back. The menu's FPS counter lock row: "Attached to vehicle".
 # fps_vr_lock = 0
 # Phase 44: the box's text colour, 0..19 = white (default, as before), yellow, amber, orange, red, pink, magenta, purple,
 # violet, blue, sky blue, cyan, teal, mint, green, lime, olive, gold, silver, black on white. Flat and VR. Menu: FPS colour.
