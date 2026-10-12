@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstring>
 #include <mutex>
+#include <new>
 #include <utility>
 #include "MinHook.h"
 #include "log.h"
@@ -184,6 +185,39 @@ typedef XrResult (XRH_CALL* PFN_xrPollEvent)(XrInstance, void* eventData);
 typedef XrResult (XRH_CALL* PFN_xrCreateSession)(XrInstance, const void* createInfo, XrSession*);
 typedef XrResult (XRH_CALL* PFN_xrBeginSession)(XrSession, const XrSessionBeginInfo*);
 typedef XrResult (XRH_CALL* PFN_xrRequestExitSession)(XrSession);
+// phase 40: the hidden area mask -- instance creation + XR_KHR_visibility_mask (openxr.h 1.0 layouts, x64; values from the same
+// OpenXR-SDK 1.1.62 header as above)
+struct XrApplicationInfo {
+    char applicationName[128]; uint32_t applicationVersion; char engineName[128]; uint32_t engineVersion; XrVersion apiVersion;
+};
+struct XrInstanceCreateInfo {
+    int32_t type; const void* next; uint64_t createFlags; XrApplicationInfo applicationInfo;
+    uint32_t enabledApiLayerCount; const char* const* enabledApiLayerNames;
+    uint32_t enabledExtensionCount; const char* const* enabledExtensionNames;
+};
+struct XrExtensionProperties { int32_t type; void* next; char extensionName[128]; uint32_t extensionVersion; };
+struct XrVector2f { float x, y; };
+struct XrVisibilityMaskKHR {
+    int32_t type; void* next; uint32_t vertexCapacityInput, vertexCountOutput; XrVector2f* vertices;
+    uint32_t indexCapacityInput, indexCountOutput; uint32_t* indices;
+};
+static_assert(sizeof(XrApplicationInfo) == 272 && offsetof(XrApplicationInfo, apiVersion) == 264 &&
+              offsetof(XrInstanceCreateInfo, applicationInfo) == 24 && offsetof(XrInstanceCreateInfo, enabledApiLayerCount) == 296 &&
+              offsetof(XrInstanceCreateInfo, enabledExtensionCount) == 312 &&
+              offsetof(XrInstanceCreateInfo, enabledExtensionNames) == 320 && sizeof(XrInstanceCreateInfo) == 328 &&
+              offsetof(XrExtensionProperties, extensionName) == 16 && sizeof(XrExtensionProperties) == 152 &&
+              offsetof(XrVisibilityMaskKHR, vertices) == 24 && offsetof(XrVisibilityMaskKHR, indexCountOutput) == 36 &&
+              offsetof(XrVisibilityMaskKHR, indices) == 40 && sizeof(XrVisibilityMaskKHR) == 48, "OpenXR struct layout (x64)");
+constexpr int32_t kTypeInstanceCreateInfo  = 3;            // XR_TYPE_INSTANCE_CREATE_INFO
+constexpr int32_t kTypeExtensionProperties = 2;            // XR_TYPE_EXTENSION_PROPERTIES
+constexpr int32_t kTypeEventDataBuffer     = 16;           // XR_TYPE_EVENT_DATA_BUFFER
+constexpr int32_t kTypeVisibilityMaskKhr   = 1000031000;   // XR_TYPE_VISIBILITY_MASK_KHR
+constexpr int32_t kMaskHiddenTriangleMesh  = 1;            // XR_VISIBILITY_MASK_TYPE_HIDDEN_TRIANGLE_MESH_KHR
+constexpr XrResult kEventUnavailable       = 4;            // XR_EVENT_UNAVAILABLE
+const char* const kVisMaskExt = "XR_KHR_visibility_mask";
+typedef XrResult (XRH_CALL* PFN_xrCreateInstance)(const XrInstanceCreateInfo*, XrInstance*);
+typedef XrResult (XRH_CALL* PFN_xrEnumerateInstanceExtensionProperties)(const char*, uint32_t, uint32_t*, XrExtensionProperties*);
+typedef XrResult (XRH_CALL* PFN_xrGetVisibilityMaskKHR)(XrSession, int32_t, uint32_t, int32_t, XrVisibilityMaskKHR*);
 
 // ---- components (one per runtime / layer / loader entry point) --------------------------------------------------------
 enum { kKindRuntime = 0, kKindLayer = 1, kKindLoader = 2 };
@@ -198,6 +232,7 @@ struct Slot {
     std::atomic<void*> destroySession{nullptr};                                       // phase 29 (the overlay's objects)
     std::atomic<void*> waitFrame{nullptr}, beginFrame{nullptr}, endSession{nullptr};  // phase 30 (Turbo mode)
     std::atomic<void*> pollEvent{nullptr}, createSession{nullptr}, beginSession{nullptr}, requestExit{nullptr};   // phase 33
+    std::atomic<void*> createInstance{nullptr};                                       // phase 40 (runtime slots only)
     std::atomic<void*> instance{nullptr};        // phase 29: the last non-null XrInstance this component's GIPA was asked with
     int  kind = 0;
     char module[64] = "";
@@ -1400,6 +1435,270 @@ void TbAfterEndLocked(int i, XrSession ses, XrResult r, bool want, uint8_t tag) 
     TbMirrorLocked();
 }
 
+// ---- phase 40: the hidden area mask (see xr_hook.h) -----------------------------------------------------------------------
+std::atomic<bool>     s_hmWant{false};            // HiddenMaskRequest: ask for the extension at xrCreateInstance
+std::atomic<bool>     s_hmActive{false};          // HiddenMaskActive: fetch the meshes
+std::atomic<int>      s_hmExt{0};                 // HiddenStats::ext
+std::atomic<bool>     s_hmOurs{false};            // the extension is enabled by us only: its events are swallowed
+std::atomic<bool>     s_hmDirty[2] = {};          // re-query view v at the next xrEndFrame (event / new session)
+std::atomic<uint64_t> s_hmQueries{0}, s_hmEvents{0}, s_hmSwallowed{0};
+std::atomic<bool>     s_hmFnOk{false}, s_hmFailedA{false};
+struct HmView {
+    uint64_t gen = 0;
+    uint32_t nv = 0, ni = 0;
+    float    xy[2 * kHiddenMaxVerts] = {};
+    uint32_t idx[kHiddenMaxIdx] = {};
+    float    fov[4] = {};
+    bool     have = false;
+};
+HmView   s_hmView[2];
+uint64_t s_hmGenNext = 0;
+SRWLOCK  s_hmLock = SRWLOCK_INIT;                 // s_hmView + s_hmGenNext (copies only)
+// the query side: the game's outermost xrEndFrame (s_hmMx; never held over a game call)
+std::mutex                 s_hmMx;
+XrSession                  s_hmSes = nullptr;     // the session the meshes belong to
+PFN_xrGetVisibilityMaskKHR s_hmFn = nullptr;
+int                        s_hmFnSlot = -1;       // the component it was resolved at
+uint32_t                   s_hmFnTried = 0;       // bit per slot: resolution tried
+bool                       s_hmFailed = false;    // a query failed for s_hmSes: given up until the next session
+int                        s_hmTries[2] = {};     // size-mismatch retries of the current dirty query
+XrVector2f                 s_hmVb[kHiddenMaxVerts];
+uint32_t                   s_hmIb[kHiddenMaxIdx];
+
+// under s_hmMx: xrGetVisibilityMaskKHR through component k's real GIPA (+ its last instance). False = not resolvable there.
+bool HmResolveAt(int k) {
+    if (k < 0 || k >= s_slotN.load(std::memory_order_acquire) || (s_hmFnTried & (1u << k))) return false;
+    s_hmFnTried |= 1u << k;
+    auto gipa = reinterpret_cast<PFN_xrGetInstanceProcAddr>(s_slot[k].gipa.load(std::memory_order_acquire));
+    XrInstance inst = s_slot[k].instance.load(std::memory_order_acquire);
+    if (!gipa || !inst) return false;
+    PFN_xrVoidFunction fp = nullptr;
+    ++t_depth;
+    const XrResult r = gipa(inst, "xrGetVisibilityMaskKHR", &fp);
+    --t_depth;
+    if (r < 0 || !fp) {
+        LogDbg("hidden area mask: xrGetVisibilityMaskKHR not resolved at the %s %s (result %d = %s)", kKindName[s_slot[k].kind],
+            s_slot[k].module, r, XrResultName(r));
+        return false;
+    }
+    s_hmFn = reinterpret_cast<PFN_xrGetVisibilityMaskKHR>(fp);
+    s_hmFnSlot = k;
+    s_hmFnOk.store(true, std::memory_order_relaxed);
+    Log("hidden area mask: xrGetVisibilityMaskKHR resolved at the %s %s (slot %d, instance %p)", kKindName[s_slot[k].kind],
+        s_slot[k].module, k, inst);
+    return true;
+}
+// under s_hmMx: the next component to try after slot `from` failed: the runtime (the extension is enabled there for sure)
+bool HmResolveRuntime() {
+    const int n = s_slotN.load(std::memory_order_acquire);
+    for (int k = 0; k < n; ++k)
+        if (s_slot[k].kind == kKindRuntime && HmResolveAt(k)) return true;
+    return false;
+}
+// under s_hmMx, t_depth 0: one view's hidden mesh into s_hmView[v]. 1 = done (mesh or empty), 0 = retry next frame, -1 = failed.
+int HmQuery(XrSession ses, int v, const XrFovf& fov) {
+    XrVisibilityMaskKHR m{};
+    m.type = kTypeVisibilityMaskKhr;
+    ++t_depth;
+    XrResult r = s_hmFn(ses, kViewConfigPrimaryStereo, (uint32_t)v, kMaskHiddenTriangleMesh, &m);
+    --t_depth;
+    if (r < 0) {
+        LogErr("hidden area mask: xrGetVisibilityMaskKHR(view %d, count) FAILED -> %d = %s (at the %s %s) -- no mask", v, r,
+            XrResultName(r), kKindName[s_slot[s_hmFnSlot].kind], s_slot[s_hmFnSlot].module);
+        return -1;
+    }
+    const uint32_t nv = m.vertexCountOutput, ni = m.indexCountOutput;
+    if (nv > kHiddenMaxVerts || ni > kHiddenMaxIdx || ni % 3 != 0 || (nv == 0) != (ni == 0)) {
+        LogErr("hidden area mask: view %d mesh not usable (%u vertices, %u indices; at most %u / %u, indices a multiple of 3) -- no "
+            "mask", v, nv, ni, kHiddenMaxVerts, kHiddenMaxIdx);
+        return -1;
+    }
+    if (nv) {
+        m.vertexCapacityInput = nv; m.vertices = s_hmVb;
+        m.indexCapacityInput = ni; m.indices = s_hmIb;
+        m.vertexCountOutput = m.indexCountOutput = 0;
+        ++t_depth;
+        r = s_hmFn(ses, kViewConfigPrimaryStereo, (uint32_t)v, kMaskHiddenTriangleMesh, &m);
+        --t_depth;
+        if (r < 0 || m.vertexCountOutput != nv || m.indexCountOutput != ni) {
+            if (++s_hmTries[v] <= 3) return 0;          // (the mesh changed between the two calls: again next frame)
+            LogErr("hidden area mask: xrGetVisibilityMaskKHR(view %d, fill) FAILED -> %d = %s (%u / %u of %u / %u) -- no mask", v, r,
+                XrResultName(r), m.vertexCountOutput, m.indexCountOutput, nv, ni);
+            return -1;
+        }
+        float mn[2] = { 1e30f, 1e30f }, mx[2] = { -1e30f, -1e30f };
+        for (uint32_t k = 0; k < nv; ++k) {
+            const XrVector2f& p = s_hmVb[k];
+            if (!std::isfinite(p.x) || !std::isfinite(p.y)) {
+                LogErr("hidden area mask: view %d vertex %u is not finite -- no mask", v, k);
+                return -1;
+            }
+            mn[0] = (std::min)(mn[0], p.x); mx[0] = (std::max)(mx[0], p.x);
+            mn[1] = (std::min)(mn[1], p.y); mx[1] = (std::max)(mx[1], p.y);
+        }
+        for (uint32_t k = 0; k < ni; ++k)
+            if (s_hmIb[k] >= nv) {
+                LogErr("hidden area mask: view %d index %u = %u is out of range (%u vertices) -- no mask", v, k, s_hmIb[k], nv);
+                return -1;
+            }
+        LogDbg("hidden area mask: view %d hidden triangle mesh %u vertices, %u triangles; raw bounds x %+.3f..%+.3f y %+.3f..%+.3f "
+            "(view tangents; the submitted fov tangents are x %+.3f..%+.3f y %+.3f..%+.3f) -- session %p", v, nv, ni / 3,
+            mn[0], mx[0], mn[1], mx[1], std::tan(fov.angleLeft), std::tan(fov.angleRight), std::tan(fov.angleDown),
+            std::tan(fov.angleUp), ses);
+    } else {
+        LogDbg("hidden area mask: view %d -- the runtime reports NO hidden area (empty mesh), session %p", v, ses);
+    }
+    AcquireSRWLockExclusive(&s_hmLock);
+    HmView& h = s_hmView[v];
+    h.nv = nv; h.ni = ni;
+    if (nv) { memcpy(h.xy, s_hmVb, sizeof(float) * 2 * nv); memcpy(h.idx, s_hmIb, sizeof(uint32_t) * ni); }
+    h.fov[0] = fov.angleLeft; h.fov[1] = fov.angleRight; h.fov[2] = fov.angleUp; h.fov[3] = fov.angleDown;
+    h.have = true;
+    h.gen = ++s_hmGenNext;
+    ReleaseSRWLockExclusive(&s_hmLock);
+    s_hmQueries.fetch_add(1, std::memory_order_relaxed);
+    s_hmTries[v] = 0;
+    return 1;
+}
+// under s_hmMx: the meshes of the old session go (an empty mesh with a new gen: the drawer drops its copy)
+void HmClearLocked() {
+    AcquireSRWLockExclusive(&s_hmLock);
+    for (HmView& h : s_hmView) { if (h.have || h.nv) { h.have = false; h.nv = h.ni = 0; h.gen = ++s_hmGenNext; } }
+    ReleaseSRWLockExclusive(&s_hmLock);
+}
+// The game's outermost xrEndFrame with its first stereo projection layer (slot i = the component it went to; t_depth 0):
+// the meshes for this session (once, and again after a mask-changed event) + the submitted fov of each view.
+void HmEndFrame(int i, XrSession ses, const XrCompositionLayerProjection* proj) {
+    if (!s_hmActive.load(std::memory_order_relaxed)) return;
+    const int ext = s_hmExt.load(std::memory_order_relaxed);
+    if (ext != 2 && ext != 3) return;
+    std::lock_guard<std::mutex> lk(s_hmMx);
+    if (ses != s_hmSes) {
+        if (s_hmSes) HmClearLocked();
+        s_hmSes = ses;
+        s_hmFailed = false;
+        s_hmFailedA.store(false, std::memory_order_relaxed);
+        s_hmDirty[0].store(true, std::memory_order_relaxed);
+        s_hmDirty[1].store(true, std::memory_order_relaxed);
+        s_hmTries[0] = s_hmTries[1] = 0;
+    }
+    if (!s_hmFailed && (s_hmDirty[0].load(std::memory_order_relaxed) || s_hmDirty[1].load(std::memory_order_relaxed))) {
+        if (!s_hmFn && !HmResolveAt(i) && !HmResolveRuntime()) {
+            s_hmFailed = true;
+            s_hmFailedA.store(true, std::memory_order_relaxed);
+            LogErr("hidden area mask: xrGetVisibilityMaskKHR could not be resolved (extension state %d) -- no mask", ext);
+        }
+        for (int v = 0; v < 2 && !s_hmFailed; ++v) {
+            if (!s_hmDirty[v].load(std::memory_order_relaxed)) continue;
+            int q = HmQuery(ses, v, proj->views[v].fov);
+            if (q < 0 && s_hmFnSlot >= 0 && s_slot[s_hmFnSlot].kind != kKindRuntime) {
+                // a layer above the runtime refused it (it may not know the extension we enabled below it): straight to the runtime
+                const int was = s_hmFnSlot;
+                s_hmFn = nullptr; s_hmFnSlot = -1;
+                if (HmResolveRuntime()) {
+                    LogWarn("hidden area mask: the query failed through the %s %s -- trying the runtime directly", kKindName[s_slot[was].kind],
+                        s_slot[was].module);
+                    q = HmQuery(ses, v, proj->views[v].fov);
+                }
+            }
+            if (q < 0) { s_hmFailed = true; s_hmFailedA.store(true, std::memory_order_relaxed); HmClearLocked(); break; }
+            if (q > 0) s_hmDirty[v].store(false, std::memory_order_relaxed);
+        }
+    }
+    // the submitted fov may change without a new mesh (another FOV setting): a new gen, the drawer maps it again
+    AcquireSRWLockExclusive(&s_hmLock);
+    for (int v = 0; v < 2; ++v) {
+        HmView& h = s_hmView[v];
+        if (!h.have) continue;
+        const XrFovf& f = proj->views[v].fov;
+        if (std::fabs(h.fov[0] - f.angleLeft) > 1e-5f || std::fabs(h.fov[1] - f.angleRight) > 1e-5f ||
+            std::fabs(h.fov[2] - f.angleUp) > 1e-5f || std::fabs(h.fov[3] - f.angleDown) > 1e-5f) {
+            h.fov[0] = f.angleLeft; h.fov[1] = f.angleRight; h.fov[2] = f.angleUp; h.fov[3] = f.angleDown;
+            h.gen = ++s_hmGenNext;
+        }
+    }
+    ReleaseSRWLockExclusive(&s_hmLock);
+}
+// The game's xrDestroySession (outermost): that session's meshes go.
+void HmDestroySession(XrSession ses) {
+    std::lock_guard<std::mutex> lk(s_hmMx);
+    if (!ses || ses != s_hmSes) return;
+    HmClearLocked();
+    s_hmSes = nullptr;
+    s_hmFailed = false;
+}
+// The runtime's xrCreateInstance (wrapped at runtime slots only; the loader's own call, layers or not): + XR_KHR_visibility_mask.
+XrResult CreateInstanceImpl(int i, const XrInstanceCreateInfo* ci, XrInstance* out) {
+    auto real = reinterpret_cast<PFN_xrCreateInstance>(s_slot[i].createInstance.load(std::memory_order_acquire));
+    if (!real) return -1;
+    auto pass = [&]() { ++t_depth; const XrResult r = real(ci, out); --t_depth; return r; };
+    if (!s_hmWant.load(std::memory_order_relaxed) || !ci || ci->type != kTypeInstanceCreateInfo) return pass();
+    for (uint32_t k = 0; k < ci->enabledExtensionCount; ++k)
+        if (ci->enabledExtensionNames && ci->enabledExtensionNames[k] && !strcmp(ci->enabledExtensionNames[k], kVisMaskExt)) {
+            s_hmExt.store(2, std::memory_order_relaxed);
+            s_hmOurs.store(false, std::memory_order_relaxed);
+            Log("hidden area mask: the game enables %s itself (xrCreateInstance at the runtime %s)", kVisMaskExt, s_slot[i].module);
+            return pass();
+        }
+    // does the runtime offer it? (its own xrEnumerateInstanceExtensionProperties, no layer name)
+    bool offered = false;
+    auto gipa = reinterpret_cast<PFN_xrGetInstanceProcAddr>(s_slot[i].gipa.load(std::memory_order_acquire));
+    PFN_xrVoidFunction fp = nullptr;
+    ++t_depth;
+    XrResult r = gipa ? gipa(nullptr, "xrEnumerateInstanceExtensionProperties", &fp) : -1;
+    if (r >= 0 && fp) {
+        auto en = reinterpret_cast<PFN_xrEnumerateInstanceExtensionProperties>(fp);
+        uint32_t n = 0;
+        r = en(nullptr, 0, &n, nullptr);
+        if (r >= 0 && n > 0 && n < 4096) {
+            XrExtensionProperties* props = new (std::nothrow) XrExtensionProperties[n];
+            if (props) {
+                for (uint32_t k = 0; k < n; ++k) { props[k] = XrExtensionProperties{}; props[k].type = kTypeExtensionProperties; }
+                uint32_t got = 0;
+                r = en(nullptr, n, &got, props);
+                if (r >= 0)
+                    for (uint32_t k = 0; k < got && k < n; ++k) {
+                        props[k].extensionName[127] = 0;
+                        if (!strcmp(props[k].extensionName, kVisMaskExt)) offered = true;
+                    }
+                delete[] props;
+            }
+        }
+    }
+    --t_depth;
+    if (!offered) {
+        s_hmExt.store(1, std::memory_order_relaxed);
+        LogWarn("hidden area mask: the OpenXR runtime %s does not offer %s (enumerate result %d) -- the hidden area mask is not "
+            "available", s_slot[i].module, kVisMaskExt, r);
+        return pass();
+    }
+    // a COPY of the create info with the extension appended (the game's array stays as it is)
+    const uint32_t n0 = ci->enabledExtensionCount;
+    const char** names = new (std::nothrow) const char*[n0 + 1];
+    if (!names) return pass();
+    for (uint32_t k = 0; k < n0; ++k) names[k] = ci->enabledExtensionNames[k];
+    names[n0] = kVisMaskExt;
+    XrInstanceCreateInfo c = *ci;
+    c.enabledExtensionCount = n0 + 1;
+    c.enabledExtensionNames = names;
+    ++t_depth;
+    r = real(&c, out);
+    --t_depth;
+    delete[] names;
+    if (r >= 0) {
+        s_hmExt.store(3, std::memory_order_relaxed);
+        s_hmOurs.store(true, std::memory_order_relaxed);
+        Log("hidden area mask: %s enabled at the runtime %s's xrCreateInstance (the game asked for %u extension(s); instance %p) -- "
+            "the meshes are fetched at the game's xrEndFrame while xr_hidden_mask is on", kVisMaskExt, s_slot[i].module, n0,
+            out ? *out : nullptr);
+        return r;
+    }
+    s_hmExt.store(4, std::memory_order_relaxed);
+    LogErr("hidden area mask: xrCreateInstance with %s FAILED (%d = %s) -- created again with the game's own extensions, no mask",
+        kVisMaskExt, r, XrResultName(r));
+    return pass();
+}
+
 // ---- the per-slot implementations ---------------------------------------------------------------------------------------
 XrResult EnumerateImpl(int i, XrSwapchain sc, uint32_t cap, uint32_t* cnt, void* images) {
     auto real = reinterpret_cast<PFN_xrEnumerateSwapchainImages>(s_slot[i].enumerate.load(std::memory_order_acquire));
@@ -1918,10 +2217,34 @@ XrResult PollEventImpl(int i, XrInstance inst, void* ev) {
     if (!real) return -1;
     CPU_HOOK(kHkXrOther);
     const bool outer = t_depth == 0;
+    int32_t evType0 = 0;                                 // phase 40: the game's buffer header (a swallowed event polls again)
+    const void* evNext0 = nullptr;
+    if (outer && ev) { memcpy(&evType0, ev, sizeof(evType0)); memcpy(&evNext0, static_cast<char*>(ev) + 8, sizeof(evNext0)); }
     ++t_depth;
     XrResult r;
     CPU_ORIG(r = real(inst, ev));
     --t_depth;
+    // phase 40: XrEventDataVisibilityMaskChangedKHR -> that view's mesh is fetched again at the next xrEndFrame. When only WE
+    // enabled the extension the game never asked for these events: it gets the next event instead (at most 8 in a row)
+    for (int k = 0; outer && r == 0 && ev && k < 8; ++k) {
+        int32_t t = 0;
+        memcpy(&t, ev, sizeof(t));
+        if (t != kTypeEvVisibilityMaskChangedKhr) break;
+        XrEvSessionInt e;
+        memcpy(&e, ev, sizeof(e));
+        s_hmEvents.fetch_add(1, std::memory_order_relaxed);
+        if (e.b < 2) s_hmDirty[e.b].store(true, std::memory_order_relaxed);
+        const bool ours = s_hmOurs.load(std::memory_order_relaxed);
+        Log("hidden area mask: VISIBILITY_MASK_CHANGED for view %u (session %p, view configuration %d) -- fetched again at the next "
+            "xrEndFrame%s", e.b, e.session, e.a, ours ? "; not passed to the game (it did not enable the extension)" : "");
+        if (!ours) break;
+        s_hmSwallowed.fetch_add(1, std::memory_order_relaxed);
+        memcpy(ev, &evType0, sizeof(evType0));
+        memcpy(static_cast<char*>(ev) + 8, &evNext0, sizeof(evNext0));
+        ++t_depth;
+        CPU_ORIG(r = real(inst, ev));
+        --t_depth;
+    }
     if (outer) {
         if (r == 0 && ev) LogEvent(ev);
         else if (r < 0) {
@@ -2033,6 +2356,7 @@ XrResult EndFrameImpl(int i, XrSession ses, const XrFrameEndInfo* fe) {
             }
         }
     }
+    if (outer && proj) HmEndFrame(i, ses, proj);           // phase 40: the hidden area meshes (+ the submitted fov per view)
     // v0.10.3 phase 29: our quad layers appended (a copy of the frame info; the game's own stays untouched)
     XrFrameEndInfo ovFe{};
     const XrCompositionLayerBaseHeader* ovLayers[kOvMaxLayers] = {};
@@ -2093,6 +2417,7 @@ XrResult DestroySessionImpl(int i, XrSession ses) {
                 had ? "our swapchains + VIEW space destroyed first" : "none of our objects existed");
         }
         OvSetOk(false, false);
+        HmDestroySession(ses);                           // phase 40
     }
     ++t_depth;
     XrResult r;
@@ -2193,10 +2518,12 @@ template <int I> struct Thunk {
     static XrResult XRH_CALL CreateSession(XrInstance a, const void* b, XrSession* c) { return CreateSessionImpl(I, a, b, c); }
     static XrResult XRH_CALL BeginSession(XrSession a, const XrSessionBeginInfo* b) { return BeginSessionImpl(I, a, b); }
     static XrResult XRH_CALL RequestExit(XrSession a) { return RequestExitSessionImpl(I, a); }
+    static XrResult XRH_CALL CreateInstance(const XrInstanceCreateInfo* a, XrInstance* b) { return CreateInstanceImpl(I, a, b); }
 };
 struct ThunkSet { void *gipa, *negRuntime, *negLayer, *release, *acquire, *enumerate, *destroy, *locate, *endFrame, *createRefSpace,
                   *locateSpace, *destroySession, *waitFrame, *beginFrame, *endSession,
-                  *pollEvent, *createSession, *beginSession, *requestExit; };   // (phase 33: + 4)
+                  *pollEvent, *createSession, *beginSession, *requestExit,       // (phase 33: + 4)
+                  *createInstance; };                                            // (phase 40: + 1)
 template <int I> ThunkSet MakeSet() {
     return ThunkSet{ reinterpret_cast<void*>(&Thunk<I>::Gipa), reinterpret_cast<void*>(&Thunk<I>::NegRuntime),
                      reinterpret_cast<void*>(&Thunk<I>::NegLayer), reinterpret_cast<void*>(&Thunk<I>::Release),
@@ -2207,7 +2534,7 @@ template <int I> ThunkSet MakeSet() {
                      reinterpret_cast<void*>(&Thunk<I>::WaitFrame), reinterpret_cast<void*>(&Thunk<I>::BeginFrame),
                      reinterpret_cast<void*>(&Thunk<I>::EndSession), reinterpret_cast<void*>(&Thunk<I>::PollEvent),
                      reinterpret_cast<void*>(&Thunk<I>::CreateSession), reinterpret_cast<void*>(&Thunk<I>::BeginSession),
-                     reinterpret_cast<void*>(&Thunk<I>::RequestExit) };
+                     reinterpret_cast<void*>(&Thunk<I>::RequestExit), reinterpret_cast<void*>(&Thunk<I>::CreateInstance) };
 }
 template <size_t... Is> const ThunkSet* MakeTable(std::index_sequence<Is...>) {
     static const ThunkSet t[] = { MakeSet<(int)Is>()... };
@@ -2243,6 +2570,9 @@ XrResult GipaImpl(int i, XrInstance inst, const char* name, PFN_xrVoidFunction* 
     else if (!strcmp(name, "xrCreateSession"))            { store = &s_slot[i].createSession; thunk = ts.createSession; }
     else if (!strcmp(name, "xrBeginSession"))             { store = &s_slot[i].beginSession; thunk = ts.beginSession; }
     else if (!strcmp(name, "xrRequestExitSession"))       { store = &s_slot[i].requestExit; thunk = ts.requestExit; }
+    else if (!strcmp(name, "xrCreateInstance") && !inst && s_slot[i].kind == kKindRuntime) {   // phase 40 (hidden area mask)
+        store = &s_slot[i].createInstance; thunk = ts.createInstance;
+    }
     else if (!strcmp(name, "xrGetInstanceProcAddr") && reinterpret_cast<void*>(*fn) == s_slot[i].gipa.load()) {
         *fn = reinterpret_cast<PFN_xrVoidFunction>(ts.gipa);   // a GIPA asked for itself: stay wrapped
         return r;
@@ -2534,6 +2864,43 @@ TurboStats GetTurboStats() {
     s.blocks = s_tbBlocks.load(std::memory_order_relaxed);
     s.timeouts = s_tbToEnd.load(std::memory_order_relaxed) + s_tbToWait.load(std::memory_order_relaxed);
     s.failures = s_tbFails.load(std::memory_order_relaxed);
+    return s;
+}
+
+// ---- phase 40: the hidden area mask (see xr_hook.h; the logic is in the anonymous namespace above) ----
+void HiddenMaskRequest(bool want) { s_hmWant.store(want, std::memory_order_relaxed); }
+void HiddenMaskActive(bool on) { s_hmActive.store(on, std::memory_order_relaxed); }
+bool HiddenMaskRaw(int view, uint64_t haveGen, HiddenRaw* out) {
+    if (view < 0 || view > 1 || !out) return false;
+    AcquireSRWLockShared(&s_hmLock);
+    const HmView& h = s_hmView[view];
+    const bool fresh = h.gen != haveGen && h.gen != 0;
+    if (fresh) {
+        out->gen = h.gen;
+        out->nv = h.have ? h.nv : 0;
+        out->ni = h.have ? h.ni : 0;
+        if (out->nv) {
+            memcpy(out->xy, h.xy, sizeof(float) * 2 * out->nv);
+            memcpy(out->idx, h.idx, sizeof(uint32_t) * out->ni);
+        }
+        memcpy(out->fov, h.fov, sizeof(out->fov));
+    }
+    ReleaseSRWLockShared(&s_hmLock);
+    return fresh;
+}
+HiddenStats GetHiddenStats() {
+    HiddenStats s;
+    s.ext = s_hmExt.load(std::memory_order_relaxed);
+    s.fn = s_hmFnOk.load(std::memory_order_relaxed);
+    s.failed = s_hmFailedA.load(std::memory_order_relaxed);
+    AcquireSRWLockShared(&s_hmLock);
+    for (int v = 0; v < 2; ++v) {
+        s.nv[v] = s_hmView[v].have ? s_hmView[v].nv : 0;
+        s.ni[v] = s_hmView[v].have ? s_hmView[v].ni : 0;
+    }
+    ReleaseSRWLockShared(&s_hmLock);
+    s.queries = s_hmQueries.load(std::memory_order_relaxed);
+    s.events = s_hmEvents.load(std::memory_order_relaxed);
     return s;
 }
 

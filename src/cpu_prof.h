@@ -73,6 +73,7 @@ enum Cat : uint8_t {
     kBLog,                 // Log() (formatting + the queue push)
     kBProf,                // this profiler's own report
     kBVrs,                 // phase 34: VRS bracket enter / leave + the per-draw full-rate rule (vrs.cpp NVAPI calls included)
+    kBHmask,               // phase 40: VR hidden area mask (the eye / mesh decision + the depth-only draw at the scene clear)
     kModEnd,
     // ---- outside the mod: the game's own call inside each hook ----
     kDrvFirst = kModEnd,
@@ -86,7 +87,7 @@ inline const char* Name(int c) {
         "Map", "Dispatch", "CopyRes", "CopySub", "Resolve", "ClearRtv", "ClearDsv", "Discard", "CreatePS", "xrWaitFrame",
         "xrBeginFrame", "xrEndFrame", "xrAcquire", "xrRelease", "xrLocateViews", "xrOther", "StateSet",
         "blit", "dlaa-run", "ngx-eval", "mv-gen", "did-rec", "did-replay", "fwd-depth", "mv-collect", "obj-ids", "snapshot",
-        "lod", "frame-end", "mirror", "menu", "preview", "frame-work", "keys", "gpu-timers", "log", "prof", "vrs" };
+        "lod", "frame-end", "mirror", "menu", "preview", "frame-work", "keys", "gpu-timers", "log", "prof", "vrs", "hmask" };
     if (c < 0 || c >= kCount) return "?";
     return c < kModEnd ? kN[c] : kN[c - kDrvFirst];
 }
