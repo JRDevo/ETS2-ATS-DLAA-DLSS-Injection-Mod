@@ -53,7 +53,9 @@ namespace Vrs {
 bool g_want = false;
 
 namespace {
-std::atomic<int> s_on{0}, s_inner{55}, s_outer{80}, s_quality{1}, s_debug{0};
+std::atomic<int> s_on{0}, s_inner{55}, s_outer{80}, s_quality{1}, s_debug{0}, s_passes{0};
+int              s_cls = kClsGbuf;                   // the bind kind of the open bracket (render thread; stats per kind)
+uint64_t         s_lastLogFrame = 0;                 // the Present count at the last stats line (per-frame figures)
 int              s_support = -1;                     // render thread (Probe)
 const char*      s_supportText = "not checked yet (VR world scene not seen)";
 ID3D11Device*    s_probedDev = nullptr;              // identity: the device the support state belongs to
@@ -84,7 +86,9 @@ bool             s_bound = false;                    // a shading-rate view is b
 bool             s_excl = false;                     // the last game draw was excluded (full rate)
 bool             s_mod = false;                      // the mod's own work is running inside the bracket
 NV_D3D11_VIEWPORT_SHADING_RATE_DESC s_vp[NV_MAX_NUM_VIEWPORTS];   // the table, all viewports (the game may set several)
-int              s_tableKey = -1;                    // quality | debug | upscale step the table was built for
+NV_D3D11_VIEWPORT_SHADING_RATE_DESC s_vpOuter[NV_MAX_NUM_VIEWPORTS];   // phase 42: the outer-only table (extra passes)
+NV_D3D11_VIEWPORT_SHADING_RATE_DESC* s_vpCur = s_vp; // the table of the open bracket (SetHw binds this one)
+int              s_tableKey = -1;                    // quality | debug | upscale step the tables were built for
 
 void ReleaseMasks() {
     for (Mask& m : s_masks) {
@@ -122,11 +126,18 @@ void BuildTable(int quality, int debug, float renderOverOutput) {
         v.shadingRateTable[1] = mid;
         v.shadingRateTable[2] = out;
     }
+    // phase 42: the extra passes (lighting) -- the outer ring only; the middle ring stays 1 x 1 whatever vrs_quality says
+    for (NV_D3D11_VIEWPORT_SHADING_RATE_DESC& v : s_vpOuter) {
+        v.enableVariablePixelShadingRate = true;
+        for (NV_PIXEL_SHADING_RATE& r : v.shadingRateTable) r = NV_PIXEL_X1_PER_RASTER_PIXEL;
+        v.shadingRateTable[2] = out;
+    }
     const bool first = s_tableKey < 0;
     s_tableKey = key;
-    Log("VRS: shading-rate table inner 1x1, middle %s, outer %s (vrs_quality=%d%s%s)%s", RateName(mid), RateName(out), quality,
+    Log("VRS: shading-rate table inner 1x1, middle %s, outer %s (vrs_quality=%d%s%s); extra passes (vrs_passes=1): middle 1x1, "
+        "outer %s%s", RateName(mid), RateName(out), quality,
         debug ? ", vrs_debug=1: exaggerated to show the pattern" : "",
-        upLow ? ", DLSS upscales from below 75 % of the output width: outer one step finer" : "",
+        upLow ? ", DLSS upscales from below 75 % of the output width: outer one step finer" : "", RateName(out),
         first ? "" : " -- changed");
 }
 
@@ -205,7 +216,7 @@ void SetHw(ID3D11DeviceContext* ctx, bool on) {
     NV_D3D11_VIEWPORTS_SHADING_RATE_DESC d{};
     d.version = NV_D3D11_VIEWPORTS_SHADING_RATE_DESC_VER;
     d.numViewports = on ? NV_MAX_NUM_VIEWPORTS : 0;  // 0 = VRS off for every viewport (NVAPI)
-    d.pViewports = on ? s_vp : nullptr;
+    d.pViewports = on ? s_vpCur : nullptr;
     if (!NvOk(NvAPI_D3D11_RSSetViewportsPixelShadingRates(ctx, &d), "NvAPI_D3D11_RSSetViewportsPixelShadingRates")) {
         s_support = 0;
         s_supportText = "the driver refused the shading-rate table";
@@ -218,7 +229,7 @@ void SetHw(ID3D11DeviceContext* ctx, bool on) {
 #endif // WITH_VRS
 } // namespace
 
-void Configure(int on, int innerPct, int outerPct, int quality, int debug) {
+void Configure(int on, int innerPct, int outerPct, int quality, int debug, int passes) {
     innerPct = innerPct < 10 ? 10 : (innerPct > 150 ? 150 : innerPct);
     outerPct = outerPct < 10 ? 10 : (outerPct > 150 ? 150 : outerPct);
     if (outerPct < innerPct) outerPct = innerPct;
@@ -227,8 +238,18 @@ void Configure(int on, int innerPct, int outerPct, int quality, int debug) {
     s_outer.store(outerPct, std::memory_order_relaxed);
     s_quality.store(quality ? 1 : 0, std::memory_order_relaxed);
     s_debug.store(debug ? 1 : 0, std::memory_order_relaxed);
+    s_passes.store(passes ? 1 : 0, std::memory_order_relaxed);
 }
 bool On() { return s_on.load(std::memory_order_relaxed) != 0; }
+int Passes() { return s_passes.load(std::memory_order_relaxed); }
+const char* ClsName(int cls) {
+    switch (cls) {
+    case kClsGbuf:  return "G-buffer";
+    case kClsFwd:   return "forward";
+    case kClsLight: return "lighting";
+    default:        return "?";
+    }
+}
 int Support() { return s_support; }
 const char* SupportText() { return s_supportText; }
 Stats& GetStats() { return s_stats; }
@@ -297,10 +318,12 @@ int Probe(ID3D11Device* dev) {
 #endif
 }
 
-bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, float cv, float renderOverOutput) {
+bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, float cv, float renderOverOutput, int cls) {
 #ifdef WITH_VRS
     if (g_want) Leave(ctx);                            // (never expected: every game bind leaves first)
     if (!s_on.load(std::memory_order_relaxed) || !ctx || !w || !h) return false;
+    if (cls < 0 || cls >= kNCls) cls = kClsGbuf;
+    if (cls == kClsLight && !s_passes.load(std::memory_order_relaxed)) return false;   // phase 42: vrs_passes = 0
     ID3D11Device* dev = nullptr;
     ctx->GetDevice(&dev);
     if (!dev) return false;
@@ -310,6 +333,8 @@ bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, 
                           eye);
     if (!m) return false;
     BuildTable(s_quality.load(std::memory_order_relaxed), s_debug.load(std::memory_order_relaxed), renderOverOutput);
+    s_vpCur = cls == kClsLight ? s_vpOuter : s_vp;     // phase 42: an extra pass = outer ring only
+    s_cls = cls;
     // the Toolkit's order: the viewport table first, then the shading-rate view
     SetHw(ctx, true);
     if (!s_hw) return false;                            // refused (logged, VRS off for the session)
@@ -326,10 +351,11 @@ bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, 
     s_mod = false;
     g_want = true;
     ++s_stats.enters;
+    ++s_stats.entersCls[cls];
     if (eye == 0 || eye == 1) ++s_stats.entersEye[eye];
     return true;
 #else
-    (void)ctx; (void)w; (void)h; (void)eye; (void)cu; (void)cv; (void)renderOverOutput;
+    (void)ctx; (void)w; (void)h; (void)eye; (void)cu; (void)cv; (void)renderOverOutput; (void)cls;
     return false;
 #endif
 }
@@ -343,6 +369,7 @@ void Leave(ID3D11DeviceContext* ctx) {
     if (s_bound) { NvAPI_D3D11_RSSetShadingRateResourceView(c, nullptr); s_bound = false; }
     s_hw = false; s_mod = false; s_excl = false;
     s_ctx = nullptr;
+    s_vpCur = s_vp; s_cls = kClsGbuf;                  // phase 42
     ++s_stats.leaves;
 #else
     (void)ctx;
@@ -352,8 +379,8 @@ void Leave(ID3D11DeviceContext* ctx) {
 void OnDraw(ID3D11DeviceContext* ctx, bool exclude, int why) {
 #ifdef WITH_VRS
     if (!g_want || ctx != s_ctx) return;
-    if (exclude) { if (why >= 0 && why < kSkipCount) ++s_stats.drawsSkip[why]; }
-    else ++s_stats.drawsVrs;
+    if (exclude) { if (why >= 0 && why < kSkipCount) ++s_stats.drawsSkip[why]; ++s_stats.drawsFullCls[s_cls]; }
+    else { ++s_stats.drawsVrs; ++s_stats.drawsVrsCls[s_cls]; }
     s_excl = exclude;
     const bool want = !exclude && !s_mod;
     if (want != s_hw) SetHw(ctx, want);
@@ -382,12 +409,13 @@ void Abandon() {
     g_want = false;
     s_hw = false; s_bound = false; s_mod = false; s_excl = false;
     s_ctx = nullptr;
+    s_vpCur = s_vp; s_cls = kClsGbuf;                  // phase 42
 #endif
 }
 
 void MaybeLogStats(uint64_t frame) {
     const uint64_t now = GetTickCount64();
-    if (!s_lastLogMs) { s_lastLogMs = now; s_lastLog = s_stats; return; }
+    if (!s_lastLogMs) { s_lastLogMs = now; s_lastLogFrame = frame; s_lastLog = s_stats; return; }
     if (now - s_lastLogMs < 10000) return;
     const Stats& c = s_stats;
     const Stats& p = s_lastLog;
@@ -409,7 +437,20 @@ void MaybeLogStats(uint64_t frame) {
         (unsigned long long)(c.eyeSrc[3] - p.eyeSrc[3]), (unsigned long long)(c.eyeSrc[0] - p.eyeSrc[0]),
         (unsigned long long)(c.bindNoEye - p.bindNoEye), (unsigned long long)(c.bindDisagree - p.bindDisagree),
         (unsigned long long)(c.bindNoCentre - p.bindNoCentre), s_supportText);
+    // phase 42: which passes got VRS, per frame (Presents in the window; both eyes together)
+    const double fr = frame > s_lastLogFrame ? (double)(frame - s_lastLogFrame) : 0.0;
+    auto pf = [&](uint64_t a, uint64_t b) { return fr > 0.0 ? (double)(a - b) / fr : 0.0; };
+    LogDbg("VRS passes @%.0f s (vrs_passes=%d; per frame, both eyes, %.0f frames): G-buffer %.2f binds / %.0f coarse-capable draws / "
+        "%.0f full-rate draws | forward %.2f / %.0f / %.0f | lighting %.2f / %.0f / %.0f | lighting-stage binds %.2f, of them not "
+        "the lighting shape %.2f (left at full rate)", (double)(now - s_lastLogMs) / 1000.0, s_passes.load(std::memory_order_relaxed),
+        fr, pf(c.entersCls[kClsGbuf], p.entersCls[kClsGbuf]), pf(c.drawsVrsCls[kClsGbuf], p.drawsVrsCls[kClsGbuf]),
+        pf(c.drawsFullCls[kClsGbuf], p.drawsFullCls[kClsGbuf]), pf(c.entersCls[kClsFwd], p.entersCls[kClsFwd]),
+        pf(c.drawsVrsCls[kClsFwd], p.drawsVrsCls[kClsFwd]), pf(c.drawsFullCls[kClsFwd], p.drawsFullCls[kClsFwd]),
+        pf(c.entersCls[kClsLight], p.entersCls[kClsLight]), pf(c.drawsVrsCls[kClsLight], p.drawsVrsCls[kClsLight]),
+        pf(c.drawsFullCls[kClsLight], p.drawsFullCls[kClsLight]), pf(c.litStageBinds, p.litStageBinds),
+        pf(c.litShapeMiss, p.litShapeMiss));
     s_lastLogMs = now;
+    s_lastLogFrame = frame;
     s_lastLog = s_stats;
 }
 
