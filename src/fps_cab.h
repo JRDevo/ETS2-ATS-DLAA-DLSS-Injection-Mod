@@ -359,11 +359,12 @@ bool Attached();
 constexpr int kOnFrames = 8, kOffFrames = 3;
 void NoteDraw(bool attached, int why);                  // per eye picture drawn while Attached() (attached, or held = no box)
 void Shutdown();                                        // device change / exit: every D3D object dropped
-// Test hooks (tests/fps_cab_test.cpp): the monitor snapshot period in eye blits (both eyes; default 72 = ~0.5 s at 72 Hz), state.
+// Test hooks (tests/fps_cab_test.cpp): the monitor snapshot period in eye blits (both eyes; default 12 = 6 frames ~0.08 s at 72 Hz)
 void SetMonitorEvery(int blits);
 struct Stats { int state; int entries; int demoted; uint64_t reacquires, relocks, locks, attached, fallback; int refEntry[2];
                uint64_t lockFrame; double devMaxM; int devN;   // devMaxM: the cab vs the play space (log window / lock)
-               int lockEyes; bool lockXr; uint64_t monitors, latchOn, latchOff, held, lockRefusals; bool latched; };
+               int lockEyes; bool lockXr; uint64_t monitors, latchOn, latchOff, held, lockRefusals; bool latched;
+               uint32_t refIc; int remembered; double monitorUs; };   // phase 47d
 Stats GetStats();
 
 }  // namespace FpsCab

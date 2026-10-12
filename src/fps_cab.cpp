@@ -93,7 +93,7 @@ struct St {
     Snap snap[kRb];
     int open = -1;                                      // the open snapshot (state 1)
     uint64_t blits = 0, lastMonitor = 0, nextLock = 0;
-    int monitorEvery = 72;                              // blits (both eyes): ~0.5 s at 72 Hz
+    int monitorEvery = 12;                              // blits (both eyes): 6 frames = ~0.08 s at 72 Hz (phase 47d; was 72 = 0.5 s)
     uint64_t gen = 0;
     // totals
     uint64_t locks = 0, relocks = 0, reacq = 0, attached = 0, fallback = 0;
@@ -106,6 +106,7 @@ struct St {
     uint32_t hist = 0;                                  // bit i = frame -i was NOT attachable (the last 8 frames)
     uint64_t steady = 0;                                // blits in a row with cab draws + usable poses (the lock gate)
     uint64_t latchOn = 0, latchOff = 0, held = 0, monitors = 0, lockRefusals = 0;
+    double monitorUs = 0.0;                             // phase 47d: CPU spent in ProcessMonitor (total)
     int linesLatch = 0;
     // the 10-s window (level 4)
     ULONGLONG winT0 = 0;
@@ -273,6 +274,31 @@ int RowsOf(const float* data, int e, int j, const Cand& c, const float** rows4) 
     return n > 8 ? 8 : n;
 }
 
+// ---- phase 47d: MOVING PARTS remembered for the session ------------------------------------------------------------------
+// A part the monitor found moving (steering wheel, door, wiper) is remembered by its full key and its loose key (IndexCount, start
+// index, base vertex, VS: no buffer pointers, so it survives the game's buffer-pool rotation). One list for the session, not one
+// per truck: a key is the geometry of one draw of one cab, so another cab's parts do not match it, and going back to a truck
+// finds its wheel again. Every lock-on (also after the exterior camera / menus / a re-lock / a cab change) refuses those parts.
+// Dropped at a device change (the VS pointers in the keys change).
+constexpr int kMoveMax = 64;
+struct Moving { uint64_t full, loose; uint32_t ic; };
+Moving g_moving[kMoveMax];
+int g_nMoving = 0, g_linesMoving = 0;
+bool IsMoving(uint64_t full, uint64_t loose) {
+    for (int i = 0; i < g_nMoving; ++i) if (g_moving[i].full == full || g_moving[i].loose == loose) return true;
+    return false;
+}
+void Remember(const Entry& en) {
+    if (IsMoving(en.full, en.loose)) return;
+    if (g_nMoving == kMoveMax) { memmove(g_moving, g_moving + 1, sizeof(Moving) * (kMoveMax - 1)); --g_nMoving; }
+    g_moving[g_nMoving++] = Moving{ en.full, en.loose, en.ic };
+    if (g_linesMoving < kLogLines) {
+        ++g_linesMoving;
+        Log("fps box attached to vehicle: cab part IndexCount %u REMEMBERED as moving for this session (%d remembered) -- no lock-on / "
+            "re-acquire will use it again", en.ic, g_nMoving);
+    }
+}
+
 const char* CandVerdict(const float* rows4, int nr, M4* M, int* row, EyeFrame* ef) {
     *row = FindMvpRow(rows4, nr, M);
     if (!*row) return "no MVP-shaped block";
@@ -299,6 +325,7 @@ void ProcessLock(Snap& sn, const float* data) {
             const int nr = RowsOf(data, e, j, c, &rows4);
             V& x = v[k][e];
             x.why = CandVerdict(rows4, nr, &x.M, &x.row, &x.ef);
+            if (!x.why && IsMoving(c.full, c.loose)) x.why = "a remembered MOVING part (phase 47d)";
             x.ok = x.why == nullptr;
         }
     // sort the keys by IndexCount (biggest first; stable)
@@ -327,7 +354,21 @@ void ProcessLock(Snap& sn, const float* data) {
     for (int j = 0; j < ng; ++j) if (bestG < 0 || gsum[j] > gsum[bestG]) bestG = j;
     int ref = bestG >= 0 ? rep[bestG] : -1;
     int others = 0;
-    for (int q = 0; q < nk; ++q) if (grp[ord[q]] >= 0 && grp[ord[q]] != bestG) ++others;    // phase 47b: BOTH eyes or no lock (the ATS 14:32 lock #1 was eye 1 only: a loading picture, no IPD, no pose) -- one eye is
+    for (int q = 0; q < nk; ++q) if (grp[ord[q]] >= 0 && grp[ord[q]] != bestG) ++others;
+    {                                                    // phase 47d: the remembered moving parts this lock-on skipped (level 3)
+        int skip = 0;
+        uint32_t skipIc = 0;
+        for (int k = 0; k < nk; ++k)
+            if (IsMoving(keys[k], looses[k])) { ++skip; if (ics[k] > skipIc) skipIc = ics[k]; }
+        if (skip && g_linesMoving < kLogLines) {
+            ++g_linesMoving;
+            Log("fps box attached to vehicle: lock-on SKIPS %d remembered moving part(s) (biggest IndexCount %u)", skip, skipIc);
+        }
+    }
+    // phase 47d: a best group of ONE part (every usable part has its own transform -- the ATS 15:06 truck: 3 parts, 3 transforms)
+    // proves nothing: then every usable part carries the box (ranked by IndexCount) and the monitor sorts out the moving ones
+    const bool groupOnly = bestG >= 0 && gn[bestG] >= 2;
+    // phase 47b: BOTH eyes or no lock (the ATS 14:32 lock #1 was eye 1 only: a loading picture, no IPD, no pose) -- one eye is
     // refused below, the lock is tried again
     const bool lg4 = (LogLevel() >= 4);
     if (lg4 && g.linesLock < kLogLines) {
@@ -444,7 +485,8 @@ void ProcessLock(Snap& sn, const float* data) {
         ++L.n;
     };
     addEntry(ref);
-    for (int q = 0; q < nk; ++q) if (ord[q] != ref && grp[ord[q]] == bestG) addEntry(ord[q]);   // phase 47c: the cab group only
+    for (int q = 0; q < nk; ++q)                                     // phase 47c: the cab group only (47d: all when it is one part)
+        if (ord[q] != ref && grp[ord[q]] >= 0 && (!groupOnly || grp[ord[q]] == bestG)) addEntry(ord[q]);
     L.have = true;
     g.lk = L;
     BuildCorners();
@@ -461,12 +503,13 @@ void ProcessLock(Snap& sn, const float* data) {
         Log("fps box attached to vehicle: LOCKED ON (lock #%llu) -- reference cab draw IndexCount %u (MVP in cb0 rows %d..%d), seen in %s; "
             "%d cab part(s) of its rigid group (IndexCount sum %llu, the largest of %d transform group(s); %d part(s) with their own "
             "transform -- wheel / doors / needles -- not used) can carry the box; play -> cab map from %s%s (game IPD / headset IPD %.3f, %.1f model units per m); "
-            "anchor %s, box centre (%+.3f %+.3f %+.3f) m in the play space, %.3f m wide",
+            "anchor %s, box centre (%+.3f %+.3f %+.3f) m in the play space, %.3f m wide%s",
             (unsigned long long)g.locks, L.e[0].ic, L.e[0].row, L.e[0].row + 3, both ? "both eyes" : (ea == 0 ? "eye 0 only" : "eye 1 only"),
             L.n, (unsigned long long)gsum[bestG], ng, others, L.xr ? (n == 2 ? "both eyes' OpenXR poses" : "one eye's OpenXR pose") : "NO OpenXR pose (the box placed from the eye's own "
             "view at the lock)", swapped ? ", the eye order swapped (OpenXR view vs eye picture)" : "", ipdRatio, L.upm,
             !L.xr ? "straight ahead of the eye" : (L.local ? "around the seat (LOCAL space origin)" : "around the eyes' midpoint at the lock"),
-            cc[0], cc[1], cc[2], wM);
+            cc[0], cc[1], cc[2], wM, groupOnly ? "" : " -- NO shared transform among the parts (each its own group): all usable "
+            "parts carry the box, the monitor (every ~0.08 s) drops a moving one");
     }
     if (lg4 && g.linesLock < kLogLines) {
         ++g.linesLock;
@@ -479,6 +522,10 @@ void ProcessMonitor(Snap& sn, const float* data) {
     LockSt& L = g.lk;
     ++g.wMon;
     ++g.monitors;
+    LARGE_INTEGER q0, q1, qf;
+    QueryPerformanceCounter(&q0);
+    struct Tm { LARGE_INTEGER& a; LARGE_INTEGER& b; LARGE_INTEGER& f; ~Tm() { QueryPerformanceCounter(&b); QueryPerformanceFrequency(&f);
+        g.monitorUs += (double)(b.QuadPart - a.QuadPart) * 1e6 / (double)f.QuadPart; } } tm{ q0, q1, qf };
     for (int e = 0; e < 2; ++e) {
         const SnapEye& se = sn.eye[e];
         if (!se.done || se.n < 1) continue;
@@ -541,6 +588,7 @@ void ProcessMonitor(Snap& sn, const float* data) {
             const double d = std::fmax(dis[a][best], dis[best][a]);
             if (!(d > kDemoteM)) continue;
             en.demoted = true;
+            Remember(en);                                  // phase 47d: never a carrier again on this cab (this session)
             if (g.linesDemote < kLogLines) {
                 ++g.linesDemote;
                 Log("fps box attached to vehicle: cab part IndexCount %u MOVES against the cab (it puts the box %.1f cm away from the "
@@ -593,7 +641,7 @@ void LogWindow() {
                "fixed in the play space%s%s%s | monitor readbacks %llu, lock refusals %llu (total) | "
                "lock #%llu %s: part in use eye 0 %d (IndexCount %u), eye 1 %d (IndexCount %u); %d part(s), %d moving; re-acquires %llu "
                "(total %llu), new locks after a cab change %llu | THE CAB AGAINST THE PLAY SPACE (the attached box vs its spot at the lock, %llu "
-               "readbacks ~0.5 s apart in this window): max %.1f cm, rms %.1f cm; largest change between two readbacks %.1f cm",
+               "readbacks ~0.08 s apart in this window): max %.1f cm, rms %.1f cm; largest change between two readbacks %.1f cm",
                (double)(now - g.winT0) / 1000.0, (unsigned long long)g.wFrOn, (unsigned long long)g.wAttached, (unsigned long long)g.wHeld,
                (unsigned long long)g.wFrOff, o ? " (" : "",
                o ? wh : "", o ? ")" : "", (unsigned long long)g.wMon, (unsigned long long)g.lockRefusals, (unsigned long long)g.locks, g.lk.have ? "held" : "NOT held (locking / none)", r0,
@@ -688,6 +736,21 @@ void OnBlit(ID3D11DeviceContext* ctx, int eye, DrawIdRecord& rec, uint64_t seria
     Match(rec, idx);
     int use = -1;
     for (int e = 0; e < g.lk.n; ++e) if (idx[e] >= 0 && !g.lk.e[e].demoted) { use = e; break; }
+    if (use < 0 && g.lk.n > 0) {                       // phase 47d: every carrier found moving -> a new lock at once (it skips them)
+        bool all = true;
+        for (int e = 0; e < g.lk.n; ++e) if (!g.lk.e[e].demoted) all = false;
+        if (all) {
+            ++g.relocks;
+            if (g.linesRelock < kLogLines) {
+                ++g.linesRelock;
+                Log("fps box attached to vehicle: every carrier of lock #%llu was found moving -- locking on again now", (unsigned long long)g.locks);
+            }
+            cur.why = kLocking;
+            DropLock();
+            LogWindow();
+            return;
+        }
+    }
     if (use < 0) {
         const bool cab = AnyCab(rec);
         cur.why = cab ? kNotFound : kNoCab;
@@ -804,6 +867,7 @@ void NoteDraw(bool attached, int why) {
     else { ++g.held; ++g.wHeld; }                                     // attached frame, this eye could not: no box (never the other kind)
 }
 void Shutdown() {
+    g_nMoving = 0;                                      // phase 47d: the keys hold VS pointers of the old device
     for (Snap& s : g.snap) { s.buf.Reset(); s.state = 0; }
     for (EyeCur& c : g.eye) { c.srv.Reset(); c.frame = ~0ull; c.why = kNoBlit; }
     DropLock();
@@ -817,6 +881,7 @@ Stats GetStats() {
     s.reacquires = g.reacq; s.relocks = g.relocks; s.locks = g.locks; s.attached = g.attached; s.fallback = g.fallback;
     s.refEntry[0] = g.eye[0].lastEntry; s.refEntry[1] = g.eye[1].lastEntry;
     s.lockFrame = g.lk.frame;
+    s.refIc = g.lk.have && g.lk.n ? g.lk.e[0].ic : 0u; s.remembered = g_nMoving; s.monitorUs = g.monitorUs;
     s.devMaxM = g.maxDev; s.devN = g.nDev;
     s.lockEyes = g.lk.have ? g.lk.eyesUsed : 0; s.lockXr = g.lk.have && g.lk.xr;
     s.monitors = g.monitors; s.latchOn = g.latchOn; s.latchOff = g.latchOff; s.held = g.held; s.lockRefusals = g.lockRefusals;

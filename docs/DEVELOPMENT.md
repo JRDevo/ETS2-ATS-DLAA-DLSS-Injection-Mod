@@ -1549,6 +1549,30 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
 - **Not verified (needs the game):** that ETS2 / ATS cab parts really share one transform per pass (the level-4 lock-on line lists
   the candidates; the level-3 line the group sizes).
 
+#### Phase 47d: moving cab parts remembered per session; the monitor every ~0.08 s
+
+- **Why:** the 15:06 ATS log (captures/ats_2026-10-12_1506_p47c_vr.log ~693): only 3 usable candidates (the big cab draws are
+  camera-relative), 3 different transforms, so 47c's group rule fell back to the biggest single part, IndexCount 13200 -- the
+  steering wheel (the 14:58 log line 717: it moved 43.9 cm).
+- **Memory:** a part the monitor demotes is remembered (`Remember`: full key + loose key -- IndexCount, start index, base vertex,
+  VS -- so it survives the buffer-pool rotation; up to 64, the oldest dropped). One list for the session rather than one per
+  truck: a key is the geometry of one draw of one cab, so another truck's parts never match it, and going back to a truck
+  finds its wheel again without any truck identity. Every lock-on (the first, after the exterior camera / menus, a Reset, a
+  cab change, a return to the truck) refuses remembered parts (`a remembered MOVING part` in the level-4 candidate list,
+  level 3 `lock-on SKIPS N remembered moving part(s)`); level 3 `REMEMBERED as moving for this session` on each new one. A
+  device change clears it (the keys hold VS pointers).
+- **Carriers when nothing shares a transform:** a best group of ONE part proves nothing, so then every usable part carries the box
+  (ranked by IndexCount) and the monitor drops the moving one; with a real group (>= 2 parts) only its members (47c). When every
+  carrier is demoted, a new lock starts at once (not after 90 blits).
+- **Monitor every 12 eye blits (6 frames, ~0.08 s at 72 Hz; was 72 = 0.5 s).** Cost: the staging copy is <= 16 parts x 128 B x 2
+  eyes = 4 KB per readback (~12 per second, a ring of 4 staging buffers, `Map` with `DO_NOT_WAIT`: never a stall), the CPU side
+  `ProcessMonitor` 4-9 us per readback in the WARP test (16 x 16 pair checks at most; ~0.1 ms per second). The cab-vs-play
+  figure stays per 10 s (more samples).
+- **Test (variant 4, 640 frames, every part its own transform):** the first lock takes the wheel (the biggest), it is found
+  moving 5 frames after it starts to turn (the box exact again 2 frames later), the re-lock after a Reset takes the body, truck B
+  locks (its own wheel is not remembered: it never moved), back on truck A the body again -- the wheel stays remembered (1).
+  Variants 0-3 unchanged (the cab group: the wheel never a carrier). 324 checks.
+
 ### Phase 48: fps box brightness (`fps_brightness` 10..100 %)
 
 - `fps_brightness` (default 100 = the colour as it is). `FpsPose::Dimmed(ColorOf(g_fpsColor), g_fpsBright)` scales the glyph

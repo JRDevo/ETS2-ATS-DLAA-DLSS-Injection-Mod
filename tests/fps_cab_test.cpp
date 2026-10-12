@@ -66,6 +66,7 @@ constexpr int kW = 512, kH = 512;
 // eye 0 = the RIGHT eye (the DLAA eye order of the mod), eye 1 = the left eye
 static const double kTan[2][4] = { { -0.9, 1.1, 1.0, -1.05 }, { -1.1, 0.9, 1.0, -1.05 } };   // L, R, U, D
 static double g_steerFrom = 60.0;
+static bool g_ownTransforms = false;                    // phase 47d (variant 4): every part its own transform (the ATS 15:06 truck)
 // the head in the play space (LOCAL: origin = the seat): small yaw / nod / lean
 static Pose Head(double t) {
     Pose h{};
@@ -104,12 +105,12 @@ static const UINT kIc[PN] = { 2400, 1800, 3000, 1000, 5000, 9000 };
 static M4 PartModel(int p, double t, double frame) {
     switch (p) {
     case PBody: return Perm();
-    case PDash: return Perm();                          // phase 47c: dashboard + console share the body's transform (the cab group)
+    case PDash: return g_ownTransforms ? Mul(T(0.0, 0.9, -0.8), Perm()) : Perm();   // 47c: shares the body's transform (the cab group)
     case PWheel: {
         const double a = frame >= g_steerFrom && frame < g_steerFrom + 50.0 ? 0.7 * std::sin(3.14159265 * (frame - g_steerFrom) / 50.0) : 0.0;
         return Mul(Mul(T(0.45, 1.0, -0.2), Rax(2, a)), Perm());   // turns about the cab's z (towards the driver)
     }
-    case PCar: return Perm();
+    case PCar: return g_ownTransforms ? Mul(T(0.0, 0.8, -0.5), Perm()) : Perm();
     case PWorld: return Mul(T(3.0, 0.0, -20.0), Perm());
     default: return Identity();
     }
@@ -310,11 +311,11 @@ static bool Centroid(const std::vector<uint8_t>& px, double* cx, double* cy, dou
 static void Clear(Gpu& g) { const float c[4] = { 128.f / 255.f, 128.f / 255.f, 128.f / 255.f, 1.0f }; g.ctx->ClearRenderTargetView(g.rtv.Get(), c); }
 
 // variant 0: eye 0 (right) is rendered first in each frame; 1: the left eye first; 2: + the OpenXR views in the wrong order;
-// 3 (phase 47b): the Present (Latch) between the two eyes' blits
+// 3 (phase 47b): the Present (Latch) between the two eyes' blits; 4 (phase 47d): no shared transform, a Reset re-lock, back to truck A
 static int PartB(int variant) {
-    printf("Part B variant %d (%s): WARP -- DrawIdRecord + FpsCab + menu.cpp VSCab, 2 eyes x 480 frames\n", variant,
+    printf("Part B variant %d, 2 eyes x %d frames (%s): WARP -- DrawIdRecord + FpsCab + menu.cpp VSCab\n", variant, variant == 4 ? 640 : 480,
            variant == 0 ? "right eye first" : variant == 1 ? "left eye first" : variant == 2 ? "left eye first, OpenXR views swapped"
-           : "a Present between the two eyes' blits");
+           : variant == 3 ? "a Present between the two eyes' blits" : "every part its own transform (ATS): the wheel is the first reference");
     Gpu g;
     const D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_11_0;
     if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, &fl, 1, D3D11_SDK_VERSION, &g.dev, nullptr, &g.ctx)) ||
@@ -339,7 +340,8 @@ static int PartB(int variant) {
     DrawIdRecord ring[4];
     Settings set;                                         // the defaults: x 0, y -25 deg, 80 cm, no turn, scale 0.3
     set.scale = 1.0;                                      // (a bigger box: more pixels to compare)
-    SetMonitorEvery(8);
+    SetMonitorEvery(12);                                  // phase 47d: the DLL's default (6 frames)
+    g_ownTransforms = variant == 4;
     SetActive(true, 0);
     SetSettings(set);
     const Stats s0 = GetStats();                          // (the totals run on over the variants)
@@ -347,7 +349,7 @@ static int PartB(int variant) {
     // space (no lock without poses), the steering wheel turns 120-170, exterior camera 190-209, buffer-pool rotation at 230, a
     // LOADING screen 260-299 (eye 0 has no world blit, eye 1 shows other cabin-layer draws, VIEW-space views, and every 3rd frame
     // looks attachable: the decision must not flap), a truck change at 320.
-    const int kFrames = 480, kNoEye0To = 30, kNoXrTo = 45, kExtFrom = 190, kExtTo = 210, kPoolAt = 230, kLoadFrom = 260, kLoadTo = 300,
+    const int kFrames = variant == 4 ? 640 : 480, kResetAt = 240, kBackAt = 450, kNoEye0To = 30, kNoXrTo = 45, kExtFrom = 190, kExtTo = 210, kPoolAt = 230, kLoadFrom = 260, kLoadTo = 300,
               kTruckAt = 320;
     g_steerFrom = 120.0;
     const float build = (float)(kW * 0.08 / TuningMenu::kWidgetRefW * set.scale);
@@ -361,14 +363,21 @@ static int PartB(int variant) {
     int firstBadAfterSteer = -1, twoKinds = 0, loadAttachedDraws = 0, staleChecked = 0;
     uint64_t switches0 = 0, switchesLoad0 = 0, switchesLoad = 0;
     int firstLockEyes = -1;
+    uint64_t lastLocks = s0.locks;
+    std::vector<uint32_t> lockRefs;
+    std::vector<int> lockAt;
+    int demoteAt = -1;
+    const int rem0 = s0.remembered;
     bool firstLockXr = false;
     for (int f = 0; f < kFrames; ++f) {
         const double t = f / kHz;
         const bool ext = f >= kExtFrom && f < kExtTo;     // exterior camera: no cabin layer
         const bool load = f >= kLoadFrom && f < kLoadTo;  // loading screen
         const bool loadAttachable = load && (f % 3 == 0); // (a normal-looking frame in the middle of it)
-        const int ibi = f >= kTruckAt ? 2 : (f >= kPoolAt ? 1 : 0);
-        const UINT siAdd = f >= kTruckAt ? 100u : 0u;     // the new truck's parts: new loose keys too
+        const bool truckB = f >= kTruckAt && !(variant == 4 && f >= kBackAt);   // variant 4: back to truck A at kBackAt
+        const int ibi = truckB ? 2 : (f >= kPoolAt ? 1 : 0);
+        const UINT siAdd = truckB ? 100u : 0u;            // the new truck's parts: new loose keys too
+        if (variant == 4 && f == kResetAt) Reset("test: the lock row toggled");   // a re-lock on the same truck
         if (f == kTruckAt) locksBeforeTruck = GetStats().locks - s0.locks;
         if (f == kExtFrom) reacqBeforeExt = GetStats().reacquires - s0.reacquires;
         if (f == kNoXrTo) locksEarly = GetStats().locks - s0.locks;
@@ -417,6 +426,11 @@ static int PartB(int variant) {
             blitted[e] = true;
         }
         if (firstLockEyes < 0 && GetStats().locks > s0.locks) { const Stats q = GetStats(); firstLockEyes = q.lockEyes; firstLockXr = q.lockXr; }
+        {                                                 // phase 47d: each lock's reference, and when the wheel was found moving
+            const Stats q = GetStats();
+            if (q.locks != lastLocks && q.state == 2) { lastLocks = q.locks; lockRefs.push_back(q.refIc); lockAt.push_back(f); }
+            if (demoteAt < 0 && q.remembered > rem0) demoteAt = f;
+        }
         // the late draw of both eye pictures (after both blits, as at the OpenXR release): ONE box per picture -- the attached one on
         // an attached frame (or none), else the lock-1 box (here only counted: it is inject.cpp's drawn-in / quad path)
         const uint64_t passSeq = (uint64_t)f * 2 + 2;
@@ -461,7 +475,9 @@ static int PartB(int variant) {
                 if (da > 24) ++diff;
             }
             const double share = ink ? (double)diff / (double)ink : 0.0;
-            const bool steerSettling = false;             // phase 47c: the wheel is never a carrier -- exact while it turns
+            // 47c: the wheel is never a carrier -- exact while it turns; 47d variant 4 (no shared transform): the first lock may take it,
+            // until the monitor drops it (+ 2 frames for the draws already placed)
+            const bool steerSettling = variant == 4 && f >= g_steerFrom && (demoteAt < 0 || f <= demoteAt + 2);
             if (!steerSettling) {
                 maxErr = std::fmax(maxErr, err);
                 maxDiffShare = std::fmax(maxDiffShare, share);
@@ -525,22 +541,43 @@ static int PartB(int variant) {
     CHECK(twoKinds == 0, "%d eye pictures got an attached placement on a fixed frame (two kinds in one frame)", twoKinds);
     CHECK(switchesLoad <= 1 && loadAttachedDraws <= 2 * kOffFrames, "loading screen: %llu switches, %d attached boxes (flicker)",
           (unsigned long long)switchesLoad, loadAttachedDraws);
-    CHECK(switches0 <= 8, "%llu attach switches in all (flapping)", (unsigned long long)switches0);
     CHECK(st.monitors - s0.monitors > 40, "monitor readbacks %llu", (unsigned long long)(st.monitors - s0.monitors));
     CHECK(staleChecked == 1, "stale check not reached");
     CHECK(badFrames == 0, "%d attached eye pictures not at the cab-fixed truth of the same frame", badFrames);
     CHECK(compared > 400, "only %d eye pictures compared", compared);
     CHECK(lagMeasured > 0 && sumLag / lagMeasured > 1.0, "the sway is too small to show a 1-frame lag (%.2f px)", lagMeasured ? sumLag / lagMeasured : 0.0);
     CHECK(attachedExt == 0, "attached %d times with no cabin layer", attachedExt);
-    CHECK(locksBeforeTruck == 1, "the exterior camera / pool rotation caused a new lock (%llu locks before the truck change)",
-          (unsigned long long)locksBeforeTruck);
-    CHECK(st.relocks == 1 && st.locks == 2, "truck change: relocks %llu locks %llu (want 1 / 2)", (unsigned long long)st.relocks,
-          (unsigned long long)st.locks);
-    CHECK(reacqBeforeExt == 0 && st.demoted == 0, "the wheel was a carrier: re-acquires %llu, demoted %d", (unsigned long long)reacqBeforeExt, st.demoted);
-    CHECK(st.entries == 3, "the lock holds %d carriers (want the 3 cab-group parts, not the wheel)", st.entries);
     CHECK(attachedAfterSteer > 100, "only %d attached pictures after the wheel started turning", attachedAfterSteer);
-    CHECK(firstBadAfterSteer < 0, "the box moved with the wheel (frame %d)", firstBadAfterSteer);
-    SetActive(false, 0);
+    {
+        char refs[160];
+        int o = 0;
+        for (size_t i = 0; i < lockRefs.size() && o < 140; ++i)
+            o += snprintf(refs + o, sizeof(refs) - (size_t)o, "%s%u@%d", i ? ", " : "", lockRefs[i], lockAt[i]);
+        printf("  lock references (IndexCount@frame): %s; wheel found moving at frame %d (%d frames after it began to turn); remembered "
+               "%d; monitor CPU %.1f us per readback\n", o ? refs : "none", demoteAt, demoteAt >= 0 ? demoteAt - (int)g_steerFrom : -1,
+               GetStats().remembered, (st.monitors - s0.monitors) ? (GetStats().monitorUs - s0.monitorUs) / (double)(st.monitors - s0.monitors) : 0.0);
+    }
+    if (variant != 4) {                                   // 47c: the cab group shares a transform -- the wheel is never a carrier
+        CHECK(switches0 <= 8, "%llu attach switches in all (flapping)", (unsigned long long)switches0);
+        CHECK(locksBeforeTruck == 1, "the exterior camera / pool rotation caused a new lock (%llu locks before the truck change)",
+              (unsigned long long)locksBeforeTruck);
+        CHECK(st.relocks == 1 && st.locks == 2, "truck change: relocks %llu locks %llu (want 1 / 2)", (unsigned long long)st.relocks,
+              (unsigned long long)st.locks);
+        CHECK(reacqBeforeExt == 0 && st.demoted == 0, "the wheel was a carrier: re-acquires %llu, demoted %d", (unsigned long long)reacqBeforeExt, st.demoted);
+        CHECK(st.entries == 3, "the lock holds %d carriers (want the 3 cab-group parts, not the wheel)", st.entries);
+        CHECK(firstBadAfterSteer < 0, "the box moved with the wheel (frame %d)", firstBadAfterSteer);
+    } else {                                              // 47d: no shared transform -- the first lock takes the wheel (the biggest)
+        CHECK(switches0 <= 12, "%llu attach switches in all (flapping)", (unsigned long long)switches0);
+        CHECK(lockRefs.size() == 4, "%zu locks (want: first, re-lock after Reset, truck B, back to truck A)", lockRefs.size());
+        CHECK(!lockRefs.empty() && lockRefs[0] == kIc[PWheel], "the first lock took IndexCount %u (the scene's biggest is the wheel)",
+              lockRefs.empty() ? 0u : lockRefs[0]);
+        CHECK(demoteAt >= 0 && demoteAt - (int)g_steerFrom <= 10, "the turning wheel was found moving %d frames after it began",
+              demoteAt < 0 ? -1 : demoteAt - (int)g_steerFrom);
+        CHECK(lockRefs.size() >= 2 && lockRefs[1] != kIc[PWheel], "the re-lock after the round trip / Reset took the wheel again");
+        CHECK(lockRefs.size() >= 4 && lockRefs[3] != kIc[PWheel], "back on truck A the wheel was taken again (the memory was lost)");
+        CHECK(GetStats().remembered == 1, "%d parts remembered (want the wheel of truck A only)", GetStats().remembered);
+        CHECK(locksBeforeTruck == 2, "locks before the truck change %llu (want 2: first + the Reset)", (unsigned long long)locksBeforeTruck);
+    }    SetActive(false, 0);
     Shutdown();
     return 0;
 }
@@ -552,7 +589,7 @@ int main() {
     while (!ShaderCache::Done()) Sleep(10);
     if (!ShaderCache::Ready(ShaderCache::kMenuCabVs)) { printf("VSCab not compiled: %s\n", ShaderCache::Error(ShaderCache::kMenuCabVs)); return 1; }
     int r = 0;
-    for (int v = 0; v < 4; ++v) r |= PartB(v);
+    for (int v = 0; v < 5; ++v) r |= PartB(v);
     printf("fps_cab_test: %d checks, %d failed\n", g_checks, g_fail);
     return (r || g_fail) ? 1 : 0;
 }
