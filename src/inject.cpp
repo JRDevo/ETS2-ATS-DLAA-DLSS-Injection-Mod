@@ -2050,6 +2050,9 @@ struct PassSlot {
     uint64_t s = 0;                  // pass sequence number
     float    jx = 0.0f, jy = 0.0f;   // viewport shift this pass was rasterized with (0 when jitter disabled)
     int      phase = 0;
+    bool     rastSeen = false;       // v0.12.0 issue #12 round 4: the first G-buffer draw of this pass was checked: rasterized with
+    bool     rastShifted = false;    //   a shifted viewport? by (rastJx, rastJy) px (g_vpShiftX / Y at that draw) -- vs jx / jy above
+    float    rastJx = 0.0f, rastJy = 0.0f;
     bool     snap = false;           // scene depth of this pass was snapshotted into twin
     bool     consumed = true;
     bool     discarded = false;      // a Discard* of the scene depth was seen since this pass started
@@ -7192,6 +7195,7 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
     if (g_jitterEnabled && !WorldJitterHeld() && !fvBeyondCap) JitterOfPhase(n.phase, &n.jx, &n.jy);   // v0.7.9: held until VR is real
     else { n.jx = 0.0f; n.jy = 0.0f; }
     n.snap = false;
+    n.rastSeen = false; n.rastShifted = false; n.rastJx = n.rastJy = 0.0f;   // v0.12.0 issue #12 round 4
     n.discarded = false;
     n.depth = g_sceneDepth;                               // v0.10.3 issue #9 (per-eye depths: switched by the clear / bind)
     n.pre = 0;                                            // v0.10.0 phase 4
@@ -7234,6 +7238,12 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
 // v0.6.1: called for EVERY immediate-context ClearDSV (was: only while g_depthDirty) so the flight recorder
 // also counts the scene-depth clears that do not start a pass.
 // phase 40: returns true when this clear STARTED a pass (the hidden area mask is drawn only after such a clear).
+void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet);   // (defined with the viewport hooks below)
+extern bool g_jitterPass;                      // (defined with the viewport hooks below)
+uint64_t g_cClearReshift = 0;                  // v0.12.0 issue #12 round 4: passes started by a clear while a jittered binding was bound
+uint64_t g_cRastJitPasses = 0, g_cRastJitMismatch = 0;   // round 4: passes whose first G-buffer draw was rasterized with a
+                                               // different viewport shift than the jitter NGX is told (checked / mismatched)
+int      g_rastJitLogs = 0;
 bool OnSceneDepthClear(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v) {
     CpuProf::Block cpb(CpuProf::kBSnap);               // phase 31 CPU profiler (cpu_prof.h)
     ID3D11Resource* r = nullptr;
@@ -7265,6 +7275,12 @@ bool OnSceneDepthClear(ID3D11DeviceContext* ctx, ID3D11DepthStencilView* v) {
         if (g_plActive.load(std::memory_order_relaxed)) LayerFrameBoundary(ctx, kPlbSceneClear);
         StartPass(ctx, true);
         started = true;
+        // v0.12.0 issue #12 round 4: the clear that starts a pass may come while the G-buffer is ALREADY bound (the bind hook's
+        // ReconcileViewports then ran with the PREVIOUS pass's g_jx). The pass's draws must be rasterized with ITS jitter -- the
+        // one NGX is told (slot.jx / jy) -- so the shifted viewport is re-issued now (no-op when the binding is not a jittered
+        // world pass or the shift did not change). Before: such a pass drew with the previous pass's shift until the game's next
+        // RSSetViewports / OMSetRenderTargets.
+        if (g_jitterPass) { ReconcileViewports(ctx, false); ++g_cClearReshift; }
     }
     if (g_passSeq) ++g_ring[SlotOf(g_passSeq - 1)].sceneClears;   // lands on the pass it started, if any
     return started;
@@ -11104,6 +11120,11 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
             LogDbg("jitter (VR) @blit %llu: phase parity %d, corrections %llu (both eyes of a frame share one Halton phase; a "
                 "correction means a serial pair straddled two frames)", (unsigned long long)g_blitCount, g_vrPhaseOff,
                 (unsigned long long)g_vrPhaseFlips);
+        // v0.12.0 issue #12 round 4 (every mode): the rasterized-vs-told jitter check of the passes' first G-buffer draws
+        LogDbg("jitter check @blit %llu: %llu of %llu passes drew their first G-buffer draw with a different viewport shift than the "
+            "jitter DLSS is told (expect 0); passes started by a scene depth clear while a jittered binding was bound (viewport "
+            "re-shifted there): %llu", (unsigned long long)g_blitCount, (unsigned long long)g_cRastJitMismatch,
+            (unsigned long long)g_cRastJitPasses, (unsigned long long)g_cClearReshift);
         if (FlatViewCount() >= 2) {                        // v0.12.0 issue #12: the per-view figures the FIFO stats line has for 2 eyes
             const FlatViews::Layout& L = g_fv.Current();
             char vt[1024], ord[64];
@@ -11218,10 +11239,13 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         if (g_fvJitLogLeft > 0) {
             --g_fvJitLogLeft;
             Log("flat multi-view jitter: pass s=%llu phase %d (offset %d) predicted view %d -> consumed by view %d (blit %d of %d, Present "
-                "#%llu) | rasterizer shift (%+.4f,%+.4f) px of the %ux%u scene | NGX jitter (%+.4f,%+.4f) (sign %+d,%+d) | scene viewport "
-                "of this pass's jitter: 1 px = 1 render pixel; the blit stretches %ux%u -> %dx%d", (unsigned long long)slot.s, slot.phase,
+                "#%llu) | pass jitter (%+.4f,%+.4f) px of the %ux%u scene | ACTUALLY RASTERIZED at its first G-buffer draw: %s(%+.4f,%+.4f)%s "
+                "| NGX jitter (%+.4f,%+.4f) (sign %+d,%+d) | the blit stretches %ux%u -> %dx%d", (unsigned long long)slot.s, slot.phase,
                 g_fvPhaseOff, slot.predView, eye, g_fv.BlitIndex(), g_fv.Views(), (unsigned long long)frame, (double)slot.jx,
-                (double)slot.jy, g_sceneW, g_sceneH, (double)((float)g_signX * slot.jx), (double)((float)g_signY * slot.jy), g_signX,
+                (double)slot.jy, g_sceneW, g_sceneH, slot.rastSeen ? (slot.rastShifted ? "" : "NOT shifted ") : "no G-buffer draw seen ",
+                (double)slot.rastJx, (double)slot.rastJy,
+                slot.rastSeen && slot.rastShifted && slot.rastJx == slot.jx && slot.rastJy == slot.jy ? " = the pass jitter" : " -- MISMATCH",
+                (double)((float)g_signX * slot.jx), (double)((float)g_signY * slot.jy), g_signX,
                 g_signY, d.Width, d.Height, flatVp.w, flatVp.h);
         }
     }
@@ -18974,6 +18998,28 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
             ++ps.diOther;
         } else {
             ++ps.diGbuf;
+            // v0.12.0 issue #12 round 4: what the rasterizer really uses for this pass (the shift last issued by ReconcileViewports)
+            // vs the jitter NGX will be told (ps.jx / jy), at the pass's first G-buffer draw. A mismatch = DLSS is fed the wrong
+            // jitter for the whole pass (smudge on camera motion). Counted always; the first 8 logged.
+            if (!ps.rastSeen && !t_inDlaa) {
+                ps.rastSeen = true;
+                ps.rastShifted = g_vpShifted; ps.rastJx = g_vpShiftX; ps.rastJy = g_vpShiftY;
+                if (g_dlaaOn.load(std::memory_order_relaxed)) {
+                    ++g_cRastJitPasses;
+                    const float ax = g_vpShifted ? g_vpShiftX : 0.0f, ay = g_vpShifted ? g_vpShiftY : 0.0f;
+                    if (std::fabs(ax - ps.jx) > 1e-4f || std::fabs(ay - ps.jy) > 1e-4f) {
+                        ++g_cRastJitMismatch;
+                        if (g_rastJitLogs++ < 8)
+                            LogWarn("jitter MISMATCH: pass s=%llu drew its first G-buffer draw with viewport shift (%+.4f,%+.4f)%s but its "
+                                "jitter (told to DLSS) is (%+.4f,%+.4f) phase %d -- mode %s, views %d, clear re-shifts %llu (#%llu of %llu "
+                                "passes, Present #%llu)", (unsigned long long)ps.s, (double)ax, (double)ay,
+                                g_vpShifted ? "" : " (not shifted)", (double)ps.jx, (double)ps.jy, ps.phase,
+                                g_vrMode ? "VR" : (g_flatMode ? "flat" : "undetected"), ViewCount(),
+                                (unsigned long long)g_cClearReshift, (unsigned long long)g_cRastJitMismatch,
+                                (unsigned long long)g_cRastJitPasses, (unsigned long long)g_frames.load(std::memory_order_relaxed));
+                    }
+                }
+            }
 #ifdef WITH_DLAA
             // v0.5.5: VR collects candidates even with MV off (the projection eye verdict reads them).
             if (t_inDlaa) {
