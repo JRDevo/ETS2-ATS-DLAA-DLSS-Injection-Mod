@@ -63,11 +63,11 @@ int      g_mapHead = 0;
 
 // window
 struct Win {
-    uint64_t passes[2] = {};
-    uint64_t lastTag[2] = {};
-    double   sum[2][kCount] = {}, mx[2][kCount] = {};
-    uint64_t n[2][kCount] = {};
-    double   totMax[2] = {};
+    uint64_t passes[kViews] = {};                    // v0.12.0 issue #12: per eye / view (was 2)
+    uint64_t lastTag[kViews] = {};
+    double   sum[kViews][kCount] = {}, mx[kViews][kCount] = {};
+    uint64_t n[kViews][kCount] = {};
+    double   totMax[kViews] = {};
     uint64_t unattributed = 0, dropped = 0;
     double   fsum[kCount] = {}, fmx[kCount] = {};   // v0.10.3 phase 29b: per-frame sections (perFrame): ms, largest set sum
     uint64_t fn[kCount] = {};                        // ... sets they ran in
@@ -264,7 +264,7 @@ void Poll(ID3D11DeviceContext* ctx) {
         }
         for (int q = 0; q < nTags; ++q) {
             const int eye = EyeOf(tags[q]);
-            if (eye < 0 || eye > 1) {
+            if (eye < 0 || eye >= kViews) {
                 for (int c = 0; c < kCount; ++c) if (seen[q][c]) ++g_w.unattributed;
                 continue;
             }
@@ -289,7 +289,7 @@ void Poll(ID3D11DeviceContext* ctx) {
 }
 
 bool Stats(int eye, EyeStats* out) {
-    if (eye < 0 || eye > 1 || !out) return false;
+    if (eye < 0 || eye >= kViews || !out) return false;
     *out = EyeStats();
     const uint64_t np = g_w.passes[eye];
     out->passes = np;
@@ -320,7 +320,7 @@ uint32_t Restarts() { return g_restarts; }
 
 void LogWindow(uint64_t blit, double sceneMs, uint32_t sceneN) {
     if (!g_on) return;
-    for (int eye = 0; eye < 2; ++eye) {
+    for (int eye = 0; eye < kViews; ++eye) {
         EyeStats st;
         if (!Stats(eye, &st)) continue;
         char buf[3072];
