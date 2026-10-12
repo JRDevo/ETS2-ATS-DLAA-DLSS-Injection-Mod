@@ -16,9 +16,9 @@
 // Views 0..kMaxViews-1 each get their own DLAA unit (g_dlaa[view]: history, MV / camera / per-draw pairing state, reset bit,
 // record classification), exactly like the two VR eyes; a layout with MORE views than kMaxViews keeps the first kMaxViews (by
 // position) and the rest pass through untouched (OnBlit returns kBeyondCap; logged once at the confirm). The scene pass -> view
-// mapping is the pass FIFO (blit k of a Present consumes the oldest unconsumed pass, as in VR), and the Halton phase advances
-// once per frame for all views (PhaseOf: (s + off) / n, the VR ">> 1" generalised; off learned from the blit order inside the
-// Present, PhaseOffset).
+// mapping is NOT the FIFO (round 5, see "BLIT <-> PASS PAIRING" below: passes and blits run in different orders): a blit takes the
+// pass whose tonemapped picture it samples. The Halton phase advances once per frame for all views (PhaseOf((s - framePos), 0, n):
+// the VR ">> 1" generalised; framePos = the pass's position among the world passes since the last Present).
 // tests/flat_views_test.cpp checks this file (no D3D).
 #pragma once
 #include <cstdint>
@@ -164,6 +164,86 @@ inline int BlitIndexOf(uint64_t s, int off, int n) {
     if (n < 1) return 0;
     return (int)((s + (uint64_t)off) % (uint64_t)n);
 }
+
+// ---- round 5: BLIT <-> PASS PAIRING (RenderDoc, ATS 3 x 1920x1080, frame 1176) ---------------------------------------------------
+// The passes run LEFT, CENTRE, RIGHT but the blits CENTRE, LEFT, RIGHT: pass L, pass C, tonemap L (RGBA16F forward colour of L ->
+// LDR RT a), tonemap C (-> LDR RT b), blit CENTRE samples b, blit LEFT samples a, pass R (re-uses L's forward colour and a), tonemap
+// R, blit RIGHT samples a, Present. The FIFO ("a blit belongs to the OLDEST unconsumed pass", VR's rule) gave the CENTRE blit the LEFT
+// pass's slot (depth, motion vectors, camera R) and vice versa: NGX got one camera's colour with another camera's depth / MVs = the
+// smudge on all camera motion. A blit is now paired with the pass whose tonemapped picture it SAMPLES: each pass records the LDR RT
+// its tonemap wrote (toneRt, set when a draw reads the pass's forward colour into a scene-sized RT); the blit's SRV0 names it.
+// Fallback: the pass-position -> blit-index permutation learned from linked frames (stable: blit k takes pass perm[k] of the
+// frame); last resort the old FIFO (logged).
+struct PassInfo {
+    uint64_t    s = 0;
+    bool        consumed = false;
+    uint64_t    frame = 0;         // the Present counter at the pass's start
+    int         pos = -1;          // the pass's position in its frame (0 = first world pass after the Present)
+    const void* toneRt = nullptr;  // the LDR RT its tonemap wrote (identity), nullptr = none (yet)
+};
+enum PickHow : int { kPickNone = 0, kPickLink, kPickPerm, kPickFifo };
+// `win` = the outstanding window [head, seq) in pass order (consumed ones may be inside it after an out-of-order pick). Returns the
+// index in `win` of the pass this blit takes, *how = which rule picked it. src = the blit's SRV0 resource (identity); frame = now;
+// permPos = the pass position the learned permutation gives this blit (-1 = unknown).
+inline int PickPass(const PassInfo* win, int n, const void* src, uint64_t frame, int permPos, int* how) {
+    *how = kPickNone;
+    if (src)                                               // 1. the pass whose tonemap wrote what this blit samples (newest)
+        for (int i = n - 1; i >= 0; --i)
+            if (!win[i].consumed && win[i].toneRt == src) { *how = kPickLink; return i; }
+    if (permPos >= 0)                                      // 2. the learned permutation, inside this frame
+        for (int i = 0; i < n; ++i)
+            if (!win[i].consumed && win[i].frame == frame && win[i].pos == permPos) { *how = kPickPerm; return i; }
+    for (int i = 0; i < n; ++i)                            // 3. the FIFO (oldest unconsumed)
+        if (!win[i].consumed) { *how = kPickFifo; return i; }
+    return -1;
+}
+// the FIFO head after an out-of-order pick: past every consumed pass at the front (consumed(i) for pass head + i)
+template <class Consumed> inline uint64_t AdvanceHead(uint64_t head, uint64_t seq, Consumed consumed) {
+    while (head < seq && consumed(head)) ++head;
+    return head;
+}
+
+// The permutation blit index k -> pass position perm[k], learned from linked blits: one complete frame (every k < n linked, a
+// permutation) per OnFrame; the same one kPermConfirm frames in a row = known. A different complete frame restarts the count.
+constexpr int kPermConfirm = 10;
+class PermLearner {
+public:
+    void Reset() { *this = PermLearner(); }
+    void Note(int k, int pos) { if (k >= 0 && k < kMaxBlits) { m_cur[k] = pos; m_have |= 1u << k; } }
+    // end of a frame with n views; true when the permutation just became known
+    bool OnFrame(int n) {
+        const uint32_t need = n >= 1 && n <= kMaxBlits ? ((1u << n) - 1u) : 0u;   // (kMaxBlits = 16 < 32)
+        bool complete = need && (m_have & need) == need;
+        uint32_t seen = 0;
+        for (int k = 0; complete && k < n; ++k) {
+            if (m_cur[k] < 0 || m_cur[k] >= n || (seen & (1u << m_cur[k]))) complete = false;
+            else seen |= 1u << m_cur[k];
+        }
+        m_have = 0;
+        if (!complete) return false;
+        bool same = m_n == n;
+        for (int k = 0; same && k < n; ++k) same = m_perm[k] == m_cur[k];
+        if (!same) { m_n = n; for (int k = 0; k < n; ++k) m_perm[k] = m_cur[k]; m_stable = 1; if (m_known) ++m_changes; m_known = false; }
+        else if (m_stable < 1000000) ++m_stable;
+        if (!m_known && m_stable >= kPermConfirm) { m_known = true; return true; }
+        return false;
+    }
+    bool Known() const { return m_known; }
+    int  N() const { return m_n; }
+    int  PosOfBlit(int k) const { return m_known && k >= 0 && k < m_n ? m_perm[k] : -1; }
+    int  BlitOfPos(int pos) const {
+        if (!m_known) return -1;
+        for (int k = 0; k < m_n; ++k) if (m_perm[k] == pos) return k;
+        return -1;
+    }
+    uint64_t Changes() const { return m_changes; }
+private:
+    int      m_cur[kMaxBlits] = {}, m_perm[kMaxBlits] = {};
+    uint32_t m_have = 0;
+    int      m_n = 0, m_stable = 0;
+    bool     m_known = false;
+    uint64_t m_changes = 0;
+};
 
 // The detection state machine (render thread: OnBlit per matched flat backbuffer blit, OnPresent per Present boundary).
 class Detector {

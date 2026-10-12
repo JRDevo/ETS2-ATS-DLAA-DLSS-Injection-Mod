@@ -4,6 +4,7 @@
 #include "../src/flat_views.h"
 #include <cstdio>
 #include <cstdint>
+#include <vector>
 
 static int g_checks = 0, g_fails = 0;
 #define CHECK(c, ...) do { ++g_checks; if (!(c)) { ++g_fails; printf("   FAIL: "); printf(__VA_ARGS__); printf("\n"); } } while (0)
@@ -314,7 +315,126 @@ static void TestDetectorFiveAndCap() {
     CHECK(d1.Views() == 1 && d1.DlaaViews() == 1 && d1.ViewOfBlitIndex(0) == -1, "1 view: single view");
 }
 
+// ---- round 5: blit <-> pass pairing (PickPass / AdvanceHead / PermLearner) ------------------------------------------------------
+// A frame simulator with inject.cpp's bookkeeping: passes start (StartPass: framePos, frame), a tonemap draw reads a pass's forward
+// colour into an LDR RT (FvNoteTonemap: the NEWEST unconsumed pass with that forward colour takes the RT, every other pass loses it),
+// a blit samples an RT and picks its pass (PickPass), consumes it and advances the head (AdvanceHead). Passes run in `passView`
+// order (pass i of the frame renders view passView[i]); they are processed in chunks of `chunk` passes: the chunk's passes, then their
+// tonemaps (pass order), then their blits in a scrambled order. Forward colours and LDR RTs come from pools of `chunk` textures
+// re-used by every chunk (ATS: pass R re-uses pass L's forward colour and tonemap RT inside one frame).
+struct SimPass { uint64_t s; bool consumed; uint64_t frame; int pos; const void* toneRt; const void* fwd; int view; };
+struct PairSim {
+    std::vector<SimPass> ring;                   // indexed by serial (no wrap needed in a test)
+    uint64_t head = 0, seq = 0;
+    int maxOutstanding = 0;
+    uint64_t picks[4] = {}, wrong = 0;
+    FlatViews::PermLearner perm;
+    char pool[64];                               // texture identities: &pool[i]
+    void Tonemap(const void* fwd, const void* rt) {
+        SimPass* owner = nullptr;
+        for (uint64_t q = seq; q-- > head;) if (!ring[q].consumed && ring[q].fwd == fwd) { owner = &ring[q]; break; }
+        for (uint64_t q = head; q < seq; ++q) if (&ring[q] != owner && ring[q].toneRt == rt) ring[q].toneRt = nullptr;
+        if (owner) owner->toneRt = rt;
+    }
+    // one frame; dropLink = blit indices (bitmask) whose tonemap link is "missed" (SRV identity unknown: src = nullptr)
+    void Frame(uint64_t f, int n, const int* passView, const int* blitOfChunk, int chunk, uint32_t dropLink) {
+        int blitK = 0;
+        for (int c0 = 0; c0 < n; c0 += chunk) {
+            const int cn = n - c0 < chunk ? n - c0 : chunk;
+            for (int i = 0; i < cn; ++i) {        // passes of the chunk
+                SimPass p{ seq, false, f, c0 + i, nullptr, &pool[i], passView[c0 + i] };
+                ring.push_back(p); ++seq;
+            }
+            const int out = (int)(seq - head);
+            if (out > maxOutstanding) maxOutstanding = out;
+            for (int i = 0; i < cn; ++i) Tonemap(&pool[i], &pool[32 + i]);   // tonemaps, pass order, RT i of the pool
+            for (int b = 0; b < cn; ++b, ++blitK) {   // blits, scrambled inside the chunk
+                bool fits = true;                    // a short last chunk: the blits go in pass order there
+                for (int bb = 0; bb < cn; ++bb) if (blitOfChunk[bb] >= cn) fits = false;
+                const int i = fits ? blitOfChunk[b] : b;   // which pass of the chunk this blit shows
+                const void* src = (dropLink >> blitK) & 1u ? nullptr : (const void*)&pool[32 + i];
+                FlatViews::PassInfo win[64];
+                int wn = 0;
+                for (uint64_t q = head; q < seq && wn < 64; ++q, ++wn) {
+                    win[wn].s = ring[q].s; win[wn].consumed = ring[q].consumed; win[wn].frame = ring[q].frame;
+                    win[wn].pos = ring[q].pos; win[wn].toneRt = ring[q].toneRt;
+                }
+                int how = 0;
+                const int w = FlatViews::PickPass(win, wn, src, f, perm.PosOfBlit(blitK), &how);
+                ++picks[how];
+                if (w < 0) { ++wrong; continue; }
+                SimPass& took = ring[head + (uint64_t)w];
+                if (took.view != passView[c0 + i]) ++wrong;      // the blit shows view passView[c0 + i]
+                if (how == FlatViews::kPickLink) perm.Note(blitK, took.pos);
+                took.consumed = true;
+                head = FlatViews::AdvanceHead(head, seq, [&](uint64_t q) { return ring[q].consumed; });
+            }
+        }
+        perm.OnFrame(n);
+    }
+};
+
+static void TestPairing(const char* name, int n, const int* passView, const int* blitOfChunk, int chunk) {
+    printf("Pairing: %s (%d views, chunks of %d)\n", name, n, chunk);
+    PairSim sim;
+    for (uint64_t f = 1; f <= 20; ++f) sim.Frame(f, n, passView, blitOfChunk, chunk, 0u);
+    CHECK(sim.wrong == 0, "%s: every blit took the pass of its own view by the tonemap link (wrong %llu)", name, (unsigned long long)sim.wrong);
+    CHECK(sim.picks[FlatViews::kPickLink] == (uint64_t)(20 * n), "%s: all %d blits linked (got %llu)", name, 20 * n,
+          (unsigned long long)sim.picks[FlatViews::kPickLink]);
+    CHECK(sim.head == sim.seq, "%s: nothing left outstanding at the frame end", name);
+    CHECK(sim.maxOutstanding == chunk, "%s: %d passes outstanding at once (got %d) -- the ring needs views + 1 slots", name, chunk,
+          sim.maxOutstanding);
+    CHECK(sim.perm.Known(), "%s: the pass order became known", name);
+    // the FIFO would have been wrong whenever the blit order differs from the pass order inside a chunk
+    // links missing from now on: the learned permutation must pick the same passes
+    PairSim& s2 = sim;
+    const uint64_t perm0 = s2.picks[FlatViews::kPickPerm];
+    for (uint64_t f = 21; f <= 30; ++f) s2.Frame(f, n, passView, blitOfChunk, chunk, 0xFFFFu);
+    CHECK(s2.wrong == 0, "%s: without links the learned order still pairs every blit right (wrong %llu)", name, (unsigned long long)s2.wrong);
+    CHECK(s2.picks[FlatViews::kPickPerm] - perm0 == (uint64_t)(10 * n), "%s: %d blits by the learned order", name, 10 * n);
+    // and with neither: FIFO (wrong for scrambled orders -- what the old code always did)
+    PairSim s3;
+    for (uint64_t f = 1; f <= 5; ++f) s3.Frame(f, n, passView, blitOfChunk, chunk, 0xFFFFu);
+    bool scrambled = false;
+    for (int b = 0; b < chunk && b < n; ++b) if (blitOfChunk[b] != b) scrambled = true;
+    CHECK(s3.picks[FlatViews::kPickFifo] == (uint64_t)(5 * n) && (!scrambled || s3.wrong > 0),
+          "%s: no link, no learned order -> FIFO (%llu wrong pairs, the round-1..4 bug when the orders differ)", name,
+          (unsigned long long)s3.wrong);
+}
+
+static void TestPairingAll() {
+    // ATS (RenderDoc frame 1176): passes L C R; chunk 1 = passes L, C, tonemaps L, C, blits C, L; chunk 2 = pass R, tonemap, blit R
+    { const int pv[3] = { 0, 1, 2 }; const int bo[2] = { 1, 0 }; TestPairing("ATS triple (passes L C R, blits C L R)", 3, pv, bo, 2); }
+    { const int pv[3] = { 0, 1, 2 }; const int bo[3] = { 0, 1, 2 }; TestPairing("pass, blit, pass, blit (chunk 1)", 3, pv, bo, 1); }
+    { const int pv[5] = { 2, 0, 4, 1, 3 }; const int bo[5] = { 3, 0, 4, 2, 1 }; TestPairing("5 views, scrambled, all passes first", 5, pv, bo, 5); }
+    { const int pv[5] = { 4, 3, 2, 1, 0 }; const int bo[2] = { 1, 0 }; TestPairing("5 views, chunks of 2, RTs re-used", 5, pv, bo, 2); }
+    { const int pv[8] = { 7, 2, 5, 0, 3, 6, 1, 4 }; const int bo[8] = { 5, 2, 7, 0, 6, 1, 3, 4 };
+      TestPairing("8 views, scrambled, all passes first", 8, pv, bo, 8); }
+    { const int pv[8] = { 0, 1, 2, 3, 4, 5, 6, 7 }; const int bo[3] = { 2, 0, 1 }; TestPairing("8 views, chunks of 3, RTs re-used", 8, pv, bo, 3); }
+    // AdvanceHead with a gap: passes 0..3, 1 and 2 consumed first -> head stays 0; 0 consumed -> head jumps to 3
+    { bool c[4] = { false, true, true, false };
+      auto f = [&](uint64_t q) { return c[q]; };
+      CHECK(FlatViews::AdvanceHead(0, 4, f) == 0, "AdvanceHead: an older pass still outstanding holds the head");
+      c[0] = true;
+      CHECK(FlatViews::AdvanceHead(0, 4, f) == 3, "AdvanceHead: then it jumps past every consumed pass");
+      c[3] = true;
+      CHECK(FlatViews::AdvanceHead(0, 4, f) == 4, "AdvanceHead: up to seq"); }
+    // PermLearner: incomplete frames do not count, a change restarts the count
+    { FlatViews::PermLearner p;
+      for (int f = 0; f < FlatViews::kPermConfirm - 1; ++f) { p.Note(0, 1); p.Note(1, 0); p.Note(2, 2); p.OnFrame(3); }
+      CHECK(!p.Known(), "PermLearner: not known before kPermConfirm frames");
+      p.Note(0, 1); p.Note(1, 0); p.OnFrame(3);          // incomplete
+      CHECK(!p.Known(), "PermLearner: an incomplete frame does not count");
+      p.Note(0, 1); p.Note(1, 0); p.Note(2, 2);
+      CHECK(p.OnFrame(3) && p.Known() && p.PosOfBlit(0) == 1 && p.BlitOfPos(1) == 0 && p.BlitOfPos(2) == 2, "PermLearner: known");
+      p.Note(0, 0); p.Note(1, 0); p.Note(2, 2); p.OnFrame(3);   // not a permutation: ignored
+      CHECK(p.Known(), "PermLearner: a non-permutation frame is ignored");
+      p.Note(0, 2); p.Note(1, 0); p.Note(2, 1); p.OnFrame(3);   // a different permutation
+      CHECK(!p.Known() && p.Changes() == 1, "PermLearner: a different complete frame restarts the count"); }
+}
+
 int main() {
+    TestPairingAll();
     TestMakeLayout();
     TestPlaceBlit();
     TestPhase();

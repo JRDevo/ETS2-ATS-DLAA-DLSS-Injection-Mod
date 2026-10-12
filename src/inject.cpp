@@ -2058,8 +2058,13 @@ struct PassSlot {
     bool     discarded = false;      // a Discard* of the scene depth was seen since this pass started
     ID3D11Texture2D* depth = nullptr;   // v0.10.3 issue #9: g_sceneDepth at StartPass = this pass's scene depth (identity, no
                                         // ref; read through PassDepth, which falls back to g_sceneDepth once it is released)
+    uint64_t frameN = 0;             // v0.12.0 issue #12 round 5: the Present counter at this pass's start ...
+    int      framePos = -1;          //   ... and its position among the world passes of that frame (0 = first after the Present)
+    const void* toneRt = nullptr;    //   the LDR RT the tonemap of this pass's forward colour wrote (identity; the blit that samples it
+                                     //   takes this pass -- flat multi-view pairing), nullptr = none yet
+    int      pickHow = 0;            //   how its blit found it (FlatViews::PickHow; logs)
     int      predView = -1;          // v0.12.0 issue #12: flat multi-view: the view this pass is expected to belong to at StartPass
-                                     // (frame position (s + off) % n -> the last Present's blit order); -1 = not multi-view
+                                     // (round 5: framePos -> the learned permutation -> the blit order); -1 = unknown / not multi-view
     int      pre = 0;                // v0.10.0 phase 4: 1 = DLAA ran before the tonemap (in place on the forward colour), 2 =
                                      // tried there but deferred / failed (v0.10.0 phase 7: the blit unit takes it), 0 = blit path
 #ifdef WITH_DLAA
@@ -2270,7 +2275,13 @@ bool             g_vrMode        = false;        // a blit into a non-backbuffer
 // depth 2) -- the kill switch if the detection ever misfires on a single screen.
 int              g_flatMvCfg     = 1;
 FlatViews::Detector g_fv;                        // render thread: OnBlit at each matched flat backbuffer blit, OnPresent per Present
-int              g_fvPhaseOff    = 0;            // flat multi-view jitter phase offset (FlatViews::PhaseOf; the VR g_vrPhaseOff)
+int              g_fvPhaseOff    = 0;            // (round 5: unused for the phase -- it is (s - framePos) / n now; kept 0 for the logs)
+int              g_fvPassInFrame = 0;            // round 5: world passes started since the last Present (PassSlot::framePos)
+FlatViews::PermLearner g_fvPerm;                 // round 5: blit index -> pass position of the frame, learned from linked blits
+uint64_t         g_fvPickLink = 0, g_fvPickPerm = 0, g_fvPickFifo = 0;   // round 5: how flat multi-view blits found their pass
+uint64_t         g_fvToneMismatch = 0, g_fvToneNone = 0;   // round 5 check: the pass a blit took was tonemapped into ANOTHER RT than
+                                                 // the blit samples (colour of one camera, depth / MVs of another) / into none
+uint64_t         g_fvTonemaps = 0, g_fvToneUnlinked = 0;   // round 5: tonemap draws linked to a pass / with no pass of that forward colour
 uint64_t         g_fvPhaseFlips  = 0;            // offset corrections (first 8 logged)
 uint64_t         g_fvSkipped     = 0;            // blits whose viewport is not in the confirmed layout (DLAA left alone; total)
 uint64_t         g_fvOrderLogs   = 0;            // "blit order changed" lines written (cap)
@@ -7153,10 +7164,10 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
     // clear); the new pass's spans begin after the clear (SpanBeginPending). No unconsumed pass = frame start.
     // v0.12.0 issue #12 round 3: flat multi-view interleaves pass, blit, pass, blit (the ATS log: no FIFO overflow after the confirm),
     // so "no unconsumed pass" is true before EVERY view's pass and the frame's scene span was restarted per pass and always dropped
-    // ("GPU spans scene n/a", "scene spans dropped=400"). There the frame starts at the pass of blit index 0 ((s + off) % n == 0).
+    // ("GPU spans scene n/a", "scene spans dropped=400"). There the frame starts at its first world pass after the Present (round 5: framePos 0).
     const int spanViews = g_vrMode ? 0 : FlatViewCount();
-    SpanOnPassStart(ctx, g_passSeq, spanViews >= 2 ? FlatViews::BlitIndexOf(g_passSeq, g_fvPhaseOff, spanViews) == 0
-                                                   : g_fifoHead == g_passSeq);
+    const int framePos = g_fvPassInFrame++;            // v0.12.0 issue #12 round 5: position among this frame's world passes
+    SpanOnPassStart(ctx, g_passSeq, spanViews >= 2 ? framePos == 0 : g_fifoHead == g_passSeq);
     // v0.6.1: the previous newest pass ends here -> freeze its deferred-context DrawIndexed delta.
     // v0.6.2: same for the foreign-context and game-context-other-thread counters.
     const uint32_t defNow = g_diDeferred.load(std::memory_order_relaxed);
@@ -7177,6 +7188,7 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
             (unsigned long long)g_frames.load(std::memory_order_relaxed));
     PassSlot& n = g_ring[SlotOf(s)];
     n.s = s;
+    n.frameN = g_frames.load(std::memory_order_relaxed); n.framePos = framePos; n.toneRt = nullptr; n.pickHow = 0;   // round 5
     n.ResetRecorder(defNow, fgnNow, otNow, Qpc());
     const int phases = EffectivePhases();                 // v0.7.0: more phases while upscaling
     if (phases != g_effPhases) {
@@ -7185,11 +7197,12 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
     }
     // v0.12.0 issue #12: flat multi-view -- all N views of a frame share one phase too ((s + off) / N, flat_views.h PhaseOf)
     const int fvN = g_vrMode ? 0 : FlatViewCount();
-    if (fvN >= 2) n.phase = FlatViews::PhaseOf(s, g_fvPhaseOff, fvN, phases);
+    // round 5: the frame's first pass serial = s - framePos (passes and blits do NOT share an order: ATS draws L C R, blits C L R)
+    if (fvN >= 2) n.phase = FlatViews::PhaseOf(s - (uint64_t)(n.framePos > 0 ? n.framePos : 0), 0, fvN, phases);
     else n.phase = (int)((g_vrMode ? ((s + (uint64_t)g_vrPhaseOff) >> 1) : s) % (uint64_t)phases);   // v0.10.0 phase 24: parity
     // v0.12.0 issue #12: a view past kMaxViews (its blit passes through untouched) is not jittered -- a raw jittered picture would
     // shimmer. Its view is predicted from the frame position of the pass and the last Present's blit order.
-    n.predView = fvN >= 2 ? g_fv.ViewOfBlitIndex(FlatViews::BlitIndexOf(s, g_fvPhaseOff, fvN)) : -1;
+    n.predView = fvN >= 2 ? g_fv.ViewOfBlitIndex(g_fvPerm.BlitOfPos(n.framePos)) : -1;   // round 5: via the learned permutation
     const bool fvBeyondCap = fvN > FlatViews::kMaxViews &&
                              n.predView >= FlatViews::kMaxViews;
     if (g_jitterEnabled && !WorldJitterHeld() && !fvBeyondCap) JitterOfPhase(n.phase, &n.jx, &n.jy);   // v0.7.9: held until VR is real
@@ -7226,6 +7239,8 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
     uint64_t fifoCap = FlatMvSeen() && g_fv.FifoDepth() > 2 ? (uint64_t)g_fv.FifoDepth() : 2;
     if (fifoCap > (uint64_t)(g_ringN - 1)) fifoCap = (uint64_t)(g_ringN - 1);
     while (g_passSeq - g_fifoHead > fifoCap) { ++g_fifoHead; ++g_cOverflow; }
+    // round 5: passes consumed out of order (flat multi-view) right behind a dropped one are not outstanding either
+    g_fifoHead = FlatViews::AdvanceHead(g_fifoHead, g_passSeq, [](uint64_t q) { return g_ring[SlotOf(q)].consumed; });
     static int logged = 0;
     if (logged < 12) {
         ++logged;
@@ -10283,7 +10298,7 @@ bool IsRgbaBgraFamily(DXGI_FORMAT f) {
 void DropPassesForModeSwitch() {
     while (g_fifoHead < g_passSeq) g_ring[SlotOf(g_fifoHead++)].consumed = true;
     g_flatMode = false; g_vrMode = false;                // re-detected at the next matched blit
-    g_fv.Reset(); g_fvPhaseOff = 0;                      // v0.12.0 issue #12: flat multi-view detected again
+    g_fv.Reset(); g_fvPhaseOff = 0; g_fvPerm.Reset();                    // v0.12.0 issue #12: flat multi-view detected again
     g_eyeMapN = 0; g_eyeMapLogged = false; g_prevBlitRt = nullptr; g_lastUnderflowBlit = 0;
     for (EyeMapEntry& e : g_eyeMap) e.score = 0;
     for (bool& b : g_eyeLogged) b = false;
@@ -10454,6 +10469,25 @@ void FlatBlitDiag(ID3D11DeviceContext* ctx, const D3D11_TEXTURE2D_DESC& rt, cons
 }
 
 #ifdef WITH_DLAA
+// v0.12.0 issue #12 round 5 (flat_views.h "BLIT <-> PASS PAIRING"): a tonemap draw (scene-sized RGBA16F SRV0 -> scene-sized LDR RT0)
+// reads the forward colour of a pass. The NEWEST outstanding pass whose forward colour (PassSlot::fwdTex, FwdOnBind) is that SRV
+// now owns the RT: its toneRt = rt, and every other outstanding pass that had this RT loses it (the RT is re-used inside a frame:
+// ATS tonemaps pass L and later pass R into the same RT). The blit that samples rt takes that pass (HandlePossibleBlit).
+void FvNoteTonemap(const void* src, const void* rt) {
+    if (!src || !rt) return;
+    PassSlot* owner = nullptr;
+    for (uint64_t q = g_passSeq; q-- > g_fifoHead;) {
+        PassSlot& p = g_ring[SlotOf(q)];
+        if (!p.consumed && p.fwdTex == src) { owner = &p; break; }
+    }
+    for (uint64_t q = g_fifoHead; q < g_passSeq; ++q) {
+        PassSlot& p = g_ring[SlotOf(q)];
+        if (&p != owner && p.toneRt == rt) p.toneRt = nullptr;
+    }
+    if (owner) { owner->toneRt = rt; ++g_fvTonemaps; }
+    else ++g_fvToneUnlinked;
+}
+
 // ---- v0.10.0 phase 4: DLAA BEFORE THE TONEMAP (flat DLAA mode; dlaa.ini dlaa_pre_tonemap = 1, key_pre_tonemap Alt+F7) -------
 // WHY: the blit-time DLAA (v0.3.1 design) works on the tone-mapped 8-bit sRGB picture; NGX is trained for LINEAR HDR input,
 // and post-tonemap input is the known cause of the remaining thin bright line shimmer (lane paint, wires, rail edges, far
@@ -10862,6 +10896,9 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         if (rtSceneSized) {
             if (d.Format == DXGI_FORMAT_R16G16B16A16_FLOAT && d.Width == g_sceneW && d.Height == g_sceneH) {
                 g_tonemapTex = rtPtr;
+#ifdef WITH_DLAA
+                if (g_flatMvCfg) FvNoteTonemap(srcPtr, rtPtr);   // v0.12.0 issue #12 round 5: which pass this LDR RT now shows
+#endif
                 tex->Release();
                 return;
             }
@@ -11135,14 +11172,23 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
             for (int v = 0; v < FlatDlaaViewCount() && o >= 0 && o < (int)sizeof(pv); ++v)
                 o += snprintf(pv + o, sizeof(pv) - (size_t)o, "%s v%d: dlaa frames %llu, R |x|>0.25 %llu/%llu", v ? " |" : "", v,
                               (unsigned long long)g_dlaaFrames[v], (unsigned long long)g_rBig[v], (unsigned long long)g_rReads[v]);
-            LogDbg("flat multi-view @blit %llu: %d views (%d with DLAA):%s | blit order (view of blit 0..): %s | %s | jitter phase "
-                "offset %d (corrections %llu), pass -> view predictions wrong %llu of %llu | blits outside the layout %llu, past the %d-view "
-                "cap %llu, order mismatches %llu, order changes %llu (R |x|>0.25 should stay near 0 per view: each view pairs only with "
-                "itself)", (unsigned long long)g_blitCount,
-                L.n, FlatDlaaViewCount(), vt, ord, pv, g_fvPhaseOff, (unsigned long long)g_fvPhaseFlips, (unsigned long long)g_fvPredMiss,
-                (unsigned long long)g_fvPredN, (unsigned long long)g_fvSkipped,
-                FlatViews::kMaxViews, (unsigned long long)g_fv.BeyondCap(), (unsigned long long)g_fv.OrderMismatch(),
-                (unsigned long long)g_fv.OrderChanges());
+            char pm[96] = "unknown";                       // round 5: the learned blit -> pass-position permutation
+            if (g_fvPerm.Known()) {
+                int po = 0;
+                for (int k = 0; k < g_fvPerm.N() && po >= 0 && po < (int)sizeof(pm); ++k)
+                    po += snprintf(pm + po, sizeof(pm) - (size_t)po, "%s%d", k ? " " : "", g_fvPerm.PosOfBlit(k));
+            }
+            LogDbg("flat multi-view @blit %llu: %d views (%d with DLAA):%s | blit order (view of blit 0..): %s | %s | blit -> pass: by "
+                "tonemap link %llu, by learned order %llu, FIFO %llu; pass positions of blit 0..: %s (order changes %llu); tonemaps linked "
+                "%llu / without a pass %llu | CHECK colour source != the pass's tonemap RT %llu (expect 0), pass without a tonemap RT %llu "
+                "| pass -> view predictions wrong %llu of %llu | blits outside the layout %llu, past the %d-view cap %llu, order mismatches "
+                "%llu, order changes %llu (R |x|>0.25 should stay near 0 per view: each view pairs only with itself)",
+                (unsigned long long)g_blitCount, L.n, FlatDlaaViewCount(), vt, ord, pv, (unsigned long long)g_fvPickLink,
+                (unsigned long long)g_fvPickPerm, (unsigned long long)g_fvPickFifo, pm, (unsigned long long)g_fvPerm.Changes(),
+                (unsigned long long)g_fvTonemaps, (unsigned long long)g_fvToneUnlinked, (unsigned long long)g_fvToneMismatch,
+                (unsigned long long)g_fvToneNone, (unsigned long long)g_fvPredMiss, (unsigned long long)g_fvPredN,
+                (unsigned long long)g_fvSkipped, FlatViews::kMaxViews, (unsigned long long)g_fv.BeyondCap(),
+                (unsigned long long)g_fv.OrderMismatch(), (unsigned long long)g_fv.OrderChanges());
         }
 #ifdef WITH_DLAA
         if (stageAutoWin > 2)                                              // v0.10.0 phase 7
@@ -11183,14 +11229,59 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         tex->Release();
         return;
     }
-    PassSlot& slot = g_ring[SlotOf(g_fifoHead)];
+    // v0.12.0 issue #12 round 5: in flat multi-view (confirmed or being confirmed) the blit takes the pass whose tonemapped picture it
+    // SAMPLES (FlatViews::PickPass: PassSlot::toneRt == SRV0), else the learned pass-position permutation, else the FIFO -- the
+    // passes run L C R but the blits C L R (RenderDoc), the FIFO paired the centre blit with the left pass. Out of order: the slot is
+    // consumed, the head moves past every consumed pass at the front (an older pass stays outstanding for its own blit; the window
+    // [head, seq) keeps every slot in it from being re-used). VR / single view: the FIFO exactly as before.
+    const uint64_t headBefore = g_fifoHead;              // the oldest outstanding pass (logs)
+    uint64_t cs = g_fifoHead;                            // the serial this blit consumes
+    int pickHow = FlatViews::kPickFifo;
 #ifdef WITH_DLAA
-    ObjRecord* const objRec = &g_objRing[SlotOf(g_fifoHead)];   // v0.9.0 the same pass's object record
-    DrawIdRecord* const didRec = &g_didRing[SlotOf(g_fifoHead)]; // v0.10.0 the same pass's draw record
-    DrawIdRecord* const didFwdRec = &g_didFwdRing[SlotOf(g_fifoHead)];   // v0.10.0 phase 3: its forward draws
+    if (isBackbuffer && FlatMvSeen()) {
+        FlatViews::PassInfo win[kRing];
+        int wn = 0;
+        for (uint64_t q = g_fifoHead; q < g_passSeq && wn < kRing; ++q, ++wn) {
+            const PassSlot& p = g_ring[SlotOf(q)];
+            win[wn].s = p.s; win[wn].consumed = p.consumed; win[wn].frame = p.frameN; win[wn].pos = p.framePos; win[wn].toneRt = p.toneRt;
+        }
+        const int k = g_fv.BlitIndex();
+        const int i = FlatViews::PickPass(win, wn, srcPtr, frame, g_fvPerm.PosOfBlit(k), &pickHow);
+        if (i >= 0) cs = g_fifoHead + (uint64_t)i;
+        if (pickHow == FlatViews::kPickLink) { ++g_fvPickLink; g_fvPerm.Note(k, g_ring[SlotOf(cs)].framePos); }
+        else if (pickHow == FlatViews::kPickPerm) ++g_fvPickPerm;
+        else {
+            static int s_fifoWarn = 0;
+            ++g_fvPickFifo;
+            if (s_fifoWarn++ < 5)
+                LogWarn("flat multi-view: blit #%llu (blit %d of Present #%llu) found no pass by its tonemap source and no learned pass order "
+                    "-- the oldest outstanding pass s=%llu is used (FIFO; colour and depth may be of different cameras)",
+                    (unsigned long long)g_blitCount, k, (unsigned long long)frame, (unsigned long long)cs);
+        }
+    }
+#endif
+    PassSlot& slot = g_ring[SlotOf(cs)];
+#ifdef WITH_DLAA
+    ObjRecord* const objRec = &g_objRing[SlotOf(cs)];   // v0.9.0 the same pass's object record
+    DrawIdRecord* const didRec = &g_didRing[SlotOf(cs)]; // v0.10.0 the same pass's draw record
+    DrawIdRecord* const didFwdRec = &g_didFwdRing[SlotOf(cs)];   // v0.10.0 phase 3: its forward draws
 #endif
     slot.consumed = true;
-    ++g_fifoHead;
+    slot.pickHow = pickHow;
+    if (cs == g_fifoHead) ++g_fifoHead;
+    g_fifoHead = FlatViews::AdvanceHead(g_fifoHead, g_passSeq, [](uint64_t q) { return g_ring[SlotOf(q)].consumed; });
+    // round 5 CHECK (would have caught the bug): the pass this blit took must have been tonemapped into the RT the blit samples
+    if (isBackbuffer && FlatMvSeen()) {
+        if (!slot.toneRt) ++g_fvToneNone;
+        else if (slot.toneRt != srcPtr) {
+            static int s_toneWarn = 0;
+            ++g_fvToneMismatch;
+            if (s_toneWarn++ < 5)
+                LogWarn("flat multi-view: blit #%llu samples %p but its pass s=%llu was tonemapped into %p -- colour and depth / MVs of "
+                    "different cameras (pick %d; mismatch #%llu)", (unsigned long long)g_blitCount, srcPtr, (unsigned long long)slot.s,
+                    slot.toneRt, pickHow, (unsigned long long)g_fvToneMismatch);
+        }
+    }
     // v0.6.2 GPU spans: this pass's gbuf span ends (if no discard ended it) before any of our work; the frame's
     // scene span is marked to close after the game's Draw of this blit when it is the frame's clean last blit.
     SpanOnBlit(ctx, slot.s);
@@ -11217,36 +11308,28 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         tex->Release();
         return;
     }
-    if (isBackbuffer && g_fv.Views() >= 2) {   // v0.12.0 issue #12: jitter phase offset from the blit order
-        const int n = g_fv.Views(), k = g_fv.BlitIndex();
-        if (k >= 0 && k < n) {
-            const int off = FlatViews::PhaseOffset(k, slot.s, n);   // pass s is the Present's k-th = (s + off) % n == k
-            if (off != g_fvPhaseOff) {
-                g_fvPhaseOff = off; ++g_fvPhaseFlips;
-                if (g_fvPhaseFlips <= 8)
-                    Log("jitter (flat multi-view): phase offset -> %d at pass s=%llu (blit %d of %d in Present #%llu, view %d; from the next "
-                        "pass all %d views of a frame share one Halton phase; correction #%llu)", off, (unsigned long long)slot.s, k, n,
-                        (unsigned long long)frame, eye, n, (unsigned long long)g_fvPhaseFlips);
-            }
-        }
-        // round 3 (issue #12 smudge check): did the pass belong to the view StartPass predicted, and is the jitter NGX gets the one the
-        // pass was rasterized with? NGX jitter = sign * slot.jx / jy (below); the rasterizer shift = slot.jx / jy (ReconcileViewports
-        // uses g_jx / g_jy = the newest pass's values while that pass draws). One-shot lines for 2 frames after the confirm.
+    if (isBackbuffer && g_fv.Views() >= 2) {
+        // round 5: the jitter phase is per frame from the pass's frame position (StartPass); the old blit-order offset learning was
+        // circular (it assumed the k-th pass of a frame = its k-th blit) and is gone. predView now comes from the learned
+        // permutation (-1 until it is known): checked against the view that consumed the pass.
         if (slot.predView >= 0) {
             ++g_fvPredN;
             if (slot.predView != eye) ++g_fvPredMiss;
         }
         if (g_fvJitLogLeft > 0) {
             --g_fvJitLogLeft;
-            Log("flat multi-view jitter: pass s=%llu phase %d (offset %d) predicted view %d -> consumed by view %d (blit %d of %d, Present "
-                "#%llu) | pass jitter (%+.4f,%+.4f) px of the %ux%u scene | ACTUALLY RASTERIZED at its first G-buffer draw: %s(%+.4f,%+.4f)%s "
-                "| NGX jitter (%+.4f,%+.4f) (sign %+d,%+d) | the blit stretches %ux%u -> %dx%d", (unsigned long long)slot.s, slot.phase,
-                g_fvPhaseOff, slot.predView, eye, g_fv.BlitIndex(), g_fv.Views(), (unsigned long long)frame, (double)slot.jx,
-                (double)slot.jy, g_sceneW, g_sceneH, slot.rastSeen ? (slot.rastShifted ? "" : "NOT shifted ") : "no G-buffer draw seen ",
-                (double)slot.rastJx, (double)slot.rastJy,
+            static const char* const kHow[] = { "none", "tonemap link", "learned order", "FIFO" };
+            Log("flat multi-view jitter: blit %d of %d (view %d, Present #%llu) took pass s=%llu (frame position %d, by %s; the oldest "
+                "outstanding pass was s=%llu) phase %d, predicted view %d | pass jitter (%+.4f,%+.4f) px of the %ux%u scene | ACTUALLY "
+                "RASTERIZED at its first G-buffer draw: %s(%+.4f,%+.4f)%s | NGX jitter (%+.4f,%+.4f) (sign %+d,%+d) | its tonemap RT %s "
+                "the blit's source | the blit stretches %ux%u -> %dx%d", g_fv.BlitIndex(), g_fv.Views(), eye, (unsigned long long)frame,
+                (unsigned long long)slot.s, slot.framePos, kHow[slot.pickHow >= 0 && slot.pickHow < 4 ? slot.pickHow : 0],
+                (unsigned long long)headBefore, slot.phase,
+                slot.predView, (double)slot.jx, (double)slot.jy, g_sceneW, g_sceneH,
+                slot.rastSeen ? (slot.rastShifted ? "" : "NOT shifted ") : "no G-buffer draw seen ", (double)slot.rastJx, (double)slot.rastJy,
                 slot.rastSeen && slot.rastShifted && slot.rastJx == slot.jx && slot.rastJy == slot.jy ? " = the pass jitter" : " -- MISMATCH",
-                (double)((float)g_signX * slot.jx), (double)((float)g_signY * slot.jy), g_signX,
-                g_signY, d.Width, d.Height, flatVp.w, flatVp.h);
+                (double)((float)g_signX * slot.jx), (double)((float)g_signY * slot.jy), g_signX, g_signY,
+                !slot.toneRt ? "unknown --" : (slot.toneRt == srcPtr ? "IS" : "is NOT"), d.Width, d.Height, flatVp.w, flatVp.h);
         }
     }
     if (!isBackbuffer) {                                  // v0.10.0 phase 24: VR jitter phase parity from the eye order
@@ -11745,6 +11828,18 @@ void FlatViewsOnPresent(uint64_t n) {
     if (!g_flatMvCfg) return;
     const FlatViews::Detector::Event ev = g_fv.OnPresent();   // (VR / undetected: nothing was fed -> kNone)
     SetRingSize(FlatMvSeen() ? g_fv.FifoDepth() + 1 : kRingBase, n);
+    // round 5: one frame of blit -> pass links for the permutation learner (flat multi-view only); logged once when it is known
+    if (g_flatMode && FlatMvSeen() && g_fvPerm.OnFrame(g_fv.LastN())) {
+        char pm[160] = "";
+        int o = 0;
+        for (int k = 0; k < g_fvPerm.N() && o >= 0 && o < (int)sizeof(pm); ++k)
+            o += snprintf(pm + o, sizeof(pm) - (size_t)o, "%s%d", k ? " " : "", g_fvPerm.PosOfBlit(k));
+        char ord[64];
+        FvOrderStr(ord, sizeof(ord), g_fv.Views() >= 2 ? g_fv.Current() : g_fv.Candidate());
+        Log("flat multi-view: blit<->pass link by tonemap source: blit 0, 1, ... (views %s) take the passes at frame positions %s "
+            "(stable for %d frames; passes run in a different order than the blits -- each blit now gets the depth / motion vectors of "
+            "the pass whose picture it shows; Present #%llu)", ord, pm, FlatViews::kPermConfirm, (unsigned long long)n);
+    }
     // round 2 diagnostics: the blits of one more Present are logged in full after the first verdict on a multi-blit Present, and
     // after a confirm (the rects the views were confirmed with)
     static bool s_diagAfterConfirm = false;
@@ -11778,6 +11873,7 @@ void FlatViewsOnPresent(uint64_t n) {
                 "untouched and unjittered", L.n, FlatViews::kMaxViews, FlatViews::kMaxViews, L.n - 1);
     } else if (ev == FlatViews::Detector::kDropped) {
         g_fvPhaseOff = 0;
+        g_fvPerm.Reset();                                // round 5: the pass order is learned again with the next layout
         g_resetNext = true;
         MvInvalidate();
         Log("flat multi-view ENDED: the %d-view layout was missing in %d Presents with world blits in a row (last: %d blit(s), %s) -- "
@@ -11797,6 +11893,7 @@ void FlatViewsOnPresent(uint64_t n) {
 
 void OnPresentBoundary(uint64_t n) {
     FlatViewsOnPresent(n);                             // v0.12.0 issue #12 (the blits of the Present that just ended)
+    g_fvPassInFrame = 0;                               // round 5: the next world pass is frame position 0
     if (MeasureOn()) TscCalibrate();                   // phase 35: the TSC -> QPC ratio of the per-draw timers (phase 45: only
                                                        // while measuring; anchored at startup, so a late update is exact)
 #ifdef WITH_DLAA
@@ -19143,7 +19240,7 @@ void ResetPassTrackingCore(bool forceDlaaOff) {
     while (g_fifoHead < g_passSeq) g_ring[SlotOf(g_fifoHead++)].consumed = true;   // drop outstanding passes
     g_needFirstPass = true;                                    // next G-buffer bind starts a pass
     g_flatMode = false; g_vrMode = false;                      // re-detected at the next matched blit
-    g_fv.Reset(); g_fvPhaseOff = 0;                            // v0.12.0 issue #12: flat multi-view detected again
+    g_fv.Reset(); g_fvPhaseOff = 0; g_fvPerm.Reset();                          // v0.12.0 issue #12: flat multi-view detected again
     g_eyeMapN = 0; g_eyeMapLogged = false; g_prevBlitRt = nullptr; g_lastUnderflowBlit = 0;
     for (EyeMapEntry& e : g_eyeMap) e.score = 0;
     for (bool& b : g_eyeLogged) b = false;
