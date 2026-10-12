@@ -69,6 +69,9 @@ log_level = 1
 # vrs_outer = 80
 # 1 (default) = full detail everywhere inside vrs_outer; 0 = also save in the middle ring (2 x 1).
 # vrs_quality = 1
+# What foveated rendering acts on: 0 (default) = the 3D world only; 1 = also the game's lighting pass, outer ring only
+# (more saving; test it first: look for blocky light or shadow edges at the side). The menu's Foveated passes row.
+# vrs_passes = 0
 # Test only, needs log_level = 4: 1 = middle ring 2 x 2 and outer ring 4 x 4, so the pattern is easy to see in the headset.
 # vrs_debug = 0
 

@@ -1,3 +1,15 @@
+// phase 42 -- VRS ON MORE PASSES (dlaa.ini vrs_passes, 0 default; menu row "Foveated passes": scene / scene + lighting, live,
+//           Shift+F12 saves, Reset removes). The game's per-eye work at eye size (ATS flat trace + the phase 36 "GPU per pass"
+//           lines of captures/ats_2026-10-11_p37_vr.log, ms per frame for both eyes at 4592 x 6496): shadow maps 0-1.9 (depth only:
+//           nothing to shade), G-buffer 2.1-3.3 and forward 2.2-4.1 (VRS since phase 34; the forward bind also holds the fog
+//           triangle, sky, transparents and particles), LIGHTING 1.8-3.6 (2 RTV RGBA16F scene size on the scene depth: a full-screen
+//           sun / ambient / shadow triangle + light volumes), post 0.9-2.3 (bloom chain at 1/4 size and smaller, the HDR composite,
+//           the tonemap / eye blit = the DLAA input: never coarse), mirrors (never), UI / menus (never). vrs_passes = 1 adds the
+//           lighting bind (VrsIsLightingBind: exact shape, inside the lighting stage = after a world G-buffer bind and before the
+//           forward bind of the same pass, no mirror view open, not a preview pass) with an OUTER-ONLY table (middle ring 1 x 1
+//           even at vrs_quality 0; outer 2 x 2, 2 x 1 while DLSS upscales from below 75 %). Same eye logic (VrsDecideEye), same
+//           per-draw rule and mod-work pause. Log level 4: "VRS passes @" line every 10 s = binds / coarse-capable / full-rate
+//           draws per frame for G-buffer, forward and lighting + lighting-stage binds that did not match the shape.
 // v0.11.0 -- issue #8 OPTISCALER: DetectOptiScaler (startup) looks for OptiScaler.ini / .log / .asi / folder or nvngx_dlssnr.dll next
 //           to the game exe; found = mirror DLAA starts OFF unless dlaa.ini sets mirror_dlaa (its DLSS 5 "Neural Rendering" DX12
 //           bridge loses the device on the small HDR mirror DLSS frames, the picture freezes). Alt+F6 / mirror_dlaa = 1 still force
@@ -767,6 +779,12 @@ int      g_vrsInner = 55, g_vrsOuter = 80;
 int      g_vrsQuality = 1;
 int      g_vrsDebug = 0;
 bool     g_vrsExplicit = false;          // set in dlaa.ini or changed in the menu -> SaveSettings writes vrs / vrs_inner / vrs_outer
+// phase 42: dlaa.ini vrs_passes -- 0 (default) = VRS on the world scene binds only (G-buffer + main forward, phase 34); 1 = + the
+// eye's deferred LIGHTING bind (2 RTV RGBA16F scene size + scene depth, between the G-buffer and the forward bind), outer ring
+// only. The menu's Foveated passes row switches it live; SaveSettings writes it once explicit (own flag: a saved 0 is not written
+// just because another Foveated row was touched).
+int      g_vrsPasses = 0;
+bool     g_vrsPassesExplicit = false;
 // phase 32: dlaa.ini cpu_cache_pin -- 0 (default) = never touch the affinity; 1 = on a CPU whose L3 caches differ in size (AMD X3D: V-Cache on one CCD only)
 // the process affinity is set to the logical processors of the biggest L3, once at startup (cpu_pin.h). Opt-in: no gain was measured.
 // Startup only: no menu row, so SaveSettings / ResetSettings have nothing to write or remove (the key stays as the user left it).
@@ -2752,8 +2770,13 @@ void SaveSettings(uint64_t n) {
         snprintf(add("vrs_inner"), sizeof(kv[0].val), "%d", g_vrsInner);
         snprintf(add("vrs_outer"), sizeof(kv[0].val), "%d", g_vrsOuter);
     }
-    char vrsW[80] = "";                                   // (phase 39: was 64, + log_level)
+    if (g_vrsPassesExplicit) snprintf(add("vrs_passes"), sizeof(kv[0].val), "%d", g_vrsPasses);   // phase 42 (Foveated passes)
+    char vrsW[96] = "";                                   // (phase 39: was 64, + log_level; phase 42: 80 -> 96, + vrs_passes)
     if (g_vrsExplicit) snprintf(vrsW, sizeof(vrsW), " vrs=%d vrs_inner=%d vrs_outer=%d", g_vrsOn, g_vrsInner, g_vrsOuter);
+    if (g_vrsPassesExplicit) {
+        const size_t vl = strlen(vrsW);
+        snprintf(vrsW + vl, sizeof(vrsW) - vl, " vrs_passes=%d", g_vrsPasses);
+    }
     if (g_logLevelExplicit) {
         const size_t vl = strlen(vrsW);
         snprintf(vrsW + vl, sizeof(vrsW) - vl, " log_level=%d", LogLevel());
@@ -8640,6 +8663,7 @@ HRESULT STDMETHODCALLTYPE hkCreatePixelShader(ID3D11Device* dev, const void* cod
 //          (alpha-tested foliage / fences: coarse shading would cut their edges in 2 x 2 blocks), one that writes SV_Depth (the
 //          depth would go coarse: depth, MVs and draw ids must stay exact) or one never scanned (created before the hook) keeps
 //          full rate; the table is switched only when the class changes from the previous draw (counted: "table switches").
+// PHASE 42 (vrs_passes = 1): + the eye's LIGHTING bind of the same pass (VrsIsLightingBind / g_vrsLitS), outer ring only.
 // Rasterised depth, stencil and coverage stay per pixel under VRS, so the scene depth, the per-draw MVs (draw-id replay: mod
 // work = full rate) and the DLAA inputs are exactly what they were; only the colour of the outer ring is shaded per block.
 // EYE (phase 34b): the eye of a pass is certain only at its blit (the blit RT -> eye map, corrected by projection verdicts).
@@ -8880,10 +8904,49 @@ void VrsLogOrder() {
         "map entry) %s -- the eye order of a frame is not fixed, so the eye of a pass is never guessed from its parity (phase 34b)",
         n, (unsigned long long)first.s, g_vrPhaseOff, eyes, rts);
 }
+// phase 42: the LIGHTING STAGE of pass s -- set at a world G-buffer bind (not a preview pass), ended by the pass's forward bind
+// (or any other jitter / preview bind). Only a bind inside it can be the eye's lighting bind.
+uint64_t g_vrsLitS = ~0ull;
+bool     g_vrsLitLogged = false;
+// phase 42: is this bind the eye's deferred lighting bind? Shape (ATS flat trace dlaa_trace_ats_flat_hdr_scale125.txt [3678],
+// mirror_dlaa_plan.md for ETS2): exactly 2 RTVs, both R16G16B16A16_FLOAT single-sample textures of the scene size, on the scene
+// depth of this pass (a mirror view has its own depth; the other eye's depth alias is not g_sceneDepth). Its draws: a full-screen
+// sun / ambient / shadow triangle + light volumes, read the G-buffer, write light accumulation the forward pass reads -- no motion
+// vectors, no ids, no depth (the mod's draw-id / depth work runs as mod work, at full rate).
+bool VrsIsLightingBind(UINT n, ID3D11RenderTargetView* const* rtvs, const void* bindDepth) {
+    if (n != 2 || !rtvs || !rtvs[0] || !rtvs[1] || !bindDepth || bindDepth != (const void*)g_sceneDepth) return false;
+    for (UINT i = 0; i < 2; ++i) {
+        ID3D11Resource* r = nullptr;
+        rtvs[i]->GetResource(&r);
+        if (!r) return false;
+        ID3D11Texture2D* t = nullptr;
+        D3D11_TEXTURE2D_DESC d{};
+        const bool tex = SUCCEEDED(r->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&t)) && t;
+        if (tex) { t->GetDesc(&d); t->Release(); }
+        r->Release();
+        if (!tex || d.Format != DXGI_FORMAT_R16G16B16A16_FLOAT || d.Width != g_sceneW || d.Height != g_sceneH ||
+            d.SampleDesc.Count != 1)
+            return false;
+    }
+    return true;
+}
 // hkOMSetRenderTargets (game context, not our work), the end of the hook: enter the bracket for this binding if it is an eye's
-// world scene pass. Vrs::g_want is false here (the top of the hook left the previous one).
-void VrsOnBind(ID3D11DeviceContext* ctx) {
-    if (!g_vrsOn || !g_vrMode || !g_jitterPass || g_previewPass || !g_passSeq || !g_sceneW || !g_sceneH) return;
+// world scene pass (or, vrs_passes = 1, its lighting bind). Vrs::g_want is false here (the top of the hook left the previous one).
+// n / rtvs / bindDepth = this bind (bindDepth: identity only, the bound DSV keeps it alive).
+void VrsOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* rtvs, const void* bindDepth) {
+    if (!g_vrsOn || !g_vrMode || !g_passSeq || !g_sceneW || !g_sceneH) return;
+    int cls;
+    if (g_jitterPass) {
+        // phase 42: a world G-buffer bind opens the lighting stage of its pass, every other jitter bind (forward, preview) ends it
+        g_vrsLitS = (g_gbufPass && !g_previewPass) ? g_passSeq - 1 : ~0ull;
+        if (g_previewPass) return;
+        cls = g_gbufPass ? Vrs::kClsGbuf : Vrs::kClsFwd;
+    } else {
+        if (!g_vrsPasses || g_vrsLitS != g_passSeq - 1 || g_previewPass || g_mirCur >= 0) return;
+        ++Vrs::GetStats().litStageBinds;
+        if (!VrsIsLightingBind(n, rtvs, bindDepth)) { ++Vrs::GetStats().litShapeMiss; return; }
+        cls = Vrs::kClsLight;
+    }
     CpuProf::Block cpb(CpuProf::kBVrs);               // phase 34 CPU profiler row "vrs"
     if (!g_lodPsHooked.load(std::memory_order_relaxed)) {
         if (!g_vrsNoPsLogged) {
@@ -8897,7 +8960,7 @@ void VrsOnBind(ID3D11DeviceContext* ctx) {
     const uint64_t s = g_passSeq - 1;
     void* fwdTex = nullptr;                            // this bind's forward colour (FWD eye source; nullptr = G-buffer bind)
 #ifdef WITH_DLAA
-    if (!g_gbufPass && g_fwdBound) fwdTex = g_fwdBoundTex;
+    if (cls == Vrs::kClsFwd && g_fwdBound) fwdTex = g_fwdBoundTex;
 #endif
     int src = 0, srcEye[4] = { -1, -1, -1, -1 };
     bool disagree = false;
@@ -8906,7 +8969,7 @@ void VrsOnBind(ID3D11DeviceContext* ctx) {
         ++g_vrsBindLogs;
         LogDbg("VRS bind #%d: pass s=%llu %s bind, last eye blit s=%llu (k=%lld) -- blit %d / RT cycle %d / forward colour %d / frame "
             "pair %d (-1 = not certain) -> %s%d (Present #%llu)", g_vrsBindLogs, (unsigned long long)s,
-            g_gbufPass ? "G-buffer" : "forward", (unsigned long long)g_vrLastBlitS,
+            Vrs::ClsName(cls), (unsigned long long)g_vrLastBlitS,
             g_vrLastBlitS == ~0ull ? -1LL : (long long)(s - g_vrLastBlitS), srcEye[0], srcEye[1], srcEye[2], srcEye[3],
             disagree ? "DISAGREE, full rate, " : (eye < 0 ? "no certain eye, full rate, " : "eye "), eye,
             (unsigned long long)g_frames.load(std::memory_order_relaxed));
@@ -8926,7 +8989,7 @@ void VrsOnBind(ID3D11DeviceContext* ctx) {
     const double up = g_upRenderOverOutX;
     const float ratio = (g_dlaaOn.load(std::memory_order_relaxed) && g_dlssUpscale.load(std::memory_order_relaxed) && up > 0.0 &&
                          up < 1.0) ? (float)up : 1.0f;
-    if (Vrs::Enter(ctx, g_sceneW, g_sceneH, eye, u, v, ratio)) {
+    if (Vrs::Enter(ctx, g_sceneW, g_sceneH, eye, u, v, ratio, cls)) {
         Vrs::Stats& st = Vrs::GetStats();
         for (int i = 0; i < 4; ++i) if (src & (1 << i)) ++st.eyeSrc[i];
         VrsPred& p = g_vrsPred[s & 7];
@@ -8936,19 +8999,27 @@ void VrsOnBind(ID3D11DeviceContext* ctx) {
             g_vrsFirstLogged = true;
             Log("VRS: first scene bind with foveated rendering -- pass s=%llu, %s pass, eye %d (sources:%s%s%s%s; last eye blit pass "
                 "s=%llu), %ux%u, ring centre uv (%.3f, %.3f), DLSS render / output %.3f (Present #%llu)", (unsigned long long)s,
-                g_gbufPass ? "G-buffer" : "forward", eye, (src & kVrsSrcBlit) ? " blit" : "", (src & kVrsSrcRing) ? " RT-cycle" : "",
+                Vrs::ClsName(cls), eye, (src & kVrsSrcBlit) ? " blit" : "", (src & kVrsSrcRing) ? " RT-cycle" : "",
                 (src & kVrsSrcFwd) ? " forward-colour" : "", (src & kVrsSrcPair) ? " frame-pair" : "",
                 (unsigned long long)g_vrLastBlitS, g_sceneW, g_sceneH, (double)u, (double)v,
                 (double)ratio, (unsigned long long)g_frames.load(std::memory_order_relaxed));
             VrsLogOrder();
         }
+        if (cls == Vrs::kClsLight && !g_vrsLitLogged) {   // phase 42: once, the first lighting bind with VRS
+            g_vrsLitLogged = true;
+            Log("VRS: first LIGHTING bind with foveated rendering (vrs_passes=1, phase 42) -- pass s=%llu, eye %d, 2 RTV RGBA16F %ux%u "
+                "on the scene depth, outer ring only (Present #%llu)", (unsigned long long)s, eye, g_sceneW, g_sceneH,
+                (unsigned long long)g_frames.load(std::memory_order_relaxed));
+        }
     }
 }
 // The ini / menu values -> vrs.cpp (any thread; read at the next bracket). vrs_debug only with debug = 1 (phase 39: log level 4,
 // live: StepLogLevel calls this again).
-void VrsApplyConfig() { Vrs::Configure(g_vrsOn, g_vrsInner, g_vrsOuter, g_vrsQuality, g_vrsDebug && LogDebugLevel() ? 1 : 0); }
+void VrsApplyConfig() {
+    Vrs::Configure(g_vrsOn, g_vrsInner, g_vrsOuter, g_vrsQuality, g_vrsDebug && LogDebugLevel() ? 1 : 0, g_vrsPasses);
+}
 #else
-inline void VrsOnBind(ID3D11DeviceContext*) {}       // (no VRS without WITH_DLAA)
+inline void VrsOnBind(ID3D11DeviceContext*, UINT, ID3D11RenderTargetView* const*, const void*) {}   // (no VRS without WITH_DLAA)
 inline void VrsNoteBlit(uint64_t, int, void*, void*) {}
 #endif
 
@@ -9100,7 +9171,7 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
     (void)sceneDsv;
 #endif
     ReconcileViewports(ctx, false);       // no-op unless the shift state changed
-    VrsOnBind(ctx);                       // phase 34: an eye's world scene pass -> VRS bracket (no-op unless vrs = 1 in VR)
+    VrsOnBind(ctx, n, rtvs, bindDepth);   // phase 34: an eye's world scene pass (phase 42: + lighting) -> VRS bracket (no-op unless vrs = 1 in VR)
 #ifdef WITH_DLAA
     if (gpOn) {                           // phase 36: timestamp 2 = this bind's class starts after the mod's bind-time work
         GpuPass::BindEnd(ctx, gpCls);
@@ -14204,6 +14275,7 @@ enum MenuRowId {
     MR_UPSCALE, MR_DLAA, MR_OFXR,
     MR_TURBO,                                             // phase 30: VR Turbo mode (dlaa.ini xr_turbo; OpenXR Toolkit port)
     MR_VRS, MR_VRSSIZE,                                   // phase 34: VR foveated rendering (dlaa.ini vrs; vrs_inner / vrs_outer preset)
+    MR_VRSPASS,                                           // phase 42: Foveated passes (dlaa.ini vrs_passes: scene / scene + lighting)
     MR_LOG,                                               // phase 39: Logging (dlaa.ini log_level) + what logging costs
     MR_PANELGRP,                                          // v0.10.3 phase 29c: group header "Panel settings" (collapsible)
     MR_POSX, MR_POSY, MR_SIZE, MR_DEPTH, MR_FACE,
@@ -14261,6 +14333,9 @@ const wchar_t* const kMenuDesc[] = {
     L"once per 2 x 2 pixels; fences, grass and leaves keep full detail. Turn it off if the edge looks blocky.",
     L"How big the sharp centre of Foveated (VRS) is: wide = the largest sharp area, the smallest saving; narrow = the biggest "
     L"saving, lower detail starts closer to the middle. balanced is the default.",
+    // phase 42 (MR_VRSPASS)
+    L"Which of the game's passes Foveated (VRS) acts on. scene = the 3D world only (default). scene + lighting = also the game's "
+    L"lighting pass, at the very edge only: more saving. Test it: look for blocky light or shadow edges at the side of your view.",
     // phase 39 (MR_LOG)
     L"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + problems worked around; "
     L"info = + start-up and changes; debug = + statistics, and debug also runs the GPU timers and the CPU profiler.",
@@ -14496,6 +14571,19 @@ void StepVrsSize(int dir, uint64_t n) {
         g_vrsOn ? "" : " -- Foveated (VRS) is off: used once it is on");
     PlayTones(1, 600 + 300 * next, 120, 0);
 }
+// phase 42: the menu's Foveated passes row -- dlaa.ini vrs_passes live (0 = scene binds only, 1 = + the lighting bind, outer ring
+// only). The next game bind uses it (VrsOnBind reads g_vrsPasses; Vrs::Enter refuses a lighting bracket at 0).
+void ToggleVrsPasses(uint64_t n) {
+    g_vrsPasses = g_vrsPasses ? 0 : 1;
+    g_vrsPassesExplicit = true;
+    VrsApplyConfig();
+    Log("Foveated passes (VRS): %s (vrs_passes=%d, tuning menu, Present #%llu) -- %s%s", g_vrsPasses ? "scene + lighting" : "scene",
+        g_vrsPasses, (unsigned long long)n,
+        g_vrsPasses ? "from the next frame the eye's lighting bind is shaded coarse in the outer ring too (middle ring stays 1x1)"
+                    : "from the next frame only the world scene binds (G-buffer, forward)",
+        g_vrsOn ? "" : " -- Foveated (VRS) is off: used once it is on");
+    PlayTones(1, g_vrsPasses ? 1200 : 300, 150, 0);
+}
 // phase 39: what followed debug = 1 follows log level 4 -- live: the GPU timers (perf_timers -1) and the CPU profiler (cpu_prof -1;
 // explicit 0 / 1 stay as set), vrs_debug. Called by StepLogLevel / ResetSettings (LoadConfig + SetupThread set the start state).
 // While the menu is open the GPU timers stay on (its own figures need them): MenuPerfClose puts them where the level says.
@@ -14532,7 +14620,7 @@ void StepLogLevel(int dir, uint64_t n) {
 // cut-out key absent (g_lodCutMode = kLodCutAbsent, -0.50), mv_objects 2, mirror_dlaa 1, dlaa_pre_tonemap 1, perf_profile high,
 // mv_fwd_depth 1, the panel and the fps box at their default placement (fps box off), Turbo and foveated rendering off, logging
 // at errors (phase 39; debug = 1 in dlaa.ini: debug, as the next start gives without log_level). Each live
-// change uses the side effects of the Step* / Toggle* function of the row. On disk the 39 keys are REMOVED (WriteIniPreserving, empty value): key_* hotkeys, debug,
+// change uses the side effects of the Step* / Toggle* function of the row. On disk the 40 keys (phase 42: + vrs_passes) are REMOVED (WriteIniPreserving, empty value): key_* hotkeys, debug,
 // every other key and all comments stay. Only the profile keys that dlaa.ini sets AND this reset removes (dlss_preset, dlaa_area,
 // mirror_dlaa, mv_fwd_depth) lose their "explicit" mark; the other profile keys (mirror_vr_mode, mv_vote_res, ...) stay in the file,
 // so they stay explicit exactly as at the next start.
@@ -14599,6 +14687,8 @@ void ResetSettings(uint64_t n) {
     XrHook::SetTurbo(false);
     g_vrsOn = 0; g_vrsInner = 55; g_vrsOuter = 80;        // phase 34: foveated rendering off, balanced radii (vrs_quality /
     g_vrsExplicit = false;                                //   vrs_debug are dlaa.ini-only: left as they are)
+    g_vrsPasses = 0;                                      // phase 42: scene binds only
+    g_vrsPassesExplicit = false;
     VrsApplyConfig();
     // phase 39: logging back to the level dlaa.ini gives without log_level (the key is removed below; `debug` stays in the file,
     // so debug = 1 there = level 4, as at the next start; else 1 = errors)
@@ -14610,7 +14700,7 @@ void ResetSettings(uint64_t n) {
 
     // dlaa.ini: remove the 35 keys (empty value); everything else stays byte-for-byte (v0.10.2: + mirror_mv = 32; v0.10.3 phase 28:
     // + fps_vr_lock = 33, the cap raised to kIniMaxKeys; v0.10.3 phase 29b: + menu_vr_dist = 34; phase 30: + xr_turbo = 35;
-    // phase 34: + vrs / vrs_inner / vrs_outer = 38; phase 39: + log_level = 39)
+    // phase 34: + vrs / vrs_inner / vrs_outer = 38; phase 39: + log_level = 39; phase 42: + vrs_passes = 40 = kIniMaxKeys)
     static const char* const kKeys[] = {
         "mode", "dlss_preset", "dlaa_area", "sharpness", "sharp_radius", "dlss_upscale", "tex_lod_bias", "tex_lod_bias_cutout",
         "mv_objects", "mirror_dlaa", "mirror_vr_mode", "mirror_flat_mode", "mirror_vr_views", "mirror_mv", "dlaa_pre_tonemap",
@@ -14620,6 +14710,7 @@ void ResetSettings(uint64_t n) {
         "fps_show", "fps_x", "fps_y", "fps_scale", "fps_vr_x", "fps_vr_y", "fps_vr_scale", "fps_vr_lock",   // phase 28: + fps_vr_lock
         "xr_turbo",                                                                                     // phase 30
         "vrs", "vrs_inner", "vrs_outer",                                                                // phase 34
+        "vrs_passes",                                                                                   // phase 42
         "log_level",                                                                                    // phase 39
     };
     constexpr int kNKeys = (int)(sizeof(kKeys) / sizeof(kKeys[0]));
@@ -14635,7 +14726,7 @@ void ResetSettings(uint64_t n) {
             "perf_profile = high mv_fwd_depth = 1 menu_x = 2 menu_y = 8 "
             "menu_scale = 1.0 menu_vr_x = 0 menu_vr_y = -5 menu_vr_scale = 1.0 menu_vr_depth = 12 menu_vr_dist = 100 menu_vr_face = 1 "
             "fps_show = 0 "
-            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 xr_turbo = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 log_level = %d (%s) -- profile: %s -- "
+            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 xr_turbo = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 log_level = %d (%s) -- profile: %s -- "
             "dlaa.ini: %d keys removed (hotkeys and other lines kept)", (unsigned long long)n, g_dlaaOn.load() ? "DLSS" : "off",
             (double)kFpsVrScaleDefault, LogLevel(), g_logDebugKey ? "no key: debug = 1 in dlaa.ini" : "no key", changed, kNKeys);
         BeepSeq b;                                        // success: rising two-tone 600 -> 900 Hz, 120 ms each (as SaveSettings)
@@ -15020,7 +15111,7 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         }
         break;
     }
-    case MR_VRS: case MR_VRSSIZE:                         // phase 34
+    case MR_VRS: case MR_VRSSIZE: case MR_VRSPASS:        // phase 34 (phase 42: + Foveated passes)
         if (Vrs::Support() == 0)     swprintf(sent, sentCap, L"Not available here: %hs.", Vrs::SupportText());
         else if (!vr)                swprintf(sent, sentCap, L"Greyed in flat: VR only.");
         else if (!g_vrsOn)           swprintf(sent, sentCap, L"Off now: every pixel is shaded.");
@@ -15572,6 +15663,8 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         const int si = VrsSizeIndex();
         if (si >= 0) swprintf(p.rows[MR_VRSSIZE].value, kV, L"%ls", kVrsSizes[si].name);
         else         swprintf(p.rows[MR_VRSSIZE].value, kV, L"%d / %d %%", g_vrsInner, g_vrsOuter);
+        MenuRow(p, MR_VRSPASS, L"Foveated passes", "dlaa.ini vrs_passes", vr ? nullptr : "VR only", !vr || noVrs || !g_vrsOn);   // phase 42
+        swprintf(p.rows[MR_VRSPASS].value, kV, L"%ls", g_vrsPasses ? L"scene + lighting" : L"scene");
     }
     {   // phase 39: the level + what logging costs (CPU ms per frame; changes only at the ~1-s snapshots: no rebuild per frame)
         MenuRow(p, MR_LOG, L"Logging", "dlaa.ini log_level", nullptr, false);
@@ -15731,6 +15824,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_TURBO:   ToggleXrTurbo(n); break;               // phase 30: Left and Right both switch it (also flat: kept for VR)
     case MR_VRS:     ToggleVrs(n); break;                   // phase 34: Left and Right both switch it (also flat: kept for VR)
     case MR_VRSSIZE: StepVrsSize(dir, n); break;            // phase 34: Right = narrower (more saving), Left = wider
+    case MR_VRSPASS: ToggleVrsPasses(n); break;             // phase 42: two choices, Left and Right both switch
     case MR_LOG:     StepLogLevel(dir, n); break;           // phase 39: Right = more, Left = less (clamped)
     case MR_PANELGRP: case MR_FPSGRP:                       // v0.10.3 phase 29c: Right opens the group, Left closes it (a fresh
         MenuGrpOpen(row) = dir > 0;                         // press only: not a stepRow, so auto-repeat is ignored above)
@@ -18281,6 +18375,9 @@ bool DlaaOffFilePresent() {
 //   vrs_quality                    0/1 (default 1): 1 = 1 x 1 inside vrs_outer, 2 x 2 outside; 0 = 2 x 1 between the radii.
 //                                  While DLSS upscales from below 75 % of the output width the outer ring is 2 x 1 instead
 //   vrs_debug                      0/1 (default 0; needs debug = 1): middle ring 2 x 2, outer ring 4 x 4 -- shows the pattern
+//   vrs_passes                     0/1 (default 0, phase 42): 1 = VRS also on the eye's deferred lighting bind (2 RTV RGBA16F
+//                                  scene size + scene depth, after the G-buffer, before the forward bind), outer ring only
+//                                  (the middle ring stays 1 x 1). Menu row Foveated passes (live)
 
 // v0.7.10: "a.b.c.d" file version from a module's PE version resource, for the startup "env:" lines. "no version info"
 // if the resource is absent, "unavailable" on a read error. Startup only (GetFileVersionInfo is not on any hot path).
@@ -18687,6 +18784,7 @@ void LoadConfig() {
             else if (!strcmp(key, "vrs_outer"))      { g_vrsOuter = v < 10 ? 10 : (v > 150 ? 150 : (int)v); g_vrsExplicit = true; }
             else if (!strcmp(key, "vrs_quality"))    g_vrsQuality = v != 0 ? 1 : 0;
             else if (!strcmp(key, "vrs_debug"))      g_vrsDebug = v != 0 ? 1 : 0;
+            else if (!strcmp(key, "vrs_passes"))     { g_vrsPasses = v != 0 ? 1 : 0; g_vrsPassesExplicit = true; }   // phase 42
             else if (!strcmp(key, "bind_hold_ms"))   g_bindHoldMs = v < 500 ? 500 : (v > 10000 ? 10000 : (int)v);   // v0.10.2
             else if (!strcmp(key, "menu_scale") || !strcmp(key, "menu_vr_scale")) {
                 const double s = strtod(eq + 1, nullptr);
@@ -18944,8 +19042,9 @@ void LoadConfig() {
                           : "off: every scope is one flag test", CpuProf::g_transTicks);
     }
     VrsApplyConfig();                                       // phase 34: VRS fixed foveated rendering (dlaa.ini vrs*)
-    Log("phase 34: VRS foveated rendering vrs=%d vrs_inner=%d vrs_outer=%d vrs_quality=%d vrs_debug=%d%s -- %s", g_vrsOn, g_vrsInner,
-        g_vrsOuter, g_vrsQuality, g_vrsDebug, g_vrsDebug && !LogDebugLevel() ? " (ignored: needs debug = 1)" : "",
+    Log("phase 34: VRS foveated rendering vrs=%d vrs_inner=%d vrs_outer=%d vrs_quality=%d vrs_debug=%d%s vrs_passes=%d (%s) -- %s",
+        g_vrsOn, g_vrsInner, g_vrsOuter, g_vrsQuality, g_vrsDebug, g_vrsDebug && !LogDebugLevel() ? " (ignored: needs debug = 1)" : "",
+        g_vrsPasses, g_vrsPasses ? "phase 42: + the lighting bind, outer ring only" : "world scene binds only",
         g_vrsOn ? "VR only: the outer ring of each eye's world scene passes is shaded per 2 x 2 px (NVIDIA RTX; checked at the first "
                   "VR scene pass)" : "off (the menu's Foveated (VRS) row switches it live in VR)");
     Log("phase 8 (v0.10.0): perf_timers=%d (%s) mv_vote_res=%u mv_vote_march_cap=%u mv_cons_cands=%u mv_medoid_drop=%u "
