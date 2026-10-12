@@ -306,9 +306,28 @@ void ProcessLock(Snap& sn, const float* data) {
     for (int k = 0; k < nk; ++k) ord[k] = k;
     for (int a = 1; a < nk; ++a)
         for (int b = a; b > 0 && ics[ord[b]] > ics[ord[b - 1]]; --b) { const int t = ord[b]; ord[b] = ord[b - 1]; ord[b - 1] = t; }
-    int ref = -1;
-    for (int q = 0; q < nk && ref < 0; ++q) if (v[ord[q]][0].ok && v[ord[q]][1].ok) ref = ord[q];   // in both eyes first
-    // phase 47b: BOTH eyes or no lock (the ATS 14:32 lock #1 was eye 1 only: a loading picture, no IPD, no pose) -- one eye is
+    // phase 47c: the RIGID CAB GROUP. Parts fixed to the cab share one model transform, so in one eye's pass they carry the SAME
+    // MVP; the steering wheel / doors / wipers / needles have their own. The keys usable in both eyes are grouped by identical
+    // MVP in both eyes (SameTransform); the group with the largest summed IndexCount is the cab (summed, not counted: one big
+    // shell outweighs a cluster of tiny gauge draws), its biggest member the reference, and only its members carry the box
+    // (ATS car -> truck test: the biggest draw, the steering wheel, was picked and rode the wheel until the monitor caught it).
+    int grp[2 * kCand], rep[2 * kCand], gn[2 * kCand] = {};
+    uint64_t gsum[2 * kCand] = {};
+    int ng = 0;
+    for (int q = 0; q < nk; ++q) {
+        const int k = ord[q];
+        grp[k] = -1;
+        if (!(v[k][0].ok && v[k][1].ok)) continue;
+        int j = 0;
+        while (j < ng && !(SameTransform(v[k][0].M, v[rep[j]][0].M) && SameTransform(v[k][1].M, v[rep[j]][1].M))) ++j;
+        if (j == ng) rep[ng++] = k;                      // (ord = biggest first: a group's rep is its biggest member)
+        grp[k] = j; ++gn[j]; gsum[j] += ics[k];
+    }
+    int bestG = -1;
+    for (int j = 0; j < ng; ++j) if (bestG < 0 || gsum[j] > gsum[bestG]) bestG = j;
+    int ref = bestG >= 0 ? rep[bestG] : -1;
+    int others = 0;
+    for (int q = 0; q < nk; ++q) if (grp[ord[q]] >= 0 && grp[ord[q]] != bestG) ++others;    // phase 47b: BOTH eyes or no lock (the ATS 14:32 lock #1 was eye 1 only: a loading picture, no IPD, no pose) -- one eye is
     // refused below, the lock is tried again
     const bool lg4 = (LogLevel() >= 4);
     if (lg4 && g.linesLock < kLogLines) {
@@ -425,7 +444,7 @@ void ProcessLock(Snap& sn, const float* data) {
         ++L.n;
     };
     addEntry(ref);
-    for (int q = 0; q < nk; ++q) if (ord[q] != ref) addEntry(ord[q]);
+    for (int q = 0; q < nk; ++q) if (ord[q] != ref && grp[ord[q]] == bestG) addEntry(ord[q]);   // phase 47c: the cab group only
     L.have = true;
     g.lk = L;
     BuildCorners();
@@ -440,10 +459,11 @@ void ProcessLock(Snap& sn, const float* data) {
     if (g.linesLock < kLogLines) {
         ++g.linesLock;
         Log("fps box attached to vehicle: LOCKED ON (lock #%llu) -- reference cab draw IndexCount %u (MVP in cb0 rows %d..%d), seen in %s; "
-            "%d cab part(s) can carry the box; play -> cab map from %s%s (game IPD / headset IPD %.3f, %.1f model units per m); "
+            "%d cab part(s) of its rigid group (IndexCount sum %llu, the largest of %d transform group(s); %d part(s) with their own "
+            "transform -- wheel / doors / needles -- not used) can carry the box; play -> cab map from %s%s (game IPD / headset IPD %.3f, %.1f model units per m); "
             "anchor %s, box centre (%+.3f %+.3f %+.3f) m in the play space, %.3f m wide",
             (unsigned long long)g.locks, L.e[0].ic, L.e[0].row, L.e[0].row + 3, both ? "both eyes" : (ea == 0 ? "eye 0 only" : "eye 1 only"),
-            L.n, L.xr ? (n == 2 ? "both eyes' OpenXR poses" : "one eye's OpenXR pose") : "NO OpenXR pose (the box placed from the eye's own "
+            L.n, (unsigned long long)gsum[bestG], ng, others, L.xr ? (n == 2 ? "both eyes' OpenXR poses" : "one eye's OpenXR pose") : "NO OpenXR pose (the box placed from the eye's own "
             "view at the lock)", swapped ? ", the eye order swapped (OpenXR view vs eye picture)" : "", ipdRatio, L.upm,
             !L.xr ? "straight ahead of the eye" : (L.local ? "around the seat (LOCAL space origin)" : "around the eyes' midpoint at the lock"),
             cc[0], cc[1], cc[2], wM);

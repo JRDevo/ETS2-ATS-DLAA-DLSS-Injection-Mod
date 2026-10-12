@@ -114,6 +114,16 @@ inline int FindMvpRow(const float* rows4, int nRows, M4* out) {
     return 0;
 }
 
+// phase 47c: two draws of one pass carry the same model transform (rigidly fixed to each other): their MVPs are equal within
+// a tight relative tolerance (the game writes the same matrix: bit-identical in practice; 1e-5 of the largest entry allows float
+// noise of a recomputed product).
+inline bool SameTransform(const M4& a, const M4& b, double tol = 1e-5) {
+    double s = 0.0, d = 0.0;
+    for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 4; ++j) { s = std::fmax(s, std::fabs(a.m[i][j])); d = std::fmax(d, std::fabs(a.m[i][j] - b.m[i][j])); }
+    return s > 0.0 && d <= tol * s;
+}
+
 // ---- the eye in a draw's model space ------------------------------------------------------------------------------------
 // From an MVP M = P V W (P a perspective projection whose clip-w row is the view depth): C = the eye (camera centre) in model
 // units (rows x, y, w of M vanish there), F = the forward direction (clip w grows along row 3), R / U = the right / up directions

@@ -1530,6 +1530,25 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
 - **Not verified (needs the game):** the box in menus / loading = the lock-1 quad; the transitions (a few eye pictures without a
   box when the attach drops); the white plates.
 
+#### Phase 47c: the lock-on reference = the largest RIGID CAB GROUP (never the steering wheel)
+
+- **Why:** 47b's VR test (captures/ats_2026-10-12_1458_p47b_vr.log) was clean, but after a car -> truck change the new lock took
+  the biggest draw, the STEERING WHEEL, and the box rode the wheel until the 0.5 s monitor demoted it.
+- **Rule (`ProcessLock`, every lock: the first one, a new lock after a cab change):** the candidates usable in both eyes are
+  grouped by identical MVP in both eyes (`FpsCab::SameTransform`: max |a - b| <= 1e-5 of the largest entry; parts fixed to the
+  cab share one model transform, so their MVPs in one pass are the same matrix; the wheel, doors, wipers and needles have
+  their own). The group with the largest SUMMED IndexCount is the cab (summed, not counted: the shell / dashboard outweigh a
+  cluster of tiny gauge draws; a part's size is what makes it the cab), its biggest member is the reference, and ONLY its members
+  carry the box (re-acquires stay inside the group). Parts with their own transform are never carriers -- not even after a
+  monitor check. The both-eye + pose gate and the monitor (it can still demote a group member) are unchanged. The LOCKED ON
+  line names the group (parts, IndexCount sum, groups, parts left out).
+- **Test:** the dashboard and the car-layout console now share the body's transform; the wheel (the single biggest draw, 3000
+  vs 2400) has its own. The first lock and the lock after the truck change both use the body (3 carriers), the wheel turns
+  for 50 frames: 0 re-acquires, 0 demotions, every attached eye picture exact (no settling window any more). Part A: the
+  transform groups. 263 checks.
+- **Not verified (needs the game):** that ETS2 / ATS cab parts really share one transform per pass (the level-4 lock-on line lists
+  the candidates; the level-3 line the group sizes).
+
 ### Phase 48: fps box brightness (`fps_brightness` 10..100 %)
 
 - `fps_brightness` (default 100 = the colour as it is). `FpsPose::Dimmed(ColorOf(g_fpsColor), g_fpsBright)` scales the glyph

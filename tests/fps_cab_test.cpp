@@ -104,12 +104,12 @@ static const UINT kIc[PN] = { 2400, 1800, 3000, 1000, 5000, 9000 };
 static M4 PartModel(int p, double t, double frame) {
     switch (p) {
     case PBody: return Perm();
-    case PDash: return Mul(T(0.0, 0.9, -0.8), Perm());
+    case PDash: return Perm();                          // phase 47c: dashboard + console share the body's transform (the cab group)
     case PWheel: {
         const double a = frame >= g_steerFrom && frame < g_steerFrom + 50.0 ? 0.7 * std::sin(3.14159265 * (frame - g_steerFrom) / 50.0) : 0.0;
         return Mul(Mul(T(0.45, 1.0, -0.2), Rax(2, a)), Perm());   // turns about the cab's z (towards the driver)
     }
-    case PCar: return Mul(T(0.0, 0.8, -0.5), Perm());
+    case PCar: return Perm();
     case PWorld: return Mul(T(3.0, 0.0, -20.0), Perm());
     default: return Identity();
     }
@@ -252,6 +252,10 @@ static void PartA() {
         CHECK(FindMvpRow(car, 8, &o) == 5, "car layout -> rows 5..8");
         CHECK(FindMvpRow(car, 4, &o) == 0, "rows 5..8 not mirrored -> none");
     }
+    // phase 47c: the transform groups -- body / dashboard / car-layout console share one MVP, the wheel (even at rest) has its own
+    CHECK(SameTransform(Mvp(PBody, t, fr, 0), Mvp(PDash, t, fr, 0)) && SameTransform(Mvp(PBody, t, fr, 1), Mvp(PCar, t, fr, 1)),
+          "cab parts must share the transform");
+    CHECK(!SameTransform(Mvp(PBody, t, 0.0, 0), Mvp(PWheel, t, 0.0, 0)), "the wheel at rest must be its own group");
     // the moving-part test: rigid parts agree (0), the wheel turned 20 deg puts the box centre far away
     {
         const M4 Tw = Mul(InvM(Mvp(PWheel, t, 0.0, 0)), Mvp(PBody, t, fr, 0));
@@ -457,7 +461,7 @@ static int PartB(int variant) {
                 if (da > 24) ++diff;
             }
             const double share = ink ? (double)diff / (double)ink : 0.0;
-            const bool steerSettling = f >= g_steerFrom && f < g_steerFrom + 24;   // the wheel carries the box until it is found moving
+            const bool steerSettling = false;             // phase 47c: the wheel is never a carrier -- exact while it turns
             if (!steerSettling) {
                 maxErr = std::fmax(maxErr, err);
                 maxDiffShare = std::fmax(maxDiffShare, share);
@@ -532,10 +536,10 @@ static int PartB(int variant) {
           (unsigned long long)locksBeforeTruck);
     CHECK(st.relocks == 1 && st.locks == 2, "truck change: relocks %llu locks %llu (want 1 / 2)", (unsigned long long)st.relocks,
           (unsigned long long)st.locks);
-    CHECK(reacqBeforeExt >= 1, "the turning steering wheel was never replaced (re-acquires %llu)", (unsigned long long)reacqBeforeExt);
-    CHECK(st.demoted == 0 || st.locks == 2, "(after the new lock the demotions start over)");
+    CHECK(reacqBeforeExt == 0 && st.demoted == 0, "the wheel was a carrier: re-acquires %llu, demoted %d", (unsigned long long)reacqBeforeExt, st.demoted);
+    CHECK(st.entries == 3, "the lock holds %d carriers (want the 3 cab-group parts, not the wheel)", st.entries);
     CHECK(attachedAfterSteer > 100, "only %d attached pictures after the wheel started turning", attachedAfterSteer);
-    CHECK(firstBadAfterSteer >= 0, "the wheel never carried the box off the truth (the test would not see a moving reference)");
+    CHECK(firstBadAfterSteer < 0, "the box moved with the wheel (frame %d)", firstBadAfterSteer);
     SetActive(false, 0);
     Shutdown();
     return 0;
