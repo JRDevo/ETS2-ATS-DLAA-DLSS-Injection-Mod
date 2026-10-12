@@ -123,7 +123,12 @@
 // DONOTFLUSH; Take() returns the window average since the last Take.
 class GpuSpanTimer {
 public:
-    int  Begin(ID3D11DeviceContext* ctx);        // slot for End(), -1 = this span is not timed (all slots in flight)
+    // phase 45: the process-wide gate -- inject.cpp MeasureUpdate sets it (the tuning menu open or log level 4); off = Begin
+    // returns -1 at once (no query, no poll: the closed menu costs one relaxed load per span). Default on (the harnesses).
+    static inline std::atomic<bool> s_on{true};
+    // slot for End(), -1 = this span is not timed (all slots in flight, or s_on off); force = timed whatever s_on says (inject.cpp:
+    // the VR forward-depth budget guard needs its timer while it is armed)
+    int  Begin(ID3D11DeviceContext* ctx, bool force = false);
     void End(ID3D11DeviceContext* ctx, int slot);
     void Poll(ID3D11DeviceContext* ctx);
     // window statistics since the last Take (n = landed samples; avg / max in ms); restarts the window

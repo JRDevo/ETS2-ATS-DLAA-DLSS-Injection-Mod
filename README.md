@@ -35,7 +35,8 @@ account — a few hotkeys, an in-game tuning menu (`Delete`) and an optional tex
   not see those keys while the menu is open. See [The tuning menu](#the-tuning-menu).
 - **Movable widgets** — the tuning panel and the live fps counter can both be moved and resized from the menu
   (position X / Y and size), flat and VR each with their own place. In VR the panel turns to face you.
-- **Live GPU cost** — the menu shows the game's GPU time per frame and what each part of this mod costs, in ms.
+- **Live CPU and GPU cost** — the menu shows what each part of this mod costs on the CPU and the GPU, in ms, and what
+  limits your frame rate right now (CPU, GPU or the headset).
 - **Windows HDR** — works with HDR on in flat mode.
 - **NVIDIA Smooth Motion** — works with the driver's frame generation switched on, in flat mode.
 - **OFXR Bridge (VR frame generation)** — runs together with the bridge, which adds in-between frames to the
@@ -389,7 +390,7 @@ The full sheet with every beep pattern is in [`docs/KEYS.md`](docs/KEYS.md).
 ![The tuning menu](docs/images/tuning-menu.png)
 
 Press **`Delete`** in game and a panel with every setting opens over the picture: name, current
-value, the hotkey for it, the GPU cost, and for the selected row a description: what it does, when you would change
+value, the hotkey for it, the CPU and GPU cost, and for the selected row a description: what it does, when you would change
 it, what it costs or saves. **`Up` / `Down`** select a row,
 **`Left` / `Right`** change it, `Delete` closes it again (two short beeps on open, one low beep on close).
 
@@ -400,7 +401,7 @@ it, what it costs or saves. **`Up` / `Down`** select a row,
 | **Setting** | The name of the setting. A greyed row does not apply right now (for example VR-only rows in flat mode). |
 | **Value** | The current value. `Left` / `Right` change it. |
 | **Hotkey** | The key that does the same thing without the menu, or the `dlaa.ini` key for rows that have no hotkey. |
-| **GPU cost** | What this row costs on the GPU right now, in ms per frame (`-` = nothing to measure, `off` = switched off, `same` = no extra cost). |
+| **CPU \| GPU ms** | What this row costs right now, in ms per frame: the CPU figure in **blue**, the GPU figure in **orange**, e.g. `0.12 \| 0.62` (`-` = that side does not apply or is not measured, `...` = still measuring, `off` = switched off, `same` / `no extra` = no extra cost). |
 
 **Categories (phase 43):** the menu is in groups you open and close. `Mode`, `Performance profile` and `DLAA model` are
 always shown. Then come the groups: `Picture` (sharpening, texture sharpness, DLAA area, tonemap, see-through depth),
@@ -492,21 +493,32 @@ The three green lines under the title show the game's GPU time per frame, what t
   you see stays the same. The first time you switch it on, save (`Shift+F12`) and restart the game; after that the row
   switches it live. If your VR runtime has no such mask the row says `not supported`.
 - **Logging** (`log_level`, `errors` by default): how much goes into `dlaa_inject.log` -- `off`, `errors`, `warnings`,
-  `info` or `debug`, live. The row shows what the logging costs: CPU milliseconds per frame (and in its description the
+  `info` or `debug`, live. Its cost column shows what the logging costs on the CPU per frame (the description adds the
   lines per second; at `debug` also what the CPU profiler costs). `debug` also runs the mod's GPU timers and CPU
-  profiler; use it for bug reports, `errors` for play.
+  profiler all the time; use it for bug reports, `errors` for play.
 - **Save to dlaa.ini** (the same as `Shift+F12`) writes the live values, and the panel position / fps box once you
   changed them.
 - **Reset to defaults** puts every row back to the fresh-install values, live and in `dlaa.ini` (the keys are removed
   from the file; your hotkeys and every other line stay). Use it when you have changed too much. It is a **hold**: keep
   `Right` held on the row for 5 s (`bind_hold_ms`; the Hotkey column reads `hold Right 5 s` and fills a progress bar);
   let go earlier and nothing happens, `Left` does nothing there.
-- **Where your GPU time goes:** under the title, a GPU line shows the game's own GPU time per frame, what this mod costs
-  (split into DLAA/DLSS itself, per-part motion, camera motion, see-through depth, mirrors, sharpen and copies; in VR per
-  eye) and the fps. The `GPU cost` column shows each row's share right now (`off` = that feature is off and costs
-  nothing; `Mode` and `DLAA on / off` show the whole mod, `DLSS upscale` shows `no extra`, the texture sharpness rows
-  `~0 ms`). All figures are GPU milliseconds per frame (VR: per eye), measured live and refreshed once a second. The
-  mod's timers switch on while the menu is open and off again when it closes (unless `log_level = 4`).
+- **Where your time goes:** three lines under the title.
+  - Line 1: **`Limit:`** what holds your frame rate back right now -- `headset` (VR: the game already runs at the
+    headset's rate), `GPU`, `CPU`, `CPU and GPU`, `vsync / fps cap` (flat), or `unknown` when the numbers do not say it
+    clearly (the mod never guesses). Then the fps, and how busy the frame is: CPU (blue) | GPU (orange) ms per frame.
+    How it decides is in [Performance](#performance).
+  - Line 2: what this mod costs in total, CPU | GPU ms per frame, and the GPU part split into DLAA/DLSS itself (NGX),
+    per-part motion, camera motion, see-through depth, mirrors, sharpen and copies.
+  - Line 3: the colour key (**CPU blue, GPU orange** -- not red and green, so colour-blind players can tell them apart),
+    what the CPU figure covers (the game's render thread; the mod's work on other threads is listed apart) and what the
+    measuring itself costs (already taken out of every figure).
+
+  The cost column shows each row's share: `Mode` and `DLAA on / off` show the whole mod, `DLSS upscale` `no extra`, the
+  texture sharpness rows CPU only (no GPU pass of their own), the Foveated and Hidden area mask rows CPU only (what they
+  save shows up in the game's own GPU time, not in the mod's). All figures are milliseconds **per frame** (VR: the GPU
+  figure covers both eyes), measured live and refreshed once a second; right after you open the menu they read `...` for
+  about a second. **Measuring costs nothing while the menu is closed:** the mod's CPU profiler and GPU timers run only
+  while it is open (or all the time at `log_level = 4`).
 - Different keys: `key_menu`, `key_menu_up`, `key_menu_down`, `key_menu_left`, `key_menu_right` in `dlaa.ini`
   (see [`docs/KEYS.md`](docs/KEYS.md)).
 - **From the wheel:** the menu (and every other hotkey) can also be driven from a wheel's D-pad and buttons, e.g.
@@ -620,6 +632,35 @@ The game held its 72 fps cap the whole time.
 
 Everything except DLAA itself adds up to about 4 ms per frame on this card in flat. VRAM: about 410 MB for the
 per-frame textures in flat (pooled), roughly 2.5x that in VR.
+
+### Live figures in the menu
+
+Open the tuning menu (`Delete`) while driving: every row shows its cost as **CPU | GPU** in ms per frame, CPU in blue,
+GPU in orange (VR: GPU = both eyes). CPU means the game's render thread: the thread that sends every draw to the GPU,
+where the mod does almost all of its work. The figures are live and refresh once a second.
+
+**The `Limit:` line** tells you what to change first:
+
+| It says | What it means | What helps |
+|---|---|---|
+| `headset (72 Hz)` | VR: the game already keeps the headset's rate | nothing needed; you have headroom |
+| `GPU` | the GPU is busy for (almost) the whole frame | lower Scaling, DLAA area, a lighter model, fewer mirrors |
+| `CPU` | the game's frame loop is busy the whole frame and never waits for the GPU | fewer mirrors, `Performance profile` medium / low, Turbo mode (VR) |
+| `CPU (or a game fps cap)` | flat: the same, or the game's own fps limit (it looks the same from inside) | check the game's fps limit first |
+| `CPU and GPU` | both are at the limit | either list above |
+| `vsync / fps cap` | flat: the frame waits for the display, the GPU is not full | nothing; raise the cap if you want more fps |
+| `unknown` | the numbers do not point at one side | -- |
+
+How it decides: it compares the frame's CPU time (the time the game's frame threads work instead of waiting inside
+Present / OpenXR) and the frame's GPU time with the frame budget (VR: the headset's frame time, e.g. 13.9 ms at 72 Hz).
+CPU at 90 % of the budget or more = CPU; GPU at 85 % or more = GPU (the GPU figure misses a little of the frame, so its
+bar is lower). In VR, first: if the game keeps the headset's rate, it says `headset`.
+
+**What measuring costs:** while the menu is open the mod's CPU profiler and GPU timers run; the profiler costs about
+27 ns per D3D11 call of the game (measured on a Ryzen 9 9950X3D), typically 0.1 - 0.3 ms per frame. The menu shows that figure
+(`measuring costs ...`) and takes it out of every number. When the menu is closed (and `log_level` is below 4) nothing
+is measured: each measuring point is then one skipped check. Since phase 45 also `gpu_timing = -1` (the DLAA stage
+timers in the log) runs only at `log_level = 4`, not always in VR.
 
 **Static redraw skip:** the per-part motion vectors redraw every world object once more each frame to learn which
 object owns which pixel; for road, buildings, trees and parked trucks that only ever says "it did not move". An object that was

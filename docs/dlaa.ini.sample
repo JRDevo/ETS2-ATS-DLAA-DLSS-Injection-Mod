@@ -224,7 +224,8 @@ log_level = 1
 # with log_level = 4 the log also gets a "CPU prof" line every 10 s: the mod's own CPU time on the game's render thread per hook and
 # per part of the mod, the game's own D3D11 calls, Present + OpenXR waits and the rest of the frame (the profiler itself costs
 # ~0.1-0.3 ms per frame while on; the line says how much). -1 = with log_level = 4 (default; follows the menu's Logging row),
-# 0 = off, 1 = on
+# 0 = off, 1 = on. Both perf_timers and cpu_prof also run while the tuning menu is open (its cost column), whatever is set here,
+# and stop again when it closes.
 # cpu_prof = -1
 # phase 35: the per-draw record of the motion vectors copies the game's input state (input layout, vertex shader, its cbuffers
 # and samplers, rasterizer state) from hooked Set calls instead of ~10 getter calls per draw (startup only). 1 = default,
@@ -397,7 +398,8 @@ log_level = 1
 # drops, dirt, glare) is not drawn into that depth at all (0.1..5)
 # mv_fwd_min_m = 0.5
 
-# GPU timing logs (per-stage DLAA cost + depth snapshot cost, every 600): -1 auto (VR only), 0 off, 1 on
+# GPU timing logs (per-stage DLAA cost + depth snapshot cost, every 600): -1 = with log_level = 4 (phase 45; before: always in
+# VR), 0 off, 1 on
 # gpu_timing = -1
 
 # v0.7.8: DLAA on the profile / truck-preview screen (flat and VR; it has no world G-buffer, so the normal path

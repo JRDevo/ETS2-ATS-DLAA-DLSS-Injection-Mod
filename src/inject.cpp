@@ -1,3 +1,11 @@
+// phase 45 -- MENU COST COLUMN "CPU | GPU" + LIMIT LINE; MEASURING ONLY WHILE ASKED. The cost column shows CPU (blue) | GPU
+//           (orange) ms per frame per row (VR: GPU = both eyes; ink marks TuningMenu::kInkCpu / kInkGpu / kInkEnd, menu.cpp
+//           inkText); CPU from the cpu_prof.h profiler, now also on while the menu is open (MenuPerfOpen / MenuPerfClose,
+//           MenuCpuRead: the render thread's blocks, the profiler's own timer reads taken out). Perf line 0 = "Limit: headset /
+//           GPU / CPU / CPU and GPU / vsync / fps cap / unknown" (MenuLimit; XrHook::DisplayPeriodNs). g_measure (MeasureOn:
+//           menu open or log level 4) gates the legacy per-draw / per-pass CPU timers, GpuSpanTimer (s_on) and the per-Present
+//           TSC calibration; gpu_timing -1 = log level 4 (was: always in VR). The VR forward-depth budget guard keeps its timer
+//           while it can act. docs/DEVELOPMENT.md phase 45.
 // phase 44 -- FPS BOX COLOURS / VR DISTANCE / TURN (dlaa.ini fps_color 0..19, fps_vr_dist cm 30..300, fps_vr_yaw / fps_vr_pitch /
 //           fps_vr_roll degrees; fps_pose.h; menu rows "FPS colour", "FPS distance (VR)", "FPS turn", "FPS tilt", "FPS rotate", live,
 //           Shift+F12 saves, Reset removes). Quad layer: the fps quad at fps_vr_dist (same angle), turned by base * turn. Drawn
@@ -698,6 +706,7 @@
 #include <cstring>
 #include <mutex>
 #include <new>
+#include <initializer_list>                         // phase 45: MenuCpuOf
 #include <string>
 #include <vector>
 #include <intrin.h>
@@ -796,6 +805,23 @@ bool     g_logDebugKey = false;          // dlaa.ini debug = 1 (true / yes / on)
 int      g_logLevelIni = 1;              // the start level LoadConfig decided
 bool     g_logLevelExplicit = false;     // set in dlaa.ini or changed in the menu -> SaveSettings writes log_level
 inline bool LogDebugLevel() { return LogLevel() >= 4; }   // phase 39: the "debug = 1" diagnostics (was g_debugIni)
+// phase 45: MEASURE ONLY WHEN ASKED. g_measure = the tuning menu is open OR the log level is 4 (debug). The mod's own per-draw /
+// per-pass CPU timers of the debug statistics lines (collector, object ids, draw record, forward depth: TSC; replay, forward
+// replay, forward batch, blit: QPC) read the clock only while it is set -- menu closed below level 4 = ONE relaxed load + a
+// not-taken branch per timed scope, no clock read. The same flag gates the per-pass GPU span timers (draw_ids.h GpuSpanTimer:
+// replay, forward replay, pairing, pass B, mirror units, forward batch -- the last one stays on while the VR forward-depth budget
+// guard can still act: a feature, not a statistic) and the preview depth-assembly timer. The CPU profiler (cpu_prof.h g_on) and the GPU timers (GpuPerf / GpuPass,
+// the whole-frame spans, gpu_timing -1) have their own flags with the same rule (MenuPerfOpen / MenuPerfClose /
+// ApplyLogLevelGates). MeasureUpdate: at the start, the menu's open / close, a log level change.
+std::atomic<bool> g_measure{false};
+inline bool MeasureOn() { return g_measure.load(std::memory_order_relaxed); }
+inline void MeasureUpdate() {
+    const bool on = g_menuOpen.load(std::memory_order_relaxed) || LogDebugLevel();
+    g_measure.store(on, std::memory_order_relaxed);
+#ifdef WITH_DLAA
+    GpuSpanTimer::s_on.store(on, std::memory_order_relaxed);   // the per-pass GPU span timers (replays, pairing, pass B, mirrors)
+#endif
+}
 // phase 34, VR: dlaa.ini vrs -- 1 = FIXED FOVEATED RENDERING (NVIDIA VRS, vrs.cpp): the eye's world scene passes shade the outer
 // ring of the picture once per 2 x 2 pixels. vrs_inner / vrs_outer = ring radii in % of the NDC half-size around the eye's optical
 // centre; vrs_quality 1 (default) = 1 x 1 inside vrs_outer, 0 = 2 x 1 between the radii; vrs_debug (+ debug = 1) = 2 x 2 / 4 x 4
@@ -2946,8 +2972,8 @@ void ToggleFwdDepth(uint64_t n) {
 #endif
 // Adds the time from construction to scope exit to the blit CPU counters (every return path of the matched part).
 struct BlitCpuTimer {
-    const int64_t t0 = Qpc();
-    ~BlitCpuTimer() { g_cpuBlitTicks += Qpc() - t0; ++g_cpuBlitN; }
+    const int64_t t0 = MeasureOn() ? Qpc() : 0;          // phase 45: the clock only while measuring (g_measure)
+    ~BlitCpuTimer() { if (t0) g_cpuBlitTicks += Qpc() - t0; ++g_cpuBlitN; }
 };
 
 void LogEyeMap() {
@@ -3252,9 +3278,11 @@ void QueueEyeReadback(ID3D11DeviceContext* ctx, const CandidateRecord& cand, voi
     ++g_rbPending;
 }
 #endif
-int              g_gpuTiming     = -1;           // dlaa.ini gpu_timing: -1 auto (VR only), 0 off, 1 on
-// GPU timestamp queries wanted right now (DLAA stages and, v0.5.6, the depth snapshot copy).
-inline bool GpuTimingOn() { return g_gpuTiming > 0 || (g_gpuTiming < 0 && g_vrMode); }
+int              g_gpuTiming     = -1;           // dlaa.ini gpu_timing: -1 = at log level 4 (phase 45; was: VR always), 0 off, 1 on
+// GPU timestamp queries wanted right now (DLAA stages and, v0.5.6, the depth snapshot copy). phase 45: -1 followed VR (the queries
+// ran in every VR session for log lines only written at level 4); now -1 = log level 4 (debug), live. The menu's own GPU figures
+// do not need it (they use GpuPerf, on while the menu is open; the whole-frame spans run under GpuTimingOn() || GpuPerf::On()).
+inline bool GpuTimingOn() { return g_gpuTiming > 0 || (g_gpuTiming < 0 && LogDebugLevel()); }
 
 // ---- v0.6.2 whole-frame GPU spans (game context, render thread, log only) -----------------------------------
 // Two timestamp spans, same pattern as SnapTimer (scene_dlaa.cpp): a small query ring per span type, read with
@@ -4819,7 +4847,7 @@ void PvAssembleTile(ID3D11DeviceContext* ctx, int g, int slot) {
         ++g_pvAsmClipWin;
     }
     t_inDlaa = true;
-    const int tq = g_pvAsmTimer.Begin(ctx);
+    const int tq = MeasureOn() ? g_pvAsmTimer.Begin(ctx) : -1;   // phase 45: only while measuring (menu / level 4)
     if (!A.frameMask) PvAsmClear(ctx, A, cx0, cy0, cx1, cy1);   // far (reversed-Z) where no tile writes
     const bool ok = g_pvTileTwin.Snapshot(ctx, g_pvDs.Get(), false);
     D3D11_MAPPED_SUBRESOURCE mp{};
@@ -6289,7 +6317,7 @@ void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
     }
     // Cost visibility: the instance's own non-blocking GPU timestamp queries ("DLAA GPU cost eye 10 / 11" lines, every
     // 600 timed frames). Flat: only with gpu_timing = 1 (the flat default stays as before); VR: also in auto mode.
-    t.dl.SetTiming(g_gpuTiming > 0 || (g_gpuTiming < 0 && g_launchVr == 1));
+    t.dl.SetTiming(GpuTimingOn());                       // phase 45: -1 = log level 4 (was: VR launches)
     t.dl.SetNoSharpen(!g_pvSharpen);                     // v0.8.1 round 5: dlaa.ini preview_sharpen = 0 (A/B)
     // Round 5: no reset on a reference-slot change any more -- the unit is the eye, so slot 0 vs 4 only reflects which eye
     // the game rendered first this frame (round 4 reset on it, but its units were order-bound, see the block comment).
@@ -11365,7 +11393,8 @@ void MaybePrewarmNgx() {
 // any more (passes/blits are matched by the FIFO); logging only.
 void LogFrameEndCheck(uint64_t n);      // v0.8.1, defined with the frame-end rule
 void OnPresentBoundary(uint64_t n) {
-    TscCalibrate();                                    // phase 35: the TSC -> QPC ratio of the per-draw timers
+    if (MeasureOn()) TscCalibrate();                   // phase 35: the TSC -> QPC ratio of the per-draw timers (phase 45: only
+                                                       // while measuring; anchored at startup, so a late update is exact)
 #ifdef WITH_DLAA
     DidShadow::FrameStart();                           // phase 35: re-read at the next Record; a verify fallback ends
     GpuPerf::SetFrame(n);                              // v0.10.0 phase 8: the next timed section opens the next frame's query set
@@ -12697,7 +12726,7 @@ void DidReplay(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int
         g_ctx1Owner = ctx;
     }
     if (!g_ctx1) return;
-    const int64_t t0 = Qpc();
+    const int64_t t0 = MeasureOn() ? Qpc() : 0;           // phase 45: the clock only while measuring (g_measure)
     ID3D11Device* dev = nullptr;
     ctx->GetDevice(&dev);
     ID3D11DepthStencilView* ro = dev ? DidRoDsv(dev, PassDepth(ps)) : nullptr;   // v0.10.3 issue #9: this pass's depth
@@ -12732,7 +12761,7 @@ void DidReplay(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int
     g_didReplayed += (uint64_t)rr.replayed;
     g_didSkipped += (uint64_t)rr.skipped;
     if (why >= 2) ++g_didEndReplays;
-    g_didTicksReplay += (uint64_t)(Qpc() - t0);
+    if (t0) g_didTicksReplay += (uint64_t)(Qpc() - t0);
     if (!g_didFirstReplayLogged && rr.ok && rr.replayed > 0) {
         g_didFirstReplayLogged = true;
         Log("MV draw-ids: first replay (pass s=%llu, %s): %d draws replayed into the %ux%u draw-id target, %d skipped "
@@ -12757,7 +12786,7 @@ void DidFwdReplay(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, 
         g_ctx1Owner = ctx;
     }
     if (!g_ctx1) return;
-    const int64_t t0 = Qpc();
+    const int64_t t0 = MeasureOn() ? Qpc() : 0;           // phase 45: the clock only while measuring (g_measure)
     // v0.10.0 phase 9: a 1/2-resolution forward depth -> the forward ids go to its own 1/2-size R16_UINT target
     const UINT sh = ps.twin.fwdValid ? ps.twin.fwdShift : 0u;
     ID3D11RenderTargetView* fidRtv = sh ? ps.twin.fwdIdRtv.Get() : ps.twin.idRtv.Get();
@@ -12777,7 +12806,7 @@ void DidFwdReplay(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, 
     t_inDlaa = false;
     ps.twin.fwdIdValid = rec.Cleared() && !rec.ReplayFailed();
     g_didFwdReplayed += (uint64_t)rr.replayed;
-    g_didFwdTicks += (uint64_t)(Qpc() - t0);
+    if (t0) g_didFwdTicks += (uint64_t)(Qpc() - t0);
     if (!g_didFwdFirstLogged && rr.ok && rr.replayed > 0) {
         g_didFwdFirstLogged = true;
         Log("MV draw-ids: first FORWARD replay (pass s=%llu, %s): %d forward draws replayed into %s %ux%u (ids %u + 1..), "
@@ -12840,7 +12869,7 @@ void FwdBatch(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int 
         g_ctx1Owner = ctx;
     }
     if (!g_ctx1) return;
-    const int64_t t0 = Qpc();
+    const int64_t t0 = MeasureOn() ? Qpc() : 0;           // phase 45: the clock only while measuring (g_measure)
     if (rec.PendingDepth() > 0) {
         ++g_fwdBatchSegs;
         if (why == 1) ++g_fwdBatchForced;
@@ -12854,7 +12883,9 @@ void FwdBatch(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int 
             t_inDlaa = false;
         } else {
             t_inDlaa = true;                                  // our own calls: every hook passes straight through
-            const int tq = g_fwdBatchTimer.Begin(ctx);
+            // phase 45: timed while measuring (menu / level 4), or while the VR budget guard below can still act (FwdGuardStep)
+            const int tq = g_fwdBatchTimer.Begin(ctx, g_vrMode && g_fwdBudgetMs > 0.0f && !g_profExplicit[PK_FWD_DEPTH] &&
+                                                      !g_fwdAutoOff && g_fwdOn.load(std::memory_order_relaxed));
             GpuPerf::SetPass(ps.s);
             int pq = -1;
             bool inited = false;
@@ -12901,7 +12932,7 @@ void FwdBatch(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int 
     // the forward ids of the same draws (ids on) -- or their release (ids off)
     if (g_didOn) DidFwdReplay(ctx, pass, restoreTargets, why);
     else if (rec.PendingReplay() > 0) { t_inDlaa = true; rec.DropIds(); t_inDlaa = false; }
-    g_fwdBatchTicks += (uint64_t)(Qpc() - t0);
+    if (t0) g_fwdBatchTicks += (uint64_t)(Qpc() - t0);
 }
 
 void FwdOnPassEnd(ID3D11DeviceContext* ctx) {
@@ -13061,12 +13092,12 @@ void DidOnDraw(ID3D11DeviceContext* ctx, UINT ic, UINT inst, UINT si, INT bv, UI
         g_ctx1Owner = ctx;
     }
     if (!g_ctx1) return;
-    const uint64_t t0 = __rdtsc();                        // phase 35: TSC (was QPC, see TscToQpc)
+    const uint64_t t0 = MeasureOn() ? __rdtsc() : 0;      // phase 35: TSC (was QPC, see TscToQpc); phase 45: only while measuring
     DidShadow::SetAlias(ctx);                             // phase 35: the context the game's Set calls name
     DrawIdRecord& rec = g_didRing[(g_passSeq - 1) % kRing];
     if (rec.Record(g_ctx1, ic, inst, si, bv, sinst, instanced)) { ++g_didRecDraws; if (instanced) ++g_didRecInst; }
     else ++g_didRecFull;
-    g_didTicksRec += TscToQpc(__rdtsc() - t0);
+    if (t0) g_didTicksRec += TscToQpc(__rdtsc() - t0);
 }
 
 // hkOMSetRenderTargets: the game leaves the world G-buffer (its next targets are not bound yet).
@@ -15186,11 +15217,13 @@ void ToggleVrsPasses(uint64_t n) {
 void MenuPerfLevelChanged();                              // (the menu's GPU figures: defined with MenuPerfOpen)
 void ApplyLogLevelGates() {
     const bool dbg = LogDebugLevel();
-    if (g_perfCfg < 0) {
-        if (g_menuOpen.load(std::memory_order_relaxed)) MenuPerfLevelChanged();
-        else if (GpuPerf::On() != dbg) { GpuPerf::SetOn(dbg); if (dbg) GpuPerf::Restart(); }
+    if (g_menuOpen.load(std::memory_order_relaxed)) {
+        MenuPerfLevelChanged();                  // phase 45: the menu keeps the GPU timers AND the CPU profiler on until its close
+    } else {
+        if (g_perfCfg < 0 && GpuPerf::On() != dbg) { GpuPerf::SetOn(dbg); if (dbg) GpuPerf::Restart(); }
+        if (g_cpuProfCfg < 0) CpuProfSetOn(dbg);
     }
-    if (g_cpuProfCfg < 0) CpuProfSetOn(dbg);
+    MeasureUpdate();                             // phase 45: the legacy CPU timers (g_measure)
     VrsApplyConfig();
 }
 // phase 39: the menu's Logging row -- dlaa.ini log_level live (log.h LogSetLevel: raising writes "log level -> N (name)", lowering
@@ -15347,14 +15380,24 @@ void ResetSettings(uint64_t n) {
         PlayTones(1, 200, 400, 0);                        // failure: one long 200 Hz tone (400 ms)
     }
 }
-// ---- tuning menu: live GPU figures (the GPU block under the title, the "GPU cost" column, the cost sentence) ----
-// GpuPerf (gpu_perf.h) times every sub-pass of the mod per eye; it is OFF for a normal user (debug = 0), so the menu switches it
-// on while open (MenuPerfOpen / MenuPerfClose; the GPU spans' scene figure follows GpuPerf::On, SpanOnPassStart). The menu keeps
-// its OWN ~1-s figures: every kMenuPerfEvery Presents the per-eye window sums are read back from GpuPerf::Stats and the
-// difference to the previous read is the last interval (a LogWindow restart in between -- debug = 1, every 600 blits -- shows in
+// ---- tuning menu: live figures (the perf block under the title, the cost column "CPU | GPU", the cost sentence) -------------
+// GPU: GpuPerf (gpu_perf.h) times every sub-pass of the mod per eye; it is OFF below log level 4, so the menu switches it on while
+// open (MenuPerfOpen / MenuPerfClose; the GPU spans' scene figure follows GpuPerf::On, SpanOnPassStart). The menu keeps its OWN
+// ~1-s figures: every kMenuPerfEvery Presents the per-eye window sums are read back from GpuPerf::Stats and the difference to
+// the previous read is the last interval (a LogWindow restart in between -- level 4, every 600 blits -- shows in
 // GpuPerf::Restarts: that interval then counts from the restart). The panel texts change only at these snapshots, so the panel
-// texture is rebuilt at most once per second. "game" = the GPU spans' scene ms/frame (both eyes; updated every ~300 frames)
-// MINUS the mod's own total of the eyes (the scene span contains the mod's work: the DLAA evaluates, the per-pass work, ...).
+// texture is rebuilt at most once per second. gpuFrameMs = the GPU spans' scene ms/frame (game + mod, both eyes; updated every
+// ~300 frames); "game" = that MINUS the mod's own total of the eyes.
+// phase 45 -- CPU: the cpu_prof.h profiler (phase 31 / 33) is switched on the same way while the menu is open (cpu_prof = -1 below
+// level 4, or cpu_prof = 0: on for the menu only; level 4 / cpu_prof = 1 keep it on anyway). At the same snapshots MenuCpuRead
+// reads every profiled thread's cumulative counters (single-writer relaxed atomics; the 10-s log report keeps its own baseline)
+// and keeps per-frame deltas: the RENDER thread (the thread with the most game D3D11 calls in the interval = the one that draws)
+// per mod category, the mod on all other threads together, the profiler's own cost, and the frame loop's busy time for the Limit
+// line (MenuLimit). Frame = the game's xrEndFrame in VR, its Present in flat (the profiler's frame marks), so both sides of the
+// cost column are ms PER FRAME (VR: the GPU side = both eyes). The profiler's own timer reads are taken out of every figure.
+// COST WHILE CLOSED: nothing of this runs (MenuPerfTick is called only while open); the profiler / GPU timers / g_measure go back
+// to the dlaa.ini + log level state at the close (MenuPerfClose): below level 4 every profiler scope is one relaxed load + a
+// not-taken branch, every GPU timer section one call + a flag test, every legacy CPU timer one relaxed load (MeasureOn).
 enum MenuCostGrp { MG_NGX, MG_PART, MG_CAM, MG_FWD, MG_MIR, MG_SHARP, MG_COPY, MG_COUNT };
 int MenuCostGroup(int sec) {
     switch (sec) {
@@ -15384,6 +15427,24 @@ struct MenuPerfRaw {                             // one eye's GpuPerf window sum
     uint64_t n[GpuPerf::kCount] = {};
 };
 struct MenuPerfEye { bool have = false; double grp[MG_COUNT] = {}; double total = 0.0; };   // ms per pass (= per eye)
+// phase 45: one profiler registry slot as MenuCpuRead read it last (heap, [CpuProf::kMaxThreads]; the Present thread only)
+struct MenuCpuSlot {
+    CpuProf::Tls* tp;                            // the slot's thread block then (another one = no baseline: one interval skipped)
+    uint64_t      ticks[CpuProf::kCount], calls[CpuProf::kCount], trans;
+};
+MenuCpuSlot* g_menuCpuPrev = nullptr;
+// phase 45: the menu's CPU figures over the last interval, ms PER FRAME, the profiler's own cost taken out
+struct MenuCpu {
+    bool     have = false;
+    double   blk[CpuProf::kModEnd] = {};         // the render thread, per mod category (hook bodies + blocks)
+    double   modMs = 0.0;                        // the render thread: every mod category but the menu's own (menu, gpu-timers, prof)
+    double   otherMs = 0.0;                      // the same on every other thread together (main / Present thread: keys, frame work)
+    double   profMs = 0.0;                       // measuring: the profiler + the GPU timers' CPU, every thread (NOT in the figures above)
+    double   frameMs = 0.0;                      // wall time per frame over the interval
+    double   busyMs = -1.0;                      // the frame loop's CPU busy time per frame (MenuLimit); -1 = no frame-loop thread
+    double   waitMs = 0.0;                       // that thread's time inside Present / OpenXR per frame
+    uint32_t renderTid = 0;
+};
 struct MenuPerfState {
     bool          forced = false;                // the menu switched the timers on (back to the dlaa.ini state at the close)
     bool          spanFresh = false;             // g_spanSceneLast belongs to this menu session (or the spans were on anyway)
@@ -15413,6 +15474,15 @@ struct MenuPerfState {
     uint64_t      logPres = 0;                   // `presents` then
     bool          haveLog = false;
     double        logMs = 0.0, logLps = 0.0;
+    // phase 45: CPU (MenuCpuRead) + the Limit line (MenuLimit)
+    bool          cpuForced = false;             // the menu switched the CPU profiler on (back to the dlaa.ini / level state at the close)
+    bool          cpuBase = false;               // MenuCpuRead has its baseline
+    uint64_t      cpuPres = 0, cpuXre = 0;       // the profiler's frame-mark counts (Presents, the game's xrEndFrame) then
+    int64_t       cpuQpc = 0;                    // ... and the time
+    MenuCpu       cpu;
+    double        gpuFrameMs = -1.0;             // the GPU spans' scene figure (game + mod, both eyes), -1 = none this menu session
+    double        periodMs = 0.0;                // VR: the headset's frame period (XrHook::DisplayPeriodNs), 0 = unknown / flat
+    wchar_t       limit[80] = L"Limit: ...";     // the Limit line's text (MenuLimit)
 };
 MenuPerfState g_menuPerf;
 
@@ -15427,6 +15497,14 @@ void MenuPerfOpen() {
         m.forced = true;
         Log("tuning menu: GPU timers on while the menu is open");
     }
+    if (!CpuProf::On()) {                        // phase 45: the CPU profiler too (cpu_prof 0, or -1 below log level 4)
+        CpuProfSetOn(true);
+        m.cpuForced = true;
+        Log("tuning menu: CPU profiler on while the menu is open");
+    }
+    if (g_menuCpuPrev)                           // phase 45: fresh baselines (the next read only takes the snapshot)
+        for (int i = 0; i < CpuProf::kMaxThreads; ++i) g_menuCpuPrev[i].tp = nullptr;
+    MeasureUpdate();                             // phase 45: the legacy CPU timers too (g_menuOpen is set already)
     m.spanSeq0 = g_spanSceneLastSeq;
     m.spanFresh = spansOn && g_spanSceneLastN > 0;
     QueryPerformanceCounter(&m.tOpen);
@@ -15437,11 +15515,132 @@ void MenuPerfOpen() {
 void MenuPerfClose() {
     if (g_menuPerf.forced) GpuPerf::SetOn(g_perfCfg > 0 || (g_perfCfg < 0 && LogDebugLevel()));
     g_menuPerf.forced = false;
+    if (g_menuPerf.cpuForced) CpuProfSetOn(g_cpuProfCfg > 0 || (g_cpuProfCfg < 0 && LogDebugLevel()));   // phase 45
+    g_menuPerf.cpuForced = false;
+    MeasureUpdate();                             // phase 45 (g_menuOpen is false already: MenuClose)
 }
-// phase 39: the Logging row changed the level while the menu is open (perf_timers -1): the timers stay on for the menu; the close
-// puts them where the new level says (MenuPerfClose) -- "forced" = they are on for the menu, not for the level.
+// phase 39: the Logging row changed the level while the menu is open: the timers (perf_timers -1) and, phase 45, the CPU profiler
+// (cpu_prof -1) stay on for the menu; the close puts them where the new level says (MenuPerfClose) -- "forced" = on for the menu,
+// not for the level. Explicit 0 / 1 in dlaa.ini: unchanged (0 = forced by the menu until the close, 1 = on anyway).
 void MenuPerfLevelChanged() {
-    if (GpuPerf::On()) g_menuPerf.forced = !LogDebugLevel();
+    const bool dbg = LogDebugLevel();
+    if (g_perfCfg < 0 && GpuPerf::On()) g_menuPerf.forced = !dbg;
+    if (g_cpuProfCfg < 0 && CpuProf::On()) g_menuPerf.cpuForced = !dbg;
+}
+// phase 45: the CPU figures since the previous read (see the block comment above MenuCostGrp). base = the first read after the
+// open: the baseline only. The profiler's own cost is taken out: entering a scope charges about ONE timer transition of overhead
+// to the category it enters (the push's counter updates after its TSC read + the pop's work before its TSC read), a hook body
+// about TWO (its own push + the pop of the game's call inside it), so a category's ticks minus its entries x that x the
+// calibrated cost of one transition (CpuProf::Calibrate, g_transTicks) ~ its time with the profiler off (clamped at 0); a
+// thread's busy time loses ALL of its transitions. "measuring" (profMs) = every thread's transitions + the GPU timers' own CPU
+// (gpu-timers block) + the profiler's 10-s report (prof block): what the closed menu does not pay. Reads other threads' counters lock-free
+// (cpu_prof.h: single-writer relaxed atomics; a snapshot may be torn across fields by a few ns: fine for 1-s figures).
+void MenuCpuRead(MenuPerfState& m, bool base, int64_t q) {
+    using namespace CpuProf;
+    if (!On()) { m.cpuBase = false; return; }   // (switched on at the open; off only if that failed)
+    if (!g_menuCpuPrev) g_menuCpuPrev = new (std::nothrow) MenuCpuSlot[kMaxThreads]();
+    if (!g_menuCpuPrev) return;
+    const uint64_t pres = g_cpPresents.load(std::memory_order_relaxed), xre = g_cpXrEnds.load(std::memory_order_relaxed);
+    const bool cont = m.cpuBase && !base;
+    const uint64_t dP = pres - m.cpuPres, dX = xre - m.cpuXre;
+    const double secs = cont && g_qpcFreq > 0 ? (double)(q - m.cpuQpc) / (double)g_qpcFreq : 0.0;
+    m.cpuPres = pres; m.cpuXre = xre; m.cpuQpc = q; m.cpuBase = true;
+    const uint64_t F = dX ? dX : dP;             // VR: the game's xrEndFrame calls; flat: Presents (as the 10-s report)
+    const double msPerTick = g_qpcFreq > 0 ? g_qpcPerTsc.load(std::memory_order_relaxed) * 1000.0 / (double)g_qpcFreq : 0.0;
+    const double trMs = g_transTicks * msPerTick; // one timer transition, ms
+    const bool ok = cont && F > 0 && secs > 0.0 && msPerTick > 0.0;
+    const double fr = (double)(F ? F : 1);
+    const int nReg = (std::min)(g_nThreads.load(std::memory_order_acquire), kMaxThreads);
+    // the render thread: the most game D3D11 calls (draws, binds, copies; not Present / OpenXR) since the last read
+    int render = -1;
+    uint64_t best = 0;
+    for (int i = 0; i < nReg; ++i) {
+        Tls* const tp = g_threads[i].load(std::memory_order_acquire);
+        const MenuCpuSlot& p = g_menuCpuPrev[i];
+        if (!tp || p.tp != tp) continue;
+        uint64_t n = 0;
+        for (int h = 0; h < kHookCount; ++h)
+            if (h != kHkPresent && !(h >= kHkXrWait && h <= kHkXrOther)) n += Get(tp->calls[h]) - p.calls[h];
+        if (n > best) { best = n; render = i; }
+    }
+    MenuCpu c;
+    c.frameMs = ok ? secs * 1000.0 / fr : 0.0;
+    double busyMin = -1.0, busyWait = 0.0;
+    for (int i = 0; i < nReg; ++i) {
+        Tls* const tp = g_threads[i].load(std::memory_order_acquire);
+        if (!tp) continue;                       // (a slot being filled right now)
+        MenuCpuSlot& p = g_menuCpuPrev[i];
+        const bool have = p.tp == tp;            // a baseline of this thread exists
+        if (!have) { memset(&p, 0, sizeof(p)); p.tp = tp; }
+        double mod = 0.0, wait = 0.0, meas = 0.0;
+        for (int k = 0; k < kCount; ++k) {
+            const uint64_t tk = Get(tp->ticks[k]), cl = Get(tp->calls[k]);
+            const uint64_t dt = tk - p.ticks[k], dc = cl - p.calls[k];
+            p.ticks[k] = tk; p.calls[k] = cl;
+            if (!have || !ok) continue;
+            if (k < kModEnd) {
+                const double v = (std::max)(0.0, (double)dt * msPerTick - (double)dc * trMs * (k < kHookCount ? 2.0 : 1.0));
+                if (i == render) c.blk[k] = v / fr;
+                if (k != kBMenu && k != kBGpuPerf && k != kBProf) mod += v;
+                else if (k != kBMenu) meas += v;   // the GPU timers' CPU + the profiler's report: measuring, not the mod
+            } else {
+                const int h = k - kDrvFirst;     // the game's own call inside hook h: Present / OpenXR = blocked (waiting)
+                if (h == kHkPresent || (h >= kHkXrWait && h <= kHkXrOther)) wait += (double)dt * msPerTick;
+            }
+        }
+        const uint64_t tr = Get(tp->transitions), dTr = tr - p.trans;
+        p.trans = tr;
+        if (!have || !ok) continue;
+        const double prof = (double)dTr * trMs;
+        c.profMs += (prof + meas) / fr;
+        if (i == render) { c.modMs += mod / fr; c.renderTid = tp->tid; }
+        else             c.otherMs += mod / fr;
+        const uint32_t roles = tp->roles.load(std::memory_order_relaxed);
+        if (roles & (kRolePresent | kRoleXrWait | kRoleXrEnd)) {   // a thread of the game's frame loop (not our turbo wait thread)
+            const double busy = (std::max)(0.0, c.frameMs - (wait + prof + meas) / fr);   // (measuring taken out)
+            if (busyMin < 0.0 || busy < busyMin) { busyMin = busy; busyWait = wait / fr; }
+        }
+    }
+    if (!ok) return;                             // the baseline only: the last figures stay
+    c.busyMs = busyMin;
+    c.waitMs = busyWait;
+    c.have = true;
+    m.cpu = c;
+}
+// phase 45: the LIMIT LINE -- what holds the frame rate back, from data the mod has anyway while the menu is open:
+//   T = wall time per frame (the profiler's frame marks: VR the game's xrEndFrame, flat its Present);
+//   P = the budget: VR = the headset's frame period (the runtime's predictedDisplayPeriod at xrWaitFrame), flat = T;
+//   B = the frame loop's CPU busy time per frame: for each thread of the game's frame loop (Present / xrWaitFrame / xrEndFrame),
+//       T minus its time blocked inside the original Present / OpenXR calls minus the profiler's own reads; the SMALLEST of them
+//       (a thread that waits for the other one outside the hooks -- an event, a sleep -- looks busy; the other one does not);
+//   G = the GPU time of the frame = the whole-frame scene span (game + mod, both eyes; it misses the game's UI / post work after
+//       the scene and the VR compositor, so it reads a little LOW: hence 0.85 below).
+//   1. VR and T <= 1.04 P         -> "headset (N Hz)": the game keeps the headset's rate, nothing else limits it.
+//   2. B >= 0.90 P and G >= 0.85 P -> "CPU and GPU".
+//   3. B >= 0.90 P                -> "CPU" (the loop is busy the whole frame and does not wait for the GPU or the display; flat:
+//                                    "or a game fps cap" -- the game's own limiter sleeps outside the hooks and looks the same).
+//   4. G >= 0.85 P                -> "GPU".
+//   5. flat, the loop waits >= 10 % of the frame inside Present -> "vsync / fps cap" (waits for the display, the GPU is not full).
+//   6. G not measured yet (the span needs ~330 clean frames) -> "Limit: ..." (30 s after the open: "unknown").
+//   7. anything else -> "unknown" (never a guess).
+void MenuLimit(MenuPerfState& m, bool vr) {
+    constexpr size_t kL = sizeof(m.limit) / sizeof(m.limit[0]);
+    const MenuCpu& c = m.cpu;
+    if (!c.have || c.frameMs <= 0.0) { swprintf(m.limit, kL, L"Limit: ..."); return; }
+    const double T = c.frameMs, B = c.busyMs, G = m.gpuFrameMs;
+    double P = T;
+    if (vr) {
+        if (m.periodMs <= 0.0) { swprintf(m.limit, kL, L"Limit: unknown"); return; }
+        P = m.periodMs;
+        if (T <= 1.04 * P) { swprintf(m.limit, kL, L"Limit: headset (%.0f Hz)", 1000.0 / P); return; }
+    }
+    const bool cpu = B >= 0.0 && B >= 0.90 * P, gpu = G >= 0.0 && G >= 0.85 * P;
+    if (cpu && gpu)      swprintf(m.limit, kL, L"Limit: CPU and GPU");
+    else if (cpu)        swprintf(m.limit, kL, L"%ls", vr ? L"Limit: CPU" : L"Limit: CPU (or a game fps cap)");
+    else if (gpu)        swprintf(m.limit, kL, L"Limit: GPU");
+    else if (!vr && G >= 0.0 && B >= 0.0 && c.waitMs >= 0.10 * T) swprintf(m.limit, kL, L"Limit: vsync / fps cap");
+    else if (G < 0.0 && !m.gameNa && !m.noAa) swprintf(m.limit, kL, L"Limit: ...");
+    else                 swprintf(m.limit, kL, L"Limit: unknown");
 }
 // Eye `eye`'s figures since the previous read (false = no pass of that eye landed in between). Always advances the baseline.
 bool MenuPerfEyeDelta(int eye, MenuPerfEye& out) {
@@ -15539,47 +15738,117 @@ void MenuPerfTick() {
     m.nothing = !m.eye[0].have && open > 3.0;
     if (!g_ngxEverReady && (g_dlaa[0].FeatureReady() || g_dlaa[1].FeatureReady())) g_ngxEverReady = true;
     m.noAa = !g_ngxEverReady;
+    // phase 45: the CPU figures, the frame's GPU time, the headset period and the Limit line (same ~1-s snapshots)
+    MenuCpuRead(m, base, now.QuadPart);
+    m.gpuFrameMs = m.spanFresh && g_spanSceneLastN ? g_spanSceneLast : -1.0;
+    const int64_t per = eyes == 2 ? XrHook::DisplayPeriodNs() : 0;
+    m.periodMs = per > 0 ? (double)per / 1.0e6 : 0.0;
+    MenuLimit(m, eyes == 2);
 }
-// "1.2 ms" (the cost column; "<0.1 ms" below 0.05)
-void MenuMs(wchar_t* d, size_t cap, double ms) {
-    if (ms < 0.05) swprintf(d, cap, L"<0.1 ms");
-    else           swprintf(d, cap, L"%.1f ms", ms);
+// phase 45: a figure of the cost column / the perf lines: "<0.01", "0.42" (under 1 ms), "1.3", "12.4"
+void MenuNum(wchar_t* d, size_t cap, double ms) {
+    if (ms < 0.005)     swprintf(d, cap, L"<0.01");
+    else if (ms < 1.0)  swprintf(d, cap, L"%.2f", ms);
+    else if (ms < 100.) swprintf(d, cap, L"%.1f", ms);
+    else                swprintf(d, cap, L"%.0f", ms);
 }
-// The GPU block: line 0 = the game's frame + fps, then the mod per eye (VR: eye 0, eye 1; flat: one line + what the numbers are).
-void MenuPerfLines(TuningMenu::Panel& p, bool vr) {
+// phase 45: a cost column cell "<cpu> | <gpu>", the CPU text in blue and the GPU text in orange (TuningMenu ink marks, drawn by
+// menu.cpp); nullptr = "-" in the row's own colour (that side does not apply / is not measured). Both nullptr = "-".
+void MenuCell(wchar_t* d, size_t cap, const wchar_t* cpu, const wchar_t* gpu) {
+    using namespace TuningMenu;
+    if (!cpu && !gpu) { swprintf(d, cap, L"-"); return; }
+    wchar_t c[16], g[16];
+    if (cpu) swprintf(c, 16, L"%lc%ls%lc", kInkCpu, cpu, kInkEnd); else swprintf(c, 16, L"-");
+    if (gpu) swprintf(g, 16, L"%lc%ls%lc", kInkGpu, gpu, kInkEnd); else swprintf(g, 16, L"-");
+    swprintf(d, cap, L"%ls | %ls", c, g);
+}
+// phase 45: the GPU groups of the last interval, ms PER FRAME (VR: the eyes that landed, summed; flat: the one picture)
+struct MenuGpuFrame { bool have = false; double grp[MG_COUNT] = {}; double total = 0.0; };
+MenuGpuFrame MenuGpuPerFrame(bool vr) {
     const MenuPerfState& m = g_menuPerf;
-    constexpr size_t kP = sizeof(p.perf[0]) / sizeof(wchar_t);
-    wchar_t game[48], fps[48];
-    if (m.gameMs >= 0.0) swprintf(game, 48, vr ? L"%.1f ms (both eyes)" : L"%.1f ms", m.gameMs);
-    else                 swprintf(game, 48, L"%ls", (m.gameNa || m.noAa) ? L"n/a" : L"measuring...");
-    if (m.haveFps) swprintf(fps, 48, L"%.0f (frame %.1f ms)", m.fps, m.frameMs);
-    else           swprintf(fps, 48, L"measuring...");
-    swprintf(p.perf[0], kP, L"GPU per frame: game %ls | fps %ls", game, fps);
-    if (!GpuPerf::On()) {
-        swprintf(p.perf[1], kP, L"this mod: n/a (the GPU timers could not start: timestamp queries failed)");
-        return;
-    }
-    if (m.nothing && !m.eye[0].have) {                 // no pass of the mod ever landed since the open (3 s+): say so, one line
-        swprintf(p.perf[1], kP, L"this mod: nothing to measure on this screen - it works while you drive; open this menu on the road");
-        if (!vr)
-            swprintf(p.perf[2], kP, L"GPU ms per frame, live. A part can include GPU waiting time (idle); judge gains by the frame time.");
-        return;
-    }
+    MenuGpuFrame f;
     for (int e = 0; e < (vr ? 2 : 1); ++e) {
-        wchar_t* const d = p.perf[1 + e];
-        const wchar_t* const pre = vr ? (e ? L"eye 1: " : L"eye 0: ") : L"";
-        const MenuPerfEye& pe = m.eye[e];
-        if (!pe.have) { swprintf(d, kP, L"%lsthis mod: measuring...", pre); continue; }
-        swprintf(d, kP, L"%lsthis mod %.1f ms = NGX %.1f + per-part motion %.1f + camera %.1f + see-through "
-                 L"%.1f + mirrors %.1f + sharpen %.1f + copies %.1f", pre, pe.total, pe.grp[MG_NGX], pe.grp[MG_PART],
-                 pe.grp[MG_CAM], pe.grp[MG_FWD], pe.grp[MG_MIR], pe.grp[MG_SHARP], pe.grp[MG_COPY]);
+        if (!m.eye[e].have) continue;
+        f.have = true;
+        for (int g = 0; g < MG_COUNT; ++g) f.grp[g] += m.eye[e].grp[g];
+        f.total += m.eye[e].total;
     }
-    if (!vr)
-        swprintf(p.perf[2], kP, L"GPU ms per frame, live. A part can include GPU waiting time (idle); judge gains by the frame time.");
+    return f;
 }
-// The "GPU cost" column and the one cost sentence of the selected row (appended to its description).
+// phase 45: the CPU of a row = the render thread's mod blocks, ms per frame (MenuCpuRead)
+double MenuCpuOf(std::initializer_list<int> cats) {
+    double s = 0.0;
+    for (int c : cats) s += g_menuPerf.cpu.blk[c];
+    return s;
+}
+double MenuCpuParts() {                          // per-part motion: the per-draw MV work (record, replay, ids, candidates, dispatch)
+    using namespace CpuProf;
+    return MenuCpuOf({ kBMvGen, kBDidRec, kBDidReplay, kBMvCollect, kBObj });
+}
+// The perf block (3 lines): line 0 = the Limit line + fps + the frame's CPU / GPU busy time; line 1 = the mod's CPU | GPU per
+// frame + the GPU parts; line 2 = the colour legend, what the CPU figure covers and what measuring costs (taken out).
+void MenuPerfLines(TuningMenu::Panel& p, bool vr) {
+    using namespace TuningMenu;
+    const MenuPerfState& m = g_menuPerf;
+    const MenuCpu& c = m.cpu;
+    constexpr size_t kP = sizeof(p.perf[0]) / sizeof(wchar_t);
+    wchar_t fps[64], cb[16], gb[16];
+    if (!m.haveFps)                    swprintf(fps, 64, L"...");
+    else if (vr && m.periodMs > 0.0)   swprintf(fps, 64, L"%.0f (%.1f ms, headset %.0f Hz)", m.fps, m.frameMs, 1000.0 / m.periodMs);
+    else                               swprintf(fps, 64, L"%.0f (%.1f ms)", m.fps, m.frameMs);
+    if (c.have && c.busyMs >= 0.0) MenuNum(cb, 16, c.busyMs); else swprintf(cb, 16, c.have ? L"-" : L"...");
+    if (m.gpuFrameMs >= 0.0)       MenuNum(gb, 16, m.gpuFrameMs);
+    else                           swprintf(gb, 16, (m.gameNa || m.noAa) ? L"-" : L"...");
+    swprintf(p.perf[0], kP, L"%ls      fps %ls      frame busy %lc%ls%lc | %lc%ls%lc ms", m.limit, fps, kInkCpu, cb, kInkEnd,
+             kInkGpu, gb, kInkEnd);
+    // line 1: the mod
+    const MenuGpuFrame g = MenuGpuPerFrame(vr);
+    if (c.have) MenuNum(cb, 16, c.modMs); else swprintf(cb, 16, L"...");
+    if (!GpuPerf::On()) {
+        swprintf(p.perf[1], kP, L"this mod: %lc%ls%lc | GPU n/a (the GPU timers could not start: timestamp queries failed)", kInkCpu,
+                 cb, kInkEnd);
+    } else if (m.nothing && !g.have) {             // no pass of the mod ever landed since the open (3 s+): say so
+        swprintf(p.perf[1], kP, L"this mod: %lc%ls%lc | - ms -- nothing for the GPU on this screen; it works while you drive",
+                 kInkCpu, cb, kInkEnd);
+    } else if (!g.have) {
+        swprintf(p.perf[1], kP, L"this mod: %lc%ls%lc | %lc...%lc ms", kInkCpu, cb, kInkEnd, kInkGpu, kInkEnd);
+    } else {
+        MenuNum(gb, 16, g.total);
+        swprintf(p.perf[1], kP, L"this mod: %lc%ls%lc | %lc%ls%lc ms -- GPU: NGX %.1f, part motion %.1f, camera %.1f, see-through %.1f, "
+                 L"mirrors %.1f, sharpen %.1f, copies %.1f", kInkCpu, cb, kInkEnd, kInkGpu, gb, kInkEnd, g.grp[MG_NGX],
+                 g.grp[MG_PART], g.grp[MG_CAM], g.grp[MG_FWD], g.grp[MG_MIR], g.grp[MG_SHARP], g.grp[MG_COPY]);
+    }
+    // line 2: legend + what the CPU figure is + the profiler's own cost (already taken out of every figure)
+    wchar_t oth[48] = L"", prof[64] = L"";
+    if (c.have) {
+        wchar_t f[16];
+        MenuNum(f, 16, c.otherMs);
+        swprintf(oth, 48, L", other threads %ls", f);
+        MenuNum(f, 16, c.profMs);
+        swprintf(prof, 64, L"; measuring costs %ls ms CPU (taken out)", f);
+    }
+    swprintf(p.perf[2], kP, L"%lcCPU%lc | %lcGPU%lc ms per frame%ls. CPU = the game's render thread%ls%ls.", kInkCpu, kInkEnd, kInkGpu,
+             kInkEnd, vr ? L" (GPU: both eyes)" : L"", oth, prof);
+}
+// The cost column (CPU | GPU per row) and the one cost sentence of the selected row (appended to its description).
+// Row -> CPU block(s) of cpu_prof.h (the render thread, ms per frame) / GPU group (MG_*, ms per frame):
+//   Mode, DLAA (whole mod)  CPU: every mod hook + block but the menu's own (menu, gpu-timers, prof) | GPU: the mod total
+//   Model, DLAA area        CPU: ngx-eval                                    | GPU: NGX
+//   Sharpen strength / width CPU: - (inside dlaa-run, not separable)         | GPU: sharpen
+//   Texture sharpness rows  CPU: lod                                         | GPU: - (no pass of its own)
+//   See-through depth       CPU: fwd-depth                                   | GPU: see-through
+//   Per-part motion         CPU: mv-gen + did-rec + did-replay + mv-collect + obj-ids | GPU: per-part motion
+//   Mirror DLAA, in turns   CPU: mirror                                      | GPU: mirrors
+//   Foveated rows           CPU: vrs                                         | GPU: - (the saving is in the game's own time)
+//   Hidden area mask        CPU: hmask                                       | GPU: - (as Foveated; its small depth draw is not timed)
+//   FPS counter             CPU: - (inside the menu block)                   | GPU: the fps box (GpuPerf kOverlay)
+//   Logging                 CPU: the log's own cost (log.h LogCost, every thread, per Present) | GPU: -
+//   everything else: "-" (no cost of its own), "off", "same", "no extra" as before.
 void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t sentCap) {
-    const MenuPerfEye& e0 = g_menuPerf.eye[0];   // VR: eye 0's figures
+    using namespace CpuProf;
+    const MenuPerfState& mp = g_menuPerf;
+    const MenuCpu& c = mp.cpu;
+    const MenuGpuFrame gf = MenuGpuPerFrame(vr);
     const bool timers = GpuPerf::On();
     constexpr size_t kC = sizeof(p.rows[0].cost) / sizeof(wchar_t);
     const bool dlaaOn = g_dlaaOn.load();
@@ -15589,111 +15858,119 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
     const bool mirOn = g_mirOn.load() && MirMode() != 0;
     const bool fwdOn = g_fwdCfg && g_fwdOn.load();   // (the VR budget guard clears g_fwdOn; its key turns it back on)
     const int area = SceneDlaa::Area();
-    const wchar_t* const unit = vr ? L"per eye" : L"per frame";
+    const double cpuAll = c.modMs, cpuNgx = c.blk[kBNgx], cpuParts = MenuCpuParts(), cpuFwd = c.blk[kBFwd],
+                 cpuMir = c.blk[kBMirror], cpuLod = c.blk[kBLod], cpuVrs = c.blk[kBVrs], cpuHm = c.blk[kBHmask];
     auto txt = [&](int row, const wchar_t* t) { swprintf(p.rows[row].cost, kC, L"%ls", t); };
-    auto ms = [&](int row, int g) {
-        if (!timers)        txt(row, L"n/a");
-        else if (!e0.have)  txt(row, g_menuPerf.nothing ? L"-" : L"...");
-        else                MenuMs(p.rows[row].cost, kC, e0.grp[g]);
+    wchar_t cs[16], gs[16];
+    auto cpuS = [&](double v) -> const wchar_t* { if (!c.have) return L"..."; MenuNum(cs, 16, v); return cs; };
+    auto gpuS = [&](int g) -> const wchar_t* {     // g = an MG_* group, -1 = the mod total
+        if (!timers)   return L"n/a";
+        if (!gf.have)  return mp.nothing ? nullptr : L"...";
+        MenuNum(gs, 16, g < 0 ? gf.total : gf.grp[g]);
+        return gs;
     };
-    // Mode / DLAA on-off: the WHOLE mod (what switching it off saves) = the "this mod" total of the GPU line
-    auto msTotal = [&](int row) {
-        if (!timers)        txt(row, L"n/a");
-        else if (!e0.have)  txt(row, g_menuPerf.nothing ? L"-" : L"...");
-        else                MenuMs(p.rows[row].cost, kC, e0.total);
-    };
+    auto cell = [&](int row, const wchar_t* cpu, const wchar_t* gpu) { MenuCell(p.rows[row].cost, kC, cpu, gpu); };
     for (int r = 0; r < MR_COUNT; ++r) txt(r, L"-");   // default for every row (phase 43: order-independent; headers included); set below
-    msTotal(MR_MODE);                            if (!dlaaOn) txt(MR_MODE, L"off");
-    txt(MR_PROFILE, L"-");
-    ms(MR_MODEL, MG_NGX);                        if (!dlaaOn) txt(MR_MODEL, L"off");   // the model IS the NGX cost
-    ms(MR_SHARP, MG_SHARP);                      if (!sharpOn) txt(MR_SHARP, L"off");
-    ms(MR_WIDTH, MG_SHARP);                      if (!sharpOn) txt(MR_WIDTH, L"off");
-    txt(MR_LOD, g_lodBias == 0.0f ? L"off" : L"~0 ms");                           // memory only, no GPU pass of its own
-    txt(MR_LODCUT, LodCutEffective(g_lodBias) == 0.0f ? L"off" : L"~0 ms");
+    if (dlaaOn) cell(MR_MODE, cpuS(cpuAll), gpuS(-1));  else txt(MR_MODE, L"off");
+    if (dlaaOn) cell(MR_MODEL, cpuS(cpuNgx), gpuS(MG_NGX)); else txt(MR_MODEL, L"off");   // the model IS the NGX cost
+    if (sharpOn) cell(MR_SHARP, nullptr, gpuS(MG_SHARP)); else txt(MR_SHARP, L"off");
+    if (sharpOn) cell(MR_WIDTH, nullptr, gpuS(MG_SHARP)); else txt(MR_WIDTH, L"off");
+    if (g_lodBias != 0.0f) cell(MR_LOD, cpuS(cpuLod), nullptr); else txt(MR_LOD, L"off");   // CPU only: no GPU pass of its own
+    if (LodCutEffective(g_lodBias) != 0.0f) cell(MR_LODCUT, cpuS(cpuLod), nullptr); else txt(MR_LODCUT, L"off");
     if (!vr)          txt(MR_AREA, L"-");
     else if (!dlaaOn) txt(MR_AREA, L"off");
-    else {
-        ms(MR_AREA, MG_NGX);
-        if (timers && e0.have) {
-            wchar_t f[24];
-            MenuMs(f, 24, e0.grp[MG_NGX]);
-            swprintf(p.rows[MR_AREA].cost, kC, L"%ls (%d %%)", f, area);   // "0.6 ms (100 %)" (fits the 104 px column)
-        }
-    }
-    ms(MR_DRAWIDS, MG_PART);                     if (!partOn) txt(MR_DRAWIDS, L"off");
-    ms(MR_MIRROR, MG_MIR);                       if (!mirOn) txt(MR_MIRROR, L"off");
+    else              cell(MR_AREA, cpuS(cpuNgx), gpuS(MG_NGX));   // (the area % is in the value column)
+    if (partOn) cell(MR_DRAWIDS, cpuS(cpuParts), gpuS(MG_PART)); else txt(MR_DRAWIDS, L"off");
+    if (mirOn) cell(MR_MIRROR, cpuS(cpuMir), gpuS(MG_MIR));      else txt(MR_MIRROR, L"off");
     // phase 41: the mirrors' cost as it is now (in turns: about half of the same row's figure without)
-    ms(MR_MIRTURNS, MG_MIR);                     if (!mirOn) txt(MR_MIRTURNS, L"off");
+    if (mirOn) cell(MR_MIRTURNS, cpuS(cpuMir), gpuS(MG_MIR));    else txt(MR_MIRTURNS, L"off");
     txt(MR_PRETM, vr ? L"-" : L"same");
-    ms(MR_FWD, MG_FWD);                          if (!fwdOn) txt(MR_FWD, L"off");
+    if (fwdOn) cell(MR_FWD, cpuS(cpuFwd), gpuS(MG_FWD));         else txt(MR_FWD, L"off");
     txt(MR_UPSCALE, dlaaOn && upOn ? L"no extra" : L"off");   // the upscale is the same NGX pass; the game draws fewer pixels
-    msTotal(MR_DLAA);                            if (!dlaaOn) txt(MR_DLAA, L"off");
-    // v0.10.3 phase 29b: the fps box's own measured cost, ms PER FRAME (GpuPerf::kOverlay; not per eye: one quad image or the
-    // eye pictures + the desktop mirror together)
-    const MenuPerfState& mp = g_menuPerf;
-    if (!g_fpsShow)       txt(MR_FPS, L"off");
-    else if (!timers)     txt(MR_FPS, L"n/a");
-    else if (!mp.haveBox) txt(MR_FPS, L"...");
-    else                  MenuMs(p.rows[MR_FPS].cost, kC, mp.boxMs);
+    if (dlaaOn) cell(MR_DLAA, cpuS(cpuAll), gpuS(-1));           else txt(MR_DLAA, L"off");
+    // v0.10.3 phase 29b: the fps box's own measured GPU cost, ms PER FRAME (GpuPerf::kOverlay: the quad image or the eye pictures +
+    // the desktop mirror together); its CPU is inside the menu block (not separable)
+    if (!g_fpsShow)        txt(MR_FPS, L"off");
+    else if (!timers)      cell(MR_FPS, nullptr, L"n/a");
+    else if (!mp.haveBox)  cell(MR_FPS, nullptr, L"...");
+    else                   { MenuNum(gs, 16, mp.boxMs); cell(MR_FPS, nullptr, gs); }
+    // phase 34 / 42 / 40: VR-only rows -- the CPU of the per-draw rule / the mask; the GPU they SAVE is in the game's own time
+    const bool vrsLive = vr && Vrs::Support() != 0 && g_vrsOn;
+    for (int r : { (int)MR_VRS, (int)MR_VRSSIZE, (int)MR_VRSPASS }) {
+        if (vrsLive)                       cell(r, cpuS(cpuVrs), nullptr);
+        else if (vr && !g_vrsOn)           txt(r, L"off");
+    }
+    if (vr && g_xrHiddenMask)  cell(MR_HMASK, cpuS(cpuHm), nullptr);
+    else if (vr)               txt(MR_HMASK, L"off");
+    // phase 39: the Logging row -- the log's own CPU (log.h LogCost: every thread, per Present), the same ~1-s snapshots
+    const int lv = LogLevel();
+    if (lv == 0)             txt(MR_LOG, L"off");
+    else if (!mp.haveLog)    cell(MR_LOG, L"...", nullptr);
+    else                     { MenuNum(cs, 16, mp.logMs); cell(MR_LOG, cs, nullptr); }
 
-    // the sentence: "Costs 1.3 ms per eye now; ..." (numbers from the same snapshot as the column). The description already
-    // says what the row does and its typical cost; this adds the LIVE figure, or WHY a greyed row is greyed. The panel shows 3
-    // lines of ~105 characters for the description + this sentence (menu.cpp kDescH): keep the sentence under ~100.
+    // the sentence: "Costs 0.12 ms CPU + 0.62 ms GPU per frame now; ..." (numbers from the same snapshot as the column). The
+    // description already says what the row does and its typical cost; this adds the LIVE figures, or WHY a greyed row is
+    // greyed. The panel shows 3 lines of ~105 characters for the description + this sentence (menu.cpp kDescH): keep the
+    // sentence under ~100.
     sent[0] = 0;
-    wchar_t f[24] = L"";
-    auto fig = [&](int g) { MenuMs(f, 24, e0.grp[g]); return (const wchar_t*)f; };
-    const bool live = timers && e0.have;
-    // (timers on but no pass landed yet: append nothing -- not "Costs ... ms", not even "measuring...")
-    const wchar_t* const wait = timers ? L"" : L"GPU cost: n/a (the GPU timers could not start).";
+    wchar_t f[64] = L"";
+    // "0.12 ms CPU + 0.62 ms GPU" -- a side that is not measured yet / not available is left out; nullptr = neither
+    auto both = [&](double cpuMs, int g) -> const wchar_t* {
+        wchar_t a[16], b[16];
+        const bool hc = c.have, hg = timers && gf.have;
+        if (hc) MenuNum(a, 16, cpuMs);
+        if (hg) MenuNum(b, 16, g < 0 ? gf.total : gf.grp[g]);
+        if (hc && hg)  swprintf(f, 64, L"%ls ms CPU + %ls ms GPU", a, b);
+        else if (hc)   swprintf(f, 64, L"%ls ms CPU", a);
+        else if (hg)   swprintf(f, 64, L"%ls ms GPU", b);
+        else           return nullptr;
+        return f;
+    };
+    const wchar_t* fig = nullptr;
     switch (sel) {
     case MR_MODE: case MR_DLAA:
-        if (!dlaaOn)    swprintf(sent, sentCap, L"Off now: the mod costs nothing.");
-        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            { MenuMs(f, 24, e0.total);
-                          swprintf(sent, sentCap, L"The whole mod costs %ls %ls now; off saves all of it.", f, unit); }
+        if (!dlaaOn)                       swprintf(sent, sentCap, L"Off now: the mod's DLAA / DLSS work costs nothing.");
+        else if ((fig = both(cpuAll, -1))) swprintf(sent, sentCap, L"The whole mod costs %ls per frame now; off saves most of it.", fig);
         break;
-    case MR_PROFILE: swprintf(sent, sentCap, L"Costs nothing itself; watch the GPU line for what it saves."); break;
+    case MR_PROFILE: swprintf(sent, sentCap, L"Costs nothing itself; watch the perf lines for what it saves."); break;
     case MR_MODEL:
-        if (!dlaaOn)    swprintf(sent, sentCap, L"Off now.");
-        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"Costs %ls %ls now (VR per eye: 1 (K) 1.0, 2 (E) / 3 (F) 0.6, 4 (M) ~3 ms).",
-                                 fig(MG_NGX), unit);
+        if (!dlaaOn)                       swprintf(sent, sentCap, L"Off now.");
+        else if ((fig = both(cpuNgx, MG_NGX)))
+            swprintf(sent, sentCap, L"Costs %ls per frame now (GPU per eye: 1 (K) 1.0, 2 (E) / 3 (F) 0.6, 4 (M) ~3 ms).", fig);
         break;
     case MR_SHARP:
-        if (!sharpOn)   swprintf(sent, sentCap, L"Off now: sharpening costs nothing.");
-        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"Costs %ls %ls now; 0 saves it.", fig(MG_SHARP), unit);
+        if (!sharpOn)                      swprintf(sent, sentCap, L"Off now: sharpening costs nothing.");
+        else if (timers && gf.have)
+            swprintf(sent, sentCap, L"Costs %ls GPU per frame now; 0 saves it.", (MenuNum(f, 64, gf.grp[MG_SHARP]), f));
         break;
     case MR_WIDTH:
-        if (!sharpOn)   swprintf(sent, sentCap, L"Off now (Sharpen strength is 0): sharpening costs nothing.");
-        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"Same pass as Sharpen strength: costs %ls %ls now.", fig(MG_SHARP), unit);
+        if (!sharpOn)                      swprintf(sent, sentCap, L"Off now (Sharpen strength is 0): sharpening costs nothing.");
+        else if (timers && gf.have)
+            swprintf(sent, sentCap, L"Same pass as Sharpen strength: costs %ls ms GPU per frame now.", (MenuNum(f, 64, gf.grp[MG_SHARP]), f));
         break;
     case MR_LOD: case MR_LODCUT:
-        break;                                            // the description says it all: no GPU pass of its own
+        if (g_lodBias != 0.0f && c.have)
+            swprintf(sent, sentCap, L"CPU %ls ms per frame now (the sampler swaps).", (MenuNum(f, 64, cpuLod), f));
+        break;
     case MR_AREA:
-        if (!vr)        swprintf(sent, sentCap, L"Greyed in flat: flat mode always uses the whole picture.");
-        else if (!dlaaOn) swprintf(sent, sentCap, L"Off now: DLAA/DLSS costs nothing.");
-        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"DLAA costs %ls per eye at %d %%; a smaller area costs less.",
-                                 fig(MG_NGX), area);
+        if (!vr)                           swprintf(sent, sentCap, L"Greyed in flat: flat mode always uses the whole picture.");
+        else if (!dlaaOn)                  swprintf(sent, sentCap, L"Off now: DLAA/DLSS costs nothing.");
+        else if ((fig = both(cpuNgx, MG_NGX)))
+            swprintf(sent, sentCap, L"DLAA costs %ls per frame at %d %%; a smaller area costs less.", fig, area);
         break;
     case MR_DRAWIDS:
-        if (!partOn)    swprintf(sent, sentCap, L"Off now: costs nothing.");
-        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"Costs %ls %ls now; the performance profile medium / low cut it.",
-                                 fig(MG_PART), unit);
+        if (!partOn)                       swprintf(sent, sentCap, L"Off now: costs nothing.");
+        else if ((fig = both(cpuParts, MG_PART)))
+            swprintf(sent, sentCap, L"Costs %ls per frame now; the profiles medium / low cut it.", fig);
         break;
     case MR_MIRROR:
-        if (!mirOn)     swprintf(sent, sentCap, L"Off now: costs nothing.");
-        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"Costs %ls %ls now; fewer mirrors cost less.", fig(MG_MIR), unit);
+        if (!mirOn)                        swprintf(sent, sentCap, L"Off now: costs nothing.");
+        else if ((fig = both(cpuMir, MG_MIR))) swprintf(sent, sentCap, L"Costs %ls per frame now; fewer mirrors cost less.", fig);
         break;
     case MR_MIRTURNS:                                     // phase 41
-        if (!mirOn)     swprintf(sent, sentCap, L"Greyed: Mirror DLAA is off.");
-        else if (MirMode() == 3) swprintf(sent, sentCap, L"Always on: dlaa.ini mirror mode 3 is in turns already.");
-        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"The mirrors cost %ls %ls now.", fig(MG_MIR), unit);
+        if (!mirOn)                        swprintf(sent, sentCap, L"Greyed: Mirror DLAA is off.");
+        else if (MirMode() == 3)           swprintf(sent, sentCap, L"Always on: dlaa.ini mirror mode 3 is in turns already.");
+        else if ((fig = both(cpuMir, MG_MIR))) swprintf(sent, sentCap, L"The mirrors cost %ls per frame now.", fig);
         break;
     case MR_PRETM:
         if (vr) swprintf(sent, sentCap, L"Greyed in VR: VR always runs DLAA on the finished picture.");
@@ -15703,28 +15980,26 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
                         swprintf(sent, sentCap, L"Switched off by the mod: it cost more than %.1f ms per eye (VR budget). "
                                  L"Press its key to try again.", (double)g_fwdBudgetMs);
         else if (!fwdOn) swprintf(sent, sentCap, L"Off now: costs nothing.");
-        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
-        else            swprintf(sent, sentCap, L"Costs %ls %ls now; off saves it.", fig(MG_FWD), unit);
+        else if ((fig = both(cpuFwd, MG_FWD))) swprintf(sent, sentCap, L"Costs %ls per frame now; off saves it.", fig);
         break;
     case MR_FPS:                                          // v0.10.3 phase 29b
         if (!g_fpsShow)       swprintf(sent, sentCap, L"Off now: costs nothing.");
-        else if (!timers)     swprintf(sent, sentCap, L"%ls", wait);
+        else if (!timers)     swprintf(sent, sentCap, L"GPU cost: n/a (the GPU timers could not start).");
         else if (mp.haveBox)  { wchar_t b[24];
                                 swprintf(b, 24, mp.boxMs < 0.001 ? L"<0.001 ms" : L"%.3f ms", mp.boxMs);
-                                swprintf(sent, sentCap, L"Costs %ls per frame now (all pictures together).", b); }
+                                swprintf(sent, sentCap, L"Costs %ls GPU per frame now (all pictures together).", b); }
         break;
     case MR_TURBO:                                        // phase 30
         if (!vr)                     swprintf(sent, sentCap, L"Greyed in flat: it changes the VR frame loop only.");
         else if (g_xrTurbo && XrHook::GetTurboStats().failed)
                                      swprintf(sent, sentCap, L"Stopped for this VR session: the runtime refused it (see the log).");
         break;
-    case MR_LOG: {                                        // phase 39: CPU, not GPU (the row's value has the ms too)
-        const int lv = LogLevel();
+    case MR_LOG: {                                        // phase 39: CPU, not GPU
         if (lv == 0)          swprintf(sent, sentCap, L"Off now: nothing is written.");
         else if (mp.haveLog) {
-            wchar_t pr[48] = L"";
-            const double pms = CpuProf::SelfMsPerFrame();
-            if (lv >= 4 && CpuProf::On() && pms >= 0.0) swprintf(pr, 48, L", + %.2f ms the CPU profiler", pms);
+            wchar_t pr[56] = L"";
+            const double pms = CpuProf::SelfMsPerFrame();   // (level 4 keeps the profiler on after the menu closes)
+            if (lv >= 4 && pms >= 0.0) swprintf(pr, 56, L"; at debug the CPU profiler adds %.2f ms", pms);
             swprintf(sent, sentCap, L"Costs %.2f ms CPU per frame now, %.0f lines/s%ls.", mp.logMs, mp.logLps, pr);
         }
         break;
@@ -15733,6 +16008,8 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         if (Vrs::Support() == 0)     swprintf(sent, sentCap, L"Not available here: %hs.", Vrs::SupportText());
         else if (!vr)                swprintf(sent, sentCap, L"Greyed in flat: VR only.");
         else if (!g_vrsOn)           swprintf(sent, sentCap, L"Off now: every pixel is shaded.");
+        else if (c.have)             swprintf(sent, sentCap, L"CPU %ls ms per frame; it saves GPU time in the game's own figure.",
+                                              (MenuNum(f, 64, cpuVrs), f));
         else                         swprintf(sent, sentCap, L"It saves time in the game's own GPU figure, not in the mod's.");
         break;
     case MR_HMASK: {                                      // phase 40
@@ -15740,6 +16017,8 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         if (hs.ext == 1)             swprintf(sent, sentCap, L"Not available: this VR runtime reports no hidden area.");
         else if (!vr)                swprintf(sent, sentCap, L"Greyed in flat: VR only.");
         else if (!g_xrHiddenMask)    swprintf(sent, sentCap, L"Off now: every pixel is drawn.");
+        else if (c.have)             swprintf(sent, sentCap, L"CPU %ls ms per frame; it saves GPU time in the game's own figure.",
+                                              (MenuNum(f, 64, cpuHm), f));
         else                         swprintf(sent, sentCap, L"It saves time in the game's own GPU figure, not in the mod's.");
         break;
     }
@@ -16337,8 +16616,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     {   // phase 39: the level + what logging costs (CPU ms per frame; changes only at the ~1-s snapshots: no rebuild per frame)
         MenuRow(p, MR_LOG, L"Logging", "dlaa.ini log_level", nullptr, false);
         const int lv = LogLevel();
-        if (lv == 0 || !g_menuPerf.haveLog) swprintf(p.rows[MR_LOG].value, kV, L"%hs", LogLevelName(lv));
-        else swprintf(p.rows[MR_LOG].value, kV, L"%hs  %.2f ms", LogLevelName(lv), g_menuPerf.logMs);
+        swprintf(p.rows[MR_LOG].value, kV, L"%hs", LogLevelName(lv));   // phase 45: its CPU ms is in the cost column
     }
     groupRow(MR_PANELGRP, L"Panel settings");             // v0.10.3 phase 29c
     MenuRow(p, MR_POSX, L"Panel position X", vr ? "dlaa.ini menu_vr_x" : "dlaa.ini menu_x", nullptr, false);
@@ -16394,7 +16672,8 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
 
     const int sel = g_menuSel < 0 || g_menuSel >= MR_COUNT ? 0 : g_menuSel;
     MenuPerfLines(p, vr);                                 // v0.10.0: the GPU block + the GPU cost column (once-a-second figures)
-    swprintf(p.costHead, sizeof(p.costHead) / sizeof(wchar_t), L"%ls", vr ? L"GPU cost (eye 0)" : L"GPU cost");
+    swprintf(p.costHead, sizeof(p.costHead) / sizeof(wchar_t), L"%lcCPU%lc | %lcGPU%lc ms", TuningMenu::kInkCpu, TuningMenu::kInkEnd,
+             TuningMenu::kInkGpu, TuningMenu::kInkEnd);   // phase 45: both per frame (VR: GPU = both eyes)
     wchar_t sent[200];
     MenuPerfCosts(p, vr, sel, sent, sizeof(sent) / sizeof(sent[0]));
     constexpr size_t kD = sizeof(p.desc) / sizeof(wchar_t);
@@ -18317,15 +18596,15 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
                        g_passive.load(std::memory_order_relaxed)) {   // v0.6.2 passive: no candidate copies
                 ++ps.skGate;
             } else {
-                const uint64_t t0 = __rdtsc();                   // v0.5.6: CPU cost of the collector (phase 35: TSC)
+                const uint64_t t0 = MeasureOn() ? __rdtsc() : 0; // v0.5.6: CPU cost of the collector (phase 35: TSC; 45: g_measure)
                 CpuProf::Block cpb(CpuProf::kBMvCollect);        // phase 31
                 CollectMvCandidate(ctx, indexCount, startIndex, baseVertex, ps);
-                g_cpuMvTicks += (int64_t)TscToQpc(__rdtsc() - t0);
+                if (t0) g_cpuMvTicks += (int64_t)TscToQpc(__rdtsc() - t0);
             }
             if (g_objInScene && !t_inDlaa) {                   // v0.9.0 per-object MVs: record + id lookup
-                const uint64_t t1 = __rdtsc();                   // (phase 35: TSC)
+                const uint64_t t1 = MeasureOn() ? __rdtsc() : 0; // (phase 35: TSC; phase 45: only while measuring)
                 objSlot = ObjOnDraw(ctx, indexCount, startIndex, baseVertex);
-                g_objTicks += TscToQpc(__rdtsc() - t1);
+                if (t1) g_objTicks += TscToQpc(__rdtsc() - t1);
             }
             if (g_didOn && !t_inDlaa)                          // v0.10.0 per-draw MVs: the draw's whole input state
                 DidOnDraw(ctx, indexCount, 1, startIndex, baseVertex, 0, false);
@@ -18373,9 +18652,9 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
     if (pvMenuIdx >= 0 && !t_inDlaa) MenuDrawPreview(ctx, pvMenuIdx, 'a');      // v0.10.0 phase 15 (VR menu-screen eye)
     // v0.9.0 r5: a world FORWARD-pass draw (1 RTV RGBA16F + scene DSV, not the G-buffer) -> forward depth re-draw
     if (gameCtx && g_jitterPass && !g_gbufPass && !t_inDlaa && FwdLive()) {
-        const uint64_t t2 = __rdtsc();                    // (phase 35: TSC)
+        const uint64_t t2 = MeasureOn() ? __rdtsc() : 0;  // (phase 35: TSC; phase 45: only while measuring)
         FwdOnDraw(ctx, indexCount, startIndex, baseVertex);
-        g_fwdTicks += TscToQpc(__rdtsc() - t2);
+        if (t2) g_fwdTicks += TscToQpc(__rdtsc() - t2);
     }
 #endif
 }
@@ -19873,6 +20152,7 @@ void LoadConfig() {
         CpuProf::Calibrate();
         CpuProf::g_markFn.store(&CpuProfFrameMark, std::memory_order_relaxed);   // phase 33: the xrEndFrame marks (xr_hook.cpp)
         CpuProf::g_on.store(g_cpuProfCfg > 0 || (g_cpuProfCfg < 0 && LogDebugLevel()), std::memory_order_relaxed);
+        MeasureUpdate();                                    // phase 45: the legacy CPU timers follow level 4 / the menu (g_measure)
         Log("phase 31: cpu_prof=%d (%s) -- one timer read ~%.0f TSC ticks per scope transition", g_cpuProfCfg,
             CpuProf::On() ? "on: 'CPU prof' lines every 10 s, one per busy thread (phase 33: render / main / turbo / other): the mod's CPU "
                             "time per hook / block, the game's own D3D11 calls, Present + OpenXR, and the rest of the frame"

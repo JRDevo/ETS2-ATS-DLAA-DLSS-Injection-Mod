@@ -2876,6 +2876,11 @@ OverlayStats GetOverlayStats() {
 
 // ---- phase 30: Turbo mode (see xr_hook.h; the logic is in the anonymous namespace above, from OpenXR Toolkit, MIT) ----
 void SetTurbo(bool on) { s_tbWant.store(on, std::memory_order_relaxed); }
+int64_t DisplayPeriodNs() {                       // phase 45 (the tuning menu's Limit line)
+    TbWorker& w = Wk();
+    std::lock_guard<std::mutex> wl(w.mx);
+    return (int64_t)w.lastPeriod;
+}
 TurboStats GetTurboStats() {
     TurboStats s;
     s.want = s_tbWant.load(std::memory_order_relaxed);

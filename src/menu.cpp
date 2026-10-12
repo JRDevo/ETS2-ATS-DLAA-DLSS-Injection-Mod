@@ -312,7 +312,14 @@ const COLORREF kGrey     = RGB(112, 112, 122);
 const COLORREF kSelGrey  = RGB(168, 148, 72);
 const COLORREF kHead     = RGB(140, 140, 152);
 const COLORREF kDesc     = RGB(214, 214, 220);
-const COLORREF kPerf     = RGB(150, 210, 160);   // the GPU block (soft green: measured figures, not settings)
+const COLORREF kPerf     = RGB(150, 210, 160);   // the perf block (soft green: measured figures, not settings)
+// phase 45: the CPU / GPU inks (TuningMenu::kInkCpu / kInkGpu marks): Okabe-Ito sky blue and orange -- a pair that stays apart
+// for protan / deutan / tritan vision (no red / green), both bright on the dark panel. Greyed rows: halfway to the background.
+const COLORREF kInkCpuC  = RGB(86, 180, 233);
+const COLORREF kInkGpuC  = RGB(230, 159, 0);
+COLORREF Dim(COLORREF c) {
+    return RGB((GetRValue(c) + GetRValue(kBg)) / 2, (GetGValue(c) + GetGValue(kBg)) / 2, (GetBValue(c) + GetBValue(kBg)) / 2);
+}
 
 HFONT MakeFont(float px, int weight) {
     HFONT f = CreateFontW(-(int)std::lround(px), 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_TT_PRECIS,
@@ -423,18 +430,49 @@ bool RenderPanel(const TuningMenu::Panel& p, float s, uint32_t w, uint32_t h) {
     };
     const float W = (float)w / s, H = (float)h / s;          // reference px
     const UINT one = DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS;
+    // phase 45: single-line text with ink marks (TuningMenu::kInkCpu / kInkGpu / kInkEnd): the segments are drawn left to right,
+    // each in its colour (base = the text's own colour; dim = a greyed row: the inks dimmed too); the last visible segment ends
+    // in "..." when the box is too narrow. A text without marks = text() (same flags).
+    auto inkText = [&](HFONT f, COLORREF base, const wchar_t* t, float x0, float y0, float x1, float y1, bool dim) {
+        if (!t || !t[0]) return;
+        bool marks = false;
+        for (const wchar_t* q = t; *q; ++q) if (*q >= TuningMenu::kInkCpu && *q <= TuningMenu::kInkEnd) { marks = true; break; }
+        if (!marks) { text(f, base, t, x0, y0, x1, y1, one); return; }
+        SelectObject(dc, pick(f));
+        LONG x = px(x0);
+        const LONG right = px(x1), top = px(y0), bottom = px(y1);
+        COLORREF cur = base;
+        const wchar_t* seg = t;
+        for (const wchar_t* q = t;; ++q) {
+            const wchar_t ch = *q;
+            const bool mark = ch >= TuningMenu::kInkCpu && ch <= TuningMenu::kInkEnd;
+            if (!mark && ch) continue;
+            const int len = (int)(q - seg);
+            if (len > 0 && x < right) {
+                SetTextColor(dc, cur);
+                RECT r{ x, top, right, bottom };
+                DrawTextW(dc, seg, len, &r, one | DT_NOPREFIX);
+                SIZE sz{};
+                if (GetTextExtentPoint32W(dc, seg, len, &sz)) x += sz.cx;
+            }
+            if (!ch) break;
+            cur = ch == TuningMenu::kInkCpu ? (dim ? Dim(kInkCpuC) : kInkCpuC)
+                : ch == TuningMenu::kInkGpu ? (dim ? Dim(kInkGpuC) : kInkGpuC) : base;
+            seg = q + 1;
+        }
+    };
     fill(kBg, 0.0f, 0.0f, W, H);
     fill(kLine, 0.0f, 0.0f, W, 1.0f); fill(kLine, 0.0f, H - 1.0f, W, H);   // 1-px frame
     fill(kLine, 0.0f, 0.0f, 1.0f, H); fill(kLine, W - 1.0f, 0.0f, W, H);
     text(fTitle, kText, p.title, 12.0f, kTitleY, W - 12.0f, kTitleY + kTitleH, one);
     for (int l = 0; l < TuningMenu::kPerfLines; ++l) {
         const float y = kPerfY + kPerfLineH * (float)l;
-        text(fPerf, kPerf, p.perf[l], 14.0f, y, W - 14.0f, y + kPerfLineH, one);
+        inkText(fPerf, kPerf, p.perf[l], 14.0f, y, W - 14.0f, y + kPerfLineH, false);   // phase 45: CPU / GPU inks
     }
     text(fSmall, kHead, L"Setting", kNameX0 + 14.0f, kHeadY, kNameX1, kHeadY + kHeadH, one);
     text(fSmall, kHead, L"Value", kValX0, kHeadY, kValX1, kHeadY + kHeadH, one);
     text(fSmall, kHead, L"Hotkey", kKeyX0, kHeadY, kKeyX1, kHeadY + kHeadH, one);
-    text(fSmall, kHead, p.costHead[0] ? p.costHead : L"GPU cost", kCostX0, kHeadY, kCostX1, kHeadY + kHeadH, one);
+    inkText(fSmall, kHead, p.costHead[0] ? p.costHead : L"Cost", kCostX0, kHeadY, kCostX1, kHeadY + kHeadH, false);
     fill(kLine, 10.0f, kRowsY - 2.0f, W - 10.0f, kRowsY - 1.0f);
     const int n = p.nRows < 0 ? 0 : (p.nRows > TuningMenu::kMaxRows ? TuningMenu::kMaxRows : p.nRows);
     for (int i = 0; i < n; ++i) {
@@ -448,7 +486,7 @@ bool RenderPanel(const TuningMenu::Panel& p, float s, uint32_t w, uint32_t h) {
         text(fBody, cName, r.name, kNameX0 + 14.0f, y0, kNameX1, y1, one);
         text(fBody, cName, r.value, kValX0, y0, kValX1, y1, one);
         text(fBody, cKey, r.keys, kKeyX0, y0, kKeyX1, y1, one);
-        text(fBody, cKey, r.cost, kCostX0, y0, kCostX1, y1, one);
+        inkText(fBody, cKey, r.cost, kCostX0, y0, kCostX1, y1, r.greyed != 0);   // phase 45: "<cpu> | <gpu>" in blue / orange
     }
     const float rowsEnd = kRowsY + kRowH * (float)n;
     fill(kLine, 10.0f, rowsEnd + 4.0f, W - 10.0f, rowsEnd + 5.0f);

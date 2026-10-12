@@ -173,6 +173,9 @@ struct TurboStats {
     uint64_t asyncWaits = 0, madeUp = 0, blocks = 0, timeouts = 0, failures = 0;
 };
 TurboStats GetTurboStats();
+// phase 45: the headset's frame period (ns) from the runtime's last real xrWaitFrame (predictedDisplayPeriod; turbo's own waits
+// too); 0 = none yet. The tuning menu's Limit line (once a second; takes the turbo worker's lock briefly).
+int64_t DisplayPeriodNs();
 
 // ---- phase 40: HIDDEN AREA MASK (XR_KHR_visibility_mask; dlaa.ini xr_hidden_mask, inject.cpp draws it) ---------------------
 // The runtime knows which pixels of each eye picture the lenses never show. ETS2 / ATS do not enable XR_KHR_visibility_mask, so

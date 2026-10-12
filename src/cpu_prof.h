@@ -249,16 +249,23 @@ struct Block {
 
 // Cost of one timer transition in TSC ticks (measured once by Calibrate; the report's self-cost estimate).
 inline double g_transTicks = 0.0;
+// phase 45: the best of 8 rounds (one cold round read 2x the warm figure on a Zen 4 test: 58 vs 29 ticks); the tuning menu
+// subtracts entries x this from its CPU figures, so a cold outlier would over-correct them.
 inline void Calibrate() {
     static Tls* dummy = new (std::nothrow) Tls();          // (not registered: never reported)
     if (!dummy) return;
-    dummy->depth = 0; dummy->overflow = 0;
-    const uint64_t t0 = __rdtsc();
-    for (int i = 0; i < 4096; ++i) { Push(*dummy, kBProf); Pop(*dummy); }
-    const uint64_t t1 = __rdtsc();
+    double best = 0.0;
+    for (int round = 0; round < 8; ++round) {
+        dummy->depth = 0; dummy->overflow = 0;
+        const uint64_t t0 = __rdtsc();
+        for (int i = 0; i < 4096; ++i) { Push(*dummy, kBProf); Pop(*dummy); }
+        const uint64_t t1 = __rdtsc();
+        const double r = (double)(t1 - t0) / 8192.0;
+        if (round == 0 || r < best) best = r;
+    }
     volatile uint64_t sink = Get(dummy->ticks[kBProf]) + Get(dummy->transitions);
     (void)sink;
-    g_transTicks = (double)(t1 - t0) / 8192.0;
+    g_transTicks = best;
 }
 
 } // namespace CpuProf

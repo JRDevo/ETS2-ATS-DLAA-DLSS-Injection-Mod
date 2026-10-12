@@ -29,7 +29,12 @@ constexpr int   kMaxRows  = 47;                      // (was 24 before the 4 fps
                                                      //  37 before the phase 42 Foveated passes row, 38 before the 4 phase 43 category headers, 42 before the
                                                      //  5 phase 44 fps box rows (colour, distance, turn, tilt, rotate); a Panel holds
                                                      //  only the VISIBLE rows, nRows <= this)
-constexpr int   kPerfLines = 3;                      // the GPU block under the title (small font, one line each)
+constexpr int   kPerfLines = 3;                      // the perf block under the title (small font, one line each)
+// phase 45: INK MARKS in the perf lines, the cost column cells and its header: kInkCpu / kInkGpu switch the text colour to the
+// CPU blue / the GPU orange (blue / orange, not red / green: readable with the common colour-vision deficiencies), kInkEnd back
+// to the line's own colour. Control characters, never drawn; a text without them draws exactly as before. (Build the strings
+// with %lc -- an "" literal followed by a hex digit would swallow it.)
+constexpr wchar_t kInkCpu = 0x01, kInkGpu = 0x02, kInkEnd = 0x03;
 constexpr float kRefWidth = 760.0f;                  // panel width in reference px (scale 1; was 720 before the GPU cost column)
 constexpr float kWidgetRefW = 92.0f;                 // the fps box in reference px (scale 1)
 constexpr float kWidgetRefH = 44.0f;
@@ -38,15 +43,15 @@ struct Row {
     wchar_t name[48];
     wchar_t value[40];
     wchar_t keys[72];                                // the hotkey(s) of the row + a "VR only" / "flat only" tag
-    wchar_t cost[24];                                // the "GPU cost" column ("1.2 ms", "off", "same", "-")
+    wchar_t cost[32];                                // the cost column: "<cpu> | <gpu>" with ink marks (phase 45), "off", "same", "-"
     unsigned char greyed;                            // 1 = not applicable in the current mode (drawn grey)
 };
 // Fill with memset 0 first: Draw compares the whole struct to decide whether the texture must be rebuilt (the caller keeps
 // every text stable between its once-a-second GPU snapshots, so the texture is not rebuilt every frame).
 struct Panel {
     wchar_t title[112];
-    wchar_t perf[kPerfLines][224];                   // the GPU block (game / fps, the mod's cost per eye)
-    wchar_t costHead[24];                            // the 4th column's header ("GPU cost" / "GPU cost (eye 0)")
+    wchar_t perf[kPerfLines][224];                   // the perf block (Limit / fps / frame busy, the mod's CPU | GPU, the legend)
+    wchar_t costHead[24];                            // the 4th column's header ("CPU | GPU ms" with ink marks, phase 45)
     Row     rows[kMaxRows];
     int     nRows;
     int     sel;

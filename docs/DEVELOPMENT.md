@@ -254,7 +254,7 @@ The self-test dumps eye 0 only in VR (~89 MB per BMP at 4592×6496); snapshots a
   | `mv_sample_shift` | `2` | int 0..4 (v0.6.3); a G-buffer draw is an MV candidate only when `hash(indexCount,startIndex,baseVertex) & ((1<<shift)-1) == 0` (same draws every frame); `0` = every draw (old behaviour), `2` = ~1/4 |
   | `mv_world_slots` | `40` | int 1..128 (v0.6.3); world (layer 0) MV-candidate cap per pass (replaces the old 128 limit) |
   | `mv_cabin_slots` | `24` | int 1..128 (v0.6.3); cabin (layer 1) MV-candidate cap per pass (replaces the old 128 limit) |
-  | `gpu_timing` | `-1` | `-1` = GPU timestamp queries around each eye's DLAA work in VR only, `0` = off, `1` = on (flat too); logs avg ms per eye every 600 frames. v0.6.2: also the whole-frame `GPU spans [...]: scene .. ms/frame \| gbuf .. ms/pass` line every 300 frames, with DLAA ON, OFF or passive |
+  | `gpu_timing` | `-1` | `-1` = GPU timestamp queries around each eye's DLAA work at log level 4 (phase 45; was: VR only), `0` = off, `1` = on (flat too); logs avg ms per eye every 600 frames. v0.6.2: also the whole-frame `GPU spans [...]: scene .. ms/frame \| gbuf .. ms/pass` line every 300 frames, with DLAA ON, OFF or passive |
   | `trace_auto_frame` | `0` | auto-run the frame trace once when the Present count reaches this; `0` = off (`Ctrl+F11` always works) |
   | `dlss_preset` | `default` | DLSS render preset for DLAA (`default`, `J`, `K`, `L`, `M`, `E`, `F`); models 1–4 (`Shift+F1`..`F4`) select `default`/`E`/`F`/`M`; written by `Shift+F12`. v0.7.0: applied to every DLSS quality mode (all hint parameters), so it also picks the model while upscaling |
   | `sharpness` | `0.4` | RCAS sharpen strength after DLAA, 0..1 (`0` = pass skipped); `Shift+F7`/`F8` adjust; written by `Shift+F12` |
@@ -264,7 +264,7 @@ The self-test dumps eye 0 only in VR (~89 MB per BMP at 4592×6496); snapshots a
   | `dlss_upscale` | `1` | `0`/`1` (v0.7.0): DLSS upscaling from the scene size to the eye texture / backbuffer size whenever that is larger (see "DLSS upscaling"); `0` = always DLAA at render res (v0.6.5 path); `Ctrl+F4` toggles; written by `Shift+F12` |
   | `mode` | *(absent)* | `0`/`1`/`2` (v0.7.2): start mode written by the plain `End` key — `1` DLAA, `2` DLSS, `0` off. When present (and no `dlaa_off.txt`) it wins over `dlss_upscale` at startup. `End` cycles and rewrites it |
   | `beeps` | `1` | `0` = no audible feedback for the hotkeys |
-  | `log_level` | `1` | phase 39: `0` off, `1` errors (`LogErr`, "ERROR " in the file), `2` + warnings (`LogWarn`, "WARN  "), `3` + info (`Log`: one-time state lines), `4` + debug (`LogDbg`: periodic statistics, tracing, dumps; also `perf_timers` / `cpu_prof` = -1 on, `vrs_debug`, `did_shadow_verify` -1 = 64, the frame-end rule's counting); a number or the name. The file is created at the first line that passes. A filtered call = one atomic load. Live: the menu's `Logging` row (`LogSetLevel`), which also shows the logging cost (CPU ms per frame inside `LogImpl`, lines/s, + the CPU profiler's own cost at 4) |
+  | `log_level` | `1` | phase 39: `0` off, `1` errors (`LogErr`, "ERROR " in the file), `2` + warnings (`LogWarn`, "WARN  "), `3` + info (`Log`: one-time state lines), `4` + debug (`LogDbg`: periodic statistics, tracing, dumps; also `perf_timers` / `cpu_prof` = -1 on, `vrs_debug`, `did_shadow_verify` -1 = 64, the frame-end rule's counting); a number or the name. The file is created at the first line that passes. A filtered call = one atomic load. Live: the menu's `Logging` row (`LogSetLevel`); its cost column shows the logging cost (CPU ms per frame inside `LogImpl`; the sentence: lines/s, + the CPU profiler's own cost at 4) |
   | `debug` | `0` | v0.7.5: `1` / `true` / `yes` / `on` = write `dlaa_inject.log`; default off (no file is created). Phase 39: `1` = `log_level` 4 when there is no `log_level` line; `0` has no effect |
 
   The values in use are logged at startup. If the image shimmers or looks doubled
@@ -545,7 +545,7 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   `frame #n summary: ...` (first 5 Presents: G-buffer pass entries, depth clears, eye blits, snapshots),
   `DLAA: NGX feature created for eye N`, heartbeat with per-eye frame counts and snapshot counts every 600
   frames, and `DLAA GPU cost eye N: avg X ms` every 600 frames (timestamp queries, read back late, never
-  blocking). `dlaa.ini` `gpu_timing`: -1 (default) = VR only, 0 off, 1 on.
+  blocking). `dlaa.ini` `gpu_timing`: -1 (default) = VR only (phase 45: log level 4), 0 off, 1 on.
 - **Cost.** About 30 MP per eye: expect a heavy GPU hit and ~1.5 GB extra VRAM with both eyes live.
 
 ## OFXR Bridge pass-through (v0.10.0)
@@ -1333,6 +1333,64 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   depth, the drawn-in follow-head extra shift feels right, the drawn-in fixed box keeps its angle); the turn signs as seen in
   the headset on the quad path (the unit test covers the maths and the drawn-in projection, not the runtime); layer order
   with the panel when both distances are close; the Foveated size scaler's steps.
+
+### Phase 45: the menu's cost column shows CPU | GPU, a Limit line; measuring only while the menu is open
+
+- **Cost column.** Each row's cell is `<CPU> | <GPU>` in ms PER FRAME (VR: the GPU side = both eyes summed; before: eye 0's
+  ms per eye), the CPU text in blue (RGB 86,180,233) and the GPU text in orange (RGB 230,159,0) -- Okabe-Ito, not red / green.
+  `-` = that side does not apply / is not measured, `...` = no complete ~1-s interval yet (warm-up after the open), `off`,
+  `same`, `no extra` as before. The colours are control characters in the strings (`TuningMenu::kInkCpu` 0x01, `kInkGpu` 0x02,
+  `kInkEnd` 0x03, built with `%lc`); `menu.cpp` `inkText` draws the segments left to right (greyed rows: inks dimmed halfway
+  to the background); a string without marks draws as before. Header `CPU | GPU ms` in the same inks. `Row::cost` 24 -> 32.
+- **Row -> CPU block** (`cpu_prof.h`, the RENDER thread, ms per frame): Mode / DLAA = every mod hook + block except the
+  menu's own (`menu`, `gpu-timers`, `prof`) | GPU the mod total; Model, DLAA area = `ngx-eval` | NGX; Sharpen strength /
+  width = `-` (inside `dlaa-run`) | sharpen; Texture sharpness rows = `lod` | `-`; See-through depth = `fwd-depth` |
+  see-through; Per-part motion = `mv-gen + did-rec + did-replay + mv-collect + obj-ids` | per-part; Mirror DLAA, Mirrors in
+  turns = `mirror` | mirrors; Foveated rows = `vrs` | `-` (the saving is in the game's own GPU time); Hidden area mask =
+  `hmask` | `-`; FPS counter = `-` (inside `menu`) | the fps box (`kOverlay`); Logging = `LogCost` (every thread, per
+  Present; was in the value column) | `-`. Rows without either: `-`.
+- **CPU data (`MenuCpuRead`).** At the menu's ~1-s snapshots (`MenuPerfTick`, the Present thread) the profiler registry is
+  read lock-free (single-writer relaxed counters; the 10-s log report keeps its own baseline). Render thread = the slot with
+  the most game D3D11 hook calls in the interval (Present / OpenXR excluded) -- the per-thread handling of phase 33: the
+  rows use that thread only; the mod on all other threads together is shown in the perf lines (`other threads`). Frames =
+  the profiler's frame marks (the game's xrEndFrame in VR, Present in flat), the same divisor as the report. **Profiler cost
+  taken out:** each entry of a category minus one calibrated transition (`g_transTicks`; hook bodies two: their push + the
+  pop of the game's call inside), clamped at 0; `measuring` (perf line 2) = every thread's transitions x `g_transTicks` + the
+  `gpu-timers` and `prof` blocks. `CpuProf::Calibrate` now takes the best of 8 rounds (a cold first round read 58 instead of
+  29 TSC ticks on the 9950X3D).
+- **Limit line (`MenuLimit`, perf line 0).** T = wall ms per frame; P = the budget (VR: the runtime's
+  `predictedDisplayPeriod`, new `XrHook::DisplayPeriodNs`; flat: T); B = the frame loop's CPU busy time = per thread with a
+  Present / xrWaitFrame / xrEndFrame role, T minus its time inside the original Present / OpenXR calls minus measuring, the
+  SMALLEST of them (a thread waiting for the other one outside the hooks looks busy); G = the whole-frame scene span (game
+  + mod, both eyes; reads a little low: no UI / post / compositor). Rules in order: VR and T <= 1.04 P -> `headset (N Hz)`;
+  B >= 0.90 P and G >= 0.85 P -> `CPU and GPU`; B >= 0.90 P -> `CPU` (flat: `CPU (or a game fps cap)` -- the game's own
+  limiter sleeps outside the hooks); G >= 0.85 P -> `GPU`; flat with >= 10 % of the frame inside Present -> `vsync / fps
+  cap`; G not there yet -> `...`; else `unknown`. Never a guess.
+- **Perf lines.** 0: `Limit: ..   fps N (T ms[, headset N Hz])   frame busy B | G ms`; 1: `this mod: CPU | GPU ms -- GPU:
+  NGX .., part motion .., camera .., see-through .., mirrors .., sharpen .., copies ..` (VR: both eyes, was one line per
+  eye); 2: the legend (`CPU` blue | `GPU` orange), `CPU = the game's render thread, other threads x; measuring costs y ms
+  CPU (taken out)`.
+- **Measuring only while asked (user requirement: nothing while the menu is closed).** The CPU profiler is switched on by
+  `MenuPerfOpen` like the GPU timers (`cpuForced`), back at `MenuPerfClose` (`cpu_prof` 1 / level 4 keep it on);
+  `ApplyLogLevelGates` with the menu open leaves both on and only updates the forced flags (it used to switch the profiler
+  OFF on a level drop with the menu open). New `g_measure` (`MeasureOn` / `MeasureUpdate`: menu open or log level 4) gates
+  the legacy debug-line timers that ran ALWAYS: the per-draw TSC pairs (collector, object ids, draw record, forward depth --
+  phase 35 measured the QPC version at ~0.13 ms per VR frame), the per-pass QPC timers (replay, forward replay, forward
+  batch, blit), the per-Present `TscCalibrate`, the preview depth-assembly GPU timer, and every `GpuSpanTimer` (new static
+  `s_on`; replay, forward replay, pairing, pass B, mirror run / replay / hold, forward batch). Exception (a feature, not a
+  statistic): the forward-batch timer stays on while the VR forward-depth budget guard can still act (VR, budget > 0,
+  `mv_fwd_depth` not explicit, not switched off yet, on). `gpu_timing = -1` (DLAA stage timestamps, depth snapshot timer,
+  whole-frame spans) now means log level 4 instead of "always in VR"; the menu does not need it (its spans run under
+  `GpuPerf::On`). Closed menu below level 4: each profiler scope = one relaxed load + a not-taken branch, each GPU section =
+  one call + a flag test, each legacy timer = one relaxed load.
+- **Measured (micro-benchmark, Ryzen 9 9950X3D, `cpu_prof.h` as built):** profiler OFF: +0.2 ns per hooked call or block
+  (one load + branch); ON: 26.6 ns per hooked game call (4 timer transitions) and 12.8 ns per mod block entry (2); one
+  transition = 29.3 TSC ticks (~6.7 ns). So the menu's profiler costs about 0.27 ms per 10,000 hooked game calls per frame;
+  the menu shows the live figure (`measuring costs .. ms`) and takes it out of its numbers.
+- **Not verified (needs the game):** the figures and the Limit line in flat / VR (headset / GPU / CPU cases; Turbo mode;
+  reprojection at half rate), the render-thread pick in flat, the inks' readability in the headset, the warm-up, that the
+  `CPU prof` log line and the `perf eye` lines still appear at level 4, that a closed menu below level 4 really shows no
+  `GPU spans` / `DLAA GPU cost` lines in VR any more.
 
 ### The RenderDoc oracle (done in v0.2)
 
