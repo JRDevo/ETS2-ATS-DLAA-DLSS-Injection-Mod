@@ -392,6 +392,8 @@ int main(int argc, char** argv) {
     MenuShot(g, L"tuning-menu.png", none, L"Mode");
     MenuShot(g, L"tuning-menu-vr-performance.png", vrp, L"Foveated (VRS)");
     MenuShot(g, L"tuning-menu-picture.png", pic, L"Sharpen strength");
+    bool all[6]; for (bool& o : all) o = true;
+    MenuShot(g, L"tuning-menu-all-open.png", all, L"Mode");                       // phase 46b: every group open
     FpsShots(g);
     g.ctx->Release();
     g.dev->Release();
