@@ -68,7 +68,9 @@ account — a few hotkeys, an in-game tuning menu (`Delete`) and an optional tex
   to uninstall.
 - **Debug log** for bug reports (off by default).
 
-![The tuning menu, all groups closed](docs/images/tuning-menu.png)
+| Tuning menu, groups closed | Tuning menu, groups open | FPS counter colours |
+|---|---|---|
+| ![The tuning menu, all groups closed](docs/images/tuning-menu.png) | ![The tuning menu, all groups open](docs/images/tuning-menu-all-open.png) | ![The fps counter in its 20 colours](docs/images/fps-counter-colours.png) |
 
 ## ⬇ Download
 
