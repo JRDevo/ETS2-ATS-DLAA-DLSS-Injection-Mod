@@ -557,6 +557,9 @@ log_level = 1
 # Phase 44: the box's text colour, 0..19 = white (default, as before), yellow, amber, orange, red, pink, magenta, purple,
 # violet, blue, sky blue, cyan, teal, mint, green, lime, olive, gold, silver, black on white. Flat and VR. Menu: FPS colour.
 # fps_color = 0
+# Phase 48: the box's brightness in % (10..100, default 100 = the colour as it is). Dims the text colour toward black (the
+# outline stays; "black on white" dims its white outline). Flat and VR. Menu: FPS brightness.
+# fps_brightness = 100
 # Phase 44, VR: the box's distance in cm (30..300, default 80). It keeps the same size in your view at every distance (the
 # VR layer and the fixed box: a real distance; drawn into the picture and following the head: an extra stereo shift on top
 # of menu_vr_depth). Menu: FPS distance (VR).

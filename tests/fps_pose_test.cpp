@@ -36,6 +36,25 @@ int main() {
         CHECK(StepColor(19, 1) == 0 && StepColor(0, -1) == 19 && StepColor(5, 1) == 6, "StepColor wraps");
         CHECK(ClampColor(-1) == 0 && ClampColor(25) == 19 && ClampColor(7) == 7, "ClampColor");
     }
+    // ---- brightness (phase 48)
+    {
+        CHECK(ClampBright(0) == 10 && ClampBright(5) == 10 && ClampBright(55) == 55 && ClampBright(500) == 100, "ClampBright 10..100");
+        CHECK(StepBright(100, 1) == 100 && StepBright(100, -1) == 90 && StepBright(10, -1) == 10 && StepBright(10, 1) == 20, "StepBright 10 %% steps, clamped");
+        for (int i = 0; i < kColorCount; ++i) {
+            const Color& c = ColorOf(i);
+            const Color d = Dimmed(c, 100);
+            CHECK(d.tr == c.tr && d.tg == c.tg && d.tb == c.tb && d.lr == c.lr && d.lg == c.lg && d.lb == c.lb, "preset %d: 100 %% = unchanged", i);
+            const Color h = Dimmed(c, 50);
+            CHECK(i == 19 || (h.lr == c.lr && h.lg == c.lg && h.lb == c.lb), "preset %d: the outline stays", i);
+            const Color m = Dimmed(c, 10);
+            CHECK(i == 19 || (m.tr <= (c.tr + 9) / 10 + 1 && m.tg <= (c.tg + 9) / 10 + 1 && m.tb <= (c.tb + 9) / 10 + 1), "preset %d: 10 %% is dark", i);
+        }
+        const Color w = Dimmed(ColorOf(0), 50);
+        CHECK(w.tr == 128 && w.tg == 128 && w.tb == 128, "white at 50 %% = 128, got %d", w.tr);
+        const Color bw = Dimmed(ColorOf(19), 50);
+        CHECK(bw.tr == 16 && bw.lr == 128 && bw.lg == 128 && bw.lb == 128, "black on white: the white outline dims, text stays");
+        CHECK(Dimmed(ColorOf(2), 10).tr == 26 && Dimmed(ColorOf(2), 10).tg == 19 && Dimmed(ColorOf(2), 10).tb == 0, "amber at 10 %%");
+    }
     // ---- turn quaternion conventions
     {
         double q[4];

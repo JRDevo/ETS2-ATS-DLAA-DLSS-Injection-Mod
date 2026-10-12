@@ -1491,6 +1491,19 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   headset (the box should now ride the dashboard on bumps, braking and hills, in a car too); the logged cab sway figures;
   the fallback in the exterior camera / menus and the new lock after a truck change.
 
+### Phase 48: fps box brightness (`fps_brightness` 10..100 %)
+
+- `fps_brightness` (default 100 = the colour as it is). `FpsPose::Dimmed(ColorOf(g_fpsColor), g_fpsBright)` scales the glyph
+  colour by pct / 100 toward black (outline kept); a preset with a LIGHTER outline than text (19, black on white) scales the
+  outline instead, so the box still dims. `FpsSyncColor()` (inject.cpp) pushes the result into `SetWidgetColors` before every
+  `DrawWidget` -- flat, VR quad layer, VR drawn-in and phase 47 "Attached to vehicle" all go through it, and the widget texture
+  cache already compares the colours, so a change rebuilds once; no separate cache key.
+- Menu: row `FPS brightness` (`MR_FPSBRIGHT`, after `FPS colour`, Left / Right 10 % steps, fresh presses, live; Shift+F12 saves
+  with the other fps_* keys under `g_fpsExplicit`; Reset removes the key). `kMaxRows` 47 -> 48; the group's last row stays
+  `MR_FPSROLL`; 48 reset keys (cap 56). LoadConfig reads it as a standalone `if (...) { ...; continue; }` line (C1061).
+- Test: `tests/fps_pose_test.cpp` (clamp / step, 100 % unchanged for all 20 presets, outline kept, 50 % white = 128, preset 19
+  dims the outline, amber at 10 %).
+
 ### The RenderDoc oracle (done in v0.2)
 
 Capture a frame of the unmodified game to learn empirically: which pass writes

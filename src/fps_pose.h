@@ -48,6 +48,21 @@ inline const Color& ColorOf(int i) {
 inline int ClampColor(long long v) { return v < 0 ? 0 : (v >= kColorCount ? kColorCount - 1 : (int)v); }
 inline int StepColor(int cur, int dir) { return ((cur + dir) % kColorCount + kColorCount) % kColorCount; }   // wraps
 
+// ---- brightness (fps_brightness 10..100 %, phase 48) ---------------------------------------------------------------------
+// The box dims toward black: the glyph colour * pct / 100. A preset whose outline is LIGHTER than its text (19, black on white)
+// dims the outline instead, so the box still gets dimmer. 100 = the preset as it is.
+constexpr int kBrightMin = 10, kBrightMax = 100, kBrightDefault = 100, kBrightStep = 10;
+inline int ClampBright(long long v) { return v < kBrightMin ? kBrightMin : (v > kBrightMax ? kBrightMax : (int)v); }
+inline int StepBright(int cur, int dir) { return ClampBright((long long)cur + (long long)kBrightStep * dir); }
+inline uint8_t DimByte(int v, int pct) { return (uint8_t)((v * ClampBright(pct) + 50) / 100); }
+inline Color Dimmed(const Color& c, int pct) {
+    Color o = c;
+    const int lt = c.tr + c.tg + c.tb, ll = c.lr + c.lg + c.lb;
+    if (ll > lt) { o.lr = DimByte(c.lr, pct); o.lg = DimByte(c.lg, pct); o.lb = DimByte(c.lb, pct); }
+    else         { o.tr = DimByte(c.tr, pct); o.tg = DimByte(c.tg, pct); o.tb = DimByte(c.tb, pct); }
+    return o;
+}
+
 // ---- ini ranges --------------------------------------------------------------------------------------------------------
 constexpr int kDistMin = 30, kDistMax = 300, kDistDefault = 80;   // fps_vr_dist, cm (80 = the phase 28 0.8 m)
 constexpr int kYawMax = 90, kPitchMax = 90, kRollMax = 180;       // degrees, symmetric
