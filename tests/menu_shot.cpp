@@ -105,7 +105,7 @@ static const wchar_t kPerf1[] = L"this mod: <c>0.31</> | <g>3.4</> ms -- GPU: NG
                                 L"mirrors 0.3, sharpen 0.1, copies 0.2";
 static const wchar_t kPerf2[] = L"<c>CPU</> | <g>GPU</> ms per frame (GPU: both eyes), other threads 0.4. CPU = the game's render thread; "
                                 L"measuring costs 0.12 ms CPU (taken out).";
-static const wchar_t kTitle[] = L"ETS2 / ATS DLAA & DLSS mod v0.11.0 - tuning menu";
+static const wchar_t kTitle[] = L"ETS2 / ATS DLAA & DLSS mod v0.12.0 - tuning menu";
 static const wchar_t kFooter[] = L"Up / Down select   Left / Right change   Delete close   hold a key: rebind";
 
 // Ink shorthand in the table strings: "<c>0.31</>" = CPU blue, "<g>3.4</>" = GPU orange (menu.h kInkCpu / kInkGpu / kInkEnd).

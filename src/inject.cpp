@@ -1,3 +1,4 @@
+// v0.12.0 -- phases 40-48 (below, newest first) + issue #12 flat multi-monitor (FlatViewCount / r_multimon_mode 2).
 // phase 47 -- FPS BOX "ATTACHED TO VEHICLE" (dlaa.ini fps_vr_lock = 2; the FPS counter lock row's 3rd value; src/fps_cab.h /
 //           fps_cab.cpp, menu.cpp VSCab / TuningMenu::DrawWidgetMvp). At each VR eye blit FpsCabBlit hands the pass's DrawIdRecord to
 //           FpsCab::OnBlit: a lock-on readback of the biggest cabin-layer draws' cb0 rows (+ the OpenXR poses) maps the play-space
