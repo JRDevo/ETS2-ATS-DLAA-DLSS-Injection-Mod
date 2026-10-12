@@ -1209,6 +1209,50 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   at some scales; the VR quad image is now 1824 x 1884) and `RenderPanel` draws only whole lines, cut at a word + `...` (`DescFit`); the Reset row
   resets after a `bind_hold_ms` hold of the menu Right (`MenuResetTick`, the bind bar, `hold Right 5 s`), no longer on a Left / Right press.
 
+### Phase 41: mirrors in turns (`mirror_turns`, default 0)
+
+- **Investigation.** Mirror views per frame: ETS2 flat 4 (512x1024 x2, 512x512, 512x256, ~1.44 MP), ATS 2-3 (2048x512,
+  1024x512, now and then a 256x512 / second 1024x512). VR: the game renders the mirrors ONCE per frame, not per eye (phase 21:
+  ~2-3 mirror views per Present for both eyes together) -- so "one DLAA for both eyes" has nothing to share. Everything a mirror
+  unit costs is per view and per run: the draw-id replay (`MirReplay`, GPU `replay`), the depth snapshot, the camera / per-draw
+  MV chain + pass B, copy-in, NGX (`mirror-NGX`), copy-out (README: 1.3 ms MV + ids + 0.4 ms NGX for the 4 flat views; VR ~0.4 ms
+  per mirror with per-part motion, ~0.15 ms camera-only). A skipped mirror without anything put in shows the game's raw aliased
+  picture (not jittered: `jitOn` needs a run) -- every 2nd frame aliased = a 36 Hz edge flicker over the glass (phase 21's
+  "raw jittered picture = the flicker").
+- **What it does** (`src/mirror_turns.h` = the decisions, `inject.cpp` MIRROR UNITS = the plumbing). Each unit has a turn slot
+  0 / 1; on frame fr the slot with (fr + slot) even runs the full path, the other HOLDS: no jitter, nothing recorded / replayed,
+  no snapshot, no Run, and at its depth discard (`MirFlush`) its last DLAA output (`SceneDlaa::ResultTex`) is copied over the
+  game's raw mirror colour before the game down-samples it (the existing mode-3 hold, now timed: `gpuHold`). Held, not raw:
+  edges stay clean, only moving things in the glass update at half rate (own trailer / cab are static to the mirror camera).
+  A cheap path instead (camera-only MVs + NGX every frame) would keep NGX + pass B + copies and break the per-draw pairing
+  (the record of a camera-only frame is missing for the next full run). Out of turn (`MirTurns::Runs`): first run / reset
+  pending / epoch change (`MirInvalidate`), no run in the previous frame (never 2 frames stale), no last output of this size,
+  a camera cut (`MirTurnsNoteCut`: the main view's `dl.LastReset()` after its Run, or a mirror unit's own reset after a run
+  without one -- a mirror that resets every run is not a cut each time; covers this frame and the next), the jitter-only key.
+  Slots: a new unit takes the lighter slot (`PickSlot`), and `MirTurnsEndFrame` re-balances all units in view (last 8 frames)
+  by area, largest first (`AssignSlots`) whenever that set changes -- ETS2 flat: 0.79 / 0.66 MP per slot of 1.44 MP, so the
+  PEAK per frame drops too. Mode 3 (`mirror_vr_mode` / `mirror_flat_mode` 3, each unit every 2nd frame by index parity) now
+  takes this path (`MirTurnsOn() = mirror_turns || mode 3`).
+- **History.** Everything temporal is per unit and moves only on its runs: the Halton phase (`phaseCtr` counts jittered views;
+  a held view is not jittered), the camera record / previous matrices and the per-draw record pairing (CameraMv / DrawIdMv commit
+  inside `Run`), NGX's history. So a run's motion vectors point back to the unit's LAST RUN. `MirFlush` keeps the history over a
+  gap of 1, or 2 with turns on or when the frame between was the unit's hold (`GapKeepsHistory`; was: mode 3 only, gap exactly 2).
+  WARP harness S20 (= S5 with the mirror unit running on even frames + every f % 13 == 7: gaps of 1 and 2 mixed, 220 frames):
+  0 of 7.97 M mirror pixels outside the MV tolerance vs the unit's last run, no world miss / reset, the own trailer a mover with
+  R = I in 118 of 118 frames. `tests/mirror_turns_test.cpp` (594 checks): never a hold after a non-run, exactly one slot per
+  steady frame, longest gap 2, no history reset over a gap, every forced case, slot moves, 51 % of the mirror pixels per frame.
+- **Menu / ini / log.** Row `Mirrors in turns` (`MR_MIRTURNS`, under Mirror DLAA; greyed while mirror DLAA is off or in mode 3;
+  cost column = the mirrors' live cost), `ToggleMirTurns`, `mirror_turns` saved when explicit, removed by Reset (40 keys =
+  `kIniMaxKeys`), `kMaxRows` 36. Config line `phase 41: mirror_turns=...`; log level 4: the first 24 frames with mirror views
+  after turns switch on get `mirror turns @Present N: R ran, H held -- unit u WxH slot s turn / HELD / <forced reason>`;
+  `mirror turns: slots balanced for N units [...]` on a re-balance (first 16); the `mirror units @blit` line gains per unit
+  `{turns unit u: slot, ran on its turn + forced, held (copy ms)}` and `mirrors in turns (...): views on their turn, held,
+  forced [reasons] | camera cuts: main view, mirror | slot balances | ~X ms GPU per frame saved by the held views | last frames
+  (units): #fr ran [..] held [..]` (saved = held views x (that unit's DLAA + replay ms per run - its copy ms) / Presents, from the
+  per-unit GPU span timers).
+- **Not verified (needs the game):** the saving in the `perf eye` lines / menu GPU line; how the half-rate traffic in the glass
+  looks (flat and VR); how often the main view's reset forces a full frame while driving.
+
 ### The RenderDoc oracle (done in v0.2)
 
 Capture a frame of the unmodified game to learn empirically: which pass writes

@@ -46,6 +46,8 @@ jobs:
           if not exist build\tests\drawid_harness.exe exit /b 1
           call tests\build_lod_scope_test.bat
           if not exist build\tests\lod_scope_test.exe exit /b 1
+          call tests\build_mirror_turns_test.bat
+          if not exist build\tests\mirror_turns_test.exe exit /b 1
 
       - name: Test draw-id harness (did_shadow off)
         run: build\tests\drawid_harness.exe -1 0.1
@@ -55,3 +57,6 @@ jobs:
 
       - name: Test LOD bias scope (inject.cpp without WITH_DLAA)
         run: build\tests\lod_scope_test.exe
+
+      - name: Test mirrors in turns (src/mirror_turns.h decisions)
+        run: build\tests\mirror_turns_test.exe

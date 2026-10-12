@@ -452,6 +452,10 @@ The three green lines under the title show the game's GPU time per frame, what t
   Without `camera` each moving part moves exactly in the glass (about 0.4 ms per mirror in VR); with `camera` the mirror
   uses the camera motion only: the cheapest per mirror (about 0.15 ms), but moving traffic can ghost in the glass
   (`mirror_mv` in `dlaa.ini`). `Alt+F6` still switches it on / off.
+- **Mirrors in turns** (`mirror_turns`, off by default): each mirror gets its DLAA only every 2nd frame and shows its
+  last clean picture in between. That is about half the mirror cost. Edges in the glass stay clean; moving things in the
+  glass update at half the frame rate (a slight judder on passing traffic). A reset or a big camera jump updates every
+  mirror at once.
 - **Turbo mode (VR)** (`xr_turbo`, off by default; from OpenXR Toolkit): the game stops waiting for the headset each
   frame. More fps only when the CPU is the limit. Warning: frame smoothing (ASW, Motion Smoothing, Motion Reprojection,
   SSW) does not work while it is on. Switch it off again if the picture judders.
@@ -510,6 +514,7 @@ The table below lists the commonly used keys:
 | `mv_objects` | `2` | motion vectors for moving traffic: `2` = every moving part gets its own exact motion (default), `0` = camera motion only (`1` = the older method, for comparison) |
 | `mirror_dlaa` | `1` | DLAA on the truck / car mirrors: `1` = each mirror gets its own DLAA (default), `0` = mirrors are left as the game draws them. `Alt+F6` switches it live, `Shift+F12` saves. With OptiScaler next to the game exe (v0.11.0) it starts off by itself unless this key is set: its DLSS 5 bridge crashes on the mirror frames (issue #8). |
 | `mirror_mv` | `parts` | motion in the mirrors (v0.10.2, VR and flat): `parts` = each moving part gets its own exact motion in the glass (default, about 0.4 ms per mirror in VR), `camera` = camera motion only (about 0.15 ms per mirror, moving traffic can ghost in the glass). Used with `mirror_vr_mode` / `mirror_flat_mode` 1, 2 and 3; mode 4 is always camera motion. The menu's Mirror DLAA row sets it live, `Shift+F12` saves |
+| `mirror_turns` | `0` | mirrors in turns (VR and flat): `1` = each mirror gets its DLAA every 2nd frame and shows its last clean picture in between (about half the mirror cost; moving things in the glass update at half rate), `0` = every mirror every frame (default). The menu's `Mirrors in turns` row switches it live, `Shift+F12` saves |
 | `dlaa_pre_tonemap` | `1` | DLAA before the game's tonemap (flat DLAA mode): `1` = on the game's HDR colours (default), `0` = on the finished picture at the end of the frame. `Alt+F7` switches it live, `Shift+F12` saves |
 | `tex_lod_bias` | `0` | sharper texture text: texture mip LOD bias for the 3-D world while DLAA / DLSS runs, `-3`..`1`, `0` = off. Try `-0.5` to `-1`; more negative = sharper but more shimmer on fine patterns. `Ctrl+F1` / `F2` change it live, `Shift+F12` saves |
 | `tex_lod_bias_auto` | `0` | `1` = while DLSS upscales, add log2(render width / output width) on top of `tex_lod_bias` (e.g. 75 % render width → −0.42) |
@@ -570,6 +575,7 @@ The game held its 72 fps cap the whole time.
 | Model (`Shift+F1..F4`, `dlss_preset`) | 1 = 2.4 ms, 2 (E) = 1.0 ms, 3 (F) = 1.0 ms, 4 (M) = 9.4 ms per eye at 4592x6496 | measured in VR; E is the default |
 | DLAA area (`dlaa_area`, `Shift+F5/F6`, VR only) | 40 % = about 0.45 ms per eye instead of 1.0 | NGX runs on the centre only; the edge keeps the raw picture. `10`..`100`; also applies to the VR main menu / garage truck picture |
 | Mirror DLAA (`mirror_dlaa`, `Alt+F6`) | 1.7 ms per frame flat with 4 mirrors | the second-biggest item after DLAA itself |
+| Mirrors in turns (`mirror_turns`, menu row) | expected: about half the mirror cost (~0.8 ms per frame flat with 4 mirrors) | not yet measured in game; each mirror updates every 2nd frame |
 | Per-part motion vectors (`mv_objects`, `Alt+F5`) | about 0.8 ms per frame flat | 0 = camera-only motion: traffic ghosts again |
 | Static redraw skip (`mv_replay_static_frames`, `mv_replay_static_every`) | saves most of the per-part `replay` (2-3 ms at 4K in ATS before it) | on by default; `mv_replay_static_frames = 0` = redraw everything every frame |
 | Wire / plate depth (`mv_fwd_depth`, `Ctrl+F3`) | 0.5 ms per frame flat | off: wires and fences smear when you move |
@@ -597,6 +603,13 @@ roughly double. `mirror_vr_mode` (0 off, 1 all mirrors, 2 only the two largest, 
 `mirror_dlaa = 0` are the first knobs to turn if VR drops below the headset rate (the menu's Mirror DLAA row sets them live:
 `1 mirror (largest)` is the cheapest clean choice; v0.10.2: `1 mirror, camera` / `mirror_mv = camera` drops the per-part
 motion in the mirrors, about 0.15 ms per mirror instead of 0.4 ms).
+
+**Mirrors in turns** (`mirror_turns = 1`, the menu's `Mirrors in turns` row): every mirror still gets DLAA, but only
+every 2nd frame; in between it shows its last clean picture. Each frame does about half of the mirrors (big and small
+mirrors are split evenly), so the mirror cost per frame drops to about half, also at its peak. The game renders each
+mirror once per frame, also in VR, so this is the only way to share the work. Watch for: moving traffic in the glass
+moves at half the frame rate. With `log_level = 4` the `mirror units` lines show which mirror ran in each frame and the
+ms saved.
 
 **Test rig** (all numbers above): AMD Ryzen 9 9950X3D, 62 GB RAM, NVIDIA GeForce RTX 5090 (driver 32.0.16.1692),
 Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR); ATS 1.61, ETS2 current.

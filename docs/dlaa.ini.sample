@@ -200,6 +200,12 @@ log_level = 1
 #   all mirrors = mode 1, parts                      all, camera motion = mode 4
 # Shift+F12 / the Save row writes mirror_mv with the mode; the Reset row removes it.
 # mirror_mv = parts
+# phase 41: mirrors in turns (VR and flat). 1 = each mirror gets its DLAA every 2nd frame and shows its last clean picture in
+# between (half of the mirrors per frame, big and small ones split evenly): about half the mirror GPU cost, also at its peak.
+# Edges stay clean; moving things in the glass update at half the frame rate. A reset, a big camera jump or a frame without a
+# run updates a mirror at once. 0 = every mirror every frame (default). mirror_vr_mode / mirror_flat_mode 3 = every mirror in
+# turns whatever this says. The tuning menu's "Mirrors in turns" row switches it live; Shift+F12 / the Save row writes it.
+# mirror_turns = 0
 
 # ---- v0.10.0 phase 8 PERFORMANCE (each one has the fast setting as its default; the other value is the phase-7 behaviour) ----
 # with log_level = 4 the log gets "perf eye N" lines every 600 frames: the GPU time of every part of the mod per eye (NGX itself

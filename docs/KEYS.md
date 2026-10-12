@@ -108,6 +108,10 @@ menu and the garage / truck dealer screens, before a save is loaded).
   with the state it had; a `dlaa.ini` / profile value that is none of the seven shows as it is (`3 largest`, `3 largest,
   camera`, `all, every 2nd frame`, `all, 2nd fr., camera`, `off (mode 0)`) and `Left` / `Right` go to the nearest state on
   that side.
+- **Mirrors in turns** (phase 41, `mirror_turns`, off by default): `Left` / `Right` switch it. On, each mirror gets its DLAA
+  every 2nd frame and shows its last clean picture in between: about half the mirror cost. Works with every Mirror DLAA
+  state; greyed while Mirror DLAA is off, and shows `on (mode 3)` with a `dlaa.ini` mirror mode 3 (already in turns).
+  Beeps: high = on, low = off. `Shift+F12` / the Save row writes it, the Reset row removes it.
 - **Save to dlaa.ini** (or `Shift+F12`) writes the live values, and the panel position once you changed it
   (`menu_x`, `menu_y`, `menu_scale`, `menu_vr_x`, `menu_vr_y`, `menu_vr_scale`, `menu_vr_depth`, `menu_vr_dist`, `menu_vr_face`) and the fps box once you
   changed it (the 7 `fps_*` keys), keeping every other line.

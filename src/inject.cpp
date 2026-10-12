@@ -685,6 +685,7 @@
 #include "dlaa_stage.h"
 #include "gpu_perf.h"
 #include "gpu_pass.h"                                // phase 36: GPU time per pass type (measurement only)
+#include "mirror_turns.h"                            // phase 41: mirrors in turns (mirror_turns; pure decisions)
 #include "vrs.h"                                    // phase 34: VRS fixed foveated rendering (NVAPI; VR world scene only)
 #endif
 #include "cpu_pin.h"                                // phase 32: keep the game on the V-Cache cores (cpu_cache_pin; both builds)
@@ -2066,7 +2067,11 @@ bool             g_mirCamOnly = false;          // v0.10.2: dlaa.ini mirror_mv (
                                                 // views modes 1 / 2 / 3 handle use camera motion vectors only (no per-draw ids,
                                                 // as mode 4); one key for VR and flat (as mirror_vr_views). MirIdsOff()
 int MirMode();                                 // v0.10.0 phase 10: the mirror mode in force (VR: mirror_vr_mode, flat: _flat_)
-uint64_t         g_mirVrSkip = 0, g_mirAltHeld = 0, g_mirAltRaw = 0;   // stats window (mirror_vr_mode 2 / 3)
+uint64_t         g_mirVrSkip = 0, g_mirAltHeld = 0, g_mirAltRaw = 0;   // stats window (mirror_vr_mode 2 / 3; phase 41: + turns)
+int              g_mirTurns = 0;                // phase 41: dlaa.ini mirror_turns (0 = off, 1 = each mirror every 2nd frame,
+                                                // its last DLAA picture in between; mirror_turns.h). The menu row sets it live
+bool             g_mirTurnsExplicit = false;    // set in dlaa.ini or changed in the menu -> SaveSettings writes mirror_turns
+void MirTurnsNoteCut(int why);                  // phase 41: a camera cut -> every mirror unit runs this frame and the next
 bool             g_slotPool = true;             // dlaa.ini mv_slot_pool: pass-slot depth twin / forward depth / draw-id
                                                 // textures go back to a shared pool when their pass is consumed
 // v0.10.0 phase 9 VR cost (the "phase 9 (v0.10.0)" config line, the "perf view" line)
@@ -2699,6 +2704,7 @@ void SaveSettings(uint64_t n) {
                                                           // phase 30: + xr_turbo = 33
                                                           // phase 34: + vrs / vrs_inner / vrs_outer = 36
                                                           // phase 39: + log_level = 37
+                                                          // phase 41: + mirror_turns = 38
     int nkv = 0;
     auto add = [&](const char* k) -> char* { kv[nkv].key = k; return kv[nkv++].val; };
     if (g_profExplicit[PK_PRESET]) snprintf(add("dlss_preset"), sizeof(kv[0].val), "%s", preset);
@@ -2722,6 +2728,7 @@ void SaveSettings(uint64_t n) {
     // v0.10.2: mirror_mv (parts / camera, one key for both kinds) with either mode (the row sets it with the mode it shows)
     const bool mirMvW = mirVrW || mirFlatW;
     if (mirMvW) snprintf(add("mirror_mv"), sizeof(kv[0].val), "%s", g_mirCamOnly ? "camera" : "parts");
+    if (g_mirTurnsExplicit) snprintf(add("mirror_turns"), sizeof(kv[0].val), "%d", g_mirTurns);   // phase 41 (Mirrors in turns row)
     snprintf(add("dlaa_pre_tonemap"), sizeof(kv[0].val), "%d", preTm);
     snprintf(add("perf_profile"), sizeof(kv[0].val), "%s", kProfName[g_profile]);
     if (g_menuExplicit) {                                 // v0.10.0 tuning menu: the panel placement, only once changed in the menu
@@ -2771,13 +2778,15 @@ void SaveSettings(uint64_t n) {
     char notW[128];
     snprintf(notW, sizeof(notW), "%s%s%s%s%s", g_profExplicit[PK_PRESET] ? "" : " dlss_preset", g_profExplicit[PK_AREA] ? "" : " dlaa_area",
              g_profExplicit[PK_MIRROR_DLAA] ? "" : " mirror_dlaa", mirVrW ? "" : " mirror_vr_mode", mirFlatW ? "" : " mirror_flat_mode");
-    char mirW[128] = "";                                  // v0.10.2: the mirror modes written (the menu's Mirror DLAA row)
+    char mirW[160] = "";                                  // v0.10.2: the mirror modes written (the menu's Mirror DLAA row; phase 41: 128 -> 160)
     {
         int o = 0;
         if (mirVrW) o += snprintf(mirW + o, sizeof(mirW) - (size_t)o, " mirror_vr_mode=%d", g_mirVrMode);
         if (mirFlatW) o += snprintf(mirW + o, sizeof(mirW) - (size_t)o, " mirror_flat_mode=%d", g_mirFlatMode);
         if (mirViewsW) o += snprintf(mirW + o, sizeof(mirW) - (size_t)o, " mirror_vr_views=%d", g_mirVrViews);
-        if (mirMvW) snprintf(mirW + o, sizeof(mirW) - (size_t)o, " mirror_mv=%s", g_mirCamOnly ? "camera" : "parts");
+        if (mirMvW) o += snprintf(mirW + o, sizeof(mirW) - (size_t)o, " mirror_mv=%s", g_mirCamOnly ? "camera" : "parts");
+        if (g_mirTurnsExplicit && o < (int)sizeof(mirW))  // phase 41
+            snprintf(mirW + o, sizeof(mirW) - (size_t)o, " mirror_turns=%d", g_mirTurns);
     }
     if (WriteIniPreserving(kv, nkv)) {
         Log("settings saved to dlaa.ini: dlss_preset=%s dlaa_area=%d sharpness=%.1f sharp_radius=%.1f dlss_upscale=%d tex_lod_bias=%.2f tex_lod_bias_cutout=%s mv_objects=%d mirror_dlaa=%d%s dlaa_pre_tonemap=%d perf_profile=%s%s%s (save key, Present #%llu)%s%s%s%s",
@@ -9975,6 +9984,7 @@ void PreTonemapPoint(ID3D11DeviceContext1* ctx, PassSlot& slot, bool atLeave) {
                            g_didCfg ? &g_didFwdRing[k] : nullptr);
     t_inDlaa = false;
     UpdateMedoidDrop(0, dl);                              // v0.10.0 phase 8
+    if (ok && dl.LastReset()) MirTurnsNoteCut(0);         // phase 41: a camera cut -> the mirrors run out of turn (if in turns)
     if (o.switched > 0)
         PreStage(true, nullptr, td.Width, td.Height,
                  o.forced ? "switched after 2 x the hysteresis without a warm HDR unit (its history starts over)"
@@ -10667,6 +10677,9 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
                                g_didCfg ? didRec : nullptr, g_didCfg ? didFwdRec : nullptr);
         t_inDlaa = false;
         UpdateMedoidDrop(eye, dl);                       // v0.10.0 phase 8
+        // phase 41: the main view's history reset (a camera cut, a teleport, a DLAA key) -> the mirrors run out of turn this frame
+        // and the next (MirTurnsNoteCut: only while mirror_turns / mode 3 is on)
+        if (ok && dl.LastReset()) MirTurnsNoteCut(0);
         // v0.10.0 phase 7: a post -> pre switch is coming -> the HDR unit evaluates the same pass on its forward colour (same MV /
         // depth / jitter, nothing written back) so it takes over with a continuous history
         if (ok && eye == 0 && slot.warmHdr && slot.warmTex) {
@@ -13066,6 +13079,14 @@ struct MirUnit {
     bool     resetPending = true;                  // the next Run drops the history (new / re-homed / taken over)
     bool     inited = false, unsupported = false;
     bool     altSkip = false;                      // v0.10.0 phase 8 (mirror_vr_mode 3): this view is the unit's off frame
+                                                   // phase 41: = the view HOLDS (mirror_turns or mode 3): no jitter / record /
+                                                   // DLAA, its last DLAA output is copied in (MirFlush)
+    int      turnSlot = -1;                        // phase 41: its turn slot 0 / 1 (-1 = not placed yet; MirTurnsEndFrame)
+    int      turnWhy = 0;                          // phase 41: MirTurns::Why of its current view
+    uint64_t heldFrame = 0;                        // phase 41: g_frames of its last held view
+    bool     lastRunReset = true;                  // phase 41: its last run ended with a history reset (MirTurnsNoteCut filter)
+    uint64_t sTurnRun = 0, sTurnHeld = 0, sTurnForced = 0;   // phase 41 stats window: views run on their turn / held / forced
+    GpuSpanTimer gpuHold;                          // phase 41: the held copy
     int      forcedView = 0;                       // forced replays in this view
     int      failRun = 0;                          // failed Runs in a row
     UINT     failW = 0, failH = 0;                 // a size whose unit build failed (InitFailed): no jitter, no retry there
@@ -13153,6 +13174,85 @@ inline bool MirPathLive() {
     return g_mirOn.load(std::memory_order_relaxed) && g_dlaaOn.load(std::memory_order_relaxed) &&
            !g_passive.load(std::memory_order_relaxed) && !g_gameDeviceChanged.load(std::memory_order_relaxed) &&
            ShaderCache::Done();
+}
+
+// ---- phase 41: MIRRORS IN TURNS (dlaa.ini mirror_turns; the decisions and the WHY are in mirror_turns.h) ----------------------
+// mirror_vr_mode / mirror_flat_mode 3 (each unit every 2nd frame, v0.10.0 phase 8) is now "every view, in turns": the same path.
+inline bool MirTurnsOn() { return g_mirTurns != 0 || MirMode() == 3; }
+uint64_t g_mirForceFrame = 0;                            // frames <= this run every unit (a camera cut; MirTurnsNoteCut)
+uint64_t g_mirTurnCuts[3] = {};                          // stats window: cuts noted (0 main view reset, 1 mirror reset, 2 other)
+uint64_t g_mirTurnWhy[MirTurns::kWhyN] = {};             // stats window: views by reason
+uint64_t g_mirTurnFrames = 0, g_mirTurnBalances = 0;     // stats window: frames with turns on and mirror views, slot re-balances
+uint32_t g_mirTurnMask = 0;                              // the units in view (last 8 frames) the slots were balanced for
+uint32_t g_mirTurnRunMask = 0, g_mirTurnHeldMask = 0;    // this frame: units that ran / held (bit = unit)
+int      g_mirTurnFrameLogs = 0;                         // per-frame log lines left (log level 4; re-armed when turns switch on)
+struct MirTurnFrame { uint64_t fr; uint32_t run, held; };
+MirTurnFrame g_mirTurnHist[8] = {};                      // the last 8 frames with mirror views (MirStatsLog prints them)
+int      g_mirTurnHistN = 0;
+// A camera cut (the main view's DLAA history reset, or a mirror unit's own Run reset): every unit runs on this frame and the
+// next -- a held picture would show the old place for one more frame.
+void MirTurnsNoteCut(int why) {
+    if (!MirTurnsOn()) return;
+    const uint64_t f = g_frames.load(std::memory_order_relaxed) + 1;
+    if (f > g_mirForceFrame) g_mirForceFrame = f;
+    ++g_mirTurnCuts[why < 0 || why > 2 ? 2 : why];
+}
+// MirNextFrame (before the frame's tables restart): the frame's run / held units go into the history ring (+ the first per-frame
+// log lines at level 4), and the slots are re-balanced (largest first onto the lighter slot, MirTurns::AssignSlots) whenever the
+// set of units in view in the last 8 frames changed -- rare (a mirror appears / goes); a moved slot costs at most one forced run.
+void MirTurnsEndFrame(uint64_t fr) {
+    const uint32_t run = g_mirTurnRunMask, held = g_mirTurnHeldMask;
+    g_mirTurnRunMask = g_mirTurnHeldMask = 0;
+    if (!MirTurnsOn()) { g_mirTurnMask = 0; return; }
+    if (run | held) {
+        ++g_mirTurnFrames;
+        g_mirTurnHist[g_mirTurnHistN & 7] = { fr, run, held };
+        ++g_mirTurnHistN;
+        if (g_mirTurnFrameLogs > 0 && LogDebugLevel()) {
+            --g_mirTurnFrameLogs;
+            char b[640] = "";
+            size_t o = 0;
+            for (int u = 0; u < kMirCap && o < sizeof(b); ++u) {
+                if (!((run | held) & (1u << u))) continue;
+                const MirUnit& m = g_mir[u];
+                o += (size_t)snprintf(b + o, sizeof(b) - o, "%sunit %d %ux%u slot %d %s", o ? ", " : "", u, m.w, m.h, m.turnSlot,
+                                      (held & (1u << u)) ? "HELD (last DLAA picture)" : MirTurns::WhyName(m.turnWhy));
+            }
+            LogDbg("mirror turns @Present %llu: %d ran, %d held -- %s%s", (unsigned long long)fr, (int)__popcnt(run), (int)__popcnt(held), b,
+                   fr <= g_mirForceFrame ? " (camera cut: every unit runs)" : "");
+        }
+    }
+    uint32_t mask = 0;
+    for (int u = 0; u < kMirCap; ++u) {
+        const MirUnit& m = g_mir[u];
+        if (m.used && m.viewFrame + 8 >= fr && m.viewFrame <= fr) mask |= 1u << u;
+    }
+    if (mask == g_mirTurnMask) return;
+    g_mirTurnMask = mask;
+    uint64_t area[kMirCap];
+    int idx[kMirCap], slot[kMirCap], n = 0;
+    for (int u = 0; u < kMirCap; ++u) {
+        if (!(mask & (1u << u))) continue;
+        idx[n] = u; area[n] = (uint64_t)g_mir[u].w * g_mir[u].h; ++n;
+    }
+    MirTurns::AssignSlots(area, n, slot);
+    char b[512] = "";
+    size_t o = 0;
+    uint64_t sum[2] = { 0, 0 };
+    for (int k = 0; k < n; ++k) {
+        g_mir[idx[k]].turnSlot = slot[k];
+        sum[slot[k] & 1] += area[k];
+        if (o < sizeof(b))
+            o += (size_t)snprintf(b + o, sizeof(b) - o, "%sunit %d %ux%u -> slot %d", o ? ", " : "", idx[k], g_mir[idx[k]].w,
+                                  g_mir[idx[k]].h, slot[k]);
+    }
+    ++g_mirTurnBalances;
+    static int balLogs = 0;
+    if (balLogs < 16 && n > 0) {
+        ++balLogs;
+        LogDbg("mirror turns: slots balanced for %d unit%s in view [%s] -- slot 0 %.2f MP, slot 1 %.2f MP (each frame runs one slot; "
+               "Present #%llu)", n, n == 1 ? "" : "s", b, (double)sum[0] / 1e6, (double)sum[1] / 1e6, (unsigned long long)fr);
+    }
 }
 
 // v0.10.2: the unit's one-time SceneDlaa set-up (was in MirFlush; MirPrebuild does it before the unit's first Run, so the boot
@@ -13576,9 +13676,40 @@ void MirBeginView(const Microsoft::WRL::ComPtr<ID3D11Texture2D>& rt0, const Micr
     // for this frame instead (no jitter, nothing recorded) and gets its unit at a later frame. The unit is not touched. Views
     // whose Run cannot build this frame anyway (a mirror_vr_mode 3 off frame, a failed / unsupported size, the jitter-only
     // debug key) never wait.
+    // phase 41 (mirror_turns / mode 3): does this view run its DLAA on this frame or hold its last output (mirror_turns.h)?
+    bool hold = false;
+    int turnWhy = MirTurns::kTurn;
+    if (MirTurnsOn()) {
+        MirUnit& mt = g_mir[u];
+        if (how == 2 || how == 3) mt.turnSlot = -1;      // a new / taken-over view: placed afresh
+        if (mt.turnSlot < 0) {                           // the lighter slot next to the units in view (re-balanced at the frame end)
+            uint64_t sum[2] = { 0, 0 };
+            int cnt[2] = { 0, 0 };
+            for (int i = 0; i < kMirCap; ++i) {
+                const MirUnit& o = g_mir[i];
+                if (i == u || !o.used || o.turnSlot < 0 || o.viewFrame + 8 < fr) continue;
+                sum[o.turnSlot & 1] += (uint64_t)o.w * o.h;
+                ++cnt[o.turnSlot & 1];
+            }
+            mt.turnSlot = MirTurns::PickSlot(sum[0], sum[1], cnt[0], cnt[1]);
+        }
+        MirTurns::UnitState st;
+        st.lastRunFrame = mt.lastRunFrame;
+        st.runs = mt.runs;
+        st.resetPending = mt.resetPending || how != 0;
+        st.epochStale = mt.epoch != g_mirEpoch;
+        ID3D11Texture2D* const res = mt.dl.ResultTex();
+        if (res) {
+            D3D11_TEXTURE2D_DESC rd{};
+            res->GetDesc(&rd);
+            st.haveResult = rd.Width == w && rd.Height == h && mt.w == w && mt.h == h && !mt.unsupported;
+        }
+        st.slot = mt.turnSlot;
+        hold = !MirTurns::Runs(fr, st, fr <= g_mirForceFrame, g_jitterOnly.load(std::memory_order_relaxed), &turnWhy);
+    }
     {
         const MirUnit& mb = g_mir[u];
-        const bool runs = !g_jitterOnly.load(std::memory_order_relaxed) && !(MirMode() == 3 && ((fr + (uint64_t)u) & 1u)) &&
+        const bool runs = !g_jitterOnly.load(std::memory_order_relaxed) && !hold &&
                           !(how == 0 && mb.unsupported) && !(mb.failW == w && mb.failH == h);
         if (runs && !mb.dl.ReadyFor(w, h, true, 100) && !DlaaProcessor::CreateBudgetFree()) {
             ++g_mirNotHandled; ++g_mirBuildDefer; ++g_mirWinBuildDefer;
@@ -13619,7 +13750,17 @@ void MirBeginView(const Microsoft::WRL::ComPtr<ID3D11Texture2D>& rt0, const Micr
     m.ps.dropN[0] = m.ps.dropN[1] = 0;
     // v0.10.0 phase 8 (mirror_vr_mode 3, VR): each unit runs every 2nd frame (units alternate by index); on its off frame the view
     // is not jittered / recorded and gets the unit's last picture (MirFlush)
-    m.altSkip = MirMode() == 3 && ((fr + (uint64_t)u) & 1u) != 0;
+    // phase 41: mirror_turns (and mode 3) decide it above -- balanced slots, forced runs (mirror_turns.h)
+    m.altSkip = hold;
+    m.turnWhy = turnWhy;
+    if (MirTurnsOn()) {
+        ++g_mirTurnWhy[turnWhy];
+        if (hold) { ++m.sTurnHeld; g_mirTurnHeldMask |= 1u << u; }
+        else {
+            if (turnWhy == MirTurns::kTurn) ++m.sTurnRun; else ++m.sTurnForced;
+            g_mirTurnRunMask |= 1u << u;
+        }
+    }
     m.ps.skSampled = m.ps.skNoCtx = m.ps.skFull = m.ps.skNoCb = m.ps.skRange = 0;
     m.rec.Reset();
     // no jitter where this unit cannot anti-alias (unsupported colour, a size whose build failed, kMirFailWarn failed Runs
@@ -13785,6 +13926,7 @@ void MirFlush(ID3D11DeviceContext* ctx, MirUnit& m) {
     if (m.altSkip) {                                      // v0.10.0 phase 8 (mirror_vr_mode 3): the unit's off frame
         // the unit's last anti-aliased picture (it ran in the previous frame) replaces this frame's raw one -- same size / format
         // only; else the raw (un-jittered) picture stays
+        // phase 41: the same for mirror_turns (MirBeginView decided it: the unit ran in the previous frame, a result of this size)
         ID3D11Texture2D* res = m.dl.ResultTex();
         bool held = false;
         if (res && m.color && m.runs && m.lastRunFrame + 1 == fr) {
@@ -13792,14 +13934,17 @@ void MirFlush(ID3D11DeviceContext* ctx, MirUnit& m) {
             res->GetDesc(&a); m.color->GetDesc(&b);
             if (a.Width == b.Width && a.Height == b.Height && a.Format == b.Format && a.SampleDesc.Count == b.SampleDesc.Count) {
                 t_inDlaa = true;
+                const int hq = m.gpuHold.Begin(ctx);
                 GpuPerf::SetMirror(true);
                 GpuPerf::SetPass(g_passSeq);
                 const int pq = GpuPerf::Begin(ctx, GpuPerf::kCopyOut);
                 ctx->CopyResource(m.color.Get(), res);
                 GpuPerf::End(ctx, pq);
                 GpuPerf::SetMirror(false);
+                m.gpuHold.End(ctx, hq);
                 t_inDlaa = false;
                 held = true;
+                m.heldFrame = fr;
             }
         }
         if (held) ++g_mirAltHeld; else ++g_mirAltRaw;
@@ -13826,8 +13971,11 @@ void MirFlush(ID3D11DeviceContext* ctx, MirUnit& m) {
     MirUnitSetup(m, u);
     m.dl.SetTiming(GpuTimingOn());
     // (v0.10.0 phase 8: with mirror_vr_mode 3 in VR the unit's previous run is 2 frames back -- its history is kept)
-    const uint64_t runGap = MirMode() == 3 ? 2u : 1u;
-    const bool reset = m.resetPending || m.runs == 0 || m.lastRunFrame + runGap != fr || m.epoch != g_mirEpoch;
+    // phase 41: a run 1 frame after the last one, or 2 frames after it with turns on / after a hold, keeps the history: the unit's
+    // MV history (CameraMv / DrawIdMv), its Halton phase and NGX's history all moved only on its runs, so its motion vectors refer
+    // to its LAST RUN (mirror_turns.h; WARP harness S20)
+    const bool gapOk = MirTurns::GapKeepsHistory(fr, m.lastRunFrame, MirTurnsOn(), m.heldFrame + 1 == fr);
+    const bool reset = m.resetPending || m.runs == 0 || !gapOk || m.epoch != g_mirEpoch;
     const float njx = (float)g_signX * m.jx, njy = (float)g_signY * m.jy;
     const int64_t t0 = m.runs == 0 ? Qpc() : 0;          // wall time of the run that builds the unit
     // v0.10.2: this Run builds the unit (textures + NGX feature at this size: the same test as Run's, area 100, RGBA16F)
@@ -13858,6 +14006,10 @@ void MirFlush(ID3D11DeviceContext* ctx, MirUnit& m) {
     if (ok) {
         ++m.runs; ++m.sOk; ++m.tOk;
         if (reset) ++m.sResets;
+        // phase 41: the unit's Run reset on its own (no world pair: a camera cut in the mirror) -> every unit runs now and next frame;
+        // only after a run WITHOUT a reset: a mirror that resets on every run (no usable world in it) is not a cut each time
+        if (!reset && m.dl.LastReset() && !m.lastRunReset) MirTurnsNoteCut(1);
+        m.lastRunReset = m.dl.LastReset();
         m.lastRunFrame = fr; m.epoch = g_mirEpoch; m.resetPending = false; m.failRun = 0;
         if (m.tOk == 1 && g_mirFirstOkLogs < kMirCap) {
             ++g_mirFirstOkLogs;
@@ -14007,6 +14159,7 @@ void MirNextFrame(uint64_t n) {
     g_mirCur = -1; g_mirGbuf = false; g_mirJit = false;
     ++g_mirWinPresents;
     if (g_mirSeenN > 0) ++g_mirWinFrames;
+    MirTurnsEndFrame(g_mirFrame);                        // phase 41: the frame's run / held units, the slot balance
     MirSelEndFrame();                                    // v0.10.0 phase 21: the mode-2 selection, BEFORE the table is cleared
     g_mirSeenN = 0;
     g_mirFrame = g_frames.load(std::memory_order_relaxed);
@@ -14018,6 +14171,7 @@ void MirNextFrame(uint64_t n) {
 }
 
 // MvInvalidate (DLAA / MV keys, context reset, ...) and the mirror key: every unit restarts its history at its next run.
+// (phase 41: MirBeginView sees the epoch change -> every unit runs at its next view, out of turn)
 void MirInvalidate() {
     ++g_mirEpoch;
     for (MirUnit& m : g_mir) m.dl.Mv().Invalidate();
@@ -14032,6 +14186,7 @@ void MirOnContextReset() {
         m.roDsv.Reset(); m.roDsvTex = nullptr;
         m.dbgH.Reset(); m.dbgV.Reset(); m.dbgW = m.dbgHt = 0;
         m.gpuRun.Reset(); m.gpuReplay.Reset();
+        m.gpuHold.Reset(); m.turnSlot = -1;              // phase 41
         m.resetPending = true;
     }
 }
@@ -14200,7 +14355,9 @@ void ToggleMirrors(uint64_t n) {
 #define DLAA_INJECTOR_VERSION "0.0.0-dev"
 #endif
 enum MenuRowId {
-    MR_MODE, MR_PROFILE, MR_MODEL, MR_SHARP, MR_WIDTH, MR_LOD, MR_LODCUT, MR_AREA, MR_DRAWIDS, MR_MIRROR, MR_PRETM, MR_FWD,
+    MR_MODE, MR_PROFILE, MR_MODEL, MR_SHARP, MR_WIDTH, MR_LOD, MR_LODCUT, MR_AREA, MR_DRAWIDS, MR_MIRROR,
+    MR_MIRTURNS,                                          // phase 41: mirrors in turns (dlaa.ini mirror_turns)
+    MR_PRETM, MR_FWD,
     MR_UPSCALE, MR_DLAA, MR_OFXR,
     MR_TURBO,                                             // phase 30: VR Turbo mode (dlaa.ini xr_turbo; OpenXR Toolkit port)
     MR_VRS, MR_VRSSIZE,                                   // phase 34: VR foveated rendering (dlaa.ini vrs; vrs_inner / vrs_outer preset)
@@ -14243,6 +14400,8 @@ const wchar_t* const kMenuDesc[] = {
     L"only to save about 0.5 ms per eye or to test: every pixel then moves with the camera and traffic smears.",
     L"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main mirror next to you). "
     L"all = every mirror. camera = cheapest per mirror, moving traffic can ghost in the glass; else each part moves exactly in the glass.",
+    L"on = each mirror gets its DLAA every 2nd frame and shows its last clean picture in between: about half the mirror cost. Edges "
+    L"stay clean; moving things in the glass update at half rate. off = every mirror every frame.",
     L"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. Change it only to compare. "
     L"Not used with DLSS upscale or Windows HDR. Same cost either way; takes ~60 frames to switch.",
     L"Gives wires, fences and glass their own distance instead of what is behind them, so they do not smear when you move. Turn "
@@ -14569,6 +14728,8 @@ void ResetSettings(uint64_t n) {
     g_profExplicit[PK_MIRROR_VR_MODE] = g_profExplicit[PK_MIRROR_FLAT_MODE] = false;
     g_mirVrViews = 2;
     g_mirCamOnly = false;                                 // mirror_mv back to its built-in parts (no profile value)
+    g_mirTurns = 0;                                       // phase 41: mirrors in turns off (every mirror every frame)
+    g_mirTurnsExplicit = false;
     g_profile = 0;
     g_fwdAutoOff = false;                                 // re-arms the VR budget measurement (ToggleFwdDepth / ApplyProfile)
     g_vrArea = 100;                                       // flat keeps the VR value in dlaa.ini; the fresh value is 100 too
@@ -14610,7 +14771,7 @@ void ResetSettings(uint64_t n) {
 
     // dlaa.ini: remove the 35 keys (empty value); everything else stays byte-for-byte (v0.10.2: + mirror_mv = 32; v0.10.3 phase 28:
     // + fps_vr_lock = 33, the cap raised to kIniMaxKeys; v0.10.3 phase 29b: + menu_vr_dist = 34; phase 30: + xr_turbo = 35;
-    // phase 34: + vrs / vrs_inner / vrs_outer = 38; phase 39: + log_level = 39)
+    // phase 34: + vrs / vrs_inner / vrs_outer = 38; phase 39: + log_level = 39; phase 41: + mirror_turns = 40 = kIniMaxKeys)
     static const char* const kKeys[] = {
         "mode", "dlss_preset", "dlaa_area", "sharpness", "sharp_radius", "dlss_upscale", "tex_lod_bias", "tex_lod_bias_cutout",
         "mv_objects", "mirror_dlaa", "mirror_vr_mode", "mirror_flat_mode", "mirror_vr_views", "mirror_mv", "dlaa_pre_tonemap",
@@ -14621,6 +14782,7 @@ void ResetSettings(uint64_t n) {
         "xr_turbo",                                                                                     // phase 30
         "vrs", "vrs_inner", "vrs_outer",                                                                // phase 34
         "log_level",                                                                                    // phase 39
+        "mirror_turns",                                                                                 // phase 41
     };
     constexpr int kNKeys = (int)(sizeof(kKeys) / sizeof(kKeys[0]));
     static_assert(kNKeys <= kIniMaxKeys, "WriteIniPreserving handles at most kIniMaxKeys keys");
@@ -14631,7 +14793,7 @@ void ResetSettings(uint64_t n) {
         Log("settings RESET to defaults (Reset row, Present #%llu): mode = %s (no key: DLAA on + dlss_upscale on) dlss_preset = default "
             "dlaa_area = 100 sharpness = 0.4 sharp_radius = 1.5 dlss_upscale = 1 tex_lod_bias = 0.00 tex_lod_bias_cutout = absent "
             "(-0.50) mv_objects = 2 mirror_dlaa = 1 mirror_vr_mode = 2 mirror_flat_mode = 1 mirror_vr_views = 2 mirror_mv = parts "
-            "dlaa_pre_tonemap = 1 "
+            "mirror_turns = 0 dlaa_pre_tonemap = 1 "
             "perf_profile = high mv_fwd_depth = 1 menu_x = 2 menu_y = 8 "
             "menu_scale = 1.0 menu_vr_x = 0 menu_vr_y = -5 menu_vr_scale = 1.0 menu_vr_depth = 12 menu_vr_dist = 100 menu_vr_face = 1 "
             "fps_show = 0 "
@@ -14920,6 +15082,8 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
     }
     ms(MR_DRAWIDS, MG_PART);                     if (!partOn) txt(MR_DRAWIDS, L"off");
     ms(MR_MIRROR, MG_MIR);                       if (!mirOn) txt(MR_MIRROR, L"off");
+    // phase 41: the mirrors' cost as it is now (in turns: about half of the same row's figure without)
+    ms(MR_MIRTURNS, MG_MIR);                     if (!mirOn) txt(MR_MIRTURNS, L"off");
     txt(MR_PRETM, vr ? L"-" : L"same");
     ms(MR_FWD, MG_FWD);                          if (!fwdOn) txt(MR_FWD, L"off");
     txt(MR_UPSCALE, dlaaOn && upOn ? L"no extra" : L"off");   // the upscale is the same NGX pass; the game draws fewer pixels
@@ -14985,6 +15149,12 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         if (!mirOn)     swprintf(sent, sentCap, L"Off now: costs nothing.");
         else if (!live) swprintf(sent, sentCap, L"%ls", wait);
         else            swprintf(sent, sentCap, L"Costs %ls %ls now; fewer mirrors cost less.", fig(MG_MIR), unit);
+        break;
+    case MR_MIRTURNS:                                     // phase 41
+        if (!mirOn)     swprintf(sent, sentCap, L"Greyed: Mirror DLAA is off.");
+        else if (MirMode() == 3) swprintf(sent, sentCap, L"Always on: dlaa.ini mirror mode 3 is in turns already.");
+        else if (!live) swprintf(sent, sentCap, L"%ls", wait);
+        else            swprintf(sent, sentCap, L"The mirrors cost %ls %ls now.", fig(MG_MIR), unit);
         break;
     case MR_PRETM:
         if (vr) swprintf(sent, sentCap, L"Greyed in VR: VR always runs DLAA on the finished picture.");
@@ -15131,6 +15301,24 @@ void CycleMirrors(uint64_t n, int dir, bool vr) {
                                     : "");
     if (s == 0) PlayTones(1, 300, 150, 0);
     else        PlayTones((s + 1) / 2, partsState ? 1200 : 800, 90, 60);
+}
+
+// phase 41: the menu's "Mirrors in turns" row -- dlaa.ini mirror_turns live (on: each mirror unit runs its DLAA every 2nd frame
+// and holds its last output in between, mirror_turns.h). No history restart either way: a unit that held keeps its history over
+// the 2-frame gap (GapKeepsHistory), the slots are placed at the next views. Logged + beeped like the other toggles.
+void ToggleMirTurns(uint64_t n) {
+    g_mirTurns = g_mirTurns ? 0 : 1;
+    g_mirTurnsExplicit = true;
+    g_mirTurnFrameLogs = g_mirTurns ? 24 : 0;            // level 4: the first 24 frames with mirror views get a line each
+    g_mirTurnMask = 0;                                    // the slots are re-balanced at the next frame end
+    Log("Mirrors in turns: %s (mirror_turns=%d, tuning menu, Present #%llu) -- %s%s", g_mirTurns ? "ON" : "OFF", g_mirTurns,
+        (unsigned long long)n,
+        g_mirTurns ? "each mirror gets its DLAA every 2nd frame (half of them per frame, balanced by size) and shows its last DLAA "
+                     "picture in between; out of turn after a reset, a camera cut or a frame without a run"
+                   : "every mirror view gets its DLAA every frame again",
+        !g_mirOn.load() || MirMode() == 0 ? " (mirror DLAA is off now: used once it is on)"
+        : (MirMode() == 3 ? " (the mirror mode is 3: every view stays in turns whatever this says)" : ""));
+    PlayTones(1, g_mirTurns ? 1200 : 300, 150, 0);
 }
 
 // ---- v0.10.2 HOLD TO BIND ----------------------------------------------------------------------------------------------------
@@ -15545,6 +15733,11 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     swprintf(p.rows[MR_DRAWIDS].value, kV, L"%ls", g_objMode == 2 ? L"on" : (g_objMode == 1 ? L"old stencil ids" : L"off"));
     MenuRow(p, MR_MIRROR, L"Mirror DLAA", KeyName(KA_MIRROR_TOGGLE), nullptr, false);
     MirMenuValue(p.rows[MR_MIRROR].value, kV, vr);       // v0.10.2: the seven states (CycleMirrors)
+    {   // phase 41: greyed while mirror DLAA is off; mode 3 is in turns anyway
+        const bool mirLive = g_mirOn.load() && MirMode() != 0;
+        MenuRow(p, MR_MIRTURNS, L"Mirrors in turns", "dlaa.ini mirror_turns", nullptr, !mirLive || MirMode() == 3);
+        swprintf(p.rows[MR_MIRTURNS].value, kV, L"%ls", MirMode() == 3 ? L"on (mode 3)" : onOff[g_mirTurns ? 1 : 0]);
+    }
     MenuRow(p, MR_PRETM, L"DLAA before tonemap (flat)", KeyName(KA_PRE_TONEMAP), vr ? "flat only" : nullptr, vr);
     swprintf(p.rows[MR_PRETM].value, kV, L"%ls", !g_preCfg ? L"off (dlaa.ini 0)" : onOff[g_preOn.load() ? 1 : 0]);
     MenuRow(p, MR_FWD, L"See-through depth", KeyName(KA_FWD_DEPTH), nullptr, false);
@@ -15723,6 +15916,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_AREA:    StepArea(dir, n); break;               // flat: refuses with its low beep
     case MR_DRAWIDS: ToggleDrawIds(n); break;
     case MR_MIRROR:  CycleMirrors(n, dir, vr); break;       // v0.10.2: seven states (Alt+F6 stays on / off)
+    case MR_MIRTURNS: ToggleMirTurns(n); break;             // phase 41: Left and Right both switch it (also while greyed: kept)
     case MR_PRETM:   TogglePreTonemap(n); break;
     case MR_FWD:     ToggleFwdDepth(n); break;
     case MR_UPSCALE: ToggleUpscale(n); break;
@@ -17271,6 +17465,8 @@ void MirStatsLog(uint64_t blit) {
     s += b;
     int units = 0;
     double gpuFrame = 0.0;
+    double turnSaved = 0.0;                               // phase 41: GPU ms per frame the held views did not spend
+    bool turnTimed = false;
     for (int u = 0; u < kMirCap; ++u) {
         MirUnit& m = g_mir[u];
         if (!m.used) continue;
@@ -17310,6 +17506,25 @@ void MirStatsLog(uint64_t blit) {
                  pMax);
         s += b;
         gpuFrame += (rAvg + pAvg) * (double)m.sOk / pres;
+        {                                                 // phase 41: this unit's turns + what its held views saved
+            double hAvg = 0, hMax = 0;
+            uint64_t hN = 0;
+            m.gpuHold.Take(&hAvg, &hMax, &hN);
+            if (MirTurnsOn() || m.sTurnHeld) {
+                const double perRun = rAvg + pAvg;        // DLAA (snapshot + MV + NGX + copies) + replay of one run
+                if (rN && m.sTurnHeld) {
+                    turnSaved += (double)m.sTurnHeld * (perRun - hAvg) / pres;
+                    turnTimed = true;
+                }
+                gpuFrame += hAvg * (double)m.sTurnHeld / pres;
+                b[0] = 0;
+                snprintf(b, sizeof(b), "{turns unit %d: slot %d, ran %llu on its turn + %llu forced, held %llu (copy %.3f ms avg, %llu "
+                         "timed)}", u, m.turnSlot, (unsigned long long)m.sTurnRun, (unsigned long long)m.sTurnForced,
+                         (unsigned long long)m.sTurnHeld, hAvg, (unsigned long long)hN);
+                s += b;
+            }
+            m.sTurnRun = m.sTurnHeld = m.sTurnForced = 0;
+        }
         if (rN && rAvg > kMirBudgetMs && g_mirBudgetLogs < 20) {
             ++g_mirBudgetLogs;
             LogWarn("mirror DLAA: WARNING unit %d (%ux%u) averaged %.3f ms GPU per view in this window (budget %.2f ms; max %.3f "
@@ -17333,6 +17548,45 @@ void MirStatsLog(uint64_t blit) {
         s += b;
     }
     g_mirVrSkip = g_mirAltHeld = g_mirAltRaw = 0;
+    {                                                     // phase 41: mirrors in turns
+        if (MirTurnsOn()) {
+            uint64_t forced = 0;
+            for (int w = MirTurns::kForceFirst; w < MirTurns::kWhyN; ++w) forced += g_mirTurnWhy[w];
+            char hist[400] = "";
+            size_t o = 0;
+            const int nh = g_mirTurnHistN < 8 ? g_mirTurnHistN : 8;
+            for (int k = nh; k >= 1 && o < sizeof(hist); --k) {
+                const MirTurnFrame& t = g_mirTurnHist[(g_mirTurnHistN - k) & 7];
+                char r[48] = "", h[48] = "";
+                size_t ro = 0, ho = 0;
+                for (int u = 0; u < kMirCap; ++u) {
+                    if ((t.run & (1u << u)) && ro < sizeof(r)) ro += (size_t)snprintf(r + ro, sizeof(r) - ro, "%s%d", ro ? "," : "", u);
+                    if ((t.held & (1u << u)) && ho < sizeof(h)) ho += (size_t)snprintf(h + ho, sizeof(h) - ho, "%s%d", ho ? "," : "", u);
+                }
+                o += (size_t)snprintf(hist + o, sizeof(hist) - o, "%s#%llu ran [%s] held [%s]", o ? " " : "",
+                                      (unsigned long long)t.fr, r, h);
+            }
+            char saved[96];
+            if (turnTimed) snprintf(saved, sizeof(saved), "~%.3f ms GPU per frame saved by the held views", turnSaved);
+            else           snprintf(saved, sizeof(saved), "ms saved: not timed yet");
+            snprintf(b, sizeof(b), " | mirrors in turns (mirror_turns %d%s): views on their turn %llu, held %llu, forced %llu "
+                     "[first / reset %llu, no run last frame %llu, no output %llu, camera cut %llu, debug %llu] | camera cuts: main "
+                     "view %llu, mirror %llu | slot balances %llu | frames with views %llu | %s | last frames (units): %s",
+                     g_mirTurns, MirMode() == 3 ? ", mode 3 = every view in turns" : "",
+                     (unsigned long long)g_mirTurnWhy[MirTurns::kTurn], (unsigned long long)g_mirTurnWhy[MirTurns::kHold],
+                     (unsigned long long)forced, (unsigned long long)g_mirTurnWhy[MirTurns::kForceFirst],
+                     (unsigned long long)g_mirTurnWhy[MirTurns::kForceGap], (unsigned long long)g_mirTurnWhy[MirTurns::kForceNoResult],
+                     (unsigned long long)g_mirTurnWhy[MirTurns::kForceCut], (unsigned long long)g_mirTurnWhy[MirTurns::kForceDebug],
+                     (unsigned long long)g_mirTurnCuts[0], (unsigned long long)g_mirTurnCuts[1],
+                     (unsigned long long)g_mirTurnBalances, (unsigned long long)g_mirTurnFrames, saved, nh ? hist : "none");
+            s += b;
+        } else {
+            s += " | mirrors in turns off (mirror_turns 0)";
+        }
+        for (uint64_t& w : g_mirTurnWhy) w = 0;
+        for (uint64_t& c : g_mirTurnCuts) c = 0;
+        g_mirTurnBalances = g_mirTurnFrames = 0;
+    }
     LogDbg("%s", s.c_str());
     if (MirMode() == 2) MirSelLog(blit);                 // v0.10.0 phase 21: the mode-2 selection line
     g_mirWinViews = g_mirWinFrames = g_mirWinPresents = g_mirWinCap = 0;
@@ -18519,6 +18773,9 @@ void LoadConfig() {
                 while (*p == ' ' || *p == '\t') ++p;
                 g_mirCamOnly = !_strnicmp(p, "camera", 6);
             }
+            else if (!strcmp(key, "mirror_turns")) {     // phase 41: 0 = off (default), 1 = each mirror every 2nd frame
+                g_mirTurns = v > 0 ? 1 : 0; g_mirTurnsExplicit = true;
+            }
             else if (!strcmp(key, "mv_slot_pool"))      g_slotPool = v != 0;
             else if (!strcmp(key, "mv_inst_replay"))    { DrawIdMv::SetInstReplay(v != 0 ? 1 : 0); g_profExplicit[PK_INST_REPLAY] = true; }
             // v0.10.0 phase 14: the static replay skip (0 = off, 1..60 frames; re-check every 1..16 frames, 1 = never skipped)
@@ -18968,6 +19225,13 @@ void LoadConfig() {
                                        : (g_mirVrMode == 4 ? "every view, per-draw ids off (camera motion vectors)" : "every view"))),
         g_mirCamOnly && g_mirVrMode >= 1 && g_mirVrMode <= 3 ? ", per-draw ids off (mirror_mv camera: camera motion vectors)" : "",
         g_slotPool ? "pooled (alive = passes in flight)" : "one set per FIFO slot");
+    // phase 41: mirrors in turns
+    g_mirTurnFrameLogs = g_mirTurns ? 24 : 0;
+    Log("phase 41: mirror_turns=%d (%s) -- %s", g_mirTurns, g_mirTurnsExplicit ? "dlaa.ini" : "default",
+        g_mirTurns ? "each mirror view gets its DLAA every 2nd frame (half of the mirrors per frame, balanced by size) and shows its "
+                     "last DLAA picture in between; a reset / camera cut / frame without a run makes it run out of turn; the "
+                     "'mirror units @blit' line (log level 4) has the counts and the ms saved"
+                   : "every mirror view gets its DLAA every frame (the menu's Mirrors in turns row switches it live)");
     // v0.10.0 phase 9: VR cost -- area scissor, 1/2-resolution forward depth, mirror modes, folded dispatches
     {
         const int marginNow = g_areaMarginCfg >= 0 ? g_areaMarginCfg : SceneDlaa::Feather() + 32;
