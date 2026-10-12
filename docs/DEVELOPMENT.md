@@ -1392,6 +1392,21 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   `CPU prof` log line and the `perf eye` lines still appear at level 4, that a closed menu below level 4 really shows no
   `GPU spans` / `DLAA GPU cost` lines in VR any more.
 
+### Phase 46: menu_shot -- the README pictures are rendered offline from the real menu code
+
+- `tests/menu_shot.cpp` (`tests\build_menu_shot.bat` -> `build\tests\menu_shot.exe <dir>`) renders the tuning menu and the fps
+  box to PNG without the game: a WARP D3D11 device, a render target over a generated dark blurred-road background (no game
+  assets), then the REAL `src/menu.cpp` (`TuningMenu::Draw`, `DrawWidget`, `SetWidgetColors`; linked, not copied), read back and
+  saved with WIC. Writes `tuning-menu.png` (all groups closed, `Mode` selected), `tuning-menu-vr-performance.png` (`VR
+  performance` open), `tuning-menu-picture.png` (`Picture` open), `fps-counter.png` and `fps-counter-colours.png` (the 20
+  `src/fps_pose.h` presets with their names). Run it as `build\tests\menu_shot.exe docs\images` to refresh the README images.
+- **The panel is filled by hand**, from ONE table (`kRows` at the top of the file): the rows of `MenuBuildPanel`, the
+  descriptions of `kMenuDesc`, the perf lines of `MenuPerfLines` and the CPU | GPU cost cells (ink marks `<c>..</>` blue /
+  `<g>..</>` orange), for a VR session at 72 Hz with plausible figures. `inject.cpp` cannot be linked without the whole mod. **When
+  a menu row is added, renamed or reordered, update `kRows` and re-run the tool**, then commit the new PNGs.
+- CI runs it as a smoke test only (the exe must exist, exit 0, the five files must exist); the CI outputs are not committed.
+- Not changed: `src/menu.cpp` is used as it is.
+
 ### The RenderDoc oracle (done in v0.2)
 
 Capture a frame of the unmodified game to learn empirically: which pass writes

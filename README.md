@@ -410,6 +410,11 @@ rendering, hidden area mask), `Panel settings` and `FPS counter settings`. After
 `Save`, `Reset` and `Close`. Select a group and press `Right` to open it, `Left` to close it. A closed group shows how
 many rows it holds. All groups are closed again each time you open the menu.
 
+![The Picture group open](docs/images/tuning-menu-picture.png)
+![The VR performance group open](docs/images/tuning-menu-vr-performance.png)
+
+(These pictures are rendered by the real menu code, see `tests/menu_shot.cpp`; the figures in them are examples.)
+
 The three green lines under the title show the game's GPU time per frame, what this mod costs, and the fps. The line at the bottom explains the selected row.
 
 - **Flat:** the panel sits near the top-left corner of the screen.
@@ -459,6 +464,8 @@ The three green lines under the title show the game's GPU time per frame, what t
   - **FPS colour:** 20 colours (white, yellow, amber, orange, red, pink, magenta, purple, violet, blue, sky blue, cyan,
     teal, mint, green, lime, olive, gold, silver, black on white). Each has an outline, so it reads on any picture
     (`fps_color`, 0 = white).
+
+    ![The 20 fps colours](docs/images/fps-counter-colours.png)
   - **FPS distance (VR):** how far away the box floats, 0.30 - 3.00 m (`fps_vr_dist` in cm, default 80). It keeps the
     same size in your view at every distance; only the depth changes.
   - **FPS turn / tilt / rotate (VR):** turn the box itself, in 5 degree steps: turn = left / right, tilt = lean it back

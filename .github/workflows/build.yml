@@ -52,6 +52,8 @@ jobs:
           if not exist build\tests\hidden_mask_test.exe exit /b 1
           call tests\build_fps_pose_test.bat
           if not exist build\tests\fps_pose_test.exe exit /b 1
+          call tests\build_menu_shot.bat
+          if not exist build\tests\menu_shot.exe exit /b 1
 
       - name: Test draw-id harness (did_shadow off)
         run: build\tests\drawid_harness.exe -1 0.1
@@ -68,3 +70,9 @@ jobs:
         run: build\tests\hidden_mask_test.exe
       - name: Test fps box pose (src/fps_pose.h colours, VR turn, distance shift)
         run: build\tests\fps_pose_test.exe
+      - name: Smoke test menu_shot (renders the real tuning menu + fps box to PNG; outputs are not committed)
+        shell: cmd
+        run: |
+          build\tests\menu_shot.exe build\menu_shot_out
+          if errorlevel 1 exit /b 1
+          for %%f in (tuning-menu tuning-menu-vr-performance tuning-menu-picture fps-counter fps-counter-colours) do if not exist build\menu_shot_out\%%f.png exit /b 1
