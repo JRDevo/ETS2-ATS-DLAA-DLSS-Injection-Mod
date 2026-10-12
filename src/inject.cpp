@@ -16494,7 +16494,8 @@ void MenuResetDecorate(TuningMenu::Panel& p, int sel) {
 // One row: name, the hotkey text (+ "  (VR only)" / "  (flat only)" tag), greyed = not applicable now. The value is set by the caller.
 void MenuRow(TuningMenu::Panel& p, int id, const wchar_t* name, const char* keys, const char* tag, bool greyed) {
     TuningMenu::Row& r = p.rows[id];
-    wcsncpy_s(r.name, name, _TRUNCATE);
+    if (MenuRowGroup(id) >= 0) swprintf(r.name, sizeof(r.name) / sizeof(r.name[0]), L"    %ls", name);   // phase 46b: a group's
+    else                       wcsncpy_s(r.name, name, _TRUNCATE);                                             // rows are indented
     char kb[128];
     if (tag) snprintf(kb, sizeof(kb), "%s  (%s)", keys, tag);
     else     snprintf(kb, sizeof(kb), "%s", keys);
@@ -16525,10 +16526,12 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     auto groupRow = [&](int id, const wchar_t* name) {
         const bool o = MenuGrpOpen(id);
         snprintf(k, sizeof(k), "%s: %s", o ? snLeft : snRight, o ? "close" : "open");
-        MenuRow(p, id, name, k, nullptr, false);
-        const int gi = MenuGroupIndex(id);                // phase 43: closed = "N rows" (the group's size), open = "shown"
-        if (o || gi < 0) swprintf(p.rows[id].value, kV, L"%ls", o ? L"shown" : L"...");
-        else             swprintf(p.rows[id].value, kV, L"%d rows", kMenuGroups[gi].last - kMenuGroups[gi].header);
+        wchar_t hn[48];                                   // phase 46b: an arrow shows the state (WGL4 glyphs: in Segoe UI)
+        swprintf(hn, 48, L"%lc %ls", o ? (wchar_t)0x25BC : (wchar_t)0x25BA, name);
+        MenuRow(p, id, hn, k, nullptr, false);
+        const int gi = MenuGroupIndex(id);                // closed = "closed (N)" (the group's size), open = "open"
+        if (o || gi < 0) swprintf(p.rows[id].value, kV, L"%ls", o ? L"open" : L"closed");
+        else             swprintf(p.rows[id].value, kV, L"closed (%d)", kMenuGroups[gi].last - kMenuGroups[gi].header);
     };
 
     MenuRow(p, MR_MODE, L"Mode", KeyName(KA_MODE_CYCLE), nullptr, false);

@@ -137,13 +137,15 @@ static void BuildPanel(TuningMenu::Panel& p, const bool open[6], const wchar_t* 
         const E& e = kRows[i];
         if (e.grp >= 0 && !e.hdr && !open[e.grp]) continue;       // a collapsed group's children are not in the panel
         TuningMenu::Row& r = p.rows[nv];
-        wcsncpy_s(r.name, e.name, _TRUNCATE);
+        if (e.hdr)          swprintf(r.name, 48, L"%lc %ls", open[e.grp] ? (wchar_t)0x25BC : (wchar_t)0x25BA, e.name);   // as MenuBuildPanel
+        else if (e.grp >= 0) swprintf(r.name, 48, L"    %ls", e.name);                                         // (phase 46b)
+        else                wcsncpy_s(r.name, e.name, _TRUNCATE);
         wcsncpy_s(r.keys, e.keys, _TRUNCATE);
         r.greyed = e.greyed ? 1 : 0;
         if (e.hdr) {
             int n = 0;
             for (int j = 0; j < kNRows; ++j) if (kRows[j].grp == e.grp && !kRows[j].hdr) ++n;
-            if (open[e.grp]) wcsncpy_s(r.value, L"shown", _TRUNCATE); else swprintf(r.value, 40, L"%d rows", n);
+            if (open[e.grp]) wcsncpy_s(r.value, L"open", _TRUNCATE); else swprintf(r.value, 40, L"closed (%d)", n);
             wcsncpy_s(r.keys, open[e.grp] ? L"Left: close" : L"Right: open", _TRUNCATE);
         } else {
             wcsncpy_s(r.value, e.value, _TRUNCATE);
