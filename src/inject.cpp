@@ -15059,6 +15059,7 @@ void ToggleHiddenMask(uint64_t n) {
                                   : "from the next eye scene clear"),
         hs.ext, hs.ni[0] / 3, hs.ni[1] / 3, (unsigned long long)(g_hm.drawn[0] + g_hm.drawn[1]));
     PlayTones(1, g_xrHiddenMask ? 1200 : 300, 150, 0);
+}
 // phase 42: the menu's Foveated passes row -- dlaa.ini vrs_passes live (0 = scene binds only, 1 = + the lighting bind, outer ring
 // only). The next game bind uses it (VrsOnBind reads g_vrsPasses; Vrs::Enter refuses a lighting bracket at 0).
 void ToggleVrsPasses(uint64_t n) {
@@ -19110,7 +19111,11 @@ void LoadConfig() {
 #ifdef WITH_DLAA
             if (!strcmp(key, "did_shadow"))        { g_didShadowCfg = v >= 2 ? 2 : (v == 1 ? 1 : 0); continue; }   // startup only
             if (!strcmp(key, "did_shadow_verify")) { g_didShadowVerify = v < 0 ? -1 : (int)(v > 100000 ? 100000 : v); continue; }
+            // phase 40 / 41 / 42 (outside the else-if chain too: C1061 at the dev merge)
+            if (!strcmp(key, "mirror_turns"))       { g_mirTurns = v > 0 ? 1 : 0; g_mirTurnsExplicit = true; continue; }   // phase 41
 #endif
+            if (!strcmp(key, "xr_hidden_mask"))     { g_xrHiddenMask = v != 0 ? 1 : 0; g_xrHiddenMaskExplicit = true; continue; }   // phase 40
+            if (!strcmp(key, "vrs_passes"))         { g_vrsPasses = v != 0 ? 1 : 0; g_vrsPassesExplicit = true; continue; }   // phase 42
             // phase 39 (here for the same reason; debug moved out of the WITH_DLAA chain: the log-only build reads it too)
             if (!_stricmp(key, "log_level")) {           // (case-insensitive as log.h's reader)
                 const int lv = LogParseLevel(eq + 1);     // log.h: the same parser as its own early read
@@ -19224,9 +19229,6 @@ void LoadConfig() {
                 const char* p = eq + 1;
                 while (*p == ' ' || *p == '\t') ++p;
                 g_mirCamOnly = !_strnicmp(p, "camera", 6);
-            }
-            else if (!strcmp(key, "mirror_turns")) {     // phase 41: 0 = off (default), 1 = each mirror every 2nd frame
-                g_mirTurns = v > 0 ? 1 : 0; g_mirTurnsExplicit = true;
             }
             else if (!strcmp(key, "mv_slot_pool"))      g_slotPool = v != 0;
             else if (!strcmp(key, "mv_inst_replay"))    { DrawIdMv::SetInstReplay(v != 0 ? 1 : 0); g_profExplicit[PK_INST_REPLAY] = true; }
@@ -19390,14 +19392,12 @@ void LoadConfig() {
             else if (!strcmp(key, "menu_vr_layer"))  g_menuVrLayer = v != 0 ? 1 : 0;        // v0.10.3 phase 29
             else if (!strcmp(key, "cpu_cache_pin"))  g_cpuCachePin = v != 0 ? 1 : 0;        // phase 32
             else if (!strcmp(key, "xr_turbo"))       { g_xrTurbo = v != 0 ? 1 : 0; g_xrTurboExplicit = true; }   // phase 30
-            else if (!strcmp(key, "xr_hidden_mask")) { g_xrHiddenMask = v != 0 ? 1 : 0; g_xrHiddenMaskExplicit = true; }   // phase 40
             // phase 34: VRS fixed foveated rendering (VR; the menu's Foveated rows switch vrs and the radii preset)
             else if (!strcmp(key, "vrs"))            { g_vrsOn = v != 0 ? 1 : 0; g_vrsExplicit = true; }
             else if (!strcmp(key, "vrs_inner"))      { g_vrsInner = v < 10 ? 10 : (v > 150 ? 150 : (int)v); g_vrsExplicit = true; }
             else if (!strcmp(key, "vrs_outer"))      { g_vrsOuter = v < 10 ? 10 : (v > 150 ? 150 : (int)v); g_vrsExplicit = true; }
             else if (!strcmp(key, "vrs_quality"))    g_vrsQuality = v != 0 ? 1 : 0;
             else if (!strcmp(key, "vrs_debug"))      g_vrsDebug = v != 0 ? 1 : 0;
-            else if (!strcmp(key, "vrs_passes"))     { g_vrsPasses = v != 0 ? 1 : 0; g_vrsPassesExplicit = true; }   // phase 42
             else if (!strcmp(key, "bind_hold_ms"))   g_bindHoldMs = v < 500 ? 500 : (v > 10000 ? 10000 : (int)v);   // v0.10.2
             else if (!strcmp(key, "menu_scale") || !strcmp(key, "menu_vr_scale")) {
                 const double s = strtod(eq + 1, nullptr);
