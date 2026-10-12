@@ -1586,6 +1586,54 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
 - Test: `tests/fps_pose_test.cpp` (clamp / step, 100 % unchanged for all 20 presets, outline kept, 50 % white = 128, preset 19
   dims the outline, amber at 10 %).
 
+### Phase 49: light glow ghosting fix -- NGX bias current colour mask (`dlss_bias_mask` 0..100 %, default 100)
+
+- **Report** (night driving, flat + VR): street-lamp and vehicle-light glows leave a trail behind them when the camera moves;
+  vertical street lights flicker.
+- **Cause (glows)**: the glows / flares / light cones are ADDITIVE forward draws (frame 1969: 31 per frame, `DestBlend ONE`, depth
+  test without depth write; see the forward-pass audit above). They write no depth and have no motion of their own -- the
+  forward depth / forward ids leave additive draws out on purpose -- so NGX sees the depth and motion of what lies behind them and
+  its history keeps the glow where it was. The mod never set NGX's `DLSS.Input.Bias.Current.Color.Mask` (the DLSS answer for
+  exactly this: 1 = trust the current frame there).
+- **Record** (`BiasOnDraw`, hkDrawIndexed after the game's draw, main forward binding `g_fwdBound`, world-layer viewport): RT0
+  `BlendEnable`, `DestBlend ONE`, `BlendOp ADD`, `SrcBlend ONE` or `SRC_ALPHA`, colour written, no A2C; depth test GREATER /
+  GREATER_EQUAL without write. Into `g_didBiasRing[slot][kind]` (a `DrawIdRecord` in forward mode with the PS state captured);
+  the RT0 texture (the pass's forward colour) is kept in `PassSlot::biasF`. Independent of the forward depth (`mv_fwd_depth` 0
+  keeps it working).
+- **Pass end** (`BiasBatch`, next to `FwdBatch`: scene depth discard / forward leave, next pass start, forced by a
+  WRITE_DISCARD of a buffer a pending glow reads): `ReplayDepth` into ONE shared R11G11B10_FLOAT glow sum (scene size; blend
+  ONE + ONE or SRC_ALPHA + ONE like the game), GREATER_EQUAL against a READ-ONLY DSV of the pass's scene depth (`DidRoDsv`),
+  through the pass's area clip; then `DrawIdRecord::BiasShare` writes the pass's R8 mask (`DepthTwin::biasTex`, pooled):
+  `smoothstep(0.05, 0.5, lum(glow) / lum(forward colour))` = the share of the pixel's light the glows made (exposure-free: a
+  glow over the night sky = 1, a faint glow over a bright day background ~ 0, so daytime anti-aliasing is not touched). Full
+  resolution always: the depth test needs the full-size depth, so `mv_fwd_depth_res 2` does not apply.
+- **Blit** (`SceneDlaa::BiasPrep`, after the MV pass, before NGX): the mask at the DLAA crop, max'ed with LAST frame's crop
+  sampled around `current + mv` (2x2) -- the pixels whose history still holds the glow that moved on = the trail -- times
+  `dlss_bias_mask / 100`, -> `DlaaProcessor::Evaluate(..., biasMask)` -> `pInBiasCurrentColorMask`. Per unit ping-pong (3 R8
+  crop textures); reset / new crop = no carry-over. A pass without glows after one with = one more frame of carry-over only.
+  Mirror units, menu / truck previews: no mask (their passes have no forward hooks).
+- **Menu**: `Light glow ghosting fix` (`MR_BIAS`, last row of the Picture group, Left / Right 25 % steps, fresh presses; cost
+  column GPU = GpuPerf `bias-mask` = new menu group `MG_BIAS`); `kMaxRows` 48 -> 50; 49 reset keys (cap 56); Save writes
+  `dlss_bias_mask` once changed (`g_biasExplicit`).
+- **Log**: `DLSS bias mask (phase 49): dlss_bias_mask=N %` at the start; `first pass with light glows (pass s=..): N additive
+  forward draws flagged ...` once; at log level 4 every 1200 passes `glow draws per pass X (SrcBlend ONE a, SRC_ALPHA b), passes
+  with glows P %, ... failed, record full, glow draws without the forward colour`.
+- **Cost / memory** (estimated, not measured in game): the glows once more (small sprites), one share pass over the clip, one
+  crop dispatch per eye. Glow sum 4 B per scene pixel (VR 4592x6496: ~114 MB, one, shared), R8 mask per alive pass slot (~28 MB
+  VR), 3 crop-sized R8 per unit.
+- **Pole flicker (report point 2) -- investigated, no change**: lamp poles are opaque G-buffer draws; static scenery keeps the
+  camera R (the static replay skip / static snap give it exactly), and the 2026-10-10 two-frame lamp-post check measured their
+  MVs right within 0.15 px; the "pole edges crawl" note above (same in passive mode) puts the edge sparkle on the game's own
+  sub-pixel aliasing. What phase 49 changes there: the glow quads around the lamp heads / any vertical glow streaks are additive
+  draws and now get the bias -- that removes their trail, but where a glow makes most of a pixel's light DLSS now shows the
+  CURRENT (jittered) frame, so a thin, hard-edged glow streak can shimmer more. If lamps flicker more with it, lower
+  `dlss_bias_mask` (75 / 50) and compare with 0.
+- **Test**: `tests/bias_mask_test.cpp` (WARP): T1 the glow re-draw through `ReplayDepth` against a read-only D32S8 depth
+  (occluded glow rejected, overlaps summed, the recorded PS cbuffer used, the game's binding back), T2 `BiasShare` values on 4
+  bands + clip + state restore, T3 `kBiasPrepShader` (crop origin, carry-over along the MVs, strength, PrevOk 0).
+- **Not verified**: anything in game (whether ETS2 / ATS draw their glows exactly like this in every case, the visual result,
+  the cost, the NGX response to the mask on the user's preset).
+
 ### The RenderDoc oracle (done in v0.2)
 
 Capture a frame of the unmodified game to learn empirically: which pass writes

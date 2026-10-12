@@ -1,4 +1,14 @@
-// v0.12.0 -- phases 40-48 (below, newest first) + issue #12 flat multi-monitor (FlatViewCount / r_multimon_mode 2).
+// v0.12.0 -- phases 40-49 (below, newest first) + issue #12 flat multi-monitor (FlatViewCount / r_multimon_mode 2).
+// phase 49 -- LIGHT GLOW GHOSTING FIX: NGX BIAS CURRENT COLOUR MASK (dlaa.ini dlss_bias_mask 0..100 %, default 100; menu row "Light
+//           glow ghosting fix", Picture group; the "GLOW BIAS MASK" block above hkDrawIndexed, DrawIdRecord::BiasShare, SceneDlaa::
+//           BiasPrep, DlaaProcessor::Evaluate's biasMask). Night report: lamp / vehicle-light glows trail behind them. They are
+//           additive forward draws (no depth, no motion of their own), so NGX's history kept them. Now: the additive world forward
+//           draws are recorded (BiasOnDraw), re-drawn at the pass end into a shared R11G11B10 glow sum against a read-only view of the
+//           pass's scene depth (BiasBatch), turned into the pass's R8 mask = the glows' share of each pixel's light (BiasShare); at
+//           the blit the mask at the DLAA crop, max'ed with last frame's glow carried along the MVs (the trail pixels), x strength,
+//           goes to NGX as DLSS.Input.Bias.Current.Color.Mask. Per pass slot like the depth snapshot (VR eyes, flat views); mirror
+//           units / previews: none. Pole flicker investigated: no MV / id bug found (docs/DEVELOPMENT.md phase 49).
+//           tests\bias_mask_test.cpp.
 // phase 47 -- FPS BOX "ATTACHED TO VEHICLE" (dlaa.ini fps_vr_lock = 2; the FPS counter lock row's 3rd value; src/fps_cab.h /
 //           fps_cab.cpp, menu.cpp VSCab / TuningMenu::DrawWidgetMvp). At each VR eye blit FpsCabBlit hands the pass's DrawIdRecord to
 //           FpsCab::OnBlit: a lock-on readback of the biggest cabin-layer draws' cb0 rows (+ the OpenXR poses) maps the play-space
@@ -900,6 +910,10 @@ std::atomic<bool> g_mvOn{true};          // camera-reprojection MVs live switch 
 // (default 1) and its live switch (key_fwd_depth, Ctrl+F3; starts at the ini value).
 bool              g_fwdCfg = true;
 std::atomic<bool> g_fwdOn{true};
+// phase 49 GLOW BIAS MASK (see the "GLOW BIAS MASK" block above hkDrawIndexed): dlaa.ini dlss_bias_mask = strength in % 0..100
+// (default 100; 0 = off: NGX gets no mask), live from the menu's "Light glow ghosting fix" row (25 % steps)
+int               g_biasCfg = 100;
+bool              g_biasExplicit = false;   // set in dlaa.ini or changed in the menu -> SaveSettings writes dlss_bias_mask
 float             g_fwdMinM = 0.5f;     // v0.9.0 r11 dlaa.ini mv_fwd_min_m (0.1..5): an origin nearer = an overlay
 // v0.10.0 phase 10 PERFORMANCE PROFILES (dlaa.ini perf_profile = high | medium | low, Alt+F9 cycles live, Shift+F12 saves): a
 // profile only gives DEFAULTS to the keys below; a key set in dlaa.ini -- or changed by its own hotkey this session (Alt+F6,
@@ -2101,6 +2115,10 @@ struct PassSlot {
     bool       clip = false;
     D3D11_RECT clipRect = { 0, 0, 0, 0 };
     uint8_t    fwdShift = 0;
+    // phase 49 glow bias mask: the forward colour the pass's glow draws went into (RT0 at its first glow draw; the share pass reads
+    // it at the pass end; ref held until the slot's next StartPass) and the glow draws recorded in this pass
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> biasF;
+    uint32_t   biasDraws = 0;
 #endif
     // ---- v0.6.1 flight recorder: plain counters on the NEWEST slot, reset in StartPass, logged at the blit
     // only for a bad record (PASS ANOMALY) or as a periodic reference (pass sample). Record counts = cand.
@@ -2160,6 +2178,9 @@ DrawIdRecord     g_didRing[kRing];              // per pass slot, parallel to g_
 // v0.10.0 phase 3: per pass slot, the pass's FORWARD draws that were re-drawn into the forward depth (forward mode; replayed
 // into the GREEN channel of the same draw-id target, see DidFwdOnDraw / DidFwdReplay)
 DrawIdRecord     g_didFwdRing[kRing];
+// phase 49: per pass slot, the pass's ADDITIVE world forward draws (light glows / flares / light cones; forward mode, pixel-shader
+// state captured), [0] = SrcBlend ONE, [1] = SrcBlend SRC_ALPHA -- re-drawn into the glow sum at the pass end (BiasBatch)
+DrawIdRecord     g_didBiasRing[kRing][2];
 bool             g_didCfg = true;               // mv_objects == 2
 bool             g_didOn  = false;              // per frame: the feature is live (ObjFrameUpdate)
 // phase 35 SHADOWED INPUT STATE (draw_ids.h DidShadow): dlaa.ini did_shadow (startup only) / did_shadow_verify
@@ -2273,6 +2294,12 @@ void ObjStatsTag(char* buf, size_t cap, uint64_t passes);
 // v0.9.0 r5 forward depth: stats window (defined above hkDrawIndexed); r11: + the near-camera readback slots (ctx)
 void FwdOnPassStart(ID3D11DeviceContext* ctx);
 void FwdOnContextReset();
+// phase 49 glow bias mask (the "GLOW BIAS MASK" block above hkDrawIndexed)
+void BiasOnDraw(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex);
+void BiasBatch(ID3D11DeviceContext* ctx, uint64_t pass, int why);
+void BiasOnPassStart(ID3D11DeviceContext* ctx, uint64_t s);
+void BiasOnContextReset();
+bool BiasLive();
 #else
 constexpr bool   g_mirJit = false;              // (no mirror jitter without WITH_DLAA; hkDraw's full-screen unshift reads it)
 #endif
@@ -2919,6 +2946,7 @@ void SaveSettings(uint64_t n) {
     }
     if (g_xrTurboExplicit) snprintf(add("xr_turbo"), sizeof(kv[0].val), "%d", g_xrTurbo);   // phase 30 (Turbo mode row)
     if (g_xrHiddenMaskExplicit) snprintf(add("xr_hidden_mask"), sizeof(kv[0].val), "%d", g_xrHiddenMask);   // phase 40
+    if (g_biasExplicit) snprintf(add("dlss_bias_mask"), sizeof(kv[0].val), "%d", g_biasCfg);   // phase 49 (glow ghosting row)
     if (g_logLevelExplicit) snprintf(add("log_level"), sizeof(kv[0].val), "%d", LogLevel());  // phase 39 (Logging row)
     if (g_vrsExplicit) {                                  // phase 34 (the Foveated rows)
         snprintf(add("vrs"), sizeof(kv[0].val), "%d", g_vrsOn);
@@ -2926,7 +2954,8 @@ void SaveSettings(uint64_t n) {
         snprintf(add("vrs_outer"), sizeof(kv[0].val), "%d", g_vrsOuter);
     }
     if (g_vrsPassesExplicit) snprintf(add("vrs_passes"), sizeof(kv[0].val), "%d", g_vrsPasses);   // phase 42 (Foveated passes)
-    char vrsW[128] = "";                                  // (phase 39: was 64, + log_level; phase 40: + xr_hidden_mask; phase 42: + vrs_passes)
+    char vrsW[160] = "";                                  // (phase 39: was 64, + log_level; phase 40: + xr_hidden_mask; phase 42: + vrs_passes;
+                                                          //  phase 49: 128 -> 160, + dlss_bias_mask)
     if (g_vrsExplicit) snprintf(vrsW, sizeof(vrsW), " vrs=%d vrs_inner=%d vrs_outer=%d", g_vrsOn, g_vrsInner, g_vrsOuter);
     if (g_xrHiddenMaskExplicit) {
         const size_t vl = strlen(vrsW);
@@ -2935,6 +2964,10 @@ void SaveSettings(uint64_t n) {
     if (g_vrsPassesExplicit) {
         const size_t vl = strlen(vrsW);
         snprintf(vrsW + vl, sizeof(vrsW) - vl, " vrs_passes=%d", g_vrsPasses);
+    }
+    if (g_biasExplicit) {                                 // phase 49
+        const size_t vl = strlen(vrsW);
+        snprintf(vrsW + vl, sizeof(vrsW) - vl, " dlss_bias_mask=%d", g_biasCfg);
     }
     if (g_logLevelExplicit) {
         const size_t vl = strlen(vrsW);
@@ -7244,11 +7277,14 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
     if (g_medoidDropBits & 1) ++g_cMedoidPassW;
     if (g_medoidDropBits & 2) ++g_cMedoidPassC;
     n.fwdTex = nullptr; n.fwdBinds = 0;                   // v0.10.0 phase 7
+    n.twin.biasValid = false; n.twin.biasOpen = false;   // phase 49: this pass's glow bias mask is written at its pass end
     n.stageDone = false; n.stageAtLeave = false; n.fallback = false; n.warmHdr = false; n.candBad = false;
     n.warmTex.Reset();
     PassViewSetup(n);                                     // v0.10.0 phase 9: area clip + forward-depth resolution of this pass
     ObjOnPassStart(ctx, s);                               // v0.9.0: the previous record flushed, this pass's record empty
     DidOnPassStart(ctx, s);                               // v0.10.0: the previous pass replayed if it still waits, new record
+    BiasOnPassStart(ctx, s);                              // phase 49: the previous pass's glow draws (no discard came), new records
+    n.biasF.Reset(); n.biasDraws = 0;                     //   (this slot's forward colour of its previous use goes)
     FwdOnPassStart(ctx);                                  // v0.9.0 r5: stats window (r11: + near-camera readback)
 #endif
     g_phase = n.phase; g_jx = n.jx; g_jy = n.jy;          // ReconcileViewports uses these for this pass
@@ -12782,7 +12818,7 @@ void FwdFlush() {
     memset(g_fwdNear, 0, sizeof(g_fwdNear)); g_fwdNearFill = 0;
     g_fwdLastCb = nullptr; g_fwdLastCbBytes = 0;
 }
-void FwdOnContextReset() { FwdFlush(); g_fwdFailed = false; }
+void FwdOnContextReset() { FwdFlush(); g_fwdFailed = false; BiasOnContextReset(); }   // phase 49: + the glow bias mask
 
 // Depth tested, no depth written. Null = the D3D11 default state (writes depth) -> no.
 bool FwdDssQualifies(ID3D11DepthStencilState* s) {
@@ -13461,6 +13497,7 @@ void FwdBatch(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int 
 void FwdOnPassEnd(ID3D11DeviceContext* ctx) {
     CpuProf::Block cpb(CpuProf::kBFwd);               // phase 31 CPU profiler (cpu_prof.h)
     if (g_passSeq) FwdBatch(ctx, g_passSeq - 1, true, 3);
+    if (g_passSeq) BiasBatch(ctx, g_passSeq - 1, 3);  // phase 49: the glow bias mask (before the pre-tonemap DLAA reads it)
 }
 
 // v0.10.0 phase 10: called for every qualifying forward draw (ids on or off): the record (+ its pixel-shader state) is the input
@@ -13480,6 +13517,333 @@ bool DidFwdOnDraw(ID3D11DeviceContext* ctx, UINT ic, UINT si, INT bv) {
     if (rec.Record(g_ctx1, ic, 1, si, bv, 0, false)) { ++g_didFwdRec; return true; }
     ++g_didFwdRecFull;
     return false;
+}
+
+// ---- phase 49 GLOW BIAS MASK (dlaa.ini dlss_bias_mask, default 100 %; menu row "Light glow ghosting fix") -----------------------
+// WHY (user report, night driving, flat + VR): street-lamp and vehicle-light glows GHOST -- a trail behind them when the camera
+// moves. Those glows / flares / light cones are ADDITIVE forward draws (RenderDoc frame 1969: 31 per frame with DestBlend ONE, depth
+// tested without depth write, docs/CAPTURE_FINDINGS.md): no depth and no motion of their own, so NGX gets the depth / motion of what
+// lies behind them, and its history keeps the glow where it was a frame ago (the forward depth / forward ids leave them out on
+// purpose: their pixels belong to what is behind them). DLSS's own answer is the BIAS CURRENT COLOUR mask (NGX
+// DLSS.Input.Bias.Current.Color.Mask, 1 = take this frame's colour over the history there); the mod never set it before.
+// HOW:
+//  * BiasOnDraw (hkDrawIndexed, after the game's draw, main forward binding, world-layer viewport -- the forward depth's rule): a
+//    draw whose blend state ADDS to RT0 (BlendEnable, DestBlend ONE, BlendOp ADD, SrcBlend ONE or SRC_ALPHA, colour written, no
+//    alpha-to-coverage) and whose depth-stencil state tests (GREATER / GREATER_EQUAL: reversed-Z) without writing is recorded into
+//    the pass's glow record (g_didBiasRing: forward mode, pixel-shader state captured = the forward-depth batch's machinery), one
+//    record per SrcBlend kind; the bound RT0 (the pass's forward colour) is kept for the pass (PassSlot::biasF).
+//  * BiasBatch (next to the forward-depth batch: the scene depth discard / the forward leave, the next pass start, a forced buffer
+//    discard): DrawIdRecord::ReplayDepth re-draws them with the game's VS / PS / resources / RS / viewport into ONE shared
+//    R11G11B10_FLOAT GLOW SUM of the scene size (blend ONE + ONE or SRC_ALPHA + ONE, as the game adds them), depth GREATER_EQUAL
+//    without write against a READ-ONLY view of the pass's scene depth (the game's own occlusion), through the pass's area clip.
+//    Then the SHARE PASS (DrawIdRecord::BiasShare) writes the pass's R8 mask (DepthTwin::biasTex): smoothstep(0.05, 0.5,
+//    lum(glow sum) / lum(forward colour)) -- the share of the pixel's light the glows made. Exposure-free (both are the game's
+//    linear HDR values of that pixel): a glow over the night sky = 1, a faint glow over a bright day background ~ 0 (keeps its
+//    anti-aliasing).
+//  * SceneDlaa::Run (BiasPrep): the mask at the DLAA crop, max'ed with LAST frame's glow pixels carried along this frame's motion
+//    vectors (the history pixels that still hold the glow that moved on: the trail itself), x dlss_bias_mask %, -> NGX. Per eye /
+//    per flat view exactly like the depth snapshot (per pass slot, consumed at the blit). Mirror units / previews get none (their
+//    passes have no forward hooks).
+// COST: the glow draws once more (~30 small sprites per pass in the capture), one full-screen share pass inside the clip, one crop
+//    dispatch per eye: GpuPerf 'bias-mask'. Memory: the glow sum (4 B per scene pixel, one, shared), an R8 mask per pass slot
+//    (pooled) and 3 R8 crops per unit.
+// LOG: the first pass with glow draws (how many were flagged), then (log level 4) a line every 1200 passes: glow draws per pass.
+ID3D11Device*             g_biasDev = nullptr;       // device of the objects below (ref)
+ID3D11DepthStencilState*  g_biasDss = nullptr;       // GREATER_EQUAL, no depth write, stencil off
+ID3D11BlendState*         g_biasBs[2] = {};          // RT0 += src (ONE) / src x src alpha (SRC_ALPHA), colour only
+ID3D11Texture2D*          g_biasGlow = nullptr;      // the shared glow sum: R11G11B10_FLOAT, scene size
+ID3D11RenderTargetView*   g_biasGlowRtv = nullptr;
+ID3D11ShaderResourceView* g_biasGlowSrv = nullptr;
+uint32_t                  g_biasGlowW = 0, g_biasGlowH = 0;
+bool                      g_biasFailed = false;      // a state / the glow sum could not be created: off for the session (one line)
+int                       g_biasClearView = -1;      // D3D11_FEATURE_D3D11_OPTIONS.ClearView (once): clear only the clip
+FwdMemo                   g_biasBsMemo[kFwdMemo];    // blend state -> glow kind (g_biasBsKind; ref held on the key)
+int8_t                    g_biasBsKind[kFwdMemo] = {};
+int                       g_biasBsMemoN = 0;
+FwdMemo                   g_biasDssMemo[kFwdMemo];   // depth-stencil state -> tests without writing (reversed-Z)
+int                       g_biasDssMemoN = 0;
+struct BiasColSrv { Microsoft::WRL::ComPtr<ID3D11Texture2D> tex; Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv; };
+BiasColSrv                g_biasCol[4];              // SRVs of the forward colours (flat 1, VR one per eye), round robin
+int                       g_biasColNext = 0;
+// stats window (passes with dlss_bias_mask > 0): passes / passes with glows, glow draws by kind, record full, batches, failed,
+// masks written, glow draws without the forward colour bound
+uint64_t                  g_biasPasses = 0, g_biasPassesGlow = 0, g_biasDraws[2] = {}, g_biasRecFull = 0, g_biasBatches = 0;
+uint64_t                  g_biasFail = 0, g_biasShares = 0, g_biasNoColour = 0, g_biasTicks = 0;
+uint32_t                  g_biasStatLogs = 0;
+bool                      g_biasFirstLogged = false;
+
+bool BiasLive() {
+    return g_biasCfg > 0 && !g_biasFailed && g_passSeq > g_fifoHead && g_dlaaOn.load(std::memory_order_relaxed) &&
+           !g_passive.load(std::memory_order_relaxed) && !g_jitterOnly.load(std::memory_order_relaxed) &&
+           !g_gameDeviceChanged.load(std::memory_order_relaxed) && g_sceneDepth && g_sceneW && g_sceneH &&
+           SceneDlaa::ShadersReady();
+}
+
+void BiasFlush() {
+    for (int i = 0; i < g_biasBsMemoN; ++i) if (g_biasBsMemo[i].key) g_biasBsMemo[i].key->Release();
+    for (int i = 0; i < g_biasDssMemoN; ++i) if (g_biasDssMemo[i].key) g_biasDssMemo[i].key->Release();
+    g_biasBsMemoN = g_biasDssMemoN = 0;
+    if (g_biasGlowSrv) { g_biasGlowSrv->Release(); g_biasGlowSrv = nullptr; }
+    if (g_biasGlowRtv) { g_biasGlowRtv->Release(); g_biasGlowRtv = nullptr; }
+    if (g_biasGlow) { g_biasGlow->Release(); g_biasGlow = nullptr; }
+    g_biasGlowW = g_biasGlowH = 0;
+    if (g_biasDss) { g_biasDss->Release(); g_biasDss = nullptr; }
+    for (ID3D11BlendState*& b : g_biasBs) if (b) { b->Release(); b = nullptr; }
+    if (g_biasDev) { g_biasDev->Release(); g_biasDev = nullptr; }
+    for (BiasColSrv& c : g_biasCol) c = BiasColSrv();
+    g_biasColNext = 0;
+    g_biasClearView = -1;
+}
+// device / context change: everything of the old device, the glow records and the kept forward colours
+void BiasOnContextReset() {
+    BiasFlush();
+    g_biasFailed = false;
+    for (auto& recs : g_didBiasRing) for (DrawIdRecord& r : recs) r.Reset();
+    for (PassSlot& p : g_ring) { p.biasF.Reset(); p.biasDraws = 0; }
+}
+
+// -1 = not a glow draw, 0 = SrcBlend ONE, 1 = SrcBlend SRC_ALPHA (both DestBlend ONE, ADD). Null = blending off -> -1.
+int BiasBlendKind(ID3D11BlendState* s) {
+    if (!s) return -1;
+    for (int i = 0; i < g_biasBsMemoN; ++i) if (g_biasBsMemo[i].key == s) return g_biasBsKind[i];
+    D3D11_BLEND_DESC d{};
+    s->GetDesc(&d);
+    const D3D11_RENDER_TARGET_BLEND_DESC& r = d.RenderTarget[0];
+    int k = -1;
+    if (r.BlendEnable && r.DestBlend == D3D11_BLEND_ONE && r.BlendOp == D3D11_BLEND_OP_ADD && (r.RenderTargetWriteMask & 7) != 0 &&
+        !d.AlphaToCoverageEnable)
+        k = r.SrcBlend == D3D11_BLEND_ONE ? 0 : (r.SrcBlend == D3D11_BLEND_SRC_ALPHA ? 1 : -1);
+    if (g_biasBsMemoN < kFwdMemo) { s->AddRef(); g_biasBsMemo[g_biasBsMemoN] = { s, k >= 0 }; g_biasBsKind[g_biasBsMemoN++] = (int8_t)k; }
+    return k;
+}
+// depth tested (reversed-Z GREATER / GREATER_EQUAL), no depth written. Null = the default state (writes depth) -> no.
+bool BiasDssQualifies(ID3D11DepthStencilState* s) {
+    if (!s) return false;
+    for (int i = 0; i < g_biasDssMemoN; ++i) if (g_biasDssMemo[i].key == s) return g_biasDssMemo[i].ok;
+    D3D11_DEPTH_STENCIL_DESC d{};
+    s->GetDesc(&d);
+    const bool ok = d.DepthEnable && d.DepthWriteMask == D3D11_DEPTH_WRITE_MASK_ZERO &&
+                    (d.DepthFunc == D3D11_COMPARISON_GREATER || d.DepthFunc == D3D11_COMPARISON_GREATER_EQUAL);
+    if (g_biasDssMemoN < kFwdMemo) { s->AddRef(); g_biasDssMemo[g_biasDssMemoN++] = { s, ok }; }
+    return ok;
+}
+
+// Our states (once per device) + the glow sum at the scene size. false = not now (failed: g_biasFailed, logged once).
+bool BiasEnsure(ID3D11DeviceContext* ctx) {
+    if (!g_biasDev) ctx->GetDevice(&g_biasDev);
+    if (!g_biasDev) return false;
+    HRESULT hr = S_OK;
+    if (!g_biasDss) {
+        D3D11_DEPTH_STENCIL_DESC dd{};
+        dd.DepthEnable = TRUE;
+        dd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;  // a read-only view of the scene depth is bound
+        dd.DepthFunc = D3D11_COMPARISON_GREATER_EQUAL;   // reversed-Z: the game's own occlusion of the glows
+        dd.StencilEnable = FALSE;
+        dd.StencilReadMask = 0xFF; dd.StencilWriteMask = 0x00;
+        const D3D11_DEPTH_STENCILOP_DESC op{ D3D11_STENCIL_OP_KEEP, D3D11_STENCIL_OP_KEEP, D3D11_STENCIL_OP_KEEP, D3D11_COMPARISON_ALWAYS };
+        dd.FrontFace = op; dd.BackFace = op;
+        hr = g_biasDev->CreateDepthStencilState(&dd, &g_biasDss);
+    }
+    for (int k = 0; k < 2 && SUCCEEDED(hr); ++k) {
+        if (g_biasBs[k]) continue;
+        D3D11_BLEND_DESC bd{};
+        bd.AlphaToCoverageEnable = FALSE;
+        bd.IndependentBlendEnable = FALSE;
+        D3D11_RENDER_TARGET_BLEND_DESC& r = bd.RenderTarget[0];
+        r.BlendEnable = TRUE;
+        r.SrcBlend = k ? D3D11_BLEND_SRC_ALPHA : D3D11_BLEND_ONE;   // as the game adds them
+        r.DestBlend = D3D11_BLEND_ONE;
+        r.BlendOp = D3D11_BLEND_OP_ADD;
+        r.SrcBlendAlpha = D3D11_BLEND_ONE; r.DestBlendAlpha = D3D11_BLEND_ONE; r.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+        r.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN | D3D11_COLOR_WRITE_ENABLE_BLUE;
+        hr = g_biasDev->CreateBlendState(&bd, &g_biasBs[k]);
+    }
+    if (FAILED(hr) || !g_biasDss || !g_biasBs[0] || !g_biasBs[1]) {
+        g_biasFailed = true;
+        LogErr("DLSS bias mask: OFF for this session -- state creation failed hr=0x%lx", (unsigned long)hr);
+        return false;
+    }
+    if (g_biasGlow && g_biasGlowW == g_sceneW && g_biasGlowH == g_sceneH) return true;
+    if (g_biasGlowSrv) { g_biasGlowSrv->Release(); g_biasGlowSrv = nullptr; }
+    if (g_biasGlowRtv) { g_biasGlowRtv->Release(); g_biasGlowRtv = nullptr; }
+    if (g_biasGlow) { g_biasGlow->Release(); g_biasGlow = nullptr; }
+    g_biasGlowW = g_biasGlowH = 0;
+    D3D11_TEXTURE2D_DESC td{};
+    td.Width = g_sceneW; td.Height = g_sceneH;
+    td.MipLevels = 1; td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_R11G11B10_FLOAT;
+    td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_DEFAULT;
+    td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    if (FAILED(hr = g_biasDev->CreateTexture2D(&td, nullptr, &g_biasGlow)) ||
+        FAILED(hr = g_biasDev->CreateRenderTargetView(g_biasGlow, nullptr, &g_biasGlowRtv)) ||
+        FAILED(hr = g_biasDev->CreateShaderResourceView(g_biasGlow, nullptr, &g_biasGlowSrv))) {
+        if (g_biasGlowSrv) { g_biasGlowSrv->Release(); g_biasGlowSrv = nullptr; }
+        if (g_biasGlowRtv) { g_biasGlowRtv->Release(); g_biasGlowRtv = nullptr; }
+        if (g_biasGlow) { g_biasGlow->Release(); g_biasGlow = nullptr; }
+        g_biasFailed = true;
+        LogErr("DLSS bias mask: OFF for this session -- glow sum create hr=0x%lx (%ux%u R11G11B10_FLOAT)", (unsigned long)hr,
+            g_sceneW, g_sceneH);
+        return false;
+    }
+    g_biasGlowW = g_sceneW; g_biasGlowH = g_sceneH;
+    if (g_biasClearView < 0) {
+        D3D11_FEATURE_DATA_D3D11_OPTIONS o{};
+        g_biasClearView = SUCCEEDED(g_biasDev->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS, &o, sizeof(o))) && o.ClearView ? 1 : 0;
+    }
+    return true;
+}
+
+// an SRV of the pass's forward colour (RGBA16F, single-sample, shader-readable); null = not readable
+ID3D11ShaderResourceView* BiasColourSrv(ID3D11Device* dev, ID3D11Texture2D* f) {
+    if (!dev || !f) return nullptr;
+    for (BiasColSrv& c : g_biasCol) if (c.tex.Get() == f) return c.srv.Get();
+    D3D11_TEXTURE2D_DESC d{};
+    f->GetDesc(&d);
+    if (!(d.BindFlags & D3D11_BIND_SHADER_RESOURCE) || d.SampleDesc.Count != 1 || d.ArraySize != 1) return nullptr;
+    D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+    sd.Format = d.Format == DXGI_FORMAT_R16G16B16A16_TYPELESS ? DXGI_FORMAT_R16G16B16A16_FLOAT : d.Format;
+    sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    sd.Texture2D.MostDetailedMip = 0;
+    sd.Texture2D.MipLevels = 1;
+    BiasColSrv& c = g_biasCol[g_biasColNext];
+    g_biasColNext = (g_biasColNext + 1) % (int)(sizeof(g_biasCol) / sizeof(g_biasCol[0]));
+    c = BiasColSrv();
+    if (FAILED(dev->CreateShaderResourceView(f, &sd, &c.srv)) || !c.srv) { c = BiasColSrv(); return nullptr; }
+    c.tex = f;                                            // (ref held: the identity cannot be reused while cached)
+    return c.srv.Get();
+}
+
+// One world forward-pass DrawIndexed of the main forward binding, right after the game's own call (see the block comment).
+void BiasOnDraw(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex) {
+    CpuProf::Block cpb(CpuProf::kBFwd);                // phase 31 CPU profiler: with the forward depth's recording
+    if (g_gameVpN == 0 || g_gameVp[0].MinDepth < 0.005f || g_gameVp[0].MaxDepth > 0.95f) return;   // world layer only
+    ID3D11BlendState* bs = nullptr; FLOAT bf[4] = {}; UINT mask = 0;
+    ctx->OMGetBlendState(&bs, bf, &mask);
+    const int kind = BiasBlendKind(bs);
+    if (bs) bs->Release();
+    if (kind < 0) return;
+    ID3D11DepthStencilState* dss = nullptr; UINT ref = 0;
+    ctx->OMGetDepthStencilState(&dss, &ref);
+    const bool dOk = BiasDssQualifies(dss);
+    if (dss) dss->Release();
+    if (!dOk || !g_passSeq) return;
+    if (g_ctx1Owner != ctx) {
+        if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
+        ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&g_ctx1);
+        g_ctx1Owner = ctx;
+    }
+    if (!g_ctx1) return;
+    PassSlot& slot = g_ring[SlotOf(g_passSeq - 1)];
+    if (!slot.biasF) {                                    // the pass's forward colour = the RT0 of this draw (the share pass reads it)
+        ID3D11RenderTargetView* rtv = nullptr;
+        ctx->OMGetRenderTargets(1, &rtv, nullptr);
+        if (rtv) {
+            Microsoft::WRL::ComPtr<ID3D11Resource> r;
+            rtv->GetResource(&r);
+            rtv->Release();
+            if (r && (void*)r.Get() == g_fwdBoundTex) r.As(&slot.biasF);
+        }
+        if (!slot.biasF) { ++g_biasNoColour; return; }
+    }
+    DrawIdRecord& rec = g_didBiasRing[SlotOf(g_passSeq - 1)][kind];
+    if (!rec.Forward()) rec.SetForward(true);
+    if (!rec.CapturePs() && rec.Count() == 0) rec.SetCapturePs(true);
+    DidShadow::SetAlias(ctx);                             // phase 35 (as DidFwdOnDraw)
+    if (rec.Record(g_ctx1, indexCount, 1, startIndex, baseVertex, 0, false)) { ++slot.biasDraws; ++g_biasDraws[kind]; }
+    else ++g_biasRecFull;
+}
+
+// The pending glow draws of pass `pass` -> the glow sum -> the share pass -> the pass's mask. why: 1 = forced (hkMap discard),
+// 2 = the next pass started, 3 = the pass end (scene depth discard / forward leave).
+void BiasBatch(ID3D11DeviceContext* ctx, uint64_t pass, int why) {
+    DrawIdRecord* const recs = g_didBiasRing[SlotOf(pass)];
+    if (recs[0].PendingDepth() <= 0 && recs[1].PendingDepth() <= 0) return;
+    PassSlot& ps = g_ring[SlotOf(pass)];
+    DepthTwin& t = ps.twin;
+    if (g_ctx1Owner != ctx) {
+        if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
+        ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&g_ctx1);
+        g_ctx1Owner = ctx;
+    }
+    if (!g_ctx1) return;
+    const int64_t t0 = MeasureOn() ? Qpc() : 0;           // phase 45: the clock only while measuring (g_measure)
+    ++g_biasBatches;
+    ID3D11Device* dev = nullptr;
+    ctx->GetDevice(&dev);
+    ID3D11DepthStencilView* const ro = dev ? DidRoDsv(dev, PassDepth(ps)) : nullptr;   // this pass's depth (issue #9)
+    ID3D11ShaderResourceView* const colSrv = BiasColourSrv(dev, ps.biasF.Get());
+    const bool ok = g_biasCfg > 0 && !g_biasFailed && ro && colSrv && g_sceneW && g_sceneH && BiasEnsure(ctx) &&
+                    t.EnsureBias(dev, g_sceneW, g_sceneH);
+    if (dev) dev->Release();
+    t_inDlaa = true;                                      // our own calls: every hook passes straight through
+    if (!ok) {                                            // nothing drawn: the draws are released, the pass gets no mask
+        for (int k = 0; k < 2; ++k) { recs[k].ReplayDepth(g_ctx1, nullptr, nullptr, nullptr, nullptr, true); recs[k].DropIds(); }
+        t_inDlaa = false;
+        ++g_biasFail;
+        return;
+    }
+    GpuPerf::SetPass(ps.s);
+    const int pq = GpuPerf::Begin(ctx, GpuPerf::kBias);
+    const D3D11_RECT* const clip = ps.clip ? &ps.clipRect : nullptr;
+    if (!t.biasOpen) {                                    // the pass's first glow segment: its glow sum starts at 0
+        const FLOAT zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        if (clip && g_biasClearView == 1) g_ctx1->ClearView(g_biasGlowRtv, zero, clip, 1);
+        else oClearRTV(ctx, g_biasGlowRtv, zero);
+        if (clip) oClearRTV(ctx, t.biasRtv.Get(), zero); // outside the clip the share pass writes nothing (pooled: old values)
+        t.biasOpen = true;
+    }
+    int replayed[2] = { 0, 0 };
+    for (int k = 0; k < 2; ++k) {
+        if (recs[k].PendingDepth() <= 0) continue;
+        recs[k].SetView(clip, 0);
+        const DrawIdRecord::ReplayResult rr = recs[k].ReplayDepth(g_ctx1, g_biasGlowRtv, ro, g_biasDss, g_biasBs[k], true);
+        recs[k].DropIds();                                // no ids for glows: the refs go
+        replayed[k] = rr.replayed;
+    }
+    const bool shared = DrawIdRecord::BiasShare(g_ctx1, t.biasRtv.Get(), g_sceneW, g_sceneH, g_biasGlowSrv, colSrv, clip);
+    GpuPerf::End(ctx, pq);
+    t_inDlaa = false;
+    if (shared) { t.biasValid = true; ++g_biasShares; }
+    else ++g_biasFail;
+    if (t0) g_biasTicks += (uint64_t)(Qpc() - t0);
+    if (!g_biasFirstLogged && shared && replayed[0] + replayed[1] > 0) {
+        g_biasFirstLogged = true;
+        Log("DLSS bias mask (phase 49): first pass with light glows (pass s=%llu, %s): %u additive forward draws flagged in this pass "
+            "(%d SrcBlend ONE + %d SRC_ALPHA re-drawn into the %ux%u glow sum, depth tested against the scene depth%s), the share "
+            "pass wrote the pass's R8 mask -- NGX gets it (x dlss_bias_mask %d %%) as its bias current colour mask: the glows come "
+            "from the current frame instead of the history (no trail)", (unsigned long long)ps.s,
+            why == 1 ? "forced by a discard" : (why == 2 ? "next pass" : "pass end"), ps.biasDraws, replayed[0], replayed[1],
+            g_biasGlowW, g_biasGlowH, clip ? ", inside the DLAA-area clip" : "", g_biasCfg);
+    }
+}
+
+// StartPass (pass s, before the game's clear): the previous pass's pending glow draws (no discard came) + the stats window; the
+// new slot's records start empty.
+void BiasOnPassStart(ID3D11DeviceContext* ctx, uint64_t s) {
+    if (s > 0) {
+        BiasBatch(ctx, s - 1, 2);
+        const PassSlot& prev = g_ring[SlotOf(s - 1)];
+        if (g_biasCfg > 0) {
+            ++g_biasPasses;
+            if (prev.biasDraws) ++g_biasPassesGlow;
+        }
+    }
+    for (DrawIdRecord& r : g_didBiasRing[SlotOf(s)]) { r.Reset(); r.SetForward(true); r.SetCapturePs(true); }
+    if (g_biasPasses < 1200) return;
+    const double p = (double)g_biasPasses;
+    const double qf = g_qpcFreq > 0 ? (double)g_qpcFreq : 1.0;
+    if (g_biasStatLogs++ < 200)
+        LogDbg("DLSS bias mask (phase 49) over %llu passes: glow draws per pass %.1f (SrcBlend ONE %.1f, SRC_ALPHA %.1f), passes with "
+            "glows %.0f %%, batches %.2f / pass, masks %llu, failed %llu, record full %llu, glow draws without the forward colour %llu "
+            "| CPU %.3f ms/pass (batch; the recording is in the forward depth's figure) | dlss_bias_mask %d %%",
+            (unsigned long long)g_biasPasses, (double)(g_biasDraws[0] + g_biasDraws[1]) / p, (double)g_biasDraws[0] / p,
+            (double)g_biasDraws[1] / p, 100.0 * (double)g_biasPassesGlow / p, (double)g_biasBatches / p,
+            (unsigned long long)g_biasShares, (unsigned long long)g_biasFail, (unsigned long long)g_biasRecFull,
+            (unsigned long long)g_biasNoColour, (double)g_biasTicks * 1000.0 / qf / p, g_biasCfg);
+    g_biasPasses = g_biasPassesGlow = 0;
+    g_biasDraws[0] = g_biasDraws[1] = 0;
+    g_biasRecFull = g_biasBatches = g_biasFail = g_biasShares = g_biasNoColour = g_biasTicks = 0;
 }
 
 // v0.10.0 phase 5 (Alt+F8): one forward draw of the logged pass that gets no forward depth / no id (verdict != 0 of
@@ -13694,6 +14058,11 @@ void DidOnDiscardMap(ID3D11DeviceContext* ctx, ID3D11Resource* r) {
         }
     }
     if (fr.HasOpenRing(r)) { t_inDlaa = true; fr.OnDiscard(ctx, r); t_inDlaa = false; }
+    // phase 49: the same for the pending glow draws (their VS / PS buffers): re-drawn into the glow sum now
+    DrawIdRecord* const br = g_didBiasRing[SlotOf(g_passSeq - 1)];
+    if ((br[0].PendingDepth() > 0 && br[0].ReferencesPending(r)) || (br[1].PendingDepth() > 0 && br[1].ReferencesPending(r)))
+        BiasBatch(ctx, g_passSeq - 1, 1);
+    for (int k = 0; k < 2; ++k) if (br[k].HasOpenRing(r)) { t_inDlaa = true; br[k].OnDiscard(ctx, r); t_inDlaa = false; }
 }
 
 void DidOnContextReset() {
@@ -15315,6 +15684,7 @@ enum MenuRowId {
     MR_MODE, MR_PROFILE, MR_MODEL,
     MR_PICGRP,                                            // phase 43: group "Picture"
     MR_SHARP, MR_WIDTH, MR_LOD, MR_LODCUT, MR_AREA, MR_PRETM, MR_FWD,
+    MR_BIAS,                                              // phase 49: light glow ghosting fix (dlaa.ini dlss_bias_mask)
     MR_MOTGRP,                                            // phase 43: group "Motion and mirrors"
     MR_DRAWIDS, MR_MIRROR,
     MR_MIRTURNS,                                          // phase 41: mirrors in turns (dlaa.ini mirror_turns)
@@ -15345,7 +15715,7 @@ static_assert(MR_COUNT <= TuningMenu::kMaxRows, "tuning menu: too many rows");
 // `last` (v0.10.3 phase 29c layout). MenuRowGroup / MenuGrpOpen / MenuRowVisible / MenuChange / the open-state array use it.
 struct MenuGroupDef { int header, last; const wchar_t* title; };
 constexpr MenuGroupDef kMenuGroups[] = {
-    { MR_PICGRP,   MR_FWD,      L"Picture" },
+    { MR_PICGRP,   MR_BIAS,     L"Picture" },                    // phase 49: last row MR_FWD -> MR_BIAS
     { MR_MOTGRP,   MR_MIRTURNS, L"Motion and mirrors" },
     { MR_UPGRP,    MR_OFXR,     L"Upscaling and VR" },
     { MR_VRPGRP,   MR_HMASK,    L"VR performance" },
@@ -15353,12 +15723,12 @@ constexpr MenuGroupDef kMenuGroups[] = {
     { MR_FPSGRP,   MR_FPSROLL,  L"FPS counter settings" },     // phase 44: last row MR_FPSSIZE -> MR_FPSROLL (phase 48: + FPS brightness inside)
 };
 constexpr int kMenuGroupCount = (int)(sizeof(kMenuGroups) / sizeof(kMenuGroups[0]));
-static_assert(MR_PICGRP + 1 == MR_SHARP && MR_FWD + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_MIRTURNS + 1 == MR_UPGRP &&
+static_assert(MR_PICGRP + 1 == MR_SHARP && MR_BIAS + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_MIRTURNS + 1 == MR_UPGRP &&
               MR_UPGRP + 1 == MR_UPSCALE && MR_OFXR + 1 == MR_VRPGRP && MR_VRPGRP + 1 == MR_TURBO && MR_HMASK + 1 == MR_PANELGRP &&
               MR_PANELGRP + 1 == MR_POSX && MR_MENUKEYS + 1 == MR_FPS && MR_FPSGRP + 1 == MR_FPSLOCK && MR_FPSROLL + 1 == MR_LOG,
               "tuning menu: a group's children must follow its header and fill it up to its last row");
 static_assert(MR_SHARP < MR_WIDTH && MR_WIDTH < MR_LOD && MR_LOD < MR_LODCUT && MR_LODCUT < MR_AREA && MR_AREA < MR_PRETM &&
-              MR_PRETM < MR_FWD && MR_DRAWIDS < MR_MIRROR && MR_MIRROR < MR_MIRTURNS && MR_UPSCALE < MR_DLAA && MR_DLAA < MR_OFXR &&
+              MR_PRETM < MR_FWD && MR_FWD < MR_BIAS && MR_DRAWIDS < MR_MIRROR && MR_MIRROR < MR_MIRTURNS && MR_UPSCALE < MR_DLAA && MR_DLAA < MR_OFXR &&
               MR_TURBO < MR_VRS && MR_VRS < MR_VRSSIZE && MR_VRSSIZE < MR_VRSPASS && MR_VRSPASS < MR_HMASK &&
               MR_POSX < MR_POSY && MR_POSY < MR_SIZE && MR_SIZE < MR_DEPTH && MR_DEPTH < MR_FACE && MR_FACE < MR_MENUKEYS &&
               MR_FPSLOCK < MR_FPSX && MR_FPSX < MR_FPSY && MR_FPSY < MR_FPSSIZE && MR_FPSSIZE < MR_FPSCOLOR &&
@@ -15391,6 +15761,9 @@ const wchar_t* const kMenuDesc[] = {
     L"Not used with DLSS upscale or Windows HDR. Same cost either way; takes ~60 frames to switch.",
     L"Gives wires, fences and glass their own distance instead of what is behind them, so they do not smear when you move. Turn "
     L"it off if you see no smearing there: saves 0.02 - 0.06 ms per eye.",
+    // phase 49 (MR_BIAS)
+    L"Stops street-lamp and car-light glows leaving a trail behind them when you move: DLSS takes each glow from the current "
+    L"frame, not its history. 25 % steps; lower it if lamp glows flicker, 0 = off. Costs about 0.05 - 0.2 ms per eye.",
     // phase 43: menu categories (Motion and mirrors)
     L"How moving parts and truck mirrors are handled by DLAA. Right opens the group, Left closes it; it starts closed every time the "
     L"menu opens.",
@@ -15712,6 +16085,20 @@ void StepVrsSize(int dir, uint64_t n, bool repeat) {
         LogDbg("Foveated size (VRS): %d %% (vrs_inner=%d vrs_outer=%d, auto-repeat)", g_vrsOuter, g_vrsInner, g_vrsOuter);
     PlayTones(1, 300 + 9 * g_vrsOuter, 60, 0);
 }
+// phase 49: the menu's Light glow ghosting fix row -- dlaa.ini dlss_bias_mask live in 25 % steps (0 = off .. 100). Logged + beeped
+// like the step rows; at the ends a low beep. Off: the units drop their glow history (BiasPrep), the pass records stay empty.
+void StepBiasMask(int dir, uint64_t n) {
+    const int next = g_biasCfg + (dir > 0 ? 25 : -25);
+    if (next < 0 || next > 100) { PlayTones(1, 200, 120, 0); return; }
+    g_biasCfg = next;
+    g_biasExplicit = true;
+    SceneDlaa::SetBiasStrength(g_biasCfg);
+    Log("Light glow ghosting fix (phase 49): dlss_bias_mask=%d %% (tuning menu, Present #%llu) -- %s", g_biasCfg,
+        (unsigned long long)n, g_biasCfg ? "NGX takes the additive light glows (lamps, vehicle lights) from the current frame "
+                                           "by this share (the bias current colour mask)"
+                                         : "off: NGX gets no mask, the glows come from the history as before phase 49");
+    PlayTones(1, g_biasCfg ? 400 + 8 * g_biasCfg : 300, 120, 0);
+}
 // phase 40: the menu's Hidden area mask (VR) row -- dlaa.ini xr_hidden_mask live (the next eye scene clear draws / skips it). The
 // OpenXR extension is only requested when it was on at the game's start: switched on later, it waits for a restart (logged; the
 // row says so). Logged + beeped like the other toggles; also switchable in flat (kept for VR; the row is greyed there).
@@ -15860,6 +16247,9 @@ void ResetSettings(uint64_t n) {
     g_xrHiddenMask = 0;                                   // phase 40: hidden area mask off
     g_xrHiddenMaskExplicit = false;
     HmApplyConfig();
+    g_biasCfg = 100;                                      // phase 49: the glow bias mask at full strength
+    g_biasExplicit = false;
+    SceneDlaa::SetBiasStrength(g_biasCfg);
     // phase 39: logging back to the level dlaa.ini gives without log_level (the key is removed below; `debug` stays in the file,
     // so debug = 1 there = level 4, as at the next start; else 1 = errors)
     g_logLevelKey = -1;
@@ -15888,6 +16278,7 @@ void ResetSettings(uint64_t n) {
         "log_level",                                                                                    // phase 39
         "mirror_turns",                                                                                 // phase 41
         "xr_hidden_mask",                                                                               // phase 40
+        "dlss_bias_mask",                                                                               // phase 49
     };
     constexpr int kNKeys = (int)(sizeof(kKeys) / sizeof(kKeys[0]));
     static_assert(kNKeys <= kIniMaxKeys, "WriteIniPreserving handles at most kIniMaxKeys keys");
@@ -15902,7 +16293,7 @@ void ResetSettings(uint64_t n) {
             "perf_profile = high mv_fwd_depth = 1 menu_x = 2 menu_y = 8 "
             "menu_scale = 1.0 menu_vr_x = 0 menu_vr_y = -5 menu_vr_scale = 1.0 menu_vr_depth = 12 menu_vr_dist = 100 menu_vr_face = 1 "
             "fps_show = 0 "
-            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 xr_turbo = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 xr_hidden_mask = 0 log_level = %d (%s) -- profile: %s -- "
+            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 xr_turbo = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 xr_hidden_mask = 0 dlss_bias_mask = 100 log_level = %d (%s) -- profile: %s -- "
             "dlaa.ini: %d keys removed (hotkeys and other lines kept)", (unsigned long long)n, g_dlaaOn.load() ? "DLSS" : "off",
             (double)kFpsVrScaleDefault, LogLevel(), g_logDebugKey ? "no key: debug = 1 in dlaa.ini" : "no key", changed, kNKeys);
         BeepSeq b;                                        // success: rising two-tone 600 -> 900 Hz, 120 ms each (as SaveSettings)
@@ -15931,7 +16322,7 @@ void ResetSettings(uint64_t n) {
 // COST WHILE CLOSED: nothing of this runs (MenuPerfTick is called only while open); the profiler / GPU timers / g_measure go back
 // to the dlaa.ini + log level state at the close (MenuPerfClose): below level 4 every profiler scope is one relaxed load + a
 // not-taken branch, every GPU timer section one call + a flag test, every legacy CPU timer one relaxed load (MeasureOn).
-enum MenuCostGrp { MG_NGX, MG_PART, MG_CAM, MG_FWD, MG_MIR, MG_SHARP, MG_COPY, MG_COUNT };
+enum MenuCostGrp { MG_NGX, MG_PART, MG_CAM, MG_FWD, MG_MIR, MG_SHARP, MG_COPY, MG_BIAS, MG_COUNT };   // phase 49: + MG_BIAS
 int MenuCostGroup(int sec) {
     switch (sec) {
     case GpuPerf::kNgx:      return MG_NGX;
@@ -15944,6 +16335,7 @@ int MenuCostGroup(int sec) {
     case GpuPerf::kSnap:     case GpuPerf::kCandCopy:  case GpuPerf::kConvert:  case GpuPerf::kMedoid:  case GpuPerf::kPassB:
     case GpuPerf::kMvMisc:   return MG_CAM;
     case GpuPerf::kFwdDepth: case GpuPerf::kFwdInit:   return MG_FWD;
+    case GpuPerf::kBias:     return MG_BIAS;          // phase 49: the glow bias mask (pass end + crop)
     case GpuPerf::kMirror:   case GpuPerf::kMirNgx:    return MG_MIR;
     case GpuPerf::kRcas:     return MG_SHARP;
     case GpuPerf::kCopyIn:   case GpuPerf::kCopyOut:   case GpuPerf::kDbgView:  return MG_COPY;
@@ -16420,6 +16812,8 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
     if (mirOn) cell(MR_MIRTURNS, cpuS(cpuMir), gpuS(MG_MIR));    else txt(MR_MIRTURNS, L"off");
     txt(MR_PRETM, vr ? L"-" : L"same");
     if (fwdOn) cell(MR_FWD, cpuS(cpuFwd), gpuS(MG_FWD));         else txt(MR_FWD, L"off");
+    // phase 49: GPU only (its CPU -- the glow draws' recording -- is inside the see-through depth's figure)
+    if (dlaaOn && g_biasCfg > 0) cell(MR_BIAS, nullptr, gpuS(MG_BIAS)); else txt(MR_BIAS, L"off");
     txt(MR_UPSCALE, dlaaOn && upOn ? L"no extra" : L"off");   // the upscale is the same NGX pass; the game draws fewer pixels
     if (dlaaOn) cell(MR_DLAA, cpuS(cpuAll), gpuS(-1));           else txt(MR_DLAA, L"off");
     // v0.10.3 phase 29b: the fps box's own measured GPU cost, ms PER FRAME (GpuPerf::kOverlay: the quad image or the eye pictures +
@@ -16515,6 +16909,11 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
                                  L"Press its key to try again.", (double)g_fwdBudgetMs);
         else if (!fwdOn) swprintf(sent, sentCap, L"Off now: costs nothing.");
         else if ((fig = both(cpuFwd, MG_FWD))) swprintf(sent, sentCap, L"Costs %ls per frame now; off saves it.", fig);
+        break;
+    case MR_BIAS:                                         // phase 49
+        if (g_biasCfg <= 0 || !dlaaOn)     swprintf(sent, sentCap, L"Off now: costs nothing.");
+        else if (timers && gf.have)        { MenuNum(f, 64, gf.grp[MG_BIAS]);
+                                             swprintf(sent, sentCap, L"Costs %ls ms GPU per frame now; most of it at night.", f); }
         break;
     case MR_FPS:                                          // v0.10.3 phase 29b
         if (!g_fpsShow)       swprintf(sent, sentCap, L"Off now: costs nothing.");
@@ -17110,6 +17509,9 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     MenuRow(p, MR_FWD, L"See-through depth", KeyName(KA_FWD_DEPTH), nullptr, false);
     swprintf(p.rows[MR_FWD].value, kV, L"%ls", !g_fwdCfg ? L"off (dlaa.ini 0)"
                                               : (!g_fwdOn.load() ? (g_fwdAutoOff ? L"off (VR budget)" : L"off") : L"on"));
+    MenuRow(p, MR_BIAS, L"Light glow ghosting fix", "dlaa.ini dlss_bias_mask", nullptr, false);   // phase 49
+    if (g_biasCfg > 0) swprintf(p.rows[MR_BIAS].value, kV, L"%d %%", g_biasCfg);
+    else               swprintf(p.rows[MR_BIAS].value, kV, L"off");
     groupRow(MR_UPGRP, kMenuGroups[MenuGroupIndex(MR_UPGRP)].title);   // phase 43: menu categories
     MenuRow(p, MR_UPSCALE, L"DLSS upscale", KeyName(KA_UPSCALE_TOGGLE), nullptr, false);
     swprintf(p.rows[MR_UPSCALE].value, kV, L"%ls", onOff[g_dlssUpscale.load() ? 1 : 0]);
@@ -17320,6 +17722,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_MIRTURNS: ToggleMirTurns(n); break;             // phase 41: Left and Right both switch it (also while greyed: kept)
     case MR_PRETM:   TogglePreTonemap(n); break;
     case MR_FWD:     ToggleFwdDepth(n); break;
+    case MR_BIAS:    StepBiasMask(dir, n); break;           // phase 49: 25 % steps, Right = stronger, Left = weaker (0 = off)
     case MR_UPSCALE: ToggleUpscale(n); break;
     case MR_DLAA:    ToggleDlaa(n); break;
     case MR_OFXR:    break;                                 // information only (dlaa.ini ofxr_bridge, read at start)
@@ -19311,6 +19714,8 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
         FwdOnDraw(ctx, indexCount, startIndex, baseVertex);
         if (t2) g_fwdTicks += TscToQpc(__rdtsc() - t2);
     }
+    // phase 49: an additive glow draw of the main forward binding -> the pass's glow record (GLOW BIAS MASK)
+    if (gameCtx && g_jitterPass && !g_gbufPass && !t_inDlaa && g_fwdBound && BiasLive()) BiasOnDraw(ctx, indexCount, startIndex, baseVertex);
 #endif
 }
 
@@ -20266,6 +20671,7 @@ void LoadConfig() {
             if (!strcmp(key, "mirror_turns"))       { g_mirTurns = v > 0 ? 1 : 0; g_mirTurnsExplicit = true; continue; }   // phase 41
 #endif
             if (!strcmp(key, "xr_hidden_mask"))     { g_xrHiddenMask = v != 0 ? 1 : 0; g_xrHiddenMaskExplicit = true; continue; }   // phase 40
+            if (!strcmp(key, "dlss_bias_mask"))     { g_biasCfg = v < 0 ? 0 : (v > 100 ? 100 : (int)v); g_biasExplicit = true; continue; }   // phase 49
             if (!strcmp(key, "vrs_passes"))         { g_vrsPasses = v != 0 ? 1 : 0; g_vrsPassesExplicit = true; continue; }   // phase 42
             // phase 44: the fps box colour / VR distance / VR turn (outside the else-if chain: C1061)
             if (!strcmp(key, "fps_color"))          { g_fpsColor = FpsPose::ClampColor(v); continue; }
@@ -20707,6 +21113,12 @@ void LoadConfig() {
             "column / bottom row of the picture unrendered (sky in the depth), the sun-shaft / bloom haze blinks on those frames");
     Log("OFXR Bridge support: ofxr_bridge=%d (%s)", (int)Ofxr::g_on.load(),
         Ofxr::g_on.load() ? "on: the layer's calls pass through the hooks" : "off");
+#ifdef WITH_DLAA
+    SceneDlaa::SetBiasStrength(g_biasCfg);              // phase 49
+    Log("DLSS bias mask (phase 49): dlss_bias_mask=%d %% (%s)", g_biasCfg, g_biasCfg
+        ? "the additive light glows of the world forward pass go to NGX as its bias current colour mask (no glow trails)"
+        : "off: NGX gets no mask");
+#endif
     if (g_controllerName[0])                             // v0.10.1
         Log("controller_name = \"%s\" (only controllers whose name contains it are read for WheelN / WheelUp ... bindings; "
             "the others go to the game untouched)", g_controllerName);

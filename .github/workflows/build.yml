@@ -58,6 +58,8 @@ jobs:
           if not exist build\tests\flat_views_test.exe exit /b 1
           call tests\build_fps_cab_test.bat
           if not exist build\tests\fps_cab_test.exe exit /b 1
+          call tests\build_bias_mask_test.bat
+          if not exist build\tests\bias_mask_test.exe exit /b 1
 
       - name: Test draw-id harness (did_shadow off)
         run: build\tests\drawid_harness.exe -1 0.1
@@ -78,6 +80,8 @@ jobs:
         run: build\tests\flat_views_test.exe
       - name: Test fps box attached to the vehicle (src/fps_cab.h maths; DrawIdRecord + FpsCab + the VSCab draw, zero-lag cab sway)
         run: build\tests\fps_cab_test.exe
+      - name: Test glow bias mask (phase 49 -- glow re-draw against the scene depth, share pass, crop step)
+        run: build\tests\bias_mask_test.exe
       - name: Smoke test menu_shot (renders the real tuning menu + fps box to PNG; outputs are not committed)
         shell: cmd
         run: |

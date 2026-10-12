@@ -39,6 +39,45 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
 )";
 // kDepthConvertShader-END
 
+// phase 49 GLOW BIAS MASK, the crop step before NGX (SceneDlaa::BiasPrep): Cur = the pass's mask at the crop (the next frame's
+// Prev); Out = Strength x max(Cur, last frame's Cur around where this pixel's history comes from: current + mv = previous, the 2x2
+// texels around that point) -- a glow that moved on leaves its old pixels in the history; those get the bias too. PrevOk = 0 after
+// a history reset / a new crop. Full unbound (the pass had no glow) reads 0.
+// kBiasPrepShader-BEGIN (the build validates this block with fxc)
+const char kBiasPrepShader[] = R"(
+cbuffer BiasCB : register(b0) {
+    uint2 Origin;        // crop origin in the full-size pass mask (px)
+    uint  PrevOk;        // 1 = Prev holds last frame's crop of this unit (same rect, no reset)
+    float Strength;      // dlss_bias_mask / 100
+};
+Texture2D<float>   Full : register(t0);   // the pass's mask (scene size)
+Texture2D<float>   Prev : register(t1);   // last frame's glow crop
+Texture2D<float2>  Mv   : register(t2);   // this frame's motion vectors (crop, px)
+RWTexture2D<float> Cur  : register(u0);   // this frame's glow crop
+RWTexture2D<float> Out  : register(u1);   // the mask NGX reads
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID) {
+    uint w, h;
+    Out.GetDimensions(w, h);
+    if (id.x >= w || id.y >= h) return;
+    float c = Full[id.xy + Origin];
+    Cur[id.xy] = c;
+    float p = 0.0;
+    if (PrevOk != 0u) {
+        float2 q = float2(id.xy) + 0.5 + Mv[id.xy];
+        int2 b = int2(floor(q - 0.5));
+        [unroll] for (int y = 0; y < 2; ++y)
+            [unroll] for (int x = 0; x < 2; ++x) {
+                int2 t = b + int2(x, y);
+                if (t.x >= 0 && t.y >= 0 && t.x < (int)w && t.y < (int)h) p = max(p, Prev[t]);
+            }
+    }
+    Out[id.xy] = saturate(max(c, p) * Strength);
+}
+)";
+// kBiasPrepShader-END
+
 // MV debug view (INSERT key): color = (0.5 + mv.x/16, 0.5 + mv.y/16, cabin ? 1 : 0).
 // Gray = no motion. Cabin = depth >= 0.9 (same split as the reprojection pass).
 // v0.6.0: blue = 0.5 for ego pixels (world layer, view depth < EgoPixelM -> R_ego). The classification is
@@ -585,6 +624,7 @@ void SceneDlaa::RegisterShaders() {
     ShaderCache::Add(ShaderCache::kCompositeVs, kCompositeVs, sizeof(kCompositeVs) - 1, "composite_vs", "VSMain", "vs_5_0");
     ShaderCache::Add(ShaderCache::kCompositePs, kCompositePs, sizeof(kCompositePs) - 1, "composite_ps", "PSMain", "ps_5_0");
     ShaderCache::Add(ShaderCache::kMvDebug, kMvDebugShader, sizeof(kMvDebugShader) - 1, "mv_debug", "CSMain", "cs_5_0");
+    ShaderCache::Add(ShaderCache::kBiasPrep, kBiasPrepShader, sizeof(kBiasPrepShader) - 1, "bias_prep", "CSMain", "cs_5_0");   // phase 49
 }
 
 bool SceneDlaa::ShadersReady() { return ShaderCache::Done(); }
@@ -1082,6 +1122,7 @@ bool SceneDlaa::EnsureDebugCs(ID3D11Device* dev) {
 // v0.5.6: RCAS compute shader (compiled once, kept across resizes) + its constant buffer (strength).
 float SceneDlaa::s_sharpness = 0.4f;     // dlaa.ini sharpness (default 0.4; 0 = off)
 float SceneDlaa::s_sharpRadius = 1.5f;   // v0.5.8 dlaa.ini sharp_radius (default 1.5; clamp 1..4)
+int   SceneDlaa::s_biasPct = 100;         // phase 49 dlaa.ini dlss_bias_mask (default 100 %; 0 = off)
 int   SceneDlaa::s_area = 100;           // v0.6.4 dlaa.ini dlaa_area (default 100 = whole image; clamp kAreaMin (10)..100)
 int   SceneDlaa::s_feather = 96;         // v0.6.4 dlaa.ini dlaa_area_feather (default 96 px; clamp 0..512)
 bool  SceneDlaa::s_hdrLinear = true;     // v0.8.0 dlaa.ini dlss_hdr (default 1 = IsHDR for HDR units)
@@ -1160,6 +1201,99 @@ void SceneDlaa::DepthConvert(ID3D11DeviceContext* ctx, ID3D11ShaderResourceView*
     ctx->CSSetUnorderedAccessViews(0, 1, &nullUav, &keep);
 }
 
+// phase 49: see scene_dlaa.h (SetBiasStrength). Inside Run, compute state saved by the caller; after the MV pass, before NGX.
+ID3D11ShaderResourceView* SceneDlaa::BiasPrep(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11ShaderResourceView* passMask,
+                                              bool reset) {
+    const bool had = passMask != nullptr;
+    if (s_biasPct <= 0 || m_biasFailed || (!had && !m_biasPrevHad)) {   // off / nothing glowed this frame or the last
+        m_biasPrevHad = false;
+        m_biasPrevOk = false;
+        return nullptr;
+    }
+    HRESULT hr = S_OK;
+    if (!m_biasCs) {
+        size_t size = 0;
+        const void* code = ShaderCache::Code(ShaderCache::kBiasPrep, &size);
+        if (!code || FAILED(hr = dev->CreateComputeShader(code, size, nullptr, &m_biasCs))) {
+            m_biasFailed = true;
+            LogErr("DLSS bias mask: crop shader unavailable on eye %d (%s, hr=0x%lx) -- no glow bias on this unit", m_eye,
+                ShaderCache::Error(ShaderCache::kBiasPrep), (unsigned long)hr);
+            return nullptr;
+        }
+    }
+    if (!m_biasCb) {
+        D3D11_BUFFER_DESC bd{};
+        bd.ByteWidth = 16;
+        bd.Usage = D3D11_USAGE_DYNAMIC;
+        bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        if (FAILED(hr = dev->CreateBuffer(&bd, nullptr, &m_biasCb))) {
+            m_biasFailed = true;
+            LogErr("DLSS bias mask: constant buffer create hr=0x%lx on eye %d -- no glow bias on this unit", (unsigned long)hr, m_eye);
+            return nullptr;
+        }
+    }
+    if (!m_biasOut || m_biasW != m_w || m_biasH != m_h) {   // crop size (= render size of the DLSS input)
+        m_biasOut.Reset(); m_biasOutSrv.Reset(); m_biasOutUav.Reset();
+        for (int k = 0; k < 2; ++k) { m_biasCur[k].Reset(); m_biasCurSrv[k].Reset(); m_biasCurUav[k].Reset(); }
+        m_biasW = m_biasH = 0;
+        m_biasPrevOk = false;
+        const UINT bind = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+        bool ok = SUCCEEDED(hr = MakeTex(dev, m_w, m_h, DXGI_FORMAT_R8_UNORM, bind, &m_biasOut)) &&
+                  SUCCEEDED(hr = dev->CreateShaderResourceView(m_biasOut.Get(), nullptr, &m_biasOutSrv)) &&
+                  SUCCEEDED(hr = dev->CreateUnorderedAccessView(m_biasOut.Get(), nullptr, &m_biasOutUav));
+        for (int k = 0; k < 2 && ok; ++k)
+            ok = SUCCEEDED(hr = MakeTex(dev, m_w, m_h, DXGI_FORMAT_R8_UNORM, bind, &m_biasCur[k])) &&
+                 SUCCEEDED(hr = dev->CreateShaderResourceView(m_biasCur[k].Get(), nullptr, &m_biasCurSrv[k])) &&
+                 SUCCEEDED(hr = dev->CreateUnorderedAccessView(m_biasCur[k].Get(), nullptr, &m_biasCurUav[k]));
+        if (!ok) {
+            m_biasFailed = true;
+            LogErr("DLSS bias mask: crop textures create hr=0x%lx (%ux%u, eye %d) -- no glow bias on this unit", (unsigned long)hr,
+                m_w, m_h, m_eye);
+            BiasShutdown();
+            m_biasFailed = true;
+            return nullptr;
+        }
+        m_biasW = m_w; m_biasH = m_h;
+    }
+    const bool prevOk = m_biasPrevOk && !reset;
+    D3D11_MAPPED_SUBRESOURCE mp{};
+    if (FAILED(ctx->Map(m_biasCb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) return nullptr;
+    struct { uint32_t x, y, prevOk; float strength; } cb = { m_rx, m_ry, prevOk ? 1u : 0u, (float)s_biasPct / 100.0f };
+    memcpy(mp.pData, &cb, sizeof(cb));
+    ctx->Unmap(m_biasCb.Get(), 0);
+    const int cur = m_biasIdx;
+    GpuPerfScope gp(ctx, GpuPerf::kBias);
+    ID3D11Buffer* b0 = m_biasCb.Get();
+    ID3D11ShaderResourceView* srv[3] = { passMask, m_biasCurSrv[1 - cur].Get(), m_mvSrv.Get() };
+    ID3D11UnorderedAccessView* uav[2] = { m_biasCurUav[cur].Get(), m_biasOutUav.Get() };
+    const UINT keep[2] = { (UINT)-1, (UINT)-1 };
+    ctx->CSSetShader(m_biasCs.Get(), nullptr, 0);
+    ctx->CSSetConstantBuffers(0, 1, &b0);
+    ctx->CSSetShaderResources(0, 3, srv);
+    ctx->CSSetUnorderedAccessViews(0, 2, uav, keep);
+    ctx->Dispatch((m_w + 7) / 8, (m_h + 7) / 8, 1);
+    ID3D11ShaderResourceView*  nullSrv[3] = {};
+    ID3D11UnorderedAccessView* nullUav[2] = {};
+    ctx->CSSetShaderResources(0, 3, nullSrv);              // NGX reads the mask / MVs as SRVs next
+    ctx->CSSetUnorderedAccessViews(0, 2, nullUav, keep);
+    m_biasIdx = 1 - cur;
+    m_biasPrevOk = true;
+    m_biasPrevHad = had;
+    ++m_biasRuns;
+    return m_biasOutSrv.Get();
+}
+
+void SceneDlaa::BiasShutdown() {
+    m_biasCs.Reset(); m_biasCb.Reset();
+    m_biasOut.Reset(); m_biasOutSrv.Reset(); m_biasOutUav.Reset();
+    for (int k = 0; k < 2; ++k) { m_biasCur[k].Reset(); m_biasCurSrv[k].Reset(); m_biasCurUav[k].Reset(); }
+    m_biasW = m_biasH = 0;
+    m_biasIdx = 0;
+    m_biasPrevOk = m_biasPrevHad = false;
+    m_biasFailed = false;
+}
+
 // v0.5.7: see scene_dlaa.h. Render thread (called from Present, never inside Run).
 void SceneDlaa::ResetTiming() {
     m_msSum = 0.0;
@@ -1203,9 +1337,12 @@ struct PoolFwd { ComPtr<ID3D11Texture2D> tex; ComPtr<ID3D11DepthStencilView> dsv
                  ComPtr<ID3D11ShaderResourceView> idSrv; };
 struct PoolIds { ComPtr<ID3D11Texture2D> tex; ComPtr<ID3D11RenderTargetView> rtv; ComPtr<ID3D11ShaderResourceView> srv;
                  uint32_t w = 0, h = 0; bool twoCh = false; };
+struct PoolBias { ComPtr<ID3D11Texture2D> tex; ComPtr<ID3D11RenderTargetView> rtv; ComPtr<ID3D11ShaderResourceView> srv;   // phase 49
+                  uint32_t w = 0, h = 0; };
 PoolDepth g_poolDepth[kPoolN];
 PoolFwd   g_poolFwd[kPoolN];
 PoolIds   g_poolIds[kPoolN];
+PoolBias  g_poolBias[kPoolN];                    // phase 49: the glow bias masks (R8, counted in the MB figure only)
 // alive = created and not destroyed (in a slot or in the pool); MB = their memory
 int      g_aliveDepth = 0, g_aliveFwd = 0, g_aliveIds = 0;
 double   g_aliveMb = 0.0;
@@ -1243,6 +1380,14 @@ void DepthTwin::ReleaseToPool() {
         if (idTex) { --g_aliveIds; g_aliveMb -= TexMb(idW, idH, idTwoCh ? 4 : 2); }
         IdsShutdown();
     }
+    if (biasTex) {                                       // phase 49
+        for (PoolBias& p : g_poolBias) if (!p.tex) {
+            p.tex = std::move(biasTex); p.rtv = std::move(biasRtv); p.srv = std::move(biasSrv); p.w = biasW; p.h = biasH;
+            break;
+        }
+        if (biasTex) g_aliveMb -= TexMb(biasW, biasH, 1);
+        BiasShutdown();
+    }
 }
 
 DepthTwin::PoolStats DepthTwin::GetPoolStats() {
@@ -1259,6 +1404,7 @@ void DepthTwin::PoolShutdown() {
     for (PoolDepth& p : g_poolDepth) { if (p.tex) { --g_aliveDepth; g_aliveMb -= TexMb(p.w, p.h, 8); } p = PoolDepth(); }
     for (PoolFwd& p : g_poolFwd) { if (p.tex) { --g_aliveFwd; g_aliveMb -= TexMb(p.w, p.h, FwdBpp(p.shift)); } p = PoolFwd(); }
     for (PoolIds& p : g_poolIds) { if (p.tex) { --g_aliveIds; g_aliveMb -= TexMb(p.w, p.h, p.twoCh ? 4 : 2); } p = PoolIds(); }
+    for (PoolBias& p : g_poolBias) { if (p.tex) g_aliveMb -= TexMb(p.w, p.h, 1); p = PoolBias(); }   // phase 49
 }
 
 bool DepthTwin::Snapshot(ID3D11DeviceContext* ctx, ID3D11Texture2D* depth, bool timing) {
@@ -1393,6 +1539,38 @@ bool DepthTwin::EnsureIds(ID3D11Device* dev, uint32_t iw, uint32_t ih, bool twoC
     idW = iw; idH = ih;
     idTwoCh = twoCh;
     if (pooled) { ++g_aliveIds; g_aliveMb += TexMb(iw, ih, twoCh ? 4 : 2); ++g_poolCreated; }   // v0.10.0 phase 8 (pool statistics)
+    return true;
+}
+
+// phase 49: the pass's glow bias mask (see DepthTwin). R8_UNORM: RTV for the share pass at the pass end, SRV for Run's crop step;
+// never bound as both at once.
+bool DepthTwin::EnsureBias(ID3D11Device* dev, uint32_t bw, uint32_t bh) {
+    if (!biasTex && pooled) {                            // a pooled mask of this size first (as the other slot textures)
+        for (PoolBias& p : g_poolBias) {
+            if (!p.tex) continue;
+            if (p.w != bw || p.h != bh) { g_aliveMb -= TexMb(p.w, p.h, 1); p = PoolBias(); continue; }
+            biasTex = std::move(p.tex); biasRtv = std::move(p.rtv); biasSrv = std::move(p.srv); biasW = p.w; biasH = p.h;
+            p = PoolBias();
+            ++g_poolReused;
+            break;
+        }
+    }
+    if (biasTex && biasRtv && biasSrv && biasW == bw && biasH == bh) return true;
+    if (biasTex && pooled) g_aliveMb -= TexMb(biasW, biasH, 1);
+    const bool open = biasOpen;
+    BiasShutdown();
+    biasOpen = open;
+    if (!dev || !bw || !bh) return false;
+    HRESULT hr;
+    if (FAILED(hr = MakeTex(dev, bw, bh, DXGI_FORMAT_R8_UNORM, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, &biasTex)) ||
+        FAILED(hr = dev->CreateRenderTargetView(biasTex.Get(), nullptr, &biasRtv)) ||
+        FAILED(hr = dev->CreateShaderResourceView(biasTex.Get(), nullptr, &biasSrv))) {
+        LogErr("DLSS bias mask: mask create hr=0x%lx (%ux%u) -- no glow bias for this pass slot", (unsigned long)hr, bw, bh);
+        BiasShutdown();
+        return false;
+    }
+    biasW = bw; biasH = bh;
+    if (pooled) { g_aliveMb += TexMb(bw, bh, 1); ++g_poolCreated; }
     return true;
 }
 
@@ -1579,6 +1757,7 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
     const DrawIdRecord* didFwd = nullptr;              // v0.10.0 phase 3: the pass's forward ids (GREEN channel)
     uint32_t fwdShiftRun = 0;                          // v0.10.0 phase 9: the forward depth's resolution shift
     ID3D11ShaderResourceView* fwdIdSrv = nullptr;      // v0.10.0 phase 9: the 1/2-size forward ids (fwdShiftRun 1)
+    ID3D11ShaderResourceView* biasMaskSrv = nullptr;   // phase 49: the pass's glow bias mask (only with its own snapshot)
     if (depthTwin && depthTwin->valid && depthTwin->srv && depthTwin->w == m_fullW && depthTwin->h == m_fullH) {
         twinSrv = depthTwin->srv.Get();                // the pass's pre-clear snapshot
         stencilSrv = depthTwin->stencilSrv.Get();
@@ -1591,6 +1770,8 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
         }
         if (didRec && depthTwin->idValid && depthTwin->idSrv && depthTwin->idW == m_fullW && depthTwin->idH == m_fullH)
             didSrv = depthTwin->idSrv.Get();
+        if (depthTwin->biasValid && depthTwin->biasSrv && depthTwin->biasW == m_fullW && depthTwin->biasH == m_fullH)
+            biasMaskSrv = depthTwin->biasSrv.Get();     // phase 49
         // forward ids: the GREEN channel of a two-channel id target (full resolution) or the 1/2-size forward-id target
         if (didFwdRec && didSrv && fwdSrv && depthTwin->fwdIdValid &&
             (fwdShiftRun ? depthTwin->fwdIdSrv != nullptr : depthTwin->idTwoCh)) {
@@ -1605,6 +1786,7 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
     }
     // snapshot (+ r5 forward depth, v0.10.0 draw ids) consumed
     if (depthTwin) { depthTwin->valid = false; depthTwin->fwdValid = false; depthTwin->idValid = false; depthTwin->fwdIdValid = false; }
+    if (depthTwin) depthTwin->biasValid = false;       // phase 49 (consumed like the snapshot)
     m_fwdSrvRun = fwdSrv;                              // v0.9.0 r5: the debug view below tints its pixels (no ref)
     if (!twinSrv) { saved.Restore(ctx); if (m_timing) GpuEnd(ctx, /*keep=*/false); return false; }
     const UINT keep = (UINT)-1;
@@ -1662,6 +1844,9 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
     if (still) ++m_stillFrames;
     if (m_timing) GpuMark(ctx, 3);                     // after MV
 
+    // c2. phase 49 glow bias mask: the pass's mask at the crop + last frame's glow pixels along the MVs (null = no mask)
+    ID3D11ShaderResourceView* const biasNgx = BiasPrep(dev.Get(), ctx, biasMaskSrv, reset);
+
     // d. evaluate: injected viewport jitter, depth is reversed-Z
     DlaaFrameParams p;
     p.jitterX = jitterX;
@@ -1670,7 +1855,7 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
     p.depthInverted = true;
     perfTok = GpuPerf::Begin(ctx, GpuPerf::kNgx);
     const bool ok = m_dlaa.Evaluate(ctx, m_colorInSrv.Get(), m_depthR32Srv.Get(),
-                                    m_mvSrv.Get(), m_outUav.Get(), p);
+                                    m_mvSrv.Get(), m_outUav.Get(), p, biasNgx);
     GpuPerf::End(ctx, perfTok);
     ++m_runSerial;                                     // v0.10.0 phase 7: this set evaluated (KindIdleRuns; a failed
     if (ok) m_lastRunSerial = m_runSerial;             // evaluate does not count as keeping its history going)
@@ -1911,6 +2096,7 @@ void SceneDlaa::CancelComposite(ID3D11DeviceContext* ctx) {
 void SceneDlaa::Shutdown() {
     m_dlaa.Shutdown();
     m_cam.Shutdown();
+    BiasShutdown();                                    // phase 49
     m_mvDbgCs.Reset(); m_mvDbgTried = false;
     m_sharp.Reset(); m_sharpUav.Reset(); m_sharpSrv.Reset(); m_outSrv.Reset(); m_sharpRes = false;
     m_sharpCs.Reset(); m_sharpCb.Reset(); m_sharpSampler.Reset(); m_sharpCbValid = false;

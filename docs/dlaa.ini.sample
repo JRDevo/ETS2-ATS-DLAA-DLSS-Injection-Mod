@@ -404,6 +404,12 @@ log_level = 1
 # v0.9.0 r11: a see-through draw whose centre point (origin) lies within this many metres of the camera (windscreen
 # drops, dirt, glare) is not drawn into that depth at all (0.1..5)
 # mv_fwd_min_m = 0.5
+# Phase 49 LIGHT GLOW GHOSTING FIX, strength in % 0..100, default 100; 0 = off. Street-lamp and car-light glows (flares,
+# light cones) are added on top of the picture and have no depth or motion of their own, so DLSS kept them in its history and
+# they left a trail behind them while driving at night. With this on, the mod draws those glows once more into a mask and tells
+# DLSS to take them (and the pixels where they were a frame ago) from the current frame. Lower it (25 % steps) if lamp glows
+# start to flicker. The tuning menu's "Light glow ghosting fix" row (Picture group) changes it live; Shift+F12 / Save writes it.
+# dlss_bias_mask = 100
 
 # GPU timing logs (per-stage DLAA cost + depth snapshot cost, every 600): -1 = with log_level = 4 (phase 45; before: always in
 # VR), 0 off, 1 on

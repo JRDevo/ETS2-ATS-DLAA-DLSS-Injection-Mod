@@ -99,6 +99,20 @@ struct DepthTwin {
         idSrv.Reset(); idRtv.Reset(); idTex.Reset(); idW = idH = 0; idValid = false; idTwoCh = false; fwdIdValid = false;
     }
 
+    // ---- phase 49 GLOW BIAS MASK of the same pass (inject.cpp GLOW BIAS MASK, dlaa.ini dlss_bias_mask): R8_UNORM at the scene
+    // depth's size, 0 = trust the history as before, 1 = NGX should take this frame's colour (the additive light glows / flares /
+    // light cones that have no depth or motion of their own). Written at the pass end (the share pass after the glow re-draw),
+    // SceneDlaa::Run crops it (+ last frame's glow pixels carried along the motion vectors) and hands it to NGX. biasValid = written
+    // this pass and not yet consumed by Run (like fwdValid); biasOpen = the shared glow-sum target was cleared for this pass.
+    Microsoft::WRL::ComPtr<ID3D11Texture2D>          biasTex;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView>   biasRtv;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> biasSrv;
+    uint32_t biasW = 0, biasH = 0;
+    bool     biasValid = false;
+    bool     biasOpen = false;
+    bool EnsureBias(ID3D11Device* dev, uint32_t w, uint32_t h);
+    void BiasShutdown() { biasSrv.Reset(); biasRtv.Reset(); biasTex.Reset(); biasW = biasH = 0; biasValid = false; biasOpen = false; }
+
     // ---- v0.10.0 phase 8 SLOT POOL (inject.cpp, dlaa.ini mv_slot_pool): a pass slot's three big textures (the depth twin, the
     // forward depth, the draw-id target: 239 + 119 + 119 MB per slot at 4592x6496 in VR) are only needed from the pass's first
     // use until its blit consumed it. ReleaseToPool (after the blit) moves them into a process-wide pool; Snapshot / EnsureFwd /
@@ -271,6 +285,13 @@ public:
     static int  Area() { return s_area; }
     static void SetFeather(int f) { s_feather = f < 0 ? 0 : (f > 512 ? 512 : f); }
     static int  Feather() { return s_feather; }
+    // phase 49 GLOW BIAS MASK strength, % 0..100 (dlaa.ini dlss_bias_mask, live from the menu; 0 = off: NGX gets no mask, the
+    // units drop their glow history). Process-wide. A Run whose pass carries a mask (DepthTwin::biasValid) -- or whose unit had
+    // one last frame -- crops it, adds last frame's glow pixels carried along this frame's motion vectors (where the history
+    // still holds the glow that has moved on) and hands NGX strength x that as its bias current colour mask.
+    static void SetBiasStrength(int pct) { s_biasPct = pct < 0 ? 0 : (pct > 100 ? 100 : pct); }
+    static int  BiasStrength() { return s_biasPct; }
+    uint64_t BiasRuns() const { return m_biasRuns; }   // Runs that handed NGX a mask (log / menu)
     // Crop size for a full image W x H at `area` %: each axis round(full * area / 100) to a multiple of 8
     // (at least 8), clamped to the full size; area >= 100 = full size.
     static void CropSize(uint32_t fullW, uint32_t fullH, int area, uint32_t* cw, uint32_t* ch);
@@ -347,6 +368,10 @@ private:
     bool EnsureDebugCs(ID3D11Device* dev);
     bool EnsureSharpen(ID3D11Device* dev);                 // RCAS CS + its constant buffer (v0.5.6)
     void DepthConvert(ID3D11DeviceContext* ctx, ID3D11ShaderResourceView* twinSrv);   // twin (at rect origin) -> m_depthR32
+    // phase 49: the crop / reprojection step of the glow bias mask (see SetBiasStrength). Returns the mask NGX gets (null = none).
+    ID3D11ShaderResourceView* BiasPrep(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11ShaderResourceView* passMask,
+                                       bool reset);
+    void BiasShutdown();
 
     DlaaProcessor m_dlaa;
     CameraMv m_cam;
@@ -399,6 +424,23 @@ private:
     static int                                        s_area;         // v0.6.4 dlaa_area (kAreaMin..100; phase 15: 20..100; now 10..100)
     static int                                        s_feather;      // v0.6.4 dlaa_area_feather (0..512 px)
     static bool                                       s_hdrLinear;    // v0.8.0 dlaa.ini dlss_hdr (IsHDR for HDR units)
+    static int                                        s_biasPct;      // phase 49 dlaa.ini dlss_bias_mask (0..100 %)
+
+    // ---- phase 49 glow bias mask (BiasPrep): crop-sized R8_UNORM, SRV + UAV ----
+    Microsoft::WRL::ComPtr<ID3D11ComputeShader>       m_biasCs;
+    Microsoft::WRL::ComPtr<ID3D11Buffer>              m_biasCb;       // b0: origin, prev-ok, strength (DYNAMIC, 16 bytes)
+    Microsoft::WRL::ComPtr<ID3D11Texture2D>           m_biasCur[2];   // this frame's / last frame's glow crop (ping-pong)
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>  m_biasCurSrv[2];
+    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_biasCurUav[2];
+    Microsoft::WRL::ComPtr<ID3D11Texture2D>           m_biasOut;      // what NGX reads
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>  m_biasOutSrv;
+    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_biasOutUav;
+    uint32_t                                          m_biasW = 0, m_biasH = 0;   // size of the textures above
+    int                                               m_biasIdx = 0;          // m_biasCur[m_biasIdx] = the next write
+    bool                                              m_biasPrevOk = false;   // m_biasCur[1 - m_biasIdx] = last frame's crop
+    bool                                              m_biasPrevHad = false;  // last frame's pass carried a mask
+    bool                                              m_biasFailed = false;   // shader / textures could not be made (logged once)
+    uint64_t                                          m_biasRuns = 0;
 
     // ---- v0.7.0 upscale composite (VS + PS draw into the game's RT0 after its blit) ----
     Microsoft::WRL::ComPtr<ID3D11VertexShader>        m_compVs;

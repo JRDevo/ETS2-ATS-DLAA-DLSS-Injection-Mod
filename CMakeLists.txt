@@ -187,6 +187,8 @@ if (WITH_DLAA)
             "src/draw_ids.cpp@kFwdInitShader@vs_5_0@VSMain"     # v0.10.0 phase 10 forward-depth occlusion init (full-screen tri)
             "src/draw_ids.cpp@kFwdInitShader@ps_5_0@PSInit0"    #   full resolution
             "src/draw_ids.cpp@kFwdInitShader@ps_5_0@PSInit1"    #   1/2 resolution (min of 2x2)
+            "src/draw_ids.cpp@kBiasNormShader@ps_5_0@PSNorm"    # phase 49 glow bias mask: glow share of the pixel
+            "src/scene_dlaa.cpp@kBiasPrepShader"                # phase 49 crop + last frame's glow along the MVs
             "src/inject.cpp@kPvStatsShader"                     # v0.7.8 Ctrl+F10 preview capture metrics
             "src/inject.cpp@kPvDepthAsmShader"                  # v0.7.8 tiled preview picture depth
             "src/inject.cpp@kPvEdgeFillShader")                 # v0.8.1 preview tile edge (zero-guarded fill)
