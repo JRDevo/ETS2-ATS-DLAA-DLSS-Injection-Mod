@@ -68,7 +68,7 @@ account — a few hotkeys, an in-game tuning menu (`Delete`) and an optional tex
   to uninstall.
 - **Debug log** for bug reports (off by default).
 
-![The tuning menu (v0.10.3)](docs/images/tuning-menu.png)
+![The tuning menu, all groups closed](docs/images/tuning-menu.png)
 
 ## ⬇ Download
 
@@ -407,11 +407,10 @@ it, what it costs or saves. **`Up` / `Down`** select a row,
 always shown. Then come the groups: `Picture` (sharpening, texture sharpness, DLAA area, tonemap, see-through depth),
 `Motion and mirrors`, `Upscaling and VR` (DLSS upscale, DLAA on / off, OFXR Bridge), `VR performance` (Turbo, foveated
 rendering, hidden area mask), `Panel settings` and `FPS counter settings`. After them: `FPS counter`, `Logging`,
-`Save`, `Reset` and `Close`. Select a group and press `Right` to open it, `Left` to close it. A closed group shows how
-many rows it holds. All groups are closed again each time you open the menu.
+`Save`, `Reset` and `Close`. Select a group and press `Right` to open it, `Left` to close it. A closed group shows `►` and
+`closed (N)` (N = its rows); an open group shows `▼` and `open`, with its rows indented below it. All groups are closed again each time you open the menu.
 
-![The Picture group open](docs/images/tuning-menu-picture.png)
-![The VR performance group open](docs/images/tuning-menu-vr-performance.png)
+![The tuning menu, all groups open](docs/images/tuning-menu-all-open.png)
 
 (These pictures are rendered by the real menu code, see `tests/menu_shot.cpp`; the figures in them are examples.)
 
