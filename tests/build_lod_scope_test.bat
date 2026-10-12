@@ -1,4 +1,5 @@
 @echo off
+setlocal
 rem v0.10.0 phase 11 unit test of the texture LOD bias scope (tests\lod_scope_test.cpp: inject.cpp WITHOUT WITH_DLAA in one TU,
 rem WARP device, the real LodFrameUpdate / LodOnBind / hkOMSetBlendState / hkPSSetSamplers / hkDrawIndexed / hkDraw;
 rem phase 12: + hkCreatePixelShader / hkPSSetShader / DxbcPsClass = the cut-out rule; "--scan <dir>" classifies *.dxbc).

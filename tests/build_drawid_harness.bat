@@ -1,4 +1,5 @@
 @echo off
+setlocal
 rem v0.10.0 WARP harness for the per-draw motion vectors (tests\drawid_harness.cpp). Output: build\tests\drawid_harness.exe
 rem Run: build\tests\drawid_harness.exe [scene 1..9, -1 = all] [snap px] [debug | nocons | nofwd | noattach | notwin |
 rem noinherit | noparent | parentconj | nodepth]   (exit code 0 = all checks passed; S5 = the v0.10.0 phase 2 mirror view +

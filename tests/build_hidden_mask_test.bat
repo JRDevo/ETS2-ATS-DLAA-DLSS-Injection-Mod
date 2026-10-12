@@ -1,4 +1,5 @@
 @echo off
+setlocal
 rem phase 40 WARP test for the VR hidden area mask (tests\hidden_mask_test.cpp): the view-tangent -> NDC mapping + its sanity
 rem checks, and the depth-only draw on a D32S8 depth (nearest value inside, untouched outside, stencil untouched, every D3D11
 rem state restored). Output: build\tests\hidden_mask_test.exe (exit code 0 = all checks passed).

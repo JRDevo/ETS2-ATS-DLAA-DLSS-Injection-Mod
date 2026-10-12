@@ -1,4 +1,5 @@
 @echo off
+setlocal
 rem v0.12.0 issue #12 unit test of src\flat_views.h (flat multi-view / triple screen: layout, view index, confirm / drop, shared jitter phase).
 rem No D3D, no game, no build tree needed. Output: build\tests\flat_views_test.exe
 rem Run: build\tests\flat_views_test.exe   (exit code 0 = all checks passed)

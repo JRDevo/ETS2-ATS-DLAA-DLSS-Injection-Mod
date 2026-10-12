@@ -1,4 +1,5 @@
 @echo off
+setlocal
 rem phase 47: fps_cab_test -- the VR fps box attached to the vehicle (src\fps_cab.h maths; WARP: the real DrawIdRecord + FpsCab
 rem runtime + menu.cpp VSCab, a swaying cab, zero-lag check against the same frame's truth). Output: build\tests\fps_cab_test.exe
 rem (exit code 0 = all checks passed).

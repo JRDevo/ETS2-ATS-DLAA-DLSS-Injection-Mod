@@ -1,4 +1,5 @@
 @echo off
+setlocal
 rem Phase 44 unit test of src\fps_pose.h (fps box colours, VR turn quaternion, drawn-in turned corners, distance shift).
 rem No D3D, no game, no build tree needed. Output: build\tests\fps_pose_test.exe
 rem Run: build\tests\fps_pose_test.exe   (exit code 0 = all checks passed)

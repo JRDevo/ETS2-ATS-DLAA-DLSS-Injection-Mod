@@ -1,4 +1,5 @@
 @echo off
+setlocal
 rem Phase 41 unit test of src\mirror_turns.h (mirrors in turns: run / hold decision, history gap, slot balance).
 rem No D3D, no game, no build tree needed. Output: build\tests\mirror_turns_test.exe
 rem Run: build\tests\mirror_turns_test.exe   (exit code 0 = all checks passed)

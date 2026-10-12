@@ -1,4 +1,5 @@
 @echo off
+setlocal
 rem phase 46: menu_shot -- offline renders of the REAL tuning menu (src\menu.cpp, linked as it is) and the fps box to PNG files for the
 rem README (WARP D3D11, no game). Usage: build\tests\menu_shot.exe docs\images   (exit code 0 = every image written).
 rem Output: build\tests\menu_shot.exe.
