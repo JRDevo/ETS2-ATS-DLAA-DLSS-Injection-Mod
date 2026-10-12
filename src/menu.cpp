@@ -214,26 +214,26 @@ bool Ensure(ID3D11Device* dev) {
     size_t vsSize = 0, psSize = 0;
     const void* vsCode = ShaderCache::Code(ShaderCache::kMenuVs, &vsSize);
     const void* psCode = ShaderCache::Code(ShaderCache::kMenuPs, &psSize);
-    if (!vsCode) { Log("tuning menu VS D3DCompile failed %s", ShaderCache::Error(ShaderCache::kMenuVs)); return false; }
+    if (!vsCode) { LogErr("tuning menu VS D3DCompile failed %s", ShaderCache::Error(ShaderCache::kMenuVs)); return false; }
     if (FAILED(hr = dev->CreateVertexShader(vsCode, vsSize, nullptr, &g_vs))) {
-        Log("tuning menu CreateVertexShader hr=0x%lx", hr); return false;
+        LogErr("tuning menu CreateVertexShader hr=0x%lx", hr); return false;
     }
-    if (!psCode) { Log("tuning menu PS D3DCompile failed %s", ShaderCache::Error(ShaderCache::kMenuPs)); return false; }
+    if (!psCode) { LogErr("tuning menu PS D3DCompile failed %s", ShaderCache::Error(ShaderCache::kMenuPs)); return false; }
     if (FAILED(hr = dev->CreatePixelShader(psCode, psSize, nullptr, &g_ps))) {
-        Log("tuning menu CreatePixelShader hr=0x%lx", hr); return false;
+        LogErr("tuning menu CreatePixelShader hr=0x%lx", hr); return false;
     }
     D3D11_BUFFER_DESC cbd{};
     cbd.ByteWidth = sizeof(CbData);
     cbd.Usage = D3D11_USAGE_DEFAULT;
     cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    if (FAILED(hr = dev->CreateBuffer(&cbd, nullptr, &g_cb))) { Log("tuning menu CreateBuffer hr=0x%lx", hr); return false; }
+    if (FAILED(hr = dev->CreateBuffer(&cbd, nullptr, &g_cb))) { LogErr("tuning menu CreateBuffer hr=0x%lx", hr); return false; }
     D3D11_SAMPLER_DESC sd{};
     sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
     sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
     sd.MaxAnisotropy = 1;
     sd.ComparisonFunc = D3D11_COMPARISON_NEVER;
     sd.MinLOD = 0.0f; sd.MaxLOD = D3D11_FLOAT32_MAX;
-    if (FAILED(hr = dev->CreateSamplerState(&sd, &g_smp))) { Log("tuning menu CreateSamplerState hr=0x%lx", hr); return false; }
+    if (FAILED(hr = dev->CreateSamplerState(&sd, &g_smp))) { LogErr("tuning menu CreateSamplerState hr=0x%lx", hr); return false; }
     D3D11_BLEND_DESC bd{};
     bd.IndependentBlendEnable = TRUE;
     for (int i = 0; i < 8; ++i) {
@@ -245,7 +245,7 @@ bool Ensure(ID3D11Device* dev) {
         bd.RenderTarget[i].RenderTargetWriteMask = i == 0 ? (D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN |
                                                              D3D11_COLOR_WRITE_ENABLE_BLUE) : 0;
     }
-    if (FAILED(hr = dev->CreateBlendState(&bd, &g_blend))) { Log("tuning menu CreateBlendState hr=0x%lx", hr); return false; }
+    if (FAILED(hr = dev->CreateBlendState(&bd, &g_blend))) { LogErr("tuning menu CreateBlendState hr=0x%lx", hr); return false; }
     D3D11_BLEND_DESC bo{};                                   // v0.10.3 phase 29: the overlay image (kOutOverlay)
     bo.RenderTarget[0].BlendEnable = FALSE;
     bo.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;       bo.RenderTarget[0].DestBlend = D3D11_BLEND_ZERO;
@@ -253,12 +253,12 @@ bool Ensure(ID3D11Device* dev) {
     bo.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;  bo.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
     bo.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
     bo.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-    if (FAILED(hr = dev->CreateBlendState(&bo, &g_blendOv))) { Log("tuning menu CreateBlendState (overlay) hr=0x%lx", hr); return false; }
+    if (FAILED(hr = dev->CreateBlendState(&bo, &g_blendOv))) { LogErr("tuning menu CreateBlendState (overlay) hr=0x%lx", hr); return false; }
     D3D11_RASTERIZER_DESC rd{};
     rd.FillMode = D3D11_FILL_SOLID;
     rd.CullMode = D3D11_CULL_NONE;
     rd.DepthClipEnable = TRUE;
-    if (FAILED(hr = dev->CreateRasterizerState(&rd, &g_rs))) { Log("tuning menu CreateRasterizerState hr=0x%lx", hr); return false; }
+    if (FAILED(hr = dev->CreateRasterizerState(&rd, &g_rs))) { LogErr("tuning menu CreateRasterizerState hr=0x%lx", hr); return false; }
     D3D11_DEPTH_STENCIL_DESC dd{};
     dd.DepthEnable = FALSE;
     dd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
@@ -269,7 +269,7 @@ bool Ensure(ID3D11Device* dev) {
     dd.FrontFace.StencilFailOp = dd.FrontFace.StencilDepthFailOp = dd.FrontFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
     dd.FrontFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
     dd.BackFace = dd.FrontFace;
-    if (FAILED(hr = dev->CreateDepthStencilState(&dd, &g_dss))) { Log("tuning menu CreateDepthStencilState hr=0x%lx", hr); return false; }
+    if (FAILED(hr = dev->CreateDepthStencilState(&dd, &g_dss))) { LogErr("tuning menu CreateDepthStencilState hr=0x%lx", hr); return false; }
     g_failed = false;
     return true;
 }
@@ -323,7 +323,7 @@ bool DibBegin(Dib& d, uint32_t w, uint32_t h, const char* what, bool& failLogged
     d = Dib();
     d.dc = CreateCompatibleDC(nullptr);
     if (!d.dc) {
-        if (!failLogged) { failLogged = true; Log("tuning menu: %s CreateCompatibleDC failed (%lu)", what, GetLastError()); }
+        if (!failLogged) { failLogged = true; LogErr("tuning menu: %s CreateCompatibleDC failed (%lu)", what, GetLastError()); }
         return false;
     }
     BITMAPINFO bi{};
@@ -335,7 +335,7 @@ bool DibBegin(Dib& d, uint32_t w, uint32_t h, const char* what, bool& failLogged
     bi.bmiHeader.biCompression = BI_RGB;
     d.bmp = CreateDIBSection(d.dc, &bi, DIB_RGB_COLORS, &d.bits, nullptr, 0);
     if (!d.bmp || !d.bits) {
-        if (!failLogged) { failLogged = true; Log("tuning menu: %s CreateDIBSection %ux%u failed (%lu)", what, w, h, GetLastError()); }
+        if (!failLogged) { failLogged = true; LogErr("tuning menu: %s CreateDIBSection %ux%u failed (%lu)", what, w, h, GetLastError()); }
         if (d.bmp) DeleteObject(d.bmp);
         DeleteDC(d.dc);
         d = Dib();
@@ -557,7 +557,7 @@ bool UploadTexture(ID3D11Device* dev, ID3D11DeviceContext* ctx, ComPtr<ID3D11Tex
         if (FAILED(hr = dev->CreateTexture2D(&td, nullptr, &tex)) ||
             FAILED(hr = dev->CreateShaderResourceView(tex.Get(), nullptr, &srv))) {
             static int logs = 0;
-            if (logs++ < 3) Log("tuning menu: %s texture %ux%u create failed hr=0x%lx", what, w, h, hr);
+            if (logs++ < 3) LogErr("tuning menu: %s texture %ux%u create failed hr=0x%lx", what, w, h, hr);
             tex.Reset(); srv.Reset();
             return false;
         }

@@ -20,6 +20,11 @@
 //    the same thunk on the loader's own entry point.
 // v0.10.3 phase 28: + xrLocateViews / xrEndFrame / xrCreateReferenceSpace (read only: the view poses, see LatestViews).
 // v0.10.3 phase 29: + xrDestroySession, and xrEndFrame gets our quad layers appended (OverlaySet below).
+// phase 30: + xrWaitFrame / xrBeginFrame / xrEndSession (Turbo mode, SetTurbo below).
+// phase 33: + xrPollEvent / xrCreateSession / xrBeginSession / xrRequestExitSession (read only: the session lifecycle and every
+// event handed to the game are logged -- "OpenXR session:" / "OpenXR event #n:" lines, with the turbo state and, at
+// xrEndSession / xrDestroySession, whether the RUNTIME (STOPPING / LOSS_PENDING / EXITING sent first) or the GAME started it;
+// non-XR_SUCCESS results of xrWaitFrame / xrBeginFrame / xrEndFrame / xrLocateViews: "OpenXR result:" lines, the first 20 each).
 // Only these function names are touched; everything else the GIPA thunks return is the real pointer. No OpenXR SDK
 // dependency: the few types needed are declared in xr_hook.cpp. No D3D calls here (the texture is passed as an identity).
 #pragma once
@@ -146,5 +151,23 @@ struct OverlayStats {
     int      fixedSpaceType = 0;             // that layer space's XrReferenceSpaceType (0 = unknown)
 };
 OverlayStats GetOverlayStats();
+
+// ---- phase 30: TURBO MODE (dlaa.ini xr_turbo; ported from OpenXR Toolkit, MIT -- see xr_hook.cpp) --------------------------
+// xrWaitFrame / xrBeginFrame / xrEndSession are wrapped too (outermost = the game's call). With turbo on, the game's
+// xrWaitFrame no longer blocks: after each xrEndFrame a thread of ours calls the real xrWaitFrame, the game gets a made-up
+// frame state (one frame of pipelining at most), its xrBeginFrame is skipped and xrEndFrame begins the frame for real. More
+// fps when the CPU is the limit; the runtime's frame smoothing (ASW / Motion Smoothing / SSW / motion reprojection) cannot
+// work with it. SetTurbo takes effect at the game's next xrBeginFrame / xrEndFrame (any thread, any time). phase 33: the first
+// async wait is armed right after a real xrBeginFrame of the game while none of its xrWaitFrame calls is outstanding (no 1-s
+// stall at the switch-on / in a new session with a game that waits on one thread and ends frames on another: ETS2 / ATS);
+// each game frame is tagged REAL / TURBO from its xrBeginFrame to its xrEndFrame; see xr_hook.cpp.
+void SetTurbo(bool on);
+struct TurboStats {
+    bool     want = false;                   // SetTurbo
+    bool     running = false;                // an async wait started within the last 0.5 s
+    bool     failed = false;                 // given up for the current session (an async wait / real xrBeginFrame failed)
+    uint64_t asyncWaits = 0, madeUp = 0, blocks = 0, timeouts = 0, failures = 0;
+};
+TurboStats GetTurboStats();
 
 } // namespace XrHook

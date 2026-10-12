@@ -405,7 +405,7 @@ struct SnapTimer {
             msLast = (double)(b - a) * 1000.0 / (double)dd.Frequency;
             msSum += msLast;
             if (++n % 600 == 0) {
-                Log("depth snapshot GPU cost: avg %.2f ms (over the last 600 timed snapshots, last %.2f ms)",
+                LogDbg("depth snapshot GPU cost: avg %.2f ms (over the last 600 timed snapshots, last %.2f ms)",
                     msSum / 600.0, msLast);
                 msSum = 0.0;
             }
@@ -711,7 +711,7 @@ bool SceneDlaa::Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32
             m_sharp.Reset(); m_sharpUav.Reset(); m_sharpSrv.Reset(); m_sharpRes = false;
             SwapParked();                    // the old set back (it keeps running)
             m_parkFailed[k] = true; m_altFailed = true;
-            Log("DLAA: eye %d could not build its %s colour set next to the %s one -- no retry at these sizes", m_eye,
+            LogErr("DLAA: eye %d could not build its %s colour set next to the %s one -- no retry at these sizes", m_eye,
                 hdr ? "HDR" : "LDR", hdr ? "LDR" : "HDR");
             return false;
         }
@@ -756,11 +756,11 @@ bool SceneDlaa::Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32
         size_t size = 0;
         const void* code = ShaderCache::Code(ShaderCache::kDepthConvert, &size);
         if (!code) {
-            Log("DLAA: depth shader D3DCompile failed %s", ShaderCache::Error(ShaderCache::kDepthConvert));
+            LogErr("DLAA: depth shader D3DCompile failed %s", ShaderCache::Error(ShaderCache::kDepthConvert));
             return false;
         }
         hr = dev->CreateComputeShader(code, size, nullptr, &m_depthCs);
-        if (FAILED(hr)) { Log("DLAA: depth CreateComputeShader hr=0x%lx", hr); return false; }
+        if (FAILED(hr)) { LogErr("DLAA: depth CreateComputeShader hr=0x%lx", hr); return false; }
     }
     if (!m_depthCb) {
         // v0.6.4: rect origin for the convert pass (DYNAMIC, rewritten in DepthConvert when the origin moved).
@@ -772,7 +772,7 @@ bool SceneDlaa::Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32
         bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
         D3D11_SUBRESOURCE_DATA sd{ cb, 0, 0 };
         hr = dev->CreateBuffer(&bd, &sd, &m_depthCb);
-        if (FAILED(hr)) { Log("DLAA: depth convert constant buffer create hr=0x%lx", hr); return false; }
+        if (FAILED(hr)) { LogErr("DLAA: depth convert constant buffer create hr=0x%lx", hr); return false; }
         m_depthCbX = m_depthCbY = 0;
     }
 
@@ -781,7 +781,7 @@ bool SceneDlaa::Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32
                             D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS, &m_depthR32)) ||
         FAILED(hr = dev->CreateShaderResourceView(m_depthR32.Get(), nullptr, &m_depthR32Srv)) ||
         FAILED(hr = dev->CreateUnorderedAccessView(m_depthR32.Get(), nullptr, &m_depthR32Uav))) {
-        Log("DLAA: depth R32F create hr=0x%lx", hr); return false;
+        LogErr("DLAA: depth R32F create hr=0x%lx", hr); return false;
     }
 
     // Motion vectors (RG16F): written by CameraMv, or cleared to 0 when MV is off.
@@ -789,7 +789,7 @@ bool SceneDlaa::Ensure(ID3D11Device* dev, uint32_t fullW, uint32_t fullH, uint32
                             D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS, &m_mv)) ||
         FAILED(hr = dev->CreateShaderResourceView(m_mv.Get(), nullptr, &m_mvSrv)) ||
         FAILED(hr = dev->CreateUnorderedAccessView(m_mv.Get(), nullptr, &m_mvUav))) {
-        Log("DLAA: MV create hr=0x%lx", hr); return false;
+        LogErr("DLAA: MV create hr=0x%lx", hr); return false;
     }
 
     // v0.10.0 phase 7: colorIn / m_out / m_sharp + the NGX feature = the colour set (BuildColourSet, also used to build the
@@ -814,7 +814,7 @@ bool SceneDlaa::BuildColourSet(ID3D11Device* dev, bool hdr, bool keepsOther) {
     const DXGI_FORMAT colorFmt = hdr ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM;
     if (FAILED(hr = MakeTex(dev, w, h, colorFmt, D3D11_BIND_SHADER_RESOURCE, &m_colorIn)) ||
         FAILED(hr = dev->CreateShaderResourceView(m_colorIn.Get(), nullptr, &m_colorInSrv))) {
-        Log("DLAA: colorIn create hr=0x%lx", hr); return false;
+        LogErr("DLAA: colorIn create hr=0x%lx", hr); return false;
     }
 
     // Output (UAV, written by NGX), copied back over the game texture. v0.5.6: with sharpening it is also
@@ -824,10 +824,10 @@ bool SceneDlaa::BuildColourSet(ID3D11Device* dev, bool hdr, bool keepsOther) {
     if (FAILED(hr = MakeTex(dev, ow, oh, colorFmt,
                             D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE, &m_out)) ||
         FAILED(hr = dev->CreateUnorderedAccessView(m_out.Get(), nullptr, &m_outUav))) {
-        Log("DLAA: output create hr=0x%lx", hr); return false;
+        LogErr("DLAA: output create hr=0x%lx", hr); return false;
     }
     if (m_up && FAILED(hr = dev->CreateShaderResourceView(m_out.Get(), nullptr, &m_outSrv))) {
-        Log("DLAA: output SRV create hr=0x%lx", hr); return false;   // v0.7.0: the composite needs it
+        LogErr("DLAA: output SRV create hr=0x%lx", hr); return false;   // v0.7.0: the composite needs it
     }
 
     // v0.5.6 sharpen target + shader. v0.5.7: created even at sharpness 0 (Shift+PageUp can raise it live);
@@ -855,7 +855,7 @@ bool SceneDlaa::BuildColourSet(ID3D11Device* dev, bool hdr, bool keepsOther) {
                 s_sharpness, s_sharpRadius,
                 s_sharpness > 0.0f ? "" : " (pass skipped while 0; Shift+PageUp raises it)", w, h);
     } else {
-        Log("DLAA: sharpen setup failed hr=0x%lx for eye %d -- sharpening OFF (DLAA continues)%s", (unsigned long)hr,
+        LogErr("DLAA: sharpen setup failed hr=0x%lx for eye %d -- sharpening OFF (DLAA continues)%s", (unsigned long)hr,
             m_eye, (m_crop && !m_up) ? "; DLAA area border blend OFF too (hard rect edge)" : "");
         m_sharp.Reset(); m_sharpUav.Reset(); m_sharpSrv.Reset();
         if (!m_up) m_outSrv.Reset();          // v0.7.0: upscale keeps it (composite source)
@@ -866,7 +866,7 @@ bool SceneDlaa::BuildColourSet(ID3D11Device* dev, bool hdr, bool keepsOther) {
     // v0.8.0: an HDR unit sets IsHDR unless dlaa.ini dlss_hdr = 0 (then the float values go in as display-referred).
     const bool ngxHdr = hdr && s_hdrLinear;
     if (!m_dlaa.Init(dev, w, h, ow, oh, /*depthInverted=*/true, ngxHdr)) {
-        Log("DLAA: NGX init FAILED for eye %d %ux%u -> %ux%u%s (see preceding DLAA lines for the reason)", m_eye, w, h,
+        LogErr("DLAA: NGX init FAILED for eye %d %ux%u -> %ux%u%s (see preceding DLAA lines for the reason)", m_eye, w, h,
             ow, oh, hdr ? (ngxHdr ? " [HDR unit: RGBA16F colour, IsHDR=1]" : " [HDR unit: RGBA16F colour, IsHDR=0 (dlss_hdr=0)]") : "");
         return false;
     }
@@ -940,7 +940,7 @@ bool SceneDlaa::Warm(ID3D11DeviceContext* ctx, ID3D11Texture2D* colour, float ji
             m_colorIn.Reset(); m_colorInSrv.Reset(); m_out.Reset(); m_outUav.Reset(); m_outSrv.Reset();
             m_sharp.Reset(); m_sharpUav.Reset(); m_sharpSrv.Reset(); m_sharpRes = false;
             m_parkFailed[k] = true;
-            Log("DLAA: eye %d could not build its %s colour set for the warm-up -- no retry at these sizes", m_eye,
+            LogErr("DLAA: eye %d could not build its %s colour set for the warm-up -- no retry at these sizes", m_eye,
                 hdr ? "HDR" : "LDR");
         } else {
             ++m_setBuilds;
@@ -986,18 +986,18 @@ bool SceneDlaa::EnsureComposite(ID3D11Device* dev) {
     const void* vsCode = ShaderCache::Code(ShaderCache::kCompositeVs, &vsSize);
     const void* psCode = ShaderCache::Code(ShaderCache::kCompositePs, &psSize);
     if (!vsCode) {
-        Log("DLAA: composite VS D3DCompile failed %s", ShaderCache::Error(ShaderCache::kCompositeVs));
+        LogErr("DLAA: composite VS D3DCompile failed %s", ShaderCache::Error(ShaderCache::kCompositeVs));
         return false;
     }
     if (FAILED(hr = dev->CreateVertexShader(vsCode, vsSize, nullptr, &m_compVs))) {
-        Log("DLAA: composite CreateVertexShader hr=0x%lx", hr); return false;
+        LogErr("DLAA: composite CreateVertexShader hr=0x%lx", hr); return false;
     }
     if (!psCode) {
-        Log("DLAA: composite PS D3DCompile failed %s", ShaderCache::Error(ShaderCache::kCompositePs));
+        LogErr("DLAA: composite PS D3DCompile failed %s", ShaderCache::Error(ShaderCache::kCompositePs));
         return false;
     }
     if (FAILED(hr = dev->CreatePixelShader(psCode, psSize, nullptr, &m_compPs))) {
-        Log("DLAA: composite CreatePixelShader hr=0x%lx", hr); return false;
+        LogErr("DLAA: composite CreatePixelShader hr=0x%lx", hr); return false;
     }
     // RT0: out = src * a + dst * (1 - a) on RGB (a = 1 -> exactly src); alpha channel NOT written (the eye RT's
     // alpha stays what the game's blit wrote). RT1..7 (if the game had more bound): nothing written.
@@ -1023,7 +1023,7 @@ bool SceneDlaa::EnsureComposite(ID3D11Device* dev) {
         bd.RenderTarget[i].BlendOpAlpha   = D3D11_BLEND_OP_ADD;
         bd.RenderTarget[i].RenderTargetWriteMask = 0;
     }
-    if (FAILED(hr = dev->CreateBlendState(&bd, &m_compBlend))) { Log("DLAA: composite CreateBlendState hr=0x%lx", hr); return false; }
+    if (FAILED(hr = dev->CreateBlendState(&bd, &m_compBlend))) { LogErr("DLAA: composite CreateBlendState hr=0x%lx", hr); return false; }
     D3D11_RASTERIZER_DESC rd{};
     rd.FillMode = D3D11_FILL_SOLID;
     rd.CullMode = D3D11_CULL_NONE;
@@ -1032,7 +1032,7 @@ bool SceneDlaa::EnsureComposite(ID3D11Device* dev) {
     rd.ScissorEnable = FALSE;
     rd.MultisampleEnable = FALSE;
     rd.AntialiasedLineEnable = FALSE;
-    if (FAILED(hr = dev->CreateRasterizerState(&rd, &m_compRs))) { Log("DLAA: composite CreateRasterizerState hr=0x%lx", hr); return false; }
+    if (FAILED(hr = dev->CreateRasterizerState(&rd, &m_compRs))) { LogErr("DLAA: composite CreateRasterizerState hr=0x%lx", hr); return false; }
     D3D11_DEPTH_STENCIL_DESC dd{};
     dd.DepthEnable = FALSE;
     dd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
@@ -1043,21 +1043,21 @@ bool SceneDlaa::EnsureComposite(ID3D11Device* dev) {
     dd.FrontFace.StencilFailOp = dd.FrontFace.StencilDepthFailOp = dd.FrontFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
     dd.FrontFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
     dd.BackFace = dd.FrontFace;
-    if (FAILED(hr = dev->CreateDepthStencilState(&dd, &m_compDss))) { Log("DLAA: composite CreateDepthStencilState hr=0x%lx", hr); return false; }
+    if (FAILED(hr = dev->CreateDepthStencilState(&dd, &m_compDss))) { LogErr("DLAA: composite CreateDepthStencilState hr=0x%lx", hr); return false; }
     // Params: 3 x float4 in a DYNAMIC buffer read through a Buffer<float4> SRV (t1).
     D3D11_BUFFER_DESC pb{};
     pb.ByteWidth = sizeof(m_compData);
     pb.Usage = D3D11_USAGE_DYNAMIC;
     pb.BindFlags = D3D11_BIND_SHADER_RESOURCE;
     pb.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-    if (FAILED(hr = dev->CreateBuffer(&pb, nullptr, &m_compParams))) { Log("DLAA: composite params buffer hr=0x%lx", hr); return false; }
+    if (FAILED(hr = dev->CreateBuffer(&pb, nullptr, &m_compParams))) { LogErr("DLAA: composite params buffer hr=0x%lx", hr); return false; }
     D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
     sd.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
     sd.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
     sd.Buffer.FirstElement = 0;
     sd.Buffer.NumElements = (UINT)(sizeof(m_compData) / 16);
     if (FAILED(hr = dev->CreateShaderResourceView(m_compParams.Get(), &sd, &m_compParamsSrv))) {
-        Log("DLAA: composite params SRV hr=0x%lx", hr); return false;
+        LogErr("DLAA: composite params SRV hr=0x%lx", hr); return false;
     }
     m_compDataValid = false;
     Log("DLAA: upscale composite ready for eye %d (VS + PS, alpha-blend feather, RGB write mask)", m_eye);
@@ -1071,11 +1071,11 @@ bool SceneDlaa::EnsureDebugCs(ID3D11Device* dev) {
     size_t size = 0;                                   // v0.7.8: bytecode from ShaderCache
     const void* code = ShaderCache::Code(ShaderCache::kMvDebug, &size);
     if (!code) {
-        Log("DLAA: MV debug shader D3DCompile failed %s", ShaderCache::Error(ShaderCache::kMvDebug));
+        LogErr("DLAA: MV debug shader D3DCompile failed %s", ShaderCache::Error(ShaderCache::kMvDebug));
         return false;
     }
     HRESULT hr = dev->CreateComputeShader(code, size, nullptr, &m_mvDbgCs);
-    if (FAILED(hr)) { Log("DLAA: MV debug CreateComputeShader hr=0x%lx", hr); return false; }
+    if (FAILED(hr)) { LogErr("DLAA: MV debug CreateComputeShader hr=0x%lx", hr); return false; }
     return true;
 }
 
@@ -1092,11 +1092,11 @@ bool SceneDlaa::EnsureSharpen(ID3D11Device* dev) {
         size_t size = 0;                               // v0.7.8: bytecode from ShaderCache
         const void* code = ShaderCache::Code(ShaderCache::kRcas, &size);
         if (!code) {
-            Log("DLAA: RCAS shader D3DCompile failed %s", ShaderCache::Error(ShaderCache::kRcas));
+            LogErr("DLAA: RCAS shader D3DCompile failed %s", ShaderCache::Error(ShaderCache::kRcas));
             return false;
         }
         hr = dev->CreateComputeShader(code, size, nullptr, &m_sharpCs);
-        if (FAILED(hr)) { Log("DLAA: RCAS CreateComputeShader hr=0x%lx", hr); return false; }
+        if (FAILED(hr)) { LogErr("DLAA: RCAS CreateComputeShader hr=0x%lx", hr); return false; }
     }
     if (!m_sharpCb) {
         // v0.5.7: DYNAMIC (was immutable) -- the strength changes live; Run re-uploads it (Map WRITE_DISCARD)
@@ -1112,7 +1112,7 @@ bool SceneDlaa::EnsureSharpen(ID3D11Device* dev) {
         bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
         D3D11_SUBRESOURCE_DATA sd{ cb, 0, 0 };
         hr = dev->CreateBuffer(&bd, &sd, &m_sharpCb);
-        if (FAILED(hr)) { Log("DLAA: RCAS constant buffer create hr=0x%lx", hr); return false; }
+        if (FAILED(hr)) { LogErr("DLAA: RCAS constant buffer create hr=0x%lx", hr); return false; }
         memcpy(m_sharpCbData, cb, sizeof(cb));
         m_sharpCbValid = true;
     }
@@ -1124,7 +1124,7 @@ bool SceneDlaa::EnsureSharpen(ID3D11Device* dev) {
         sd.ComparisonFunc = D3D11_COMPARISON_NEVER;
         sd.MinLOD = 0.0f; sd.MaxLOD = D3D11_FLOAT32_MAX;
         hr = dev->CreateSamplerState(&sd, &m_sharpSampler);
-        if (FAILED(hr)) { Log("DLAA: RCAS sampler create hr=0x%lx", hr); return false; }
+        if (FAILED(hr)) { LogErr("DLAA: RCAS sampler create hr=0x%lx", hr); return false; }
     }
     return true;
 }
@@ -1141,7 +1141,7 @@ void SceneDlaa::DepthConvert(ID3D11DeviceContext* ctx, ID3D11ShaderResourceView*
             m_depthCbX = m_rx; m_depthCbY = m_ry;
         } else {
             static int warned = 0;                     // stale origin this frame (depth off by the move), retried next
-            if (warned++ < 5) Log("DLAA: depth convert constant buffer Map failed on eye %d", m_eye);
+            if (warned++ < 5) LogErr("DLAA: depth convert constant buffer Map failed on eye %d", m_eye);
         }
     }
     ctx->CSSetShader(m_depthCs.Get(), nullptr, 0);
@@ -1183,7 +1183,7 @@ bool SceneDlaa::EnsureOwnTwin(ID3D11Device* dev) {
     HRESULT hr;
     if (FAILED(hr = MakeTex(dev, m_fullW, m_fullH, DXGI_FORMAT_R32G8X24_TYPELESS, D3D11_BIND_SHADER_RESOURCE, &m_depthTwin)) ||
         FAILED(hr = dev->CreateShaderResourceView(m_depthTwin.Get(), &sd, &m_depthTwinSrv))) {
-        Log("DLAA: own depth twin create hr=0x%lx", (unsigned long)hr);
+        LogErr("DLAA: own depth twin create hr=0x%lx", (unsigned long)hr);
         m_depthTwin.Reset(); m_depthTwinSrv.Reset();
         return false;
     }
@@ -1289,7 +1289,7 @@ bool DepthTwin::Snapshot(ID3D11DeviceContext* ctx, ID3D11Texture2D* depth, bool 
         if (FAILED(hr = MakeTex(dev.Get(), td.Width, td.Height, DXGI_FORMAT_R32G8X24_TYPELESS,
                                 D3D11_BIND_SHADER_RESOURCE, &tex)) ||
             FAILED(hr = dev->CreateShaderResourceView(tex.Get(), &sd, &srv))) {
-            Log("DLAA: pass depth twin create hr=0x%lx (%ux%u)", (unsigned long)hr, td.Width, td.Height);
+            LogErr("DLAA: pass depth twin create hr=0x%lx (%ux%u)", (unsigned long)hr, td.Width, td.Height);
             Shutdown();
             return false;
         }
@@ -1350,7 +1350,7 @@ bool DepthTwin::EnsureFwd(ID3D11Device* dev, uint32_t sw, uint32_t sh, uint32_t 
                                        &fwdIdTex)) ||
                    FAILED(hr = dev->CreateRenderTargetView(fwdIdTex.Get(), nullptr, &fwdIdRtv)) ||
                    FAILED(hr = dev->CreateShaderResourceView(fwdIdTex.Get(), nullptr, &fwdIdSrv))))) {
-        Log("MV forward depth: target create hr=0x%lx (%ux%u%s) -- no forward depth for this pass slot", (unsigned long)hr, fw, fh,
+        LogErr("MV forward depth: target create hr=0x%lx (%ux%u%s) -- no forward depth for this pass slot", (unsigned long)hr, fw, fh,
             shift ? ", 1/2 resolution" : "");
         FwdShutdown();
         return false;
@@ -1385,7 +1385,7 @@ bool DepthTwin::EnsureIds(ID3D11Device* dev, uint32_t iw, uint32_t ih, bool twoC
                             D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, &idTex)) ||
         FAILED(hr = dev->CreateRenderTargetView(idTex.Get(), nullptr, &idRtv)) ||
         FAILED(hr = dev->CreateShaderResourceView(idTex.Get(), nullptr, &idSrv))) {
-        Log("MV draw-ids: draw-id target create hr=0x%lx (%ux%u) -- no per-draw motion vectors for this pass slot",
+        LogErr("MV draw-ids: draw-id target create hr=0x%lx (%ux%u) -- no per-draw motion vectors for this pass slot",
             (unsigned long)hr, iw, ih);
         IdsShutdown();
         return false;
@@ -1440,7 +1440,7 @@ void SceneDlaa::GpuPoll(ID3D11DeviceContext* ctx) {
             char rect[48];
             if (m_crop) snprintf(rect, sizeof(rect), " rect=%ux%u of %ux%u", m_w, m_h, m_fullW, m_fullH);
             else        rect[0] = 0;
-            Log("DLAA GPU cost eye %d: total %.2f ms | copy-in %.2f | depth %.2f | mv %.2f | ngx %.2f | sharpen %.2f | %s %.2f (avg over %llu) [preset=%s sharp=%.1f r=%.1f area=%d up=%s%s]",
+            LogDbg("DLAA GPU cost eye %d: total %.2f ms | copy-in %.2f | depth %.2f | mv %.2f | ngx %.2f | sharpen %.2f | %s %.2f (avg over %llu) [preset=%s sharp=%.1f r=%.1f area=%d up=%s%s]",
                 m_eye, m_msSum / nW, m_stSum[0] / nW, m_stSum[1] / nW, m_stSum[2] / nW,
                 m_stSum[3] / nW, m_stSum[4] / nW, m_up ? "composite" : "copy-back", m_stSum[5] / nW, (unsigned long long)m_msN,
                 m_eye >= 10 ? "E" : DlssPresetName(), (double)s_sharpness, (double)s_sharpRadius,
@@ -1495,6 +1495,7 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
                     DepthTwin* depthTwin, const CandidateRecord* cand, float jitterX, float jitterY, bool reset, bool useMv, bool mvDebug, bool candBad,
                     uint32_t outW, uint32_t outH, const ObjRecord* objs, const DrawIdRecord* didRec,
                     const DrawIdRecord* didFwdRec) {
+    CpuProf::Block cpb(CpuProf::kBDlaaRun);            // phase 31 CPU profiler (cpu_prof.h)
     if (m_compPending) CancelComposite(ctx);           // v0.7.0: never left open (Composite always follows Run)
     m_deferred = false;
     m_altFailed = false;                               // v0.10.0 phase 7
@@ -1511,7 +1512,7 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
         td.Format != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB) {
         if (!m_badFmtLogged) {
             m_badFmtLogged = true;
-            Log("DLAA: eye %d colour texture %ux%u fmt=%d is neither R8G8B8A8 nor R16G16B16A16_FLOAT -- not processed",
+            LogWarn("DLAA: eye %d colour texture %ux%u fmt=%d is neither R8G8B8A8 nor R16G16B16A16_FLOAT -- not processed",
                 m_eye, td.Width, td.Height, (int)td.Format);
         }
         return false;
@@ -1624,9 +1625,12 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
         CameraMv::FrameStats fs;
         // v0.10.0 phase 17: no candidate in this frame's record (not even initialised: no draw was sampled yet)
         const bool noCand = !cand->Ready() || cand->Count(0) + cand->Count(1) == 0;
-        mvDone = m_cam.Generate(ctx, m_w, m_h, m_rx, m_ry, m_fullW, m_fullH, *cand, twinSrv,
-                                m_depthR32Uav.Get(), m_mvUav.Get(), &fs, candBad, objs, objs ? stencilSrv : nullptr,
-                                fwdSrv, didRec, didSrv, didFwd, fwdShiftRun, fwdIdSrv);
+        {
+            CpuProf::Block cpbMv(CpuProf::kBMvGen);    // phase 31 CPU profiler
+            mvDone = m_cam.Generate(ctx, m_w, m_h, m_rx, m_ry, m_fullW, m_fullH, *cand, twinSrv,
+                                    m_depthR32Uav.Get(), m_mvUav.Get(), &fs, candBad, objs, objs ? stencilSrv : nullptr,
+                                    fwdSrv, didRec, didSrv, didFwd, fwdShiftRun, fwdIdSrv);
+        }
         if (!mvDone) { GpuPerfScope gp(ctx, GpuPerf::kConvert); DepthConvert(ctx, twinSrv); }   // Generate wrote nothing: depth must not stay stale
         // v0.10.0 phase 17 STILL-CAMERA FALLBACK (menu units, see SetMenuUnit): no candidates -> Generate either wrote
         // nothing (record not initialised: the MV texture is cleared to 0 below) or solved with 0 pairs (pass A writes
@@ -1701,7 +1705,7 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
         } else {
             sharpOn = false;                           // stale strength/radius in the CB: skip this frame, retry next
             static int warned = 0;
-            if (warned++ < 5) Log("DLAA: RCAS constant buffer Map failed on eye %d -- frame not sharpened", m_eye);
+            if (warned++ < 5) LogErr("DLAA: RCAS constant buffer Map failed on eye %d -- frame not sharpened", m_eye);
         }
     }
     const bool sharpened = ok && sharpOn;
@@ -1747,7 +1751,7 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
         }
         ++m_frames;
     } else if (m_evalFails++ < 20) {
-        Log("DLAA: Evaluate failed (#%llu), game frame left untouched",
+        LogErr("DLAA: Evaluate failed (#%llu), game frame left untouched",
             (unsigned long long)m_evalFails);
     }
     // After copy-back (MV debug view below is not timed per stage). v0.7.0: with a pending composite, stamp 6
@@ -1839,7 +1843,7 @@ bool SceneDlaa::Composite(ID3D11DeviceContext* ctx, uint32_t vpX, uint32_t vpY, 
         D3D11_MAPPED_SUBRESOURCE mp{};
         if (FAILED(ctx->Map(m_compParams.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) {
             static int warned = 0;
-            if (warned++ < 5) Log("DLAA: composite params Map failed on eye %d -- frame keeps the game's stretch", m_eye);
+            if (warned++ < 5) LogErr("DLAA: composite params Map failed on eye %d -- frame keeps the game's stretch", m_eye);
             if (m_timing) GpuEnd(ctx, false);
             return false;
         }

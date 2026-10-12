@@ -34,3 +34,24 @@ jobs:
           name: dinput8-dll
           path: build/Release/dinput8.dll
           if-no-files-found: error
+
+      # Unit tests on WARP (software D3D11, no GPU needed). The exe exits 1 when a check fails.
+      # The .bat file only builds; the exe must exist, then it runs.
+      # The LOD scope test builds inject.cpp WITHOUT WITH_DLAA and needs the configured build tree
+      # (build\_deps\minhook-src, build\Release\minhook_static.lib): the Configure + Build steps above make it.
+      - name: Build tests
+        shell: cmd
+        run: |
+          call tests\build_drawid_harness.bat
+          if not exist build\tests\drawid_harness.exe exit /b 1
+          call tests\build_lod_scope_test.bat
+          if not exist build\tests\lod_scope_test.exe exit /b 1
+
+      - name: Test draw-id harness (did_shadow off)
+        run: build\tests\drawid_harness.exe -1 0.1
+
+      - name: Test draw-id harness (did_shadow on, the mod default)
+        run: build\tests\drawid_harness.exe -1 0.1 didshadow=1 shverify=1
+
+      - name: Test LOD bias scope (inject.cpp without WITH_DLAA)
+        run: build\tests\lod_scope_test.exe

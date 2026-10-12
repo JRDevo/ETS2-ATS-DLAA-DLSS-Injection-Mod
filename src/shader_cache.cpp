@@ -187,7 +187,7 @@ void LogSummary() {
         const int w = snprintf(times + tl, sizeof(times) - tl, " %s %.0f%s", e.name, e.ms, e.cached ? "c" : "");
         if (w > 0) tl += (size_t)w;
     }
-    Log("shader warm-up: %d from the disk cache, %d compiled in %.1f ms on %d thread(s) (%d failed; disk cache %s, %d bad / "
+    LogDbg("shader warm-up: %d from the disk cache, %d compiled in %.1f ms on %d thread(s) (%d failed; disk cache %s, %d bad / "
         "unreadable file(s) ignored, %d write failure(s)) -- ms per shader (c = disk cache):%s; every DLAA unit creates its "
         "shaders from these blobs (no D3DCompile on the render thread)", g_fromDisk.load(), g_compiled.load(),
         MsSince(g_t0), g_threads, g_failed.load(), g_dir.empty() ? "off (folder unavailable)" : "on", g_diskBad.load(),
@@ -222,7 +222,7 @@ void DoEntry(int id) {
                 e.err = buf;
                 e.err += err ? (const char*)err->GetBufferPointer() : "(no log)";
                 g_failed.fetch_add(1);
-                Log("shader warm-up: %s (%s / %s) D3DCompile FAILED %s", e.name, e.profile, e.entry, e.err.c_str());
+                LogErr("shader warm-up: %s (%s / %s) D3DCompile FAILED %s", e.name, e.profile, e.entry, e.err.c_str());
             }
             if (err) err->Release();
         }
@@ -279,7 +279,7 @@ void Start() {
             slash[1] = 0;
             std::wstring dir = std::wstring(exe) + L"dlaa_shader_cache\\";
             if (CreateDirectoryW(dir.c_str(), nullptr) || GetLastError() == ERROR_ALREADY_EXISTS) g_dir = dir;
-            else Log("shader warm-up: disk cache folder %ls not available (err %lu) -- every start compiles", dir.c_str(),
+            else LogWarn("shader warm-up: disk cache folder %ls not available (err %lu) -- every start compiles", dir.c_str(),
                      GetLastError());
         }
     }
@@ -300,7 +300,7 @@ void Start() {
     Log("shader warm-up: %d shader slot(s), %d worker thread(s) (%u hardware threads), core group first, disk cache %ls",
         (int)kCount, g_threads, hc, g_dir.empty() ? L"off" : g_dir.c_str());
     if (made > 0) return;
-    Log("shader warm-up: worker thread creation failed (err %lu) -- compiling on the setup thread", GetLastError());
+    LogErr("shader warm-up: worker thread creation failed (err %lu) -- compiling on the setup thread", GetLastError());
     Worker(nullptr);
 }
 

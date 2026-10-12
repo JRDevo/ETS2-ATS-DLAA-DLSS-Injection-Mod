@@ -3,7 +3,9 @@
 #include <windows.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstddef>
 #include <cstring>
 #include <mutex>
@@ -133,6 +135,55 @@ typedef XrResult (XRH_CALL* PFN_xrCreateSwapchain)(XrSession, const XrSwapchainC
 typedef XrResult (XRH_CALL* PFN_xrWaitSwapchainImage)(XrSwapchain, const XrSwapchainImageWaitInfo*);
 typedef XrResult (XRH_CALL* PFN_xrDestroySession)(XrSession);
 typedef XrResult (XRH_CALL* PFN_xrDestroySpace)(XrSpace);
+// phase 30 (Turbo mode): the frame loop types (openxr.h 1.0 layouts, same SDK header as above)
+struct XrFrameWaitInfo  { int32_t type; const void* next; };
+struct XrFrameState     { int32_t type; void* next; XrTime predictedDisplayTime; XrDuration predictedDisplayPeriod; uint32_t shouldRender; };
+struct XrFrameBeginInfo { int32_t type; const void* next; };
+static_assert(sizeof(XrFrameState) == 40 && offsetof(XrFrameState, predictedDisplayTime) == 16 &&
+              offsetof(XrFrameState, shouldRender) == 32 && sizeof(XrFrameWaitInfo) == 16 && sizeof(XrFrameBeginInfo) == 16,
+              "OpenXR struct layout (x64)");
+constexpr int32_t kTypeFrameWaitInfo  = 33;                      // XR_TYPE_FRAME_WAIT_INFO
+constexpr int32_t kTypeFrameState     = 44;                      // XR_TYPE_FRAME_STATE
+constexpr int32_t kTypeFrameBeginInfo = 46;                      // XR_TYPE_FRAME_BEGIN_INFO
+typedef XrResult (XRH_CALL* PFN_xrWaitFrame)(XrSession, const XrFrameWaitInfo*, XrFrameState*);
+typedef XrResult (XRH_CALL* PFN_xrBeginFrame)(XrSession, const XrFrameBeginInfo*);
+typedef XrResult (XRH_CALL* PFN_xrEndSession)(XrSession);
+// phase 33: the session lifecycle + events (openxr.h 1.0 layouts, x64; values from the OpenXR-SDK 1.1.62 header named above)
+struct XrSessionBeginInfo { int32_t type; const void* next; int32_t primaryViewConfigurationType; };
+struct XrEvSessionStateChanged { int32_t type; const void* next; XrSession session; int32_t state; XrTime time; };
+struct XrEvRefSpaceChangePending {
+    int32_t type; const void* next; XrSession session; int32_t referenceSpaceType; XrTime changeTime; uint32_t poseValid;
+    XrPosef poseInPreviousSpace;
+};
+struct XrEvEventsLost { int32_t type; const void* next; uint32_t lostEventCount; };
+struct XrEvInstanceLossPending { int32_t type; const void* next; XrTime lossTime; };
+struct XrEvRefreshRateChangedFB { int32_t type; const void* next; float from, to; };
+struct XrEvSessionInt { int32_t type; const void* next; XrSession session; int32_t a; uint32_t b; };   // user presence (a = present),
+                                                                                                        //   visibility mask (a, b)
+struct XrEvPerfSettings { int32_t type; const void* next; int32_t domain, subDomain, fromLevel, toLevel; };
+static_assert(offsetof(XrEvSessionStateChanged, session) == 16 && offsetof(XrEvSessionStateChanged, state) == 24 &&
+              offsetof(XrEvSessionStateChanged, time) == 32 && sizeof(XrEvSessionStateChanged) == 40 &&
+              offsetof(XrEvRefSpaceChangePending, referenceSpaceType) == 24 && offsetof(XrEvRefSpaceChangePending, changeTime) == 32 &&
+              offsetof(XrEvRefSpaceChangePending, poseValid) == 40 && offsetof(XrEvRefSpaceChangePending, poseInPreviousSpace) == 44 &&
+              sizeof(XrEvRefSpaceChangePending) == 72 && offsetof(XrEvEventsLost, lostEventCount) == 16 &&
+              offsetof(XrEvInstanceLossPending, lossTime) == 16 && offsetof(XrEvRefreshRateChangedFB, from) == 16 &&
+              offsetof(XrEvSessionInt, a) == 24 && offsetof(XrEvSessionInt, b) == 28 && sizeof(XrEvSessionInt) == 32 &&
+              offsetof(XrEvPerfSettings, domain) == 16 && offsetof(XrSessionBeginInfo, primaryViewConfigurationType) == 16,
+              "OpenXR event struct layout (x64)");
+constexpr int32_t kTypeEvInstanceLossPending       = 17;          // XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING
+constexpr int32_t kTypeEvSessionStateChanged       = 18;          // XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED
+constexpr int32_t kTypeEvRefSpaceChangePending     = 40;          // XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING
+constexpr int32_t kTypeEvEventsLost                = 49;          // XR_TYPE_EVENT_DATA_EVENTS_LOST
+constexpr int32_t kTypeEvInteractionProfileChanged = 52;          // XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED
+constexpr int32_t kTypeEvPerfSettingsExt           = 1000015000;  // XR_TYPE_EVENT_DATA_PERF_SETTINGS_EXT
+constexpr int32_t kTypeEvVisibilityMaskChangedKhr  = 1000031001;  // XR_TYPE_EVENT_DATA_VISIBILITY_MASK_CHANGED_KHR
+constexpr int32_t kTypeEvMainSessionVisibilityExtx = 1000033003;  // XR_TYPE_EVENT_DATA_MAIN_SESSION_VISIBILITY_CHANGED_EXTX
+constexpr int32_t kTypeEvRefreshRateChangedFb      = 1000101000;  // XR_TYPE_EVENT_DATA_DISPLAY_REFRESH_RATE_CHANGED_FB
+constexpr int32_t kTypeEvUserPresenceChangedExt    = 1000470000;  // XR_TYPE_EVENT_DATA_USER_PRESENCE_CHANGED_EXT
+typedef XrResult (XRH_CALL* PFN_xrPollEvent)(XrInstance, void* eventData);
+typedef XrResult (XRH_CALL* PFN_xrCreateSession)(XrInstance, const void* createInfo, XrSession*);
+typedef XrResult (XRH_CALL* PFN_xrBeginSession)(XrSession, const XrSessionBeginInfo*);
+typedef XrResult (XRH_CALL* PFN_xrRequestExitSession)(XrSession);
 
 // ---- components (one per runtime / layer / loader entry point) --------------------------------------------------------
 enum { kKindRuntime = 0, kKindLayer = 1, kKindLoader = 2 };
@@ -145,6 +196,8 @@ struct Slot {
     std::atomic<void*> locate{nullptr}, endFrame{nullptr}, createRefSpace{nullptr};   // v0.10.3 phase 28
     std::atomic<void*> locateSpace{nullptr};                                          // phase 28b (diagnostics)
     std::atomic<void*> destroySession{nullptr};                                       // phase 29 (the overlay's objects)
+    std::atomic<void*> waitFrame{nullptr}, beginFrame{nullptr}, endSession{nullptr};  // phase 30 (Turbo mode)
+    std::atomic<void*> pollEvent{nullptr}, createSession{nullptr}, beginSession{nullptr}, requestExit{nullptr};   // phase 33
     std::atomic<void*> instance{nullptr};        // phase 29: the last non-null XrInstance this component's GIPA was asked with
     int  kind = 0;
     char module[64] = "";
@@ -366,7 +419,7 @@ void OvResolveLocked(int i) {
     XrInstance inst = s_slot[i].instance.load(std::memory_order_acquire);
     if (!gipa || !inst) {
         if (s_ov.resolveTries <= 3)
-            Log("OpenXR overlay: cannot resolve the swapchain functions yet at the %s %s (GIPA %p, instance %p) -- the VR panel "
+            LogWarn("OpenXR overlay: cannot resolve the swapchain functions yet at the %s %s (GIPA %p, instance %p) -- the VR panel "
                 "stays in the eye picture", kKindName[s_slot[i].kind], s_slot[i].module, reinterpret_cast<void*>(gipa), inst);
         return;
     }
@@ -385,7 +438,7 @@ void OvResolveLocked(int i) {
     }
     if (missing >= 0) {
         if (s_ov.resolveTries <= 3)
-            Log("OpenXR overlay: %s not resolved at the %s %s (instance %p) -- the VR panel stays in the eye picture",
+            LogWarn("OpenXR overlay: %s not resolved at the %s %s (instance %p) -- the VR panel stays in the eye picture",
                 kNames[missing], kKindName[s_slot[i].kind], s_slot[i].module, inst);
         return;
     }
@@ -424,7 +477,7 @@ bool OvCreateLocked(XrSession ses, const OverlayParams& par) {
     const OvFns& o = s_ov.fn;
     auto fail = [&](const char* what, XrResult r) {
         s_ovCreateFails.fetch_add(1, std::memory_order_relaxed);
-        Log("OpenXR overlay: %s failed (result %d) -- the VR panel / fps box stay in the eye picture for this session", what, r);
+        LogErr("OpenXR overlay: %s failed (result %d) -- the VR panel / fps box stay in the eye picture for this session", what, r);
         OvDropLocked(true);
         s_ov.dead = true;
         return false;
@@ -448,7 +501,7 @@ bool OvCreateLocked(XrSession ses, const OverlayParams& par) {
     for (uint32_t k = 0, at = 0; k < nf && at < sizeof(list) - 24; ++k)
         at += (uint32_t)snprintf(list + at, sizeof(list) - at, "%s%lld", k ? " " : "", (long long)fmts[k]);
     if (!pick) {
-        Log("OpenXR overlay: the runtime offers none of the 8-bit RGBA swapchain formats (offered: %s)", list);
+        LogWarn("OpenXR overlay: the runtime offers none of the 8-bit RGBA swapchain formats (offered: %s)", list);
         return fail("picking a swapchain format", 0);
     }
     const uint32_t sw[2] = { par.panelW, par.fpsW }, sh[2] = { par.panelH, par.fpsH };
@@ -505,7 +558,7 @@ bool OvDrawLocked(int which) {
     XrResult r = o.acquire(c.sc, &ai, &idx);
     if (r < 0) {
         const uint64_t n = s_ovAcqFails.fetch_add(1, std::memory_order_relaxed);
-        if (n < 4) Log("OpenXR overlay: xrAcquireSwapchainImage of our %s swapchain failed (result %d)", which ? "fps box" : "panel", r);
+        if (n < 4) LogErr("OpenXR overlay: xrAcquireSwapchainImage of our %s swapchain failed (result %d)", which ? "fps box" : "panel", r);
         if (r == kErrSessionLost) s_ov.dead = true;
         return false;
     }
@@ -513,7 +566,7 @@ bool OvDrawLocked(int which) {
     r = o.wait(c.sc, &wi);
     if (r < 0 || r == kTimeoutExpired) {                 // an acquired image we may not release: the session is given up
         s_ovWaitFails.fetch_add(1, std::memory_order_relaxed);
-        Log("OpenXR overlay: xrWaitSwapchainImage of our %s swapchain failed (result %d) -- the quad path is off for this session",
+        LogErr("OpenXR overlay: xrWaitSwapchainImage of our %s swapchain failed (result %d) -- the quad path is off for this session",
             which ? "fps box" : "panel", r);
         s_ov.dead = true;
         return false;
@@ -536,7 +589,7 @@ bool OvDrawLocked(int which) {
     r = o.release(c.sc, &ri);
     if (r < 0) {
         s_ovRelFails.fetch_add(1, std::memory_order_relaxed);
-        Log("OpenXR overlay: xrReleaseSwapchainImage of our %s swapchain failed (result %d) -- the quad path is off for this session",
+        LogErr("OpenXR overlay: xrReleaseSwapchainImage of our %s swapchain failed (result %d) -- the quad path is off for this session",
             which ? "fps box" : "panel", r);
         s_ov.dead = true;
         return false;
@@ -558,7 +611,7 @@ void OvDrawWantedLocked(const OverlayParams& par) {
     s_ov.acqRun = acqFail ? s_ov.acqRun + 1 : 0;
     if (s_ov.acqRun >= 60 && !s_ov.dead) {
         s_ov.dead = true;
-        Log("OpenXR overlay: 60 frames in a row without an image of our swapchains -- the quad path is off for this session");
+        LogWarn("OpenXR overlay: 60 frames in a row without an image of our swapchains -- the quad path is off for this session");
     }
 }
 // rotation of `ang` rad about the +y / +x axis as a quaternion (x, y, z, w)
@@ -587,7 +640,7 @@ void OvFacingQuat(int k, const char* what, const char* to, const double dir[3], 
         const double dot = -(zr[0] * dir[0] + zr[1] * dir[1] + zr[2] * dir[2]);
         s_ov.zChecked[k] = true;
         s_ov.zFlip[k] = dot < 0.0;
-        Log("OpenXR overlay: %s quad orientation check: yaw %+.1f pitch %+.1f deg, R(q)(0,0,1) = (%+.3f %+.3f %+.3f) vs back-to-%s "
+        LogDbg("OpenXR overlay: %s quad orientation check: yaw %+.1f pitch %+.1f deg, R(q)(0,0,1) = (%+.3f %+.3f %+.3f) vs back-to-%s "
             "(%+.3f %+.3f %+.3f): dot %+.3f -> %s; R(q)(0,1,0) = (%+.3f %+.3f %+.3f)", what, yaw / kRad, pitch / kRad, zr[0], zr[1],
             zr[2], to, -dir[0], -dir[1], -dir[2], dot,
             dot > 0.999 ? "OK (faces it)" : (dot < 0.0 ? "POINTS AWAY: turned 180 deg about its y axis from now on" : "NOT exact (kept)"),
@@ -611,7 +664,7 @@ bool OvBuildQuadLocked(int which, const OverlayParams& par, const XrCompositionL
     if (!(fw > 0.1 && fw < 20.0) || !(fh > 0.1 && fh < 20.0)) {
         if (!s_ov.fovBadLogged) {
             s_ov.fovBadLogged = true;
-            Log("OpenXR overlay: the submitted view 0 fov (L%+.1f R%+.1f U%+.1f D%+.1f deg) is not usable -- no quads",
+            LogWarn("OpenXR overlay: the submitted view 0 fov (L%+.1f R%+.1f U%+.1f D%+.1f deg) is not usable -- no quads",
                 f.angleLeft * 57.29578, f.angleRight * 57.29578, f.angleUp * 57.29578, f.angleDown * 57.29578);
         }
         return false;
@@ -770,7 +823,7 @@ bool OvEndFrame(int i, XrSession ses, const XrFrameEndInfo* fe, const XrComposit
     if (nGame + 2 > kOvMaxLayers) {
         if (!s_ov.capLogged) {
             s_ov.capLogged = true;
-            Log("OpenXR overlay: the game submits %d layers (we append ours up to %d in all) -- no quads in such frames", nGame,
+            LogWarn("OpenXR overlay: the game submits %d layers (we append ours up to %d in all) -- no quads in such frames", nGame,
                 kOvMaxLayers);
         }
         OvSetOk(ok[0], ok[1]);
@@ -801,7 +854,7 @@ bool OvEndFrame(int i, XrSession ses, const XrFrameEndInfo* fe, const XrComposit
 void OvRejected(XrResult r) {
     std::lock_guard<std::mutex> lk(s_ovMx);
     s_ovRejects.fetch_add(1, std::memory_order_relaxed);
-    Log("OpenXR overlay: the runtime REJECTED xrEndFrame with our quad layers (result %d) -- the frame was submitted again without "
+    LogErr("OpenXR overlay: the runtime REJECTED xrEndFrame with our quad layers (result %d) -- the frame was submitted again without "
         "them; the VR panel / fps box go back into the eye picture for this session", r);
     s_ov.dead = true;
     OvSetOk(false, false);
@@ -818,6 +871,533 @@ void OvAtRelease() {
     OvDrawWantedLocked(par);
     if (s_ov.have[0]) s_ovOk[0].store(true, std::memory_order_relaxed);   // (this frame's in-picture draw follows: skip it)
     if (s_ov.have[1]) s_ovOk[1].store(true, std::memory_order_relaxed);
+}
+
+// ---- phase 33: names for the log -- OpenXR results, session states, event types (values checked against openxr.h of
+// OpenXR-SDK 1.1.62, E:/OpenXR-EyeCapture/build/_deps/openxr_sdk-src/include/openxr/openxr.h) --------------------------------
+const char* XrResultName(XrResult r) {
+    switch (r) {
+    case 0: return "XR_SUCCESS";                       case 1: return "XR_TIMEOUT_EXPIRED";
+    case 3: return "XR_SESSION_LOSS_PENDING";          case 4: return "XR_EVENT_UNAVAILABLE";
+    case 7: return "XR_SPACE_BOUNDS_UNAVAILABLE";      case 8: return "XR_SESSION_NOT_FOCUSED";
+    case 9: return "XR_FRAME_DISCARDED";               case -1: return "XR_ERROR_VALIDATION_FAILURE";
+    case -2: return "XR_ERROR_RUNTIME_FAILURE";        case -3: return "XR_ERROR_OUT_OF_MEMORY";
+    case -4: return "XR_ERROR_API_VERSION_UNSUPPORTED"; case -6: return "XR_ERROR_INITIALIZATION_FAILED";
+    case -7: return "XR_ERROR_FUNCTION_UNSUPPORTED";   case -9: return "XR_ERROR_EXTENSION_NOT_PRESENT";
+    case -10: return "XR_ERROR_LIMIT_REACHED";         case -11: return "XR_ERROR_SIZE_INSUFFICIENT";
+    case -12: return "XR_ERROR_HANDLE_INVALID";        case -13: return "XR_ERROR_INSTANCE_LOST";
+    case -14: return "XR_ERROR_SESSION_RUNNING";       case -16: return "XR_ERROR_SESSION_NOT_RUNNING";
+    case -17: return "XR_ERROR_SESSION_LOST";          case -18: return "XR_ERROR_SYSTEM_INVALID";
+    case -23: return "XR_ERROR_LAYER_INVALID";         case -24: return "XR_ERROR_LAYER_LIMIT_EXCEEDED";
+    case -25: return "XR_ERROR_SWAPCHAIN_RECT_INVALID"; case -28: return "XR_ERROR_SESSION_NOT_READY";
+    case -29: return "XR_ERROR_SESSION_NOT_STOPPING";  case -30: return "XR_ERROR_TIME_INVALID";
+    case -31: return "XR_ERROR_REFERENCE_SPACE_UNSUPPORTED"; case -37: return "XR_ERROR_CALL_ORDER_INVALID";
+    case -38: return "XR_ERROR_GRAPHICS_DEVICE_INVALID"; case -39: return "XR_ERROR_POSE_INVALID";
+    case -40: return "XR_ERROR_INDEX_OUT_OF_RANGE";    case -41: return "XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED";
+    case -42: return "XR_ERROR_ENVIRONMENT_BLEND_MODE_UNSUPPORTED"; case -50: return "XR_ERROR_GRAPHICS_REQUIREMENTS_CALL_MISSING";
+    default: return r < 0 ? "XR_ERROR_(other)" : "XR_(other success code)";
+    }
+}
+const char* SessionStateName(int s) {               // XrSessionState
+    static const char* const k[9] = { "UNKNOWN", "IDLE", "READY", "SYNCHRONIZED", "VISIBLE", "FOCUSED", "STOPPING", "LOSS_PENDING",
+                                       "EXITING" };
+    return s >= 0 && s < 9 ? k[s] : "?";
+}
+const char* EventTypeName(int32_t t) {              // XrStructureType of an XrEventDataBuffer
+    switch (t) {
+    case kTypeEvInstanceLossPending:        return "INSTANCE_LOSS_PENDING";
+    case kTypeEvSessionStateChanged:        return "SESSION_STATE_CHANGED";
+    case kTypeEvRefSpaceChangePending:      return "REFERENCE_SPACE_CHANGE_PENDING";
+    case kTypeEvEventsLost:                 return "EVENTS_LOST";
+    case kTypeEvInteractionProfileChanged:  return "INTERACTION_PROFILE_CHANGED";
+    case kTypeEvPerfSettingsExt:            return "PERF_SETTINGS_EXT";
+    case kTypeEvVisibilityMaskChangedKhr:   return "VISIBILITY_MASK_CHANGED_KHR";
+    case kTypeEvMainSessionVisibilityExtx:  return "MAIN_SESSION_VISIBILITY_CHANGED_EXTX";
+    case kTypeEvRefreshRateChangedFb:       return "DISPLAY_REFRESH_RATE_CHANGED_FB";
+    case kTypeEvUserPresenceChangedExt:     return "USER_PRESENCE_CHANGED_EXT";
+    default:                                return "other";
+    }
+}
+int64_t SteadyNs() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+// ---- phase 33: the session lifecycle as the game sees it (who starts a session restart: the runtime or the game) -----------
+std::atomic<int>      s_sesState{0};                 // the newest XrSessionState the game was handed (xrPollEvent); 0 = none
+std::atomic<int64_t>  s_sesStateNs{0};               // ... when (steady clock)
+std::atomic<int>      s_rtStop{0};                   // STOPPING / LOSS_PENDING / EXITING handed to the game since the last
+std::atomic<int64_t>  s_rtStopNs{0};                 //   xrBeginSession (the highest one; 0 = none) -- the RUNTIME asks
+std::atomic<bool>     s_instLoss{false};             // INSTANCE_LOSS_PENDING seen since the last xrBeginSession
+std::atomic<bool>     s_exitAsked{false};            // the game called xrRequestExitSession since the last xrBeginSession
+std::atomic<bool>     s_endCalled{false};            // the game called xrEndSession since the last xrBeginSession
+std::atomic<int>      s_sesLogs{0};                  // lifecycle + state lines so far (cap kSesLogCap)
+constexpr int         kSesLogCap = 2000;
+// "who started it" for the xrEndSession / xrDestroySession lines
+void WhoStarted(char* b, size_t n) {
+    const int stop = s_rtStop.load(std::memory_order_relaxed);
+    if (s_exitAsked.load(std::memory_order_relaxed))
+        snprintf(b, n, "=> started by the GAME (it called xrRequestExitSession first)");
+    else if (stop || s_instLoss.load(std::memory_order_relaxed))
+        snprintf(b, n, "=> started by the RUNTIME (it sent %s %.1f s before; the game did not call xrRequestExitSession)",
+                 stop ? SessionStateName(stop) : "INSTANCE_LOSS_PENDING",
+                 stop ? (double)(SteadyNs() - s_rtStopNs.load(std::memory_order_relaxed)) / 1e9 : 0.0);
+    else
+        snprintf(b, n, "=> started by the GAME on its own (no STOPPING / LOSS_PENDING / EXITING / INSTANCE_LOSS_PENDING from the "
+                 "runtime, no xrRequestExitSession; last session state %s, %.1f s ago)",
+                 SessionStateName(s_sesState.load(std::memory_order_relaxed)),
+                 s_sesStateNs.load(std::memory_order_relaxed)
+                     ? (double)(SteadyNs() - s_sesStateNs.load(std::memory_order_relaxed)) / 1e9 : -1.0);
+}
+
+// ---- phase 33: non-XR_SUCCESS results of the frame loop (the first 20 of each kind logged, then only counted) ----------------
+enum NsKind { kNsWait = 0, kNsBegin, kNsEnd, kNsLocate, kNsAsyncWait, kNsTbBegin, kNsTbSyncWait, kNsCount };
+const char* const kNsName[kNsCount] = { "xrWaitFrame", "xrBeginFrame", "xrEndFrame", "xrLocateViews", "async xrWaitFrame (turbo)",
+                                        "xrBeginFrame by turbo (at xrEndFrame)", "xrWaitFrame by turbo at xrEndFrame" };
+std::atomic<uint64_t> s_ns[kNsCount];
+void TbDescribe(char* b, size_t n);                   // (below: the turbo state, lock-free)
+void NoteResult(int kind, XrResult r, XrSession ses) {
+    if (r == 0) return;
+    const uint64_t k = s_ns[kind].fetch_add(1, std::memory_order_relaxed);
+    if (k >= 20) return;
+    char tb[400];
+    TbDescribe(tb, sizeof(tb));
+    LogWarn("OpenXR result: %s(session %p) returned %d = %s (#%llu of this kind%s; tid=%lu) | %s", kNsName[kind], ses, r, XrResultName(r),
+        (unsigned long long)k + 1, k == 19 ? "; the rest are only counted in the turbo stats line" : "", GetCurrentThreadId(), tb);
+}
+
+// ---- phase 30: TURBO MODE (dlaa.ini xr_turbo; the tuning menu's Turbo mode row; see xr_hook.h) -----------------------------
+// The logic below is ported from OpenXR Toolkit (XR_APILAYER_MBUCCHIA_toolkit/layer.cpp: xrWaitFrame, xrBeginFrame, the end of
+// xrEndFrame, xrDestroySession; setting "turbo"), used under its MIT licence:
+//
+//   MIT License
+//
+//   Copyright (c) 2021-2022 Matthieu Bucchianeri
+//   Copyright (c) 2021-2022 Jean-Luc Dupiot - Reality XP
+//
+//   Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation
+//   files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy,
+//   modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+//   Software is furnished to do so, subject to the following conditions:
+//
+//   The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+//   Software.
+//
+//   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+//   WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+//   COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+//   ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+//
+// How it works (the game's OUTERMOST calls only; t_depth > 0 = an inner layer's call or ours: passed straight through):
+//  * a worker thread calls the REAL xrWaitFrame (the slot's next function, never our thunk; ++t_depth on the worker so the
+//    inner layers' thunks pass it through) and keeps its predictedDisplayTime / predictedDisplayPeriod;
+//  * the game's xrWaitFrame while that wait is pending does not wait: it gets a made-up frame state (the async time when the
+//    wait is done, else the last real time + the time since the game's previous xrWaitFrame, at most 2 frame periods ahead
+//    (phase 33); the period of the last wait; shouldRender TRUE; strictly increasing). A SECOND such poll before a frame was
+//    ended first blocks on the pending wait (exactly one frame of pipelining, as the Toolkit; bounded at 1 s here);
+//  * the game's xrBeginFrame after a made-up frame state returns XR_SUCCESS without the real call (the frame is a TURBO frame);
+//  * the game's xrEndFrame of a turbo frame: up to 1 s for the pending wait to finish, the REAL xrBeginFrame, the real
+//    xrEndFrame (after the phase 29 quads are appended, as before), then the next async wait if turbo is still on.
+// phase 33 (ETS2 VR log 2026-10-11 16:02-16:14: the game calls xrWaitFrame + xrBeginFrame on its MAIN thread and xrEndFrame on
+// its RENDER thread, and the main thread runs ahead: its real xrWaitFrame of frame N+1 is usually already running -- or done,
+// not yet begun -- while the render thread is still in xrEndFrame of frame N. Phase 30 armed the first async wait at that
+// xrEndFrame: then the game's real wait of N+1 and our async wait were outstanding TOGETHER (two concurrent xrWaitFrame = not
+// allowed: the calls must be externally synchronised), the game's xrBeginFrame of N+1 was then skipped (a wait was pending),
+// and our async wait -- which the runtime holds until the previous waited frame is BEGUN -- could only finish after the next
+// xrEndFrame's real xrBeginFrame, which first waited 1 s for it: the 1-s freeze at every turbo start, at the switch-on and in
+// every new session):
+//  * the FIRST async wait is armed right after a real xrBeginFrame of the game (on the thread that called it), and only when no
+//    real game xrWaitFrame is in flight: at that point every frame the runtime waited has been begun, so the async wait is the
+//    only xrWaitFrame outstanding and it needs nothing but time. Steady state as before: each turbo frame's xrEndFrame posts the
+//    next wait (no real game wait can be running then: every game wait is answered with a made-up state while one is pending);
+//  * every frame the game begins carries a TAG (a small FIFO from the game's xrBeginFrame to its xrEndFrame): REAL = the game's
+//    own xrBeginFrame reached the runtime (its xrEndFrame is passed through: nothing consumed, nothing begun -- the arming frame),
+//    TURBO = its xrWaitFrame got a made-up state and its xrBeginFrame was skipped (its xrEndFrame consumes the pending wait and
+//    calls the real xrBeginFrame). Phase 30 decided by "a wait is pending" at each call, which mixed up the frames of the two
+//    threads at a switch;
+//  * a TURBO frame whose xrEndFrame finds NO wait pending (turbo was switched off -- or given up -- while the main thread had
+//    already been handed its made-up state): its frame is waited for for real right there, then begun (phase 30 let the game's
+//    next xrBeginFrame through without any real xrWaitFrame = XR_ERROR_CALL_ORDER_INVALID, the frame lost);
+//  * no new async wait while the runtime has asked the session to stop (STOPPING / LOSS_PENDING / EXITING / IDLE handed to the
+//    game by xrPollEvent); xrBeginSession / xrEndSession / xrDestroySession reset the frame tags and the "given up" mark (the
+//    runtime reuses session handle values: VD's sessions are all 0x1);
+//  * a real predicted display time is only nudged to stay increasing when it is within 2 frame periods of the last one handed
+//    out (phase 30 nudged any amount: after a 1-s stall every frame got the same time ~1 s in the future for ~1 s).
+// Locks: s_tbMx = the frame state below; held by the game's xrWaitFrame / xrBeginFrame checks (and over the game's real
+// xrBeginFrame) and over the whole turbo part of xrEndFrame (as the Toolkit's frame lock: another thread's xrWaitFrame sees
+// either the old or the new pending wait, never the gap between them). TbWorker::mx = the worker's job / result data (never
+// held while waiting for anything but its own condition). The worker never takes s_tbMx: blocking on it with s_tbMx held
+// cannot deadlock. The log's view of the state (TbDescribe) reads atomic mirrors only (never s_tbMx).
+struct TbWorker {                                // heap, never destroyed (no destructor at process exit / with the loader lock)
+    std::mutex              mx;
+    std::condition_variable cv;
+    bool                    started = false;     // the thread exists (under s_tbMx)
+    uint64_t                jobSeq = 0, doneSeq = 0;   // the newest posted / finished async wait
+    std::atomic<uint64_t>   doneSeqA{0};         // phase 33: doneSeq for the log (lock-free)
+    XrSession               ses = nullptr;
+    PFN_xrWaitFrame         fn = nullptr;        // the REAL xrWaitFrame of the slot that posted it
+    XrResult                result = 0;          // of doneSeq
+    XrTime                  lastTime = 0;        // the last REAL predicted display time / period (the game's own real waits
+    XrDuration              lastPeriod = 0;      //   too: needed for the switch into turbo)
+};
+TbWorker& Wk() { static TbWorker* w = new TbWorker; return *w; }
+enum : uint8_t { kTagReal = 1, kTagTurbo = 2 };  // phase 33: how a game frame was begun (see above)
+constexpr int kTags = 8;
+struct TbState {                                 // under s_tbMx
+    XrSession ses = nullptr;                     // the session of the pending wait
+    bool      pending = false;                   // an async wait was started and no turbo frame's xrEndFrame consumed it yet
+    uint64_t  seq = 0;                           // ... its job seq
+    bool      polled = false;                    // the pending wait is CLAIMED: a made-up game frame will consume it (phase 30:
+                                                 //   "answered once"; phase 33: also set at a post for a frame already made up)
+    bool      lastWaitFake = false;              // phase 33: the game's newest xrWaitFrame got a made-up state (its xrBeginFrame
+                                                 //   is skipped: a TURBO frame)
+    uint8_t   tags[kTags] = {};                  // phase 33: the begun, not yet ended game frames (FIFO, oldest at tagH)
+    int       tagH = 0, tagN = 0;
+    int       gameWaits = 0;                     // phase 33: real game xrWaitFrame calls running right now
+    bool      gameWaited = false;                // phase 33: a real game xrWaitFrame returned and its xrBeginFrame has not come
+    int64_t   lastGameWaitNs = 0;                // steady clock at the game's previous xrWaitFrame
+    XrTime    lastReturned = 0;                  // the last predicted display time handed to the game (kept increasing)
+    int64_t   aheadMaxNs = 0;                    // phase 33: the most a made-up time was ahead of the newest real one (window)
+    bool      loggedOn = false;                  // the turbo state the log last announced
+    bool      broken = false;                    // turbo given up for `brokenSes` (a failed async wait / real xrBeginFrame)
+    XrSession brokenSes = nullptr;
+    int64_t   statsNextNs = 0;
+    uint64_t  statsPrev[12] = {};
+    uint64_t  nsPrev = 0;                        // phase 33: the non-success results total at the last stats line
+};
+TbState               s_tb;
+std::mutex            s_tbMx;
+std::condition_variable s_tbCv;                  // phase 33: s_tb.pending went false (a switch-off waits for it, s_tbMx)
+std::atomic<bool>     s_tbWant{false};
+std::atomic<bool>     s_tbFailed{false};
+std::atomic<int64_t>  s_tbLastStartNs{0};
+std::atomic<uint64_t> s_tbStarts{0}, s_tbFaked{0}, s_tbBeginSkips{0}, s_tbBlocks{0}, s_tbToEnd{0}, s_tbToWait{0}, s_tbFails{0};
+std::atomic<uint64_t> s_tbArms{0}, s_tbSyncWaits{0}, s_tbBumps{0}, s_tbBackJumps{0}, s_tbTagDrops{0};   // phase 33
+// phase 33: lock-free mirrors of s_tb for TbDescribe (written under s_tbMx by TbMirrorLocked)
+std::atomic<bool>     s_tbPendA{false}, s_tbPolledA{false}, s_tbFakeA{false};
+std::atomic<uint64_t> s_tbSeqA{0};
+std::atomic<int>      s_tbTagsA{0}, s_tbTurboTagsA{0}, s_tbGameWaitsA{0};
+
+void TbMirrorLocked() {
+    int turbo = 0;
+    for (int k = 0; k < s_tb.tagN; ++k) if (s_tb.tags[(s_tb.tagH + k) % kTags] == kTagTurbo) ++turbo;
+    s_tbPendA.store(s_tb.pending, std::memory_order_relaxed);
+    s_tbPolledA.store(s_tb.polled, std::memory_order_relaxed);
+    s_tbFakeA.store(s_tb.lastWaitFake, std::memory_order_relaxed);
+    s_tbSeqA.store(s_tb.seq, std::memory_order_relaxed);
+    s_tbTagsA.store(s_tb.tagN, std::memory_order_relaxed);
+    s_tbTurboTagsA.store(turbo, std::memory_order_relaxed);
+    s_tbGameWaitsA.store(s_tb.gameWaits, std::memory_order_relaxed);
+}
+void TbDescribe(char* b, size_t n) {
+    const bool pend = s_tbPendA.load(std::memory_order_relaxed);
+    const uint64_t seq = s_tbSeqA.load(std::memory_order_relaxed), done = Wk().doneSeqA.load(std::memory_order_relaxed);
+    char aw[96];
+    if (pend)
+        snprintf(aw, sizeof(aw), "#%llu pending, %s, started %.1f ms ago", (unsigned long long)seq,
+                 done >= seq ? "finished (not consumed yet)" : "RUNNING",
+                 (double)(SteadyNs() - s_tbLastStartNs.load(std::memory_order_relaxed)) / 1e6);
+    else
+        snprintf(aw, sizeof(aw), "none pending (%llu posted in all)", (unsigned long long)s_tbStarts.load(std::memory_order_relaxed));
+    snprintf(b, n, "turbo %s%s: async wait %s; game frames begun + not ended %d (%d turbo); last game xrWaitFrame %s; game waits in "
+             "flight %d; session state %s", s_tbWant.load(std::memory_order_relaxed) ? "ON" : "off",
+             s_tbFailed.load(std::memory_order_relaxed) ? " (given up for this session)" : "", aw,
+             s_tbTagsA.load(std::memory_order_relaxed), s_tbTurboTagsA.load(std::memory_order_relaxed),
+             s_tbFakeA.load(std::memory_order_relaxed) ? "made up" : "real", s_tbGameWaitsA.load(std::memory_order_relaxed),
+             SessionStateName(s_sesState.load(std::memory_order_relaxed)));
+}
+void TbPushTagLocked(uint8_t t) {
+    if (s_tb.tagN == kTags) {                    // (never: a game ends what it begins) drop the oldest
+        s_tb.tagH = (s_tb.tagH + 1) % kTags;
+        --s_tb.tagN;
+        s_tbTagDrops.fetch_add(1, std::memory_order_relaxed);
+    }
+    s_tb.tags[(s_tb.tagH + s_tb.tagN) % kTags] = t;
+    ++s_tb.tagN;
+}
+uint8_t TbPopTagLocked() {                       // 0 = no begun frame known (treated as REAL: passed through)
+    if (!s_tb.tagN) return 0;
+    const uint8_t t = s_tb.tags[s_tb.tagH];
+    s_tb.tagH = (s_tb.tagH + 1) % kTags;
+    --s_tb.tagN;
+    return t;
+}
+// A new async wait may start: the runtime has not asked the session to stop (0 = no state seen yet: allowed).
+bool TbSessionStateOk() {
+    const int st = s_sesState.load(std::memory_order_relaxed);
+    return st == 0 || (st >= 2 && st <= 5);      // READY, SYNCHRONIZED, VISIBLE, FOCUSED
+}
+
+DWORD WINAPI TbWorkerMain(LPVOID) {
+    TbWorker& w = Wk();
+    uint64_t done = 0;
+    for (;;) {
+        uint64_t seq;
+        XrSession ses;
+        PFN_xrWaitFrame fn;
+        {
+            std::unique_lock<std::mutex> lk(w.mx);
+            w.cv.wait(lk, [&] { return w.jobSeq != done; });
+            seq = w.jobSeq; ses = w.ses; fn = w.fn;   // (posted twice while busy: only the newest runs)
+        }
+        CpuProf::SetRole(CpuProf::kRoleTurbo);   // phase 33: the CPU profiler's thread label
+        const XrFrameWaitInfo wi{ kTypeFrameWaitInfo, nullptr };
+        XrFrameState fs{ kTypeFrameState, nullptr, 0, 0, 0 };
+        ++t_depth;                               // the inner layers' xrWaitFrame thunks pass it through (never the turbo path)
+        const XrResult r = fn ? fn(ses, &wi, &fs) : -1;
+        --t_depth;
+        {
+            std::lock_guard<std::mutex> lk(w.mx);
+            w.result = r;
+            if (r >= 0 && seq == w.jobSeq) { w.lastTime = fs.predictedDisplayTime; w.lastPeriod = fs.predictedDisplayPeriod; }
+            w.doneSeq = seq;
+            w.doneSeqA.store(seq, std::memory_order_relaxed);
+            done = seq;
+        }
+        w.cv.notify_all();
+        if (r != 0) NoteResult(kNsAsyncWait, r, ses);   // phase 33 (never under s_tbMx: lock-free)
+    }
+}
+// Waits up to `ms` for async wait `seq` to finish; true = finished (*r = its result).
+bool TbWaitDone(uint64_t seq, int ms, XrResult* r) {
+    TbWorker& w = Wk();
+    std::unique_lock<std::mutex> lk(w.mx);
+    const bool ok = w.cv.wait_for(lk, std::chrono::milliseconds(ms), [&] { return w.doneSeq >= seq; });
+    if (ok && r) *r = w.result;
+    return ok;
+}
+// Under s_tbMx: the next async wait. claimed = a made-up game frame is already waiting for it (phase 33). False = the worker
+// thread could not be made (logged once).
+bool TbStartLocked(XrSession ses, PFN_xrWaitFrame fn, bool claimed) {
+    TbWorker& w = Wk();
+    if (!w.started) {
+        HANDLE h = CreateThread(nullptr, 0, &TbWorkerMain, nullptr, 0, nullptr);
+        if (!h) {
+            static bool s_logged = false;
+            if (!s_logged) { s_logged = true; LogErr("OpenXR turbo: the wait thread could not be created (error %lu) -- turbo stays off", GetLastError()); }
+            return false;
+        }
+        CloseHandle(h);
+        w.started = true;
+    }
+    {
+        std::lock_guard<std::mutex> lk(w.mx);
+        w.ses = ses;
+        w.fn = fn;
+        s_tb.seq = ++w.jobSeq;
+    }
+    w.cv.notify_all();
+    s_tb.ses = ses;
+    s_tb.pending = true;
+    s_tb.polled = claimed;
+    s_tbStarts.fetch_add(1, std::memory_order_relaxed);
+    s_tbLastStartNs.store(SteadyNs(), std::memory_order_relaxed);
+    return true;
+}
+// phase 33: xrBeginSession / xrEndSession / xrDestroySession by the game (s_tbMx taken here): a pending wait of `ses` is drained
+// first when `drain` (up to 5 s, as the Toolkit's xrDestroySession) and forgotten; the frame tags, the made-up mark and the
+// "given up" mark of `ses` are reset. `out` = what was done (for the caller's lifecycle line).
+void TbSessionReset(XrSession ses, bool drain, char* out, size_t n) {
+    std::lock_guard<std::mutex> lk(s_tbMx);
+    const bool had = s_tb.pending && ses == s_tb.ses;
+    const int tags = s_tb.tagN;
+    const bool fake = s_tb.lastWaitFake;
+    bool ok = true;
+    int64_t waitedMs = 0;
+    if (had && drain) {
+        const int64_t t0 = SteadyNs();
+        ok = TbWaitDone(s_tb.seq, 5000, nullptr);
+        waitedMs = (SteadyNs() - t0) / 1000000;
+    }
+    if (had && drain) { s_tb.pending = false; s_tb.polled = false; }
+    s_tb.tagN = 0; s_tb.tagH = 0;
+    s_tb.lastWaitFake = false;
+    s_tb.gameWaited = false;
+    s_tb.lastGameWaitNs = 0;
+    s_tbCv.notify_all();
+    if (s_tb.broken && ses == s_tb.brokenSes) {
+        s_tb.broken = false;
+        s_tb.brokenSes = nullptr;
+        s_tbFailed.store(false, std::memory_order_relaxed);
+    }
+    TbMirrorLocked();
+    snprintf(out, n, "turbo %s: %s; %d begun + not ended frame tag(s)%s cleared", s_tbWant.load(std::memory_order_relaxed) ? "ON" : "off",
+             !had ? "no async wait pending" : !drain ? "an async wait of this session is pending (kept)"
+             : ok ? (waitedMs ? "the pending async xrWaitFrame was drained (finished) and dropped" : "the pending async xrWaitFrame had finished; dropped")
+                  : "the pending async xrWaitFrame did NOT finish within 5 s (dropped anyway; the runtime ends it)",
+             tags, fake ? " + the made-up mark" : "");
+}
+void TbLogStatsLocked(const char* why) {         // under s_tbMx
+    const uint64_t v[12] = { s_tbStarts.load(), s_tbFaked.load(), s_tbBeginSkips.load(), s_tbBlocks.load(), s_tbToEnd.load(),
+                             s_tbToWait.load(), s_tbFails.load(), s_tbArms.load(), s_tbSyncWaits.load(), s_tbBumps.load(),
+                             s_tbBackJumps.load(), s_tbTagDrops.load() };
+    uint64_t d[12];
+    for (int k = 0; k < 12; ++k) { d[k] = v[k] - s_tb.statsPrev[k]; s_tb.statsPrev[k] = v[k]; }
+    char ns[400] = "";
+    int at = 0;
+    uint64_t nsAll = 0;
+    for (int k = 0; k < kNsCount && at < (int)sizeof(ns) - 64; ++k) {
+        const uint64_t c = s_ns[k].load(std::memory_order_relaxed);
+        nsAll += c;
+        if (c) at += snprintf(ns + at, sizeof(ns) - (size_t)at, "%s%s %llu", at ? ", " : "", kNsName[k], (unsigned long long)c);
+    }
+    s_tb.nsPrev = nsAll;
+    LogDbg("OpenXR turbo stats (%s): %llu async xrWaitFrame (%llu in all), %llu made-up frame states, %llu xrBeginFrame skipped, "
+        "%llu second-poll blocks, 1-s timeouts %llu at xrEndFrame / %llu at xrWaitFrame, %llu failures | phase 33: %llu first waits "
+        "armed at the game's xrBeginFrame, %llu turbo frames waited for at xrEndFrame (no wait pending), made-up time up to %.2f ms "
+        "ahead of the newest real one, %llu nudged to stay increasing, %llu real times kept although earlier, %llu frame tags "
+        "dropped | non-XR_SUCCESS results since the start: %s", why, (unsigned long long)d[0], (unsigned long long)v[0],
+        (unsigned long long)d[1], (unsigned long long)d[2], (unsigned long long)d[3], (unsigned long long)d[4],
+        (unsigned long long)d[5], (unsigned long long)d[6], (unsigned long long)d[7], (unsigned long long)d[8],
+        (double)s_tb.aheadMaxNs / 1e6, (unsigned long long)d[9], (unsigned long long)d[10], (unsigned long long)d[11],
+        at ? ns : "none");
+    s_tb.aheadMaxNs = 0;
+}
+// Under s_tbMx: the on / off announcement (`where` = the call that noticed the switch).
+void TbAnnounceLocked(int i, XrSession ses, bool want, const char* where) {
+    if (want == s_tb.loggedOn) return;
+    s_tb.loggedOn = want;
+    if (want) {
+        s_tb.broken = false;                     // a fresh switch-on re-arms a session turbo gave up on
+        s_tb.brokenSes = nullptr;
+        s_tbFailed.store(false, std::memory_order_relaxed);
+        s_tb.statsNextNs = SteadyNs() + 30000000000LL;
+        Log("OpenXR turbo: ON at %s (session %p, the %s %s, tid=%lu) -- the first async wait starts right after the game's next "
+            "real xrBeginFrame (phase 33: never while a real game xrWaitFrame is outstanding); then the game no longer waits for "
+            "the headset in xrWaitFrame; frame smoothing (ASW / Motion Smoothing / SSW / reprojection) stops working", where, ses,
+            kKindName[s_slot[i].kind], s_slot[i].module, GetCurrentThreadId());
+    } else {
+        Log("OpenXR turbo: OFF at %s (session %p) -- %s; the game waits in its own xrWaitFrame again", where, ses,
+            s_tb.pending ? "the pending async wait is consumed by the next turbo frame's xrEndFrame" : "no wait pending");
+        TbLogStatsLocked("at switch-off");
+    }
+}
+// Under s_tbMx: the first async wait, right after a real xrBeginFrame of the game succeeded (see the phase 33 notes above).
+void TbArmLocked(int i, XrSession ses) {
+    const bool want = s_tbWant.load(std::memory_order_relaxed);
+    TbAnnounceLocked(i, ses, want, "xrBeginFrame");
+    if (!want || s_tb.pending || (s_tb.broken && ses == s_tb.brokenSes) || s_tb.gameWaits != 0 || !TbSessionStateOk()) return;
+    auto realWait = reinterpret_cast<PFN_xrWaitFrame>(s_slot[i].waitFrame.load(std::memory_order_acquire));
+    auto realEnd = s_slot[i].endFrame.load(std::memory_order_acquire);
+    if (!realWait || !realEnd) {
+        static bool s_logged = false;
+        if (!s_logged) {
+            s_logged = true;
+            LogErr("OpenXR turbo: xrWaitFrame / xrEndFrame not resolved at the %s %s (the component that begins the game's frame) "
+                "-- turbo cannot run", kKindName[s_slot[i].kind], s_slot[i].module);
+        }
+        return;
+    }
+    if (!TbStartLocked(ses, realWait, false)) return;
+    const uint64_t n = s_tbArms.fetch_add(1, std::memory_order_relaxed);
+    if (n < 16)
+        Log("OpenXR turbo: first async xrWaitFrame #%llu armed right after the game's real xrBeginFrame (session %p, tid=%lu; no "
+            "real game xrWaitFrame outstanding) -- the frame begun now is passed through at its xrEndFrame, the game's next "
+            "frame is a turbo frame", (unsigned long long)s_tb.seq, ses, GetCurrentThreadId());
+}
+// The game's xrEndFrame of a TURBO frame, BEFORE the real call (s_tbMx held by the caller): the pending wait is consumed and the
+// real xrBeginFrame of this frame is called (the game's own was skipped); no wait pending: a real xrWaitFrame first.
+void TbBeginForGameLocked(int i, XrSession ses) {
+    XrResult wr = 0;
+    if (s_tb.pending && ses == s_tb.ses) {
+        const bool ready = TbWaitDone(s_tb.seq, 1000, &wr);
+        if (ready) {
+            s_tb.pending = false;
+        } else {
+            const uint64_t n = s_tbToEnd.fetch_add(1, std::memory_order_relaxed);
+            if (n < 8) {
+                char tb[400];
+                TbMirrorLocked();
+                TbDescribe(tb, sizeof(tb));
+                LogWarn("OpenXR turbo: the async xrWaitFrame did not finish within 1 s at xrEndFrame -- the frame is begun and ended "
+                    "anyway; the wait stays pending for the next turbo frame (phase 33: not expected any more -- the first wait "
+                    "is armed only when no game wait is outstanding) | %s", tb);
+            }
+        }
+        if (ready && wr < 0) {                   // no frame was waited for: no xrBeginFrame (the real xrEndFrame reports it)
+            s_tbFails.fetch_add(1, std::memory_order_relaxed);
+            s_tb.broken = true;
+            s_tb.brokenSes = ses;
+            s_tbFailed.store(true, std::memory_order_relaxed);
+            LogErr("OpenXR turbo: the async xrWaitFrame FAILED (result %d = %s) -- turbo is off for this session (session %p)", wr,
+                XrResultName(wr), ses);
+            return;
+        }
+    } else {
+        // phase 33: the game got a made-up frame state but no async wait is pending (turbo switched off / given up / a session
+        // reset in between): the frame is waited for for real now (at most one frame period on this thread), then begun
+        // (never while a real game xrWaitFrame is running or has waited a frame not yet begun: two waits outstanding -- and the
+        // runtime would hold ours until the game begins its frame, which the game does only after this xrEndFrame = a hang;
+        // then the frame is not begun: its xrEndFrame fails, logged as a non-success result)
+        auto realWait = reinterpret_cast<PFN_xrWaitFrame>(s_slot[i].waitFrame.load(std::memory_order_acquire));
+        if (!realWait) return;
+        if (s_tb.gameWaits || s_tb.gameWaited) {
+            const uint64_t n = s_tbSyncWaits.fetch_add(1, std::memory_order_relaxed);
+            if (n < 8)
+                LogWarn("OpenXR turbo: a turbo frame reached xrEndFrame with no async wait pending while the game has a real xrWaitFrame "
+                    "%s -- the frame is NOT begun (its xrEndFrame will fail; a wait here could hang the game) (tid=%lu)",
+                    s_tb.gameWaits ? "running" : "done and not begun", GetCurrentThreadId());
+            return;
+        }
+        const XrFrameWaitInfo wi{ kTypeFrameWaitInfo, nullptr };
+        XrFrameState fs{ kTypeFrameState, nullptr, 0, 0, 0 };
+        ++t_depth;
+        wr = realWait(ses, &wi, &fs);
+        --t_depth;
+        const uint64_t n = s_tbSyncWaits.fetch_add(1, std::memory_order_relaxed);
+        if (n < 8)
+            LogWarn("OpenXR turbo: a turbo frame reached xrEndFrame with no async wait pending (turbo %s) -- waited for it for real "
+                "here (result %d = %s), then begun (tid=%lu)", s_tbWant.load(std::memory_order_relaxed) ? "on" : "switched off",
+                wr, XrResultName(wr), GetCurrentThreadId());
+        if (wr != 0) NoteResult(kNsTbSyncWait, wr, ses);
+        if (wr < 0) return;                      // no frame waited: no xrBeginFrame (the real xrEndFrame reports it)
+        TbWorker& w = Wk();
+        std::lock_guard<std::mutex> wl(w.mx);
+        w.lastTime = fs.predictedDisplayTime;
+        w.lastPeriod = fs.predictedDisplayPeriod;
+    }
+    auto realBegin = reinterpret_cast<PFN_xrBeginFrame>(s_slot[i].beginFrame.load(std::memory_order_acquire));
+    const XrFrameBeginInfo bi{ kTypeFrameBeginInfo, nullptr };
+    ++t_depth;
+    const XrResult rb = realBegin ? realBegin(ses, &bi) : -1;
+    --t_depth;
+    if (rb != 0) NoteResult(kNsTbBegin, rb, ses);
+    if (rb < 0) {
+        s_tbFails.fetch_add(1, std::memory_order_relaxed);
+        s_tb.broken = true;
+        s_tb.brokenSes = ses;
+        s_tbFailed.store(true, std::memory_order_relaxed);
+        LogErr("OpenXR turbo: the real xrBeginFrame FAILED (result %d = %s%s) -- turbo is off for this session (session %p)", rb,
+            XrResultName(rb), realBegin ? "" : ", not resolved", ses);
+    }
+}
+// ... AFTER the real xrEndFrame (result r; s_tbMx still held; tag = how the frame was begun): the on / off log, the stats
+// line, the next async wait (turbo frames only: the first one is armed at the game's xrBeginFrame).
+void TbAfterEndLocked(int i, XrSession ses, XrResult r, bool want, uint8_t tag) {
+    TbAnnounceLocked(i, ses, want, "xrEndFrame");
+    const int64_t now = SteadyNs();
+    if (now >= s_tb.statsNextNs) {               // every 30 s while turbo is on or something new went wrong
+        uint64_t nsAll = 0;
+        for (int k = 0; k < kNsCount; ++k) nsAll += s_ns[k].load(std::memory_order_relaxed);
+        if (want || s_tb.pending || nsAll != s_tb.nsPrev) TbLogStatsLocked("last 30 s");
+        s_tb.statsNextNs = now + 30000000000LL;
+    }
+    // the next wait (turbo frames only): NEEDED when the game already has a made-up frame that no wait covers yet (its
+    // xrWaitFrame came while the one just consumed was pending: the newest wait is made up, or a turbo frame is still begun) --
+    // posted even with turbo switched off / given up / the session stopping (switched off: CLAIMED by that frame, so the game's
+    // next xrWaitFrame waits for it to be consumed instead of being made up); else only while turbo is on (then the game's
+    // next xrWaitFrame claims it). A switch-off thus ends cleanly: no made-up frame is ever left without a wait, and the game's
+    // next real xrWaitFrame is the only wait outstanding.
+    if (tag == kTagTurbo && !s_tb.pending && r >= 0) {
+        bool needed = s_tb.lastWaitFake;
+        for (int k = 0; k < s_tb.tagN && !needed; ++k) if (s_tb.tags[(s_tb.tagH + k) % kTags] == kTagTurbo) needed = true;
+        const bool more = want && !(s_tb.broken && ses == s_tb.brokenSes) && s_tb.gameWaits == 0 && !s_tb.gameWaited &&
+                          TbSessionStateOk();
+        if (needed || more)
+            if (auto realWait = reinterpret_cast<PFN_xrWaitFrame>(s_slot[i].waitFrame.load(std::memory_order_acquire)))
+                TbStartLocked(ses, realWait, needed && !want);   // (turbo on: unclaimed, the phase 30 pipelining)
+    }
+    if (tag == kTagTurbo) s_tbCv.notify_all();   // a switch-off's xrWaitFrame waits for the consume (WaitFrameImpl)
+    TbMirrorLocked();
 }
 
 // ---- the per-slot implementations ---------------------------------------------------------------------------------------
@@ -853,9 +1433,11 @@ XrResult EnumerateImpl(int i, XrSwapchain sc, uint32_t cap, uint32_t* cnt, void*
 XrResult AcquireImpl(int i, XrSwapchain sc, const void* info, uint32_t* index) {
     auto real = reinterpret_cast<PFN_xrAcquireSwapchainImage>(s_slot[i].acquire.load(std::memory_order_acquire));
     if (!real) return -1;
+    CPU_HOOK(kHkXrAcquire);                                    // phase 31 CPU profiler (cpu_prof.h)
     const bool outer = t_depth == 0;
     ++t_depth;
-    const XrResult r = real(sc, info, index);
+    XrResult r;
+    CPU_ORIG(r = real(sc, info, index));
     --t_depth;
     if (outer && r >= 0 && index) {
         AcquireSRWLockExclusive(&s_scLock);
@@ -871,6 +1453,7 @@ XrResult AcquireImpl(int i, XrSwapchain sc, const void* info, uint32_t* index) {
 XrResult ReleaseImpl(int i, XrSwapchain sc, const void* info) {
     auto real = reinterpret_cast<PFN_xrReleaseSwapchainImage>(s_slot[i].release.load(std::memory_order_acquire));
     if (!real) return -1;
+    CPU_HOOK(kHkXrRelease);                                    // phase 31 CPU profiler (cpu_prof.h)
     if (t_depth == 0) {
         void* tex = nullptr;
         AcquireSRWLockExclusive(&s_scLock);
@@ -901,7 +1484,8 @@ XrResult ReleaseImpl(int i, XrSwapchain sc, const void* info) {
         }
     }
     ++t_depth;
-    const XrResult r = real(sc, info);
+    XrResult r;
+    CPU_ORIG(r = real(sc, info));
     --t_depth;
     return r;
 }
@@ -922,10 +1506,13 @@ XrResult DestroyImpl(int i, XrSwapchain sc) {
 XrResult LocateImpl(int i, XrSession ses, const XrViewLocateInfo* li, XrViewState* vs, uint32_t cap, uint32_t* cnt, XrView* views) {
     auto real = reinterpret_cast<PFN_xrLocateViews>(s_slot[i].locate.load(std::memory_order_acquire));
     if (!real) return -1;
+    CPU_HOOK(kHkXrLocate);                                    // phase 31 CPU profiler (cpu_prof.h)
     const bool outer = t_depth == 0;
     ++t_depth;
-    const XrResult r = real(ses, li, vs, cap, cnt, views);
+    XrResult r;
+    CPU_ORIG(r = real(ses, li, vs, cap, cnt, views));
     --t_depth;
+    if (outer && r != 0) NoteResult(kNsLocate, r, ses);   // phase 33
     if (outer && r >= 0 && li && li->viewConfigurationType == kViewConfigPrimaryStereo && cap >= 2 && cnt && *cnt >= 2 && views) {
         LARGE_INTEGER now;
         QueryPerformanceCounter(&now);
@@ -977,11 +1564,381 @@ XrResult LocateImpl(int i, XrSession ses, const XrViewLocateInfo* li, XrViewStat
     }
     return r;
 }
+// phase 30 (Turbo mode, ported from OpenXR Toolkit -- see the MIT notice above TbWorker): the game's xrWaitFrame. While an async
+// wait is pending: a made-up frame state (a second poll first blocks on that wait, up to 1 s). Else the real call, its
+// predicted time / period kept for the switch into turbo. Every time handed out is kept increasing (phase 33: a real time is
+// nudged only when it is within 2 frame periods of the last one handed out; a made-up one is at most 2 periods ahead).
+XrResult WaitFrameImpl(int i, XrSession ses, const XrFrameWaitInfo* wi, XrFrameState* fs) {
+    auto real = reinterpret_cast<PFN_xrWaitFrame>(s_slot[i].waitFrame.load(std::memory_order_acquire));
+    if (!real) return -1;
+    CPU_HOOK(kHkXrWait);                                    // phase 31 CPU profiler (cpu_prof.h)
+    if (t_depth > 0) {                           // an inner layer's / our call: straight through
+        ++t_depth;
+        XrResult r;
+        CPU_ORIG(r = real(ses, wi, fs));
+        --t_depth;
+        return r;
+    }
+    CpuProf::SetRole(CpuProf::kRoleXrWait);      // phase 33: the CPU profiler's "main" thread label
+    static std::atomic<bool> s_logged{false};
+    if (!s_logged.exchange(true))
+        Log("OpenXR hook: first xrWaitFrame by the game (session %p; via the %s %s, tid=%lu)", ses, kKindName[s_slot[i].kind],
+            s_slot[i].module, GetCurrentThreadId());
+    const int64_t now = SteadyNs();
+    std::unique_lock<std::mutex> lk(s_tbMx);
+    const int64_t prev = s_tb.lastGameWaitNs;
+    s_tb.lastGameWaitNs = now;
+    if (s_tb.pending && fs && ses != s_tb.ses) {
+        static std::atomic<int> s_other{0};
+        if (s_other.fetch_add(1, std::memory_order_relaxed) < 4)
+            LogWarn("OpenXR turbo: xrWaitFrame of session %p while an async wait of session %p is pending -- passed to the runtime",
+                ses, s_tb.ses);
+    }
+    // phase 33: turbo switched off while the pending wait is already claimed by a made-up frame: this frame must not be made
+    // up (nothing would wait for it) -- wait (<= 1 s) until that frame's xrEndFrame consumes the wait: then either no new one
+    // is posted (turbo still off: wait for real below, the only xrWaitFrame outstanding) or turbo came back on and a new,
+    // unclaimed one was posted (made up from it below)
+    if (s_tb.pending && ses == s_tb.ses && fs && s_tb.polled && !s_tbWant.load(std::memory_order_relaxed)) {
+        const uint64_t seq0 = s_tb.seq;
+        bool freed;
+        CPU_ORIG(freed = s_tbCv.wait_for(lk, std::chrono::milliseconds(1000), [seq0] { return !s_tb.pending || s_tb.seq != seq0; }));
+        if (!freed) {
+            const uint64_t n = s_tbToWait.fetch_add(1, std::memory_order_relaxed);
+            if (n < 8) {
+                char tb[400];
+                TbMirrorLocked();
+                TbDescribe(tb, sizeof(tb));
+                LogWarn("OpenXR turbo: switched off, but the pending async wait was not consumed within 1 s at the game's xrWaitFrame "
+                    "-- a made-up frame state is returned once more | %s", tb);
+            }
+        }
+    }
+    if (s_tb.pending && ses == s_tb.ses && fs) {
+        if (s_tb.polled) {                       // pipelining of exactly one frame: the second poll waits
+            s_tbBlocks.fetch_add(1, std::memory_order_relaxed);
+            bool waited;
+            CPU_ORIG(waited = TbWaitDone(s_tb.seq, 1000, nullptr));   // phase 31: a wait for the headset, not mod CPU
+            if (!waited) {
+                const uint64_t n = s_tbToWait.fetch_add(1, std::memory_order_relaxed);
+                if (n < 8) {
+                    char tb[400];
+                    TbMirrorLocked();
+                    TbDescribe(tb, sizeof(tb));
+                    LogWarn("OpenXR turbo: the async xrWaitFrame did not finish within 1 s at the game's second xrWaitFrame -- a "
+                        "made-up frame state is returned anyway | %s", tb);
+                }
+            }
+        }
+        s_tb.polled = true;
+        TbWorker& w = Wk();
+        bool done;
+        XrTime t;
+        XrDuration per;
+        {
+            std::lock_guard<std::mutex> wl(w.mx);
+            done = w.doneSeq >= s_tb.seq;
+            t = w.lastTime;
+            per = w.lastPeriod;
+        }
+        const XrTime newest = t;
+        if (!done && prev) {                     // not waited yet: the last time + the time since the previous game wait
+            int64_t dt = now - prev;             // (phase 33: at most 2 frame periods -- a stall must not push the time ahead)
+            const int64_t cap = per > 0 ? 2 * per : 50000000;
+            if (dt > cap) dt = cap;
+            if (dt > 0) t += dt;
+        }
+        if (t <= s_tb.lastReturned) { t = s_tb.lastReturned + 1; s_tbBumps.fetch_add(1, std::memory_order_relaxed); }
+        if (t - newest > s_tb.aheadMaxNs) s_tb.aheadMaxNs = t - newest;
+        s_tb.lastReturned = t;
+        fs->predictedDisplayTime = t;
+        fs->predictedDisplayPeriod = per;
+        fs->shouldRender = 1;
+        s_tb.lastWaitFake = true;                // phase 33: its xrBeginFrame is skipped (a TURBO frame)
+        TbMirrorLocked();
+        s_tbFaked.fetch_add(1, std::memory_order_relaxed);
+        return 0;                                // XR_SUCCESS
+    }
+    ++s_tb.gameWaits;                            // phase 33: no async wait may start while this one runs
+    TbMirrorLocked();
+    lk.unlock();
+    ++t_depth;
+    XrResult r;
+    CPU_ORIG(r = real(ses, wi, fs));
+    --t_depth;
+    lk.lock();
+    --s_tb.gameWaits;
+    s_tb.gameWaited = r >= 0;                    // (until the game's xrBeginFrame)
+    s_tb.lastWaitFake = false;
+    if (r >= 0 && fs) {
+        TbWorker& w = Wk();
+        {
+            std::lock_guard<std::mutex> wl(w.mx);  // always kept: the switch into turbo starts from it
+            w.lastTime = fs->predictedDisplayTime;
+            w.lastPeriod = fs->predictedDisplayPeriod;
+        }
+        if (fs->predictedDisplayTime <= s_tb.lastReturned) {
+            const int64_t back = s_tb.lastReturned - fs->predictedDisplayTime;
+            const int64_t tol = fs->predictedDisplayPeriod > 0 ? 2 * fs->predictedDisplayPeriod : 50000000;
+            if (back < tol) {
+                fs->predictedDisplayTime = s_tb.lastReturned + 1;
+                s_tbBumps.fetch_add(1, std::memory_order_relaxed);
+            } else {
+                const uint64_t n = s_tbBackJumps.fetch_add(1, std::memory_order_relaxed);
+                if (n < 8)
+                    LogWarn("OpenXR turbo: the runtime's predicted display time is %.2f ms EARLIER than the last one handed to the game "
+                        "-- kept as it is (phase 33: only nudged within 2 frame periods)", (double)back / 1e6);
+            }
+        }
+        s_tb.lastReturned = fs->predictedDisplayTime;
+    }
+    TbMirrorLocked();
+    lk.unlock();
+    if (r != 0) NoteResult(kNsWait, r, ses);     // phase 33
+    return r;
+}
+// phase 30: the game's xrBeginFrame -- skipped (XR_SUCCESS) after a made-up frame state (xrEndFrame begins the frame). phase 33:
+// every game frame is tagged (REAL / TURBO) here for its xrEndFrame, and the first async wait is armed right after a real one.
+XrResult BeginFrameImpl(int i, XrSession ses, const XrFrameBeginInfo* bi) {
+    auto real = reinterpret_cast<PFN_xrBeginFrame>(s_slot[i].beginFrame.load(std::memory_order_acquire));
+    if (!real) return -1;
+    CPU_HOOK(kHkXrBegin);                                    // phase 31 CPU profiler (cpu_prof.h)
+    if (t_depth > 0) {
+        ++t_depth;
+        XrResult r;
+        CPU_ORIG(r = real(ses, bi));
+        --t_depth;
+        return r;
+    }
+    static std::atomic<bool> s_logged{false};
+    if (!s_logged.exchange(true))
+        Log("OpenXR hook: first xrBeginFrame by the game (session %p; via the %s %s, tid=%lu)", ses, kKindName[s_slot[i].kind],
+            s_slot[i].module, GetCurrentThreadId());
+    std::unique_lock<std::mutex> lk(s_tbMx);     // (held over the real call: the frame tags stay in call order)
+    if (s_tb.lastWaitFake) {
+        s_tb.lastWaitFake = false;
+        TbPushTagLocked(kTagTurbo);
+        TbMirrorLocked();
+        s_tbBeginSkips.fetch_add(1, std::memory_order_relaxed);
+        return 0;                                // XR_SUCCESS
+    }
+    ++t_depth;
+    XrResult r;
+    CPU_ORIG(r = real(ses, bi));
+    --t_depth;
+    s_tb.gameWaited = false;
+    if (r == 9) s_tb.tagN = 0;                   // XR_FRAME_DISCARDED: the runtime dropped the frame still open (its tag too)
+    TbPushTagLocked(kTagReal);
+    if (r >= 0) TbArmLocked(i, ses);
+    TbMirrorLocked();
+    lk.unlock();
+    if (r != 0) NoteResult(kNsBegin, r, ses);    // phase 33
+    return r;
+}
+// phase 30: the game's xrEndSession -- a pending async wait is drained first (the next session run starts with a real wait).
+// phase 33: + the lifecycle line (who started it, the turbo state).
+XrResult EndSessionImpl(int i, XrSession ses) {
+    auto real = reinterpret_cast<PFN_xrEndSession>(s_slot[i].endSession.load(std::memory_order_acquire));
+    if (!real) return -1;
+    CPU_HOOK(kHkXrOther);
+    const bool outer = t_depth == 0;
+    char tb[400] = "", who[300] = "";
+    if (outer) {
+        WhoStarted(who, sizeof(who));
+        TbSessionReset(ses, true, tb, sizeof(tb));
+    }
+    ++t_depth;
+    XrResult r;
+    CPU_ORIG(r = real(ses));
+    --t_depth;
+    if (outer) {
+        s_endCalled.store(true, std::memory_order_relaxed);
+        if (s_sesLogs.fetch_add(1, std::memory_order_relaxed) < kSesLogCap)
+            Log("OpenXR session: xrEndSession(%p) by the game -> %d = %s (tid=%lu) %s | %s", ses, r, XrResultName(r),
+                GetCurrentThreadId(), who, tb);
+    }
+    return r;
+}
+// phase 33: xrCreateSession / xrBeginSession / xrRequestExitSession -- logged (with the turbo state); xrBeginSession also starts
+// a fresh lifecycle record (who-started marks) and clears the turbo frame tags.
+XrResult CreateSessionImpl(int i, XrInstance inst, const void* ci, XrSession* out) {
+    auto real = reinterpret_cast<PFN_xrCreateSession>(s_slot[i].createSession.load(std::memory_order_acquire));
+    if (!real) return -1;
+    CPU_HOOK(kHkXrOther);
+    const bool outer = t_depth == 0;
+    ++t_depth;
+    XrResult r;
+    CPU_ORIG(r = real(inst, ci, out));
+    --t_depth;
+    if (outer) {
+        s_sesState.store(0, std::memory_order_relaxed);
+        s_rtStop.store(0, std::memory_order_relaxed);
+        s_instLoss.store(false, std::memory_order_relaxed);
+        s_exitAsked.store(false, std::memory_order_relaxed);
+        s_endCalled.store(false, std::memory_order_relaxed);
+        char tb[400];
+        TbDescribe(tb, sizeof(tb));
+        if (s_sesLogs.fetch_add(1, std::memory_order_relaxed) < kSesLogCap)
+            Log("OpenXR session: xrCreateSession(instance %p) by the game -> %d = %s, session %p (via the %s %s, tid=%lu) | %s", inst,
+                r, XrResultName(r), (r >= 0 && out) ? *out : nullptr, kKindName[s_slot[i].kind], s_slot[i].module,
+                GetCurrentThreadId(), tb);
+    }
+    return r;
+}
+XrResult BeginSessionImpl(int i, XrSession ses, const XrSessionBeginInfo* bi) {
+    auto real = reinterpret_cast<PFN_xrBeginSession>(s_slot[i].beginSession.load(std::memory_order_acquire));
+    if (!real) return -1;
+    CPU_HOOK(kHkXrOther);
+    const bool outer = t_depth == 0;
+    char tb[400] = "";
+    if (outer) TbSessionReset(ses, true, tb, sizeof(tb));
+    ++t_depth;
+    XrResult r;
+    CPU_ORIG(r = real(ses, bi));
+    --t_depth;
+    if (outer) {
+        const int prevState = s_sesState.load(std::memory_order_relaxed);
+        if (r >= 0) {                            // a new run of the session: fresh who-started marks
+            s_rtStop.store(0, std::memory_order_relaxed);
+            s_instLoss.store(false, std::memory_order_relaxed);
+            s_exitAsked.store(false, std::memory_order_relaxed);
+            s_endCalled.store(false, std::memory_order_relaxed);
+        }
+        if (s_sesLogs.fetch_add(1, std::memory_order_relaxed) < kSesLogCap)
+            Log("OpenXR session: xrBeginSession(%p, view configuration %d) by the game -> %d = %s (tid=%lu; session state %s) | %s",
+                ses, bi ? bi->primaryViewConfigurationType : -1, r, XrResultName(r), GetCurrentThreadId(),
+                SessionStateName(prevState), tb);
+    }
+    return r;
+}
+XrResult RequestExitSessionImpl(int i, XrSession ses) {
+    auto real = reinterpret_cast<PFN_xrRequestExitSession>(s_slot[i].requestExit.load(std::memory_order_acquire));
+    if (!real) return -1;
+    CPU_HOOK(kHkXrOther);
+    const bool outer = t_depth == 0;
+    ++t_depth;
+    XrResult r;
+    CPU_ORIG(r = real(ses));
+    --t_depth;
+    if (outer) {
+        s_exitAsked.store(true, std::memory_order_relaxed);
+        char tb[400];
+        TbDescribe(tb, sizeof(tb));
+        if (s_sesLogs.fetch_add(1, std::memory_order_relaxed) < kSesLogCap)
+            Log("OpenXR session: xrRequestExitSession(%p) by the GAME -> %d = %s (tid=%lu; session state %s) -- the game itself asks "
+                "the runtime to end the session | %s", ses, r, XrResultName(r), GetCurrentThreadId(),
+                SessionStateName(s_sesState.load(std::memory_order_relaxed)), tb);
+    }
+    return r;
+}
+// phase 33: xrPollEvent -- every event handed to the game is logged by name (session state changes always, up to kSesLogCap
+// lines; the others at most 20 lines a second, the rest counted and reported in the next line).
+void LogEvent(const void* ev) {
+    const int32_t type = *static_cast<const int32_t*>(ev);
+    static std::atomic<uint64_t> s_n{0};
+    static std::atomic<int64_t>  s_sec{0};
+    static std::atomic<int>      s_inSec{0};
+    static std::atomic<uint64_t> s_dropped{0};
+    const uint64_t n = s_n.fetch_add(1, std::memory_order_relaxed) + 1;
+    const int64_t now = SteadyNs();
+    char tb[400];
+    if (type == kTypeEvSessionStateChanged) {
+        XrEvSessionStateChanged e;
+        memcpy(&e, ev, sizeof(e));
+        const int prev = s_sesState.exchange(e.state, std::memory_order_relaxed);
+        s_sesStateNs.store(now, std::memory_order_relaxed);
+        const bool stop = e.state >= 6 && e.state <= 8;     // STOPPING / LOSS_PENDING / EXITING
+        if (stop && e.state > s_rtStop.load(std::memory_order_relaxed)) {
+            s_rtStop.store(e.state, std::memory_order_relaxed);
+            s_rtStopNs.store(now, std::memory_order_relaxed);
+        }
+        TbDescribe(tb, sizeof(tb));
+        if (s_sesLogs.fetch_add(1, std::memory_order_relaxed) < kSesLogCap)
+            Log("OpenXR event #%llu: SESSION_STATE_CHANGED session %p %s -> %s (%d) at XrTime %lld (tid=%lu)%s | %s",
+                (unsigned long long)n, e.session, SessionStateName(prev), SessionStateName(e.state), e.state, (long long)e.time,
+                GetCurrentThreadId(),
+                e.state == 6 ? " -- the RUNTIME asks the game to end the session (xrEndSession expected)"
+                : e.state == 7 ? " -- the RUNTIME is losing the session (the game must destroy it)"
+                : e.state == 8 ? " -- the RUNTIME wants the application to exit / leave VR"
+                : e.state == 1 && prev >= 6 ? " -- the session has ended" : "", tb);
+        return;
+    }
+    if (type == kTypeEvInstanceLossPending) s_instLoss.store(true, std::memory_order_relaxed);
+    const int64_t sec = now / 1000000000LL;
+    if (s_sec.exchange(sec, std::memory_order_relaxed) != sec) s_inSec.store(0, std::memory_order_relaxed);
+    if (s_inSec.fetch_add(1, std::memory_order_relaxed) >= 20) { s_dropped.fetch_add(1, std::memory_order_relaxed); return; }
+    const uint64_t dropped = s_dropped.exchange(0, std::memory_order_relaxed);
+    char what[256] = "";
+    switch (type) {
+    case kTypeEvInstanceLossPending: {
+        XrEvInstanceLossPending e; memcpy(&e, ev, sizeof(e));
+        snprintf(what, sizeof(what), " at XrTime %lld -- the RUNTIME is losing the whole OpenXR instance", (long long)e.lossTime);
+        break; }
+    case kTypeEvRefSpaceChangePending: {
+        XrEvRefSpaceChangePending e; memcpy(&e, ev, sizeof(e));
+        snprintf(what, sizeof(what), " session %p, space type %d (%s), change at XrTime %lld, pose %s (pos %+.3f %+.3f %+.3f m in the "
+                 "old space) -- a recenter / seat reset", e.session, e.referenceSpaceType, SpaceTypeName(e.referenceSpaceType),
+                 (long long)e.changeTime, e.poseValid ? "valid" : "not valid", e.poseInPreviousSpace.position.x,
+                 e.poseInPreviousSpace.position.y, e.poseInPreviousSpace.position.z);
+        break; }
+    case kTypeEvEventsLost: {
+        XrEvEventsLost e; memcpy(&e, ev, sizeof(e));
+        snprintf(what, sizeof(what), " -- %u event(s) LOST by the runtime's queue", e.lostEventCount);
+        break; }
+    case kTypeEvInteractionProfileChanged: {
+        XrEvSessionInt e; memcpy(&e, ev, 24);
+        snprintf(what, sizeof(what), " session %p", e.session);
+        break; }
+    case kTypeEvRefreshRateChangedFb: {
+        XrEvRefreshRateChangedFB e; memcpy(&e, ev, sizeof(e));
+        snprintf(what, sizeof(what), " %.1f -> %.1f Hz", e.from, e.to);
+        break; }
+    case kTypeEvUserPresenceChangedExt: {
+        XrEvSessionInt e; memcpy(&e, ev, sizeof(e));
+        snprintf(what, sizeof(what), " session %p, user %s", e.session, e.a ? "PRESENT (headset on)" : "NOT present (headset off)");
+        break; }
+    case kTypeEvVisibilityMaskChangedKhr: {
+        XrEvSessionInt e; memcpy(&e, ev, sizeof(e));
+        snprintf(what, sizeof(what), " session %p, view configuration %d, view %u", e.session, e.a, e.b);
+        break; }
+    case kTypeEvPerfSettingsExt: {
+        XrEvPerfSettings e; memcpy(&e, ev, sizeof(e));
+        snprintf(what, sizeof(what), " domain %d sub-domain %d, level %d -> %d", e.domain, e.subDomain, e.fromLevel, e.toLevel);
+        break; }
+    default:
+        break;
+    }
+    TbDescribe(tb, sizeof(tb));
+    char drop[64] = "";
+    if (dropped) snprintf(drop, sizeof(drop), " [%llu earlier event line(s) dropped: > 20 a second]", (unsigned long long)dropped);
+    Log("OpenXR event #%llu: %s (type %d)%s (tid=%lu)%s | %s", (unsigned long long)n, EventTypeName(type), type, what,
+        GetCurrentThreadId(), drop, tb);
+}
+XrResult PollEventImpl(int i, XrInstance inst, void* ev) {
+    auto real = reinterpret_cast<PFN_xrPollEvent>(s_slot[i].pollEvent.load(std::memory_order_acquire));
+    if (!real) return -1;
+    CPU_HOOK(kHkXrOther);
+    const bool outer = t_depth == 0;
+    ++t_depth;
+    XrResult r;
+    CPU_ORIG(r = real(inst, ev));
+    --t_depth;
+    if (outer) {
+        if (r == 0 && ev) LogEvent(ev);
+        else if (r < 0) {
+            static std::atomic<int> s_errs{0};
+            if (s_errs.fetch_add(1, std::memory_order_relaxed) < 20)
+                LogErr("OpenXR event: xrPollEvent(instance %p) FAILED -> %d = %s (tid=%lu)", inst, r, XrResultName(r), GetCurrentThreadId());
+        }
+    }
+    return r;
+}
 // v0.10.3 phase 28: xrEndFrame -- the first projection layer: its per-view swapchain / rect / slice (the picture layout) and
 // the submitted poses + fovs (the per-space correction C = S (x) L^-1, phase 28b). Read only.
 XrResult EndFrameImpl(int i, XrSession ses, const XrFrameEndInfo* fe) {
     auto real = reinterpret_cast<PFN_xrEndFrame>(s_slot[i].endFrame.load(std::memory_order_acquire));
     if (!real) return -1;
+    if (t_depth == 0) CpuProf::FrameMark(CpuProf::kMarkXrEnd);   // phase 33: the VR render thread's frame boundary
+    CPU_HOOK(kHkXrEnd);                                    // phase 31 CPU profiler (cpu_prof.h)
     const bool outer = t_depth == 0;
     const XrCompositionLayerProjection* proj = nullptr;   // (phase 29: also the overlay's)
     if (outer && fe && fe->layers) {
@@ -1068,7 +2025,7 @@ XrResult EndFrameImpl(int i, XrSession ses, const XrFrameEndInfo* fe) {
                 YawPitch(S0.q, &sy, &spt);
                 YawPitch(C0.q, &cy, &cp);
                 const double cAng = AngleBetween(C0.q, Pose{ { 0, 0, 0, 1 }, {} }.q);
-                Log("OpenXR hook pose diag: view 0 LOCATED (space %p %s) yaw %+.1f pitch %+.1f pos (%+.3f %+.3f %+.3f) | SUBMITTED "
+                LogDbg("OpenXR hook pose diag: view 0 LOCATED (space %p %s) yaw %+.1f pitch %+.1f pos (%+.3f %+.3f %+.3f) | SUBMITTED "
                     "(layer space %p %s) yaw %+.1f pitch %+.1f pos (%+.3f %+.3f %+.3f) | correction C = S (x) L^-1: rotation %.1f deg "
                     "(yaw %+.1f pitch %+.1f) offset (%+.3f %+.3f %+.3f) m | mean residual of the previous C %.2f deg over %llu frames",
                     bestSpace, SpaceTypeName(bestType), ly, lp, L0.p[0], L0.p[1], L0.p[2], proj->space, SpaceTypeName(layerType), sy,
@@ -1086,20 +2043,46 @@ XrResult EndFrameImpl(int i, XrSession ses, const XrFrameEndInfo* fe) {
         ov = OvEndFrame(i, ses, fe, proj, &ovFe, ovLayers, ovQuads);
         --t_depth;
     }
+    // phase 30 (Turbo mode): s_tbMx over the whole turbo part of a TURBO frame -- the pending wait consumed + the real
+    // xrBeginFrame, the real xrEndFrame, the next async wait. phase 33: every outermost xrEndFrame takes the frame's tag (how
+    // it was begun); a REAL frame (the game's own xrBeginFrame reached the runtime) releases the lock over the real call.
+    std::unique_lock<std::mutex> tlk(s_tbMx, std::defer_lock);
+    const bool want = s_tbWant.load(std::memory_order_relaxed);
+    uint8_t tag = 0;
+    if (outer && fe) {
+        tlk.lock();
+        tag = TbPopTagLocked();
+        if (tag == kTagTurbo) TbBeginForGameLocked(i, ses);
+        else { TbMirrorLocked(); tlk.unlock(); }
+    }
     ++t_depth;
-    XrResult r = real(ses, ov ? &ovFe : fe);
+    XrResult r;
+    CPU_ORIG(r = real(ses, ov ? &ovFe : fe));
     if (ov && r < 0 && r != kErrSessionLost) {           // refused with our layers: the game's frame again, as it was
         OvRejected(r);
-        r = real(ses, fe);
+        CPU_ORIG(r = real(ses, fe));
     }
     --t_depth;
+    if (outer && fe) {
+        if (!tlk.owns_lock()) tlk.lock();
+        TbAfterEndLocked(i, ses, r, want, tag);
+        tlk.unlock();
+        if (r != 0) NoteResult(kNsEnd, r, ses);          // phase 33
+    }
     return r;
 }
 // v0.10.3 phase 29: xrDestroySession -- our swapchains / space of that session go first (through the runtime).
 XrResult DestroySessionImpl(int i, XrSession ses) {
     auto real = reinterpret_cast<PFN_xrDestroySession>(s_slot[i].destroySession.load(std::memory_order_acquire));
     if (!real) return -1;
-    if (t_depth == 0) {
+    CPU_HOOK(kHkXrOther);
+    const bool outer = t_depth == 0;
+    char tb[400] = "", who[300] = "";
+    if (outer) {                                         // phase 33: who started it (before anything is reset)
+        WhoStarted(who, sizeof(who));
+        TbSessionReset(ses, true, tb, sizeof(tb));       // phase 30: the Toolkit drains its async wait first, too
+    }
+    if (outer) {
         std::lock_guard<std::mutex> lk(s_ovMx);
         if (ses && ses == s_ov.ses) {
             const bool had = s_ov.ready;
@@ -1112,8 +2095,12 @@ XrResult DestroySessionImpl(int i, XrSession ses) {
         OvSetOk(false, false);
     }
     ++t_depth;
-    const XrResult r = real(ses);
+    XrResult r;
+    CPU_ORIG(r = real(ses));
     --t_depth;
+    if (outer && s_sesLogs.fetch_add(1, std::memory_order_relaxed) < kSesLogCap)
+        Log("OpenXR session: xrDestroySession(%p) by the game -> %d = %s (tid=%lu; xrEndSession %s) %s | %s", ses, r, XrResultName(r),
+            GetCurrentThreadId(), s_endCalled.load(std::memory_order_relaxed) ? "called before" : "NOT called before", who, tb);
     return r;
 }
 // v0.10.3 phase 28: xrCreateReferenceSpace -- the type of each space the game creates (LOCAL / STAGE ...; read only).
@@ -1199,16 +2186,28 @@ template <int I> struct Thunk {
     }
     static XrResult XRH_CALL LocateSpace(XrSpace a, XrSpace b, XrTime c, XrSpaceLocation* d) { return LocateSpaceImpl(I, a, b, c, d); }
     static XrResult XRH_CALL DestroySession(XrSession a) { return DestroySessionImpl(I, a); }   // phase 29
+    static XrResult XRH_CALL WaitFrame(XrSession a, const XrFrameWaitInfo* b, XrFrameState* c) { return WaitFrameImpl(I, a, b, c); }
+    static XrResult XRH_CALL BeginFrame(XrSession a, const XrFrameBeginInfo* b) { return BeginFrameImpl(I, a, b); }   // phase 30
+    static XrResult XRH_CALL EndSession(XrSession a) { return EndSessionImpl(I, a); }
+    static XrResult XRH_CALL PollEvent(XrInstance a, void* b) { return PollEventImpl(I, a, b); }              // phase 33
+    static XrResult XRH_CALL CreateSession(XrInstance a, const void* b, XrSession* c) { return CreateSessionImpl(I, a, b, c); }
+    static XrResult XRH_CALL BeginSession(XrSession a, const XrSessionBeginInfo* b) { return BeginSessionImpl(I, a, b); }
+    static XrResult XRH_CALL RequestExit(XrSession a) { return RequestExitSessionImpl(I, a); }
 };
 struct ThunkSet { void *gipa, *negRuntime, *negLayer, *release, *acquire, *enumerate, *destroy, *locate, *endFrame, *createRefSpace,
-                  *locateSpace, *destroySession; };
+                  *locateSpace, *destroySession, *waitFrame, *beginFrame, *endSession,
+                  *pollEvent, *createSession, *beginSession, *requestExit; };   // (phase 33: + 4)
 template <int I> ThunkSet MakeSet() {
     return ThunkSet{ reinterpret_cast<void*>(&Thunk<I>::Gipa), reinterpret_cast<void*>(&Thunk<I>::NegRuntime),
                      reinterpret_cast<void*>(&Thunk<I>::NegLayer), reinterpret_cast<void*>(&Thunk<I>::Release),
                      reinterpret_cast<void*>(&Thunk<I>::Acquire), reinterpret_cast<void*>(&Thunk<I>::Enumerate),
                      reinterpret_cast<void*>(&Thunk<I>::Destroy), reinterpret_cast<void*>(&Thunk<I>::Locate),
                      reinterpret_cast<void*>(&Thunk<I>::EndFrame), reinterpret_cast<void*>(&Thunk<I>::CreateRefSpace),
-                     reinterpret_cast<void*>(&Thunk<I>::LocateSpace), reinterpret_cast<void*>(&Thunk<I>::DestroySession) };
+                     reinterpret_cast<void*>(&Thunk<I>::LocateSpace), reinterpret_cast<void*>(&Thunk<I>::DestroySession),
+                     reinterpret_cast<void*>(&Thunk<I>::WaitFrame), reinterpret_cast<void*>(&Thunk<I>::BeginFrame),
+                     reinterpret_cast<void*>(&Thunk<I>::EndSession), reinterpret_cast<void*>(&Thunk<I>::PollEvent),
+                     reinterpret_cast<void*>(&Thunk<I>::CreateSession), reinterpret_cast<void*>(&Thunk<I>::BeginSession),
+                     reinterpret_cast<void*>(&Thunk<I>::RequestExit) };
 }
 template <size_t... Is> const ThunkSet* MakeTable(std::index_sequence<Is...>) {
     static const ThunkSet t[] = { MakeSet<(int)Is>()... };
@@ -1237,6 +2236,13 @@ XrResult GipaImpl(int i, XrInstance inst, const char* name, PFN_xrVoidFunction* 
     else if (!strcmp(name, "xrCreateReferenceSpace"))     { store = &s_slot[i].createRefSpace; thunk = ts.createRefSpace; }
     else if (!strcmp(name, "xrLocateSpace"))              { store = &s_slot[i].locateSpace; thunk = ts.locateSpace; }   // 28b
     else if (!strcmp(name, "xrDestroySession"))           { store = &s_slot[i].destroySession; thunk = ts.destroySession; }   // 29
+    else if (!strcmp(name, "xrWaitFrame"))                { store = &s_slot[i].waitFrame;  thunk = ts.waitFrame; }    // phase 30
+    else if (!strcmp(name, "xrBeginFrame"))               { store = &s_slot[i].beginFrame; thunk = ts.beginFrame; }
+    else if (!strcmp(name, "xrEndSession"))               { store = &s_slot[i].endSession; thunk = ts.endSession; }
+    else if (!strcmp(name, "xrPollEvent"))                { store = &s_slot[i].pollEvent; thunk = ts.pollEvent; }   // phase 33
+    else if (!strcmp(name, "xrCreateSession"))            { store = &s_slot[i].createSession; thunk = ts.createSession; }
+    else if (!strcmp(name, "xrBeginSession"))             { store = &s_slot[i].beginSession; thunk = ts.beginSession; }
+    else if (!strcmp(name, "xrRequestExitSession"))       { store = &s_slot[i].requestExit; thunk = ts.requestExit; }
     else if (!strcmp(name, "xrGetInstanceProcAddr") && reinterpret_cast<void*>(*fn) == s_slot[i].gipa.load()) {
         *fn = reinterpret_cast<PFN_xrVoidFunction>(ts.gipa);   // a GIPA asked for itself: stay wrapped
         return r;
@@ -1247,7 +2253,7 @@ XrResult GipaImpl(int i, XrInstance inst, const char* name, PFN_xrVoidFunction* 
     store->store(got, std::memory_order_release);
     *fn = reinterpret_cast<PFN_xrVoidFunction>(thunk);
     static std::atomic<int> s_logs{0};
-    if (s_logs.fetch_add(1, std::memory_order_relaxed) < 16)
+    if (s_logs.fetch_add(1, std::memory_order_relaxed) < 64)   // (phase 30: was 16, + 3 names; phase 33: 32 -> 64, + 4 names)
         Log("OpenXR hook: %s wrapped at the %s %s (real %p)", name, kKindName[s_slot[i].kind], s_slot[i].module, got);
     return r;
 }
@@ -1326,7 +2332,7 @@ FARPROC Filter(HMODULE mod, LPCSTR name, FARPROC p) {
     if (i < 0) {
         static std::atomic<bool> s_full{false};
         if (!s_full.exchange(true))
-            Log("OpenXR hook: WARNING more than %d OpenXR components -- %s not wrapped (the VR panel falls back to the arm "
+            LogWarn("OpenXR hook: WARNING more than %d OpenXR components -- %s not wrapped (the VR panel falls back to the arm "
                 "point if the release is not seen)", kSlots, name);
         return p;
     }
@@ -1346,7 +2352,7 @@ bool HookOne(const wchar_t* dll, void* hook, PFN_GetProcAddress* orig) {
     HMODULE m = GetModuleHandleW(dll);
     void* target = m ? reinterpret_cast<void*>(GetProcAddress(m, "GetProcAddress")) : nullptr;
     if (!target) {
-        Log("OpenXR hook: %ls!GetProcAddress not found", dll);
+        LogErr("OpenXR hook: %ls!GetProcAddress not found", dll);
         return false;
     }
     MH_STATUS st = MH_CreateHook(target, hook, reinterpret_cast<void**>(orig));
@@ -1356,7 +2362,7 @@ bool HookOne(const wchar_t* dll, void* hook, PFN_GetProcAddress* orig) {
     }
     if (st == MH_OK) st = MH_EnableHook(target);
     if (st != MH_OK) {
-        Log("OpenXR hook: detour of %ls!GetProcAddress (%p) failed: %s", dll, target, MH_StatusToString(st));
+        LogErr("OpenXR hook: detour of %ls!GetProcAddress (%p) failed: %s", dll, target, MH_StatusToString(st));
         return false;
     }
     Log("OpenXR hook: %ls!GetProcAddress detoured (%p)", dll, target);
@@ -1369,7 +2375,7 @@ bool Install() {
     if (s_hooked.load()) return true;
     MH_STATUS st = MH_Initialize();
     if (st != MH_OK && st != MH_ERROR_ALREADY_INITIALIZED) {
-        Log("OpenXR hook: MH_Initialize failed: %s -- VR panel stays at the arm point", MH_StatusToString(st));
+        LogErr("OpenXR hook: MH_Initialize failed: %s -- VR panel stays at the arm point", MH_StatusToString(st));
         return false;
     }
     Sets();                                      // the thunk table before the first lookup can need it
@@ -1512,6 +2518,22 @@ OverlayStats GetOverlayStats() {
     s.rejects = s_ovRejects.load(std::memory_order_relaxed);
     s.fixedHow = s_ovFixedHow.load(std::memory_order_relaxed);
     s.fixedSpaceType = s_ovFixedType.load(std::memory_order_relaxed);
+    return s;
+}
+
+// ---- phase 30: Turbo mode (see xr_hook.h; the logic is in the anonymous namespace above, from OpenXR Toolkit, MIT) ----
+void SetTurbo(bool on) { s_tbWant.store(on, std::memory_order_relaxed); }
+TurboStats GetTurboStats() {
+    TurboStats s;
+    s.want = s_tbWant.load(std::memory_order_relaxed);
+    const int64_t last = s_tbLastStartNs.load(std::memory_order_relaxed);
+    s.running = s.want && last && SteadyNs() - last < 500000000LL;   // an async wait started within 0.5 s
+    s.failed = s_tbFailed.load(std::memory_order_relaxed);
+    s.asyncWaits = s_tbStarts.load(std::memory_order_relaxed);
+    s.madeUp = s_tbFaked.load(std::memory_order_relaxed);
+    s.blocks = s_tbBlocks.load(std::memory_order_relaxed);
+    s.timeouts = s_tbToEnd.load(std::memory_order_relaxed) + s_tbToWait.load(std::memory_order_relaxed);
+    s.failures = s_tbFails.load(std::memory_order_relaxed);
     return s;
 }
 

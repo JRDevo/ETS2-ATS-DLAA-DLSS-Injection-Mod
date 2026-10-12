@@ -27,7 +27,7 @@ void LoadReal() {
     UINT n = GetSystemDirectoryW(path, MAX_PATH);         // C:\Windows\System32
     wcscpy_s(path + n, MAX_PATH - n, L"\\dinput8.dll");
     g_real = LoadLibraryW(path);
-    if (!g_real) { Log("FATAL: LoadLibrary(real dinput8) failed: %lu", GetLastError()); return; }
+    if (!g_real) { LogErr("FATAL: LoadLibrary(real dinput8) failed: %lu", GetLastError()); return; }
     p_DirectInput8Create  = (PFN_DI8Create)        GetProcAddress(g_real, "DirectInput8Create");
     p_DllGetClassObject   = (PFN_DllGetClassObject) GetProcAddress(g_real, "DllGetClassObject");
     p_DllCanUnloadNow     = (PFN_Void)              GetProcAddress(g_real, "DllCanUnloadNow");

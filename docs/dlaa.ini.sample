@@ -32,15 +32,49 @@
 #   dlaa_area (VR only)   100       100       60
 # perf_profile = high
 
-# Log file dlaa_inject.log (next to dinput8.dll): 0 = no log (default), 1 = write the log. Needed for bug reports.
-# This line has no '#' in front: just change the 0 to 1.
-debug = 0
+# Log file dlaa_inject.log (next to dinput8.dll), how much goes into it (phase 39):
+#   0 = off: no log at all
+#   1 = errors: only failures (default; without an error no file is created)
+#   2 = warnings: + problems the mod works around
+#   3 = info: + start-up lines and every setting change
+#   4 = debug: + statistics every few seconds, and the GPU timers and the CPU profiler run (perf_timers / cpu_prof = -1).
+#       Needed for bug reports.
+# The names work too (off, errors, warnings, info, debug). The tuning menu's Logging row changes it live and shows what the
+# logging costs. Older dlaa.ini files: debug = 1 still means 4, but only without a log_level line.
+# This line has no '#' in front: just change the 1 to 4.
+log_level = 1
 
 # OFXR Bridge (VR frame generation, https://github.com/djules75/OFXR-Bridge) support, 0 / 1. 1 = default: the mod finds the
 # bridge's layer module (ofxr*.dll) in the game and lets that module's own D3D11 copies and draws pass through the hooks without
 # counting them as game draws, so they cannot be mistaken for the eye picture. 0 = no search, no pass-through (only for ruling
 # the handling out). Nothing to change when you do not use the bridge: with no ofxr*.dll in the game it does nothing.
 # ofxr_bridge = 1
+
+# VR TURBO MODE (from OpenXR Toolkit), 0 / 1, default 0. 1 = the game no longer waits for the headset in each frame (the
+# wait runs on a thread of the mod), so it can start the next frame sooner. WARNING: it turns off the headset's frame
+# smoothing -- ASW (Meta / Oculus), Motion Smoothing, Motion Reprojection (Windows Mixed Reality) and SSW (Virtual Desktop)
+# cannot work with it. It helps only when the CPU is the limit (busy cities, heavy traffic); when the GPU is the limit it
+# gains nothing. The tuning menu's Turbo mode (VR) row switches it live; Shift+F12 / the Save row writes it here.
+# xr_turbo = 0
+
+# VR FOVEATED RENDERING (VRS, NVIDIA RTX only; from OpenXR Toolkit), 0 / 1, default 0. 1 = the outer ring of each eye picture is
+# shaded once per 2 x 2 pixels (the centre stays sharp), which saves GPU time at high in-game Scaling. Fences, grass and leaves
+# (alpha-tested) and everything the mod draws itself keep full detail. The tuning menu's Foveated (VRS) row switches it live;
+# Shift+F12 / the Save row writes it here. Not available on other GPUs (the menu row then says "not supported").
+# vrs = 0
+# Ring sizes in % of the half picture around each eye's centre: inside vrs_inner full detail; with vrs_quality = 0 the ring
+# between vrs_inner and vrs_outer is shaded per 2 x 1 pixels; outside vrs_outer per 2 x 2. The menu's Foveated size row:
+# wide = 65 / 90, balanced = 55 / 80 (default), narrow = 40 / 65.
+# vrs_inner = 55
+# vrs_outer = 80
+# 1 (default) = full detail everywhere inside vrs_outer; 0 = also save in the middle ring (2 x 1).
+# vrs_quality = 1
+# Test only, needs log_level = 4: 1 = middle ring 2 x 2 and outer ring 4 x 4, so the pattern is easy to see in the headset.
+# vrs_debug = 0
+
+# 1 = on AMD X3D CPUs with V-Cache on one half only (e.g. 7950X3D / 9950X3D) the game is kept on the V-Cache cores (read at game
+# start only). Does nothing on other CPUs. 0 (default) = off: no fps gain was measured yet, try it and compare.
+# cpu_cache_pin = 0
 
 # NGX jitter = sign * viewport shift, per axis: -1 or +1 (+1/+1 won the self-test; Ctrl+F12 cycles live)
 # jitter_sign_x = 1
@@ -127,6 +161,8 @@ debug = 0
 # jitter, own motion vectors -- your own trailer moves with the mirror and stays sharp --, DLAA on the mirror picture
 # itself; default), 0 = mirrors are left as the game draws them. key_mirror_dlaa (Alt+F6) switches it live, Shift+F12
 # saves it here.
+# v0.11.0 issue #8: with OptiScaler next to the game exe the mod starts with mirror DLAA off unless this key is set (its
+# DLSS 5 bridge crashes on the mirror frames); 1 here forces it on.
 # mirror_dlaa = 1
 # v0.10.0 phase 4 DLAA BEFORE THE TONEMAP (flat, DLAA mode): 1 = the main picture's DLAA runs on the game's own HDR colours
 # (the RGBA16F scene picture) right after the 3-D scene is drawn, before the game's brightness / bloom / tonemap step --
@@ -166,9 +202,23 @@ debug = 0
 # mirror_mv = parts
 
 # ---- v0.10.0 phase 8 PERFORMANCE (each one has the fast setting as its default; the other value is the phase-7 behaviour) ----
-# with debug = 1 the log gets "perf eye N" lines every 600 frames: the GPU time of every part of the mod per eye (NGX itself
-# listed apart), next to the game's whole frame. -1 = with debug = 1 (default), 0 = off, 1 = on
+# with log_level = 4 the log gets "perf eye N" lines every 600 frames: the GPU time of every part of the mod per eye (NGX itself
+# listed apart), next to the game's whole frame. -1 = with log_level = 4 (default; follows the menu's Logging row), 0 = off, 1 = on
 # perf_timers = -1
+# with log_level = 4 the log also gets a "CPU prof" line every 10 s: the mod's own CPU time on the game's render thread per hook and
+# per part of the mod, the game's own D3D11 calls, Present + OpenXR waits and the rest of the frame (the profiler itself costs
+# ~0.1-0.3 ms per frame while on; the line says how much). -1 = with log_level = 4 (default; follows the menu's Logging row),
+# 0 = off, 1 = on
+# cpu_prof = -1
+# phase 35: the per-draw record of the motion vectors copies the game's input state (input layout, vertex shader, its cbuffers
+# and samplers, rasterizer state) from hooked Set calls instead of ~10 getter calls per draw (startup only). 1 = default,
+# 2 = also the vertex / index buffers (wins only when draws share buffers), 0 = the getters at every draw (before phase 35).
+# The log's startup line "did_shadow=N" says which mode ran; the "MV draw-ids" line has a "state shadow" field.
+# did_shadow = 1
+# test only: every Nth record also reads the getters and compares; a difference logs "MV draw-ids shadow: MISMATCH" (first 20)
+# and the getters are used for the rest of that frame (after 8 such frames: for the rest of the session).
+# -1 = 64 with log_level = 4 at the start, else 0 (default); 0 = off
+# did_shadow_verify = -1
 # how finely the "which vehicle does this plate sit on" search looks at the picture: 4 = every 4th pixel, small plates every
 # 2nd (default), 2 = every 2nd pixel for everything (before phase 8)
 # mv_vote_res = 4
@@ -223,8 +273,10 @@ debug = 0
 # mv_fwd_depth_res = 0
 # 1 = some of the small GPU steps of the per-part motion run together (fewer passes per eye, same result), 0 = one pass each
 # (before phase 9), 2 = like 1, but the steps that touch every part run spread over the whole GPU (v0.10.0 phase 18: about
-# 0.13 ms less per eye in VR, same result; default)
-# mv_fold_dispatch = 2
+# 0.13 ms less per eye in VR, same result), 3 = like 2, but the step that matches plates / parts to the vehicle they sit on
+# (twin + attach) also runs spread over the whole GPU (v0.10.0 phase 37: cheaper in a busy city with many moving vehicles, same
+# result; default)
+# mv_fold_dispatch = 3
 
 # ---- v0.10.0 phase 10 ----
 # the see-through depth (mv_fwd_depth) is now drawn in ONE batch at the end of the game's see-through pass. 1 = it first copies
@@ -478,7 +530,7 @@ debug = 0
 # Space, Tab, Backspace, Enter, Pause, Numpad0-Numpad9, NumpadAdd, NumpadSubtract, NumpadMultiply, NumpadDivide,
 # NumpadDecimal, [ ] ; ' , . / \ - = `   Modifiers must match exactly; put nothing after the value on the line.
 # v0.10.1: a wheel / gamepad button or D-pad can be added after a comma: Wheel1..Wheel128 (button N, see the
-# "controller: button N pressed" lines in the log with debug = 1) or WheelUp / WheelDown / WheelLeft / WheelRight, e.g.
+# "controller: button N pressed" lines in the log with log_level = 3 or 4) or WheelUp / WheelDown / WheelLeft / WheelRight, e.g.
 # key_menu = Delete, Wheel10   or   key_menu_up = Up, WheelUp   (docs/KEYS.md, "Wheel, gamepad and joystick buttons")
 # controller_name: only read the controllers whose name contains this text (not case-sensitive), e.g. T300 when a shifter
 # shares the wheel's button numbers. Empty (default) = every DirectInput controller the game opens.
@@ -524,7 +576,7 @@ key_snapshot = Ctrl+F10
 key_trace = Ctrl+F11
 key_jitter_sign = Ctrl+F12
 # v0.10.0 A/B switches: per-draw motion vectors on / off (mv_objects 2 <-> 0), mirror DLAA on / off, DLAA before / after the
-# tonemap (dlaa_pre_tonemap), and the per-draw motion-vector dump of the next frame (diagnostic, needs debug = 1)
+# tonemap (dlaa_pre_tonemap), and the per-draw motion-vector dump of the next frame (diagnostic, needs log_level = 4)
 key_mv_drawids = Alt+F5
 key_mirror_dlaa = Alt+F6
 key_pre_tonemap = Alt+F7

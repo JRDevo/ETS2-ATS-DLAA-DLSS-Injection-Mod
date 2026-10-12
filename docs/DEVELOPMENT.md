@@ -25,7 +25,8 @@ VR (OpenXR, e.g. Virtual Desktop).
 > launch options at load (`-openxr` / `-oculus` = VR; log `launch mode: VR|FLAT`); flat never
 > switches to VR and always uses `dlaa_area` 100 (outside the area the image is the raw jittered frame, which
 > flickers on a monitor); VR always ignores the backbuffer (mirror). v0.7.5: the log file is only written with
-> `debug = 1` in `dlaa.ini` (`src/log.h`, checked once at the first `Log` call).
+> `debug = 1` in `dlaa.ini` (`src/log.h`, checked once at the first `Log` call). Phase 39: replaced by `log_level` (0 off,
+> 1 errors = default, 2 warnings, 3 info, 4 debug; `debug = 1` without a `log_level` line = 4), see the table below.
 >
 > **Status: v0.7.2 — real DLSS upscaling (render res < output res) on top of the v0.6.5 per-eye DLAA (VR /
 > OpenXR + flat), plus the plain-`End` mode cycle (DLAA → DLSS → off, saved to `dlaa.ini`).** v0.6.5 runs in
@@ -141,7 +142,7 @@ checks without rstatic). S6, S7 and S8 (consensus convoy, plates by twin / attac
 trailer that moves from frame 0) also run gated (their own id / parent / MV checks + "the gate must skip something"). `cmpdump`
 without / `cmp` with `rstatic=4`: S1-S4 and S6-S8 0 px differ; S13 785 px in 2 frames (max 0.24 px: the start lag). Run this
 comparison after any change to the gate or the vote.
-Phase 18 knobs: `fold=0|1|2` (mv_fold_dispatch; `nofold` = 0), `nocompact` (mv_vote_compact 0), `cabmin=N` (mv_cons_min_cabin) and
+Phase 18 knobs: `fold=0|1|2|3` (mv_fold_dispatch, phase 37: 3 = default; `nofold` = 0), `nocompact` (mv_vote_compact 0), `cabmin=N` (mv_cons_min_cabin) and
 `hw` (the hardware adapter instead of WARP: the per-scene perf line then shows real GPU ms; the checks still pass on an RTX 5090).
 Phase 19: scene 17 = S17 (car, the interior's big draws with their MVP one cb0 row later, the in-game signature) + S17b (car with a
 valid interior: one big body draw against a 2-draw swinging tag); knobs `cabsmall=N` (mv_cabin_small, 0 = off) and the mutation
@@ -263,7 +264,8 @@ The self-test dumps eye 0 only in VR (~89 MB per BMP at 4592×6496); snapshots a
   | `dlss_upscale` | `1` | `0`/`1` (v0.7.0): DLSS upscaling from the scene size to the eye texture / backbuffer size whenever that is larger (see "DLSS upscaling"); `0` = always DLAA at render res (v0.6.5 path); `Ctrl+F4` toggles; written by `Shift+F12` |
   | `mode` | *(absent)* | `0`/`1`/`2` (v0.7.2): start mode written by the plain `End` key — `1` DLAA, `2` DLSS, `0` off. When present (and no `dlaa_off.txt`) it wins over `dlss_upscale` at startup. `End` cycles and rewrites it |
   | `beeps` | `1` | `0` = no audible feedback for the hotkeys |
-  | `debug` | `0` | v0.7.5: `1` / `true` / `yes` / `on` = write `dlaa_inject.log`; default off (no file is created) |
+  | `log_level` | `1` | phase 39: `0` off, `1` errors (`LogErr`, "ERROR " in the file), `2` + warnings (`LogWarn`, "WARN  "), `3` + info (`Log`: one-time state lines), `4` + debug (`LogDbg`: periodic statistics, tracing, dumps; also `perf_timers` / `cpu_prof` = -1 on, `vrs_debug`, `did_shadow_verify` -1 = 64, the frame-end rule's counting); a number or the name. The file is created at the first line that passes. A filtered call = one atomic load. Live: the menu's `Logging` row (`LogSetLevel`), which also shows the logging cost (CPU ms per frame inside `LogImpl`, lines/s, + the CPU profiler's own cost at 4) |
+  | `debug` | `0` | v0.7.5: `1` / `true` / `yes` / `on` = write `dlaa_inject.log`; default off (no file is created). Phase 39: `1` = `log_level` 4 when there is no `log_level` line; `0` has no effect |
 
   The values in use are logged at startup. If the image shimmers or looks doubled
   with DLAA on, try flipping the signs (4 combinations).

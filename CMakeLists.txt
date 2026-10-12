@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(ets2_ats_dlaa VERSION 0.10.3 LANGUAGES C CXX)
+project(ets2_ats_dlaa VERSION 0.11.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -12,6 +12,7 @@ add_library(dinput8 SHARED
     src/ofxr.cpp      # v0.10.0: OFXR Bridge module-range pass-through (compiles with or without WITH_DLAA)
     src/dinput_wrap.cpp   # v0.10.0: tuning menu keys hidden from the game (DirectInput keyboard wrap + window subclass)
     src/xr_hook.cpp       # v0.10.3 phase 27: OpenXR xrReleaseSwapchainImage hook (VR panel drawn right before the release)
+    src/vrs.cpp           # phase 34: VRS fixed foveated rendering (NVAPI with WITH_VRS, a "not built in" stub without)
 )
 set_target_properties(dinput8 PROPERTIES PREFIX "" OUTPUT_NAME "dinput8")
 # Single source of the version string: project(... VERSION 0.10.0) above feeds the
@@ -49,6 +50,31 @@ if (MSVC)
     # Export the 5 dinput8 entry points named in the .def.
     target_link_options(dinput8 PRIVATE "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/src/dinput8_proxy.def")
 endif()
+
+# --- VRS (NVIDIA NVAPI) --- phase 34 fixed foveated rendering. ON automatically when external/nvapi exists (a clone of
+# github.com/NVIDIA/nvapi, git-ignored like external/DLSS; MIT), OFF otherwise: src/vrs.cpp then builds as a stub that logs
+# "not built in" and the menu row says so. Override with -DWITH_VRS=OFF/ON and/or -DNVAPI_SDK_DIR=path/to/nvapi.
+# nvapi64.lib is linked STATICALLY as the SDK intends (it loads nvapi64.dll from the driver at NvAPI_Initialize).
+set(NVAPI_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/nvapi" CACHE PATH
+    "Path to a clone of github.com/NVIDIA/nvapi (has nvapi.h and amd64/nvapi64.lib)")
+if (NOT NVAPI_SDK_DIR)
+    set(NVAPI_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/nvapi" CACHE PATH "" FORCE)
+endif()
+if (EXISTS "${NVAPI_SDK_DIR}/nvapi.h" AND EXISTS "${NVAPI_SDK_DIR}/amd64/nvapi64.lib")
+    set(_vrs_default ON)
+else()
+    set(_vrs_default OFF)
+endif()
+option(WITH_VRS "Build the NVAPI VRS foveated rendering (needs NVAPI_SDK_DIR)" ${_vrs_default})
+if (WITH_VRS)
+    if (NOT EXISTS "${NVAPI_SDK_DIR}/nvapi.h" OR NOT EXISTS "${NVAPI_SDK_DIR}/amd64/nvapi64.lib")
+        message(FATAL_ERROR "WITH_VRS=ON needs NVAPI_SDK_DIR pointing at a clone of github.com/NVIDIA/nvapi")
+    endif()
+    target_include_directories(dinput8 PRIVATE "${NVAPI_SDK_DIR}")
+    target_compile_definitions(dinput8 PRIVATE WITH_VRS=1)
+    target_link_libraries(dinput8 PRIVATE "${NVAPI_SDK_DIR}/amd64/nvapi64.lib")
+endif()
+message(STATUS "VRS (NVAPI foveated rendering): ${WITH_VRS} (${NVAPI_SDK_DIR})")
 
 # --- DLAA (NGX/DLSS) --- ON automatically when external/DLSS exists (a clone of
 # github.com/NVIDIA/DLSS, git-ignored: NVIDIA license), OFF otherwise so the base

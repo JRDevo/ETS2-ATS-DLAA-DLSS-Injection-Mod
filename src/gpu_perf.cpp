@@ -119,7 +119,7 @@ bool OpenCur(ID3D11DeviceContext* ctx) {
         qd.Query = D3D11_QUERY_TIMESTAMP_DISJOINT;
         const bool ok = dev && SUCCEEDED(dev->CreateQuery(&qd, &s.dis));
         if (dev) dev->Release();
-        if (!ok) { s.dis = nullptr; g_broken = true; Log("GPU perf: query creation failed -- perf timers off"); return false; }
+        if (!ok) { s.dis = nullptr; g_broken = true; LogErr("GPU perf: query creation failed -- perf timers off"); return false; }
     }
     ctx->Begin(s.dis);
     s.open = true;
@@ -136,6 +136,7 @@ Set* Cur(ID3D11DeviceContext* ctx) {
     if (!g_on || g_broken || !ctx) return nullptr;
     if (g_cur >= 0 && g_set[g_cur].frame != g_frame) CloseCur(ctx);
     if (g_cur < 0) {
+        CpuProf::Block cpb(CpuProf::kBGpuPerf);        // phase 31 CPU profiler: landing the old sets + opening a new one
         Poll(ctx);
         if (!OpenCur(ctx)) { ++g_w.dropped; return nullptr; }
     }
@@ -158,6 +159,7 @@ inline bool TokOk(int tok, int* ent) {
 
 int Stamp(ID3D11DeviceContext* ctx, Set& s) {
     if (s.nTs >= kTs) return -1;
+    CpuProf::Block cpb(CpuProf::kBGpuPerf);            // phase 31 CPU profiler: the timestamp End (+ its query create)
     ID3D11Query* q = Ts(ctx, s, s.nTs);
     if (!q) return -1;
     ctx->End(q);
@@ -337,16 +339,16 @@ void LogWindow(uint64_t blit, double sceneMs, uint32_t sceneN) {
             else
                 o += snprintf(buf + o, sizeof(buf) - (size_t)o, " %s %.3f/%.3f", kInfo[c].name, st.avg[c], st.mx[c]);
         }
-        Log("%s", buf);
+        LogDbg("%s", buf);
     }
     for (int c = 0; c < kCount; ++c) {               // v0.10.3 phase 29b: the per-frame sections (the fps box)
         if (!kInfo[c].perFrame || !g_w.fn[c]) continue;
-        Log("perf @blit %llu: %s %.3f avg / %.3f max ms per frame (%llu of %llu timed frames; per frame, both eyes / every target "
+        LogDbg("perf @blit %llu: %s %.3f avg / %.3f max ms per frame (%llu of %llu timed frames; per frame, both eyes / every target "
             "together; not in the eye lines' mod total)", (unsigned long long)blit, kInfo[c].name,
             g_w.sets ? g_w.fsum[c] / (double)g_w.sets : 0.0, g_w.fmx[c], (unsigned long long)g_w.fn[c], (unsigned long long)g_w.sets);
     }
     if (g_w.unattributed || g_w.dropped)
-        Log("perf @blit %llu: %llu sections of passes that never reached a blit (not in the eye lines), %llu sections not timed "
+        LogDbg("perf @blit %llu: %llu sections of passes that never reached a blit (not in the eye lines), %llu sections not timed "
             "(a frame's query set full / all sets in flight / disjoint)", (unsigned long long)blit,
             (unsigned long long)g_w.unattributed, (unsigned long long)g_w.dropped);
     Restart();

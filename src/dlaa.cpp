@@ -124,7 +124,7 @@ bool NgxAcquire(ID3D11Device* dev, bool quiet) {
             g_ngxPinned = true;
             return true;
         }
-        Log("DLAA: NGX is initialised on device %p with %d user(s), a unit asks for device %p -- refused (restart the "
+        LogErr("DLAA: NGX is initialised on device %p with %d user(s), a unit asks for device %p -- refused (restart the "
             "game)", (void*)g_ngxDev, g_ngxRefs, (void*)dev);
         return false;
     }
@@ -147,7 +147,7 @@ bool NgxAcquire(ID3D11Device* dev, bool quiet) {
         kProjectId, NVSDK_NGX_ENGINE_TYPE_CUSTOM, kEngineVersion,
         dllDir, dev, &fci, NVSDK_NGX_Version_API);
     if (NVSDK_NGX_FAILED(r)) {
-        Log("DLAA: NGX init failed %s (non-NVIDIA GPU or driver too old?)", NgxErr(r));
+        LogErr("DLAA: NGX init failed %s (non-NVIDIA GPU or driver too old?)", NgxErr(r));
         g_ngxInitState.store(-1, std::memory_order_relaxed);   // phase 12
         return false;
     }
@@ -173,7 +173,7 @@ bool DlaaProcessor::Prewarm(ID3D11Device* dev) {
     const bool fresh = g_ngxRefs == 0;
     const int64_t t0 = QpcNow();
     if (!NgxAcquire(dev, true)) {
-        Log("DLAA: NGX pre-warm FAILED after %.1f ms (see the line above) -- units initialise NGX themselves", QpcMs(t0, QpcNow()));
+        LogErr("DLAA: NGX pre-warm FAILED after %.1f ms (see the line above) -- units initialise NGX themselves", QpcMs(t0, QpcNow()));
         return false;
     }
     g_ngxPinned = true;
@@ -197,8 +197,8 @@ bool DlaaProcessor::Prewarm(ID3D11Device* dev) {
 
 bool DlaaProcessor::Init(ID3D11Device* dev, uint32_t renderW, uint32_t renderH, uint32_t outW, uint32_t outH,
                          bool depthInverted, bool hdr) {
-    if (m_ngxInited) { Log("DLAA: Init called twice -- call Shutdown first"); return false; }
-    if (!dev || !renderW || !renderH || outW < renderW || outH < renderH) { Log("DLAA: bad Init args"); return false; }
+    if (m_ngxInited) { LogErr("DLAA: Init called twice -- call Shutdown first"); return false; }
+    if (!dev || !renderW || !renderH || outW < renderW || outH < renderH) { LogErr("DLAA: bad Init args"); return false; }
 
     m_dev = dev; m_dev->AddRef();
     m_width = renderW; m_height = renderH;
@@ -212,7 +212,7 @@ bool DlaaProcessor::Init(ID3D11Device* dev, uint32_t renderW, uint32_t renderH, 
     NVSDK_NGX_Parameter* caps = nullptr;
     NVSDK_NGX_Result r = NVSDK_NGX_D3D11_GetCapabilityParameters(&caps);
     if (NVSDK_NGX_FAILED(r) || !caps) {
-        Log("DLAA: GetCapabilityParameters failed %s", NgxErr(r));
+        LogErr("DLAA: GetCapabilityParameters failed %s", NgxErr(r));
         Shutdown();
         return false;
     }
@@ -224,7 +224,7 @@ bool DlaaProcessor::Init(ID3D11Device* dev, uint32_t renderW, uint32_t renderH, 
         NVSDK_NGX_Parameter_GetI(caps, NVSDK_NGX_Parameter_SuperSampling_MinDriverVersionMajor, &minMajor);
         NVSDK_NGX_Parameter_GetI(caps, NVSDK_NGX_Parameter_SuperSampling_MinDriverVersionMinor, &minMinor);
         NVSDK_NGX_Parameter_GetI(caps, NVSDK_NGX_Parameter_SuperSampling_FeatureInitResult, &initResult);
-        Log("DLAA: DLSS not available (needsDriver=%d min=%d.%d initResult=0x%x)",
+        LogErr("DLAA: DLSS not available (needsDriver=%d min=%d.%d initResult=0x%x)",
             needsDriver, minMajor, minMinor, (unsigned)initResult);
         NVSDK_NGX_D3D11_DestroyParameters(caps);
         Shutdown();
@@ -234,7 +234,7 @@ bool DlaaProcessor::Init(ID3D11Device* dev, uint32_t renderW, uint32_t renderH, 
 
     r = NVSDK_NGX_D3D11_AllocateParameters(&m_params);
     if (NVSDK_NGX_FAILED(r) || !m_params) {
-        Log("DLAA: AllocateParameters failed %s", NgxErr(r));
+        LogErr("DLAA: AllocateParameters failed %s", NgxErr(r));
         Shutdown();
         return false;
     }
@@ -308,7 +308,7 @@ bool DlaaProcessor::CreateFeature(bool depthInverted) {
     // v0.7.0: some DLSS builds reject UltraQuality at creation -- one retry with Quality (same dims, same
     // preset hint) before giving up. DLAA / the other modes are not retried (same behaviour as v0.6.5).
     if (pq == NVSDK_NGX_PerfQuality_Value_UltraQuality) {
-        Log("DLAA: CreateFeature with PerfQuality UltraQuality failed on eye %d -- retrying with Quality", m_eye);
+        LogWarn("DLAA: CreateFeature with PerfQuality UltraQuality failed on eye %d -- retrying with Quality", m_eye);
         return CreateFeatureOnce(depthInverted, (int)NVSDK_NGX_PerfQuality_Value_MaxQuality);
     }
     return false;
@@ -341,7 +341,7 @@ bool DlaaProcessor::CreateFeatureOnce(bool depthInverted, int perfQuality) {
     NVSDK_NGX_Result r = NGX_D3D11_CREATE_DLSS_EXT(ctx, &m_feature, m_params, &cp);
     ctx->Release();
     if (NVSDK_NGX_FAILED(r) || !m_feature) {
-        Log("DLAA: CreateFeature failed %s (%ux%u -> %ux%u, PerfQuality %s)%s", NgxErr(r), m_width, m_height,
+        LogErr("DLAA: CreateFeature failed %s (%ux%u -> %ux%u, PerfQuality %s)%s", NgxErr(r), m_width, m_height,
             m_outW, m_outH, PerfQualityName(perfQuality), m_hdr ? " [HDR input: IsHDR flag set]" : "");   // v0.8.0 tag
         m_feature = nullptr;
         return false;
@@ -369,15 +369,15 @@ bool DlaaProcessor::Evaluate(ID3D11DeviceContext* ctx,
     if (m_presetGen != g_presetGen && (!m_feature || CreateBudgetFree())) {
         if (!CreateFeature(m_depthInverted)) {
             if (g_preset != NVSDK_NGX_DLSS_Hint_Render_Preset_Default) {
-                Log("DLAA: CreateFeature for preset %s FAILED on eye %d -- falling back to default", g_presetName, m_eye);
+                LogErr("DLAA: CreateFeature for preset %s FAILED on eye %d -- falling back to default", g_presetName, m_eye);
                 SetRenderPreset(0);                    // bumps the generation: the other eye follows
                 ++g_presetFallbacks;
                 if (!CreateFeature(m_depthInverted)) {
-                    Log("DLAA: CreateFeature for preset default ALSO FAILED on eye %d -- no DLSS on this eye until the next preset change", m_eye);
+                    LogErr("DLAA: CreateFeature for preset default ALSO FAILED on eye %d -- no DLSS on this eye until the next preset change", m_eye);
                     return false;
                 }
             } else {
-                Log("DLAA: CreateFeature for preset default FAILED on eye %d -- no DLSS on this eye until the next preset change", m_eye);
+                LogErr("DLAA: CreateFeature for preset default FAILED on eye %d -- no DLSS on this eye until the next preset change", m_eye);
                 return false;
             }
         }
@@ -415,14 +415,18 @@ bool DlaaProcessor::Evaluate(ID3D11DeviceContext* ctx,
     ep.InReset           = (p.reset || recreated) ? 1 : 0;   // a fresh feature has no history anyway
     ep.InRenderSubrectDimensions = { m_width, m_height };   // v0.7.0: render size (output size = the feature's target)
 
-    NVSDK_NGX_Result r = NGX_D3D11_EVALUATE_DLSS_EXT(ctx, m_feature, m_params, &ep);
+    NVSDK_NGX_Result r;
+    {
+        CpuProf::Block cpb(CpuProf::kBNgx);              // phase 31 CPU profiler: the evaluate's own CPU time
+        r = NGX_D3D11_EVALUATE_DLSS_EXT(ctx, m_feature, m_params, &ep);
+    }
 
     colorRes->Release(); depthRes->Release(); mvRes->Release(); outRes->Release();
 
     if (NVSDK_NGX_FAILED(r)) {
         static uint64_t fails = 0;                       // don't spam the log
         if (fails < 20 || (fails % 600 == 0))
-            Log("DLAA: EvaluateFeature failed %s (fail #%llu)%s", NgxErr(r), (unsigned long long)fails,
+            LogErr("DLAA: EvaluateFeature failed %s (fail #%llu)%s", NgxErr(r), (unsigned long long)fails,
                 m_hdr ? " [HDR input: RGBA16F colour, IsHDR]" : "");   // v0.8.0 tag (LDR line unchanged)
         ++fails;
         return false;

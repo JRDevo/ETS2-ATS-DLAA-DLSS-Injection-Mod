@@ -88,6 +88,7 @@
 #include <algorithm>
 #include <random>
 #include <memory>
+#include <thread>                  // phase 35: S19 (Sets from another thread)
 #include "motion_vectors.h"
 #include "draw_ids.h"
 #include "shader_cache.h"
@@ -103,6 +104,8 @@ constexpr int W = 960, H = 540;
 bool g_debugLayer = false;
 bool g_hw = false;        // v0.10.0 phase 18: "hw" = the hardware adapter (GPU timings in the perf lines; the checks are WARP-tuned)
 int  g_vpOver = 0;        // v0.10.0 phase 23 "overscan": the jittered scene viewports are (W+1) x (H+1) like the DLL's jitter_overscan=1
+int  g_didShadow = 0;      // phase 35 "didshadow=1|2": the state-Set hooks (vtable patch) + DrawIdRecord's shadow path (2: + VB / IB)
+int  g_shVerify = 0;       // phase 35 "shverify=N": did_shadow_verify
 unsigned g_rstatic = 0;     // v0.10.0 phase 14: "rstatic=E" -- S1-S4 / S13 replay with the static gate (0 = off)
 double   g_yawJerk = 0.0;   // phase 14 round 5 "jerk=X": S1-S4 / S13 / S14 camera yaw rate + X rad / frame from frame 60
 constexpr int kLagMax = 2;  // most frames in a row a skipped MOVER may keep the camera R (readback latency + the stagger)
@@ -512,6 +515,97 @@ struct SceneCfg {
 constexpr int kMatchShallow = 30, kMatchAccel = 90;
 
 struct Totals { int checks = 0, fails = 0; };
+
+// ---- phase 35: the injector's state-Set / invalidation hooks on the harness context ------------------------------------------
+// "didshadow=1": the WARP context's vtable entries are patched (VirtualProtect) with the same DidShadow calls inject.cpp's MinHook
+// detours make (the Note AFTER the original call), so EVERY Set of every scene -- the scene's own binds, DrawIdRecord's replay
+// save / restore, CameraMv / DrawIdMv dispatches -- reaches the shadow exactly as in the game; DrawIdRecord::Record then takes
+// the shadow path. "mutshadow": ClearState / ExecuteCommandList / SwapDeviceContextState are not reported (S19 must FAIL).
+namespace ShHook {
+typedef void (STDMETHODCALLTYPE* IlFn)(ID3D11DeviceContext*, ID3D11InputLayout*);
+typedef void (STDMETHODCALLTYPE* VbFn)(ID3D11DeviceContext*, UINT, UINT, ID3D11Buffer* const*, const UINT*, const UINT*);
+typedef void (STDMETHODCALLTYPE* IbFn)(ID3D11DeviceContext*, ID3D11Buffer*, DXGI_FORMAT, UINT);
+typedef void (STDMETHODCALLTYPE* VsFn)(ID3D11DeviceContext*, ID3D11VertexShader*, ID3D11ClassInstance* const*, UINT);
+typedef void (STDMETHODCALLTYPE* CbFn)(ID3D11DeviceContext*, UINT, UINT, ID3D11Buffer* const*);
+typedef void (STDMETHODCALLTYPE* Cb1Fn)(ID3D11DeviceContext1*, UINT, UINT, ID3D11Buffer* const*, const UINT*, const UINT*);
+typedef void (STDMETHODCALLTYPE* SmpFn)(ID3D11DeviceContext*, UINT, UINT, ID3D11SamplerState* const*);
+typedef void (STDMETHODCALLTYPE* RsFn)(ID3D11DeviceContext*, ID3D11RasterizerState*);
+typedef void (STDMETHODCALLTYPE* ClrFn)(ID3D11DeviceContext*);
+typedef void (STDMETHODCALLTYPE* EclFn)(ID3D11DeviceContext*, ID3D11CommandList*, BOOL);
+typedef void (STDMETHODCALLTYPE* SwapFn)(ID3D11DeviceContext1*, ID3DDeviceContextState*, ID3DDeviceContextState**);
+IlFn oIl; VbFn oVb; IbFn oIb; VsFn oVs; CbFn oCb; Cb1Fn oCb1; SmpFn oSmp; RsFn oRs; ClrFn oClr; EclFn oEcl; SwapFn oSwap;
+bool g_on = false, g_mut = false;
+void STDMETHODCALLTYPE hIl(ID3D11DeviceContext* c, ID3D11InputLayout* p) { oIl(c, p); DidShadow::NoteIl(c, p); }
+void STDMETHODCALLTYPE hVb(ID3D11DeviceContext* c, UINT s, UINT n, ID3D11Buffer* const* b, const UINT* st, const UINT* of) {
+    oVb(c, s, n, b, st, of); DidShadow::NoteVb(c, s, n, b, st, of);
+}
+void STDMETHODCALLTYPE hIb(ID3D11DeviceContext* c, ID3D11Buffer* b, DXGI_FORMAT f, UINT o) { oIb(c, b, f, o); DidShadow::NoteIb(c, b, f, o); }
+void STDMETHODCALLTYPE hVs(ID3D11DeviceContext* c, ID3D11VertexShader* v, ID3D11ClassInstance* const* ci, UINT n) {
+    oVs(c, v, ci, n); DidShadow::NoteVs(c, v);
+}
+void STDMETHODCALLTYPE hCb(ID3D11DeviceContext* c, UINT s, UINT n, ID3D11Buffer* const* b) {
+    oCb(c, s, n, b); DidShadow::NoteCb(c, s, n, b, nullptr, nullptr, true);
+}
+void STDMETHODCALLTYPE hCb1(ID3D11DeviceContext1* c, UINT s, UINT n, ID3D11Buffer* const* b, const UINT* f, const UINT* k) {
+    oCb1(c, s, n, b, f, k); DidShadow::NoteCb(static_cast<ID3D11DeviceContext*>(c), s, n, b, f, k, false);
+}
+void STDMETHODCALLTYPE hSmp(ID3D11DeviceContext* c, UINT s, UINT n, ID3D11SamplerState* const* p) { oSmp(c, s, n, p); DidShadow::NoteSmp(c, s, n, p); }
+void STDMETHODCALLTYPE hRs(ID3D11DeviceContext* c, ID3D11RasterizerState* r) { oRs(c, r); DidShadow::NoteRs(c, r); }
+void Rehook(void* ctx);
+void STDMETHODCALLTYPE hClr(ID3D11DeviceContext* c) { oClr(c); if (!g_mut) DidShadow::Invalidate(c, DidShadow::kKClearState); }
+void STDMETHODCALLTYPE hEcl(ID3D11DeviceContext* c, ID3D11CommandList* l, BOOL r) {
+    oEcl(c, l, r); Rehook(c); if (!g_mut) DidShadow::Invalidate(c, DidShadow::kKExecCmd);
+}
+void STDMETHODCALLTYPE hSwap(ID3D11DeviceContext1* c, ID3DDeviceContextState* s, ID3DDeviceContextState** p) {
+    oSwap(c, s, p); Rehook(c); if (!g_mut) DidShadow::Invalidate(static_cast<ID3D11DeviceContext*>(c), DidShadow::kKSwapState);
+}
+// S19 hook-liveness step: a VSSetShader body the "detours" do not sit on (the call reaches the runtime, no Note)
+void STDMETHODCALLTYPE hVsBypass(ID3D11DeviceContext* c, ID3D11VertexShader* v, ID3D11ClassInstance* const* ci, UINT n) { oVs(c, v, ci, n); }
+template <class F> bool Patch(void** vt, int idx, F fn, F* orig) {
+    if (vt[idx] == reinterpret_cast<void*>(fn)) return true;   // (still ours: a re-install after a vtable rewrite)
+    DWORD old = 0;
+    if (!VirtualProtect(&vt[idx], sizeof(void*), PAGE_READWRITE, &old)) return false;
+    *orig = reinterpret_cast<F>(vt[idx]);
+    vt[idx] = reinterpret_cast<void*>(fn);
+    VirtualProtect(&vt[idx], sizeof(void*), old, &old);
+    return true;
+}
+// the vtable indices inject.cpp hooks (d3d11.h / d3d11_1.h order)
+// (the immediate context's vtable is a per-object WRITABLE copy that the runtime rewrites -- SwapDeviceContextState puts the
+// original entries back -- so S19 installs again after a swap; DidShadow's liveness check sees the gap in between)
+bool Install(ID3D11DeviceContext1* ctx) {
+    void** vt = *reinterpret_cast<void***>(ctx);
+    const bool ok = Patch(vt, 7, &hCb, &oCb) && Patch(vt, 11, &hVs, &oVs) && Patch(vt, 17, &hIl, &oIl) && Patch(vt, 18, &hVb, &oVb) &&
+                    Patch(vt, 19, &hIb, &oIb) && Patch(vt, 26, &hSmp, &oSmp) && Patch(vt, 43, &hRs, &oRs) &&
+                    Patch(vt, 58, &hEcl, &oEcl) && Patch(vt, 110, &hClr, &oClr) && Patch(vt, 119, &hCb1, &oCb1) &&
+                    Patch(vt, 131, &hSwap, &oSwap);
+    static const int idx[11] = { 7, 11, 17, 18, 19, 26, 43, 58, 110, 119, 131 };
+    void* const exp[11] = { (void*)&hCb, (void*)&hVs, (void*)&hIl, (void*)&hVb, (void*)&hIb, (void*)&hSmp, (void*)&hRs, (void*)&hEcl,
+                            (void*)&hClr, (void*)&hCb1, (void*)&hSwap };
+    DidShadow::SetHookTargets(idx, exp, 11);
+    return ok;
+}
+// The runtime rewrites the immediate context's (per-object, writable) vtable on ExecuteCommandList / SwapDeviceContextState
+// (measured on WARP). An entry it put back with the ORIGINAL function is patched again: inject.cpp's MinHook detours sit on the
+// function bodies, so the DLL keeps seeing those calls; an entry with any other function is left alone -- the DLL's hooks would
+// not see it either, and DidShadow's liveness check must catch it.
+void Rehook(void* ctx) {
+    void** vt = *reinterpret_cast<void***>(ctx);
+    auto re = [&](int i, void* orig, void* hook) {
+        if (vt[i] != orig) return;
+        DWORD old = 0;
+        if (VirtualProtect(&vt[i], sizeof(void*), PAGE_READWRITE, &old)) { vt[i] = hook; VirtualProtect(&vt[i], sizeof(void*), old, &old); }
+    };
+    re(7, (void*)oCb, (void*)&hCb); re(11, (void*)oVs, (void*)&hVs); re(17, (void*)oIl, (void*)&hIl); re(18, (void*)oVb, (void*)&hVb);
+    re(19, (void*)oIb, (void*)&hIb); re(26, (void*)oSmp, (void*)&hSmp); re(43, (void*)oRs, (void*)&hRs); re(58, (void*)oEcl, (void*)&hEcl);
+    re(110, (void*)oClr, (void*)&hClr); re(119, (void*)oCb1, (void*)&hCb1); re(131, (void*)oSwap, (void*)&hSwap);
+}
+void SetEntry(void* ctx, int i, void* fn) {
+    void** vt = *reinterpret_cast<void***>(ctx);
+    DWORD old = 0;
+    if (VirtualProtect(&vt[i], sizeof(void*), PAGE_READWRITE, &old)) { vt[i] = fn; VirtualProtect(&vt[i], sizeof(void*), old, &old); }
+}
+}
 
 // ---- the scene ----------------------------------------------------------------------------------------------------------
 // mesh table indices
@@ -5786,6 +5880,395 @@ int RunShopScene(Env& E, float snapPx, Totals& tot) {
     return fails;
 }
 
+// ---- phase 35: the shadow's window statistics, summed over the run ------------------------------------------------------
+DidShadow::Stats g_shAcc;
+void AccumShadowStats() {
+    DidShadow::Stats s;
+    DidShadow::TakeStats(&s);
+    g_shAcc.recShadow += s.recShadow; g_shAcc.recGet += s.recGet; g_shAcc.reseeds += s.reseeds;
+    g_shAcc.verified += s.verified; g_shAcc.mismatchRecs += s.mismatchRecs; g_shAcc.fallbackFrames += s.fallbackFrames;
+    g_shAcc.refsTaken += s.refsTaken; g_shAcc.refsSkipped += s.refsSkipped; g_shAcc.notes += s.notes; g_shAcc.vtMiss += s.vtMiss;
+    for (int f = 0; f < DidShadow::kFieldN; ++f) {
+        g_shAcc.hazGet[f] += s.hazGet[f]; g_shAcc.groupSeed[f] += s.groupSeed[f]; g_shAcc.mismatch[f] += s.mismatch[f];
+    }
+    for (int k = 0; k < DidShadow::kKillN; ++k) g_shAcc.kills[k] += s.kills[k];
+    g_shAcc.disabled = s.disabled;
+}
+void PrintShadowStats(const char* tag) {
+    const DidShadow::Stats& a = g_shAcc;
+    const double rec = (double)(a.recShadow + a.recGet);
+    printf("   state shadow (%s): %llu records from the shadow, %llu through the getters (fallback); record AddRefs taken %llu / "
+           "avoided %llu (%.1f %%); %llu Set calls applied; full reseeds %llu; group re-reads il %llu vb %llu ib %llu vs %llu cb %llu "
+           "smp %llu rs %llu; output-capable getter reads vb %llu ib %llu cb %llu; drops frame %llu pass %llu ClearState %llu "
+           "ExecuteCommandList %llu SwapDeviceContextState %llu thread %llu context %llu verify %llu; verify %llu compared, %llu "
+           "mismatching records (il %llu vb %llu ib %llu vs %llu cb %llu smp %llu rs %llu), fallback frames %llu, vtable misses %llu%s\n", tag,
+           (unsigned long long)a.recShadow, (unsigned long long)a.recGet, (unsigned long long)a.refsTaken,
+           (unsigned long long)a.refsSkipped,
+           a.refsTaken + a.refsSkipped ? 100.0 * (double)a.refsSkipped / (double)(a.refsTaken + a.refsSkipped) : 0.0,
+           (unsigned long long)a.notes, (unsigned long long)a.reseeds,
+           (unsigned long long)a.groupSeed[0], (unsigned long long)a.groupSeed[1], (unsigned long long)a.groupSeed[2],
+           (unsigned long long)a.groupSeed[3], (unsigned long long)a.groupSeed[4], (unsigned long long)a.groupSeed[5],
+           (unsigned long long)a.groupSeed[6], (unsigned long long)a.hazGet[DidShadow::kFVb], (unsigned long long)a.hazGet[DidShadow::kFIb],
+           (unsigned long long)a.hazGet[DidShadow::kFCb], (unsigned long long)a.kills[DidShadow::kKFrame],
+           (unsigned long long)a.kills[DidShadow::kKPass], (unsigned long long)a.kills[DidShadow::kKClearState],
+           (unsigned long long)a.kills[DidShadow::kKExecCmd], (unsigned long long)a.kills[DidShadow::kKSwapState],
+           (unsigned long long)a.kills[DidShadow::kKThread], (unsigned long long)a.kills[DidShadow::kKCtx],
+           (unsigned long long)a.kills[DidShadow::kKVerify], (unsigned long long)a.verified, (unsigned long long)a.mismatchRecs,
+           (unsigned long long)a.mismatch[0], (unsigned long long)a.mismatch[1], (unsigned long long)a.mismatch[2],
+           (unsigned long long)a.mismatch[3], (unsigned long long)a.mismatch[4], (unsigned long long)a.mismatch[5],
+           (unsigned long long)a.mismatch[6], (unsigned long long)a.fallbackFrames, (unsigned long long)a.vtMiss,
+           a.disabled ? " -- DISABLED" : "");
+    (void)rec;
+}
+
+// ---- phase 35: S19 STATE SHADOW (didshadow=1) ----------------------------------------------------------------------------
+// The sequences that can make a shadow of the input state wrong, each followed by a check: DrawIdRecord::ShadowCheck (what a
+// Record takes from the shadow now == what the getters return, every shadowed field) + one draw recorded through the shadow
+// and one through the getters (did_shadow off around it) whose keys (VB0 / IB / offsets / VS / input layout / cb0 window /
+// flags / viewport) must agree. Steps: full bind; partial binds + null slots with strides; every cb0 window form (legacy,
+// null first / count, null buffer with a window, count 0, an unusual window the runtime normalises, untracked / invalid
+// slots); ClearState in the middle of a pass; output-capable buffers bound as VB / IB and then as a CS UAV (the hazard
+// unbind) and a texture that is a VS SRV bound as a render target; a partial bind of a group made unknown by an invalid call;
+// SwapDeviceContextState there and back; ExecuteCommandList of a deferred context (state cleared / restored); Sets from another
+// thread; a VB released by the game and a new one (at the same address when the allocator reuses it); the hand-over of record
+// references at a partial release (a forward record's DropIds); a Set the hooks never saw is caught by the verify mode and the
+// record keeps the runtime's state. "mutshadow" must FAIL the ClearState / swap / ExecuteCommandList steps.
+int RunStateShadowScene(Env& E, Totals& tot) {
+    printf("S19 state shadow (phase 35): every way the shadowed IA / VS / RS state can change, checked against the getters\n");
+    int checks = 0, fails = 0;
+    ID3D11Device* dev = E.dev.Get();
+    ID3D11DeviceContext* ctx = E.ctx.Get();
+    ID3D11DeviceContext1* c1 = E.ctx1.Get();
+    const int vEvery = DidShadow::VerifyEvery();
+    const uint32_t groups = DidShadow::Groups();
+    const bool vbKept = (groups & (1u << DidShadow::kFVb)) != 0;
+    std::unique_ptr<DrawIdRecord> rs(new DrawIdRecord), rg(new DrawIdRecord);
+    int step = 0;
+    auto expect = [&](bool ok, const char* what, const char* detail) {
+        ++checks;
+        if (!ok) { ++fails; printf("   S19 %s: FAILED -- %s\n", what, detail); }
+    };
+    auto check = [&](const char* what) {
+        ++step;
+        const uint32_t bits = DrawIdRecord::ShadowCheck(c1);
+        rs->Record(c1, 36, 1, 0, 0, 0, false);
+        DidShadow::Configure(false, vEvery, groups);
+        rg->Record(c1, 36, 1, 0, 0, 0, false);
+        DidShadow::Configure(true, vEvery, groups);
+        const int i = rs->Count() - 1, j = rg->Count() - 1;
+        UINT f1 = 0, n1 = 0, f2 = 0, n2 = 0;
+        if (i >= 0) rs->CbWindow(i, &f1, &n1);
+        if (j >= 0) rg->CbWindow(j, &f2, &n2);
+        const bool keys = i >= 0 && j >= 0 && rs->FullKey(i) == rg->FullKey(j) && rs->LooseKey(i) == rg->LooseKey(j) &&
+                          rs->ShapeKey(i) == rg->ShapeKey(j) && rs->Vs(i) == rg->Vs(j) && rs->Flags(i) == rg->Flags(j) &&
+                          f1 == f2 && n1 == n2 && rs->VpMin(i) == rg->VpMin(j) && rs->MirrorRows(i) == rg->MirrorRows(j);
+        char d[160] = "";
+        if (bits || !keys) {
+            int l = snprintf(d, sizeof(d), "shadow fields differing from the getters:");
+            for (int f = 0; f < DidShadow::kFieldN; ++f)
+                if (bits & (1u << f)) l += snprintf(d + l, sizeof(d) - (size_t)l, " %s", DidShadow::FieldName(f));
+            if (!keys) snprintf(d + l, sizeof(d) - (size_t)l, "%s record keys differ", bits ? ";" : "");
+        }
+        char w[96];
+        snprintf(w, sizeof(w), "step %d (%s)", step, what);
+        expect(!bits && keys, w, d);
+    };
+    // ---- resources ----
+    auto mkBuf = [&](UINT bytes, UINT bind, UINT misc, ComPtr<ID3D11Buffer>& out) {
+        D3D11_BUFFER_DESC bd{ bytes, D3D11_USAGE_DEFAULT, bind, 0, misc, 0 };
+        return SUCCEEDED(dev->CreateBuffer(&bd, nullptr, &out));
+    };
+    ComPtr<ID3D11Buffer> vbA, vbB, raw, cbSmall;
+    D3D11_SAMPLER_DESC sd{};
+    sd.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT; sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP; sd.MaxLOD = 1e9f;
+    ComPtr<ID3D11SamplerState> smp1, smp2;
+    ComPtr<ID3D11Texture2D> tex;
+    ComPtr<ID3D11RenderTargetView> texRtv;
+    ComPtr<ID3D11ShaderResourceView> texSrv;
+    ComPtr<ID3D11UnorderedAccessView> rawUav;
+    D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};
+    ud.Format = DXGI_FORMAT_R32_TYPELESS; ud.ViewDimension = D3D11_UAV_DIMENSION_BUFFER; ud.Buffer.NumElements = 1024;
+    ud.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW;
+    if (!mkBuf(65536, D3D11_BIND_VERTEX_BUFFER, 0, vbA) || !mkBuf(65536, D3D11_BIND_VERTEX_BUFFER, 0, vbB) ||
+        !mkBuf(4096, D3D11_BIND_VERTEX_BUFFER | D3D11_BIND_INDEX_BUFFER | D3D11_BIND_UNORDERED_ACCESS,
+               D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS, raw) ||
+        !mkBuf(256, D3D11_BIND_CONSTANT_BUFFER, 0, cbSmall) || FAILED(dev->CreateSamplerState(&sd, &smp1)) ||
+        (sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR, FAILED(dev->CreateSamplerState(&sd, &smp2))) ||
+        !MakeTex(dev, 64, 64, DXGI_FORMAT_R8G8B8A8_UNORM, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, &tex) ||
+        FAILED(dev->CreateRenderTargetView(tex.Get(), nullptr, &texRtv)) ||
+        FAILED(dev->CreateShaderResourceView(tex.Get(), nullptr, &texSrv)) ||
+        FAILED(dev->CreateUnorderedAccessView(raw.Get(), &ud, &rawUav))) {
+        printf("   S19: resource creation failed\n");
+        ++tot.checks; ++tot.fails;
+        return 1;
+    }
+    const UINT strides[2] = { (UINT)sizeof(Vtx), (UINT)sizeof(Vtx) }, offs[2] = { 0, 0 };
+    D3D11_VIEWPORT vp{ 0.25f, 0.5f, (float)W, (float)H, 0.01f, 0.9f };
+    auto fullBind = [&]() {
+        ID3D11Buffer* vbs[2] = { E.vb[0].Get(), vbA.Get() };
+        ctx->IASetInputLayout(E.il.Get());
+        ctx->IASetVertexBuffers(0, 2, vbs, strides, offs);
+        ctx->IASetIndexBuffer(E.ib[0].Get(), DXGI_FORMAT_R32_UINT, 0);
+        ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        ctx->VSSetShader(E.vsMain.Get(), nullptr, 0);
+        ID3D11Buffer* ring = E.ring[0].Get();
+        const UINT first = 256, num = 16;
+        c1->VSSetConstantBuffers1(0, 1, &ring, &first, &num);
+        ID3D11SamplerState* s0 = smp1.Get();
+        ctx->VSSetSamplers(0, 1, &s0);
+        ctx->RSSetState(E.rsBack.Get());
+        ctx->RSSetViewports(1, &vp);
+    };
+    ctx->ClearState();
+    fullBind();
+    check("full bind");
+    {   // partial binds, null slots keeping their stride / offset
+        ID3D11Buffer* b1 = vbB.Get(); const UINT s1 = 24, o1 = 48;
+        ctx->IASetVertexBuffers(1, 1, &b1, &s1, &o1);
+        ID3D11Buffer* sc = cbSmall.Get(); const UINT f0 = 0, n16 = 16;
+        c1->VSSetConstantBuffers1(1, 1, &sc, &f0, &n16);
+        ID3D11SamplerState* s2 = smp2.Get();
+        ctx->VSSetSamplers(1, 1, &s2);
+        check("partial binds: VB slot 1, cb slot 1, sampler slot 1");
+        ID3D11Buffer* nb = nullptr; const UINT s7 = 7, o9 = 9;
+        ctx->IASetVertexBuffers(0, 1, &nb, &s7, &o9);
+        check("VB slot 0 null with stride 7 / offset 9");
+        ID3D11SamplerState* ns = nullptr;
+        ctx->VSSetSamplers(0, 1, &ns);
+        ctx->RSSetState(nullptr);
+        ctx->IASetInputLayout(nullptr);
+        check("null sampler 0, null RS, null input layout");
+        ctx->IASetIndexBuffer(nullptr, DXGI_FORMAT_R16_UINT, 8);
+        check("null index buffer with format / offset");
+        fullBind();
+        check("full bind again");
+    }
+    {   // every cb0 window form
+        ID3D11Buffer* ring = E.ring[0].Get();
+        ctx->VSSetConstantBuffers(0, 1, &ring);
+        check("legacy VSSetConstantBuffers (0 / 4096)");
+        c1->VSSetConstantBuffers1(0, 1, &ring, nullptr, nullptr);
+        check("VSSetConstantBuffers1 with null first / count");
+        ID3D11Buffer* two[2] = { ring, nullptr }; const UINT f2[2] = { 512, 32 }, n2[2] = { 16, 48 };
+        c1->VSSetConstantBuffers1(0, 2, two, f2, n2);
+        check("VSSetConstantBuffers1 {ring 512/16, null 32/48}");
+        const UINT f3 = 1024, n0 = 0;
+        c1->VSSetConstantBuffers1(0, 1, &ring, &f3, &n0);
+        check("VSSetConstantBuffers1 count 0");
+        const UINT f4 = 2048, n4 = 4096;
+        c1->VSSetConstantBuffers1(0, 1, &ring, &f4, &n4);
+        check("VSSetConstantBuffers1 count 4096");
+        ID3D11Buffer* sc = cbSmall.Get();
+        c1->VSSetConstantBuffers1(13, 1, &sc, nullptr, nullptr);
+        check("VSSetConstantBuffers1 slot 13 (not tracked)");
+        if (!g_debugLayer) {                              // (deliberately invalid calls: the debug layer reports them)
+            const UINT f8 = 8, n16 = 16;
+            c1->VSSetConstantBuffers1(0, 1, &ring, &f8, &n16);
+            check("VSSetConstantBuffers1 first 8 (normalised by the runtime: the group is re-read)");
+            c1->VSSetConstantBuffers1(14, 1, &sc, nullptr, nullptr);
+            check("VSSetConstantBuffers1 slot 14 (dropped by the runtime)");
+            ID3D11Buffer* b = vbA.Get();
+            ctx->IASetVertexBuffers(31, 2, &b, strides, offs);
+            check("IASetVertexBuffers slots 31..32 (dropped by the runtime: the group is re-read)");
+            ctx->IASetVertexBuffers(1, 1, &b, strides, offs);
+            check("a partial VB bind of a group made unknown");
+        }
+        fullBind();
+        check("full bind after the cb forms");
+    }
+    // ClearState in the middle of a pass (state = defaults)
+    ctx->ClearState();
+    check("ClearState");
+    fullBind();
+    check("rebind after ClearState");
+    {   // output-capable buffers and the hazard unbind
+        AccumShadowStats();
+        const uint64_t hz0 = g_shAcc.hazGet[DidShadow::kFVb] + g_shAcc.hazGet[DidShadow::kFIb];
+        ID3D11Buffer* r = raw.Get(); const UINT s4 = 4, o0 = 0;
+        ctx->IASetVertexBuffers(0, 1, &r, &s4, &o0);
+        ctx->IASetIndexBuffer(r, DXGI_FORMAT_R32_UINT, 0);
+        check("raw UAV-capable buffer as VB 0 + IB");
+        ID3D11UnorderedAccessView* u = rawUav.Get();
+        ctx->CSSetUnorderedAccessViews(0, 1, &u, nullptr);
+        check("the same buffer bound as a CS UAV (hazard unbind on hardware)");
+        ctx->IASetVertexBuffers(0, 1, &r, &s4, &o0);
+        check("bound as VB 0 again while it is a CS UAV");
+        ID3D11UnorderedAccessView* nu = nullptr;
+        ctx->CSSetUnorderedAccessViews(0, 1, &nu, nullptr);
+        ID3D11ShaderResourceView* sv = texSrv.Get();
+        ctx->VSSetShaderResources(0, 1, &sv);
+        ID3D11RenderTargetView* rt = texRtv.Get();
+        ctx->OMSetRenderTargets(1, &rt, nullptr);
+        check("a VS SRV texture bound as the render target (SRV hazard)");
+        ctx->OMSetRenderTargets(0, nullptr, nullptr);
+        fullBind();
+        check("normal buffers again");
+        AccumShadowStats();
+        const uint64_t hz1 = g_shAcc.hazGet[DidShadow::kFVb] + g_shAcc.hazGet[DidShadow::kFIb];
+        if (vbKept) expect(hz1 > hz0, "output-capable buffers read through the getter", "no getter read was counted");
+    }
+    // a deferred context's command list (recorded once; executed with and without the state restore)
+    ComPtr<ID3D11DeviceContext> dc;
+    ComPtr<ID3D11CommandList> cl;
+    if (SUCCEEDED(dev->CreateDeferredContext(0, &dc))) {
+        dc->VSSetShader(E.vsSkin.Get(), nullptr, 0);
+        dc->IASetInputLayout(E.ilInst.Get());
+        if (FAILED(dc->FinishCommandList(FALSE, &cl))) cl.Reset();
+    }
+    if (cl) {   // ExecuteCommandList (the hooked entries in place: the hook reports it)
+        ctx->ExecuteCommandList(cl.Get(), FALSE);
+        check("ExecuteCommandList(restore FALSE): state cleared");
+        fullBind();
+        check("rebind after ExecuteCommandList");
+        ctx->ExecuteCommandList(cl.Get(), TRUE);
+        check("ExecuteCommandList(restore TRUE): state restored");
+    } else {
+        printf("   S19: no deferred context / command list on this device -- ExecuteCommandList steps skipped\n");
+    }
+    {   // SwapDeviceContextState there and back. Measured on WARP: the swap REWRITES the context's vtable with OTHER functions
+        // (VSSetShader's entry is not the original body afterwards, not even after the swap back; an ExecuteCommandList puts
+        // the originals back) -- inject.cpp's MinHook detours would not see those calls either: the liveness check must route
+        // every Record through the getters until the original entries are back, then re-read the shadow.
+        ComPtr<ID3D11Device1> dev1;
+        ComPtr<ID3DDeviceContextState> st, prevSt;
+        D3D_FEATURE_LEVEL fl = dev->GetFeatureLevel(), got{};
+        if (SUCCEEDED(E.dev.As(&dev1)) &&
+            SUCCEEDED(dev1->CreateDeviceContextState(0, &fl, 1, D3D11_SDK_VERSION, __uuidof(ID3D11Device1), &got, &st))) {
+            AccumShadowStats();
+            const uint64_t vm0 = g_shAcc.vtMiss;
+            c1->SwapDeviceContextState(st.Get(), &prevSt);
+            const bool other = (*reinterpret_cast<void***>(c1))[11] != (void*)ShHook::oVs;
+            printf("   S19: after SwapDeviceContextState the VSSetShader entry is %s\n", other ? "ANOTHER function (not the hooked "
+                   "body)" : "the original function");
+            ShHook::Rehook(c1);
+            check("SwapDeviceContextState to a fresh state");
+            ctx->VSSetShader(E.vsSkin.Get(), nullptr, 0);
+            ctx->IASetInputLayout(E.ilInst.Get());
+            check("binds inside the swapped state");
+            ComPtr<ID3DDeviceContextState> back;
+            c1->SwapDeviceContextState(prevSt.Get(), &back);
+            ShHook::Rehook(c1);
+            check("SwapDeviceContextState back");
+            fullBind();
+            check("binds after the swap back");
+            AccumShadowStats();
+            if (other) expect(g_shAcc.vtMiss > vm0, "hook liveness after SwapDeviceContextState (getters used)", "no vtable miss counted");
+            if (cl) {                                     // the original entries come back with an ExecuteCommandList
+                ctx->ExecuteCommandList(cl.Get(), TRUE);
+                ShHook::Rehook(c1);
+                fullBind();
+                check("hooks back after an ExecuteCommandList");
+            }
+        } else {
+            expect(false, "SwapDeviceContextState", "CreateDeviceContextState failed");
+        }
+    }
+    {   // Sets from another thread
+        std::thread t([&]() { ctx->IASetInputLayout(E.ilInst.Get()); ctx->VSSetShader(E.vsSkin.Get(), nullptr, 0); });
+        t.join();
+        check("Sets from another thread");
+        fullBind();
+        check("rebind on the owner thread");
+    }
+    {   // a VB the game releases, and a new one (the allocator may hand out the same address)
+        ComPtr<ID3D11Buffer> vt;
+        mkBuf(65536, D3D11_BIND_VERTEX_BUFFER, 0, vt);
+        ID3D11Buffer* b = vt.Get(); const UINT s = (UINT)sizeof(Vtx), o = 0;
+        ctx->IASetVertexBuffers(0, 1, &b, &s, &o);
+        check("a new VB 0");
+        rs->Reset(); rg->Reset();                         // (the records let go of it)
+        ID3D11Buffer* bb = vbB.Get();
+        ctx->IASetVertexBuffers(0, 1, &bb, &s, &o);
+        const void* old = vt.Get();
+        vt.Reset();                                       // the game's last reference: destroyed
+        ComPtr<ID3D11Buffer> vu;
+        int reused = 0;
+        for (int k = 0; k < 8 && !reused; ++k) {          // try to get the same address back
+            vu.Reset();
+            mkBuf(65536, D3D11_BIND_VERTEX_BUFFER, 0, vu);
+            reused = (const void*)vu.Get() == old;
+        }
+        ID3D11Buffer* bu = vu.Get();
+        ctx->IASetVertexBuffers(0, 1, &bu, &s, &o);
+        check(reused ? "a new VB at the released VB's address" : "a new VB after the release (address not reused)");
+        printf("   S19: released VB address %s by the new one\n", reused ? "REUSED" : "not reused");
+        fullBind();
+    }
+    {   // the hand-over of record references at a partial release (forward record: depth replay, then DropIds). A rasterizer
+        // state of its own (a unique depth bias: the device would hand back an existing state object for an equal description) --
+        // the RS is shadowed in both did_shadow modes; with did_shadow 2 a vertex buffer is checked the same way.
+        for (int kind = 0; kind < (vbKept ? 2 : 1); ++kind) {
+            std::unique_ptr<DrawIdRecord> rf(new DrawIdRecord);
+            rf->SetForward(true);
+            rf->SetCapturePs(true);
+            ComPtr<ID3D11RasterizerState> ro;
+            ComPtr<ID3D11Buffer> vo;
+            const UINT s = (UINT)sizeof(Vtx), o = 0;
+            if (kind == 0) {
+                D3D11_RASTERIZER_DESC rd{};
+                rd.FillMode = D3D11_FILL_SOLID; rd.CullMode = D3D11_CULL_BACK; rd.DepthClipEnable = TRUE; rd.DepthBias = 12345;
+                dev->CreateRasterizerState(&rd, &ro);
+                ctx->RSSetState(ro.Get());
+            } else {
+                mkBuf(65536, D3D11_BIND_VERTEX_BUFFER, 0, vo);
+                ID3D11Buffer* b = vo.Get();
+                ctx->IASetVertexBuffers(0, 1, &b, &s, &o);
+            }
+            rf->Record(c1, 36, 1, 0, 0, 0, false);
+            rf->Record(c1, 36, 1, 0, 0, 0, false);
+            rf->ReplayDepth(c1, nullptr, nullptr, nullptr, nullptr, false);   // (no states: only the depth cursor moves)
+            rf->Record(c1, 36, 1, 0, 0, 0, false);       // draws 2, 3 name the object through draw 1's reference
+            rf->Record(c1, 36, 1, 0, 0, 0, false);
+            rf->DropIds();                               // releases draws 0, 1 only: draw 2 must take its own reference first
+            IUnknown* obj = nullptr;
+            if (kind == 0) { ctx->RSSetState(E.rsBack.Get()); obj = ro.Detach(); }   // the shadow lets go of it; the game's
+            else { ID3D11Buffer* bb = vbB.Get(); ctx->IASetVertexBuffers(0, 1, &bb, &s, &o); obj = vo.Detach(); }   // own reference
+            const ULONG left = obj->Release();           // ... released: only the record's references remain
+            expect(left == 1, kind == 0 ? "record reference hand-over at a partial release (RS)"
+                                        : "record reference hand-over at a partial release (VB)",
+                   left == 0 ? "the object lost its last reference while draws 2 / 3 still name it" : "unexpected reference count");
+            rf->ReplayDepth(c1, nullptr, nullptr, nullptr, nullptr, false);
+            rf->Shutdown();                              // releases draws 2, 3 (the object goes away now)
+            fullBind();
+            check("after the forward record");
+        }
+    }
+    {   // hook liveness: a vtable entry the hooks do not sit on (a runtime rewrite with another function) -> the getters
+        AccumShadowStats();
+        const uint64_t vm0 = g_shAcc.vtMiss;
+        ShHook::SetEntry(c1, 11, (void*)&ShHook::hVsBypass);
+        ctx->VSSetShader(E.vsSkin.Get(), nullptr, 0);     // not noted
+        check("VSSetShader through a vtable entry the hooks do not see");
+        AccumShadowStats();
+        expect(g_shAcc.vtMiss > vm0, "hook liveness: the foreign vtable entry is seen (getters used)", "no vtable miss counted");
+        ShHook::SetEntry(c1, 11, (void*)&ShHook::hVs);
+        fullBind();
+        check("hooks back");
+    }
+    {   // a Set the hooks never saw: the verify mode must catch it and the record must keep the runtime's state
+        AccumShadowStats();
+        const uint64_t mm0 = g_shAcc.mismatchRecs;
+        DidShadow::Configure(true, 1, groups);
+        ShHook::oIl(ctx, E.ilInst.Get());                // the original, bypassing the hook
+        rs->Record(c1, 36, 1, 0, 0, 0, false);
+        DidShadow::Configure(false, 1, groups);
+        rg->Record(c1, 36, 1, 0, 0, 0, false);
+        DidShadow::Configure(true, vEvery, groups);
+        AccumShadowStats();
+        const int i = rs->Count() - 1, j = rg->Count() - 1;
+        expect(g_shAcc.mismatchRecs > mm0, "verify mode: an unseen Set is detected", "no mismatch was counted");
+        expect(i >= 0 && j >= 0 && rs->ShapeKey(i) == rg->ShapeKey(j), "verify mode: the record keeps the runtime's input layout",
+               "the record kept the stale shadow value");
+        DidShadow::FrameStart();                         // the fallback of this "frame" ends
+        fullBind();
+        check("after the verify fallback");
+    }
+    rs->Shutdown(); rg->Shutdown();
+    printf("   %s: %d / %d checks passed\n", fails ? "FAILED" : "passed", checks - fails, checks);
+    tot.checks += checks; tot.fails += fails;
+    return fails;
+}
+
 int main(int argc, char** argv) {
     int only = -1;
     float snapPx = 0.1f;
@@ -5832,10 +6315,13 @@ int main(int argc, char** argv) {
         else if (!strncmp(s, "vres=", 5)) DrawIdMv::SetVoteRes((unsigned)atoi(s + 5));
         else if (!strncmp(s, "cap=", 4)) DrawIdMv::SetMarchCap((unsigned)atoi(s + 4));
         else if (!strncmp(s, "cands=", 6)) DrawIdMv::SetConsCands((unsigned)atoi(s + 6));
+        else if (!strncmp(s, "didshadow=", 10)) g_didShadow = atoi(s + 10) >= 2 ? 2 : (atoi(s + 10) == 1 ? 1 : 0);   // phase 35
+        else if (!strncmp(s, "shverify=", 9)) g_shVerify = atoi(s + 9);             //   did_shadow_verify (0 = off)
+        else if (!strcmp(s, "mutshadow")) ShHook::g_mut = true;                      //   S19 must FAIL
         else if (!strcmp(s, "mutclip")) g_shadowMut = 1;     // v0.10.0 phase 9 (S11 / S12 must FAIL)
         else if (!strcmp(s, "mutview")) g_shadowMut = 2;
         else if (!strcmp(s, "nofold")) DrawIdMv::SetFold(0);       // v0.10.0 phase 9: the phase-8 dispatch chain
-        else if (!strncmp(s, "fold=", 5)) DrawIdMv::SetFold(atoi(s + 5));   // v0.10.0 phase 18: 0 / 1 (phase 9) / 2 (default)
+        else if (!strncmp(s, "fold=", 5)) DrawIdMv::SetFold(atoi(s + 5));   // v0.10.0 phase 18: 0 / 1 (phase 9) / 2; phase 37: 3 (default)
         else if (!strcmp(s, "nocompact")) DrawIdMv::SetVoteCompact(false);  // v0.10.0 phase 18: the full-grid vote (phase 8)
         else if (!strncmp(s, "cabmin=", 7)) DrawIdMv::SetConsMinCabin((unsigned)atoi(s + 7));   // phase 18: mv_cons_min_cabin
         else if (!strcmp(s, "hw")) g_hw = true;                    // v0.10.0 phase 18: hardware adapter (GPU timings)
@@ -5871,6 +6357,14 @@ int main(int argc, char** argv) {
         printf("D3D11 debug layer ON\n");
     }
     if (FAILED(E.ctx.As(&E.ctx1))) { printf("no ID3D11DeviceContext1\n"); return 1; }
+    if (g_didShadow) {                                  // phase 35: the injector's Set hooks + the shadow path of Record
+        if (!ShHook::Install(E.ctx1.Get())) { printf("phase 35: vtable patch failed\n"); return 1; }
+        DidShadow::SetAlias(E.ctx.Get());
+        DidShadow::Configure(true, g_shVerify, g_didShadow == 2 ? (1u << DidShadow::kFieldN) - 1u : ((1u << DidShadow::kFieldN) - 1u) & ~((1u << DidShadow::kFVb) | (1u << DidShadow::kFIb)));
+    }
+    printf("phase 35: did_shadow %d (did_shadow_verify %d%s), context %p / ID3D11DeviceContext1 %p\n", g_didShadow, g_shVerify,
+           ShHook::g_mut ? ", MUTATION: no ClearState / ExecuteCommandList / SwapDeviceContextState invalidation" : "",
+           (void*)E.ctx.Get(), (void*)static_cast<ID3D11DeviceContext*>(E.ctx1.Get()));
     GpuPerf::SetOn(true);                               // v0.10.0 phase 8: every section timed (WARP figures)
     CameraMv::RegisterShaders();
     SceneDlaa::RegisterShaders();                       // v0.10.0 phase 7: S9 runs the real SceneDlaa
@@ -6239,6 +6733,25 @@ int main(int argc, char** argv) {
         const int fl = RunShopScene(E, snapPx, tot);
         res.push_back({ "S18 shop windows: glass + forward reflection draws with the MVP in cb0 rows 6..9 keep the camera motion while "
                         "the camera drives and yaws", fl });
+    }
+    // phase 35: S19 state shadow (didshadow=1 only; last in the full run); the verify mode's mismatches of S1-S18 are failures
+    if (g_didShadow) {
+        AccumShadowStats();
+        const uint64_t mmScenes = g_shAcc.mismatchRecs;
+        PrintShadowStats("S1-S18");
+        if (g_shVerify > 0) {
+            ++tot.checks;
+            if (mmScenes) ++tot.fails;
+            res.push_back({ "phase 35 verify mode over S1-S18: no record whose shadowed state differs from the getters", mmScenes ? 1 : 0 });
+        }
+        if (only < 0 || only == 19) {
+            const int fl = RunStateShadowScene(E, tot);
+            res.push_back({ "S19 state shadow: ClearState / swap / ExecuteCommandList / hazards / partial + null binds / cb windows / "
+                            "threads / released VB / reference hand-over / verify fallback", fl });
+            AccumShadowStats();
+            PrintShadowStats("whole run incl. S19");
+        }
+        DidShadow::Shutdown();
     }
     printf("\n");
     for (auto& r : res) printf("%-120.120s %s\n", r.first, r.second ? "FAILED" : "passed");
