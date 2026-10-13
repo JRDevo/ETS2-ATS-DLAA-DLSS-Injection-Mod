@@ -130,6 +130,12 @@ log_level = 1
 # every frame (at most 1 px at the right / bottom edge).
 # jitter_overscan = 1
 
+# Phase 55: the game's lighting pass draws some meshes a second time (sunlight through a tent canopy, emissive surfaces) and
+# lights them only where that redraw matches the G-buffer depth. 1 = default: those redraws (depth test GREATER_EQUAL / EQUAL
+# without depth write, with a depth bias) get the same jittered viewport as the G-buffer, so they match on every jitter phase.
+# 0 = the game's own viewport for the whole lighting pass (before phase 55): such lit areas switch off on some frames (flicker).
+# light_redraw_jitter = 1
+
 # Camera-reprojection motion vectors: 1 on, 0 = zero MVs (Ctrl+F5 toggles live)
 # mv_enabled = 1
 

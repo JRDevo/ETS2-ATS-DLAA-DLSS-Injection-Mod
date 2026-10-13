@@ -2325,6 +2325,7 @@ int              g_mirMaxViews  = 8;            // dlaa.ini mirror_max_views: un
 int              g_mirCur       = -1;           // unit of the open mirror view (its G-buffer bind .. its depth discard)
 bool             g_mirGbuf      = false;        // the open view's G-buffer (4 RTVs + its own depth) is the current binding
 bool             g_mirJit       = false;        // the current binding is the open view's G-buffer or forward pass (shifted)
+bool             g_mirLight     = false;        // phase 55: the current binding is the open (jittered) view's lighting pass
 float            g_mirShX = 0.0f, g_mirShY = 0.0f;   // the open view's viewport shift (px)
 UINT             g_mirW = 0, g_mirH = 0;        // the open view's size (the viewport the shift applies to)
 uint64_t         g_mirHandled = 0, g_mirNotHandled = 0;   // mirror views run as units / left to the game (FIFO stats)
@@ -2378,6 +2379,7 @@ void BiasOnContextReset();
 bool BiasLive();
 #else
 constexpr bool   g_mirJit = false;              // (no mirror jitter without WITH_DLAA; hkDraw's full-screen unshift reads it)
+constexpr bool   g_mirLight = false;            // (phase 55: no mirror lighting redraw shift without WITH_DLAA)
 #endif
 uint64_t         g_passSeq       = 0;            // passes started so far (= next s)
 uint64_t         g_fifoHead      = 0;            // oldest unconsumed pass (unconsumed = [g_fifoHead, g_passSeq))
@@ -7875,6 +7877,17 @@ float          g_vpShiftX = 0.0f, g_vpShiftY = 0.0f;   // ...and which one
 bool           g_vpOver       = false;     // v0.10.0 phase 23: ...and was 1 px larger (jitter_overscan)
 uint64_t       g_cFsUnshift   = 0;         // v0.10.0 phase 25: full-screen draws inside a jittered pass issued with the game's own viewport
 int            g_passLogged   = 0;         // bit0 = G-buffer logged, bit1 = forward logged
+// phase 55 LIGHTING-PASS REDRAWS (the block above LightRedrawOnDraw): dlaa.ini light_redraw_jitter (default 1), the kind of the
+// current lighting binding and whether the issued viewport now carries its G-buffer's shift for a run of qualifying redraws.
+int            g_lightRedrawCfg   = 1;     // dlaa.ini light_redraw_jitter: 1 = the lighting pass's mesh redraws get the G-buffer's shift
+uint8_t        g_lightBind        = 0;     // 0 = none, 1 = main lighting bind (2 RTVs + scene DSV), 2 = the open mirror view's (g_mirLight)
+bool           g_lightRedrawShift = false; // ReconcileViewports shifts the lighting bind's viewport (a qualifying redraw is next)
+uint64_t       g_cLightBinds = 0, g_cLightRedraws = 0, g_cLightRuns = 0, g_cLightUnDraw = 0, g_cLightUnIdx = 0, g_cLightUnDss = 0;   // stats window
+uint64_t       g_cLightNoShift = 0;        // stats window: qualifying redraws whose viewport could not be shifted (not the pass size)
+uint64_t       g_cLightRedrawsTotal = 0;   // since the start (the first one is logged)
+#ifdef WITH_DLAA
+void LightRedrawStatsLog(uint64_t blit, uint64_t blitsInWindow);   // (defined with the lighting redraws, above hkOMSetDepthStencilState)
+#endif
 
 // Jitter only while DLAA is live and the jitter is enabled in dlaa.ini (v0.6.2: and not in passive mode).
 // v0.10.0 phase 17: split -- JitterLiveBase = everything but the shader warm-up; JitterLive (world, mirrors) = + every shader
@@ -8012,7 +8025,10 @@ inline void CountGameOtherThread() {
 // nothing if that is exactly what was last issued (no call spam).
 void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
     if (g_gameVpN == 0) return;
-    const bool worldShift = g_jitterPass && JitterLive() && !WorldJitterHeld() && g_sceneW &&   // v0.7.9: see g_eyeBlitEver
+    // phase 55: a qualifying mesh redraw of the main lighting bind (g_lightRedrawShift, set per draw by LightRedrawOnDraw) gets
+    // exactly the G-buffer's viewport: the same shift and, with jitter_overscan, the same (W+1) x (H+1) size
+    const bool lightMain = g_lightRedrawShift && g_lightBind == 1;
+    const bool worldShift = (g_jitterPass || lightMain) && JitterLive() && !WorldJitterHeld() && g_sceneW &&   // v0.7.9: see g_eyeBlitEver
                             (UINT)g_gameVp[0].Width == g_sceneW && (UINT)g_gameVp[0].Height == g_sceneH;
     // v0.7.8: the profile-screen preview pass shifts viewport 0 too (when its size is the preview RT's size, g_pvW x
     // g_pvH), by the frame's own jitter (g_pvJx / g_pvJy: no G-buffer pass advances g_jx / g_jy on that screen).
@@ -8025,7 +8041,9 @@ void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
     if (pvShift) PvShiftScale(g_pvCur, &pvKx, &pvKy);
     // v0.10.0 phase 2: the open mirror view's G-buffer / forward pass (g_mirJit) shifts viewport 0 by ITS unit's jitter when
     // the viewport is the mirror's full size (the lighting pass and the 256^2 down-sample are never g_mirJit)
-    const bool mirShift = !worldShift && !pvShift && g_mirJit && g_mirW && JitterLive() &&
+    // phase 55: + a qualifying mesh redraw of the open view's lighting bind (g_mirLight, the view's own shift / size)
+    const bool mirLight = g_lightRedrawShift && g_lightBind == 2 && g_mirLight;
+    const bool mirShift = !worldShift && !pvShift && (g_mirJit || mirLight) && g_mirW && JitterLive() &&
                           (UINT)g_gameVp[0].Width == g_mirW && (UINT)g_gameVp[0].Height == g_mirH;
     const float sx = pvShift ? g_pvJx * pvKx : (mirShift ? g_mirShX : g_jx),
                 sy = pvShift ? g_pvJy * pvKy : (mirShift ? g_mirShY : g_jy);
@@ -9773,6 +9791,16 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
 #endif
     CPU_ORIG(oOMSetRenderTargets(ctx, n, rtvs, dsv));
     g_jitterPass = pass;
+    // phase 55: the LIGHTING bind (2 RTVs + the scene depth; or the open jittered mirror view's, MirOnBind above) -- never jittered
+    // as a whole, only its qualifying mesh redraws get the G-buffer's shift, per draw (LightRedrawOnDraw). Every bind starts
+    // unshifted (ReconcileViewports below).
+    g_lightRedrawShift = false;
+#ifdef WITH_DLAA
+    g_lightBind = !g_lightRedrawCfg ? 0 : ((sceneDsv && n == 2) ? 1 : (g_mirLight ? 2 : 0));
+    if (g_lightBind) ++g_cLightBinds;
+#else
+    g_lightBind = 0;                               // (no depth-stencil state hook without WITH_DLAA: no redraw is recognised)
+#endif
 #ifdef WITH_DLAA
     g_fwdBound = fwdNow != nullptr;                // v0.10.0 phase 7
     g_fwdBoundTex = fwdNow;
@@ -11346,6 +11374,9 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
             "jitter DLSS is told (expect 0); passes started by a scene depth clear while a jittered binding was bound (viewport "
             "re-shifted there): %llu", (unsigned long long)g_blitCount, (unsigned long long)g_cRastJitMismatch,
             (unsigned long long)g_cRastJitPasses, (unsigned long long)g_cClearReshift);
+#ifdef WITH_DLAA
+        LightRedrawStatsLog(g_blitCount, g_blitCount - g_rateBlit0);   // phase 55 (window = the rate window's blits)
+#endif
         if (FlatViewCount() >= 2) {                        // v0.12.0 issue #12: the per-view figures the FIFO stats line has for 2 eyes
             const FlatViews::Layout& L = g_fv.Current();
             char vt[1024], ord[64];
@@ -11928,6 +11959,9 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
     // every bush against water / sky (ATS flat 2026-10-10, Ctrl+F10 color_in: sky 204, line 25, hill 120; gone with DLAA off).
     // Such a draw gets the game's own viewport; the shifted one is re-issued right after it (never a preview tile: those are
     // composited by their own rule, and never our own draws).
+    // phase 55: a Draw in the lighting bind (the full-screen light passes, Draw(3)) is never a mesh redraw: back to the game's
+    // own viewport if the previous draw was a shifted redraw (LightRedrawOnDraw)
+    if (g_lightRedrawShift && !t_inDlaa) { g_lightRedrawShift = false; ++g_cLightUnDraw; ReconcileViewports(ctx, false); }
     const bool fsUnshift = !t_inDlaa && g_vpShifted && (g_jitterPass || g_mirJit) && !g_previewPass && vertexCount <= 4 &&
                            g_gameVpN > 0 && g_gameVp[0].MinDepth == 0.0f && g_gameVp[0].MaxDepth == 1.0f;
     if (fsUnshift) {
@@ -12510,12 +12544,142 @@ void ObjOnBind(ID3D11DeviceContext* ctx, bool sceneDsv) {
     if (!g_gbufPass && sceneDsv && g_objOn) ObjWatch(ctx);
 }
 
+// ---- phase 55 LIGHTING-PASS REDRAWS ------------------------------------------------------------------------------------------
+// REPORT (ATS 2026-10-13, VR + flat): the sun-through-fabric light under a market tent canopy flickers. Self-test with the
+// jitter off: always lit.
+// CAUSE (RenderDoc amtrucks_2026.10.13_13.44.08_frame1323.rdc + Ctrl+F10 / Ctrl+F9 dumps): the game's LIGHTING bind (2 RTVs +
+// the scene DSV -- never jittered by the mod, see the "Jitter-pass test" in hkOMSetRenderTargets) contains mesh REDRAWS: the
+// canopy mesh is drawn again (EID 21000, VS 12256 / PS 12257, additive One / One) with depth test GREATER_EQUAL, depth write
+// OFF and a rasterizer depth bias (SlopeScaledDepthBias 1.0, DepthBiasClamp 1.5e-5). The game accepts these only where the
+// redraw's depth matches the G-buffer's. The G-buffer is rasterized with the jittered viewport (shift (sx, sy), (W+1) x (H+1)
+// with jitter_overscan) but the redraw with the game's own one: on steep surfaces the depth gap exceeds the 1.5e-5 bias clamp
+// on ~3 of the 8 Halton phases -> the whole lit area fails the test on those frames = the flicker. Same class: the emissive
+// redraws EIDs 20966-20991 (VS 9918 / PS 9919, same depth state + bias). (The forward pass's redraws are jittered already: the
+// whole forward binding is a jitter pass.)
+// FIX: inside a lighting bind (g_lightBind: hkOMSetRenderTargets main, MirOnBind mirror), a DrawIndexed / DrawIndexedInstanced
+// QUALIFIES as a redraw when the game's depth-stencil state has DepthEnable, DepthWriteMask ZERO and DepthFunc GREATER_EQUAL or
+// EQUAL (the game's depth is reversed -- the G-buffer tests GREATER -- so "on or in front of the G-buffer surface"), AND the
+// rasterizer state has a depth bias (DepthBias != 0 or SlopeScaledDepthBias != 0: the coplanar-redraw signature; a light volume
+// or a decal box -- depth LESS, cull front -- has none). A qualifying draw gets exactly the viewport the G-buffer used (the
+// current pass's g_jx / g_jy -- per eye the order is G-buffer, lighting, forward, the forward pass relies on the same; a mirror
+// view its own shift / size); any other draw of the binding (the full-screen Draw(3) light passes in hkDraw, a non-qualifying
+// DrawIndexed, a depth-stencil state change to a non-qualifying state) gets the game's own viewport back. Only a CHANGE of the
+// qualification issues viewports (ReconcileViewports), so a run of redraws costs one RSSetViewports at its start and one at its
+// end. Both states are classified once per state object (small caches holding a ref, like ObjResolve). No-op while the jitter
+// is not live (JitterLive / WorldJitterHeld; mirror: the unit's jitOn) and with light_redraw_jitter = 0. DrawInstanced /
+// indirect draws are not hooked: such a draw right after a redraw with the same depth-stencil state would keep the shift.
+struct LightStateEnt { IUnknown* key; bool ok; };          // key: the game's state (ref held); ok = qualifies
+constexpr int kLightCacheMax = 64;
+LightStateEnt g_lightDss[kLightCacheMax];
+int           g_lightDssN = 0;
+LightStateEnt g_lightRs[kLightCacheMax];
+int           g_lightRsN = 0;
+
+bool LightDssOk(const D3D11_DEPTH_STENCIL_DESC& d) {
+    return d.DepthEnable && d.DepthWriteMask == D3D11_DEPTH_WRITE_MASK_ZERO &&
+           (d.DepthFunc == D3D11_COMPARISON_GREATER_EQUAL || d.DepthFunc == D3D11_COMPARISON_EQUAL);
+}
+bool LightRsOk(const D3D11_RASTERIZER_DESC& d) { return d.DepthBias != 0 || d.SlopeScaledDepthBias != 0.0f; }
+
+// The cached verdict of state `s` (null = the D3D11 default: depth LESS with write / no bias = never a redraw).
+template <class S, class D>
+bool LightCached(LightStateEnt* tab, int& n, S* s, bool (*ok)(const D&)) {
+    if (!s) return false;
+    for (int i = 0; i < n; ++i) if (tab[i].key == s) return tab[i].ok;
+    D d{};
+    s->GetDesc(&d);
+    const bool v = ok(d);
+    if (n < kLightCacheMax) { s->AddRef(); tab[n].key = s; tab[n].ok = v; ++n; }   // the key stays alive (no pointer reuse)
+    return v;
+}
+
+// The game's depth-stencil state as tracked by hkOMSetDepthStencilState (OMGet when unknown, as ObjWatch).
+ID3D11DepthStencilState* LightGameDss(ID3D11DeviceContext* ctx) {
+    if (!g_objGameKnown) {
+        ID3D11DepthStencilState* cur = nullptr;
+        UINT ref = 0;
+        ctx->OMGetDepthStencilState(&cur, &ref);
+        g_objGameDss = cur; g_objGameRef = ref; g_objGameKnown = true;
+        if (cur) cur->Release();                          // still bound (runtime ref)
+    }
+    return g_objGameDss;
+}
+
+void LightFirstLog(ID3D11DeviceContext* ctx) {
+    D3D11_DEPTH_STENCIL_DESC dd{};
+    D3D11_RASTERIZER_DESC rd{};
+    if (ID3D11DepthStencilState* s = LightGameDss(ctx)) s->GetDesc(&dd);
+    ID3D11RasterizerState* rs = nullptr;
+    ctx->RSGetState(&rs);
+    if (rs) { rs->GetDesc(&rd); rs->Release(); }
+    Log("lighting redraws (phase 55): first %s lighting-pass mesh redraw issued with the G-buffer's viewport -- shift (%+.4f,%+.4f)%s, "
+        "game viewport %.0fx%.0f, depth func %s write %d, depth bias %d slope %.3f clamp %.2g (Present #%llu). The redraws now land "
+        "on the jittered G-buffer depth (light under the canopy no longer switches off on some jitter phases)%s",
+        g_lightBind == 2 ? "mirror" : "main", (double)g_vpShiftX, (double)g_vpShiftY, g_vpOver ? " + 1 px overscan" : "",
+        g_gameVp[0].Width, g_gameVp[0].Height, ObjCmpName(dd.DepthFunc), (int)dd.DepthWriteMask, rd.DepthBias,
+        (double)rd.SlopeScaledDepthBias, (double)rd.DepthBiasClamp, (unsigned long long)g_frames.load(std::memory_order_relaxed),
+        g_vpShifted ? "" : " -- WARNING: the viewport was NOT shifted (game viewport is not the pass size)");
+}
+
+// hkDrawIndexed / hkDrawIndexedInstanced (game context, not our work, g_lightBind != 0), before the game's draw.
+void LightRedrawOnDraw(ID3D11DeviceContext* ctx) {
+    bool want = false;
+    if (g_objHooked.load(std::memory_order_relaxed) && !g_previewPass &&
+        LightCached<ID3D11DepthStencilState, D3D11_DEPTH_STENCIL_DESC>(g_lightDss, g_lightDssN, LightGameDss(ctx), &LightDssOk) &&
+        (g_lightBind == 2 ? g_mirLight : (JitterLive() && !WorldJitterHeld()))) {
+        ID3D11RasterizerState* rs = nullptr;
+        ctx->RSGetState(&rs);
+        want = LightCached<ID3D11RasterizerState, D3D11_RASTERIZER_DESC>(g_lightRs, g_lightRsN, rs, &LightRsOk);
+        if (rs) rs->Release();                            // the cache holds its own ref
+    }
+    if (want) { ++g_cLightRedraws; ++g_cLightRedrawsTotal; }
+    if (want == g_lightRedrawShift) {
+        if (want && !g_vpShifted) ++g_cLightNoShift;
+        return;
+    }
+    g_lightRedrawShift = want;
+    if (want) ++g_cLightRuns; else ++g_cLightUnIdx;
+    ReconcileViewports(ctx, false);
+    if (want && !g_vpShifted) ++g_cLightNoShift;
+    if (want && g_cLightRedrawsTotal == 1) LightFirstLog(ctx);
+}
+
+// hkOMSetDepthStencilState (game context, after the game's call): a non-qualifying state ends a redraw run right here (covers
+// a following draw that is not hooked).
+void LightRedrawOnDss(ID3D11DeviceContext* ctx, ID3D11DepthStencilState* dss) {
+    if (LightCached<ID3D11DepthStencilState, D3D11_DEPTH_STENCIL_DESC>(g_lightDss, g_lightDssN, dss, &LightDssOk)) return;
+    g_lightRedrawShift = false;
+    ++g_cLightUnDss;
+    ReconcileViewports(ctx, false);
+}
+
+// ResetPassTrackingCore (game context change): the old context's binding is forgotten, the caches' refs dropped.
+void LightRedrawOnContextReset() {
+    g_lightBind = 0; g_lightRedrawShift = false;
+    for (int i = 0; i < g_lightDssN; ++i) g_lightDss[i].key->Release();
+    for (int i = 0; i < g_lightRsN; ++i) g_lightRs[i].key->Release();
+    g_lightDssN = g_lightRsN = 0;
+}
+
+// Level-4 statistics (the FIFO stats cadence, next to the "jitter check" line); the window restarts.
+void LightRedrawStatsLog(uint64_t blit, uint64_t blitsInWindow) {
+    const double perBlit = blitsInWindow ? (double)g_cLightRedraws / (double)blitsInWindow : 0.0;
+    LogDbg("lighting redraws (phase 55, light_redraw_jitter %d) @blit %llu: %llu shifted redraws in %llu lighting binds (%.1f per "
+        "blit), %llu runs; back to the game's viewport at a Draw %llu, a non-qualifying DrawIndexed %llu, a depth-stencil state %llu; "
+        "redraws NOT shifted (viewport not the pass size) %llu; cached states: depth-stencil %d, rasterizer %d",
+        g_lightRedrawCfg, (unsigned long long)blit, (unsigned long long)g_cLightRedraws, (unsigned long long)g_cLightBinds,
+        perBlit, (unsigned long long)g_cLightRuns, (unsigned long long)g_cLightUnDraw, (unsigned long long)g_cLightUnIdx,
+        (unsigned long long)g_cLightUnDss, (unsigned long long)g_cLightNoShift, g_lightDssN, g_lightRsN);
+    g_cLightBinds = g_cLightRedraws = g_cLightRuns = g_cLightUnDraw = g_cLightUnIdx = g_cLightUnDss = g_cLightNoShift = 0;
+}
+
 void STDMETHODCALLTYPE hkOMSetDepthStencilState(ID3D11DeviceContext* ctx, ID3D11DepthStencilState* dss, UINT ref) {
     CPU_HOOK(kHkOMSetDss);                                 // phase 31 CPU profiler (cpu_prof.h)
     if (t_inDlaa || !IsGameCtx(ctx)) { CPU_ORIG(oOMSetDepthStencilState(ctx, dss, ref)); return; }
     g_objGameDss = dss; g_objGameRef = ref; g_objGameKnown = true;
     if (g_objInScene) { ObjBindForGame(ctx); return; }
     CPU_ORIG(oOMSetDepthStencilState(ctx, dss, ref));
+    if (g_lightRedrawShift) LightRedrawOnDss(ctx, dss);   // phase 55: a non-qualifying state ends the redraw run here
     if (g_objSceneDsv && g_objOn) ObjWatch(ctx);
 }
 
@@ -15513,7 +15677,7 @@ void MirEndView(ID3D11DeviceContext* ctx, MirUnit& m, const char* lateWhy) {
     if (!m.open) return;
     if (m.rec.PendingReplay() > 0) MirReplay(ctx, m, true, 3);   // no G-buffer leave since: the game's targets restored
     m.open = false;
-    if (g_mirCur == u) { g_mirCur = -1; g_mirGbuf = false; g_mirJit = false; }
+    if (g_mirCur == u) { g_mirCur = -1; g_mirGbuf = false; g_mirJit = false; g_mirLight = false; }
     m.sCand += (uint64_t)m.ps.cand.Count(0);
     if (MirPathLive()) {
         if (lateWhy) {
@@ -15548,6 +15712,7 @@ void MirOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* 
     if (cu && cu->open && !sameView && (gbuf || sceneGbuf)) MirEndView(ctx, *cu, "the next G-buffer bind");
     g_mirGbuf = false;
     g_mirJit = false;
+    g_mirLight = false;                                   // phase 55
     if (gbuf && sameView) {
         g_mirGbuf = true; g_mirJit = cu->jitOn; g_mirShX = cu->jx; g_mirShY = cu->jy; g_mirW = cu->w; g_mirH = cu->h;
         return;
@@ -15574,7 +15739,10 @@ void MirOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* 
             }
         }
     } else if (n == 2) {
-        cu->lightSeen = true;                             // the lighting pass (never shifted)
+        cu->lightSeen = true;                             // the lighting pass (never shifted as a whole)
+        // phase 55: ... but its mesh redraws (depth GREATER_EQUAL / EQUAL, no depth write, depth bias) must land on the view's
+        // jittered G-buffer depth -> they get the view's own shift / size per draw (LightRedrawOnDraw, ReconcileViewports)
+        if (cu->jitOn) { g_mirLight = true; g_mirShX = cu->jx; g_mirShY = cu->jy; g_mirW = cu->w; g_mirH = cu->h; }
     }
 }
 
@@ -15610,7 +15778,7 @@ void MirNextFrame(uint64_t n) {
         if (m.open && c) MirEndView(c, m, "the frame boundary");
         m.open = false;
     }
-    g_mirCur = -1; g_mirGbuf = false; g_mirJit = false;
+    g_mirCur = -1; g_mirGbuf = false; g_mirJit = false; g_mirLight = false;
     ++g_mirWinPresents;
     if (g_mirSeenN > 0) ++g_mirWinFrames;
     MirTurnsEndFrame(g_mirFrame);                        // phase 41: the frame's run / held units, the slot balance
@@ -15634,7 +15802,7 @@ void MirInvalidate() {
 // ResetPassTrackingCore (game context change): the old context's views are abandoned (DLAA is forced off after a device
 // change; the units' DLAA resources belong to the old device and are never used again).
 void MirOnContextReset() {
-    g_mirCur = -1; g_mirGbuf = false; g_mirJit = false; g_mirSeenN = 0;
+    g_mirCur = -1; g_mirGbuf = false; g_mirJit = false; g_mirLight = false; g_mirSeenN = 0;
     for (MirUnit& m : g_mir) {
         m.open = false; m.rec.Reset(); m.color.Reset(); m.rt0.Reset(); m.depth.Reset();
         m.roDsv.Reset(); m.roDsvTex = nullptr;
@@ -20380,6 +20548,7 @@ void STDMETHODCALLTYPE hkDrawIndexedInstanced(ID3D11DeviceContext* ctx, UINT ic,
     if (!t_inDlaa && g_lodPerDraw.load(std::memory_order_relaxed) && IsGameCtx(ctx)) LodOnDraw(ctx);
     if (g_menuLateBound >= 0 && !t_inDlaa && IsGameCtx(ctx)) MenuLateCountDraw();   // v0.10.0 phase 16 VR late panel
     if (Vrs::g_want && !t_inDlaa && IsGameCtx(ctx)) VrsOnDraw(ctx);   // phase 34 (as hkDrawIndexed)
+    if (g_lightBind && !t_inDlaa && IsGameCtx(ctx)) LightRedrawOnDraw(ctx);   // phase 55 (as hkDrawIndexed)
     CPU_ORIG(oDrawIndexedInstanced(ctx, ic, inst, si, bv, sinst));
 }
 #endif
@@ -20496,6 +20665,7 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
 #ifdef WITH_DLAA
     if (g_menuLateN && gameCtx && !t_inDlaa && indexCount <= 6) MenuLateOnDraw(ctx, "DrawIndexed", indexCount, _ReturnAddress());
     if (Vrs::g_want && gameCtx && !t_inDlaa) VrsOnDraw(ctx);   // phase 34: full rate for a cut-out / SV_Depth / unknown PS
+    if (g_lightBind && gameCtx && !t_inDlaa) LightRedrawOnDraw(ctx);   // phase 55: a lighting-pass mesh redraw -> the G-buffer's viewport
 #endif
     CPU_ORIG(oDrawIndexed(ctx, indexCount, startIndex, baseVertex));
 #ifdef WITH_DLAA
@@ -20551,6 +20721,7 @@ void ResetPassTrackingCore(bool forceDlaaOff) {
     ObjOnContextReset();                                      // v0.9.0: depth-stencil twins / object records too
     FwdOnContextReset();                                       // v0.9.0 r5: forward-depth states (old device)
     MirOnContextReset();                                       // v0.10.0 phase 2: mirror views / units' game refs
+    LightRedrawOnContextReset();                               // phase 55: lighting bind state + state caches (old device refs)
     MenuLateReset("game context change");                      // v0.10.0 phase 16: recorded eye pictures (game refs)
     DepthTwin::PoolShutdown();                                 // v0.10.0 phase 8: pooled pass-slot textures (old device)
     GpuPerf::Shutdown();                                       // v0.10.0 phase 8: the perf queries belong to the old device
@@ -20560,6 +20731,7 @@ void ResetPassTrackingCore(bool forceDlaaOff) {
     g_stage.Restart();
 #endif
     g_gameVpN = 0; g_vpShifted = false; g_vpShiftX = g_vpShiftY = 0.0f; g_vpOver = false;
+    g_lightBind = 0; g_lightRedrawShift = false;               // phase 55
     while (g_fifoHead < g_passSeq) g_ring[SlotOf(g_fifoHead++)].consumed = true;   // drop outstanding passes
     g_needFirstPass = true;                                    // next G-buffer bind starts a pass
     g_flatMode = false; g_vrMode = false;                      // re-detected at the next matched blit
@@ -21186,6 +21358,7 @@ bool DlaaOffFilePresent() {
 //   jitter_sign_x / jitter_sign_y  -1 or +1 (default +1, see g_signX; template: docs/dlaa.ini.sample)
 //   jitter_enabled                 0/1 (default 1)
 //   jitter_overscan                0/1 (default 1, v0.10.0 phase 23): jittered world / mirror viewport 1 px larger right / bottom
+//   light_redraw_jitter            0/1 (default 1, phase 55): the lighting pass's mesh redraws get the G-buffer's jittered viewport
 //   jitter_phases                  Halton phase count (default 8 since v0.5.7, was 16; NVIDIA: 8 x render ratio)
 //   mv_enabled                     0/1 camera-reprojection motion vectors (default 1; Ctrl+F5 toggles)
 //   gpu_timing                     -1 auto (VR only, default) / 0 off / 1 on: timestamp queries around each
@@ -21476,6 +21649,7 @@ void LoadConfig() {
 #endif
             if (!strcmp(key, "xr_hidden_mask"))     { g_xrHiddenMask = v != 0 ? 1 : 0; g_xrHiddenMaskExplicit = true; continue; }   // phase 40
             if (!strcmp(key, "dlss_bias_mask"))     { g_biasCfg = v < 0 ? 0 : (v > 100 ? 100 : (int)v); g_biasExplicit = true; continue; }   // phase 49
+            if (!strcmp(key, "light_redraw_jitter")) { g_lightRedrawCfg = v != 0 ? 1 : 0; continue; }   // phase 55 (outside the chain: C1061)
             if (!strcmp(key, "cpu_pcore"))          { g_cpuPcore = v != 0 ? 1 : 0; g_cpuTuneExplicit = true; continue; }          // phase 54
             if (!strcmp(key, "cpu_priority"))       { g_cpuPriority = v != 0 ? 1 : 0; g_cpuTuneExplicit = true; continue; }       // phase 54 (only 0 / 1: never HIGH)
             if (!strcmp(key, "cpu_no_throttle"))    { g_cpuNoThrottle = v != 0 ? 1 : 0; g_cpuTuneExplicit = true; continue; }     // phase 54
@@ -21925,6 +22099,10 @@ void LoadConfig() {
     else
         Log("jitter (v0.10.0 phase 23): jitter_overscan=0 -- the phase-22 W x H viewport: a negative shift leaves the last pixel "
             "column / bottom row of the picture unrendered (sky in the depth), the sun-shaft / bloom haze blinks on those frames");
+    Log("lighting redraws (phase 55): light_redraw_jitter=%d (%s)", g_lightRedrawCfg, g_lightRedrawCfg
+        ? "the lighting pass's mesh redraws (depth GREATER_EQUAL / EQUAL, no depth write, depth bias) are rasterized with the "
+          "G-buffer's jittered viewport, so they match its depth on every jitter phase"
+        : "off: the lighting pass keeps the game's viewport; its redraws can miss the jittered G-buffer depth (lit areas flicker)");
     Log("OFXR Bridge support: ofxr_bridge=%d (%s)", (int)Ofxr::g_on.load(),
         Ofxr::g_on.load() ? "on: the layer's calls pass through the hooks" : "off");
 #ifdef WITH_DLAA
