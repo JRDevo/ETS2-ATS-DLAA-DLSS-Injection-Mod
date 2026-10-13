@@ -469,19 +469,28 @@ The three green lines under the title show the game's GPU time per frame, what t
 - **Flat:** the panel sits near the top-left corner of the screen.
 - **VR:** the panel shows in both eyes, centred in front of you, and on the desktop mirror window -- also on the
   VR main menu and the garage / truck dealer screens, before a save is loaded.
-- **While the menu is open the game gets no keys and no wheel / gamepad buttons at all** (the arrow keys steer and drive
-  in the default layout, and a held key must not honk the horn), so the truck does not react while you tune. Steering,
-  pedals and other axes still reach the game. `Escape` / pause and every game key are off too: close the menu first.
-  Closed, every key and button belongs to the game again.
-- **Bind a key in the menu:** select a row and **hold a key or a wheel button for 5 s** (`bind_hold_ms`): a bar in the
-  Hotkey column fills up, two rising beeps, and the key is that row's hotkey from now on, written to `dlaa.ini` at once.
-  Hold `Ctrl` / `Shift` / `Alt` with it for a combination. A key replaces the row's keyboard key and keeps its wheel
-  button, a wheel button the other way round; **holding `Backspace` clears** the row's hotkey (`none`). A key that
-  already belongs to another hotkey is taken away from it (the row says `taken from key_...` for 3 s). Rows with two
-  keys (minus / plus) or four (the models) ask for one hold per key, one after the other.
-- **Menu keys** row (in the `Panel settings` group): the five keys that open and drive the menu, bound by five holds in
-  a row (open / close, up, down, left, right). On this row the open key does not close the menu and a short tap of `Up` /
-  `Down` moves to the next row; hold longer to bind. See [`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu).
+- **You can keep driving with the menu open (v0.12.1):** only the five menu keys / buttons (by default `Delete` and the
+  arrow keys) are kept from the game while the menu is open; every other key, wheel and gamepad button, your shifter, the
+  steering and the pedals reach the game as usual. (v0.10.2 to v0.12.0 kept every key and button from the game.) Closed,
+  the menu keys belong to the game again.
+- **Hotkeys page (v0.12.1):** select **`Hotkeys...`** (near the bottom, above `Save`) and press `Right`: the panel shows
+  one line per hotkey action (`Sharpen strength -` and `Sharpen strength +` are separate lines, so are the four models and
+  the five menu keys) with its keyboard key and its wheel / gamepad button. `Up` / `Down` select a line, `Left` (or
+  `Right` on `< Back`) goes back to the main menu.
+- **Bind a key:** select a line and press `Right`. The line reads `Press a key or button...`: press the new key (hold
+  `Ctrl` / `Shift` / `Alt` with it for a combination) or the new wheel / gamepad button or D-pad direction. Two rising
+  beeps, and it is that action's hotkey from now on, written to `dlaa.ini` at once. A key replaces the keyboard key and
+  keeps the wheel button, a wheel button the other way round. A key or button that already belongs to another hotkey is
+  taken away from it (the line says `taken from key_...` for 3 s). `Left` or `Esc` cancels, **`Backspace` clears** the
+  hotkey (`none`), and so does nothing for 10 s (cancel). Only a **new press** counts: a key or button that is already
+  held when you press `Right` -- an H-shifter in gear, a held pedal button -- is ignored until you let it go and press it
+  again (issue #16), and steering / pedal axes never bind. While the line waits (a few seconds at most) the game gets no
+  keys or buttons, so the press you bind with does nothing in the game.
+- **Menu keys:** the last five lines (`Menu: open / close`, `up`, `down`, `left`, `right`) are the keys that drive the
+  menu. There every key counts, the menu keys too (so `Left` binds instead of cancelling): `Esc` or `Backspace` cancels,
+  or wait 10 s. They cannot be cleared, and the open key must keep a binding. The **Menu keys** row in the `Panel
+  settings` group shows them; `Right` on it opens the Hotkeys page there. See
+  [`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu).
 - **Groups (v0.10.3):** the panel rows (`Panel position X` / `Y`, `Panel size`, `Panel VR depth`, `Panel faces you`,
   `Menu keys`) sit in the **Panel settings** group and the fps box rows (`FPS counter lock`, `X`, `Y`, `size`, `colour`,
   `distance`, `turn`, `tilt`, `rotate`) in the
@@ -564,6 +573,8 @@ The three green lines under the title show the game's GPU time per frame, what t
   `info` or `debug`, live. Its cost column shows what the logging costs on the CPU per frame (the description adds the
   lines per second; at `debug` also what the CPU profiler costs). `debug` also runs the mod's GPU timers and CPU
   profiler all the time; use it for bug reports, `errors` for play.
+- **Hotkeys...** (v0.12.1) opens the Hotkeys page: every hotkey of the menu with its key and wheel button; bind one by
+  pressing `Right` on its line and then the new key or button (see above).
 - **Save to dlaa.ini** (the same as `Shift+F12`) writes the live values, and the panel position / fps box once you
   changed them.
 - **Reset to defaults** puts every row back to the fresh-install values, live and in `dlaa.ini` (the keys are removed
@@ -653,7 +664,7 @@ The table below lists the commonly used keys:
 | `cpu_cache_pin` | `0` | `1` = on AMD X3D CPUs with V-Cache on one half only (e.g. 7950X3D / 9950X3D) the game is kept on the V-Cache cores (read at game start only). Does nothing on other CPUs. Off by default: no fps gain was measured yet, try it and compare |
 | `did_shadow` | `1` | CPU saving for the per-part motion vectors (read at game start only): `1` = the mod remembers the game's drawing settings as the game sets them instead of asking the graphics driver for them at every draw (input layout, vertex shader, its constant buffers and samplers, rasterizer state); `2` = also the vertex / index buffers (faster only when the game reuses buffers between draws); `0` = ask at every draw (as before). The log's `did_shadow=` line at startup says which one ran |
 | `did_shadow_verify` | `-1` | test only: every Nth draw the remembered settings are compared with the driver's; a difference is logged (`MISMATCH`) and the mod asks the driver for the rest of that frame. `-1` = every 64th draw with `log_level = 4`, off otherwise; `0` = off |
-| `bind_hold_ms` | `5000` | tuning menu: how long (ms, `500`..`10000`) a key or wheel button must be held on a row to bind it to that row ([`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu)) |
+| `bind_hold_ms` | `5000` | tuning menu: how long (ms, `500`..`10000`) the menu `Right` must be held on the `Reset to defaults` row. (Up to v0.12.0 it was also the hold-to-bind time; v0.12.1 binds on the Hotkeys page with one press, [`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu)) |
 | `controller_name` | *(empty)* | only read the wheels / gamepads whose name contains this text for `WheelN` / `WheelUp` hotkey bindings, e.g. `T300` when a shifter shares the wheel's button numbers; empty = every controller ([`docs/KEYS.md`](docs/KEYS.md#wheel-gamepad-and-joystick-buttons)) |
 | `key_<action>` | *(see KEYS.md)* | re-bind any hotkey, e.g. `key_dlaa_toggle = Ctrl+D`, or `none` to disable it. Full list and format: [`docs/KEYS.md`](docs/KEYS.md) |
 | `log_level` | `1` | how much goes into the log file `dlaa_inject.log`: `0` = off, `1` = errors only (without an error no file is created), `2` = + warnings (problems the mod works around), `3` = + info (start-up and every setting change), `4` = debug: + statistics every few seconds, and the mod's GPU timers and CPU profiler run. Bug reports need `4`. The names work too (`off`, `errors`, `warnings`, `info`, `debug`). The menu's `Logging` row changes it live. The old `debug = 1` still means `4`, but only when there is no `log_level` line |

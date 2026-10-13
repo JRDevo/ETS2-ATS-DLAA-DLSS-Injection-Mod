@@ -42,10 +42,12 @@ constexpr float kWidgetRefH = 44.0f;
 
 struct Row {
     wchar_t name[48];
-    wchar_t value[40];
+    wchar_t value[72];                               // (v0.12.1 phase 50: was 40 -- the wide bind-mode line needs ~60)
     wchar_t keys[72];                                // the hotkey(s) of the row + a "VR only" / "flat only" tag
     wchar_t cost[32];                                // the cost column: "<cpu> | <gpu>" with ink marks (phase 45), "off", "same", "-"
     unsigned char greyed;                            // 1 = not applicable in the current mode (drawn grey)
+    unsigned char wide;                              // v0.12.1 phase 50: 1 = `value` spans the Value, Hotkey and Cost columns (keys /
+                                                     //   cost not drawn): the Hotkeys page's "Press a key or button..." line
 };
 // Fill with memset 0 first: Draw compares the whole struct to decide whether the texture must be rebuilt (the caller keeps
 // every text stable between its once-a-second GPU snapshots, so the texture is not rebuilt every frame).
@@ -53,6 +55,8 @@ struct Panel {
     wchar_t title[112];
     wchar_t perf[kPerfLines][224];                   // the perf block (Limit / fps / frame busy, the mod's CPU | GPU, the legend)
     wchar_t costHead[24];                            // the 4th column's header ("CPU | GPU ms" with ink marks, phase 45)
+    wchar_t colHead[3][24];                          // v0.12.1 phase 50: the first 3 column headers; "" = "Setting" / "Value" /
+                                                     //   "Hotkey" (the Hotkeys page: "Action" / "Keyboard" / "Controller")
     Row     rows[kMaxRows];
     int     nRows;
     int     sel;

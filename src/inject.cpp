@@ -1,3 +1,9 @@
+// v0.12.1 -- phase 50: HOTKEYS PAGE (GitHub issue #16; the block "the HOTKEYS PAGE" before the Reset hold, ~17090). Hold-to-bind
+//           is gone: main rows only change values; "Hotkeys..." / "Menu keys" (Right) open a second list in the same panel, one
+//           line per action; Right on a line waits for the NEXT FRESH press of one key / button (inputs held at that moment,
+//           e.g. an engaged H-shifter gear, are ignored until released; a stale controller read is not a release). While the
+//           menu is open only the 5 menu inputs are hidden from the game (KeySwallow::SetMenuHide, dinput_wrap.cpp), every
+//           key / button only while a bind waits. bind_hold_ms is now the Reset row's hold only.
 // v0.12.0 -- phases 40-49 (below, newest first) + issue #12 flat multi-monitor (FlatViewCount / r_multimon_mode 2).
 // phase 49 -- LIGHT GLOW GHOSTING FIX: NGX BIAS CURRENT COLOUR MASK (dlaa.ini dlss_bias_mask 0..100 %, default 100; menu row "Light
 //           glow ghosting fix", Picture group; the "GLOW BIAS MASK" block above hkDrawIndexed, DrawIdRecord::BiasShare, SceneDlaa::
@@ -146,7 +152,7 @@
 //           short footer, 3-line description fit, Reset = hold Right (bind_hold_ms), one bar square per second.
 // v0.10.2 -- VR perf pass (mv_cons_fail_tol, mirror units pre-built from mirror_sizes.txt, mv_area_clip, mirror_mv camera-only
 //           mirrors), 7-state Mirror DLAA row, Reset row, wheel / D-pad bindings (dinput_wrap.cpp JoyTap), HOLD TO BIND
-//           (MenuBindTick; the open menu hides every key / button from the game).
+//           (MenuBindTick; the open menu hides every key / button from the game; both replaced by v0.12.1 phase 50).
 // v0.10.1 -- (1) phase 25: full-screen draws inside a jittered pass (the forward-pass FOG TRIANGLE: Draw verts=3, UV-sampled)
 //           get the game's own viewport back for that draw and the shift after it; with the shifted + overscanned viewport
 //           the fog sampled the neighbour texel = a dark 1 px line on every silhouette in flat (hkDraw).
@@ -738,6 +744,7 @@
 #include "ofxr.h"                                  // v0.10.0 OFXR Bridge module-range pass-through
 #include "xr_hook.h"                               // v0.10.3 phase 27: OpenXR xrReleaseSwapchainImage (VR panel draw point)
 #include "fps_pose.h"                              // phase 44: fps box colours, VR distance, turn (pure maths)
+#include "hotkey_scan.h"                           // v0.12.1 phase 50: the Hotkeys page's fresh-press detector (pure logic)
 #ifdef WITH_DLAA
 #include "scene_dlaa.h"
 #include "preview_blit.h"
@@ -790,9 +797,9 @@ bool     g_resetNext      = true;        // pass reset=true to NGX on the next e
 // v0.7.7: every hotkey is a re-bindable action (dlaa.ini key_*), see KeyBind / PollKeys below. One down-edge
 // state per virtual-key code (g_vkWasDown) replaces the F-key-only table of v0.6.5.
 bool     g_vkWasDown[256] = {};          // edge detect per VK, refreshed every top-level Present (PollKeys)
-// v0.10.0 IN-GAME TUNING MENU (see the "TUNING MENU" block after ToggleMirrors): open state (also read by the input-hiding
-// window / DirectInput threads, dinput_wrap.cpp MenuHidesInput) and the panel placement (dlaa.ini menu_*; flat and VR have
-// their own).
+// v0.10.0 IN-GAME TUNING MENU (see the "TUNING MENU" block after ToggleMirrors): open state (v0.12.1 phase 50: the input-hiding
+// window / DirectInput threads get WHAT to hide from MenuPublishHide -> KeySwallow::SetMenuHide) and the panel placement
+// (dlaa.ini menu_*; flat and VR have their own).
 std::atomic<bool> g_menuOpen{false};
 int      g_menuX = 2, g_menuY = 8;       // flat: % of the picture width / height to the panel's left / top edge (0..90)
 float    g_menuScale = 1.0f;             // flat: 0.5..2.0 (1 = 720 px wide at 1080 p, scales with the picture height)
@@ -867,7 +874,8 @@ bool     g_vrsPassesExplicit = false;
 // Startup only: no menu row, so SaveSettings / ResetSettings have nothing to write or remove (the key stays as the user left it).
 int      g_cpuCachePin = 0;
 bool     g_menuExplicit = false;        // a menu_* value was changed in the menu -> SaveSettings writes the 9 menu_* keys
-int      g_bindHoldMs = 5000;            // v0.10.2 dlaa.ini bind_hold_ms (500..10000): the menu's hold-to-bind time (MenuBindTick)
+int      g_bindHoldMs = 5000;            // v0.10.2 dlaa.ini bind_hold_ms (500..10000): v0.12.1 phase 50: the Reset row's hold
+                                         //   time only (MenuResetTick; was also the hold-to-bind time, gone: Hotkeys page)
 // v0.10.0 live fps box (dlaa.ini fps_*; the tuning menu's FPS counter rows): drawn where the panel draws, also while the menu
 // is closed. Flat and VR have their own placement.
 bool     g_fpsShow = false;              // fps_show: the box is on
@@ -1162,13 +1170,15 @@ char g_controllerName[64] = "";
 inline const char* KeyName(KeyAction a) { return g_keys[a].name; }
 bool g_keyRepeat[KA_COUNT] = {};         // v0.10.0: this Present's hit is an auto-repeat (menu navigation keys only)
 // v0.10.2: the action was ACTIVE at the last PollKeys (keyboard part with exact modifiers or controller part down; was
-// PollKeys' s_wasActive). The menu's hold-to-bind sets it for a freshly bound action, so the input still held from the hold
-// does not fire the action at once (a hit needs "not active the Present before"); the Menu keys row's tap test reads it.
+// PollKeys' s_wasActive). The Hotkeys page's bind (v0.12.1 phase 50; v0.10.2 hold-to-bind) sets it for a freshly bound
+// action, so the input still held from the press does not fire the action at once (a hit needs "not active the Present
+// before"); the Reset row's hold reads it.
 bool g_keyWasActive[KA_COUNT] = {};
 // v0.10.2: the controller state PollKeys read this Present (KeySwallow::ControllerState consumes its press latches, so the
-// menu's hold-to-bind scan uses this copy instead of a second call). Render thread.
+// Hotkeys page's bind scan uses this copy instead of a second call). Render thread.
 uint32_t g_pollJoyBtn[4] = {};
 unsigned g_pollJoyPov = 0;
+uint32_t g_pollJoyFresh = 0;             // v0.12.1 phase 50: the controller slots whose state is KNOWN (read by the game < 0.5 s ago)
 
 // v0.10.1: one controller token (lower case, no spaces): "wheel1".."wheel128" -> 1..128, "wheelup" / "wheelright" /
 // "wheeldown" / "wheelleft" -> KeySwallow::kJoyPovUp..kJoyPovLeft. Modifiers are not allowed in front of it.
@@ -1229,7 +1239,7 @@ bool ParseBinding(const char* text, int* vkOut, unsigned* modsOut, int* joyOut) 
 }
 // The named keys of a chord (letters, digits, F1..F24 and Numpad0..Numpad9 are handled in code). v0.10.2: one table in the
 // CANONICAL spelling -- ParseKeyChord compares case-insensitively, KeyChordName writes this spelling back (a binding made in
-// the menu's hold-to-bind reads like the defaults: "PageUp", "NumpadAdd", "[").
+// the menu's Hotkeys page (v0.12.1 phase 50; v0.10.2: hold-to-bind) reads like the defaults: "PageUp", "NumpadAdd", "[").
 const struct { const char* name; int vk; } kKeyChordNames[] = {
     { "Home", VK_HOME }, { "End", VK_END }, { "Insert", VK_INSERT }, { "Delete", VK_DELETE },
     { "PageUp", VK_PRIOR }, { "PageDown", VK_NEXT }, { "Up", VK_UP }, { "Down", VK_DOWN },
@@ -1270,7 +1280,7 @@ bool ParseKeyChord(const char* buf, int* vkOut, unsigned* modsOut) {
     return true;
 }
 // v0.10.2: the inverse of ParseKeyChord's key part -- the canonical name of a virtual key ("F5", "Numpad3", "PageUp", "[",
-// "A", "0"). False (out = "") = the parser has no name for it: such a key cannot be bound (the hold-to-bind ignores it).
+// "A", "0"). False (out = "") = the parser has no name for it: such a key cannot be bound (the Hotkeys page ignores it).
 bool KeyChordName(int vk, char* out, size_t cap) {
     if (!cap) return false;
     out[0] = 0;
@@ -1390,13 +1400,15 @@ void PollKeys() {
                           (keyDown(VK_CONTROL) ? MOD_CTRL_BIT  : 0u) |
                           (keyDown(VK_MENU)    ? MOD_ALT_BIT   : 0u);
     uint32_t joyBtn[4]; unsigned joyPov = 0;             // v0.10.1 every tapped DirectInput controller, OR'd
-    KeySwallow::ControllerState(joyBtn, &joyPov);
-    for (int w = 0; w < 4; ++w) g_pollJoyBtn[w] = joyBtn[w];   // v0.10.2 for the menu's hold-to-bind scan (MenuBindScan)
+    uint32_t joyFresh = 0;
+    KeySwallow::ControllerState(joyBtn, &joyPov, &joyFresh);
+    for (int w = 0; w < 4; ++w) g_pollJoyBtn[w] = joyBtn[w];   // for the Hotkeys page's bind scan (v0.12.1 phase 50 MenuHkBindTick)
     g_pollJoyPov = joyPov;
+    g_pollJoyFresh = joyFresh;
     bool down[KA_COUNT], joyDown[KA_COUNT], active[KA_COUNT];
     static bool s_joyWasDown[KA_COUNT] = {};             // v0.10.1 the controller part, per action
     bool* const s_wasActive = g_keyWasActive;            // v0.10.1 keyboard part (exact mods) OR controller part, per action
-                                                         //   (v0.10.2: file scope, the hold-to-bind sets it)
+                                                         //   (v0.10.2: file scope, the Hotkeys page's bind sets it)
     // v0.10.0 tuning menu: the navigation keys fire only while the menu is open, and repeat while held (first repeat
     // 350 ms after the press, then every 70 ms; at most one per Present).
     const bool menuOpen = g_menuOpen.load(std::memory_order_relaxed);
@@ -15672,9 +15684,10 @@ void ToggleMirrors(uint64_t n) {
 // while the menu is open). The panel is drawn (TuningMenu::Draw, menu.cpp) at Present over the backbuffer (flat, and the VR
 // desktop mirror; under a present layer: over the game-side backbuffer while it is still bound at the frame-end boundary) and,
 // in VR, into each eye texture right after the game's eye blit (and the DLSS upscale composite), centred on the eye's optical
-// centre. While open, NO key and NO controller button reaches the game (v0.10.2 MenuHidesInput -> dinput_wrap.cpp; v0.10.0 /
-// v0.10.1: only the 5 menu keys), and a key / button held on a row for bind_hold_ms binds it to that row's hotkey (v0.10.2
-// HOLD TO BIND, MenuBindTick). Closed: one branch per Present and per blit Draw, nothing else.
+// centre. While open, only the 5 menu inputs are hidden from the game, every key / button only while the Hotkeys page waits
+// for a press (v0.12.1 phase 50 MenuPublishHide -> dinput_wrap.cpp; v0.10.2 .. v0.12.0: every key / button while open), and
+// hotkeys are set on the Hotkeys page (v0.12.1 phase 50, "the HOTKEYS PAGE" below; v0.10.2 .. v0.12.0: HOLD TO BIND on the
+// rows). Closed: one branch per Present and per blit Draw, nothing else.
 #ifndef DLAA_INJECTOR_VERSION
 #define DLAA_INJECTOR_VERSION "0.0.0-dev"
 #endif
@@ -15707,6 +15720,7 @@ enum MenuRowId {
     MR_FPSDIST,                                           // phase 44: VR distance (dlaa.ini fps_vr_dist)
     MR_FPSYAW, MR_FPSPITCH, MR_FPSROLL,                   // phase 44: VR turn / tilt / rotate (dlaa.ini fps_vr_yaw / _pitch / _roll)
     MR_LOG,                                               // phase 39: Logging (dlaa.ini log_level) + what logging costs
+    MR_HOTKEYS,                                           // v0.12.1 phase 50: "Hotkeys..." -- Right opens the Hotkeys page
     MR_SAVE, MR_RESET, MR_CLOSE,
     MR_COUNT
 };
@@ -15813,7 +15827,7 @@ const wchar_t* const kMenuDesc[] = {
     L"inward shift per eye with menu_vr_layer = 0. Same size at every depth. Change it if the panel is tiring to look at. No cost.",
     L"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same size from every angle "
     L"(as a VR layer, the default, the head-following fps box too); off = a flat picture. No cost.",
-    nullptr,                                              // MR_MENUKEYS: built with the hold time and the key names (MenuBuildPanel)
+    nullptr,                                              // MR_MENUKEYS: built with the key names (MenuBuildPanel)
     L"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see what a setting gains. "
     L"Its GPU cost is measured: per frame, every picture it is drawn into; none when off. Save keeps it for the next start.",
     // v0.10.3 phase 29c (MR_FPSGRP)
@@ -15842,6 +15856,9 @@ const wchar_t* const kMenuDesc[] = {
     // phase 39 (MR_LOG)
     L"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + problems worked around; "
     L"info = + start-up and changes; debug = + statistics, and debug also runs the GPU timers and the CPU profiler.",
+    // v0.12.1 phase 50 (MR_HOTKEYS)
+    L"Every hotkey of this menu, one line per action, with its keyboard key and controller button. Right opens the list; pick "
+    L"an action with Right, then press the new key or wheel button. Saved to dlaa.ini at once.",
     L"Writes everything shown here into dlaa.ini (settings, and the panel / fps box positions once you moved them), keeping every "
     L"other line. Do it once you like what you see, or the changes are gone at the next start. Mode saves itself.",
     // v0.10.3 phase 29d (MR_RESET): MenuBuildPanel puts "Hold <menu Right> for <bind_hold_ms> s to reset. " in front of it
@@ -17080,124 +17097,124 @@ void ToggleMirTurns(uint64_t n) {
     PlayTones(1, g_mirTurns ? 1200 : 300, 150, 0);
 }
 
-// ---- v0.10.2 HOLD TO BIND ----------------------------------------------------------------------------------------------------
-// While the menu is open, holding ONE key (any key ParseKeyChord can name) or ONE controller button / D-pad direction on a row
-// for bind_hold_ms (default 2000) binds it to that row's hotkey action, live and in dlaa.ini (key_<action>) at once:
-//  - the hold starts at the input's DOWN-EDGE (an input already held when the row was reached does not count; one held since
-//    the menu opened -- the open key, an engaged shifter gear -- is ignored until released once), is cancelled when it is released or a second key / button joins (Shift / Ctrl / Alt do not count: they are read
-//    when the hold completes, so holding Ctrl+F5 binds "Ctrl+F5"), completes once, and runs only with the game in front.
-//  - a keyboard hold replaces the action's keyboard part and keeps its controller part; a controller hold the reverse.
-//    Backspace (any modifiers) clears both parts ("none"), so Backspace itself cannot be bound in the menu.
-//  - an input already bound to ANOTHER action (same key + modifiers, or the same controller code) is taken from it (that part
-//    becomes empty there and is written too) -- but never the last binding of key_menu: that hold is refused (low tone).
-//  - rows with several actions (model 1..4, the minus / plus pairs, Menu keys) ask one hold per action in sequence; the next
-//    step needs a fresh press (the down-edge rule: release first), moving to another row or closing the menu ends the
-//    sequence (completed steps stay bound). The Menu keys row cannot be cleared with Backspace.
-//  - on every row but Menu keys the 5 current menu inputs (their key with ANY modifiers, their controller code) are no
-//    candidates: holding Down keeps scrolling. On the Menu keys row they are: the open key does not close the menu there, the
-//    menu Up / Down move the selection on RELEASE when tapped (shorter than kMenuTapMs), held longer they bind instead; no
-//    auto-repeat, Left / Right do nothing there.
-//  - the held input still does its current job once at the press (holding Shift+F11 toggles DLAA first), as any hotkey.
-// Render thread only (MenuKeys / MenuBuildPanel). The input-hiding threads never read g_keys (MenuHidesInput), so g_keys may
-// change here.
-constexpr ULONGLONG kMenuTapMs = 300;          // shorter = a tap (Menu keys row: navigates); also when the progress bar shows
-constexpr int       kMenuBindBar = 10;         // progress bar: the buffer (max squares); drawn = MenuBarSteps() = ONE PER SECOND of
-                                               //   bind_hold_ms (v0.10.3 phase 29e; was a fixed 8: "5 s shows more than 5 blocks")
+// ---- v0.12.1 phase 50: the HOTKEYS PAGE (GitHub issue #16; replaces the v0.10.2 .. v0.12.0 HOLD TO BIND) ---------------------
+// Why: hold-to-bind bound ANY input held bind_hold_ms on a main row, and the open menu hid every key / button from the game. A
+// player with an H-shifter opened the menu in gear: the gear (a button held for minutes) slipped past the "held since the menu
+// opened" ignore set (a controller slot that reads all up for a moment -- a stale / cleared DirectInput read -- dropped it from
+// the set) and was bound to the Mode row, so every shift into that gear toggled the mode. And nobody could drive with the menu
+// open. Now:
+//  - Main rows never bind. "Hotkeys..." (MR_HOTKEYS, Right) and "Menu keys" (Right) open a second list in the same panel
+//    (MenuBuildHotkeysPanel: the same Panel / Draw / VR quad path; g_menuPage). One line per bindable ACTION (kMenuHkLines) +
+//    "< Back" first; Up / Down move (wrap), Left (a fresh press) or Right on "< Back" go back to the main menu.
+//  - BIND MODE (MenuHkBindStart / MenuHkBindTick / MenuHkBindApply): Right (a fresh press) on a line waits for the NEXT FRESH
+//    DOWN-EDGE of ONE key (any key KeyChordName can name; Shift / Ctrl / Alt are read as modifiers at the press: Ctrl+F5) or ONE
+//    controller button / D-pad direction (axes never bind). Every key / button already DOWN when bind mode starts is in the
+//    snapshot (g_hk.scan, hotkey_scan.h HotkeyScan::Start) and needs a release and a new press -- an engaged shifter gear can
+//    never bind. A controller slot that goes stale / is cleared (dinput_wrap.cpp ControllerState freshSlots) reads all up
+//    WITHOUT a release: while the set of known slots changes, no controller edge counts and the held state is kept, and a
+//    slot that becomes known again is adopted as held; a controller edge also needs the input up in the two previous
+//    Presents (a single torn read is no release). Two fresh inputs in the same Present = ambiguous, nothing binds.
+//  - A key replaces the action's keyboard part, a button its controller part; an input bound to ANOTHER action is taken from it
+//    (that part becomes empty there, written too) -- never the last binding of key_menu (refused: low tone, bind mode stays).
+//    Written live and to dlaa.ini key_<action> at once (WriteIniPreserving).
+//  - Cancel: menu Left (a fresh press) on every line but the 5 menu-key lines; Escape on every line; 10 s without a press
+//    (kMenuHkTimeoutMs); the game in the background; the menu closed (the open key closes it on every line but the menu-key
+//    lines). Backspace clears the action to "none" -- on the 5 menu-key lines Backspace cancels instead (they cannot be
+//    cleared here; dlaa.ini key_menu* can). On the 5 menu-key lines the 5 current menu inputs ARE candidates (Left, Delete ...),
+//    so Escape / Backspace / the timeout are the only ways out there; on every other line they are not (Up / Down / Right do
+//    nothing, Left cancels).
+//  - The press that binds / clears / cancels does NOT fire its old action (MenuHkKeys clears every KeyBind::hit of each Present
+//    in bind mode) and does not reach the game: bind mode hides every key / button from the game (KeySwallow kHideAll), and the
+//    input that ended it stays hidden until it is released (g_hk.swallow, MenuPublishHide).
+// Render thread only (MenuKeys / MenuBuildPanel). The input threads read only what MenuPublishHide hands to KeySwallow.
+constexpr ULONGLONG kMenuTapMs = 300;          // the Reset hold: its bar shows after this (a tap shows nothing)
+constexpr int       kMenuBindBar = 10;         // the Reset hold's progress bar: the buffer (max squares); drawn = MenuBarSteps() =
+                                               //   ONE PER SECOND of bind_hold_ms (v0.10.3 phase 29e)
 inline int MenuBarSteps() { const int s = (g_bindHoldMs + 500) / 1000; return s < 1 ? 1 : (s > kMenuBindBar ? kMenuBindBar : s); }
 constexpr int       kSigJoy = 0x100;           // input signature: 1..255 = a key (VK), kSigJoy + code = a controller code
-struct MenuBindRow {
-    int         row;
-    int         n;                             // actions = holds in sequence (1..5)
-    KeyAction   a[5];
-    const char* step[5];                       // the step label ("step 2/2: plus"); unused when n == 1
-    const char* name;                          // the row name for the log line
+constexpr ULONGLONG kMenuHkTimeoutMs = 10000;  // bind mode ends by itself after this without a press
+struct MenuHkLine {
+    KeyAction   a;
+    const char* name;                          // the line's name (the Action column, ~28 characters fit)
 };
-const MenuBindRow kMenuBindRows[] = {
-    { MR_MODE,     1, { KA_MODE_CYCLE },                                     { "" },                         "Mode" },
-    { MR_PROFILE,  1, { KA_PROFILE },                                        { "" },                         "Performance profile" },
-    { MR_MODEL,    4, { KA_MODEL1, KA_MODEL2, KA_MODEL3, KA_MODEL4 },        { "model 1", "model 2", "model 3", "model 4" },
-                                                                                                             "DLAA model" },
-    { MR_SHARP,    2, { KA_SHARPEN_DOWN, KA_SHARPEN_UP },                    { "minus", "plus" },            "Sharpen strength" },
-    { MR_WIDTH,    2, { KA_WIDTH_DOWN, KA_WIDTH_UP },                        { "minus", "plus" },            "Sharpen width" },
-    { MR_LOD,      2, { KA_LOD_DOWN, KA_LOD_UP },                            { "minus", "plus" },            "Texture sharpness" },
-    { MR_LODCUT,   2, { KA_LOD_CUT_DOWN, KA_LOD_CUT_UP },                    { "minus", "plus" },            "Cut-out texture sharpness" },
-    { MR_AREA,     2, { KA_AREA_DOWN, KA_AREA_UP },                          { "minus", "plus" },            "DLAA area (VR)" },
-    { MR_DRAWIDS,  1, { KA_DRAWID_TOGGLE },                                  { "" },                         "Per-part motion vectors" },
-    { MR_MIRROR,   1, { KA_MIRROR_TOGGLE },                                  { "" },                         "Mirror DLAA" },
-    { MR_PRETM,    1, { KA_PRE_TONEMAP },                                    { "" },                         "DLAA before tonemap (flat)" },
-    { MR_FWD,      1, { KA_FWD_DEPTH },                                      { "" },                         "See-through depth" },
-    { MR_UPSCALE,  1, { KA_UPSCALE_TOGGLE },                                 { "" },                         "DLSS upscale" },
-    { MR_DLAA,     1, { KA_DLAA_TOGGLE },                                    { "" },                         "DLAA on / off" },
-    { MR_MENUKEYS, 5, { KA_MENU, KA_MENU_UP, KA_MENU_DOWN, KA_MENU_LEFT, KA_MENU_RIGHT },
-                      { "open", "up", "down", "left", "right" },                                             "Menu keys" },
-    { MR_SAVE,     1, { KA_SAVE },                                           { "" },                         "Save to dlaa.ini" },
+const MenuHkLine kMenuHkLines[] = {
+    { KA_MODE_CYCLE,     "Mode (DLAA / DLSS / off)" },
+    { KA_PROFILE,        "Performance profile" },
+    { KA_MODEL1,         "DLAA model 1 (K)" },
+    { KA_MODEL2,         "DLAA model 2 (E)" },
+    { KA_MODEL3,         "DLAA model 3 (F)" },
+    { KA_MODEL4,         "DLAA model 4 (M)" },
+    { KA_SHARPEN_DOWN,   "Sharpen strength -" },
+    { KA_SHARPEN_UP,     "Sharpen strength +" },
+    { KA_WIDTH_DOWN,     "Sharpen width -" },
+    { KA_WIDTH_UP,       "Sharpen width +" },
+    { KA_LOD_DOWN,       "Texture sharpness -" },
+    { KA_LOD_UP,         "Texture sharpness +" },
+    { KA_LOD_CUT_DOWN,   "Cut-out sharpness -" },
+    { KA_LOD_CUT_UP,     "Cut-out sharpness +" },
+    { KA_AREA_DOWN,      "DLAA area (VR) -" },
+    { KA_AREA_UP,        "DLAA area (VR) +" },
+    { KA_DRAWID_TOGGLE,  "Per-part motion vectors" },
+    { KA_MIRROR_TOGGLE,  "Mirror DLAA on / off" },
+    { KA_PRE_TONEMAP,    "DLAA before tonemap (flat)" },
+    { KA_FWD_DEPTH,      "See-through depth" },
+    { KA_UPSCALE_TOGGLE, "DLSS upscale" },
+    { KA_DLAA_TOGGLE,    "DLAA on / off" },
+    { KA_SAVE,           "Save to dlaa.ini" },
+    { KA_MENU,           "Menu: open / close" },
+    { KA_MENU_UP,        "Menu: up" },
+    { KA_MENU_DOWN,      "Menu: down" },
+    { KA_MENU_LEFT,      "Menu: left" },
+    { KA_MENU_RIGHT,     "Menu: right" },
 };
-// The bind actions of a row; null = the row takes no hold (OFXR, the panel / fps box rows, the 29c group headers, Reset, Close).
-const MenuBindRow* MenuBindOf(int row) {
-    for (const MenuBindRow& b : kMenuBindRows) if (b.row == row) return &b;
-    return nullptr;
+constexpr int kMenuHkActions = (int)(sizeof(kMenuHkLines) / sizeof(kMenuHkLines[0]));
+constexpr int kMenuHkCount = 1 + kMenuHkActions;   // line 0 = "< Back", line i = kMenuHkLines[i - 1]
+static_assert(kMenuHkCount <= TuningMenu::kMaxRows, "hotkeys page: too many lines for one Panel");
+enum { kMenuPageMain = 0, kMenuPageHotkeys = 1 };
+int g_menuPage = kMenuPageMain;                // the open menu's page (every open starts on the main page)
+int g_hkSel = 0;                               // the selected line of the Hotkeys page (kept while closed)
+inline bool MenuIsMenuAction(int a) { return a == KA_MENU || IsMenuNavKey(a); }
+inline KeyAction MenuHkAction(int line) { return kMenuHkLines[(line < 1 || line > kMenuHkActions) ? 0 : line - 1].a; }
+int MenuHkLineOf(KeyAction a) {                // the page line of action `a` (0 = "< Back" when it has none)
+    for (int i = 0; i < kMenuHkActions; ++i) if (kMenuHkLines[i].a == a) return i + 1;
+    return 0;
 }
-struct MenuBindState {
-    int       prevSig = 0;                     // the single input held at the previous Present: 0 none, -1 several, else a sig
-    int       sig = 0;                         // the input of the running hold (0 = none)
-    ULONGLONG t0 = 0;                          // its down-edge (GetTickCount64)
-    int       bar = 0;                         // progress steps shown (0..kMenuBindBar - 1; refreshed at most every 100 ms)
-    ULONGLONG barAt = 0;
-    int       row = -1;                        // the row of the sequence
-    int       step = 0;                        // its next step (0-based)
-    wchar_t   note[48] = L"";                  // "taken from key_x" ... in the row's Hotkey column until noteUntil
-    int       noteRow = -1;
+struct MenuHkBind {
+    bool      on = false;                      // bind mode (waits for a press)
+    int       line = 0;                        // its line (1..kMenuHkActions)
+    ULONGLONG t0 = 0;                          // its start (GetTickCount64; a refused press restarts the 10 s)
+    HotkeyScan::State scan;                    // the fresh-press detector (hotkey_scan.h): at the start, the snapshot of every
+                                               //   key / button / D-pad direction held (ignored until released and pressed again)
+    int       swallow = 0;                    // the input that ended bind mode, hidden from the game until released (0 none)
+    int       multi = 0;                       // "two at once" log lines this bind mode (at most 1)
+    wchar_t   note[64] = L"";                  // the result on its line ("= Ctrl+F5 (taken from key_mv_toggle)") until noteUntil
+    int       noteLine = -1;
     ULONGLONG noteUntil = 0;
-    int       navDir = 0;                      // Menu keys row: the menu Up (-1) / Down (+1) pressed, waiting for its release
-    ULONGLONG navAt = 0;
-    // inputs already held when the menu opened (the Delete that opened it, a held accelerator key, an engaged H-shifter gear =
-    // a button held for minutes): ignored by the scan until released once, so they neither start a hold nor block one
-    uint32_t  ignKey[8] = {};                  // bit vk
-    uint32_t  ignBtn[4] = {};                  // bit = button - 1
-    unsigned  ignPov = 0;
 };
-MenuBindState g_mb;
+MenuHkBind g_hk;
 inline unsigned HeldMods() {
     return ((GetAsyncKeyState(VK_SHIFT)   & 0x8000) ? MOD_SHIFT_BIT : 0u) |
            ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? MOD_CTRL_BIT  : 0u) |
            ((GetAsyncKeyState(VK_MENU)    & 0x8000) ? MOD_ALT_BIT   : 0u);
 }
-// The single input held now (game in front only): 0 none, -1 several (keys and / or controller inputs), else its signature.
-// Keys: only those KeyChordName can name (the list is built once; modifiers, mouse buttons and the Windows keys are not
-// among them). Controller: the state PollKeys read this Present; a D-pad diagonal is two directions = several. Inputs in the
-// ignore set (held since the menu opened) do not count; a released one leaves the set. adopt = put every input held now
-// into the ignore set (MenuBindReset at the open).
-int MenuBindScan(bool adopt = false) {
+// The keys the bind scan reads: every key KeyChordName can name (modifiers, mouse buttons and the Windows keys are not among
+// them) + Escape (cancels; it cannot be bound). Built once.
+const int* MenuHkScanVks(int* count) {
     static int s_vks[256];
-    static int s_nVk = -1;
-    if (s_nVk < 0) {
-        s_nVk = 0;
+    static int s_n = -1;
+    if (s_n < 0) {
+        s_n = 0;
         char nm[24];
-        for (int vk = 0x08; vk <= 0xFE; ++vk) if (KeyChordName(vk, nm, sizeof(nm))) s_vks[s_nVk++] = vk;
+        for (int vk = 0x08; vk <= 0xFE; ++vk) if (vk == VK_ESCAPE || KeyChordName(vk, nm, sizeof(nm))) s_vks[s_n++] = vk;
     }
-    if (!IsForeground()) return 0;                        // (the ignore set is kept while the game is in the background)
-    uint32_t key[8] = {};
-    for (int i = 0; i < s_nVk; ++i)
-        if (GetAsyncKeyState(s_vks[i]) & 0x8000) key[s_vks[i] >> 5] |= 1u << (s_vks[i] & 31);
-    MenuBindState& m = g_mb;
-    for (int w = 0; w < 8; ++w) m.ignKey[w] = adopt ? key[w] : (m.ignKey[w] & key[w]);
-    for (int w = 0; w < 4; ++w) m.ignBtn[w] = adopt ? g_pollJoyBtn[w] : (m.ignBtn[w] & g_pollJoyBtn[w]);
-    m.ignPov = adopt ? g_pollJoyPov : (m.ignPov & g_pollJoyPov);
-    int sig = 0, count = 0;
-    for (int w = 0; w < 8; ++w) {
-        uint32_t b = key[w] & ~m.ignKey[w];
-        for (int i = 0; b && i < 32; ++i, b >>= 1)
-            if (b & 1u) { sig = w * 32 + i; if (++count > 1) return -1; }
-    }
-    for (int w = 0; w < 4; ++w) {
-        uint32_t b = g_pollJoyBtn[w] & ~m.ignBtn[w];
-        for (int i = 0; b && i < 32; ++i, b >>= 1)
-            if (b & 1u) { sig = kSigJoy + w * 32 + i + 1; if (++count > 1) return -1; }
-    }
-    const unsigned pov = g_pollJoyPov & ~m.ignPov;
-    for (int d = 0; d < 4; ++d)
-        if (pov & (1u << d)) { sig = kSigJoy + KeySwallow::kJoyPovUp + d; if (++count > 1) return -1; }
-    return sig;
+    *count = s_n;
+    return s_vks;
+}
+void MenuHkKeysDown(uint32_t out[8]) {
+    for (int w = 0; w < 8; ++w) out[w] = 0;
+    int n = 0;
+    const int* vks = MenuHkScanVks(&n);
+    for (int i = 0; i < n; ++i) if (GetAsyncKeyState(vks[i]) & 0x8000) out[vks[i] >> 5] |= 1u << (vks[i] & 31);
 }
 // The text of an input signature ("Ctrl+F5" with the given modifiers, "Wheel7", "WheelUp").
 void MenuBindSigName(int sig, unsigned mods, char* out, size_t cap) {
@@ -17211,38 +17228,102 @@ bool MenuBindIsMenuInput(int sig) {
         if (sig >= kSigJoy ? g_keys[m].joy == sig - kSigJoy : g_keys[m].vk == sig) return true;
     return false;
 }
-// A fresh state at the open; every input held right now is ignored until released (the Delete that opened the menu starts no
-// hold, an engaged shifter gear blocks none).
-void MenuBindReset() {
-    g_mb = MenuBindState();
-    g_mb.row = g_menuSel;
-    g_mb.prevSig = MenuBindScan(true);
+void MenuHkNote(int line, const char* text) {
+    MenuWiden(g_hk.note, sizeof(g_hk.note) / sizeof(g_hk.note[0]), text);
+    g_hk.noteLine = line;
+    g_hk.noteUntil = GetTickCount64() + 3000;
 }
-void MenuBindNote(int row, const char* text) {
-    MenuWiden(g_mb.note, sizeof(g_mb.note) / sizeof(g_mb.note[0]), text);
-    g_mb.noteRow = row;
-    g_mb.noteUntil = GetTickCount64() + 3000;
+// What the open menu hides from the game now (KeySwallow::SetMenuHide; only on a change). Closed: nothing. Bind mode:
+// everything. Else: the 5 menu inputs + the swallowed input (until released). Per Present at the end of MenuKeys and at
+// MenuClose.
+void MenuPublishHide() {
+    const bool open = g_menuOpen.load(std::memory_order_relaxed);
+    const int mode = !open ? KeySwallow::kHideNone : (g_hk.on ? KeySwallow::kHideAll : KeySwallow::kHideMenuInputs);
+    int vks[KeySwallow::kMaxHide] = {}, joys[KeySwallow::kMaxHide] = {};
+    int k = 0;
+    if (mode == KeySwallow::kHideMenuInputs) {
+        static const KeyAction kMenuActs[] = { KA_MENU, KA_MENU_UP, KA_MENU_DOWN, KA_MENU_LEFT, KA_MENU_RIGHT };
+        for (KeyAction m : kMenuActs) { vks[k] = g_keys[m].vk; joys[k] = g_keys[m].joy; ++k; }
+        if (g_hk.swallow > 0 && g_hk.swallow < kSigJoy) vks[k++] = g_hk.swallow;
+        else if (g_hk.swallow >= kSigJoy)               joys[k++] = g_hk.swallow - kSigJoy;
+    }
+    static int s_mode = -1, s_vks[KeySwallow::kMaxHide] = {}, s_joys[KeySwallow::kMaxHide] = {};
+    if (mode == s_mode && !memcmp(vks, s_vks, sizeof(vks)) && !memcmp(joys, s_joys, sizeof(joys))) return;
+    s_mode = mode;
+    memcpy(s_vks, vks, sizeof(vks));
+    memcpy(s_joys, joys, sizeof(joys));
+    KeySwallow::SetMenuHide(mode, vks, joys, k);
 }
-// A completed hold: binds `sig` to the row's current step (or clears it: Backspace), takes it from any other action, writes
-// dlaa.ini, logs, beeps, and moves the sequence on. A refused hold (Backspace on Menu keys / the last key_menu binding)
-// keeps the step.
-void MenuBindComplete(const MenuBindRow& br, int sig, ULONGLONG heldMs, uint64_t n) {
-    const int step = g_mb.step < br.n ? g_mb.step : 0;
-    const KeyAction a = br.a[step];
+// Opens the Hotkeys page on `line` (MR_HOTKEYS: the first action; Menu keys: "Menu: open / close").
+void MenuHkOpen(int line, uint64_t n) {
+    g_menuPage = kMenuPageHotkeys;
+    g_hkSel = line < 0 || line >= kMenuHkCount ? 0 : line;
+    const int keep = g_hk.swallow;
+    g_hk = MenuHkBind();
+    g_hk.swallow = keep;
+    Log("tuning menu: Hotkeys page opened (Present #%llu) -- %s / %s select an action, %s binds it (then press the new key / "
+        "button), %s goes back", (unsigned long long)n, KeyName(KA_MENU_UP), KeyName(KA_MENU_DOWN), KeyName(KA_MENU_RIGHT),
+        KeyName(KA_MENU_LEFT));
+}
+void MenuHkBack(const char* why, uint64_t n) {
+    g_menuPage = kMenuPageMain;
+    const int keep = g_hk.swallow;
+    g_hk = MenuHkBind();
+    g_hk.swallow = keep;
+    LogDbg("tuning menu: back to the main page (%s, Present #%llu)", why, (unsigned long long)n);
+}
+// Bind mode on `line`: the snapshot of everything held now (the menu Right that started it included) = the "previous" state,
+// so only a fresh down-edge after it counts.
+void MenuHkBindStart(int line, uint64_t n) {
+    const int keep = g_hk.swallow;
+    g_hk = MenuHkBind();
+    g_hk.swallow = keep;
+    g_hk.on = true;
+    g_hk.line = line;
+    g_hk.t0 = GetTickCount64();
+    uint32_t key[8];
+    MenuHkKeysDown(key);
+    HotkeyScan::Start(g_hk.scan, key, g_pollJoyBtn, g_pollJoyPov, g_pollJoyFresh);
+    int held = 0;
+    auto bits = [](uint32_t v) { int c = 0; for (; v; v &= v - 1) ++c; return c; };
+    for (int w = 0; w < 8; ++w) held += bits(key[w]);
+    for (int w = 0; w < 4; ++w) held += bits(g_pollJoyBtn[w]);
+    held += bits(g_pollJoyPov);
+    const KeyAction a = MenuHkAction(line);
+    Log("hotkey %s: waiting for a key / button (Hotkeys page, Present #%llu) -- %d key(s) / button(s) held now are ignored until "
+        "released and pressed again; %s; the game gets no key / button meanwhile", g_keys[a].ini, (unsigned long long)n, held,
+        MenuIsMenuAction(a) ? "Escape or Backspace cancels (menu keys cannot be cleared here), 10 s without a press too"
+                            : "the menu Left / Escape cancel, Backspace clears it, 10 s without a press cancels");
+    PlayTones(1, 880, 60, 0);
+}
+void MenuHkBindEnd(int swallowSig) {
+    g_hk.on = false;
+    g_hk.swallow = swallowSig;
+}
+void MenuHkCancel(const char* why, int swallowSig, uint64_t n) {
+    const KeyAction a = MenuHkAction(g_hk.line);
+    Log("hotkey %s unchanged (%s; Hotkeys page, Present #%llu) -- still %s", g_keys[a].ini, why, (unsigned long long)n,
+        (g_keys[a].vk || g_keys[a].joy) ? g_keys[a].name : "none");
+    MenuHkNote(g_hk.line, "cancelled");
+    MenuHkBindEnd(swallowSig);
+    PlayTones(1, 300, 120, 0);
+}
+// A fresh press in bind mode: binds `sig` to the line's action (or clears it: clear = Backspace), takes it from any other
+// action, writes dlaa.ini, logs, beeps. True = bind mode ends; false = refused (the last binding of key_menu): bind mode stays
+// and its 10 s start again.
+bool MenuHkBindApply(int sig, bool clear, uint64_t n) {
+    const KeyAction a = MenuHkAction(g_hk.line);
     KeyBind& k = g_keys[a];
     const bool isKey = sig < kSigJoy;
-    const bool clear = isKey && sig == VK_BACK;
-    const unsigned mods = isKey ? HeldMods() : 0u;
+    const unsigned mods = isKey && !clear ? HeldMods() : 0u;
     char held[64];
     MenuBindSigName(sig, mods, held, sizeof(held));
-    char stepTxt[24] = "";
-    if (br.n > 1) snprintf(stepTxt, sizeof(stepTxt), " step %d/%d", step + 1, br.n);
-    if (clear && br.row == MR_MENUKEYS) {
-        LogWarn("hotkey %s NOT cleared (held %s for %.1f s on row \"%s\"%s, Present #%llu): the 5 menu keys cannot be cleared in the "
-            "menu (dlaa.ini key_menu* can)", k.ini, held, (double)heldMs / 1000.0, br.name, stepTxt, (unsigned long long)n);
-        MenuBindNote(br.row, "menu keys: no clear");
+    if (clear && a == KA_MENU) {                          // (unreachable: Backspace cancels on the menu-key lines; kept as a guard)
+        LogWarn("hotkey %s NOT cleared (Hotkeys page, Present #%llu): the menu must stay reachable", k.ini, (unsigned long long)n);
+        MenuHkNote(g_hk.line, "NOT cleared: the menu needs it");
         PlayTones(1, 200, 400, 0);
-        return;
+        g_hk.t0 = GetTickCount64();
+        return false;
     }
     int nvk = k.vk, njoy = k.joy;
     unsigned nmods = k.mods;
@@ -17259,12 +17340,12 @@ void MenuBindComplete(const MenuBindRow& br, int sig, ULONGLONG heldMs, uint64_t
         }
     for (int t = 0; t < nt; ++t)
         if (taken[t] == KA_MENU && (isKey ? !g_keys[KA_MENU].joy : !g_keys[KA_MENU].vk)) {
-            LogWarn("hotkey %s NOT bound to %s (held for %.1f s on row \"%s\"%s, Present #%llu): it is the only binding of key_menu -- "
-                "the menu must stay reachable (bind another open key in step 1 first)", held, k.ini, (double)heldMs / 1000.0,
-                br.name, stepTxt, (unsigned long long)n);
-            MenuBindNote(br.row, "key_menu needs it");
+            LogWarn("hotkey %s NOT bound to %s (Hotkeys page, Present #%llu): it is the only binding of key_menu -- the menu must "
+                "stay reachable (give \"Menu: open / close\" another key first)", held, k.ini, (unsigned long long)n);
+            MenuHkNote(g_hk.line, "NOT bound: key_menu needs it");
             PlayTones(1, 200, 400, 0);
-            return;
+            g_hk.t0 = GetTickCount64();
+            return false;
         }
     char was[64];
     snprintf(was, sizeof(was), "%s", (k.vk || k.joy) ? k.name : "none");
@@ -17289,103 +17370,225 @@ void MenuBindComplete(const MenuBindRow& br, int sig, ULONGLONG heldMs, uint64_t
         }
     }
     const bool written = WriteIniPreserving(kv, nkv);     // "none" is written as such (an empty value would delete the line)
-    Log("hotkey %s = %s (%s in the menu: held %s for %.1f s on row \"%s\"%s; was \"%s\"%s) -- %s, Present #%llu", k.ini, k.name,
-        clear ? "cleared" : "bound", held, (double)heldMs / 1000.0, br.name, stepTxt, was, takenTxt,
+    Log("hotkey %s = %s (%s on the Hotkeys page: pressed %s; was \"%s\"%s) -- %s, Present #%llu", k.ini, k.name,
+        clear ? "cleared" : "bound", clear ? "Backspace" : held, was, takenTxt,
         written ? "dlaa.ini written" : "dlaa.ini write FAILED (live until the game closes)", (unsigned long long)n);
+    char note[96];
     if (!written) {
-        MenuBindNote(br.row, "dlaa.ini write FAILED");
+        MenuHkNote(g_hk.line, "dlaa.ini write FAILED (live only)");
         PlayTones(1, 200, 400, 0);                        // failure: one long 200 Hz tone (as a failed save)
     } else if (clear) {
-        MenuBindNote(br.row, "cleared (none)");
+        MenuHkNote(g_hk.line, "cleared (none)");
         PlayTones(1, 300, 150, 0);                        // clear: one low 300 Hz tone
     } else {
-        if (nt) {
-            char nb[64];
-            snprintf(nb, sizeof(nb), "taken from %s%s", g_keys[taken[0]].ini, nt > 1 ? " +more" : "");
-            MenuBindNote(br.row, nb);
-        }
+        if (nt) snprintf(note, sizeof(note), "= %s  (taken from %s%s)", held, g_keys[taken[0]].ini, nt > 1 ? " +more" : "");
+        else    snprintf(note, sizeof(note), "= %s", held);
+        MenuHkNote(g_hk.line, note);
         BeepSeq b;                                        // bound: the Save two-tone 600 -> 900 Hz
         b.n = 2; b.freq[0] = 600; b.ms[0] = 120; b.freq[1] = 900; b.ms[1] = 120; b.gapMs = 40;
         PlayBeeps(b);
     }
-    g_mb.step = step + 1 < br.n ? step + 1 : 0;           // the next step is asked at once (a fresh press starts it)
+    MenuHkBindEnd(sig);                                   // the pressed input stays hidden from the game until released
+    return true;
 }
-// Per Present while the menu is open (MenuKeys, after the navigation): the hold state machine of the selected row.
-void MenuBindTick(uint64_t n) {
+// Per Present in bind mode (MenuHkKeys): the cancel rules, then the fresh down-edges since the previous Present.
+void MenuHkBindTick(uint64_t n) {
+    const KeyAction a = MenuHkAction(g_hk.line);
+    const bool menuLine = MenuIsMenuAction(a);
     const ULONGLONG now = GetTickCount64();
-    const int sel = g_menuSel;
-    if (g_mb.row != sel) { g_mb.row = sel; g_mb.step = 0; g_mb.sig = 0; g_mb.bar = 0; }   // another row: the sequence ends
-    const MenuBindRow* br = MenuBindOf(sel);
-    const int raw = MenuBindScan();
-    if (raw != g_mb.prevSig) {                            // an edge (or a change): any running hold ends, a new one may start
-        g_mb.sig = 0; g_mb.bar = 0;
-        if (raw > 0 && br && (sel == MR_MENUKEYS || !MenuBindIsMenuInput(raw))) { g_mb.sig = raw; g_mb.t0 = now; g_mb.barAt = now; }
-    } else if (g_mb.sig && br) {
-        const ULONGLONG el = now - g_mb.t0;
-        if (el >= (ULONGLONG)g_bindHoldMs) {
-            const int sig = g_mb.sig;
-            g_mb.sig = 0; g_mb.bar = 0;                   // completes once: the input stays held, no new edge
-            MenuBindComplete(*br, sig, el, n);
-        } else {
-            const int bar = (int)(el * MenuBarSteps() / (ULONGLONG)g_bindHoldMs);
-            if (bar != g_mb.bar && now - g_mb.barAt >= 100) { g_mb.bar = bar; g_mb.barAt = now; }   // <= 10 panel rebuilds / s
+    if (!IsForeground())                    { MenuHkCancel("the game went to the background", 0, n); return; }
+    if (now - g_hk.t0 >= kMenuHkTimeoutMs)  { MenuHkCancel("10 s without a press", 0, n); return; }
+    if (!menuLine && KeyHit(KA_MENU_LEFT) && !g_keyRepeat[KA_MENU_LEFT]) { MenuHkCancel("menu Left", 0, n); return; }
+    uint32_t key[8];
+    MenuHkKeysDown(key);
+    // the fresh presses since the previous Present (hotkey_scan.h: held-at-start inputs need a release first; a controller
+    // slot that goes stale / is cleared / comes back, or a single torn read, is never taken for a release -- issue #16)
+    const HotkeyScan::Edges ed = HotkeyScan::Step(g_hk.scan, key, g_pollJoyBtn, g_pollJoyPov, g_pollJoyFresh);
+    int sig = 0, count = 0;
+    bool esc = false, bksp = false;
+    for (int w = 0; w < 8; ++w) {
+        uint32_t e = ed.key[w];
+        for (int i = 0; e && i < 32; ++i, e >>= 1) {
+            if (!(e & 1u)) continue;
+            const int vk = w * 32 + i;
+            if (vk == VK_ESCAPE)                              esc = true;
+            else if (vk == VK_BACK && (menuLine || !MenuBindIsMenuInput(vk))) bksp = true;
+            else if (!menuLine && MenuBindIsMenuInput(vk))    continue;   // not a candidate here (Left: KeyHit above)
+            else                                              { sig = vk; ++count; }
         }
     }
-    g_mb.prevSig = raw;
+    for (int w = 0; w < 4; ++w) {
+        uint32_t e = ed.btn[w];
+        for (int i = 0; e && i < 32; ++i, e >>= 1) {
+            if (!(e & 1u)) continue;
+            const int s = kSigJoy + w * 32 + i + 1;
+            if (!menuLine && MenuBindIsMenuInput(s)) continue;
+            sig = s; ++count;
+        }
+    }
+    for (int d = 0; d < 4; ++d) {
+        if (!(ed.pov & (1u << d))) continue;
+        const int s = kSigJoy + KeySwallow::kJoyPovUp + d;
+        if (!menuLine && MenuBindIsMenuInput(s)) continue;
+        sig = s; ++count;
+    }
+    if (esc) { MenuHkCancel("Escape", VK_ESCAPE, n); return; }
+    if (bksp) {
+        if (menuLine) MenuHkCancel("Backspace: the menu keys cannot be cleared here", VK_BACK, n);
+        else          MenuHkBindApply(VK_BACK, true, n);
+        return;
+    }
+    if (count == 1) { MenuHkBindApply(sig, false, n); return; }
+    if (count > 1 && !g_hk.multi++)
+        Log("hotkey %s: %d keys / buttons pressed in the same frame -- ignored (press ONE; Present #%llu)", g_keys[a].ini, count,
+            (unsigned long long)n);
 }
-// The hold progress bar: `steps` of MenuBarSteps() squares filled, ONE SQUARE PER SECOND of the hold (v0.10.3 phase 29d: shared by
-// the bind hold and the Reset hold; 29e: one per second, was a fixed 8).
-void MenuHoldBar(int steps, wchar_t (&bar)[kMenuBindBar + 1]) {
-    const int n = MenuBarSteps();
-    const int fill = steps < 0 ? 0 : (steps > n ? n : steps);
-    for (int i = 0; i < n; ++i) bar[i] = i < fill ? L'\u25A0' : L'\u25A1';   // filled / empty square (WGL4)
-    bar[n] = 0;
+// Per Present while the Hotkeys page is shown (MenuKeys).
+void MenuHkKeys(uint64_t n) {
+    if (g_hk.on) {
+        MenuHkBindTick(n);
+        for (KeyBind& k : g_keys) k.hit = false;          // bind mode: nothing fires, also not the press that ended it
+        return;
+    }
+    if (KeyHit(KA_MENU_UP))   g_hkSel = (g_hkSel + kMenuHkCount - 1) % kMenuHkCount;   // (auto-repeat scrolls)
+    if (KeyHit(KA_MENU_DOWN)) g_hkSel = (g_hkSel + 1) % kMenuHkCount;
+    if (g_hkSel < 0 || g_hkSel >= kMenuHkCount) g_hkSel = 0;
+    if (KeyHit(KA_MENU_RIGHT) && !g_keyRepeat[KA_MENU_RIGHT]) {
+        if (g_hkSel == 0) MenuHkBack("< Back", n);
+        else              MenuHkBindStart(g_hkSel, n);
+    } else if (KeyHit(KA_MENU_LEFT) && !g_keyRepeat[KA_MENU_LEFT]) {
+        MenuHkBack("menu Left", n);
+    }
 }
-// The selected row's hold feedback on the panel: progress bar / note in the Hotkey column, the step in the Value column of a
-// multi-step row. MenuBuildPanel, after the rows.
-void MenuBindDecorate(TuningMenu::Panel& p, int sel) {
-    const MenuBindRow* br = MenuBindOf(sel);
-    if (!br) return;
-    TuningMenu::Row& r = p.rows[sel];
-    constexpr size_t kV = sizeof(r.value) / sizeof(wchar_t), kK = sizeof(r.keys) / sizeof(wchar_t);
+// The swallowed input (the one that ended bind mode) is released: it is no longer hidden. Per Present while open.
+void MenuHkSwallowTick() {
+    const int s = g_hk.swallow;
+    if (!s) return;
+    const bool down = s < kSigJoy ? (GetAsyncKeyState(s) & 0x8000) != 0 : JoyPartDown(s - kSigJoy, g_pollJoyBtn, g_pollJoyPov);
+    if (!down) g_hk.swallow = 0;
+}
+// A footer that fits left of the licence line (TuningMenu::FooterFits; measured only when the candidates change).
+void MenuFitFooter(const wchar_t* const* cand, int n, wchar_t* out, size_t cap) {
+    static wchar_t s_key[256] = L"", s_shown[256] = L"";
+    if (wcscmp(cand[0], s_key)) {
+        wcsncpy_s(s_key, cand[0], _TRUNCATE);
+        int i = 0;
+        while (i + 1 < n && !TuningMenu::FooterFits(cand[i])) ++i;
+        wcsncpy_s(s_shown, cand[i], _TRUNCATE);
+    }
+    wcsncpy_s(out, cap, s_shown, _TRUNCATE);
+}
+// The Hotkeys page as a Panel (MenuBuildPanel on that page; the same Draw / VR quad path as the main page).
+void MenuBuildHotkeysPanel(TuningMenu::Panel& p, bool vr) {
+    using namespace TuningMenu;
+    constexpr size_t kN = sizeof(p.rows[0].name) / sizeof(wchar_t), kV = sizeof(p.rows[0].value) / sizeof(wchar_t),
+                     kK = sizeof(p.rows[0].keys) / sizeof(wchar_t);
+    swprintf(p.title, sizeof(p.title) / sizeof(wchar_t), L"ETS2 / ATS DLAA & DLSS mod v%hs - hotkeys", DLAA_INJECTOR_VERSION);
+    swprintf(p.colHead[0], 24, L"Action");
+    swprintf(p.colHead[1], 24, L"Keyboard");
+    swprintf(p.colHead[2], 24, L"Controller");
+    swprintf(p.costHead, sizeof(p.costHead) / sizeof(wchar_t), L" ");   // (no cost column on this page)
+    MenuPerfLines(p, vr);
+    char snUp[40], snDown[40], snLeft[40], snRight[40], snMenu[40];
+    KeyShortName(KA_MENU_UP, snUp, sizeof(snUp));
+    KeyShortName(KA_MENU_DOWN, snDown, sizeof(snDown));
+    KeyShortName(KA_MENU_LEFT, snLeft, sizeof(snLeft));
+    KeyShortName(KA_MENU_RIGHT, snRight, sizeof(snRight));
+    KeyShortName(KA_MENU, snMenu, sizeof(snMenu));
     const ULONGLONG now = GetTickCount64();
-    const bool mine = g_mb.row == sel;
-    const bool holding = mine && g_mb.sig && now - g_mb.t0 >= kMenuTapMs;   // a tap shows nothing
-    if (br->n > 1 && mine && (holding || g_mb.step > 0)) {
-        const int st = g_mb.step < br->n ? g_mb.step : 0;
-        swprintf(r.value, kV, L"step %d/%d: %hs", st + 1, br->n, br->step[st]);
+    swprintf(p.rows[0].name, kN, L"< Back");
+    swprintf(p.rows[0].value, kV, L"-");
+    swprintf(p.rows[0].keys, kK, L"%hs / %hs: main menu", snLeft, snRight);
+    for (int i = 1; i < kMenuHkCount; ++i) {
+        Row& r = p.rows[i];
+        const KeyBind& k = g_keys[kMenuHkLines[i - 1].a];
+        MenuWiden(r.name, kN, kMenuHkLines[i - 1].name);
+        char t[64];
+        if (k.vk) { KeyBindText(k.vk, k.mods, 0, t, sizeof(t)); MenuWiden(r.value, kV, t); }
+        else      swprintf(r.value, kV, L"%ls", k.joy ? L"-" : L"none");
+        if (k.joy) { JoyTokenName(k.joy, t, sizeof(t)); MenuWiden(r.keys, kK, t); }
+        else       swprintf(r.keys, kK, L"-");
+        const bool menuLine = MenuIsMenuAction(kMenuHkLines[i - 1].a);
+        const bool note = g_hk.noteLine == i && now < g_hk.noteUntil;
+        if (g_hk.on && g_hk.line == i) {
+            r.wide = 1;
+            if (note)          swprintf(r.value, kV, L"%ls -- press another", g_hk.note);
+            else if (menuLine) swprintf(r.value, kV, L"Press a key or button...  (Esc = cancel, 10 s)");
+            else               swprintf(r.value, kV, L"Press a key or button...  (%hs = cancel, Backspace = clear)", snLeft);
+        } else if (note) {
+            r.wide = 1;
+            swprintf(r.value, kV, L"%ls", g_hk.note);
+        }
     }
-    if (holding) {
-        wchar_t bar[kMenuBindBar + 1];
-        MenuHoldBar(g_mb.bar, bar);
-        char nm[64];
-        MenuBindSigName(g_mb.sig, g_mb.sig < kSigJoy ? HeldMods() : 0u, nm, sizeof(nm));
-        swprintf(r.keys, kK, L"hold %ls %hs", bar, nm);
-    } else if (g_mb.noteRow == sel && now < g_mb.noteUntil) {
-        swprintf(r.keys, kK, L"%ls", g_mb.note);
-    } else if (br->n > 1 && mine && g_mb.step > 0) {
-        swprintf(r.keys, kK, L"hold a key for: %hs", br->step[g_mb.step < br->n ? g_mb.step : 0]);
+    p.nRows = kMenuHkCount;
+    p.sel = g_hkSel < 0 || g_hkSel >= kMenuHkCount ? 0 : g_hkSel;
+    constexpr size_t kD = sizeof(p.desc) / sizeof(wchar_t);
+    const int sel = g_hk.on ? g_hk.line : p.sel;
+    if (sel == 0) {
+        swprintf(p.desc, kD, L"Back to the main menu. %hs does the same on every line of this page. Every key and controller button "
+                 L"except the 5 menu keys still reaches the game while this menu is open, so you can keep driving.", snLeft);
+    } else {
+        const KeyAction a = kMenuHkLines[sel - 1].a;
+        const bool menuLine = MenuIsMenuAction(a);
+        if (g_hk.on && menuLine)
+            swprintf(p.desc, kD, L"Press ONE new key or controller button for %hs: any key, also another menu key (it is taken from "
+                     L"it). Keys / buttons already held now are ignored until released. Esc or Backspace cancels, so does 10 s "
+                     L"without a press; menu keys cannot be cleared here.", kMenuHkLines[sel - 1].name);
+        else if (g_hk.on)
+            swprintf(p.desc, kD, L"Press ONE new key (Shift / Ctrl / Alt with it make a combination) or controller button / "
+                     L"D-pad direction. Keys / buttons already held now (a shifter gear) are ignored until released; axes never "
+                     L"bind. %hs or Esc cancels, Backspace clears to none, 10 s without a press cancels.", snLeft);
+        else if (menuLine)
+            swprintf(p.desc, kD, L"One of the 5 keys that drive this menu (dlaa.ini %hs). %hs, then press the new key or button: "
+                     L"the other menu keys can be taken too. These lines cannot be cleared, and the open key must keep a "
+                     L"binding. Saved to dlaa.ini at once.", g_keys[a].ini, snRight);
+        else
+            swprintf(p.desc, kD, L"%hs (dlaa.ini %hs). %hs, then press the new key or button: a key replaces the Keyboard part, a "
+                     L"controller button or D-pad direction the Controller part. A key / button used by another action moves "
+                     L"here. Saved to dlaa.ini at once.", kMenuHkLines[sel - 1].name, g_keys[a].ini, snRight);
     }
-    // (v0.10.3 phase 29c: the footer is no longer rewritten here -- one constant footer, MenuBuildPanel; the hold time and the
-    // step count overflowed its line in VR. The progress is the row's bar / step text above.)
+    wchar_t f[3][128];
+    if (g_hk.on && MenuIsMenuAction(MenuHkAction(g_hk.line))) {
+        swprintf(f[0], 128, L"press the new key / button   Esc cancel   (10 s)");
+        swprintf(f[1], 128, L"press a key / button   Esc cancel");
+        swprintf(f[2], 128, L"Esc cancel");
+    } else if (g_hk.on) {
+        swprintf(f[0], 128, L"press the new key / button   %hs cancel   Backspace clear", snLeft);
+        swprintf(f[1], 128, L"%hs cancel   Backspace clear", snLeft);
+        swprintf(f[2], 128, L"%hs cancel", snLeft);
+    } else {
+        swprintf(f[0], 128, L"%hs / %hs select   %hs bind   %hs back   %hs close", snUp, snDown, snRight, snLeft, snMenu);
+        swprintf(f[1], 128, L"%hs bind   %hs back   %hs close", snRight, snLeft, snMenu);
+        swprintf(f[2], 128, L"%hs bind   %hs back", snRight, snLeft);
+    }
+    const wchar_t* const cand[3] = { f[0], f[1], f[2] };
+    MenuFitFooter(cand, 3, p.footer, sizeof(p.footer) / sizeof(wchar_t));
 }
 
 // ---- v0.10.3 phase 29d: "Reset to defaults" = a HOLD of the menu Right key ----------------------------------------------------
 // Left / Right reset at once before (MenuChange): one stray press lost every setting. Now a FRESH press of the menu Right on the
 // Reset row (KeyHit without g_keyRepeat: an auto-repeat hit neither starts nor restarts it) starts a hold; while the action stays
 // active (g_keyWasActive[KA_MENU_RIGHT] = its key with its exact modifiers or its wheel button down, as PollKeys read it this
-// Present) for bind_hold_ms, the Hotkey column fills the hold-to-bind bar (MenuHoldBar, shown after kMenuTapMs as that bar), then
+// Present) for bind_hold_ms, the Hotkey column fills a progress bar (MenuHoldBar, shown after kMenuTapMs), then
 // ResetSettings runs ONCE (its beeps / log) and the hold is consumed: "reset done" until the release, a new press for another.
 // Released early, another row, the game in the background or the menu closed / opened = nothing happens, the state clears.
-// Left does nothing on the row. Kept apart from g_mb (hold to bind): the Reset row has no MenuBindRow (MenuBindOf = null, so
-// MenuBindTick starts no bind there) and the 5 menu inputs are bind candidates only on the Menu keys row (MenuBindIsMenuInput).
+// Left does nothing on the row. v0.12.1 phase 50: bind_hold_ms is now ONLY this hold (the main rows no longer bind; hotkeys are
+// set on the Hotkeys page, which has no hold).
 struct MenuResetHold {
     ULONGLONG t0 = 0;                          // the fresh press (GetTickCount64); 0 = no hold
-    int       bar = 0;                         // progress steps shown (as MenuBindState: refreshed at most every 100 ms)
+    int       bar = 0;                         // progress steps shown (refreshed at most every 100 ms)
     ULONGLONG barAt = 0;
     bool      done = false;                    // ResetSettings ran for this press: nothing more until the release
 };
 MenuResetHold g_mrh;
+// The hold progress bar: `steps` of MenuBarSteps() squares filled, ONE SQUARE PER SECOND of the hold (v0.10.3 phase 29d / 29e;
+// v0.12.1 phase 50: the Reset hold's only, the bind hold is gone).
+void MenuHoldBar(int steps, wchar_t (&bar)[kMenuBindBar + 1]) {
+    const int n = MenuBarSteps();
+    const int fill = steps < 0 ? 0 : (steps > n ? n : steps);
+    for (int i = 0; i < n; ++i) bar[i] = i < fill ? L'\u25A0' : L'\u25A1';   // filled / empty square (WGL4)
+    bar[n] = 0;
+}
 // The hold time as the Reset row shows it: "5", "2.5" (one decimal only when not whole).
 void MenuHoldSecs(char* out, size_t cap) {
     if (g_bindHoldMs % 1000 == 0) snprintf(out, cap, "%d", g_bindHoldMs / 1000);
@@ -17439,6 +17642,7 @@ void MenuRow(TuningMenu::Panel& p, int id, const wchar_t* name, const char* keys
 void MenuBuildPanel(TuningMenu::Panel& p) {
     memset(&p, 0, sizeof(p));
     const bool vr = MenuVr();
+    if (g_menuPage == kMenuPageHotkeys) { MenuBuildHotkeysPanel(p, vr); return; }   // v0.12.1 phase 50: the Hotkeys page
     constexpr size_t kV = sizeof(p.rows[0].value) / sizeof(wchar_t);
     swprintf(p.title, sizeof(p.title) / sizeof(wchar_t), L"ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu", DLAA_INJECTOR_VERSION);
     p.nRows = MR_COUNT;
@@ -17573,7 +17777,8 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     else        swprintf(p.rows[MR_DEPTH].value, kV, L"%d px", g_menuVrDepth);
     MenuRow(p, MR_FACE, L"Panel faces you (VR)", "dlaa.ini menu_vr_face", vr ? nullptr : "VR only", !vr);   // phase 16
     swprintf(p.rows[MR_FACE].value, kV, L"%ls", onOff[g_menuVrFace ? 1 : 0]);
-    // v0.10.2: the open key is the value, the 4 others the Hotkey column (v0.10.3 phase 29c: their short names; in the group)
+    // v0.10.2: the open key is the value, the 4 others the Hotkey column (v0.10.3 phase 29c: their short names; in the group).
+    // v0.12.1 phase 50: Right opens the Hotkeys page on its "Menu: open / close" line (the row no longer binds)
     snprintf(k, sizeof(k), "%s / %s / %s / %s", snUp, snDown, snLeft, snRight);
     MenuRow(p, MR_MENUKEYS, L"Menu keys", k, nullptr, false);
     MenuWiden(p.rows[MR_MENUKEYS].value, kV, snMenu);
@@ -17604,6 +17809,9 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     swprintf(p.rows[MR_FPSPITCH].value, kV, L"%+d deg", g_fpsVrPitch);
     MenuRow(p, MR_FPSROLL, L"FPS rotate", "dlaa.ini fps_vr_roll", vr ? nullptr : "VR only", !vr);
     swprintf(p.rows[MR_FPSROLL].value, kV, L"%+d deg", g_fpsVrRoll);
+    snprintf(k, sizeof(k), "%s: open", snRight);          // v0.12.1 phase 50: the Hotkeys page
+    MenuRow(p, MR_HOTKEYS, L"Hotkeys...", k, nullptr, false);
+    swprintf(p.rows[MR_HOTKEYS].value, kV, L"%d actions", kMenuHkActions);
     MenuRow(p, MR_SAVE, L"Save to dlaa.ini", KeyName(KA_SAVE), nullptr, false);
     swprintf(p.rows[MR_SAVE].value, kV, L"-");
     snprintf(k, sizeof(k), "hold %s %s s", snRight, holdS);   // v0.10.3 phase 29d: was "dlaa.ini" (MenuResetTick)
@@ -17622,19 +17830,19 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     if (sel == MR_RESET)                                  // v0.10.3 phase 29d: the hold first (no cost sentence on this row)
         swprintf(p.desc, kD, L"Hold %hs for %hs s to reset. %ls", snRight, holdS, kMenuDesc[sel]);
     else if (kMenuDesc[sel]) swprintf(p.desc, kD, L"%ls%ls%ls", kMenuDesc[sel], sent[0] ? L" " : L"", sent);
-    else if (sel == MR_MENUKEYS)                          // v0.10.2
-        swprintf(p.desc, kD, L"The 5 keys that open and drive this menu. Hold a key or wheel button %.1f s, 5 times in a row: open "
-                 L"/ close, up, down, left, right. Backspace cannot clear them here. A short tap of %hs / %hs moves to another row "
-                 L"(ends the sequence); %hs does not close the menu on this row: use Close menu.", (double)g_bindHoldMs / 1000.0,
-                 snUp, snDown, snMenu);
-    else                swprintf(p.desc, kD, L"Closes the menu; every key and button goes back to the game. %hs does the same from "
-                                 L"any row but Menu keys.", snMenu);
-    // v0.10.3 phase 29c: ONE footer for every state (the hold / bind progress is in the row), from the short key names. It shares
-    // its line with the licence line (menu.cpp), so the rebind hint is shortened, then dropped, when the text does not fit left of
+    else if (sel == MR_MENUKEYS)                          // v0.10.2 (v0.12.1 phase 50: set on the Hotkeys page)
+        swprintf(p.desc, kD, L"The 5 keys that open and drive this menu: %hs opens / closes it (the value), %hs / %hs / %hs / %hs "
+                 L"move (Hotkey column). While the menu is open only these 5 are kept from the game. %hs: change them on the "
+                 L"Hotkeys page.", snMenu, snUp, snDown, snLeft, snRight, snRight);
+    else                swprintf(p.desc, kD, L"Closes the menu; the 5 menu keys go back to the game. %hs does the same from any "
+                                 L"row.", snMenu);
+    // v0.10.3 phase 29c: ONE footer for every state (the Reset progress is in the row), from the short key names. It shares
+    // its line with the licence line (menu.cpp), so the hint is shortened, then dropped, when the text does not fit left of
     // it (TuningMenu::FooterFits, measured with the panel's font; only when a menu key name changed: cached by the full text).
+    // v0.12.1 phase 50: the hint names the Hotkeys row (was "hold a key: rebind").
     {
         constexpr size_t kF = sizeof(p.footer) / sizeof(wchar_t);
-        static const wchar_t* const kHint[] = { L"   hold a key: rebind", L"   hold: rebind", L"" };
+        static const wchar_t* const kHint[] = { L"   keys: Hotkeys...", L"" };
         constexpr size_t kT = 256;                        // (5 x 39 + the words: never truncated before the fit test)
         static wchar_t s_full[kT] = L"", s_shown[kT] = L"";
         wchar_t full[kT];
@@ -17648,8 +17856,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         }
         wcsncpy_s(p.footer, kF, s_shown, _TRUNCATE);
     }
-    MenuBindDecorate(p, sel);                             // v0.10.2 hold to bind: bar / step / note (by MR id: before the compaction)
-    MenuResetDecorate(p, sel);                            // v0.10.3 phase 29d: the Reset hold's bar (by MR id too)
+    MenuResetDecorate(p, sel);                            // v0.10.3 phase 29d: the Reset hold's bar (by MR id: before the compaction)
 
     // v0.10.3 phase 29c: the rows of a collapsed group are not drawn -- the visible rows move to the front in MR order, nRows =
     // their count (RefHeight: the panel shrinks), sel = the visible index of g_menuSel (a hidden selection -- not reachable,
@@ -17669,8 +17876,13 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
 
 void MenuClose(uint64_t n, const char* why) {
     g_menuOpen = false;
-    g_mb = MenuBindState();                               // v0.10.2: a running hold / bind sequence ends with the menu
-    g_mrh = MenuResetHold();                              // v0.10.3 phase 29d: so does a Reset hold
+    if (g_hk.on)                                          // v0.12.1 phase 50: a waiting Hotkeys-page bind ends with the menu
+        Log("hotkey %s unchanged (the menu closed while it waited for a press, Present #%llu)", g_keys[MenuHkAction(g_hk.line)].ini,
+            (unsigned long long)n);
+    g_hk = MenuHkBind();                                  // (the swallowed input too: the game gets every key again)
+    g_menuPage = kMenuPageMain;
+    MenuPublishHide();                                    // nothing hidden any more
+    g_mrh = MenuResetHold();                              // v0.10.3 phase 29d: a Reset hold ends with the menu
     g_menuBlitEye = -1; g_menuBlitRt = nullptr;
     PlayTones(1, 300, 120, 0);
     char placed[240] = "";
@@ -17816,8 +18028,14 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
                 g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll, (unsigned long long)n);
         break;
     }
+    case MR_HOTKEYS:                                         // v0.12.1 phase 50: Right opens the Hotkeys page (Left: nothing)
+        if (dir > 0) MenuHkOpen(1, n);
+        break;
+    case MR_MENUKEYS:                                        // v0.12.1 phase 50: ... on its "Menu: open / close" line
+        if (dir > 0) MenuHkOpen(MenuHkLineOf(KA_MENU), n);
+        break;
     case MR_SAVE:    SaveSettings(n); break;
-    case MR_RESET:   break;                                  // v0.10.3 phase 29d: a HOLD of Right resets (MenuResetTick), no press
+    case MR_RESET:   break;                                 // v0.10.3 phase 29d: a HOLD of Right resets (MenuResetTick), no press
     case MR_CLOSE:   MenuClose(n, "Close row"); break;
     default: break;
     }
@@ -17827,8 +18045,10 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
 void MenuKeys(uint64_t n) {
     CpuProf::Block cpb(CpuProf::kBMenu);               // phase 31 CPU profiler (cpu_prof.h)
     const bool open = g_menuOpen.load(std::memory_order_relaxed);
-    // v0.10.2: on the Menu keys row the open key does not close the menu (the row binds it; Close menu closes from there)
-    if (KeyHit(KA_MENU) && !(open && g_menuSel == MR_MENUKEYS)) {
+    // v0.12.1 phase 50: while the Hotkeys page waits for a press on one of the 5 menu-key lines, the open key is a candidate
+    // there (it binds, MenuHkBindTick); everywhere else it opens / closes the menu (a waiting bind is cancelled by the close)
+    const bool openKeyBinds = open && g_menuPage == kMenuPageHotkeys && g_hk.on && MenuIsMenuAction(MenuHkAction(g_hk.line));
+    if (KeyHit(KA_MENU) && !openKeyBinds) {
         if (!open) {
             g_menuOpen = true;
             g_menuMoved = false;
@@ -17837,47 +18057,33 @@ void MenuKeys(uint64_t n) {
             if (g_menuSel < 0 || g_menuSel >= MR_COUNT) g_menuSel = 0;
             if (!MenuRowVisible(g_menuSel)) g_menuSel = MenuRowGroup(g_menuSel);
             MenuPerfOpen();                               // GPU timers on while open (debug = 0) + fresh figures
-            MenuBindReset();                              // v0.10.2 hold to bind: the held open key starts no hold (after the
-                                                          // selection fix above: it records g_menuSel as the bind row)
+            g_menuPage = kMenuPageMain;                   // v0.12.1 phase 50: every open starts on the main page, no bind
+            g_hk = MenuHkBind();
             g_mrh = MenuResetHold();                      // v0.10.3 phase 29d: no Reset hold carried over
             PlayTones(2, 880, 60, 60);
-            Log("tuning menu opened (%s, Present #%llu) -- %s / %s select a row, %s / %s change it, hold a key or button %.1f s "
-                "on a row to bind it (bind_hold_ms); the game sees no key / button while the menu is open", KeyName(KA_MENU),
+            Log("tuning menu opened (%s, Present #%llu) -- %s / %s select a row, %s / %s change it; hotkeys are set on the "
+                "Hotkeys... row; only the 5 menu keys / buttons are kept from the game while the menu is open", KeyName(KA_MENU),
                 (unsigned long long)n, KeyName(KA_MENU_UP), KeyName(KA_MENU_DOWN), KeyName(KA_MENU_LEFT),
-                KeyName(KA_MENU_RIGHT), (double)g_bindHoldMs / 1000.0);
+                KeyName(KA_MENU_RIGHT));
         } else {
             MenuClose(n, KeyName(KA_MENU));
         }
+        MenuPublishHide();                                // v0.12.1 phase 50: open = the menu inputs, closed = nothing
         return;                                           // the open / close press does nothing else this frame
     }
     if (!open) return;
-    if (g_menuSel == MR_MENUKEYS) {
-        // v0.10.2 Menu keys row: the menu Up / Down act on RELEASE after a tap (< kMenuTapMs); held longer they are a bind hold.
-        // No auto-repeat here (a scroll arriving with the key held stops on this row); Left / Right do nothing on this row.
-        const ULONGLONG now = GetTickCount64();
-        if (KeyHit(KA_MENU_UP) && !g_keyRepeat[KA_MENU_UP])          { g_mb.navDir = -1; g_mb.navAt = now; }
-        else if (KeyHit(KA_MENU_DOWN) && !g_keyRepeat[KA_MENU_DOWN]) { g_mb.navDir = +1; g_mb.navAt = now; }
-        else if (g_mb.navDir) {
-            const KeyAction na = g_mb.navDir < 0 ? KA_MENU_UP : KA_MENU_DOWN;
-            if (!g_keyWasActive[na]) {                    // released
-                if (now - g_mb.navAt < kMenuTapMs) g_menuSel = MenuStepRow(g_menuSel, g_mb.navDir);   // 29c: visible rows
-                g_mb.navDir = 0;
-            } else if (now - g_mb.navAt >= kMenuTapMs) {
-                g_mb.navDir = 0;                          // held: a bind hold, not a step
-            }
-        }
+    MenuHkSwallowTick();                                  // v0.12.1 phase 50: the input that ended a bind, released yet?
+    if (g_menuPage == kMenuPageHotkeys) {
+        MenuHkKeys(n);                                    // v0.12.1 phase 50: the Hotkeys page (navigation + bind mode)
     } else {
-        g_mb.navDir = 0;
         if (KeyHit(KA_MENU_UP))   g_menuSel = MenuStepRow(g_menuSel, -1);   // v0.10.3 phase 29c: the next VISIBLE row
         if (KeyHit(KA_MENU_DOWN)) g_menuSel = MenuStepRow(g_menuSel, +1);   // (a collapsed group's rows are skipped, wraps)
-        if (g_menuSel != MR_MENUKEYS) {                   // (arriving on Menu keys: Left / Right do nothing there)
-            if (KeyHit(KA_MENU_RIGHT))     MenuChange(g_menuSel, +1, g_keyRepeat[KA_MENU_RIGHT], n);
-            else if (KeyHit(KA_MENU_LEFT)) MenuChange(g_menuSel, -1, g_keyRepeat[KA_MENU_LEFT], n);
-        }
+        if (KeyHit(KA_MENU_RIGHT))     MenuChange(g_menuSel, +1, g_keyRepeat[KA_MENU_RIGHT], n);
+        else if (KeyHit(KA_MENU_LEFT)) MenuChange(g_menuSel, -1, g_keyRepeat[KA_MENU_LEFT], n);
+        if (g_menuOpen.load(std::memory_order_relaxed)) MenuResetTick(n);  // v0.10.3 phase 29d: the Reset row's hold of Right
     }
-    if (g_menuOpen.load(std::memory_order_relaxed)) MenuResetTick(n);  // v0.10.3 phase 29d: the Reset row's hold of Right
-    if (g_menuOpen.load(std::memory_order_relaxed)) MenuBindTick(n);   // v0.10.2 hold to bind (the Close row may have closed it)
     if (g_menuOpen.load(std::memory_order_relaxed)) MenuPerfTick();   // (the Close row may have closed it just now)
+    MenuPublishHide();                                    // v0.12.1 phase 50: what the game may not see now (on a change only)
 }
 
 // The Present-time target of the panel and the fps box. Flat (and the VR desktop mirror): the backbuffer of the presenting
@@ -20963,7 +21169,7 @@ void LoadConfig() {
             else if (!strcmp(key, "vrs_outer"))      { g_vrsOuter = v < 10 ? 10 : (v > 150 ? 150 : (int)v); g_vrsExplicit = true; }
             else if (!strcmp(key, "vrs_quality"))    g_vrsQuality = v != 0 ? 1 : 0;
             else if (!strcmp(key, "vrs_debug"))      g_vrsDebug = v != 0 ? 1 : 0;
-            else if (!strcmp(key, "bind_hold_ms"))   g_bindHoldMs = v < 500 ? 500 : (v > 10000 ? 10000 : (int)v);   // v0.10.2
+            else if (!strcmp(key, "bind_hold_ms"))   g_bindHoldMs = v < 500 ? 500 : (v > 10000 ? 10000 : (int)v);   // v0.10.2 (v0.12.1: Reset hold only)
             else if (!strcmp(key, "menu_scale") || !strcmp(key, "menu_vr_scale")) {
                 const double s = strtod(eq + 1, nullptr);
                 const float c = (s != s) ? 1.0f : (float)(s < 0.3 ? 0.3 : (s > 2.0 ? 2.0 : s));   // v0.10.2: 0.3..2.0
@@ -21129,8 +21335,8 @@ void LoadConfig() {
         "menu_scale=%.1f, VR menu_vr_x=%d menu_vr_y=%d menu_vr_scale=%.1f menu_vr_depth=%d menu_vr_dist=%d menu_vr_face=%d (%s); "
         "v0.10.3 phase 29 "
         "menu_vr_layer=%d (%s); VR in the picture: drawn last on each eye picture once the game's read of it is confirmed (phase "
-        "16); v0.10.2 bind_hold_ms=%d (hold a key / button that long on a row to bind it; no key / button reaches the game while "
-        "the menu is open)", KeyName(KA_MENU), KeyName(KA_MENU_UP),
+        "16); bind_hold_ms=%d (hold the menu Right that long on the Reset row to reset; v0.12.1 phase 50: hotkeys are set on the "
+        "Hotkeys page, and only the 5 menu keys / buttons are kept from the game while the menu is open)", KeyName(KA_MENU), KeyName(KA_MENU_UP),
         KeyName(KA_MENU_DOWN), KeyName(KA_MENU_LEFT), KeyName(KA_MENU_RIGHT), g_menuX, g_menuY, (double)g_menuScale, g_menuVrX,
         g_menuVrY, (double)g_menuVrScale, g_menuVrDepth, g_menuVrDist, g_menuVrFace,
         g_menuVrFace ? "the VR panel turns to face the eye" : "flat VR panel", g_menuVrLayer,
@@ -21850,13 +22056,12 @@ void OnProcessDetach(bool processTerminating) {
     // original window procedure goes back if the window still exists and still points at ours. At process exit no message
     // is dispatched any more: nothing is touched.
     g_menuOpen.store(false, std::memory_order_relaxed);
+    KeySwallow::SetMenuHide(KeySwallow::kHideNone, nullptr, nullptr, 0);   // v0.12.1 phase 50: nothing hidden any more
     if (!processTerminating) KeySwallow::UnhookWindow();
 }
 
-// v0.10.2 tuning menu: true while the menu is open = NO key and NO controller button reaches the game (dinput_wrap.cpp: the
-// keyboard / controller device wraps and the window subclass, the game's input / window threads; replaces v0.10.0's
-// MenuSwallowKeys / v0.10.1's MenuSwallowJoy, which listed only the 5 menu inputs). Releases always pass there.
-bool MenuHidesInput() { return g_menuOpen.load(std::memory_order_relaxed); }
+// (v0.12.1 phase 50: v0.10.2's MenuHidesInput -- every key / button hidden while the menu is open -- is gone; the menu
+// publishes WHICH inputs to hide with KeySwallow::SetMenuHide, MenuPublishHide.)
 // v0.10.1 dlaa.ini controller_name filter (dinput_wrap.cpp CreateDevice, the game's thread): true = tap / filter this
 // controller. Empty filter = every controller; else the product name must contain it (ASCII case-insensitive).
 bool ControllerNameAllowed(const char* product) {

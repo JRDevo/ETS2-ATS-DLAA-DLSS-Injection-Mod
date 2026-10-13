@@ -503,9 +503,10 @@ bool RenderPanel(const TuningMenu::Panel& p, float s, uint32_t w, uint32_t h) {
         const float y = kPerfY + kPerfLineH * (float)l;
         inkText(fPerf, kPerf, p.perf[l], 14.0f, y, W - 14.0f, y + kPerfLineH, false);   // phase 45: CPU / GPU inks
     }
-    text(fSmall, kHead, L"Setting", kNameX0 + 14.0f, kHeadY, kNameX1, kHeadY + kHeadH, one);
-    text(fSmall, kHead, L"Value", kValX0, kHeadY, kValX1, kHeadY + kHeadH, one);
-    text(fSmall, kHead, L"Hotkey", kKeyX0, kHeadY, kKeyX1, kHeadY + kHeadH, one);
+    // v0.12.1 phase 50: the Hotkeys page names its columns itself (colHead; "" = the main menu's)
+    text(fSmall, kHead, p.colHead[0][0] ? p.colHead[0] : L"Setting", kNameX0 + 14.0f, kHeadY, kNameX1, kHeadY + kHeadH, one);
+    text(fSmall, kHead, p.colHead[1][0] ? p.colHead[1] : L"Value", kValX0, kHeadY, kValX1, kHeadY + kHeadH, one);
+    text(fSmall, kHead, p.colHead[2][0] ? p.colHead[2] : L"Hotkey", kKeyX0, kHeadY, kKeyX1, kHeadY + kHeadH, one);
     inkText(fSmall, kHead, p.costHead[0] ? p.costHead : L"Cost", kCostX0, kHeadY, kCostX1, kHeadY + kHeadH, false);
     fill(kLine, 10.0f, kRowsY - 2.0f, W - 10.0f, kRowsY - 1.0f);
     const int n = p.nRows < 0 ? 0 : (p.nRows > TuningMenu::kMaxRows ? TuningMenu::kMaxRows : p.nRows);
@@ -518,6 +519,10 @@ bool RenderPanel(const TuningMenu::Panel& p, float s, uint32_t w, uint32_t h) {
         const COLORREF cKey  = sel ? (r.greyed ? kSelGrey : kSelText) : (r.greyed ? kGrey : kKeyText);
         if (sel) text(fBody, cName, L">", kNameX0, y0, kNameX0 + 14.0f, y1, one);
         text(fBody, cName, r.name, kNameX0 + 14.0f, y0, kNameX1, y1, one);
+        if (r.wide) {                                        // v0.12.1 phase 50: one text over Value + Hotkey + Cost
+            text(fBody, cName, r.value, kValX0, y0, kCostX1, y1, one);
+            continue;
+        }
         text(fBody, cName, r.value, kValX0, y0, kValX1, y1, one);
         text(fBody, cKey, r.keys, kKeyX0, y0, kKeyX1, y1, one);
         inkText(fBody, cKey, r.cost, kCostX0, y0, kCostX1, y1, r.greyed != 0);   // phase 45: "<cpu> | <gpu>" in blue / orange

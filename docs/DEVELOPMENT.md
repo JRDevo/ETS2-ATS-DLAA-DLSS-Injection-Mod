@@ -587,7 +587,8 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   only while the box is on or the menu is open (`MenuPerfTick` copies its figures); `TuningMenu::DrawWidget` draws it after the panel
   at the same two places (`MenuPresentTarget` at Present, `MenuDrawVr` per eye; the eye blit is noted while menu open || box on) from
   its own texture cache (rebuilt only when its text or build scale changes), dropped by `ReleaseWidget` when switched off.
-- **Input hiding** (`src/dinput_wrap.cpp`, `KeySwallow`), only while the menu is open (`MenuHidesInput`; v0.10.2: EVERY key and
+- **Input hiding** (v0.12.1 phase 50: PER INPUT again, see Phase 50 below -- the text here is the v0.10.2 .. v0.12.0 state)
+  (`src/dinput_wrap.cpp`, `KeySwallow`), only while the menu is open (`MenuHidesInput`; v0.10.2: EVERY key and
   controller button -- v0.10.0 / v0.10.1 hid only the 5 bound menu inputs via `MenuSwallowKeys` / `MenuSwallowJoy`, both removed):
   `DirectInput8Create` (proxy.cpp) wraps `IDirectInput8A/W`; `CreateDevice` of a keyboard returns a full forwarding
   `IDirectInputDevice8A/W` whose `GetDeviceState` clears all 256 DIK bytes and whose `GetDeviceData` drops every key-down entry; a
@@ -596,7 +597,8 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   `WM_SYSKEYDOWN` / `WM_CHAR` / `WM_SYSCHAR` and every `WM_INPUT` keyboard make event is dropped. Key / button releases always pass
   (a key held when the menu opened must reach the game as released). The menu itself reads `GetAsyncKeyState` and the tapped
   controller state. A DLL unload puts the original window procedure back if the window still points at ours.
-- **Hold to bind** (v0.10.2, `MenuBindTick` / `MenuBindComplete` / `MenuBindDecorate`, `kMenuBindRows`): per Present while open,
+- **Hold to bind** (v0.10.2 .. v0.12.0; REMOVED in v0.12.1 phase 50, replaced by the Hotkeys page -- see Phase 50 below)
+  (`MenuBindTick` / `MenuBindComplete` / `MenuBindDecorate`, `kMenuBindRows`): per Present while open,
   `MenuBindScan` finds the single held input (a key `KeyChordName` can name, or one controller button / POV direction from
   `PollKeys`' copy); a down-edge on a row with actions starts a hold, `bind_hold_ms` later it replaces that part of the step's
   `KeyBind` (Backspace = none), takes it from any other action, writes `key_*` via `WriteIniPreserving` and sets
@@ -1633,6 +1635,48 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   bands + clip + state restore, T3 `kBiasPrepShader` (crop origin, carry-over along the MVs, strength, PrevOk 0).
 - **Not verified**: anything in game (whether ETS2 / ATS draw their glows exactly like this in every case, the visual result,
   the cost, the NGX response to the mask on the user's preset).
+
+### Phase 50 (v0.12.1): Hotkeys page -- one fresh press binds, the game keeps every key but the menu's (GitHub issue #16)
+
+- **Why**: issue #16 -- a player with an H-shifter opened the menu while in gear; hold-to-bind bound the gear (a button held
+  all the time) to the Mode row, so every shift into that gear toggled the mode. The "ignore input held since the menu
+  opened" set lost the gear whenever its controller slot read all up for one Present (`ControllerState` returns a slot the
+  game has not read for 0.5 s, or one cleared by a failed read / `Unacquire` / a new data format, as all up), after which the
+  next read was a "new" press. And the open menu kept EVERY key and button from the game, so nobody could drive with it open.
+- **Main rows never bind.** New top-level row `Hotkeys...` (`MR_HOTKEYS`, above Save); `Right` on it (or on `Menu keys`, which
+  opens on the `Menu: open / close` line) switches the panel to the Hotkeys page (`g_menuPage`, `MenuBuildHotkeysPanel`: the
+  same `TuningMenu::Panel` / `Draw` / VR quad path; `Panel::colHead` names the columns Action / Keyboard / Controller,
+  `Row::wide` lets the bind line span the Value + Hotkey + Cost columns; `Row::value` grew 40 -> 72). Lines = `< Back` +
+  `kMenuHkLines` (28 actions: every former `kMenuBindRows` action on its own line). `MenuHkKeys`: `Up` / `Down` wrap, `Left`
+  (fresh press) or `Right` on `< Back` = back, `Right` (fresh press) = bind mode.
+- **Bind mode** (`MenuHkBindStart` / `MenuHkBindTick` / `MenuHkBindApply`, `src/hotkey_scan.h`): `HotkeyScan::Start` takes the
+  snapshot of every scanned key (`KeyChordName` keys + Escape, `GetAsyncKeyState`), controller button and D-pad direction
+  (`PollKeys`' copy) and the KNOWN controller slots (`ControllerState`'s new `freshSlots`). `HotkeyScan::Step` per Present
+  returns the fresh down-edges: keys = down now and not at the previous Present; controller = only while the known-slot set is
+  the same as at the previous Present (a change: everything down anywhere stays held = adopted) and the input up in the TWO
+  previous compared Presents (a single torn read is no release). Exactly one candidate edge binds (two in one Present are
+  ignored). Rules: a key replaces the keyboard part with the modifiers held at the press (`HeldMods`), a button the controller
+  part; taken from another action (written too); never the last binding of `key_menu` (refused, bind mode stays and its 10 s
+  restart). Cancel: menu `Left` (fresh press; not on the 5 menu-key lines), `Esc`, 10 s (`kMenuHkTimeoutMs`), the game in the
+  background, the menu closed (the open key closes it, except on the menu-key lines where it is a candidate). `Backspace` =
+  clear to `none` (on the menu-key lines: cancel). On the 5 menu-key lines the menu inputs are candidates; elsewhere they are
+  skipped. While bind mode runs, `MenuHkKeys` clears every `KeyBind::hit` of the Present (the binding press fires nothing).
+- **Input hiding per input** (`MenuPublishHide` -> `KeySwallow::SetMenuHide`, at the end of `MenuKeys` and at `MenuClose`, only on
+  a change): closed = nothing; open = `kHideMenuInputs` -- the 5 menu actions' VKs (any modifiers; their DIK codes via `DikOfVk`,
+  back from v0.10.1) and controller codes + the "swallowed" input that ended the last bind (`g_hk.swallow`, until
+  `MenuHkSwallowTick` sees it released); bind mode = `kHideAll` (every key / button; axes pass). The input threads read relaxed
+  atomics (`g_hideMode` acquire, the bit sets relaxed). `WM_CHAR` of a hidden key is matched by its scan code (`VkOfCharMsg`).
+  Alt+F4 always passes. `MenuHidesInput` is gone.
+- **`bind_hold_ms`** is now only the Reset row's hold (`MenuResetTick`, `MenuHoldBar`); the ini key and its clamp are unchanged.
+- **Test**: `tests/hotkey_scan_test.cpp` (no D3D): A = `HotkeyScan` (held-at-start Right, the issue #16 gear held 600 Presents /
+  slot stale 40 / back / one torn read / one-Present stale flicker / a tap of another button / a real release + re-engage, a
+  new slot with a held button, D-pad, keys, a press at a slot-set change); B = `dinput_wrap.cpp` compiled in: `SetMenuHide`
+  modes on the keyboard state / buffer (DIK bytes), the controller state / buffer (gear passes, menu button and D-pad
+  direction hidden, axes untouched), `ControllerState` known slots after a read / a failed read. `tests/menu_shot.cpp` renders
+  `tuning-menu-hotkeys.png` (the page with a line in bind mode).
+- **Not verified**: anything in game -- binding with a real wheel / H-shifter (the slot staleness pattern of a real device),
+  driving with the menu open (that the game reacts to everything but the menu keys in both DirectInput and window-message
+  paths), the VR quad path with the 29-line page.
 
 ### The RenderDoc oracle (done in v0.2)
 

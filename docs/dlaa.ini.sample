@@ -527,9 +527,11 @@ log_level = 1
 # real distance, menu_vr_dist). 0 = drawn into the eye picture as before (menu_vr_depth, no menu_vr_dist). The mod falls
 # back to the picture by itself when the layers are not possible (no OpenXR session, the runtime refuses them).
 # menu_vr_layer = 1
-# v0.10.2 HOLD TO BIND: hold a key or a wheel / gamepad button this long (ms, 500..10000) on a menu row and it becomes that
-# row's hotkey (written to the key_* line below at once; Backspace held = none). While the menu is open the game gets no
-# keys and no buttons at all (axes / pedals still pass): close the menu before you press Escape or drive.
+# The Reset to defaults row: how long (ms, 500..10000) the menu Right key must be held on it to reset. (v0.10.2 .. v0.12.0
+# this was also the HOLD TO BIND time; v0.12.1 binds hotkeys on the menu's Hotkeys page with ONE fresh press: Hotkeys...,
+# Right, pick the action, Right, press the new key / button -- written to the key_* line below at once; Backspace = none.)
+# While the menu is open only its 5 keys / buttons are kept from the game (every key / button only while the Hotkeys page
+# waits for a press), so you can keep driving.
 # bind_hold_ms = 5000
 
 # ---- v0.10.0 FPS BOX: a small live fps / frame-time box ("60 fps" / "16.7 ms", updated twice a second), shown also
