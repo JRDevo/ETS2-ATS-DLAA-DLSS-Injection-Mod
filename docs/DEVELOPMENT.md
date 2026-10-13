@@ -1634,6 +1634,34 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
 - **Not verified**: anything in game (whether ETS2 / ATS draw their glows exactly like this in every case, the visual result,
   the cost, the NGX response to the mask on the user's preset).
 
+### Phase 53: mirrors at a lower resolution + DLSS back to full size -- investigated, NOT built
+
+- **Idea**: shrink the viewport of every mirror pass to a scale s (0.5 .. 0.85) inside the game's full-size mirror textures,
+  then let a DLSS mirror unit rebuild the sub-rect to the full size before the game's down-sample reads it.
+- **Evidence**: `scripts/rdc_mirror_scale_audit.py` + `scripts/rdc_mirror_scale_cb.py` on `captures/ets2_flat_frame1969.rdc`
+  (outputs `captures/ets2_flat_frame1969.mirror_scale_audit.txt`, `.mirror_scale_cb.txt`, shader text in
+  `.mirror_scale_dump\`). Every mirror view (512x256, 512x512, 512x1024): G-buffer (4 RTV) -> lighting (1 full-screen draw,
+  VS R80 / PS R142) -> forward (1 RTV): a full-screen composite (PS R303), lit forward draws (PS R2317, R14226, R14742), forward
+  lights (PS R664, ~20 draws), a full-screen fog / haze pass (PS R311), sky -> down-sample (VS R62 / PS R63, a full-screen draw
+  reading the forward colour with 0..1 UVs into a texture of half the size: 256x128, 256x256, 256x512). Scissor is on, the
+  scissor rect = the full view.
+- **Why it breaks**: none of the screen-space reads uses `SV_Position`. Each one computes its texel as
+  `ftoi(uv * cb.xy / cb.zw)` with `uv` 0..1 across the VIEWPORT (full-screen interpolant, or the projected position) and
+  `cb = (view W, view H, 1, 1)` from the draw's OWN constant block in the game's D3D11.1 constant ring: lighting PS cb0[61],
+  composite PS R303 cb0[1], fog PS R311 cb0[1], PS R2317 cb0[1], PS R664 cb0[5], PS R14226 / R14742 cb0[12], and the full-screen
+  VS R80 cb0[3] (`o1.zw = v0 * cb0[3].xy`). With a smaller viewport, `uv * W` reads texels outside the rendered sub-rect: the
+  lighting pass would light the wrong G-buffer pixels and every forward read would sample a stretched, mostly stale picture.
+  There are also derived texel sizes (lighting PS cb0[64].y = 1/512 for its checkerboard neighbour, fog PS cb0[9].y = 1/512).
+  Rescaling = rewriting those rows per draw, per shader (different row in every shader, written by the CPU into the ring,
+  ~30 draws per view, more shaders in other scenes / weather / ATS) -- not something to ship.
+- **The game already has the lever**: `config.cfg` (ETS2 and ATS, both at the default) `r_mirror_scale_x "2"`,
+  `r_mirror_scale_y "2"` = the mirror view is rendered at 2x the mirror texture per axis (the 512x1024 view -> 256x512 glass
+  texture) -- the game's own 4x supersampling of the mirrors. `r_mirror_scale_x / _y 1` should render the views at the glass
+  texture size (4x fewer pixels, the game's constants stay consistent), and mirror DLAA then anti-aliases at that size; a DLSS
+  rebuild to 2x would only be down-sampled again by the game. **Not tested in game**: the expected log after the change is
+  `mirror view detected: ... 256x512` (ETS2) / `512x256` (ATS) instead of 512x1024 / 1024x512; check the mirror picture and the
+  `mirror units @blit` cost. Views below `mirror_min_px` (128) are left to the game.
+
 ### The RenderDoc oracle (done in v0.2)
 
 Capture a frame of the unmodified game to learn empirically: which pass writes
