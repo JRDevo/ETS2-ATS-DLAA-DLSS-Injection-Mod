@@ -245,6 +245,7 @@ The self-test dumps eye 0 only in VR (~89 MB per BMP at 4592×6496); snapshots a
   |-----|---------|---------|
   | `jitter_enabled` | `1` | `0` = never jitter (DLAA then only temporally smooths) |
   | `jitter_phases`  | `8` | length of the Halton(2,3) jitter sequence (v0.5.7: was 16) |
+  | `light_redraw_jitter` | `1` | phase 55: `1` = the lighting pass's mesh redraws (depth GREATER_EQUAL / EQUAL, no depth write, depth bias) are rasterized with the G-buffer's jittered viewport; `0` = the whole lighting pass keeps the game's viewport (lit areas under canopies flicker). Startup only |
   | `jitter_sign_x`  | `-1` | sign applied to the X offset handed to NGX (`-1` or `1`) |
   | `jitter_sign_y`  | `-1` | sign applied to the Y offset handed to NGX (`-1` or `1`) |
   | `mv_enabled`     | `1`  | `0` = zero motion vectors (start state of `Ctrl+F5`) |
@@ -361,6 +362,8 @@ game's fog triangle in the forward pass, which samples the scene by interpolated
 (`hkDraw`, no shift, no overscan) and the shifted one is re-issued after it. Shifted, it read the neighbour texel over much of the
 picture (shift + the phase-23 scale), at every silhouette the neighbour's depth: a dark 1 px line on the horizon and around bushes
 (ATS flat 2026-10-10, `Ctrl+F10` color_in: sky 204 / line 25 / hill 120; gone with DLAA off). Log line `jitter (v0.10.0 phase 25)`.
+Phase 55: the LIGHTING pass (2 RTVs + scene depth) stays unjittered, except its mesh redraws, which get the G-buffer's shifted
+viewport per draw (`light_redraw_jitter`, default 1; see "Phase 55" below).
 
 ## Motion vectors
 
@@ -1930,6 +1933,44 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
 - **Not verified in game:** that the camera-relative group is the dashboard's frame in ATS / ETS2 (level-4 groups line); the one-time
   move of 47a8's (and 7b8a's: 0.24 deg, invisible) older pose; that the cab frame is found at each lock-on (`cab frame from N draw(s)`);
   the Reset row with the box attached; Left on Re-measure cab spot.
+
+### Phase 55: lighting-pass redraws get the G-buffer's jitter (`light_redraw_jitter`, default 1)
+
+- **Report** (ATS 2026-10-13, VR + flat): the sunlight shining through a market tent canopy flickers. With the jitter off (self-test)
+  it is always lit.
+- **Cause** (RenderDoc `amtrucks_2026.10.13_13.44.08_frame1323.rdc` + `Ctrl+F10` / `Ctrl+F9` dumps): the game's lighting bind
+  (2 RTVs + the scene DSV) is never jittered by the mod (the "Jitter-pass test" in `hkOMSetRenderTargets`; mirrors: the `n == 2`
+  branch of `MirOnBind`). It contains mesh REDRAWS: the canopy mesh drawn again (EID 21000, VS 12256 / PS 12257, additive One / One),
+  depth test GREATER_EQUAL, depth write off, rasterizer `SlopeScaledDepthBias` 1.0, `DepthBiasClamp` 1.5e-5. The game lights only
+  where the redraw's depth matches the G-buffer's. The G-buffer is drawn with the shifted viewport ((W+1) x (H+1) with
+  `jitter_overscan`), the redraw with the game's own: on steep surfaces the depth gap is larger than the 1.5e-5 clamp on ~3 of the 8
+  Halton phases, and the whole lit area fails the test on those frames. Same class: the emissive redraws EIDs 20966-20991 (VS 9918 /
+  PS 9919, same depth state and bias). The forward pass's redraws were fine (the whole forward binding is jittered).
+- **Fix** (`src/inject.cpp`, block above `hkOMSetDepthStencilState`): `hkOMSetRenderTargets` sets `g_lightBind` (1 = 2 RTVs + the
+  scene depth, 2 = the open jittered mirror view's lighting bind, `g_mirLight` from `MirOnBind`; 0 otherwise or with
+  `light_redraw_jitter = 0`) and starts every bind unshifted. `LightRedrawOnDraw` (hkDrawIndexed / hkDrawIndexedInstanced, game
+  draws in a lighting bind) qualifies a draw as a REDRAW when the game's depth-stencil state (`g_objGameDss`, tracked by
+  hkOMSetDepthStencilState) has `DepthEnable`, `DepthWriteMask ZERO` and `DepthFunc GREATER_EQUAL` or `EQUAL` (reversed depth: the
+  G-buffer tests GREATER) AND the rasterizer state has a depth bias (`DepthBias != 0` or `SlopeScaledDepthBias != 0`; light volumes
+  and decal boxes -- depth LESS, cull front -- have none), and the jitter is live (`JitterLive` and not `WorldJitterHeld`; mirror:
+  the unit's `jitOn`). A qualifying draw sets `g_lightRedrawShift`; `ReconcileViewports` then issues the G-buffer's viewport: the
+  pass's `g_jx` / `g_jy` (main; per eye the order is G-buffer, lighting, forward, as the forward pass relies on) or the view's own
+  shift (mirror), with the overscan, only when the game's viewport is the pass size. Any other draw of the binding gets the game's
+  viewport back: a `Draw` (the full-screen light passes, `hkDraw`), a non-qualifying `DrawIndexed`, or a depth-stencil state change
+  to a non-qualifying state (`LightRedrawOnDss`, covers a following unhooked draw). Viewports are issued only when the
+  qualification changes (one `RSSetViewports` at the start and one at the end of a run of redraws). The two state verdicts are
+  cached per state object (64 entries each, ref held, dropped at a game context change). The game's own `RSSetViewports` inside the
+  binding goes through `ReconcileViewports(ctx, true)` as in the G-buffer pass.
+- **Log**: `lighting redraws (phase 55): light_redraw_jitter=N` at the start; `lighting redraws (phase 55): first main / mirror
+  lighting-pass mesh redraw issued with the G-buffer's viewport -- shift (..), game viewport WxH, depth func .., depth bias ..`
+  once (a WARNING tail if the viewport could not be shifted); at log level 4 with the `jitter check` line: shifted redraws, lighting
+  binds, redraws per blit, runs, unshifts (Draw / DrawIndexed / depth-stencil state), redraws NOT shifted, cached states.
+- **Not covered**: `DrawInstanced` / indirect draws are not hooked (a qualifying one would keep the game's viewport; one right
+  after a redraw with the SAME depth-stencil state would keep the shift). Without `WITH_DLAA` (no depth-stencil hook) the feature
+  is off.
+- **Not verified**: anything in game -- the canopy light (VR + flat), the emissive redraws, mirrors (the mirror lighting bind's
+  viewport must be the view's size for the shift to apply), the level-4 counts. Unit tests: the existing suite only (none of it
+  exercises the lighting bind).
 
 ### The RenderDoc oracle (done in v0.2)
 
