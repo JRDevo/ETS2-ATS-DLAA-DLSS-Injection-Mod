@@ -1416,6 +1416,7 @@ static int PartD() {
         CHECK(o.nChanged == 0 && *ps.Get(K) == before && ss.nBound == 0, "the Reset row changed the bound vehicle's profile");
         o = ss.Tick(ps, false, false, true, 1, K, false, def);
         CHECK(o.nChanged == 0 && *ps.Get(K) == before, "the Present after the Reset changed the profile");
+        ss.Unbind();                                       // (inject.cpp FpsProfUnbind: the Reset row) -> the next lock-on loads
         // mode 2 again (the user turns the attached box back on): a new lock-on -> the vehicle's own values return
         o = ss.Tick(ps, true, true, true, 2, K, false, def);
         CHECK(o.lock == Session::kLockLoaded && o.applyIt && o.apply == before && *ps.Get(K) == before && *ps.Get(K2) == other,
@@ -1435,6 +1436,35 @@ static int PartD() {
         Session s3;
         o = s3.Tick(ps, true, true, false, 5, K, false, def);
         CHECK(o.lock == Session::kLockNone && s3.nBound == 0, "the shared mode bound a vehicle");
+        // phase 51e: the FPS row cycling through Off re-binds the same vehicle -> the live values are kept and stored
+        {
+            Store p2; Session s5;
+            Vals a = mine, b = other;
+            p2.Put(K, a); p2.Put(K2, b);
+            Vals lv = a;                                   // text 4 stored
+            o = s5.Tick(p2, true, true, true, 1, K, false, lv);
+            CHECK(o.lock == Session::kLockLoaded, "51e: first bind did not load");
+            o = s5.Tick(p2, false, true, true, 1, K, false, lv);   // box Off
+            o = s5.Tick(p2, false, false, true, 1, K, false, lv);
+            lv.text = 1; lv.color = 2; lv.bright = 55;     // edited in the gap / meanwhile
+            o = s5.Tick(p2, true, false, true, 1, K, false, lv);   // box On, cab not locked yet: edits unbound
+            CHECK(o.nChanged == 0 && p2.Get(K)->text == 4, "51e: an unbound tick wrote a profile");
+            o = s5.Tick(p2, true, true, true, 2, K, false, lv);    // re-lock on the same vehicle
+            CHECK(o.lock == Session::kLockKept && !o.applyIt && p2.Get(K)->text == 1 && p2.Get(K)->color == 2 && p2.Get(K)->bright == 55 &&
+                  s5.nBound == 1, "51e: the re-bind did not keep + store the live values (text %d)", p2.Get(K)->text);
+            // another vehicle in between -> A's stored values load again
+            o = s5.Tick(p2, true, true, true, 3, K2, false, lv);
+            CHECK(o.lock == Session::kLockLoaded && o.apply == b, "51e: B did not load");
+            Vals lb = *p2.Get(K2);
+            o = s5.Tick(p2, true, true, true, 4, K, false, lb);
+            CHECK(o.lock == Session::kLockLoaded && o.applyIt && o.apply.text == 1 && o.apply.x == a.x, "51e: A after B did not load its stored values");
+            // box off, then a Reset (Unbind): loads again
+            s5.Tick(p2, false, true, true, 4, K, false, def);
+            s5.Unbind();
+            o = s5.Tick(p2, true, true, true, 5, K, false, def);
+            CHECK(o.lock == Session::kLockLoaded, "51e: after Reset the stored values did not load");
+            printf("  51e: same-vehicle re-bind keeps + stores the live values; another vehicle / Reset loads\n");
+        }
         printf("  Reset: the bound profile kept (x %.1f), the vehicle's values back at the next lock-on; the old gate would have stored the "
                "defaults; Left on Re-measure = this vehicle's box to defaults only\n", (double)before.x);
     }

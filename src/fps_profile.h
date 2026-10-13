@@ -373,7 +373,8 @@ struct Session {
     uint64_t bound[kBound] = {};
     int nBound = 0;
     uint64_t locks = 0;                                  // FpsCab::LockCount handled (~0 = handle the held lock again)
-    enum { kLockNone = 0, kLockLoaded, kLockNew, kLockAlias };
+    uint64_t lastKey = 0;                                // phase 51e: the vehicle bound last (kept while unbound: box off / mode 0 / 1)
+    enum { kLockNone = 0, kLockLoaded, kLockNew, kLockAlias, kLockKept };
     struct Out {
         int lock = kLockNone;                            // a new lock-on was handled (its vehicle key = key)
         uint64_t key = 0, aliasOf = 0;
@@ -382,7 +383,9 @@ struct Session {
         int nChanged = 0;                                // keys whose profile changed this tick (new / alias / edits)
         uint64_t changed[kBound + 1] = {};
     };
-    void Unbind() { nBound = 0; }
+    // (explicit: the Reset row, profiles switched off -- the next lock-on loads the vehicle's stored values; the unbound ticks below
+    // keep lastKey: the FPS row cycling through Off re-binds the same vehicle and keeps the live values, phase 51e)
+    void Unbind() { nBound = 0; lastKey = 0; }
     bool IsBound(uint64_t k) const { for (int i = 0; i < nBound; ++i) if (bound[i] == k) return true; return false; }
     static Vals Applied(const Vals& live, const Vals& pv) {   // the live values after a profile is applied (look -1 = keep live)
         Vals o = pv;
@@ -411,14 +414,18 @@ struct Session {
                     if (nBound < kBound) bound[nBound++] = key; else bound[kBound - 1] = key;
                     if (st.Put(key, live)) Changed(&o, key);
                     o.lock = kLockAlias;
-                } else if (const Vals* pv = st.Get(key)) {
+                } else if (key == lastKey && nBound == 0 && st.Get(key)) {   // phase 51e: the same vehicle re-bound: live values win
                     bound[0] = key; nBound = 1;
+                    if (st.Put(key, live)) Changed(&o, key);
+                    o.lock = kLockKept;
+                } else if (const Vals* pv = st.Get(key)) {
+                    bound[0] = key; nBound = 1; lastKey = key;
                     o.apply = *pv;
                     o.applyIt = *pv != live;
                     live = Applied(live, *pv);
                     o.lock = kLockLoaded;
                 } else {
-                    bound[0] = key; nBound = 1;
+                    bound[0] = key; nBound = 1; lastKey = key;
                     st.Put(key, live);
                     Changed(&o, key);
                     o.lock = kLockNew;

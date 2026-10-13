@@ -1594,6 +1594,7 @@ void ToggleFwdDepth(uint64_t n);         // v0.10.0 (was inline): Ctrl+F3 forwar
 void MenuKeys(uint64_t n);               // v0.10.0 tuning menu: open / close + navigation (before the other user keys)
 void FpsProfileTick();                   // phase 51: per-vehicle fps box profiles (after MenuKeys)
 void FpsBoxDefaults(uint64_t n);         // phase 51d: the menu's Left on "Re-measure cab spot": the current vehicle's box to defaults
+void FpsProfStoreLive();                 // phase 51e: the FPS row switching the box Off -- the live values into the bound vehicle(s)
 void FpsProfUnbind();                    // phase 51d: the Reset row -- the live values are bound to no vehicle until the next lock-on
 bool g_fpsBoxDefaulted = false;          // phase 51d: the menu's Left on "Re-measure cab spot" reset the box (its value column)
 void ToggleFpsProfiles(uint64_t n);      // phase 51b: the menu's Position per vehicle row (dlaa.ini fps_profiles)
@@ -16343,6 +16344,7 @@ void ToggleFpsBox(uint64_t n) {
     g_fpsShow = !g_fpsShow;
     g_fpsExplicit = g_fpsMoved = true;
     if (!g_fpsShow) {
+        FpsProfStoreLive();                               // phase 51e: nothing of the live values is lost while unbound
         TuningMenu::ReleaseWidget();
         g_fpsVrBuild = 0.0f;
         if (!g_menuOpen.load(std::memory_order_relaxed)) MenuLateReset("fps box off");   // v0.10.0 phase 16
@@ -19173,6 +19175,10 @@ void FpsProfileTick() {
         if (o.applyIt) FpsProfApply(o.apply);
         Log("fps profile: vehicle %016llx -> loaded (%s)", (unsigned long long)o.key, FpsProfStr(o.apply, b, sizeof(b)));
         break;
+    case FpsProfile::Session::kLockKept:
+        Log("fps profile: vehicle %016llx -> re-bound (same vehicle as before the box was off): the live values kept and stored (%s)",
+            (unsigned long long)o.key, FpsProfStr(live, b, sizeof(b)));
+        break;
     case FpsProfile::Session::kLockNew:
         Log("fps profile: vehicle %016llx -> new, starts from the current values (%s; %d profile(s))", (unsigned long long)o.key,
             FpsProfStr(live, b, sizeof(b)), FpsProfCount());
@@ -19206,6 +19212,14 @@ void FpsProfileTick() {
 // text: the Reset row's fps values); the cab pose is kept (the defaults are placed on it). An edit like any other: the next tick stores
 // it in the bound vehicle's profile (+ aliases); other vehicles' profiles are untouched. Unbound (no lock yet): the live values only.
 void FpsProfUnbind() { g_fpsProfSess.Unbind(); }
+// phase 51e: the box is switched Off through the FPS row while a vehicle is bound: its live values (text / colour / brightness /
+// placement) are stored now, so the unbound time loses nothing and the re-bind finds them. (Not the Reset row: it Unbinds first.)
+void FpsProfStoreLive() {
+    if (!g_fpsProfiles || !g_fpsProfSess.nBound) return;
+    const FpsProfile::Vals live = FpsProfLive();
+    for (int i = 0; i < g_fpsProfSess.nBound; ++i)
+        if (FpsProfPut(g_fpsProfSess.bound[i], live)) FpsProfMarkDirty(g_fpsProfSess.bound[i]);
+}
 void FpsBoxDefaults(uint64_t n) {
     g_fpsVrX = 0.0f; g_fpsVrY = -25.0f; g_fpsVrScale = kFpsVrScaleDefault;
     g_fpsVrDist = FpsPose::kDistDefault;
