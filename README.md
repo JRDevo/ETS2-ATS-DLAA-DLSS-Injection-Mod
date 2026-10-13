@@ -528,9 +528,9 @@ The three green lines under the title show the game's GPU time per frame, what t
   settings` group shows them; `Right` on it opens the Hotkeys page there. See
   [`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu).
 - **Groups (v0.10.3):** the panel rows (`Panel position X` / `Y`, `Panel size`, `Panel VR depth`, `Panel faces you`,
-  `Menu keys`) sit in the **Panel settings** group and the fps box rows (`FPS counter lock`, `X`, `Y`, `size`, `colour`,
-  `distance`, `turn`, `tilt`, `rotate`) in the
-  **FPS counter settings** group, right under the `FPS counter` on / off row. Both groups are closed every time the menu
+  `Menu keys`) sit in the **Panel settings** group and the fps box rows (`FPS counter lock`, `X`, `Y`, `turn`, `tilt`, `rotate`, `size`, `colour`,
+  `brightness`, `distance`) in the
+  **FPS counter settings** group, right under the `FPS counter` row. Both groups are closed every time the menu
   opens: select the group row and press `Right` to show its rows, `Left` to hide them again.
 - Every row calls the same function as its hotkey: the hotkeys keep working while the menu is open, and every change
   beeps and logs exactly like its key. Number rows repeat while you hold `Left` / `Right`.
@@ -549,7 +549,7 @@ The three green lines under the title show the game's GPU time per frame, what t
   follows your head -- towards you as a true 3-D layer. With `menu_vr_layer = 0` (the panel drawn into the picture, as
   before; also the automatic fallback when the layers are not possible) `Panel VR depth` is the inward shift in px
   (`menu_vr_depth`).
-- **Live fps counter:** ![fps counter](docs/images/fps-counter.png) the `FPS counter` row switches on a small fps box: the fps and the frame time as text with a dark outline, no background (`60 fps` /
+- **Live fps counter:** ![fps counter](docs/images/fps-counter.png) the `FPS counter` row (Right / Left step `Off`, `72 fps + 13.9 ms`, `72 fps`, `13.9 ms`, and the same as plain numbers: `72 + 13.9`, `72`, `13.9`) switches on a small fps box: the fps and the frame time as text with a dark outline, no background (`60 fps` /
   `16.7 ms`, updated twice a second) that stays on screen also when the menu is closed (flat, and in VR in both eyes).
   Its own GPU cost is measured and shown in the row's cost column, per frame (all the pictures it is drawn into together).
   `FPS counter X`, `FPS counter Y` and `FPS counter size` (in the `FPS counter settings` group) move it; flat and VR keep their own position (`fps_show`,
@@ -573,10 +573,23 @@ The three green lines under the title show the game's GPU time per frame, what t
       hills or when you brake, so the cab moves under it.
     - `Attached to vehicle`: the box sits on the cab like a sticker and sways with it, in trucks and in cars. It is
       placed where it was when you picked this choice (`X` / `Y` / distance / turn still move it, inside the cab).
+      With all turns at 0 it is square to the cab (upright with the cab, facing your seat along the cab's own axes),
+      wherever you recentred the headset, so the same `X` / `Y` mean the same spot in every truck.
       It needs DLAA on with `Per-part motion vectors` on (the defaults). Without them, in the outside camera, in menus
       and while loading it is exactly the `Fixed in play space` box (also as a quad layer) until you are steadily back
       in the cab. It only takes its spot when both eyes see the cab and the headset position is known. After a truck
       change it finds the new cab by itself after about a second.
+      Every vehicle keeps its own placement, colour, brightness and text: when you get into a truck or car again (also
+      after a game restart) the box goes back to exactly the spot in the cab where you put it in that vehicle; a new
+      vehicle starts from the current values. Changes are saved automatically when the menu closes (`fps_profile` lines
+      in `dlaa.ini`, one per vehicle; delete a line to forget that vehicle; the Reset row does not change them: the
+      vehicle's own values come back when you attach the box again). A spot saved by an older version is squared to the
+      cab once at the next lock-on, so the box may sit a little differently that one time.
+  - **Re-measure cab spot (VR, attached only):** press Right while parked if the box sits off: the mod measures the cab
+    again and keeps your position, turn, size and colour. Press Left to put just this vehicle's box back to the
+    defaults (spot, turn, size, colour, brightness, text); other vehicles keep theirs.
+  - **Position per vehicle (VR, attached only):** `On` (default) = the per-vehicle settings above; `Off` = one shared
+    placement, colour, brightness and text for every vehicle (`fps_profiles` in `dlaa.ini`; the vehicle lines are kept).
 
     Which to pick: `Attached to vehicle` if you want it to look like part of the dashboard; `Fixed in play space` if
     you want it calm while the cab shakes; `Follow head` if you always want to see it.
@@ -683,6 +696,7 @@ The table below lists the commonly used keys:
 | `menu_vr_face` | `1` | tuning menu panel, VR: `1` = the panel turns to face your eye when moved off the centre (a tilted 3-D panel, same size from every angle), `0` = a flat picture. On the VR layer path (default) also the fps box when it follows your head, turned by the compositor. The menu's `Panel faces you (VR)` row switches it live |
 | `menu_vr_layer` | `1` | VR (v0.10.3): `1` = the panel and the fps box are separate OpenXR quad layers the headset's compositor places itself: rock-steady (no swimming with the reprojection), at a real distance (panel `menu_vr_dist`, default 1 m; fps box 0.8 m), facing you with `menu_vr_face = 1`, never covered by the game's menus; `menu_vr_depth` is then unused. `0` = drawn into the eye picture as before (also the automatic fallback; `menu_vr_dist` unused) |
 | `fps_show` | `0` | live fps box: `1` = a small fps / frame-time box stays on screen, also while the menu is closed. The menu's `FPS counter` row switches it live |
+| `fps_text` | `0` | what the fps box shows: `0` = fps and frame time (two lines), `1` = fps only, `2` = frame time (ms) only, and the same as plain numbers without `fps` / `ms`: `3` = both, `4` = the fps number, `5` = the ms number. The menu's `FPS counter` row steps `Off` / `72 fps + 13.9 ms` / `72 fps` / `13.9 ms` / `72 + 13.9` / `72` / `13.9` |
 | `fps_x` / `fps_y` / `fps_scale` | `1` / `1` / `1.0` | fps box, flat: left / top edge in % of the picture (`0`..`95`), size `0.2`..`3.0` (1 = 92 x 44 px at 1080 p) |
 | `fps_vr_x` / `fps_vr_y` / `fps_vr_scale` | `0` / `-25` / `0.3` | fps box, VR: centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size `0.2`..`3.0` (1 = 8 % of the eye width) |
 | `fps_vr_lock` | `0` | fps box, VR (v0.10.3): `0` = follows the headset, `1` = fixed in the play space, `fps_vr_dist` from your seat; `fps_vr_x` / `fps_vr_y` are then degrees around you (+ = right / down). It does not follow the cab's sway. `2` = attached to the vehicle (phase 47): placed like `1` when picked, then it moves with the cab (needs DLAA + per-part motion vectors; otherwise it acts like `1`). The menu's `FPS counter lock` row switches it |

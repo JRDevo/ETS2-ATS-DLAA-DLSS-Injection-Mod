@@ -16,6 +16,8 @@
 //      facing it, its own turn) and mapped into the model space: four model-space corners a_k -- the box is now a sticker in
 //      the cab. Every other usable cab draw c gets the same corners in ITS model space: a_c = M_c(t0)^-1 M_ref(t0) a_ref
 //      (= model_c^-1 model_ref: exact, the view / projection cancel), so any of them can carry the box later (re-acquire).
+//      Phase 47e: a part is also found again by its IndexCount alone (one cab draw with it) when the game changes its buffers / shader
+//      (keys), and a re-lock on the same cab (cab change / every carrier moving) keeps the box's spot (A carried over via a shared IndexCount).
 //   2. DRAW (every frame, every eye, ZERO lag): a vertex shader (menu.cpp kMenuVs / VSCab) reads the reference draw's MVP of
 //      THIS eye's pass from the record's GPU mirror (byte offset known on the CPU at the blit) and outputs clip = M(t) a_k --
 //      the box moves with the cab in the very picture the cab is in, and the runtime's reprojection treats it like the
@@ -25,6 +27,7 @@
 //      disagrees with the largest agreeing group (by summed IndexCount: the cab shell, dashboard, seats) is a MOVING part (the
 //      steering wheel turned, a door, a wiper) and is never used again for this lock. The same readback measures how far the
 //      cab moved against the play space since the lock (log level 4, per 10 s).
+//      (Phase 47e: the lock's entries are matched by full key, else loose key, else the unique IndexCount.)
 // The maths below is pure (no D3D, double precision; tests/fps_cab_test.cpp); the runtime (fps_cab.cpp, WITH_DLAA) owns the
 // candidate scan, the staging readbacks, the state and the logs. inject.cpp calls OnBlit / Get, menu.cpp draws.
 #pragma once
@@ -32,6 +35,7 @@
 #include <cstdint>
 #include <cstring>
 #include "fps_pose.h"
+#include "fps_profile.h"                                // phase 51b: FpsProfile::CabPose
 
 namespace FpsCab {
 
@@ -237,7 +241,7 @@ inline bool PlayToModel(const EyeFrame* ef, const Pose* poseIn, int n, M4* A, do
 
 // ---- the box in the play space (as the mode-1 quad layer builds it) -------------------------------------------------------
 struct Settings {
-    int x = 0, y = -25;                                 // fps_vr_x / fps_vr_y: degrees around the seat (+ right, + down)
+    double x = 0, y = -25;                                 // fps_vr_x / fps_vr_y: degrees around the seat (+ right, + down)
     int distCm = FpsPose::kDistDefault;                 // fps_vr_dist
     int yaw = 0, pitch = 0, roll = 0;                   // fps_vr_yaw / _pitch / _roll (the box's own turn)
     double scale = 0.3;                                 // fps_vr_scale (1 = 8 % of the eye's fov width at the distance)
@@ -278,6 +282,213 @@ inline void BoxPlay(const Settings& s, const LockFrame& l, double out[4][3], dou
     }
     if (centre) { centre[0] = c[0]; centre[1] = c[1]; centre[2] = c[2]; }
     if (widthM) *widthM = wM;
+}
+
+// ---- phase 51b: the box's CAB POSE (FpsProfile::CabPose, stored per vehicle) ----------------------------------------------
+// The play -> part-model map A of one rigid cab part + the LockFrame: corners = A BoxPlay(settings). Stored once per vehicle, it
+// places the box at a later lock-on WITHOUT that lock's own play -> cab map (which carries the lock frame's pose error: the
+// located / submitted pose correction C changes by up to ~1 deg from frame to frame in the ATS 13:41 log): the reference's map
+// is A_ref = T_j^-1 A_j (T_j = the lock's reference -> part j transform, Entry::T: exact for a rigid pair, no pose involved).
+inline M4 CabM(const FpsProfile::CabPose& c) {
+    M4 o = Identity();
+    for (int i = 0; i < 3; ++i) for (int j = 0; j < 4; ++j) o.m[i][j] = c.A[i][j];
+    return o;
+}
+inline LockFrame CabFrame(const FpsProfile::CabPose& c) {
+    LockFrame l;
+    for (int i = 0; i < 3; ++i) l.pivot[i] = c.pivot[i];
+    l.yaw0 = c.yaw0; l.fw = c.fw;
+    return l;
+}
+inline void CabPoseSet(const M4& A, const LockFrame& lf, uint32_t ic, uint32_t stride, uint32_t fmt, FpsProfile::CabPose* out) {
+    *out = FpsProfile::CabPose();
+    out->ic = ic; out->stride = stride; out->fmt = fmt;
+    for (int i = 0; i < 3; ++i) for (int j = 0; j < 4; ++j) out->A[i][j] = A.m[i][j];
+    for (int i = 0; i < 3; ++i) out->pivot[i] = lf.pivot[i];
+    out->yaw0 = lf.yaw0; out->fw = lf.fw;
+}
+// the box corners (homogeneous) + centre in the cab pose's part model space for settings s
+inline void CabCorners(const FpsProfile::CabPose& c, const Settings& s, double out[4][4], double centre[4] = nullptr) {
+    double cp[4][3], cc[3];
+    BoxPlay(s, CabFrame(c), cp, cc);
+    const M4 A = CabM(c);
+    for (int k = 0; k < 4; ++k) { const double p[4] = { cp[k][0], cp[k][1], cp[k][2], 1.0 }; Apply(A, p, out[k]); }
+    if (centre) { const double p[4] = { cc[0], cc[1], cc[2], 1.0 }; Apply(A, p, centre); }
+}
+// the lock reference's play -> model map from a cab pose of part j (Tj: the reference's model space -> part j's). False = singular.
+inline bool RefMapFromCab(const FpsProfile::CabPose& c, const M4& Tj, M4* Aref) {
+    M4 inv;
+    if (!Inv(Tj, &inv)) return false;
+    *Aref = Mul(inv, CabM(c));
+    return Finite(*Aref);
+}
+// The lock-on map from SEVERAL readbacks (phase 51b: one frame's map carries that frame's pose error). A[0..n-1]: the play ->
+// reference-model maps of n lock readbacks (the same reference part). Each map's images of the probe points (the box corners in
+// the play space) are compared with the per-coordinate median image; a map further than max(3 x the median distance, tol)
+// (model units) is an OUTLIER (a frame with a pose glitch / fast head turn) and dropped; the rest are averaged (entries), the
+// linear part made orthogonal again (Gram-Schmidt on the columns, the maps' mean column length: a rotation x scale, any
+// handedness). Returns the maps used (0 = none: *out unchanged); *spread = the largest distance of a used map (model units).
+constexpr int kMaxLockSamples = 16;
+inline int AverageMaps(const M4* A, int n, const double (*probe)[3], int np, double tol, M4* out, double* spread = nullptr) {
+    if (n < 1 || np < 1) return 0;
+    if (n > kMaxLockSamples) n = kMaxLockSamples;
+    if (np > 8) np = 8;
+    double img[kMaxLockSamples][8][3];
+    for (int f = 0; f < n; ++f)
+        for (int p = 0; p < np; ++p) {
+            const double h[4] = { probe[p][0], probe[p][1], probe[p][2], 1.0 };
+            double o[4];
+            Apply(A[f], h, o);
+            for (int i = 0; i < 3; ++i) img[f][p][i] = o[i];
+        }
+    auto median = [](double* v, int m) {                  // (insertion sort: m <= 16)
+        for (int a = 1; a < m; ++a) for (int b = a; b > 0 && v[b] < v[b - 1]; --b) { const double t = v[b]; v[b] = v[b - 1]; v[b - 1] = t; }
+        return (m & 1) ? v[m / 2] : 0.5 * (v[m / 2 - 1] + v[m / 2]);
+    };
+    double med[8][3];
+    for (int p = 0; p < np; ++p)
+        for (int i = 0; i < 3; ++i) {
+            double v[kMaxLockSamples];
+            for (int f = 0; f < n; ++f) v[f] = img[f][p][i];
+            med[p][i] = median(v, n);
+        }
+    double d[kMaxLockSamples], ds[kMaxLockSamples];
+    for (int f = 0; f < n; ++f) {
+        double m = 0.0;
+        for (int p = 0; p < np; ++p) {
+            const double t[3] = { img[f][p][0] - med[p][0], img[f][p][1] - med[p][1], img[f][p][2] - med[p][2] };
+            m = std::fmax(m, Len3(t));
+        }
+        d[f] = ds[f] = m;
+    }
+    const double lim = std::fmax(3.0 * median(ds, n), tol);
+    double sum[3][4] = {}, sp = 0.0, len = 0.0;
+    int used = 0;
+    for (int f = 0; f < n; ++f) {
+        if (!(d[f] <= lim) || !Finite(A[f])) continue;
+        for (int i = 0; i < 3; ++i) for (int j = 0; j < 4; ++j) sum[i][j] += A[f].m[i][j];
+        for (int j = 0; j < 3; ++j) { const double col[3] = { A[f].m[0][j], A[f].m[1][j], A[f].m[2][j] }; len += Len3(col); }
+        sp = std::fmax(sp, d[f]);
+        ++used;
+    }
+    if (!used) return 0;
+    M4 o = Identity();
+    for (int i = 0; i < 3; ++i) for (int j = 0; j < 4; ++j) o.m[i][j] = sum[i][j] / used;
+    len /= 3.0 * used;                                  // (the maps' own column length: averaging rotations shortens the columns)
+    double c[3][3];
+    for (int j = 0; j < 3; ++j) for (int i = 0; i < 3; ++i) c[j][i] = o.m[i][j];
+    for (int j = 0; j < 3; ++j) {
+        for (int k = 0; k < j; ++k) {
+            const double dt = c[j][0] * c[k][0] + c[j][1] * c[k][1] + c[j][2] * c[k][2];
+            for (int i = 0; i < 3; ++i) c[j][i] -= dt * c[k][i];
+        }
+        const double l = Len3(c[j]);
+        if (!(l > 1e-12)) return 0;
+        for (int i = 0; i < 3; ++i) c[j][i] /= l;
+    }
+    for (int j = 0; j < 3; ++j) for (int i = 0; i < 3; ++i) o.m[i][j] = c[j][i] * len;
+    if (!Finite(o)) return 0;
+    *out = o;
+    if (spread) *spread = sp;
+    return used;
+}
+
+// ---- phase 51d: the box SQUARE TO THE CAB (not to the play space) ------------------------------------------------------------
+// BoxPlay builds the box upright in the play space and facing its -z. The play space is the headset's LOCAL space: gravity-up, its
+// -z where the user recentred. The cab is not always aligned with it -- the ATS 15:02 truck 47a8: the stored play -> part maps of
+// IndexCount 12246 / 8325 are turned 11.4 deg (10.4 deg about the cab's forward axis, 4.6 about its side axis) and the steering
+// wheel's tilt axis (a cab side axis by construction: the wheel / 12246 relative turn is 49 deg about x only) lies 10.4 deg off the
+// play horizontal; the box looked rolled against the dashboard with every turn at 0. So the box is built in a frame made from the
+// CAB's own axes: the rotation shared by the largest summed IndexCount of the lock's cab draws (camera-relative ones included --
+// their MVP's translation is gone, their rotation is still P V W: the cab's axes), its up axis the one nearest the play up (+y in
+// the game's models: then forward = -z), turned onto the box's frame about the pivot. The orientation then comes from the MVPs
+// alone (exact, no pose); only the pivot (the seat) and the scale come from the play -> cab map.
+//
+// S = the rotation that takes model space b's axes into model space a's, from one eye's frames in both (the same pass: the
+// view / projection cancel): S = R_a R_b^T + U_a U_b^T + F_a F_b^T (column i = b's axis i in a's coordinates).
+inline void FrameRot(const EyeFrame& a, const EyeFrame& b, double S[3][3]) {
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) S[i][j] = a.R[i] * b.R[j] + a.U[i] * b.U[j] + a.F[i] * b.F[j];
+}
+// two draws of one eye's pass with the same model ROTATION (their eye frames' axes agree within tol; the translation may differ:
+// separate nodes of one rigid cab, or camera-relative)
+inline bool SameRot(const EyeFrame& a, const EyeFrame& b, double tol = 0.0035) {
+    double d = 0.0;
+    for (int i = 0; i < 3; ++i) {
+        d = std::fmax(d, std::fabs(a.R[i] - b.R[i]));
+        d = std::fmax(d, std::fabs(a.U[i] - b.U[i]));
+        d = std::fmax(d, std::fabs(a.F[i] - b.F[i]));
+    }
+    return d <= tol;
+}
+// an MVP that is the bare projection (no view rotation: a HEAD-LOCKED draw -- its axes are the eye's, never the cab's)
+inline bool HeadLocked(const EyeFrame& e) {
+    for (int k = 0; k < 3; ++k) {                       // R, U, F each exactly on a model axis
+        const double* v = k == 0 ? e.R : (k == 1 ? e.U : e.F);
+        const double m = std::fmax(std::fabs(v[0]), std::fmax(std::fabs(v[1]), std::fabs(v[2])));
+        if (!(std::fabs(m - 1.0) < 1e-8)) return false;
+    }
+    return true;
+}
+constexpr double kCabLevelMaxDeg = 30.0;                 // a cab frame further from the box's frame than this is not trusted
+// The box's frame square to the cab: A = the map virtual frame -> reference model (the play space of a lock, or a stored pose's
+// frame), S = the cab's axes in the reference model (FrameRot(ref, cab)). Q (columns: right, up, back in the virtual frame) = the
+// cab's axes there: up = the cab axis nearest the virtual up; back = the cab's +z when up is its +y (the game's models: y up, -z
+// forward), else the axis nearest the virtual back; right = up x back. *turnDeg = Q's angle (0 = already square), *upAxis = the
+// cab axis taken as up (1 = +y). False = degenerate or turned more than kCabLevelMaxDeg (*turnDeg still set).
+inline bool CabLevel(const M4& A, const double S[3][3], double Q[3][3], double* turnDeg = nullptr, int* upAxis = nullptr) {
+    M4 inv;
+    if (!Inv(A, &inv)) return false;
+    double w[3][3];                                     // w[i] = the cab's axis i in the virtual frame (unit)
+    for (int i = 0; i < 3; ++i) {
+        for (int r = 0; r < 3; ++r) w[i][r] = inv.m[r][0] * S[0][i] + inv.m[r][1] * S[1][i] + inv.m[r][2] * S[2][i];
+        const double l = Len3(w[i]);
+        if (!(l > 1e-12)) return false;
+        for (double& v : w[i]) v /= l;
+    }
+    int iu = 0;
+    double su = 1.0, bu = -2.0;
+    for (int i = 0; i < 3; ++i) { const double d = w[i][1]; if (std::fabs(d) > bu) { bu = std::fabs(d); iu = i; su = d >= 0.0 ? 1.0 : -1.0; } }
+    double up[3] = { su * w[iu][0], su * w[iu][1], su * w[iu][2] }, back[3];
+    if (iu == 1 && su > 0.0) { for (int r = 0; r < 3; ++r) back[r] = w[2][r]; }
+    else {
+        int ib = iu == 0 ? 1 : 0;
+        double sb = 1.0, bb = -2.0;
+        for (int i = 0; i < 3; ++i) { if (i == iu) continue; const double d = w[i][2]; if (std::fabs(d) > bb) { bb = std::fabs(d); ib = i; sb = d >= 0.0 ? 1.0 : -1.0; } }
+        for (int r = 0; r < 3; ++r) back[r] = sb * w[ib][r];
+    }
+    const double lu = Len3(up);
+    for (double& v : up) v /= lu;
+    const double d = back[0] * up[0] + back[1] * up[1] + back[2] * up[2];
+    for (int r = 0; r < 3; ++r) back[r] -= d * up[r];
+    const double lb = Len3(back);
+    if (!(lb > 1e-9)) return false;
+    for (double& v : back) v /= lb;
+    const double right[3] = { up[1] * back[2] - up[2] * back[1], up[2] * back[0] - up[0] * back[2], up[0] * back[1] - up[1] * back[0] };
+    for (int r = 0; r < 3; ++r) { Q[r][0] = right[r]; Q[r][1] = up[r]; Q[r][2] = back[r]; }
+    const double c = std::fmax(-1.0, std::fmin(1.0, 0.5 * (Q[0][0] + Q[1][1] + Q[2][2] - 1.0)));
+    const double deg = std::acos(c) * 57.29577951308232;
+    if (turnDeg) *turnDeg = deg;
+    if (upAxis) *upAxis = iu;
+    return std::isfinite(deg) && deg <= kCabLevelMaxDeg;
+}
+// T_Q: the rotation Q about the pivot (box frame -> virtual frame); the levelled map = A T_Q (corners = A T_Q BoxPlay(settings)).
+inline M4 LevelT(const double Q[3][3], const double pivot[3]) {
+    M4 t = Identity();
+    for (int r = 0; r < 3; ++r) {
+        double s = pivot[r];
+        for (int c = 0; c < 3; ++c) { t.m[r][c] = Q[r][c]; s -= Q[r][c] * pivot[c]; }
+        t.m[r][3] = s;
+    }
+    return t;
+}
+// For the log: the cab against the former box frame (Q's columns right, up, back): the cab up leaning sideways (+ = to the right) /
+// forward (+ = forward), the cab forward turned (+ = to the right), degrees.
+inline void CabTilt(const double Q[3][3], double* side, double* fore, double* yaw) {
+    const double k = 57.29577951308232;
+    *side = std::atan2(Q[0][1], Q[1][1]) * k;
+    *fore = std::atan2(-Q[2][1], Q[1][1]) * k;
+    *yaw = std::atan2(-Q[0][2], Q[2][2]) * k;
 }
 
 // ---- consensus / stats helpers ------------------------------------------------------------------------------------------
@@ -364,8 +575,68 @@ void SetMonitorEvery(int blits);
 struct Stats { int state; int entries; int demoted; uint64_t reacquires, relocks, locks, attached, fallback; int refEntry[2];
                uint64_t lockFrame; double devMaxM; int devN;   // devMaxM: the cab vs the play space (log window / lock)
                int lockEyes; bool lockXr; uint64_t monitors, latchOn, latchOff, held, lockRefusals; bool latched;
-               uint32_t refIc; int remembered; double monitorUs; };   // phase 47d
+               uint32_t refIc; int remembered; double monitorUs;   // phase 47d
+               uint64_t vehicleKey; bool sameCab;                    // phase 51 (fps profiles)
+               int placed; };                                        // phase 51b (GetLockInfo().placed)
 Stats GetStats();
+// Phase 51 (per-vehicle fps box profiles, src/fps_profile.h): the locks made so far (a change = a new lock-on), the current lock's
+// vehicle key (0 = no lock) and whether that lock is a phase 47e re-lock on the same cab (the box kept its spot).
+uint64_t LockCount();
+uint64_t VehicleKey();
+bool LockSameCab();
+// Phase 51b: where the current lock's play -> cab map came from.
+enum Placed : int {
+    kPlacedNone = 0,                                    // no lock
+    kPlacedPlay,                                        // the play space, one lock readback (SetLockSamples(1) / a lone sample)
+    kPlacedPlayAvg,                                     // the play space, averaged over several lock readbacks (AverageMaps)
+    kPlacedCab,                                         // a stored cab pose (FpsProfile::CabPose: the provider / PlaceFromCab)
+    kPlacedSameCab,                                     // a phase 47e re-lock on the same cab (the previous lock's map carried over)
+};
+struct LockInfo {
+    int placed = kPlacedNone;
+    int samples = 0, samplesUsed = 0;                   // kPlacedPlayAvg: readbacks taken / kept (outliers dropped)
+    double spreadMm = 0.0;                              // kPlacedPlayAvg: the largest distance of a kept readback's box from the median
+    uint32_t cabIc = 0;                                 // kPlacedCab: the stored pose's part
+    bool cabMissing = false;                            // a stored pose was offered but its part is not among the lock's rigid parts
+    uint32_t missingIc = 0;
+    int cabFound = 0, cabAgree = 0;                     // phase 51c: stored parts found in the lock / in the agreeing majority
+    bool cabAmbiguous = false;                          // phase 51c: the found stored parts disagree, no majority (-> the play space)
+    bool remeasured = false;                            // phase 51c: this lock-on was asked for by Remeasure
+    // phase 51d: the box square to the cab (CabLevel)
+    bool level = false;                                 // the box is built square to the cab
+    bool leveledOld = false;                            // kPlacedCab: an older (play-space) stored pose was levelled at this lock-on
+    double turnDeg = 0.0;                               // how far the box frame was turned onto the cab (0 = it was square already)
+    double tiltSide = 0.0, tiltFore = 0.0, tiltYaw = 0.0;   // the cab against the box's former frame (CabTilt)
+    int cabFrameDraws = 0;                              // the draws sharing the cab rotation (0 = no cab frame: not levelled)
+    uint32_t cabFrameIc = 0;                            // the biggest of them
+    uint64_t cabFrameSum = 0;                           // their summed IndexCount
+    bool cabFrameRejected = false;                      // a cab frame was found but turned more than kCabLevelMaxDeg
+};
+LockInfo GetLockInfo();
+// The current lock's cab pose: the stored one verbatim when the lock was placed from it, else the lock's own map in its reference
+// part's model space (entry 0). False = no lock.
+bool CurrentCabPose(FpsProfile::CabPose* out);
+// Re-place the current lock from a stored cab pose (its part must be one of the lock's rigid, not moving parts): true = placed (the
+// box corners rebuilt; GetLockInfo().placed = kPlacedCab). Used when the per-vehicle profiles are switched on with a lock held.
+bool PlaceFromCab(const FpsProfile::CabPose& c);
+// The stored cab pose of a vehicle key, asked at each lock-on readback (render thread). nullptr = none (the shared mode).
+using CabPoseFn = bool (*)(uint64_t key, FpsProfile::CabPose* out);
+void SetCabPoseProvider(CabPoseFn fn);
+// Phase 51c: drop the lock and take the next one from a fresh averaged play -> cab map (the stored pose not used; the menu's
+// "Re-measure cab spot" row). The profile then replaces the vehicle's stored pose with it (GetLockInfo().remeasured).
+void Remeasure();
+// Phase 51c: counts the times a part of the stored cab pose was found MOVING by the monitor (*part = the last one): the profile
+// drops that part from the vehicle's pose.
+uint64_t CabMovedSerial(FpsProfile::CabPart* part);
+// Phase 51d: every cab part reported moving since *serial (up to cap, oldest first; *serial advanced): a part of ANY lock (also one
+// placed from the play space, whose pose the profile stored from the lock: the ATS 15:02 wheel 13200 stayed in the line) and a
+// stored part the lock-on skipped as a remembered moving part. The profile drops each from the bound vehicle's pose.
+int CabMovedSince(uint64_t* serial, FpsProfile::CabPart* out, int cap);
+// Readbacks averaged for a lock-on from the play space (1 = the single-frame lock of phase 47; default kLockSamplesDefault).
+constexpr int kLockSamplesDefault = 12;
+void SetLockSamples(int n);
+// Test hook: the box corners in the model space of the lock entry with IndexCount ic. False = no such entry.
+bool EntryCorners(uint32_t ic, double out[4][4]);
 
 }  // namespace FpsCab
 #endif

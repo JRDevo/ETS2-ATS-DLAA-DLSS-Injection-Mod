@@ -3308,6 +3308,7 @@ bool DrawIdRecord::Record(ID3D11DeviceContext1* ctx, UINT ic, UINT inst, UINT si
     if (m_forward) k.flags |= kFFwd;                     // v0.10.0 phase 3
     k.off = kNone;
     k.rows = 0;
+    k.stride = s.vb[0] ? s.vbStride[0] : 0u; k.ibFmt = (UINT)s.ibFmt;   // fps profiles (FpsProfile::VehicleKey)
     k.vs = s.vs;                                         // v0.10.0 phase 22: identity only (DrawIdMv::MvpRow, the layout table)
     if (!instanced && s.cb[0] && s.cbNum[0] * 16u >= 128u) {
         const UINT nRows = s.cbNum[0] < kMirrorRows ? s.cbNum[0] : kMirrorRows;   // v0.10.0 phase 22: rows 0..11 (was 4..7)
@@ -3670,6 +3671,8 @@ float    DrawIdRecord::VpMax(int i) const { return (i >= 0 && i < m_n) ? m_key[i
 UINT     DrawIdRecord::VpJitterPacked(int i) const { return (i >= 0 && i < m_n) ? m_key[i].jit : 0u; }   // phase 14 round 4
 UINT     DrawIdRecord::InstanceCount(int i) const { return (i >= 0 && i < m_n) ? m_key[i].inst : 1u; }  // phase 14 round 4
 UINT     DrawIdRecord::IndexCount(int i) const { return (i >= 0 && i < m_n) ? m_key[i].ic : 0; }
+UINT     DrawIdRecord::VbStride(int i) const { return (i >= 0 && i < m_n) ? m_key[i].stride : 0; }   // fps profiles
+UINT     DrawIdRecord::IbFormat(int i) const { return (i >= 0 && i < m_n) ? m_key[i].ibFmt : 0; }
 void     DrawIdRecord::CbWindow(int i, UINT* first, UINT* num) const {
     *first = (i >= 0 && i < m_n) ? m_key[i].cbFirst : 0;
     *num = (i >= 0 && i < m_n) ? m_key[i].cbNum : 0;

@@ -735,6 +735,7 @@
 #include <mutex>
 #include <new>
 #include <initializer_list>                         // phase 45: MenuCpuOf
+#include <memory>
 #include <string>
 #include <vector>
 #include <intrin.h>
@@ -757,6 +758,7 @@
 #include "vrs.h"                                    // phase 34: VRS fixed foveated rendering (NVAPI; VR world scene only)
 #include "hidden_mask.h"                            // phase 40: VR hidden area mask (XR_KHR_visibility_mask into the eye depth)
 #include "fps_cab.h"                                // phase 47: the VR fps box attached to the vehicle (GPU-placed from a cab draw)
+#include "fps_profile.h"                            // phase 51: per-vehicle fps box placement (fps_profile lines; pure logic)
 #endif
 #include "cpu_pin.h"                                // phase 32: keep the game on the V-Cache cores (cpu_cache_pin; both builds)
 #include "flat_views.h"                             // v0.12.0 issue #12: flat multi-view (multi-monitor) detection (both builds)
@@ -879,9 +881,12 @@ int      g_bindHoldMs = 5000;            // v0.10.2 dlaa.ini bind_hold_ms (500..
 // v0.10.0 live fps box (dlaa.ini fps_*; the tuning menu's FPS counter rows): drawn where the panel draws, also while the menu
 // is closed. Flat and VR have their own placement.
 bool     g_fpsShow = false;              // fps_show: the box is on
+int      g_fpsText = 0;                  // fps_text: what the box shows -- 0 = fps + ms (two lines), 1 = fps only, 2 = ms only (one line);
+                                         //   3 / 4 / 5 = the same without the units: "72" + "13.9", "72", "13.9"
+constexpr int kFpsTextModes = 6;         // fps_text 0..5
 int      g_fpsX = 1, g_fpsY = 1;         // flat: % of the picture width / height to the box's left / top edge (0..95)
 float    g_fpsScale = 1.0f;              // flat: 0.2..3.0 (1 = 92 x 44 px at 1080 p, scales with the picture height; phase 15: was 0.5..3.0)
-int      g_fpsVrX = 0, g_fpsVrY = -25;   // VR: % of the eye width / height, box CENTRE from the eye's optical centre (-50..50)
+float    g_fpsVrX = 0.0f, g_fpsVrY = -25.0f;   // VR: % of the eye width / height (or degrees), box CENTRE from the eye's optical centre (-50..50, 0.1 resolution, menu step 0.2)
 // VR: 0.2..3.0 (1 = 8 % of the eye width, unchanged so a saved fps_vr_scale keeps its size). v0.10.0 phase 15: default 0.3
 // (was 1.0; range was 0.5..3.0): 1.0 = ~490 px on a 6120-px eye = about 4x the flat box's angle; 0.3 = ~150 px, about 1.5x
 // the flat box as seen in the headset (still readable after the headset's downsampling).
@@ -902,7 +907,11 @@ int      g_fpsColor = 0;
 int      g_fpsBright = FpsPose::kBrightDefault;   // phase 48: dlaa.ini fps_brightness 10..100 % (the colour * pct / 100)
 int      g_fpsVrDist = FpsPose::kDistDefault;
 int      g_fpsVrYaw = 0, g_fpsVrPitch = 0, g_fpsVrRoll = 0;
-bool     g_fpsExplicit = false;          // an fps_* value was changed in the menu -> SaveSettings writes the 13 fps_* keys
+// phase 51b: dlaa.ini fps_profiles -- 1 = the attached box's placement / colour / brightness / text PER VEHICLE (fps_profile lines,
+// FpsProfileTick; default), 0 = one shared set for every vehicle (the global fps_* keys; the fps_profile lines are neither read
+// into the live values nor written). The menu's "Position per vehicle" row.
+int      g_fpsProfiles = 1;
+bool     g_fpsExplicit = false;         // an fps_* value was changed in the menu -> SaveSettings writes the 13 fps_* keys
 int      g_menuBlitEye = -1;             // VR: the eye blit this Draw is (HandlePossibleBlit), drawn on after it (hkDraw)
 void*    g_menuBlitRt  = nullptr;        // ... and its render target (identity only)
 // v0.10.0 phase 16 VR LATE PANEL (see that block after MenuDrawPreview): the panel / fps box go LAST onto each eye picture.
@@ -1562,6 +1571,11 @@ void ToggleDlaa(uint64_t n);             // v0.10.0 (was inline): Shift+F11 DLAA
 void ToggleUpscale(uint64_t n);          // v0.10.0 (was inline): Ctrl+F4 DLSS upscale on / off
 void ToggleFwdDepth(uint64_t n);         // v0.10.0 (was inline): Ctrl+F3 forward depth for the MVs on / off
 void MenuKeys(uint64_t n);               // v0.10.0 tuning menu: open / close + navigation (before the other user keys)
+void FpsProfileTick();                   // phase 51: per-vehicle fps box profiles (after MenuKeys)
+void FpsBoxDefaults(uint64_t n);         // phase 51d: the menu's Left on "Re-measure cab spot": the current vehicle's box to defaults
+void FpsProfUnbind();                    // phase 51d: the Reset row -- the live values are bound to no vehicle until the next lock-on
+bool g_fpsBoxDefaulted = false;          // phase 51d: the menu's Left on "Re-measure cab spot" reset the box (its value column)
+void ToggleFpsProfiles(uint64_t n);      // phase 51b: the menu's Position per vehicle row (dlaa.ini fps_profiles)
 void MenuDrawAtPresent(IDXGISwapChain* sc, ID3D11DeviceContext* bctx); // v0.10.0 tuning menu: flat / desktop-mirror panel
 void MenuDrawVr(ID3D11DeviceContext* ctx); // v0.10.0 tuning menu: VR panel into the eye texture after the game's eye blit
 void MenuDrawPreview(ID3D11DeviceContext* ctx, int idx, char trigger);   // v0.10.0 phase 15: ... onto a VR preview eye picture
@@ -1671,6 +1685,7 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
         CheckPresetFallback(n);                  // v0.5.7: a live preset create failed -> told by ear
         if (g_fpsShow || g_menuOpen.load(std::memory_order_relaxed)) FpsTick();   // v0.10.0 fps meter (box / menu)
         MenuKeys(n);                             // v0.10.0 tuning menu (Delete, arrows) -- before the other user keys
+        FpsProfileTick();                        // phase 51: per-vehicle fps box profiles (lock-on / edits / save at menu close)
 #endif
 
         // ---- user keys -------------------------------------------------------------------------------
@@ -2803,19 +2818,34 @@ bool PathNextToDll(const wchar_t* name, wchar_t* path);   // defined below
 constexpr int kIniMaxKeys = 56;                    // v0.10.3 phase 28: WriteIniPreserving's key cap (was 32; phase 44: 48 -> 56)
 struct IniKV { const char* key; char val[48]; };   // val[0] == 0: delete the key's line(s) (WriteIniPreserving)
                                                    // (v0.10.2: was 32 -- "Ctrl+Shift+Alt+NumpadSubtract, Wheel128" is 39)
-bool WriteIniPreserving(const IniKV* kv, int nkv) {
-    wchar_t path[MAX_PATH], tmp[MAX_PATH];
-    if (!PathNextToDll(L"dlaa.ini", path) || !PathNextToDll(L"dlaa.ini.tmp", tmp)) return false;
-
-    std::string in;                                      // existing file, read raw (binary) so endings survive
+// phase 51: the raw read (binary: the line endings survive) and the safe write (dlaa.ini.tmp, then MoveFileExW over the
+// original: a failed write never empties or truncates dlaa.ini) of WriteIniPreserving, shared with WriteIniProfiles.
+void ReadIniRaw(const wchar_t* path, std::string* in) {
+    in->clear();
     FILE* f = nullptr;
     if (_wfopen_s(&f, path, L"rb") == 0 && f) {
         fseek(f, 0, SEEK_END);
         long sz = ftell(f);
         fseek(f, 0, SEEK_SET);
-        if (sz > 0) { in.resize((size_t)sz); in.resize(fread(&in[0], 1, (size_t)sz, f)); }
+        if (sz > 0) { in->resize((size_t)sz); in->resize(fread(&(*in)[0], 1, (size_t)sz, f)); }
         fclose(f);
     }
+}
+bool WriteIniAtomic(const wchar_t* path, const wchar_t* tmp, const std::string& out) {
+    FILE* w = nullptr;
+    if (_wfopen_s(&w, tmp, L"wb") != 0 || !w) return false;
+    const bool wrote = out.empty() ? true : (fwrite(out.data(), 1, out.size(), w) == out.size());
+    const bool closed = (fclose(w) == 0);
+    if (!wrote || !closed) { _wremove(tmp); return false; }
+    if (!MoveFileExW(tmp, path, MOVEFILE_REPLACE_EXISTING)) { _wremove(tmp); return false; }
+    return true;
+}
+bool WriteIniPreserving(const IniKV* kv, int nkv) {
+    wchar_t path[MAX_PATH], tmp[MAX_PATH];
+    if (!PathNextToDll(L"dlaa.ini", path) || !PathNextToDll(L"dlaa.ini.tmp", tmp)) return false;
+
+    std::string in;                                      // existing file, read raw (binary) so endings survive
+    ReadIniRaw(path, &in);
     const char* nl = (in.find("\r\n") != std::string::npos) ? "\r\n" : "\n";   // match the file's ending
     bool anyWrite = false;                               // at least one key with a value (else a missing file stays missing)
     for (int k = 0; k < nkv && k < kIniMaxKeys; ++k) if (kv[k].val[0]) anyWrite = true;
@@ -2872,14 +2902,7 @@ bool WriteIniPreserving(const IniKV* kv, int nkv) {
         if (needNl) { out += nl; needNl = false; }
         out += kv[k].key; out += " = "; out += kv[k].val; out += nl;
     }
-
-    FILE* w = nullptr;
-    if (_wfopen_s(&w, tmp, L"wb") != 0 || !w) return false;
-    const bool wrote = out.empty() ? true : (fwrite(out.data(), 1, out.size(), w) == out.size());
-    const bool closed = (fclose(w) == 0);
-    if (!wrote || !closed) { _wremove(tmp); return false; }
-    if (!MoveFileExW(tmp, path, MOVEFILE_REPLACE_EXISTING)) { _wremove(tmp); return false; }
-    return true;
+    return WriteIniAtomic(path, tmp, out);
 }
 
 void SaveSettings(uint64_t n) {
@@ -2942,11 +2965,12 @@ void SaveSettings(uint64_t n) {
     }
     if (g_fpsExplicit) {                                  // v0.10.0 fps box: on / off + placement, only once changed in the menu
         snprintf(add("fps_show"), sizeof(kv[0].val), "%d", g_fpsShow ? 1 : 0);
+        snprintf(add("fps_text"), sizeof(kv[0].val), "%d", g_fpsText);   // 0 fps + ms, 1 fps only, 2 ms only, 3..5 the same without units
         snprintf(add("fps_x"), sizeof(kv[0].val), "%d", g_fpsX);
         snprintf(add("fps_y"), sizeof(kv[0].val), "%d", g_fpsY);
         snprintf(add("fps_scale"), sizeof(kv[0].val), "%.1f", (double)g_fpsScale);
-        snprintf(add("fps_vr_x"), sizeof(kv[0].val), "%d", g_fpsVrX);
-        snprintf(add("fps_vr_y"), sizeof(kv[0].val), "%d", g_fpsVrY);
+        snprintf(add("fps_vr_x"), sizeof(kv[0].val), "%.1f", (double)g_fpsVrX);
+        snprintf(add("fps_vr_y"), sizeof(kv[0].val), "%.1f", (double)g_fpsVrY);
         snprintf(add("fps_vr_scale"), sizeof(kv[0].val), "%.1f", (double)g_fpsVrScale);
         snprintf(add("fps_vr_lock"), sizeof(kv[0].val), "%d", g_fpsVrLock);   // v0.10.3 phase 28
         snprintf(add("fps_color"), sizeof(kv[0].val), "%d", g_fpsColor);      // phase 44
@@ -2955,6 +2979,7 @@ void SaveSettings(uint64_t n) {
         snprintf(add("fps_vr_yaw"), sizeof(kv[0].val), "%d", g_fpsVrYaw);
         snprintf(add("fps_vr_pitch"), sizeof(kv[0].val), "%d", g_fpsVrPitch);
         snprintf(add("fps_vr_roll"), sizeof(kv[0].val), "%d", g_fpsVrRoll);
+        snprintf(add("fps_profiles"), sizeof(kv[0].val), "%d", g_fpsProfiles);   // phase 51b
     }
     if (g_xrTurboExplicit) snprintf(add("xr_turbo"), sizeof(kv[0].val), "%d", g_xrTurbo);   // phase 30 (Turbo mode row)
     if (g_xrHiddenMaskExplicit) snprintf(add("xr_hidden_mask"), sizeof(kv[0].val), "%d", g_xrHiddenMask);   // phase 40
@@ -2990,12 +3015,12 @@ void SaveSettings(uint64_t n) {
         snprintf(menuW, sizeof(menuW), " -- menu panel: menu_x=%d menu_y=%d menu_scale=%.1f menu_vr_x=%d menu_vr_y=%d menu_vr_scale=%.1f "
                  "menu_vr_depth=%d menu_vr_dist=%d menu_vr_face=%d", g_menuX, g_menuY, (double)g_menuScale, g_menuVrX, g_menuVrY,
                  (double)g_menuVrScale, g_menuVrDepth, g_menuVrDist, g_menuVrFace);
-    char fpsW[320] = "";                                  // (phase 44: was 160, + fps_color / fps_vr_dist / the turn)
+    char fpsW[384] = "";                                  // (phase 44: was 160, + fps_color / fps_vr_dist / the turn; 51b: 352 -> 384)
     if (g_fpsExplicit)
-        snprintf(fpsW, sizeof(fpsW), " -- fps box: fps_show=%d fps_x=%d fps_y=%d fps_scale=%.1f fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f "
-                 "fps_vr_lock=%d fps_color=%d (%ls) fps_brightness=%d fps_vr_dist=%d fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d", g_fpsShow ? 1 : 0,
-                 g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY, (double)g_fpsVrScale, g_fpsVrLock, g_fpsColor,
-                 FpsPose::ColorOf(g_fpsColor).name, g_fpsBright, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll);
+        snprintf(fpsW, sizeof(fpsW), " -- fps box: fps_show=%d fps_text=%d fps_x=%d fps_y=%d fps_scale=%.1f fps_vr_x=%.1f fps_vr_y=%.1f fps_vr_scale=%.1f "
+                 "fps_vr_lock=%d fps_color=%d (%ls) fps_brightness=%d fps_vr_dist=%d fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d fps_profiles=%d", g_fpsShow ? 1 : 0,
+                 g_fpsText, g_fpsX, g_fpsY, (double)g_fpsScale, (double)g_fpsVrX, (double)g_fpsVrY, (double)g_fpsVrScale, g_fpsVrLock, g_fpsColor,
+                 FpsPose::ColorOf(g_fpsColor).name, g_fpsBright, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll, g_fpsProfiles);
     char notW[128];
     snprintf(notW, sizeof(notW), "%s%s%s%s%s", g_profExplicit[PK_PRESET] ? "" : " dlss_preset", g_profExplicit[PK_AREA] ? "" : " dlaa_area",
              g_profExplicit[PK_MIRROR_DLAA] ? "" : " mirror_dlaa", mirVrW ? "" : " mirror_vr_mode", mirFlatW ? "" : " mirror_flat_mode");
@@ -15714,11 +15739,14 @@ enum MenuRowId {
     MR_FPS,
     MR_FPSGRP,                                            // v0.10.3 phase 29c: group header "FPS counter settings" (collapsible)
     MR_FPSLOCK,                                           // v0.10.3 phase 28: VR fps box follows the head / fixed in the cab
-    MR_FPSX, MR_FPSY, MR_FPSSIZE,
+    MR_FPSPROF,                                           // phase 51b: Position per vehicle (dlaa.ini fps_profiles)
+    MR_FPSREMEAS,                                         // phase 51c: Re-measure cab spot (an action: Right)
+    MR_FPSX, MR_FPSY,
+    MR_FPSYAW, MR_FPSPITCH, MR_FPSROLL,                   // phase 44: VR turn / tilt / rotate (dlaa.ini fps_vr_yaw / _pitch / _roll); moved up behind Y (combined build)
+    MR_FPSSIZE,
     MR_FPSCOLOR,                                          // phase 44: fps box colour (dlaa.ini fps_color)
     MR_FPSBRIGHT,                                         // phase 48: fps box brightness (dlaa.ini fps_brightness)
     MR_FPSDIST,                                           // phase 44: VR distance (dlaa.ini fps_vr_dist)
-    MR_FPSYAW, MR_FPSPITCH, MR_FPSROLL,                   // phase 44: VR turn / tilt / rotate (dlaa.ini fps_vr_yaw / _pitch / _roll)
     MR_LOG,                                               // phase 39: Logging (dlaa.ini log_level) + what logging costs
     MR_HOTKEYS,                                           // v0.12.1 phase 50: "Hotkeys..." -- Right opens the Hotkeys page
     MR_SAVE, MR_RESET, MR_CLOSE,
@@ -15734,19 +15762,20 @@ constexpr MenuGroupDef kMenuGroups[] = {
     { MR_UPGRP,    MR_OFXR,     L"Upscaling and VR" },
     { MR_VRPGRP,   MR_HMASK,    L"VR performance" },
     { MR_PANELGRP, MR_MENUKEYS, L"Panel settings" },
-    { MR_FPSGRP,   MR_FPSROLL,  L"FPS counter settings" },     // phase 44: last row MR_FPSSIZE -> MR_FPSROLL (phase 48: + FPS brightness inside)
+    { MR_FPSGRP,   MR_FPSDIST,  L"FPS counter settings" },     // phase 44: last row MR_FPSSIZE -> MR_FPSROLL (phase 48: + FPS brightness inside)
 };
 constexpr int kMenuGroupCount = (int)(sizeof(kMenuGroups) / sizeof(kMenuGroups[0]));
 static_assert(MR_PICGRP + 1 == MR_SHARP && MR_BIAS + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_MIRTURNS + 1 == MR_UPGRP &&
               MR_UPGRP + 1 == MR_UPSCALE && MR_OFXR + 1 == MR_VRPGRP && MR_VRPGRP + 1 == MR_TURBO && MR_HMASK + 1 == MR_PANELGRP &&
-              MR_PANELGRP + 1 == MR_POSX && MR_MENUKEYS + 1 == MR_FPS && MR_FPSGRP + 1 == MR_FPSLOCK && MR_FPSROLL + 1 == MR_LOG,
+              MR_PANELGRP + 1 == MR_POSX && MR_MENUKEYS + 1 == MR_FPS && MR_FPSGRP + 1 == MR_FPSLOCK && MR_FPSLOCK + 1 == MR_FPSPROF && MR_FPSPROF + 1 == MR_FPSREMEAS &&
+              MR_FPSDIST + 1 == MR_LOG,
               "tuning menu: a group's children must follow its header and fill it up to its last row");
 static_assert(MR_SHARP < MR_WIDTH && MR_WIDTH < MR_LOD && MR_LOD < MR_LODCUT && MR_LODCUT < MR_AREA && MR_AREA < MR_PRETM &&
               MR_PRETM < MR_FWD && MR_FWD < MR_BIAS && MR_DRAWIDS < MR_MIRROR && MR_MIRROR < MR_MIRTURNS && MR_UPSCALE < MR_DLAA && MR_DLAA < MR_OFXR &&
               MR_TURBO < MR_VRS && MR_VRS < MR_VRSSIZE && MR_VRSSIZE < MR_VRSPASS && MR_VRSPASS < MR_HMASK &&
               MR_POSX < MR_POSY && MR_POSY < MR_SIZE && MR_SIZE < MR_DEPTH && MR_DEPTH < MR_FACE && MR_FACE < MR_MENUKEYS &&
-              MR_FPSLOCK < MR_FPSX && MR_FPSX < MR_FPSY && MR_FPSY < MR_FPSSIZE && MR_FPSSIZE < MR_FPSCOLOR &&
-              MR_FPSCOLOR < MR_FPSBRIGHT && MR_FPSBRIGHT < MR_FPSDIST && MR_FPSDIST < MR_FPSYAW && MR_FPSYAW < MR_FPSPITCH && MR_FPSPITCH < MR_FPSROLL,
+              MR_FPSLOCK < MR_FPSPROF && MR_FPSPROF < MR_FPSREMEAS && MR_FPSREMEAS < MR_FPSX && MR_FPSX < MR_FPSY && MR_FPSY < MR_FPSYAW && MR_FPSYAW < MR_FPSPITCH && MR_FPSPITCH < MR_FPSROLL &&
+              MR_FPSROLL < MR_FPSSIZE && MR_FPSSIZE < MR_FPSCOLOR && MR_FPSCOLOR < MR_FPSBRIGHT && MR_FPSBRIGHT < MR_FPSDIST,
               "tuning menu: group children out of order");
 const wchar_t* const kMenuDesc[] = {
     // v0.10.0: every row = what it does, when a player would change it, what it costs. The panel shows 3 lines of about 105
@@ -15836,10 +15865,21 @@ const wchar_t* const kMenuDesc[] = {
     // v0.10.3 phase 28 (MR_FPSLOCK)
     L"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, ignores the cab's sway. "
     L"Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Per-part motion vectors). No cost.",
+    // phase 51b (MR_FPSPROF)
+    L"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, size, colour, brightness and "
+    L"text (saved in dlaa.ini when the menu closes). Off = one shared set for every vehicle. No cost.",
+    // phase 51c / 51d (MR_FPSREMEAS)
+    L"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box sits off. Left = this "
+    L"vehicle's box back to the defaults (spot, turn, size, colour, text); other vehicles keep theirs. The box is square to the cab.",
     L"Moves the fps box sideways, in % of the screen (VR fixed / attached: degrees around you). Flat and VR each keep their "
     L"own position. No cost.",
     L"Moves the fps box up / down, in % of the screen (VR fixed / attached: degrees, minus = up). Flat and VR each keep their "
     L"own position. No cost.",
+    L"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face turns to the right). Use it "
+    L"to angle the box when it sits at the side. 0 = it faces you. No cost.",
+    L"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if lying on the dashboard). "
+    L"0 = it faces you. No cost.",
+    L"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = upright. No cost.",
     L"Makes the fps box bigger or smaller (0.2 .. 3.0). Raise it if you cannot read it in the headset or on a big screen. No cost.",
     // phase 44 (MR_FPSCOLOR, MR_FPSDIST, MR_FPSYAW, MR_FPSPITCH, MR_FPSROLL)
     L"The colour of the fps box's text: 20 colours, each with an outline so it reads on any picture (black on white = dark text, "
@@ -15848,11 +15888,6 @@ const wchar_t* const kMenuDesc[] = {
     L"to tone the counter down at night or in the headset. Flat and VR. No cost.",
     L"VR only, so greyed in flat. How far away the fps box floats, 0.30 - 3.00 m. It keeps the same size in your view at every "
     L"distance; only the depth changes. Put it near the depth you look at to read it without refocusing. No cost.",
-    L"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face turns to the right). Use it "
-    L"to angle the box when it sits at the side. 0 = it faces you. No cost.",
-    L"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if lying on the dashboard). "
-    L"0 = it faces you. No cost.",
-    L"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = upright. No cost.",
     // phase 39 (MR_LOG)
     L"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + problems worked around; "
     L"info = + start-up and changes; debug = + statistics, and debug also runs the GPU timers and the CPU profiler.",
@@ -15914,6 +15949,8 @@ inline bool MenuVr() {
                         g_frames.load(std::memory_order_relaxed) - g_pvVrPicFrame < 120);
 }
 inline int  MenuClampI(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+// VR fps box position rows: 0.2 per press, clamped -50..50, rounded to 1 decimal so repeated steps do not drift
+inline float MenuStepFpsVr(float v, int dir) { const float r = std::round((v + 0.2f * (float)dir) * 10.0f) / 10.0f; return r < -50.0f ? -50.0f : (r > 50.0f ? 50.0f : r); }
 // v0.10.3 phase 29b: the VR panel goes to the compositor as an OpenXR QUAD layer now (menu_vr_layer = 1 and its quad went out
 // at the last xrEndFrame -- XrHook::OverlayActive(0)): the Depth row then edits menu_vr_dist (the quad's distance) instead of
 // menu_vr_depth (the in-picture fallback's shift, also the path while the quad path is not up / failed this session).
@@ -15951,6 +15988,34 @@ struct FpsMeter {
 FpsMeter g_fps;
 constexpr double kFpsEvery = 0.5;                // s between two updates
 
+// The box's two text lines from the last measurement and fps_text (0 = both, 1 = the fps line only, 2 = the ms line only; 3 / 4 / 5
+// = the same as numbers only, no "fps" / "ms"; the unused line is empty and TuningMenu::RenderWidget centres the single line in
+// the big font). Also called when the text mode changes.
+void FpsSetLines() {
+    FpsMeter& f = g_fps;
+    const bool units = g_fpsText < 3;
+    const int what = g_fpsText % 3;                       // 0 both, 1 fps, 2 ms
+    wchar_t a[24], b[24];
+    if (f.have) {
+        swprintf(a, 24, units ? L"%.0f fps" : L"%.0f", f.fps);
+        swprintf(b, 24, units ? L"%.1f ms" : L"%.1f", f.frameMs);
+    } else {
+        wcscpy_s(a, 24, units ? L"-- fps" : L"--");
+        wcscpy_s(b, 24, units ? L"-- ms" : L"--");
+    }
+    wcscpy_s(f.line1, 24, what == 2 ? b : a);             // ms only: ONE line, passed as line1
+    if (what == 0) wcscpy_s(f.line2, 24, b); else f.line2[0] = 0;
+}
+// the fps_text modes as the menu row shows them (example values) and as the logs name them
+const wchar_t* FpsTextMenuName(int t) {
+    static const wchar_t* const k[kFpsTextModes] = { L"72 fps + 13.9 ms", L"72 fps", L"13.9 ms", L"72 + 13.9", L"72", L"13.9" };
+    return t >= 0 && t < kFpsTextModes ? k[t] : L"?";
+}
+const char* FpsTextLogName(int t) {
+    static const char* const k[kFpsTextModes] = { "fps + ms", "fps only", "ms only", "fps + ms numbers only (no units)",
+                                                  "fps number only", "ms number only" };
+    return t >= 0 && t < kFpsTextModes ? k[t] : "?";
+}
 void FpsTick() {
     CpuProf::Block cpb(CpuProf::kBMenu);               // phase 31 CPU profiler (cpu_prof.h)
     FpsMeter& f = g_fps;
@@ -15975,13 +16040,13 @@ void FpsTick() {
     f.have = true;
     f.t0 = now;
     f.count = 0;
-    swprintf(f.line1, 24, L"%.0f fps", f.fps);
-    swprintf(f.line2, 24, L"%.1f ms", f.frameMs);
+    FpsSetLines();
 }
 void FpsStop() {
     const LONGLONG freq = g_fps.freq;
     g_fps = FpsMeter();
     g_fps.freq = freq;
+    FpsSetLines();
 }
 // v0.10.3 phase 29: how the VR panel / fps box reach the headset now (the toggle logs)
 const char* MenuVrPathName() {
@@ -16002,10 +16067,23 @@ void ToggleFpsBox(uint64_t n) {
         if (!g_menuOpen.load(std::memory_order_relaxed)) MenuLateReset("fps box off");   // v0.10.0 phase 16
         if (!g_menuOpen.load(std::memory_order_relaxed)) FpsStop();   // (the menu row: the menu is open, the meter keeps running)
     }
-    Log("fps box %s (tuning menu, Present #%llu) -- flat fps_x=%d fps_y=%d fps_scale=%.1f, VR fps_vr_x=%d fps_vr_y=%d "
-        "fps_vr_scale=%.1f; %s", g_fpsShow ? "ON" : "OFF", (unsigned long long)n, g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX,
+    Log("fps box %s (tuning menu, Present #%llu) -- fps_text=%d (0 fps + ms, 1 fps only, 2 ms only, 3..5 the same without units) flat fps_x=%d fps_y=%d fps_scale=%.1f, VR fps_vr_x=%.1f fps_vr_y=%.1f "
+        "fps_vr_scale=%.1f; %s", g_fpsShow ? "ON" : "OFF", (unsigned long long)n, g_fpsText, g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX,
         g_fpsVrY, (double)g_fpsVrScale, MenuVrPathName());
     PlayTones(1, g_fpsShow ? 1200 : 300, 150, 0);
+}
+// The menu's FPS counter row: 7 values, Right = next, Left = previous, wrapping: Off -> fps + ms -> fps only -> ms only ->
+// numbers fps + ms -> fps number -> ms number -> Off. Stored as fps_show (on / off) + fps_text (0..5). Off <-> on goes through
+// ToggleFpsBox (texture drop, meter stop, beep).
+void CycleFpsMode(uint64_t n, int dir) {
+    const int cur = g_fpsShow ? 1 + g_fpsText : 0;
+    const int nxt = ((cur + (dir < 0 ? -1 : 1)) % (kFpsTextModes + 1) + (kFpsTextModes + 1)) % (kFpsTextModes + 1);
+    if (nxt > 0) g_fpsText = nxt - 1;
+    g_fpsExplicit = g_fpsMoved = true;
+    FpsSetLines();                                        // (the texture rebuilds on the changed text, EnsureWidgetTexture)
+    if (cur == 0 || nxt == 0) { ToggleFpsBox(n); return; }
+    Log("fps box text: %s (fps_text=%d, tuning menu, Present #%llu)", FpsTextLogName(g_fpsText), g_fpsText, (unsigned long long)n);
+    PlayTones(1, 900 + 150 * g_fpsText, 100, 0);
 }
 // v0.10.3 phase 28: the menu's FPS counter lock row -- the VR fps box follows the headset (0) / stays fixed in the cab (1).
 // Logged + beeped like ToggleFpsBox. Also switchable in flat (kept for VR; the row is greyed there).
@@ -16017,10 +16095,10 @@ void ToggleFpsVrLock(uint64_t n, int dir) {
     g_fpsExplicit = g_fpsMoved = true;
     FpsVrLockReset();
     const XrHook::PoseStats ps = XrHook::GetPoseStats();
-    Log("fps box VR lock: %s (fps_vr_lock=%d, tuning menu, Present #%llu) -- fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f are now %s; "
+    Log("fps box VR lock: %s (fps_vr_lock=%d, tuning menu, Present #%llu) -- fps_vr_x=%.1f fps_vr_y=%.1f fps_vr_scale=%.1f are now %s; "
         "OpenXR: hook %s, %llu stereo xrLocateViews seen, %llu xrEndFrame projection layers, layer space type %d (2 = LOCAL); %s%s",
         g_fpsVrLock == 2 ? "ATTACHED TO THE VEHICLE" : g_fpsVrLock ? "FIXED IN THE PLAY SPACE" : "follows the headset", g_fpsVrLock,
-        (unsigned long long)n, g_fpsVrX, g_fpsVrY,
+        (unsigned long long)n, (double)g_fpsVrX, (double)g_fpsVrY,
         (double)g_fpsVrScale, g_fpsVrLock ? "yaw / pitch degrees at fps_vr_dist (+ right, + down) and the size as at 0.8 m"
                                           : "% of the eye picture from its optical centre",
         XrHook::Hooked() ? "installed" : "NOT installed", (unsigned long long)ps.locates, (unsigned long long)ps.endFrames,
@@ -16243,13 +16321,18 @@ void ResetSettings(uint64_t n) {
         if (!g_menuOpen.load(std::memory_order_relaxed)) MenuLateReset("fps box off");
         if (!g_menuOpen.load(std::memory_order_relaxed)) FpsStop();
     }
+    g_fpsText = 0;                                        // fps + ms
+    FpsSetLines();
     g_fpsX = 1; g_fpsY = 1; g_fpsScale = 1.0f;
-    g_fpsVrX = 0; g_fpsVrY = -25; g_fpsVrScale = kFpsVrScaleDefault;
+    g_fpsVrX = 0.0f; g_fpsVrY = -25.0f; g_fpsVrScale = kFpsVrScaleDefault;
     g_fpsVrLock = 0;                                      // v0.10.3 phase 28: follows the headset again
     g_fpsColor = 0;                                       // phase 44: white, 0.8 m, not turned
     g_fpsBright = FpsPose::kBrightDefault;                // phase 48
     g_fpsVrDist = FpsPose::kDistDefault;
     g_fpsVrYaw = g_fpsVrPitch = g_fpsVrRoll = 0;
+    g_fpsProfiles = 1;                                    // phase 51b: per vehicle (the fps_profile lines stay in dlaa.ini)
+    FpsProfUnbind();                                      // phase 51d: the defaults never reach the bound vehicle's profile -- the
+                                                          // next lock-on in mode 2 loads that vehicle's own values again
     FpsVrLockReset();
     g_fpsExplicit = false;
     g_fpsMoved = true;
@@ -16279,14 +16362,16 @@ void ResetSettings(uint64_t n) {
     // + fps_vr_lock = 33, the cap raised to kIniMaxKeys; v0.10.3 phase 29b: + menu_vr_dist = 34; phase 30: + xr_turbo = 35;
     // phase 34: + vrs / vrs_inner / vrs_outer = 38; phase 39: + log_level = 39; phase 41: + mirror_turns = 40;
     // phase 40: + xr_hidden_mask = 41; kIniMaxKeys raised 40 -> 48 at the dev merge;
-    // phase 42: + vrs_passes = 42; phase 44: + fps_color / fps_vr_dist / fps_vr_yaw / fps_vr_pitch / fps_vr_roll = 47, cap 56)
+    // phase 42: + vrs_passes = 42; phase 44: + fps_color / fps_vr_dist / fps_vr_yaw / fps_vr_pitch / fps_vr_roll = 47, cap 56;
+    // later keys (fps_brightness, vrs_passes, log_level, mirror_turns, xr_hidden_mask, dlss_bias_mask) + fps_text: kNKeys below is
+    // the live count, static_assert'ed against the cap)
     static const char* const kKeys[] = {
         "mode", "dlss_preset", "dlaa_area", "sharpness", "sharp_radius", "dlss_upscale", "tex_lod_bias", "tex_lod_bias_cutout",
         "mv_objects", "mirror_dlaa", "mirror_vr_mode", "mirror_flat_mode", "mirror_vr_views", "mirror_mv", "dlaa_pre_tonemap",
         "perf_profile", "mv_fwd_depth",
         "menu_x", "menu_y", "menu_scale", "menu_vr_x", "menu_vr_y", "menu_vr_scale", "menu_vr_depth", "menu_vr_face",
         "menu_vr_dist",                                                                                 // phase 29b
-        "fps_show", "fps_x", "fps_y", "fps_scale", "fps_vr_x", "fps_vr_y", "fps_vr_scale", "fps_vr_lock",   // phase 28: + fps_vr_lock
+        "fps_show", "fps_text", "fps_x", "fps_y", "fps_scale", "fps_vr_x", "fps_vr_y", "fps_vr_scale", "fps_vr_lock",   // phase 28: + fps_vr_lock
         "fps_color", "fps_vr_dist", "fps_vr_yaw", "fps_vr_pitch", "fps_vr_roll",                        // phase 44
         "fps_brightness",                                                                               // phase 48
         "xr_turbo",                                                                                     // phase 30
@@ -16296,6 +16381,7 @@ void ResetSettings(uint64_t n) {
         "mirror_turns",                                                                                 // phase 41
         "xr_hidden_mask",                                                                               // phase 40
         "dlss_bias_mask",                                                                               // phase 49
+        "fps_profiles",                                                                                 // phase 51b
     };
     constexpr int kNKeys = (int)(sizeof(kKeys) / sizeof(kKeys[0]));
     static_assert(kNKeys <= kIniMaxKeys, "WriteIniPreserving handles at most kIniMaxKeys keys");
@@ -16309,8 +16395,8 @@ void ResetSettings(uint64_t n) {
             "mirror_turns = 0 dlaa_pre_tonemap = 1 "
             "perf_profile = high mv_fwd_depth = 1 menu_x = 2 menu_y = 8 "
             "menu_scale = 1.0 menu_vr_x = 0 menu_vr_y = -5 menu_vr_scale = 1.0 menu_vr_depth = 12 menu_vr_dist = 100 menu_vr_face = 1 "
-            "fps_show = 0 "
-            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 xr_turbo = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 xr_hidden_mask = 0 dlss_bias_mask = 100 log_level = %d (%s) -- profile: %s -- "
+            "fps_show = 0 fps_text = 0 "
+            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 fps_profiles = 1 xr_turbo = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 xr_hidden_mask = 0 dlss_bias_mask = 100 log_level = %d (%s) -- profile: %s -- "
             "dlaa.ini: %d keys removed (hotkeys and other lines kept)", (unsigned long long)n, g_dlaaOn.load() ? "DLSS" : "off",
             (double)kFpsVrScaleDefault, LogLevel(), g_logDebugKey ? "no key: debug = 1 in dlaa.ini" : "no key", changed, kNKeys);
         BeepSeq b;                                        // success: rising two-tone 600 -> 900 Hz, 120 ms each (as SaveSettings)
@@ -17782,18 +17868,31 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     snprintf(k, sizeof(k), "%s / %s / %s / %s", snUp, snDown, snLeft, snRight);
     MenuRow(p, MR_MENUKEYS, L"Menu keys", k, nullptr, false);
     MenuWiden(p.rows[MR_MENUKEYS].value, kV, snMenu);
-    MenuRow(p, MR_FPS, L"FPS counter", "dlaa.ini fps_show", nullptr, false);
-    swprintf(p.rows[MR_FPS].value, kV, L"%ls", onOff[g_fpsShow ? 1 : 0]);
+    MenuRow(p, MR_FPS, L"FPS counter", "dlaa.ini fps_show / fps_text", nullptr, false);
+    swprintf(p.rows[MR_FPS].value, kV, L"%ls", !g_fpsShow ? L"Off" : FpsTextMenuName(g_fpsText));
     groupRow(MR_FPSGRP, L"FPS counter settings");         // v0.10.3 phase 29c
     MenuRow(p, MR_FPSLOCK, L"FPS counter lock", "dlaa.ini fps_vr_lock", vr ? nullptr : "VR only", !vr);   // v0.10.3 phase 28
     swprintf(p.rows[MR_FPSLOCK].value, kV, L"%ls", g_fpsVrLock == 2 ? L"Attached to vehicle"   // phase 47
                                                    : g_fpsVrLock ? L"Fixed in play space" : L"Follow head");   // phase 44: was "Fixed in cab"
+    {                                                     // phase 51b: Position per vehicle (the attached box only)
+        const bool att = vr && g_fpsVrLock == 2;
+        MenuRow(p, MR_FPSPROF, L"Position per vehicle", "dlaa.ini fps_profiles", att ? nullptr : "VR attached only", !att);
+        swprintf(p.rows[MR_FPSPROF].value, kV, L"%ls", g_fpsProfiles ? L"On" : L"Off");
+        MenuRow(p, MR_FPSREMEAS, L"Re-measure cab spot", "Right: now, Left: defaults", att ? nullptr : "VR attached only", !att);   // phase 51c / 51d
+        swprintf(p.rows[MR_FPSREMEAS].value, kV, L"%ls", g_fpsBoxDefaulted ? L"box defaults" : (FpsCab::GetLockInfo().remeasured ? L"done" : L"-"));
+    }
     MenuRow(p, MR_FPSX, L"FPS counter X", vr ? "dlaa.ini fps_vr_x" : "dlaa.ini fps_x", nullptr, false);
-    if (vr) swprintf(p.rows[MR_FPSX].value, kV, L"%+d %%", g_fpsVrX);
+    if (vr) swprintf(p.rows[MR_FPSX].value, kV, L"%+.1f %%", (double)g_fpsVrX);
     else    swprintf(p.rows[MR_FPSX].value, kV, L"%d %%", g_fpsX);
     MenuRow(p, MR_FPSY, L"FPS counter Y", vr ? "dlaa.ini fps_vr_y" : "dlaa.ini fps_y", nullptr, false);
-    if (vr) swprintf(p.rows[MR_FPSY].value, kV, L"%+d %%", g_fpsVrY);
+    if (vr) swprintf(p.rows[MR_FPSY].value, kV, L"%+.1f %%", (double)g_fpsVrY);
     else    swprintf(p.rows[MR_FPSY].value, kV, L"%d %%", g_fpsY);
+    MenuRow(p, MR_FPSYAW, L"FPS turn", "dlaa.ini fps_vr_yaw", vr ? nullptr : "VR only", !vr);
+    swprintf(p.rows[MR_FPSYAW].value, kV, L"%+d deg", g_fpsVrYaw);
+    MenuRow(p, MR_FPSPITCH, L"FPS tilt", "dlaa.ini fps_vr_pitch", vr ? nullptr : "VR only", !vr);
+    swprintf(p.rows[MR_FPSPITCH].value, kV, L"%+d deg", g_fpsVrPitch);
+    MenuRow(p, MR_FPSROLL, L"FPS rotate", "dlaa.ini fps_vr_roll", vr ? nullptr : "VR only", !vr);
+    swprintf(p.rows[MR_FPSROLL].value, kV, L"%+d deg", g_fpsVrRoll);
     MenuRow(p, MR_FPSSIZE, L"FPS counter size", vr ? "dlaa.ini fps_vr_scale" : "dlaa.ini fps_scale", nullptr, false);
     swprintf(p.rows[MR_FPSSIZE].value, kV, L"%.1f", (double)(vr ? g_fpsVrScale : g_fpsScale));
     // phase 44: colour (flat and VR), VR distance and the VR turn
@@ -17803,12 +17902,6 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     swprintf(p.rows[MR_FPSBRIGHT].value, kV, L"%d %%", g_fpsBright);
     MenuRow(p, MR_FPSDIST, L"FPS distance (VR)", "dlaa.ini fps_vr_dist", vr ? nullptr : "VR only", !vr);
     swprintf(p.rows[MR_FPSDIST].value, kV, L"%.2f m", (double)g_fpsVrDist / 100.0);
-    MenuRow(p, MR_FPSYAW, L"FPS turn", "dlaa.ini fps_vr_yaw", vr ? nullptr : "VR only", !vr);
-    swprintf(p.rows[MR_FPSYAW].value, kV, L"%+d deg", g_fpsVrYaw);
-    MenuRow(p, MR_FPSPITCH, L"FPS tilt", "dlaa.ini fps_vr_pitch", vr ? nullptr : "VR only", !vr);
-    swprintf(p.rows[MR_FPSPITCH].value, kV, L"%+d deg", g_fpsVrPitch);
-    MenuRow(p, MR_FPSROLL, L"FPS rotate", "dlaa.ini fps_vr_roll", vr ? nullptr : "VR only", !vr);
-    swprintf(p.rows[MR_FPSROLL].value, kV, L"%+d deg", g_fpsVrRoll);
     snprintf(k, sizeof(k), "%s: open", snRight);          // v0.12.1 phase 50: the Hotkeys page
     MenuRow(p, MR_HOTKEYS, L"Hotkeys...", k, nullptr, false);
     swprintf(p.rows[MR_HOTKEYS].value, kV, L"%d actions", kMenuHkActions);
@@ -17893,8 +17986,8 @@ void MenuClose(uint64_t n, const char* why) {
                  KeyName(KA_SAVE));
     char fpsPlaced[256] = "";                             // (v0.10.3 phase 28: was 200, + the VR lock state)
     if (g_fpsMoved)
-        snprintf(fpsPlaced, sizeof(fpsPlaced), " -- fps box now %s, flat x=%d%% y=%d%% size %.1f, VR x=%+d y=%+d (%s) size %.1f (%s or "
-                 "the Save row writes it)", g_fpsShow ? "on" : "off", g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY,
+        snprintf(fpsPlaced, sizeof(fpsPlaced), " -- fps box now %s, flat x=%d%% y=%d%% size %.1f, VR x=%+.1f y=%+.1f (%s) size %.1f (%s or "
+                 "the Save row writes it)", g_fpsShow ? "on" : "off", g_fpsX, g_fpsY, (double)g_fpsScale, (double)g_fpsVrX, (double)g_fpsVrY,
                  g_fpsVrLock == 2 ? "degrees, attached to the vehicle" : g_fpsVrLock ? "degrees, fixed in the play space"
                  : "%, follows the head", (double)g_fpsVrScale, KeyName(KA_SAVE));
     Log("tuning menu closed (%s, Present #%llu)%s%s", why, (unsigned long long)n, placed, fpsPlaced);
@@ -17983,14 +18076,26 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
                          : "the in-picture path: the panel drawn as a turned quad (phase 16); the fps box stays flat",
             (unsigned long long)n);
         break;
-    case MR_FPS:     ToggleFpsBox(n); break;                // Left and Right both switch it
+    case MR_FPS:     CycleFpsMode(n, dir); break;           // 7 values: Off / fps_text 0..5 (Right next, Left previous)
     case MR_FPSLOCK: ToggleFpsVrLock(n, dir); break;        // phase 47: 3 values, Right = next, Left = previous (also flat: kept for VR)
+    case MR_FPSPROF: ToggleFpsProfiles(n); break;           // phase 51b: Left and Right both switch it (also when greyed: kept for VR)
+    case MR_FPSREMEAS:                                      // phase 51c: Right = re-measure now; 51d: Left = this vehicle's box to defaults
+        if (dir > 0 && g_launchVr == 1 && g_fpsVrLock == 2) {
+            FpsCab::Remeasure();
+            g_fpsBoxDefaulted = false;
+            Log("fps box: re-measure the cab spot (tuning menu, Present #%llu) -- the next lock-on stores a fresh cab pose for this vehicle",
+                (unsigned long long)n);
+            PlayTones(1, 1400, 120, 0);
+        } else if (dir < 0 && g_launchVr == 1 && g_fpsVrLock == 2) {
+            FpsBoxDefaults(n);
+        }
+        break;
     case MR_FPSX:
-        if (vr) g_fpsVrX = MenuClampI(g_fpsVrX + dir, -50, 50); else g_fpsX = MenuClampI(g_fpsX + dir, 0, 95);
+        if (vr) g_fpsVrX = MenuStepFpsVr(g_fpsVrX, dir); else g_fpsX = MenuClampI(g_fpsX + dir, 0, 95);
         g_fpsExplicit = g_fpsMoved = true;
         break;
     case MR_FPSY:
-        if (vr) g_fpsVrY = MenuClampI(g_fpsVrY + dir, -50, 50); else g_fpsY = MenuClampI(g_fpsY + dir, 0, 95);
+        if (vr) g_fpsVrY = MenuStepFpsVr(g_fpsVrY, dir); else g_fpsY = MenuClampI(g_fpsY + dir, 0, 95);
         g_fpsExplicit = g_fpsMoved = true;
         break;
     case MR_FPSSIZE: {
@@ -18396,15 +18501,15 @@ int FpsVrLockedPlace(int eye, ID3D11Texture2D* tex, const D3D11_RENDER_TARGET_VI
         ++st.lines;
         LogDbg("fps box VR lock: eye %d -> OpenXR view %d (%s%s), picture rect (%d,%d) %dx%d of %.0fx%.0f slice %u; view fov L%+.1f "
             "R%+.1f U%+.1f D%+.1f deg -> optical centre uv=(%.3f, %.3f) vs measured %s(%.3f, %.3f); layer space type %d, located "
-            "in space type %d (%s), age %.1f ms; anchor yaw %+d pitch %+d deg at %.1f m -> depth %.2f m, centre (%.0f, %.0f) px, "
+            "in space type %d (%s), age %.1f ms; anchor yaw %+.1f pitch %+.1f deg at %.1f m -> depth %.2f m, centre (%.0f, %.0f) px, "
             "draw scale x%.2f%s",
             eye, view, mapped ? "the swapchain image of that view in the last xrEndFrame" : "assumed: eye index",
             swapped ? ", SWAPPED: the other view's optical centre matches the measured one" : "", rect[0], rect[1], rect[2],
             rect[3], (double)W, (double)H, slice, (double)w.angleLeft / kRad, (double)w.angleRight / kRad,
             (double)w.angleUp / kRad, (double)w.angleDown / kRad, uOf(view), vOf(view), measured ? "" : "(not measured yet) ",
             (double)mu, (double)mv, vs.spaceType, vs.locSpaceType, vs.corrected ? "corrected to the submitted pose" : "raw",
-            vs.ageSec * 1000.0, g_fpsVrX,
-            -g_fpsVrY, dA, depth, px, py, k, behind ? " -- BEHIND the eye now: not drawn" : "");
+            vs.ageSec * 1000.0, (double)g_fpsVrX,
+            -(double)g_fpsVrY, dA, depth, px, py, k, behind ? " -- BEHIND the eye now: not drawn" : "");
     }
     // phase 28b: the direction self-check + the once-a-second log for 10 s after the lock-on (eye 0 only). Head yaw / pitch =
     // this view's forward (-z) in the layer space; the anchor's direction FROM THIS EYE; rel = anchor - head. A point to the
@@ -18471,7 +18576,9 @@ FpsCab::XrIn FpsCabXr() {
     return x;
 }
 // FpsCab follows the menu state: on = VR, the box shown, lock 2; the fps_vr_* settings (a change moves the box in the cab).
+bool FpsProfCabPose(uint64_t key, FpsProfile::CabPose* out);   // phase 51b (the per-vehicle profiles, below)
 void FpsCabSync(uint64_t frame) {
+    FpsCab::SetCabPoseProvider(FpsProfCabPose);          // phase 51b: the vehicles' stored cab poses (none while fps_profiles = 0)
     FpsCab::SetActive(g_launchVr == 1 && g_fpsShow && g_fpsVrLock == 2, frame);
     if (!FpsCab::Active()) return;
     FpsCab::Settings s;
@@ -18479,6 +18586,255 @@ void FpsCabSync(uint64_t frame) {
     s.yaw = g_fpsVrYaw; s.pitch = g_fpsVrPitch; s.roll = g_fpsVrRoll;
     s.scale = (double)g_fpsVrScale;
     FpsCab::SetSettings(s);
+}
+
+// ---- phase 51: per-vehicle fps box profiles for "Attached to vehicle" (fps_vr_lock = 2; src/fps_profile.h) ---------------------
+// At each lock-on (FpsCab::LockCount changes) the lock's vehicle key picks the profile: a stored one is applied to the live
+// fps_vr_* values (the menu rows show it), none = the live values (the last used / the global fps_vr_* keys) become that vehicle's
+// start. While mode 2 is active, any change of those values goes into the bound vehicle's profile (and its phase 47e same-cab
+// aliases). Saved -- only the fps_profile lines, nothing else of dlaa.ini -- when the tuning menu closes and at process exit, when
+// something changed. Present thread (after MenuKeys), the same thread as the menu's edits.
+FpsProfile::Store g_fpsProf;
+// phase 51d: the binding (the vehicle the live values belong to, + same-cab aliases; the lock count handled) is FpsProfile::Session
+// (pure: tests/fps_cab_test.cpp). Main thread only; its Tick runs under the profile lock (it reads / writes g_fpsProf).
+FpsProfile::Session g_fpsProfSess;
+bool     g_fpsProfDirty = false, g_fpsProfMenuWas = false, g_fpsProfStartLogged = false;
+int      g_fpsProfRead = 0, g_fpsProfBad = 0;            // dlaa.ini fps_profile lines read / not usable (LoadConfig)
+constexpr int kFpsProfDirtyLog = 8;
+uint64_t g_fpsProfDirtyKeys[kFpsProfDirtyLog] = {};      // the keys changed since the last save (log)
+int      g_fpsProfNDirty = 0;
+
+FpsProfile::Vals FpsProfLive() {
+    FpsProfile::Vals v;
+    v.x = g_fpsVrX; v.y = g_fpsVrY; v.dist = g_fpsVrDist; v.yaw = g_fpsVrYaw; v.pitch = g_fpsVrPitch; v.roll = g_fpsVrRoll;
+    v.scale = g_fpsVrScale;
+    v.color = g_fpsColor; v.bright = g_fpsBright; v.text = g_fpsText;   // phase 51b
+    return v;
+}
+// phase 51b: colour / brightness / text only when the profile has them (a v1 line: -1 = keep the live global values)
+void FpsProfApply(const FpsProfile::Vals& v) {
+    g_fpsVrX = v.x; g_fpsVrY = v.y; g_fpsVrDist = v.dist; g_fpsVrYaw = v.yaw; g_fpsVrPitch = v.pitch; g_fpsVrRoll = v.roll;
+    g_fpsVrScale = v.scale;
+    if (v.color >= 0) g_fpsColor = v.color;
+    if (v.bright >= 0) g_fpsBright = v.bright;
+    if (v.text >= 0 && v.text != g_fpsText) { g_fpsText = v.text; FpsSetLines(); }   // (the box texture rebuilds on the new text)
+}
+const char* FpsProfStr(const FpsProfile::Vals& v, char* b, size_t n) {
+    char c[24], br[16], t[16];
+    if (v.color >= 0) snprintf(c, sizeof(c), "%d", v.color); else snprintf(c, sizeof(c), "(global)");
+    if (v.bright >= 0) snprintf(br, sizeof(br), "%d", v.bright); else snprintf(br, sizeof(br), "(global)");
+    if (v.text >= 0) snprintf(t, sizeof(t), "%d", v.text); else snprintf(t, sizeof(t), "(global)");
+    snprintf(b, n, "fps_vr_x=%.2f fps_vr_y=%.2f fps_vr_dist=%d fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d fps_vr_scale=%.2f fps_color=%s "
+             "fps_brightness=%s fps_text=%s", (double)v.x, (double)v.y, v.dist, v.yaw, v.pitch, v.roll, (double)v.scale, c, br, t);
+    return b;
+}
+void FpsProfMarkDirty(uint64_t key) {
+    g_fpsProfDirty = true;
+    for (int i = 0; i < g_fpsProfNDirty; ++i) if (g_fpsProfDirtyKeys[i] == key) return;
+    if (g_fpsProfNDirty < kFpsProfDirtyLog) g_fpsProfDirtyKeys[g_fpsProfNDirty++] = key;
+}
+// phase 51b: g_fpsProf is shared by the game's MAIN thread (Present: FpsProfileTick / the menu toggle / the saves write it) and the
+// RENDER thread (the lock-on readback asks FpsProfCabPose, inside FpsCab's own lock). Every access goes through these: an SRW
+// lock held only for the copy in / out (never around file I/O, never while calling FpsCab: the lock order is FpsCab -> profile).
+SRWLOCK g_fpsProfLock = SRWLOCK_INIT;
+struct FpsProfLockW { FpsProfLockW() { AcquireSRWLockExclusive(&g_fpsProfLock); } ~FpsProfLockW() { ReleaseSRWLockExclusive(&g_fpsProfLock); } };
+struct FpsProfLockR { FpsProfLockR() { AcquireSRWLockShared(&g_fpsProfLock); } ~FpsProfLockR() { ReleaseSRWLockShared(&g_fpsProfLock); } };
+bool FpsProfPut(uint64_t key, const FpsProfile::Vals& v) { FpsProfLockW l; return g_fpsProf.Put(key, v); }
+bool FpsProfPutCab(uint64_t key, const FpsProfile::CabPose& c) { FpsProfLockW l; return g_fpsProf.PutCab(key, c); }
+bool FpsProfGet(uint64_t key, FpsProfile::Vals* out) {   // (a use: the LRU stamp)
+    FpsProfLockW l;
+    const FpsProfile::Vals* v = g_fpsProf.Get(key);
+    if (v) *out = *v;
+    return v != nullptr;
+}
+bool FpsProfPeek(uint64_t key, FpsProfile::Vals* out) {
+    FpsProfLockR l;
+    const int i = g_fpsProf.Find(key);
+    if (i >= 0) *out = g_fpsProf.e[i].v;
+    return i >= 0;
+}
+bool FpsProfCabOf(uint64_t key, FpsProfile::CabPose* out) {
+    FpsProfLockR l;
+    const FpsProfile::CabPose* c = g_fpsProf.Cab(key);
+    if (c) *out = *c;
+    return c != nullptr;
+}
+int FpsProfCount() { FpsProfLockR l; return g_fpsProf.n; }
+bool FpsProfDropCabPart(uint64_t key, const FpsProfile::CabPart& p) { FpsProfLockW l; return g_fpsProf.DropCabPart(key, p.ic, p.stride, p.fmt); }
+uint64_t g_fpsProfMovedSerial = 0;                       // phase 51c: FpsCab::CabMovedSerial handled
+bool FpsProfLoadLine(const char* value) { FpsProfLockW l; return g_fpsProf.Load(value); }   // (LoadConfig)
+std::unique_ptr<FpsProfile::Store> FpsProfCopy() {
+    std::unique_ptr<FpsProfile::Store> c(new FpsProfile::Store());
+    FpsProfLockR l;
+    *c = g_fpsProf;
+    return c;
+}
+// phase 51b: FpsCab asks at each lock-on readback (render thread -- the same thread as FpsProfileTick: the game's render thread
+// runs the Present boundary) for the vehicle's stored cab pose. The shared mode (fps_profiles = 0) has none.
+bool FpsProfCabPose(uint64_t key, FpsProfile::CabPose* out) {
+    if (!g_fpsProfiles) return false;
+    return FpsProfCabOf(key, out);                       // (a copy, under the profile lock)
+}
+// dlaa.ini with the fps_profile lines brought up to date (FpsProfile::Rewrite: every other byte kept), via dlaa.ini.tmp
+bool WriteIniProfiles(const FpsProfile::Store& st) {
+    wchar_t path[MAX_PATH], tmp[MAX_PATH];
+    if (!PathNextToDll(L"dlaa.ini", path) || !PathNextToDll(L"dlaa.ini.tmp", tmp)) return false;
+    std::string in;
+    ReadIniRaw(path, &in);
+    // never replace an existing dlaa.ini we could not read (locked / mid-write elsewhere): Rewrite("") would keep only the profiles
+    if (in.empty() && GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) return false;
+    const std::string out = FpsProfile::Rewrite(in, st);
+    if (out == in) return true;                          // nothing to write
+    return WriteIniAtomic(path, tmp, out);
+}
+void FpsProfileSave(const char* why) {
+    if (!g_fpsProfDirty) return;
+    const std::unique_ptr<FpsProfile::Store> st = FpsProfCopy();   // phase 51b: the copy is written (no lock around the file I/O)
+    if (!WriteIniProfiles(*st)) {
+        LogWarn("fps profile: writing the vehicle profiles to dlaa.ini FAILED (%s) -- dlaa.ini unchanged, trying again at the next "
+                "menu close / exit", why);
+        return;
+    }
+    char b[260];
+    for (int i = 0; i < g_fpsProfNDirty; ++i) {
+        const int e = st->Find(g_fpsProfDirtyKeys[i]);
+        if (e >= 0)
+            Log("fps profile: vehicle %016llx -> saved (%s; %s; cab pose %s)", (unsigned long long)g_fpsProfDirtyKeys[i], why,
+                FpsProfStr(st->e[e].v, b, sizeof(b)), st->e[e].hasCab ? "stored" : "none");
+    }
+    g_fpsProfDirty = false;
+    g_fpsProfNDirty = 0;
+}
+// phase 51b: the lock-on's placement source -> the log, and the cab pose: a vehicle without one gets this lock's (the first lock-on
+// on it, or a v1 profile line); a stored one whose part this lock does not have (LOD / mod change) is KEPT (the next lock-on with
+// the part uses it again) -- only an edit of a placement row replaces it (FpsProfileTick, below). With the profiles switched on
+// while a lock is held (ToggleFpsProfiles), the stored pose re-places the current lock (FpsCab::PlaceFromCab).
+void FpsProfCabAtLock(uint64_t key) {
+    FpsCab::LockInfo li = FpsCab::GetLockInfo();
+    FpsProfile::CabPose stored;
+    const FpsProfile::CabPose* st = FpsProfCabOf(key, &stored) ? &stored : nullptr;   // (a copy: FpsCab is called without the profile lock)
+    if (!li.remeasured && li.placed != FpsCab::kPlacedCab && st && FpsCab::PlaceFromCab(*st)) li = FpsCab::GetLockInfo();
+    if (li.placed == FpsCab::kPlacedCab) {
+        Log("fps profile: vehicle %016llx -> placed from the stored cab pose (part IC %u; %d of %d stored part(s) found agree)",
+            (unsigned long long)key, li.cabIc, li.cabAgree, li.cabFound);
+        // phase 51d: an older pose (built in the play space of its lock) was levelled onto the cab's axes -> stored as such ("cabsq"):
+        // the box moves ONCE (turned about the seat by turnDeg), then stays square to the cab
+        FpsProfile::CabPose cp;
+        if (li.leveledOld && FpsCab::CurrentCabPose(&cp) && FpsProfPutCab(key, cp)) {
+            FpsProfMarkDirty(key);
+            Log("fps profile: vehicle %016llx -> its older cab pose LEVELLED onto the cab (turned %.2f deg: the cab leaned %+.1f deg sideways, "
+                "%+.1f deg forward, turned %+.1f deg against it) -- the box is square to the cab now and may sit a little elsewhere this once; "
+                "stored as square", (unsigned long long)key, li.turnDeg, li.tiltSide, li.tiltFore, li.tiltYaw);
+        }
+        return;
+    }
+    char why[200];
+    if (li.remeasured)    snprintf(why, sizeof(why), "RE-MEASURED (the menu) -- this lock's cab pose replaces the stored one");
+    else if (st && li.cabAmbiguous)
+        snprintf(why, sizeof(why), "the %d stored cab parts found disagree (one moved since: steering wheel?) -- the stored pose is kept", li.cabFound);
+    else if (st) snprintf(why, sizeof(why), "the stored cab pose's part IC %u is not among this lock's rigid cab parts -- the stored pose is kept", st->ic);
+    else          snprintf(why, sizeof(why), "no stored cab pose -- this lock's is stored now");
+    char how[96];
+    if (li.placed == FpsCab::kPlacedPlayAvg)
+        snprintf(how, sizeof(how), "averaged over %d lock readbacks, %d kept, spread %.1f mm", li.samples, li.samplesUsed, li.spreadMm);
+    else snprintf(how, sizeof(how), "%s", li.placed == FpsCab::kPlacedSameCab ? "the previous lock's map: a re-lock on the same cab" : "one lock readback");
+    Log("fps profile: vehicle %016llx -> placed from the play space (%s; %s)", (unsigned long long)key, how, why);
+    FpsProfile::CabPose cp;
+    if ((!st || li.remeasured) && FpsCab::CurrentCabPose(&cp) && FpsProfPutCab(key, cp)) FpsProfMarkDirty(key);
+}
+void FpsProfileTick() {
+    if (!g_fpsProfStartLogged) {
+        g_fpsProfStartLogged = true;
+        if (g_fpsProfRead || g_fpsProfBad)
+            Log("fps profile: %d vehicle profile(s) read from dlaa.ini (%d fps_profile line(s) not usable: malformed / duplicate / over %d)%s",
+                g_fpsProfRead, g_fpsProfBad, FpsProfile::kMax, g_fpsProfiles ? "" : " -- fps_profiles = 0: one shared placement, the profiles are not used");
+    }
+    char b[260];
+    // phase 51d: the LIVE mode decides the binding, not FpsCab's state alone -- the Reset row sets the defaults + mode 0 at once and
+    // FpsCab switches off only at its next sync, one Present later (ATS 15:04:46: that Present copied the defaults into the bound
+    // vehicle's profile). (FpsCab is asked before the profile lock: the lock order is FpsCab -> profile.)
+    const bool mode2 = g_launchVr == 1 && g_fpsShow && g_fpsVrLock == 2;
+    const bool cabOn = FpsCab::Active();
+    const uint64_t locks = FpsCab::LockCount();
+    const uint64_t vkey = FpsCab::VehicleKey();
+    const bool sameCab = FpsCab::LockSameCab();
+    const FpsProfile::Vals live = FpsProfLive();
+    FpsProfile::Session::Out o;
+    {
+        FpsProfLockW l;
+        o = g_fpsProfSess.Tick(g_fpsProf, mode2, cabOn, g_fpsProfiles != 0, locks, vkey, sameCab, live);
+    }
+    if (o.lock != FpsProfile::Session::kLockNone) g_fpsBoxDefaulted = false;
+    switch (o.lock) {
+    case FpsProfile::Session::kLockAlias:
+        Log("fps profile: vehicle %016llx -> same cab as %016llx (a re-lock), its placement kept (%s)", (unsigned long long)o.key,
+            (unsigned long long)o.aliasOf, FpsProfStr(live, b, sizeof(b)));
+        break;
+    case FpsProfile::Session::kLockLoaded:
+        if (o.applyIt) FpsProfApply(o.apply);
+        Log("fps profile: vehicle %016llx -> loaded (%s)", (unsigned long long)o.key, FpsProfStr(o.apply, b, sizeof(b)));
+        break;
+    case FpsProfile::Session::kLockNew:
+        Log("fps profile: vehicle %016llx -> new, starts from the current values (%s; %d profile(s))", (unsigned long long)o.key,
+            FpsProfStr(live, b, sizeof(b)), FpsProfCount());
+        break;
+    default: break;
+    }
+    for (int i = 0; i < o.nChanged; ++i) FpsProfMarkDirty(o.changed[i]);
+    if (o.lock != FpsProfile::Session::kLockNone) FpsProfCabAtLock(o.key);   // phase 51b
+    // phase 51c: an edit changes only the settings on top of the stored map -- the map is never re-taken from the live lock (51b
+    // re-stored it at an edit; a lock from a moving part then baked that part's turn into the vehicle). It is stored at the first
+    // lock-on, replaced by the menu's Re-measure row, levelled once (51d) and loses a part found moving (below).
+    {                                                     // phase 51c / 51d: cab parts found MOVING -> dropped from the bound vehicles' pose
+        FpsProfile::CabPart mp[8];
+        const int nm = FpsCab::CabMovedSince(&g_fpsProfMovedSerial, mp, 8);
+        for (int m = 0; m < nm; ++m)
+            for (int i = 0; i < g_fpsProfSess.nBound; ++i) {
+                const uint64_t k = g_fpsProfSess.bound[i];
+                if (!FpsProfDropCabPart(k, mp[m])) continue;
+                FpsProfMarkDirty(k);
+                FpsProfile::CabPose left;
+                const bool any = FpsProfCabOf(k, &left);
+                Log("fps profile: vehicle %016llx -> stored cab part IC %u MOVES (steering wheel / door?) -- dropped from its cab pose (%s)",
+                    (unsigned long long)k, mp[m].ic, any ? "the other stored parts stay" : "none left: the next lock-on stores a new one");
+            }
+    }
+    const bool open = g_menuOpen.load(std::memory_order_relaxed);
+    if (g_fpsProfMenuWas && !open) FpsProfileSave("tuning menu closed");
+    g_fpsProfMenuWas = open;
+}
+// phase 51d: the menu's Left on "Re-measure cab spot" -- the box of THIS vehicle back to the defaults (placement + colour / brightness /
+// text: the Reset row's fps values); the cab pose is kept (the defaults are placed on it). An edit like any other: the next tick stores
+// it in the bound vehicle's profile (+ aliases); other vehicles' profiles are untouched. Unbound (no lock yet): the live values only.
+void FpsProfUnbind() { g_fpsProfSess.Unbind(); }
+void FpsBoxDefaults(uint64_t n) {
+    g_fpsVrX = 0.0f; g_fpsVrY = -25.0f; g_fpsVrScale = kFpsVrScaleDefault;
+    g_fpsVrDist = FpsPose::kDistDefault;
+    g_fpsVrYaw = g_fpsVrPitch = g_fpsVrRoll = 0;
+    g_fpsColor = 0;
+    g_fpsBright = FpsPose::kBrightDefault;
+    if (g_fpsText != 0) { g_fpsText = 0; FpsSetLines(); }
+    g_fpsExplicit = g_fpsMoved = true;
+    g_fpsBoxDefaulted = true;
+    Log("fps box: this vehicle's box back to the defaults (tuning menu Left on Re-measure cab spot, Present #%llu; vehicle %016llx%s) -- "
+        "fps_vr_x 0 fps_vr_y -25 fps_vr_dist %d fps_vr_scale %.1f no turn, colour white, brightness %d %%, text fps + ms; the cab pose kept",
+        (unsigned long long)n, (unsigned long long)(g_fpsProfSess.nBound ? g_fpsProfSess.bound[0] : 0ull),
+        g_fpsProfSess.nBound ? "" : " = none bound: the live values only", FpsPose::kDistDefault, (double)kFpsVrScaleDefault,
+        FpsPose::kBrightDefault);
+    PlayTones(1, 900, 120, 0);
+}
+// phase 51b: the menu's Position per vehicle row. Off -> On: the current vehicle is bound at the next tick (its profile loaded and
+// its stored cab pose placing the box, else a new profile from the current values); On -> Off: the live values stay as the shared
+// ones, the changes made so far are saved now (no profile is written while off).
+void ToggleFpsProfiles(uint64_t n) {
+    g_fpsProfiles = g_fpsProfiles ? 0 : 1;
+    g_fpsExplicit = true;                                 // (Save writes fps_profiles with the other fps_* keys)
+    if (g_fpsProfiles) g_fpsProfSess.locks = ~0ull;       // the held lock counts as a new lock-on (FpsProfileTick)
+    else { FpsProfileSave("per-vehicle profiles switched off"); g_fpsProfSess.Unbind(); }
+    Log("fps box: position per vehicle %s (fps_profiles=%d, tuning menu, Present #%llu) -- %s", g_fpsProfiles ? "ON" : "OFF", g_fpsProfiles,
+        (unsigned long long)n, g_fpsProfiles ? "each vehicle keeps its own placement / colour / brightness / text (fps_profile lines)"
+                                            : "one shared placement for every vehicle (the fps_profile lines are kept, not used)");
+    PlayTones(1, g_fpsProfiles ? 1200 : 300, 150, 0);
 }
 // HandlePossibleBlit, a VR eye blit (render thread): this eye's pass record -> the reference cab draw's MVP offset for the box
 // drawn into this picture later this frame (zero lag), the lock / monitor readbacks.
@@ -20848,7 +21204,7 @@ void LoadConfig() {
     if (PathNextToDll(L"dlaa.ini", path)) _wfopen_s(&f, path, L"r");
     const bool haveIni = f != nullptr;
     if (f) {
-        char line[256];
+        char line[4096];                                 // phase 51b/c: was 256 (a v2 fps_profile line with a 3-part cab pose is ~1300)
         while (fgets(line, sizeof(line), f)) {
             char* eq = strchr(line, '=');
             if (!eq || line[0] == '#' || line[0] == ';') continue;
@@ -20886,6 +21242,10 @@ void LoadConfig() {
             if (!strcmp(key, "fps_vr_yaw"))         { g_fpsVrYaw = FpsPose::ClampI(v, -FpsPose::kYawMax, FpsPose::kYawMax); continue; }
             if (!strcmp(key, "fps_vr_pitch"))       { g_fpsVrPitch = FpsPose::ClampI(v, -FpsPose::kPitchMax, FpsPose::kPitchMax); continue; }
             if (!strcmp(key, "fps_vr_roll"))        { g_fpsVrRoll = FpsPose::ClampI(v, -FpsPose::kRollMax, FpsPose::kRollMax); continue; }
+            if (!strcmp(key, "fps_profiles"))       { g_fpsProfiles = v != 0 ? 1 : 0; continue; }   // phase 51b
+#ifdef WITH_DLAA
+            if (!strcmp(key, FpsProfile::kIniKey))  { if (FpsProfLoadLine(eq + 1)) ++g_fpsProfRead; else ++g_fpsProfBad; continue; }   // phase 51
+#endif
             // phase 39 (here for the same reason; debug moved out of the WITH_DLAA chain: the log-only build reads it too)
             if (!_stricmp(key, "log_level")) {           // (case-insensitive as log.h's reader)
                 const int lv = LogParseLevel(eq + 1);     // log.h: the same parser as its own early read
@@ -21176,11 +21536,14 @@ void LoadConfig() {
                 if (key[5] == 'v') g_menuVrScale = c; else g_menuScale = c;
             }
             // v0.10.0 live fps box (the menu's FPS counter rows change them; the save key writes them once changed there)
-            else if (!strcmp(key, "fps_show"))       g_fpsShow = v != 0;
+            else if (!strcmp(key, "fps_show") || !strcmp(key, "fps_text")) {   // (one branch: the else-if chain is at the compiler's nesting limit)
+                if (key[4] == 's') g_fpsShow = v != 0;
+                else               g_fpsText = v <= 0 ? 0 : (v >= kFpsTextModes - 1 ? kFpsTextModes - 1 : (int)v);   // fps_text 0..5 (3..5: no units)
+            }
             else if (!strcmp(key, "fps_x"))          g_fpsX = v < 0 ? 0 : (v > 95 ? 95 : (int)v);
             else if (!strcmp(key, "fps_y"))          g_fpsY = v < 0 ? 0 : (v > 95 ? 95 : (int)v);
-            else if (!strcmp(key, "fps_vr_x"))       g_fpsVrX = v < -50 ? -50 : (v > 50 ? 50 : (int)v);
-            else if (!strcmp(key, "fps_vr_y"))       g_fpsVrY = v < -50 ? -50 : (v > 50 ? 50 : (int)v);
+            else if (!strcmp(key, "fps_vr_x"))       { const double d = strtod(eq + 1, nullptr); g_fpsVrX = (d != d) ? 0.0f : (float)(d < -50.0 ? -50.0 : (d > 50.0 ? 50.0 : d)); }
+            else if (!strcmp(key, "fps_vr_y"))       { const double d = strtod(eq + 1, nullptr); g_fpsVrY = (d != d) ? -25.0f : (float)(d < -50.0 ? -50.0 : (d > 50.0 ? 50.0 : d)); }
             else if (!strcmp(key, "fps_vr_lock"))    g_fpsVrLock = v <= 0 ? 0 : (v >= 2 ? 2 : 1);   // phase 28: 1 = fixed in the
                                                                                                     // play space; phase 47: 2 = attached
             else if (!strcmp(key, "fps_scale") || !strcmp(key, "fps_vr_scale")) {
@@ -21345,15 +21708,17 @@ void LoadConfig() {
                         "menu_vr_depth = the in-picture fallback's shift" : "the VR panel / fps box are drawn into the eye picture "
                         "(menu_vr_depth / menu_vr_face; menu_vr_dist unused)",
         g_bindHoldMs);
-    Log("fps box (v0.10.0): fps_show=%d (%s), flat fps_x=%d fps_y=%d fps_scale=%.1f, VR fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f "
-        "fps_vr_lock=%d (%s); phase 44: fps_color=%d (%ls) fps_brightness=%d %% fps_vr_dist=%d cm fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d deg (the "
-        "tuning menu's FPS counter rows change them)", g_fpsShow ? 1 : 0,
-        g_fpsShow ? "on: shown also while the menu is closed" : "off", g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY,
+    Log("fps box (v0.10.0): fps_show=%d (%s), fps_text=%d (0 fps + ms, 1 fps only, 2 ms only), flat fps_x=%d fps_y=%d fps_scale=%.1f, VR fps_vr_x=%.1f fps_vr_y=%.1f fps_vr_scale=%.1f "
+        "fps_vr_lock=%d (%s); phase 44: fps_color=%d (%ls) fps_brightness=%d %% fps_vr_dist=%d cm fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d deg; phase 51b: "
+        "fps_profiles=%d (%s) (the tuning menu's FPS counter rows change them)", g_fpsShow ? 1 : 0,
+        g_fpsShow ? "on: shown also while the menu is closed" : "off", g_fpsText, g_fpsX, g_fpsY, (double)g_fpsScale, (double)g_fpsVrX, (double)g_fpsVrY,
         (double)g_fpsVrScale, g_fpsVrLock, g_fpsVrLock == 2 ? "VR: ATTACHED TO THE VEHICLE (phase 47: drawn in, placed from a cab "
                                                          "draw's MVP on the GPU), fps_vr_x / fps_vr_y = yaw / pitch degrees at "
                                                          "fps_vr_dist at the lock-on" : g_fpsVrLock ? "VR: fixed in the play space, "
                                                          "fps_vr_x / fps_vr_y = yaw / pitch degrees at fps_vr_dist" : "VR: follows the headset",
-        g_fpsColor, FpsPose::ColorOf(g_fpsColor).name, g_fpsBright, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll);
+        g_fpsColor, FpsPose::ColorOf(g_fpsColor).name, g_fpsBright, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll, g_fpsProfiles,
+        g_fpsProfiles ? "attached box: placement, colour, brightness and text per vehicle" : "one shared placement for every vehicle");
+    FpsSetLines();                                        // fps_text applies to the box's lines from the start
     // v0.10.0 phase 6b: the vote participation of instanced / no-MVP draws follows mv_drawid_instanced (default 1, even when the
     // key is absent) -- set it here, after the whole ini is parsed, so both the replay and the vote agree.
     DrawIdMv::SetInstanced(g_didInstancedCfg);
@@ -22038,6 +22403,9 @@ void StartInjection() {
 // either way we only log and do nothing else.
 void OnProcessDetach(bool processTerminating) {
     LogExiting().store(true, std::memory_order_relaxed);   // never block on the log mutex from here on
+#ifdef WITH_DLAA
+    FpsProfileSave(processTerminating ? "process exit" : "DLL unload");   // phase 51: changed vehicle profiles (a file write only)
+#endif
     // v0.8.1: + the present-layer verdict, only when that mode was on (presents= then counts game frames).
     char plTail[200] = "";
     if (g_plActive.load(std::memory_order_relaxed))
