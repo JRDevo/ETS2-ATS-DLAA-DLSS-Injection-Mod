@@ -179,8 +179,10 @@ The log says what changed, e.g.
   **Panel settings** group shows them and `Right` on it opens the Hotkeys page there): here every key counts, the menu
   keys too -- `Left` binds instead of cancelling and the open key binds instead of closing the menu. To get out without
   binding press `Esc` or `Backspace`, or wait 10 seconds. These lines cannot be cleared, and a press that would take the
-  **only** binding away from `key_menu` is refused (one long low tone, the line keeps waiting): the menu must stay
-  reachable. Give `Menu: open / close` another key first.
+  **only** binding away from any of the five menu actions (`key_menu`, `key_menu_up` ... `key_menu_right`) is refused
+  (one long low tone, the line keeps waiting): the menu must stay reachable, and `Right` is what opens the groups, the
+  Hotkeys page and Reset. To swap two menu keys, give one of them a third key first (`Menu: left` = `Numpad4`, then
+  `Menu: right` = `Left`, then `Menu: left` = `Right`).
 - `bind_hold_ms` is no longer used for binding; it is only the [Reset row](#the-tuning-menu)'s hold time.
 
 ## User keys — Shift + F-key (Ctrl and Alt NOT held)

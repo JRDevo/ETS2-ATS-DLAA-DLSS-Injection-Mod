@@ -21,7 +21,15 @@ an in-game menu (`Delete`) and an optional text config.
 
 **An NVIDIA RTX GPU is required** (DLAA and DLSS only run on RTX cards).
 
-**Menu:** [Features](#features) · [Download](#-download) · [Requirements](#requirements) · [Install](#install) · [Modes](#modes--the-end-key) · [Flat or VR](#flat-or-vr) · [OFXR Bridge](#ofxr-bridge-vr-frame-generation) · [Render scale](#how-render-scale-works) · [Models](#models-presets--which-one-to-use) · [Controls](#controls) · [Tuning menu](#the-tuning-menu) · [dlaa.ini](#dlaaini) · [Performance](#performance) · [Troubleshooting](#troubleshooting) · [Multiplayer](#multiplayer) · [Build](#build-from-source) · [Report a problem](#reporting-a-problem-what-to-upload) · [License](#license-and-credits)
+**Menu:** [Features](#features) · [Download](#-download) · [Requirements](#requirements) · [Install](#install) · [Modes](#modes--the-end-key) · [Flat or VR](#flat-or-vr) · [OFXR Bridge](#ofxr-bridge-vr-frame-generation) · [Render scale](#how-render-scale-works) · [Models](#models-presets--which-one-to-use) · [Controls](#controls) · [Tuning menu](#the-tuning-menu) · [dlaa.ini](#dlaaini) · [Performance](#performance) · [Troubleshooting](#troubleshooting) · [Multiplayer](#multiplayer) · [Build](#build-from-source) · [Report a problem](#reporting-a-problem-what-to-upload) · [Contributing](#contributing-logs-flicker-captures-code) · [License](#license-and-credits)
+
+> **Where the project stands (v0.13.0).** The mod was built for as many use cases, devices and situations as
+> I could reach: flat and VR, one screen and three, keyboard, wheel and shifter, Reflex and frame rate caps,
+> foveated rendering, a hidden area mask, Turbo mode, CPU tuning, a tuning menu with every setting and its cost.
+> There are many options to tweak, and to tweak is paradise. The bells and whistles I know of are in; the ideas
+> left on my list are not worth their cost. From here on the main work is **performance tuning on your hardware**,
+> and that needs your logs: see [Contributing](#contributing-logs-flicker-captures-code). If you have a suggestion,
+> a feature idea or a device I have not thought of, [open an issue](../../issues/new/choose) (Feature request).
 
 ## Features
 
@@ -134,6 +142,7 @@ Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
 > Status: v0.13.0. New: NVIDIA Reflex and frame rate caps, a Hotkeys page in the menu, a per-vehicle fps box in VR, a night light glow fix, CPU tuning, and fixes for Linux / Proton.
+> With this version the bells and whistles I know of are in. From here on the main work is performance tuning, from your logs; new ideas are still welcome. See [Contributing](#contributing-logs-flicker-captures-code).
 > See the [Releases page](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/releases) for every version.
 > DLSS upscaling in VR is still being tuned; treat it as experimental.
 
@@ -539,7 +548,9 @@ The three green lines under the title show the game's GPU time per frame, what t
   keys or buttons, so the press you bind with does nothing in the game.
 - **Menu keys:** the last five lines (`Menu: open / close`, `up`, `down`, `left`, `right`) are the keys that drive the
   menu. There every key counts, the menu keys too (so `Left` binds instead of cancelling): `Esc` or `Backspace` cancels,
-  or wait 10 s. They cannot be cleared, and the open key must keep a binding. The **Menu keys** row in the `Panel
+  or wait 10 s. They cannot be cleared, and each of the five must keep a binding: a press that would take the only
+  key of another menu action (give `Menu: left` the Right arrow) is refused. Swap two keys by giving one of them a third
+  key first. The **Menu keys** row in the `Panel
   settings` group shows them; `Right` on it opens the Hotkeys page there. See
   [`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu).
 - **Groups (v0.10.3):** the panel rows (`Panel position X` / `Y`, `Panel size`, `Panel VR depth`, `Panel faces you`,
@@ -1013,6 +1024,80 @@ check (or edit it) before uploading.
 
 **Never attach `nvngx_dlss.dll` or any other NVIDIA DLL** — their license doesn't allow
 redistribution. Just give the version number.
+
+</details>
+
+## Contributing (logs, flicker captures, code)
+
+<details>
+<summary><b>Show</b></summary>
+
+With v0.13.0 the bells and whistles I know of are in, and the ideas left on my list are not worth
+their cost. From here on the main work is **performance tuning and fixing what the mod gets
+wrong**, and for that I need data from PCs that are not mine. New feature ideas are welcome too:
+[open an issue](../../issues/new/choose) with the **Feature request** template and say what it
+would do for you in the game. Three ways to help, from easy to hard.
+
+### 1. Send a performance log
+
+The log is the most useful thing you can send. At `log_level = 4` the mod writes its own GPU and
+CPU timings every 10 seconds (`perf eye`, `CPU prof`, `mirror units`, `frame pace` lines), so I can
+see where the time goes on your hardware and tune for it.
+
+1. Put `log_level = 4` in `dlaa.ini` (next to `dinput8.dll`). The packaged file has `log_level = 1`:
+   change the `1` to `4`. The menu's `Logging` row does the same live (`debug`); `Shift+F12` saves it.
+2. Start the game, load a save and **drive 2 to 3 minutes** where the fps drop or the problem shows.
+   Then **quit the game** (the log is written while the game runs).
+3. [Open an issue](../../issues/new/choose) (**Bug report**, also for performance) and attach
+   `dlaa_inject.log` and `dlaa.ini` from `bin\win_x64\`. Write:
+   - game (ETS2 / ATS), flat or VR (headset and runtime), GPU and driver;
+   - **where**: map (base game or a map mod), city, road or depot;
+   - **when**: the in-game time of day, the weather, the traffic;
+   - your game Scaling (`r_scale_x` in `config.cfg`, or the Graphics menu) and the mod's mode / model;
+   - what you saw: the fps, a stutter, a flicker, a ghost, and when it happens (always, in cities,
+     at night, in mirrors ...).
+
+"It does not work" or "the fps are low" without the log cannot be investigated. With the log, where
+and when, it usually can.
+
+### 2. Capture a flicker, a shimmer or a ghost
+
+Anti-aliasing problems do not survive video compression, so a video rarely shows what is wrong.
+The mod has its own capture keys. They need `log_level = 4`.
+
+1. **Is it the mod?** Press `Shift+F11` (DLAA off) and look at the spot again. If the flicker is still
+   there, the game draws it that way (its far shadows do flicker on their own); the mod cannot fix
+   it. If it goes away with DLAA off, it is the mod's.
+2. Switch DLAA back on (`Shift+F11`), **look straight at the spot** and press **`Ctrl+F9`**: the mod
+   writes lossless frames into `dlaa_selftest\` (`<mode>_<n>.bmp` = the DLAA output,
+   `final_<mode>_<n>.bmp` = the same frame as it reached the screen).
+3. Still looking at the spot, press **`Ctrl+F10`**: two consecutive frames of what goes into DLSS
+   (colour, depth, motion vectors) go into `dlaa_snap\<n>_blit<blit>\`. On the menu / truck-preview
+   screen the same key takes a measuring capture (a short freeze).
+4. For a part that smears or a number plate that blinks, also press **`Alt+F8`** next to it: the
+   per-part motion state of the next frame goes into the log (`MV dump` lines).
+5. Zip `dlaa_selftest\` and `dlaa_snap\` and attach them with the log and `dlaa.ini`. Say what to look
+   at (a pole on the left, the shop window, the trailer's plate) and where / when you were.
+
+**RenderDoc** is not needed for a report, and it does not help here: DLSS refuses to run under
+RenderDoc, so a capture holds the game's own frame only, none of the mod's work. The keys above
+replace it. RenderDoc is useful to study how the **game** draws a frame (that is how
+[`docs/CAPTURE_FINDINGS.md`](docs/CAPTURE_FINDINGS.md) was written); if you do that and find
+something, open a discussion.
+
+### 3. Code
+
+- Build: see [Build from source](#build-from-source). The internals, every phase and why it was
+  built that way: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
+- Branches: `main` holds released versions only; all work goes into `dev`. Open pull requests
+  against `dev`.
+- Tests: `tests\build_*.bat` build the unit tests without the game (`build\tests\*.exe`, exit code 0
+  = pass). GitHub Actions runs them on every push. Pure logic goes into a header with a test
+  (`src\fps_pose.h`, `src\frame_pace.h`, `src\hotkey_scan.h` are examples); the DX11 and OpenXR
+  hooks stay in `src\inject.cpp`.
+- Rules for published text: never name another ETS2 / ATS anti-aliasing mod, VR = OpenXR only
+  (no SteamVR / `-openvr`), game paths as `bin\win_x64\`, say what was tested and what was not.
+- Tell me what you tested in game (game, flat / VR, where, when) in the pull request, with a log.
 
 </details>
 

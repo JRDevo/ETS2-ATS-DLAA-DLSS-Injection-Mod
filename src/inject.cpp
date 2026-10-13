@@ -1596,6 +1596,7 @@ void MenuKeys(uint64_t n);               // v0.10.0 tuning menu: open / close + 
 void FpsProfileTick();                   // phase 51: per-vehicle fps box profiles (after MenuKeys)
 void FpsBoxDefaults(uint64_t n);         // phase 51d: the menu's Left on "Re-measure cab spot": the current vehicle's box to defaults
 void FpsProfStoreLive();                 // phase 51e: the FPS row switching the box Off -- the live values into the bound vehicle(s)
+void FpsProfLeaveAttached();             // the lock row leaving "attached": store the live values, the return RELOADS the profile
 void FpsProfUnbind();                    // phase 51d: the Reset row -- the live values are bound to no vehicle until the next lock-on
 bool g_fpsBoxDefaulted = false;          // phase 51d: the menu's Left on "Re-measure cab spot" reset the box (its value column)
 void ToggleFpsProfiles(uint64_t n);      // phase 51b: the menu's Position per vehicle row (dlaa.ini fps_profiles)
@@ -1958,7 +1959,9 @@ HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
     // phase 52: frame rate (flat Reflex / fps_cap; frame_pace.h). PRESENT_START marker here, after the mod's own frame work (the
     // menu / fps box draw is part of the game's frame); Reflex Sleep or the own limiter right after the original Present returns
     // = the start of the next frame's simulation on this thread. VR (an OpenXR frame loop): neither -- xrWaitFrame paces.
-    const bool paceVr = FramePaceVrLoop();
+    // v0.13.0 pre-release fix: neither while a present layer is SUSPECTED (g_plSuspect, before its adoption makes PresentLayerActive
+    // return above): these Presents are the layer's own swap chain, and sleep mode set on it was never switched off afterwards.
+    const bool paceVr = FramePaceVrLoop() || g_plSuspect.load(std::memory_order_relaxed);
     FramePace::BeforePresent(sc, paceVr);
 #endif
     ++t_depth;
@@ -13965,6 +13968,8 @@ bool BiasEnsure(ID3D11DeviceContext* ctx) {
     if (g_biasGlowRtv) { g_biasGlowRtv->Release(); g_biasGlowRtv = nullptr; }
     if (g_biasGlow) { g_biasGlow->Release(); g_biasGlow = nullptr; }
     g_biasGlowW = g_biasGlowH = 0;
+    for (BiasColSrv& c : g_biasCol) c = BiasColSrv();     // v0.13.0 pre-release fix: the refs on the old scene size's forward colours go
+    g_biasColNext = 0;                                    //   too (a render-scale change kept up to 4 old eye textures alive)
     D3D11_TEXTURE2D_DESC td{};
     td.Width = g_sceneW; td.Height = g_sceneH;
     td.MipLevels = 1; td.ArraySize = 1;
@@ -14069,9 +14074,12 @@ void BiasBatch(ID3D11DeviceContext* ctx, uint64_t pass, int why) {
     ID3D11Device* dev = nullptr;
     ctx->GetDevice(&dev);
     ID3D11DepthStencilView* const ro = dev ? DidRoDsv(dev, PassDepth(ps)) : nullptr;   // this pass's depth (issue #9)
-    ID3D11ShaderResourceView* const colSrv = BiasColourSrv(dev, ps.biasF.Get());
-    const bool ok = g_biasCfg > 0 && !g_biasFailed && ro && colSrv && g_sceneW && g_sceneH && BiasEnsure(ctx) &&
-                    t.EnsureBias(dev, g_sceneW, g_sceneH);
+    // BiasEnsure FIRST: at the very first batch and on a scene-size change it (re)creates the glow sum and DROPS the forward-colour
+    // SRV cache (g_biasCol), so the SRV must be looked up after it. (v0.13.0 pre-release: the other order handed BiasShare the SRV
+    // that BiasEnsure had just released = an access violation in the NVIDIA driver at the first pass with glows, ATS VR 18:06.)
+    const bool ens = g_biasCfg > 0 && !g_biasFailed && g_sceneW && g_sceneH && BiasEnsure(ctx);
+    ID3D11ShaderResourceView* const colSrv = ens ? BiasColourSrv(dev, ps.biasF.Get()) : nullptr;
+    const bool ok = ens && ro && colSrv && t.EnsureBias(dev, g_sceneW, g_sceneH);
     if (dev) dev->Release();
     t_inDlaa = true;                                      // our own calls: every hook passes straight through
     if (!ok) {                                            // nothing drawn: the draws are released, the pass gets no mask
@@ -16381,8 +16389,10 @@ void FpsVrLockReset();                                    // (FpsVrLockedPlace's
 // Phase 47: three values -- Right = the next (follow head -> fixed in play space -> attached to vehicle -> follow head), Left =
 // the previous one.
 void ToggleFpsVrLock(uint64_t n, int dir) {
+    const bool wasAttached = g_fpsVrLock == 2;
     g_fpsVrLock = ((g_fpsVrLock + (dir < 0 ? -1 : 1)) % 3 + 3) % 3;
     g_fpsExplicit = g_fpsMoved = true;
+    if (wasAttached && g_fpsVrLock != 2) FpsProfLeaveAttached();   // v0.13.0 pre-release fix: mode 0 / 1 edits must not reach the profile
     FpsVrLockReset();
     const XrHook::PoseStats ps = XrHook::GetPoseStats();
     Log("fps box VR lock: %s (fps_vr_lock=%d, tuning menu, Present #%llu) -- fps_vr_x=%.1f fps_vr_y=%.1f fps_vr_scale=%.1f are now %s; "
@@ -16528,7 +16538,8 @@ void StepVrsSize(int dir, uint64_t n, bool repeat) {
 // phase 49: the menu's Light glow ghosting fix row -- dlaa.ini dlss_bias_mask live in 25 % steps (0 = off .. 100). Logged + beeped
 // like the step rows; at the ends a low beep. Off: the units drop their glow history (BiasPrep), the pass records stay empty.
 void StepBiasMask(int dir, uint64_t n) {
-    const int next = g_biasCfg + (dir > 0 ? 25 : -25);
+    // v0.13.0 pre-release fix: snap to the 25 % grid (a dlaa.ini value like 30 stepped 5 / 30 / 55 / 80 and never reached 0 or 100)
+    const int next = dir > 0 ? (g_biasCfg / 25 + 1) * 25 : ((g_biasCfg + 24) / 25 - 1) * 25;
     if (next < 0 || next > 100) { PlayTones(1, 200, 120, 0); return; }
     g_biasCfg = next;
     g_biasExplicit = true;
@@ -17805,10 +17816,15 @@ bool MenuHkBindApply(int sig, bool clear, uint64_t n) {
             if (isKey ? (o.vk == nvk && o.mods == nmods) : (o.joy == njoy)) taken[nt++] = i;
         }
     for (int t = 0; t < nt; ++t)
-        if (taken[t] == KA_MENU && (isKey ? !g_keys[KA_MENU].joy : !g_keys[KA_MENU].vk)) {
-            LogWarn("hotkey %s NOT bound to %s (Hotkeys page, Present #%llu): it is the only binding of key_menu -- the menu must "
-                "stay reachable (give \"Menu: open / close\" another key first)", held, k.ini, (unsigned long long)n);
-            MenuHkNote(g_hk.line, "NOT bound: key_menu needs it");
+        // v0.13.0 pre-release fix: EVERY menu action keeps a binding, not only the open key (taking the Right arrow from "Menu: right"
+        // left key_menu_right = none: no group, the Hotkeys page and Reset were unreachable until dlaa.ini was edited by hand)
+        if (MenuIsMenuAction(taken[t]) && (isKey ? !g_keys[taken[t]].joy : !g_keys[taken[t]].vk)) {
+            LogWarn("hotkey %s NOT bound to %s (Hotkeys page, Present #%llu): it is the only binding of %s -- the menu must "
+                "stay reachable (give \"%s\" another key first)", held, k.ini, (unsigned long long)n, g_keys[taken[t]].ini,
+                kMenuHkLines[MenuHkLineOf((KeyAction)taken[t]) - 1].name);
+            char nb[64];
+            snprintf(nb, sizeof(nb), "NOT bound: %s needs it", g_keys[taken[t]].ini);
+            MenuHkNote(g_hk.line, nb);
             PlayTones(1, 200, 400, 0);
             g_hk.t0 = GetTickCount64();
             return false;
@@ -18006,8 +18022,8 @@ void MenuBuildHotkeysPanel(TuningMenu::Panel& p, bool vr) {
                      L"bind. %hs or Esc cancels, Backspace clears to none, 10 s without a press cancels.", snLeft);
         else if (menuLine)
             swprintf(p.desc, kD, L"One of the 5 keys that drive this menu (dlaa.ini %hs). %hs, then press the new key or button: "
-                     L"the other menu keys can be taken too. These lines cannot be cleared, and the open key must keep a "
-                     L"binding. Saved to dlaa.ini at once.", g_keys[a].ini, snRight);
+                     L"the other menu keys can be taken too. These lines cannot be cleared, and each of the 5 must keep a "
+                     L"binding (a press that leaves another one empty is refused). Saved to dlaa.ini at once.", g_keys[a].ini, snRight);
         else
             swprintf(p.desc, kD, L"%hs (dlaa.ini %hs). %hs, then press the new key or button: a key replaces the Keyboard part, a "
                      L"controller button or D-pad direction the Controller part. A key / button used by another action moves "
@@ -19238,6 +19254,13 @@ void FpsProfStoreLive() {
     const FpsProfile::Vals live = FpsProfLive();
     for (int i = 0; i < g_fpsProfSess.nBound; ++i)
         if (FpsProfPut(g_fpsProfSess.bound[i], live)) FpsProfMarkDirty(g_fpsProfSess.bound[i]);
+}
+// v0.13.0 pre-release fix: the lock row leaves mode 2 (follow head / fixed in play space). The bound vehicle gets the live values
+// now (as the FPS row's Off), and lastKey is forgotten: without that the return to mode 2 took the 51e "same vehicle re-bound: live
+// values win" path and stored the follow-head numbers (% of the eye, not degrees) as that vehicle's cab placement.
+void FpsProfLeaveAttached() {
+    FpsProfStoreLive();
+    g_fpsProfSess.lastKey = 0;
 }
 void FpsBoxDefaults(uint64_t n) {
     g_fpsVrX = 0.0f; g_fpsVrY = -25.0f; g_fpsVrScale = kFpsVrScaleDefault;

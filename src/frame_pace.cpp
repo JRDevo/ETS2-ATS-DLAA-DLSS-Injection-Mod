@@ -224,13 +224,14 @@ void AfterPresent(IDXGISwapChain* sc, bool vr, uint64_t presentNo) {
             s_deadline = 0;
             if (s_sleepModeSet) {
                 ID3D11Device* d = DeviceOf(sc);
-                SleepModeOff(d == s_dev ? d : nullptr, "VR frame loop");   // (another device: s_dev may be gone -- not touched)
+                SleepModeOff(d == s_dev ? d : nullptr, "VR frame loop / present layer");   // (another device: s_dev may be gone -- not touched)
                 if (d) d->Release();
             }
             if (!s_vrLogged && (s_reflex.load() || s_cap.load())) {
                 s_vrLogged = true;
-                Log("frame pace (phase 52): VR (an OpenXR frame loop runs) -- Reflex Sleep and fps_cap do NOT run (the runtime paces the "
-                    "game in xrWaitFrame; vr_fps_cap is the VR cap); reflex=%d fps_cap=%d stay for flat (Present #%llu)",
+                Log("frame pace (phase 52): VR (an OpenXR frame loop runs) or a present layer (NVIDIA Smooth Motion) -- Reflex Sleep and fps_cap do "
+                    "NOT run (VR: the runtime paces the game in xrWaitFrame, vr_fps_cap is the VR cap; the layer presents its own frames); "
+                    "reflex=%d fps_cap=%d stay for plain flat (Present #%llu)",
                     s_reflex.load(), s_cap.load(), (unsigned long long)presentNo);
             }
         }
