@@ -50,6 +50,8 @@ jobs:
           if not exist build\tests\mirror_turns_test.exe exit /b 1
           call tests\build_hidden_mask_test.bat
           if not exist build\tests\hidden_mask_test.exe exit /b 1
+          call tests\build_cpu_tuning_test.bat
+          if not exist build\tests\cpu_tuning_test.exe exit /b 1
           call tests\build_fps_pose_test.bat
           if not exist build\tests\fps_pose_test.exe exit /b 1
           call tests\build_menu_shot.bat
@@ -76,6 +78,8 @@ jobs:
         run: build\tests\mirror_turns_test.exe
       - name: Test VR hidden area mask (mapping, depth-only draw, state restore)
         run: build\tests\hidden_mask_test.exe
+      - name: Test CPU tuning (src/cpu_tuning_pick.h P-core pick, narrowed-affinity rule)
+        run: build\tests\cpu_tuning_test.exe
       - name: Test fps box pose (src/fps_pose.h colours, VR turn, distance shift)
         run: build\tests\fps_pose_test.exe
       - name: Test flat multi-view (src/flat_views.h layout, view index, confirm / drop, shared jitter phase)
