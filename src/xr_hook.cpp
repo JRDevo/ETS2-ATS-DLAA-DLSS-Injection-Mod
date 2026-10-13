@@ -14,6 +14,7 @@
 #include "MinHook.h"
 #include "log.h"
 #include "fps_pose.h"                                 // phase 44: the fps box turn (ComposeTurn)
+#include "frame_pace.h"                               // phase 52: the VR FPS cap's target maths + the precise sleeper
 
 namespace XrHook {
 
@@ -1135,6 +1136,22 @@ std::atomic<bool>     s_tbPendA{false}, s_tbPolledA{false}, s_tbFakeA{false};
 std::atomic<uint64_t> s_tbSeqA{0};
 std::atomic<int>      s_tbTagsA{0}, s_tbTurboTagsA{0}, s_tbGameWaitsA{0};
 
+// ---- phase 52: VR FPS CAP (dlaa.ini vr_fps_cap; see xr_hook.h, frame_pace.h) ----------------------------------------------
+// Why sleeping BEFORE the real xrWaitFrame (and not after it, with a made-up later display time): the runtime then still decides
+// the display slot and predicts its time itself, so the pose the game renders with, the time it hands back at xrEndFrame and
+// the frame the runtime shows all agree -- no fiction to keep consistent across wait / begin / end, turbo's tags or OFXR
+// Bridge. The runtime only sees a game that is slower than the display; its reprojection (ASW / Motion Smoothing / SSW) fills
+// the slots in between, at a cadence that no longer changes (the point of the cap). Same idea as OpenXR Toolkit's frame
+// throttling (a sleep in front of the real xrWaitFrame); written here, not ported.
+// The game's outermost xrWaitFrame calls are externally synchronised (OpenXR rule) -> the plain statics need no lock.
+std::atomic<int>      s_capDiv{0};
+std::atomic<int64_t>  s_capBaseA{0}, s_capSleepNs{0}, s_gameWaitNsA{0};
+std::atomic<uint64_t> s_capWaits{0}, s_capSleeps{0};
+int64_t               s_capLastReturn = 0;              // FramePace::NowNs when the game's last real xrWaitFrame returned
+int64_t               s_capBase = 0;                    // FramePace::VrBasePeriod of this run of waits
+FramePace::Sleeper    s_capSleeper;
+int                   s_capAnnouncedDiv = 0;           // the div of the last "VR FPS cap:" line (one line per change)
+
 void TbMirrorLocked() {
     int turbo = 0;
     for (int k = 0; k < s_tb.tagN; ++k) if (s_tb.tags[(s_tb.tagH + k) % kTags] == kTagTurbo) ++turbo;
@@ -1906,6 +1923,33 @@ XrResult WaitFrameImpl(int i, XrSession ses, const XrFrameWaitInfo* wi, XrFrameS
     if (!s_logged.exchange(true))
         Log("OpenXR hook: first xrWaitFrame by the game (session %p; via the %s %s, tid=%lu)", ses, kKindName[s_slot[i].kind],
             s_slot[i].module, GetCurrentThreadId());
+    // phase 52: the VR FPS cap -- sleep (no lock held) until the target, then the call goes on exactly as without the cap.
+    // Turbo wanted: no cap (turbo's made-up frames must not wait; inject.cpp keeps turbo off while the cap is on).
+    const int capDiv = s_capDiv.load(std::memory_order_relaxed);
+    const bool turboWant = s_tbWant.load(std::memory_order_relaxed);
+    if (capDiv != s_capAnnouncedDiv && (!capDiv || s_capBase > 0)) {   // (on: once the display period is known)
+        s_capAnnouncedDiv = capDiv;
+        if (capDiv)
+            Log("VR FPS cap (phase 52): 1/%d of the headset rate (vr_fps_cap=%d; display period %.2f ms -> %.1f fps)%s -- the game's "
+                "xrWaitFrame sleeps until a quarter period before every %s display slot; the runtime's reprojection fills the slots "
+                "in between (session %p)", capDiv, capDiv, (double)s_capBase / 1e6,
+                s_capBase > 0 ? 1e9 / (double)s_capBase / capDiv : 0.0,
+                turboWant ? " -- NOT pacing while Turbo mode is on" : "", capDiv == 2 ? "2nd" : "3rd", ses);
+        else
+            Log("VR FPS cap (phase 52): off (vr_fps_cap=0) -- the game's xrWaitFrame is not delayed (session %p)", ses);
+    }
+    if (capDiv >= 2 && !turboWant && fs) {
+        const int64_t target = FramePace::VrWaitTarget(s_capLastReturn, s_capBase, capDiv);
+        const int64_t t0 = FramePace::NowNs();
+        // (a target more than div periods ahead cannot happen with a sane clock: never sleep longer than that)
+        if (target > t0 && target - t0 <= (int64_t)capDiv * s_capBase) {
+            int64_t slept;
+            CPU_ORIG(slept = s_capSleeper.Until(target, 0));   // phase 31: a wait for the headset slot, not mod CPU
+            s_capSleepNs.fetch_add(slept, std::memory_order_relaxed);
+            s_capSleeps.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+    s_gameWaitNsA.store(SteadyNs(), std::memory_order_relaxed);   // phase 52: FrameLoopActive
     const int64_t now = SteadyNs();
     std::unique_lock<std::mutex> lk(s_tbMx);
     const int64_t prev = s_tb.lastGameWaitNs;
@@ -1987,6 +2031,14 @@ XrResult WaitFrameImpl(int i, XrSession ses, const XrFrameWaitInfo* wi, XrFrameS
     XrResult r;
     CPU_ORIG(r = real(ses, wi, fs));
     --t_depth;
+    if (r >= 0 && fs) {                          // phase 52: the VR FPS cap's anchor (the runtime woke the game for a slot now)
+        const int64_t ret = FramePace::NowNs();
+        if (ret - s_capLastReturn > 2000000000LL) s_capBase = 0;   // a gap (new session, maybe another rate): re-seed the period
+        s_capBase = FramePace::VrBasePeriod(s_capBase, (int64_t)fs->predictedDisplayPeriod);
+        s_capLastReturn = ret;
+        s_capBaseA.store(s_capBase, std::memory_order_relaxed);
+        s_capWaits.fetch_add(1, std::memory_order_relaxed);
+    }
     lk.lock();
     --s_tb.gameWaits;
     s_tb.gameWaited = r >= 0;                    // (until the game's xrBeginFrame)
@@ -2876,6 +2928,21 @@ OverlayStats GetOverlayStats() {
 
 // ---- phase 30: Turbo mode (see xr_hook.h; the logic is in the anonymous namespace above, from OpenXR Toolkit, MIT) ----
 void SetTurbo(bool on) { s_tbWant.store(on, std::memory_order_relaxed); }
+// ---- phase 52: VR FPS cap (see xr_hook.h; the pacing is in WaitFrameImpl) ----
+void SetFpsCap(int div) { s_capDiv.store(FramePace::ClampVrDiv(div), std::memory_order_relaxed); }
+FpsCapStats GetFpsCapStats() {
+    FpsCapStats s;
+    s.div = s_capDiv.load(std::memory_order_relaxed);
+    s.basePeriodNs = s_capBaseA.load(std::memory_order_relaxed);
+    s.waits = s_capWaits.load(std::memory_order_relaxed);
+    s.sleeps = s_capSleeps.load(std::memory_order_relaxed);
+    s.sleepNs = s_capSleepNs.load(std::memory_order_relaxed);
+    return s;
+}
+bool FrameLoopActive() {
+    const int64_t t = s_gameWaitNsA.load(std::memory_order_relaxed);
+    return t && SteadyNs() - t < 1000000000LL;
+}
 int64_t DisplayPeriodNs() {                       // phase 45 (the tuning menu's Limit line)
     TbWorker& w = Wk();
     std::lock_guard<std::mutex> wl(w.mx);

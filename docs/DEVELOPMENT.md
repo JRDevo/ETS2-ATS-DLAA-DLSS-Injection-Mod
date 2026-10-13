@@ -1634,6 +1634,48 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
 - **Not verified**: anything in game (whether ETS2 / ATS draw their glows exactly like this in every case, the visual result,
   the cost, the NGX response to the mask on the user's preset).
 
+### Phase 52: frame rate -- NVIDIA Reflex + FPS cap (flat), VR FPS cap (`reflex`, `fps_cap`, `vr_fps_cap`, all default 0)
+
+- **Module**: `src/frame_pace.h` (pure maths, tested) + `src/frame_pace.cpp` (NVAPI, sleeper, stats). NVAPI only with
+  `WITH_NVAPI` (CMake sets it with `WITH_VRS`, the same external/nvapi + static nvapi64.lib as phase 34); without it the Reflex
+  row says `not built in` and `fps_cap` runs on the own limiter.
+- **Flat, hkPresent (depth 0, not a present layer)**: `FramePace::BeforePresent` (PRESENT_START marker) right before the original
+  Present -- after the mod's own frame work, which belongs to the game's frame; `FramePace::AfterPresent` right after it returns
+  (inside `CPU_ORIG`: a wait, not mod CPU). There: settings applied when they changed or the device changed
+  (`NvAPI_D3D_SetSleepMode(bLowLatencyMode, bLowLatencyBoost, minimumIntervalUs = 1e6 / fps_cap)`, the status logged once per
+  change), then either `NvAPI_D3D_Sleep` (PRESENT_END marker before, `++frameId` + SIMULATION_START after: the next frame's
+  simulation starts there on the presenting thread) or the own limiter: `next = max(prev + interval, now - interval)`, a
+  `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` timer for all but the last 0.5 ms, a spin for the rest. A refused SetSleepMode =
+  `Support() 0` + one ERROR line; `fps_cap` falls back to the own limiter. If the game presents from a render thread separate
+  from its simulation thread, the sleep holds the render thread and the simulation waits on it one frame later (still a cap).
+- **VR**: `FramePaceVrLoop()` (`g_vrMode` or a game xrWaitFrame within 1 s) = no Reflex Sleep, no flat cap (sleep mode set
+  back off once if it was on). `vr_fps_cap` lives in `xr_hook.cpp WaitFrameImpl`: before the game's REAL xrWaitFrame (never
+  turbo's made-up path, no lock held) it sleeps until `lastReturn + div * period - period / 4` (`FramePace::VrWaitTarget`;
+  `period` = the smallest predictedDisplayPeriod of this run of waits, re-seeded after a 2-s gap), then calls the real
+  xrWaitFrame. The runtime blocks the call to its next wake point = the slot `div` periods after the last one, and returns ITS
+  predicted display time for that slot: wait / begin / end order, the frame's display time and pose stay the runtime's own
+  (sleeping AFTER the real wait and handing out a later made-up display time was rejected: the game would render a pose for a
+  time the runtime never promised, and every layer above would see a frame the runtime has not scheduled). A quarter period
+  of margin: the previous wake point is 3/4 of a period behind (a late timer cannot hit it), the next one ahead.
+- **Turbo**: excluded -- the cap WINS. `ApplyXrTurbo()` gives XrHook `xr_turbo && !vr_fps_cap` (turbo's phase 33 switch-off
+  drains the pending async wait); the Turbo row reads `on (FPS cap wins)`; WaitFrameImpl also never caps while turbo is wanted.
+- **Reprojection**: the point of the VR cap. At half rate every real frame is followed by exactly one synthetic one (ASW /
+  Motion Smoothing / SSW) -- a constant cadence instead of a game that swings between 72 and 50 fps. A runtime that already
+  locks the game to half rate itself keeps its slots; `vr_fps_cap = 2` then changes nothing, `3` may land on every 4th slot
+  (the runtime's half-rate slots) -- documented, not handled.
+- **Menu**: new group `Frame rate` after `VR performance` (`MR_FRGRP`, `MR_REFLEX`, `MR_FPSCAP` (step row, the
+  `FramePace::kCapSteps` list), `MR_VRFPSCAP`); `kMaxRows` 50 -> 56; 52 reset keys (cap 56); Save writes all three once one was
+  set (`g_paceExplicit`). LoadConfig reads them as standalone `if (...) { ...; continue; }` lines (C1061).
+- **Log**: `frame rate (phase 52): reflex=.. fps_cap=.. vr_fps_cap=..` at the start; `frame pace (phase 52): ... -> ...` at the
+  first flat Present and each change (the NvAPI status); `VR FPS cap (phase 52): 1/N of the headset rate ...` once the period is
+  known and at each change; at level 4 the `CPU prof` header line ends with `| frame pace (phase 52): ... limiter sleep X
+  ms/frame, Reflex Sleep Y ms/frame; vr_fps_cap=.. -> Z ms/frame slept before xrWaitFrame (n of m waits delayed, period ..)`.
+- **Test**: `tests/frame_pace_test.cpp` (deadline rule: exact cadence, no drift over 10000 frames, no wait for a slow game, at
+  most one interval caught up after a hitch; steps / clamps; the VR target against a model runtime at 72 / 80 / 90 / 120 Hz
+  with a timer up to 0.2 periods late: every frame on every 2nd / 3rd slot, none early).
+- **Not verified**: anything in game (Reflex on the user's driver, the limiter's precision on the game thread, how each VR
+  runtime's xrWaitFrame and reprojection react to the delayed waits).
+
 ### The RenderDoc oracle (done in v0.2)
 
 Capture a frame of the unmodified game to learn empirically: which pass writes

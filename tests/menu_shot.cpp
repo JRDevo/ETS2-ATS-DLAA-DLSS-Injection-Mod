@@ -39,8 +39,8 @@ struct E {
     const wchar_t* sent;       // the live cost sentence MenuPerfCosts appends
 };
 static const wchar_t* const kGroups[] = { L"Picture", L"Motion and mirrors", L"Upscaling and VR", L"VR performance",
-                                          L"Panel settings", L"FPS counter settings" };
-enum { G_PIC, G_MOT, G_UP, G_VRP, G_PANEL, G_FPSG };
+                                          L"Frame rate", L"Panel settings", L"FPS counter settings" };   // phase 52: + Frame rate
+enum { G_PIC, G_MOT, G_UP, G_VRP, G_FR, G_PANEL, G_FPSG, G_COUNT };
 static const E kRows[] = {
     { -1, false, L"Mode", L"DLAA", L"End", L"<c>0.31</> | <g>3.4</>", false,
       L"DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's Scaling is below 100 %. "
@@ -80,6 +80,10 @@ static const E kRows[] = {
     { G_VRP, false, L"Foveated size", L"80 % (balanced)", L"dlaa.ini vrs_inner / vrs_outer", L"<c>0.04</> | -", false, nullptr, nullptr },
     { G_VRP, false, L"Foveated passes", L"scene", L"dlaa.ini vrs_passes", L"<c>0.04</> | -", false, nullptr, nullptr },
     { G_VRP, false, L"Hidden area mask (VR)", L"on", L"dlaa.ini xr_hidden_mask", L"<c>0.02</> | -", false, nullptr, nullptr },
+    { G_FR, true, L"Frame rate", L"", L"", L"", false, nullptr, nullptr },                                       // phase 52
+    { G_FR, false, L"Reflex (flat)", L"off", L"dlaa.ini reflex  (flat only)", L"", true, nullptr, nullptr },
+    { G_FR, false, L"FPS cap (flat)", L"off", L"dlaa.ini fps_cap  (flat only)", L"", true, nullptr, nullptr },
+    { G_FR, false, L"VR FPS cap", L"off", L"dlaa.ini vr_fps_cap", L"", false, nullptr, nullptr },
     { -1, false, L"FPS counter", L"on", L"dlaa.ini fps_show", L"- | <g>0.012</>", false, nullptr, nullptr },
     { G_FPSG, true, L"FPS counter settings", L"", L"", L"", false, nullptr, nullptr },
     { G_FPSG, false, L"FPS counter lock", L"Follow head", L"dlaa.ini fps_vr_lock", L"", false, nullptr, nullptr },
@@ -124,7 +128,7 @@ static std::wstring Ink(const wchar_t* s) {
 static void Put(wchar_t* dst, size_t cap, const std::wstring& s) { wcsncpy_s(dst, cap, s.c_str(), _TRUNCATE); }
 
 // open[g]: group g shown. selName: the selected row (by name).
-static void BuildPanel(TuningMenu::Panel& p, const bool open[6], const wchar_t* selName) {
+static void BuildPanel(TuningMenu::Panel& p, const bool open[G_COUNT], const wchar_t* selName) {
     memset(&p, 0, sizeof(p));
     wcsncpy_s(p.title, kTitle, _TRUNCATE);
     Put(p.perf[0], 224, Ink(kPerf0));
@@ -310,7 +314,7 @@ static void Save(const wchar_t* name, const std::vector<uint32_t>& px, int W, in
 }
 
 // ---- the shots ---------------------------------------------------------------------------------------------------------------
-static void MenuShot(Gpu& g, const wchar_t* file, const bool open[6], const wchar_t* sel) {
+static void MenuShot(Gpu& g, const wchar_t* file, const bool open[G_COUNT], const wchar_t* sel) {
     TuningMenu::Panel p;
     BuildPanel(p, open, sel);
     const float scale = 1.6f;                                      // the existing README picture is the panel at about 1.6x
@@ -388,12 +392,12 @@ int main(int argc, char** argv) {
         return 1;
     }
     printf("menu_shot -> %ls\n", g_dir.c_str());
-    bool none[6] = {}, vrp[6] = {}, pic[6] = {};
+    bool none[G_COUNT] = {}, vrp[G_COUNT] = {}, pic[G_COUNT] = {};
     vrp[G_VRP] = true; pic[G_PIC] = true;
     MenuShot(g, L"tuning-menu.png", none, L"Mode");
     MenuShot(g, L"tuning-menu-vr-performance.png", vrp, L"Foveated (VRS)");
     MenuShot(g, L"tuning-menu-picture.png", pic, L"Sharpen strength");
-    bool all[6]; for (bool& o : all) o = true;
+    bool all[G_COUNT]; for (bool& o : all) o = true;
     MenuShot(g, L"tuning-menu-all-open.png", all, L"Mode");                       // phase 46b: every group open
     FpsShots(g);
     g.ctx->Release();

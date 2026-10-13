@@ -1,3 +1,11 @@
+// phase 52 -- FRAME RATE: NVIDIA REFLEX + FPS CAP (flat) + VR FPS CAP (dlaa.ini reflex 0/1/2, fps_cap 0 / 20..1000, vr_fps_cap
+//           0/2/3, all default 0; menu group "Frame rate": Reflex (flat), FPS cap (flat), VR FPS cap; src/frame_pace.h / .cpp,
+//           xr_hook.cpp WaitFrameImpl). Flat, at hkPresent: PRESENT_START marker before the original Present, after it Reflex's
+//           NvAPI_D3D_Sleep (+ PRESENT_END / SIMULATION_START markers; fps_cap = minimumIntervalUs) or the own deadline limiter
+//           (high-resolution waitable timer + 0.5 ms spin). Nothing while an OpenXR frame loop runs (FramePaceVrLoop) or under a
+//           present layer. VR: the game's real xrWaitFrame is delayed until a quarter period before every 2nd / 3rd display slot;
+//           the runtime predicts the display time itself (no made-up times), the reprojection fills the slots between. The cap
+//           wins over Turbo mode (ApplyXrTurbo). Level-4 "CPU prof" line: the sleeps per frame. tests\frame_pace_test.cpp.
 // v0.12.0 -- phases 40-49 (below, newest first) + issue #12 flat multi-monitor (FlatViewCount / r_multimon_mode 2).
 // phase 49 -- LIGHT GLOW GHOSTING FIX: NGX BIAS CURRENT COLOUR MASK (dlaa.ini dlss_bias_mask 0..100 %, default 100; menu row "Light
 //           glow ghosting fix", Picture group; the "GLOW BIAS MASK" block above hkDrawIndexed, DrawIdRecord::BiasShare, SceneDlaa::
@@ -748,6 +756,7 @@
 #include "gpu_pass.h"                                // phase 36: GPU time per pass type (measurement only)
 #include "mirror_turns.h"                            // phase 41: mirrors in turns (mirror_turns; pure decisions)
 #include "vrs.h"                                    // phase 34: VRS fixed foveated rendering (NVAPI; VR world scene only)
+#include "frame_pace.h"                             // phase 52: frame cap + NVIDIA Reflex (flat), the VR FPS cap's maths
 #include "hidden_mask.h"                            // phase 40: VR hidden area mask (XR_KHR_visibility_mask into the eye depth)
 #include "fps_cab.h"                                // phase 47: the VR fps box attached to the vehicle (GPU-placed from a cab draw)
 #endif
@@ -813,6 +822,12 @@ int      g_menuVrLayer = 1;
 // switches it live (takes effect at the next xrEndFrame).
 int      g_xrTurbo = 0;
 bool     g_xrTurboExplicit = false;      // set in dlaa.ini or changed in the menu -> SaveSettings writes xr_turbo
+// phase 52: FRAME RATE (frame_pace.h) -- dlaa.ini reflex (0 off / 1 on / 2 on + boost; flat, NVIDIA), fps_cap (0 off, else fps;
+// flat: Reflex's driver limit while Reflex runs, else the own limiter after Present), vr_fps_cap (0 off / 2 half / 3 a third
+// of the headset rate; xr_hook.cpp paces the game's xrWaitFrame). All default 0. The menu's Frame rate rows switch them live.
+// vr_fps_cap and Turbo mode exclude each other: the cap wins (ApplyXrTurbo keeps turbo off while the cap is on).
+int      g_reflex = 0, g_fpsCap = 0, g_vrFpsCap = 0;
+bool     g_paceExplicit = false;         // set in dlaa.ini or changed in the menu -> SaveSettings writes all three
 // phase 40, VR: dlaa.ini xr_hidden_mask -- 1 = HIDDEN AREA MASK (hidden_mask.h, xr_hook.h, the block above HmOnSceneClear): the
 // lens corners the runtime reports as never visible (XR_KHR_visibility_mask) are filled into each eye's scene depth at the nearest
 // depth right after the game clears it, so the game shades nothing there. Default 0. The OpenXR extension is only requested at the
@@ -1789,6 +1804,10 @@ HRESULT LayerPresent(IDXGISwapChain* sc, UINT sync, UINT flags, void* caller, un
     return hr;
 }
 
+#ifdef WITH_DLAA
+bool FramePaceVrLoop();                         // phase 52: an OpenXR frame loop runs (defined after g_vrMode)
+inline bool FramePaceWanted() { return g_reflex != 0 || g_fpsCap != 0; }
+#endif
 HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
     const int   depth  = t_depth;
     void* const caller = _ReturnAddress();
@@ -1834,7 +1853,17 @@ HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
     // v0.10.0 phase 26: self-test only -- the back buffer still holds the finished frame here (before the original Present)
     if (sc) SelfTestFinalDump(sc);
 #endif
-    if (PresentLayerActive()) return LayerPresent(sc, sync, flags, caller, tid);   // v0.8.1: count + log only
+    if (PresentLayerActive()) {                 // v0.8.1: count + log only
+#ifdef WITH_DLAA
+        static bool s_paceLayerLogged = false;  // phase 52: no frame pace on the layer's own present thread (generated frames too)
+        if (!s_paceLayerLogged && FramePaceWanted()) {
+            s_paceLayerLogged = true;
+            Log("frame pace (phase 52): a present layer (NVIDIA Smooth Motion) presents -- Reflex / fps_cap do NOT run (they would pace "
+                "the layer's generated frames too); use the driver's own frame limiter with Smooth Motion");
+        }
+#endif
+        return LayerPresent(sc, sync, flags, caller, tid);
+    }
     // phase 31: the render thread's frame boundary for the CPU profiler (before this Present's own scope opens), then the
     // Present hook's scope: the per-frame work below is mod time, the original Present (CPU_ORIG) is not
     CpuProfFrameMark(CpuProf::kMarkPresent);
@@ -1886,10 +1915,20 @@ HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
     if (!UpdateGameContext(sc, n, caller))      // v0.6.2: before anything else this frame (hotkeys may reset state)
         PresentFrameWork(sc, n, nullptr, false);// v0.8.1: false = a present layer took over this very Present
     plLock.unlock();
+#ifdef WITH_DLAA
+    // phase 52: frame rate (flat Reflex / fps_cap; frame_pace.h). PRESENT_START marker here, after the mod's own frame work (the
+    // menu / fps box draw is part of the game's frame); Reflex Sleep or the own limiter right after the original Present returns
+    // = the start of the next frame's simulation on this thread. VR (an OpenXR frame loop): neither -- xrWaitFrame paces.
+    const bool paceVr = FramePaceVrLoop();
+    FramePace::BeforePresent(sc, paceVr);
+#endif
     ++t_depth;
     HRESULT hr;
     CPU_ORIG(hr = oPresent(sc, sync, flags));
     --t_depth;
+#ifdef WITH_DLAA
+    CPU_ORIG(FramePace::AfterPresent(sc, paceVr, n));   // (CPU_ORIG: a deliberate wait, not mod CPU -- phase 31 profiler)
+#endif
     if (n < 5)
         LogErr("Present #%llu oPresent returned hr=0x%lx", (unsigned long long)n, (unsigned long)hr);
     if (FAILED(hr)) {
@@ -2313,6 +2352,11 @@ bool             g_depthDirty    = false;        // G-buffer rendered into the s
 bool             g_eyeLogged[kMaxViews] = {};    // "eye blit detected" logged per eye / view (v0.12.0 issue #12)
 bool             g_flatMode      = false;        // a blit with RT0 == DXGI backbuffer was seen (flat, 1 eye)
 bool             g_vrMode        = false;        // a blit into a non-backbuffer RT was seen
+#ifdef WITH_DLAA
+// phase 52: VR for the frame pace = the game called xrWaitFrame within the last second, or eye blits were seen (the desktop
+// mirror's Present of a VR session is never paced: the runtime paces the game in xrWaitFrame).
+bool FramePaceVrLoop() { return g_vrMode || XrHook::FrameLoopActive(); }
+#endif
 // ---- v0.12.0 issue #12: FLAT MULTI-VIEW (multi-monitor; the WHY / HOW is in flat_views.h) -------------------------------------------
 // dlaa.ini flat_multiview (startup only): 1 (default) = detect several non-overlapping backbuffer blits per Present (r_multimon_mode 2)
 // and give every view (up to kMaxViews) its own DLAA unit; 0 = the v0.11 behaviour EXACTLY (every backbuffer blit is eye 0, no detection, pass FIFO
@@ -2471,6 +2515,26 @@ const char* CpuProfRole(uint32_t r, char* buf, size_t n) {
     else                     snprintf(buf, n, "other");
     return buf;
 }
+#ifdef WITH_DLAA
+// phase 52: the frame pace's part of the level-4 "CPU prof" line -- the sleeps of the own limiter and of Reflex (flat) and of the
+// VR FPS cap (in the game's xrWaitFrame), ms per frame over the window since the previous line. Empty while all of it is off.
+void FramePacePerfTag(char* b, size_t n) {
+    const FramePace::Window w = FramePace::TakeWindow();
+    const XrHook::FpsCapStats cs = XrHook::GetFpsCapStats();
+    static uint64_t s_prevWaits = 0, s_prevSleeps = 0;
+    static int64_t  s_prevNs = 0;
+    const uint64_t dw = cs.waits - s_prevWaits, ds = cs.sleeps - s_prevSleeps;
+    const int64_t  dns = cs.sleepNs - s_prevNs;
+    s_prevWaits = cs.waits; s_prevSleeps = cs.sleeps; s_prevNs = cs.sleepNs;
+    b[0] = 0;
+    if (!g_reflex && !g_fpsCap && !g_vrFpsCap && !ds) return;
+    snprintf(b, n, " | frame pace (phase 52): reflex=%d%s fps_cap=%d -> limiter sleep %.3f ms/frame, Reflex Sleep %.3f ms/frame "
+             "(%llu flat frames); vr_fps_cap=%d -> %.3f ms/frame slept before xrWaitFrame (%llu of %llu waits delayed, period %.2f ms)",
+             g_reflex, FramePace::ReflexRunning() ? " (running)" : (g_reflex ? " (not running)" : ""), g_fpsCap, w.limiterMs,
+             w.reflexMs, (unsigned long long)w.frames, g_vrFpsCap, dw ? (double)dns / 1e6 / (double)dw : 0.0,
+             (unsigned long long)ds, (unsigned long long)dw, (double)cs.basePeriodNs / 1e6);
+}
+#endif
 // Snapshot of every registered slot (deltas against g_cpPrev); report = false: only the baseline at the first window start.
 void CpuProfReport(bool report, int64_t q, uint64_t tscNow) {
     using namespace CpuProf;
@@ -2519,9 +2583,13 @@ void CpuProfReport(bool report, int64_t q, uint64_t tscNow) {
         const int unprof = g_unprofiled.load(std::memory_order_relaxed);
         char un[64] = "";
         if (unprof) snprintf(un, sizeof(un), ", %d not profiled (registry full)", unprof);
+        char pace[384] = "";                              // phase 52: the frame pace's sleeps (empty while it is all off)
+#ifdef WITH_DLAA
+        FramePacePerfTag(pace, sizeof(pace));
+#endif
         LogDbg("CPU prof (phase 33) %.1f s: %llu frames = %s (%.1f fps; %llu Presents, %llu xrEndFrame) | %d busy thread(s) of %d "
-            "profiled%s; figures per frame = / %llu", secs, (unsigned long long)F, vr ? "xrEndFrame calls (VR)" : "Presents (flat)",
-            (double)F / secs, (unsigned long long)dPres, (unsigned long long)dXre, nBusy, nReg, un, (unsigned long long)F);
+            "profiled%s; figures per frame = / %llu%s", secs, (unsigned long long)F, vr ? "xrEndFrame calls (VR)" : "Presents (flat)",
+            (double)F / secs, (unsigned long long)dPres, (unsigned long long)dXre, nBusy, nReg, un, (unsigned long long)F, pace);
         // pass 2: one line per busy thread -- render first, then main, then the rest
         int order[kMaxThreads], no = 0;
         for (int pass = 0; pass < 3; ++pass)
@@ -2891,6 +2959,7 @@ void SaveSettings(uint64_t n) {
                                                           // phase 34: + vrs / vrs_inner / vrs_outer = 36
                                                           // phase 39: + log_level = 37
                                                           // phase 41: + mirror_turns = 38
+                                                          // phase 52: + reflex / fps_cap / vr_fps_cap (at most 50 of kIniMaxKeys)
     int nkv = 0;
     auto add = [&](const char* k) -> char* { kv[nkv].key = k; return kv[nkv++].val; };
     if (g_profExplicit[PK_PRESET]) snprintf(add("dlss_preset"), sizeof(kv[0].val), "%s", preset);
@@ -2945,6 +3014,11 @@ void SaveSettings(uint64_t n) {
         snprintf(add("fps_vr_roll"), sizeof(kv[0].val), "%d", g_fpsVrRoll);
     }
     if (g_xrTurboExplicit) snprintf(add("xr_turbo"), sizeof(kv[0].val), "%d", g_xrTurbo);   // phase 30 (Turbo mode row)
+    if (g_paceExplicit) {                                 // phase 52 (the Frame rate rows)
+        snprintf(add("reflex"), sizeof(kv[0].val), "%d", g_reflex);
+        snprintf(add("fps_cap"), sizeof(kv[0].val), "%d", g_fpsCap);
+        snprintf(add("vr_fps_cap"), sizeof(kv[0].val), "%d", g_vrFpsCap);
+    }
     if (g_xrHiddenMaskExplicit) snprintf(add("xr_hidden_mask"), sizeof(kv[0].val), "%d", g_xrHiddenMask);   // phase 40
     if (g_biasExplicit) snprintf(add("dlss_bias_mask"), sizeof(kv[0].val), "%d", g_biasCfg);   // phase 49 (glow ghosting row)
     if (g_logLevelExplicit) snprintf(add("log_level"), sizeof(kv[0].val), "%d", LogLevel());  // phase 39 (Logging row)
@@ -2954,8 +3028,8 @@ void SaveSettings(uint64_t n) {
         snprintf(add("vrs_outer"), sizeof(kv[0].val), "%d", g_vrsOuter);
     }
     if (g_vrsPassesExplicit) snprintf(add("vrs_passes"), sizeof(kv[0].val), "%d", g_vrsPasses);   // phase 42 (Foveated passes)
-    char vrsW[160] = "";                                  // (phase 39: was 64, + log_level; phase 40: + xr_hidden_mask; phase 42: + vrs_passes;
-                                                          //  phase 49: 128 -> 160, + dlss_bias_mask)
+    char vrsW[208] = "";                                  // (phase 39: was 64, + log_level; phase 40: + xr_hidden_mask; phase 42: + vrs_passes;
+                                                          //  phase 49: 128 -> 160, + dlss_bias_mask; phase 52: 160 -> 208, + the frame rate keys)
     if (g_vrsExplicit) snprintf(vrsW, sizeof(vrsW), " vrs=%d vrs_inner=%d vrs_outer=%d", g_vrsOn, g_vrsInner, g_vrsOuter);
     if (g_xrHiddenMaskExplicit) {
         const size_t vl = strlen(vrsW);
@@ -2972,6 +3046,10 @@ void SaveSettings(uint64_t n) {
     if (g_logLevelExplicit) {
         const size_t vl = strlen(vrsW);
         snprintf(vrsW + vl, sizeof(vrsW) - vl, " log_level=%d", LogLevel());
+    }
+    if (g_paceExplicit) {                                 // phase 52
+        const size_t vl = strlen(vrsW);
+        snprintf(vrsW + vl, sizeof(vrsW) - vl, " reflex=%d fps_cap=%d vr_fps_cap=%d", g_reflex, g_fpsCap, g_vrFpsCap);
     }
     char menuW[224] = "";                                 // (v0.10.3 phase 29b: was 200, + menu_vr_dist)
     if (g_menuExplicit)
@@ -15695,6 +15773,9 @@ enum MenuRowId {
     MR_VRS, MR_VRSSIZE,                                   // phase 34: VR foveated rendering (dlaa.ini vrs; vrs_inner / vrs_outer preset)
     MR_VRSPASS,                                           // phase 42: Foveated passes (dlaa.ini vrs_passes: scene / scene + lighting)
     MR_HMASK,                                             // phase 40: VR hidden area mask (dlaa.ini xr_hidden_mask)
+    MR_FRGRP,                                             // phase 52: group "Frame rate"
+    MR_REFLEX, MR_FPSCAP,                                 // phase 52: flat Reflex / FPS cap (dlaa.ini reflex / fps_cap)
+    MR_VRFPSCAP,                                          // phase 52: VR FPS cap (dlaa.ini vr_fps_cap: half / third)
     MR_PANELGRP,                                          // v0.10.3 phase 29c: group header "Panel settings" (collapsible)
     MR_POSX, MR_POSY, MR_SIZE, MR_DEPTH, MR_FACE,
     MR_MENUKEYS,                                          // v0.10.2: the 5 menu keys, bound by 5 holds in sequence (29c: in the panel group)
@@ -15719,17 +15800,20 @@ constexpr MenuGroupDef kMenuGroups[] = {
     { MR_MOTGRP,   MR_MIRTURNS, L"Motion and mirrors" },
     { MR_UPGRP,    MR_OFXR,     L"Upscaling and VR" },
     { MR_VRPGRP,   MR_HMASK,    L"VR performance" },
+    { MR_FRGRP,    MR_VRFPSCAP, L"Frame rate" },                 // phase 52
     { MR_PANELGRP, MR_MENUKEYS, L"Panel settings" },
     { MR_FPSGRP,   MR_FPSROLL,  L"FPS counter settings" },     // phase 44: last row MR_FPSSIZE -> MR_FPSROLL (phase 48: + FPS brightness inside)
 };
 constexpr int kMenuGroupCount = (int)(sizeof(kMenuGroups) / sizeof(kMenuGroups[0]));
 static_assert(MR_PICGRP + 1 == MR_SHARP && MR_BIAS + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_MIRTURNS + 1 == MR_UPGRP &&
-              MR_UPGRP + 1 == MR_UPSCALE && MR_OFXR + 1 == MR_VRPGRP && MR_VRPGRP + 1 == MR_TURBO && MR_HMASK + 1 == MR_PANELGRP &&
+              MR_UPGRP + 1 == MR_UPSCALE && MR_OFXR + 1 == MR_VRPGRP && MR_VRPGRP + 1 == MR_TURBO && MR_HMASK + 1 == MR_FRGRP &&
+              MR_FRGRP + 1 == MR_REFLEX && MR_VRFPSCAP + 1 == MR_PANELGRP &&
               MR_PANELGRP + 1 == MR_POSX && MR_MENUKEYS + 1 == MR_FPS && MR_FPSGRP + 1 == MR_FPSLOCK && MR_FPSROLL + 1 == MR_LOG,
               "tuning menu: a group's children must follow its header and fill it up to its last row");
 static_assert(MR_SHARP < MR_WIDTH && MR_WIDTH < MR_LOD && MR_LOD < MR_LODCUT && MR_LODCUT < MR_AREA && MR_AREA < MR_PRETM &&
               MR_PRETM < MR_FWD && MR_FWD < MR_BIAS && MR_DRAWIDS < MR_MIRROR && MR_MIRROR < MR_MIRTURNS && MR_UPSCALE < MR_DLAA && MR_DLAA < MR_OFXR &&
               MR_TURBO < MR_VRS && MR_VRS < MR_VRSSIZE && MR_VRSSIZE < MR_VRSPASS && MR_VRSPASS < MR_HMASK &&
+              MR_REFLEX < MR_FPSCAP && MR_FPSCAP < MR_VRFPSCAP &&
               MR_POSX < MR_POSY && MR_POSY < MR_SIZE && MR_SIZE < MR_DEPTH && MR_DEPTH < MR_FACE && MR_FACE < MR_MENUKEYS &&
               MR_FPSLOCK < MR_FPSX && MR_FPSX < MR_FPSY && MR_FPSY < MR_FPSSIZE && MR_FPSSIZE < MR_FPSCOLOR &&
               MR_FPSCOLOR < MR_FPSBRIGHT && MR_FPSBRIGHT < MR_FPSDIST && MR_FPSDIST < MR_FPSYAW && MR_FPSYAW < MR_FPSPITCH && MR_FPSPITCH < MR_FPSROLL,
@@ -15800,6 +15884,15 @@ const wchar_t* const kMenuDesc[] = {
     L"VR only. The game skips the lens corners you never see (the headset reports them), so it draws fewer pixels: more GPU "
     L"headroom, the picture you see stays the same. The first switch-on needs a game restart. Turn it off if the edge of the view "
     L"looks wrong.",
+    // phase 52: menu category (Frame rate) + MR_REFLEX, MR_FPSCAP, MR_VRFPSCAP
+    L"Frame rate limits: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap. Right opens the group, Left closes it; it starts closed "
+    L"every time the menu opens.",
+    L"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when the GPU is the limit. Boost "
+    L"also keeps the GPU clocks up. Same fps; small cost. Not used in VR.",
+    L"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. Set it a bit below what your "
+    L"PC holds in a busy city. With Reflex on, the NVIDIA driver does the limiting. off = no limit.",
+    L"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the headset's reprojection "
+    L"(ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when the fps swings. Turns Turbo off while on.",
     // v0.10.3 phase 29c (MR_PANELGRP)
     L"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes it; it starts closed "
     L"every time the menu opens.",
@@ -15846,7 +15939,7 @@ const wchar_t* const kMenuDesc[] = {
     L"other line. Do it once you like what you see, or the changes are gone at the next start. Mode saves itself.",
     // v0.10.3 phase 29d (MR_RESET): MenuBuildPanel puts "Hold <menu Right> for <bind_hold_ms> s to reset. " in front of it
     L"Puts every setting in this menu back to how the mod ships (model, sharpen, texture sharpness, DLAA area, motion, mirrors, "
-    L"profile, panel, fps box, turbo, foveated, logging), live and in dlaa.ini, keeping your hotkeys and every other line.",
+    L"profile, panel, fps box, turbo, foveated, frame rate, logging), live and in dlaa.ini, keeping your hotkeys and every other line.",
     nullptr,                                              // MR_CLOSE: "Closes the menu ..." (built with the key name)
 };
 static_assert(sizeof(kMenuDesc) / sizeof(kMenuDesc[0]) == MR_COUNT, "tuning menu: kMenuDesc must have one entry per row (MR_* order)");
@@ -16011,20 +16104,75 @@ void ToggleFpsVrLock(uint64_t n, int dir) {
         "quad layer), placed from a cab draw's MVP of each picture" : "");
     PlayTones(1, g_fpsVrLock == 2 ? 1600 : g_fpsVrLock ? 1200 : 300, 150, 0);
 }
+// phase 52: Turbo mode and the VR FPS cap exclude each other -- the CAP WINS: it exists to give the runtime's reprojection
+// (ASW / Motion Smoothing / SSW) a steady cadence, and turbo stops that reprojection from working. XrHook gets the EFFECTIVE
+// turbo state (its phase 33 switch-off path drains a pending async wait cleanly); g_xrTurbo keeps the user's choice (the Turbo
+// row says "on (FPS cap wins)", dlaa.ini keeps xr_turbo) and comes back when the cap goes off.
+inline bool XrTurboEffective() { return g_xrTurbo != 0 && g_vrFpsCap == 0; }
+void ApplyXrTurbo() { XrHook::SetTurbo(XrTurboEffective()); }
+// phase 52: the frame rate values into FramePace (flat: applied + logged at the next flat Present) and XrHook (VR: the game's
+// next xrWaitFrame), and the effective turbo state.
+void FramePaceApply() {
+    FramePace::Configure(g_reflex, g_fpsCap);
+    XrHook::SetFpsCap(g_vrFpsCap);
+    ApplyXrTurbo();
+}
 // phase 30: the menu's Turbo mode row -- dlaa.ini xr_turbo live (XrHook::SetTurbo: takes effect at the next xrEndFrame). Logged +
 // beeped like the other toggles. Also switchable in flat (kept for VR; the row is greyed there, no OpenXR frame loop).
 void ToggleXrTurbo(uint64_t n) {
     g_xrTurbo = g_xrTurbo ? 0 : 1;
     g_xrTurboExplicit = true;
-    XrHook::SetTurbo(g_xrTurbo != 0);
+    ApplyXrTurbo();                                       // phase 52: stays off while the VR FPS cap is on (the cap wins)
     const XrHook::TurboStats ts = XrHook::GetTurboStats();
     Log("Turbo mode: %s (xr_turbo=%d, tuning menu, Present #%llu) -- %s; OpenXR hook %s; so far %llu async xrWaitFrame, %llu "
         "1-s timeouts, %llu failures", g_xrTurbo ? "ON" : "OFF", g_xrTurbo, (unsigned long long)n,
-        g_xrTurbo ? "from the next xrEndFrame the game no longer waits for the headset; ASW / Motion Smoothing / SSW / "
+        g_xrTurbo && !XrTurboEffective() ? "NOT running: the VR FPS cap is on and wins (vr_fps_cap; turbo runs once the cap is off)"
+        : g_xrTurbo ? "from the next xrEndFrame the game no longer waits for the headset; ASW / Motion Smoothing / SSW / "
                     "reprojection cannot work" : "from the next xrEndFrame the game waits in its own xrWaitFrame again",
         XrHook::Hooked() ? "installed" : "NOT installed (flat launch: kept for VR)", (unsigned long long)ts.asyncWaits,
         (unsigned long long)ts.timeouts, (unsigned long long)ts.failures);
     PlayTones(1, g_xrTurbo ? 1200 : 300, 150, 0);
+}
+// phase 52: the menu's Frame rate rows -- dlaa.ini reflex / fps_cap / vr_fps_cap live (FramePaceApply). Logged + beeped like the
+// other rows; all three are switchable in either mode (the row of the other mode is greyed, the value is kept for it).
+const char* ReflexName(int r) { return r == 2 ? "on + boost" : r ? "on" : "off"; }
+const char* VrCapName(int d) { return d == 2 ? "half" : d == 3 ? "third" : "off"; }
+void StepReflex(uint64_t n, int dir) {                    // Right: off -> on -> on + boost -> off, Left the other way
+    g_reflex = ((g_reflex + (dir < 0 ? -1 : 1)) % 3 + 3) % 3;
+    g_paceExplicit = true;
+    FramePaceApply();
+    Log("Reflex: %s (reflex=%d, tuning menu, Present #%llu) -- %s", ReflexName(g_reflex), g_reflex, (unsigned long long)n,
+        FramePace::Support() == 0 ? FramePace::SupportText()
+        : "flat: applied at the next Present (the next 'frame pace' line has the driver's answer); VR: never used");
+    PlayTones(1, g_reflex == 2 ? 1600 : g_reflex ? 1200 : 300, 150, 0);
+}
+void StepFpsCap(int dir, uint64_t n, bool repeat) {       // the FramePace::kCapSteps list; at the ends a low beep
+    const int next = FramePace::StepCap(g_fpsCap, dir);
+    if (next == g_fpsCap) { if (!repeat) PlayTones(1, 200, 120, 0); return; }
+    g_fpsCap = next;
+    g_paceExplicit = true;
+    FramePaceApply();
+    Log("FPS cap: %d fps%s (fps_cap=%d, tuning menu, Present #%llu) -- flat only: %s", g_fpsCap, g_fpsCap ? "" : " = off", g_fpsCap,
+        (unsigned long long)n, !g_fpsCap ? "no limit"
+        : (g_reflex && FramePace::Support() != 0) ? "the Reflex driver limit (minimumIntervalUs)" : "the own limiter after Present");
+    PlayTones(1, 300 + 3 * (g_fpsCap > 360 ? 360 : g_fpsCap), 60, 0);
+}
+void StepVrFpsCap(uint64_t n, int dir) {                  // Right: off -> half -> third -> off, Left the other way
+    static const int kOrder[3] = { 0, 2, 3 };
+    int i = g_vrFpsCap == 2 ? 1 : g_vrFpsCap == 3 ? 2 : 0;
+    i = ((i + (dir < 0 ? -1 : 1)) % 3 + 3) % 3;
+    g_vrFpsCap = kOrder[i];
+    g_paceExplicit = true;
+    FramePaceApply();
+    const XrHook::FpsCapStats cs = XrHook::GetFpsCapStats();
+    Log("VR FPS cap: %s (vr_fps_cap=%d, tuning menu, Present #%llu) -- %s; headset period %.2f ms%s", VrCapName(g_vrFpsCap),
+        g_vrFpsCap, (unsigned long long)n,
+        g_vrFpsCap == 2 ? "the game's xrWaitFrame waits for every 2nd display slot (reprojection fills the others)"
+        : g_vrFpsCap == 3 ? "the game's xrWaitFrame waits for every 3rd display slot (reprojection fills the others)"
+        : "the game's xrWaitFrame is not delayed", (double)cs.basePeriodNs / 1e6,
+        g_xrTurbo ? (g_vrFpsCap ? " -- Turbo mode (xr_turbo=1) is OFF while the cap is on (the cap wins)" : " -- Turbo mode runs again")
+                  : "");
+    PlayTones(1, g_vrFpsCap ? 900 + 200 * g_vrFpsCap : 300, 150, 0);
 }
 // phase 34: the menu's Foveated (VRS) / Foveated size rows -- dlaa.ini vrs / vrs_inner / vrs_outer live (Vrs::Configure: the next
 // scene bind uses them; a radii change builds new masks once). Logged + beeped like the other toggles; also switchable in flat
@@ -16238,7 +16386,9 @@ void ResetSettings(uint64_t n) {
     g_fpsMoved = true;
     g_xrTurbo = 0;                                        // phase 30: Turbo mode off (the pending wait ends at the next xrEndFrame)
     g_xrTurboExplicit = false;
-    XrHook::SetTurbo(false);
+    g_reflex = g_fpsCap = g_vrFpsCap = 0;                 // phase 52: no Reflex, no caps
+    g_paceExplicit = false;
+    FramePaceApply();                                     //   (+ XrHook::SetTurbo(false))
     g_vrsOn = 0; g_vrsInner = 55; g_vrsOuter = 80;        // phase 34: foveated rendering off, balanced radii (vrs_quality /
     g_vrsExplicit = false;                                //   vrs_debug are dlaa.ini-only: left as they are)
     g_vrsPasses = 0;                                      // phase 42: scene binds only
@@ -16262,7 +16412,8 @@ void ResetSettings(uint64_t n) {
     // + fps_vr_lock = 33, the cap raised to kIniMaxKeys; v0.10.3 phase 29b: + menu_vr_dist = 34; phase 30: + xr_turbo = 35;
     // phase 34: + vrs / vrs_inner / vrs_outer = 38; phase 39: + log_level = 39; phase 41: + mirror_turns = 40;
     // phase 40: + xr_hidden_mask = 41; kIniMaxKeys raised 40 -> 48 at the dev merge;
-    // phase 42: + vrs_passes = 42; phase 44: + fps_color / fps_vr_dist / fps_vr_yaw / fps_vr_pitch / fps_vr_roll = 47, cap 56)
+    // phase 42: + vrs_passes = 42; phase 44: + fps_color / fps_vr_dist / fps_vr_yaw / fps_vr_pitch / fps_vr_roll = 47, cap 56;
+    // phase 52: + reflex / fps_cap / vr_fps_cap = 52 with fps_brightness and dlss_bias_mask)
     static const char* const kKeys[] = {
         "mode", "dlss_preset", "dlaa_area", "sharpness", "sharp_radius", "dlss_upscale", "tex_lod_bias", "tex_lod_bias_cutout",
         "mv_objects", "mirror_dlaa", "mirror_vr_mode", "mirror_flat_mode", "mirror_vr_views", "mirror_mv", "dlaa_pre_tonemap",
@@ -16273,6 +16424,7 @@ void ResetSettings(uint64_t n) {
         "fps_color", "fps_vr_dist", "fps_vr_yaw", "fps_vr_pitch", "fps_vr_roll",                        // phase 44
         "fps_brightness",                                                                               // phase 48
         "xr_turbo",                                                                                     // phase 30
+        "reflex", "fps_cap", "vr_fps_cap",                                                              // phase 52
         "vrs", "vrs_inner", "vrs_outer",                                                                // phase 34
         "vrs_passes",                                                                                   // phase 42
         "log_level",                                                                                    // phase 39
@@ -16293,7 +16445,7 @@ void ResetSettings(uint64_t n) {
             "perf_profile = high mv_fwd_depth = 1 menu_x = 2 menu_y = 8 "
             "menu_scale = 1.0 menu_vr_x = 0 menu_vr_y = -5 menu_vr_scale = 1.0 menu_vr_depth = 12 menu_vr_dist = 100 menu_vr_face = 1 "
             "fps_show = 0 "
-            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 xr_turbo = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 xr_hidden_mask = 0 dlss_bias_mask = 100 log_level = %d (%s) -- profile: %s -- "
+            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 xr_turbo = 0 reflex = 0 fps_cap = 0 vr_fps_cap = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 xr_hidden_mask = 0 dlss_bias_mask = 100 log_level = %d (%s) -- profile: %s -- "
             "dlaa.ini: %d keys removed (hotkeys and other lines kept)", (unsigned long long)n, g_dlaaOn.load() ? "DLSS" : "off",
             (double)kFpsVrScaleDefault, LogLevel(), g_logDebugKey ? "no key: debug = 1 in dlaa.ini" : "no key", changed, kNKeys);
         BeepSeq b;                                        // success: rising two-tone 600 -> 900 Hz, 120 ms each (as SaveSettings)
@@ -16924,8 +17076,22 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         break;
     case MR_TURBO:                                        // phase 30
         if (!vr)                     swprintf(sent, sentCap, L"Greyed in flat: it changes the VR frame loop only.");
+        else if (g_xrTurbo && !XrTurboEffective())        // phase 52
+                                     swprintf(sent, sentCap, L"Not running now: VR FPS cap is on and wins.");
         else if (g_xrTurbo && XrHook::GetTurboStats().failed)
                                      swprintf(sent, sentCap, L"Stopped for this VR session: the runtime refused it (see the log).");
+        break;
+    case MR_REFLEX:                                       // phase 52
+        if (FramePace::Support() == 0) swprintf(sent, sentCap, L"Not available here: %hs.", FramePace::SupportText());
+        else if (vr)                 swprintf(sent, sentCap, L"Greyed in VR: the headset paces the game.");
+        break;
+    case MR_FPSCAP:                                       // phase 52
+        if (vr)                      swprintf(sent, sentCap, L"Greyed in VR: use VR FPS cap.");
+        else if (g_fpsCap && FramePace::ReflexRunning())
+                                     swprintf(sent, sentCap, L"Limited by the NVIDIA driver now (Reflex is on).");
+        break;
+    case MR_VRFPSCAP:                                     // phase 52
+        if (!vr)                     swprintf(sent, sentCap, L"Greyed in flat: use FPS cap.");
         break;
     case MR_LOG: {                                        // phase 39: CPU, not GPU
         if (lv == 0)          swprintf(sent, sentCap, L"Off now: nothing is written.");
@@ -17552,6 +17718,26 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
                            : (hs.failed ? L"on (failed, see log)" : L"on");
         swprintf(p.rows[MR_HMASK].value, kV, L"%ls", (!g_xrHiddenMask && noExt) ? L"not supported" : val);
     }
+    if (g_xrTurbo && !XrTurboEffective())                 // phase 52: the VR FPS cap wins over turbo
+        swprintf(p.rows[MR_TURBO].value, kV, L"on (FPS cap wins)");
+    groupRow(MR_FRGRP, kMenuGroups[MenuGroupIndex(MR_FRGRP)].title);   // phase 52: frame rate
+    {   // phase 52: "not supported" once Reflex was refused / NVAPI is missing (FramePace::Support 0; no live counter)
+        const bool noReflex = FramePace::Support() == 0;
+        MenuRow(p, MR_REFLEX, L"Reflex (flat)", "dlaa.ini reflex", vr ? "flat only" : nullptr, vr || noReflex);
+        static const wchar_t* const kRx[3] = { L"off", L"on", L"on + boost" };
+        if (noReflex) swprintf(p.rows[MR_REFLEX].value, kV, L"%ls", g_reflex ? L"on (not supported)" : L"not supported");
+        else          swprintf(p.rows[MR_REFLEX].value, kV, L"%ls", kRx[g_reflex < 0 || g_reflex > 2 ? 0 : g_reflex]);
+        MenuRow(p, MR_FPSCAP, L"FPS cap (flat)", "dlaa.ini fps_cap", vr ? "flat only" : nullptr, vr);
+        if (g_fpsCap) swprintf(p.rows[MR_FPSCAP].value, kV, L"%d fps", g_fpsCap);
+        else          swprintf(p.rows[MR_FPSCAP].value, kV, L"off");
+        MenuRow(p, MR_VRFPSCAP, L"VR FPS cap", "dlaa.ini vr_fps_cap", vr ? nullptr : "VR only", !vr);
+        const int64_t per = XrHook::GetFpsCapStats().basePeriodNs;   // (atomics; the headset rate: a new session at most)
+        if (g_vrFpsCap && per > 0)
+            swprintf(p.rows[MR_VRFPSCAP].value, kV, L"%ls (%.0f fps)", g_vrFpsCap == 2 ? L"half" : L"third",
+                     1e9 / (double)per / (double)g_vrFpsCap);
+        else
+            swprintf(p.rows[MR_VRFPSCAP].value, kV, L"%ls", g_vrFpsCap == 2 ? L"half" : g_vrFpsCap == 3 ? L"third" : L"off");
+    }
     {   // phase 39: the level + what logging costs (CPU ms per frame; changes only at the ~1-s snapshots: no rebuild per frame)
         MenuRow(p, MR_LOG, L"Logging", "dlaa.ini log_level", nullptr, false);
         const int lv = LogLevel();
@@ -17699,8 +17885,8 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     const bool stepRow = row == MR_SHARP || row == MR_WIDTH || row == MR_LOD || row == MR_LODCUT || row == MR_AREA ||
                          row == MR_POSX || row == MR_POSY || row == MR_SIZE || row == MR_DEPTH || row == MR_FPSX ||
                          row == MR_FPSY || row == MR_FPSSIZE || row == MR_FPSDIST || row == MR_FPSYAW || row == MR_FPSPITCH ||
-                         row == MR_FPSROLL || row == MR_VRSSIZE;   // phase 44: + the VR distance / turn rows, Foveated size (the
-                                                    //   colour row: fresh presses)
+                         row == MR_FPSROLL || row == MR_VRSSIZE ||   // phase 44: + the VR distance / turn rows, Foveated size (the
+                         row == MR_FPSCAP;          //   colour row: fresh presses); phase 52: + FPS cap
     if (repeat && !stepRow) return;
     const bool vr = MenuVr();
     switch (row) {
@@ -17731,8 +17917,12 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_VRSSIZE: StepVrsSize(dir, n, repeat); break;    // phase 44: Right = bigger sharp centre, Left = smaller (5 % steps)
     case MR_HMASK:   ToggleHiddenMask(n); break;            // phase 40: Left and Right both switch it (also flat: kept for VR)
     case MR_VRSPASS: ToggleVrsPasses(n); break;             // phase 42: two choices, Left and Right both switch
+    case MR_REFLEX:  StepReflex(n, dir); break;             // phase 52: off / on / on + boost (also in VR: kept for flat)
+    case MR_FPSCAP:  StepFpsCap(dir, n, repeat); break;     // phase 52: the kCapSteps list (also in VR: kept for flat)
+    case MR_VRFPSCAP: StepVrFpsCap(n, dir); break;          // phase 52: off / half / third (also in flat: kept for VR)
     case MR_LOG:     StepLogLevel(dir, n); break;           // phase 39: Right = more, Left = less (clamped)
     case MR_PICGRP: case MR_MOTGRP: case MR_UPGRP: case MR_VRPGRP:   // phase 43: the four new groups
+    case MR_FRGRP:                                          // phase 52
     case MR_PANELGRP: case MR_FPSGRP:                       // v0.10.3 phase 29c: Right opens the group, Left closes it (a fresh
         MenuGrpOpen(row) = dir > 0;                         // press only: not a stepRow, so auto-repeat is ignored above)
         break;
@@ -20544,6 +20734,13 @@ bool DlaaOffFilePresent() {
 //   vrs_passes                     0/1 (default 0, phase 42): 1 = VRS also on the eye's deferred lighting bind (2 RTV RGBA16F
 //                                  scene size + scene depth, after the G-buffer, before the forward bind), outer ring only
 //                                  (the middle ring stays 1 x 1). Menu row Foveated passes (live)
+//   reflex                         0/1/2 (default 0, phase 52): flat, NVIDIA: 1 = Reflex low latency (NvAPI_D3D_SetSleepMode +
+//                                  NvAPI_D3D_Sleep after each Present), 2 = + boost (GPU clocks kept up). Menu row Reflex (live)
+//   fps_cap                        0 or 20..1000 (default 0 = off, phase 52): flat frame cap -- the Reflex driver limit while
+//                                  Reflex runs, else the own limiter after Present. Menu row FPS cap (live)
+//   vr_fps_cap                     0/2/3 (default 0, phase 52): VR: 2 = half the headset rate, 3 = a third (the game's
+//                                  xrWaitFrame waits for every 2nd / 3rd display slot); Turbo mode is off while it is on.
+//                                  Menu row VR FPS cap (live)
 
 // v0.7.10: "a.b.c.d" file version from a module's PE version resource, for the startup "env:" lines. "no version info"
 // if the resource is absent, "unavailable" on a read error. Startup only (GetFileVersionInfo is not on any hot path).
@@ -20669,6 +20866,10 @@ void LoadConfig() {
             if (!strcmp(key, "did_shadow_verify")) { g_didShadowVerify = v < 0 ? -1 : (int)(v > 100000 ? 100000 : v); continue; }
             // phase 40 / 41 / 42 (outside the else-if chain too: C1061 at the dev merge)
             if (!strcmp(key, "mirror_turns"))       { g_mirTurns = v > 0 ? 1 : 0; g_mirTurnsExplicit = true; continue; }   // phase 41
+            // phase 52: frame rate (outside the else-if chain: C1061; the menu's Frame rate rows switch them live)
+            if (!strcmp(key, "reflex"))             { g_reflex = FramePace::ClampReflex(v); g_paceExplicit = true; continue; }
+            if (!strcmp(key, "fps_cap"))            { g_fpsCap = FramePace::ClampFpsCap(v); g_paceExplicit = true; continue; }
+            if (!strcmp(key, "vr_fps_cap"))         { g_vrFpsCap = FramePace::ClampVrDiv(v); g_paceExplicit = true; continue; }
 #endif
             if (!strcmp(key, "xr_hidden_mask"))     { g_xrHiddenMask = v != 0 ? 1 : 0; g_xrHiddenMaskExplicit = true; continue; }   // phase 40
             if (!strcmp(key, "dlss_bias_mask"))     { g_biasCfg = v < 0 ? 0 : (v > 100 ? 100 : (int)v); g_biasExplicit = true; continue; }   // phase 49
@@ -21552,7 +21753,8 @@ DWORD WINAPI SetupThread(LPVOID) {
     if (g_launchVr == 1) {
         XrHook::SetReleaseCallback(&MenuLateOnXrRelease);
         XrHook::SetOverlayDrawCallback(&MenuOverlayDraw);   // v0.10.3 phase 29: the quad layers' images (menu_vr_layer)
-        XrHook::SetTurbo(g_xrTurbo != 0);                   // phase 30: dlaa.ini xr_turbo (the menu row switches it live)
+        ApplyXrTurbo();                                     // phase 30: dlaa.ini xr_turbo (the menu row switches it live; phase 52:
+                                                            //   off while vr_fps_cap is on)
         g_xrHiddenMaskAtStart = g_xrHiddenMask;             // phase 40: the extension is asked for only when on at the start
         XrHook::HiddenMaskRequest(g_xrHiddenMask != 0);
         XrHook::HiddenMaskActive(g_xrHiddenMask != 0);
@@ -21564,6 +21766,12 @@ DWORD WINAPI SetupThread(LPVOID) {
             g_xrTurbo ? "ON: the game does not wait for the headset in xrWaitFrame; ASW / Motion Smoothing / SSW / reprojection "
                         "cannot work" : "off: the game's own xrWaitFrame paces it");
     }
+    // phase 52: frame rate -- flat Reflex / fps_cap (FramePace: applied at the first flat Present, the driver's answer logged
+    // there), VR vr_fps_cap (XrHook: the game's xrWaitFrame). One line with the start values.
+    FramePaceApply();
+    Log("frame rate (phase 52): reflex=%d (%s) fps_cap=%d (%s) vr_fps_cap=%d (%s)%s", g_reflex, ReflexName(g_reflex), g_fpsCap,
+        g_fpsCap ? "flat: Reflex's driver limit while Reflex runs, else the own limiter" : "off", g_vrFpsCap, VrCapName(g_vrFpsCap),
+        (g_vrFpsCap && g_xrTurbo) ? " -- xr_turbo=1 is ignored while vr_fps_cap is on (the cap wins)" : "");
 #endif
     Ofxr::Rescan();                                     // v0.10.0 OFXR Bridge: layer modules already loaded (later ones: every 300 Presents)
 #ifdef WITH_DLAA
