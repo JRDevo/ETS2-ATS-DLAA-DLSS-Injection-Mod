@@ -1,14 +1,17 @@
-// ShaderCache implementation (v0.7.8; v0.10.0 phase 17: core group first, several worker threads, DXBC disk cache).
+// ShaderCache implementation (v0.7.8; v0.10.0 phase 17: core group first, several worker threads, DXBC disk cache;
+// issue #15: prebuilt bytecode embedded at build time, d3dcompiler_47 delay-loaded and only a fallback).
 // See shader_cache.h.
 #ifdef WITH_DLAA
 
 #include "shader_cache.h"
+#include "embedded_shaders.h"
 #include "log.h"
 #include <d3dcompiler.h>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <cwctype>
+#include <new>
 #include <string>
 #include <thread>
 
@@ -20,10 +23,15 @@ struct Entry {
     const char* name = nullptr;
     const char* entry = nullptr;
     const char* profile = nullptr;
-    ID3DBlob*   code = nullptr;          // held for the process life (never released)
+    // issue #15: the bytecode as plain bytes (no ID3DBlob, so the embedded / disk paths never touch d3dcompiler_47.dll).
+    // Points into the embedded table, a disk-cache buffer or `blob`; held for the process life (never released).
+    const void* code = nullptr;
+    size_t      size = 0;
+    ID3DBlob*   blob = nullptr;          // D3DCompile output (compiled shaders only)
     std::string err;                     // D3DCompile error text (failed shaders only)
     double      ms = 0.0;                // compile (or disk cache load) wall time
     bool        cached = false;          // v0.10.0 phase 17: the blob came from the disk cache
+    bool        embedded = false;        // issue #15: the bytecode is the build-time fxc blob (EmbeddedShaders)
     std::atomic<bool> ready{false};      // v0.10.0 phase 17: release-stored right after THIS entry is done (ok or failed)
 };
 
@@ -39,6 +47,8 @@ std::atomic<int>  g_next{0};             // next position in OrderAt to take
 std::atomic<int>  g_left{0};             // entries not finished yet (all ids, registered or not)
 std::atomic<int>  g_coreLeft{0};         // core entries not finished yet
 std::atomic<int>  g_fromDisk{0}, g_compiled{0}, g_failed{0}, g_diskBad{0}, g_diskWriteFail{0};
+std::atomic<int>  g_fromEmbedded{0};     // issue #15: bytecode taken from the build-time table
+std::atomic<int>  g_noEmbedded{0};       // issue #15: registered shaders without a matching embedded blob
 int               g_threads = 1;
 LARGE_INTEGER     g_freq{}, g_t0{};
 std::wstring      g_dir;                 // disk cache folder incl. the trailing backslash ("" = no disk cache)
@@ -117,15 +127,16 @@ bool DiskLoad(Entry& e, uint64_t key, bool* bad) {
         if (ReadFile(h, &hd, sizeof(hd), &rd, nullptr) && rd == sizeof(hd) && memcmp(hd.magic, "DLSC", 4) == 0 &&
             hd.version == kDiskVersion && hd.key == key && (LONGLONG)hd.size + (LONGLONG)sizeof(hd) == fs.QuadPart &&
             hd.size >= 4) {
-            ID3DBlob* blob = nullptr;
-            if (SUCCEEDED(D3DCreateBlob(hd.size, &blob)) && blob) {
-                if (ReadFile(h, blob->GetBufferPointer(), hd.size, &rd, nullptr) && rd == hd.size &&
-                    memcmp(blob->GetBufferPointer(), "DXBC", 4) == 0 &&
-                    Fnv64(blob->GetBufferPointer(), hd.size) == hd.payloadHash) {
-                    e.code = blob;
+            // issue #15: a plain heap buffer (was D3DCreateBlob: a d3dcompiler_47 export, delay-loaded now)
+            uint8_t* buf = new (std::nothrow) uint8_t[hd.size];
+            if (buf) {
+                if (ReadFile(h, buf, hd.size, &rd, nullptr) && rd == hd.size && memcmp(buf, "DXBC", 4) == 0 &&
+                    Fnv64(buf, hd.size) == hd.payloadHash) {
+                    e.code = buf;                    // held for the process life
+                    e.size = hd.size;
                     ok = true;
                 } else {
-                    blob->Release();
+                    delete[] buf;
                 }
             }
         }
@@ -165,11 +176,11 @@ void DiskStore(const Entry& e, uint64_t key) {
     memcpy(hd.magic, "DLSC", 4);
     hd.version = kDiskVersion;
     hd.key = key;
-    hd.size = (uint32_t)e.code->GetBufferSize();
-    hd.payloadHash = Fnv64(e.code->GetBufferPointer(), hd.size);
+    hd.size = (uint32_t)e.size;
+    hd.payloadHash = Fnv64(e.code, hd.size);
     DWORD wr = 0, wr2 = 0;
     const bool ok = WriteFile(h, &hd, sizeof(hd), &wr, nullptr) && wr == sizeof(hd) &&
-                    WriteFile(h, e.code->GetBufferPointer(), hd.size, &wr2, nullptr) && wr2 == hd.size;
+                    WriteFile(h, e.code, hd.size, &wr2, nullptr) && wr2 == hd.size;
     CloseHandle(h);
     if (!ok || !MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) {
         DeleteFileW(tmp.c_str());
@@ -178,53 +189,132 @@ void DiskStore(const Entry& e, uint64_t key) {
 }
 
 void LogSummary() {
-    char times[1600];
+    char times[2400];
     size_t tl = 0;
     times[0] = 0;
     for (int k = 0; k < ShaderCache::kCount; ++k) {
         const Entry& e = g_e[g_order[k]];
         if (!e.src || tl + 48 >= sizeof(times)) continue;
-        const int w = snprintf(times + tl, sizeof(times) - tl, " %s %.0f%s", e.name, e.ms, e.cached ? "c" : "");
+        const int w = snprintf(times + tl, sizeof(times) - tl, " %s %.0f%s", e.name, e.ms,
+                               e.embedded ? "e" : (e.cached ? "c" : ""));
         if (w > 0) tl += (size_t)w;
     }
-    LogDbg("shader warm-up: %d from the disk cache, %d compiled in %.1f ms on %d thread(s) (%d failed; disk cache %s, %d bad / "
-        "unreadable file(s) ignored, %d write failure(s)) -- ms per shader (c = disk cache):%s; every DLAA unit creates its "
-        "shaders from these blobs (no D3DCompile on the render thread)", g_fromDisk.load(), g_compiled.load(),
-        MsSince(g_t0), g_threads, g_failed.load(), g_dir.empty() ? "off (folder unavailable)" : "on", g_diskBad.load(),
-        g_diskWriteFail.load(), times);
+    // issue #15: one always-on line with where the bytecode came from (embedded = build-time fxc, no d3dcompiler needed)
+    Log("shader warm-up: %d shader(s) ready in %.1f ms -- %d from embedded bytecode, %d from the disk cache, %d compiled "
+        "with D3DCompile, %d failed; %d registered shader(s) had no matching embedded blob (issue #15: embedded = prebuilt at "
+        "build time, no d3dcompiler_47.dll needed)",
+        g_fromEmbedded.load() + g_fromDisk.load() + g_compiled.load(), MsSince(g_t0), g_fromEmbedded.load(),
+        g_fromDisk.load(), g_compiled.load(), g_failed.load(), g_noEmbedded.load());
+    LogDbg("shader warm-up: %d from embedded bytecode, %d from the disk cache, %d compiled in %.1f ms on %d thread(s) (%d "
+        "failed; disk cache %s, %d bad / unreadable file(s) ignored, %d write failure(s)) -- ms per shader (e = embedded, c = "
+        "disk cache):%s; every DLAA unit creates its shaders from these blobs (no D3DCompile on the render thread)",
+        g_fromEmbedded.load(), g_fromDisk.load(), g_compiled.load(), MsSince(g_t0), g_threads, g_failed.load(),
+        g_dir.empty() ? "off (folder unavailable)" : "on", g_diskBad.load(), g_diskWriteFail.load(), times);
 }
 
-// One entry: disk cache, else D3DCompile (+ store). Publishes Ready(id) and the core / all completion.
+// ---- issue #15: embedded bytecode + delay-loaded d3dcompiler_47 ---------------------------------------------------------
+// The build (SHADER_VALIDATION=ON) compiles every _shader_blocks entry with fxc and embeds the DXBC (embedded_shaders.h).
+// A registered shader takes the blob whose source length + hash, entry, profile and flags all match its registration, so
+// a source edited without re-running the build step can never get stale bytecode: it falls back to D3DCompile.
+const EmbeddedShaders::Blob* FindEmbedded(const Entry& e) {
+#ifdef DLAA_EMBEDDED_SHADERS
+    uint64_t hash = 0;
+    bool hashed = false;
+    for (size_t i = 0; i < EmbeddedShaders::kBlobCount; ++i) {
+        const EmbeddedShaders::Blob& b = EmbeddedShaders::kBlobs[i];
+        if (b.srcLen != (uint64_t)e.len || b.flags != (uint32_t)kCompileFlags || strcmp(b.entry, e.entry) != 0 ||
+            strcmp(b.profile, e.profile) != 0)
+            continue;
+        if (!hashed) { hash = EmbeddedShaders::Fnv64(e.src, e.len); hashed = true; }
+        if (b.srcHash == hash && b.size >= 4 && memcmp(b.code, "DXBC", 4) == 0) return &b;
+    }
+#else
+    (void)e;
+#endif
+    return nullptr;
+}
+
+// d3dcompiler_47.dll is delay-loaded (/DELAYLOAD): the first D3DCompile call would load it, and a missing DLL would raise
+// the delay-load exception. So the fallback path loads it explicitly first, once, and logs a clear line if it is not there.
+bool CompilerAvailable() {
+    static std::atomic<int> s_state{0};          // 0 = not tried, 1 = loaded, 2 = not available
+    const int st = s_state.load(std::memory_order_acquire);
+    if (st != 0) return st == 1;
+    const HMODULE m = LoadLibraryW(L"d3dcompiler_47.dll");   // worker thread, never under the loader lock
+    const DWORD le = m ? 0 : GetLastError();
+    int expected = 0;
+    if (s_state.compare_exchange_strong(expected, m ? 1 : 2, std::memory_order_acq_rel)) {
+        if (m) Log("shader warm-up: d3dcompiler_47.dll loaded for the runtime compile fallback (a shader without embedded "
+                   "bytecode)");
+        else   LogErr("shader warm-up: d3dcompiler_47.dll could not be loaded (err %lu) -- shaders without embedded bytecode "
+                      "cannot be compiled", le);
+    }
+    return s_state.load(std::memory_order_acquire) == 1;
+}
+
+// D3DCompile behind an SEH guard for the delay-load exceptions (module / export not found: 0xC06D007E / 0xC06D007F), in
+// case the DLL found by LoadLibrary lacks the export. No C++ objects with destructors here (__try rule).
+HRESULT GuardedCompile(const Entry& e, ID3DBlob** cso, ID3DBlob** err, bool* delayFail) {
+    *delayFail = false;
+    __try {
+        return D3DCompile(e.src, e.len, e.name, nullptr, nullptr, e.entry, e.profile, kCompileFlags, 0, cso, err);
+    } __except ((GetExceptionCode() == 0xC06D007E || GetExceptionCode() == 0xC06D007F) ? EXCEPTION_EXECUTE_HANDLER
+                                                                                          : EXCEPTION_CONTINUE_SEARCH) {
+        *delayFail = true;
+        return E_FAIL;
+    }
+}
+
+// One entry: embedded bytecode, else disk cache, else D3DCompile (+ store). Publishes Ready(id) and the core / all
+// completion.
 void DoEntry(int id) {
     Entry& e = g_e[id];
     if (e.src) {
         LARGE_INTEGER s;
         QueryPerformanceCounter(&s);
-        const uint64_t key = EntryKey(e);
-        bool bad = false;
-        if (DiskLoad(e, key, &bad)) {
-            e.cached = true;
-            g_fromDisk.fetch_add(1);
+        if (const EmbeddedShaders::Blob* b = FindEmbedded(e)) {
+            e.code = b->code;
+            e.size = b->size;
+            e.embedded = true;
+            g_fromEmbedded.fetch_add(1);
         } else {
-            if (bad) g_diskBad.fetch_add(1);
-            ID3DBlob* cso = nullptr;
-            ID3DBlob* err = nullptr;
-            const HRESULT hr = D3DCompile(e.src, e.len, e.name, nullptr, nullptr, e.entry, e.profile, kCompileFlags, 0,
-                                          &cso, &err);
-            if (SUCCEEDED(hr) && cso) {
-                e.code = cso;
-                g_compiled.fetch_add(1);
-                DiskStore(e, key);
+#ifdef DLAA_EMBEDDED_SHADERS
+            g_noEmbedded.fetch_add(1);
+            LogWarn("shader warm-up: %s (%s / %s) has no matching embedded bytecode (not in the build's _shader_blocks, or "
+                    "its source changed after the build step) -- disk cache / runtime compile instead", e.name, e.profile,
+                    e.entry);
+#endif
+            const uint64_t key = EntryKey(e);
+            bool bad = false;
+            if (DiskLoad(e, key, &bad)) {
+                e.cached = true;
+                g_fromDisk.fetch_add(1);
             } else {
-                if (cso) cso->Release();
-                char buf[64];
-                snprintf(buf, sizeof(buf), "hr=0x%lx: ", (unsigned long)hr);
-                e.err = buf;
-                e.err += err ? (const char*)err->GetBufferPointer() : "(no log)";
-                g_failed.fetch_add(1);
-                LogErr("shader warm-up: %s (%s / %s) D3DCompile FAILED %s", e.name, e.profile, e.entry, e.err.c_str());
+                if (bad) g_diskBad.fetch_add(1);
+                ID3DBlob* cso = nullptr;
+                ID3DBlob* err = nullptr;
+                bool delayFail = false;
+                const bool have = CompilerAvailable();
+                const HRESULT hr = have ? GuardedCompile(e, &cso, &err, &delayFail) : E_FAIL;
+                if (SUCCEEDED(hr) && cso) {
+                    e.blob = cso;
+                    e.code = cso->GetBufferPointer();
+                    e.size = cso->GetBufferSize();
+                    g_compiled.fetch_add(1);
+                    DiskStore(e, key);
+                } else {
+                    if (cso) cso->Release();
+                    char buf[64];
+                    snprintf(buf, sizeof(buf), "hr=0x%lx: ", (unsigned long)hr);
+                    e.err = buf;
+                    if (!have)          e.err += "d3dcompiler_47.dll not available (no embedded bytecode for this shader)";
+                    else if (delayFail) e.err += "d3dcompiler_47.dll delay-load failed (module or D3DCompile export missing)";
+                    else                e.err += err ? (const char*)err->GetBufferPointer() : "(no log)";
+                    g_failed.fetch_add(1);
+                    LogErr("shader warm-up: %s (%s / %s) D3DCompile FAILED %s", e.name, e.profile, e.entry, e.err.c_str());
+                }
+                if (err) err->Release();
             }
-            if (err) err->Release();
         }
         e.ms = MsSince(s);
     }
@@ -232,9 +322,9 @@ void DoEntry(int id) {
     if (id <= ShaderCache::kCoreLast && g_coreLeft.fetch_sub(1) == 1) {
         g_coreDone.store(true, std::memory_order_release);
         Log("shader warm-up: core set (ids 0..%d: camera MVs, depth, RCAS, composite, preview blit / depth assembly / edge "
-            "fill) ready after %.1f ms (%d from the disk cache so far) -- menu / truck-preview DLAA units can start now; the "
-            "tuning menu quad and the per-object / per-draw world set keep going (v0.10.0 phase 17)",
-            (int)ShaderCache::kCoreLast, MsSince(g_t0), g_fromDisk.load());
+            "fill) ready after %.1f ms (%d embedded, %d from the disk cache so far) -- menu / truck-preview DLAA units can "
+            "start now; the tuning menu quad and the per-object / per-draw world set keep going (v0.10.0 phase 17)",
+            (int)ShaderCache::kCoreLast, MsSince(g_t0), g_fromEmbedded.load(), g_fromDisk.load());
     }
     if (g_left.fetch_sub(1) == 1) {
         g_coreDone.store(true, std::memory_order_release);
@@ -297,8 +387,14 @@ void Start() {
         ++made;
     }
     g_threads = made > 0 ? made : 1;
-    Log("shader warm-up: %d shader slot(s), %d worker thread(s) (%u hardware threads), core group first, disk cache %ls",
-        (int)kCount, g_threads, hc, g_dir.empty() ? L"off" : g_dir.c_str());
+#ifdef DLAA_EMBEDDED_SHADERS
+    const int embeddedBlobs = (int)EmbeddedShaders::kBlobCount;
+#else
+    const int embeddedBlobs = 0;
+#endif
+    Log("shader warm-up: %d shader slot(s), %d embedded bytecode blob(s) in this build, %d worker thread(s) (%u hardware "
+        "threads), core group first, disk cache %ls", (int)kCount, embeddedBlobs, g_threads, hc,
+        g_dir.empty() ? L"off" : g_dir.c_str());
     if (made > 0) return;
     LogErr("shader warm-up: worker thread creation failed (err %lu) -- compiling on the setup thread", GetLastError());
     Worker(nullptr);
@@ -316,8 +412,8 @@ bool Ready(Id id) {
 const void* Code(Id id, size_t* size) {
     if (size) *size = 0;
     if (id < 0 || id >= kCount || !Ready(id) || !g_e[id].code) return nullptr;
-    if (size) *size = g_e[id].code->GetBufferSize();
-    return g_e[id].code->GetBufferPointer();
+    if (size) *size = g_e[id].size;
+    return g_e[id].code;
 }
 
 const char* Error(Id id) {

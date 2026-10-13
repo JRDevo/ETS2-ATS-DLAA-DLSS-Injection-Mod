@@ -176,6 +176,42 @@ To uninstall, delete `dinput8.dll` (and `dlaa.ini`) from `bin\win_x64\`.
 
 </details>
 
+## Linux / Proton
+
+<details>
+<summary><b>Show</b></summary>
+
+Install the files the same way as on Windows (see Install above). Then tell Proton to load
+the mod's `dinput8.dll` instead of its own. In Steam, open the game's **Properties** and set
+the **Launch Options** to:
+
+```
+WINEDLLOVERRIDES="dinput8=n,b" %command%
+```
+
+From this version on, the C++ runtime and the shaders are built into `dinput8.dll`. You do
+**not** need `vcrun2026` or `d3dcompiler_47` any more.
+
+Older versions need both. If you use an older version, install them with protontricks
+(227300 = ETS2, 270880 = ATS):
+
+```
+protontricks 227300 vcrun2026
+protontricks 227300 d3dcompiler_47
+```
+
+**AMD cards** work through [OptiScaler](https://github.com/optiscaler/OptiScaler). Rename
+OptiScaler's DLL to `winmm.dll` and add `winmm=n,b` to the override:
+
+```
+WINEDLLOVERRIDES="dinput8=n,b;winmm=n,b" %command%
+```
+
+Thanks to **rimaille** for the Linux testing and these steps
+([discussion #13](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/discussions/13)).
+
+</details>
+
 ## Modes — the `End` key
 
 <details>
