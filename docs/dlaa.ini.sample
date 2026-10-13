@@ -57,6 +57,21 @@ log_level = 1
 # gains nothing. The tuning menu's Turbo mode (VR) row switches it live; Shift+F12 / the Save row writes it here.
 # xr_turbo = 0
 
+# FRAME RATE (phase 52), all 0 = off by default; the tuning menu's Frame rate rows switch them live, Shift+F12 / the Save row
+# writes them here.
+# NVIDIA REFLEX, flat only, NVIDIA only: 0 = off, 1 = on (the game's frames wait less in the GPU queue: less input lag when the
+# GPU is the limit), 2 = on + boost (the GPU clocks stay up). On another GPU or a driver that refuses it, it stays off (the
+# menu row says "not supported"). Not used in VR and not while NVIDIA Smooth Motion is on.
+# reflex = 0
+# FPS CAP, flat only: the most fps the game may run at, 20..1000; 0 = no cap. With Reflex on, the NVIDIA driver limits;
+# otherwise the mod waits after each frame (a precise timer, no drift). Not used in VR (see vr_fps_cap) and not while NVIDIA
+# Smooth Motion is on.
+# fps_cap = 0
+# VR FPS CAP: 2 = the game runs at half the headset rate (72 Hz: 36 fps, 90 Hz: 45), 3 = a third (72 Hz: 24 fps); 0 = off.
+# The headset's reprojection (ASW, Motion Smoothing, Motion Reprojection, SSW) fills the frames in between at a steady rhythm:
+# use it when the fps swings around the headset rate. While it is on, xr_turbo is ignored (the cap wins).
+# vr_fps_cap = 0
+
 # VR FOVEATED RENDERING (VRS, NVIDIA RTX only; from OpenXR Toolkit), 0 / 1, default 0. 1 = the outer ring of each eye picture is
 # shaded once per 2 x 2 pixels (the centre stays sharp), which saves GPU time at high in-game Scaling. Fences, grass and leaves
 # (alpha-tested) and everything the mod draws itself keep full detail. The tuning menu's Foveated (VRS) row switches it live;
@@ -85,6 +100,18 @@ log_level = 1
 # 1 = on AMD X3D CPUs with V-Cache on one half only (e.g. 7950X3D / 9950X3D) the game is kept on the V-Cache cores (read at game
 # start only). Does nothing on other CPUs. 0 (default) = off: no fps gain was measured yet, try it and compare.
 # cpu_cache_pin = 0
+
+# CPU TUNING, each 0 / 1, default 0 = off. The tuning menu's CPU tuning row switches the three together, live; Shift+F12 / the Save
+# row writes them here. The log says what each one did or why it did nothing.
+# cpu_pcore = 1: on Intel CPUs with P-cores and E-cores, the game's main thread and its render thread prefer the P-cores (a soft
+# preference; other threads are not touched). Does nothing on other CPUs, and nothing when cpu_cache_pin or a launcher already
+# narrowed the game's cores (that wins).
+# cpu_pcore = 0
+# cpu_priority = 1: the game runs at Above normal priority. Never High or Realtime.
+# cpu_priority = 0
+# cpu_no_throttle = 1: Windows may not slow the game down to save power (EcoQoS) and honours its timer requests while the window is
+# minimized or hidden (the timer part needs Windows 11).
+# cpu_no_throttle = 0
 
 # NGX jitter = sign * viewport shift, per axis: -1 or +1 (+1/+1 won the self-test; Ctrl+F12 cycles live)
 # jitter_sign_x = 1

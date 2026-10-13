@@ -44,6 +44,7 @@ an in-game menu (`Delete`) and an optional text config.
 - **VR fps counter attached to the vehicle**: rides with the cab; 20 colours. **new**
 - Three VR speed-ups: hidden area mask, foveated lighting, mirrors in turns. **new**
 - DLAA area: process only the middle of each eye.
+- **Frame rate limits**: NVIDIA Reflex and an FPS cap in flat, a half / third rate VR FPS cap. **new**
 
 **Menu**
 - **In-game menu** (`Delete`): every setting, its hotkey, its GPU cost, a short description.
@@ -74,6 +75,9 @@ an in-game menu (`Delete`) and an optional text config.
   mirrors in turns; all off by default, each a menu row (new in v0.12.0).
 - **VR fps counter attached to the vehicle** — rides with the cab on bumps, braking and hills; 20 colours, brightness,
   distance and turn (new in v0.12.0).
+- **Frame rate limits** — in flat, NVIDIA Reflex (less input lag when the GPU is the limit) and an FPS cap (a steady
+  frame time, less heat). In VR, a cap at half or a third of the headset rate, so the headset's reprojection (ASW /
+  Motion Smoothing) fills the frames in between at a steady rhythm. All off by default, each a menu row (new).
 - **Windows HDR** — works with HDR on in flat mode.
 - **NVIDIA Smooth Motion** — works with the driver's frame generation switched on, in flat mode.
 - **OFXR Bridge (VR frame generation)** — runs together with the bridge, which adds in-between frames to the
@@ -492,7 +496,8 @@ it, what it costs or saves. **`Up` / `Down`** select a row,
 **Categories (phase 43):** the menu is in groups you open and close. `Mode`, `Performance profile` and `DLAA model` are
 always shown. Then come the groups: `Picture` (sharpening, texture sharpness, DLAA area, tonemap, see-through depth),
 `Motion and mirrors`, `Upscaling and VR` (DLSS upscale, DLAA on / off, OFXR Bridge), `VR performance` (Turbo, foveated
-rendering, hidden area mask), `Panel settings` and `FPS counter settings`. After them: `FPS counter`, `Logging`,
+rendering, hidden area mask), `Frame rate and CPU` (Reflex, FPS cap, VR FPS cap, CPU tuning), `Panel settings` and `FPS counter settings`.
+After them: `FPS counter`, `Logging`,
 `Save`, `Reset` and `Close`. Select a group and press `Right` to open it, `Left` to close it. A closed group shows `►` and
 `closed (N)` (N = its rows); an open group shows `▼` and `open`, with its rows indented below it. All groups are closed again each time you open the menu.
 
@@ -605,6 +610,22 @@ The three green lines under the title show the game's GPU time per frame, what t
   picture that the headset lenses never show (the VR runtime reports them). Fewer pixels drawn = more GPU headroom; what
   you see stays the same. The first time you switch it on, save (`Shift+F12`) and restart the game; after that the row
   switches it live. If your VR runtime has no such mask the row says `not supported`.
+- **Frame rate and CPU** group (all off by default, all live):
+  - **Reflex (flat)** (`reflex`): `off`, `on`, `on + boost`. NVIDIA only. The game's frames wait less in the GPU queue,
+    so the input lag drops when the GPU is the limit. `on + boost` also keeps the GPU clocks up. On another GPU, or a
+    driver that refuses it, the row says `not supported`. Not used in VR.
+  - **FPS cap (flat)** (`fps_cap`): `off` or 30 - 360 fps (`dlaa.ini` takes any value from 20 to 1000). The game never
+    runs faster than this. A cap a bit below what your PC holds in a busy city gives a steady frame time, less heat and
+    less power. With Reflex on, the NVIDIA driver does the limiting; otherwise the mod waits after each frame (a precise
+    timer, no drift).
+  - **VR FPS cap** (`vr_fps_cap`): `off`, `half` or `third` of the headset rate (72 Hz: 36 or 24 fps; 90 Hz: 45 or 30).
+    The game draws every 2nd (or 3rd) headset frame and the headset's reprojection (ASW, Motion Smoothing, Motion
+    Reprojection, SSW) fills the frames in between at a steady rhythm. Use it when your fps swings around the headset
+    rate: a steady half rate judders less than a rate that jumps. Make sure the headset's reprojection is on. Turbo mode
+    is off while the cap is on (the cap wins; the Turbo row then says `on (FPS cap wins)`).
+  - **CPU tuning** (`cpu_pcore`, `cpu_priority`, `cpu_no_throttle`): `off` or `on` (all three together); `mixed (dlaa.ini)`
+    when they differ in `dlaa.ini`. Flat and VR. The game runs at Above normal priority, Windows may not slow it down to
+    save power, and on Intel CPUs with P-cores and E-cores the game's main and render thread prefer the P-cores.
 - **Logging** (`log_level`, `errors` by default): how much goes into `dlaa_inject.log` -- `off`, `errors`, `warnings`,
   `info` or `debug`, live. Its cost column shows what the logging costs on the CPU per frame (the description adds the
   lines per second; at `debug` also what the CPU profiler costs). `debug` also runs the mod's GPU timers and CPU
@@ -697,7 +718,13 @@ The table below lists the commonly used keys:
 | `vrs_passes` | `0` | foveated rendering: what it acts on. `0` = the 3D world only; `1` = also the game's lighting pass, outer ring only (the middle ring stays sharp even with `vrs_quality = 0`). More saving; test it first. The menu's `Foveated passes` row switches it live, `Shift+F12` saves |
 | `vrs_debug` | `0` | foveated rendering, test only (needs `log_level = 4`): `1` = middle ring 2 x 2, outer ring 4 x 4, to see the pattern |
 | `xr_hidden_mask` | `0` | VR: `1` = **hidden area mask**: the game skips the corners of each eye picture that the lenses never show (the VR runtime reports them), so it draws fewer pixels. What you see stays the same. Needs a game restart the first time (the mod asks the runtime for the mask when the game starts); after that the menu's `Hidden area mask (VR)` row switches it live, `Shift+F12` saves |
+| `reflex` | `0` | flat, NVIDIA only: `1` = **NVIDIA Reflex** low latency (the game's frames wait less in the GPU queue: less input lag when the GPU is the limit), `2` = the same + boost (the GPU clocks stay up). On another GPU or a driver that refuses it, it stays off and the menu row says `not supported`. Not used in VR. The menu's `Reflex (flat)` row switches it live, `Shift+F12` saves |
+| `fps_cap` | `0` | flat: the most fps the game may run at, `20`..`1000` (`0` = no cap). With Reflex on, the NVIDIA driver limits; otherwise the mod waits after each frame (a precise timer, no drift). Not used in VR (see `vr_fps_cap`). The menu's `FPS cap (flat)` row steps through 30 - 360, `Shift+F12` saves |
+| `vr_fps_cap` | `0` | VR: `2` = the game runs at **half** the headset rate (72 Hz: 36 fps), `3` = a **third** (72 Hz: 24 fps); the headset's reprojection (ASW, Motion Smoothing, Motion Reprojection, SSW) fills the frames in between at a steady rhythm. `0` = off. While it is on, `xr_turbo` is ignored (the cap wins). The menu's `VR FPS cap` row switches it live, `Shift+F12` saves |
 | `cpu_cache_pin` | `0` | `1` = on AMD X3D CPUs with V-Cache on one half only (e.g. 7950X3D / 9950X3D) the game is kept on the V-Cache cores (read at game start only). Does nothing on other CPUs. Off by default: no fps gain was measured yet, try it and compare |
+| `cpu_pcore` | `0` | `1` = on Intel CPUs with P-cores and E-cores, the game's main thread and its render thread prefer the P-cores (a soft preference, other threads are not touched). Does nothing on other CPUs, and nothing when `cpu_cache_pin` or a launcher already narrowed the game's cores (that wins). The log says what it did. Read at game start; the menu's `CPU tuning` row switches it live |
+| `cpu_priority` | `0` | `1` = the game runs at Above normal priority. Never High or Realtime. The menu's `CPU tuning` row switches it live |
+| `cpu_no_throttle` | `0` | `1` = Windows may not slow the game down to save power (EcoQoS) and honours its timer requests while the window is minimized or hidden. Needs Windows 11 for the timer part. The menu's `CPU tuning` row switches it live |
 | `did_shadow` | `1` | CPU saving for the per-part motion vectors (read at game start only): `1` = the mod remembers the game's drawing settings as the game sets them instead of asking the graphics driver for them at every draw (input layout, vertex shader, its constant buffers and samplers, rasterizer state); `2` = also the vertex / index buffers (faster only when the game reuses buffers between draws); `0` = ask at every draw (as before). The log's `did_shadow=` line at startup says which one ran |
 | `did_shadow_verify` | `-1` | test only: every Nth draw the remembered settings are compared with the driver's; a difference is logged (`MISMATCH`) and the mod asks the driver for the rest of that frame. `-1` = every 64th draw with `log_level = 4`, off otherwise; `0` = off |
 | `bind_hold_ms` | `5000` | tuning menu: how long (ms, `500`..`10000`) the menu `Right` must be held on the `Reset to defaults` row. (Up to v0.12.0 it was also the hold-to-bind time; v0.12.1 binds on the Hotkeys page with one press, [`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu)) |
@@ -749,6 +776,13 @@ The game held its 72 fps cap the whole time.
 Everything except DLAA itself adds up to about 4 ms per frame on this card in flat. VRAM: about 410 MB for the
 per-frame textures in flat (pooled), roughly 2.5x that in VR.
 
+**Frame rate limits** (the menu's `Frame rate` group) cost nothing measurable themselves; they change how the frame time is
+spent. In flat, `fps_cap` makes the game wait after each frame (the waiting is not counted as mod time); with `reflex`
+on, the NVIDIA driver does that wait instead and also keeps the GPU queue short. In VR, `vr_fps_cap` gives the GPU twice
+(or three times) the time per frame, so a heavier setting (higher Scaling, a bigger DLAA area, model 1) can run without
+dropping frames; the headset's reprojection makes up the other frames. At `log_level = 4` the `CPU prof` line in the log
+shows how long the cap waited per frame (`frame pace`).
+
 ### Live figures in the menu
 
 Open the tuning menu (`Delete`) while driving: every row shows its cost as **CPU | GPU** in ms per frame, CPU in blue,
@@ -761,7 +795,7 @@ where the mod does almost all of its work. The figures are live and refresh once
 |---|---|---|
 | `headset (72 Hz)` | VR: the game already keeps the headset's rate | nothing needed; you have headroom |
 | `GPU` | the GPU is busy for (almost) the whole frame | lower Scaling, DLAA area, a lighter model, fewer mirrors |
-| `CPU` | the game's frame loop is busy the whole frame and never waits for the GPU | fewer mirrors, `Performance profile` medium / low, Turbo mode (VR) |
+| `CPU` | the game's frame loop is busy the whole frame and never waits for the GPU | fewer mirrors, `Performance profile` medium / low, Turbo mode (VR), the `CPU tuning` row (Intel P-cores, Above normal priority, no power throttling; off by default, try it and compare) |
 | `CPU (or a game fps cap)` | flat: the same, or the game's own fps limit (it looks the same from inside) | check the game's fps limit first |
 | `CPU and GPU` | both are at the limit | either list above |
 | `vsync / fps cap` | flat: the frame waits for the display, the GPU is not full | nothing; raise the cap if you want more fps |
@@ -830,7 +864,8 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
 - **NVIDIA Smooth Motion:** supported from v0.8.1 in flat mode (driving and the menu / truck-preview
   screen). Older versions do nothing with Smooth Motion on (the log shows `passes=0 blits=0` and
   `caller=NvPresent64.dll`): update. Smooth Motion only adds frames on the monitor; it does nothing for
-  the headset picture in VR, so switch it off for VR.
+  the headset picture in VR, so switch it off for VR. The mod's `reflex` and `fps_cap` do not run while Smooth Motion is
+  on (they would also hold back its generated frames); use the frame limit in the NVIDIA app / control panel instead.
 - **OFXR Bridge (VR frame generation):** see the section above.
 - **Picture freezes in the interior camera with OptiScaler (DLSS 5 / Neural Rendering):** OptiScaler's DX12
   bridge loses its device on the small HDR mirror DLSS frames that appear with the mirrors in view. Since v0.11.0
