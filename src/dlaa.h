@@ -57,7 +57,11 @@ public:
                   ID3D11ShaderResourceView* depth,
                   ID3D11ShaderResourceView* motionVectors,
                   ID3D11UnorderedAccessView* output,
-                  const DlaaFrameParams& p);
+                  const DlaaFrameParams& p,
+                  ID3D11ShaderResourceView* biasMask = nullptr);
+    // phase 49 `biasMask` (nullable): NGX's "bias current colour" mask (DLSS.Input.Bias.Current.Color.Mask), R8_UNORM at the
+    // render (input) size, 1 = trust this frame's colour over the history there -- the additive light glows that have no motion
+    // vector / depth of their own (inject.cpp GLOW BIAS MASK). Null = the parameter is cleared (no bias), as before phase 49.
 
     // Release feature + params + NGX. Safe to call twice / without Init.
     void Shutdown();

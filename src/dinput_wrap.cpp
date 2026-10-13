@@ -1,4 +1,5 @@
-// KeySwallow implementation (v0.10.0; v0.10.1 + the controller tap; v0.10.2: the open menu hides ALL keys / buttons).
+// KeySwallow implementation (v0.10.0; v0.10.1 + the controller tap; v0.10.2: the open menu hides ALL keys / buttons;
+// v0.12.1 phase 50: per input again -- only the 5 menu inputs, everything only while the Hotkeys page waits for a press).
 // See dinput_wrap.h.
 #define DIRECTINPUT_VERSION 0x0800
 #include "dinput_wrap.h"
@@ -40,6 +41,62 @@ JoySlot g_joy[kMaxJoyDevs];
 std::atomic<int> g_joyDiscLogs{0};
 std::atomic<int> g_joySetupLogs{0};
 std::atomic<int> g_joyWraps{0};
+
+// ---- v0.12.1 phase 50: what the open menu hides (SetMenuHide, render thread -> the game's input / window threads) ---------
+// Bit sets, written before the mode (release) and read after it (acquire). kHideMenuInputs: a key is hidden when its VK bit
+// (window messages / raw input) or its DIK bit (DirectInput) is set, a controller button / D-pad direction when its bit is.
+std::atomic<int>      g_hideMode{KeySwallow::kHideNone};
+std::atomic<uint32_t> g_hideVk[8];             // bit vk
+std::atomic<uint32_t> g_hideDik[8];            // bit DIK code
+std::atomic<uint32_t> g_hideBtn[4];            // bit = button - 1
+std::atomic<unsigned> g_hidePov{0};            // POV direction bits (1 up, 2 right, 4 down, 8 left)
+
+inline int  HideMode() { return g_hideMode.load(std::memory_order_acquire); }
+inline bool BitIn(const std::atomic<uint32_t>* set, unsigned i, unsigned words) {
+    return i < words * 32u && (set[i >> 5].load(std::memory_order_relaxed) & (1u << (i & 31))) != 0;
+}
+inline bool HidesVk(int mode, unsigned vk) {
+    return mode == KeySwallow::kHideAll || (mode == KeySwallow::kHideMenuInputs && BitIn(g_hideVk, vk, 8));
+}
+inline bool HidesDik(int mode, unsigned dik) {
+    return mode == KeySwallow::kHideAll || (mode == KeySwallow::kHideMenuInputs && BitIn(g_hideDik, dik, 8));
+}
+inline bool HidesBtn(int mode, int i0) {       // i0 = 0-based button index
+    return mode == KeySwallow::kHideAll || (mode == KeySwallow::kHideMenuInputs && i0 >= 0 && BitIn(g_hideBtn, (unsigned)i0, 4));
+}
+inline unsigned HiddenPov(int mode) {           // the POV direction bits hidden now
+    return mode == KeySwallow::kHideAll ? 0xFu
+         : (mode == KeySwallow::kHideMenuInputs ? g_hidePov.load(std::memory_order_relaxed) : 0u);
+}
+// DirectInput key code (DIK_*) of a virtual key: the scan code, + 0x80 for an extended key (v0.10.1 DikOfVk, back with phase
+// 50). The navigation block keys map to their numpad twins without the extended flag, so they are listed (DIK_UP 0xC8 ...).
+DWORD DikOfVk(int vk) {
+    switch (vk) {
+    case VK_UP:     return 0xC8;
+    case VK_DOWN:   return 0xD0;
+    case VK_LEFT:   return 0xCB;
+    case VK_RIGHT:  return 0xCD;
+    case VK_DELETE: return 0xD3;
+    case VK_INSERT: return 0xD2;
+    case VK_HOME:   return 0xC7;
+    case VK_END:    return 0xCF;
+    case VK_PRIOR:  return 0xC9;
+    case VK_NEXT:   return 0xD1;
+    case VK_DIVIDE: return 0xB5;
+    case VK_PAUSE:  return 0xC5;
+    default: break;
+    }
+    const UINT sc = MapVirtualKeyW((UINT)vk, MAPVK_VK_TO_VSC_EX);
+    if (!sc) return 0;
+    DWORD d = sc & 0xFFu;
+    if ((sc & 0xFF00u) == 0xE000u || (sc & 0xFF00u) == 0xE100u) d |= 0x80u;
+    return d;
+}
+// The virtual key of a WM_CHAR / WM_SYSCHAR (its scan code + extended bit -> VK; v0.10.1 VkOfCharMsg).
+int VkOfCharMsg(LPARAM l) {
+    const UINT sc = (UINT)((l >> 16) & 0xFF) | (((l >> 24) & 1) ? 0xE000u : 0u);
+    return (int)MapVirtualKeyW(sc, MAPVK_VSC_TO_VK_EX);
+}
 
 // The live part of a slot -> all up, not read (a failed read, Unacquire, a new data format).
 void JoyClearLive(JoySlot& s) {
@@ -106,23 +163,32 @@ void ProductName(const DIDEVICEINSTANCEW& di, char* out, size_t cap) {
 }
 
 // ---- device read filters (the Tap policy of DevWrap) ---------------------------------------------------------------
-// Keyboard: v0.10.2 while the menu is open GetDeviceState clears ALL 256 key bytes and GetDeviceData drops EVERY key-DOWN
-// entry (v0.10.0 / v0.10.1: only the 5 menu keys). Key-up entries always pass.
+// Keyboard: while the menu hides keys (v0.12.1 phase 50 HideMode) GetDeviceState clears the hidden keys' bytes (kHideAll: all
+// 256) and GetDeviceData drops their key-DOWN entries (v0.10.2 .. v0.12.0: every key while open). Key-up entries always pass.
 struct KbTap {
     void OnFormat(LPCDIDATAFORMAT) {}
     void OnActionMap() {}
     void OnUnacquire() {}
     void OnState(HRESULT hr, DWORD cb, LPVOID data) {
-        if (SUCCEEDED(hr) && data && cb >= 256 && MenuHidesInput())   // c_dfDIKeyboard: 256 key bytes
-            memset(data, 0, 256);
+        if (FAILED(hr) || !data || cb < 256) return;          // c_dfDIKeyboard: 256 key bytes
+        const int mode = HideMode();
+        if (mode == KeySwallow::kHideAll) { memset(data, 0, 256); return; }
+        if (mode != KeySwallow::kHideMenuInputs) return;
+        BYTE* const d = static_cast<BYTE*>(data);
+        for (unsigned w = 0; w < 8; ++w) {
+            uint32_t b = g_hideDik[w].load(std::memory_order_relaxed);
+            for (unsigned i = 0; b; ++i, b >>= 1) if (b & 1u) d[w * 32 + i] = 0;
+        }
     }
     void OnData(HRESULT hr, DWORD cbObj, LPDIDEVICEOBJECTDATA rg, LPDWORD inOut) {
-        if (SUCCEEDED(hr) && rg && inOut && *inOut && cbObj >= sizeof(DIDEVICEOBJECTDATA_DX3) && MenuHidesInput()) {
+        const int mode = HideMode();
+        if (SUCCEEDED(hr) && rg && inOut && *inOut && cbObj >= sizeof(DIDEVICEOBJECTDATA_DX3) && mode != KeySwallow::kHideNone) {
             BYTE* const base = reinterpret_cast<BYTE*>(rg);
             DWORD kept = 0;
             for (DWORD i = 0; i < *inOut; ++i) {
                 const DIDEVICEOBJECTDATA_DX3* e = reinterpret_cast<const DIDEVICEOBJECTDATA_DX3*>(base + (size_t)i * cbObj);
-                if (e->dwData & 0x80u) continue;              // key DOWN entry: dropped (releases always pass)
+                // a hidden key's DOWN entry is dropped (dwOfs = its DIK code with c_dfDIKeyboard; releases always pass)
+                if ((e->dwData & 0x80u) && HidesDik(mode, e->dwOfs)) continue;
                 if (kept != i) memmove(base + (size_t)kept * cbObj, base + (size_t)i * cbObj, cbObj);
                 ++kept;
             }
@@ -131,9 +197,9 @@ struct KbTap {
     }
 };
 
-// v0.10.1 controller (wheel / gamepad / joystick / shifter): taps the button / POV state into its JoySlot, then (v0.10.2)
-// hides EVERY button and the POV from the game while the menu is open (v0.10.1: only the menu actions' controller parts);
-// axes and sliders are never touched. The layout comes from the game's SetDataFormat:
+// v0.10.1 controller (wheel / gamepad / joystick / shifter): taps the button / POV state into its JoySlot, then hides the
+// buttons / POV directions the open menu hides (v0.12.1 phase 50 HideMode: the menu inputs' controller codes, everything in
+// bind mode; v0.10.2 .. v0.12.0: every button and the POV while open); axes and sliders are never touched. The layout comes from the game's SetDataFormat:
 // the i-th button object in rgodf order is button i (GUID_Button, or a NULL guid with a DIDFT_BUTTON type, which is how
 // c_dfDIJoystick / c_dfDIJoystick2 list their buttons), the first GUID_POV / DIDFT_POV object is the hat. Until a
 // SetDataFormat is seen the c_dfDIJoystick2 layout is assumed (buttons at DIJOFS_BUTTON(0..127), POV 1 at DIJOFS_POV(0)).
@@ -242,12 +308,13 @@ struct JoyTap {
             const unsigned pd = havePov ? PovDirs(pv) : 0u;
             Publish(b, pd, b, pd);                          // held = pressed for the latch (a short tap between Presents)
         }
-        if (!MenuHidesInput()) return;
-        for (int i = 0; i < nBtn; ++i) {                    // v0.10.2: every button
+        const int mode = HideMode();
+        if (mode == KeySwallow::kHideNone) return;
+        for (int i = 0; i < nBtn; ++i) {                    // v0.12.1 phase 50: the hidden buttons (kHideAll: every button)
             const DWORD o = btnOfs[i];
-            if (o < cb) d[o] = 0;                           // the game sees the button up (a held one: released)
+            if (o < cb && HidesBtn(mode, i)) d[o] = 0;      // the game sees the button up (a held one: released)
         }
-        if (havePov && PovDirs(pv)) {                       // the POV centred (an already centred one is left as it is)
+        if (havePov && (PovDirs(pv) & HiddenPov(mode))) {   // the POV centred when it points a hidden way (a diagonal with one too)
             const DWORD centred = 0xFFFFFFFFu;
             memcpy(d + povOfs, &centred, sizeof(centred));
         }
@@ -262,7 +329,8 @@ struct JoyTap {
             for (int w = 0; w < 4; ++w) b[w] = slot->btn[w].load(std::memory_order_relaxed);
             pd = slot->pov.load(std::memory_order_relaxed);
         }
-        const bool hide = entries && MenuHidesInput();     // v0.10.2: every button-down / non-centred POV entry
+        const int mode = entries ? HideMode() : KeySwallow::kHideNone;   // v0.12.1 phase 50: the hidden buttons / directions
+        const bool hide = mode != KeySwallow::kHideNone;
         if (entries) {
             BYTE* const base = reinterpret_cast<BYTE*>(rg);
             DWORD kept = 0;
@@ -274,14 +342,14 @@ struct JoyTap {
                     const uint32_t bit = 1u << (bi & 31);
                     if (e->dwData & 0x80u) {
                         b[bi >> 5] |= bit; pressed[bi >> 5] |= bit;
-                        drop = hide;                                    // button DOWN entries only (releases always pass)
+                        drop = hide && HidesBtn(mode, bi);              // button DOWN entries only (releases always pass)
                     } else {
                         b[bi >> 5] &= ~bit;
                     }
                 } else if (povOfs != kNoOfs && e->dwOfs == povOfs) {
                     const unsigned dirs = PovDirs(e->dwData);
                     pd = dirs; povPressed |= dirs;
-                    drop = hide && dirs != 0;                           // a centred entry (dirs 0) = release, passes
+                    drop = hide && (dirs & HiddenPov(mode)) != 0;       // a centred entry (dirs 0) = release, passes
                 }
                 if (drop) continue;
                 if (kept != i) memmove(base + (size_t)kept * cbObj, base + (size_t)i * cbObj, cbObj);
@@ -466,8 +534,8 @@ public:
             const int k = g_joyWraps.fetch_add(1, std::memory_order_relaxed);
             if (g_joySetupLogs.fetch_add(1, std::memory_order_relaxed) < kJoySetupLogMax)
                 Log("DirectInput: controller device wrapped (%s, #%d): '%s', type %s (0x%02lX) -- its buttons / D-pad can be bound "
-                    "to the mod's hotkeys (dlaa.ini key_* = WheelN / WheelUp ...); its buttons / D-pad are hidden from the game while "
-                    "the menu is open (axes pass)%s",
+                    "to the mod's hotkeys (dlaa.ini key_* = WheelN / WheelUp ...); while the menu is open only the menu's own buttons "
+                    "are hidden from the game (all of them while the Hotkeys page waits for a press; axes always pass)%s",
                     T::DevName(), k + 1, product, DevTypeName(GET_DIDEVICE_TYPE(di.dwDevType)),
                     (unsigned long)GET_DIDEVICE_TYPE(di.dwDevType),
                     jw->tap().slot ? "" : " -- NO STATE SLOT LEFT (8 controllers): its presses are not seen by the mod");
@@ -478,8 +546,8 @@ public:
         *out = w;
         const int k = g_kbWraps.fetch_add(1);
         if (k < 4)
-            Log("DirectInput: keyboard device wrapped (%s, #%d) -- no key reaches the game while the tuning menu is open "
-                "(releases pass)", T::DevName(), k + 1);
+            Log("DirectInput: keyboard device wrapped (%s, #%d) -- while the tuning menu is open the 5 menu keys do not reach "
+                "the game (every key while the Hotkeys page waits for a press; releases pass)", T::DevName(), k + 1);
         return hr;
     }
     HRESULT STDMETHODCALLTYPE EnumDevices(DWORD t, typename T::EnumDevCb cb, LPVOID ref, DWORD fl) override {
@@ -508,19 +576,28 @@ std::atomic<HWND>     g_hwnd{nullptr};
 std::atomic<LONG_PTR> g_origProc{0};
 std::atomic<bool>     g_hookTried{false};
 
-// v0.10.2: while the menu is open EVERY key-down / character message and every WM_INPUT keyboard make event is dropped
-// (v0.10.0 / v0.10.1: only those of the 5 menu keys). Key-up messages, WM_INPUT break events and WM_INPUT mouse pass.
+// v0.12.1 phase 50: while the menu hides keys (HideMode) the key-down / character messages and the WM_INPUT keyboard make
+// events of a HIDDEN key are dropped (kHideMenuInputs: the menu keys + the swallowed one; kHideAll: every key; v0.10.2 ..
+// v0.12.0: every key while open). Key-up messages, WM_INPUT break events and WM_INPUT mouse pass; Alt+F4 always passes.
 LRESULT CALLBACK SubProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     const WNDPROC orig = reinterpret_cast<WNDPROC>(g_origProc.load(std::memory_order_acquire));
-    if ((m == WM_KEYDOWN || m == WM_SYSKEYDOWN || m == WM_CHAR || m == WM_SYSCHAR || m == WM_INPUT) && MenuHidesInput()) {
+    const bool keyMsg = m == WM_KEYDOWN || m == WM_SYSKEYDOWN || m == WM_CHAR || m == WM_SYSCHAR || m == WM_INPUT;
+    const int mode = keyMsg ? HideMode() : KeySwallow::kHideNone;
+    if (mode != KeySwallow::kHideNone) {
         if (m == WM_SYSKEYDOWN && w == VK_F4) return orig ? CallWindowProcW(orig, h, m, w, l) : DefWindowProcW(h, m, w, l);   // Alt+F4 (close the game) always passes
-        if (m != WM_INPUT) return 0;
-        alignas(8) BYTE buf[sizeof(RAWINPUT)];                 // WM_INPUT: keyboard make events only
-        UINT size = sizeof(buf);
-        if (GetRawInputData(reinterpret_cast<HRAWINPUT>(l), RID_INPUT, buf, &size, sizeof(RAWINPUTHEADER)) != (UINT)-1) {
-            const RAWINPUT* ri = reinterpret_cast<const RAWINPUT*>(buf);
-            if (ri->header.dwType == RIM_TYPEKEYBOARD && !(ri->data.keyboard.Flags & RI_KEY_BREAK))
-                return DefWindowProcW(h, m, w, l);            // the system's raw-input cleanup, the game never sees it
+        if (m == WM_KEYDOWN || m == WM_SYSKEYDOWN) {
+            if (HidesVk(mode, (unsigned)w)) return 0;
+        } else if (m == WM_CHAR || m == WM_SYSCHAR) {
+            if (mode == KeySwallow::kHideAll || HidesVk(mode, (unsigned)VkOfCharMsg(l))) return 0;
+        } else {
+            alignas(8) BYTE buf[sizeof(RAWINPUT)];             // WM_INPUT: keyboard make events of a hidden key only
+            UINT size = sizeof(buf);
+            if (GetRawInputData(reinterpret_cast<HRAWINPUT>(l), RID_INPUT, buf, &size, sizeof(RAWINPUTHEADER)) != (UINT)-1) {
+                const RAWINPUT* ri = reinterpret_cast<const RAWINPUT*>(buf);
+                if (ri->header.dwType == RIM_TYPEKEYBOARD && !(ri->data.keyboard.Flags & RI_KEY_BREAK) &&
+                    HidesVk(mode, (unsigned)ri->data.keyboard.VKey))
+                    return DefWindowProcW(h, m, w, l);        // the system's raw-input cleanup, the game never sees it
+            }
         }
     }
     return orig ? CallWindowProcW(orig, h, m, w, l) : DefWindowProcW(h, m, w, l);
@@ -560,8 +637,8 @@ void HookWindow(HWND hwnd) {
     }
     if (prev != cur) g_origProc.store(prev, std::memory_order_release);   // changed in between: chain to what was really there
     g_hwnd.store(hwnd, std::memory_order_release);
-    Log("tuning menu: game window %p subclassed (every key-down / character message is dropped while the menu is open; "
-        "key releases always pass)", (void*)hwnd);
+    Log("tuning menu: game window %p subclassed (while the menu is open the menu keys' key-down / character messages are "
+        "dropped, every key's while the Hotkeys page waits for a press; key releases always pass)", (void*)hwnd);
 }
 
 void UnhookWindow() {
@@ -572,18 +649,45 @@ void UnhookWindow() {
     g_hwnd.store(nullptr, std::memory_order_release);
 }
 
+// v0.12.1 phase 50: see dinput_wrap.h. Render thread (inject.cpp, at a menu state change).
+void SetMenuHide(int mode, const int* vks, const int* joys, int n) {
+    uint32_t vk[8] = {}, dik[8] = {}, btn[4] = {};
+    unsigned pov = 0;
+    if (mode == kHideMenuInputs)
+        for (int i = 0; i < n && i < kMaxHide; ++i) {
+            const int v = vks ? vks[i] : 0, j = joys ? joys[i] : 0;
+            if (v > 0 && v < 256) {
+                vk[v >> 5] |= 1u << (v & 31);
+                const DWORD d = DikOfVk(v);
+                if (d && d < 256) dik[d >> 5] |= 1u << (d & 31);
+            }
+            if (j >= 1 && j <= kJoyMaxButton) btn[(j - 1) >> 5] |= 1u << ((j - 1) & 31);
+            else                              pov |= JoyPovBit(j);
+        }
+    for (int w = 0; w < 8; ++w) {
+        g_hideVk[w].store(vk[w], std::memory_order_relaxed);
+        g_hideDik[w].store(dik[w], std::memory_order_relaxed);
+    }
+    for (int w = 0; w < 4; ++w) g_hideBtn[w].store(btn[w], std::memory_order_relaxed);
+    g_hidePov.store(pov, std::memory_order_relaxed);
+    g_hideMode.store(mode, std::memory_order_release);
+}
+
 // v0.10.1: see dinput_wrap.h. Render thread only (the latches and the discovery bits are consumed here).
-void ControllerState(uint32_t buttons[4], unsigned* povDirs) {
+void ControllerState(uint32_t buttons[4], unsigned* povDirs, uint32_t* freshSlots) {
     for (int w = 0; w < 4; ++w) buttons[w] = 0;
     unsigned pov = 0;
+    uint32_t fresh = 0;                                     // v0.12.1 phase 50: the slots read by the game recently
     const ULONGLONG now = GetTickCount64();
-    for (JoySlot& s : g_joy) {
+    for (int si = 0; si < kMaxJoyDevs; ++si) {
+        JoySlot& s = g_joy[si];
         if (s.state.load(std::memory_order_acquire) != 2) continue;
         uint32_t lat[4];
         for (int w = 0; w < 4; ++w) lat[w] = s.latch[w].exchange(0, std::memory_order_relaxed);
         const unsigned povLat = s.povLatch.exchange(0, std::memory_order_relaxed);
         const ULONGLONG st = s.stamp.load(std::memory_order_acquire);
         if (st && st + kJoyStaleMs >= now) {               // read by the game recently (the input thread may stamp after `now`)
+            fresh |= 1u << si;
             for (int w = 0; w < 4; ++w) buttons[w] |= s.btn[w].load(std::memory_order_relaxed) | lat[w];
             pov |= s.pov.load(std::memory_order_relaxed) | povLat;
         }
@@ -613,6 +717,7 @@ void ControllerState(uint32_t buttons[4], unsigned* povDirs) {
         }
     }
     *povDirs = pov;
+    if (freshSlots) *freshSlots = fresh;
 }
 
 }  // namespace KeySwallow

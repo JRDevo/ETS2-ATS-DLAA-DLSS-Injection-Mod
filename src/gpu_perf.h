@@ -58,6 +58,8 @@ enum Sec : int {
     kOverlay,         // v0.10.3 phase 29b: the fps box draws (TuningMenu::DrawWidget: the VR quad image, each eye picture, the
                       // flat / desktop-mirror backbuffer) -- PER FRAME, not per pass: not tagged with an eye (FrameStats), NOT in
                       // the per-eye mod total
+    kBias,            // phase 49: the glow bias mask -- the pass-end re-draw of the additive forward draws + the share pass (pass
+                      // time, EXACT) and the crop / reprojection step before NGX (blit time)
     kCount
 };
 

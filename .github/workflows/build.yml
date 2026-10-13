@@ -50,6 +50,8 @@ jobs:
           if not exist build\tests\mirror_turns_test.exe exit /b 1
           call tests\build_hidden_mask_test.bat
           if not exist build\tests\hidden_mask_test.exe exit /b 1
+          call tests\build_cpu_tuning_test.bat
+          if not exist build\tests\cpu_tuning_test.exe exit /b 1
           call tests\build_fps_pose_test.bat
           if not exist build\tests\fps_pose_test.exe exit /b 1
           call tests\build_menu_shot.bat
@@ -58,6 +60,12 @@ jobs:
           if not exist build\tests\flat_views_test.exe exit /b 1
           call tests\build_fps_cab_test.bat
           if not exist build\tests\fps_cab_test.exe exit /b 1
+          call tests\build_bias_mask_test.bat
+          if not exist build\tests\bias_mask_test.exe exit /b 1
+          call tests\build_hotkey_scan_test.bat
+          if not exist build\tests\hotkey_scan_test.exe exit /b 1
+          call tests\build_frame_pace_test.bat
+          if not exist build\tests\frame_pace_test.exe exit /b 1
 
       - name: Test draw-id harness (did_shadow off)
         run: build\tests\drawid_harness.exe -1 0.1
@@ -72,12 +80,20 @@ jobs:
         run: build\tests\mirror_turns_test.exe
       - name: Test VR hidden area mask (mapping, depth-only draw, state restore)
         run: build\tests\hidden_mask_test.exe
+      - name: Test CPU tuning (src/cpu_tuning_pick.h P-core pick, narrowed-affinity rule)
+        run: build\tests\cpu_tuning_test.exe
       - name: Test fps box pose (src/fps_pose.h colours, VR turn, distance shift)
         run: build\tests\fps_pose_test.exe
       - name: Test flat multi-view (src/flat_views.h layout, view index, confirm / drop, shared jitter phase)
         run: build\tests\flat_views_test.exe
       - name: Test fps box attached to the vehicle (src/fps_cab.h maths; DrawIdRecord + FpsCab + the VSCab draw, zero-lag cab sway)
         run: build\tests\fps_cab_test.exe
+      - name: Test glow bias mask (phase 49 -- glow re-draw against the scene depth, share pass, crop step)
+        run: build\tests\bias_mask_test.exe
+      - name: Test hotkeys page (phase 50 / issue #16 -- fresh-press detector, held shifter gear, per-input hiding)
+        run: build\tests\hotkey_scan_test.exe
+      - name: Test frame pace (phase 52 -- flat limiter deadlines, FPS cap steps, VR FPS cap wait target)
+        run: build\tests\frame_pace_test.exe
       - name: Smoke test menu_shot (renders the real tuning menu + fps box to PNG; outputs are not committed)
         shell: cmd
         run: |

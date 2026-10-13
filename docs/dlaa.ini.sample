@@ -57,6 +57,21 @@ log_level = 1
 # gains nothing. The tuning menu's Turbo mode (VR) row switches it live; Shift+F12 / the Save row writes it here.
 # xr_turbo = 0
 
+# FRAME RATE (phase 52), all 0 = off by default; the tuning menu's Frame rate rows switch them live, Shift+F12 / the Save row
+# writes them here.
+# NVIDIA REFLEX, flat only, NVIDIA only: 0 = off, 1 = on (the game's frames wait less in the GPU queue: less input lag when the
+# GPU is the limit), 2 = on + boost (the GPU clocks stay up). On another GPU or a driver that refuses it, it stays off (the
+# menu row says "not supported"). Not used in VR and not while NVIDIA Smooth Motion is on.
+# reflex = 0
+# FPS CAP, flat only: the most fps the game may run at, 20..1000; 0 = no cap. With Reflex on, the NVIDIA driver limits;
+# otherwise the mod waits after each frame (a precise timer, no drift). Not used in VR (see vr_fps_cap) and not while NVIDIA
+# Smooth Motion is on.
+# fps_cap = 0
+# VR FPS CAP: 2 = the game runs at half the headset rate (72 Hz: 36 fps, 90 Hz: 45), 3 = a third (72 Hz: 24 fps); 0 = off.
+# The headset's reprojection (ASW, Motion Smoothing, Motion Reprojection, SSW) fills the frames in between at a steady rhythm:
+# use it when the fps swings around the headset rate. While it is on, xr_turbo is ignored (the cap wins).
+# vr_fps_cap = 0
+
 # VR FOVEATED RENDERING (VRS, NVIDIA RTX only; from OpenXR Toolkit), 0 / 1, default 0. 1 = the outer ring of each eye picture is
 # shaded once per 2 x 2 pixels (the centre stays sharp), which saves GPU time at high in-game Scaling. Fences, grass and leaves
 # (alpha-tested) and everything the mod draws itself keep full detail. The tuning menu's Foveated (VRS) row switches it live;
@@ -86,6 +101,18 @@ log_level = 1
 # start only). Does nothing on other CPUs. 0 (default) = off: no fps gain was measured yet, try it and compare.
 # cpu_cache_pin = 0
 
+# CPU TUNING, each 0 / 1, default 0 = off. The tuning menu's CPU tuning row switches the three together, live; Shift+F12 / the Save
+# row writes them here. The log says what each one did or why it did nothing.
+# cpu_pcore = 1: on Intel CPUs with P-cores and E-cores, the game's main thread and its render thread prefer the P-cores (a soft
+# preference; other threads are not touched). Does nothing on other CPUs, and nothing when cpu_cache_pin or a launcher already
+# narrowed the game's cores (that wins).
+# cpu_pcore = 0
+# cpu_priority = 1: the game runs at Above normal priority. Never High or Realtime.
+# cpu_priority = 0
+# cpu_no_throttle = 1: Windows may not slow the game down to save power (EcoQoS) and honours its timer requests while the window is
+# minimized or hidden (the timer part needs Windows 11).
+# cpu_no_throttle = 0
+
 # NGX jitter = sign * viewport shift, per axis: -1 or +1 (+1/+1 won the self-test; Ctrl+F12 cycles live)
 # jitter_sign_x = 1
 # jitter_sign_y = 1
@@ -102,6 +129,12 @@ log_level = 1
 # bloom haze blinks on the right / bottom edge when the sun is on that side. The picture is scaled by (W+1)/W, the same on
 # every frame (at most 1 px at the right / bottom edge).
 # jitter_overscan = 1
+
+# Phase 55: the game's lighting pass draws some meshes a second time (sunlight through a tent canopy, emissive surfaces) and
+# lights them only where that redraw matches the G-buffer depth. 1 = default: those redraws (depth test GREATER_EQUAL / EQUAL
+# without depth write, with a depth bias) get the same jittered viewport as the G-buffer, so they match on every jitter phase.
+# 0 = the game's own viewport for the whole lighting pass (before phase 55): such lit areas switch off on some frames (flicker).
+# light_redraw_jitter = 1
 
 # Camera-reprojection motion vectors: 1 on, 0 = zero MVs (Ctrl+F5 toggles live)
 # mv_enabled = 1
@@ -404,6 +437,12 @@ log_level = 1
 # v0.9.0 r11: a see-through draw whose centre point (origin) lies within this many metres of the camera (windscreen
 # drops, dirt, glare) is not drawn into that depth at all (0.1..5)
 # mv_fwd_min_m = 0.5
+# Phase 49 LIGHT GLOW GHOSTING FIX, strength in % 0..100, default 100; 0 = off. Street-lamp and car-light glows (flares,
+# light cones) are added on top of the picture and have no depth or motion of their own, so DLSS kept them in its history and
+# they left a trail behind them while driving at night. With this on, the mod draws those glows once more into a mask and tells
+# DLSS to take them (and the pixels where they were a frame ago) from the current frame. Lower it (25 % steps) if lamp glows
+# start to flicker. The tuning menu's "Light glow ghosting fix" row (Picture group) changes it live; Shift+F12 / Save writes it.
+# dlss_bias_mask = 100
 
 # GPU timing logs (per-stage DLAA cost + depth snapshot cost, every 600): -1 = with log_level = 4 (phase 45; before: always in
 # VR), 0 off, 1 on
@@ -521,9 +560,11 @@ log_level = 1
 # real distance, menu_vr_dist). 0 = drawn into the eye picture as before (menu_vr_depth, no menu_vr_dist). The mod falls
 # back to the picture by itself when the layers are not possible (no OpenXR session, the runtime refuses them).
 # menu_vr_layer = 1
-# v0.10.2 HOLD TO BIND: hold a key or a wheel / gamepad button this long (ms, 500..10000) on a menu row and it becomes that
-# row's hotkey (written to the key_* line below at once; Backspace held = none). While the menu is open the game gets no
-# keys and no buttons at all (axes / pedals still pass): close the menu before you press Escape or drive.
+# The Reset to defaults row: how long (ms, 500..10000) the menu Right key must be held on it to reset. (v0.10.2 .. v0.12.0
+# this was also the HOLD TO BIND time; v0.13.0 binds hotkeys on the menu's Hotkeys page with ONE fresh press: Hotkeys...,
+# Right, pick the action, Right, press the new key / button -- written to the key_* line below at once; Backspace = none.)
+# While the menu is open only its 5 keys / buttons are kept from the game (every key / button only while the Hotkeys page
+# waits for a press), so you can keep driving.
 # bind_hold_ms = 5000
 
 # ---- v0.10.0 FPS BOX: a small live fps / frame-time box ("60 fps" / "16.7 ms", updated twice a second), shown also
@@ -531,6 +572,10 @@ log_level = 1
 # here once you changed them in the menu ----
 # 1 = show the box, 0 = off (nothing is measured or drawn then)
 # fps_show = 0
+# What the box shows: 0 = fps and frame time (two lines), 1 = fps only, 2 = frame time (ms) only; the same as numbers only,
+# without "fps" / "ms": 3 = both ("72" + "13.9"), 4 = the fps number ("72"), 5 = the ms number ("13.9"). The menu's FPS
+# counter row steps Off / 72 fps + 13.9 ms / 72 fps / 13.9 ms / 72 + 13.9 / 72 / 13.9 (Right = next, Left = previous)
+# fps_text = 0
 # Flat: left / top edge of the box in % of the picture width / height (0..95; kept inside the picture), size 0.2..3.0
 # (1 = 92 x 44 px at a 1080 p picture, scales with the picture height)
 # fps_x = 1
@@ -553,13 +598,37 @@ log_level = 1
 # layer, also with menu_vr_layer = 1) and placed on the GPU from a cab part's position in the same picture, so it has no
 # lag. Needs DLAA on with per-part motion vectors (mv_objects = 2, the default); without them, in the outside camera, in
 # menus and while loading it is drawn like 1 until the cab is back. The menu's FPS counter lock row: "Attached to vehicle".
+# Phase 51: with 2 every VEHICLE keeps its own box placement (fps_vr_x, fps_vr_y, fps_vr_dist, fps_vr_yaw, fps_vr_pitch,
+# fps_vr_roll, fps_vr_scale; phase 51b: + fps_color, fps_brightness, fps_text; phase 51f: + fps_opacity). When the box locks on to a cab it takes that
+# cab's saved values; a new cab starts from the current values (= the fps_* keys: the default for new vehicles). Your changes
+# in the menu go to the vehicle you sit in and are saved automatically when the menu closes (and at game exit) as one line per
+# vehicle (up to 64):
+#   fps_profile = <vehicle key> x y dist yaw pitch roll scale v2 color brightness text cab <part> <the box's pose in the cab>
+# Phase 51f: with the opacity stored the marker is "v3" and the opacity follows the text number (v2 lines still load; they keep the
+# current fps_opacity).
+# Phase 51b: the line also keeps the box's exact spot IN THE CAB (the "cab" numbers: a cab part's index count + the map
+# into it): every later lock-on of that vehicle puts the box on exactly that spot (no few-pixel shift), also after a headset
+# recentre. It is stored at the first lock-on and replaced only by the menu's "Re-measure cab spot" (Right); a cab part found
+# moving (the steering wheel) is dropped from it. Old lines (only the 7 numbers) still load: that vehicle then takes the
+# current colour / brightness / text, and its cab spot is stored at its next lock-on.
+# Phase 51d: the box is built SQUARE TO THE CAB (the cab's own axes, not the headset's play space): "cabsq" instead of "cab"
+# marks such a spot. A "cab" spot of an older version is squared once at its next lock-on (the box may move a little that
+# once) and written back as "cabsq". Left on "Re-measure cab spot" puts only that vehicle's box back to the defaults.
+# The Save row is not needed for them and the Reset row does not touch them; delete a line to forget that vehicle.
+# The vehicle key is made from the cab's 3 biggest meshes (their index counts), so it stays the same after a game restart.
 # fps_vr_lock = 0
+# Phase 51b: 1 = the vehicle profiles above are used (default); 0 = one shared placement / colour / brightness / text for every
+# vehicle (the fps_* keys); the fps_profile lines are kept but neither loaded nor written. Menu: Position per vehicle.
+# fps_profiles = 1
 # Phase 44: the box's text colour, 0..19 = white (default, as before), yellow, amber, orange, red, pink, magenta, purple,
 # violet, blue, sky blue, cyan, teal, mint, green, lime, olive, gold, silver, black on white. Flat and VR. Menu: FPS colour.
 # fps_color = 0
 # Phase 48: the box's brightness in % (10..100, default 100 = the colour as it is). Dims the text colour toward black (the
 # outline stays; "black on white" dims its white outline). Flat and VR. Menu: FPS brightness.
 # fps_brightness = 100
+# Phase 51f: the box's opacity in % (10..100, default 100 = solid). Fades the WHOLE box, text and its outline together (brightness
+# only dims the text colour, so a dim box keeps a black outline). Flat and VR (drawn in, quad layer, attached). Menu: FPS opacity.
+# fps_opacity = 100
 # Phase 44, VR: the box's distance in cm (30..300, default 80). It keeps the same size in your view at every distance (the
 # VR layer and the fixed box: a real distance; drawn into the picture and following the head: an extra stereo shift on top
 # of menu_vr_depth). Menu: FPS distance (VR).

@@ -1,4 +1,28 @@
-// v0.12.0 -- phases 40-48 (below, newest first) + issue #12 flat multi-monitor (FlatViewCount / r_multimon_mode 2).
+// v0.13.0 -- phase 50: HOTKEYS PAGE (GitHub issue #16; the block "the HOTKEYS PAGE" before the Reset hold, ~17090). Hold-to-bind
+//           is gone: main rows only change values; "Hotkeys..." / "Menu keys" (Right) open a second list in the same panel, one
+//           line per action; Right on a line waits for the NEXT FRESH press of one key / button (inputs held at that moment,
+//           e.g. an engaged H-shifter gear, are ignored until released; a stale controller read is not a release). While the
+//           menu is open only the 5 menu inputs are hidden from the game (KeySwallow::SetMenuHide, dinput_wrap.cpp), every
+//           key / button only while a bind waits. bind_hold_ms is now the Reset row's hold only.
+// phase 52 -- FRAME RATE: NVIDIA REFLEX + FPS CAP (flat) + VR FPS CAP (dlaa.ini reflex 0/1/2, fps_cap 0 / 20..1000, vr_fps_cap
+//           0/2/3, all default 0; menu group "Frame rate": Reflex (flat), FPS cap (flat), VR FPS cap; src/frame_pace.h / .cpp,
+//           xr_hook.cpp WaitFrameImpl). Flat, at hkPresent: PRESENT_START marker before the original Present, after it Reflex's
+//           NvAPI_D3D_Sleep (+ PRESENT_END / SIMULATION_START markers; fps_cap = minimumIntervalUs) or the own deadline limiter
+//           (high-resolution waitable timer + 0.5 ms spin). Nothing while an OpenXR frame loop runs (FramePaceVrLoop) or under a
+//           present layer. VR: the game's real xrWaitFrame is delayed until a quarter period before every 2nd / 3rd display slot;
+//           the runtime predicts the display time itself (no made-up times), the reprojection fills the slots between. The cap
+//           wins over Turbo mode (ApplyXrTurbo). Level-4 "CPU prof" line: the sleeps per frame. tests\frame_pace_test.cpp.
+// v0.12.0 -- phases 40-49 (below, newest first) + issue #12 flat multi-monitor (FlatViewCount / r_multimon_mode 2).
+// phase 49 -- LIGHT GLOW GHOSTING FIX: NGX BIAS CURRENT COLOUR MASK (dlaa.ini dlss_bias_mask 0..100 %, default 100; menu row "Light
+//           glow ghosting fix", Picture group; the "GLOW BIAS MASK" block above hkDrawIndexed, DrawIdRecord::BiasShare, SceneDlaa::
+//           BiasPrep, DlaaProcessor::Evaluate's biasMask). Night report: lamp / vehicle-light glows trail behind them. They are
+//           additive forward draws (no depth, no motion of their own), so NGX's history kept them. Now: the additive world forward
+//           draws are recorded (BiasOnDraw), re-drawn at the pass end into a shared R11G11B10 glow sum against a read-only view of the
+//           pass's scene depth (BiasBatch), turned into the pass's R8 mask = the glows' share of each pixel's light (BiasShare); at
+//           the blit the mask at the DLAA crop, max'ed with last frame's glow carried along the MVs (the trail pixels), x strength,
+//           goes to NGX as DLSS.Input.Bias.Current.Color.Mask. Per pass slot like the depth snapshot (VR eyes, flat views); mirror
+//           units / previews: none. Pole flicker investigated: no MV / id bug found (docs/DEVELOPMENT.md phase 49).
+//           tests\bias_mask_test.cpp.
 // phase 47 -- FPS BOX "ATTACHED TO VEHICLE" (dlaa.ini fps_vr_lock = 2; the FPS counter lock row's 3rd value; src/fps_cab.h /
 //           fps_cab.cpp, menu.cpp VSCab / TuningMenu::DrawWidgetMvp). At each VR eye blit FpsCabBlit hands the pass's DrawIdRecord to
 //           FpsCab::OnBlit: a lock-on readback of the biggest cabin-layer draws' cb0 rows (+ the OpenXR poses) maps the play-space
@@ -136,7 +160,7 @@
 //           short footer, 3-line description fit, Reset = hold Right (bind_hold_ms), one bar square per second.
 // v0.10.2 -- VR perf pass (mv_cons_fail_tol, mirror units pre-built from mirror_sizes.txt, mv_area_clip, mirror_mv camera-only
 //           mirrors), 7-state Mirror DLAA row, Reset row, wheel / D-pad bindings (dinput_wrap.cpp JoyTap), HOLD TO BIND
-//           (MenuBindTick; the open menu hides every key / button from the game).
+//           (MenuBindTick; the open menu hides every key / button from the game; both replaced by v0.12.1 phase 50).
 // v0.10.1 -- (1) phase 25: full-screen draws inside a jittered pass (the forward-pass FOG TRIANGLE: Draw verts=3, UV-sampled)
 //           get the game's own viewport back for that draw and the shift after it; with the shifted + overscanned viewport
 //           the fog sampled the neighbour texel = a dark 1 px line on every silhouette in flat (hkDraw).
@@ -719,6 +743,7 @@
 #include <mutex>
 #include <new>
 #include <initializer_list>                         // phase 45: MenuCpuOf
+#include <memory>
 #include <string>
 #include <vector>
 #include <intrin.h>
@@ -728,6 +753,7 @@
 #include "ofxr.h"                                  // v0.10.0 OFXR Bridge module-range pass-through
 #include "xr_hook.h"                               // v0.10.3 phase 27: OpenXR xrReleaseSwapchainImage (VR panel draw point)
 #include "fps_pose.h"                              // phase 44: fps box colours, VR distance, turn (pure maths)
+#include "hotkey_scan.h"                           // v0.12.1 phase 50: the Hotkeys page's fresh-press detector (pure logic)
 #ifdef WITH_DLAA
 #include "scene_dlaa.h"
 #include "preview_blit.h"
@@ -738,10 +764,13 @@
 #include "gpu_pass.h"                                // phase 36: GPU time per pass type (measurement only)
 #include "mirror_turns.h"                            // phase 41: mirrors in turns (mirror_turns; pure decisions)
 #include "vrs.h"                                    // phase 34: VRS fixed foveated rendering (NVAPI; VR world scene only)
+#include "frame_pace.h"                             // phase 52: frame cap + NVIDIA Reflex (flat), the VR FPS cap's maths
 #include "hidden_mask.h"                            // phase 40: VR hidden area mask (XR_KHR_visibility_mask into the eye depth)
 #include "fps_cab.h"                                // phase 47: the VR fps box attached to the vehicle (GPU-placed from a cab draw)
+#include "fps_profile.h"                            // phase 51: per-vehicle fps box placement (fps_profile lines; pure logic)
 #endif
 #include "cpu_pin.h"                                // phase 32: keep the game on the V-Cache cores (cpu_cache_pin; both builds)
+#include "cpu_tuning.h"                            // phase 54: P-core preference / priority / EcoQoS opt-out (cpu_pcore, cpu_priority, cpu_no_throttle)
 #include "flat_views.h"                             // v0.12.0 issue #12: flat multi-view (multi-monitor) detection (both builds)
 
 namespace {
@@ -780,9 +809,9 @@ bool     g_resetNext      = true;        // pass reset=true to NGX on the next e
 // v0.7.7: every hotkey is a re-bindable action (dlaa.ini key_*), see KeyBind / PollKeys below. One down-edge
 // state per virtual-key code (g_vkWasDown) replaces the F-key-only table of v0.6.5.
 bool     g_vkWasDown[256] = {};          // edge detect per VK, refreshed every top-level Present (PollKeys)
-// v0.10.0 IN-GAME TUNING MENU (see the "TUNING MENU" block after ToggleMirrors): open state (also read by the input-hiding
-// window / DirectInput threads, dinput_wrap.cpp MenuHidesInput) and the panel placement (dlaa.ini menu_*; flat and VR have
-// their own).
+// v0.10.0 IN-GAME TUNING MENU (see the "TUNING MENU" block after ToggleMirrors): open state (v0.12.1 phase 50: the input-hiding
+// window / DirectInput threads get WHAT to hide from MenuPublishHide -> KeySwallow::SetMenuHide) and the panel placement
+// (dlaa.ini menu_*; flat and VR have their own).
 std::atomic<bool> g_menuOpen{false};
 int      g_menuX = 2, g_menuY = 8;       // flat: % of the picture width / height to the panel's left / top edge (0..90)
 float    g_menuScale = 1.0f;             // flat: 0.5..2.0 (1 = 720 px wide at 1080 p, scales with the picture height)
@@ -803,6 +832,12 @@ int      g_menuVrLayer = 1;
 // switches it live (takes effect at the next xrEndFrame).
 int      g_xrTurbo = 0;
 bool     g_xrTurboExplicit = false;      // set in dlaa.ini or changed in the menu -> SaveSettings writes xr_turbo
+// phase 52: FRAME RATE (frame_pace.h) -- dlaa.ini reflex (0 off / 1 on / 2 on + boost; flat, NVIDIA), fps_cap (0 off, else fps;
+// flat: Reflex's driver limit while Reflex runs, else the own limiter after Present), vr_fps_cap (0 off / 2 half / 3 a third
+// of the headset rate; xr_hook.cpp paces the game's xrWaitFrame). All default 0. The menu's Frame rate rows switch them live.
+// vr_fps_cap and Turbo mode exclude each other: the cap wins (ApplyXrTurbo keeps turbo off while the cap is on).
+int      g_reflex = 0, g_fpsCap = 0, g_vrFpsCap = 0;
+bool     g_paceExplicit = false;         // set in dlaa.ini or changed in the menu -> SaveSettings writes all three
 // phase 40, VR: dlaa.ini xr_hidden_mask -- 1 = HIDDEN AREA MASK (hidden_mask.h, xr_hook.h, the block above HmOnSceneClear): the
 // lens corners the runtime reports as never visible (XR_KHR_visibility_mask) are filled into each eye's scene depth at the nearest
 // depth right after the game clears it, so the game shades nothing there. Default 0. The OpenXR extension is only requested at the
@@ -856,14 +891,23 @@ bool     g_vrsPassesExplicit = false;
 // the process affinity is set to the logical processors of the biggest L3, once at startup (cpu_pin.h). Opt-in: no gain was measured.
 // Startup only: no menu row, so SaveSettings / ResetSettings have nothing to write or remove (the key stays as the user left it).
 int      g_cpuCachePin = 0;
+// phase 54: dlaa.ini cpu_pcore / cpu_priority / cpu_no_throttle (all 0 = off; cpu_tuning.h). Read at start; the menu's CPU tuning row
+// switches the three together live (CpuTuning::SetLive) and SaveSettings writes them once explicit (own flag: a saved 0 is not
+// written just because another row was touched).
+int      g_cpuPcore = 0, g_cpuPriority = 0, g_cpuNoThrottle = 0;
+bool     g_cpuTuneExplicit = false;
 bool     g_menuExplicit = false;        // a menu_* value was changed in the menu -> SaveSettings writes the 9 menu_* keys
-int      g_bindHoldMs = 5000;            // v0.10.2 dlaa.ini bind_hold_ms (500..10000): the menu's hold-to-bind time (MenuBindTick)
+int      g_bindHoldMs = 5000;            // v0.10.2 dlaa.ini bind_hold_ms (500..10000): v0.12.1 phase 50: the Reset row's hold
+                                         //   time only (MenuResetTick; was also the hold-to-bind time, gone: Hotkeys page)
 // v0.10.0 live fps box (dlaa.ini fps_*; the tuning menu's FPS counter rows): drawn where the panel draws, also while the menu
 // is closed. Flat and VR have their own placement.
 bool     g_fpsShow = false;              // fps_show: the box is on
+int      g_fpsText = 0;                  // fps_text: what the box shows -- 0 = fps + ms (two lines), 1 = fps only, 2 = ms only (one line);
+                                         //   3 / 4 / 5 = the same without the units: "72" + "13.9", "72", "13.9"
+constexpr int kFpsTextModes = 6;         // fps_text 0..5
 int      g_fpsX = 1, g_fpsY = 1;         // flat: % of the picture width / height to the box's left / top edge (0..95)
 float    g_fpsScale = 1.0f;              // flat: 0.2..3.0 (1 = 92 x 44 px at 1080 p, scales with the picture height; phase 15: was 0.5..3.0)
-int      g_fpsVrX = 0, g_fpsVrY = -25;   // VR: % of the eye width / height, box CENTRE from the eye's optical centre (-50..50)
+float    g_fpsVrX = 0.0f, g_fpsVrY = -25.0f;   // VR: % of the eye width / height (or degrees), box CENTRE from the eye's optical centre (-50..50, 0.1 resolution, menu step 0.2)
 // VR: 0.2..3.0 (1 = 8 % of the eye width, unchanged so a saved fps_vr_scale keeps its size). v0.10.0 phase 15: default 0.3
 // (was 1.0; range was 0.5..3.0): 1.0 = ~490 px on a 6120-px eye = about 4x the flat box's angle; 0.3 = ~150 px, about 1.5x
 // the flat box as seen in the headset (still readable after the headset's downsampling).
@@ -882,9 +926,14 @@ int      g_fpsVrLock = 0;
 // its normal facing; FpsPose::TurnQuat). The menu's FPS colour / distance / turn / tilt / rotate rows; saved with the fps_* keys.
 int      g_fpsColor = 0;
 int      g_fpsBright = FpsPose::kBrightDefault;   // phase 48: dlaa.ini fps_brightness 10..100 % (the colour * pct / 100)
+int      g_fpsOpacity = FpsPose::kOpacityDefault; // phase 51f: dlaa.ini fps_opacity 10..100 % (the whole box's alpha: text AND outline)
 int      g_fpsVrDist = FpsPose::kDistDefault;
 int      g_fpsVrYaw = 0, g_fpsVrPitch = 0, g_fpsVrRoll = 0;
-bool     g_fpsExplicit = false;          // an fps_* value was changed in the menu -> SaveSettings writes the 13 fps_* keys
+// phase 51b: dlaa.ini fps_profiles -- 1 = the attached box's placement / colour / brightness / text PER VEHICLE (fps_profile lines,
+// FpsProfileTick; default), 0 = one shared set for every vehicle (the global fps_* keys; the fps_profile lines are neither read
+// into the live values nor written). The menu's "Position per vehicle" row.
+int      g_fpsProfiles = 1;
+bool     g_fpsExplicit = false;         // an fps_* value was changed in the menu -> SaveSettings writes the 13 fps_* keys
 int      g_menuBlitEye = -1;             // VR: the eye blit this Draw is (HandlePossibleBlit), drawn on after it (hkDraw)
 void*    g_menuBlitRt  = nullptr;        // ... and its render target (identity only)
 // v0.10.0 phase 16 VR LATE PANEL (see that block after MenuDrawPreview): the panel / fps box go LAST onto each eye picture.
@@ -900,6 +949,10 @@ std::atomic<bool> g_mvOn{true};          // camera-reprojection MVs live switch 
 // (default 1) and its live switch (key_fwd_depth, Ctrl+F3; starts at the ini value).
 bool              g_fwdCfg = true;
 std::atomic<bool> g_fwdOn{true};
+// phase 49 GLOW BIAS MASK (see the "GLOW BIAS MASK" block above hkDrawIndexed): dlaa.ini dlss_bias_mask = strength in % 0..100
+// (default 100; 0 = off: NGX gets no mask), live from the menu's "Light glow ghosting fix" row (25 % steps)
+int               g_biasCfg = 100;
+bool              g_biasExplicit = false;   // set in dlaa.ini or changed in the menu -> SaveSettings writes dlss_bias_mask
 float             g_fwdMinM = 0.5f;     // v0.9.0 r11 dlaa.ini mv_fwd_min_m (0.1..5): an origin nearer = an overlay
 // v0.10.0 phase 10 PERFORMANCE PROFILES (dlaa.ini perf_profile = high | medium | low, Alt+F9 cycles live, Shift+F12 saves): a
 // profile only gives DEFAULTS to the keys below; a key set in dlaa.ini -- or changed by its own hotkey this session (Alt+F6,
@@ -1148,13 +1201,15 @@ char g_controllerName[64] = "";
 inline const char* KeyName(KeyAction a) { return g_keys[a].name; }
 bool g_keyRepeat[KA_COUNT] = {};         // v0.10.0: this Present's hit is an auto-repeat (menu navigation keys only)
 // v0.10.2: the action was ACTIVE at the last PollKeys (keyboard part with exact modifiers or controller part down; was
-// PollKeys' s_wasActive). The menu's hold-to-bind sets it for a freshly bound action, so the input still held from the hold
-// does not fire the action at once (a hit needs "not active the Present before"); the Menu keys row's tap test reads it.
+// PollKeys' s_wasActive). The Hotkeys page's bind (v0.12.1 phase 50; v0.10.2 hold-to-bind) sets it for a freshly bound
+// action, so the input still held from the press does not fire the action at once (a hit needs "not active the Present
+// before"); the Reset row's hold reads it.
 bool g_keyWasActive[KA_COUNT] = {};
 // v0.10.2: the controller state PollKeys read this Present (KeySwallow::ControllerState consumes its press latches, so the
-// menu's hold-to-bind scan uses this copy instead of a second call). Render thread.
+// Hotkeys page's bind scan uses this copy instead of a second call). Render thread.
 uint32_t g_pollJoyBtn[4] = {};
 unsigned g_pollJoyPov = 0;
+uint32_t g_pollJoyFresh = 0;             // v0.12.1 phase 50: the controller slots whose state is KNOWN (read by the game < 0.5 s ago)
 
 // v0.10.1: one controller token (lower case, no spaces): "wheel1".."wheel128" -> 1..128, "wheelup" / "wheelright" /
 // "wheeldown" / "wheelleft" -> KeySwallow::kJoyPovUp..kJoyPovLeft. Modifiers are not allowed in front of it.
@@ -1215,7 +1270,7 @@ bool ParseBinding(const char* text, int* vkOut, unsigned* modsOut, int* joyOut) 
 }
 // The named keys of a chord (letters, digits, F1..F24 and Numpad0..Numpad9 are handled in code). v0.10.2: one table in the
 // CANONICAL spelling -- ParseKeyChord compares case-insensitively, KeyChordName writes this spelling back (a binding made in
-// the menu's hold-to-bind reads like the defaults: "PageUp", "NumpadAdd", "[").
+// the menu's Hotkeys page (v0.12.1 phase 50; v0.10.2: hold-to-bind) reads like the defaults: "PageUp", "NumpadAdd", "[").
 const struct { const char* name; int vk; } kKeyChordNames[] = {
     { "Home", VK_HOME }, { "End", VK_END }, { "Insert", VK_INSERT }, { "Delete", VK_DELETE },
     { "PageUp", VK_PRIOR }, { "PageDown", VK_NEXT }, { "Up", VK_UP }, { "Down", VK_DOWN },
@@ -1256,7 +1311,7 @@ bool ParseKeyChord(const char* buf, int* vkOut, unsigned* modsOut) {
     return true;
 }
 // v0.10.2: the inverse of ParseKeyChord's key part -- the canonical name of a virtual key ("F5", "Numpad3", "PageUp", "[",
-// "A", "0"). False (out = "") = the parser has no name for it: such a key cannot be bound (the hold-to-bind ignores it).
+// "A", "0"). False (out = "") = the parser has no name for it: such a key cannot be bound (the Hotkeys page ignores it).
 bool KeyChordName(int vk, char* out, size_t cap) {
     if (!cap) return false;
     out[0] = 0;
@@ -1376,13 +1431,15 @@ void PollKeys() {
                           (keyDown(VK_CONTROL) ? MOD_CTRL_BIT  : 0u) |
                           (keyDown(VK_MENU)    ? MOD_ALT_BIT   : 0u);
     uint32_t joyBtn[4]; unsigned joyPov = 0;             // v0.10.1 every tapped DirectInput controller, OR'd
-    KeySwallow::ControllerState(joyBtn, &joyPov);
-    for (int w = 0; w < 4; ++w) g_pollJoyBtn[w] = joyBtn[w];   // v0.10.2 for the menu's hold-to-bind scan (MenuBindScan)
+    uint32_t joyFresh = 0;
+    KeySwallow::ControllerState(joyBtn, &joyPov, &joyFresh);
+    for (int w = 0; w < 4; ++w) g_pollJoyBtn[w] = joyBtn[w];   // for the Hotkeys page's bind scan (v0.12.1 phase 50 MenuHkBindTick)
     g_pollJoyPov = joyPov;
+    g_pollJoyFresh = joyFresh;
     bool down[KA_COUNT], joyDown[KA_COUNT], active[KA_COUNT];
     static bool s_joyWasDown[KA_COUNT] = {};             // v0.10.1 the controller part, per action
     bool* const s_wasActive = g_keyWasActive;            // v0.10.1 keyboard part (exact mods) OR controller part, per action
-                                                         //   (v0.10.2: file scope, the hold-to-bind sets it)
+                                                         //   (v0.10.2: file scope, the Hotkeys page's bind sets it)
     // v0.10.0 tuning menu: the navigation keys fire only while the menu is open, and repeat while held (first repeat
     // 350 ms after the press, then every 70 ms; at most one per Present).
     const bool menuOpen = g_menuOpen.load(std::memory_order_relaxed);
@@ -1536,6 +1593,13 @@ void ToggleDlaa(uint64_t n);             // v0.10.0 (was inline): Shift+F11 DLAA
 void ToggleUpscale(uint64_t n);          // v0.10.0 (was inline): Ctrl+F4 DLSS upscale on / off
 void ToggleFwdDepth(uint64_t n);         // v0.10.0 (was inline): Ctrl+F3 forward depth for the MVs on / off
 void MenuKeys(uint64_t n);               // v0.10.0 tuning menu: open / close + navigation (before the other user keys)
+void FpsProfileTick();                   // phase 51: per-vehicle fps box profiles (after MenuKeys)
+void FpsBoxDefaults(uint64_t n);         // phase 51d: the menu's Left on "Re-measure cab spot": the current vehicle's box to defaults
+void FpsProfStoreLive();                 // phase 51e: the FPS row switching the box Off -- the live values into the bound vehicle(s)
+void FpsProfLeaveAttached();             // the lock row leaving "attached": store the live values, the return RELOADS the profile
+void FpsProfUnbind();                    // phase 51d: the Reset row -- the live values are bound to no vehicle until the next lock-on
+bool g_fpsBoxDefaulted = false;          // phase 51d: the menu's Left on "Re-measure cab spot" reset the box (its value column)
+void ToggleFpsProfiles(uint64_t n);      // phase 51b: the menu's Position per vehicle row (dlaa.ini fps_profiles)
 void MenuDrawAtPresent(IDXGISwapChain* sc, ID3D11DeviceContext* bctx); // v0.10.0 tuning menu: flat / desktop-mirror panel
 void MenuDrawVr(ID3D11DeviceContext* ctx); // v0.10.0 tuning menu: VR panel into the eye texture after the game's eye blit
 void MenuDrawPreview(ID3D11DeviceContext* ctx, int idx, char trigger);   // v0.10.0 phase 15: ... onto a VR preview eye picture
@@ -1628,6 +1692,10 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
     if (!sc) CpuProfFrameMark(CpuProf::kMarkPresent);   // phase 31: present-layer mode -- the game-thread frame boundary is the frame
     CpuProf::Block cpb(CpuProf::kBFrameWork);               // phase 31 CPU profiler (cpu_prof.h)
     Ofxr::OnPresent(n);                         // v0.10.0 OFXR Bridge: layer-module rescan cadence + pass-through stats
+    if (CpuTuning::NeedPresent()) {             // phase 54: once -- the render (Present) thread + the window's thread get the CPU tuning
+        DXGI_SWAP_CHAIN_DESC cd{};
+        CpuTuning::OnPresent(sc && SUCCEEDED(sc->GetDesc(&cd)) ? cd.OutputWindow : nullptr);
+    }
 #ifdef WITH_DLAA
     MaybePrewarmNgx();                          // v0.7.8: NGX init + first feature on the boot screen (once)
     MirPrebuild();                              // v0.10.2: the cached mirror unit sizes, once NGX + the shaders are ready (once)
@@ -1645,6 +1713,7 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
         CheckPresetFallback(n);                  // v0.5.7: a live preset create failed -> told by ear
         if (g_fpsShow || g_menuOpen.load(std::memory_order_relaxed)) FpsTick();   // v0.10.0 fps meter (box / menu)
         MenuKeys(n);                             // v0.10.0 tuning menu (Delete, arrows) -- before the other user keys
+        FpsProfileTick();                        // phase 51: per-vehicle fps box profiles (lock-on / edits / save at menu close)
 #endif
 
         // ---- user keys -------------------------------------------------------------------------------
@@ -1775,6 +1844,10 @@ HRESULT LayerPresent(IDXGISwapChain* sc, UINT sync, UINT flags, void* caller, un
     return hr;
 }
 
+#ifdef WITH_DLAA
+bool FramePaceVrLoop();                         // phase 52: an OpenXR frame loop runs (defined after g_vrMode)
+inline bool FramePaceWanted() { return g_reflex != 0 || g_fpsCap != 0; }
+#endif
 HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
     const int   depth  = t_depth;
     void* const caller = _ReturnAddress();
@@ -1820,7 +1893,17 @@ HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
     // v0.10.0 phase 26: self-test only -- the back buffer still holds the finished frame here (before the original Present)
     if (sc) SelfTestFinalDump(sc);
 #endif
-    if (PresentLayerActive()) return LayerPresent(sc, sync, flags, caller, tid);   // v0.8.1: count + log only
+    if (PresentLayerActive()) {                 // v0.8.1: count + log only
+#ifdef WITH_DLAA
+        static bool s_paceLayerLogged = false;  // phase 52: no frame pace on the layer's own present thread (generated frames too)
+        if (!s_paceLayerLogged && FramePaceWanted()) {
+            s_paceLayerLogged = true;
+            Log("frame pace (phase 52): a present layer (NVIDIA Smooth Motion) presents -- Reflex / fps_cap do NOT run (they would pace "
+                "the layer's generated frames too); use the driver's own frame limiter with Smooth Motion");
+        }
+#endif
+        return LayerPresent(sc, sync, flags, caller, tid);
+    }
     // phase 31: the render thread's frame boundary for the CPU profiler (before this Present's own scope opens), then the
     // Present hook's scope: the per-frame work below is mod time, the original Present (CPU_ORIG) is not
     CpuProfFrameMark(CpuProf::kMarkPresent);
@@ -1872,10 +1955,22 @@ HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
     if (!UpdateGameContext(sc, n, caller))      // v0.6.2: before anything else this frame (hotkeys may reset state)
         PresentFrameWork(sc, n, nullptr, false);// v0.8.1: false = a present layer took over this very Present
     plLock.unlock();
+#ifdef WITH_DLAA
+    // phase 52: frame rate (flat Reflex / fps_cap; frame_pace.h). PRESENT_START marker here, after the mod's own frame work (the
+    // menu / fps box draw is part of the game's frame); Reflex Sleep or the own limiter right after the original Present returns
+    // = the start of the next frame's simulation on this thread. VR (an OpenXR frame loop): neither -- xrWaitFrame paces.
+    // v0.13.0 pre-release fix: neither while a present layer is SUSPECTED (g_plSuspect, before its adoption makes PresentLayerActive
+    // return above): these Presents are the layer's own swap chain, and sleep mode set on it was never switched off afterwards.
+    const bool paceVr = FramePaceVrLoop() || g_plSuspect.load(std::memory_order_relaxed);
+    FramePace::BeforePresent(sc, paceVr);
+#endif
     ++t_depth;
     HRESULT hr;
     CPU_ORIG(hr = oPresent(sc, sync, flags));
     --t_depth;
+#ifdef WITH_DLAA
+    CPU_ORIG(FramePace::AfterPresent(sc, paceVr, n));   // (CPU_ORIG: a deliberate wait, not mod CPU -- phase 31 profiler)
+#endif
     if (n < 5)
         LogErr("Present #%llu oPresent returned hr=0x%lx", (unsigned long long)n, (unsigned long)hr);
     if (FAILED(hr)) {
@@ -2101,6 +2196,10 @@ struct PassSlot {
     bool       clip = false;
     D3D11_RECT clipRect = { 0, 0, 0, 0 };
     uint8_t    fwdShift = 0;
+    // phase 49 glow bias mask: the forward colour the pass's glow draws went into (RT0 at its first glow draw; the share pass reads
+    // it at the pass end; ref held until the slot's next StartPass) and the glow draws recorded in this pass
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> biasF;
+    uint32_t   biasDraws = 0;
 #endif
     // ---- v0.6.1 flight recorder: plain counters on the NEWEST slot, reset in StartPass, logged at the blit
     // only for a bad record (PASS ANOMALY) or as a periodic reference (pass sample). Record counts = cand.
@@ -2160,6 +2259,9 @@ DrawIdRecord     g_didRing[kRing];              // per pass slot, parallel to g_
 // v0.10.0 phase 3: per pass slot, the pass's FORWARD draws that were re-drawn into the forward depth (forward mode; replayed
 // into the GREEN channel of the same draw-id target, see DidFwdOnDraw / DidFwdReplay)
 DrawIdRecord     g_didFwdRing[kRing];
+// phase 49: per pass slot, the pass's ADDITIVE world forward draws (light glows / flares / light cones; forward mode, pixel-shader
+// state captured), [0] = SrcBlend ONE, [1] = SrcBlend SRC_ALPHA -- re-drawn into the glow sum at the pass end (BiasBatch)
+DrawIdRecord     g_didBiasRing[kRing][2];
 bool             g_didCfg = true;               // mv_objects == 2
 bool             g_didOn  = false;              // per frame: the feature is live (ObjFrameUpdate)
 // phase 35 SHADOWED INPUT STATE (draw_ids.h DidShadow): dlaa.ini did_shadow (startup only) / did_shadow_verify
@@ -2228,6 +2330,7 @@ int              g_mirMaxViews  = 8;            // dlaa.ini mirror_max_views: un
 int              g_mirCur       = -1;           // unit of the open mirror view (its G-buffer bind .. its depth discard)
 bool             g_mirGbuf      = false;        // the open view's G-buffer (4 RTVs + its own depth) is the current binding
 bool             g_mirJit       = false;        // the current binding is the open view's G-buffer or forward pass (shifted)
+bool             g_mirLight     = false;        // phase 55: the current binding is the open (jittered) view's lighting pass
 float            g_mirShX = 0.0f, g_mirShY = 0.0f;   // the open view's viewport shift (px)
 UINT             g_mirW = 0, g_mirH = 0;        // the open view's size (the viewport the shift applies to)
 uint64_t         g_mirHandled = 0, g_mirNotHandled = 0;   // mirror views run as units / left to the game (FIFO stats)
@@ -2273,8 +2376,15 @@ void ObjStatsTag(char* buf, size_t cap, uint64_t passes);
 // v0.9.0 r5 forward depth: stats window (defined above hkDrawIndexed); r11: + the near-camera readback slots (ctx)
 void FwdOnPassStart(ID3D11DeviceContext* ctx);
 void FwdOnContextReset();
+// phase 49 glow bias mask (the "GLOW BIAS MASK" block above hkDrawIndexed)
+void BiasOnDraw(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex);
+void BiasBatch(ID3D11DeviceContext* ctx, uint64_t pass, int why);
+void BiasOnPassStart(ID3D11DeviceContext* ctx, uint64_t s);
+void BiasOnContextReset();
+bool BiasLive();
 #else
 constexpr bool   g_mirJit = false;              // (no mirror jitter without WITH_DLAA; hkDraw's full-screen unshift reads it)
+constexpr bool   g_mirLight = false;            // (phase 55: no mirror lighting redraw shift without WITH_DLAA)
 #endif
 uint64_t         g_passSeq       = 0;            // passes started so far (= next s)
 uint64_t         g_fifoHead      = 0;            // oldest unconsumed pass (unconsumed = [g_fifoHead, g_passSeq))
@@ -2286,6 +2396,11 @@ bool             g_depthDirty    = false;        // G-buffer rendered into the s
 bool             g_eyeLogged[kMaxViews] = {};    // "eye blit detected" logged per eye / view (v0.12.0 issue #12)
 bool             g_flatMode      = false;        // a blit with RT0 == DXGI backbuffer was seen (flat, 1 eye)
 bool             g_vrMode        = false;        // a blit into a non-backbuffer RT was seen
+#ifdef WITH_DLAA
+// phase 52: VR for the frame pace = the game called xrWaitFrame within the last second, or eye blits were seen (the desktop
+// mirror's Present of a VR session is never paced: the runtime paces the game in xrWaitFrame).
+bool FramePaceVrLoop() { return g_vrMode || XrHook::FrameLoopActive(); }
+#endif
 // ---- v0.12.0 issue #12: FLAT MULTI-VIEW (multi-monitor; the WHY / HOW is in flat_views.h) -------------------------------------------
 // dlaa.ini flat_multiview (startup only): 1 (default) = detect several non-overlapping backbuffer blits per Present (r_multimon_mode 2)
 // and give every view (up to kMaxViews) its own DLAA unit; 0 = the v0.11 behaviour EXACTLY (every backbuffer blit is eye 0, no detection, pass FIFO
@@ -2444,6 +2559,26 @@ const char* CpuProfRole(uint32_t r, char* buf, size_t n) {
     else                     snprintf(buf, n, "other");
     return buf;
 }
+#ifdef WITH_DLAA
+// phase 52: the frame pace's part of the level-4 "CPU prof" line -- the sleeps of the own limiter and of Reflex (flat) and of the
+// VR FPS cap (in the game's xrWaitFrame), ms per frame over the window since the previous line. Empty while all of it is off.
+void FramePacePerfTag(char* b, size_t n) {
+    const FramePace::Window w = FramePace::TakeWindow();
+    const XrHook::FpsCapStats cs = XrHook::GetFpsCapStats();
+    static uint64_t s_prevWaits = 0, s_prevSleeps = 0;
+    static int64_t  s_prevNs = 0;
+    const uint64_t dw = cs.waits - s_prevWaits, ds = cs.sleeps - s_prevSleeps;
+    const int64_t  dns = cs.sleepNs - s_prevNs;
+    s_prevWaits = cs.waits; s_prevSleeps = cs.sleeps; s_prevNs = cs.sleepNs;
+    b[0] = 0;
+    if (!g_reflex && !g_fpsCap && !g_vrFpsCap && !ds) return;
+    snprintf(b, n, " | frame pace (phase 52): reflex=%d%s fps_cap=%d -> limiter sleep %.3f ms/frame, Reflex Sleep %.3f ms/frame "
+             "(%llu flat frames); vr_fps_cap=%d -> %.3f ms/frame slept before xrWaitFrame (%llu of %llu waits delayed, period %.2f ms)",
+             g_reflex, FramePace::ReflexRunning() ? " (running)" : (g_reflex ? " (not running)" : ""), g_fpsCap, w.limiterMs,
+             w.reflexMs, (unsigned long long)w.frames, g_vrFpsCap, dw ? (double)dns / 1e6 / (double)dw : 0.0,
+             (unsigned long long)ds, (unsigned long long)dw, (double)cs.basePeriodNs / 1e6);
+}
+#endif
 // Snapshot of every registered slot (deltas against g_cpPrev); report = false: only the baseline at the first window start.
 void CpuProfReport(bool report, int64_t q, uint64_t tscNow) {
     using namespace CpuProf;
@@ -2492,9 +2627,13 @@ void CpuProfReport(bool report, int64_t q, uint64_t tscNow) {
         const int unprof = g_unprofiled.load(std::memory_order_relaxed);
         char un[64] = "";
         if (unprof) snprintf(un, sizeof(un), ", %d not profiled (registry full)", unprof);
+        char pace[384] = "";                              // phase 52: the frame pace's sleeps (empty while it is all off)
+#ifdef WITH_DLAA
+        FramePacePerfTag(pace, sizeof(pace));
+#endif
         LogDbg("CPU prof (phase 33) %.1f s: %llu frames = %s (%.1f fps; %llu Presents, %llu xrEndFrame) | %d busy thread(s) of %d "
-            "profiled%s; figures per frame = / %llu", secs, (unsigned long long)F, vr ? "xrEndFrame calls (VR)" : "Presents (flat)",
-            (double)F / secs, (unsigned long long)dPres, (unsigned long long)dXre, nBusy, nReg, un, (unsigned long long)F);
+            "profiled%s; figures per frame = / %llu%s", secs, (unsigned long long)F, vr ? "xrEndFrame calls (VR)" : "Presents (flat)",
+            (double)F / secs, (unsigned long long)dPres, (unsigned long long)dXre, nBusy, nReg, un, (unsigned long long)F, pace);
         // pass 2: one line per busy thread -- render first, then main, then the rest
         int order[kMaxThreads], no = 0;
         for (int pass = 0; pass < 3; ++pass)
@@ -2761,22 +2900,37 @@ bool PathNextToDll(const wchar_t* name, wchar_t* path);   // defined below
 // v0.10.0 (Reset row): an entry with an EMPTY val ("") means "remove this key": every matching line is dropped (not replaced), and
 // the key is never appended. A missing file with only removals is left missing (nothing to write).
 // Returns true only if the temp was fully written AND the replace succeeded.
-constexpr int kIniMaxKeys = 56;                    // v0.10.3 phase 28: WriteIniPreserving's key cap (was 32; phase 44: 48 -> 56)
+constexpr int kIniMaxKeys = 64;                    // v0.10.3 phase 28: WriteIniPreserving's key cap (was 32; phase 44: 48 -> 56; phase 54: 64)
 struct IniKV { const char* key; char val[48]; };   // val[0] == 0: delete the key's line(s) (WriteIniPreserving)
                                                    // (v0.10.2: was 32 -- "Ctrl+Shift+Alt+NumpadSubtract, Wheel128" is 39)
-bool WriteIniPreserving(const IniKV* kv, int nkv) {
-    wchar_t path[MAX_PATH], tmp[MAX_PATH];
-    if (!PathNextToDll(L"dlaa.ini", path) || !PathNextToDll(L"dlaa.ini.tmp", tmp)) return false;
-
-    std::string in;                                      // existing file, read raw (binary) so endings survive
+// phase 51: the raw read (binary: the line endings survive) and the safe write (dlaa.ini.tmp, then MoveFileExW over the
+// original: a failed write never empties or truncates dlaa.ini) of WriteIniPreserving, shared with WriteIniProfiles.
+void ReadIniRaw(const wchar_t* path, std::string* in) {
+    in->clear();
     FILE* f = nullptr;
     if (_wfopen_s(&f, path, L"rb") == 0 && f) {
         fseek(f, 0, SEEK_END);
         long sz = ftell(f);
         fseek(f, 0, SEEK_SET);
-        if (sz > 0) { in.resize((size_t)sz); in.resize(fread(&in[0], 1, (size_t)sz, f)); }
+        if (sz > 0) { in->resize((size_t)sz); in->resize(fread(&(*in)[0], 1, (size_t)sz, f)); }
         fclose(f);
     }
+}
+bool WriteIniAtomic(const wchar_t* path, const wchar_t* tmp, const std::string& out) {
+    FILE* w = nullptr;
+    if (_wfopen_s(&w, tmp, L"wb") != 0 || !w) return false;
+    const bool wrote = out.empty() ? true : (fwrite(out.data(), 1, out.size(), w) == out.size());
+    const bool closed = (fclose(w) == 0);
+    if (!wrote || !closed) { _wremove(tmp); return false; }
+    if (!MoveFileExW(tmp, path, MOVEFILE_REPLACE_EXISTING)) { _wremove(tmp); return false; }
+    return true;
+}
+bool WriteIniPreserving(const IniKV* kv, int nkv) {
+    wchar_t path[MAX_PATH], tmp[MAX_PATH];
+    if (!PathNextToDll(L"dlaa.ini", path) || !PathNextToDll(L"dlaa.ini.tmp", tmp)) return false;
+
+    std::string in;                                      // existing file, read raw (binary) so endings survive
+    ReadIniRaw(path, &in);
     const char* nl = (in.find("\r\n") != std::string::npos) ? "\r\n" : "\n";   // match the file's ending
     bool anyWrite = false;                               // at least one key with a value (else a missing file stays missing)
     for (int k = 0; k < nkv && k < kIniMaxKeys; ++k) if (kv[k].val[0]) anyWrite = true;
@@ -2833,14 +2987,7 @@ bool WriteIniPreserving(const IniKV* kv, int nkv) {
         if (needNl) { out += nl; needNl = false; }
         out += kv[k].key; out += " = "; out += kv[k].val; out += nl;
     }
-
-    FILE* w = nullptr;
-    if (_wfopen_s(&w, tmp, L"wb") != 0 || !w) return false;
-    const bool wrote = out.empty() ? true : (fwrite(out.data(), 1, out.size(), w) == out.size());
-    const bool closed = (fclose(w) == 0);
-    if (!wrote || !closed) { _wremove(tmp); return false; }
-    if (!MoveFileExW(tmp, path, MOVEFILE_REPLACE_EXISTING)) { _wremove(tmp); return false; }
-    return true;
+    return WriteIniAtomic(path, tmp, out);
 }
 
 void SaveSettings(uint64_t n) {
@@ -2864,6 +3011,7 @@ void SaveSettings(uint64_t n) {
                                                           // phase 34: + vrs / vrs_inner / vrs_outer = 36
                                                           // phase 39: + log_level = 37
                                                           // phase 41: + mirror_turns = 38
+                                                          // phase 52: + reflex / fps_cap / vr_fps_cap (at most 50 of kIniMaxKeys)
     int nkv = 0;
     auto add = [&](const char* k) -> char* { kv[nkv].key = k; return kv[nkv++].val; };
     if (g_profExplicit[PK_PRESET]) snprintf(add("dlss_preset"), sizeof(kv[0].val), "%s", preset);
@@ -2903,22 +3051,36 @@ void SaveSettings(uint64_t n) {
     }
     if (g_fpsExplicit) {                                  // v0.10.0 fps box: on / off + placement, only once changed in the menu
         snprintf(add("fps_show"), sizeof(kv[0].val), "%d", g_fpsShow ? 1 : 0);
+        snprintf(add("fps_text"), sizeof(kv[0].val), "%d", g_fpsText);   // 0 fps + ms, 1 fps only, 2 ms only, 3..5 the same without units
         snprintf(add("fps_x"), sizeof(kv[0].val), "%d", g_fpsX);
         snprintf(add("fps_y"), sizeof(kv[0].val), "%d", g_fpsY);
         snprintf(add("fps_scale"), sizeof(kv[0].val), "%.1f", (double)g_fpsScale);
-        snprintf(add("fps_vr_x"), sizeof(kv[0].val), "%d", g_fpsVrX);
-        snprintf(add("fps_vr_y"), sizeof(kv[0].val), "%d", g_fpsVrY);
+        snprintf(add("fps_vr_x"), sizeof(kv[0].val), "%.1f", (double)g_fpsVrX);
+        snprintf(add("fps_vr_y"), sizeof(kv[0].val), "%.1f", (double)g_fpsVrY);
         snprintf(add("fps_vr_scale"), sizeof(kv[0].val), "%.1f", (double)g_fpsVrScale);
         snprintf(add("fps_vr_lock"), sizeof(kv[0].val), "%d", g_fpsVrLock);   // v0.10.3 phase 28
         snprintf(add("fps_color"), sizeof(kv[0].val), "%d", g_fpsColor);      // phase 44
         snprintf(add("fps_brightness"), sizeof(kv[0].val), "%d", g_fpsBright);   // phase 48
+        snprintf(add("fps_opacity"), sizeof(kv[0].val), "%d", g_fpsOpacity);     // phase 51f
         snprintf(add("fps_vr_dist"), sizeof(kv[0].val), "%d", g_fpsVrDist);
         snprintf(add("fps_vr_yaw"), sizeof(kv[0].val), "%d", g_fpsVrYaw);
         snprintf(add("fps_vr_pitch"), sizeof(kv[0].val), "%d", g_fpsVrPitch);
         snprintf(add("fps_vr_roll"), sizeof(kv[0].val), "%d", g_fpsVrRoll);
+        snprintf(add("fps_profiles"), sizeof(kv[0].val), "%d", g_fpsProfiles);   // phase 51b
     }
     if (g_xrTurboExplicit) snprintf(add("xr_turbo"), sizeof(kv[0].val), "%d", g_xrTurbo);   // phase 30 (Turbo mode row)
+    if (g_paceExplicit) {                                 // phase 52 (the Frame rate rows)
+        snprintf(add("reflex"), sizeof(kv[0].val), "%d", g_reflex);
+        snprintf(add("fps_cap"), sizeof(kv[0].val), "%d", g_fpsCap);
+        snprintf(add("vr_fps_cap"), sizeof(kv[0].val), "%d", g_vrFpsCap);
+    }
     if (g_xrHiddenMaskExplicit) snprintf(add("xr_hidden_mask"), sizeof(kv[0].val), "%d", g_xrHiddenMask);   // phase 40
+    if (g_biasExplicit) snprintf(add("dlss_bias_mask"), sizeof(kv[0].val), "%d", g_biasCfg);   // phase 49 (glow ghosting row)
+    if (g_cpuTuneExplicit) {                              // phase 54 (CPU tuning row)
+        snprintf(add("cpu_pcore"), sizeof(kv[0].val), "%d", g_cpuPcore);
+        snprintf(add("cpu_priority"), sizeof(kv[0].val), "%d", g_cpuPriority);
+        snprintf(add("cpu_no_throttle"), sizeof(kv[0].val), "%d", g_cpuNoThrottle);
+    }
     if (g_logLevelExplicit) snprintf(add("log_level"), sizeof(kv[0].val), "%d", LogLevel());  // phase 39 (Logging row)
     if (g_vrsExplicit) {                                  // phase 34 (the Foveated rows)
         snprintf(add("vrs"), sizeof(kv[0].val), "%d", g_vrsOn);
@@ -2926,7 +3088,8 @@ void SaveSettings(uint64_t n) {
         snprintf(add("vrs_outer"), sizeof(kv[0].val), "%d", g_vrsOuter);
     }
     if (g_vrsPassesExplicit) snprintf(add("vrs_passes"), sizeof(kv[0].val), "%d", g_vrsPasses);   // phase 42 (Foveated passes)
-    char vrsW[128] = "";                                  // (phase 39: was 64, + log_level; phase 40: + xr_hidden_mask; phase 42: + vrs_passes)
+    char vrsW[208] = "";                                  // (phase 39: was 64, + log_level; phase 40: + xr_hidden_mask; phase 42: + vrs_passes;
+                                                          //  phase 49: 128 -> 160, + dlss_bias_mask; phase 52: 160 -> 208, + the frame rate keys)
     if (g_vrsExplicit) snprintf(vrsW, sizeof(vrsW), " vrs=%d vrs_inner=%d vrs_outer=%d", g_vrsOn, g_vrsInner, g_vrsOuter);
     if (g_xrHiddenMaskExplicit) {
         const size_t vl = strlen(vrsW);
@@ -2936,21 +3099,29 @@ void SaveSettings(uint64_t n) {
         const size_t vl = strlen(vrsW);
         snprintf(vrsW + vl, sizeof(vrsW) - vl, " vrs_passes=%d", g_vrsPasses);
     }
+    if (g_biasExplicit) {                                 // phase 49
+        const size_t vl = strlen(vrsW);
+        snprintf(vrsW + vl, sizeof(vrsW) - vl, " dlss_bias_mask=%d", g_biasCfg);
+    }
     if (g_logLevelExplicit) {
         const size_t vl = strlen(vrsW);
         snprintf(vrsW + vl, sizeof(vrsW) - vl, " log_level=%d", LogLevel());
+    }
+    if (g_paceExplicit) {                                 // phase 52
+        const size_t vl = strlen(vrsW);
+        snprintf(vrsW + vl, sizeof(vrsW) - vl, " reflex=%d fps_cap=%d vr_fps_cap=%d", g_reflex, g_fpsCap, g_vrFpsCap);
     }
     char menuW[224] = "";                                 // (v0.10.3 phase 29b: was 200, + menu_vr_dist)
     if (g_menuExplicit)
         snprintf(menuW, sizeof(menuW), " -- menu panel: menu_x=%d menu_y=%d menu_scale=%.1f menu_vr_x=%d menu_vr_y=%d menu_vr_scale=%.1f "
                  "menu_vr_depth=%d menu_vr_dist=%d menu_vr_face=%d", g_menuX, g_menuY, (double)g_menuScale, g_menuVrX, g_menuVrY,
                  (double)g_menuVrScale, g_menuVrDepth, g_menuVrDist, g_menuVrFace);
-    char fpsW[320] = "";                                  // (phase 44: was 160, + fps_color / fps_vr_dist / the turn)
+    char fpsW[416] = "";                                  // (phase 44: was 160, + fps_color / fps_vr_dist / the turn; 51b: 352 -> 384)
     if (g_fpsExplicit)
-        snprintf(fpsW, sizeof(fpsW), " -- fps box: fps_show=%d fps_x=%d fps_y=%d fps_scale=%.1f fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f "
-                 "fps_vr_lock=%d fps_color=%d (%ls) fps_brightness=%d fps_vr_dist=%d fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d", g_fpsShow ? 1 : 0,
-                 g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY, (double)g_fpsVrScale, g_fpsVrLock, g_fpsColor,
-                 FpsPose::ColorOf(g_fpsColor).name, g_fpsBright, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll);
+        snprintf(fpsW, sizeof(fpsW), " -- fps box: fps_show=%d fps_text=%d fps_x=%d fps_y=%d fps_scale=%.1f fps_vr_x=%.1f fps_vr_y=%.1f fps_vr_scale=%.1f "
+                 "fps_vr_lock=%d fps_color=%d (%ls) fps_brightness=%d fps_opacity=%d fps_vr_dist=%d fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d fps_profiles=%d", g_fpsShow ? 1 : 0,
+                 g_fpsText, g_fpsX, g_fpsY, (double)g_fpsScale, (double)g_fpsVrX, (double)g_fpsVrY, (double)g_fpsVrScale, g_fpsVrLock, g_fpsColor,
+                 FpsPose::ColorOf(g_fpsColor).name, g_fpsBright, g_fpsOpacity, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll, g_fpsProfiles);
     char notW[128];
     snprintf(notW, sizeof(notW), "%s%s%s%s%s", g_profExplicit[PK_PRESET] ? "" : " dlss_preset", g_profExplicit[PK_AREA] ? "" : " dlaa_area",
              g_profExplicit[PK_MIRROR_DLAA] ? "" : " mirror_dlaa", mirVrW ? "" : " mirror_vr_mode", mirFlatW ? "" : " mirror_flat_mode");
@@ -7244,11 +7415,14 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
     if (g_medoidDropBits & 1) ++g_cMedoidPassW;
     if (g_medoidDropBits & 2) ++g_cMedoidPassC;
     n.fwdTex = nullptr; n.fwdBinds = 0;                   // v0.10.0 phase 7
+    n.twin.biasValid = false; n.twin.biasOpen = false;   // phase 49: this pass's glow bias mask is written at its pass end
     n.stageDone = false; n.stageAtLeave = false; n.fallback = false; n.warmHdr = false; n.candBad = false;
     n.warmTex.Reset();
     PassViewSetup(n);                                     // v0.10.0 phase 9: area clip + forward-depth resolution of this pass
     ObjOnPassStart(ctx, s);                               // v0.9.0: the previous record flushed, this pass's record empty
     DidOnPassStart(ctx, s);                               // v0.10.0: the previous pass replayed if it still waits, new record
+    BiasOnPassStart(ctx, s);                              // phase 49: the previous pass's glow draws (no discard came), new records
+    n.biasF.Reset(); n.biasDraws = 0;                     //   (this slot's forward colour of its previous use goes)
     FwdOnPassStart(ctx);                                  // v0.9.0 r5: stats window (r11: + near-camera readback)
 #endif
     g_phase = n.phase; g_jx = n.jx; g_jy = n.jy;          // ReconcileViewports uses these for this pass
@@ -7709,6 +7883,17 @@ float          g_vpShiftX = 0.0f, g_vpShiftY = 0.0f;   // ...and which one
 bool           g_vpOver       = false;     // v0.10.0 phase 23: ...and was 1 px larger (jitter_overscan)
 uint64_t       g_cFsUnshift   = 0;         // v0.10.0 phase 25: full-screen draws inside a jittered pass issued with the game's own viewport
 int            g_passLogged   = 0;         // bit0 = G-buffer logged, bit1 = forward logged
+// phase 55 LIGHTING-PASS REDRAWS (the block above LightRedrawOnDraw): dlaa.ini light_redraw_jitter (default 1), the kind of the
+// current lighting binding and whether the issued viewport now carries its G-buffer's shift for a run of qualifying redraws.
+int            g_lightRedrawCfg   = 1;     // dlaa.ini light_redraw_jitter: 1 = the lighting pass's mesh redraws get the G-buffer's shift
+uint8_t        g_lightBind        = 0;     // 0 = none, 1 = main lighting bind (2 RTVs + scene DSV), 2 = the open mirror view's (g_mirLight)
+bool           g_lightRedrawShift = false; // ReconcileViewports shifts the lighting bind's viewport (a qualifying redraw is next)
+uint64_t       g_cLightBinds = 0, g_cLightRedraws = 0, g_cLightRuns = 0, g_cLightUnDraw = 0, g_cLightUnIdx = 0, g_cLightUnDss = 0;   // stats window
+uint64_t       g_cLightNoShift = 0;        // stats window: qualifying redraws whose viewport could not be shifted (not the pass size)
+uint64_t       g_cLightRedrawsTotal = 0;   // since the start (the first one is logged)
+#ifdef WITH_DLAA
+void LightRedrawStatsLog(uint64_t blit, uint64_t blitsInWindow);   // (defined with the lighting redraws, above hkOMSetDepthStencilState)
+#endif
 
 // Jitter only while DLAA is live and the jitter is enabled in dlaa.ini (v0.6.2: and not in passive mode).
 // v0.10.0 phase 17: split -- JitterLiveBase = everything but the shader warm-up; JitterLive (world, mirrors) = + every shader
@@ -7846,7 +8031,10 @@ inline void CountGameOtherThread() {
 // nothing if that is exactly what was last issued (no call spam).
 void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
     if (g_gameVpN == 0) return;
-    const bool worldShift = g_jitterPass && JitterLive() && !WorldJitterHeld() && g_sceneW &&   // v0.7.9: see g_eyeBlitEver
+    // phase 55: a qualifying mesh redraw of the main lighting bind (g_lightRedrawShift, set per draw by LightRedrawOnDraw) gets
+    // exactly the G-buffer's viewport: the same shift and, with jitter_overscan, the same (W+1) x (H+1) size
+    const bool lightMain = g_lightRedrawShift && g_lightBind == 1;
+    const bool worldShift = (g_jitterPass || lightMain) && JitterLive() && !WorldJitterHeld() && g_sceneW &&   // v0.7.9: see g_eyeBlitEver
                             (UINT)g_gameVp[0].Width == g_sceneW && (UINT)g_gameVp[0].Height == g_sceneH;
     // v0.7.8: the profile-screen preview pass shifts viewport 0 too (when its size is the preview RT's size, g_pvW x
     // g_pvH), by the frame's own jitter (g_pvJx / g_pvJy: no G-buffer pass advances g_jx / g_jy on that screen).
@@ -7859,7 +8047,9 @@ void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
     if (pvShift) PvShiftScale(g_pvCur, &pvKx, &pvKy);
     // v0.10.0 phase 2: the open mirror view's G-buffer / forward pass (g_mirJit) shifts viewport 0 by ITS unit's jitter when
     // the viewport is the mirror's full size (the lighting pass and the 256^2 down-sample are never g_mirJit)
-    const bool mirShift = !worldShift && !pvShift && g_mirJit && g_mirW && JitterLive() &&
+    // phase 55: + a qualifying mesh redraw of the open view's lighting bind (g_mirLight, the view's own shift / size)
+    const bool mirLight = g_lightRedrawShift && g_lightBind == 2 && g_mirLight;
+    const bool mirShift = !worldShift && !pvShift && (g_mirJit || mirLight) && g_mirW && JitterLive() &&
                           (UINT)g_gameVp[0].Width == g_mirW && (UINT)g_gameVp[0].Height == g_mirH;
     const float sx = pvShift ? g_pvJx * pvKx : (mirShift ? g_mirShX : g_jx),
                 sy = pvShift ? g_pvJy * pvKy : (mirShift ? g_mirShY : g_jy);
@@ -9607,6 +9797,16 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
 #endif
     CPU_ORIG(oOMSetRenderTargets(ctx, n, rtvs, dsv));
     g_jitterPass = pass;
+    // phase 55: the LIGHTING bind (2 RTVs + the scene depth; or the open jittered mirror view's, MirOnBind above) -- never jittered
+    // as a whole, only its qualifying mesh redraws get the G-buffer's shift, per draw (LightRedrawOnDraw). Every bind starts
+    // unshifted (ReconcileViewports below).
+    g_lightRedrawShift = false;
+#ifdef WITH_DLAA
+    g_lightBind = !g_lightRedrawCfg ? 0 : ((sceneDsv && n == 2) ? 1 : (g_mirLight ? 2 : 0));
+    if (g_lightBind) ++g_cLightBinds;
+#else
+    g_lightBind = 0;                               // (no depth-stencil state hook without WITH_DLAA: no redraw is recognised)
+#endif
 #ifdef WITH_DLAA
     g_fwdBound = fwdNow != nullptr;                // v0.10.0 phase 7
     g_fwdBoundTex = fwdNow;
@@ -11180,6 +11380,9 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
             "jitter DLSS is told (expect 0); passes started by a scene depth clear while a jittered binding was bound (viewport "
             "re-shifted there): %llu", (unsigned long long)g_blitCount, (unsigned long long)g_cRastJitMismatch,
             (unsigned long long)g_cRastJitPasses, (unsigned long long)g_cClearReshift);
+#ifdef WITH_DLAA
+        LightRedrawStatsLog(g_blitCount, g_blitCount - g_rateBlit0);   // phase 55 (window = the rate window's blits)
+#endif
         if (FlatViewCount() >= 2) {                        // v0.12.0 issue #12: the per-view figures the FIFO stats line has for 2 eyes
             const FlatViews::Layout& L = g_fv.Current();
             char vt[1024], ord[64];
@@ -11762,6 +11965,9 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
     // every bush against water / sky (ATS flat 2026-10-10, Ctrl+F10 color_in: sky 204, line 25, hill 120; gone with DLAA off).
     // Such a draw gets the game's own viewport; the shifted one is re-issued right after it (never a preview tile: those are
     // composited by their own rule, and never our own draws).
+    // phase 55: a Draw in the lighting bind (the full-screen light passes, Draw(3)) is never a mesh redraw: back to the game's
+    // own viewport if the previous draw was a shifted redraw (LightRedrawOnDraw)
+    if (g_lightRedrawShift && !t_inDlaa) { g_lightRedrawShift = false; ++g_cLightUnDraw; ReconcileViewports(ctx, false); }
     const bool fsUnshift = !t_inDlaa && g_vpShifted && (g_jitterPass || g_mirJit) && !g_previewPass && vertexCount <= 4 &&
                            g_gameVpN > 0 && g_gameVp[0].MinDepth == 0.0f && g_gameVp[0].MaxDepth == 1.0f;
     if (fsUnshift) {
@@ -12344,12 +12550,142 @@ void ObjOnBind(ID3D11DeviceContext* ctx, bool sceneDsv) {
     if (!g_gbufPass && sceneDsv && g_objOn) ObjWatch(ctx);
 }
 
+// ---- phase 55 LIGHTING-PASS REDRAWS ------------------------------------------------------------------------------------------
+// REPORT (ATS 2026-10-13, VR + flat): the sun-through-fabric light under a market tent canopy flickers. Self-test with the
+// jitter off: always lit.
+// CAUSE (RenderDoc amtrucks_2026.10.13_13.44.08_frame1323.rdc + Ctrl+F10 / Ctrl+F9 dumps): the game's LIGHTING bind (2 RTVs +
+// the scene DSV -- never jittered by the mod, see the "Jitter-pass test" in hkOMSetRenderTargets) contains mesh REDRAWS: the
+// canopy mesh is drawn again (EID 21000, VS 12256 / PS 12257, additive One / One) with depth test GREATER_EQUAL, depth write
+// OFF and a rasterizer depth bias (SlopeScaledDepthBias 1.0, DepthBiasClamp 1.5e-5). The game accepts these only where the
+// redraw's depth matches the G-buffer's. The G-buffer is rasterized with the jittered viewport (shift (sx, sy), (W+1) x (H+1)
+// with jitter_overscan) but the redraw with the game's own one: on steep surfaces the depth gap exceeds the 1.5e-5 bias clamp
+// on ~3 of the 8 Halton phases -> the whole lit area fails the test on those frames = the flicker. Same class: the emissive
+// redraws EIDs 20966-20991 (VS 9918 / PS 9919, same depth state + bias). (The forward pass's redraws are jittered already: the
+// whole forward binding is a jitter pass.)
+// FIX: inside a lighting bind (g_lightBind: hkOMSetRenderTargets main, MirOnBind mirror), a DrawIndexed / DrawIndexedInstanced
+// QUALIFIES as a redraw when the game's depth-stencil state has DepthEnable, DepthWriteMask ZERO and DepthFunc GREATER_EQUAL or
+// EQUAL (the game's depth is reversed -- the G-buffer tests GREATER -- so "on or in front of the G-buffer surface"), AND the
+// rasterizer state has a depth bias (DepthBias != 0 or SlopeScaledDepthBias != 0: the coplanar-redraw signature; a light volume
+// or a decal box -- depth LESS, cull front -- has none). A qualifying draw gets exactly the viewport the G-buffer used (the
+// current pass's g_jx / g_jy -- per eye the order is G-buffer, lighting, forward, the forward pass relies on the same; a mirror
+// view its own shift / size); any other draw of the binding (the full-screen Draw(3) light passes in hkDraw, a non-qualifying
+// DrawIndexed, a depth-stencil state change to a non-qualifying state) gets the game's own viewport back. Only a CHANGE of the
+// qualification issues viewports (ReconcileViewports), so a run of redraws costs one RSSetViewports at its start and one at its
+// end. Both states are classified once per state object (small caches holding a ref, like ObjResolve). No-op while the jitter
+// is not live (JitterLive / WorldJitterHeld; mirror: the unit's jitOn) and with light_redraw_jitter = 0. DrawInstanced /
+// indirect draws are not hooked: such a draw right after a redraw with the same depth-stencil state would keep the shift.
+struct LightStateEnt { IUnknown* key; bool ok; };          // key: the game's state (ref held); ok = qualifies
+constexpr int kLightCacheMax = 64;
+LightStateEnt g_lightDss[kLightCacheMax];
+int           g_lightDssN = 0;
+LightStateEnt g_lightRs[kLightCacheMax];
+int           g_lightRsN = 0;
+
+bool LightDssOk(const D3D11_DEPTH_STENCIL_DESC& d) {
+    return d.DepthEnable && d.DepthWriteMask == D3D11_DEPTH_WRITE_MASK_ZERO &&
+           (d.DepthFunc == D3D11_COMPARISON_GREATER_EQUAL || d.DepthFunc == D3D11_COMPARISON_EQUAL);
+}
+bool LightRsOk(const D3D11_RASTERIZER_DESC& d) { return d.DepthBias != 0 || d.SlopeScaledDepthBias != 0.0f; }
+
+// The cached verdict of state `s` (null = the D3D11 default: depth LESS with write / no bias = never a redraw).
+template <class S, class D>
+bool LightCached(LightStateEnt* tab, int& n, S* s, bool (*ok)(const D&)) {
+    if (!s) return false;
+    for (int i = 0; i < n; ++i) if (tab[i].key == s) return tab[i].ok;
+    D d{};
+    s->GetDesc(&d);
+    const bool v = ok(d);
+    if (n < kLightCacheMax) { s->AddRef(); tab[n].key = s; tab[n].ok = v; ++n; }   // the key stays alive (no pointer reuse)
+    return v;
+}
+
+// The game's depth-stencil state as tracked by hkOMSetDepthStencilState (OMGet when unknown, as ObjWatch).
+ID3D11DepthStencilState* LightGameDss(ID3D11DeviceContext* ctx) {
+    if (!g_objGameKnown) {
+        ID3D11DepthStencilState* cur = nullptr;
+        UINT ref = 0;
+        ctx->OMGetDepthStencilState(&cur, &ref);
+        g_objGameDss = cur; g_objGameRef = ref; g_objGameKnown = true;
+        if (cur) cur->Release();                          // still bound (runtime ref)
+    }
+    return g_objGameDss;
+}
+
+void LightFirstLog(ID3D11DeviceContext* ctx) {
+    D3D11_DEPTH_STENCIL_DESC dd{};
+    D3D11_RASTERIZER_DESC rd{};
+    if (ID3D11DepthStencilState* s = LightGameDss(ctx)) s->GetDesc(&dd);
+    ID3D11RasterizerState* rs = nullptr;
+    ctx->RSGetState(&rs);
+    if (rs) { rs->GetDesc(&rd); rs->Release(); }
+    Log("lighting redraws (phase 55): first %s lighting-pass mesh redraw issued with the G-buffer's viewport -- shift (%+.4f,%+.4f)%s, "
+        "game viewport %.0fx%.0f, depth func %s write %d, depth bias %d slope %.3f clamp %.2g (Present #%llu). The redraws now land "
+        "on the jittered G-buffer depth (light under the canopy no longer switches off on some jitter phases)%s",
+        g_lightBind == 2 ? "mirror" : "main", (double)g_vpShiftX, (double)g_vpShiftY, g_vpOver ? " + 1 px overscan" : "",
+        g_gameVp[0].Width, g_gameVp[0].Height, ObjCmpName(dd.DepthFunc), (int)dd.DepthWriteMask, rd.DepthBias,
+        (double)rd.SlopeScaledDepthBias, (double)rd.DepthBiasClamp, (unsigned long long)g_frames.load(std::memory_order_relaxed),
+        g_vpShifted ? "" : " -- WARNING: the viewport was NOT shifted (game viewport is not the pass size)");
+}
+
+// hkDrawIndexed / hkDrawIndexedInstanced (game context, not our work, g_lightBind != 0), before the game's draw.
+void LightRedrawOnDraw(ID3D11DeviceContext* ctx) {
+    bool want = false;
+    if (g_objHooked.load(std::memory_order_relaxed) && !g_previewPass &&
+        LightCached<ID3D11DepthStencilState, D3D11_DEPTH_STENCIL_DESC>(g_lightDss, g_lightDssN, LightGameDss(ctx), &LightDssOk) &&
+        (g_lightBind == 2 ? g_mirLight : (JitterLive() && !WorldJitterHeld()))) {
+        ID3D11RasterizerState* rs = nullptr;
+        ctx->RSGetState(&rs);
+        want = LightCached<ID3D11RasterizerState, D3D11_RASTERIZER_DESC>(g_lightRs, g_lightRsN, rs, &LightRsOk);
+        if (rs) rs->Release();                            // the cache holds its own ref
+    }
+    if (want) { ++g_cLightRedraws; ++g_cLightRedrawsTotal; }
+    if (want == g_lightRedrawShift) {
+        if (want && !g_vpShifted) ++g_cLightNoShift;
+        return;
+    }
+    g_lightRedrawShift = want;
+    if (want) ++g_cLightRuns; else ++g_cLightUnIdx;
+    ReconcileViewports(ctx, false);
+    if (want && !g_vpShifted) ++g_cLightNoShift;
+    if (want && g_cLightRedrawsTotal == 1) LightFirstLog(ctx);
+}
+
+// hkOMSetDepthStencilState (game context, after the game's call): a non-qualifying state ends a redraw run right here (covers
+// a following draw that is not hooked).
+void LightRedrawOnDss(ID3D11DeviceContext* ctx, ID3D11DepthStencilState* dss) {
+    if (LightCached<ID3D11DepthStencilState, D3D11_DEPTH_STENCIL_DESC>(g_lightDss, g_lightDssN, dss, &LightDssOk)) return;
+    g_lightRedrawShift = false;
+    ++g_cLightUnDss;
+    ReconcileViewports(ctx, false);
+}
+
+// ResetPassTrackingCore (game context change): the old context's binding is forgotten, the caches' refs dropped.
+void LightRedrawOnContextReset() {
+    g_lightBind = 0; g_lightRedrawShift = false;
+    for (int i = 0; i < g_lightDssN; ++i) g_lightDss[i].key->Release();
+    for (int i = 0; i < g_lightRsN; ++i) g_lightRs[i].key->Release();
+    g_lightDssN = g_lightRsN = 0;
+}
+
+// Level-4 statistics (the FIFO stats cadence, next to the "jitter check" line); the window restarts.
+void LightRedrawStatsLog(uint64_t blit, uint64_t blitsInWindow) {
+    const double perBlit = blitsInWindow ? (double)g_cLightRedraws / (double)blitsInWindow : 0.0;
+    LogDbg("lighting redraws (phase 55, light_redraw_jitter %d) @blit %llu: %llu shifted redraws in %llu lighting binds (%.1f per "
+        "blit), %llu runs; back to the game's viewport at a Draw %llu, a non-qualifying DrawIndexed %llu, a depth-stencil state %llu; "
+        "redraws NOT shifted (viewport not the pass size) %llu; cached states: depth-stencil %d, rasterizer %d",
+        g_lightRedrawCfg, (unsigned long long)blit, (unsigned long long)g_cLightRedraws, (unsigned long long)g_cLightBinds,
+        perBlit, (unsigned long long)g_cLightRuns, (unsigned long long)g_cLightUnDraw, (unsigned long long)g_cLightUnIdx,
+        (unsigned long long)g_cLightUnDss, (unsigned long long)g_cLightNoShift, g_lightDssN, g_lightRsN);
+    g_cLightBinds = g_cLightRedraws = g_cLightRuns = g_cLightUnDraw = g_cLightUnIdx = g_cLightUnDss = g_cLightNoShift = 0;
+}
+
 void STDMETHODCALLTYPE hkOMSetDepthStencilState(ID3D11DeviceContext* ctx, ID3D11DepthStencilState* dss, UINT ref) {
     CPU_HOOK(kHkOMSetDss);                                 // phase 31 CPU profiler (cpu_prof.h)
     if (t_inDlaa || !IsGameCtx(ctx)) { CPU_ORIG(oOMSetDepthStencilState(ctx, dss, ref)); return; }
     g_objGameDss = dss; g_objGameRef = ref; g_objGameKnown = true;
     if (g_objInScene) { ObjBindForGame(ctx); return; }
     CPU_ORIG(oOMSetDepthStencilState(ctx, dss, ref));
+    if (g_lightRedrawShift) LightRedrawOnDss(ctx, dss);   // phase 55: a non-qualifying state ends the redraw run here
     if (g_objSceneDsv && g_objOn) ObjWatch(ctx);
 }
 
@@ -12782,7 +13118,7 @@ void FwdFlush() {
     memset(g_fwdNear, 0, sizeof(g_fwdNear)); g_fwdNearFill = 0;
     g_fwdLastCb = nullptr; g_fwdLastCbBytes = 0;
 }
-void FwdOnContextReset() { FwdFlush(); g_fwdFailed = false; }
+void FwdOnContextReset() { FwdFlush(); g_fwdFailed = false; BiasOnContextReset(); }   // phase 49: + the glow bias mask
 
 // Depth tested, no depth written. Null = the D3D11 default state (writes depth) -> no.
 bool FwdDssQualifies(ID3D11DepthStencilState* s) {
@@ -13461,6 +13797,7 @@ void FwdBatch(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int 
 void FwdOnPassEnd(ID3D11DeviceContext* ctx) {
     CpuProf::Block cpb(CpuProf::kBFwd);               // phase 31 CPU profiler (cpu_prof.h)
     if (g_passSeq) FwdBatch(ctx, g_passSeq - 1, true, 3);
+    if (g_passSeq) BiasBatch(ctx, g_passSeq - 1, 3);  // phase 49: the glow bias mask (before the pre-tonemap DLAA reads it)
 }
 
 // v0.10.0 phase 10: called for every qualifying forward draw (ids on or off): the record (+ its pixel-shader state) is the input
@@ -13480,6 +13817,338 @@ bool DidFwdOnDraw(ID3D11DeviceContext* ctx, UINT ic, UINT si, INT bv) {
     if (rec.Record(g_ctx1, ic, 1, si, bv, 0, false)) { ++g_didFwdRec; return true; }
     ++g_didFwdRecFull;
     return false;
+}
+
+// ---- phase 49 GLOW BIAS MASK (dlaa.ini dlss_bias_mask, default 100 %; menu row "Light glow ghosting fix") -----------------------
+// WHY (user report, night driving, flat + VR): street-lamp and vehicle-light glows GHOST -- a trail behind them when the camera
+// moves. Those glows / flares / light cones are ADDITIVE forward draws (RenderDoc frame 1969: 31 per frame with DestBlend ONE, depth
+// tested without depth write, docs/CAPTURE_FINDINGS.md): no depth and no motion of their own, so NGX gets the depth / motion of what
+// lies behind them, and its history keeps the glow where it was a frame ago (the forward depth / forward ids leave them out on
+// purpose: their pixels belong to what is behind them). DLSS's own answer is the BIAS CURRENT COLOUR mask (NGX
+// DLSS.Input.Bias.Current.Color.Mask, 1 = take this frame's colour over the history there); the mod never set it before.
+// HOW:
+//  * BiasOnDraw (hkDrawIndexed, after the game's draw, main forward binding, world-layer viewport -- the forward depth's rule): a
+//    draw whose blend state ADDS to RT0 (BlendEnable, DestBlend ONE, BlendOp ADD, SrcBlend ONE or SRC_ALPHA, colour written, no
+//    alpha-to-coverage) and whose depth-stencil state tests (GREATER / GREATER_EQUAL: reversed-Z) without writing is recorded into
+//    the pass's glow record (g_didBiasRing: forward mode, pixel-shader state captured = the forward-depth batch's machinery), one
+//    record per SrcBlend kind; the bound RT0 (the pass's forward colour) is kept for the pass (PassSlot::biasF).
+//  * BiasBatch (next to the forward-depth batch: the scene depth discard / the forward leave, the next pass start, a forced buffer
+//    discard): DrawIdRecord::ReplayDepth re-draws them with the game's VS / PS / resources / RS / viewport into ONE shared
+//    R11G11B10_FLOAT GLOW SUM of the scene size (blend ONE + ONE or SRC_ALPHA + ONE, as the game adds them), depth GREATER_EQUAL
+//    without write against a READ-ONLY view of the pass's scene depth (the game's own occlusion), through the pass's area clip.
+//    Then the SHARE PASS (DrawIdRecord::BiasShare) writes the pass's R8 mask (DepthTwin::biasTex): smoothstep(0.05, 0.5,
+//    lum(glow sum) / lum(forward colour)) -- the share of the pixel's light the glows made. Exposure-free (both are the game's
+//    linear HDR values of that pixel): a glow over the night sky = 1, a faint glow over a bright day background ~ 0 (keeps its
+//    anti-aliasing).
+//  * SceneDlaa::Run (BiasPrep): the mask at the DLAA crop, max'ed with LAST frame's glow pixels carried along this frame's motion
+//    vectors (the history pixels that still hold the glow that moved on: the trail itself), x dlss_bias_mask %, -> NGX. Per eye /
+//    per flat view exactly like the depth snapshot (per pass slot, consumed at the blit). Mirror units / previews get none (their
+//    passes have no forward hooks).
+// COST: the glow draws once more (~30 small sprites per pass in the capture), one full-screen share pass inside the clip, one crop
+//    dispatch per eye: GpuPerf 'bias-mask'. Memory: the glow sum (4 B per scene pixel, one, shared), an R8 mask per pass slot
+//    (pooled) and 3 R8 crops per unit.
+// LOG: the first pass with glow draws (how many were flagged), then (log level 4) a line every 1200 passes: glow draws per pass.
+ID3D11Device*             g_biasDev = nullptr;       // device of the objects below (ref)
+ID3D11DepthStencilState*  g_biasDss = nullptr;       // GREATER_EQUAL, no depth write, stencil off
+ID3D11BlendState*         g_biasBs[2] = {};          // RT0 += src (ONE) / src x src alpha (SRC_ALPHA), colour only
+ID3D11Texture2D*          g_biasGlow = nullptr;      // the shared glow sum: R11G11B10_FLOAT, scene size
+ID3D11RenderTargetView*   g_biasGlowRtv = nullptr;
+ID3D11ShaderResourceView* g_biasGlowSrv = nullptr;
+uint32_t                  g_biasGlowW = 0, g_biasGlowH = 0;
+bool                      g_biasFailed = false;      // a state / the glow sum could not be created: off for the session (one line)
+int                       g_biasClearView = -1;      // D3D11_FEATURE_D3D11_OPTIONS.ClearView (once): clear only the clip
+FwdMemo                   g_biasBsMemo[kFwdMemo];    // blend state -> glow kind (g_biasBsKind; ref held on the key)
+int8_t                    g_biasBsKind[kFwdMemo] = {};
+int                       g_biasBsMemoN = 0;
+FwdMemo                   g_biasDssMemo[kFwdMemo];   // depth-stencil state -> tests without writing (reversed-Z)
+int                       g_biasDssMemoN = 0;
+struct BiasColSrv { Microsoft::WRL::ComPtr<ID3D11Texture2D> tex; Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv; };
+BiasColSrv                g_biasCol[4];              // SRVs of the forward colours (flat 1, VR one per eye), round robin
+int                       g_biasColNext = 0;
+// stats window (passes with dlss_bias_mask > 0): passes / passes with glows, glow draws by kind, record full, batches, failed,
+// masks written, glow draws without the forward colour bound
+uint64_t                  g_biasPasses = 0, g_biasPassesGlow = 0, g_biasDraws[2] = {}, g_biasRecFull = 0, g_biasBatches = 0;
+uint64_t                  g_biasFail = 0, g_biasShares = 0, g_biasNoColour = 0, g_biasTicks = 0;
+uint32_t                  g_biasStatLogs = 0;
+bool                      g_biasFirstLogged = false;
+
+bool BiasLive() {
+    return g_biasCfg > 0 && !g_biasFailed && g_passSeq > g_fifoHead && g_dlaaOn.load(std::memory_order_relaxed) &&
+           !g_passive.load(std::memory_order_relaxed) && !g_jitterOnly.load(std::memory_order_relaxed) &&
+           !g_gameDeviceChanged.load(std::memory_order_relaxed) && g_sceneDepth && g_sceneW && g_sceneH &&
+           SceneDlaa::ShadersReady();
+}
+
+void BiasFlush() {
+    for (int i = 0; i < g_biasBsMemoN; ++i) if (g_biasBsMemo[i].key) g_biasBsMemo[i].key->Release();
+    for (int i = 0; i < g_biasDssMemoN; ++i) if (g_biasDssMemo[i].key) g_biasDssMemo[i].key->Release();
+    g_biasBsMemoN = g_biasDssMemoN = 0;
+    if (g_biasGlowSrv) { g_biasGlowSrv->Release(); g_biasGlowSrv = nullptr; }
+    if (g_biasGlowRtv) { g_biasGlowRtv->Release(); g_biasGlowRtv = nullptr; }
+    if (g_biasGlow) { g_biasGlow->Release(); g_biasGlow = nullptr; }
+    g_biasGlowW = g_biasGlowH = 0;
+    if (g_biasDss) { g_biasDss->Release(); g_biasDss = nullptr; }
+    for (ID3D11BlendState*& b : g_biasBs) if (b) { b->Release(); b = nullptr; }
+    if (g_biasDev) { g_biasDev->Release(); g_biasDev = nullptr; }
+    for (BiasColSrv& c : g_biasCol) c = BiasColSrv();
+    g_biasColNext = 0;
+    g_biasClearView = -1;
+}
+// device / context change: everything of the old device, the glow records and the kept forward colours
+void BiasOnContextReset() {
+    BiasFlush();
+    g_biasFailed = false;
+    for (auto& recs : g_didBiasRing) for (DrawIdRecord& r : recs) r.Reset();
+    for (PassSlot& p : g_ring) { p.biasF.Reset(); p.biasDraws = 0; }
+}
+
+// -1 = not a glow draw, 0 = SrcBlend ONE, 1 = SrcBlend SRC_ALPHA (both DestBlend ONE, ADD). Null = blending off -> -1.
+int BiasBlendKind(ID3D11BlendState* s) {
+    if (!s) return -1;
+    for (int i = 0; i < g_biasBsMemoN; ++i) if (g_biasBsMemo[i].key == s) return g_biasBsKind[i];
+    D3D11_BLEND_DESC d{};
+    s->GetDesc(&d);
+    const D3D11_RENDER_TARGET_BLEND_DESC& r = d.RenderTarget[0];
+    int k = -1;
+    if (r.BlendEnable && r.DestBlend == D3D11_BLEND_ONE && r.BlendOp == D3D11_BLEND_OP_ADD && (r.RenderTargetWriteMask & 7) != 0 &&
+        !d.AlphaToCoverageEnable)
+        k = r.SrcBlend == D3D11_BLEND_ONE ? 0 : (r.SrcBlend == D3D11_BLEND_SRC_ALPHA ? 1 : -1);
+    if (g_biasBsMemoN < kFwdMemo) { s->AddRef(); g_biasBsMemo[g_biasBsMemoN] = { s, k >= 0 }; g_biasBsKind[g_biasBsMemoN++] = (int8_t)k; }
+    return k;
+}
+// depth tested (reversed-Z GREATER / GREATER_EQUAL), no depth written. Null = the default state (writes depth) -> no.
+bool BiasDssQualifies(ID3D11DepthStencilState* s) {
+    if (!s) return false;
+    for (int i = 0; i < g_biasDssMemoN; ++i) if (g_biasDssMemo[i].key == s) return g_biasDssMemo[i].ok;
+    D3D11_DEPTH_STENCIL_DESC d{};
+    s->GetDesc(&d);
+    const bool ok = d.DepthEnable && d.DepthWriteMask == D3D11_DEPTH_WRITE_MASK_ZERO &&
+                    (d.DepthFunc == D3D11_COMPARISON_GREATER || d.DepthFunc == D3D11_COMPARISON_GREATER_EQUAL);
+    if (g_biasDssMemoN < kFwdMemo) { s->AddRef(); g_biasDssMemo[g_biasDssMemoN++] = { s, ok }; }
+    return ok;
+}
+
+// Our states (once per device) + the glow sum at the scene size. false = not now (failed: g_biasFailed, logged once).
+bool BiasEnsure(ID3D11DeviceContext* ctx) {
+    if (!g_biasDev) ctx->GetDevice(&g_biasDev);
+    if (!g_biasDev) return false;
+    HRESULT hr = S_OK;
+    if (!g_biasDss) {
+        D3D11_DEPTH_STENCIL_DESC dd{};
+        dd.DepthEnable = TRUE;
+        dd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;  // a read-only view of the scene depth is bound
+        dd.DepthFunc = D3D11_COMPARISON_GREATER_EQUAL;   // reversed-Z: the game's own occlusion of the glows
+        dd.StencilEnable = FALSE;
+        dd.StencilReadMask = 0xFF; dd.StencilWriteMask = 0x00;
+        const D3D11_DEPTH_STENCILOP_DESC op{ D3D11_STENCIL_OP_KEEP, D3D11_STENCIL_OP_KEEP, D3D11_STENCIL_OP_KEEP, D3D11_COMPARISON_ALWAYS };
+        dd.FrontFace = op; dd.BackFace = op;
+        hr = g_biasDev->CreateDepthStencilState(&dd, &g_biasDss);
+    }
+    for (int k = 0; k < 2 && SUCCEEDED(hr); ++k) {
+        if (g_biasBs[k]) continue;
+        D3D11_BLEND_DESC bd{};
+        bd.AlphaToCoverageEnable = FALSE;
+        bd.IndependentBlendEnable = FALSE;
+        D3D11_RENDER_TARGET_BLEND_DESC& r = bd.RenderTarget[0];
+        r.BlendEnable = TRUE;
+        r.SrcBlend = k ? D3D11_BLEND_SRC_ALPHA : D3D11_BLEND_ONE;   // as the game adds them
+        r.DestBlend = D3D11_BLEND_ONE;
+        r.BlendOp = D3D11_BLEND_OP_ADD;
+        r.SrcBlendAlpha = D3D11_BLEND_ONE; r.DestBlendAlpha = D3D11_BLEND_ONE; r.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+        r.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN | D3D11_COLOR_WRITE_ENABLE_BLUE;
+        hr = g_biasDev->CreateBlendState(&bd, &g_biasBs[k]);
+    }
+    if (FAILED(hr) || !g_biasDss || !g_biasBs[0] || !g_biasBs[1]) {
+        g_biasFailed = true;
+        LogErr("DLSS bias mask: OFF for this session -- state creation failed hr=0x%lx", (unsigned long)hr);
+        return false;
+    }
+    if (g_biasGlow && g_biasGlowW == g_sceneW && g_biasGlowH == g_sceneH) return true;
+    if (g_biasGlowSrv) { g_biasGlowSrv->Release(); g_biasGlowSrv = nullptr; }
+    if (g_biasGlowRtv) { g_biasGlowRtv->Release(); g_biasGlowRtv = nullptr; }
+    if (g_biasGlow) { g_biasGlow->Release(); g_biasGlow = nullptr; }
+    g_biasGlowW = g_biasGlowH = 0;
+    for (BiasColSrv& c : g_biasCol) c = BiasColSrv();     // v0.13.0 pre-release fix: the refs on the old scene size's forward colours go
+    g_biasColNext = 0;                                    //   too (a render-scale change kept up to 4 old eye textures alive)
+    D3D11_TEXTURE2D_DESC td{};
+    td.Width = g_sceneW; td.Height = g_sceneH;
+    td.MipLevels = 1; td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_R11G11B10_FLOAT;
+    td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_DEFAULT;
+    td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    if (FAILED(hr = g_biasDev->CreateTexture2D(&td, nullptr, &g_biasGlow)) ||
+        FAILED(hr = g_biasDev->CreateRenderTargetView(g_biasGlow, nullptr, &g_biasGlowRtv)) ||
+        FAILED(hr = g_biasDev->CreateShaderResourceView(g_biasGlow, nullptr, &g_biasGlowSrv))) {
+        if (g_biasGlowSrv) { g_biasGlowSrv->Release(); g_biasGlowSrv = nullptr; }
+        if (g_biasGlowRtv) { g_biasGlowRtv->Release(); g_biasGlowRtv = nullptr; }
+        if (g_biasGlow) { g_biasGlow->Release(); g_biasGlow = nullptr; }
+        g_biasFailed = true;
+        LogErr("DLSS bias mask: OFF for this session -- glow sum create hr=0x%lx (%ux%u R11G11B10_FLOAT)", (unsigned long)hr,
+            g_sceneW, g_sceneH);
+        return false;
+    }
+    g_biasGlowW = g_sceneW; g_biasGlowH = g_sceneH;
+    if (g_biasClearView < 0) {
+        D3D11_FEATURE_DATA_D3D11_OPTIONS o{};
+        g_biasClearView = SUCCEEDED(g_biasDev->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS, &o, sizeof(o))) && o.ClearView ? 1 : 0;
+    }
+    return true;
+}
+
+// an SRV of the pass's forward colour (RGBA16F, single-sample, shader-readable); null = not readable
+ID3D11ShaderResourceView* BiasColourSrv(ID3D11Device* dev, ID3D11Texture2D* f) {
+    if (!dev || !f) return nullptr;
+    for (BiasColSrv& c : g_biasCol) if (c.tex.Get() == f) return c.srv.Get();
+    D3D11_TEXTURE2D_DESC d{};
+    f->GetDesc(&d);
+    if (!(d.BindFlags & D3D11_BIND_SHADER_RESOURCE) || d.SampleDesc.Count != 1 || d.ArraySize != 1) return nullptr;
+    D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+    sd.Format = d.Format == DXGI_FORMAT_R16G16B16A16_TYPELESS ? DXGI_FORMAT_R16G16B16A16_FLOAT : d.Format;
+    sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    sd.Texture2D.MostDetailedMip = 0;
+    sd.Texture2D.MipLevels = 1;
+    BiasColSrv& c = g_biasCol[g_biasColNext];
+    g_biasColNext = (g_biasColNext + 1) % (int)(sizeof(g_biasCol) / sizeof(g_biasCol[0]));
+    c = BiasColSrv();
+    if (FAILED(dev->CreateShaderResourceView(f, &sd, &c.srv)) || !c.srv) { c = BiasColSrv(); return nullptr; }
+    c.tex = f;                                            // (ref held: the identity cannot be reused while cached)
+    return c.srv.Get();
+}
+
+// One world forward-pass DrawIndexed of the main forward binding, right after the game's own call (see the block comment).
+void BiasOnDraw(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex) {
+    CpuProf::Block cpb(CpuProf::kBFwd);                // phase 31 CPU profiler: with the forward depth's recording
+    if (g_gameVpN == 0 || g_gameVp[0].MinDepth < 0.005f || g_gameVp[0].MaxDepth > 0.95f) return;   // world layer only
+    ID3D11BlendState* bs = nullptr; FLOAT bf[4] = {}; UINT mask = 0;
+    ctx->OMGetBlendState(&bs, bf, &mask);
+    const int kind = BiasBlendKind(bs);
+    if (bs) bs->Release();
+    if (kind < 0) return;
+    ID3D11DepthStencilState* dss = nullptr; UINT ref = 0;
+    ctx->OMGetDepthStencilState(&dss, &ref);
+    const bool dOk = BiasDssQualifies(dss);
+    if (dss) dss->Release();
+    if (!dOk || !g_passSeq) return;
+    if (g_ctx1Owner != ctx) {
+        if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
+        ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&g_ctx1);
+        g_ctx1Owner = ctx;
+    }
+    if (!g_ctx1) return;
+    PassSlot& slot = g_ring[SlotOf(g_passSeq - 1)];
+    if (!slot.biasF) {                                    // the pass's forward colour = the RT0 of this draw (the share pass reads it)
+        ID3D11RenderTargetView* rtv = nullptr;
+        ctx->OMGetRenderTargets(1, &rtv, nullptr);
+        if (rtv) {
+            Microsoft::WRL::ComPtr<ID3D11Resource> r;
+            rtv->GetResource(&r);
+            rtv->Release();
+            if (r && (void*)r.Get() == g_fwdBoundTex) r.As(&slot.biasF);
+        }
+        if (!slot.biasF) { ++g_biasNoColour; return; }
+    }
+    DrawIdRecord& rec = g_didBiasRing[SlotOf(g_passSeq - 1)][kind];
+    if (!rec.Forward()) rec.SetForward(true);
+    if (!rec.CapturePs() && rec.Count() == 0) rec.SetCapturePs(true);
+    DidShadow::SetAlias(ctx);                             // phase 35 (as DidFwdOnDraw)
+    if (rec.Record(g_ctx1, indexCount, 1, startIndex, baseVertex, 0, false)) { ++slot.biasDraws; ++g_biasDraws[kind]; }
+    else ++g_biasRecFull;
+}
+
+// The pending glow draws of pass `pass` -> the glow sum -> the share pass -> the pass's mask. why: 1 = forced (hkMap discard),
+// 2 = the next pass started, 3 = the pass end (scene depth discard / forward leave).
+void BiasBatch(ID3D11DeviceContext* ctx, uint64_t pass, int why) {
+    DrawIdRecord* const recs = g_didBiasRing[SlotOf(pass)];
+    if (recs[0].PendingDepth() <= 0 && recs[1].PendingDepth() <= 0) return;
+    PassSlot& ps = g_ring[SlotOf(pass)];
+    DepthTwin& t = ps.twin;
+    if (g_ctx1Owner != ctx) {
+        if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
+        ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&g_ctx1);
+        g_ctx1Owner = ctx;
+    }
+    if (!g_ctx1) return;
+    const int64_t t0 = MeasureOn() ? Qpc() : 0;           // phase 45: the clock only while measuring (g_measure)
+    ++g_biasBatches;
+    ID3D11Device* dev = nullptr;
+    ctx->GetDevice(&dev);
+    ID3D11DepthStencilView* const ro = dev ? DidRoDsv(dev, PassDepth(ps)) : nullptr;   // this pass's depth (issue #9)
+    // BiasEnsure FIRST: at the very first batch and on a scene-size change it (re)creates the glow sum and DROPS the forward-colour
+    // SRV cache (g_biasCol), so the SRV must be looked up after it. (v0.13.0 pre-release: the other order handed BiasShare the SRV
+    // that BiasEnsure had just released = an access violation in the NVIDIA driver at the first pass with glows, ATS VR 18:06.)
+    const bool ens = g_biasCfg > 0 && !g_biasFailed && g_sceneW && g_sceneH && BiasEnsure(ctx);
+    ID3D11ShaderResourceView* const colSrv = ens ? BiasColourSrv(dev, ps.biasF.Get()) : nullptr;
+    const bool ok = ens && ro && colSrv && t.EnsureBias(dev, g_sceneW, g_sceneH);
+    if (dev) dev->Release();
+    t_inDlaa = true;                                      // our own calls: every hook passes straight through
+    if (!ok) {                                            // nothing drawn: the draws are released, the pass gets no mask
+        for (int k = 0; k < 2; ++k) { recs[k].ReplayDepth(g_ctx1, nullptr, nullptr, nullptr, nullptr, true); recs[k].DropIds(); }
+        t_inDlaa = false;
+        ++g_biasFail;
+        return;
+    }
+    GpuPerf::SetPass(ps.s);
+    const int pq = GpuPerf::Begin(ctx, GpuPerf::kBias);
+    const D3D11_RECT* const clip = ps.clip ? &ps.clipRect : nullptr;
+    if (!t.biasOpen) {                                    // the pass's first glow segment: its glow sum starts at 0
+        const FLOAT zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        if (clip && g_biasClearView == 1) g_ctx1->ClearView(g_biasGlowRtv, zero, clip, 1);
+        else oClearRTV(ctx, g_biasGlowRtv, zero);
+        if (clip) oClearRTV(ctx, t.biasRtv.Get(), zero); // outside the clip the share pass writes nothing (pooled: old values)
+        t.biasOpen = true;
+    }
+    int replayed[2] = { 0, 0 };
+    for (int k = 0; k < 2; ++k) {
+        if (recs[k].PendingDepth() <= 0) continue;
+        recs[k].SetView(clip, 0);
+        const DrawIdRecord::ReplayResult rr = recs[k].ReplayDepth(g_ctx1, g_biasGlowRtv, ro, g_biasDss, g_biasBs[k], true);
+        recs[k].DropIds();                                // no ids for glows: the refs go
+        replayed[k] = rr.replayed;
+    }
+    const bool shared = DrawIdRecord::BiasShare(g_ctx1, t.biasRtv.Get(), g_sceneW, g_sceneH, g_biasGlowSrv, colSrv, clip);
+    GpuPerf::End(ctx, pq);
+    t_inDlaa = false;
+    if (shared) { t.biasValid = true; ++g_biasShares; }
+    else ++g_biasFail;
+    if (t0) g_biasTicks += (uint64_t)(Qpc() - t0);
+    if (!g_biasFirstLogged && shared && replayed[0] + replayed[1] > 0) {
+        g_biasFirstLogged = true;
+        Log("DLSS bias mask (phase 49): first pass with light glows (pass s=%llu, %s): %u additive forward draws flagged in this pass "
+            "(%d SrcBlend ONE + %d SRC_ALPHA re-drawn into the %ux%u glow sum, depth tested against the scene depth%s), the share "
+            "pass wrote the pass's R8 mask -- NGX gets it (x dlss_bias_mask %d %%) as its bias current colour mask: the glows come "
+            "from the current frame instead of the history (no trail)", (unsigned long long)ps.s,
+            why == 1 ? "forced by a discard" : (why == 2 ? "next pass" : "pass end"), ps.biasDraws, replayed[0], replayed[1],
+            g_biasGlowW, g_biasGlowH, clip ? ", inside the DLAA-area clip" : "", g_biasCfg);
+    }
+}
+
+// StartPass (pass s, before the game's clear): the previous pass's pending glow draws (no discard came) + the stats window; the
+// new slot's records start empty.
+void BiasOnPassStart(ID3D11DeviceContext* ctx, uint64_t s) {
+    if (s > 0) {
+        BiasBatch(ctx, s - 1, 2);
+        const PassSlot& prev = g_ring[SlotOf(s - 1)];
+        if (g_biasCfg > 0) {
+            ++g_biasPasses;
+            if (prev.biasDraws) ++g_biasPassesGlow;
+        }
+    }
+    for (DrawIdRecord& r : g_didBiasRing[SlotOf(s)]) { r.Reset(); r.SetForward(true); r.SetCapturePs(true); }
+    if (g_biasPasses < 1200) return;
+    const double p = (double)g_biasPasses;
+    const double qf = g_qpcFreq > 0 ? (double)g_qpcFreq : 1.0;
+    if (g_biasStatLogs++ < 200)
+        LogDbg("DLSS bias mask (phase 49) over %llu passes: glow draws per pass %.1f (SrcBlend ONE %.1f, SRC_ALPHA %.1f), passes with "
+            "glows %.0f %%, batches %.2f / pass, masks %llu, failed %llu, record full %llu, glow draws without the forward colour %llu "
+            "| CPU %.3f ms/pass (batch; the recording is in the forward depth's figure) | dlss_bias_mask %d %%",
+            (unsigned long long)g_biasPasses, (double)(g_biasDraws[0] + g_biasDraws[1]) / p, (double)g_biasDraws[0] / p,
+            (double)g_biasDraws[1] / p, 100.0 * (double)g_biasPassesGlow / p, (double)g_biasBatches / p,
+            (unsigned long long)g_biasShares, (unsigned long long)g_biasFail, (unsigned long long)g_biasRecFull,
+            (unsigned long long)g_biasNoColour, (double)g_biasTicks * 1000.0 / qf / p, g_biasCfg);
+    g_biasPasses = g_biasPassesGlow = 0;
+    g_biasDraws[0] = g_biasDraws[1] = 0;
+    g_biasRecFull = g_biasBatches = g_biasFail = g_biasShares = g_biasNoColour = g_biasTicks = 0;
 }
 
 // v0.10.0 phase 5 (Alt+F8): one forward draw of the logged pass that gets no forward depth / no id (verdict != 0 of
@@ -13694,6 +14363,11 @@ void DidOnDiscardMap(ID3D11DeviceContext* ctx, ID3D11Resource* r) {
         }
     }
     if (fr.HasOpenRing(r)) { t_inDlaa = true; fr.OnDiscard(ctx, r); t_inDlaa = false; }
+    // phase 49: the same for the pending glow draws (their VS / PS buffers): re-drawn into the glow sum now
+    DrawIdRecord* const br = g_didBiasRing[SlotOf(g_passSeq - 1)];
+    if ((br[0].PendingDepth() > 0 && br[0].ReferencesPending(r)) || (br[1].PendingDepth() > 0 && br[1].ReferencesPending(r)))
+        BiasBatch(ctx, g_passSeq - 1, 1);
+    for (int k = 0; k < 2; ++k) if (br[k].HasOpenRing(r)) { t_inDlaa = true; br[k].OnDiscard(ctx, r); t_inDlaa = false; }
 }
 
 void DidOnContextReset() {
@@ -15014,7 +15688,7 @@ void MirEndView(ID3D11DeviceContext* ctx, MirUnit& m, const char* lateWhy) {
     if (!m.open) return;
     if (m.rec.PendingReplay() > 0) MirReplay(ctx, m, true, 3);   // no G-buffer leave since: the game's targets restored
     m.open = false;
-    if (g_mirCur == u) { g_mirCur = -1; g_mirGbuf = false; g_mirJit = false; }
+    if (g_mirCur == u) { g_mirCur = -1; g_mirGbuf = false; g_mirJit = false; g_mirLight = false; }
     m.sCand += (uint64_t)m.ps.cand.Count(0);
     if (MirPathLive()) {
         if (lateWhy) {
@@ -15049,6 +15723,7 @@ void MirOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* 
     if (cu && cu->open && !sameView && (gbuf || sceneGbuf)) MirEndView(ctx, *cu, "the next G-buffer bind");
     g_mirGbuf = false;
     g_mirJit = false;
+    g_mirLight = false;                                   // phase 55
     if (gbuf && sameView) {
         g_mirGbuf = true; g_mirJit = cu->jitOn; g_mirShX = cu->jx; g_mirShY = cu->jy; g_mirW = cu->w; g_mirH = cu->h;
         return;
@@ -15075,7 +15750,10 @@ void MirOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* 
             }
         }
     } else if (n == 2) {
-        cu->lightSeen = true;                             // the lighting pass (never shifted)
+        cu->lightSeen = true;                             // the lighting pass (never shifted as a whole)
+        // phase 55: ... but its mesh redraws (depth GREATER_EQUAL / EQUAL, no depth write, depth bias) must land on the view's
+        // jittered G-buffer depth -> they get the view's own shift / size per draw (LightRedrawOnDraw, ReconcileViewports)
+        if (cu->jitOn) { g_mirLight = true; g_mirShX = cu->jx; g_mirShY = cu->jy; g_mirW = cu->w; g_mirH = cu->h; }
     }
 }
 
@@ -15111,7 +15789,7 @@ void MirNextFrame(uint64_t n) {
         if (m.open && c) MirEndView(c, m, "the frame boundary");
         m.open = false;
     }
-    g_mirCur = -1; g_mirGbuf = false; g_mirJit = false;
+    g_mirCur = -1; g_mirGbuf = false; g_mirJit = false; g_mirLight = false;
     ++g_mirWinPresents;
     if (g_mirSeenN > 0) ++g_mirWinFrames;
     MirTurnsEndFrame(g_mirFrame);                        // phase 41: the frame's run / held units, the slot balance
@@ -15135,7 +15813,7 @@ void MirInvalidate() {
 // ResetPassTrackingCore (game context change): the old context's views are abandoned (DLAA is forced off after a device
 // change; the units' DLAA resources belong to the old device and are never used again).
 void MirOnContextReset() {
-    g_mirCur = -1; g_mirGbuf = false; g_mirJit = false; g_mirSeenN = 0;
+    g_mirCur = -1; g_mirGbuf = false; g_mirJit = false; g_mirLight = false; g_mirSeenN = 0;
     for (MirUnit& m : g_mir) {
         m.open = false; m.rec.Reset(); m.color.Reset(); m.rt0.Reset(); m.depth.Reset();
         m.roDsv.Reset(); m.roDsvTex = nullptr;
@@ -15303,9 +15981,10 @@ void ToggleMirrors(uint64_t n) {
 // while the menu is open). The panel is drawn (TuningMenu::Draw, menu.cpp) at Present over the backbuffer (flat, and the VR
 // desktop mirror; under a present layer: over the game-side backbuffer while it is still bound at the frame-end boundary) and,
 // in VR, into each eye texture right after the game's eye blit (and the DLSS upscale composite), centred on the eye's optical
-// centre. While open, NO key and NO controller button reaches the game (v0.10.2 MenuHidesInput -> dinput_wrap.cpp; v0.10.0 /
-// v0.10.1: only the 5 menu keys), and a key / button held on a row for bind_hold_ms binds it to that row's hotkey (v0.10.2
-// HOLD TO BIND, MenuBindTick). Closed: one branch per Present and per blit Draw, nothing else.
+// centre. While open, only the 5 menu inputs are hidden from the game, every key / button only while the Hotkeys page waits
+// for a press (v0.12.1 phase 50 MenuPublishHide -> dinput_wrap.cpp; v0.10.2 .. v0.12.0: every key / button while open), and
+// hotkeys are set on the Hotkeys page (v0.12.1 phase 50, "the HOTKEYS PAGE" below; v0.10.2 .. v0.12.0: HOLD TO BIND on the
+// rows). Closed: one branch per Present and per blit Draw, nothing else.
 #ifndef DLAA_INJECTOR_VERSION
 #define DLAA_INJECTOR_VERSION "0.0.0-dev"
 #endif
@@ -15315,6 +15994,7 @@ enum MenuRowId {
     MR_MODE, MR_PROFILE, MR_MODEL,
     MR_PICGRP,                                            // phase 43: group "Picture"
     MR_SHARP, MR_WIDTH, MR_LOD, MR_LODCUT, MR_AREA, MR_PRETM, MR_FWD,
+    MR_BIAS,                                              // phase 49: light glow ghosting fix (dlaa.ini dlss_bias_mask)
     MR_MOTGRP,                                            // phase 43: group "Motion and mirrors"
     MR_DRAWIDS, MR_MIRROR,
     MR_MIRTURNS,                                          // phase 41: mirrors in turns (dlaa.ini mirror_turns)
@@ -15325,18 +16005,27 @@ enum MenuRowId {
     MR_VRS, MR_VRSSIZE,                                   // phase 34: VR foveated rendering (dlaa.ini vrs; vrs_inner / vrs_outer preset)
     MR_VRSPASS,                                           // phase 42: Foveated passes (dlaa.ini vrs_passes: scene / scene + lighting)
     MR_HMASK,                                             // phase 40: VR hidden area mask (dlaa.ini xr_hidden_mask)
+    MR_FRGRP,                                             // phase 52: group "Frame rate"
+    MR_REFLEX, MR_FPSCAP,                                 // phase 52: flat Reflex / FPS cap (dlaa.ini reflex / fps_cap)
+    MR_VRFPSCAP,                                          // phase 52: VR FPS cap (dlaa.ini vr_fps_cap: half / third)
+    MR_CPU,                                               // phase 54: CPU tuning (dlaa.ini cpu_pcore / cpu_priority / cpu_no_throttle)
     MR_PANELGRP,                                          // v0.10.3 phase 29c: group header "Panel settings" (collapsible)
     MR_POSX, MR_POSY, MR_SIZE, MR_DEPTH, MR_FACE,
     MR_MENUKEYS,                                          // v0.10.2: the 5 menu keys, bound by 5 holds in sequence (29c: in the panel group)
     MR_FPS,
     MR_FPSGRP,                                            // v0.10.3 phase 29c: group header "FPS counter settings" (collapsible)
     MR_FPSLOCK,                                           // v0.10.3 phase 28: VR fps box follows the head / fixed in the cab
-    MR_FPSX, MR_FPSY, MR_FPSSIZE,
+    MR_FPSPROF,                                           // phase 51b: Position per vehicle (dlaa.ini fps_profiles)
+    MR_FPSREMEAS,                                         // phase 51c: Re-measure cab spot (an action: Right)
+    MR_FPSX, MR_FPSY,
+    MR_FPSYAW, MR_FPSPITCH, MR_FPSROLL,                   // phase 44: VR turn / tilt / rotate (dlaa.ini fps_vr_yaw / _pitch / _roll); moved up behind Y (combined build)
+    MR_FPSSIZE,
     MR_FPSCOLOR,                                          // phase 44: fps box colour (dlaa.ini fps_color)
     MR_FPSBRIGHT,                                         // phase 48: fps box brightness (dlaa.ini fps_brightness)
+    MR_FPSOPAC,                                           // phase 51f: fps box opacity (dlaa.ini fps_opacity)
     MR_FPSDIST,                                           // phase 44: VR distance (dlaa.ini fps_vr_dist)
-    MR_FPSYAW, MR_FPSPITCH, MR_FPSROLL,                   // phase 44: VR turn / tilt / rotate (dlaa.ini fps_vr_yaw / _pitch / _roll)
     MR_LOG,                                               // phase 39: Logging (dlaa.ini log_level) + what logging costs
+    MR_HOTKEYS,                                           // v0.12.1 phase 50: "Hotkeys..." -- Right opens the Hotkeys page
     MR_SAVE, MR_RESET, MR_CLOSE,
     MR_COUNT
 };
@@ -15345,24 +16034,28 @@ static_assert(MR_COUNT <= TuningMenu::kMaxRows, "tuning menu: too many rows");
 // `last` (v0.10.3 phase 29c layout). MenuRowGroup / MenuGrpOpen / MenuRowVisible / MenuChange / the open-state array use it.
 struct MenuGroupDef { int header, last; const wchar_t* title; };
 constexpr MenuGroupDef kMenuGroups[] = {
-    { MR_PICGRP,   MR_FWD,      L"Picture" },
+    { MR_PICGRP,   MR_BIAS,     L"Picture" },                    // phase 49: last row MR_FWD -> MR_BIAS
     { MR_MOTGRP,   MR_MIRTURNS, L"Motion and mirrors" },
     { MR_UPGRP,    MR_OFXR,     L"Upscaling and VR" },
     { MR_VRPGRP,   MR_HMASK,    L"VR performance" },
+    { MR_FRGRP,    MR_CPU,      L"Frame rate and CPU" },         // phase 52; + phase 54 CPU tuning
     { MR_PANELGRP, MR_MENUKEYS, L"Panel settings" },
-    { MR_FPSGRP,   MR_FPSROLL,  L"FPS counter settings" },     // phase 44: last row MR_FPSSIZE -> MR_FPSROLL (phase 48: + FPS brightness inside)
+    { MR_FPSGRP,   MR_FPSDIST,  L"FPS counter settings" },     // phase 44: last row MR_FPSSIZE -> MR_FPSROLL (phase 48: + FPS brightness inside)
 };
 constexpr int kMenuGroupCount = (int)(sizeof(kMenuGroups) / sizeof(kMenuGroups[0]));
-static_assert(MR_PICGRP + 1 == MR_SHARP && MR_FWD + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_MIRTURNS + 1 == MR_UPGRP &&
-              MR_UPGRP + 1 == MR_UPSCALE && MR_OFXR + 1 == MR_VRPGRP && MR_VRPGRP + 1 == MR_TURBO && MR_HMASK + 1 == MR_PANELGRP &&
-              MR_PANELGRP + 1 == MR_POSX && MR_MENUKEYS + 1 == MR_FPS && MR_FPSGRP + 1 == MR_FPSLOCK && MR_FPSROLL + 1 == MR_LOG,
+static_assert(MR_PICGRP + 1 == MR_SHARP && MR_BIAS + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_MIRTURNS + 1 == MR_UPGRP &&
+              MR_UPGRP + 1 == MR_UPSCALE && MR_OFXR + 1 == MR_VRPGRP && MR_VRPGRP + 1 == MR_TURBO && MR_HMASK + 1 == MR_FRGRP &&
+              MR_FRGRP + 1 == MR_REFLEX && MR_VRFPSCAP + 1 == MR_CPU && MR_CPU + 1 == MR_PANELGRP &&
+              MR_PANELGRP + 1 == MR_POSX && MR_MENUKEYS + 1 == MR_FPS && MR_FPSGRP + 1 == MR_FPSLOCK && MR_FPSLOCK + 1 == MR_FPSPROF && MR_FPSPROF + 1 == MR_FPSREMEAS &&
+              MR_FPSDIST + 1 == MR_LOG,
               "tuning menu: a group's children must follow its header and fill it up to its last row");
 static_assert(MR_SHARP < MR_WIDTH && MR_WIDTH < MR_LOD && MR_LOD < MR_LODCUT && MR_LODCUT < MR_AREA && MR_AREA < MR_PRETM &&
-              MR_PRETM < MR_FWD && MR_DRAWIDS < MR_MIRROR && MR_MIRROR < MR_MIRTURNS && MR_UPSCALE < MR_DLAA && MR_DLAA < MR_OFXR &&
+              MR_PRETM < MR_FWD && MR_FWD < MR_BIAS && MR_DRAWIDS < MR_MIRROR && MR_MIRROR < MR_MIRTURNS && MR_UPSCALE < MR_DLAA && MR_DLAA < MR_OFXR &&
               MR_TURBO < MR_VRS && MR_VRS < MR_VRSSIZE && MR_VRSSIZE < MR_VRSPASS && MR_VRSPASS < MR_HMASK &&
+              MR_REFLEX < MR_FPSCAP && MR_FPSCAP < MR_VRFPSCAP && MR_VRFPSCAP < MR_CPU &&
               MR_POSX < MR_POSY && MR_POSY < MR_SIZE && MR_SIZE < MR_DEPTH && MR_DEPTH < MR_FACE && MR_FACE < MR_MENUKEYS &&
-              MR_FPSLOCK < MR_FPSX && MR_FPSX < MR_FPSY && MR_FPSY < MR_FPSSIZE && MR_FPSSIZE < MR_FPSCOLOR &&
-              MR_FPSCOLOR < MR_FPSBRIGHT && MR_FPSBRIGHT < MR_FPSDIST && MR_FPSDIST < MR_FPSYAW && MR_FPSYAW < MR_FPSPITCH && MR_FPSPITCH < MR_FPSROLL,
+              MR_FPSLOCK < MR_FPSPROF && MR_FPSPROF < MR_FPSREMEAS && MR_FPSREMEAS < MR_FPSX && MR_FPSX < MR_FPSY && MR_FPSY < MR_FPSYAW && MR_FPSYAW < MR_FPSPITCH && MR_FPSPITCH < MR_FPSROLL &&
+              MR_FPSROLL < MR_FPSSIZE && MR_FPSSIZE < MR_FPSCOLOR && MR_FPSCOLOR < MR_FPSBRIGHT && MR_FPSBRIGHT < MR_FPSOPAC && MR_FPSOPAC < MR_FPSDIST,
               "tuning menu: group children out of order");
 const wchar_t* const kMenuDesc[] = {
     // v0.10.0: every row = what it does, when a player would change it, what it costs. The panel shows 3 lines of about 105
@@ -15391,6 +16084,9 @@ const wchar_t* const kMenuDesc[] = {
     L"Not used with DLSS upscale or Windows HDR. Same cost either way; takes ~60 frames to switch.",
     L"Gives wires, fences and glass their own distance instead of what is behind them, so they do not smear when you move. Turn "
     L"it off if you see no smearing there: saves 0.02 - 0.06 ms per eye.",
+    // phase 49 (MR_BIAS)
+    L"Stops street-lamp and car-light glows leaving a trail behind them when you move: DLSS takes each glow from the current "
+    L"frame, not its history. 25 % steps; lower it if lamp glows flicker, 0 = off. Costs about 0.05 - 0.2 ms per eye.",
     // phase 43: menu categories (Motion and mirrors)
     L"How moving parts and truck mirrors are handled by DLAA. Right opens the group, Left closes it; it starts closed every time the "
     L"menu opens.",
@@ -15427,6 +16123,19 @@ const wchar_t* const kMenuDesc[] = {
     L"VR only. The game skips the lens corners you never see (the headset reports them), so it draws fewer pixels: more GPU "
     L"headroom, the picture you see stays the same. The first switch-on needs a game restart. Turn it off if the edge of the view "
     L"looks wrong.",
+    // phase 52: menu category (Frame rate) + MR_REFLEX, MR_FPSCAP, MR_VRFPSCAP
+    L"Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed "
+    L"every time the menu opens.",
+    L"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when the GPU is the limit. Boost "
+    L"also keeps the GPU clocks up. Same fps; small cost. Not used in VR.",
+    L"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. Set it a bit below what your "
+    L"PC holds in a busy city. With Reflex on, the NVIDIA driver does the limiting. off = no limit.",
+    L"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the headset's reprojection "
+    L"(ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when the fps swings. Turns Turbo off while on.",
+    // phase 54 (MR_CPU)
+    L"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs only), the game runs at Above "
+    L"normal priority, and Windows may not throttle it (EcoQoS) or ignore its timer requests. Helps when the CPU is the limit; no "
+    L"cost. Separate settings in dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle.",
     // v0.10.3 phase 29c (MR_PANELGRP)
     L"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes it; it starts closed "
     L"every time the menu opens.",
@@ -15440,7 +16149,7 @@ const wchar_t* const kMenuDesc[] = {
     L"inward shift per eye with menu_vr_layer = 0. Same size at every depth. Change it if the panel is tiring to look at. No cost.",
     L"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same size from every angle "
     L"(as a VR layer, the default, the head-following fps box too); off = a flat picture. No cost.",
-    nullptr,                                              // MR_MENUKEYS: built with the hold time and the key names (MenuBuildPanel)
+    nullptr,                                              // MR_MENUKEYS: built with the key names (MenuBuildPanel)
     L"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see what a setting gains. "
     L"Its GPU cost is measured: per frame, every picture it is drawn into; none when off. Save keeps it for the next start.",
     // v0.10.3 phase 29c (MR_FPSGRP)
@@ -15449,31 +16158,43 @@ const wchar_t* const kMenuDesc[] = {
     // v0.10.3 phase 28 (MR_FPSLOCK)
     L"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, ignores the cab's sway. "
     L"Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Per-part motion vectors). No cost.",
+    // phase 51b (MR_FPSPROF)
+    L"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, size, colour, brightness and "
+    L"text (saved in dlaa.ini when the menu closes). Off = one shared set for every vehicle. No cost.",
+    // phase 51c / 51d (MR_FPSREMEAS)
+    L"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box sits off. Left = this "
+    L"vehicle's box back to the defaults (spot, turn, size, colour, text); other vehicles keep theirs. The box is square to the cab.",
     L"Moves the fps box sideways, in % of the screen (VR fixed / attached: degrees around you). Flat and VR each keep their "
     L"own position. No cost.",
     L"Moves the fps box up / down, in % of the screen (VR fixed / attached: degrees, minus = up). Flat and VR each keep their "
     L"own position. No cost.",
+    L"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face turns to the right). Use it "
+    L"to angle the box when it sits at the side. 0 = it faces you. No cost.",
+    L"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if lying on the dashboard). "
+    L"0 = it faces you. No cost.",
+    L"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = upright. No cost.",
     L"Makes the fps box bigger or smaller (0.2 .. 3.0). Raise it if you cannot read it in the headset or on a big screen. No cost.",
     // phase 44 (MR_FPSCOLOR, MR_FPSDIST, MR_FPSYAW, MR_FPSPITCH, MR_FPSROLL)
     L"The colour of the fps box's text: 20 colours, each with an outline so it reads on any picture (black on white = dark text, "
     L"white outline). Flat and VR. No cost.",
     L"How bright the fps box is, 10 - 100 %: 100 = the colour as it is, lower dims the text (the outline stays) toward black. Use it "
     L"to tone the counter down at night or in the headset. Flat and VR. No cost.",
+    // phase 51f (MR_FPSOPAC)
+    L"How see-through the whole fps box is, 10 - 100 %: 100 = solid, lower fades the text AND its black outline together, so a "
+    L"dimmed box does not turn into a black blob. Flat and VR. No cost.",
     L"VR only, so greyed in flat. How far away the fps box floats, 0.30 - 3.00 m. It keeps the same size in your view at every "
     L"distance; only the depth changes. Put it near the depth you look at to read it without refocusing. No cost.",
-    L"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face turns to the right). Use it "
-    L"to angle the box when it sits at the side. 0 = it faces you. No cost.",
-    L"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if lying on the dashboard). "
-    L"0 = it faces you. No cost.",
-    L"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = upright. No cost.",
     // phase 39 (MR_LOG)
     L"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + problems worked around; "
     L"info = + start-up and changes; debug = + statistics, and debug also runs the GPU timers and the CPU profiler.",
+    // v0.12.1 phase 50 (MR_HOTKEYS)
+    L"Every hotkey of this menu, one line per action, with its keyboard key and controller button. Right opens the list; pick "
+    L"an action with Right, then press the new key or wheel button. Saved to dlaa.ini at once.",
     L"Writes everything shown here into dlaa.ini (settings, and the panel / fps box positions once you moved them), keeping every "
     L"other line. Do it once you like what you see, or the changes are gone at the next start. Mode saves itself.",
     // v0.10.3 phase 29d (MR_RESET): MenuBuildPanel puts "Hold <menu Right> for <bind_hold_ms> s to reset. " in front of it
     L"Puts every setting in this menu back to how the mod ships (model, sharpen, texture sharpness, DLAA area, motion, mirrors, "
-    L"profile, panel, fps box, turbo, foveated, logging), live and in dlaa.ini, keeping your hotkeys and every other line.",
+    L"profile, panel, fps box, turbo, foveated, frame rate, logging), live and in dlaa.ini, keeping your hotkeys and every other line.",
     nullptr,                                              // MR_CLOSE: "Closes the menu ..." (built with the key name)
 };
 static_assert(sizeof(kMenuDesc) / sizeof(kMenuDesc[0]) == MR_COUNT, "tuning menu: kMenuDesc must have one entry per row (MR_* order)");
@@ -15509,6 +16230,7 @@ float g_fpsVrBuild  = 0.0f;                               // VR: fps box scale o
 inline void FpsSyncColor() {
     const FpsPose::Color c = FpsPose::Dimmed(FpsPose::ColorOf(g_fpsColor), g_fpsBright);   // phase 48: + brightness (the widget cache compares the colours)
     TuningMenu::SetWidgetColors(c.tr, c.tg, c.tb, c.lr, c.lg, c.lb);
+    TuningMenu::SetWidgetOpacity((float)FpsPose::ClampOpacity(g_fpsOpacity) / 100.0f);   // phase 51f: text AND outline (the shader's alpha factor)
 }
 bool  g_fpsMoved    = false;                              // an fps box row changed since the menu was opened (close line)
 
@@ -15524,6 +16246,8 @@ inline bool MenuVr() {
                         g_frames.load(std::memory_order_relaxed) - g_pvVrPicFrame < 120);
 }
 inline int  MenuClampI(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+// VR fps box position rows: 0.2 per press, clamped -50..50, rounded to 1 decimal so repeated steps do not drift
+inline float MenuStepFpsVr(float v, int dir) { const float r = std::round((v + 0.2f * (float)dir) * 10.0f) / 10.0f; return r < -50.0f ? -50.0f : (r > 50.0f ? 50.0f : r); }
 // v0.10.3 phase 29b: the VR panel goes to the compositor as an OpenXR QUAD layer now (menu_vr_layer = 1 and its quad went out
 // at the last xrEndFrame -- XrHook::OverlayActive(0)): the Depth row then edits menu_vr_dist (the quad's distance) instead of
 // menu_vr_depth (the in-picture fallback's shift, also the path while the quad path is not up / failed this session).
@@ -15561,6 +16285,34 @@ struct FpsMeter {
 FpsMeter g_fps;
 constexpr double kFpsEvery = 0.5;                // s between two updates
 
+// The box's two text lines from the last measurement and fps_text (0 = both, 1 = the fps line only, 2 = the ms line only; 3 / 4 / 5
+// = the same as numbers only, no "fps" / "ms"; the unused line is empty and TuningMenu::RenderWidget centres the single line in
+// the big font). Also called when the text mode changes.
+void FpsSetLines() {
+    FpsMeter& f = g_fps;
+    const bool units = g_fpsText < 3;
+    const int what = g_fpsText % 3;                       // 0 both, 1 fps, 2 ms
+    wchar_t a[24], b[24];
+    if (f.have) {
+        swprintf(a, 24, units ? L"%.0f fps" : L"%.0f", f.fps);
+        swprintf(b, 24, units ? L"%.1f ms" : L"%.1f", f.frameMs);
+    } else {
+        wcscpy_s(a, 24, units ? L"-- fps" : L"--");
+        wcscpy_s(b, 24, units ? L"-- ms" : L"--");
+    }
+    wcscpy_s(f.line1, 24, what == 2 ? b : a);             // ms only: ONE line, passed as line1
+    if (what == 0) wcscpy_s(f.line2, 24, b); else f.line2[0] = 0;
+}
+// the fps_text modes as the menu row shows them (example values) and as the logs name them
+const wchar_t* FpsTextMenuName(int t) {
+    static const wchar_t* const k[kFpsTextModes] = { L"72 fps + 13.9 ms", L"72 fps", L"13.9 ms", L"72 + 13.9", L"72", L"13.9" };
+    return t >= 0 && t < kFpsTextModes ? k[t] : L"?";
+}
+const char* FpsTextLogName(int t) {
+    static const char* const k[kFpsTextModes] = { "fps + ms", "fps only", "ms only", "fps + ms numbers only (no units)",
+                                                  "fps number only", "ms number only" };
+    return t >= 0 && t < kFpsTextModes ? k[t] : "?";
+}
 void FpsTick() {
     CpuProf::Block cpb(CpuProf::kBMenu);               // phase 31 CPU profiler (cpu_prof.h)
     FpsMeter& f = g_fps;
@@ -15585,13 +16337,13 @@ void FpsTick() {
     f.have = true;
     f.t0 = now;
     f.count = 0;
-    swprintf(f.line1, 24, L"%.0f fps", f.fps);
-    swprintf(f.line2, 24, L"%.1f ms", f.frameMs);
+    FpsSetLines();
 }
 void FpsStop() {
     const LONGLONG freq = g_fps.freq;
     g_fps = FpsMeter();
     g_fps.freq = freq;
+    FpsSetLines();
 }
 // v0.10.3 phase 29: how the VR panel / fps box reach the headset now (the toggle logs)
 const char* MenuVrPathName() {
@@ -15607,15 +16359,29 @@ void ToggleFpsBox(uint64_t n) {
     g_fpsShow = !g_fpsShow;
     g_fpsExplicit = g_fpsMoved = true;
     if (!g_fpsShow) {
+        FpsProfStoreLive();                               // phase 51e: nothing of the live values is lost while unbound
         TuningMenu::ReleaseWidget();
         g_fpsVrBuild = 0.0f;
         if (!g_menuOpen.load(std::memory_order_relaxed)) MenuLateReset("fps box off");   // v0.10.0 phase 16
         if (!g_menuOpen.load(std::memory_order_relaxed)) FpsStop();   // (the menu row: the menu is open, the meter keeps running)
     }
-    Log("fps box %s (tuning menu, Present #%llu) -- flat fps_x=%d fps_y=%d fps_scale=%.1f, VR fps_vr_x=%d fps_vr_y=%d "
-        "fps_vr_scale=%.1f; %s", g_fpsShow ? "ON" : "OFF", (unsigned long long)n, g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX,
+    Log("fps box %s (tuning menu, Present #%llu) -- fps_text=%d (0 fps + ms, 1 fps only, 2 ms only, 3..5 the same without units) flat fps_x=%d fps_y=%d fps_scale=%.1f, VR fps_vr_x=%.1f fps_vr_y=%.1f "
+        "fps_vr_scale=%.1f; %s", g_fpsShow ? "ON" : "OFF", (unsigned long long)n, g_fpsText, g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX,
         g_fpsVrY, (double)g_fpsVrScale, MenuVrPathName());
     PlayTones(1, g_fpsShow ? 1200 : 300, 150, 0);
+}
+// The menu's FPS counter row: 7 values, Right = next, Left = previous, wrapping: Off -> fps + ms -> fps only -> ms only ->
+// numbers fps + ms -> fps number -> ms number -> Off. Stored as fps_show (on / off) + fps_text (0..5). Off <-> on goes through
+// ToggleFpsBox (texture drop, meter stop, beep).
+void CycleFpsMode(uint64_t n, int dir) {
+    const int cur = g_fpsShow ? 1 + g_fpsText : 0;
+    const int nxt = ((cur + (dir < 0 ? -1 : 1)) % (kFpsTextModes + 1) + (kFpsTextModes + 1)) % (kFpsTextModes + 1);
+    if (nxt > 0) g_fpsText = nxt - 1;
+    g_fpsExplicit = g_fpsMoved = true;
+    FpsSetLines();                                        // (the texture rebuilds on the changed text, EnsureWidgetTexture)
+    if (cur == 0 || nxt == 0) { ToggleFpsBox(n); return; }
+    Log("fps box text: %s (fps_text=%d, tuning menu, Present #%llu)", FpsTextLogName(g_fpsText), g_fpsText, (unsigned long long)n);
+    PlayTones(1, 900 + 150 * g_fpsText, 100, 0);
 }
 // v0.10.3 phase 28: the menu's FPS counter lock row -- the VR fps box follows the headset (0) / stays fixed in the cab (1).
 // Logged + beeped like ToggleFpsBox. Also switchable in flat (kept for VR; the row is greyed there).
@@ -15623,14 +16389,16 @@ void FpsVrLockReset();                                    // (FpsVrLockedPlace's
 // Phase 47: three values -- Right = the next (follow head -> fixed in play space -> attached to vehicle -> follow head), Left =
 // the previous one.
 void ToggleFpsVrLock(uint64_t n, int dir) {
+    const bool wasAttached = g_fpsVrLock == 2;
     g_fpsVrLock = ((g_fpsVrLock + (dir < 0 ? -1 : 1)) % 3 + 3) % 3;
     g_fpsExplicit = g_fpsMoved = true;
+    if (wasAttached && g_fpsVrLock != 2) FpsProfLeaveAttached();   // v0.13.0 pre-release fix: mode 0 / 1 edits must not reach the profile
     FpsVrLockReset();
     const XrHook::PoseStats ps = XrHook::GetPoseStats();
-    Log("fps box VR lock: %s (fps_vr_lock=%d, tuning menu, Present #%llu) -- fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f are now %s; "
+    Log("fps box VR lock: %s (fps_vr_lock=%d, tuning menu, Present #%llu) -- fps_vr_x=%.1f fps_vr_y=%.1f fps_vr_scale=%.1f are now %s; "
         "OpenXR: hook %s, %llu stereo xrLocateViews seen, %llu xrEndFrame projection layers, layer space type %d (2 = LOCAL); %s%s",
         g_fpsVrLock == 2 ? "ATTACHED TO THE VEHICLE" : g_fpsVrLock ? "FIXED IN THE PLAY SPACE" : "follows the headset", g_fpsVrLock,
-        (unsigned long long)n, g_fpsVrX, g_fpsVrY,
+        (unsigned long long)n, (double)g_fpsVrX, (double)g_fpsVrY,
         (double)g_fpsVrScale, g_fpsVrLock ? "yaw / pitch degrees at fps_vr_dist (+ right, + down) and the size as at 0.8 m"
                                           : "% of the eye picture from its optical centre",
         XrHook::Hooked() ? "installed" : "NOT installed", (unsigned long long)ps.locates, (unsigned long long)ps.endFrames,
@@ -15638,20 +16406,75 @@ void ToggleFpsVrLock(uint64_t n, int dir) {
         "quad layer), placed from a cab draw's MVP of each picture" : "");
     PlayTones(1, g_fpsVrLock == 2 ? 1600 : g_fpsVrLock ? 1200 : 300, 150, 0);
 }
+// phase 52: Turbo mode and the VR FPS cap exclude each other -- the CAP WINS: it exists to give the runtime's reprojection
+// (ASW / Motion Smoothing / SSW) a steady cadence, and turbo stops that reprojection from working. XrHook gets the EFFECTIVE
+// turbo state (its phase 33 switch-off path drains a pending async wait cleanly); g_xrTurbo keeps the user's choice (the Turbo
+// row says "on (FPS cap wins)", dlaa.ini keeps xr_turbo) and comes back when the cap goes off.
+inline bool XrTurboEffective() { return g_xrTurbo != 0 && g_vrFpsCap == 0; }
+void ApplyXrTurbo() { XrHook::SetTurbo(XrTurboEffective()); }
+// phase 52: the frame rate values into FramePace (flat: applied + logged at the next flat Present) and XrHook (VR: the game's
+// next xrWaitFrame), and the effective turbo state.
+void FramePaceApply() {
+    FramePace::Configure(g_reflex, g_fpsCap);
+    XrHook::SetFpsCap(g_vrFpsCap);
+    ApplyXrTurbo();
+}
 // phase 30: the menu's Turbo mode row -- dlaa.ini xr_turbo live (XrHook::SetTurbo: takes effect at the next xrEndFrame). Logged +
 // beeped like the other toggles. Also switchable in flat (kept for VR; the row is greyed there, no OpenXR frame loop).
 void ToggleXrTurbo(uint64_t n) {
     g_xrTurbo = g_xrTurbo ? 0 : 1;
     g_xrTurboExplicit = true;
-    XrHook::SetTurbo(g_xrTurbo != 0);
+    ApplyXrTurbo();                                       // phase 52: stays off while the VR FPS cap is on (the cap wins)
     const XrHook::TurboStats ts = XrHook::GetTurboStats();
     Log("Turbo mode: %s (xr_turbo=%d, tuning menu, Present #%llu) -- %s; OpenXR hook %s; so far %llu async xrWaitFrame, %llu "
         "1-s timeouts, %llu failures", g_xrTurbo ? "ON" : "OFF", g_xrTurbo, (unsigned long long)n,
-        g_xrTurbo ? "from the next xrEndFrame the game no longer waits for the headset; ASW / Motion Smoothing / SSW / "
+        g_xrTurbo && !XrTurboEffective() ? "NOT running: the VR FPS cap is on and wins (vr_fps_cap; turbo runs once the cap is off)"
+        : g_xrTurbo ? "from the next xrEndFrame the game no longer waits for the headset; ASW / Motion Smoothing / SSW / "
                     "reprojection cannot work" : "from the next xrEndFrame the game waits in its own xrWaitFrame again",
         XrHook::Hooked() ? "installed" : "NOT installed (flat launch: kept for VR)", (unsigned long long)ts.asyncWaits,
         (unsigned long long)ts.timeouts, (unsigned long long)ts.failures);
     PlayTones(1, g_xrTurbo ? 1200 : 300, 150, 0);
+}
+// phase 52: the menu's Frame rate rows -- dlaa.ini reflex / fps_cap / vr_fps_cap live (FramePaceApply). Logged + beeped like the
+// other rows; all three are switchable in either mode (the row of the other mode is greyed, the value is kept for it).
+const char* ReflexName(int r) { return r == 2 ? "on + boost" : r ? "on" : "off"; }
+const char* VrCapName(int d) { return d == 2 ? "half" : d == 3 ? "third" : "off"; }
+void StepReflex(uint64_t n, int dir) {                    // Right: off -> on -> on + boost -> off, Left the other way
+    g_reflex = ((g_reflex + (dir < 0 ? -1 : 1)) % 3 + 3) % 3;
+    g_paceExplicit = true;
+    FramePaceApply();
+    Log("Reflex: %s (reflex=%d, tuning menu, Present #%llu) -- %s", ReflexName(g_reflex), g_reflex, (unsigned long long)n,
+        FramePace::Support() == 0 ? FramePace::SupportText()
+        : "flat: applied at the next Present (the next 'frame pace' line has the driver's answer); VR: never used");
+    PlayTones(1, g_reflex == 2 ? 1600 : g_reflex ? 1200 : 300, 150, 0);
+}
+void StepFpsCap(int dir, uint64_t n, bool repeat) {       // the FramePace::kCapSteps list; at the ends a low beep
+    const int next = FramePace::StepCap(g_fpsCap, dir);
+    if (next == g_fpsCap) { if (!repeat) PlayTones(1, 200, 120, 0); return; }
+    g_fpsCap = next;
+    g_paceExplicit = true;
+    FramePaceApply();
+    Log("FPS cap: %d fps%s (fps_cap=%d, tuning menu, Present #%llu) -- flat only: %s", g_fpsCap, g_fpsCap ? "" : " = off", g_fpsCap,
+        (unsigned long long)n, !g_fpsCap ? "no limit"
+        : (g_reflex && FramePace::Support() != 0) ? "the Reflex driver limit (minimumIntervalUs)" : "the own limiter after Present");
+    PlayTones(1, 300 + 3 * (g_fpsCap > 360 ? 360 : g_fpsCap), 60, 0);
+}
+void StepVrFpsCap(uint64_t n, int dir) {                  // Right: off -> half -> third -> off, Left the other way
+    static const int kOrder[3] = { 0, 2, 3 };
+    int i = g_vrFpsCap == 2 ? 1 : g_vrFpsCap == 3 ? 2 : 0;
+    i = ((i + (dir < 0 ? -1 : 1)) % 3 + 3) % 3;
+    g_vrFpsCap = kOrder[i];
+    g_paceExplicit = true;
+    FramePaceApply();
+    const XrHook::FpsCapStats cs = XrHook::GetFpsCapStats();
+    Log("VR FPS cap: %s (vr_fps_cap=%d, tuning menu, Present #%llu) -- %s; headset period %.2f ms%s", VrCapName(g_vrFpsCap),
+        g_vrFpsCap, (unsigned long long)n,
+        g_vrFpsCap == 2 ? "the game's xrWaitFrame waits for every 2nd display slot (reprojection fills the others)"
+        : g_vrFpsCap == 3 ? "the game's xrWaitFrame waits for every 3rd display slot (reprojection fills the others)"
+        : "the game's xrWaitFrame is not delayed", (double)cs.basePeriodNs / 1e6,
+        g_xrTurbo ? (g_vrFpsCap ? " -- Turbo mode (xr_turbo=1) is OFF while the cap is on (the cap wins)" : " -- Turbo mode runs again")
+                  : "");
+    PlayTones(1, g_vrFpsCap ? 900 + 200 * g_vrFpsCap : 300, 150, 0);
 }
 // phase 34: the menu's Foveated (VRS) / Foveated size rows -- dlaa.ini vrs / vrs_inner / vrs_outer live (Vrs::Configure: the next
 // scene bind uses them; a radii change builds new masks once). Logged + beeped like the other toggles; also switchable in flat
@@ -15712,6 +16535,21 @@ void StepVrsSize(int dir, uint64_t n, bool repeat) {
         LogDbg("Foveated size (VRS): %d %% (vrs_inner=%d vrs_outer=%d, auto-repeat)", g_vrsOuter, g_vrsInner, g_vrsOuter);
     PlayTones(1, 300 + 9 * g_vrsOuter, 60, 0);
 }
+// phase 49: the menu's Light glow ghosting fix row -- dlaa.ini dlss_bias_mask live in 25 % steps (0 = off .. 100). Logged + beeped
+// like the step rows; at the ends a low beep. Off: the units drop their glow history (BiasPrep), the pass records stay empty.
+void StepBiasMask(int dir, uint64_t n) {
+    // v0.13.0 pre-release fix: snap to the 25 % grid (a dlaa.ini value like 30 stepped 5 / 30 / 55 / 80 and never reached 0 or 100)
+    const int next = dir > 0 ? (g_biasCfg / 25 + 1) * 25 : ((g_biasCfg + 24) / 25 - 1) * 25;
+    if (next < 0 || next > 100) { PlayTones(1, 200, 120, 0); return; }
+    g_biasCfg = next;
+    g_biasExplicit = true;
+    SceneDlaa::SetBiasStrength(g_biasCfg);
+    Log("Light glow ghosting fix (phase 49): dlss_bias_mask=%d %% (tuning menu, Present #%llu) -- %s", g_biasCfg,
+        (unsigned long long)n, g_biasCfg ? "NGX takes the additive light glows (lamps, vehicle lights) from the current frame "
+                                           "by this share (the bias current colour mask)"
+                                         : "off: NGX gets no mask, the glows come from the history as before phase 49");
+    PlayTones(1, g_biasCfg ? 400 + 8 * g_biasCfg : 300, 120, 0);
+}
 // phase 40: the menu's Hidden area mask (VR) row -- dlaa.ini xr_hidden_mask live (the next eye scene clear draws / skips it). The
 // OpenXR extension is only requested when it was on at the game's start: switched on later, it waits for a restart (logged; the
 // row says so). Logged + beeped like the other toggles; also switchable in flat (kept for VR; the row is greyed there).
@@ -15728,6 +16566,18 @@ void ToggleHiddenMask(uint64_t n) {
                                   : "from the next eye scene clear"),
         hs.ext, hs.ni[0] / 3, hs.ni[1] / 3, (unsigned long long)(g_hm.drawn[0] + g_hm.drawn[1]));
     PlayTones(1, g_xrHiddenMask ? 1200 : 300, 150, 0);
+}
+// phase 54: the menu's CPU tuning row -- dlaa.ini cpu_pcore / cpu_priority / cpu_no_throttle live, all three together: all off ->
+// all on; all on or a mix -> all off. CpuTuning::SetLive applies / undoes the cpu sets, the priority class and the EcoQoS opt-out
+// (it logs what each part did or why not). Runs on the Present thread (the menu keys), which is what the thread part needs.
+void ToggleCpuTuning(uint64_t n) {
+    const int to = CpuTuningPick::NextRowState(CpuTuningPick::Summary(g_cpuPcore, g_cpuPriority, g_cpuNoThrottle));
+    g_cpuPcore = g_cpuPriority = g_cpuNoThrottle = to;
+    g_cpuTuneExplicit = true;
+    Log("CPU tuning: %s (cpu_pcore=%d cpu_priority=%d cpu_no_throttle=%d, tuning menu, Present #%llu)", to ? "ON" : "OFF", to, to, to,
+        (unsigned long long)n);
+    CpuTuning::SetLive({ g_cpuPcore, g_cpuPriority, g_cpuNoThrottle });
+    PlayTones(1, to ? 1200 : 300, 150, 0);
 }
 // phase 42: the menu's Foveated passes row -- dlaa.ini vrs_passes live (0 = scene binds only, 1 = + the lighting bind, outer ring
 // only). The next game bind uses it (VrsOnBind reads g_vrsPasses; Vrs::Enter refuses a lighting bracket at 0).
@@ -15839,19 +16689,30 @@ void ResetSettings(uint64_t n) {
         if (!g_menuOpen.load(std::memory_order_relaxed)) MenuLateReset("fps box off");
         if (!g_menuOpen.load(std::memory_order_relaxed)) FpsStop();
     }
+    g_fpsText = 0;                                        // fps + ms
+    FpsSetLines();
     g_fpsX = 1; g_fpsY = 1; g_fpsScale = 1.0f;
-    g_fpsVrX = 0; g_fpsVrY = -25; g_fpsVrScale = kFpsVrScaleDefault;
+    g_fpsVrX = 0.0f; g_fpsVrY = -25.0f; g_fpsVrScale = kFpsVrScaleDefault;
     g_fpsVrLock = 0;                                      // v0.10.3 phase 28: follows the headset again
     g_fpsColor = 0;                                       // phase 44: white, 0.8 m, not turned
     g_fpsBright = FpsPose::kBrightDefault;                // phase 48
+    g_fpsOpacity = FpsPose::kOpacityDefault;              // phase 51f
     g_fpsVrDist = FpsPose::kDistDefault;
     g_fpsVrYaw = g_fpsVrPitch = g_fpsVrRoll = 0;
+    g_fpsProfiles = 1;                                    // phase 51b: per vehicle (the fps_profile lines stay in dlaa.ini)
+    FpsProfUnbind();                                      // phase 51d: the defaults never reach the bound vehicle's profile -- the
+                                                          // next lock-on in mode 2 loads that vehicle's own values again
     FpsVrLockReset();
     g_fpsExplicit = false;
     g_fpsMoved = true;
     g_xrTurbo = 0;                                        // phase 30: Turbo mode off (the pending wait ends at the next xrEndFrame)
     g_xrTurboExplicit = false;
-    XrHook::SetTurbo(false);
+    g_reflex = g_fpsCap = g_vrFpsCap = 0;                 // phase 52: no Reflex, no caps
+    g_paceExplicit = false;
+    FramePaceApply();                                     //   (+ XrHook::SetTurbo(false))
+    g_cpuPcore = g_cpuPriority = g_cpuNoThrottle = 0;     // phase 54: CPU tuning off (live: cpu sets / priority / EcoQoS put back)
+    g_cpuTuneExplicit = false;
+    CpuTuning::SetLive({ 0, 0, 0 });
     g_vrsOn = 0; g_vrsInner = 55; g_vrsOuter = 80;        // phase 34: foveated rendering off, balanced radii (vrs_quality /
     g_vrsExplicit = false;                                //   vrs_debug are dlaa.ini-only: left as they are)
     g_vrsPasses = 0;                                      // phase 42: scene binds only
@@ -15860,6 +16721,9 @@ void ResetSettings(uint64_t n) {
     g_xrHiddenMask = 0;                                   // phase 40: hidden area mask off
     g_xrHiddenMaskExplicit = false;
     HmApplyConfig();
+    g_biasCfg = 100;                                      // phase 49: the glow bias mask at full strength
+    g_biasExplicit = false;
+    SceneDlaa::SetBiasStrength(g_biasCfg);
     // phase 39: logging back to the level dlaa.ini gives without log_level (the key is removed below; `debug` stays in the file,
     // so debug = 1 there = level 4, as at the next start; else 1 = errors)
     g_logLevelKey = -1;
@@ -15872,22 +16736,29 @@ void ResetSettings(uint64_t n) {
     // + fps_vr_lock = 33, the cap raised to kIniMaxKeys; v0.10.3 phase 29b: + menu_vr_dist = 34; phase 30: + xr_turbo = 35;
     // phase 34: + vrs / vrs_inner / vrs_outer = 38; phase 39: + log_level = 39; phase 41: + mirror_turns = 40;
     // phase 40: + xr_hidden_mask = 41; kIniMaxKeys raised 40 -> 48 at the dev merge;
-    // phase 42: + vrs_passes = 42; phase 44: + fps_color / fps_vr_dist / fps_vr_yaw / fps_vr_pitch / fps_vr_roll = 47, cap 56)
+    // phase 42: + vrs_passes = 42; phase 44: + fps_color / fps_vr_dist / fps_vr_yaw / fps_vr_pitch / fps_vr_roll = 47, cap 56;
+    // later keys (fps_brightness, vrs_passes, log_level, mirror_turns, xr_hidden_mask, dlss_bias_mask) + fps_text: kNKeys below is
+    // the live count, static_assert'ed against the cap)
     static const char* const kKeys[] = {
         "mode", "dlss_preset", "dlaa_area", "sharpness", "sharp_radius", "dlss_upscale", "tex_lod_bias", "tex_lod_bias_cutout",
         "mv_objects", "mirror_dlaa", "mirror_vr_mode", "mirror_flat_mode", "mirror_vr_views", "mirror_mv", "dlaa_pre_tonemap",
         "perf_profile", "mv_fwd_depth",
         "menu_x", "menu_y", "menu_scale", "menu_vr_x", "menu_vr_y", "menu_vr_scale", "menu_vr_depth", "menu_vr_face",
         "menu_vr_dist",                                                                                 // phase 29b
-        "fps_show", "fps_x", "fps_y", "fps_scale", "fps_vr_x", "fps_vr_y", "fps_vr_scale", "fps_vr_lock",   // phase 28: + fps_vr_lock
+        "fps_show", "fps_text", "fps_x", "fps_y", "fps_scale", "fps_vr_x", "fps_vr_y", "fps_vr_scale", "fps_vr_lock",   // phase 28: + fps_vr_lock
         "fps_color", "fps_vr_dist", "fps_vr_yaw", "fps_vr_pitch", "fps_vr_roll",                        // phase 44
         "fps_brightness",                                                                               // phase 48
+        "fps_opacity",                                                                                  // phase 51f
         "xr_turbo",                                                                                     // phase 30
+        "reflex", "fps_cap", "vr_fps_cap",                                                              // phase 52
         "vrs", "vrs_inner", "vrs_outer",                                                                // phase 34
         "vrs_passes",                                                                                   // phase 42
         "log_level",                                                                                    // phase 39
         "mirror_turns",                                                                                 // phase 41
         "xr_hidden_mask",                                                                               // phase 40
+        "dlss_bias_mask",                                                                               // phase 49
+        "cpu_pcore", "cpu_priority", "cpu_no_throttle",                                                 // phase 54
+        "fps_profiles",                                                                                 // phase 51b
     };
     constexpr int kNKeys = (int)(sizeof(kKeys) / sizeof(kKeys[0]));
     static_assert(kNKeys <= kIniMaxKeys, "WriteIniPreserving handles at most kIniMaxKeys keys");
@@ -15901,8 +16772,8 @@ void ResetSettings(uint64_t n) {
             "mirror_turns = 0 dlaa_pre_tonemap = 1 "
             "perf_profile = high mv_fwd_depth = 1 menu_x = 2 menu_y = 8 "
             "menu_scale = 1.0 menu_vr_x = 0 menu_vr_y = -5 menu_vr_scale = 1.0 menu_vr_depth = 12 menu_vr_dist = 100 menu_vr_face = 1 "
-            "fps_show = 0 "
-            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 xr_turbo = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 xr_hidden_mask = 0 log_level = %d (%s) -- profile: %s -- "
+            "fps_show = 0 fps_text = 0 "
+            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_opacity = 100 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 fps_profiles = 1 xr_turbo = 0 reflex = 0 fps_cap = 0 vr_fps_cap = 0 cpu_pcore = 0 cpu_priority = 0 cpu_no_throttle = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 xr_hidden_mask = 0 dlss_bias_mask = 100 log_level = %d (%s) -- profile: %s -- "
             "dlaa.ini: %d keys removed (hotkeys and other lines kept)", (unsigned long long)n, g_dlaaOn.load() ? "DLSS" : "off",
             (double)kFpsVrScaleDefault, LogLevel(), g_logDebugKey ? "no key: debug = 1 in dlaa.ini" : "no key", changed, kNKeys);
         BeepSeq b;                                        // success: rising two-tone 600 -> 900 Hz, 120 ms each (as SaveSettings)
@@ -15931,7 +16802,7 @@ void ResetSettings(uint64_t n) {
 // COST WHILE CLOSED: nothing of this runs (MenuPerfTick is called only while open); the profiler / GPU timers / g_measure go back
 // to the dlaa.ini + log level state at the close (MenuPerfClose): below level 4 every profiler scope is one relaxed load + a
 // not-taken branch, every GPU timer section one call + a flag test, every legacy CPU timer one relaxed load (MeasureOn).
-enum MenuCostGrp { MG_NGX, MG_PART, MG_CAM, MG_FWD, MG_MIR, MG_SHARP, MG_COPY, MG_COUNT };
+enum MenuCostGrp { MG_NGX, MG_PART, MG_CAM, MG_FWD, MG_MIR, MG_SHARP, MG_COPY, MG_BIAS, MG_COUNT };   // phase 49: + MG_BIAS
 int MenuCostGroup(int sec) {
     switch (sec) {
     case GpuPerf::kNgx:      return MG_NGX;
@@ -15944,6 +16815,7 @@ int MenuCostGroup(int sec) {
     case GpuPerf::kSnap:     case GpuPerf::kCandCopy:  case GpuPerf::kConvert:  case GpuPerf::kMedoid:  case GpuPerf::kPassB:
     case GpuPerf::kMvMisc:   return MG_CAM;
     case GpuPerf::kFwdDepth: case GpuPerf::kFwdInit:   return MG_FWD;
+    case GpuPerf::kBias:     return MG_BIAS;          // phase 49: the glow bias mask (pass end + crop)
     case GpuPerf::kMirror:   case GpuPerf::kMirNgx:    return MG_MIR;
     case GpuPerf::kRcas:     return MG_SHARP;
     case GpuPerf::kCopyIn:   case GpuPerf::kCopyOut:   case GpuPerf::kDbgView:  return MG_COPY;
@@ -16420,6 +17292,8 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
     if (mirOn) cell(MR_MIRTURNS, cpuS(cpuMir), gpuS(MG_MIR));    else txt(MR_MIRTURNS, L"off");
     txt(MR_PRETM, vr ? L"-" : L"same");
     if (fwdOn) cell(MR_FWD, cpuS(cpuFwd), gpuS(MG_FWD));         else txt(MR_FWD, L"off");
+    // phase 49: GPU only (its CPU -- the glow draws' recording -- is inside the see-through depth's figure)
+    if (dlaaOn && g_biasCfg > 0) cell(MR_BIAS, nullptr, gpuS(MG_BIAS)); else txt(MR_BIAS, L"off");
     txt(MR_UPSCALE, dlaaOn && upOn ? L"no extra" : L"off");   // the upscale is the same NGX pass; the game draws fewer pixels
     if (dlaaOn) cell(MR_DLAA, cpuS(cpuAll), gpuS(-1));           else txt(MR_DLAA, L"off");
     // v0.10.3 phase 29b: the fps box's own measured GPU cost, ms PER FRAME (GpuPerf::kOverlay: the quad image or the eye pictures +
@@ -16516,6 +17390,11 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         else if (!fwdOn) swprintf(sent, sentCap, L"Off now: costs nothing.");
         else if ((fig = both(cpuFwd, MG_FWD))) swprintf(sent, sentCap, L"Costs %ls per frame now; off saves it.", fig);
         break;
+    case MR_BIAS:                                         // phase 49
+        if (g_biasCfg <= 0 || !dlaaOn)     swprintf(sent, sentCap, L"Off now: costs nothing.");
+        else if (timers && gf.have)        { MenuNum(f, 64, gf.grp[MG_BIAS]);
+                                             swprintf(sent, sentCap, L"Costs %ls ms GPU per frame now; most of it at night.", f); }
+        break;
     case MR_FPS:                                          // v0.10.3 phase 29b
         if (!g_fpsShow)       swprintf(sent, sentCap, L"Off now: costs nothing.");
         else if (!timers)     swprintf(sent, sentCap, L"GPU cost: n/a (the GPU timers could not start).");
@@ -16525,8 +17404,22 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         break;
     case MR_TURBO:                                        // phase 30
         if (!vr)                     swprintf(sent, sentCap, L"Greyed in flat: it changes the VR frame loop only.");
+        else if (g_xrTurbo && !XrTurboEffective())        // phase 52
+                                     swprintf(sent, sentCap, L"Not running now: VR FPS cap is on and wins.");
         else if (g_xrTurbo && XrHook::GetTurboStats().failed)
                                      swprintf(sent, sentCap, L"Stopped for this VR session: the runtime refused it (see the log).");
+        break;
+    case MR_REFLEX:                                       // phase 52
+        if (FramePace::Support() == 0) swprintf(sent, sentCap, L"Not available here: %hs.", FramePace::SupportText());
+        else if (vr)                 swprintf(sent, sentCap, L"Greyed in VR: the headset paces the game.");
+        break;
+    case MR_FPSCAP:                                       // phase 52
+        if (vr)                      swprintf(sent, sentCap, L"Greyed in VR: use VR FPS cap.");
+        else if (g_fpsCap && FramePace::ReflexRunning())
+                                     swprintf(sent, sentCap, L"Limited by the NVIDIA driver now (Reflex is on).");
+        break;
+    case MR_VRFPSCAP:                                     // phase 52
+        if (!vr)                     swprintf(sent, sentCap, L"Greyed in flat: use FPS cap.");
         break;
     case MR_LOG: {                                        // phase 39: CPU, not GPU
         if (lv == 0)          swprintf(sent, sentCap, L"Off now: nothing is written.");
@@ -16681,124 +17574,124 @@ void ToggleMirTurns(uint64_t n) {
     PlayTones(1, g_mirTurns ? 1200 : 300, 150, 0);
 }
 
-// ---- v0.10.2 HOLD TO BIND ----------------------------------------------------------------------------------------------------
-// While the menu is open, holding ONE key (any key ParseKeyChord can name) or ONE controller button / D-pad direction on a row
-// for bind_hold_ms (default 2000) binds it to that row's hotkey action, live and in dlaa.ini (key_<action>) at once:
-//  - the hold starts at the input's DOWN-EDGE (an input already held when the row was reached does not count; one held since
-//    the menu opened -- the open key, an engaged shifter gear -- is ignored until released once), is cancelled when it is released or a second key / button joins (Shift / Ctrl / Alt do not count: they are read
-//    when the hold completes, so holding Ctrl+F5 binds "Ctrl+F5"), completes once, and runs only with the game in front.
-//  - a keyboard hold replaces the action's keyboard part and keeps its controller part; a controller hold the reverse.
-//    Backspace (any modifiers) clears both parts ("none"), so Backspace itself cannot be bound in the menu.
-//  - an input already bound to ANOTHER action (same key + modifiers, or the same controller code) is taken from it (that part
-//    becomes empty there and is written too) -- but never the last binding of key_menu: that hold is refused (low tone).
-//  - rows with several actions (model 1..4, the minus / plus pairs, Menu keys) ask one hold per action in sequence; the next
-//    step needs a fresh press (the down-edge rule: release first), moving to another row or closing the menu ends the
-//    sequence (completed steps stay bound). The Menu keys row cannot be cleared with Backspace.
-//  - on every row but Menu keys the 5 current menu inputs (their key with ANY modifiers, their controller code) are no
-//    candidates: holding Down keeps scrolling. On the Menu keys row they are: the open key does not close the menu there, the
-//    menu Up / Down move the selection on RELEASE when tapped (shorter than kMenuTapMs), held longer they bind instead; no
-//    auto-repeat, Left / Right do nothing there.
-//  - the held input still does its current job once at the press (holding Shift+F11 toggles DLAA first), as any hotkey.
-// Render thread only (MenuKeys / MenuBuildPanel). The input-hiding threads never read g_keys (MenuHidesInput), so g_keys may
-// change here.
-constexpr ULONGLONG kMenuTapMs = 300;          // shorter = a tap (Menu keys row: navigates); also when the progress bar shows
-constexpr int       kMenuBindBar = 10;         // progress bar: the buffer (max squares); drawn = MenuBarSteps() = ONE PER SECOND of
-                                               //   bind_hold_ms (v0.10.3 phase 29e; was a fixed 8: "5 s shows more than 5 blocks")
+// ---- v0.12.1 phase 50: the HOTKEYS PAGE (GitHub issue #16; replaces the v0.10.2 .. v0.12.0 HOLD TO BIND) ---------------------
+// Why: hold-to-bind bound ANY input held bind_hold_ms on a main row, and the open menu hid every key / button from the game. A
+// player with an H-shifter opened the menu in gear: the gear (a button held for minutes) slipped past the "held since the menu
+// opened" ignore set (a controller slot that reads all up for a moment -- a stale / cleared DirectInput read -- dropped it from
+// the set) and was bound to the Mode row, so every shift into that gear toggled the mode. And nobody could drive with the menu
+// open. Now:
+//  - Main rows never bind. "Hotkeys..." (MR_HOTKEYS, Right) and "Menu keys" (Right) open a second list in the same panel
+//    (MenuBuildHotkeysPanel: the same Panel / Draw / VR quad path; g_menuPage). One line per bindable ACTION (kMenuHkLines) +
+//    "< Back" first; Up / Down move (wrap), Left (a fresh press) or Right on "< Back" go back to the main menu.
+//  - BIND MODE (MenuHkBindStart / MenuHkBindTick / MenuHkBindApply): Right (a fresh press) on a line waits for the NEXT FRESH
+//    DOWN-EDGE of ONE key (any key KeyChordName can name; Shift / Ctrl / Alt are read as modifiers at the press: Ctrl+F5) or ONE
+//    controller button / D-pad direction (axes never bind). Every key / button already DOWN when bind mode starts is in the
+//    snapshot (g_hk.scan, hotkey_scan.h HotkeyScan::Start) and needs a release and a new press -- an engaged shifter gear can
+//    never bind. A controller slot that goes stale / is cleared (dinput_wrap.cpp ControllerState freshSlots) reads all up
+//    WITHOUT a release: while the set of known slots changes, no controller edge counts and the held state is kept, and a
+//    slot that becomes known again is adopted as held; a controller edge also needs the input up in the two previous
+//    Presents (a single torn read is no release). Two fresh inputs in the same Present = ambiguous, nothing binds.
+//  - A key replaces the action's keyboard part, a button its controller part; an input bound to ANOTHER action is taken from it
+//    (that part becomes empty there, written too) -- never the last binding of key_menu (refused: low tone, bind mode stays).
+//    Written live and to dlaa.ini key_<action> at once (WriteIniPreserving).
+//  - Cancel: menu Left (a fresh press) on every line but the 5 menu-key lines; Escape on every line; 10 s without a press
+//    (kMenuHkTimeoutMs); the game in the background; the menu closed (the open key closes it on every line but the menu-key
+//    lines). Backspace clears the action to "none" -- on the 5 menu-key lines Backspace cancels instead (they cannot be
+//    cleared here; dlaa.ini key_menu* can). On the 5 menu-key lines the 5 current menu inputs ARE candidates (Left, Delete ...),
+//    so Escape / Backspace / the timeout are the only ways out there; on every other line they are not (Up / Down / Right do
+//    nothing, Left cancels).
+//  - The press that binds / clears / cancels does NOT fire its old action (MenuHkKeys clears every KeyBind::hit of each Present
+//    in bind mode) and does not reach the game: bind mode hides every key / button from the game (KeySwallow kHideAll), and the
+//    input that ended it stays hidden until it is released (g_hk.swallow, MenuPublishHide).
+// Render thread only (MenuKeys / MenuBuildPanel). The input threads read only what MenuPublishHide hands to KeySwallow.
+constexpr ULONGLONG kMenuTapMs = 300;          // the Reset hold: its bar shows after this (a tap shows nothing)
+constexpr int       kMenuBindBar = 10;         // the Reset hold's progress bar: the buffer (max squares); drawn = MenuBarSteps() =
+                                               //   ONE PER SECOND of bind_hold_ms (v0.10.3 phase 29e)
 inline int MenuBarSteps() { const int s = (g_bindHoldMs + 500) / 1000; return s < 1 ? 1 : (s > kMenuBindBar ? kMenuBindBar : s); }
 constexpr int       kSigJoy = 0x100;           // input signature: 1..255 = a key (VK), kSigJoy + code = a controller code
-struct MenuBindRow {
-    int         row;
-    int         n;                             // actions = holds in sequence (1..5)
-    KeyAction   a[5];
-    const char* step[5];                       // the step label ("step 2/2: plus"); unused when n == 1
-    const char* name;                          // the row name for the log line
+constexpr ULONGLONG kMenuHkTimeoutMs = 10000;  // bind mode ends by itself after this without a press
+struct MenuHkLine {
+    KeyAction   a;
+    const char* name;                          // the line's name (the Action column, ~28 characters fit)
 };
-const MenuBindRow kMenuBindRows[] = {
-    { MR_MODE,     1, { KA_MODE_CYCLE },                                     { "" },                         "Mode" },
-    { MR_PROFILE,  1, { KA_PROFILE },                                        { "" },                         "Performance profile" },
-    { MR_MODEL,    4, { KA_MODEL1, KA_MODEL2, KA_MODEL3, KA_MODEL4 },        { "model 1", "model 2", "model 3", "model 4" },
-                                                                                                             "DLAA model" },
-    { MR_SHARP,    2, { KA_SHARPEN_DOWN, KA_SHARPEN_UP },                    { "minus", "plus" },            "Sharpen strength" },
-    { MR_WIDTH,    2, { KA_WIDTH_DOWN, KA_WIDTH_UP },                        { "minus", "plus" },            "Sharpen width" },
-    { MR_LOD,      2, { KA_LOD_DOWN, KA_LOD_UP },                            { "minus", "plus" },            "Texture sharpness" },
-    { MR_LODCUT,   2, { KA_LOD_CUT_DOWN, KA_LOD_CUT_UP },                    { "minus", "plus" },            "Cut-out texture sharpness" },
-    { MR_AREA,     2, { KA_AREA_DOWN, KA_AREA_UP },                          { "minus", "plus" },            "DLAA area (VR)" },
-    { MR_DRAWIDS,  1, { KA_DRAWID_TOGGLE },                                  { "" },                         "Per-part motion vectors" },
-    { MR_MIRROR,   1, { KA_MIRROR_TOGGLE },                                  { "" },                         "Mirror DLAA" },
-    { MR_PRETM,    1, { KA_PRE_TONEMAP },                                    { "" },                         "DLAA before tonemap (flat)" },
-    { MR_FWD,      1, { KA_FWD_DEPTH },                                      { "" },                         "See-through depth" },
-    { MR_UPSCALE,  1, { KA_UPSCALE_TOGGLE },                                 { "" },                         "DLSS upscale" },
-    { MR_DLAA,     1, { KA_DLAA_TOGGLE },                                    { "" },                         "DLAA on / off" },
-    { MR_MENUKEYS, 5, { KA_MENU, KA_MENU_UP, KA_MENU_DOWN, KA_MENU_LEFT, KA_MENU_RIGHT },
-                      { "open", "up", "down", "left", "right" },                                             "Menu keys" },
-    { MR_SAVE,     1, { KA_SAVE },                                           { "" },                         "Save to dlaa.ini" },
+const MenuHkLine kMenuHkLines[] = {
+    { KA_MODE_CYCLE,     "Mode (DLAA / DLSS / off)" },
+    { KA_PROFILE,        "Performance profile" },
+    { KA_MODEL1,         "DLAA model 1 (K)" },
+    { KA_MODEL2,         "DLAA model 2 (E)" },
+    { KA_MODEL3,         "DLAA model 3 (F)" },
+    { KA_MODEL4,         "DLAA model 4 (M)" },
+    { KA_SHARPEN_DOWN,   "Sharpen strength -" },
+    { KA_SHARPEN_UP,     "Sharpen strength +" },
+    { KA_WIDTH_DOWN,     "Sharpen width -" },
+    { KA_WIDTH_UP,       "Sharpen width +" },
+    { KA_LOD_DOWN,       "Texture sharpness -" },
+    { KA_LOD_UP,         "Texture sharpness +" },
+    { KA_LOD_CUT_DOWN,   "Cut-out sharpness -" },
+    { KA_LOD_CUT_UP,     "Cut-out sharpness +" },
+    { KA_AREA_DOWN,      "DLAA area (VR) -" },
+    { KA_AREA_UP,        "DLAA area (VR) +" },
+    { KA_DRAWID_TOGGLE,  "Per-part motion vectors" },
+    { KA_MIRROR_TOGGLE,  "Mirror DLAA on / off" },
+    { KA_PRE_TONEMAP,    "DLAA before tonemap (flat)" },
+    { KA_FWD_DEPTH,      "See-through depth" },
+    { KA_UPSCALE_TOGGLE, "DLSS upscale" },
+    { KA_DLAA_TOGGLE,    "DLAA on / off" },
+    { KA_SAVE,           "Save to dlaa.ini" },
+    { KA_MENU,           "Menu: open / close" },
+    { KA_MENU_UP,        "Menu: up" },
+    { KA_MENU_DOWN,      "Menu: down" },
+    { KA_MENU_LEFT,      "Menu: left" },
+    { KA_MENU_RIGHT,     "Menu: right" },
 };
-// The bind actions of a row; null = the row takes no hold (OFXR, the panel / fps box rows, the 29c group headers, Reset, Close).
-const MenuBindRow* MenuBindOf(int row) {
-    for (const MenuBindRow& b : kMenuBindRows) if (b.row == row) return &b;
-    return nullptr;
+constexpr int kMenuHkActions = (int)(sizeof(kMenuHkLines) / sizeof(kMenuHkLines[0]));
+constexpr int kMenuHkCount = 1 + kMenuHkActions;   // line 0 = "< Back", line i = kMenuHkLines[i - 1]
+static_assert(kMenuHkCount <= TuningMenu::kMaxRows, "hotkeys page: too many lines for one Panel");
+enum { kMenuPageMain = 0, kMenuPageHotkeys = 1 };
+int g_menuPage = kMenuPageMain;                // the open menu's page (every open starts on the main page)
+int g_hkSel = 0;                               // the selected line of the Hotkeys page (kept while closed)
+inline bool MenuIsMenuAction(int a) { return a == KA_MENU || IsMenuNavKey(a); }
+inline KeyAction MenuHkAction(int line) { return kMenuHkLines[(line < 1 || line > kMenuHkActions) ? 0 : line - 1].a; }
+int MenuHkLineOf(KeyAction a) {                // the page line of action `a` (0 = "< Back" when it has none)
+    for (int i = 0; i < kMenuHkActions; ++i) if (kMenuHkLines[i].a == a) return i + 1;
+    return 0;
 }
-struct MenuBindState {
-    int       prevSig = 0;                     // the single input held at the previous Present: 0 none, -1 several, else a sig
-    int       sig = 0;                         // the input of the running hold (0 = none)
-    ULONGLONG t0 = 0;                          // its down-edge (GetTickCount64)
-    int       bar = 0;                         // progress steps shown (0..kMenuBindBar - 1; refreshed at most every 100 ms)
-    ULONGLONG barAt = 0;
-    int       row = -1;                        // the row of the sequence
-    int       step = 0;                        // its next step (0-based)
-    wchar_t   note[48] = L"";                  // "taken from key_x" ... in the row's Hotkey column until noteUntil
-    int       noteRow = -1;
+struct MenuHkBind {
+    bool      on = false;                      // bind mode (waits for a press)
+    int       line = 0;                        // its line (1..kMenuHkActions)
+    ULONGLONG t0 = 0;                          // its start (GetTickCount64; a refused press restarts the 10 s)
+    HotkeyScan::State scan;                    // the fresh-press detector (hotkey_scan.h): at the start, the snapshot of every
+                                               //   key / button / D-pad direction held (ignored until released and pressed again)
+    int       swallow = 0;                    // the input that ended bind mode, hidden from the game until released (0 none)
+    int       multi = 0;                       // "two at once" log lines this bind mode (at most 1)
+    wchar_t   note[64] = L"";                  // the result on its line ("= Ctrl+F5 (taken from key_mv_toggle)") until noteUntil
+    int       noteLine = -1;
     ULONGLONG noteUntil = 0;
-    int       navDir = 0;                      // Menu keys row: the menu Up (-1) / Down (+1) pressed, waiting for its release
-    ULONGLONG navAt = 0;
-    // inputs already held when the menu opened (the Delete that opened it, a held accelerator key, an engaged H-shifter gear =
-    // a button held for minutes): ignored by the scan until released once, so they neither start a hold nor block one
-    uint32_t  ignKey[8] = {};                  // bit vk
-    uint32_t  ignBtn[4] = {};                  // bit = button - 1
-    unsigned  ignPov = 0;
 };
-MenuBindState g_mb;
+MenuHkBind g_hk;
 inline unsigned HeldMods() {
     return ((GetAsyncKeyState(VK_SHIFT)   & 0x8000) ? MOD_SHIFT_BIT : 0u) |
            ((GetAsyncKeyState(VK_CONTROL) & 0x8000) ? MOD_CTRL_BIT  : 0u) |
            ((GetAsyncKeyState(VK_MENU)    & 0x8000) ? MOD_ALT_BIT   : 0u);
 }
-// The single input held now (game in front only): 0 none, -1 several (keys and / or controller inputs), else its signature.
-// Keys: only those KeyChordName can name (the list is built once; modifiers, mouse buttons and the Windows keys are not
-// among them). Controller: the state PollKeys read this Present; a D-pad diagonal is two directions = several. Inputs in the
-// ignore set (held since the menu opened) do not count; a released one leaves the set. adopt = put every input held now
-// into the ignore set (MenuBindReset at the open).
-int MenuBindScan(bool adopt = false) {
+// The keys the bind scan reads: every key KeyChordName can name (modifiers, mouse buttons and the Windows keys are not among
+// them) + Escape (cancels; it cannot be bound). Built once.
+const int* MenuHkScanVks(int* count) {
     static int s_vks[256];
-    static int s_nVk = -1;
-    if (s_nVk < 0) {
-        s_nVk = 0;
+    static int s_n = -1;
+    if (s_n < 0) {
+        s_n = 0;
         char nm[24];
-        for (int vk = 0x08; vk <= 0xFE; ++vk) if (KeyChordName(vk, nm, sizeof(nm))) s_vks[s_nVk++] = vk;
+        for (int vk = 0x08; vk <= 0xFE; ++vk) if (vk == VK_ESCAPE || KeyChordName(vk, nm, sizeof(nm))) s_vks[s_n++] = vk;
     }
-    if (!IsForeground()) return 0;                        // (the ignore set is kept while the game is in the background)
-    uint32_t key[8] = {};
-    for (int i = 0; i < s_nVk; ++i)
-        if (GetAsyncKeyState(s_vks[i]) & 0x8000) key[s_vks[i] >> 5] |= 1u << (s_vks[i] & 31);
-    MenuBindState& m = g_mb;
-    for (int w = 0; w < 8; ++w) m.ignKey[w] = adopt ? key[w] : (m.ignKey[w] & key[w]);
-    for (int w = 0; w < 4; ++w) m.ignBtn[w] = adopt ? g_pollJoyBtn[w] : (m.ignBtn[w] & g_pollJoyBtn[w]);
-    m.ignPov = adopt ? g_pollJoyPov : (m.ignPov & g_pollJoyPov);
-    int sig = 0, count = 0;
-    for (int w = 0; w < 8; ++w) {
-        uint32_t b = key[w] & ~m.ignKey[w];
-        for (int i = 0; b && i < 32; ++i, b >>= 1)
-            if (b & 1u) { sig = w * 32 + i; if (++count > 1) return -1; }
-    }
-    for (int w = 0; w < 4; ++w) {
-        uint32_t b = g_pollJoyBtn[w] & ~m.ignBtn[w];
-        for (int i = 0; b && i < 32; ++i, b >>= 1)
-            if (b & 1u) { sig = kSigJoy + w * 32 + i + 1; if (++count > 1) return -1; }
-    }
-    const unsigned pov = g_pollJoyPov & ~m.ignPov;
-    for (int d = 0; d < 4; ++d)
-        if (pov & (1u << d)) { sig = kSigJoy + KeySwallow::kJoyPovUp + d; if (++count > 1) return -1; }
-    return sig;
+    *count = s_n;
+    return s_vks;
+}
+void MenuHkKeysDown(uint32_t out[8]) {
+    for (int w = 0; w < 8; ++w) out[w] = 0;
+    int n = 0;
+    const int* vks = MenuHkScanVks(&n);
+    for (int i = 0; i < n; ++i) if (GetAsyncKeyState(vks[i]) & 0x8000) out[vks[i] >> 5] |= 1u << (vks[i] & 31);
 }
 // The text of an input signature ("Ctrl+F5" with the given modifiers, "Wheel7", "WheelUp").
 void MenuBindSigName(int sig, unsigned mods, char* out, size_t cap) {
@@ -16812,38 +17705,102 @@ bool MenuBindIsMenuInput(int sig) {
         if (sig >= kSigJoy ? g_keys[m].joy == sig - kSigJoy : g_keys[m].vk == sig) return true;
     return false;
 }
-// A fresh state at the open; every input held right now is ignored until released (the Delete that opened the menu starts no
-// hold, an engaged shifter gear blocks none).
-void MenuBindReset() {
-    g_mb = MenuBindState();
-    g_mb.row = g_menuSel;
-    g_mb.prevSig = MenuBindScan(true);
+void MenuHkNote(int line, const char* text) {
+    MenuWiden(g_hk.note, sizeof(g_hk.note) / sizeof(g_hk.note[0]), text);
+    g_hk.noteLine = line;
+    g_hk.noteUntil = GetTickCount64() + 3000;
 }
-void MenuBindNote(int row, const char* text) {
-    MenuWiden(g_mb.note, sizeof(g_mb.note) / sizeof(g_mb.note[0]), text);
-    g_mb.noteRow = row;
-    g_mb.noteUntil = GetTickCount64() + 3000;
+// What the open menu hides from the game now (KeySwallow::SetMenuHide; only on a change). Closed: nothing. Bind mode:
+// everything. Else: the 5 menu inputs + the swallowed input (until released). Per Present at the end of MenuKeys and at
+// MenuClose.
+void MenuPublishHide() {
+    const bool open = g_menuOpen.load(std::memory_order_relaxed);
+    const int mode = !open ? KeySwallow::kHideNone : (g_hk.on ? KeySwallow::kHideAll : KeySwallow::kHideMenuInputs);
+    int vks[KeySwallow::kMaxHide] = {}, joys[KeySwallow::kMaxHide] = {};
+    int k = 0;
+    if (mode == KeySwallow::kHideMenuInputs) {
+        static const KeyAction kMenuActs[] = { KA_MENU, KA_MENU_UP, KA_MENU_DOWN, KA_MENU_LEFT, KA_MENU_RIGHT };
+        for (KeyAction m : kMenuActs) { vks[k] = g_keys[m].vk; joys[k] = g_keys[m].joy; ++k; }
+        if (g_hk.swallow > 0 && g_hk.swallow < kSigJoy) vks[k++] = g_hk.swallow;
+        else if (g_hk.swallow >= kSigJoy)               joys[k++] = g_hk.swallow - kSigJoy;
+    }
+    static int s_mode = -1, s_vks[KeySwallow::kMaxHide] = {}, s_joys[KeySwallow::kMaxHide] = {};
+    if (mode == s_mode && !memcmp(vks, s_vks, sizeof(vks)) && !memcmp(joys, s_joys, sizeof(joys))) return;
+    s_mode = mode;
+    memcpy(s_vks, vks, sizeof(vks));
+    memcpy(s_joys, joys, sizeof(joys));
+    KeySwallow::SetMenuHide(mode, vks, joys, k);
 }
-// A completed hold: binds `sig` to the row's current step (or clears it: Backspace), takes it from any other action, writes
-// dlaa.ini, logs, beeps, and moves the sequence on. A refused hold (Backspace on Menu keys / the last key_menu binding)
-// keeps the step.
-void MenuBindComplete(const MenuBindRow& br, int sig, ULONGLONG heldMs, uint64_t n) {
-    const int step = g_mb.step < br.n ? g_mb.step : 0;
-    const KeyAction a = br.a[step];
+// Opens the Hotkeys page on `line` (MR_HOTKEYS: the first action; Menu keys: "Menu: open / close").
+void MenuHkOpen(int line, uint64_t n) {
+    g_menuPage = kMenuPageHotkeys;
+    g_hkSel = line < 0 || line >= kMenuHkCount ? 0 : line;
+    const int keep = g_hk.swallow;
+    g_hk = MenuHkBind();
+    g_hk.swallow = keep;
+    Log("tuning menu: Hotkeys page opened (Present #%llu) -- %s / %s select an action, %s binds it (then press the new key / "
+        "button), %s goes back", (unsigned long long)n, KeyName(KA_MENU_UP), KeyName(KA_MENU_DOWN), KeyName(KA_MENU_RIGHT),
+        KeyName(KA_MENU_LEFT));
+}
+void MenuHkBack(const char* why, uint64_t n) {
+    g_menuPage = kMenuPageMain;
+    const int keep = g_hk.swallow;
+    g_hk = MenuHkBind();
+    g_hk.swallow = keep;
+    LogDbg("tuning menu: back to the main page (%s, Present #%llu)", why, (unsigned long long)n);
+}
+// Bind mode on `line`: the snapshot of everything held now (the menu Right that started it included) = the "previous" state,
+// so only a fresh down-edge after it counts.
+void MenuHkBindStart(int line, uint64_t n) {
+    const int keep = g_hk.swallow;
+    g_hk = MenuHkBind();
+    g_hk.swallow = keep;
+    g_hk.on = true;
+    g_hk.line = line;
+    g_hk.t0 = GetTickCount64();
+    uint32_t key[8];
+    MenuHkKeysDown(key);
+    HotkeyScan::Start(g_hk.scan, key, g_pollJoyBtn, g_pollJoyPov, g_pollJoyFresh);
+    int held = 0;
+    auto bits = [](uint32_t v) { int c = 0; for (; v; v &= v - 1) ++c; return c; };
+    for (int w = 0; w < 8; ++w) held += bits(key[w]);
+    for (int w = 0; w < 4; ++w) held += bits(g_pollJoyBtn[w]);
+    held += bits(g_pollJoyPov);
+    const KeyAction a = MenuHkAction(line);
+    Log("hotkey %s: waiting for a key / button (Hotkeys page, Present #%llu) -- %d key(s) / button(s) held now are ignored until "
+        "released and pressed again; %s; the game gets no key / button meanwhile", g_keys[a].ini, (unsigned long long)n, held,
+        MenuIsMenuAction(a) ? "Escape or Backspace cancels (menu keys cannot be cleared here), 10 s without a press too"
+                            : "the menu Left / Escape cancel, Backspace clears it, 10 s without a press cancels");
+    PlayTones(1, 880, 60, 0);
+}
+void MenuHkBindEnd(int swallowSig) {
+    g_hk.on = false;
+    g_hk.swallow = swallowSig;
+}
+void MenuHkCancel(const char* why, int swallowSig, uint64_t n) {
+    const KeyAction a = MenuHkAction(g_hk.line);
+    Log("hotkey %s unchanged (%s; Hotkeys page, Present #%llu) -- still %s", g_keys[a].ini, why, (unsigned long long)n,
+        (g_keys[a].vk || g_keys[a].joy) ? g_keys[a].name : "none");
+    MenuHkNote(g_hk.line, "cancelled");
+    MenuHkBindEnd(swallowSig);
+    PlayTones(1, 300, 120, 0);
+}
+// A fresh press in bind mode: binds `sig` to the line's action (or clears it: clear = Backspace), takes it from any other
+// action, writes dlaa.ini, logs, beeps. True = bind mode ends; false = refused (the last binding of key_menu): bind mode stays
+// and its 10 s start again.
+bool MenuHkBindApply(int sig, bool clear, uint64_t n) {
+    const KeyAction a = MenuHkAction(g_hk.line);
     KeyBind& k = g_keys[a];
     const bool isKey = sig < kSigJoy;
-    const bool clear = isKey && sig == VK_BACK;
-    const unsigned mods = isKey ? HeldMods() : 0u;
+    const unsigned mods = isKey && !clear ? HeldMods() : 0u;
     char held[64];
     MenuBindSigName(sig, mods, held, sizeof(held));
-    char stepTxt[24] = "";
-    if (br.n > 1) snprintf(stepTxt, sizeof(stepTxt), " step %d/%d", step + 1, br.n);
-    if (clear && br.row == MR_MENUKEYS) {
-        LogWarn("hotkey %s NOT cleared (held %s for %.1f s on row \"%s\"%s, Present #%llu): the 5 menu keys cannot be cleared in the "
-            "menu (dlaa.ini key_menu* can)", k.ini, held, (double)heldMs / 1000.0, br.name, stepTxt, (unsigned long long)n);
-        MenuBindNote(br.row, "menu keys: no clear");
+    if (clear && a == KA_MENU) {                          // (unreachable: Backspace cancels on the menu-key lines; kept as a guard)
+        LogWarn("hotkey %s NOT cleared (Hotkeys page, Present #%llu): the menu must stay reachable", k.ini, (unsigned long long)n);
+        MenuHkNote(g_hk.line, "NOT cleared: the menu needs it");
         PlayTones(1, 200, 400, 0);
-        return;
+        g_hk.t0 = GetTickCount64();
+        return false;
     }
     int nvk = k.vk, njoy = k.joy;
     unsigned nmods = k.mods;
@@ -16859,13 +17816,18 @@ void MenuBindComplete(const MenuBindRow& br, int sig, ULONGLONG heldMs, uint64_t
             if (isKey ? (o.vk == nvk && o.mods == nmods) : (o.joy == njoy)) taken[nt++] = i;
         }
     for (int t = 0; t < nt; ++t)
-        if (taken[t] == KA_MENU && (isKey ? !g_keys[KA_MENU].joy : !g_keys[KA_MENU].vk)) {
-            LogWarn("hotkey %s NOT bound to %s (held for %.1f s on row \"%s\"%s, Present #%llu): it is the only binding of key_menu -- "
-                "the menu must stay reachable (bind another open key in step 1 first)", held, k.ini, (double)heldMs / 1000.0,
-                br.name, stepTxt, (unsigned long long)n);
-            MenuBindNote(br.row, "key_menu needs it");
+        // v0.13.0 pre-release fix: EVERY menu action keeps a binding, not only the open key (taking the Right arrow from "Menu: right"
+        // left key_menu_right = none: no group, the Hotkeys page and Reset were unreachable until dlaa.ini was edited by hand)
+        if (MenuIsMenuAction(taken[t]) && (isKey ? !g_keys[taken[t]].joy : !g_keys[taken[t]].vk)) {
+            LogWarn("hotkey %s NOT bound to %s (Hotkeys page, Present #%llu): it is the only binding of %s -- the menu must "
+                "stay reachable (give \"%s\" another key first)", held, k.ini, (unsigned long long)n, g_keys[taken[t]].ini,
+                kMenuHkLines[MenuHkLineOf((KeyAction)taken[t]) - 1].name);
+            char nb[64];
+            snprintf(nb, sizeof(nb), "NOT bound: %s needs it", g_keys[taken[t]].ini);
+            MenuHkNote(g_hk.line, nb);
             PlayTones(1, 200, 400, 0);
-            return;
+            g_hk.t0 = GetTickCount64();
+            return false;
         }
     char was[64];
     snprintf(was, sizeof(was), "%s", (k.vk || k.joy) ? k.name : "none");
@@ -16890,103 +17852,225 @@ void MenuBindComplete(const MenuBindRow& br, int sig, ULONGLONG heldMs, uint64_t
         }
     }
     const bool written = WriteIniPreserving(kv, nkv);     // "none" is written as such (an empty value would delete the line)
-    Log("hotkey %s = %s (%s in the menu: held %s for %.1f s on row \"%s\"%s; was \"%s\"%s) -- %s, Present #%llu", k.ini, k.name,
-        clear ? "cleared" : "bound", held, (double)heldMs / 1000.0, br.name, stepTxt, was, takenTxt,
+    Log("hotkey %s = %s (%s on the Hotkeys page: pressed %s; was \"%s\"%s) -- %s, Present #%llu", k.ini, k.name,
+        clear ? "cleared" : "bound", clear ? "Backspace" : held, was, takenTxt,
         written ? "dlaa.ini written" : "dlaa.ini write FAILED (live until the game closes)", (unsigned long long)n);
+    char note[96];
     if (!written) {
-        MenuBindNote(br.row, "dlaa.ini write FAILED");
+        MenuHkNote(g_hk.line, "dlaa.ini write FAILED (live only)");
         PlayTones(1, 200, 400, 0);                        // failure: one long 200 Hz tone (as a failed save)
     } else if (clear) {
-        MenuBindNote(br.row, "cleared (none)");
+        MenuHkNote(g_hk.line, "cleared (none)");
         PlayTones(1, 300, 150, 0);                        // clear: one low 300 Hz tone
     } else {
-        if (nt) {
-            char nb[64];
-            snprintf(nb, sizeof(nb), "taken from %s%s", g_keys[taken[0]].ini, nt > 1 ? " +more" : "");
-            MenuBindNote(br.row, nb);
-        }
+        if (nt) snprintf(note, sizeof(note), "= %s  (taken from %s%s)", held, g_keys[taken[0]].ini, nt > 1 ? " +more" : "");
+        else    snprintf(note, sizeof(note), "= %s", held);
+        MenuHkNote(g_hk.line, note);
         BeepSeq b;                                        // bound: the Save two-tone 600 -> 900 Hz
         b.n = 2; b.freq[0] = 600; b.ms[0] = 120; b.freq[1] = 900; b.ms[1] = 120; b.gapMs = 40;
         PlayBeeps(b);
     }
-    g_mb.step = step + 1 < br.n ? step + 1 : 0;           // the next step is asked at once (a fresh press starts it)
+    MenuHkBindEnd(sig);                                   // the pressed input stays hidden from the game until released
+    return true;
 }
-// Per Present while the menu is open (MenuKeys, after the navigation): the hold state machine of the selected row.
-void MenuBindTick(uint64_t n) {
+// Per Present in bind mode (MenuHkKeys): the cancel rules, then the fresh down-edges since the previous Present.
+void MenuHkBindTick(uint64_t n) {
+    const KeyAction a = MenuHkAction(g_hk.line);
+    const bool menuLine = MenuIsMenuAction(a);
     const ULONGLONG now = GetTickCount64();
-    const int sel = g_menuSel;
-    if (g_mb.row != sel) { g_mb.row = sel; g_mb.step = 0; g_mb.sig = 0; g_mb.bar = 0; }   // another row: the sequence ends
-    const MenuBindRow* br = MenuBindOf(sel);
-    const int raw = MenuBindScan();
-    if (raw != g_mb.prevSig) {                            // an edge (or a change): any running hold ends, a new one may start
-        g_mb.sig = 0; g_mb.bar = 0;
-        if (raw > 0 && br && (sel == MR_MENUKEYS || !MenuBindIsMenuInput(raw))) { g_mb.sig = raw; g_mb.t0 = now; g_mb.barAt = now; }
-    } else if (g_mb.sig && br) {
-        const ULONGLONG el = now - g_mb.t0;
-        if (el >= (ULONGLONG)g_bindHoldMs) {
-            const int sig = g_mb.sig;
-            g_mb.sig = 0; g_mb.bar = 0;                   // completes once: the input stays held, no new edge
-            MenuBindComplete(*br, sig, el, n);
-        } else {
-            const int bar = (int)(el * MenuBarSteps() / (ULONGLONG)g_bindHoldMs);
-            if (bar != g_mb.bar && now - g_mb.barAt >= 100) { g_mb.bar = bar; g_mb.barAt = now; }   // <= 10 panel rebuilds / s
+    if (!IsForeground())                    { MenuHkCancel("the game went to the background", 0, n); return; }
+    if (now - g_hk.t0 >= kMenuHkTimeoutMs)  { MenuHkCancel("10 s without a press", 0, n); return; }
+    if (!menuLine && KeyHit(KA_MENU_LEFT) && !g_keyRepeat[KA_MENU_LEFT]) { MenuHkCancel("menu Left", 0, n); return; }
+    uint32_t key[8];
+    MenuHkKeysDown(key);
+    // the fresh presses since the previous Present (hotkey_scan.h: held-at-start inputs need a release first; a controller
+    // slot that goes stale / is cleared / comes back, or a single torn read, is never taken for a release -- issue #16)
+    const HotkeyScan::Edges ed = HotkeyScan::Step(g_hk.scan, key, g_pollJoyBtn, g_pollJoyPov, g_pollJoyFresh);
+    int sig = 0, count = 0;
+    bool esc = false, bksp = false;
+    for (int w = 0; w < 8; ++w) {
+        uint32_t e = ed.key[w];
+        for (int i = 0; e && i < 32; ++i, e >>= 1) {
+            if (!(e & 1u)) continue;
+            const int vk = w * 32 + i;
+            if (vk == VK_ESCAPE)                              esc = true;
+            else if (vk == VK_BACK && (menuLine || !MenuBindIsMenuInput(vk))) bksp = true;
+            else if (!menuLine && MenuBindIsMenuInput(vk))    continue;   // not a candidate here (Left: KeyHit above)
+            else                                              { sig = vk; ++count; }
         }
     }
-    g_mb.prevSig = raw;
+    for (int w = 0; w < 4; ++w) {
+        uint32_t e = ed.btn[w];
+        for (int i = 0; e && i < 32; ++i, e >>= 1) {
+            if (!(e & 1u)) continue;
+            const int s = kSigJoy + w * 32 + i + 1;
+            if (!menuLine && MenuBindIsMenuInput(s)) continue;
+            sig = s; ++count;
+        }
+    }
+    for (int d = 0; d < 4; ++d) {
+        if (!(ed.pov & (1u << d))) continue;
+        const int s = kSigJoy + KeySwallow::kJoyPovUp + d;
+        if (!menuLine && MenuBindIsMenuInput(s)) continue;
+        sig = s; ++count;
+    }
+    if (esc) { MenuHkCancel("Escape", VK_ESCAPE, n); return; }
+    if (bksp) {
+        if (menuLine) MenuHkCancel("Backspace: the menu keys cannot be cleared here", VK_BACK, n);
+        else          MenuHkBindApply(VK_BACK, true, n);
+        return;
+    }
+    if (count == 1) { MenuHkBindApply(sig, false, n); return; }
+    if (count > 1 && !g_hk.multi++)
+        Log("hotkey %s: %d keys / buttons pressed in the same frame -- ignored (press ONE; Present #%llu)", g_keys[a].ini, count,
+            (unsigned long long)n);
 }
-// The hold progress bar: `steps` of MenuBarSteps() squares filled, ONE SQUARE PER SECOND of the hold (v0.10.3 phase 29d: shared by
-// the bind hold and the Reset hold; 29e: one per second, was a fixed 8).
-void MenuHoldBar(int steps, wchar_t (&bar)[kMenuBindBar + 1]) {
-    const int n = MenuBarSteps();
-    const int fill = steps < 0 ? 0 : (steps > n ? n : steps);
-    for (int i = 0; i < n; ++i) bar[i] = i < fill ? L'\u25A0' : L'\u25A1';   // filled / empty square (WGL4)
-    bar[n] = 0;
+// Per Present while the Hotkeys page is shown (MenuKeys).
+void MenuHkKeys(uint64_t n) {
+    if (g_hk.on) {
+        MenuHkBindTick(n);
+        for (KeyBind& k : g_keys) k.hit = false;          // bind mode: nothing fires, also not the press that ended it
+        return;
+    }
+    if (KeyHit(KA_MENU_UP))   g_hkSel = (g_hkSel + kMenuHkCount - 1) % kMenuHkCount;   // (auto-repeat scrolls)
+    if (KeyHit(KA_MENU_DOWN)) g_hkSel = (g_hkSel + 1) % kMenuHkCount;
+    if (g_hkSel < 0 || g_hkSel >= kMenuHkCount) g_hkSel = 0;
+    if (KeyHit(KA_MENU_RIGHT) && !g_keyRepeat[KA_MENU_RIGHT]) {
+        if (g_hkSel == 0) MenuHkBack("< Back", n);
+        else              MenuHkBindStart(g_hkSel, n);
+    } else if (KeyHit(KA_MENU_LEFT) && !g_keyRepeat[KA_MENU_LEFT]) {
+        MenuHkBack("menu Left", n);
+    }
 }
-// The selected row's hold feedback on the panel: progress bar / note in the Hotkey column, the step in the Value column of a
-// multi-step row. MenuBuildPanel, after the rows.
-void MenuBindDecorate(TuningMenu::Panel& p, int sel) {
-    const MenuBindRow* br = MenuBindOf(sel);
-    if (!br) return;
-    TuningMenu::Row& r = p.rows[sel];
-    constexpr size_t kV = sizeof(r.value) / sizeof(wchar_t), kK = sizeof(r.keys) / sizeof(wchar_t);
+// The swallowed input (the one that ended bind mode) is released: it is no longer hidden. Per Present while open.
+void MenuHkSwallowTick() {
+    const int s = g_hk.swallow;
+    if (!s) return;
+    const bool down = s < kSigJoy ? (GetAsyncKeyState(s) & 0x8000) != 0 : JoyPartDown(s - kSigJoy, g_pollJoyBtn, g_pollJoyPov);
+    if (!down) g_hk.swallow = 0;
+}
+// A footer that fits left of the licence line (TuningMenu::FooterFits; measured only when the candidates change).
+void MenuFitFooter(const wchar_t* const* cand, int n, wchar_t* out, size_t cap) {
+    static wchar_t s_key[256] = L"", s_shown[256] = L"";
+    if (wcscmp(cand[0], s_key)) {
+        wcsncpy_s(s_key, cand[0], _TRUNCATE);
+        int i = 0;
+        while (i + 1 < n && !TuningMenu::FooterFits(cand[i])) ++i;
+        wcsncpy_s(s_shown, cand[i], _TRUNCATE);
+    }
+    wcsncpy_s(out, cap, s_shown, _TRUNCATE);
+}
+// The Hotkeys page as a Panel (MenuBuildPanel on that page; the same Draw / VR quad path as the main page).
+void MenuBuildHotkeysPanel(TuningMenu::Panel& p, bool vr) {
+    using namespace TuningMenu;
+    constexpr size_t kN = sizeof(p.rows[0].name) / sizeof(wchar_t), kV = sizeof(p.rows[0].value) / sizeof(wchar_t),
+                     kK = sizeof(p.rows[0].keys) / sizeof(wchar_t);
+    swprintf(p.title, sizeof(p.title) / sizeof(wchar_t), L"ETS2 / ATS DLAA & DLSS mod v%hs - hotkeys", DLAA_INJECTOR_VERSION);
+    swprintf(p.colHead[0], 24, L"Action");
+    swprintf(p.colHead[1], 24, L"Keyboard");
+    swprintf(p.colHead[2], 24, L"Controller");
+    swprintf(p.costHead, sizeof(p.costHead) / sizeof(wchar_t), L" ");   // (no cost column on this page)
+    MenuPerfLines(p, vr);
+    char snUp[40], snDown[40], snLeft[40], snRight[40], snMenu[40];
+    KeyShortName(KA_MENU_UP, snUp, sizeof(snUp));
+    KeyShortName(KA_MENU_DOWN, snDown, sizeof(snDown));
+    KeyShortName(KA_MENU_LEFT, snLeft, sizeof(snLeft));
+    KeyShortName(KA_MENU_RIGHT, snRight, sizeof(snRight));
+    KeyShortName(KA_MENU, snMenu, sizeof(snMenu));
     const ULONGLONG now = GetTickCount64();
-    const bool mine = g_mb.row == sel;
-    const bool holding = mine && g_mb.sig && now - g_mb.t0 >= kMenuTapMs;   // a tap shows nothing
-    if (br->n > 1 && mine && (holding || g_mb.step > 0)) {
-        const int st = g_mb.step < br->n ? g_mb.step : 0;
-        swprintf(r.value, kV, L"step %d/%d: %hs", st + 1, br->n, br->step[st]);
+    swprintf(p.rows[0].name, kN, L"< Back");
+    swprintf(p.rows[0].value, kV, L"-");
+    swprintf(p.rows[0].keys, kK, L"%hs / %hs: main menu", snLeft, snRight);
+    for (int i = 1; i < kMenuHkCount; ++i) {
+        Row& r = p.rows[i];
+        const KeyBind& k = g_keys[kMenuHkLines[i - 1].a];
+        MenuWiden(r.name, kN, kMenuHkLines[i - 1].name);
+        char t[64];
+        if (k.vk) { KeyBindText(k.vk, k.mods, 0, t, sizeof(t)); MenuWiden(r.value, kV, t); }
+        else      swprintf(r.value, kV, L"%ls", k.joy ? L"-" : L"none");
+        if (k.joy) { JoyTokenName(k.joy, t, sizeof(t)); MenuWiden(r.keys, kK, t); }
+        else       swprintf(r.keys, kK, L"-");
+        const bool menuLine = MenuIsMenuAction(kMenuHkLines[i - 1].a);
+        const bool note = g_hk.noteLine == i && now < g_hk.noteUntil;
+        if (g_hk.on && g_hk.line == i) {
+            r.wide = 1;
+            if (note)          swprintf(r.value, kV, L"%ls -- press another", g_hk.note);
+            else if (menuLine) swprintf(r.value, kV, L"Press a key or button...  (Esc = cancel, 10 s)");
+            else               swprintf(r.value, kV, L"Press a key or button...  (%hs = cancel, Backspace = clear)", snLeft);
+        } else if (note) {
+            r.wide = 1;
+            swprintf(r.value, kV, L"%ls", g_hk.note);
+        }
     }
-    if (holding) {
-        wchar_t bar[kMenuBindBar + 1];
-        MenuHoldBar(g_mb.bar, bar);
-        char nm[64];
-        MenuBindSigName(g_mb.sig, g_mb.sig < kSigJoy ? HeldMods() : 0u, nm, sizeof(nm));
-        swprintf(r.keys, kK, L"hold %ls %hs", bar, nm);
-    } else if (g_mb.noteRow == sel && now < g_mb.noteUntil) {
-        swprintf(r.keys, kK, L"%ls", g_mb.note);
-    } else if (br->n > 1 && mine && g_mb.step > 0) {
-        swprintf(r.keys, kK, L"hold a key for: %hs", br->step[g_mb.step < br->n ? g_mb.step : 0]);
+    p.nRows = kMenuHkCount;
+    p.sel = g_hkSel < 0 || g_hkSel >= kMenuHkCount ? 0 : g_hkSel;
+    constexpr size_t kD = sizeof(p.desc) / sizeof(wchar_t);
+    const int sel = g_hk.on ? g_hk.line : p.sel;
+    if (sel == 0) {
+        swprintf(p.desc, kD, L"Back to the main menu. %hs does the same on every line of this page. Every key and controller button "
+                 L"except the 5 menu keys still reaches the game while this menu is open, so you can keep driving.", snLeft);
+    } else {
+        const KeyAction a = kMenuHkLines[sel - 1].a;
+        const bool menuLine = MenuIsMenuAction(a);
+        if (g_hk.on && menuLine)
+            swprintf(p.desc, kD, L"Press ONE new key or controller button for %hs: any key, also another menu key (it is taken from "
+                     L"it). Keys / buttons already held now are ignored until released. Esc or Backspace cancels, so does 10 s "
+                     L"without a press; menu keys cannot be cleared here.", kMenuHkLines[sel - 1].name);
+        else if (g_hk.on)
+            swprintf(p.desc, kD, L"Press ONE new key (Shift / Ctrl / Alt with it make a combination) or controller button / "
+                     L"D-pad direction. Keys / buttons already held now (a shifter gear) are ignored until released; axes never "
+                     L"bind. %hs or Esc cancels, Backspace clears to none, 10 s without a press cancels.", snLeft);
+        else if (menuLine)
+            swprintf(p.desc, kD, L"One of the 5 keys that drive this menu (dlaa.ini %hs). %hs, then press the new key or button: "
+                     L"the other menu keys can be taken too. These lines cannot be cleared, and each of the 5 must keep a "
+                     L"binding (a press that leaves another one empty is refused). Saved to dlaa.ini at once.", g_keys[a].ini, snRight);
+        else
+            swprintf(p.desc, kD, L"%hs (dlaa.ini %hs). %hs, then press the new key or button: a key replaces the Keyboard part, a "
+                     L"controller button or D-pad direction the Controller part. A key / button used by another action moves "
+                     L"here. Saved to dlaa.ini at once.", kMenuHkLines[sel - 1].name, g_keys[a].ini, snRight);
     }
-    // (v0.10.3 phase 29c: the footer is no longer rewritten here -- one constant footer, MenuBuildPanel; the hold time and the
-    // step count overflowed its line in VR. The progress is the row's bar / step text above.)
+    wchar_t f[3][128];
+    if (g_hk.on && MenuIsMenuAction(MenuHkAction(g_hk.line))) {
+        swprintf(f[0], 128, L"press the new key / button   Esc cancel   (10 s)");
+        swprintf(f[1], 128, L"press a key / button   Esc cancel");
+        swprintf(f[2], 128, L"Esc cancel");
+    } else if (g_hk.on) {
+        swprintf(f[0], 128, L"press the new key / button   %hs cancel   Backspace clear", snLeft);
+        swprintf(f[1], 128, L"%hs cancel   Backspace clear", snLeft);
+        swprintf(f[2], 128, L"%hs cancel", snLeft);
+    } else {
+        swprintf(f[0], 128, L"%hs / %hs select   %hs bind   %hs back   %hs close", snUp, snDown, snRight, snLeft, snMenu);
+        swprintf(f[1], 128, L"%hs bind   %hs back   %hs close", snRight, snLeft, snMenu);
+        swprintf(f[2], 128, L"%hs bind   %hs back", snRight, snLeft);
+    }
+    const wchar_t* const cand[3] = { f[0], f[1], f[2] };
+    MenuFitFooter(cand, 3, p.footer, sizeof(p.footer) / sizeof(wchar_t));
 }
 
 // ---- v0.10.3 phase 29d: "Reset to defaults" = a HOLD of the menu Right key ----------------------------------------------------
 // Left / Right reset at once before (MenuChange): one stray press lost every setting. Now a FRESH press of the menu Right on the
 // Reset row (KeyHit without g_keyRepeat: an auto-repeat hit neither starts nor restarts it) starts a hold; while the action stays
 // active (g_keyWasActive[KA_MENU_RIGHT] = its key with its exact modifiers or its wheel button down, as PollKeys read it this
-// Present) for bind_hold_ms, the Hotkey column fills the hold-to-bind bar (MenuHoldBar, shown after kMenuTapMs as that bar), then
+// Present) for bind_hold_ms, the Hotkey column fills a progress bar (MenuHoldBar, shown after kMenuTapMs), then
 // ResetSettings runs ONCE (its beeps / log) and the hold is consumed: "reset done" until the release, a new press for another.
 // Released early, another row, the game in the background or the menu closed / opened = nothing happens, the state clears.
-// Left does nothing on the row. Kept apart from g_mb (hold to bind): the Reset row has no MenuBindRow (MenuBindOf = null, so
-// MenuBindTick starts no bind there) and the 5 menu inputs are bind candidates only on the Menu keys row (MenuBindIsMenuInput).
+// Left does nothing on the row. v0.12.1 phase 50: bind_hold_ms is now ONLY this hold (the main rows no longer bind; hotkeys are
+// set on the Hotkeys page, which has no hold).
 struct MenuResetHold {
     ULONGLONG t0 = 0;                          // the fresh press (GetTickCount64); 0 = no hold
-    int       bar = 0;                         // progress steps shown (as MenuBindState: refreshed at most every 100 ms)
+    int       bar = 0;                         // progress steps shown (refreshed at most every 100 ms)
     ULONGLONG barAt = 0;
     bool      done = false;                    // ResetSettings ran for this press: nothing more until the release
 };
 MenuResetHold g_mrh;
+// The hold progress bar: `steps` of MenuBarSteps() squares filled, ONE SQUARE PER SECOND of the hold (v0.10.3 phase 29d / 29e;
+// v0.12.1 phase 50: the Reset hold's only, the bind hold is gone).
+void MenuHoldBar(int steps, wchar_t (&bar)[kMenuBindBar + 1]) {
+    const int n = MenuBarSteps();
+    const int fill = steps < 0 ? 0 : (steps > n ? n : steps);
+    for (int i = 0; i < n; ++i) bar[i] = i < fill ? L'\u25A0' : L'\u25A1';   // filled / empty square (WGL4)
+    bar[n] = 0;
+}
 // The hold time as the Reset row shows it: "5", "2.5" (one decimal only when not whole).
 void MenuHoldSecs(char* out, size_t cap) {
     if (g_bindHoldMs % 1000 == 0) snprintf(out, cap, "%d", g_bindHoldMs / 1000);
@@ -17040,6 +18124,7 @@ void MenuRow(TuningMenu::Panel& p, int id, const wchar_t* name, const char* keys
 void MenuBuildPanel(TuningMenu::Panel& p) {
     memset(&p, 0, sizeof(p));
     const bool vr = MenuVr();
+    if (g_menuPage == kMenuPageHotkeys) { MenuBuildHotkeysPanel(p, vr); return; }   // v0.12.1 phase 50: the Hotkeys page
     constexpr size_t kV = sizeof(p.rows[0].value) / sizeof(wchar_t);
     swprintf(p.title, sizeof(p.title) / sizeof(wchar_t), L"ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu", DLAA_INJECTOR_VERSION);
     p.nRows = MR_COUNT;
@@ -17110,6 +18195,9 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     MenuRow(p, MR_FWD, L"See-through depth", KeyName(KA_FWD_DEPTH), nullptr, false);
     swprintf(p.rows[MR_FWD].value, kV, L"%ls", !g_fwdCfg ? L"off (dlaa.ini 0)"
                                               : (!g_fwdOn.load() ? (g_fwdAutoOff ? L"off (VR budget)" : L"off") : L"on"));
+    MenuRow(p, MR_BIAS, L"Light glow ghosting fix", "dlaa.ini dlss_bias_mask", nullptr, false);   // phase 49
+    if (g_biasCfg > 0) swprintf(p.rows[MR_BIAS].value, kV, L"%d %%", g_biasCfg);
+    else               swprintf(p.rows[MR_BIAS].value, kV, L"off");
     groupRow(MR_UPGRP, kMenuGroups[MenuGroupIndex(MR_UPGRP)].title);   // phase 43: menu categories
     MenuRow(p, MR_UPSCALE, L"DLSS upscale", KeyName(KA_UPSCALE_TOGGLE), nullptr, false);
     swprintf(p.rows[MR_UPSCALE].value, kV, L"%ls", onOff[g_dlssUpscale.load() ? 1 : 0]);
@@ -17150,6 +18238,31 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
                            : (hs.failed ? L"on (failed, see log)" : L"on");
         swprintf(p.rows[MR_HMASK].value, kV, L"%ls", (!g_xrHiddenMask && noExt) ? L"not supported" : val);
     }
+    if (g_xrTurbo && !XrTurboEffective())                 // phase 52: the VR FPS cap wins over turbo
+        swprintf(p.rows[MR_TURBO].value, kV, L"on (FPS cap wins)");
+    groupRow(MR_FRGRP, kMenuGroups[MenuGroupIndex(MR_FRGRP)].title);   // phase 52: frame rate
+    {   // phase 52: "not supported" once Reflex was refused / NVAPI is missing (FramePace::Support 0; no live counter)
+        const bool noReflex = FramePace::Support() == 0;
+        MenuRow(p, MR_REFLEX, L"Reflex (flat)", "dlaa.ini reflex", vr ? "flat only" : nullptr, vr || noReflex);
+        static const wchar_t* const kRx[3] = { L"off", L"on", L"on + boost" };
+        if (noReflex) swprintf(p.rows[MR_REFLEX].value, kV, L"%ls", g_reflex ? L"on (not supported)" : L"not supported");
+        else          swprintf(p.rows[MR_REFLEX].value, kV, L"%ls", kRx[g_reflex < 0 || g_reflex > 2 ? 0 : g_reflex]);
+        MenuRow(p, MR_FPSCAP, L"FPS cap (flat)", "dlaa.ini fps_cap", vr ? "flat only" : nullptr, vr);
+        if (g_fpsCap) swprintf(p.rows[MR_FPSCAP].value, kV, L"%d fps", g_fpsCap);
+        else          swprintf(p.rows[MR_FPSCAP].value, kV, L"off");
+        MenuRow(p, MR_VRFPSCAP, L"VR FPS cap", "dlaa.ini vr_fps_cap", vr ? nullptr : "VR only", !vr);
+        const int64_t per = XrHook::GetFpsCapStats().basePeriodNs;   // (atomics; the headset rate: a new session at most)
+        if (g_vrFpsCap && per > 0)
+            swprintf(p.rows[MR_VRFPSCAP].value, kV, L"%ls (%.0f fps)", g_vrFpsCap == 2 ? L"half" : L"third",
+                     1e9 / (double)per / (double)g_vrFpsCap);
+        else
+            swprintf(p.rows[MR_VRFPSCAP].value, kV, L"%ls", g_vrFpsCap == 2 ? L"half" : g_vrFpsCap == 3 ? L"third" : L"off");
+    }
+    {   // phase 54: CPU tuning -- off / on (all three) / mixed (set in dlaa.ini); what the P-core part did is in the log
+        MenuRow(p, MR_CPU, L"CPU tuning", "dlaa.ini cpu_pcore / cpu_priority / cpu_no_throttle", nullptr, false);
+        const int cs = CpuTuningPick::Summary(g_cpuPcore, g_cpuPriority, g_cpuNoThrottle);
+        swprintf(p.rows[MR_CPU].value, kV, L"%ls", cs == 0 ? L"off" : (cs == 1 ? L"on" : L"mixed (dlaa.ini)"));
+    }
     {   // phase 39: the level + what logging costs (CPU ms per frame; changes only at the ~1-s snapshots: no rebuild per frame)
         MenuRow(p, MR_LOG, L"Logging", "dlaa.ini log_level", nullptr, false);
         const int lv = LogLevel();
@@ -17171,22 +18284,36 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     else        swprintf(p.rows[MR_DEPTH].value, kV, L"%d px", g_menuVrDepth);
     MenuRow(p, MR_FACE, L"Panel faces you (VR)", "dlaa.ini menu_vr_face", vr ? nullptr : "VR only", !vr);   // phase 16
     swprintf(p.rows[MR_FACE].value, kV, L"%ls", onOff[g_menuVrFace ? 1 : 0]);
-    // v0.10.2: the open key is the value, the 4 others the Hotkey column (v0.10.3 phase 29c: their short names; in the group)
+    // v0.10.2: the open key is the value, the 4 others the Hotkey column (v0.10.3 phase 29c: their short names; in the group).
+    // v0.12.1 phase 50: Right opens the Hotkeys page on its "Menu: open / close" line (the row no longer binds)
     snprintf(k, sizeof(k), "%s / %s / %s / %s", snUp, snDown, snLeft, snRight);
     MenuRow(p, MR_MENUKEYS, L"Menu keys", k, nullptr, false);
     MenuWiden(p.rows[MR_MENUKEYS].value, kV, snMenu);
-    MenuRow(p, MR_FPS, L"FPS counter", "dlaa.ini fps_show", nullptr, false);
-    swprintf(p.rows[MR_FPS].value, kV, L"%ls", onOff[g_fpsShow ? 1 : 0]);
+    MenuRow(p, MR_FPS, L"FPS counter", "dlaa.ini fps_show / fps_text", nullptr, false);
+    swprintf(p.rows[MR_FPS].value, kV, L"%ls", !g_fpsShow ? L"Off" : FpsTextMenuName(g_fpsText));
     groupRow(MR_FPSGRP, L"FPS counter settings");         // v0.10.3 phase 29c
     MenuRow(p, MR_FPSLOCK, L"FPS counter lock", "dlaa.ini fps_vr_lock", vr ? nullptr : "VR only", !vr);   // v0.10.3 phase 28
     swprintf(p.rows[MR_FPSLOCK].value, kV, L"%ls", g_fpsVrLock == 2 ? L"Attached to vehicle"   // phase 47
                                                    : g_fpsVrLock ? L"Fixed in play space" : L"Follow head");   // phase 44: was "Fixed in cab"
+    {                                                     // phase 51b: Position per vehicle (the attached box only)
+        const bool att = vr && g_fpsVrLock == 2;
+        MenuRow(p, MR_FPSPROF, L"Position per vehicle", "dlaa.ini fps_profiles", att ? nullptr : "VR attached only", !att);
+        swprintf(p.rows[MR_FPSPROF].value, kV, L"%ls", g_fpsProfiles ? L"On" : L"Off");
+        MenuRow(p, MR_FPSREMEAS, L"Re-measure cab spot", "Right: now, Left: defaults", att ? nullptr : "VR attached only", !att);   // phase 51c / 51d
+        swprintf(p.rows[MR_FPSREMEAS].value, kV, L"%ls", g_fpsBoxDefaulted ? L"box defaults" : (FpsCab::GetLockInfo().remeasured ? L"done" : L"-"));
+    }
     MenuRow(p, MR_FPSX, L"FPS counter X", vr ? "dlaa.ini fps_vr_x" : "dlaa.ini fps_x", nullptr, false);
-    if (vr) swprintf(p.rows[MR_FPSX].value, kV, L"%+d %%", g_fpsVrX);
+    if (vr) swprintf(p.rows[MR_FPSX].value, kV, L"%+.1f %%", (double)g_fpsVrX);
     else    swprintf(p.rows[MR_FPSX].value, kV, L"%d %%", g_fpsX);
     MenuRow(p, MR_FPSY, L"FPS counter Y", vr ? "dlaa.ini fps_vr_y" : "dlaa.ini fps_y", nullptr, false);
-    if (vr) swprintf(p.rows[MR_FPSY].value, kV, L"%+d %%", g_fpsVrY);
+    if (vr) swprintf(p.rows[MR_FPSY].value, kV, L"%+.1f %%", (double)g_fpsVrY);
     else    swprintf(p.rows[MR_FPSY].value, kV, L"%d %%", g_fpsY);
+    MenuRow(p, MR_FPSYAW, L"FPS turn", "dlaa.ini fps_vr_yaw", vr ? nullptr : "VR only", !vr);
+    swprintf(p.rows[MR_FPSYAW].value, kV, L"%+d deg", g_fpsVrYaw);
+    MenuRow(p, MR_FPSPITCH, L"FPS tilt", "dlaa.ini fps_vr_pitch", vr ? nullptr : "VR only", !vr);
+    swprintf(p.rows[MR_FPSPITCH].value, kV, L"%+d deg", g_fpsVrPitch);
+    MenuRow(p, MR_FPSROLL, L"FPS rotate", "dlaa.ini fps_vr_roll", vr ? nullptr : "VR only", !vr);
+    swprintf(p.rows[MR_FPSROLL].value, kV, L"%+d deg", g_fpsVrRoll);
     MenuRow(p, MR_FPSSIZE, L"FPS counter size", vr ? "dlaa.ini fps_vr_scale" : "dlaa.ini fps_scale", nullptr, false);
     swprintf(p.rows[MR_FPSSIZE].value, kV, L"%.1f", (double)(vr ? g_fpsVrScale : g_fpsScale));
     // phase 44: colour (flat and VR), VR distance and the VR turn
@@ -17194,14 +18321,13 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     swprintf(p.rows[MR_FPSCOLOR].value, kV, L"%ls", FpsPose::ColorOf(g_fpsColor).name);
     MenuRow(p, MR_FPSBRIGHT, L"FPS brightness", "dlaa.ini fps_brightness", nullptr, false);   // phase 48
     swprintf(p.rows[MR_FPSBRIGHT].value, kV, L"%d %%", g_fpsBright);
+    MenuRow(p, MR_FPSOPAC, L"FPS opacity", "dlaa.ini fps_opacity", nullptr, false);   // phase 51f
+    swprintf(p.rows[MR_FPSOPAC].value, kV, L"%d %%", g_fpsOpacity);
     MenuRow(p, MR_FPSDIST, L"FPS distance (VR)", "dlaa.ini fps_vr_dist", vr ? nullptr : "VR only", !vr);
     swprintf(p.rows[MR_FPSDIST].value, kV, L"%.2f m", (double)g_fpsVrDist / 100.0);
-    MenuRow(p, MR_FPSYAW, L"FPS turn", "dlaa.ini fps_vr_yaw", vr ? nullptr : "VR only", !vr);
-    swprintf(p.rows[MR_FPSYAW].value, kV, L"%+d deg", g_fpsVrYaw);
-    MenuRow(p, MR_FPSPITCH, L"FPS tilt", "dlaa.ini fps_vr_pitch", vr ? nullptr : "VR only", !vr);
-    swprintf(p.rows[MR_FPSPITCH].value, kV, L"%+d deg", g_fpsVrPitch);
-    MenuRow(p, MR_FPSROLL, L"FPS rotate", "dlaa.ini fps_vr_roll", vr ? nullptr : "VR only", !vr);
-    swprintf(p.rows[MR_FPSROLL].value, kV, L"%+d deg", g_fpsVrRoll);
+    snprintf(k, sizeof(k), "%s: open", snRight);          // v0.12.1 phase 50: the Hotkeys page
+    MenuRow(p, MR_HOTKEYS, L"Hotkeys...", k, nullptr, false);
+    swprintf(p.rows[MR_HOTKEYS].value, kV, L"%d actions", kMenuHkActions);
     MenuRow(p, MR_SAVE, L"Save to dlaa.ini", KeyName(KA_SAVE), nullptr, false);
     swprintf(p.rows[MR_SAVE].value, kV, L"-");
     snprintf(k, sizeof(k), "hold %s %s s", snRight, holdS);   // v0.10.3 phase 29d: was "dlaa.ini" (MenuResetTick)
@@ -17220,19 +18346,19 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     if (sel == MR_RESET)                                  // v0.10.3 phase 29d: the hold first (no cost sentence on this row)
         swprintf(p.desc, kD, L"Hold %hs for %hs s to reset. %ls", snRight, holdS, kMenuDesc[sel]);
     else if (kMenuDesc[sel]) swprintf(p.desc, kD, L"%ls%ls%ls", kMenuDesc[sel], sent[0] ? L" " : L"", sent);
-    else if (sel == MR_MENUKEYS)                          // v0.10.2
-        swprintf(p.desc, kD, L"The 5 keys that open and drive this menu. Hold a key or wheel button %.1f s, 5 times in a row: open "
-                 L"/ close, up, down, left, right. Backspace cannot clear them here. A short tap of %hs / %hs moves to another row "
-                 L"(ends the sequence); %hs does not close the menu on this row: use Close menu.", (double)g_bindHoldMs / 1000.0,
-                 snUp, snDown, snMenu);
-    else                swprintf(p.desc, kD, L"Closes the menu; every key and button goes back to the game. %hs does the same from "
-                                 L"any row but Menu keys.", snMenu);
-    // v0.10.3 phase 29c: ONE footer for every state (the hold / bind progress is in the row), from the short key names. It shares
-    // its line with the licence line (menu.cpp), so the rebind hint is shortened, then dropped, when the text does not fit left of
+    else if (sel == MR_MENUKEYS)                          // v0.10.2 (v0.12.1 phase 50: set on the Hotkeys page)
+        swprintf(p.desc, kD, L"The 5 keys that open and drive this menu: %hs opens / closes it (the value), %hs / %hs / %hs / %hs "
+                 L"move (Hotkey column). While the menu is open only these 5 are kept from the game. %hs: change them on the "
+                 L"Hotkeys page.", snMenu, snUp, snDown, snLeft, snRight, snRight);
+    else                swprintf(p.desc, kD, L"Closes the menu; the 5 menu keys go back to the game. %hs does the same from any "
+                                 L"row.", snMenu);
+    // v0.10.3 phase 29c: ONE footer for every state (the Reset progress is in the row), from the short key names. It shares
+    // its line with the licence line (menu.cpp), so the hint is shortened, then dropped, when the text does not fit left of
     // it (TuningMenu::FooterFits, measured with the panel's font; only when a menu key name changed: cached by the full text).
+    // v0.12.1 phase 50: the hint names the Hotkeys row (was "hold a key: rebind").
     {
         constexpr size_t kF = sizeof(p.footer) / sizeof(wchar_t);
-        static const wchar_t* const kHint[] = { L"   hold a key: rebind", L"   hold: rebind", L"" };
+        static const wchar_t* const kHint[] = { L"   keys: Hotkeys...", L"" };
         constexpr size_t kT = 256;                        // (5 x 39 + the words: never truncated before the fit test)
         static wchar_t s_full[kT] = L"", s_shown[kT] = L"";
         wchar_t full[kT];
@@ -17246,8 +18372,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         }
         wcsncpy_s(p.footer, kF, s_shown, _TRUNCATE);
     }
-    MenuBindDecorate(p, sel);                             // v0.10.2 hold to bind: bar / step / note (by MR id: before the compaction)
-    MenuResetDecorate(p, sel);                            // v0.10.3 phase 29d: the Reset hold's bar (by MR id too)
+    MenuResetDecorate(p, sel);                            // v0.10.3 phase 29d: the Reset hold's bar (by MR id: before the compaction)
 
     // v0.10.3 phase 29c: the rows of a collapsed group are not drawn -- the visible rows move to the front in MR order, nRows =
     // their count (RefHeight: the panel shrinks), sel = the visible index of g_menuSel (a hidden selection -- not reachable,
@@ -17267,8 +18392,13 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
 
 void MenuClose(uint64_t n, const char* why) {
     g_menuOpen = false;
-    g_mb = MenuBindState();                               // v0.10.2: a running hold / bind sequence ends with the menu
-    g_mrh = MenuResetHold();                              // v0.10.3 phase 29d: so does a Reset hold
+    if (g_hk.on)                                          // v0.12.1 phase 50: a waiting Hotkeys-page bind ends with the menu
+        Log("hotkey %s unchanged (the menu closed while it waited for a press, Present #%llu)", g_keys[MenuHkAction(g_hk.line)].ini,
+            (unsigned long long)n);
+    g_hk = MenuHkBind();                                  // (the swallowed input too: the game gets every key again)
+    g_menuPage = kMenuPageMain;
+    MenuPublishHide();                                    // nothing hidden any more
+    g_mrh = MenuResetHold();                              // v0.10.3 phase 29d: a Reset hold ends with the menu
     g_menuBlitEye = -1; g_menuBlitRt = nullptr;
     PlayTones(1, 300, 120, 0);
     char placed[240] = "";
@@ -17279,8 +18409,8 @@ void MenuClose(uint64_t n, const char* why) {
                  KeyName(KA_SAVE));
     char fpsPlaced[256] = "";                             // (v0.10.3 phase 28: was 200, + the VR lock state)
     if (g_fpsMoved)
-        snprintf(fpsPlaced, sizeof(fpsPlaced), " -- fps box now %s, flat x=%d%% y=%d%% size %.1f, VR x=%+d y=%+d (%s) size %.1f (%s or "
-                 "the Save row writes it)", g_fpsShow ? "on" : "off", g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY,
+        snprintf(fpsPlaced, sizeof(fpsPlaced), " -- fps box now %s, flat x=%d%% y=%d%% size %.1f, VR x=%+.1f y=%+.1f (%s) size %.1f (%s or "
+                 "the Save row writes it)", g_fpsShow ? "on" : "off", g_fpsX, g_fpsY, (double)g_fpsScale, (double)g_fpsVrX, (double)g_fpsVrY,
                  g_fpsVrLock == 2 ? "degrees, attached to the vehicle" : g_fpsVrLock ? "degrees, fixed in the play space"
                  : "%, follows the head", (double)g_fpsVrScale, KeyName(KA_SAVE));
     Log("tuning menu closed (%s, Present #%llu)%s%s", why, (unsigned long long)n, placed, fpsPlaced);
@@ -17297,8 +18427,8 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     const bool stepRow = row == MR_SHARP || row == MR_WIDTH || row == MR_LOD || row == MR_LODCUT || row == MR_AREA ||
                          row == MR_POSX || row == MR_POSY || row == MR_SIZE || row == MR_DEPTH || row == MR_FPSX ||
                          row == MR_FPSY || row == MR_FPSSIZE || row == MR_FPSDIST || row == MR_FPSYAW || row == MR_FPSPITCH ||
-                         row == MR_FPSROLL || row == MR_VRSSIZE;   // phase 44: + the VR distance / turn rows, Foveated size (the
-                                                    //   colour row: fresh presses)
+                         row == MR_FPSROLL || row == MR_VRSSIZE ||   // phase 44: + the VR distance / turn rows, Foveated size (the
+                         row == MR_FPSCAP;          //   colour row: fresh presses); phase 52: + FPS cap
     if (repeat && !stepRow) return;
     const bool vr = MenuVr();
     switch (row) {
@@ -17320,6 +18450,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_MIRTURNS: ToggleMirTurns(n); break;             // phase 41: Left and Right both switch it (also while greyed: kept)
     case MR_PRETM:   TogglePreTonemap(n); break;
     case MR_FWD:     ToggleFwdDepth(n); break;
+    case MR_BIAS:    StepBiasMask(dir, n); break;           // phase 49: 25 % steps, Right = stronger, Left = weaker (0 = off)
     case MR_UPSCALE: ToggleUpscale(n); break;
     case MR_DLAA:    ToggleDlaa(n); break;
     case MR_OFXR:    break;                                 // information only (dlaa.ini ofxr_bridge, read at start)
@@ -17327,9 +18458,14 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_VRS:     ToggleVrs(n); break;                   // phase 34: Left and Right both switch it (also flat: kept for VR)
     case MR_VRSSIZE: StepVrsSize(dir, n, repeat); break;    // phase 44: Right = bigger sharp centre, Left = smaller (5 % steps)
     case MR_HMASK:   ToggleHiddenMask(n); break;            // phase 40: Left and Right both switch it (also flat: kept for VR)
+    case MR_CPU:     ToggleCpuTuning(n); break;             // phase 54: Left and Right both switch it
     case MR_VRSPASS: ToggleVrsPasses(n); break;             // phase 42: two choices, Left and Right both switch
+    case MR_REFLEX:  StepReflex(n, dir); break;             // phase 52: off / on / on + boost (also in VR: kept for flat)
+    case MR_FPSCAP:  StepFpsCap(dir, n, repeat); break;     // phase 52: the kCapSteps list (also in VR: kept for flat)
+    case MR_VRFPSCAP: StepVrFpsCap(n, dir); break;          // phase 52: off / half / third (also in flat: kept for VR)
     case MR_LOG:     StepLogLevel(dir, n); break;           // phase 39: Right = more, Left = less (clamped)
     case MR_PICGRP: case MR_MOTGRP: case MR_UPGRP: case MR_VRPGRP:   // phase 43: the four new groups
+    case MR_FRGRP:                                          // phase 52
     case MR_PANELGRP: case MR_FPSGRP:                       // v0.10.3 phase 29c: Right opens the group, Left closes it (a fresh
         MenuGrpOpen(row) = dir > 0;                         // press only: not a stepRow, so auto-repeat is ignored above)
         break;
@@ -17368,14 +18504,26 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
                          : "the in-picture path: the panel drawn as a turned quad (phase 16); the fps box stays flat",
             (unsigned long long)n);
         break;
-    case MR_FPS:     ToggleFpsBox(n); break;                // Left and Right both switch it
+    case MR_FPS:     CycleFpsMode(n, dir); break;           // 7 values: Off / fps_text 0..5 (Right next, Left previous)
     case MR_FPSLOCK: ToggleFpsVrLock(n, dir); break;        // phase 47: 3 values, Right = next, Left = previous (also flat: kept for VR)
+    case MR_FPSPROF: ToggleFpsProfiles(n); break;           // phase 51b: Left and Right both switch it (also when greyed: kept for VR)
+    case MR_FPSREMEAS:                                      // phase 51c: Right = re-measure now; 51d: Left = this vehicle's box to defaults
+        if (dir > 0 && g_launchVr == 1 && g_fpsVrLock == 2) {
+            FpsCab::Remeasure();
+            g_fpsBoxDefaulted = false;
+            Log("fps box: re-measure the cab spot (tuning menu, Present #%llu) -- the next lock-on stores a fresh cab pose for this vehicle",
+                (unsigned long long)n);
+            PlayTones(1, 1400, 120, 0);
+        } else if (dir < 0 && g_launchVr == 1 && g_fpsVrLock == 2) {
+            FpsBoxDefaults(n);
+        }
+        break;
     case MR_FPSX:
-        if (vr) g_fpsVrX = MenuClampI(g_fpsVrX + dir, -50, 50); else g_fpsX = MenuClampI(g_fpsX + dir, 0, 95);
+        if (vr) g_fpsVrX = MenuStepFpsVr(g_fpsVrX, dir); else g_fpsX = MenuClampI(g_fpsX + dir, 0, 95);
         g_fpsExplicit = g_fpsMoved = true;
         break;
     case MR_FPSY:
-        if (vr) g_fpsVrY = MenuClampI(g_fpsVrY + dir, -50, 50); else g_fpsY = MenuClampI(g_fpsY + dir, 0, 95);
+        if (vr) g_fpsVrY = MenuStepFpsVr(g_fpsVrY, dir); else g_fpsY = MenuClampI(g_fpsY + dir, 0, 95);
         g_fpsExplicit = g_fpsMoved = true;
         break;
     case MR_FPSSIZE: {
@@ -17396,6 +18544,11 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
         g_fpsExplicit = g_fpsMoved = true;
         Log("fps box brightness: %d %% (fps_brightness, tuning menu, Present #%llu)", g_fpsBright, (unsigned long long)n);
         break;
+    case MR_FPSOPAC:                                        // phase 51f: 10 % steps, live (text AND outline fade together)
+        g_fpsOpacity = FpsPose::StepOpacity(g_fpsOpacity, dir);
+        g_fpsExplicit = g_fpsMoved = true;
+        Log("fps box opacity: %d %% (fps_opacity, tuning menu, Present #%llu)", g_fpsOpacity, (unsigned long long)n);
+        break;
     case MR_FPSDIST:                                        // phase 44: 5 cm steps (also flat: kept for VR; the row is greyed)
         g_fpsVrDist = FpsPose::ClampI(g_fpsVrDist + 5 * dir, FpsPose::kDistMin, FpsPose::kDistMax);
         g_fpsExplicit = g_fpsMoved = true;                  // (no FpsVrLockReset: that would re-capture a non-LOCAL pivot)
@@ -17413,8 +18566,14 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
                 g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll, (unsigned long long)n);
         break;
     }
+    case MR_HOTKEYS:                                         // v0.12.1 phase 50: Right opens the Hotkeys page (Left: nothing)
+        if (dir > 0) MenuHkOpen(1, n);
+        break;
+    case MR_MENUKEYS:                                        // v0.12.1 phase 50: ... on its "Menu: open / close" line
+        if (dir > 0) MenuHkOpen(MenuHkLineOf(KA_MENU), n);
+        break;
     case MR_SAVE:    SaveSettings(n); break;
-    case MR_RESET:   break;                                  // v0.10.3 phase 29d: a HOLD of Right resets (MenuResetTick), no press
+    case MR_RESET:   break;                                 // v0.10.3 phase 29d: a HOLD of Right resets (MenuResetTick), no press
     case MR_CLOSE:   MenuClose(n, "Close row"); break;
     default: break;
     }
@@ -17424,8 +18583,10 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
 void MenuKeys(uint64_t n) {
     CpuProf::Block cpb(CpuProf::kBMenu);               // phase 31 CPU profiler (cpu_prof.h)
     const bool open = g_menuOpen.load(std::memory_order_relaxed);
-    // v0.10.2: on the Menu keys row the open key does not close the menu (the row binds it; Close menu closes from there)
-    if (KeyHit(KA_MENU) && !(open && g_menuSel == MR_MENUKEYS)) {
+    // v0.12.1 phase 50: while the Hotkeys page waits for a press on one of the 5 menu-key lines, the open key is a candidate
+    // there (it binds, MenuHkBindTick); everywhere else it opens / closes the menu (a waiting bind is cancelled by the close)
+    const bool openKeyBinds = open && g_menuPage == kMenuPageHotkeys && g_hk.on && MenuIsMenuAction(MenuHkAction(g_hk.line));
+    if (KeyHit(KA_MENU) && !openKeyBinds) {
         if (!open) {
             g_menuOpen = true;
             g_menuMoved = false;
@@ -17434,47 +18595,33 @@ void MenuKeys(uint64_t n) {
             if (g_menuSel < 0 || g_menuSel >= MR_COUNT) g_menuSel = 0;
             if (!MenuRowVisible(g_menuSel)) g_menuSel = MenuRowGroup(g_menuSel);
             MenuPerfOpen();                               // GPU timers on while open (debug = 0) + fresh figures
-            MenuBindReset();                              // v0.10.2 hold to bind: the held open key starts no hold (after the
-                                                          // selection fix above: it records g_menuSel as the bind row)
+            g_menuPage = kMenuPageMain;                   // v0.12.1 phase 50: every open starts on the main page, no bind
+            g_hk = MenuHkBind();
             g_mrh = MenuResetHold();                      // v0.10.3 phase 29d: no Reset hold carried over
             PlayTones(2, 880, 60, 60);
-            Log("tuning menu opened (%s, Present #%llu) -- %s / %s select a row, %s / %s change it, hold a key or button %.1f s "
-                "on a row to bind it (bind_hold_ms); the game sees no key / button while the menu is open", KeyName(KA_MENU),
+            Log("tuning menu opened (%s, Present #%llu) -- %s / %s select a row, %s / %s change it; hotkeys are set on the "
+                "Hotkeys... row; only the 5 menu keys / buttons are kept from the game while the menu is open", KeyName(KA_MENU),
                 (unsigned long long)n, KeyName(KA_MENU_UP), KeyName(KA_MENU_DOWN), KeyName(KA_MENU_LEFT),
-                KeyName(KA_MENU_RIGHT), (double)g_bindHoldMs / 1000.0);
+                KeyName(KA_MENU_RIGHT));
         } else {
             MenuClose(n, KeyName(KA_MENU));
         }
+        MenuPublishHide();                                // v0.12.1 phase 50: open = the menu inputs, closed = nothing
         return;                                           // the open / close press does nothing else this frame
     }
     if (!open) return;
-    if (g_menuSel == MR_MENUKEYS) {
-        // v0.10.2 Menu keys row: the menu Up / Down act on RELEASE after a tap (< kMenuTapMs); held longer they are a bind hold.
-        // No auto-repeat here (a scroll arriving with the key held stops on this row); Left / Right do nothing on this row.
-        const ULONGLONG now = GetTickCount64();
-        if (KeyHit(KA_MENU_UP) && !g_keyRepeat[KA_MENU_UP])          { g_mb.navDir = -1; g_mb.navAt = now; }
-        else if (KeyHit(KA_MENU_DOWN) && !g_keyRepeat[KA_MENU_DOWN]) { g_mb.navDir = +1; g_mb.navAt = now; }
-        else if (g_mb.navDir) {
-            const KeyAction na = g_mb.navDir < 0 ? KA_MENU_UP : KA_MENU_DOWN;
-            if (!g_keyWasActive[na]) {                    // released
-                if (now - g_mb.navAt < kMenuTapMs) g_menuSel = MenuStepRow(g_menuSel, g_mb.navDir);   // 29c: visible rows
-                g_mb.navDir = 0;
-            } else if (now - g_mb.navAt >= kMenuTapMs) {
-                g_mb.navDir = 0;                          // held: a bind hold, not a step
-            }
-        }
+    MenuHkSwallowTick();                                  // v0.12.1 phase 50: the input that ended a bind, released yet?
+    if (g_menuPage == kMenuPageHotkeys) {
+        MenuHkKeys(n);                                    // v0.12.1 phase 50: the Hotkeys page (navigation + bind mode)
     } else {
-        g_mb.navDir = 0;
         if (KeyHit(KA_MENU_UP))   g_menuSel = MenuStepRow(g_menuSel, -1);   // v0.10.3 phase 29c: the next VISIBLE row
         if (KeyHit(KA_MENU_DOWN)) g_menuSel = MenuStepRow(g_menuSel, +1);   // (a collapsed group's rows are skipped, wraps)
-        if (g_menuSel != MR_MENUKEYS) {                   // (arriving on Menu keys: Left / Right do nothing there)
-            if (KeyHit(KA_MENU_RIGHT))     MenuChange(g_menuSel, +1, g_keyRepeat[KA_MENU_RIGHT], n);
-            else if (KeyHit(KA_MENU_LEFT)) MenuChange(g_menuSel, -1, g_keyRepeat[KA_MENU_LEFT], n);
-        }
+        if (KeyHit(KA_MENU_RIGHT))     MenuChange(g_menuSel, +1, g_keyRepeat[KA_MENU_RIGHT], n);
+        else if (KeyHit(KA_MENU_LEFT)) MenuChange(g_menuSel, -1, g_keyRepeat[KA_MENU_LEFT], n);
+        if (g_menuOpen.load(std::memory_order_relaxed)) MenuResetTick(n);  // v0.10.3 phase 29d: the Reset row's hold of Right
     }
-    if (g_menuOpen.load(std::memory_order_relaxed)) MenuResetTick(n);  // v0.10.3 phase 29d: the Reset row's hold of Right
-    if (g_menuOpen.load(std::memory_order_relaxed)) MenuBindTick(n);   // v0.10.2 hold to bind (the Close row may have closed it)
     if (g_menuOpen.load(std::memory_order_relaxed)) MenuPerfTick();   // (the Close row may have closed it just now)
+    MenuPublishHide();                                    // v0.12.1 phase 50: what the game may not see now (on a change only)
 }
 
 // The Present-time target of the panel and the fps box. Flat (and the VR desktop mirror): the backbuffer of the presenting
@@ -17787,15 +18934,15 @@ int FpsVrLockedPlace(int eye, ID3D11Texture2D* tex, const D3D11_RENDER_TARGET_VI
         ++st.lines;
         LogDbg("fps box VR lock: eye %d -> OpenXR view %d (%s%s), picture rect (%d,%d) %dx%d of %.0fx%.0f slice %u; view fov L%+.1f "
             "R%+.1f U%+.1f D%+.1f deg -> optical centre uv=(%.3f, %.3f) vs measured %s(%.3f, %.3f); layer space type %d, located "
-            "in space type %d (%s), age %.1f ms; anchor yaw %+d pitch %+d deg at %.1f m -> depth %.2f m, centre (%.0f, %.0f) px, "
+            "in space type %d (%s), age %.1f ms; anchor yaw %+.1f pitch %+.1f deg at %.1f m -> depth %.2f m, centre (%.0f, %.0f) px, "
             "draw scale x%.2f%s",
             eye, view, mapped ? "the swapchain image of that view in the last xrEndFrame" : "assumed: eye index",
             swapped ? ", SWAPPED: the other view's optical centre matches the measured one" : "", rect[0], rect[1], rect[2],
             rect[3], (double)W, (double)H, slice, (double)w.angleLeft / kRad, (double)w.angleRight / kRad,
             (double)w.angleUp / kRad, (double)w.angleDown / kRad, uOf(view), vOf(view), measured ? "" : "(not measured yet) ",
             (double)mu, (double)mv, vs.spaceType, vs.locSpaceType, vs.corrected ? "corrected to the submitted pose" : "raw",
-            vs.ageSec * 1000.0, g_fpsVrX,
-            -g_fpsVrY, dA, depth, px, py, k, behind ? " -- BEHIND the eye now: not drawn" : "");
+            vs.ageSec * 1000.0, (double)g_fpsVrX,
+            -(double)g_fpsVrY, dA, depth, px, py, k, behind ? " -- BEHIND the eye now: not drawn" : "");
     }
     // phase 28b: the direction self-check + the once-a-second log for 10 s after the lock-on (eye 0 only). Head yaw / pitch =
     // this view's forward (-z) in the layer space; the anchor's direction FROM THIS EYE; rel = anchor - head. A point to the
@@ -17862,7 +19009,9 @@ FpsCab::XrIn FpsCabXr() {
     return x;
 }
 // FpsCab follows the menu state: on = VR, the box shown, lock 2; the fps_vr_* settings (a change moves the box in the cab).
+bool FpsProfCabPose(uint64_t key, FpsProfile::CabPose* out);   // phase 51b (the per-vehicle profiles, below)
 void FpsCabSync(uint64_t frame) {
+    FpsCab::SetCabPoseProvider(FpsProfCabPose);          // phase 51b: the vehicles' stored cab poses (none while fps_profiles = 0)
     FpsCab::SetActive(g_launchVr == 1 && g_fpsShow && g_fpsVrLock == 2, frame);
     if (!FpsCab::Active()) return;
     FpsCab::Settings s;
@@ -17870,6 +19019,278 @@ void FpsCabSync(uint64_t frame) {
     s.yaw = g_fpsVrYaw; s.pitch = g_fpsVrPitch; s.roll = g_fpsVrRoll;
     s.scale = (double)g_fpsVrScale;
     FpsCab::SetSettings(s);
+}
+
+// ---- phase 51: per-vehicle fps box profiles for "Attached to vehicle" (fps_vr_lock = 2; src/fps_profile.h) ---------------------
+// At each lock-on (FpsCab::LockCount changes) the lock's vehicle key picks the profile: a stored one is applied to the live
+// fps_vr_* values (the menu rows show it), none = the live values (the last used / the global fps_vr_* keys) become that vehicle's
+// start. While mode 2 is active, any change of those values goes into the bound vehicle's profile (and its phase 47e same-cab
+// aliases). Saved -- only the fps_profile lines, nothing else of dlaa.ini -- when the tuning menu closes and at process exit, when
+// something changed. Present thread (after MenuKeys), the same thread as the menu's edits.
+FpsProfile::Store g_fpsProf;
+// phase 51d: the binding (the vehicle the live values belong to, + same-cab aliases; the lock count handled) is FpsProfile::Session
+// (pure: tests/fps_cab_test.cpp). Main thread only; its Tick runs under the profile lock (it reads / writes g_fpsProf).
+FpsProfile::Session g_fpsProfSess;
+bool     g_fpsProfDirty = false, g_fpsProfMenuWas = false, g_fpsProfStartLogged = false;
+int      g_fpsProfRead = 0, g_fpsProfBad = 0;            // dlaa.ini fps_profile lines read / not usable (LoadConfig)
+constexpr int kFpsProfDirtyLog = 8;
+uint64_t g_fpsProfDirtyKeys[kFpsProfDirtyLog] = {};      // the keys changed since the last save (log)
+int      g_fpsProfNDirty = 0;
+
+FpsProfile::Vals FpsProfLive() {
+    FpsProfile::Vals v;
+    v.x = g_fpsVrX; v.y = g_fpsVrY; v.dist = g_fpsVrDist; v.yaw = g_fpsVrYaw; v.pitch = g_fpsVrPitch; v.roll = g_fpsVrRoll;
+    v.scale = g_fpsVrScale;
+    v.color = g_fpsColor; v.bright = g_fpsBright; v.text = g_fpsText;   // phase 51b
+    v.opacity = g_fpsOpacity;                                           // phase 51f
+    return v;
+}
+// phase 51b: colour / brightness / text only when the profile has them (a v1 line: -1 = keep the live global values)
+void FpsProfApply(const FpsProfile::Vals& v) {
+    g_fpsVrX = v.x; g_fpsVrY = v.y; g_fpsVrDist = v.dist; g_fpsVrYaw = v.yaw; g_fpsVrPitch = v.pitch; g_fpsVrRoll = v.roll;
+    g_fpsVrScale = v.scale;
+    if (v.color >= 0) g_fpsColor = v.color;
+    if (v.bright >= 0) g_fpsBright = v.bright;
+    if (v.opacity >= 0) g_fpsOpacity = v.opacity;         // phase 51f (a v1 / v2 line has none: the live value stays)
+    if (v.text >= 0 && v.text != g_fpsText) { g_fpsText = v.text; FpsSetLines(); }   // (the box texture rebuilds on the new text)
+}
+const char* FpsProfStr(const FpsProfile::Vals& v, char* b, size_t n) {
+    char c[24], br[16], t[16], op[16];
+    if (v.color >= 0) snprintf(c, sizeof(c), "%d", v.color); else snprintf(c, sizeof(c), "(global)");
+    if (v.bright >= 0) snprintf(br, sizeof(br), "%d", v.bright); else snprintf(br, sizeof(br), "(global)");
+    if (v.text >= 0) snprintf(t, sizeof(t), "%d", v.text); else snprintf(t, sizeof(t), "(global)");
+    if (v.opacity >= 0) snprintf(op, sizeof(op), "%d", v.opacity); else snprintf(op, sizeof(op), "(global)");
+    snprintf(b, n, "fps_vr_x=%.2f fps_vr_y=%.2f fps_vr_dist=%d fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d fps_vr_scale=%.2f fps_color=%s "
+             "fps_brightness=%s fps_text=%s fps_opacity=%s", (double)v.x, (double)v.y, v.dist, v.yaw, v.pitch, v.roll, (double)v.scale, c, br, t, op);
+    return b;
+}
+void FpsProfMarkDirty(uint64_t key) {
+    g_fpsProfDirty = true;
+    for (int i = 0; i < g_fpsProfNDirty; ++i) if (g_fpsProfDirtyKeys[i] == key) return;
+    if (g_fpsProfNDirty < kFpsProfDirtyLog) g_fpsProfDirtyKeys[g_fpsProfNDirty++] = key;
+}
+// phase 51b: g_fpsProf is shared by the game's MAIN thread (Present: FpsProfileTick / the menu toggle / the saves write it) and the
+// RENDER thread (the lock-on readback asks FpsProfCabPose, inside FpsCab's own lock). Every access goes through these: an SRW
+// lock held only for the copy in / out (never around file I/O, never while calling FpsCab: the lock order is FpsCab -> profile).
+SRWLOCK g_fpsProfLock = SRWLOCK_INIT;
+struct FpsProfLockW { FpsProfLockW() { AcquireSRWLockExclusive(&g_fpsProfLock); } ~FpsProfLockW() { ReleaseSRWLockExclusive(&g_fpsProfLock); } };
+struct FpsProfLockR { FpsProfLockR() { AcquireSRWLockShared(&g_fpsProfLock); } ~FpsProfLockR() { ReleaseSRWLockShared(&g_fpsProfLock); } };
+bool FpsProfPut(uint64_t key, const FpsProfile::Vals& v) { FpsProfLockW l; return g_fpsProf.Put(key, v); }
+bool FpsProfPutCab(uint64_t key, const FpsProfile::CabPose& c) { FpsProfLockW l; return g_fpsProf.PutCab(key, c); }
+bool FpsProfGet(uint64_t key, FpsProfile::Vals* out) {   // (a use: the LRU stamp)
+    FpsProfLockW l;
+    const FpsProfile::Vals* v = g_fpsProf.Get(key);
+    if (v) *out = *v;
+    return v != nullptr;
+}
+bool FpsProfPeek(uint64_t key, FpsProfile::Vals* out) {
+    FpsProfLockR l;
+    const int i = g_fpsProf.Find(key);
+    if (i >= 0) *out = g_fpsProf.e[i].v;
+    return i >= 0;
+}
+bool FpsProfCabOf(uint64_t key, FpsProfile::CabPose* out) {
+    FpsProfLockR l;
+    const FpsProfile::CabPose* c = g_fpsProf.Cab(key);
+    if (c) *out = *c;
+    return c != nullptr;
+}
+int FpsProfCount() { FpsProfLockR l; return g_fpsProf.n; }
+bool FpsProfDropCabPart(uint64_t key, const FpsProfile::CabPart& p) { FpsProfLockW l; return g_fpsProf.DropCabPart(key, p.ic, p.stride, p.fmt); }
+uint64_t g_fpsProfMovedSerial = 0;                       // phase 51c: FpsCab::CabMovedSerial handled
+bool FpsProfLoadLine(const char* value) { FpsProfLockW l; return g_fpsProf.Load(value); }   // (LoadConfig)
+std::unique_ptr<FpsProfile::Store> FpsProfCopy() {
+    std::unique_ptr<FpsProfile::Store> c(new FpsProfile::Store());
+    FpsProfLockR l;
+    *c = g_fpsProf;
+    return c;
+}
+// phase 51b: FpsCab asks at each lock-on readback (render thread -- the same thread as FpsProfileTick: the game's render thread
+// runs the Present boundary) for the vehicle's stored cab pose. The shared mode (fps_profiles = 0) has none.
+bool FpsProfCabPose(uint64_t key, FpsProfile::CabPose* out) {
+    if (!g_fpsProfiles) return false;
+    return FpsProfCabOf(key, out);                       // (a copy, under the profile lock)
+}
+// dlaa.ini with the fps_profile lines brought up to date (FpsProfile::Rewrite: every other byte kept), via dlaa.ini.tmp
+bool WriteIniProfiles(const FpsProfile::Store& st) {
+    wchar_t path[MAX_PATH], tmp[MAX_PATH];
+    if (!PathNextToDll(L"dlaa.ini", path) || !PathNextToDll(L"dlaa.ini.tmp", tmp)) return false;
+    std::string in;
+    ReadIniRaw(path, &in);
+    // never replace an existing dlaa.ini we could not read (locked / mid-write elsewhere): Rewrite("") would keep only the profiles
+    if (in.empty() && GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) return false;
+    const std::string out = FpsProfile::Rewrite(in, st);
+    if (out == in) return true;                          // nothing to write
+    return WriteIniAtomic(path, tmp, out);
+}
+void FpsProfileSave(const char* why) {
+    if (!g_fpsProfDirty) return;
+    const std::unique_ptr<FpsProfile::Store> st = FpsProfCopy();   // phase 51b: the copy is written (no lock around the file I/O)
+    if (!WriteIniProfiles(*st)) {
+        LogWarn("fps profile: writing the vehicle profiles to dlaa.ini FAILED (%s) -- dlaa.ini unchanged, trying again at the next "
+                "menu close / exit", why);
+        return;
+    }
+    char b[260];
+    for (int i = 0; i < g_fpsProfNDirty; ++i) {
+        const int e = st->Find(g_fpsProfDirtyKeys[i]);
+        if (e >= 0)
+            Log("fps profile: vehicle %016llx -> saved (%s; %s; cab pose %s)", (unsigned long long)g_fpsProfDirtyKeys[i], why,
+                FpsProfStr(st->e[e].v, b, sizeof(b)), st->e[e].hasCab ? "stored" : "none");
+    }
+    g_fpsProfDirty = false;
+    g_fpsProfNDirty = 0;
+}
+// phase 51b: the lock-on's placement source -> the log, and the cab pose: a vehicle without one gets this lock's (the first lock-on
+// on it, or a v1 profile line); a stored one whose part this lock does not have (LOD / mod change) is KEPT (the next lock-on with
+// the part uses it again) -- only an edit of a placement row replaces it (FpsProfileTick, below). With the profiles switched on
+// while a lock is held (ToggleFpsProfiles), the stored pose re-places the current lock (FpsCab::PlaceFromCab).
+void FpsProfCabAtLock(uint64_t key) {
+    FpsCab::LockInfo li = FpsCab::GetLockInfo();
+    FpsProfile::CabPose stored;
+    const FpsProfile::CabPose* st = FpsProfCabOf(key, &stored) ? &stored : nullptr;   // (a copy: FpsCab is called without the profile lock)
+    if (!li.remeasured && li.placed != FpsCab::kPlacedCab && st && FpsCab::PlaceFromCab(*st)) li = FpsCab::GetLockInfo();
+    if (li.placed == FpsCab::kPlacedCab) {
+        Log("fps profile: vehicle %016llx -> placed from the stored cab pose (part IC %u; %d of %d stored part(s) found agree)",
+            (unsigned long long)key, li.cabIc, li.cabAgree, li.cabFound);
+        // phase 51d: an older pose (built in the play space of its lock) was levelled onto the cab's axes -> stored as such ("cabsq"):
+        // the box moves ONCE (turned about the seat by turnDeg), then stays square to the cab
+        FpsProfile::CabPose cp;
+        if (li.leveledOld && FpsCab::CurrentCabPose(&cp) && FpsProfPutCab(key, cp)) {
+            FpsProfMarkDirty(key);
+            Log("fps profile: vehicle %016llx -> its older cab pose LEVELLED onto the cab (turned %.2f deg: the cab leaned %+.1f deg sideways, "
+                "%+.1f deg forward, turned %+.1f deg against it) -- the box is square to the cab now and may sit a little elsewhere this once; "
+                "stored as square", (unsigned long long)key, li.turnDeg, li.tiltSide, li.tiltFore, li.tiltYaw);
+        }
+        return;
+    }
+    char why[200];
+    if (li.remeasured)    snprintf(why, sizeof(why), "RE-MEASURED (the menu) -- this lock's cab pose replaces the stored one");
+    else if (st && li.cabAmbiguous)
+        snprintf(why, sizeof(why), "the %d stored cab parts found disagree (one moved since: steering wheel?) -- the stored pose is kept", li.cabFound);
+    else if (st) snprintf(why, sizeof(why), "the stored cab pose's part IC %u is not among this lock's rigid cab parts -- the stored pose is kept", st->ic);
+    else          snprintf(why, sizeof(why), "no stored cab pose -- this lock's is stored now");
+    char how[96];
+    if (li.placed == FpsCab::kPlacedPlayAvg)
+        snprintf(how, sizeof(how), "averaged over %d lock readbacks, %d kept, spread %.1f mm", li.samples, li.samplesUsed, li.spreadMm);
+    else snprintf(how, sizeof(how), "%s", li.placed == FpsCab::kPlacedSameCab ? "the previous lock's map: a re-lock on the same cab" : "one lock readback");
+    Log("fps profile: vehicle %016llx -> placed from the play space (%s; %s)", (unsigned long long)key, how, why);
+    FpsProfile::CabPose cp;
+    if ((!st || li.remeasured) && FpsCab::CurrentCabPose(&cp) && FpsProfPutCab(key, cp)) FpsProfMarkDirty(key);
+}
+void FpsProfileTick() {
+    if (!g_fpsProfStartLogged) {
+        g_fpsProfStartLogged = true;
+        if (g_fpsProfRead || g_fpsProfBad)
+            Log("fps profile: %d vehicle profile(s) read from dlaa.ini (%d fps_profile line(s) not usable: malformed / duplicate / over %d)%s",
+                g_fpsProfRead, g_fpsProfBad, FpsProfile::kMax, g_fpsProfiles ? "" : " -- fps_profiles = 0: one shared placement, the profiles are not used");
+    }
+    char b[260];
+    // phase 51d: the LIVE mode decides the binding, not FpsCab's state alone -- the Reset row sets the defaults + mode 0 at once and
+    // FpsCab switches off only at its next sync, one Present later (ATS 15:04:46: that Present copied the defaults into the bound
+    // vehicle's profile). (FpsCab is asked before the profile lock: the lock order is FpsCab -> profile.)
+    const bool mode2 = g_launchVr == 1 && g_fpsShow && g_fpsVrLock == 2;
+    const bool cabOn = FpsCab::Active();
+    const uint64_t locks = FpsCab::LockCount();
+    const uint64_t vkey = FpsCab::VehicleKey();
+    const bool sameCab = FpsCab::LockSameCab();
+    const FpsProfile::Vals live = FpsProfLive();
+    FpsProfile::Session::Out o;
+    {
+        FpsProfLockW l;
+        o = g_fpsProfSess.Tick(g_fpsProf, mode2, cabOn, g_fpsProfiles != 0, locks, vkey, sameCab, live);
+    }
+    if (o.lock != FpsProfile::Session::kLockNone) g_fpsBoxDefaulted = false;
+    switch (o.lock) {
+    case FpsProfile::Session::kLockAlias:
+        Log("fps profile: vehicle %016llx -> same cab as %016llx (a re-lock), its placement kept (%s)", (unsigned long long)o.key,
+            (unsigned long long)o.aliasOf, FpsProfStr(live, b, sizeof(b)));
+        break;
+    case FpsProfile::Session::kLockLoaded:
+        if (o.applyIt) FpsProfApply(o.apply);
+        Log("fps profile: vehicle %016llx -> loaded (%s)", (unsigned long long)o.key, FpsProfStr(o.apply, b, sizeof(b)));
+        break;
+    case FpsProfile::Session::kLockKept:
+        Log("fps profile: vehicle %016llx -> re-bound (same vehicle as before the box was off): the live values kept and stored (%s)",
+            (unsigned long long)o.key, FpsProfStr(live, b, sizeof(b)));
+        break;
+    case FpsProfile::Session::kLockNew:
+        Log("fps profile: vehicle %016llx -> new, starts from the current values (%s; %d profile(s))", (unsigned long long)o.key,
+            FpsProfStr(live, b, sizeof(b)), FpsProfCount());
+        break;
+    default: break;
+    }
+    for (int i = 0; i < o.nChanged; ++i) FpsProfMarkDirty(o.changed[i]);
+    if (o.lock != FpsProfile::Session::kLockNone) FpsProfCabAtLock(o.key);   // phase 51b
+    // phase 51c: an edit changes only the settings on top of the stored map -- the map is never re-taken from the live lock (51b
+    // re-stored it at an edit; a lock from a moving part then baked that part's turn into the vehicle). It is stored at the first
+    // lock-on, replaced by the menu's Re-measure row, levelled once (51d) and loses a part found moving (below).
+    {                                                     // phase 51c / 51d: cab parts found MOVING -> dropped from the bound vehicles' pose
+        FpsProfile::CabPart mp[8];
+        const int nm = FpsCab::CabMovedSince(&g_fpsProfMovedSerial, mp, 8);
+        for (int m = 0; m < nm; ++m)
+            for (int i = 0; i < g_fpsProfSess.nBound; ++i) {
+                const uint64_t k = g_fpsProfSess.bound[i];
+                if (!FpsProfDropCabPart(k, mp[m])) continue;
+                FpsProfMarkDirty(k);
+                FpsProfile::CabPose left;
+                const bool any = FpsProfCabOf(k, &left);
+                Log("fps profile: vehicle %016llx -> stored cab part IC %u MOVES (steering wheel / door?) -- dropped from its cab pose (%s)",
+                    (unsigned long long)k, mp[m].ic, any ? "the other stored parts stay" : "none left: the next lock-on stores a new one");
+            }
+    }
+    const bool open = g_menuOpen.load(std::memory_order_relaxed);
+    if (g_fpsProfMenuWas && !open) FpsProfileSave("tuning menu closed");
+    g_fpsProfMenuWas = open;
+}
+// phase 51d: the menu's Left on "Re-measure cab spot" -- the box of THIS vehicle back to the defaults (placement + colour / brightness /
+// text: the Reset row's fps values); the cab pose is kept (the defaults are placed on it). An edit like any other: the next tick stores
+// it in the bound vehicle's profile (+ aliases); other vehicles' profiles are untouched. Unbound (no lock yet): the live values only.
+void FpsProfUnbind() { g_fpsProfSess.Unbind(); }
+// phase 51e: the box is switched Off through the FPS row while a vehicle is bound: its live values (text / colour / brightness /
+// placement) are stored now, so the unbound time loses nothing and the re-bind finds them. (Not the Reset row: it Unbinds first.)
+void FpsProfStoreLive() {
+    if (!g_fpsProfiles || !g_fpsProfSess.nBound) return;
+    const FpsProfile::Vals live = FpsProfLive();
+    for (int i = 0; i < g_fpsProfSess.nBound; ++i)
+        if (FpsProfPut(g_fpsProfSess.bound[i], live)) FpsProfMarkDirty(g_fpsProfSess.bound[i]);
+}
+// v0.13.0 pre-release fix: the lock row leaves mode 2 (follow head / fixed in play space). The bound vehicle gets the live values
+// now (as the FPS row's Off), and lastKey is forgotten: without that the return to mode 2 took the 51e "same vehicle re-bound: live
+// values win" path and stored the follow-head numbers (% of the eye, not degrees) as that vehicle's cab placement.
+void FpsProfLeaveAttached() {
+    FpsProfStoreLive();
+    g_fpsProfSess.lastKey = 0;
+}
+void FpsBoxDefaults(uint64_t n) {
+    g_fpsVrX = 0.0f; g_fpsVrY = -25.0f; g_fpsVrScale = kFpsVrScaleDefault;
+    g_fpsVrDist = FpsPose::kDistDefault;
+    g_fpsVrYaw = g_fpsVrPitch = g_fpsVrRoll = 0;
+    g_fpsColor = 0;
+    g_fpsBright = FpsPose::kBrightDefault;
+    g_fpsOpacity = FpsPose::kOpacityDefault;              // phase 51f
+    if (g_fpsText != 0) { g_fpsText = 0; FpsSetLines(); }
+    g_fpsExplicit = g_fpsMoved = true;
+    g_fpsBoxDefaulted = true;
+    Log("fps box: this vehicle's box back to the defaults (tuning menu Left on Re-measure cab spot, Present #%llu; vehicle %016llx%s) -- "
+        "fps_vr_x 0 fps_vr_y -25 fps_vr_dist %d fps_vr_scale %.1f no turn, colour white, brightness %d %%, opacity %d %%, text fps + ms; the cab pose kept",
+        (unsigned long long)n, (unsigned long long)(g_fpsProfSess.nBound ? g_fpsProfSess.bound[0] : 0ull),
+        g_fpsProfSess.nBound ? "" : " = none bound: the live values only", FpsPose::kDistDefault, (double)kFpsVrScaleDefault,
+        FpsPose::kBrightDefault, FpsPose::kOpacityDefault);
+    PlayTones(1, 900, 120, 0);
+}
+// phase 51b: the menu's Position per vehicle row. Off -> On: the current vehicle is bound at the next tick (its profile loaded and
+// its stored cab pose placing the box, else a new profile from the current values); On -> Off: the live values stay as the shared
+// ones, the changes made so far are saved now (no profile is written while off).
+void ToggleFpsProfiles(uint64_t n) {
+    g_fpsProfiles = g_fpsProfiles ? 0 : 1;
+    g_fpsExplicit = true;                                 // (Save writes fps_profiles with the other fps_* keys)
+    if (g_fpsProfiles) g_fpsProfSess.locks = ~0ull;       // the held lock counts as a new lock-on (FpsProfileTick)
+    else { FpsProfileSave("per-vehicle profiles switched off"); g_fpsProfSess.Unbind(); }
+    Log("fps box: position per vehicle %s (fps_profiles=%d, tuning menu, Present #%llu) -- %s", g_fpsProfiles ? "ON" : "OFF", g_fpsProfiles,
+        (unsigned long long)n, g_fpsProfiles ? "each vehicle keeps its own placement / colour / brightness / text (fps_profile lines)"
+                                            : "one shared placement for every vehicle (the fps_profile lines are kept, not used)");
+    PlayTones(1, g_fpsProfiles ? 1200 : 300, 150, 0);
 }
 // HandlePossibleBlit, a VR eye blit (render thread): this eye's pass record -> the reference cab draw's MVP offset for the box
 // drawn into this picture later this frame (zero lag), the lock / monitor readbacks.
@@ -19184,6 +20605,7 @@ void STDMETHODCALLTYPE hkDrawIndexedInstanced(ID3D11DeviceContext* ctx, UINT ic,
     if (!t_inDlaa && g_lodPerDraw.load(std::memory_order_relaxed) && IsGameCtx(ctx)) LodOnDraw(ctx);
     if (g_menuLateBound >= 0 && !t_inDlaa && IsGameCtx(ctx)) MenuLateCountDraw();   // v0.10.0 phase 16 VR late panel
     if (Vrs::g_want && !t_inDlaa && IsGameCtx(ctx)) VrsOnDraw(ctx);   // phase 34 (as hkDrawIndexed)
+    if (g_lightBind && !t_inDlaa && IsGameCtx(ctx)) LightRedrawOnDraw(ctx);   // phase 55 (as hkDrawIndexed)
     CPU_ORIG(oDrawIndexedInstanced(ctx, ic, inst, si, bv, sinst));
 }
 #endif
@@ -19300,6 +20722,7 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
 #ifdef WITH_DLAA
     if (g_menuLateN && gameCtx && !t_inDlaa && indexCount <= 6) MenuLateOnDraw(ctx, "DrawIndexed", indexCount, _ReturnAddress());
     if (Vrs::g_want && gameCtx && !t_inDlaa) VrsOnDraw(ctx);   // phase 34: full rate for a cut-out / SV_Depth / unknown PS
+    if (g_lightBind && gameCtx && !t_inDlaa) LightRedrawOnDraw(ctx);   // phase 55: a lighting-pass mesh redraw -> the G-buffer's viewport
 #endif
     CPU_ORIG(oDrawIndexed(ctx, indexCount, startIndex, baseVertex));
 #ifdef WITH_DLAA
@@ -19311,6 +20734,8 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
         FwdOnDraw(ctx, indexCount, startIndex, baseVertex);
         if (t2) g_fwdTicks += TscToQpc(__rdtsc() - t2);
     }
+    // phase 49: an additive glow draw of the main forward binding -> the pass's glow record (GLOW BIAS MASK)
+    if (gameCtx && g_jitterPass && !g_gbufPass && !t_inDlaa && g_fwdBound && BiasLive()) BiasOnDraw(ctx, indexCount, startIndex, baseVertex);
 #endif
 }
 
@@ -19353,6 +20778,7 @@ void ResetPassTrackingCore(bool forceDlaaOff) {
     ObjOnContextReset();                                      // v0.9.0: depth-stencil twins / object records too
     FwdOnContextReset();                                       // v0.9.0 r5: forward-depth states (old device)
     MirOnContextReset();                                       // v0.10.0 phase 2: mirror views / units' game refs
+    LightRedrawOnContextReset();                               // phase 55: lighting bind state + state caches (old device refs)
     MenuLateReset("game context change");                      // v0.10.0 phase 16: recorded eye pictures (game refs)
     DepthTwin::PoolShutdown();                                 // v0.10.0 phase 8: pooled pass-slot textures (old device)
     GpuPerf::Shutdown();                                       // v0.10.0 phase 8: the perf queries belong to the old device
@@ -19362,6 +20788,7 @@ void ResetPassTrackingCore(bool forceDlaaOff) {
     g_stage.Restart();
 #endif
     g_gameVpN = 0; g_vpShifted = false; g_vpShiftX = g_vpShiftY = 0.0f; g_vpOver = false;
+    g_lightBind = 0; g_lightRedrawShift = false;               // phase 55
     while (g_fifoHead < g_passSeq) g_ring[SlotOf(g_fifoHead++)].consumed = true;   // drop outstanding passes
     g_needFirstPass = true;                                    // next G-buffer bind starts a pass
     g_flatMode = false; g_vrMode = false;                      // re-detected at the next matched blit
@@ -19988,6 +21415,7 @@ bool DlaaOffFilePresent() {
 //   jitter_sign_x / jitter_sign_y  -1 or +1 (default +1, see g_signX; template: docs/dlaa.ini.sample)
 //   jitter_enabled                 0/1 (default 1)
 //   jitter_overscan                0/1 (default 1, v0.10.0 phase 23): jittered world / mirror viewport 1 px larger right / bottom
+//   light_redraw_jitter            0/1 (default 1, phase 55): the lighting pass's mesh redraws get the G-buffer's jittered viewport
 //   jitter_phases                  Halton phase count (default 8 since v0.5.7, was 16; NVIDIA: 8 x render ratio)
 //   mv_enabled                     0/1 camera-reprojection motion vectors (default 1; Ctrl+F5 toggles)
 //   gpu_timing                     -1 auto (VR only, default) / 0 off / 1 on: timestamp queries around each
@@ -20139,6 +21567,13 @@ bool DlaaOffFilePresent() {
 //   vrs_passes                     0/1 (default 0, phase 42): 1 = VRS also on the eye's deferred lighting bind (2 RTV RGBA16F
 //                                  scene size + scene depth, after the G-buffer, before the forward bind), outer ring only
 //                                  (the middle ring stays 1 x 1). Menu row Foveated passes (live)
+//   reflex                         0/1/2 (default 0, phase 52): flat, NVIDIA: 1 = Reflex low latency (NvAPI_D3D_SetSleepMode +
+//                                  NvAPI_D3D_Sleep after each Present), 2 = + boost (GPU clocks kept up). Menu row Reflex (live)
+//   fps_cap                        0 or 20..1000 (default 0 = off, phase 52): flat frame cap -- the Reflex driver limit while
+//                                  Reflex runs, else the own limiter after Present. Menu row FPS cap (live)
+//   vr_fps_cap                     0/2/3 (default 0, phase 52): VR: 2 = half the headset rate, 3 = a third (the game's
+//                                  xrWaitFrame waits for every 2nd / 3rd display slot); Turbo mode is off while it is on.
+//                                  Menu row VR FPS cap (live)
 
 // v0.7.10: "a.b.c.d" file version from a module's PE version resource, for the startup "env:" lines. "no version info"
 // if the resource is absent, "unavailable" on a read error. Startup only (GetFileVersionInfo is not on any hot path).
@@ -20237,7 +21672,7 @@ void LoadConfig() {
     if (PathNextToDll(L"dlaa.ini", path)) _wfopen_s(&f, path, L"r");
     const bool haveIni = f != nullptr;
     if (f) {
-        char line[256];
+        char line[4096];                                 // phase 51b/c: was 256 (a v2 fps_profile line with a 3-part cab pose is ~1300)
         while (fgets(line, sizeof(line), f)) {
             char* eq = strchr(line, '=');
             if (!eq || line[0] == '#' || line[0] == ';') continue;
@@ -20264,16 +21699,30 @@ void LoadConfig() {
             if (!strcmp(key, "did_shadow_verify")) { g_didShadowVerify = v < 0 ? -1 : (int)(v > 100000 ? 100000 : v); continue; }
             // phase 40 / 41 / 42 (outside the else-if chain too: C1061 at the dev merge)
             if (!strcmp(key, "mirror_turns"))       { g_mirTurns = v > 0 ? 1 : 0; g_mirTurnsExplicit = true; continue; }   // phase 41
+            // phase 52: frame rate (outside the else-if chain: C1061; the menu's Frame rate rows switch them live)
+            if (!strcmp(key, "reflex"))             { g_reflex = FramePace::ClampReflex(v); g_paceExplicit = true; continue; }
+            if (!strcmp(key, "fps_cap"))            { g_fpsCap = FramePace::ClampFpsCap(v); g_paceExplicit = true; continue; }
+            if (!strcmp(key, "vr_fps_cap"))         { g_vrFpsCap = FramePace::ClampVrDiv(v); g_paceExplicit = true; continue; }
 #endif
             if (!strcmp(key, "xr_hidden_mask"))     { g_xrHiddenMask = v != 0 ? 1 : 0; g_xrHiddenMaskExplicit = true; continue; }   // phase 40
+            if (!strcmp(key, "dlss_bias_mask"))     { g_biasCfg = v < 0 ? 0 : (v > 100 ? 100 : (int)v); g_biasExplicit = true; continue; }   // phase 49
+            if (!strcmp(key, "light_redraw_jitter")) { g_lightRedrawCfg = v != 0 ? 1 : 0; continue; }   // phase 55 (outside the chain: C1061)
+            if (!strcmp(key, "cpu_pcore"))          { g_cpuPcore = v != 0 ? 1 : 0; g_cpuTuneExplicit = true; continue; }          // phase 54
+            if (!strcmp(key, "cpu_priority"))       { g_cpuPriority = v != 0 ? 1 : 0; g_cpuTuneExplicit = true; continue; }       // phase 54 (only 0 / 1: never HIGH)
+            if (!strcmp(key, "cpu_no_throttle"))    { g_cpuNoThrottle = v != 0 ? 1 : 0; g_cpuTuneExplicit = true; continue; }     // phase 54
             if (!strcmp(key, "vrs_passes"))         { g_vrsPasses = v != 0 ? 1 : 0; g_vrsPassesExplicit = true; continue; }   // phase 42
             // phase 44: the fps box colour / VR distance / VR turn (outside the else-if chain: C1061)
             if (!strcmp(key, "fps_color"))          { g_fpsColor = FpsPose::ClampColor(v); continue; }
             if (!strcmp(key, "fps_brightness"))     { g_fpsBright = FpsPose::ClampBright(v); continue; }   // phase 48
+            if (!strcmp(key, "fps_opacity"))        { g_fpsOpacity = FpsPose::ClampOpacity(v); continue; }   // phase 51f
             if (!strcmp(key, "fps_vr_dist"))        { g_fpsVrDist = FpsPose::ClampI(v, FpsPose::kDistMin, FpsPose::kDistMax); continue; }
             if (!strcmp(key, "fps_vr_yaw"))         { g_fpsVrYaw = FpsPose::ClampI(v, -FpsPose::kYawMax, FpsPose::kYawMax); continue; }
             if (!strcmp(key, "fps_vr_pitch"))       { g_fpsVrPitch = FpsPose::ClampI(v, -FpsPose::kPitchMax, FpsPose::kPitchMax); continue; }
             if (!strcmp(key, "fps_vr_roll"))        { g_fpsVrRoll = FpsPose::ClampI(v, -FpsPose::kRollMax, FpsPose::kRollMax); continue; }
+            if (!strcmp(key, "fps_profiles"))       { g_fpsProfiles = v != 0 ? 1 : 0; continue; }   // phase 51b
+#ifdef WITH_DLAA
+            if (!strcmp(key, FpsProfile::kIniKey))  { if (FpsProfLoadLine(eq + 1)) ++g_fpsProfRead; else ++g_fpsProfBad; continue; }   // phase 51
+#endif
             // phase 39 (here for the same reason; debug moved out of the WITH_DLAA chain: the log-only build reads it too)
             if (!_stricmp(key, "log_level")) {           // (case-insensitive as log.h's reader)
                 const int lv = LogParseLevel(eq + 1);     // log.h: the same parser as its own early read
@@ -20557,18 +22006,21 @@ void LoadConfig() {
             else if (!strcmp(key, "vrs_outer"))      { g_vrsOuter = v < 10 ? 10 : (v > 150 ? 150 : (int)v); g_vrsExplicit = true; }
             else if (!strcmp(key, "vrs_quality"))    g_vrsQuality = v != 0 ? 1 : 0;
             else if (!strcmp(key, "vrs_debug"))      g_vrsDebug = v != 0 ? 1 : 0;
-            else if (!strcmp(key, "bind_hold_ms"))   g_bindHoldMs = v < 500 ? 500 : (v > 10000 ? 10000 : (int)v);   // v0.10.2
+            else if (!strcmp(key, "bind_hold_ms"))   g_bindHoldMs = v < 500 ? 500 : (v > 10000 ? 10000 : (int)v);   // v0.10.2 (v0.12.1: Reset hold only)
             else if (!strcmp(key, "menu_scale") || !strcmp(key, "menu_vr_scale")) {
                 const double s = strtod(eq + 1, nullptr);
                 const float c = (s != s) ? 1.0f : (float)(s < 0.3 ? 0.3 : (s > 2.0 ? 2.0 : s));   // v0.10.2: 0.3..2.0
                 if (key[5] == 'v') g_menuVrScale = c; else g_menuScale = c;
             }
             // v0.10.0 live fps box (the menu's FPS counter rows change them; the save key writes them once changed there)
-            else if (!strcmp(key, "fps_show"))       g_fpsShow = v != 0;
+            else if (!strcmp(key, "fps_show") || !strcmp(key, "fps_text")) {   // (one branch: the else-if chain is at the compiler's nesting limit)
+                if (key[4] == 's') g_fpsShow = v != 0;
+                else               g_fpsText = v <= 0 ? 0 : (v >= kFpsTextModes - 1 ? kFpsTextModes - 1 : (int)v);   // fps_text 0..5 (3..5: no units)
+            }
             else if (!strcmp(key, "fps_x"))          g_fpsX = v < 0 ? 0 : (v > 95 ? 95 : (int)v);
             else if (!strcmp(key, "fps_y"))          g_fpsY = v < 0 ? 0 : (v > 95 ? 95 : (int)v);
-            else if (!strcmp(key, "fps_vr_x"))       g_fpsVrX = v < -50 ? -50 : (v > 50 ? 50 : (int)v);
-            else if (!strcmp(key, "fps_vr_y"))       g_fpsVrY = v < -50 ? -50 : (v > 50 ? 50 : (int)v);
+            else if (!strcmp(key, "fps_vr_x"))       { const double d = strtod(eq + 1, nullptr); g_fpsVrX = (d != d) ? 0.0f : (float)(d < -50.0 ? -50.0 : (d > 50.0 ? 50.0 : d)); }
+            else if (!strcmp(key, "fps_vr_y"))       { const double d = strtod(eq + 1, nullptr); g_fpsVrY = (d != d) ? -25.0f : (float)(d < -50.0 ? -50.0 : (d > 50.0 ? 50.0 : d)); }
             else if (!strcmp(key, "fps_vr_lock"))    g_fpsVrLock = v <= 0 ? 0 : (v >= 2 ? 2 : 1);   // phase 28: 1 = fixed in the
                                                                                                     // play space; phase 47: 2 = attached
             else if (!strcmp(key, "fps_scale") || !strcmp(key, "fps_vr_scale")) {
@@ -20705,8 +22157,18 @@ void LoadConfig() {
     else
         Log("jitter (v0.10.0 phase 23): jitter_overscan=0 -- the phase-22 W x H viewport: a negative shift leaves the last pixel "
             "column / bottom row of the picture unrendered (sky in the depth), the sun-shaft / bloom haze blinks on those frames");
+    Log("lighting redraws (phase 55): light_redraw_jitter=%d (%s)", g_lightRedrawCfg, g_lightRedrawCfg
+        ? "the lighting pass's mesh redraws (depth GREATER_EQUAL / EQUAL, no depth write, depth bias) are rasterized with the "
+          "G-buffer's jittered viewport, so they match its depth on every jitter phase"
+        : "off: the lighting pass keeps the game's viewport; its redraws can miss the jittered G-buffer depth (lit areas flicker)");
     Log("OFXR Bridge support: ofxr_bridge=%d (%s)", (int)Ofxr::g_on.load(),
         Ofxr::g_on.load() ? "on: the layer's calls pass through the hooks" : "off");
+#ifdef WITH_DLAA
+    SceneDlaa::SetBiasStrength(g_biasCfg);              // phase 49
+    Log("DLSS bias mask (phase 49): dlss_bias_mask=%d %% (%s)", g_biasCfg, g_biasCfg
+        ? "the additive light glows of the world forward pass go to NGX as its bias current colour mask (no glow trails)"
+        : "off: NGX gets no mask");
+#endif
     if (g_controllerName[0])                             // v0.10.1
         Log("controller_name = \"%s\" (only controllers whose name contains it are read for WheelN / WheelUp ... bindings; "
             "the others go to the game untouched)", g_controllerName);
@@ -20717,8 +22179,8 @@ void LoadConfig() {
         "menu_scale=%.1f, VR menu_vr_x=%d menu_vr_y=%d menu_vr_scale=%.1f menu_vr_depth=%d menu_vr_dist=%d menu_vr_face=%d (%s); "
         "v0.10.3 phase 29 "
         "menu_vr_layer=%d (%s); VR in the picture: drawn last on each eye picture once the game's read of it is confirmed (phase "
-        "16); v0.10.2 bind_hold_ms=%d (hold a key / button that long on a row to bind it; no key / button reaches the game while "
-        "the menu is open)", KeyName(KA_MENU), KeyName(KA_MENU_UP),
+        "16); bind_hold_ms=%d (hold the menu Right that long on the Reset row to reset; v0.12.1 phase 50: hotkeys are set on the "
+        "Hotkeys page, and only the 5 menu keys / buttons are kept from the game while the menu is open)", KeyName(KA_MENU), KeyName(KA_MENU_UP),
         KeyName(KA_MENU_DOWN), KeyName(KA_MENU_LEFT), KeyName(KA_MENU_RIGHT), g_menuX, g_menuY, (double)g_menuScale, g_menuVrX,
         g_menuVrY, (double)g_menuVrScale, g_menuVrDepth, g_menuVrDist, g_menuVrFace,
         g_menuVrFace ? "the VR panel turns to face the eye" : "flat VR panel", g_menuVrLayer,
@@ -20727,15 +22189,17 @@ void LoadConfig() {
                         "menu_vr_depth = the in-picture fallback's shift" : "the VR panel / fps box are drawn into the eye picture "
                         "(menu_vr_depth / menu_vr_face; menu_vr_dist unused)",
         g_bindHoldMs);
-    Log("fps box (v0.10.0): fps_show=%d (%s), flat fps_x=%d fps_y=%d fps_scale=%.1f, VR fps_vr_x=%d fps_vr_y=%d fps_vr_scale=%.1f "
-        "fps_vr_lock=%d (%s); phase 44: fps_color=%d (%ls) fps_brightness=%d %% fps_vr_dist=%d cm fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d deg (the "
-        "tuning menu's FPS counter rows change them)", g_fpsShow ? 1 : 0,
-        g_fpsShow ? "on: shown also while the menu is closed" : "off", g_fpsX, g_fpsY, (double)g_fpsScale, g_fpsVrX, g_fpsVrY,
+    Log("fps box (v0.10.0): fps_show=%d (%s), fps_text=%d (0 fps + ms, 1 fps only, 2 ms only), flat fps_x=%d fps_y=%d fps_scale=%.1f, VR fps_vr_x=%.1f fps_vr_y=%.1f fps_vr_scale=%.1f "
+        "fps_vr_lock=%d (%s); phase 44: fps_color=%d (%ls) fps_brightness=%d %% fps_opacity=%d %% fps_vr_dist=%d cm fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d deg; phase 51b: "
+        "fps_profiles=%d (%s) (the tuning menu's FPS counter rows change them)", g_fpsShow ? 1 : 0,
+        g_fpsShow ? "on: shown also while the menu is closed" : "off", g_fpsText, g_fpsX, g_fpsY, (double)g_fpsScale, (double)g_fpsVrX, (double)g_fpsVrY,
         (double)g_fpsVrScale, g_fpsVrLock, g_fpsVrLock == 2 ? "VR: ATTACHED TO THE VEHICLE (phase 47: drawn in, placed from a cab "
                                                          "draw's MVP on the GPU), fps_vr_x / fps_vr_y = yaw / pitch degrees at "
                                                          "fps_vr_dist at the lock-on" : g_fpsVrLock ? "VR: fixed in the play space, "
                                                          "fps_vr_x / fps_vr_y = yaw / pitch degrees at fps_vr_dist" : "VR: follows the headset",
-        g_fpsColor, FpsPose::ColorOf(g_fpsColor).name, g_fpsBright, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll);
+        g_fpsColor, FpsPose::ColorOf(g_fpsColor).name, g_fpsBright, g_fpsOpacity, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll, g_fpsProfiles,
+        g_fpsProfiles ? "attached box: placement, colour, brightness and text per vehicle" : "one shared placement for every vehicle");
+    FpsSetLines();                                        // fps_text applies to the box's lines from the start
     // v0.10.0 phase 6b: the vote participation of instanced / no-MVP draws follows mv_drawid_instanced (default 1, even when the
     // key is absent) -- set it here, after the whole ini is parsed, so both the replay and the vote agree.
     DrawIdMv::SetInstanced(g_didInstancedCfg);
@@ -21140,7 +22604,8 @@ DWORD WINAPI SetupThread(LPVOID) {
     if (g_launchVr == 1) {
         XrHook::SetReleaseCallback(&MenuLateOnXrRelease);
         XrHook::SetOverlayDrawCallback(&MenuOverlayDraw);   // v0.10.3 phase 29: the quad layers' images (menu_vr_layer)
-        XrHook::SetTurbo(g_xrTurbo != 0);                   // phase 30: dlaa.ini xr_turbo (the menu row switches it live)
+        ApplyXrTurbo();                                     // phase 30: dlaa.ini xr_turbo (the menu row switches it live; phase 52:
+                                                            //   off while vr_fps_cap is on)
         g_xrHiddenMaskAtStart = g_xrHiddenMask;             // phase 40: the extension is asked for only when on at the start
         XrHook::HiddenMaskRequest(g_xrHiddenMask != 0);
         XrHook::HiddenMaskActive(g_xrHiddenMask != 0);
@@ -21152,6 +22617,12 @@ DWORD WINAPI SetupThread(LPVOID) {
             g_xrTurbo ? "ON: the game does not wait for the headset in xrWaitFrame; ASW / Motion Smoothing / SSW / reprojection "
                         "cannot work" : "off: the game's own xrWaitFrame paces it");
     }
+    // phase 52: frame rate -- flat Reflex / fps_cap (FramePace: applied at the first flat Present, the driver's answer logged
+    // there), VR vr_fps_cap (XrHook: the game's xrWaitFrame). One line with the start values.
+    FramePaceApply();
+    Log("frame rate (phase 52): reflex=%d (%s) fps_cap=%d (%s) vr_fps_cap=%d (%s)%s", g_reflex, ReflexName(g_reflex), g_fpsCap,
+        g_fpsCap ? "flat: Reflex's driver limit while Reflex runs, else the own limiter" : "off", g_vrFpsCap, VrCapName(g_vrFpsCap),
+        (g_vrFpsCap && g_xrTurbo) ? " -- xr_turbo=1 is ignored while vr_fps_cap is on (the cap wins)" : "");
 #endif
     Ofxr::Rescan();                                     // v0.10.0 OFXR Bridge: layer modules already loaded (later ones: every 300 Presents)
 #ifdef WITH_DLAA
@@ -21381,6 +22852,7 @@ void StartInjection() {
     TscCalibrate();                                      // phase 35: the anchor of the TSC -> QPC ratio
     LoadConfig();
     CpuPin::Apply(g_cpuCachePin);                        // phase 32: once, as early as possible (dlaa.ini is read)
+    CpuTuning::Start({ g_cpuPcore, g_cpuPriority, g_cpuNoThrottle });   // phase 54: after the cache pin (a narrowed affinity wins over cpu_pcore)
     {                                                    // v0.7.4: flat or VR, from the launch options
         std::wstring cl = GetCommandLineW();
         for (wchar_t& c : cl) c = (wchar_t)towlower(c);
@@ -21420,6 +22892,9 @@ void StartInjection() {
 // either way we only log and do nothing else.
 void OnProcessDetach(bool processTerminating) {
     LogExiting().store(true, std::memory_order_relaxed);   // never block on the log mutex from here on
+#ifdef WITH_DLAA
+    FpsProfileSave(processTerminating ? "process exit" : "DLL unload");   // phase 51: changed vehicle profiles (a file write only)
+#endif
     // v0.8.1: + the present-layer verdict, only when that mode was on (presents= then counts game frames).
     char plTail[200] = "";
     if (g_plActive.load(std::memory_order_relaxed))
@@ -21438,13 +22913,12 @@ void OnProcessDetach(bool processTerminating) {
     // original window procedure goes back if the window still exists and still points at ours. At process exit no message
     // is dispatched any more: nothing is touched.
     g_menuOpen.store(false, std::memory_order_relaxed);
+    KeySwallow::SetMenuHide(KeySwallow::kHideNone, nullptr, nullptr, 0);   // v0.12.1 phase 50: nothing hidden any more
     if (!processTerminating) KeySwallow::UnhookWindow();
 }
 
-// v0.10.2 tuning menu: true while the menu is open = NO key and NO controller button reaches the game (dinput_wrap.cpp: the
-// keyboard / controller device wraps and the window subclass, the game's input / window threads; replaces v0.10.0's
-// MenuSwallowKeys / v0.10.1's MenuSwallowJoy, which listed only the 5 menu inputs). Releases always pass there.
-bool MenuHidesInput() { return g_menuOpen.load(std::memory_order_relaxed); }
+// (v0.12.1 phase 50: v0.10.2's MenuHidesInput -- every key / button hidden while the menu is open -- is gone; the menu
+// publishes WHICH inputs to hide with KeySwallow::SetMenuHide, MenuPublishHide.)
 // v0.10.1 dlaa.ini controller_name filter (dinput_wrap.cpp CreateDevice, the game's thread): true = tap / filter this
 // controller. Empty filter = every controller; else the product name must contain it (ASCII case-insensitive).
 bool ControllerNameAllowed(const char* product) {

@@ -16,6 +16,9 @@
 // in that order, and every compiled DXBC is kept on disk next to the game exe (dlaa_shader_cache\<name>_<key>.dxbc, key =
 // hash of source / entry / profile / flags / compiler version, header + payload hash checked at load; a bad or stale file is
 // ignored, recompiled and rewritten) -- later starts load instead of compiling. Still never on the render thread.
+// Issue #15 (Proton): a SHADER_VALIDATION=ON build embeds the fxc bytecode of every registered shader (embedded_shaders.h);
+// an entry whose source / entry / profile / flags match a blob uses it directly (no d3dcompiler_47.dll at all, which is
+// delay-loaded). The disk cache + D3DCompile are only the fallback for a shader without a matching blob.
 // Compiled only when WITH_DLAA=1.
 #pragma once
 #ifdef WITH_DLAA
@@ -70,6 +73,8 @@ enum Id : int {
     kMenuPs,               // menu.cpp           kMenuPs                 ps_5_0
     kHiddenMaskVs,         // hidden_mask.cpp    kHmVs                   vs_5_0 (phase 40: VR hidden area mask, depth only)
     kMenuCabVs,            // menu.cpp           kMenuVs / VSCab         vs_5_0 (phase 47: the fps box attached to the vehicle)
+    kBiasNormPs,           // draw_ids.cpp       kBiasNormShader / PSNorm  ps_5_0 (phase 49: glow share of the pixel -> bias mask)
+    kBiasPrep,             // scene_dlaa.cpp     kBiasPrepShader         cs_5_0 (phase 49: crop + last frame's glow reprojected)
     kCount,
     kCoreLast = kPvEdgeFill  // v0.10.0 phase 17: ids 0..kCoreLast = the core group (compiled first, CoreDone)
 };

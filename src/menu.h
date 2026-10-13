@@ -21,14 +21,15 @@
 
 namespace TuningMenu {
 
-constexpr int   kMaxRows  = 48;                      // (was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
+constexpr int   kMaxRows  = 60;                      // (phase 52: 50 -> 56 -> 60 at the 51b merge, + the Frame rate group header and its 3 rows; was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
                                                      //  28 before the v0.10.3 phase 28 FPS counter lock row, 29 before the phase 29c
                                                      //  group header rows, 31 before the phase 30 Turbo mode row, 32 before the
                                                      //  phase 34 Foveated rows, 34 before the phase 39 Logging row, 35 before the
                                                      //  phase 41 Mirrors in turns row, 36 before the phase 40 Hidden area mask row,
                                                      //  37 before the phase 42 Foveated passes row, 38 before the 4 phase 43 category headers, 42 before the
-                                                     //  5 phase 44 fps box rows (colour, distance, turn, tilt, rotate); a Panel holds
-                                                     //  only the VISIBLE rows, nRows <= this)
+                                                     //  5 phase 44 fps box rows (colour, distance, turn, tilt, rotate), 48 before the
+                                                     //  phase 49 Light glow ghosting fix row, 50 before the phase 51b Position per vehicle row; a Panel holds only the VISIBLE rows,
+                                                     //  nRows <= this; phase 52: + Frame rate group (4), phase 54: + CPU tuning)
 constexpr int   kPerfLines = 3;                      // the perf block under the title (small font, one line each)
 // phase 45: INK MARKS in the perf lines, the cost column cells and its header: kInkCpu / kInkGpu switch the text colour to the
 // CPU blue / the GPU orange (blue / orange, not red / green: readable with the common colour-vision deficiencies), kInkEnd back
@@ -41,10 +42,12 @@ constexpr float kWidgetRefH = 44.0f;
 
 struct Row {
     wchar_t name[48];
-    wchar_t value[40];
+    wchar_t value[72];                               // (v0.12.1 phase 50: was 40 -- the wide bind-mode line needs ~60)
     wchar_t keys[72];                                // the hotkey(s) of the row + a "VR only" / "flat only" tag
     wchar_t cost[32];                                // the cost column: "<cpu> | <gpu>" with ink marks (phase 45), "off", "same", "-"
     unsigned char greyed;                            // 1 = not applicable in the current mode (drawn grey)
+    unsigned char wide;                              // v0.12.1 phase 50: 1 = `value` spans the Value, Hotkey and Cost columns (keys /
+                                                     //   cost not drawn): the Hotkeys page's "Press a key or button..." line
 };
 // Fill with memset 0 first: Draw compares the whole struct to decide whether the texture must be rebuilt (the caller keeps
 // every text stable between its once-a-second GPU snapshots, so the texture is not rebuilt every frame).
@@ -52,6 +55,8 @@ struct Panel {
     wchar_t title[112];
     wchar_t perf[kPerfLines][224];                   // the perf block (Limit / fps / frame busy, the mod's CPU | GPU, the legend)
     wchar_t costHead[24];                            // the 4th column's header ("CPU | GPU ms" with ink marks, phase 45)
+    wchar_t colHead[3][24];                          // v0.12.1 phase 50: the first 3 column headers; "" = "Setting" / "Value" /
+                                                     //   "Hotkey" (the Hotkeys page: "Action" / "Keyboard" / "Controller")
     Row     rows[kMaxRows];
     int     nRows;
     int     sel;
@@ -106,6 +111,9 @@ bool  DrawWidgetMvp(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint3
 // phase 44 (dlaa.ini fps_color): the fps box's text and outline colours (sRGB bytes). Default white text, RGB 8,8,8 outline (the
 // colours before phase 44). A change rebuilds the box texture once (the cache key includes them).
 void  SetWidgetColors(uint8_t tr, uint8_t tg, uint8_t tb, uint8_t lr, uint8_t lg, uint8_t lb);
+// phase 51f (dlaa.ini fps_opacity): the fps box's alpha factor 0..1 (text AND outline); read by the pixel shader per draw, so a change
+// needs no texture rebuild. Applies to every draw path (flat, VR drawn-in, OpenXR quad layer image, attached to vehicle).
+void  SetWidgetOpacity(float a);
 
 }  // namespace TuningMenu
 

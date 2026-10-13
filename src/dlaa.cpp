@@ -356,7 +356,8 @@ bool DlaaProcessor::Evaluate(ID3D11DeviceContext* ctx,
                              ID3D11ShaderResourceView* depth,
                              ID3D11ShaderResourceView* motionVectors,
                              ID3D11UnorderedAccessView* output,
-                             const DlaaFrameParams& p) {
+                             const DlaaFrameParams& p,
+                             ID3D11ShaderResourceView* biasMask) {
     if (!m_params || !m_dev || !ctx || !color || !depth || !motionVectors || !output) return false;
 
     // v0.5.7: live preset change (Shift+End) -> recreate with the new hint before this evaluate. Checked
@@ -401,6 +402,8 @@ bool DlaaProcessor::Evaluate(ID3D11DeviceContext* ctx,
     depth->GetResource(&depthRes);
     motionVectors->GetResource(&mvRes);
     output->GetResource(&outRes);
+    ID3D11Resource* biasRes = nullptr;                 // phase 49: the glow bias mask (null = no bias this frame)
+    if (biasMask) biasMask->GetResource(&biasRes);
 
     NVSDK_NGX_D3D11_DLSS_Eval_Params ep{};
     ep.Feature.pInColor  = colorRes;
@@ -414,6 +417,9 @@ bool DlaaProcessor::Evaluate(ID3D11DeviceContext* ctx,
     ep.InMVScaleY        = p.mvScaleY;
     ep.InReset           = (p.reset || recreated) ? 1 : 0;   // a fresh feature has no history anyway
     ep.InRenderSubrectDimensions = { m_width, m_height };   // v0.7.0: render size (output size = the feature's target)
+    // phase 49: the helper sets the mask parameter on EVERY evaluate (null clears it: m_params is reused across frames)
+    ep.pInBiasCurrentColorMask = biasRes;
+    ep.InBiasCurrentColorSubrectBase = { 0u, 0u };
 
     NVSDK_NGX_Result r;
     {
@@ -422,6 +428,7 @@ bool DlaaProcessor::Evaluate(ID3D11DeviceContext* ctx,
     }
 
     colorRes->Release(); depthRes->Release(); mvRes->Release(); outRes->Release();
+    if (biasRes) biasRes->Release();
 
     if (NVSDK_NGX_FAILED(r)) {
         static uint64_t fails = 0;                       // don't spam the log

@@ -3,7 +3,8 @@
 // assets), a hand-filled TuningMenu::Panel, TuningMenu::Draw / DrawWidget, read back, saved with WIC.
 //
 //   menu_shot.exe <output dir>      writes tuning-menu.png, tuning-menu-vr-performance.png, tuning-menu-picture.png,
-//                                   fps-counter.png, fps-counter-colours.png; exit 0 = all written.
+//                                   tuning-menu-hotkeys.png (v0.13.0 phase 50), fps-counter.png, fps-counter-colours.png;
+//                                   exit 0 = all written.
 //
 // THE DATA is ONE table (kRows, below) that mirrors MenuBuildPanel / kMenuDesc / MenuPerfLines in src/inject.cpp (those need the
 // whole of inject.cpp, so the panel is filled by hand): update the table when a row is added or renamed. The scenario is a
@@ -39,8 +40,8 @@ struct E {
     const wchar_t* sent;       // the live cost sentence MenuPerfCosts appends
 };
 static const wchar_t* const kGroups[] = { L"Picture", L"Motion and mirrors", L"Upscaling and VR", L"VR performance",
-                                          L"Panel settings", L"FPS counter settings" };
-enum { G_PIC, G_MOT, G_UP, G_VRP, G_PANEL, G_FPSG };
+                                          L"Frame rate and CPU", L"Panel settings", L"FPS counter settings" };   // phase 52: + Frame rate
+enum { G_PIC, G_MOT, G_UP, G_VRP, G_FR, G_PANEL, G_FPSG, G_COUNT };
 static const E kRows[] = {
     { -1, false, L"Mode", L"DLAA", L"End", L"<c>0.31</> | <g>3.4</>", false,
       L"DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's Scaling is below 100 %. "
@@ -61,6 +62,7 @@ static const E kRows[] = {
     { G_PIC, false, L"DLAA area (VR)", L"40 %", L"Shift+F5 / Shift+F6", L"<c>0.12</> | <g>1.2</>", false, nullptr, nullptr },
     { G_PIC, false, L"DLAA before tonemap (flat)", L"on", L"Alt+F7  (flat only)", L"-", true, nullptr, nullptr },
     { G_PIC, false, L"See-through depth", L"on", L"Ctrl+F3", L"<c>0.05</> | <g>0.52</>", false, nullptr, nullptr },
+    { G_PIC, false, L"Light glow ghosting fix", L"100 %", L"dlaa.ini dlss_bias_mask", L"", false, nullptr, nullptr },   // phase 49
     { G_MOT, true, L"Motion and mirrors", L"", L"", L"", false, nullptr, nullptr },
     { G_MOT, false, L"Per-part motion vectors", L"on", L"Alt+F5", L"<c>0.18</> | <g>0.70</>", false, nullptr, nullptr },
     { G_MOT, false, L"Mirror DLAA", L"2 mirrors (largest)", L"Alt+F6", L"<c>0.08</> | <g>0.34</>", false, nullptr, nullptr },
@@ -80,26 +82,35 @@ static const E kRows[] = {
     { G_VRP, false, L"Foveated size", L"80 % (balanced)", L"dlaa.ini vrs_inner / vrs_outer", L"<c>0.04</> | -", false, nullptr, nullptr },
     { G_VRP, false, L"Foveated passes", L"scene", L"dlaa.ini vrs_passes", L"<c>0.04</> | -", false, nullptr, nullptr },
     { G_VRP, false, L"Hidden area mask (VR)", L"on", L"dlaa.ini xr_hidden_mask", L"<c>0.02</> | -", false, nullptr, nullptr },
+    { G_FR, true, L"Frame rate and CPU", L"", L"", L"", false, nullptr, nullptr },                                       // phase 52
+    { G_FR, false, L"Reflex (flat)", L"off", L"dlaa.ini reflex  (flat only)", L"", true, nullptr, nullptr },
+    { G_FR, false, L"FPS cap (flat)", L"off", L"dlaa.ini fps_cap  (flat only)", L"", true, nullptr, nullptr },
+    { G_FR, false, L"VR FPS cap", L"off", L"dlaa.ini vr_fps_cap", L"", false, nullptr, nullptr },
+    { G_FR, false, L"CPU tuning", L"off", L"dlaa.ini cpu_pcore / cpu_priority / cpu_no_throttle", L"", false, nullptr, nullptr },   // phase 54
     { G_PANEL, true, L"Panel settings", L"", L"", L"", false, nullptr, nullptr },
     { G_PANEL, false, L"Panel position X", L"+0 %", L"dlaa.ini menu_vr_x", L"", false, nullptr, nullptr },
-    { G_PANEL, false, L"Panel position Y", L"-5 %", L"dlaa.ini menu_vr_y", L"", false, nullptr, nullptr },
+    { G_PANEL, false, L"Panel position Y", L"+0 %", L"dlaa.ini menu_vr_y", L"", false, nullptr, nullptr },
     { G_PANEL, false, L"Panel size", L"1.0", L"dlaa.ini menu_vr_scale", L"", false, nullptr, nullptr },
     { G_PANEL, false, L"Panel VR depth", L"1.00 m", L"dlaa.ini menu_vr_dist", L"", false, nullptr, nullptr },
     { G_PANEL, false, L"Panel faces you (VR)", L"on", L"dlaa.ini menu_vr_face", L"", false, nullptr, nullptr },
     { G_PANEL, false, L"Menu keys", L"Delete", L"Up / Down / Left / Right", L"", false, nullptr, nullptr },
-    { -1, false, L"FPS counter", L"on", L"dlaa.ini fps_show", L"- | <g>0.012</>", false, nullptr, nullptr },
+    { -1, false, L"FPS counter", L"72 fps + 13.9 ms", L"dlaa.ini fps_show / fps_text", L"- | <g>0.012</>", false, nullptr, nullptr },
     { G_FPSG, true, L"FPS counter settings", L"", L"", L"", false, nullptr, nullptr },
     { G_FPSG, false, L"FPS counter lock", L"Follow head", L"dlaa.ini fps_vr_lock", L"", false, nullptr, nullptr },
+    { G_FPSG, false, L"Position per vehicle", L"On", L"dlaa.ini fps_profiles", L"", true, nullptr, nullptr },   // phase 51b (greyed: lock = Follow head)
+    { G_FPSG, false, L"Re-measure cab spot", L"-", L"Right: now, Left: defaults", L"", true, nullptr, nullptr },   // phase 51c / 51d (greyed: lock = Follow head)
     { G_FPSG, false, L"FPS counter X", L"+5 %", L"dlaa.ini fps_vr_x", L"", false, nullptr, nullptr },
     { G_FPSG, false, L"FPS counter Y", L"+5 %", L"dlaa.ini fps_vr_y", L"", false, nullptr, nullptr },
-    { G_FPSG, false, L"FPS counter size", L"0.3", L"dlaa.ini fps_vr_scale", L"", false, nullptr, nullptr },
-    { G_FPSG, false, L"FPS colour", L"white", L"dlaa.ini fps_color", L"", false, nullptr, nullptr },
-    { G_FPSG, false, L"FPS brightness", L"100 %", L"dlaa.ini fps_brightness", L"", false, nullptr, nullptr },
-    { G_FPSG, false, L"FPS distance (VR)", L"0.80 m", L"dlaa.ini fps_vr_dist", L"", false, nullptr, nullptr },
     { G_FPSG, false, L"FPS turn", L"+0 deg", L"dlaa.ini fps_vr_yaw", L"", false, nullptr, nullptr },
     { G_FPSG, false, L"FPS tilt", L"+0 deg", L"dlaa.ini fps_vr_pitch", L"", false, nullptr, nullptr },
     { G_FPSG, false, L"FPS rotate", L"+0 deg", L"dlaa.ini fps_vr_roll", L"", false, nullptr, nullptr },
+    { G_FPSG, false, L"FPS counter size", L"0.3", L"dlaa.ini fps_vr_scale", L"", false, nullptr, nullptr },
+    { G_FPSG, false, L"FPS colour", L"white", L"dlaa.ini fps_color", L"", false, nullptr, nullptr },
+    { G_FPSG, false, L"FPS brightness", L"100 %", L"dlaa.ini fps_brightness", L"", false, nullptr, nullptr },
+    { G_FPSG, false, L"FPS opacity", L"100 %", L"dlaa.ini fps_opacity", L"", false, nullptr, nullptr },   // phase 51f
+    { G_FPSG, false, L"FPS distance (VR)", L"0.80 m", L"dlaa.ini fps_vr_dist", L"", false, nullptr, nullptr },
     { -1, false, L"Logging", L"errors", L"dlaa.ini log_level", L"<c>0.01</> | -", false, nullptr, nullptr },
+    { -1, false, L"Hotkeys...", L"28 actions", L"Right: open", L"", false, nullptr, nullptr },   // v0.13.0 phase 50
     { -1, false, L"Save to dlaa.ini", L"-", L"Shift+F12", L"", false, nullptr, nullptr },
     { -1, false, L"Reset to defaults", L"-", L"hold Right 5 s", L"", false, nullptr, nullptr },
     { -1, false, L"Close menu", L"-", L"Delete", L"", false, nullptr, nullptr },
@@ -112,8 +123,8 @@ static const wchar_t kPerf1[] = L"this mod: <c>0.31</> | <g>3.4</> ms -- GPU: NG
                                 L"mirrors 0.3, sharpen 0.1, copies 0.2";
 static const wchar_t kPerf2[] = L"<c>CPU</> | <g>GPU</> ms per frame (GPU: both eyes), other threads 0.4. CPU = the game's render thread; "
                                 L"measuring costs 0.12 ms CPU (taken out).";
-static const wchar_t kTitle[] = L"ETS2 / ATS DLAA & DLSS mod v0.12.0 - tuning menu";
-static const wchar_t kFooter[] = L"Up / Down select   Left / Right change   Delete close   hold a key: rebind";
+static const wchar_t kTitle[] = L"ETS2 / ATS DLAA & DLSS mod v0.13.0 - tuning menu";
+static const wchar_t kFooter[] = L"Up / Down select   Left / Right change   Delete close   keys: Hotkeys...";
 
 // Ink shorthand in the table strings: "<c>0.31</>" = CPU blue, "<g>3.4</>" = GPU orange (menu.h kInkCpu / kInkGpu / kInkEnd).
 static std::wstring Ink(const wchar_t* s) {
@@ -131,7 +142,7 @@ static std::wstring Ink(const wchar_t* s) {
 static void Put(wchar_t* dst, size_t cap, const std::wstring& s) { wcsncpy_s(dst, cap, s.c_str(), _TRUNCATE); }
 
 // open[g]: group g shown. selName: the selected row (by name).
-static void BuildPanel(TuningMenu::Panel& p, const bool open[6], const wchar_t* selName) {
+static void BuildPanel(TuningMenu::Panel& p, const bool open[G_COUNT], const wchar_t* selName) {
     memset(&p, 0, sizeof(p));
     wcsncpy_s(p.title, kTitle, _TRUNCATE);
     Put(p.perf[0], 224, Ink(kPerf0));
@@ -317,10 +328,73 @@ static void Save(const wchar_t* name, const std::vector<uint32_t>& px, int W, in
 }
 
 // ---- the shots ---------------------------------------------------------------------------------------------------------------
-static void MenuShot(Gpu& g, const wchar_t* file, const bool open[6], const wchar_t* sel) {
+static void MenuShot(Gpu& g, const wchar_t* file, const bool open[G_COUNT], const wchar_t* sel) {
     TuningMenu::Panel p;
     BuildPanel(p, open, sel);
     const float scale = 1.6f;                                      // the existing README picture is the panel at about 1.6x
+    const int margin = 10;
+    const int W = (int)std::ceil(TuningMenu::kRefWidth * scale) + 2 * margin;
+    const int H = (int)std::ceil(TuningMenu::RefHeight(p.nRows) * scale) + 2 * margin;
+    std::vector<uint32_t> px;
+    const bool ok = Render(g, W, H, [&](ID3D11DeviceContext* c, ID3D11RenderTargetView* rtv, uint32_t w, uint32_t h) {
+        return TuningMenu::Draw(c, rtv, w, h, (float)margin, (float)margin, scale, scale, TuningMenu::kOutRaw, p);
+    }, px);
+    TuningMenu::ReleaseTargets();
+    if (!ok) { wprintf(L"  %ls: render FAILED\n", file); ++g_fail; return; }
+    Save(file, px, W, H);
+}
+
+// v0.13.0 phase 50: the Hotkeys page (mirrors MenuBuildHotkeysPanel in src/inject.cpp: "< Back" + one line per action, the
+// Keyboard / Controller columns), the "Sharpen strength +" line waiting for a press (the wide bind-mode line).
+static void HotkeysShot(Gpu& g, const wchar_t* file) {
+    struct L { const wchar_t* name; const wchar_t* kb; const wchar_t* pad; };
+    static const L kL[] = {
+        { L"Mode (DLAA / DLSS / off)", L"End", L"-" }, { L"Performance profile", L"Alt+F9", L"-" },
+        { L"DLAA model 1 (K)", L"Shift+F1", L"-" }, { L"DLAA model 2 (E)", L"Shift+F2", L"-" },
+        { L"DLAA model 3 (F)", L"Shift+F3", L"-" }, { L"DLAA model 4 (M)", L"Shift+F4", L"-" },
+        { L"Sharpen strength -", L"Shift+F7", L"Wheel7" }, { L"Sharpen strength +", L"Shift+F8", L"Wheel8" },
+        { L"Sharpen width -", L"Shift+F9", L"-" }, { L"Sharpen width +", L"Shift+F10", L"-" },
+        { L"Texture sharpness -", L"Ctrl+F1", L"-" }, { L"Texture sharpness +", L"Ctrl+F2", L"-" },
+        { L"Cut-out sharpness -", L"Ctrl+Shift+F1", L"-" }, { L"Cut-out sharpness +", L"Ctrl+Shift+F2", L"-" },
+        { L"DLAA area (VR) -", L"Shift+F5", L"-" }, { L"DLAA area (VR) +", L"Shift+F6", L"-" },
+        { L"Per-part motion vectors", L"Alt+F5", L"-" }, { L"Mirror DLAA on / off", L"Alt+F6", L"-" },
+        { L"DLAA before tonemap (flat)", L"Alt+F7", L"-" }, { L"See-through depth", L"Ctrl+F3", L"-" },
+        { L"DLSS upscale", L"Ctrl+F4", L"-" }, { L"DLAA on / off", L"Shift+F11", L"-" }, { L"Save to dlaa.ini", L"Shift+F12", L"-" },
+        { L"Menu: open / close", L"Delete", L"Wheel10" }, { L"Menu: up", L"Up", L"WheelUp" }, { L"Menu: down", L"Down", L"WheelDown" },
+        { L"Menu: left", L"Left", L"WheelLeft" }, { L"Menu: right", L"Right", L"WheelRight" },
+    };
+    constexpr int kN = (int)(sizeof(kL) / sizeof(kL[0]));
+    static_assert(kN + 1 <= TuningMenu::kMaxRows, "menu_shot: hotkeys page too long");
+    const int bindLine = 8;                                        // "Sharpen strength +"
+    TuningMenu::Panel p;
+    memset(&p, 0, sizeof(p));
+    wcsncpy_s(p.title, L"ETS2 / ATS DLAA & DLSS mod v0.13.0 - hotkeys", _TRUNCATE);
+    Put(p.perf[0], 224, Ink(kPerf0));
+    Put(p.perf[1], 224, Ink(kPerf1));
+    Put(p.perf[2], 224, Ink(kPerf2));
+    wcsncpy_s(p.colHead[0], L"Action", _TRUNCATE);
+    wcsncpy_s(p.colHead[1], L"Keyboard", _TRUNCATE);
+    wcsncpy_s(p.colHead[2], L"Controller", _TRUNCATE);
+    wcsncpy_s(p.costHead, L" ", _TRUNCATE);
+    wcsncpy_s(p.rows[0].name, L"< Back", _TRUNCATE);
+    wcsncpy_s(p.rows[0].value, L"-", _TRUNCATE);
+    wcsncpy_s(p.rows[0].keys, L"Left / Right: main menu", _TRUNCATE);
+    for (int i = 0; i < kN; ++i) {
+        TuningMenu::Row& r = p.rows[i + 1];
+        wcsncpy_s(r.name, kL[i].name, _TRUNCATE);
+        wcsncpy_s(r.value, kL[i].kb, _TRUNCATE);
+        wcsncpy_s(r.keys, kL[i].pad, _TRUNCATE);
+    }
+    TuningMenu::Row& b = p.rows[bindLine];
+    b.wide = 1;
+    wcsncpy_s(b.value, L"Press a key or button...  (Left = cancel, Backspace = clear)", _TRUNCATE);
+    p.nRows = kN + 1;
+    p.sel = bindLine;
+    wcsncpy_s(p.desc, L"Press ONE new key (Shift / Ctrl / Alt with it make a combination) or controller button / D-pad direction. "
+              L"Keys / buttons already held now (a shifter gear) are ignored until released; axes never bind. Left or Esc cancels, "
+              L"Backspace clears to none, 10 s without a press cancels.", _TRUNCATE);
+    wcsncpy_s(p.footer, L"press the new key / button   Left cancel   Backspace clear", _TRUNCATE);
+    const float scale = 1.6f;
     const int margin = 10;
     const int W = (int)std::ceil(TuningMenu::kRefWidth * scale) + 2 * margin;
     const int H = (int)std::ceil(TuningMenu::RefHeight(p.nRows) * scale) + 2 * margin;
@@ -395,13 +469,14 @@ int main(int argc, char** argv) {
         return 1;
     }
     printf("menu_shot -> %ls\n", g_dir.c_str());
-    bool none[6] = {}, vrp[6] = {}, pic[6] = {};
+    bool none[G_COUNT] = {}, vrp[G_COUNT] = {}, pic[G_COUNT] = {};
     vrp[G_VRP] = true; pic[G_PIC] = true;
     MenuShot(g, L"tuning-menu.png", none, L"Mode");
     MenuShot(g, L"tuning-menu-vr-performance.png", vrp, L"Foveated (VRS)");
     MenuShot(g, L"tuning-menu-picture.png", pic, L"Sharpen strength");
-    bool all[6]; for (bool& o : all) o = true;
+    bool all[G_COUNT]; for (bool& o : all) o = true;
     MenuShot(g, L"tuning-menu-all-open.png", all, L"Mode");                       // phase 46b: every group open
+    HotkeysShot(g, L"tuning-menu-hotkeys.png");                                   // v0.13.0 phase 50: the Hotkeys page
     FpsShots(g);
     g.ctx->Release();
     g.dev->Release();

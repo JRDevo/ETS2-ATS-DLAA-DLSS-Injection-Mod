@@ -35,7 +35,7 @@ bool DlaaProcessor::Init(ID3D11Device* dev, uint32_t renderW, uint32_t renderH, 
 
 bool DlaaProcessor::Evaluate(ID3D11DeviceContext* ctx, ID3D11ShaderResourceView* color, ID3D11ShaderResourceView* depth,
                              ID3D11ShaderResourceView* motionVectors, ID3D11UnorderedAccessView* output,
-                             const DlaaFrameParams& p) {
+                             const DlaaFrameParams& p, ID3D11ShaderResourceView* /*biasMask (phase 49)*/) {
     if (!m_feature || !ctx || !color || !depth || !motionVectors || !output) return false;
     const uintptr_t id = reinterpret_cast<uintptr_t>(m_feature) / 16;
     ++FakeNgx::evals;

@@ -53,16 +53,18 @@ menu and the garage / truck dealer screens, before a save is loaded).
   the panel gets shorter while a group is closed. If the menu was closed on a row inside a group, it reopens on that
   group's row. The group rows hold no setting (nothing to save or reset).
 - **The line at the bottom** names the menu keys by their keyboard key only (`Up / Down select   Left / Right change
-  Delete close   hold: rebind`), whatever wheel buttons are bound too; it is the same on every row (a running hold shows
-  its bar in the row itself). With long key names the rebind hint is shortened or left out so the line fits.
+  Delete close   keys: Hotkeys...`), whatever wheel buttons are bound too; it is the same on every row (the Reset hold shows
+  its bar in the row itself). With long key names the hint is left out so the line fits.
 
-- **The game gets no keys and no wheel / gamepad buttons at all while the menu is open** (v0.10.2; before only these 5
-  keys were hidden) — the arrow keys steer, accelerate and brake in the default ETS2 / ATS layout, and a key held for
-  [hold to bind](#bind-a-key-in-the-menu) must not honk the horn or change the camera. Steering, pedals and other axes
-  still reach the game. `Escape` / pause and every game key are off too: **close the menu first**. Key and button
-  releases always reach the game. When the menu is closed every key goes to the game as usual (the arrow keys do
-  nothing for the mod then).
-- **Bind a key in the menu:** hold a key or a wheel button on a row for 5 s, see
+- **Only the 5 menu keys are kept from the game while the menu is open** (v0.13.0): `Delete`, `Up`, `Down`, `Left`,
+  `Right` (or whatever they are bound to, with any `Shift` / `Ctrl` / `Alt`, and their wheel buttons) -- the arrow keys
+  steer, accelerate and brake in the default ETS2 / ATS layout. Every other key, every other wheel / gamepad button, the
+  shifter, steering and pedals reach the game, so **you can keep driving with the menu open**. Only while the
+  [Hotkeys page](#bind-a-key-in-the-menu) waits for a key (a few seconds at most) does the game get no keys or buttons at
+  all, so the key you bind does nothing in the game. Key and button releases always reach the game; `Alt+F4` always
+  works. When the menu is closed every key goes to the game as usual (the arrow keys do nothing for the mod then).
+  (v0.10.2 to v0.12.0 kept every key and button from the game while the menu was open; before that only the 5 menu keys.)
+- **Bind a key in the menu:** `Hotkeys...` row, `Right`, pick the action, `Right`, press the new key or button, see
   [Bind a key in the menu](#bind-a-key-in-the-menu).
 - **Every row names its hotkey**, so you can learn the keys from the menu. The hotkeys keep working while the menu is
   open, and the menu shows their changes at once. Each change logs and beeps like its key.
@@ -118,8 +120,8 @@ menu and the garage / truck dealer screens, before a save is loaded).
   The `Mode` row saves itself at once, like `End`.
 - **Reset to defaults** puts every row back to the fresh-install values, live and in `dlaa.ini` (the keys are removed
   from the file; hotkeys and other lines stay). v0.10.3: **hold `Right` 5 s** on the row (the menu right key, keyboard or
-  its wheel button; the time is `bind_hold_ms`): the Hotkey column reads `hold Right 5 s`, fills the same progress bar as
-  a bind hold, then resets once (`reset done` until you let go; press and hold again for another reset). Let go earlier =
+  its wheel button; the time is `bind_hold_ms`): the Hotkey column reads `hold Right 5 s`, fills a progress bar (one
+  square per second), then resets once (`reset done` until you let go; press and hold again for another reset). Let go earlier =
   nothing happens; `Left` and a plain tap of `Right` do nothing. It beeps like Save (rising two-tone = done, one long low tone = the file
   could not be written).
 - **GPU line and GPU cost column.** Under the title the panel shows what the GPU spends per frame, measured live and
@@ -134,49 +136,54 @@ menu and the garage / truck dealer screens, before a save is loaded).
 
 ## Bind a key in the menu
 
-(v0.10.2) Instead of editing `dlaa.ini`, open the menu, select a row and **hold the new key (or wheel / gamepad button,
-or D-pad direction) for 5 seconds**. The Hotkey column shows a filling bar, one square per second, e.g. `hold ■■■□□ F5`; when it is full
-the mod beeps twice (rising, like Save), the row's hotkey is the new key at once and the `key_<action>` line in
-`dlaa.ini` is rewritten (every other line stays). The log says what changed, e.g.
-`hotkey key_sharpen_up = Shift+F8, Wheel5 (bound in the menu: held Wheel5 for 2.0 s on row "Sharpen strength" step 2/2; was "Shift+F8")`.
+(v0.13.0; GitHub issue #16) Instead of editing `dlaa.ini`, open the menu, select **`Hotkeys...`** (near the bottom, above
+`Save to dlaa.ini`) and press `Right`. The panel shows the **Hotkeys page**: `< Back` first, then one line per action --
+`Mode`, `Performance profile`, `DLAA model 1` .. `4`, `Sharpen strength -` / `+`, `Sharpen width -` / `+`,
+`Texture sharpness -` / `+`, `Cut-out sharpness -` / `+`, `DLAA area (VR) -` / `+`, `Per-part motion vectors`,
+`Mirror DLAA on / off`, `DLAA before tonemap (flat)`, `See-through depth`, `DLSS upscale`, `DLAA on / off`,
+`Save to dlaa.ini` and the five menu keys (`Menu: open / close`, `up`, `down`, `left`, `right`). The `Keyboard` column
+shows the key, the `Controller` column the wheel / gamepad button or D-pad direction (`-` = none). `Up` / `Down` select a
+line; `Left` (or `Right` on `< Back`) goes back to the main menu; the open key closes the menu as everywhere.
 
-- **The hold:** exactly one key or one button must be held the whole time. It counts from the moment you press it: a key
-  that was already down when you reached the row does not count, and a hold ends without binding if you let go early or
-  press a second key / button. Anything already held when the menu opened (a pedal key, an engaged H-shifter gear) is
-  ignored until you let go of it once, so it does not block a bind. `Shift`, `Ctrl` and `Alt` do not count as keys: they are
-  read when the bar is full, so holding `Ctrl` + `F5` binds `Ctrl+F5`. Only keys from the key list in
-  [Change a key](#change-a-key) can be bound (not `Escape`, `Caps Lock`, the Windows keys or the mouse). The time is
-  `bind_hold_ms` in `dlaa.ini` (default `5000`, `500` to `10000`).
-- **Keyboard and wheel stay separate:** a key replaces the row's keyboard key and keeps its wheel button; a wheel button
-  replaces the wheel button and keeps the key (`key_menu = Delete, Wheel10` + holding `Wheel12` = `Delete, Wheel12`).
-- **`Backspace` clears:** holding `Backspace` sets the row's hotkey to `none` (keyboard key and wheel button; one low beep).
-  So `Backspace` itself cannot be bound in the menu (it can in `dlaa.ini`).
+**Bind:** select a line and press `Right`. The line reads `Press a key or button...  (Left = cancel, Backspace = clear)`.
+Press the new key (hold `Shift` / `Ctrl` / `Alt` with it for a combination: `Ctrl` + `F5` binds `Ctrl+F5`) or the new wheel /
+gamepad button or D-pad direction. The mod beeps twice (rising, like Save), the line shows `= Ctrl+F5` for 3 seconds, the
+action's hotkey is the new key at once and the `key_<action>` line in `dlaa.ini` is rewritten (every other line stays).
+The log says what changed, e.g.
+`hotkey key_sharpen_up = Shift+F8, Wheel5 (bound on the Hotkeys page: pressed Wheel5; was "Shift+F8")`.
+
+- **Only a new press counts.** A key or button that is already held when you press `Right` -- an H-shifter in gear (the
+  shifter is a set of buttons, one held all the time), a pedal key, the `Right` you just pressed -- is ignored until you
+  let go of it and press it again. A wheel the game has not read for a moment (it reads as "nothing pressed" then) does
+  not count as a release either. So an engaged gear can never be bound by accident (issue #16: with v0.10.2 to v0.12.0's
+  hold-to-bind, a player in gear bound the gear to the Mode row). Steering, pedals and other axes never bind. Two keys /
+  buttons pressed in the same frame are ignored: press one.
+- **Cancel:** the menu `Left` key, `Esc`, or 10 seconds without a press (one low beep, `cancelled` for 3 s); also closing
+  the menu or switching to another window.
+- **`Backspace` clears** the action's hotkey to `none` (keyboard key and wheel button; one low beep). So `Backspace`
+  itself cannot be bound in the menu (it can in `dlaa.ini`); neither can `Esc`.
+- **Keyboard and wheel stay separate:** a key replaces the action's keyboard key and keeps its wheel button; a wheel
+  button replaces the wheel button and keeps the key (`key_menu = Delete, Wheel10` + pressing `Wheel12` =
+  `Delete, Wheel12`). Only keys from the key list in [Change a key](#change-a-key) can be bound (not `Escape`,
+  `Caps Lock`, the Windows keys or the mouse).
 - **Taken from another hotkey:** if the key (with the same `Shift` / `Ctrl` / `Alt`) or the button already belongs to
-  another action, it is taken away from that one (its key or button becomes empty, also written to `dlaa.ini`); the row
+  another action, it is taken away from that one (its key or button becomes empty, also written to `dlaa.ini`); the line
   shows `taken from key_...` for 3 seconds and the log names it.
-- **Rows with more than one key** ask for them one after the other: `DLAA model` 4 holds (model 1, 2, 3, 4); `Sharpen
-  strength`, `Sharpen width`, `Texture sharpness`, `Cut-out texture sharpness` and `DLAA area (VR)` 2 holds (minus, then
-  plus). The Value column says which step comes next (`step 2/2: plus`); let go and hold the next key. Moving to another
-  row or closing the menu ends the sequence; the steps already done stay bound.
-- **The held key still does its old job once** when you press it (holding `Shift+F11` on a row switches DLAA off first,
-  holding a key that changes a value changes it once), like any hotkey. Pick a key, wait for the beeps, done.
-- **The menu's own keys** (`Delete`, `Up`, `Down`, `Left`, `Right`, or whatever they are bound to, also with modifiers, and
-  their wheel buttons) cannot be bound on the normal rows: holding `Down` there keeps scrolling. They are set on the
-  **Menu keys** row instead.
-- **Menu keys row** (v0.10.3: the last row of the **Panel settings** group, open it with `Right` first): the value is the
-  open key, the Hotkey column shows up / down / left / right (keyboard keys only; the full bindings, wheel buttons
-  included, are in `dlaa.ini` and the log). Five holds in a row: **open / close, up, down, left, right**. On this row:
-  - the open key (`Delete`) does **not** close the menu (it may be what you are binding); close with the `Close menu` row or
-    move off the row first;
-  - a **short tap** (under 0.3 s) of `Up` / `Down` moves to the next row when you let go (and ends the sequence); held
-    longer, `Up` / `Down` are bound instead. Scrolling with `Up` / `Down` held stops on this row; `Left` / `Right` do
-    nothing here;
-  - `Backspace` does not clear the menu keys, and a hold that would take the **only** open key away from `key_menu` is
-    refused (one long low tone): the menu must stay reachable. Bind a new open key in step 1 first.
-- **Rows without a hotkey** (OFXR Bridge, the panel and fps counter rows, the two group rows, Reset, Close) ignore a hold
-  (the Reset row's hold of the menu `Right` key is its own reset action, not a bind).
-- While the menu is open the game gets no keys or buttons (see [The tuning menu](#the-tuning-menu)), so a 2-second hold of
-  the horn button only binds it, the truck does not honk.
+- **The press does nothing else:** while a line waits, no hotkey fires and the game gets no key or button, and the key /
+  button you bind with stays hidden from the game until you let it go. (With v0.10.2 to v0.12.0's hold-to-bind the held
+  key did its old job once.)
+- **The menu's own keys** (`Delete`, `Up`, `Down`, `Left`, `Right`, or whatever they are bound to, also with modifiers,
+  and their wheel buttons) cannot be bound on the other lines: there `Up` / `Down` / `Right` do nothing and `Left`
+  cancels.
+- **The five menu-key lines** (`Menu: open / close`, `up`, `down`, `left`, `right`; the `Menu keys` row in the
+  **Panel settings** group shows them and `Right` on it opens the Hotkeys page there): here every key counts, the menu
+  keys too -- `Left` binds instead of cancelling and the open key binds instead of closing the menu. To get out without
+  binding press `Esc` or `Backspace`, or wait 10 seconds. These lines cannot be cleared, and a press that would take the
+  **only** binding away from any of the five menu actions (`key_menu`, `key_menu_up` ... `key_menu_right`) is refused
+  (one long low tone, the line keeps waiting): the menu must stay reachable, and `Right` is what opens the groups, the
+  Hotkeys page and Reset. To swap two menu keys, give one of them a third key first (`Menu: left` = `Numpad4`, then
+  `Menu: right` = `Left`, then `Menu: left` = `Right`).
+- `bind_hold_ms` is no longer used for binding; it is only the [Reset row](#the-tuning-menu)'s hold time.
 
 ## User keys — Shift + F-key (Ctrl and Alt NOT held)
 

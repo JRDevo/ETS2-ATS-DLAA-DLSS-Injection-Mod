@@ -254,6 +254,13 @@ public:
     static bool InitFwdDepth(ID3D11DeviceContext1* ctx, ID3D11DepthStencilView* dsv, UINT dsvW, UINT dsvH,
                              ID3D11ShaderResourceView* snapSrv, UINT shift, const D3D11_RECT* clip);
     static bool InitFwdReady();
+    // phase 49 GLOW BIAS MASK (inject.cpp), the share pass: one full-screen triangle into `maskRtv` (R8_UNORM, maskW x maskH = the
+    // scene) through the scissor `clip` (full-image px, nullable): mask = smoothstep(0.05, 0.5, lum(glow) / lum(colour)) -- `glowSrv`
+    // = what the pass's additive forward draws added (R11G11B10_FLOAT, scene size, re-drawn by the caller through ReplayDepth),
+    // `colourSrv` = the pass's finished forward colour (RGBA16F, scene size; this call unbinds the OM targets before reading it).
+    // Saves / restores every state it touches (the OM targets too). false = not available (shaders / states).
+    static bool BiasShare(ID3D11DeviceContext1* ctx, ID3D11RenderTargetView* maskRtv, UINT maskW, UINT maskH,
+                          ID3D11ShaderResourceView* glowSrv, ID3D11ShaderResourceView* colourSrv, const D3D11_RECT* clip);
     void Shutdown();                             // + the mirror buffer
     // Render thread, one G-buffer draw (call before or after the game's draw: the bound state is the draw's). Captures
     // the full input state with ~11 getters. false = not recorded (full).
@@ -367,6 +374,10 @@ public:
     UINT     VpJitterPacked(int i) const;
     UINT     InstanceCount(int i) const;         // v0.10.0 phase 14 round 4: 1 for DrawIndexed
     UINT     IndexCount(int i) const;            // v0.10.0 phase 4 (dump): the draw's IndexCount
+    // fps profiles (FpsProfile::VehicleKey): VB slot 0's stride and the index buffer's DXGI format -- geometry numbers that
+    // survive a game restart (no pointers)
+    UINT     VbStride(int i) const;
+    UINT     IbFormat(int i) const;
     void     CbWindow(int i, UINT* first, UINT* num) const;   // v0.10.0 phase 4 (dump): VS cb0 first / num constants
     // v0.10.0 phase 21 (dump / pixel probe): the game's pixel shader of draw i (identity only, never dereferenced; null = none /
     // unknown). inject.cpp hkPSSetShader keeps the game's current PS in NoteGamePs; every Record copies it. PsInfo = the DXBC
@@ -416,7 +427,8 @@ private:
                  uint64_t shape;                 // v0.10.0 phase 8: ShapeKey
                  UINT jit, inst;                 // v0.10.0 phase 14 round 4: VpJitterPacked, InstanceCount
                  const void* ps;                 // v0.10.0 phase 21: the game's PS at Record (identity; dump / probe)
-                 const void* vs; UINT rows; };   // v0.10.0 phase 22: the VS (identity) + cb0 rows mirrored from row 0
+                 const void* vs; UINT rows;      // v0.10.0 phase 22: the VS (identity) + cb0 rows mirrored from row 0
+                 UINT stride, ibFmt; };          // fps profiles: VB0 stride + index format (geometry only, no pointers)
     static const void* s_gamePs;                 // v0.10.0 phase 21: NoteGamePs
     static PsInfoFn    s_psInfo;                 //   SetPsInfoFn
     bool FlushPending() const {

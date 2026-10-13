@@ -62,7 +62,8 @@ VOut VSCab(uint id : SV_VertexID) {
 // kMenuVs-END
 
 // Panel texel (linear sampler) -> rgb; Opt.z = 0 (panel): alpha = max(opacity, luminance) so the text is opaque, the
-// background 88 %. Opt.z = 1 (the fps box, outlined text): alpha = the texture's alpha as it is (the black background has 0).
+// background 88 %. Opt.z = 1 (the fps box, outlined text): alpha = the texture's alpha (the black background has 0) * Opt.y
+// (phase 51f: fps_opacity -- text AND outline fade together; every path blends straight alpha, so this one place is enough).
 // kMenuPs-BEGIN (the build validates this block with fxc, ps_5_0 / PSMain)
 const char kMenuPs[] = R"(
 cbuffer MenuCb : register(b0) {
@@ -75,7 +76,7 @@ float4 PSMain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
     const float4 t = PanelTex.Sample(Lin, uv);
     float3 c = t.rgb;
     const float lum = dot(c, float3(0.2126, 0.7152, 0.0722));
-    const float a = (Opt.z > 0.5) ? t.a : max(Opt.y, lum);
+    const float a = (Opt.z > 0.5) ? t.a * Opt.y : max(Opt.y, lum);
     if (Opt.x > 0.5) c = pow(max(c, 0.0), 2.2);
     if (Opt.x > 1.5) {
         const float3x3 toBt2020 = float3x3(0.6274, 0.3293, 0.0433,
@@ -127,6 +128,7 @@ bool                             g_wHave = false;
 // phase 44 (dlaa.ini fps_color): the text / outline colours of the fps box (SetWidgetColors) and those of the cached texture
 COLORREF                         g_wText = RGB(255, 255, 255), g_wLine = RGB(8, 8, 8);
 COLORREF                         g_wLastText = 0, g_wLastLine = 0;
+float                            g_wOpacity = 1.0f;   // phase 51f (fps_opacity): the box's alpha factor, applied by the shader (no rebuild)
 std::vector<uint32_t>            g_wPixels;
 
 constexpr UINT kInst = 256;
@@ -503,9 +505,10 @@ bool RenderPanel(const TuningMenu::Panel& p, float s, uint32_t w, uint32_t h) {
         const float y = kPerfY + kPerfLineH * (float)l;
         inkText(fPerf, kPerf, p.perf[l], 14.0f, y, W - 14.0f, y + kPerfLineH, false);   // phase 45: CPU / GPU inks
     }
-    text(fSmall, kHead, L"Setting", kNameX0 + 14.0f, kHeadY, kNameX1, kHeadY + kHeadH, one);
-    text(fSmall, kHead, L"Value", kValX0, kHeadY, kValX1, kHeadY + kHeadH, one);
-    text(fSmall, kHead, L"Hotkey", kKeyX0, kHeadY, kKeyX1, kHeadY + kHeadH, one);
+    // v0.12.1 phase 50: the Hotkeys page names its columns itself (colHead; "" = the main menu's)
+    text(fSmall, kHead, p.colHead[0][0] ? p.colHead[0] : L"Setting", kNameX0 + 14.0f, kHeadY, kNameX1, kHeadY + kHeadH, one);
+    text(fSmall, kHead, p.colHead[1][0] ? p.colHead[1] : L"Value", kValX0, kHeadY, kValX1, kHeadY + kHeadH, one);
+    text(fSmall, kHead, p.colHead[2][0] ? p.colHead[2] : L"Hotkey", kKeyX0, kHeadY, kKeyX1, kHeadY + kHeadH, one);
     inkText(fSmall, kHead, p.costHead[0] ? p.costHead : L"Cost", kCostX0, kHeadY, kCostX1, kHeadY + kHeadH, false);
     fill(kLine, 10.0f, kRowsY - 2.0f, W - 10.0f, kRowsY - 1.0f);
     const int n = p.nRows < 0 ? 0 : (p.nRows > TuningMenu::kMaxRows ? TuningMenu::kMaxRows : p.nRows);
@@ -518,6 +521,10 @@ bool RenderPanel(const TuningMenu::Panel& p, float s, uint32_t w, uint32_t h) {
         const COLORREF cKey  = sel ? (r.greyed ? kSelGrey : kSelText) : (r.greyed ? kGrey : kKeyText);
         if (sel) text(fBody, cName, L">", kNameX0, y0, kNameX0 + 14.0f, y1, one);
         text(fBody, cName, r.name, kNameX0 + 14.0f, y0, kNameX1, y1, one);
+        if (r.wide) {                                        // v0.12.1 phase 50: one text over Value + Hotkey + Cost
+            text(fBody, cName, r.value, kValX0, y0, kCostX1, y1, one);
+            continue;
+        }
         text(fBody, cName, r.value, kValX0, y0, kValX1, y1, one);
         text(fBody, cKey, r.keys, kKeyX0, y0, kKeyX1, y1, one);
         inkText(fBody, cKey, r.cost, kCostX0, y0, kCostX1, y1, r.greyed != 0);   // phase 45: "<cpu> | <gpu>" in blue / orange
@@ -599,8 +606,15 @@ bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t 
             RECT r{ px(3.0f), px(y0), px(W - 3.0f), px(y1) };
             DrawTextW(dc, t, -1, &r, fl);
         };
-        line(fBig, line1, 4.0f, 24.0f);
-        line(fSmall, line2, 24.0f, 40.0f);
+        // fps_text: ONE line (the other empty) = drawn in the big font, centred on the two-line layout's centre (y 4..40 -> 22),
+        // so the (transparent) box keeps its size and centre and the text does not jump.
+        const bool has1 = line1 && line1[0], has2 = line2 && line2[0];
+        if (has1 && has2) {
+            line(fBig, line1, 4.0f, 24.0f);
+            line(fSmall, line2, 24.0f, 40.0f);
+        } else {
+            line(fBig, has1 ? line1 : line2, 12.0f, 32.0f);
+        }
         SelectObject(dc, oldFont);
         DibFinish(d, w, h, out);
         return true;
@@ -693,7 +707,7 @@ void DrawCb(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW,
     const bool overlay = (outMode & TuningMenu::kOutOverlay) != 0;   // v0.10.3 phase 29: blend off, RGBA written
     outMode &= ~TuningMenu::kOutOverlay;
     cb.opt[0] = (float)(outMode < TuningMenu::kOutRaw ? TuningMenu::kOutRaw : (outMode > TuningMenu::kOutPq ? TuningMenu::kOutPq : outMode));
-    cb.opt[1] = 0.88f;
+    cb.opt[1] = textureAlpha ? g_wOpacity : 0.88f;           // panel: its 88 % background; fps box: fps_opacity (phase 51f)
     cb.opt[2] = textureAlpha ? 1.0f : 0.0f;                  // 1 = the fps box: alpha comes from the texture
     ctx->UpdateSubresource(g_cb.Get(), 0, nullptr, &cb, 0, 0);
     SaveState(ctx, vsCab != nullptr);
@@ -883,6 +897,8 @@ void SetWidgetColors(uint8_t tr, uint8_t tg, uint8_t tb, uint8_t lr, uint8_t lg,
     g_wText = RGB(tr, tg, tb);                               // the cache compares them (EnsureWidgetTexture): a change rebuilds once
     g_wLine = RGB(lr, lg, lb);
 }
+
+void SetWidgetOpacity(float a) { g_wOpacity = a < 0.0f ? 0.0f : (a > 1.0f ? 1.0f : a); }
 
 void ReleaseWidget() {
     DropWidget();

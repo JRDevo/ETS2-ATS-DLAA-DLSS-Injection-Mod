@@ -116,7 +116,7 @@ struct OverlayParams {
                                              //   its angular size stays: the width scales with it)
     bool          menuFace = true;           // v0.10.3 phase 29b: menu_vr_face -- the panel and the head-following fps box quads
                                              //   turned to FACE the head (false: parallel to the view plane)
-    int           fpsX = 0, fpsY = 0;        // fps_vr_x / fps_vr_y (% as the panel; fixed in the cab: yaw / pitch degrees)
+    float         fpsX = 0, fpsY = 0;        // fps_vr_x / fps_vr_y (% as the panel; fixed in the cab: yaw / pitch degrees)
     float         fpsScale = 0.3f;           // fps_vr_scale (1 = 8 % of the eye fov width at 0.8 m)
     float         fpsDist = 0.8f;            // phase 44: fps_vr_dist / 100 -- the fps box quad's distance (m; 0.3..3.0). Its
                                              //   angular size stays (the width scales with it), in both lock modes
@@ -176,6 +176,23 @@ TurboStats GetTurboStats();
 // phase 45: the headset's frame period (ns) from the runtime's last real xrWaitFrame (predictedDisplayPeriod; turbo's own waits
 // too); 0 = none yet. The tuning menu's Limit line (once a second; takes the turbo worker's lock briefly).
 int64_t DisplayPeriodNs();
+
+// ---- phase 52: VR FPS CAP (dlaa.ini vr_fps_cap; frame_pace.h has the maths) -------------------------------------------------
+// div 2 = half the headset rate, 3 = a third, 0 = off. The game's outermost xrWaitFrame (the real path, never turbo's made-up
+// one) first sleeps until FramePace::VrWaitTarget -- the last real wait's return + div display periods - a quarter period --
+// then calls the real xrWaitFrame as always: the runtime wakes the game at the display slot div periods after the last one and
+// its predicted display time stays its own. Wait / begin / end order is untouched. Not while turbo is wanted (inject.cpp
+// switches turbo off while the cap is on: the cap wins). Any thread, any time; takes effect at the game's next xrWaitFrame.
+void SetFpsCap(int div);
+struct FpsCapStats {
+    int      div = 0;                        // SetFpsCap
+    int64_t  basePeriodNs = 0;               // the smallest predictedDisplayPeriod of this run of waits (0 = none yet)
+    uint64_t waits = 0, sleeps = 0;          // the game's real xrWaitFrame calls / those the cap delayed
+    int64_t  sleepNs = 0;                    // the cap's sleeps together
+};
+FpsCapStats GetFpsCapStats();
+// phase 52: an OpenXR frame loop runs -- the game called xrWaitFrame within the last second (flat Reflex / fps_cap stay off).
+bool FrameLoopActive();
 
 // ---- phase 40: HIDDEN AREA MASK (XR_KHR_visibility_mask; dlaa.ini xr_hidden_mask, inject.cpp draws it) ---------------------
 // The runtime knows which pixels of each eye picture the lenses never show. ETS2 / ATS do not enable XR_KHR_visibility_mask, so

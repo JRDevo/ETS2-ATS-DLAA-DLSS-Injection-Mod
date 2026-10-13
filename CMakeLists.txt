@@ -1,8 +1,14 @@
 cmake_minimum_required(VERSION 3.20)
-project(ets2_ats_dlaa VERSION 0.12.0 LANGUAGES C CXX)
+project(ets2_ats_dlaa VERSION 0.13.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Static C/C++ runtime (/MT, /MTd in Debug) for every target (dinput8 + minhook_static), issue #14: with the DLL CRT
+# (/MD) the mod needs a VC++ redistributable at least as new as the compiler. Under Proton (and on Windows with an old
+# redist) an older msvcp140.dll crashes in std::mutex (VS 17.10+ constexpr mutex constructor, page fault at 0x8).
+# CMP0091 is NEW with cmake_minimum_required 3.20, so this variable is honoured. Must be set before the targets.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # Ships as dinput8.dll (proxy loader). ETS2/ATS load dinput8 for input, so this
 # is a reliable, low-risk injection vector with only 5 exports to forward.
@@ -13,6 +19,7 @@ add_library(dinput8 SHARED
     src/dinput_wrap.cpp   # v0.10.0: tuning menu keys hidden from the game (DirectInput keyboard wrap + window subclass)
     src/xr_hook.cpp       # v0.10.3 phase 27: OpenXR xrReleaseSwapchainImage hook (VR panel drawn right before the release)
     src/vrs.cpp           # phase 34: VRS fixed foveated rendering (NVAPI with WITH_VRS, a "not built in" stub without)
+    src/frame_pace.cpp    # phase 52: frame cap + NVIDIA Reflex (NVAPI with WITH_NVAPI = WITH_VRS, the own limiter without)
 )
 set_target_properties(dinput8 PROPERTIES PREFIX "" OUTPUT_NAME "dinput8")
 # Single source of the version string: project(... VERSION 0.10.0) above feeds the
@@ -24,7 +31,7 @@ target_compile_definitions(dinput8 PRIVATE DLAA_INJECTOR_VERSION="${PROJECT_VERS
 # because the Steam overlay inline-detours it and re-enters via the vtable.
 # SOURCE_SUBDIR points at a nonexistent dir so MinHook's own CMakeLists is NOT
 # used; we compile its 4 sources ourselves into a static lib that inherits our
-# default /MD CRT and gets /W0 so its warnings don't pollute our /W3 build.
+# static /MT CRT (CMAKE_MSVC_RUNTIME_LIBRARY above) and gets /W0 so its warnings don't pollute our /W3 build.
 include(FetchContent)
 FetchContent_Declare(minhook
     GIT_REPOSITORY https://github.com/TsudaKageyu/minhook.git
@@ -71,7 +78,7 @@ if (WITH_VRS)
         message(FATAL_ERROR "WITH_VRS=ON needs NVAPI_SDK_DIR pointing at a clone of github.com/NVIDIA/nvapi")
     endif()
     target_include_directories(dinput8 PRIVATE "${NVAPI_SDK_DIR}")
-    target_compile_definitions(dinput8 PRIVATE WITH_VRS=1)
+    target_compile_definitions(dinput8 PRIVATE WITH_VRS=1 WITH_NVAPI=1)   # phase 52: WITH_NVAPI = Reflex (frame_pace.cpp)
     target_link_libraries(dinput8 PRIVATE "${NVAPI_SDK_DIR}/amd64/nvapi64.lib")
 endif()
 message(STATUS "VRS (NVAPI foveated rendering): ${WITH_VRS} (${NVAPI_SDK_DIR})")
@@ -98,11 +105,12 @@ if (WITH_DLAA)
     if (NOT EXISTS "${NGX_SDK_DIR}/include/nvsdk_ngx.h")
         message(FATAL_ERROR "WITH_DLAA=ON needs NGX_SDK_DIR pointing at a clone of github.com/NVIDIA/DLSS")
     endif()
-    # _d = dynamic CRT (/MD, our default); _dbg variants match /MDd in Debug.
-    find_library(NGX_LIB_RELEASE nvsdk_ngx_d     PATHS "${NGX_SDK_DIR}/lib/Windows_x86_64/x64" NO_DEFAULT_PATH)
-    find_library(NGX_LIB_DEBUG   nvsdk_ngx_d_dbg PATHS "${NGX_SDK_DIR}/lib/Windows_x86_64/x64" NO_DEFAULT_PATH)
-    if (NOT NGX_LIB_RELEASE)
-        message(FATAL_ERROR "nvsdk_ngx_d.lib not found under ${NGX_SDK_DIR}/lib/Windows_x86_64/x64")
+    # _s = static CRT (/MT, our runtime since issue #14); _s_dbg matches /MTd in Debug. (_d / _d_dbg = the /MD ones.)
+    # NGX_LIB_STATIC_* are new cache names so an old build dir that cached the _d libs does not keep linking them.
+    find_library(NGX_LIB_STATIC_RELEASE nvsdk_ngx_s     PATHS "${NGX_SDK_DIR}/lib/Windows_x86_64/x64" NO_DEFAULT_PATH)
+    find_library(NGX_LIB_STATIC_DEBUG   nvsdk_ngx_s_dbg PATHS "${NGX_SDK_DIR}/lib/Windows_x86_64/x64" NO_DEFAULT_PATH)
+    if (NOT NGX_LIB_STATIC_RELEASE)
+        message(FATAL_ERROR "nvsdk_ngx_s.lib not found under ${NGX_SDK_DIR}/lib/Windows_x86_64/x64")
     endif()
     # v0.7.8: shader_cache.cpp compiles every embedded shader once per process on a worker thread (no D3DCompile on
     # the render thread any more; the blocks below are still fxc-validated at build time).
@@ -114,18 +122,30 @@ if (WITH_DLAA)
                                    src/fps_cab.cpp)                         # phase 47: the VR fps box attached to the vehicle
     target_include_directories(dinput8 PRIVATE "${NGX_SDK_DIR}/include")
     target_compile_definitions(dinput8 PRIVATE WITH_DLAA=1)
-    # d3dcompiler: runtime HLSL compile for the depth + motion-vector passes (OS DLL).
+    # d3dcompiler: runtime HLSL compile fallback (src/shader_cache.cpp) for a shader that has no embedded bytecode
+    # (SHADER_VALIDATION=OFF builds, or a source changed without the build step). Issue #15: DELAY-loaded, so the DLL
+    # loads and runs with no d3dcompiler_47.dll at all (Proton's builtin one rejects 29 of our shaders) when every
+    # shader is embedded; shader_cache LoadLibrary-checks it before the first D3DCompile call.
     # advapi32/user32: pulled by the NGX static lib (registry + window queries);
     # CMake's default MSVC libs cover them, listed here so that stays true.
     target_link_libraries(dinput8 PRIVATE
-        "$<IF:$<CONFIG:Debug>,${NGX_LIB_DEBUG},${NGX_LIB_RELEASE}>"
-        d3dcompiler advapi32 user32)
+        "$<IF:$<CONFIG:Debug>,${NGX_LIB_STATIC_DEBUG},${NGX_LIB_STATIC_RELEASE}>"
+        d3dcompiler delayimp advapi32 user32)
+    if (MSVC)
+        target_link_options(dinput8 PRIVATE "/DELAYLOAD:d3dcompiler_47.dll")
+    endif()
 
     # --- embedded HLSL validation (v0.5.6) --- every "// kName-BEGIN ... // kName-END" block in the
     # sources is extracted and compiled with fxc (cs_5_0 / CSMain, like the runtime D3DCompile; v0.7.0: or the
     # "@profile@entry" given after the block name, e.g. vs_5_0 / ps_5_0 for the upscale composite) before
     # dinput8 builds; a shader error fails the build instead of showing up as a runtime log line.
-    # Register new blocks in _shader_blocks. -DSHADER_VALIDATION=OFF skips it (no Windows SDK fxc).
+    # Issue #15: the same step also keeps the DXBC bytecode and generates <build>/shaders/embedded_shaders.cpp (every
+    # blob as a byte array + a table keyed by source hash / length, entry, profile, compile flags); shader_cache.cpp uses
+    # those blobs instead of D3DCompile (Wine/Proton's builtin d3dcompiler rejects most of our shaders). Every shader the
+    # runtime registers (ShaderCache::Add) must be listed in _shader_blocks with the same entry + profile, or it falls
+    # back to D3DCompile at runtime (logged).
+    # Register new blocks in _shader_blocks. -DSHADER_VALIDATION=OFF skips it (no Windows SDK fxc): no embedded bytecode
+    # then, every shader is compiled at runtime as before.
     option(SHADER_VALIDATION "Compile the embedded HLSL blocks with fxc at build time" ON)
     if (SHADER_VALIDATION)
         if (NOT FXC_EXE)
@@ -187,19 +207,23 @@ if (WITH_DLAA)
             "src/draw_ids.cpp@kFwdInitShader@vs_5_0@VSMain"     # v0.10.0 phase 10 forward-depth occlusion init (full-screen tri)
             "src/draw_ids.cpp@kFwdInitShader@ps_5_0@PSInit0"    #   full resolution
             "src/draw_ids.cpp@kFwdInitShader@ps_5_0@PSInit1"    #   1/2 resolution (min of 2x2)
+            "src/draw_ids.cpp@kBiasNormShader@ps_5_0@PSNorm"    # phase 49 glow bias mask: glow share of the pixel
+            "src/scene_dlaa.cpp@kBiasPrepShader"                # phase 49 crop + last frame's glow along the MVs
             "src/inject.cpp@kPvStatsShader"                     # v0.7.8 Ctrl+F10 preview capture metrics
             "src/inject.cpp@kPvDepthAsmShader"                  # v0.7.8 tiled preview picture depth
             "src/inject.cpp@kPvEdgeFillShader")                 # v0.8.1 preview tile edge (zero-guarded fill)
         string(REPLACE ";" "," _shader_blocks_arg "${_shader_blocks}")
         set(_shader_stamp "${CMAKE_CURRENT_BINARY_DIR}/shaders/validated.stamp")
+        set(_shader_embed_cpp "${CMAKE_CURRENT_BINARY_DIR}/shaders/embedded_shaders.cpp")   # issue #15
         add_custom_command(
-            OUTPUT  "${_shader_stamp}"
+            OUTPUT  "${_shader_stamp}" "${_shader_embed_cpp}"
             COMMAND "${CMAKE_COMMAND}"
                     "-DFXC=${FXC_EXE}"
                     "-DSRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
                     "-DOUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/shaders"
                     "-DBLOCKS=${_shader_blocks_arg}"
                     "-DSTAMP=${_shader_stamp}"
+                    "-DEMBED_CPP=${_shader_embed_cpp}"
                     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/validate_shaders.cmake"
             DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/scene_dlaa.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/motion_vectors.cpp"
@@ -209,9 +233,16 @@ if (WITH_DLAA)
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/inject.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/draw_ids.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/validate_shaders.cmake"
-            COMMENT "Validating embedded HLSL shader blocks with fxc"
+            COMMENT "Validating embedded HLSL shader blocks with fxc + embedding their bytecode"
             VERBATIM)
-        add_custom_target(validate_shaders ALL DEPENDS "${_shader_stamp}")
+        add_custom_target(validate_shaders ALL DEPENDS "${_shader_stamp}" "${_shader_embed_cpp}")
         add_dependencies(dinput8 validate_shaders)
+        # issue #15: the prebuilt DXBC table (shader_cache.cpp looks it up when DLAA_EMBEDDED_SHADERS is defined).
+        # The generated file hashes each HLSL raw string in a constexpr (so the literal text itself is not kept in the
+        # DLL); the biggest block is ~116 KB, past MSVC's default constexpr step budget.
+        target_sources(dinput8 PRIVATE "${_shader_embed_cpp}")
+        set_source_files_properties("${_shader_embed_cpp}" PROPERTIES GENERATED TRUE
+            COMPILE_OPTIONS "/constexpr:steps100000000")
+        target_compile_definitions(dinput8 PRIVATE DLAA_EMBEDDED_SHADERS=1)
     endif()
 endif()

@@ -65,6 +65,29 @@ float PSInit1(float4 pos : SV_Position) : SV_Depth { return InitDepth(pos, 1u); 
 )";
 // kFwdInitShader-END
 
+// phase 49 GLOW BIAS MASK, the SHARE PASS (DrawIdRecord::BiasShare; inject.cpp GLOW BIAS MASK): one full-screen triangle (the
+// occlusion init's VSMain) over the pass's R8 bias mask writes how much of each pixel's finished forward colour the pass's additive
+// forward draws (light glows, flares, light cones) put there: s = lum(glow sum) / lum(colour) -> smoothstep(0.05, 0.5, s). A glow
+// that makes half of the pixel's light or more = 1 (NGX takes this frame's colour), a faint glow over a bright background ~ 0 (the
+// history keeps anti-aliasing it). Exposure-free: both sums are the game's linear HDR values of the same pixel. Glow =
+// R11G11B10_FLOAT, Colour = the forward colour (RGBA16F), both at the scene size (the glow re-draw is depth tested against the
+// full-size scene depth, so it cannot run at 1/2 resolution like the forward depth can).
+// kBiasNormShader-BEGIN (the build validates this block with fxc: ps_5_0 / PSNorm)
+const char kBiasNormShader[] = R"(
+Texture2D<float3> Glow   : register(t0);   // the summed colour of the pass's additive forward draws (scene size)
+Texture2D<float4> Colour : register(t1);   // the pass's finished forward colour (scene size, linear HDR)
+float PSNorm(float4 pos : SV_Position) : SV_Target {
+    uint2 p = uint2(pos.xy);
+    float3 g = max(Glow[p], 0.0);
+    float3 c = max(Colour[p].rgb, 0.0);
+    float lg = dot(g, float3(0.2126, 0.7152, 0.0722));
+    float lc = dot(c, float3(0.2126, 0.7152, 0.0722));
+    float s = lg / max(max(lc, lg), 1e-6);     // the finished colour holds the glow + what lies behind it (+ what was drawn over it)
+    return lg > 1e-5 ? smoothstep(0.05, 0.5, s) : 0.0;
+}
+)";
+// kBiasNormShader-END
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Per-draw pairing + R table (DrawIdMv, one thread per draw; three entry points of one source):
 //  CSGather  : Mc = this draw's MVP (rows 4..7 of its VS cb0 window, from the ring mirror) -> CurM (the next frame's
@@ -2039,6 +2062,11 @@ ComPtr<ID3D11RasterizerState>    s_initRs;                // cull none, scissor 
 const void*                      s_initDev = nullptr;
 bool                             s_initFailed = false;
 bool                             s_devFailed = false;
+// phase 49: the glow bias mask's share pass (BiasShare): own device identity (the forward depth / ids may be off)
+ComPtr<ID3D11PixelShader>        s_biasPs;
+ComPtr<ID3D11DepthStencilState>  s_biasDss;               // depth + stencil off
+const void*                      s_biasDev = nullptr;
+bool                             s_biasFailed = false;
 
 // Everything the replay touches, saved before and restored after (refs held in between).
 struct GfxSave {
@@ -3280,6 +3308,7 @@ bool DrawIdRecord::Record(ID3D11DeviceContext1* ctx, UINT ic, UINT inst, UINT si
     if (m_forward) k.flags |= kFFwd;                     // v0.10.0 phase 3
     k.off = kNone;
     k.rows = 0;
+    k.stride = s.vb[0] ? s.vbStride[0] : 0u; k.ibFmt = (UINT)s.ibFmt;   // fps profiles (FpsProfile::VehicleKey)
     k.vs = s.vs;                                         // v0.10.0 phase 22: identity only (DrawIdMv::MvpRow, the layout table)
     if (!instanced && s.cb[0] && s.cbNum[0] * 16u >= 128u) {
         const UINT nRows = s.cbNum[0] < kMirrorRows ? s.cbNum[0] : kMirrorRows;   // v0.10.0 phase 22: rows 0..11 (was 4..7)
@@ -3642,6 +3671,8 @@ float    DrawIdRecord::VpMax(int i) const { return (i >= 0 && i < m_n) ? m_key[i
 UINT     DrawIdRecord::VpJitterPacked(int i) const { return (i >= 0 && i < m_n) ? m_key[i].jit : 0u; }   // phase 14 round 4
 UINT     DrawIdRecord::InstanceCount(int i) const { return (i >= 0 && i < m_n) ? m_key[i].inst : 1u; }  // phase 14 round 4
 UINT     DrawIdRecord::IndexCount(int i) const { return (i >= 0 && i < m_n) ? m_key[i].ic : 0; }
+UINT     DrawIdRecord::VbStride(int i) const { return (i >= 0 && i < m_n) ? m_key[i].stride : 0; }   // fps profiles
+UINT     DrawIdRecord::IbFormat(int i) const { return (i >= 0 && i < m_n) ? m_key[i].ibFmt : 0; }
 void     DrawIdRecord::CbWindow(int i, UINT* first, UINT* num) const {
     *first = (i >= 0 && i < m_n) ? m_key[i].cbFirst : 0;
     *num = (i >= 0 && i < m_n) ? m_key[i].cbNum : 0;
@@ -3658,6 +3689,8 @@ void DrawIdRecord::RegisterShaders() {
     ShaderCache::Add(ShaderCache::kFwdInitVs, kFwdInitShader, sizeof(kFwdInitShader) - 1, "fwd_init_vs", "VSMain", "vs_5_0");
     ShaderCache::Add(ShaderCache::kFwdInitPs0, kFwdInitShader, sizeof(kFwdInitShader) - 1, "fwd_init_ps0", "PSInit0", "ps_5_0");
     ShaderCache::Add(ShaderCache::kFwdInitPs1, kFwdInitShader, sizeof(kFwdInitShader) - 1, "fwd_init_ps1", "PSInit1", "ps_5_0");
+    // phase 49: the glow bias mask's share pass
+    ShaderCache::Add(ShaderCache::kBiasNormPs, kBiasNormShader, sizeof(kBiasNormShader) - 1, "bias_norm_ps", "PSNorm", "ps_5_0");
 }
 
 // v0.10.0 phase 10: the occlusion init of a forward-depth target (see draw_ids.h). Device objects per device, lazily.
@@ -3698,6 +3731,78 @@ static bool FwdInitObjects(ID3D11Device* dev) {
 }
 
 bool DrawIdRecord::InitFwdReady() { return s_initDev && !s_initFailed && s_initVs; }
+
+// phase 49: the share pass objects (the full-screen VS + cull-none / scissor RS come from the occlusion init's set)
+static bool BiasObjects(ID3D11Device* dev) {
+    if (!dev) return false;
+    if (s_biasDev == (const void*)dev) return !s_biasFailed && s_biasPs && s_biasDss && FwdInitObjects(dev);
+    if (!ShaderCache::Done()) return false;              // warm-up still running: retried
+    if (!FwdInitObjects(dev)) return false;              // (logs its own failure once)
+    s_biasPs.Reset(); s_biasDss.Reset();
+    s_biasDev = dev;
+    s_biasFailed = true;
+    size_t n0 = 0;
+    const void* c0 = ShaderCache::Code(ShaderCache::kBiasNormPs, &n0);
+    if (!c0 || FAILED(dev->CreatePixelShader(c0, n0, nullptr, &s_biasPs))) {
+        LogErr("DLSS bias mask: share-pass shader unavailable (%s) -- no glow bias mask this session",
+            ShaderCache::Error(ShaderCache::kBiasNormPs));
+        return false;
+    }
+    D3D11_DEPTH_STENCIL_DESC dd{};
+    dd.DepthEnable = FALSE;
+    dd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+    dd.DepthFunc = D3D11_COMPARISON_ALWAYS;
+    dd.StencilEnable = FALSE;
+    dd.StencilReadMask = 0xFF; dd.StencilWriteMask = 0x00;
+    dd.FrontFace = { D3D11_STENCIL_OP_KEEP, D3D11_STENCIL_OP_KEEP, D3D11_STENCIL_OP_KEEP, D3D11_COMPARISON_ALWAYS };
+    dd.BackFace = dd.FrontFace;
+    if (FAILED(dev->CreateDepthStencilState(&dd, &s_biasDss))) {
+        LogErr("DLSS bias mask: share-pass state create failed -- no glow bias mask this session");
+        return false;
+    }
+    s_biasFailed = false;
+    return true;
+}
+
+bool DrawIdRecord::BiasShare(ID3D11DeviceContext1* ctx, ID3D11RenderTargetView* maskRtv, UINT maskW, UINT maskH,
+                             ID3D11ShaderResourceView* glowSrv, ID3D11ShaderResourceView* colourSrv, const D3D11_RECT* clip) {
+    if (!ctx || !maskRtv || !glowSrv || !colourSrv || !maskW || !maskH) return false;
+    ComPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    if (!BiasObjects(dev.Get())) return false;
+    D3D11_RECT sc{ 0, 0, (LONG)maskW, (LONG)maskH };
+    if (clip) {                                          // full-resolution target: the clip as it is, clamped
+        sc = *clip;
+        if (sc.left < 0) sc.left = 0;
+        if (sc.top < 0) sc.top = 0;
+        if (sc.right > (LONG)maskW) sc.right = (LONG)maskW;
+        if (sc.bottom > (LONG)maskH) sc.bottom = (LONG)maskH;
+        if (sc.left >= sc.right || sc.top >= sc.bottom) return true;   // nothing of the clip on the mask
+    }
+    GfxSave sv;
+    sv.Save(ctx, true, true);
+    ctx->OMSetRenderTargets(1, &maskRtv, nullptr);       // (unbinds the forward colour from the OM before it is read below)
+    ctx->OMSetDepthStencilState(s_biasDss.Get(), 0);
+    ctx->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFFu);
+    ctx->IASetInputLayout(nullptr);
+    ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    ctx->VSSetShader(s_initVs.Get(), nullptr, 0);
+    ctx->PSSetShader(s_biasPs.Get(), nullptr, 0);
+    ID3D11ShaderResourceView* srvs[2] = { glowSrv, colourSrv };
+    ctx->PSSetShaderResources(0, 2, srvs);
+    ctx->GSSetShader(nullptr, nullptr, 0);
+    ctx->HSSetShader(nullptr, nullptr, 0);
+    ctx->DSSetShader(nullptr, nullptr, 0);
+    ctx->RSSetState(s_initRs.Get());
+    const D3D11_VIEWPORT vp{ 0.0f, 0.0f, (float)maskW, (float)maskH, 0.0f, 1.0f };
+    ctx->RSSetViewports(1, &vp);
+    ctx->RSSetScissorRects(1, &sc);
+    ctx->Draw(3, 0);
+    ID3D11ShaderResourceView* none[2] = { nullptr, nullptr };
+    ctx->PSSetShaderResources(0, 2, none);               // (the restore rebinds the game's forward colour as RT0)
+    sv.Restore(ctx);
+    return true;
+}
 
 bool DrawIdRecord::InitFwdDepth(ID3D11DeviceContext1* ctx, ID3D11DepthStencilView* dsv, UINT dsvW, UINT dsvH,
                                 ID3D11ShaderResourceView* snapSrv, UINT shift, const D3D11_RECT* clip) {
@@ -3805,6 +3910,8 @@ void DrawIdRecord::ShutdownDevice() {
     s_dev = nullptr;
     s_initVs.Reset(); s_initPs[0].Reset(); s_initPs[1].Reset(); s_initDss.Reset(); s_initRs.Reset();   // v0.10.0 phase 10
     s_initDev = nullptr; s_initFailed = false;
+    s_biasPs.Reset(); s_biasDss.Reset();                 // phase 49
+    s_biasDev = nullptr; s_biasFailed = false;
     RsMemoClear();                                       // v0.10.0 phase 9: the scissor-enabled RS copies
     DrawIdMv::VsLayoutClear();                           // v0.10.0 phase 22: VS pointers belong to the old device
 }
