@@ -1,4 +1,4 @@
-// v0.12.1 -- phase 50: HOTKEYS PAGE (GitHub issue #16; the block "the HOTKEYS PAGE" before the Reset hold, ~17090). Hold-to-bind
+// v0.13.0 -- phase 50: HOTKEYS PAGE (GitHub issue #16; the block "the HOTKEYS PAGE" before the Reset hold, ~17090). Hold-to-bind
 //           is gone: main rows only change values; "Hotkeys..." / "Menu keys" (Right) open a second list in the same panel, one
 //           line per action; Right on a line waits for the NEXT FRESH press of one key / button (inputs held at that moment,
 //           e.g. an engaged H-shifter gear, are ignored until released; a stale controller read is not a release). While the

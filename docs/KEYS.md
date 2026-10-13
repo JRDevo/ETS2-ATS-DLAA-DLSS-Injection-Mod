@@ -56,7 +56,7 @@ menu and the garage / truck dealer screens, before a save is loaded).
   Delete close   keys: Hotkeys...`), whatever wheel buttons are bound too; it is the same on every row (the Reset hold shows
   its bar in the row itself). With long key names the hint is left out so the line fits.
 
-- **Only the 5 menu keys are kept from the game while the menu is open** (v0.12.1): `Delete`, `Up`, `Down`, `Left`,
+- **Only the 5 menu keys are kept from the game while the menu is open** (v0.13.0): `Delete`, `Up`, `Down`, `Left`,
   `Right` (or whatever they are bound to, with any `Shift` / `Ctrl` / `Alt`, and their wheel buttons) -- the arrow keys
   steer, accelerate and brake in the default ETS2 / ATS layout. Every other key, every other wheel / gamepad button, the
   shifter, steering and pedals reach the game, so **you can keep driving with the menu open**. Only while the
@@ -136,7 +136,7 @@ menu and the garage / truck dealer screens, before a save is loaded).
 
 ## Bind a key in the menu
 
-(v0.12.1; GitHub issue #16) Instead of editing `dlaa.ini`, open the menu, select **`Hotkeys...`** (near the bottom, above
+(v0.13.0; GitHub issue #16) Instead of editing `dlaa.ini`, open the menu, select **`Hotkeys...`** (near the bottom, above
 `Save to dlaa.ini`) and press `Right`. The panel shows the **Hotkeys page**: `< Back` first, then one line per action --
 `Mode`, `Performance profile`, `DLAA model 1` .. `4`, `Sharpen strength -` / `+`, `Sharpen width -` / `+`,
 `Texture sharpness -` / `+`, `Cut-out sharpness -` / `+`, `DLAA area (VR) -` / `+`, `Per-part motion vectors`,

@@ -74,10 +74,18 @@ an in-game menu (`Delete`) and an optional text config.
 - **VR speed-ups** — hidden area mask (the lens corners are not drawn), foveated rendering also on the lighting pass,
   mirrors in turns; all off by default, each a menu row (new in v0.12.0).
 - **VR fps counter attached to the vehicle** — rides with the cab on bumps, braking and hills; 20 colours, brightness,
-  distance and turn (new in v0.12.0).
+  distance and turn (new in v0.12.0). New in v0.13.0: the box sits on the cab itself and keeps its place after menus and recentring, every vehicle keeps its own box (place, size, colour, brightness, text, opacity), and the text has 7 choices.
 - **Frame rate limits** — in flat, NVIDIA Reflex (less input lag when the GPU is the limit) and an FPS cap (a steady
   frame time, less heat). In VR, a cap at half or a third of the headset rate, so the headset's reprojection (ASW /
-  Motion Smoothing) fills the frames in between at a steady rhythm. All off by default, each a menu row (new).
+  Motion Smoothing) fills the frames in between at a steady rhythm. All off by default, each a menu row (new in v0.13.0).
+- **Night light glow fix** — street lamp and car light glows no longer leave a trail behind them at night; a menu row
+  (`Light glow ghosting fix`, `dlss_bias_mask`) sets the strength (new in v0.13.0).
+- **Lit areas under canopies** — the game's lighting pass draws some meshes a second time (sunlight through a tent
+  canopy); they now match the DLAA picture and no longer flicker on and off (`light_redraw_jitter`, new in v0.13.0).
+- **CPU tuning** — optional: Intel P-cores for the game's main threads, Above normal priority, no power throttling;
+  one menu row, off by default (new in v0.13.0).
+- **Hotkeys page** — bind every menu hotkey in the menu itself with one press; only the five menu keys are kept from the
+  game while the menu is open (new in v0.13.0).
 - **Windows HDR** — works with HDR on in flat mode.
 - **NVIDIA Smooth Motion** — works with the driver's frame generation switched on, in flat mode.
 - **OFXR Bridge (VR frame generation)** — runs together with the bridge, which adds in-between frames to the
@@ -125,11 +133,13 @@ This is an unofficial fan project. It is not affiliated with, or endorsed by, SC
 Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
-> Status: v0.12.0. New: triple screens in flat, the VR fps counter attached to the vehicle, a menu in categories with a CPU | GPU cost column, and three VR speed-ups.
+> Status: v0.13.0. New: NVIDIA Reflex and frame rate caps, a Hotkeys page in the menu, a per-vehicle fps box in VR, a night light glow fix, CPU tuning, and fixes for Linux / Proton.
 > See the [Releases page](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/releases) for every version.
 > DLSS upscaling in VR is still being tuned; treat it as experimental.
 
 <details><summary>Older versions</summary>
+
+v0.12.0: triple screens in flat, the VR fps counter attached to the vehicle, a menu in categories with a CPU | GPU cost column, hidden area mask, foveated lighting pass and mirrors in turns.
 
 v0.11.0: Turbo mode (VR), foveated rendering (VRS), logging levels in the menu, about half the GPU cost for the per-part motion vectors in busy cities, fixes for issue #8 (OptiScaler: mirror DLAA starts off) and issue #9 (DLSS stopped on the eyes after a VR minimize / restore). v0.10.3: in VR the tuning menu and the fps box are OpenXR quad layers placed by the headset (`menu_vr_layer`): steady, never covered by the game's menus, at a real distance (`menu_vr_dist`), with the fps box optionally fixed in the cab (`fps_vr_lock`). Hold a key or wheel button on a menu row to bind it; Reset to defaults is a 5 s hold; Panel / FPS settings are collapsible groups. v0.10.2 (unpublished): VR performance pass (`mv_cons_fail_tol`, mirror units pre-built on the loading screen, `mv_area_clip`, camera-only mirrors `mirror_mv`), the 7-choice Mirror DLAA row, wheel / D-pad bindings. The DLSS
 *upscaling* path (render below native, reconstruct up) runs in VR but is still
@@ -510,11 +520,11 @@ The three green lines under the title show the game's GPU time per frame, what t
 - **Flat:** the panel sits near the top-left corner of the screen.
 - **VR:** the panel shows in both eyes, centred in front of you, and on the desktop mirror window -- also on the
   VR main menu and the garage / truck dealer screens, before a save is loaded.
-- **You can keep driving with the menu open (v0.12.1):** only the five menu keys / buttons (by default `Delete` and the
+- **You can keep driving with the menu open (v0.13.0):** only the five menu keys / buttons (by default `Delete` and the
   arrow keys) are kept from the game while the menu is open; every other key, wheel and gamepad button, your shifter, the
   steering and the pedals reach the game as usual. (v0.10.2 to v0.12.0 kept every key and button from the game.) Closed,
   the menu keys belong to the game again.
-- **Hotkeys page (v0.12.1):** select **`Hotkeys...`** (near the bottom, above `Save`) and press `Right`: the panel shows
+- **Hotkeys page (v0.13.0):** select **`Hotkeys...`** (near the bottom, above `Save`) and press `Right`: the panel shows
   one line per hotkey action (`Sharpen strength -` and `Sharpen strength +` are separate lines, so are the four models and
   the five menu keys) with its keyboard key and its wheel / gamepad button. `Up` / `Down` select a line, `Left` (or
   `Right` on `< Back`) goes back to the main menu.
@@ -644,7 +654,7 @@ The three green lines under the title show the game's GPU time per frame, what t
   `info` or `debug`, live. Its cost column shows what the logging costs on the CPU per frame (the description adds the
   lines per second; at `debug` also what the CPU profiler costs). `debug` also runs the mod's GPU timers and CPU
   profiler all the time; use it for bug reports, `errors` for play.
-- **Hotkeys...** (v0.12.1) opens the Hotkeys page: every hotkey of the menu with its key and wheel button; bind one by
+- **Hotkeys...** (v0.13.0) opens the Hotkeys page: every hotkey of the menu with its key and wheel button; bind one by
   pressing `Right` on its line and then the new key or button (see above).
 - **Save to dlaa.ini** (the same as `Shift+F12`) writes the live values, and the panel position / fps box once you
   changed them.
@@ -710,6 +720,8 @@ The table below lists the commonly used keys:
 | `tex_aniso` | `0` | anisotropic filtering for the world textures: `0` = the game's own setting; `2`..`16` = at least this level (trilinear textures become anisotropic) |
 | `preview_dlaa` | `1` | `1` = also anti-alias the profile / truck-preview screen (flat and VR); `0` = leave that screen untouched. VR at eye resolution needs a lot of GPU memory and time there, turn it off if that screen stutters. That screen always uses model 2 (preset E); the model keys change the drive only |
 | `jitter_sign_x` / `jitter_sign_y` | `1` | flip if the image shimmers or looks doubled (try the 4 combinations) |
+| `dlss_bias_mask` | `100` | light glow ghosting fix (phase 49): strength in % `0`..`100`, `0` = off. Street lamp and car light glows are told to DLSS as a mask so they leave no trail at night. Lower it (25 % steps) if glows flicker. The menu's `Light glow ghosting fix` row |
+| `light_redraw_jitter` | `1` | phase 55: `1` = the lighting pass's mesh redraws (sunlight through canopies, emissive surfaces) use the same jittered viewport as the G-buffer; `0` = the game's viewport for the whole lighting pass (lit areas can flicker). Startup only |
 | `dlss_hdr` | `1` | HDR only: `1` = tell DLSS the picture is HDR (normal); `0` = try this if HDR brightness or colours look wrong with DLAA on |
 | `beeps` | `1` | `0` = silence the hotkey beeps |
 | `menu_x` / `menu_y` / `menu_scale` | `2` / `8` / `1.0` | tuning menu panel, flat: left / top edge in % of the picture, size `0.3`..`2.0`. The menu's Panel rows change them live |
@@ -743,7 +755,7 @@ The table below lists the commonly used keys:
 | `cpu_no_throttle` | `0` | `1` = Windows may not slow the game down to save power (EcoQoS) and honours its timer requests while the window is minimized or hidden. Needs Windows 11 for the timer part. The menu's `CPU tuning` row switches it live |
 | `did_shadow` | `1` | CPU saving for the per-part motion vectors (read at game start only): `1` = the mod remembers the game's drawing settings as the game sets them instead of asking the graphics driver for them at every draw (input layout, vertex shader, its constant buffers and samplers, rasterizer state); `2` = also the vertex / index buffers (faster only when the game reuses buffers between draws); `0` = ask at every draw (as before). The log's `did_shadow=` line at startup says which one ran |
 | `did_shadow_verify` | `-1` | test only: every Nth draw the remembered settings are compared with the driver's; a difference is logged (`MISMATCH`) and the mod asks the driver for the rest of that frame. `-1` = every 64th draw with `log_level = 4`, off otherwise; `0` = off |
-| `bind_hold_ms` | `5000` | tuning menu: how long (ms, `500`..`10000`) the menu `Right` must be held on the `Reset to defaults` row. (Up to v0.12.0 it was also the hold-to-bind time; v0.12.1 binds on the Hotkeys page with one press, [`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu)) |
+| `bind_hold_ms` | `5000` | tuning menu: how long (ms, `500`..`10000`) the menu `Right` must be held on the `Reset to defaults` row. (Up to v0.12.0 it was also the hold-to-bind time; v0.13.0 binds on the Hotkeys page with one press, [`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu)) |
 | `controller_name` | *(empty)* | only read the wheels / gamepads whose name contains this text for `WheelN` / `WheelUp` hotkey bindings, e.g. `T300` when a shifter shares the wheel's button numbers; empty = every controller ([`docs/KEYS.md`](docs/KEYS.md#wheel-gamepad-and-joystick-buttons)) |
 | `key_<action>` | *(see KEYS.md)* | re-bind any hotkey, e.g. `key_dlaa_toggle = Ctrl+D`, or `none` to disable it. Full list and format: [`docs/KEYS.md`](docs/KEYS.md) |
 | `log_level` | `1` | how much goes into the log file `dlaa_inject.log`: `0` = off, `1` = errors only (without an error no file is created), `2` = + warnings (problems the mod works around), `3` = + info (start-up and every setting change), `4` = debug: + statistics every few seconds, and the mod's GPU timers and CPU profiler run. Bug reports need `4`. The names work too (`off`, `errors`, `warnings`, `info`, `debug`). The menu's `Logging` row changes it live. The old `debug = 1` still means `4`, but only when there is no `log_level` line |
@@ -888,6 +900,15 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   the mod sees OptiScaler next to the game exe and starts with mirror DLAA off (look for `env: OptiScaler
   detected` in the log). On v0.10.3 set `mirror_dlaa = 0` in `dlaa.ini` or press `Alt+F6`. OptiScaler is not
   supported or tested by this mod; it happens to work for the main picture.
+- **Light trails behind street lamps and car lights at night:** fixed in v0.13.0: update (`dlss_bias_mask`, menu row
+  `Light glow ghosting fix`). Lower it if glows start to flicker.
+- **Lit areas under tent canopies switch off on some frames (flicker):** fixed in v0.13.0: update (`light_redraw_jitter = 1`).
+- **Linux / Proton: the game does not start or the shaders fail with the mod:** fixed in v0.13.0: update (GitHub issues #14 and #15;
+  the mod needs no extra runtime library and carries its shaders prebuilt). See [Linux / Proton](#linux--proton).
+- **Hotkeys could not be re-bound in the menu, or held keys reached the game (hold-to-bind):** fixed in v0.13.0: update
+  (the Hotkeys page, GitHub issue #16).
+- **The VR fps box moved after a menu or a recentre, or sat in the wrong place in a second truck:** fixed in v0.13.0: update
+  (the box is saved on the cab itself, per vehicle).
 - **Faint dark line down the middle of the menu / truck-preview screen:** fixed in v0.8.1: update.
 - **Dark 1 px line on every silhouette (trees, poles, trucks) in flat mode:** fixed in v0.10.1: update. v0.10.0
   drew the game's fog pass one texel off.

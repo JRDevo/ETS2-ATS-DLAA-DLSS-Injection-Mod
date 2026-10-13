@@ -561,7 +561,7 @@ log_level = 1
 # back to the picture by itself when the layers are not possible (no OpenXR session, the runtime refuses them).
 # menu_vr_layer = 1
 # The Reset to defaults row: how long (ms, 500..10000) the menu Right key must be held on it to reset. (v0.10.2 .. v0.12.0
-# this was also the HOLD TO BIND time; v0.12.1 binds hotkeys on the menu's Hotkeys page with ONE fresh press: Hotkeys...,
+# this was also the HOLD TO BIND time; v0.13.0 binds hotkeys on the menu's Hotkeys page with ONE fresh press: Hotkeys...,
 # Right, pick the action, Right, press the new key / button -- written to the key_* line below at once; Backspace = none.)
 # While the menu is open only its 5 keys / buttons are kept from the game (every key / button only while the Hotkeys page
 # waits for a press), so you can keep driving.
