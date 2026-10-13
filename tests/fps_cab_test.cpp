@@ -850,7 +850,42 @@ static void PartP2() {
         CHECK(ParseValue("1f 1 2 80 0 0 0 0.3 v2 -1 -1 -1 -", &kk, &vv, &cc2, &h2) && !h2 && !vv.HasLook(), "a v2 line without look / cab failed");
         CHECK(ParseValue("1f 1 2 80 0 0 0 0.3 v2 99 5 9 -", &kk, &vv) && vv.color == FpsPose::kColorCount - 1 &&
               vv.bright == FpsPose::kBrightMin && vv.text == kTextModes - 1, "the v2 look values are not clamped");
-        CHECK(!ParseValue("1f 1 2 80 0 0 0 0.3 v3 1 1 1 -", &kk, &vv), "an unknown version was accepted");
+        CHECK(!ParseValue("1f 1 2 80 0 0 0 0.3 v4 1 1 1 1 -", &kk, &vv), "an unknown version was accepted");
+        // phase 51f: v3 = v2 + opacity after text; a v2 line has none (-1: the live value stays); written as v3 only with an opacity
+        {
+            CHECK(ParseValue("1f 1 2 80 0 0 0 0.3 v2 3 50 1 -", &kk, &vv) && vv.opacity == -1 && vv.color == 3, "51f: a v2 line must load with opacity -1");
+            CHECK(ParseValue("1f 1 2 80 0 0 0 0.3 v3 3 50 1 40 -", &kk, &vv) && vv.opacity == 40 && vv.color == 3 && vv.bright == 50 &&
+                  vv.text == 1, "51f: a v3 line did not load");
+            CHECK(ParseValue("1f 1 2 80 0 0 0 0.3 v3 3 50 1 5 -", &kk, &vv) && vv.opacity == FpsPose::kOpacityMin, "51f: opacity not clamped low");
+            CHECK(ParseValue("1f 1 2 80 0 0 0 0.3 v3 3 50 1 900 -", &kk, &vv) && vv.opacity == FpsPose::kOpacityMax, "51f: opacity not clamped high");
+            CHECK(ParseValue("1f 1 2 80 0 0 0 0.3 v3 -1 -1 -1 -1 -", &kk, &vv) && !vv.HasLook(), "51f: a v3 line without look failed");
+            CHECK(!ParseValue("1f 1 2 80 0 0 0 0.3 v3 3 50 1 -", &kk, &vv), "51f: a v3 line missing its opacity was accepted");
+            Vals o3 = vv; o3.color = 2; o3.bright = 70; o3.text = 0; o3.opacity = 60;
+            const std::string l3 = FormatValue(0x1full, o3);
+            CHECK(l3 == "000000000000001f 1.00 2.00 80 0 0 0 0.30 v3 2 70 0 60 -", "51f: the v3 line is %s", l3.c_str());
+            Vals back; uint64_t kb = 0;
+            CHECK(ParseValue(l3.c_str(), &kb, &back) && back == o3 && kb == 0x1full, "51f: the v3 line does not round-trip");
+            o3.opacity = -1;
+            CHECK(FormatValue(0x1full, o3).find(" v2 2 70 0 -") != std::string::npos, "51f: without an opacity the line must stay v2");
+            // a cab pose after the opacity
+            const std::string l3c = FormatValue(0x1full, back, &cp);
+            Vals b2; CabPose c3; bool hc3 = false;
+            CHECK(ParseValue(l3c.c_str(), &kb, &b2, &c3, &hc3) && hc3 && b2 == back && c3 == cp, "51f: v3 + cab pose does not round-trip");
+            // Session: an applied profile keeps its opacity, an opacity-less one keeps the live value
+            Vals pv = back; pv.opacity = 30;
+            Vals live = back; live.opacity = 80;
+            CHECK(Session::Applied(live, pv).opacity == 30, "51f: Applied lost the profile's opacity");
+            pv.opacity = -1;
+            CHECK(Session::Applied(live, pv).opacity == 80, "51f: Applied must keep the live opacity for a v2 profile");
+            Store ps; Session ss;
+            Vals mine = back; mine.opacity = 30;
+            ps.Put(0x55ull, mine);
+            Session::Out out = ss.Tick(ps, true, true, true, 1, 0x55ull, false, live);
+            CHECK(out.lock == Session::kLockLoaded && out.applyIt && out.apply.opacity == 30, "51f: the lock-on did not hand over the stored opacity");
+            live.opacity = 50;                             // a menu edit
+            out = ss.Tick(ps, true, true, true, 1, 0x55ull, false, live);
+            CHECK(out.nChanged == 1 && ps.Get(0x55ull)->opacity == 50, "51f: an opacity edit did not reach the bound profile");
+        }
         CHECK(!ParseValue("1f 1 2 80 0 0 0 0.3 v2 1 1 1 cab 5 6", &kk, &vv), "a short cab pose was accepted");
         CHECK(ParseValue("1f 1 2 80 0 0 0 0.3 v2 1 1 1 cab 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 1.6", &kk, &vv, &cc2, &h2) && !h2,
               "a cab pose with IndexCount 0 was used");

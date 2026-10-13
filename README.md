@@ -567,6 +567,7 @@ The three green lines under the title show the game's GPU time per frame, what t
     ![The 20 fps colours](docs/images/fps-counter-colours.png)
   - **FPS brightness:** 10 - 100 % in 10 % steps (`fps_brightness`, default 100). Dims the colour toward black (the
     outline stays; `black on white` dims its white outline instead). Flat and VR, live.
+  - **FPS opacity:** 10 - 100 % in 10 % steps (`fps_opacity`, default 100). Fades the whole box, text and outline together. Flat and VR, live.
   - **FPS distance (VR):** how far away the box floats, 0.30 - 3.00 m (`fps_vr_dist` in cm, default 80). It keeps the
     same size in your view at every distance; only the depth changes.
   - **FPS turn / tilt / rotate (VR):** turn the box itself, in 1 degree steps (hold the key to go faster): turn = left / right, tilt = lean it back
@@ -723,6 +724,7 @@ The table below lists the commonly used keys:
 | `fps_vr_lock` | `0` | fps box, VR (v0.10.3): `0` = follows the headset, `1` = fixed in the play space, `fps_vr_dist` from your seat; `fps_vr_x` / `fps_vr_y` are then degrees around you (+ = right / down). It does not follow the cab's sway. `2` = attached to the vehicle (phase 47): placed like `1` when picked, then it moves with the cab (needs DLAA + per-part motion vectors; otherwise it acts like `1`). The menu's `FPS counter lock` row switches it |
 | `fps_color` | `0` | fps box colour (phase 44): `0`..`19` = white, yellow, amber, orange, red, pink, magenta, purple, violet, blue, sky blue, cyan, teal, mint, green, lime, olive, gold, silver, black on white. The menu's `FPS colour` row |
 | `fps_brightness` | `100` | fps box brightness in % (phase 48): `10`..`100`, 100 = the colour as it is, lower dims it toward black. The menu's `FPS brightness` row |
+| `fps_opacity` | `100` | fps box opacity in % (phase 51f): `10`..`100`, 100 = solid, lower fades the text AND its outline together (stored per vehicle in the `fps_profile` lines). The menu's `FPS opacity` row |
 | `fps_vr_dist` | `80` | fps box, VR (phase 44): distance in cm (`30`..`300`), same angular size at every distance. The menu's `FPS distance (VR)` row |
 | `fps_vr_yaw` / `fps_vr_pitch` / `fps_vr_roll` | `0` / `0` / `0` | fps box, VR (phase 44): the box's own turn in degrees: yaw `-90`..`90` (+ = its face turns right), pitch `-90`..`90` (+ = its top leans away), roll `-180`..`180` (+ = clockwise). The menu's `FPS turn` / `FPS tilt` / `FPS rotate` rows (1 degree steps) |
 | `xr_turbo` | `0` | VR: `1` = **Turbo mode** (from OpenXR Toolkit): the game no longer waits for the headset each frame, so it can start the next frame sooner. **It turns off the headset's frame smoothing**: ASW (Meta / Oculus), Motion Smoothing, Motion Reprojection (Windows Mixed Reality) and SSW (Virtual Desktop) cannot work with it. It helps only when the CPU is the limit (busy cities, heavy traffic); when the GPU is the limit it gains nothing. The menu's `Turbo mode (VR)` row switches it live, `Shift+F12` saves |

@@ -18,11 +18,14 @@
 //   v2 (phase 51b): fps_profile = <16 hex digits> x y dist yaw pitch roll scale v2 color brightness text <cab>
 //                   <cab> = "-" (none) or "cab" ic stride fmt a00 a01 a02 a03 a10 .. a13 a20 .. a23 pivotx pivoty pivotz yaw0 fw
 //                   [+ ic stride fmt a00 .. a23]... (phase 51c: the same box in up to 2 more cab parts)
+//   v3 (phase 51f): fps_profile = <16 hex digits> x y dist yaw pitch roll scale v3 color brightness text opacity <cab>
+//                   (v2 + fps_opacity after text; written only when an opacity is stored, else the line stays v2)
 //                   phase 51d: "cabsq" instead of "cab" = the pose is SQUARE TO THE CAB (CabPose::level: its virtual frame was
 //                   turned onto the cab's own axes at the lock, FpsCab CabLevel); "cab" = an older pose built in the play space of
 //                   its lock (levelled once at the next lock-on that has a cab frame, then written back as "cabsq")
 // A v1 line still loads (colour / brightness / text = -1: "not stored" -> the live global values are kept and stored at the next
-// tick); an entry with nothing of v2 is written back as v1. color / brightness / text = -1 in a v2 line = not stored either.
+// tick); an entry with nothing of v2 is written back as v1. color / brightness / text / opacity = -1 in a v2 / v3 line = not stored
+// either (a v2 line has no opacity: -1, the live global value is kept).
 // CAB POSE (phase 51b): the box's placement IN THE CAB, independent of the play space: the play -> model map A (3 x 4 affine
 // rows) of one rigid cab part (identified by IndexCount, VB0 stride, index format: the numbers of the vehicle key) and the
 // LockFrame (pivot, yaw0, fw) the box is built in. Corners = A * BoxPlay(settings, frame) -- the same settings give the same
@@ -89,12 +92,13 @@ struct Vals {
     int yaw = 0, pitch = 0, roll = 0;                    // fps_vr_yaw / _pitch / _roll (degrees)
     float scale = 0.3f;                                  // fps_vr_scale (0.2..3.0)
     int color = -1, bright = -1, text = -1;              // phase 51b: fps_color / fps_brightness / fps_text; -1 = not stored (a v1 line)
+    int opacity = -1;                                    // phase 51f: fps_opacity; -1 = not stored (a v1 / v2 line)
     bool operator==(const Vals& o) const {
         return x == o.x && y == o.y && dist == o.dist && yaw == o.yaw && pitch == o.pitch && roll == o.roll && scale == o.scale &&
-               color == o.color && bright == o.bright && text == o.text;
+               color == o.color && bright == o.bright && text == o.text && opacity == o.opacity;
     }
     bool operator!=(const Vals& o) const { return !(*this == o); }
-    bool HasLook() const { return color >= 0 || bright >= 0 || text >= 0; }
+    bool HasLook() const { return color >= 0 || bright >= 0 || text >= 0 || opacity >= 0; }
 };
 constexpr int kTextModes = 6;                            // fps_text 0..5 (inject.cpp kFpsTextModes)
 inline float ClampF(double v, double lo, double hi, float def) { return v != v ? def : (float)(v < lo ? lo : (v > hi ? hi : v)); }
@@ -110,6 +114,7 @@ inline Vals Clamped(const Vals& v) {                     // the LoadConfig range
     o.color = v.color < 0 ? -1 : FpsPose::ClampColor(v.color);
     o.bright = v.bright < 0 ? -1 : FpsPose::ClampBright(v.bright);
     o.text = v.text < 0 ? -1 : (v.text >= kTextModes ? kTextModes - 1 : v.text);
+    o.opacity = v.opacity < 0 ? -1 : FpsPose::ClampOpacity(v.opacity);
     return o;
 }
 
@@ -209,9 +214,10 @@ inline bool ParseValue(const char* s, uint64_t* key, Vals* v, CabPose* cab = nul
     Vals o;
     skip();
     if (*p && *p != '#' && *p != ';') {                  // phase 51b: the v2 fields
-        if (!word("v2")) return false;
-        double l[3];
-        for (int i = 0; i < 3; ++i) {
+        const bool v3 = word("v3");                      // phase 51f: v3 = v2 + opacity after text
+        if (!v3 && !word("v2")) return false;
+        double l[4] = { -1.0, -1.0, -1.0, -1.0 };
+        for (int i = 0; i < (v3 ? 4 : 3); ++i) {
             char* q = nullptr;
             l[i] = strtod(p, &q);
             if (q == p || l[i] != l[i]) return false;
@@ -220,6 +226,7 @@ inline bool ParseValue(const char* s, uint64_t* key, Vals* v, CabPose* cab = nul
         o.color = l[0] < 0 ? -1 : clampI(l[0]);
         o.bright = l[1] < 0 ? -1 : clampI(l[1]);
         o.text = l[2] < 0 ? -1 : clampI(l[2]);
+        o.opacity = l[3] < 0 ? -1 : clampI(l[3]);
         skip();
         bool sq = false;
         if (word("-")) {
@@ -271,13 +278,14 @@ inline bool ParseValue(const char* s, uint64_t* key, Vals* v, CabPose* cab = nul
     *v = Clamped(o);
     return true;
 }
-// v1 when there is nothing of v2 to write (no colour / brightness / text, no cab pose), else v2
+// v1 when there is nothing of v2 to write (no colour / brightness / text / opacity, no cab pose), else v2 (v3 when an opacity is stored)
 inline std::string FormatValue(uint64_t key, const Vals& v, const CabPose* cab = nullptr) {
     char b[2048];
     int o = snprintf(b, sizeof(b), "%016llx %.2f %.2f %d %d %d %d %.2f", (unsigned long long)key, (double)v.x, (double)v.y, v.dist, v.yaw,
                      v.pitch, v.roll, (double)v.scale);
     if (v.HasLook() || cab) {
-        o += snprintf(b + o, sizeof(b) - (size_t)o, " v2 %d %d %d", v.color, v.bright, v.text);
+        if (v.opacity >= 0) o += snprintf(b + o, sizeof(b) - (size_t)o, " v3 %d %d %d %d", v.color, v.bright, v.text, v.opacity);
+        else                o += snprintf(b + o, sizeof(b) - (size_t)o, " v2 %d %d %d", v.color, v.bright, v.text);
         if (!cab) {
             o += snprintf(b + o, sizeof(b) - (size_t)o, " -");
         } else {
@@ -392,6 +400,7 @@ struct Session {
         o.color = pv.color >= 0 ? pv.color : live.color;
         o.bright = pv.bright >= 0 ? pv.bright : live.bright;
         o.text = pv.text >= 0 ? pv.text : live.text;
+        o.opacity = pv.opacity >= 0 ? pv.opacity : live.opacity;   // phase 51f
         return o;
     }
     void Changed(Out* o, uint64_t k) const {

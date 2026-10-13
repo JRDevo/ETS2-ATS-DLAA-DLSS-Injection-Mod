@@ -111,6 +111,9 @@ bool  DrawWidgetMvp(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint3
 // phase 44 (dlaa.ini fps_color): the fps box's text and outline colours (sRGB bytes). Default white text, RGB 8,8,8 outline (the
 // colours before phase 44). A change rebuilds the box texture once (the cache key includes them).
 void  SetWidgetColors(uint8_t tr, uint8_t tg, uint8_t tb, uint8_t lr, uint8_t lg, uint8_t lb);
+// phase 51f (dlaa.ini fps_opacity): the fps box's alpha factor 0..1 (text AND outline); read by the pixel shader per draw, so a change
+// needs no texture rebuild. Applies to every draw path (flat, VR drawn-in, OpenXR quad layer image, attached to vehicle).
+void  SetWidgetOpacity(float a);
 
 }  // namespace TuningMenu
 

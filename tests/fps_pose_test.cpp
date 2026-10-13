@@ -36,6 +36,11 @@ int main() {
         CHECK(StepColor(19, 1) == 0 && StepColor(0, -1) == 19 && StepColor(5, 1) == 6, "StepColor wraps");
         CHECK(ClampColor(-1) == 0 && ClampColor(25) == 19 && ClampColor(7) == 7, "ClampColor");
     }
+    // ---- opacity (phase 51f)
+    {
+        CHECK(ClampOpacity(0) == 10 && ClampOpacity(5) == 10 && ClampOpacity(55) == 55 && ClampOpacity(500) == 100, "ClampOpacity 10..100");
+        CHECK(StepOpacity(100, 1) == 100 && StepOpacity(100, -1) == 90 && StepOpacity(10, -1) == 10 && StepOpacity(10, 1) == 20, "StepOpacity 10 %% steps, clamped");
+    }
     // ---- brightness (phase 48)
     {
         CHECK(ClampBright(0) == 10 && ClampBright(5) == 10 && ClampBright(55) == 55 && ClampBright(500) == 100, "ClampBright 10..100");

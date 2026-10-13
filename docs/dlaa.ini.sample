@@ -599,11 +599,13 @@ log_level = 1
 # lag. Needs DLAA on with per-part motion vectors (mv_objects = 2, the default); without them, in the outside camera, in
 # menus and while loading it is drawn like 1 until the cab is back. The menu's FPS counter lock row: "Attached to vehicle".
 # Phase 51: with 2 every VEHICLE keeps its own box placement (fps_vr_x, fps_vr_y, fps_vr_dist, fps_vr_yaw, fps_vr_pitch,
-# fps_vr_roll, fps_vr_scale; phase 51b: + fps_color, fps_brightness, fps_text). When the box locks on to a cab it takes that
+# fps_vr_roll, fps_vr_scale; phase 51b: + fps_color, fps_brightness, fps_text; phase 51f: + fps_opacity). When the box locks on to a cab it takes that
 # cab's saved values; a new cab starts from the current values (= the fps_* keys: the default for new vehicles). Your changes
 # in the menu go to the vehicle you sit in and are saved automatically when the menu closes (and at game exit) as one line per
 # vehicle (up to 64):
 #   fps_profile = <vehicle key> x y dist yaw pitch roll scale v2 color brightness text cab <part> <the box's pose in the cab>
+# Phase 51f: with the opacity stored the marker is "v3" and the opacity follows the text number (v2 lines still load; they keep the
+# current fps_opacity).
 # Phase 51b: the line also keeps the box's exact spot IN THE CAB (the "cab" numbers: a cab part's index count + the map
 # into it): every later lock-on of that vehicle puts the box on exactly that spot (no few-pixel shift), also after a headset
 # recentre. It is stored at the first lock-on and replaced only by the menu's "Re-measure cab spot" (Right); a cab part found
@@ -624,6 +626,9 @@ log_level = 1
 # Phase 48: the box's brightness in % (10..100, default 100 = the colour as it is). Dims the text colour toward black (the
 # outline stays; "black on white" dims its white outline). Flat and VR. Menu: FPS brightness.
 # fps_brightness = 100
+# Phase 51f: the box's opacity in % (10..100, default 100 = solid). Fades the WHOLE box, text and its outline together (brightness
+# only dims the text colour, so a dim box keeps a black outline). Flat and VR (drawn in, quad layer, attached). Menu: FPS opacity.
+# fps_opacity = 100
 # Phase 44, VR: the box's distance in cm (30..300, default 80). It keeps the same size in your view at every distance (the
 # VR layer and the fixed box: a real distance; drawn into the picture and following the head: an extra stereo shift on top
 # of menu_vr_depth). Menu: FPS distance (VR).

@@ -1934,6 +1934,19 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   move of 47a8's (and 7b8a's: 0.24 deg, invisible) older pose; that the cab frame is found at each lock-on (`cab frame from N draw(s)`);
   the Reset row with the box attached; Left on Re-measure cab spot.
 
+### Phase 51f: fps box opacity (`fps_opacity` 10..100 %, per vehicle)
+
+- Brightness only darkens the text colour, so a dim box was a black outline blob. `fps_opacity` (default 100, step 10, menu row
+  `FPS opacity` = `MR_FPSOPAC` after `FPS brightness`) scales the alpha of the WHOLE box.
+- One place: the widget pixel shader (`menu.cpp` kMenuPs) returns `texture alpha * Opt.y` for the fps box (`Opt.z = 1`);
+  `DrawCb` sets `Opt.y = g_wOpacity` (`TuningMenu::SetWidgetOpacity`, called from `FpsSyncColor` before every `DrawWidget*`)
+  instead of the panel's 0.88. Every path blends straight alpha: flat / VR drawn-in / attached (SrcAlpha, InvSrcAlpha) and the
+  OpenXR quad layer image (RGBA written as is, the quad layer is `BLEND_TEXTURE_SOURCE_ALPHA | UNPREMULTIPLIED_ALPHA`, xr_hook.cpp),
+  so no premultiplication and no texture rebuild (the cache key is unchanged; the texture stays at full alpha).
+- Profile: line `v3` = v2 + opacity after text (`... v3 color brightness text opacity <cab>`); written only when an opacity is stored
+  (else the line stays v2/v1); v1/v2 lines load with opacity -1 = the live value stays (`Session::Applied`). Reset row and
+  Left on `Re-measure cab spot` set 100.
+
 ### Phase 55: lighting-pass redraws get the G-buffer's jitter (`light_redraw_jitter`, default 1)
 
 - **Report** (ATS 2026-10-13, VR + flat): the sunlight shining through a market tent canopy flickers. With the jitter off (self-test)

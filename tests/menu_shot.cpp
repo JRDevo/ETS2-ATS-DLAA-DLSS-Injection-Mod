@@ -98,6 +98,7 @@ static const E kRows[] = {
     { G_FPSG, false, L"FPS counter size", L"0.3", L"dlaa.ini fps_vr_scale", L"", false, nullptr, nullptr },
     { G_FPSG, false, L"FPS colour", L"white", L"dlaa.ini fps_color", L"", false, nullptr, nullptr },
     { G_FPSG, false, L"FPS brightness", L"100 %", L"dlaa.ini fps_brightness", L"", false, nullptr, nullptr },
+    { G_FPSG, false, L"FPS opacity", L"100 %", L"dlaa.ini fps_opacity", L"", false, nullptr, nullptr },   // phase 51f
     { G_FPSG, false, L"FPS distance (VR)", L"0.80 m", L"dlaa.ini fps_vr_dist", L"", false, nullptr, nullptr },
     { -1, false, L"Logging", L"errors", L"dlaa.ini log_level", L"<c>0.01</> | -", false, nullptr, nullptr },
     { -1, false, L"Hotkeys...", L"28 actions", L"Right: open", L"", false, nullptr, nullptr },   // v0.12.1 phase 50

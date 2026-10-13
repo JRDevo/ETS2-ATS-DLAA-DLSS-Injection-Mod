@@ -62,7 +62,8 @@ VOut VSCab(uint id : SV_VertexID) {
 // kMenuVs-END
 
 // Panel texel (linear sampler) -> rgb; Opt.z = 0 (panel): alpha = max(opacity, luminance) so the text is opaque, the
-// background 88 %. Opt.z = 1 (the fps box, outlined text): alpha = the texture's alpha as it is (the black background has 0).
+// background 88 %. Opt.z = 1 (the fps box, outlined text): alpha = the texture's alpha (the black background has 0) * Opt.y
+// (phase 51f: fps_opacity -- text AND outline fade together; every path blends straight alpha, so this one place is enough).
 // kMenuPs-BEGIN (the build validates this block with fxc, ps_5_0 / PSMain)
 const char kMenuPs[] = R"(
 cbuffer MenuCb : register(b0) {
@@ -75,7 +76,7 @@ float4 PSMain(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
     const float4 t = PanelTex.Sample(Lin, uv);
     float3 c = t.rgb;
     const float lum = dot(c, float3(0.2126, 0.7152, 0.0722));
-    const float a = (Opt.z > 0.5) ? t.a : max(Opt.y, lum);
+    const float a = (Opt.z > 0.5) ? t.a * Opt.y : max(Opt.y, lum);
     if (Opt.x > 0.5) c = pow(max(c, 0.0), 2.2);
     if (Opt.x > 1.5) {
         const float3x3 toBt2020 = float3x3(0.6274, 0.3293, 0.0433,
@@ -127,6 +128,7 @@ bool                             g_wHave = false;
 // phase 44 (dlaa.ini fps_color): the text / outline colours of the fps box (SetWidgetColors) and those of the cached texture
 COLORREF                         g_wText = RGB(255, 255, 255), g_wLine = RGB(8, 8, 8);
 COLORREF                         g_wLastText = 0, g_wLastLine = 0;
+float                            g_wOpacity = 1.0f;   // phase 51f (fps_opacity): the box's alpha factor, applied by the shader (no rebuild)
 std::vector<uint32_t>            g_wPixels;
 
 constexpr UINT kInst = 256;
@@ -705,7 +707,7 @@ void DrawCb(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW,
     const bool overlay = (outMode & TuningMenu::kOutOverlay) != 0;   // v0.10.3 phase 29: blend off, RGBA written
     outMode &= ~TuningMenu::kOutOverlay;
     cb.opt[0] = (float)(outMode < TuningMenu::kOutRaw ? TuningMenu::kOutRaw : (outMode > TuningMenu::kOutPq ? TuningMenu::kOutPq : outMode));
-    cb.opt[1] = 0.88f;
+    cb.opt[1] = textureAlpha ? g_wOpacity : 0.88f;           // panel: its 88 % background; fps box: fps_opacity (phase 51f)
     cb.opt[2] = textureAlpha ? 1.0f : 0.0f;                  // 1 = the fps box: alpha comes from the texture
     ctx->UpdateSubresource(g_cb.Get(), 0, nullptr, &cb, 0, 0);
     SaveState(ctx, vsCab != nullptr);
@@ -895,6 +897,8 @@ void SetWidgetColors(uint8_t tr, uint8_t tg, uint8_t tb, uint8_t lr, uint8_t lg,
     g_wText = RGB(tr, tg, tb);                               // the cache compares them (EnsureWidgetTexture): a change rebuilds once
     g_wLine = RGB(lr, lg, lb);
 }
+
+void SetWidgetOpacity(float a) { g_wOpacity = a < 0.0f ? 0.0f : (a > 1.0f ? 1.0f : a); }
 
 void ReleaseWidget() {
     DropWidget();

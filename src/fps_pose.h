@@ -63,6 +63,13 @@ inline Color Dimmed(const Color& c, int pct) {
     return o;
 }
 
+// ---- opacity (fps_opacity 10..100 %, phase 51f) --------------------------------------------------------------------------
+// The WHOLE box (glyphs AND outline) fades: the widget texture's alpha * pct / 100 (menu.cpp: the pixel shader's Opt.y), in every
+// draw path (all of them blend with that alpha; the OpenXR quad layer is UNPREMULTIPLIED + texture-source-alpha). 100 = as drawn.
+constexpr int kOpacityMin = 10, kOpacityMax = 100, kOpacityDefault = 100, kOpacityStep = 10;
+inline int ClampOpacity(long long v) { return v < kOpacityMin ? kOpacityMin : (v > kOpacityMax ? kOpacityMax : (int)v); }
+inline int StepOpacity(int cur, int dir) { return ClampOpacity((long long)cur + (long long)kOpacityStep * dir); }
+
 // ---- ini ranges --------------------------------------------------------------------------------------------------------
 constexpr int kDistMin = 30, kDistMax = 300, kDistDefault = 80;   // fps_vr_dist, cm (80 = the phase 28 0.8 m)
 constexpr int kYawMax = 90, kPitchMax = 90, kRollMax = 180;       // degrees, symmetric

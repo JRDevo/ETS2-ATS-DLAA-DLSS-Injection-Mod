@@ -926,6 +926,7 @@ int      g_fpsVrLock = 0;
 // its normal facing; FpsPose::TurnQuat). The menu's FPS colour / distance / turn / tilt / rotate rows; saved with the fps_* keys.
 int      g_fpsColor = 0;
 int      g_fpsBright = FpsPose::kBrightDefault;   // phase 48: dlaa.ini fps_brightness 10..100 % (the colour * pct / 100)
+int      g_fpsOpacity = FpsPose::kOpacityDefault; // phase 51f: dlaa.ini fps_opacity 10..100 % (the whole box's alpha: text AND outline)
 int      g_fpsVrDist = FpsPose::kDistDefault;
 int      g_fpsVrYaw = 0, g_fpsVrPitch = 0, g_fpsVrRoll = 0;
 // phase 51b: dlaa.ini fps_profiles -- 1 = the attached box's placement / colour / brightness / text PER VEHICLE (fps_profile lines,
@@ -3057,6 +3058,7 @@ void SaveSettings(uint64_t n) {
         snprintf(add("fps_vr_lock"), sizeof(kv[0].val), "%d", g_fpsVrLock);   // v0.10.3 phase 28
         snprintf(add("fps_color"), sizeof(kv[0].val), "%d", g_fpsColor);      // phase 44
         snprintf(add("fps_brightness"), sizeof(kv[0].val), "%d", g_fpsBright);   // phase 48
+        snprintf(add("fps_opacity"), sizeof(kv[0].val), "%d", g_fpsOpacity);     // phase 51f
         snprintf(add("fps_vr_dist"), sizeof(kv[0].val), "%d", g_fpsVrDist);
         snprintf(add("fps_vr_yaw"), sizeof(kv[0].val), "%d", g_fpsVrYaw);
         snprintf(add("fps_vr_pitch"), sizeof(kv[0].val), "%d", g_fpsVrPitch);
@@ -3111,12 +3113,12 @@ void SaveSettings(uint64_t n) {
         snprintf(menuW, sizeof(menuW), " -- menu panel: menu_x=%d menu_y=%d menu_scale=%.1f menu_vr_x=%d menu_vr_y=%d menu_vr_scale=%.1f "
                  "menu_vr_depth=%d menu_vr_dist=%d menu_vr_face=%d", g_menuX, g_menuY, (double)g_menuScale, g_menuVrX, g_menuVrY,
                  (double)g_menuVrScale, g_menuVrDepth, g_menuVrDist, g_menuVrFace);
-    char fpsW[384] = "";                                  // (phase 44: was 160, + fps_color / fps_vr_dist / the turn; 51b: 352 -> 384)
+    char fpsW[416] = "";                                  // (phase 44: was 160, + fps_color / fps_vr_dist / the turn; 51b: 352 -> 384)
     if (g_fpsExplicit)
         snprintf(fpsW, sizeof(fpsW), " -- fps box: fps_show=%d fps_text=%d fps_x=%d fps_y=%d fps_scale=%.1f fps_vr_x=%.1f fps_vr_y=%.1f fps_vr_scale=%.1f "
-                 "fps_vr_lock=%d fps_color=%d (%ls) fps_brightness=%d fps_vr_dist=%d fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d fps_profiles=%d", g_fpsShow ? 1 : 0,
+                 "fps_vr_lock=%d fps_color=%d (%ls) fps_brightness=%d fps_opacity=%d fps_vr_dist=%d fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d fps_profiles=%d", g_fpsShow ? 1 : 0,
                  g_fpsText, g_fpsX, g_fpsY, (double)g_fpsScale, (double)g_fpsVrX, (double)g_fpsVrY, (double)g_fpsVrScale, g_fpsVrLock, g_fpsColor,
-                 FpsPose::ColorOf(g_fpsColor).name, g_fpsBright, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll, g_fpsProfiles);
+                 FpsPose::ColorOf(g_fpsColor).name, g_fpsBright, g_fpsOpacity, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll, g_fpsProfiles);
     char notW[128];
     snprintf(notW, sizeof(notW), "%s%s%s%s%s", g_profExplicit[PK_PRESET] ? "" : " dlss_preset", g_profExplicit[PK_AREA] ? "" : " dlaa_area",
              g_profExplicit[PK_MIRROR_DLAA] ? "" : " mirror_dlaa", mirVrW ? "" : " mirror_vr_mode", mirFlatW ? "" : " mirror_flat_mode");
@@ -16012,6 +16014,7 @@ enum MenuRowId {
     MR_FPSSIZE,
     MR_FPSCOLOR,                                          // phase 44: fps box colour (dlaa.ini fps_color)
     MR_FPSBRIGHT,                                         // phase 48: fps box brightness (dlaa.ini fps_brightness)
+    MR_FPSOPAC,                                           // phase 51f: fps box opacity (dlaa.ini fps_opacity)
     MR_FPSDIST,                                           // phase 44: VR distance (dlaa.ini fps_vr_dist)
     MR_LOG,                                               // phase 39: Logging (dlaa.ini log_level) + what logging costs
     MR_HOTKEYS,                                           // v0.12.1 phase 50: "Hotkeys..." -- Right opens the Hotkeys page
@@ -16044,7 +16047,7 @@ static_assert(MR_SHARP < MR_WIDTH && MR_WIDTH < MR_LOD && MR_LOD < MR_LODCUT && 
               MR_REFLEX < MR_FPSCAP && MR_FPSCAP < MR_VRFPSCAP && MR_VRFPSCAP < MR_CPU &&
               MR_POSX < MR_POSY && MR_POSY < MR_SIZE && MR_SIZE < MR_DEPTH && MR_DEPTH < MR_FACE && MR_FACE < MR_MENUKEYS &&
               MR_FPSLOCK < MR_FPSPROF && MR_FPSPROF < MR_FPSREMEAS && MR_FPSREMEAS < MR_FPSX && MR_FPSX < MR_FPSY && MR_FPSY < MR_FPSYAW && MR_FPSYAW < MR_FPSPITCH && MR_FPSPITCH < MR_FPSROLL &&
-              MR_FPSROLL < MR_FPSSIZE && MR_FPSSIZE < MR_FPSCOLOR && MR_FPSCOLOR < MR_FPSBRIGHT && MR_FPSBRIGHT < MR_FPSDIST,
+              MR_FPSROLL < MR_FPSSIZE && MR_FPSSIZE < MR_FPSCOLOR && MR_FPSCOLOR < MR_FPSBRIGHT && MR_FPSBRIGHT < MR_FPSOPAC && MR_FPSOPAC < MR_FPSDIST,
               "tuning menu: group children out of order");
 const wchar_t* const kMenuDesc[] = {
     // v0.10.0: every row = what it does, when a player would change it, what it costs. The panel shows 3 lines of about 105
@@ -16168,6 +16171,9 @@ const wchar_t* const kMenuDesc[] = {
     L"white outline). Flat and VR. No cost.",
     L"How bright the fps box is, 10 - 100 %: 100 = the colour as it is, lower dims the text (the outline stays) toward black. Use it "
     L"to tone the counter down at night or in the headset. Flat and VR. No cost.",
+    // phase 51f (MR_FPSOPAC)
+    L"How see-through the whole fps box is, 10 - 100 %: 100 = solid, lower fades the text AND its black outline together, so a "
+    L"dimmed box does not turn into a black blob. Flat and VR. No cost.",
     L"VR only, so greyed in flat. How far away the fps box floats, 0.30 - 3.00 m. It keeps the same size in your view at every "
     L"distance; only the depth changes. Put it near the depth you look at to read it without refocusing. No cost.",
     // phase 39 (MR_LOG)
@@ -16216,6 +16222,7 @@ float g_fpsVrBuild  = 0.0f;                               // VR: fps box scale o
 inline void FpsSyncColor() {
     const FpsPose::Color c = FpsPose::Dimmed(FpsPose::ColorOf(g_fpsColor), g_fpsBright);   // phase 48: + brightness (the widget cache compares the colours)
     TuningMenu::SetWidgetColors(c.tr, c.tg, c.tb, c.lr, c.lg, c.lb);
+    TuningMenu::SetWidgetOpacity((float)FpsPose::ClampOpacity(g_fpsOpacity) / 100.0f);   // phase 51f: text AND outline (the shader's alpha factor)
 }
 bool  g_fpsMoved    = false;                              // an fps box row changed since the menu was opened (close line)
 
@@ -16678,6 +16685,7 @@ void ResetSettings(uint64_t n) {
     g_fpsVrLock = 0;                                      // v0.10.3 phase 28: follows the headset again
     g_fpsColor = 0;                                       // phase 44: white, 0.8 m, not turned
     g_fpsBright = FpsPose::kBrightDefault;                // phase 48
+    g_fpsOpacity = FpsPose::kOpacityDefault;              // phase 51f
     g_fpsVrDist = FpsPose::kDistDefault;
     g_fpsVrYaw = g_fpsVrPitch = g_fpsVrRoll = 0;
     g_fpsProfiles = 1;                                    // phase 51b: per vehicle (the fps_profile lines stay in dlaa.ini)
@@ -16729,6 +16737,7 @@ void ResetSettings(uint64_t n) {
         "fps_show", "fps_text", "fps_x", "fps_y", "fps_scale", "fps_vr_x", "fps_vr_y", "fps_vr_scale", "fps_vr_lock",   // phase 28: + fps_vr_lock
         "fps_color", "fps_vr_dist", "fps_vr_yaw", "fps_vr_pitch", "fps_vr_roll",                        // phase 44
         "fps_brightness",                                                                               // phase 48
+        "fps_opacity",                                                                                  // phase 51f
         "xr_turbo",                                                                                     // phase 30
         "reflex", "fps_cap", "vr_fps_cap",                                                              // phase 52
         "vrs", "vrs_inner", "vrs_outer",                                                                // phase 34
@@ -16753,7 +16762,7 @@ void ResetSettings(uint64_t n) {
             "perf_profile = high mv_fwd_depth = 1 menu_x = 2 menu_y = 8 "
             "menu_scale = 1.0 menu_vr_x = 0 menu_vr_y = -5 menu_vr_scale = 1.0 menu_vr_depth = 12 menu_vr_dist = 100 menu_vr_face = 1 "
             "fps_show = 0 fps_text = 0 "
-            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 fps_profiles = 1 xr_turbo = 0 reflex = 0 fps_cap = 0 vr_fps_cap = 0 cpu_pcore = 0 cpu_priority = 0 cpu_no_throttle = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 xr_hidden_mask = 0 dlss_bias_mask = 100 log_level = %d (%s) -- profile: %s -- "
+            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_opacity = 100 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 fps_profiles = 1 xr_turbo = 0 reflex = 0 fps_cap = 0 vr_fps_cap = 0 cpu_pcore = 0 cpu_priority = 0 cpu_no_throttle = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 xr_hidden_mask = 0 dlss_bias_mask = 100 log_level = %d (%s) -- profile: %s -- "
             "dlaa.ini: %d keys removed (hotkeys and other lines kept)", (unsigned long long)n, g_dlaaOn.load() ? "DLSS" : "off",
             (double)kFpsVrScaleDefault, LogLevel(), g_logDebugKey ? "no key: debug = 1 in dlaa.ini" : "no key", changed, kNKeys);
         BeepSeq b;                                        // success: rising two-tone 600 -> 900 Hz, 120 ms each (as SaveSettings)
@@ -18296,6 +18305,8 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     swprintf(p.rows[MR_FPSCOLOR].value, kV, L"%ls", FpsPose::ColorOf(g_fpsColor).name);
     MenuRow(p, MR_FPSBRIGHT, L"FPS brightness", "dlaa.ini fps_brightness", nullptr, false);   // phase 48
     swprintf(p.rows[MR_FPSBRIGHT].value, kV, L"%d %%", g_fpsBright);
+    MenuRow(p, MR_FPSOPAC, L"FPS opacity", "dlaa.ini fps_opacity", nullptr, false);   // phase 51f
+    swprintf(p.rows[MR_FPSOPAC].value, kV, L"%d %%", g_fpsOpacity);
     MenuRow(p, MR_FPSDIST, L"FPS distance (VR)", "dlaa.ini fps_vr_dist", vr ? nullptr : "VR only", !vr);
     swprintf(p.rows[MR_FPSDIST].value, kV, L"%.2f m", (double)g_fpsVrDist / 100.0);
     snprintf(k, sizeof(k), "%s: open", snRight);          // v0.12.1 phase 50: the Hotkeys page
@@ -18516,6 +18527,11 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
         g_fpsBright = FpsPose::StepBright(g_fpsBright, dir);
         g_fpsExplicit = g_fpsMoved = true;
         Log("fps box brightness: %d %% (fps_brightness, tuning menu, Present #%llu)", g_fpsBright, (unsigned long long)n);
+        break;
+    case MR_FPSOPAC:                                        // phase 51f: 10 % steps, live (text AND outline fade together)
+        g_fpsOpacity = FpsPose::StepOpacity(g_fpsOpacity, dir);
+        g_fpsExplicit = g_fpsMoved = true;
+        Log("fps box opacity: %d %% (fps_opacity, tuning menu, Present #%llu)", g_fpsOpacity, (unsigned long long)n);
         break;
     case MR_FPSDIST:                                        // phase 44: 5 cm steps (also flat: kept for VR; the row is greyed)
         g_fpsVrDist = FpsPose::ClampI(g_fpsVrDist + 5 * dir, FpsPose::kDistMin, FpsPose::kDistMax);
@@ -19010,6 +19026,7 @@ FpsProfile::Vals FpsProfLive() {
     v.x = g_fpsVrX; v.y = g_fpsVrY; v.dist = g_fpsVrDist; v.yaw = g_fpsVrYaw; v.pitch = g_fpsVrPitch; v.roll = g_fpsVrRoll;
     v.scale = g_fpsVrScale;
     v.color = g_fpsColor; v.bright = g_fpsBright; v.text = g_fpsText;   // phase 51b
+    v.opacity = g_fpsOpacity;                                           // phase 51f
     return v;
 }
 // phase 51b: colour / brightness / text only when the profile has them (a v1 line: -1 = keep the live global values)
@@ -19018,15 +19035,17 @@ void FpsProfApply(const FpsProfile::Vals& v) {
     g_fpsVrScale = v.scale;
     if (v.color >= 0) g_fpsColor = v.color;
     if (v.bright >= 0) g_fpsBright = v.bright;
+    if (v.opacity >= 0) g_fpsOpacity = v.opacity;         // phase 51f (a v1 / v2 line has none: the live value stays)
     if (v.text >= 0 && v.text != g_fpsText) { g_fpsText = v.text; FpsSetLines(); }   // (the box texture rebuilds on the new text)
 }
 const char* FpsProfStr(const FpsProfile::Vals& v, char* b, size_t n) {
-    char c[24], br[16], t[16];
+    char c[24], br[16], t[16], op[16];
     if (v.color >= 0) snprintf(c, sizeof(c), "%d", v.color); else snprintf(c, sizeof(c), "(global)");
     if (v.bright >= 0) snprintf(br, sizeof(br), "%d", v.bright); else snprintf(br, sizeof(br), "(global)");
     if (v.text >= 0) snprintf(t, sizeof(t), "%d", v.text); else snprintf(t, sizeof(t), "(global)");
+    if (v.opacity >= 0) snprintf(op, sizeof(op), "%d", v.opacity); else snprintf(op, sizeof(op), "(global)");
     snprintf(b, n, "fps_vr_x=%.2f fps_vr_y=%.2f fps_vr_dist=%d fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d fps_vr_scale=%.2f fps_color=%s "
-             "fps_brightness=%s fps_text=%s", (double)v.x, (double)v.y, v.dist, v.yaw, v.pitch, v.roll, (double)v.scale, c, br, t);
+             "fps_brightness=%s fps_text=%s fps_opacity=%s", (double)v.x, (double)v.y, v.dist, v.yaw, v.pitch, v.roll, (double)v.scale, c, br, t, op);
     return b;
 }
 void FpsProfMarkDirty(uint64_t key) {
@@ -19226,14 +19245,15 @@ void FpsBoxDefaults(uint64_t n) {
     g_fpsVrYaw = g_fpsVrPitch = g_fpsVrRoll = 0;
     g_fpsColor = 0;
     g_fpsBright = FpsPose::kBrightDefault;
+    g_fpsOpacity = FpsPose::kOpacityDefault;              // phase 51f
     if (g_fpsText != 0) { g_fpsText = 0; FpsSetLines(); }
     g_fpsExplicit = g_fpsMoved = true;
     g_fpsBoxDefaulted = true;
     Log("fps box: this vehicle's box back to the defaults (tuning menu Left on Re-measure cab spot, Present #%llu; vehicle %016llx%s) -- "
-        "fps_vr_x 0 fps_vr_y -25 fps_vr_dist %d fps_vr_scale %.1f no turn, colour white, brightness %d %%, text fps + ms; the cab pose kept",
+        "fps_vr_x 0 fps_vr_y -25 fps_vr_dist %d fps_vr_scale %.1f no turn, colour white, brightness %d %%, opacity %d %%, text fps + ms; the cab pose kept",
         (unsigned long long)n, (unsigned long long)(g_fpsProfSess.nBound ? g_fpsProfSess.bound[0] : 0ull),
         g_fpsProfSess.nBound ? "" : " = none bound: the live values only", FpsPose::kDistDefault, (double)kFpsVrScaleDefault,
-        FpsPose::kBrightDefault);
+        FpsPose::kBrightDefault, FpsPose::kOpacityDefault);
     PlayTones(1, 900, 120, 0);
 }
 // phase 51b: the menu's Position per vehicle row. Off -> On: the current vehicle is bound at the next tick (its profile loaded and
@@ -21671,6 +21691,7 @@ void LoadConfig() {
             // phase 44: the fps box colour / VR distance / VR turn (outside the else-if chain: C1061)
             if (!strcmp(key, "fps_color"))          { g_fpsColor = FpsPose::ClampColor(v); continue; }
             if (!strcmp(key, "fps_brightness"))     { g_fpsBright = FpsPose::ClampBright(v); continue; }   // phase 48
+            if (!strcmp(key, "fps_opacity"))        { g_fpsOpacity = FpsPose::ClampOpacity(v); continue; }   // phase 51f
             if (!strcmp(key, "fps_vr_dist"))        { g_fpsVrDist = FpsPose::ClampI(v, FpsPose::kDistMin, FpsPose::kDistMax); continue; }
             if (!strcmp(key, "fps_vr_yaw"))         { g_fpsVrYaw = FpsPose::ClampI(v, -FpsPose::kYawMax, FpsPose::kYawMax); continue; }
             if (!strcmp(key, "fps_vr_pitch"))       { g_fpsVrPitch = FpsPose::ClampI(v, -FpsPose::kPitchMax, FpsPose::kPitchMax); continue; }
@@ -22146,14 +22167,14 @@ void LoadConfig() {
                         "(menu_vr_depth / menu_vr_face; menu_vr_dist unused)",
         g_bindHoldMs);
     Log("fps box (v0.10.0): fps_show=%d (%s), fps_text=%d (0 fps + ms, 1 fps only, 2 ms only), flat fps_x=%d fps_y=%d fps_scale=%.1f, VR fps_vr_x=%.1f fps_vr_y=%.1f fps_vr_scale=%.1f "
-        "fps_vr_lock=%d (%s); phase 44: fps_color=%d (%ls) fps_brightness=%d %% fps_vr_dist=%d cm fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d deg; phase 51b: "
+        "fps_vr_lock=%d (%s); phase 44: fps_color=%d (%ls) fps_brightness=%d %% fps_opacity=%d %% fps_vr_dist=%d cm fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d deg; phase 51b: "
         "fps_profiles=%d (%s) (the tuning menu's FPS counter rows change them)", g_fpsShow ? 1 : 0,
         g_fpsShow ? "on: shown also while the menu is closed" : "off", g_fpsText, g_fpsX, g_fpsY, (double)g_fpsScale, (double)g_fpsVrX, (double)g_fpsVrY,
         (double)g_fpsVrScale, g_fpsVrLock, g_fpsVrLock == 2 ? "VR: ATTACHED TO THE VEHICLE (phase 47: drawn in, placed from a cab "
                                                          "draw's MVP on the GPU), fps_vr_x / fps_vr_y = yaw / pitch degrees at "
                                                          "fps_vr_dist at the lock-on" : g_fpsVrLock ? "VR: fixed in the play space, "
                                                          "fps_vr_x / fps_vr_y = yaw / pitch degrees at fps_vr_dist" : "VR: follows the headset",
-        g_fpsColor, FpsPose::ColorOf(g_fpsColor).name, g_fpsBright, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll, g_fpsProfiles,
+        g_fpsColor, FpsPose::ColorOf(g_fpsColor).name, g_fpsBright, g_fpsOpacity, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll, g_fpsProfiles,
         g_fpsProfiles ? "attached box: placement, colour, brightness and text per vehicle" : "one shared placement for every vehicle");
     FpsSetLines();                                        // fps_text applies to the box's lines from the start
     // v0.10.0 phase 6b: the vote participation of instanced / no-MVP draws follows mv_drawid_instanced (default 1, even when the
