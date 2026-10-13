@@ -1079,12 +1079,6 @@ The mod has its own capture keys. They need `log_level = 4`.
 5. Zip `dlaa_selftest\` and `dlaa_snap\` and attach them with the log and `dlaa.ini`. Say what to look
    at (a pole on the left, the shop window, the trailer's plate) and where / when you were.
 
-**RenderDoc** is not needed for a report, and it does not help here: DLSS refuses to run under
-RenderDoc, so a capture holds the game's own frame only, none of the mod's work. The keys above
-replace it. RenderDoc is useful to study how the **game** draws a frame (that is how
-[`docs/CAPTURE_FINDINGS.md`](docs/CAPTURE_FINDINGS.md) was written); if you do that and find
-something, open a discussion.
-
 ### 3. Code
 
 - Build: see [Build from source](#build-from-source). The internals, every phase and why it was
