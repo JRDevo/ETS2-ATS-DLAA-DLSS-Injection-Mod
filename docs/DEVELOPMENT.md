@@ -1748,6 +1748,189 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   `mirror view detected: ... 256x512` (ETS2) / `512x256` (ATS) instead of 512x1024 / 1024x512; check the mirror picture and the
   `mirror units @blit` cost. Views below `mirror_min_px` (128) are left to the game.
 
+### Phase 51: per-vehicle fps box profiles (fps_vr_lock = 2) + number-only fps text
+
+- **Vehicle key** (`src/fps_profile.h` `VehicleKey`, computed in `FpsCab` `ProcessLock` from the lock-on readback): the 3
+  biggest cabin-layer draws of both eyes' candidate lists (Gather: up to 16 per eye, all of them -- camera-relative and
+  remembered moving parts included, they are still the cab's geometry), each as (IndexCount, VB0 stride, index format),
+  deduplicated, put in a canonical order (IndexCount desc, stride, format) and hashed. No buffer / shader pointers (new every
+  run) and no start index / base vertex (offsets into the game's buffers; phase 47e had to fall back to IndexCount-only
+  matching because a part's keys changed mid-session). The order of the draws and which part became the anchor do not matter.
+  `DrawIdRecord::VbStride` / `IbFormat` added for it (two UINTs per recorded draw).
+- **Risk:** the 3 biggest cab draws must be the same set at every lock-on: a big part culled at the lock-on (head turned far
+  away) or another LOD gives another key (= another profile that starts from the current values). Two vehicles whose 3 biggest
+  cab meshes have the same index counts share a profile. A 47e same-cab re-lock (`LockSameCab`) whose key differs is made an
+  ALIAS of the bound vehicle (both keys get the edits), so a second key of one cab follows the first.
+- **Runtime** (`inject.cpp` `FpsProfileTick`, Present thread after `MenuKeys`): a new lock (`FpsCab::LockCount` changed) with a
+  key: a stored profile is applied to the live `fps_vr_*` values (log `fps profile: vehicle K -> loaded`), else the live values
+  become its start (`-> new`). While mode 2 is active, any change of the 7 values goes into the bound vehicle (+ aliases).
+  Mode 0 / 1 unbinds (their edits never reach a profile). The Reset row switches the box off and mode 0: profiles untouched.
+- **Persistence:** `fps_profile = <16 hex> x y dist yaw pitch roll scale`, up to 64 (least recently used dropped, its line
+  removed). Written when the tuning menu closes and at process exit / DLL unload (`OnProcessDetach`), only when something
+  changed, by `FpsProfile::Rewrite` (lines of stored keys replaced in place with their own terminator, a later duplicate
+  dropped, every other byte kept, new keys appended) through `WriteIniAtomic` (dlaa.ini.tmp + MoveFileExW, shared with
+  `WriteIniPreserving` now). Read by `LoadConfig` (malformed / duplicate lines ignored and kept on disk). The Save row does not
+  write them; the global `fps_vr_*` keys stay the default for new vehicles.
+- **fps_text 3..5:** the same as 0..2 without the units ("72" + "13.9", "72", "13.9"); the FPS counter row now has 7 values
+  (`Off`, `72 fps + 13.9 ms`, `72 fps`, `13.9 ms`, `72 + 13.9`, `72`, `13.9`). The single-line modes use RenderWidget's
+  one-line big-font path.
+- **Test:** `tests/fps_cab_test.cpp` Part P (key order / duplicates / small parts / other mesh, stride, format; line round trip,
+  clamps, malformed; store LRU; the CRLF / LF / new-file rewrite byte for byte) and Part B (every lock has a key; truck A != B;
+  A after a Reset, after the 47e key change and when coming back = the same key).
+- **Not verified:** in game -- whether the key really is the same at every lock-on of the same truck / after a restart (the log
+  line `vehicle key ... from the 3 biggest cab draw(s)` lists the index counts), the save at menu close / exit.
+
+### Phase 51b: the attached box on the SAME cab spot at every lock-on, look per vehicle, fps_profiles switch
+
+- **Root cause of the few-pixel shift** (ATS VR test 2026-10-13 13:41-13:52): mode 2 built the box in the play space and mapped
+  it into the cab with `PlayToModel` from ONE lock readback, with the `XrHook::LatestViews` poses (the newest locate corrected
+  by the located -> submitted correction C). C changes by 0 .. 1.1 deg from frame to frame (`OpenXR hook pose diag` lines), and
+  the parked-cab monitor showed a steady offset of the box against its lock spot ("max 1.5 cm, rms 1.4 cm, largest change
+  0.1 cm"): each lock-on landed a few mm .. 1.5 cm elsewhere. The play-space origin (the headset recentre) moved it too.
+- **Cab pose** (`FpsProfile::CabPose`; `fps_cab.h` `CabCorners` / `RefMapFromCab`): the play -> part-model map A (3 x 4) of one
+  rigid cab part (IndexCount + VB0 stride + index format) + the LockFrame. Corners = A BoxPlay(settings). Storing the MAP (not
+  4 corners) keeps edits continuous (the rows move the box in the same virtual play space) and gives the same corners for the
+  same settings bit for bit. At a lock-on `ProcessLock` asks the provider (`SetCabPoseProvider`: inject.cpp `FpsProfCabPose`)
+  for the vehicle key's pose; when its part is one of the lock's rigid entries, A_ref = T_j^-1 A_j (T_j = the lock's
+  reference -> part j transform, exact for a rigid pair): no pose of the lock-on frame is involved (`kPlacedCab`). Part
+  missing (LOD / mod) = the play-space path below, the stored pose kept. Stored at the first lock-on of a vehicle (none yet /
+  a v1 line) and replaced only when a PLACEMENT row (x, y, dist, yaw, pitch, roll, scale) is edited while bound
+  (`FpsProfileTick`; `CurrentCabPose` = the stored pose verbatim when the lock was placed from it).
+- **Averaged play-space lock** (first lock-on of a vehicle, part missing, the shared mode): `kLockSamplesDefault` = 12 lock
+  readbacks (both eyes each) of the same reference part, `AverageMaps`: each map's box-corner images vs the per-coordinate
+  median; a map further than max(3 x the median distance, 2 mm) is dropped (a pose glitch); the rest averaged and the linear
+  part re-orthogonalised (Gram-Schmidt, the maps' mean column length). 12 .. ~36 frames longer to lock on; no extra GPU work
+  (the same staging readbacks, one in flight). A 47e same-cab re-lock still carries the previous map (`kPlacedSameCab`).
+- **Threads:** Present (FpsProfileTick, the menu, FpsCabSync / Latch) runs on the game MAIN thread, the blits / draws / lock
+  readbacks on the RENDER thread. FpsCab: one CRITICAL_SECTION around every public call (the whole state). The profile store:
+  an SRW lock in inject.cpp, copy in / out only (FpsProfPut / PutCab / Get / Peek / CabOf / Copy), never around the file write
+  (the store is copied, then written); lock order FpsCab -> profile (inject.cpp never calls FpsCab under the profile lock).
+- **Look per vehicle:** `fps_color`, `fps_brightness`, `fps_text` are in the profile (`fps_show` stays global).
+- **Line v2:** `<key> x y dist yaw pitch roll scale v2 color brightness text (- | cab ic stride fmt a00..a23 pivot(3) yaw0 fw)`,
+  17 significant digits. v1 lines load (look = -1 = "not stored": the live values are kept and stored at the next tick); an
+  untouched entry without look / cab pose is written back as v1. `LoadConfig`'s line buffer 256 -> 1024 (a v2 line is ~300).
+- **`fps_profiles`** (default 1; menu row "Position per vehicle" right after "FPS counter lock", greyed "VR attached only" unless
+  VR + mode 2): 0 = no profile load / save / cab pose (the provider answers none), the fps_profile lines untouched. Off -> On
+  re-handles the held lock (its profile loaded or a new one; `PlaceFromCab` re-places it from a stored pose); On -> Off saves the
+  pending changes once and keeps the live values as the shared ones. Save writes it, Reset removes it (= 1). `kMaxRows` 50 -> 52.
+- **Logs (level 3, one line per lock-on):** `fps profile: vehicle K -> placed from the stored cab pose (part IC N)` /
+  `-> placed from the play space (averaged over n lock readbacks, m kept, spread x mm; no stored cab pose -- this lock's is
+  stored now | the stored cab pose's part IC N is not among this lock's rigid cab parts -- the stored pose is kept)`; the
+  `LOCKED ON` line names the source too.
+- **Roll -2 vs 0 in the 13:41-13:52 log:** not a bug -- the user set roll 0 (and x / y / dist) at 13:47:17-21, saved 13:47:29.
+- **Test:** `fps_cab_test` Part P2 (cab pose -> corners = the lock path; through the line exactly; a 1.5 deg / 1 cm pose
+  error: stored pose 1e-14, the lock's own map 9 cm; AverageMaps drops an 8-deg outlier; v1 back-compat, v2 clamps /
+  malformed) and Part C (WARP runtime: lock 1 from the play space; two re-locks with the pose error placed from the stored pose
+  = the same corners to 1e-13 cm; the same error without it moves the box 1.2 cm; a missing part falls back; PlaceFromCab; the
+  12-readback averaged lock). Part B runs with `SetLockSamples(1)` (its truth is one lock frame).
+- **Not verified:** in game -- the same pixel spot after re-entering the cab / after menus / after a headset recentre; that the
+  stored part is in the rigid group at each lock-on of the same truck (log `placed from the stored cab pose`); the averaged
+  lock-on while driving (the cab sways during the ~0.3 s of readbacks: their average is used).
+
+### Phase 51c: the stored cab pose never on a moving part (the "tilted box with all turns at 0" bug)
+
+- **Cause** (ATS VR 2026-10-13 14:38-14:43, vehicle 47a81f298a9ee69e): its lock-ons say "NO shared transform among the parts (each
+  its own group)" (the phase 47d case), so the biggest usable part became the reference: IndexCount 13200, the STEERING WHEEL. The
+  monitor proved it ("cab part IndexCount 13200 MOVES against the cab ... 4.5 cm" 14:40:41, "21.6 cm" 14:43:10). 51b stored the
+  cab pose in that part's model space (its rows: a 48.3 deg column tilt + a 6.2 deg turn about the wheel axis at that moment), so
+  every later lock-on put the box where the wheel's turn then said: rotated about the column = the tilt the user saw (he set
+  roll -10 to compensate). Not gravity / slope: the other truck's stored part (18144, a 4-part rigid group) maps play -> model
+  within 0.24 deg of identity -- the LOCAL play space is the seat's, the game keeps it in the cab. Two more holes: the moving
+  memory matched only by keys, which change (47e), so locks #5 / #7 took 13200 as the reference again after it was REMEMBERED;
+  and 51b re-took the map from the live lock at an edit.
+- **Fix:** (1) the cab pose holds the box in up to 3 carriers (`FpsProfile::CabPose` part 0 + `x[]`; line: `+ ic stride fmt
+  a00..a23` per extra part). `ApplyCab` maps each found stored part to a reference map and takes the largest group whose box
+  corners agree within 1 cm (ties: summed IndexCount); found parts that all disagree = not placed (the play space; the stored
+  pose kept). (2) The moving memory also matches by geometry (IndexCount + stride + format): a remembered wheel is never a
+  reference / carrier / stored part again in the session. (3) A stored part the monitor finds moving is dropped from the
+  vehicle's pose (`CabMovedSerial` -> `FpsProfDropCabPart`; the last one dropped = the next lock-on stores a fresh pose). (4) Edits
+  never re-take the map (only the settings change on top of it). (5) Menu row "Re-measure cab spot" (after Position per vehicle,
+  Right): `FpsCab::Remeasure` -- the next lock-on ignores the stored pose, takes a fresh averaged map and the profile replaces the
+  stored pose (settings kept). Fixes an existing pose with a baked turn. (6) A lock readback whose game / headset IPD ratio is
+  outside 0.8 .. 1.25 (lock #7: 0.006) is not used for a play-space map (up to 240 skipped, then accepted). No "levelling": the
+  box is built upright in the play space of the first lock, which is the cab's own frame when the stored part is rigid.
+- **Test:** `fps_cab_test` Part C 51c (every part its own transform, the wheel the reference, turned 7 deg at the first lock):
+  3 parts stored; re-lock with the wheel straight + a pose error -> 2 of 3 agree, placed from the body, the box within 5e-5 cm (the
+  stored 3 x 4 drops T's float-noise projective row); the 51b wheel-only pose is 2.1 cm off; the turning wheel is reported
+  (`CabMovedSerial`), `DropCabPart` 3 -> 2 -> cleared; the wheel is not the reference again; Remeasure; 60 frames of broken
+  maps -> no lock until they end.
+- **Not verified in game:** that the truck's rigid parts agree at each lock-on (log `placed from the stored cab pose (part IC N;
+  2 of 3 stored part(s) found agree)`); the Re-measure row on 47a8 (its stored pose has the wheel only: until the user steers or
+  re-measures, the old tilt stays).
+
+### Phase 51d: the attached box SQUARE TO THE CAB; Reset never reaches a vehicle's profile; moving parts leave the stored pose
+
+- **Bug 1, cause** (ATS VR 2026-10-13 15:02-15:06, vehicle 47a81f298a9ee69e, "rotated even with tilt and everything at 0"): the box was
+  built UPRIGHT IN THE PLAY SPACE (BoxPlay: gravity-up, the play -z forward) and mapped into the cab at the vehicle's first lock. The
+  play space is not the cab's frame. Evidence: the vehicle's stored maps (dlaa.ini line 77) play -> part 12246 and play -> part 8325 are
+  the SAME rotation, 11.4 deg off identity (cab up in play = (-0.180, 0.981, 0.078): 10.4 deg sideways, 4.6 deg fore / aft; ~1 deg
+  yaw: not a recentre), and the steering wheel 13200 relative to 12246 is a pure 49.1 deg turn about x (its column tilt axis, a cab
+  side axis by construction) -- that axis lies 10.4 deg off the play horizontal. So at that first lock the play space was rolled
+  ~10 deg against the cab, and the stored pose kept that roll for every later lock-on. The play space also moves against the cab
+  while driving: the 10-s "THE CAB AGAINST THE PLAY SPACE" figure of lock #1 grows from 0.4 cm (parked) to 15-20 cm steady
+  (15:03:07-15:04:21; at the box's 0.95 m that is ~9-12 deg), lock #2 (placed from lock #1's pose) starts at a steady 14.2 cm, lock #3 at
+  7.8 cm -- the game's VR camera follows the play space's gravity, the cab pitches / rolls under it on the road. Vehicle 7b8a's stored
+  map (part 18144, a rigid 4-part group) is 0.24 deg off identity: it was stored on a level spot, it looks fine. Not proven in the log
+  (no MVP dumps): that the camera-relative draws' rotation is the dashboard's -- the new lock-on log line shows it (below).
+- **Fix: the CAB FRAME** (`fps_cab.h` `FrameRot` / `SameRot` / `HeadLocked` / `CabLevel` / `LevelT` / `CabTilt`; `fps_cab.cpp`
+  ProcessLock / `LevelLock`). At every lock-on readback the cab draws of the anchor eye (all 16 candidates, camera-relative ones
+  INCLUDED: their MVP block has no translation but its rotation is still P V W -- the cab's own axes; in the 47a8 lock 13 of the 16 cab
+  draws, the 3 biggest among them, are camera-relative) are grouped by MODEL ROTATION (their eye frames' R / U / F agree within 0.0035,
+  ~0.2 deg; the translation may differ), remembered moving parts and head-locked draws (a bare projection) left out; the group with the
+  largest summed IndexCount is the cab. S = FrameRot(reference, cab) = the cab's axes in the reference model (exact: one pass, the view
+  / projection cancel). `CabLevel(A, S)` puts those axes into the box's frame (A^-1), up = the cab axis nearest the frame's up (the
+  game's models are y-up: then forward = the model's -z, so a recentre yaw cannot turn it; any other up axis: the axis nearest the
+  frame's back), right = up x back; Q = those columns. The map becomes A T_Q (T_Q = Q about the pivot), yaw0 = 0. Then BoxPlay's x / y
+  degrees, distance and the box's own yaw / pitch / roll are all measured in the CAB's frame around the seat: a zero-turn box is upright
+  with the cab and faces the seat along the cab's axes, and the same settings give the same cab-relative spot in every truck. The
+  orientation comes from MVPs only (no pose); the pivot (the LOCAL origin = the seat) and the scale still come from the play -> cab map.
+  A cab frame more than 30 deg (`kCabLevelMaxDeg`) from the box's frame is not trusted (logged, the box stays play-built).
+- **Stored poses:** `CabPose::level`, line token `cabsq` (square) instead of `cab`. A new pose is stored square. An OLDER pose (`cab`,
+  built in its lock's play space) is levelled ONCE at the next lock-on that has a cab frame (`ApplyCab`: the agreeing majority's map
+  levelled, every stored part turned by the same T_Q, yaw0 0) and the profile stores it (`FpsProfCabAtLock`, log `its older cab pose
+  LEVELLED onto the cab (turned X deg ...)`): **that one time the box moves** (turned about the seat by the old roll / pitch, ~11 deg for
+  47a8; the user's X / Y were tuned in the tilted frame). A square pose is never re-levelled (stable when a lock-on sees a different
+  draw set); its residual against the lock's cab frame is logged (~0 for a rigid cab). A 47e same-cab re-lock inherits the flag.
+  Older DLLs read a `cabsq` line as malformed (kept on disk, a second line for that key appended); this DLL takes the first line of a key.
+- **Logs:** the `LOCKED ON` line ends with `cab frame from N draw(s) sharing one rotation (IndexCount sum S, biggest IC); the box is
+  SQUARE TO THE CAB -- its frame turned X deg onto it (the cab leans a deg sideways, b deg forward and is turned c deg against the play
+  space)` (or `the stored pose is square to the cab already (r deg residual)`, `NOT used: ... over 30`, `NO cab frame`); level 4 adds
+  `cab draw rotation groups of eye E against the cab frame: [n draw(s) from IndexCount I, sum S, k camera-relative: d deg] ...` --
+  the in-game check of the evidence above (for 47a8 expected: the camera-relative group 0 deg, 12246 / 8325 ~0 or ~11 deg).
+- **Bug 2, cause:** `FpsProfileTick` gated the binding on `FpsCab::Active()` only. The Reset row sets the fps defaults and mode 0 in
+  the same Present, but FpsCab switches off at its next `FpsCabSync` (log: Reset at Present #11185, `fps box attached to vehicle: off
+  (Present #11186)`): that one tick saw mode 2 still bound and copied the defaults into vehicle 47a8's profile (loaded 15:06:05 as x 0
+  y -25 dist 80 scale 0.3, saved at exit). **Fix:** the binding is `FpsProfile::Session` (pure, fps_profile.h; inject.cpp keeps the logs /
+  apply / cab-pose side effects): not bound unless the LIVE mode is 2 (`g_launchVr == 1 && g_fpsShow && g_fpsVrLock == 2`) and FpsCab
+  is active and profiles are on; ResetSettings also unbinds (`FpsProfUnbind`). When the box is attached again, the lock-on loads the
+  vehicle's own values. 47a8's profile in the user's dlaa.ini already holds the defaults (it was saved): the user re-places it once.
+- **Reset one vehicle:** Left on the existing "Re-measure cab spot" row (no new row, `MR_COUNT` stays 52) = `FpsBoxDefaults`: the live
+  fps_vr_x / y / dist / scale / yaw / pitch / roll, colour, brightness, text to the Reset row's values; an ordinary edit, so only the
+  bound vehicle (+ its aliases) gets them; the cab pose is kept. Hotkey column `Right: now, Left: defaults`, value `box defaults`
+  until the next lock-on.
+- **The moving stored part** (47a8's line kept the wheel 13200 first although the monitor found it moving 2 s after lock #1): 51c
+  reported a moving part to the profile only when the lock was PLACED FROM a stored pose (`L.hasCab`). Lock #1 was placed from the
+  play space; its pose (wheel + 12246 + 8325) was stored from the lock, the wheel demoted at 15:02:38 -- not reported -- and every later
+  lock-on skipped the remembered wheel, so it was never found to be dropped. **Fix:** every demotion is reported (`ReportMoved`, a
+  16-entry queue: `CabMovedSince`; the profile drops each from the bound vehicle's pose, a no-op when the part is not stored), and a
+  stored part the lock-on skips as a remembered moving part is reported too (once per lock-on). 47a8's current line: after a restart
+  the wheel is not remembered; it is dropped the first time it moves (steer) while attached.
+- **Test:** `fps_cab_test` Part D -- (1) a cab turned 18.5 deg (yaw 15, pitch 4.6, roll 10.4) against the play space: the levelled
+  zero-turn box = the cab-square truth to 2e-16 m (top edge along the cab x, side edge along the cab y, 0.8 m along the cab -z from the
+  seat), the play-built one 0.21 m off; the body's own z-up axes give the same frame (the fallback snap); CabTilt of a 10-deg roll;
+  HeadLocked. (2) Two cabs turned 18.5 / 20.9 deg, x 8 y 26.2 dist 95: 3e-15 m apart in cab space (play-built: 0.46 m). (3) WARP:
+  the lock in the tilted cab levelled 18.47 deg, 3e-5 cm off the truth; an older `cab` pose levelled once at the next lock (with a
+  1.5-deg pose error) to 5e-14 cm, round-trips as `cabsq`, the next lock does not move it (residual < 1e-6 deg). (4) A play-space lock
+  on the wheel: its stored pose has the wheel; the turning wheel is reported and dropped (3 -> 2 parts, the line without it); a stored
+  pose naming the remembered wheel is placed from the others and reports it. (5) Session: the Reset Present (live mode 0, FpsCab still
+  active) keeps the profile, the next lock-on brings its values back; the 51c gate reproduced (it stores the defaults); Left = the
+  defaults for that vehicle only; the shared mode never binds. Parts B / C now compare against the cab-square truth (Part B's sway at
+  the lock frame is levelled away: the box is square to the cab at t0, not to the play space); Part C's pose-error lock moves only the
+  1 cm shift (the 1.5-deg turn is gone).
+- **Not verified in game:** that the camera-relative group is the dashboard's frame in ATS / ETS2 (level-4 groups line); the one-time
+  move of 47a8's (and 7b8a's: 0.24 deg, invisible) older pose; that the cab frame is found at each lock-on (`cab frame from N draw(s)`);
+  the Reset row with the box attached; Left on Re-measure cab spot.
+
 ### The RenderDoc oracle (done in v0.2)
 
 Capture a frame of the unmodified game to learn empirically: which pass writes

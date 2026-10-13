@@ -566,6 +566,10 @@ log_level = 1
 # here once you changed them in the menu ----
 # 1 = show the box, 0 = off (nothing is measured or drawn then)
 # fps_show = 0
+# What the box shows: 0 = fps and frame time (two lines), 1 = fps only, 2 = frame time (ms) only; the same as numbers only,
+# without "fps" / "ms": 3 = both ("72" + "13.9"), 4 = the fps number ("72"), 5 = the ms number ("13.9"). The menu's FPS
+# counter row steps Off / 72 fps + 13.9 ms / 72 fps / 13.9 ms / 72 + 13.9 / 72 / 13.9 (Right = next, Left = previous)
+# fps_text = 0
 # Flat: left / top edge of the box in % of the picture width / height (0..95; kept inside the picture), size 0.2..3.0
 # (1 = 92 x 44 px at a 1080 p picture, scales with the picture height)
 # fps_x = 1
@@ -588,7 +592,26 @@ log_level = 1
 # layer, also with menu_vr_layer = 1) and placed on the GPU from a cab part's position in the same picture, so it has no
 # lag. Needs DLAA on with per-part motion vectors (mv_objects = 2, the default); without them, in the outside camera, in
 # menus and while loading it is drawn like 1 until the cab is back. The menu's FPS counter lock row: "Attached to vehicle".
+# Phase 51: with 2 every VEHICLE keeps its own box placement (fps_vr_x, fps_vr_y, fps_vr_dist, fps_vr_yaw, fps_vr_pitch,
+# fps_vr_roll, fps_vr_scale; phase 51b: + fps_color, fps_brightness, fps_text). When the box locks on to a cab it takes that
+# cab's saved values; a new cab starts from the current values (= the fps_* keys: the default for new vehicles). Your changes
+# in the menu go to the vehicle you sit in and are saved automatically when the menu closes (and at game exit) as one line per
+# vehicle (up to 64):
+#   fps_profile = <vehicle key> x y dist yaw pitch roll scale v2 color brightness text cab <part> <the box's pose in the cab>
+# Phase 51b: the line also keeps the box's exact spot IN THE CAB (the "cab" numbers: a cab part's index count + the map
+# into it): every later lock-on of that vehicle puts the box on exactly that spot (no few-pixel shift), also after a headset
+# recentre. It is stored at the first lock-on and replaced only by the menu's "Re-measure cab spot" (Right); a cab part found
+# moving (the steering wheel) is dropped from it. Old lines (only the 7 numbers) still load: that vehicle then takes the
+# current colour / brightness / text, and its cab spot is stored at its next lock-on.
+# Phase 51d: the box is built SQUARE TO THE CAB (the cab's own axes, not the headset's play space): "cabsq" instead of "cab"
+# marks such a spot. A "cab" spot of an older version is squared once at its next lock-on (the box may move a little that
+# once) and written back as "cabsq". Left on "Re-measure cab spot" puts only that vehicle's box back to the defaults.
+# The Save row is not needed for them and the Reset row does not touch them; delete a line to forget that vehicle.
+# The vehicle key is made from the cab's 3 biggest meshes (their index counts), so it stays the same after a game restart.
 # fps_vr_lock = 0
+# Phase 51b: 1 = the vehicle profiles above are used (default); 0 = one shared placement / colour / brightness / text for every
+# vehicle (the fps_* keys); the fps_profile lines are kept but neither loaded nor written. Menu: Position per vehicle.
+# fps_profiles = 1
 # Phase 44: the box's text colour, 0..19 = white (default, as before), yellow, amber, orange, red, pink, magenta, purple,
 # violet, blue, sky blue, cyan, teal, mint, green, lime, olive, gold, silver, black on white. Flat and VR. Menu: FPS colour.
 # fps_color = 0

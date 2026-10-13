@@ -604,8 +604,15 @@ bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t 
             RECT r{ px(3.0f), px(y0), px(W - 3.0f), px(y1) };
             DrawTextW(dc, t, -1, &r, fl);
         };
-        line(fBig, line1, 4.0f, 24.0f);
-        line(fSmall, line2, 24.0f, 40.0f);
+        // fps_text: ONE line (the other empty) = drawn in the big font, centred on the two-line layout's centre (y 4..40 -> 22),
+        // so the (transparent) box keeps its size and centre and the text does not jump.
+        const bool has1 = line1 && line1[0], has2 = line2 && line2[0];
+        if (has1 && has2) {
+            line(fBig, line1, 4.0f, 24.0f);
+            line(fSmall, line2, 24.0f, 40.0f);
+        } else {
+            line(fBig, has1 ? line1 : line2, 12.0f, 32.0f);
+        }
         SelectObject(dc, oldFont);
         DibFinish(d, w, h, out);
         return true;

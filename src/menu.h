@@ -21,15 +21,15 @@
 
 namespace TuningMenu {
 
-constexpr int   kMaxRows  = 56;                      // (phase 52: 50 -> 56, + the Frame rate group header and its 3 rows; was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
+constexpr int   kMaxRows  = 60;                      // (phase 52: 50 -> 56 -> 60 at the 51b merge, + the Frame rate group header and its 3 rows; was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
                                                      //  28 before the v0.10.3 phase 28 FPS counter lock row, 29 before the phase 29c
                                                      //  group header rows, 31 before the phase 30 Turbo mode row, 32 before the
                                                      //  phase 34 Foveated rows, 34 before the phase 39 Logging row, 35 before the
                                                      //  phase 41 Mirrors in turns row, 36 before the phase 40 Hidden area mask row,
                                                      //  37 before the phase 42 Foveated passes row, 38 before the 4 phase 43 category headers, 42 before the
                                                      //  5 phase 44 fps box rows (colour, distance, turn, tilt, rotate), 48 before the
-                                                     //  phase 49 Light glow ghosting fix row; a Panel holds only the VISIBLE rows,
-                                                     //  nRows <= this; phase 54: + the CPU tuning row, 54 of 56)
+                                                     //  phase 49 Light glow ghosting fix row, 50 before the phase 51b Position per vehicle row; a Panel holds only the VISIBLE rows,
+                                                     //  nRows <= this; phase 52: + Frame rate group (4), phase 54: + CPU tuning)
 constexpr int   kPerfLines = 3;                      // the perf block under the title (small font, one line each)
 // phase 45: INK MARKS in the perf lines, the cost column cells and its header: kInkCpu / kInkGpu switch the text colour to the
 // CPU blue / the GPU orange (blue / orange, not red / green: readable with the common colour-vision deficiencies), kInkEnd back

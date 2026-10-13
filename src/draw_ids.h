@@ -374,6 +374,10 @@ public:
     UINT     VpJitterPacked(int i) const;
     UINT     InstanceCount(int i) const;         // v0.10.0 phase 14 round 4: 1 for DrawIndexed
     UINT     IndexCount(int i) const;            // v0.10.0 phase 4 (dump): the draw's IndexCount
+    // fps profiles (FpsProfile::VehicleKey): VB slot 0's stride and the index buffer's DXGI format -- geometry numbers that
+    // survive a game restart (no pointers)
+    UINT     VbStride(int i) const;
+    UINT     IbFormat(int i) const;
     void     CbWindow(int i, UINT* first, UINT* num) const;   // v0.10.0 phase 4 (dump): VS cb0 first / num constants
     // v0.10.0 phase 21 (dump / pixel probe): the game's pixel shader of draw i (identity only, never dereferenced; null = none /
     // unknown). inject.cpp hkPSSetShader keeps the game's current PS in NoteGamePs; every Record copies it. PsInfo = the DXBC
@@ -423,7 +427,8 @@ private:
                  uint64_t shape;                 // v0.10.0 phase 8: ShapeKey
                  UINT jit, inst;                 // v0.10.0 phase 14 round 4: VpJitterPacked, InstanceCount
                  const void* ps;                 // v0.10.0 phase 21: the game's PS at Record (identity; dump / probe)
-                 const void* vs; UINT rows; };   // v0.10.0 phase 22: the VS (identity) + cb0 rows mirrored from row 0
+                 const void* vs; UINT rows;      // v0.10.0 phase 22: the VS (identity) + cb0 rows mirrored from row 0
+                 UINT stride, ibFmt; };          // fps profiles: VB0 stride + index format (geometry only, no pointers)
     static const void* s_gamePs;                 // v0.10.0 phase 21: NoteGamePs
     static PsInfoFn    s_psInfo;                 //   SetPsInfoFn
     bool FlushPending() const {

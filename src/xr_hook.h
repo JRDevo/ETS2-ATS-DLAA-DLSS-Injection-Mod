@@ -116,7 +116,7 @@ struct OverlayParams {
                                              //   its angular size stays: the width scales with it)
     bool          menuFace = true;           // v0.10.3 phase 29b: menu_vr_face -- the panel and the head-following fps box quads
                                              //   turned to FACE the head (false: parallel to the view plane)
-    int           fpsX = 0, fpsY = 0;        // fps_vr_x / fps_vr_y (% as the panel; fixed in the cab: yaw / pitch degrees)
+    float         fpsX = 0, fpsY = 0;        // fps_vr_x / fps_vr_y (% as the panel; fixed in the cab: yaw / pitch degrees)
     float         fpsScale = 0.3f;           // fps_vr_scale (1 = 8 % of the eye fov width at 0.8 m)
     float         fpsDist = 0.8f;            // phase 44: fps_vr_dist / 100 -- the fps box quad's distance (m; 0.3..3.0). Its
                                              //   angular size stays (the width scales with it), in both lock modes
