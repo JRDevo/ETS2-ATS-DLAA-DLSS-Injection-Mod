@@ -29,7 +29,7 @@ constexpr int   kMaxRows  = 56;                      // (phase 52: 50 -> 56, + t
                                                      //  37 before the phase 42 Foveated passes row, 38 before the 4 phase 43 category headers, 42 before the
                                                      //  5 phase 44 fps box rows (colour, distance, turn, tilt, rotate), 48 before the
                                                      //  phase 49 Light glow ghosting fix row; a Panel holds only the VISIBLE rows,
-                                                     //  nRows <= this)
+                                                     //  nRows <= this; phase 54: + the CPU tuning row, 54 of 56)
 constexpr int   kPerfLines = 3;                      // the perf block under the title (small font, one line each)
 // phase 45: INK MARKS in the perf lines, the cost column cells and its header: kInkCpu / kInkGpu switch the text colour to the
 // CPU blue / the GPU orange (blue / orange, not red / green: readable with the common colour-vision deficiencies), kInkEnd back

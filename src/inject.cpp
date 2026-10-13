@@ -761,6 +761,7 @@
 #include "fps_cab.h"                                // phase 47: the VR fps box attached to the vehicle (GPU-placed from a cab draw)
 #endif
 #include "cpu_pin.h"                                // phase 32: keep the game on the V-Cache cores (cpu_cache_pin; both builds)
+#include "cpu_tuning.h"                            // phase 54: P-core preference / priority / EcoQoS opt-out (cpu_pcore, cpu_priority, cpu_no_throttle)
 #include "flat_views.h"                             // v0.12.0 issue #12: flat multi-view (multi-monitor) detection (both builds)
 
 namespace {
@@ -881,6 +882,11 @@ bool     g_vrsPassesExplicit = false;
 // the process affinity is set to the logical processors of the biggest L3, once at startup (cpu_pin.h). Opt-in: no gain was measured.
 // Startup only: no menu row, so SaveSettings / ResetSettings have nothing to write or remove (the key stays as the user left it).
 int      g_cpuCachePin = 0;
+// phase 54: dlaa.ini cpu_pcore / cpu_priority / cpu_no_throttle (all 0 = off; cpu_tuning.h). Read at start; the menu's CPU tuning row
+// switches the three together live (CpuTuning::SetLive) and SaveSettings writes them once explicit (own flag: a saved 0 is not
+// written just because another row was touched).
+int      g_cpuPcore = 0, g_cpuPriority = 0, g_cpuNoThrottle = 0;
+bool     g_cpuTuneExplicit = false;
 bool     g_menuExplicit = false;        // a menu_* value was changed in the menu -> SaveSettings writes the 9 menu_* keys
 int      g_bindHoldMs = 5000;            // v0.10.2 dlaa.ini bind_hold_ms (500..10000): the menu's hold-to-bind time (MenuBindTick)
 // v0.10.0 live fps box (dlaa.ini fps_*; the tuning menu's FPS counter rows): drawn where the panel draws, also while the menu
@@ -1657,6 +1663,10 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
     if (!sc) CpuProfFrameMark(CpuProf::kMarkPresent);   // phase 31: present-layer mode -- the game-thread frame boundary is the frame
     CpuProf::Block cpb(CpuProf::kBFrameWork);               // phase 31 CPU profiler (cpu_prof.h)
     Ofxr::OnPresent(n);                         // v0.10.0 OFXR Bridge: layer-module rescan cadence + pass-through stats
+    if (CpuTuning::NeedPresent()) {             // phase 54: once -- the render (Present) thread + the window's thread get the CPU tuning
+        DXGI_SWAP_CHAIN_DESC cd{};
+        CpuTuning::OnPresent(sc && SUCCEEDED(sc->GetDesc(&cd)) ? cd.OutputWindow : nullptr);
+    }
 #ifdef WITH_DLAA
     MaybePrewarmNgx();                          // v0.7.8: NGX init + first feature on the boot screen (once)
     MirPrebuild();                              // v0.10.2: the cached mirror unit sizes, once NGX + the shaders are ready (once)
@@ -2856,7 +2866,7 @@ bool PathNextToDll(const wchar_t* name, wchar_t* path);   // defined below
 // v0.10.0 (Reset row): an entry with an EMPTY val ("") means "remove this key": every matching line is dropped (not replaced), and
 // the key is never appended. A missing file with only removals is left missing (nothing to write).
 // Returns true only if the temp was fully written AND the replace succeeded.
-constexpr int kIniMaxKeys = 56;                    // v0.10.3 phase 28: WriteIniPreserving's key cap (was 32; phase 44: 48 -> 56)
+constexpr int kIniMaxKeys = 64;                    // v0.10.3 phase 28: WriteIniPreserving's key cap (was 32; phase 44: 48 -> 56; phase 54: 64)
 struct IniKV { const char* key; char val[48]; };   // val[0] == 0: delete the key's line(s) (WriteIniPreserving)
                                                    // (v0.10.2: was 32 -- "Ctrl+Shift+Alt+NumpadSubtract, Wheel128" is 39)
 bool WriteIniPreserving(const IniKV* kv, int nkv) {
@@ -3021,6 +3031,11 @@ void SaveSettings(uint64_t n) {
     }
     if (g_xrHiddenMaskExplicit) snprintf(add("xr_hidden_mask"), sizeof(kv[0].val), "%d", g_xrHiddenMask);   // phase 40
     if (g_biasExplicit) snprintf(add("dlss_bias_mask"), sizeof(kv[0].val), "%d", g_biasCfg);   // phase 49 (glow ghosting row)
+    if (g_cpuTuneExplicit) {                              // phase 54 (CPU tuning row)
+        snprintf(add("cpu_pcore"), sizeof(kv[0].val), "%d", g_cpuPcore);
+        snprintf(add("cpu_priority"), sizeof(kv[0].val), "%d", g_cpuPriority);
+        snprintf(add("cpu_no_throttle"), sizeof(kv[0].val), "%d", g_cpuNoThrottle);
+    }
     if (g_logLevelExplicit) snprintf(add("log_level"), sizeof(kv[0].val), "%d", LogLevel());  // phase 39 (Logging row)
     if (g_vrsExplicit) {                                  // phase 34 (the Foveated rows)
         snprintf(add("vrs"), sizeof(kv[0].val), "%d", g_vrsOn);
@@ -15776,6 +15791,7 @@ enum MenuRowId {
     MR_FRGRP,                                             // phase 52: group "Frame rate"
     MR_REFLEX, MR_FPSCAP,                                 // phase 52: flat Reflex / FPS cap (dlaa.ini reflex / fps_cap)
     MR_VRFPSCAP,                                          // phase 52: VR FPS cap (dlaa.ini vr_fps_cap: half / third)
+    MR_CPU,                                               // phase 54: CPU tuning (dlaa.ini cpu_pcore / cpu_priority / cpu_no_throttle)
     MR_PANELGRP,                                          // v0.10.3 phase 29c: group header "Panel settings" (collapsible)
     MR_POSX, MR_POSY, MR_SIZE, MR_DEPTH, MR_FACE,
     MR_MENUKEYS,                                          // v0.10.2: the 5 menu keys, bound by 5 holds in sequence (29c: in the panel group)
@@ -15800,20 +15816,20 @@ constexpr MenuGroupDef kMenuGroups[] = {
     { MR_MOTGRP,   MR_MIRTURNS, L"Motion and mirrors" },
     { MR_UPGRP,    MR_OFXR,     L"Upscaling and VR" },
     { MR_VRPGRP,   MR_HMASK,    L"VR performance" },
-    { MR_FRGRP,    MR_VRFPSCAP, L"Frame rate" },                 // phase 52
+    { MR_FRGRP,    MR_CPU,      L"Frame rate and CPU" },         // phase 52; + phase 54 CPU tuning
     { MR_PANELGRP, MR_MENUKEYS, L"Panel settings" },
     { MR_FPSGRP,   MR_FPSROLL,  L"FPS counter settings" },     // phase 44: last row MR_FPSSIZE -> MR_FPSROLL (phase 48: + FPS brightness inside)
 };
 constexpr int kMenuGroupCount = (int)(sizeof(kMenuGroups) / sizeof(kMenuGroups[0]));
 static_assert(MR_PICGRP + 1 == MR_SHARP && MR_BIAS + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_MIRTURNS + 1 == MR_UPGRP &&
               MR_UPGRP + 1 == MR_UPSCALE && MR_OFXR + 1 == MR_VRPGRP && MR_VRPGRP + 1 == MR_TURBO && MR_HMASK + 1 == MR_FRGRP &&
-              MR_FRGRP + 1 == MR_REFLEX && MR_VRFPSCAP + 1 == MR_PANELGRP &&
+              MR_FRGRP + 1 == MR_REFLEX && MR_VRFPSCAP + 1 == MR_CPU && MR_CPU + 1 == MR_PANELGRP &&
               MR_PANELGRP + 1 == MR_POSX && MR_MENUKEYS + 1 == MR_FPS && MR_FPSGRP + 1 == MR_FPSLOCK && MR_FPSROLL + 1 == MR_LOG,
               "tuning menu: a group's children must follow its header and fill it up to its last row");
 static_assert(MR_SHARP < MR_WIDTH && MR_WIDTH < MR_LOD && MR_LOD < MR_LODCUT && MR_LODCUT < MR_AREA && MR_AREA < MR_PRETM &&
               MR_PRETM < MR_FWD && MR_FWD < MR_BIAS && MR_DRAWIDS < MR_MIRROR && MR_MIRROR < MR_MIRTURNS && MR_UPSCALE < MR_DLAA && MR_DLAA < MR_OFXR &&
               MR_TURBO < MR_VRS && MR_VRS < MR_VRSSIZE && MR_VRSSIZE < MR_VRSPASS && MR_VRSPASS < MR_HMASK &&
-              MR_REFLEX < MR_FPSCAP && MR_FPSCAP < MR_VRFPSCAP &&
+              MR_REFLEX < MR_FPSCAP && MR_FPSCAP < MR_VRFPSCAP && MR_VRFPSCAP < MR_CPU &&
               MR_POSX < MR_POSY && MR_POSY < MR_SIZE && MR_SIZE < MR_DEPTH && MR_DEPTH < MR_FACE && MR_FACE < MR_MENUKEYS &&
               MR_FPSLOCK < MR_FPSX && MR_FPSX < MR_FPSY && MR_FPSY < MR_FPSSIZE && MR_FPSSIZE < MR_FPSCOLOR &&
               MR_FPSCOLOR < MR_FPSBRIGHT && MR_FPSBRIGHT < MR_FPSDIST && MR_FPSDIST < MR_FPSYAW && MR_FPSYAW < MR_FPSPITCH && MR_FPSPITCH < MR_FPSROLL,
@@ -15885,7 +15901,7 @@ const wchar_t* const kMenuDesc[] = {
     L"headroom, the picture you see stays the same. The first switch-on needs a game restart. Turn it off if the edge of the view "
     L"looks wrong.",
     // phase 52: menu category (Frame rate) + MR_REFLEX, MR_FPSCAP, MR_VRFPSCAP
-    L"Frame rate limits: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap. Right opens the group, Left closes it; it starts closed "
+    L"Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed "
     L"every time the menu opens.",
     L"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when the GPU is the limit. Boost "
     L"also keeps the GPU clocks up. Same fps; small cost. Not used in VR.",
@@ -15893,6 +15909,10 @@ const wchar_t* const kMenuDesc[] = {
     L"PC holds in a busy city. With Reflex on, the NVIDIA driver does the limiting. off = no limit.",
     L"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the headset's reprojection "
     L"(ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when the fps swings. Turns Turbo off while on.",
+    // phase 54 (MR_CPU)
+    L"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs only), the game runs at Above "
+    L"normal priority, and Windows may not throttle it (EcoQoS) or ignore its timer requests. Helps when the CPU is the limit; no "
+    L"cost. Separate settings in dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle.",
     // v0.10.3 phase 29c (MR_PANELGRP)
     L"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes it; it starts closed "
     L"every time the menu opens.",
@@ -16264,6 +16284,18 @@ void ToggleHiddenMask(uint64_t n) {
         hs.ext, hs.ni[0] / 3, hs.ni[1] / 3, (unsigned long long)(g_hm.drawn[0] + g_hm.drawn[1]));
     PlayTones(1, g_xrHiddenMask ? 1200 : 300, 150, 0);
 }
+// phase 54: the menu's CPU tuning row -- dlaa.ini cpu_pcore / cpu_priority / cpu_no_throttle live, all three together: all off ->
+// all on; all on or a mix -> all off. CpuTuning::SetLive applies / undoes the cpu sets, the priority class and the EcoQoS opt-out
+// (it logs what each part did or why not). Runs on the Present thread (the menu keys), which is what the thread part needs.
+void ToggleCpuTuning(uint64_t n) {
+    const int to = CpuTuningPick::NextRowState(CpuTuningPick::Summary(g_cpuPcore, g_cpuPriority, g_cpuNoThrottle));
+    g_cpuPcore = g_cpuPriority = g_cpuNoThrottle = to;
+    g_cpuTuneExplicit = true;
+    Log("CPU tuning: %s (cpu_pcore=%d cpu_priority=%d cpu_no_throttle=%d, tuning menu, Present #%llu)", to ? "ON" : "OFF", to, to, to,
+        (unsigned long long)n);
+    CpuTuning::SetLive({ g_cpuPcore, g_cpuPriority, g_cpuNoThrottle });
+    PlayTones(1, to ? 1200 : 300, 150, 0);
+}
 // phase 42: the menu's Foveated passes row -- dlaa.ini vrs_passes live (0 = scene binds only, 1 = + the lighting bind, outer ring
 // only). The next game bind uses it (VrsOnBind reads g_vrsPasses; Vrs::Enter refuses a lighting bracket at 0).
 void ToggleVrsPasses(uint64_t n) {
@@ -16389,6 +16421,9 @@ void ResetSettings(uint64_t n) {
     g_reflex = g_fpsCap = g_vrFpsCap = 0;                 // phase 52: no Reflex, no caps
     g_paceExplicit = false;
     FramePaceApply();                                     //   (+ XrHook::SetTurbo(false))
+    g_cpuPcore = g_cpuPriority = g_cpuNoThrottle = 0;     // phase 54: CPU tuning off (live: cpu sets / priority / EcoQoS put back)
+    g_cpuTuneExplicit = false;
+    CpuTuning::SetLive({ 0, 0, 0 });
     g_vrsOn = 0; g_vrsInner = 55; g_vrsOuter = 80;        // phase 34: foveated rendering off, balanced radii (vrs_quality /
     g_vrsExplicit = false;                                //   vrs_debug are dlaa.ini-only: left as they are)
     g_vrsPasses = 0;                                      // phase 42: scene binds only
@@ -16431,6 +16466,7 @@ void ResetSettings(uint64_t n) {
         "mirror_turns",                                                                                 // phase 41
         "xr_hidden_mask",                                                                               // phase 40
         "dlss_bias_mask",                                                                               // phase 49
+        "cpu_pcore", "cpu_priority", "cpu_no_throttle",                                                 // phase 54
     };
     constexpr int kNKeys = (int)(sizeof(kKeys) / sizeof(kKeys[0]));
     static_assert(kNKeys <= kIniMaxKeys, "WriteIniPreserving handles at most kIniMaxKeys keys");
@@ -17738,6 +17774,11 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         else
             swprintf(p.rows[MR_VRFPSCAP].value, kV, L"%ls", g_vrFpsCap == 2 ? L"half" : g_vrFpsCap == 3 ? L"third" : L"off");
     }
+    {   // phase 54: CPU tuning -- off / on (all three) / mixed (set in dlaa.ini); what the P-core part did is in the log
+        MenuRow(p, MR_CPU, L"CPU tuning", "dlaa.ini cpu_pcore / cpu_priority / cpu_no_throttle", nullptr, false);
+        const int cs = CpuTuningPick::Summary(g_cpuPcore, g_cpuPriority, g_cpuNoThrottle);
+        swprintf(p.rows[MR_CPU].value, kV, L"%ls", cs == 0 ? L"off" : (cs == 1 ? L"on" : L"mixed (dlaa.ini)"));
+    }
     {   // phase 39: the level + what logging costs (CPU ms per frame; changes only at the ~1-s snapshots: no rebuild per frame)
         MenuRow(p, MR_LOG, L"Logging", "dlaa.ini log_level", nullptr, false);
         const int lv = LogLevel();
@@ -17916,6 +17957,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_VRS:     ToggleVrs(n); break;                   // phase 34: Left and Right both switch it (also flat: kept for VR)
     case MR_VRSSIZE: StepVrsSize(dir, n, repeat); break;    // phase 44: Right = bigger sharp centre, Left = smaller (5 % steps)
     case MR_HMASK:   ToggleHiddenMask(n); break;            // phase 40: Left and Right both switch it (also flat: kept for VR)
+    case MR_CPU:     ToggleCpuTuning(n); break;             // phase 54: Left and Right both switch it
     case MR_VRSPASS: ToggleVrsPasses(n); break;             // phase 42: two choices, Left and Right both switch
     case MR_REFLEX:  StepReflex(n, dir); break;             // phase 52: off / on / on + boost (also in VR: kept for flat)
     case MR_FPSCAP:  StepFpsCap(dir, n, repeat); break;     // phase 52: the kCapSteps list (also in VR: kept for flat)
@@ -20873,6 +20915,9 @@ void LoadConfig() {
 #endif
             if (!strcmp(key, "xr_hidden_mask"))     { g_xrHiddenMask = v != 0 ? 1 : 0; g_xrHiddenMaskExplicit = true; continue; }   // phase 40
             if (!strcmp(key, "dlss_bias_mask"))     { g_biasCfg = v < 0 ? 0 : (v > 100 ? 100 : (int)v); g_biasExplicit = true; continue; }   // phase 49
+            if (!strcmp(key, "cpu_pcore"))          { g_cpuPcore = v != 0 ? 1 : 0; g_cpuTuneExplicit = true; continue; }          // phase 54
+            if (!strcmp(key, "cpu_priority"))       { g_cpuPriority = v != 0 ? 1 : 0; g_cpuTuneExplicit = true; continue; }       // phase 54 (only 0 / 1: never HIGH)
+            if (!strcmp(key, "cpu_no_throttle"))    { g_cpuNoThrottle = v != 0 ? 1 : 0; g_cpuTuneExplicit = true; continue; }     // phase 54
             if (!strcmp(key, "vrs_passes"))         { g_vrsPasses = v != 0 ? 1 : 0; g_vrsPassesExplicit = true; continue; }   // phase 42
             // phase 44: the fps box colour / VR distance / VR turn (outside the else-if chain: C1061)
             if (!strcmp(key, "fps_color"))          { g_fpsColor = FpsPose::ClampColor(v); continue; }
@@ -22001,6 +22046,7 @@ void StartInjection() {
     TscCalibrate();                                      // phase 35: the anchor of the TSC -> QPC ratio
     LoadConfig();
     CpuPin::Apply(g_cpuCachePin);                        // phase 32: once, as early as possible (dlaa.ini is read)
+    CpuTuning::Start({ g_cpuPcore, g_cpuPriority, g_cpuNoThrottle });   // phase 54: after the cache pin (a narrowed affinity wins over cpu_pcore)
     {                                                    // v0.7.4: flat or VR, from the launch options
         std::wstring cl = GetCommandLineW();
         for (wchar_t& c : cl) c = (wchar_t)towlower(c);

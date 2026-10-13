@@ -101,6 +101,18 @@ log_level = 1
 # start only). Does nothing on other CPUs. 0 (default) = off: no fps gain was measured yet, try it and compare.
 # cpu_cache_pin = 0
 
+# CPU TUNING, each 0 / 1, default 0 = off. The tuning menu's CPU tuning row switches the three together, live; Shift+F12 / the Save
+# row writes them here. The log says what each one did or why it did nothing.
+# cpu_pcore = 1: on Intel CPUs with P-cores and E-cores, the game's main thread and its render thread prefer the P-cores (a soft
+# preference; other threads are not touched). Does nothing on other CPUs, and nothing when cpu_cache_pin or a launcher already
+# narrowed the game's cores (that wins).
+# cpu_pcore = 0
+# cpu_priority = 1: the game runs at Above normal priority. Never High or Realtime.
+# cpu_priority = 0
+# cpu_no_throttle = 1: Windows may not slow the game down to save power (EcoQoS) and honours its timer requests while the window is
+# minimized or hidden (the timer part needs Windows 11).
+# cpu_no_throttle = 0
+
 # NGX jitter = sign * viewport shift, per axis: -1 or +1 (+1/+1 won the self-test; Ctrl+F12 cycles live)
 # jitter_sign_x = 1
 # jitter_sign_y = 1
