@@ -143,8 +143,10 @@ struct St {
     // the 10-s window (level 4)
     ULONGLONG winT0 = 0;
     uint64_t wAttached = 0, wFallback = 0, wWhy[kWhyCount] = {}, wReacq = 0, wMon = 0, wHeld = 0, wFrOn = 0, wFrOff = 0;
-    double maxDev = 0.0, sumDev2 = 0.0, maxJump = 0.0;
+    double maxDev = 0.0, sumDev2 = 0.0, maxJump = 0.0;  // the cab vs the play space: this LOG WINDOW (ResetWindow every 10 s)
     int nDev = 0;
+    double lkMaxDev = 0.0, lkSumDev2 = 0.0;             // ... and SINCE THE LOCK (GetStats; the test's figure -- the log window's
+    int lkNDev = 0;                                     // 10-s reset used to zero it mid-test, a wall-clock CI flake)
     double lastPlay[3] = {};
     bool lastHave = false;
     // phase 51b: the stored cab pose source (inject.cpp: the vehicle profiles) and the multi-readback lock-on
@@ -843,6 +845,8 @@ void ProcessLock(Snap& sn, const float* data) {
     BuildCorners();
     g.maxDev = g.sumDev2 = g.maxJump = 0.0;             // (the cab-vs-play-space figures restart with the lock)
     g.nDev = 0;
+    g.lkMaxDev = g.lkSumDev2 = 0.0;
+    g.lkNDev = 0;
     ++g.locks;
     g.lockFails = 0;
     for (EyeCur& c : g.eye) { c.lastEntry = -1; c.noMatch = 0; }
@@ -940,6 +944,9 @@ void ProcessMonitor(Snap& sn, const float* data) {
                     g.maxDev = std::fmax(g.maxDev, dev);
                     g.sumDev2 += dev * dev;
                     ++g.nDev;
+                    g.lkMaxDev = std::fmax(g.lkMaxDev, dev);
+                    g.lkSumDev2 += dev * dev;
+                    ++g.lkNDev;
                     if (g.lastHave) {
                         const double j3[3] = { P[0] - g.lastPlay[0], P[1] - g.lastPlay[1], P[2] - g.lastPlay[2] };
                         g.maxJump = std::fmax(g.maxJump, Len3(j3));
@@ -1393,7 +1400,7 @@ Stats GetStats() {
     s.refEntry[0] = g.eye[0].lastEntry; s.refEntry[1] = g.eye[1].lastEntry;
     s.lockFrame = g.lk.frame;
     s.refIc = g.lk.have && g.lk.n ? g.lk.e[0].ic : 0u; s.remembered = g_nMoving; s.monitorUs = g.monitorUs;
-    s.devMaxM = g.maxDev; s.devN = g.nDev;
+    s.devMaxM = g.lkMaxDev; s.devN = g.lkNDev;          // since the lock (not the 10-s log window)
     s.lockEyes = g.lk.have ? g.lk.eyesUsed : 0; s.lockXr = g.lk.have && g.lk.xr;
     s.monitors = g.monitors; s.latchOn = g.latchOn; s.latchOff = g.latchOff; s.held = g.held; s.lockRefusals = g.lockRefusals;
     s.latched = g.latched;

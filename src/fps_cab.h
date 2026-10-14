@@ -573,7 +573,7 @@ void Shutdown();                                        // device change / exit:
 // Test hooks (tests/fps_cab_test.cpp): the monitor snapshot period in eye blits (both eyes; default 12 = 6 frames ~0.08 s at 72 Hz)
 void SetMonitorEvery(int blits);
 struct Stats { int state; int entries; int demoted; uint64_t reacquires, relocks, locks, attached, fallback; int refEntry[2];
-               uint64_t lockFrame; double devMaxM; int devN;   // devMaxM: the cab vs the play space (log window / lock)
+               uint64_t lockFrame; double devMaxM; int devN;   // devMaxM: the cab vs the play space since the lock
                int lockEyes; bool lockXr; uint64_t monitors, latchOn, latchOff, held, lockRefusals; bool latched;
                uint32_t refIc; int remembered; double monitorUs;   // phase 47d
                uint64_t vehicleKey; bool sameCab;                    // phase 51 (fps profiles)
