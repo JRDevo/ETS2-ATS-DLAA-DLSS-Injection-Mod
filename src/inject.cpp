@@ -1971,8 +1971,8 @@ HRESULT STDMETHODCALLTYPE hkPresent(IDXGISwapChain* sc, UINT sync, UINT flags) {
 #ifdef WITH_DLAA
     CPU_ORIG(FramePace::AfterPresent(sc, paceVr, n));   // (CPU_ORIG: a deliberate wait, not mod CPU -- phase 31 profiler)
 #endif
-    if (n < 5)
-        LogErr("Present #%llu oPresent returned hr=0x%lx", (unsigned long long)n, (unsigned long)hr);
+    if (n < 5)                                            // issue #14 / #15: a trace, not an error (the FAILED path below reports failures)
+        LogDbg("Present #%llu oPresent returned hr=0x%lx", (unsigned long long)n, (unsigned long)hr);
     if (FAILED(hr)) {
         const uint64_t f = g_failures.fetch_add(1);
         if (f < 20)
@@ -5140,8 +5140,10 @@ void PvAssembleTile(ID3D11DeviceContext* ctx, int g, int slot) {
     static int logs = 0;
     if (logs < 2 || (!ok && logs < 6)) {
         ++logs;
-        LogErr("preview depth assembly: tile slot %d of target order %d %s", slot, g,
-            ok ? "reduced into the picture depth" : "FAILED (DS copy)");
+        if (ok)                                           // issue #14 / #15: success is a trace, only the failure is an ERROR line
+            LogDbg("preview depth assembly: tile slot %d of target order %d reduced into the picture depth", slot, g);
+        else
+            LogErr("preview depth assembly: tile slot %d of target order %d FAILED (DS copy)", slot, g);
     }
 }
 
@@ -7248,7 +7250,10 @@ void PreviewOnDiscard(ID3D11DeviceContext* ctx, ID3D11Resource* res) {
     static int logs = 0;
     if (logs < 2 || (!ok && logs < 6)) {
         ++logs;
-        LogErr("preview depth snapshot slot %d: %s (before the DS_P discard)", g_pvCur, ok ? "captured" : "FAILED");
+        if (ok)                                           // issue #14 / #15: success is a trace, only the failure is an ERROR line
+            LogDbg("preview depth snapshot slot %d: captured (before the DS_P discard)", g_pvCur);
+        else
+            LogErr("preview depth snapshot slot %d: FAILED (before the DS_P discard)", g_pvCur);
     }
 }
 #else
@@ -11349,8 +11354,23 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
             g_stage.ClearWindow();
         }
 #endif
+        // issue #14: the per-view fields of the FIFO stats line. VR / single view = e0 e1 (the layout every log reader knows);
+        // a flat multi-view rig = every view with a DLAA unit (e0 .. eN), so the third screen's figures are on this line too.
+        char rBigS[kMaxViews * 40 + 1] = "", dfS[kMaxViews * 28 + 1] = "";
+        {
+            const int nv = FlatViewCount() >= 2 ? FlatDlaaViewCount() : 2;
+            int ob = 0, od = 0;
+            for (int v = 0; v < nv && v < kMaxViews; ++v) {
+                if (ob >= 0 && ob < (int)sizeof(rBigS))
+                    ob += snprintf(rBigS + ob, sizeof(rBigS) - (size_t)ob, "%se%d=%llu/%llu", v ? " " : "", v,
+                                   (unsigned long long)g_rBig[v], (unsigned long long)g_rReads[v]);
+                if (od >= 0 && od < (int)sizeof(dfS))
+                    od += snprintf(dfS + od, sizeof(dfS) - (size_t)od, "%se%d=%llu", v ? " " : "", v,
+                                   (unsigned long long)g_dlaaFrames[v]);
+            }
+        }
         LogDbg("FIFO stats @blit %llu: passes=%llu blits=%llu depth snapshot used=%llu live used=%llu fifo underflow=%llu "
-            "fifo overflow=%llu mirror ignored=%llu secondary gbuf ignored=%llu mirror views handled=%llu not handled=%llu | snapshots: at discard=%llu at forward leave=%llu at clear=%llu live used=%llu discarded-without-snapshot=%llu (scene depth discards seen=%llu) | scene depth aliases=%d (added %llu, switches %llu, bind starts %llu, other-depth discards %llu / binds %llu) | eye map: %s entries=%d rt-parity-mismatch=%llu verdicts=%llu no-vote=%llu corrections=%llu rb-skipped-full=%llu rb-failed=%llu rb-throttled=%llu | R |x|>0.25: e0=%llu/%llu e1=%llu/%llu | dlaa frames e0=%llu e1=%llu | "
+            "fifo overflow=%llu mirror ignored=%llu secondary gbuf ignored=%llu mirror views handled=%llu not handled=%llu | snapshots: at discard=%llu at forward leave=%llu at clear=%llu live used=%llu discarded-without-snapshot=%llu (scene depth discards seen=%llu) | scene depth aliases=%d (added %llu, switches %llu, bind starts %llu, other-depth discards %llu / binds %llu) | eye map: %s entries=%d rt-parity-mismatch=%llu verdicts=%llu no-vote=%llu corrections=%llu rb-skipped-full=%llu rb-failed=%llu rb-throttled=%llu | R |x|>0.25: %s | dlaa frames %s | "
             "cpu: blit %.3f ms/blit, mv-collect %.3f ms/pass (%.0f records/pass), obj-ids %.3f ms/pass | rate: blits/s=%.1f fps=%.1f (%s) [profile=%s preset=%s sharp=%.1f r=%.1f area=%d up=%s%s] | Present #%llu",
             (unsigned long long)g_blitCount, (unsigned long long)g_passSeq, (unsigned long long)g_blitCount,
             (unsigned long long)g_cSnapUsed, (unsigned long long)g_cLiveUsed, (unsigned long long)g_cUnderflow,
@@ -11365,9 +11385,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
             g_vrMode ? "RT map" : "flat", g_eyeMapN, (unsigned long long)g_cRtParityMismatch,
             (unsigned long long)g_cVerdicts, (unsigned long long)g_cVerdictNoVote, (unsigned long long)g_cEyeCorrections,
             (unsigned long long)g_cRbSkipFull, (unsigned long long)g_cRbFailed, (unsigned long long)g_cRbThrottled,
-            (unsigned long long)g_rBig[0], (unsigned long long)g_rReads[0],
-            (unsigned long long)g_rBig[1], (unsigned long long)g_rReads[1],
-            (unsigned long long)g_dlaaFrames[0], (unsigned long long)g_dlaaFrames[1],
+            rBigS, dfS,                                               // issue #14: e0 e1, or e0 .. eN on a flat multi-view rig
             cpuBlitMs, cpuMvMs, recPass, cpuObjMs, blitsPerS, fps,
             g_vrMode ? "VR: fps = blits/s / 2" : (FlatViewCount() >= 2 ? "flat multi-view: fps = blits/s / views" : "flat: fps = blits/s"), kProfName[g_profile], stPreset, stSharp, stRadius, stArea,
             g_upTag, lodTag, (unsigned long long)frame);
