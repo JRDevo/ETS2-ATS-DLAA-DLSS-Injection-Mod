@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstring>
 #include <new>
+#include <xmmintrin.h>                                   // phase 58: _mm_prefetch (the static-skip table, DrawIdRecord::ReplayImpl)
 #ifdef DRAWID_VERIFY_MERGE
 #include <cstdio>
 #include <cstdlib>
@@ -125,7 +126,8 @@ float PSNorm(float4 pos : SV_Position) : SV_Target {
 //  CSVote    : one 64-thread group per CANDIDATE (Cand[], chosen on the CPU: evenly spaced draws of the layer): how many paired
 //              draws of its layer (world voters: origin >= Params2.z m from the camera when at least Cons.z such draws exist
 //              -- the own truck / trailer move with the camera) agree with the candidate's R within Params2.y px at their
-//              own probe points (ProbeDev(Mp_j, R_cand * Mc_j)).
+//              own probe points (ProbeDev(Mp_j, R_cand * Mc_j)). Phase 58: CSPair stores each draw's voter class (Work
+//              kVoterL) and a voter's Mp_j * probe projections (kVoterA); a group computes only R_cand * Mc_j per voter.
 //  CSPick    : per layer the candidate with the most agreeing draws (tie: the smaller mean deviation). A cluster of >= Cons.z
 //              draws replaces the medoid in the solve buffer (SolveRW, Solve[8 + layer].w = its size); else the medoid
 //              stays. Static scenery is hundreds of draws, vehicles tens -- a convoy moving together forms a cluster too,
@@ -149,7 +151,9 @@ float PSNorm(float4 pos : SV_Position) : SV_Target {
 //  CSInherit1: one thread per draw, after CSResolve: a draw whose OWN pair made it static / mover (state 2 / 3) inserts itself
 //              into a hash table of its 16 MVP words (Work kHash, 2n slots, linear probing; the slots are cleared by CSGather;
 //              only when Cons.w bit 2 = mv_drawid_twin); a G-buffer MOVER also appends itself to a compact list (kMovCnt /
-//              kMovList, the candidates of CSAttach).
+//              kMovList, the candidates of CSAttach). Phase 58: one slot per unique (MVP, layer) holding TwinDraw's pick of
+//              that group (InterlockedMin of forward << 31 | draw + 1); the list entries are 32-byte mover records (kMovRec:
+//              origin + the x / y scales CSAttach divides by), see Inherit1Draw.
 //  CSTwin    : a draw still at state 1 (no partner group, oversized group, continuity reject, not mutual) whose MVP is
 //              BIT-identical (-0 == +0) to such a draw's (same layer; G-buffer twins before forward ones, then the lowest
 //              index) takes the twin's R rows and state -- a plate, a lamp, a mirror arm drawn with the vehicle's own matrix
@@ -325,7 +329,8 @@ static const uint kAttach = kMaxDraws * 164u + 4096u;   // v0.10.0 phase 4: atta
 static const uint kTwin = kMaxDraws * 168u + 4096u;     // v0.10.0 phase 5: twin (draw index) per draw (kNone = none)
 static const uint kHash = kMaxDraws * 172u + 4096u;     // v0.10.0 phase 5: MVP hash table, 2n slots (draw + 1, 0 = empty)
 static const uint kMovCnt = kMaxDraws * 180u + 4096u;   // v0.10.0 phase 5: G-buffer movers in the list (16 B)
-static const uint kMovList = kMaxDraws * 180u + 4112u;  // v0.10.0 phase 5: G-buffer mover indices (CSAttach candidates)
+static const uint kMovList = kMaxDraws * 180u + 4112u;  // v0.10.0 phase 5: G-buffer mover indices (phase 58: unused, the list is
+                                                        // kMovRec; kept: removing a static const shifts fxc's output elsewhere)
 static const uint kMStride = 80u;                   // CurM / PrevM bytes per draw (MVP 64 + track 16)
 static const uint kParSlot = kMaxDraws * 184u + 8192u;  // v0.10.0 phase 6: U slot per draw (kNone = not a listed unpaired draw)
 static const uint kParent = kMaxDraws * 188u + 8192u;   // v0.10.0 phase 6: rigid parent (draw index) per draw (kNone = none)
@@ -338,6 +343,14 @@ static const uint kChainBit = 0x80000000u;          // kParVT: won in the 2nd pa
 static const uint kParSum = kMaxDraws * 200u + 24576u;  // v0.10.0 phase 14 round 4: per draw (sum x, sum y, n) of its pixels on
                                                         // a 2 px sub-grid (CSParentCount: its centroid -- the plate hold)
 static const uint kVoteW = kMaxDraws * 212u + 24576u;  // v0.10.0 phase 19: per candidate the agreeing voters' summed IndexCount
+// phase 58 (perf round 2), after the phase-19 block (kVoteW + 1024 B). #define, not static const: measured with fxc 10.0.26100,
+// three more static const declarations alone changed the DXBC of CSParentPick1 / CSParentPick2 (code that never reads them);
+// as macros every entry point this phase does not touch compiles to the same bytecode as before.
+#define kVoterL (kMaxDraws * 212u + 25600u) // per draw (CSPair -> CSVote): bits 0..1 voter class without the far filter, 2..3
+                                            // with it (VoterClass: 0 world, 1 cabin, 2 none), 16..31 min(IndexCount, 65535)
+                                            // (the phase-19 weight)
+#define kVoterA (kMaxDraws * 216u + 25600u) // per draw 72 B: the 6 probe projections a = Mp * probe (x, y, w) of a voter
+#define kMovRec (kMaxDraws * 288u + 25600u) // per mover-list entry 32 B: (draw | cabin << 31, origin x, y, w bits), (sx, sy)
 
 // (v0.10.0 phase 14 round 4: one more C++ raw-string split here, MSVC's 16380-byte literal cap): )" R"(
 float4x4 LoadM(ByteAddressBuffer b, uint a) {
@@ -631,27 +644,59 @@ void CSMatch(uint3 tid : SV_DispatchThreadID) {
 // points. Only an ON-SCREEN probe (|ndc| <= 1.5, w >= 0.05) is compared in screen space; a probe off-screen, at or behind
 // the camera plane compares clip x / y divided by max(w, 1): a perspective divide by a tiny w (a probe beside the camera)
 // would magnify float noise of the camera solve into "motion" there, while a real mover still shows up in clip units.
-float ProbeDev(float4x4 Mp, float4x4 P) {
+// phase 58: split into ProbeAt (the probe projection) + ProbeTerm (one probe's distance) so CSVote can take the PREVIOUS side's
+// projections a = Mp * probe precomputed by CSPair (ProbeDevA): the same expressions, inlined, give the same values bit for bit
+float4 ProbeAt(float4x4 M, int k) {
     // origin, +-4 on the local x / z axes, +4 on y: about a vehicle's half length (a trailer's far end must not hide a
     // motion the origin alone would not show); a larger lever only over-estimates -> "mover" -> its own exact R (safe)
     float4 probes[6] = { float4(0, 0, 0, 1), float4(4, 0, 0, 1), float4(-4, 0, 0, 1),
                          float4(0, 0, 4, 1), float4(0, 0, -4, 1), float4(0, 4, 0, 1) };
+    return mul(M, probes[k]);
+}
+float ProbeTerm(float4 a, float4 b) {                    // a = the true previous position, b = the prediction (a.z / b.z unused)
+    float d;
+    bool onScreen = a.w > 0.05 && b.w > 0.05;
+    float2 na = a.xy / max(a.w, 1e-6), nb = b.xy / max(b.w, 1e-6);
+    onScreen = onScreen && all(abs(na) <= 1.5) && all(abs(nb) <= 1.5);
+    if (onScreen) d = length((na - nb) * Params.zw * 0.5);
+    else d = length((a.xy - b.xy) / max(max(abs(a.w), abs(b.w)), 1.0) * Params.zw * 0.5);
+    return isfinite(d) ? d : 1e9;
+}
+float ProbeDev(float4x4 Mp, float4x4 P) {
+    float dev = 0.0;
+    [unroll] for (int k = 0; k < 6; ++k) dev = max(dev, ProbeTerm(ProbeAt(Mp, k), ProbeAt(P, k)));
+    return dev;
+}
+// phase 58: ProbeDev(Mp_i, P) with draw i's a = Mp_i * probe read from Work kVoterA (CSPair, StoreProbeA)
+float ProbeDevA(uint i, float4x4 P) {
     float dev = 0.0;
     [unroll] for (int k = 0; k < 6; ++k) {
-        float4 a = mul(Mp, probes[k]);
-        float4 b = mul(P, probes[k]);
-        float d;
-        bool onScreen = a.w > 0.05 && b.w > 0.05;
-        float2 na = a.xy / max(a.w, 1e-6), nb = b.xy / max(b.w, 1e-6);
-        onScreen = onScreen && all(abs(na) <= 1.5) && all(abs(nb) <= 1.5);
-        if (onScreen) d = length((na - nb) * Params.zw * 0.5);
-        else d = length((a.xy - b.xy) / max(max(abs(a.w), abs(b.w)), 1.0) * Params.zw * 0.5);
-        dev = max(dev, isfinite(d) ? d : 1e9);
+        float3 a = asfloat(Work.Load3(kVoterA + i * 72u + (uint)k * 12u));
+        dev = max(dev, ProbeTerm(float4(a.x, a.y, 0.0, a.z), ProbeAt(P, k)));
     }
     return dev;
 }
+void StoreProbeA(uint i, float4x4 Mp) {
+    [unroll] for (int k = 0; k < 6; ++k) {
+        float4 a = ProbeAt(Mp, k);
+        Work.Store3(kVoterA + i * 72u + (uint)k * 12u, asuint(float3(a.x, a.y, a.w)));
+    }
+}
 
 // v0.10.0 phase 3: the source is split into two C++ raw strings here (MSVC caps one literal at 16380 bytes): )" R"(
+// consensus voter / candidate class of a draw: 0 world, 1 cabin, 2 none (unpaired, instanced, no MVP, forward, or a world
+// draw nearer than the near filter while enough far ones exist). flags = Tab .z, c3 = column 3 of its current MVP.
+// Phase 58: CSPair evaluates it once per draw for both values of useFar (Work kVoterL); CSVote's groups read the two bits instead
+// of each re-deriving it for every draw (it was VoterLayer: Tab + partner + CurM loads per draw and candidate group).
+uint VoterClass(uint flags, uint partner, float4 c3, bool useFar) {
+    if (partner == kNone || (flags & (kFInst | kFNoMvp | kFFwd)) != 0u) return 2u;
+    bool cab = (flags & kFCabin) != 0u;
+    if (!cab && useFar) return abs(c3.w) >= Params2.z ? 0u : 2u;   // |MVP row 3 .w| = origin w
+    // v0.10.0 phase 14 round 6: an origin-free (camera-relative) draw's own R is the camera rotation only -- never a voter or a
+    // candidate (with the far filter on, its origin w ~ 0 already fails it above)
+    if (OriginFreeCol(c3)) return 2u;
+    return cab ? 1u : 0u;
+}
 // v0.10.0 phase 3: the mutual pair of each draw and its R_draw (kept in Work for the consensus and CSResolve)
 [numthreads(64, 1, 1)]
 void CSPair(uint3 tid : SV_DispatchThreadID) {
@@ -659,6 +704,7 @@ void CSPair(uint3 tid : SV_DispatchThreadID) {
     if (i >= Counts.x) return;
     uint4 e = Tab[i * 2u];
     uint partner = kNone;
+    float4 c3 = float4(0.0, 0.0, 0.0, 0.0);              // phase 58: column 3 of Mc (VoterClass)
     bool shapeOk = true;                                 // v0.10.0 phase 19: rows 4..7 have the shape of an MVP (NotMvp)
     if ((e.z & (kFInst | kFNoMvp)) == 0u && e.x != kNone && NotMvp(LoadMW(CurM, i * kMStride))) {
         shapeOk = false;
@@ -678,7 +724,10 @@ void CSPair(uint3 tid : SV_DispatchThreadID) {
                 float4x4 Rd = mul(Mp, Ic);
                 if (Finite4(Rd)) {
                     partner = b.x;
+                    c3 = Col3(Mc);
                     StoreM(Work, kRd + i * 64u, Rd);
+                    // phase 58: a voter's previous-side probe projections, read by every CSVote group (ProbeDevA)
+                    if (VoterClass(e.z, partner, c3, false) != 2u || VoterClass(e.z, partner, c3, true) != 2u) StoreProbeA(i, Mp);
                     uint old;
                     if ((e.z & kFFwd) == 0u) {
                         // (phase 19: [231] = the cabin layer's VOTERS -- paired, not camera-relative; the small-cabin rule)
@@ -696,22 +745,11 @@ void CSPair(uint3 tid : SV_DispatchThreadID) {
         }
     }
     Work.Store(kPartner + i * 4u, partner);
+    // phase 58: the voter classes (no far filter / far filter; CSVote picks by its useFar) + the phase-19 weight
+    Work.Store(kVoterL + i * 4u, VoterClass(e.z, partner, c3, false) | (VoterClass(e.z, partner, c3, true) << 2) |
+                                 (min(Tab[i * 2u + 1u].z & 0xFFFFFFu, 65535u) << 16));
 }
 
-// consensus voter / candidate class of draw i: 0 world, 1 cabin, 2 none (unpaired, instanced, no MVP, forward, or a world
-// draw nearer than the near filter while enough far ones exist)
-uint VoterLayer(uint i, bool useFar, out uint partner) {
-    uint4 e = Tab[i * 2u];
-    partner = Work.Load(kPartner + i * 4u);
-    if (partner == kNone || (e.z & (kFInst | kFNoMvp | kFFwd)) != 0u) return 2u;
-    bool cab = (e.z & kFCabin) != 0u;
-    if (!cab && useFar) return abs(asfloat(CurM.Load(i * kMStride + 60u))) >= Params2.z ? 0u : 2u;   // |MVP row 3 .w| = origin w
-    // v0.10.0 phase 14 round 6: an origin-free (camera-relative) draw's own R is the camera rotation only -- never a voter or a
-    // candidate (with the far filter on, its origin w ~ 0 already fails it above)
-    uint b = i * kMStride;
-    if (OriginFreeCol(asfloat(uint4(CurM.Load(b + 12u), CurM.Load(b + 28u), CurM.Load(b + 44u), CurM.Load(b + 60u))))) return 2u;
-    return cab ? 1u : 0u;
-}
 
 groupshared uint  gVoteN[64];
 groupshared float gVoteD[64];
@@ -724,21 +762,23 @@ void CSVote(uint3 gid : SV_GroupID, uint gi : SV_GroupIndex) {
     uint want = c < Cons.x ? 0u : 1u;
     bool useFar = Cnt.Load(17u * 4u) >= Cons.z;
     uint ci = c < Cons.x + Cons.y ? CandAt(c) : kNone;
-    uint pc = kNone;
+    uint sh = useFar ? 2u : 0u;                          // phase 58: the voter class bits of this vote (Work kVoterL, CSPair)
     bool ok = false;
-    if (ci < Counts.x) ok = VoterLayer(ci, useFar, pc) == want;
+    if (ci < Counts.x) ok = ((Work.Load(kVoterL + ci * 4u) >> sh) & 3u) == want;
     float4x4 Rc = float4x4(1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1);
     if (ok) Rc = LoadMW(Work, kRd + ci * 64u);
     uint cnt = 0u, wsum = 0u;
     float sdev = 0.0;
     if (ok) {
+        // phase 58: the same draws per thread in the same order as before (i = gi, gi + 64, ...): sdev is a float sum and its
+        // order decides the bits of the mean deviation (CSPick's tie-break), so the voters stay a dense per-draw array, not a
+        // compacted list. Per voter only b = (Rc * Mc) * probe is computed; a = Mp * probe comes from CSPair (ProbeDevA).
         for (uint i = gi; i < Counts.x; i += 64u) {
-            uint p;
-            if (VoterLayer(i, useFar, p) != want) continue;
+            uint vl = Work.Load(kVoterL + i * 4u);
+            if (((vl >> sh) & 3u) != want) continue;
             float4x4 Mc = LoadMW(CurM, i * kMStride);
-            float4x4 Mp = LoadM(PrevM, p * kMStride);
-            float dv = ProbeDev(Mp, mul(Rc, Mc));
-            if (dv < Params2.y) { ++cnt; sdev += dv; wsum += min(Tab[i * 2u + 1u].z & 0xFFFFFFu, 65535u); }
+            float dv = ProbeDevA(i, mul(Rc, Mc));
+            if (dv < Params2.y) { ++cnt; sdev += dv; wsum += vl >> 16; }
         }
     }
     gVoteN[gi] = cnt;
@@ -1056,19 +1096,21 @@ void AttachDraw(uint i) {
     uint best = kNone;
     float bd = Params2.w;
     uint nMov = min(Work.Load(kMovCnt), Counts.x);
+    uint cab = (e.z & kFCabin) != 0u ? 0x80000000u : 0u;
+    // phase 58: the list holds each mover's 32-byte record (Inherit1Draw: origin, sx, sy computed there with the same operations
+    // this loop used to repeat for every forward / unpaired draw); the full matrix is loaded only for the SameAxes test of a
+    // G-buffer draw's candidates that beat the best distance so far. Same list, same order, same tests: the same pick.
     for (uint q = 0u; q < nMov; ++q) {
-        uint j = Work.Load(kMovList + q * 4u);                   // a G-buffer MOVER by its own pair (CSInherit1)
-        uint4 ej = Tab[j * 2u];
-        if (((ej.z ^ e.z) & kFCabin) != 0u) continue;
-        float4x4 Mj = LoadMW(CurM, j * kMStride);
-        float4 oj = Col3(Mj);
+        uint4 r0 = Work.Load4(kMovRec + q * 32u);                // a G-buffer MOVER by its own pair (CSInherit1)
+        if ((r0.x & 0x80000000u) != cab) continue;               // another layer
+        uint j = r0.x & 0x7FFFFFFFu;
+        float4 oj = float4(asfloat(r0.y), asfloat(r0.z), 0.0, asfloat(r0.w));
         if (!(oj.w > 0.05)) continue;
-        float n3 = max(length(Mj[3].xyz), 1e-6);
-        float sx = max(length(Mj[0].xyz) / n3, 1e-6), sy = max(length(Mj[1].xyz) / n3, 1e-6);
-        float dist = length(float3((oi.x - oj.x) / sx, (oi.y - oj.y) / sy, oi.w - oj.w));
+        float2 sxy = asfloat(Work.Load2(kMovRec + q * 32u + 16u));
+        float dist = length(float3((oi.x - oj.x) / sxy.x, (oi.y - oj.y) / sxy.y, oi.w - oj.w));
         // nearest; equal distances -> the lower index (the list order is not deterministic)
         if (best == kNone ? !(dist < bd) : (dist > bd || (dist == bd && j > best))) continue;
-        if (!fwd && !SameAxes(Mc, Mj)) continue;                 // phase 5: a G-buffer draw must share the mover's orientation
+        if (!fwd && !SameAxes(Mc, LoadMW(CurM, j * kMStride))) continue;   // phase 5: a G-buffer draw must share the mover's orientation
         bd = dist; best = j;
     }
     if (best == kNone) return;
@@ -1091,23 +1133,47 @@ void CSAttach(uint3 tid : SV_DispatchThreadID) {
 }
 
 // phase 5: after CSResolve -- own-pair static / mover draws into the twin table, G-buffer movers into the mover list
+// Phase 58 (perf round 2):
+//  MOVER RECORDS: the mover list entry is a 32-byte record (kMovRec): (i | cabin << 31, origin x, y, w), (sx, sy) -- the origin and
+//    the per-mover scales AttachDraw needs, computed here once with exactly its old operations (it re-derived them, 3 length()
+//    of a reloaded matrix, for every forward / unpaired draw x every mover: up to 336 movers in a city).
+//  TWIN TABLE, ONE SLOT PER UNIQUE (MATRIX, LAYER): was one slot per draw, so identical MVPs (camera-relative grass sharing one
+//    matrix) formed one long linear-probe CAS chain that every insert and every TwinDraw lookup walked (SameM + Tab per entry).
+//    Now an insert that meets an occupied slot compares it (same layer + SameM, against the slot's current member -- every
+//    member of a slot carries the same matrix) and, when equal, joins it with InterlockedMin of (forward << 31 | draw + 1): the
+//    slot ends up holding TwinDraw's old pick of that group -- G-buffer before forward, then the lowest index. Two inserts of one
+//    key race to the same first free-or-same slot along the same probe sequence (occupied slots never change key), so a key
+//    never lands in two slots. Empty = 0 (draw + 1 >= 1).
 void Inherit1Draw(uint i) {
     uint4 e = Tab[i * 2u];
     if ((e.z & (kFInst | kFNoMvp)) != 0u || e.x == kNone) return;
     uint st = (uint)(RTab[i * 5u + 4u].x + 0.5);
     if (st != 2u && st != 3u) return;
+    float4x4 M = LoadMW(CurM, i * kMStride);
+    uint cab = (e.z & kFCabin) != 0u ? 0x80000000u : 0u;
     if (st == 3u && (e.z & kFFwd) == 0u) {
         uint k;
         Work.InterlockedAdd(kMovCnt, 1u, k);
-        if (k < kMaxDraws) Work.Store(kMovList + k * 4u, i);
+        if (k < kMaxDraws) {
+            float4 oj = Col3(M);
+            float n3 = max(length(M[3].xyz), 1e-6);
+            float sx = max(length(M[0].xyz) / n3, 1e-6), sy = max(length(M[1].xyz) / n3, 1e-6);
+            Work.Store4(kMovRec + k * 32u, uint4(i | cab, asuint(oj.x), asuint(oj.y), asuint(oj.w)));
+            Work.Store2(kMovRec + k * 32u + 16u, uint2(asuint(sx), asuint(sy)));
+        }
     }
     if ((Cons.w & 4u) == 0u) return;
     uint T = Counts.x * 2u;
-    uint h = HashM(LoadMW(CurM, i * kMStride));
+    uint h = HashM(M);
+    uint enc = ((e.z & kFFwd) != 0u ? 0x80000000u : 0u) | (i + 1u);
     for (uint k2 = 0u; k2 < T; ++k2) {
-        uint orig;
-        Work.InterlockedCompareExchange(kHash + ((h + k2) % T) * 4u, 0u, i + 1u, orig);
-        if (orig == 0u) break;
+        uint a = kHash + ((h + k2) % T) * 4u, orig;
+        Work.InterlockedCompareExchange(a, 0u, enc, orig);
+        if (orig == 0u) break;                                   // a new slot: this (matrix, layer) so far
+        uint j = (orig & 0x7FFFFFFFu) - 1u;
+        if (((Tab[j * 2u].z & kFCabin) != 0u ? 0x80000000u : 0u) != cab || !SameM(M, LoadMW(CurM, j * kMStride))) continue;
+        Work.InterlockedMin(a, enc, orig);                       // the same (matrix, layer): keep the better of the two
+        break;
     }
 }
 [numthreads(64, 1, 1)]
@@ -1132,17 +1198,17 @@ void TwinDraw(uint i) {
     uint T = Counts.x * 2u;
     uint h = HashM(M);
     uint best = kNone;
-    bool bestFwd = true;
+    // phase 58: one slot per (matrix, layer) holding the pick already (G-buffer before forward, then the lowest index; see
+    // Inherit1Draw): the first slot of this layer with the same matrix is the twin
     for (uint k = 0u; k < T; ++k) {
         uint v = Work.Load(kHash + ((h + k) % T) * 4u);
         if (v == 0u) break;                                      // end of the probe chain
-        uint j = v - 1u;
+        uint j = (v & 0x7FFFFFFFu) - 1u;
         if (j == i || j >= Counts.x) continue;
-        uint4 ej = Tab[j * 2u];
-        if (((ej.z ^ e.z) & kFCabin) != 0u) continue;
+        if (((Tab[j * 2u].z ^ e.z) & kFCabin) != 0u) continue;
         if (!SameM(M, LoadMW(CurM, j * kMStride))) continue;
-        bool jf = (ej.z & kFFwd) != 0u;
-        if (best == kNone || (bestFwd && !jf) || (bestFwd == jf && j < best)) { best = j; bestFwd = jf; }
+        best = j;
+        break;
     }
     if (best == kNone) return;
     uint ob = best * 5u;
@@ -2332,31 +2398,65 @@ constexpr uint64_t kStatQuiet = 60;          // round 3: a key that MOVED (or wa
 constexpr uint64_t kStatExpire = 600;        // a slot not seen for this many frames may take another key
 constexpr int      kStatTab = 8192;          // >= 2x the draws of a pass (kMax 4096)
 // badTag: the readback that reset it; moved: the last frame + 1 a draw of the key moved / was only shallow-static (0 = never)
-struct StatEnt { uint64_t key, seen, inc, parent, moved; uint32_t streak, badTag; };
-StatEnt  g_stat[kStatTab] = {};
+// Phase 58 (perf round 2) HOT / COLD SPLIT: the table was one 48-byte entry per slot (393 KB). StaticSkip runs once per candidate
+// draw of every gated G-buffer replay (~1650 per pass, 2 eyes), and a whole G-buffer pass runs between two replays, so the table
+// is cold every time: each probe was a cache miss into a 48-byte entry of which StaticSkip needs a third. Now the slot is split:
+//   HOT  (StatHot, 16 B x 8192 = 128 KB): the key + `packed`, everything StaticSkip needs, precomputed by Poll (StatPack);
+//   COLD (StatCold, 40 B): seen, inc, parent, moved, streak, badTag -- only Poll (the streak feed, StatFind's expiry) and the
+//        per-10-s StaticKeys statistic read it.
+// Same slots, same probing, same expiry / reuse as before (StatFind walks the HOT keys and reads COLD only to test an expiry while
+// inserting), so every decision is the old one bit for bit. `packed` (StatPack):
+//   bits  0..27  hi = seen + kStatFresh            (skip only while frame <= hi: a recent verdict)
+//   bits 28..55  lo = max(parent + kStatParentHold + 1, moved + kStatQuiet)   (0 when neither is set: skip only from lo on)
+//   bits 56..61  min(streak, 63)                   (g_statFrames <= 60, so ">= g_statFrames" is unchanged by the cap)
+//   bit  62      FAR: seen / parent / moved >= 2^27 (in game: ~15 days of 100 fps in one session) -- StaticSkip then evaluates
+//                the exact old tests from COLD (never wrong, only slower)
+// Frames may go BACKWARDS between harness scenes / shadow runs without a clear: [lo, hi] are plain uint64 comparisons with the
+// current frame, exactly the old ones (no deltas against "now"), so that stays identical too.
+struct StatHot { uint64_t key, packed; };
+struct StatCold { uint64_t seen, inc, parent, moved; uint32_t streak, badTag; };
+alignas(64) StatHot g_statHot[kStatTab] = {};
+StatCold g_statCold[kStatTab] = {};
+constexpr uint64_t kStatPackMask = (1ull << 28) - 1ull;
+constexpr uint64_t kStatPackFar = 1ull << 62;
+constexpr uint64_t kStatPackLim = 1ull << 27;            // seen / parent / moved below this: hi / lo fit 28 bits
+uint64_t StatPack(const StatCold& c) {
+    const uint64_t st = (uint64_t)(c.streak < 63u ? c.streak : 63u) << 56;
+    if (c.seen >= kStatPackLim || c.parent >= kStatPackLim || c.moved >= kStatPackLim) return kStatPackFar | st;
+    const uint64_t hi = c.seen + kStatFresh;                                   // StaticSkip: seen + kStatFresh >= frame
+    const uint64_t loP = c.parent ? c.parent + kStatParentHold + 1u : 0u;      //   !(parent && parent + kStatParentHold >= frame)
+    const uint64_t loM = c.moved ? c.moved + kStatQuiet : 0u;                  //   !(moved && moved + kStatQuiet > frame)
+    const uint64_t lo = loP > loM ? loP : loM;
+    return hi | (lo << 28) | st;
+}
+inline uint32_t StatHome(uint64_t key) {                 // the first probe slot of a key (StatFind; the replay's prefetch)
+    if (!key) key = 1;
+    return (uint32_t)(key ^ (key >> 29)) & (kStatTab - 1);
+}
 uint32_t g_statTag = 0;                      // one per fed readback (the "this key had a non-static draw in it" mark)
 int      g_statUsed = 0;                     // slots taken since the last clear
 uint64_t g_statClears[DrawIdMv::kStatClrN] = {};
 constexpr int kStatUnits = 8;                // main units registered for DrawIdMv::PollMain (flat: 1, VR: 2; harness: a few)
 DrawIdMv* g_statUnit[kStatUnits] = {};
-StatEnt* StatFind(uint64_t key, bool insert) {
+// phase 58: returns the SLOT (-1 = none); a new / reused slot is zeroed (packed 0 = streak 0 = never skipped until Poll repacks it)
+int StatFind(uint64_t key, bool insert) {
     if (!key) key = 1;
-    uint32_t h = (uint32_t)(key ^ (key >> 29)) & (kStatTab - 1);
+    uint32_t h = StatHome(key);
     for (int p = 0; p < 32; ++p, h = (h + 1) & (kStatTab - 1)) {
-        StatEnt& e = g_stat[h];
-        if (e.key == key) return &e;
+        StatHot& e = g_statHot[h];
+        if (e.key == key) return (int)h;
         if (!e.key) {
-            if (!insert) return nullptr;
-            e = StatEnt{}; e.key = key;
+            if (!insert) return -1;
+            e.key = key; e.packed = 0; g_statCold[h] = StatCold{};
             ++g_statUsed;
-            return &e;
+            return (int)h;
         }
-        if (insert && e.seen + kStatExpire < g_instFrame && e.parent + kStatExpire < g_instFrame) {   // expired: reused
-            e = StatEnt{}; e.key = key;
-            return &e;
+        if (insert && g_statCold[h].seen + kStatExpire < g_instFrame && g_statCold[h].parent + kStatExpire < g_instFrame) {
+            e.key = key; e.packed = 0; g_statCold[h] = StatCold{};   // expired: reused
+            return (int)h;
         }
     }
-    return nullptr;                                      // probe chain full: the key is never skipped (always replayed)
+    return -1;                                           // probe chain full: the key is never skipped (always replayed)
 }
 constexpr float kParFineSamples = 64.0f;   // < 64 coarse samples (~1000 px at mv_vote_res 4) = a FINE listed draw
 // v0.10.0 phase 9: dlaa.ini mv_fold_dispatch (1 = CSPickResolve / CSListTwin, 0 = the phase-8 chain of separate dispatches)
@@ -2403,7 +2503,9 @@ constexpr UINT kCbBytes = 64u + 48u * 16u + 96u;     // v0.10.0 phase 9: + Clip,
 // phase 6c: the vote tables grow to 64 x 192 B (kParTab = kMax * 200 + 8704, end kMax * 200 + 20992)
 // phase 14 round 4: + the per-draw centroid sums (kParSum = kMax * 200 + 24576, kMax * 12 B)
 // phase 19: + the candidates' summed voter IndexCounts (kVoteW = kMax * 212 + 24576, 256 x 4 B)
-constexpr UINT kWorkBytes = (UINT)DrawIdRecord::kMax * 212u + 24576u + 1024u;
+// phase 58: + the voter classes (kVoterL = kMax * 212 + 25600, kMax x 4 B), the voters' probe projections (kVoterA = kMax * 216
+// + 25600, kMax x 72 B) and the mover records (kMovRec = kMax * 288 + 25600, kMax x 32 B)
+constexpr UINT kWorkBytes = (UINT)DrawIdRecord::kMax * 320u + 25600u;   // = the shader's kMovRec + kMaxDraws * 32 (phase 58)
 constexpr UINT kCntBytes = 5376u;               // v0.10.0 phase 8: + dwords 256..383 = instanced draws with a moving parent
                                                  // v0.10.0 phase 22: + dwords 832..1343 = the per-draw MVP layout codes
                                                  // (4 bits per draw, kLayCodeBase in the shader; was 3328)
@@ -3577,6 +3679,10 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
     int splitTok = -1, splitKind = -1, splitN = 0;
     for (int q = 0; q < pend; ++q) {
         const int i = forward ? from + q : m_n - 1 - q;
+        // phase 58: the static-skip table is cold (a whole G-buffer pass ran since the last replay): fetch the home slot of the draw
+        // 16 replays ahead (statGate = a G-buffer replay = reverse order) while this one is issued. A hint only: no decision changes.
+        if (statGate && q + 16 < pend)
+            _mm_prefetch(reinterpret_cast<const char*>(&g_statHot[StatHome(m_key[i - 16].full)]), _MM_HINT_T0);
         const State& s = m_st[i];
         const uint8_t fl = m_key[i].flags;
         if (!replayAll && !(fl & kFLate) && (fl & (kFInstanced | kFNoMvp))) { ++rr.skipped; continue; }
@@ -4097,25 +4203,37 @@ void DrawIdMv::SetReplayStaticEps(float px) {           // round 3 (dlaa.ini mv_
 float DrawIdMv::ReplayStaticEps() { return g_statEps; }
 bool DrawIdMv::StaticSkip(uint64_t key) {
     if (g_statFrames == 0u || g_statEvery <= 1u) return false;
-    const StatEnt* e = StatFind(key, false);
-    if (!e || e->streak < g_statFrames) return false;
-    if (e->seen + kStatFresh < g_instFrame) return false;                   // no recent verdict (readbacks stalled)
-    if (e->parent && e->parent + kStatParentHold >= g_instFrame) return false;   // a rigid parent lately: its plates need it
-    if (e->moved && e->moved + kStatQuiet > g_instFrame) return false;      // round 3: it moved / wobbled lately (a vehicle)
+    // phase 58: the HOT half only (see StatHot / StatPack): the same tests as before, precomputed into one word by Poll
+    const int h = StatFind(key, false);
+    if (h < 0) return false;
+    const uint64_t p = g_statHot[h].packed;
+    if (((p >> 56) & 63u) < g_statFrames) return false;  // the static streak (capped at 63; g_statFrames <= 60)
+    if (p & kStatPackFar) {                              // frame numbers past 2^27: the old tests from the COLD half
+        const StatCold& e = g_statCold[h];
+        if (e.seen + kStatFresh < g_instFrame) return false;
+        if (e.parent && e.parent + kStatParentHold >= g_instFrame) return false;
+        if (e.moved && e.moved + kStatQuiet > g_instFrame) return false;
+    } else {
+        // frame <= hi: a recent verdict (readbacks stalled: replay); frame >= lo: not a rigid parent lately (its plates need it)
+        // and (round 3) it did not move / wobble lately (a vehicle)
+        if (g_instFrame > (p & kStatPackMask) || g_instFrame < ((p >> 28) & kStatPackMask)) return false;
+    }
     // the re-check frame: ~1/every of the static keys each frame, spread by the key's hash
     return (g_instFrame % g_statEvery) != (Mix(key ^ 0x51A7C0DE51A7C0DEull) % g_statEvery);
 }
 void DrawIdMv::StaticClear(int why) {
     if (!g_statUsed) return;                             // nothing to drop (not counted)
-    memset(g_stat, 0, sizeof(g_stat));
+    memset(g_statHot, 0, sizeof(g_statHot));
+    memset(g_statCold, 0, sizeof(g_statCold));
     g_statUsed = 0;
     if (why >= 0 && why < kStatClrN) ++g_statClears[why];
 }
 uint64_t DrawIdMv::StaticClears(int why) { return (why >= 0 && why < kStatClrN) ? g_statClears[why] : 0; }
 int DrawIdMv::StaticKeys(int* atThreshold, int* held) {
     int n = 0, at = 0, hd = 0;
-    for (const StatEnt& e : g_stat) {
-        if (!e.key || e.seen + kStatExpire < g_instFrame) continue;
+    for (int h = 0; h < kStatTab; ++h) {
+        const StatCold& e = g_statCold[h];
+        if (!g_statHot[h].key || e.seen + kStatExpire < g_instFrame) continue;
         ++n;
         if (g_statFrames && e.streak >= g_statFrames) ++at;
         if (e.parent && e.parent + kStatParentHold >= g_instFrame) ++hd;
@@ -4543,22 +4661,27 @@ void DrawIdMv::Poll(ID3D11DeviceContext* ctx) {
                     const bool mov = (c[640 + w] & b) != 0;    // moves (any route) / track reject
                     if (!par && !stat && !mov) {         // no partner: neither builds nor breaks the streak, but HOLDS the
                         ++m_stats.statNeutral;           // key (always re-drawn): an unpaired copy needs its pixels for the
-                        StatEnt* n0 = StatFind(key, false);   // rigid-parent vote (a part of a moving car that shares a mesh
-                        if (n0) n0->parent = src > 0 ? src : 1;   // with parked copies); a key not in the table is never skipped
+                        const int h0 = StatFind(key, false);   // rigid-parent vote (a part of a moving car that shares a mesh
+                        if (h0 >= 0) {                   // with parked copies); a key not in the table is never skipped
+                            g_statCold[h0].parent = src > 0 ? src : 1;
+                            g_statHot[h0].packed = StatPack(g_statCold[h0]);   // phase 58: StaticSkip reads only the HOT word
+                        }
                         continue;
                     }
-                    StatEnt* e = StatFind(key, true);
-                    if (!e) continue;                    // probe chain full: this key is never skipped
+                    const int h = StatFind(key, true);
+                    if (h < 0) continue;                 // probe chain full: this key is never skipped
+                    StatCold* e = &g_statCold[h];
                     if (par) { e->parent = src > 0 ? src : 1; ++m_stats.statParents; }
                     if (src > e->seen) e->seen = src;
                     if (mov || !stat) {                  // (mov: a mover, a track reject, or round 3: only shallow-static)
                         e->streak = 0; e->badTag = tag;
                         if (mov) { ++m_stats.statMoving; e->moved = src + 1; }   // + the kStatQuiet guard (StaticSkip)
-                        continue;
+                    } else {
+                        ++m_stats.statStatic;
+                        // one increment per source frame (inc = frame + 1: 0 = never): two eyes of one frame count once
+                        if (e->badTag != tag && e->inc != src + 1) { if (e->streak < 0xFFFFu) ++e->streak; e->inc = src + 1; }
                     }
-                    ++m_stats.statStatic;
-                    // one increment per source frame (inc = frame + 1: 0 = never): two eyes of one frame count once
-                    if (e->badTag != tag && e->inc != src + 1) { if (e->streak < 0xFFFFu) ++e->streak; e->inc = src + 1; }
+                    g_statHot[h].packed = StatPack(*e);  // phase 58: every change of the COLD half repacks the HOT word
                 }
             }
         }
