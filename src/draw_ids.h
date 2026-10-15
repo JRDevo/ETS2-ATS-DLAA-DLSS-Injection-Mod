@@ -305,7 +305,9 @@ public:
     // (G-buffer + forward depth + forward ids). Every one of those hook bodies does nothing for a call made under t_inDlaa that
     // the replay needs (the per-hook verdicts: the comment block above g_raw in draw_ids.cpp). How -- inject.cpp registers, for
     // each hooked entry point the replay LOOP calls, the context-vtable index, the function MinHook detoured (what the vtable
-    // entry points at) and the hook's trampoline (`o*`: the original). ReplayImpl reads the replay context's vtable ONCE per replay:
+    // entry points at) and the hook's trampoline (`o*`: the original). ReplayImpl reads the replay context's vtable ONCE per replay
+    // for the state Set calls and before EVERY replayed draw for DrawIndexed / DrawIndexedInstanced (phase 58c: d3d11 rewrites
+    // those entries to an Amortized variant after each command-buffer submit; evidence above RawResolve in draw_ids.cpp):
     // an entry still pointing at the detoured function -> the trampoline (exactly what the vtable call reaches, minus our hook
     // body); anything else -- nothing registered (the harness), a hook not installed, an entry the runtime rewrote, a wrapped
     // context -- the vtable call as before. Only the per-draw loop uses it: the pass-level sets (targets, clear, depth / blend
@@ -316,7 +318,10 @@ public:
                        kRawN };
     // (a null target / raw or an out-of-range fn / vtIndex is ignored = that call keeps the vtable). Logged (info) at the first
     // replay and whenever the set of raw calls changes: "MV draw-ids: replay calls ... through the hook trampolines".
+    // phase 58c: a draw that found another entry is logged once per distinct entry (address, module + offset, PE stamp / size).
     static void SetRawCall(int fn, int vtIndex, const void* target, void* raw);
+    // phase 58c: replayed DrawIndexed / DrawIndexedInstanced calls so far through the trampoline / through the vtable (stats)
+    static void RawDraws(uint64_t* tramp, uint64_t* vtab);
     int  GatedDraws() const { return m_instGated; }      // instanced draws not replayed this pass (mv_inst_replay 1)
     // v0.10.0 phase 14 (dlaa.ini mv_replay_static_*): the caller turns the static gate on around the replays of the MAIN
     // G-buffer passes only (off for mirror units / the harness unless asked): a world, non-instanced, non-cabin draw whose key

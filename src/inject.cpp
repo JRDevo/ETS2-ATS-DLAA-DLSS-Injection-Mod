@@ -2229,7 +2229,8 @@ struct PassSlot {
     // ---- v0.6.1 flight recorder: plain counters on the NEWEST slot, reset in StartPass, logged at the blit
     // only for a bad record (PASS ANOMALY) or as a periodic reference (pass sample). Record counts = cand.
     uint32_t diGbuf = 0;             // immediate DrawIndexed while g_gbufPass (all of them, any gate; phase 58b: not the draw-id
-                                     // replays, which call the trampoline -- DrawIdRecord::SetRawCall)
+                                     // replays, which call the trampoline -- DrawIdRecord::SetRawCall; phase 58c: except a
+                                     // replayed draw that finds d3d11's Amortized entry, ~1 per command-buffer submit)
     uint32_t diOther = 0;            // immediate DrawIndexed while !g_gbufPass (phase 58b: ditto)
     uint32_t diDeferred = 0;         // non-immediate DrawIndexed during the pass (frozen at the next StartPass)
     uint32_t defStart = 0;           // g_diDeferred at StartPass
@@ -2238,7 +2239,7 @@ struct PassSlot {
     uint32_t sceneClears = 0;        // ClearDSV of the scene depth incl. the one that started this pass
     uint32_t skSampled = 0;          // v0.6.3 ... rejected by the stable-sampling hash (mv_sample_shift)
     uint32_t skGate = 0;             // G-buffer draws not collected: DLAA off / (MV off and not VR)
-    uint32_t skInDlaa = 0;           // ... t_inDlaa set (phase 58b: only a replay whose DrawIndexed keeps the vtable call)
+    uint32_t skInDlaa = 0;           // ... t_inDlaa set (phase 58b / 58c: only a replay draw that found d3d11's Amortized entry)
     uint32_t skNoCtx = 0;            // ... no ID3D11DeviceContext1 / no game viewport / record not ready
     uint32_t skFull = 0;             // ... layer already holds its cap (v0.6.3: mv_world_slots / mv_cabin_slots)
     uint32_t skNoCb = 0;             // ... no VS cbuffer in slot 0
@@ -10380,7 +10381,8 @@ void LogPassRecord(const char* prefix, int eye, const PassSlot& slot, int lgW, i
     const uint32_t oth = slot.defClosed ? slot.otherThread
                                         : g_gameOtherThread.load(std::memory_order_relaxed) - slot.otStart;
     LogDbg("%s eye=%d s=%llu blit #%llu: records world=%d cabin=%d (last good %d/%d) | DrawIndexed gbuf=%u other=%u "
-        "deferred=%u (the draw-id replays bypass the hook since phase 58b: not counted here or in indlaa) | gbuf binds=%u scene "
+        "deferred=%u (the draw-id replays bypass the hook since phase 58b: not counted here or in indlaa, except the first "
+        "replayed draw after a command-buffer submit, phase 58c) | gbuf binds=%u scene "
         "clears=%u | skips: sampled=%u gate=%u indlaa=%u noctx=%u full=%u nocb=%u range=%u | "
         "pass age %.2f ms, eye blit interval %.2f ms | snap=%d discarded=%d | Present #%llu | foreign-ctx OM/RS/Draw/DI=%u "
         "game-ctx other-thread OM/RS=%u scene-depth changes=%llu secondary gbuf ignored=%llu%s",
@@ -10519,7 +10521,15 @@ void PerfStatsLog(uint64_t blit) {
                   vgPass[1] < 0.0 ? 0.0 : vgPass[1]);
     if (rectShare[1] >= 0.0) snprintf(rcTag, sizeof(rcTag), "%.1f %% (eye 0) / %.1f %% (eye 1)", rectShare[0], rectShare[1]);
     else snprintf(rcTag, sizeof(rcTag), "%.1f %%", rectShare[0] < 0.0 ? 100.0 : rectShare[0]);
-    LogDbg("perf view @blit %llu: area scissor (mv_area_scissor %d, dlaa_area %d): %llu of %llu passes clipped, rect %.1f %% of the "
+    // phase 58c: the replayed draws of this window by path (DrawIdRecord::RawDraws)
+    static uint64_t s_rawT = 0, s_rawV = 0;
+    uint64_t rawT = 0, rawV = 0;
+    DrawIdRecord::RawDraws(&rawT, &rawV);
+    const unsigned long long rawTw = rawT - s_rawT, rawVw = rawV - s_rawV;
+    s_rawT = rawT; s_rawV = rawV;
+    LogDbg("perf view @blit %llu: replayed draws %llu through the hook trampoline, %llu through the vtable (phase 58c: the "
+        "vtable ones found d3d11's Amortized entry -- the first draw after a command-buffer submit -- or a hook not installed) | "
+        "area scissor (mv_area_scissor %d, dlaa_area %d): %llu of %llu passes clipped, rect %.1f %% of the "
         "image on average (last (%ld,%ld)-(%ld,%ld) of %ux%u) | forward depth at %s in %llu of %llu passes | dispatch chain %s | "
         "scissor RS copies failed %llu (total; > 0 = some draws replayed unclipped) | v0.10.2 per-eye coverage: rigid-parent pixel "
         "count + vote grid (mv_area_clip %d, eye rect + %d px n the pass clip; %llu of %llu vote passes clipped to their eye): %s | "
@@ -10527,7 +10537,7 @@ void PerfStatsLog(uint64_t blit) {
         "clip above (the eye is unknown at pass time; the forward target's clear is a whole-target fast clear) | depth snapshot: "
         "100 %% (whole D32S8 copy -- D3D11 copies a depth-stencil resource only whole) | gather .. resolve, list+twin, picks, "
         "cand-copy, medoid: per draw (no pixel size)",
-        (unsigned long long)blit, (int)g_areaScissorCfg, SceneDlaa::Area(), (unsigned long long)g_p9Clipped,
+        (unsigned long long)blit, rawTw, rawVw, (int)g_areaScissorCfg, SceneDlaa::Area(), (unsigned long long)g_p9Clipped,
         (unsigned long long)g_p9Passes, g_p9Clipped ? 100.0 * g_p9ClipShare / (double)g_p9Clipped : 100.0,
         (long)g_p9LastClip.left, (long)g_p9LastClip.top, (long)g_p9LastClip.right, (long)g_p9LastClip.bottom, g_sceneW, g_sceneH,
         "1/2 resolution", (unsigned long long)g_p9Half, (unsigned long long)g_p9Passes,
@@ -23114,6 +23124,8 @@ DWORD WINAPI SetupThread(LPVOID) {
         // test, IsGameCtx, the t_inDlaa tests) for nothing: under t_inDlaa they only pass through (verdicts: draw_ids.cpp above
         // RawResolve). How -- the replay loop calls the trampoline while the replay context's vtable entry is still the function
         // detoured here (cvtbl[i] = the HookFn target); installed hooks only. The pass-level sets and GfxSave::Restore keep the hooks.
+        // Phase 58c: DrawIndexed / DrawIndexedInstanced are compared before every replayed draw (d3d11 swaps their entries to an
+        // Amortized variant after each command-buffer submit; that one must run -- draw_ids.cpp above RawResolve).
         {
             auto raw = [&](int fn, int i, bool in, void* orig) { if (in && orig) DrawIdRecord::SetRawCall(fn, i, cvtbl[i], orig); };
             raw(DrawIdRecord::kRawDi, 12, diHooked, reinterpret_cast<void*>(oDrawIndexed));

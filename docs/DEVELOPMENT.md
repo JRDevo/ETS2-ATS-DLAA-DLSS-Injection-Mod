@@ -686,6 +686,23 @@ non-blocking readback timing -- so it is judged by the check totals and a verify
   trace no longer lists the replay's viewports, the shadow log's "Set calls/pass applied" excludes the replay's sets. Startup log:
   `MV draw-ids: replay calls ... through the hook trampolines (phase 58b)`; a "does not point at the hooked function" suffix =
   the vtable fallback. A scratch harness with all 12 entries registered: every argument list bit-exact, 0 px differ.
+- **58c, DrawIndexed / DrawIndexedInstanced resolved per draw (`draw_ids.cpp`).** The first VR log (ATS 1.61) showed the 58b
+  line flipping within a millisecond: DrawIndexed / DrawIndexedInstanced "do not point at the hooked function", the state
+  sets always do. A scratch probe (d3d11.dll 10.0.26100.9711, symbols from the Microsoft symbol server) found why: the
+  immediate context's vtable is a writable copy INSIDE the object, and after every command-buffer submit (Flush, or implicitly
+  every few thousand draws) d3d11 rewrites its 24 work entries (Draw*, Dispatch*, Copy*, Update*, Clear*, ResolveSubresource,
+  ...; never a state Set) from `CContext::TID3D11DeviceContext_DrawIndexed_<1>` (+0x1535a0, the function we detour) to
+  `..._DrawIndexed_Amortized<1>` (+0x153b70). That variant runs `CContext::AcquireDevCtxIfaceNoSync` ->
+  `PerformAmortizedRenderOperations` / `PerformAcquireResource` (deferred per-submit work), restores the `<1>` entries and
+  re-dispatches through the vtable (= our hook). 58b picked once per replay: while Amortized it lost the trampoline for the whole
+  replay; while `<1>` it skipped the Amortized prologue after a mid-replay submit. Now the draw compares its entry right before
+  each call (two L1 loads): `<1>` -> the trampoline, anything else -> `ctx->X()` (the prologue runs, the next draws take the
+  trampoline). State sets keep the once-per-replay pick. Multithread-protected contexts use `<2>` / `Amortized<0>` entries
+  everywhere: nothing matches, all vtable. A mismatch is logged once per distinct entry: `MV draw-ids: a replayed DrawIndexed
+  found the context's vtable entry at <address> d3d11.dll+0x... (TimeDateStamp, SizeOfImage)`; the debug `perf view` line
+  counts the replayed draws by path. Proven on the RTX 5090 (probe with MinHook detours like SetupThread, Flush every 0 / 1 / 2 /
+  7 / 64 draws: 0 px differ vs `ctx->DrawIndexed`, every vtable fallback reached the hook once) and on WARP (the harness with
+  all 12 hooks installed and registered: `cmpdump` byte-identical to HEAD).
 - **Not verified in game:** the CPU rows `did-replay` / `fwd-depth` / `mirror` (58b) and the static-skip gain (58a); the GpuPerf
   sections `vote` / `attach` / `twin` / `res+inh` / `medoid` (58a). Bit identity on NVIDIA hardware rests on the DXBC op patterns
   being unchanged (the medoid pass was A/B-tested on the 5090 itself).

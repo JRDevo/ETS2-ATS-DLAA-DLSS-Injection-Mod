@@ -3557,6 +3557,8 @@ uint64_t DrawIdRecord::ScissorRsFails() { return g_rsFails; }
 //    VrsOnDraw, LightRedrawOnDraw, FwdOnDraw, BiasOnDraw -- tests !inDlaa. The ONE effect: the newest pass slot's flight-recorder
 //    counters ++diGbuf / ++diOther and ++skInDlaa (log only: the PASS ANOMALY / pass sample line). CHOSEN: not bumped by the raw
 //    path; that line now says the draw-id replays are not counted (they were the only mod DrawIndexed on the game context).
+//    Phase 58c: a replayed draw that finds d3d11's Amortized entry (the first after a command-buffer submit) still goes through
+//    the vtable = the hook, and bumps them as before 58b.
 //  - hkDrawIndexedInstanced: every branch tests !inDlaa -- nothing.
 //  - hkRSSetViewports: TraceVp (the F11 frame trace, debug) runs before the t_inDlaa test, so the trace listed the replay's
 //    per-draw viewports (never its draws: hkDrawIndexed traces only !inDlaa) -- no longer; then t_inDlaa -> the original at once
@@ -3580,12 +3582,50 @@ uint64_t DrawIdRecord::ScissorRsFails() { return g_rsFails; }
 // gain): IASetPrimitiveTopology, VSSetShaderResources, RSSetScissorRects, PSSetConstantBuffers1, PSSetShaderResources.
 // Another tool that detoured the same function AFTER us is skipped by the trampoline call too (as inject.cpp's existing direct
 // oClearDSV / oOMSetDepthStencilState / oRSSetViewports calls already do).
+// ---- phase 58c: DrawIndexed / DrawIndexedInstanced are resolved PER DRAW ----
+// Why -- the first VR log (ATS 1.61, 2026-10-15 21:03) showed the mask flipping within a millisecond: DrawIndexed /
+// DrawIndexedInstanced sometimes "does not point at the hooked function", the state sets never. Evidence (scratch probe on this
+// machine, d3d11.dll 10.0.26100.9711, hardware device FL 11_1, symbols from the Microsoft symbol server):
+//  - The immediate context's vtable is NOT d3d11.dll's .rdata table: the object's vtable pointer points 8 bytes further INTO the
+//    object (a per-object, writable copy), and the runtime rewrites ENTRIES of it (the pointer never changes).
+//  - Normal state: vt[12] = CContext::TID3D11DeviceContext_DrawIndexed_<1> (d3d11+0x1535a0), vt[20] = ..._DrawIndexedInstanced_<1>
+//    (+0x1531b0) = the functions SetupThread takes from the dummy device and MinHook detours. <1> = no multithread protection:
+//    SupportsFeatureLevel / FL9 checks, then the UMD's DDI (SWDC_Context::DDI_DrawIndexed_ or the driver's pfn).
+//  - After EVERY command-buffer submit -- an explicit Flush, and implicitly (200000 back-to-back DrawIndexed: 13 times, the first
+//    after ~4500 draws) -- 24 WORK entries (Draw*, Dispatch*, Copy* / Update*, Clear*, GenerateMips, ResolveSubresource,
+//    CopySubresourceRegion1, UpdateSubresource1, ClearView, CopyTiles / UpdateTiles; NO state Set call) are rewritten to
+//    CContext::TID3D11DeviceContext_<Fn>_Amortized<1> (DrawIndexed_Amortized<1> = d3d11+0x153b70, DrawIndexedInstanced_Amortized<1>
+//    = +0x1a4580). That variant builds a CDevCtxInterface<CContext>, whose constructor calls CContext::AcquireDevCtxIfaceNoSync ->
+//    CContext::PerformAmortizedRenderOperations / CContext::PerformAcquireResource (the runtime's deferred per-submit work) and
+//    returns CContext::g_DefaultID3D11DeviceContextVtbl, i.e. puts the fast <1> entries back; it then calls vtable slot 12 (20)
+//    = <1> = through our hook (then CContext::SetMarker when a context flag asks). The first work call after a submit takes it.
+//  - So the Amortized prologue does work that must not be skipped: phase 58b's ONCE-per-replay pick, taken while the entry was
+//    <1>, called the trampoline on through every later submit (scratch probe: the context then stayed Amortized for up to 4096
+//    replayed draws, i.e. the deferred work waited for the game's next work call); taken while Amortized, it lost the trampoline
+//    for the whole replay (the log's flip).
+//  - With multithread protection (SetMultithreadProtected(TRUE)) EVERY entry is a locking <2> / Amortized<0> variant that never
+//    reaches <1>: nothing matches -> the vtable everywhere (and the hooks would not see the game's draws at all; the in-game state
+//    sets matching <1> show the game's context is not protected).
+// How -- DrawIndexed / DrawIndexedInstanced compare the entry right before EACH replayed draw (two L1 loads: the in-object vtable
+// pointer, the entry): <1> = the trampoline (bit for bit what ctx->DrawIndexed reaches, minus our hook body); anything else =
+// ctx->X() as before -- an Amortized entry runs its prologue, restores <1> and enters our hook, which passes the call on
+// (t_inDlaa), so the following draws take the trampoline again. The state Set entries keep the once-per-replay pick: the runtime
+// never rewrites them between submits (only SetMultithreadProtected / SwapDeviceContextState, never inside a replay), and in the
+// Amortized state the game's own state sets call the same <1> functions. Proven on the RTX 5090 (scratch probe, MinHook detours
+// like SetupThread, 4096 draws with state sets per draw, Flush every 0 / 1 / 2 / 7 / 64 draws): 0 px differ vs ctx->DrawIndexed,
+// every vtable fallback reached the hook exactly once and left <1> behind. A mismatch is logged once per distinct entry with its
+// address, module + offset and the module's PE TimeDateStamp / SizeOfImage (the symbol-server key), so a log explains itself.
 namespace {
 struct RawEntry { int vt; const void* target; void* raw; };
 RawEntry          g_raw[DrawIdRecord::kRawN] = {};   // written at hook install (SetRawCall), read by every replay
 std::atomic<bool> g_rawOn{false};                    // any entry registered (the harness: never -> no vtable read at all)
 uint32_t          g_rawLogMask = 0xFFFFFFFFu;        // the RawFn mask last logged (render thread)
 int               g_rawLogs = 0;
+constexpr uint32_t kRawPerDraw = (1u << DrawIdRecord::kRawDi) | (1u << DrawIdRecord::kRawDii);   // phase 58c: checked per draw
+uint64_t          g_rawDrawTramp = 0, g_rawDrawVt = 0;   // phase 58c: replayed draws through the trampoline / the vtable (RawDraws)
+const void*       g_rawMissSeen[6] = {};             // phase 58c: the (fn, entry) pairs already logged (render thread)
+int               g_rawMissFn[6] = {};
+int               g_rawMissN = 0;
 static_assert(DrawIdRecord::kRawN <= 32, "RawFn bits are a uint32_t mask");
 const char* const kRawName[DrawIdRecord::kRawN] = {
     "IASetInputLayout", "IASetVertexBuffers", "IASetIndexBuffer", "VSSetShader", "VSSetConstantBuffers1", "VSSetSamplers",
@@ -3602,15 +3642,62 @@ struct RawCalls {
     void (STDMETHODCALLTYPE* vp)(ID3D11DeviceContext*, UINT, const D3D11_VIEWPORT*);
     void (STDMETHODCALLTYPE* ps)(ID3D11DeviceContext*, ID3D11PixelShader*, ID3D11ClassInstance* const*, UINT);
     void (STDMETHODCALLTYPE* psSmp)(ID3D11DeviceContext*, UINT, UINT, ID3D11SamplerState* const*);
+    // phase 58c: di / dii are registered-or-null; the replay loop takes them only while VtNow(ctx, diVt) == diT (per draw)
     void (STDMETHODCALLTYPE* di)(ID3D11DeviceContext*, UINT, UINT, INT);
     void (STDMETHODCALLTYPE* dii)(ID3D11DeviceContext*, UINT, UINT, UINT, INT, UINT);
+    const void* diT;
+    const void* diiT;
+    int diVt, diiVt;
 };
+// the context's vtable entry i NOW (the vtable pointer is re-read too: it is the object's own field)
+inline const void* VtNow(ID3D11DeviceContext* ctx, int i) { return (*reinterpret_cast<void* const* const*>(ctx))[i]; }
+// "<address> <module>+0x<offset> (TimeDateStamp 0x.., SizeOfImage 0x..)" -- module = the loaded image holding the address
+void AddrTag(const void* p, char* out, size_t n) {
+    HMODULE m = nullptr;
+    if (!p || !GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                  static_cast<LPCWSTR>(p), &m) || !m) {
+        snprintf(out, n, "%p (in no loaded module: heap / generated code)", p);
+        return;
+    }
+    wchar_t path[MAX_PATH] = L"";
+    const DWORD len = GetModuleFileNameW(m, path, MAX_PATH);
+    const wchar_t* base = len ? wcsrchr(path, L'\\') : nullptr;
+    base = base ? base + 1 : (len ? path : L"?");
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(m);
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(reinterpret_cast<const char*>(m) + dos->e_lfanew);
+    snprintf(out, n, "%p %ls+0x%llx (TimeDateStamp 0x%08lx, SizeOfImage 0x%lx)", p, base,
+             (unsigned long long)(static_cast<const char*>(p) - reinterpret_cast<const char*>(m)),
+             (unsigned long)nt->FileHeader.TimeDateStamp, (unsigned long)nt->OptionalHeader.SizeOfImage);
+}
+// phase 58c, cold: a replayed draw found its vtable entry not on the detoured function -- logged once per distinct entry
+__declspec(noinline) void RawDrawMiss(int k, const void* now) {
+    for (int i = 0; i < g_rawMissN; ++i)
+        if (g_rawMissFn[i] == k && g_rawMissSeen[i] == now) return;
+    if (g_rawMissN >= (int)(sizeof(g_rawMissSeen) / sizeof(g_rawMissSeen[0]))) return;
+    g_rawMissFn[g_rawMissN] = k;
+    g_rawMissSeen[g_rawMissN++] = now;
+    char a[200], t[200];
+    AddrTag(now, a, sizeof(a));
+    AddrTag(g_raw[k].target, t, sizeof(t));
+    Log("MV draw-ids: a replayed %s found the context's vtable entry at %s, not the hooked function %s -- that draw goes through "
+        "the vtable (phase 58c; expected after a command-buffer submit: d3d11's CContext::TID3D11DeviceContext_%s_Amortized<1>, "
+        "which runs the runtime's deferred per-submit work and puts the hooked entry back, so the next draws take the trampoline "
+        "again; logged once per distinct entry)", DrawIdRecord::kRawDi == k ? "DrawIndexed" : "DrawIndexedInstanced", a, t,
+        DrawIdRecord::kRawDi == k ? "DrawIndexed" : "DrawIndexedInstanced");
+}
 template <class F> inline void RawPick(F& f, int k, void* const* vt, uint32_t& mask) {
     const RawEntry& e = g_raw[k];
     if (e.raw && vt[e.vt] == e.target) { f = reinterpret_cast<F>(e.raw); mask |= 1u << k; }
     else f = nullptr;
 }
-// Once per replay: the context's vtable entries against the detoured functions. Returns the RawFn mask taken raw.
+// phase 58c: a per-draw entry -- the trampoline + what to compare, whenever the hook is registered (the entry is tested per draw)
+template <class F> inline void RawPickPerDraw(F& f, const void*& target, int& vtIndex, int k, uint32_t& mask) {
+    const RawEntry& e = g_raw[k];
+    if (e.raw) { f = reinterpret_cast<F>(e.raw); target = e.target; vtIndex = e.vt; mask |= 1u << k; }
+    else { f = nullptr; target = nullptr; vtIndex = 0; }
+}
+// Once per replay: the context's vtable entries of the state Set calls against the detoured functions + the per-draw entries
+// (phase 58c). Returns the RawFn mask taken raw (the per-draw bits: registered).
 uint32_t RawResolve(ID3D11DeviceContext1* ctx, RawCalls& rc) {
     rc = RawCalls{};
     if (!g_rawOn.load(std::memory_order_acquire)) return 0;
@@ -3626,22 +3713,31 @@ uint32_t RawResolve(ID3D11DeviceContext1* ctx, RawCalls& rc) {
     RawPick(rc.vp, DrawIdRecord::kRawVp, vt, m);
     RawPick(rc.ps, DrawIdRecord::kRawPs, vt, m);
     RawPick(rc.psSmp, DrawIdRecord::kRawPsSmp, vt, m);
-    RawPick(rc.di, DrawIdRecord::kRawDi, vt, m);
-    RawPick(rc.dii, DrawIdRecord::kRawDii, vt, m);
+    RawPickPerDraw(rc.di, rc.diT, rc.diVt, DrawIdRecord::kRawDi, m);
+    RawPickPerDraw(rc.dii, rc.diiT, rc.diiVt, DrawIdRecord::kRawDii, m);
     if (m != g_rawLogMask && g_rawLogs < 8) {            // the first replay + every change of the set (a rewritten vtable entry)
         ++g_rawLogs;
         g_rawLogMask = m;
-        char raw[400] = "", vtc[400] = "";
-        size_t ro = 0, vo = 0;
+        char raw[400] = "", pd[100] = "", vtc[2400] = "";
+        size_t ro = 0, po = 0, vo = 0;
         for (int k = 0; k < DrawIdRecord::kRawN; ++k) {
             if (!g_raw[k].raw) continue;                 // not registered (hook not installed): the vtable, as before
-            const bool on = ((m >> k) & 1u) != 0;
-            char* b = on ? raw : vtc;
-            size_t& o = on ? ro : vo;
-            if (o < sizeof(raw)) o += (size_t)snprintf(b + o, sizeof(raw) - o, "%s%s", o ? " " : "", kRawName[k]);
+            if ((kRawPerDraw >> k) & 1u) {
+                if (po < sizeof(pd)) po += (size_t)snprintf(pd + po, sizeof(pd) - po, "%s%s", po ? " " : "", kRawName[k]);
+            } else if ((m >> k) & 1u) {
+                if (ro < sizeof(raw)) ro += (size_t)snprintf(raw + ro, sizeof(raw) - ro, "%s%s", ro ? " " : "", kRawName[k]);
+            } else if (vo < sizeof(vtc)) {               // phase 58c: what the entry points at instead, and what we hooked
+                char a[200], t[200];
+                AddrTag(vt[g_raw[k].vt], a, sizeof(a));
+                AddrTag(g_raw[k].target, t, sizeof(t));
+                vo += (size_t)snprintf(vtc + vo, sizeof(vtc) - vo, "%s%s = %s (hooked: %s)", vo ? "; " : "", kRawName[k], a, t);
+            }
         }
-        Log("MV draw-ids: replay calls %s through the hook trampolines (phase 58b)%s%s%s", ro ? raw : "none",
-            vo ? "; the context's vtable does not point at the hooked function of " : "", vo ? vtc : "",
+        Log("MV draw-ids: replay calls %s through the hook trampolines (phase 58b)%s%s%s%s%s%s", ro ? raw : "no state set",
+            po ? "; " : "", po ? pd : "", po ? " through theirs per draw, while the context's vtable entry is the hooked function "
+                                               "(phase 58c: d3d11 swaps in an Amortized variant after each command-buffer submit, "
+                                               "which must run)" : "",
+            vo ? "; the context's vtable does not point at the hooked function of: " : "", vo ? vtc : "",
             vo ? " -- those keep the vtable call" : "");
     }
     return m;
@@ -3653,6 +3749,10 @@ void DrawIdRecord::SetRawCall(int fn, int vtIndex, const void* target, void* raw
     if (fn < 0 || fn >= kRawN || vtIndex < 0 || vtIndex > 133 || !target || !raw) return;
     g_raw[fn] = RawEntry{ vtIndex, target, raw };
     g_rawOn.store(true, std::memory_order_release);
+}
+void DrawIdRecord::RawDraws(uint64_t* tramp, uint64_t* vtab) {   // phase 58c
+    if (tramp) *tramp = g_rawDrawTramp;
+    if (vtab) *vtab = g_rawDrawVt;
 }
 
 DrawIdRecord::ReplayResult DrawIdRecord::Replay(ID3D11DeviceContext1* ctx, ID3D11RenderTargetView* idRtv,
@@ -3760,6 +3860,7 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
     // phase 58b: the per-draw calls below through the hook trampolines where the context's vtable still leads into our hooks
     RawCalls rc;
     RawResolve(ctx, rc);
+    uint64_t drawTramp = 0, drawVt = 0;                  // phase 58c: this replay's draws by path (g_rawDraw*)
 
     // per-draw: only what differs from the previously replayed draw (first draw: everything). REVERSE draw order: the game
     // tests depth GREATER, so of two draws at exactly the same depth the FIRST one owns the pixel; with EQUAL the last
@@ -3909,16 +4010,30 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
             const UINT first = drawId * 16u, num = 16u;
             ctx->PSSetConstantBuffers1(0, 1, &idCb, &first, &num);
         }
+        // phase 58c: the draw's trampoline only while its vtable entry is the hooked function NOW (after this draw's sets); else
+        // the vtable -- d3d11's Amortized entry after a command-buffer submit runs its prologue, restores the entry, enters our hook
         if (s.instanced) {
-            if (rc.dii) rc.dii(ctx, s.ic, s.inst, s.si, s.bv, s.sinst);
-            else ctx->DrawIndexedInstanced(s.ic, s.inst, s.si, s.bv, s.sinst);
+            const void* now = rc.dii ? VtNow(ctx, rc.diiVt) : nullptr;
+            if (rc.dii && now == rc.diiT) { rc.dii(ctx, s.ic, s.inst, s.si, s.bv, s.sinst); ++drawTramp; }
+            else {
+                if (rc.dii) RawDrawMiss(DrawIdRecord::kRawDii, now);
+                ctx->DrawIndexedInstanced(s.ic, s.inst, s.si, s.bv, s.sinst);
+                ++drawVt;
+            }
         } else {
-            if (rc.di) rc.di(ctx, s.ic, s.si, s.bv);
-            else ctx->DrawIndexed(s.ic, s.si, s.bv);
+            const void* now = rc.di ? VtNow(ctx, rc.diVt) : nullptr;
+            if (rc.di && now == rc.diT) { rc.di(ctx, s.ic, s.si, s.bv); ++drawTramp; }
+            else {
+                if (rc.di) RawDrawMiss(DrawIdRecord::kRawDi, now);
+                ctx->DrawIndexed(s.ic, s.si, s.bv);
+                ++drawVt;
+            }
         }
         cur = &s;
         ++rr.replayed;
     }
+    g_rawDrawTramp += drawTramp;                         // phase 58c (RawDraws)
+    g_rawDrawVt += drawVt;
     GpuPerf::End(ctx, splitTok);
     sv.Restore(ctx);
     if (depth) {                                         // v0.10.0 phase 10: only the depth cursor moves
