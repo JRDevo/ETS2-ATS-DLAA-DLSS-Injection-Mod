@@ -640,10 +640,55 @@ hk:DrawIdx 0.12-0.17 for 3400-4500 calls). What changed:
 - **Verified:** WARP harness 150726 / 150726 checks, motion vectors bit-identical over 2237 frames (`cmp`), Release build 0
   warnings. **Not verified:** the in-game CPU / GPU figures (the next VR log's `CPU prof` lines and `DLAA GPU cost` lines), the
   quad reuse on the user's runtime (Virtual Desktop) and with OFXR Bridge / VectorXR.
-- **Deferred (audit backlog):** the replay through raw trampolines (0.1-0.17 ms), the static-skip table hot / cold split, GPU
-  shader items (attach mover list, 64-thread medoid, pick lanes, twin hash, CSVote voter lists), skipping multi-instance replays
-  (vote semantics), the depth snapshot crop (high risk), RCAS + copy-out as one PS pass, profiler counter-only StateSet scopes,
-  a VR-only DLSS preset key.
+- **Deferred (audit backlog):** skipping multi-instance replays (vote semantics), the depth snapshot crop (high risk), RCAS +
+  copy-out as one PS pass, profiler counter-only StateSet scopes, a VR-only DLSS preset key, the rigid-parent pick over 8 lanes
+  (p-pick1 / p-pick2). Done in phase 58: the replay through raw trampolines, the static-skip hot / cold split, the attach mover
+  list, the 64-thread medoid, the twin hash, the CSVote voter lists.
+
+## Phase 58: performance round 2 (2026-10-15)
+
+The deferred items of phase 57 that are bit-identical by construction, each proven on the WARP harness (`cmpdump` of HEAD vs the
+change byte-identical for the default and `legacy` runs; `rstatic=4 didshadow=2` varies run to run on WARP by itself -- the
+non-blocking readback timing -- so it is judged by the check totals and a verify build, not the pixel count).
+- **58a, static-skip table hot / cold split (`draw_ids.cpp`).** `StatEnt` (48 B x 8192 = 393 KB; StaticSkip probed it ~6000x per
+  frame with a whole G-buffer pass between uses = a cache miss per probe) is `StatHot {key, packed}` (128 KB, `alignas(64)`) +
+  `StatCold {seen, inc, parent, moved, streak, badTag}`. Poll packs the hot word (`StatPack`: bits 0..27 hi = seen + kStatFresh,
+  28..55 lo = max(parent + 31, moved + 60), 56..61 streak capped at 63, bit 62 FAR = a frame number past 2^27 -> the old tests
+  from the cold half); StaticSkip = one word, `lo <= frame <= hi` + the streak. `StatFind` returns a slot index. The replay loop
+  prefetches the hot slot of draw i-16. A verify build (both tables fed, every decision compared) gave 88998 decisions, 0
+  mismatches, also with the FAR threshold forced to 2^6.
+- **58a, HLSL (`draw_ids.cpp`).** `Inherit1Draw` appends a 32-byte mover record (`kMovRec`: i | cabin << 31, oj.xyw, sx, sy --
+  the same dp3 / sqrt / max / div sequence) and `AttachDraw` walks those, loading the full Mj only for `SameAxes` on candidates
+  that beat the best distance. `CSPair` writes per-draw `kVoterL` (voter class with / without the far filter + IndexCount) and
+  `kVoterA` (the 6 `a = Mp*probe` projections) so `CSVote` computes only `mul(Rc, Mc)` and b with the SAME thread-to-draw mapping
+  (the float sum order feeds CSPick's tie-break, so no compacted list). The twin table keeps one slot per unique (matrix, layer):
+  an occupied slot with `SameM` gets `InterlockedMin(slot, fwd << 31 | j + 1)` = "G-buffer first, then the lowest index";
+  `TwinDraw` takes the first `SameM` slot of its layer. Work: + `kVoterL` / `kVoterA` / `kMovRec` (`kWorkBytes` = kMax*320 +
+  25600, ~+440 KB per unit). The offsets are `#define`s: fxc 10.0.26100 changes the DXBC of UNRELATED entry points when a new
+  `static const uint` is added (reproduced on HEAD), and `kMovList` stays for the same reason.
+- **58a, pass A medoid (`motion_vectors.cpp` `kSolveShader`).** `[numthreads(2,1,1)]` with `float4x4 R[16]` per thread (four
+  indexable temps, spills) -> one 64-thread group: threads 0..31 each one pair's R_k into groupshared (`NotMvp` / `Inv4` /
+  `mul(Mp, ic)` as before), 0..31 the costs summing over j ascending (the same mul / mad / sqrt / add chain in the DXBC), 0..1
+  the picks (strict `<`: the first index wins ties), the ego scan in chunks of 64 with `InterlockedOr` + `countbits` prefix = "the
+  first 16 valid in AllPairs order", thread 32 InvRow3, thread 0 the ego pick. Proven bit for bit on WARP and on the RTX 5090 with
+  an A/B tester (old vs new bytecode, 50000 random trials incl. ties / NaN / Inf / all-near / Counts.z > 128, 0 differing);
+  5090 timing 53 -> 14 us per dispatch.
+- **58b, the replay through the hook trampolines (`draw_ids.cpp` + `inject.cpp`).** `ReplayImpl`'s per-draw loop (the G-buffer
+  replay, forward ids, the forward-depth and glow-bias batches, the mirror units) used to issue its state sets and draws through
+  `ctx->X()` = the mod's own hooks (CPU_HOOK, FromOfxr, IsGameCtx, the t_inDlaa tests: ~130-220 ns per replayed draw vs ~37 for a
+  game draw). `DrawIdRecord::SetRawCall(fn, vtIndex, target, raw)` (12 entries: IL / VB / IB / VS / VSCb1 / VSSmp / RS / Vp / PS /
+  PSSmp / DrawIndexed / DrawIndexedInstanced, filled by `SetupThread` from the `o*` trampolines where the hook installed);
+  `RawResolve` once per ReplayImpl reads the context's vtable and uses a trampoline only where the entry still equals the detoured
+  function (anything else -- the harness, a hook not installed, a rewritten entry, a wrapped context -- stays the vtable call).
+  Pass-level sets (OMSetRenderTargets, clears, OM states, GfxSave::Save / Restore) stay through the hooks, so the did_shadow
+  trackers see the game's state come back (Restore re-sets every group; verify mode `didshadow=2 shverify=1` passes). Side
+  effects given up: `ps.diGbuf / diOther / skInDlaa` no longer count replay draws (the PASS ANOMALY line says so), the F11 viewport
+  trace no longer lists the replay's viewports, the shadow log's "Set calls/pass applied" excludes the replay's sets. Startup log:
+  `MV draw-ids: replay calls ... through the hook trampolines (phase 58b)`; a "does not point at the hooked function" suffix =
+  the vtable fallback. A scratch harness with all 12 entries registered: every argument list bit-exact, 0 px differ.
+- **Not verified in game:** the CPU rows `did-replay` / `fwd-depth` / `mirror` (58b) and the static-skip gain (58a); the GpuPerf
+  sections `vote` / `attach` / `twin` / `res+inh` / `medoid` (58a). Bit identity on NVIDIA hardware rests on the DXBC op patterns
+  being unchanged (the medoid pass was A/B-tested on the 5090 itself).
 
 ## Tuning menu overlay (v0.10.0)
 

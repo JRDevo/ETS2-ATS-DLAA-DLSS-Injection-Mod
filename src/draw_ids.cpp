@@ -3546,6 +3546,115 @@ ID3D11RasterizerState* DrawIdRecord::ScissorRs(ID3D11Device* dev, ID3D11Rasteriz
 }
 uint64_t DrawIdRecord::ScissorRsFails() { return g_rsFails; }
 
+// ---- phase 58b (perf round 2) RAW REPLAY CALLS (see SetRawCall in draw_ids.h) ----
+// PER-HOOK VERDICTS -- what inject.cpp's hook does with a call the replay loop makes (render thread, the game context, t_inDlaa =
+// true: every caller -- DidReplay, DidFwdReplay, FwdBatch, the glow bias batch, MirReplay -- sets it around the replay), and what
+// the trampoline call changes:
+//  - hkDrawIndexed: CPU_HOOK is idle (a hook scope opens only at depth 0; every replay runs inside a hook + the did-replay / fwd-depth
+//    / mirror block), Ofxr::FromOfxr is false (the return address is ours), CountGameDraw(inDlaa) returns at once (no frame-end
+//    rule, no g_plDraws / watchdog), and every per-draw branch -- the F11 trace, rastSeen, the candidate collector, ObjOnDraw,
+//    DidOnDraw, MirOnDraw, the preview collector + PreviewFlush / MenuDrawPreview, the stencil-id twin, LodOnDraw, MenuLate*,
+//    VrsOnDraw, LightRedrawOnDraw, FwdOnDraw, BiasOnDraw -- tests !inDlaa. The ONE effect: the newest pass slot's flight-recorder
+//    counters ++diGbuf / ++diOther and ++skInDlaa (log only: the PASS ANOMALY / pass sample line). CHOSEN: not bumped by the raw
+//    path; that line now says the draw-id replays are not counted (they were the only mod DrawIndexed on the game context).
+//  - hkDrawIndexedInstanced: every branch tests !inDlaa -- nothing.
+//  - hkRSSetViewports: TraceVp (the F11 frame trace, debug) runs before the t_inDlaa test, so the trace listed the replay's
+//    per-draw viewports (never its draws: hkDrawIndexed traces only !inDlaa) -- no longer; then t_inDlaa -> the original at once
+//    (no g_gameVp copy, no ReconcileViewports jitter shift, no frame-start marker). A context the hook does not take for the
+//    game's (an ID3D11DeviceContext1 alias at another address) counted our calls as foreign -- no longer either.
+//  - hkPSSetShader / hkPSSetSamplers (forward-depth batch only: the game's PS + samplers per draw): g_lodPsCur / NoteGamePs and the
+//    LOD twin substitution test !t_inDlaa -> the original with the recorded samplers (twins included: Record read what was bound).
+//  - the did_shadow hooks (IASetInputLayout / IASetVertexBuffers / IASetIndexBuffer / VSSetShader / VSSetConstantBuffers1 /
+//    VSSetSamplers / RSSetState; installed with did_shadow >= 1): no t_inDlaa test -- DidShadow::Note* applied the replay's sets to
+//    the armed shadow and GfxSave::Restore (through the hooks) put the game's values back. Restore sets every one of these groups
+//    IN FULL (slot 0, the whole tracked range) on the same thread / context, and no Record runs between the replay's first set and
+//    its Restore, so the shadow ends on the game's values with every group valid EITHER WAY: through the trampolines the shadow
+//    simply keeps the game's values during the replay and Restore's Notes find the same pointers (Put: no reference change; the
+//    output-capable bits stay those of the same buffers) and mark the groups valid; a Restore Note that hits Unknown() invalidates
+//    its group in both paths. Same net shadow, so did_shadow's records / verify are unchanged; the shadow's "Set calls/pass applied"
+//    figure no longer counts the replay's sets (its log text says so).
+//  - CPU profiler rows: unchanged (the inner CPU_HOOKs were idle, see above); the did-replay / fwd-depth / mirror blocks get cheaper.
+//  - VRS bracket, LightRedraw, MenuLate*, Ofxr pass-through counters: per-draw paths test !inDlaa or are not reached -- nothing.
+// KEPT THROUGH THE HOOKS (pass level, once per replay): OMSetRenderTargets, the id-target clear, OMSetDepthStencilState /
+// OMSetBlendState, our PSSetShader, GS / HS / DS = null, GfxSave::Save / Restore. NOT HOOKED (direct vtable calls, nothing to
+// gain): IASetPrimitiveTopology, VSSetShaderResources, RSSetScissorRects, PSSetConstantBuffers1, PSSetShaderResources.
+// Another tool that detoured the same function AFTER us is skipped by the trampoline call too (as inject.cpp's existing direct
+// oClearDSV / oOMSetDepthStencilState / oRSSetViewports calls already do).
+namespace {
+struct RawEntry { int vt; const void* target; void* raw; };
+RawEntry          g_raw[DrawIdRecord::kRawN] = {};   // written at hook install (SetRawCall), read by every replay
+std::atomic<bool> g_rawOn{false};                    // any entry registered (the harness: never -> no vtable read at all)
+uint32_t          g_rawLogMask = 0xFFFFFFFFu;        // the RawFn mask last logged (render thread)
+int               g_rawLogs = 0;
+static_assert(DrawIdRecord::kRawN <= 32, "RawFn bits are a uint32_t mask");
+const char* const kRawName[DrawIdRecord::kRawN] = {
+    "IASetInputLayout", "IASetVertexBuffers", "IASetIndexBuffer", "VSSetShader", "VSSetConstantBuffers1", "VSSetSamplers",
+    "RSSetState", "RSSetViewports", "PSSetShader", "PSSetSamplers", "DrawIndexed", "DrawIndexedInstanced" };
+// the replay's per-draw calls: a trampoline, or null = the vtable call (ctx->X)
+struct RawCalls {
+    void (STDMETHODCALLTYPE* il)(ID3D11DeviceContext*, ID3D11InputLayout*);
+    void (STDMETHODCALLTYPE* vb)(ID3D11DeviceContext*, UINT, UINT, ID3D11Buffer* const*, const UINT*, const UINT*);
+    void (STDMETHODCALLTYPE* ib)(ID3D11DeviceContext*, ID3D11Buffer*, DXGI_FORMAT, UINT);
+    void (STDMETHODCALLTYPE* vs)(ID3D11DeviceContext*, ID3D11VertexShader*, ID3D11ClassInstance* const*, UINT);
+    void (STDMETHODCALLTYPE* vsCb1)(ID3D11DeviceContext1*, UINT, UINT, ID3D11Buffer* const*, const UINT*, const UINT*);
+    void (STDMETHODCALLTYPE* vsSmp)(ID3D11DeviceContext*, UINT, UINT, ID3D11SamplerState* const*);
+    void (STDMETHODCALLTYPE* rs)(ID3D11DeviceContext*, ID3D11RasterizerState*);
+    void (STDMETHODCALLTYPE* vp)(ID3D11DeviceContext*, UINT, const D3D11_VIEWPORT*);
+    void (STDMETHODCALLTYPE* ps)(ID3D11DeviceContext*, ID3D11PixelShader*, ID3D11ClassInstance* const*, UINT);
+    void (STDMETHODCALLTYPE* psSmp)(ID3D11DeviceContext*, UINT, UINT, ID3D11SamplerState* const*);
+    void (STDMETHODCALLTYPE* di)(ID3D11DeviceContext*, UINT, UINT, INT);
+    void (STDMETHODCALLTYPE* dii)(ID3D11DeviceContext*, UINT, UINT, UINT, INT, UINT);
+};
+template <class F> inline void RawPick(F& f, int k, void* const* vt, uint32_t& mask) {
+    const RawEntry& e = g_raw[k];
+    if (e.raw && vt[e.vt] == e.target) { f = reinterpret_cast<F>(e.raw); mask |= 1u << k; }
+    else f = nullptr;
+}
+// Once per replay: the context's vtable entries against the detoured functions. Returns the RawFn mask taken raw.
+uint32_t RawResolve(ID3D11DeviceContext1* ctx, RawCalls& rc) {
+    rc = RawCalls{};
+    if (!g_rawOn.load(std::memory_order_acquire)) return 0;
+    void* const* vt = *reinterpret_cast<void* const* const*>(ctx);
+    uint32_t m = 0;
+    RawPick(rc.il, DrawIdRecord::kRawIl, vt, m);
+    RawPick(rc.vb, DrawIdRecord::kRawVb, vt, m);
+    RawPick(rc.ib, DrawIdRecord::kRawIb, vt, m);
+    RawPick(rc.vs, DrawIdRecord::kRawVs, vt, m);
+    RawPick(rc.vsCb1, DrawIdRecord::kRawVsCb1, vt, m);
+    RawPick(rc.vsSmp, DrawIdRecord::kRawVsSmp, vt, m);
+    RawPick(rc.rs, DrawIdRecord::kRawRs, vt, m);
+    RawPick(rc.vp, DrawIdRecord::kRawVp, vt, m);
+    RawPick(rc.ps, DrawIdRecord::kRawPs, vt, m);
+    RawPick(rc.psSmp, DrawIdRecord::kRawPsSmp, vt, m);
+    RawPick(rc.di, DrawIdRecord::kRawDi, vt, m);
+    RawPick(rc.dii, DrawIdRecord::kRawDii, vt, m);
+    if (m != g_rawLogMask && g_rawLogs < 8) {            // the first replay + every change of the set (a rewritten vtable entry)
+        ++g_rawLogs;
+        g_rawLogMask = m;
+        char raw[400] = "", vtc[400] = "";
+        size_t ro = 0, vo = 0;
+        for (int k = 0; k < DrawIdRecord::kRawN; ++k) {
+            if (!g_raw[k].raw) continue;                 // not registered (hook not installed): the vtable, as before
+            const bool on = ((m >> k) & 1u) != 0;
+            char* b = on ? raw : vtc;
+            size_t& o = on ? ro : vo;
+            if (o < sizeof(raw)) o += (size_t)snprintf(b + o, sizeof(raw) - o, "%s%s", o ? " " : "", kRawName[k]);
+        }
+        Log("MV draw-ids: replay calls %s through the hook trampolines (phase 58b)%s%s%s", ro ? raw : "none",
+            vo ? "; the context's vtable does not point at the hooked function of " : "", vo ? vtc : "",
+            vo ? " -- those keep the vtable call" : "");
+    }
+    return m;
+}
+}  // namespace
+
+void DrawIdRecord::SetRawCall(int fn, int vtIndex, const void* target, void* raw) {
+    // 133 = DiscardView1, the last entry of the ID3D11DeviceContext1 vtable (the replay context's interface)
+    if (fn < 0 || fn >= kRawN || vtIndex < 0 || vtIndex > 133 || !target || !raw) return;
+    g_raw[fn] = RawEntry{ vtIndex, target, raw };
+    g_rawOn.store(true, std::memory_order_release);
+}
+
 DrawIdRecord::ReplayResult DrawIdRecord::Replay(ID3D11DeviceContext1* ctx, ID3D11RenderTargetView* idRtv,
                                                  ID3D11DepthStencilView* roDsv, bool restoreTargets, bool replayAll) {
     return ReplayImpl(ctx, idRtv, roDsv, restoreTargets, replayAll, false, 0);
@@ -3648,6 +3757,9 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
     ctx->HSSetShader(nullptr, nullptr, 0);
     ctx->DSSetShader(nullptr, nullptr, 0);
     ID3D11Buffer* idCb = s_idCb.Get();
+    // phase 58b: the per-draw calls below through the hook trampolines where the context's vtable still leads into our hooks
+    RawCalls rc;
+    RawResolve(ctx, rc);
 
     // per-draw: only what differs from the previously replayed draw (first draw: everything). REVERSE draw order: the game
     // tests depth GREATER, so of two draws at exactly the same depth the FIRST one owns the pixel; with EQUAL the last
@@ -3710,13 +3822,19 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
                 else splitTok = GpuPerf::Next(ctx, splitTok, kind ? GpuPerf::kReplayInst : GpuPerf::kReplayRest);
             }
         }
-        if (!cur || cur->il != s.il) ctx->IASetInputLayout(s.il);
+        // phase 58b: rc.X = the hook's trampoline (null: the vtable call as before) -- see the verdicts above RawResolve
+        if (!cur || cur->il != s.il) { if (rc.il) rc.il(ctx, s.il); else ctx->IASetInputLayout(s.il); }
         if (!cur || memcmp(cur->vb, s.vb, sizeof(s.vb)) || memcmp(cur->vbStride, s.vbStride, sizeof(s.vbStride)) ||
-            memcmp(cur->vbOff, s.vbOff, sizeof(s.vbOff)))
-            ctx->IASetVertexBuffers(0, kVb, s.vb, s.vbStride, s.vbOff);
-        if (!cur || cur->ib != s.ib || cur->ibFmt != s.ibFmt || cur->ibOff != s.ibOff) ctx->IASetIndexBuffer(s.ib, s.ibFmt, s.ibOff);
+            memcmp(cur->vbOff, s.vbOff, sizeof(s.vbOff))) {
+            if (rc.vb) rc.vb(ctx, 0, kVb, s.vb, s.vbStride, s.vbOff);
+            else ctx->IASetVertexBuffers(0, kVb, s.vb, s.vbStride, s.vbOff);
+        }
+        if (!cur || cur->ib != s.ib || cur->ibFmt != s.ibFmt || cur->ibOff != s.ibOff) {
+            if (rc.ib) rc.ib(ctx, s.ib, s.ibFmt, s.ibOff);
+            else ctx->IASetIndexBuffer(s.ib, s.ibFmt, s.ibOff);
+        }
         if (!cur || cur->topo != s.topo) ctx->IASetPrimitiveTopology(s.topo);
-        if (!cur || cur->vs != s.vs) ctx->VSSetShader(s.vs, nullptr, 0);
+        if (!cur || cur->vs != s.vs) { if (rc.vs) rc.vs(ctx, s.vs, nullptr, 0); else ctx->VSSetShader(s.vs, nullptr, 0); }
         if (!cur || memcmp(cur->cb, s.cb, sizeof(s.cb)) || memcmp(cur->cbFirst, s.cbFirst, sizeof(s.cbFirst)) ||
             memcmp(cur->cbNum, s.cbNum, sizeof(s.cbNum))) {
             UINT f[kVsCb], nm[kVsCb];
@@ -3725,14 +3843,20 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
                 f[c] = valid ? s.cbFirst[c] : 0;
                 nm[c] = valid ? s.cbNum[c] : 4096;
             }
-            ctx->VSSetConstantBuffers1(0, kVsCb, s.cb, f, nm);
+            if (rc.vsCb1) rc.vsCb1(ctx, 0, kVsCb, s.cb, f, nm);
+            else ctx->VSSetConstantBuffers1(0, kVsCb, s.cb, f, nm);
         }
         if (!cur || memcmp(cur->srv, s.srv, sizeof(s.srv))) ctx->VSSetShaderResources(0, kVsSrv, s.srv);
-        if (!cur || memcmp(cur->smp, s.smp, sizeof(s.smp))) ctx->VSSetSamplers(0, kVsSmp, s.smp);
+        if (!cur || memcmp(cur->smp, s.smp, sizeof(s.smp))) {
+            if (rc.vsSmp) rc.vsSmp(ctx, 0, kVsSmp, s.smp);
+            else ctx->VSSetSamplers(0, kVsSmp, s.smp);
+        }
         if (!view) {
-            if (!cur || cur->rs != s.rs) ctx->RSSetState(s.rs);
-            if (!cur || cur->nVp != s.nVp || memcmp(cur->vp, s.vp, sizeof(D3D11_VIEWPORT) * s.nVp))
-                ctx->RSSetViewports(s.nVp, s.nVp ? s.vp : nullptr);
+            if (!cur || cur->rs != s.rs) { if (rc.rs) rc.rs(ctx, s.rs); else ctx->RSSetState(s.rs); }
+            if (!cur || cur->nVp != s.nVp || memcmp(cur->vp, s.vp, sizeof(D3D11_VIEWPORT) * s.nVp)) {
+                if (rc.vp) rc.vp(ctx, s.nVp, s.nVp ? s.vp : nullptr);
+                else ctx->RSSetViewports(s.nVp, s.nVp ? s.vp : nullptr);
+            }
             if (!cur || cur->nSc != s.nSc || memcmp(cur->sc, s.sc, sizeof(D3D11_RECT) * s.nSc))
                 ctx->RSSetScissorRects(s.nSc, s.nSc ? s.sc : nullptr);
         } else {
@@ -3751,9 +3875,11 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
                 for (UINT k = 0; k < nSc; ++k)
                     ScaledScissor(had, k < s.nSc ? &s.sc[k] : nullptr, rsS && m_clip ? &m_clipRect : nullptr, shift, &sc[k]);
             }
-            if (viewFirst || rsUse != lastRs) ctx->RSSetState(rsUse);
-            if (viewFirst || lastNVp != s.nVp || memcmp(lastVp, vp, sizeof(D3D11_VIEWPORT) * s.nVp))
-                ctx->RSSetViewports(s.nVp, s.nVp ? vp : nullptr);
+            if (viewFirst || rsUse != lastRs) { if (rc.rs) rc.rs(ctx, rsUse); else ctx->RSSetState(rsUse); }
+            if (viewFirst || lastNVp != s.nVp || memcmp(lastVp, vp, sizeof(D3D11_VIEWPORT) * s.nVp)) {
+                if (rc.vp) rc.vp(ctx, s.nVp, s.nVp ? vp : nullptr);
+                else ctx->RSSetViewports(s.nVp, s.nVp ? vp : nullptr);
+            }
             if (scOn && (viewFirst || lastNSc != nSc || memcmp(lastSc, sc, sizeof(D3D11_RECT) * nSc)))
                 ctx->RSSetScissorRects(nSc, sc);
             viewFirst = false;
@@ -3762,7 +3888,7 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
         }
         if (depth) {                                     // v0.10.0 phase 10: the game's pixel shader + its resources
             const PsState& p = m_ps[i];
-            if (!curPs || curPs->ps != p.ps) ctx->PSSetShader(p.ps, nullptr, 0);
+            if (!curPs || curPs->ps != p.ps) { if (rc.ps) rc.ps(ctx, p.ps, nullptr, 0); else ctx->PSSetShader(p.ps, nullptr, 0); }
             if (!curPs || memcmp(curPs->cb, p.cb, sizeof(p.cb)) || memcmp(curPs->cbFirst, p.cbFirst, sizeof(p.cbFirst)) ||
                 memcmp(curPs->cbNum, p.cbNum, sizeof(p.cbNum))) {
                 UINT f[kPsCb], nm[kPsCb];
@@ -3774,14 +3900,22 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
                 ctx->PSSetConstantBuffers1(0, kPsCb, p.cb, f, nm);
             }
             if (!curPs || memcmp(curPs->srv, p.srv, sizeof(p.srv))) ctx->PSSetShaderResources(0, kPsSrv, p.srv);
-            if (!curPs || memcmp(curPs->smp, p.smp, sizeof(p.smp))) ctx->PSSetSamplers(0, kPsSmp, p.smp);
+            if (!curPs || memcmp(curPs->smp, p.smp, sizeof(p.smp))) {
+                if (rc.psSmp) rc.psSmp(ctx, 0, kPsSmp, p.smp);
+                else ctx->PSSetSamplers(0, kPsSmp, p.smp);
+            }
             curPs = &p;
         } else {
             const UINT first = drawId * 16u, num = 16u;
             ctx->PSSetConstantBuffers1(0, 1, &idCb, &first, &num);
         }
-        if (s.instanced) ctx->DrawIndexedInstanced(s.ic, s.inst, s.si, s.bv, s.sinst);
-        else ctx->DrawIndexed(s.ic, s.si, s.bv);
+        if (s.instanced) {
+            if (rc.dii) rc.dii(ctx, s.ic, s.inst, s.si, s.bv, s.sinst);
+            else ctx->DrawIndexedInstanced(s.ic, s.inst, s.si, s.bv, s.sinst);
+        } else {
+            if (rc.di) rc.di(ctx, s.ic, s.si, s.bv);
+            else ctx->DrawIndexed(s.ic, s.si, s.bv);
+        }
         cur = &s;
         ++rr.replayed;
     }

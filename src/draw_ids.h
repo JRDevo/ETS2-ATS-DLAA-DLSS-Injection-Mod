@@ -299,6 +299,24 @@ public:
     // PROBE pass (the caller sets it per replay: every 7th pass of the main view -- odd, so both VR eyes probe; always for mirror
     // units). 0 = all, every pass.
     static void SetInstancedProbe(bool probe);
+    // phase 58b (perf round 2) RAW REPLAY CALLS: why -- every replayed draw issued its state sets + its draw through ctx->X, i.e. the
+    // context vtable = inject.cpp's own hooks (CPU_HOOK, Ofxr::FromOfxr, IsGameCtx, the t_inDlaa tests, the DidShadow Note) before
+    // the original ran: ~130-220 ns per replayed draw against ~37 ns per plain game draw, ~2100 replayed draws per VR frame
+    // (G-buffer + forward depth + forward ids). Every one of those hook bodies does nothing for a call made under t_inDlaa that
+    // the replay needs (the per-hook verdicts: the comment block above g_raw in draw_ids.cpp). How -- inject.cpp registers, for
+    // each hooked entry point the replay LOOP calls, the context-vtable index, the function MinHook detoured (what the vtable
+    // entry points at) and the hook's trampoline (`o*`: the original). ReplayImpl reads the replay context's vtable ONCE per replay:
+    // an entry still pointing at the detoured function -> the trampoline (exactly what the vtable call reaches, minus our hook
+    // body); anything else -- nothing registered (the harness), a hook not installed, an entry the runtime rewrote, a wrapped
+    // context -- the vtable call as before. Only the per-draw loop uses it: the pass-level sets (targets, clear, depth / blend
+    // state, our PS, GS / HS / DS) and GfxSave::Restore keep going through the hooks, so every tracker sees the game's state
+    // come back. Registration: once, at hook install (before the first replay); fn = RawFn, vtIndex into the
+    // ID3D11DeviceContext1 vtable (ID3D11DeviceContext's own entries keep their indices there).
+    enum RawFn : int { kRawIl = 0, kRawVb, kRawIb, kRawVs, kRawVsCb1, kRawVsSmp, kRawRs, kRawVp, kRawPs, kRawPsSmp, kRawDi, kRawDii,
+                       kRawN };
+    // (a null target / raw or an out-of-range fn / vtIndex is ignored = that call keeps the vtable). Logged (info) at the first
+    // replay and whenever the set of raw calls changes: "MV draw-ids: replay calls ... through the hook trampolines".
+    static void SetRawCall(int fn, int vtIndex, const void* target, void* raw);
     int  GatedDraws() const { return m_instGated; }      // instanced draws not replayed this pass (mv_inst_replay 1)
     // v0.10.0 phase 14 (dlaa.ini mv_replay_static_*): the caller turns the static gate on around the replays of the MAIN
     // G-buffer passes only (off for mirror units / the harness unless asked): a world, non-instanced, non-cabin draw whose key

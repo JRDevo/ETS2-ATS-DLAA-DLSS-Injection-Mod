@@ -2228,8 +2228,9 @@ struct PassSlot {
 #endif
     // ---- v0.6.1 flight recorder: plain counters on the NEWEST slot, reset in StartPass, logged at the blit
     // only for a bad record (PASS ANOMALY) or as a periodic reference (pass sample). Record counts = cand.
-    uint32_t diGbuf = 0;             // immediate DrawIndexed while g_gbufPass (all of them, any gate)
-    uint32_t diOther = 0;            // immediate DrawIndexed while !g_gbufPass
+    uint32_t diGbuf = 0;             // immediate DrawIndexed while g_gbufPass (all of them, any gate; phase 58b: not the draw-id
+                                     // replays, which call the trampoline -- DrawIdRecord::SetRawCall)
+    uint32_t diOther = 0;            // immediate DrawIndexed while !g_gbufPass (phase 58b: ditto)
     uint32_t diDeferred = 0;         // non-immediate DrawIndexed during the pass (frozen at the next StartPass)
     uint32_t defStart = 0;           // g_diDeferred at StartPass
     bool     defClosed = false;      // diDeferred frozen
@@ -2237,7 +2238,7 @@ struct PassSlot {
     uint32_t sceneClears = 0;        // ClearDSV of the scene depth incl. the one that started this pass
     uint32_t skSampled = 0;          // v0.6.3 ... rejected by the stable-sampling hash (mv_sample_shift)
     uint32_t skGate = 0;             // G-buffer draws not collected: DLAA off / (MV off and not VR)
-    uint32_t skInDlaa = 0;           // ... t_inDlaa set
+    uint32_t skInDlaa = 0;           // ... t_inDlaa set (phase 58b: only a replay whose DrawIndexed keeps the vtable call)
     uint32_t skNoCtx = 0;            // ... no ID3D11DeviceContext1 / no game viewport / record not ready
     uint32_t skFull = 0;             // ... layer already holds its cap (v0.6.3: mv_world_slots / mv_cabin_slots)
     uint32_t skNoCb = 0;             // ... no VS cbuffer in slot 0
@@ -10379,7 +10380,8 @@ void LogPassRecord(const char* prefix, int eye, const PassSlot& slot, int lgW, i
     const uint32_t oth = slot.defClosed ? slot.otherThread
                                         : g_gameOtherThread.load(std::memory_order_relaxed) - slot.otStart;
     LogDbg("%s eye=%d s=%llu blit #%llu: records world=%d cabin=%d (last good %d/%d) | DrawIndexed gbuf=%u other=%u "
-        "deferred=%u | gbuf binds=%u scene clears=%u | skips: sampled=%u gate=%u indlaa=%u noctx=%u full=%u nocb=%u range=%u | "
+        "deferred=%u (the draw-id replays bypass the hook since phase 58b: not counted here or in indlaa) | gbuf binds=%u scene "
+        "clears=%u | skips: sampled=%u gate=%u indlaa=%u noctx=%u full=%u nocb=%u range=%u | "
         "pass age %.2f ms, eye blit interval %.2f ms | snap=%d discarded=%d | Present #%llu | foreign-ctx OM/RS/Draw/DI=%u "
         "game-ctx other-thread OM/RS=%u scene-depth changes=%llu secondary gbuf ignored=%llu%s",
         prefix, eye, (unsigned long long)slot.s, (unsigned long long)g_blitCount, slot.cand.Count(0), slot.cand.Count(1),
@@ -14683,9 +14685,9 @@ void DidStatsTag(char* buf, size_t cap, uint64_t passes) {
             uint64_t seeds = 0;
             for (int f = 0; f < DidShadow::kFieldN; ++f) seeds += sh.groupSeed[f];
             snprintf(buf + u5, cap - u5, " | state shadow (did_shadow %d, verify every %d%s): %.1f %% of %.0f records/pass from the "
-                     "shadow (%.0f/pass through the getters), record AddRefs %.0f/pass (%.1f %% avoided), %.0f Set calls/pass applied, "
-                     "%.1f reseeds/pass, group re-reads %llu, output-capable getter reads vb %llu ib %llu cb %llu, vtable misses %llu "
-                     "| drops: frame %llu pass %llu ClearState %llu ExecuteCommandList %llu SwapDeviceContextState %llu thread %llu "
+                     "shadow (%.0f/pass through the getters), record AddRefs %.0f/pass (%.1f %% avoided), %.0f Set calls/pass applied "
+                     "(not the draw-id replays' per-draw sets: phase 58b trampolines), %.1f reseeds/pass, group re-reads %llu, "
+                     "output-capable getter reads vb %llu ib %llu cb %llu, vtable misses %llu | drops: frame %llu pass %llu ClearState %llu ExecuteCommandList %llu SwapDeviceContextState %llu thread %llu "
                      "context %llu verify %llu vtable %llu | verify: %llu compared, %llu mismatching (il %llu vb %llu ib %llu vs %llu "
                      "cb %llu smp %llu rs %llu), fallback frames %llu",
                      g_didShadowCfg, DidShadow::VerifyEvery(), sh.disabled ? ", DISABLED after repeated mismatches" : "",
@@ -22961,10 +22963,10 @@ DWORD WINAPI SetupThread(LPVOID) {
         void** cvtbl = *reinterpret_cast<void***>(ctx);
         HookFn("OMSetRenderTargets", cvtbl[33], reinterpret_cast<void*>(&hkOMSetRenderTargets),
                reinterpret_cast<void**>(&oOMSetRenderTargets));
-        HookFn("RSSetViewports", cvtbl[44], reinterpret_cast<void*>(&hkRSSetViewports),
-               reinterpret_cast<void**>(&oRSSetViewports));
-        HookFn("DrawIndexed", cvtbl[12], reinterpret_cast<void*>(&hkDrawIndexed),
-               reinterpret_cast<void**>(&oDrawIndexed));
+        const bool vpHooked = HookFn("RSSetViewports", cvtbl[44], reinterpret_cast<void*>(&hkRSSetViewports),
+                                     reinterpret_cast<void**>(&oRSSetViewports));
+        const bool diHooked = HookFn("DrawIndexed", cvtbl[12], reinterpret_cast<void*>(&hkDrawIndexed),
+                                     reinterpret_cast<void**>(&oDrawIndexed));
         // v0.9.0 texture LOD bias: PSSetSamplers = 10. g_lodHooked gates every use of oPSSetSamplers (LodFrameUpdate).
         if (HookFn("PSSetSamplers", cvtbl[10], reinterpret_cast<void*>(&hkPSSetSamplers),
                    reinterpret_cast<void**>(&oPSSetSamplers)))
@@ -23068,6 +23070,25 @@ DWORD WINAPI SetupThread(LPVOID) {
             hook("SwapDeviceContextState", 131, true, reinterpret_cast<void*>(&hkSwapDeviceContextState),
                  reinterpret_cast<void**>(&oSwapDeviceContextState));
             if (sc1) sc1->Release();
+            // phase 58b (perf round 2): the draw-id replay loop calls the installed ones among these through their trampolines
+            // (DrawIdRecord::SetRawCall; idx / tgt = the hooks that went in, whether or not all of them did -- each trampoline is
+            // valid on its own). The net DidShadow state is the same: GfxSave::Restore still goes through the hooks (verdicts:
+            // draw_ids.cpp above RawResolve).
+            for (int k = 0; k < n; ++k) {
+                int fn = -1;
+                void* o = nullptr;
+                switch (idx[k]) {
+                case 17:  fn = DrawIdRecord::kRawIl;    o = reinterpret_cast<void*>(oIASetInputLayout);      break;
+                case 18:  fn = DrawIdRecord::kRawVb;    o = reinterpret_cast<void*>(oIASetVertexBuffers);    break;
+                case 19:  fn = DrawIdRecord::kRawIb;    o = reinterpret_cast<void*>(oIASetIndexBuffer);      break;
+                case 11:  fn = DrawIdRecord::kRawVs;    o = reinterpret_cast<void*>(oVSSetShader);           break;
+                case 119: fn = DrawIdRecord::kRawVsCb1; o = reinterpret_cast<void*>(oVSSetConstantBuffers1); break;
+                case 26:  fn = DrawIdRecord::kRawVsSmp; o = reinterpret_cast<void*>(oVSSetSamplers);         break;
+                case 43:  fn = DrawIdRecord::kRawRs;    o = reinterpret_cast<void*>(oRSSetState);            break;
+                default: break;                          // VSSetConstantBuffers / the whole-state calls: not in the replay loop
+                }
+                if (fn >= 0) DrawIdRecord::SetRawCall(fn, idx[k], tgt[k], o);
+            }
             const int verify = g_didShadowVerify >= 0 ? g_didShadowVerify : (LogDebugLevel() ? 64 : 0);   // phase 39: level 4
             const uint32_t all = (1u << DidShadow::kFieldN) - 1u;
             const uint32_t groups = vbib ? all : all & ~((1u << DidShadow::kFVb) | (1u << DidShadow::kFIb));
@@ -23088,6 +23109,18 @@ DWORD WINAPI SetupThread(LPVOID) {
         } else {
             Log("did_shadow=0 did_shadow_verify=0 (phase 35) -- the draw-id record reads every draw's input state through the "
                 "getters (the pre-phase-35 path; no state Set hooks)");
+        }
+        // phase 58b (perf round 2) RAW REPLAY CALLS: why -- each replayed draw paid our own hooks (CPU_HOOK, the OFXR return-address
+        // test, IsGameCtx, the t_inDlaa tests) for nothing: under t_inDlaa they only pass through (verdicts: draw_ids.cpp above
+        // RawResolve). How -- the replay loop calls the trampoline while the replay context's vtable entry is still the function
+        // detoured here (cvtbl[i] = the HookFn target); installed hooks only. The pass-level sets and GfxSave::Restore keep the hooks.
+        {
+            auto raw = [&](int fn, int i, bool in, void* orig) { if (in && orig) DrawIdRecord::SetRawCall(fn, i, cvtbl[i], orig); };
+            raw(DrawIdRecord::kRawDi, 12, diHooked, reinterpret_cast<void*>(oDrawIndexed));
+            raw(DrawIdRecord::kRawDii, 20, g_didHooked.load(std::memory_order_acquire), reinterpret_cast<void*>(oDrawIndexedInstanced));
+            raw(DrawIdRecord::kRawVp, 44, vpHooked, reinterpret_cast<void*>(oRSSetViewports));
+            raw(DrawIdRecord::kRawPs, 9, g_lodPsHooked.load(std::memory_order_acquire), reinterpret_cast<void*>(oPSSetShader));
+            raw(DrawIdRecord::kRawPsSmp, 10, g_lodHooked.load(std::memory_order_acquire), reinterpret_cast<void*>(oPSSetSamplers));
         }
 #endif
     }
