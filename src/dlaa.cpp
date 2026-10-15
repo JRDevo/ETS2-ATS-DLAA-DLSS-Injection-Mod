@@ -318,12 +318,18 @@ bool DlaaProcessor::CreateFeatureOnce(bool depthInverted, int perfQuality) {
     if (m_feature) { NVSDK_NGX_D3D11_ReleaseFeature(m_feature); m_feature = nullptr; }
 
     // Flags: MVs are unjittered; color is the post-tonemap LDR image (not IsHDR). AutoExposure spares us an
-    // exposure texture; it's ignored for LDR input anyway. v0.7.0: MVLowRes when render != output (our MV
+    // exposure texture; it is only meaningful for HDR input. v0.7.0: MVLowRes when render != output (our MV
     // texture and depth stay at render res, MVs in render pixels, MVScale 1); DLAA (equal dims): MVs are
     // "display res" = render res, no MVLowRes, exactly as before.
     // v0.8.0: IsHDR when the colour input is the game's linear RGBA16F HDR scene (Windows HDR on); AutoExposure then
     // supplies the exposure DLSS needs for HDR input. LDR: flags exactly as before.
-    int flags = NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
+    // phase 57 (perf): AutoExposure is now set ONLY for an IsHDR unit (m_hdr). It was ignored for LDR input anyway, but
+    // the flag may still make DLSS run its auto-exposure reduction every evaluate -- the VR
+    // post-tonemap eyes, the mirrors and the menu units are LDR and are now created without it. The audit expects at
+    // most ~0.02-0.05 ms per eye saved; compare the `ngx` figure of the `DLAA GPU cost eye N` log line before / after.
+    // (dlss_hdr = 0 on an RGBA16F unit: m_hdr is false there too -- display-referred values, treated as LDR, no flag.)
+    int flags = 0;
+    if (m_hdr)         flags |= NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
     if (depthInverted) flags |= NVSDK_NGX_DLSS_Feature_Flags_DepthInverted;
     if (Upscaling())   flags |= NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
     if (m_hdr)         flags |= NVSDK_NGX_DLSS_Feature_Flags_IsHDR;

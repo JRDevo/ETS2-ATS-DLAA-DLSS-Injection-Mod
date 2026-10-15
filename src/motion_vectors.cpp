@@ -1410,6 +1410,7 @@ void CameraMv::DispatchReproj(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, 
     if (cntSlot >= 0) {                                 // v0.9.0 r11: read back without waiting (FwdCountPoll)
         ctx->CopyResource(m_fwdCntRb[cntSlot].Get(), m_fwdCnt.Get());
         m_fwdCntPending[cntSlot] = true;
+        m_fwdCntSeq[cntSlot] = ++m_fwdCntCtr;            // phase 57: FwdCountPoll reads the oldest first
     }
 }
 
@@ -1447,12 +1448,17 @@ bool CameraMv::FwdCountInit() {
     return true;
 }
 
+// phase 57 (perf): oldest copy first, stop at the first one the GPU has not finished (the copies complete in order on one
+// context, as RingStep) -- before, every pending slot took a failed DO_NOT_WAIT Map per pass B.
 void CameraMv::FwdCountPoll(ID3D11DeviceContext* ctx) {
-    for (int k = 0; k < kFwdCntRb; ++k) {
-        if (!m_fwdCntPending[k]) continue;
+    for (;;) {
+        int k = -1;
+        for (int q = 0; q < kFwdCntRb; ++q)
+            if (m_fwdCntPending[q] && (k < 0 || m_fwdCntSeq[q] < m_fwdCntSeq[k])) k = q;
+        if (k < 0) break;
         D3D11_MAPPED_SUBRESOURCE mp{};
         const HRESULT hr = ctx->Map(m_fwdCntRb[k].Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mp);
-        if (hr == DXGI_ERROR_WAS_STILL_DRAWING) continue;
+        if (hr == DXGI_ERROR_WAS_STILL_DRAWING) break;
         m_fwdCntPending[k] = false;
         if (FAILED(hr)) continue;
         const uint32_t* c = (const uint32_t*)mp.pData;

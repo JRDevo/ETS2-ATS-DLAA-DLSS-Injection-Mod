@@ -1029,11 +1029,14 @@ inline bool PlOnGameThread() {
     return t != 0 && t == GetCurrentThreadId();
 }
 void LayerBoundaryWatchdog();                                        // no boundary for 5 s -> one WARNING
+inline bool FrameEndCounting();                                      // (defined with the frame-end rule)
 // Game-context Draw / DrawIndexed (not our own work): feeds the frame-end rule and the fallbacks' "draws since the last
 // boundary"; every 4096 draws in present-layer mode the watchdog looks at the clock.
+// phase 57 (perf): FrameEndOnDraw's own entry test inline here (present-layer mode, or the flat log-level-4 count): a VR launch or a
+// lower log level -- the usual case -- makes no out-of-line call per draw. FrameEndOnDraw keeps the test (its other callers).
 inline void CountGameDraw(bool inDlaa, ID3D11DeviceContext* ctx, UINT verts, bool indexed) {
     if (inDlaa) return;
-    FrameEndOnDraw(ctx, verts, indexed);
+    if (g_plActive.load(std::memory_order_relaxed) || FrameEndCounting()) FrameEndOnDraw(ctx, verts, indexed);
     if ((++g_plDraws & 4095u) == 0 && g_plActive.load(std::memory_order_relaxed)) LayerBoundaryWatchdog();
 }
 int      g_signX = +1, g_signY = +1;     // dlaa.ini: NGX jitter = sign * viewport shift
@@ -1776,6 +1779,9 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
             if (KeyHit(KA_MV_DEBUG)) {                         // MV debug view (old INSERT)
                 const bool on = !g_mvDebug.load();
                 g_mvDebug = on;
+#ifdef WITH_DLAA
+                DrawIdRecord::SetFullIdClear(on);          // phase 57: the debug view reads the whole id target -> clear all of it
+#endif
                 Log("MV debug view %s (%s, Present #%llu)", on ? "ON (R=mv.x G=mv.y B=cabin; gray = still)" : "OFF",
                     KeyName(KA_MV_DEBUG), (unsigned long long)n);
             }
@@ -2260,7 +2266,14 @@ constexpr int    kRing           = FlatViews::kMaxBlits + 1;
 static_assert(FlatViews::kMaxBlits < kRing && kRingBase <= kRing, "N outstanding passes + the newest one fit the ring");
 int              g_ringN         = kRingBase;
 uint64_t         g_ringBase      = 0;
-inline size_t SlotOf(uint64_t s) { return (size_t)((s - g_ringBase) % (uint64_t)g_ringN); }
+// phase 57 (perf): SlotOf runs several times per draw; the 64-bit division only for a flat multi-view ring (g_ringN > kRingBase:
+// SetRingSize clamps it to kRingBase..kRing), the usual 4 slots (VR, single-view flat) by a mask. Unsigned: x % 4 == x & 3 for every
+// x, also a wrapped s - g_ringBase.
+static_assert(kRingBase == 4, "SlotOf masks with 3 for the base ring");
+inline size_t SlotOf(uint64_t s) {
+    const uint64_t d = s - g_ringBase;
+    return (size_t)(g_ringN == kRingBase ? (d & 3u) : d % (uint64_t)g_ringN);
+}
 PassSlot         g_ring[kRing];
 // v0.10.3 issue #9: the scene depth pass s was drawn on -- its own while it is still the scene depth or an alias (per-eye depths:
 // the other eye's pass may have switched g_sceneDepth since), else g_sceneDepth (single depth: always the same texture).
@@ -2395,8 +2408,20 @@ void ObjStatsTag(char* buf, size_t cap, uint64_t passes);
 // v0.9.0 r5 forward depth: stats window (defined above hkDrawIndexed); r11: + the near-camera readback slots (ctx)
 void FwdOnPassStart(ID3D11DeviceContext* ctx);
 void FwdOnContextReset();
+// phase 57 (perf): a world forward draw's depth-stencil + blend state, fetched ONCE per draw (FwdOnDraw) and handed on to BiasOnDraw
+// (both test them; the OM getters were called twice per forward draw). The refs are released when the draw's hook returns.
+// have = false: not fetched (FwdOnDraw did not run or left before) -- BiasOnDraw fetches them itself, as before.
+struct FwdDrawStates {
+    ID3D11DepthStencilState* dss = nullptr;
+    ID3D11BlendState*        bs = nullptr;
+    bool                     have = false;
+    FwdDrawStates() = default;
+    FwdDrawStates(const FwdDrawStates&) = delete;
+    FwdDrawStates& operator=(const FwdDrawStates&) = delete;
+    ~FwdDrawStates() { if (dss) dss->Release(); if (bs) bs->Release(); }
+};
 // phase 49 glow bias mask (the "GLOW BIAS MASK" block above hkDrawIndexed)
-void BiasOnDraw(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex);
+void BiasOnDraw(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex, const FwdDrawStates& st);
 void BiasBatch(ID3D11DeviceContext* ctx, uint64_t pass, int why);
 void BiasOnPassStart(ID3D11DeviceContext* ctx, uint64_t s);
 void BiasOnContextReset();
@@ -8045,9 +8070,11 @@ void NoteForeignDraw(ID3D11DeviceContext* ctx, UINT verts) {
 }
 // OM / RS on the game context from a thread other than the blit thread (v0.6.1's "foreign-thread" signal, kept
 // as a separate counter: if anomalies persist with foreign-ctx=0, the game context itself is shared).
+// phase 57 (perf): per OMSetRenderTargets / RSSetViewports -- the thread id straight from the TEB (ClientId.UniqueThread at gs:0x48
+// on x64, as cpu_prof.h RegisterSlow reads it) instead of the GetCurrentThreadId call.
 inline void CountGameOtherThread() {
     const unsigned long rt = g_renderTid.load(std::memory_order_relaxed);
-    if (rt && GetCurrentThreadId() != rt) g_gameOtherThread.fetch_add(1, std::memory_order_relaxed);
+    if (rt && (unsigned long)__readgsdword(0x48) != rt) g_gameOtherThread.fetch_add(1, std::memory_order_relaxed);
 }
 
 // Issues the right viewports for the current state: the game's unmodified ones,
@@ -8807,7 +8834,6 @@ void LodOnDraw(ID3D11DeviceContext* ctx) {
 // hkOMSetRenderTargets (game context, not t_inDlaa), after g_jitterPass / g_previewPass were set for this bind.
 // phase 11: which set this binding needs, and whether its draws decide it one by one (see SCOPE).
 void LodOnBind(ID3D11DeviceContext* ctx) {
-    CpuProf::Block cpb(CpuProf::kBLod);               // phase 31 CPU profiler (cpu_prof.h)
 #ifdef WITH_DLAA
     // v0.10.0 phase 17: g_lodOn follows the preview jitter (PvJitterLive: core shaders); the world passes still need the
     // world jitter (JitterLive: every shader compiled) -- no bias on a world pass that is not jittered yet
@@ -8827,6 +8853,9 @@ void LodOnBind(ID3D11DeviceContext* ctx) {
         else set = kLodSetFull;                                         // no blend hook: pass level
     }
     const bool in = g_lodInScene.load(std::memory_order_relaxed);
+    // phase 57: outside the scene and nothing to enter (the usual bind) -- the !set path below without its timer reads
+    if (!set && !perDraw && !in) { g_lodPerDraw.store(false, std::memory_order_relaxed); return; }
+    CpuProf::Block cpb(CpuProf::kBLod);               // phase 31 CPU profiler (cpu_prof.h)
     if (perDraw) {
         if (!g_lodPerDraw.load(std::memory_order_relaxed)) {           // entering per-draw state: resync the blend state
             ID3D11BlendState* bs = nullptr;
@@ -12579,9 +12608,11 @@ void ObjWatch(ID3D11DeviceContext* ctx) {
 
 // hkOMSetRenderTargets (game context, not our work), after g_gbufPass and the pass start for this bind.
 void ObjOnBind(ID3D11DeviceContext* ctx, bool sceneDsv) {
-    CpuProf::Block cpb(CpuProf::kBObj);               // phase 31 CPU profiler (cpu_prof.h)
     g_objSceneDsv = sceneDsv;
     const bool want = g_gbufPass && g_objOn && g_passSeq > 0;
+    // phase 57: no enter / leave / watch to do (always so with mv_objects 2: g_objOn off) -- out before the profiler's timer reads
+    if (want == g_objInScene && !(!g_gbufPass && sceneDsv && g_objOn)) return;
+    CpuProf::Block cpb(CpuProf::kBObj);               // phase 31 CPU profiler (cpu_prof.h)
     if (want && !g_objInScene) ObjEnter(ctx);
     else if (!want && g_objInScene) ObjLeave(ctx);
     if (!g_gbufPass && sceneDsv && g_objOn) ObjWatch(ctx);
@@ -13249,13 +13280,12 @@ bool FwdSetNear(uint64_t id, bool nearCam) {
     return true;
 }
 // a forward draw's identity: geometry key + vertex shader + occurrence index of that key in this pass
-uint64_t FwdIdentity(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex) {
+// (phase 57: `vs` = the draw's vertex shader, read once by FwdOnDraw for this and FwdNoteMvp; identity only)
+uint64_t FwdIdentity(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex, ID3D11VertexShader* vs) {
     ID3D11Buffer* ib = nullptr; DXGI_FORMAT ibFmt = DXGI_FORMAT_UNKNOWN; UINT ibOff = 0;
     ID3D11Buffer* vb = nullptr; UINT vbStride = 0, vbOff = 0;
-    ID3D11VertexShader* vs = nullptr;
     ctx->IAGetIndexBuffer(&ib, &ibFmt, &ibOff);
     ctx->IAGetVertexBuffers(0, 1, &vb, &vbStride, &vbOff);
-    ctx->VSGetShader(&vs, nullptr, nullptr);
     uint64_t kh = ObjMix((uint64_t)(uintptr_t)ib + 0x51ED270B27BF4D3Bull);
     kh = ObjMix(kh ^ (uint64_t)(uintptr_t)vb);
     kh = ObjMix(kh ^ (uint64_t)(uintptr_t)vs);
@@ -13264,7 +13294,6 @@ uint64_t FwdIdentity(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex,
     kh = ObjMix(kh ^ (uint64_t)(uint32_t)baseVertex);
     if (ib) ib->Release();
     if (vb) vb->Release();
-    if (vs) vs->Release();
     uint32_t occ = 0xFFFFu;
     if (g_fwdOccFill < kFwdOcc / 2) {
         for (uint32_t i = (uint32_t)(kh >> 54) & (kFwdOcc - 1);; i = (i + 1) & (kFwdOcc - 1)) {
@@ -13277,9 +13306,9 @@ uint64_t FwdIdentity(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex,
     return id ? id : 1;
 }
 // the draw's MVP (VS cbuffer slot 0, rows 4..7; v0.10.0 phase 22: the VS's MVP row, DrawIdMv::MvpRow) -> the open staging slot
-// (+ what the near-camera log line names)
+// (+ what the near-camera log line names). phase 57: `vs` = the draw's vertex shader (FwdOnDraw reads it once)
 void FwdNoteMvp(ID3D11DeviceContext* ctx, uint64_t id, UINT indexCount, ID3D11DepthStencilState* dss,
-                ID3D11BlendState* bs) {
+                ID3D11BlendState* bs, ID3D11VertexShader* vs) {
     if (g_fwdRbOpen < 0 || !g_fwdDev) return;
     FwdRbSlot& S = g_fwdRbs[g_fwdRbOpen];
     if (S.n >= kFwdRbMax) return;
@@ -13299,11 +13328,7 @@ void FwdNoteMvp(ID3D11DeviceContext* ctx, uint64_t id, UINT indexCount, ID3D11De
         g_fwdLastCb = cb; g_fwdLastCbBytes = bd.ByteWidth;
     }
     UINT mvpRow = 4u;                                    // v0.10.0 phase 22 (see CameraMv's candidates above)
-    if (!DrawIdMv::LayoutOff()) {
-        ID3D11VertexShader* vs = nullptr;
-        ctx->VSGetShader(&vs, nullptr, nullptr);
-        if (vs) { mvpRow = DrawIdMv::MvpRow(vs); vs->Release(); }
-    }
+    if (!DrawIdMv::LayoutOff() && vs) mvpRow = DrawIdMv::MvpRow(vs);
     const UINT off = first * 16u + 16u * mvpRow;
     if (num >= mvpRow + 4u && off + 64u <= g_fwdLastCbBytes) {
         if (!S.stage) {
@@ -13429,8 +13454,9 @@ void FwdOnPassStart(ID3D11DeviceContext* ctx) {
     g_fwdPassesLive = 0;
 }
 
-// One world forward-pass DrawIndexed, right after the game's own call (see the block comment).
-void FwdOnDraw(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex) {
+// One world forward-pass DrawIndexed, right after the game's own call (see the block comment). phase 57: the draw's depth-stencil /
+// blend state go into `st` (kept for BiasOnDraw; the caller's scope releases them).
+void FwdOnDraw(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex, FwdDrawStates& st) {
     CpuProf::Block cpb(CpuProf::kBFwd);               // phase 31 CPU profiler (cpu_prof.h)
     g_fwdLivePass = true;
     ++g_fwdSeen;
@@ -13439,16 +13465,22 @@ void FwdOnDraw(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT b
         if (g_didOn) DidFwdNoteDraw(ctx, indexCount, false, 1, nullptr, nullptr);   // v0.10.0 phase 3 diagnostic
         return;
     }
-    ID3D11DepthStencilState* dss = nullptr; UINT ref = 0;
-    ctx->OMGetDepthStencilState(&dss, &ref);
-    ID3D11BlendState* bs = nullptr; FLOAT bf[4] = {}; UINT mask = 0;
-    ctx->OMGetBlendState(&bs, bf, &mask);
+    UINT ref = 0;
+    ctx->OMGetDepthStencilState(&st.dss, &ref);
+    FLOAT bf[4] = {}; UINT mask = 0;
+    ctx->OMGetBlendState(&st.bs, bf, &mask);
+    st.have = true;
+    ID3D11DepthStencilState* const dss = st.dss;
+    ID3D11BlendState* const bs = st.bs;
     const bool qualifies = FwdDssQualifies(dss) && FwdBlendQualifies(bs);
     const bool statesOk = qualifies && FwdEnsureStates(ctx);   // once per draw (r11: the near-camera step needs it)
     bool nearCam = false;                                 // v0.9.0 r11: a near-camera identity (overlay): no re-draw
     if (statesOk) {
-        const uint64_t fid = FwdIdentity(ctx, indexCount, startIndex, baseVertex);
-        FwdNoteMvp(ctx, fid, indexCount, dss, bs);        // every qualifying draw: its verdict stays fresh
+        ID3D11VertexShader* vs = nullptr;                 // phase 57: read once for the identity and the MVP row
+        ctx->VSGetShader(&vs, nullptr, nullptr);
+        const uint64_t fid = FwdIdentity(ctx, indexCount, startIndex, baseVertex, vs);
+        FwdNoteMvp(ctx, fid, indexCount, dss, bs, vs);    // every qualifying draw: its verdict stays fresh
+        if (vs) vs->Release();
         nearCam = FwdIsNear(fid);
     }
     if (!qualifies) {
@@ -13467,8 +13499,6 @@ void FwdOnDraw(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT b
     }
     if (g_didOn)                                          // v0.10.0 phase 3: first-20 forward draws line (one pass)
         DidFwdNoteDraw(ctx, indexCount, false, !qualifies ? 2 : (nearCam ? 3 : (statesOk ? 0 : 4)), dss, bs);
-    if (dss) dss->Release();
-    if (bs) bs->Release();
 }
 
 // ---- v0.10.0 PER-DRAW MOTION VECTORS (mv_objects = 2, the default) --------------------------------------------------
@@ -14054,18 +14084,19 @@ ID3D11ShaderResourceView* BiasColourSrv(ID3D11Device* dev, ID3D11Texture2D* f) {
 }
 
 // One world forward-pass DrawIndexed of the main forward binding, right after the game's own call (see the block comment).
-void BiasOnDraw(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex) {
+// phase 57: `st` = the draw's depth-stencil / blend state when FwdOnDraw fetched them (st.have), else fetched here as before.
+void BiasOnDraw(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex, const FwdDrawStates& st) {
     CpuProf::Block cpb(CpuProf::kBFwd);                // phase 31 CPU profiler: with the forward depth's recording
     if (g_gameVpN == 0 || g_gameVp[0].MinDepth < 0.005f || g_gameVp[0].MaxDepth > 0.95f) return;   // world layer only
-    ID3D11BlendState* bs = nullptr; FLOAT bf[4] = {}; UINT mask = 0;
-    ctx->OMGetBlendState(&bs, bf, &mask);
+    ID3D11BlendState* bs = st.bs;
+    if (!st.have) { FLOAT bf[4] = {}; UINT mask = 0; ctx->OMGetBlendState(&bs, bf, &mask); }
     const int kind = BiasBlendKind(bs);
-    if (bs) bs->Release();
+    if (!st.have && bs) bs->Release();
     if (kind < 0) return;
-    ID3D11DepthStencilState* dss = nullptr; UINT ref = 0;
-    ctx->OMGetDepthStencilState(&dss, &ref);
+    ID3D11DepthStencilState* dss = st.dss;
+    if (!st.have) { UINT ref = 0; ctx->OMGetDepthStencilState(&dss, &ref); }
     const bool dOk = BiasDssQualifies(dss);
-    if (dss) dss->Release();
+    if (!st.have && dss) dss->Release();
     if (!dOk || !g_passSeq) return;
     if (g_ctx1Owner != ctx) {
         if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
@@ -14371,8 +14402,8 @@ void DidOnDepthDiscard(ID3D11DeviceContext* ctx) {
 
 // hkMap WRITE_DISCARD (game context, not our work): a buffer a pending draw reads is about to get new contents.
 void DidOnDiscardMap(ID3D11DeviceContext* ctx, ID3D11Resource* r) {
-    CpuProf::Block cpb(CpuProf::kBDidReplay);               // phase 31 CPU profiler (cpu_prof.h)
     if (!g_passSeq) return;
+    CpuProf::Block cpb(CpuProf::kBDidReplay);               // phase 31 CPU profiler (phase 57: after the early-out)
     DrawIdRecord& rec = g_didRing[SlotOf(g_passSeq - 1)];
     if (rec.PendingReplay() > 0 && rec.ReferencesPending(r)) {
         if (g_didForcedPass < kDidForcedMax) {
@@ -15747,8 +15778,11 @@ void MirEndView(ID3D11DeviceContext* ctx, MirUnit& m, const char* lateWhy) {
 // (identity), sceneGbuf = the bind is the main G-buffer.
 void MirOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* rtvs, ID3D11Resource* depthRes,
                bool sceneGbuf) {
-    CpuProf::Block cpb(CpuProf::kBMirror);               // phase 31 CPU profiler (cpu_prof.h)
     MirUnit* cu = g_mirCur >= 0 ? &g_mir[g_mirCur] : nullptr;
+    // phase 57: no open view and this bind cannot be a mirror G-buffer (MirIsGbuf needs 4 RTVs + a depth) -- exactly the path below
+    // that only clears the three flags and leaves at "outside the view", before the profiler's timer reads
+    if (!(cu && cu->open) && !(n == 4 && depthRes)) { g_mirGbuf = false; g_mirJit = false; g_mirLight = false; return; }
+    CpuProf::Block cpb(CpuProf::kBMirror);               // phase 31 CPU profiler (cpu_prof.h)
     Microsoft::WRL::ComPtr<ID3D11Texture2D> rt0, depth;
     UINT w = 0, h = 0;
     const bool gbuf = n == 4 && depthRes && !IsSceneDepth(depthRes) && !sceneGbuf &&   // v0.10.3 #9: + aliases
@@ -19236,6 +19270,17 @@ void FpsProfileTick() {
     // FpsCab switches off only at its next sync, one Present later (ATS 15:04:46: that Present copied the defaults into the bound
     // vehicle's profile). (FpsCab is asked before the profile lock: the lock order is FpsCab -> profile.)
     const bool mode2 = g_launchVr == 1 && g_fpsShow && g_fpsVrLock == 2;
+    // phase 57 (perf): out of mode 2 with no vehicle bound and nothing to save, the tick below only re-syncs two counters (Tick's
+    // unbound branch: locks = FpsCab's lock count; the moved-parts serial, whose parts go to no bound vehicle) and the menu-open
+    // edge -- done here directly: 2 FpsCab locks instead of 5 + the profile lock + the live values per Present. The tick that
+    // unbinds (nBound > 0) and a pending save (dirty: the menu-close save) still take the full path.
+    if (!mode2 && g_fpsProfSess.nBound == 0 && !g_fpsProfDirty) {
+        g_fpsProfSess.locks = FpsCab::LockCount();
+        FpsProfile::CabPart mp[8];
+        FpsCab::CabMovedSince(&g_fpsProfMovedSerial, mp, 8);
+        g_fpsProfMenuWas = g_menuOpen.load(std::memory_order_relaxed);
+        return;
+    }
     const bool cabOn = FpsCab::Active();
     const uint64_t locks = FpsCab::LockCount();
     const uint64_t vkey = FpsCab::VehicleKey();
@@ -19953,11 +19998,28 @@ void MenuLateCountDraw() {
     const int e = g_menuLateBound;
     if (e >= 0 && e < kMaxEyes && g_menuLate[e].state != kLrNone) ++g_menuLate[e].draws;
 }
+// phase 57 (perf): will the panel or the fps box be drawn INTO an eye picture now? MenuDrawVrOn's own test (menu open and its quad
+// not out; fps box on and attached to the vehicle this frame or its quad not out). With the default menu_vr_layer = 1 both go to the
+// compositor as quads: no arm, so no record, so the late panel's per-bind GetResource (MenuLateOnBind) and per-small-draw
+// PSGetShaderResources (MenuLateOnDraw) stop (g_menuLateN = 0). FpsCab::Attached (a lock) only when the fps quad is out.
+inline bool MenuDrawsIntoEyes() {
+    if (g_menuOpen.load(std::memory_order_relaxed) && !(g_menuVrLayer && XrHook::OverlayActive(0))) return true;
+    return g_fpsShow && (!(g_menuVrLayer && XrHook::OverlayActive(1)) || (g_fpsVrLock == 2 && FpsCab::Attached()));
+}
 // The arm point of eye `eye`'s picture (`rtv` = the game's view of it). Mode late: recorded only; learning: drawn now (when
 // it is the eye's last picture of the frame pattern and the eye has no panel this Present yet) + watched.
 void MenuLateArm(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv, char kind) {
     if (eye < 0 || eye >= kMaxEyes || !rtv || t_inDlaa) return;
     if (!(g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)) return;
+    g_menuLateTid.store(GetCurrentThreadId(), std::memory_order_relaxed);   // phase 27: XrHook draws on this thread only
+    // phase 57: nothing goes into the eye picture (both are quads) -> not armed. (The thread above is still stored: XrHook's drawTid
+    // for the quads.) A record of this eye left from before the quads took over is retired without a verdict (reset: no miss, no
+    // fallback), else an unread one would keep g_menuLateN -- and the per-bind / per-draw work -- on. When a quad drops back to the
+    // eye picture, the next arm records again (that frame may miss the box: accepted).
+    if (!MenuDrawsIntoEyes()) {
+        if (g_menuLate[eye].state != kLrNone) { MenuLateRetire(eye, true); MenuLateUpdateN(); }
+        return;
+    }
     Microsoft::WRL::ComPtr<ID3D11Resource> res;
     rtv->GetResource(res.GetAddressOf());
     if (!res) return;
@@ -19976,7 +20038,6 @@ void MenuLateArm(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv,
                 (unsigned long long)fr, o, o);
         return;
     }
-    g_menuLateTid.store(GetCurrentThreadId(), std::memory_order_relaxed);   // phase 27: XrHook draws on this thread only
     // the same picture armed again in the same Present (a second flush / blit into it, also after a read): keep the record (no
     // miss, no second panel); the panel still goes on at the read (late) or is there already (learning). Phase 27: not after
     // its OpenXR release -- the image came back for a NEW frame (several game frames per mirror Present): a new record.
@@ -20326,6 +20387,138 @@ void MenuLateOnXrRelease(void* swapchain, void* tex) {
 // The quad shows only the drawn top-left part of the image (its sub-image), so the image size never changes with the scale.
 constexpr float kOvPanelDensity = 1.6f, kOvPanelMax = 2.4f;
 constexpr float kOvFpsDensity   = 4.0f, kOvFpsMax   = 8.0f;
+// ---- phase 57 (perf): the quads' CONTENT GENERATIONS + the panel built once per Present -------------------------------------------
+// XrHook redraws a quad's swapchain image only when its generation changes (OverlayParams::panelGen / fpsGen; 0 = no content). The
+// fps box: a 32-bit FNV-1a hash of everything its image shows (the two text lines, colour / brightness / opacity -- what FpsSyncColor
+// hands the widget --, fps_vr_scale, the lock mode). The panel: MenuBuildPanel (~88 snprintfs) ran 2-3 x per frame while the menu was
+// open (the quad draw, the desktop mirror, the in-picture fallback); MenuOverlaySet now builds it ONCE per Present and bumps a COUNTER
+// when the build differs from the cached one. The Panel is POD with no padding and MenuBuildPanel memsets it first, so the bytes are
+// the content (TuningMenu::Draw compares the whole struct the same way to rebuild its texture). A counter, not a hash: no collision can
+// hide a change, and a byte hash of the 30 KB Panel per Present would cost more than the memcmp. menu_vr_scale goes into the same
+// generation (the draw scale follows it). MenuOverlayDraw draws the cached build instead of building again.
+// Threads: MenuOverlaySet runs per Present (the Present thread -- in VR not always the render thread), MenuOverlayDraw on the render
+// thread inside xrEndFrame / the game's xrReleaseSwapchainImage. Only MenuOverlaySet WRITES the cache, so it compares without a lock
+// and takes the SRW lock exclusive only to publish a changed build (copy + generation); the draw takes it shared for one 30 KB copy
+// into its own Panel, and only when the generation moved. Never held around GDI / D3D work.
+SRWLOCK            g_ovPanelLock  = SRWLOCK_INIT;
+TuningMenu::Panel  g_ovPanel;                            // the published build (under g_ovPanelLock)
+bool               g_ovPanelValid = false;               // a build of the open menu is published (under g_ovPanelLock)
+uint32_t           g_ovPanelGen   = 0;                   // its generation (never 0 once published; under g_ovPanelLock)
+float              g_ovPanelScale = 0.0f;                // the menu_vr_scale it was published with (MenuOverlaySet only)
+inline uint32_t OvFnv(uint32_t h, const void* p, size_t n) {   // 32-bit FNV-1a step
+    const unsigned char* b = static_cast<const unsigned char*>(p);
+    for (size_t i = 0; i < n; ++i) h = (h ^ b[i]) * 16777619u;
+    return h;
+}
+inline uint32_t OvFnvW(uint32_t h, const wchar_t* s, size_t cap) {   // a string up to its terminator (bytes after it ignored)
+    size_t n = 0;
+    while (n < cap && s[n]) ++n;
+    h = OvFnv(h, s, n * sizeof(wchar_t));
+    const wchar_t z = 0;
+    return OvFnv(h, &z, sizeof(z));                      // (the terminator: "ab" + "c" != "a" + "bc")
+}
+uint32_t MenuOvFpsGen() {
+    uint32_t h = 2166136261u;
+    h = OvFnvW(h, g_fps.line1, sizeof(g_fps.line1) / sizeof(wchar_t));
+    h = OvFnvW(h, g_fps.line2, sizeof(g_fps.line2) / sizeof(wchar_t));
+    const int ints[4] = { g_fpsColor, g_fpsBright, g_fpsOpacity, g_fpsVrLock };
+    h = OvFnv(h, ints, sizeof(ints));
+    h = OvFnv(h, &g_fpsVrScale, sizeof(g_fpsVrScale));
+    return h | 1u;                                       // never 0 (0 = no content)
+}
+// The open menu's panel for the quad, built once per Present (MenuOverlaySet; want = the panel quad is asked for). Returns its
+// generation (0 = not wanted: the cache is withdrawn, the draw builds its own).
+uint32_t MenuOvPanelUpdate(bool want) {
+    if (!want) {
+        if (g_ovPanelValid) {
+            AcquireSRWLockExclusive(&g_ovPanelLock);
+            g_ovPanelValid = false;
+            ReleaseSRWLockExclusive(&g_ovPanelLock);
+        }
+        return 0;
+    }
+    static TuningMenu::Panel s_build;                    // (30 KB: not on the stack; MenuOverlaySet's thread only)
+    MenuBuildPanel(s_build);
+    const float scale = g_menuVrScale;
+    if (!g_ovPanelValid || scale != g_ovPanelScale || memcmp(&s_build, &g_ovPanel, sizeof(s_build)) != 0) {
+        AcquireSRWLockExclusive(&g_ovPanelLock);
+        memcpy(&g_ovPanel, &s_build, sizeof(s_build));
+        if (++g_ovPanelGen == 0) g_ovPanelGen = 1;
+        g_ovPanelValid = true;
+        ReleaseSRWLockExclusive(&g_ovPanelLock);
+        g_ovPanelScale = scale;
+    }
+    return g_ovPanelGen;                                 // (only this thread writes it)
+}
+// The draw's side: `dst` = the published build when there is one (copied only when `dstGen` differs from its generation).
+bool MenuOvPanelTake(TuningMenu::Panel& dst, uint32_t& dstGen) {
+    AcquireSRWLockShared(&g_ovPanelLock);
+    const bool ok = g_ovPanelValid;
+    if (ok && dstGen != g_ovPanelGen) {
+        memcpy(&dst, &g_ovPanel, sizeof(dst));
+        dstGen = g_ovPanelGen;
+    }
+    ReleaseSRWLockShared(&g_ovPanelLock);
+    return ok;
+}
+// ---- phase 57 (perf): one render-target view per OpenXR swapchain image, per quad (was a CreateRenderTargetView + its release at
+// every draw). Keyed by the image's texture pointer + the swapchain format; the ComPtr keeps the image alive, so a cached pointer
+// cannot come back as another texture. Dropped: an entry not used for kOvRtvStale draws of its quad at the next miss (a swapchain's
+// images come round every 2-4 draws: an older one belongs to a destroyed swapchain), the least recently used one when the table is
+// full, the whole table when the draw's device is not the table's, when no quad went out for 0.5 s (the session / quad path ended:
+// MenuOverlaySet, XrHook::OverlayActive), and at a game context change (ResetPassTrackingCore) -- before the device goes, so no image
+// or device is kept alive past it. Own SRW lock: the draw (render thread) vs the drops (the Present thread).
+struct OvRtvEnt {
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv;
+    const void* tex = nullptr;
+    int64_t     fmt = 0;
+    uint64_t    used = 0;                                // the quad's draw count at its last use
+};
+constexpr int kOvRtvN = 8;
+constexpr uint64_t kOvRtvStale = 32;
+struct OvRtvTable { OvRtvEnt e[kOvRtvN]; const void* dev = nullptr; uint64_t draws = 0; };
+OvRtvTable        g_ovRtv[2];                            // [0] the panel quad, [1] the fps box quad
+SRWLOCK           g_ovRtvLock = SRWLOCK_INIT;
+std::atomic<bool> g_ovRtvAny{false};                     // an entry is cached (MenuOverlaySet's test without the lock)
+void MenuOvRtvDrop() {
+    if (!g_ovRtvAny.load(std::memory_order_relaxed)) return;
+    AcquireSRWLockExclusive(&g_ovRtvLock);
+    for (OvRtvTable& t : g_ovRtv) t = OvRtvTable();     // (the views are released here, under the lock)
+    g_ovRtvAny.store(false, std::memory_order_relaxed);
+    ReleaseSRWLockExclusive(&g_ovRtvLock);
+}
+// the cached view of image `tex` of quad k on `dev` (nullptr = none yet); counts the quad's draw
+Microsoft::WRL::ComPtr<ID3D11RenderTargetView> MenuOvRtvFind(int k, const void* dev, const void* tex, int64_t fmt) {
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> v;
+    AcquireSRWLockExclusive(&g_ovRtvLock);
+    OvRtvTable& t = g_ovRtv[k];
+    if (t.dev != dev) { t = OvRtvTable(); t.dev = dev; }   // another device: nothing cached is usable
+    ++t.draws;
+    for (OvRtvEnt& e : t.e)
+        if (e.rtv && e.tex == tex && e.fmt == fmt) { e.used = t.draws; v = e.rtv; break; }
+    ReleaseSRWLockExclusive(&g_ovRtvLock);
+    return v;
+}
+void MenuOvRtvPut(int k, const void* dev, const void* tex, int64_t fmt, ID3D11RenderTargetView* rtv) {
+    AcquireSRWLockExclusive(&g_ovRtvLock);
+    OvRtvTable& t = g_ovRtv[k];
+    if (t.dev == dev) {                                  // (a drop in between: not cached, the next draw makes it again)
+        int slot = -1;
+        for (int i = 0; i < kOvRtvN; ++i) {
+            OvRtvEnt& e = t.e[i];
+            if (e.rtv && t.draws - e.used > kOvRtvStale) e = OvRtvEnt();   // stale: a destroyed swapchain's image
+            if (!e.rtv && slot < 0) slot = i;
+        }
+        if (slot < 0) {                                  // full: the least recently used one goes
+            slot = 0;
+            for (int i = 1; i < kOvRtvN; ++i) if (t.e[i].used < t.e[slot].used) slot = i;
+        }
+        OvRtvEnt& e = t.e[slot];
+        e.rtv = rtv; e.tex = tex; e.fmt = fmt; e.used = t.draws;
+        g_ovRtvAny.store(true, std::memory_order_relaxed);
+    }
+    ReleaseSRWLockExclusive(&g_ovRtvLock);
+}
 void MenuOverlaySet() {
     if (g_launchVr != 1) return;                         // (XrHook is installed for VR launches only)
     XrHook::OverlayParams p;
@@ -20349,6 +20542,12 @@ void MenuOverlaySet() {
     p.panelH    = (uint32_t)std::ceil(TuningMenu::RefHeight(TuningMenu::kMaxRows) * kOvPanelMax);
     p.fpsW      = (uint32_t)std::lround(TuningMenu::kWidgetRefW * kOvFpsMax);
     p.fpsH      = (uint32_t)std::lround(TuningMenu::kWidgetRefH * kOvFpsMax);
+    // phase 57: the content generations (XrHook redraws a quad's image only when its generation changes); the panel is built here
+    // once per Present for the quad draw (only while its quad is asked for: menu_vr_layer on, menu open)
+    p.fpsGen    = p.fpsShow ? MenuOvFpsGen() : 0;
+    p.panelGen  = MenuOvPanelUpdate(p.enabled && p.menuOpen);
+    // phase 57: the cached swapchain-image views go when no quad went out for 0.5 s (session ended / quad path down)
+    if (g_ovRtvAny.load(std::memory_order_relaxed) && !XrHook::OverlayActive(0) && !XrHook::OverlayActive(1)) MenuOvRtvDrop();
     XrHook::OverlaySet(p);
 }
 // XrHook's draw callback (on the render thread, inside xrEndFrame or the game's xrReleaseSwapchainImage): clear the swapchain
@@ -20374,24 +20573,29 @@ bool MenuOverlayDraw(XrHook::OverlayDraw* d) {
     }
     D3D11_TEXTURE2D_DESC td{};
     tex->GetDesc(&td);
-    D3D11_RENDER_TARGET_VIEW_DESC rd{};
-    rd.Format = (DXGI_FORMAT)d->format;                  // (the runtime's texture may be typeless)
-    if (td.ArraySize > 1) {
-        rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
-        rd.Texture2DArray.MipSlice = 0; rd.Texture2DArray.FirstArraySlice = 0; rd.Texture2DArray.ArraySize = 1;
-    } else {
-        rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-        rd.Texture2D.MipSlice = 0;
-    }
-    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv;  // a view for this draw only (no reference on the image is kept)
-    HRESULT hr = dev->CreateRenderTargetView(tex, &rd, rtv.GetAddressOf());
-    if (FAILED(hr) || !rtv) hr = dev->CreateRenderTargetView(tex, nullptr, rtv.GetAddressOf());   // a typed texture: its own format
-    if (FAILED(hr) || !rtv) {
-        static int logs = 0;
-        if (logs++ < 3)
-            LogErr("tuning menu: VR overlay image RTV create failed hr=0x%lx (%ux%u texture fmt=%d, swapchain fmt=%lld)", (unsigned long)hr,
-                td.Width, td.Height, (int)td.Format, (long long)d->format);
-        return false;
+    const int k = d->which ? 1 : 0;
+    // phase 57: the image's view from the per-quad cache (MenuOvRtvFind); made + cached at its first draw
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv = MenuOvRtvFind(k, dev.Get(), d->tex, d->format);
+    if (!rtv) {
+        D3D11_RENDER_TARGET_VIEW_DESC rd{};
+        rd.Format = (DXGI_FORMAT)d->format;              // (the runtime's texture may be typeless)
+        if (td.ArraySize > 1) {
+            rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
+            rd.Texture2DArray.MipSlice = 0; rd.Texture2DArray.FirstArraySlice = 0; rd.Texture2DArray.ArraySize = 1;
+        } else {
+            rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+            rd.Texture2D.MipSlice = 0;
+        }
+        HRESULT hr = dev->CreateRenderTargetView(tex, &rd, rtv.GetAddressOf());
+        if (FAILED(hr) || !rtv) hr = dev->CreateRenderTargetView(tex, nullptr, rtv.GetAddressOf());   // a typed texture: its own format
+        if (FAILED(hr) || !rtv) {
+            static int logs = 0;
+            if (logs++ < 3)
+                LogErr("tuning menu: VR overlay image RTV create failed hr=0x%lx (%ux%u texture fmt=%d, swapchain fmt=%lld)", (unsigned long)hr,
+                    td.Width, td.Height, (int)td.Format, (long long)d->format);
+            return false;
+        }
+        MenuOvRtvPut(k, dev.Get(), d->tex, d->format, rtv.Get());
     }
     const int outMode = TuningMenu::kOutLinear | TuningMenu::kOutOverlay;
     const FLOAT clear[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -20402,8 +20606,12 @@ bool MenuOverlayDraw(XrHook::OverlayDraw* d) {
     const int gpTok = d->which ? GpuPerf::Begin(ctx, GpuPerf::kOverlay) : -1;
     ctx->ClearRenderTargetView(rtv.Get(), clear);
     if (d->which == 0) {
-        TuningMenu::Panel p;
-        MenuBuildPanel(p);
+        // phase 57: the panel MenuOverlaySet built this Present (the build its panelGen names); a build of its own only when none is
+        // published (render thread only -- the armTid test above; 30 KB: not on the stack)
+        static TuningMenu::Panel s_p;
+        static uint32_t s_pGen = 0;                      // the generation s_p holds (0 = its own build)
+        if (!MenuOvPanelTake(s_p, s_pGen)) { MenuBuildPanel(s_p); s_pGen = 0; }
+        const TuningMenu::Panel& p = s_p;
         const float refH = TuningMenu::RefHeight(p.nRows);
         s = (std::min)(kOvPanelDensity * g_menuVrScale, (std::min)((float)d->w / TuningMenu::kRefWidth, (float)d->h / refH));
         g_menuVrBuild = s;                               // one build scale for the quad and the desktop mirror
@@ -20422,7 +20630,6 @@ bool MenuOverlayDraw(XrHook::OverlayDraw* d) {
     GpuPerf::End(ctx, gpTok);                            // (-1 = not timed: a no-op)
     t_inDlaa = false;
     static bool s_logged[2] = {};
-    const int k = d->which ? 1 : 0;
     if (ok && !s_logged[k]) {
         s_logged[k] = true;
         Log("tuning menu: VR %s drawn into its OpenXR quad image %p (%ux%u, texture fmt=%d, view fmt=%lld, array %u) at %.2f px per "
@@ -20640,18 +20847,19 @@ void MirStatsLog(uint64_t blit) {
 void STDMETHODCALLTYPE hkDrawIndexedInstanced(ID3D11DeviceContext* ctx, UINT ic, UINT inst, UINT si, INT bv, UINT sinst) {
     CPU_HOOK(kHkDrawIdxInst);                                 // phase 31 CPU profiler (cpu_prof.h)
     if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); CPU_ORIG(oDrawIndexedInstanced(ctx, ic, inst, si, bv, sinst)); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
+    const bool inDlaa = t_inDlaa;                         // phase 57: the TLS flag read once per call (see hkDrawIndexed)
     // v0.10.0: only recorded (world G-buffer, per-draw MVs live, not our own work); every other call passes straight through
-    if (g_didOn && g_gbufPass && g_passSeq && !t_inDlaa && IsGameCtx(ctx)) DidOnDraw(ctx, ic, inst, si, bv, sinst, true);
-    else if (g_mirGbuf && g_didOn && !t_inDlaa && IsGameCtx(ctx)) MirOnDraw(ctx, ic, inst, si, bv, sinst, true);   // v0.10.0 phase 2
-    else if (g_didOn && g_jitterPass && !g_gbufPass && !t_inDlaa && IsGameCtx(ctx) && FwdLive()) {
+    if (g_didOn && g_gbufPass && g_passSeq && !inDlaa && IsGameCtx(ctx)) DidOnDraw(ctx, ic, inst, si, bv, sinst, true);
+    else if (g_mirGbuf && g_didOn && !inDlaa && IsGameCtx(ctx)) MirOnDraw(ctx, ic, inst, si, bv, sinst, true);   // v0.10.0 phase 2
+    else if (g_didOn && g_jitterPass && !g_gbufPass && !inDlaa && IsGameCtx(ctx) && FwdLive()) {
         ++g_didFwdInst;                                   // v0.10.0 phase 3: an instanced forward draw (no forward id)
         DidFwdNoteDraw(ctx, ic, true, 5, nullptr, nullptr);
     }
     // v0.10.0 phase 11 LOD bias scope: the sampler set this draw needs (solid / see-through blend state)
-    if (!t_inDlaa && g_lodPerDraw.load(std::memory_order_relaxed) && IsGameCtx(ctx)) LodOnDraw(ctx);
-    if (g_menuLateBound >= 0 && !t_inDlaa && IsGameCtx(ctx)) MenuLateCountDraw();   // v0.10.0 phase 16 VR late panel
-    if (Vrs::g_want && !t_inDlaa && IsGameCtx(ctx)) VrsOnDraw(ctx);   // phase 34 (as hkDrawIndexed)
-    if (g_lightBind && !t_inDlaa && IsGameCtx(ctx)) LightRedrawOnDraw(ctx);   // phase 55 (as hkDrawIndexed)
+    if (!inDlaa && g_lodPerDraw.load(std::memory_order_relaxed) && IsGameCtx(ctx)) LodOnDraw(ctx);
+    if (g_menuLateBound >= 0 && !inDlaa && IsGameCtx(ctx)) MenuLateCountDraw();   // v0.10.0 phase 16 VR late panel
+    if (Vrs::g_want && !inDlaa && IsGameCtx(ctx)) VrsOnDraw(ctx);   // phase 34 (as hkDrawIndexed)
+    if (g_lightBind && !inDlaa && IsGameCtx(ctx)) LightRedrawOnDraw(ctx);   // phase 55 (as hkDrawIndexed)
     CPU_ORIG(oDrawIndexedInstanced(ctx, ic, inst, si, bv, sinst));
 }
 #endif
@@ -20659,7 +20867,12 @@ void STDMETHODCALLTYPE hkDrawIndexedInstanced(ID3D11DeviceContext* ctx, UINT ic,
 void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex) {
     CPU_HOOK(kHkDrawIndexed);                                 // phase 31 CPU profiler (cpu_prof.h)
     if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); CPU_ORIG(oDrawIndexed(ctx, indexCount, startIndex, baseVertex)); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
-    TraceDrawIndexed(ctx, indexCount);
+    // phase 57 (perf): t_inDlaa (a TLS lookup per read) read ONCE per call. Behaviour-neutral: every scope of the mod's own work that
+    // a callee below opens closes again before it returns (all t_inDlaa = true / false pairs and the `was` save / restore pairs in
+    // this file), so a flag that is false here is false at every later test, and a true one skips all of them either way.
+    const bool inDlaa = t_inDlaa;
+    // phase 57: TraceOn() inline (the F11 frame trace records: a call into TraceDrawIndexed only then; it tests again)
+    if (!inDlaa && g_traceState.load(std::memory_order_relaxed) == 2) TraceDrawIndexed(ctx, indexCount);
     // v0.6.1: every call is counted on the newest pass (flight recorder).
     // v0.6.2: only the game context is tracked (identity compare, no GetType); for any other context the type is
     // queried once: deferred -> g_diDeferred, other immediate -> g_foreignCtx (once the game context is known).
@@ -20674,9 +20887,9 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
             MenuLateOnForeignDraw(ctx, "DrawIndexed", indexCount, _ReturnAddress());
 #endif
     } else {
-        CountGameDraw(t_inDlaa, ctx, 0, true);     // v0.8.1: frame-end rule + present-layer bookkeeping
+        CountGameDraw(inDlaa, ctx, 0, true);     // v0.8.1: frame-end rule + present-layer bookkeeping
 #ifdef WITH_DLAA
-        if (g_menuLateBound >= 0 && !t_inDlaa) MenuLateCountDraw();   // v0.10.0 phase 16 (a game draw into a recorded eye picture)
+        if (g_menuLateBound >= 0 && !inDlaa) MenuLateCountDraw();   // v0.10.0 phase 16 (a game draw into a recorded eye picture)
 #endif
     }
 #ifdef WITH_DLAA
@@ -20691,7 +20904,7 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
             // v0.12.0 issue #12 round 4: what the rasterizer really uses for this pass (the shift last issued by ReconcileViewports)
             // vs the jitter NGX will be told (ps.jx / jy), at the pass's first G-buffer draw. A mismatch = DLSS is fed the wrong
             // jitter for the whole pass (smudge on camera motion). Counted always; the first 8 logged.
-            if (!ps.rastSeen && !t_inDlaa) {
+            if (!ps.rastSeen && !inDlaa) {
                 ps.rastSeen = true;
                 ps.rastShifted = g_vpShifted; ps.rastJx = g_vpShiftX; ps.rastJy = g_vpShiftY;
                 if (g_dlaaOn.load(std::memory_order_relaxed)) {
@@ -20712,7 +20925,7 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
             }
 #ifdef WITH_DLAA
             // v0.5.5: VR collects candidates even with MV off (the projection eye verdict reads them).
-            if (t_inDlaa) {
+            if (inDlaa) {
                 ++ps.skInDlaa;
             } else if (!g_dlaaOn.load(std::memory_order_relaxed) ||
                        !(g_mvOn.load(std::memory_order_relaxed) || g_vrMode) ||
@@ -20724,19 +20937,19 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
                 CollectMvCandidate(ctx, indexCount, startIndex, baseVertex, ps);
                 if (t0) g_cpuMvTicks += (int64_t)TscToQpc(__rdtsc() - t0);
             }
-            if (g_objInScene && !t_inDlaa) {                   // v0.9.0 per-object MVs: record + id lookup
+            if (g_objInScene && !inDlaa) {                   // v0.9.0 per-object MVs: record + id lookup
                 const uint64_t t1 = MeasureOn() ? __rdtsc() : 0; // (phase 35: TSC; phase 45: only while measuring)
                 objSlot = ObjOnDraw(ctx, indexCount, startIndex, baseVertex);
                 if (t1) g_objTicks += TscToQpc(__rdtsc() - t1);
             }
-            if (g_didOn && !t_inDlaa)                          // v0.10.0 per-draw MVs: the draw's whole input state
+            if (g_didOn && !inDlaa)                          // v0.10.0 per-draw MVs: the draw's whole input state
                 DidOnDraw(ctx, indexCount, 1, startIndex, baseVertex, 0, false);
 #endif
         }
     }
 #ifdef WITH_DLAA
     // v0.10.0 phase 2: a mirror view's G-buffer draw -> its unit's camera candidates + draw record (MirOnDraw)
-    if (g_mirGbuf && gameCtx && !t_inDlaa) MirOnDraw(ctx, indexCount, 1, startIndex, baseVertex, 0, false);
+    if (g_mirGbuf && gameCtx && !inDlaa) MirOnDraw(ctx, indexCount, 1, startIndex, baseVertex, 0, false);
     // v0.7.8 profile-screen preview: the truck's draws feed the current slot's own candidate record (same
     // CollectMvCandidate, same gates as the world path; the viewport MinDepth 0.01 makes it the world layer).
     // v0.7.8 round 4: only for the learned reference slots (the others' candidates are never used).
@@ -20747,7 +20960,7 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
     // of the MV key (the layout is needed for the depth too).
     // v0.8.1 round 5: the other passes collect their first kPvLayCands (16) -- the layout pairs candidates of the same
     // instance, the first one of a tile is often another instance of the reference's first mesh (see PvLayout).
-    if (g_previewPass && g_pvCur >= 0 && !t_inDlaa && IsGameCtx(ctx)) {
+    if (g_previewPass && g_pvCur >= 0 && !inDlaa && IsGameCtx(ctx)) {
         ++g_pv[g_pvCur].diCount;                                  // round 6 diagnostics (no-candidate report)
         if (PvReadbacksOn()) {                                    // phase 15: also for the VR panel with DLAA off
             const bool full = ((g_ptRefMask >> g_pvCur) & 1) || g_pvCapActive;
@@ -20758,30 +20971,31 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
     }
     // Trigger (a): a DrawIndexed (flat: the UI) while a pending composite target is the current RT0 runs its DLAA first.
     int pvMenuIdx = -1;                                  // v0.10.0 phase 15: ... and gets the VR menu panel after this draw
-    if (g_ptBoundIdx >= 0 && !t_inDlaa && IsGameCtx(ctx)) { pvMenuIdx = g_ptBoundIdx; PreviewFlush(ctx, pvMenuIdx); }
+    if (g_ptBoundIdx >= 0 && !inDlaa && IsGameCtx(ctx)) { pvMenuIdx = g_ptBoundIdx; PreviewFlush(ctx, pvMenuIdx); }
     // v0.9.0: a tagged draw writes its id into the stencil upper nibble (the twin with ref id << 4 for this one draw)
     const bool objTag = objSlot && g_objInScene && g_objCur && g_objCur->twin;
     if (objTag) oOMSetDepthStencilState(ctx, g_objCur->twin, ObjStaticRef() | ((UINT)objSlot << 4));
 #endif
     // v0.10.0 phase 11 LOD bias scope: the sampler set this draw needs (solid / see-through blend state)
-    if (gameCtx && !t_inDlaa && g_lodPerDraw.load(std::memory_order_relaxed)) LodOnDraw(ctx);
+    if (gameCtx && !inDlaa && g_lodPerDraw.load(std::memory_order_relaxed)) LodOnDraw(ctx);
 #ifdef WITH_DLAA
-    if (g_menuLateN && gameCtx && !t_inDlaa && indexCount <= 6) MenuLateOnDraw(ctx, "DrawIndexed", indexCount, _ReturnAddress());
-    if (Vrs::g_want && gameCtx && !t_inDlaa) VrsOnDraw(ctx);   // phase 34: full rate for a cut-out / SV_Depth / unknown PS
-    if (g_lightBind && gameCtx && !t_inDlaa) LightRedrawOnDraw(ctx);   // phase 55: a lighting-pass mesh redraw -> the G-buffer's viewport
+    if (g_menuLateN && gameCtx && !inDlaa && indexCount <= 6) MenuLateOnDraw(ctx, "DrawIndexed", indexCount, _ReturnAddress());
+    if (Vrs::g_want && gameCtx && !inDlaa) VrsOnDraw(ctx);   // phase 34: full rate for a cut-out / SV_Depth / unknown PS
+    if (g_lightBind && gameCtx && !inDlaa) LightRedrawOnDraw(ctx);   // phase 55: a lighting-pass mesh redraw -> the G-buffer's viewport
 #endif
     CPU_ORIG(oDrawIndexed(ctx, indexCount, startIndex, baseVertex));
 #ifdef WITH_DLAA
     if (objTag) oOMSetDepthStencilState(ctx, g_objCur->twin, ObjStaticRef());   // back to the static ref
-    if (pvMenuIdx >= 0 && !t_inDlaa) MenuDrawPreview(ctx, pvMenuIdx, 'a');      // v0.10.0 phase 15 (VR menu-screen eye)
+    if (pvMenuIdx >= 0 && !inDlaa) MenuDrawPreview(ctx, pvMenuIdx, 'a');      // v0.10.0 phase 15 (VR menu-screen eye)
     // v0.9.0 r5: a world FORWARD-pass draw (1 RTV RGBA16F + scene DSV, not the G-buffer) -> forward depth re-draw
-    if (gameCtx && g_jitterPass && !g_gbufPass && !t_inDlaa && FwdLive()) {
+    FwdDrawStates fst;                                    // phase 57: its depth-stencil / blend state, fetched once (released here)
+    if (gameCtx && g_jitterPass && !g_gbufPass && !inDlaa && FwdLive()) {
         const uint64_t t2 = MeasureOn() ? __rdtsc() : 0;  // (phase 35: TSC; phase 45: only while measuring)
-        FwdOnDraw(ctx, indexCount, startIndex, baseVertex);
+        FwdOnDraw(ctx, indexCount, startIndex, baseVertex, fst);
         if (t2) g_fwdTicks += TscToQpc(__rdtsc() - t2);
     }
     // phase 49: an additive glow draw of the main forward binding -> the pass's glow record (GLOW BIAS MASK)
-    if (gameCtx && g_jitterPass && !g_gbufPass && !t_inDlaa && g_fwdBound && BiasLive()) BiasOnDraw(ctx, indexCount, startIndex, baseVertex);
+    if (gameCtx && g_jitterPass && !g_gbufPass && !inDlaa && g_fwdBound && BiasLive()) BiasOnDraw(ctx, indexCount, startIndex, baseVertex, fst);
 #endif
 }
 
@@ -20826,6 +21040,7 @@ void ResetPassTrackingCore(bool forceDlaaOff) {
     MirOnContextReset();                                       // v0.10.0 phase 2: mirror views / units' game refs
     LightRedrawOnContextReset();                               // phase 55: lighting bind state + state caches (old device refs)
     MenuLateReset("game context change");                      // v0.10.0 phase 16: recorded eye pictures (game refs)
+    MenuOvRtvDrop();                                           // phase 57: the cached quad-image views (old device refs)
     DepthTwin::PoolShutdown();                                 // v0.10.0 phase 8: pooled pass-slot textures (old device)
     GpuPerf::Shutdown();                                       // v0.10.0 phase 8: the perf queries belong to the old device
     GpuPass::Shutdown();                                       // phase 36: ... and the per-pass-type ones
@@ -21218,7 +21433,6 @@ uint64_t g_feTileDraws  = 0;        // tile composites into the screen target (n
 inline bool FrameEndCounting() { return g_launchVr != 1 && LogDebugLevel(); }
 
 void FrameEndOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* rtvs) {
-    CpuProf::Block cpb(CpuProf::kBFrameEnd);               // phase 31 CPU profiler (cpu_prof.h)
     const bool pl = g_plActive.load(std::memory_order_relaxed);
     if (pl) {
         if (g_plGameTid.load(std::memory_order_relaxed) == 0) {   // mid-session activation: claim the game thread
@@ -21233,6 +21447,7 @@ void FrameEndOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* co
     } else if (!FrameEndCounting()) {
         return;                                          // phase 31: nothing reads the count (see FrameEndCounting)
     }
+    CpuProf::Block cpb(CpuProf::kBFrameEnd);               // phase 31 CPU profiler (phase 57: after the early-outs: no timer reads there)
     bool screen = false;
     void* rtPtr = nullptr;
     if (n >= 1 && rtvs && rtvs[0] && g_bbW) {

@@ -285,6 +285,10 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
 // per axis min over its two edges of saturate(distance to that edge / Feather), each axis ramp smoothstep'd;
 // an edge that coincides with the image border (EdgeOn = 0) is not feathered (ramp 1). Feather 0 = hard edge.
 // Blend = 0: the v0.6.3 pass, same output (Orig unbound, never read).
+// phase 57 (perf, two GPU savings, output unchanged): (a) Orig is only loaded where mask < 1 (the Feather band, ~96 px at
+// the rect border) instead of for every pixel -- the mask is exactly 1 inside; (b) LDR at Sharpness 0 (the pass runs only
+// for the blend) skips the 4 ring taps and the RCAS maths: the lobe is 0 there so c = centre, i.e. saturate(centre) --
+// bit-identical. HDR at Sharpness 0 keeps the full path (HdrCompress/HdrExpand round trip is not bit-exact).
 // v0.8.0 HDR unit (Mode.x = 1; RGBA16F linear input, values above 1): RCAS's limiters assume 0..1, and sharpening the
 // linear value rings hard around highlights. Every tap is first mapped through the REVERSIBLE tonemapper
 // c / (1 + max3(c)) (into 0..1, the one AMD recommends for running FSR / RCAS on HDR input), the unchanged RCAS math
@@ -327,30 +331,38 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
     //  d e f
     //    g
     const float4 e0 = Src.Load(int3(p, 0));
-    float3 b = Src.SampleLevel(LinearClampSampler, uv + float2(0.0, -Radius) / size, 0).rgb;
-    float3 d = Src.SampleLevel(LinearClampSampler, uv + float2(-Radius, 0.0) / size, 0).rgb;
-    float3 f = Src.SampleLevel(LinearClampSampler, uv + float2( Radius, 0.0) / size, 0).rgb;
-    float3 g = Src.SampleLevel(LinearClampSampler, uv + float2(0.0,  Radius) / size, 0).rgb;
-    float4 e = e0;
-    if (hdr) {
-        e.rgb = HdrCompress(e0.rgb);
-        b = HdrCompress(b); d = HdrCompress(d); f = HdrCompress(f); g = HdrCompress(g);
+    float3 res;
+    // phase 57 (perf): LDR unit at Sharpness 0 (the pass runs only for the border blend): the RCAS lobe is exactly 0,
+    // so c = e and the result is saturate(centre) -- skip the 4 ring taps + the limiter maths. Shader-uniform branch
+    // (constant buffer). Not taken for HDR: the compress / expand round trip is not bit-exact, so HDR keeps the full path.
+    if (!hdr && Sharpness <= 0.0) {
+        res = saturate(e0.rgb);
+    } else {
+        float3 b = Src.SampleLevel(LinearClampSampler, uv + float2(0.0, -Radius) / size, 0).rgb;
+        float3 d = Src.SampleLevel(LinearClampSampler, uv + float2(-Radius, 0.0) / size, 0).rgb;
+        float3 f = Src.SampleLevel(LinearClampSampler, uv + float2( Radius, 0.0) / size, 0).rgb;
+        float3 g = Src.SampleLevel(LinearClampSampler, uv + float2(0.0,  Radius) / size, 0).rgb;
+        float4 e = e0;
+        if (hdr) {
+            e.rgb = HdrCompress(e0.rgb);
+            b = HdrCompress(b); d = HdrCompress(d); f = HdrCompress(f); g = HdrCompress(g);
+        }
+        const float bL = Luma(b), dL = Luma(d), fL = Luma(f), gL = Luma(g);
+        const float mn4 = min(min(bL, dL), min(fL, gL));
+        const float mx4 = max(max(bL, dL), max(fL, gL));
+        // RCAS limiters: the largest negative lobe that keeps the result inside [0,1] given the ring range.
+        const float hitMin = mn4 / max(4.0 * mx4, 1.0e-5);
+        const float hitMax = (1.0 - mx4) / min(4.0 * mn4 - 4.0, -1.0e-5);
+        float lobe = max(-hitMin, hitMax);
+        lobe = max(-kRcasLimit, min(lobe, 0.0)) * Sharpness;
+        float3 c = (lobe * (b + d + f + g) + e.rgb) / (4.0 * lobe + 1.0);
+        // v0.5.9 anti-ringing: keep the result inside the range of the 5 taps. With a wide Radius a bright
+        // lamp in one ring tap pushed the dark pixels around it below zero (black, flickering halos).
+        const float3 mn5 = min(e.rgb, min(min(b, d), min(f, g)));
+        const float3 mx5 = max(e.rgb, max(max(b, d), max(f, g)));
+        c = clamp(c, mn5, mx5);
+        res = hdr ? min(HdrExpand(c), 65504.0) : saturate(c);   // v0.8.0 HDR: back to linear, no 0..1 clamp
     }
-    const float bL = Luma(b), dL = Luma(d), fL = Luma(f), gL = Luma(g);
-    const float mn4 = min(min(bL, dL), min(fL, gL));
-    const float mx4 = max(max(bL, dL), max(fL, gL));
-    // RCAS limiters: the largest negative lobe that keeps the result inside [0,1] given the ring range.
-    const float hitMin = mn4 / max(4.0 * mx4, 1.0e-5);
-    const float hitMax = (1.0 - mx4) / min(4.0 * mn4 - 4.0, -1.0e-5);
-    float lobe = max(-hitMin, hitMax);
-    lobe = max(-kRcasLimit, min(lobe, 0.0)) * Sharpness;
-    float3 c = (lobe * (b + d + f + g) + e.rgb) / (4.0 * lobe + 1.0);
-    // v0.5.9 anti-ringing: keep the result inside the range of the 5 taps. With a wide Radius a bright
-    // lamp in one ring tap pushed the dark pixels around it below zero (black, flickering halos).
-    const float3 mn5 = min(e.rgb, min(min(b, d), min(f, g)));
-    const float3 mx5 = max(e.rgb, max(max(b, d), max(f, g)));
-    c = clamp(c, mn5, mx5);
-    float3 res = hdr ? min(HdrExpand(c), 65504.0) : saturate(c);   // v0.8.0 HDR: back to linear, no 0..1 clamp
     if (Blend > 0.5) {
         float mask = 1.0;
         if (Feather > 0.0) {
@@ -362,9 +374,11 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
                                  EdgeOn.w > 0.5 ? saturate(hi.y / Feather) : 1.0);
             mask = smoothstep(0.0, 1.0, rx) * smoothstep(0.0, 1.0, ry);
         }
-        res = lerp(Orig.Load(int3(p, 0)).rgb, res, mask);
+        // phase 57 (perf): the mask is exactly 1 everywhere except the Feather band at the rect border -> read Orig
+        // (a full-res load per pixel) only there; lerp(Orig, res, 1) is res.
+        if (mask < 1.0) res = lerp(Orig.Load(int3(p, 0)).rgb, res, mask);
     }
-    Dst[id.xy] = float4(res, e.a);
+    Dst[id.xy] = float4(res, e0.a);
 }
 )";
 // kRcasShader-END

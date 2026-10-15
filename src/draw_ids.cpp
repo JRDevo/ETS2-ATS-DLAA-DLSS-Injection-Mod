@@ -9,6 +9,10 @@
 #include <cmath>
 #include <cstring>
 #include <new>
+#ifdef DRAWID_VERIFY_MERGE
+#include <cstdio>
+#include <cstdlib>
+#endif
 
 using Microsoft::WRL::ComPtr;
 
@@ -2054,6 +2058,7 @@ ComPtr<ID3D11DepthStencilState>  s_dss;
 ComPtr<ID3D11Buffer>             s_idCb;
 ComPtr<ID3D11BlendState>         s_bsR, s_bsG;            // v0.10.0 phase 3: write RED (G-buffer ids) / GREEN (forward ids)
 const void*                      s_dev = nullptr;          // identity of the device the objects belong to
+bool                             s_clearView = false;      // phase 57: the driver supports ClearView (the id-target clear by rect)
 // v0.10.0 phase 10: forward-depth occlusion init (InitFwdDepth): own device identity (the ids may be off)
 ComPtr<ID3D11VertexShader>       s_initVs;
 ComPtr<ID3D11PixelShader>        s_initPs[2];
@@ -2317,6 +2322,8 @@ unsigned g_statFrames = 6u, g_statEvery = 4u;
 //                            player's speed is "static" within the 0.1 px snap but wobbles: it is never skipped (default 0.02)
 float    g_statEps = 0.02f;
 bool     g_staticGate = false;               // DrawIdRecord::SetStaticGate (set per replay by the caller)
+bool     g_fullIdClear = false;              // phase 57: DrawIdRecord::SetFullIdClear (the Ctrl+F6 view: clear the whole id target)
+uint64_t g_idClearRect = 0, g_idClearFull = 0;   // phase 57: G-buffer id-target clears by rect / whole target (IdClears)
 uint64_t g_testSkipKey = 0;                  // round 4, HARNESS ONLY: DrawIdRecord::SetTestSkipKey
 constexpr uint64_t kStatFresh = 16;         // the last verdict must be at most this many frames old (readbacks stalled: replay)
 constexpr uint64_t kStatParentHold = 30;     // a key that was a rigid parent within this many frames is always replayed
@@ -2531,15 +2538,19 @@ struct DrawIdRecord::PsState {
     ID3D11SamplerState* smp[kPsSmp];
 };
 
+// phase 57 (perf): no memset of the whole PsState (~300 B per draw) -- only the pointers it releases are nulled. Record overwrites
+// every field before the slot is replayed again (PSGetShader / PSGetConstantBuffers1 / PSGetShaderResources / PSGetSamplers write
+// all their slots), but two readers rely on a released slot holding NO pointers: Record's "SRV unchanged since this record's
+// previous draw" test reads m_ps[m_n - 1] even when that draw is already released (a stale match would keep a resource out of
+// the pending-resource set restarted by the replay), and a second release of the same slot must not Release twice.
 void DrawIdRecord::ReleasePs(int from, int to) {
     if (!m_ps) return;
     for (int i = from; i < to; ++i) {
         PsState& p = m_ps[i];
-        if (p.ps) p.ps->Release();
-        for (auto* x : p.cb) if (x) x->Release();
-        for (auto* x : p.srv) if (x) x->Release();
-        for (auto* x : p.smp) if (x) x->Release();
-        memset(&p, 0, sizeof(p));
+        if (p.ps) { p.ps->Release(); p.ps = nullptr; }
+        for (auto*& x : p.cb) if (x) { x->Release(); x = nullptr; }
+        for (auto*& x : p.srv) if (x) { x->Release(); x = nullptr; }
+        for (auto*& x : p.smp) if (x) { x->Release(); x = nullptr; }
     }
 }
 
@@ -2589,7 +2600,13 @@ void DrawIdRecord::ReleaseState(State& s) {
     for (int t = 0; t < kVsSrv; ++t) rel(s.srv[t], kOSrv0 << t);
     for (int t = 0; t < kVsSmp; ++t) rel(s.smp[t], kOSmp0 << t);
     rel(s.rs, kORs);
-    memset(&s, 0, sizeof(s));
+    // phase 57 (perf): no memset of the whole State (~380 B x ~1700 draws per pass in VR) -- only own = 0, so a second release of
+    // the same slot releases nothing. A released State is never read again: the replays read [m_replayedTo / m_depthTo, m_n) and
+    // releases only cover [m_releasedTo, min of both); CaptureShadow's `prev` is m_st[m_n - 1] only while m_n > m_releasedTo;
+    // OwnAll reads an unreleased draw. Record's next capture into the slot (CaptureShadow / CaptureGet) writes every field
+    // the replay reads: all pointer slots, strides / offsets / formats, topology, nVp / nSc + vp[0..nVp) / sc[0..nSc) (the
+    // only entries read), own; Record then sets ic / inst / si / sinst / bv / instanced.
+    s.own = 0;
 }
 
 uint32_t DrawIdRecord::ShadowCheck(ID3D11DeviceContext1* ctx) {
@@ -3488,7 +3505,30 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
     if (!m_cleared && !depth) {
         if (!forward) {                                  // the forward replay never clears: the G-buffer replay did (both
             const FLOAT zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };   // channels) and its ids must survive
-            ctx->ClearRenderTargetView(idRtv, zero);
+            // phase 57 (perf): only the view clip + the march reach (see SetFullIdClear in draw_ids.h); ids outside it are never
+            // read. Every replay of this pass is scissored to the same clip (SetView before each one), and the margin ring is
+            // zero as before, so the vote / pass B see exactly what the whole-target clear gave them.
+            D3D11_RECT cr{};
+            bool rectOk = m_clip && !g_fullIdClear && s_clearView;
+            if (rectOk) {
+                ComPtr<ID3D11Resource> res;
+                ComPtr<ID3D11Texture2D> tex;
+                D3D11_TEXTURE2D_DESC td{};
+                idRtv->GetResource(&res);
+                rectOk = res && SUCCEEDED(res.As(&tex));
+                if (rectOk) tex->GetDesc(&td);
+                const LONG m = (LONG)((g_parReach > kParReachPx ? g_parReach : kParReachPx) + 4u);
+                const LONG W = (LONG)td.Width, H = (LONG)td.Height;
+                cr.left = m_clipRect.left - m > 0 ? m_clipRect.left - m : 0;
+                cr.top = m_clipRect.top - m > 0 ? m_clipRect.top - m : 0;
+                cr.right = m_clipRect.right + m < W ? m_clipRect.right + m : W;
+                cr.bottom = m_clipRect.bottom + m < H ? m_clipRect.bottom + m : H;
+                // an empty rect (a clip off the target) or one that covers it: the whole-target clear
+                rectOk = rectOk && cr.right > cr.left && cr.bottom > cr.top &&
+                         !(cr.left == 0 && cr.top == 0 && cr.right == W && cr.bottom == H);
+            }
+            if (rectOk) { ctx->ClearView(idRtv, zero, &cr, 1); ++g_idClearRect; }
+            else { ctx->ClearRenderTargetView(idRtv, zero); ++g_idClearFull; }
         }
         m_cleared = true;
     }
@@ -3846,6 +3886,10 @@ bool DrawIdRecord::InitDevice(ID3D11Device* dev) {
     if (s_dev && s_dev != (const void*)dev) ShutdownDevice();
     if (!ShaderCache::Done()) return false;              // warm-up still running: retried (not failed)
     s_dev = dev;
+    {   // phase 57: the id-target clear by rect (ReplayImpl) only where the driver has ClearView (as inject.cpp's glow clear)
+        D3D11_FEATURE_DATA_D3D11_OPTIONS o{};
+        s_clearView = SUCCEEDED(dev->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS, &o, sizeof(o))) && o.ClearView;
+    }
     size_t size = 0;
     const void* code = ShaderCache::Code(ShaderCache::kDrawIdPs, &size);
     HRESULT hr = E_FAIL;
@@ -3908,6 +3952,7 @@ bool DrawIdRecord::InitDevice(ID3D11Device* dev) {
 void DrawIdRecord::ShutdownDevice() {
     s_ps.Reset(); s_dss.Reset(); s_idCb.Reset(); s_bsR.Reset(); s_bsG.Reset();
     s_dev = nullptr;
+    s_clearView = false;                                 // phase 57
     s_initVs.Reset(); s_initPs[0].Reset(); s_initPs[1].Reset(); s_initDss.Reset(); s_initRs.Reset();   // v0.10.0 phase 10
     s_initDev = nullptr; s_initFailed = false;
     s_biasPs.Reset(); s_biasDss.Reset();                 // phase 49
@@ -4030,6 +4075,11 @@ bool DrawIdMv::InstancedWanted(uint64_t key) {
 void DrawIdRecord::SetInstancedProbe(bool probe) { g_instProbe = probe; }
 // ---- v0.10.0 phase 14 STATIC REPLAY SKIP (see the StatEnt table above) ----
 void DrawIdRecord::SetStaticGate(bool on) { g_staticGate = on; }
+void DrawIdRecord::SetFullIdClear(bool on) { g_fullIdClear = on; }   // phase 57
+void DrawIdRecord::IdClears(uint64_t* rect, uint64_t* full) {
+    if (rect) *rect = g_idClearRect;
+    if (full) *full = g_idClearFull;
+}
 void DrawIdRecord::SetTestSkipKey(uint64_t fullKey) { g_testSkipKey = fullKey; }   // round 4 (harness only)
 void DrawIdMv::SetReplayStatic(unsigned frames, unsigned every) {
     const unsigned f = frames > 60u ? 60u : frames;
@@ -4074,9 +4124,14 @@ int DrawIdMv::StaticKeys(int* atThreshold, int* held) {
     if (held) *held = hd;
     return n;
 }
+// phase 57 (perf): inject.cpp calls this before EVERY gated replay (VR: twice a frame, more with forced replays), and each call
+// mapped every pending slot of every main unit. A unit already polled this frame (by an earlier PollMain or its own Prepare) is
+// skipped: a copy that was still in flight then has rarely landed a few hundred microseconds later, and Prepare polls the unit
+// again before its next pass anyway (a verdict that lands in between counts one pass later at most).
 void DrawIdMv::PollMain(ID3D11DeviceContext* ctx) {
     if (!ctx || g_statFrames == 0u || g_statEvery <= 1u) return;
-    for (DrawIdMv* u : g_statUnit) if (u && u->m_ready && !u->m_quiet) u->Poll(ctx);
+    for (DrawIdMv* u : g_statUnit)
+        if (u && u->m_ready && !u->m_quiet && u->m_pollTag != g_instFrame + 1u) u->Poll(ctx);
 }
 void DrawIdMv::SetConsCands(unsigned n) { g_consCands = n < 16u ? 16u : (n > (unsigned)kCandWorld ? (unsigned)kCandWorld : n); }
 unsigned DrawIdMv::ConsCands() { return g_consCands; }
@@ -4094,6 +4149,7 @@ DrawIdMv::~DrawIdMv() {
     delete[] m_prevFull; delete[] m_prevLoose; delete[] m_prevFlags;
     delete[] m_curFull; delete[] m_curLoose; delete[] m_curFlags;
     delete[] m_ent; delete[] m_orph;
+    delete[] m_sortCur; delete[] m_sortPrev;            // phase 57
     delete[] m_curGroup; delete[] m_curRank; delete[] m_curLooseG; delete[] m_prevGroup; delete[] m_prevRank;
     delete[] m_groupData; delete[] m_listData;
     delete[] m_candTmp;
@@ -4116,6 +4172,7 @@ bool DrawIdMv::Init(ID3D11Device* dev) {
         m_curFull = new (std::nothrow) uint64_t[kMax]; m_curLoose = new (std::nothrow) uint64_t[kMax];
         m_curFlags = new (std::nothrow) uint8_t[kMax];
         m_ent = new (std::nothrow) Ent[2 * kMax]; m_orph = new (std::nothrow) Ent[2 * kMax];
+        m_sortCur = new (std::nothrow) Ent[kMax]; m_sortPrev = new (std::nothrow) Ent[kMax];   // phase 57
         m_curGroup = new (std::nothrow) uint32_t[kMax]; m_curRank = new (std::nothrow) uint32_t[kMax];
         m_curLooseG = new (std::nothrow) uint32_t[kMax];
         m_prevGroup = new (std::nothrow) uint32_t[kMax]; m_prevRank = new (std::nothrow) uint32_t[kMax];
@@ -4128,6 +4185,7 @@ bool DrawIdMv::Init(ID3D11Device* dev) {
         m_prepInstKey = new (std::nothrow) uint64_t[kRbInst];
     }
     if (!m_prevFull || !m_prevLoose || !m_prevFlags || !m_curFull || !m_curLoose || !m_curFlags || !m_ent || !m_orph ||
+        !m_sortCur || !m_sortPrev ||
         !m_curGroup || !m_curRank || !m_curLooseG || !m_prevGroup || !m_prevRank || !m_groupData || !m_listData ||
         !m_candTmp || !m_curBig || !m_rbInstIdx || !m_rbInstKey || !m_prepInstIdx || !m_prepInstKey) {
         LogErr("MV draw-ids: out of memory for the pairing tables");
@@ -4274,10 +4332,20 @@ bool DrawIdMv::EnsureParList(ID3D11Device* dev) {
 
 void DrawIdMv::Poll(ID3D11DeviceContext* ctx) {
     if (m_dumpPending) DumpPoll(ctx);                    // v0.10.0 phase 4
-    for (int k = 0; k < kRb; ++k) {
-        if (!m_rbPending[k]) continue;
+    m_pollTag = g_instFrame + 1u;                        // phase 57: PollMain skips a unit already polled this frame
+    // phase 57 (perf): oldest copy first (m_rbSeq), stop at the first one the GPU has not finished -- the copies run in order on
+    // one context, so a newer one cannot be done either (as CameraMv::RingStep). Before, every pending slot was mapped (a failed
+    // DO_NOT_WAIT Map per slot per call), in slot order: two readbacks that landed together could be counted newest first --
+    // the consensus streaks (m_consRun / m_consFail) and the static streaks now always see them in pass order. A Map that
+    // fails for another reason (device lost) drops its slot instead of retrying it forever.
+    for (;;) {
+        int k = -1;
+        for (int q = 0; q < kRb; ++q) if (m_rbPending[q] && (k < 0 || m_rbSeq[q] < m_rbSeq[k])) k = q;
+        if (k < 0) break;
         D3D11_MAPPED_SUBRESOURCE mp{};
-        if (ctx->Map(m_rb[k].Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mp) != S_OK) continue;
+        const HRESULT mhr = ctx->Map(m_rb[k].Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mp);
+        if (mhr == DXGI_ERROR_WAS_STILL_DRAWING) break;
+        if (mhr != S_OK) { m_rbPending[k] = false; m_rbInstN[k] = 0; m_rbStatN[k] = 0; m_rbVsN[k] = 0; continue; }
         uint32_t c[kCntBytes / 4];
         memcpy(c, mp.pData, sizeof(c));
         ctx->Unmap(m_rb[k].Get(), 0);
@@ -4520,6 +4588,44 @@ void DrawIdMv::Poll(ID3D11DeviceContext* ctx) {
     }
 }
 
+// phase 57 (perf): sorts e[0..n) by key, STABLE -- equal keys keep their order, so entries written in index order come out in
+// (key, index) order, the total order of Prepare's byKey (its keys + indices are unique pairs). The audit (in-game VR log
+// 2026-10-12, ~1650 G-buffer draws per pass) found the old full std::sort of current + previous entries (~3300, hashed 64-bit
+// keys) costing ~0.13 ms per eye; the scratch micro-benchmark at 1650 random keys: std::sort of both halves 126 us, std::sort
+// of the current half + merge 43 us, this LSD radix sort (8 passes of 8 bits; a pass whose byte is the same for every key is
+// skipped) + merge 25 us. Below ~100 entries std::sort is as fast and needs no histogram pass. tmp = n entries of scratch.
+namespace {
+#ifdef DRAWID_VERIFY_MERGE
+uint64_t g_verifyMergePasses = 0;                        // (check build only: passes whose merge was compared)
+#endif
+template <class E>
+void SortByKeyStable(E* a, E* tmp, uint32_t n) {
+    if (n < 2) return;
+    if (n < 96u) {
+        std::sort(a, a + n, [](const E& x, const E& y) { return x.key < y.key || (x.key == y.key && x.sideIdx < y.sideIdx); });
+        return;
+    }
+    uint32_t cnt[8][256];
+    memset(cnt, 0, sizeof(cnt));
+    for (uint32_t i = 0; i < n; ++i) {
+        uint64_t k = a[i].key;
+        for (int b = 0; b < 8; ++b) { ++cnt[b][k & 0xFFu]; k >>= 8; }
+    }
+    E* src = a;
+    E* dst = tmp;
+    for (int b = 0; b < 8; ++b) {
+        const int sh = 8 * b;
+        uint32_t* c = cnt[b];
+        if (c[(src[0].key >> sh) & 0xFFu] == n) continue;   // every key has this byte: the pass would move nothing
+        uint32_t sum = 0;
+        for (int v = 0; v < 256; ++v) { const uint32_t t = c[v]; c[v] = sum; sum += t; }
+        for (uint32_t i = 0; i < n; ++i) dst[c[(src[i].key >> sh) & 0xFFu]++] = src[i];
+        E* const t = src; src = dst; dst = t;
+    }
+    if (src != a) memcpy(a, src, sizeof(E) * n);
+}
+}  // namespace
+
 uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, uint32_t fullW, uint32_t fullH,
                            const DrawIdRecord* fwd, float nearM, bool freshMedoid, uint32_t noMedoid, bool idsBound) {
     m_prepN = 0; m_prepNG = 0; m_prepNF = 0;
@@ -4569,7 +4675,12 @@ uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ui
     const uint8_t kNoPair = DrawIdRecord::kFInstanced | DrawIdRecord::kFNoMvp;
     uint32_t elig = 0;
     // ---- group by the full key; orphans (one side only) by the pointer-free key ----
-    uint32_t ne = 0;
+    // phase 57 (perf): m_ent = every eligible current (index i) and previous (0x80000000 | j) draw in byKey order. The previous
+    // half was this unit's current half one pass ago and is kept sorted (m_sortPrev, swapped in at Finish's commit), so only
+    // the current half is sorted (stable radix, written in index order = (key, i) order) and the two are MERGED: at equal keys
+    // the current entry first (its sideIdx < 0x80000000 | j) -- exactly the order std::sort(byKey) gave the concatenation, so
+    // the groups, ranks and orphans are bit-identical to before.
+    uint32_t nc = 0;
     m_prepInstN = 0;                                     // v0.10.0 phase 8 (mv_inst_replay): the G-buffer instanced draws
     for (uint32_t i = 0; i < n; ++i) {
         if (g_instReplay && i < nG && (rec->Flags((int)i) & kNoPair) && m_prepInstN < (uint32_t)kRbInst) {
@@ -4581,15 +4692,47 @@ uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ui
         m_curGroup[i] = kNone; m_curRank[i] = 0; m_curLooseG[i] = 0; m_curBig[i] = 0;
         if (m_curFlags[i] & kNoPair) continue;
         ++elig;
-        m_ent[ne++] = { m_curFull[i], i };
+        m_sortCur[nc++] = { m_curFull[i], i };
     }
-    for (uint32_t j = 0; j < m; ++j) {
-        m_prevGroup[j] = kNone; m_prevRank[j] = 0;
-        if (m_prevFlags[j] & kNoPair) continue;
-        m_ent[ne++] = { m_prevFull[j], 0x80000000u | j };
+    SortByKeyStable(m_sortCur, m_orph, nc);              // (m_orph: free until the orphans below)
+    m_sortCurN = nc; m_sortCurOf = n;
+    for (uint32_t j = 0; j < m; ++j) { m_prevGroup[j] = kNone; m_prevRank[j] = 0; }
+    if (m && (!m_sortPrevOk || m_sortPrevOf != m)) {     // no kept list for this history (defensive): build it from the keys
+        uint32_t np = 0;
+        for (uint32_t j = 0; j < m; ++j) if (!(m_prevFlags[j] & kNoPair)) m_sortPrev[np++] = { m_prevFull[j], j };
+        SortByKeyStable(m_sortPrev, m_orph, np);
+        m_sortPrevN = np; m_sortPrevOf = m; m_sortPrevOk = true;
+    }
+    uint32_t ne = 0;
+    {
+        const uint32_t np = m ? m_sortPrevN : 0u;
+        const Ent* sc = m_sortCur;
+        const Ent* sp = m_sortPrev;
+        uint32_t a = 0, b = 0;
+        while (a < nc && b < np) {
+            if (sp[b].key < sc[a].key) { m_ent[ne++] = { sp[b].key, 0x80000000u | sp[b].sideIdx }; ++b; }
+            else m_ent[ne++] = sc[a++];
+        }
+        while (a < nc) m_ent[ne++] = sc[a++];
+        while (b < np) { m_ent[ne++] = { sp[b].key, 0x80000000u | sp[b].sideIdx }; ++b; }
     }
     auto byKey = [](const Ent& a, const Ent& b) { return a.key < b.key || (a.key == b.key && a.sideIdx < b.sideIdx); };
-    std::sort(m_ent, m_ent + ne, byKey);
+#ifdef DRAWID_VERIFY_MERGE
+    {   // phase 57 check build (harness: cl /DDRAWID_VERIFY_MERGE): the pre-phase-57 concatenation + full sort must equal the merge
+        uint32_t nr = 0;
+        for (uint32_t i = 0; i < n; ++i) if (!(m_curFlags[i] & kNoPair)) m_orph[nr++] = { m_curFull[i], i };
+        for (uint32_t j = 0; j < m; ++j) if (!(m_prevFlags[j] & kNoPair)) m_orph[nr++] = { m_prevFull[j], 0x80000000u | j };
+        std::sort(m_orph, m_orph + nr, byKey);
+        bool same = nr == ne;
+        for (uint32_t q = 0; same && q < ne; ++q) same = m_orph[q].key == m_ent[q].key && m_orph[q].sideIdx == m_ent[q].sideIdx;
+        if (!same) {
+            fprintf(stderr, "DRAWID_VERIFY_MERGE: the merged order differs from the full sort (%u / %u entries)\n", ne, nr);
+            abort();
+        }
+        if ((++g_verifyMergePasses % 1000u) == 1u)
+            fprintf(stderr, "DRAWID_VERIFY_MERGE: %llu passes compared, all identical\n", (unsigned long long)g_verifyMergePasses);
+    }
+#endif
     constexpr uint32_t kGroupCap = 1024;                // larger groups: unpaired (drawn > 1024 times: static clutter)
     m_nGroups = 0; m_nList = 0;
     uint32_t no = 0;
@@ -5229,6 +5372,12 @@ void DrawIdMv::Finish(ID3D11DeviceContext* ctx) {
     memcpy(m_prevLoose, m_curLoose, sizeof(uint64_t) * m_prepN);
     memcpy(m_prevFlags, m_curFlags, m_prepN);
     m_prevN = m_prepN;
+    {   // phase 57: ... and its sorted eligible list the next Prepare's previous half (a swap, no copy)
+        Ent* const t = m_sortPrev; m_sortPrev = m_sortCur; m_sortCur = t;
+        m_sortPrevN = m_sortCurN; m_sortPrevOf = m_sortCurOf;
+        m_sortPrevOk = m_sortCurOf == m_prepN;           // (always: Prepare filled it for this pass; defensive)
+        m_sortCurN = 0; m_sortCurOf = 0;
+    }
     m_ping = 1 - m_ping;
     m_prepN = 0;
     m_prepNG = 0; m_prepNF = 0; m_prepCandW = 0; m_prepCandC = 0;

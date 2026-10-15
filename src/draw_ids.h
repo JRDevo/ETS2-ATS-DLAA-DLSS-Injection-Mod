@@ -304,6 +304,19 @@ public:
     // G-buffer passes only (off for mirror units / the harness unless asked): a world, non-instanced, non-cabin draw whose key
     // DrawIdMv::StaticSkip calls static is not replayed (no id pixels; it stays recorded and paired). Not counted in `skipped`.
     static void SetStaticGate(bool on);
+    // phase 57 (perf) ID-TARGET CLEAR: why -- the G-buffer replay cleared the whole id target every pass although every reader
+    // stays near the pass clip: the replays are scissored to it, the vote grid lies inside it (x0 / y0 aligned down by <= 3 px) and
+    // marches at most the march reach (kParReachPx 32 px, the harness' SetParentReach if larger) beyond, pass B and the Ctrl+F6
+    // view read the DLAA rect, which the clip contains with mv_area_margin. How -- ID3D11DeviceContext1::ClearView of the clip
+    // grown by the reach + 4 px, clamped to the target. The whole target is still cleared without a clip (mirror units, preview),
+    // when the grown rect covers it, when the driver lacks ClearView (D3D11_FEATURE_D3D11_OPTIONS, read at InitDevice) and while
+    // SetFullIdClear(true) (inject.cpp: while the Ctrl+F6 view is on). Outside the rect a pooled target keeps an older pass's ids:
+    // only a DLAA rect that moved by more than mv_area_margin + 36 px between the pass start (PassViewSetup) and its blit could
+    // read them (a > 0.01 optical-centre re-adopt resets that eye's history anyway). The saving is GPU only and small (VR
+    // 4592x6496 R16 / R16G16, clip ~2/3 of it: 0..0.08 ms per eye): read it from the `replay` GpuPerf section of the perf eye
+    // line, which contains the clear. IdClears: rect / whole-target clears so far.
+    static void SetFullIdClear(bool on);
+    static void IdClears(uint64_t* rect, uint64_t* full);
     // HARNESS ONLY (v0.10.0 phase 14 round 4): the draws with this FullKey are left out of the G-buffer replay (0 = none) -- a body
     // whose pixels are missing for one frame (the plate-hold test); not counted as static skips. Never set by the DLL
     static void SetTestSkipKey(uint64_t fullKey);
@@ -880,6 +893,7 @@ private:
     bool      m_prepLay = false;                 // m_prepVs / m_prepHint hold the prepared pass (layout detection on)
     bool      m_statReg = false;                 // registered for PollMain (the destructor unregisters)
     uint64_t m_rbCtr = 0;
+    uint64_t m_pollTag = 0;                      // phase 57: the frame (DrawIdMv::SetFrame) + 1 of the last Poll (PollMain skips it)
     // previous committed pass of this eye (CPU keys)
     uint32_t m_prevN = 0;
     uint64_t* m_prevFull = nullptr;
@@ -917,6 +931,15 @@ private:
     struct Ent { uint64_t key; uint32_t sideIdx; };
     Ent*      m_ent = nullptr;                  // 2 * kMax
     Ent*      m_orph = nullptr;                 // 2 * kMax
+    // phase 57 (perf): the eligible draws of a pass sorted by (FullKey, index) -- m_sortCur is this pass's (Prepare), m_sortPrev the
+    // committed pass's (Finish swaps them), so Prepare sorts only the current half and MERGES it with the previous one. sideIdx is
+    // the plain index on both lists (the previous side's 0x80000000 bit is added by the merge). m_sortPrevOf = the m_prevN the
+    // list was made for (m_sortPrevOk false or a different m_prevN: Prepare rebuilds it from m_prevFull / m_prevFlags)
+    Ent*      m_sortCur = nullptr;              // kMax
+    Ent*      m_sortPrev = nullptr;             // kMax
+    uint32_t  m_sortCurN = 0, m_sortCurOf = 0;  // entries / the pass size (n) they were made for
+    uint32_t  m_sortPrevN = 0, m_sortPrevOf = 0;
+    bool      m_sortPrevOk = false;
     uint32_t* m_curGroup = nullptr;             // kMax
     uint32_t* m_curRank = nullptr;
     uint32_t* m_curLooseG = nullptr;            // 1 = grouped by the loose key

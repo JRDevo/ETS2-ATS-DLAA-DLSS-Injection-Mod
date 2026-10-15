@@ -367,6 +367,14 @@ std::atomic<ReleaseFn> s_cb{nullptr};
 std::atomic<bool>      s_hooked{false};
 std::atomic<uint64_t>  s_releases{0}, s_releasesMapped{0};
 thread_local int       t_depth = 0;              // > 0 inside one of our wrapped calls (an inner layer's call: pass through)
+// phase 57 (perf): a WAIT or a runtime call of ours inside a hooked OpenXR call, charged to the DRIVER row of hook category `cat`
+// (cpu_prof.h kHkXr..., the "present + OpenXR" / blocked time -- not the mod's), the same way CPU_ORIG charges the game's own
+// call. Why: the ATS VR log 2026-10-13 18:12 showed hk:xrEndFrame at 1.9-5.2 ms/frame with Turbo on (0.03 ms off) -- the time
+// the render thread sits in the turbo frame lock, the async xrWaitFrame (= the runtime pacing the frame), the real xrBeginFrame
+// and the quad swapchains' acquire / wait / release, all counted as mod work (the menu's "this mod" column and Limit line).
+// CpuProf::Drv pushes only when a scope of ours is open on this thread (an active hook, or a block): nothing open = nothing to
+// charge. Use it for waits and runtime calls only; the mod's own work around them stays in the hook / block it runs in.
+#define XR_DRV(cat, expr) do { CpuProf::Drv xdrv_(true, CpuProf::cat); expr; } while (0)
 
 typedef FARPROC (WINAPI* PFN_GetProcAddress)(HMODULE, LPCSTR);
 PFN_GetProcAddress oGetProcAddressK32 = nullptr; // kernel32!GetProcAddress (trampoline)
@@ -395,6 +403,20 @@ struct OvFns {
     PFN_xrDestroySpace              destroySpace = nullptr;
 };
 struct OvSc { XrSwapchain sc = nullptr; uint32_t w = 0, h = 0, n = 0; void* img[kImg] = {}; };
+// phase 57 (perf): what a quad's image depends on -- inject.cpp's content generation (the panel's built text / the fps box's
+// text + colour + brightness + opacity + scale) plus the parameters the draw callback's scale is derived from: the swapchain
+// size inject.cpp asks for, the box kind (fps_vr_lock) and the quad's own scale (menu_vr_scale / fps_vr_scale). Any change of
+// one of them = the image is drawn again.
+struct OvKey { uint32_t gen = 0, w = 0, h = 0; int lock = 0; float scale = 0.0f; };
+OvKey OvKeyOf(int which, const OverlayParams& par) {
+    OvKey k;
+    if (which == 0) { k.gen = par.panelGen; k.w = par.panelW; k.h = par.panelH; k.scale = par.menuScale; }
+    else            { k.gen = par.fpsGen;   k.w = par.fpsW;   k.h = par.fpsH;   k.lock = par.fpsLock; k.scale = par.fpsScale; }
+    return k;
+}
+bool OvKeySame(const OvKey& a, const OvKey& b) {
+    return a.gen == b.gen && a.w == b.w && a.h == b.h && a.lock == b.lock && a.scale == b.scale;
+}
 struct OvState {
     int       slot = -1;                         // the component the functions were resolved at
     bool      resolved = false;
@@ -407,7 +429,10 @@ struct OvState {
     OvSc      sc[2];                             // 0 panel, 1 fps box
     XrSpace   viewSpace = nullptr;
     bool      have[2] = {};                      // quad drawn (and released) for the frame that ends at the next xrEndFrame
-    uint32_t  usedW[2] = {}, usedH[2] = {};
+    uint32_t  usedW[2] = {}, usedH[2] = {};      // the sub-image of the last SUCCESSFUL draw (phase 57: also what a reused image shows)
+    bool      drawnValid[2] = {};                // phase 57: the swapchain's most recently released image is a good draw of
+                                                 //   drawnKey (drawn AND released since the swapchain was made; see OvDrawWantedLocked)
+    OvKey     drawnKey[2];                       // phase 57: the key of that draw
     uint64_t  endSeq = 0, relSeq = ~0ull;        // xrEndFrame count; the interval the release draw (mode 2) ran in
     int       mode = 0;                          // 1 drawn at xrEndFrame, 2 at the game's first release of the frame
     int       acqRun = 0;                        // frames in a row with an acquire failure
@@ -429,6 +454,7 @@ std::atomic<bool>          s_ovOk[2] = {};       // OverlayActive (+ s_ovOkQpc: 
 std::atomic<LONGLONG>      s_ovOkQpc{0};
 std::atomic<uint64_t>      s_ovFrames{0}, s_ovPanel{0}, s_ovFps{0}, s_ovCreateFails{0}, s_ovAcqFails{0}, s_ovWaitFails{0},
                            s_ovRelFails{0}, s_ovDrawFails{0}, s_ovRejects{0};
+std::atomic<uint64_t>      s_ovDrawn{0}, s_ovSkipped{0};   // phase 57: quad images drawn / reused (the last released image kept)
 std::atomic<int>           s_ovMode{0}, s_ovFixedHow{0}, s_ovFixedType{0};
 std::atomic<int64_t>       s_ovFormat{0};
 std::atomic<bool>          s_ovReady{false};
@@ -508,6 +534,7 @@ void OvDropLocked(bool destroy) {
     s_ov.viewSpace = nullptr;
     s_ov.ready = false;
     s_ov.have[0] = s_ov.have[1] = false;
+    s_ov.drawnValid[0] = s_ov.drawnValid[1] = false;     // phase 57: no image of ours left to reuse
     s_ov.pivotHave = false;
     s_ov.pivotSpace = nullptr;
     s_ovReady.store(false, std::memory_order_relaxed);
@@ -516,6 +543,7 @@ void OvDropLocked(bool destroy) {
 // session is given up: dead).
 bool OvCreateLocked(XrSession ses, const OverlayParams& par) {
     const OvFns& o = s_ov.fn;
+    s_ov.drawnValid[0] = s_ov.drawnValid[1] = false;     // phase 57: new swapchains have no released image yet
     auto fail = [&](const char* what, XrResult r) {
         s_ovCreateFails.fetch_add(1, std::memory_order_relaxed);
         LogErr("OpenXR overlay: %s failed (result %d) -- the VR panel / fps box stay in the eye picture for this session", what, r);
@@ -590,13 +618,17 @@ bool OvCreateLocked(XrSession ses, const OverlayParams& par) {
     return true;
 }
 // under s_ovMx, t_depth > 0: one image of quad `which`: acquire, wait, the draw callback, release. True = drawn + released
-// (s_ov.have / usedW / usedH set).
+// (s_ov.have / usedW / usedH set). phase 57: the three runtime calls are charged to the CPU profiler's xrAcquire / xrRelease
+// DRIVER rows (XR_DRV: the wait blocks until the compositor lets go of the image -- not mod work); the draw callback stays mod
+// time (its own kBMenu block). Any outcome but a good draw leaves drawnValid false (the next frame draws again).
 bool OvDrawLocked(int which) {
     const OvFns& o = s_ov.fn;
     OvSc& c = s_ov.sc[which];
+    s_ov.drawnValid[which] = false;                      // phase 57: set again below only by a good draw that was released
     uint32_t idx = 0;
     const XrSwapchainImageAcquireInfo ai{ kTypeSwapchainImageAcquireInfo, nullptr };
-    XrResult r = o.acquire(c.sc, &ai, &idx);
+    XrResult r;
+    XR_DRV(kHkXrAcquire, r = o.acquire(c.sc, &ai, &idx));
     if (r < 0) {
         const uint64_t n = s_ovAcqFails.fetch_add(1, std::memory_order_relaxed);
         if (n < 4) LogErr("OpenXR overlay: xrAcquireSwapchainImage of our %s swapchain failed (result %d)", which ? "fps box" : "panel", r);
@@ -604,7 +636,7 @@ bool OvDrawLocked(int which) {
         return false;
     }
     const XrSwapchainImageWaitInfo wi{ kTypeSwapchainImageWaitInfo, nullptr, kInfiniteDuration };
-    r = o.wait(c.sc, &wi);
+    XR_DRV(kHkXrAcquire, r = o.wait(c.sc, &wi));
     if (r < 0 || r == kTimeoutExpired) {                 // an acquired image we may not release: the session is given up
         s_ovWaitFails.fetch_add(1, std::memory_order_relaxed);
         LogErr("OpenXR overlay: xrWaitSwapchainImage of our %s swapchain failed (result %d) -- the quad path is off for this session",
@@ -627,7 +659,7 @@ bool OvDrawLocked(int which) {
     }
     if (!drew) s_ovDrawFails.fetch_add(1, std::memory_order_relaxed);
     const XrSwapchainImageReleaseInfo ri{ kTypeSwapchainImageReleaseInfo, nullptr };
-    r = o.release(c.sc, &ri);
+    XR_DRV(kHkXrRelease, r = o.release(c.sc, &ri));
     if (r < 0) {
         s_ovRelFails.fetch_add(1, std::memory_order_relaxed);
         LogErr("OpenXR overlay: xrReleaseSwapchainImage of our %s swapchain failed (result %d) -- the quad path is off for this session",
@@ -641,17 +673,42 @@ bool OvDrawLocked(int which) {
     s_ov.usedH[which] = d.usedH;
     return true;
 }
-// under s_ovMx: the wanted quads drawn now (both paths); 60 frames in a row with an acquire failure give up the session
+// under s_ovMx: the wanted quads drawn now (both paths); 60 frames in a row with an acquire failure give up the session.
+// phase 57 (perf): a quad image is drawn only when its content changed. Why: every wanted quad used to cost an acquire, an
+// INFINITE xrWaitSwapchainImage (until the compositor let go of the image), the draw callback (clear + text draw on the game's
+// immediate context) and a release EVERY frame -- for an fps box whose text changes every 0.5 s and a panel that changes on key
+// presses / the 1-s cost snapshot. How: OpenXR composites a swapchain's most recently RELEASED image, so a quad layer may keep
+// pointing at the swapchain without a new acquire / release. When the swapchain's last released image is a good draw
+// (drawnValid) of the same key (OvKeyOf: inject.cpp's content gen + swapchain size + box kind + quad scale), the draw is skipped:
+// `have` is set with the usedW / usedH of that draw, and OvEndFrame builds the quad exactly as before. A gen of 0 = "always
+// redraw" (a caller that never sets it keeps the old behaviour). drawnValid is cleared by any failed draw, by OvCreateLocked /
+// OvDropLocked (new swapchains, session change, xrDestroySession), OvRejected, the 60-frame give-up below, and by OvEndFrame
+// while the quad is not wanted (the first frame it is wanted again draws: inject.cpp resets its build scales when the panel /
+// box goes away).
 void OvDrawWantedLocked(const OverlayParams& par) {
     const uint64_t a0 = s_ovAcqFails.load(std::memory_order_relaxed);
+    const bool want[2] = { par.menuOpen, par.fpsShow };
     ++t_depth;
-    if (par.menuOpen && !s_ov.dead) OvDrawLocked(0);
-    if (par.fpsShow && !s_ov.dead) OvDrawLocked(1);
+    for (int w = 0; w < 2; ++w) {                        // (the panel first, as before)
+        if (!want[w] || s_ov.dead) continue;
+        const OvKey k = OvKeyOf(w, par);
+        if (k.gen && s_ov.drawnValid[w] && OvKeySame(k, s_ov.drawnKey[w])) {
+            s_ov.have[w] = true;                         // the swapchain's last released image = that draw (usedW / usedH kept)
+            s_ovSkipped.fetch_add(1, std::memory_order_relaxed);
+            continue;
+        }
+        if (OvDrawLocked(w)) {
+            s_ov.drawnValid[w] = true;
+            s_ov.drawnKey[w] = k;
+            s_ovDrawn.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
     --t_depth;
     const bool acqFail = s_ovAcqFails.load(std::memory_order_relaxed) != a0;
     s_ov.acqRun = acqFail ? s_ov.acqRun + 1 : 0;
     if (s_ov.acqRun >= 60 && !s_ov.dead) {
         s_ov.dead = true;
+        s_ov.drawnValid[0] = s_ov.drawnValid[1] = false; // phase 57
         LogWarn("OpenXR overlay: 60 frames in a row without an image of our swapchains -- the quad path is off for this session");
     }
 }
@@ -841,6 +898,8 @@ bool OvEndFrame(int i, XrSession ses, const XrFrameEndInfo* fe, const XrComposit
     struct EndSeq { uint64_t& s; ~EndSeq() { ++s; } } endSeq{ s_ov.endSeq };   // this frame's release-draw interval ends
     bool have[2] = { s_ov.have[0], s_ov.have[1] };
     s_ov.have[0] = s_ov.have[1] = false;
+    if (!par.enabled || !par.menuOpen) s_ov.drawnValid[0] = false;   // phase 57: drawn again the first frame it is wanted again
+    if (!par.enabled || !par.fpsShow) s_ov.drawnValid[1] = false;    //   (see OvDrawWantedLocked)
     if (!par.enabled) { OvSetOk(false, false); return false; }
     if (ses != s_ov.ses) {
         if (s_ov.ses)
@@ -910,7 +969,12 @@ bool OvEndFrame(int i, XrSession ses, const XrFrameEndInfo* fe, const XrComposit
     *outFe = *fe;
     outFe->layerCount = (uint32_t)(nGame + nq);
     outFe->layers = outLayers;
-    s_ovFrames.fetch_add(1, std::memory_order_relaxed);
+    const uint64_t nf = s_ovFrames.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (nf % 600 == 0)                                   // phase 57: how often a quad image was reused instead of drawn
+        LogDbg("OpenXR overlay: %llu xrEndFrame(s) with our quads -- quad images drawn %llu, reused %llu (phase 57: content "
+            "unchanged = no acquire / wait / draw / release; the swapchain's last released image is shown again)",
+            (unsigned long long)nf, (unsigned long long)s_ovDrawn.load(std::memory_order_relaxed),
+            (unsigned long long)s_ovSkipped.load(std::memory_order_relaxed));
     return true;
 }
 // The runtime refused the frame with our layers (result r): counted, logged, the quad path off for this session.
@@ -920,6 +984,7 @@ void OvRejected(XrResult r) {
     LogErr("OpenXR overlay: the runtime REJECTED xrEndFrame with our quad layers (result %d) -- the frame was submitted again without "
         "them; the VR panel / fps box go back into the eye picture for this session", r);
     s_ov.dead = true;
+    s_ov.drawnValid[0] = s_ov.drawnValid[1] = false;     // phase 57
     OvSetOk(false, false);
 }
 // Mode 2 (another thread ends the frame): the game's outermost xrReleaseSwapchainImage on the render thread draws the wanted
@@ -1375,10 +1440,14 @@ void TbArmLocked(int i, XrSession ses) {
 }
 // The game's xrEndFrame of a TURBO frame, BEFORE the real call (s_tbMx held by the caller): the pending wait is consumed and the
 // real xrBeginFrame of this frame is called (the game's own was skipped); no wait pending: a real xrWaitFrame first.
+// phase 57 (perf): the wait for the async xrWaitFrame (and the synchronous real one) is charged to the CPU profiler's xrWaitFrame
+// DRIVER row, the real xrBeginFrame to the xrBeginFrame driver row (XR_DRV): the runtime pacing the frame, not mod work -- they
+// are the waits the game's own xrWaitFrame / xrBeginFrame would have done without turbo.
 void TbBeginForGameLocked(int i, XrSession ses) {
     XrResult wr = 0;
     if (s_tb.pending && ses == s_tb.ses) {
-        const bool ready = TbWaitDone(s_tb.seq, 1000, &wr);
+        bool ready;
+        XR_DRV(kHkXrWait, ready = TbWaitDone(s_tb.seq, 1000, &wr));
         if (ready) {
             s_tb.pending = false;
         } else {
@@ -1420,7 +1489,7 @@ void TbBeginForGameLocked(int i, XrSession ses) {
         const XrFrameWaitInfo wi{ kTypeFrameWaitInfo, nullptr };
         XrFrameState fs{ kTypeFrameState, nullptr, 0, 0, 0 };
         ++t_depth;
-        wr = realWait(ses, &wi, &fs);
+        XR_DRV(kHkXrWait, wr = realWait(ses, &wi, &fs));
         --t_depth;
         const uint64_t n = s_tbSyncWaits.fetch_add(1, std::memory_order_relaxed);
         if (n < 8)
@@ -1437,7 +1506,8 @@ void TbBeginForGameLocked(int i, XrSession ses) {
     auto realBegin = reinterpret_cast<PFN_xrBeginFrame>(s_slot[i].beginFrame.load(std::memory_order_acquire));
     const XrFrameBeginInfo bi{ kTypeFrameBeginInfo, nullptr };
     ++t_depth;
-    const XrResult rb = realBegin ? realBegin(ses, &bi) : -1;
+    XrResult rb = -1;
+    if (realBegin) XR_DRV(kHkXrBegin, rb = realBegin(ses, &bi));
     --t_depth;
     if (rb != 0) NoteResult(kNsTbBegin, rb, ses);
     if (rb < 0) {
@@ -1955,7 +2025,8 @@ XrResult WaitFrameImpl(int i, XrSession ses, const XrFrameWaitInfo* wi, XrFrameS
     }
     s_gameWaitNsA.store(SteadyNs(), std::memory_order_relaxed);   // phase 52: FrameLoopActive
     const int64_t now = SteadyNs();
-    std::unique_lock<std::mutex> lk(s_tbMx);
+    std::unique_lock<std::mutex> lk(s_tbMx, std::defer_lock);
+    CPU_ORIG(lk.lock());                         // phase 57: a lock wait (a turbo frame's xrEndFrame holds it over the runtime), not mod work
     const int64_t prev = s_tb.lastGameWaitNs;
     s_tb.lastGameWaitNs = now;
     if (s_tb.pending && fs && ses != s_tb.ses) {
@@ -2043,7 +2114,7 @@ XrResult WaitFrameImpl(int i, XrSession ses, const XrFrameWaitInfo* wi, XrFrameS
         s_capBaseA.store(s_capBase, std::memory_order_relaxed);
         s_capWaits.fetch_add(1, std::memory_order_relaxed);
     }
-    lk.lock();
+    CPU_ORIG(lk.lock());                         // phase 57 (as above)
     --s_tb.gameWaits;
     s_tb.gameWaited = r >= 0;                    // (until the game's xrBeginFrame)
     s_tb.lastWaitFake = false;
@@ -2091,7 +2162,8 @@ XrResult BeginFrameImpl(int i, XrSession ses, const XrFrameBeginInfo* bi) {
     if (!s_logged.exchange(true))
         Log("OpenXR hook: first xrBeginFrame by the game (session %p; via the %s %s, tid=%lu)", ses, kKindName[s_slot[i].kind],
             s_slot[i].module, GetCurrentThreadId());
-    std::unique_lock<std::mutex> lk(s_tbMx);     // (held over the real call: the frame tags stay in call order)
+    std::unique_lock<std::mutex> lk(s_tbMx, std::defer_lock);   // (held over the real call: the frame tags stay in call order)
+    CPU_ORIG(lk.lock());                         // phase 57: a lock wait (a turbo frame's xrEndFrame holds it over the runtime), not mod work
     if (s_tb.lastWaitFake) {
         s_tb.lastWaitFake = false;
         TbPushTagLocked(kTagTurbo);
@@ -2336,6 +2408,15 @@ XrResult PollEventImpl(int i, XrInstance inst, void* ev) {
 }
 // v0.10.3 phase 28: xrEndFrame -- the first projection layer: its per-view swapchain / rect / slice (the picture layout) and
 // the submitted poses + fovs (the per-space correction C = S (x) L^-1, phase 28b). Read only.
+// phase 57 (perf): where the CPU profiler charges the time spent in here (cpu_prof.h; the ATS VR log 2026-10-13 18:12 had
+// hk:xrEndFrame at 1.9-5.2 ms/frame with Turbo on, 0.03 ms off -- waits counted as mod work):
+//  * MOD time (hk:xrEndFrame): the layout / pose bookkeeping above, the hidden-mask fetch, OvEndFrame's quad maths (the
+//    quad draw callback itself = the kBMenu block), the turbo bookkeeping (tags, the next async wait's post, the stats line);
+//  * xrEndFrame DRIVER (not the mod): the real xrEndFrame (as before) and both s_tbMx acquisitions (the game's main thread holds
+//    it over its own xrWaitFrame / xrBeginFrame checks and its real xrBeginFrame);
+//  * xrWaitFrame DRIVER: a turbo frame's wait for the async xrWaitFrame (TbWaitDone, up to a frame period = the runtime pacing)
+//    or the synchronous real xrWaitFrame when none is pending; xrBeginFrame DRIVER: the real xrBeginFrame of a turbo frame;
+//  * xrAcquire / xrRelease DRIVER: our quad swapchains' acquire + xrWaitSwapchainImage / release (OvDrawLocked, when drawn here).
 XrResult EndFrameImpl(int i, XrSession ses, const XrFrameEndInfo* fe) {
     auto real = reinterpret_cast<PFN_xrEndFrame>(s_slot[i].endFrame.load(std::memory_order_acquire));
     if (!real) return -1;
@@ -2453,7 +2534,7 @@ XrResult EndFrameImpl(int i, XrSession ses, const XrFrameEndInfo* fe) {
     const bool want = s_tbWant.load(std::memory_order_relaxed);
     uint8_t tag = 0;
     if (outer && fe) {
-        tlk.lock();
+        CPU_ORIG(tlk.lock());                              // phase 57: a lock wait (the main thread's frame calls), not mod work
         tag = TbPopTagLocked();
         if (tag == kTagTurbo) TbBeginForGameLocked(i, ses);
         else { TbMirrorLocked(); tlk.unlock(); }
@@ -2467,7 +2548,7 @@ XrResult EndFrameImpl(int i, XrSession ses, const XrFrameEndInfo* fe) {
     }
     --t_depth;
     if (outer && fe) {
-        if (!tlk.owns_lock()) tlk.lock();
+        if (!tlk.owns_lock()) CPU_ORIG(tlk.lock());        // phase 57 (as above)
         TbAfterEndLocked(i, ses, r, want, tag);
         tlk.unlock();
         if (r != 0) NoteResult(kNsEnd, r, ses);          // phase 33
@@ -2979,6 +3060,8 @@ OverlayStats GetOverlayStats() {
     s.releaseFails = s_ovRelFails.load(std::memory_order_relaxed);
     s.drawFails = s_ovDrawFails.load(std::memory_order_relaxed);
     s.rejects = s_ovRejects.load(std::memory_order_relaxed);
+    s.drawn = s_ovDrawn.load(std::memory_order_relaxed);         // phase 57
+    s.skipped = s_ovSkipped.load(std::memory_order_relaxed);
     s.fixedHow = s_ovFixedHow.load(std::memory_order_relaxed);
     s.fixedSpaceType = s_ovFixedType.load(std::memory_order_relaxed);
     return s;

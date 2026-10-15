@@ -909,6 +909,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_fwdCnt, m_fwdCntRb[kFwdCntRb];
     Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_fwdCntUav;
     bool     m_fwdCntPending[kFwdCntRb] = {};
+    uint64_t m_fwdCntSeq[kFwdCntRb] = {}, m_fwdCntCtr = 0;   // phase 57: copy order of the pending slots (FwdCountPoll)
     bool     m_fwdCntFailed = false;
     uint64_t m_fwdNearPx = 0, m_fwdNearFrames = 0;
     bool     FwdCountInit();

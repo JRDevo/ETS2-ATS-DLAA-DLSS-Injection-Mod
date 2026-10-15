@@ -125,6 +125,7 @@ struct OverlayParams {
     unsigned long drawTid = 0;               // the game render thread (owner of the immediate context); 0 = none yet
     uint32_t      panelW = 0, panelH = 0;    // the panel swapchain size (px; read at its creation)
     uint32_t      fpsW = 0, fpsH = 0;        // the fps box swapchain size (px)
+    uint32_t      panelGen = 0, fpsGen = 0;   // phase 57: content generation of the panel / fps box (any change = a new value); the quad image is redrawn only when it changed
 };
 void OverlaySet(const OverlayParams& p);     // inject.cpp, every Present (any thread; copied under a lock)
 // The draw callback (inject.cpp, on drawTid): clear `tex` (the swapchain image, an ID3D11Texture2D* of `format` = the
@@ -149,6 +150,8 @@ struct OverlayStats {
     int64_t  format = 0;                     // the swapchain DXGI_FORMAT (0 = none yet)
     uint64_t frames = 0, panelQuads = 0, fpsQuads = 0;   // xrEndFrame calls with our quads appended; quads per kind
     uint64_t createFails = 0, acquireFails = 0, waitFails = 0, releaseFails = 0, drawFails = 0, rejects = 0;
+    uint64_t drawn = 0, skipped = 0;         // phase 57: quad images drawn (acquire, wait, draw, release) / reused (the content gen
+                                             //   unchanged: the swapchain's last released image is shown again, no runtime call)
     int      fixedHow = 0;                   // fps box fixed in the cab: 0 not used yet, 1 the layer space (LOCAL: its origin =
                                              //   the seat), 2 the layer space around a pivot captured at lock-on, 3 head-locked
                                              //   (the layer space is a VIEW space)

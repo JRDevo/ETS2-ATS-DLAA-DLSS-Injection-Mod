@@ -585,6 +585,66 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   would otherwise look like the game's outermost calls and disturb the frame bookkeeping (Turbo, quad layers, frame pairing).
 - Not tested in a headset with VectorXR yet; ask for `log_level = 4`.
 
+
+## Phase 57: performance pass (2026-10-15)
+
+Four read-only audits (hook bodies, the per-draw MV chain, the DLAA unit / NGX / OpenXR wrapping) against the VR logs
+`captures/ats_2026-10-13_1812_v0130_fixed_test_vr.log` and `captures/ets2_2026-10-12_1529_v012_vr.log`. The headline: the
+`hk:xrEndFrame` row (1.9-5.2 ms/frame with Turbo on, 0.03 off) was WAIT time -- the turbo frame lock, the async `xrWaitFrame`
+(= the runtime pacing the frame), the real `xrBeginFrame`, the quad swapchains' `xrWaitSwapchainImage` -- charged as mod CPU.
+The mod's real CPU on the render thread is ~0.5 ms/frame (fwd-depth 0.16-0.21, did-rec 0.2, the pairing sort 0.17 per eye,
+hk:DrawIdx 0.12-0.17 for 3400-4500 calls). What changed:
+- **Profiler truth (`xr_hook.cpp`).** `XR_DRV(cat, expr)` charges a wait / runtime call to a hook's DRIVER row (`CpuProf::Drv`):
+  the `s_tbMx` lock waits (xrEndFrame / xrWaitFrame / xrBeginFrame), `TbWaitDone` + the synchronous real wait (xrWaitFrame row),
+  the real `xrBeginFrame` of a turbo frame, the quad swapchains' acquire / wait / release (xrAcquire / xrRelease rows). The menu's
+  "this mod" column and the Limit line's B no longer carry the pacing wait. Expect `hk:xrEndFrame` ~0.03 ms and "present + OpenXR"
+  / "wait" up by the same amount.
+- **Quad images drawn on change only (`xr_hook.cpp` + `inject.cpp`).** `OverlayParams::panelGen / fpsGen`: the fps box = an
+  FNV-1a hash of its two text lines + colour / brightness / opacity + `fps_vr_scale` + `fps_vr_lock` (`MenuOvFpsGen`); the panel =
+  a counter bumped when `MenuBuildPanel`'s bytes or `menu_vr_scale` change (`MenuOvPanelUpdate`, built ONCE per Present, the draw
+  reuses the build: `MenuOvPanelTake`). `OvDrawWantedLocked` skips the acquire / INFINITE wait / draw / release when the
+  swapchain's last released image is a good draw of the same `OvKey` (gen + swapchain size + box kind + quad scale) -- OpenXR
+  composites the most recently released image. `drawnValid` is cleared by any failure, create / drop / reject / give-up, and while
+  the quad is not wanted (the first frame it is wanted again draws). Log every 600 overlay frames: `quad images drawn X, reused Y`
+  (`OverlayStats::drawn / skipped`). The RTV of each swapchain image is cached per quad (`MenuOvRtvFind / Put / Drop`, 8 entries,
+  dropped on device / context change and when no quad went out for 0.5 s).
+- **Late panel off while the quads are out (`MenuLateArm`).** `MenuDrawsIntoEyes()` = `MenuDrawVrOn`'s own test; with
+  `menu_vr_layer = 1` nothing goes into the eye picture, so no record -> `MenuLateOnBind`'s GetResource per bind and
+  `MenuLateOnDraw`'s PSGetShaderResources per small draw stop. A leftover record is retired without a verdict.
+- **Hook micro-work (`inject.cpp`).** `t_inDlaa` read once per DrawIndexed / DrawIndexedInstanced (`inDlaa`; every callee restores
+  the flag); `TraceOn` inline; `CountGameDraw` tests `g_plActive || FrameEndCounting()` before the out-of-line call;
+  `CountGameOtherThread` reads the thread id from the TEB (`__readgsdword(0x48)`); `SlotOf` masks with 3 for the 4-slot ring (a
+  64-bit division before, several times per draw); `FwdOnDraw` fetches the DSS / blend state once (`FwdDrawStates`, released at
+  the hook's end) and `BiasOnDraw` takes them; the VS is read once for `FwdIdentity` + `FwdNoteMvp`; profiler blocks in
+  `FrameEndOnBind` / `LodOnBind` / `ObjOnBind` / `MirOnBind` / `DidOnDiscardMap` open after the cheap early-outs;
+  `FpsProfileTick` returns early out of mode 2 with nothing bound / dirty.
+- **Pairing sort (`draw_ids.cpp` `DrawIdMv::Prepare`).** Was: all eligible current + previous draws (~3300) concatenated and
+  `std::sort`ed every pass. Now: the current half only, stable LSD radix sort on the 64-bit keys (8 x 8 bits, a pass with one
+  byte value skipped; `std::sort` below 96 entries), MERGED with the previous pass's sorted list (kept by `Finish`, a pointer
+  swap; rebuilt from `m_prevFull` when stale). Same (key, sideIdx) total order = bit-identical groups / ranks (check build
+  `/DDRAWID_VERIFY_MERGE` compares against the old full sort; passed on the harness default, `legacy`, `rstatic=4 didshadow=2`).
+  Micro-benchmark at 1650 draws: 126 us (old) -> 25 us (radix + merge) / 43 us (std::sort + merge).
+- **Record / release (`draw_ids.cpp`).** `ReleaseState` sets only `own = 0` (no 380-byte memset per draw); `ReleasePs` nulls the
+  pointers it releases (Record compares `m_ps[m_n-1].srv[t]` after release, so those must stay null).
+- **Readback polls.** `DrawIdMv::Poll`, `PollMain`, `CameraMv::FwdCountPoll` map the OLDEST pending slot first and stop at the
+  first `DXGI_ERROR_WAS_STILL_DRAWING` (copies finish in order); `PollMain` skips a unit already polled this frame (`m_pollTag`).
+  Behaviour change: two readbacks that land together are now processed in pass order (before: slot order).
+- **Id-target clear by rect.** `ReplayImpl` clears the view clip + march reach + 4 px with `ID3D11DeviceContext1::ClearView`
+  (whole target: no clip, the rect covers it, no ClearView support, or `SetFullIdClear(true)` while the Ctrl+F6 view is on).
+  Saving 0..0.08 ms per eye -- read it from the `replay` GpuPerf section.
+- **RCAS (`scene_dlaa.cpp`).** `Orig` is read only in the feather band (`if (mask < 1.0)`); at sharpness 0 the LDR path skips
+  the 4 taps (`res = saturate(e0)`, bit-identical: the lobe is 0); HDR keeps the full path (the compress / expand round trip is
+  not bit-exact).
+- **NGX AutoExposure (`dlaa.cpp`).** The flag only for HDR features; LDR (VR eyes, mirrors, menu units) are created without it.
+  Compare the `ngx` figure of `DLAA GPU cost eye N` before / after.
+- **Verified:** WARP harness 150726 / 150726 checks, motion vectors bit-identical over 2237 frames (`cmp`), Release build 0
+  warnings. **Not verified:** the in-game CPU / GPU figures (the next VR log's `CPU prof` lines and `DLAA GPU cost` lines), the
+  quad reuse on the user's runtime (Virtual Desktop) and with OFXR Bridge / VectorXR.
+- **Deferred (audit backlog):** the replay through raw trampolines (0.1-0.17 ms), the static-skip table hot / cold split, GPU
+  shader items (attach mover list, 64-thread medoid, pick lanes, twin hash, CSVote voter lists), skipping multi-instance replays
+  (vote semantics), the depth snapshot crop (high risk), RCAS + copy-out as one PS pass, profiler counter-only StateSet scopes,
+  a VR-only DLSS preset key.
+
 ## Tuning menu overlay (v0.10.0)
 
 - **State** lives in `inject.cpp` (the "TUNING MENU" block after `ToggleMirrors`): `g_menuOpen` (atomic), the selected row, the
