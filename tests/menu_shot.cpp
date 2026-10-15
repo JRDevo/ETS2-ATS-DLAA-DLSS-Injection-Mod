@@ -71,6 +71,7 @@ static const E kRows[] = {
     { G_UP, false, L"DLSS upscale", L"off", L"Ctrl+F4", L"off", false, nullptr, nullptr },
     { G_UP, false, L"DLAA on / off", L"on", L"Shift+F11", L"<c>0.31</> | <g>3.4</>", false, nullptr, nullptr },
     { G_UP, false, L"OFXR Bridge (VR frame gen)", L"not found", L"dlaa.ini ofxr_bridge", L"", false, nullptr, nullptr },
+    { G_UP, false, L"VectorXR (VR layer)", L"not found", L"dlaa.ini vectorxr", L"", false, nullptr, nullptr },   // phase 56
     { G_VRP, true, L"VR performance", L"", L"", L"", false,
       L"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed "
       L"every time the menu opens.", nullptr },

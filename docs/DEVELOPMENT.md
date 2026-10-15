@@ -561,6 +561,30 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   ResolveSubresource / OMSetRenderTargets / RSSetViewports / ClearRenderTargetView: `if (Ofxr::FromOfxr(_ReturnAddress()))` -> call the
   original and return, no counting, no blit test. Readers never lock (fixed array, atomic count written last). `ofxr_bridge = 0` disables it.
 
+## VectorXR pass-through (phase 56)
+
+- VectorXR (https://github.com/DienerTech/vectorxr, DienerTech LLC, MPL-2.0) is an OpenXR API layer + desktop app: Depth, Pivot,
+  Quadviews, Turbo (frame-pacing override), experimental Frame Generation and an On-Screen Display. For D3D11 games its frame-generation
+  bridge shares the game's swapchain images with a D3D12 device and runs compute on the GAME's immediate context; its OSD is its own
+  composition layer drawn with `UpdateSubresource` on the same context. Same problem as OFXR Bridge, same cure: the return address.
+- `src/ofxr.{h,cpp}` is generalised, not duplicated. `Range` gained a `kind` (`kKindOfxr = 1`, `kKindVectorXr = 2`);
+  `ModuleKind(base, fullPath)` replaces `IsOfxrModule` (OFXR: base name contains `ofxr` or path under `%LOCALAPPDATA%\OFXR Bridge\`;
+  VectorXR: base name contains `vectorxr` -- the layer is `XR_APILAYER_DIENERTECH_VECTORXR.dll`, registered machine-wide -- or path
+  under `%LOCALAPPDATA%\VectorXR\`). `Rescan` records a module only when its kind is switched on (`g_on` = ini `ofxr_bridge`,
+  `g_onVxr` = ini `vectorxr`, both default 1) and runs while `g_anyOn` (either) is set; `g_kinds` is the mask of kinds seen
+  (`DetectedOfxr()` / `DetectedVectorXr()`; `Detected()` = any). `FromOfxr` keeps its name and inline fast path but reads `g_anyOn`, so
+  the ten D3D11 hooks that already call it needed no change. The first scan logs whether `%LOCALAPPDATA%\VectorXR\config\settings.json`
+  exists (VectorXR's own log is `%LOCALAPPDATA%\VectorXR\logs\vectorxr.log`).
+- Conflict notices (`PresentFrameWork`, once, when the layer is first found): an info line, a warning when the mod's Turbo
+  (`XrTurboEffective()`) is on (VectorXR has its own Turbo: run one), and a warning when `vr_fps_cap` is on (Frame Generation wants no
+  frame-rate limit). Nothing is switched off automatically; the user decides. The tuning menu has an info row `VectorXR (VR layer)`
+  (`MR_VECTORXR`, last row of `Upscaling and VR`).
+- `src/xr_hook.cpp` gates layer-origin OpenXR calls by return address through the same `Ofxr::FromOfxr` (`LayerGate` in the
+  `Thunk<I>` stubs, where `_ReturnAddress()` is the layer's call site; `NegLayerImpl` triggers `Ofxr::Rescan()` right after a layer
+  negotiates, so its range is known before its first call): VectorXR Frame Generation presents from its own thread, so its `xrWaitFrame` / `xrBeginFrame` / `xrEndFrame` calls
+  would otherwise look like the game's outermost calls and disturb the frame bookkeeping (Turbo, quad layers, frame pairing).
+- Not tested in a headset with VectorXR yet; ask for `log_level = 4`.
+
 ## Tuning menu overlay (v0.10.0)
 
 - **State** lives in `inject.cpp` (the "TUNING MENU" block after `ToggleMirrors`): `g_menuOpen` (atomic), the selected row, the

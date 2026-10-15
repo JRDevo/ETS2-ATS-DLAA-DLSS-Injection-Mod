@@ -1,6 +1,9 @@
 // XrHook -- see xr_hook.h. v0.10.3 phase 27: OpenXR swapchain release hook (GetProcAddress -> negotiation -> GIPA thunks).
+// phase 56 (VectorXR): a call from an API layer's own code (its presenter thread, outside any game call) is gated by RETURN
+// ADDRESS in the Thunk<I> stubs (LayerGate): run as nested = no bookkeeping, so only the game's outermost calls act.
 #include "xr_hook.h"
 #include <windows.h>
+#include <intrin.h>                                   // phase 56: _ReturnAddress (LayerGate)
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -15,6 +18,7 @@
 #include "log.h"
 #include "fps_pose.h"                                 // phase 44: the fps box turn (ComposeTurn)
 #include "frame_pace.h"                               // phase 52: the VR FPS cap's target maths + the precise sleeper
+#include "ofxr.h"                                     // phase 56: FromOfxr -- the OFXR Bridge / VectorXR module ranges
 
 namespace XrHook {
 
@@ -2565,6 +2569,27 @@ XrResult GipaImpl(int i, XrInstance inst, const char* name, PFN_xrVoidFunction* 
 XrResult NegRuntimeImpl(int i, const XrNegotiateLoaderInfo* li, XrNegotiateRuntimeRequest* rq);
 XrResult NegLayerImpl(int i, const XrNegotiateLoaderInfo* li, const char* layerName, XrNegotiateApiLayerRequest* rq);
 
+// phase 56 (VectorXR): an API layer can call the functions below from its OWN thread, outside any game call -- VectorXR's
+// Frame Generation "presents from its own thread" in D3D11: its presenter runs xrWaitFrame / xrBeginFrame / xrEndFrame and
+// acquires / waits / releases its own swapchain images (+ its own swapchains / spaces) there. On that thread t_depth is 0, so
+// the thunk under the layer would take those calls for the game's outermost ones: foreign swapchains in the image map, the
+// panel release callback on the layer's images, its poses learned, our quad layers appended to its xrEndFrame, Turbo / the
+// fps cap pacing it, session-state tracking and CPU-profiler frame marks -- twice per frame. Same risk for OFXR Bridge.
+// How: the stub's return address is the caller's code; inside a detected OFXR / VectorXR module (Ofxr::FromOfxr) the call
+// runs as nested (++t_depth = every Impl passes straight through to the real function, no bookkeeping). The gate lives in
+// the stubs, never in the *Impl functions: only the stub's own frame has the layer's call site as its return address (an
+// Impl reached by a tail call would see the loader's or the game's). Already nested (t_depth > 0, e.g. the layer forwarding
+// the game's own call down the chain): nothing to do -- also keeps the range scan and the pass counter off the normal path.
+// Gipa / NegRuntime / NegLayer are NOT gated: a layer resolving its "next" functions must still get our thunks.
+template <class F> inline XrResult LayerGate(void* ret, F&& f) {
+    if (t_depth > 0 || !Ofxr::FromOfxr(ret)) return f();
+    Ofxr::NotePassed();
+    ++t_depth;
+    const XrResult r = f();
+    --t_depth;
+    return r;
+}
+
 template <int I> struct Thunk {
     static XrResult XRH_CALL Gipa(XrInstance a, const char* b, PFN_xrVoidFunction* c) { return GipaImpl(I, a, b, c); }
     static XrResult XRH_CALL NegRuntime(const XrNegotiateLoaderInfo* a, XrNegotiateRuntimeRequest* b) {
@@ -2573,27 +2598,58 @@ template <int I> struct Thunk {
     static XrResult XRH_CALL NegLayer(const XrNegotiateLoaderInfo* a, const char* b, XrNegotiateApiLayerRequest* c) {
         return NegLayerImpl(I, a, b, c);
     }
-    static XrResult XRH_CALL Release(XrSwapchain a, const void* b) { return ReleaseImpl(I, a, b); }
-    static XrResult XRH_CALL Acquire(XrSwapchain a, const void* b, uint32_t* c) { return AcquireImpl(I, a, b, c); }
-    static XrResult XRH_CALL Enumerate(XrSwapchain a, uint32_t b, uint32_t* c, void* d) { return EnumerateImpl(I, a, b, c, d); }
-    static XrResult XRH_CALL Destroy(XrSwapchain a) { return DestroyImpl(I, a); }
+    // phase 56: everything below goes through LayerGate (see above)
+    static XrResult XRH_CALL Release(XrSwapchain a, const void* b) {
+        return LayerGate(_ReturnAddress(), [&] { return ReleaseImpl(I, a, b); });
+    }
+    static XrResult XRH_CALL Acquire(XrSwapchain a, const void* b, uint32_t* c) {
+        return LayerGate(_ReturnAddress(), [&] { return AcquireImpl(I, a, b, c); });
+    }
+    static XrResult XRH_CALL Enumerate(XrSwapchain a, uint32_t b, uint32_t* c, void* d) {
+        return LayerGate(_ReturnAddress(), [&] { return EnumerateImpl(I, a, b, c, d); });
+    }
+    static XrResult XRH_CALL Destroy(XrSwapchain a) {
+        return LayerGate(_ReturnAddress(), [&] { return DestroyImpl(I, a); });
+    }
     static XrResult XRH_CALL Locate(XrSession a, const XrViewLocateInfo* b, XrViewState* c, uint32_t d, uint32_t* e, XrView* f) {
-        return LocateImpl(I, a, b, c, d, e, f);           // v0.10.3 phase 28
+        return LayerGate(_ReturnAddress(), [&] { return LocateImpl(I, a, b, c, d, e, f); });   // v0.10.3 phase 28
     }
-    static XrResult XRH_CALL EndFrame(XrSession a, const XrFrameEndInfo* b) { return EndFrameImpl(I, a, b); }
+    static XrResult XRH_CALL EndFrame(XrSession a, const XrFrameEndInfo* b) {
+        return LayerGate(_ReturnAddress(), [&] { return EndFrameImpl(I, a, b); });
+    }
     static XrResult XRH_CALL CreateRefSpace(XrSession a, const XrReferenceSpaceCreateInfo* b, XrSpace* c) {
-        return CreateRefSpaceImpl(I, a, b, c);
+        return LayerGate(_ReturnAddress(), [&] { return CreateRefSpaceImpl(I, a, b, c); });
     }
-    static XrResult XRH_CALL LocateSpace(XrSpace a, XrSpace b, XrTime c, XrSpaceLocation* d) { return LocateSpaceImpl(I, a, b, c, d); }
-    static XrResult XRH_CALL DestroySession(XrSession a) { return DestroySessionImpl(I, a); }   // phase 29
-    static XrResult XRH_CALL WaitFrame(XrSession a, const XrFrameWaitInfo* b, XrFrameState* c) { return WaitFrameImpl(I, a, b, c); }
-    static XrResult XRH_CALL BeginFrame(XrSession a, const XrFrameBeginInfo* b) { return BeginFrameImpl(I, a, b); }   // phase 30
-    static XrResult XRH_CALL EndSession(XrSession a) { return EndSessionImpl(I, a); }
-    static XrResult XRH_CALL PollEvent(XrInstance a, void* b) { return PollEventImpl(I, a, b); }              // phase 33
-    static XrResult XRH_CALL CreateSession(XrInstance a, const void* b, XrSession* c) { return CreateSessionImpl(I, a, b, c); }
-    static XrResult XRH_CALL BeginSession(XrSession a, const XrSessionBeginInfo* b) { return BeginSessionImpl(I, a, b); }
-    static XrResult XRH_CALL RequestExit(XrSession a) { return RequestExitSessionImpl(I, a); }
-    static XrResult XRH_CALL CreateInstance(const XrInstanceCreateInfo* a, XrInstance* b) { return CreateInstanceImpl(I, a, b); }
+    static XrResult XRH_CALL LocateSpace(XrSpace a, XrSpace b, XrTime c, XrSpaceLocation* d) {
+        return LayerGate(_ReturnAddress(), [&] { return LocateSpaceImpl(I, a, b, c, d); });
+    }
+    static XrResult XRH_CALL DestroySession(XrSession a) {                                     // phase 29
+        return LayerGate(_ReturnAddress(), [&] { return DestroySessionImpl(I, a); });
+    }
+    static XrResult XRH_CALL WaitFrame(XrSession a, const XrFrameWaitInfo* b, XrFrameState* c) {
+        return LayerGate(_ReturnAddress(), [&] { return WaitFrameImpl(I, a, b, c); });
+    }
+    static XrResult XRH_CALL BeginFrame(XrSession a, const XrFrameBeginInfo* b) {             // phase 30
+        return LayerGate(_ReturnAddress(), [&] { return BeginFrameImpl(I, a, b); });
+    }
+    static XrResult XRH_CALL EndSession(XrSession a) {
+        return LayerGate(_ReturnAddress(), [&] { return EndSessionImpl(I, a); });
+    }
+    static XrResult XRH_CALL PollEvent(XrInstance a, void* b) {                                // phase 33
+        return LayerGate(_ReturnAddress(), [&] { return PollEventImpl(I, a, b); });
+    }
+    static XrResult XRH_CALL CreateSession(XrInstance a, const void* b, XrSession* c) {
+        return LayerGate(_ReturnAddress(), [&] { return CreateSessionImpl(I, a, b, c); });
+    }
+    static XrResult XRH_CALL BeginSession(XrSession a, const XrSessionBeginInfo* b) {
+        return LayerGate(_ReturnAddress(), [&] { return BeginSessionImpl(I, a, b); });
+    }
+    static XrResult XRH_CALL RequestExit(XrSession a) {
+        return LayerGate(_ReturnAddress(), [&] { return RequestExitSessionImpl(I, a); });
+    }
+    static XrResult XRH_CALL CreateInstance(const XrInstanceCreateInfo* a, XrInstance* b) {
+        return LayerGate(_ReturnAddress(), [&] { return CreateInstanceImpl(I, a, b); });
+    }
 };
 struct ThunkSet { void *gipa, *negRuntime, *negLayer, *release, *acquire, *enumerate, *destroy, *locate, *endFrame, *createRefSpace,
                   *locateSpace, *destroySession, *waitFrame, *beginFrame, *endSession,
@@ -2685,6 +2741,8 @@ XrResult NegLayerImpl(int i, const XrNegotiateLoaderInfo* li, const char* layerN
         rq->getInstanceProcAddr = reinterpret_cast<PFN_xrGetInstanceProcAddr>(Sets()[i].gipa);
         Log("OpenXR hook: API layer \"%s\" (%s) negotiated -- its xrGetInstanceProcAddr is wrapped", layerName ? layerName : "?",
             s_slot[i].module);
+        Ofxr::Rescan();                          // phase 56: the layer's module is loaded NOW -- its range is recorded before its first
+                                                 //   OpenXR / D3D11 call (the Present cadence alone could miss the first ~300 frames)
     }
     return r;
 }

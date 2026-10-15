@@ -21,7 +21,7 @@ an in-game menu (`Delete`) and an optional text config.
 
 **An NVIDIA RTX GPU is required** (DLAA and DLSS only run on RTX cards).
 
-**Menu:** [Features](#features) · [Download](#-download) · [Requirements](#requirements) · [Install](#install) · [Modes](#modes--the-end-key) · [Flat or VR](#flat-or-vr) · [OFXR Bridge](#ofxr-bridge-vr-frame-generation) · [Render scale](#how-render-scale-works) · [Models](#models-presets--which-one-to-use) · [Controls](#controls) · [Tuning menu](#the-tuning-menu) · [dlaa.ini](#dlaaini) · [Performance](#performance) · [Troubleshooting](#troubleshooting) · [Multiplayer](#multiplayer) · [Build](#build-from-source) · [Report a problem](#reporting-a-problem-what-to-upload) · [Contributing](#contributing-logs-flicker-captures-code) · [License](#license-and-credits)
+**Menu:** [Features](#features) · [Download](#-download) · [Requirements](#requirements) · [Install](#install) · [Modes](#modes--the-end-key) · [Flat or VR](#flat-or-vr) · [OFXR Bridge](#ofxr-bridge-vr-frame-generation) · [VectorXR](#vectorxr-vr-layer-suite) · [Render scale](#how-render-scale-works) · [Models](#models-presets--which-one-to-use) · [Controls](#controls) · [Tuning menu](#the-tuning-menu) · [dlaa.ini](#dlaaini) · [Performance](#performance) · [Troubleshooting](#troubleshooting) · [Multiplayer](#multiplayer) · [Build](#build-from-source) · [Report a problem](#reporting-a-problem-what-to-upload) · [Contributing](#contributing-logs-flicker-captures-code) · [License](#license-and-credits)
 
 > **Where the project stands (v0.13.0).** The mod was built for as many use cases, devices and situations as
 > I could reach: flat and VR, one screen and three, keyboard, wheel and shifter, Reflex and frame rate caps,
@@ -45,7 +45,7 @@ an in-game menu (`Delete`) and an optional text config.
 - One DLL and one `dlaa.ini` for both; VR renders one pass per eye (OpenXR).
 - **Triple screens** in flat: every screen gets its own DLAA. **new**
 - Windows HDR and NVIDIA Smooth Motion work in flat mode.
-- OFXR Bridge (VR frame generation) works alongside.
+- OFXR Bridge (VR frame generation) and VectorXR (VR layer suite) work alongside.
 - Drivable cars (ATS) get DLAA / DLSS too.
 
 **VR extras and speed**
@@ -98,6 +98,8 @@ an in-game menu (`Delete`) and an optional text config.
 - **NVIDIA Smooth Motion** — works with the driver's frame generation switched on, in flat mode.
 - **OFXR Bridge (VR frame generation)** — runs together with the bridge, which adds in-between frames to the
   finished eye pictures (see [OFXR Bridge](#ofxr-bridge-vr-frame-generation)).
+- **VectorXR (VR layer suite)** — runs together with VectorXR (Turbo, Depth, frame generation, on-screen display); the mod leaves
+  its work inside the game alone (see [VectorXR](#vectorxr-vr-layer-suite)).
 - **Drivable cars (ATS)** — DLAA / DLSS also runs while you drive a car.
 - **Menu and truck-preview screens** get anti-aliasing too, not only the drive.
 - **Four DLSS models** to pick from, switched live with a key, from light to heavy.
@@ -289,6 +291,37 @@ the mod. The mod only makes sure the bridge's own copies inside the game are lef
   `OFXR Bridge: N calls passed through so far`.
 
 Status: the handling is built but not yet tested in a headset with the bridge armed; report what you see with `log_level = 4`.
+
+</details>
+
+## VectorXR (VR layer suite)
+
+<details>
+<summary><b>Show</b></summary>
+
+[VectorXR](https://github.com/DienerTech/vectorxr) (by DienerTech) is a separate OpenXR layer plus a desktop app that adds Depth, Pivot,
+Quadviews, a Turbo mode (its own frame pacing), experimental Frame Generation (optical flow) and an on-screen display. The mod runs
+together with it. For a D3D11 game, VectorXR's frame generation shares the game's swapchain images with a D3D12 device, runs its
+work on the game's own immediate context and presents from its own thread; its on-screen display also draws on the game's context.
+The mod makes sure those calls are left alone: they are not counted as game drawing, and the OpenXR calls VectorXR makes from its
+own thread are not mistaken for the game's.
+
+- **Order:** install the mod as usual, install VectorXR with its own installer and switch it on for the game in its app. Nothing to
+  change in `dlaa.ini`.
+- **No administrator note:** VectorXR registers its layer machine-wide, so the "never run the game as administrator" rule of the
+  OFXR Bridge does not apply.
+- **Turbo:** VectorXR has its own Turbo and so has the mod (`xr_turbo`). Run only one. If both are on, the log warns once
+  (`VectorXR found with the mod's Turbo mode on`); set `xr_turbo = 0` in `dlaa.ini`, or switch Turbo off for the game in VectorXR.
+- **FPS cap:** VectorXR Frame Generation wants no frame-rate limit. Keep `vr_fps_cap = 0` (the default) while it is on; the log
+  warns once when both are on.
+- **Switch off:** `vectorxr = 0` in `dlaa.ini` switches the mod's handling off (default 1). It does nothing when VectorXR is not
+  in the game.
+- **In the log** (`log_level = 3` or `4`): `VectorXR: layer module ... loaded` when VectorXR's layer shows up in the game (it loads
+  when the game creates its OpenXR instance, so it can appear a little after start), `VectorXR: settings found` / `not installed`
+  at start, `VectorXR: layer found in the game` once, and `OFXR Bridge / VectorXR: N calls passed through so far`. The tuning
+  menu's `VectorXR (VR layer)` row (group `Upscaling and VR`) shows `found` / `not found` / `off`.
+
+Status: the handling is built but not yet tested in a headset with VectorXR; report what you see with `log_level = 4`.
 
 </details>
 
@@ -514,7 +547,7 @@ it, what it costs or saves. **`Up` / `Down`** select a row,
 
 **Categories (phase 43):** the menu is in groups you open and close. `Mode`, `Performance profile` and `DLAA model` are
 always shown. Then come the groups: `Picture` (sharpening, texture sharpness, DLAA area, tonemap, see-through depth),
-`Motion and mirrors`, `Upscaling and VR` (DLSS upscale, DLAA on / off, OFXR Bridge), `VR performance` (Turbo, foveated
+`Motion and mirrors`, `Upscaling and VR` (DLSS upscale, DLAA on / off, OFXR Bridge, VectorXR), `VR performance` (Turbo, foveated
 rendering, hidden area mask), `Frame rate and CPU` (Reflex, FPS cap, VR FPS cap, CPU tuning), `Panel settings` and `FPS counter settings`.
 After them: `FPS counter`, `Logging`,
 `Save`, `Reset` and `Close`. Select a group and press `Right` to open it, `Left` to close it. A closed group shows `►` and
@@ -906,6 +939,7 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   the headset picture in VR, so switch it off for VR. The mod's `reflex` and `fps_cap` do not run while Smooth Motion is
   on (they would also hold back its generated frames); use the frame limit in the NVIDIA app / control panel instead.
 - **OFXR Bridge (VR frame generation):** see the section above.
+- **VectorXR (VR layer suite):** see the [VectorXR](#vectorxr-vr-layer-suite) section above (one Turbo only, `vr_fps_cap = 0` with its frame generation).
 - **Picture freezes in the interior camera with OptiScaler (DLSS 5 / Neural Rendering):** OptiScaler's DX12
   bridge loses its device on the small HDR mirror DLSS frames that appear with the mirrors in view. Since v0.11.0
   the mod sees OptiScaler next to the game exe and starts with mirror DLAA off (look for `env: OptiScaler

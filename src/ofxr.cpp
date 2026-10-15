@@ -13,6 +13,9 @@ namespace Ofxr {
 Range                 g_ranges[kMaxRanges] = {};
 std::atomic<int>      g_count{0};
 std::atomic<bool>     g_on{true};
+std::atomic<bool>     g_onVxr{true};          // phase 56
+std::atomic<bool>     g_anyOn{true};
+std::atomic<int>      g_kinds{0};
 std::atomic<uint64_t> g_passed{0};
 
 namespace {
@@ -25,28 +28,45 @@ uint64_t              s_lastStatPassed = 0;
 
 wchar_t s_bridgeDir[MAX_PATH] = L"";          // "%LOCALAPPDATA%\OFXR Bridge\" lower-cased; "" when LOCALAPPDATA is unset
 
-// The layer DLL's name is not documented (the tray copies "the OpenXR layer" into %LOCALAPPDATA%\OFXR Bridge\), so a module
-// counts when its base name CONTAINS "ofxr" (case-insensitive) or when it was loaded from that folder.
-bool IsOfxrModule(const wchar_t* base, const wchar_t* fullPath) {
+wchar_t s_vxrDir[MAX_PATH] = L"";             // phase 56: "%LOCALAPPDATA%\VectorXR\" lower-cased; "" when LOCALAPPDATA is unset
+
+bool PathStartsWith(const wchar_t* fullPath, const wchar_t* lowerDir) {
+    if (!lowerDir[0] || !fullPath) return false;
+    const size_t dl = wcslen(lowerDir);
+    for (size_t k = 0; k < dl; ++k)
+        if (!fullPath[k] || (wchar_t)towlower(fullPath[k]) != lowerDir[k]) return false;
+    return true;
+}
+
+// Which layer a module belongs to, 0 = none. OFXR: the layer DLL's name is not documented (the tray copies "the OpenXR layer"
+// into %LOCALAPPDATA%\OFXR Bridge\), so a module counts when its base name CONTAINS "ofxr" (case-insensitive) or when it was
+// loaded from that folder. VectorXR (phase 56): the layer is XR_APILAYER_DIENERTECH_VECTORXR.dll, so the base name contains
+// "vectorxr"; any other module of it would live under %LOCALAPPDATA%\VectorXR\.
+int ModuleKind(const wchar_t* base, const wchar_t* fullPath) {
     wchar_t lo[MAX_PATH];
     int i = 0;
     for (; base[i] && i < MAX_PATH - 1; ++i) lo[i] = (wchar_t)towlower(base[i]);
     lo[i] = 0;
-    if (wcsstr(lo, L"ofxr")) return true;
-    if (!s_bridgeDir[0] || !fullPath) return false;
-    const size_t dl = wcslen(s_bridgeDir);
-    for (size_t k = 0; k < dl; ++k)
-        if (!fullPath[k] || (wchar_t)towlower(fullPath[k]) != s_bridgeDir[k]) return false;
-    return true;
+    if (wcsstr(lo, L"ofxr")) return kKindOfxr;
+    if (wcsstr(lo, L"vectorxr")) return kKindVectorXr;
+    if (PathStartsWith(fullPath, s_bridgeDir)) return kKindOfxr;
+    if (PathStartsWith(fullPath, s_vxrDir)) return kKindVectorXr;
+    return 0;
 }
 } // namespace
 
 void Configure(int mode) {
     g_on.store(mode != 0, std::memory_order_relaxed);
+    g_anyOn.store(g_on.load(std::memory_order_relaxed) || g_onVxr.load(std::memory_order_relaxed), std::memory_order_relaxed);
+}
+
+void ConfigureVectorXr(int mode) {
+    g_onVxr.store(mode != 0, std::memory_order_relaxed);
+    g_anyOn.store(g_on.load(std::memory_order_relaxed) || g_onVxr.load(std::memory_order_relaxed), std::memory_order_relaxed);
 }
 
 void Rescan() {
-    if (!g_on.load(std::memory_order_relaxed)) return;
+    if (!g_anyOn.load(std::memory_order_relaxed)) return;
     std::unique_lock<std::mutex> lk(s_scanLock, std::try_to_lock);
     if (!lk.owns_lock()) return;                  // another thread is scanning right now
 
@@ -63,8 +83,18 @@ void Rescan() {
                 Log("OFXR Bridge: tray.ini found at %ls (the bridge is installed on this PC; armed = the tray app is running)", path);
             else
                 Log("OFXR Bridge: not installed (no %ls)", path);
+            // phase 56: VectorXR keeps its settings under %LOCALAPPDATA%\VectorXR\config\ (its layer DLL is registered machine-wide)
+            swprintf_s(s_vxrDir, L"%ls\\VectorXR\\", base);
+            for (wchar_t* c = s_vxrDir; *c; ++c) *c = (wchar_t)towlower(*c);
+            swprintf_s(path, L"%ls\\VectorXR\\config\\settings.json", base);
+            if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES)
+                Log("VectorXR: settings found at %ls (VectorXR is installed on this PC; its layer loads with the game's OpenXR "
+                    "instance when it is enabled for this game)", path);
+            else
+                Log("VectorXR: not installed (no %ls)", path);
         } else {
             Log("OFXR Bridge: not installed (LOCALAPPDATA not set)");
+            Log("VectorXR: not installed (LOCALAPPDATA not set)");
         }
     }
 
@@ -79,7 +109,11 @@ void Rescan() {
         wchar_t name[MAX_PATH], full[MAX_PATH];
         if (!GetModuleBaseNameW(GetCurrentProcess(), mods[i], name, MAX_PATH)) continue;
         if (!GetModuleFileNameExW(GetCurrentProcess(), mods[i], full, MAX_PATH)) full[0] = 0;
-        if (!IsOfxrModule(name, full)) continue;
+        const int kind = ModuleKind(name, full);
+        if (kind == 0) continue;
+        // phase 56: a layer that is switched off (ini) is not recorded, so its calls are tracked like the game's
+        if (kind == kKindOfxr && !g_on.load(std::memory_order_relaxed)) continue;
+        if (kind == kKindVectorXr && !g_onVxr.load(std::memory_order_relaxed)) continue;
         MODULEINFO mi{};
         if (!GetModuleInformation(GetCurrentProcess(), mods[i], &mi, sizeof(mi)) || !mi.SizeOfImage) continue;
         const uintptr_t lo = reinterpret_cast<uintptr_t>(mi.lpBaseOfDll);
@@ -88,10 +122,17 @@ void Rescan() {
         if (known) continue;
         g_ranges[n].lo = lo;
         g_ranges[n].hi = lo + mi.SizeOfImage;
+        g_ranges[n].kind = kind;
         ++n;
+        g_kinds.fetch_or(kind, std::memory_order_relaxed);
         g_count.store(n, std::memory_order_release);   // count written last: readers never see a half-filled range
-        Log("OFXR Bridge: layer module %ls loaded @ %p size %u KB -- its D3D11 calls on the game context pass through the "
-            "mod's hooks", name, mi.lpBaseOfDll, (unsigned)(mi.SizeOfImage / 1024));
+        if (kind == kKindOfxr)
+            Log("OFXR Bridge: layer module %ls loaded @ %p size %u KB -- its D3D11 calls on the game context pass through the "
+                "mod's hooks", name, mi.lpBaseOfDll, (unsigned)(mi.SizeOfImage / 1024));
+        else
+            Log("VectorXR: layer module %ls loaded @ %p size %u KB -- its D3D11 work on the game's device and its OpenXR calls "
+                "from its own presenter thread pass through the mod's hooks", name, mi.lpBaseOfDll,
+                (unsigned)(mi.SizeOfImage / 1024));
     }
     static int s_timedLogs = 0;
     if (s_timedLogs < 3) {
@@ -105,7 +146,7 @@ void Rescan() {
 }
 
 void OnPresent(uint64_t n) {
-    if (!g_on.load(std::memory_order_relaxed)) return;
+    if (!g_anyOn.load(std::memory_order_relaxed)) return;
     const ULONGLONG now = GetTickCount64();
     if (!s_startTick) { s_startTick = now; s_lastScanN = n; s_lastStatN = n; }
     const uint64_t interval = (now - s_startTick < 10ull * 60ull * 1000ull) ? 300 : 3000;
@@ -125,7 +166,7 @@ void OnPresent(uint64_t n) {
         const uint64_t p = g_passed.load(std::memory_order_relaxed);
         if (p > 0 && p != s_lastStatPassed) {
             s_lastStatPassed = p;
-            LogDbg("OFXR Bridge: %llu calls passed through so far", (unsigned long long)p);
+            LogDbg("OFXR Bridge / VectorXR: %llu calls passed through so far", (unsigned long long)p);
         }
     }
 }

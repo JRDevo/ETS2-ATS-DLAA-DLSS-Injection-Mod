@@ -71,7 +71,7 @@ menu and the garage / truck dealer screens, before a save is loaded).
 - The selected row shows a description under the list, in plain words: what the row does, when you would change it, and
   what it costs or saves (the measured figure is added while the GPU timers run). A greyed row does not apply to the
   current mode and says why (`DLAA area`, `Panel VR depth` and `Panel faces you` are VR only; `DLAA before tonemap` is flat
-  only; `OFXR Bridge` is greyed when `ofxr_bridge = 0`); it stays in the list. The **Performance profile** description
+  only; `OFXR Bridge` is greyed when `ofxr_bridge = 0`, `VectorXR (VR layer)` when `vectorxr = 0`); it stays in the list. The **Performance profile** description
   lists what `medium` and `low` change; **Save to dlaa.ini** says what it writes.
 - **Panel position X / Y, Panel size** move and size the panel (repeat makes it fast); flat and VR each keep their own
   values. **Panel VR depth** (VR only) shifts the panel inward per eye so it sits nearer than infinity: raise it if the

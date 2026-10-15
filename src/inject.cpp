@@ -1684,6 +1684,9 @@ void RefreshBackbufferFromSwapchain(IDXGISwapChain* sc, uint64_t n) {
     }
 }
 
+#ifdef WITH_DLAA
+inline bool XrTurboEffective();                 // phase 56: defined with the Turbo mode code (phase 52), used by the VectorXR notice below
+#endif
 // The per-frame work (v0.8.1: was the body of hkPresent at depth 0). Normal mode: hkPresent, sc = the presenting
 // swapchain, under g_plMx. Present-layer mode: the game render thread at the frame boundary (LayerFrameBoundary), sc =
 // nullptr, bctx = the game context, fromRule = the boundary is the frame-end rule (between two frames, the frame's last
@@ -1692,6 +1695,22 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
     if (!sc) CpuProfFrameMark(CpuProf::kMarkPresent);   // phase 31: present-layer mode -- the game-thread frame boundary is the frame
     CpuProf::Block cpb(CpuProf::kBFrameWork);               // phase 31 CPU profiler (cpu_prof.h)
     Ofxr::OnPresent(n);                         // v0.10.0 OFXR Bridge: layer-module rescan cadence + pass-through stats
+    {   // phase 56: VectorXR found in the game -- say once what it means, and warn about the two settings that fight it
+        static bool s_vxrNoted = false;
+        if (!s_vxrNoted && Ofxr::DetectedVectorXr()) {
+            s_vxrNoted = true;
+            Log("VectorXR: layer found in the game -- its frame generation / OSD work on the game's device and its presenter-thread "
+                "OpenXR calls pass through the mod's hooks (phase 56)");
+#ifdef WITH_DLAA
+            if (XrTurboEffective())
+                LogWarn("VectorXR found with the mod's Turbo mode on (dlaa.ini xr_turbo = %d): VectorXR's own Turbo does the same "
+                        "job -- run only one: xr_turbo = 0 here, or Turbo off for this game in VectorXR", g_xrTurbo);
+#endif
+            if (g_vrFpsCap)
+                LogWarn("VectorXR found with vr_fps_cap = %d: VectorXR Frame Generation wants no frame-rate limit -- set "
+                        "vr_fps_cap = 0 while its Frame Generation is on", g_vrFpsCap);
+        }
+    }
     if (CpuTuning::NeedPresent()) {             // phase 54: once -- the render (Present) thread + the window's thread get the CPU tuning
         DXGI_SWAP_CHAIN_DESC cd{};
         CpuTuning::OnPresent(sc && SUCCEEDED(sc->GetDesc(&cd)) ? cd.OutputWindow : nullptr);
@@ -16018,6 +16037,7 @@ enum MenuRowId {
     MR_MIRTURNS,                                          // phase 41: mirrors in turns (dlaa.ini mirror_turns)
     MR_UPGRP,                                             // phase 43: group "Upscaling and VR"
     MR_UPSCALE, MR_DLAA, MR_OFXR,
+    MR_VECTORXR,                                          // phase 56: VectorXR info row (dlaa.ini vectorxr)
     MR_VRPGRP,                                            // phase 43: group "VR performance"
     MR_TURBO,                                             // phase 30: VR Turbo mode (dlaa.ini xr_turbo; OpenXR Toolkit port)
     MR_VRS, MR_VRSSIZE,                                   // phase 34: VR foveated rendering (dlaa.ini vrs; vrs_inner / vrs_outer preset)
@@ -16054,7 +16074,7 @@ struct MenuGroupDef { int header, last; const wchar_t* title; };
 constexpr MenuGroupDef kMenuGroups[] = {
     { MR_PICGRP,   MR_BIAS,     L"Picture" },                    // phase 49: last row MR_FWD -> MR_BIAS
     { MR_MOTGRP,   MR_MIRTURNS, L"Motion and mirrors" },
-    { MR_UPGRP,    MR_OFXR,     L"Upscaling and VR" },
+    { MR_UPGRP,    MR_VECTORXR, L"Upscaling and VR" },      // phase 56: last row MR_OFXR -> MR_VECTORXR
     { MR_VRPGRP,   MR_HMASK,    L"VR performance" },
     { MR_FRGRP,    MR_CPU,      L"Frame rate and CPU" },         // phase 52; + phase 54 CPU tuning
     { MR_PANELGRP, MR_MENUKEYS, L"Panel settings" },
@@ -16062,13 +16082,13 @@ constexpr MenuGroupDef kMenuGroups[] = {
 };
 constexpr int kMenuGroupCount = (int)(sizeof(kMenuGroups) / sizeof(kMenuGroups[0]));
 static_assert(MR_PICGRP + 1 == MR_SHARP && MR_BIAS + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_MIRTURNS + 1 == MR_UPGRP &&
-              MR_UPGRP + 1 == MR_UPSCALE && MR_OFXR + 1 == MR_VRPGRP && MR_VRPGRP + 1 == MR_TURBO && MR_HMASK + 1 == MR_FRGRP &&
+              MR_UPGRP + 1 == MR_UPSCALE && MR_VECTORXR + 1 == MR_VRPGRP && MR_VRPGRP + 1 == MR_TURBO && MR_HMASK + 1 == MR_FRGRP &&
               MR_FRGRP + 1 == MR_REFLEX && MR_VRFPSCAP + 1 == MR_CPU && MR_CPU + 1 == MR_PANELGRP &&
               MR_PANELGRP + 1 == MR_POSX && MR_MENUKEYS + 1 == MR_FPS && MR_FPSGRP + 1 == MR_FPSLOCK && MR_FPSLOCK + 1 == MR_FPSPROF && MR_FPSPROF + 1 == MR_FPSREMEAS &&
               MR_FPSDIST + 1 == MR_LOG,
               "tuning menu: a group's children must follow its header and fill it up to its last row");
 static_assert(MR_SHARP < MR_WIDTH && MR_WIDTH < MR_LOD && MR_LOD < MR_LODCUT && MR_LODCUT < MR_AREA && MR_AREA < MR_PRETM &&
-              MR_PRETM < MR_FWD && MR_FWD < MR_BIAS && MR_DRAWIDS < MR_MIRROR && MR_MIRROR < MR_MIRTURNS && MR_UPSCALE < MR_DLAA && MR_DLAA < MR_OFXR &&
+              MR_PRETM < MR_FWD && MR_FWD < MR_BIAS && MR_DRAWIDS < MR_MIRROR && MR_MIRROR < MR_MIRTURNS && MR_UPSCALE < MR_DLAA && MR_DLAA < MR_OFXR && MR_OFXR < MR_VECTORXR &&
               MR_TURBO < MR_VRS && MR_VRS < MR_VRSSIZE && MR_VRSSIZE < MR_VRSPASS && MR_VRSPASS < MR_HMASK &&
               MR_REFLEX < MR_FPSCAP && MR_FPSCAP < MR_VRFPSCAP && MR_VRFPSCAP < MR_CPU &&
               MR_POSX < MR_POSY && MR_POSY < MR_SIZE && MR_SIZE < MR_DEPTH && MR_DEPTH < MR_FACE && MR_FACE < MR_MENUKEYS &&
@@ -16115,14 +16135,17 @@ const wchar_t* const kMenuDesc[] = {
     L"on = each mirror gets its DLAA every 2nd frame and shows its last clean picture in between: about half the mirror cost. Edges "
     L"stay clean; moving things in the glass update at half rate. off = every mirror every frame.",
     // phase 43: menu categories (Upscaling and VR)
-    L"DLSS upscale, the DLAA on / off switch and the OFXR Bridge info. Right opens the group, Left closes it; it starts closed every "
-    L"time the menu opens.",
+    L"DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts "
+    L"closed every time the menu opens.",
     L"DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and "
     L"fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %.",
     L"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for comparing. Off saves the cost "
     L"of every part together.",
     L"OFXR Bridge = VR frame generation by djules75, a separate download (github.com/djules75/OFXR-Bridge). found = its layer "
     L"is loaded in this game and the mod lets its work pass through. Start its tray app before the game.",
+    // phase 56 (MR_VECTORXR)
+    L"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, Depth, frame generation; found = "
+    L"its layer is loaded in the game and the mod lets its work pass through. Run only one Turbo (its or the mod's).",
     // phase 43: menu categories (VR performance)
     L"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every "
     L"time the menu opens.",
@@ -18225,6 +18248,10 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     if (!Ofxr::g_on.load())      swprintf(p.rows[MR_OFXR].value, kV, L"off (dlaa.ini 0)");
     else if (Ofxr::Detected())   swprintf(p.rows[MR_OFXR].value, kV, L"found");   // (no live counter: it would rebuild the panel every frame)
     else                         swprintf(p.rows[MR_OFXR].value, kV, L"not found");
+    MenuRow(p, MR_VECTORXR, L"VectorXR (VR layer)", "dlaa.ini vectorxr", nullptr, !Ofxr::g_onVxr.load());   // phase 56: info row
+    if (!Ofxr::g_onVxr.load())          swprintf(p.rows[MR_VECTORXR].value, kV, L"off (dlaa.ini 0)");
+    else if (Ofxr::DetectedVectorXr())  swprintf(p.rows[MR_VECTORXR].value, kV, L"found");
+    else                                swprintf(p.rows[MR_VECTORXR].value, kV, L"not found");
     groupRow(MR_VRPGRP, kMenuGroups[MenuGroupIndex(MR_VRPGRP)].title);   // phase 43: menu categories
     MenuRow(p, MR_TURBO, L"Turbo mode (VR)", "dlaa.ini xr_turbo", vr ? nullptr : "VR only", !vr);   // phase 30
     {
@@ -18472,6 +18499,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_UPSCALE: ToggleUpscale(n); break;
     case MR_DLAA:    ToggleDlaa(n); break;
     case MR_OFXR:    break;                                 // information only (dlaa.ini ofxr_bridge, read at start)
+    case MR_VECTORXR: break;                                // phase 56: information only (dlaa.ini vectorxr, read at start)
     case MR_TURBO:   ToggleXrTurbo(n); break;               // phase 30: Left and Right both switch it (also flat: kept for VR)
     case MR_VRS:     ToggleVrs(n); break;                   // phase 34: Left and Right both switch it (also flat: kept for VR)
     case MR_VRSSIZE: StepVrsSize(dir, n, repeat); break;    // phase 44: Right = bigger sharp centre, Left = smaller (5 % steps)
@@ -21720,6 +21748,9 @@ void LoadConfig() {
             // phase 52: frame rate (outside the else-if chain: C1061; the menu's Frame rate rows switch them live)
             if (!strcmp(key, "reflex"))             { g_reflex = FramePace::ClampReflex(v); g_paceExplicit = true; continue; }
             if (!strcmp(key, "fps_cap"))            { g_fpsCap = FramePace::ClampFpsCap(v); g_paceExplicit = true; continue; }
+            // phase 56: VectorXR pass-through, 0/1 (default 1). A standalone `if` + continue, NOT another `else if` below: the key chain
+            // is at MSVC's 128-nested-blocks limit (C1061) with one more link.
+            if (!strcmp(key, "vectorxr"))           { Ofxr::ConfigureVectorXr(v != 0 ? 1 : 0); continue; }
             if (!strcmp(key, "vr_fps_cap"))         { g_vrFpsCap = FramePace::ClampVrDiv(v); g_paceExplicit = true; continue; }
 #endif
             if (!strcmp(key, "xr_hidden_mask"))     { g_xrHiddenMask = v != 0 ? 1 : 0; g_xrHiddenMaskExplicit = true; continue; }   // phase 40
@@ -22181,6 +22212,8 @@ void LoadConfig() {
         : "off: the lighting pass keeps the game's viewport; its redraws can miss the jittered G-buffer depth (lit areas flicker)");
     Log("OFXR Bridge support: ofxr_bridge=%d (%s)", (int)Ofxr::g_on.load(),
         Ofxr::g_on.load() ? "on: the layer's calls pass through the hooks" : "off");
+    Log("VectorXR support: vectorxr=%d (%s)", (int)Ofxr::g_onVxr.load(),
+        Ofxr::g_onVxr.load() ? "on: the layer's calls pass through the hooks" : "off");   // phase 56
 #ifdef WITH_DLAA
     SceneDlaa::SetBiasStrength(g_biasCfg);              // phase 49
     Log("DLSS bias mask (phase 49): dlss_bias_mask=%d %% (%s)", g_biasCfg, g_biasCfg

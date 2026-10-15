@@ -50,6 +50,16 @@ log_level = 1
 # the handling out). Nothing to change when you do not use the bridge: with no ofxr*.dll in the game it does nothing.
 # ofxr_bridge = 1
 
+# VectorXR (an OpenXR enhancement suite by DienerTech: Depth, Pivot, Quadviews, Turbo, Frame Generation, On-Screen Display;
+# https://github.com/DienerTech/vectorxr) support, 0 / 1. 1 = default: the mod finds VectorXR's layer module
+# (XR_APILAYER_DIENERTECH_VECTORXR.dll) in the game and lets that module's own D3D11 work on the game's device (frame generation,
+# the on-screen display) and its OpenXR calls from its own presenter thread pass through the hooks without being counted as the
+# game's, so they cannot be mistaken for the eye picture. 0 = no search, no pass-through (only for ruling the handling out).
+# Nothing to change when you do not use VectorXR: with no such module in the game it does nothing. Two settings fight it: run
+# only ONE Turbo (VectorXR's own, or xr_turbo here -- the log warns when both are on), and VectorXR Frame Generation wants no
+# frame-rate limit, so set vr_fps_cap = 0 while it is on.
+# vectorxr = 1
+
 # VR TURBO MODE (from OpenXR Toolkit), 0 / 1, default 0. 1 = the game no longer waits for the headset in each frame (the
 # wait runs on a thread of the mod), so it can start the next frame sooner. WARNING: it turns off the headset's frame
 # smoothing -- ASW (Meta / Oculus), Motion Smoothing, Motion Reprojection (Windows Mixed Reality) and SSW (Virtual Desktop)
