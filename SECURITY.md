@@ -4,7 +4,7 @@
 
 The mod is a single `dinput8.dll` that the game loads from its `bin\win_x64\` folder. It hooks the game's DirectX 11 and
 OpenXR calls. It does not go online, has no account and collects nothing. It only writes files next to the game:
-`dlaa.ini`, `dlaa_inject.log`, and test captures when you press a capture key.
+`dlaa.ini`, `dlaa_inject.log`, the shader cache folder `dlaa_shader_cache\`, and test captures when you press a capture key.
 
 ## Get it from one place only
 

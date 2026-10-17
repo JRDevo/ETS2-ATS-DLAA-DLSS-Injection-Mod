@@ -55,8 +55,8 @@ The mod has its own capture keys. They need `log_level = 4`.
   against `dev`.
 - Tests: `tests\build_*.bat` build the unit tests without the game (`build\tests\*.exe`, exit code 0
   = pass). GitHub Actions runs them on every push. Pure logic goes into a header with a test
-  (`src\fps_pose.h`, `src\frame_pace.h`, `src\hotkey_scan.h` are examples); the DX11 and OpenXR
-  hooks stay in `src\inject.cpp`.
-- Rules for published text: never name another ETS2 / ATS anti-aliasing mod, VR = OpenXR only
-  (no SteamVR / `-openvr`), game paths as `bin\win_x64\`, say what was tested and what was not.
+  (`src\fps_pose.h`, `src\frame_pace.h`, `src\hotkey_scan.h` are examples); the DX11 hooks stay
+  in `src\inject.cpp`, the OpenXR hooks in `src\xr_hook.cpp`.
+- Rules for published text: never name another ETS2 / ATS anti-aliasing mod, VR = OpenXR only,
+  game paths as `bin\win_x64\`, say what was tested and what was not.
 - Tell me what you tested in game (game, flat / VR, where, when) in the pull request, with a log.
