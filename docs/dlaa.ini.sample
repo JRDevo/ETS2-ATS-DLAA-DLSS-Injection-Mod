@@ -99,7 +99,7 @@ log_level = 1
 # (more saving; test it first: look for blocky light or shadow edges at the side). The menu's Foveated passes row.
 # vrs_passes = 0
 # EYE-TRACKED FOVEATION (experimental / test build), 0 / 1, default 0. 1 = the sharp centre follows where you look, on a headset
-# with eye tracking that the VR runtime reports through OpenXR (XR_EXT_eye_gaze_interaction: Varjo, Quest Pro, Pimax Crystal ...);
+# with eye tracking that the VR runtime reports through OpenXR (XR_EXT_eye_gaze_interaction, for example Varjo);
 # without one it stays at the lens centre. The mod asks the runtime for eye gaze when the game starts, so the first switch-on needs
 # a game restart; after that the tuning menu's Foveated eye tracking row switches it live. See it work: log_level = 4 + vrs_debug = 1
 # (the blocky outer ring moves with your eyes in the desktop mirror). The log's "Eye tracking" lines say what the headset sent.
