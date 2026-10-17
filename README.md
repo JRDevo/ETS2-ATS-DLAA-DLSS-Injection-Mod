@@ -21,14 +21,14 @@ an in-game menu (`Delete`) and an optional text config.
 
 **An NVIDIA RTX GPU is required** (DLAA and DLSS only run on RTX cards).
 
-**Menu:** [Features](#features) · [Download](#-download) · [Requirements](#requirements) · [Install](#install) · [Modes](#modes--the-end-key) · [Flat or VR](#flat-or-vr) · [OFXR Bridge](#ofxr-bridge-vr-frame-generation) · [Render scale](#how-render-scale-works) · [Models](#models-presets--which-one-to-use) · [Controls](#controls) · [Tuning menu](#the-tuning-menu) · [dlaa.ini](#dlaaini) · [Performance](#performance) · [Troubleshooting](#troubleshooting) · [Multiplayer](#multiplayer) · [Build](#build-from-source) · [Report a problem](#reporting-a-problem-what-to-upload) · [Contributing](#contributing-logs-flicker-captures-code) · [License](#license-and-credits)
+**Menu:** [Features](#features) · [Download](#-download) · [Requirements](#requirements) · [Install](#install) · [Modes](#modes--the-end-key) · [Flat or VR](#flat-or-vr) · [OFXR Bridge](#ofxr-bridge-vr-frame-generation) · [Render scale](#how-render-scale-works) · [Models](#models-presets--which-one-to-use) · [Controls](#controls) · [Tuning menu](#the-tuning-menu) · [dlaa.ini](#dlaaini) · [Performance](#performance) · [Troubleshooting](#troubleshooting) · [Multiplayer](#multiplayer) · [Build](#build-from-source) · [Report a problem](#reporting-a-problem-what-to-upload) · [Contributing](CONTRIBUTING.md) · [License](#license-and-credits)
 
 > **Where the project stands (v0.13.0).** The mod was built for as many use cases, devices and situations as
 > I could reach: flat and VR, one screen and three, keyboard, wheel and shifter, Reflex and frame rate caps,
 > foveated rendering, a hidden area mask, Turbo mode, CPU tuning, a tuning menu with every setting and its cost.
 > There are many options to tweak, and to tweak is paradise. The bells and whistles I know of are in; the ideas
 > left on my list are not worth their cost. From here on the main work is **performance tuning on your hardware**,
-> and that needs your logs: see [Contributing](#contributing-logs-flicker-captures-code). If you have a suggestion,
+> and that needs your logs: see [Contributing](CONTRIBUTING.md). If you have a suggestion,
 > a feature idea or a device I have not thought of, [open an issue](../../issues/new/choose) (Feature request).
 
 ## Features
@@ -65,7 +65,7 @@ an in-game menu (`Delete`) and an optional text config.
 - Drop in a newer `nvngx_dlss.dll` any time for NVIDIA's newer models.
 - Debug log for bug reports (off by default).
 
-<details><summary><b>More detail on each feature</b></summary>
+<details><summary><h3>More detail on each feature</h3></summary>
 
 - **DLAA** — NVIDIA anti-aliasing at the game's render resolution. It removes the shimmer and flicker on
   fences, power lines, road markings and shadows that the game's own AA leaves behind.
@@ -142,11 +142,12 @@ Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
 > Status: v0.13.0. New: NVIDIA Reflex and frame rate caps, a Hotkeys page in the menu, a per-vehicle fps box in VR, a night light glow fix, CPU tuning, and fixes for Linux / Proton.
-> With this version the bells and whistles I know of are in. From here on the main work is performance tuning, from your logs; new ideas are still welcome. See [Contributing](#contributing-logs-flicker-captures-code).
+> Test build for testers: [v0.14.0-eyetest1 (pre-release)](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/releases/tag/v0.14.0-eyetest1) — eye-tracked foveated rendering, VectorXR support and a performance pass.
+> With this version the bells and whistles I know of are in. From here on the main work is performance tuning, from your logs; new ideas are still welcome. See [Contributing](CONTRIBUTING.md).
 > See the [Releases page](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/releases) for every version.
 > DLSS upscaling in VR is still being tuned; treat it as experimental.
 
-<details><summary>Older versions</summary>
+<details><summary><h3>Older versions</h3></summary>
 
 v0.12.0: triple screens in flat, the VR fps counter attached to the vehicle, a menu in categories with a CPU | GPU cost column, hidden area mask, foveated lighting pass and mirrors in turns.
 
@@ -158,7 +159,9 @@ being tuned. Treat upscaling as experimental. The OFXR Bridge handling is not ye
 
 ---
 
-## Requirements
+<a name="requirements"></a>
+<details>
+<summary><h2>Requirements</h2></summary>
 
 - Euro Truck Simulator 2 or American Truck Simulator (64-bit, DirectX 11).
 - An **NVIDIA RTX** GPU with a current driver.
@@ -167,10 +170,11 @@ being tuned. Treat upscaling as experimental. The OFXR Bridge handling is not ye
 - For VR: an OpenXR runtime (for example Virtual Desktop), launched with the game's `-openxr`
   option.
 
-## Install
+</details>
 
+<a name="install"></a>
 <details>
-<summary><b>Show</b></summary>
+<summary><h2>Install</h2></summary>
 
 1. **Make a backup** of the game's `bin\win_x64\` folder first.
 2. [Download the latest release zip](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/releases/latest)
@@ -199,10 +203,9 @@ To uninstall, delete `dinput8.dll` (and `dlaa.ini`) from `bin\win_x64\`.
 
 </details>
 
-## Linux / Proton
-
+<a name="linux--proton"></a>
 <details>
-<summary><b>Show</b></summary>
+<summary><h2>Linux / Proton</h2></summary>
 
 Install the files the same way as on Windows (see Install above). Then tell Proton to load
 the mod's `dinput8.dll` instead of its own. In Steam, open the game's **Properties** and set
@@ -235,10 +238,9 @@ Thanks to **rimaille** for the Linux testing and these steps
 
 </details>
 
-## Modes — the `End` key
-
+<a name="modes--the-end-key"></a>
 <details>
-<summary><b>Show</b></summary>
+<summary><h2>Modes — the <code>End</code> key</h2></summary>
 
 Press **`End`** in game (no modifier) to cycle the mode. The choice is saved to
 `dlaa.ini` immediately and used again next launch.
@@ -254,10 +256,9 @@ shows once you render below native (see render scale below).
 
 </details>
 
-## Flat or VR
-
+<a name="flat-or-vr"></a>
 <details>
-<summary><b>Show</b></summary>
+<summary><h2>Flat or VR</h2></summary>
 
 The mod reads the game's launch options at start. With `-openxr` or `-oculus` it runs in VR mode
 (one DLAA / DLSS pass per eye; the desktop mirror window is left alone). Without them it runs in flat mode.
@@ -268,10 +269,9 @@ notices after about one second of driving and switches to flat mode by itself (`
 
 </details>
 
-## OFXR Bridge (VR frame generation)
-
+<a name="ofxr-bridge-vr-frame-generation"></a>
 <details>
-<summary><b>Show</b></summary>
+<summary><h2>OFXR Bridge (VR frame generation)</h2></summary>
 
 [OFXR Bridge](https://github.com/djules75/OFXR-Bridge) is a separate program that adds in-between frames in VR: it takes the finished
 picture of each eye and generates the frames between them from optical flow. The mod runs together with it. The mod
@@ -292,10 +292,9 @@ Status: the handling is built but not yet tested in a headset with the bridge ar
 
 </details>
 
-## How render scale works
-
+<a name="how-render-scale-works"></a>
 <details>
-<summary><b>Show</b></summary>
+<summary><h2>How render scale works</h2></summary>
 
 The game renders the 3-D scene at `r_scale_x` × `r_scale_y` of the output size and
 then stretches it up. In **DLSS** mode this injector replaces that stretch with DLSS
@@ -323,10 +322,9 @@ up to it.
 
 </details>
 
-## Models (presets) — which one to use
-
+<a name="models-presets--which-one-to-use"></a>
 <details>
-<summary><b>Show</b></summary>
+<summary><h2>Models (presets) — which one to use</h2></summary>
 
 A "model" (NVIDIA calls it a *render preset*) is the neural network that cleans
 the picture. All four remove jagged edges. They differ in detail, in how they
@@ -415,10 +413,9 @@ What to expect:
 
 </details>
 
-## Controls
-
+<a name="controls"></a>
 <details>
-<summary><b>Show</b></summary>
+<summary><h2>Controls</h2></summary>
 
 **You only need three keys** — or the `Delete` menu, which has every setting on one panel. Everything else is tuning,
 and the defaults are tuned already.
@@ -444,10 +441,9 @@ blind in a headset. The game window must be focused. Each key beeps to confirm (
 the value); a long low tone means "already at the limit" or "save failed". Turn beeps off with
 `beeps = 0` in `dlaa.ini`.
 
-### Tuning keys
-
+<a name="tuning-keys"></a>
 <details>
-<summary>Show the tuning keys</summary>
+<summary><h3>Tuning keys</h3></summary>
 
 | Default key | What it changes, and when you would touch it |
 |-----|--------|
@@ -466,10 +462,9 @@ the value); a long low tone means "already at the limit" or "save failed". Turn 
 
 </details>
 
-### Debug keys
-
+<a name="debug-keys"></a>
 <details>
-<summary>Show the debug keys</summary>
+<summary><h3>Debug keys</h3></summary>
 
 These need `log_level = 4` in `dlaa.ini`. They are for diagnostics and bug reports; you can ignore them when playing.
 
@@ -491,10 +486,9 @@ The full sheet with every beep pattern is in [`docs/KEYS.md`](docs/KEYS.md).
 
 </details>
 
-## The tuning menu
-
+<a name="the-tuning-menu"></a>
 <details>
-<summary><b>Show</b></summary>
+<summary><h2>The tuning menu</h2></summary>
 
 ![The tuning menu](docs/images/tuning-menu.png)
 
@@ -698,10 +692,9 @@ The three green lines under the title show the game's GPU time per frame, what t
 
 </details>
 
-## dlaa.ini
-
+<a name="dlaaini"></a>
 <details>
-<summary><b>Show</b></summary>
+<summary><h2>dlaa.ini</h2></summary>
 
 Optional, placed next to `dinput8.dll`. One `key = value` per line; `#` or `;` start
 a comment. It is read once at launch (the `config (...)` line in the log shows what
@@ -773,10 +766,9 @@ The table below lists the commonly used keys:
 
 </details>
 
-## Performance
-
+<a name="performance"></a>
 <details>
-<summary><b>Show</b></summary>
+<summary><h2>Performance</h2></summary>
 
 Measured with the mod's own GPU timers (`log_level = 4` writes a `perf eye` line to the log every 10 seconds). ETS2 flat,
 render 2880x2160 (Scaling 75 % of 3840x2160), model E, sharpen on, texture LOD bias -1.0, 4 mirrors, dense traffic.
@@ -878,10 +870,9 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
 
 </details>
 
-## Troubleshooting
-
+<a name="troubleshooting"></a>
 <details>
-<summary><b>Show</b></summary>
+<summary><h2>Troubleshooting</h2></summary>
 
 - **Traffic, trailers or buildings look wrong (wobble, smear, pink in the `Ctrl+F6`
   view)?** Press `Alt+F5` (or set `mv_objects = 0` in `dlaa.ini`). That turns off
@@ -937,10 +928,9 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
 
 </details>
 
-## Multiplayer
-
+<a name="multiplayer"></a>
 <details>
-<summary><b>Show</b></summary>
+<summary><h2>Multiplayer</h2></summary>
 
 ETS2/ATS single-player has no anti-cheat, so this works fine there. **TruckersMP and
 Convoy multiplayer have their own rules about third-party DLLs — check what each
@@ -948,10 +938,9 @@ allows before using it online.**
 
 </details>
 
-## Build from source
-
+<a name="build-from-source"></a>
 <details>
-<summary><b>Show</b></summary>
+<summary><h2>Build from source</h2></summary>
 
 Visual Studio 2022 (MSVC, x64) and CMake ≥ 3.20. MinHook is fetched automatically by
 CMake (needs git + internet on the first configure). DLAA is compiled in when the
@@ -972,10 +961,9 @@ the release zip. Architecture and internals: [`docs/DEVELOPMENT.md`](docs/DEVELO
 
 </details>
 
-## Reporting a problem (what to upload)
-
+<a name="reporting-a-problem-what-to-upload"></a>
 <details>
-<summary><b>Show</b></summary>
+<summary><h2>Reporting a problem (what to upload)</h2></summary>
 
 If something goes wrong, [open an issue](../../issues/new/choose) (**New issue** >
 **Bug report**) and attach the files below. Without the log I usually can't tell what
@@ -1027,73 +1015,10 @@ redistribution. Just give the version number.
 
 </details>
 
-## Contributing (logs, flicker captures, code)
+## Contributing
 
-<details>
-<summary><b>Show</b></summary>
-
-With v0.13.0 the bells and whistles I know of are in, and the ideas left on my list are not worth
-their cost. From here on the main work is **performance tuning and fixing what the mod gets
-wrong**, and for that I need data from PCs that are not mine. New feature ideas are welcome too:
-[open an issue](../../issues/new/choose) with the **Feature request** template and say what it
-would do for you in the game. Three ways to help, from easy to hard.
-
-### 1. Send a performance log
-
-The log is the most useful thing you can send. At `log_level = 4` the mod writes its own GPU and
-CPU timings every 10 seconds (`perf eye`, `CPU prof`, `mirror units`, `frame pace` lines), so I can
-see where the time goes on your hardware and tune for it.
-
-1. Put `log_level = 4` in `dlaa.ini` (next to `dinput8.dll`). The packaged file has `log_level = 1`:
-   change the `1` to `4`. The menu's `Logging` row does the same live (`debug`); `Shift+F12` saves it.
-2. Start the game, load a save and **drive 2 to 3 minutes** where the fps drop or the problem shows.
-   Then **quit the game** (the log is written while the game runs).
-3. [Open an issue](../../issues/new/choose) (**Bug report**, also for performance) and attach
-   `dlaa_inject.log` and `dlaa.ini` from `bin\win_x64\`. Write:
-   - game (ETS2 / ATS), flat or VR (headset and runtime), GPU and driver;
-   - **where**: map (base game or a map mod), city, road or depot;
-   - **when**: the in-game time of day, the weather, the traffic;
-   - your game Scaling (`r_scale_x` in `config.cfg`, or the Graphics menu) and the mod's mode / model;
-   - what you saw: the fps, a stutter, a flicker, a ghost, and when it happens (always, in cities,
-     at night, in mirrors ...).
-
-"It does not work" or "the fps are low" without the log cannot be investigated. With the log, where
-and when, it usually can.
-
-### 2. Capture a flicker, a shimmer or a ghost
-
-Anti-aliasing problems do not survive video compression, so a video rarely shows what is wrong.
-The mod has its own capture keys. They need `log_level = 4`.
-
-1. **Is it the mod?** Press `Shift+F11` (DLAA off) and look at the spot again. If the flicker is still
-   there, the game draws it that way (its far shadows do flicker on their own); the mod cannot fix
-   it. If it goes away with DLAA off, it is the mod's.
-2. Switch DLAA back on (`Shift+F11`), **look straight at the spot** and press **`Ctrl+F9`**: the mod
-   writes lossless frames into `dlaa_selftest\` (`<mode>_<n>.bmp` = the DLAA output,
-   `final_<mode>_<n>.bmp` = the same frame as it reached the screen).
-3. Still looking at the spot, press **`Ctrl+F10`**: two consecutive frames of what goes into DLSS
-   (colour, depth, motion vectors) go into `dlaa_snap\<n>_blit<blit>\`. On the menu / truck-preview
-   screen the same key takes a measuring capture (a short freeze).
-4. For a part that smears or a number plate that blinks, also press **`Alt+F8`** next to it: the
-   per-part motion state of the next frame goes into the log (`MV dump` lines).
-5. Zip `dlaa_selftest\` and `dlaa_snap\` and attach them with the log and `dlaa.ini`. Say what to look
-   at (a pole on the left, the shop window, the trailer's plate) and where / when you were.
-
-### 3. Code
-
-- Build: see [Build from source](#build-from-source). The internals, every phase and why it was
-  built that way: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
-- Branches: `main` holds released versions only; all work goes into `dev`. Open pull requests
-  against `dev`.
-- Tests: `tests\build_*.bat` build the unit tests without the game (`build\tests\*.exe`, exit code 0
-  = pass). GitHub Actions runs them on every push. Pure logic goes into a header with a test
-  (`src\fps_pose.h`, `src\frame_pace.h`, `src\hotkey_scan.h` are examples); the DX11 and OpenXR
-  hooks stay in `src\inject.cpp`.
-- Rules for published text: never name another ETS2 / ATS anti-aliasing mod, VR = OpenXR only
-  (no SteamVR / `-openvr`), game paths as `bin\win_x64\`, say what was tested and what was not.
-- Tell me what you tested in game (game, flat / VR, where, when) in the pull request, with a log.
-
-</details>
+Logs, flicker captures and code are welcome. How to send them: [CONTRIBUTING.md](CONTRIBUTING.md)
+(also the **Contributing** tab at the top of this page).
 
 ## License and credits
 
