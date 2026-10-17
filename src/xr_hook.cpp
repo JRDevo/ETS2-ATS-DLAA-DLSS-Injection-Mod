@@ -17,6 +17,7 @@
 #include "MinHook.h"
 #include "log.h"
 #include "fps_pose.h"                                 // phase 44: the fps box turn (ComposeTurn)
+#include "gaze_math.h"                                // phase 59: the gaze -> view tangents (GazeToViewTangents)
 #include "frame_pace.h"                               // phase 52: the VR FPS cap's target maths + the precise sleeper
 #include "ofxr.h"                                     // phase 56: FromOfxr -- the OFXR Bridge / VectorXR module ranges
 
@@ -224,6 +225,77 @@ const char* const kVisMaskExt = "XR_KHR_visibility_mask";
 typedef XrResult (XRH_CALL* PFN_xrCreateInstance)(const XrInstanceCreateInfo*, XrInstance*);
 typedef XrResult (XRH_CALL* PFN_xrEnumerateInstanceExtensionProperties)(const char*, uint32_t, uint32_t*, XrExtensionProperties*);
 typedef XrResult (XRH_CALL* PFN_xrGetVisibilityMaskKHR)(XrSession, int32_t, uint32_t, int32_t, XrVisibilityMaskKHR*);
+// phase 59: eye gaze -- XR_EXT_eye_gaze_interaction + the action system (openxr.h 1.0 layouts, x64; values and layouts checked
+// against the same OpenXR-SDK 1.1.62 header as above)
+typedef uint64_t XrPath;                                   // XR_DEFINE_ATOM
+typedef uint64_t XrSystemId;
+typedef void*    XrActionSet;
+typedef void*    XrAction;
+struct XrSessionCreateInfo { int32_t type; const void* next; uint64_t createFlags; XrSystemId systemId; };
+struct XrSystemProperties {
+    int32_t type; void* next; XrSystemId systemId; uint32_t vendorId; char systemName[256];
+    uint32_t maxSwapchainImageHeight, maxSwapchainImageWidth, maxLayerCount;   // XrSystemGraphicsProperties
+    uint32_t orientationTracking, positionTracking;                            // XrSystemTrackingProperties
+};
+struct XrSystemEyeGazeInteractionPropertiesEXT { int32_t type; void* next; uint32_t supportsEyeGazeInteraction; };
+struct XrActionSetCreateInfo { int32_t type; const void* next; char actionSetName[64]; char localizedActionSetName[128]; uint32_t priority; };
+struct XrActionCreateInfo {
+    int32_t type; const void* next; char actionName[64]; int32_t actionType; uint32_t countSubactionPaths;
+    const XrPath* subactionPaths; char localizedActionName[128];
+};
+struct XrActionSuggestedBinding { XrAction action; XrPath binding; };
+struct XrInteractionProfileSuggestedBinding {
+    int32_t type; const void* next; XrPath interactionProfile; uint32_t countSuggestedBindings;
+    const XrActionSuggestedBinding* suggestedBindings;
+};
+struct XrSessionActionSetsAttachInfo { int32_t type; const void* next; uint32_t countActionSets; const XrActionSet* actionSets; };
+struct XrActiveActionSet { XrActionSet actionSet; XrPath subactionPath; };
+struct XrActionsSyncInfo { int32_t type; const void* next; uint32_t countActiveActionSets; const XrActiveActionSet* activeActionSets; };
+struct XrActionSpaceCreateInfo { int32_t type; const void* next; XrAction action; XrPath subactionPath; XrPosef poseInActionSpace; };
+static_assert(offsetof(XrSessionCreateInfo, systemId) == 24 && sizeof(XrSessionCreateInfo) == 32 &&
+              offsetof(XrSystemProperties, systemId) == 16 && offsetof(XrSystemProperties, vendorId) == 24 &&
+              offsetof(XrSystemProperties, systemName) == 28 && offsetof(XrSystemProperties, maxSwapchainImageHeight) == 284 &&
+              offsetof(XrSystemProperties, orientationTracking) == 296 && sizeof(XrSystemProperties) == 304 &&
+              offsetof(XrSystemEyeGazeInteractionPropertiesEXT, supportsEyeGazeInteraction) == 16 &&
+              sizeof(XrSystemEyeGazeInteractionPropertiesEXT) == 24 &&
+              offsetof(XrActionSetCreateInfo, actionSetName) == 16 && offsetof(XrActionSetCreateInfo, priority) == 208 &&
+              sizeof(XrActionSetCreateInfo) == 216 && offsetof(XrActionCreateInfo, actionType) == 80 &&
+              offsetof(XrActionCreateInfo, countSubactionPaths) == 84 && offsetof(XrActionCreateInfo, subactionPaths) == 88 &&
+              offsetof(XrActionCreateInfo, localizedActionName) == 96 && sizeof(XrActionCreateInfo) == 224 &&
+              sizeof(XrActionSuggestedBinding) == 16 && offsetof(XrInteractionProfileSuggestedBinding, interactionProfile) == 16 &&
+              offsetof(XrInteractionProfileSuggestedBinding, countSuggestedBindings) == 24 &&
+              offsetof(XrInteractionProfileSuggestedBinding, suggestedBindings) == 32 && sizeof(XrInteractionProfileSuggestedBinding) == 40 &&
+              offsetof(XrSessionActionSetsAttachInfo, countActionSets) == 16 && offsetof(XrSessionActionSetsAttachInfo, actionSets) == 24 &&
+              sizeof(XrSessionActionSetsAttachInfo) == 32 && sizeof(XrActiveActionSet) == 16 &&
+              offsetof(XrActionsSyncInfo, countActiveActionSets) == 16 && offsetof(XrActionsSyncInfo, activeActionSets) == 24 &&
+              sizeof(XrActionsSyncInfo) == 32 && offsetof(XrActionSpaceCreateInfo, action) == 16 &&
+              offsetof(XrActionSpaceCreateInfo, subactionPath) == 24 && offsetof(XrActionSpaceCreateInfo, poseInActionSpace) == 32 &&
+              sizeof(XrActionSpaceCreateInfo) == 64 && sizeof(XrSpaceLocation) == 56 && offsetof(XrSpaceLocation, pose) == 24,
+              "OpenXR eye gaze / action struct layout (x64)");
+constexpr int32_t kTypeSystemProperties          = 5;            // XR_TYPE_SYSTEM_PROPERTIES
+constexpr int32_t kTypeSessionCreateInfo         = 8;            // XR_TYPE_SESSION_CREATE_INFO
+constexpr int32_t kTypeActionSetCreateInfo       = 28;           // XR_TYPE_ACTION_SET_CREATE_INFO
+constexpr int32_t kTypeActionCreateInfo          = 29;           // XR_TYPE_ACTION_CREATE_INFO
+constexpr int32_t kTypeActionSpaceCreateInfo     = 38;           // XR_TYPE_ACTION_SPACE_CREATE_INFO
+constexpr int32_t kTypeSpaceLocation             = 42;           // XR_TYPE_SPACE_LOCATION
+constexpr int32_t kTypeIpSuggestedBinding        = 51;           // XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING
+constexpr int32_t kTypeSessionActionSetsAttach   = 60;           // XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO
+constexpr int32_t kTypeActionsSyncInfo           = 61;           // XR_TYPE_ACTIONS_SYNC_INFO
+constexpr int32_t kTypeSystemEyeGazeProps        = 1000030000;   // XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT
+constexpr int32_t kActionTypePoseInput           = 4;            // XR_ACTION_TYPE_POSE_INPUT
+constexpr uint64_t kLocOrientValid = 0x1, kLocOrientTracked = 0x4;   // XR_SPACE_LOCATION_ORIENTATION_VALID_BIT / _TRACKED_BIT
+constexpr XrResult kErrActionSetsAlreadyAttached = -47;          // XR_ERROR_ACTIONSETS_ALREADY_ATTACHED
+constexpr XrResult kErrActionSetNotAttached      = -46;          // XR_ERROR_ACTIONSET_NOT_ATTACHED
+const char* const kEyeGazeExt = "XR_EXT_eye_gaze_interaction";
+typedef XrResult (XRH_CALL* PFN_xrGetSystemProperties)(XrInstance, XrSystemId, XrSystemProperties*);
+typedef XrResult (XRH_CALL* PFN_xrStringToPath)(XrInstance, const char*, XrPath*);
+typedef XrResult (XRH_CALL* PFN_xrCreateActionSet)(XrInstance, const XrActionSetCreateInfo*, XrActionSet*);
+typedef XrResult (XRH_CALL* PFN_xrDestroyActionSet)(XrActionSet);
+typedef XrResult (XRH_CALL* PFN_xrCreateAction)(XrActionSet, const XrActionCreateInfo*, XrAction*);
+typedef XrResult (XRH_CALL* PFN_xrSuggestInteractionProfileBindings)(XrInstance, const XrInteractionProfileSuggestedBinding*);
+typedef XrResult (XRH_CALL* PFN_xrAttachSessionActionSets)(XrSession, const XrSessionActionSetsAttachInfo*);
+typedef XrResult (XRH_CALL* PFN_xrSyncActions)(XrSession, const XrActionsSyncInfo*);
+typedef XrResult (XRH_CALL* PFN_xrCreateActionSpace)(XrSession, const XrActionSpaceCreateInfo*, XrSpace*);
 
 // ---- components (one per runtime / layer / loader entry point) --------------------------------------------------------
 enum { kKindRuntime = 0, kKindLayer = 1, kKindLoader = 2 };
@@ -239,6 +311,7 @@ struct Slot {
     std::atomic<void*> waitFrame{nullptr}, beginFrame{nullptr}, endSession{nullptr};  // phase 30 (Turbo mode)
     std::atomic<void*> pollEvent{nullptr}, createSession{nullptr}, beginSession{nullptr}, requestExit{nullptr};   // phase 33
     std::atomic<void*> createInstance{nullptr};                                       // phase 40 (runtime slots only)
+    std::atomic<void*> attachSets{nullptr}, syncActions{nullptr}, createActionSet{nullptr};   // phase 59 (eye gaze)
     std::atomic<void*> instance{nullptr};        // phase 29: the last non-null XrInstance this component's GIPA was asked with
     int  kind = 0;
     char module[64] = "";
@@ -1741,21 +1814,407 @@ void HmDestroySession(XrSession ses) {
     s_hmSes = nullptr;
     s_hmFailed = false;
 }
-// The runtime's xrCreateInstance (wrapped at runtime slots only; the loader's own call, layers or not): + XR_KHR_visibility_mask.
+// ---- phase 59: eye gaze (XR_EXT_eye_gaze_interaction; see xr_hook.h) ------------------------------------------------------
+std::atomic<bool>     s_egWant{false};            // EyeGazeRequest: ask for the extension at xrCreateInstance
+std::atomic<bool>     s_egActive{false};          // EyeGazeActive: sync + locate per frame
+std::atomic<int>      s_egExt{0};                 // EyeGazeStats::ext
+std::atomic<int>      s_egSystem{-1};             // EyeGazeStats::system
+std::atomic<int>      s_egSetup{0};               // EyeGazeStats::setup
+std::atomic<int>      s_egAttachedBy{0};          // EyeGazeStats::attachedBy (this session)
+std::atomic<bool>     s_egGameAttach{false};      // the game called xrAttachSessionActionSets (this session)
+std::atomic<bool>     s_egFailedA{false};         // gaze given up for this session
+std::atomic<uint32_t> s_egGameSets{0};            // action sets the game created
+std::atomic<uint64_t> s_egSyncGame{0}, s_egSyncOurs{0}, s_egLocates{0}, s_egValid{0}, s_egInvalid{0}, s_egLocFails{0};
+std::atomic<uint64_t> s_egGameSyncCalls{0};       // the game's outermost xrSyncActions calls (with or without our append)
+std::atomic<int64_t>  s_egGameSyncNs{0};          // the game's last xrSyncActions (steady ns; 0 = never)
+// what the game's xrSyncActions may append (atomics: read on the game's thread without s_egMx)
+std::atomic<void*>    s_egSyncSes{nullptr};       // the session our set is attached to (null = nothing to append)
+std::atomic<void*>    s_egSyncSet{nullptr};       // our action set
+std::atomic<bool>     s_egSyncAppendOff{false};   // the append was refused once in this session
+struct EgFns {
+    PFN_xrGetSystemProperties               sysProps = nullptr;
+    PFN_xrStringToPath                      toPath = nullptr;
+    PFN_xrCreateActionSet                   createSet = nullptr;
+    PFN_xrDestroyActionSet                  destroySet = nullptr;
+    PFN_xrCreateAction                      createAction = nullptr;
+    PFN_xrSuggestInteractionProfileBindings suggest = nullptr;
+    PFN_xrAttachSessionActionSets           attach = nullptr;
+    PFN_xrSyncActions                       sync = nullptr;
+    PFN_xrCreateActionSpace                 createSpace = nullptr;
+    PFN_xrLocateSpace                       locate = nullptr;
+    PFN_xrDestroySpace                      destroySpace = nullptr;
+};
+struct EgState {
+    int        slot = -1;                         // the component the functions were resolved at (the game's xrCreateSession)
+    XrInstance inst = nullptr;                    // the instance our action set belongs to
+    EgFns      fn;
+    XrActionSet set = nullptr;
+    XrAction   act = nullptr;
+    XrSession  ses = nullptr;                     // the session the per-session state below belongs to
+    int64_t    beginNs = 0;                       // its (last) xrBeginSession (steady ns; 0 = not begun)
+    bool       attached = false;                  // our set is attached to `ses`
+    bool       soloWaitLogged = false;
+    XrSpace    space = nullptr;                   // our gaze action space in `ses`
+    bool       failed = false;                    // given up for `ses`
+    XrTime     lastSyncTime = 0, lastLocTime = 0; // the display times our own sync / locate last ran for
+    int        syncFailRun = 0;
+    uint64_t   syncFailLogs = 0, locFailLogs = 0;
+    bool       firstLocLogged = false, firstValidLogged = false, firstOwnSyncLogged = false;
+};
+EgState    s_eg;
+std::mutex s_egMx;                                // s_eg (the game's create / begin / attach / destroy calls; the frame tick try-locks)
+struct EgGaze { float tx[2] = {}, ty[2] = {}; LONGLONG qpc = 0; bool have = false; };
+EgGaze     s_egGaze;
+SRWLOCK    s_egLock = SRWLOCK_INIT;               // s_egGaze (copies only)
+
+const char* EgAttachName(int a) {
+    return a == 1 ? "by the game (ours appended)" : a == 2 ? "by the mod ALONE (the game attached none)" : a == -1 ? "FAILED" : "not yet";
+}
+// under s_egMx: every function through component i's real GIPA with `inst`. False = one is missing (logged).
+bool EgResolveLocked(int i, XrInstance inst) {
+    auto gipa = reinterpret_cast<PFN_xrGetInstanceProcAddr>(s_slot[i].gipa.load(std::memory_order_acquire));
+    if (!gipa || !inst) {
+        LogErr("Eye tracking: no xrGetInstanceProcAddr / instance at the %s %s (GIPA %p, instance %p) -- eye gaze off",
+            kKindName[s_slot[i].kind], s_slot[i].module, reinterpret_cast<void*>(gipa), inst);
+        return false;
+    }
+    static const char* const kNames[11] = { "xrGetSystemProperties", "xrStringToPath", "xrCreateActionSet", "xrDestroyActionSet",
+                                            "xrCreateAction", "xrSuggestInteractionProfileBindings", "xrAttachSessionActionSets",
+                                            "xrSyncActions", "xrCreateActionSpace", "xrLocateSpace", "xrDestroySpace" };
+    void* f[11] = {};
+    for (int k = 0; k < 11; ++k) {
+        PFN_xrVoidFunction fp = nullptr;
+        ++t_depth;
+        const XrResult r = gipa(inst, kNames[k], &fp);
+        --t_depth;
+        f[k] = r >= 0 ? reinterpret_cast<void*>(fp) : nullptr;
+        if (!f[k]) {
+            LogErr("Eye tracking: %s not resolved at the %s %s (result %d = %s) -- eye gaze off", kNames[k], kKindName[s_slot[i].kind],
+                s_slot[i].module, r, XrResultName(r));
+            return false;
+        }
+    }
+    EgFns& o = s_eg.fn;
+    o.sysProps     = reinterpret_cast<PFN_xrGetSystemProperties>(f[0]);
+    o.toPath       = reinterpret_cast<PFN_xrStringToPath>(f[1]);
+    o.createSet    = reinterpret_cast<PFN_xrCreateActionSet>(f[2]);
+    o.destroySet   = reinterpret_cast<PFN_xrDestroyActionSet>(f[3]);
+    o.createAction = reinterpret_cast<PFN_xrCreateAction>(f[4]);
+    o.suggest      = reinterpret_cast<PFN_xrSuggestInteractionProfileBindings>(f[5]);
+    o.attach       = reinterpret_cast<PFN_xrAttachSessionActionSets>(f[6]);
+    o.sync         = reinterpret_cast<PFN_xrSyncActions>(f[7]);
+    o.createSpace  = reinterpret_cast<PFN_xrCreateActionSpace>(f[8]);
+    o.locate       = reinterpret_cast<PFN_xrLocateSpace>(f[9]);
+    o.destroySpace = reinterpret_cast<PFN_xrDestroySpace>(f[10]);
+    return true;
+}
+// under s_egMx, a new instance: the system's eye gaze support, then our action set + pose action + the suggested binding.
+// Leaves s_egSetup at 1 (ready), 0 (the system has no eye gaze: nothing to do) or -1 (failed, logged).
+void EgSetupInstanceLocked(int i, XrInstance inst, XrSystemId sys) {
+    if (!EgResolveLocked(i, inst)) { s_egSetup.store(-1, std::memory_order_relaxed); return; }
+    const EgFns& o = s_eg.fn;
+    XrSystemEyeGazeInteractionPropertiesEXT gp{};
+    gp.type = kTypeSystemEyeGazeProps;
+    XrSystemProperties sp{};
+    sp.type = kTypeSystemProperties;
+    sp.next = &gp;
+    ++t_depth;
+    XrResult r = o.sysProps(inst, sys, &sp);
+    --t_depth;
+    if (r < 0) {
+        s_egSetup.store(-1, std::memory_order_relaxed);
+        LogErr("Eye tracking: xrGetSystemProperties(system %llu) with the eye gaze properties FAILED -> %d = %s -- eye gaze off",
+            (unsigned long long)sys, r, XrResultName(r));
+        return;
+    }
+    sp.systemName[255] = 0;
+    s_egSystem.store(gp.supportsEyeGazeInteraction ? 1 : 0, std::memory_order_relaxed);
+    Log("Eye tracking: system \"%s\" (vendor 0x%04x, id %llu) -- supportsEyeGazeInteraction = %u%s", sp.systemName, sp.vendorId,
+        (unsigned long long)sys, gp.supportsEyeGazeInteraction,
+        gp.supportsEyeGazeInteraction ? " (the mod's eye gaze action is set up now)"
+                                      : " -- NO EYE TRACKER: no action set is made, the game's input stays untouched; vrs_eye keeps the "
+                                        "optical centre");
+    if (!gp.supportsEyeGazeInteraction) return;
+    XrActionSetCreateInfo si{};
+    si.type = kTypeActionSetCreateInfo;
+    strcpy_s(si.actionSetName, "dlaa_eye_gaze");
+    strcpy_s(si.localizedActionSetName, "DLAA mod eye gaze");
+    si.priority = 0;
+    XrPath profile = 0, binding = 0;
+    const char* step = "xrCreateActionSet";
+    ++t_depth;
+    r = o.createSet(inst, &si, &s_eg.set);
+    if (r >= 0) {
+        XrActionCreateInfo ai{};
+        ai.type = kTypeActionCreateInfo;
+        strcpy_s(ai.actionName, "gaze_pose");
+        ai.actionType = kActionTypePoseInput;
+        strcpy_s(ai.localizedActionName, "Eye gaze");
+        step = "xrCreateAction";
+        r = o.createAction(s_eg.set, &ai, &s_eg.act);
+    }
+    if (r >= 0) { step = "xrStringToPath (profile)"; r = o.toPath(inst, "/interaction_profiles/ext/eye_gaze_interaction", &profile); }
+    if (r >= 0) { step = "xrStringToPath (binding)"; r = o.toPath(inst, "/user/eyes_ext/input/gaze_ext/pose", &binding); }
+    if (r >= 0) {
+        const XrActionSuggestedBinding b{ s_eg.act, binding };
+        XrInteractionProfileSuggestedBinding sb{};
+        sb.type = kTypeIpSuggestedBinding;
+        sb.interactionProfile = profile;
+        sb.countSuggestedBindings = 1;
+        sb.suggestedBindings = &b;
+        step = "xrSuggestInteractionProfileBindings";
+        r = o.suggest(inst, &sb);
+    }
+    if (r < 0 && s_eg.set) { o.destroySet(s_eg.set); }   // (its action goes with it)
+    --t_depth;
+    if (r < 0) {
+        s_eg.set = nullptr; s_eg.act = nullptr;
+        s_egSetup.store(-1, std::memory_order_relaxed);
+        LogErr("Eye tracking: %s FAILED -> %d = %s -- eye gaze off (the game's input untouched)", step, r, XrResultName(r));
+        return;
+    }
+    s_egSyncSet.store(s_eg.set, std::memory_order_relaxed);
+    s_egSetup.store(1, std::memory_order_relaxed);
+    Log("Eye tracking: action set \"dlaa_eye_gaze\" %p (priority 0) + pose action %p suggested for "
+        "/interaction_profiles/ext/eye_gaze_interaction -> /user/eyes_ext/input/gaze_ext/pose (instance %p, via the %s %s)",
+        s_eg.set, s_eg.act, inst, kKindName[s_slot[i].kind], s_slot[i].module);
+}
+// The game's outermost xrCreateSession succeeded (slot i, its create info `ci`): set up the instance once, then fresh per-session state.
+void EgOnCreateSession(int i, XrInstance inst, const void* ci, XrSession ses) {
+    if (!s_egWant.load(std::memory_order_relaxed)) return;
+    const int ext = s_egExt.load(std::memory_order_relaxed);
+    if (ext != 3) {
+        static std::atomic<bool> s_logged{false};
+        if (ext == 2 && !s_logged.exchange(true))
+            Log("Eye tracking: the game enables %s itself -- the mod stays out (no action set of ours: the game's own bindings for "
+                "that profile would be replaced)", kEyeGazeExt);
+        return;
+    }
+    const XrSessionCreateInfo* sci = static_cast<const XrSessionCreateInfo*>(ci);
+    std::lock_guard<std::mutex> lk(s_egMx);
+    if (inst != s_eg.inst) {                     // first session of this instance: its action set (the old one died with the old instance)
+        s_eg = EgState();
+        s_eg.inst = inst;
+        s_eg.slot = i;
+        s_egSetup.store(0, std::memory_order_relaxed);
+        s_egSystem.store(-1, std::memory_order_relaxed);
+        s_egSyncSet.store(nullptr, std::memory_order_relaxed);
+        if (!sci || sci->type != kTypeSessionCreateInfo) {
+            s_egSetup.store(-1, std::memory_order_relaxed);
+            LogErr("Eye tracking: the game's xrCreateSession info is not an XrSessionCreateInfo (type %d) -- eye gaze off",
+                sci ? sci->type : -1);
+        } else {
+            EgSetupInstanceLocked(i, inst, sci->systemId);
+        }
+    }
+    // per session (OpenXR attaches action sets once per session)
+    s_eg.ses = ses;
+    s_eg.beginNs = 0;
+    s_eg.attached = false;
+    s_eg.soloWaitLogged = false;
+    s_eg.space = nullptr;
+    s_eg.failed = false;
+    s_eg.lastSyncTime = s_eg.lastLocTime = 0;
+    s_eg.syncFailRun = 0;
+    s_eg.firstLocLogged = s_eg.firstValidLogged = s_eg.firstOwnSyncLogged = false;
+    s_egAttachedBy.store(0, std::memory_order_relaxed);
+    s_egGameAttach.store(false, std::memory_order_relaxed);
+    s_egFailedA.store(false, std::memory_order_relaxed);
+    s_egSyncSes.store(nullptr, std::memory_order_relaxed);
+    s_egSyncAppendOff.store(false, std::memory_order_relaxed);
+    AcquireSRWLockExclusive(&s_egLock);
+    s_egGaze = EgGaze();
+    ReleaseSRWLockExclusive(&s_egLock);
+    if (s_egSetup.load(std::memory_order_relaxed) == 1)
+        Log("Eye tracking: session %p -- our gaze set is appended to the game's xrAttachSessionActionSets; if the game created no "
+            "action set and has not attached 3 s after xrBeginSession, the mod attaches it alone", ses);
+}
+// The game's outermost xrBeginSession succeeded: the 3-s clock of the solo attach starts.
+void EgOnBeginSession(XrSession ses) {
+    if (s_egSetup.load(std::memory_order_relaxed) != 1) return;
+    std::lock_guard<std::mutex> lk(s_egMx);
+    if (ses == s_eg.ses) s_eg.beginNs = SteadyNs();
+}
+// The game's outermost xrDestroySession: our gaze space goes first (through the runtime), the per-session state is dropped.
+void EgOnDestroySession(XrSession ses) {
+    std::lock_guard<std::mutex> lk(s_egMx);
+    if (!ses || ses != s_eg.ses) return;
+    if (s_eg.space && s_eg.fn.destroySpace) { ++t_depth; s_eg.fn.destroySpace(s_eg.space); --t_depth; }
+    s_eg.space = nullptr;
+    s_eg.ses = nullptr;
+    s_eg.attached = false;
+    s_egSyncSes.store(nullptr, std::memory_order_relaxed);
+    AcquireSRWLockExclusive(&s_egLock);
+    s_egGaze = EgGaze();
+    ReleaseSRWLockExclusive(&s_egLock);
+}
+void EgFailLocked(const char* what, XrResult r) {   // under s_egMx: gaze off for this session (logged once per session)
+    if (s_eg.failed) return;
+    s_eg.failed = true;
+    s_egFailedA.store(true, std::memory_order_relaxed);
+    LogErr("Eye tracking: %s FAILED -> %d = %s -- eye gaze off for this session (session %p); VRS keeps the optical centre", what, r,
+        XrResultName(r));
+}
+// The game's outermost PRIMARY_STEREO xrLocateViews returned (r >= 0; `views` = its two views in li->space at li->displayTime):
+// attach alone if due, our action space, our own sync (no game sync within 100 ms, FOCUSED), the gaze locate (once per display
+// time) -> the per-view tangents. Render thread usually; s_egMx is only try-locked (a game attach / create in flight = skip).
+void EgFrame(XrSession ses, const XrViewLocateInfo* li, const XrViewState* vs, const XrView* views) {
+    if (!s_egActive.load(std::memory_order_relaxed) || s_egSetup.load(std::memory_order_relaxed) != 1) return;
+    std::unique_lock<std::mutex> lk(s_egMx, std::try_to_lock);
+    if (!lk.owns_lock() || ses != s_eg.ses || s_eg.failed || !s_eg.set) return;
+    const EgFns& o = s_eg.fn;
+    const int64_t now = SteadyNs();
+    XrResult r = 0;
+    if (!s_eg.attached) {
+        if (s_egGameAttach.load(std::memory_order_relaxed)) return;   // (the game's attach without ours: failed, marked there)
+        if (!s_eg.beginNs || now - s_eg.beginNs < 3000000000LL) return;
+        const uint32_t gameSets = s_egGameSets.load(std::memory_order_relaxed);
+        if (gameSets) {
+            if (!s_eg.soloWaitLogged) {
+                s_eg.soloWaitLogged = true;
+                LogWarn("Eye tracking: the game created %u action set(s) but has not attached them %.1f s after xrBeginSession -- the "
+                    "mod waits for the game's own xrAttachSessionActionSets (ours is appended there; never attached alone while the "
+                    "game uses actions)", gameSets, (double)(now - s_eg.beginNs) / 1e9);
+            }
+            return;
+        }
+        XrSessionActionSetsAttachInfo ai{};
+        ai.type = kTypeSessionActionSetsAttach;
+        ai.countActionSets = 1;
+        ai.actionSets = &s_eg.set;
+        ++t_depth;
+        XR_DRV(kHkXrLocate, r = o.attach(ses, &ai));
+        --t_depth;
+        if (r < 0) { s_egAttachedBy.store(-1, std::memory_order_relaxed); EgFailLocked("xrAttachSessionActionSets (our set alone)", r); return; }
+        s_eg.attached = true;
+        s_egAttachedBy.store(2, std::memory_order_relaxed);
+        s_egSyncSes.store(ses, std::memory_order_relaxed);
+        LogWarn("Eye tracking: the game created no action set and did not attach any %.1f s after xrBeginSession -- the mod attached "
+            "its eye gaze set ALONE (session %p). Should the game attach later, its call fails with XR_ERROR_ACTIONSETS_ALREADY_ATTACHED "
+            "(logged as an ERROR)", (double)(now - s_eg.beginNs) / 1e9, ses);
+    }
+    if (!s_eg.space) {
+        XrActionSpaceCreateInfo ci{};
+        ci.type = kTypeActionSpaceCreateInfo;
+        ci.action = s_eg.act;
+        ci.poseInActionSpace.orientation.w = 1.0f;
+        ++t_depth;
+        XR_DRV(kHkXrLocate, r = o.createSpace(ses, &ci, &s_eg.space));
+        --t_depth;
+        if (r < 0 || !s_eg.space) { s_eg.space = nullptr; EgFailLocked("xrCreateActionSpace (the gaze pose)", r); return; }
+        Log("Eye tracking: gaze action space %p made in session %p (identity pose; located in the game's view space %p at its display "
+            "time)", s_eg.space, ses, li->space);
+    }
+    // our own sync: only when the game did not sync within 100 ms, once per display time, only while FOCUSED
+    const int64_t gs = s_egGameSyncNs.load(std::memory_order_relaxed);
+    if (s_sesState.load(std::memory_order_relaxed) == 5 && (!gs || now - gs > 100000000LL) && li->displayTime != s_eg.lastSyncTime) {
+        s_eg.lastSyncTime = li->displayTime;
+        const XrActiveActionSet as{ s_eg.set, 0 };
+        XrActionsSyncInfo si{};
+        si.type = kTypeActionsSyncInfo;
+        si.countActiveActionSets = 1;
+        si.activeActionSets = &as;
+        ++t_depth;
+        XR_DRV(kHkXrLocate, r = o.sync(ses, &si));
+        --t_depth;
+        if (r < 0) {
+            if (s_eg.syncFailLogs++ < 8)
+                LogErr("Eye tracking: our xrSyncActions FAILED -> %d = %s (#%llu)", r, XrResultName(r), (unsigned long long)s_eg.syncFailLogs);
+            if (r == kErrActionSetNotAttached || ++s_eg.syncFailRun >= 120) { EgFailLocked("xrSyncActions (ours, repeatedly)", r); return; }
+        } else {
+            s_eg.syncFailRun = 0;
+            s_egSyncOurs.fetch_add(1, std::memory_order_relaxed);
+            if (!s_eg.firstOwnSyncLogged) {
+                s_eg.firstOwnSyncLogged = true;
+                Log("Eye tracking: the mod syncs its gaze set itself (no xrSyncActions of the game within 100 ms; %llu game sync(s) "
+                    "so far) -> %d = %s", (unsigned long long)s_egGameSyncCalls.load(std::memory_order_relaxed), r, XrResultName(r));
+            }
+        }
+    }
+    if (li->displayTime == s_eg.lastLocTime) return;   // (a second locate of the same frame, e.g. another space)
+    s_eg.lastLocTime = li->displayTime;
+    XrSpaceLocation loc{};
+    loc.type = kTypeSpaceLocation;
+    ++t_depth;
+    XR_DRV(kHkXrLocate, r = o.locate(s_eg.space, li->space, li->displayTime, &loc));
+    --t_depth;
+    if (r < 0) {
+        s_egLocFails.fetch_add(1, std::memory_order_relaxed);
+        if (s_eg.locFailLogs++ < 8)
+            LogErr("Eye tracking: xrLocateSpace(gaze %p, base %p, time %lld) FAILED -> %d = %s", s_eg.space, li->space,
+                (long long)li->displayTime, r, XrResultName(r));
+        return;
+    }
+    s_egLocates.fetch_add(1, std::memory_order_relaxed);
+    const bool ok = (loc.locationFlags & kLocOrientValid) && (loc.locationFlags & kLocOrientTracked) &&
+                    (!vs || (vs->viewStateFlags & 1));   // (the views' orientations must be valid too)
+    if (!s_eg.firstLocLogged) {
+        s_eg.firstLocLogged = true;
+        Log("Eye tracking: first gaze locate -- flags 0x%llx (%s), q=(%+.3f %+.3f %+.3f %+.3f), focused %d, game syncs %llu / ours %llu",
+            (unsigned long long)loc.locationFlags, ok ? "VALID + TRACKED" : "not valid / not tracked yet", loc.pose.orientation.x,
+            loc.pose.orientation.y, loc.pose.orientation.z, loc.pose.orientation.w, s_sesState.load(std::memory_order_relaxed) == 5,
+            (unsigned long long)s_egSyncGame.load(std::memory_order_relaxed), (unsigned long long)s_egSyncOurs.load(std::memory_order_relaxed));
+    }
+    if (!ok) { s_egInvalid.fetch_add(1, std::memory_order_relaxed); return; }
+    // the gaze (-z of the located pose) in the locate space, then in each view's own frame (inverse of the view's orientation)
+    const Pose gp = PoseOf(loc.pose);
+    float tx[2] = {}, ty[2] = {};
+    for (int k = 0; k < 2; ++k) {
+        const XrQuaternionf& q = views[k].pose.orientation;
+        const double vq[4] = { (double)q.x, (double)q.y, (double)q.z, (double)q.w };
+        if (!GazeMath::GazeToViewTangents(gp.q, vq, &tx[k], &ty[k])) {   // looking sideways / behind the view
+            s_egInvalid.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+    }
+    LARGE_INTEGER qpc;
+    QueryPerformanceCounter(&qpc);
+    AcquireSRWLockExclusive(&s_egLock);
+    for (int k = 0; k < 2; ++k) { s_egGaze.tx[k] = tx[k]; s_egGaze.ty[k] = ty[k]; }
+    s_egGaze.qpc = qpc.QuadPart;
+    s_egGaze.have = true;
+    ReleaseSRWLockExclusive(&s_egLock);
+    s_egValid.fetch_add(1, std::memory_order_relaxed);
+    if (!s_eg.firstValidLogged) {
+        s_eg.firstValidLogged = true;
+        Log("Eye tracking: FIRST VALID GAZE -- view 0 (left) tangents (%+.3f, %+.3f) = %+.1f / %+.1f deg, view 1 (right) (%+.3f, %+.3f); "
+            "attached %s, game syncs %llu / ours %llu (session %p)", tx[0], ty[0], std::atan(tx[0]) * 57.29578,
+            std::atan(ty[0]) * 57.29578, tx[1], ty[1], EgAttachName(s_egAttachedBy.load(std::memory_order_relaxed)),
+            (unsigned long long)s_egSyncGame.load(std::memory_order_relaxed), (unsigned long long)s_egSyncOurs.load(std::memory_order_relaxed),
+            ses);
+    }
+}
+
+// The runtime's xrCreateInstance (wrapped at runtime slots only; the loader's own call, layers or not): + XR_KHR_visibility_mask
+// (phase 40) and / or + XR_EXT_eye_gaze_interaction (phase 59), in ONE copy of the game's extension list. A refused create with
+// both is retried with the visibility mask alone, then (or with one only) with the game's own create info.
 XrResult CreateInstanceImpl(int i, const XrInstanceCreateInfo* ci, XrInstance* out) {
     auto real = reinterpret_cast<PFN_xrCreateInstance>(s_slot[i].createInstance.load(std::memory_order_acquire));
     if (!real) return -1;
     auto pass = [&]() { ++t_depth; const XrResult r = real(ci, out); --t_depth; return r; };
-    if (!s_hmWant.load(std::memory_order_relaxed) || !ci || ci->type != kTypeInstanceCreateInfo) return pass();
-    for (uint32_t k = 0; k < ci->enabledExtensionCount; ++k)
-        if (ci->enabledExtensionNames && ci->enabledExtensionNames[k] && !strcmp(ci->enabledExtensionNames[k], kVisMaskExt)) {
-            s_hmExt.store(2, std::memory_order_relaxed);
-            s_hmOurs.store(false, std::memory_order_relaxed);
-            Log("hidden area mask: the game enables %s itself (xrCreateInstance at the runtime %s)", kVisMaskExt, s_slot[i].module);
-            return pass();
-        }
-    // does the runtime offer it? (its own xrEnumerateInstanceExtensionProperties, no layer name)
-    bool offered = false;
+    const bool wantHm = s_hmWant.load(std::memory_order_relaxed), wantEg = s_egWant.load(std::memory_order_relaxed);
+    if ((!wantHm && !wantEg) || !ci || ci->type != kTypeInstanceCreateInfo) return pass();
+    bool gameHm = false, gameEg = false;
+    for (uint32_t k = 0; k < ci->enabledExtensionCount; ++k) {
+        const char* e = ci->enabledExtensionNames ? ci->enabledExtensionNames[k] : nullptr;
+        if (!e) continue;
+        if (!strcmp(e, kVisMaskExt)) gameHm = true;
+        if (!strcmp(e, kEyeGazeExt)) gameEg = true;
+    }
+    if (wantHm && gameHm) {
+        s_hmExt.store(2, std::memory_order_relaxed);
+        s_hmOurs.store(false, std::memory_order_relaxed);
+        Log("hidden area mask: the game enables %s itself (xrCreateInstance at the runtime %s)", kVisMaskExt, s_slot[i].module);
+    }
+    if (wantEg && gameEg) {
+        s_egExt.store(2, std::memory_order_relaxed);
+        Log("Eye tracking: the game enables %s itself (xrCreateInstance at the runtime %s) -- the mod stays out of its actions",
+            kEyeGazeExt, s_slot[i].module);
+    }
+    const bool tryHm = wantHm && !gameHm, tryEg = wantEg && !gameEg;
+    if (!tryHm && !tryEg) return pass();
+    // does the runtime offer them? (its own xrEnumerateInstanceExtensionProperties, no layer name)
+    bool offHm = false, offEg = false;
     auto gipa = reinterpret_cast<PFN_xrGetInstanceProcAddr>(s_slot[i].gipa.load(std::memory_order_acquire));
     PFN_xrVoidFunction fp = nullptr;
     ++t_depth;
@@ -1773,43 +2232,87 @@ XrResult CreateInstanceImpl(int i, const XrInstanceCreateInfo* ci, XrInstance* o
                 if (r >= 0)
                     for (uint32_t k = 0; k < got && k < n; ++k) {
                         props[k].extensionName[127] = 0;
-                        if (!strcmp(props[k].extensionName, kVisMaskExt)) offered = true;
+                        if (!strcmp(props[k].extensionName, kVisMaskExt)) offHm = true;
+                        if (!strcmp(props[k].extensionName, kEyeGazeExt)) offEg = true;
                     }
                 delete[] props;
             }
         }
     }
     --t_depth;
-    if (!offered) {
+    if (tryHm && !offHm) {
         s_hmExt.store(1, std::memory_order_relaxed);
         LogWarn("hidden area mask: the OpenXR runtime %s does not offer %s (enumerate result %d) -- the hidden area mask is not "
             "available", s_slot[i].module, kVisMaskExt, r);
-        return pass();
     }
-    // a COPY of the create info with the extension appended (the game's array stays as it is)
+    if (tryEg && !offEg) {
+        s_egExt.store(1, std::memory_order_relaxed);
+        LogWarn("Eye tracking: the OpenXR runtime %s does not offer %s (enumerate result %d) -- NO EYE TRACKER: vrs_eye keeps the "
+            "optical centre", s_slot[i].module, kEyeGazeExt, r);
+    }
+    const bool addHm = tryHm && offHm, addEg = tryEg && offEg;
+    if (!addHm && !addEg) return pass();
+    // a COPY of the create info with the extension(s) appended (the game's array stays as it is)
     const uint32_t n0 = ci->enabledExtensionCount;
-    const char** names = new (std::nothrow) const char*[n0 + 1];
+    const char** names = new (std::nothrow) const char*[n0 + 2];
     if (!names) return pass();
     for (uint32_t k = 0; k < n0; ++k) names[k] = ci->enabledExtensionNames[k];
-    names[n0] = kVisMaskExt;
+    uint32_t nAdd = 0;
+    if (addHm) names[n0 + nAdd++] = kVisMaskExt;
+    if (addEg) names[n0 + nAdd++] = kEyeGazeExt;
     XrInstanceCreateInfo c = *ci;
-    c.enabledExtensionCount = n0 + 1;
+    c.enabledExtensionCount = n0 + nAdd;
     c.enabledExtensionNames = names;
     ++t_depth;
     r = real(&c, out);
     --t_depth;
-    delete[] names;
     if (r >= 0) {
-        s_hmExt.store(3, std::memory_order_relaxed);
-        s_hmOurs.store(true, std::memory_order_relaxed);
-        Log("hidden area mask: %s enabled at the runtime %s's xrCreateInstance (the game asked for %u extension(s); instance %p) -- "
-            "the meshes are fetched at the game's xrEndFrame while xr_hidden_mask is on", kVisMaskExt, s_slot[i].module, n0,
-            out ? *out : nullptr);
+        delete[] names;
+        if (addHm) {
+            s_hmExt.store(3, std::memory_order_relaxed);
+            s_hmOurs.store(true, std::memory_order_relaxed);
+            Log("hidden area mask: %s enabled at the runtime %s's xrCreateInstance (the game asked for %u extension(s); instance %p) -- "
+                "the meshes are fetched at the game's xrEndFrame while xr_hidden_mask is on", kVisMaskExt, s_slot[i].module, n0,
+                out ? *out : nullptr);
+        }
+        if (addEg) {
+            s_egExt.store(3, std::memory_order_relaxed);
+            Log("Eye tracking: %s enabled at the runtime %s's xrCreateInstance (the game asked for %u extension(s)%s; instance %p) -- "
+                "the system's eye gaze support is checked at the game's xrCreateSession", kEyeGazeExt, s_slot[i].module, n0,
+                addHm ? ", + XR_KHR_visibility_mask in the same list" : "", out ? *out : nullptr);
+        }
         return r;
     }
-    s_hmExt.store(4, std::memory_order_relaxed);
-    LogErr("hidden area mask: xrCreateInstance with %s FAILED (%d = %s) -- created again with the game's own extensions, no mask",
-        kVisMaskExt, r, XrResultName(r));
+    const XrResult rBoth = r;
+    if (addHm && addEg) {                        // both refused: the visibility mask alone (phase 40's proven case), without the gaze
+        LogErr("Eye tracking: xrCreateInstance with %s + %s FAILED (%d = %s) -- retried with %s alone, no eye gaze", kVisMaskExt,
+            kEyeGazeExt, r, XrResultName(r), kVisMaskExt);
+        c.enabledExtensionCount = n0 + 1;        // names[n0] = the visibility mask
+        ++t_depth;
+        r = real(&c, out);
+        --t_depth;
+        s_egExt.store(4, std::memory_order_relaxed);
+        if (r >= 0) {
+            delete[] names;
+            s_hmExt.store(3, std::memory_order_relaxed);
+            s_hmOurs.store(true, std::memory_order_relaxed);
+            Log("hidden area mask: %s enabled at the runtime %s's xrCreateInstance (second try, without %s; instance %p)", kVisMaskExt,
+                s_slot[i].module, kEyeGazeExt, out ? *out : nullptr);
+            return r;
+        }
+    }
+    delete[] names;
+    if (addHm) {
+        s_hmExt.store(4, std::memory_order_relaxed);
+        LogErr("hidden area mask: xrCreateInstance with %s FAILED (%d = %s) -- created again with the game's own extensions, no mask",
+            kVisMaskExt, r, XrResultName(r));
+    }
+    if (addEg) {
+        s_egExt.store(4, std::memory_order_relaxed);
+        if (!addHm)
+            LogErr("Eye tracking: xrCreateInstance with %s FAILED (%d = %s) -- created again with the game's own extensions, no eye gaze",
+                kEyeGazeExt, rBoth, XrResultName(rBoth));
+    }
     return pass();
 }
 
@@ -1974,6 +2477,7 @@ XrResult LocateImpl(int i, XrSession ses, const XrViewLocateInfo* li, XrViewStat
                 views[0].fov.angleUp * 57.29578, views[0].fov.angleDown * 57.29578, views[1].fov.angleLeft * 57.29578,
                 views[1].fov.angleRight * 57.29578, views[1].fov.angleUp * 57.29578, views[1].fov.angleDown * 57.29578,
                 kKindName[s_slot[i].kind], s_slot[i].module, GetCurrentThreadId());
+        EgFrame(ses, li, vs, views);             // phase 59: eye gaze -- attach / sync if due, the gaze locate at this display time
     }
     return r;
 }
@@ -2219,6 +2723,7 @@ XrResult CreateSessionImpl(int i, XrInstance inst, const void* ci, XrSession* ou
     XrResult r;
     CPU_ORIG(r = real(inst, ci, out));
     --t_depth;
+    if (outer && r >= 0 && out && *out) EgOnCreateSession(i, inst, ci, *out);   // phase 59: eye gaze (system check, our action set)
     if (outer) {
         s_sesState.store(0, std::memory_order_relaxed);
         s_rtStop.store(0, std::memory_order_relaxed);
@@ -2248,6 +2753,7 @@ XrResult BeginSessionImpl(int i, XrSession ses, const XrSessionBeginInfo* bi) {
     if (outer) {
         const int prevState = s_sesState.load(std::memory_order_relaxed);
         if (r >= 0) {                            // a new run of the session: fresh who-started marks
+            EgOnBeginSession(ses);               // phase 59: the 3-s clock of the eye gaze solo attach
             s_rtStop.store(0, std::memory_order_relaxed);
             s_instLoss.store(false, std::memory_order_relaxed);
             s_exitAsked.store(false, std::memory_order_relaxed);
@@ -2578,6 +3084,7 @@ XrResult DestroySessionImpl(int i, XrSession ses) {
         }
         OvSetOk(false, false);
         HmDestroySession(ses);                           // phase 40
+        EgOnDestroySession(ses);                         // phase 59: our gaze space first
     }
     ++t_depth;
     XrResult r;
@@ -2643,6 +3150,115 @@ XrResult LocateSpaceImpl(int i, XrSpace sp, XrSpace base, XrTime t, XrSpaceLocat
                 loc->pose.orientation.z, loc->pose.orientation.w, loc->pose.position.x, loc->pose.position.y, loc->pose.position.z,
                 GetCurrentThreadId());
         }
+    }
+    return r;
+}
+// phase 59: xrAttachSessionActionSets -- the game's call gets our eye gaze set appended to a COPY of its list (refused: its own
+// list again, gaze off for the session). After the mod attached its set alone (EgFrame, the game had created no action set) the
+// game's late attach is passed as it is: it fails ALREADY_ATTACHED -- an ERROR line, the game gets the runtime's real result.
+XrResult AttachSetsImpl(int i, XrSession ses, const XrSessionActionSetsAttachInfo* ai) {
+    auto real = reinterpret_cast<PFN_xrAttachSessionActionSets>(s_slot[i].attachSets.load(std::memory_order_acquire));
+    if (!real) return -1;
+    auto pass = [&]() { ++t_depth; const XrResult r = real(ses, ai); --t_depth; return r; };
+    if (t_depth > 0) return pass();
+    CPU_HOOK(kHkXrOther);
+    const uint32_t n0 = ai ? ai->countActionSets : 0;
+    std::lock_guard<std::mutex> lk(s_egMx);
+    s_egGameAttach.store(true, std::memory_order_relaxed);
+    const bool mine = s_egSetup.load(std::memory_order_relaxed) == 1 && s_eg.set && ses == s_eg.ses;
+    if (mine && s_eg.attached) {                         // already attached: the game's attach cannot succeed now
+        const XrResult r = pass();
+        if (s_egAttachedBy.load(std::memory_order_relaxed) != 2) {   // (the game's own second attach: its business)
+            LogWarn("Eye tracking: the game calls xrAttachSessionActionSets AGAIN (%u set(s), session %p) -> %d = %s", n0, ses, r,
+                XrResultName(r));
+            return r;
+        }
+        LogErr("Eye tracking: the GAME called xrAttachSessionActionSets (%u set(s), session %p) AFTER the mod attached its eye gaze set "
+            "alone -> %d = %s%s -- the game's own OpenXR input actions do NOT work in this session. Set vrs_eye = 0 and report this "
+            "log", n0, ses, r, XrResultName(r), r == kErrActionSetsAlreadyAttached ? " (ALREADY_ATTACHED, as expected)" : "");
+        return r;
+    }
+    if (!mine || s_eg.failed || !ai || ai->type != kTypeSessionActionSetsAttach || n0 > 63) {
+        const XrResult r = pass();
+        Log("Eye tracking: the game attaches %u action set(s) (session %p) -> %d = %s -- our gaze set NOT appended (%s)", n0, ses, r,
+            XrResultName(r), !mine ? "no gaze set for this session" : s_eg.failed ? "gaze off for this session" : "unusual attach info");
+        if (mine && !s_eg.failed) EgFailLocked("appending to the game's attach (not possible)", r);
+        return r;
+    }
+    XrActionSet sets[64];
+    for (uint32_t k = 0; k < n0; ++k) sets[k] = ai->actionSets[k];
+    sets[n0] = s_eg.set;
+    XrSessionActionSetsAttachInfo c = *ai;
+    c.countActionSets = n0 + 1;
+    c.actionSets = sets;
+    ++t_depth;
+    XrResult r = real(ses, &c);
+    --t_depth;
+    if (r >= 0) {
+        s_eg.attached = true;
+        s_egAttachedBy.store(1, std::memory_order_relaxed);
+        s_egSyncSes.store(ses, std::memory_order_relaxed);
+        Log("Eye tracking: the game attached %u action set(s) (session %p, tid=%lu) -- our eye gaze set appended -> %d = %s", n0, ses,
+            GetCurrentThreadId(), r, XrResultName(r));
+        return r;
+    }
+    s_egAttachedBy.store(-1, std::memory_order_relaxed);
+    EgFailLocked("xrAttachSessionActionSets with our gaze set appended", r);
+    r = pass();
+    LogErr("Eye tracking: the game's own xrAttachSessionActionSets (%u set(s), without ours) -> %d = %s", n0, r, XrResultName(r));
+    return r;
+}
+// phase 59: xrSyncActions -- the game's call gets our active set appended to a COPY of its list once our set is attached to that
+// session (refused: the game's own call again, no more appends this session). Every game sync is timed (EgFrame syncs ours alone
+// only without a game sync within 100 ms).
+XrResult SyncActionsImpl(int i, XrSession ses, const XrActionsSyncInfo* si) {
+    auto real = reinterpret_cast<PFN_xrSyncActions>(s_slot[i].syncActions.load(std::memory_order_acquire));
+    if (!real) return -1;
+    auto pass = [&]() { ++t_depth; const XrResult r = real(ses, si); --t_depth; return r; };
+    if (t_depth > 0) return pass();
+    CPU_HOOK(kHkXrOther);
+    s_egGameSyncNs.store(SteadyNs(), std::memory_order_relaxed);
+    const uint64_t nCalls = s_egGameSyncCalls.fetch_add(1, std::memory_order_relaxed);
+    void* const set = s_egSyncSet.load(std::memory_order_relaxed);
+    const bool append = set && ses && s_egSyncSes.load(std::memory_order_relaxed) == ses &&
+                        !s_egSyncAppendOff.load(std::memory_order_relaxed) && !s_egFailedA.load(std::memory_order_relaxed) && si &&
+                        si->type == kTypeActionsSyncInfo && si->countActiveActionSets < 31;
+    if (nCalls == 0)
+        Log("Eye tracking: first xrSyncActions by the game (session %p, %u active set(s), tid=%lu) -- %s", ses,
+            si ? si->countActiveActionSets : 0, GetCurrentThreadId(), append ? "our gaze set appended" : "nothing of ours to append yet");
+    if (!append) return pass();
+    XrActiveActionSet as[32];
+    const uint32_t n0 = si->countActiveActionSets;
+    for (uint32_t k = 0; k < n0; ++k) as[k] = si->activeActionSets[k];
+    as[n0] = XrActiveActionSet{ set, 0 };
+    XrActionsSyncInfo c = *si;
+    c.countActiveActionSets = n0 + 1;
+    c.activeActionSets = as;
+    ++t_depth;
+    XrResult r;
+    CPU_ORIG(r = real(ses, &c));
+    --t_depth;
+    if (r >= 0) { s_egSyncGame.fetch_add(1, std::memory_order_relaxed); return r; }
+    const XrResult rOurs = r;
+    r = pass();                                          // the game's own call, as it was
+    if (r >= 0 && !s_egSyncAppendOff.exchange(true, std::memory_order_relaxed))
+        LogErr("Eye tracking: the game's xrSyncActions with our gaze set appended FAILED (%d = %s; without it %d = %s) -- no more "
+            "appends this session: the mod syncs its set itself", rOurs, XrResultName(rOurs), r, XrResultName(r));
+    return r;
+}
+// phase 59: xrCreateActionSet -- counted (a game that uses actions is never pre-empted by our solo attach).
+XrResult CreateActionSetImpl(int i, XrInstance inst, const XrActionSetCreateInfo* ci, XrActionSet* out) {
+    auto real = reinterpret_cast<PFN_xrCreateActionSet>(s_slot[i].createActionSet.load(std::memory_order_acquire));
+    if (!real) return -1;
+    const bool outer = t_depth == 0;
+    ++t_depth;
+    const XrResult r = real(inst, ci, out);
+    --t_depth;
+    if (outer && r >= 0) {
+        const uint32_t n = s_egGameSets.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (n <= 8)
+            Log("Eye tracking: the game creates OpenXR action set #%u \"%.63s\" (priority %u) -- it uses OpenXR input actions",
+                n, ci ? ci->actionSetName : "?", ci ? ci->priority : 0);
     }
     return r;
 }
@@ -2731,11 +3347,21 @@ template <int I> struct Thunk {
     static XrResult XRH_CALL CreateInstance(const XrInstanceCreateInfo* a, XrInstance* b) {
         return LayerGate(_ReturnAddress(), [&] { return CreateInstanceImpl(I, a, b); });
     }
+    static XrResult XRH_CALL AttachSets(XrSession a, const XrSessionActionSetsAttachInfo* b) {   // phase 59 (eye gaze)
+        return LayerGate(_ReturnAddress(), [&] { return AttachSetsImpl(I, a, b); });
+    }
+    static XrResult XRH_CALL SyncActions(XrSession a, const XrActionsSyncInfo* b) {
+        return LayerGate(_ReturnAddress(), [&] { return SyncActionsImpl(I, a, b); });
+    }
+    static XrResult XRH_CALL CreateActionSet(XrInstance a, const XrActionSetCreateInfo* b, XrActionSet* c) {
+        return LayerGate(_ReturnAddress(), [&] { return CreateActionSetImpl(I, a, b, c); });
+    }
 };
 struct ThunkSet { void *gipa, *negRuntime, *negLayer, *release, *acquire, *enumerate, *destroy, *locate, *endFrame, *createRefSpace,
                   *locateSpace, *destroySession, *waitFrame, *beginFrame, *endSession,
                   *pollEvent, *createSession, *beginSession, *requestExit,       // (phase 33: + 4)
-                  *createInstance; };                                            // (phase 40: + 1)
+                  *createInstance,                                               // (phase 40: + 1)
+                  *attachSets, *syncActions, *createActionSet; };                // (phase 59: + 3)
 template <int I> ThunkSet MakeSet() {
     return ThunkSet{ reinterpret_cast<void*>(&Thunk<I>::Gipa), reinterpret_cast<void*>(&Thunk<I>::NegRuntime),
                      reinterpret_cast<void*>(&Thunk<I>::NegLayer), reinterpret_cast<void*>(&Thunk<I>::Release),
@@ -2746,7 +3372,9 @@ template <int I> ThunkSet MakeSet() {
                      reinterpret_cast<void*>(&Thunk<I>::WaitFrame), reinterpret_cast<void*>(&Thunk<I>::BeginFrame),
                      reinterpret_cast<void*>(&Thunk<I>::EndSession), reinterpret_cast<void*>(&Thunk<I>::PollEvent),
                      reinterpret_cast<void*>(&Thunk<I>::CreateSession), reinterpret_cast<void*>(&Thunk<I>::BeginSession),
-                     reinterpret_cast<void*>(&Thunk<I>::RequestExit), reinterpret_cast<void*>(&Thunk<I>::CreateInstance) };
+                     reinterpret_cast<void*>(&Thunk<I>::RequestExit), reinterpret_cast<void*>(&Thunk<I>::CreateInstance),
+                     reinterpret_cast<void*>(&Thunk<I>::AttachSets), reinterpret_cast<void*>(&Thunk<I>::SyncActions),
+                     reinterpret_cast<void*>(&Thunk<I>::CreateActionSet) };
 }
 template <size_t... Is> const ThunkSet* MakeTable(std::index_sequence<Is...>) {
     static const ThunkSet t[] = { MakeSet<(int)Is>()... };
@@ -2785,6 +3413,9 @@ XrResult GipaImpl(int i, XrInstance inst, const char* name, PFN_xrVoidFunction* 
     else if (!strcmp(name, "xrCreateInstance") && !inst && s_slot[i].kind == kKindRuntime) {   // phase 40 (hidden area mask)
         store = &s_slot[i].createInstance; thunk = ts.createInstance;
     }
+    else if (!strcmp(name, "xrAttachSessionActionSets"))  { store = &s_slot[i].attachSets; thunk = ts.attachSets; }   // phase 59
+    else if (!strcmp(name, "xrSyncActions"))              { store = &s_slot[i].syncActions; thunk = ts.syncActions; }
+    else if (!strcmp(name, "xrCreateActionSet"))          { store = &s_slot[i].createActionSet; thunk = ts.createActionSet; }
     else if (!strcmp(name, "xrGetInstanceProcAddr") && reinterpret_cast<void*>(*fn) == s_slot[i].gipa.load()) {
         *fn = reinterpret_cast<PFN_xrVoidFunction>(ts.gipa);   // a GIPA asked for itself: stay wrapped
         return r;
@@ -2795,7 +3426,7 @@ XrResult GipaImpl(int i, XrInstance inst, const char* name, PFN_xrVoidFunction* 
     store->store(got, std::memory_order_release);
     *fn = reinterpret_cast<PFN_xrVoidFunction>(thunk);
     static std::atomic<int> s_logs{0};
-    if (s_logs.fetch_add(1, std::memory_order_relaxed) < 64)   // (phase 30: was 16, + 3 names; phase 33: 32 -> 64, + 4 names)
+    if (s_logs.fetch_add(1, std::memory_order_relaxed) < 96)   // (phase 30: was 16, + 3 names; phase 33: 32 -> 64, + 4 names; phase 59: 96, + 3)
         Log("OpenXR hook: %s wrapped at the %s %s (real %p)", name, kKindName[s_slot[i].kind], s_slot[i].module, got);
     return r;
 }
@@ -3137,6 +3768,52 @@ HiddenStats GetHiddenStats() {
     ReleaseSRWLockShared(&s_hmLock);
     s.queries = s_hmQueries.load(std::memory_order_relaxed);
     s.events = s_hmEvents.load(std::memory_order_relaxed);
+    return s;
+}
+
+// ---- phase 59: eye gaze (see xr_hook.h; the logic is in the anonymous namespace above) ----
+void EyeGazeRequest(bool want) { s_egWant.store(want, std::memory_order_relaxed); }
+void EyeGazeActive(bool on) { s_egActive.store(on, std::memory_order_relaxed); }
+bool EyeGaze(int view, float* tx, float* ty) {
+    if (view < 0 || view > 1 || !tx || !ty) return false;
+    AcquireSRWLockShared(&s_egLock);
+    const EgGaze g = s_egGaze;
+    ReleaseSRWLockShared(&s_egLock);
+    if (!g.have) return false;
+    LARGE_INTEGER now, fq;
+    QueryPerformanceCounter(&now);
+    QueryPerformanceFrequency(&fq);
+    if ((now.QuadPart - g.qpc) * 10 > fq.QuadPart) return false;   // older than 100 ms
+    *tx = g.tx[view];
+    *ty = g.ty[view];
+    return true;
+}
+EyeGazeStats GetEyeGazeStats() {
+    EyeGazeStats s;
+    s.ext = s_egExt.load(std::memory_order_relaxed);
+    s.system = s_egSystem.load(std::memory_order_relaxed);
+    s.setup = s_egSetup.load(std::memory_order_relaxed);
+    s.attachedBy = s_egAttachedBy.load(std::memory_order_relaxed);
+    s.gameAttach = s_egGameAttach.load(std::memory_order_relaxed);
+    s.gameSets = s_egGameSets.load(std::memory_order_relaxed);
+    s.syncGame = s_egSyncGame.load(std::memory_order_relaxed);
+    s.syncOurs = s_egSyncOurs.load(std::memory_order_relaxed);
+    s.locates = s_egLocates.load(std::memory_order_relaxed);
+    s.valid = s_egValid.load(std::memory_order_relaxed);
+    s.invalid = s_egInvalid.load(std::memory_order_relaxed);
+    s.locateFails = s_egLocFails.load(std::memory_order_relaxed);
+    s.focused = s_sesState.load(std::memory_order_relaxed) == 5;
+    s.failed = s_egFailedA.load(std::memory_order_relaxed);
+    AcquireSRWLockShared(&s_egLock);
+    const EgGaze g = s_egGaze;
+    ReleaseSRWLockShared(&s_egLock);
+    for (int k = 0; k < 2; ++k) { s.lastTx[k] = g.tx[k]; s.lastTy[k] = g.ty[k]; }
+    if (g.have) {
+        LARGE_INTEGER now, fq;
+        QueryPerformanceCounter(&now);
+        QueryPerformanceFrequency(&fq);
+        s.ageMs = (double)(now.QuadPart - g.qpc) * 1000.0 / (double)fq.QuadPart;
+    }
     return s;
 }
 

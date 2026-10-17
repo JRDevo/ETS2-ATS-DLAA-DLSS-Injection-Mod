@@ -82,6 +82,7 @@ static const E kRows[] = {
       L"CPU 0.04 ms per frame; it saves GPU time in the game's own figure." },
     { G_VRP, false, L"Foveated size", L"80 % (balanced)", L"dlaa.ini vrs_inner / vrs_outer", L"<c>0.04</> | -", false, nullptr, nullptr },
     { G_VRP, false, L"Foveated passes", L"scene", L"dlaa.ini vrs_passes", L"<c>0.04</> | -", false, nullptr, nullptr },
+    { G_VRP, false, L"Foveated eye tracking", L"off", L"dlaa.ini vrs_eye", L"<c>0.04</> | -", false, nullptr, nullptr },   // phase 59
     { G_VRP, false, L"Hidden area mask (VR)", L"on", L"dlaa.ini xr_hidden_mask", L"<c>0.02</> | -", false, nullptr, nullptr },
     { G_FR, true, L"Frame rate and CPU", L"", L"", L"", false, nullptr, nullptr },                                       // phase 52
     { G_FR, false, L"Reflex (flat)", L"off", L"dlaa.ini reflex  (flat only)", L"", true, nullptr, nullptr },

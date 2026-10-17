@@ -66,6 +66,8 @@ jobs:
           if not exist build\tests\hotkey_scan_test.exe exit /b 1
           call tests\build_frame_pace_test.bat
           if not exist build\tests\frame_pace_test.exe exit /b 1
+          call tests\build_vrs_gaze_test.bat
+          if not exist build\tests\vrs_gaze_test.exe exit /b 1
 
       - name: Test draw-id harness (did_shadow off)
         run: build\tests\drawid_harness.exe -1 0.1
@@ -94,6 +96,8 @@ jobs:
         run: build\tests\hotkey_scan_test.exe
       - name: Test frame pace (phase 52 -- flat limiter deadlines, FPS cap steps, VR FPS cap wait target)
         run: build\tests\frame_pace_test.exe
+      - name: Test eye-tracked foveation maths (phase 59 -- gaze mask row fill = FillMask, gaze -> ring centre, smoother)
+        run: build\tests\vrs_gaze_test.exe
       - name: Smoke test menu_shot (renders the real tuning menu + fps box to PNG; outputs are not committed)
         shell: cmd
         run: |

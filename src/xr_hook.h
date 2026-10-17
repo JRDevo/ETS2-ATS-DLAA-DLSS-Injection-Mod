@@ -25,6 +25,8 @@
 // event handed to the game are logged -- "OpenXR session:" / "OpenXR event #n:" lines, with the turbo state and, at
 // xrEndSession / xrDestroySession, whether the RUNTIME (STOPPING / LOSS_PENDING / EXITING sent first) or the GAME started it;
 // non-XR_SUCCESS results of xrWaitFrame / xrBeginFrame / xrEndFrame / xrLocateViews: "OpenXR result:" lines, the first 20 each).
+// phase 40: + the runtime's xrCreateInstance (an extension added to a copy of the game's list). phase 59: + xrAttachSessionActionSets /
+// xrSyncActions (our eye gaze action set appended to copies of the game's lists) and xrCreateActionSet (counted only).
 // Only these function names are touched; everything else the GIPA thunks return is the real pointer. No OpenXR SDK
 // dependency: the few types needed are declared in xr_hook.cpp. No D3D calls here (the texture is passed as an identity).
 #pragma once
@@ -230,5 +232,48 @@ struct HiddenStats {
     uint64_t queries = 0, events = 0;        // successful view queries, mask-changed events seen
 };
 HiddenStats GetHiddenStats();
+
+// ---- phase 59: EYE GAZE (XR_EXT_eye_gaze_interaction; dlaa.ini vrs_eye, inject.cpp moves the VRS ring centre with it) --------
+// The runtime's xrCreateInstance adds XR_EXT_eye_gaze_interaction to the SAME copy of the game's extension list as phase 40's
+// visibility mask (EyeGazeRequest(true) before the game's xrCreateInstance; offered by the runtime and not enabled by the game
+// itself). A refused create is retried with the visibility mask alone (when that was added too), then with the game's own create
+// info. At the game's outermost xrCreateSession (its XrSessionCreateInfo carries the systemId): xrGetSystemProperties with
+// XrSystemEyeGazeInteractionPropertiesEXT chained; a system without eye gaze = nothing else happens (the game's input untouched).
+// Else, once per instance, through the real xrGetInstanceProcAddr of the component that took the game's call (every call inside
+// ++t_depth): our action set "dlaa_eye_gaze" (priority 0) with one POSE action, suggested for
+// /interaction_profiles/ext/eye_gaze_interaction -> /user/eyes_ext/input/gaze_ext/pose (the game never suggests that profile).
+// ATTACH (once per session, OpenXR allows one call): the game's xrAttachSessionActionSets gets our set appended to a COPY of its
+// list (refused: the game's own list again, gaze off for that session). A game that has created NO action set of its own when
+// its session has been running 3 s: ours is attached alone (a later attach of the game then fails ALREADY_ATTACHED -- logged as
+// an ERROR, the game gets that real result). A game that created action sets waits for its own attach (never attached alone).
+// SYNC: the game's xrSyncActions gets our set appended to a COPY of its active sets (refused: the game's own again, no append for
+// that session). Without a game sync within the last 100 ms we sync our set alone, once per display time, only while the session
+// is FOCUSED. LOCATE: at the game's outermost PRIMARY_STEREO xrLocateViews (while EyeGazeActive), our action space (identity
+// pose) is located with xrLocateSpace in the game's locate space at the game's display time, once per display time. Valid =
+// ORIENTATION_VALID + ORIENTATION_TRACKED; the gaze (-z of the located pose) is rotated into each VIEW's frame with the inverse of
+// that view's located orientation (canted displays) and kept as view tangents tx = x / -z, ty = y / -z (+x right, +y up; z >= 0
+// = rejected). Every failure: logged once, gaze off for the session; the game's own call and result are never changed.
+void EyeGazeRequest(bool want);              // before the game's xrCreateInstance (SetupThread): ask for the extension
+void EyeGazeActive(bool on);                 // live: sync + locate per frame while on (vrs_eye on, VRS on)
+// The newest gaze of OpenXR view `view` (0 = left, 1 = right) as view tangents (+x right, +y up). False = no valid gaze located
+// within the last 100 ms (out untouched).
+bool EyeGaze(int view, float* tx, float* ty);
+struct EyeGazeStats {
+    int      ext = 0;                        // as HiddenStats::ext: 0 not asked, 1 not offered, 2 enabled by the game itself (we stay
+                                             //   out: its own bindings for that profile), 3 enabled by us, 4 the create with it failed
+    int      system = -1;                    // -1 not queried yet, 0 the system has no eye gaze, 1 supports it
+    int      setup = 0;                      // 0 none, 1 action set + action + bindings made, -1 failed (see log)
+    int      attachedBy = 0;                 // this session: 0 not yet, 1 the game's attach with ours appended, 2 ours alone, -1 failed
+    bool     gameAttach = false;             // the game called xrAttachSessionActionSets (this session)
+    uint32_t gameSets = 0;                   // action sets the game created (xrCreateActionSet, this instance)
+    uint64_t syncGame = 0, syncOurs = 0;     // the game's syncs (with ours appended) / our own syncs
+    uint64_t locates = 0, valid = 0, invalid = 0;   // our gaze locates; ORIENTATION valid + tracked; not
+    uint64_t locateFails = 0;                // xrLocateSpace failures
+    bool     focused = false;                // the session state handed to the game is FOCUSED
+    bool     failed = false;                 // gaze given up for this session (see log)
+    float    lastTx[2] = {}, lastTy[2] = {}; // the newest tangents per view
+    double   ageMs = -1.0;                   // since the newest valid gaze (-1 = none yet)
+};
+EyeGazeStats GetEyeGazeStats();
 
 } // namespace XrHook

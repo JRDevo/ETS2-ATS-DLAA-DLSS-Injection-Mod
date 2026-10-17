@@ -674,6 +674,13 @@ The three green lines under the title show the game's GPU time per frame, what t
   **Foveated passes** (`vrs_passes`) picks what it acts on: `scene` (default) = the 3D world only; `scene + lighting`
   = also the game's lighting pass, at the very edge only, for more saving. Test it before you keep it: look for blocky
   light or shadow edges at the side of your view.
+  **Foveated eye tracking** (`vrs_eye`, off by default; **experimental / test build**): on a headset with eye tracking
+  that the VR runtime reports through OpenXR (`XR_EXT_eye_gaze_interaction`: Varjo, Quest Pro, Pimax Crystal and
+  others), the sharp centre follows where you look instead of staying at the lens centre. Without an eye tracker the row
+  says `no eye tracker` and nothing changes. The mod asks the runtime for eye gaze when the game starts, so the first
+  switch-on needs a save (`Shift+F12`) and a game restart. To SEE it work, set `log_level = 4` and `vrs_debug = 1`: the
+  blocky outer ring in the desktop mirror then moves with your eyes. The log's `Eye tracking` lines say whether the
+  headset sent a gaze (send that log when you test it).
 - **Hidden area mask (VR)** (`xr_hidden_mask`, off by default; VR only): the game stops drawing the corners of each eye
   picture that the headset lenses never show (the VR runtime reports them). Fewer pixels drawn = more GPU headroom; what
   you see stays the same. The first time you switch it on, save (`Shift+F12`) and restart the game; after that the row
@@ -788,6 +795,9 @@ The table below lists the commonly used keys:
 | `vrs_inner` / `vrs_outer` | `55` / `80` | foveated rendering: ring sizes in % of the half picture around each eye's centre (`10`..`150`); full detail inside `vrs_outer` (with `vrs_quality = 1`), 2 x 2 outside. The menu's `Foveated size` row sets `vrs_outer` 10..100 in 5 % steps and `vrs_inner` = max(10, `vrs_outer` - 25): `wide` = 65 / 90, `balanced` = 55 / 80, `narrow` = 40 / 65; other values from `dlaa.ini` keep working (shown as inner / outer) |
 | `vrs_quality` | `1` | foveated rendering: `1` = full detail inside `vrs_outer`; `0` = the ring between `vrs_inner` and `vrs_outer` is shaded per 2 x 1 pixels too (more saving) |
 | `vrs_passes` | `0` | foveated rendering: what it acts on. `0` = the 3D world only; `1` = also the game's lighting pass, outer ring only (the middle ring stays sharp even with `vrs_quality = 0`). More saving; test it first. The menu's `Foveated passes` row switches it live, `Shift+F12` saves |
+| `vrs_eye` | `0` | foveated rendering, **experimental / test build** (phase 59): `1` = the sharp centre follows your gaze on a headset with eye tracking (OpenXR `XR_EXT_eye_gaze_interaction`: Varjo, Quest Pro, Pimax Crystal ...); without one it stays at the lens centre. Needs a game restart the first time (the mod asks the runtime for eye gaze at the game's start); after that the menu's `Foveated eye tracking` row switches it live, `Shift+F12` saves. The log's `Eye tracking` lines show what the headset sent |
+| `vrs_eye_smooth` | `20` | eye-tracked foveation: how calmly the sharp centre follows the gaze, a time constant in ms (`0`..`100`; `0` = every gaze sample at once). A big eye jump (a saccade) is followed four times faster |
+| `vrs_eye_fake` | `0` | eye-tracked foveation, test only: `1` (with `vrs_eye = 1`) = a made-up gaze that circles slowly (about 14 degrees, one turn in 6 s) instead of the eye tracker, to check the moving sharp area on a headset without one. OpenXR eye gaze is then not requested |
 | `vrs_debug` | `0` | foveated rendering, test only (needs `log_level = 4`): `1` = middle ring 2 x 2, outer ring 4 x 4, to see the pattern |
 | `xr_hidden_mask` | `0` | VR: `1` = **hidden area mask**: the game skips the corners of each eye picture that the lenses never show (the VR runtime reports them), so it draws fewer pixels. What you see stays the same. Needs a game restart the first time (the mod asks the runtime for the mask when the game starts); after that the menu's `Hidden area mask (VR)` row switches it live, `Shift+F12` saves |
 | `reflex` | `0` | flat, NVIDIA only: `1` = **NVIDIA Reflex** low latency (the game's frames wait less in the GPU queue: less input lag when the GPU is the limit), `2` = the same + boost (the GPU clocks stay up). On another GPU or a driver that refuses it, it stays off and the menu row says `not supported`. Not used in VR. The menu's `Reflex (flat)` row switches it live, `Shift+F12` saves |

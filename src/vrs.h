@@ -31,6 +31,16 @@
 // per eye in ATS VR at 4592 x 6496, the "lighting" class of the phase 36 GPU-per-pass line). An extra pass gets the OUTER-ONLY
 // table: the middle ring stays 1 x 1 even with vrs_quality = 0 (only the outer ring may go coarse there). The per-draw rule
 // (cut-out / SV_Depth / unknown PS = full rate) and the mod-work pause are the same as in the scene binds.
+//
+// Phase 59 (dlaa.ini vrs_eye, EYE-TRACKED foveation): the ring centre follows the gaze (inject.cpp VrsGazeCentre), so the mask
+// can no longer be one cached texture per centre. Enter(..., dynamic = true) uses ONE mask texture PER EYE (DEFAULT, R8_UINT, its
+// own NVAPI shading-rate view, made once per size) that is REFILLED only when the centre moved by >= 1 tile (16 px) in x or y
+// since its last fill, or the size / radii changed: FillMaskRuns on the CPU (per tile row: the ring borders from the circle
+// equation, then the border tiles checked with FillMask's exact tile-centre test, so the bytes are identical to FillMask's) +
+// one UpdateSubresource on the game's context (the path the phase 34 note below found to work with the shading-rate view; a
+// compute shader would need the game's CS state saved / restored and a new embedded shader for ~10 us of CPU). Refills are
+// counted and timed (QPC around fill + upload): the "VRS:" line and the inject.cpp "Eye tracking:" line. dynamic = false (vrs_eye
+// 0) = the phase 34 cache exactly as before.
 #pragma once
 #include <d3d11.h>
 #include <atomic>
@@ -62,12 +72,17 @@ int Probe(ID3D11Device* dev);
 // 2 outer (decided at the tile centre). Returns the tile counts per value in counts[3] (nullable).
 void FillMask(uint8_t* dst, uint32_t tw, uint32_t th, uint32_t rtW, uint32_t rtH, float cu, float cv, float rInner,
               float rOuter, uint32_t counts[3]);
+// phase 59: the same bytes as FillMask (the same tile-centre test decides every border tile), built per tile row from the ring
+// borders: two square roots + a few tests + memset per row instead of a test per tile (testsrs_mask_test.cpp compares them).
+void FillMaskRuns(uint8_t* dst, uint32_t tw, uint32_t th, uint32_t rtW, uint32_t rtH, float cu, float cv, float rInner,
+                  float rOuter, uint32_t counts[3]);
 
 // Bracket. Enter: `eye` only for the log / stats; `renderOverOutput` = render width / output width while DLSS upscales
 // (1 = no upscale); `cls` = the bind kind (PassCls; kClsLight takes the outer-only table). false = not entered (off,
-// unsupported, mask failed): no state was touched.
+// unsupported, mask failed): no state was touched. phase 59: `dynamic` = the eye's own refillable mask (vrs_eye; eye 0 / 1 only),
+// false = the phase 34 cache per (size, centre, radii).
 bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, float cv, float renderOverOutput,
-           int cls = kClsGbuf);
+           int cls = kClsGbuf, bool dynamic = false);
 void Leave(ID3D11DeviceContext* ctx);
 // A game draw inside the bracket: `exclude` = this draw keeps full-rate shading. Render thread, only while g_want.
 void OnDraw(ID3D11DeviceContext* ctx, bool exclude, int why);
@@ -93,6 +108,11 @@ struct Stats {
     // phase 42 (inject.cpp): binds of the lighting stage (after a world G-buffer bind, before its forward bind) seen with
     // vrs_passes = 1, and those left alone because their shape is not the lighting bind's (2 RTV RGBA16F scene size + scene depth)
     uint64_t litStageBinds = 0, litShapeMiss = 0;
+    // phase 59 (vrs_eye): brackets entered with the per-eye refillable mask, its refills (centre moved >= 1 tile / size / radii),
+    // the refill time (QPC: FillMaskRuns + UpdateSubresource, CPU only) summed and the largest one, and the last filled centre
+    uint64_t dynEnters = 0, dynRefills = 0, dynMasks = 0;
+    double   dynRefillUs = 0.0, dynRefillMaxUs = 0.0;
+    float    dynCu[2] = { 0.5f, 0.5f }, dynCv[2] = { 0.5f, 0.5f };
 };
 Stats& GetStats();
 void NoteEyeCheck(bool ok);    // the blit's eye vs the eye predicted at Enter (inject.cpp)
