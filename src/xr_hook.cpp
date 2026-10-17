@@ -3241,9 +3241,13 @@ XrResult SyncActionsImpl(int i, XrSession ses, const XrActionsSyncInfo* si) {
     if (r >= 0) { s_egSyncGame.fetch_add(1, std::memory_order_relaxed); return r; }
     const XrResult rOurs = r;
     r = pass();                                          // the game's own call, as it was
-    if (r >= 0 && !s_egSyncAppendOff.exchange(true, std::memory_order_relaxed))
+    if (r >= 0 && !s_egSyncAppendOff.exchange(true, std::memory_order_relaxed)) {
+        // (the mod does not sync its set alone while the game syncs: that would leave the game's sets inactive between its calls)
+        s_egFailedA.store(true, std::memory_order_relaxed);
         LogErr("Eye tracking: the game's xrSyncActions with our gaze set appended FAILED (%d = %s; without it %d = %s) -- no more "
-            "appends this session: the mod syncs its set itself", rOurs, XrResultName(rOurs), r, XrResultName(r));
+            "appends this session: eye gaze OFF for this session, VRS keeps the optical centre", rOurs, XrResultName(rOurs), r,
+            XrResultName(r));
+    }
     return r;
 }
 // phase 59: xrCreateActionSet -- counted (a game that uses actions is never pre-empted by our solo attach).
@@ -3394,6 +3398,7 @@ XrResult GipaImpl(int i, XrInstance inst, const char* name, PFN_xrVoidFunction* 
     std::atomic<void*>* store = nullptr;
     void* thunk = nullptr;
     const ThunkSet& ts = Sets()[i];
+    const bool egHooks = s_egWant.load(std::memory_order_relaxed);   // phase 59: the action calls are wrapped only with vrs_eye on at start
     if      (!strcmp(name, "xrReleaseSwapchainImage"))    { store = &s_slot[i].release;   thunk = ts.release; }
     else if (!strcmp(name, "xrAcquireSwapchainImage"))    { store = &s_slot[i].acquire;   thunk = ts.acquire; }
     else if (!strcmp(name, "xrEnumerateSwapchainImages")) { store = &s_slot[i].enumerate; thunk = ts.enumerate; }
@@ -3413,9 +3418,9 @@ XrResult GipaImpl(int i, XrInstance inst, const char* name, PFN_xrVoidFunction* 
     else if (!strcmp(name, "xrCreateInstance") && !inst && s_slot[i].kind == kKindRuntime) {   // phase 40 (hidden area mask)
         store = &s_slot[i].createInstance; thunk = ts.createInstance;
     }
-    else if (!strcmp(name, "xrAttachSessionActionSets"))  { store = &s_slot[i].attachSets; thunk = ts.attachSets; }   // phase 59
-    else if (!strcmp(name, "xrSyncActions"))              { store = &s_slot[i].syncActions; thunk = ts.syncActions; }
-    else if (!strcmp(name, "xrCreateActionSet"))          { store = &s_slot[i].createActionSet; thunk = ts.createActionSet; }
+    else if (egHooks && !strcmp(name, "xrAttachSessionActionSets")) { store = &s_slot[i].attachSets; thunk = ts.attachSets; }   // phase 59
+    else if (egHooks && !strcmp(name, "xrSyncActions"))      { store = &s_slot[i].syncActions; thunk = ts.syncActions; }
+    else if (egHooks && !strcmp(name, "xrCreateActionSet"))  { store = &s_slot[i].createActionSet; thunk = ts.createActionSet; }
     else if (!strcmp(name, "xrGetInstanceProcAddr") && reinterpret_cast<void*>(*fn) == s_slot[i].gipa.load()) {
         *fn = reinterpret_cast<PFN_xrVoidFunction>(ts.gipa);   // a GIPA asked for itself: stay wrapped
         return r;

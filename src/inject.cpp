@@ -16392,8 +16392,8 @@ const wchar_t* const kMenuDesc[] = {
     L"Which of the game's passes Foveated (VRS) acts on. scene = the 3D world only (default). scene + lighting = also the game's "
     L"lighting pass, at the very edge only: more saving. Test it: look for blocky light or shadow edges at the side of your view.",
     // phase 59 (MR_VRSEYE)
-    L"Experimental. The sharp centre of Foveated (VRS) follows your eyes on a headset with eye tracking (OpenXR eye gaze: Varjo, "
-    L"Quest Pro, Pimax Crystal ...); without one it stays at the lens centre. The first switch-on needs a game restart. No GPU cost.",
+    L"Experimental. The sharp centre of Foveated (VRS) follows your eyes on a headset with eye tracking (OpenXR eye gaze, for "
+    L"example Varjo); without one it stays at the lens centre. The first switch-on needs a game restart. Almost no cost.",
     // phase 40 (MR_HMASK)
     L"VR only. The game skips the lens corners you never see (the headset reports them), so it draws fewer pixels: more GPU "
     L"headroom, the picture you see stays the same. The first switch-on needs a game restart. Turn it off if the edge of the view "
@@ -22081,7 +22081,7 @@ bool DlaaOffFilePresent() {
 //                                  scene size + scene depth, after the G-buffer, before the forward bind), outer ring only
 //                                  (the middle ring stays 1 x 1). Menu row Foveated passes (live)
 //   vrs_eye                        0/1 (default 0, phase 59, EXPERIMENTAL): eye-tracked foveation -- the VRS ring centre follows
-//                                  the gaze (OpenXR XR_EXT_eye_gaze_interaction: Varjo, Quest Pro, Pimax Crystal ...); without an
+//                                  the gaze (OpenXR XR_EXT_eye_gaze_interaction, for example Varjo); without an
 //                                  eye tracker it stays at the optical centre. The extension is requested only when it is 1 at the
 //                                  game's start. Menu row Foveated eye tracking (live after that). Log: "Eye tracking" lines
 //   vrs_eye_fake                   0/1 (default 0, debug, dlaa.ini only): with vrs_eye = 1, a MADE-UP gaze circling slowly (0.25

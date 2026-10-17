@@ -32,18 +32,19 @@ log_level=4
 ## Test 1 — does the mod get your eye data? (5 minutes)
 
 1. Start the game in VR. Drive for 1 minute.
-2. Open the menu (**Delete** key) → **VR speed-ups** group.
+2. Open the menu (**Delete** key) → **VR performance** group.
 3. Look at the row **Foveated eye tracking**. What does it say?
    - `on (gaze)` → good, eye data comes in.
    - `on (waiting for gaze)` → the mod asked for eye data, but none comes yet.
    - `on (no eye tracker)` → the runtime does not offer eye tracking to the game.
    - `on (restart the game)` → you switched it on in the menu. The eye data is asked for only at game start. Restart the game.
    - `on (failed, see log)` → something went wrong. The log says what.
+   - `on (no OpenXR session yet)` → VR has not started yet. Wait until you sit in the truck.
 4. Quit the game. Send me the log file `dlaa_inject.log` (same folder as the DLL).
 
 ## Test 2 — does the sharp area follow your eyes? (5 minutes)
 
-1. In `dlaa.ini` set `vrs_debug=1`. This makes the low-detail area **very blocky on purpose**, so you can see it.
+1. In `dlaa.ini` set `vrs_debug=1`. Keep `log_level=4` (`vrs_debug` works only at log level 4). This makes the low-detail area **very blocky on purpose**, so you can see it.
 2. Start the game in VR.
 3. Record the desktop mirror window (Varjo Base mirror, or the game window) with OBS or the NVIDIA overlay (Alt+F9).
 4. While driving, look slowly: left, right, up at the sky, down at the dashboard. Hold each look for 2 seconds.
