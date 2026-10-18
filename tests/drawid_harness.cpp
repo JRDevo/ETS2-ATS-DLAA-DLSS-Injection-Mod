@@ -91,6 +91,7 @@
 #include <thread>                  // phase 35: S19 (Sets from another thread)
 #include "motion_vectors.h"
 #include "draw_ids.h"
+#include <d3d11_3.h>   // phase 60: ID3D11RasterizerState2 (S60 unit)
 #include "shader_cache.h"
 #include "scene_dlaa.h"            // v0.10.0 phase 7: S9 (the real SceneDlaa, tests/fake_dlaa.cpp for NGX)
 #include "gpu_perf.h"              // v0.10.0 phase 8: per-sub-pass timers (WARP figures)
@@ -4504,6 +4505,113 @@ int RunStageScene(Env& E, Totals& tot) {
     return fails;
 }
 
+// phase 60 (thin wires): DrawIdRecord::ConservativeRs -- the RS copy differs only in ConservativeRaster (+ the rules it needs), is
+// kept per state, and a ribbon 0.3 px thin (a far wire) gets depth on EVERY column it crosses only through the copy; without it
+// the rasterizer draws dashes (only where the ribbon covers a pixel centre). NOT covered: the A2C interplay (mode 1 / 2) and the
+// in-game near-range depth of edge-on wire faces -- in-game log / Ctrl+F6 only.
+int RunConservativeUnit(Env& E, Totals& tot) {
+    printf("\n===== S60 unit: DrawIdRecord::ConservativeRs (conservative raster for the thin-wire forward depth) =====\n");
+    int checks = 0, fails = 0;
+    auto expect = [&](bool c, const char* what) { ++checks; if (!c) { ++fails; printf("   FAIL %s\n", what); } };
+    ID3D11Device* d = E.dev.Get();
+    D3D11_RASTERIZER_DESC rd{}; rd.FillMode = D3D11_FILL_SOLID; rd.CullMode = D3D11_CULL_NONE; rd.FrontCounterClockwise = TRUE;
+    rd.DepthBias = 2; rd.SlopeScaledDepthBias = 0.25f; rd.DepthClipEnable = TRUE; rd.ScissorEnable = TRUE;
+    rd.AntialiasedLineEnable = TRUE;
+    ComPtr<ID3D11RasterizerState> game;
+    d->CreateRasterizerState(&rd, &game);
+    ID3D11RasterizerState* cr = DrawIdRecord::ConservativeRs(d, game.Get());
+    const int tier = DrawIdRecord::ConservativeTier();
+    printf("   conservative rasterization tier %d\n", tier);
+    if (tier < 1) {
+        expect(cr == nullptr, "tier 0: no copy (the caller keeps the game's state)");
+        printf("   (device without conservative raster: coverage checks skipped)\n");
+    } else {
+        ComPtr<ID3D11RasterizerState2> cr2;
+        D3D11_RASTERIZER_DESC2 c2{};
+        if (cr && SUCCEEDED(cr->QueryInterface(IID_PPV_ARGS(&cr2)))) cr2->GetDesc2(&c2);
+        expect(cr && cr != game.Get(), "the state gets its own copy");
+        expect(cr2 && c2.ConservativeRaster == D3D11_CONSERVATIVE_RASTERIZATION_MODE_ON, "the copy has ConservativeRaster ON");
+        expect(cr2 && c2.CullMode == D3D11_CULL_NONE && c2.FrontCounterClockwise && c2.DepthBias == 2 && c2.SlopeScaledDepthBias == 0.25f &&
+               c2.DepthClipEnable && c2.ScissorEnable && c2.FillMode == D3D11_FILL_SOLID && !c2.AntialiasedLineEnable &&
+               c2.ForcedSampleCount == 0, "the copy keeps every game field (line AA off: required)");
+        expect(DrawIdRecord::ConservativeRs(d, game.Get()) == cr, "the copy is kept (one per state)");
+        ID3D11RasterizerState* dn = DrawIdRecord::ConservativeRs(d, nullptr);
+        D3D11_RASTERIZER_DESC dd{};
+        if (dn) dn->GetDesc(&dd);
+        expect(dn && dd.CullMode == D3D11_CULL_BACK && dd.DepthClipEnable && !dd.ScissorEnable, "the default state's copy");
+
+        // coverage: a near-horizontal ribbon 0.3 px thin from x 8 to 120 in a 128 x 64 depth target
+        static const char kSrc[] =
+            "static const float2 P[6] = { float2(8.0, 30.10), float2(120.0, 31.30), float2(8.0, 30.40),"
+            "                             float2(8.0, 30.40), float2(120.0, 31.30), float2(120.0, 31.60) };\n"
+            "float4 vs(uint i : SV_VertexID) : SV_Position { float2 p = P[i];"
+            "  return float4(p.x / 64.0 - 1.0, 1.0 - p.y / 32.0, 0.5, 1.0); }\n"
+            "void ps() {}\n";
+        ComPtr<ID3DBlob> vb, pb, err;
+        ComPtr<ID3D11VertexShader> vsh; ComPtr<ID3D11PixelShader> psh;
+        bool ok = SUCCEEDED(D3DCompile(kSrc, sizeof(kSrc) - 1, "s60", nullptr, nullptr, "vs", "vs_5_0", 0, 0, &vb, &err)) &&
+                  SUCCEEDED(D3DCompile(kSrc, sizeof(kSrc) - 1, "s60", nullptr, nullptr, "ps", "ps_5_0", 0, 0, &pb, &err)) &&
+                  SUCCEEDED(d->CreateVertexShader(vb->GetBufferPointer(), vb->GetBufferSize(), nullptr, &vsh)) &&
+                  SUCCEEDED(d->CreatePixelShader(pb->GetBufferPointer(), pb->GetBufferSize(), nullptr, &psh));
+        ComPtr<ID3D11Texture2D> dt, st;
+        ComPtr<ID3D11DepthStencilView> dsv;
+        ComPtr<ID3D11DepthStencilState> dss;
+        D3D11_TEXTURE2D_DESC td{}; td.Width = 128; td.Height = 64; td.MipLevels = 1; td.ArraySize = 1;
+        td.Format = DXGI_FORMAT_D32_FLOAT; td.SampleDesc.Count = 1; td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+        ok = ok && SUCCEEDED(d->CreateTexture2D(&td, nullptr, &dt)) && SUCCEEDED(d->CreateDepthStencilView(dt.Get(), nullptr, &dsv));
+        td.BindFlags = 0; td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        ok = ok && SUCCEEDED(d->CreateTexture2D(&td, nullptr, &st));
+        D3D11_DEPTH_STENCIL_DESC ds{}; ds.DepthEnable = TRUE; ds.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+        ds.DepthFunc = D3D11_COMPARISON_GREATER_EQUAL;   // reversed-Z, as the forward depth
+        ok = ok && SUCCEEDED(d->CreateDepthStencilState(&ds, &dss));
+        expect(ok, "coverage test resources");
+        rd.ScissorEnable = FALSE; rd.AntialiasedLineEnable = FALSE;
+        ComPtr<ID3D11RasterizerState> plain;
+        d->CreateRasterizerState(&rd, &plain);
+        ID3D11RasterizerState* plainCr = ok ? DrawIdRecord::ConservativeRs(d, plain.Get()) : nullptr;
+        auto columns = [&](ID3D11RasterizerState* r, int* rowsMax) -> int {
+            ID3D11DeviceContext* c = E.ctx.Get();
+            c->ClearState();
+            c->ClearDepthStencilView(dsv.Get(), D3D11_CLEAR_DEPTH, 0.0f, 0);
+            c->OMSetRenderTargets(0, nullptr, dsv.Get());
+            c->OMSetDepthStencilState(dss.Get(), 0);
+            const D3D11_VIEWPORT vp{ 0, 0, 128, 64, 0, 1 };
+            c->RSSetViewports(1, &vp);
+            c->RSSetState(r);
+            c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            c->VSSetShader(vsh.Get(), nullptr, 0);
+            c->PSSetShader(psh.Get(), nullptr, 0);
+            c->Draw(6, 0);
+            c->CopyResource(st.Get(), dt.Get());
+            D3D11_MAPPED_SUBRESOURCE m{};
+            int cols = 0; *rowsMax = 0;
+            if (SUCCEEDED(c->Map(st.Get(), 0, D3D11_MAP_READ, 0, &m))) {
+                for (int x = 8; x < 120; ++x) {
+                    int rows = 0;
+                    for (int y = 0; y < 64; ++y) if (((const float*)((const char*)m.pData + y * m.RowPitch))[x] > 0.0f) ++rows;
+                    if (rows) ++cols;
+                    if (rows > *rowsMax) *rowsMax = rows;
+                }
+                c->Unmap(st.Get(), 0);
+            }
+            c->ClearState();
+            return cols;
+        };
+        int rowsPlain = 0, rowsCons = 0;
+        const int colsPlain = ok ? columns(plain.Get(), &rowsPlain) : 0;
+        const int colsCons = (ok && plainCr) ? columns(plainCr, &rowsCons) : 0;
+        printf("   0.3 px ribbon over 112 columns: plain raster %d columns (dashes), conservative %d columns, <= %d rows per column\n",
+               colsPlain, colsCons, rowsCons);
+        expect(colsPlain < 112, "plain raster leaves gaps in a 0.3 px ribbon (the game's dashes)");
+        expect(colsCons == 112, "conservative raster gives EVERY column the ribbon crosses a depth");
+        expect(rowsCons >= 1 && rowsCons <= 3, "conservative raster stays thin (<= 3 rows per column)");
+    }
+    if (g_debugLayer) { const int dl = DrainDebugLayer("S60"); ++checks; if (dl) { ++fails; printf("   FAIL debug layer: %d messages\n", dl); } }
+    printf("   %s: %d / %d checks passed\n", fails ? "FAILED" : "passed", checks - fails, checks);
+    tot.checks += checks; tot.fails += fails;
+    return fails;
+}
+
 // v0.10.0 phase 9: DrawIdRecord's view helpers (shared with inject.cpp's forward-depth re-draw)
 int RunViewUnit(Env& E, Totals& tot) {
     printf("\n===== S11/S12 unit: DrawIdRecord::ScissorRs / ScaledScissor / ScaleViewport =====\n");
@@ -6668,6 +6776,11 @@ int main(int argc, char** argv) {
         const int fl = RunViewUnit(E, tot);
         res.push_back({ "S11/S12 unit: scissor-enabled RS copy (a no-scissor state gets ScissorEnable, everything else equal), "
                         "clip / 1/2-size scissor + viewport maths", fl });
+    }
+    if ((only < 0 || only == 60) && !mutNoCons && !mutNoFwd && !mutNoAttach && !mutNoTwin && !mutPar) {   // phase 60
+        const int fl = RunConservativeUnit(E, tot);
+        res.push_back({ "S60 unit: conservative-raster RS copy for the thin-wire forward depth (copy fields, memo, a 0.3 px ribbon "
+                        "gets depth on every column)", fl });
     }
     if ((only < 0 || only == 11) && !mutNoCons && !mutNoFwd && !mutNoAttach && !mutNoTwin && !mutPar) {
         std::unique_ptr<Shadow> pa(new Shadow), pb(new Shadow);   // (heap: two CameraMv + four records would overflow the stack)

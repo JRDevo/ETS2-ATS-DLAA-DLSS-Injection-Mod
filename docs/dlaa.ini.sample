@@ -455,6 +455,24 @@ log_level = 1
 # v0.9.0 r11: only a depth inside the world range counts (a rain / dirt / glare layer on the windscreen used to make the
 # road and trees behind the glass move like the cabin)
 # mv_fwd_depth = 1
+
+# phase 60: DLSS's own motion-vector dilation in DLAA mode (the NGX flag MVLowRes). With it DLSS gives the pixels next to a
+# thin wire / cable the wire's motion (taken from the nearest depth around them) instead of the sky's, so the wire keeps its
+# history while driving and does not break into flickering dashes. DLSS upscaling always uses it; before phase 60 DLAA did
+# not. 1 = on (default), 0 = off (the v0.14 behaviour). key_mv_dilate (Alt+F10) switches it live (the DLAA features are
+# recreated: a short history reset, like a model change).
+# dlaa_mv_dilate = 1
+
+# phase 60: the forward-depth re-draw (mv_fwd_depth) through CONSERVATIVE rasterization: every pixel a wire / cable touches,
+# even by a sliver, gets the wire's depth and so the wire's motion vector, not the sky's (DLSS Programming Guide 3.6.4: thin
+# features). Without it a far wire thinner than a pixel only has depth where it covers a pixel centre -- dashes -- and the gaps
+# move like the sky while driving. Needs a GPU with conservative rasterization (D3D11.3, every RTX card; the log says "tier N").
+# The forward ids (the per-draw motion of cables on a moving truck) are drawn the same way, so the extra pixels move with the
+# cable. 0 = off (the v0.14 behaviour), 1 = on (default): the depth still only where the wire's texture is at least half solid
+# (alpha-to-coverage), 2 = on WITHOUT that alpha test: every touched pixel (try it if 1 is not enough; glass / smoke then own
+# their whole area). key_mv_conservative (Alt+F11) cycles 1 -> 2 -> 0 live (mode 1: one high beep, mode 2: two
+# high beeps, off: one low beep); Shift+F12 saves the value.
+# mv_fwd_conservative = 1
 # v0.9.0 r11: a see-through draw whose centre point (origin) lies within this many metres of the camera (windscreen
 # drops, dirt, glare) is not drawn into that depth at all (0.1..5)
 # mv_fwd_min_m = 0.5
@@ -720,6 +738,10 @@ key_pre_tonemap = Alt+F7
 key_mv_dump = Alt+F8
 # Performance profile high -> medium -> low (perf_profile)
 key_perf_profile = Alt+F9
+# phase 60: DLSS motion-vector dilation in DLAA (dlaa_mv_dilate) on / off
+key_mv_dilate = Alt+F10
+# phase 60: conservative raster for the wire depth (mv_fwd_conservative) 1 -> 2 -> 0
+key_mv_conservative = Alt+F11
 # v0.10.0 tuning menu: open / close, and (only while it is open) select a row up / down and change it left / right.
 # v0.10.2: the game sees no key / button at all while the menu is open; closed, they belong to the game. The menu's
 # Menu keys row binds these 5 by holding the new keys (docs/KEYS.md, "Bind a key in the menu").

@@ -2,6 +2,7 @@
 #ifdef WITH_DLAA
 
 #include "draw_ids.h"
+#include <d3d11_3.h>                                    // phase 60: ID3D11Device3 / CreateRasterizerState2 (ConservativeRs)
 #include "gpu_perf.h"
 #include "shader_cache.h"
 #include "log.h"
@@ -3546,6 +3547,76 @@ ID3D11RasterizerState* DrawIdRecord::ScissorRs(ID3D11Device* dev, ID3D11Rasteriz
 }
 uint64_t DrawIdRecord::ScissorRsFails() { return g_rsFails; }
 
+// phase 60: conservative-raster copies (see ConservativeRs in draw_ids.h). Same memo rules as ScissorRs: key ref held, copy ref
+// held, cleared on a device change and in ShutdownDevice. A full table = no conservative copy for new states.
+struct CrMemo { ID3D11RasterizerState* in; ID3D11RasterizerState* cr; };
+constexpr int kCrMemo = 64;
+CrMemo      g_crMemo[kCrMemo] = {};
+int         g_crMemoN = 0, g_crMemoLast = -1;
+const void* g_crMemoDev = nullptr;
+int         g_crTier = -1;                               // -1 = not checked for g_crMemoDev (0 also when there is no ID3D11Device3)
+uint64_t    g_crFails = 0;                               // copies whose creation failed
+uint64_t    g_crFull = 0;                                // states seen while the table was full (counted once each, g_crFullSeen)
+ID3D11RasterizerState* g_crFullSeen[kCrMemo] = {};      // identity only (no ref): the last states counted in g_crFull
+int         g_crFullSeenN = 0;
+ComPtr<ID3D11Device3> g_crDev3;                          // the ID3D11Device3 of g_crMemoDev (queried once with the tier)
+void CrMemoClear() {
+    for (int i = 0; i < g_crMemoN; ++i) {
+        if (g_crMemo[i].in) g_crMemo[i].in->Release();
+        if (g_crMemo[i].cr) g_crMemo[i].cr->Release();
+        g_crMemo[i] = CrMemo{};
+    }
+    g_crMemoN = 0; g_crMemoLast = -1; g_crMemoDev = nullptr; g_crTier = -1;
+    g_crFullSeenN = 0;
+    g_crDev3.Reset();
+}
+ID3D11RasterizerState* DrawIdRecord::ConservativeRs(ID3D11Device* dev, ID3D11RasterizerState* rs) {
+    if (!dev) return nullptr;
+    if (g_crMemoDev != (const void*)dev) { CrMemoClear(); g_crMemoDev = dev; }
+    if (g_crTier < 0) {                                  // once per device: the tier AND the D3D11.3 interface
+        D3D11_FEATURE_DATA_D3D11_OPTIONS2 o2{};
+        g_crTier = SUCCEEDED(dev->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS2, &o2, sizeof(o2)))
+                 ? (int)o2.ConservativeRasterizationTier : 0;
+        if (g_crTier >= 1 && FAILED(dev->QueryInterface(IID_PPV_ARGS(&g_crDev3)))) { g_crDev3.Reset(); g_crTier = 0; }
+    }
+    if (g_crTier < 1) return nullptr;
+    if (g_crMemoLast >= 0 && g_crMemo[g_crMemoLast].in == rs) return g_crMemo[g_crMemoLast].cr;
+    for (int i = 0; i < g_crMemoN; ++i)
+        if (g_crMemo[i].in == rs) { g_crMemoLast = i; return g_crMemo[i].cr; }
+    if (g_crMemoN >= kCrMemo) {                          // full: no copy for new states (counted once per state)
+        bool seen = false;
+        for (int i = 0; i < g_crFullSeenN; ++i) if (g_crFullSeen[i] == rs) { seen = true; break; }
+        if (!seen) { ++g_crFull; if (g_crFullSeenN < kCrMemo) g_crFullSeen[g_crFullSeenN++] = rs; }
+        return nullptr;
+    }
+    D3D11_RASTERIZER_DESC d{};
+    if (rs) rs->GetDesc(&d);
+    else {                                               // the D3D11 default state
+        d.FillMode = D3D11_FILL_SOLID; d.CullMode = D3D11_CULL_BACK; d.FrontCounterClockwise = FALSE;
+        d.DepthBias = 0; d.DepthBiasClamp = 0.0f; d.SlopeScaledDepthBias = 0.0f; d.DepthClipEnable = TRUE;
+        d.ScissorEnable = FALSE; d.MultisampleEnable = FALSE; d.AntialiasedLineEnable = FALSE;
+    }
+    D3D11_RASTERIZER_DESC2 d2{};
+    d2.FillMode = D3D11_FILL_SOLID;                      // conservative raster: solid fill, no line AA, no forced sample count
+    d2.CullMode = d.CullMode; d2.FrontCounterClockwise = d.FrontCounterClockwise;
+    d2.DepthBias = d.DepthBias; d2.DepthBiasClamp = d.DepthBiasClamp; d2.SlopeScaledDepthBias = d.SlopeScaledDepthBias;
+    d2.DepthClipEnable = d.DepthClipEnable; d2.ScissorEnable = d.ScissorEnable; d2.MultisampleEnable = d.MultisampleEnable;
+    d2.AntialiasedLineEnable = FALSE; d2.ForcedSampleCount = 0;
+    d2.ConservativeRaster = D3D11_CONSERVATIVE_RASTERIZATION_MODE_ON;
+    ID3D11RasterizerState2* cr = nullptr;
+    if (!g_crDev3 || FAILED(g_crDev3->CreateRasterizerState2(&d2, &cr)) || !cr) {
+        ++g_crFails;
+        return nullptr;                                  // the caller draws with `rs` (no conservative raster for it)
+    }
+    if (rs) rs->AddRef();
+    g_crMemo[g_crMemoN] = { rs, cr };
+    g_crMemoLast = g_crMemoN++;
+    return cr;
+}
+int DrawIdRecord::ConservativeTier() { return g_crTier; }
+uint64_t DrawIdRecord::ConservativeRsFails() { return g_crFails; }
+uint64_t DrawIdRecord::ConservativeRsFull() { return g_crFull; }
+
 // ---- phase 58b (perf round 2) RAW REPLAY CALLS (see SetRawCall in draw_ids.h) ----
 // PER-HOOK VERDICTS -- what inject.cpp's hook does with a call the replay loop makes (render thread, the game context, t_inDlaa =
 // true: every caller -- DidReplay, DidFwdReplay, FwdBatch, the glow bias batch, MirReplay -- sets it around the replay), and what
@@ -3761,16 +3832,17 @@ DrawIdRecord::ReplayResult DrawIdRecord::Replay(ID3D11DeviceContext1* ctx, ID3D1
 }
 
 DrawIdRecord::ReplayResult DrawIdRecord::ReplayForward(ID3D11DeviceContext1* ctx, ID3D11RenderTargetView* idRtv,
-                                                        ID3D11DepthStencilView* fwdDsv, bool restoreTargets, UINT idBase) {
-    return ReplayImpl(ctx, idRtv, fwdDsv, restoreTargets, true, true, idBase);
+                                                        ID3D11DepthStencilView* fwdDsv, bool restoreTargets, UINT idBase,
+                                                        bool conservative) {
+    return ReplayImpl(ctx, idRtv, fwdDsv, restoreTargets, true, true, idBase, nullptr, nullptr, conservative);
 }
 
 // v0.10.0 phase 10: the batched forward-depth re-draw (see draw_ids.h)
 DrawIdRecord::ReplayResult DrawIdRecord::ReplayDepth(ID3D11DeviceContext1* ctx, ID3D11RenderTargetView* rt0,
                                                       ID3D11DepthStencilView* dsv, ID3D11DepthStencilState* dss,
-                                                      ID3D11BlendState* bs, bool restoreTargets) {
+                                                      ID3D11BlendState* bs, bool restoreTargets, bool conservative) {
     if (!dss || !bs) { ReplayResult rr; m_depthTo = m_n; return rr; }
-    return ReplayImpl(ctx, rt0, dsv, restoreTargets, true, true, 0, dss, bs);
+    return ReplayImpl(ctx, rt0, dsv, restoreTargets, true, true, 0, dss, bs, conservative);
 }
 
 void DrawIdRecord::DropIds() {
@@ -3786,7 +3858,7 @@ void DrawIdRecord::DropIds() {
 DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, ID3D11RenderTargetView* idRtv,
                                                      ID3D11DepthStencilView* roDsv, bool restoreTargets, bool replayAll,
                                                      bool forward, UINT idBase, ID3D11DepthStencilState* depthDss,
-                                                     ID3D11BlendState* depthBs) {
+                                                     ID3D11BlendState* depthBs, bool conservative) {
     ReplayResult rr;
     if (!ctx) return rr;
     Flush(ctx);                                          // MVP copies of everything recorded so far (queued first)
@@ -3877,8 +3949,9 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
     // one) n the clip, viewport / scissor at 1/2^shift (forward mode). Off (no clip, no shift) = the phase-8 calls exactly.
     const UINT shift = forward ? m_shift : 0u;
     const bool view = m_clip || shift != 0u;
+    const bool cons = forward && conservative;           // phase 60: the forward-depth batch / forward ids with ConservativeRs
     ComPtr<ID3D11Device> vdev;
-    if (view) ctx->GetDevice(&vdev);
+    if (view || cons) ctx->GetDevice(&vdev);
     ID3D11RasterizerState* lastRs = nullptr;
     D3D11_VIEWPORT lastVp[kVp] = {};
     D3D11_RECT lastSc[kVp] = {};
@@ -3953,7 +4026,11 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
             else ctx->VSSetSamplers(0, kVsSmp, s.smp);
         }
         if (!view) {
-            if (!cur || cur->rs != s.rs) { if (rc.rs) rc.rs(ctx, s.rs); else ctx->RSSetState(s.rs); }
+            if (!cur || cur->rs != s.rs) {
+                ID3D11RasterizerState* cr = cons ? ConservativeRs(vdev.Get(), s.rs) : nullptr;   // phase 60
+                ID3D11RasterizerState* r = cr ? cr : s.rs;
+                if (rc.rs) rc.rs(ctx, r); else ctx->RSSetState(r);
+            }
             if (!cur || cur->nVp != s.nVp || memcmp(cur->vp, s.vp, sizeof(D3D11_VIEWPORT) * s.nVp)) {
                 if (rc.vp) rc.vp(ctx, s.nVp, s.nVp ? s.vp : nullptr);
                 else ctx->RSSetViewports(s.nVp, s.nVp ? s.vp : nullptr);
@@ -3965,6 +4042,7 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
             ID3D11RasterizerState* rsS = ScissorRs(vdev.Get(), s.rs, &had);
             // no copy (creation failed / table full): the draw's own RS, its own scissor scaled, no clip (more pixels, same ids)
             ID3D11RasterizerState* rsUse = rsS ? rsS : s.rs;
+            if (cons) { ID3D11RasterizerState* cr = ConservativeRs(vdev.Get(), rsUse); if (cr) rsUse = cr; }   // phase 60
             const bool scOn = rsS ? true : had;
             D3D11_VIEWPORT vp[kVp];
             memcpy(vp, s.vp, sizeof(D3D11_VIEWPORT) * s.nVp);
@@ -4313,6 +4391,7 @@ void DrawIdRecord::ShutdownDevice() {
     s_biasPs.Reset(); s_biasDss.Reset();                 // phase 49
     s_biasDev = nullptr; s_biasFailed = false;
     RsMemoClear();                                       // v0.10.0 phase 9: the scissor-enabled RS copies
+    CrMemoClear();                                       // phase 60: the conservative-raster RS copies
     DrawIdMv::VsLayoutClear();                           // v0.10.0 phase 22: VS pointers belong to the old device
 }
 

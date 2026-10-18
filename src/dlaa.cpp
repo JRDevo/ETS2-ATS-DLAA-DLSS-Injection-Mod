@@ -42,6 +42,8 @@ char               g_presetName[8] = "default";
 // generation recreates it at its next Evaluate (live Shift+End cycle). Render thread only.
 uint32_t           g_presetGen  = 0;
 uint32_t           g_presetFallbacks = 0;     // live preset creates that failed -> default
+// phase 60: MVLowRes also in DLAA mode = DLSS dilates our MVs by depth (dlaa.ini dlaa_mv_dilate). Render thread.
+bool               g_mvDilate   = true;
 
 // v0.7.8 creation budget: at most ONE NGX feature create per Present (BeginFrame), so two units (VR: two eyes, two
 // preview targets) or two live preset recreates never stack into one long frame. Render thread only.
@@ -254,7 +256,8 @@ const char* DlaaProcessor::QualityName() const { return PerfQualityName(m_perfQ)
 // v0.8.0: " HDR input (IsHDR)" appended for an HDR feature (LDR text unchanged).
 const char* DlaaProcessor::SizeText(char* buf, size_t cap) const {
     if (!Upscaling())
-        snprintf(buf, cap, "%ux%u native (DLAA)%s", m_width, m_height, m_hdr ? ", HDR input (IsHDR)" : "");
+        snprintf(buf, cap, "%ux%u native (DLAA%s)%s", m_width, m_height, g_mvDilate ? ", MVLowRes: DLSS dilates the MVs" : "",
+                 m_hdr ? ", HDR input (IsHDR)" : "");   // phase 60
     else
         snprintf(buf, cap, "%ux%u -> %ux%u (DLSS %s, ratio x%.3f / y%.3f, MVLowRes%s)", m_width, m_height, m_outW, m_outH,
                  PerfQualityName(m_perfQ), (double)m_outW / (double)m_width, (double)m_outH / (double)m_height,
@@ -282,6 +285,12 @@ bool DlaaProcessor::SetRenderPreset(char letter) {
 }
 
 const char* DlaaProcessor::RenderPresetName() { return g_presetName; }
+void DlaaProcessor::SetMvDilate(bool on) {
+    if (g_mvDilate == on) return;
+    g_mvDilate = on;
+    ++g_presetGen;                                     // phase 60: a creation flag -> every feature recreates (as a preset change)
+}
+bool DlaaProcessor::MvDilate() { return g_mvDilate; }
 uint32_t DlaaProcessor::PresetFallbacks() { return g_presetFallbacks; }
 
 bool DlaaProcessor::CreateFeature(bool depthInverted) {
@@ -331,7 +340,9 @@ bool DlaaProcessor::CreateFeatureOnce(bool depthInverted, int perfQuality) {
     int flags = 0;
     if (m_hdr)         flags |= NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
     if (depthInverted) flags |= NVSDK_NGX_DLSS_Feature_Flags_DepthInverted;
-    if (Upscaling())   flags |= NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
+    // phase 60: DLAA too (dlaa_mv_dilate): our MVs ARE at the input resolution, and only with this flag does DLSS dilate them
+    // (thin wires / cables: the pixels next to them take the wire's motion instead of the sky's).
+    if (Upscaling() || g_mvDilate) flags |= NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
     if (m_hdr)         flags |= NVSDK_NGX_DLSS_Feature_Flags_IsHDR;
 
     NVSDK_NGX_DLSS_Create_Params cp{};

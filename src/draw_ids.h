@@ -293,7 +293,8 @@ public:
                         bool restoreTargets, bool replayAll);
     // v0.10.0 phase 10: the batched forward-depth re-draw (see SetCapturePs above)
     ReplayResult ReplayDepth(ID3D11DeviceContext1* ctx, ID3D11RenderTargetView* rt0, ID3D11DepthStencilView* dsv,
-                             ID3D11DepthStencilState* dss, ID3D11BlendState* bs, bool restoreTargets);
+                             ID3D11DepthStencilState* dss, ID3D11BlendState* bs, bool restoreTargets,
+                             bool conservative = false);   // phase 60: every draw through ConservativeRs (the forward depth only)
     // v0.10.0 phase 8 (dlaa.ini mv_inst_replay 1): with replayAll, an instanced / no-MVP draw is replayed only when its
     // pointer-free key took a MOVING rigid parent in the vote lately (DrawIdMv::InstancedWanted) -- every draw is replayed in a
     // PROBE pass (the caller sets it per replay: every 7th pass of the main view -- odd, so both VR eyes probe; always for mirror
@@ -354,7 +355,9 @@ public:
     // idBase + record index + 1 (idBase = the G-buffer record's draw count: one id space with the G-buffer draws); draws
     // whose id would exceed kMax are skipped. Every replay of a pass must use the same idBase (else ReplayFailed()).
     ReplayResult ReplayForward(ID3D11DeviceContext1* ctx, ID3D11RenderTargetView* idRtv, ID3D11DepthStencilView* fwdDsv,
-                               bool restoreTargets, UINT idBase);
+                               bool restoreTargets, UINT idBase,
+                               bool conservative = false);   // phase 60: the same ConservativeRs coverage as the depth batch, so
+                                                             // depth EQUAL passes on the fringe pixels and they take the draw's id
     UINT IdBase() const { return m_idBase; }             // forward mode: the idBase of this pass's replays (~0u: none)
     bool Cleared() const { return m_cleared; }           // the id target was cleared this pass (a replay ran)
     bool ReplayFailed() const { return m_replayFail; }   // a replay of this pass could not run (ids incomplete)
@@ -388,6 +391,15 @@ public:
     // caller replays / re-draws without the clip). Render thread only.
     static ID3D11RasterizerState* ScissorRs(ID3D11Device* dev, ID3D11RasterizerState* game, bool* hadScissor);
     static uint64_t ScissorRsFails();            // copies that could not be created (stats)
+    // phase 60 (thin wires): a copy of `rs` (the game's state or its ScissorRs copy; nullptr = the D3D11 default) with
+    // CONSERVATIVE rasterization on (D3D11.3 ID3D11Device3::CreateRasterizerState2, tier >= 1): every pixel a triangle touches
+    // is drawn, so a wire thinner than a pixel gets a forward depth on every pixel it crosses, not only where it covers a pixel
+    // centre (DLSS Programming Guide 3.6.4: draw the motion vectors of thin features with conservative raster). Created once
+    // per state object and kept (ref held on both). nullptr = not supported / not created (the caller uses `rs`). Render thread.
+    static ID3D11RasterizerState* ConservativeRs(ID3D11Device* dev, ID3D11RasterizerState* rs);
+    static int ConservativeTier();               // -1 = not checked yet, 0 = not supported, 1..3 = the device's tier
+    static uint64_t ConservativeRsFails();       // copies that could not be CREATED (stats; a full memo table is not counted here)
+    static uint64_t ConservativeRsFull();        // states left without a copy because the memo table was full (once per state)
 
     // ---- pairing inputs (CameraMv / DrawIdMv at the blit) ----
     uint64_t FullKey(int i) const;               // IB, VB0, offsets, counts, base vertex, VS, instanced
@@ -442,7 +454,8 @@ public:
 private:
     ReplayResult ReplayImpl(ID3D11DeviceContext1* ctx, ID3D11RenderTargetView* idRtv, ID3D11DepthStencilView* dsv,
                             bool restoreTargets, bool replayAll, bool forward, UINT idBase,
-                            ID3D11DepthStencilState* depthDss = nullptr, ID3D11BlendState* depthBs = nullptr);   // phase 10:
+                            ID3D11DepthStencilState* depthDss = nullptr, ID3D11BlendState* depthBs = nullptr,    // phase 10:
+                            bool conservative = false);   // phase 60: the forward depth / forward ids -- ConservativeRs on every draw
                                                  // depthDss != null = the forward-depth batch (ReplayDepth)
     struct PsState;                              // v0.10.0 phase 10: per-draw pixel-shader state (draw_ids.cpp)
     void ReleasePs(int from, int to);

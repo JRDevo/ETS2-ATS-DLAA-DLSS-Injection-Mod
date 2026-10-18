@@ -77,6 +77,15 @@ public:
     static bool SetRenderPreset(char letter);
     static const char* RenderPresetName();     // "default" or "K" etc.
     static uint32_t PresetFallbacks();         // v0.5.7: live preset changes that failed and fell back to default
+    // phase 60 (wire flicker): DLSS's own depth-based motion-vector dilation in DLAA mode (dlaa.ini dlaa_mv_dilate, default 1;
+    // key_mv_dilate Alt+F10 live). The NGX flag MVLowRes tells DLSS the MVs are at the input resolution, so it dilates them
+    // internally (DLSS Programming Guide 3.6.1: display-res MVs "must be dilated", input-res ones are dilated by DLSS). DLAA
+    // (render == output) used to create the feature WITHOUT it, so thin wires sent undilated MVs: the pixels beside a wire kept
+    // the sky's motion and the wire's history was dropped while driving. Upscaling always sets it. A change bumps the preset
+    // generation: every unit recreates its feature at its next Evaluate (history reset). Like a model change, a recreate that
+    // NGX refuses falls back to the default model once (the existing preset fallback in Evaluate).
+    static void SetMvDilate(bool on);
+    static bool MvDilate();
 
     void SetEye(int e) { m_eye = e; }          // v0.5.7: log tag only
 

@@ -973,6 +973,17 @@ std::atomic<bool> g_mvOn{true};          // camera-reprojection MVs live switch 
 // (default 1) and its live switch (key_fwd_depth, Ctrl+F3; starts at the ini value).
 bool              g_fwdCfg = true;
 std::atomic<bool> g_fwdOn{true};
+// phase 60 (thin wires): the forward-depth re-draw AND the forward-id replay through CONSERVATIVE rasterization
+// (DrawIdRecord::ConservativeRs): every pixel a wire / cable touches gets its depth and its draw id -> its own motion vector, not
+// the sky's. dlaa.ini mv_fwd_conservative: 0 = off (the v0.14 behaviour), 1 = conservative raster, the depth still only where the
+// pixel shader's alpha >= 0.5 (alpha-to-coverage), 2 = conservative raster WITHOUT alpha-to-coverage (depth on every touched pixel:
+// the fringe pixels of an alpha-textured ribbon sample alpha ~0 outside the ribbon and mode 1 drops them; glass / smoke quads then
+// own their whole area). Default 1. key_mv_conservative (Alt+F11) cycles 1 -> 2 -> 0 live. Needs a D3D11.3 device with conservative
+// raster tier >= 1 (logged at the first batch).
+int               g_fwdConsCfg = 1;
+std::atomic<int>  g_fwdConsOn{1};
+bool              g_fwdConsExplicit = false;        // set in dlaa.ini or changed by its key -> written by the save key
+bool              g_mvDilateExplicit = false;       // phase 60 dlaa_mv_dilate: the same rule
 // phase 49 GLOW BIAS MASK (see the "GLOW BIAS MASK" block above hkDrawIndexed): dlaa.ini dlss_bias_mask = strength in % 0..100
 // (default 100; 0 = off: NGX gets no mask), live from the menu's "Light glow ghosting fix" row (25 % steps)
 int               g_biasCfg = 100;
@@ -1163,6 +1174,8 @@ enum KeyAction {
     KA_DRAWID_TOGGLE, KA_MIRROR_TOGGLE,                      // v0.10.0 phase 2: per-draw MVs (2 <-> 0) / mirror DLAA on / off
     KA_PRE_TONEMAP, KA_MV_DUMP,                              // v0.10.0 phase 4: DLAA before / after the tonemap; per-draw dump
     KA_PROFILE,                                              // v0.10.0 phase 10: perf_profile high -> medium -> low
+    KA_MV_DILATE,                                            // phase 60: DLSS motion-vector dilation in DLAA (MVLowRes) on / off
+    KA_FWD_CONSERVATIVE,                                     // phase 60: conservative raster for the forward depth on / off
     KA_LOD_CUT_DOWN, KA_LOD_CUT_UP,                          // v0.10.0 phase 13: cut-out (alpha-tested) LOD bias -/+0.25
     KA_MENU, KA_MENU_UP, KA_MENU_DOWN, KA_MENU_LEFT, KA_MENU_RIGHT,   // v0.10.0 tuning menu open / close + navigation
     KA_COUNT
@@ -1211,6 +1224,8 @@ KeyBind g_keys[KA_COUNT] = {
     { "key_pre_tonemap",     "Alt+F7",    0, 0, "", false },   // v0.10.0 phase 4: main-scene DLAA before / after the tonemap
     { "key_mv_dump",         "Alt+F8",    0, 0, "", false },   // v0.10.0 phase 4: log the per-draw MV state of the next frame
     { "key_perf_profile",    "Alt+F9",    0, 0, "", false },   // v0.10.0 phase 10: perf_profile high -> medium -> low (1-3 beeps)
+    { "key_mv_dilate",       "Alt+F10",   0, 0, "", false },   // phase 60: DLSS MV dilation in DLAA (thin wires) on / off
+    { "key_mv_conservative", "Alt+F11",   0, 0, "", false },   // phase 60: conservative raster for the wire depth on / off
     { "key_lod_cutout_down", "Ctrl+Shift+F1", 0, 0, "", false },   // v0.10.0 phase 13: tex_lod_bias_cutout -0.25 (2 beeps)
     { "key_lod_cutout_up",   "Ctrl+Shift+F2", 0, 0, "", false },   // v0.10.0 phase 13: tex_lod_bias_cutout +0.25 (2 beeps)
     { "key_menu",            "Delete",    0, 0, "", false },   // v0.10.0 tuning menu open / close
@@ -1619,6 +1634,8 @@ void ResetSettings(uint64_t n);          // v0.10.0 tuning menu Reset row: every
 void ToggleDlaa(uint64_t n);             // v0.10.0 (was inline): Shift+F11 DLAA on / off
 void ToggleUpscale(uint64_t n);          // v0.10.0 (was inline): Ctrl+F4 DLSS upscale on / off
 void ToggleFwdDepth(uint64_t n);         // v0.10.0 (was inline): Ctrl+F3 forward depth for the MVs on / off
+void ToggleMvDilate(uint64_t n);         // phase 60: Alt+F10 DLSS motion-vector dilation in DLAA on / off
+void ToggleFwdConservative(uint64_t n);  // phase 60: Alt+F11 conservative raster for the forward depth on / off
 void MenuKeys(uint64_t n);               // v0.10.0 tuning menu: open / close + navigation (before the other user keys)
 void FpsProfileTick();                   // phase 51: per-vehicle fps box profiles (after MenuKeys)
 void FpsBoxDefaults(uint64_t n);         // phase 51d: the menu's Left on "Re-measure cab spot": the current vehicle's box to defaults
@@ -1815,6 +1832,8 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
             if (KeyHit(KA_PRE_TONEMAP)) TogglePreTonemap(n);  // v0.10.0 phase 4 Alt+F7: DLAA before / after the tonemap
             if (KeyHit(KA_MV_DUMP)) RequestMvDump(n);         // v0.10.0 phase 4 Alt+F8: per-draw MV dump of the next frame
             if (KeyHit(KA_PROFILE)) CycleProfile(n);          // v0.10.0 phase 10 Alt+F9: perf_profile high -> medium -> low
+            if (KeyHit(KA_MV_DILATE)) ToggleMvDilate(n);      // phase 60 Alt+F10: DLSS MV dilation in DLAA (thin wires)
+            if (KeyHit(KA_FWD_CONSERVATIVE)) ToggleFwdConservative(n);   // phase 60 Alt+F11: conservative raster for the wire depth
             if (KeyHit(KA_PASSIVE)) TogglePassive(n);         // Ctrl+F7 passive mode (old Ctrl+End)
             if (KeyHit(KA_JITTER_ONLY)) {                         // jitter-only debug (old plain PageUp)
                 const bool jo = !g_jitterOnly.load();
@@ -3159,6 +3178,10 @@ void SaveSettings(uint64_t n) {
     }
     if (g_vrsPassesExplicit) snprintf(add("vrs_passes"), sizeof(kv[0].val), "%d", g_vrsPasses);   // phase 42 (Foveated passes)
     if (g_vrsEyeExplicit) snprintf(add("vrs_eye"), sizeof(kv[0].val), "%d", g_vrsEye);   // phase 59 (Foveated eye tracking)
+    if (g_fwdConsExplicit) snprintf(add("mv_fwd_conservative"), sizeof(kv[0].val), "%d", g_fwdConsOn.load());   // phase 60 (Alt+F11)
+#ifdef WITH_DLAA
+    if (g_mvDilateExplicit) snprintf(add("dlaa_mv_dilate"), sizeof(kv[0].val), "%d", DlaaProcessor::MvDilate() ? 1 : 0);   // phase 60 (Alt+F10)
+#endif
     char vrsW[224] = "";                                  // (phase 39: was 64, + log_level; phase 40: + xr_hidden_mask; phase 42: + vrs_passes;
                                                           //  phase 49: 128 -> 160, + dlss_bias_mask; phase 52: 160 -> 208, + the frame rate keys;
                                                           //  phase 59: 224, + vrs_eye)
@@ -3285,6 +3308,36 @@ void ToggleUpscale(uint64_t n) {
            : " -- DLAA at render res, copied back over the blit source (v0.6.5 path)");
     PlayTones(1, on ? 1200 : 300, 150, 0);
     OnLiveTuningChange();                            // timing windows restart (new pipeline shape)
+}
+// phase 60 Alt+F10 (key_mv_dilate): DLSS's own motion-vector dilation in DLAA mode (the NGX MVLowRes creation flag; dlaa.ini
+// dlaa_mv_dilate). Every DLAA unit recreates its feature at its next evaluate (history reset, as a model change).
+void ToggleMvDilate(uint64_t n) {
+#ifdef WITH_DLAA
+    const bool on = !DlaaProcessor::MvDilate();
+    DlaaProcessor::SetMvDilate(on);
+    g_mvDilateExplicit = true;
+    Log("DLAA motion-vector dilation %s (%s, Present #%llu)%s", on ? "ON" : "OFF", KeyName(KA_MV_DILATE), (unsigned long long)n,
+        on ? " -- MVLowRes in DLAA mode: DLSS dilates the motion vectors by depth (thin wires / cables keep their history "
+             "while driving); the DLAA features are recreated"
+           : " -- DLAA features recreated without MVLowRes (the v0.14 behaviour: undilated motion vectors)");
+    PlayTones(1, on ? 1200 : 300, 150, 0);
+#else
+    (void)n;
+#endif
+}
+// phase 60 Alt+F11 (key_mv_conservative): the forward depth / forward ids with conservative raster: 1 -> 2 -> 0 -> 1 (A/B/C).
+void ToggleFwdConservative(uint64_t n) {
+    const int cur = g_fwdConsOn.load();
+    const int m = cur == 1 ? 2 : (cur == 2 ? 0 : 1);
+    g_fwdConsOn = m;
+    g_fwdConsCfg = m;                                // the live value is the one the save key writes
+    g_fwdConsExplicit = true;
+    Log("MV forward depth conservative raster mode %d (%s, Present #%llu) -- %s", m, KeyName(KA_FWD_CONSERVATIVE),
+        (unsigned long long)n,
+        m == 1 ? "every pixel a wire / cable touches gets its depth + id where the wire's alpha >= 0.5 (alpha-to-coverage)"
+        : (m == 2 ? "every pixel a wire / cable touches gets its depth + id, alpha-to-coverage OFF (glass / smoke own their whole area)"
+                  : "OFF: depth + ids only where a wire covers a pixel centre (the v0.14 behaviour)"));
+    PlayTones(m == 0 ? 1 : m, m == 0 ? 300 : 1200, 150, 100);
 }
 // Ctrl+F3 (key_fwd_depth): v0.9.0 r5 forward depth for the MVs (A/B switch).
 void ToggleFwdDepth(uint64_t n) {
@@ -13314,6 +13367,7 @@ void ObjStatsTag(char* buf, size_t cap, uint64_t passes) {
 ID3D11Device*            g_fwdDev = nullptr;        // device of the two states below (ref)
 ID3D11DepthStencilState* g_fwdDss = nullptr;        // depth on, write ALL, GREATER_EQUAL, stencil off
 ID3D11BlendState*        g_fwdBs  = nullptr;        // alpha-to-coverage, every render target write mask 0
+ID3D11BlendState*        g_fwdBsNoA2c = nullptr;    // phase 60 mv_fwd_conservative 2: the same without alpha-to-coverage
 bool                     g_fwdFailed = false;       // state creation failed / MSAA scene depth: off for the session
 const void*              g_fwdSdChecked = nullptr;  // scene depth whose sample count was checked (identity)
 bool                     g_fwdFirstLogged = false;
@@ -13372,6 +13426,7 @@ void FwdFlush() {
     g_fwdDssMemoN = g_fwdBsMemoN = 0;
     if (g_fwdDss) { g_fwdDss->Release(); g_fwdDss = nullptr; }
     if (g_fwdBs)  { g_fwdBs->Release();  g_fwdBs = nullptr; }
+    if (g_fwdBsNoA2c) { g_fwdBsNoA2c->Release(); g_fwdBsNoA2c = nullptr; }
     if (g_fwdDev) { g_fwdDev->Release(); g_fwdDev = nullptr; }
     g_fwdSdChecked = nullptr;
     for (FwdRbSlot& S : g_fwdRbs) {                       // v0.9.0 r11 (old device: the staging copies are dropped)
@@ -13442,6 +13497,11 @@ bool FwdEnsureStates(ID3D11DeviceContext* ctx) {
     HRESULT hr1 = S_OK, hr2 = S_OK;
     if (!g_fwdDss) hr1 = g_fwdDev->CreateDepthStencilState(&dd, &g_fwdDss);
     if (!g_fwdBs)  hr2 = g_fwdDev->CreateBlendState(&bd, &g_fwdBs);
+    if (!g_fwdBsNoA2c) {                               // phase 60: optional (mode 2 falls back to mode 1 without it)
+        D3D11_BLEND_DESC b2 = bd;
+        b2.AlphaToCoverageEnable = FALSE;
+        if (FAILED(g_fwdDev->CreateBlendState(&b2, &g_fwdBsNoA2c))) g_fwdBsNoA2c = nullptr;
+    }
     if (FAILED(hr1) || FAILED(hr2) || !g_fwdDss || !g_fwdBs) {
         g_fwdFailed = true;
         LogErr("MV forward depth: OFF for this session -- state creation failed (depth-stencil hr=0x%lx, blend hr=0x%lx)",
@@ -13922,7 +13982,8 @@ void DidFwdReplay(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, 
     rec.SetView(ps.clip ? &ps.clipRect : nullptr, sh);    // v0.10.0 phase 9: the area clip + the forward resolution
     const DrawIdRecord::ReplayResult rr = rec.ReplayForward(g_ctx1, ok ? fidRtv : nullptr,
                                                             ok ? ps.twin.fwdDsv.Get() : nullptr, restoreTargets,
-                                                            (UINT)gb.Count());
+                                                            (UINT)gb.Count(),
+                                                            g_fwdCfg && g_fwdOn.load() && g_fwdConsOn.load() >= 1);   // phase 60
     GpuPerf::End(ctx, pq);
     g_didFwdReplayTimer.End(ctx, tq);
     t_inDlaa = false;
@@ -14031,8 +14092,11 @@ void FwdBatch(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int 
                 pq = GpuPerf::Begin(ctx, GpuPerf::kFwdDepth);
             }
             rec.SetView(ps.clip ? &ps.clipRect : nullptr, t.fwdShift);   // the area clip + the forward resolution
-            const DrawIdRecord::ReplayResult rr = rec.ReplayDepth(g_ctx1, t.fwdDummyRtv.Get(), t.fwdDsv.Get(), g_fwdDss, g_fwdBs,
-                                                                  restoreTargets);
+            const int  consMode = g_fwdConsOn.load();        // phase 60: conservative raster (thin wires), 0 / 1 / 2
+            const bool cons = consMode >= 1;
+            ID3D11BlendState* const fbs = (consMode == 2 && g_fwdBsNoA2c) ? g_fwdBsNoA2c : g_fwdBs;
+            const DrawIdRecord::ReplayResult rr = rec.ReplayDepth(g_ctx1, t.fwdDummyRtv.Get(), t.fwdDsv.Get(), g_fwdDss, fbs,
+                                                                  restoreTargets, cons);
             GpuPerf::End(ctx, pq);
             g_fwdBatchTimer.End(ctx, tq);
             t_inDlaa = false;
@@ -14048,6 +14112,14 @@ void FwdBatch(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int 
                     t.fwdShift ? " (1/2 resolution: viewport / scissor halved, R8 dummy RT0)" : "", g_sceneW, g_sceneH,
                     inited ? "ON (mv_fwd_depth_cull 1)" : (g_fwdCullCfg ? "NOT possible for this pass (no snapshot yet)"
                                                                          : "off (mv_fwd_depth_cull 0)"));
+                const int tier = DrawIdRecord::ConservativeTier();
+                Log("MV forward depth: conservative raster (phase 60, mv_fwd_conservative mode %d%s) -- %s", consMode,
+                    consMode == 2 ? (g_fwdBsNoA2c ? ", alpha-to-coverage off" : ", NO blend state without alpha-to-coverage: as mode 1") : "",
+                    !cons ? "not used for this batch"
+                    : (tier >= 1 ? (DrawIdRecord::ConservativeRsFails() ? "device tier OK, but some rasterizer copies failed (those draws as before)"
+                                                                        : "ACTIVE: every pixel a wire touches gets its depth + id")
+                                 : "NOT SUPPORTED by this device (tier 0 / no D3D11.3) -- the forward depth stays as before"));
+                if (tier >= 0) Log("MV forward depth: conservative rasterization tier %d", tier);
             }
         }
     }
@@ -17949,6 +18021,8 @@ const MenuHkLine kMenuHkLines[] = {
     { KA_MIRROR_TOGGLE,  "Mirror DLAA on / off" },
     { KA_PRE_TONEMAP,    "DLAA before tonemap (flat)" },
     { KA_FWD_DEPTH,      "See-through depth" },
+    { KA_MV_DILATE,      "Thin-wire motion (DLAA)" },
+    { KA_FWD_CONSERVATIVE, "Thin-wire depth" },
     { KA_UPSCALE_TOGGLE, "DLSS upscale" },
     { KA_DLAA_TOGGLE,    "DLAA on / off" },
     { KA_SAVE,           "Save to dlaa.ini" },
@@ -22231,6 +22305,18 @@ void LoadConfig() {
             if (!strcmp(key, "xr_hidden_mask"))     { g_xrHiddenMask = v != 0 ? 1 : 0; g_xrHiddenMaskExplicit = true; continue; }   // phase 40
             if (!strcmp(key, "dlss_bias_mask"))     { g_biasCfg = v < 0 ? 0 : (v > 100 ? 100 : (int)v); g_biasExplicit = true; continue; }   // phase 49
             if (!strcmp(key, "light_redraw_jitter")) { g_lightRedrawCfg = v != 0 ? 1 : 0; continue; }   // phase 55 (outside the chain: C1061)
+            // phase 60: thin wires -- DLSS MV dilation in DLAA (Alt+F10) and the conservative forward depth (Alt+F11), 0/1, default 1
+            // (outside the else-if chain: C1061)
+            if (!strcmp(key, "mv_fwd_conservative")) {
+                g_fwdConsCfg = v <= 0 ? 0 : (v >= 2 ? 2 : 1); g_fwdConsOn = g_fwdConsCfg; g_fwdConsExplicit = true; continue;
+            }
+            if (!strcmp(key, "dlaa_mv_dilate")) {
+#ifdef WITH_DLAA
+                DlaaProcessor::SetMvDilate(v != 0);
+#endif
+                g_mvDilateExplicit = true;
+                continue;
+            }
             if (!strcmp(key, "cpu_pcore"))          { g_cpuPcore = v != 0 ? 1 : 0; g_cpuTuneExplicit = true; continue; }          // phase 54
             if (!strcmp(key, "cpu_priority"))       { g_cpuPriority = v != 0 ? 1 : 0; g_cpuTuneExplicit = true; continue; }       // phase 54 (only 0 / 1: never HIGH)
             if (!strcmp(key, "cpu_no_throttle"))    { g_cpuNoThrottle = v != 0 ? 1 : 0; g_cpuTuneExplicit = true; continue; }     // phase 54
