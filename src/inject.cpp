@@ -9586,9 +9586,17 @@ void HmNoteBlit(uint64_t s, int eye, void* rt, uint32_t slice, uint32_t sceneCle
     if (view >= 0) {
         if (view == g_hm.eyeView[eye]) { if (g_hm.eyeRun[eye] < (1 << 30)) ++g_hm.eyeRun[eye]; }
         else {
-            if (g_hm.eyeView[eye] >= 0)
-                LogWarn("hidden area mask: eye %d is now blitted to OpenXR view %d (was view %d) -- relearning (%d blits)", eye, view,
-                    g_hm.eyeView[eye], kVrsTrust);
+            if (g_hm.eyeView[eye] >= 0) {
+                // phase 59c: the first 8, then one line at each power of two (a Varjo log had 6,484 of these in 70 s)
+                static uint64_t s_flips = 0;
+                const uint64_t f = ++s_flips;
+                if (f <= 8)
+                    LogWarn("hidden area mask: eye %d is now blitted to OpenXR view %d (was view %d) -- relearning (%d blits)", eye, view,
+                        g_hm.eyeView[eye], kVrsTrust);
+                else if ((f & (f - 1)) == 0)
+                    LogWarn("hidden area mask: %llu eye -> OpenXR view changes so far (the eye order of the blits keeps changing; the "
+                        "single lines stop after 8)", (unsigned long long)f);
+            }
             g_hm.eyeView[eye] = view;
             g_hm.eyeRun[eye] = 1;
         }
@@ -9769,7 +9777,7 @@ void VrsGazeMaybeLog() {
     const Vrs::Stats& vs = Vrs::GetStats();
     if (!s_lastMs) {
         s_lastMs = now; s_lastFrame = frame; s_prev = es;
-        Log("Eye tracking: ON (vrs_eye=1%s, vrs_eye_smooth=%d ms) -- extension state %d (0 not asked, 1 not offered, 2 the game's own, 3 "
+        Log("Eye tracking: ON (vrs_eye=1%s, vrs_eye_smooth=%d ms) -- extension state %d (0 not asked, 1 not listed, 2 enabled above the runtime (used, phase 59c), 3 "
             "enabled by the mod, 4 refused), system %d (-1 not queried, 0 no eye gaze, 1 eye gaze), setup %d, attached %s; an \"Eye "
             "tracking @\" line every 10 s", g_vrsEyeFake ? ", vrs_eye_fake=1: a MADE-UP gaze circling 0.25 tangent / 6 s" : "",
             g_vrsEyeSmooth, es.ext, es.system, es.setup,
@@ -9802,7 +9810,7 @@ void VrsGazeMaybeLog() {
         "+%llu / ours +%llu; FOCUSED %d; gaze locates +%llu: valid +%llu (%.0f %%), invalid +%llu, fails %llu, %.0f valid gazes/s, "
         "newest %.0f ms old, view 0 (%+.3f, %+.3f) view 1 (%+.3f, %+.3f) | %s | %s | gaze masks: refills +%llu (%.1f /s, %.2f per "
         "frame), %.1f us each (max %.1f us), %.3f ms per frame, brackets +%llu",
-        sec, g_vrsEyeFake ? "FAKE (vrs_eye_fake=1)" : (es.ext == 3 && es.system == 1 && !es.failed ? "real (OpenXR eye gaze)" : "none (optical centre)"),
+        sec, g_vrsEyeFake ? "FAKE (vrs_eye_fake=1)" : ((es.ext == 3 || es.ext == 2) && es.system == 1 && !es.failed ? "real (OpenXR eye gaze)" : "none (optical centre)"),
         es.ext, es.system, es.setup,
         es.attachedBy == 1 ? "by the game (ours appended)" : es.attachedBy == 2 ? "by the mod alone" : es.attachedBy < 0 ? "FAILED" : "not yet",
         es.failed ? ", GIVEN UP (see the error above)" : "", es.gameAttach ? 1 : 0, es.gameSets,
@@ -18551,7 +18559,6 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
                           : g_vrsEyeFake ? L"on (fake gaze)"
                           : !g_vrsEyeAtStart ? L"on (restart the game)"
                           : (es.ext == 1 || es.ext == 4 || es.system == 0) ? L"on (no eye tracker)"
-                          : es.ext == 2 ? L"on (the game's own gaze)"
                           : (es.failed || es.setup < 0 || es.attachedBy < 0) ? L"on (failed, see log)"
                           : (es.ext == 0 || es.system < 0) ? L"on (no OpenXR session yet)"
                           : (es.ageMs >= 0.0 && es.ageMs < 200.0) ? L"on (gaze)" : L"on (waiting for gaze)";
