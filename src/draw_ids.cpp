@@ -2622,6 +2622,7 @@ struct DrawIdRecord::State {
     UINT ic, inst, si, sinst;
     INT  bv;
     bool instanced;
+    uint8_t gsKind;                              // phase 64: widening kind (SetNextGs; 0 = none)
     uint32_t own;                                // phase 35: the pointers this draw holds a reference on (kO* bits)
 };
 
@@ -2728,6 +2729,7 @@ void DrawIdRecord::Reset() {
     m_nRings = 0; m_lastRing = -1; m_seals = 0; m_need = 0; m_copiedAny = false; m_flushFail = false;
     m_otherBuf = nullptr;
     m_n = 0; m_replayedTo = 0; m_releasedTo = 0;
+    m_nextGs = 0;                                        // phase 64: no stamp survives a reset
     m_full = 0; m_nInst = 0; m_nNoMvp = 0;
     m_cleared = false; m_replayFail = false;
     m_segments = 0; m_replayed = 0; m_skipped = 0;
@@ -3376,6 +3378,8 @@ bool DrawIdRecord::CaptureShadow(ID3D11DeviceContext1* ctx, State& s, const Stat
 }
 
 bool DrawIdRecord::Record(ID3D11DeviceContext1* ctx, UINT ic, UINT inst, UINT si, INT bv, UINT sinst, bool instanced) {
+    const uint8_t gsKind = m_nextGs;                     // phase 64: consumed by THIS call, also when it records nothing (a full
+    m_nextGs = 0;                                        //   record must not leave the stamp armed for another pass's draw)
     if (!ctx) return false;
     if (m_n >= kMax) { ++m_full; return false; }
     if (!m_st) {
@@ -3388,6 +3392,7 @@ bool DrawIdRecord::Record(ID3D11DeviceContext1* ctx, UINT ic, UINT inst, UINT si
     // phase 35: the IA / VS / RS input state from DidShadow (did_shadow = 1) or through the getters (the pre-phase-35 path)
     if (!DidShadow::Configured() || !CaptureShadow(ctx, s, m_n > m_releasedTo ? &m_st[m_n - 1] : nullptr)) CaptureGet(ctx, s);
     s.ic = ic; s.inst = inst; s.si = si; s.sinst = sinst; s.bv = bv; s.instanced = instanced;
+    s.gsKind = gsKind;                                   // phase 64
     // v0.10.0 phase 10: the pixel-shader state of a forward draw (the batched forward-depth re-draw needs the game's alpha)
     if (m_capPs && !m_ps && m_n == 0) {
         m_ps = new (std::nothrow) PsState[kMax];
@@ -3616,6 +3621,12 @@ ID3D11RasterizerState* DrawIdRecord::ConservativeRs(ID3D11Device* dev, ID3D11Ras
 int DrawIdRecord::ConservativeTier() { return g_crTier; }
 uint64_t DrawIdRecord::ConservativeRsFails() { return g_crFails; }
 uint64_t DrawIdRecord::ConservativeRsFull() { return g_crFull; }
+
+// phase 64: the widening GS for replays (see SetReplayGs in draw_ids.h)
+DrawIdRecord::ReplayGsFn g_replayGsFn = nullptr;
+ID3D11BlendState*        g_replayNoA2c = nullptr;      // identity only (owned by inject.cpp's forward-depth states)
+uint64_t                 g_replayGsDraws = 0;
+void DrawIdRecord::SetReplayGs(ReplayGsFn fn, ID3D11BlendState* noA2c) { g_replayGsFn = fn; g_replayNoA2c = noA2c; }
 
 // ---- phase 58b (perf round 2) RAW REPLAY CALLS (see SetRawCall in draw_ids.h) ----
 // PER-HOOK VERDICTS -- what inject.cpp's hook does with a call the replay loop makes (render thread, the game context, t_inDlaa =
@@ -3933,6 +3944,8 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
     RawCalls rc;
     RawResolve(ctx, rc);
     uint64_t drawTramp = 0, drawVt = 0;                  // phase 58c: this replay's draws by path (g_rawDraw*)
+    int boundGs = 0;                                     // phase 64: the widening kind whose GS is bound now
+    bool gsTouched = false;                              //   any bind attempt this replay (-> the final unbind)
 
     // per-draw: only what differs from the previously replayed draw (first draw: everything). REVERSE draw order: the game
     // tests depth GREATER, so of two draws at exactly the same depth the FIRST one owns the pixel; with EQUAL the last
@@ -4065,6 +4078,21 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
             lastRs = rsUse; lastNVp = s.nVp; memcpy(lastVp, vp, sizeof(D3D11_VIEWPORT) * s.nVp);
             if (scOn) { lastNSc = nSc; memcpy(lastSc, sc, sizeof(D3D11_RECT) * nSc); }
         }
+        // phase 64: a widened draw (its colour went through the widening GS) -> the same GS here, so its depth / id cover the band
+        {
+            const int want = (forward && g_replayGsFn && s.gsKind && s.nVp) ? (int)s.gsKind : 0;
+            if (want != boundGs) {
+                const float scale = shift ? 0.5f : 1.0f;
+                const bool okGs = want ? g_replayGsFn(ctx, want, s.vp[0].Width * scale, s.vp[0].Height * scale, scale) : false;
+                if (!okGs) g_replayGsFn(ctx, 0, 0, 0, 0);    // unstamped draw, or a failed bind: never leave a previous kind's GS bound
+                gsTouched = true;
+                const int now = okGs ? want : 0;
+                if (depth && (now != 0) != (boundGs != 0))   // the band's depth on every pixel: no alpha-to-coverage for it
+                    ctx->OMSetBlendState(now && g_replayNoA2c ? g_replayNoA2c : depthBs, nullptr, 0xFFFFFFFFu);
+                boundGs = now;
+            }
+            if (boundGs) ++g_replayGsDraws;
+        }
         if (depth) {                                     // v0.10.0 phase 10: the game's pixel shader + its resources
             const PsState& p = m_ps[i];
             if (!curPs || curPs->ps != p.ps) { if (rc.ps) rc.ps(ctx, p.ps, nullptr, 0); else ctx->PSSetShader(p.ps, nullptr, 0); }
@@ -4110,6 +4138,7 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
         cur = &s;
         ++rr.replayed;
     }
+    if (gsTouched && g_replayGsFn) g_replayGsFn(ctx, 0, 0, 0, 0);   // phase 64: GS + its constant buffer off again
     g_rawDrawTramp += drawTramp;                         // phase 58c (RawDraws)
     g_rawDrawVt += drawVt;
     GpuPerf::End(ctx, splitTok);

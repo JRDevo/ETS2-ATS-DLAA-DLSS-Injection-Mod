@@ -779,6 +779,7 @@
 #include "gaze_math.h"                              // phase 59: eye-tracked foveation (gaze -> ring centre, smoothing, fake gaze)
 #include "frame_pace.h"                             // phase 52: frame cap + NVIDIA Reflex (flat), the VR FPS cap's maths
 #include "hidden_mask.h"                            // phase 40: VR hidden area mask (XR_KHR_visibility_mask into the eye depth)
+#include "wire_widen.h"                             // phase 61: sub-pixel wires drawn min-px wide (geometry shader)
 #include "fps_cab.h"                                // phase 47: the VR fps box attached to the vehicle (GPU-placed from a cab draw)
 #include "fps_profile.h"                            // phase 51: per-vehicle fps box placement (fps_profile lines; pure logic)
 #endif
@@ -984,6 +985,22 @@ int               g_fwdConsCfg = 1;
 std::atomic<int>  g_fwdConsOn{1};
 bool              g_fwdConsExplicit = false;        // set in dlaa.ini or changed by its key -> written by the save key
 bool              g_mvDilateExplicit = false;       // phase 60 dlaa_mv_dilate: the same rule
+// phase 61 (thin wires, the colour): the game's wire draws through WireWiden's geometry shader -- a triangle thinner than
+// wire_min_px on screen becomes a wire_min_px band with its alpha scaled down by the same ratio (wire_widen.h). dlaa.ini
+// wire_widen (default 0: experimental, no measured gain while driving) + its live switch key_wire_widen (Alt+F12); wire_min_px 0.5..3 (default 1.0). Only while DLAA runs (not
+// passive), main world forward pass, the wire VS + PS pair, SRC_ALPHA blending.
+bool              g_wireCfg = false;
+std::atomic<bool> g_wireOn{false};
+float             g_wireMinPx = 1.0f;
+float             g_wireSolidMinShare = 0.10f;    // phase 63 dlaa.ini wire_solid_min_share 0 .. 1 (the dither's keep-share floor; phase 68: default 0.25 -> 0.1)
+bool              g_wireExplicit = false;
+bool              g_wireLogged = false;
+bool              g_solidLogged = false;          // phase 63
+bool              g_solidInstLogged = false;      // phase 66: the instanced street lights' first line
+int               g_lastSolidKind = 0;            // phase 64: the kind SolidOnDraw bound for this draw (1 A / 2 B)
+uint8_t           g_nextFwdGsKind = 0;            // phase 64: the widening kind DidFwdOnDraw stamps on the draw it records
+bool              g_wireDiagLogged = false, g_wireFullLogged = false;   // one-shot diagnostics
+int               g_wireDiagWindows = 0;
 // phase 49 GLOW BIAS MASK (see the "GLOW BIAS MASK" block above hkDrawIndexed): dlaa.ini dlss_bias_mask = strength in % 0..100
 // (default 100; 0 = off: NGX gets no mask), live from the menu's "Light glow ghosting fix" row (25 % steps)
 int               g_biasCfg = 100;
@@ -1176,6 +1193,7 @@ enum KeyAction {
     KA_PROFILE,                                              // v0.10.0 phase 10: perf_profile high -> medium -> low
     KA_MV_DILATE,                                            // phase 60: DLSS motion-vector dilation in DLAA (MVLowRes) on / off
     KA_FWD_CONSERVATIVE,                                     // phase 60: conservative raster for the forward depth on / off
+    KA_WIRE_WIDEN,                                           // phase 61: sub-pixel wires drawn min-px wide on / off
     KA_LOD_CUT_DOWN, KA_LOD_CUT_UP,                          // v0.10.0 phase 13: cut-out (alpha-tested) LOD bias -/+0.25
     KA_MENU, KA_MENU_UP, KA_MENU_DOWN, KA_MENU_LEFT, KA_MENU_RIGHT,   // v0.10.0 tuning menu open / close + navigation
     KA_COUNT
@@ -1226,6 +1244,7 @@ KeyBind g_keys[KA_COUNT] = {
     { "key_perf_profile",    "Alt+F9",    0, 0, "", false },   // v0.10.0 phase 10: perf_profile high -> medium -> low (1-3 beeps)
     { "key_mv_dilate",       "Alt+F10",   0, 0, "", false },   // phase 60: DLSS MV dilation in DLAA (thin wires) on / off
     { "key_mv_conservative", "Alt+F11",   0, 0, "", false },   // phase 60: conservative raster for the wire depth on / off
+    { "key_wire_widen",      "Alt+F12",   0, 0, "", false },   // phase 61: far wires drawn at least wire_min_px wide on / off
     { "key_lod_cutout_down", "Ctrl+Shift+F1", 0, 0, "", false },   // v0.10.0 phase 13: tex_lod_bias_cutout -0.25 (2 beeps)
     { "key_lod_cutout_up",   "Ctrl+Shift+F2", 0, 0, "", false },   // v0.10.0 phase 13: tex_lod_bias_cutout +0.25 (2 beeps)
     { "key_menu",            "Delete",    0, 0, "", false },   // v0.10.0 tuning menu open / close
@@ -1636,6 +1655,7 @@ void ToggleUpscale(uint64_t n);          // v0.10.0 (was inline): Ctrl+F4 DLSS u
 void ToggleFwdDepth(uint64_t n);         // v0.10.0 (was inline): Ctrl+F3 forward depth for the MVs on / off
 void ToggleMvDilate(uint64_t n);         // phase 60: Alt+F10 DLSS motion-vector dilation in DLAA on / off
 void ToggleFwdConservative(uint64_t n);  // phase 60: Alt+F11 conservative raster for the forward depth on / off
+void ToggleWireWiden(uint64_t n);        // phase 61: Alt+F12 far wires drawn min-px wide on / off
 void MenuKeys(uint64_t n);               // v0.10.0 tuning menu: open / close + navigation (before the other user keys)
 void FpsProfileTick();                   // phase 51: per-vehicle fps box profiles (after MenuKeys)
 void FpsBoxDefaults(uint64_t n);         // phase 51d: the menu's Left on "Re-measure cab spot": the current vehicle's box to defaults
@@ -1834,6 +1854,7 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
             if (KeyHit(KA_PROFILE)) CycleProfile(n);          // v0.10.0 phase 10 Alt+F9: perf_profile high -> medium -> low
             if (KeyHit(KA_MV_DILATE)) ToggleMvDilate(n);      // phase 60 Alt+F10: DLSS MV dilation in DLAA (thin wires)
             if (KeyHit(KA_FWD_CONSERVATIVE)) ToggleFwdConservative(n);   // phase 60 Alt+F11: conservative raster for the wire depth
+            if (KeyHit(KA_WIRE_WIDEN)) ToggleWireWiden(n);    // phase 61 Alt+F12: far wires drawn min-px wide
             if (KeyHit(KA_PASSIVE)) TogglePassive(n);         // Ctrl+F7 passive mode (old Ctrl+End)
             if (KeyHit(KA_JITTER_ONLY)) {                         // jitter-only debug (old plain PageUp)
                 const bool jo = !g_jitterOnly.load();
@@ -2390,7 +2411,10 @@ void DidOnDepthDiscard(ID3D11DeviceContext* ctx);
 void DidOnDiscardMap(ID3D11DeviceContext* ctx, ID3D11Resource* r);
 void DidOnContextReset();
 void DidStatsTag(char* buf, size_t cap, uint64_t passes);
-bool DidFwdOnDraw(ID3D11DeviceContext* ctx, UINT ic, UINT si, INT bv);   // v0.10.0 phase 3 (FwdOnDraw; phase 10: records only)
+bool DidFwdOnDraw(ID3D11DeviceContext* ctx, UINT ic, UINT si, INT bv,   // v0.10.0 phase 3 (FwdOnDraw; phase 10: records only)
+                  UINT inst = 1, UINT sinst = 0, bool instanced = false);   // phase 66: + an instanced draw (the street lights)
+bool SolidOnDraw(ID3D11DeviceContext* ctx, bool instanced = false);   // phase 63 (phase 66: + hkDrawIndexedInstanced)
+bool WireReplayGs(ID3D11DeviceContext* ctx, int kind, float vpW, float vpH, float scale);   // phase 64 (DrawIdRecord::SetReplayGs)
 void FwdOnPassEnd(ID3D11DeviceContext* ctx);   // v0.10.0 phase 10: the forward-depth batch of the newest pass (scene depth discard)
 void FwdBatch(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int why);   // v0.10.0 phase 10
 void DidFwdNoteDraw(ID3D11DeviceContext* ctx, UINT ic, bool instanced, int verdict, ID3D11DepthStencilState* dss,
@@ -3179,6 +3203,7 @@ void SaveSettings(uint64_t n) {
     if (g_vrsPassesExplicit) snprintf(add("vrs_passes"), sizeof(kv[0].val), "%d", g_vrsPasses);   // phase 42 (Foveated passes)
     if (g_vrsEyeExplicit) snprintf(add("vrs_eye"), sizeof(kv[0].val), "%d", g_vrsEye);   // phase 59 (Foveated eye tracking)
     if (g_fwdConsExplicit) snprintf(add("mv_fwd_conservative"), sizeof(kv[0].val), "%d", g_fwdConsOn.load());   // phase 60 (Alt+F11)
+    if (g_wireExplicit) snprintf(add("wire_widen"), sizeof(kv[0].val), "%d", g_wireOn.load() ? 1 : 0);   // phase 61 (Alt+F12)
 #ifdef WITH_DLAA
     if (g_mvDilateExplicit) snprintf(add("dlaa_mv_dilate"), sizeof(kv[0].val), "%d", DlaaProcessor::MvDilate() ? 1 : 0);   // phase 60 (Alt+F10)
 #endif
@@ -3324,6 +3349,24 @@ void ToggleMvDilate(uint64_t n) {
 #else
     (void)n;
 #endif
+}
+// phase 61 Alt+F12 (key_wire_widen): sub-pixel wires drawn min-px wide on / off (A/B switch).
+void ToggleWireWiden(uint64_t n) {
+    const bool on = !g_wireOn.load();
+    g_wireOn = on;
+    g_wireCfg = on;                                  // the live value is the one the save key writes
+    g_wireExplicit = true;
+#ifdef WITH_DLAA
+    Log("wire widening %s (%s, Present #%llu) -- %s (wire_min_px %.2f; wire shaders known: %d VS, %d PS)", on ? "ON" : "OFF",
+        KeyName(KA_WIRE_WIDEN), (unsigned long long)n,
+        on ? (g_fwdConsOn.load() >= 1 ? "a wire triangle thinner than wire_min_px becomes a band that wide with its alpha scaled down (no dashes); "
+                                        "solid far wires / lattice towers: the band dithered (phase 63)"
+                                      : "a wire triangle thinner than wire_min_px becomes a band that wide -- NOTE: mv_fwd_conservative is 0 "
+                                        "(Alt+F11), so the band pixels between the dashes keep the sky's motion")
+           : "the game's own thin wires (dashes where a wire covers no pixel centre)",
+        (double)g_wireMinPx, WireWiden::KnownVs(), WireWiden::KnownPs());
+#endif
+    PlayTones(1, on ? 1200 : 300, 150, 0);
 }
 // phase 60 Alt+F11 (key_mv_conservative): the forward depth / forward ids with conservative raster: 1 -> 2 -> 0 -> 1 (A/B/C).
 void ToggleFwdConservative(uint64_t n) {
@@ -9189,7 +9232,22 @@ HRESULT STDMETHODCALLTYPE hkCreatePixelShader(ID3D11Device* dev, const void* cod
         bool dep = false;                                // v0.10.0 phase 21: + the SV_Depth output flag
         const int cls = DxbcPsClass(code, len, &dep);
         LodPsNote(*pp, cls, dep);
+#ifdef WITH_DLAA
+        WireWiden::NotePs(*pp, code, len);               // phase 61: the wire PS (by its DXBC checksum)
+#endif
     }
+    return hr;
+}
+// phase 61: CreateVertexShader (device vtable 12, any thread) -- only the wire VS is remembered (WireWiden, by its DXBC checksum).
+typedef HRESULT (STDMETHODCALLTYPE* CreateVertexShader_t)(ID3D11Device*, const void*, SIZE_T, ID3D11ClassLinkage*,
+                                                           ID3D11VertexShader**);
+CreateVertexShader_t oCreateVertexShader = nullptr;
+HRESULT STDMETHODCALLTYPE hkCreateVertexShader(ID3D11Device* dev, const void* code, SIZE_T len, ID3D11ClassLinkage* cl,
+                                               ID3D11VertexShader** pp) {
+    const HRESULT hr = oCreateVertexShader(dev, code, len, cl, pp);
+#ifdef WITH_DLAA
+    if (SUCCEEDED(hr) && pp && *pp) WireWiden::NoteVs(*pp, code, len);
+#endif
     return hr;
 }
 
@@ -13678,6 +13736,37 @@ void FwdOnPassStart(ID3D11DeviceContext* ctx) {
     const CameraMv& mv0 = g_dlaa[0].Mv();
     const uint64_t npx = mv0.FwdNearPx(), nfr = mv0.FwdNearFrames();
     const double nearPx = nfr > g_fwdNearFr0 ? (double)(npx - g_fwdNearPx0) / (double)(nfr - g_fwdNearFr0) : 0.0;
+    {                                                     // phase 61: the wire widening over the same window (counters always taken)
+        const WireWiden::Stats ws = WireWiden::TakeStats();
+        // one-shot: switched on, forward passes ran, but the widening cannot ever bind (the reason, not just silence)
+        if (g_wireCfg && !g_wireDiagLogged && g_fwdPassesLive > 0 && g_dlaaOn.load() && !g_passive.load() && !g_wireLogged &&
+            !g_solidLogged && ws.boundSolid == 0 &&                                    // phase 63: solid pairs count too
+            ++g_wireDiagWindows >= 3 && (!g_lodPsHooked.load() || WireWiden::KnownVs() == 0 || WireWiden::KnownPs() == 0 ||
+                                         ws.skipBlend || ws.skipNotReady)) {   // (no wire in view is not a warning)
+            g_wireDiagLogged = true;
+            LogWarn("wire widening (phase 61): no wire draw widened yet -- %s", !g_lodPsHooked.load() ? "the PSSetShader hook is not "
+                "installed (the current pixel shader is unknown)" : (WireWiden::KnownVs() == 0 || WireWiden::KnownPs() == 0) ?
+                "the game's wire shaders were not seen at creation (created before the mod's hooks, or another game version)" :
+                (ws.skipBlend ? "the wire draws do not blend SRC_ALPHA (another game version?)" : (ws.skipNotReady ?
+                "the geometry shader is still compiling" : "no wire in view yet / DLAA off")));
+        }
+        if (WireWiden::SetFull() && !g_wireFullLogged) {
+            g_wireFullLogged = true;
+            LogWarn("wire widening (phase 61): the wire shader identity set is full (%d notes lost) -- shaders re-created many times; "
+                "a new wire shader may not be recognised until the game restarts", WireWiden::SetFull());
+        }
+        if (g_fwdStatLogs < 200)
+            LogDbg("wire widening (phase 61, %s, wire_min_px %.2f) over %llu passes: %.1f wire draws widened per pass (%.1f of them pole "
+                "hardware, phase 62) + %.1f solid G-buffer draws dithered (phase 63), skipped: blend %llu, game GS %llu, shader not ready %llu, "
+                "constant-buffer updates %llu | wire shaders known: %d VS, %d PS (%d pole hardware), solid %d / 5",
+                (g_wireCfg && g_wireOn.load()) ? "on" : "off",
+                (double)g_wireMinPx, (unsigned long long)g_fwdPassesLive,
+                g_fwdPassesLive ? (double)ws.bound / (double)g_fwdPassesLive : 0.0,
+                g_fwdPassesLive ? (double)ws.boundCut / (double)g_fwdPassesLive : 0.0,
+                g_fwdPassesLive ? (double)ws.boundSolid / (double)g_fwdPassesLive : 0.0, (unsigned long long)ws.skipBlend,
+                (unsigned long long)ws.skipGs, (unsigned long long)ws.skipNotReady, (unsigned long long)ws.cbUpdates,
+                WireWiden::KnownVs(), WireWiden::KnownPs(), WireWiden::KnownPsCut(), WireWiden::KnownSolid());
+    }
     if (g_fwdStatLogs++ < 200)
         LogDbg("MV forward depth: per pass over %llu passes -- forward draws %.1f, recorded for the batch %.1f (over-blended, depth test "
             "without depth write, world layer), skipped: sky / cabin layer %.1f, other states %.1f, near-camera %.1f, "
@@ -13980,6 +14069,8 @@ void DidFwdReplay(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, 
     GpuPerf::SetPass(ps.s);                               // v0.10.0 phase 8
     const int pq = ok ? GpuPerf::Begin(ctx, GpuPerf::kFwdReplay) : -1;
     rec.SetView(ps.clip ? &ps.clipRect : nullptr, sh);    // v0.10.0 phase 9: the area clip + the forward resolution
+    DrawIdRecord::SetReplayGs(&WireReplayGs, g_fwdBsNoA2c);   // phase 64: widened draws replay through their widening GS
+    WireWiden::SetReplayMinPx(g_wireMinPx);
     const DrawIdRecord::ReplayResult rr = rec.ReplayForward(g_ctx1, ok ? fidRtv : nullptr,
                                                             ok ? ps.twin.fwdDsv.Get() : nullptr, restoreTargets,
                                                             (UINT)gb.Count(),
@@ -14092,6 +14183,8 @@ void FwdBatch(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int 
                 pq = GpuPerf::Begin(ctx, GpuPerf::kFwdDepth);
             }
             rec.SetView(ps.clip ? &ps.clipRect : nullptr, t.fwdShift);   // the area clip + the forward resolution
+            DrawIdRecord::SetReplayGs(&WireReplayGs, g_fwdBsNoA2c);   // phase 64: widened draws replay through their widening GS
+            WireWiden::SetReplayMinPx(g_wireMinPx);
             const int  consMode = g_fwdConsOn.load();        // phase 60: conservative raster (thin wires), 0 / 1 / 2
             const bool cons = consMode >= 1;
             ID3D11BlendState* const fbs = (consMode == 2 && g_fwdBsNoA2c) ? g_fwdBsNoA2c : g_fwdBs;
@@ -14137,7 +14230,7 @@ void FwdOnPassEnd(ID3D11DeviceContext* ctx) {
 
 // v0.10.0 phase 10: called for every qualifying forward draw (ids on or off): the record (+ its pixel-shader state) is the input
 // of the pass-end forward-depth batch AND of the forward-id replay. false = not recorded (record full / no context).
-bool DidFwdOnDraw(ID3D11DeviceContext* ctx, UINT ic, UINT si, INT bv) {
+bool DidFwdOnDraw(ID3D11DeviceContext* ctx, UINT ic, UINT si, INT bv, UINT inst, UINT sinst, bool instanced) {
     if (!g_passSeq) return false;
     if (g_ctx1Owner != ctx) {
         if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
@@ -14148,8 +14241,9 @@ bool DidFwdOnDraw(ID3D11DeviceContext* ctx, UINT ic, UINT si, INT bv) {
     DrawIdRecord& rec = g_didFwdRing[SlotOf(g_passSeq - 1)];
     if (!rec.Forward()) rec.SetForward(true);
     if (!rec.CapturePs() && rec.Count() == 0) rec.SetCapturePs(true);   // v0.10.0 phase 10
+    rec.SetNextGs(g_nextFwdGsKind);                       // phase 64: a widened draw replays through its widening GS
     DidShadow::SetAlias(ctx);                             // phase 35
-    if (rec.Record(g_ctx1, ic, 1, si, bv, 0, false)) { ++g_didFwdRec; return true; }
+    if (rec.Record(g_ctx1, ic, instanced ? inst : 1u, si, bv, instanced ? sinst : 0u, instanced)) { ++g_didFwdRec; return true; }
     ++g_didFwdRecFull;
     return false;
 }
@@ -14717,6 +14811,7 @@ void DidOnContextReset() {
     g_didForcedPass = 0;
     g_didReplayTimer.Reset();
     DrawIdRecord::ShutdownDevice();                       // recreated on the new device at the next replay
+    WireWiden::Reset();                                   // phase 61: GS + constant buffer of the old device
     FpsCab::Shutdown();                                   // phase 47: staging buffers / mirror refs of the old device; a fresh lock
 }
 
@@ -18023,6 +18118,7 @@ const MenuHkLine kMenuHkLines[] = {
     { KA_FWD_DEPTH,      "See-through depth" },
     { KA_MV_DILATE,      "Thin-wire motion (DLAA)" },
     { KA_FWD_CONSERVATIVE, "Thin-wire depth" },
+    { KA_WIRE_WIDEN,     "Thin-wire widening" },
     { KA_UPSCALE_TOGGLE, "DLSS upscale" },
     { KA_DLAA_TOGGLE,    "DLAA on / off" },
     { KA_SAVE,           "Save to dlaa.ini" },
@@ -21186,10 +21282,94 @@ void STDMETHODCALLTYPE hkDrawIndexedInstanced(ID3D11DeviceContext* ctx, UINT ic,
     if (g_menuLateBound >= 0 && !inDlaa && IsGameCtx(ctx)) MenuLateCountDraw();   // v0.10.0 phase 16 VR late panel
     if (Vrs::g_want && !inDlaa && IsGameCtx(ctx)) VrsOnDraw(ctx);   // phase 34 (as hkDrawIndexed)
     if (g_lightBind && !inDlaa && IsGameCtx(ctx)) LightRedrawOnDraw(ctx);   // phase 55 (as hkDrawIndexed)
+    // phase 66: the street lights are ONE instanced G-buffer draw (pair B's PS 34860eed with the instanced VS a484ef85) -> the same
+    // solid GS + dither PS copy as the lattice towers (SolidOnDraw; cheap reject on the current PS first), and after the draw its
+    // record in the pass's forward record (the band's depth + id; the replay issues DrawIndexedInstanced with the recorded instances)
+    const bool solidGs = g_gbufPass && g_jitterPass && !inDlaa && IsGameCtx(ctx) && SolidOnDraw(ctx, true);
     CPU_ORIG(oDrawIndexedInstanced(ctx, ic, inst, si, bv, sinst));
+    if (solidGs) {
+        t_inDlaa = true; WireWiden::Unbind(ctx); t_inDlaa = false;
+        if (g_lastSolidKind && g_fwdCfg && g_fwdOn.load(std::memory_order_relaxed) && FwdLive()) {   // (as hkDrawIndexed, phase 64)
+            g_nextFwdGsKind = (uint8_t)(1 + g_lastSolidKind);
+            DidFwdOnDraw(ctx, ic, si, bv, inst, sinst, true);
+            g_nextFwdGsKind = 0;
+        }
+    }
 }
 #endif
 
+#ifdef WITH_DLAA
+// phase 63: the game's DrawIndexed of the world G-buffer pass (caller: gameCtx, g_jitterPass, g_gbufPass, not the mod's own work) ->
+// true = the solid GS + the dither PS copy are bound for this draw (the caller unbinds after the draw). Same switch / gates as the
+// wires; the current PS must be one of the two solid PSs (cheap reject), then its VS must be the matching one.
+// phase 66: + the game's DrawIndexedInstanced (instanced = true: the street lights, pair B with VS a484ef85; own first log line).
+// phase 64: DrawIdRecord's replay hook -> WireWiden::BindReplay (the widening GS for the forward-depth batch / forward-id replay)
+bool WireReplayGs(ID3D11DeviceContext* ctx, int kind, float vpW, float vpH, float scale) {
+    return WireWiden::BindReplay(ctx, kind, vpW, vpH, scale);
+}
+bool SolidOnDraw(ID3D11DeviceContext* ctx, bool instanced) {
+    if (!g_wireCfg || !g_wireOn.load(std::memory_order_relaxed)) return false;
+    if (!g_dlaaOn.load(std::memory_order_relaxed) || g_passive.load(std::memory_order_relaxed)) return false;
+    if (g_gameVpN == 0 || g_gameVp[0].MinDepth < 0.005f || g_gameVp[0].MaxDepth > 0.95f) return false;
+    const int kind = WireWiden::SolidPsKind(g_lodPsCur);
+    if (!kind) return false;
+    ID3D11VertexShader* vs = nullptr;
+    ctx->VSGetShader(&vs, nullptr, nullptr);
+    const bool ok = WireWiden::IsSolidVs(vs, kind);
+    if (vs) vs->Release();
+    if (!ok) return false;
+    t_inDlaa = true;
+    const bool bound = WireWiden::BindSolid(ctx, kind, g_gameVp[0].Width, g_gameVp[0].Height, g_wireMinPx,
+                                            (uint32_t)g_frames.load(std::memory_order_relaxed), g_wireSolidMinShare);
+    t_inDlaa = false;
+    // VRS (phase 34) decided this draw's rate from the GAME's PS (solid -> coarse allowed in the periphery); the dither copy must run
+    // per pixel (coarse shading would keep / drop 2 x 2 .. 4 x 4 blocks together) -> full rate for this draw, like a cut-out PS
+    if (bound && Vrs::g_want) Vrs::OnDraw(ctx, true, Vrs::kSkipCutout);
+    g_lastSolidKind = bound ? kind : 0;
+    // phase 66: one line per variant (the instanced street lights usually come after the towers / wires)
+    bool& logged = instanced ? g_solidInstLogged : g_solidLogged;
+    if (bound && !logged) {
+        logged = true;
+        Log("wire widening (phase 63): first solid thin draw dithered -- %s, viewport %.0fx%.0f, wire_min_px %.2f (Alt+F12 switches "
+            "it with the wires)", instanced ? "street lights (instanced, VS a484ef85 + PS 34860eed, phase 66)"
+                                            : (kind == 1 ? "far high-voltage wire (b67da69f)" : "lattice tower / street light (34860eed)"),
+            (double)g_gameVp[0].Width, (double)g_gameVp[0].Height, (double)g_wireMinPx);
+    }
+    return bound;
+}
+
+// phase 61: the game's DrawIndexed of the main world forward pass (caller: gameCtx, g_jitterPass, not the G-buffer, not the mod's
+// own work) -> true = WireWiden's GS is bound for this draw (the caller unbinds it after the draw). Cheap reject first: the
+// switch, DLAA running, the world layer of the viewport (as FwdOnDraw), the current PS (tracked by hkPSSetShader) = the wire PS;
+// only then the VS and the blend state are read.
+bool WireOnDraw(ID3D11DeviceContext* ctx) {
+    if (!g_wireCfg || !g_wireOn.load(std::memory_order_relaxed)) return false;
+    if (!g_dlaaOn.load(std::memory_order_relaxed) || g_passive.load(std::memory_order_relaxed)) return false;
+    if (g_gameVpN == 0 || g_gameVp[0].MinDepth < 0.005f || g_gameVp[0].MaxDepth > 0.95f) return false;
+    const int psKind = WireWiden::WirePsKind(g_lodPsCur);   // phase 62: 1 = the long wires, 2 = the pole hardware (discard)
+    if (!psKind) return false;
+    ID3D11VertexShader* vs = nullptr;
+    ctx->VSGetShader(&vs, nullptr, nullptr);
+    const bool wireVs = WireWiden::IsWireVs(vs);
+    if (vs) vs->Release();
+    if (!wireVs) return false;
+    ID3D11BlendState* bs = nullptr; FLOAT bf[4] = {}; UINT mask = 0;
+    ctx->OMGetBlendState(&bs, bf, &mask);
+    t_inDlaa = true;
+    const bool bound = WireWiden::Bind(ctx, bs, g_gameVp[0].Width, g_gameVp[0].Height, g_wireMinPx, psKind);
+    t_inDlaa = false;
+    if (bs) bs->Release();
+    if (bound && !g_wireLogged) {
+        g_wireLogged = true;
+        Log("wire widening (phase 61): first wire draw widened -- viewport %.0fx%.0f, wire_min_px %.2f (Alt+F12 switches it; wire "
+            "shaders known: %d VS, %d PS of which %d = the pole hardware, drawn with the mod's PS copy, phase 62)", (double)g_gameVp[0].Width,
+            (double)g_gameVp[0].Height, (double)g_wireMinPx, WireWiden::KnownVs(), WireWiden::KnownPs(), WireWiden::KnownPsCut());
+    }
+    return bound;
+}
+#endif
+
+// ---- v0.10.0 PER-DRAW MOTION VECTORS (mv_objects = 2, the default) --------------------------------------------------
 void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex) {
     CPU_HOOK(kHkDrawIndexed);                                 // phase 31 CPU profiler (cpu_prof.h)
     if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); CPU_ORIG(oDrawIndexed(ctx, indexCount, startIndex, baseVertex)); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
@@ -21308,16 +21488,29 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
     if (g_menuLateN && gameCtx && !inDlaa && indexCount <= 6) MenuLateOnDraw(ctx, "DrawIndexed", indexCount, _ReturnAddress());
     if (Vrs::g_want && gameCtx && !inDlaa) VrsOnDraw(ctx);   // phase 34: full rate for a cut-out / SV_Depth / unknown PS
     if (g_lightBind && gameCtx && !inDlaa) LightRedrawOnDraw(ctx);   // phase 55: a lighting-pass mesh redraw -> the G-buffer's viewport
+    // phase 61: a wire draw of the main world forward pass -> WireWiden's geometry shader for this one draw
+    // phase 63: in the G-buffer, the solid far wires / lattice towers -> the solid GS + the dither PS copy (SolidOnDraw)
+    const bool wireGs = gameCtx && g_jitterPass && !inDlaa && (g_gbufPass ? SolidOnDraw(ctx) : WireOnDraw(ctx));
 #endif
     CPU_ORIG(oDrawIndexed(ctx, indexCount, startIndex, baseVertex));
 #ifdef WITH_DLAA
+    if (wireGs) { t_inDlaa = true; WireWiden::Unbind(ctx); t_inDlaa = false; }   // phase 61
+    // phase 64: a widened SOLID G-buffer draw (phase 63) also goes into the pass's forward record: the forward-depth batch and the
+    // forward-id replay draw its full band (no dither) -> every band pixel carries the wire's depth and id, not the background's
+    if (wireGs && g_gbufPass && g_lastSolidKind && g_fwdCfg && g_fwdOn.load(std::memory_order_relaxed) && FwdLive()) {
+        g_nextFwdGsKind = (uint8_t)(1 + g_lastSolidKind);
+        DidFwdOnDraw(ctx, indexCount, startIndex, baseVertex);
+        g_nextFwdGsKind = 0;
+    }
     if (objTag) oOMSetDepthStencilState(ctx, g_objCur->twin, ObjStaticRef());   // back to the static ref
     if (pvMenuIdx >= 0 && !inDlaa) MenuDrawPreview(ctx, pvMenuIdx, 'a');      // v0.10.0 phase 15 (VR menu-screen eye)
     // v0.9.0 r5: a world FORWARD-pass draw (1 RTV RGBA16F + scene DSV, not the G-buffer) -> forward depth re-draw
     FwdDrawStates fst;                                    // phase 57: its depth-stencil / blend state, fetched once (released here)
     if (gameCtx && g_jitterPass && !g_gbufPass && !inDlaa && FwdLive()) {
         const uint64_t t2 = MeasureOn() ? __rdtsc() : 0;  // (phase 35: TSC; phase 45: only while measuring)
+        g_nextFwdGsKind = wireGs ? 1 : 0;                 // phase 64: a widened wire's record replays through the widening GS
         FwdOnDraw(ctx, indexCount, startIndex, baseVertex, fst);
+        g_nextFwdGsKind = 0;
         if (t2) g_fwdTicks += TscToQpc(__rdtsc() - t2);
     }
     // phase 49: an additive glow draw of the main forward binding -> the pass's glow record (GLOW BIAS MASK)
@@ -22310,6 +22503,18 @@ void LoadConfig() {
             if (!strcmp(key, "mv_fwd_conservative")) {
                 g_fwdConsCfg = v <= 0 ? 0 : (v >= 2 ? 2 : 1); g_fwdConsOn = g_fwdConsCfg; g_fwdConsExplicit = true; continue;
             }
+            // phase 61: far wires drawn min-px wide (outside the else-if chain: C1061)
+            if (!strcmp(key, "wire_widen")) { g_wireCfg = v != 0; g_wireOn = g_wireCfg; g_wireExplicit = true; continue; }
+            if (!strcmp(key, "wire_solid_min_share")) {   // phase 63, 0 .. 1 (default 0.1 since phase 68)
+                const double m = strtod(eq + 1, nullptr);
+                g_wireSolidMinShare = (float)(m < 0.0 ? 0.0 : (m > 1.0 ? 1.0 : m));
+                continue;
+            }
+            if (!strcmp(key, "wire_min_px")) {
+                const double m = strtod(eq + 1, nullptr);
+                g_wireMinPx = (float)(m < 0.5 ? 0.5 : (m > 3.0 ? 3.0 : m));
+                continue;
+            }
             if (!strcmp(key, "dlaa_mv_dilate")) {
 #ifdef WITH_DLAA
                 DlaaProcessor::SetMvDilate(v != 0);
@@ -23261,6 +23466,7 @@ DWORD WINAPI SetupThread(LPVOID) {
     SceneDlaa::RegisterShaders();
     PreviewBlit::RegisterShaders();
     HiddenMask::RegisterShaders();                      // phase 40
+    WireWiden::RegisterShaders();                       // phase 61
     TuningMenu::RegisterShaders();                       // v0.10.0 tuning menu panel quad
     PvCapRegisterShaders();                              // Ctrl+F10 preview capture metrics shader
     PvAsmRegisterShaders();                              // round 6 tiled preview: picture depth assembly
@@ -23315,6 +23521,9 @@ DWORD WINAPI SetupThread(LPVOID) {
             void** dvtbl = *reinterpret_cast<void***>(dev);
             psCreateHooked = HookFn("CreatePixelShader", dvtbl[15], reinterpret_cast<void*>(&hkCreatePixelShader),
                                     reinterpret_cast<void**>(&oCreatePixelShader));
+            // phase 61: CreateVertexShader (vtable 12) for the wire widening's VS check (without it: no widening)
+            HookFn("CreateVertexShader", dvtbl[12], reinterpret_cast<void*>(&hkCreateVertexShader),
+                   reinterpret_cast<void**>(&oCreateVertexShader));
         }
         HookFn("Present", present, reinterpret_cast<void*>(&hkPresent),
                reinterpret_cast<void**>(&oPresent));

@@ -119,7 +119,8 @@ if (WITH_DLAA)
                                    src/gpu_perf.cpp                         # v0.10.0 phase 8: per-sub-pass GPU timers
                                    src/menu.cpp                             # v0.10.0 in-game tuning menu (GDI panel quad)
                                    src/hidden_mask.cpp                      # phase 40: VR hidden area mask (depth-only draw)
-                                   src/fps_cab.cpp)                         # phase 47: the VR fps box attached to the vehicle
+                                   src/fps_cab.cpp                          # phase 47: the VR fps box attached to the vehicle
+                                   src/wire_widen.cpp)                      # phase 61: sub-pixel wires drawn min-px wide (GS)
     target_include_directories(dinput8 PRIVATE "${NGX_SDK_DIR}/include")
     target_compile_definitions(dinput8 PRIVATE WITH_DLAA=1)
     # d3dcompiler: runtime HLSL compile fallback (src/shader_cache.cpp) for a shader that has no embedded bytecode
@@ -172,6 +173,13 @@ if (WITH_DLAA)
             "src/preview_blit.cpp@kPvBlitVs@vs_5_0@VSMain"      # v0.7.8 profile-screen preview format-converting copy
             "src/preview_blit.cpp@kPvBlitPs@ps_5_0@PSMain"
             "src/hidden_mask.cpp@kHmVs@vs_5_0@VSMain"           # phase 40 VR hidden area mask (depth only)
+            "src/wire_widen.cpp@kWireGs@gs_5_0@GSMain"          # phase 61 sub-pixel wires -> a min-px band
+            "src/wire_widen.cpp@kWireGs@gs_5_0@GSCut"           # phase 62 the same for the pole hardware
+            "src/wire_widen.cpp@kWireCutPs@ps_5_0@PSCut"        # phase 62 copy of the pole-hardware PS (cut-off unscaled)
+            "src/wire_widen.cpp@kSolidGs@gs_5_0@GSolidA"        # phase 63 solid far wires -> dithered band
+            "src/wire_widen.cpp@kSolidGs@gs_5_0@GSolidB"        # phase 63 lattice towers
+            "src/wire_widen.cpp@kSolidPs@ps_5_0@PSSolidA"       # phase 63 copy of G-buffer PS b67da69f + dither
+            "src/wire_widen.cpp@kSolidPs@ps_5_0@PSSolidB"       # phase 63 copy of G-buffer PS 34860eed + dither
             "src/menu.cpp@kMenuVs@vs_5_0@VSMain"                # v0.10.0 tuning menu panel quad
             "src/menu.cpp@kMenuPs@ps_5_0@PSMain"
             "src/menu.cpp@kMenuVs@vs_5_0@VSCab"                 # phase 47 the fps box attached to the vehicle
@@ -229,6 +237,7 @@ if (WITH_DLAA)
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/motion_vectors.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/preview_blit.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/hidden_mask.cpp"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/src/wire_widen.cpp"     # phase 61 (kWireGs)
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/menu.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/inject.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/draw_ids.cpp"

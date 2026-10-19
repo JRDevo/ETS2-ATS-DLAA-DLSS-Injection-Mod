@@ -75,6 +75,13 @@ enum Id : int {
     kMenuCabVs,            // menu.cpp           kMenuVs / VSCab         vs_5_0 (phase 47: the fps box attached to the vehicle)
     kBiasNormPs,           // draw_ids.cpp       kBiasNormShader / PSNorm  ps_5_0 (phase 49: glow share of the pixel -> bias mask)
     kBiasPrep,             // scene_dlaa.cpp     kBiasPrepShader         cs_5_0 (phase 49: crop + last frame's glow reprojected)
+    kWireGs,               // wire_widen.cpp     kWireGs                 gs_5_0 (phase 61: sub-pixel wires -> a min-px band)
+    kWireGsCut,            // wire_widen.cpp     kWireGs / GSCut         gs_5_0 (phase 62: the same for the pole hardware, k in TEXCOORD7)
+    kWireCutPs,            // wire_widen.cpp     kWireCutPs / PSCut      ps_5_0 (phase 62: copy of the pole-hardware PS, cut-off unscaled)
+    kSolidGsA,             // wire_widen.cpp     kSolidGs / GSolidA      gs_5_0 (phase 63: solid far wires -> a dithered band)
+    kSolidGsB,             // wire_widen.cpp     kSolidGs / GSolidB      gs_5_0 (phase 63: lattice towers)
+    kSolidPsA,             // wire_widen.cpp     kSolidPs / PSSolidA     ps_5_0 (phase 63: copy of G-buffer PS b67da69f + dither)
+    kSolidPsB,             // wire_widen.cpp     kSolidPs / PSSolidB     ps_5_0 (phase 63: copy of G-buffer PS 34860eed + dither)
     kCount,
     kCoreLast = kPvEdgeFill  // v0.10.0 phase 17: ids 0..kCoreLast = the core group (compiled first, CoreDone)
 };

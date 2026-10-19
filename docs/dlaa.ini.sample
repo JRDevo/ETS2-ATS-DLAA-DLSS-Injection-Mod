@@ -473,6 +473,30 @@ log_level = 1
 # their whole area). key_mv_conservative (Alt+F11) cycles 1 -> 2 -> 0 live (mode 1: one high beep, mode 2: two
 # high beeps, off: one low beep); Shift+F12 saves the value.
 # mv_fwd_conservative = 1
+
+# EXPERIMENTAL, off by default: in the tests so far it gave no clear gain while driving (far wires thinner than a pixel
+# stay a sampling limit). Turn it on with Alt+F12 to compare.
+# phase 61: far power / catenary wires drawn at least wire_min_px pixels wide, faded to keep their look. The game draws a wire as
+# a flat strip lying face-up; seen from the cab it is far thinner than a pixel (0.05 px at 170 m), so the GPU draws it only where it
+# covers a pixel centre -- dashes that move every frame while driving. With this on, every wire triangle thinner than wire_min_px
+# becomes a band that wide with its transparency raised by the same ratio: one continuous faint line with the same average
+# darkness, nothing for DLAA to lose. Near wires (already wider) are not changed. Only the game's wire shaders, only while DLAA
+# runs. 1 = on, 0 = off (default); key_wire_widen (Alt+F12) switches it live, Shift+F12 saves it. Works best with
+# mv_fwd_conservative 1 or 2 (the wire's motion then covers the whole band; with 0 the band pixels between the dashes move
+# like the sky). ATS (phase 62): also the small hardware at the poles (jumper loops, wire ends, insulators); the game cuts
+# those off below a set transparency, so the mod draws them with its own copy of that shader, which keeps the game's cut-off.
+# Phase 63: far high-voltage wires and the lattice towers are SOLID (no transparency to fade): their thin parts get the same
+# band, and the mod keeps only a share of its pixels, a different random-looking share every frame -- DLAA averages that into
+# a faint continuous line (the way games draw dithered see-through objects).
+# wire_solid_min_share: the smallest share of the band's pixels kept per frame, 0 .. 1 (default 0.1; 0.25 before phase 68 made
+# far wires about a third darker than the game's own and flicker more). Lower = closer to the
+# wire's real (very faint) darkness but it can twinkle; higher = steadier and darker.
+# wire_solid_min_share = 0.1
+# wire_widen = 0
+# The band width in pixels, 0.5 .. 3 (default 1.0). Larger = steadier but softer / wider far wires.
+# Phase 67: the band has soft edges (darkest in the middle, fading to nothing at 1 x wire_min_px either side), so a sloped far
+# wire stays an even line under DLAA instead of a row of beads / stair steps (a hard 1 px band did that).
+# wire_min_px = 1.0
 # v0.9.0 r11: a see-through draw whose centre point (origin) lies within this many metres of the camera (windscreen
 # drops, dirt, glare) is not drawn into that depth at all (0.1..5)
 # mv_fwd_min_m = 0.5
@@ -742,6 +766,8 @@ key_perf_profile = Alt+F9
 key_mv_dilate = Alt+F10
 # phase 60: conservative raster for the wire depth (mv_fwd_conservative) 1 -> 2 -> 0
 key_mv_conservative = Alt+F11
+# phase 61: far wires drawn at least wire_min_px wide (wire_widen) on / off
+key_wire_widen = Alt+F12
 # v0.10.0 tuning menu: open / close, and (only while it is open) select a row up / down and change it left / right.
 # v0.10.2: the game sees no key / button at all while the menu is open; closed, they belong to the game. The menu's
 # Menu keys row binds these 5 by holding the new keys (docs/KEYS.md, "Bind a key in the menu").

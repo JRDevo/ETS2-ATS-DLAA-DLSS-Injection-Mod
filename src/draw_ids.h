@@ -400,6 +400,15 @@ public:
     static int ConservativeTier();               // -1 = not checked yet, 0 = not supported, 1..3 = the device's tier
     static uint64_t ConservativeRsFails();       // copies that could not be CREATED (stats; a full memo table is not counted here)
     static uint64_t ConservativeRsFull();        // states left without a copy because the memo table was full (once per state)
+    // phase 64 (wire widening, the MOTION side): a forward-record draw can carry a widening kind (SetNextGs before its Record): 1 =
+    // a widened see-through wire / pole piece (phase 61 / 62), 2 / 3 = a solid far wire / lattice tower recorded from the G-buffer
+    // (phase 63). The forward-depth batch and the forward-id replay then draw it through the same widening GS as its colour
+    // (ReplayGsFn binds GS + its constant buffer for kind k, 0 = unbind; vpW / vpH = the replay viewport, scale = replay px per
+    // game px) and the depth batch without alpha-to-coverage (ReplayNoA2c): every band pixel gets the wire's depth + id, so its
+    // motion vector is the wire's, not the background's (the ghost at the poles). Set by inject.cpp; null = no widening in replays.
+    using ReplayGsFn = bool (*)(ID3D11DeviceContext* ctx, int kind, float vpW, float vpH, float scale);
+    static void SetReplayGs(ReplayGsFn fn, ID3D11BlendState* depthBsNoA2c);
+    void SetNextGs(uint8_t kind) { m_nextGs = kind; }  // the next Record's widening kind (consumed by that call, recorded or not)
 
     // ---- pairing inputs (CameraMv / DrawIdMv at the blit) ----
     uint64_t FullKey(int i) const;               // IB, VB0, offsets, counts, base vertex, VS, instanced
@@ -459,6 +468,7 @@ private:
                                                  // depthDss != null = the forward-depth batch (ReplayDepth)
     struct PsState;                              // v0.10.0 phase 10: per-draw pixel-shader state (draw_ids.cpp)
     void ReleasePs(int from, int to);
+    uint8_t m_nextGs = 0;                        // phase 64: SetNextGs
     struct State;                                // per-draw captured state (draw_ids.cpp)
     // phase 35: fills the IA / VS / RS part of `s` from DidShadow (+ the always-read fields); false = not available (the caller
     // reads everything through the getters). prev = the record's previous unreleased draw (null: none)
