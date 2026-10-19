@@ -144,7 +144,7 @@ Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
 > Status: v0.13.0. New: NVIDIA Reflex and frame rate caps, a Hotkeys page in the menu, a per-vehicle fps box in VR, a night light glow fix, CPU tuning, and fixes for Linux / Proton.
-> Test build v0.14.0-eyetest2 (pre-release): eye-tracked foveated rendering, VectorXR support and a performance pass. For testers; see [the test guide](docs/EYE_TRACKING_TEST.md).
+> Test build v0.14.0-eyetest3 (pre-release): eye-tracked foveated rendering (now also on Varjo with or without OpenXR Toolkit), VectorXR support and a performance pass. For testers; see [the test guide](docs/EYE_TRACKING_TEST.md).
 > With this version the bells and whistles I know of are in. From here on the main work is performance tuning, from your logs; new ideas are still welcome. See [Contributing](CONTRIBUTING.md).
 > See the [Releases page](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/releases) for every version.
 > DLSS upscaling in VR is still being tuned; treat it as experimental.
