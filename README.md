@@ -233,8 +233,7 @@ OptiScaler's DLL to `winmm.dll` and add `winmm=n,b` to the override:
 WINEDLLOVERRIDES="dinput8=n,b;winmm=n,b" %command%
 ```
 
-Thanks to **rimaille** for the Linux testing and these steps
-([discussion #13](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/discussions/13)).
+Thanks to **rimaille** for the Linux testing and these steps.
 
 </details>
 
