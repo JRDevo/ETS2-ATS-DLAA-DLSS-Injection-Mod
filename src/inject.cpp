@@ -9473,7 +9473,13 @@ void VrsOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* 
     float u = 0.5f, v = 0.5f;
     if (!VrEyeCentre(eye, &u, &v)) { ++Vrs::GetStats().bindNoCentre; return; }   // the ring centre = the eye's own optical centre
     const bool gaze = g_vrsEye != 0;                   // phase 59: + the gaze offset (one centre per eye pass), the eye's own mask
-    if (gaze) { VrsGazeCentre(eye, s, u, v, &u, &v); VrsGazeMaybeLog(); }
+    float grow = 1.0f;
+    if (gaze) {
+        const float uOpt = u;
+        VrsGazeCentre(eye, s, u, v, &u, &v);
+        VrsGazeMaybeLog();
+        grow = GazeMath::EdgeGrow(u - uOpt);           // phase 59d: far to the side the tracker reads short -- bigger rings
+    }
     // the game's current pixel shader (one PSGetShader per bracket: hkPSSetShader keeps it from here on)
     ID3D11PixelShader* ps = nullptr;
     ctx->PSGetShader(&ps, nullptr, nullptr);
@@ -9485,7 +9491,7 @@ void VrsOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* 
     const double up = g_upRenderOverOutX;
     const float ratio = (g_dlaaOn.load(std::memory_order_relaxed) && g_dlssUpscale.load(std::memory_order_relaxed) && up > 0.0 &&
                          up < 1.0) ? (float)up : 1.0f;
-    if (Vrs::Enter(ctx, g_sceneW, g_sceneH, eye, u, v, ratio, cls, gaze)) {
+    if (Vrs::Enter(ctx, g_sceneW, g_sceneH, eye, u, v, ratio, cls, gaze, grow)) {
         Vrs::Stats& st = Vrs::GetStats();
         for (int i = 0; i < 4; ++i) if (src & (1 << i)) ++st.eyeSrc[i];
         VrsPred& p = g_vrsPred[s & 7];

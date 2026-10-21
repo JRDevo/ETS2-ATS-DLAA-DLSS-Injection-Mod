@@ -12,6 +12,7 @@
 //    clamped to the picture. tests\vrs_gaze_test.cpp checks it against an OpenXR fov projection, skewed fovs included.
 //  * Smoother: per eye, exponential toward the target with time constant `ms` (vrs_eye_smooth); a jump of more than kSaccadeUv
 //    (a saccade) is followed four times faster.
+//  * EdgeGrow (phase 59d): the sharp rings grow when the gaze is far to the side (the tracker reads short there).
 //  * FakeGaze: vrs_eye_fake -- a made-up gaze that circles slowly (radius 0.25 tangent ~ 14 deg, one turn in 6 s), the same
 //    downstream path as the real one (a Quest 3 has no eye tracker).
 #pragma once
@@ -47,6 +48,20 @@ inline float Clamp01(float x) { return x < 0.0f ? 0.0f : (x > 1.0f ? 1.0f : x); 
 inline void GazeUv(float cu, float cv, float sx, float sy, float tx, float ty, float* u, float* v) {
     *u = Clamp01(cu + 0.5f * sx * tx);
     *v = Clamp01(cv - 0.5f * sy * ty);
+}
+
+// phase 59d: EDGE GROW -- toward the lens edge the eye tracker reads short (issue #21, Varjo Aero: at a full left / right look the
+// runtime's own gaze dot stops short of where the eye looks; up / down were fine), so the sharp rings grow with the gaze's SIDEWAYS
+// distance from the eye's optical centre: x 1 up to kEdgeFrom uv, then linear to x (1 + kEdgeGrow) at kEdgeFull uv, in kEdgeStep
+// steps (a new step = one mask refill; steps keep the refills rare). The Varjo log's full left look: 0.31 uv off.
+constexpr float kEdgeFrom = 0.12f, kEdgeFull = 0.28f, kEdgeGrow = 0.30f, kEdgeStep = 0.05f;
+// du = gaze u - optical u (uv of the eye picture) -> the ring scale (1 .. 1 + kEdgeGrow)
+inline float EdgeGrow(float du) {
+    const float d = du < 0.0f ? -du : du;
+    if (!(d > kEdgeFrom)) return 1.0f;                   // (NaN: no grow)
+    const float t = d >= kEdgeFull ? 1.0f : (d - kEdgeFrom) / (kEdgeFull - kEdgeFrom);
+    const float steps = std::floor(t * kEdgeGrow / kEdgeStep + 0.5f);
+    return 1.0f + steps * kEdgeStep;
 }
 
 constexpr float kSaccadeUv = 0.06f;                      // a jump this big (uv) is a saccade: followed 4x faster

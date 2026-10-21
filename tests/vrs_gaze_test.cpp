@@ -239,6 +239,26 @@ int main() {
         CHECK(std::fabs(tx) < 1e-6 && std::fabs(ty - 0.25f) < 1e-6, "fake gaze at t = 1.5 s (a quarter turn: up)");
     }
 
+    printf("5. EdgeGrow (phase 59d)\n");
+    {
+        CHECK(GazeMath::EdgeGrow(0.0f) == 1.0f && GazeMath::EdgeGrow(0.12f) == 1.0f && GazeMath::EdgeGrow(-0.10f) == 1.0f,
+              "no grow near the centre");
+        CHECK(std::fabs(GazeMath::EdgeGrow(0.28f) - 1.30f) < 1e-6 && std::fabs(GazeMath::EdgeGrow(-0.31f) - 1.30f) < 1e-6 &&
+              std::fabs(GazeMath::EdgeGrow(0.9f) - 1.30f) < 1e-6, "full grow at / past kEdgeFull, both sides");
+        CHECK(std::fabs(GazeMath::EdgeGrow(0.20f) - 1.15f) < 1e-6, "half way: x %.3f", (double)GazeMath::EdgeGrow(0.20f));
+        float prev = 1.0f;
+        bool mono = true, stepped = true;
+        for (int i = 0; i <= 400; ++i) {
+            const float g = GazeMath::EdgeGrow(i * 0.001f);
+            if (g < prev) mono = false;
+            const float k = (g - 1.0f) / GazeMath::kEdgeStep;
+            if (std::fabs(k - std::floor(k + 0.5f)) > 1e-4) stepped = false;
+            prev = g;
+        }
+        CHECK(mono && stepped, "monotonic, in kEdgeStep steps");
+        CHECK(GazeMath::EdgeGrow(std::nanf("")) == 1.0f, "NaN -> no grow");
+    }
+
     printf("%d checks, %d failed\n", g_checks, g_fails);
     return g_fails ? 1 : 0;
 }

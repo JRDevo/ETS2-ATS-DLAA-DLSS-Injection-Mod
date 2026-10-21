@@ -469,7 +469,7 @@ int Probe(ID3D11Device* dev) {
 }
 
 bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, float cv, float renderOverOutput, int cls,
-           bool dynamic) {
+           bool dynamic, float grow) {
 #ifdef WITH_VRS
     if (g_want) Leave(ctx);                            // (never expected: every game bind leaves first)
     if (!s_on.load(std::memory_order_relaxed) || !ctx || !w || !h) return false;
@@ -482,7 +482,13 @@ bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, 
     if (Probe(dev) != 1) return false;
     ID3D11NvShadingRateResourceView* view = nullptr;
     if (dynamic && (eye == 0 || eye == 1)) {           // phase 59: the eye's refillable gaze mask
-        view = DynMaskFor(dev, ctx, w, h, cu, cv, s_inner.load(std::memory_order_relaxed), s_outer.load(std::memory_order_relaxed), eye);
+        int inner = s_inner.load(std::memory_order_relaxed), outer = s_outer.load(std::memory_order_relaxed);
+        if (grow > 1.0f) {                             // phase 59d: gaze far to the side -- both rings grow (Configure's 150 % cap)
+            inner = (std::min)(150, (int)(inner * grow + 0.5f));
+            outer = (std::min)(150, (int)(outer * grow + 0.5f));
+            ++s_stats.edgeGrown;
+        }
+        view = DynMaskFor(dev, ctx, w, h, cu, cv, inner, outer, eye);
         if (view) ++s_stats.dynEnters;
     } else {
         Mask* m = FindOrBuild(dev, ctx, w, h, cu, cv, s_inner.load(std::memory_order_relaxed), s_outer.load(std::memory_order_relaxed),
@@ -513,7 +519,7 @@ bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, 
     if (eye == 0 || eye == 1) ++s_stats.entersEye[eye];
     return true;
 #else
-    (void)ctx; (void)w; (void)h; (void)eye; (void)cu; (void)cv; (void)renderOverOutput; (void)cls; (void)dynamic;
+    (void)ctx; (void)w; (void)h; (void)eye; (void)cu; (void)cv; (void)renderOverOutput; (void)cls; (void)dynamic; (void)grow;
     return false;
 #endif
 }
@@ -614,10 +620,11 @@ void MaybeLogStats(uint64_t frame) {
         const double us = c.dynRefillUs - p.dynRefillUs, sec = (double)(now - s_lastLogMs) / 1000.0;
         LogDbg("VRS gaze masks @%.0f s (phase 59, vrs_eye): %llu brackets with the per-eye mask, %llu refills (%.1f /s, %.2f per frame) "
             "costing %.1f us each on average (max so far %.1f us; FillMaskRuns + UpdateSubresource, CPU), %.3f ms per frame; masks "
-            "made %llu; last centres eye 0 (%.3f, %.3f) eye 1 (%.3f, %.3f)", sec, (unsigned long long)(c.dynEnters - p.dynEnters),
+            "made %llu; last centres eye 0 (%.3f, %.3f) eye 1 (%.3f, %.3f); %llu brackets with grown rings (phase 59d: gaze far to "
+            "the side)", sec, (unsigned long long)(c.dynEnters - p.dynEnters),
             (unsigned long long)rf, sec > 0.0 ? (double)rf / sec : 0.0, fr > 0.0 ? (double)rf / fr : 0.0, rf ? us / (double)rf : 0.0,
             c.dynRefillMaxUs, fr > 0.0 ? us / 1000.0 / fr : 0.0, (unsigned long long)c.dynMasks, (double)c.dynCu[0],
-            (double)c.dynCv[0], (double)c.dynCu[1], (double)c.dynCv[1]);
+            (double)c.dynCv[0], (double)c.dynCu[1], (double)c.dynCv[1], (unsigned long long)(c.edgeGrown - p.edgeGrown));
         (void)rf; (void)us; (void)sec;                 // (VRS_NO_LOG)
     }
     s_lastLogMs = now;
