@@ -17752,7 +17752,13 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         else                         swprintf(sent, sentCap, L"It saves time in the game's own GPU figure, not in the mod's.");
         break;
     case MR_VRSEYE: {                                     // phase 59: the gaze state, live
-        const XrHook::EyeGazeStats es = XrHook::GetEyeGazeStats();
+        // phase 59e (issue #21): the figures move every frame, and a changed text rebuilds the whole panel image (GDI + upload +
+        // a new VR quad image): selected, this row did that EVERY frame (Varjo: render CPU 7 -> 12.5 ms until the menu closed).
+        // A snapshot once per second, as the cost column's figures.
+        static XrHook::EyeGazeStats es{};
+        static uint64_t s_refills = 0, s_atMs = 0;
+        const uint64_t nowMs = GetTickCount64();
+        if (!s_atMs || nowMs - s_atMs >= 1000) { es = XrHook::GetEyeGazeStats(); s_refills = Vrs::GetStats().dynRefills; s_atMs = nowMs; }
         const uint64_t loc = es.locates ? es.locates : 1;
         if (Vrs::Support() == 0)     swprintf(sent, sentCap, L"Not available here: %hs.", Vrs::SupportText());
         else if (!vr)                swprintf(sent, sentCap, L"Greyed in flat: VR only.");
@@ -17764,7 +17770,7 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
                                      swprintf(sent, sentCap, L"No eye tracker reported by this headset / runtime: the lens centre is used.");
         else                         swprintf(sent, sentCap, L"Gaze valid in %.0f %% of %llu frames so far; mask refills %llu.",
                                               100.0 * (double)es.valid / (double)loc, (unsigned long long)es.locates,
-                                              (unsigned long long)Vrs::GetStats().dynRefills);
+                                              (unsigned long long)s_refills);
         break;
     }
     case MR_HMASK: {                                      // phase 40
