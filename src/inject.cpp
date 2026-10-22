@@ -981,7 +981,7 @@ bool              g_fwdCfg = true;
 std::atomic<bool> g_fwdOn{true};
 // phase 60 (thin wires): the forward-depth re-draw AND the forward-id replay through CONSERVATIVE rasterization
 // (DrawIdRecord::ConservativeRs): every pixel a wire / cable touches gets its depth and its draw id -> its own motion vector, not
-// the sky's. dlaa.ini mv_fwd_conservative: 0 = off (the v0.14 behaviour), 1 = conservative raster, the depth still only where the
+// the sky's. dlaa.ini mv_fwd_conservative: 0 = off (the v0.13 behaviour), 1 = conservative raster, the depth still only where the
 // pixel shader's alpha >= 0.5 (alpha-to-coverage), 2 = conservative raster WITHOUT alpha-to-coverage (depth on every touched pixel:
 // the fringe pixels of an alpha-textured ribbon sample alpha ~0 outside the ribbon and mode 1 drops them; glass / smoke quads then
 // own their whole area). Default 1. key_mv_conservative (Alt+F11) cycles 1 -> 2 -> 0 live. Needs a D3D11.3 device with conservative
@@ -3354,7 +3354,7 @@ void ToggleMvDilate(uint64_t n) {
     Log("DLAA motion-vector dilation %s (%s, Present #%llu)%s", on ? "ON" : "OFF", KeyName(KA_MV_DILATE), (unsigned long long)n,
         on ? " -- MVLowRes in DLAA mode: DLSS dilates the motion vectors by depth (thin wires / cables keep their history "
              "while driving); the DLAA features are recreated"
-           : " -- DLAA features recreated without MVLowRes (the v0.14 behaviour: undilated motion vectors)");
+           : " -- DLAA features recreated without MVLowRes (the v0.13 behaviour: undilated motion vectors)");
     PlayTones(1, on ? 1200 : 300, 150, 0);
 #else
     (void)n;
@@ -3389,7 +3389,7 @@ void ToggleFwdConservative(uint64_t n) {
         (unsigned long long)n,
         m == 1 ? "every pixel a wire / cable touches gets its depth + id where the wire's alpha >= 0.5 (alpha-to-coverage)"
         : (m == 2 ? "every pixel a wire / cable touches gets its depth + id, alpha-to-coverage OFF (glass / smoke own their whole area)"
-                  : "OFF: depth + ids only where a wire covers a pixel centre (the v0.14 behaviour)"));
+                  : "OFF: depth + ids only where a wire covers a pixel centre (the v0.13 behaviour)"));
     PlayTones(m == 0 ? 1 : m, m == 0 ? 300 : 1200, 150, 100);
 }
 // Ctrl+F3 (key_fwd_depth): v0.9.0 r5 forward depth for the MVs (A/B switch).
@@ -17285,6 +17285,7 @@ void ResetSettings(uint64_t n) {
         "dlss_bias_mask",                                                                               // phase 49
         "cpu_pcore", "cpu_priority", "cpu_no_throttle",                                                 // phase 54
         "fps_profiles",                                                                                 // phase 51b
+        "dlaa_mv_dilate", "mv_fwd_conservative", "wire_widen",                                       // phase 60 / 61 (69: menu rows)
     };
     constexpr int kNKeys = (int)(sizeof(kKeys) / sizeof(kKeys[0]));
     static_assert(kNKeys <= kIniMaxKeys, "WriteIniPreserving handles at most kIniMaxKeys keys");
@@ -17299,7 +17300,7 @@ void ResetSettings(uint64_t n) {
             "perf_profile = high mv_fwd_depth = 1 menu_x = 2 menu_y = 8 "
             "menu_scale = 1.0 menu_vr_x = 0 menu_vr_y = -5 menu_vr_scale = 1.0 menu_vr_depth = 12 menu_vr_dist = 100 menu_vr_face = 1 "
             "fps_show = 0 fps_text = 0 "
-            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_opacity = 100 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 fps_profiles = 1 xr_turbo = 0 reflex = 0 fps_cap = 0 vr_fps_cap = 0 cpu_pcore = 0 cpu_priority = 0 cpu_no_throttle = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 vrs_eye = 0 xr_hidden_mask = 0 dlss_bias_mask = 100 log_level = %d (%s) -- profile: %s -- "
+            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_opacity = 100 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 fps_profiles = 1 xr_turbo = 0 reflex = 0 fps_cap = 0 vr_fps_cap = 0 cpu_pcore = 0 cpu_priority = 0 cpu_no_throttle = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 vrs_strength = 0 vrs_eye = 0 dlaa_mv_dilate = 1 mv_fwd_conservative = 1 wire_widen = 0 xr_hidden_mask = 0 dlss_bias_mask = 100 log_level = %d (%s) -- profile: %s -- "
             "dlaa.ini: %d keys removed (hotkeys and other lines kept)", (unsigned long long)n, g_dlaaOn.load() ? "DLSS" : "off",
             (double)kFpsVrScaleDefault, LogLevel(), g_logDebugKey ? "no key: debug = 1 in dlaa.ini" : "no key", changed, kNKeys);
         BeepSeq b;                                        // success: rising two-tone 600 -> 900 Hz, 120 ms each (as SaveSettings)

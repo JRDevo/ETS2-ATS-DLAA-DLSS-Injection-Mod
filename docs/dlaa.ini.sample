@@ -463,7 +463,7 @@ log_level = 1
 # phase 60: DLSS's own motion-vector dilation in DLAA mode (the NGX flag MVLowRes). With it DLSS gives the pixels next to a
 # thin wire / cable the wire's motion (taken from the nearest depth around them) instead of the sky's, so the wire keeps its
 # history while driving and does not break into flickering dashes. DLSS upscaling always uses it; before phase 60 DLAA did
-# not. 1 = on (default), 0 = off (the v0.14 behaviour). key_mv_dilate (Alt+F10) switches it live (the DLAA features are
+# not. 1 = on (default), 0 = off (the v0.13 behaviour). key_mv_dilate (Alt+F10) switches it live (the DLAA features are
 # recreated: a short history reset, like a model change).
 # dlaa_mv_dilate = 1
 
@@ -472,7 +472,7 @@ log_level = 1
 # features). Without it a far wire thinner than a pixel only has depth where it covers a pixel centre -- dashes -- and the gaps
 # move like the sky while driving. Needs a GPU with conservative rasterization (D3D11.3, every RTX card; the log says "tier N").
 # The forward ids (the per-draw motion of cables on a moving truck) are drawn the same way, so the extra pixels move with the
-# cable. 0 = off (the v0.14 behaviour), 1 = on (default): the depth still only where the wire's texture is at least half solid
+# cable. 0 = off (the v0.13 behaviour), 1 = on (default): the depth still only where the wire's texture is at least half solid
 # (alpha-to-coverage), 2 = on WITHOUT that alpha test: every touched pixel (try it if 1 is not enough; glass / smoke then own
 # their whole area). key_mv_conservative (Alt+F11) cycles 1 -> 2 -> 0 live (mode 1: one high beep, mode 2: two
 # high beeps, off: one low beep); Shift+F12 saves the value.
