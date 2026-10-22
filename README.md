@@ -654,6 +654,10 @@ The three green lines under the title show the game's GPU time per frame, what t
   last clean picture in between. That is about half the mirror cost. Edges in the glass stay clean; moving things in the
   glass update at half the frame rate (a slight judder on passing traffic). A reset or a big camera jump updates every
   mirror at once.
+- **Thin wires** (3 rows in the same group, also on the Hotkeys page): **Thin-wire motion** (`dlaa_mv_dilate`, on,
+  `Alt+F10`) and **Thin-wire depth** (`mv_fwd_conservative`, on, `Alt+F11`) keep near telephone and power wires steady
+  while you drive. Switch them off only to compare. **Thin-wire widening** (`wire_widen`, off, `Alt+F12`) is experimental:
+  it draws far wires thinner than 1 pixel as a 1-pixel line. Far wires may look darker or flicker more with it.
 - **Turbo mode (VR)** (`xr_turbo`, off by default; from OpenXR Toolkit): the game stops waiting for the headset each
   frame. More fps only when the CPU is the limit. Warning: frame smoothing (ASW, Motion Smoothing, Motion Reprojection,
   SSW) does not work while it is on. Switch it off again if the picture judders.
@@ -759,6 +763,9 @@ The table below lists the commonly used keys:
 | `mirror_dlaa` | `1` | DLAA on the truck / car mirrors: `1` = each mirror gets its own DLAA (default), `0` = mirrors are left as the game draws them. `Alt+F6` switches it live, `Shift+F12` saves. With OptiScaler next to the game exe (v0.11.0) it starts off by itself unless this key is set: its DLSS 5 bridge crashes on the mirror frames (issue #8). |
 | `mirror_mv` | `parts` | motion in the mirrors (v0.10.2, VR and flat): `parts` = each moving part gets its own exact motion in the glass (default, about 0.4 ms per mirror in VR), `camera` = camera motion only (about 0.15 ms per mirror, moving traffic can ghost in the glass). Used with `mirror_vr_mode` / `mirror_flat_mode` 1, 2 and 3; mode 4 is always camera motion. The menu's Mirror DLAA row sets it live, `Shift+F12` saves |
 | `mirror_turns` | `0` | mirrors in turns (VR and flat): `1` = each mirror gets its DLAA every 2nd frame and shows its last clean picture in between (about half the mirror cost; moving things in the glass update at half rate), `0` = every mirror every frame (default). The menu's `Mirrors in turns` row switches it live, `Shift+F12` saves |
+| `dlaa_mv_dilate` | `1` | thin wires: `1` = DLSS spreads the motion data over thin lines in DLAA mode, so near wires keep their motion while driving; `0` = off (compare only). Menu row `Thin-wire motion`, `Alt+F10` |
+| `mv_fwd_conservative` | `1` | thin wires: `1` = a wire gets depth on every pixel it touches; `2` = the same without alpha-to-coverage; `0` = off (compare only). Menu row `Thin-wire depth`, `Alt+F11` |
+| `wire_widen` | `0` | thin wires, experimental: `1` = far wires thinner than 1 pixel are drawn 1 pixel wide (`wire_min_px`). Menu row `Thin-wire widening`, `Alt+F12` |
 | `dlaa_pre_tonemap` | `1` | DLAA before the game's tonemap (flat DLAA mode): `1` = on the game's HDR colours (default), `0` = on the finished picture at the end of the frame. `Alt+F7` switches it live, `Shift+F12` saves |
 | `tex_lod_bias` | `0` | sharper texture text: texture mip LOD bias for the 3-D world while DLAA / DLSS runs, `-3`..`1`, `0` = off. Try `-0.5` to `-1`; more negative = sharper but more shimmer on fine patterns. `Ctrl+F1` / `F2` change it live, `Shift+F12` saves |
 | `tex_lod_bias_auto` | `0` | `1` = while DLSS upscales, add log2(render width / output width) on top of `tex_lod_bias` (e.g. 75 % render width → −0.42) |

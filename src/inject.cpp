@@ -16460,6 +16460,7 @@ enum MenuRowId {
     MR_MOTGRP,                                            // phase 43: group "Motion and mirrors"
     MR_DRAWIDS, MR_MIRROR,
     MR_MIRTURNS,                                          // phase 41: mirrors in turns (dlaa.ini mirror_turns)
+    MR_WIREMV, MR_WIREDEPTH, MR_WIREWIDEN,                // phase 69: the thin-wire switches (dlaa_mv_dilate / mv_fwd_conservative / wire_widen)
     MR_UPGRP,                                             // phase 43: group "Upscaling and VR"
     MR_UPSCALE, MR_DLAA, MR_OFXR,
     MR_VECTORXR,                                          // phase 56: VectorXR info row (dlaa.ini vectorxr)
@@ -16500,7 +16501,7 @@ static_assert(MR_COUNT <= TuningMenu::kMaxRows, "tuning menu: too many rows");
 struct MenuGroupDef { int header, last; const wchar_t* title; };
 constexpr MenuGroupDef kMenuGroups[] = {
     { MR_PICGRP,   MR_BIAS,     L"Picture" },                    // phase 49: last row MR_FWD -> MR_BIAS
-    { MR_MOTGRP,   MR_MIRTURNS, L"Motion and mirrors" },
+    { MR_MOTGRP,   MR_WIREWIDEN, L"Motion and mirrors" },
     { MR_UPGRP,    MR_VECTORXR, L"Upscaling and VR" },      // phase 56: last row MR_OFXR -> MR_VECTORXR
     { MR_VRPGRP,   MR_HMASK,    L"VR performance" },
     { MR_FRGRP,    MR_CPU,      L"Frame rate and CPU" },         // phase 52; + phase 54 CPU tuning
@@ -16508,14 +16509,14 @@ constexpr MenuGroupDef kMenuGroups[] = {
     { MR_FPSGRP,   MR_FPSDIST,  L"FPS counter settings" },     // phase 44: last row MR_FPSSIZE -> MR_FPSROLL (phase 48: + FPS brightness inside)
 };
 constexpr int kMenuGroupCount = (int)(sizeof(kMenuGroups) / sizeof(kMenuGroups[0]));
-static_assert(MR_PICGRP + 1 == MR_SHARP && MR_BIAS + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_MIRTURNS + 1 == MR_UPGRP &&
+static_assert(MR_PICGRP + 1 == MR_SHARP && MR_BIAS + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_WIREWIDEN + 1 == MR_UPGRP &&
               MR_UPGRP + 1 == MR_UPSCALE && MR_VECTORXR + 1 == MR_VRPGRP && MR_VRPGRP + 1 == MR_TURBO && MR_HMASK + 1 == MR_FRGRP &&
               MR_FRGRP + 1 == MR_REFLEX && MR_VRFPSCAP + 1 == MR_CPU && MR_CPU + 1 == MR_PANELGRP &&
               MR_PANELGRP + 1 == MR_POSX && MR_MENUKEYS + 1 == MR_FPS && MR_FPSGRP + 1 == MR_FPSLOCK && MR_FPSLOCK + 1 == MR_FPSPROF && MR_FPSPROF + 1 == MR_FPSREMEAS &&
               MR_FPSDIST + 1 == MR_LOG,
               "tuning menu: a group's children must follow its header and fill it up to its last row");
 static_assert(MR_SHARP < MR_WIDTH && MR_WIDTH < MR_LOD && MR_LOD < MR_LODCUT && MR_LODCUT < MR_AREA && MR_AREA < MR_PRETM &&
-              MR_PRETM < MR_FWD && MR_FWD < MR_BIAS && MR_DRAWIDS < MR_MIRROR && MR_MIRROR < MR_MIRTURNS && MR_UPSCALE < MR_DLAA && MR_DLAA < MR_OFXR && MR_OFXR < MR_VECTORXR &&
+              MR_PRETM < MR_FWD && MR_FWD < MR_BIAS && MR_DRAWIDS < MR_MIRROR && MR_MIRROR < MR_MIRTURNS && MR_MIRTURNS < MR_WIREMV && MR_WIREMV < MR_WIREDEPTH && MR_WIREDEPTH < MR_WIREWIDEN && MR_UPSCALE < MR_DLAA && MR_DLAA < MR_OFXR && MR_OFXR < MR_VECTORXR &&
               MR_TURBO < MR_VRS && MR_VRS < MR_VRSSIZE && MR_VRSSIZE < MR_VRSPASS && MR_VRSPASS < MR_VRSSTR && MR_VRSSTR < MR_VRSEYE && MR_VRSEYE < MR_HMASK &&
               MR_REFLEX < MR_FPSCAP && MR_FPSCAP < MR_VRFPSCAP && MR_VRFPSCAP < MR_CPU &&
               MR_POSX < MR_POSY && MR_POSY < MR_SIZE && MR_SIZE < MR_DEPTH && MR_DEPTH < MR_FACE && MR_FACE < MR_MENUKEYS &&
@@ -16561,6 +16562,13 @@ const wchar_t* const kMenuDesc[] = {
     L"all = every mirror. camera = cheapest per mirror, moving traffic can ghost in the glass; else each part moves exactly in the glass.",
     L"on = each mirror gets its DLAA every 2nd frame and shows its last clean picture in between: about half the mirror cost. Edges "
     L"stay clean; moving things in the glass update at half rate. off = every mirror every frame.",
+    // phase 69 (MR_WIREMV, MR_WIREDEPTH, MR_WIREWIDEN): the thin-wire switches, also on the Hotkeys page
+    L"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS motion dilation). "
+    L"on = default. off = only to compare; near wires flicker more. The picture is soft for a moment when it changes.",
+    L"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = default. "
+    L"on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more.",
+    L"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not break into dashes. "
+    L"Off by default: far wires may look darker or flicker more. Try it and compare.",
     // phase 43: menu categories (Upscaling and VR)
     L"DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts "
     L"closed every time the menu opens.",
@@ -17225,6 +17233,12 @@ void ResetSettings(uint64_t n) {
     g_vrsPassesExplicit = false;
     g_vrsStrength = 0;                                    // phase 59f: Normal (2 x 2)
     g_vrsStrengthExplicit = false;
+#ifdef WITH_DLAA
+    if (!DlaaProcessor::MvDilate()) DlaaProcessor::SetMvDilate(true);   // phase 69: the thin-wire defaults (motion on, depth 1, widening off)
+#endif
+    g_mvDilateExplicit = false;
+    g_fwdConsOn = 1; g_fwdConsCfg = 1; g_fwdConsExplicit = false;
+    g_wireOn = false; g_wireCfg = false; g_wireExplicit = false;
     g_vrsEye = 0;                                         // phase 59: eye-tracked foveation off (vrs_eye_fake / _smooth: dlaa.ini only)
     g_vrsEyeExplicit = false;
     VrsApplyConfig();
@@ -18730,6 +18744,20 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         MenuRow(p, MR_MIRTURNS, L"Mirrors in turns", "dlaa.ini mirror_turns", nullptr, !mirLive || MirMode() == 3);
         swprintf(p.rows[MR_MIRTURNS].value, kV, L"%ls", MirMode() == 3 ? L"on (mode 3)" : onOff[g_mirTurns ? 1 : 0]);
     }
+    {   // phase 69: the thin-wire switches (the same functions as Alt+F10 / Alt+F11 / Alt+F12)
+#ifdef WITH_DLAA
+        const bool mvDil = DlaaProcessor::MvDilate();
+#else
+        const bool mvDil = false;
+#endif
+        MenuRow(p, MR_WIREMV, L"Thin-wire motion", KeyName(KA_MV_DILATE), nullptr, false);
+        swprintf(p.rows[MR_WIREMV].value, kV, L"%ls", onOff[mvDil ? 1 : 0]);
+        MenuRow(p, MR_WIREDEPTH, L"Thin-wire depth", KeyName(KA_FWD_CONSERVATIVE), nullptr, false);
+        const int fc = g_fwdConsOn.load();
+        swprintf(p.rows[MR_WIREDEPTH].value, kV, L"%ls", fc == 1 ? L"on" : (fc == 2 ? L"on (no A2C)" : L"off"));
+        MenuRow(p, MR_WIREWIDEN, L"Thin-wire widening", KeyName(KA_WIRE_WIDEN), nullptr, false);
+        swprintf(p.rows[MR_WIREWIDEN].value, kV, L"%ls", g_wireOn.load() ? L"on (experimental)" : L"off");
+    }
     MenuRow(p, MR_PRETM, L"DLAA before tonemap (flat)", KeyName(KA_PRE_TONEMAP), vr ? "flat only" : nullptr, vr);
     swprintf(p.rows[MR_PRETM].value, kV, L"%ls", !g_preCfg ? L"off (dlaa.ini 0)" : onOff[g_preOn.load() ? 1 : 0]);
     MenuRow(p, MR_FWD, L"See-through depth", KeyName(KA_FWD_DEPTH), nullptr, false);
@@ -19004,6 +19032,9 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_AREA:    StepArea(dir, n); break;               // flat: refuses with its low beep
     case MR_DRAWIDS: ToggleDrawIds(n); break;
     case MR_MIRROR:  CycleMirrors(n, dir, vr); break;       // v0.10.2: seven states (Alt+F6 stays on / off)
+    case MR_WIREMV:    ToggleMvDilate(n); break;          // phase 69: on / off (Alt+F10)
+    case MR_WIREDEPTH: ToggleFwdConservative(n); break;   // phase 69: on -> on (no A2C) -> off -> on (Alt+F11)
+    case MR_WIREWIDEN: ToggleWireWiden(n); break;         // phase 69: off / on (Alt+F12)
     case MR_MIRTURNS: ToggleMirTurns(n); break;             // phase 41: Left and Right both switch it (also while greyed: kept)
     case MR_PRETM:   TogglePreTonemap(n); break;
     case MR_FWD:     ToggleFwdDepth(n); break;
