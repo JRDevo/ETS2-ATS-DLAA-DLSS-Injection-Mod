@@ -1818,6 +1818,7 @@ void HmDestroySession(XrSession ses) {
 }
 // ---- phase 59: eye gaze (XR_EXT_eye_gaze_interaction; see xr_hook.h) ------------------------------------------------------
 std::atomic<bool>     s_egWant{false};            // EyeGazeRequest: ask for the extension at xrCreateInstance
+std::atomic<bool>     s_egForce{true};            // phase 59g: ask even when the runtime does not list it (vrs_eye on at start)
 std::atomic<bool>     s_egActive{false};          // EyeGazeActive: sync + locate per frame
 std::atomic<int>      s_egExt{0};                 // EyeGazeStats::ext
 std::atomic<int>      s_egSystem{-1};             // EyeGazeStats::system
@@ -2277,13 +2278,18 @@ XrResult CreateInstanceImpl(int i, const XrInstanceCreateInfo* ci, XrInstance* o
         LogWarn("hidden area mask: the OpenXR runtime %s does not offer %s (enumerate result %d) -- the hidden area mask is not "
             "available", s_slot[i].module, kVisMaskExt, r);
     }
-    if (tryEg && !offEg) {
+    const bool egForce = s_egForce.load(std::memory_order_relaxed);
+    if (tryEg && !offEg && !egForce) {                   // phase 59g: asked only for Foveated (VRS): no blind try (no 2nd create)
+        s_egExt.store(1, std::memory_order_relaxed);
+        Log("Eye tracking: the OpenXR runtime %s does not list %s -- not asked for (eye tracking was off at the start, only "
+            "Foveated (VRS) on: no blind try)", s_slot[i].module, kEyeGazeExt);
+    } else if (tryEg && !offEg) {
         s_egExt.store(1, std::memory_order_relaxed);
         LogWarn("Eye tracking: the OpenXR runtime %s does not LIST %s (enumerate result %d) -- asked for anyway (phase 59c: with "
             "OpenXR Toolkit the same runtime accepted it); a refused create = the game's own create again, no eye gaze",
             s_slot[i].module, kEyeGazeExt, r);
     }
-    const bool addHm = tryHm && offHm, addEg = tryEg;    // phase 59c: the gaze is asked for even when not listed
+    const bool addHm = tryHm && offHm, addEg = tryEg && (offEg || egForce);   // phase 59c: even when not listed (59g: only if forced)
     if (!addHm && !addEg) return pass();
     // a COPY of the create info with the extension(s) appended (the game's array stays as it is)
     const uint32_t n0 = ci->enabledExtensionCount;
@@ -3255,6 +3261,7 @@ XrResult SyncActionsImpl(int i, XrSession ses, const XrActionsSyncInfo* si) {
     void* const set = s_egSyncSet.load(std::memory_order_relaxed);
     const bool append = set && ses && s_egSyncSes.load(std::memory_order_relaxed) == ses &&
                         !s_egSyncAppendOff.load(std::memory_order_relaxed) && !s_egFailedA.load(std::memory_order_relaxed) && si &&
+                        s_egActive.load(std::memory_order_relaxed) &&   // phase 59g: attached but dormant while eye tracking is off
                         si->type == kTypeActionsSyncInfo && si->countActiveActionSets < 31;
     if (nCalls == 0)
         Log("Eye tracking: first xrSyncActions by the game (session %p, %u active set(s), tid=%lu) -- %s", ses,
@@ -3877,7 +3884,10 @@ HiddenStats GetHiddenStats() {
 }
 
 // ---- phase 59: eye gaze (see xr_hook.h; the logic is in the anonymous namespace above) ----
-void EyeGazeRequest(bool want) { s_egWant.store(want, std::memory_order_relaxed); }
+void EyeGazeRequest(bool want, bool force) {
+    s_egWant.store(want, std::memory_order_relaxed);
+    s_egForce.store(force, std::memory_order_relaxed);   // phase 59g
+}
 void EyeGazeActive(bool on) { s_egActive.store(on, std::memory_order_relaxed); }
 bool EyeGaze(int view, float* tx, float* ty) {
     if (view < 0 || view > 1 || !tx || !ty) return false;

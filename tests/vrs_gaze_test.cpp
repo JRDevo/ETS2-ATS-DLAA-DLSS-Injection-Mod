@@ -257,6 +257,22 @@ int main() {
         }
         CHECK(mono && stepped, "monotonic, in kEdgeStep steps");
         CHECK(GazeMath::EdgeGrow(std::nanf("")) == 1.0f, "NaN -> no grow");
+        // phase 59g: EdgeStep = EdgeGrow's steps from scratch, and holds its step at a border (hysteresis)
+        bool same = true;
+        for (int i = 0; i <= 400; ++i) {
+            const float du = i * 0.001f;
+            if (std::fabs(1.0f + GazeMath::EdgeStep(du, -1) * GazeMath::kEdgeStep - GazeMath::EdgeGrow(du)) > 1e-5f) same = false;
+        }
+        CHECK(same, "EdgeStep(-1) = EdgeGrow");
+        const float border = GazeMath::kEdgeFrom + 2.5f / 6.0f * (GazeMath::kEdgeFull - GazeMath::kEdgeFrom);   // between step 2 and 3
+        int st = GazeMath::EdgeStep(border - 0.002f, -1), flips = 0;
+        for (int i = 0; i < 100; ++i) {
+            const int nx = GazeMath::EdgeStep(border + ((i & 1) ? 0.002f : -0.002f), st);
+            if (nx != st) ++flips;
+            st = nx;
+        }
+        CHECK(flips == 0, "no flips at a step border (%d)", flips);
+        CHECK(GazeMath::EdgeStep(0.30f, 0) == 6 && GazeMath::EdgeStep(0.0f, 6) == 0, "big moves still change the step");
     }
 
     printf("%d checks, %d failed\n", g_checks, g_fails);

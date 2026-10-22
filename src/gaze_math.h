@@ -64,6 +64,16 @@ inline float EdgeGrow(float du) {
     return 1.0f + steps * kEdgeStep;
 }
 
+// phase 59g: the same steps with HYSTERESIS -- `prev` (-1 = none) is kept until the raw step is 0.75 of a step away from it, so
+// a gaze resting on a step border does not flip the radii (one mask refill each) every frame. Returns the step 0 .. 6.
+inline int EdgeStep(float du, int prev) {
+    const float d = du < 0.0f ? -du : du;
+    float raw = 0.0f;                                    // (NaN: 0)
+    if (d > kEdgeFrom) raw = (d >= kEdgeFull ? 1.0f : (d - kEdgeFrom) / (kEdgeFull - kEdgeFrom)) * kEdgeGrow / kEdgeStep;
+    if (prev >= 0 && std::fabs(raw - (float)prev) < 0.75f) return prev;
+    return (int)std::floor(raw + 0.5f);
+}
+
 constexpr float kSaccadeUv = 0.06f;                      // a jump this big (uv) is a saccade: followed 4x faster
 
 struct Smoother {

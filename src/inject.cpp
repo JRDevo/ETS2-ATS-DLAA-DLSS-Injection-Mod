@@ -9488,7 +9488,11 @@ void VrsOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* 
         const float uOpt = u;
         VrsGazeCentre(eye, s, u, v, &u, &v);
         VrsGazeMaybeLog();
-        grow = GazeMath::EdgeGrow(u - uOpt);           // phase 59d: far to the side the tracker reads short -- bigger rings
+        static int s_edgeStep[kMaxEyes] = { -1, -1 };  // phase 59g: the step with hysteresis (no refill per frame at a border)
+        if (eye >= 0 && eye < kMaxEyes) {
+            s_edgeStep[eye] = GazeMath::EdgeStep(u - uOpt, s_edgeStep[eye]);
+            grow = 1.0f + (float)s_edgeStep[eye] * GazeMath::kEdgeStep;   // phase 59d: far to the side the tracker reads short
+        }
     }
     // the game's current pixel shader (one PSGetShader per bracket: hkPSSetShader keeps it from here on)
     ID3D11PixelShader* ps = nullptr;
@@ -23201,7 +23205,7 @@ DWORD WINAPI SetupThread(LPVOID) {
         // so the menu's Foveated eye tracking row works without a restart. Harmless while eye tracking is off: a runtime that
         // refuses it gets the game's own create again, and the gaze is only located while it is used (VrsEyeApply).
         g_vrsEyeAtStart = ((g_vrsEye || g_vrsOn) && !g_vrsEyeFake) ? 1 : 0;
-        XrHook::EyeGazeRequest(g_vrsEyeAtStart != 0);
+        XrHook::EyeGazeRequest(g_vrsEyeAtStart != 0, g_vrsEye != 0);   // phase 59g: blind try (unlisted) only with eye tracking on
         VrsEyeApply();
         XrHook::Install();
         Log("hidden area mask (phase 40): xr_hidden_mask=%d (%s)", g_xrHiddenMask, g_xrHiddenMask

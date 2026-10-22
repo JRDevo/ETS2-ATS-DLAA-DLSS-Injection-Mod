@@ -256,7 +256,8 @@ HiddenStats GetHiddenStats();
 // ORIENTATION_VALID + ORIENTATION_TRACKED; the gaze (-z of the located pose) is rotated into each VIEW's frame with the inverse of
 // that view's located orientation (canted displays) and kept as view tangents tx = x / -z, ty = y / -z (+x right, +y up; z >= 0
 // = rejected). Every failure: logged once, gaze off for the session; the game's own call and result are never changed.
-void EyeGazeRequest(bool want);              // before the game's xrCreateInstance (SetupThread): ask for the extension
+void EyeGazeRequest(bool want, bool force = true);   // before the game's xrCreateInstance (SetupThread): ask for the extension;
+                                             // phase 59g: force = also when the runtime does not list it
 void EyeGazeActive(bool on);                 // live: sync + locate per frame while on (vrs_eye on, VRS on)
 // The newest gaze of OpenXR view `view` (0 = left, 1 = right) as view tangents (+x right, +y up). False = no valid gaze located
 // within the last 100 ms (out untouched).

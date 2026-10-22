@@ -668,7 +668,8 @@ The three green lines under the title show the game's GPU time per frame, what t
   = also the game's lighting pass, at the very edge only, for more saving. Test it before you keep it: look for blocky
   light or shadow edges at the side of your view.
   **Foveated strength** (`vrs_strength`) sets how coarse the outer ring is: `Normal` (default, 1 colour per 2 x 2
-  pixels), `Strong` (4 x 2) or `Max` (4 x 4). More saving, blockier edges; best with eye tracking.
+  pixels), `Strong` (4 x 2) or `Max` (4 x 4), also for the lighting pass when Foveated passes is `scene + lighting`.
+  More saving, blockier edges; best with eye tracking.
   **Foveated eye tracking** (`vrs_eye`, off by default; **experimental / test build**): on a headset with eye tracking
   that the VR runtime reports through OpenXR (`XR_EXT_eye_gaze_interaction`, for example Varjo; other
   eye-tracked headsets may work too), the sharp centre follows where you look instead of staying at the lens centre. Without an eye tracker the row
