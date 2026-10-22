@@ -1,11 +1,14 @@
-# Bug flow: an issue that waits for the reporter carries the label "needs-info".
-#   - day 7 without any activity : a reminder comment + label "stale"
-#   - day 14 without any activity: the issue is closed (reason "not planned")
-#   - the reporter comments      : "needs-info" and "stale" are removed, the clock stops; an issue the bot closed (it
-#                                  still has "stale") opens again. A maintainer's comment never counts, also when the
-#                                  maintainer opened the issue (issues moved over from Discussions).
-# Issues without "needs-info" are never touched.
-name: Needs-info bug flow
+# Waiting flow: the label "needs-info" means "the ball is with the reporter".
+#   - a maintainer comments on an open issue -> "needs-info" is added (and "stale" removed): we answered, now they test / reply
+#   - anyone else comments (not a bot)       -> "needs-info" and "stale" are removed: their turn is done. An issue the bot
+#                                               closed for silence (it still has "stale") opens again.
+#   - day 2 without an answer                -> ONE reminder comment + label "stale" (asks for the log when "needs-logs" is on,
+#                                               else to test the fix / answer the question)
+#   - day 14 without an answer               -> closed as "not planned" (a comment says how to reopen)
+# "Without an answer" counts from the last maintainer comment or the last time "needs-info" was added, whichever is later.
+# The reporter is the issue's author, or for an issue a maintainer moved over from Discussions the "Reported by @name" in its
+# body; any non-maintainer comment counts as an answer. The daily run also repairs a missed event (an answer after the label).
+name: Needs-info waiting flow
 
 on:
   schedule:
@@ -18,46 +21,114 @@ permissions:
   issues: write
 
 jobs:
-  close-silent:
-    if: github.event_name != 'issue_comment'
+  flow:
+    if: github.event_name != 'issue_comment' || !github.event.issue.pull_request
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/stale@v9
+      - uses: actions/github-script@v7
         with:
-          only-labels: needs-info
-          stale-issue-label: stale
-          days-before-stale: 7
-          days-before-close: 7
-          days-before-pr-stale: -1
-          days-before-pr-close: -1
-          close-issue-reason: not_planned
-          stale-issue-message: >
-            We need more information to work on this. Please send what was asked above
-            (normally `dlaa_inject.log` and `dlaa.ini`, made with the latest version).
-            Without an answer this issue closes in 7 days.
-          close-issue-message: >
-            Closed: no answer for 2 weeks. If you still have the problem, comment here with
-            the requested files and we open it again.
+          script: |
+            const { owner, repo } = context.repo;
+            const MAINT = ['OWNER', 'MEMBER', 'COLLABORATOR'];
+            const MARK_REMIND = '<!-- needs-info-reminder -->';
+            const MARK_CLOSE = '<!-- needs-info-close -->';
+            const DAY = 24 * 3600 * 1000, REMIND_DAYS = 2, CLOSE_DAYS = 14;
+            const isMaint = c => MAINT.includes(c.author_association);
+            const LOG_RE = [                                // the same test as needs-logs.yml
+              /user-attachments\/(files|assets)\/\d+\/[^\s)\]]*\.(log|zip|7z|rar)\b/i,
+              /\[[^\]]*dlaa_inject[^\]]*\]\(http/i,
+              /DLAA injector v[0-9][^\n]*loaded/i,
+            ];
+            const hasLog = t => !!t && LOG_RE.some(r => r.test(t));
+            const isBot = u => !u || u.type === 'Bot' || /\[bot\]$/.test(u.login);
+            const labelsOf = i => i.labels.map(l => typeof l === 'string' ? l : l.name);
+            const addLabels = (n, labels) => github.rest.issues.addLabels({ owner, repo, issue_number: n, labels });
+            const removeLabel = (n, name) => github.rest.issues.removeLabel({ owner, repo, issue_number: n, name }).catch(() => {});
 
-  reporter-answered:
-    # the reporter (not a maintainer, not a bot) commented on an issue that waits for them
-    if: >
-      github.event_name == 'issue_comment' &&
-      !github.event.issue.pull_request &&
-      github.event.comment.user.login == github.event.issue.user.login &&
-      github.event.comment.user.type != 'Bot' &&
-      !contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) &&
-      contains(github.event.issue.labels.*.name, 'needs-info')
-    runs-on: ubuntu-latest
-    steps:
-      - env:
-          GH_TOKEN: ${{ github.token }}
-          ISSUE: ${{ github.event.issue.number }}
-          REPO: ${{ github.repository }}
-        run: |
-          gh issue edit "$ISSUE" --repo "$REPO" --remove-label needs-info
-          gh issue edit "$ISSUE" --repo "$REPO" --remove-label stale || true
-          # reopen only an issue the bot closed for silence (it keeps "stale"); one a maintainer closed stays closed
-          if [ "${{ github.event.issue.state }}" = "closed" ] && [ "${{ contains(github.event.issue.labels.*.name, 'stale') }}" = "true" ]; then
-            gh issue reopen "$ISSUE" --repo "$REPO"
-          fi
+            // who we wait for: the author, or "Reported by @name" in a moved issue's body
+            function reporter(issue) {
+              if (!MAINT.includes(issue.author_association)) return issue.user.login;
+              const m = /(?:Reported by|Tester):?\s*@([A-Za-z0-9-]+)/i.exec(issue.body || '');
+              return m ? m[1] : null;
+            }
+
+            async function answered(issue, why) {
+              const n = issue.number, labels = labelsOf(issue);
+              if (labels.includes('needs-info')) await removeLabel(n, 'needs-info');
+              if (labels.includes('stale')) await removeLabel(n, 'stale');
+              if (issue.state === 'closed' && labels.includes('stale')) {
+                await github.rest.issues.update({ owner, repo, issue_number: n, state: 'open' })
+                  .catch(e => core.warning(`#${n}: reopen failed: ${e.message}`));
+              }
+              core.info(`#${n}: answered (${why}) -> needs-info removed`);
+            }
+
+            // ---- a new comment ----
+            if (context.eventName === 'issue_comment') {
+              const c = context.payload.comment, issue = context.payload.issue;
+              if (isBot(c.user)) return;
+              if (isMaint(c)) {
+                if (issue.state !== 'open') return;
+                if (!reporter(issue)) { core.info(`#${issue.number}: maintainer's own issue, no reporter -> not waiting`); return; }
+                await addLabels(issue.number, ['needs-info']);
+                if (labelsOf(issue).includes('stale')) await removeLabel(issue.number, 'stale');
+                core.info(`#${issue.number}: maintainer answered -> needs-info added`);
+              } else if (labelsOf(issue).includes('needs-logs') && !hasLog(c.body)) {
+                // still no log: keep waiting (the clock keeps running), only "stale" goes
+                if (labelsOf(issue).includes('stale')) await removeLabel(issue.number, 'stale');
+                core.info(`#${issue.number}: @${c.user.login} commented without a log -> still needs-info`);
+              } else {
+                await answered(issue, `@${c.user.login} commented`);
+              }
+              return;
+            }
+
+            // ---- daily (or manual) run: reminders, closing, repair ----
+            const now = Date.now();
+            const issues = await github.paginate(github.rest.issues.listForRepo,
+              { owner, repo, state: 'open', labels: 'needs-info', per_page: 100 });
+            for (const issue of issues) {
+              if (issue.pull_request) continue;
+              const n = issue.number, labels = labelsOf(issue);
+              const comments = await github.paginate(github.rest.issues.listComments,
+                { owner, repo, issue_number: n, per_page: 100 });
+              const events = await github.paginate(github.rest.issues.listEventsForTimeline,
+                { owner, repo, issue_number: n, per_page: 100 });
+              // when the wait started: the last maintainer comment or the last "needs-info" label, whichever is later
+              let start = 0;
+              for (const c of comments) if (isMaint(c) && !isBot(c.user)) start = Math.max(start, Date.parse(c.created_at));
+              for (const e of events) if (e.event === 'labeled' && e.label && e.label.name === 'needs-info')
+                start = Math.max(start, Date.parse(e.created_at));
+              if (!start) start = Date.parse(issue.created_at);
+              // an answer after that = a missed event: repair
+              if (!reporter(issue)) { core.info(`#${n}: maintainer's own issue, no reporter -> skipped`); continue; }
+              const needLog = labels.includes('needs-logs');
+              const answer = comments.find(c => !isMaint(c) && !isBot(c.user) && Date.parse(c.created_at) > start &&
+                                                (!needLog || hasLog(c.body)));
+              if (answer) { await answered(issue, `repair: @${answer.user.login} commented`); continue; }
+
+              const days = (now - start) / DAY;
+              const who = reporter(issue);
+              const hi = who ? `Hi @${who}, ` : 'Hi, ';
+              const reminded = comments.some(c => isBot(c.user) && c.body && c.body.includes(MARK_REMIND) &&
+                                                  Date.parse(c.created_at) > start);
+              if (days >= CLOSE_DAYS) {
+                await github.rest.issues.createComment({ owner, repo, issue_number: n, body: MARK_CLOSE + `
+            ${hi}this issue is closed because there was no answer for 2 weeks. If you still have the problem, just comment here (with \`dlaa_inject.log\` and \`dlaa.ini\` if it is a bug) and it opens again.` });
+                if (!labels.includes('stale')) await addLabels(n, ['stale']);
+                await github.rest.issues.update({ owner, repo, issue_number: n, state: 'closed', state_reason: 'not_planned' });
+                core.info(`#${n}: closed after ${days.toFixed(1)} days`);
+              } else if (days >= REMIND_DAYS && !reminded) {
+                const ask = labels.includes('needs-logs')
+                  ? `we need your \`dlaa_inject.log\` and \`dlaa.ini\` to look into this. Please follow [Reporting a problem (what to upload)](https://github.com/${owner}/${repo}#reporting-a-problem-what-to-upload): set \`log_level = 4\` in \`dlaa.ini\`, play 1 to 2 minutes where the problem shows, quit, and drag both files into a comment here.`
+                  : `there is an answer above: a fix or a new build to test, or a question. Please try it and let us know here whether it works.`;
+                await github.rest.issues.createComment({ owner, repo, issue_number: n, body: MARK_REMIND + `
+            ${hi}${ask}
+
+            Without an answer, this issue closes in ${Math.max(1, Math.ceil(CLOSE_DAYS - days))} days.` });
+                if (!labels.includes('stale')) await addLabels(n, ['stale']);
+                core.info(`#${n}: reminder after ${days.toFixed(1)} days`);
+              } else {
+                core.info(`#${n}: waiting ${days.toFixed(1)} days${reminded ? ' (reminded)' : ''}`);
+              }
+            }

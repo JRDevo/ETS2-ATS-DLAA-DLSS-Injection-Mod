@@ -1,10 +1,11 @@
 # Log check for bug reports: a bug report without dlaa_inject.log gets the labels "needs-logs" + "needs-info" and one
 # comment that asks for the files (needs-info.yml then reminds / closes it as for any issue that waits for the reporter).
 #   - issue opened or edited     : the body is checked
-#   - the reporter comments      : the body + all of the reporter's comments are checked; with a log, "needs-logs" is removed
+#   - anyone comments            : the body + every non-maintainer comment are checked; with a log, "needs-logs" is removed
 #   - workflow_dispatch          : every open bug report is checked (the comment is still written only once per issue)
 # A log counts when the text has an attached .log / .zip / .7z file, or the pasted "DLAA injector v... loaded" line.
-# Feature requests, pull requests and issues opened by the maintainer are not checked.
+# Feature requests and pull requests are not checked. On an issue the maintainer opened (moved from Discussions) the bot
+# never asks, but it still removes "needs-logs" once a log is there.
 name: Needs-logs check
 
 on:
@@ -38,11 +39,13 @@ jobs:
               const labels = issue.labels.map(l => typeof l === 'string' ? l : l.name);
               const isBug = labels.includes('bug') || /^\s*\[bug\]/i.test(issue.title);
               if (!isBug || issue.pull_request || issue.state !== 'open') return;
-              if (['OWNER', 'MEMBER', 'COLLABORATOR'].includes(issue.author_association)) return;
+              const MAINT = ['OWNER', 'MEMBER', 'COLLABORATOR'];
+              const byMaint = MAINT.includes(issue.author_association);
 
               const comments = await github.paginate(github.rest.issues.listComments,
                 { owner, repo, issue_number: issue.number, per_page: 100 });
-              const texts = [issue.body, ...comments.filter(c => c.user.login === issue.user.login).map(c => c.body)];
+              const texts = [issue.body, ...comments.filter(c => !MAINT.includes(c.author_association) &&
+                                                               c.user.type !== 'Bot').map(c => c.body)];
               const n = issue.number;
 
               if (texts.some(hasLog)) {
@@ -53,6 +56,7 @@ jobs:
                 return;
               }
               if (labels.includes('needs-logs')) { core.info(`#${n}: still no log, already labelled`); return; }
+              if (byMaint) return;                       // a moved issue: the maintainer asks by hand
 
               await github.rest.issues.addLabels({ owner, repo, issue_number: n, labels: ['needs-logs', 'needs-info'] });
               if (comments.some(c => c.body && c.body.includes(MARK))) return;
