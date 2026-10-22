@@ -907,7 +907,7 @@ int      g_vrsStrength = 0;
 bool     g_vrsStrengthExplicit = false;
 // phase 59: dlaa.ini vrs_eye -- 1 = EYE-TRACKED foveation: the VRS ring centre follows the gaze (XR_EXT_eye_gaze_interaction,
 // xr_hook.h EyeGaze) when the headset has an eye tracker, else the optical centre as before. The OpenXR extension is only requested
-// when it is on at the game's start (g_vrsEyeAtStart; not with vrs_eye_fake); the menu's Foveated eye tracking row switches it live
+// when it (phase 59g: or Foveated (VRS)) is on at the game's start (g_vrsEyeAtStart; not with vrs_eye_fake); the menu's Foveated eye tracking row switches it live
 // after that, SaveSettings writes it once explicit (own flag). vrs_eye_fake (debug, dlaa.ini only) = a made-up gaze circling slowly
 // (gaze_math.h FakeGaze) through the same path -- no OpenXR involved. vrs_eye_smooth = the centre's smoothing time constant in ms
 // (0..100, default 20; a saccade is followed 4x faster).
@@ -16421,7 +16421,7 @@ const wchar_t* const kMenuDesc[] = {
     L"4 x 4: more GPU saving, blockier edges. Best with eye tracking, where you never look at the outer ring.",
     // phase 59 (MR_VRSEYE)
     L"Experimental. The sharp centre of Foveated (VRS) follows your eyes on a headset with eye tracking (OpenXR eye gaze, for "
-    L"example Varjo); without one it stays at the lens centre. The first switch-on needs a game restart. Almost no cost.",
+    L"example Varjo); without one it stays at the lens centre. Needs Foveated (VRS) on at the game's start, else a restart. Almost no cost.",
     // phase 40 (MR_HMASK)
     L"VR only. The game skips the lens corners you never see (the headset reports them), so it draws fewer pixels: more GPU "
     L"headroom, the picture you see stays the same. The first switch-on needs a game restart. Turn it off if the edge of the view "
@@ -17796,7 +17796,8 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         else if (!g_vrsOn)           swprintf(sent, sentCap, L"Foveated (VRS) is off: switch it on first.");
         else if (!g_vrsEye)          swprintf(sent, sentCap, L"Off now: the sharp centre stays at the lens centre.");
         else if (g_vrsEyeFake)       swprintf(sent, sentCap, L"Fake gaze (vrs_eye_fake = 1): the sharp area circles slowly, a test.");
-        else if (!g_vrsEyeAtStart)   swprintf(sent, sentCap, L"Save (Shift+F12) and restart the game to ask the headset for eye gaze.");
+        else if (!g_vrsEyeAtStart)   swprintf(sent, sentCap, L"Foveated (VRS) was off at the game's start: save (Shift+F12) and restart "
+                                              L"the game to ask the headset for eye gaze.");
         else if (es.ext == 1 || es.ext == 4 || es.system == 0)
                                      swprintf(sent, sentCap, L"No eye tracker reported by this headset / runtime: the lens centre is used.");
         else                         swprintf(sent, sentCap, L"Gaze valid in %.0f %% of %llu frames so far; mask refills %llu.",
@@ -23196,7 +23197,10 @@ DWORD WINAPI SetupThread(LPVOID) {
         g_xrHiddenMaskAtStart = g_xrHiddenMask;             // phase 40: the extension is asked for only when on at the start
         XrHook::HiddenMaskRequest(g_xrHiddenMask != 0);
         XrHook::HiddenMaskActive(g_xrHiddenMask != 0);
-        g_vrsEyeAtStart = (g_vrsEye && !g_vrsEyeFake) ? 1 : 0;   // phase 59: the eye gaze extension, only when on at the start
+        // phase 59: the eye gaze extension is asked for at the start only. phase 59g (issue #21): also when Foveated (VRS) is on,
+        // so the menu's Foveated eye tracking row works without a restart. Harmless while eye tracking is off: a runtime that
+        // refuses it gets the game's own create again, and the gaze is only located while it is used (VrsEyeApply).
+        g_vrsEyeAtStart = ((g_vrsEye || g_vrsOn) && !g_vrsEyeFake) ? 1 : 0;
         XrHook::EyeGazeRequest(g_vrsEyeAtStart != 0);
         VrsEyeApply();
         XrHook::Install();
@@ -23208,7 +23212,9 @@ DWORD WINAPI SetupThread(LPVOID) {
             g_vrsEyeFake && g_vrsEye ? "FAKE gaze: the ring centre circles slowly, OpenXR eye gaze NOT requested"
             : g_vrsEye ? "ON: XR_EXT_eye_gaze_interaction is added at the game's xrCreateInstance when the runtime offers it; the VRS "
                          "ring centre follows the gaze when the headset has an eye tracker"
-                       : "off: the OpenXR extension is not requested; switching it on needs a game restart");
+                       : g_vrsEyeAtStart ? "off, but Foveated (VRS) is on: XR_EXT_eye_gaze_interaction is requested anyway "
+                                           "(phase 59g), so the menu row can switch it on without a restart"
+                                         : "off: the OpenXR extension is not requested; switching it on needs a game restart");
         Log("Turbo mode (phase 30, from OpenXR Toolkit): xr_turbo=%d (%s)", g_xrTurbo,
             g_xrTurbo ? "ON: the game does not wait for the headset in xrWaitFrame; ASW / Motion Smoothing / SSW / reprojection "
                         "cannot work" : "off: the game's own xrWaitFrame paces it");
