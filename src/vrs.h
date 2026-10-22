@@ -53,7 +53,9 @@ namespace Vrs {
 extern bool g_want;
 
 // dlaa.ini vrs / vrs_inner / vrs_outer / vrs_quality / vrs_debug / vrs_passes (any thread; Enter reads them). Clamped here.
-void Configure(int on, int innerPct, int outerPct, int quality, int debug, int passes);
+// phase 59f: `strength` (dlaa.ini vrs_strength) = the outer ring's rate: 0 Normal 2 x 2, 1 Strong 4 x 2, 2 Max 4 x 4 (each one
+// step finer while DLSS upscales from below 75 %, as before; the middle ring does not change).
+void Configure(int on, int innerPct, int outerPct, int quality, int debug, int passes, int strength = 0);
 bool On();                     // vrs = 1
 int  Passes();                 // vrs_passes: 0 = scene binds only, 1 = + the lighting bind (phase 42)
 
@@ -80,9 +82,10 @@ void FillMaskRuns(uint8_t* dst, uint32_t tw, uint32_t th, uint32_t rtW, uint32_t
 // Bracket. Enter: `eye` only for the log / stats; `renderOverOutput` = render width / output width while DLSS upscales
 // (1 = no upscale); `cls` = the bind kind (PassCls; kClsLight takes the outer-only table). false = not entered (off,
 // unsupported, mask failed): no state was touched. phase 59: `dynamic` = the eye's own refillable mask (vrs_eye; eye 0 / 1 only),
-// false = the phase 34 cache per (size, centre, radii).
+// false = the phase 34 cache per (size, centre, radii). phase 59d: `grow` = both radii x this (gaze far to the side: GazeMath::
+// EdgeGrow; dynamic masks only).
 bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, float cv, float renderOverOutput,
-           int cls = kClsGbuf, bool dynamic = false);
+           int cls = kClsGbuf, bool dynamic = false, float grow = 1.0f);
 void Leave(ID3D11DeviceContext* ctx);
 // A game draw inside the bracket: `exclude` = this draw keeps full-rate shading. Render thread, only while g_want.
 void OnDraw(ID3D11DeviceContext* ctx, bool exclude, int why);
@@ -111,6 +114,7 @@ struct Stats {
     // phase 59 (vrs_eye): brackets entered with the per-eye refillable mask, its refills (centre moved >= 1 tile / size / radii),
     // the refill time (QPC: FillMaskRuns + UpdateSubresource, CPU only) summed and the largest one, and the last filled centre
     uint64_t dynEnters = 0, dynRefills = 0, dynMasks = 0;
+    uint64_t edgeGrown = 0;                           // phase 59d: brackets whose rings grew (gaze far to the side)
     double   dynRefillUs = 0.0, dynRefillMaxUs = 0.0;
     float    dynCu[2] = { 0.5f, 0.5f }, dynCv[2] = { 0.5f, 0.5f };
 };

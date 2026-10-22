@@ -37,7 +37,7 @@ log_level=4
    - `on (gaze)` → good, eye data comes in.
    - `on (waiting for gaze)` → the mod asked for eye data, but none comes yet.
    - `on (no eye tracker)` → the runtime does not offer eye tracking to the game.
-   - `on (restart the game)` → you switched it on in the menu. The eye data is asked for only at game start. Restart the game.
+   - `on (restart the game)` → Foveated (VRS) was off when the game started, so no eye data was asked for. Restart the game.
    - `on (failed, see log)` → something went wrong. The log says what.
    - `on (no OpenXR session yet)` → VR has not started yet. Wait until you sit in the truck.
 4. Quit the game. Send me the log file `dlaa_inject.log` (same folder as the DLL).
@@ -87,3 +87,4 @@ Post it in [discussion #11](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injecti
 
 - Game does not start, or VR does not start: set `vrs_eye=0`. If it still fails, put back your old `dinput8.dll`. Send me the log.
 - Menu row says `no eye tracker` but your headset has eye tracking: send me the log. The first `Eye tracking:` lines say why.
+- OpenXR Toolkit: since eyetest3 the mod works with it on or off. If you use the Toolkit, send one log with it on and one with it off.

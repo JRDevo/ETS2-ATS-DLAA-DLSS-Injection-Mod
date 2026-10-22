@@ -13,6 +13,7 @@
 #include <cstring>
 #include <mutex>
 #include <new>
+#include <string>
 #include <utility>
 #include "MinHook.h"
 #include "log.h"
@@ -312,6 +313,7 @@ struct Slot {
     std::atomic<void*> pollEvent{nullptr}, createSession{nullptr}, beginSession{nullptr}, requestExit{nullptr};   // phase 33
     std::atomic<void*> createInstance{nullptr};                                       // phase 40 (runtime slots only)
     std::atomic<void*> attachSets{nullptr}, syncActions{nullptr}, createActionSet{nullptr};   // phase 59 (eye gaze)
+    std::atomic<void*> suggest{nullptr};          // phase 59c: xrSuggestInteractionProfileBindings (runtime slots only)
     std::atomic<void*> instance{nullptr};        // phase 29: the last non-null XrInstance this component's GIPA was asked with
     int  kind = 0;
     char module[64] = "";
@@ -1816,6 +1818,7 @@ void HmDestroySession(XrSession ses) {
 }
 // ---- phase 59: eye gaze (XR_EXT_eye_gaze_interaction; see xr_hook.h) ------------------------------------------------------
 std::atomic<bool>     s_egWant{false};            // EyeGazeRequest: ask for the extension at xrCreateInstance
+std::atomic<bool>     s_egForce{true};            // phase 59g: ask even when the runtime does not list it (vrs_eye on at start)
 std::atomic<bool>     s_egActive{false};          // EyeGazeActive: sync + locate per frame
 std::atomic<int>      s_egExt{0};                 // EyeGazeStats::ext
 std::atomic<int>      s_egSystem{-1};             // EyeGazeStats::system
@@ -1863,6 +1866,16 @@ struct EgState {
 };
 EgState    s_eg;
 std::mutex s_egMx;                                // s_eg (the game's create / begin / attach / destroy calls; the frame tick try-locks)
+// phase 59c: the eye gaze profile's suggested bindings from ABOVE the runtime (the game, or an API layer such as OpenXR Toolkit
+// that enabled the extension itself). A suggestion REPLACES the earlier one for that profile, so ours always carries theirs and
+// theirs gets ours appended (SuggestImpl) -- both orders end with both sets of bindings.
+std::mutex               s_egSugMx;               // the fields below
+XrInstance               s_egSugInst = nullptr;   // the instance they belong to
+XrPath                   s_egSugProfile = 0;      // /interaction_profiles/ext/eye_gaze_interaction in that instance (0 = not yet)
+XrActionSuggestedBinding s_egForeign[64];         // the last foreign suggestion for that profile
+uint32_t                 s_egForeignN = 0;
+XrActionSuggestedBinding s_egOurs{};              // our pose action + its binding (action null = not suggested yet)
+thread_local bool        t_egOwnSuggest = false;  // our own suggest call is on its way down (SuggestImpl passes it)
 struct EgGaze { float tx[2] = {}, ty[2] = {}; LONGLONG qpc = 0; bool have = false; };
 EgGaze     s_egGaze;
 SRWLOCK    s_egLock = SRWLOCK_INIT;               // s_egGaze (copies only)
@@ -1955,15 +1968,26 @@ void EgSetupInstanceLocked(int i, XrInstance inst, XrSystemId sys) {
     }
     if (r >= 0) { step = "xrStringToPath (profile)"; r = o.toPath(inst, "/interaction_profiles/ext/eye_gaze_interaction", &profile); }
     if (r >= 0) { step = "xrStringToPath (binding)"; r = o.toPath(inst, "/user/eyes_ext/input/gaze_ext/pose", &binding); }
+    uint32_t nForeign = 0;
     if (r >= 0) {
-        const XrActionSuggestedBinding b{ s_eg.act, binding };
+        XrActionSuggestedBinding all[65];        // phase 59c: a foreign suggestion for the profile first (it would be replaced)
+        {
+            std::lock_guard<std::mutex> sl(s_egSugMx);
+            if (s_egSugInst != inst) { s_egSugInst = inst; s_egForeignN = 0; s_egOurs = XrActionSuggestedBinding{}; }
+            s_egSugProfile = profile;
+            for (uint32_t k = 0; k < s_egForeignN; ++k) all[nForeign++] = s_egForeign[k];
+        }
+        all[nForeign] = XrActionSuggestedBinding{ s_eg.act, binding };
         XrInteractionProfileSuggestedBinding sb{};
         sb.type = kTypeIpSuggestedBinding;
         sb.interactionProfile = profile;
-        sb.countSuggestedBindings = 1;
-        sb.suggestedBindings = &b;
+        sb.countSuggestedBindings = nForeign + 1;
+        sb.suggestedBindings = all;
         step = "xrSuggestInteractionProfileBindings";
+        t_egOwnSuggest = true;
         r = o.suggest(inst, &sb);
+        t_egOwnSuggest = false;
+        if (r >= 0) { std::lock_guard<std::mutex> sl(s_egSugMx); s_egOurs = all[nForeign]; }
     }
     if (r < 0 && s_eg.set) { o.destroySet(s_eg.set); }   // (its action goes with it)
     --t_depth;
@@ -1976,20 +2000,16 @@ void EgSetupInstanceLocked(int i, XrInstance inst, XrSystemId sys) {
     s_egSyncSet.store(s_eg.set, std::memory_order_relaxed);
     s_egSetup.store(1, std::memory_order_relaxed);
     Log("Eye tracking: action set \"dlaa_eye_gaze\" %p (priority 0) + pose action %p suggested for "
-        "/interaction_profiles/ext/eye_gaze_interaction -> /user/eyes_ext/input/gaze_ext/pose (instance %p, via the %s %s)",
-        s_eg.set, s_eg.act, inst, kKindName[s_slot[i].kind], s_slot[i].module);
+        "/interaction_profiles/ext/eye_gaze_interaction -> /user/eyes_ext/input/gaze_ext/pose (instance %p, via the %s %s; + %u "
+        "binding(s) suggested for that profile before us, kept)", s_eg.set, s_eg.act, inst, kKindName[s_slot[i].kind], s_slot[i].module,
+        nForeign);
 }
 // The game's outermost xrCreateSession succeeded (slot i, its create info `ci`): set up the instance once, then fresh per-session state.
 void EgOnCreateSession(int i, XrInstance inst, const void* ci, XrSession ses) {
     if (!s_egWant.load(std::memory_order_relaxed)) return;
     const int ext = s_egExt.load(std::memory_order_relaxed);
-    if (ext != 3) {
-        static std::atomic<bool> s_logged{false};
-        if (ext == 2 && !s_logged.exchange(true))
-            Log("Eye tracking: the game enables %s itself -- the mod stays out (no action set of ours: the game's own bindings for "
-                "that profile would be replaced)", kEyeGazeExt);
-        return;
-    }
+    if (ext != 3 && ext != 2) return;            // phase 59c: 2 (enabled above the runtime, e.g. by OpenXR Toolkit) is used too
+
     const XrSessionCreateInfo* sci = static_cast<const XrSessionCreateInfo*>(ci);
     std::lock_guard<std::mutex> lk(s_egMx);
     if (inst != s_eg.inst) {                     // first session of this instance: its action set (the old one died with the old instance)
@@ -2208,11 +2228,12 @@ XrResult CreateInstanceImpl(int i, const XrInstanceCreateInfo* ci, XrInstance* o
     }
     if (wantEg && gameEg) {
         s_egExt.store(2, std::memory_order_relaxed);
-        Log("Eye tracking: the game enables %s itself (xrCreateInstance at the runtime %s) -- the mod stays out of its actions",
-            kEyeGazeExt, s_slot[i].module);
+        Log("Eye tracking: %s is already enabled above the runtime %s (by the game or an API layer such as OpenXR Toolkit) -- the mod "
+            "uses it: its gaze action is suggested next to theirs (phase 59c)", kEyeGazeExt, s_slot[i].module);
     }
     const bool tryHm = wantHm && !gameHm, tryEg = wantEg && !gameEg;
-    if (!tryHm && !tryEg) return pass();
+    static std::atomic<bool> s_listLogged{false};    // phase 59c: the runtime's whole list is logged once with vrs_eye on
+    if (!tryHm && !tryEg && !(wantEg && !s_listLogged.load(std::memory_order_relaxed))) return pass();
     // does the runtime offer them? (its own xrEnumerateInstanceExtensionProperties, no layer name)
     bool offHm = false, offEg = false;
     auto gipa = reinterpret_cast<PFN_xrGetInstanceProcAddr>(s_slot[i].gipa.load(std::memory_order_acquire));
@@ -2235,6 +2256,18 @@ XrResult CreateInstanceImpl(int i, const XrInstanceCreateInfo* ci, XrInstance* o
                         if (!strcmp(props[k].extensionName, kVisMaskExt)) offHm = true;
                         if (!strcmp(props[k].extensionName, kEyeGazeExt)) offEg = true;
                     }
+                if (r >= 0 && wantEg && !s_listLogged.exchange(true)) {   // phase 59c: what the runtime offers (Varjo tester, #11)
+                    std::string all;
+                    for (uint32_t k = 0; k < got && k < n; ++k) { if (k) all += ' '; all += props[k].extensionName; }
+                    std::string game;
+                    for (uint32_t k = 0; k < ci->enabledExtensionCount; ++k)
+                        if (ci->enabledExtensionNames && ci->enabledExtensionNames[k]) {
+                            if (!game.empty()) game += ' ';
+                            game += ci->enabledExtensionNames[k];
+                        }
+                    Log("Eye tracking: the OpenXR runtime %s offers %u instance extension(s): %s | asked for at its xrCreateInstance "
+                        "(game + layers above it): %s", s_slot[i].module, got, all.c_str(), game.empty() ? "(none)" : game.c_str());
+                }
                 delete[] props;
             }
         }
@@ -2245,12 +2278,18 @@ XrResult CreateInstanceImpl(int i, const XrInstanceCreateInfo* ci, XrInstance* o
         LogWarn("hidden area mask: the OpenXR runtime %s does not offer %s (enumerate result %d) -- the hidden area mask is not "
             "available", s_slot[i].module, kVisMaskExt, r);
     }
-    if (tryEg && !offEg) {
+    const bool egForce = s_egForce.load(std::memory_order_relaxed);
+    if (tryEg && !offEg && !egForce) {                   // phase 59g: asked only for Foveated (VRS): no blind try (no 2nd create)
         s_egExt.store(1, std::memory_order_relaxed);
-        LogWarn("Eye tracking: the OpenXR runtime %s does not offer %s (enumerate result %d) -- NO EYE TRACKER: vrs_eye keeps the "
-            "optical centre", s_slot[i].module, kEyeGazeExt, r);
+        Log("Eye tracking: the OpenXR runtime %s does not list %s -- not asked for (eye tracking was off at the start, only "
+            "Foveated (VRS) on: no blind try)", s_slot[i].module, kEyeGazeExt);
+    } else if (tryEg && !offEg) {
+        s_egExt.store(1, std::memory_order_relaxed);
+        LogWarn("Eye tracking: the OpenXR runtime %s does not LIST %s (enumerate result %d) -- asked for anyway (phase 59c: with "
+            "OpenXR Toolkit the same runtime accepted it); a refused create = the game's own create again, no eye gaze",
+            s_slot[i].module, kEyeGazeExt, r);
     }
-    const bool addHm = tryHm && offHm, addEg = tryEg && offEg;
+    const bool addHm = tryHm && offHm, addEg = tryEg && (offEg || egForce);   // phase 59c: even when not listed (59g: only if forced)
     if (!addHm && !addEg) return pass();
     // a COPY of the create info with the extension(s) appended (the game's array stays as it is)
     const uint32_t n0 = ci->enabledExtensionCount;
@@ -3222,6 +3261,7 @@ XrResult SyncActionsImpl(int i, XrSession ses, const XrActionsSyncInfo* si) {
     void* const set = s_egSyncSet.load(std::memory_order_relaxed);
     const bool append = set && ses && s_egSyncSes.load(std::memory_order_relaxed) == ses &&
                         !s_egSyncAppendOff.load(std::memory_order_relaxed) && !s_egFailedA.load(std::memory_order_relaxed) && si &&
+                        s_egActive.load(std::memory_order_relaxed) &&   // phase 59g: attached but dormant while eye tracking is off
                         si->type == kTypeActionsSyncInfo && si->countActiveActionSets < 31;
     if (nCalls == 0)
         Log("Eye tracking: first xrSyncActions by the game (session %p, %u active set(s), tid=%lu) -- %s", ses,
@@ -3264,6 +3304,67 @@ XrResult CreateActionSetImpl(int i, XrInstance inst, const XrActionSetCreateInfo
             Log("Eye tracking: the game creates OpenXR action set #%u \"%.63s\" (priority %u) -- it uses OpenXR input actions",
                 n, ci ? ci->actionSetName : "?", ci ? ci->priority : 0);
     }
+    return r;
+}
+// phase 59c: xrSuggestInteractionProfileBindings at the runtime (wrapped there only, with vrs_eye on at start). Any call but our
+// own (t_egOwnSuggest) for the eye gaze profile comes from above -- the game or a layer (OpenXR Toolkit's eye tracker): it is
+// kept (our own suggestion carries it) and, once our action is suggested, gets ours appended (a suggestion replaces the earlier
+// one for that profile). Every other profile, or a refused merge (then their own call again), passes as it is.
+XrResult SuggestImpl(int i, XrInstance inst, const XrInteractionProfileSuggestedBinding* sb) {
+    auto real = reinterpret_cast<PFN_xrSuggestInteractionProfileBindings>(s_slot[i].suggest.load(std::memory_order_acquire));
+    if (!real) return -1;
+    auto pass = [&]() { ++t_depth; const XrResult r = real(inst, sb); --t_depth; return r; };
+    if (t_egOwnSuggest || !inst || !sb || sb->type != kTypeIpSuggestedBinding || !sb->suggestedBindings) return pass();
+    XrActionSuggestedBinding all[65];
+    uint32_t n = 0;
+    XrActionSuggestedBinding ours{};
+    {
+        std::lock_guard<std::mutex> sl(s_egSugMx);
+        if (s_egSugInst != inst) { s_egSugInst = inst; s_egSugProfile = 0; s_egForeignN = 0; s_egOurs = XrActionSuggestedBinding{}; }
+        if (!s_egSugProfile) {
+            auto gipa = reinterpret_cast<PFN_xrGetInstanceProcAddr>(s_slot[i].gipa.load(std::memory_order_acquire));
+            PFN_xrVoidFunction fp = nullptr;
+            ++t_depth;
+            if (gipa && gipa(inst, "xrStringToPath", &fp) >= 0 && fp) {
+                XrPath p = 0;
+                if (reinterpret_cast<PFN_xrStringToPath>(fp)(inst, "/interaction_profiles/ext/eye_gaze_interaction", &p) >= 0)
+                    s_egSugProfile = p;
+            }
+            --t_depth;
+        }
+        if (!s_egSugProfile || sb->interactionProfile != s_egSugProfile) return pass();
+        n = sb->countSuggestedBindings < 64 ? sb->countSuggestedBindings : 64;
+        for (uint32_t k = 0; k < n; ++k) { s_egForeign[k] = sb->suggestedBindings[k]; all[k] = sb->suggestedBindings[k]; }
+        s_egForeignN = n;
+        ours = s_egOurs;
+    }
+    static std::atomic<int> s_logs{0};
+    const bool log = s_logs.fetch_add(1, std::memory_order_relaxed) < 4;
+    if (!ours.action || sb->countSuggestedBindings >= 64) {
+        const XrResult r = pass();
+        if (log)
+            Log("Eye tracking: %u eye gaze binding(s) suggested from above the runtime (the game or a layer such as OpenXR Toolkit) "
+                "-> %d = %s -- %s", sb->countSuggestedBindings, r, XrResultName(r),
+                ours.action ? "too many to merge, passed as they are" : "kept: our own suggestion (made later) carries them");
+        return r;
+    }
+    all[n] = ours;
+    XrInteractionProfileSuggestedBinding c = *sb;
+    c.countSuggestedBindings = n + 1;
+    c.suggestedBindings = all;
+    ++t_depth;
+    XrResult r = real(inst, &c);
+    --t_depth;
+    if (r >= 0) {
+        if (log)
+            Log("Eye tracking: %u eye gaze binding(s) suggested from above the runtime (the game or a layer such as OpenXR Toolkit) "
+                "-- ours appended (it would be replaced) -> %d = %s", n, r, XrResultName(r));
+        return r;
+    }
+    const XrResult rOurs = r;
+    r = pass();
+    LogErr("Eye tracking: the eye gaze suggestion from above the runtime with ours appended FAILED (%d = %s; theirs alone %d = %s) -- "
+        "our gaze action has no binding now: no eye gaze", rOurs, XrResultName(rOurs), r, XrResultName(r));
     return r;
 }
 XrResult GipaImpl(int i, XrInstance inst, const char* name, PFN_xrVoidFunction* fn);
@@ -3360,12 +3461,15 @@ template <int I> struct Thunk {
     static XrResult XRH_CALL CreateActionSet(XrInstance a, const XrActionSetCreateInfo* b, XrActionSet* c) {
         return LayerGate(_ReturnAddress(), [&] { return CreateActionSetImpl(I, a, b, c); });
     }
+    // phase 59c: NOT gated -- a layer's own eye gaze suggestion (OpenXR Toolkit's) is exactly what must be merged with ours
+    static XrResult XRH_CALL Suggest(XrInstance a, const XrInteractionProfileSuggestedBinding* b) { return SuggestImpl(I, a, b); }
 };
 struct ThunkSet { void *gipa, *negRuntime, *negLayer, *release, *acquire, *enumerate, *destroy, *locate, *endFrame, *createRefSpace,
                   *locateSpace, *destroySession, *waitFrame, *beginFrame, *endSession,
                   *pollEvent, *createSession, *beginSession, *requestExit,       // (phase 33: + 4)
                   *createInstance,                                               // (phase 40: + 1)
-                  *attachSets, *syncActions, *createActionSet; };                // (phase 59: + 3)
+                  *attachSets, *syncActions, *createActionSet,                   // (phase 59: + 3)
+                  *suggest; };                                                   // (phase 59c: + 1)
 template <int I> ThunkSet MakeSet() {
     return ThunkSet{ reinterpret_cast<void*>(&Thunk<I>::Gipa), reinterpret_cast<void*>(&Thunk<I>::NegRuntime),
                      reinterpret_cast<void*>(&Thunk<I>::NegLayer), reinterpret_cast<void*>(&Thunk<I>::Release),
@@ -3378,7 +3482,7 @@ template <int I> ThunkSet MakeSet() {
                      reinterpret_cast<void*>(&Thunk<I>::CreateSession), reinterpret_cast<void*>(&Thunk<I>::BeginSession),
                      reinterpret_cast<void*>(&Thunk<I>::RequestExit), reinterpret_cast<void*>(&Thunk<I>::CreateInstance),
                      reinterpret_cast<void*>(&Thunk<I>::AttachSets), reinterpret_cast<void*>(&Thunk<I>::SyncActions),
-                     reinterpret_cast<void*>(&Thunk<I>::CreateActionSet) };
+                     reinterpret_cast<void*>(&Thunk<I>::CreateActionSet), reinterpret_cast<void*>(&Thunk<I>::Suggest) };
 }
 template <size_t... Is> const ThunkSet* MakeTable(std::index_sequence<Is...>) {
     static const ThunkSet t[] = { MakeSet<(int)Is>()... };
@@ -3421,6 +3525,9 @@ XrResult GipaImpl(int i, XrInstance inst, const char* name, PFN_xrVoidFunction* 
     else if (egHooks && !strcmp(name, "xrAttachSessionActionSets")) { store = &s_slot[i].attachSets; thunk = ts.attachSets; }   // phase 59
     else if (egHooks && !strcmp(name, "xrSyncActions"))      { store = &s_slot[i].syncActions; thunk = ts.syncActions; }
     else if (egHooks && !strcmp(name, "xrCreateActionSet"))  { store = &s_slot[i].createActionSet; thunk = ts.createActionSet; }
+    else if (egHooks && !strcmp(name, "xrSuggestInteractionProfileBindings") && s_slot[i].kind == kKindRuntime) {   // phase 59c
+        store = &s_slot[i].suggest; thunk = ts.suggest;
+    }
     else if (!strcmp(name, "xrGetInstanceProcAddr") && reinterpret_cast<void*>(*fn) == s_slot[i].gipa.load()) {
         *fn = reinterpret_cast<PFN_xrVoidFunction>(ts.gipa);   // a GIPA asked for itself: stay wrapped
         return r;
@@ -3431,7 +3538,7 @@ XrResult GipaImpl(int i, XrInstance inst, const char* name, PFN_xrVoidFunction* 
     store->store(got, std::memory_order_release);
     *fn = reinterpret_cast<PFN_xrVoidFunction>(thunk);
     static std::atomic<int> s_logs{0};
-    if (s_logs.fetch_add(1, std::memory_order_relaxed) < 96)   // (phase 30: was 16, + 3 names; phase 33: 32 -> 64, + 4 names; phase 59: 96, + 3)
+    if (s_logs.fetch_add(1, std::memory_order_relaxed) < 100)  // (phase 30: was 16, + 3 names; phase 33: 32 -> 64, + 4 names; phase 59: 96, + 3; 59c: 100)
         Log("OpenXR hook: %s wrapped at the %s %s (real %p)", name, kKindName[s_slot[i].kind], s_slot[i].module, got);
     return r;
 }
@@ -3777,7 +3884,10 @@ HiddenStats GetHiddenStats() {
 }
 
 // ---- phase 59: eye gaze (see xr_hook.h; the logic is in the anonymous namespace above) ----
-void EyeGazeRequest(bool want) { s_egWant.store(want, std::memory_order_relaxed); }
+void EyeGazeRequest(bool want, bool force) {
+    s_egWant.store(want, std::memory_order_relaxed);
+    s_egForce.store(force, std::memory_order_relaxed);   // phase 59g
+}
 void EyeGazeActive(bool on) { s_egActive.store(on, std::memory_order_relaxed); }
 bool EyeGaze(int view, float* tx, float* ty) {
     if (view < 0 || view > 1 || !tx || !ty) return false;

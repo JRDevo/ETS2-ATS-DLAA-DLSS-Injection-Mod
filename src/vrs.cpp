@@ -55,6 +55,7 @@ bool g_want = false;
 
 namespace {
 std::atomic<int> s_on{0}, s_inner{55}, s_outer{80}, s_quality{1}, s_debug{0}, s_passes{0};
+std::atomic<int> s_strength{0};                      // phase 59f: dlaa.ini vrs_strength (0 Normal, 1 Strong, 2 Max)
 int              s_cls = kClsGbuf;                   // the bind kind of the open bracket (render thread; stats per kind)
 uint64_t         s_lastLogFrame = 0;                 // the Present count at the last stats line (per-frame figures)
 int              s_support = -1;                     // render thread (Probe)
@@ -122,21 +123,27 @@ const char* RateName(NV_PIXEL_SHADING_RATE r) {
     case NV_PIXEL_X1_PER_2X1_RASTER_PIXELS: return "2x1";
     case NV_PIXEL_X1_PER_1X2_RASTER_PIXELS: return "1x2";
     case NV_PIXEL_X1_PER_2X2_RASTER_PIXELS: return "2x2";
+    case NV_PIXEL_X1_PER_4X2_RASTER_PIXELS: return "4x2";
     case NV_PIXEL_X1_PER_4X4_RASTER_PIXELS: return "4x4";
     default:                                return "?";
     }
 }
 
 // The table for this Enter: index 0 = inner, 1 = middle ring, 2 = outer ring (the mask's values); the rest 1 x 1.
-void BuildTable(int quality, int debug, float renderOverOutput) {
+void BuildTable(int quality, int debug, int strength, float renderOverOutput) {
     const bool upLow = renderOverOutput > 0.0f && renderOverOutput < 0.75f;
-    const int key = (quality ? 1 : 0) | (debug ? 2 : 0) | (upLow ? 4 : 0);
+    strength = strength < 0 ? 0 : (strength > 2 ? 2 : strength);
+    const int key = (quality ? 1 : 0) | (debug ? 2 : 0) | (upLow ? 4 : 0) | (strength << 3);
     if (key == s_tableKey) return;
+    // phase 59f: the outer ring per vrs_strength -- [upLow][strength]; upLow = one step finer (DLSS already upscales)
+    static const NV_PIXEL_SHADING_RATE kOut[2][3] = {
+        { NV_PIXEL_X1_PER_2X2_RASTER_PIXELS, NV_PIXEL_X1_PER_4X2_RASTER_PIXELS, NV_PIXEL_X1_PER_4X4_RASTER_PIXELS },
+        { NV_PIXEL_X1_PER_2X1_RASTER_PIXELS, NV_PIXEL_X1_PER_2X2_RASTER_PIXELS, NV_PIXEL_X1_PER_4X2_RASTER_PIXELS } };
     NV_PIXEL_SHADING_RATE mid, out;
     if (debug)      { mid = NV_PIXEL_X1_PER_2X2_RASTER_PIXELS; out = NV_PIXEL_X1_PER_4X4_RASTER_PIXELS; }   // the pattern, on purpose
-    else if (upLow) { mid = NV_PIXEL_X1_PER_RASTER_PIXEL;      out = NV_PIXEL_X1_PER_2X1_RASTER_PIXELS; }   // DLSS already upscales
+    else if (upLow) { mid = NV_PIXEL_X1_PER_RASTER_PIXEL;      out = kOut[1][strength]; }   // DLSS already upscales
     else            { mid = quality ? NV_PIXEL_X1_PER_RASTER_PIXEL : NV_PIXEL_X1_PER_2X1_RASTER_PIXELS;
-                      out = NV_PIXEL_X1_PER_2X2_RASTER_PIXELS; }
+                      out = kOut[0][strength]; }
     for (NV_D3D11_VIEWPORT_SHADING_RATE_DESC& v : s_vp) {
         v.enableVariablePixelShadingRate = true;
         for (NV_PIXEL_SHADING_RATE& r : v.shadingRateTable) r = NV_PIXEL_X1_PER_RASTER_PIXEL;
@@ -151,8 +158,8 @@ void BuildTable(int quality, int debug, float renderOverOutput) {
     }
     const bool first = s_tableKey < 0;
     s_tableKey = key;
-    Log("VRS: shading-rate table inner 1x1, middle %s, outer %s (vrs_quality=%d%s%s); extra passes (vrs_passes=1): middle 1x1, "
-        "outer %s%s", RateName(mid), RateName(out), quality,
+    Log("VRS: shading-rate table inner 1x1, middle %s, outer %s (vrs_quality=%d vrs_strength=%d%s%s); extra passes (vrs_passes=1): "
+        "middle 1x1, outer %s%s", RateName(mid), RateName(out), quality, strength,
         debug ? ", vrs_debug=1: exaggerated to show the pattern" : "",
         upLow ? ", DLSS upscales from below 75 % of the output width: outer one step finer" : "", RateName(out),
         first ? "" : " -- changed");
@@ -316,7 +323,8 @@ void SetHw(ID3D11DeviceContext* ctx, bool on) {
 #endif // WITH_VRS
 } // namespace
 
-void Configure(int on, int innerPct, int outerPct, int quality, int debug, int passes) {
+void Configure(int on, int innerPct, int outerPct, int quality, int debug, int passes, int strength) {
+    s_strength.store(strength < 0 ? 0 : (strength > 2 ? 2 : strength), std::memory_order_relaxed);   // phase 59f
     innerPct = innerPct < 10 ? 10 : (innerPct > 150 ? 150 : innerPct);
     outerPct = outerPct < 10 ? 10 : (outerPct > 150 ? 150 : outerPct);
     if (outerPct < innerPct) outerPct = innerPct;
@@ -469,7 +477,7 @@ int Probe(ID3D11Device* dev) {
 }
 
 bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, float cv, float renderOverOutput, int cls,
-           bool dynamic) {
+           bool dynamic, float grow) {
 #ifdef WITH_VRS
     if (g_want) Leave(ctx);                            // (never expected: every game bind leaves first)
     if (!s_on.load(std::memory_order_relaxed) || !ctx || !w || !h) return false;
@@ -482,7 +490,13 @@ bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, 
     if (Probe(dev) != 1) return false;
     ID3D11NvShadingRateResourceView* view = nullptr;
     if (dynamic && (eye == 0 || eye == 1)) {           // phase 59: the eye's refillable gaze mask
-        view = DynMaskFor(dev, ctx, w, h, cu, cv, s_inner.load(std::memory_order_relaxed), s_outer.load(std::memory_order_relaxed), eye);
+        int inner = s_inner.load(std::memory_order_relaxed), outer = s_outer.load(std::memory_order_relaxed);
+        if (grow > 1.0f) {                             // phase 59d: gaze far to the side -- both rings grow (Configure's 150 % cap)
+            inner = (std::min)(150, (int)(inner * grow + 0.5f));
+            outer = (std::min)(150, (int)(outer * grow + 0.5f));
+            ++s_stats.edgeGrown;
+        }
+        view = DynMaskFor(dev, ctx, w, h, cu, cv, inner, outer, eye);
         if (view) ++s_stats.dynEnters;
     } else {
         Mask* m = FindOrBuild(dev, ctx, w, h, cu, cv, s_inner.load(std::memory_order_relaxed), s_outer.load(std::memory_order_relaxed),
@@ -490,7 +504,8 @@ bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, 
         view = m ? m->view : nullptr;
     }
     if (!view) return false;
-    BuildTable(s_quality.load(std::memory_order_relaxed), s_debug.load(std::memory_order_relaxed), renderOverOutput);
+    BuildTable(s_quality.load(std::memory_order_relaxed), s_debug.load(std::memory_order_relaxed),
+               s_strength.load(std::memory_order_relaxed), renderOverOutput);
     s_vpCur = cls == kClsLight ? s_vpOuter : s_vp;     // phase 42: an extra pass = outer ring only
     s_cls = cls;
     // the Toolkit's order: the viewport table first, then the shading-rate view
@@ -513,7 +528,7 @@ bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, 
     if (eye == 0 || eye == 1) ++s_stats.entersEye[eye];
     return true;
 #else
-    (void)ctx; (void)w; (void)h; (void)eye; (void)cu; (void)cv; (void)renderOverOutput; (void)cls; (void)dynamic;
+    (void)ctx; (void)w; (void)h; (void)eye; (void)cu; (void)cv; (void)renderOverOutput; (void)cls; (void)dynamic; (void)grow;
     return false;
 #endif
 }
@@ -614,10 +629,11 @@ void MaybeLogStats(uint64_t frame) {
         const double us = c.dynRefillUs - p.dynRefillUs, sec = (double)(now - s_lastLogMs) / 1000.0;
         LogDbg("VRS gaze masks @%.0f s (phase 59, vrs_eye): %llu brackets with the per-eye mask, %llu refills (%.1f /s, %.2f per frame) "
             "costing %.1f us each on average (max so far %.1f us; FillMaskRuns + UpdateSubresource, CPU), %.3f ms per frame; masks "
-            "made %llu; last centres eye 0 (%.3f, %.3f) eye 1 (%.3f, %.3f)", sec, (unsigned long long)(c.dynEnters - p.dynEnters),
+            "made %llu; last centres eye 0 (%.3f, %.3f) eye 1 (%.3f, %.3f); %llu brackets with grown rings (phase 59d: gaze far to "
+            "the side)", sec, (unsigned long long)(c.dynEnters - p.dynEnters),
             (unsigned long long)rf, sec > 0.0 ? (double)rf / sec : 0.0, fr > 0.0 ? (double)rf / fr : 0.0, rf ? us / (double)rf : 0.0,
             c.dynRefillMaxUs, fr > 0.0 ? us / 1000.0 / fr : 0.0, (unsigned long long)c.dynMasks, (double)c.dynCu[0],
-            (double)c.dynCv[0], (double)c.dynCu[1], (double)c.dynCv[1]);
+            (double)c.dynCv[0], (double)c.dynCu[1], (double)c.dynCv[1], (unsigned long long)(c.edgeGrown - p.edgeGrown));
         (void)rf; (void)us; (void)sec;                 // (VRS_NO_LOG)
     }
     s_lastLogMs = now;

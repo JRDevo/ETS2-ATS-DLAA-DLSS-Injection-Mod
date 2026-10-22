@@ -98,10 +98,14 @@ log_level = 1
 # What foveated rendering acts on: 0 (default) = the 3D world only; 1 = also the game's lighting pass, outer ring only
 # (more saving; test it first: look for blocky light or shadow edges at the side). The menu's Foveated passes row.
 # vrs_passes = 0
+# How coarse the outer ring is: 0 (default) = Normal, 1 colour per 2 x 2 pixels; 1 = Strong, per 4 x 2; 2 = Max, per 4 x 4.
+# More GPU saving, blockier edges. Best with eye tracking (vrs_eye), where you never look at the outer ring.
+# The menu's Foveated strength row.
+# vrs_strength = 0
 # EYE-TRACKED FOVEATION (experimental / test build), 0 / 1, default 0. 1 = the sharp centre follows where you look, on a headset
 # with eye tracking that the VR runtime reports through OpenXR (XR_EXT_eye_gaze_interaction, for example Varjo);
-# without one it stays at the lens centre. The mod asks the runtime for eye gaze when the game starts, so the first switch-on needs
-# a game restart; after that the tuning menu's Foveated eye tracking row switches it live. See it work: log_level = 4 + vrs_debug = 1
+# without one it stays at the lens centre. The mod asks the runtime for eye gaze when the game starts, if this or vrs is on; so
+# with vrs = 1 the tuning menu's Foveated eye tracking row switches it live with no restart (with vrs = 0 at the start: restart once). See it work: log_level = 4 + vrs_debug = 1
 # (the blocky outer ring moves with your eyes in the desktop mirror). The log's "Eye tracking" lines say what the headset sent.
 # vrs_eye = 0
 # How calmly the sharp centre follows the gaze: a time constant in ms, 0..100 (0 = every gaze sample at once). Eye jumps
