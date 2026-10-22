@@ -61,16 +61,16 @@ jobs:
               await github.rest.issues.addLabels({ owner, repo, issue_number: n, labels: ['needs-logs', 'needs-info'] });
               if (comments.some(c => c.body && c.body.includes(MARK))) return;
               await github.rest.issues.createComment({ owner, repo, issue_number: n, body: MARK + `
-            Thanks for the report. I cannot see a log file here, and without it I usually cannot tell what happened.
+            Hi @${issue.user.login}, thanks a lot for reporting this! The mod is a free community project, and reports like yours are how it gets better for everyone.
 
-            Please follow the steps in the README, [Reporting a problem (what to upload)](https://github.com/${owner}/${repo}#reporting-a-problem-what-to-upload):
+            To find out what happens, I need your log file. It only takes a minute (the steps are also in the README, [Reporting a problem (what to upload)](https://github.com/${owner}/${repo}#reporting-a-problem-what-to-upload)):
 
             1. In \`dlaa.ini\` (next to \`dinput8.dll\` in the game's \`bin\\win_x64\\\` folder), change \`log_level = 1\` to \`log_level = 4\`.
-            2. Start the game, load a save, and drive for 1 to 2 minutes where the problem shows.
+            2. Start the game, load a save, and play for 1 to 2 minutes where the problem shows.
             3. Quit the game.
-            4. Drag \`dlaa_inject.log\` and \`dlaa.ini\` into a comment here. (Attach them as files; do not paste the text.)
+            4. Drag \`dlaa_inject.log\` and \`dlaa.ini\` into a comment here. (Attach them as files; please do not paste the text.)
 
-            If there is no \`dlaa_inject.log\` at all, please say so: then the mod did not load.` });
+            If there is no \`dlaa_inject.log\` at all, just tell me: then the mod did not load, and that is useful to know too. Thanks!` });
               core.info(`#${n}: no log, labelled and asked`);
             }
 
