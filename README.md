@@ -667,6 +667,8 @@ The three green lines under the title show the game's GPU time per frame, what t
   **Foveated passes** (`vrs_passes`) picks what it acts on: `scene` (default) = the 3D world only; `scene + lighting`
   = also the game's lighting pass, at the very edge only, for more saving. Test it before you keep it: look for blocky
   light or shadow edges at the side of your view.
+  **Foveated strength** (`vrs_strength`) sets how coarse the outer ring is: `Normal` (default, 1 colour per 2 x 2
+  pixels), `Strong` (4 x 2) or `Max` (4 x 4). More saving, blockier edges; best with eye tracking.
   **Foveated eye tracking** (`vrs_eye`, off by default; **experimental / test build**): on a headset with eye tracking
   that the VR runtime reports through OpenXR (`XR_EXT_eye_gaze_interaction`, for example Varjo; other
   eye-tracked headsets may work too), the sharp centre follows where you look instead of staying at the lens centre. Without an eye tracker the row
@@ -787,6 +789,7 @@ The table below lists the commonly used keys:
 | `vrs_inner` / `vrs_outer` | `55` / `80` | foveated rendering: ring sizes in % of the half picture around each eye's centre (`10`..`150`); full detail inside `vrs_outer` (with `vrs_quality = 1`), 2 x 2 outside. The menu's `Foveated size` row sets `vrs_outer` 10..100 in 5 % steps and `vrs_inner` = max(10, `vrs_outer` - 25): `wide` = 65 / 90, `balanced` = 55 / 80, `narrow` = 40 / 65; other values from `dlaa.ini` keep working (shown as inner / outer) |
 | `vrs_quality` | `1` | foveated rendering: `1` = full detail inside `vrs_outer`; `0` = the ring between `vrs_inner` and `vrs_outer` is shaded per 2 x 1 pixels too (more saving) |
 | `vrs_passes` | `0` | foveated rendering: what it acts on. `0` = the 3D world only; `1` = also the game's lighting pass, outer ring only (the middle ring stays sharp even with `vrs_quality = 0`). More saving; test it first. The menu's `Foveated passes` row switches it live, `Shift+F12` saves |
+| `vrs_strength` | `0` | foveated rendering: how coarse the outer ring is. `0` = Normal (2 x 2), `1` = Strong (4 x 2), `2` = Max (4 x 4). More saving, blockier edges; best with `vrs_eye = 1`. The menu's `Foveated strength` row changes it live, `Shift+F12` saves |
 | `vrs_eye` | `0` | foveated rendering, **experimental / test build** (phase 59): `1` = the sharp centre follows your gaze on a headset with eye tracking (OpenXR `XR_EXT_eye_gaze_interaction`, for example Varjo); without one it stays at the lens centre. Needs a game restart the first time (the mod asks the runtime for eye gaze at the game's start); after that the menu's `Foveated eye tracking` row switches it live, `Shift+F12` saves. The log's `Eye tracking` lines show what the headset sent |
 | `vrs_eye_smooth` | `20` | eye-tracked foveation: how calmly the sharp centre follows the gaze, a time constant in ms (`0`..`100`; `0` = every gaze sample at once). A big eye jump (a saccade) is followed four times faster |
 | `vrs_eye_fake` | `0` | eye-tracked foveation, test only: `1` (with `vrs_eye = 1`) = a made-up gaze that circles slowly (about 14 degrees, one turn in 6 s) instead of the eye tracker, to check the moving sharp area on a headset without one. OpenXR eye gaze is then not requested |

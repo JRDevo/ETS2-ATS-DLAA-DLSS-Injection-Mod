@@ -53,7 +53,9 @@ namespace Vrs {
 extern bool g_want;
 
 // dlaa.ini vrs / vrs_inner / vrs_outer / vrs_quality / vrs_debug / vrs_passes (any thread; Enter reads them). Clamped here.
-void Configure(int on, int innerPct, int outerPct, int quality, int debug, int passes);
+// phase 59f: `strength` (dlaa.ini vrs_strength) = the outer ring's rate: 0 Normal 2 x 2, 1 Strong 4 x 2, 2 Max 4 x 4 (each one
+// step finer while DLSS upscales from below 75 %, as before; the middle ring does not change).
+void Configure(int on, int innerPct, int outerPct, int quality, int debug, int passes, int strength = 0);
 bool On();                     // vrs = 1
 int  Passes();                 // vrs_passes: 0 = scene binds only, 1 = + the lighting bind (phase 42)
 
