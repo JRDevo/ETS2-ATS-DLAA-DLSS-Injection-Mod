@@ -1,3 +1,12 @@
+// v0.14.0 -- phase 59 (eye-tracked foveated rendering, + 59f vrs_strength), phases 60-69 (thin wires: dlaa_mv_dilate,
+//           mv_fwd_conservative, wire_widen + their menu rows), phase 56 (VectorXR), phase 70 (below).
+// phase 70 -- VR PANEL FIXED IN THE CAB + SHARPER VR PANEL TEXT (dlaa.ini menu_vr_lock 0/1, menu_vr_lock_x / _y degrees,
+//           menu_vr_lock_dist cm; menu row "Panel lock (VR)", first in Panel settings). Lock 1 = the panel quad in the game's
+//           layer space at yaw / pitch / distance from the seat (xr_hook.cpp OvBuildQuadLocked's `anchored`, shared with the fps
+//           box "fixed in play space"; pivot state per quad): steady while the head moves -- the head-locked VIEW-space quad
+//           shivered with Turbo's made-up display times. X / Y / depth rows edit the fixed spot while locked; the in-picture
+//           fallback stays head-locked. kOvPanelDensity 1.6 -> 3.2 (the panel image at menu_vr_scale 0.4 was 486 px with 10-px
+//           fonts the compositor stretched). kIniMaxKeys 64 -> 80.
 // phase 59 -- EYE-TRACKED FOVEATED RENDERING, EXPERIMENTAL (dlaa.ini vrs_eye 0/1, vrs_eye_fake 0/1, vrs_eye_smooth 0..100 ms, all
 //           default off / 20; menu row "Foveated eye tracking" after Foveated passes; GitHub discussion #11, a Varjo Aero tester).
 //           xr_hook.cpp adds XR_EXT_eye_gaze_interaction to the runtime's xrCreateInstance (the same extension-list copy as the
@@ -22622,11 +22631,6 @@ void LoadConfig() {
 #ifdef WITH_DLAA
             if (!strcmp(key, "did_shadow"))        { g_didShadowCfg = v >= 2 ? 2 : (v == 1 ? 1 : 0); continue; }   // startup only
             if (!strcmp(key, "did_shadow_verify")) { g_didShadowVerify = v < 0 ? -1 : (int)(v > 100000 ? 100000 : v); continue; }
-            // phase 70: the VR panel fixed in the cab (outside the else-if chain: C1061)
-            if (!strcmp(key, "menu_vr_lock"))      { g_menuVrLock = v != 0 ? 1 : 0; continue; }
-            if (!strcmp(key, "menu_vr_lock_x"))    { g_menuVrLockX = v < -90 ? -90 : (v > 90 ? 90 : (int)v); continue; }
-            if (!strcmp(key, "menu_vr_lock_y"))    { g_menuVrLockY = v < -60 ? -60 : (v > 60 ? 60 : (int)v); continue; }
-            if (!strcmp(key, "menu_vr_lock_dist")) { g_menuVrLockDist = v < 30 ? 30 : (v > 300 ? 300 : (int)v); continue; }
             // phase 40 / 41 / 42 (outside the else-if chain too: C1061 at the dev merge)
             if (!strcmp(key, "mirror_turns"))       { g_mirTurns = v > 0 ? 1 : 0; g_mirTurnsExplicit = true; continue; }   // phase 41
             // phase 52: frame rate (outside the else-if chain: C1061; the menu's Frame rate rows switch them live)
@@ -22637,6 +22641,11 @@ void LoadConfig() {
             if (!strcmp(key, "vectorxr"))           { Ofxr::ConfigureVectorXr(v != 0 ? 1 : 0); continue; }
             if (!strcmp(key, "vr_fps_cap"))         { g_vrFpsCap = FramePace::ClampVrDiv(v); g_paceExplicit = true; continue; }
 #endif
+            // phase 70: the VR panel fixed in the cab (outside the else-if chain: C1061)
+            if (!strcmp(key, "menu_vr_lock"))      { g_menuVrLock = v != 0 ? 1 : 0; continue; }
+            if (!strcmp(key, "menu_vr_lock_x"))    { g_menuVrLockX = v < -90 ? -90 : (v > 90 ? 90 : (int)v); continue; }
+            if (!strcmp(key, "menu_vr_lock_y"))    { g_menuVrLockY = v < -60 ? -60 : (v > 60 ? 60 : (int)v); continue; }
+            if (!strcmp(key, "menu_vr_lock_dist")) { g_menuVrLockDist = v < 30 ? 30 : (v > 300 ? 300 : (int)v); continue; }
             if (!strcmp(key, "xr_hidden_mask"))     { g_xrHiddenMask = v != 0 ? 1 : 0; g_xrHiddenMaskExplicit = true; continue; }   // phase 40
             if (!strcmp(key, "dlss_bias_mask"))     { g_biasCfg = v < 0 ? 0 : (v > 100 ? 100 : (int)v); g_biasExplicit = true; continue; }   // phase 49
             if (!strcmp(key, "light_redraw_jitter")) { g_lightRedrawCfg = v != 0 ? 1 : 0; continue; }   // phase 55 (outside the chain: C1061)

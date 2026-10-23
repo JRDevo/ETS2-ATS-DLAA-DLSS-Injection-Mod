@@ -771,7 +771,7 @@ float RefHeight(int nRows) {
 
 // v0.10.3 phase 29c: measured at scale 1 (the small font = 13 px there): the widest case relative to the panel -- the size is
 // rounded up from 12.5 and the hinting widens small text (Segoe UI: the default footer is 430 px at 13 px, 403 at 50 px / 4),
-// so what fits here fits at every larger build scale (VR quad 1.6+). The room = the panel width - both margins - the licence
+// so what fits here fits at every larger build scale (VR quad: 3.2 x menu_vr_scale, phase 70). The room = the panel width - both margins - the licence
 // text - the gap, as RenderPanel lays the line out. No GDI = "no".
 bool FooterFits(const wchar_t* footer) {
     if (!footer || !footer[0]) return true;

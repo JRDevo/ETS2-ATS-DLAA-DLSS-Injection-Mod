@@ -2131,6 +2131,26 @@ non-blocking readback timing -- so it is judged by the check totals and a verify
   viewport must be the view's size for the shift to apply), the level-4 counts. Unit tests: the existing suite only (none of it
   exercises the lighting bind).
 
+### Phase 70 (v0.14.0): VR panel fixed in the cab (`menu_vr_lock`) + sharper VR panel text
+
+- **Why.** The head-locked panel quad (our VIEW space) shivered while the head moved: the runtime locates a VIEW-space quad at
+  the frame's `displayTime`, and with Turbo mode that time is made up (up to ~1 frame off), so the head pose used for the quad
+  is wrong by head velocity x time error, different every frame. The fps box "fixed in play space" (game layer space) was steady.
+- **What.** Menu row `Panel lock (VR)` (`MR_PANELLOCK`, first in Panel settings; greyed in flat or without the quad path):
+  `Follow head` / `Fixed in cab`. Fixed = the panel quad in the game's projection-layer space at yaw / pitch degrees and a
+  distance from the seat (`menu_vr_lock_x` / `_y` / `_dist`, defaults 0 / 10 / 80 cm), placed by the same code as the fps box:
+  `OvBuildQuadLocked`'s `anchored` lambda (LOCAL space: pivot = origin; other spaces: eyes' midpoint + head yaw captured at
+  lock-on). Pivot state is per quad (`OvState::lastLock / pivotSpace / pivotHave / pivot / yaw0 [2]`); the panel's pivot is
+  dropped whenever the menu is closed. While locked, the X / Y / depth rows edit the fixed spot; the head-locked keys stay. The
+  in-picture fallback (`menu_vr_layer = 0`) stays head-locked. Draw order uses `menu_vr_lock_dist` while fixed.
+- **Sharper text.** `kOvPanelDensity` 1.6 -> 3.2 (image px per reference px per `menu_vr_scale`): at scale 0.4 the panel image
+  was 486 px wide with ~10-px GDI fonts the compositor stretched (thick, soft). Capped by the unchanged swapchain (2.4): full
+  density up to scale 0.75. Images are redrawn only on content change (phase 57), so the cost is per change, not per frame.
+- **Other.** `kIniMaxKeys` 64 -> 80 (the save writes up to 65 keys). The new ini keys parse as standalone `if` + `continue`
+  outside the key chain (C1061) and outside `WITH_DLAA`.
+- **Verified.** VR (ETS2, Quest 3 via Virtual Desktop, LOCAL layer space): the fixed panel holds still, text sharp at size 0.4.
+  Not verified: a non-LOCAL layer space (pivot capture path for the panel).
+
 ### The RenderDoc oracle (done in v0.2)
 
 Capture a frame of the unmodified game to learn empirically: which pass writes

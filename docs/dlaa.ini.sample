@@ -102,7 +102,7 @@ log_level = 1
 # More GPU saving, blockier edges. Best with eye tracking (vrs_eye), where you never look at the outer ring.
 # The menu's Foveated strength row.
 # vrs_strength = 0
-# EYE-TRACKED FOVEATION (experimental / test build), 0 / 1, default 0. 1 = the sharp centre follows where you look, on a headset
+# EYE-TRACKED FOVEATION (experimental), 0 / 1, default 0. 1 = the sharp centre follows where you look, on a headset
 # with eye tracking that the VR runtime reports through OpenXR (XR_EXT_eye_gaze_interaction, for example Varjo);
 # without one it stays at the lens centre. The mod asks the runtime for eye gaze when the game starts, if this or vrs is on; so
 # with vrs = 1 the tuning menu's Foveated eye tracking row switches it live with no restart (with vrs = 0 at the start: restart once). See it work: log_level = 4 + vrs_debug = 1
@@ -627,6 +627,15 @@ log_level = 1
 # real distance, menu_vr_dist). 0 = drawn into the eye picture as before (menu_vr_depth, no menu_vr_dist). The mod falls
 # back to the picture by itself when the layers are not possible (no OpenXR session, the runtime refuses them).
 # menu_vr_layer = 1
+# VR layer (v0.14.0): 0 = the panel follows the headset, 1 = FIXED IN THE CAB: it stays at one spot in front of your seat and
+# keeps still while you look around. The spot: menu_vr_lock_x / menu_vr_lock_y in degrees around the seat (x -90..90,
+# + = right; y -60..60, + = down) and menu_vr_lock_dist in cm from the seat (30..300). menu_vr_x / menu_vr_y / menu_vr_dist
+# stay the head-locked position. The menu's "Panel lock (VR)" row switches it; while fixed, the Panel position X / Y and
+# Panel VR depth rows set the fixed spot. Needs menu_vr_layer = 1 (with 0 the panel always follows the headset).
+# menu_vr_lock = 0
+# menu_vr_lock_x = 0
+# menu_vr_lock_y = 10
+# menu_vr_lock_dist = 80
 # The Reset to defaults row: how long (ms, 500..10000) the menu Right key must be held on it to reset. (v0.10.2 .. v0.12.0
 # this was also the HOLD TO BIND time; v0.13.0 binds hotkeys on the menu's Hotkeys page with ONE fresh press: Hotkeys...,
 # Right, pick the action, Right, press the new key / button -- written to the key_* line below at once; Backspace = none.)

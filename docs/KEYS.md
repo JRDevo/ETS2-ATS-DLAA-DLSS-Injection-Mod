@@ -45,7 +45,7 @@ menu and the garage / truck dealer screens, before a save is loaded).
 | `Up` / `Down` | Select a row (hold to scroll) |
 | `Left` / `Right` | Change the selected row. Number rows step and repeat while held; switches, the mode, the profile and the model change once per press. On a group row (`Panel settings`, `FPS counter settings`) `Right` opens the group, `Left` closes it |
 
-- **Two groups keep the list short** (v0.10.3): **Panel settings** (`Panel position X`, `Panel position Y`, `Panel size`,
+- **Two groups keep the list short** (v0.10.3): **Panel settings** (`Panel lock (VR)`, `Panel position X`, `Panel position Y`, `Panel size`,
   `Panel VR depth`, `Panel faces you (VR)`, `Menu keys`) and **FPS counter settings** (`FPS counter lock`, `FPS counter X`,
   `FPS counter Y`, `FPS counter size`; the `FPS counter` on / off row itself stays in the main list, right above the
   group). Both are **closed every time the menu opens** (the value shows `...`): select the group row and press `Right` to
@@ -86,6 +86,11 @@ menu and the garage / truck dealer screens, before a save is loaded).
   follows your head -- towards you as a true 3-D layer (off = parallel to your view, a flat picture seen at an angle).
   With `menu_vr_layer = 0` (the panel drawn into the picture; also the automatic fallback when the layers are not
   possible) **Panel VR depth** is the inward shift in px (`menu_vr_depth`) as above.
+- **Panel lock (VR)** (v0.14.0, no key, `menu_vr_lock`): `Follow head` (default) or `Fixed in cab` -- the panel stays at
+  one spot in front of your seat and keeps still while you look around. While fixed, **Panel position X / Y** set that spot
+  in degrees around the seat (Y: plus = down) and **Panel VR depth** its distance from the seat (`menu_vr_lock_x`,
+  `menu_vr_lock_y`, `menu_vr_lock_dist`, default 0.80 m); the head-locked position is kept for when you switch back.
+  Needs the VR layer (`menu_vr_layer = 1`); greyed otherwise and in flat.
 - **FPS counter** (on / off), **FPS counter X / Y, FPS counter size**: a small live fps box: the fps and the frame time as text with a dark outline, no background
   (`60 fps` / `16.7 ms`, updated twice a second) that stays on screen also while the menu is closed, in flat and in VR
   (both eyes + the desktop mirror). Flat and VR each keep their own position (`fps_show`, `fps_x`, `fps_y`, `fps_scale`,

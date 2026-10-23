@@ -989,7 +989,10 @@ bool OvEndFrame(int i, XrSession ses, const XrFrameEndInfo* fe, const XrComposit
     struct EndSeq { uint64_t& s; ~EndSeq() { ++s; } } endSeq{ s_ov.endSeq };   // this frame's release-draw interval ends
     bool have[2] = { s_ov.have[0], s_ov.have[1] };
     s_ov.have[0] = s_ov.have[1] = false;
-    if (!par.enabled || !par.menuOpen) s_ov.drawnValid[0] = false;   // phase 57: drawn again the first frame it is wanted again
+    if (!par.enabled || !par.menuOpen) {
+        s_ov.drawnValid[0] = false;                      // phase 57: drawn again the first frame it is wanted again
+        s_ov.pivotHave[0] = false;                       // phase 70: the fixed panel's pivot is captured again at the next open
+    }
     if (!par.enabled || !par.fpsShow) s_ov.drawnValid[1] = false;    //   (see OvDrawWantedLocked)
     if (!par.enabled) { OvSetOk(false, false); return false; }
     if (ses != s_ov.ses) {

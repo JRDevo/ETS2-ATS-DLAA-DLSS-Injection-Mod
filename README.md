@@ -23,7 +23,7 @@ an in-game menu (`Delete`) and an optional text config.
 
 **Menu:** [Features](#features) · [Download](#-download) · [Requirements](#requirements) · [Install](#install) · [Modes](#modes--the-end-key) · [Flat or VR](#flat-or-vr) · [OFXR Bridge](#ofxr-bridge-vr-frame-generation) · [VectorXR](#vectorxr-vr-layer-suite) · [Render scale](#how-render-scale-works) · [Models](#models-presets--which-one-to-use) · [Controls](#controls) · [Tuning menu](#the-tuning-menu) · [dlaa.ini](#dlaaini) · [Performance](#performance) · [Troubleshooting](#troubleshooting) · [Multiplayer](#multiplayer) · [Build](#build-from-source) · [Report a problem](#reporting-a-problem-what-to-upload) · [Contributing](CONTRIBUTING.md) · [License](#license-and-credits)
 
-> **Where the project stands (v0.13.0).** The mod was built for as many use cases, devices and situations as
+> **Where the project stands (v0.14.0).** The mod was built for as many use cases, devices and situations as
 > I could reach: flat and VR, one screen and three, keyboard, wheel and shifter, Reflex and frame rate caps,
 > foveated rendering, a hidden area mask, Turbo mode, CPU tuning, a tuning menu with every setting and its cost.
 > There are many options to tweak, and to tweak is paradise. The bells and whistles I know of are in; the ideas
@@ -38,25 +38,29 @@ an in-game menu (`Delete`) and an optional text config.
 - **Mirrors anti-aliased too**, trailer included.
 - **Exact motion for traffic**, wheels, trailers and plates: sharp, no ghosting.
 - Menu and truck-preview screens get anti-aliasing as well.
+- **Steadier near wires**: telephone and power wires stay calm while you drive. **new**
 - Four DLSS models, switched live with a key.
 - Sharper texture text and adjustable sharpening.
 
 **Flat and VR**
 - One DLL and one `dlaa.ini` for both; VR renders one pass per eye (OpenXR).
-- **Triple screens** in flat: every screen gets its own DLAA. **new**
+- **Triple screens** in flat: every screen gets its own DLAA.
 - Windows HDR and NVIDIA Smooth Motion work in flat mode.
-- OFXR Bridge (VR frame generation) and VectorXR (VR layer suite) work alongside.
+- OFXR Bridge (VR frame generation) and **VectorXR** (VR layer suite) work alongside. **new: VectorXR**
 - Drivable cars (ATS) get DLAA / DLSS too.
 
 **VR extras and speed**
-- **VR fps counter attached to the vehicle**: rides with the cab; 20 colours. **new**
-- Three VR speed-ups: hidden area mask, foveated lighting, mirrors in turns. **new**
+- **Eye-tracked foveated rendering**: the sharp area follows your eyes (eye-tracked headsets, experimental). **new**
+- **Foveated strength**: Normal / Strong / Max outer ring for more GPU saving. **new**
+- **VR fps counter attached to the vehicle**: rides with the cab; 20 colours.
+- Three VR speed-ups: hidden area mask, foveated lighting, mirrors in turns.
 - DLAA area: process only the middle of each eye.
-- **Frame rate limits**: NVIDIA Reflex and an FPS cap in flat, a half / third rate VR FPS cap. **new**
+- **Frame rate limits**: NVIDIA Reflex and an FPS cap in flat, a half / third rate VR FPS cap.
 
 **Menu**
 - **In-game menu** (`Delete`): every setting, its hotkey, its GPU cost, a short description.
 - Panel and fps counter can be moved and resized, flat and VR.
+- **VR panel fixed in the cab**: stays still while you look around; sharper text. **new**
 - Live CPU and GPU cost per part, and what limits your frame rate.
 
 **Setup**
@@ -75,7 +79,14 @@ an in-game menu (`Delete`) and an optional text config.
   costs on the GPU and a short description; `Up` / `Down` select, `Left` / `Right` change. Flat and VR (both eyes); the game does
   not see those keys while the menu is open. See [The tuning menu](#the-tuning-menu).
 - **Movable widgets** — the tuning panel and the live fps counter can both be moved and resized from the menu
-  (position X / Y and size), flat and VR each with their own place. In VR the panel turns to face you.
+  (position X / Y and size), flat and VR each with their own place. In VR the panel turns to face you. New in v0.14.0:
+  the VR panel can stay fixed in the cab (`Panel lock (VR)`), and its text is drawn sharper.
+- **Eye-tracked foveated rendering (VR, experimental)** — on a headset with eye tracking (OpenXR eye gaze, tested on
+  Varjo Aero) the sharp centre of `Foveated (VRS)` follows where you look; `Foveated strength` sets how coarse the outer
+  ring is (new in v0.14.0). See [the test guide](docs/EYE_TRACKING_TEST.md).
+- **Steadier thin wires** — near telephone and power wires no longer break up while you drive (`Thin-wire motion`,
+  `Thin-wire depth`, both on; `Thin-wire widening` is experimental and off). Far wires thinner than 1 pixel can still
+  break up (new in v0.14.0).
 - **Live CPU and GPU cost** — the menu shows what each part of this mod costs on the CPU and the GPU, in ms, and what
   limits your frame rate right now (CPU, GPU or the headset).
 - **Triple screens (flat)** — with the game's multi-monitor mode every screen gets its own DLAA (new in v0.12.0).
@@ -99,7 +110,9 @@ an in-game menu (`Delete`) and an optional text config.
 - **OFXR Bridge (VR frame generation)** — runs together with the bridge, which adds in-between frames to the
   finished eye pictures (see [OFXR Bridge](#ofxr-bridge-vr-frame-generation)).
 - **VectorXR (VR layer suite)** — runs together with VectorXR (Turbo, Depth, frame generation, on-screen display); the mod leaves
-  its work inside the game alone (see [VectorXR](#vectorxr-vr-layer-suite)).
+  its work inside the game alone (see [VectorXR](#vectorxr-vr-layer-suite); new in v0.14.0, tested on a Quest 3).
+- **Lower CPU cost** — a performance pass in v0.14.0: the VR panel and fps box are only redrawn when their text changes,
+  and the per-part motion work in busy scenes takes less CPU time.
 - **Drivable cars (ATS)** — DLAA / DLSS also runs while you drive a car.
 - **Menu and truck-preview screens** get anti-aliasing too, not only the drive.
 - **Four DLSS models** to pick from, switched live with a key, from light to heavy.
@@ -143,13 +156,14 @@ This is an unofficial fan project. It is not affiliated with, or endorsed by, SC
 Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
-> Status: v0.13.0. New: NVIDIA Reflex and frame rate caps, a Hotkeys page in the menu, a per-vehicle fps box in VR, a night light glow fix, CPU tuning, and fixes for Linux / Proton.
-> Test build v0.14.0-rc1 (pre-release): eye-tracked foveated rendering (Varjo), Foveated strength, the thin-wire fix (near wires stay steady while driving) and VectorXR support. For testers; see [the test guide](docs/EYE_TRACKING_TEST.md).
+> Status: v0.14.0. New: eye-tracked foveated rendering (experimental, tested on Varjo), Foveated strength, steadier near wires while driving, VectorXR support (tested), and a VR menu panel that can stay fixed in the cab with sharper text. Eye tracking test guide: [docs/EYE_TRACKING_TEST.md](docs/EYE_TRACKING_TEST.md).
 > With this version the bells and whistles I know of are in. From here on the main work is performance tuning, from your logs; new ideas are still welcome. See [Contributing](CONTRIBUTING.md).
 > See the [Releases page](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/releases) for every version.
 > DLSS upscaling in VR is still being tuned; treat it as experimental.
 
 <details><summary><h3>Older versions</h3></summary>
+
+v0.13.0: NVIDIA Reflex and frame rate caps, a Hotkeys page in the menu, a per-vehicle fps box in VR, a night light glow fix, CPU tuning, and fixes for Linux / Proton.
 
 v0.12.0: triple screens in flat, the VR fps counter attached to the vehicle, a menu in categories with a CPU | GPU cost column, hidden area mask, foveated lighting pass and mirrors in turns.
 
@@ -319,7 +333,9 @@ own thread are not mistaken for the game's.
   at start, `VectorXR: layer found in the game` once, and `OFXR Bridge / VectorXR: N calls passed through so far`. The tuning
   menu's `VectorXR (VR layer)` row (group `Upscaling and VR`) shows `found` / `not found` / `off`.
 
-Status: the handling is built but not yet tested in a headset with VectorXR; report what you see with `log_level = 4`.
+Status: tested on a Quest 3 (Virtual Desktop): the game and the mod run with VectorXR's layer loaded. With VectorXR's frame
+generation on, the game itself runs at half the frame rate and VectorXR fills the rest, as SSW / ASW do: on that PC it was no
+gain. Report what you see with `log_level = 4`.
 
 </details>
 
@@ -578,7 +594,7 @@ The three green lines under the title show the game's GPU time per frame, what t
   key first. The **Menu keys** row in the `Panel
   settings` group shows them; `Right` on it opens the Hotkeys page there. See
   [`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu).
-- **Groups (v0.10.3):** the panel rows (`Panel position X` / `Y`, `Panel size`, `Panel VR depth`, `Panel faces you`,
+- **Groups (v0.10.3):** the panel rows (`Panel lock (VR)`, `Panel position X` / `Y`, `Panel size`, `Panel VR depth`, `Panel faces you`,
   `Menu keys`) sit in the **Panel settings** group and the fps box rows (`FPS counter lock`, `X`, `Y`, `turn`, `tilt`, `rotate`, `size`, `colour`,
   `brightness`, `distance`) in the
   **FPS counter settings** group, right under the `FPS counter` row. Both groups are closed every time the menu
@@ -600,6 +616,13 @@ The three green lines under the title show the game's GPU time per frame, what t
   follows your head -- towards you as a true 3-D layer. With `menu_vr_layer = 0` (the panel drawn into the picture, as
   before; also the automatic fallback when the layers are not possible) `Panel VR depth` is the inward shift in px
   (`menu_vr_depth`).
+- **VR: panel fixed in the cab (new in v0.14.0).** The `Panel lock (VR)` row: `Follow head` (default) = the panel moves
+  with the headset; `Fixed in cab` = it stays at one spot in front of your seat and keeps still while you look around.
+  While it is fixed, `Panel position X` / `Y` set the spot in degrees around your seat (Y: plus = down) and
+  `Panel VR depth` its distance from the seat (`menu_vr_lock`, `menu_vr_lock_x`, `menu_vr_lock_y`, `menu_vr_lock_dist`;
+  0.80 m by default). The head-locked position is kept for when you switch back. Needs the VR layer
+  (`menu_vr_layer = 1`, the default); with `menu_vr_layer = 0` the panel always follows your head.
+  Also new in v0.14.0: the VR panel text is drawn with twice the pixels, so small panel sizes stay sharp.
 - **Live fps counter:** ![fps counter](docs/images/fps-counter.png) the `FPS counter` row (Right / Left step `Off`, `72 fps + 13.9 ms`, `72 fps`, `13.9 ms`, and the same as plain numbers: `72 + 13.9`, `72`, `13.9`) switches on a small fps box: the fps and the frame time as text with a dark outline, no background (`60 fps` /
   `16.7 ms`, updated twice a second) that stays on screen also when the menu is closed (flat, and in VR in both eyes).
   Its own GPU cost is measured and shown in the row's cost column, per frame (all the pictures it is drawn into together).
@@ -673,7 +696,7 @@ The three green lines under the title show the game's GPU time per frame, what t
   **Foveated strength** (`vrs_strength`) sets how coarse the outer ring is: `Normal` (default, 1 colour per 2 x 2
   pixels), `Strong` (4 x 2) or `Max` (4 x 4), also for the lighting pass when Foveated passes is `scene + lighting`.
   More saving, blockier edges; best with eye tracking.
-  **Foveated eye tracking** (`vrs_eye`, off by default; **experimental / test build**): on a headset with eye tracking
+  **Foveated eye tracking** (`vrs_eye`, off by default; **experimental**, new in v0.14.0): on a headset with eye tracking
   that the VR runtime reports through OpenXR (`XR_EXT_eye_gaze_interaction`, for example Varjo; other
   eye-tracked headsets may work too), the sharp centre follows where you look instead of staying at the lens centre. Without an eye tracker the row
   says `no eye tracker` and nothing changes. The mod asks the runtime for eye gaze when the game starts, so the first
@@ -780,6 +803,8 @@ The table below lists the commonly used keys:
 | `menu_vr_x` / `menu_vr_y` / `menu_vr_scale` / `menu_vr_depth` | `0` / `-5` / `1.0` / `12` | tuning menu panel, VR: centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size (1 = 54 % of the eye width), inward shift per eye in px |
 | `menu_vr_dist` | `100` | tuning menu panel, VR layer (v0.10.3, `menu_vr_layer = 1`): the panel's distance in cm (`30`..`300`); it keeps the same size at every distance, only the stereo depth changes. The menu's `Panel VR depth` row sets it in 5 cm steps on the layer path (`menu_vr_depth` is the in-picture shift) |
 | `menu_vr_face` | `1` | tuning menu panel, VR: `1` = the panel turns to face your eye when moved off the centre (a tilted 3-D panel, same size from every angle), `0` = a flat picture. On the VR layer path (default) also the fps box when it follows your head, turned by the compositor. The menu's `Panel faces you (VR)` row switches it live |
+| `menu_vr_lock` | `0` | tuning menu panel, VR layer (new in v0.14.0): `0` = follows the headset, `1` = fixed in the cab at one spot in front of your seat (steady while you look around). The menu's `Panel lock (VR)` row |
+| `menu_vr_lock_x` / `menu_vr_lock_y` / `menu_vr_lock_dist` | `0` / `10` / `80` | the fixed panel's spot (v0.14.0, `menu_vr_lock = 1`): degrees around your seat (x `-90`..`90`, + = right; y `-60`..`60`, + = down) and its distance from the seat in cm (`30`..`300`). The `Panel position X` / `Y` and `Panel VR depth` rows set them while the panel is fixed |
 | `menu_vr_layer` | `1` | VR (v0.10.3): `1` = the panel and the fps box are separate OpenXR quad layers the headset's compositor places itself: rock-steady (no swimming with the reprojection), at a real distance (panel `menu_vr_dist`, default 1 m; fps box 0.8 m), facing you with `menu_vr_face = 1`, never covered by the game's menus; `menu_vr_depth` is then unused. `0` = drawn into the eye picture as before (also the automatic fallback; `menu_vr_dist` unused) |
 | `fps_show` | `0` | live fps box: `1` = a small fps / frame-time box stays on screen, also while the menu is closed. The menu's `FPS counter` row switches it live |
 | `fps_text` | `0` | what the fps box shows: `0` = fps and frame time (two lines), `1` = fps only, `2` = frame time (ms) only, and the same as plain numbers without `fps` / `ms`: `3` = both, `4` = the fps number, `5` = the ms number. The menu's `FPS counter` row steps `Off` / `72 fps + 13.9 ms` / `72 fps` / `13.9 ms` / `72 + 13.9` / `72` / `13.9` |
@@ -797,7 +822,7 @@ The table below lists the commonly used keys:
 | `vrs_quality` | `1` | foveated rendering: `1` = full detail inside `vrs_outer`; `0` = the ring between `vrs_inner` and `vrs_outer` is shaded per 2 x 1 pixels too (more saving) |
 | `vrs_passes` | `0` | foveated rendering: what it acts on. `0` = the 3D world only; `1` = also the game's lighting pass, outer ring only (the middle ring stays sharp even with `vrs_quality = 0`). More saving; test it first. The menu's `Foveated passes` row switches it live, `Shift+F12` saves |
 | `vrs_strength` | `0` | foveated rendering: how coarse the outer ring is. `0` = Normal (2 x 2), `1` = Strong (4 x 2), `2` = Max (4 x 4). More saving, blockier edges; best with `vrs_eye = 1`. The menu's `Foveated strength` row changes it live, `Shift+F12` saves |
-| `vrs_eye` | `0` | foveated rendering, **experimental / test build** (phase 59): `1` = the sharp centre follows your gaze on a headset with eye tracking (OpenXR `XR_EXT_eye_gaze_interaction`, for example Varjo); without one it stays at the lens centre. The mod asks the runtime for eye gaze at the game's start when this or `vrs` is on, so with `vrs = 1` the menu's `Foveated eye tracking` row switches it live with no restart (with `vrs = 0` at the start: restart once), `Shift+F12` saves. The log's `Eye tracking` lines show what the headset sent |
+| `vrs_eye` | `0` | foveated rendering, **experimental** (phase 59, new in v0.14.0): `1` = the sharp centre follows your gaze on a headset with eye tracking (OpenXR `XR_EXT_eye_gaze_interaction`, for example Varjo); without one it stays at the lens centre. The mod asks the runtime for eye gaze at the game's start when this or `vrs` is on, so with `vrs = 1` the menu's `Foveated eye tracking` row switches it live with no restart (with `vrs = 0` at the start: restart once), `Shift+F12` saves. The log's `Eye tracking` lines show what the headset sent |
 | `vrs_eye_smooth` | `20` | eye-tracked foveation: how calmly the sharp centre follows the gaze, a time constant in ms (`0`..`100`; `0` = every gaze sample at once). A big eye jump (a saccade) is followed four times faster |
 | `vrs_eye_fake` | `0` | eye-tracked foveation, test only: `1` (with `vrs_eye = 1`) = a made-up gaze that circles slowly (about 14 degrees, one turn in 6 s) instead of the eye tracker, to check the moving sharp area on a headset without one. OpenXR eye gaze is then not requested |
 | `vrs_debug` | `0` | foveated rendering, test only (needs `log_level = 4`): `1` = middle ring 2 x 2, outer ring 4 x 4, to see the pattern |
@@ -964,6 +989,12 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   (the Hotkeys page, GitHub issue #16).
 - **The VR fps box moved after a menu or a recentre, or sat in the wrong place in a second truck:** fixed in v0.13.0: update
   (the box is saved on the cab itself, per vehicle).
+- **Near telephone / power wires flicker or break up while driving:** fixed in v0.14.0: update (`Thin-wire motion` and
+  `Thin-wire depth`, both on by default). Far wires thinner than 1 pixel can still break up.
+- **The log shows `ERROR` lines although nothing is wrong, or the flat stats line shows only one screen:** fixed in
+  v0.14.0: update (GitHub issues #14 and #15).
+- **The VR menu panel shivers or jitters when you move your head (most with Turbo mode on):** set `Panel lock (VR)` to
+  `Fixed in cab` (new in v0.14.0). **The VR panel text looks thick or soft at a small panel size:** fixed in v0.14.0: update.
 - **Faint dark line down the middle of the menu / truck-preview screen:** fixed in v0.8.1: update.
 - **Dark 1 px line on every silhouette (trees, poles, trucks) in flat mode:** fixed in v0.10.1: update. v0.10.0
   drew the game's fog pass one texel off.
