@@ -1,6 +1,9 @@
 // XrHook -- see xr_hook.h. v0.10.3 phase 27: OpenXR swapchain release hook (GetProcAddress -> negotiation -> GIPA thunks).
+// phase 56 (VectorXR): a call from an API layer's own code (its presenter thread, outside any game call) is gated by RETURN
+// ADDRESS in the Thunk<I> stubs (LayerGate): run as nested = no bookkeeping, so only the game's outermost calls act.
 #include "xr_hook.h"
 #include <windows.h>
+#include <intrin.h>                                   // phase 56: _ReturnAddress (LayerGate)
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -10,11 +13,14 @@
 #include <cstring>
 #include <mutex>
 #include <new>
+#include <string>
 #include <utility>
 #include "MinHook.h"
 #include "log.h"
 #include "fps_pose.h"                                 // phase 44: the fps box turn (ComposeTurn)
+#include "gaze_math.h"                                // phase 59: the gaze -> view tangents (GazeToViewTangents)
 #include "frame_pace.h"                               // phase 52: the VR FPS cap's target maths + the precise sleeper
+#include "ofxr.h"                                     // phase 56: FromOfxr -- the OFXR Bridge / VectorXR module ranges
 
 namespace XrHook {
 
@@ -220,6 +226,77 @@ const char* const kVisMaskExt = "XR_KHR_visibility_mask";
 typedef XrResult (XRH_CALL* PFN_xrCreateInstance)(const XrInstanceCreateInfo*, XrInstance*);
 typedef XrResult (XRH_CALL* PFN_xrEnumerateInstanceExtensionProperties)(const char*, uint32_t, uint32_t*, XrExtensionProperties*);
 typedef XrResult (XRH_CALL* PFN_xrGetVisibilityMaskKHR)(XrSession, int32_t, uint32_t, int32_t, XrVisibilityMaskKHR*);
+// phase 59: eye gaze -- XR_EXT_eye_gaze_interaction + the action system (openxr.h 1.0 layouts, x64; values and layouts checked
+// against the same OpenXR-SDK 1.1.62 header as above)
+typedef uint64_t XrPath;                                   // XR_DEFINE_ATOM
+typedef uint64_t XrSystemId;
+typedef void*    XrActionSet;
+typedef void*    XrAction;
+struct XrSessionCreateInfo { int32_t type; const void* next; uint64_t createFlags; XrSystemId systemId; };
+struct XrSystemProperties {
+    int32_t type; void* next; XrSystemId systemId; uint32_t vendorId; char systemName[256];
+    uint32_t maxSwapchainImageHeight, maxSwapchainImageWidth, maxLayerCount;   // XrSystemGraphicsProperties
+    uint32_t orientationTracking, positionTracking;                            // XrSystemTrackingProperties
+};
+struct XrSystemEyeGazeInteractionPropertiesEXT { int32_t type; void* next; uint32_t supportsEyeGazeInteraction; };
+struct XrActionSetCreateInfo { int32_t type; const void* next; char actionSetName[64]; char localizedActionSetName[128]; uint32_t priority; };
+struct XrActionCreateInfo {
+    int32_t type; const void* next; char actionName[64]; int32_t actionType; uint32_t countSubactionPaths;
+    const XrPath* subactionPaths; char localizedActionName[128];
+};
+struct XrActionSuggestedBinding { XrAction action; XrPath binding; };
+struct XrInteractionProfileSuggestedBinding {
+    int32_t type; const void* next; XrPath interactionProfile; uint32_t countSuggestedBindings;
+    const XrActionSuggestedBinding* suggestedBindings;
+};
+struct XrSessionActionSetsAttachInfo { int32_t type; const void* next; uint32_t countActionSets; const XrActionSet* actionSets; };
+struct XrActiveActionSet { XrActionSet actionSet; XrPath subactionPath; };
+struct XrActionsSyncInfo { int32_t type; const void* next; uint32_t countActiveActionSets; const XrActiveActionSet* activeActionSets; };
+struct XrActionSpaceCreateInfo { int32_t type; const void* next; XrAction action; XrPath subactionPath; XrPosef poseInActionSpace; };
+static_assert(offsetof(XrSessionCreateInfo, systemId) == 24 && sizeof(XrSessionCreateInfo) == 32 &&
+              offsetof(XrSystemProperties, systemId) == 16 && offsetof(XrSystemProperties, vendorId) == 24 &&
+              offsetof(XrSystemProperties, systemName) == 28 && offsetof(XrSystemProperties, maxSwapchainImageHeight) == 284 &&
+              offsetof(XrSystemProperties, orientationTracking) == 296 && sizeof(XrSystemProperties) == 304 &&
+              offsetof(XrSystemEyeGazeInteractionPropertiesEXT, supportsEyeGazeInteraction) == 16 &&
+              sizeof(XrSystemEyeGazeInteractionPropertiesEXT) == 24 &&
+              offsetof(XrActionSetCreateInfo, actionSetName) == 16 && offsetof(XrActionSetCreateInfo, priority) == 208 &&
+              sizeof(XrActionSetCreateInfo) == 216 && offsetof(XrActionCreateInfo, actionType) == 80 &&
+              offsetof(XrActionCreateInfo, countSubactionPaths) == 84 && offsetof(XrActionCreateInfo, subactionPaths) == 88 &&
+              offsetof(XrActionCreateInfo, localizedActionName) == 96 && sizeof(XrActionCreateInfo) == 224 &&
+              sizeof(XrActionSuggestedBinding) == 16 && offsetof(XrInteractionProfileSuggestedBinding, interactionProfile) == 16 &&
+              offsetof(XrInteractionProfileSuggestedBinding, countSuggestedBindings) == 24 &&
+              offsetof(XrInteractionProfileSuggestedBinding, suggestedBindings) == 32 && sizeof(XrInteractionProfileSuggestedBinding) == 40 &&
+              offsetof(XrSessionActionSetsAttachInfo, countActionSets) == 16 && offsetof(XrSessionActionSetsAttachInfo, actionSets) == 24 &&
+              sizeof(XrSessionActionSetsAttachInfo) == 32 && sizeof(XrActiveActionSet) == 16 &&
+              offsetof(XrActionsSyncInfo, countActiveActionSets) == 16 && offsetof(XrActionsSyncInfo, activeActionSets) == 24 &&
+              sizeof(XrActionsSyncInfo) == 32 && offsetof(XrActionSpaceCreateInfo, action) == 16 &&
+              offsetof(XrActionSpaceCreateInfo, subactionPath) == 24 && offsetof(XrActionSpaceCreateInfo, poseInActionSpace) == 32 &&
+              sizeof(XrActionSpaceCreateInfo) == 64 && sizeof(XrSpaceLocation) == 56 && offsetof(XrSpaceLocation, pose) == 24,
+              "OpenXR eye gaze / action struct layout (x64)");
+constexpr int32_t kTypeSystemProperties          = 5;            // XR_TYPE_SYSTEM_PROPERTIES
+constexpr int32_t kTypeSessionCreateInfo         = 8;            // XR_TYPE_SESSION_CREATE_INFO
+constexpr int32_t kTypeActionSetCreateInfo       = 28;           // XR_TYPE_ACTION_SET_CREATE_INFO
+constexpr int32_t kTypeActionCreateInfo          = 29;           // XR_TYPE_ACTION_CREATE_INFO
+constexpr int32_t kTypeActionSpaceCreateInfo     = 38;           // XR_TYPE_ACTION_SPACE_CREATE_INFO
+constexpr int32_t kTypeSpaceLocation             = 42;           // XR_TYPE_SPACE_LOCATION
+constexpr int32_t kTypeIpSuggestedBinding        = 51;           // XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING
+constexpr int32_t kTypeSessionActionSetsAttach   = 60;           // XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO
+constexpr int32_t kTypeActionsSyncInfo           = 61;           // XR_TYPE_ACTIONS_SYNC_INFO
+constexpr int32_t kTypeSystemEyeGazeProps        = 1000030000;   // XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT
+constexpr int32_t kActionTypePoseInput           = 4;            // XR_ACTION_TYPE_POSE_INPUT
+constexpr uint64_t kLocOrientValid = 0x1, kLocOrientTracked = 0x4;   // XR_SPACE_LOCATION_ORIENTATION_VALID_BIT / _TRACKED_BIT
+constexpr XrResult kErrActionSetsAlreadyAttached = -47;          // XR_ERROR_ACTIONSETS_ALREADY_ATTACHED
+constexpr XrResult kErrActionSetNotAttached      = -46;          // XR_ERROR_ACTIONSET_NOT_ATTACHED
+const char* const kEyeGazeExt = "XR_EXT_eye_gaze_interaction";
+typedef XrResult (XRH_CALL* PFN_xrGetSystemProperties)(XrInstance, XrSystemId, XrSystemProperties*);
+typedef XrResult (XRH_CALL* PFN_xrStringToPath)(XrInstance, const char*, XrPath*);
+typedef XrResult (XRH_CALL* PFN_xrCreateActionSet)(XrInstance, const XrActionSetCreateInfo*, XrActionSet*);
+typedef XrResult (XRH_CALL* PFN_xrDestroyActionSet)(XrActionSet);
+typedef XrResult (XRH_CALL* PFN_xrCreateAction)(XrActionSet, const XrActionCreateInfo*, XrAction*);
+typedef XrResult (XRH_CALL* PFN_xrSuggestInteractionProfileBindings)(XrInstance, const XrInteractionProfileSuggestedBinding*);
+typedef XrResult (XRH_CALL* PFN_xrAttachSessionActionSets)(XrSession, const XrSessionActionSetsAttachInfo*);
+typedef XrResult (XRH_CALL* PFN_xrSyncActions)(XrSession, const XrActionsSyncInfo*);
+typedef XrResult (XRH_CALL* PFN_xrCreateActionSpace)(XrSession, const XrActionSpaceCreateInfo*, XrSpace*);
 
 // ---- components (one per runtime / layer / loader entry point) --------------------------------------------------------
 enum { kKindRuntime = 0, kKindLayer = 1, kKindLoader = 2 };
@@ -235,6 +312,8 @@ struct Slot {
     std::atomic<void*> waitFrame{nullptr}, beginFrame{nullptr}, endSession{nullptr};  // phase 30 (Turbo mode)
     std::atomic<void*> pollEvent{nullptr}, createSession{nullptr}, beginSession{nullptr}, requestExit{nullptr};   // phase 33
     std::atomic<void*> createInstance{nullptr};                                       // phase 40 (runtime slots only)
+    std::atomic<void*> attachSets{nullptr}, syncActions{nullptr}, createActionSet{nullptr};   // phase 59 (eye gaze)
+    std::atomic<void*> suggest{nullptr};          // phase 59c: xrSuggestInteractionProfileBindings (runtime slots only)
     std::atomic<void*> instance{nullptr};        // phase 29: the last non-null XrInstance this component's GIPA was asked with
     int  kind = 0;
     char module[64] = "";
@@ -363,6 +442,14 @@ std::atomic<ReleaseFn> s_cb{nullptr};
 std::atomic<bool>      s_hooked{false};
 std::atomic<uint64_t>  s_releases{0}, s_releasesMapped{0};
 thread_local int       t_depth = 0;              // > 0 inside one of our wrapped calls (an inner layer's call: pass through)
+// phase 57 (perf): a WAIT or a runtime call of ours inside a hooked OpenXR call, charged to the DRIVER row of hook category `cat`
+// (cpu_prof.h kHkXr..., the "present + OpenXR" / blocked time -- not the mod's), the same way CPU_ORIG charges the game's own
+// call. Why: the ATS VR log 2026-10-13 18:12 showed hk:xrEndFrame at 1.9-5.2 ms/frame with Turbo on (0.03 ms off) -- the time
+// the render thread sits in the turbo frame lock, the async xrWaitFrame (= the runtime pacing the frame), the real xrBeginFrame
+// and the quad swapchains' acquire / wait / release, all counted as mod work (the menu's "this mod" column and Limit line).
+// CpuProf::Drv pushes only when a scope of ours is open on this thread (an active hook, or a block): nothing open = nothing to
+// charge. Use it for waits and runtime calls only; the mod's own work around them stays in the hook / block it runs in.
+#define XR_DRV(cat, expr) do { CpuProf::Drv xdrv_(true, CpuProf::cat); expr; } while (0)
 
 typedef FARPROC (WINAPI* PFN_GetProcAddress)(HMODULE, LPCSTR);
 PFN_GetProcAddress oGetProcAddressK32 = nullptr; // kernel32!GetProcAddress (trampoline)
@@ -391,6 +478,20 @@ struct OvFns {
     PFN_xrDestroySpace              destroySpace = nullptr;
 };
 struct OvSc { XrSwapchain sc = nullptr; uint32_t w = 0, h = 0, n = 0; void* img[kImg] = {}; };
+// phase 57 (perf): what a quad's image depends on -- inject.cpp's content generation (the panel's built text / the fps box's
+// text + colour + brightness + opacity + scale) plus the parameters the draw callback's scale is derived from: the swapchain
+// size inject.cpp asks for, the box kind (fps_vr_lock) and the quad's own scale (menu_vr_scale / fps_vr_scale). Any change of
+// one of them = the image is drawn again.
+struct OvKey { uint32_t gen = 0, w = 0, h = 0; int lock = 0; float scale = 0.0f; };
+OvKey OvKeyOf(int which, const OverlayParams& par) {
+    OvKey k;
+    if (which == 0) { k.gen = par.panelGen; k.w = par.panelW; k.h = par.panelH; k.scale = par.menuScale; }
+    else            { k.gen = par.fpsGen;   k.w = par.fpsW;   k.h = par.fpsH;   k.lock = par.fpsLock; k.scale = par.fpsScale; }
+    return k;
+}
+bool OvKeySame(const OvKey& a, const OvKey& b) {
+    return a.gen == b.gen && a.w == b.w && a.h == b.h && a.lock == b.lock && a.scale == b.scale;
+}
 struct OvState {
     int       slot = -1;                         // the component the functions were resolved at
     bool      resolved = false;
@@ -403,17 +504,20 @@ struct OvState {
     OvSc      sc[2];                             // 0 panel, 1 fps box
     XrSpace   viewSpace = nullptr;
     bool      have[2] = {};                      // quad drawn (and released) for the frame that ends at the next xrEndFrame
-    uint32_t  usedW[2] = {}, usedH[2] = {};
+    uint32_t  usedW[2] = {}, usedH[2] = {};      // the sub-image of the last SUCCESSFUL draw (phase 57: also what a reused image shows)
+    bool      drawnValid[2] = {};                // phase 57: the swapchain's most recently released image is a good draw of
+                                                 //   drawnKey (drawn AND released since the swapchain was made; see OvDrawWantedLocked)
+    OvKey     drawnKey[2];                       // phase 57: the key of that draw
     uint64_t  endSeq = 0, relSeq = ~0ull;        // xrEndFrame count; the interval the release draw (mode 2) ran in
     int       mode = 0;                          // 1 drawn at xrEndFrame, 2 at the game's first release of the frame
     int       acqRun = 0;                        // frames in a row with an acquire failure
-    int       lastLock = 0;                      // the fps box fixed in the cab: params.fpsLock at the last xrEndFrame
-    XrSpace   pivotSpace = nullptr;              // ... the layer space the pivot was captured in
-    bool      pivotHave = false;
-    double    pivot[3] = {}, yaw0 = 0.0;         // ... non-LOCAL layer spaces: the eyes' midpoint + head yaw at lock-on (rad)
+    int       lastLock[2] = {};                  // fixed in the cab, per quad (0 panel -- phase 70, 1 fps box): its lock at the last xrEndFrame
+    XrSpace   pivotSpace[2] = {};                // ... the layer space the pivot was captured in
+    bool      pivotHave[2] = {};
+    double    pivot[2][3] = {}, yaw0[2] = {};    // ... non-LOCAL layer spaces: the eyes' midpoint + head yaw at lock-on (rad)
     bool      zChecked[2] = {}, zFlip[2] = {};   // the quad's +z verified to point back (QRot; OvFacingQuat): 0 the fps box fixed
                                                  //   in the cab (at the pivot), 1 the quads facing the head (phase 29b)
-    bool      firstLog[3] = {};                  // first panel / follow-head / fixed fps quad logged
+    bool      firstLog[4] = {};                  // first panel / follow-head / fixed fps / fixed panel (phase 70) quad logged
     bool      fovBadLogged = false, capLogged = false;
 };
 OvState                    s_ov;
@@ -425,6 +529,7 @@ std::atomic<bool>          s_ovOk[2] = {};       // OverlayActive (+ s_ovOkQpc: 
 std::atomic<LONGLONG>      s_ovOkQpc{0};
 std::atomic<uint64_t>      s_ovFrames{0}, s_ovPanel{0}, s_ovFps{0}, s_ovCreateFails{0}, s_ovAcqFails{0}, s_ovWaitFails{0},
                            s_ovRelFails{0}, s_ovDrawFails{0}, s_ovRejects{0};
+std::atomic<uint64_t>      s_ovDrawn{0}, s_ovSkipped{0};   // phase 57: quad images drawn / reused (the last released image kept)
 std::atomic<int>           s_ovMode{0}, s_ovFixedHow{0}, s_ovFixedType{0};
 std::atomic<int64_t>       s_ovFormat{0};
 std::atomic<bool>          s_ovReady{false};
@@ -504,14 +609,16 @@ void OvDropLocked(bool destroy) {
     s_ov.viewSpace = nullptr;
     s_ov.ready = false;
     s_ov.have[0] = s_ov.have[1] = false;
-    s_ov.pivotHave = false;
-    s_ov.pivotSpace = nullptr;
+    s_ov.drawnValid[0] = s_ov.drawnValid[1] = false;     // phase 57: no image of ours left to reuse
+    s_ov.pivotHave[0] = s_ov.pivotHave[1] = false;
+    s_ov.pivotSpace[0] = s_ov.pivotSpace[1] = nullptr;
     s_ovReady.store(false, std::memory_order_relaxed);
 }
 // under s_ovMx: the two swapchains (+ their D3D11 images) and the VIEW space for session `ses`. False = failed (logged; the
 // session is given up: dead).
 bool OvCreateLocked(XrSession ses, const OverlayParams& par) {
     const OvFns& o = s_ov.fn;
+    s_ov.drawnValid[0] = s_ov.drawnValid[1] = false;     // phase 57: new swapchains have no released image yet
     auto fail = [&](const char* what, XrResult r) {
         s_ovCreateFails.fetch_add(1, std::memory_order_relaxed);
         LogErr("OpenXR overlay: %s failed (result %d) -- the VR panel / fps box stay in the eye picture for this session", what, r);
@@ -586,13 +693,17 @@ bool OvCreateLocked(XrSession ses, const OverlayParams& par) {
     return true;
 }
 // under s_ovMx, t_depth > 0: one image of quad `which`: acquire, wait, the draw callback, release. True = drawn + released
-// (s_ov.have / usedW / usedH set).
+// (s_ov.have / usedW / usedH set). phase 57: the three runtime calls are charged to the CPU profiler's xrAcquire / xrRelease
+// DRIVER rows (XR_DRV: the wait blocks until the compositor lets go of the image -- not mod work); the draw callback stays mod
+// time (its own kBMenu block). Any outcome but a good draw leaves drawnValid false (the next frame draws again).
 bool OvDrawLocked(int which) {
     const OvFns& o = s_ov.fn;
     OvSc& c = s_ov.sc[which];
+    s_ov.drawnValid[which] = false;                      // phase 57: set again below only by a good draw that was released
     uint32_t idx = 0;
     const XrSwapchainImageAcquireInfo ai{ kTypeSwapchainImageAcquireInfo, nullptr };
-    XrResult r = o.acquire(c.sc, &ai, &idx);
+    XrResult r;
+    XR_DRV(kHkXrAcquire, r = o.acquire(c.sc, &ai, &idx));
     if (r < 0) {
         const uint64_t n = s_ovAcqFails.fetch_add(1, std::memory_order_relaxed);
         if (n < 4) LogErr("OpenXR overlay: xrAcquireSwapchainImage of our %s swapchain failed (result %d)", which ? "fps box" : "panel", r);
@@ -600,7 +711,7 @@ bool OvDrawLocked(int which) {
         return false;
     }
     const XrSwapchainImageWaitInfo wi{ kTypeSwapchainImageWaitInfo, nullptr, kInfiniteDuration };
-    r = o.wait(c.sc, &wi);
+    XR_DRV(kHkXrAcquire, r = o.wait(c.sc, &wi));
     if (r < 0 || r == kTimeoutExpired) {                 // an acquired image we may not release: the session is given up
         s_ovWaitFails.fetch_add(1, std::memory_order_relaxed);
         LogErr("OpenXR overlay: xrWaitSwapchainImage of our %s swapchain failed (result %d) -- the quad path is off for this session",
@@ -623,7 +734,7 @@ bool OvDrawLocked(int which) {
     }
     if (!drew) s_ovDrawFails.fetch_add(1, std::memory_order_relaxed);
     const XrSwapchainImageReleaseInfo ri{ kTypeSwapchainImageReleaseInfo, nullptr };
-    r = o.release(c.sc, &ri);
+    XR_DRV(kHkXrRelease, r = o.release(c.sc, &ri));
     if (r < 0) {
         s_ovRelFails.fetch_add(1, std::memory_order_relaxed);
         LogErr("OpenXR overlay: xrReleaseSwapchainImage of our %s swapchain failed (result %d) -- the quad path is off for this session",
@@ -637,17 +748,42 @@ bool OvDrawLocked(int which) {
     s_ov.usedH[which] = d.usedH;
     return true;
 }
-// under s_ovMx: the wanted quads drawn now (both paths); 60 frames in a row with an acquire failure give up the session
+// under s_ovMx: the wanted quads drawn now (both paths); 60 frames in a row with an acquire failure give up the session.
+// phase 57 (perf): a quad image is drawn only when its content changed. Why: every wanted quad used to cost an acquire, an
+// INFINITE xrWaitSwapchainImage (until the compositor let go of the image), the draw callback (clear + text draw on the game's
+// immediate context) and a release EVERY frame -- for an fps box whose text changes every 0.5 s and a panel that changes on key
+// presses / the 1-s cost snapshot. How: OpenXR composites a swapchain's most recently RELEASED image, so a quad layer may keep
+// pointing at the swapchain without a new acquire / release. When the swapchain's last released image is a good draw
+// (drawnValid) of the same key (OvKeyOf: inject.cpp's content gen + swapchain size + box kind + quad scale), the draw is skipped:
+// `have` is set with the usedW / usedH of that draw, and OvEndFrame builds the quad exactly as before. A gen of 0 = "always
+// redraw" (a caller that never sets it keeps the old behaviour). drawnValid is cleared by any failed draw, by OvCreateLocked /
+// OvDropLocked (new swapchains, session change, xrDestroySession), OvRejected, the 60-frame give-up below, and by OvEndFrame
+// while the quad is not wanted (the first frame it is wanted again draws: inject.cpp resets its build scales when the panel /
+// box goes away).
 void OvDrawWantedLocked(const OverlayParams& par) {
     const uint64_t a0 = s_ovAcqFails.load(std::memory_order_relaxed);
+    const bool want[2] = { par.menuOpen, par.fpsShow };
     ++t_depth;
-    if (par.menuOpen && !s_ov.dead) OvDrawLocked(0);
-    if (par.fpsShow && !s_ov.dead) OvDrawLocked(1);
+    for (int w = 0; w < 2; ++w) {                        // (the panel first, as before)
+        if (!want[w] || s_ov.dead) continue;
+        const OvKey k = OvKeyOf(w, par);
+        if (k.gen && s_ov.drawnValid[w] && OvKeySame(k, s_ov.drawnKey[w])) {
+            s_ov.have[w] = true;                         // the swapchain's last released image = that draw (usedW / usedH kept)
+            s_ovSkipped.fetch_add(1, std::memory_order_relaxed);
+            continue;
+        }
+        if (OvDrawLocked(w)) {
+            s_ov.drawnValid[w] = true;
+            s_ov.drawnKey[w] = k;
+            s_ovDrawn.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
     --t_depth;
     const bool acqFail = s_ovAcqFails.load(std::memory_order_relaxed) != a0;
     s_ov.acqRun = acqFail ? s_ov.acqRun + 1 : 0;
     if (s_ov.acqRun >= 60 && !s_ov.dead) {
         s_ov.dead = true;
+        s_ov.drawnValid[0] = s_ov.drawnValid[1] = false; // phase 57
         LogWarn("OpenXR overlay: 60 frames in a row without an image of our swapchains -- the quad path is off for this session");
     }
 }
@@ -717,8 +853,50 @@ bool OvBuildQuadLocked(int which, const OverlayParams& par, const XrCompositionL
     const double aspect = (double)s_ov.usedH[which] / (double)s_ov.usedW[which];
     const double kRad = 0.017453292519943295;
     double pos[3] = { 0.0, 0.0, 0.0 }, rq[4] = { 0.0, 0.0, 0.0, 1.0 }, wM = 0.0;
-    int logIdx = which;                                  // 0 panel, 1 fps follows the head, 2 fps fixed in the cab
+    int logIdx = which;                                  // 0 panel, 1 fps follows the head, 2 fps fixed in the cab, 3 panel fixed
     int how = 0, lt = 0;
+    const int lock = which == 0 ? par.menuLock : par.fpsLock;
+    if (lock) {
+        AcquireSRWLockShared(&s_poseLock);
+        lt = SpaceTypeLocked(proj->space);
+        ReleaseSRWLockShared(&s_poseLock);
+    }
+    // fixed in the cab (the fps box: phase 28; the panel: phase 70): the game's projection-layer space, `xDeg` / `yDeg` yaw /
+    // pitch (+ right, + down) at `d` from the seat. Each quad keeps its own pivot (one lock-on must not re-capture the other's).
+    auto anchored = [&](double d, float xDeg, float yDeg, const char* what) {
+        if (!s_ov.lastLock[which] || proj->space != s_ov.pivotSpace[which]) {
+            s_ov.pivotHave[which] = false;
+            s_ov.pivotSpace[which] = proj->space;
+        }
+        double piv[3] = { 0.0, 0.0, 0.0 }, yaw0 = 0.0;
+        if (lt == kRefSpaceLocal) {
+            how = 1;                                     // LOCAL: its origin is the seat, its -z the seat's forward
+        } else {
+            how = 2;                                     // other / unknown: a pivot from the submitted views, once per lock-on
+            if (!s_ov.pivotHave[which]) {
+                const XrPosef& a = proj->views[0].pose;
+                const XrPosef& b = proj->views[1].pose;
+                s_ov.pivot[which][0] = 0.5 * ((double)a.position.x + (double)b.position.x);
+                s_ov.pivot[which][1] = 0.5 * ((double)a.position.y + (double)b.position.y);
+                s_ov.pivot[which][2] = 0.5 * ((double)a.position.z + (double)b.position.z);
+                const Pose pa = PoseOf(a);
+                double yd = 0.0, pd = 0.0;
+                YawPitch(pa.q, &yd, &pd);
+                s_ov.yaw0[which] = yd * kRad;
+                s_ov.pivotHave[which] = true;
+                Log("OpenXR overlay: %s -- layer space %p type %d (%s): the anchor turns around a PIVOT captured now from the "
+                    "submitted views: the eyes' midpoint (%+.3f %+.3f %+.3f) m, head yaw %+.1f deg", what, proj->space, lt,
+                    SpaceTypeName(lt), s_ov.pivot[which][0], s_ov.pivot[which][1], s_ov.pivot[which][2], yd);
+            }
+            for (int k = 0; k < 3; ++k) piv[k] = s_ov.pivot[which][k];
+            yaw0 = s_ov.yaw0[which];
+        }
+        const double yaw = yaw0 + (double)xDeg * kRad, pitch = -(double)yDeg * kRad;
+        const double dir[3] = { std::sin(yaw) * std::cos(pitch), std::sin(pitch), -std::cos(yaw) * std::cos(pitch) };
+        for (int k = 0; k < 3; ++k) pos[k] = piv[k] + d * dir[k];
+        OvFacingQuat(0, what, "pivot", dir, rq);         // faces the pivot (phase 29b: the shared helper)
+        q.space = proj->space;
+    };
     // v0.10.3 phase 29b, menu_vr_face = 1: a VIEW-space quad at `pos` (d ahead) turned to FACE the head (the VIEW origin), its
     // size times |pos| / d so it keeps the angle it has straight ahead (the phase 16 "same size from every angle"); 0 = parallel
     // to the view plane (identity: a flat picture seen at an angle off the axis, as phase 29)
@@ -729,7 +907,12 @@ bool OvBuildQuadLocked(int which, const OverlayParams& par, const XrCompositionL
         OvFacingQuat(1, what, "head", dir, rq);
         wM *= r / d;
     };
-    if (which == 0) {                                    // the panel: VIEW space, menu_vr_dist ahead (phase 29b: was 1 m)
+    if (which == 0 && lock && lt != kRefSpaceView) {     // phase 70: the panel fixed in the cab (menu_vr_lock = 1)
+        const double d = par.menuLockDist >= 0.3f && par.menuLockDist <= 3.0f ? (double)par.menuLockDist : 0.8;
+        wM = d * fw * 0.54 * (double)par.menuScale;      // the same angular size as following the head at any distance
+        anchored(d, par.menuLockX, par.menuLockY, "panel fixed in the cab");
+        logIdx = 3;
+    } else if (which == 0) {                             // the panel: VIEW space, menu_vr_dist ahead (phase 29b: was 1 m)
         const double d = par.menuDist >= 0.3f && par.menuDist <= 3.0f ? (double)par.menuDist : 1.0;
         wM = d * fw * 0.54 * (double)par.menuScale;      // (scales with d: the same angle at every distance)
         pos[0] = d * fw * (double)par.menuX / 100.0;
@@ -737,46 +920,14 @@ bool OvBuildQuadLocked(int which, const OverlayParams& par, const XrCompositionL
         pos[2] = -d;
         faceHead(d, "panel facing the head");
         q.space = s_ov.viewSpace;
+        if (lock) how = 3;                               // fixed asked, but the layer space is a VIEW space: head-locked
     } else {
         // the fps box: fps_vr_dist (phase 44; was 0.8 m = the phase 28 anchor distance, still the default). wM scales with d:
         // the same angular size at every distance, in both lock modes.
         const double d = par.fpsDist >= 0.3f && par.fpsDist <= 3.0f ? (double)par.fpsDist : 0.8;
         wM = d * fw * 0.08 * (double)par.fpsScale;
-        if (par.fpsLock) {
-            AcquireSRWLockShared(&s_poseLock);
-            lt = SpaceTypeLocked(proj->space);
-            ReleaseSRWLockShared(&s_poseLock);
-        }
         if (par.fpsLock && lt != kRefSpaceView) {        // fixed in the cab: the game's projection-layer space
-            if (!s_ov.lastLock || proj->space != s_ov.pivotSpace) { s_ov.pivotHave = false; s_ov.pivotSpace = proj->space; }
-            double piv[3] = { 0.0, 0.0, 0.0 }, yaw0 = 0.0;
-            if (lt == kRefSpaceLocal) {
-                how = 1;                                 // LOCAL: its origin is the seat, its -z the seat's forward
-            } else {
-                how = 2;                                 // other / unknown: a pivot from the submitted views, once per lock-on
-                if (!s_ov.pivotHave) {
-                    const XrPosef& a = proj->views[0].pose;
-                    const XrPosef& b = proj->views[1].pose;
-                    s_ov.pivot[0] = 0.5 * ((double)a.position.x + (double)b.position.x);
-                    s_ov.pivot[1] = 0.5 * ((double)a.position.y + (double)b.position.y);
-                    s_ov.pivot[2] = 0.5 * ((double)a.position.z + (double)b.position.z);
-                    const Pose pa = PoseOf(a);
-                    double yd = 0.0, pd = 0.0;
-                    YawPitch(pa.q, &yd, &pd);
-                    s_ov.yaw0 = yd * kRad;
-                    s_ov.pivotHave = true;
-                    Log("OpenXR overlay: fps box fixed in the cab -- layer space %p type %d (%s): the anchor turns around a PIVOT "
-                        "captured now from the submitted views: the eyes' midpoint (%+.3f %+.3f %+.3f) m, head yaw %+.1f deg",
-                        proj->space, lt, SpaceTypeName(lt), s_ov.pivot[0], s_ov.pivot[1], s_ov.pivot[2], yd);
-                }
-                piv[0] = s_ov.pivot[0]; piv[1] = s_ov.pivot[1]; piv[2] = s_ov.pivot[2];
-                yaw0 = s_ov.yaw0;
-            }
-            const double yaw = yaw0 + (double)par.fpsX * kRad, pitch = -(double)par.fpsY * kRad;
-            const double dir[3] = { std::sin(yaw) * std::cos(pitch), std::sin(pitch), -std::cos(yaw) * std::cos(pitch) };
-            for (int k = 0; k < 3; ++k) pos[k] = piv[k] + d * dir[k];
-            OvFacingQuat(0, "fps box fixed-in-cab", "pivot", dir, rq);   // faces the pivot (phase 29b: the shared helper)
-            q.space = proj->space;
+            anchored(d, par.fpsX, par.fpsY, "fps box fixed in the cab");
             logIdx = 2;
         } else {                                         // follows the head (or the layer space is a VIEW space)
             how = par.fpsLock ? 3 : 0;
@@ -801,14 +952,15 @@ bool OvBuildQuadLocked(int which, const OverlayParams& par, const XrCompositionL
     q.size.height = (float)(wM * aspect);
     if (!s_ov.firstLog[logIdx]) {
         s_ov.firstLog[logIdx] = true;
-        static const char* const kWhat[3] = { "panel (VIEW space, ours)", "fps box following the head (VIEW space, ours)",
-                                              "fps box FIXED IN THE PLAY SPACE (the game's projection-layer space)" };
+        static const char* const kWhat[4] = { "panel (VIEW space, ours)", "fps box following the head (VIEW space, ours)",
+                                              "fps box FIXED IN THE PLAY SPACE (the game's projection-layer space)",
+                                              "panel FIXED IN THE CAB (phase 70: the game's projection-layer space)" };
         Log("OpenXR overlay: first %s quad -- space %p, pose q=(%+.3f %+.3f %+.3f %+.3f) p=(%+.3f %+.3f %+.3f) m, size %.3f x %.3f m, "
             "sub-image %dx%d of %ux%u px; view 0 fov tangents L%+.3f R%+.3f U%+.3f D%+.3f%s%s", kWhat[logIdx], q.space,
             rq[0], rq[1], rq[2], rq[3], pos[0], pos[1], pos[2], wM, wM * aspect, q.subImage.w, q.subImage.h, s_ov.sc[which].w,
             s_ov.sc[which].h, tl, tr, tu, tdn,
             how == 3 ? " (fixed in the cab asked, but the layer space is a VIEW space: head-locked)" : "",
-            logIdx == 2 ? "" : (par.menuFace ? "; menu_vr_face=1: turned to face the head (phase 29b)"
+            logIdx >= 2 ? "" : (par.menuFace ? "; menu_vr_face=1: turned to face the head (phase 29b)"
                                              : "; menu_vr_face=0: parallel to the view plane"));
     }
     // phase 44: the fps box quad again whenever its lock / distance / turn changes (level 4; 32 lines at most)
@@ -837,6 +989,11 @@ bool OvEndFrame(int i, XrSession ses, const XrFrameEndInfo* fe, const XrComposit
     struct EndSeq { uint64_t& s; ~EndSeq() { ++s; } } endSeq{ s_ov.endSeq };   // this frame's release-draw interval ends
     bool have[2] = { s_ov.have[0], s_ov.have[1] };
     s_ov.have[0] = s_ov.have[1] = false;
+    if (!par.enabled || !par.menuOpen) {
+        s_ov.drawnValid[0] = false;                      // phase 57: drawn again the first frame it is wanted again
+        s_ov.pivotHave[0] = false;                       // phase 70: the fixed panel's pivot is captured again at the next open
+    }
+    if (!par.enabled || !par.fpsShow) s_ov.drawnValid[1] = false;    //   (see OvDrawWantedLocked)
     if (!par.enabled) { OvSetOk(false, false); return false; }
     if (ses != s_ov.ses) {
         if (s_ov.ses)
@@ -889,7 +1046,8 @@ bool OvEndFrame(int i, XrSession ses, const XrFrameEndInfo* fe, const XrComposit
         return false;
     }
     // phase 29b: the later layer is drawn on top -- the panel last when it sits nearer than the fps box (menu_vr_dist vs fps_vr_dist)
-    const bool panelTop = par.menuDist < par.fpsDist;     // phase 44: the fps box's own distance (was its fixed 0.8 m)
+    const bool panelTop = (par.menuLock ? par.menuLockDist : par.menuDist) < par.fpsDist;   // phase 44: the fps box's own distance
+                                                         //   (was its fixed 0.8 m); phase 70: the fixed panel's own distance
     for (int k = 0; k < 2; ++k) {
         const int w = panelTop ? 1 - k : k;
         if (!want[w] || !have[w]) continue;
@@ -898,7 +1056,8 @@ bool OvEndFrame(int i, XrSession ses, const XrFrameEndInfo* fe, const XrComposit
         ok[w] = true;
         (w ? s_ovFps : s_ovPanel).fetch_add(1, std::memory_order_relaxed);
     }
-    s_ov.lastLock = par.fpsLock;
+    s_ov.lastLock[0] = par.menuOpen ? par.menuLock : 0;  // phase 70: closed = re-captured at the next open (non-LOCAL spaces)
+    s_ov.lastLock[1] = par.fpsLock;
     OvSetOk(ok[0], ok[1]);
     if (!nq) return false;
     for (int k = 0; k < nGame; ++k) outLayers[k] = fe->layers[k];
@@ -906,7 +1065,12 @@ bool OvEndFrame(int i, XrSession ses, const XrFrameEndInfo* fe, const XrComposit
     *outFe = *fe;
     outFe->layerCount = (uint32_t)(nGame + nq);
     outFe->layers = outLayers;
-    s_ovFrames.fetch_add(1, std::memory_order_relaxed);
+    const uint64_t nf = s_ovFrames.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (nf % 600 == 0)                                   // phase 57: how often a quad image was reused instead of drawn
+        LogDbg("OpenXR overlay: %llu xrEndFrame(s) with our quads -- quad images drawn %llu, reused %llu (phase 57: content "
+            "unchanged = no acquire / wait / draw / release; the swapchain's last released image is shown again)",
+            (unsigned long long)nf, (unsigned long long)s_ovDrawn.load(std::memory_order_relaxed),
+            (unsigned long long)s_ovSkipped.load(std::memory_order_relaxed));
     return true;
 }
 // The runtime refused the frame with our layers (result r): counted, logged, the quad path off for this session.
@@ -916,6 +1080,7 @@ void OvRejected(XrResult r) {
     LogErr("OpenXR overlay: the runtime REJECTED xrEndFrame with our quad layers (result %d) -- the frame was submitted again without "
         "them; the VR panel / fps box go back into the eye picture for this session", r);
     s_ov.dead = true;
+    s_ov.drawnValid[0] = s_ov.drawnValid[1] = false;     // phase 57
     OvSetOk(false, false);
 }
 // Mode 2 (another thread ends the frame): the game's outermost xrReleaseSwapchainImage on the render thread draws the wanted
@@ -1371,10 +1536,14 @@ void TbArmLocked(int i, XrSession ses) {
 }
 // The game's xrEndFrame of a TURBO frame, BEFORE the real call (s_tbMx held by the caller): the pending wait is consumed and the
 // real xrBeginFrame of this frame is called (the game's own was skipped); no wait pending: a real xrWaitFrame first.
+// phase 57 (perf): the wait for the async xrWaitFrame (and the synchronous real one) is charged to the CPU profiler's xrWaitFrame
+// DRIVER row, the real xrBeginFrame to the xrBeginFrame driver row (XR_DRV): the runtime pacing the frame, not mod work -- they
+// are the waits the game's own xrWaitFrame / xrBeginFrame would have done without turbo.
 void TbBeginForGameLocked(int i, XrSession ses) {
     XrResult wr = 0;
     if (s_tb.pending && ses == s_tb.ses) {
-        const bool ready = TbWaitDone(s_tb.seq, 1000, &wr);
+        bool ready;
+        XR_DRV(kHkXrWait, ready = TbWaitDone(s_tb.seq, 1000, &wr));
         if (ready) {
             s_tb.pending = false;
         } else {
@@ -1416,7 +1585,7 @@ void TbBeginForGameLocked(int i, XrSession ses) {
         const XrFrameWaitInfo wi{ kTypeFrameWaitInfo, nullptr };
         XrFrameState fs{ kTypeFrameState, nullptr, 0, 0, 0 };
         ++t_depth;
-        wr = realWait(ses, &wi, &fs);
+        XR_DRV(kHkXrWait, wr = realWait(ses, &wi, &fs));
         --t_depth;
         const uint64_t n = s_tbSyncWaits.fetch_add(1, std::memory_order_relaxed);
         if (n < 8)
@@ -1433,7 +1602,8 @@ void TbBeginForGameLocked(int i, XrSession ses) {
     auto realBegin = reinterpret_cast<PFN_xrBeginFrame>(s_slot[i].beginFrame.load(std::memory_order_acquire));
     const XrFrameBeginInfo bi{ kTypeFrameBeginInfo, nullptr };
     ++t_depth;
-    const XrResult rb = realBegin ? realBegin(ses, &bi) : -1;
+    XrResult rb = -1;
+    if (realBegin) XR_DRV(kHkXrBegin, rb = realBegin(ses, &bi));
     --t_depth;
     if (rb != 0) NoteResult(kNsTbBegin, rb, ses);
     if (rb < 0) {
@@ -1667,21 +1837,426 @@ void HmDestroySession(XrSession ses) {
     s_hmSes = nullptr;
     s_hmFailed = false;
 }
-// The runtime's xrCreateInstance (wrapped at runtime slots only; the loader's own call, layers or not): + XR_KHR_visibility_mask.
+// ---- phase 59: eye gaze (XR_EXT_eye_gaze_interaction; see xr_hook.h) ------------------------------------------------------
+std::atomic<bool>     s_egWant{false};            // EyeGazeRequest: ask for the extension at xrCreateInstance
+std::atomic<bool>     s_egForce{true};            // phase 59g: ask even when the runtime does not list it (vrs_eye on at start)
+std::atomic<bool>     s_egActive{false};          // EyeGazeActive: sync + locate per frame
+std::atomic<int>      s_egExt{0};                 // EyeGazeStats::ext
+std::atomic<int>      s_egSystem{-1};             // EyeGazeStats::system
+std::atomic<int>      s_egSetup{0};               // EyeGazeStats::setup
+std::atomic<int>      s_egAttachedBy{0};          // EyeGazeStats::attachedBy (this session)
+std::atomic<bool>     s_egGameAttach{false};      // the game called xrAttachSessionActionSets (this session)
+std::atomic<bool>     s_egFailedA{false};         // gaze given up for this session
+std::atomic<uint32_t> s_egGameSets{0};            // action sets the game created
+std::atomic<uint64_t> s_egSyncGame{0}, s_egSyncOurs{0}, s_egLocates{0}, s_egValid{0}, s_egInvalid{0}, s_egLocFails{0};
+std::atomic<uint64_t> s_egGameSyncCalls{0};       // the game's outermost xrSyncActions calls (with or without our append)
+std::atomic<int64_t>  s_egGameSyncNs{0};          // the game's last xrSyncActions (steady ns; 0 = never)
+// what the game's xrSyncActions may append (atomics: read on the game's thread without s_egMx)
+std::atomic<void*>    s_egSyncSes{nullptr};       // the session our set is attached to (null = nothing to append)
+std::atomic<void*>    s_egSyncSet{nullptr};       // our action set
+std::atomic<bool>     s_egSyncAppendOff{false};   // the append was refused once in this session
+struct EgFns {
+    PFN_xrGetSystemProperties               sysProps = nullptr;
+    PFN_xrStringToPath                      toPath = nullptr;
+    PFN_xrCreateActionSet                   createSet = nullptr;
+    PFN_xrDestroyActionSet                  destroySet = nullptr;
+    PFN_xrCreateAction                      createAction = nullptr;
+    PFN_xrSuggestInteractionProfileBindings suggest = nullptr;
+    PFN_xrAttachSessionActionSets           attach = nullptr;
+    PFN_xrSyncActions                       sync = nullptr;
+    PFN_xrCreateActionSpace                 createSpace = nullptr;
+    PFN_xrLocateSpace                       locate = nullptr;
+    PFN_xrDestroySpace                      destroySpace = nullptr;
+};
+struct EgState {
+    int        slot = -1;                         // the component the functions were resolved at (the game's xrCreateSession)
+    XrInstance inst = nullptr;                    // the instance our action set belongs to
+    EgFns      fn;
+    XrActionSet set = nullptr;
+    XrAction   act = nullptr;
+    XrSession  ses = nullptr;                     // the session the per-session state below belongs to
+    int64_t    beginNs = 0;                       // its (last) xrBeginSession (steady ns; 0 = not begun)
+    bool       attached = false;                  // our set is attached to `ses`
+    bool       soloWaitLogged = false;
+    XrSpace    space = nullptr;                   // our gaze action space in `ses`
+    bool       failed = false;                    // given up for `ses`
+    XrTime     lastSyncTime = 0, lastLocTime = 0; // the display times our own sync / locate last ran for
+    int        syncFailRun = 0;
+    uint64_t   syncFailLogs = 0, locFailLogs = 0;
+    bool       firstLocLogged = false, firstValidLogged = false, firstOwnSyncLogged = false;
+};
+EgState    s_eg;
+std::mutex s_egMx;                                // s_eg (the game's create / begin / attach / destroy calls; the frame tick try-locks)
+// phase 59c: the eye gaze profile's suggested bindings from ABOVE the runtime (the game, or an API layer such as OpenXR Toolkit
+// that enabled the extension itself). A suggestion REPLACES the earlier one for that profile, so ours always carries theirs and
+// theirs gets ours appended (SuggestImpl) -- both orders end with both sets of bindings.
+std::mutex               s_egSugMx;               // the fields below
+XrInstance               s_egSugInst = nullptr;   // the instance they belong to
+XrPath                   s_egSugProfile = 0;      // /interaction_profiles/ext/eye_gaze_interaction in that instance (0 = not yet)
+XrActionSuggestedBinding s_egForeign[64];         // the last foreign suggestion for that profile
+uint32_t                 s_egForeignN = 0;
+XrActionSuggestedBinding s_egOurs{};              // our pose action + its binding (action null = not suggested yet)
+thread_local bool        t_egOwnSuggest = false;  // our own suggest call is on its way down (SuggestImpl passes it)
+struct EgGaze { float tx[2] = {}, ty[2] = {}; LONGLONG qpc = 0; bool have = false; };
+EgGaze     s_egGaze;
+SRWLOCK    s_egLock = SRWLOCK_INIT;               // s_egGaze (copies only)
+
+const char* EgAttachName(int a) {
+    return a == 1 ? "by the game (ours appended)" : a == 2 ? "by the mod ALONE (the game attached none)" : a == -1 ? "FAILED" : "not yet";
+}
+// under s_egMx: every function through component i's real GIPA with `inst`. False = one is missing (logged).
+bool EgResolveLocked(int i, XrInstance inst) {
+    auto gipa = reinterpret_cast<PFN_xrGetInstanceProcAddr>(s_slot[i].gipa.load(std::memory_order_acquire));
+    if (!gipa || !inst) {
+        LogErr("Eye tracking: no xrGetInstanceProcAddr / instance at the %s %s (GIPA %p, instance %p) -- eye gaze off",
+            kKindName[s_slot[i].kind], s_slot[i].module, reinterpret_cast<void*>(gipa), inst);
+        return false;
+    }
+    static const char* const kNames[11] = { "xrGetSystemProperties", "xrStringToPath", "xrCreateActionSet", "xrDestroyActionSet",
+                                            "xrCreateAction", "xrSuggestInteractionProfileBindings", "xrAttachSessionActionSets",
+                                            "xrSyncActions", "xrCreateActionSpace", "xrLocateSpace", "xrDestroySpace" };
+    void* f[11] = {};
+    for (int k = 0; k < 11; ++k) {
+        PFN_xrVoidFunction fp = nullptr;
+        ++t_depth;
+        const XrResult r = gipa(inst, kNames[k], &fp);
+        --t_depth;
+        f[k] = r >= 0 ? reinterpret_cast<void*>(fp) : nullptr;
+        if (!f[k]) {
+            LogErr("Eye tracking: %s not resolved at the %s %s (result %d = %s) -- eye gaze off", kNames[k], kKindName[s_slot[i].kind],
+                s_slot[i].module, r, XrResultName(r));
+            return false;
+        }
+    }
+    EgFns& o = s_eg.fn;
+    o.sysProps     = reinterpret_cast<PFN_xrGetSystemProperties>(f[0]);
+    o.toPath       = reinterpret_cast<PFN_xrStringToPath>(f[1]);
+    o.createSet    = reinterpret_cast<PFN_xrCreateActionSet>(f[2]);
+    o.destroySet   = reinterpret_cast<PFN_xrDestroyActionSet>(f[3]);
+    o.createAction = reinterpret_cast<PFN_xrCreateAction>(f[4]);
+    o.suggest      = reinterpret_cast<PFN_xrSuggestInteractionProfileBindings>(f[5]);
+    o.attach       = reinterpret_cast<PFN_xrAttachSessionActionSets>(f[6]);
+    o.sync         = reinterpret_cast<PFN_xrSyncActions>(f[7]);
+    o.createSpace  = reinterpret_cast<PFN_xrCreateActionSpace>(f[8]);
+    o.locate       = reinterpret_cast<PFN_xrLocateSpace>(f[9]);
+    o.destroySpace = reinterpret_cast<PFN_xrDestroySpace>(f[10]);
+    return true;
+}
+// under s_egMx, a new instance: the system's eye gaze support, then our action set + pose action + the suggested binding.
+// Leaves s_egSetup at 1 (ready), 0 (the system has no eye gaze: nothing to do) or -1 (failed, logged).
+void EgSetupInstanceLocked(int i, XrInstance inst, XrSystemId sys) {
+    if (!EgResolveLocked(i, inst)) { s_egSetup.store(-1, std::memory_order_relaxed); return; }
+    const EgFns& o = s_eg.fn;
+    XrSystemEyeGazeInteractionPropertiesEXT gp{};
+    gp.type = kTypeSystemEyeGazeProps;
+    XrSystemProperties sp{};
+    sp.type = kTypeSystemProperties;
+    sp.next = &gp;
+    ++t_depth;
+    XrResult r = o.sysProps(inst, sys, &sp);
+    --t_depth;
+    if (r < 0) {
+        s_egSetup.store(-1, std::memory_order_relaxed);
+        LogErr("Eye tracking: xrGetSystemProperties(system %llu) with the eye gaze properties FAILED -> %d = %s -- eye gaze off",
+            (unsigned long long)sys, r, XrResultName(r));
+        return;
+    }
+    sp.systemName[255] = 0;
+    s_egSystem.store(gp.supportsEyeGazeInteraction ? 1 : 0, std::memory_order_relaxed);
+    Log("Eye tracking: system \"%s\" (vendor 0x%04x, id %llu) -- supportsEyeGazeInteraction = %u%s", sp.systemName, sp.vendorId,
+        (unsigned long long)sys, gp.supportsEyeGazeInteraction,
+        gp.supportsEyeGazeInteraction ? " (the mod's eye gaze action is set up now)"
+                                      : " -- NO EYE TRACKER: no action set is made, the game's input stays untouched; vrs_eye keeps the "
+                                        "optical centre");
+    if (!gp.supportsEyeGazeInteraction) return;
+    XrActionSetCreateInfo si{};
+    si.type = kTypeActionSetCreateInfo;
+    strcpy_s(si.actionSetName, "dlaa_eye_gaze");
+    strcpy_s(si.localizedActionSetName, "DLAA mod eye gaze");
+    si.priority = 0;
+    XrPath profile = 0, binding = 0;
+    const char* step = "xrCreateActionSet";
+    ++t_depth;
+    r = o.createSet(inst, &si, &s_eg.set);
+    if (r >= 0) {
+        XrActionCreateInfo ai{};
+        ai.type = kTypeActionCreateInfo;
+        strcpy_s(ai.actionName, "gaze_pose");
+        ai.actionType = kActionTypePoseInput;
+        strcpy_s(ai.localizedActionName, "Eye gaze");
+        step = "xrCreateAction";
+        r = o.createAction(s_eg.set, &ai, &s_eg.act);
+    }
+    if (r >= 0) { step = "xrStringToPath (profile)"; r = o.toPath(inst, "/interaction_profiles/ext/eye_gaze_interaction", &profile); }
+    if (r >= 0) { step = "xrStringToPath (binding)"; r = o.toPath(inst, "/user/eyes_ext/input/gaze_ext/pose", &binding); }
+    uint32_t nForeign = 0;
+    if (r >= 0) {
+        XrActionSuggestedBinding all[65];        // phase 59c: a foreign suggestion for the profile first (it would be replaced)
+        {
+            std::lock_guard<std::mutex> sl(s_egSugMx);
+            if (s_egSugInst != inst) { s_egSugInst = inst; s_egForeignN = 0; s_egOurs = XrActionSuggestedBinding{}; }
+            s_egSugProfile = profile;
+            for (uint32_t k = 0; k < s_egForeignN; ++k) all[nForeign++] = s_egForeign[k];
+        }
+        all[nForeign] = XrActionSuggestedBinding{ s_eg.act, binding };
+        XrInteractionProfileSuggestedBinding sb{};
+        sb.type = kTypeIpSuggestedBinding;
+        sb.interactionProfile = profile;
+        sb.countSuggestedBindings = nForeign + 1;
+        sb.suggestedBindings = all;
+        step = "xrSuggestInteractionProfileBindings";
+        t_egOwnSuggest = true;
+        r = o.suggest(inst, &sb);
+        t_egOwnSuggest = false;
+        if (r >= 0) { std::lock_guard<std::mutex> sl(s_egSugMx); s_egOurs = all[nForeign]; }
+    }
+    if (r < 0 && s_eg.set) { o.destroySet(s_eg.set); }   // (its action goes with it)
+    --t_depth;
+    if (r < 0) {
+        s_eg.set = nullptr; s_eg.act = nullptr;
+        s_egSetup.store(-1, std::memory_order_relaxed);
+        LogErr("Eye tracking: %s FAILED -> %d = %s -- eye gaze off (the game's input untouched)", step, r, XrResultName(r));
+        return;
+    }
+    s_egSyncSet.store(s_eg.set, std::memory_order_relaxed);
+    s_egSetup.store(1, std::memory_order_relaxed);
+    Log("Eye tracking: action set \"dlaa_eye_gaze\" %p (priority 0) + pose action %p suggested for "
+        "/interaction_profiles/ext/eye_gaze_interaction -> /user/eyes_ext/input/gaze_ext/pose (instance %p, via the %s %s; + %u "
+        "binding(s) suggested for that profile before us, kept)", s_eg.set, s_eg.act, inst, kKindName[s_slot[i].kind], s_slot[i].module,
+        nForeign);
+}
+// The game's outermost xrCreateSession succeeded (slot i, its create info `ci`): set up the instance once, then fresh per-session state.
+void EgOnCreateSession(int i, XrInstance inst, const void* ci, XrSession ses) {
+    if (!s_egWant.load(std::memory_order_relaxed)) return;
+    const int ext = s_egExt.load(std::memory_order_relaxed);
+    if (ext != 3 && ext != 2) return;            // phase 59c: 2 (enabled above the runtime, e.g. by OpenXR Toolkit) is used too
+
+    const XrSessionCreateInfo* sci = static_cast<const XrSessionCreateInfo*>(ci);
+    std::lock_guard<std::mutex> lk(s_egMx);
+    if (inst != s_eg.inst) {                     // first session of this instance: its action set (the old one died with the old instance)
+        s_eg = EgState();
+        s_eg.inst = inst;
+        s_eg.slot = i;
+        s_egSetup.store(0, std::memory_order_relaxed);
+        s_egSystem.store(-1, std::memory_order_relaxed);
+        s_egSyncSet.store(nullptr, std::memory_order_relaxed);
+        if (!sci || sci->type != kTypeSessionCreateInfo) {
+            s_egSetup.store(-1, std::memory_order_relaxed);
+            LogErr("Eye tracking: the game's xrCreateSession info is not an XrSessionCreateInfo (type %d) -- eye gaze off",
+                sci ? sci->type : -1);
+        } else {
+            EgSetupInstanceLocked(i, inst, sci->systemId);
+        }
+    }
+    // per session (OpenXR attaches action sets once per session)
+    s_eg.ses = ses;
+    s_eg.beginNs = 0;
+    s_eg.attached = false;
+    s_eg.soloWaitLogged = false;
+    s_eg.space = nullptr;
+    s_eg.failed = false;
+    s_eg.lastSyncTime = s_eg.lastLocTime = 0;
+    s_eg.syncFailRun = 0;
+    s_eg.firstLocLogged = s_eg.firstValidLogged = s_eg.firstOwnSyncLogged = false;
+    s_egAttachedBy.store(0, std::memory_order_relaxed);
+    s_egGameAttach.store(false, std::memory_order_relaxed);
+    s_egFailedA.store(false, std::memory_order_relaxed);
+    s_egSyncSes.store(nullptr, std::memory_order_relaxed);
+    s_egSyncAppendOff.store(false, std::memory_order_relaxed);
+    AcquireSRWLockExclusive(&s_egLock);
+    s_egGaze = EgGaze();
+    ReleaseSRWLockExclusive(&s_egLock);
+    if (s_egSetup.load(std::memory_order_relaxed) == 1)
+        Log("Eye tracking: session %p -- our gaze set is appended to the game's xrAttachSessionActionSets; if the game created no "
+            "action set and has not attached 3 s after xrBeginSession, the mod attaches it alone", ses);
+}
+// The game's outermost xrBeginSession succeeded: the 3-s clock of the solo attach starts.
+void EgOnBeginSession(XrSession ses) {
+    if (s_egSetup.load(std::memory_order_relaxed) != 1) return;
+    std::lock_guard<std::mutex> lk(s_egMx);
+    if (ses == s_eg.ses) s_eg.beginNs = SteadyNs();
+}
+// The game's outermost xrDestroySession: our gaze space goes first (through the runtime), the per-session state is dropped.
+void EgOnDestroySession(XrSession ses) {
+    std::lock_guard<std::mutex> lk(s_egMx);
+    if (!ses || ses != s_eg.ses) return;
+    if (s_eg.space && s_eg.fn.destroySpace) { ++t_depth; s_eg.fn.destroySpace(s_eg.space); --t_depth; }
+    s_eg.space = nullptr;
+    s_eg.ses = nullptr;
+    s_eg.attached = false;
+    s_egSyncSes.store(nullptr, std::memory_order_relaxed);
+    AcquireSRWLockExclusive(&s_egLock);
+    s_egGaze = EgGaze();
+    ReleaseSRWLockExclusive(&s_egLock);
+}
+void EgFailLocked(const char* what, XrResult r) {   // under s_egMx: gaze off for this session (logged once per session)
+    if (s_eg.failed) return;
+    s_eg.failed = true;
+    s_egFailedA.store(true, std::memory_order_relaxed);
+    LogErr("Eye tracking: %s FAILED -> %d = %s -- eye gaze off for this session (session %p); VRS keeps the optical centre", what, r,
+        XrResultName(r));
+}
+// The game's outermost PRIMARY_STEREO xrLocateViews returned (r >= 0; `views` = its two views in li->space at li->displayTime):
+// attach alone if due, our action space, our own sync (no game sync within 100 ms, FOCUSED), the gaze locate (once per display
+// time) -> the per-view tangents. Render thread usually; s_egMx is only try-locked (a game attach / create in flight = skip).
+void EgFrame(XrSession ses, const XrViewLocateInfo* li, const XrViewState* vs, const XrView* views) {
+    if (!s_egActive.load(std::memory_order_relaxed) || s_egSetup.load(std::memory_order_relaxed) != 1) return;
+    std::unique_lock<std::mutex> lk(s_egMx, std::try_to_lock);
+    if (!lk.owns_lock() || ses != s_eg.ses || s_eg.failed || !s_eg.set) return;
+    const EgFns& o = s_eg.fn;
+    const int64_t now = SteadyNs();
+    XrResult r = 0;
+    if (!s_eg.attached) {
+        if (s_egGameAttach.load(std::memory_order_relaxed)) return;   // (the game's attach without ours: failed, marked there)
+        if (!s_eg.beginNs || now - s_eg.beginNs < 3000000000LL) return;
+        const uint32_t gameSets = s_egGameSets.load(std::memory_order_relaxed);
+        if (gameSets) {
+            if (!s_eg.soloWaitLogged) {
+                s_eg.soloWaitLogged = true;
+                LogWarn("Eye tracking: the game created %u action set(s) but has not attached them %.1f s after xrBeginSession -- the "
+                    "mod waits for the game's own xrAttachSessionActionSets (ours is appended there; never attached alone while the "
+                    "game uses actions)", gameSets, (double)(now - s_eg.beginNs) / 1e9);
+            }
+            return;
+        }
+        XrSessionActionSetsAttachInfo ai{};
+        ai.type = kTypeSessionActionSetsAttach;
+        ai.countActionSets = 1;
+        ai.actionSets = &s_eg.set;
+        ++t_depth;
+        XR_DRV(kHkXrLocate, r = o.attach(ses, &ai));
+        --t_depth;
+        if (r < 0) { s_egAttachedBy.store(-1, std::memory_order_relaxed); EgFailLocked("xrAttachSessionActionSets (our set alone)", r); return; }
+        s_eg.attached = true;
+        s_egAttachedBy.store(2, std::memory_order_relaxed);
+        s_egSyncSes.store(ses, std::memory_order_relaxed);
+        LogWarn("Eye tracking: the game created no action set and did not attach any %.1f s after xrBeginSession -- the mod attached "
+            "its eye gaze set ALONE (session %p). Should the game attach later, its call fails with XR_ERROR_ACTIONSETS_ALREADY_ATTACHED "
+            "(logged as an ERROR)", (double)(now - s_eg.beginNs) / 1e9, ses);
+    }
+    if (!s_eg.space) {
+        XrActionSpaceCreateInfo ci{};
+        ci.type = kTypeActionSpaceCreateInfo;
+        ci.action = s_eg.act;
+        ci.poseInActionSpace.orientation.w = 1.0f;
+        ++t_depth;
+        XR_DRV(kHkXrLocate, r = o.createSpace(ses, &ci, &s_eg.space));
+        --t_depth;
+        if (r < 0 || !s_eg.space) { s_eg.space = nullptr; EgFailLocked("xrCreateActionSpace (the gaze pose)", r); return; }
+        Log("Eye tracking: gaze action space %p made in session %p (identity pose; located in the game's view space %p at its display "
+            "time)", s_eg.space, ses, li->space);
+    }
+    // our own sync: only when the game did not sync within 100 ms, once per display time, only while FOCUSED
+    const int64_t gs = s_egGameSyncNs.load(std::memory_order_relaxed);
+    if (s_sesState.load(std::memory_order_relaxed) == 5 && (!gs || now - gs > 100000000LL) && li->displayTime != s_eg.lastSyncTime) {
+        s_eg.lastSyncTime = li->displayTime;
+        const XrActiveActionSet as{ s_eg.set, 0 };
+        XrActionsSyncInfo si{};
+        si.type = kTypeActionsSyncInfo;
+        si.countActiveActionSets = 1;
+        si.activeActionSets = &as;
+        ++t_depth;
+        XR_DRV(kHkXrLocate, r = o.sync(ses, &si));
+        --t_depth;
+        if (r < 0) {
+            if (s_eg.syncFailLogs++ < 8)
+                LogErr("Eye tracking: our xrSyncActions FAILED -> %d = %s (#%llu)", r, XrResultName(r), (unsigned long long)s_eg.syncFailLogs);
+            if (r == kErrActionSetNotAttached || ++s_eg.syncFailRun >= 120) { EgFailLocked("xrSyncActions (ours, repeatedly)", r); return; }
+        } else {
+            s_eg.syncFailRun = 0;
+            s_egSyncOurs.fetch_add(1, std::memory_order_relaxed);
+            if (!s_eg.firstOwnSyncLogged) {
+                s_eg.firstOwnSyncLogged = true;
+                Log("Eye tracking: the mod syncs its gaze set itself (no xrSyncActions of the game within 100 ms; %llu game sync(s) "
+                    "so far) -> %d = %s", (unsigned long long)s_egGameSyncCalls.load(std::memory_order_relaxed), r, XrResultName(r));
+            }
+        }
+    }
+    if (li->displayTime == s_eg.lastLocTime) return;   // (a second locate of the same frame, e.g. another space)
+    s_eg.lastLocTime = li->displayTime;
+    XrSpaceLocation loc{};
+    loc.type = kTypeSpaceLocation;
+    ++t_depth;
+    XR_DRV(kHkXrLocate, r = o.locate(s_eg.space, li->space, li->displayTime, &loc));
+    --t_depth;
+    if (r < 0) {
+        s_egLocFails.fetch_add(1, std::memory_order_relaxed);
+        if (s_eg.locFailLogs++ < 8)
+            LogErr("Eye tracking: xrLocateSpace(gaze %p, base %p, time %lld) FAILED -> %d = %s", s_eg.space, li->space,
+                (long long)li->displayTime, r, XrResultName(r));
+        return;
+    }
+    s_egLocates.fetch_add(1, std::memory_order_relaxed);
+    const bool ok = (loc.locationFlags & kLocOrientValid) && (loc.locationFlags & kLocOrientTracked) &&
+                    (!vs || (vs->viewStateFlags & 1));   // (the views' orientations must be valid too)
+    if (!s_eg.firstLocLogged) {
+        s_eg.firstLocLogged = true;
+        Log("Eye tracking: first gaze locate -- flags 0x%llx (%s), q=(%+.3f %+.3f %+.3f %+.3f), focused %d, game syncs %llu / ours %llu",
+            (unsigned long long)loc.locationFlags, ok ? "VALID + TRACKED" : "not valid / not tracked yet", loc.pose.orientation.x,
+            loc.pose.orientation.y, loc.pose.orientation.z, loc.pose.orientation.w, s_sesState.load(std::memory_order_relaxed) == 5,
+            (unsigned long long)s_egSyncGame.load(std::memory_order_relaxed), (unsigned long long)s_egSyncOurs.load(std::memory_order_relaxed));
+    }
+    if (!ok) { s_egInvalid.fetch_add(1, std::memory_order_relaxed); return; }
+    // the gaze (-z of the located pose) in the locate space, then in each view's own frame (inverse of the view's orientation)
+    const Pose gp = PoseOf(loc.pose);
+    float tx[2] = {}, ty[2] = {};
+    for (int k = 0; k < 2; ++k) {
+        const XrQuaternionf& q = views[k].pose.orientation;
+        const double vq[4] = { (double)q.x, (double)q.y, (double)q.z, (double)q.w };
+        if (!GazeMath::GazeToViewTangents(gp.q, vq, &tx[k], &ty[k])) {   // looking sideways / behind the view
+            s_egInvalid.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+    }
+    LARGE_INTEGER qpc;
+    QueryPerformanceCounter(&qpc);
+    AcquireSRWLockExclusive(&s_egLock);
+    for (int k = 0; k < 2; ++k) { s_egGaze.tx[k] = tx[k]; s_egGaze.ty[k] = ty[k]; }
+    s_egGaze.qpc = qpc.QuadPart;
+    s_egGaze.have = true;
+    ReleaseSRWLockExclusive(&s_egLock);
+    s_egValid.fetch_add(1, std::memory_order_relaxed);
+    if (!s_eg.firstValidLogged) {
+        s_eg.firstValidLogged = true;
+        Log("Eye tracking: FIRST VALID GAZE -- view 0 (left) tangents (%+.3f, %+.3f) = %+.1f / %+.1f deg, view 1 (right) (%+.3f, %+.3f); "
+            "attached %s, game syncs %llu / ours %llu (session %p)", tx[0], ty[0], std::atan(tx[0]) * 57.29578,
+            std::atan(ty[0]) * 57.29578, tx[1], ty[1], EgAttachName(s_egAttachedBy.load(std::memory_order_relaxed)),
+            (unsigned long long)s_egSyncGame.load(std::memory_order_relaxed), (unsigned long long)s_egSyncOurs.load(std::memory_order_relaxed),
+            ses);
+    }
+}
+
+// The runtime's xrCreateInstance (wrapped at runtime slots only; the loader's own call, layers or not): + XR_KHR_visibility_mask
+// (phase 40) and / or + XR_EXT_eye_gaze_interaction (phase 59), in ONE copy of the game's extension list. A refused create with
+// both is retried with the visibility mask alone, then (or with one only) with the game's own create info.
 XrResult CreateInstanceImpl(int i, const XrInstanceCreateInfo* ci, XrInstance* out) {
     auto real = reinterpret_cast<PFN_xrCreateInstance>(s_slot[i].createInstance.load(std::memory_order_acquire));
     if (!real) return -1;
     auto pass = [&]() { ++t_depth; const XrResult r = real(ci, out); --t_depth; return r; };
-    if (!s_hmWant.load(std::memory_order_relaxed) || !ci || ci->type != kTypeInstanceCreateInfo) return pass();
-    for (uint32_t k = 0; k < ci->enabledExtensionCount; ++k)
-        if (ci->enabledExtensionNames && ci->enabledExtensionNames[k] && !strcmp(ci->enabledExtensionNames[k], kVisMaskExt)) {
-            s_hmExt.store(2, std::memory_order_relaxed);
-            s_hmOurs.store(false, std::memory_order_relaxed);
-            Log("hidden area mask: the game enables %s itself (xrCreateInstance at the runtime %s)", kVisMaskExt, s_slot[i].module);
-            return pass();
-        }
-    // does the runtime offer it? (its own xrEnumerateInstanceExtensionProperties, no layer name)
-    bool offered = false;
+    const bool wantHm = s_hmWant.load(std::memory_order_relaxed), wantEg = s_egWant.load(std::memory_order_relaxed);
+    if ((!wantHm && !wantEg) || !ci || ci->type != kTypeInstanceCreateInfo) return pass();
+    bool gameHm = false, gameEg = false;
+    for (uint32_t k = 0; k < ci->enabledExtensionCount; ++k) {
+        const char* e = ci->enabledExtensionNames ? ci->enabledExtensionNames[k] : nullptr;
+        if (!e) continue;
+        if (!strcmp(e, kVisMaskExt)) gameHm = true;
+        if (!strcmp(e, kEyeGazeExt)) gameEg = true;
+    }
+    if (wantHm && gameHm) {
+        s_hmExt.store(2, std::memory_order_relaxed);
+        s_hmOurs.store(false, std::memory_order_relaxed);
+        Log("hidden area mask: the game enables %s itself (xrCreateInstance at the runtime %s)", kVisMaskExt, s_slot[i].module);
+    }
+    if (wantEg && gameEg) {
+        s_egExt.store(2, std::memory_order_relaxed);
+        Log("Eye tracking: %s is already enabled above the runtime %s (by the game or an API layer such as OpenXR Toolkit) -- the mod "
+            "uses it: its gaze action is suggested next to theirs (phase 59c)", kEyeGazeExt, s_slot[i].module);
+    }
+    const bool tryHm = wantHm && !gameHm, tryEg = wantEg && !gameEg;
+    static std::atomic<bool> s_listLogged{false};    // phase 59c: the runtime's whole list is logged once with vrs_eye on
+    if (!tryHm && !tryEg && !(wantEg && !s_listLogged.load(std::memory_order_relaxed))) return pass();
+    // does the runtime offer them? (its own xrEnumerateInstanceExtensionProperties, no layer name)
+    bool offHm = false, offEg = false;
     auto gipa = reinterpret_cast<PFN_xrGetInstanceProcAddr>(s_slot[i].gipa.load(std::memory_order_acquire));
     PFN_xrVoidFunction fp = nullptr;
     ++t_depth;
@@ -1699,43 +2274,105 @@ XrResult CreateInstanceImpl(int i, const XrInstanceCreateInfo* ci, XrInstance* o
                 if (r >= 0)
                     for (uint32_t k = 0; k < got && k < n; ++k) {
                         props[k].extensionName[127] = 0;
-                        if (!strcmp(props[k].extensionName, kVisMaskExt)) offered = true;
+                        if (!strcmp(props[k].extensionName, kVisMaskExt)) offHm = true;
+                        if (!strcmp(props[k].extensionName, kEyeGazeExt)) offEg = true;
                     }
+                if (r >= 0 && wantEg && !s_listLogged.exchange(true)) {   // phase 59c: what the runtime offers (Varjo tester, #11)
+                    std::string all;
+                    for (uint32_t k = 0; k < got && k < n; ++k) { if (k) all += ' '; all += props[k].extensionName; }
+                    std::string game;
+                    for (uint32_t k = 0; k < ci->enabledExtensionCount; ++k)
+                        if (ci->enabledExtensionNames && ci->enabledExtensionNames[k]) {
+                            if (!game.empty()) game += ' ';
+                            game += ci->enabledExtensionNames[k];
+                        }
+                    Log("Eye tracking: the OpenXR runtime %s offers %u instance extension(s): %s | asked for at its xrCreateInstance "
+                        "(game + layers above it): %s", s_slot[i].module, got, all.c_str(), game.empty() ? "(none)" : game.c_str());
+                }
                 delete[] props;
             }
         }
     }
     --t_depth;
-    if (!offered) {
+    if (tryHm && !offHm) {
         s_hmExt.store(1, std::memory_order_relaxed);
         LogWarn("hidden area mask: the OpenXR runtime %s does not offer %s (enumerate result %d) -- the hidden area mask is not "
             "available", s_slot[i].module, kVisMaskExt, r);
-        return pass();
     }
-    // a COPY of the create info with the extension appended (the game's array stays as it is)
+    const bool egForce = s_egForce.load(std::memory_order_relaxed);
+    if (tryEg && !offEg && !egForce) {                   // phase 59g: asked only for Foveated (VRS): no blind try (no 2nd create)
+        s_egExt.store(1, std::memory_order_relaxed);
+        Log("Eye tracking: the OpenXR runtime %s does not list %s -- not asked for (eye tracking was off at the start, only "
+            "Foveated (VRS) on: no blind try)", s_slot[i].module, kEyeGazeExt);
+    } else if (tryEg && !offEg) {
+        s_egExt.store(1, std::memory_order_relaxed);
+        LogWarn("Eye tracking: the OpenXR runtime %s does not LIST %s (enumerate result %d) -- asked for anyway (phase 59c: with "
+            "OpenXR Toolkit the same runtime accepted it); a refused create = the game's own create again, no eye gaze",
+            s_slot[i].module, kEyeGazeExt, r);
+    }
+    const bool addHm = tryHm && offHm, addEg = tryEg && (offEg || egForce);   // phase 59c: even when not listed (59g: only if forced)
+    if (!addHm && !addEg) return pass();
+    // a COPY of the create info with the extension(s) appended (the game's array stays as it is)
     const uint32_t n0 = ci->enabledExtensionCount;
-    const char** names = new (std::nothrow) const char*[n0 + 1];
+    const char** names = new (std::nothrow) const char*[n0 + 2];
     if (!names) return pass();
     for (uint32_t k = 0; k < n0; ++k) names[k] = ci->enabledExtensionNames[k];
-    names[n0] = kVisMaskExt;
+    uint32_t nAdd = 0;
+    if (addHm) names[n0 + nAdd++] = kVisMaskExt;
+    if (addEg) names[n0 + nAdd++] = kEyeGazeExt;
     XrInstanceCreateInfo c = *ci;
-    c.enabledExtensionCount = n0 + 1;
+    c.enabledExtensionCount = n0 + nAdd;
     c.enabledExtensionNames = names;
     ++t_depth;
     r = real(&c, out);
     --t_depth;
-    delete[] names;
     if (r >= 0) {
-        s_hmExt.store(3, std::memory_order_relaxed);
-        s_hmOurs.store(true, std::memory_order_relaxed);
-        Log("hidden area mask: %s enabled at the runtime %s's xrCreateInstance (the game asked for %u extension(s); instance %p) -- "
-            "the meshes are fetched at the game's xrEndFrame while xr_hidden_mask is on", kVisMaskExt, s_slot[i].module, n0,
-            out ? *out : nullptr);
+        delete[] names;
+        if (addHm) {
+            s_hmExt.store(3, std::memory_order_relaxed);
+            s_hmOurs.store(true, std::memory_order_relaxed);
+            Log("hidden area mask: %s enabled at the runtime %s's xrCreateInstance (the game asked for %u extension(s); instance %p) -- "
+                "the meshes are fetched at the game's xrEndFrame while xr_hidden_mask is on", kVisMaskExt, s_slot[i].module, n0,
+                out ? *out : nullptr);
+        }
+        if (addEg) {
+            s_egExt.store(3, std::memory_order_relaxed);
+            Log("Eye tracking: %s enabled at the runtime %s's xrCreateInstance (the game asked for %u extension(s)%s; instance %p) -- "
+                "the system's eye gaze support is checked at the game's xrCreateSession", kEyeGazeExt, s_slot[i].module, n0,
+                addHm ? ", + XR_KHR_visibility_mask in the same list" : "", out ? *out : nullptr);
+        }
         return r;
     }
-    s_hmExt.store(4, std::memory_order_relaxed);
-    LogErr("hidden area mask: xrCreateInstance with %s FAILED (%d = %s) -- created again with the game's own extensions, no mask",
-        kVisMaskExt, r, XrResultName(r));
+    const XrResult rBoth = r;
+    if (addHm && addEg) {                        // both refused: the visibility mask alone (phase 40's proven case), without the gaze
+        LogErr("Eye tracking: xrCreateInstance with %s + %s FAILED (%d = %s) -- retried with %s alone, no eye gaze", kVisMaskExt,
+            kEyeGazeExt, r, XrResultName(r), kVisMaskExt);
+        c.enabledExtensionCount = n0 + 1;        // names[n0] = the visibility mask
+        ++t_depth;
+        r = real(&c, out);
+        --t_depth;
+        s_egExt.store(4, std::memory_order_relaxed);
+        if (r >= 0) {
+            delete[] names;
+            s_hmExt.store(3, std::memory_order_relaxed);
+            s_hmOurs.store(true, std::memory_order_relaxed);
+            Log("hidden area mask: %s enabled at the runtime %s's xrCreateInstance (second try, without %s; instance %p)", kVisMaskExt,
+                s_slot[i].module, kEyeGazeExt, out ? *out : nullptr);
+            return r;
+        }
+    }
+    delete[] names;
+    if (addHm) {
+        s_hmExt.store(4, std::memory_order_relaxed);
+        LogErr("hidden area mask: xrCreateInstance with %s FAILED (%d = %s) -- created again with the game's own extensions, no mask",
+            kVisMaskExt, r, XrResultName(r));
+    }
+    if (addEg) {
+        s_egExt.store(4, std::memory_order_relaxed);
+        if (!addHm)
+            LogErr("Eye tracking: xrCreateInstance with %s FAILED (%d = %s) -- created again with the game's own extensions, no eye gaze",
+                kEyeGazeExt, rBoth, XrResultName(rBoth));
+    }
     return pass();
 }
 
@@ -1900,6 +2537,7 @@ XrResult LocateImpl(int i, XrSession ses, const XrViewLocateInfo* li, XrViewStat
                 views[0].fov.angleUp * 57.29578, views[0].fov.angleDown * 57.29578, views[1].fov.angleLeft * 57.29578,
                 views[1].fov.angleRight * 57.29578, views[1].fov.angleUp * 57.29578, views[1].fov.angleDown * 57.29578,
                 kKindName[s_slot[i].kind], s_slot[i].module, GetCurrentThreadId());
+        EgFrame(ses, li, vs, views);             // phase 59: eye gaze -- attach / sync if due, the gaze locate at this display time
     }
     return r;
 }
@@ -1951,7 +2589,8 @@ XrResult WaitFrameImpl(int i, XrSession ses, const XrFrameWaitInfo* wi, XrFrameS
     }
     s_gameWaitNsA.store(SteadyNs(), std::memory_order_relaxed);   // phase 52: FrameLoopActive
     const int64_t now = SteadyNs();
-    std::unique_lock<std::mutex> lk(s_tbMx);
+    std::unique_lock<std::mutex> lk(s_tbMx, std::defer_lock);
+    CPU_ORIG(lk.lock());                         // phase 57: a lock wait (a turbo frame's xrEndFrame holds it over the runtime), not mod work
     const int64_t prev = s_tb.lastGameWaitNs;
     s_tb.lastGameWaitNs = now;
     if (s_tb.pending && fs && ses != s_tb.ses) {
@@ -2039,7 +2678,7 @@ XrResult WaitFrameImpl(int i, XrSession ses, const XrFrameWaitInfo* wi, XrFrameS
         s_capBaseA.store(s_capBase, std::memory_order_relaxed);
         s_capWaits.fetch_add(1, std::memory_order_relaxed);
     }
-    lk.lock();
+    CPU_ORIG(lk.lock());                         // phase 57 (as above)
     --s_tb.gameWaits;
     s_tb.gameWaited = r >= 0;                    // (until the game's xrBeginFrame)
     s_tb.lastWaitFake = false;
@@ -2087,7 +2726,8 @@ XrResult BeginFrameImpl(int i, XrSession ses, const XrFrameBeginInfo* bi) {
     if (!s_logged.exchange(true))
         Log("OpenXR hook: first xrBeginFrame by the game (session %p; via the %s %s, tid=%lu)", ses, kKindName[s_slot[i].kind],
             s_slot[i].module, GetCurrentThreadId());
-    std::unique_lock<std::mutex> lk(s_tbMx);     // (held over the real call: the frame tags stay in call order)
+    std::unique_lock<std::mutex> lk(s_tbMx, std::defer_lock);   // (held over the real call: the frame tags stay in call order)
+    CPU_ORIG(lk.lock());                         // phase 57: a lock wait (a turbo frame's xrEndFrame holds it over the runtime), not mod work
     if (s_tb.lastWaitFake) {
         s_tb.lastWaitFake = false;
         TbPushTagLocked(kTagTurbo);
@@ -2143,6 +2783,7 @@ XrResult CreateSessionImpl(int i, XrInstance inst, const void* ci, XrSession* ou
     XrResult r;
     CPU_ORIG(r = real(inst, ci, out));
     --t_depth;
+    if (outer && r >= 0 && out && *out) EgOnCreateSession(i, inst, ci, *out);   // phase 59: eye gaze (system check, our action set)
     if (outer) {
         s_sesState.store(0, std::memory_order_relaxed);
         s_rtStop.store(0, std::memory_order_relaxed);
@@ -2172,6 +2813,7 @@ XrResult BeginSessionImpl(int i, XrSession ses, const XrSessionBeginInfo* bi) {
     if (outer) {
         const int prevState = s_sesState.load(std::memory_order_relaxed);
         if (r >= 0) {                            // a new run of the session: fresh who-started marks
+            EgOnBeginSession(ses);               // phase 59: the 3-s clock of the eye gaze solo attach
             s_rtStop.store(0, std::memory_order_relaxed);
             s_instLoss.store(false, std::memory_order_relaxed);
             s_exitAsked.store(false, std::memory_order_relaxed);
@@ -2332,6 +2974,15 @@ XrResult PollEventImpl(int i, XrInstance inst, void* ev) {
 }
 // v0.10.3 phase 28: xrEndFrame -- the first projection layer: its per-view swapchain / rect / slice (the picture layout) and
 // the submitted poses + fovs (the per-space correction C = S (x) L^-1, phase 28b). Read only.
+// phase 57 (perf): where the CPU profiler charges the time spent in here (cpu_prof.h; the ATS VR log 2026-10-13 18:12 had
+// hk:xrEndFrame at 1.9-5.2 ms/frame with Turbo on, 0.03 ms off -- waits counted as mod work):
+//  * MOD time (hk:xrEndFrame): the layout / pose bookkeeping above, the hidden-mask fetch, OvEndFrame's quad maths (the
+//    quad draw callback itself = the kBMenu block), the turbo bookkeeping (tags, the next async wait's post, the stats line);
+//  * xrEndFrame DRIVER (not the mod): the real xrEndFrame (as before) and both s_tbMx acquisitions (the game's main thread holds
+//    it over its own xrWaitFrame / xrBeginFrame checks and its real xrBeginFrame);
+//  * xrWaitFrame DRIVER: a turbo frame's wait for the async xrWaitFrame (TbWaitDone, up to a frame period = the runtime pacing)
+//    or the synchronous real xrWaitFrame when none is pending; xrBeginFrame DRIVER: the real xrBeginFrame of a turbo frame;
+//  * xrAcquire / xrRelease DRIVER: our quad swapchains' acquire + xrWaitSwapchainImage / release (OvDrawLocked, when drawn here).
 XrResult EndFrameImpl(int i, XrSession ses, const XrFrameEndInfo* fe) {
     auto real = reinterpret_cast<PFN_xrEndFrame>(s_slot[i].endFrame.load(std::memory_order_acquire));
     if (!real) return -1;
@@ -2449,7 +3100,7 @@ XrResult EndFrameImpl(int i, XrSession ses, const XrFrameEndInfo* fe) {
     const bool want = s_tbWant.load(std::memory_order_relaxed);
     uint8_t tag = 0;
     if (outer && fe) {
-        tlk.lock();
+        CPU_ORIG(tlk.lock());                              // phase 57: a lock wait (the main thread's frame calls), not mod work
         tag = TbPopTagLocked();
         if (tag == kTagTurbo) TbBeginForGameLocked(i, ses);
         else { TbMirrorLocked(); tlk.unlock(); }
@@ -2463,7 +3114,7 @@ XrResult EndFrameImpl(int i, XrSession ses, const XrFrameEndInfo* fe) {
     }
     --t_depth;
     if (outer && fe) {
-        if (!tlk.owns_lock()) tlk.lock();
+        if (!tlk.owns_lock()) CPU_ORIG(tlk.lock());        // phase 57 (as above)
         TbAfterEndLocked(i, ses, r, want, tag);
         tlk.unlock();
         if (r != 0) NoteResult(kNsEnd, r, ses);          // phase 33
@@ -2493,6 +3144,7 @@ XrResult DestroySessionImpl(int i, XrSession ses) {
         }
         OvSetOk(false, false);
         HmDestroySession(ses);                           // phase 40
+        EgOnDestroySession(ses);                         // phase 59: our gaze space first
     }
     ++t_depth;
     XrResult r;
@@ -2561,9 +3213,205 @@ XrResult LocateSpaceImpl(int i, XrSpace sp, XrSpace base, XrTime t, XrSpaceLocat
     }
     return r;
 }
+// phase 59: xrAttachSessionActionSets -- the game's call gets our eye gaze set appended to a COPY of its list (refused: its own
+// list again, gaze off for the session). After the mod attached its set alone (EgFrame, the game had created no action set) the
+// game's late attach is passed as it is: it fails ALREADY_ATTACHED -- an ERROR line, the game gets the runtime's real result.
+XrResult AttachSetsImpl(int i, XrSession ses, const XrSessionActionSetsAttachInfo* ai) {
+    auto real = reinterpret_cast<PFN_xrAttachSessionActionSets>(s_slot[i].attachSets.load(std::memory_order_acquire));
+    if (!real) return -1;
+    auto pass = [&]() { ++t_depth; const XrResult r = real(ses, ai); --t_depth; return r; };
+    if (t_depth > 0) return pass();
+    CPU_HOOK(kHkXrOther);
+    const uint32_t n0 = ai ? ai->countActionSets : 0;
+    std::lock_guard<std::mutex> lk(s_egMx);
+    s_egGameAttach.store(true, std::memory_order_relaxed);
+    const bool mine = s_egSetup.load(std::memory_order_relaxed) == 1 && s_eg.set && ses == s_eg.ses;
+    if (mine && s_eg.attached) {                         // already attached: the game's attach cannot succeed now
+        const XrResult r = pass();
+        if (s_egAttachedBy.load(std::memory_order_relaxed) != 2) {   // (the game's own second attach: its business)
+            LogWarn("Eye tracking: the game calls xrAttachSessionActionSets AGAIN (%u set(s), session %p) -> %d = %s", n0, ses, r,
+                XrResultName(r));
+            return r;
+        }
+        LogErr("Eye tracking: the GAME called xrAttachSessionActionSets (%u set(s), session %p) AFTER the mod attached its eye gaze set "
+            "alone -> %d = %s%s -- the game's own OpenXR input actions do NOT work in this session. Set vrs_eye = 0 and report this "
+            "log", n0, ses, r, XrResultName(r), r == kErrActionSetsAlreadyAttached ? " (ALREADY_ATTACHED, as expected)" : "");
+        return r;
+    }
+    if (!mine || s_eg.failed || !ai || ai->type != kTypeSessionActionSetsAttach || n0 > 63) {
+        const XrResult r = pass();
+        Log("Eye tracking: the game attaches %u action set(s) (session %p) -> %d = %s -- our gaze set NOT appended (%s)", n0, ses, r,
+            XrResultName(r), !mine ? "no gaze set for this session" : s_eg.failed ? "gaze off for this session" : "unusual attach info");
+        if (mine && !s_eg.failed) EgFailLocked("appending to the game's attach (not possible)", r);
+        return r;
+    }
+    XrActionSet sets[64];
+    for (uint32_t k = 0; k < n0; ++k) sets[k] = ai->actionSets[k];
+    sets[n0] = s_eg.set;
+    XrSessionActionSetsAttachInfo c = *ai;
+    c.countActionSets = n0 + 1;
+    c.actionSets = sets;
+    ++t_depth;
+    XrResult r = real(ses, &c);
+    --t_depth;
+    if (r >= 0) {
+        s_eg.attached = true;
+        s_egAttachedBy.store(1, std::memory_order_relaxed);
+        s_egSyncSes.store(ses, std::memory_order_relaxed);
+        Log("Eye tracking: the game attached %u action set(s) (session %p, tid=%lu) -- our eye gaze set appended -> %d = %s", n0, ses,
+            GetCurrentThreadId(), r, XrResultName(r));
+        return r;
+    }
+    s_egAttachedBy.store(-1, std::memory_order_relaxed);
+    EgFailLocked("xrAttachSessionActionSets with our gaze set appended", r);
+    r = pass();
+    LogErr("Eye tracking: the game's own xrAttachSessionActionSets (%u set(s), without ours) -> %d = %s", n0, r, XrResultName(r));
+    return r;
+}
+// phase 59: xrSyncActions -- the game's call gets our active set appended to a COPY of its list once our set is attached to that
+// session (refused: the game's own call again, no more appends this session). Every game sync is timed (EgFrame syncs ours alone
+// only without a game sync within 100 ms).
+XrResult SyncActionsImpl(int i, XrSession ses, const XrActionsSyncInfo* si) {
+    auto real = reinterpret_cast<PFN_xrSyncActions>(s_slot[i].syncActions.load(std::memory_order_acquire));
+    if (!real) return -1;
+    auto pass = [&]() { ++t_depth; const XrResult r = real(ses, si); --t_depth; return r; };
+    if (t_depth > 0) return pass();
+    CPU_HOOK(kHkXrOther);
+    s_egGameSyncNs.store(SteadyNs(), std::memory_order_relaxed);
+    const uint64_t nCalls = s_egGameSyncCalls.fetch_add(1, std::memory_order_relaxed);
+    void* const set = s_egSyncSet.load(std::memory_order_relaxed);
+    const bool append = set && ses && s_egSyncSes.load(std::memory_order_relaxed) == ses &&
+                        !s_egSyncAppendOff.load(std::memory_order_relaxed) && !s_egFailedA.load(std::memory_order_relaxed) && si &&
+                        s_egActive.load(std::memory_order_relaxed) &&   // phase 59g: attached but dormant while eye tracking is off
+                        si->type == kTypeActionsSyncInfo && si->countActiveActionSets < 31;
+    if (nCalls == 0)
+        Log("Eye tracking: first xrSyncActions by the game (session %p, %u active set(s), tid=%lu) -- %s", ses,
+            si ? si->countActiveActionSets : 0, GetCurrentThreadId(), append ? "our gaze set appended" : "nothing of ours to append yet");
+    if (!append) return pass();
+    XrActiveActionSet as[32];
+    const uint32_t n0 = si->countActiveActionSets;
+    for (uint32_t k = 0; k < n0; ++k) as[k] = si->activeActionSets[k];
+    as[n0] = XrActiveActionSet{ set, 0 };
+    XrActionsSyncInfo c = *si;
+    c.countActiveActionSets = n0 + 1;
+    c.activeActionSets = as;
+    ++t_depth;
+    XrResult r;
+    CPU_ORIG(r = real(ses, &c));
+    --t_depth;
+    if (r >= 0) { s_egSyncGame.fetch_add(1, std::memory_order_relaxed); return r; }
+    const XrResult rOurs = r;
+    r = pass();                                          // the game's own call, as it was
+    if (r >= 0 && !s_egSyncAppendOff.exchange(true, std::memory_order_relaxed)) {
+        // (the mod does not sync its set alone while the game syncs: that would leave the game's sets inactive between its calls)
+        s_egFailedA.store(true, std::memory_order_relaxed);
+        LogErr("Eye tracking: the game's xrSyncActions with our gaze set appended FAILED (%d = %s; without it %d = %s) -- no more "
+            "appends this session: eye gaze OFF for this session, VRS keeps the optical centre", rOurs, XrResultName(rOurs), r,
+            XrResultName(r));
+    }
+    return r;
+}
+// phase 59: xrCreateActionSet -- counted (a game that uses actions is never pre-empted by our solo attach).
+XrResult CreateActionSetImpl(int i, XrInstance inst, const XrActionSetCreateInfo* ci, XrActionSet* out) {
+    auto real = reinterpret_cast<PFN_xrCreateActionSet>(s_slot[i].createActionSet.load(std::memory_order_acquire));
+    if (!real) return -1;
+    const bool outer = t_depth == 0;
+    ++t_depth;
+    const XrResult r = real(inst, ci, out);
+    --t_depth;
+    if (outer && r >= 0) {
+        const uint32_t n = s_egGameSets.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (n <= 8)
+            Log("Eye tracking: the game creates OpenXR action set #%u \"%.63s\" (priority %u) -- it uses OpenXR input actions",
+                n, ci ? ci->actionSetName : "?", ci ? ci->priority : 0);
+    }
+    return r;
+}
+// phase 59c: xrSuggestInteractionProfileBindings at the runtime (wrapped there only, with vrs_eye on at start). Any call but our
+// own (t_egOwnSuggest) for the eye gaze profile comes from above -- the game or a layer (OpenXR Toolkit's eye tracker): it is
+// kept (our own suggestion carries it) and, once our action is suggested, gets ours appended (a suggestion replaces the earlier
+// one for that profile). Every other profile, or a refused merge (then their own call again), passes as it is.
+XrResult SuggestImpl(int i, XrInstance inst, const XrInteractionProfileSuggestedBinding* sb) {
+    auto real = reinterpret_cast<PFN_xrSuggestInteractionProfileBindings>(s_slot[i].suggest.load(std::memory_order_acquire));
+    if (!real) return -1;
+    auto pass = [&]() { ++t_depth; const XrResult r = real(inst, sb); --t_depth; return r; };
+    if (t_egOwnSuggest || !inst || !sb || sb->type != kTypeIpSuggestedBinding || !sb->suggestedBindings) return pass();
+    XrActionSuggestedBinding all[65];
+    uint32_t n = 0;
+    XrActionSuggestedBinding ours{};
+    {
+        std::lock_guard<std::mutex> sl(s_egSugMx);
+        if (s_egSugInst != inst) { s_egSugInst = inst; s_egSugProfile = 0; s_egForeignN = 0; s_egOurs = XrActionSuggestedBinding{}; }
+        if (!s_egSugProfile) {
+            auto gipa = reinterpret_cast<PFN_xrGetInstanceProcAddr>(s_slot[i].gipa.load(std::memory_order_acquire));
+            PFN_xrVoidFunction fp = nullptr;
+            ++t_depth;
+            if (gipa && gipa(inst, "xrStringToPath", &fp) >= 0 && fp) {
+                XrPath p = 0;
+                if (reinterpret_cast<PFN_xrStringToPath>(fp)(inst, "/interaction_profiles/ext/eye_gaze_interaction", &p) >= 0)
+                    s_egSugProfile = p;
+            }
+            --t_depth;
+        }
+        if (!s_egSugProfile || sb->interactionProfile != s_egSugProfile) return pass();
+        n = sb->countSuggestedBindings < 64 ? sb->countSuggestedBindings : 64;
+        for (uint32_t k = 0; k < n; ++k) { s_egForeign[k] = sb->suggestedBindings[k]; all[k] = sb->suggestedBindings[k]; }
+        s_egForeignN = n;
+        ours = s_egOurs;
+    }
+    static std::atomic<int> s_logs{0};
+    const bool log = s_logs.fetch_add(1, std::memory_order_relaxed) < 4;
+    if (!ours.action || sb->countSuggestedBindings >= 64) {
+        const XrResult r = pass();
+        if (log)
+            Log("Eye tracking: %u eye gaze binding(s) suggested from above the runtime (the game or a layer such as OpenXR Toolkit) "
+                "-> %d = %s -- %s", sb->countSuggestedBindings, r, XrResultName(r),
+                ours.action ? "too many to merge, passed as they are" : "kept: our own suggestion (made later) carries them");
+        return r;
+    }
+    all[n] = ours;
+    XrInteractionProfileSuggestedBinding c = *sb;
+    c.countSuggestedBindings = n + 1;
+    c.suggestedBindings = all;
+    ++t_depth;
+    XrResult r = real(inst, &c);
+    --t_depth;
+    if (r >= 0) {
+        if (log)
+            Log("Eye tracking: %u eye gaze binding(s) suggested from above the runtime (the game or a layer such as OpenXR Toolkit) "
+                "-- ours appended (it would be replaced) -> %d = %s", n, r, XrResultName(r));
+        return r;
+    }
+    const XrResult rOurs = r;
+    r = pass();
+    LogErr("Eye tracking: the eye gaze suggestion from above the runtime with ours appended FAILED (%d = %s; theirs alone %d = %s) -- "
+        "our gaze action has no binding now: no eye gaze", rOurs, XrResultName(rOurs), r, XrResultName(r));
+    return r;
+}
 XrResult GipaImpl(int i, XrInstance inst, const char* name, PFN_xrVoidFunction* fn);
 XrResult NegRuntimeImpl(int i, const XrNegotiateLoaderInfo* li, XrNegotiateRuntimeRequest* rq);
 XrResult NegLayerImpl(int i, const XrNegotiateLoaderInfo* li, const char* layerName, XrNegotiateApiLayerRequest* rq);
+
+// phase 56 (VectorXR): an API layer can call the functions below from its OWN thread, outside any game call -- VectorXR's
+// Frame Generation "presents from its own thread" in D3D11: its presenter runs xrWaitFrame / xrBeginFrame / xrEndFrame and
+// acquires / waits / releases its own swapchain images (+ its own swapchains / spaces) there. On that thread t_depth is 0, so
+// the thunk under the layer would take those calls for the game's outermost ones: foreign swapchains in the image map, the
+// panel release callback on the layer's images, its poses learned, our quad layers appended to its xrEndFrame, Turbo / the
+// fps cap pacing it, session-state tracking and CPU-profiler frame marks -- twice per frame. Same risk for OFXR Bridge.
+// How: the stub's return address is the caller's code; inside a detected OFXR / VectorXR module (Ofxr::FromOfxr) the call
+// runs as nested (++t_depth = every Impl passes straight through to the real function, no bookkeeping). The gate lives in
+// the stubs, never in the *Impl functions: only the stub's own frame has the layer's call site as its return address (an
+// Impl reached by a tail call would see the loader's or the game's). Already nested (t_depth > 0, e.g. the layer forwarding
+// the game's own call down the chain): nothing to do -- also keeps the range scan and the pass counter off the normal path.
+// Gipa / NegRuntime / NegLayer are NOT gated: a layer resolving its "next" functions must still get our thunks.
+template <class F> inline XrResult LayerGate(void* ret, F&& f) {
+    if (t_depth > 0 || !Ofxr::FromOfxr(ret)) return f();
+    Ofxr::NotePassed();
+    ++t_depth;
+    const XrResult r = f();
+    --t_depth;
+    return r;
+}
 
 template <int I> struct Thunk {
     static XrResult XRH_CALL Gipa(XrInstance a, const char* b, PFN_xrVoidFunction* c) { return GipaImpl(I, a, b, c); }
@@ -2573,32 +3421,76 @@ template <int I> struct Thunk {
     static XrResult XRH_CALL NegLayer(const XrNegotiateLoaderInfo* a, const char* b, XrNegotiateApiLayerRequest* c) {
         return NegLayerImpl(I, a, b, c);
     }
-    static XrResult XRH_CALL Release(XrSwapchain a, const void* b) { return ReleaseImpl(I, a, b); }
-    static XrResult XRH_CALL Acquire(XrSwapchain a, const void* b, uint32_t* c) { return AcquireImpl(I, a, b, c); }
-    static XrResult XRH_CALL Enumerate(XrSwapchain a, uint32_t b, uint32_t* c, void* d) { return EnumerateImpl(I, a, b, c, d); }
-    static XrResult XRH_CALL Destroy(XrSwapchain a) { return DestroyImpl(I, a); }
+    // phase 56: everything below goes through LayerGate (see above)
+    static XrResult XRH_CALL Release(XrSwapchain a, const void* b) {
+        return LayerGate(_ReturnAddress(), [&] { return ReleaseImpl(I, a, b); });
+    }
+    static XrResult XRH_CALL Acquire(XrSwapchain a, const void* b, uint32_t* c) {
+        return LayerGate(_ReturnAddress(), [&] { return AcquireImpl(I, a, b, c); });
+    }
+    static XrResult XRH_CALL Enumerate(XrSwapchain a, uint32_t b, uint32_t* c, void* d) {
+        return LayerGate(_ReturnAddress(), [&] { return EnumerateImpl(I, a, b, c, d); });
+    }
+    static XrResult XRH_CALL Destroy(XrSwapchain a) {
+        return LayerGate(_ReturnAddress(), [&] { return DestroyImpl(I, a); });
+    }
     static XrResult XRH_CALL Locate(XrSession a, const XrViewLocateInfo* b, XrViewState* c, uint32_t d, uint32_t* e, XrView* f) {
-        return LocateImpl(I, a, b, c, d, e, f);           // v0.10.3 phase 28
+        return LayerGate(_ReturnAddress(), [&] { return LocateImpl(I, a, b, c, d, e, f); });   // v0.10.3 phase 28
     }
-    static XrResult XRH_CALL EndFrame(XrSession a, const XrFrameEndInfo* b) { return EndFrameImpl(I, a, b); }
+    static XrResult XRH_CALL EndFrame(XrSession a, const XrFrameEndInfo* b) {
+        return LayerGate(_ReturnAddress(), [&] { return EndFrameImpl(I, a, b); });
+    }
     static XrResult XRH_CALL CreateRefSpace(XrSession a, const XrReferenceSpaceCreateInfo* b, XrSpace* c) {
-        return CreateRefSpaceImpl(I, a, b, c);
+        return LayerGate(_ReturnAddress(), [&] { return CreateRefSpaceImpl(I, a, b, c); });
     }
-    static XrResult XRH_CALL LocateSpace(XrSpace a, XrSpace b, XrTime c, XrSpaceLocation* d) { return LocateSpaceImpl(I, a, b, c, d); }
-    static XrResult XRH_CALL DestroySession(XrSession a) { return DestroySessionImpl(I, a); }   // phase 29
-    static XrResult XRH_CALL WaitFrame(XrSession a, const XrFrameWaitInfo* b, XrFrameState* c) { return WaitFrameImpl(I, a, b, c); }
-    static XrResult XRH_CALL BeginFrame(XrSession a, const XrFrameBeginInfo* b) { return BeginFrameImpl(I, a, b); }   // phase 30
-    static XrResult XRH_CALL EndSession(XrSession a) { return EndSessionImpl(I, a); }
-    static XrResult XRH_CALL PollEvent(XrInstance a, void* b) { return PollEventImpl(I, a, b); }              // phase 33
-    static XrResult XRH_CALL CreateSession(XrInstance a, const void* b, XrSession* c) { return CreateSessionImpl(I, a, b, c); }
-    static XrResult XRH_CALL BeginSession(XrSession a, const XrSessionBeginInfo* b) { return BeginSessionImpl(I, a, b); }
-    static XrResult XRH_CALL RequestExit(XrSession a) { return RequestExitSessionImpl(I, a); }
-    static XrResult XRH_CALL CreateInstance(const XrInstanceCreateInfo* a, XrInstance* b) { return CreateInstanceImpl(I, a, b); }
+    static XrResult XRH_CALL LocateSpace(XrSpace a, XrSpace b, XrTime c, XrSpaceLocation* d) {
+        return LayerGate(_ReturnAddress(), [&] { return LocateSpaceImpl(I, a, b, c, d); });
+    }
+    static XrResult XRH_CALL DestroySession(XrSession a) {                                     // phase 29
+        return LayerGate(_ReturnAddress(), [&] { return DestroySessionImpl(I, a); });
+    }
+    static XrResult XRH_CALL WaitFrame(XrSession a, const XrFrameWaitInfo* b, XrFrameState* c) {
+        return LayerGate(_ReturnAddress(), [&] { return WaitFrameImpl(I, a, b, c); });
+    }
+    static XrResult XRH_CALL BeginFrame(XrSession a, const XrFrameBeginInfo* b) {             // phase 30
+        return LayerGate(_ReturnAddress(), [&] { return BeginFrameImpl(I, a, b); });
+    }
+    static XrResult XRH_CALL EndSession(XrSession a) {
+        return LayerGate(_ReturnAddress(), [&] { return EndSessionImpl(I, a); });
+    }
+    static XrResult XRH_CALL PollEvent(XrInstance a, void* b) {                                // phase 33
+        return LayerGate(_ReturnAddress(), [&] { return PollEventImpl(I, a, b); });
+    }
+    static XrResult XRH_CALL CreateSession(XrInstance a, const void* b, XrSession* c) {
+        return LayerGate(_ReturnAddress(), [&] { return CreateSessionImpl(I, a, b, c); });
+    }
+    static XrResult XRH_CALL BeginSession(XrSession a, const XrSessionBeginInfo* b) {
+        return LayerGate(_ReturnAddress(), [&] { return BeginSessionImpl(I, a, b); });
+    }
+    static XrResult XRH_CALL RequestExit(XrSession a) {
+        return LayerGate(_ReturnAddress(), [&] { return RequestExitSessionImpl(I, a); });
+    }
+    static XrResult XRH_CALL CreateInstance(const XrInstanceCreateInfo* a, XrInstance* b) {
+        return LayerGate(_ReturnAddress(), [&] { return CreateInstanceImpl(I, a, b); });
+    }
+    static XrResult XRH_CALL AttachSets(XrSession a, const XrSessionActionSetsAttachInfo* b) {   // phase 59 (eye gaze)
+        return LayerGate(_ReturnAddress(), [&] { return AttachSetsImpl(I, a, b); });
+    }
+    static XrResult XRH_CALL SyncActions(XrSession a, const XrActionsSyncInfo* b) {
+        return LayerGate(_ReturnAddress(), [&] { return SyncActionsImpl(I, a, b); });
+    }
+    static XrResult XRH_CALL CreateActionSet(XrInstance a, const XrActionSetCreateInfo* b, XrActionSet* c) {
+        return LayerGate(_ReturnAddress(), [&] { return CreateActionSetImpl(I, a, b, c); });
+    }
+    // phase 59c: NOT gated -- a layer's own eye gaze suggestion (OpenXR Toolkit's) is exactly what must be merged with ours
+    static XrResult XRH_CALL Suggest(XrInstance a, const XrInteractionProfileSuggestedBinding* b) { return SuggestImpl(I, a, b); }
 };
 struct ThunkSet { void *gipa, *negRuntime, *negLayer, *release, *acquire, *enumerate, *destroy, *locate, *endFrame, *createRefSpace,
                   *locateSpace, *destroySession, *waitFrame, *beginFrame, *endSession,
                   *pollEvent, *createSession, *beginSession, *requestExit,       // (phase 33: + 4)
-                  *createInstance; };                                            // (phase 40: + 1)
+                  *createInstance,                                               // (phase 40: + 1)
+                  *attachSets, *syncActions, *createActionSet,                   // (phase 59: + 3)
+                  *suggest; };                                                   // (phase 59c: + 1)
 template <int I> ThunkSet MakeSet() {
     return ThunkSet{ reinterpret_cast<void*>(&Thunk<I>::Gipa), reinterpret_cast<void*>(&Thunk<I>::NegRuntime),
                      reinterpret_cast<void*>(&Thunk<I>::NegLayer), reinterpret_cast<void*>(&Thunk<I>::Release),
@@ -2609,7 +3501,9 @@ template <int I> ThunkSet MakeSet() {
                      reinterpret_cast<void*>(&Thunk<I>::WaitFrame), reinterpret_cast<void*>(&Thunk<I>::BeginFrame),
                      reinterpret_cast<void*>(&Thunk<I>::EndSession), reinterpret_cast<void*>(&Thunk<I>::PollEvent),
                      reinterpret_cast<void*>(&Thunk<I>::CreateSession), reinterpret_cast<void*>(&Thunk<I>::BeginSession),
-                     reinterpret_cast<void*>(&Thunk<I>::RequestExit), reinterpret_cast<void*>(&Thunk<I>::CreateInstance) };
+                     reinterpret_cast<void*>(&Thunk<I>::RequestExit), reinterpret_cast<void*>(&Thunk<I>::CreateInstance),
+                     reinterpret_cast<void*>(&Thunk<I>::AttachSets), reinterpret_cast<void*>(&Thunk<I>::SyncActions),
+                     reinterpret_cast<void*>(&Thunk<I>::CreateActionSet), reinterpret_cast<void*>(&Thunk<I>::Suggest) };
 }
 template <size_t... Is> const ThunkSet* MakeTable(std::index_sequence<Is...>) {
     static const ThunkSet t[] = { MakeSet<(int)Is>()... };
@@ -2629,6 +3523,7 @@ XrResult GipaImpl(int i, XrInstance inst, const char* name, PFN_xrVoidFunction* 
     std::atomic<void*>* store = nullptr;
     void* thunk = nullptr;
     const ThunkSet& ts = Sets()[i];
+    const bool egHooks = s_egWant.load(std::memory_order_relaxed);   // phase 59: the action calls are wrapped only with vrs_eye on at start
     if      (!strcmp(name, "xrReleaseSwapchainImage"))    { store = &s_slot[i].release;   thunk = ts.release; }
     else if (!strcmp(name, "xrAcquireSwapchainImage"))    { store = &s_slot[i].acquire;   thunk = ts.acquire; }
     else if (!strcmp(name, "xrEnumerateSwapchainImages")) { store = &s_slot[i].enumerate; thunk = ts.enumerate; }
@@ -2648,6 +3543,12 @@ XrResult GipaImpl(int i, XrInstance inst, const char* name, PFN_xrVoidFunction* 
     else if (!strcmp(name, "xrCreateInstance") && !inst && s_slot[i].kind == kKindRuntime) {   // phase 40 (hidden area mask)
         store = &s_slot[i].createInstance; thunk = ts.createInstance;
     }
+    else if (egHooks && !strcmp(name, "xrAttachSessionActionSets")) { store = &s_slot[i].attachSets; thunk = ts.attachSets; }   // phase 59
+    else if (egHooks && !strcmp(name, "xrSyncActions"))      { store = &s_slot[i].syncActions; thunk = ts.syncActions; }
+    else if (egHooks && !strcmp(name, "xrCreateActionSet"))  { store = &s_slot[i].createActionSet; thunk = ts.createActionSet; }
+    else if (egHooks && !strcmp(name, "xrSuggestInteractionProfileBindings") && s_slot[i].kind == kKindRuntime) {   // phase 59c
+        store = &s_slot[i].suggest; thunk = ts.suggest;
+    }
     else if (!strcmp(name, "xrGetInstanceProcAddr") && reinterpret_cast<void*>(*fn) == s_slot[i].gipa.load()) {
         *fn = reinterpret_cast<PFN_xrVoidFunction>(ts.gipa);   // a GIPA asked for itself: stay wrapped
         return r;
@@ -2658,7 +3559,7 @@ XrResult GipaImpl(int i, XrInstance inst, const char* name, PFN_xrVoidFunction* 
     store->store(got, std::memory_order_release);
     *fn = reinterpret_cast<PFN_xrVoidFunction>(thunk);
     static std::atomic<int> s_logs{0};
-    if (s_logs.fetch_add(1, std::memory_order_relaxed) < 64)   // (phase 30: was 16, + 3 names; phase 33: 32 -> 64, + 4 names)
+    if (s_logs.fetch_add(1, std::memory_order_relaxed) < 100)  // (phase 30: was 16, + 3 names; phase 33: 32 -> 64, + 4 names; phase 59: 96, + 3; 59c: 100)
         Log("OpenXR hook: %s wrapped at the %s %s (real %p)", name, kKindName[s_slot[i].kind], s_slot[i].module, got);
     return r;
 }
@@ -2685,6 +3586,8 @@ XrResult NegLayerImpl(int i, const XrNegotiateLoaderInfo* li, const char* layerN
         rq->getInstanceProcAddr = reinterpret_cast<PFN_xrGetInstanceProcAddr>(Sets()[i].gipa);
         Log("OpenXR hook: API layer \"%s\" (%s) negotiated -- its xrGetInstanceProcAddr is wrapped", layerName ? layerName : "?",
             s_slot[i].module);
+        Ofxr::Rescan();                          // phase 56: the layer's module is loaded NOW -- its range is recorded before its first
+                                                 //   OpenXR / D3D11 call (the Present cadence alone could miss the first ~300 frames)
     }
     return r;
 }
@@ -2921,6 +3824,8 @@ OverlayStats GetOverlayStats() {
     s.releaseFails = s_ovRelFails.load(std::memory_order_relaxed);
     s.drawFails = s_ovDrawFails.load(std::memory_order_relaxed);
     s.rejects = s_ovRejects.load(std::memory_order_relaxed);
+    s.drawn = s_ovDrawn.load(std::memory_order_relaxed);         // phase 57
+    s.skipped = s_ovSkipped.load(std::memory_order_relaxed);
     s.fixedHow = s_ovFixedHow.load(std::memory_order_relaxed);
     s.fixedSpaceType = s_ovFixedType.load(std::memory_order_relaxed);
     return s;
@@ -2996,6 +3901,55 @@ HiddenStats GetHiddenStats() {
     ReleaseSRWLockShared(&s_hmLock);
     s.queries = s_hmQueries.load(std::memory_order_relaxed);
     s.events = s_hmEvents.load(std::memory_order_relaxed);
+    return s;
+}
+
+// ---- phase 59: eye gaze (see xr_hook.h; the logic is in the anonymous namespace above) ----
+void EyeGazeRequest(bool want, bool force) {
+    s_egWant.store(want, std::memory_order_relaxed);
+    s_egForce.store(force, std::memory_order_relaxed);   // phase 59g
+}
+void EyeGazeActive(bool on) { s_egActive.store(on, std::memory_order_relaxed); }
+bool EyeGaze(int view, float* tx, float* ty) {
+    if (view < 0 || view > 1 || !tx || !ty) return false;
+    AcquireSRWLockShared(&s_egLock);
+    const EgGaze g = s_egGaze;
+    ReleaseSRWLockShared(&s_egLock);
+    if (!g.have) return false;
+    LARGE_INTEGER now, fq;
+    QueryPerformanceCounter(&now);
+    QueryPerformanceFrequency(&fq);
+    if ((now.QuadPart - g.qpc) * 10 > fq.QuadPart) return false;   // older than 100 ms
+    *tx = g.tx[view];
+    *ty = g.ty[view];
+    return true;
+}
+EyeGazeStats GetEyeGazeStats() {
+    EyeGazeStats s;
+    s.ext = s_egExt.load(std::memory_order_relaxed);
+    s.system = s_egSystem.load(std::memory_order_relaxed);
+    s.setup = s_egSetup.load(std::memory_order_relaxed);
+    s.attachedBy = s_egAttachedBy.load(std::memory_order_relaxed);
+    s.gameAttach = s_egGameAttach.load(std::memory_order_relaxed);
+    s.gameSets = s_egGameSets.load(std::memory_order_relaxed);
+    s.syncGame = s_egSyncGame.load(std::memory_order_relaxed);
+    s.syncOurs = s_egSyncOurs.load(std::memory_order_relaxed);
+    s.locates = s_egLocates.load(std::memory_order_relaxed);
+    s.valid = s_egValid.load(std::memory_order_relaxed);
+    s.invalid = s_egInvalid.load(std::memory_order_relaxed);
+    s.locateFails = s_egLocFails.load(std::memory_order_relaxed);
+    s.focused = s_sesState.load(std::memory_order_relaxed) == 5;
+    s.failed = s_egFailedA.load(std::memory_order_relaxed);
+    AcquireSRWLockShared(&s_egLock);
+    const EgGaze g = s_egGaze;
+    ReleaseSRWLockShared(&s_egLock);
+    for (int k = 0; k < 2; ++k) { s.lastTx[k] = g.tx[k]; s.lastTy[k] = g.ty[k]; }
+    if (g.have) {
+        LARGE_INTEGER now, fq;
+        QueryPerformanceCounter(&now);
+        QueryPerformanceFrequency(&fq);
+        s.ageMs = (double)(now.QuadPart - g.qpc) * 1000.0 / (double)fq.QuadPart;
+    }
     return s;
 }
 

@@ -293,17 +293,54 @@ public:
                         bool restoreTargets, bool replayAll);
     // v0.10.0 phase 10: the batched forward-depth re-draw (see SetCapturePs above)
     ReplayResult ReplayDepth(ID3D11DeviceContext1* ctx, ID3D11RenderTargetView* rt0, ID3D11DepthStencilView* dsv,
-                             ID3D11DepthStencilState* dss, ID3D11BlendState* bs, bool restoreTargets);
+                             ID3D11DepthStencilState* dss, ID3D11BlendState* bs, bool restoreTargets,
+                             bool conservative = false);   // phase 60: every draw through ConservativeRs (the forward depth only)
     // v0.10.0 phase 8 (dlaa.ini mv_inst_replay 1): with replayAll, an instanced / no-MVP draw is replayed only when its
     // pointer-free key took a MOVING rigid parent in the vote lately (DrawIdMv::InstancedWanted) -- every draw is replayed in a
     // PROBE pass (the caller sets it per replay: every 7th pass of the main view -- odd, so both VR eyes probe; always for mirror
     // units). 0 = all, every pass.
     static void SetInstancedProbe(bool probe);
+    // phase 58b (perf round 2) RAW REPLAY CALLS: why -- every replayed draw issued its state sets + its draw through ctx->X, i.e. the
+    // context vtable = inject.cpp's own hooks (CPU_HOOK, Ofxr::FromOfxr, IsGameCtx, the t_inDlaa tests, the DidShadow Note) before
+    // the original ran: ~130-220 ns per replayed draw against ~37 ns per plain game draw, ~2100 replayed draws per VR frame
+    // (G-buffer + forward depth + forward ids). Every one of those hook bodies does nothing for a call made under t_inDlaa that
+    // the replay needs (the per-hook verdicts: the comment block above g_raw in draw_ids.cpp). How -- inject.cpp registers, for
+    // each hooked entry point the replay LOOP calls, the context-vtable index, the function MinHook detoured (what the vtable
+    // entry points at) and the hook's trampoline (`o*`: the original). ReplayImpl reads the replay context's vtable ONCE per replay
+    // for the state Set calls and before EVERY replayed draw for DrawIndexed / DrawIndexedInstanced (phase 58c: d3d11 rewrites
+    // those entries to an Amortized variant after each command-buffer submit; evidence above RawResolve in draw_ids.cpp):
+    // an entry still pointing at the detoured function -> the trampoline (exactly what the vtable call reaches, minus our hook
+    // body); anything else -- nothing registered (the harness), a hook not installed, an entry the runtime rewrote, a wrapped
+    // context -- the vtable call as before. Only the per-draw loop uses it: the pass-level sets (targets, clear, depth / blend
+    // state, our PS, GS / HS / DS) and GfxSave::Restore keep going through the hooks, so every tracker sees the game's state
+    // come back. Registration: once, at hook install (before the first replay); fn = RawFn, vtIndex into the
+    // ID3D11DeviceContext1 vtable (ID3D11DeviceContext's own entries keep their indices there).
+    enum RawFn : int { kRawIl = 0, kRawVb, kRawIb, kRawVs, kRawVsCb1, kRawVsSmp, kRawRs, kRawVp, kRawPs, kRawPsSmp, kRawDi, kRawDii,
+                       kRawN };
+    // (a null target / raw or an out-of-range fn / vtIndex is ignored = that call keeps the vtable). Logged (info) at the first
+    // replay and whenever the set of raw calls changes: "MV draw-ids: replay calls ... through the hook trampolines".
+    // phase 58c: a draw that found another entry is logged once per distinct entry (address, module + offset, PE stamp / size).
+    static void SetRawCall(int fn, int vtIndex, const void* target, void* raw);
+    // phase 58c: replayed DrawIndexed / DrawIndexedInstanced calls so far through the trampoline / through the vtable (stats)
+    static void RawDraws(uint64_t* tramp, uint64_t* vtab);
     int  GatedDraws() const { return m_instGated; }      // instanced draws not replayed this pass (mv_inst_replay 1)
     // v0.10.0 phase 14 (dlaa.ini mv_replay_static_*): the caller turns the static gate on around the replays of the MAIN
     // G-buffer passes only (off for mirror units / the harness unless asked): a world, non-instanced, non-cabin draw whose key
     // DrawIdMv::StaticSkip calls static is not replayed (no id pixels; it stays recorded and paired). Not counted in `skipped`.
     static void SetStaticGate(bool on);
+    // phase 57 (perf) ID-TARGET CLEAR: why -- the G-buffer replay cleared the whole id target every pass although every reader
+    // stays near the pass clip: the replays are scissored to it, the vote grid lies inside it (x0 / y0 aligned down by <= 3 px) and
+    // marches at most the march reach (kParReachPx 32 px, the harness' SetParentReach if larger) beyond, pass B and the Ctrl+F6
+    // view read the DLAA rect, which the clip contains with mv_area_margin. How -- ID3D11DeviceContext1::ClearView of the clip
+    // grown by the reach + 4 px, clamped to the target. The whole target is still cleared without a clip (mirror units, preview),
+    // when the grown rect covers it, when the driver lacks ClearView (D3D11_FEATURE_D3D11_OPTIONS, read at InitDevice) and while
+    // SetFullIdClear(true) (inject.cpp: while the Ctrl+F6 view is on). Outside the rect a pooled target keeps an older pass's ids:
+    // only a DLAA rect that moved by more than mv_area_margin + 36 px between the pass start (PassViewSetup) and its blit could
+    // read them (a > 0.01 optical-centre re-adopt resets that eye's history anyway). The saving is GPU only and small (VR
+    // 4592x6496 R16 / R16G16, clip ~2/3 of it: 0..0.08 ms per eye): read it from the `replay` GpuPerf section of the perf eye
+    // line, which contains the clear. IdClears: rect / whole-target clears so far.
+    static void SetFullIdClear(bool on);
+    static void IdClears(uint64_t* rect, uint64_t* full);
     // HARNESS ONLY (v0.10.0 phase 14 round 4): the draws with this FullKey are left out of the G-buffer replay (0 = none) -- a body
     // whose pixels are missing for one frame (the plate-hold test); not counted as static skips. Never set by the DLL
     static void SetTestSkipKey(uint64_t fullKey);
@@ -318,7 +355,9 @@ public:
     // idBase + record index + 1 (idBase = the G-buffer record's draw count: one id space with the G-buffer draws); draws
     // whose id would exceed kMax are skipped. Every replay of a pass must use the same idBase (else ReplayFailed()).
     ReplayResult ReplayForward(ID3D11DeviceContext1* ctx, ID3D11RenderTargetView* idRtv, ID3D11DepthStencilView* fwdDsv,
-                               bool restoreTargets, UINT idBase);
+                               bool restoreTargets, UINT idBase,
+                               bool conservative = false);   // phase 60: the same ConservativeRs coverage as the depth batch, so
+                                                             // depth EQUAL passes on the fringe pixels and they take the draw's id
     UINT IdBase() const { return m_idBase; }             // forward mode: the idBase of this pass's replays (~0u: none)
     bool Cleared() const { return m_cleared; }           // the id target was cleared this pass (a replay ran)
     bool ReplayFailed() const { return m_replayFail; }   // a replay of this pass could not run (ids incomplete)
@@ -352,6 +391,24 @@ public:
     // caller replays / re-draws without the clip). Render thread only.
     static ID3D11RasterizerState* ScissorRs(ID3D11Device* dev, ID3D11RasterizerState* game, bool* hadScissor);
     static uint64_t ScissorRsFails();            // copies that could not be created (stats)
+    // phase 60 (thin wires): a copy of `rs` (the game's state or its ScissorRs copy; nullptr = the D3D11 default) with
+    // CONSERVATIVE rasterization on (D3D11.3 ID3D11Device3::CreateRasterizerState2, tier >= 1): every pixel a triangle touches
+    // is drawn, so a wire thinner than a pixel gets a forward depth on every pixel it crosses, not only where it covers a pixel
+    // centre (DLSS Programming Guide 3.6.4: draw the motion vectors of thin features with conservative raster). Created once
+    // per state object and kept (ref held on both). nullptr = not supported / not created (the caller uses `rs`). Render thread.
+    static ID3D11RasterizerState* ConservativeRs(ID3D11Device* dev, ID3D11RasterizerState* rs);
+    static int ConservativeTier();               // -1 = not checked yet, 0 = not supported, 1..3 = the device's tier
+    static uint64_t ConservativeRsFails();       // copies that could not be CREATED (stats; a full memo table is not counted here)
+    static uint64_t ConservativeRsFull();        // states left without a copy because the memo table was full (once per state)
+    // phase 64 (wire widening, the MOTION side): a forward-record draw can carry a widening kind (SetNextGs before its Record): 1 =
+    // a widened see-through wire / pole piece (phase 61 / 62), 2 / 3 = a solid far wire / lattice tower recorded from the G-buffer
+    // (phase 63). The forward-depth batch and the forward-id replay then draw it through the same widening GS as its colour
+    // (ReplayGsFn binds GS + its constant buffer for kind k, 0 = unbind; vpW / vpH = the replay viewport, scale = replay px per
+    // game px) and the depth batch without alpha-to-coverage (ReplayNoA2c): every band pixel gets the wire's depth + id, so its
+    // motion vector is the wire's, not the background's (the ghost at the poles). Set by inject.cpp; null = no widening in replays.
+    using ReplayGsFn = bool (*)(ID3D11DeviceContext* ctx, int kind, float vpW, float vpH, float scale);
+    static void SetReplayGs(ReplayGsFn fn, ID3D11BlendState* depthBsNoA2c);
+    void SetNextGs(uint8_t kind) { m_nextGs = kind; }  // the next Record's widening kind (consumed by that call, recorded or not)
 
     // ---- pairing inputs (CameraMv / DrawIdMv at the blit) ----
     uint64_t FullKey(int i) const;               // IB, VB0, offsets, counts, base vertex, VS, instanced
@@ -406,10 +463,12 @@ public:
 private:
     ReplayResult ReplayImpl(ID3D11DeviceContext1* ctx, ID3D11RenderTargetView* idRtv, ID3D11DepthStencilView* dsv,
                             bool restoreTargets, bool replayAll, bool forward, UINT idBase,
-                            ID3D11DepthStencilState* depthDss = nullptr, ID3D11BlendState* depthBs = nullptr);   // phase 10:
+                            ID3D11DepthStencilState* depthDss = nullptr, ID3D11BlendState* depthBs = nullptr,    // phase 10:
+                            bool conservative = false);   // phase 60: the forward depth / forward ids -- ConservativeRs on every draw
                                                  // depthDss != null = the forward-depth batch (ReplayDepth)
     struct PsState;                              // v0.10.0 phase 10: per-draw pixel-shader state (draw_ids.cpp)
     void ReleasePs(int from, int to);
+    uint8_t m_nextGs = 0;                        // phase 64: SetNextGs
     struct State;                                // per-draw captured state (draw_ids.cpp)
     // phase 35: fills the IA / VS / RS part of `s` from DidShadow (+ the always-read fields); false = not available (the caller
     // reads everything through the getters). prev = the record's previous unreleased draw (null: none)
@@ -880,6 +939,7 @@ private:
     bool      m_prepLay = false;                 // m_prepVs / m_prepHint hold the prepared pass (layout detection on)
     bool      m_statReg = false;                 // registered for PollMain (the destructor unregisters)
     uint64_t m_rbCtr = 0;
+    uint64_t m_pollTag = 0;                      // phase 57: the frame (DrawIdMv::SetFrame) + 1 of the last Poll (PollMain skips it)
     // previous committed pass of this eye (CPU keys)
     uint32_t m_prevN = 0;
     uint64_t* m_prevFull = nullptr;
@@ -917,6 +977,15 @@ private:
     struct Ent { uint64_t key; uint32_t sideIdx; };
     Ent*      m_ent = nullptr;                  // 2 * kMax
     Ent*      m_orph = nullptr;                 // 2 * kMax
+    // phase 57 (perf): the eligible draws of a pass sorted by (FullKey, index) -- m_sortCur is this pass's (Prepare), m_sortPrev the
+    // committed pass's (Finish swaps them), so Prepare sorts only the current half and MERGES it with the previous one. sideIdx is
+    // the plain index on both lists (the previous side's 0x80000000 bit is added by the merge). m_sortPrevOf = the m_prevN the
+    // list was made for (m_sortPrevOk false or a different m_prevN: Prepare rebuilds it from m_prevFull / m_prevFlags)
+    Ent*      m_sortCur = nullptr;              // kMax
+    Ent*      m_sortPrev = nullptr;             // kMax
+    uint32_t  m_sortCurN = 0, m_sortCurOf = 0;  // entries / the pass size (n) they were made for
+    uint32_t  m_sortPrevN = 0, m_sortPrevOf = 0;
+    bool      m_sortPrevOk = false;
     uint32_t* m_curGroup = nullptr;             // kMax
     uint32_t* m_curRank = nullptr;
     uint32_t* m_curLooseG = nullptr;            // 1 = grouped by the loose key

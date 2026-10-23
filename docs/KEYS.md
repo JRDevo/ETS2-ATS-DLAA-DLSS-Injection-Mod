@@ -45,7 +45,7 @@ menu and the garage / truck dealer screens, before a save is loaded).
 | `Up` / `Down` | Select a row (hold to scroll) |
 | `Left` / `Right` | Change the selected row. Number rows step and repeat while held; switches, the mode, the profile and the model change once per press. On a group row (`Panel settings`, `FPS counter settings`) `Right` opens the group, `Left` closes it |
 
-- **Two groups keep the list short** (v0.10.3): **Panel settings** (`Panel position X`, `Panel position Y`, `Panel size`,
+- **Two groups keep the list short** (v0.10.3): **Panel settings** (`Panel lock (VR)`, `Panel position X`, `Panel position Y`, `Panel size`,
   `Panel VR depth`, `Panel faces you (VR)`, `Menu keys`) and **FPS counter settings** (`FPS counter lock`, `FPS counter X`,
   `FPS counter Y`, `FPS counter size`; the `FPS counter` on / off row itself stays in the main list, right above the
   group). Both are **closed every time the menu opens** (the value shows `...`): select the group row and press `Right` to
@@ -71,7 +71,7 @@ menu and the garage / truck dealer screens, before a save is loaded).
 - The selected row shows a description under the list, in plain words: what the row does, when you would change it, and
   what it costs or saves (the measured figure is added while the GPU timers run). A greyed row does not apply to the
   current mode and says why (`DLAA area`, `Panel VR depth` and `Panel faces you` are VR only; `DLAA before tonemap` is flat
-  only; `OFXR Bridge` is greyed when `ofxr_bridge = 0`); it stays in the list. The **Performance profile** description
+  only; `OFXR Bridge` is greyed when `ofxr_bridge = 0`, `VectorXR (VR layer)` when `vectorxr = 0`); it stays in the list. The **Performance profile** description
   lists what `medium` and `low` change; **Save to dlaa.ini** says what it writes.
 - **Panel position X / Y, Panel size** move and size the panel (repeat makes it fast); flat and VR each keep their own
   values. **Panel VR depth** (VR only) shifts the panel inward per eye so it sits nearer than infinity: raise it if the
@@ -86,6 +86,11 @@ menu and the garage / truck dealer screens, before a save is loaded).
   follows your head -- towards you as a true 3-D layer (off = parallel to your view, a flat picture seen at an angle).
   With `menu_vr_layer = 0` (the panel drawn into the picture; also the automatic fallback when the layers are not
   possible) **Panel VR depth** is the inward shift in px (`menu_vr_depth`) as above.
+- **Panel lock (VR)** (v0.14.0, no key, `menu_vr_lock`): `Follow head` (default) or `Fixed in cab` -- the panel stays at
+  one spot in front of your seat and keeps still while you look around. While fixed, **Panel position X / Y** set that spot
+  in degrees around the seat (Y: plus = down) and **Panel VR depth** its distance from the seat (`menu_vr_lock_x`,
+  `menu_vr_lock_y`, `menu_vr_lock_dist`, default 0.80 m); the head-locked position is kept for when you switch back.
+  Needs the VR layer (`menu_vr_layer = 1`); greyed otherwise and in flat.
 - **FPS counter** (on / off), **FPS counter X / Y, FPS counter size**: a small live fps box: the fps and the frame time as text with a dark outline, no background
   (`60 fps` / `16.7 ms`, updated twice a second) that stays on screen also while the menu is closed, in flat and in VR
   (both eyes + the desktop mirror). Flat and VR each keep their own position (`fps_show`, `fps_x`, `fps_y`, `fps_scale`,
@@ -244,6 +249,9 @@ filtering. It only acts while `tex_lod_bias` is not 0. `Shift+F12` saves it (`te
 | `Alt+F7`   | DLAA before / after the game's tone-mapping (flat DLAA mode). ON = the main picture is anti-aliased on the game's own HDR colours before its brightness / bloom / tonemap step (calmer thin bright lines: lane paint, wires, rails); OFF = on the finished 8-bit picture as before v0.10.0. DLSS upscaling, VR and Windows HDR always use the after-tonemap path. OFF takes effect at once; ON after about 60 frames (v0.10.0 phase 7: the before-tonemap unit warms up first, so the switch shows no blur pulse) | high 1200 Hz = ON, low 300 Hz = OFF |
 | `Alt+F8`   | Diagnostic dump: writes the per-part motion state of the next frame into the log (`MV dump n/N` lines: licence plates, decals, small parts and -- v0.10.0 phase 5 -- every part that found no partner in the previous frame, with what it inherited; `MV dump fwd-skip` lines: the see-through parts of one frame that get no motion of their own). Needs `debug = 1`; press it next to a truck when asked for a plate report. v0.10.0 phase 21: the same press also writes `MV probe` lines -- a 5 x 5 grid of pixels 48 px apart around the centre of your view (VR: eye 0's optical centre; flat: the screen centre): for each pixel its depth, which surface won, cabin / world layer, the motion it got and the parts under it (`MV probe (...)` header + 25 pixel lines + one summary). Look straight at the problem spot (e.g. a pink shop window in the `Ctrl+F6` view) when you press it | 1 short 900 Hz beep = requested; 1 long low tone = not available (per-draw motion vectors off) |
 | `Alt+F9`   | Performance profile: cycles **high -> medium -> low**. high = everything on; medium = for mid-range GPUs (model E, cheaper mirror / see-through / plate work); low = for weak GPUs (+ no mirror DLAA, no see-through depth, VR DLAA area 60 %). A profile only changes the settings you did not set yourself in `dlaa.ini` or with their own key. `Shift+F12` saves it (`perf_profile`) | 1 / 2 / 3 beeps (660 Hz) = high / medium / low |
+| `Alt+F10`  | Thin-wire motion (phase 60): DLSS spreads the motion of a thin wire / cable to the pixels next to it (`dlaa_mv_dilate`). ON = far wires keep their history while driving. Switching recreates the DLAA features (a short reset) | 1 high tone = ON, 1 low tone = OFF |
+| `Alt+F11`  | Thin-wire depth (phase 60): every pixel a wire touches gets the wire's depth + motion (`mv_fwd_conservative`). Cycles mode **1 -> 2 -> 0**: 1 = on, 2 = on without the see-through test, 0 = off | 1 high tone = mode 1, 2 high tones = mode 2, 1 low tone = off |
+| `Alt+F12`  | Thin-wire widening (phase 61, **experimental, off by default**: no clear gain in tests so far): far wires drawn at least `wire_min_px` (1) pixel wide and faded to keep their darkness (`wire_widen`): no dashes that crawl while driving; also the pole hardware (phase 62) and the solid far high-voltage wires / lattice towers, whose widened band is dithered (phase 63, `wire_solid_min_share`) | 1 high tone = ON, 1 low tone = OFF |
 
 `Alt+F5` .. `Alt+F7` start at their `dlaa.ini` value (`mv_objects = 2`, `mirror_dlaa = 1`, `dlaa_pre_tonemap = 1` by
 default) and `Shift+F12` saves them. While the `Ctrl+F6` view is on, the main picture uses the after-tonemap path (exact
@@ -370,6 +378,9 @@ Keys: `F1`-`F24`, `A`-`Z`, `0`-`9`, `Home`, `End`, `Insert`, `Delete`, `PageUp`,
 | `key_pre_tonemap` | Main-picture DLAA before / after the game's tonemap | `Alt+F7` |
 | `key_mv_dump` | Per-draw motion-vector dump of the next frame into the log (diagnostic) | `Alt+F8` |
 | `key_perf_profile` | Performance profile high -> medium -> low | `Alt+F9` |
+| `key_mv_dilate` | Thin-wire motion (DLSS motion-vector dilation in DLAA) on / off | `Alt+F10` |
+| `key_mv_conservative` | Thin-wire depth: mode 1 -> 2 -> 0 | `Alt+F11` |
+| `key_wire_widen` | Thin-wire widening on / off (experimental, off by default) | `Alt+F12` |
 | `key_menu` | Tuning menu open / close | `Delete` |
 | `key_menu_up` / `key_menu_down` | Tuning menu: select the row above / below (repeats while held; menu open only) | `Up` / `Down` |
 | `key_menu_left` / `key_menu_right` | Tuning menu: change the selected row down / up (repeats on the step rows; menu open only) | `Left` / `Right` |

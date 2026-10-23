@@ -91,6 +91,8 @@
 #include <thread>                  // phase 35: S19 (Sets from another thread)
 #include "motion_vectors.h"
 #include "draw_ids.h"
+#include <d3d11_3.h>   // phase 60: ID3D11RasterizerState2 (S60 unit)
+#include "wire_widen.h"  // phase 61: WireWiden::GsSource / ChecksumIs (S61 unit)
 #include "shader_cache.h"
 #include "scene_dlaa.h"            // v0.10.0 phase 7: S9 (the real SceneDlaa, tests/fake_dlaa.cpp for NGX)
 #include "gpu_perf.h"              // v0.10.0 phase 8: per-sub-pass timers (WARP figures)
@@ -4504,6 +4506,1239 @@ int RunStageScene(Env& E, Totals& tot) {
     return fails;
 }
 
+// phase 60 (thin wires): DrawIdRecord::ConservativeRs -- the RS copy differs only in ConservativeRaster (+ the rules it needs), is
+// kept per state, and a ribbon 0.3 px thin (a far wire) gets depth on EVERY column it crosses only through the copy; without it
+// the rasterizer draws dashes (only where the ribbon covers a pixel centre). NOT covered: the A2C interplay (mode 1 / 2) and the
+// in-game near-range depth of edge-on wire faces -- in-game log / Ctrl+F6 only.
+int RunConservativeUnit(Env& E, Totals& tot) {
+    printf("\n===== S60 unit: DrawIdRecord::ConservativeRs (conservative raster for the thin-wire forward depth) =====\n");
+    int checks = 0, fails = 0;
+    auto expect = [&](bool c, const char* what) { ++checks; if (!c) { ++fails; printf("   FAIL %s\n", what); } };
+    ID3D11Device* d = E.dev.Get();
+    D3D11_RASTERIZER_DESC rd{}; rd.FillMode = D3D11_FILL_SOLID; rd.CullMode = D3D11_CULL_NONE; rd.FrontCounterClockwise = TRUE;
+    rd.DepthBias = 2; rd.SlopeScaledDepthBias = 0.25f; rd.DepthClipEnable = TRUE; rd.ScissorEnable = TRUE;
+    rd.AntialiasedLineEnable = TRUE;
+    ComPtr<ID3D11RasterizerState> game;
+    d->CreateRasterizerState(&rd, &game);
+    ID3D11RasterizerState* cr = DrawIdRecord::ConservativeRs(d, game.Get());
+    const int tier = DrawIdRecord::ConservativeTier();
+    printf("   conservative rasterization tier %d\n", tier);
+    if (tier < 1) {
+        expect(cr == nullptr, "tier 0: no copy (the caller keeps the game's state)");
+        printf("   (device without conservative raster: coverage checks skipped)\n");
+    } else {
+        ComPtr<ID3D11RasterizerState2> cr2;
+        D3D11_RASTERIZER_DESC2 c2{};
+        if (cr && SUCCEEDED(cr->QueryInterface(IID_PPV_ARGS(&cr2)))) cr2->GetDesc2(&c2);
+        expect(cr && cr != game.Get(), "the state gets its own copy");
+        expect(cr2 && c2.ConservativeRaster == D3D11_CONSERVATIVE_RASTERIZATION_MODE_ON, "the copy has ConservativeRaster ON");
+        expect(cr2 && c2.CullMode == D3D11_CULL_NONE && c2.FrontCounterClockwise && c2.DepthBias == 2 && c2.SlopeScaledDepthBias == 0.25f &&
+               c2.DepthClipEnable && c2.ScissorEnable && c2.FillMode == D3D11_FILL_SOLID && !c2.AntialiasedLineEnable &&
+               c2.ForcedSampleCount == 0, "the copy keeps every game field (line AA off: required)");
+        expect(DrawIdRecord::ConservativeRs(d, game.Get()) == cr, "the copy is kept (one per state)");
+        ID3D11RasterizerState* dn = DrawIdRecord::ConservativeRs(d, nullptr);
+        D3D11_RASTERIZER_DESC dd{};
+        if (dn) dn->GetDesc(&dd);
+        expect(dn && dd.CullMode == D3D11_CULL_BACK && dd.DepthClipEnable && !dd.ScissorEnable, "the default state's copy");
+
+        // coverage: a near-horizontal ribbon 0.3 px thin from x 8 to 120 in a 128 x 64 depth target
+        static const char kSrc[] =
+            "static const float2 P[6] = { float2(8.0, 30.10), float2(120.0, 31.30), float2(8.0, 30.40),"
+            "                             float2(8.0, 30.40), float2(120.0, 31.30), float2(120.0, 31.60) };\n"
+            "float4 vs(uint i : SV_VertexID) : SV_Position { float2 p = P[i];"
+            "  return float4(p.x / 64.0 - 1.0, 1.0 - p.y / 32.0, 0.5, 1.0); }\n"
+            "void ps() {}\n";
+        ComPtr<ID3DBlob> vb, pb, err;
+        ComPtr<ID3D11VertexShader> vsh; ComPtr<ID3D11PixelShader> psh;
+        bool ok = SUCCEEDED(D3DCompile(kSrc, sizeof(kSrc) - 1, "s60", nullptr, nullptr, "vs", "vs_5_0", 0, 0, &vb, &err)) &&
+                  SUCCEEDED(D3DCompile(kSrc, sizeof(kSrc) - 1, "s60", nullptr, nullptr, "ps", "ps_5_0", 0, 0, &pb, &err)) &&
+                  SUCCEEDED(d->CreateVertexShader(vb->GetBufferPointer(), vb->GetBufferSize(), nullptr, &vsh)) &&
+                  SUCCEEDED(d->CreatePixelShader(pb->GetBufferPointer(), pb->GetBufferSize(), nullptr, &psh));
+        ComPtr<ID3D11Texture2D> dt, st;
+        ComPtr<ID3D11DepthStencilView> dsv;
+        ComPtr<ID3D11DepthStencilState> dss;
+        D3D11_TEXTURE2D_DESC td{}; td.Width = 128; td.Height = 64; td.MipLevels = 1; td.ArraySize = 1;
+        td.Format = DXGI_FORMAT_D32_FLOAT; td.SampleDesc.Count = 1; td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+        ok = ok && SUCCEEDED(d->CreateTexture2D(&td, nullptr, &dt)) && SUCCEEDED(d->CreateDepthStencilView(dt.Get(), nullptr, &dsv));
+        td.BindFlags = 0; td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        ok = ok && SUCCEEDED(d->CreateTexture2D(&td, nullptr, &st));
+        D3D11_DEPTH_STENCIL_DESC ds{}; ds.DepthEnable = TRUE; ds.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+        ds.DepthFunc = D3D11_COMPARISON_GREATER_EQUAL;   // reversed-Z, as the forward depth
+        ok = ok && SUCCEEDED(d->CreateDepthStencilState(&ds, &dss));
+        expect(ok, "coverage test resources");
+        rd.ScissorEnable = FALSE; rd.AntialiasedLineEnable = FALSE;
+        ComPtr<ID3D11RasterizerState> plain;
+        d->CreateRasterizerState(&rd, &plain);
+        ID3D11RasterizerState* plainCr = ok ? DrawIdRecord::ConservativeRs(d, plain.Get()) : nullptr;
+        auto columns = [&](ID3D11RasterizerState* r, int* rowsMax) -> int {
+            ID3D11DeviceContext* c = E.ctx.Get();
+            c->ClearState();
+            c->ClearDepthStencilView(dsv.Get(), D3D11_CLEAR_DEPTH, 0.0f, 0);
+            c->OMSetRenderTargets(0, nullptr, dsv.Get());
+            c->OMSetDepthStencilState(dss.Get(), 0);
+            const D3D11_VIEWPORT vp{ 0, 0, 128, 64, 0, 1 };
+            c->RSSetViewports(1, &vp);
+            c->RSSetState(r);
+            c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            c->VSSetShader(vsh.Get(), nullptr, 0);
+            c->PSSetShader(psh.Get(), nullptr, 0);
+            c->Draw(6, 0);
+            c->CopyResource(st.Get(), dt.Get());
+            D3D11_MAPPED_SUBRESOURCE m{};
+            int cols = 0; *rowsMax = 0;
+            if (SUCCEEDED(c->Map(st.Get(), 0, D3D11_MAP_READ, 0, &m))) {
+                for (int x = 8; x < 120; ++x) {
+                    int rows = 0;
+                    for (int y = 0; y < 64; ++y) if (((const float*)((const char*)m.pData + y * m.RowPitch))[x] > 0.0f) ++rows;
+                    if (rows) ++cols;
+                    if (rows > *rowsMax) *rowsMax = rows;
+                }
+                c->Unmap(st.Get(), 0);
+            }
+            c->ClearState();
+            return cols;
+        };
+        int rowsPlain = 0, rowsCons = 0;
+        const int colsPlain = ok ? columns(plain.Get(), &rowsPlain) : 0;
+        const int colsCons = (ok && plainCr) ? columns(plainCr, &rowsCons) : 0;
+        printf("   0.3 px ribbon over 112 columns: plain raster %d columns (dashes), conservative %d columns, <= %d rows per column\n",
+               colsPlain, colsCons, rowsCons);
+        expect(colsPlain < 112, "plain raster leaves gaps in a 0.3 px ribbon (the game's dashes)");
+        expect(colsCons == 112, "conservative raster gives EVERY column the ribbon crosses a depth");
+        expect(rowsCons >= 1 && rowsCons <= 3, "conservative raster stays thin (<= 3 rows per column)");
+    }
+    if (g_debugLayer) { const int dl = DrainDebugLayer("S60"); ++checks; if (dl) { ++fails; printf("   FAIL debug layer: %d messages\n", dl); } }
+    printf("   %s: %d / %d checks passed\n", fails ? "FAILED" : "passed", checks - fails, checks);
+    tot.checks += checks; tot.fails += fails;
+    return fails;
+}
+
+// phase 61 (thin wires, the colour): WireWiden's geometry shader between a VS / PS with the game's wire signature. A flat
+// ribbon 0.06 px thin (the ETS2 capture's wire at 170 m) over 112 columns: without the GS the rasterizer draws dashes; with it
+// every column gets coverage and the summed alpha per column stays the ribbon's width (energy kept). A 3 px ribbon is not
+// changed (above wire_min_px). Back-face culling keeps the band (the strip has the triangle's winding). + the DXBC checksum.
+int RunWireWidenUnit(Env& E, Totals& tot) {
+    printf("\n===== S61 unit: WireWiden geometry shader (sub-pixel wires -> a min-px band, alpha scaled) =====\n");
+    int checks = 0, fails = 0;
+    auto expect = [&](bool c, const char* what) { ++checks; if (!c) { ++fails; printf("   FAIL %s\n", what); } };
+    ID3D11Device* d = E.dev.Get();
+    ID3D11DeviceContext* c = E.ctx.Get();
+    {   // checksum: bytes 4..19 as little-endian dwords
+        unsigned char b[24] = { 'D', 'X', 'B', 'C' };
+        for (int i = 0; i < 4; ++i) for (int k = 0; k < 4; ++k) b[4 + 4 * i + k] = (unsigned char)(WireWiden::kWirePs[i] >> (8 * k));
+        expect(WireWiden::ChecksumIs(b, sizeof(b), WireWiden::kWirePs), "the wire PS checksum is recognised");
+        expect(!WireWiden::ChecksumIs(b, sizeof(b), WireWiden::kWireVs), "another checksum is not");
+        expect(WireWiden::PsKind(b, sizeof(b)) == 1, "phase 62: the long-wire PS is kind 1 (plain)");
+        for (int i = 0; i < 4; ++i) for (int k = 0; k < 4; ++k) b[4 + 4 * i + k] = (unsigned char)(WireWiden::kWirePsCut[0][i] >> (8 * k));
+        expect(WireWiden::PsKind(b, sizeof(b)) == 2, "phase 62: the pole-hardware PS b97c44a3 is kind 2 (discard)");
+        for (int i = 0; i < 4; ++i) for (int k = 0; k < 4; ++k) b[4 + 4 * i + k] = (unsigned char)(WireWiden::kWirePs[i] >> (8 * k));
+        b[0] = 'X';
+        expect(!WireWiden::ChecksumIs(b, sizeof(b), WireWiden::kWirePs), "no DXBC header -> not");
+    }
+    // VS: ribbon corners from SV_VertexID (cbuffer: half width px, y centre); outputs the wire signature
+    static const char kVsPs[] =
+        "cbuffer C : register(b0) { float4 g_r; };\n"   // x = half thickness px, y = centre row, z = slope px over the length
+        "struct V { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1;"
+        " float2 t2 : TEXCOORD2; float3 t6 : TEXCOORD6; };\n"
+        "V vs(uint i : SV_VertexID) {\n"
+        "  const float2 P[6] = { float2(8, -1), float2(8, 1), float2(120, -1), float2(8, 1), float2(120, 1), float2(120, -1) };\n"
+        "  float2 q = P[i]; float x = q.x; float y = g_r.y + q.y * g_r.x + (x - 8.0) / 112.0 * g_r.z;\n"
+        "  V o = (V)0; o.col = float4(0.5, 0.5, 0.5, 1.0); o.pos = float4(x / 64.0 - 1.0, 1.0 - y / 32.0, 0.5, 1.0) * 2.0;\n"
+        "  o.t0 = float3(0, 1, 0); return o; }\n"
+        "float4 ps(V v) : SV_Target { return float4(v.col.w, 0, 0, 0); }\n"
+        "float4 psOver(V v) : SV_Target { return float4(1, 0, 0, v.col.w); }\n"
+        "struct VK { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1;"
+        " float2 t2 : TEXCOORD2; float3 t6 : TEXCOORD6; float k : TEXCOORD7; };\n"
+        // the pole hardware far away: texture alpha 0.1 (captures\\*.tex_alpha.txt: 0.05 .. 0.2 at the far mips), the game's cut-off
+        "float4 psCut(V v) : SV_Target { float a = 0.1 * v.col.w; if (a < 0.049988) discard; return float4(1, 0, 0, a); }\n"
+        "float4 psCutK(VK v) : SV_Target { float a = 0.1 * v.col.w; if (a < 0.049988) discard; return float4(1, 0, 0, a * v.k); }\n";
+    ComPtr<ID3DBlob> vb, pb, gb, err;
+    size_t gl = 0;
+    const char* gsrc = WireWiden::GsSource(&gl);
+    bool ok = SUCCEEDED(D3DCompile(kVsPs, sizeof(kVsPs) - 1, "s61", nullptr, nullptr, "vs", "vs_5_0", 0, 0, &vb, &err)) &&
+              SUCCEEDED(D3DCompile(kVsPs, sizeof(kVsPs) - 1, "s61", nullptr, nullptr, "ps", "ps_5_0", 0, 0, &pb, &err)) &&
+              SUCCEEDED(D3DCompile(gsrc, gl, "wire_gs", nullptr, nullptr, "GSMain", "gs_5_0", 0, 0, &gb, &err));
+    if (!ok && err) printf("   compile: %s\n", (const char*)err->GetBufferPointer());
+    ComPtr<ID3DBlob> pob, pcb, pkb, gcb2;
+    ok = ok && SUCCEEDED(D3DCompile(kVsPs, sizeof(kVsPs) - 1, "s61", nullptr, nullptr, "psOver", "ps_5_0", 0, 0, &pob, &err)) &&
+         SUCCEEDED(D3DCompile(kVsPs, sizeof(kVsPs) - 1, "s61", nullptr, nullptr, "psCut", "ps_5_0", 0, 0, &pcb, &err)) &&
+         SUCCEEDED(D3DCompile(kVsPs, sizeof(kVsPs) - 1, "s61", nullptr, nullptr, "psCutK", "ps_5_0", 0, 0, &pkb, &err)) &&
+         SUCCEEDED(D3DCompile(gsrc, gl, "wire_gs", nullptr, nullptr, "GSCut", "gs_5_0", 0, 0, &gcb2, &err));
+    if (!ok && err) printf("   compile: %s\n", (const char*)err->GetBufferPointer());
+    ComPtr<ID3D11VertexShader> vsh; ComPtr<ID3D11PixelShader> psh, psOver, psCut, psCutK; ComPtr<ID3D11GeometryShader> gsh, gshCut;
+    ok = ok && SUCCEEDED(d->CreateVertexShader(vb->GetBufferPointer(), vb->GetBufferSize(), nullptr, &vsh)) &&
+         SUCCEEDED(d->CreatePixelShader(pb->GetBufferPointer(), pb->GetBufferSize(), nullptr, &psh)) &&
+         SUCCEEDED(d->CreateGeometryShader(gb->GetBufferPointer(), gb->GetBufferSize(), nullptr, &gsh)) &&
+         SUCCEEDED(d->CreatePixelShader(pob->GetBufferPointer(), pob->GetBufferSize(), nullptr, &psOver)) &&
+         SUCCEEDED(d->CreatePixelShader(pcb->GetBufferPointer(), pcb->GetBufferSize(), nullptr, &psCut)) &&
+         SUCCEEDED(d->CreatePixelShader(pkb->GetBufferPointer(), pkb->GetBufferSize(), nullptr, &psCutK)) &&
+         SUCCEEDED(d->CreateGeometryShader(gcb2->GetBufferPointer(), gcb2->GetBufferSize(), nullptr, &gshCut));
+    ComPtr<ID3D11Texture2D> rt, st; ComPtr<ID3D11RenderTargetView> rtv; ComPtr<ID3D11BlendState> add;
+    ComPtr<ID3D11Buffer> cbV, cbG; ComPtr<ID3D11RasterizerState> rsBack, rsFront;
+    D3D11_TEXTURE2D_DESC td{}; td.Width = 128; td.Height = 64; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R32_FLOAT;
+    td.SampleDesc.Count = 1; td.BindFlags = D3D11_BIND_RENDER_TARGET;
+    ok = ok && SUCCEEDED(d->CreateTexture2D(&td, nullptr, &rt)) && SUCCEEDED(d->CreateRenderTargetView(rt.Get(), nullptr, &rtv));
+    td.BindFlags = 0; td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    ok = ok && SUCCEEDED(d->CreateTexture2D(&td, nullptr, &st));
+    D3D11_BLEND_DESC bd{}; bd.RenderTarget[0].BlendEnable = TRUE; bd.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+    bd.RenderTarget[0].DestBlend = D3D11_BLEND_ONE; bd.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    bd.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE; bd.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
+    bd.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD; bd.RenderTarget[0].RenderTargetWriteMask = 0xF;
+    ok = ok && SUCCEEDED(d->CreateBlendState(&bd, &add));
+    ComPtr<ID3D11BlendState> over;                       // the game's wire blend: SRC_ALPHA * src + INV_SRC_ALPHA * dst
+    bd.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA; bd.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+    ok = ok && SUCCEEDED(d->CreateBlendState(&bd, &over));
+    D3D11_BUFFER_DESC cd{}; cd.ByteWidth = 16; cd.Usage = D3D11_USAGE_DEFAULT; cd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    ok = ok && SUCCEEDED(d->CreateBuffer(&cd, nullptr, &cbV)) && SUCCEEDED(d->CreateBuffer(&cd, nullptr, &cbG));
+    D3D11_RASTERIZER_DESC rd{}; rd.FillMode = D3D11_FILL_SOLID; rd.CullMode = D3D11_CULL_BACK; rd.DepthClipEnable = TRUE;
+    ok = ok && SUCCEEDED(d->CreateRasterizerState(&rd, &rsBack));
+    rd.CullMode = D3D11_CULL_FRONT;
+    ok = ok && SUCCEEDED(d->CreateRasterizerState(&rd, &rsFront));
+    expect(ok, "S61 resources + the wire GS compiles (gs_5_0, the wire signature)");
+    struct Res { int cols; double sumMin, sumMax, sumAvg; int rowsMax; };
+    // cut: 0 = the plain PS; 1 = a game-like discard PS (tex.a 0.1) -- with gs: through GSMain (k scales COLOR.w); 2 = GSCut + the
+    // discard PS that cuts on the unscaled alpha and multiplies by k after (the mod's pole-hardware copy, phase 62)
+    auto run = [&](float halfPx, float slope, bool gs, ID3D11RasterizerState* rs, bool overBlend = false, int cut = 0,
+                   float jitY = 0.0f, std::vector<double>* acc = nullptr) -> Res {
+        Res r{ 0, 1e9, 0, 0, 0 };
+        const float vcb[4] = { halfPx, 31.3f, slope, 0 };
+        const float gcb[4] = { 64.0f, 32.0f, 1.0f, overBlend ? 1.0f : 0.0f };   // half vp px, wire_min_px 1, blend mode
+        c->ClearState();
+        c->UpdateSubresource(cbV.Get(), 0, nullptr, vcb, 0, 0);
+        c->UpdateSubresource(cbG.Get(), 0, nullptr, gcb, 0, 0);
+        const FLOAT z[4] = { 0, 0, 0, 0 };
+        c->ClearRenderTargetView(rtv.Get(), z);
+        c->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
+        c->OMSetBlendState(overBlend ? over.Get() : add.Get(), nullptr, 0xFFFFFFFFu);
+        const D3D11_VIEWPORT vp{ 0, jitY, 128, 64, 0, 1 };   // phase 67: jitY = the DLAA jitter (the mod shifts the viewport)
+        c->RSSetViewports(1, &vp);
+        c->RSSetState(rs);
+        c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        c->VSSetShader(vsh.Get(), nullptr, 0); c->VSSetConstantBuffers(0, 1, cbV.GetAddressOf());
+        if (gs) { c->GSSetShader(cut == 2 ? gshCut.Get() : gsh.Get(), nullptr, 0); c->GSSetConstantBuffers(0, 1, cbG.GetAddressOf()); }
+        c->PSSetShader(cut == 2 ? psCutK.Get() : (cut == 1 ? psCut.Get() : (overBlend ? psOver.Get() : psh.Get())), nullptr, 0);
+        c->Draw(6, 0);
+        c->CopyResource(st.Get(), rt.Get());
+        D3D11_MAPPED_SUBRESOURCE m{};
+        if (SUCCEEDED(c->Map(st.Get(), 0, D3D11_MAP_READ, 0, &m))) {
+            double tot = 0;
+            for (int x = 10; x < 118; ++x) {                 // (the ends excluded: a band starts / stops inside a pixel)
+                double sum = 0; int rows = 0;
+                for (int y = 0; y < 64; ++y) {
+                    const float a = ((const float*)((const char*)m.pData + y * m.RowPitch))[x];
+                    if (a > 0.0f) { sum += a; ++rows; }
+                    if (acc) (*acc)[(size_t)y * 128 + x] += a;
+                }
+                if (rows) ++r.cols;
+                r.sumMin = sum < r.sumMin ? sum : r.sumMin; r.sumMax = sum > r.sumMax ? sum : r.sumMax; tot += sum;
+                if (rows > r.rowsMax) r.rowsMax = rows;
+            }
+            r.sumAvg = tot / 108.0;
+            c->Unmap(st.Get(), 0);
+        }
+        c->ClearState();
+        return r;
+    };
+    if (ok) {
+        // the ribbon's real thickness: 2 * halfPx (the VS spans q.y = -1 .. +1)
+        // the culling that SHOWS the ribbon (the test's own winding), and the other one that hides it
+        ID3D11RasterizerState* rsShow = run(1.5f, 1.3f, false, rsBack.Get()).cols ? rsBack.Get() : rsFront.Get();
+        ID3D11RasterizerState* rsHide = rsShow == rsBack.Get() ? rsFront.Get() : rsBack.Get();
+        const Res thinNo = run(0.03f, 1.3f, false, rsShow), thinGs = run(0.03f, 1.3f, true, rsShow);
+        const Res thinGsB = run(0.03f, 1.3f, true, rsHide);
+        printf("   0.06 px ribbon, 108 columns: no GS %d columns (dashes), GS %d columns, alpha per column %.3f .. %.3f (avg %.3f, "
+               "want ~0.06), <= %d rows\n", thinNo.cols, thinGs.cols, thinGs.sumMin, thinGs.sumMax, thinGs.sumAvg, thinGs.rowsMax);
+        expect(thinNo.cols < 54, "without the GS a 0.06 px ribbon is dashes");
+        expect(thinGs.cols == 108, "with the GS every column has the wire");
+        expect(thinGs.sumAvg > 0.045 && thinGs.sumAvg < 0.075, "the summed alpha per column stays the ribbon width (energy)");
+        expect(thinGs.sumMax < 0.13, "no column much darker than the ribbon (no overlap pile-up)");
+        expect(thinGs.rowsMax <= 3, "the band stays thin (<= 3 rows per column; phase 67: the tent is 2 W wide, half-height W)");
+        expect(thinGsB.cols == 0, "the band keeps the triangles' winding (the other cull mode hides it, as the ribbon)");
+        // the game's over blending (colour 1 over black): the pair's two bands (h / 2 apart) compound; kWireGs solves k for h / W
+        const Res ovThin = run(0.03f, 1.3f, true, rsShow, true), ovNear = run(0.45f, 1.3f, true, rsShow, true);
+        const Res ovNearNo = run(0.45f, 1.3f, false, rsShow, true);
+        printf("   over blending: 0.06 px ribbon avg %.3f per column (want 0.06), 0.9 px ribbon avg %.3f / %d rows max (want ~0.9, "
+               "no 2 px smear; without the GS %.3f, %d columns)\n", ovThin.sumAvg, ovNear.sumAvg, ovNear.rowsMax, ovNearNo.sumAvg, ovNearNo.cols);
+        expect(ovThin.cols == 108 && ovThin.sumAvg > 0.05 && ovThin.sumAvg < 0.07, "over blending: a 0.06 px wire keeps its darkness");
+        expect(ovNear.cols == 108 && ovNear.sumAvg > 0.82 && ovNear.sumAvg < 0.98 && ovNear.rowsMax <= 3,
+               "over blending: a 0.9 px wire = one soft ~1 px line at ~0.9 (no darker step at the 1 px limit)");
+        // the same with the other diagonal / slope sign (which edge is the longest flips)
+        const Res ovNear2 = run(0.45f, -1.3f, true, rsShow, true), ovNear3 = run(0.45f, 0.0f, true, rsShow, true);
+        printf("   over blending, 0.9 px ribbon, slope -1.3 / 0: avg %.3f / %.3f per column\n", ovNear2.sumAvg, ovNear3.sumAvg);
+        expect(ovNear2.sumAvg > 0.82 && ovNear2.sumAvg < 0.98 && ovNear3.sumAvg > 0.82 && ovNear3.sumAvg < 0.98,
+               "over blending: the 0.9 px wire stays ~0.9 whichever edge is the longest");
+        // phase 62: the pole hardware's PS discards tex.a * COLOR.w < 0.05; far away tex.a is ~0.1 -> any fade of COLOR.w drops it
+        const Res cutRaw = run(0.01f, 1.3f, false, rsShow, true, 1);
+        const Res cutMain = run(0.01f, 1.3f, true, rsShow, true, 1), cutK = run(0.01f, 1.3f, true, rsShow, true, 2);
+        printf("   pole hardware (cut-off PS, tex.a 0.1), 0.02 px piece: raw %d columns (dashes), GSMain %d columns (faded under the "
+               "cut-off: vanished), GSCut + the PS copy %d columns at avg %.4f (want ~0.002 = 0.1 x 0.02)\n",
+               cutRaw.cols, cutMain.cols, cutK.cols, cutK.sumAvg);
+        expect(cutMain.cols == 0, "pole hardware: fading COLOR.w drops every texel under the game's cut-off (why GSCut exists)");
+        expect(cutK.cols == 108 && cutK.sumAvg > 0.001 && cutK.sumAvg < 0.004,
+               "pole hardware: GSCut + the copy keep every column at the strip's own energy (cut-off on the unscaled alpha)");
+        // phase 67: the jagged look at wire_min_px 1.0 -- the 8 jitter phases (Halton 3, the mod's vertical jitter) averaged, the
+        // way DLAA's history sees the band; a wire crossing 6 pixel rows over 108 columns. Per column: the peak pixel (the
+        // line's darkness) and the sum (its ink). A hard 1 px band swings 2 : 1 (beads); the tent stays near 1.55 : 1.
+        {
+            auto halton3 = [](int i) { double f = 1, r = 0; while (i > 0) { f /= 3; r += f * (i % 3); i /= 3; } return r; };
+            std::vector<double> acc((size_t)128 * 64, 0.0);
+            for (int j = 0; j < 8; ++j) run(0.03f, 6.0f, true, rsShow, false, 0, (float)(halton3(j + 1) - 0.5), &acc);
+            double pkMin = 1e9, pkMax = 0, sMin = 1e9, sMax = 0;
+            for (int x = 10; x < 118; ++x) {
+                double pk = 0, sm = 0;
+                for (int y = 0; y < 64; ++y) { const double a = acc[(size_t)y * 128 + x] / 8.0; pk = std::max(pk, a); sm += a; }
+                pkMin = std::min(pkMin, pk); pkMax = std::max(pkMax, pk); sMin = std::min(sMin, sm); sMax = std::max(sMax, sm);
+            }
+            printf("   phase 67, 8 jitter phases averaged (0.06 px wire over 6 rows): peak per column %.4f .. %.4f (ripple %.2f : 1; a hard "
+                   "1 px band: 2 : 1), ink per column %.4f .. %.4f\n", pkMin, pkMax, pkMax / std::max(pkMin, 1e-9), sMin, sMax);
+            expect(pkMax / std::max(pkMin, 1e-9) < 1.7, "phase 67: the soft band's darkness along a sloped wire ripples < 1.7 : 1 (no beads)");
+            expect(sMin > 0.045 && sMax < 0.075, "phase 67: the jittered band keeps the wire's ink in every column");
+        }
+        const Res wideNo = run(1.5f, 1.3f, false, rsShow), wideGs = run(1.5f, 1.3f, true, rsShow);
+        expect(wideNo.cols == 108, "the 3 px ribbon is drawn (test setup)");
+        printf("   3 px ribbon: no GS avg %.3f / %d columns, GS avg %.3f / %d columns\n", wideNo.sumAvg, wideNo.cols, wideGs.sumAvg, wideGs.cols);
+        expect(wideNo.cols == wideGs.cols && std::fabs(wideNo.sumAvg - wideGs.sumAvg) < 1e-4 && std::fabs(wideNo.sumMax - wideGs.sumMax) < 1e-4,
+               "a ribbon wider than wire_min_px is drawn exactly as without the GS");
+    }
+    if (g_debugLayer) { const int dl = DrainDebugLayer("S61"); ++checks; if (dl) { ++fails; printf("   FAIL debug layer: %d messages\n", dl); } }
+    printf("   %s: %d / %d checks passed\n", fails ? "FAILED" : "passed", checks - fails, checks);
+    tot.checks += checks; tot.fails += fails;
+    return fails;
+}
+
+// phase 62: the mod's copy of the pole-hardware PS (WireWiden::CutPsSource, k = 1) against the game's real bytecode
+// (captures\ps_b97c44a3.dxbc, saved by scripts\rdc_wire_sig_scan.py with RDC_DXBC=1; game data, not in the repository: the check is
+// skipped without it). A 64 x 64 quad with every input varying per pixel: colour, UV into a texture whose alpha crosses the 0.05
+// cut-off, the screen-position buffers t10 / t11, cb0[0..6]. Both PSs must discard the same pixels and output the same RGBA.
+int RunWireCutPsUnit(Env& E, Totals& tot) {
+    printf("\n===== S62 unit: the pole-hardware PS copy vs the game's PS b97c44a3 =====\n");
+    int checks = 0, fails = 0;
+    auto expect = [&](bool c, const char* what) { ++checks; if (!c) { ++fails; printf("   FAIL %s\n", what); } };
+    std::vector<char> ref;
+    for (const char* path : { "captures\\ps_b97c44a3.dxbc", "..\\..\\..\\captures\\ps_b97c44a3.dxbc" }) {
+        FILE* f = fopen(path, "rb");
+        if (!f) continue;
+        fseek(f, 0, SEEK_END); const long n = ftell(f); fseek(f, 0, SEEK_SET);
+        ref.resize(n > 0 ? (size_t)n : 0);
+        if (n > 0 && fread(ref.data(), 1, (size_t)n, f) != (size_t)n) ref.clear();
+        fclose(f);
+        break;
+    }
+    if (ref.empty()) {
+        printf("   (captures\\ps_b97c44a3.dxbc not found: skipped -- game bytecode is not in the repository)\n");
+        return 0;
+    }
+    ID3D11Device* d = E.dev.Get();
+    ID3D11DeviceContext* c = E.ctx.Get();
+    expect(WireWiden::PsKind(ref.data(), ref.size()) == 2, "the reference bytecode is the pole-hardware PS (kind 2)");
+    static const char kVs[] =
+        "struct V { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1;"
+        " float2 t2 : TEXCOORD2; float3 t6 : TEXCOORD6; };\n"
+        "struct VK { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1;"
+        " float2 t2 : TEXCOORD2; float3 t6 : TEXCOORD6; float k : TEXCOORD7; };\n"
+        "V Make(uint i) { float2 q = float2((i == 1 || i == 3 || i == 4) ? 1 : 0, (i == 2 || i == 4 || i == 5) ? 1 : 0);\n"
+        "  V o = (V)0; o.pos = float4(q.x * 2 - 1, 1 - q.y * 2, 0.5, 1);\n"
+        "  o.col = float4(0.3 + 0.6 * q.x, 0.8 - 0.5 * q.y, 0.2 + 0.3 * q.x * q.y, 0.4 + 0.6 * q.y);\n"
+        "  o.t2 = float2(q.x * 3.0, q.y * 2.0);\n"
+        "  float w = 1.5 + q.x; o.t6 = float3(w, q.x * w * 0.98, q.y * w * 0.97); return o; }\n"
+        "V vsV(uint i : SV_VertexID) { return Make(i); }\n"
+        "VK vsK(uint i : SV_VertexID) { V v = Make(i); VK o; o.col = v.col; o.pos = v.pos; o.t0 = v.t0; o.t1 = v.t1; o.t2 = v.t2;"
+        " o.t6 = v.t6; o.k = 1.0; return o; }\n";
+    size_t pl = 0;
+    const char* psrc = WireWiden::CutPsSource(&pl);
+    ComPtr<ID3DBlob> vb, kb, pb, err;
+    bool ok = SUCCEEDED(D3DCompile(kVs, sizeof(kVs) - 1, "s62", nullptr, nullptr, "vsV", "vs_5_0", 0, 0, &vb, &err)) &&
+              SUCCEEDED(D3DCompile(kVs, sizeof(kVs) - 1, "s62", nullptr, nullptr, "vsK", "vs_5_0", 0, 0, &kb, &err)) &&
+              SUCCEEDED(D3DCompile(psrc, pl, "wire_cut_ps", nullptr, nullptr, "PSCut", "ps_5_0", 0, 0, &pb, &err));
+    if (!ok && err) printf("   compile: %s\n", (const char*)err->GetBufferPointer());
+    ComPtr<ID3D11VertexShader> vsV, vsK; ComPtr<ID3D11PixelShader> psRef, psCopy;
+    ok = ok && SUCCEEDED(d->CreateVertexShader(vb->GetBufferPointer(), vb->GetBufferSize(), nullptr, &vsV)) &&
+         SUCCEEDED(d->CreateVertexShader(kb->GetBufferPointer(), kb->GetBufferSize(), nullptr, &vsK)) &&
+         SUCCEEDED(d->CreatePixelShader(ref.data(), ref.size(), nullptr, &psRef)) &&
+         SUCCEEDED(d->CreatePixelShader(pb->GetBufferPointer(), pb->GetBufferSize(), nullptr, &psCopy));
+    // inputs: t6 16 x 16 RGBA32F (alpha 0 .. 0.2 + spots near 1: crosses the cut-off), t10 / t11 64 x 64 RGBA32F, cb0[7]
+    auto mkTex = [&](UINT w, UINT h, const std::vector<float>& px, ComPtr<ID3D11ShaderResourceView>& srv) {
+        D3D11_TEXTURE2D_DESC td{}; td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        td.SampleDesc.Count = 1; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        D3D11_SUBRESOURCE_DATA sd{ px.data(), w * 16u, 0 };
+        ComPtr<ID3D11Texture2D> t;
+        return SUCCEEDED(d->CreateTexture2D(&td, &sd, &t)) && SUCCEEDED(d->CreateShaderResourceView(t.Get(), nullptr, &srv));
+    };
+    std::vector<float> t6(16 * 16 * 4), t10(64 * 64 * 4), t11(64 * 64 * 4);
+    for (int i = 0; i < 16 * 16; ++i) {
+        t6[i * 4 + 0] = 0.1f + 0.05f * (i % 7); t6[i * 4 + 1] = 0.2f + 0.03f * (i % 11); t6[i * 4 + 2] = 0.9f - 0.02f * (i % 13);
+        t6[i * 4 + 3] = (i % 9 == 0) ? 0.95f : 0.01f * (float)(i % 21);   // 0 .. 0.2 and some ~1
+    }
+    for (int i = 0; i < 64 * 64; ++i) {
+        t10[i * 4 + 0] = 0.5f + 0.004f * (i % 97); t10[i * 4 + 1] = 0.3f + 0.006f * (i % 53); t10[i * 4 + 2] = 1.2f - 0.01f * (i % 31);
+        t11[i * 4 + 0] = 0.05f * (i % 17); t11[i * 4 + 1] = 0.7f - 0.003f * (i % 89); t11[i * 4 + 2] = 0.02f * (i % 29);
+    }
+    ComPtr<ID3D11ShaderResourceView> s6, s10, s11;
+    ok = ok && mkTex(16, 16, t6, s6) && mkTex(64, 64, t10, s10) && mkTex(64, 64, t11, s11);
+    const float cb0[7][4] = { { 1.1f, 0.9f, 1.05f, 0.35f }, { 0.6f, 0.7f, 0.8f, 0 }, { 0, 0, 0.5f, 0.25f }, { 0, 0, 0, 0 },
+                              { 1.0f, 1.0f, 0, 0 }, { 63.0f, 63.0f, 1.0f, 1.0f }, { 0.12f, 0.15f, 0.2f, 0 } };
+    D3D11_BUFFER_DESC bd{}; bd.ByteWidth = sizeof(cb0); bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    D3D11_SUBRESOURCE_DATA bdat{ cb0, 0, 0 };
+    ComPtr<ID3D11Buffer> cb;
+    ok = ok && SUCCEEDED(d->CreateBuffer(&bd, &bdat, &cb));
+    D3D11_SAMPLER_DESC smd{}; smd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; smd.AddressU = smd.AddressV = smd.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+    smd.MaxLOD = D3D11_FLOAT32_MAX;
+    ComPtr<ID3D11SamplerState> smp;
+    ok = ok && SUCCEEDED(d->CreateSamplerState(&smd, &smp));
+    ComPtr<ID3D11Texture2D> rt, st; ComPtr<ID3D11RenderTargetView> rtv;
+    D3D11_TEXTURE2D_DESC td{}; td.Width = 64; td.Height = 64; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+    td.SampleDesc.Count = 1; td.BindFlags = D3D11_BIND_RENDER_TARGET;
+    ok = ok && SUCCEEDED(d->CreateTexture2D(&td, nullptr, &rt)) && SUCCEEDED(d->CreateRenderTargetView(rt.Get(), nullptr, &rtv));
+    td.BindFlags = 0; td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    ok = ok && SUCCEEDED(d->CreateTexture2D(&td, nullptr, &st));
+    expect(ok, "S62 resources (the copy compiles, the game bytecode loads)");
+    auto draw = [&](bool copy, std::vector<float>& out) {
+        c->ClearState();
+        const FLOAT sentinel[4] = { -7, -7, -7, -7 };
+        c->ClearRenderTargetView(rtv.Get(), sentinel);
+        c->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
+        const D3D11_VIEWPORT vp{ 0, 0, 64, 64, 0, 1 };
+        c->RSSetViewports(1, &vp);
+        c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        c->VSSetShader(copy ? vsK.Get() : vsV.Get(), nullptr, 0);
+        c->PSSetShader(copy ? psCopy.Get() : psRef.Get(), nullptr, 0);
+        c->PSSetConstantBuffers(0, 1, cb.GetAddressOf());
+        ID3D11ShaderResourceView* v6 = s6.Get(); ID3D11ShaderResourceView* v10 = s10.Get(); ID3D11ShaderResourceView* v11 = s11.Get();
+        c->PSSetShaderResources(6, 1, &v6); c->PSSetShaderResources(10, 1, &v10); c->PSSetShaderResources(11, 1, &v11);
+        c->PSSetSamplers(0, 1, smp.GetAddressOf());
+        c->Draw(6, 0);
+        c->CopyResource(st.Get(), rt.Get());
+        D3D11_MAPPED_SUBRESOURCE m{};
+        out.assign(64 * 64 * 4, 0.0f);
+        if (SUCCEEDED(c->Map(st.Get(), 0, D3D11_MAP_READ, 0, &m))) {
+            for (int y = 0; y < 64; ++y) memcpy(&out[y * 64 * 4], (const char*)m.pData + y * m.RowPitch, 64 * 16);
+            c->Unmap(st.Get(), 0);
+        }
+        c->ClearState();
+    };
+    if (ok) {
+        std::vector<float> a, b;
+        draw(false, a); draw(true, b);
+        int discA = 0, discB = 0, discDiff = 0, drawn = 0;
+        double maxErr = 0.0;
+        for (int i = 0; i < 64 * 64; ++i) {
+            const bool da = a[i * 4] == -7.0f, db = b[i * 4] == -7.0f;
+            discA += da; discB += db;
+            if (da != db) { ++discDiff; continue; }
+            if (da) continue;
+            ++drawn;
+            for (int k = 0; k < 4; ++k) {
+                const double e = std::fabs((double)a[i * 4 + k] - (double)b[i * 4 + k]) / (1.0 + std::fabs((double)a[i * 4 + k]));
+                if (e > maxErr) maxErr = e;
+            }
+        }
+        printf("   64 x 64 pixels: game PS discards %d, the copy %d (%d differ); %d drawn by both, max relative difference %.2e\n",
+               discA, discB, discDiff, drawn, maxErr);
+        expect(discA > 200 && discA < 3900, "the test crosses the game's cut-off (some pixels discarded, some drawn)");
+        expect(discDiff == 0, "the copy discards exactly the game's pixels");
+        expect(maxErr < 1e-5, "the copy's RGBA equals the game's (k = 1)");
+    }
+    if (g_debugLayer) { const int dl = DrainDebugLayer("S62"); ++checks; if (dl) { ++fails; printf("   FAIL debug layer: %d messages\n", dl); } }
+    printf("   %s: %d / %d checks passed\n", fails ? "FAILED" : "passed", checks - fails, checks);
+    tot.checks += checks; tot.fails += fails;
+    return fails;
+}
+
+// phase 63: the solid thin geometry (G-buffer, no blending). (a) the mod's dither copies of the game's G-buffer PSs b67da69f (A, far
+// wires) and 34860eed (B, lattice towers) at k = 1 against the game's real bytecode (captures\ps_b67da69f.dxbc / ps_34860eed.dxbc,
+// saved by scripts\rdc_dump_draw_shaders.py; game data, not in the repository: skipped without them) -- all 4 render targets, bit
+// for bit. (b) GSolidA + PSSolidA on a 0.06 px ribbon, 64 frames: every column gets pixels and the average coverage per column is
+// the ribbon's width (the dither keeps share k of the band; DLAA's history averages it). (c) a 3 px ribbon: exactly unchanged.
+static bool LoadFile(const char* name, std::vector<char>& out) {
+    out.clear();
+    char path[512];
+    for (const char* dir : { "captures\\", "..\\..\\..\\captures\\" }) {
+        snprintf(path, sizeof(path), "%s%s", dir, name);
+        FILE* f = fopen(path, "rb");
+        if (!f) continue;
+        fseek(f, 0, SEEK_END); const long n = ftell(f); fseek(f, 0, SEEK_SET);
+        out.resize(n > 0 ? (size_t)n : 0);
+        if (n > 0 && fread(out.data(), 1, (size_t)n, f) != (size_t)n) out.clear();
+        fclose(f);
+        return !out.empty();
+    }
+    return false;
+}
+int RunSolidUnit(Env& E, Totals& tot) {
+    printf("\n===== S63 unit: solid thin geometry -- dither PS copies vs the game's G-buffer PSs, dithered band coverage =====\n");
+    int checks = 0, fails = 0;
+    auto expect = [&](bool c, const char* what) { ++checks; if (!c) { ++fails; printf("   FAIL %s\n", what); } };
+    ID3D11Device* d = E.dev.Get();
+    ID3D11DeviceContext* c = E.ctx.Get();
+    static const char kVs[] =
+        "cbuffer C : register(b0) { float4 g_r; };\n"   // x = half thickness px (ribbon) or < 0 = full-screen quad
+        "struct VA { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float2 t2 : TEXCOORD2; };\n"
+        "struct VAK { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float2 t2 : TEXCOORD2; float4 kf : TEXCOORD7; };\n"
+        "struct VB { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float4 t2 : TEXCOORD2; float2 t3 : TEXCOORD3; };\n"
+        "struct VBK { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float4 t2 : TEXCOORD2; float2 t3 : TEXCOORD3; float4 kf : TEXCOORD7; };\n"
+        "VB Make(uint i) { float2 q = float2((i == 1 || i == 3 || i == 4) ? 1 : 0, (i == 2 || i == 4 || i == 5) ? 1 : 0);\n"
+        "  VB o = (VB)0;\n"
+        "  if (g_r.x < 0) o.pos = float4(q.x * 2 - 1, 1 - q.y * 2, 0.5, 1);\n"
+        "  else { const float2 P[6] = { float2(8, -1), float2(8, 1), float2(120, -1), float2(8, 1), float2(120, 1), float2(120, -1) };\n"
+        "         float2 r = P[i]; float y = g_r.y + r.y * g_r.x + (r.x - 8.0) / 112.0 * 1.3;\n"
+        "         float w = 1.0 + (r.y > 0 ? g_r.z : 0.0);\n"   // g_r.z: depth across the strip (a tube's edge-on face)
+        "         r.x += (r.y > 0 ? g_r.w : 0.0);\n"           // g_r.w: shear (the top edge shifted along the wire, px: draw 2025)
+        "         o.pos = float4((r.x / 64.0 - 1.0) * w, (1.0 - y / 32.0) * w, 0.5 * w, w); q = float2(r.x / 128.0, y / 64.0); }\n"
+        "  o.col = float4(0.3 + 0.6 * q.x, 0.8 - 0.5 * q.y, 0.2 + 0.3 * q.x * q.y, 0.25 + 0.5 * q.y);\n"
+        "  o.t0 = float3(0.2 + q.x, 1.0 - 0.4 * q.y, 0.3 * q.x - 0.1); o.t1 = float3(5.0 * q.x, 3.0 * q.y, 120.0 + 40.0 * q.x);\n"
+        "  o.t2 = float4(q.x * 3.0, q.y * 2.0, q.y * 1.5, q.x * 2.5); o.t3 = float2(q.y * 2.2, q.x * 1.7); return o; }\n"
+        "VA vsA(uint i : SV_VertexID) { VB b = Make(i); VA o; o.col = b.col; o.pos = b.pos; o.t0 = b.t0; o.t1 = b.t1; o.t2 = b.t2.xy; return o; }\n"
+        "VAK vsAK(uint i : SV_VertexID) { VB b = Make(i); VAK o; o.col = b.col; o.pos = b.pos; o.t0 = b.t0; o.t1 = b.t1; o.t2 = b.t2.xy; o.kf = float4(1, 0, 1, 0); return o; }\n"
+        "VB vsB(uint i : SV_VertexID) { return Make(i); }\n"
+        "VBK vsBK(uint i : SV_VertexID) { VB b = Make(i); VBK o; o.col = b.col; o.pos = b.pos; o.t0 = b.t0; o.t1 = b.t1; o.t2 = b.t2; o.t3 = b.t3; o.kf = float4(1, 0, 1, 0); return o; }\n";
+    size_t gl = 0, pl = 0;
+    const char* gsrc = WireWiden::SolidGsSource(&gl);
+    const char* psrc = WireWiden::SolidPsSource(&pl);
+    ComPtr<ID3DBlob> b1, b2, b3, b4, gA, pA, pB, err;
+    bool ok = SUCCEEDED(D3DCompile(kVs, sizeof(kVs) - 1, "s63", nullptr, nullptr, "vsA", "vs_5_0", 0, 0, &b1, &err)) &&
+              SUCCEEDED(D3DCompile(kVs, sizeof(kVs) - 1, "s63", nullptr, nullptr, "vsAK", "vs_5_0", 0, 0, &b2, &err)) &&
+              SUCCEEDED(D3DCompile(kVs, sizeof(kVs) - 1, "s63", nullptr, nullptr, "vsB", "vs_5_0", 0, 0, &b3, &err)) &&
+              SUCCEEDED(D3DCompile(kVs, sizeof(kVs) - 1, "s63", nullptr, nullptr, "vsBK", "vs_5_0", 0, 0, &b4, &err)) &&
+              SUCCEEDED(D3DCompile(gsrc, gl, "solid_gs", nullptr, nullptr, "GSolidA", "gs_5_0", 0, 0, &gA, &err)) &&
+              SUCCEEDED(D3DCompile(psrc, pl, "solid_ps", nullptr, nullptr, "PSSolidA", "ps_5_0", 0, 0, &pA, &err)) &&
+              SUCCEEDED(D3DCompile(psrc, pl, "solid_ps", nullptr, nullptr, "PSSolidB", "ps_5_0", 0, 0, &pB, &err));
+    if (!ok && err) printf("   compile: %s\n", (const char*)err->GetBufferPointer());
+    ComPtr<ID3D11VertexShader> vA, vAK, vB, vBK; ComPtr<ID3D11GeometryShader> gsA; ComPtr<ID3D11PixelShader> cpA, cpB, refA, refB;
+    ok = ok && SUCCEEDED(d->CreateVertexShader(b1->GetBufferPointer(), b1->GetBufferSize(), nullptr, &vA)) &&
+         SUCCEEDED(d->CreateVertexShader(b2->GetBufferPointer(), b2->GetBufferSize(), nullptr, &vAK)) &&
+         SUCCEEDED(d->CreateVertexShader(b3->GetBufferPointer(), b3->GetBufferSize(), nullptr, &vB)) &&
+         SUCCEEDED(d->CreateVertexShader(b4->GetBufferPointer(), b4->GetBufferSize(), nullptr, &vBK)) &&
+         SUCCEEDED(d->CreateGeometryShader(gA->GetBufferPointer(), gA->GetBufferSize(), nullptr, &gsA)) &&
+         SUCCEEDED(d->CreatePixelShader(pA->GetBufferPointer(), pA->GetBufferSize(), nullptr, &cpA)) &&
+         SUCCEEDED(d->CreatePixelShader(pB->GetBufferPointer(), pB->GetBufferSize(), nullptr, &cpB));
+    // inputs: t0 / t1 / t6 16 x 16 RGBA32F, cb0[4], 3 samplers
+    auto mkTex = [&](UINT w, UINT h, const std::vector<float>& px, ComPtr<ID3D11ShaderResourceView>& srv) {
+        D3D11_TEXTURE2D_DESC td{}; td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        td.SampleDesc.Count = 1; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        D3D11_SUBRESOURCE_DATA sd{ px.data(), w * 16u, 0 };
+        ComPtr<ID3D11Texture2D> t;
+        return SUCCEEDED(d->CreateTexture2D(&td, &sd, &t)) && SUCCEEDED(d->CreateShaderResourceView(t.Get(), nullptr, &srv));
+    };
+    std::vector<float> tx0(16 * 16 * 4), tx1(16 * 16 * 4), tx6(16 * 16 * 4), white(16 * 16 * 4, 1.0f);
+    for (int i = 0; i < 256; ++i)
+        for (int k = 0; k < 4; ++k) {
+            tx0[i * 4 + k] = 0.1f + 0.03f * (float)((i * 7 + k * 3) % 29);
+            tx1[i * 4 + k] = 0.05f + 0.02f * (float)((i * 5 + k * 11) % 37);
+            tx6[i * 4 + k] = 0.2f + 0.025f * (float)((i * 3 + k * 13) % 31);
+        }
+    ComPtr<ID3D11ShaderResourceView> s0v, s1v, s6v, swv;
+    ok = ok && mkTex(16, 16, tx0, s0v) && mkTex(16, 16, tx1, s1v) && mkTex(16, 16, tx6, s6v) && mkTex(16, 16, white, swv);
+    const float cb0[4][4] = { { 1.1f, 0.9f, 1.05f, 0.35f }, { 0.6f, 0.7f, 0.8f, 0.45f }, { 0.73f, 0.0f, 0.8f, 0.1f }, { 1.0f, 0, 0, 0 } };
+    const float cbWhite[4][4] = { { 1, 1, 1, 0.5f }, { 1, 1, 1, 0.5f }, { 0.5f, 0, 1, 0 }, { 0, 0, 0, 0 } };
+    D3D11_BUFFER_DESC bd{}; bd.ByteWidth = sizeof(cb0); bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    D3D11_SUBRESOURCE_DATA bdat{ cb0, 0, 0 }, bdw{ cbWhite, 0, 0 };
+    ComPtr<ID3D11Buffer> cbuf, cbw, cbV, cbG;
+    ok = ok && SUCCEEDED(d->CreateBuffer(&bd, &bdat, &cbuf)) && SUCCEEDED(d->CreateBuffer(&bd, &bdw, &cbw));
+    D3D11_BUFFER_DESC b16{}; b16.ByteWidth = 16; b16.Usage = D3D11_USAGE_DEFAULT; b16.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    D3D11_BUFFER_DESC b32 = b16; b32.ByteWidth = 32;
+    ok = ok && SUCCEEDED(d->CreateBuffer(&b16, nullptr, &cbV)) && SUCCEEDED(d->CreateBuffer(&b32, nullptr, &cbG));
+    D3D11_SAMPLER_DESC smd{}; smd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; smd.AddressU = smd.AddressV = smd.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+    smd.MaxLOD = D3D11_FLOAT32_MAX;
+    ComPtr<ID3D11SamplerState> smp[3];
+    for (int i = 0; i < 3 && ok; ++i) { smd.AddressU = i == 1 ? D3D11_TEXTURE_ADDRESS_MIRROR : D3D11_TEXTURE_ADDRESS_WRAP; ok = SUCCEEDED(d->CreateSamplerState(&smd, &smp[i])); }
+    // 4 render targets: RGBA32F x 3 + RGBA32_UINT (the G-buffer's integer target)
+    ComPtr<ID3D11Texture2D> rt[4], st[4]; ComPtr<ID3D11RenderTargetView> rtv[4];
+    for (int i = 0; i < 4 && ok; ++i) {
+        D3D11_TEXTURE2D_DESC td{}; td.Width = 128; td.Height = 64; td.MipLevels = 1; td.ArraySize = 1; td.SampleDesc.Count = 1;
+        td.Format = i == 3 ? DXGI_FORMAT_R32G32B32A32_UINT : DXGI_FORMAT_R32G32B32A32_FLOAT; td.BindFlags = D3D11_BIND_RENDER_TARGET;
+        ok = SUCCEEDED(d->CreateTexture2D(&td, nullptr, &rt[i])) && SUCCEEDED(d->CreateRenderTargetView(rt[i].Get(), nullptr, &rtv[i]));
+        td.BindFlags = 0; td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        ok = ok && SUCCEEDED(d->CreateTexture2D(&td, nullptr, &st[i]));
+    }
+    ComPtr<ID3D11RasterizerState> rsNone;
+    { D3D11_RASTERIZER_DESC rd{}; rd.FillMode = D3D11_FILL_SOLID; rd.CullMode = D3D11_CULL_NONE; rd.DepthClipEnable = TRUE;
+      ok = ok && SUCCEEDED(d->CreateRasterizerState(&rd, &rsNone)); }
+    expect(ok, "S63 resources (the solid GS / PS copies compile)");
+    // draw: vs, gs (nullable), ps, cb0, vcb (ribbon / full quad), gcb (half vp, W, frame) -> the 4 targets read back (raw 32-bit words)
+    auto draw = [&](ID3D11VertexShader* vs, ID3D11GeometryShader* gs, ID3D11PixelShader* ps, ID3D11Buffer* cbp, float halfPx,
+                    float frame, ID3D11ShaderResourceView* t6, std::vector<uint32_t>* out, float minShare = 0.0f, float across = 0.0f, float shear = 0.0f) {
+        c->ClearState();
+        const FLOAT sentinel[4] = { -7, -7, -7, -7 };
+        const UINT usent[4] = { 0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu };
+        for (int i = 0; i < 3; ++i) c->ClearRenderTargetView(rtv[i].Get(), sentinel);
+        { ComPtr<ID3D11DeviceContext> cc = c; D3D11_TEXTURE2D_DESC dd; rt[3]->GetDesc(&dd); (void)dd; }
+        // clear the uint target through a float clear of the same bit pattern is not portable: draw a sentinel via ClearView-less path
+        const FLOAT usentF[4] = { (FLOAT)0xBEEF, (FLOAT)0xBEEF, (FLOAT)0xBEEF, (FLOAT)0xBEEF };
+        c->ClearRenderTargetView(rtv[3].Get(), usentF);
+        (void)usent;
+        ID3D11RenderTargetView* rts[4] = { rtv[0].Get(), rtv[1].Get(), rtv[2].Get(), rtv[3].Get() };
+        c->OMSetRenderTargets(4, rts, nullptr);
+        const D3D11_VIEWPORT vp{ 0, 0, 128, 64, 0, 1 };
+        c->RSSetViewports(1, &vp);
+        c->RSSetState(rsNone.Get());                     // (the test ribbon's winding is arbitrary)
+        c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        const float vcb[4] = { halfPx, 31.3f, across, shear };
+        const float gcb[8] = { 64.0f, 32.0f, 1.5f, 0, frame, minShare, 0, 0 };   // W = 1.5 px (the user's wire_min_px), keep floor
+        c->UpdateSubresource(cbV.Get(), 0, nullptr, vcb, 0, 0);
+        c->UpdateSubresource(cbG.Get(), 0, nullptr, gcb, 0, 0);
+        c->VSSetShader(vs, nullptr, 0); c->VSSetConstantBuffers(0, 1, cbV.GetAddressOf());
+        if (gs) { c->GSSetShader(gs, nullptr, 0); c->GSSetConstantBuffers(0, 1, cbG.GetAddressOf()); }
+        c->PSSetShader(ps, nullptr, 0);
+        c->PSSetConstantBuffers(0, 1, &cbp);
+        ID3D11ShaderResourceView* v0 = s0v.Get(); ID3D11ShaderResourceView* v1 = s1v.Get();
+        c->PSSetShaderResources(0, 1, &v0); c->PSSetShaderResources(1, 1, &v1); c->PSSetShaderResources(6, 1, &t6);
+        ID3D11SamplerState* ss[3] = { smp[0].Get(), smp[1].Get(), smp[2].Get() };
+        c->PSSetSamplers(0, 3, ss);
+        c->Draw(6, 0);
+        out->assign(4 * 128 * 64 * 4, 0u);
+        for (int i = 0; i < 4; ++i) {
+            c->CopyResource(st[i].Get(), rt[i].Get());
+            D3D11_MAPPED_SUBRESOURCE m{};
+            if (SUCCEEDED(c->Map(st[i].Get(), 0, D3D11_MAP_READ, 0, &m))) {
+                for (int y = 0; y < 64; ++y) memcpy(&(*out)[((size_t)i * 64 + y) * 128 * 4], (const char*)m.pData + y * m.RowPitch, 128 * 16);
+                c->Unmap(st[i].Get(), 0);
+            }
+        }
+        c->ClearState();
+    };
+    if (ok) {
+        // (a) the copies vs the game's bytecode (k = 1, full-screen quad)
+        const char* names[2] = { "ps_b67da69f.dxbc", "ps_34860eed.dxbc" };
+        for (int pair = 0; pair < 2; ++pair) {
+            std::vector<char> ref;
+            if (!LoadFile(names[pair], ref)) { printf("   (captures\\%s not found: copy check %c skipped)\n", names[pair], 'A' + pair); continue; }
+            ComPtr<ID3D11PixelShader>& rp = pair ? refB : refA;
+            if (FAILED(d->CreatePixelShader(ref.data(), ref.size(), nullptr, &rp))) { expect(false, "the game bytecode loads"); continue; }
+            std::vector<uint32_t> a, b;
+            draw(pair ? vB.Get() : vA.Get(), nullptr, rp.Get(), cbuf.Get(), -1.0f, 0, s6v.Get(), &a);
+            draw(pair ? vBK.Get() : vAK.Get(), nullptr, pair ? cpB.Get() : cpA.Get(), cbuf.Get(), -1.0f, 0, s6v.Get(), &b);
+            size_t diff = 0, first = (size_t)-1;
+            for (size_t i = 0; i < a.size(); ++i) if (a[i] != b[i]) { ++diff; if (first == (size_t)-1) first = i; }
+            printf("   pair %c: the copy vs the game's PS %s over 128 x 64 px x 4 targets: %zu of %zu words differ%s\n", 'A' + pair,
+                   pair ? "34860eed" : "b67da69f", diff, a.size(), diff ? "" : " (bit-exact)");
+            if (diff) printf("     first difference: target %zu word %zu: %08x vs %08x\n", first / (128 * 64 * 4), first % (128 * 64 * 4), a[first], b[first]);
+            expect(diff == 0, pair ? "pair B: the dither copy at k = 1 = the game's 34860eed on every target, bit for bit"
+                                   : "pair A: the dither copy at k = 1 = the game's b67da69f on every target, bit for bit");
+        }
+        // (b) GSolidA + PSSolidA on a 0.06 px ribbon over 64 frames: coverage from RT2 (white texture: o2 = 2 * col)
+        std::vector<double> avg(128, 0.0);
+        std::vector<int> seen(128, 0);
+        int rawCols = 0;
+        {
+            std::vector<uint32_t> o;
+            draw(vAK.Get(), nullptr, cpA.Get(), cbw.Get(), 0.03f, 0, swv.Get(), &o);   // without the GS (k = 1): the game's dashes
+            for (int x = 10; x < 118; ++x) {
+                bool any = false;
+                for (int y = 0; y < 64; ++y) { float f; memcpy(&f, &o[((size_t)2 * 64 + y) * 128 * 4 + x * 4 + 3], 4); if (f != -7.0f) any = true; }
+                rawCols += any;
+            }
+        }
+        for (int fr = 0; fr < 64; ++fr) {
+            std::vector<uint32_t> o;
+            draw(vA.Get(), gsA.Get(), cpA.Get(), cbw.Get(), 0.03f, (float)fr, swv.Get(), &o);
+            for (int x = 10; x < 118; ++x)
+                for (int y = 0; y < 64; ++y) {
+                    float f; memcpy(&f, &o[((size_t)2 * 64 + y) * 128 * 4 + x * 4 + 3], 4);   // RT2.w = cb0[0].w (0.5) where drawn
+                    if (f != -7.0f) { avg[x] += 1.0 / 64.0; ++seen[x]; }
+                }
+        }
+        int cols = 0; double mn = 1e9, mx = 0, sum = 0;
+        for (int x = 10; x < 118; ++x) { if (seen[x]) ++cols; mn = std::min(mn, avg[x]); mx = std::max(mx, avg[x]); sum += avg[x]; }
+        const double mean = sum / 108.0;
+        printf("   0.06 px solid ribbon: no GS %d / 108 columns (dashes); GSolidA + dither over 64 frames: %d / 108 columns, average "
+               "coverage per column %.3f (min %.3f, max %.3f; want ~0.06)\n", rawCols, cols, mean, mn, mx);
+        expect(rawCols < 54, "without the GS a 0.06 px solid ribbon is dashes");
+        expect(cols == 108, "with the GS + dither every column gets the wire over the frames");
+        // (per column the 1.5 px band covers 1 or 2 pixel centres, and a pixel kept in ~4 % of the frames is kept 1 .. 3 times in 64:
+        //  the spread per column is geometry + sampling, the MEAN is the energy)
+        expect(mean > 0.05 && mean < 0.07 && mn > 0.01 && mx < 0.12, "the average coverage per column is the ribbon's width (energy)");
+        // (b2) with the keep-share floor 0.25 (the pre-phase-68 wire_solid_min_share default): denser in time, darker than the real 0.06 px
+        {
+            double fsum = 0; int fcols = 0, minFrames = 64, minBest = 64;
+            std::vector<int> cnt(128, 0), px((size_t)128 * 64, 0);
+            for (int fr = 0; fr < 64; ++fr) {
+                std::vector<uint32_t> o;
+                draw(vA.Get(), gsA.Get(), cpA.Get(), cbw.Get(), 0.03f, (float)fr, swv.Get(), &o, 0.25f);
+                for (int x = 10; x < 118; ++x)
+                    for (int y = 0; y < 64; ++y) {
+                        float f; memcpy(&f, &o[((size_t)2 * 64 + y) * 128 * 4 + x * 4 + 3], 4);
+                        if (f != -7.0f) { fsum += 1.0 / 64.0; ++cnt[x]; ++px[(size_t)y * 128 + x]; }
+                    }
+            }
+            for (int x = 10; x < 118; ++x) {
+                if (cnt[x]) ++fcols; minFrames = std::min(minFrames, cnt[x]);
+                int best = 0; for (int y = 0; y < 64; ++y) best = std::max(best, px[(size_t)y * 128 + x]);
+                minBest = std::min(minBest, best);
+            }
+            printf("   with the keep floor 0.25: %d / 108 columns, mean coverage %.3f per column, every column drawn in >= %d of 64 frames, "
+                   "its most-kept PIXEL in >= %d (phase 67: the floor holds per pixel on the soft band's inner half)\n",
+                   fcols, fsum / 108.0, minFrames, minBest);
+            expect(fcols == 108 && fsum / 108.0 > 0.3 && fsum / 108.0 < 0.45 && minFrames >= 14,
+                   "keep floor 0.25: every column drawn in at least ~1 frame of 4 (no 1-in-25 flashes)");
+            expect(minBest >= 14, "phase 67: keep floor 0.25 per pixel: in every column one pixel shows the wire in >= ~1 frame of 4 (no twinkle)");
+        }
+        // (b2b) phase 68: the DEFAULT floor 0.1 -- every column's most-kept pixel in >= ~1 frame of 10 (golden-ratio spacing: 6 .. 7 of
+        //       64), and the mean coverage between the energy-correct 0.06 and the old 0.25 floor's ~0.37
+        {
+            double fsum = 0; int minBest = 64;
+            std::vector<int> px((size_t)128 * 64, 0);
+            for (int fr = 0; fr < 64; ++fr) {
+                std::vector<uint32_t> o;
+                draw(vA.Get(), gsA.Get(), cpA.Get(), cbw.Get(), 0.03f, (float)fr, swv.Get(), &o, 0.1f);
+                for (int x = 10; x < 118; ++x)
+                    for (int y = 0; y < 64; ++y) {
+                        float f; memcpy(&f, &o[((size_t)2 * 64 + y) * 128 * 4 + x * 4 + 3], 4);
+                        if (f != -7.0f) { fsum += 1.0 / 64.0; ++px[(size_t)y * 128 + x]; }
+                    }
+            }
+            for (int x = 10; x < 118; ++x) {
+                int best = 0; for (int y = 0; y < 64; ++y) best = std::max(best, px[(size_t)y * 128 + x]);
+                minBest = std::min(minBest, best);
+            }
+            printf("   phase 68, the default keep floor 0.1: mean coverage %.3f per column, every column's most-kept pixel in >= %d of 64 frames\n",
+                   fsum / 108.0, minBest);
+            expect(minBest >= 5 && fsum / 108.0 > 0.08 && fsum / 108.0 < 0.3,
+                   "phase 68: keep floor 0.1 (default): each column's best pixel in >= ~1 frame of 10, coverage below the 0.25 floor's");
+        }
+        // (b3) phase 65: the same 0.06 px sliver, but its across edge points INTO the screen (0.3 view units deep at w 1: the
+        //      edge-on face of a thick tube) -> not widened: exactly the game's own pixels
+        {
+            std::vector<uint32_t> t0v, t1v;
+            draw(vAK.Get(), nullptr, cpA.Get(), cbw.Get(), 0.03f, 3, swv.Get(), &t0v, 0.25f, 0.3f);
+            draw(vA.Get(), gsA.Get(), cpA.Get(), cbw.Get(), 0.03f, 3, swv.Get(), &t1v, 0.25f, 0.3f);
+            size_t td = 0;
+            for (size_t i = 0; i < t0v.size(); ++i) if (t0v[i] != t1v[i]) ++td;
+            printf("   phase 65: a tube's edge-on face (0.06 px on screen, wide in 3D): %zu words differ from the game's own drawing\n", td);
+            expect(td == 0, "a thick tube's edge-on face is not widened (no dark fringe on close round wires)");
+            // the far HV wire's sheared faces (capture draw 2025): the top edge shifted 6 px along the wire, the strip still 0.06 px
+            // thick -> the shortest edge is ~6 px long, but the face is thin: it must still widen (all columns over 16 frames)
+            std::vector<int> seenS(128, 0);
+            for (int fr = 0; fr < 16; ++fr) {
+                std::vector<uint32_t> o;
+                draw(vA.Get(), gsA.Get(), cpA.Get(), cbw.Get(), 0.03f, (float)fr, swv.Get(), &o, 0.25f, 0.0f, 6.0f);
+                for (int x = 20; x < 110; ++x)
+                    for (int y = 0; y < 64; ++y) { float f; memcpy(&f, &o[((size_t)2 * 64 + y) * 128 * 4 + x * 4 + 3], 4); if (f != -7.0f) { seenS[x] = 1; break; } }
+            }
+            int colsS = 0;
+            for (int x = 20; x < 110; ++x) colsS += seenS[x];
+            printf("   phase 65: a sheared thin face (the far HV wire's, shortest edge ~6 px, 0.06 px thick): %d / 90 columns over 16 frames\n", colsS);
+            expect(colsS == 90, "a sheared thin face (draw 2025's far HV wire) still widens");
+        }
+        // (c) a 3 px ribbon: exactly as without the GS
+        std::vector<uint32_t> w0, w1;
+        draw(vAK.Get(), nullptr, cpA.Get(), cbuf.Get(), 1.5f, 5, s6v.Get(), &w0);
+        draw(vA.Get(), gsA.Get(), cpA.Get(), cbuf.Get(), 1.5f, 5, s6v.Get(), &w1);
+        size_t wd = 0;
+        for (size_t i = 0; i < w0.size(); ++i) if (w0[i] != w1[i]) ++wd;
+        expect(wd == 0, "a 3 px solid ribbon passes through unchanged (k = 1: the copy = the game's PS)");
+    }
+    if (g_debugLayer) { const int dl = DrainDebugLayer("S63"); ++checks; if (dl) { ++fails; printf("   FAIL debug layer: %d messages\n", dl); } }
+    printf("   %s: %d / %d checks passed\n", fails ? "FAILED" : "passed", checks - fails, checks);
+    tot.checks += checks; tot.fails += fails;
+    return fails;
+}
+
+// phase 64: the MOTION side of the widening. A forward-record draw stamped with a widening kind (SetNextGs) replays through the
+// widening GS (DrawIdRecord::SetReplayGs) in the forward-depth batch -- so a 0.06 px wire's forward depth covers the same band as its
+// widened colour (every column, 1 .. 2 rows) instead of the dashes; an unstamped draw replays exactly as before (dashes).
+static ComPtr<ID3D11GeometryShader> g_s64Gs;
+static ComPtr<ID3D11Buffer> g_s64Cb;
+static int g_s64Binds = 0;
+static bool g_s64Fail = false;                    // the bind callback fails (BindReplay before its shaders are ready)
+static bool S64ReplayGs(ID3D11DeviceContext* ctx, int kind, float vpW, float vpH, float scale) {
+    if (kind == 0) { ctx->GSSetShader(nullptr, nullptr, 0); return true; }
+    if (g_s64Fail) return false;
+    const float v[4] = { 0.5f * vpW, 0.5f * vpH, 1.5f * scale, 1.0f };
+    ctx->UpdateSubresource(g_s64Cb.Get(), 0, nullptr, v, 0, 0);
+    ctx->GSSetConstantBuffers(0, 1, g_s64Cb.GetAddressOf());
+    ctx->GSSetShader(g_s64Gs.Get(), nullptr, 0);
+    ++g_s64Binds;
+    return true;
+}
+int RunReplayGsUnit(Env& E, Totals& tot) {
+    printf("\n===== S64 unit: widened draws replay through the widening GS (forward depth covers the band) =====\n");
+    int checks = 0, fails = 0;
+    auto expect = [&](bool c, const char* what) { ++checks; if (!c) { ++fails; printf("   FAIL %s\n", what); } };
+    ID3D11Device* d = E.dev.Get();
+    ID3D11DeviceContext* c = E.ctx.Get();
+    ID3D11DeviceContext1* c1 = E.ctx1.Get();
+    static const char kSrc[] =
+        "struct V { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1;"
+        " float2 t2 : TEXCOORD2; float3 t6 : TEXCOORD6; };\n"
+        "V vs(uint i : SV_VertexID) {\n"
+        "  const float2 P[6] = { float2(8, -1), float2(8, 1), float2(120, -1), float2(8, 1), float2(120, 1), float2(120, -1) };\n"
+        "  float2 q = P[i % 6]; float y = (i < 6 ? 31.3 : 15.3) + q.y * 0.03 + (q.x - 8.0) / 112.0 * 1.3;\n"
+        "  V o = (V)0; o.col = float4(0.5, 0.5, 0.5, 1); o.pos = float4(q.x / 64.0 - 1.0, 1.0 - y / 32.0, 0.5, 1.0); return o; }\n"
+        "float4 ps(V v) : SV_Target { return float4(0, 0, 0, v.col.w); }\n";
+    size_t gl = 0;
+    const char* gsrc = WireWiden::GsSource(&gl);
+    ComPtr<ID3DBlob> vb, pb, gb, err;
+    bool ok = SUCCEEDED(D3DCompile(kSrc, sizeof(kSrc) - 1, "s64", nullptr, nullptr, "vs", "vs_5_0", 0, 0, &vb, &err)) &&
+              SUCCEEDED(D3DCompile(kSrc, sizeof(kSrc) - 1, "s64", nullptr, nullptr, "ps", "ps_5_0", 0, 0, &pb, &err)) &&
+              SUCCEEDED(D3DCompile(gsrc, gl, "wire_gs", nullptr, nullptr, "GSCut", "gs_5_0", 0, 0, &gb, &err));
+    if (!ok && err) printf("   compile: %s\n", (const char*)err->GetBufferPointer());
+    ComPtr<ID3D11VertexShader> vs; ComPtr<ID3D11PixelShader> ps;
+    ok = ok && SUCCEEDED(d->CreateVertexShader(vb->GetBufferPointer(), vb->GetBufferSize(), nullptr, &vs)) &&
+         SUCCEEDED(d->CreatePixelShader(pb->GetBufferPointer(), pb->GetBufferSize(), nullptr, &ps)) &&
+         SUCCEEDED(d->CreateGeometryShader(gb->GetBufferPointer(), gb->GetBufferSize(), nullptr, &g_s64Gs));
+    D3D11_BUFFER_DESC b16{}; b16.ByteWidth = 16; b16.Usage = D3D11_USAGE_DEFAULT; b16.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    ok = ok && SUCCEEDED(d->CreateBuffer(&b16, nullptr, &g_s64Cb));
+    const uint16_t idx[12] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
+    D3D11_BUFFER_DESC ibd{}; ibd.ByteWidth = sizeof(idx); ibd.Usage = D3D11_USAGE_DEFAULT; ibd.BindFlags = D3D11_BIND_INDEX_BUFFER;
+    D3D11_SUBRESOURCE_DATA isd{ idx, 0, 0 };
+    ComPtr<ID3D11Buffer> ib;
+    ok = ok && SUCCEEDED(d->CreateBuffer(&ibd, &isd, &ib));
+    ComPtr<ID3D11Texture2D> dt, st, dummy; ComPtr<ID3D11DepthStencilView> dsv; ComPtr<ID3D11RenderTargetView> drtv;
+    D3D11_TEXTURE2D_DESC td{}; td.Width = 128; td.Height = 64; td.MipLevels = 1; td.ArraySize = 1; td.SampleDesc.Count = 1;
+    td.Format = DXGI_FORMAT_D32_FLOAT; td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+    ok = ok && SUCCEEDED(d->CreateTexture2D(&td, nullptr, &dt)) && SUCCEEDED(d->CreateDepthStencilView(dt.Get(), nullptr, &dsv));
+    td.BindFlags = 0; td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    ok = ok && SUCCEEDED(d->CreateTexture2D(&td, nullptr, &st));
+    D3D11_TEXTURE2D_DESC rd = {}; rd.Width = 128; rd.Height = 64; rd.MipLevels = 1; rd.ArraySize = 1; rd.SampleDesc.Count = 1;
+    rd.Format = DXGI_FORMAT_R8_UNORM; rd.BindFlags = D3D11_BIND_RENDER_TARGET;
+    ok = ok && SUCCEEDED(d->CreateTexture2D(&rd, nullptr, &dummy)) && SUCCEEDED(d->CreateRenderTargetView(dummy.Get(), nullptr, &drtv));
+    D3D11_DEPTH_STENCIL_DESC ds{}; ds.DepthEnable = TRUE; ds.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL; ds.DepthFunc = D3D11_COMPARISON_GREATER_EQUAL;
+    ComPtr<ID3D11DepthStencilState> dss;
+    ok = ok && SUCCEEDED(d->CreateDepthStencilState(&ds, &dss));
+    D3D11_BLEND_DESC bd{}; bd.AlphaToCoverageEnable = TRUE; bd.RenderTarget[0].RenderTargetWriteMask = 0;
+    ComPtr<ID3D11BlendState> bsA2c, bsNo;
+    ok = ok && SUCCEEDED(d->CreateBlendState(&bd, &bsA2c));
+    bd.AlphaToCoverageEnable = FALSE;
+    ok = ok && SUCCEEDED(d->CreateBlendState(&bd, &bsNo));
+    D3D11_RASTERIZER_DESC rsd{}; rsd.FillMode = D3D11_FILL_SOLID; rsd.CullMode = D3D11_CULL_NONE; rsd.DepthClipEnable = TRUE;
+    ComPtr<ID3D11RasterizerState> rsNone;
+    ok = ok && SUCCEEDED(d->CreateRasterizerState(&rsd, &rsNone));
+    expect(ok, "S64 resources");
+    // stamp: the first ribbon (rows ~31) is a widened draw; second: + an unstamped ribbon (rows ~15) recorded after it.
+    // Returns the first ribbon's columns; *secondCols = the second's; *gsLeft = a GS still bound after the replay.
+    auto run = [&](bool stamp, int* rowsMax, bool second = false, int* secondCols = nullptr, bool* gsLeft = nullptr) -> int {
+        c->ClearState();
+        c->ClearDepthStencilView(dsv.Get(), D3D11_CLEAR_DEPTH, 0.0f, 0);
+        // the game's draw state as the record captures it
+        c->IASetIndexBuffer(ib.Get(), DXGI_FORMAT_R16_UINT, 0);
+        c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        c->VSSetShader(vs.Get(), nullptr, 0);
+        c->PSSetShader(ps.Get(), nullptr, 0);
+        c->RSSetState(rsNone.Get());
+        const D3D11_VIEWPORT vp{ 0, 0, 128, 64, 0.01f, 0.9f };
+        c->RSSetViewports(1, &vp);
+        DrawIdRecord rec;
+        rec.SetForward(true);
+        rec.SetCapturePs(true);
+        if (stamp) rec.SetNextGs(1);
+        rec.Record(c1, 6, 1, 0, 0, 0, false);
+        if (second) rec.Record(c1, 6, 1, 6, 0, 0, false);   // (no SetNextGs: unstamped)
+        DrawIdRecord::SetReplayGs(&S64ReplayGs, bsNo.Get());
+        const auto rr = rec.ReplayDepth(c1, drtv.Get(), dsv.Get(), dss.Get(), bsA2c.Get(), true);
+        if (gsLeft) { ID3D11GeometryShader* g = nullptr; c->GSGetShader(&g, nullptr, nullptr); *gsLeft = g != nullptr; if (g) g->Release(); }
+        DrawIdRecord::SetReplayGs(nullptr, nullptr);
+        rec.Shutdown();
+        c->CopyResource(st.Get(), dt.Get());
+        D3D11_MAPPED_SUBRESOURCE m{};
+        int cols = 0; *rowsMax = 0;
+        if (secondCols) *secondCols = 0;
+        if (rr.replayed == (second ? 2 : 1) && SUCCEEDED(c->Map(st.Get(), 0, D3D11_MAP_READ, 0, &m))) {
+            for (int x = 10; x < 118; ++x) {
+                int rows = 0, rows2 = 0;
+                for (int y = 0; y < 64; ++y)
+                    if (((const float*)((const char*)m.pData + y * m.RowPitch))[x] > 0.0f) { if (y >= 24) ++rows; else ++rows2; }
+                if (rows) ++cols;
+                if (rows2 && secondCols) ++*secondCols;
+                *rowsMax = std::max(*rowsMax, rows);
+            }
+            c->Unmap(st.Get(), 0);
+        }
+        c->ClearState();
+        return cols;
+    };
+    if (ok) {
+        int rPlain = 0, rGs = 0;
+        g_s64Binds = 0;
+        const int plain = run(false, &rPlain);
+        const int binds0 = g_s64Binds;
+        const int wide = run(true, &rGs);
+        printf("   0.06 px wire, forward depth from the batch replay: unstamped %d / 108 columns (dashes, GS binds %d); stamped kind 1: "
+               "%d / 108 columns, <= %d rows (GS binds %d)\n", plain, binds0, wide, rGs, g_s64Binds - binds0);
+        expect(plain < 54 && binds0 == 0, "an unstamped draw replays exactly as before (no GS, the dashes)");
+        expect(wide == 108 && rGs <= 4 && g_s64Binds - binds0 >= 1,   // (phase 67: the soft band is 2 W = 3 px across here -> <= 4 rows)
+               "a stamped (widened) draw's forward depth covers the band: every column, <= 4 rows (alpha-to-coverage off for it)");
+        // [stamped, unstamped]: the GS is unbound for the second draw, which stays dashes; nothing left bound after the replay
+        int r2 = 0, sec = 0; bool left = true;
+        const int w2 = run(true, &r2, true, &sec, &left);
+        // a failing bind (shaders not ready): no widening, no stale GS for the next draw, nothing left bound
+        g_s64Fail = true;
+        int r3 = 0, sec3 = 0; bool left3 = true;
+        const int w3 = run(true, &r3, true, &sec3, &left3);
+        g_s64Fail = false;
+        printf("   [stamped, unstamped]: %d / %d columns, GS left bound %d; failing bind: %d / %d columns, GS left bound %d\n",
+               w2, sec, (int)left, w3, sec3, (int)left3);
+        expect(w2 == 108 && sec < 54 && !left, "stamped then unstamped: the widened band, then the plain draw's dashes; no GS left");
+        expect(w3 < 54 && sec3 < 54 && !left3, "a failed bind: both draws plain (dashes), no GS left bound");
+    }
+    g_s64Gs.Reset(); g_s64Cb.Reset();
+    if (g_debugLayer) { const int dl = DrainDebugLayer("S64"); ++checks; if (dl) { ++fails; printf("   FAIL debug layer: %d messages\n", dl); } }
+    printf("   %s: %d / %d checks passed\n", fails ? "FAILED" : "passed", checks - fails, checks);
+    tot.checks += checks; tot.fails += fails;
+    return fails;
+}
+
+// phase 66: the STREET LIGHTS -- ONE instanced G-buffer draw (ATS capture amtrucks_2026.10.18_20.34.48_frame1277 EID 12285, 294
+// indices x 35 instances) with pair B's PS 34860eed and its own VS a484ef85 (captures\vs_a484ef85.dxbc, from effect.scs; game data,
+// not in the repository: the unit is skipped without it). (a) the bytecode: checksum = WireWiden::kSolidVsB2, its output signature =
+// the tower VS 6c157c5f's byte for byte, NoteVs files it under pair B. (b) the GAME's VS (instance data in TEXCOORD4 / 5 decoded by
+// the game's own code) -> GSolidB -> PSSolidB, DrawIndexedInstanced with 2 instances of a 0.06 px ribbon: dashes without the GS,
+// every column of both instances with it (dither, 64 frames); the debug layer checks the VS -> GS -> PS linkage. (c) the lens rule
+// (phase 65): a face that is thin on screen only because it is seen EDGE-ON (deep in w: the lamp's flat lens from below, near) stays
+// exactly as the game draws it; the same face with 75 x less depth (far: thin in 3D too) widens; a 3 px ribbon (a near shaft) is
+// unchanged. (d) the forward-depth batch replays the INSTANCED record (stamped kind 3 = GSolidB): both instances' bands get depth.
+static ComPtr<ID3D11GeometryShader> g_s66Gs;
+static ComPtr<ID3D11Buffer> g_s66Cb;
+static int g_s66Binds = 0;
+static bool S66ReplayGs(ID3D11DeviceContext* ctx, int kind, float vpW, float vpH, float scale) {
+    if (kind == 0) { ctx->GSSetShader(nullptr, nullptr, 0); return true; }
+    if (kind != 3) return false;                       // (only GSolidB is used here)
+    const float v[8] = { 0.5f * vpW, 0.5f * vpH, 1.0f * scale, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
+    ctx->UpdateSubresource(g_s66Cb.Get(), 0, nullptr, v, 0, 0);
+    ctx->GSSetConstantBuffers(0, 1, g_s66Cb.GetAddressOf());
+    ctx->GSSetShader(g_s66Gs.Get(), nullptr, 0);
+    ++g_s66Binds;
+    return true;
+}
+// the DXBC chunk `tag` (e.g. "OSGN") of a shader blob, empty if absent
+static std::vector<char> DxbcChunk(const std::vector<char>& b, const char* tag) {
+    std::vector<char> out;
+    if (b.size() < 32 || memcmp(b.data(), "DXBC", 4)) return out;
+    uint32_t n = 0; memcpy(&n, b.data() + 28, 4);
+    for (uint32_t i = 0; i < n && 32 + 4 * i + 4 <= b.size(); ++i) {
+        uint32_t o = 0; memcpy(&o, b.data() + 32 + 4 * i, 4);
+        if (o + 8 > b.size() || memcmp(b.data() + o, tag, 4)) continue;
+        uint32_t sz = 0; memcpy(&sz, b.data() + o + 4, 4);
+        if (o + 8 + sz <= b.size()) out.assign(b.data() + o + 8, b.data() + o + 8 + sz);
+        return out;
+    }
+    return out;
+}
+int RunStreetLightUnit(Env& E, Totals& tot) {
+    printf("\n===== S66 unit: street lights -- the instanced VS a484ef85 through GSolidB (pair B), lens rule, instanced replay =====\n");
+    int checks = 0, fails = 0;
+    auto expect = [&](bool c, const char* what) { ++checks; if (!c) { ++fails; printf("   FAIL %s\n", what); } };
+    ID3D11Device* d = E.dev.Get();
+    ID3D11DeviceContext* c = E.ctx.Get();
+    ID3D11DeviceContext1* c1 = E.ctx1.Get();
+    std::vector<char> vsL, vsT, psG;
+    if (!LoadFile("vs_a484ef85.dxbc", vsL)) {
+        printf("   (captures\\vs_a484ef85.dxbc not found: skipped -- game bytecode is not in the repository)\n");
+        printf("   passed: 0 / 0 checks passed\n");
+        return 0;
+    }
+    // (a) identity + signature
+    expect(WireWiden::ChecksumIs(vsL.data(), vsL.size(), WireWiden::kSolidVsB2), "vs_a484ef85.dxbc has the checksum kSolidVsB2");
+    if (LoadFile("vs_6c157c5f.dxbc", vsT)) {
+        const std::vector<char> oL = DxbcChunk(vsL, "OSGN"), oT = DxbcChunk(vsT, "OSGN");
+        printf("   output signature (OSGN) a484ef85 %zu bytes vs tower VS 6c157c5f %zu bytes: %s\n", oL.size(), oT.size(),
+               (!oL.empty() && oL == oT) ? "identical" : "DIFFERENT");
+        expect(!oL.empty() && oL == oT, "the street-light VS outputs exactly what GSolidB takes (= the tower VS's OSGN, byte for byte)");
+    } else {
+        printf("   (captures\\vs_6c157c5f.dxbc not found: signature comparison skipped)\n");
+    }
+    {
+        static int fakeVs = 0;
+        const void* key = &fakeVs;
+        WireWiden::NoteVs(key, vsL.data(), vsL.size());
+        const bool b = WireWiden::IsSolidVs(key, 2), a = WireWiden::IsSolidVs(key, 1);
+        static const char junk[24] = "DXBCjunkjunkjunkjunk";
+        WireWiden::NoteVs(key, junk, sizeof(junk));     // another shader created at the same address: forgotten
+        const bool gone = !WireWiden::IsSolidVs(key, 2);
+        printf("   NoteVs(a484ef85): pair B %d, pair A %d; re-created with other bytecode: forgotten %d\n", (int)b, (int)a, (int)gone);
+        expect(b && !a && gone, "NoteVs files the street-light VS under pair B only (and forgets a re-used address)");
+    }
+    const bool havePs = LoadFile("ps_34860eed.dxbc", psG);
+    // harness PSs: one with the VS's own signature (no GS), one with the GS's (+ TEXCOORD7); both write the coverage marker
+    static const char kPs[] =
+        "struct VB { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float4 t2 : TEXCOORD2; float2 t3 : TEXCOORD3; };\n"
+        "struct VBK { float4 col : COLOR0; float4 pos : SV_Position; float3 t0 : TEXCOORD0; float3 t1 : TEXCOORD1; float4 t2 : TEXCOORD2; float2 t3 : TEXCOORD3; float4 kf : TEXCOORD7; };\n"
+        "struct O { float4 o0 : SV_Target0; float4 o1 : SV_Target1; float4 o2 : SV_Target2; uint4 o3 : SV_Target3; };\n"
+        "O psPlain(VB v) { O o; o.o0 = v.col; o.o1 = float4(v.t0, 1); o.o2 = float4(v.t2.xyz, 0.5); o.o3 = uint4(1, 2, 3, 4); return o; }\n"
+        "O psK(VBK v) { O o; o.o0 = v.col; o.o1 = float4(v.t0, 1); o.o2 = float4(v.t2.xyz, 0.5); o.o3 = uint4(1, 2, 3, 4); return o; }\n"
+        "float4 psDepth(VB v) : SV_Target { return float4(0, 0, 0, 1); }\n";
+    size_t gl = 0, pl = 0;
+    const char* gsrc = WireWiden::SolidGsSource(&gl);
+    const char* psrc = WireWiden::SolidPsSource(&pl);
+    ComPtr<ID3DBlob> gB, pB, p1, p2, p3, err;
+    bool ok = SUCCEEDED(D3DCompile(gsrc, gl, "solid_gs", nullptr, nullptr, "GSolidB", "gs_5_0", 0, 0, &gB, &err)) &&
+              SUCCEEDED(D3DCompile(psrc, pl, "solid_ps", nullptr, nullptr, "PSSolidB", "ps_5_0", 0, 0, &pB, &err)) &&
+              SUCCEEDED(D3DCompile(kPs, sizeof(kPs) - 1, "s66", nullptr, nullptr, "psPlain", "ps_5_0", 0, 0, &p1, &err)) &&
+              SUCCEEDED(D3DCompile(kPs, sizeof(kPs) - 1, "s66", nullptr, nullptr, "psK", "ps_5_0", 0, 0, &p2, &err)) &&
+              SUCCEEDED(D3DCompile(kPs, sizeof(kPs) - 1, "s66", nullptr, nullptr, "psDepth", "ps_5_0", 0, 0, &p3, &err));
+    if (!ok && err) printf("   compile: %s\n", (const char*)err->GetBufferPointer());
+    ComPtr<ID3D11VertexShader> vsGame; ComPtr<ID3D11PixelShader> psCopy, psPlain, psK, psDepth, psGame; ComPtr<ID3D11InputLayout> il;
+    ok = ok && SUCCEEDED(d->CreateVertexShader(vsL.data(), vsL.size(), nullptr, &vsGame)) &&
+         SUCCEEDED(d->CreateGeometryShader(gB->GetBufferPointer(), gB->GetBufferSize(), nullptr, &g_s66Gs)) &&
+         SUCCEEDED(d->CreatePixelShader(pB->GetBufferPointer(), pB->GetBufferSize(), nullptr, &psCopy)) &&
+         SUCCEEDED(d->CreatePixelShader(p1->GetBufferPointer(), p1->GetBufferSize(), nullptr, &psPlain)) &&
+         SUCCEEDED(d->CreatePixelShader(p2->GetBufferPointer(), p2->GetBufferSize(), nullptr, &psK)) &&
+         SUCCEEDED(d->CreatePixelShader(p3->GetBufferPointer(), p3->GetBufferSize(), nullptr, &psDepth));
+    if (ok && havePs && FAILED(d->CreatePixelShader(psG.data(), psG.size(), nullptr, &psGame))) psGame.Reset();
+    // the game VS's input signature: per vertex POSITION / NORMAL / COLOR / TEXCOORD0..2, per instance TEXCOORD4 (uint: the packed
+    // position, 1/512 units around -4096 / -1024 / -4096) + TEXCOORD5 (quaternion xyz, w sign + scale / 16)
+    const D3D11_INPUT_ELEMENT_DESC ied[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 28, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 44, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 1, DXGI_FORMAT_R32G32_FLOAT,       0, 52, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 2, DXGI_FORMAT_R32G32_FLOAT,       0, 60, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 4, DXGI_FORMAT_R32G32B32A32_UINT,  1, 0,  D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+        { "TEXCOORD", 5, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 16, D3D11_INPUT_PER_INSTANCE_DATA, 1 },
+    };
+    ok = ok && SUCCEEDED(d->CreateInputLayout(ied, 8, vsL.data(), vsL.size(), &il));
+    constexpr UINT kStride = 68;
+    D3D11_BUFFER_DESC vbd{}; vbd.ByteWidth = kStride * 6; vbd.Usage = D3D11_USAGE_DEFAULT; vbd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    ComPtr<ID3D11Buffer> vb, ivb, ib, vcb, pcb, gcb;
+    ok = ok && SUCCEEDED(d->CreateBuffer(&vbd, nullptr, &vb));
+    // 2 instances: identity rotation, scale 1; translation (0, 0, 0) and (0, -16, 0) px
+    struct Inst { uint32_t p[4]; float q[4]; } inst[2];
+    for (int i = 0; i < 2; ++i) {
+        const double t[3] = { 0.0, i ? -16.0 : 0.0, 0.0 }, bias[3] = { 4096.0, 1024.0, 4096.0 };
+        uint32_t hi[3];
+        for (int k = 0; k < 3; ++k) {
+            const uint32_t v = (uint32_t)llround((t[k] + bias[k]) * 512.0);
+            inst[i].p[k] = v & 0xFFFFu; hi[k] = v >> 16;
+        }
+        inst[i].p[3] = (hi[0] & 63u) | ((hi[1] & 15u) << 6) | ((hi[2] & 63u) << 10);
+        inst[i].q[0] = inst[i].q[1] = inst[i].q[2] = 0.0f; inst[i].q[3] = 1.0f / 16.0f;
+    }
+    D3D11_BUFFER_DESC ivd = vbd; ivd.ByteWidth = sizeof(inst);
+    D3D11_SUBRESOURCE_DATA isd{ inst, 0, 0 };
+    ok = ok && SUCCEEDED(d->CreateBuffer(&ivd, &isd, &ivb));
+    const uint16_t idx[6] = { 0, 1, 2, 3, 4, 5 };
+    D3D11_BUFFER_DESC ibd{}; ibd.ByteWidth = sizeof(idx); ibd.Usage = D3D11_USAGE_DEFAULT; ibd.BindFlags = D3D11_BIND_INDEX_BUFFER;
+    D3D11_SUBRESOURCE_DATA idd{ idx, 0, 0 };
+    ok = ok && SUCCEEDED(d->CreateBuffer(&ibd, &idd, &ib));
+    // VS cb0 (14 rows): 0..2 view rows (o2 / o3), 4..7 clip rows = (x / 64 - 1, 1 - y / 32, 0.5, 1) of the instanced world position
+    // (pixel units, w = POSITION.w: a homogeneous POSITION puts a vertex deeper without moving it on screen), 12 / 13 UV scale + bias
+    float vc[14][4] = {};
+    vc[0][0] = 1; vc[1][1] = 1; vc[2][2] = 1;
+    vc[4][0] = 1.0f / 64.0f; vc[4][3] = -1.0f; vc[5][1] = -1.0f / 32.0f; vc[5][3] = 1.0f; vc[6][3] = 0.5f; vc[7][3] = 1.0f;
+    vc[12][0] = 1; vc[12][2] = 1; vc[13][0] = 1;
+    D3D11_BUFFER_DESC cbd{}; cbd.ByteWidth = sizeof(vc); cbd.Usage = D3D11_USAGE_DEFAULT; cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    D3D11_SUBRESOURCE_DATA vcd{ vc, 0, 0 };
+    ok = ok && SUCCEEDED(d->CreateBuffer(&cbd, &vcd, &vcb));
+    const float pc[4][4] = { { 1, 1, 1, 0.5f }, { 1, 1, 1, 0.5f }, { 0.5f, 0, 1, 0 }, { 0, 0, 0, 0 } };   // (the PS copy's cb0)
+    D3D11_BUFFER_DESC pbd = cbd; pbd.ByteWidth = sizeof(pc);
+    D3D11_SUBRESOURCE_DATA pcd{ pc, 0, 0 };
+    ok = ok && SUCCEEDED(d->CreateBuffer(&pbd, &pcd, &pcb));
+    D3D11_BUFFER_DESC gbd = cbd; gbd.ByteWidth = 32;
+    ok = ok && SUCCEEDED(d->CreateBuffer(&gbd, nullptr, &gcb)) && SUCCEEDED(d->CreateBuffer(&gbd, nullptr, &g_s66Cb));
+    std::vector<float> white(16 * 16 * 4, 1.0f);
+    ComPtr<ID3D11ShaderResourceView> swv;
+    {
+        D3D11_TEXTURE2D_DESC td{}; td.Width = 16; td.Height = 16; td.MipLevels = 1; td.ArraySize = 1; td.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        td.SampleDesc.Count = 1; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        D3D11_SUBRESOURCE_DATA sd{ white.data(), 16 * 16, 0 };
+        ComPtr<ID3D11Texture2D> t;
+        ok = ok && SUCCEEDED(d->CreateTexture2D(&td, &sd, &t)) && SUCCEEDED(d->CreateShaderResourceView(t.Get(), nullptr, &swv));
+    }
+    D3D11_SAMPLER_DESC smd{}; smd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; smd.AddressU = smd.AddressV = smd.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+    smd.MaxLOD = D3D11_FLOAT32_MAX;
+    ComPtr<ID3D11SamplerState> smp;
+    ok = ok && SUCCEEDED(d->CreateSamplerState(&smd, &smp));
+    ComPtr<ID3D11Texture2D> rt[4], st[4]; ComPtr<ID3D11RenderTargetView> rtv[4];
+    for (int i = 0; i < 4 && ok; ++i) {
+        D3D11_TEXTURE2D_DESC td{}; td.Width = 128; td.Height = 64; td.MipLevels = 1; td.ArraySize = 1; td.SampleDesc.Count = 1;
+        td.Format = i == 3 ? DXGI_FORMAT_R32G32B32A32_UINT : DXGI_FORMAT_R32G32B32A32_FLOAT; td.BindFlags = D3D11_BIND_RENDER_TARGET;
+        ok = SUCCEEDED(d->CreateTexture2D(&td, nullptr, &rt[i])) && SUCCEEDED(d->CreateRenderTargetView(rt[i].Get(), nullptr, &rtv[i]));
+        td.BindFlags = 0; td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        ok = ok && SUCCEEDED(d->CreateTexture2D(&td, nullptr, &st[i]));
+    }
+    // forward-depth batch targets (as S64)
+    ComPtr<ID3D11Texture2D> dt, dst, dummy; ComPtr<ID3D11DepthStencilView> dsv; ComPtr<ID3D11RenderTargetView> drtv;
+    {
+        D3D11_TEXTURE2D_DESC td{}; td.Width = 128; td.Height = 64; td.MipLevels = 1; td.ArraySize = 1; td.SampleDesc.Count = 1;
+        td.Format = DXGI_FORMAT_D32_FLOAT; td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+        ok = ok && SUCCEEDED(d->CreateTexture2D(&td, nullptr, &dt)) && SUCCEEDED(d->CreateDepthStencilView(dt.Get(), nullptr, &dsv));
+        td.BindFlags = 0; td.Usage = D3D11_USAGE_STAGING; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        ok = ok && SUCCEEDED(d->CreateTexture2D(&td, nullptr, &dst));
+        td.Format = DXGI_FORMAT_R8_UNORM; td.Usage = D3D11_USAGE_DEFAULT; td.CPUAccessFlags = 0; td.BindFlags = D3D11_BIND_RENDER_TARGET;
+        ok = ok && SUCCEEDED(d->CreateTexture2D(&td, nullptr, &dummy)) && SUCCEEDED(d->CreateRenderTargetView(dummy.Get(), nullptr, &drtv));
+    }
+    D3D11_DEPTH_STENCIL_DESC dsd{}; dsd.DepthEnable = TRUE; dsd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL; dsd.DepthFunc = D3D11_COMPARISON_GREATER_EQUAL;
+    ComPtr<ID3D11DepthStencilState> dss;
+    ok = ok && SUCCEEDED(d->CreateDepthStencilState(&dsd, &dss));
+    D3D11_BLEND_DESC bld{}; bld.AlphaToCoverageEnable = TRUE; bld.RenderTarget[0].RenderTargetWriteMask = 0;
+    ComPtr<ID3D11BlendState> bsA2c, bsNo;
+    ok = ok && SUCCEEDED(d->CreateBlendState(&bld, &bsA2c));
+    bld.AlphaToCoverageEnable = FALSE;
+    ok = ok && SUCCEEDED(d->CreateBlendState(&bld, &bsNo));
+    ComPtr<ID3D11RasterizerState> rsNone;
+    { D3D11_RASTERIZER_DESC rd{}; rd.FillMode = D3D11_FILL_SOLID; rd.CullMode = D3D11_CULL_NONE; rd.DepthClipEnable = TRUE;
+      ok = ok && SUCCEEDED(d->CreateRasterizerState(&rd, &rsNone)); }
+    expect(ok, "S66 resources (the game's VS + its input layout, GSolidB, PSSolidB)");
+    // the ribbon: 2 triangles from x 8 to 120 px, half thickness `half` px around row 31.3 (+ 1.3 px slope); its top edge `deep`
+    // deeper in w (homogeneous POSITION: same screen position) -- the edge-on face of something wide in 3D
+    auto setRibbon = [&](float half, float deep) {
+        const float P[6][2] = { { 8, -1 }, { 8, 1 }, { 120, -1 }, { 8, 1 }, { 120, 1 }, { 120, -1 } };
+        float v[6][17] = {};
+        for (int i = 0; i < 6; ++i) {
+            const float x = P[i][0], y = 31.3f + P[i][1] * half + (x - 8.0f) / 112.0f * 1.3f, s = P[i][1] > 0 ? 1.0f + deep : 1.0f;
+            float* o = v[i];
+            o[0] = x * s; o[1] = y * s; o[2] = 0.0f; o[3] = s;                         // POSITION
+            o[4] = 0; o[5] = 0; o[6] = 1;                                              // NORMAL
+            o[7] = 0.3f + 0.005f * x; o[8] = 0.6f; o[9] = 0.2f; o[10] = 0.5f;          // COLOR
+            o[11] = x / 128.0f; o[12] = y / 64.0f; o[13] = y / 64.0f; o[14] = x / 128.0f; o[15] = 0.5f; o[16] = 0.25f;   // TEXCOORD0..2
+        }
+        c->UpdateSubresource(vb.Get(), 0, nullptr, v, 0, 0);
+    };
+    auto bindGame = [&]() {
+        ID3D11Buffer* vbs[2] = { vb.Get(), ivb.Get() }; const UINT strides[2] = { kStride, 32 }, offs[2] = { 0, 0 };
+        c->IASetVertexBuffers(0, 2, vbs, strides, offs);
+        c->IASetIndexBuffer(ib.Get(), DXGI_FORMAT_R16_UINT, 0);
+        c->IASetInputLayout(il.Get());
+        c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        c->VSSetShader(vsGame.Get(), nullptr, 0);
+        c->VSSetConstantBuffers(0, 1, vcb.GetAddressOf());
+        c->RSSetState(rsNone.Get());
+    };
+    // one G-buffer draw (2 instances): GS or not, the PS -> all 4 targets (raw words; RT2.w = -7 where nothing was drawn)
+    auto draw = [&](bool gs, ID3D11PixelShader* ps, float frame, float minShare, std::vector<uint32_t>* out) {
+        c->ClearState();
+        const FLOAT sentinel[4] = { -7, -7, -7, -7 };
+        for (int i = 0; i < 3; ++i) c->ClearRenderTargetView(rtv[i].Get(), sentinel);
+        const FLOAT usentF[4] = { (FLOAT)0xBEEF, (FLOAT)0xBEEF, (FLOAT)0xBEEF, (FLOAT)0xBEEF };
+        c->ClearRenderTargetView(rtv[3].Get(), usentF);
+        ID3D11RenderTargetView* rts[4] = { rtv[0].Get(), rtv[1].Get(), rtv[2].Get(), rtv[3].Get() };
+        c->OMSetRenderTargets(4, rts, nullptr);
+        const D3D11_VIEWPORT vp{ 0, 0, 128, 64, 0, 1 };
+        c->RSSetViewports(1, &vp);
+        bindGame();
+        if (gs) {
+            const float g[8] = { 64.0f, 32.0f, 1.0f, 0, frame, minShare, 0, 0 };   // W = 1 px (the user's ATS wire_min_px)
+            c->UpdateSubresource(gcb.Get(), 0, nullptr, g, 0, 0);
+            c->GSSetShader(g_s66Gs.Get(), nullptr, 0); c->GSSetConstantBuffers(0, 1, gcb.GetAddressOf());
+        }
+        c->PSSetShader(ps, nullptr, 0);
+        c->PSSetConstantBuffers(0, 1, pcb.GetAddressOf());
+        ID3D11ShaderResourceView* w = swv.Get();
+        c->PSSetShaderResources(0, 1, &w); c->PSSetShaderResources(1, 1, &w); c->PSSetShaderResources(6, 1, &w);
+        ID3D11SamplerState* ss[3] = { smp.Get(), smp.Get(), smp.Get() };
+        c->PSSetSamplers(0, 3, ss);
+        c->DrawIndexedInstanced(6, 2, 0, 0, 0);
+        out->assign(4 * 128 * 64 * 4, 0u);
+        for (int i = 0; i < 4; ++i) {
+            c->CopyResource(st[i].Get(), rt[i].Get());
+            D3D11_MAPPED_SUBRESOURCE m{};
+            if (SUCCEEDED(c->Map(st[i].Get(), 0, D3D11_MAP_READ, 0, &m))) {
+                for (int y = 0; y < 64; ++y) memcpy(&(*out)[((size_t)i * 64 + y) * 128 * 4], (const char*)m.pData + y * m.RowPitch, 128 * 16);
+                c->Unmap(st[i].Get(), 0);
+            }
+        }
+        c->ClearState();
+    };
+    auto drawn = [](const std::vector<uint32_t>& o, int x, int y) {
+        float f; memcpy(&f, &o[((size_t)2 * 64 + y) * 128 * 4 + x * 4 + 3], 4); return f != -7.0f;
+    };
+    // columns 10..117 of instance 0 (rows >= 24) / instance 1 (rows < 24) drawn in any of the frames + the mean coverage per column
+    auto columns = [&](bool gs, ID3D11PixelShader* ps, int frames, float minShare, int cols[2], double cover[2]) {
+        std::vector<int> seen[2] = { std::vector<int>(128, 0), std::vector<int>(128, 0) };
+        cover[0] = cover[1] = 0.0;
+        for (int fr = 0; fr < frames; ++fr) {
+            std::vector<uint32_t> o;
+            draw(gs, ps, (float)fr, minShare, &o);
+            for (int x = 10; x < 118; ++x)
+                for (int y = 0; y < 64; ++y)
+                    if (drawn(o, x, y)) { const int k = y >= 24 ? 0 : 1; seen[k][x] = 1; cover[k] += 1.0 / (108.0 * frames); }
+        }
+        for (int k = 0; k < 2; ++k) { cols[k] = 0; for (int x = 10; x < 118; ++x) cols[k] += seen[k][x]; }
+    };
+    if (ok) {
+        // (b) a far street light's 0.06 px faces, 2 instances in one DrawIndexedInstanced
+        setRibbon(0.03f, 0.0f);
+        int c0[2], c1v[2]; double v0[2], v1[2];
+        columns(false, psPlain.Get(), 1, 0.0f, c0, v0);
+        columns(true, psCopy.Get(), 64, 0.0f, c1v, v1);
+        printf("   0.06 px faces, DrawIndexedInstanced x 2 through the game's VS a484ef85: no GS %d + %d / 108 columns (dashes); GSolidB + "
+               "PSSolidB over 64 frames: %d + %d / 108, mean coverage %.3f / %.3f per column (want ~0.06)\n",
+               c0[0], c0[1], c1v[0], c1v[1], v1[0], v1[1]);
+        expect(c0[0] < 54 && c0[1] < 54, "without the GS the far street light's thin faces are dashes (both instances)");
+        expect(c1v[0] == 108 && c1v[1] == 108, "GSolidB on the street-light VS: every column of BOTH instances over the frames");
+        expect(v1[0] > 0.04 && v1[0] < 0.08 && v1[1] > 0.04 && v1[1] < 0.08, "the energy of each instance = its 0.06 px width");
+        // (c) the lens rule: the same 0.06 px screen sliver, its top edge 0.3 w deeper (a flat lens / housing face seen edge-on from
+        //     below, near: 19 px wide in 3D) -> exactly the game's drawing; 0.004 w deeper (the same face ~75 x farther: 0.26 px) ->
+        //     widened; a 3 px ribbon (a near shaft) -> unchanged
+        auto sameAsGame = [&](float half, float deep, const char* what) {
+            setRibbon(half, deep);
+            std::vector<uint32_t> a, b;
+            draw(false, psPlain.Get(), 3, 0.25f, &a);
+            draw(true, psK.Get(), 3, 0.25f, &b);
+            size_t diff = 0;
+            for (size_t i = 0; i < a.size(); ++i) if (a[i] != b[i]) ++diff;
+            size_t gdiff = 0; bool gameRun = false;
+            if (psGame) {                                // the game's own PS vs the dither copy behind the GS: bit for bit
+                gameRun = true;
+                draw(false, psGame.Get(), 3, 0.25f, &a);
+                draw(true, psCopy.Get(), 3, 0.25f, &b);
+                for (size_t i = 0; i < a.size(); ++i) if (a[i] != b[i]) ++gdiff;
+            }
+            printf("   %s: %zu words differ from the drawing without the GS%s", what, diff, gameRun ? "" : "\n");
+            if (gameRun) printf(", game PS 34860eed vs GS + copy: %zu words differ\n", gdiff);
+            return diff == 0 && gdiff == 0;
+        };
+        expect(sameAsGame(0.03f, 0.3f, "near lens (0.06 px on screen, edge-on, wide in 3D)"),
+               "a NEAR edge-on face (the lamp's lens from below) is not widened: exactly the game's pixels");
+        expect(sameAsGame(1.5f, 0.0f, "3 px ribbon (a near shaft)"), "a 3 px face (a near pole) passes through unchanged");
+        setRibbon(0.03f, 0.004f);
+        int cf[2]; double vf[2];
+        columns(true, psCopy.Get(), 16, 0.25f, cf, vf);
+        printf("   far lens (the same edge-on face, 0.004 w deep = 0.26 px in 3D): %d + %d / 108 columns over 16 frames\n", cf[0], cf[1]);
+        expect(cf[0] == 108 && cf[1] == 108, "a FAR edge-on face (thin in 3D too) widens");
+        // (d) the forward-depth batch: the instanced record, stamped kind 3 (GSolidB) vs unstamped
+        auto replay = [&](bool stamp, int cols[2], int* rowsMax, bool* gsLeft) {
+            setRibbon(0.03f, 0.0f);
+            c->ClearState();
+            c->ClearDepthStencilView(dsv.Get(), D3D11_CLEAR_DEPTH, 0.0f, 0);
+            bindGame();
+            c->PSSetShader(psDepth.Get(), nullptr, 0);
+            const D3D11_VIEWPORT vp{ 0, 0, 128, 64, 0.01f, 0.9f };
+            c->RSSetViewports(1, &vp);
+            DrawIdRecord rec;
+            rec.SetForward(true);
+            rec.SetCapturePs(true);
+            if (stamp) rec.SetNextGs(3);
+            rec.Record(c1, 6, 2, 0, 0, 0, true);
+            DrawIdRecord::SetReplayGs(&S66ReplayGs, bsNo.Get());
+            const auto rr = rec.ReplayDepth(c1, drtv.Get(), dsv.Get(), dss.Get(), bsA2c.Get(), true);
+            { ID3D11GeometryShader* g = nullptr; c->GSGetShader(&g, nullptr, nullptr); *gsLeft = g != nullptr; if (g) g->Release(); }
+            DrawIdRecord::SetReplayGs(nullptr, nullptr);
+            rec.Shutdown();
+            c->CopyResource(dst.Get(), dt.Get());
+            D3D11_MAPPED_SUBRESOURCE m{};
+            cols[0] = cols[1] = 0; *rowsMax = 0;
+            if (rr.replayed == 1 && SUCCEEDED(c->Map(dst.Get(), 0, D3D11_MAP_READ, 0, &m))) {
+                for (int x = 10; x < 118; ++x) {
+                    int rows[2] = { 0, 0 };
+                    for (int y = 0; y < 64; ++y)
+                        if (((const float*)((const char*)m.pData + y * m.RowPitch))[x] > 0.0f) ++rows[y >= 24 ? 0 : 1];
+                    for (int k = 0; k < 2; ++k) { if (rows[k]) ++cols[k]; *rowsMax = std::max(*rowsMax, rows[k]); }
+                }
+                c->Unmap(dst.Get(), 0);
+            }
+            c->ClearState();
+            return rr.replayed;
+        };
+        int pc0[2], pc1[2], r0 = 0, r1 = 0; bool l0 = true, l1 = true;
+        g_s66Binds = 0;
+        const int n0 = replay(false, pc0, &r0, &l0);
+        const int b0 = g_s66Binds;
+        const int n1 = replay(true, pc1, &r1, &l1);
+        printf("   forward-depth batch, the instanced record (2 instances): unstamped %d + %d / 108 columns (GS binds %d); stamped kind 3: "
+               "%d + %d / 108 columns, <= %d rows (GS binds %d), replayed %d / %d, GS left bound %d\n",
+               pc0[0], pc0[1], b0, pc1[0], pc1[1], r1, g_s66Binds - b0, n0, n1, (int)(l0 || l1));
+        expect(n0 == 1 && n1 == 1 && pc0[0] < 54 && pc0[1] < 54 && b0 == 0, "unstamped instanced record: as before (dashes, no GS)");
+        expect(pc1[0] == 108 && pc1[1] == 108 && r1 <= 3 && g_s66Binds - b0 >= 1 && !l0 && !l1,
+               "stamped instanced record: both instances' bands get forward depth (every column, <= 3 rows), no GS left bound");
+    }
+    g_s66Gs.Reset(); g_s66Cb.Reset();
+    if (g_debugLayer) { const int dl = DrainDebugLayer("S66"); ++checks; if (dl) { ++fails; printf("   FAIL debug layer: %d messages\n", dl); } }
+    printf("   %s: %d / %d checks passed\n", fails ? "FAILED" : "passed", checks - fails, checks);
+    tot.checks += checks; tot.fails += fails;
+    return fails;
+}
+
 // v0.10.0 phase 9: DrawIdRecord's view helpers (shared with inject.cpp's forward-depth re-draw)
 int RunViewUnit(Env& E, Totals& tot) {
     printf("\n===== S11/S12 unit: DrawIdRecord::ScissorRs / ScaledScissor / ScaleViewport =====\n");
@@ -6668,6 +7903,36 @@ int main(int argc, char** argv) {
         const int fl = RunViewUnit(E, tot);
         res.push_back({ "S11/S12 unit: scissor-enabled RS copy (a no-scissor state gets ScissorEnable, everything else equal), "
                         "clip / 1/2-size scissor + viewport maths", fl });
+    }
+    if ((only < 0 || only == 66) && !mutNoCons && !mutNoFwd && !mutNoAttach && !mutNoTwin && !mutPar) {   // phase 66
+        const int fl = RunStreetLightUnit(E, tot);
+        res.push_back({ "S66 unit: street lights (instanced VS a484ef85 = pair B's signature; GSolidB widens far thin faces of both "
+                        "instances, near edge-on lens + 3 px shaft unchanged; the instanced forward record replays through it)", fl });
+    }
+    if ((only < 0 || only == 64) && !mutNoCons && !mutNoFwd && !mutNoAttach && !mutNoTwin && !mutPar) {   // phase 64
+        const int fl = RunReplayGsUnit(E, tot);
+        res.push_back({ "S64 unit: a widened draw's forward depth covers its band (the replay binds the widening GS; unstamped draws "
+                        "unchanged)", fl });
+    }
+    if ((only < 0 || only == 63) && !mutNoCons && !mutNoFwd && !mutNoAttach && !mutNoTwin && !mutPar) {   // phase 63
+        const int fl = RunSolidUnit(E, tot);
+        res.push_back({ "S63 unit: solid thin geometry (dither PS copies = the game's G-buffer PSs bit for bit at k = 1; a 0.06 px "
+                        "solid ribbon -> every column, average coverage = its width over 64 frames; 3 px unchanged)", fl });
+    }
+    if ((only < 0 || only == 62) && !mutNoCons && !mutNoFwd && !mutNoAttach && !mutNoTwin && !mutPar) {   // phase 62
+        const int fl = RunWireCutPsUnit(E, tot);
+        res.push_back({ "S62 unit: the pole-hardware PS copy = the game's b97c44a3 (same discards, same RGBA; skipped without "
+                        "captures\\ps_b97c44a3.dxbc)", fl });
+    }
+    if ((only < 0 || only == 61) && !mutNoCons && !mutNoFwd && !mutNoAttach && !mutNoTwin && !mutPar) {   // phase 61
+        const int fl = RunWireWidenUnit(E, tot);
+        res.push_back({ "S61 unit: wire widening GS (a 0.06 px ribbon -> every column, energy kept; a 3 px ribbon unchanged; DXBC "
+                        "checksum)", fl });
+    }
+    if ((only < 0 || only == 60) && !mutNoCons && !mutNoFwd && !mutNoAttach && !mutNoTwin && !mutPar) {   // phase 60
+        const int fl = RunConservativeUnit(E, tot);
+        res.push_back({ "S60 unit: conservative-raster RS copy for the thin-wire forward depth (copy fields, memo, a 0.3 px ribbon "
+                        "gets depth on every column)", fl });
     }
     if ((only < 0 || only == 11) && !mutNoCons && !mutNoFwd && !mutNoAttach && !mutNoTwin && !mutPar) {
         std::unique_ptr<Shadow> pa(new Shadow), pb(new Shadow);   // (heap: two CameraMv + four records would overflow the stack)

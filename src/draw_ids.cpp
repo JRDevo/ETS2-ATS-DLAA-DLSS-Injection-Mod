@@ -2,6 +2,7 @@
 #ifdef WITH_DLAA
 
 #include "draw_ids.h"
+#include <d3d11_3.h>                                    // phase 60: ID3D11Device3 / CreateRasterizerState2 (ConservativeRs)
 #include "gpu_perf.h"
 #include "shader_cache.h"
 #include "log.h"
@@ -9,6 +10,11 @@
 #include <cmath>
 #include <cstring>
 #include <new>
+#include <xmmintrin.h>                                   // phase 58: _mm_prefetch (the static-skip table, DrawIdRecord::ReplayImpl)
+#ifdef DRAWID_VERIFY_MERGE
+#include <cstdio>
+#include <cstdlib>
+#endif
 
 using Microsoft::WRL::ComPtr;
 
@@ -121,7 +127,8 @@ float PSNorm(float4 pos : SV_Position) : SV_Target {
 //  CSVote    : one 64-thread group per CANDIDATE (Cand[], chosen on the CPU: evenly spaced draws of the layer): how many paired
 //              draws of its layer (world voters: origin >= Params2.z m from the camera when at least Cons.z such draws exist
 //              -- the own truck / trailer move with the camera) agree with the candidate's R within Params2.y px at their
-//              own probe points (ProbeDev(Mp_j, R_cand * Mc_j)).
+//              own probe points (ProbeDev(Mp_j, R_cand * Mc_j)). Phase 58: CSPair stores each draw's voter class (Work
+//              kVoterL) and a voter's Mp_j * probe projections (kVoterA); a group computes only R_cand * Mc_j per voter.
 //  CSPick    : per layer the candidate with the most agreeing draws (tie: the smaller mean deviation). A cluster of >= Cons.z
 //              draws replaces the medoid in the solve buffer (SolveRW, Solve[8 + layer].w = its size); else the medoid
 //              stays. Static scenery is hundreds of draws, vehicles tens -- a convoy moving together forms a cluster too,
@@ -145,7 +152,9 @@ float PSNorm(float4 pos : SV_Position) : SV_Target {
 //  CSInherit1: one thread per draw, after CSResolve: a draw whose OWN pair made it static / mover (state 2 / 3) inserts itself
 //              into a hash table of its 16 MVP words (Work kHash, 2n slots, linear probing; the slots are cleared by CSGather;
 //              only when Cons.w bit 2 = mv_drawid_twin); a G-buffer MOVER also appends itself to a compact list (kMovCnt /
-//              kMovList, the candidates of CSAttach).
+//              kMovList, the candidates of CSAttach). Phase 58: one slot per unique (MVP, layer) holding TwinDraw's pick of
+//              that group (InterlockedMin of forward << 31 | draw + 1); the list entries are 32-byte mover records (kMovRec:
+//              origin + the x / y scales CSAttach divides by), see Inherit1Draw.
 //  CSTwin    : a draw still at state 1 (no partner group, oversized group, continuity reject, not mutual) whose MVP is
 //              BIT-identical (-0 == +0) to such a draw's (same layer; G-buffer twins before forward ones, then the lowest
 //              index) takes the twin's R rows and state -- a plate, a lamp, a mirror arm drawn with the vehicle's own matrix
@@ -321,7 +330,8 @@ static const uint kAttach = kMaxDraws * 164u + 4096u;   // v0.10.0 phase 4: atta
 static const uint kTwin = kMaxDraws * 168u + 4096u;     // v0.10.0 phase 5: twin (draw index) per draw (kNone = none)
 static const uint kHash = kMaxDraws * 172u + 4096u;     // v0.10.0 phase 5: MVP hash table, 2n slots (draw + 1, 0 = empty)
 static const uint kMovCnt = kMaxDraws * 180u + 4096u;   // v0.10.0 phase 5: G-buffer movers in the list (16 B)
-static const uint kMovList = kMaxDraws * 180u + 4112u;  // v0.10.0 phase 5: G-buffer mover indices (CSAttach candidates)
+static const uint kMovList = kMaxDraws * 180u + 4112u;  // v0.10.0 phase 5: G-buffer mover indices (phase 58: unused, the list is
+                                                        // kMovRec; kept: removing a static const shifts fxc's output elsewhere)
 static const uint kMStride = 80u;                   // CurM / PrevM bytes per draw (MVP 64 + track 16)
 static const uint kParSlot = kMaxDraws * 184u + 8192u;  // v0.10.0 phase 6: U slot per draw (kNone = not a listed unpaired draw)
 static const uint kParent = kMaxDraws * 188u + 8192u;   // v0.10.0 phase 6: rigid parent (draw index) per draw (kNone = none)
@@ -334,6 +344,14 @@ static const uint kChainBit = 0x80000000u;          // kParVT: won in the 2nd pa
 static const uint kParSum = kMaxDraws * 200u + 24576u;  // v0.10.0 phase 14 round 4: per draw (sum x, sum y, n) of its pixels on
                                                         // a 2 px sub-grid (CSParentCount: its centroid -- the plate hold)
 static const uint kVoteW = kMaxDraws * 212u + 24576u;  // v0.10.0 phase 19: per candidate the agreeing voters' summed IndexCount
+// phase 58 (perf round 2), after the phase-19 block (kVoteW + 1024 B). #define, not static const: measured with fxc 10.0.26100,
+// three more static const declarations alone changed the DXBC of CSParentPick1 / CSParentPick2 (code that never reads them);
+// as macros every entry point this phase does not touch compiles to the same bytecode as before.
+#define kVoterL (kMaxDraws * 212u + 25600u) // per draw (CSPair -> CSVote): bits 0..1 voter class without the far filter, 2..3
+                                            // with it (VoterClass: 0 world, 1 cabin, 2 none), 16..31 min(IndexCount, 65535)
+                                            // (the phase-19 weight)
+#define kVoterA (kMaxDraws * 216u + 25600u) // per draw 72 B: the 6 probe projections a = Mp * probe (x, y, w) of a voter
+#define kMovRec (kMaxDraws * 288u + 25600u) // per mover-list entry 32 B: (draw | cabin << 31, origin x, y, w bits), (sx, sy)
 
 // (v0.10.0 phase 14 round 4: one more C++ raw-string split here, MSVC's 16380-byte literal cap): )" R"(
 float4x4 LoadM(ByteAddressBuffer b, uint a) {
@@ -627,27 +645,59 @@ void CSMatch(uint3 tid : SV_DispatchThreadID) {
 // points. Only an ON-SCREEN probe (|ndc| <= 1.5, w >= 0.05) is compared in screen space; a probe off-screen, at or behind
 // the camera plane compares clip x / y divided by max(w, 1): a perspective divide by a tiny w (a probe beside the camera)
 // would magnify float noise of the camera solve into "motion" there, while a real mover still shows up in clip units.
-float ProbeDev(float4x4 Mp, float4x4 P) {
+// phase 58: split into ProbeAt (the probe projection) + ProbeTerm (one probe's distance) so CSVote can take the PREVIOUS side's
+// projections a = Mp * probe precomputed by CSPair (ProbeDevA): the same expressions, inlined, give the same values bit for bit
+float4 ProbeAt(float4x4 M, int k) {
     // origin, +-4 on the local x / z axes, +4 on y: about a vehicle's half length (a trailer's far end must not hide a
     // motion the origin alone would not show); a larger lever only over-estimates -> "mover" -> its own exact R (safe)
     float4 probes[6] = { float4(0, 0, 0, 1), float4(4, 0, 0, 1), float4(-4, 0, 0, 1),
                          float4(0, 0, 4, 1), float4(0, 0, -4, 1), float4(0, 4, 0, 1) };
+    return mul(M, probes[k]);
+}
+float ProbeTerm(float4 a, float4 b) {                    // a = the true previous position, b = the prediction (a.z / b.z unused)
+    float d;
+    bool onScreen = a.w > 0.05 && b.w > 0.05;
+    float2 na = a.xy / max(a.w, 1e-6), nb = b.xy / max(b.w, 1e-6);
+    onScreen = onScreen && all(abs(na) <= 1.5) && all(abs(nb) <= 1.5);
+    if (onScreen) d = length((na - nb) * Params.zw * 0.5);
+    else d = length((a.xy - b.xy) / max(max(abs(a.w), abs(b.w)), 1.0) * Params.zw * 0.5);
+    return isfinite(d) ? d : 1e9;
+}
+float ProbeDev(float4x4 Mp, float4x4 P) {
+    float dev = 0.0;
+    [unroll] for (int k = 0; k < 6; ++k) dev = max(dev, ProbeTerm(ProbeAt(Mp, k), ProbeAt(P, k)));
+    return dev;
+}
+// phase 58: ProbeDev(Mp_i, P) with draw i's a = Mp_i * probe read from Work kVoterA (CSPair, StoreProbeA)
+float ProbeDevA(uint i, float4x4 P) {
     float dev = 0.0;
     [unroll] for (int k = 0; k < 6; ++k) {
-        float4 a = mul(Mp, probes[k]);
-        float4 b = mul(P, probes[k]);
-        float d;
-        bool onScreen = a.w > 0.05 && b.w > 0.05;
-        float2 na = a.xy / max(a.w, 1e-6), nb = b.xy / max(b.w, 1e-6);
-        onScreen = onScreen && all(abs(na) <= 1.5) && all(abs(nb) <= 1.5);
-        if (onScreen) d = length((na - nb) * Params.zw * 0.5);
-        else d = length((a.xy - b.xy) / max(max(abs(a.w), abs(b.w)), 1.0) * Params.zw * 0.5);
-        dev = max(dev, isfinite(d) ? d : 1e9);
+        float3 a = asfloat(Work.Load3(kVoterA + i * 72u + (uint)k * 12u));
+        dev = max(dev, ProbeTerm(float4(a.x, a.y, 0.0, a.z), ProbeAt(P, k)));
     }
     return dev;
 }
+void StoreProbeA(uint i, float4x4 Mp) {
+    [unroll] for (int k = 0; k < 6; ++k) {
+        float4 a = ProbeAt(Mp, k);
+        Work.Store3(kVoterA + i * 72u + (uint)k * 12u, asuint(float3(a.x, a.y, a.w)));
+    }
+}
 
 // v0.10.0 phase 3: the source is split into two C++ raw strings here (MSVC caps one literal at 16380 bytes): )" R"(
+// consensus voter / candidate class of a draw: 0 world, 1 cabin, 2 none (unpaired, instanced, no MVP, forward, or a world
+// draw nearer than the near filter while enough far ones exist). flags = Tab .z, c3 = column 3 of its current MVP.
+// Phase 58: CSPair evaluates it once per draw for both values of useFar (Work kVoterL); CSVote's groups read the two bits instead
+// of each re-deriving it for every draw (it was VoterLayer: Tab + partner + CurM loads per draw and candidate group).
+uint VoterClass(uint flags, uint partner, float4 c3, bool useFar) {
+    if (partner == kNone || (flags & (kFInst | kFNoMvp | kFFwd)) != 0u) return 2u;
+    bool cab = (flags & kFCabin) != 0u;
+    if (!cab && useFar) return abs(c3.w) >= Params2.z ? 0u : 2u;   // |MVP row 3 .w| = origin w
+    // v0.10.0 phase 14 round 6: an origin-free (camera-relative) draw's own R is the camera rotation only -- never a voter or a
+    // candidate (with the far filter on, its origin w ~ 0 already fails it above)
+    if (OriginFreeCol(c3)) return 2u;
+    return cab ? 1u : 0u;
+}
 // v0.10.0 phase 3: the mutual pair of each draw and its R_draw (kept in Work for the consensus and CSResolve)
 [numthreads(64, 1, 1)]
 void CSPair(uint3 tid : SV_DispatchThreadID) {
@@ -655,6 +705,7 @@ void CSPair(uint3 tid : SV_DispatchThreadID) {
     if (i >= Counts.x) return;
     uint4 e = Tab[i * 2u];
     uint partner = kNone;
+    float4 c3 = float4(0.0, 0.0, 0.0, 0.0);              // phase 58: column 3 of Mc (VoterClass)
     bool shapeOk = true;                                 // v0.10.0 phase 19: rows 4..7 have the shape of an MVP (NotMvp)
     if ((e.z & (kFInst | kFNoMvp)) == 0u && e.x != kNone && NotMvp(LoadMW(CurM, i * kMStride))) {
         shapeOk = false;
@@ -674,7 +725,10 @@ void CSPair(uint3 tid : SV_DispatchThreadID) {
                 float4x4 Rd = mul(Mp, Ic);
                 if (Finite4(Rd)) {
                     partner = b.x;
+                    c3 = Col3(Mc);
                     StoreM(Work, kRd + i * 64u, Rd);
+                    // phase 58: a voter's previous-side probe projections, read by every CSVote group (ProbeDevA)
+                    if (VoterClass(e.z, partner, c3, false) != 2u || VoterClass(e.z, partner, c3, true) != 2u) StoreProbeA(i, Mp);
                     uint old;
                     if ((e.z & kFFwd) == 0u) {
                         // (phase 19: [231] = the cabin layer's VOTERS -- paired, not camera-relative; the small-cabin rule)
@@ -692,22 +746,11 @@ void CSPair(uint3 tid : SV_DispatchThreadID) {
         }
     }
     Work.Store(kPartner + i * 4u, partner);
+    // phase 58: the voter classes (no far filter / far filter; CSVote picks by its useFar) + the phase-19 weight
+    Work.Store(kVoterL + i * 4u, VoterClass(e.z, partner, c3, false) | (VoterClass(e.z, partner, c3, true) << 2) |
+                                 (min(Tab[i * 2u + 1u].z & 0xFFFFFFu, 65535u) << 16));
 }
 
-// consensus voter / candidate class of draw i: 0 world, 1 cabin, 2 none (unpaired, instanced, no MVP, forward, or a world
-// draw nearer than the near filter while enough far ones exist)
-uint VoterLayer(uint i, bool useFar, out uint partner) {
-    uint4 e = Tab[i * 2u];
-    partner = Work.Load(kPartner + i * 4u);
-    if (partner == kNone || (e.z & (kFInst | kFNoMvp | kFFwd)) != 0u) return 2u;
-    bool cab = (e.z & kFCabin) != 0u;
-    if (!cab && useFar) return abs(asfloat(CurM.Load(i * kMStride + 60u))) >= Params2.z ? 0u : 2u;   // |MVP row 3 .w| = origin w
-    // v0.10.0 phase 14 round 6: an origin-free (camera-relative) draw's own R is the camera rotation only -- never a voter or a
-    // candidate (with the far filter on, its origin w ~ 0 already fails it above)
-    uint b = i * kMStride;
-    if (OriginFreeCol(asfloat(uint4(CurM.Load(b + 12u), CurM.Load(b + 28u), CurM.Load(b + 44u), CurM.Load(b + 60u))))) return 2u;
-    return cab ? 1u : 0u;
-}
 
 groupshared uint  gVoteN[64];
 groupshared float gVoteD[64];
@@ -720,21 +763,23 @@ void CSVote(uint3 gid : SV_GroupID, uint gi : SV_GroupIndex) {
     uint want = c < Cons.x ? 0u : 1u;
     bool useFar = Cnt.Load(17u * 4u) >= Cons.z;
     uint ci = c < Cons.x + Cons.y ? CandAt(c) : kNone;
-    uint pc = kNone;
+    uint sh = useFar ? 2u : 0u;                          // phase 58: the voter class bits of this vote (Work kVoterL, CSPair)
     bool ok = false;
-    if (ci < Counts.x) ok = VoterLayer(ci, useFar, pc) == want;
+    if (ci < Counts.x) ok = ((Work.Load(kVoterL + ci * 4u) >> sh) & 3u) == want;
     float4x4 Rc = float4x4(1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1);
     if (ok) Rc = LoadMW(Work, kRd + ci * 64u);
     uint cnt = 0u, wsum = 0u;
     float sdev = 0.0;
     if (ok) {
+        // phase 58: the same draws per thread in the same order as before (i = gi, gi + 64, ...): sdev is a float sum and its
+        // order decides the bits of the mean deviation (CSPick's tie-break), so the voters stay a dense per-draw array, not a
+        // compacted list. Per voter only b = (Rc * Mc) * probe is computed; a = Mp * probe comes from CSPair (ProbeDevA).
         for (uint i = gi; i < Counts.x; i += 64u) {
-            uint p;
-            if (VoterLayer(i, useFar, p) != want) continue;
+            uint vl = Work.Load(kVoterL + i * 4u);
+            if (((vl >> sh) & 3u) != want) continue;
             float4x4 Mc = LoadMW(CurM, i * kMStride);
-            float4x4 Mp = LoadM(PrevM, p * kMStride);
-            float dv = ProbeDev(Mp, mul(Rc, Mc));
-            if (dv < Params2.y) { ++cnt; sdev += dv; wsum += min(Tab[i * 2u + 1u].z & 0xFFFFFFu, 65535u); }
+            float dv = ProbeDevA(i, mul(Rc, Mc));
+            if (dv < Params2.y) { ++cnt; sdev += dv; wsum += vl >> 16; }
         }
     }
     gVoteN[gi] = cnt;
@@ -1052,19 +1097,21 @@ void AttachDraw(uint i) {
     uint best = kNone;
     float bd = Params2.w;
     uint nMov = min(Work.Load(kMovCnt), Counts.x);
+    uint cab = (e.z & kFCabin) != 0u ? 0x80000000u : 0u;
+    // phase 58: the list holds each mover's 32-byte record (Inherit1Draw: origin, sx, sy computed there with the same operations
+    // this loop used to repeat for every forward / unpaired draw); the full matrix is loaded only for the SameAxes test of a
+    // G-buffer draw's candidates that beat the best distance so far. Same list, same order, same tests: the same pick.
     for (uint q = 0u; q < nMov; ++q) {
-        uint j = Work.Load(kMovList + q * 4u);                   // a G-buffer MOVER by its own pair (CSInherit1)
-        uint4 ej = Tab[j * 2u];
-        if (((ej.z ^ e.z) & kFCabin) != 0u) continue;
-        float4x4 Mj = LoadMW(CurM, j * kMStride);
-        float4 oj = Col3(Mj);
+        uint4 r0 = Work.Load4(kMovRec + q * 32u);                // a G-buffer MOVER by its own pair (CSInherit1)
+        if ((r0.x & 0x80000000u) != cab) continue;               // another layer
+        uint j = r0.x & 0x7FFFFFFFu;
+        float4 oj = float4(asfloat(r0.y), asfloat(r0.z), 0.0, asfloat(r0.w));
         if (!(oj.w > 0.05)) continue;
-        float n3 = max(length(Mj[3].xyz), 1e-6);
-        float sx = max(length(Mj[0].xyz) / n3, 1e-6), sy = max(length(Mj[1].xyz) / n3, 1e-6);
-        float dist = length(float3((oi.x - oj.x) / sx, (oi.y - oj.y) / sy, oi.w - oj.w));
+        float2 sxy = asfloat(Work.Load2(kMovRec + q * 32u + 16u));
+        float dist = length(float3((oi.x - oj.x) / sxy.x, (oi.y - oj.y) / sxy.y, oi.w - oj.w));
         // nearest; equal distances -> the lower index (the list order is not deterministic)
         if (best == kNone ? !(dist < bd) : (dist > bd || (dist == bd && j > best))) continue;
-        if (!fwd && !SameAxes(Mc, Mj)) continue;                 // phase 5: a G-buffer draw must share the mover's orientation
+        if (!fwd && !SameAxes(Mc, LoadMW(CurM, j * kMStride))) continue;   // phase 5: a G-buffer draw must share the mover's orientation
         bd = dist; best = j;
     }
     if (best == kNone) return;
@@ -1087,23 +1134,47 @@ void CSAttach(uint3 tid : SV_DispatchThreadID) {
 }
 
 // phase 5: after CSResolve -- own-pair static / mover draws into the twin table, G-buffer movers into the mover list
+// Phase 58 (perf round 2):
+//  MOVER RECORDS: the mover list entry is a 32-byte record (kMovRec): (i | cabin << 31, origin x, y, w), (sx, sy) -- the origin and
+//    the per-mover scales AttachDraw needs, computed here once with exactly its old operations (it re-derived them, 3 length()
+//    of a reloaded matrix, for every forward / unpaired draw x every mover: up to 336 movers in a city).
+//  TWIN TABLE, ONE SLOT PER UNIQUE (MATRIX, LAYER): was one slot per draw, so identical MVPs (camera-relative grass sharing one
+//    matrix) formed one long linear-probe CAS chain that every insert and every TwinDraw lookup walked (SameM + Tab per entry).
+//    Now an insert that meets an occupied slot compares it (same layer + SameM, against the slot's current member -- every
+//    member of a slot carries the same matrix) and, when equal, joins it with InterlockedMin of (forward << 31 | draw + 1): the
+//    slot ends up holding TwinDraw's old pick of that group -- G-buffer before forward, then the lowest index. Two inserts of one
+//    key race to the same first free-or-same slot along the same probe sequence (occupied slots never change key), so a key
+//    never lands in two slots. Empty = 0 (draw + 1 >= 1).
 void Inherit1Draw(uint i) {
     uint4 e = Tab[i * 2u];
     if ((e.z & (kFInst | kFNoMvp)) != 0u || e.x == kNone) return;
     uint st = (uint)(RTab[i * 5u + 4u].x + 0.5);
     if (st != 2u && st != 3u) return;
+    float4x4 M = LoadMW(CurM, i * kMStride);
+    uint cab = (e.z & kFCabin) != 0u ? 0x80000000u : 0u;
     if (st == 3u && (e.z & kFFwd) == 0u) {
         uint k;
         Work.InterlockedAdd(kMovCnt, 1u, k);
-        if (k < kMaxDraws) Work.Store(kMovList + k * 4u, i);
+        if (k < kMaxDraws) {
+            float4 oj = Col3(M);
+            float n3 = max(length(M[3].xyz), 1e-6);
+            float sx = max(length(M[0].xyz) / n3, 1e-6), sy = max(length(M[1].xyz) / n3, 1e-6);
+            Work.Store4(kMovRec + k * 32u, uint4(i | cab, asuint(oj.x), asuint(oj.y), asuint(oj.w)));
+            Work.Store2(kMovRec + k * 32u + 16u, uint2(asuint(sx), asuint(sy)));
+        }
     }
     if ((Cons.w & 4u) == 0u) return;
     uint T = Counts.x * 2u;
-    uint h = HashM(LoadMW(CurM, i * kMStride));
+    uint h = HashM(M);
+    uint enc = ((e.z & kFFwd) != 0u ? 0x80000000u : 0u) | (i + 1u);
     for (uint k2 = 0u; k2 < T; ++k2) {
-        uint orig;
-        Work.InterlockedCompareExchange(kHash + ((h + k2) % T) * 4u, 0u, i + 1u, orig);
-        if (orig == 0u) break;
+        uint a = kHash + ((h + k2) % T) * 4u, orig;
+        Work.InterlockedCompareExchange(a, 0u, enc, orig);
+        if (orig == 0u) break;                                   // a new slot: this (matrix, layer) so far
+        uint j = (orig & 0x7FFFFFFFu) - 1u;
+        if (((Tab[j * 2u].z & kFCabin) != 0u ? 0x80000000u : 0u) != cab || !SameM(M, LoadMW(CurM, j * kMStride))) continue;
+        Work.InterlockedMin(a, enc, orig);                       // the same (matrix, layer): keep the better of the two
+        break;
     }
 }
 [numthreads(64, 1, 1)]
@@ -1128,17 +1199,17 @@ void TwinDraw(uint i) {
     uint T = Counts.x * 2u;
     uint h = HashM(M);
     uint best = kNone;
-    bool bestFwd = true;
+    // phase 58: one slot per (matrix, layer) holding the pick already (G-buffer before forward, then the lowest index; see
+    // Inherit1Draw): the first slot of this layer with the same matrix is the twin
     for (uint k = 0u; k < T; ++k) {
         uint v = Work.Load(kHash + ((h + k) % T) * 4u);
         if (v == 0u) break;                                      // end of the probe chain
-        uint j = v - 1u;
+        uint j = (v & 0x7FFFFFFFu) - 1u;
         if (j == i || j >= Counts.x) continue;
-        uint4 ej = Tab[j * 2u];
-        if (((ej.z ^ e.z) & kFCabin) != 0u) continue;
+        if (((Tab[j * 2u].z ^ e.z) & kFCabin) != 0u) continue;
         if (!SameM(M, LoadMW(CurM, j * kMStride))) continue;
-        bool jf = (ej.z & kFFwd) != 0u;
-        if (best == kNone || (bestFwd && !jf) || (bestFwd == jf && j < best)) { best = j; bestFwd = jf; }
+        best = j;
+        break;
     }
     if (best == kNone) return;
     uint ob = best * 5u;
@@ -2054,6 +2125,7 @@ ComPtr<ID3D11DepthStencilState>  s_dss;
 ComPtr<ID3D11Buffer>             s_idCb;
 ComPtr<ID3D11BlendState>         s_bsR, s_bsG;            // v0.10.0 phase 3: write RED (G-buffer ids) / GREEN (forward ids)
 const void*                      s_dev = nullptr;          // identity of the device the objects belong to
+bool                             s_clearView = false;      // phase 57: the driver supports ClearView (the id-target clear by rect)
 // v0.10.0 phase 10: forward-depth occlusion init (InitFwdDepth): own device identity (the ids may be off)
 ComPtr<ID3D11VertexShader>       s_initVs;
 ComPtr<ID3D11PixelShader>        s_initPs[2];
@@ -2317,6 +2389,8 @@ unsigned g_statFrames = 6u, g_statEvery = 4u;
 //                            player's speed is "static" within the 0.1 px snap but wobbles: it is never skipped (default 0.02)
 float    g_statEps = 0.02f;
 bool     g_staticGate = false;               // DrawIdRecord::SetStaticGate (set per replay by the caller)
+bool     g_fullIdClear = false;              // phase 57: DrawIdRecord::SetFullIdClear (the Ctrl+F6 view: clear the whole id target)
+uint64_t g_idClearRect = 0, g_idClearFull = 0;   // phase 57: G-buffer id-target clears by rect / whole target (IdClears)
 uint64_t g_testSkipKey = 0;                  // round 4, HARNESS ONLY: DrawIdRecord::SetTestSkipKey
 constexpr uint64_t kStatFresh = 16;         // the last verdict must be at most this many frames old (readbacks stalled: replay)
 constexpr uint64_t kStatParentHold = 30;     // a key that was a rigid parent within this many frames is always replayed
@@ -2325,31 +2399,65 @@ constexpr uint64_t kStatQuiet = 60;          // round 3: a key that MOVED (or wa
 constexpr uint64_t kStatExpire = 600;        // a slot not seen for this many frames may take another key
 constexpr int      kStatTab = 8192;          // >= 2x the draws of a pass (kMax 4096)
 // badTag: the readback that reset it; moved: the last frame + 1 a draw of the key moved / was only shallow-static (0 = never)
-struct StatEnt { uint64_t key, seen, inc, parent, moved; uint32_t streak, badTag; };
-StatEnt  g_stat[kStatTab] = {};
+// Phase 58 (perf round 2) HOT / COLD SPLIT: the table was one 48-byte entry per slot (393 KB). StaticSkip runs once per candidate
+// draw of every gated G-buffer replay (~1650 per pass, 2 eyes), and a whole G-buffer pass runs between two replays, so the table
+// is cold every time: each probe was a cache miss into a 48-byte entry of which StaticSkip needs a third. Now the slot is split:
+//   HOT  (StatHot, 16 B x 8192 = 128 KB): the key + `packed`, everything StaticSkip needs, precomputed by Poll (StatPack);
+//   COLD (StatCold, 40 B): seen, inc, parent, moved, streak, badTag -- only Poll (the streak feed, StatFind's expiry) and the
+//        per-10-s StaticKeys statistic read it.
+// Same slots, same probing, same expiry / reuse as before (StatFind walks the HOT keys and reads COLD only to test an expiry while
+// inserting), so every decision is the old one bit for bit. `packed` (StatPack):
+//   bits  0..27  hi = seen + kStatFresh            (skip only while frame <= hi: a recent verdict)
+//   bits 28..55  lo = max(parent + kStatParentHold + 1, moved + kStatQuiet)   (0 when neither is set: skip only from lo on)
+//   bits 56..61  min(streak, 63)                   (g_statFrames <= 60, so ">= g_statFrames" is unchanged by the cap)
+//   bit  62      FAR: seen / parent / moved >= 2^27 (in game: ~15 days of 100 fps in one session) -- StaticSkip then evaluates
+//                the exact old tests from COLD (never wrong, only slower)
+// Frames may go BACKWARDS between harness scenes / shadow runs without a clear: [lo, hi] are plain uint64 comparisons with the
+// current frame, exactly the old ones (no deltas against "now"), so that stays identical too.
+struct StatHot { uint64_t key, packed; };
+struct StatCold { uint64_t seen, inc, parent, moved; uint32_t streak, badTag; };
+alignas(64) StatHot g_statHot[kStatTab] = {};
+StatCold g_statCold[kStatTab] = {};
+constexpr uint64_t kStatPackMask = (1ull << 28) - 1ull;
+constexpr uint64_t kStatPackFar = 1ull << 62;
+constexpr uint64_t kStatPackLim = 1ull << 27;            // seen / parent / moved below this: hi / lo fit 28 bits
+uint64_t StatPack(const StatCold& c) {
+    const uint64_t st = (uint64_t)(c.streak < 63u ? c.streak : 63u) << 56;
+    if (c.seen >= kStatPackLim || c.parent >= kStatPackLim || c.moved >= kStatPackLim) return kStatPackFar | st;
+    const uint64_t hi = c.seen + kStatFresh;                                   // StaticSkip: seen + kStatFresh >= frame
+    const uint64_t loP = c.parent ? c.parent + kStatParentHold + 1u : 0u;      //   !(parent && parent + kStatParentHold >= frame)
+    const uint64_t loM = c.moved ? c.moved + kStatQuiet : 0u;                  //   !(moved && moved + kStatQuiet > frame)
+    const uint64_t lo = loP > loM ? loP : loM;
+    return hi | (lo << 28) | st;
+}
+inline uint32_t StatHome(uint64_t key) {                 // the first probe slot of a key (StatFind; the replay's prefetch)
+    if (!key) key = 1;
+    return (uint32_t)(key ^ (key >> 29)) & (kStatTab - 1);
+}
 uint32_t g_statTag = 0;                      // one per fed readback (the "this key had a non-static draw in it" mark)
 int      g_statUsed = 0;                     // slots taken since the last clear
 uint64_t g_statClears[DrawIdMv::kStatClrN] = {};
 constexpr int kStatUnits = 8;                // main units registered for DrawIdMv::PollMain (flat: 1, VR: 2; harness: a few)
 DrawIdMv* g_statUnit[kStatUnits] = {};
-StatEnt* StatFind(uint64_t key, bool insert) {
+// phase 58: returns the SLOT (-1 = none); a new / reused slot is zeroed (packed 0 = streak 0 = never skipped until Poll repacks it)
+int StatFind(uint64_t key, bool insert) {
     if (!key) key = 1;
-    uint32_t h = (uint32_t)(key ^ (key >> 29)) & (kStatTab - 1);
+    uint32_t h = StatHome(key);
     for (int p = 0; p < 32; ++p, h = (h + 1) & (kStatTab - 1)) {
-        StatEnt& e = g_stat[h];
-        if (e.key == key) return &e;
+        StatHot& e = g_statHot[h];
+        if (e.key == key) return (int)h;
         if (!e.key) {
-            if (!insert) return nullptr;
-            e = StatEnt{}; e.key = key;
+            if (!insert) return -1;
+            e.key = key; e.packed = 0; g_statCold[h] = StatCold{};
             ++g_statUsed;
-            return &e;
+            return (int)h;
         }
-        if (insert && e.seen + kStatExpire < g_instFrame && e.parent + kStatExpire < g_instFrame) {   // expired: reused
-            e = StatEnt{}; e.key = key;
-            return &e;
+        if (insert && g_statCold[h].seen + kStatExpire < g_instFrame && g_statCold[h].parent + kStatExpire < g_instFrame) {
+            e.key = key; e.packed = 0; g_statCold[h] = StatCold{};   // expired: reused
+            return (int)h;
         }
     }
-    return nullptr;                                      // probe chain full: the key is never skipped (always replayed)
+    return -1;                                           // probe chain full: the key is never skipped (always replayed)
 }
 constexpr float kParFineSamples = 64.0f;   // < 64 coarse samples (~1000 px at mv_vote_res 4) = a FINE listed draw
 // v0.10.0 phase 9: dlaa.ini mv_fold_dispatch (1 = CSPickResolve / CSListTwin, 0 = the phase-8 chain of separate dispatches)
@@ -2396,7 +2504,9 @@ constexpr UINT kCbBytes = 64u + 48u * 16u + 96u;     // v0.10.0 phase 9: + Clip,
 // phase 6c: the vote tables grow to 64 x 192 B (kParTab = kMax * 200 + 8704, end kMax * 200 + 20992)
 // phase 14 round 4: + the per-draw centroid sums (kParSum = kMax * 200 + 24576, kMax * 12 B)
 // phase 19: + the candidates' summed voter IndexCounts (kVoteW = kMax * 212 + 24576, 256 x 4 B)
-constexpr UINT kWorkBytes = (UINT)DrawIdRecord::kMax * 212u + 24576u + 1024u;
+// phase 58: + the voter classes (kVoterL = kMax * 212 + 25600, kMax x 4 B), the voters' probe projections (kVoterA = kMax * 216
+// + 25600, kMax x 72 B) and the mover records (kMovRec = kMax * 288 + 25600, kMax x 32 B)
+constexpr UINT kWorkBytes = (UINT)DrawIdRecord::kMax * 320u + 25600u;   // = the shader's kMovRec + kMaxDraws * 32 (phase 58)
 constexpr UINT kCntBytes = 5376u;               // v0.10.0 phase 8: + dwords 256..383 = instanced draws with a moving parent
                                                  // v0.10.0 phase 22: + dwords 832..1343 = the per-draw MVP layout codes
                                                  // (4 bits per draw, kLayCodeBase in the shader; was 3328)
@@ -2512,6 +2622,7 @@ struct DrawIdRecord::State {
     UINT ic, inst, si, sinst;
     INT  bv;
     bool instanced;
+    uint8_t gsKind;                              // phase 64: widening kind (SetNextGs; 0 = none)
     uint32_t own;                                // phase 35: the pointers this draw holds a reference on (kO* bits)
 };
 
@@ -2531,15 +2642,19 @@ struct DrawIdRecord::PsState {
     ID3D11SamplerState* smp[kPsSmp];
 };
 
+// phase 57 (perf): no memset of the whole PsState (~300 B per draw) -- only the pointers it releases are nulled. Record overwrites
+// every field before the slot is replayed again (PSGetShader / PSGetConstantBuffers1 / PSGetShaderResources / PSGetSamplers write
+// all their slots), but two readers rely on a released slot holding NO pointers: Record's "SRV unchanged since this record's
+// previous draw" test reads m_ps[m_n - 1] even when that draw is already released (a stale match would keep a resource out of
+// the pending-resource set restarted by the replay), and a second release of the same slot must not Release twice.
 void DrawIdRecord::ReleasePs(int from, int to) {
     if (!m_ps) return;
     for (int i = from; i < to; ++i) {
         PsState& p = m_ps[i];
-        if (p.ps) p.ps->Release();
-        for (auto* x : p.cb) if (x) x->Release();
-        for (auto* x : p.srv) if (x) x->Release();
-        for (auto* x : p.smp) if (x) x->Release();
-        memset(&p, 0, sizeof(p));
+        if (p.ps) { p.ps->Release(); p.ps = nullptr; }
+        for (auto*& x : p.cb) if (x) { x->Release(); x = nullptr; }
+        for (auto*& x : p.srv) if (x) { x->Release(); x = nullptr; }
+        for (auto*& x : p.smp) if (x) { x->Release(); x = nullptr; }
     }
 }
 
@@ -2589,7 +2704,13 @@ void DrawIdRecord::ReleaseState(State& s) {
     for (int t = 0; t < kVsSrv; ++t) rel(s.srv[t], kOSrv0 << t);
     for (int t = 0; t < kVsSmp; ++t) rel(s.smp[t], kOSmp0 << t);
     rel(s.rs, kORs);
-    memset(&s, 0, sizeof(s));
+    // phase 57 (perf): no memset of the whole State (~380 B x ~1700 draws per pass in VR) -- only own = 0, so a second release of
+    // the same slot releases nothing. A released State is never read again: the replays read [m_replayedTo / m_depthTo, m_n) and
+    // releases only cover [m_releasedTo, min of both); CaptureShadow's `prev` is m_st[m_n - 1] only while m_n > m_releasedTo;
+    // OwnAll reads an unreleased draw. Record's next capture into the slot (CaptureShadow / CaptureGet) writes every field
+    // the replay reads: all pointer slots, strides / offsets / formats, topology, nVp / nSc + vp[0..nVp) / sc[0..nSc) (the
+    // only entries read), own; Record then sets ic / inst / si / sinst / bv / instanced.
+    s.own = 0;
 }
 
 uint32_t DrawIdRecord::ShadowCheck(ID3D11DeviceContext1* ctx) {
@@ -2608,6 +2729,7 @@ void DrawIdRecord::Reset() {
     m_nRings = 0; m_lastRing = -1; m_seals = 0; m_need = 0; m_copiedAny = false; m_flushFail = false;
     m_otherBuf = nullptr;
     m_n = 0; m_replayedTo = 0; m_releasedTo = 0;
+    m_nextGs = 0;                                        // phase 64: no stamp survives a reset
     m_full = 0; m_nInst = 0; m_nNoMvp = 0;
     m_cleared = false; m_replayFail = false;
     m_segments = 0; m_replayed = 0; m_skipped = 0;
@@ -3256,6 +3378,8 @@ bool DrawIdRecord::CaptureShadow(ID3D11DeviceContext1* ctx, State& s, const Stat
 }
 
 bool DrawIdRecord::Record(ID3D11DeviceContext1* ctx, UINT ic, UINT inst, UINT si, INT bv, UINT sinst, bool instanced) {
+    const uint8_t gsKind = m_nextGs;                     // phase 64: consumed by THIS call, also when it records nothing (a full
+    m_nextGs = 0;                                        //   record must not leave the stamp armed for another pass's draw)
     if (!ctx) return false;
     if (m_n >= kMax) { ++m_full; return false; }
     if (!m_st) {
@@ -3268,6 +3392,7 @@ bool DrawIdRecord::Record(ID3D11DeviceContext1* ctx, UINT ic, UINT inst, UINT si
     // phase 35: the IA / VS / RS input state from DidShadow (did_shadow = 1) or through the getters (the pre-phase-35 path)
     if (!DidShadow::Configured() || !CaptureShadow(ctx, s, m_n > m_releasedTo ? &m_st[m_n - 1] : nullptr)) CaptureGet(ctx, s);
     s.ic = ic; s.inst = inst; s.si = si; s.sinst = sinst; s.bv = bv; s.instanced = instanced;
+    s.gsKind = gsKind;                                   // phase 64
     // v0.10.0 phase 10: the pixel-shader state of a forward draw (the batched forward-depth re-draw needs the game's alpha)
     if (m_capPs && !m_ps && m_n == 0) {
         m_ps = new (std::nothrow) PsState[kMax];
@@ -3427,22 +3552,308 @@ ID3D11RasterizerState* DrawIdRecord::ScissorRs(ID3D11Device* dev, ID3D11Rasteriz
 }
 uint64_t DrawIdRecord::ScissorRsFails() { return g_rsFails; }
 
+// phase 60: conservative-raster copies (see ConservativeRs in draw_ids.h). Same memo rules as ScissorRs: key ref held, copy ref
+// held, cleared on a device change and in ShutdownDevice. A full table = no conservative copy for new states.
+struct CrMemo { ID3D11RasterizerState* in; ID3D11RasterizerState* cr; };
+constexpr int kCrMemo = 64;
+CrMemo      g_crMemo[kCrMemo] = {};
+int         g_crMemoN = 0, g_crMemoLast = -1;
+const void* g_crMemoDev = nullptr;
+int         g_crTier = -1;                               // -1 = not checked for g_crMemoDev (0 also when there is no ID3D11Device3)
+uint64_t    g_crFails = 0;                               // copies whose creation failed
+uint64_t    g_crFull = 0;                                // states seen while the table was full (counted once each, g_crFullSeen)
+ID3D11RasterizerState* g_crFullSeen[kCrMemo] = {};      // identity only (no ref): the last states counted in g_crFull
+int         g_crFullSeenN = 0;
+ComPtr<ID3D11Device3> g_crDev3;                          // the ID3D11Device3 of g_crMemoDev (queried once with the tier)
+void CrMemoClear() {
+    for (int i = 0; i < g_crMemoN; ++i) {
+        if (g_crMemo[i].in) g_crMemo[i].in->Release();
+        if (g_crMemo[i].cr) g_crMemo[i].cr->Release();
+        g_crMemo[i] = CrMemo{};
+    }
+    g_crMemoN = 0; g_crMemoLast = -1; g_crMemoDev = nullptr; g_crTier = -1;
+    g_crFullSeenN = 0;
+    g_crDev3.Reset();
+}
+ID3D11RasterizerState* DrawIdRecord::ConservativeRs(ID3D11Device* dev, ID3D11RasterizerState* rs) {
+    if (!dev) return nullptr;
+    if (g_crMemoDev != (const void*)dev) { CrMemoClear(); g_crMemoDev = dev; }
+    if (g_crTier < 0) {                                  // once per device: the tier AND the D3D11.3 interface
+        D3D11_FEATURE_DATA_D3D11_OPTIONS2 o2{};
+        g_crTier = SUCCEEDED(dev->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS2, &o2, sizeof(o2)))
+                 ? (int)o2.ConservativeRasterizationTier : 0;
+        if (g_crTier >= 1 && FAILED(dev->QueryInterface(IID_PPV_ARGS(&g_crDev3)))) { g_crDev3.Reset(); g_crTier = 0; }
+    }
+    if (g_crTier < 1) return nullptr;
+    if (g_crMemoLast >= 0 && g_crMemo[g_crMemoLast].in == rs) return g_crMemo[g_crMemoLast].cr;
+    for (int i = 0; i < g_crMemoN; ++i)
+        if (g_crMemo[i].in == rs) { g_crMemoLast = i; return g_crMemo[i].cr; }
+    if (g_crMemoN >= kCrMemo) {                          // full: no copy for new states (counted once per state)
+        bool seen = false;
+        for (int i = 0; i < g_crFullSeenN; ++i) if (g_crFullSeen[i] == rs) { seen = true; break; }
+        if (!seen) { ++g_crFull; if (g_crFullSeenN < kCrMemo) g_crFullSeen[g_crFullSeenN++] = rs; }
+        return nullptr;
+    }
+    D3D11_RASTERIZER_DESC d{};
+    if (rs) rs->GetDesc(&d);
+    else {                                               // the D3D11 default state
+        d.FillMode = D3D11_FILL_SOLID; d.CullMode = D3D11_CULL_BACK; d.FrontCounterClockwise = FALSE;
+        d.DepthBias = 0; d.DepthBiasClamp = 0.0f; d.SlopeScaledDepthBias = 0.0f; d.DepthClipEnable = TRUE;
+        d.ScissorEnable = FALSE; d.MultisampleEnable = FALSE; d.AntialiasedLineEnable = FALSE;
+    }
+    D3D11_RASTERIZER_DESC2 d2{};
+    d2.FillMode = D3D11_FILL_SOLID;                      // conservative raster: solid fill, no line AA, no forced sample count
+    d2.CullMode = d.CullMode; d2.FrontCounterClockwise = d.FrontCounterClockwise;
+    d2.DepthBias = d.DepthBias; d2.DepthBiasClamp = d.DepthBiasClamp; d2.SlopeScaledDepthBias = d.SlopeScaledDepthBias;
+    d2.DepthClipEnable = d.DepthClipEnable; d2.ScissorEnable = d.ScissorEnable; d2.MultisampleEnable = d.MultisampleEnable;
+    d2.AntialiasedLineEnable = FALSE; d2.ForcedSampleCount = 0;
+    d2.ConservativeRaster = D3D11_CONSERVATIVE_RASTERIZATION_MODE_ON;
+    ID3D11RasterizerState2* cr = nullptr;
+    if (!g_crDev3 || FAILED(g_crDev3->CreateRasterizerState2(&d2, &cr)) || !cr) {
+        ++g_crFails;
+        return nullptr;                                  // the caller draws with `rs` (no conservative raster for it)
+    }
+    if (rs) rs->AddRef();
+    g_crMemo[g_crMemoN] = { rs, cr };
+    g_crMemoLast = g_crMemoN++;
+    return cr;
+}
+int DrawIdRecord::ConservativeTier() { return g_crTier; }
+uint64_t DrawIdRecord::ConservativeRsFails() { return g_crFails; }
+uint64_t DrawIdRecord::ConservativeRsFull() { return g_crFull; }
+
+// phase 64: the widening GS for replays (see SetReplayGs in draw_ids.h)
+DrawIdRecord::ReplayGsFn g_replayGsFn = nullptr;
+ID3D11BlendState*        g_replayNoA2c = nullptr;      // identity only (owned by inject.cpp's forward-depth states)
+uint64_t                 g_replayGsDraws = 0;
+void DrawIdRecord::SetReplayGs(ReplayGsFn fn, ID3D11BlendState* noA2c) { g_replayGsFn = fn; g_replayNoA2c = noA2c; }
+
+// ---- phase 58b (perf round 2) RAW REPLAY CALLS (see SetRawCall in draw_ids.h) ----
+// PER-HOOK VERDICTS -- what inject.cpp's hook does with a call the replay loop makes (render thread, the game context, t_inDlaa =
+// true: every caller -- DidReplay, DidFwdReplay, FwdBatch, the glow bias batch, MirReplay -- sets it around the replay), and what
+// the trampoline call changes:
+//  - hkDrawIndexed: CPU_HOOK is idle (a hook scope opens only at depth 0; every replay runs inside a hook + the did-replay / fwd-depth
+//    / mirror block), Ofxr::FromOfxr is false (the return address is ours), CountGameDraw(inDlaa) returns at once (no frame-end
+//    rule, no g_plDraws / watchdog), and every per-draw branch -- the F11 trace, rastSeen, the candidate collector, ObjOnDraw,
+//    DidOnDraw, MirOnDraw, the preview collector + PreviewFlush / MenuDrawPreview, the stencil-id twin, LodOnDraw, MenuLate*,
+//    VrsOnDraw, LightRedrawOnDraw, FwdOnDraw, BiasOnDraw -- tests !inDlaa. The ONE effect: the newest pass slot's flight-recorder
+//    counters ++diGbuf / ++diOther and ++skInDlaa (log only: the PASS ANOMALY / pass sample line). CHOSEN: not bumped by the raw
+//    path; that line now says the draw-id replays are not counted (they were the only mod DrawIndexed on the game context).
+//    Phase 58c: a replayed draw that finds d3d11's Amortized entry (the first after a command-buffer submit) still goes through
+//    the vtable = the hook, and bumps them as before 58b.
+//  - hkDrawIndexedInstanced: every branch tests !inDlaa -- nothing.
+//  - hkRSSetViewports: TraceVp (the F11 frame trace, debug) runs before the t_inDlaa test, so the trace listed the replay's
+//    per-draw viewports (never its draws: hkDrawIndexed traces only !inDlaa) -- no longer; then t_inDlaa -> the original at once
+//    (no g_gameVp copy, no ReconcileViewports jitter shift, no frame-start marker). A context the hook does not take for the
+//    game's (an ID3D11DeviceContext1 alias at another address) counted our calls as foreign -- no longer either.
+//  - hkPSSetShader / hkPSSetSamplers (forward-depth batch only: the game's PS + samplers per draw): g_lodPsCur / NoteGamePs and the
+//    LOD twin substitution test !t_inDlaa -> the original with the recorded samplers (twins included: Record read what was bound).
+//  - the did_shadow hooks (IASetInputLayout / IASetVertexBuffers / IASetIndexBuffer / VSSetShader / VSSetConstantBuffers1 /
+//    VSSetSamplers / RSSetState; installed with did_shadow >= 1): no t_inDlaa test -- DidShadow::Note* applied the replay's sets to
+//    the armed shadow and GfxSave::Restore (through the hooks) put the game's values back. Restore sets every one of these groups
+//    IN FULL (slot 0, the whole tracked range) on the same thread / context, and no Record runs between the replay's first set and
+//    its Restore, so the shadow ends on the game's values with every group valid EITHER WAY: through the trampolines the shadow
+//    simply keeps the game's values during the replay and Restore's Notes find the same pointers (Put: no reference change; the
+//    output-capable bits stay those of the same buffers) and mark the groups valid; a Restore Note that hits Unknown() invalidates
+//    its group in both paths. Same net shadow, so did_shadow's records / verify are unchanged; the shadow's "Set calls/pass applied"
+//    figure no longer counts the replay's sets (its log text says so).
+//  - CPU profiler rows: unchanged (the inner CPU_HOOKs were idle, see above); the did-replay / fwd-depth / mirror blocks get cheaper.
+//  - VRS bracket, LightRedraw, MenuLate*, Ofxr pass-through counters: per-draw paths test !inDlaa or are not reached -- nothing.
+// KEPT THROUGH THE HOOKS (pass level, once per replay): OMSetRenderTargets, the id-target clear, OMSetDepthStencilState /
+// OMSetBlendState, our PSSetShader, GS / HS / DS = null, GfxSave::Save / Restore. NOT HOOKED (direct vtable calls, nothing to
+// gain): IASetPrimitiveTopology, VSSetShaderResources, RSSetScissorRects, PSSetConstantBuffers1, PSSetShaderResources.
+// Another tool that detoured the same function AFTER us is skipped by the trampoline call too (as inject.cpp's existing direct
+// oClearDSV / oOMSetDepthStencilState / oRSSetViewports calls already do).
+// ---- phase 58c: DrawIndexed / DrawIndexedInstanced are resolved PER DRAW ----
+// Why -- the first VR log (ATS 1.61, 2026-10-15 21:03) showed the mask flipping within a millisecond: DrawIndexed /
+// DrawIndexedInstanced sometimes "does not point at the hooked function", the state sets never. Evidence (scratch probe on this
+// machine, d3d11.dll 10.0.26100.9711, hardware device FL 11_1, symbols from the Microsoft symbol server):
+//  - The immediate context's vtable is NOT d3d11.dll's .rdata table: the object's vtable pointer points 8 bytes further INTO the
+//    object (a per-object, writable copy), and the runtime rewrites ENTRIES of it (the pointer never changes).
+//  - Normal state: vt[12] = CContext::TID3D11DeviceContext_DrawIndexed_<1> (d3d11+0x1535a0), vt[20] = ..._DrawIndexedInstanced_<1>
+//    (+0x1531b0) = the functions SetupThread takes from the dummy device and MinHook detours. <1> = no multithread protection:
+//    SupportsFeatureLevel / FL9 checks, then the UMD's DDI (SWDC_Context::DDI_DrawIndexed_ or the driver's pfn).
+//  - After EVERY command-buffer submit -- an explicit Flush, and implicitly (200000 back-to-back DrawIndexed: 13 times, the first
+//    after ~4500 draws) -- 24 WORK entries (Draw*, Dispatch*, Copy* / Update*, Clear*, GenerateMips, ResolveSubresource,
+//    CopySubresourceRegion1, UpdateSubresource1, ClearView, CopyTiles / UpdateTiles; NO state Set call) are rewritten to
+//    CContext::TID3D11DeviceContext_<Fn>_Amortized<1> (DrawIndexed_Amortized<1> = d3d11+0x153b70, DrawIndexedInstanced_Amortized<1>
+//    = +0x1a4580). That variant builds a CDevCtxInterface<CContext>, whose constructor calls CContext::AcquireDevCtxIfaceNoSync ->
+//    CContext::PerformAmortizedRenderOperations / CContext::PerformAcquireResource (the runtime's deferred per-submit work) and
+//    returns CContext::g_DefaultID3D11DeviceContextVtbl, i.e. puts the fast <1> entries back; it then calls vtable slot 12 (20)
+//    = <1> = through our hook (then CContext::SetMarker when a context flag asks). The first work call after a submit takes it.
+//  - So the Amortized prologue does work that must not be skipped: phase 58b's ONCE-per-replay pick, taken while the entry was
+//    <1>, called the trampoline on through every later submit (scratch probe: the context then stayed Amortized for up to 4096
+//    replayed draws, i.e. the deferred work waited for the game's next work call); taken while Amortized, it lost the trampoline
+//    for the whole replay (the log's flip).
+//  - With multithread protection (SetMultithreadProtected(TRUE)) EVERY entry is a locking <2> / Amortized<0> variant that never
+//    reaches <1>: nothing matches -> the vtable everywhere (and the hooks would not see the game's draws at all; the in-game state
+//    sets matching <1> show the game's context is not protected).
+// How -- DrawIndexed / DrawIndexedInstanced compare the entry right before EACH replayed draw (two L1 loads: the in-object vtable
+// pointer, the entry): <1> = the trampoline (bit for bit what ctx->DrawIndexed reaches, minus our hook body); anything else =
+// ctx->X() as before -- an Amortized entry runs its prologue, restores <1> and enters our hook, which passes the call on
+// (t_inDlaa), so the following draws take the trampoline again. The state Set entries keep the once-per-replay pick: the runtime
+// never rewrites them between submits (only SetMultithreadProtected / SwapDeviceContextState, never inside a replay), and in the
+// Amortized state the game's own state sets call the same <1> functions. Proven on the RTX 5090 (scratch probe, MinHook detours
+// like SetupThread, 4096 draws with state sets per draw, Flush every 0 / 1 / 2 / 7 / 64 draws): 0 px differ vs ctx->DrawIndexed,
+// every vtable fallback reached the hook exactly once and left <1> behind. A mismatch is logged once per distinct entry with its
+// address, module + offset and the module's PE TimeDateStamp / SizeOfImage (the symbol-server key), so a log explains itself.
+namespace {
+struct RawEntry { int vt; const void* target; void* raw; };
+RawEntry          g_raw[DrawIdRecord::kRawN] = {};   // written at hook install (SetRawCall), read by every replay
+std::atomic<bool> g_rawOn{false};                    // any entry registered (the harness: never -> no vtable read at all)
+uint32_t          g_rawLogMask = 0xFFFFFFFFu;        // the RawFn mask last logged (render thread)
+int               g_rawLogs = 0;
+constexpr uint32_t kRawPerDraw = (1u << DrawIdRecord::kRawDi) | (1u << DrawIdRecord::kRawDii);   // phase 58c: checked per draw
+uint64_t          g_rawDrawTramp = 0, g_rawDrawVt = 0;   // phase 58c: replayed draws through the trampoline / the vtable (RawDraws)
+const void*       g_rawMissSeen[6] = {};             // phase 58c: the (fn, entry) pairs already logged (render thread)
+int               g_rawMissFn[6] = {};
+int               g_rawMissN = 0;
+static_assert(DrawIdRecord::kRawN <= 32, "RawFn bits are a uint32_t mask");
+const char* const kRawName[DrawIdRecord::kRawN] = {
+    "IASetInputLayout", "IASetVertexBuffers", "IASetIndexBuffer", "VSSetShader", "VSSetConstantBuffers1", "VSSetSamplers",
+    "RSSetState", "RSSetViewports", "PSSetShader", "PSSetSamplers", "DrawIndexed", "DrawIndexedInstanced" };
+// the replay's per-draw calls: a trampoline, or null = the vtable call (ctx->X)
+struct RawCalls {
+    void (STDMETHODCALLTYPE* il)(ID3D11DeviceContext*, ID3D11InputLayout*);
+    void (STDMETHODCALLTYPE* vb)(ID3D11DeviceContext*, UINT, UINT, ID3D11Buffer* const*, const UINT*, const UINT*);
+    void (STDMETHODCALLTYPE* ib)(ID3D11DeviceContext*, ID3D11Buffer*, DXGI_FORMAT, UINT);
+    void (STDMETHODCALLTYPE* vs)(ID3D11DeviceContext*, ID3D11VertexShader*, ID3D11ClassInstance* const*, UINT);
+    void (STDMETHODCALLTYPE* vsCb1)(ID3D11DeviceContext1*, UINT, UINT, ID3D11Buffer* const*, const UINT*, const UINT*);
+    void (STDMETHODCALLTYPE* vsSmp)(ID3D11DeviceContext*, UINT, UINT, ID3D11SamplerState* const*);
+    void (STDMETHODCALLTYPE* rs)(ID3D11DeviceContext*, ID3D11RasterizerState*);
+    void (STDMETHODCALLTYPE* vp)(ID3D11DeviceContext*, UINT, const D3D11_VIEWPORT*);
+    void (STDMETHODCALLTYPE* ps)(ID3D11DeviceContext*, ID3D11PixelShader*, ID3D11ClassInstance* const*, UINT);
+    void (STDMETHODCALLTYPE* psSmp)(ID3D11DeviceContext*, UINT, UINT, ID3D11SamplerState* const*);
+    // phase 58c: di / dii are registered-or-null; the replay loop takes them only while VtNow(ctx, diVt) == diT (per draw)
+    void (STDMETHODCALLTYPE* di)(ID3D11DeviceContext*, UINT, UINT, INT);
+    void (STDMETHODCALLTYPE* dii)(ID3D11DeviceContext*, UINT, UINT, UINT, INT, UINT);
+    const void* diT;
+    const void* diiT;
+    int diVt, diiVt;
+};
+// the context's vtable entry i NOW (the vtable pointer is re-read too: it is the object's own field)
+inline const void* VtNow(ID3D11DeviceContext* ctx, int i) { return (*reinterpret_cast<void* const* const*>(ctx))[i]; }
+// "<address> <module>+0x<offset> (TimeDateStamp 0x.., SizeOfImage 0x..)" -- module = the loaded image holding the address
+void AddrTag(const void* p, char* out, size_t n) {
+    HMODULE m = nullptr;
+    if (!p || !GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                  static_cast<LPCWSTR>(p), &m) || !m) {
+        snprintf(out, n, "%p (in no loaded module: heap / generated code)", p);
+        return;
+    }
+    wchar_t path[MAX_PATH] = L"";
+    const DWORD len = GetModuleFileNameW(m, path, MAX_PATH);
+    const wchar_t* base = len ? wcsrchr(path, L'\\') : nullptr;
+    base = base ? base + 1 : (len ? path : L"?");
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(m);
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(reinterpret_cast<const char*>(m) + dos->e_lfanew);
+    snprintf(out, n, "%p %ls+0x%llx (TimeDateStamp 0x%08lx, SizeOfImage 0x%lx)", p, base,
+             (unsigned long long)(static_cast<const char*>(p) - reinterpret_cast<const char*>(m)),
+             (unsigned long)nt->FileHeader.TimeDateStamp, (unsigned long)nt->OptionalHeader.SizeOfImage);
+}
+// phase 58c, cold: a replayed draw found its vtable entry not on the detoured function -- logged once per distinct entry
+__declspec(noinline) void RawDrawMiss(int k, const void* now) {
+    for (int i = 0; i < g_rawMissN; ++i)
+        if (g_rawMissFn[i] == k && g_rawMissSeen[i] == now) return;
+    if (g_rawMissN >= (int)(sizeof(g_rawMissSeen) / sizeof(g_rawMissSeen[0]))) return;
+    g_rawMissFn[g_rawMissN] = k;
+    g_rawMissSeen[g_rawMissN++] = now;
+    char a[200], t[200];
+    AddrTag(now, a, sizeof(a));
+    AddrTag(g_raw[k].target, t, sizeof(t));
+    Log("MV draw-ids: a replayed %s found the context's vtable entry at %s, not the hooked function %s -- that draw goes through "
+        "the vtable (phase 58c; expected after a command-buffer submit: d3d11's CContext::TID3D11DeviceContext_%s_Amortized<1>, "
+        "which runs the runtime's deferred per-submit work and puts the hooked entry back, so the next draws take the trampoline "
+        "again; logged once per distinct entry)", DrawIdRecord::kRawDi == k ? "DrawIndexed" : "DrawIndexedInstanced", a, t,
+        DrawIdRecord::kRawDi == k ? "DrawIndexed" : "DrawIndexedInstanced");
+}
+template <class F> inline void RawPick(F& f, int k, void* const* vt, uint32_t& mask) {
+    const RawEntry& e = g_raw[k];
+    if (e.raw && vt[e.vt] == e.target) { f = reinterpret_cast<F>(e.raw); mask |= 1u << k; }
+    else f = nullptr;
+}
+// phase 58c: a per-draw entry -- the trampoline + what to compare, whenever the hook is registered (the entry is tested per draw)
+template <class F> inline void RawPickPerDraw(F& f, const void*& target, int& vtIndex, int k, uint32_t& mask) {
+    const RawEntry& e = g_raw[k];
+    if (e.raw) { f = reinterpret_cast<F>(e.raw); target = e.target; vtIndex = e.vt; mask |= 1u << k; }
+    else { f = nullptr; target = nullptr; vtIndex = 0; }
+}
+// Once per replay: the context's vtable entries of the state Set calls against the detoured functions + the per-draw entries
+// (phase 58c). Returns the RawFn mask taken raw (the per-draw bits: registered).
+uint32_t RawResolve(ID3D11DeviceContext1* ctx, RawCalls& rc) {
+    rc = RawCalls{};
+    if (!g_rawOn.load(std::memory_order_acquire)) return 0;
+    void* const* vt = *reinterpret_cast<void* const* const*>(ctx);
+    uint32_t m = 0;
+    RawPick(rc.il, DrawIdRecord::kRawIl, vt, m);
+    RawPick(rc.vb, DrawIdRecord::kRawVb, vt, m);
+    RawPick(rc.ib, DrawIdRecord::kRawIb, vt, m);
+    RawPick(rc.vs, DrawIdRecord::kRawVs, vt, m);
+    RawPick(rc.vsCb1, DrawIdRecord::kRawVsCb1, vt, m);
+    RawPick(rc.vsSmp, DrawIdRecord::kRawVsSmp, vt, m);
+    RawPick(rc.rs, DrawIdRecord::kRawRs, vt, m);
+    RawPick(rc.vp, DrawIdRecord::kRawVp, vt, m);
+    RawPick(rc.ps, DrawIdRecord::kRawPs, vt, m);
+    RawPick(rc.psSmp, DrawIdRecord::kRawPsSmp, vt, m);
+    RawPickPerDraw(rc.di, rc.diT, rc.diVt, DrawIdRecord::kRawDi, m);
+    RawPickPerDraw(rc.dii, rc.diiT, rc.diiVt, DrawIdRecord::kRawDii, m);
+    if (m != g_rawLogMask && g_rawLogs < 8) {            // the first replay + every change of the set (a rewritten vtable entry)
+        ++g_rawLogs;
+        g_rawLogMask = m;
+        char raw[400] = "", pd[100] = "", vtc[2400] = "";
+        size_t ro = 0, po = 0, vo = 0;
+        for (int k = 0; k < DrawIdRecord::kRawN; ++k) {
+            if (!g_raw[k].raw) continue;                 // not registered (hook not installed): the vtable, as before
+            if ((kRawPerDraw >> k) & 1u) {
+                if (po < sizeof(pd)) po += (size_t)snprintf(pd + po, sizeof(pd) - po, "%s%s", po ? " " : "", kRawName[k]);
+            } else if ((m >> k) & 1u) {
+                if (ro < sizeof(raw)) ro += (size_t)snprintf(raw + ro, sizeof(raw) - ro, "%s%s", ro ? " " : "", kRawName[k]);
+            } else if (vo < sizeof(vtc)) {               // phase 58c: what the entry points at instead, and what we hooked
+                char a[200], t[200];
+                AddrTag(vt[g_raw[k].vt], a, sizeof(a));
+                AddrTag(g_raw[k].target, t, sizeof(t));
+                vo += (size_t)snprintf(vtc + vo, sizeof(vtc) - vo, "%s%s = %s (hooked: %s)", vo ? "; " : "", kRawName[k], a, t);
+            }
+        }
+        Log("MV draw-ids: replay calls %s through the hook trampolines (phase 58b)%s%s%s%s%s%s", ro ? raw : "no state set",
+            po ? "; " : "", po ? pd : "", po ? " through theirs per draw, while the context's vtable entry is the hooked function "
+                                               "(phase 58c: d3d11 swaps in an Amortized variant after each command-buffer submit, "
+                                               "which must run)" : "",
+            vo ? "; the context's vtable does not point at the hooked function of: " : "", vo ? vtc : "",
+            vo ? " -- those keep the vtable call" : "");
+    }
+    return m;
+}
+}  // namespace
+
+void DrawIdRecord::SetRawCall(int fn, int vtIndex, const void* target, void* raw) {
+    // 133 = DiscardView1, the last entry of the ID3D11DeviceContext1 vtable (the replay context's interface)
+    if (fn < 0 || fn >= kRawN || vtIndex < 0 || vtIndex > 133 || !target || !raw) return;
+    g_raw[fn] = RawEntry{ vtIndex, target, raw };
+    g_rawOn.store(true, std::memory_order_release);
+}
+void DrawIdRecord::RawDraws(uint64_t* tramp, uint64_t* vtab) {   // phase 58c
+    if (tramp) *tramp = g_rawDrawTramp;
+    if (vtab) *vtab = g_rawDrawVt;
+}
+
 DrawIdRecord::ReplayResult DrawIdRecord::Replay(ID3D11DeviceContext1* ctx, ID3D11RenderTargetView* idRtv,
                                                  ID3D11DepthStencilView* roDsv, bool restoreTargets, bool replayAll) {
     return ReplayImpl(ctx, idRtv, roDsv, restoreTargets, replayAll, false, 0);
 }
 
 DrawIdRecord::ReplayResult DrawIdRecord::ReplayForward(ID3D11DeviceContext1* ctx, ID3D11RenderTargetView* idRtv,
-                                                        ID3D11DepthStencilView* fwdDsv, bool restoreTargets, UINT idBase) {
-    return ReplayImpl(ctx, idRtv, fwdDsv, restoreTargets, true, true, idBase);
+                                                        ID3D11DepthStencilView* fwdDsv, bool restoreTargets, UINT idBase,
+                                                        bool conservative) {
+    return ReplayImpl(ctx, idRtv, fwdDsv, restoreTargets, true, true, idBase, nullptr, nullptr, conservative);
 }
 
 // v0.10.0 phase 10: the batched forward-depth re-draw (see draw_ids.h)
 DrawIdRecord::ReplayResult DrawIdRecord::ReplayDepth(ID3D11DeviceContext1* ctx, ID3D11RenderTargetView* rt0,
                                                       ID3D11DepthStencilView* dsv, ID3D11DepthStencilState* dss,
-                                                      ID3D11BlendState* bs, bool restoreTargets) {
+                                                      ID3D11BlendState* bs, bool restoreTargets, bool conservative) {
     if (!dss || !bs) { ReplayResult rr; m_depthTo = m_n; return rr; }
-    return ReplayImpl(ctx, rt0, dsv, restoreTargets, true, true, 0, dss, bs);
+    return ReplayImpl(ctx, rt0, dsv, restoreTargets, true, true, 0, dss, bs, conservative);
 }
 
 void DrawIdRecord::DropIds() {
@@ -3458,7 +3869,7 @@ void DrawIdRecord::DropIds() {
 DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, ID3D11RenderTargetView* idRtv,
                                                      ID3D11DepthStencilView* roDsv, bool restoreTargets, bool replayAll,
                                                      bool forward, UINT idBase, ID3D11DepthStencilState* depthDss,
-                                                     ID3D11BlendState* depthBs) {
+                                                     ID3D11BlendState* depthBs, bool conservative) {
     ReplayResult rr;
     if (!ctx) return rr;
     Flush(ctx);                                          // MVP copies of everything recorded so far (queued first)
@@ -3488,7 +3899,30 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
     if (!m_cleared && !depth) {
         if (!forward) {                                  // the forward replay never clears: the G-buffer replay did (both
             const FLOAT zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };   // channels) and its ids must survive
-            ctx->ClearRenderTargetView(idRtv, zero);
+            // phase 57 (perf): only the view clip + the march reach (see SetFullIdClear in draw_ids.h); ids outside it are never
+            // read. Every replay of this pass is scissored to the same clip (SetView before each one), and the margin ring is
+            // zero as before, so the vote / pass B see exactly what the whole-target clear gave them.
+            D3D11_RECT cr{};
+            bool rectOk = m_clip && !g_fullIdClear && s_clearView;
+            if (rectOk) {
+                ComPtr<ID3D11Resource> res;
+                ComPtr<ID3D11Texture2D> tex;
+                D3D11_TEXTURE2D_DESC td{};
+                idRtv->GetResource(&res);
+                rectOk = res && SUCCEEDED(res.As(&tex));
+                if (rectOk) tex->GetDesc(&td);
+                const LONG m = (LONG)((g_parReach > kParReachPx ? g_parReach : kParReachPx) + 4u);
+                const LONG W = (LONG)td.Width, H = (LONG)td.Height;
+                cr.left = m_clipRect.left - m > 0 ? m_clipRect.left - m : 0;
+                cr.top = m_clipRect.top - m > 0 ? m_clipRect.top - m : 0;
+                cr.right = m_clipRect.right + m < W ? m_clipRect.right + m : W;
+                cr.bottom = m_clipRect.bottom + m < H ? m_clipRect.bottom + m : H;
+                // an empty rect (a clip off the target) or one that covers it: the whole-target clear
+                rectOk = rectOk && cr.right > cr.left && cr.bottom > cr.top &&
+                         !(cr.left == 0 && cr.top == 0 && cr.right == W && cr.bottom == H);
+            }
+            if (rectOk) { ctx->ClearView(idRtv, zero, &cr, 1); ++g_idClearRect; }
+            else { ctx->ClearRenderTargetView(idRtv, zero); ++g_idClearFull; }
         }
         m_cleared = true;
     }
@@ -3506,6 +3940,12 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
     ctx->HSSetShader(nullptr, nullptr, 0);
     ctx->DSSetShader(nullptr, nullptr, 0);
     ID3D11Buffer* idCb = s_idCb.Get();
+    // phase 58b: the per-draw calls below through the hook trampolines where the context's vtable still leads into our hooks
+    RawCalls rc;
+    RawResolve(ctx, rc);
+    uint64_t drawTramp = 0, drawVt = 0;                  // phase 58c: this replay's draws by path (g_rawDraw*)
+    int boundGs = 0;                                     // phase 64: the widening kind whose GS is bound now
+    bool gsTouched = false;                              //   any bind attempt this replay (-> the final unbind)
 
     // per-draw: only what differs from the previously replayed draw (first draw: everything). REVERSE draw order: the game
     // tests depth GREATER, so of two draws at exactly the same depth the FIRST one owns the pixel; with EQUAL the last
@@ -3522,8 +3962,9 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
     // one) n the clip, viewport / scissor at 1/2^shift (forward mode). Off (no clip, no shift) = the phase-8 calls exactly.
     const UINT shift = forward ? m_shift : 0u;
     const bool view = m_clip || shift != 0u;
+    const bool cons = forward && conservative;           // phase 60: the forward-depth batch / forward ids with ConservativeRs
     ComPtr<ID3D11Device> vdev;
-    if (view) ctx->GetDevice(&vdev);
+    if (view || cons) ctx->GetDevice(&vdev);
     ID3D11RasterizerState* lastRs = nullptr;
     D3D11_VIEWPORT lastVp[kVp] = {};
     D3D11_RECT lastSc[kVp] = {};
@@ -3537,6 +3978,10 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
     int splitTok = -1, splitKind = -1, splitN = 0;
     for (int q = 0; q < pend; ++q) {
         const int i = forward ? from + q : m_n - 1 - q;
+        // phase 58: the static-skip table is cold (a whole G-buffer pass ran since the last replay): fetch the home slot of the draw
+        // 16 replays ahead (statGate = a G-buffer replay = reverse order) while this one is issued. A hint only: no decision changes.
+        if (statGate && q + 16 < pend)
+            _mm_prefetch(reinterpret_cast<const char*>(&g_statHot[StatHome(m_key[i - 16].full)]), _MM_HINT_T0);
         const State& s = m_st[i];
         const uint8_t fl = m_key[i].flags;
         if (!replayAll && !(fl & kFLate) && (fl & (kFInstanced | kFNoMvp))) { ++rr.skipped; continue; }
@@ -3564,13 +4009,19 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
                 else splitTok = GpuPerf::Next(ctx, splitTok, kind ? GpuPerf::kReplayInst : GpuPerf::kReplayRest);
             }
         }
-        if (!cur || cur->il != s.il) ctx->IASetInputLayout(s.il);
+        // phase 58b: rc.X = the hook's trampoline (null: the vtable call as before) -- see the verdicts above RawResolve
+        if (!cur || cur->il != s.il) { if (rc.il) rc.il(ctx, s.il); else ctx->IASetInputLayout(s.il); }
         if (!cur || memcmp(cur->vb, s.vb, sizeof(s.vb)) || memcmp(cur->vbStride, s.vbStride, sizeof(s.vbStride)) ||
-            memcmp(cur->vbOff, s.vbOff, sizeof(s.vbOff)))
-            ctx->IASetVertexBuffers(0, kVb, s.vb, s.vbStride, s.vbOff);
-        if (!cur || cur->ib != s.ib || cur->ibFmt != s.ibFmt || cur->ibOff != s.ibOff) ctx->IASetIndexBuffer(s.ib, s.ibFmt, s.ibOff);
+            memcmp(cur->vbOff, s.vbOff, sizeof(s.vbOff))) {
+            if (rc.vb) rc.vb(ctx, 0, kVb, s.vb, s.vbStride, s.vbOff);
+            else ctx->IASetVertexBuffers(0, kVb, s.vb, s.vbStride, s.vbOff);
+        }
+        if (!cur || cur->ib != s.ib || cur->ibFmt != s.ibFmt || cur->ibOff != s.ibOff) {
+            if (rc.ib) rc.ib(ctx, s.ib, s.ibFmt, s.ibOff);
+            else ctx->IASetIndexBuffer(s.ib, s.ibFmt, s.ibOff);
+        }
         if (!cur || cur->topo != s.topo) ctx->IASetPrimitiveTopology(s.topo);
-        if (!cur || cur->vs != s.vs) ctx->VSSetShader(s.vs, nullptr, 0);
+        if (!cur || cur->vs != s.vs) { if (rc.vs) rc.vs(ctx, s.vs, nullptr, 0); else ctx->VSSetShader(s.vs, nullptr, 0); }
         if (!cur || memcmp(cur->cb, s.cb, sizeof(s.cb)) || memcmp(cur->cbFirst, s.cbFirst, sizeof(s.cbFirst)) ||
             memcmp(cur->cbNum, s.cbNum, sizeof(s.cbNum))) {
             UINT f[kVsCb], nm[kVsCb];
@@ -3579,14 +4030,24 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
                 f[c] = valid ? s.cbFirst[c] : 0;
                 nm[c] = valid ? s.cbNum[c] : 4096;
             }
-            ctx->VSSetConstantBuffers1(0, kVsCb, s.cb, f, nm);
+            if (rc.vsCb1) rc.vsCb1(ctx, 0, kVsCb, s.cb, f, nm);
+            else ctx->VSSetConstantBuffers1(0, kVsCb, s.cb, f, nm);
         }
         if (!cur || memcmp(cur->srv, s.srv, sizeof(s.srv))) ctx->VSSetShaderResources(0, kVsSrv, s.srv);
-        if (!cur || memcmp(cur->smp, s.smp, sizeof(s.smp))) ctx->VSSetSamplers(0, kVsSmp, s.smp);
+        if (!cur || memcmp(cur->smp, s.smp, sizeof(s.smp))) {
+            if (rc.vsSmp) rc.vsSmp(ctx, 0, kVsSmp, s.smp);
+            else ctx->VSSetSamplers(0, kVsSmp, s.smp);
+        }
         if (!view) {
-            if (!cur || cur->rs != s.rs) ctx->RSSetState(s.rs);
-            if (!cur || cur->nVp != s.nVp || memcmp(cur->vp, s.vp, sizeof(D3D11_VIEWPORT) * s.nVp))
-                ctx->RSSetViewports(s.nVp, s.nVp ? s.vp : nullptr);
+            if (!cur || cur->rs != s.rs) {
+                ID3D11RasterizerState* cr = cons ? ConservativeRs(vdev.Get(), s.rs) : nullptr;   // phase 60
+                ID3D11RasterizerState* r = cr ? cr : s.rs;
+                if (rc.rs) rc.rs(ctx, r); else ctx->RSSetState(r);
+            }
+            if (!cur || cur->nVp != s.nVp || memcmp(cur->vp, s.vp, sizeof(D3D11_VIEWPORT) * s.nVp)) {
+                if (rc.vp) rc.vp(ctx, s.nVp, s.nVp ? s.vp : nullptr);
+                else ctx->RSSetViewports(s.nVp, s.nVp ? s.vp : nullptr);
+            }
             if (!cur || cur->nSc != s.nSc || memcmp(cur->sc, s.sc, sizeof(D3D11_RECT) * s.nSc))
                 ctx->RSSetScissorRects(s.nSc, s.nSc ? s.sc : nullptr);
         } else {
@@ -3594,6 +4055,7 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
             ID3D11RasterizerState* rsS = ScissorRs(vdev.Get(), s.rs, &had);
             // no copy (creation failed / table full): the draw's own RS, its own scissor scaled, no clip (more pixels, same ids)
             ID3D11RasterizerState* rsUse = rsS ? rsS : s.rs;
+            if (cons) { ID3D11RasterizerState* cr = ConservativeRs(vdev.Get(), rsUse); if (cr) rsUse = cr; }   // phase 60
             const bool scOn = rsS ? true : had;
             D3D11_VIEWPORT vp[kVp];
             memcpy(vp, s.vp, sizeof(D3D11_VIEWPORT) * s.nVp);
@@ -3605,18 +4067,35 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
                 for (UINT k = 0; k < nSc; ++k)
                     ScaledScissor(had, k < s.nSc ? &s.sc[k] : nullptr, rsS && m_clip ? &m_clipRect : nullptr, shift, &sc[k]);
             }
-            if (viewFirst || rsUse != lastRs) ctx->RSSetState(rsUse);
-            if (viewFirst || lastNVp != s.nVp || memcmp(lastVp, vp, sizeof(D3D11_VIEWPORT) * s.nVp))
-                ctx->RSSetViewports(s.nVp, s.nVp ? vp : nullptr);
+            if (viewFirst || rsUse != lastRs) { if (rc.rs) rc.rs(ctx, rsUse); else ctx->RSSetState(rsUse); }
+            if (viewFirst || lastNVp != s.nVp || memcmp(lastVp, vp, sizeof(D3D11_VIEWPORT) * s.nVp)) {
+                if (rc.vp) rc.vp(ctx, s.nVp, s.nVp ? vp : nullptr);
+                else ctx->RSSetViewports(s.nVp, s.nVp ? vp : nullptr);
+            }
             if (scOn && (viewFirst || lastNSc != nSc || memcmp(lastSc, sc, sizeof(D3D11_RECT) * nSc)))
                 ctx->RSSetScissorRects(nSc, sc);
             viewFirst = false;
             lastRs = rsUse; lastNVp = s.nVp; memcpy(lastVp, vp, sizeof(D3D11_VIEWPORT) * s.nVp);
             if (scOn) { lastNSc = nSc; memcpy(lastSc, sc, sizeof(D3D11_RECT) * nSc); }
         }
+        // phase 64: a widened draw (its colour went through the widening GS) -> the same GS here, so its depth / id cover the band
+        {
+            const int want = (forward && g_replayGsFn && s.gsKind && s.nVp) ? (int)s.gsKind : 0;
+            if (want != boundGs) {
+                const float scale = shift ? 0.5f : 1.0f;
+                const bool okGs = want ? g_replayGsFn(ctx, want, s.vp[0].Width * scale, s.vp[0].Height * scale, scale) : false;
+                if (!okGs) g_replayGsFn(ctx, 0, 0, 0, 0);    // unstamped draw, or a failed bind: never leave a previous kind's GS bound
+                gsTouched = true;
+                const int now = okGs ? want : 0;
+                if (depth && (now != 0) != (boundGs != 0))   // the band's depth on every pixel: no alpha-to-coverage for it
+                    ctx->OMSetBlendState(now && g_replayNoA2c ? g_replayNoA2c : depthBs, nullptr, 0xFFFFFFFFu);
+                boundGs = now;
+            }
+            if (boundGs) ++g_replayGsDraws;
+        }
         if (depth) {                                     // v0.10.0 phase 10: the game's pixel shader + its resources
             const PsState& p = m_ps[i];
-            if (!curPs || curPs->ps != p.ps) ctx->PSSetShader(p.ps, nullptr, 0);
+            if (!curPs || curPs->ps != p.ps) { if (rc.ps) rc.ps(ctx, p.ps, nullptr, 0); else ctx->PSSetShader(p.ps, nullptr, 0); }
             if (!curPs || memcmp(curPs->cb, p.cb, sizeof(p.cb)) || memcmp(curPs->cbFirst, p.cbFirst, sizeof(p.cbFirst)) ||
                 memcmp(curPs->cbNum, p.cbNum, sizeof(p.cbNum))) {
                 UINT f[kPsCb], nm[kPsCb];
@@ -3628,17 +4107,40 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
                 ctx->PSSetConstantBuffers1(0, kPsCb, p.cb, f, nm);
             }
             if (!curPs || memcmp(curPs->srv, p.srv, sizeof(p.srv))) ctx->PSSetShaderResources(0, kPsSrv, p.srv);
-            if (!curPs || memcmp(curPs->smp, p.smp, sizeof(p.smp))) ctx->PSSetSamplers(0, kPsSmp, p.smp);
+            if (!curPs || memcmp(curPs->smp, p.smp, sizeof(p.smp))) {
+                if (rc.psSmp) rc.psSmp(ctx, 0, kPsSmp, p.smp);
+                else ctx->PSSetSamplers(0, kPsSmp, p.smp);
+            }
             curPs = &p;
         } else {
             const UINT first = drawId * 16u, num = 16u;
             ctx->PSSetConstantBuffers1(0, 1, &idCb, &first, &num);
         }
-        if (s.instanced) ctx->DrawIndexedInstanced(s.ic, s.inst, s.si, s.bv, s.sinst);
-        else ctx->DrawIndexed(s.ic, s.si, s.bv);
+        // phase 58c: the draw's trampoline only while its vtable entry is the hooked function NOW (after this draw's sets); else
+        // the vtable -- d3d11's Amortized entry after a command-buffer submit runs its prologue, restores the entry, enters our hook
+        if (s.instanced) {
+            const void* now = rc.dii ? VtNow(ctx, rc.diiVt) : nullptr;
+            if (rc.dii && now == rc.diiT) { rc.dii(ctx, s.ic, s.inst, s.si, s.bv, s.sinst); ++drawTramp; }
+            else {
+                if (rc.dii) RawDrawMiss(DrawIdRecord::kRawDii, now);
+                ctx->DrawIndexedInstanced(s.ic, s.inst, s.si, s.bv, s.sinst);
+                ++drawVt;
+            }
+        } else {
+            const void* now = rc.di ? VtNow(ctx, rc.diVt) : nullptr;
+            if (rc.di && now == rc.diT) { rc.di(ctx, s.ic, s.si, s.bv); ++drawTramp; }
+            else {
+                if (rc.di) RawDrawMiss(DrawIdRecord::kRawDi, now);
+                ctx->DrawIndexed(s.ic, s.si, s.bv);
+                ++drawVt;
+            }
+        }
         cur = &s;
         ++rr.replayed;
     }
+    if (gsTouched && g_replayGsFn) g_replayGsFn(ctx, 0, 0, 0, 0);   // phase 64: GS + its constant buffer off again
+    g_rawDrawTramp += drawTramp;                         // phase 58c (RawDraws)
+    g_rawDrawVt += drawVt;
     GpuPerf::End(ctx, splitTok);
     sv.Restore(ctx);
     if (depth) {                                         // v0.10.0 phase 10: only the depth cursor moves
@@ -3846,6 +4348,10 @@ bool DrawIdRecord::InitDevice(ID3D11Device* dev) {
     if (s_dev && s_dev != (const void*)dev) ShutdownDevice();
     if (!ShaderCache::Done()) return false;              // warm-up still running: retried (not failed)
     s_dev = dev;
+    {   // phase 57: the id-target clear by rect (ReplayImpl) only where the driver has ClearView (as inject.cpp's glow clear)
+        D3D11_FEATURE_DATA_D3D11_OPTIONS o{};
+        s_clearView = SUCCEEDED(dev->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS, &o, sizeof(o))) && o.ClearView;
+    }
     size_t size = 0;
     const void* code = ShaderCache::Code(ShaderCache::kDrawIdPs, &size);
     HRESULT hr = E_FAIL;
@@ -3908,11 +4414,13 @@ bool DrawIdRecord::InitDevice(ID3D11Device* dev) {
 void DrawIdRecord::ShutdownDevice() {
     s_ps.Reset(); s_dss.Reset(); s_idCb.Reset(); s_bsR.Reset(); s_bsG.Reset();
     s_dev = nullptr;
+    s_clearView = false;                                 // phase 57
     s_initVs.Reset(); s_initPs[0].Reset(); s_initPs[1].Reset(); s_initDss.Reset(); s_initRs.Reset();   // v0.10.0 phase 10
     s_initDev = nullptr; s_initFailed = false;
     s_biasPs.Reset(); s_biasDss.Reset();                 // phase 49
     s_biasDev = nullptr; s_biasFailed = false;
     RsMemoClear();                                       // v0.10.0 phase 9: the scissor-enabled RS copies
+    CrMemoClear();                                       // phase 60: the conservative-raster RS copies
     DrawIdMv::VsLayoutClear();                           // v0.10.0 phase 22: VS pointers belong to the old device
 }
 
@@ -4030,6 +4538,11 @@ bool DrawIdMv::InstancedWanted(uint64_t key) {
 void DrawIdRecord::SetInstancedProbe(bool probe) { g_instProbe = probe; }
 // ---- v0.10.0 phase 14 STATIC REPLAY SKIP (see the StatEnt table above) ----
 void DrawIdRecord::SetStaticGate(bool on) { g_staticGate = on; }
+void DrawIdRecord::SetFullIdClear(bool on) { g_fullIdClear = on; }   // phase 57
+void DrawIdRecord::IdClears(uint64_t* rect, uint64_t* full) {
+    if (rect) *rect = g_idClearRect;
+    if (full) *full = g_idClearFull;
+}
 void DrawIdRecord::SetTestSkipKey(uint64_t fullKey) { g_testSkipKey = fullKey; }   // round 4 (harness only)
 void DrawIdMv::SetReplayStatic(unsigned frames, unsigned every) {
     const unsigned f = frames > 60u ? 60u : frames;
@@ -4047,25 +4560,37 @@ void DrawIdMv::SetReplayStaticEps(float px) {           // round 3 (dlaa.ini mv_
 float DrawIdMv::ReplayStaticEps() { return g_statEps; }
 bool DrawIdMv::StaticSkip(uint64_t key) {
     if (g_statFrames == 0u || g_statEvery <= 1u) return false;
-    const StatEnt* e = StatFind(key, false);
-    if (!e || e->streak < g_statFrames) return false;
-    if (e->seen + kStatFresh < g_instFrame) return false;                   // no recent verdict (readbacks stalled)
-    if (e->parent && e->parent + kStatParentHold >= g_instFrame) return false;   // a rigid parent lately: its plates need it
-    if (e->moved && e->moved + kStatQuiet > g_instFrame) return false;      // round 3: it moved / wobbled lately (a vehicle)
+    // phase 58: the HOT half only (see StatHot / StatPack): the same tests as before, precomputed into one word by Poll
+    const int h = StatFind(key, false);
+    if (h < 0) return false;
+    const uint64_t p = g_statHot[h].packed;
+    if (((p >> 56) & 63u) < g_statFrames) return false;  // the static streak (capped at 63; g_statFrames <= 60)
+    if (p & kStatPackFar) {                              // frame numbers past 2^27: the old tests from the COLD half
+        const StatCold& e = g_statCold[h];
+        if (e.seen + kStatFresh < g_instFrame) return false;
+        if (e.parent && e.parent + kStatParentHold >= g_instFrame) return false;
+        if (e.moved && e.moved + kStatQuiet > g_instFrame) return false;
+    } else {
+        // frame <= hi: a recent verdict (readbacks stalled: replay); frame >= lo: not a rigid parent lately (its plates need it)
+        // and (round 3) it did not move / wobble lately (a vehicle)
+        if (g_instFrame > (p & kStatPackMask) || g_instFrame < ((p >> 28) & kStatPackMask)) return false;
+    }
     // the re-check frame: ~1/every of the static keys each frame, spread by the key's hash
     return (g_instFrame % g_statEvery) != (Mix(key ^ 0x51A7C0DE51A7C0DEull) % g_statEvery);
 }
 void DrawIdMv::StaticClear(int why) {
     if (!g_statUsed) return;                             // nothing to drop (not counted)
-    memset(g_stat, 0, sizeof(g_stat));
+    memset(g_statHot, 0, sizeof(g_statHot));
+    memset(g_statCold, 0, sizeof(g_statCold));
     g_statUsed = 0;
     if (why >= 0 && why < kStatClrN) ++g_statClears[why];
 }
 uint64_t DrawIdMv::StaticClears(int why) { return (why >= 0 && why < kStatClrN) ? g_statClears[why] : 0; }
 int DrawIdMv::StaticKeys(int* atThreshold, int* held) {
     int n = 0, at = 0, hd = 0;
-    for (const StatEnt& e : g_stat) {
-        if (!e.key || e.seen + kStatExpire < g_instFrame) continue;
+    for (int h = 0; h < kStatTab; ++h) {
+        const StatCold& e = g_statCold[h];
+        if (!g_statHot[h].key || e.seen + kStatExpire < g_instFrame) continue;
         ++n;
         if (g_statFrames && e.streak >= g_statFrames) ++at;
         if (e.parent && e.parent + kStatParentHold >= g_instFrame) ++hd;
@@ -4074,9 +4599,14 @@ int DrawIdMv::StaticKeys(int* atThreshold, int* held) {
     if (held) *held = hd;
     return n;
 }
+// phase 57 (perf): inject.cpp calls this before EVERY gated replay (VR: twice a frame, more with forced replays), and each call
+// mapped every pending slot of every main unit. A unit already polled this frame (by an earlier PollMain or its own Prepare) is
+// skipped: a copy that was still in flight then has rarely landed a few hundred microseconds later, and Prepare polls the unit
+// again before its next pass anyway (a verdict that lands in between counts one pass later at most).
 void DrawIdMv::PollMain(ID3D11DeviceContext* ctx) {
     if (!ctx || g_statFrames == 0u || g_statEvery <= 1u) return;
-    for (DrawIdMv* u : g_statUnit) if (u && u->m_ready && !u->m_quiet) u->Poll(ctx);
+    for (DrawIdMv* u : g_statUnit)
+        if (u && u->m_ready && !u->m_quiet && u->m_pollTag != g_instFrame + 1u) u->Poll(ctx);
 }
 void DrawIdMv::SetConsCands(unsigned n) { g_consCands = n < 16u ? 16u : (n > (unsigned)kCandWorld ? (unsigned)kCandWorld : n); }
 unsigned DrawIdMv::ConsCands() { return g_consCands; }
@@ -4094,6 +4624,7 @@ DrawIdMv::~DrawIdMv() {
     delete[] m_prevFull; delete[] m_prevLoose; delete[] m_prevFlags;
     delete[] m_curFull; delete[] m_curLoose; delete[] m_curFlags;
     delete[] m_ent; delete[] m_orph;
+    delete[] m_sortCur; delete[] m_sortPrev;            // phase 57
     delete[] m_curGroup; delete[] m_curRank; delete[] m_curLooseG; delete[] m_prevGroup; delete[] m_prevRank;
     delete[] m_groupData; delete[] m_listData;
     delete[] m_candTmp;
@@ -4116,6 +4647,7 @@ bool DrawIdMv::Init(ID3D11Device* dev) {
         m_curFull = new (std::nothrow) uint64_t[kMax]; m_curLoose = new (std::nothrow) uint64_t[kMax];
         m_curFlags = new (std::nothrow) uint8_t[kMax];
         m_ent = new (std::nothrow) Ent[2 * kMax]; m_orph = new (std::nothrow) Ent[2 * kMax];
+        m_sortCur = new (std::nothrow) Ent[kMax]; m_sortPrev = new (std::nothrow) Ent[kMax];   // phase 57
         m_curGroup = new (std::nothrow) uint32_t[kMax]; m_curRank = new (std::nothrow) uint32_t[kMax];
         m_curLooseG = new (std::nothrow) uint32_t[kMax];
         m_prevGroup = new (std::nothrow) uint32_t[kMax]; m_prevRank = new (std::nothrow) uint32_t[kMax];
@@ -4128,6 +4660,7 @@ bool DrawIdMv::Init(ID3D11Device* dev) {
         m_prepInstKey = new (std::nothrow) uint64_t[kRbInst];
     }
     if (!m_prevFull || !m_prevLoose || !m_prevFlags || !m_curFull || !m_curLoose || !m_curFlags || !m_ent || !m_orph ||
+        !m_sortCur || !m_sortPrev ||
         !m_curGroup || !m_curRank || !m_curLooseG || !m_prevGroup || !m_prevRank || !m_groupData || !m_listData ||
         !m_candTmp || !m_curBig || !m_rbInstIdx || !m_rbInstKey || !m_prepInstIdx || !m_prepInstKey) {
         LogErr("MV draw-ids: out of memory for the pairing tables");
@@ -4274,10 +4807,20 @@ bool DrawIdMv::EnsureParList(ID3D11Device* dev) {
 
 void DrawIdMv::Poll(ID3D11DeviceContext* ctx) {
     if (m_dumpPending) DumpPoll(ctx);                    // v0.10.0 phase 4
-    for (int k = 0; k < kRb; ++k) {
-        if (!m_rbPending[k]) continue;
+    m_pollTag = g_instFrame + 1u;                        // phase 57: PollMain skips a unit already polled this frame
+    // phase 57 (perf): oldest copy first (m_rbSeq), stop at the first one the GPU has not finished -- the copies run in order on
+    // one context, so a newer one cannot be done either (as CameraMv::RingStep). Before, every pending slot was mapped (a failed
+    // DO_NOT_WAIT Map per slot per call), in slot order: two readbacks that landed together could be counted newest first --
+    // the consensus streaks (m_consRun / m_consFail) and the static streaks now always see them in pass order. A Map that
+    // fails for another reason (device lost) drops its slot instead of retrying it forever.
+    for (;;) {
+        int k = -1;
+        for (int q = 0; q < kRb; ++q) if (m_rbPending[q] && (k < 0 || m_rbSeq[q] < m_rbSeq[k])) k = q;
+        if (k < 0) break;
         D3D11_MAPPED_SUBRESOURCE mp{};
-        if (ctx->Map(m_rb[k].Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mp) != S_OK) continue;
+        const HRESULT mhr = ctx->Map(m_rb[k].Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mp);
+        if (mhr == DXGI_ERROR_WAS_STILL_DRAWING) break;
+        if (mhr != S_OK) { m_rbPending[k] = false; m_rbInstN[k] = 0; m_rbStatN[k] = 0; m_rbVsN[k] = 0; continue; }
         uint32_t c[kCntBytes / 4];
         memcpy(c, mp.pData, sizeof(c));
         ctx->Unmap(m_rb[k].Get(), 0);
@@ -4475,22 +5018,27 @@ void DrawIdMv::Poll(ID3D11DeviceContext* ctx) {
                     const bool mov = (c[640 + w] & b) != 0;    // moves (any route) / track reject
                     if (!par && !stat && !mov) {         // no partner: neither builds nor breaks the streak, but HOLDS the
                         ++m_stats.statNeutral;           // key (always re-drawn): an unpaired copy needs its pixels for the
-                        StatEnt* n0 = StatFind(key, false);   // rigid-parent vote (a part of a moving car that shares a mesh
-                        if (n0) n0->parent = src > 0 ? src : 1;   // with parked copies); a key not in the table is never skipped
+                        const int h0 = StatFind(key, false);   // rigid-parent vote (a part of a moving car that shares a mesh
+                        if (h0 >= 0) {                   // with parked copies); a key not in the table is never skipped
+                            g_statCold[h0].parent = src > 0 ? src : 1;
+                            g_statHot[h0].packed = StatPack(g_statCold[h0]);   // phase 58: StaticSkip reads only the HOT word
+                        }
                         continue;
                     }
-                    StatEnt* e = StatFind(key, true);
-                    if (!e) continue;                    // probe chain full: this key is never skipped
+                    const int h = StatFind(key, true);
+                    if (h < 0) continue;                 // probe chain full: this key is never skipped
+                    StatCold* e = &g_statCold[h];
                     if (par) { e->parent = src > 0 ? src : 1; ++m_stats.statParents; }
                     if (src > e->seen) e->seen = src;
                     if (mov || !stat) {                  // (mov: a mover, a track reject, or round 3: only shallow-static)
                         e->streak = 0; e->badTag = tag;
                         if (mov) { ++m_stats.statMoving; e->moved = src + 1; }   // + the kStatQuiet guard (StaticSkip)
-                        continue;
+                    } else {
+                        ++m_stats.statStatic;
+                        // one increment per source frame (inc = frame + 1: 0 = never): two eyes of one frame count once
+                        if (e->badTag != tag && e->inc != src + 1) { if (e->streak < 0xFFFFu) ++e->streak; e->inc = src + 1; }
                     }
-                    ++m_stats.statStatic;
-                    // one increment per source frame (inc = frame + 1: 0 = never): two eyes of one frame count once
-                    if (e->badTag != tag && e->inc != src + 1) { if (e->streak < 0xFFFFu) ++e->streak; e->inc = src + 1; }
+                    g_statHot[h].packed = StatPack(*e);  // phase 58: every change of the COLD half repacks the HOT word
                 }
             }
         }
@@ -4519,6 +5067,44 @@ void DrawIdMv::Poll(ID3D11DeviceContext* ctx) {
         }
     }
 }
+
+// phase 57 (perf): sorts e[0..n) by key, STABLE -- equal keys keep their order, so entries written in index order come out in
+// (key, index) order, the total order of Prepare's byKey (its keys + indices are unique pairs). The audit (in-game VR log
+// 2026-10-12, ~1650 G-buffer draws per pass) found the old full std::sort of current + previous entries (~3300, hashed 64-bit
+// keys) costing ~0.13 ms per eye; the scratch micro-benchmark at 1650 random keys: std::sort of both halves 126 us, std::sort
+// of the current half + merge 43 us, this LSD radix sort (8 passes of 8 bits; a pass whose byte is the same for every key is
+// skipped) + merge 25 us. Below ~100 entries std::sort is as fast and needs no histogram pass. tmp = n entries of scratch.
+namespace {
+#ifdef DRAWID_VERIFY_MERGE
+uint64_t g_verifyMergePasses = 0;                        // (check build only: passes whose merge was compared)
+#endif
+template <class E>
+void SortByKeyStable(E* a, E* tmp, uint32_t n) {
+    if (n < 2) return;
+    if (n < 96u) {
+        std::sort(a, a + n, [](const E& x, const E& y) { return x.key < y.key || (x.key == y.key && x.sideIdx < y.sideIdx); });
+        return;
+    }
+    uint32_t cnt[8][256];
+    memset(cnt, 0, sizeof(cnt));
+    for (uint32_t i = 0; i < n; ++i) {
+        uint64_t k = a[i].key;
+        for (int b = 0; b < 8; ++b) { ++cnt[b][k & 0xFFu]; k >>= 8; }
+    }
+    E* src = a;
+    E* dst = tmp;
+    for (int b = 0; b < 8; ++b) {
+        const int sh = 8 * b;
+        uint32_t* c = cnt[b];
+        if (c[(src[0].key >> sh) & 0xFFu] == n) continue;   // every key has this byte: the pass would move nothing
+        uint32_t sum = 0;
+        for (int v = 0; v < 256; ++v) { const uint32_t t = c[v]; c[v] = sum; sum += t; }
+        for (uint32_t i = 0; i < n; ++i) dst[c[(src[i].key >> sh) & 0xFFu]++] = src[i];
+        E* const t = src; src = dst; dst = t;
+    }
+    if (src != a) memcpy(a, src, sizeof(E) * n);
+}
+}  // namespace
 
 uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, uint32_t fullW, uint32_t fullH,
                            const DrawIdRecord* fwd, float nearM, bool freshMedoid, uint32_t noMedoid, bool idsBound) {
@@ -4569,7 +5155,12 @@ uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ui
     const uint8_t kNoPair = DrawIdRecord::kFInstanced | DrawIdRecord::kFNoMvp;
     uint32_t elig = 0;
     // ---- group by the full key; orphans (one side only) by the pointer-free key ----
-    uint32_t ne = 0;
+    // phase 57 (perf): m_ent = every eligible current (index i) and previous (0x80000000 | j) draw in byKey order. The previous
+    // half was this unit's current half one pass ago and is kept sorted (m_sortPrev, swapped in at Finish's commit), so only
+    // the current half is sorted (stable radix, written in index order = (key, i) order) and the two are MERGED: at equal keys
+    // the current entry first (its sideIdx < 0x80000000 | j) -- exactly the order std::sort(byKey) gave the concatenation, so
+    // the groups, ranks and orphans are bit-identical to before.
+    uint32_t nc = 0;
     m_prepInstN = 0;                                     // v0.10.0 phase 8 (mv_inst_replay): the G-buffer instanced draws
     for (uint32_t i = 0; i < n; ++i) {
         if (g_instReplay && i < nG && (rec->Flags((int)i) & kNoPair) && m_prepInstN < (uint32_t)kRbInst) {
@@ -4581,15 +5172,47 @@ uint32_t DrawIdMv::Prepare(ID3D11DeviceContext* ctx, const DrawIdRecord* rec, ui
         m_curGroup[i] = kNone; m_curRank[i] = 0; m_curLooseG[i] = 0; m_curBig[i] = 0;
         if (m_curFlags[i] & kNoPair) continue;
         ++elig;
-        m_ent[ne++] = { m_curFull[i], i };
+        m_sortCur[nc++] = { m_curFull[i], i };
     }
-    for (uint32_t j = 0; j < m; ++j) {
-        m_prevGroup[j] = kNone; m_prevRank[j] = 0;
-        if (m_prevFlags[j] & kNoPair) continue;
-        m_ent[ne++] = { m_prevFull[j], 0x80000000u | j };
+    SortByKeyStable(m_sortCur, m_orph, nc);              // (m_orph: free until the orphans below)
+    m_sortCurN = nc; m_sortCurOf = n;
+    for (uint32_t j = 0; j < m; ++j) { m_prevGroup[j] = kNone; m_prevRank[j] = 0; }
+    if (m && (!m_sortPrevOk || m_sortPrevOf != m)) {     // no kept list for this history (defensive): build it from the keys
+        uint32_t np = 0;
+        for (uint32_t j = 0; j < m; ++j) if (!(m_prevFlags[j] & kNoPair)) m_sortPrev[np++] = { m_prevFull[j], j };
+        SortByKeyStable(m_sortPrev, m_orph, np);
+        m_sortPrevN = np; m_sortPrevOf = m; m_sortPrevOk = true;
+    }
+    uint32_t ne = 0;
+    {
+        const uint32_t np = m ? m_sortPrevN : 0u;
+        const Ent* sc = m_sortCur;
+        const Ent* sp = m_sortPrev;
+        uint32_t a = 0, b = 0;
+        while (a < nc && b < np) {
+            if (sp[b].key < sc[a].key) { m_ent[ne++] = { sp[b].key, 0x80000000u | sp[b].sideIdx }; ++b; }
+            else m_ent[ne++] = sc[a++];
+        }
+        while (a < nc) m_ent[ne++] = sc[a++];
+        while (b < np) { m_ent[ne++] = { sp[b].key, 0x80000000u | sp[b].sideIdx }; ++b; }
     }
     auto byKey = [](const Ent& a, const Ent& b) { return a.key < b.key || (a.key == b.key && a.sideIdx < b.sideIdx); };
-    std::sort(m_ent, m_ent + ne, byKey);
+#ifdef DRAWID_VERIFY_MERGE
+    {   // phase 57 check build (harness: cl /DDRAWID_VERIFY_MERGE): the pre-phase-57 concatenation + full sort must equal the merge
+        uint32_t nr = 0;
+        for (uint32_t i = 0; i < n; ++i) if (!(m_curFlags[i] & kNoPair)) m_orph[nr++] = { m_curFull[i], i };
+        for (uint32_t j = 0; j < m; ++j) if (!(m_prevFlags[j] & kNoPair)) m_orph[nr++] = { m_prevFull[j], 0x80000000u | j };
+        std::sort(m_orph, m_orph + nr, byKey);
+        bool same = nr == ne;
+        for (uint32_t q = 0; same && q < ne; ++q) same = m_orph[q].key == m_ent[q].key && m_orph[q].sideIdx == m_ent[q].sideIdx;
+        if (!same) {
+            fprintf(stderr, "DRAWID_VERIFY_MERGE: the merged order differs from the full sort (%u / %u entries)\n", ne, nr);
+            abort();
+        }
+        if ((++g_verifyMergePasses % 1000u) == 1u)
+            fprintf(stderr, "DRAWID_VERIFY_MERGE: %llu passes compared, all identical\n", (unsigned long long)g_verifyMergePasses);
+    }
+#endif
     constexpr uint32_t kGroupCap = 1024;                // larger groups: unpaired (drawn > 1024 times: static clutter)
     m_nGroups = 0; m_nList = 0;
     uint32_t no = 0;
@@ -5229,6 +5852,12 @@ void DrawIdMv::Finish(ID3D11DeviceContext* ctx) {
     memcpy(m_prevLoose, m_curLoose, sizeof(uint64_t) * m_prepN);
     memcpy(m_prevFlags, m_curFlags, m_prepN);
     m_prevN = m_prepN;
+    {   // phase 57: ... and its sorted eligible list the next Prepare's previous half (a swap, no copy)
+        Ent* const t = m_sortPrev; m_sortPrev = m_sortCur; m_sortCur = t;
+        m_sortPrevN = m_sortCurN; m_sortPrevOf = m_sortCurOf;
+        m_sortPrevOk = m_sortCurOf == m_prepN;           // (always: Prepare filled it for this pass; defensive)
+        m_sortCurN = 0; m_sortCurOf = 0;
+    }
     m_ping = 1 - m_ping;
     m_prepN = 0;
     m_prepNG = 0; m_prepNF = 0; m_prepCandW = 0; m_prepCandC = 0;

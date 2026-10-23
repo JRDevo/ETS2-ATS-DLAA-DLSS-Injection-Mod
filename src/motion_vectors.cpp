@@ -25,7 +25,7 @@ constexpr UINT kCandBytes   = CandidateRecord::kBytes;       // 16384
 constexpr UINT kSolveElems  = (UINT)CameraMv::kSolveElems;
 
 // ---------------------------------------------------------------------------
-// Pass A: one thread per layer. For each matched pair k:
+// Pass A: per layer (phase 58: one group of 64 threads for both layers + the ego scan, see CSMain). For each matched pair k:
 //   R_k = MVP_prev_k * inverse(MVP_cur_k)   (current clip -> previous clip, static things)
 // then the MEDOID (smallest summed Frobenius distance to the other R's) is the
 // layer's R. Moving objects (cars, wheels, wipers) are outliers and lose.
@@ -117,25 +117,44 @@ float Frob(float4x4 a, float4x4 b) {
     return sqrt(d);
 }
 
-[numthreads(2, 1, 1)]
-void CSMain(uint3 id : SV_DispatchThreadID) {
-    uint layer = id.x;
-    if (layer >= 2) return;
-    if ((((uint)Params.z) >> layer & 1u) != 0u) return;     // v0.10.0 phase 8: the per-draw consensus answers for this layer
-    uint n = min(Counts[layer], 16u);
-    float nearM = (layer == 0) ? Params.x : 0.0;
+// Phase 58 (perf round 2): ONE group of 64 threads. Was [numthreads(2, 1, 1)], one thread per layer with float4x4 R[16] (an
+// indexable temp array: it spilled) and every inversion, the 16x16 Frobenius medoid and the ego scan of up to 128 pairs run
+// serially -- GpuPerf `medoid` 0.022-0.071 ms per eye, and pass A runs in almost every pass. The answer is the SAME BITS: each R_k
+// is the same expression on the same inputs (one thread per pair), each cost_i is summed by ONE thread over j in ascending
+// order with the same float operations, and the picks (the medoid's strict < = the first index wins a tie, the ego's tolerance
+// rule) still walk the 16 stored costs serially. Steps, a group barrier between each:
+//   1. gi < 32: R_k of layer gi / 16, pair gi % 16 (+ valid / near-filter flags and |w|) into groupshared
+//   2. gi < 32: cost_i of layer gi / 16 (the near-filter fallback decided from that layer's 16 flags)
+//   3. gi < 2:  layer gi's pick + its Solve rows (nothing for a layer whose medoid is dropped, as before)
+//   4. ego scan (world layer), AllPairs in chunks of 64, one pair per thread: a valid pair sets its bit in a groupshared mask, its
+//      slot = countbits of the valid bits before it (+ the earlier chunks) = its rank in AllPairs order, so the slots 0..15 hold
+//      "the first 16 valid" exactly as the serial scan's break did; the 2nd chunk runs only while fewer than 16 were found
+//   5. gi < 16: the static reject (Frobenius to R_world); gi == 32: InvRow3 (the chosen world pair's inverse)
+//   6. gi < 16: ego cost_i + |R_i - I|;  7. gi == 0: the ego pick (tolerance rule) + Solve[12..15], [17]
+groupshared float4x4 gR[32];          // [layer * 16 + k] = R_k (identity where not valid)
+groupshared uint     gOk[32];         // bit 0 = valid R_k, bit 1 = valid AND passes the near filter (|w| >= near_reject_m)
+groupshared float    gWd[32];         // |MVP_cur[3][3]| of a valid pair
+groupshared float    gCost[32];       // medoid cost of an eligible pair
+groupshared int      gBest[2];        // chosen index per layer (-1 = none)
+groupshared uint     gEgoMask[4];     // valid ego pairs: chunk c = words 2c, 2c+1 (bit = thread)
+groupshared float4x4 gEgoR[16];       // ego candidates in AllPairs order
+groupshared uint     gEgoElig[16];    // 1 = survives the static reject
+groupshared float    gEgoCost[16], gEgoDI[16];
 
-    float4x4 R[16];
-    bool     ok[16];
-    bool     elig[16];
-    float    wd[16];
-    uint     nValid = 0, nFarOk = 0;
-    [loop] for (uint k = 0; k < 16; ++k) {
-        R[k] = float4x4(1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1);
-        ok[k] = false;
-        elig[k] = false;
-        wd[k] = 0;
-        if (k < n) {
+[numthreads(64, 1, 1)]
+void CSMain(uint gi : SV_GroupIndex) {
+    const uint noMed = (uint)Params.z;                  // v0.10.0 phase 8: bit L = the per-draw consensus answers for layer L
+    const float4x4 I4 = float4x4(1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1);
+
+    // ---- 1: R_k, one thread per pair ------------------------------------------------------------------------------------
+    if (gi < 32) {
+        uint layer = gi >> 4, k = gi & 15u;
+        uint n = min(Counts[layer], 16u);
+        float nearM = (layer == 0) ? Params.x : 0.0;
+        float4x4 Rk = I4;
+        uint  fl = 0;
+        float wk = 0;
+        if (((noMed >> layer) & 1u) == 0u && k < n) {
             uint2 pc = Pairs[layer * 16 + k].xy;
             float4x4 Mp = LoadM(CandPrev, pc.x);
             float4x4 Mc = LoadM(CandCur,  pc.y);
@@ -147,117 +166,169 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
                     [unroll] for (int j = 0; j < 4; ++j)
                         s += r[i][j] * r[i][j];
                 if (isfinite(s) && s < 1e30) {
-                    R[k] = r; ok[k] = true; ++nValid;
+                    Rk = r; fl = 1u;
                     // object-origin view depth: clip w of the local origin = MVP row3.w
                     float w = abs(Mc[3][3]);
-                    wd[k] = w;
-                    bool farEnough = isfinite(w) && w >= nearM;
-                    elig[k] = farEnough;
-                    if (farEnough) ++nFarOk;
+                    wk = w;
+                    if (isfinite(w) && w >= nearM) fl |= 2u;
                 }
             }
         }
+        gR[gi] = Rk; gOk[gi] = fl; gWd[gi] = wk;
     }
-    // Nothing passes the near filter -> fall back to every valid pair.
-    bool fallback = (nFarOk == 0);
-    if (fallback) {
-        [unroll] for (uint q = 0; q < 16; ++q) elig[q] = ok[q];
-    }
+    if (gi < 4) gEgoMask[gi] = 0;
+    GroupMemoryBarrierWithGroupSync();
 
-    int   best = -1;
-    float bestCost = 3.0e38;
-    [loop] for (uint i2 = 0; i2 < 16; ++i2) {
-        if (elig[i2]) {
-            float cost = 0;
+    // ---- 2: medoid cost of pair i, summed over j ascending (the order of the serial loop) --------------------------------
+    if (gi < 32) {
+        uint base = gi & 16u, i2 = gi & 15u;
+        uint nFarOk = 0;
+        [unroll] for (uint q = 0; q < 16; ++q) nFarOk += (gOk[base + q] >> 1) & 1u;
+        // Nothing passes the near filter -> fall back to every valid pair.
+        uint eligBit = (nFarOk == 0) ? 1u : 2u;
+        float cost = 0;
+        if ((gOk[gi] & eligBit) != 0u) {
             [loop] for (uint j2 = 0; j2 < 16; ++j2) {
-                if (elig[j2] && j2 != i2) {
+                if ((gOk[base + j2] & eligBit) != 0u && j2 != i2) {
                     float d = 0;
                     [unroll] for (int a = 0; a < 4; ++a)
                         [unroll] for (int b = 0; b < 4; ++b) {
-                            float df = R[i2][a][b] - R[j2][a][b];
+                            float df = gR[gi][a][b] - gR[base + j2][a][b];
                             d += df * df;
                         }
                     cost += sqrt(d);
                 }
             }
-            if (cost < bestCost) { bestCost = cost; best = (int)i2; }
         }
+        gCost[gi] = cost;
     }
+    GroupMemoryBarrierWithGroupSync();
 
-    float4x4 outM = float4x4(1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1);
-    if (best >= 0) {
-        outM = R[best];
+    // ---- 3: per-layer pick (strict <: the first index wins a tie) + Solve rows -------------------------------------------
+    if (gi < 2) {
+        uint layer = gi, base = gi * 16u;
+        int best = -1;
+        if (((noMed >> layer) & 1u) == 0u) {
+            uint n = min(Counts[layer], 16u);
+            uint nValid = 0, nFarOk = 0;
+            [unroll] for (uint q = 0; q < 16; ++q) { nValid += gOk[base + q] & 1u; nFarOk += (gOk[base + q] >> 1) & 1u; }
+            bool fallback = (nFarOk == 0);
+            uint eligBit = fallback ? 1u : 2u;
+            float bestCost = 3.0e38;
+            [loop] for (uint i2 = 0; i2 < 16; ++i2) {
+                if ((gOk[base + i2] & eligBit) != 0u) {
+                    float cost = gCost[base + i2];
+                    if (cost < bestCost) { bestCost = cost; best = (int)i2; }
+                }
+            }
+            float4x4 outM = I4;
+            if (best >= 0) outM = gR[base + best];
+            [unroll] for (uint row = 0; row < 4; ++row)
+                Solve[layer * 4 + row] = outM[row];
+            // info: x = pairs offered, y = valid, z = chosen index (-1 = none -> identity)
+            Solve[8 + layer] = float4((float)n, (float)nValid, (float)best, 0);
+            // chosen pair: x = |w| (m), y = IndexCount, z = valid pairs rejected by the near filter,
+            // w = 1 if the filter would have left nothing and was bypassed
+            float cw = 0, cic = 0;
+            if (best >= 0) { cw = gWd[base + best]; cic = (float)Pairs[base + best].z; }
+            Solve[10 + layer] = float4(cw, cic, (float)(nValid - nFarOk), fallback ? 1.0 : 0.0);
+        }
+        gBest[layer] = best;
     }
-    [unroll] for (uint row = 0; row < 4; ++row)
-        Solve[layer * 4 + row] = outM[row];
-    // info: x = pairs offered, y = valid, z = chosen index (-1 = none -> identity)
-    Solve[8 + layer] = float4((float)n, (float)nValid, (float)best, 0);
-    // chosen pair: x = |w| (m), y = IndexCount, z = valid pairs rejected by the near filter,
-    // w = 1 if the filter would have left nothing and was bypassed
-    float cw = 0, cic = 0;
-    if (best >= 0) { cw = wd[best]; cic = (float)Pairs[layer * 16 + best].z; }
-    Solve[10 + layer] = float4(cw, cic, (float)(nValid - nFarOk), fallback ? 1.0 : 0.0);
+    GroupMemoryBarrierWithGroupSync();
 
-    // ---- v0.6.0 ego reprojection (world layer only) -------------------------------------
-    if (layer != 0) return;
-    float4 invRow3 = float4(0, 0, 0, 0);
-    if (best >= 0) {
-        float4x4 Mw = LoadM(CandCur, Pairs[best].y);
-        float4x4 iw;
-        if (Inv4(Mw, iw) && all(isfinite(iw[3]))) invRow3 = iw[3];
-    }
-    // Scan: one dword (MVP_cur[3][3], byte 60 of the slot) per pair; invert only candidates. R[] is reused.
-    uint  nAll  = min(Counts.z, 128u);
-    float egoM  = Params.y;
-    uint  nCand = 0;
-    if (best >= 0 && egoM > 0.0) {
-        [loop] for (uint a = 0; a < nAll; ++a) {
-            if (nCand >= 16) break;
+    // ---- v0.6.0 ego reprojection (world layer only; nothing when its medoid is dropped, as before) ------------------------
+    const bool  egoOn = (noMed & 1u) == 0u;
+    const int   best0 = gBest[0];
+    const uint  nAll  = min(Counts.z, 128u);
+    const float egoM  = Params.y;
+    const bool  scan  = egoOn && best0 >= 0 && egoM > 0.0;
+    // ---- 4: scan: one dword (MVP_cur[3][3], byte 60 of the slot) per pair; invert only candidates ------------------------
+    uint found = 0;                                     // valid candidates of the earlier chunks (same in every thread)
+    [unroll] for (uint c = 0; c < 2; ++c) {
+        uint a = c * 64u + gi;
+        bool valid = false;
+        float4x4 r = I4;
+        if (scan && found < 16u && a < nAll) {
             uint2 pa = AllPairs[a].xy;
             float wq = abs(asfloat(CandCur.Load(pa.y + 60)));
-            if (!(isfinite(wq) && wq < egoM)) continue;
-            float4x4 Mp = LoadM(CandPrev, pa.x);
-            float4x4 Mc = LoadM(CandCur,  pa.y);
-            float4x4 ic;
-            if (NotMvp(Mc) || NotMvp(Mp) || !Inv4(Mc, ic)) continue;   // (phase 19: the MVP shape)
-            float4x4 r = mul(Mp, ic);
-            float s = 0;
-            [unroll] for (int i = 0; i < 4; ++i)
-                [unroll] for (int j = 0; j < 4; ++j)
-                    s += r[i][j] * r[i][j];
-            if (isfinite(s) && s < 1e30) { R[nCand] = r; ++nCand; }
-        }
-    }
-    // Static reject: within 0.004 (Frobenius) of R_world = static scenery that happens to be near.
-    uint nUsed = 0;
-    [loop] for (uint e = 0; e < 16; ++e) {
-        elig[e] = false;
-        if (e < nCand && Frob(R[e], outM) >= 0.004) { elig[e] = true; ++nUsed; }
-    }
-    float4x4 I4 = float4x4(1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1);
-    int   egoBest = -1;
-    float egoCost = 3.0e38, egoDistI = 3.0e38;
-    [loop] for (uint i3 = 0; i3 < 16; ++i3) {
-        if (elig[i3]) {
-            float cost = 0;
-            [loop] for (uint j3 = 0; j3 < 16; ++j3) {
-                if (elig[j3] && j3 != i3) cost += Frob(R[i3], R[j3]);
+            if (isfinite(wq) && wq < egoM) {
+                float4x4 Mp = LoadM(CandPrev, pa.x);
+                float4x4 Mc = LoadM(CandCur,  pa.y);
+                float4x4 ic;
+                if (!(NotMvp(Mc) || NotMvp(Mp) || !Inv4(Mc, ic))) {   // (phase 19: the MVP shape)
+                    r = mul(Mp, ic);
+                    float s = 0;
+                    [unroll] for (int i = 0; i < 4; ++i)
+                        [unroll] for (int j = 0; j < 4; ++j)
+                            s += r[i][j] * r[i][j];
+                    valid = isfinite(s) && s < 1e30;
+                }
             }
-            float dI  = Frob(R[i3], I4);
-            float tol = 1e-5 * max(cost, 1e-6);
-            bool better = (cost < egoCost - tol) || (cost <= egoCost + tol && dI < egoDistI);
-            if (better) { egoCost = cost; egoDistI = dI; egoBest = (int)i3; }
+            if (valid) InterlockedOr(gEgoMask[c * 2u + (gi >> 5)], 1u << (gi & 31u));
         }
+        GroupMemoryBarrierWithGroupSync();
+        uint m0 = gEgoMask[c * 2u], m1 = gEgoMask[c * 2u + 1u];
+        if (valid) {
+            uint rank = found + ((gi < 32u) ? countbits(m0 & ((1u << gi) - 1u))
+                                            : countbits(m0) + countbits(m1 & ((1u << (gi - 32u)) - 1u)));
+            if (rank < 16u) gEgoR[rank] = r;
+        }
+        found += countbits(m0) + countbits(m1);
     }
-    float4x4 egoR = outM;
-    bool egoFb = true;
-    if (egoBest >= 0) { egoR = R[egoBest]; egoFb = false; }
-    [unroll] for (uint row2 = 0; row2 < 4; ++row2)
-        Solve[12 + row2] = egoR[row2];
-    Solve[16] = invRow3;
-    // ego info: x = candidates (valid R), y = used after the static reject, z = 1 if R_ego = R_world,
-    // w = |R_ego - R_world| (Frobenius)
-    Solve[17] = float4((float)nCand, (float)nUsed, egoFb ? 1.0 : 0.0, Frob(egoR, outM));
+    uint nCand = min(found, 16u);
+    GroupMemoryBarrierWithGroupSync();
+
+    // ---- 5: static reject: within 0.004 (Frobenius) of R_world = static scenery that happens to be near -------------------
+    float4x4 outW = I4;
+    if (best0 >= 0) outW = gR[best0];
+    if (gi < 16) gEgoElig[gi] = (egoOn && gi < nCand && Frob(gEgoR[gi], outW) >= 0.004) ? 1u : 0u;
+    if (gi == 32 && egoOn) {
+        float4 invRow3 = float4(0, 0, 0, 0);
+        if (best0 >= 0) {
+            float4x4 Mw = LoadM(CandCur, Pairs[best0].y);
+            float4x4 iw;
+            if (Inv4(Mw, iw) && all(isfinite(iw[3]))) invRow3 = iw[3];
+        }
+        Solve[16] = invRow3;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    // ---- 6: ego medoid cost of candidate i, summed over j ascending -----------------------------------------------------
+    if (gi < 16 && gEgoElig[gi] != 0u) {
+        float cost = 0;
+        [loop] for (uint j3 = 0; j3 < 16; ++j3) {
+            if (gEgoElig[j3] != 0u && j3 != gi) cost += Frob(gEgoR[gi], gEgoR[j3]);
+        }
+        gEgoCost[gi] = cost;
+        gEgoDI[gi]   = Frob(gEgoR[gi], I4);
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    // ---- 7: ego pick (a cost tie, e.g. 2 candidates, goes to the one nearer identity) + Solve rows -----------------------
+    if (gi == 0 && egoOn) {
+        uint nUsed = 0;
+        int   egoBest = -1;
+        float egoCost = 3.0e38, egoDistI = 3.0e38;
+        [loop] for (uint i3 = 0; i3 < 16; ++i3) {
+            if (gEgoElig[i3] != 0u) {
+                ++nUsed;
+                float cost = gEgoCost[i3];
+                float dI   = gEgoDI[i3];
+                float tol = 1e-5 * max(cost, 1e-6);
+                bool better = (cost < egoCost - tol) || (cost <= egoCost + tol && dI < egoDistI);
+                if (better) { egoCost = cost; egoDistI = dI; egoBest = (int)i3; }
+            }
+        }
+        float4x4 egoR = outW;
+        bool egoFb = true;
+        if (egoBest >= 0) { egoR = gEgoR[egoBest]; egoFb = false; }
+        [unroll] for (uint row2 = 0; row2 < 4; ++row2)
+            Solve[12 + row2] = egoR[row2];
+        // ego info: x = candidates (valid R), y = used after the static reject, z = 1 if R_ego = R_world,
+        // w = |R_ego - R_world| (Frobenius)
+        Solve[17] = float4((float)nCand, (float)nUsed, egoFb ? 1.0 : 0.0, Frob(egoR, outW));
+    }
 }
 )";
 // kSolveShader-END
@@ -1410,6 +1481,7 @@ void CameraMv::DispatchReproj(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, 
     if (cntSlot >= 0) {                                 // v0.9.0 r11: read back without waiting (FwdCountPoll)
         ctx->CopyResource(m_fwdCntRb[cntSlot].Get(), m_fwdCnt.Get());
         m_fwdCntPending[cntSlot] = true;
+        m_fwdCntSeq[cntSlot] = ++m_fwdCntCtr;            // phase 57: FwdCountPoll reads the oldest first
     }
 }
 
@@ -1447,12 +1519,17 @@ bool CameraMv::FwdCountInit() {
     return true;
 }
 
+// phase 57 (perf): oldest copy first, stop at the first one the GPU has not finished (the copies complete in order on one
+// context, as RingStep) -- before, every pending slot took a failed DO_NOT_WAIT Map per pass B.
 void CameraMv::FwdCountPoll(ID3D11DeviceContext* ctx) {
-    for (int k = 0; k < kFwdCntRb; ++k) {
-        if (!m_fwdCntPending[k]) continue;
+    for (;;) {
+        int k = -1;
+        for (int q = 0; q < kFwdCntRb; ++q)
+            if (m_fwdCntPending[q] && (k < 0 || m_fwdCntSeq[q] < m_fwdCntSeq[k])) k = q;
+        if (k < 0) break;
         D3D11_MAPPED_SUBRESOURCE mp{};
         const HRESULT hr = ctx->Map(m_fwdCntRb[k].Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mp);
-        if (hr == DXGI_ERROR_WAS_STILL_DRAWING) continue;
+        if (hr == DXGI_ERROR_WAS_STILL_DRAWING) break;
         m_fwdCntPending[k] = false;
         if (FAILED(hr)) continue;
         const uint32_t* c = (const uint32_t*)mp.pData;
@@ -1747,7 +1824,7 @@ bool CameraMv::Generate(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, uint32
     ID3D11UnorderedAccessView* nullUav = nullptr;
 
     // ---- pass A: per-layer medoid R (v0.9.0 r9: not on a held world miss -- the solve buffer keeps the last good R)
-    // ----
+    // ---- phase 58: still ONE group (now [numthreads(64, 1, 1)]: both layers' pairs, costs and the ego scan in parallel)
     if (!fs.missHeld && noMed != 3u) {                 // v0.10.0 phase 8: not when neither layer has a medoid
         GpuPerfScope gp(ctx, GpuPerf::kMedoid);
         ID3D11Buffer* cbs = m_cbPairs.Get();

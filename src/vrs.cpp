@@ -31,6 +31,7 @@
 // SOFTWARE.
 #include <windows.h>
 #include <d3d11.h>
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -54,6 +55,7 @@ bool g_want = false;
 
 namespace {
 std::atomic<int> s_on{0}, s_inner{55}, s_outer{80}, s_quality{1}, s_debug{0}, s_passes{0};
+std::atomic<int> s_strength{0};                      // phase 59f: dlaa.ini vrs_strength (0 Normal, 1 Strong, 2 Max)
 int              s_cls = kClsGbuf;                   // the bind kind of the open bracket (render thread; stats per kind)
 uint64_t         s_lastLogFrame = 0;                 // the Present count at the last stats line (per-frame figures)
 int              s_support = -1;                     // render thread (Probe)
@@ -77,6 +79,17 @@ constexpr int kMaxMasks = 8;                         // 2 eyes x a few sizes (DL
 Mask             s_masks[kMaxMasks];
 uint64_t         s_useSeq = 0;
 ID3D11Device*    s_maskDev = nullptr;                // the device the masks were made on
+// phase 59 (vrs_eye): one refillable mask per eye -- the texture + view are made once per size, the bytes refilled only when the
+// centre moved by >= 1 tile (or the size / radii changed). Same device rule as the cache (ReleaseMasks drops both).
+struct DynMask {
+    uint32_t w = 0, h = 0, tw = 0, th = 0;           // render-target px / tiles
+    int      inner = -1, outer = -1;                 // % at the last fill
+    float    cu = -1.0f, cv = -1.0f;                 // the centre of the last fill (uv)
+    ID3D11Texture2D*                 tex = nullptr;
+    ID3D11NvShadingRateResourceView* view = nullptr;
+    std::vector<uint8_t>             bytes;          // the CPU copy (tw * th)
+};
+DynMask          s_dyn[2];
 
 // bracket state (render thread)
 ID3D11DeviceContext* s_ctx = nullptr;                // the context the bracket is on (identity)
@@ -96,6 +109,11 @@ void ReleaseMasks() {
         if (m.tex) m.tex->Release();
         m = Mask();
     }
+    for (DynMask& d : s_dyn) {                       // phase 59
+        if (d.view) d.view->Release();
+        if (d.tex) d.tex->Release();
+        d = DynMask();
+    }
     s_maskDev = nullptr;
 }
 
@@ -105,21 +123,27 @@ const char* RateName(NV_PIXEL_SHADING_RATE r) {
     case NV_PIXEL_X1_PER_2X1_RASTER_PIXELS: return "2x1";
     case NV_PIXEL_X1_PER_1X2_RASTER_PIXELS: return "1x2";
     case NV_PIXEL_X1_PER_2X2_RASTER_PIXELS: return "2x2";
+    case NV_PIXEL_X1_PER_4X2_RASTER_PIXELS: return "4x2";
     case NV_PIXEL_X1_PER_4X4_RASTER_PIXELS: return "4x4";
     default:                                return "?";
     }
 }
 
 // The table for this Enter: index 0 = inner, 1 = middle ring, 2 = outer ring (the mask's values); the rest 1 x 1.
-void BuildTable(int quality, int debug, float renderOverOutput) {
+void BuildTable(int quality, int debug, int strength, float renderOverOutput) {
     const bool upLow = renderOverOutput > 0.0f && renderOverOutput < 0.75f;
-    const int key = (quality ? 1 : 0) | (debug ? 2 : 0) | (upLow ? 4 : 0);
+    strength = strength < 0 ? 0 : (strength > 2 ? 2 : strength);
+    const int key = (quality ? 1 : 0) | (debug ? 2 : 0) | (upLow ? 4 : 0) | (strength << 3);
     if (key == s_tableKey) return;
+    // phase 59f: the outer ring per vrs_strength -- [upLow][strength]; upLow = one step finer (DLSS already upscales)
+    static const NV_PIXEL_SHADING_RATE kOut[2][3] = {
+        { NV_PIXEL_X1_PER_2X2_RASTER_PIXELS, NV_PIXEL_X1_PER_4X2_RASTER_PIXELS, NV_PIXEL_X1_PER_4X4_RASTER_PIXELS },
+        { NV_PIXEL_X1_PER_2X1_RASTER_PIXELS, NV_PIXEL_X1_PER_2X2_RASTER_PIXELS, NV_PIXEL_X1_PER_4X2_RASTER_PIXELS } };
     NV_PIXEL_SHADING_RATE mid, out;
     if (debug)      { mid = NV_PIXEL_X1_PER_2X2_RASTER_PIXELS; out = NV_PIXEL_X1_PER_4X4_RASTER_PIXELS; }   // the pattern, on purpose
-    else if (upLow) { mid = NV_PIXEL_X1_PER_RASTER_PIXEL;      out = NV_PIXEL_X1_PER_2X1_RASTER_PIXELS; }   // DLSS already upscales
+    else if (upLow) { mid = NV_PIXEL_X1_PER_RASTER_PIXEL;      out = kOut[1][strength]; }   // DLSS already upscales
     else            { mid = quality ? NV_PIXEL_X1_PER_RASTER_PIXEL : NV_PIXEL_X1_PER_2X1_RASTER_PIXELS;
-                      out = NV_PIXEL_X1_PER_2X2_RASTER_PIXELS; }
+                      out = kOut[0][strength]; }
     for (NV_D3D11_VIEWPORT_SHADING_RATE_DESC& v : s_vp) {
         v.enableVariablePixelShadingRate = true;
         for (NV_PIXEL_SHADING_RATE& r : v.shadingRateTable) r = NV_PIXEL_X1_PER_RASTER_PIXEL;
@@ -134,8 +158,8 @@ void BuildTable(int quality, int debug, float renderOverOutput) {
     }
     const bool first = s_tableKey < 0;
     s_tableKey = key;
-    Log("VRS: shading-rate table inner 1x1, middle %s, outer %s (vrs_quality=%d%s%s); extra passes (vrs_passes=1): middle 1x1, "
-        "outer %s%s", RateName(mid), RateName(out), quality,
+    Log("VRS: shading-rate table inner 1x1, middle %s, outer %s (vrs_quality=%d vrs_strength=%d%s%s); extra passes (vrs_passes=1): "
+        "middle 1x1, outer %s%s", RateName(mid), RateName(out), quality, strength,
         debug ? ", vrs_debug=1: exaggerated to show the pattern" : "",
         upLow ? ", DLSS upscales from below 75 % of the output width: outer one step finer" : "", RateName(out),
         first ? "" : " -- changed");
@@ -212,6 +236,76 @@ Mask* FindOrBuild(ID3D11Device* dev, ID3D11DeviceContext* ctx, uint32_t w, uint3
     return lru;
 }
 
+// phase 59: eye `eye`'s refillable mask for (w, h, centre, radii): made once per size (an empty DEFAULT texture + one
+// UpdateSubresource before the view, as FindOrBuild), refilled with FillMaskRuns + UpdateSubresource only when the centre moved by
+// >= 1 tile (16 px) in x or y since the last fill, or the radii changed. The view stays (it refers to the texture, not the bytes).
+// nullptr = failed (logged; as FindOrBuild).
+ID3D11NvShadingRateResourceView* DynMaskFor(ID3D11Device* dev, ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, float cu, float cv,
+                                            int inner, int outer, int eye) {
+    if (s_maskDev != dev) { ReleaseMasks(); s_maskDev = dev; }
+    DynMask& d = s_dyn[eye & 1];
+    LARGE_INTEGER t0;
+    QueryPerformanceCounter(&t0);
+    bool fresh = false;
+    if (!d.view || d.w != w || d.h != h) {
+        if (d.view) d.view->Release();
+        if (d.tex) d.tex->Release();
+        d = DynMask();
+        const uint32_t tw = (w + NV_VARIABLE_PIXEL_SHADING_TILE_WIDTH - 1) / NV_VARIABLE_PIXEL_SHADING_TILE_WIDTH;
+        const uint32_t th = (h + NV_VARIABLE_PIXEL_SHADING_TILE_HEIGHT - 1) / NV_VARIABLE_PIXEL_SHADING_TILE_HEIGHT;
+        D3D11_TEXTURE2D_DESC td{};
+        td.Width = tw; td.Height = th; td.MipLevels = 1; td.ArraySize = 1;
+        td.Format = DXGI_FORMAT_R8_UINT; td.SampleDesc.Count = 1;
+        td.Usage = D3D11_USAGE_DEFAULT; td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+        ID3D11Texture2D* tex = nullptr;
+        HRESULT hr = dev->CreateTexture2D(&td, nullptr, &tex);
+        if (FAILED(hr) || !tex) {
+            LogErr("VRS: eye %d gaze mask texture %ux%u tiles FAILED (hr=0x%08lX)", eye, tw, th, (unsigned long)hr);
+            return nullptr;
+        }
+        d.bytes.assign((size_t)tw * th, 2);
+        FillMaskRuns(d.bytes.data(), tw, th, w, h, cu, cv, (float)inner / 100.0f, (float)outer / 100.0f, nullptr);
+        ctx->UpdateSubresource(tex, 0, nullptr, d.bytes.data(), tw, 0);   // (before the view: the phase 34 finding)
+        NV_D3D11_SHADING_RATE_RESOURCE_VIEW_DESC vd{};
+        vd.version = NV_D3D11_SHADING_RATE_RESOURCE_VIEW_DESC_VER;
+        vd.Format = DXGI_FORMAT_R8_UINT;
+        vd.ViewDimension = NV_SRRV_DIMENSION_TEXTURE2D;
+        vd.Texture2D.MipSlice = 0;
+        ID3D11NvShadingRateResourceView* view = nullptr;
+        if (!NvOk(NvAPI_D3D11_CreateShadingRateResourceView(dev, tex, &vd, &view), "NvAPI_D3D11_CreateShadingRateResourceView (gaze mask)") ||
+            !view) {
+            tex->Release();
+            s_support = 0;
+            s_supportText = "the driver refused the shading-rate view";
+            return nullptr;
+        }
+        d.w = w; d.h = h; d.tw = tw; d.th = th; d.tex = tex; d.view = view;
+        d.cu = cu; d.cv = cv; d.inner = inner; d.outer = outer;
+        fresh = true;
+        ++s_stats.dynMasks;
+        Log("VRS: eye %d GAZE mask made (phase 59, vrs_eye): %ux%u px -> %ux%u tiles, refilled on the CPU whenever the ring centre moves "
+            "by >= 1 tile (16 px); first centre uv (%.3f, %.3f), radii %d / %d %%", eye, w, h, tw, th, (double)cu, (double)cv, inner, outer);
+    } else {
+        const float mx = std::fabs(cu - d.cu) * (float)w, my = std::fabs(cv - d.cv) * (float)h;
+        if (mx < 16.0f && my < 16.0f && d.inner == inner && d.outer == outer) return d.view;   // moved less than a tile: as it is
+        FillMaskRuns(d.bytes.data(), d.tw, d.th, w, h, cu, cv, (float)inner / 100.0f, (float)outer / 100.0f, nullptr);
+        ctx->UpdateSubresource(d.tex, 0, nullptr, d.bytes.data(), d.tw, 0);
+        d.cu = cu; d.cv = cv; d.inner = inner; d.outer = outer;
+    }
+    LARGE_INTEGER t1, fq;
+    QueryPerformanceCounter(&t1);
+    QueryPerformanceFrequency(&fq);
+    const double us = (double)(t1.QuadPart - t0.QuadPart) * 1e6 / (double)fq.QuadPart;
+    if (!fresh) {                                    // (the first fill is counted with the texture: dynMasks)
+        ++s_stats.dynRefills;
+        s_stats.dynRefillUs += us;
+        if (us > s_stats.dynRefillMaxUs) s_stats.dynRefillMaxUs = us;
+    }
+    s_stats.dynCu[eye & 1] = cu;
+    s_stats.dynCv[eye & 1] = cv;
+    return d.view;
+}
+
 void SetHw(ID3D11DeviceContext* ctx, bool on) {
     NV_D3D11_VIEWPORTS_SHADING_RATE_DESC d{};
     d.version = NV_D3D11_VIEWPORTS_SHADING_RATE_DESC_VER;
@@ -229,7 +323,8 @@ void SetHw(ID3D11DeviceContext* ctx, bool on) {
 #endif // WITH_VRS
 } // namespace
 
-void Configure(int on, int innerPct, int outerPct, int quality, int debug, int passes) {
+void Configure(int on, int innerPct, int outerPct, int quality, int debug, int passes, int strength) {
+    s_strength.store(strength < 0 ? 0 : (strength > 2 ? 2 : strength), std::memory_order_relaxed);   // phase 59f
     innerPct = innerPct < 10 ? 10 : (innerPct > 150 ? 150 : innerPct);
     outerPct = outerPct < 10 ? 10 : (outerPct > 150 ? 150 : outerPct);
     if (outerPct < innerPct) outerPct = innerPct;
@@ -276,6 +371,69 @@ void FillMask(uint8_t* dst, uint32_t tw, uint32_t th, uint32_t rtW, uint32_t rtH
     if (counts) { counts[0] = c[0]; counts[1] = c[1]; counts[2] = c[2]; }
 }
 
+// phase 59: FillMask's bytes per tile ROW. In a row the tiles inside a ring are one contiguous run (the squared distance only
+// grows away from the centre column; float rounding keeps that monotonic), so the row = outer (2), then the middle run (1), then
+// the inner run (0). Each run's ends come from the circle equation (dx = +-sqrt(r^2 - dy^2), to tile indices) and are then moved
+// tile by tile until FillMask's exact test agrees at both borders -- every byte equals FillMask's (tests\vrs_mask_test.cpp).
+void FillMaskRuns(uint8_t* dst, uint32_t tw, uint32_t th, uint32_t rtW, uint32_t rtH, float cu, float cv, float rInner,
+                  float rOuter, uint32_t counts[3]) {
+    const float ri2 = rInner * rInner, ro2 = rOuter * rOuter;
+    uint32_t c[3] = {};
+    const int n = (int)tw;
+    for (uint32_t ty = 0; ty < th; ++ty) {
+        uint8_t* row = dst + (size_t)ty * tw;
+        const float v = ((float)ty * 16.0f + 8.0f) / (float)rtH;
+        const float dy = 2.0f * (v - cv);
+        auto d2At = [&](int tx) {                    // FillMask's expression, operation for operation
+            const float u = ((float)tx * 16.0f + 8.0f) / (float)rtW;
+            const float dx = 2.0f * (u - cu);
+            return dx * dx + dy * dy;
+        };
+        // the run [*lo, *hi] of tiles with d2 <= r2 (*lo > *hi = none). The nearest column to the centre is the minimum of d2 in
+        // the row (clamped to the picture): no run when even it is outside. Then the analytic ends as the first guess and exact
+        // steps outward / inward at each end.
+        const int mid = (std::min)((std::max)((int)std::floor((cu * (float)rtW - 8.0f) / 16.0f + 0.5f), 0), n - 1);
+        auto run = [&](float r2, int* lo, int* hi) {
+            *lo = 1; *hi = 0;
+            if (n <= 0) return;
+            int seed = -1;                           // a tile inside: the centre column or a neighbour (rounding at the minimum)
+            for (int k = mid - 1; k <= mid + 1; ++k) if (k >= 0 && k < n && d2At(k) <= r2) { seed = k; break; }
+            if (seed < 0) return;
+            const float rem = r2 - dy * dy;
+            int l = seed, h = seed;
+            if (rem > 0.0f) {
+                const float hw = std::sqrt(rem) * 0.5f;   // the ring's half-width in uv in this row
+                const float ga = std::ceil(((cu - hw) * (float)rtW - 8.0f) / 16.0f);
+                const float gb = std::floor(((cu + hw) * (float)rtW - 8.0f) / 16.0f);
+                l = ga <= 0.0f ? 0 : (ga >= (float)seed ? seed : (int)ga);
+                h = gb >= (float)(n - 1) ? n - 1 : (gb <= (float)seed ? seed : (int)gb);
+            }
+            while (l < seed && d2At(l) > r2) ++l;    // the guess was outside: step in
+            while (l > 0 && d2At(l - 1) <= r2) --l;  // the next one out is still inside: step out
+            while (h > seed && d2At(h) > r2) --h;
+            while (h < n - 1 && d2At(h + 1) <= r2) ++h;
+            *lo = l; *hi = h;
+        };
+        memset(row, 2, tw);
+        uint32_t nMid = 0, nIn = 0;
+        int lo, hi;
+        run(ro2, &lo, &hi);
+        if (lo <= hi) {
+            memset(row + lo, 1, (size_t)(hi - lo + 1));
+            nMid = (uint32_t)(hi - lo + 1);
+            int li, hi2;
+            run(ri2, &li, &hi2);                     // (inside the outer run: ri2 <= ro2, Configure keeps outer >= inner)
+            if (li <= hi2) {
+                memset(row + li, 0, (size_t)(hi2 - li + 1));
+                nIn = (uint32_t)(hi2 - li + 1);
+                nMid -= nIn;
+            }
+        }
+        c[0] += nIn; c[1] += nMid; c[2] += tw - nIn - nMid;
+    }
+    if (counts) { counts[0] = c[0]; counts[1] = c[1]; counts[2] = c[2]; }
+}
+
 int Probe(ID3D11Device* dev) {
 #ifdef WITH_VRS
     if (s_probedDev == dev && s_support >= 0) return s_support;
@@ -318,7 +476,8 @@ int Probe(ID3D11Device* dev) {
 #endif
 }
 
-bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, float cv, float renderOverOutput, int cls) {
+bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, float cv, float renderOverOutput, int cls,
+           bool dynamic, float grow) {
 #ifdef WITH_VRS
     if (g_want) Leave(ctx);                            // (never expected: every game bind leaves first)
     if (!s_on.load(std::memory_order_relaxed) || !ctx || !w || !h) return false;
@@ -329,16 +488,30 @@ bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, 
     if (!dev) return false;
     dev->Release();                                    // identity only: the context keeps its device alive
     if (Probe(dev) != 1) return false;
-    Mask* m = FindOrBuild(dev, ctx, w, h, cu, cv, s_inner.load(std::memory_order_relaxed), s_outer.load(std::memory_order_relaxed),
-                          eye);
-    if (!m) return false;
-    BuildTable(s_quality.load(std::memory_order_relaxed), s_debug.load(std::memory_order_relaxed), renderOverOutput);
+    ID3D11NvShadingRateResourceView* view = nullptr;
+    if (dynamic && (eye == 0 || eye == 1)) {           // phase 59: the eye's refillable gaze mask
+        int inner = s_inner.load(std::memory_order_relaxed), outer = s_outer.load(std::memory_order_relaxed);
+        if (grow > 1.0f) {                             // phase 59d: gaze far to the side -- both rings grow (Configure's 150 % cap)
+            inner = (std::min)(150, (int)(inner * grow + 0.5f));
+            outer = (std::min)(150, (int)(outer * grow + 0.5f));
+            ++s_stats.edgeGrown;
+        }
+        view = DynMaskFor(dev, ctx, w, h, cu, cv, inner, outer, eye);
+        if (view) ++s_stats.dynEnters;
+    } else {
+        Mask* m = FindOrBuild(dev, ctx, w, h, cu, cv, s_inner.load(std::memory_order_relaxed), s_outer.load(std::memory_order_relaxed),
+                              eye);
+        view = m ? m->view : nullptr;
+    }
+    if (!view) return false;
+    BuildTable(s_quality.load(std::memory_order_relaxed), s_debug.load(std::memory_order_relaxed),
+               s_strength.load(std::memory_order_relaxed), renderOverOutput);
     s_vpCur = cls == kClsLight ? s_vpOuter : s_vp;     // phase 42: an extra pass = outer ring only
     s_cls = cls;
     // the Toolkit's order: the viewport table first, then the shading-rate view
     SetHw(ctx, true);
     if (!s_hw) return false;                            // refused (logged, VRS off for the session)
-    if (!NvOk(NvAPI_D3D11_RSSetShadingRateResourceView(ctx, m->view), "NvAPI_D3D11_RSSetShadingRateResourceView")) {
+    if (!NvOk(NvAPI_D3D11_RSSetShadingRateResourceView(ctx, view), "NvAPI_D3D11_RSSetShadingRateResourceView")) {
         s_support = 0;
         s_supportText = "the driver refused the shading-rate view";
         SetHw(ctx, false);
@@ -355,7 +528,7 @@ bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, 
     if (eye == 0 || eye == 1) ++s_stats.entersEye[eye];
     return true;
 #else
-    (void)ctx; (void)w; (void)h; (void)eye; (void)cu; (void)cv; (void)renderOverOutput; (void)cls;
+    (void)ctx; (void)w; (void)h; (void)eye; (void)cu; (void)cv; (void)renderOverOutput; (void)cls; (void)dynamic; (void)grow;
     return false;
 #endif
 }
@@ -422,6 +595,7 @@ void MaybeLogStats(uint64_t frame) {
     const uint64_t vrs = c.drawsVrs - p.drawsVrs, cut = c.drawsSkip[kSkipCutout] - p.drawsSkip[kSkipCutout];
     const uint64_t dep = c.drawsSkip[kSkipDepth] - p.drawsSkip[kSkipDepth], unk = c.drawsSkip[kSkipUnknown] - p.drawsSkip[kSkipUnknown];
     const uint64_t all = vrs + cut + dep + unk;
+    (void)all;                                         // (phase 59: unused when built with VRS_NO_LOG -- testsrs_gaze_test.cpp)
     LogDbg("VRS @%.0f s (Present #%llu): %llu scene binds entered (eye 0 %llu / eye 1 %llu), draws coarse-capable %llu (%.1f %%), "
         "full rate: cut-out %llu / SV_Depth %llu / unknown shader %llu; mod-work pauses %llu, table switches %llu, eye prediction "
         "misses %llu of %llu checked blits, masks %llu, NVAPI failures %llu; eye sources (entered binds): blit-RT cycle %llu / "
@@ -449,6 +623,19 @@ void MaybeLogStats(uint64_t frame) {
         pf(c.entersCls[kClsLight], p.entersCls[kClsLight]), pf(c.drawsVrsCls[kClsLight], p.drawsVrsCls[kClsLight]),
         pf(c.drawsFullCls[kClsLight], p.drawsFullCls[kClsLight]), pf(c.litStageBinds, p.litStageBinds),
         pf(c.litShapeMiss, p.litShapeMiss));
+    // phase 59 (vrs_eye): the per-eye gaze masks -- brackets with them, refills (centre moved >= 1 tile) and their CPU time
+    if (c.dynEnters != p.dynEnters || c.dynMasks) {
+        const uint64_t rf = c.dynRefills - p.dynRefills;
+        const double us = c.dynRefillUs - p.dynRefillUs, sec = (double)(now - s_lastLogMs) / 1000.0;
+        LogDbg("VRS gaze masks @%.0f s (phase 59, vrs_eye): %llu brackets with the per-eye mask, %llu refills (%.1f /s, %.2f per frame) "
+            "costing %.1f us each on average (max so far %.1f us; FillMaskRuns + UpdateSubresource, CPU), %.3f ms per frame; masks "
+            "made %llu; last centres eye 0 (%.3f, %.3f) eye 1 (%.3f, %.3f); %llu brackets with grown rings (phase 59d: gaze far to "
+            "the side)", sec, (unsigned long long)(c.dynEnters - p.dynEnters),
+            (unsigned long long)rf, sec > 0.0 ? (double)rf / sec : 0.0, fr > 0.0 ? (double)rf / fr : 0.0, rf ? us / (double)rf : 0.0,
+            c.dynRefillMaxUs, fr > 0.0 ? us / 1000.0 / fr : 0.0, (unsigned long long)c.dynMasks, (double)c.dynCu[0],
+            (double)c.dynCv[0], (double)c.dynCu[1], (double)c.dynCv[1], (unsigned long long)(c.edgeGrown - p.edgeGrown));
+        (void)rf; (void)us; (void)sec;                 // (VRS_NO_LOG)
+    }
     s_lastLogMs = now;
     s_lastLogFrame = frame;
     s_lastLog = s_stats;

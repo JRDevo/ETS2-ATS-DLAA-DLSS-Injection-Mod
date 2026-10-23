@@ -67,10 +67,14 @@ static const E kRows[] = {
     { G_MOT, false, L"Per-part motion vectors", L"on", L"Alt+F5", L"<c>0.18</> | <g>0.70</>", false, nullptr, nullptr },
     { G_MOT, false, L"Mirror DLAA", L"2 mirrors (largest)", L"Alt+F6", L"<c>0.08</> | <g>0.34</>", false, nullptr, nullptr },
     { G_MOT, false, L"Mirrors in turns", L"on", L"dlaa.ini mirror_turns", L"<c>0.08</> | <g>0.34</>", false, nullptr, nullptr },
+    { G_MOT, false, L"Thin-wire motion", L"on", L"Alt+F10", L"", false, nullptr, nullptr },          // phase 69
+    { G_MOT, false, L"Thin-wire depth", L"on", L"Alt+F11", L"", false, nullptr, nullptr },
+    { G_MOT, false, L"Thin-wire widening", L"off", L"Alt+F12", L"", false, nullptr, nullptr },
     { G_UP, true, L"Upscaling and VR", L"", L"", L"", false, nullptr, nullptr },
     { G_UP, false, L"DLSS upscale", L"off", L"Ctrl+F4", L"off", false, nullptr, nullptr },
     { G_UP, false, L"DLAA on / off", L"on", L"Shift+F11", L"<c>0.31</> | <g>3.4</>", false, nullptr, nullptr },
     { G_UP, false, L"OFXR Bridge (VR frame gen)", L"not found", L"dlaa.ini ofxr_bridge", L"", false, nullptr, nullptr },
+    { G_UP, false, L"VectorXR (VR layer)", L"not found", L"dlaa.ini vectorxr", L"", false, nullptr, nullptr },   // phase 56
     { G_VRP, true, L"VR performance", L"", L"", L"", false,
       L"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed "
       L"every time the menu opens.", nullptr },
@@ -81,6 +85,8 @@ static const E kRows[] = {
       L"CPU 0.04 ms per frame; it saves GPU time in the game's own figure." },
     { G_VRP, false, L"Foveated size", L"80 % (balanced)", L"dlaa.ini vrs_inner / vrs_outer", L"<c>0.04</> | -", false, nullptr, nullptr },
     { G_VRP, false, L"Foveated passes", L"scene", L"dlaa.ini vrs_passes", L"<c>0.04</> | -", false, nullptr, nullptr },
+    { G_VRP, false, L"Foveated strength", L"Normal (2 x 2)", L"dlaa.ini vrs_strength", L"<c>0.04</> | -", false, nullptr, nullptr },   // phase 59f
+    { G_VRP, false, L"Foveated eye tracking", L"off", L"dlaa.ini vrs_eye", L"<c>0.04</> | -", false, nullptr, nullptr },   // phase 59
     { G_VRP, false, L"Hidden area mask (VR)", L"on", L"dlaa.ini xr_hidden_mask", L"<c>0.02</> | -", false, nullptr, nullptr },
     { G_FR, true, L"Frame rate and CPU", L"", L"", L"", false, nullptr, nullptr },                                       // phase 52
     { G_FR, false, L"Reflex (flat)", L"off", L"dlaa.ini reflex  (flat only)", L"", true, nullptr, nullptr },
@@ -88,6 +94,7 @@ static const E kRows[] = {
     { G_FR, false, L"VR FPS cap", L"off", L"dlaa.ini vr_fps_cap", L"", false, nullptr, nullptr },
     { G_FR, false, L"CPU tuning", L"off", L"dlaa.ini cpu_pcore / cpu_priority / cpu_no_throttle", L"", false, nullptr, nullptr },   // phase 54
     { G_PANEL, true, L"Panel settings", L"", L"", L"", false, nullptr, nullptr },
+    { G_PANEL, false, L"Panel lock (VR)", L"Follow head", L"dlaa.ini menu_vr_lock", L"", false, nullptr, nullptr },   // phase 70
     { G_PANEL, false, L"Panel position X", L"+0 %", L"dlaa.ini menu_vr_x", L"", false, nullptr, nullptr },
     { G_PANEL, false, L"Panel position Y", L"+0 %", L"dlaa.ini menu_vr_y", L"", false, nullptr, nullptr },
     { G_PANEL, false, L"Panel size", L"1.0", L"dlaa.ini menu_vr_scale", L"", false, nullptr, nullptr },
@@ -110,7 +117,7 @@ static const E kRows[] = {
     { G_FPSG, false, L"FPS opacity", L"100 %", L"dlaa.ini fps_opacity", L"", false, nullptr, nullptr },   // phase 51f
     { G_FPSG, false, L"FPS distance (VR)", L"0.80 m", L"dlaa.ini fps_vr_dist", L"", false, nullptr, nullptr },
     { -1, false, L"Logging", L"errors", L"dlaa.ini log_level", L"<c>0.01</> | -", false, nullptr, nullptr },
-    { -1, false, L"Hotkeys...", L"28 actions", L"Right: open", L"", false, nullptr, nullptr },   // v0.13.0 phase 50
+    { -1, false, L"Hotkeys...", L"31 actions", L"Right: open", L"", false, nullptr, nullptr },   // v0.13.0 phase 50
     { -1, false, L"Save to dlaa.ini", L"-", L"Shift+F12", L"", false, nullptr, nullptr },
     { -1, false, L"Reset to defaults", L"-", L"hold Right 5 s", L"", false, nullptr, nullptr },
     { -1, false, L"Close menu", L"-", L"Delete", L"", false, nullptr, nullptr },
@@ -123,7 +130,7 @@ static const wchar_t kPerf1[] = L"this mod: <c>0.31</> | <g>3.4</> ms -- GPU: NG
                                 L"mirrors 0.3, sharpen 0.1, copies 0.2";
 static const wchar_t kPerf2[] = L"<c>CPU</> | <g>GPU</> ms per frame (GPU: both eyes), other threads 0.4. CPU = the game's render thread; "
                                 L"measuring costs 0.12 ms CPU (taken out).";
-static const wchar_t kTitle[] = L"ETS2 / ATS DLAA & DLSS mod v0.13.0 - tuning menu";
+static const wchar_t kTitle[] = L"ETS2 / ATS DLAA & DLSS mod v0.14.0 - tuning menu";
 static const wchar_t kFooter[] = L"Up / Down select   Left / Right change   Delete close   keys: Hotkeys...";
 
 // Ink shorthand in the table strings: "<c>0.31</>" = CPU blue, "<g>3.4</>" = GPU orange (menu.h kInkCpu / kInkGpu / kInkEnd).
@@ -359,6 +366,7 @@ static void HotkeysShot(Gpu& g, const wchar_t* file) {
         { L"DLAA area (VR) -", L"Shift+F5", L"-" }, { L"DLAA area (VR) +", L"Shift+F6", L"-" },
         { L"Per-part motion vectors", L"Alt+F5", L"-" }, { L"Mirror DLAA on / off", L"Alt+F6", L"-" },
         { L"DLAA before tonemap (flat)", L"Alt+F7", L"-" }, { L"See-through depth", L"Ctrl+F3", L"-" },
+        { L"Thin-wire motion (DLAA)", L"Alt+F10", L"-" }, { L"Thin-wire depth", L"Alt+F11", L"-" }, { L"Thin-wire widening", L"Alt+F12", L"-" },
         { L"DLSS upscale", L"Ctrl+F4", L"-" }, { L"DLAA on / off", L"Shift+F11", L"-" }, { L"Save to dlaa.ini", L"Shift+F12", L"-" },
         { L"Menu: open / close", L"Delete", L"Wheel10" }, { L"Menu: up", L"Up", L"WheelUp" }, { L"Menu: down", L"Down", L"WheelDown" },
         { L"Menu: left", L"Left", L"WheelLeft" }, { L"Menu: right", L"Right", L"WheelRight" },
@@ -368,7 +376,7 @@ static void HotkeysShot(Gpu& g, const wchar_t* file) {
     const int bindLine = 8;                                        // "Sharpen strength +"
     TuningMenu::Panel p;
     memset(&p, 0, sizeof(p));
-    wcsncpy_s(p.title, L"ETS2 / ATS DLAA & DLSS mod v0.13.0 - hotkeys", _TRUNCATE);
+    wcsncpy_s(p.title, L"ETS2 / ATS DLAA & DLSS mod v0.14.0 - hotkeys", _TRUNCATE);
     Put(p.perf[0], 224, Ink(kPerf0));
     Put(p.perf[1], 224, Ink(kPerf1));
     Put(p.perf[2], 224, Ink(kPerf2));

@@ -561,6 +561,152 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
   ResolveSubresource / OMSetRenderTargets / RSSetViewports / ClearRenderTargetView: `if (Ofxr::FromOfxr(_ReturnAddress()))` -> call the
   original and return, no counting, no blit test. Readers never lock (fixed array, atomic count written last). `ofxr_bridge = 0` disables it.
 
+## VectorXR pass-through (phase 56)
+
+- VectorXR (https://github.com/DienerTech/vectorxr, DienerTech LLC, MPL-2.0) is an OpenXR API layer + desktop app: Depth, Pivot,
+  Quadviews, Turbo (frame-pacing override), experimental Frame Generation and an On-Screen Display. For D3D11 games its frame-generation
+  bridge shares the game's swapchain images with a D3D12 device and runs compute on the GAME's immediate context; its OSD is its own
+  composition layer drawn with `UpdateSubresource` on the same context. Same problem as OFXR Bridge, same cure: the return address.
+- `src/ofxr.{h,cpp}` is generalised, not duplicated. `Range` gained a `kind` (`kKindOfxr = 1`, `kKindVectorXr = 2`);
+  `ModuleKind(base, fullPath)` replaces `IsOfxrModule` (OFXR: base name contains `ofxr` or path under `%LOCALAPPDATA%\OFXR Bridge\`;
+  VectorXR: base name contains `vectorxr` -- the layer is `XR_APILAYER_DIENERTECH_VECTORXR.dll`, registered machine-wide -- or path
+  under `%LOCALAPPDATA%\VectorXR\`). `Rescan` records a module only when its kind is switched on (`g_on` = ini `ofxr_bridge`,
+  `g_onVxr` = ini `vectorxr`, both default 1) and runs while `g_anyOn` (either) is set; `g_kinds` is the mask of kinds seen
+  (`DetectedOfxr()` / `DetectedVectorXr()`; `Detected()` = any). `FromOfxr` keeps its name and inline fast path but reads `g_anyOn`, so
+  the ten D3D11 hooks that already call it needed no change. The first scan logs whether `%LOCALAPPDATA%\VectorXR\config\settings.json`
+  exists (VectorXR's own log is `%LOCALAPPDATA%\VectorXR\logs\vectorxr.log`).
+- Conflict notices (`PresentFrameWork`, once, when the layer is first found): an info line, a warning when the mod's Turbo
+  (`XrTurboEffective()`) is on (VectorXR has its own Turbo: run one), and a warning when `vr_fps_cap` is on (Frame Generation wants no
+  frame-rate limit). Nothing is switched off automatically; the user decides. The tuning menu has an info row `VectorXR (VR layer)`
+  (`MR_VECTORXR`, last row of `Upscaling and VR`).
+- `src/xr_hook.cpp` gates layer-origin OpenXR calls by return address through the same `Ofxr::FromOfxr` (`LayerGate` in the
+  `Thunk<I>` stubs, where `_ReturnAddress()` is the layer's call site; `NegLayerImpl` triggers `Ofxr::Rescan()` right after a layer
+  negotiates, so its range is known before its first call): VectorXR Frame Generation presents from its own thread, so its `xrWaitFrame` / `xrBeginFrame` / `xrEndFrame` calls
+  would otherwise look like the game's outermost calls and disturb the frame bookkeeping (Turbo, quad layers, frame pairing).
+- Not tested in a headset with VectorXR yet; ask for `log_level = 4`.
+
+
+## Phase 57: performance pass (2026-10-15)
+
+Four read-only audits (hook bodies, the per-draw MV chain, the DLAA unit / NGX / OpenXR wrapping) against the VR logs
+`captures/ats_2026-10-13_1812_v0130_fixed_test_vr.log` and `captures/ets2_2026-10-12_1529_v012_vr.log`. The headline: the
+`hk:xrEndFrame` row (1.9-5.2 ms/frame with Turbo on, 0.03 off) was WAIT time -- the turbo frame lock, the async `xrWaitFrame`
+(= the runtime pacing the frame), the real `xrBeginFrame`, the quad swapchains' `xrWaitSwapchainImage` -- charged as mod CPU.
+The mod's real CPU on the render thread is ~0.5 ms/frame (fwd-depth 0.16-0.21, did-rec 0.2, the pairing sort 0.17 per eye,
+hk:DrawIdx 0.12-0.17 for 3400-4500 calls). What changed:
+- **Profiler truth (`xr_hook.cpp`).** `XR_DRV(cat, expr)` charges a wait / runtime call to a hook's DRIVER row (`CpuProf::Drv`):
+  the `s_tbMx` lock waits (xrEndFrame / xrWaitFrame / xrBeginFrame), `TbWaitDone` + the synchronous real wait (xrWaitFrame row),
+  the real `xrBeginFrame` of a turbo frame, the quad swapchains' acquire / wait / release (xrAcquire / xrRelease rows). The menu's
+  "this mod" column and the Limit line's B no longer carry the pacing wait. Expect `hk:xrEndFrame` ~0.03 ms and "present + OpenXR"
+  / "wait" up by the same amount.
+- **Quad images drawn on change only (`xr_hook.cpp` + `inject.cpp`).** `OverlayParams::panelGen / fpsGen`: the fps box = an
+  FNV-1a hash of its two text lines + colour / brightness / opacity + `fps_vr_scale` + `fps_vr_lock` (`MenuOvFpsGen`); the panel =
+  a counter bumped when `MenuBuildPanel`'s bytes or `menu_vr_scale` change (`MenuOvPanelUpdate`, built ONCE per Present, the draw
+  reuses the build: `MenuOvPanelTake`). `OvDrawWantedLocked` skips the acquire / INFINITE wait / draw / release when the
+  swapchain's last released image is a good draw of the same `OvKey` (gen + swapchain size + box kind + quad scale) -- OpenXR
+  composites the most recently released image. `drawnValid` is cleared by any failure, create / drop / reject / give-up, and while
+  the quad is not wanted (the first frame it is wanted again draws). Log every 600 overlay frames: `quad images drawn X, reused Y`
+  (`OverlayStats::drawn / skipped`). The RTV of each swapchain image is cached per quad (`MenuOvRtvFind / Put / Drop`, 8 entries,
+  dropped on device / context change and when no quad went out for 0.5 s).
+- **Late panel off while the quads are out (`MenuLateArm`).** `MenuDrawsIntoEyes()` = `MenuDrawVrOn`'s own test; with
+  `menu_vr_layer = 1` nothing goes into the eye picture, so no record -> `MenuLateOnBind`'s GetResource per bind and
+  `MenuLateOnDraw`'s PSGetShaderResources per small draw stop. A leftover record is retired without a verdict.
+- **Hook micro-work (`inject.cpp`).** `t_inDlaa` read once per DrawIndexed / DrawIndexedInstanced (`inDlaa`; every callee restores
+  the flag); `TraceOn` inline; `CountGameDraw` tests `g_plActive || FrameEndCounting()` before the out-of-line call;
+  `CountGameOtherThread` reads the thread id from the TEB (`__readgsdword(0x48)`); `SlotOf` masks with 3 for the 4-slot ring (a
+  64-bit division before, several times per draw); `FwdOnDraw` fetches the DSS / blend state once (`FwdDrawStates`, released at
+  the hook's end) and `BiasOnDraw` takes them; the VS is read once for `FwdIdentity` + `FwdNoteMvp`; profiler blocks in
+  `FrameEndOnBind` / `LodOnBind` / `ObjOnBind` / `MirOnBind` / `DidOnDiscardMap` open after the cheap early-outs;
+  `FpsProfileTick` returns early out of mode 2 with nothing bound / dirty.
+- **Pairing sort (`draw_ids.cpp` `DrawIdMv::Prepare`).** Was: all eligible current + previous draws (~3300) concatenated and
+  `std::sort`ed every pass. Now: the current half only, stable LSD radix sort on the 64-bit keys (8 x 8 bits, a pass with one
+  byte value skipped; `std::sort` below 96 entries), MERGED with the previous pass's sorted list (kept by `Finish`, a pointer
+  swap; rebuilt from `m_prevFull` when stale). Same (key, sideIdx) total order = bit-identical groups / ranks (check build
+  `/DDRAWID_VERIFY_MERGE` compares against the old full sort; passed on the harness default, `legacy`, `rstatic=4 didshadow=2`).
+  Micro-benchmark at 1650 draws: 126 us (old) -> 25 us (radix + merge) / 43 us (std::sort + merge).
+- **Record / release (`draw_ids.cpp`).** `ReleaseState` sets only `own = 0` (no 380-byte memset per draw); `ReleasePs` nulls the
+  pointers it releases (Record compares `m_ps[m_n-1].srv[t]` after release, so those must stay null).
+- **Readback polls.** `DrawIdMv::Poll`, `PollMain`, `CameraMv::FwdCountPoll` map the OLDEST pending slot first and stop at the
+  first `DXGI_ERROR_WAS_STILL_DRAWING` (copies finish in order); `PollMain` skips a unit already polled this frame (`m_pollTag`).
+  Behaviour change: two readbacks that land together are now processed in pass order (before: slot order).
+- **Id-target clear by rect.** `ReplayImpl` clears the view clip + march reach + 4 px with `ID3D11DeviceContext1::ClearView`
+  (whole target: no clip, the rect covers it, no ClearView support, or `SetFullIdClear(true)` while the Ctrl+F6 view is on).
+  Saving 0..0.08 ms per eye -- read it from the `replay` GpuPerf section.
+- **RCAS (`scene_dlaa.cpp`).** `Orig` is read only in the feather band (`if (mask < 1.0)`); at sharpness 0 the LDR path skips
+  the 4 taps (`res = saturate(e0)`, bit-identical: the lobe is 0); HDR keeps the full path (the compress / expand round trip is
+  not bit-exact).
+- **NGX AutoExposure (`dlaa.cpp`).** The flag only for HDR features; LDR (VR eyes, mirrors, menu units) are created without it.
+  Compare the `ngx` figure of `DLAA GPU cost eye N` before / after.
+- **Verified:** WARP harness 150726 / 150726 checks, motion vectors bit-identical over 2237 frames (`cmp`), Release build 0
+  warnings. **Not verified:** the in-game CPU / GPU figures (the next VR log's `CPU prof` lines and `DLAA GPU cost` lines), the
+  quad reuse on the user's runtime (Virtual Desktop) and with OFXR Bridge / VectorXR.
+- **Deferred (audit backlog):** skipping multi-instance replays (vote semantics), the depth snapshot crop (high risk), RCAS +
+  copy-out as one PS pass, profiler counter-only StateSet scopes, a VR-only DLSS preset key, the rigid-parent pick over 8 lanes
+  (p-pick1 / p-pick2). Done in phase 58: the replay through raw trampolines, the static-skip hot / cold split, the attach mover
+  list, the 64-thread medoid, the twin hash, the CSVote voter lists.
+
+## Phase 58: performance round 2 (2026-10-15)
+
+The deferred items of phase 57 that are bit-identical by construction, each proven on the WARP harness (`cmpdump` of HEAD vs the
+change byte-identical for the default and `legacy` runs; `rstatic=4 didshadow=2` varies run to run on WARP by itself -- the
+non-blocking readback timing -- so it is judged by the check totals and a verify build, not the pixel count).
+- **58a, static-skip table hot / cold split (`draw_ids.cpp`).** `StatEnt` (48 B x 8192 = 393 KB; StaticSkip probed it ~6000x per
+  frame with a whole G-buffer pass between uses = a cache miss per probe) is `StatHot {key, packed}` (128 KB, `alignas(64)`) +
+  `StatCold {seen, inc, parent, moved, streak, badTag}`. Poll packs the hot word (`StatPack`: bits 0..27 hi = seen + kStatFresh,
+  28..55 lo = max(parent + 31, moved + 60), 56..61 streak capped at 63, bit 62 FAR = a frame number past 2^27 -> the old tests
+  from the cold half); StaticSkip = one word, `lo <= frame <= hi` + the streak. `StatFind` returns a slot index. The replay loop
+  prefetches the hot slot of draw i-16. A verify build (both tables fed, every decision compared) gave 88998 decisions, 0
+  mismatches, also with the FAR threshold forced to 2^6.
+- **58a, HLSL (`draw_ids.cpp`).** `Inherit1Draw` appends a 32-byte mover record (`kMovRec`: i | cabin << 31, oj.xyw, sx, sy --
+  the same dp3 / sqrt / max / div sequence) and `AttachDraw` walks those, loading the full Mj only for `SameAxes` on candidates
+  that beat the best distance. `CSPair` writes per-draw `kVoterL` (voter class with / without the far filter + IndexCount) and
+  `kVoterA` (the 6 `a = Mp*probe` projections) so `CSVote` computes only `mul(Rc, Mc)` and b with the SAME thread-to-draw mapping
+  (the float sum order feeds CSPick's tie-break, so no compacted list). The twin table keeps one slot per unique (matrix, layer):
+  an occupied slot with `SameM` gets `InterlockedMin(slot, fwd << 31 | j + 1)` = "G-buffer first, then the lowest index";
+  `TwinDraw` takes the first `SameM` slot of its layer. Work: + `kVoterL` / `kVoterA` / `kMovRec` (`kWorkBytes` = kMax*320 +
+  25600, ~+440 KB per unit). The offsets are `#define`s: fxc 10.0.26100 changes the DXBC of UNRELATED entry points when a new
+  `static const uint` is added (reproduced on HEAD), and `kMovList` stays for the same reason.
+- **58a, pass A medoid (`motion_vectors.cpp` `kSolveShader`).** `[numthreads(2,1,1)]` with `float4x4 R[16]` per thread (four
+  indexable temps, spills) -> one 64-thread group: threads 0..31 each one pair's R_k into groupshared (`NotMvp` / `Inv4` /
+  `mul(Mp, ic)` as before), 0..31 the costs summing over j ascending (the same mul / mad / sqrt / add chain in the DXBC), 0..1
+  the picks (strict `<`: the first index wins ties), the ego scan in chunks of 64 with `InterlockedOr` + `countbits` prefix = "the
+  first 16 valid in AllPairs order", thread 32 InvRow3, thread 0 the ego pick. Proven bit for bit on WARP and on the RTX 5090 with
+  an A/B tester (old vs new bytecode, 50000 random trials incl. ties / NaN / Inf / all-near / Counts.z > 128, 0 differing);
+  5090 timing 53 -> 14 us per dispatch.
+- **58b, the replay through the hook trampolines (`draw_ids.cpp` + `inject.cpp`).** `ReplayImpl`'s per-draw loop (the G-buffer
+  replay, forward ids, the forward-depth and glow-bias batches, the mirror units) used to issue its state sets and draws through
+  `ctx->X()` = the mod's own hooks (CPU_HOOK, FromOfxr, IsGameCtx, the t_inDlaa tests: ~130-220 ns per replayed draw vs ~37 for a
+  game draw). `DrawIdRecord::SetRawCall(fn, vtIndex, target, raw)` (12 entries: IL / VB / IB / VS / VSCb1 / VSSmp / RS / Vp / PS /
+  PSSmp / DrawIndexed / DrawIndexedInstanced, filled by `SetupThread` from the `o*` trampolines where the hook installed);
+  `RawResolve` once per ReplayImpl reads the context's vtable and uses a trampoline only where the entry still equals the detoured
+  function (anything else -- the harness, a hook not installed, a rewritten entry, a wrapped context -- stays the vtable call).
+  Pass-level sets (OMSetRenderTargets, clears, OM states, GfxSave::Save / Restore) stay through the hooks, so the did_shadow
+  trackers see the game's state come back (Restore re-sets every group; verify mode `didshadow=2 shverify=1` passes). Side
+  effects given up: `ps.diGbuf / diOther / skInDlaa` no longer count replay draws (the PASS ANOMALY line says so), the F11 viewport
+  trace no longer lists the replay's viewports, the shadow log's "Set calls/pass applied" excludes the replay's sets. Startup log:
+  `MV draw-ids: replay calls ... through the hook trampolines (phase 58b)`; a "does not point at the hooked function" suffix =
+  the vtable fallback. A scratch harness with all 12 entries registered: every argument list bit-exact, 0 px differ.
+- **58c, DrawIndexed / DrawIndexedInstanced resolved per draw (`draw_ids.cpp`).** The first VR log (ATS 1.61) showed the 58b
+  line flipping within a millisecond: DrawIndexed / DrawIndexedInstanced "do not point at the hooked function", the state
+  sets always do. A scratch probe (d3d11.dll 10.0.26100.9711, symbols from the Microsoft symbol server) found why: the
+  immediate context's vtable is a writable copy INSIDE the object, and after every command-buffer submit (Flush, or implicitly
+  every few thousand draws) d3d11 rewrites its 24 work entries (Draw*, Dispatch*, Copy*, Update*, Clear*, ResolveSubresource,
+  ...; never a state Set) from `CContext::TID3D11DeviceContext_DrawIndexed_<1>` (+0x1535a0, the function we detour) to
+  `..._DrawIndexed_Amortized<1>` (+0x153b70). That variant runs `CContext::AcquireDevCtxIfaceNoSync` ->
+  `PerformAmortizedRenderOperations` / `PerformAcquireResource` (deferred per-submit work), restores the `<1>` entries and
+  re-dispatches through the vtable (= our hook). 58b picked once per replay: while Amortized it lost the trampoline for the whole
+  replay; while `<1>` it skipped the Amortized prologue after a mid-replay submit. Now the draw compares its entry right before
+  each call (two L1 loads): `<1>` -> the trampoline, anything else -> `ctx->X()` (the prologue runs, the next draws take the
+  trampoline). State sets keep the once-per-replay pick. Multithread-protected contexts use `<2>` / `Amortized<0>` entries
+  everywhere: nothing matches, all vtable. A mismatch is logged once per distinct entry: `MV draw-ids: a replayed DrawIndexed
+  found the context's vtable entry at <address> d3d11.dll+0x... (TimeDateStamp, SizeOfImage)`; the debug `perf view` line
+  counts the replayed draws by path. Proven on the RTX 5090 (probe with MinHook detours like SetupThread, Flush every 0 / 1 / 2 /
+  7 / 64 draws: 0 px differ vs `ctx->DrawIndexed`, every vtable fallback reached the hook once) and on WARP (the harness with
+  all 12 hooks installed and registered: `cmpdump` byte-identical to HEAD).
+- **Not verified in game:** the CPU rows `did-replay` / `fwd-depth` / `mirror` (58b) and the static-skip gain (58a); the GpuPerf
+  sections `vote` / `attach` / `twin` / `res+inh` / `medoid` (58a). Bit identity on NVIDIA hardware rests on the DXBC op patterns
+  being unchanged (the medoid pass was A/B-tested on the 5090 itself).
+
 ## Tuning menu overlay (v0.10.0)
 
 - **State** lives in `inject.cpp` (the "TUNING MENU" block after `ToggleMirrors`): `g_menuOpen` (atomic), the selected row, the
@@ -1984,6 +2130,26 @@ is tonemapped), both tonemap into the SAME scene-size SRGB texture, then each is
 - **Not verified**: anything in game -- the canopy light (VR + flat), the emissive redraws, mirrors (the mirror lighting bind's
   viewport must be the view's size for the shift to apply), the level-4 counts. Unit tests: the existing suite only (none of it
   exercises the lighting bind).
+
+### Phase 70 (v0.14.0): VR panel fixed in the cab (`menu_vr_lock`) + sharper VR panel text
+
+- **Why.** The head-locked panel quad (our VIEW space) shivered while the head moved: the runtime locates a VIEW-space quad at
+  the frame's `displayTime`, and with Turbo mode that time is made up (up to ~1 frame off), so the head pose used for the quad
+  is wrong by head velocity x time error, different every frame. The fps box "fixed in play space" (game layer space) was steady.
+- **What.** Menu row `Panel lock (VR)` (`MR_PANELLOCK`, first in Panel settings; greyed in flat or without the quad path):
+  `Follow head` / `Fixed in cab`. Fixed = the panel quad in the game's projection-layer space at yaw / pitch degrees and a
+  distance from the seat (`menu_vr_lock_x` / `_y` / `_dist`, defaults 0 / 10 / 80 cm), placed by the same code as the fps box:
+  `OvBuildQuadLocked`'s `anchored` lambda (LOCAL space: pivot = origin; other spaces: eyes' midpoint + head yaw captured at
+  lock-on). Pivot state is per quad (`OvState::lastLock / pivotSpace / pivotHave / pivot / yaw0 [2]`); the panel's pivot is
+  dropped whenever the menu is closed. While locked, the X / Y / depth rows edit the fixed spot; the head-locked keys stay. The
+  in-picture fallback (`menu_vr_layer = 0`) stays head-locked. Draw order uses `menu_vr_lock_dist` while fixed.
+- **Sharper text.** `kOvPanelDensity` 1.6 -> 3.2 (image px per reference px per `menu_vr_scale`): at scale 0.4 the panel image
+  was 486 px wide with ~10-px GDI fonts the compositor stretched (thick, soft). Capped by the unchanged swapchain (2.4): full
+  density up to scale 0.75. Images are redrawn only on content change (phase 57), so the cost is per change, not per frame.
+- **Other.** `kIniMaxKeys` 64 -> 80 (the save writes up to 65 keys). The new ini keys parse as standalone `if` + `continue`
+  outside the key chain (C1061) and outside `WITH_DLAA`.
+- **Verified.** VR (ETS2, Quest 3 via Virtual Desktop, LOCAL layer space): the fixed panel holds still, text sharp at size 0.4.
+  Not verified: a non-LOCAL layer space (pivot capture path for the panel).
 
 ### The RenderDoc oracle (done in v0.2)
 
