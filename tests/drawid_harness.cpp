@@ -1812,6 +1812,12 @@ struct Shadow {
         ok = ok && SUCCEEDED(d->CreateBuffer(&bd, nullptr, &stR));
         ok = ok && cam.Init(d);
         if (!ok) { printf("   shadow %s: resources failed\n", nm); return false; }
+        // the id target starts at 0 everywhere: a texture created without initial data has UNDEFINED content (D3D11), and since
+        // phase 57 the G-buffer replay clears only the clip + the march reach (DrawIdRecord::ReplayImpl, ClearView) -- pixels
+        // farther out are never written again. Compare's "ids outside the clip = 0" check is about the REPLAY writing outside
+        // the clip; it must not depend on what the driver left in fresh memory (the GitHub runner's WARP re-used memory with a
+        // few non-zero texels in it: S11's last shadow failed there with 6 "ids outside the clip" every frame, never locally)
+        { const FLOAT z[4] = { 0, 0, 0, 0 }; E.ctx->ClearRenderTargetView(idRtv.Get(), z); }
         cam.SetEgoPixel(0.0f);
         cam.SetEgoOrigin(0.0f);
         cand.Init(d);
