@@ -836,6 +836,14 @@ int      g_menuVrDist = 100;             // v0.10.3 phase 29b, VR: dlaa.ini menu
                                          //   (menu_vr_layer = 1; the Depth row there; menu_vr_depth is the in-picture shift)
 int      g_menuVrFace = 1;               // v0.10.0 phase 16, VR: 1 = the panel is a 3-D quad turned to FACE the eye (dlaa.ini
                                          //   menu_vr_face, MenuFacingGeom), 0 = a flat picture as before
+// phase 70, VR: dlaa.ini menu_vr_lock -- 1 = the panel quad is FIXED IN THE CAB (the game's layer space, as the fps box fixed in
+// the play space: steady while the head moves; the head-locked VIEW-space quad shivers with Turbo's made-up display times),
+// 0 = follows the head as before. Its own spot: menu_vr_lock_x / _y (yaw / pitch degrees from the seat, + right / + down) and
+// menu_vr_lock_dist (cm from the seat), so switching does not move the head-locked panel. The quad path only (menu_vr_layer =
+// 1); the in-picture fallback stays head-locked.
+int      g_menuVrLock = 0;
+int      g_menuVrLockX = 0, g_menuVrLockY = 10;   // degrees: -90..90 / -60..60
+int      g_menuVrLockDist = 80;                   // cm: 30..300
 // v0.10.3 phase 29, VR: dlaa.ini menu_vr_layer -- 1 (default) = the panel and the fps box are OpenXR QUAD composition layers the
 // compositor places itself (no swim in the runtime's reprojection; XrHook::OverlaySet / MenuOverlayDraw); 0 = drawn into the eye
 // picture as before (also the fallback whenever the quad path is not up: no OpenXR session / swapchain / xrEndFrame seen).
@@ -3018,7 +3026,7 @@ bool PathNextToDll(const wchar_t* name, wchar_t* path);   // defined below
 // v0.10.0 (Reset row): an entry with an EMPTY val ("") means "remove this key": every matching line is dropped (not replaced), and
 // the key is never appended. A missing file with only removals is left missing (nothing to write).
 // Returns true only if the temp was fully written AND the replace succeeded.
-constexpr int kIniMaxKeys = 64;                    // v0.10.3 phase 28: WriteIniPreserving's key cap (was 32; phase 44: 48 -> 56; phase 54: 64)
+constexpr int kIniMaxKeys = 80;                    // v0.10.3 phase 28: WriteIniPreserving's key cap (was 32; phase 44: 48 -> 56; phase 54: 64; phase 70: 80)
 struct IniKV { const char* key; char val[48]; };   // val[0] == 0: delete the key's line(s) (WriteIniPreserving)
                                                    // (v0.10.2: was 32 -- "Ctrl+Shift+Alt+NumpadSubtract, Wheel128" is 39)
 // phase 51: the raw read (binary: the line endings survive) and the safe write (dlaa.ini.tmp, then MoveFileExW over the
@@ -3166,6 +3174,10 @@ void SaveSettings(uint64_t n) {
         snprintf(add("menu_vr_depth"), sizeof(kv[0].val), "%d", g_menuVrDepth);
         snprintf(add("menu_vr_dist"), sizeof(kv[0].val), "%d", g_menuVrDist);   // v0.10.3 phase 29b
         snprintf(add("menu_vr_face"), sizeof(kv[0].val), "%d", g_menuVrFace);   // v0.10.0 phase 16
+        snprintf(add("menu_vr_lock"), sizeof(kv[0].val), "%d", g_menuVrLock);   // phase 70
+        snprintf(add("menu_vr_lock_x"), sizeof(kv[0].val), "%d", g_menuVrLockX);
+        snprintf(add("menu_vr_lock_y"), sizeof(kv[0].val), "%d", g_menuVrLockY);
+        snprintf(add("menu_vr_lock_dist"), sizeof(kv[0].val), "%d", g_menuVrLockDist);
     }
     if (g_fpsExplicit) {                                  // v0.10.0 fps box: on / off + placement, only once changed in the menu
         snprintf(add("fps_show"), sizeof(kv[0].val), "%d", g_fpsShow ? 1 : 0);
@@ -16476,6 +16488,7 @@ enum MenuRowId {
     MR_VRFPSCAP,                                          // phase 52: VR FPS cap (dlaa.ini vr_fps_cap: half / third)
     MR_CPU,                                               // phase 54: CPU tuning (dlaa.ini cpu_pcore / cpu_priority / cpu_no_throttle)
     MR_PANELGRP,                                          // v0.10.3 phase 29c: group header "Panel settings" (collapsible)
+    MR_PANELLOCK,                                         // phase 70: VR panel follows the head / fixed in the cab (dlaa.ini menu_vr_lock)
     MR_POSX, MR_POSY, MR_SIZE, MR_DEPTH, MR_FACE,
     MR_MENUKEYS,                                          // v0.10.2: the 5 menu keys, bound by 5 holds in sequence (29c: in the panel group)
     MR_FPS,
@@ -16512,7 +16525,7 @@ constexpr int kMenuGroupCount = (int)(sizeof(kMenuGroups) / sizeof(kMenuGroups[0
 static_assert(MR_PICGRP + 1 == MR_SHARP && MR_BIAS + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_WIREWIDEN + 1 == MR_UPGRP &&
               MR_UPGRP + 1 == MR_UPSCALE && MR_VECTORXR + 1 == MR_VRPGRP && MR_VRPGRP + 1 == MR_TURBO && MR_HMASK + 1 == MR_FRGRP &&
               MR_FRGRP + 1 == MR_REFLEX && MR_VRFPSCAP + 1 == MR_CPU && MR_CPU + 1 == MR_PANELGRP &&
-              MR_PANELGRP + 1 == MR_POSX && MR_MENUKEYS + 1 == MR_FPS && MR_FPSGRP + 1 == MR_FPSLOCK && MR_FPSLOCK + 1 == MR_FPSPROF && MR_FPSPROF + 1 == MR_FPSREMEAS &&
+              MR_PANELGRP + 1 == MR_PANELLOCK && MR_PANELLOCK + 1 == MR_POSX && MR_MENUKEYS + 1 == MR_FPS && MR_FPSGRP + 1 == MR_FPSLOCK && MR_FPSLOCK + 1 == MR_FPSPROF && MR_FPSPROF + 1 == MR_FPSREMEAS &&
               MR_FPSDIST + 1 == MR_LOG,
               "tuning menu: a group's children must follow its header and fill it up to its last row");
 static_assert(MR_SHARP < MR_WIDTH && MR_WIDTH < MR_LOD && MR_LOD < MR_LODCUT && MR_LODCUT < MR_AREA && MR_AREA < MR_PRETM &&
@@ -16621,10 +16634,13 @@ const wchar_t* const kMenuDesc[] = {
     // v0.10.3 phase 29c (MR_PANELGRP)
     L"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes it; it starts closed "
     L"every time the menu opens.",
-    L"Moves this panel sideways, in % of the screen. Flat and VR each keep their own position. Use it if the panel covers "
-    L"something you need. No cost.",
-    L"Moves this panel up / down, in % of the screen. Flat and VR each keep their own position. Use it if the panel covers "
-    L"something you need. No cost.",
+    // phase 70 (MR_PANELLOCK)
+    L"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in front of your seat, "
+    L"steady while you look around; X / Y / depth then set that spot (degrees, metres). Needs the VR layer (default). No cost.",
+    L"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat and VR each keep their own "
+    L"position. Use it if the panel covers something you need. No cost.",
+    L"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and VR each keep their own "
+    L"position. Use it if the panel covers something you need. No cost.",
     L"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too much. Flat and VR each keep "
     L"their own size. No cost.",
     L"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, the default; in px of "
@@ -17193,6 +17209,7 @@ void ResetSettings(uint64_t n) {
     g_menuX = 2; g_menuY = 8; g_menuScale = 1.0f;
     g_menuVrX = 0; g_menuVrY = -5; g_menuVrScale = 1.0f; g_menuVrDepth = 12; g_menuVrFace = 1;
     g_menuVrDist = 100;                                   // v0.10.3 phase 29b
+    g_menuVrLock = 0; g_menuVrLockX = 0; g_menuVrLockY = 10; g_menuVrLockDist = 80;   // phase 70: follows the headset again
     g_menuExplicit = false;
     g_menuMoved = true;
     // fps box: off (ToggleFpsBox's off path) + default placement
@@ -17269,6 +17286,7 @@ void ResetSettings(uint64_t n) {
         "perf_profile", "mv_fwd_depth",
         "menu_x", "menu_y", "menu_scale", "menu_vr_x", "menu_vr_y", "menu_vr_scale", "menu_vr_depth", "menu_vr_face",
         "menu_vr_dist",                                                                                 // phase 29b
+        "menu_vr_lock", "menu_vr_lock_x", "menu_vr_lock_y", "menu_vr_lock_dist",                        // phase 70
         "fps_show", "fps_text", "fps_x", "fps_y", "fps_scale", "fps_vr_x", "fps_vr_y", "fps_vr_scale", "fps_vr_lock",   // phase 28: + fps_vr_lock
         "fps_color", "fps_vr_dist", "fps_vr_yaw", "fps_vr_pitch", "fps_vr_roll",                        // phase 44
         "fps_brightness",                                                                               // phase 48
@@ -17299,6 +17317,7 @@ void ResetSettings(uint64_t n) {
             "mirror_turns = 0 dlaa_pre_tonemap = 1 "
             "perf_profile = high mv_fwd_depth = 1 menu_x = 2 menu_y = 8 "
             "menu_scale = 1.0 menu_vr_x = 0 menu_vr_y = -5 menu_vr_scale = 1.0 menu_vr_depth = 12 menu_vr_dist = 100 menu_vr_face = 1 "
+            "menu_vr_lock = 0 menu_vr_lock_x = 0 menu_vr_lock_y = 10 menu_vr_lock_dist = 80 "
             "fps_show = 0 fps_text = 0 "
             "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_opacity = 100 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 fps_profiles = 1 xr_turbo = 0 reflex = 0 fps_cap = 0 vr_fps_cap = 0 cpu_pcore = 0 cpu_priority = 0 cpu_no_throttle = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 vrs_strength = 0 vrs_eye = 0 dlaa_mv_dilate = 1 mv_fwd_conservative = 1 wire_widen = 0 xr_hidden_mask = 0 dlss_bias_mask = 100 log_level = %d (%s) -- profile: %s -- "
             "dlaa.ini: %d keys removed (hotkeys and other lines kept)", (unsigned long long)n, g_dlaaOn.load() ? "DLSS" : "off",
@@ -18855,18 +18874,27 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         swprintf(p.rows[MR_LOG].value, kV, L"%hs", LogLevelName(lv));   // phase 45: its CPU ms is in the cost column
     }
     groupRow(MR_PANELGRP, L"Panel settings");             // v0.10.3 phase 29c
-    MenuRow(p, MR_POSX, L"Panel position X", vr ? "dlaa.ini menu_vr_x" : "dlaa.ini menu_x", nullptr, false);
-    if (vr) swprintf(p.rows[MR_POSX].value, kV, L"%+d %%", g_menuVrX);
-    else    swprintf(p.rows[MR_POSX].value, kV, L"%d %%", g_menuX);
-    MenuRow(p, MR_POSY, L"Panel position Y", vr ? "dlaa.ini menu_vr_y" : "dlaa.ini menu_y", nullptr, false);
-    if (vr) swprintf(p.rows[MR_POSY].value, kV, L"%+d %%", g_menuVrY);
-    else    swprintf(p.rows[MR_POSY].value, kV, L"%d %%", g_menuY);
+    const bool vrQuad = vr && MenuVrQuad();               // v0.10.3 phase 29b: the quad path -> the quad's distance
+    const bool vrLock = vrQuad && g_menuVrLock;           // phase 70: fixed in the cab -> X / Y / depth edit its own spot
+    MenuRow(p, MR_PANELLOCK, L"Panel lock (VR)", "dlaa.ini menu_vr_lock", vrQuad ? nullptr : (vr ? "VR layer only" : "VR only"),
+            !vrQuad);
+    swprintf(p.rows[MR_PANELLOCK].value, kV, L"%ls", g_menuVrLock ? L"Fixed in cab" : L"Follow head");
+    MenuRow(p, MR_POSX, L"Panel position X", vrLock ? "dlaa.ini menu_vr_lock_x" : (vr ? "dlaa.ini menu_vr_x" : "dlaa.ini menu_x"),
+            nullptr, false);
+    if (vrLock)  swprintf(p.rows[MR_POSX].value, kV, L"%+d deg", g_menuVrLockX);
+    else if (vr) swprintf(p.rows[MR_POSX].value, kV, L"%+d %%", g_menuVrX);
+    else         swprintf(p.rows[MR_POSX].value, kV, L"%d %%", g_menuX);
+    MenuRow(p, MR_POSY, L"Panel position Y", vrLock ? "dlaa.ini menu_vr_lock_y" : (vr ? "dlaa.ini menu_vr_y" : "dlaa.ini menu_y"),
+            nullptr, false);
+    if (vrLock)  swprintf(p.rows[MR_POSY].value, kV, L"%+d deg", g_menuVrLockY);
+    else if (vr) swprintf(p.rows[MR_POSY].value, kV, L"%+d %%", g_menuVrY);
+    else         swprintf(p.rows[MR_POSY].value, kV, L"%d %%", g_menuY);
     MenuRow(p, MR_SIZE, L"Panel size", vr ? "dlaa.ini menu_vr_scale" : "dlaa.ini menu_scale", nullptr, false);
     swprintf(p.rows[MR_SIZE].value, kV, L"%.1f", (double)(vr ? g_menuVrScale : g_menuScale));
-    const bool vrQuad = vr && MenuVrQuad();               // v0.10.3 phase 29b: the quad path -> the quad's distance
-    MenuRow(p, MR_DEPTH, L"Panel VR depth", vrQuad ? "dlaa.ini menu_vr_dist" : "dlaa.ini menu_vr_depth", vr ? nullptr : "VR only",
-            !vr);
-    if (vrQuad) swprintf(p.rows[MR_DEPTH].value, kV, L"%.2f m", (double)g_menuVrDist / 100.0);
+    MenuRow(p, MR_DEPTH, L"Panel VR depth", vrLock ? "dlaa.ini menu_vr_lock_dist" : (vrQuad ? "dlaa.ini menu_vr_dist" :
+            "dlaa.ini menu_vr_depth"), vr ? nullptr : "VR only", !vr);
+    if (vrLock)      swprintf(p.rows[MR_DEPTH].value, kV, L"%.2f m", (double)g_menuVrLockDist / 100.0);
+    else if (vrQuad) swprintf(p.rows[MR_DEPTH].value, kV, L"%.2f m", (double)g_menuVrDist / 100.0);
     else        swprintf(p.rows[MR_DEPTH].value, kV, L"%d px", g_menuVrDepth);
     MenuRow(p, MR_FACE, L"Panel faces you (VR)", "dlaa.ini menu_vr_face", vr ? nullptr : "VR only", !vr);   // phase 16
     swprintf(p.rows[MR_FACE].value, kV, L"%ls", onOff[g_menuVrFace ? 1 : 0]);
@@ -19061,12 +19089,22 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_PANELGRP: case MR_FPSGRP:                       // v0.10.3 phase 29c: Right opens the group, Left closes it (a fresh
         MenuGrpOpen(row) = dir > 0;                         // press only: not a stepRow, so auto-repeat is ignored above)
         break;
+    case MR_PANELLOCK:                                      // phase 70: Left and Right both switch it (also flat: kept for VR)
+        g_menuVrLock = g_menuVrLock ? 0 : 1;
+        g_menuExplicit = g_menuMoved = true;
+        Log("tuning menu: VR panel %s (menu_vr_lock=%d; fixed: yaw %+d pitch %+d deg at %.2f m from the seat, menu_vr_lock_x / _y / "
+            "_dist; %s; Present #%llu)", g_menuVrLock ? "FIXED IN THE CAB (the game's layer space)" : "follows the headset (VIEW space)",
+            g_menuVrLock, g_menuVrLockX, g_menuVrLockY, (double)g_menuVrLockDist / 100.0, MenuVrPathName(), (unsigned long long)n);
+        PlayTones(1, g_menuVrLock ? 1200 : 300, 150, 0);
+        break;
     case MR_POSX:
-        if (vr) g_menuVrX = MenuClampI(g_menuVrX + dir, -50, 50); else g_menuX = MenuClampI(g_menuX + dir, 0, 90);
+        if (vr && MenuVrQuad() && g_menuVrLock) g_menuVrLockX = MenuClampI(g_menuVrLockX + dir, -90, 90);   // phase 70: degrees
+        else if (vr) g_menuVrX = MenuClampI(g_menuVrX + dir, -50, 50); else g_menuX = MenuClampI(g_menuX + dir, 0, 90);
         g_menuExplicit = g_menuMoved = true;
         break;
     case MR_POSY:
-        if (vr) g_menuVrY = MenuClampI(g_menuVrY + dir, -50, 50); else g_menuY = MenuClampI(g_menuY + dir, 0, 90);
+        if (vr && MenuVrQuad() && g_menuVrLock) g_menuVrLockY = MenuClampI(g_menuVrLockY + dir, -60, 60);   // phase 70: degrees
+        else if (vr) g_menuVrY = MenuClampI(g_menuVrY + dir, -50, 50); else g_menuY = MenuClampI(g_menuY + dir, 0, 90);
         g_menuExplicit = g_menuMoved = true;
         break;
     case MR_SIZE: {
@@ -19077,7 +19115,12 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
         break;
     }
     case MR_DEPTH:
-        if (MenuVrQuad()) {                                 // v0.10.3 phase 29b: the quad path -> its distance, 5 cm steps
+        if (MenuVrQuad() && g_menuVrLock) {                 // phase 70: the fixed panel's distance from the seat, 5 cm steps
+            g_menuVrLockDist = MenuClampI(g_menuVrLockDist + 5 * dir, 30, 300);
+            if (!repeat)
+                Log("tuning menu: VR panel fixed in the cab -- %.2f m from the seat (menu_vr_lock_dist=%d; Present #%llu)",
+                    (double)g_menuVrLockDist / 100.0, g_menuVrLockDist, (unsigned long long)n);
+        } else if (MenuVrQuad()) {                          // v0.10.3 phase 29b: the quad path -> its distance, 5 cm steps
             g_menuVrDist = MenuClampI(g_menuVrDist + 5 * dir, 30, 300);
             if (!repeat)
                 Log("tuning menu: VR panel quad distance %.2f m (menu_vr_dist=%d; the quad path: the same angular size, only the "
@@ -20893,11 +20936,12 @@ void MenuLateOnXrRelease(void* swapchain, void* tex) {
 // ---- v0.10.3 phase 29: the VR panel / fps box as OpenXR QUAD layers (dlaa.ini menu_vr_layer = 1; XrHook::OverlaySet) ---------
 // XrHook owns the OpenXR side (our two swapchains, the VIEW space, the quad poses, the layers appended at xrEndFrame); this side
 // hands it the placement every Present and draws the swapchain images through MenuOverlayDraw. The image px per reference px:
-// the panel 1.6 x menu_vr_scale (1216 px wide at 1.0 = ~1.4 x the headset's own pixels over the panel's ~62 deg), the fps box
-// 4.0 x fps_vr_scale (368 x 176 at 1.0; twice the panel's density: its text is small), capped by the swapchain size (the panel
-// 2.4 = full density up to menu_vr_scale 1.5, the fps box 8.0 = up to fps_vr_scale 2.0; above that the compositor scales up).
+// the panel 3.2 x menu_vr_scale (phase 70: was 1.6 -- at menu_vr_scale 0.4 that gave a 486-px image with 10-px GDI fonts the
+// compositor stretched: thick, soft text; 3.2 = ~20-px fonts the compositor scales DOWN), the fps box 4.0 x fps_vr_scale
+// (368 x 176 at 1.0: its text is small), capped by the swapchain size (the panel 2.4 = full density up to menu_vr_scale 0.75,
+// the fps box 8.0 = up to fps_vr_scale 2.0; above that the image stays at the cap and the compositor scales it).
 // The quad shows only the drawn top-left part of the image (its sub-image), so the image size never changes with the scale.
-constexpr float kOvPanelDensity = 1.6f, kOvPanelMax = 2.4f;
+constexpr float kOvPanelDensity = 3.2f, kOvPanelMax = 2.4f;
 constexpr float kOvFpsDensity   = 4.0f, kOvFpsMax   = 8.0f;
 // ---- phase 57 (perf): the quads' CONTENT GENERATIONS + the panel built once per Present -------------------------------------------
 // XrHook redraws a quad's swapchain image only when its generation changes (OverlayParams::panelGen / fpsGen; 0 = no content). The
@@ -21043,6 +21087,9 @@ void MenuOverlaySet() {
     p.menuX     = g_menuVrX;  p.menuY = g_menuVrY;  p.menuScale = g_menuVrScale;
     p.menuDist  = (float)g_menuVrDist / 100.0f;          // v0.10.3 phase 29b (cm -> m)
     p.menuFace  = g_menuVrFace != 0;                     // v0.10.3 phase 29b: the panel / head-following fps box quads
+    p.menuLock  = g_menuVrLock;                          // phase 70: the panel fixed in the cab
+    p.menuLockX = (float)g_menuVrLockX; p.menuLockY = (float)g_menuVrLockY;
+    p.menuLockDist = (float)g_menuVrLockDist / 100.0f;   // (cm -> m)
     p.fpsX      = g_fpsVrX;   p.fpsY  = g_fpsVrY;   p.fpsScale  = g_fpsVrScale;
     p.fpsDist   = (float)g_fpsVrDist / 100.0f;           // phase 44 (cm -> m)
     p.fpsYaw    = g_fpsVrYaw; p.fpsPitch = g_fpsVrPitch; p.fpsRoll = g_fpsVrRoll;
@@ -22575,6 +22622,11 @@ void LoadConfig() {
 #ifdef WITH_DLAA
             if (!strcmp(key, "did_shadow"))        { g_didShadowCfg = v >= 2 ? 2 : (v == 1 ? 1 : 0); continue; }   // startup only
             if (!strcmp(key, "did_shadow_verify")) { g_didShadowVerify = v < 0 ? -1 : (int)(v > 100000 ? 100000 : v); continue; }
+            // phase 70: the VR panel fixed in the cab (outside the else-if chain: C1061)
+            if (!strcmp(key, "menu_vr_lock"))      { g_menuVrLock = v != 0 ? 1 : 0; continue; }
+            if (!strcmp(key, "menu_vr_lock_x"))    { g_menuVrLockX = v < -90 ? -90 : (v > 90 ? 90 : (int)v); continue; }
+            if (!strcmp(key, "menu_vr_lock_y"))    { g_menuVrLockY = v < -60 ? -60 : (v > 60 ? 60 : (int)v); continue; }
+            if (!strcmp(key, "menu_vr_lock_dist")) { g_menuVrLockDist = v < 30 ? 30 : (v > 300 ? 300 : (int)v); continue; }
             // phase 40 / 41 / 42 (outside the else-if chain too: C1061 at the dev merge)
             if (!strcmp(key, "mirror_turns"))       { g_mirTurns = v > 0 ? 1 : 0; g_mirTurnsExplicit = true; continue; }   // phase 41
             // phase 52: frame rate (outside the else-if chain: C1061; the menu's Frame rate rows switch them live)

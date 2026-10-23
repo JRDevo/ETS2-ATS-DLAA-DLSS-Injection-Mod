@@ -511,13 +511,13 @@ struct OvState {
     uint64_t  endSeq = 0, relSeq = ~0ull;        // xrEndFrame count; the interval the release draw (mode 2) ran in
     int       mode = 0;                          // 1 drawn at xrEndFrame, 2 at the game's first release of the frame
     int       acqRun = 0;                        // frames in a row with an acquire failure
-    int       lastLock = 0;                      // the fps box fixed in the cab: params.fpsLock at the last xrEndFrame
-    XrSpace   pivotSpace = nullptr;              // ... the layer space the pivot was captured in
-    bool      pivotHave = false;
-    double    pivot[3] = {}, yaw0 = 0.0;         // ... non-LOCAL layer spaces: the eyes' midpoint + head yaw at lock-on (rad)
+    int       lastLock[2] = {};                  // fixed in the cab, per quad (0 panel -- phase 70, 1 fps box): its lock at the last xrEndFrame
+    XrSpace   pivotSpace[2] = {};                // ... the layer space the pivot was captured in
+    bool      pivotHave[2] = {};
+    double    pivot[2][3] = {}, yaw0[2] = {};    // ... non-LOCAL layer spaces: the eyes' midpoint + head yaw at lock-on (rad)
     bool      zChecked[2] = {}, zFlip[2] = {};   // the quad's +z verified to point back (QRot; OvFacingQuat): 0 the fps box fixed
                                                  //   in the cab (at the pivot), 1 the quads facing the head (phase 29b)
-    bool      firstLog[3] = {};                  // first panel / follow-head / fixed fps quad logged
+    bool      firstLog[4] = {};                  // first panel / follow-head / fixed fps / fixed panel (phase 70) quad logged
     bool      fovBadLogged = false, capLogged = false;
 };
 OvState                    s_ov;
@@ -610,8 +610,8 @@ void OvDropLocked(bool destroy) {
     s_ov.ready = false;
     s_ov.have[0] = s_ov.have[1] = false;
     s_ov.drawnValid[0] = s_ov.drawnValid[1] = false;     // phase 57: no image of ours left to reuse
-    s_ov.pivotHave = false;
-    s_ov.pivotSpace = nullptr;
+    s_ov.pivotHave[0] = s_ov.pivotHave[1] = false;
+    s_ov.pivotSpace[0] = s_ov.pivotSpace[1] = nullptr;
     s_ovReady.store(false, std::memory_order_relaxed);
 }
 // under s_ovMx: the two swapchains (+ their D3D11 images) and the VIEW space for session `ses`. False = failed (logged; the
@@ -853,8 +853,50 @@ bool OvBuildQuadLocked(int which, const OverlayParams& par, const XrCompositionL
     const double aspect = (double)s_ov.usedH[which] / (double)s_ov.usedW[which];
     const double kRad = 0.017453292519943295;
     double pos[3] = { 0.0, 0.0, 0.0 }, rq[4] = { 0.0, 0.0, 0.0, 1.0 }, wM = 0.0;
-    int logIdx = which;                                  // 0 panel, 1 fps follows the head, 2 fps fixed in the cab
+    int logIdx = which;                                  // 0 panel, 1 fps follows the head, 2 fps fixed in the cab, 3 panel fixed
     int how = 0, lt = 0;
+    const int lock = which == 0 ? par.menuLock : par.fpsLock;
+    if (lock) {
+        AcquireSRWLockShared(&s_poseLock);
+        lt = SpaceTypeLocked(proj->space);
+        ReleaseSRWLockShared(&s_poseLock);
+    }
+    // fixed in the cab (the fps box: phase 28; the panel: phase 70): the game's projection-layer space, `xDeg` / `yDeg` yaw /
+    // pitch (+ right, + down) at `d` from the seat. Each quad keeps its own pivot (one lock-on must not re-capture the other's).
+    auto anchored = [&](double d, float xDeg, float yDeg, const char* what) {
+        if (!s_ov.lastLock[which] || proj->space != s_ov.pivotSpace[which]) {
+            s_ov.pivotHave[which] = false;
+            s_ov.pivotSpace[which] = proj->space;
+        }
+        double piv[3] = { 0.0, 0.0, 0.0 }, yaw0 = 0.0;
+        if (lt == kRefSpaceLocal) {
+            how = 1;                                     // LOCAL: its origin is the seat, its -z the seat's forward
+        } else {
+            how = 2;                                     // other / unknown: a pivot from the submitted views, once per lock-on
+            if (!s_ov.pivotHave[which]) {
+                const XrPosef& a = proj->views[0].pose;
+                const XrPosef& b = proj->views[1].pose;
+                s_ov.pivot[which][0] = 0.5 * ((double)a.position.x + (double)b.position.x);
+                s_ov.pivot[which][1] = 0.5 * ((double)a.position.y + (double)b.position.y);
+                s_ov.pivot[which][2] = 0.5 * ((double)a.position.z + (double)b.position.z);
+                const Pose pa = PoseOf(a);
+                double yd = 0.0, pd = 0.0;
+                YawPitch(pa.q, &yd, &pd);
+                s_ov.yaw0[which] = yd * kRad;
+                s_ov.pivotHave[which] = true;
+                Log("OpenXR overlay: %s -- layer space %p type %d (%s): the anchor turns around a PIVOT captured now from the "
+                    "submitted views: the eyes' midpoint (%+.3f %+.3f %+.3f) m, head yaw %+.1f deg", what, proj->space, lt,
+                    SpaceTypeName(lt), s_ov.pivot[which][0], s_ov.pivot[which][1], s_ov.pivot[which][2], yd);
+            }
+            for (int k = 0; k < 3; ++k) piv[k] = s_ov.pivot[which][k];
+            yaw0 = s_ov.yaw0[which];
+        }
+        const double yaw = yaw0 + (double)xDeg * kRad, pitch = -(double)yDeg * kRad;
+        const double dir[3] = { std::sin(yaw) * std::cos(pitch), std::sin(pitch), -std::cos(yaw) * std::cos(pitch) };
+        for (int k = 0; k < 3; ++k) pos[k] = piv[k] + d * dir[k];
+        OvFacingQuat(0, what, "pivot", dir, rq);         // faces the pivot (phase 29b: the shared helper)
+        q.space = proj->space;
+    };
     // v0.10.3 phase 29b, menu_vr_face = 1: a VIEW-space quad at `pos` (d ahead) turned to FACE the head (the VIEW origin), its
     // size times |pos| / d so it keeps the angle it has straight ahead (the phase 16 "same size from every angle"); 0 = parallel
     // to the view plane (identity: a flat picture seen at an angle off the axis, as phase 29)
@@ -865,7 +907,12 @@ bool OvBuildQuadLocked(int which, const OverlayParams& par, const XrCompositionL
         OvFacingQuat(1, what, "head", dir, rq);
         wM *= r / d;
     };
-    if (which == 0) {                                    // the panel: VIEW space, menu_vr_dist ahead (phase 29b: was 1 m)
+    if (which == 0 && lock && lt != kRefSpaceView) {     // phase 70: the panel fixed in the cab (menu_vr_lock = 1)
+        const double d = par.menuLockDist >= 0.3f && par.menuLockDist <= 3.0f ? (double)par.menuLockDist : 0.8;
+        wM = d * fw * 0.54 * (double)par.menuScale;      // the same angular size as following the head at any distance
+        anchored(d, par.menuLockX, par.menuLockY, "panel fixed in the cab");
+        logIdx = 3;
+    } else if (which == 0) {                             // the panel: VIEW space, menu_vr_dist ahead (phase 29b: was 1 m)
         const double d = par.menuDist >= 0.3f && par.menuDist <= 3.0f ? (double)par.menuDist : 1.0;
         wM = d * fw * 0.54 * (double)par.menuScale;      // (scales with d: the same angle at every distance)
         pos[0] = d * fw * (double)par.menuX / 100.0;
@@ -873,46 +920,14 @@ bool OvBuildQuadLocked(int which, const OverlayParams& par, const XrCompositionL
         pos[2] = -d;
         faceHead(d, "panel facing the head");
         q.space = s_ov.viewSpace;
+        if (lock) how = 3;                               // fixed asked, but the layer space is a VIEW space: head-locked
     } else {
         // the fps box: fps_vr_dist (phase 44; was 0.8 m = the phase 28 anchor distance, still the default). wM scales with d:
         // the same angular size at every distance, in both lock modes.
         const double d = par.fpsDist >= 0.3f && par.fpsDist <= 3.0f ? (double)par.fpsDist : 0.8;
         wM = d * fw * 0.08 * (double)par.fpsScale;
-        if (par.fpsLock) {
-            AcquireSRWLockShared(&s_poseLock);
-            lt = SpaceTypeLocked(proj->space);
-            ReleaseSRWLockShared(&s_poseLock);
-        }
         if (par.fpsLock && lt != kRefSpaceView) {        // fixed in the cab: the game's projection-layer space
-            if (!s_ov.lastLock || proj->space != s_ov.pivotSpace) { s_ov.pivotHave = false; s_ov.pivotSpace = proj->space; }
-            double piv[3] = { 0.0, 0.0, 0.0 }, yaw0 = 0.0;
-            if (lt == kRefSpaceLocal) {
-                how = 1;                                 // LOCAL: its origin is the seat, its -z the seat's forward
-            } else {
-                how = 2;                                 // other / unknown: a pivot from the submitted views, once per lock-on
-                if (!s_ov.pivotHave) {
-                    const XrPosef& a = proj->views[0].pose;
-                    const XrPosef& b = proj->views[1].pose;
-                    s_ov.pivot[0] = 0.5 * ((double)a.position.x + (double)b.position.x);
-                    s_ov.pivot[1] = 0.5 * ((double)a.position.y + (double)b.position.y);
-                    s_ov.pivot[2] = 0.5 * ((double)a.position.z + (double)b.position.z);
-                    const Pose pa = PoseOf(a);
-                    double yd = 0.0, pd = 0.0;
-                    YawPitch(pa.q, &yd, &pd);
-                    s_ov.yaw0 = yd * kRad;
-                    s_ov.pivotHave = true;
-                    Log("OpenXR overlay: fps box fixed in the cab -- layer space %p type %d (%s): the anchor turns around a PIVOT "
-                        "captured now from the submitted views: the eyes' midpoint (%+.3f %+.3f %+.3f) m, head yaw %+.1f deg",
-                        proj->space, lt, SpaceTypeName(lt), s_ov.pivot[0], s_ov.pivot[1], s_ov.pivot[2], yd);
-                }
-                piv[0] = s_ov.pivot[0]; piv[1] = s_ov.pivot[1]; piv[2] = s_ov.pivot[2];
-                yaw0 = s_ov.yaw0;
-            }
-            const double yaw = yaw0 + (double)par.fpsX * kRad, pitch = -(double)par.fpsY * kRad;
-            const double dir[3] = { std::sin(yaw) * std::cos(pitch), std::sin(pitch), -std::cos(yaw) * std::cos(pitch) };
-            for (int k = 0; k < 3; ++k) pos[k] = piv[k] + d * dir[k];
-            OvFacingQuat(0, "fps box fixed-in-cab", "pivot", dir, rq);   // faces the pivot (phase 29b: the shared helper)
-            q.space = proj->space;
+            anchored(d, par.fpsX, par.fpsY, "fps box fixed in the cab");
             logIdx = 2;
         } else {                                         // follows the head (or the layer space is a VIEW space)
             how = par.fpsLock ? 3 : 0;
@@ -937,14 +952,15 @@ bool OvBuildQuadLocked(int which, const OverlayParams& par, const XrCompositionL
     q.size.height = (float)(wM * aspect);
     if (!s_ov.firstLog[logIdx]) {
         s_ov.firstLog[logIdx] = true;
-        static const char* const kWhat[3] = { "panel (VIEW space, ours)", "fps box following the head (VIEW space, ours)",
-                                              "fps box FIXED IN THE PLAY SPACE (the game's projection-layer space)" };
+        static const char* const kWhat[4] = { "panel (VIEW space, ours)", "fps box following the head (VIEW space, ours)",
+                                              "fps box FIXED IN THE PLAY SPACE (the game's projection-layer space)",
+                                              "panel FIXED IN THE CAB (phase 70: the game's projection-layer space)" };
         Log("OpenXR overlay: first %s quad -- space %p, pose q=(%+.3f %+.3f %+.3f %+.3f) p=(%+.3f %+.3f %+.3f) m, size %.3f x %.3f m, "
             "sub-image %dx%d of %ux%u px; view 0 fov tangents L%+.3f R%+.3f U%+.3f D%+.3f%s%s", kWhat[logIdx], q.space,
             rq[0], rq[1], rq[2], rq[3], pos[0], pos[1], pos[2], wM, wM * aspect, q.subImage.w, q.subImage.h, s_ov.sc[which].w,
             s_ov.sc[which].h, tl, tr, tu, tdn,
             how == 3 ? " (fixed in the cab asked, but the layer space is a VIEW space: head-locked)" : "",
-            logIdx == 2 ? "" : (par.menuFace ? "; menu_vr_face=1: turned to face the head (phase 29b)"
+            logIdx >= 2 ? "" : (par.menuFace ? "; menu_vr_face=1: turned to face the head (phase 29b)"
                                              : "; menu_vr_face=0: parallel to the view plane"));
     }
     // phase 44: the fps box quad again whenever its lock / distance / turn changes (level 4; 32 lines at most)
@@ -1027,7 +1043,8 @@ bool OvEndFrame(int i, XrSession ses, const XrFrameEndInfo* fe, const XrComposit
         return false;
     }
     // phase 29b: the later layer is drawn on top -- the panel last when it sits nearer than the fps box (menu_vr_dist vs fps_vr_dist)
-    const bool panelTop = par.menuDist < par.fpsDist;     // phase 44: the fps box's own distance (was its fixed 0.8 m)
+    const bool panelTop = (par.menuLock ? par.menuLockDist : par.menuDist) < par.fpsDist;   // phase 44: the fps box's own distance
+                                                         //   (was its fixed 0.8 m); phase 70: the fixed panel's own distance
     for (int k = 0; k < 2; ++k) {
         const int w = panelTop ? 1 - k : k;
         if (!want[w] || !have[w]) continue;
@@ -1036,7 +1053,8 @@ bool OvEndFrame(int i, XrSession ses, const XrFrameEndInfo* fe, const XrComposit
         ok[w] = true;
         (w ? s_ovFps : s_ovPanel).fetch_add(1, std::memory_order_relaxed);
     }
-    s_ov.lastLock = par.fpsLock;
+    s_ov.lastLock[0] = par.menuOpen ? par.menuLock : 0;  // phase 70: closed = re-captured at the next open (non-LOCAL spaces)
+    s_ov.lastLock[1] = par.fpsLock;
     OvSetOk(ok[0], ok[1]);
     if (!nq) return false;
     for (int k = 0; k < nGame; ++k) outLayers[k] = fe->layers[k];
