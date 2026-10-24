@@ -1038,6 +1038,7 @@ int               g_profile = 0;        // 0 high (default), 1 medium, 2 low
 const char* const kProfName[3] = { "high", "medium", "low" };
 std::atomic<bool> g_snapRequest{false};       // set by Present on Ctrl+F10, consumed at the next DLAA blit
 std::atomic<bool> g_selfTestRequest{false};   // set by Present on Ctrl+F9, consumed in hkDraw
+std::atomic<bool> g_selfTestShimmer{false};   // phase 71: the request is the Ctrl+Shift+F9 shimmer capture (kShimmerModes)
 std::atomic<bool> g_jitterOnly{false};   // Ctrl+F8: jitter stays on, DLAA evaluate skipped
 // v0.6.2 (v0.6.5 Ctrl+F7): pure pass-through for cost attribution -- no jitter, no MV candidate copies, no depth snapshot,
 // no DLAA evaluate, no eye readbacks; only the pass/blit tracking and the GPU span timers keep running.
@@ -1216,6 +1217,7 @@ enum KeyAction {
     KA_MV_DILATE,                                            // phase 60: DLSS motion-vector dilation in DLAA (MVLowRes) on / off
     KA_FWD_CONSERVATIVE,                                     // phase 60: conservative raster for the forward depth on / off
     KA_WIRE_WIDEN,                                           // phase 61: sub-pixel wires drawn min-px wide on / off
+    KA_SHIMMER_CAP,                                          // phase 71: one-key shimmer capture (DLAA on + off frames, log, ini)
     KA_LOD_CUT_DOWN, KA_LOD_CUT_UP,                          // v0.10.0 phase 13: cut-out (alpha-tested) LOD bias -/+0.25
     KA_MENU, KA_MENU_UP, KA_MENU_DOWN, KA_MENU_LEFT, KA_MENU_RIGHT,   // v0.10.0 tuning menu open / close + navigation
     KA_COUNT
@@ -1267,6 +1269,7 @@ KeyBind g_keys[KA_COUNT] = {
     { "key_mv_dilate",       "Alt+F10",   0, 0, "", false },   // phase 60: DLSS MV dilation in DLAA (thin wires) on / off
     { "key_mv_conservative", "Alt+F11",   0, 0, "", false },   // phase 60: conservative raster for the wire depth on / off
     { "key_wire_widen",      "Alt+F12",   0, 0, "", false },   // phase 61: far wires drawn at least wire_min_px wide on / off
+    { "key_shimmer_capture", "Ctrl+Shift+F9", 0, 0, "", false },   // phase 71: shimmer capture -> dlaa_selftest\shimmer_<time>
     { "key_lod_cutout_down", "Ctrl+Shift+F1", 0, 0, "", false },   // v0.10.0 phase 13: tex_lod_bias_cutout -0.25 (2 beeps)
     { "key_lod_cutout_up",   "Ctrl+Shift+F2", 0, 0, "", false },   // v0.10.0 phase 13: tex_lod_bias_cutout +0.25 (2 beeps)
     { "key_menu",            "Delete",    0, 0, "", false },   // v0.10.0 tuning menu open / close
@@ -1888,6 +1891,11 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
             if (KeyHit(KA_SELFTEST)) {                         // self-test (old F9)
                 g_selfTestRequest = true;
                 LogDbg("self-test requested (%s, Present #%llu)", KeyName(KA_SELFTEST), (unsigned long long)n);
+            }
+            if (KeyHit(KA_SHIMMER_CAP)) {                      // phase 71: shimmer capture (DLAA on, then off)
+                g_selfTestShimmer = true;
+                g_selfTestRequest = true;
+                Log("shimmer capture requested (%s, Present #%llu)", KeyName(KA_SHIMMER_CAP), (unsigned long long)n);
             }
             if (KeyHit(KA_SNAPSHOT)) {                         // NGX input snapshot (old F10)
                 g_snapRequest = true;
@@ -10279,6 +10287,17 @@ const TestMode kModes[] = {
 constexpr int kNumModes = (int)(sizeof(kModes) / sizeof(kModes[0]));
 constexpr int kSettleFrames = 90;
 constexpr int kDumpFrames   = 4;
+// phase 71: Ctrl+Shift+F9 shimmer capture. The user's own settings (sign 0 = keep), DLAA on then off, 12 CONSECUTIVE frames each
+// (shimmer = frame-to-frame change), into dlaa_selftest\shimmer_<date>_<time>\ with copies of dlaa_inject.log and dlaa.ini.
+const TestMode kShimmerModes[] = {
+    { "shim_on",  true,  false, 0, 0 },
+    { "shim_off", false, false, 0, 0 },
+};
+constexpr int kShimmerDumpFrames = 12;
+bool g_testShimmer = false;                     // the running self-test is the shimmer capture
+inline const TestMode* TestModes() { return g_testShimmer ? kShimmerModes : kModes; }
+inline int TestNumModes() { return g_testShimmer ? (int)(sizeof(kShimmerModes) / sizeof(kShimmerModes[0])) : kNumModes; }
+inline int TestDumpFrames() { return g_testShimmer ? kShimmerDumpFrames : kDumpFrames; }
 
 bool  g_testRunning = false;
 int   g_testMode = 0, g_testSettle = 0, g_testDumped = 0;
@@ -10297,15 +10316,15 @@ DXGI_FORMAT g_stagBbFmt = DXGI_FORMAT_UNKNOWN;
 int g_testFinalFmtLogs = 0;                     // "back buffer fmt not dumpable" is logged once per self-test run
 
 void ApplyTestMode(int i) {
-    const TestMode& m = kModes[i];
+    const TestMode& m = TestModes()[i];
     g_dlaaOn = m.dlaaOn;
     g_jitterOnly = m.jitOnly;
-    if (m.dlaaOn && !m.jitOnly) { g_signX = m.sx; g_signY = m.sy; }
+    if (m.dlaaOn && !m.jitOnly && m.sx) { g_signX = m.sx; g_signY = m.sy; }
     if (m.dlaaOn) g_resetNext = true;
     g_testSettle = kSettleFrames;
     g_testDumped = 0;
     LogDbg("self-test: mode %d/%d '%s' (dlaa=%d jitter-only=%d sign=%+d,%+d), settling %d frames",
-        i + 1, kNumModes, m.name, (int)m.dlaaOn, (int)m.jitOnly, g_signX, g_signY, kSettleFrames);
+        i + 1, TestNumModes(), m.name, (int)m.dlaaOn, (int)m.jitOnly, g_signX, g_signY, kSettleFrames);
 }
 
 // Writes an uncompressed 24-bit bottom-up BMP from RGBA rows (bytes as-is, alpha dropped).
@@ -10463,10 +10482,32 @@ void SelfTestFinalDump(IDXGISwapChain* sc) {
     LogDbg("self-test: %s %s (back buffer %ux%u fmt=%d)", ok ? "wrote" : "FAILED to write", nm, bd.Width, bd.Height, (int)bd.Format);
 }
 
+// phase 71: copies `name` (next to the DLL) into the self-test folder. Shared read: the log stays open for writing.
+void CopyIntoTestDir(const wchar_t* name) {
+    wchar_t src[MAX_PATH], dst[MAX_PATH];
+    if (!PathNextToDll(name, src)) return;
+    wcscpy_s(dst, g_testDir); wcscat_s(dst, name);
+    FILE* in = _wfsopen(src, L"rb", _SH_DENYNO);
+    if (!in) return;
+    FILE* out = nullptr;
+    if (_wfopen_s(&out, dst, L"wb") == 0 && out) {
+        char buf[65536]; size_t k;
+        while ((k = fread(buf, 1, sizeof(buf), in)) > 0) fwrite(buf, 1, k, out);
+        fclose(out);
+    }
+    fclose(in);
+}
+
 void FinishSelfTest() {
     g_dlaaOn = g_savedOn; g_jitterOnly = g_savedJo; g_signX = g_savedSx; g_signY = g_savedSy;
     g_resetNext = true;
     g_testRunning = false;
+    if (g_testShimmer) {                                   // phase 71
+        Log("shimmer capture done -- BMPs + dlaa_inject.log + dlaa.ini in the dlaa_selftest\\shimmer_* folder");
+        CopyIntoTestDir(L"dlaa_inject.log");
+        CopyIntoTestDir(L"dlaa.ini");
+        Beep(1200, 120); Beep(1600, 120);                  // two rising beeps = done
+    }
     LogDbg("self-test done (restored dlaa=%d jitter-only=%d sign=%+d,%+d)",
         (int)g_savedOn, (int)g_savedJo, g_signX, g_signY);
 }
@@ -10480,8 +10521,17 @@ void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
         if (g_gameDeviceChanged) { LogDbg("self-test refused: the game render device changed (DLAA stays OFF)"); return; }
         g_savedOn = g_dlaaOn.load(); g_savedJo = g_jitterOnly.load();
         g_savedSx = g_signX; g_savedSy = g_signY;
+        g_testShimmer = g_selfTestShimmer.exchange(false);
         if (!PathNextToDll(L"dlaa_selftest\\", g_testDir)) { LogErr("self-test: cannot resolve DLL path"); return; }
         CreateDirectoryW(g_testDir, nullptr);
+        if (g_testShimmer) {                               // phase 71: own folder per capture, nothing is overwritten
+            SYSTEMTIME st; GetLocalTime(&st);
+            wchar_t sub[48];
+            swprintf_s(sub, L"shimmer_%04d%02d%02d_%02d%02d%02d\\", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+            wcscat_s(g_testDir, sub);
+            CreateDirectoryW(g_testDir, nullptr);
+            Beep(1200, 120);                               // one beep = capture started
+        }
         D3D11_TEXTURE2D_DESC d{}; tex->GetDesc(&d);
         wchar_t ip[MAX_PATH]; wcscpy_s(ip, g_testDir); wcscat_s(ip, L"info.txt");
         FILE* f = nullptr;
@@ -10491,7 +10541,7 @@ void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
                        "settle_frames=%d dump_frames=%d phases=%d jitter_enabled=%d\n"
                        "file | phase | viewport shift (x,y) | NGX jitter passed (x,y)\n",
                     d.Width, d.Height, (int)d.Format, t.wYear, t.wMonth, t.wDay,
-                    t.wHour, t.wMinute, t.wSecond, kSettleFrames, kDumpFrames, g_phases, (int)g_jitterEnabled);
+                    t.wHour, t.wMinute, t.wSecond, kSettleFrames, TestDumpFrames(), g_phases, (int)g_jitterEnabled);
             fclose(f);
         }
         g_testRunning = true; g_testMode = 0;
@@ -10503,7 +10553,7 @@ void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
     }
     if (g_testSettle > 0) { --g_testSettle; return; }
 
-    const TestMode& m = kModes[g_testMode];
+    const TestMode& m = TestModes()[g_testMode];
     char nm[64];
     snprintf(nm, sizeof(nm), "%s_%d.bmp", m.name, g_testDumped);
     wchar_t wn[64]; MultiByteToWideChar(CP_UTF8, 0, nm, -1, wn, 64);
@@ -10524,8 +10574,8 @@ void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
         else fprintf(f, "%s | phase=%d | shift=(%+.4f,%+.4f) | ngx=(%+.4f,%+.4f)\n", nm, phase, vx, vy, njx, njy);
         fclose(f);
     }
-    if (++g_testDumped >= kDumpFrames) {
-        if (++g_testMode >= kNumModes) FinishSelfTest();
+    if (++g_testDumped >= TestDumpFrames()) {
+        if (++g_testMode >= TestNumModes()) FinishSelfTest();
         else ApplyTestMode(g_testMode);
     }
 }
