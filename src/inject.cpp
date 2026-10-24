@@ -1269,7 +1269,8 @@ KeyBind g_keys[KA_COUNT] = {
     { "key_mv_dilate",       "Alt+F10",   0, 0, "", false },   // phase 60: DLSS MV dilation in DLAA (thin wires) on / off
     { "key_mv_conservative", "Alt+F11",   0, 0, "", false },   // phase 60: conservative raster for the wire depth on / off
     { "key_wire_widen",      "Alt+F12",   0, 0, "", false },   // phase 61: far wires drawn at least wire_min_px wide on / off
-    { "key_shimmer_capture", "Ctrl+Shift+F9", 0, 0, "", false },   // phase 71: shimmer capture -> dlaa_selftest\shimmer_<time>
+    { "key_shimmer_capture", "Pause",     0, 0, "", false },   // phase 71: shimmer capture -> dlaa_selftest\shimmer_<time>
+                                                               //   (one key, not used by the games; not PrintScreen: Windows 11 opens the Snipping Tool)
     { "key_lod_cutout_down", "Ctrl+Shift+F1", 0, 0, "", false },   // v0.10.0 phase 13: tex_lod_bias_cutout -0.25 (2 beeps)
     { "key_lod_cutout_up",   "Ctrl+Shift+F2", 0, 0, "", false },   // v0.10.0 phase 13: tex_lod_bias_cutout +0.25 (2 beeps)
     { "key_menu",            "Delete",    0, 0, "", false },   // v0.10.0 tuning menu open / close
@@ -18270,7 +18271,8 @@ const MenuHkLine kMenuHkLines[] = {
     { KA_WIRE_WIDEN,     "Thin-wire widening" },
     { KA_UPSCALE_TOGGLE, "DLSS upscale" },
     { KA_DLAA_TOGGLE,    "DLAA on / off" },
-    { KA_SAVE,           "Save to dlaa.ini" },
+    { KA_SHIMMER_CAP,    "Shimmer capture" },        // phase 71: bind a wheel button here
+    { KA_SAVE,          "Save to dlaa.ini" },
     { KA_MENU,           "Menu: open / close" },
     { KA_MENU_UP,        "Menu: up" },
     { KA_MENU_DOWN,      "Menu: down" },
