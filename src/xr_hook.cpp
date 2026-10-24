@@ -3770,6 +3770,13 @@ int ViewForImage(void* tex, uint32_t slice, int32_t rect[4]) {
     ReleaseSRWLockShared(&s_poseLock);
     return view;
 }
+bool SubmittedFov(float fov[2][4]) {
+    AcquireSRWLockShared(&s_poseLock);
+    const bool have = s_haveLayout;
+    if (have) memcpy(fov, s_subFov, sizeof(s_subFov));
+    ReleaseSRWLockShared(&s_poseLock);
+    return have;
+}
 PoseStats GetPoseStats() {
     PoseStats s{};
     s.locates = s_nLocates.load(std::memory_order_relaxed);

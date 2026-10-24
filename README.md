@@ -156,7 +156,7 @@ This is an unofficial fan project. It is not affiliated with, or endorsed by, SC
 Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
-> Status: v0.14.0. New: eye-tracked foveated rendering (experimental, tested on Varjo), Foveated strength, steadier near wires while driving, VectorXR support (tested), and a VR menu panel that can stay fixed in the cab with sharper text. Eye tracking test guide: [docs/EYE_TRACKING_TEST.md](docs/EYE_TRACKING_TEST.md).
+> Status: v0.14.0 (pre-release v0.14.1-rc1: VR eye pairing fix for Varjo, shimmer capture on the Pause key). New: eye-tracked foveated rendering (experimental, tested on Varjo), Foveated strength, steadier near wires while driving, VectorXR support (tested), and a VR menu panel that can stay fixed in the cab with sharper text. Eye tracking test guide: [docs/EYE_TRACKING_TEST.md](docs/EYE_TRACKING_TEST.md).
 > With this version the bells and whistles I know of are in. From here on the main work is performance tuning, from your logs; new ideas are still welcome. See [Contributing](CONTRIBUTING.md).
 > See the [Releases page](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/releases) for every version.
 > DLSS upscaling in VR is still being tuned; treat it as experimental.

@@ -1,3 +1,5 @@
+// v0.14.1 -- phase 71 (shimmer capture on the Pause key), phase 72 (VR eye -> OpenXR view by the optical centre before the
+//           eye blits; issue #21: a Varjo Aero paired an eye with the other eye's view = no hidden mask + wrong-eye gaze).
 // v0.14.0 -- phase 59 (eye-tracked foveated rendering, + 59f vrs_strength), phases 60-69 (thin wires: dlaa_mv_dilate,
 //           mv_fwd_conservative, wire_widen + their menu rows), phase 56 (VectorXR), phase 70 (below).
 // phase 70 -- VR PANEL FIXED IN THE CAB + SHARPER VR PANEL TEXT (dlaa.ini menu_vr_lock 0/1, menu_vr_lock_x / _y degrees,
@@ -9725,13 +9727,20 @@ void HmFovCentre(const float fov[4], double* u, double* v) {
     *u = (tr - tl) != 0.0 ? -tl / (tr - tl) : 0.5;
     *v = (tu - td) != 0.0 ? tu / (tu - td) : 0.5;
 }
-// The unambiguous optical-centre match of `eye` (-1 = not measured, no meshes, or both views fit / neither fits).
+// The unambiguous optical-centre match of `eye` (-1 = not measured, no fov yet, or both views fit / neither fits). The fov is
+// the mesh's (hidden mask on), else the one the game submitted at its last xrEndFrame (the gaze also runs with the mask off).
 int HmGeomViewOfEye(int eye) {
     float mu = 0.5f, mv = 0.5f;
-    if (!VrEyeCentre(eye, &mu, &mv) || !g_hm.gen[0] || !g_hm.gen[1]) return -1;
+    if (!VrEyeCentre(eye, &mu, &mv)) return -1;
+    float sub[2][4];
+    const float (*fov)[4] = g_hm.fov;
+    if (!g_hm.gen[0] || !g_hm.gen[1]) {
+        if (!XrHook::SubmittedFov(sub)) return -1;
+        fov = sub;
+    }
     double u0, v0, u1, v1;
-    HmFovCentre(g_hm.fov[0], &u0, &v0);
-    HmFovCentre(g_hm.fov[1], &u1, &v1);
+    HmFovCentre(fov[0], &u0, &v0);
+    HmFovCentre(fov[1], &u1, &v1);
     const double d0 = std::fabs(u0 - mu), d1 = std::fabs(u1 - mu);
     if (d0 <= 0.03 && d1 > 0.06) return 0;
     if (d1 <= 0.03 && d0 > 0.06) return 1;
@@ -9751,7 +9760,7 @@ int HmViewOfEye(int eye) {
             static uint64_t s_over = 0;
             const uint64_t n = ++s_over;
             if (n <= 4 || (n & (n - 1)) == 0)
-                LogWarn("hidden area mask: eye %d -- the blits say OpenXR view %d, its optical centre matches view %d only: using view "
+                LogWarn("eye -> view: eye %d -- the blits say OpenXR view %d, its optical centre matches view %d only: using view "
                     "%d (%llu times so far)", eye, g_hm.eyeView[eye], geo, geo, (unsigned long long)n);
         }
         return geo;

@@ -83,6 +83,9 @@ void PoseDiagArm(int seconds);
 // sub-image rect (x, y, w, h px). -1 = not known (no xrEndFrame seen, `tex` is not a swapchain image -- an intermediate eye
 // texture -- or not in the layer).
 int ViewForImage(void* tex, uint32_t slice, int32_t rect[4]);
+// phase 72: the fov (L, R, U, D radians) the game submitted for view 0 / 1 in its last xrEndFrame projection layer. False = no
+// xrEndFrame seen yet.
+bool SubmittedFov(float fov[2][4]);
 // Counters: stereo locates seen, xrEndFrame calls with a projection layer, submitted view-0 poses equal to a located one / not,
 // the residual of the previous frame's correction on this frame's locate against the actual submitted pose (mean / max degrees,
 // mean mm: what the box is off by in the compositor), and the spaces the game locates its views in.
