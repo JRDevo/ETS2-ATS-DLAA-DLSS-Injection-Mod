@@ -9725,10 +9725,8 @@ void HmFovCentre(const float fov[4], double* u, double* v) {
     *u = (tr - tl) != 0.0 ? -tl / (tr - tl) : 0.5;
     *v = (tu - td) != 0.0 ? tu / (tu - td) : 0.5;
 }
-// The view of `eye` (-1 = not known): learned at the blits, else the unambiguous optical-centre match.
-int HmViewOfEye(int eye) {
-    if (eye < 0 || eye >= kMaxEyes) return -1;
-    if (g_hm.eyeView[eye] >= 0 && g_hm.eyeRun[eye] >= kVrsTrust) return g_hm.eyeView[eye];
+// The unambiguous optical-centre match of `eye` (-1 = not measured, no meshes, or both views fit / neither fits).
+int HmGeomViewOfEye(int eye) {
     float mu = 0.5f, mv = 0.5f;
     if (!VrEyeCentre(eye, &mu, &mv) || !g_hm.gen[0] || !g_hm.gen[1]) return -1;
     double u0, v0, u1, v1;
@@ -9738,6 +9736,27 @@ int HmViewOfEye(int eye) {
     if (d0 <= 0.03 && d1 > 0.06) return 0;
     if (d1 <= 0.03 && d0 > 0.06) return 1;
     return -1;
+}
+// The view of `eye` (-1 = not known). phase 72: the unambiguous optical-centre match FIRST, then the one learned at the blits.
+// Until v0.14.0 the blits won: on a Varjo Aero the eye order of the blits keeps changing, the learned map could pair eye 1 (left)
+// with view 1 (right) -- "eye 1 / OpenXR view 1 does NOT match ... (0.387 vs 0.618)" = no mask for that eye, and the gaze of
+// the other eye for its foveation (issue #21). The geometry cannot be fooled by the blit order; the blits stay for headsets whose
+// two views have the same fov centre (no unambiguous match).
+int HmViewOfEye(int eye) {
+    if (eye < 0 || eye >= kMaxEyes) return -1;
+    const int geo = HmGeomViewOfEye(eye);
+    const bool learned = g_hm.eyeView[eye] >= 0 && g_hm.eyeRun[eye] >= kVrsTrust;
+    if (geo >= 0) {
+        if (learned && g_hm.eyeView[eye] != geo) {
+            static uint64_t s_over = 0;
+            const uint64_t n = ++s_over;
+            if (n <= 4 || (n & (n - 1)) == 0)
+                LogWarn("hidden area mask: eye %d -- the blits say OpenXR view %d, its optical centre matches view %d only: using view "
+                    "%d (%llu times so far)", eye, g_hm.eyeView[eye], geo, geo, (unsigned long long)n);
+        }
+        return geo;
+    }
+    return learned ? g_hm.eyeView[eye] : -1;
 }
 // The eye blit of pass s (HandlePossibleBlit, VR): learn eye -> view from the swapchain image, check the masked pass's eye.
 void HmNoteBlit(uint64_t s, int eye, void* rt, uint32_t slice, uint32_t sceneClears) {
@@ -9860,7 +9879,7 @@ struct VrsGazeEye {
     LONGLONG lastQpc = 0;                  // the previous decision (the smoother's dt)
     LONGLONG validQpc = 0;                 // the last fresh gaze
     float    tu = 0.5f, tv = 0.5f;         // the last gaze target (held through a blink)
-    int      view = -2, viewHow = 0;       // the OpenXR view used (-2 = none yet), 1 learned at the blits / 2 the verdict rule
+    int      view = -2, viewHow = 0;       // the OpenXR view used (-2 = none yet), 1 matched (HmViewOfEye) / 2 the verdict rule
     float    cu = 0.5f, cv = 0.5f;         // the optical centre at the last decision (log)
     // statistics (cumulative; the "Eye tracking @" line prints the deltas)
     uint64_t updates = 0, gazeUsed = 0, held = 0, optical = 0;
@@ -9868,8 +9887,13 @@ struct VrsGazeEye {
 };
 VrsGazeEye g_vgz[2];
 // The OpenXR view of `eye` for the gaze (*how 1 = learned at the blits, 2 = the verdict rule).
+// phase 72: the unambiguous optical-centre match first (HmViewOfEye; issue #21: the Varjo blit order paired an eye with the
+// other eye's view), then the blits, then the verdict rule.
 int VrsGazeView(int eye, int* how) {
-    if (eye >= 0 && eye < kMaxEyes && g_hm.eyeView[eye] >= 0 && g_hm.eyeRun[eye] >= kVrsTrust) { *how = 1; return g_hm.eyeView[eye]; }
+    if (eye >= 0 && eye < kMaxEyes) {
+        const int v = HmViewOfEye(eye);
+        if (v >= 0) { *how = 1; return v; }
+    }
     *how = 2;
     return (eye & 1) ^ 1;                  // eye 0 = the RIGHT eye (its optical centre u < 0.5) = OpenXR view 1
 }
@@ -9897,7 +9921,7 @@ void VrsGazeCentre(int eye, uint64_t s, float cu, float cv, float* u, float* v) 
         if (view != g.view || how != g.viewHow) {
             Log("Eye tracking: mod eye %d = OpenXR view %d (%s eye) -- %s; projection scale |P00| %.3f |P11| %.3f (%s), optical "
                 "centre uv (%.3f, %.3f)", eye, view, view == 0 ? "left" : "right",
-                how == 1 ? "learned at the eye blits (its blit target is that view's swapchain image)"
+                how == 1 ? "matched by its optical centre or learned at the eye blits"
                          : "the verdict rule eye 0 = right eye until the eye blits confirm it",
                 (double)sx, (double)sy, scaleSrc == 2 ? "measured" : scaleSrc == 1 ? "menu picture" : "ASSUMED", (double)cu, (double)cv);
             g.view = view; g.viewHow = how;
@@ -9963,7 +9987,7 @@ void VrsGazeMaybeLog() {
         const auto pc = [&](uint64_t a) { return up ? 100.0 * (double)a / (double)up : 0.0; };
         snprintf(eyeTxt[e], sizeof(eyeTxt[e]), "eye %d (view %d%s): %llu centres, gaze %.0f %% / held %.0f %% / optical %.0f %%, "
                  "offset mean %.3f max %.3f uv, now (%.3f, %.3f) vs optical (%.3f, %.3f)", e, g.view,
-                 g.viewHow == 1 ? " learned" : g.viewHow == 2 ? " by rule" : "", (unsigned long long)up,
+                 g.viewHow == 1 ? " matched" : g.viewHow == 2 ? " by rule" : "", (unsigned long long)up,
                  pc(g.gazeUsed - s_prevGaze[e]), pc(g.held - s_prevHeld[e]), pc(g.optical - s_prevOpt[e]),
                  up ? (g.offSum - s_prevOff[e]) / (double)up : 0.0, g.offMax, (double)g.u, (double)g.v, (double)g.cu, (double)g.cv);
     }
