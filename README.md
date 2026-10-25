@@ -83,7 +83,8 @@ an in-game menu (`Delete`) and an optional text config.
   the VR panel can stay fixed in the cab (`Panel lock (VR)`), and its text is drawn sharper.
 - **Eye-tracked foveated rendering (VR, experimental)** — on a headset with eye tracking (OpenXR eye gaze, tested on
   Varjo Aero) the sharp centre of `Foveated (VRS)` follows where you look; `Foveated strength` sets how coarse the outer
-  ring is (new in v0.14.0). See [the test guide](docs/EYE_TRACKING_TEST.md).
+  ring is (new in v0.14.0). See [the test guide](docs/EYE_TRACKING_TEST.md). Varjo testing by
+  [ejaypeppy-source](https://github.com/ejaypeppy-source), thank you!
 - **Steadier thin wires** — near telephone and power wires no longer break up while you drive (`Thin-wire motion`,
   `Thin-wire depth`, both on; `Thin-wire widening` is experimental and off). Far wires thinner than 1 pixel can still
   break up (new in v0.14.0).
@@ -1119,6 +1120,8 @@ JRDevo gains nothing from this mod except a fixed problem and a shared solution:
 no paid versions. Made with love.
 
 **Thanks** to [Breno Assis](https://github.com/breno-assis) for the idea of the draw-id state shadow (`did_shadow`, the cheaper per-part motion vector record): his pull request showed the way, the version in the mod is a rewrite with extra safety checks.
+
+**Thanks** to [ejaypeppy-source](https://github.com/ejaypeppy-source) for testing eye-tracked foveated rendering on a Varjo Aero, round after round, with logs ([issue #21](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/issues/21)): the Varjo eye pairing fixes exist because of those tests.
 
 **Third-party parts** — each has its own terms, see [`THIRD_PARTY.md`](THIRD_PARTY.md):
 
