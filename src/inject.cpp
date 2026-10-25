@@ -1,5 +1,7 @@
 // v0.14.1 -- phase 71 (shimmer capture on the Pause key), phase 72 (VR eye -> OpenXR view by the optical centre before the
-//           eye blits; issue #21: a Varjo Aero paired an eye with the other eye's view = no hidden mask + wrong-eye gaze).
+//           eye blits; issue #21: a Varjo Aero paired an eye with the other eye's view = no hidden mask + wrong-eye gaze),
+//           phase 73 (the drive's eye map starts from the menu preview's decided eyes, not the pair-index guess: no ~2 s
+//           of wrong-eye MVs / hidden-mask relearning / VRS eye miss at each drive start; Varjo + Quest logs).
 // v0.14.0 -- phase 59 (eye-tracked foveated rendering, + 59f vrs_strength), phases 60-69 (thin wires: dlaa_mv_dilate,
 //           mv_fwd_conservative, wire_widen + their menu rows), phase 56 (VectorXR), phase 70 (below).
 // phase 70 -- VR PANEL FIXED IN THE CAB + SHARPER VR PANEL TEXT (dlaa.ini menu_vr_lock 0/1, menu_vr_lock_x / _y degrees,
@@ -3473,9 +3475,15 @@ void ApplyEyeVerdict(void* rt, int verdictEye, float p) {
     }
     // RT not in the map (map was cleared since the readback was queued): ignore.
 }
+#ifdef WITH_DLAA
+int PvDecidedEye(void* rt);
+#endif
 // Eye of a blit render target. Flat (backbuffer) is handled by the caller (eye 0). `pairIdx` = s&1 of the
 // consumed pass = blit index within the frame pair; used only as the FIRST GUESS for an unseen RT. Since
 // v0.5.5 the async projection verdicts (ApplyEyeVerdict) correct the entry; until they arrive the guess rules.
+// Phase 73: an RT the menu / truck preview already decided (the same swapchain images) takes that eye instead of
+// the guess -- the pair-index guess was wrong for 2 of 6 RTs (Varjo, issue #21) / 4 of 6 (Quest) for the ~2 s until
+// the first verdicts: wrong-eye MVs, hidden-mask relearning, a VRS eye miss at every drive start.
 int EyeOfRT(void* rt, int pairIdx) {
     for (int i = 0; i < g_eyeMapN; ++i) {
         if (g_eyeMap[i].rt != rt) continue;
@@ -3491,12 +3499,20 @@ int EyeOfRT(void* rt, int pairIdx) {
         g_eyeMapN = 0; g_eyeMapLogged = false;
         for (EyeMapEntry& e : g_eyeMap) e.score = 0;
     }
-    g_eyeMap[g_eyeMapN] = { rt, pairIdx & 1, pairIdx, 0 };
+    int eye = pairIdx & 1;
+#ifdef WITH_DLAA
+    const int pv = PvDecidedEye(rt);
+    if (pv >= 0) eye = pv;
+#else
+    const int pv = -1;
+#endif
+    g_eyeMap[g_eyeMapN] = { rt, eye, pairIdx, 0 };
     ++g_eyeMapN;
     if (g_eyeMapN <= 8)
-        LogDbg("eye map: new blit RT %p -> eye %d (pair index %d, entry #%d)", rt, pairIdx & 1, pairIdx, g_eyeMapN);
+        LogDbg("eye map: new blit RT %p -> eye %d (%s, pair index %d, entry #%d)", rt, eye,
+            pv >= 0 ? "menu preview verdict" : "pair-index guess", pairIdx, g_eyeMapN);
     if (g_eyeMapN == 6 && !g_eyeMapLogged) { g_eyeMapLogged = true; LogEyeMap(); }
-    return pairIdx & 1;
+    return eye;
 }
 #ifdef WITH_DLAA
 // v0.5.5 async readback ring: a clean VR blit GPU-copies its pass's candidate record (MVPs) into a staging
@@ -4494,6 +4510,15 @@ uint64_t         g_pvConflicts = 0, g_pvUndecided = 0;   // targets left untouch
 
 int PvEyeFind(void* rt) {
     for (int i = 0; i < g_pvEyeN; ++i) if (g_pvEye[i].rt == rt) return i;
+    return -1;
+}
+// Phase 73: the preview's eye of `rt` when its projection verdicts back it (score on that eye's side; -1: unseen,
+// undecided, or the composite-order guess without a verdict for it -- no better than the game map's pair-index guess).
+int PvDecidedEye(void* rt) {
+    const int i = PvEyeFind(rt);
+    if (i < 0) return -1;
+    const PvEyeEntry& e = g_pvEye[i];
+    if ((e.eye == 0 && e.score > 0) || (e.eye == 1 && e.score < 0)) return e.eye;
     return -1;
 }
 
