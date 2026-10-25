@@ -3,7 +3,11 @@
 #   - issue opened or edited     : the body is checked
 #   - anyone comments            : the body + every non-maintainer comment are checked; with a log, "needs-logs" is removed
 #   - workflow_dispatch          : every open bug report is checked (the comment is still written only once per issue)
-# A log counts when the text has an attached .log / .zip / .7z file, or the pasted "DLAA injector v... loaded" line.
+# Once "needs-logs" is on, only a log posted AFTER it was last added ends the wait: a reporter's comment, or the reporter's
+# own edit of the body. An old log in the body (a moved issue lists the reporter's earlier log) does not count again.
+# A log counts when the text has an attached .log / .txt / .zip / .7z / .rar file, a link to such a file or to a file-share
+# site (Google Drive, Dropbox, OneDrive, MEGA, WeTransfer, Synology QuickConnect, gist, pastebin), or the pasted
+# "DLAA injector v... loaded" line.
 # Feature requests and pull requests are not checked. On an issue the maintainer opened (moved from Discussions) the bot
 # never asks, but it still removes "needs-logs" once a log is there.
 name: Needs-logs check
@@ -27,9 +31,11 @@ jobs:
         with:
           script: |
             const MARK = '<!-- needs-logs-bot -->';
-            const LOG_RE = [
-              /user-attachments\/(files|assets)\/\d+\/[^\s)\]]*\.(log|zip|7z|rar)\b/i,
+            const LOG_RE = [                                // the same test as needs-info.yml
+              /user-attachments\/(files|assets)\/\d+\/[^\s)\]]*\.(log|txt|zip|7z|rar)\b/i,
               /\[[^\]]*dlaa_inject[^\]]*\]\(http/i,
+              /https?:\/\/[^\s)\]]+\.(log|txt|zip|7z|rar)\b/i,
+              /https?:\/\/[^\s)\]]*(drive\.google\.com|dropbox\.com|1drv\.ms|onedrive\.live\.com|sharepoint\.com|mega\.nz|we\.tl|wetransfer\.com|quickconnect\.to|gist\.github\.com|pastebin\.com)/i,
               /DLAA injector v[0-9][^\n]*loaded/i,
             ];
             const hasLog = t => !!t && LOG_RE.some(r => r.test(t));
@@ -44,9 +50,18 @@ jobs:
 
               const comments = await github.paginate(github.rest.issues.listComments,
                 { owner, repo, issue_number: issue.number, per_page: 100 });
-              const texts = [issue.body, ...comments.filter(c => !MAINT.includes(c.author_association) &&
-                                                               c.user.type !== 'Bot').map(c => c.body)];
               const n = issue.number;
+              // the wait starts when "needs-logs" was last added: only a log posted after that ends it
+              const events = await github.paginate(github.rest.issues.listEventsForTimeline,
+                { owner, repo, issue_number: n, per_page: 100 });
+              let since = 0;
+              for (const e of events) if (e.event === 'labeled' && e.label && e.label.name === 'needs-logs')
+                since = Math.max(since, Date.parse(e.created_at));
+              const p = context.payload;
+              const bodyCounts = !since || (context.eventName === 'issues' && p.action === 'edited' && !byMaint &&
+                                            p.sender && p.sender.login === issue.user.login);
+              const texts = [bodyCounts ? issue.body : '', ...comments.filter(c => !MAINT.includes(c.author_association) &&
+                c.user.type !== 'Bot' && Date.parse(c.created_at) > since).map(c => c.body)];
 
               if (texts.some(hasLog)) {
                 if (labels.includes('needs-logs')) {
