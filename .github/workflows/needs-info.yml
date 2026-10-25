@@ -5,6 +5,8 @@
 #   - day 7 without an answer                -> ONE friendly reminder that tags the reporter (asks for the log when
 #                                               "needs-logs" is on, else to test the fix / answer the question)
 #   - day 14 without an answer               -> closed as "not planned", with a friendly note that a reply opens it again
+#   - an issue is closed (by anyone)         -> "needs-info", "needs-logs" and "stale" are removed: nobody waits any more
+#     (a maintainer's "comment and close" is seen as closed, so it never gets "needs-info")
 # "Without an answer" counts from the last maintainer comment or the last time "needs-info" was added, whichever is later.
 # The reporter is the issue's author, or for an issue moved over from Discussions the "Reported by @name" / "Tester: @name"
 # in its body. A maintainer's own issue without one is never reminded or closed. The bot finds its own comments by the hidden
@@ -17,6 +19,8 @@ on:
   workflow_dispatch:
   issue_comment:
     types: [created]
+  issues:
+    types: [closed]
 
 permissions:
   issues: write
@@ -37,8 +41,10 @@ jobs:
             const HOWTO = `https://github.com/${owner}/${repo}#reporting-a-problem-what-to-upload`;
             const isMaint = c => MAINT.includes(c.author_association);
             const LOG_RE = [                                // the same test as needs-logs.yml
-              /user-attachments\/(files|assets)\/\d+\/[^\s)\]]*\.(log|zip|7z|rar)\b/i,
+              /user-attachments\/(files|assets)\/\d+\/[^\s)\]]*\.(log|txt|zip|7z|rar)\b/i,
               /\[[^\]]*dlaa_inject[^\]]*\]\(http/i,
+              /https?:\/\/[^\s)\]]+\.(log|txt|zip|7z|rar)\b/i,
+              /https?:\/\/[^\s)\]]*(drive\.google\.com|dropbox\.com|1drv\.ms|onedrive\.live\.com|sharepoint\.com|mega\.nz|we\.tl|wetransfer\.com|quickconnect\.to|gist\.github\.com|pastebin\.com)/i,
               /DLAA injector v[0-9][^\n]*loaded/i,
             ];
             const hasLog = t => !!t && LOG_RE.some(r => r.test(t));
@@ -70,10 +76,21 @@ jobs:
               core.info(`#${n}: answered (${why}) -> needs-info removed`);
             }
 
+            // ---- an issue closed: nobody is waiting any more ----
+            if (context.eventName === 'issues') {
+              const issue = context.payload.issue, labels = labelsOf(issue);
+              for (const name of ['needs-info', 'needs-logs', 'stale'])
+                if (labels.includes(name)) await removeLabel(issue.number, name);
+              core.info(`#${issue.number}: closed -> waiting labels removed`);
+              return;
+            }
+
             // ---- a new comment ----
             if (context.eventName === 'issue_comment') {
-              const c = context.payload.comment, issue = context.payload.issue;
+              const c = context.payload.comment;
               if (isBot(c.user)) return;
+              // the live issue, not the event's copy: "comment and close" closes it before this run starts
+              const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number: context.issue.number });
               if (isMaint(c)) {
                 if (issue.state !== 'open') return;
                 if (!reporter(issue)) { core.info(`#${issue.number}: maintainer's own issue, no reporter -> not waiting`); return; }
