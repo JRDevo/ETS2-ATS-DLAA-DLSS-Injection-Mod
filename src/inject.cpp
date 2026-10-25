@@ -3483,7 +3483,9 @@ int PvDecidedEye(void* rt);
 // v0.5.5 the async projection verdicts (ApplyEyeVerdict) correct the entry; until they arrive the guess rules.
 // Phase 73: an RT the menu / truck preview already decided (the same swapchain images) takes that eye instead of
 // the guess -- the pair-index guess was wrong for 2 of 6 RTs (Varjo, issue #21) / 4 of 6 (Quest) for the ~2 s until
-// the first verdicts: wrong-eye MVs, hidden-mask relearning, a VRS eye miss at every drive start.
+// the first verdicts: wrong-eye MVs, hidden-mask relearning, a VRS eye miss at every drive start. The preview's eye
+// numbering matches this map's only while both eyes' reference tile is the same corner of the 2x2 composite (true in
+// every log so far); the seed keeps score 0, so a wrong seed is corrected by 2 verdicts, as the old guess was.
 int EyeOfRT(void* rt, int pairIdx) {
     for (int i = 0; i < g_eyeMapN; ++i) {
         if (g_eyeMap[i].rt != rt) continue;
@@ -21832,6 +21834,9 @@ void ResetPassTrackingCore(bool forceDlaaOff) {
     g_eyeMapN = 0; g_eyeMapLogged = false; g_prevBlitRt = nullptr; g_lastUnderflowBlit = 0;
     for (EyeMapEntry& e : g_eyeMap) e.score = 0;
     for (bool& b : g_eyeLogged) b = false;
+#ifdef WITH_DLAA
+    g_pvEyeN = 0;                                              // phase 73: no stale preview eye seeds a new game RT
+#endif
     g_tonemapLogged = false; g_passLogged = 0;                 // detection lines are logged again
     g_renderTid.store(0, std::memory_order_relaxed);
     if (forceDlaaOff) {
