@@ -21,7 +21,7 @@ an in-game menu (`Delete`) and an optional text config.
 
 **An NVIDIA RTX GPU is required** (DLAA and DLSS only run on RTX cards).
 
-**Menu:** [Features](#features) · [Download](#-download) · [Requirements](#requirements) · [Install](#install) · [Modes](#modes--the-end-key) · [Flat or VR](#flat-or-vr) · [OFXR Bridge](#ofxr-bridge-vr-frame-generation) · [VectorXR](#vectorxr-vr-layer-suite) · [Render scale](#how-render-scale-works) · [Models](#models-presets--which-one-to-use) · [Controls](#controls) · [Tuning menu](#the-tuning-menu) · [dlaa.ini](#dlaaini) · [Performance](#performance) · [Troubleshooting](#troubleshooting) · [Multiplayer](#multiplayer) · [Build](#build-from-source) · [Report a problem](#reporting-a-problem-what-to-upload) · [Contributing](CONTRIBUTING.md) · [License](#license-and-credits)
+**Menu:** [Features](#features) · [Download](#-download) · [Requirements](#requirements) · [Install](#install) · [Modes](#modes--the-end-key) · [Flat or VR](#flat-or-vr) · [OFXR Bridge](#ofxr-bridge-vr-frame-generation) · [VectorXR](#vectorxr-vr-layer-suite) · [Render scale](#how-render-scale-works) · [Models](#models-presets--which-one-to-use) · [Controls](#controls) · [Tuning menu](#the-tuning-menu) · [Translations](#translations) · [dlaa.ini](#dlaaini) · [Performance](#performance) · [Troubleshooting](#troubleshooting) · [Multiplayer](#multiplayer) · [Build](#build-from-source) · [Report a problem](#reporting-a-problem-what-to-upload) · [Contributing](CONTRIBUTING.md) · [License](#license-and-credits)
 
 > **Where the project stands (v0.14.0).** The mod was built for as many use cases, devices and situations as
 > I could reach: flat and VR, one screen and three, keyboard, wheel and shifter, Reflex and frame rate caps,
@@ -775,6 +775,25 @@ The three green lines under the title show the game's GPU time per frame, what t
 - **From the wheel:** the menu (and every other hotkey) can also be driven from a wheel's D-pad and buttons, e.g.
   `key_menu = Delete, Wheel10` and `key_menu_up = Up, WheelUp`; see
   [`docs/KEYS.md`](docs/KEYS.md#wheel-gamepad-and-joystick-buttons) for how to find the button number.
+
+</details>
+
+<a name="translations"></a>
+<details>
+<summary><h2>Translations — help wanted</h2></summary>
+
+The menu is available in **all 43 languages of ETS2 and ATS**. It uses the game's language by itself; the
+menu's `Language` row (or `language =` in `dlaa.ini`) picks another one.
+
+> [!IMPORTANT]
+> **Every translation was made by an AI, not by native speakers, so it can be wrong.** If you speak one of
+> the languages, please look at the menu in your language and tell me what is wrong.
+
+- **Found a wrong text?** [Report a translation problem](../../issues/new?template=translation.yml): the language,
+  what is wrong, what it should say, and a screenshot of the spot in the menu.
+- **The translations area: [`lang/README.md`](lang/README.md).** The list of languages, how a language is chosen,
+  fonts on Linux / Proton, what to change in a language file, and how to test your fix in the game before you
+  send it.
 
 </details>
 

@@ -49,24 +49,14 @@ The mod has its own capture keys. They need `log_level = 4`.
 
 ### 3. Fix a translation
 
-The menu speaks every language the game has (43). The first texts were machine-translated, so a native
-speaker's fixes are very welcome.
+The menu speaks every language the game has (43). **Every translation was made by an AI**, so it can be
+wrong: a native speaker's fixes are very welcome.
 
-1. Download your language file from [`lang/`](lang) (the game's code: `de_de.po`, `ru_ru.po`, `ko_kr.po` ...).
-   It is a plain text file (gettext `.po`): any text editor or [Poedit](https://poedit.net) opens it.
-2. Change the `msgstr` lines. The `msgid` line above each one is the English text: leave it as it is.
-3. Test it: put the file at `bin\win_x64\lang\<code>.po` (a `lang` folder next to `dinput8.dll`) and open the
-   menu. The mod uses your file at once, text by text; every menu open reads it again.
-4. Send it: a [Translation fix](../../issues/new?template=translation_fix.md) issue (paste the changed lines or
-   attach the file), or a pull request against `dev`.
-
-Rules: keep every placeholder (`%d`, `%ls`, `%hs`, `%.1f` ...) in the same order and `%%` as it is (the mod shows
-the English text for a line that breaks this). Keep texts short: the menu columns are narrow.
-`python scripts/lang_tool.py check` checks a file.
-
-For code changes: a new menu text goes into `TR(L"...")` (or `TRF` for a printf format), then
-`python scripts/lang_tool.py extract` (new `lang/template.pot`) and `python scripts/lang_tool.py update` (adds it to
-every `.po`, empty = English until translated).
+- **Found a wrong text?** Open a [Translation problem](../../issues/new?template=translation.yml) issue: the
+  language, what is wrong, what it should say, and a screenshot of the spot in the menu.
+- **Want to fix more lines?** Everything you need (the languages, how one is chosen, what to change in the
+  `.po` file, how to test it in the game, how to send it) is in the translations area:
+  [`lang/README.md`](lang/README.md).
 
 ### 4. Code
 

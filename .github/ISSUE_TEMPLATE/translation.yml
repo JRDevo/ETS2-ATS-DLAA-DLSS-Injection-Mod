@@ -1,0 +1,101 @@
+name: Translation problem
+description: A wrong, clumsy, cut-off or missing text in the in-game menu in your language
+title: "[Translation] "
+labels: ["translation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping! Every menu translation was made by an AI, so it can be wrong. Fixes from native
+        speakers make the menu better for everyone who speaks your language.
+        How the translations work and how to test a fix in the game: [lang/README.md](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/blob/dev/lang/README.md).
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language
+      description: The language the menu shows.
+      options:
+        - bg_bg – Български
+        - ca_es – Català
+        - cs_cz – Česky
+        - da_dk – Dansk
+        - de_de – Deutsch
+        - el_gr – Ελληνικά
+        - es_es – Español
+        - es_la – Español (Am. Latina)
+        - et_ee – Eesti
+        - eu_es – Euskara
+        - fi_fi – Suomi
+        - fr_ca – Français (Québec)
+        - fr_fr – Français (France)
+        - gl_es – Galego
+        - hr_hr – Hrvatski
+        - hu_hu – Magyar
+        - it_it – Italiano
+        - ja_jp – 日本語
+        - ka_ge – ქართული
+        - ko_kr – 한국어
+        - lt_lt – Lietuviškai
+        - lv_lv – Latviešu
+        - mk_mk – Македонски
+        - nl_nl – Nederlands
+        - no_no – Norsk (bokmål)
+        - pl_pl – Polski
+        - pl_si – Ślōnskŏ gŏdka
+        - pt_br – Português (Brasil)
+        - pt_pt – Português (Portugal)
+        - ro_ro – Română
+        - ru_ru – Русский
+        - sk_sk – Slovenčina
+        - sl_sl – Slovenščina
+        - sr_sp – Srpski (latinica)
+        - sr_sr – Српски (ћирилица)
+        - sv_se – Svenska
+        - tr_tr – Türkçe
+        - uk_uk – Українська
+        - vi_vn – Tiếng Việt
+        - zh_cn – 简体中文
+        - zh_tw – 繁體中文
+        - English
+    validations:
+      required: true
+  - type: textarea
+    id: wrong
+    attributes:
+      label: What is wrong?
+      description: |
+        Where in the menu (the row, or the description at the bottom), the text it shows now, and why it is wrong
+        (wrong meaning, sounds unnatural, cut off with "...", still in English).
+      placeholder: |
+        Row "Sharpen strength": it says "...". In Polish a player would say "..." because ...
+    validations:
+      required: true
+  - type: textarea
+    id: better
+    attributes:
+      label: What should it say?
+      description: Your text. Keep it short (the menu columns are narrow) and keep %d, %ls, %hs ... as they are.
+    validations:
+      required: true
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: |
+        A screenshot of the menu that shows exactly where the text is. Drag the picture into this box
+        (in the game: F10 saves a screenshot to Documents\Euro Truck Simulator 2\screenshot, or use Win+Shift+S).
+      placeholder: Drop the screenshot here.
+    validations:
+      required: true
+  - type: textarea
+    id: file
+    attributes:
+      label: Your edited file (optional)
+      description: If you fixed many lines, attach your edited <code>.po file here (rename it to .txt if GitHub refuses .po).
+  - type: checkboxes
+    id: tested
+    attributes:
+      label: Tested in the game? (optional)
+      description: Your file at bin\win_x64\lang\<code>.po next to dinput8.dll is used at the next menu open.
+      options:
+        - label: I tested my text in the game and it fits on screen
