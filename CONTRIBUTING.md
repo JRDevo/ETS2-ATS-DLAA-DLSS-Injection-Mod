@@ -48,6 +48,9 @@ The mod has its own capture keys. They need `log_level = 4`.
    screen the same key takes a measuring capture (a short freeze).
 4. For a part that smears or a number plate that blinks, also press **`Alt+F8`** next to it: the
    per-part motion state of the next frame goes into the log (`MV dump` lines).
+   **The quick way (v0.15.0):** look at the spot and press **`Pause`** (shimmer capture). The mod saves 12
+   frames with DLAA on and 12 with DLAA off, plus the log and your `dlaa.ini`, into one folder
+   `dlaa_selftest\shimmer_<date>_<time>\`. Zip that folder and attach it.
 5. Zip `dlaa_selftest\` and `dlaa_snap\` and attach them with the log and `dlaa.ini`. Say what to look
    at (a pole on the left, the shop window, the trailer's plate) and where / when you were.
 

@@ -1,3 +1,5 @@
+// v0.15.0 -- phase 74 (the tuning menu in all 43 game languages: lang.cpp / lang.h, TR / TRF, dlaa.ini language, the menu's
+//           Language row, key names for the player's keyboard layout) + everything of v0.14.1 below (never a full release).
 // v0.14.1 -- phase 71 (shimmer capture on the Pause key), phase 72 (VR eye -> OpenXR view by the optical centre before the
 //           eye blits; issue #21: a Varjo Aero paired an eye with the other eye's view = no hidden mask + wrong-eye gaze),
 //           phase 73 (the drive's eye map starts from the menu preview's decided eyes, not the pair-index guess: no ~2 s

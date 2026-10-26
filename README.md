@@ -1,5 +1,3 @@
-![ETS2 & ATS DLAA & DLSS Mod: a sharper, steadier picture, flat and VR, with an in-game menu in 43 languages](docs/images/banner.jpg)
-
 > [!CAUTION]
 > ## THIS GITHUB PAGE IS THE ONLY PLACE THIS MOD EXISTS
 > **`https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod` is the only source of truth for this mod: the only place it is
@@ -10,6 +8,8 @@
 >   offers it is not mine and may carry anything. If it did not come from this GitHub page, do not run it.
 > - Updates, release notes, the hotkey list and the troubleshooting guide live here and only here. If someone tells you to get the mod
 >   somewhere else, they are wrong.
+
+![ETS2 & ATS DLAA & DLSS Mod: a sharper, steadier picture, flat and VR, with an in-game menu in 43 languages](docs/images/banner.jpg)
 
 # ETS2 & ATS: DLAA & DLSS Injection Mod
 
@@ -37,7 +37,7 @@ an in-game menu (`Delete`) and an optional text config.
 - **Mirrors anti-aliased too**, trailer included.
 - **Exact motion for traffic**, wheels, trailers and plates: sharp, no ghosting.
 - Menu and truck-preview screens get anti-aliasing as well.
-- **Steadier near wires**: telephone and power wires stay calm while you drive. **new**
+- **Steadier near wires**: telephone and power wires stay calm while you drive.
 - Four DLSS models, switched live with a key.
 - Sharper texture text and adjustable sharpening.
 
@@ -45,12 +45,12 @@ an in-game menu (`Delete`) and an optional text config.
 - One DLL and one `dlaa.ini` for both; VR renders one pass per eye (OpenXR).
 - **Triple screens** in flat: every screen gets its own DLAA.
 - Windows HDR and NVIDIA Smooth Motion work in flat mode.
-- OFXR Bridge (VR frame generation) and **VectorXR** (VR layer suite) work alongside. **new: VectorXR**
+- OFXR Bridge (VR frame generation) and **VectorXR** (VR layer suite) work alongside.
 - Drivable cars (ATS) get DLAA / DLSS too.
 
 **VR extras and speed**
-- **Eye-tracked foveated rendering**: the sharp area follows your eyes (eye-tracked headsets, experimental). **new**
-- **Foveated strength**: Normal / Strong / Max outer ring for more GPU saving. **new**
+- **Eye-tracked foveated rendering**: the sharp area follows your eyes (eye-tracked headsets, experimental).
+- **Foveated strength**: Normal / Strong / Max outer ring for more GPU saving.
 - **VR fps counter attached to the vehicle**: rides with the cab; 20 colours.
 - Three VR speed-ups: hidden area mask, foveated lighting, mirrors in turns.
 - DLAA area: process only the middle of each eye.
@@ -61,6 +61,7 @@ an in-game menu (`Delete`) and an optional text config.
 - Panel and fps counter can be moved and resized, flat and VR.
 - **VR panel fixed in the cab**: stays still while you look around; sharper text.
 - **The menu in your language**: all 43 languages of the game, picked from the game's own setting. **new**
+- **Key names for your keyboard**: `Strg+F9` / `Entf` on a German keyboard, `Suppr` on a French one. **new**
 - Live CPU and GPU cost per part, and what limits your frame rate.
 
 **Setup**
@@ -533,6 +534,7 @@ These need `log_level = 4` in `dlaa.ini`. They are for diagnostics and bug repor
 | `Ctrl+F7` | Passive mode on / off |
 | `Ctrl+F8` | Jitter-only debug on / off |
 | `Ctrl+F9` | Self-test (dumps frames) |
+| `Pause` | Shimmer capture: DLAA on and off frames + log + `dlaa.ini` in one folder (new in v0.15.0) |
 | `Ctrl+F10` | NGX input snapshot |
 | `Ctrl+F11` | Frame trace |
 | `Ctrl+F12` | Cycle NGX jitter sign |
@@ -1034,6 +1036,13 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   v0.14.0: update (GitHub issues #14 and #15).
 - **The VR menu panel shivers or jitters when you move your head (most with Turbo mode on):** set `Panel lock (VR)` to
   `Fixed in cab` (new in v0.14.0). **The VR panel text looks thick or soft at a small panel size:** fixed in v0.14.0: update.
+- **VR (Varjo Aero): no hidden area mask, or eye tracking used the wrong eye; the log shows `hidden area mask: eye 1 /
+  OpenXR view 1 does NOT match`:** fixed in v0.15.0: update (GitHub issue #21).
+- **VR: for about 2 seconds at the start of each drive the picture smears or the foveated centre sits in the wrong
+  eye:** fixed in v0.15.0: update.
+- **The menu is English although the game is in another language:** the `Language` row must be on `auto` (or delete the
+  `language` line in `dlaa.ini`). Linux / Proton with Chinese, Japanese or Korean: the row says `font missing`, see
+  [Linux / Proton](#languages-and-fonts).
 - **Faint dark line down the middle of the menu / truck-preview screen:** fixed in v0.8.1: update.
 - **Dark 1 px line on every silhouette (trees, poles, trucks) in flat mode:** fixed in v0.10.1: update. v0.10.0
   drew the game's fog pass one texel off.

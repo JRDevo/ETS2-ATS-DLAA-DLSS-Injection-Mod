@@ -118,7 +118,8 @@ static const E kRows[] = {
     { G_FPSG, false, L"FPS opacity", L"100 %", L"dlaa.ini fps_opacity", L"", false, nullptr, nullptr },   // phase 51f
     { G_FPSG, false, L"FPS distance (VR)", L"0.80 m", L"dlaa.ini fps_vr_dist", L"", false, nullptr, nullptr },
     { -1, false, L"Logging", L"errors", L"dlaa.ini log_level", L"<c>0.01</> | -", false, nullptr, nullptr },
-    { -1, false, L"Hotkeys...", L"31 actions", L"Right: open", L"", false, nullptr, nullptr },   // v0.13.0 phase 50
+    { -1, false, L"Language", L"auto (English)", L"dlaa.ini language", L"", false, nullptr, nullptr },   // phase 74
+    { -1, false, L"Hotkeys...", L"32 actions", L"Right: open", L"", false, nullptr, nullptr },   // v0.13.0 phase 50
     { -1, false, L"Save to dlaa.ini", L"-", L"Shift+F12", L"", false, nullptr, nullptr },
     { -1, false, L"Reset to defaults", L"-", L"hold Right 5 s", L"", false, nullptr, nullptr },
     { -1, false, L"Close menu", L"-", L"Delete", L"", false, nullptr, nullptr },
@@ -131,7 +132,7 @@ static const wchar_t kPerf1[] = L"this mod: <c>0.31</> | <g>3.4</> ms -- GPU: NG
                                 L"mirrors 0.3, sharpen 0.1, copies 0.2";
 static const wchar_t kPerf2[] = L"<c>CPU</> | <g>GPU</> ms per frame (GPU: both eyes), other threads 0.4. CPU = the game's render thread; "
                                 L"measuring costs 0.12 ms CPU (taken out).";
-static const wchar_t kTitle[] = L"ETS2 / ATS DLAA & DLSS mod v0.14.0 - tuning menu";
+static const wchar_t kTitle[] = L"ETS2 / ATS DLAA & DLSS mod v0.15.0 - tuning menu";
 static const wchar_t kFooter[] = L"Up / Down select   Left / Right change   Delete close   keys: Hotkeys...";
 
 // Ink shorthand in the table strings: "<c>0.31</>" = CPU blue, "<g>3.4</>" = GPU orange (menu.h kInkCpu / kInkGpu / kInkEnd).
@@ -377,7 +378,8 @@ static void HotkeysShot(Gpu& g, const wchar_t* file) {
         { L"Per-part motion vectors", L"Alt+F5", L"-" }, { L"Mirror DLAA on / off", L"Alt+F6", L"-" },
         { L"DLAA before tonemap (flat)", L"Alt+F7", L"-" }, { L"See-through depth", L"Ctrl+F3", L"-" },
         { L"Thin-wire motion (DLAA)", L"Alt+F10", L"-" }, { L"Thin-wire depth", L"Alt+F11", L"-" }, { L"Thin-wire widening", L"Alt+F12", L"-" },
-        { L"DLSS upscale", L"Ctrl+F4", L"-" }, { L"DLAA on / off", L"Shift+F11", L"-" }, { L"Save to dlaa.ini", L"Shift+F12", L"-" },
+        { L"DLSS upscale", L"Ctrl+F4", L"-" }, { L"DLAA on / off", L"Shift+F11", L"-" },
+        { L"Shimmer capture", L"Pause", L"-" }, { L"Save to dlaa.ini", L"Shift+F12", L"-" },
         { L"Menu: open / close", L"Delete", L"Wheel10" }, { L"Menu: up", L"Up", L"WheelUp" }, { L"Menu: down", L"Down", L"WheelDown" },
         { L"Menu: left", L"Left", L"WheelLeft" }, { L"Menu: right", L"Right", L"WheelRight" },
     };
@@ -386,7 +388,7 @@ static void HotkeysShot(Gpu& g, const wchar_t* file) {
     const int bindLine = 8;                                        // "Sharpen strength +"
     TuningMenu::Panel p;
     memset(&p, 0, sizeof(p));
-    wcsncpy_s(p.title, L"ETS2 / ATS DLAA & DLSS mod v0.14.0 - hotkeys", _TRUNCATE);
+    wcsncpy_s(p.title, L"ETS2 / ATS DLAA & DLSS mod v0.15.0 - hotkeys", _TRUNCATE);
     Put(p.perf[0], 224, Ink(kPerf0));
     Put(p.perf[1], 224, Ink(kPerf1));
     Put(p.perf[2], 224, Ink(kPerf2));
