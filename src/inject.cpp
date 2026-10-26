@@ -2304,6 +2304,11 @@ struct InDlaaFlag {
         }
         return *this;
     }
+    // phase 75 (perf): the mod's own work that rasterises nothing (state binds, UpdateSubresource, CopySubresourceRegion) -- the
+    // hooks pass through as usual, but VRS is NOT paused: VRS acts on rasterisation only, and the pause + resume cost two NVAPI
+    // table switches. The wire widening binds / unbinds 2 x ~600 draws per eye pass in dense scenes (ATS VR 2026-10-26: 2600
+    // pauses + 4600 switches per frame, "vrs" 1.9 ms/frame CPU, 66 fps instead of 72).
+    void Quiet(bool b) { v = b; }
     operator bool() const { return v; }
 };
 thread_local InDlaaFlag t_inDlaa = {};           // re-entrancy guard for our own work
@@ -13303,9 +13308,9 @@ HRESULT STDMETHODCALLTYPE hkMap(ID3D11DeviceContext* ctx, ID3D11Resource* r, UIN
     if (type == D3D11_MAP_WRITE_DISCARD && r && g_passSeq && !t_inDlaa && IsGameCtx(ctx)) {
         ObjRecord& rec = g_objRing[SlotOf(g_passSeq - 1)];
         if (rec.HasOpenRing(r)) {                         // v0.9.0 r3: any of the pass's (up to 3) rings
-            t_inDlaa = true;
+            t_inDlaa.Quiet(true);                         // phase 75: a copy only, VRS stays as it is
             const bool sealed = rec.OnDiscard(ctx, r);    // THAT ring's copy, queued before the discard (old contents)
-            t_inDlaa = false;
+            t_inDlaa.Quiet(false);
             if (sealed && g_objInScene) {                 // later draws from this buffer go to a new ring slot
                 ++g_objTornN; ++g_objTornTotal;
                 if (g_objTornTotal <= 3)
@@ -15012,7 +15017,7 @@ void DidOnDiscardMap(ID3D11DeviceContext* ctx, ID3D11Resource* r) {
             ++g_didForcedCapped;
         }
     }
-    if (rec.HasOpenRing(r)) { t_inDlaa = true; rec.OnDiscard(ctx, r); t_inDlaa = false; }
+    if (rec.HasOpenRing(r)) { t_inDlaa.Quiet(true); rec.OnDiscard(ctx, r); t_inDlaa.Quiet(false); }
     // v0.10.0 phase 3: the same for the pending forward draws (replayed into the forward ids first)
     // v0.10.0 phase 10: their forward depth too (FwdBatch: the depth batch of the pending draws, then their ids); the pixel
     // shader's cbuffers / SRVs are in the pending set as well
@@ -15025,12 +15030,12 @@ void DidOnDiscardMap(ID3D11DeviceContext* ctx, ID3D11Resource* r) {
             ++g_didFwdForcedCapped;
         }
     }
-    if (fr.HasOpenRing(r)) { t_inDlaa = true; fr.OnDiscard(ctx, r); t_inDlaa = false; }
+    if (fr.HasOpenRing(r)) { t_inDlaa.Quiet(true); fr.OnDiscard(ctx, r); t_inDlaa.Quiet(false); }
     // phase 49: the same for the pending glow draws (their VS / PS buffers): re-drawn into the glow sum now
     DrawIdRecord* const br = g_didBiasRing[SlotOf(g_passSeq - 1)];
     if ((br[0].PendingDepth() > 0 && br[0].ReferencesPending(r)) || (br[1].PendingDepth() > 0 && br[1].ReferencesPending(r)))
         BiasBatch(ctx, g_passSeq - 1, 1);
-    for (int k = 0; k < 2; ++k) if (br[k].HasOpenRing(r)) { t_inDlaa = true; br[k].OnDiscard(ctx, r); t_inDlaa = false; }
+    for (int k = 0; k < 2; ++k) if (br[k].HasOpenRing(r)) { t_inDlaa.Quiet(true); br[k].OnDiscard(ctx, r); t_inDlaa.Quiet(false); }
 }
 
 void DidOnContextReset() {
@@ -21746,15 +21751,15 @@ void STDMETHODCALLTYPE hkDrawIndexedInstanced(ID3D11DeviceContext* ctx, UINT ic,
     // v0.10.0 phase 11 LOD bias scope: the sampler set this draw needs (solid / see-through blend state)
     if (!inDlaa && g_lodPerDraw.load(std::memory_order_relaxed) && IsGameCtx(ctx)) LodOnDraw(ctx);
     if (g_menuLateBound >= 0 && !inDlaa && IsGameCtx(ctx)) MenuLateCountDraw();   // v0.10.0 phase 16 VR late panel
-    if (Vrs::g_want && !inDlaa && IsGameCtx(ctx)) VrsOnDraw(ctx);   // phase 34 (as hkDrawIndexed)
     if (g_lightBind && !inDlaa && IsGameCtx(ctx)) LightRedrawOnDraw(ctx);   // phase 55 (as hkDrawIndexed)
     // phase 66: the street lights are ONE instanced G-buffer draw (pair B's PS 34860eed with the instanced VS a484ef85) -> the same
     // solid GS + dither PS copy as the lattice towers (SolidOnDraw; cheap reject on the current PS first), and after the draw its
     // record in the pass's forward record (the band's depth + id; the replay issues DrawIndexedInstanced with the recorded instances)
     const bool solidGs = g_gbufPass && g_jitterPass && !inDlaa && IsGameCtx(ctx) && SolidOnDraw(ctx, true);
+    if (Vrs::g_want && !inDlaa && !solidGs && IsGameCtx(ctx)) VrsOnDraw(ctx);   // phase 34 (as hkDrawIndexed; phase 75: after SolidOnDraw)
     CPU_ORIG(oDrawIndexedInstanced(ctx, ic, inst, si, bv, sinst));
     if (solidGs) {
-        t_inDlaa = true; WireWiden::Unbind(ctx); t_inDlaa = false;
+        t_inDlaa.Quiet(true); WireWiden::Unbind(ctx); t_inDlaa.Quiet(false);
         if (g_lastSolidKind && g_fwdCfg && g_fwdOn.load(std::memory_order_relaxed) && FwdLive()) {   // (as hkDrawIndexed, phase 64)
             g_nextFwdGsKind = (uint8_t)(1 + g_lastSolidKind);
             DidFwdOnDraw(ctx, ic, si, bv, inst, sinst, true);
@@ -21784,10 +21789,10 @@ bool SolidOnDraw(ID3D11DeviceContext* ctx, bool instanced) {
     const bool ok = WireWiden::IsSolidVs(vs, kind);
     if (vs) vs->Release();
     if (!ok) return false;
-    t_inDlaa = true;
+    t_inDlaa.Quiet(true);                             // phase 75: binds only, VRS stays as it is
     const bool bound = WireWiden::BindSolid(ctx, kind, g_gameVp[0].Width, g_gameVp[0].Height, g_wireMinPx,
                                             (uint32_t)g_frames.load(std::memory_order_relaxed), g_wireSolidMinShare);
-    t_inDlaa = false;
+    t_inDlaa.Quiet(false);
     // VRS (phase 34) decided this draw's rate from the GAME's PS (solid -> coarse allowed in the periphery); the dither copy must run
     // per pixel (coarse shading would keep / drop 2 x 2 .. 4 x 4 blocks together) -> full rate for this draw, like a cut-out PS
     if (bound && Vrs::g_want) Vrs::OnDraw(ctx, true, Vrs::kSkipCutout);
@@ -21821,9 +21826,9 @@ bool WireOnDraw(ID3D11DeviceContext* ctx) {
     if (!wireVs) return false;
     ID3D11BlendState* bs = nullptr; FLOAT bf[4] = {}; UINT mask = 0;
     ctx->OMGetBlendState(&bs, bf, &mask);
-    t_inDlaa = true;
+    t_inDlaa.Quiet(true);                             // phase 75: binds only, VRS stays as it is
     const bool bound = WireWiden::Bind(ctx, bs, g_gameVp[0].Width, g_gameVp[0].Height, g_wireMinPx, psKind);
-    t_inDlaa = false;
+    t_inDlaa.Quiet(false);
     if (bs) bs->Release();
     if (bound && !g_wireLogged) {
         g_wireLogged = true;
@@ -21952,15 +21957,17 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
     if (gameCtx && !inDlaa && g_lodPerDraw.load(std::memory_order_relaxed)) LodOnDraw(ctx);
 #ifdef WITH_DLAA
     if (g_menuLateN && gameCtx && !inDlaa && indexCount <= 6) MenuLateOnDraw(ctx, "DrawIndexed", indexCount, _ReturnAddress());
-    if (Vrs::g_want && gameCtx && !inDlaa) VrsOnDraw(ctx);   // phase 34: full rate for a cut-out / SV_Depth / unknown PS
     if (g_lightBind && gameCtx && !inDlaa) LightRedrawOnDraw(ctx);   // phase 55: a lighting-pass mesh redraw -> the G-buffer's viewport
     // phase 61: a wire draw of the main world forward pass -> WireWiden's geometry shader for this one draw
     // phase 63: in the G-buffer, the solid far wires / lattice towers -> the solid GS + the dither PS copy (SolidOnDraw)
     const bool wireGs = gameCtx && g_jitterPass && !inDlaa && (g_gbufPass ? SolidOnDraw(ctx) : WireOnDraw(ctx));
+    // phase 34: full rate for a cut-out / SV_Depth / unknown PS. phase 75: after SolidOnDraw -- a dithered solid draw already set
+    // full rate there (one table switch instead of coarse then full again)
+    if (Vrs::g_want && gameCtx && !inDlaa && !(wireGs && g_gbufPass)) VrsOnDraw(ctx);
 #endif
     CPU_ORIG(oDrawIndexed(ctx, indexCount, startIndex, baseVertex));
 #ifdef WITH_DLAA
-    if (wireGs) { t_inDlaa = true; WireWiden::Unbind(ctx); t_inDlaa = false; }   // phase 61
+    if (wireGs) { t_inDlaa.Quiet(true); WireWiden::Unbind(ctx); t_inDlaa.Quiet(false); }   // phase 61
     // phase 64: a widened SOLID G-buffer draw (phase 63) also goes into the pass's forward record: the forward-depth batch and the
     // forward-id replay draw its full band (no dither) -> every band pixel carries the wire's depth and id, not the background's
     if (wireGs && g_gbufPass && g_lastSolidKind && g_fwdCfg && g_fwdOn.load(std::memory_order_relaxed) && FwdLive()) {
