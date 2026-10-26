@@ -73,6 +73,7 @@ A language moves from "AI draft" to "checked" once a native speaker has gone thr
 
   ```
   protontricks 227300 cjkfonts
+  protontricks 270880 cjkfonts
   ```
 
 ## What to change
