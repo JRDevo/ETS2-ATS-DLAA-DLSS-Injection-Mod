@@ -534,7 +534,7 @@ These need `log_level = 4` in `dlaa.ini`. They are for diagnostics and bug repor
 | `Ctrl+F7` | Passive mode on / off |
 | `Ctrl+F8` | Jitter-only debug on / off |
 | `Ctrl+F9` | Self-test (dumps frames) |
-| `Pause` | Shimmer capture: DLAA on and off frames + log + `dlaa.ini` in one folder (new in v0.15.0) |
+| `Pause` | Shimmer capture: DLAA on and off frames + log + `dlaa.ini` in one folder (new in v0.15.0; works at any log level, `4` makes the copied log useful) |
 | `Ctrl+F10` | NGX input snapshot |
 | `Ctrl+F11` | Frame trace |
 | `Ctrl+F12` | Cycle NGX jitter sign |

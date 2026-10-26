@@ -452,7 +452,7 @@ void Refresh() {
         Log("language: English (setting %s)", g_setting.c_str());
     else if (fontMissing)
         LogErr("language %s (setting %s): NO FONT on this PC has its letters (%d of %d characters missing in the best one) -- the "
-               "menu shows English. Linux / Proton: install the fonts, see the README section \"Languages and fonts\"",
+               "menu shows English. Linux / Proton: install the fonts, see the README section \"Menu languages and fonts\"",
                want.c_str(), g_setting.c_str(), missing, chars);
     else if (!packed && !haveOv)
         Log("language %s (setting %s): no translation in this build -- English", want.c_str(), g_setting.c_str());
