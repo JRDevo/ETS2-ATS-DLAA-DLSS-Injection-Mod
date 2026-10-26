@@ -8,6 +8,6 @@ for /f "usebackq delims=" %%i in (`call "%VSWHERE%" -latest -products * -require
 call "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" >nul
 cd /d "%~dp0.."
 if not exist build\tests\obj_ms mkdir build\tests\obj_ms
-cl /nologo /std:c++17 /EHsc /O2 /W3 /DWITH_DLAA=1 /DNOMINMAX /I src tests\menu_shot.cpp src\menu.cpp src\shader_cache.cpp /Fe:build\tests\menu_shot.exe /Fo:build\tests\obj_ms\ /link d3d11.lib d3dcompiler.lib dxgi.lib windowscodecs.lib ole32.lib gdi32.lib user32.lib uuid.lib > build\tests\build_menu_shot.txt 2>&1
+cl /nologo /std:c++17 /EHsc /O2 /W3 /utf-8 /DWITH_DLAA=1 /DNOMINMAX /I src tests\menu_shot.cpp src\menu.cpp src\shader_cache.cpp src\lang.cpp /Fe:build\tests\menu_shot.exe /Fo:build\tests\obj_ms\ /link d3d11.lib d3dcompiler.lib dxgi.lib windowscodecs.lib ole32.lib gdi32.lib user32.lib uuid.lib shell32.lib advapi32.lib > build\tests\build_menu_shot.txt 2>&1
 echo exit %ERRORLEVEL% >> build\tests\build_menu_shot.txt
 type build\tests\build_menu_shot.txt

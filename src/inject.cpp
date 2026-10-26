@@ -1,3 +1,9 @@
+// v0.15.0 -- phase 74 (the tuning menu in all 43 game languages: lang.cpp / lang.h, TR / TRF, dlaa.ini language, the menu's
+//           Language row, key names for the player's keyboard layout) + everything of v0.14.1 below (never a full release).
+// v0.14.1 -- phase 71 (shimmer capture on the Pause key), phase 72 (VR eye -> OpenXR view by the optical centre before the
+//           eye blits; issue #21: a Varjo Aero paired an eye with the other eye's view = no hidden mask + wrong-eye gaze),
+//           phase 73 (the drive's eye map starts from the menu preview's decided eyes, not the pair-index guess: no ~2 s
+//           of wrong-eye MVs / hidden-mask relearning / VRS eye miss at each drive start; Varjo + Quest logs).
 // v0.14.0 -- phase 59 (eye-tracked foveated rendering, + 59f vrs_strength), phases 60-69 (thin wires: dlaa_mv_dilate,
 //           mv_fwd_conservative, wire_widen + their menu rows), phase 56 (VectorXR), phase 70 (below).
 // phase 70 -- VR PANEL FIXED IN THE CAB + SHARPER VR PANEL TEXT (dlaa.ini menu_vr_lock 0/1, menu_vr_lock_x / _y degrees,
@@ -779,6 +785,7 @@
 #include "scene_dlaa.h"
 #include "preview_blit.h"
 #include "menu.h"                                  // v0.10.0 in-game tuning menu panel
+#include "lang.h"                                  // phase 74: the menu in the game's languages (TR / TRF)
 #include "shader_cache.h"
 #include "dlaa_stage.h"
 #include "gpu_perf.h"
@@ -884,6 +891,8 @@ int      g_logLevelKey = -1;             // dlaa.ini log_level (-1 = no such key
 bool     g_logDebugKey = false;          // dlaa.ini debug = 1 (true / yes / on): level 4 when there is no log_level key
 int      g_logLevelIni = 1;              // the start level LoadConfig decided
 bool     g_logLevelExplicit = false;     // set in dlaa.ini or changed in the menu -> SaveSettings writes log_level
+bool     g_langExplicit = false;         // phase 74: dlaa.ini has language or the menu's Language row changed it
+int      g_langDump = 0;                 // phase 74: dlaa.ini lang_dump = 1: the first menu open dumps every language (MenuLangDump)
 inline bool LogDebugLevel() { return LogLevel() >= 4; }   // phase 39: the "debug = 1" diagnostics (was g_debugIni)
 // phase 45: MEASURE ONLY WHEN ASKED. g_measure = the tuning menu is open OR the log level is 4 (debug). The mod's own per-draw /
 // per-pass CPU timers of the debug statistics lines (collector, object ids, draw record, forward depth: TSC; replay, forward
@@ -1035,9 +1044,10 @@ enum ProfKey { PK_MIRROR_DLAA, PK_MIRROR_VR_MODE, PK_MIRROR_FLAT_MODE, PK_FWD_DE
                PK_INST_REPLAY, PK_PAR_LISTED, PK_PRESET, PK_AREA, PK_COUNT };
 bool              g_profExplicit[PK_COUNT] = {};
 int               g_profile = 0;        // 0 high (default), 1 medium, 2 low
-const char* const kProfName[3] = { "high", "medium", "low" };
+const char* const kProfName[3] = { NA_("high"), NA_("medium"), NA_("low") };   // phase 74: NA_ = the menu translates them (TrA)
 std::atomic<bool> g_snapRequest{false};       // set by Present on Ctrl+F10, consumed at the next DLAA blit
 std::atomic<bool> g_selfTestRequest{false};   // set by Present on Ctrl+F9, consumed in hkDraw
+std::atomic<bool> g_selfTestShimmer{false};   // phase 71: the request is the Ctrl+Shift+F9 shimmer capture (kShimmerModes)
 std::atomic<bool> g_jitterOnly{false};   // Ctrl+F8: jitter stays on, DLAA evaluate skipped
 // v0.6.2 (v0.6.5 Ctrl+F7): pure pass-through for cost attribution -- no jitter, no MV candidate copies, no depth snapshot,
 // no DLAA evaluate, no eye readbacks; only the pass/blit tracking and the GPU span timers keep running.
@@ -1216,6 +1226,7 @@ enum KeyAction {
     KA_MV_DILATE,                                            // phase 60: DLSS motion-vector dilation in DLAA (MVLowRes) on / off
     KA_FWD_CONSERVATIVE,                                     // phase 60: conservative raster for the forward depth on / off
     KA_WIRE_WIDEN,                                           // phase 61: sub-pixel wires drawn min-px wide on / off
+    KA_SHIMMER_CAP,                                          // phase 71: one-key shimmer capture (DLAA on + off frames, log, ini)
     KA_LOD_CUT_DOWN, KA_LOD_CUT_UP,                          // v0.10.0 phase 13: cut-out (alpha-tested) LOD bias -/+0.25
     KA_MENU, KA_MENU_UP, KA_MENU_DOWN, KA_MENU_LEFT, KA_MENU_RIGHT,   // v0.10.0 tuning menu open / close + navigation
     KA_COUNT
@@ -1267,6 +1278,8 @@ KeyBind g_keys[KA_COUNT] = {
     { "key_mv_dilate",       "Alt+F10",   0, 0, "", false },   // phase 60: DLSS MV dilation in DLAA (thin wires) on / off
     { "key_mv_conservative", "Alt+F11",   0, 0, "", false },   // phase 60: conservative raster for the wire depth on / off
     { "key_wire_widen",      "Alt+F12",   0, 0, "", false },   // phase 61: far wires drawn at least wire_min_px wide on / off
+    { "key_shimmer_capture", "Pause",     0, 0, "", false },   // phase 71: shimmer capture -> dlaa_selftest\shimmer_<time>
+                                                               //   (one key, not used by the games; not PrintScreen: Windows 11 opens the Snipping Tool)
     { "key_lod_cutout_down", "Ctrl+Shift+F1", 0, 0, "", false },   // v0.10.0 phase 13: tex_lod_bias_cutout -0.25 (2 beeps)
     { "key_lod_cutout_up",   "Ctrl+Shift+F2", 0, 0, "", false },   // v0.10.0 phase 13: tex_lod_bias_cutout +0.25 (2 beeps)
     { "key_menu",            "Delete",    0, 0, "", false },   // v0.10.0 tuning menu open / close
@@ -1431,6 +1444,73 @@ void KeyShortName(KeyAction a, char* out, size_t cap) {
     char key[24];
     if (k.vk && KeyChordName(k.vk, key, sizeof(key))) KeyBindText(k.vk, k.mods, 0, out, cap);
     else                                              KeyBindText(0, 0, k.joy, out, cap);
+}
+
+// phase 74: key names for the MENU in the player's own keyboard language: Windows' names for the active keyboard layout
+// (GetKeyNameTextW: "Strg", "Entf", "Umschalt" on a German keyboard, "Suppr" / "Maj" on a French one; "Ctrl", "Delete" on a
+// US one). Letters, digits and F1..F24 are the same everywhere. dlaa.ini, the logs and Wine / Proton (its names are X keysym
+// names) keep the canonical English names (KeyBindText). Cached per key until the keyboard layout changes.
+bool KeyUiWine() {
+    static const int s_wine = GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "wine_get_version") ? 1 : 0;
+    return s_wine != 0;
+}
+bool KeyLocalName(int vk, char* out, size_t cap) {
+    if (!cap || vk <= 0 || vk > 255 || KeyUiWine() || vk == VK_PAUSE) return false;
+    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9') || (vk >= VK_F1 && vk <= VK_F24)) return false;
+    static HKL  s_hkl = nullptr;
+    static char s_name[256][32];
+    static bool s_tried[256];
+    const HKL hkl = GetKeyboardLayout(0);
+    if (hkl != s_hkl) { s_hkl = hkl; memset(s_tried, 0, sizeof(s_tried)); }
+    if (!s_tried[vk]) {
+        s_tried[vk] = true;
+        s_name[vk][0] = 0;
+        const UINT sc = MapVirtualKeyW((UINT)vk, MAPVK_VK_TO_VSC);
+        const bool ext = vk == VK_INSERT || vk == VK_DELETE || vk == VK_HOME || vk == VK_END || vk == VK_PRIOR ||
+                         vk == VK_NEXT || vk == VK_LEFT || vk == VK_RIGHT || vk == VK_UP || vk == VK_DOWN || vk == VK_DIVIDE;
+        wchar_t w[32];
+        const int n = sc ? GetKeyNameTextW((LONG)((sc << 16) | (ext ? (1u << 24) : 0u)), w, 32) : 0;
+        if (n > 0) {
+            bool hasLower = false;
+            for (int i = 0; i < n; ++i) if (IsCharLowerW(w[i])) { hasLower = true; break; }
+            if (!hasLower && n > 3)                      // ALL CAPS ("STRG", "NACH-LINKS") -> "Strg", "Nach-links"
+                for (int i = 1; i < n; ++i) if (w[i - 1] != L' ') CharLowerBuffW(&w[i], 1);
+            if (!WideCharToMultiByte(CP_UTF8, 0, w, -1, s_name[vk], (int)sizeof(s_name[vk]), nullptr, nullptr)) s_name[vk][0] = 0;
+        }
+    }
+    if (!s_name[vk][0]) return false;
+    snprintf(out, cap, "%s", s_name[vk]);
+    return true;
+}
+// KeyBindText for the menu: the same layout ("Strg+F5, Wheel7"), the key and modifier names from KeyLocalName.
+void KeyUiText(int vk, unsigned mods, int joy, char* out, size_t cap) {
+    if (!cap) return;
+    char key[32] = "", pad[16] = "", c[32] = "Ctrl", sh[32] = "Shift", al[32] = "Alt";
+    JoyTokenName(joy, pad, sizeof(pad));
+    KeyLocalName(VK_CONTROL, c, sizeof(c));
+    KeyLocalName(VK_SHIFT, sh, sizeof(sh));
+    KeyLocalName(VK_MENU, al, sizeof(al));
+    if (vk && (KeyLocalName(vk, key, sizeof(key)) || KeyChordName(vk, key, sizeof(key))))
+        snprintf(out, cap, "%s%s%s%s%s%s%s%s%s", (mods & MOD_CTRL_BIT) ? c : "", (mods & MOD_CTRL_BIT) ? "+" : "",
+                 (mods & MOD_SHIFT_BIT) ? sh : "", (mods & MOD_SHIFT_BIT) ? "+" : "", (mods & MOD_ALT_BIT) ? al : "",
+                 (mods & MOD_ALT_BIT) ? "+" : "", key, pad[0] ? ", " : "", pad);
+    else
+        snprintf(out, cap, "%s", pad[0] ? pad : "none");
+}
+// KeyName / KeyShortName for the menu (KeyNameUi: a ring of 8 buffers, so one snprintf can use several).
+const char* KeyNameUi(KeyAction a) {
+    static char s_ring[8][96];
+    static int  s_i = 0;
+    char* o = s_ring[s_i++ & 7];
+    const KeyBind& k = g_keys[a];
+    KeyUiText(k.vk, k.mods, k.joy, o, sizeof(s_ring[0]));
+    return o;
+}
+void KeyShortNameUi(KeyAction a, char* out, size_t cap) {
+    const KeyBind& k = g_keys[a];
+    char key[24];
+    if (k.vk && KeyChordName(k.vk, key, sizeof(key))) KeyUiText(k.vk, k.mods, 0, out, cap);
+    else                                              KeyUiText(0, 0, k.joy, out, cap);
 }
 
 // Resets every binding to its default (called first in LoadConfig).
@@ -1888,6 +1968,11 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
             if (KeyHit(KA_SELFTEST)) {                         // self-test (old F9)
                 g_selfTestRequest = true;
                 LogDbg("self-test requested (%s, Present #%llu)", KeyName(KA_SELFTEST), (unsigned long long)n);
+            }
+            if (KeyHit(KA_SHIMMER_CAP)) {                      // phase 71: shimmer capture (DLAA on, then off)
+                g_selfTestShimmer = true;
+                g_selfTestRequest = true;
+                Log("shimmer capture requested (%s, Present #%llu)", KeyName(KA_SHIMMER_CAP), (unsigned long long)n);
             }
             if (KeyHit(KA_SNAPSHOT)) {                         // NGX input snapshot (old F10)
                 g_snapRequest = true;
@@ -3221,6 +3306,7 @@ void SaveSettings(uint64_t n) {
         snprintf(add("cpu_no_throttle"), sizeof(kv[0].val), "%d", g_cpuNoThrottle);
     }
     if (g_logLevelExplicit) snprintf(add("log_level"), sizeof(kv[0].val), "%d", LogLevel());  // phase 39 (Logging row)
+    if (g_langExplicit) snprintf(add("language"), sizeof(kv[0].val), "%s", Lang::Setting());   // phase 74 (Language row)
     if (g_vrsExplicit) {                                  // phase 34 (the Foveated rows)
         snprintf(add("vrs"), sizeof(kv[0].val), "%d", g_vrsOn);
         snprintf(add("vrs_inner"), sizeof(kv[0].val), "%d", g_vrsInner);
@@ -3462,9 +3548,17 @@ void ApplyEyeVerdict(void* rt, int verdictEye, float p) {
     }
     // RT not in the map (map was cleared since the readback was queued): ignore.
 }
+#ifdef WITH_DLAA
+int PvDecidedEye(void* rt);
+#endif
 // Eye of a blit render target. Flat (backbuffer) is handled by the caller (eye 0). `pairIdx` = s&1 of the
 // consumed pass = blit index within the frame pair; used only as the FIRST GUESS for an unseen RT. Since
 // v0.5.5 the async projection verdicts (ApplyEyeVerdict) correct the entry; until they arrive the guess rules.
+// Phase 73: an RT the menu / truck preview already decided (the same swapchain images) takes that eye instead of
+// the guess -- the pair-index guess was wrong for 2 of 6 RTs (Varjo, issue #21) / 4 of 6 (Quest) for the ~2 s until
+// the first verdicts: wrong-eye MVs, hidden-mask relearning, a VRS eye miss at every drive start. The preview's eye
+// numbering matches this map's only while both eyes' reference tile is the same corner of the 2x2 composite (true in
+// every log so far); the seed keeps score 0, so a wrong seed is corrected by 2 verdicts, as the old guess was.
 int EyeOfRT(void* rt, int pairIdx) {
     for (int i = 0; i < g_eyeMapN; ++i) {
         if (g_eyeMap[i].rt != rt) continue;
@@ -3480,12 +3574,20 @@ int EyeOfRT(void* rt, int pairIdx) {
         g_eyeMapN = 0; g_eyeMapLogged = false;
         for (EyeMapEntry& e : g_eyeMap) e.score = 0;
     }
-    g_eyeMap[g_eyeMapN] = { rt, pairIdx & 1, pairIdx, 0 };
+    int eye = pairIdx & 1;
+#ifdef WITH_DLAA
+    const int pv = PvDecidedEye(rt);
+    if (pv >= 0) eye = pv;
+#else
+    const int pv = -1;
+#endif
+    g_eyeMap[g_eyeMapN] = { rt, eye, pairIdx, 0 };
     ++g_eyeMapN;
     if (g_eyeMapN <= 8)
-        LogDbg("eye map: new blit RT %p -> eye %d (pair index %d, entry #%d)", rt, pairIdx & 1, pairIdx, g_eyeMapN);
+        LogDbg("eye map: new blit RT %p -> eye %d (%s, pair index %d, entry #%d)", rt, eye,
+            pv >= 0 ? "menu preview verdict" : "pair-index guess", pairIdx, g_eyeMapN);
     if (g_eyeMapN == 6 && !g_eyeMapLogged) { g_eyeMapLogged = true; LogEyeMap(); }
-    return pairIdx & 1;
+    return eye;
 }
 #ifdef WITH_DLAA
 // v0.5.5 async readback ring: a clean VR blit GPU-copies its pass's candidate record (MVPs) into a staging
@@ -4483,6 +4585,15 @@ uint64_t         g_pvConflicts = 0, g_pvUndecided = 0;   // targets left untouch
 
 int PvEyeFind(void* rt) {
     for (int i = 0; i < g_pvEyeN; ++i) if (g_pvEye[i].rt == rt) return i;
+    return -1;
+}
+// Phase 73: the preview's eye of `rt` when its projection verdicts back it (score on that eye's side; -1: unseen,
+// undecided, or the composite-order guess without a verdict for it -- no better than the game map's pair-index guess).
+int PvDecidedEye(void* rt) {
+    const int i = PvEyeFind(rt);
+    if (i < 0) return -1;
+    const PvEyeEntry& e = g_pvEye[i];
+    if ((e.eye == 0 && e.score > 0) || (e.eye == 1 && e.score < 0)) return e.eye;
     return -1;
 }
 
@@ -9716,19 +9827,45 @@ void HmFovCentre(const float fov[4], double* u, double* v) {
     *u = (tr - tl) != 0.0 ? -tl / (tr - tl) : 0.5;
     *v = (tu - td) != 0.0 ? tu / (tu - td) : 0.5;
 }
-// The view of `eye` (-1 = not known): learned at the blits, else the unambiguous optical-centre match.
-int HmViewOfEye(int eye) {
-    if (eye < 0 || eye >= kMaxEyes) return -1;
-    if (g_hm.eyeView[eye] >= 0 && g_hm.eyeRun[eye] >= kVrsTrust) return g_hm.eyeView[eye];
+// The unambiguous optical-centre match of `eye` (-1 = not measured, no fov yet, or both views fit / neither fits). The fov is
+// the mesh's (hidden mask on), else the one the game submitted at its last xrEndFrame (the gaze also runs with the mask off).
+int HmGeomViewOfEye(int eye) {
     float mu = 0.5f, mv = 0.5f;
-    if (!VrEyeCentre(eye, &mu, &mv) || !g_hm.gen[0] || !g_hm.gen[1]) return -1;
+    if (!VrEyeCentre(eye, &mu, &mv)) return -1;
+    float sub[2][4];
+    const float (*fov)[4] = g_hm.fov;
+    if (!g_hm.gen[0] || !g_hm.gen[1]) {
+        if (!XrHook::SubmittedFov(sub)) return -1;
+        fov = sub;
+    }
     double u0, v0, u1, v1;
-    HmFovCentre(g_hm.fov[0], &u0, &v0);
-    HmFovCentre(g_hm.fov[1], &u1, &v1);
+    HmFovCentre(fov[0], &u0, &v0);
+    HmFovCentre(fov[1], &u1, &v1);
     const double d0 = std::fabs(u0 - mu), d1 = std::fabs(u1 - mu);
     if (d0 <= 0.03 && d1 > 0.06) return 0;
     if (d1 <= 0.03 && d0 > 0.06) return 1;
     return -1;
+}
+// The view of `eye` (-1 = not known). phase 72: the unambiguous optical-centre match FIRST, then the one learned at the blits.
+// Until v0.14.0 the blits won: on a Varjo Aero the eye order of the blits keeps changing, the learned map could pair eye 1 (left)
+// with view 1 (right) -- "eye 1 / OpenXR view 1 does NOT match ... (0.387 vs 0.618)" = no mask for that eye, and the gaze of
+// the other eye for its foveation (issue #21). The geometry cannot be fooled by the blit order; the blits stay for headsets whose
+// two views have the same fov centre (no unambiguous match).
+int HmViewOfEye(int eye) {
+    if (eye < 0 || eye >= kMaxEyes) return -1;
+    const int geo = HmGeomViewOfEye(eye);
+    const bool learned = g_hm.eyeView[eye] >= 0 && g_hm.eyeRun[eye] >= kVrsTrust;
+    if (geo >= 0) {
+        if (learned && g_hm.eyeView[eye] != geo) {
+            static uint64_t s_over = 0;
+            const uint64_t n = ++s_over;
+            if (n <= 4 || (n & (n - 1)) == 0)
+                LogWarn("eye -> view: eye %d -- the blits say OpenXR view %d, its optical centre matches view %d only: using view "
+                    "%d (%llu times so far)", eye, g_hm.eyeView[eye], geo, geo, (unsigned long long)n);
+        }
+        return geo;
+    }
+    return learned ? g_hm.eyeView[eye] : -1;
 }
 // The eye blit of pass s (HandlePossibleBlit, VR): learn eye -> view from the swapchain image, check the masked pass's eye.
 void HmNoteBlit(uint64_t s, int eye, void* rt, uint32_t slice, uint32_t sceneClears) {
@@ -9851,7 +9988,7 @@ struct VrsGazeEye {
     LONGLONG lastQpc = 0;                  // the previous decision (the smoother's dt)
     LONGLONG validQpc = 0;                 // the last fresh gaze
     float    tu = 0.5f, tv = 0.5f;         // the last gaze target (held through a blink)
-    int      view = -2, viewHow = 0;       // the OpenXR view used (-2 = none yet), 1 learned at the blits / 2 the verdict rule
+    int      view = -2, viewHow = 0;       // the OpenXR view used (-2 = none yet), 1 matched (HmViewOfEye) / 2 the verdict rule
     float    cu = 0.5f, cv = 0.5f;         // the optical centre at the last decision (log)
     // statistics (cumulative; the "Eye tracking @" line prints the deltas)
     uint64_t updates = 0, gazeUsed = 0, held = 0, optical = 0;
@@ -9859,8 +9996,13 @@ struct VrsGazeEye {
 };
 VrsGazeEye g_vgz[2];
 // The OpenXR view of `eye` for the gaze (*how 1 = learned at the blits, 2 = the verdict rule).
+// phase 72: the unambiguous optical-centre match first (HmViewOfEye; issue #21: the Varjo blit order paired an eye with the
+// other eye's view), then the blits, then the verdict rule.
 int VrsGazeView(int eye, int* how) {
-    if (eye >= 0 && eye < kMaxEyes && g_hm.eyeView[eye] >= 0 && g_hm.eyeRun[eye] >= kVrsTrust) { *how = 1; return g_hm.eyeView[eye]; }
+    if (eye >= 0 && eye < kMaxEyes) {
+        const int v = HmViewOfEye(eye);
+        if (v >= 0) { *how = 1; return v; }
+    }
     *how = 2;
     return (eye & 1) ^ 1;                  // eye 0 = the RIGHT eye (its optical centre u < 0.5) = OpenXR view 1
 }
@@ -9888,7 +10030,7 @@ void VrsGazeCentre(int eye, uint64_t s, float cu, float cv, float* u, float* v) 
         if (view != g.view || how != g.viewHow) {
             Log("Eye tracking: mod eye %d = OpenXR view %d (%s eye) -- %s; projection scale |P00| %.3f |P11| %.3f (%s), optical "
                 "centre uv (%.3f, %.3f)", eye, view, view == 0 ? "left" : "right",
-                how == 1 ? "learned at the eye blits (its blit target is that view's swapchain image)"
+                how == 1 ? "matched by its optical centre or learned at the eye blits"
                          : "the verdict rule eye 0 = right eye until the eye blits confirm it",
                 (double)sx, (double)sy, scaleSrc == 2 ? "measured" : scaleSrc == 1 ? "menu picture" : "ASSUMED", (double)cu, (double)cv);
             g.view = view; g.viewHow = how;
@@ -9954,7 +10096,7 @@ void VrsGazeMaybeLog() {
         const auto pc = [&](uint64_t a) { return up ? 100.0 * (double)a / (double)up : 0.0; };
         snprintf(eyeTxt[e], sizeof(eyeTxt[e]), "eye %d (view %d%s): %llu centres, gaze %.0f %% / held %.0f %% / optical %.0f %%, "
                  "offset mean %.3f max %.3f uv, now (%.3f, %.3f) vs optical (%.3f, %.3f)", e, g.view,
-                 g.viewHow == 1 ? " learned" : g.viewHow == 2 ? " by rule" : "", (unsigned long long)up,
+                 g.viewHow == 1 ? " matched" : g.viewHow == 2 ? " by rule" : "", (unsigned long long)up,
                  pc(g.gazeUsed - s_prevGaze[e]), pc(g.held - s_prevHeld[e]), pc(g.optical - s_prevOpt[e]),
                  up ? (g.offSum - s_prevOff[e]) / (double)up : 0.0, g.offMax, (double)g.u, (double)g.v, (double)g.cu, (double)g.cv);
     }
@@ -10279,6 +10421,17 @@ const TestMode kModes[] = {
 constexpr int kNumModes = (int)(sizeof(kModes) / sizeof(kModes[0]));
 constexpr int kSettleFrames = 90;
 constexpr int kDumpFrames   = 4;
+// phase 71: Ctrl+Shift+F9 shimmer capture. The user's own settings (sign 0 = keep), DLAA on then off, 12 CONSECUTIVE frames each
+// (shimmer = frame-to-frame change), into dlaa_selftest\shimmer_<date>_<time>\ with copies of dlaa_inject.log and dlaa.ini.
+const TestMode kShimmerModes[] = {
+    { "shim_on",  true,  false, 0, 0 },
+    { "shim_off", false, false, 0, 0 },
+};
+constexpr int kShimmerDumpFrames = 12;
+bool g_testShimmer = false;                     // the running self-test is the shimmer capture
+inline const TestMode* TestModes() { return g_testShimmer ? kShimmerModes : kModes; }
+inline int TestNumModes() { return g_testShimmer ? (int)(sizeof(kShimmerModes) / sizeof(kShimmerModes[0])) : kNumModes; }
+inline int TestDumpFrames() { return g_testShimmer ? kShimmerDumpFrames : kDumpFrames; }
 
 bool  g_testRunning = false;
 int   g_testMode = 0, g_testSettle = 0, g_testDumped = 0;
@@ -10297,15 +10450,15 @@ DXGI_FORMAT g_stagBbFmt = DXGI_FORMAT_UNKNOWN;
 int g_testFinalFmtLogs = 0;                     // "back buffer fmt not dumpable" is logged once per self-test run
 
 void ApplyTestMode(int i) {
-    const TestMode& m = kModes[i];
+    const TestMode& m = TestModes()[i];
     g_dlaaOn = m.dlaaOn;
     g_jitterOnly = m.jitOnly;
-    if (m.dlaaOn && !m.jitOnly) { g_signX = m.sx; g_signY = m.sy; }
+    if (m.dlaaOn && !m.jitOnly && m.sx) { g_signX = m.sx; g_signY = m.sy; }
     if (m.dlaaOn) g_resetNext = true;
     g_testSettle = kSettleFrames;
     g_testDumped = 0;
     LogDbg("self-test: mode %d/%d '%s' (dlaa=%d jitter-only=%d sign=%+d,%+d), settling %d frames",
-        i + 1, kNumModes, m.name, (int)m.dlaaOn, (int)m.jitOnly, g_signX, g_signY, kSettleFrames);
+        i + 1, TestNumModes(), m.name, (int)m.dlaaOn, (int)m.jitOnly, g_signX, g_signY, kSettleFrames);
 }
 
 // Writes an uncompressed 24-bit bottom-up BMP from RGBA rows (bytes as-is, alpha dropped).
@@ -10463,10 +10616,32 @@ void SelfTestFinalDump(IDXGISwapChain* sc) {
     LogDbg("self-test: %s %s (back buffer %ux%u fmt=%d)", ok ? "wrote" : "FAILED to write", nm, bd.Width, bd.Height, (int)bd.Format);
 }
 
+// phase 71: copies `name` (next to the DLL) into the self-test folder. Shared read: the log stays open for writing.
+void CopyIntoTestDir(const wchar_t* name) {
+    wchar_t src[MAX_PATH], dst[MAX_PATH];
+    if (!PathNextToDll(name, src)) return;
+    wcscpy_s(dst, g_testDir); wcscat_s(dst, name);
+    FILE* in = _wfsopen(src, L"rb", _SH_DENYNO);
+    if (!in) return;
+    FILE* out = nullptr;
+    if (_wfopen_s(&out, dst, L"wb") == 0 && out) {
+        char buf[65536]; size_t k;
+        while ((k = fread(buf, 1, sizeof(buf), in)) > 0) fwrite(buf, 1, k, out);
+        fclose(out);
+    }
+    fclose(in);
+}
+
 void FinishSelfTest() {
     g_dlaaOn = g_savedOn; g_jitterOnly = g_savedJo; g_signX = g_savedSx; g_signY = g_savedSy;
     g_resetNext = true;
     g_testRunning = false;
+    if (g_testShimmer) {                                   // phase 71
+        Log("shimmer capture done -- BMPs + dlaa_inject.log + dlaa.ini in the dlaa_selftest\\shimmer_* folder");
+        CopyIntoTestDir(L"dlaa_inject.log");
+        CopyIntoTestDir(L"dlaa.ini");
+        Beep(1200, 120); Beep(1600, 120);                  // two rising beeps = done
+    }
     LogDbg("self-test done (restored dlaa=%d jitter-only=%d sign=%+d,%+d)",
         (int)g_savedOn, (int)g_savedJo, g_signX, g_signY);
 }
@@ -10480,8 +10655,17 @@ void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
         if (g_gameDeviceChanged) { LogDbg("self-test refused: the game render device changed (DLAA stays OFF)"); return; }
         g_savedOn = g_dlaaOn.load(); g_savedJo = g_jitterOnly.load();
         g_savedSx = g_signX; g_savedSy = g_signY;
+        g_testShimmer = g_selfTestShimmer.exchange(false);
         if (!PathNextToDll(L"dlaa_selftest\\", g_testDir)) { LogErr("self-test: cannot resolve DLL path"); return; }
         CreateDirectoryW(g_testDir, nullptr);
+        if (g_testShimmer) {                               // phase 71: own folder per capture, nothing is overwritten
+            SYSTEMTIME st; GetLocalTime(&st);
+            wchar_t sub[48];
+            swprintf_s(sub, L"shimmer_%04d%02d%02d_%02d%02d%02d\\", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+            wcscat_s(g_testDir, sub);
+            CreateDirectoryW(g_testDir, nullptr);
+            Beep(1200, 120);                               // one beep = capture started
+        }
         D3D11_TEXTURE2D_DESC d{}; tex->GetDesc(&d);
         wchar_t ip[MAX_PATH]; wcscpy_s(ip, g_testDir); wcscat_s(ip, L"info.txt");
         FILE* f = nullptr;
@@ -10491,7 +10675,7 @@ void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
                        "settle_frames=%d dump_frames=%d phases=%d jitter_enabled=%d\n"
                        "file | phase | viewport shift (x,y) | NGX jitter passed (x,y)\n",
                     d.Width, d.Height, (int)d.Format, t.wYear, t.wMonth, t.wDay,
-                    t.wHour, t.wMinute, t.wSecond, kSettleFrames, kDumpFrames, g_phases, (int)g_jitterEnabled);
+                    t.wHour, t.wMinute, t.wSecond, kSettleFrames, TestDumpFrames(), g_phases, (int)g_jitterEnabled);
             fclose(f);
         }
         g_testRunning = true; g_testMode = 0;
@@ -10503,7 +10687,7 @@ void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
     }
     if (g_testSettle > 0) { --g_testSettle; return; }
 
-    const TestMode& m = kModes[g_testMode];
+    const TestMode& m = TestModes()[g_testMode];
     char nm[64];
     snprintf(nm, sizeof(nm), "%s_%d.bmp", m.name, g_testDumped);
     wchar_t wn[64]; MultiByteToWideChar(CP_UTF8, 0, nm, -1, wn, 64);
@@ -10524,8 +10708,8 @@ void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
         else fprintf(f, "%s | phase=%d | shift=(%+.4f,%+.4f) | ngx=(%+.4f,%+.4f)\n", nm, phase, vx, vy, njx, njy);
         fclose(f);
     }
-    if (++g_testDumped >= kDumpFrames) {
-        if (++g_testMode >= kNumModes) FinishSelfTest();
+    if (++g_testDumped >= TestDumpFrames()) {
+        if (++g_testMode >= TestNumModes()) FinishSelfTest();
         else ApplyTestMode(g_testMode);
     }
 }
@@ -16513,6 +16697,7 @@ enum MenuRowId {
     MR_FPSOPAC,                                           // phase 51f: fps box opacity (dlaa.ini fps_opacity)
     MR_FPSDIST,                                           // phase 44: VR distance (dlaa.ini fps_vr_dist)
     MR_LOG,                                               // phase 39: Logging (dlaa.ini log_level) + what logging costs
+    MR_LANGUAGE,                                          // phase 74: the menu's language (dlaa.ini language: auto / a code)
     MR_HOTKEYS,                                           // v0.12.1 phase 50: "Hotkeys..." -- Right opens the Hotkeys page
     MR_SAVE, MR_RESET, MR_CLOSE,
     MR_COUNT
@@ -16522,13 +16707,13 @@ static_assert(MR_COUNT <= TuningMenu::kMaxRows, "tuning menu: too many rows");
 // `last` (v0.10.3 phase 29c layout). MenuRowGroup / MenuGrpOpen / MenuRowVisible / MenuChange / the open-state array use it.
 struct MenuGroupDef { int header, last; const wchar_t* title; };
 constexpr MenuGroupDef kMenuGroups[] = {
-    { MR_PICGRP,   MR_BIAS,     L"Picture" },                    // phase 49: last row MR_FWD -> MR_BIAS
-    { MR_MOTGRP,   MR_WIREWIDEN, L"Motion and mirrors" },
-    { MR_UPGRP,    MR_VECTORXR, L"Upscaling and VR" },      // phase 56: last row MR_OFXR -> MR_VECTORXR
-    { MR_VRPGRP,   MR_HMASK,    L"VR performance" },
-    { MR_FRGRP,    MR_CPU,      L"Frame rate and CPU" },         // phase 52; + phase 54 CPU tuning
-    { MR_PANELGRP, MR_MENUKEYS, L"Panel settings" },
-    { MR_FPSGRP,   MR_FPSDIST,  L"FPS counter settings" },     // phase 44: last row MR_FPSSIZE -> MR_FPSROLL (phase 48: + FPS brightness inside)
+    { MR_PICGRP,   MR_BIAS,     N_(L"Picture") },                    // phase 49: last row MR_FWD -> MR_BIAS
+    { MR_MOTGRP,   MR_WIREWIDEN, N_(L"Motion and mirrors") },
+    { MR_UPGRP,    MR_VECTORXR, N_(L"Upscaling and VR") },      // phase 56: last row MR_OFXR -> MR_VECTORXR
+    { MR_VRPGRP,   MR_HMASK,    N_(L"VR performance") },
+    { MR_FRGRP,    MR_CPU,      N_(L"Frame rate and CPU") },         // phase 52; + phase 54 CPU tuning
+    { MR_PANELGRP, MR_MENUKEYS, N_(L"Panel settings") },
+    { MR_FPSGRP,   MR_FPSDIST,  N_(L"FPS counter settings") },     // phase 44: last row MR_FPSSIZE -> MR_FPSROLL (phase 48: + FPS brightness inside)
 };
 constexpr int kMenuGroupCount = (int)(sizeof(kMenuGroups) / sizeof(kMenuGroups[0]));
 static_assert(MR_PICGRP + 1 == MR_SHARP && MR_BIAS + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_WIREWIDEN + 1 == MR_UPGRP &&
@@ -16548,160 +16733,164 @@ static_assert(MR_SHARP < MR_WIDTH && MR_WIDTH < MR_LOD && MR_LOD < MR_LODCUT && 
 const wchar_t* const kMenuDesc[] = {
     // v0.10.0: every row = what it does, when a player would change it, what it costs. The panel shows 3 lines of about 105
     // characters (menu.cpp kDescH) = the description + the cost sentence MenuPerfCosts appends: keep both within ~320 characters.
-    L"DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's Scaling is below 100 %. "
-    L"off = the game's own picture: use it to compare. Saved at once.",
-    L"Presets for your GPU. high = everything on (model 1). medium = model 2, half-size see-through depth, flat mirrors without "
+    N_(L"DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's Scaling is below 100 %. "
+    L"off = the game's own picture: use it to compare. Saved at once."),
+    N_(L"Presets for your GPU. high = everything on (model 1). medium = model 2, half-size see-through depth, flat mirrors without "
     L"part motion, lighter part-motion search. low = also no mirror DLAA, no see-through depth, VR area 60 %. Never changes a "
-    L"setting you set yourself.",
-    L"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, least ghosting behind traffic: start here. "
-    L"3 (F) = calmest on fences and wires, can smear moving detail, same cost as 2. 4 (M) = heaviest (about 5x), flat tests only.",
+    L"setting you set yourself."),
+    N_(L"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, least ghosting behind traffic: start here. "
+    L"3 (F) = calmest on fences and wires, can smear moving detail, same cost as 2. 4 (M) = heaviest (about 5x), flat tests only."),
     // phase 43: menu categories (Picture)
-    L"Picture quality: sharpening, texture sharpness, the DLAA area and the see-through depth. Right opens the group, Left closes it; it "
-    L"starts closed every time the menu opens.",
-    L"Sharpens the picture after DLAA, 0 (off) to 1.0. Raise it if the picture looks soft; too high gives bright halos on edges. "
-    L"Costs about 0.1 ms; 0 skips the pass.",
-    L"How far the sharpening reaches, 1 to 4 px: small = fine detail, large = bolder edges. Change it if the sharpening looks too "
-    L"fine or too coarse; a picture drawn larger than the screen, as in VR, needs more than 1 px.",
-    L"Sharper texture text (road signs, dashboard, GPS). 0 = off; more negative = sharper but more shimmer on fences; try -0.5 to "
-    L"-1 if text is blurry. No GPU time, only a little memory bandwidth.",
-    L"The same for wire fences, grass and leaf cut-outs: raise it toward 0 if fences shimmer, lower it if grass looks soft. same = "
-    L"follows the row above. Acts only while Texture sharpness is not 0. No GPU time, a little memory.",
-    L"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower it to afford a heavier "
-    L"model or win frame rate; 40 % costs about 40 % of the model. Also sets the garage / main-menu truck.",
-    L"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. Change it only to compare. "
-    L"Not used with DLSS upscale or Windows HDR. Same cost either way; takes ~60 frames to switch.",
-    L"Gives wires, fences and glass their own distance instead of what is behind them, so they do not smear when you move. Turn "
-    L"it off if you see no smearing there: saves 0.02 - 0.06 ms per eye.",
+    N_(L"Picture quality: sharpening, texture sharpness, the DLAA area and the see-through depth. Right opens the group, Left closes it; it "
+    L"starts closed every time the menu opens."),
+    N_(L"Sharpens the picture after DLAA, 0 (off) to 1.0. Raise it if the picture looks soft; too high gives bright halos on edges. "
+    L"Costs about 0.1 ms; 0 skips the pass."),
+    N_(L"How far the sharpening reaches, 1 to 4 px: small = fine detail, large = bolder edges. Change it if the sharpening looks too "
+    L"fine or too coarse; a picture drawn larger than the screen, as in VR, needs more than 1 px."),
+    N_(L"Sharper texture text (road signs, dashboard, GPS). 0 = off; more negative = sharper but more shimmer on fences; try -0.5 to "
+    L"-1 if text is blurry. No GPU time, only a little memory bandwidth."),
+    N_(L"The same for wire fences, grass and leaf cut-outs: raise it toward 0 if fences shimmer, lower it if grass looks soft. same = "
+    L"follows the row above. Acts only while Texture sharpness is not 0. No GPU time, a little memory."),
+    N_(L"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower it to afford a heavier "
+    L"model or win frame rate; 40 % costs about 40 % of the model. Also sets the garage / main-menu truck."),
+    N_(L"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. Change it only to compare. "
+    L"Not used with DLSS upscale or Windows HDR. Same cost either way; takes ~60 frames to switch."),
+    N_(L"Gives wires, fences and glass their own distance instead of what is behind them, so they do not smear when you move. Turn "
+    L"it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."),
     // phase 49 (MR_BIAS)
-    L"Stops street-lamp and car-light glows leaving a trail behind them when you move: DLSS takes each glow from the current "
-    L"frame, not its history. 25 % steps; lower it if lamp glows flicker, 0 = off. Costs about 0.05 - 0.2 ms per eye.",
+    N_(L"Stops street-lamp and car-light glows leaving a trail behind them when you move: DLSS takes each glow from the current "
+    L"frame, not its history. 25 % steps; lower it if lamp glows flicker, 0 = off. Costs about 0.05 - 0.2 ms per eye."),
     // phase 43: menu categories (Motion and mirrors)
-    L"How moving parts and truck mirrors are handled by DLAA. Right opens the group, Left closes it; it starts closed every time the "
-    L"menu opens.",
-    L"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and does not ghost. Turn it off "
-    L"only to save about 0.5 ms per eye or to test: every pixel then moves with the camera and traffic smears.",
-    L"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main mirror next to you). "
-    L"all = every mirror. camera = cheapest per mirror, moving traffic can ghost in the glass; else each part moves exactly in the glass.",
-    L"on = each mirror gets its DLAA every 2nd frame and shows its last clean picture in between: about half the mirror cost. Edges "
-    L"stay clean; moving things in the glass update at half rate. off = every mirror every frame.",
+    N_(L"How moving parts and truck mirrors are handled by DLAA. Right opens the group, Left closes it; it starts closed every time the "
+    L"menu opens."),
+    N_(L"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and does not ghost. Turn it off "
+    L"only to save about 0.5 ms per eye or to test: every pixel then moves with the camera and traffic smears."),
+    N_(L"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main mirror next to you). "
+    L"all = every mirror. camera = cheapest per mirror, moving traffic can ghost in the glass; else each part moves exactly in the glass."),
+    N_(L"on = each mirror gets its DLAA every 2nd frame and shows its last clean picture in between: about half the mirror cost. Edges "
+    L"stay clean; moving things in the glass update at half rate. off = every mirror every frame."),
     // phase 69 (MR_WIREMV, MR_WIREDEPTH, MR_WIREWIDEN): the thin-wire switches, also on the Hotkeys page
-    L"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS motion dilation). "
-    L"on = default. off = only to compare; near wires flicker more. The picture is soft for a moment when it changes.",
-    L"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = default. "
-    L"on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more.",
-    L"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not break into dashes. "
-    L"Off by default: far wires may look darker or flicker more. Try it and compare.",
+    N_(L"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS motion dilation). "
+    L"on = default. off = only to compare; near wires flicker more. The picture is soft for a moment when it changes."),
+    N_(L"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = default. "
+    L"on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."),
+    N_(L"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not break into dashes. "
+    L"Off by default: far wires may look darker or flicker more. Try it and compare."),
     // phase 43: menu categories (Upscaling and VR)
-    L"DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts "
-    L"closed every time the menu opens.",
-    L"DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and "
-    L"fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %.",
-    L"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for comparing. Off saves the cost "
-    L"of every part together.",
-    L"OFXR Bridge = VR frame generation by djules75, a separate download (github.com/djules75/OFXR-Bridge). found = its layer "
-    L"is loaded in this game and the mod lets its work pass through. Start its tray app before the game.",
+    N_(L"DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts "
+    L"closed every time the menu opens."),
+    N_(L"DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and "
+    L"fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."),
+    N_(L"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for comparing. Off saves the cost "
+    L"of every part together."),
+    N_(L"OFXR Bridge = VR frame generation by djules75, a separate download (github.com/djules75/OFXR-Bridge). found = its layer "
+    L"is loaded in this game and the mod lets its work pass through. Start its tray app before the game."),
     // phase 56 (MR_VECTORXR)
-    L"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, Depth, frame generation; found = "
-    L"its layer is loaded in the game and the mod lets its work pass through. Run only one Turbo (its or the mod's).",
+    N_(L"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, Depth, frame generation; found = "
+    L"its layer is loaded in the game and the mod lets its work pass through. Run only one Turbo (its or the mod's)."),
     // phase 43: menu categories (VR performance)
-    L"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every "
-    L"time the menu opens.",
+    N_(L"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every "
+    L"time the menu opens."),
     // phase 30 (MR_TURBO): the warning first (the description shows while the row is selected)
-    L"Turbo: no ASW / Motion Smoothing / SSW / reprojection. VR only. On = the game stops waiting for the headset each frame: "
-    L"more fps only when the CPU is the limit (busy cities, traffic). Turn it off if the picture judders. From OpenXR Toolkit.",
+    N_(L"Turbo: no ASW / Motion Smoothing / SSW / reprojection. VR only. On = the game stops waiting for the headset each frame: "
+    L"more fps only when the CPU is the limit (busy cities, traffic). Turn it off if the picture judders. From OpenXR Toolkit."),
     // phase 34 (MR_VRS, MR_VRSSIZE)
-    L"Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR only. The outer ring is shaded "
-    L"once per 2 x 2 pixels; fences, grass and leaves keep full detail. Turn it off if the edge looks blocky.",
-    L"How big the sharp centre of Foveated (VRS) is, 10 - 100 % in 5 % steps: bigger = more of the view sharp, less saving; "
-    L"smaller = more saving, lower detail starts closer to the middle. 80 % (balanced) is the default; 90 = wide, 65 = narrow.",
+    N_(L"Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR only. The outer ring is shaded "
+    L"once per 2 x 2 pixels; fences, grass and leaves keep full detail. Turn it off if the edge looks blocky."),
+    N_(L"How big the sharp centre of Foveated (VRS) is, 10 - 100 % in 5 % steps: bigger = more of the view sharp, less saving; "
+    L"smaller = more saving, lower detail starts closer to the middle. 80 % (balanced) is the default; 90 = wide, 65 = narrow."),
     // phase 42 (MR_VRSPASS)
-    L"Which of the game's passes Foveated (VRS) acts on. scene = the 3D world only (default). scene + lighting = also the game's "
-    L"lighting pass, at the very edge only: more saving. Test it: look for blocky light or shadow edges at the side of your view.",
+    N_(L"Which of the game's passes Foveated (VRS) acts on. scene = the 3D world only (default). scene + lighting = also the game's "
+    L"lighting pass, at the very edge only: more saving. Test it: look for blocky light or shadow edges at the side of your view."),
     // phase 59f (MR_VRSSTR)
-    L"How coarse the outer ring of Foveated (VRS) is. Normal = 1 colour per 2 x 2 pixels (default). Strong = per 4 x 2, Max = per "
-    L"4 x 4: more GPU saving, blockier edges. Best with eye tracking, where you never look at the outer ring.",
+    N_(L"How coarse the outer ring of Foveated (VRS) is. Normal = 1 colour per 2 x 2 pixels (default). Strong = per 4 x 2, Max = per "
+    L"4 x 4: more GPU saving, blockier edges. Best with eye tracking, where you never look at the outer ring."),
     // phase 59 (MR_VRSEYE)
-    L"Experimental. The sharp centre of Foveated (VRS) follows your eyes on a headset with eye tracking (OpenXR eye gaze, for "
-    L"example Varjo); without one it stays at the lens centre. Needs Foveated (VRS) on at the game's start, else a restart. Almost no cost.",
+    N_(L"Experimental. The sharp centre of Foveated (VRS) follows your eyes on a headset with eye tracking (OpenXR eye gaze, for "
+    L"example Varjo); without one it stays at the lens centre. Needs Foveated (VRS) on at the game's start, else a restart. Almost no cost."),
     // phase 40 (MR_HMASK)
-    L"VR only. The game skips the lens corners you never see (the headset reports them), so it draws fewer pixels: more GPU "
+    N_(L"VR only. The game skips the lens corners you never see (the headset reports them), so it draws fewer pixels: more GPU "
     L"headroom, the picture you see stays the same. The first switch-on needs a game restart. Turn it off if the edge of the view "
-    L"looks wrong.",
+    L"looks wrong."),
     // phase 52: menu category (Frame rate) + MR_REFLEX, MR_FPSCAP, MR_VRFPSCAP
-    L"Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed "
-    L"every time the menu opens.",
-    L"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when the GPU is the limit. Boost "
-    L"also keeps the GPU clocks up. Same fps; small cost. Not used in VR.",
-    L"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. Set it a bit below what your "
-    L"PC holds in a busy city. With Reflex on, the NVIDIA driver does the limiting. off = no limit.",
-    L"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the headset's reprojection "
-    L"(ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when the fps swings. Turns Turbo off while on.",
+    N_(L"Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed "
+    L"every time the menu opens."),
+    N_(L"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when the GPU is the limit. Boost "
+    L"also keeps the GPU clocks up. Same fps; small cost. Not used in VR."),
+    N_(L"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. Set it a bit below what your "
+    L"PC holds in a busy city. With Reflex on, the NVIDIA driver does the limiting. off = no limit."),
+    N_(L"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the headset's reprojection "
+    L"(ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when the fps swings. Turns Turbo off while on."),
     // phase 54 (MR_CPU)
-    L"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs only), the game runs at Above "
+    N_(L"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs only), the game runs at Above "
     L"normal priority, and Windows may not throttle it (EcoQoS) or ignore its timer requests. Helps when the CPU is the limit; no "
-    L"cost. Separate settings in dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle.",
+    L"cost. Separate settings in dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle."),
     // v0.10.3 phase 29c (MR_PANELGRP)
-    L"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes it; it starts closed "
-    L"every time the menu opens.",
+    N_(L"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes it; it starts closed "
+    L"every time the menu opens."),
     // phase 70 (MR_PANELLOCK)
-    L"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in front of your seat, "
-    L"steady while you look around; X / Y / depth then set that spot (degrees, metres). Needs the VR layer (default). No cost.",
-    L"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat and VR each keep their own "
-    L"position. Use it if the panel covers something you need. No cost.",
-    L"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and VR each keep their own "
-    L"position. Use it if the panel covers something you need. No cost.",
-    L"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too much. Flat and VR each keep "
-    L"their own size. No cost.",
-    L"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, the default; in px of "
-    L"inward shift per eye with menu_vr_layer = 0. Same size at every depth. Change it if the panel is tiring to look at. No cost.",
-    L"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same size from every angle "
-    L"(as a VR layer, the default, the head-following fps box too); off = a flat picture. No cost.",
+    N_(L"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in front of your seat, "
+    L"steady while you look around; X / Y / depth then set that spot (degrees, metres). Needs the VR layer (default). No cost."),
+    N_(L"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat and VR each keep their own "
+    L"position. Use it if the panel covers something you need. No cost."),
+    N_(L"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and VR each keep their own "
+    L"position. Use it if the panel covers something you need. No cost."),
+    N_(L"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too much. Flat and VR each keep "
+    L"their own size. No cost."),
+    N_(L"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, the default; in px of "
+    L"inward shift per eye with menu_vr_layer = 0. Same size at every depth. Change it if the panel is tiring to look at. No cost."),
+    N_(L"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same size from every angle "
+    L"(as a VR layer, the default, the head-following fps box too); off = a flat picture. No cost."),
     nullptr,                                              // MR_MENUKEYS: built with the key names (MenuBuildPanel)
-    L"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see what a setting gains. "
-    L"Its GPU cost is measured: per frame, every picture it is drawn into; none when off. Save keeps it for the next start.",
+    N_(L"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see what a setting gains. "
+    L"Its GPU cost is measured: per frame, every picture it is drawn into; none when off. Save keeps it for the next start."),
     // v0.10.3 phase 29c (MR_FPSGRP)
-    L"The fps box's lock, position, size, colour, VR distance and turn. Right opens the group, Left closes it; it starts closed "
-    L"every time the menu opens.",
+    N_(L"The fps box's lock, position, size, colour, VR distance and turn. Right opens the group, Left closes it; it starts closed "
+    L"every time the menu opens."),
     // v0.10.3 phase 28 (MR_FPSLOCK)
-    L"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, ignores the cab's sway. "
-    L"Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Per-part motion vectors). No cost.",
+    N_(L"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, ignores the cab's sway. "
+    L"Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Per-part motion vectors). No cost."),
     // phase 51b (MR_FPSPROF)
-    L"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, size, colour, brightness and "
-    L"text (saved in dlaa.ini when the menu closes). Off = one shared set for every vehicle. No cost.",
+    N_(L"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, size, colour, brightness and "
+    L"text (saved in dlaa.ini when the menu closes). Off = one shared set for every vehicle. No cost."),
     // phase 51c / 51d (MR_FPSREMEAS)
-    L"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box sits off. Left = this "
-    L"vehicle's box back to the defaults (spot, turn, size, colour, text); other vehicles keep theirs. The box is square to the cab.",
-    L"Moves the fps box sideways, in % of the screen (VR fixed / attached: degrees around you). Flat and VR each keep their "
-    L"own position. No cost.",
-    L"Moves the fps box up / down, in % of the screen (VR fixed / attached: degrees, minus = up). Flat and VR each keep their "
-    L"own position. No cost.",
-    L"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face turns to the right). Use it "
-    L"to angle the box when it sits at the side. 0 = it faces you. No cost.",
-    L"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if lying on the dashboard). "
-    L"0 = it faces you. No cost.",
-    L"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = upright. No cost.",
-    L"Makes the fps box bigger or smaller (0.2 .. 3.0). Raise it if you cannot read it in the headset or on a big screen. No cost.",
+    N_(L"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box sits off. Left = this "
+    L"vehicle's box back to the defaults (spot, turn, size, colour, text); other vehicles keep theirs. The box is square to the cab."),
+    N_(L"Moves the fps box sideways, in % of the screen (VR fixed / attached: degrees around you). Flat and VR each keep their "
+    L"own position. No cost."),
+    N_(L"Moves the fps box up / down, in % of the screen (VR fixed / attached: degrees, minus = up). Flat and VR each keep their "
+    L"own position. No cost."),
+    N_(L"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face turns to the right). Use it "
+    L"to angle the box when it sits at the side. 0 = it faces you. No cost."),
+    N_(L"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if lying on the dashboard). "
+    L"0 = it faces you. No cost."),
+    N_(L"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = upright. No cost."),
+    N_(L"Makes the fps box bigger or smaller (0.2 .. 3.0). Raise it if you cannot read it in the headset or on a big screen. No cost."),
     // phase 44 (MR_FPSCOLOR, MR_FPSDIST, MR_FPSYAW, MR_FPSPITCH, MR_FPSROLL)
-    L"The colour of the fps box's text: 20 colours, each with an outline so it reads on any picture (black on white = dark text, "
-    L"white outline). Flat and VR. No cost.",
-    L"How bright the fps box is, 10 - 100 %: 100 = the colour as it is, lower dims the text (the outline stays) toward black. Use it "
-    L"to tone the counter down at night or in the headset. Flat and VR. No cost.",
+    N_(L"The colour of the fps box's text: 20 colours, each with an outline so it reads on any picture (black on white = dark text, "
+    L"white outline). Flat and VR. No cost."),
+    N_(L"How bright the fps box is, 10 - 100 %: 100 = the colour as it is, lower dims the text (the outline stays) toward black. Use it "
+    L"to tone the counter down at night or in the headset. Flat and VR. No cost."),
     // phase 51f (MR_FPSOPAC)
-    L"How see-through the whole fps box is, 10 - 100 %: 100 = solid, lower fades the text AND its black outline together, so a "
-    L"dimmed box does not turn into a black blob. Flat and VR. No cost.",
-    L"VR only, so greyed in flat. How far away the fps box floats, 0.30 - 3.00 m. It keeps the same size in your view at every "
-    L"distance; only the depth changes. Put it near the depth you look at to read it without refocusing. No cost.",
+    N_(L"How see-through the whole fps box is, 10 - 100 %: 100 = solid, lower fades the text AND its black outline together, so a "
+    L"dimmed box does not turn into a black blob. Flat and VR. No cost."),
+    N_(L"VR only, so greyed in flat. How far away the fps box floats, 0.30 - 3.00 m. It keeps the same size in your view at every "
+    L"distance; only the depth changes. Put it near the depth you look at to read it without refocusing. No cost."),
     // phase 39 (MR_LOG)
-    L"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + problems worked around; "
-    L"info = + start-up and changes; debug = + statistics, and debug also runs the GPU timers and the CPU profiler.",
+    N_(L"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + problems worked around; "
+    L"info = + start-up and changes; debug = + statistics, and debug also runs the GPU timers and the CPU profiler."),
+    // phase 74 (MR_LANGUAGE)
+    N_(L"The language of this menu. auto = the game's language (default); Left / Right picks another one. Linux / Proton: Chinese, "
+    L"Japanese and Korean need their fonts installed, see the README. A lang\\<code>.po file next to the DLL wins, for your own fixes. "
+    L"Save keeps it. No cost."),
     // v0.12.1 phase 50 (MR_HOTKEYS)
-    L"Every hotkey of this menu, one line per action, with its keyboard key and controller button. Right opens the list; pick "
-    L"an action with Right, then press the new key or wheel button. Saved to dlaa.ini at once.",
-    L"Writes everything shown here into dlaa.ini (settings, and the panel / fps box positions once you moved them), keeping every "
-    L"other line. Do it once you like what you see, or the changes are gone at the next start. Mode saves itself.",
+    N_(L"Every hotkey of this menu, one line per action, with its keyboard key and controller button. Right opens the list; pick "
+    L"an action with Right, then press the new key or wheel button. Saved to dlaa.ini at once."),
+    N_(L"Writes everything shown here into dlaa.ini (settings, and the panel / fps box positions once you moved them), keeping every "
+    L"other line. Do it once you like what you see, or the changes are gone at the next start. Mode saves itself."),
     // v0.10.3 phase 29d (MR_RESET): MenuBuildPanel puts "Hold <menu Right> for <bind_hold_ms> s to reset. " in front of it
-    L"Puts every setting in this menu back to how the mod ships (model, sharpen, texture sharpness, DLAA area, motion, mirrors, "
-    L"profile, panel, fps box, turbo, foveated, frame rate, logging), live and in dlaa.ini, keeping your hotkeys and every other line.",
+    N_(L"Puts every setting in this menu back to how the mod ships (model, sharpen, texture sharpness, DLAA area, motion, mirrors, "
+    L"profile, panel, fps box, turbo, foveated, frame rate, logging), live and in dlaa.ini, keeping your hotkeys and every other line."),
     nullptr,                                              // MR_CLOSE: "Closes the menu ..." (built with the key name)
 };
 static_assert(sizeof(kMenuDesc) / sizeof(kMenuDesc[0]) == MR_COUNT, "tuning menu: kMenuDesc must have one entry per row (MR_* order)");
@@ -16767,6 +16956,14 @@ inline int MenuOutMode(DXGI_FORMAT f, bool screen) {
         return TuningMenu::kOutLinear;
     if (screen && g_hdrOut && (f == DXGI_FORMAT_R10G10B10A2_UNORM || f == DXGI_FORMAT_R10G10B10A2_TYPELESS)) return TuningMenu::kOutPq;
     return TuningMenu::kOutRaw;
+}
+// phase 74: a (translated) wide text as UTF-8 for the narrow keys column (MenuRow widens it again); one static buffer, so
+// the caller passes it on at once (render thread).
+const char* MenuUtf8(const wchar_t* w) {
+    static char s_u8[256];
+    if (!WideCharToMultiByte(CP_UTF8, 0, w ? w : L"", -1, s_u8, (int)sizeof(s_u8), nullptr, nullptr)) s_u8[0] = 0;
+    s_u8[sizeof(s_u8) - 1] = 0;
+    return s_u8;
 }
 void MenuWiden(wchar_t* dst, size_t cap, const char* src) {
     if (!cap) return;
@@ -16987,7 +17184,7 @@ void StepVrFpsCap(uint64_t n, int dir) {                  // Right: off -> half 
 // scene bind uses them; a radii change builds new masks once). Logged + beeped like the other toggles; also switchable in flat
 // (kept for VR; the rows are greyed there).
 struct VrsSizePreset { int inner, outer; const wchar_t* name; const char* logName; };
-const VrsSizePreset kVrsSizes[3] = { { 65, 90, L"wide", "wide" }, { 55, 80, L"balanced", "balanced" }, { 40, 65, L"narrow", "narrow" } };
+const VrsSizePreset kVrsSizes[3] = { { 65, 90, N_(L"wide"), "wide" }, { 55, 80, N_(L"balanced"), "balanced" }, { 40, 65, N_(L"narrow"), "narrow" } };
 int VrsSizeIndex() {                                      // -1 = custom radii from dlaa.ini
     for (int i = 0; i < 3; ++i) if (kVrsSizes[i].inner == g_vrsInner && kVrsSizes[i].outer == g_vrsOuter) return i;
     return -1;
@@ -17101,7 +17298,7 @@ void ToggleVrsPasses(uint64_t n) {
 }
 // phase 59f: the menu's Foveated strength row -- dlaa.ini vrs_strength live (Right = coarser, Left = finer, no wrap). The next
 // bracket rebuilds the rate table (Vrs::BuildTable keys on it); the masks do not change.
-const wchar_t* const kVrsStrengthName[3] = { L"Normal (2 x 2)", L"Strong (4 x 2)", L"Max (4 x 4)" };
+const wchar_t* const kVrsStrengthName[3] = { N_(L"Normal (2 x 2)"), N_(L"Strong (4 x 2)"), N_(L"Max (4 x 4)") };
 void StepVrsStrength(int dir, uint64_t n) {
     const int to = g_vrsStrength + (dir > 0 ? 1 : -1);
     if (to < 0 || to > 2) { PlayTones(1, 300, 80, 0); return; }   // (at the end: a low beep, nothing changes)
@@ -17307,6 +17504,7 @@ void ResetSettings(uint64_t n) {
         "vrs_strength",                                                                                 // phase 59f
         "vrs_eye",                                                                                     // phase 59
         "log_level",                                                                                    // phase 39
+        "language",                                                                                     // phase 74
         "mirror_turns",                                                                                 // phase 41
         "xr_hidden_mask",                                                                               // phase 40
         "dlss_bias_mask",                                                                               // phase 49
@@ -17586,21 +17784,21 @@ void MenuCpuRead(MenuPerfState& m, bool base, int64_t q) {
 void MenuLimit(MenuPerfState& m, bool vr) {
     constexpr size_t kL = sizeof(m.limit) / sizeof(m.limit[0]);
     const MenuCpu& c = m.cpu;
-    if (!c.have || c.frameMs <= 0.0) { swprintf(m.limit, kL, L"Limit: ..."); return; }
+    if (!c.have || c.frameMs <= 0.0) { swprintf(m.limit, kL, TRF(L"Limit: ...")); return; }
     const double T = c.frameMs, B = c.busyMs, G = m.gpuFrameMs;
     double P = T;
     if (vr) {
-        if (m.periodMs <= 0.0) { swprintf(m.limit, kL, L"Limit: unknown"); return; }
+        if (m.periodMs <= 0.0) { swprintf(m.limit, kL, TRF(L"Limit: unknown")); return; }
         P = m.periodMs;
-        if (T <= 1.04 * P) { swprintf(m.limit, kL, L"Limit: headset (%.0f Hz)", 1000.0 / P); return; }
+        if (T <= 1.04 * P) { swprintf(m.limit, kL, TRF(L"Limit: headset (%.0f Hz)"), 1000.0 / P); return; }
     }
     const bool cpu = B >= 0.0 && B >= 0.90 * P, gpu = G >= 0.0 && G >= 0.85 * P;
-    if (cpu && gpu)      swprintf(m.limit, kL, L"Limit: CPU and GPU");
-    else if (cpu)        swprintf(m.limit, kL, L"%ls", vr ? L"Limit: CPU" : L"Limit: CPU (or a game fps cap)");
-    else if (gpu)        swprintf(m.limit, kL, L"Limit: GPU");
-    else if (!vr && G >= 0.0 && B >= 0.0 && c.waitMs >= 0.10 * T) swprintf(m.limit, kL, L"Limit: vsync / fps cap");
-    else if (G < 0.0 && !m.gameNa && !m.noAa) swprintf(m.limit, kL, L"Limit: ...");
-    else                 swprintf(m.limit, kL, L"Limit: unknown");
+    if (cpu && gpu)      swprintf(m.limit, kL, TRF(L"Limit: CPU and GPU"));
+    else if (cpu)        swprintf(m.limit, kL, L"%ls", vr ? TR(L"Limit: CPU") : TR(L"Limit: CPU (or a game fps cap)"));
+    else if (gpu)        swprintf(m.limit, kL, TRF(L"Limit: GPU"));
+    else if (!vr && G >= 0.0 && B >= 0.0 && c.waitMs >= 0.10 * T) swprintf(m.limit, kL, TRF(L"Limit: vsync / fps cap"));
+    else if (G < 0.0 && !m.gameNa && !m.noAa) swprintf(m.limit, kL, TRF(L"Limit: ..."));
+    else                 swprintf(m.limit, kL, TRF(L"Limit: unknown"));
 }
 // Eye `eye`'s figures since the previous read (false = no pass of that eye landed in between). Always advances the baseline.
 bool MenuPerfEyeDelta(int eye, MenuPerfEye& out) {
@@ -17755,28 +17953,28 @@ void MenuPerfLines(TuningMenu::Panel& p, bool vr) {
     constexpr size_t kP = sizeof(p.perf[0]) / sizeof(wchar_t);
     wchar_t fps[64], cb[16], gb[16];
     if (!m.haveFps)                    swprintf(fps, 64, L"...");
-    else if (vr && m.periodMs > 0.0)   swprintf(fps, 64, L"%.0f (%.1f ms, headset %.0f Hz)", m.fps, m.frameMs, 1000.0 / m.periodMs);
-    else                               swprintf(fps, 64, L"%.0f (%.1f ms)", m.fps, m.frameMs);
+    else if (vr && m.periodMs > 0.0)   swprintf(fps, 64, TRF(L"%.0f (%.1f ms, headset %.0f Hz)"), m.fps, m.frameMs, 1000.0 / m.periodMs);
+    else                               swprintf(fps, 64, TRF(L"%.0f (%.1f ms)"), m.fps, m.frameMs);
     if (c.have && c.busyMs >= 0.0) MenuNum(cb, 16, c.busyMs); else swprintf(cb, 16, c.have ? L"-" : L"...");
     if (m.gpuFrameMs >= 0.0)       MenuNum(gb, 16, m.gpuFrameMs);
     else                           swprintf(gb, 16, (m.gameNa || m.noAa) ? L"-" : L"...");
-    swprintf(p.perf[0], kP, L"%ls      fps %ls      frame busy %lc%ls%lc | %lc%ls%lc ms", m.limit, fps, kInkCpu, cb, kInkEnd,
+    swprintf(p.perf[0], kP, TRF(L"%ls      fps %ls      frame busy %lc%ls%lc | %lc%ls%lc ms"), Lang::Tr(m.limit), fps, kInkCpu, cb, kInkEnd,
              kInkGpu, gb, kInkEnd);
     // line 1: the mod
     const MenuGpuFrame g = MenuGpuPerFrame(vr);
     if (c.have) MenuNum(cb, 16, c.modMs); else swprintf(cb, 16, L"...");
     if (!GpuPerf::On()) {
-        swprintf(p.perf[1], kP, L"this mod: %lc%ls%lc | GPU n/a (the GPU timers could not start: timestamp queries failed)", kInkCpu,
+        swprintf(p.perf[1], kP, TRF(L"this mod: %lc%ls%lc | GPU n/a (the GPU timers could not start: timestamp queries failed)"), kInkCpu,
                  cb, kInkEnd);
     } else if (m.nothing && !g.have) {             // no pass of the mod ever landed since the open (3 s+): say so
-        swprintf(p.perf[1], kP, L"this mod: %lc%ls%lc | - ms -- nothing for the GPU on this screen; it works while you drive",
+        swprintf(p.perf[1], kP, TRF(L"this mod: %lc%ls%lc | - ms -- nothing for the GPU on this screen; it works while you drive"),
                  kInkCpu, cb, kInkEnd);
     } else if (!g.have) {
-        swprintf(p.perf[1], kP, L"this mod: %lc%ls%lc | %lc...%lc ms", kInkCpu, cb, kInkEnd, kInkGpu, kInkEnd);
+        swprintf(p.perf[1], kP, TRF(L"this mod: %lc%ls%lc | %lc...%lc ms"), kInkCpu, cb, kInkEnd, kInkGpu, kInkEnd);
     } else {
         MenuNum(gb, 16, g.total);
-        swprintf(p.perf[1], kP, L"this mod: %lc%ls%lc | %lc%ls%lc ms -- GPU: NGX %.1f, part motion %.1f, camera %.1f, see-through %.1f, "
-                 L"mirrors %.1f, sharpen %.1f, copies %.1f", kInkCpu, cb, kInkEnd, kInkGpu, gb, kInkEnd, g.grp[MG_NGX],
+        swprintf(p.perf[1], kP, TRF(L"this mod: %lc%ls%lc | %lc%ls%lc ms -- GPU: NGX %.1f, part motion %.1f, camera %.1f, see-through %.1f, "
+                 L"mirrors %.1f, sharpen %.1f, copies %.1f"), kInkCpu, cb, kInkEnd, kInkGpu, gb, kInkEnd, g.grp[MG_NGX],
                  g.grp[MG_PART], g.grp[MG_CAM], g.grp[MG_FWD], g.grp[MG_MIR], g.grp[MG_SHARP], g.grp[MG_COPY]);
     }
     // line 2: legend + what the CPU figure is + the profiler's own cost (already taken out of every figure)
@@ -17784,12 +17982,12 @@ void MenuPerfLines(TuningMenu::Panel& p, bool vr) {
     if (c.have) {
         wchar_t f[16];
         MenuNum(f, 16, c.otherMs);
-        swprintf(oth, 48, L", other threads %ls", f);
+        swprintf(oth, 48, TRF(L", other threads %ls"), f);
         MenuNum(f, 16, c.profMs);
-        swprintf(prof, 64, L"; measuring costs %ls ms CPU (taken out)", f);
+        swprintf(prof, 64, TRF(L"; measuring costs %ls ms CPU (taken out)"), f);
     }
-    swprintf(p.perf[2], kP, L"%lcCPU%lc | %lcGPU%lc ms per frame%ls. CPU = the game's render thread%ls%ls.", kInkCpu, kInkEnd, kInkGpu,
-             kInkEnd, vr ? L" (GPU: both eyes)" : L"", oth, prof);
+    swprintf(p.perf[2], kP, TRF(L"%lcCPU%lc | %lcGPU%lc ms per frame%ls. CPU = the game's render thread%ls%ls."), kInkCpu, kInkEnd, kInkGpu,
+             kInkEnd, vr ? TR(L" (GPU: both eyes)") : L"", oth, prof);
 }
 // The cost column (CPU | GPU per row) and the one cost sentence of the selected row (appended to its description).
 // Row -> CPU block(s) of cpu_prof.h (the render thread, ms per frame) / GPU group (MG_*, ms per frame):
@@ -17833,28 +18031,28 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
     };
     auto cell = [&](int row, const wchar_t* cpu, const wchar_t* gpu) { MenuCell(p.rows[row].cost, kC, cpu, gpu); };
     for (int r = 0; r < MR_COUNT; ++r) txt(r, L"-");   // default for every row (phase 43: order-independent; headers included); set below
-    if (dlaaOn) cell(MR_MODE, cpuS(cpuAll), gpuS(-1));  else txt(MR_MODE, L"off");
-    if (dlaaOn) cell(MR_MODEL, cpuS(cpuNgx), gpuS(MG_NGX)); else txt(MR_MODEL, L"off");   // the model IS the NGX cost
-    if (sharpOn) cell(MR_SHARP, nullptr, gpuS(MG_SHARP)); else txt(MR_SHARP, L"off");
-    if (sharpOn) cell(MR_WIDTH, nullptr, gpuS(MG_SHARP)); else txt(MR_WIDTH, L"off");
-    if (g_lodBias != 0.0f) cell(MR_LOD, cpuS(cpuLod), nullptr); else txt(MR_LOD, L"off");   // CPU only: no GPU pass of its own
-    if (LodCutEffective(g_lodBias) != 0.0f) cell(MR_LODCUT, cpuS(cpuLod), nullptr); else txt(MR_LODCUT, L"off");
+    if (dlaaOn) cell(MR_MODE, cpuS(cpuAll), gpuS(-1));  else txt(MR_MODE, TR(L"off"));
+    if (dlaaOn) cell(MR_MODEL, cpuS(cpuNgx), gpuS(MG_NGX)); else txt(MR_MODEL, TR(L"off"));   // the model IS the NGX cost
+    if (sharpOn) cell(MR_SHARP, nullptr, gpuS(MG_SHARP)); else txt(MR_SHARP, TR(L"off"));
+    if (sharpOn) cell(MR_WIDTH, nullptr, gpuS(MG_SHARP)); else txt(MR_WIDTH, TR(L"off"));
+    if (g_lodBias != 0.0f) cell(MR_LOD, cpuS(cpuLod), nullptr); else txt(MR_LOD, TR(L"off"));   // CPU only: no GPU pass of its own
+    if (LodCutEffective(g_lodBias) != 0.0f) cell(MR_LODCUT, cpuS(cpuLod), nullptr); else txt(MR_LODCUT, TR(L"off"));
     if (!vr)          txt(MR_AREA, L"-");
-    else if (!dlaaOn) txt(MR_AREA, L"off");
+    else if (!dlaaOn) txt(MR_AREA, TR(L"off"));
     else              cell(MR_AREA, cpuS(cpuNgx), gpuS(MG_NGX));   // (the area % is in the value column)
-    if (partOn) cell(MR_DRAWIDS, cpuS(cpuParts), gpuS(MG_PART)); else txt(MR_DRAWIDS, L"off");
-    if (mirOn) cell(MR_MIRROR, cpuS(cpuMir), gpuS(MG_MIR));      else txt(MR_MIRROR, L"off");
+    if (partOn) cell(MR_DRAWIDS, cpuS(cpuParts), gpuS(MG_PART)); else txt(MR_DRAWIDS, TR(L"off"));
+    if (mirOn) cell(MR_MIRROR, cpuS(cpuMir), gpuS(MG_MIR));      else txt(MR_MIRROR, TR(L"off"));
     // phase 41: the mirrors' cost as it is now (in turns: about half of the same row's figure without)
-    if (mirOn) cell(MR_MIRTURNS, cpuS(cpuMir), gpuS(MG_MIR));    else txt(MR_MIRTURNS, L"off");
-    txt(MR_PRETM, vr ? L"-" : L"same");
-    if (fwdOn) cell(MR_FWD, cpuS(cpuFwd), gpuS(MG_FWD));         else txt(MR_FWD, L"off");
+    if (mirOn) cell(MR_MIRTURNS, cpuS(cpuMir), gpuS(MG_MIR));    else txt(MR_MIRTURNS, TR(L"off"));
+    txt(MR_PRETM, vr ? L"-" : TR(L"same"));
+    if (fwdOn) cell(MR_FWD, cpuS(cpuFwd), gpuS(MG_FWD));         else txt(MR_FWD, TR(L"off"));
     // phase 49: GPU only (its CPU -- the glow draws' recording -- is inside the see-through depth's figure)
-    if (dlaaOn && g_biasCfg > 0) cell(MR_BIAS, nullptr, gpuS(MG_BIAS)); else txt(MR_BIAS, L"off");
-    txt(MR_UPSCALE, dlaaOn && upOn ? L"no extra" : L"off");   // the upscale is the same NGX pass; the game draws fewer pixels
-    if (dlaaOn) cell(MR_DLAA, cpuS(cpuAll), gpuS(-1));           else txt(MR_DLAA, L"off");
+    if (dlaaOn && g_biasCfg > 0) cell(MR_BIAS, nullptr, gpuS(MG_BIAS)); else txt(MR_BIAS, TR(L"off"));
+    txt(MR_UPSCALE, dlaaOn && upOn ? TR(L"no extra") : TR(L"off"));   // the upscale is the same NGX pass; the game draws fewer pixels
+    if (dlaaOn) cell(MR_DLAA, cpuS(cpuAll), gpuS(-1));           else txt(MR_DLAA, TR(L"off"));
     // v0.10.3 phase 29b: the fps box's own measured GPU cost, ms PER FRAME (GpuPerf::kOverlay: the quad image or the eye pictures +
     // the desktop mirror together); its CPU is inside the menu block (not separable)
-    if (!g_fpsShow)        txt(MR_FPS, L"off");
+    if (!g_fpsShow)        txt(MR_FPS, TR(L"off"));
     else if (!timers)      cell(MR_FPS, nullptr, L"n/a");
     else if (!mp.haveBox)  cell(MR_FPS, nullptr, L"...");
     else                   { MenuNum(gs, 16, mp.boxMs); cell(MR_FPS, nullptr, gs); }
@@ -17862,14 +18060,14 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
     const bool vrsLive = vr && Vrs::Support() != 0 && g_vrsOn;
     for (int r : { (int)MR_VRS, (int)MR_VRSSIZE, (int)MR_VRSPASS, (int)MR_VRSSTR, (int)MR_VRSEYE }) {   // (phase 59: + eye tracking; 59f: + strength)
         if (vrsLive)                       cell(r, cpuS(cpuVrs), nullptr);
-        else if (vr && !g_vrsOn)           txt(r, L"off");
+        else if (vr && !g_vrsOn)           txt(r, TR(L"off"));
     }
-    if (vr && g_vrsOn && !g_vrsEye) txt(MR_VRSEYE, L"off");   // phase 59: the optical centre (no gaze work)
+    if (vr && g_vrsOn && !g_vrsEye) txt(MR_VRSEYE, TR(L"off"));   // phase 59: the optical centre (no gaze work)
     if (vr && g_xrHiddenMask)  cell(MR_HMASK, cpuS(cpuHm), nullptr);
-    else if (vr)               txt(MR_HMASK, L"off");
+    else if (vr)               txt(MR_HMASK, TR(L"off"));
     // phase 39: the Logging row -- the log's own CPU (log.h LogCost: every thread, per Present), the same ~1-s snapshots
     const int lv = LogLevel();
-    if (lv == 0)             txt(MR_LOG, L"off");
+    if (lv == 0)             txt(MR_LOG, TR(L"off"));
     else if (!mp.haveLog)    cell(MR_LOG, L"...", nullptr);
     else                     { MenuNum(cs, 16, mp.logMs); cell(MR_LOG, cs, nullptr); }
 
@@ -17885,116 +18083,116 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         const bool hc = c.have, hg = timers && gf.have;
         if (hc) MenuNum(a, 16, cpuMs);
         if (hg) MenuNum(b, 16, g < 0 ? gf.total : gf.grp[g]);
-        if (hc && hg)  swprintf(f, 64, L"%ls ms CPU + %ls ms GPU", a, b);
-        else if (hc)   swprintf(f, 64, L"%ls ms CPU", a);
-        else if (hg)   swprintf(f, 64, L"%ls ms GPU", b);
+        if (hc && hg)  swprintf(f, 64, TRF(L"%ls ms CPU + %ls ms GPU"), a, b);
+        else if (hc)   swprintf(f, 64, TRF(L"%ls ms CPU"), a);
+        else if (hg)   swprintf(f, 64, TRF(L"%ls ms GPU"), b);
         else           return nullptr;
         return f;
     };
     const wchar_t* fig = nullptr;
     switch (sel) {
     case MR_MODE: case MR_DLAA:
-        if (!dlaaOn)                       swprintf(sent, sentCap, L"Off now: the mod's DLAA / DLSS work costs nothing.");
-        else if ((fig = both(cpuAll, -1))) swprintf(sent, sentCap, L"The whole mod costs %ls per frame now; off saves most of it.", fig);
+        if (!dlaaOn)                       swprintf(sent, sentCap, TRF(L"Off now: the mod's DLAA / DLSS work costs nothing."));
+        else if ((fig = both(cpuAll, -1))) swprintf(sent, sentCap, TRF(L"The whole mod costs %ls per frame now; off saves most of it."), fig);
         break;
-    case MR_PROFILE: swprintf(sent, sentCap, L"Costs nothing itself; watch the perf lines for what it saves."); break;
+    case MR_PROFILE: swprintf(sent, sentCap, TRF(L"Costs nothing itself; watch the perf lines for what it saves.")); break;
     case MR_MODEL:
-        if (!dlaaOn)                       swprintf(sent, sentCap, L"Off now.");
+        if (!dlaaOn)                       swprintf(sent, sentCap, TRF(L"Off now."));
         else if ((fig = both(cpuNgx, MG_NGX)))
-            swprintf(sent, sentCap, L"Costs %ls per frame now (GPU per eye: 1 (K) 1.0, 2 (E) / 3 (F) 0.6, 4 (M) ~3 ms).", fig);
+            swprintf(sent, sentCap, TRF(L"Costs %ls per frame now (GPU per eye: 1 (K) 1.0, 2 (E) / 3 (F) 0.6, 4 (M) ~3 ms)."), fig);
         break;
     case MR_SHARP:
-        if (!sharpOn)                      swprintf(sent, sentCap, L"Off now: sharpening costs nothing.");
+        if (!sharpOn)                      swprintf(sent, sentCap, TRF(L"Off now: sharpening costs nothing."));
         else if (timers && gf.have)
-            swprintf(sent, sentCap, L"Costs %ls GPU per frame now; 0 saves it.", (MenuNum(f, 64, gf.grp[MG_SHARP]), f));
+            swprintf(sent, sentCap, TRF(L"Costs %ls GPU per frame now; 0 saves it."), (MenuNum(f, 64, gf.grp[MG_SHARP]), f));
         break;
     case MR_WIDTH:
-        if (!sharpOn)                      swprintf(sent, sentCap, L"Off now (Sharpen strength is 0): sharpening costs nothing.");
+        if (!sharpOn)                      swprintf(sent, sentCap, TRF(L"Off now (Sharpen strength is 0): sharpening costs nothing."));
         else if (timers && gf.have)
-            swprintf(sent, sentCap, L"Same pass as Sharpen strength: costs %ls ms GPU per frame now.", (MenuNum(f, 64, gf.grp[MG_SHARP]), f));
+            swprintf(sent, sentCap, TRF(L"Same pass as Sharpen strength: costs %ls ms GPU per frame now."), (MenuNum(f, 64, gf.grp[MG_SHARP]), f));
         break;
     case MR_LOD: case MR_LODCUT:
         if (g_lodBias != 0.0f && c.have)
-            swprintf(sent, sentCap, L"CPU %ls ms per frame now (the sampler swaps).", (MenuNum(f, 64, cpuLod), f));
+            swprintf(sent, sentCap, TRF(L"CPU %ls ms per frame now (the sampler swaps)."), (MenuNum(f, 64, cpuLod), f));
         break;
     case MR_AREA:
-        if (!vr)                           swprintf(sent, sentCap, L"Greyed in flat: flat mode always uses the whole picture.");
-        else if (!dlaaOn)                  swprintf(sent, sentCap, L"Off now: DLAA/DLSS costs nothing.");
+        if (!vr)                           swprintf(sent, sentCap, TRF(L"Greyed in flat: flat mode always uses the whole picture."));
+        else if (!dlaaOn)                  swprintf(sent, sentCap, TRF(L"Off now: DLAA/DLSS costs nothing."));
         else if ((fig = both(cpuNgx, MG_NGX)))
-            swprintf(sent, sentCap, L"DLAA costs %ls per frame at %d %%; a smaller area costs less.", fig, area);
+            swprintf(sent, sentCap, TRF(L"DLAA costs %ls per frame at %d %%; a smaller area costs less."), fig, area);
         break;
     case MR_DRAWIDS:
-        if (!partOn)                       swprintf(sent, sentCap, L"Off now: costs nothing.");
+        if (!partOn)                       swprintf(sent, sentCap, TRF(L"Off now: costs nothing."));
         else if ((fig = both(cpuParts, MG_PART)))
-            swprintf(sent, sentCap, L"Costs %ls per frame now; the profiles medium / low cut it.", fig);
+            swprintf(sent, sentCap, TRF(L"Costs %ls per frame now; the profiles medium / low cut it."), fig);
         break;
     case MR_MIRROR:
-        if (!mirOn)                        swprintf(sent, sentCap, L"Off now: costs nothing.");
-        else if ((fig = both(cpuMir, MG_MIR))) swprintf(sent, sentCap, L"Costs %ls per frame now; fewer mirrors cost less.", fig);
+        if (!mirOn)                        swprintf(sent, sentCap, TRF(L"Off now: costs nothing."));
+        else if ((fig = both(cpuMir, MG_MIR))) swprintf(sent, sentCap, TRF(L"Costs %ls per frame now; fewer mirrors cost less."), fig);
         break;
     case MR_MIRTURNS:                                     // phase 41
-        if (!mirOn)                        swprintf(sent, sentCap, L"Greyed: Mirror DLAA is off.");
-        else if (MirMode() == 3)           swprintf(sent, sentCap, L"Always on: dlaa.ini mirror mode 3 is in turns already.");
-        else if ((fig = both(cpuMir, MG_MIR))) swprintf(sent, sentCap, L"The mirrors cost %ls per frame now.", fig);
+        if (!mirOn)                        swprintf(sent, sentCap, TRF(L"Greyed: Mirror DLAA is off."));
+        else if (MirMode() == 3)           swprintf(sent, sentCap, TRF(L"Always on: dlaa.ini mirror mode 3 is in turns already."));
+        else if ((fig = both(cpuMir, MG_MIR))) swprintf(sent, sentCap, TRF(L"The mirrors cost %ls per frame now."), fig);
         break;
     case MR_PRETM:
-        if (vr) swprintf(sent, sentCap, L"Greyed in VR: VR always runs DLAA on the finished picture.");
+        if (vr) swprintf(sent, sentCap, TRF(L"Greyed in VR: VR always runs DLAA on the finished picture."));
         break;
     case MR_FWD:
         if (g_fwdCfg && g_fwdAutoOff && !g_fwdOn.load())
-                        swprintf(sent, sentCap, L"Switched off by the mod: it cost more than %.1f ms per eye (VR budget). "
-                                 L"Press its key to try again.", (double)g_fwdBudgetMs);
-        else if (!fwdOn) swprintf(sent, sentCap, L"Off now: costs nothing.");
-        else if ((fig = both(cpuFwd, MG_FWD))) swprintf(sent, sentCap, L"Costs %ls per frame now; off saves it.", fig);
+                        swprintf(sent, sentCap, TRF(L"Switched off by the mod: it cost more than %.1f ms per eye (VR budget). "
+                                 L"Press its key to try again."), (double)g_fwdBudgetMs);
+        else if (!fwdOn) swprintf(sent, sentCap, TRF(L"Off now: costs nothing."));
+        else if ((fig = both(cpuFwd, MG_FWD))) swprintf(sent, sentCap, TRF(L"Costs %ls per frame now; off saves it."), fig);
         break;
     case MR_BIAS:                                         // phase 49
-        if (g_biasCfg <= 0 || !dlaaOn)     swprintf(sent, sentCap, L"Off now: costs nothing.");
+        if (g_biasCfg <= 0 || !dlaaOn)     swprintf(sent, sentCap, TRF(L"Off now: costs nothing."));
         else if (timers && gf.have)        { MenuNum(f, 64, gf.grp[MG_BIAS]);
-                                             swprintf(sent, sentCap, L"Costs %ls ms GPU per frame now; most of it at night.", f); }
+                                             swprintf(sent, sentCap, TRF(L"Costs %ls ms GPU per frame now; most of it at night."), f); }
         break;
     case MR_FPS:                                          // v0.10.3 phase 29b
-        if (!g_fpsShow)       swprintf(sent, sentCap, L"Off now: costs nothing.");
-        else if (!timers)     swprintf(sent, sentCap, L"GPU cost: n/a (the GPU timers could not start).");
+        if (!g_fpsShow)       swprintf(sent, sentCap, TRF(L"Off now: costs nothing."));
+        else if (!timers)     swprintf(sent, sentCap, TRF(L"GPU cost: n/a (the GPU timers could not start)."));
         else if (mp.haveBox)  { wchar_t b[24];
-                                swprintf(b, 24, mp.boxMs < 0.001 ? L"<0.001 ms" : L"%.3f ms", mp.boxMs);
-                                swprintf(sent, sentCap, L"Costs %ls GPU per frame now (all pictures together).", b); }
+                                swprintf(b, 24, mp.boxMs < 0.001 ? TR(L"<0.001 ms") : TRF(L"%.3f ms"), mp.boxMs);
+                                swprintf(sent, sentCap, TRF(L"Costs %ls GPU per frame now (all pictures together)."), b); }
         break;
     case MR_TURBO:                                        // phase 30
-        if (!vr)                     swprintf(sent, sentCap, L"Greyed in flat: it changes the VR frame loop only.");
+        if (!vr)                     swprintf(sent, sentCap, TRF(L"Greyed in flat: it changes the VR frame loop only."));
         else if (g_xrTurbo && !XrTurboEffective())        // phase 52
-                                     swprintf(sent, sentCap, L"Not running now: VR FPS cap is on and wins.");
+                                     swprintf(sent, sentCap, TRF(L"Not running now: VR FPS cap is on and wins."));
         else if (g_xrTurbo && XrHook::GetTurboStats().failed)
-                                     swprintf(sent, sentCap, L"Stopped for this VR session: the runtime refused it (see the log).");
+                                     swprintf(sent, sentCap, TRF(L"Stopped for this VR session: the runtime refused it (see the log)."));
         break;
     case MR_REFLEX:                                       // phase 52
-        if (FramePace::Support() == 0) swprintf(sent, sentCap, L"Not available here: %hs.", FramePace::SupportText());
-        else if (vr)                 swprintf(sent, sentCap, L"Greyed in VR: the headset paces the game.");
+        if (FramePace::Support() == 0) swprintf(sent, sentCap, TRF(L"Not available here: %hs."), FramePace::SupportText());
+        else if (vr)                 swprintf(sent, sentCap, TRF(L"Greyed in VR: the headset paces the game."));
         break;
     case MR_FPSCAP:                                       // phase 52
-        if (vr)                      swprintf(sent, sentCap, L"Greyed in VR: use VR FPS cap.");
+        if (vr)                      swprintf(sent, sentCap, TRF(L"Greyed in VR: use VR FPS cap."));
         else if (g_fpsCap && FramePace::ReflexRunning())
-                                     swprintf(sent, sentCap, L"Limited by the NVIDIA driver now (Reflex is on).");
+                                     swprintf(sent, sentCap, TRF(L"Limited by the NVIDIA driver now (Reflex is on)."));
         break;
     case MR_VRFPSCAP:                                     // phase 52
-        if (!vr)                     swprintf(sent, sentCap, L"Greyed in flat: use FPS cap.");
+        if (!vr)                     swprintf(sent, sentCap, TRF(L"Greyed in flat: use FPS cap."));
         break;
     case MR_LOG: {                                        // phase 39: CPU, not GPU
-        if (lv == 0)          swprintf(sent, sentCap, L"Off now: nothing is written.");
+        if (lv == 0)          swprintf(sent, sentCap, TRF(L"Off now: nothing is written."));
         else if (mp.haveLog) {
             wchar_t pr[56] = L"";
             const double pms = CpuProf::SelfMsPerFrame();   // (level 4 keeps the profiler on after the menu closes)
-            if (lv >= 4 && pms >= 0.0) swprintf(pr, 56, L"; at debug the CPU profiler adds %.2f ms", pms);
-            swprintf(sent, sentCap, L"Costs %.2f ms CPU per frame now, %.0f lines/s%ls.", mp.logMs, mp.logLps, pr);
+            if (lv >= 4 && pms >= 0.0) swprintf(pr, 56, TRF(L"; at debug the CPU profiler adds %.2f ms"), pms);
+            swprintf(sent, sentCap, TRF(L"Costs %.2f ms CPU per frame now, %.0f lines/s%ls."), mp.logMs, mp.logLps, pr);
         }
         break;
     }
     case MR_VRS: case MR_VRSSIZE: case MR_VRSPASS: case MR_VRSSTR:   // phase 34 (phase 42: + Foveated passes; 59f: + strength)
-        if (Vrs::Support() == 0)     swprintf(sent, sentCap, L"Not available here: %hs.", Vrs::SupportText());
-        else if (!vr)                swprintf(sent, sentCap, L"Greyed in flat: VR only.");
-        else if (!g_vrsOn)           swprintf(sent, sentCap, L"Off now: every pixel is shaded.");
-        else if (c.have)             swprintf(sent, sentCap, L"CPU %ls ms per frame; it saves GPU time in the game's own figure.",
+        if (Vrs::Support() == 0)     swprintf(sent, sentCap, TRF(L"Not available here: %hs."), Vrs::SupportText());
+        else if (!vr)                swprintf(sent, sentCap, TRF(L"Greyed in flat: VR only."));
+        else if (!g_vrsOn)           swprintf(sent, sentCap, TRF(L"Off now: every pixel is shaded."));
+        else if (c.have)             swprintf(sent, sentCap, TRF(L"CPU %ls ms per frame; it saves GPU time in the game's own figure."),
                                               (MenuNum(f, 64, cpuVrs), f));
-        else                         swprintf(sent, sentCap, L"It saves time in the game's own GPU figure, not in the mod's.");
+        else                         swprintf(sent, sentCap, TRF(L"It saves time in the game's own GPU figure, not in the mod's."));
         break;
     case MR_VRSEYE: {                                     // phase 59: the gaze state, live
         // phase 59e (issue #21): the figures move every frame, and a changed text rebuilds the whole panel image (GDI + upload +
@@ -18005,33 +18203,33 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         const uint64_t nowMs = GetTickCount64();
         if (!s_atMs || nowMs - s_atMs >= 1000) { es = XrHook::GetEyeGazeStats(); s_refills = Vrs::GetStats().dynRefills; s_atMs = nowMs; }
         const uint64_t loc = es.locates ? es.locates : 1;
-        if (Vrs::Support() == 0)     swprintf(sent, sentCap, L"Not available here: %hs.", Vrs::SupportText());
-        else if (!vr)                swprintf(sent, sentCap, L"Greyed in flat: VR only.");
-        else if (!g_vrsOn)           swprintf(sent, sentCap, L"Foveated (VRS) is off: switch it on first.");
-        else if (!g_vrsEye)          swprintf(sent, sentCap, L"Off now: the sharp centre stays at the lens centre.");
-        else if (g_vrsEyeFake)       swprintf(sent, sentCap, L"Fake gaze (vrs_eye_fake = 1): the sharp area circles slowly, a test.");
-        else if (!g_vrsEyeAtStart)   swprintf(sent, sentCap, L"Foveated (VRS) was off at the game's start: save (Shift+F12) and restart "
-                                              L"the game to ask the headset for eye gaze.");
+        if (Vrs::Support() == 0)     swprintf(sent, sentCap, TRF(L"Not available here: %hs."), Vrs::SupportText());
+        else if (!vr)                swprintf(sent, sentCap, TRF(L"Greyed in flat: VR only."));
+        else if (!g_vrsOn)           swprintf(sent, sentCap, TRF(L"Foveated (VRS) is off: switch it on first."));
+        else if (!g_vrsEye)          swprintf(sent, sentCap, TRF(L"Off now: the sharp centre stays at the lens centre."));
+        else if (g_vrsEyeFake)       swprintf(sent, sentCap, TRF(L"Fake gaze (vrs_eye_fake = 1): the sharp area circles slowly, a test."));
+        else if (!g_vrsEyeAtStart)   swprintf(sent, sentCap, TRF(L"Foveated (VRS) was off at the game's start: save (Shift+F12) and restart "
+                                              L"the game to ask the headset for eye gaze."));
         else if (es.ext == 1 || es.ext == 4 || es.system == 0)
-                                     swprintf(sent, sentCap, L"No eye tracker reported by this headset / runtime: the lens centre is used.");
-        else                         swprintf(sent, sentCap, L"Gaze valid in %.0f %% of %llu frames so far; mask refills %llu.",
+                                     swprintf(sent, sentCap, TRF(L"No eye tracker reported by this headset / runtime: the lens centre is used."));
+        else                         swprintf(sent, sentCap, TRF(L"Gaze valid in %.0f %% of %llu frames so far; mask refills %llu."),
                                               100.0 * (double)es.valid / (double)loc, (unsigned long long)es.locates,
                                               (unsigned long long)s_refills);
         break;
     }
     case MR_HMASK: {                                      // phase 40
         const XrHook::HiddenStats hs = XrHook::GetHiddenStats();
-        if (hs.ext == 1)             swprintf(sent, sentCap, L"Not available: this VR runtime reports no hidden area.");
-        else if (!vr)                swprintf(sent, sentCap, L"Greyed in flat: VR only.");
-        else if (!g_xrHiddenMask)    swprintf(sent, sentCap, L"Off now: every pixel is drawn.");
-        else if (c.have)             swprintf(sent, sentCap, L"CPU %ls ms per frame; it saves GPU time in the game's own figure.",
+        if (hs.ext == 1)             swprintf(sent, sentCap, TRF(L"Not available: this VR runtime reports no hidden area."));
+        else if (!vr)                swprintf(sent, sentCap, TRF(L"Greyed in flat: VR only."));
+        else if (!g_xrHiddenMask)    swprintf(sent, sentCap, TRF(L"Off now: every pixel is drawn."));
+        else if (c.have)             swprintf(sent, sentCap, TRF(L"CPU %ls ms per frame; it saves GPU time in the game's own figure."),
                                               (MenuNum(f, 64, cpuHm), f));
-        else                         swprintf(sent, sentCap, L"It saves time in the game's own GPU figure, not in the mod's.");
+        else                         swprintf(sent, sentCap, TRF(L"It saves time in the game's own GPU figure, not in the mod's."));
         break;
     }
     case MR_UPSCALE:
-        if (!dlaaOn)    swprintf(sent, sentCap, L"Off now (the mod is off).");
-        else if (!upOn) swprintf(sent, sentCap, L"Off now: the game's own stretch is used below Scaling 100 %%.");
+        if (!dlaaOn)    swprintf(sent, sentCap, TRF(L"Off now (the mod is off)."));
+        else if (!upOn) swprintf(sent, sentCap, TRF(L"Off now: the game's own stretch is used below Scaling 100 %%."));
         break;
     default: break;
     }
@@ -18054,8 +18252,8 @@ const char* const kMirStateLog[7] = { "off", "1 mirror (largest)", "1 mirror (la
                                       "all, camera motion only" };
 // row values: the 144-px value column fits ~20 characters ("all, camera motion only" would end in "..."); measured at Segoe UI
 // 15 px: "all, camera motion" 122 px, "2 mirrors, camera" 115, "all, every 2nd frame" 130, "all, 2nd fr., camera" 121
-const wchar_t* const kMirStateRow[7] = { L"off", L"1 mirror (largest)", L"1 mirror, camera", L"2 mirrors (largest)",
-                                         L"2 mirrors, camera", L"all mirrors", L"all, camera motion" };
+const wchar_t* const kMirStateRow[7] = { N_(L"off"), N_(L"1 mirror (largest)"), N_(L"1 mirror, camera"), N_(L"2 mirrors (largest)"),
+                                         N_(L"2 mirrors, camera"), N_(L"all mirrors"), N_(L"all, camera motion") };
 // The state in force as TWICE its index: even = one of the seven; odd = a dlaa.ini / profile combination between two of them,
 // so Left / Right go to the nearest state on that side -- mode 2 with mirror_vr_views 3..8 = 9 (between 2 mirrors, camera and
 // all; either mirror_mv), mode 3 (each unit every 2nd frame) = 11 (between all and all, camera; either mirror_mv). Mode 1 with
@@ -18074,11 +18272,11 @@ int MirMenuPos(bool vr) {
 void MirMenuValue(wchar_t* out, size_t cap, bool vr) {
     const int mode = vr ? g_mirVrMode : g_mirFlatMode;
     const bool cam = g_mirCamOnly;
-    if (g_mirOn.load() && mode == 0)                 swprintf(out, cap, L"off (mode 0)");
+    if (g_mirOn.load() && mode == 0)                 swprintf(out, cap, TRF(L"off (mode 0)"));
     else if (g_mirOn.load() && mode == 2 && g_mirVrViews > 2)
-        swprintf(out, cap, cam ? L"%d largest, camera" : L"%d largest", g_mirVrViews);
-    else if (g_mirOn.load() && mode == 3)            swprintf(out, cap, cam ? L"all, 2nd fr., camera" : L"all, every 2nd frame");
-    else                                             swprintf(out, cap, L"%ls", kMirStateRow[MirMenuPos(vr) / 2]);
+        swprintf(out, cap, cam ? TRF(L"%d largest, camera") : TRF(L"%d largest"), g_mirVrViews);
+    else if (g_mirOn.load() && mode == 3)            swprintf(out, cap, cam ? TR(L"all, 2nd fr., camera") : TR(L"all, every 2nd frame"));
+    else                                             swprintf(out, cap, L"%ls", Lang::Tr(kMirStateRow[MirMenuPos(vr) / 2]));
 }
 // Left / Right on the row (dir -1 / +1): the next state on that side, wrap-around. Marks mirror_dlaa and the mode of this kind
 // explicit (profiles keep them; Shift+F12 / the Save row writes them with mirror_mv), restarts the mirror histories (as Alt+F6;
@@ -18195,37 +18393,38 @@ struct MenuHkLine {
     const char* name;                          // the line's name (the Action column, ~28 characters fit)
 };
 const MenuHkLine kMenuHkLines[] = {
-    { KA_MODE_CYCLE,     "Mode (DLAA / DLSS / off)" },
-    { KA_PROFILE,        "Performance profile" },
-    { KA_MODEL1,         "DLAA model 1 (K)" },
-    { KA_MODEL2,         "DLAA model 2 (E)" },
-    { KA_MODEL3,         "DLAA model 3 (F)" },
-    { KA_MODEL4,         "DLAA model 4 (M)" },
-    { KA_SHARPEN_DOWN,   "Sharpen strength -" },
-    { KA_SHARPEN_UP,     "Sharpen strength +" },
-    { KA_WIDTH_DOWN,     "Sharpen width -" },
-    { KA_WIDTH_UP,       "Sharpen width +" },
-    { KA_LOD_DOWN,       "Texture sharpness -" },
-    { KA_LOD_UP,         "Texture sharpness +" },
-    { KA_LOD_CUT_DOWN,   "Cut-out sharpness -" },
-    { KA_LOD_CUT_UP,     "Cut-out sharpness +" },
-    { KA_AREA_DOWN,      "DLAA area (VR) -" },
-    { KA_AREA_UP,        "DLAA area (VR) +" },
-    { KA_DRAWID_TOGGLE,  "Per-part motion vectors" },
-    { KA_MIRROR_TOGGLE,  "Mirror DLAA on / off" },
-    { KA_PRE_TONEMAP,    "DLAA before tonemap (flat)" },
-    { KA_FWD_DEPTH,      "See-through depth" },
-    { KA_MV_DILATE,      "Thin-wire motion (DLAA)" },
-    { KA_FWD_CONSERVATIVE, "Thin-wire depth" },
-    { KA_WIRE_WIDEN,     "Thin-wire widening" },
-    { KA_UPSCALE_TOGGLE, "DLSS upscale" },
-    { KA_DLAA_TOGGLE,    "DLAA on / off" },
-    { KA_SAVE,           "Save to dlaa.ini" },
-    { KA_MENU,           "Menu: open / close" },
-    { KA_MENU_UP,        "Menu: up" },
-    { KA_MENU_DOWN,      "Menu: down" },
-    { KA_MENU_LEFT,      "Menu: left" },
-    { KA_MENU_RIGHT,     "Menu: right" },
+    { KA_MODE_CYCLE,     NA_("Mode (DLAA / DLSS / off)") },
+    { KA_PROFILE,        NA_("Performance profile") },
+    { KA_MODEL1,         NA_("DLAA model 1 (K)") },
+    { KA_MODEL2,         NA_("DLAA model 2 (E)") },
+    { KA_MODEL3,         NA_("DLAA model 3 (F)") },
+    { KA_MODEL4,         NA_("DLAA model 4 (M)") },
+    { KA_SHARPEN_DOWN,   NA_("Sharpen strength -") },
+    { KA_SHARPEN_UP,     NA_("Sharpen strength +") },
+    { KA_WIDTH_DOWN,     NA_("Sharpen width -") },
+    { KA_WIDTH_UP,       NA_("Sharpen width +") },
+    { KA_LOD_DOWN,       NA_("Texture sharpness -") },
+    { KA_LOD_UP,         NA_("Texture sharpness +") },
+    { KA_LOD_CUT_DOWN,   NA_("Cut-out sharpness -") },
+    { KA_LOD_CUT_UP,     NA_("Cut-out sharpness +") },
+    { KA_AREA_DOWN,      NA_("DLAA area (VR) -") },
+    { KA_AREA_UP,        NA_("DLAA area (VR) +") },
+    { KA_DRAWID_TOGGLE,  NA_("Per-part motion vectors") },
+    { KA_MIRROR_TOGGLE,  NA_("Mirror DLAA on / off") },
+    { KA_PRE_TONEMAP,    NA_("DLAA before tonemap (flat)") },
+    { KA_FWD_DEPTH,      NA_("See-through depth") },
+    { KA_MV_DILATE,      NA_("Thin-wire motion (DLAA)") },
+    { KA_FWD_CONSERVATIVE, NA_("Thin-wire depth") },
+    { KA_WIRE_WIDEN,     NA_("Thin-wire widening") },
+    { KA_UPSCALE_TOGGLE, NA_("DLSS upscale") },
+    { KA_DLAA_TOGGLE,    NA_("DLAA on / off") },
+    { KA_SHIMMER_CAP,    NA_("Shimmer capture") },        // phase 71: bind a wheel button here
+    { KA_SAVE,          NA_("Save to dlaa.ini") },
+    { KA_MENU,           NA_("Menu: open / close") },
+    { KA_MENU_UP,        NA_("Menu: up") },
+    { KA_MENU_DOWN,      NA_("Menu: down") },
+    { KA_MENU_LEFT,      NA_("Menu: left") },
+    { KA_MENU_RIGHT,     NA_("Menu: right") },
 };
 constexpr int kMenuHkActions = (int)(sizeof(kMenuHkLines) / sizeof(kMenuHkLines[0]));
 constexpr int kMenuHkCount = 1 + kMenuHkActions;   // line 0 = "< Back", line i = kMenuHkLines[i - 1]
@@ -18548,38 +18747,38 @@ void MenuBuildHotkeysPanel(TuningMenu::Panel& p, bool vr) {
     using namespace TuningMenu;
     constexpr size_t kN = sizeof(p.rows[0].name) / sizeof(wchar_t), kV = sizeof(p.rows[0].value) / sizeof(wchar_t),
                      kK = sizeof(p.rows[0].keys) / sizeof(wchar_t);
-    swprintf(p.title, sizeof(p.title) / sizeof(wchar_t), L"ETS2 / ATS DLAA & DLSS mod v%hs - hotkeys", DLAA_INJECTOR_VERSION);
-    swprintf(p.colHead[0], 24, L"Action");
-    swprintf(p.colHead[1], 24, L"Keyboard");
-    swprintf(p.colHead[2], 24, L"Controller");
+    swprintf(p.title, sizeof(p.title) / sizeof(wchar_t), TRF(L"ETS2 / ATS DLAA & DLSS mod v%hs - hotkeys"), DLAA_INJECTOR_VERSION);
+    swprintf(p.colHead[0], 32, TRF(L"Action"));
+    swprintf(p.colHead[1], 32, TRF(L"Keyboard"));
+    swprintf(p.colHead[2], 32, TRF(L"Controller"));
     swprintf(p.costHead, sizeof(p.costHead) / sizeof(wchar_t), L" ");   // (no cost column on this page)
     MenuPerfLines(p, vr);
     char snUp[40], snDown[40], snLeft[40], snRight[40], snMenu[40];
-    KeyShortName(KA_MENU_UP, snUp, sizeof(snUp));
-    KeyShortName(KA_MENU_DOWN, snDown, sizeof(snDown));
-    KeyShortName(KA_MENU_LEFT, snLeft, sizeof(snLeft));
-    KeyShortName(KA_MENU_RIGHT, snRight, sizeof(snRight));
-    KeyShortName(KA_MENU, snMenu, sizeof(snMenu));
+    KeyShortNameUi(KA_MENU_UP, snUp, sizeof(snUp));
+    KeyShortNameUi(KA_MENU_DOWN, snDown, sizeof(snDown));
+    KeyShortNameUi(KA_MENU_LEFT, snLeft, sizeof(snLeft));
+    KeyShortNameUi(KA_MENU_RIGHT, snRight, sizeof(snRight));
+    KeyShortNameUi(KA_MENU, snMenu, sizeof(snMenu));
     const ULONGLONG now = GetTickCount64();
-    swprintf(p.rows[0].name, kN, L"< Back");
+    swprintf(p.rows[0].name, kN, TRF(L"< Back"));
     swprintf(p.rows[0].value, kV, L"-");
-    swprintf(p.rows[0].keys, kK, L"%hs / %hs: main menu", snLeft, snRight);
+    swprintf(p.rows[0].keys, kK, TRF(L"%hs / %hs: main menu"), snLeft, snRight);
     for (int i = 1; i < kMenuHkCount; ++i) {
         Row& r = p.rows[i];
         const KeyBind& k = g_keys[kMenuHkLines[i - 1].a];
-        MenuWiden(r.name, kN, kMenuHkLines[i - 1].name);
+        wcsncpy_s(r.name, kN, Lang::TrA(kMenuHkLines[i - 1].name), _TRUNCATE);
         char t[64];
-        if (k.vk) { KeyBindText(k.vk, k.mods, 0, t, sizeof(t)); MenuWiden(r.value, kV, t); }
-        else      swprintf(r.value, kV, L"%ls", k.joy ? L"-" : L"none");
+        if (k.vk) { KeyUiText(k.vk, k.mods, 0, t, sizeof(t)); MenuWiden(r.value, kV, t); }
+        else      swprintf(r.value, kV, L"%ls", k.joy ? L"-" : TR(L"none"));
         if (k.joy) { JoyTokenName(k.joy, t, sizeof(t)); MenuWiden(r.keys, kK, t); }
         else       swprintf(r.keys, kK, L"-");
         const bool menuLine = MenuIsMenuAction(kMenuHkLines[i - 1].a);
         const bool note = g_hk.noteLine == i && now < g_hk.noteUntil;
         if (g_hk.on && g_hk.line == i) {
             r.wide = 1;
-            if (note)          swprintf(r.value, kV, L"%ls -- press another", g_hk.note);
-            else if (menuLine) swprintf(r.value, kV, L"Press a key or button...  (Esc = cancel, 10 s)");
-            else               swprintf(r.value, kV, L"Press a key or button...  (%hs = cancel, Backspace = clear)", snLeft);
+            if (note)          swprintf(r.value, kV, TRF(L"%ls -- press another"), g_hk.note);
+            else if (menuLine) swprintf(r.value, kV, TRF(L"Press a key or button...  (Esc = cancel, 10 s)"));
+            else               swprintf(r.value, kV, TRF(L"Press a key or button...  (%hs = cancel, Backspace = clear)"), snLeft);
         } else if (note) {
             r.wide = 1;
             swprintf(r.value, kV, L"%ls", g_hk.note);
@@ -18590,41 +18789,41 @@ void MenuBuildHotkeysPanel(TuningMenu::Panel& p, bool vr) {
     constexpr size_t kD = sizeof(p.desc) / sizeof(wchar_t);
     const int sel = g_hk.on ? g_hk.line : p.sel;
     if (sel == 0) {
-        swprintf(p.desc, kD, L"Back to the main menu. %hs does the same on every line of this page. Every key and controller button "
-                 L"except the 5 menu keys still reaches the game while this menu is open, so you can keep driving.", snLeft);
+        swprintf(p.desc, kD, TRF(L"Back to the main menu. %hs does the same on every line of this page. Every key and controller button "
+                 L"except the 5 menu keys still reaches the game while this menu is open, so you can keep driving."), snLeft);
     } else {
         const KeyAction a = kMenuHkLines[sel - 1].a;
         const bool menuLine = MenuIsMenuAction(a);
         if (g_hk.on && menuLine)
-            swprintf(p.desc, kD, L"Press ONE new key or controller button for %hs: any key, also another menu key (it is taken from "
+            swprintf(p.desc, kD, TRF(L"Press ONE new key or controller button for %ls: any key, also another menu key (it is taken from "
                      L"it). Keys / buttons already held now are ignored until released. Esc or Backspace cancels, so does 10 s "
-                     L"without a press; menu keys cannot be cleared here.", kMenuHkLines[sel - 1].name);
+                     L"without a press; menu keys cannot be cleared here."), Lang::TrA(kMenuHkLines[sel - 1].name));
         else if (g_hk.on)
-            swprintf(p.desc, kD, L"Press ONE new key (Shift / Ctrl / Alt with it make a combination) or controller button / "
+            swprintf(p.desc, kD, TRF(L"Press ONE new key (Shift / Ctrl / Alt with it make a combination) or controller button / "
                      L"D-pad direction. Keys / buttons already held now (a shifter gear) are ignored until released; axes never "
-                     L"bind. %hs or Esc cancels, Backspace clears to none, 10 s without a press cancels.", snLeft);
+                     L"bind. %hs or Esc cancels, Backspace clears to none, 10 s without a press cancels."), snLeft);
         else if (menuLine)
-            swprintf(p.desc, kD, L"One of the 5 keys that drive this menu (dlaa.ini %hs). %hs, then press the new key or button: "
+            swprintf(p.desc, kD, TRF(L"One of the 5 keys that drive this menu (dlaa.ini %hs). %hs, then press the new key or button: "
                      L"the other menu keys can be taken too. These lines cannot be cleared, and each of the 5 must keep a "
-                     L"binding (a press that leaves another one empty is refused). Saved to dlaa.ini at once.", g_keys[a].ini, snRight);
+                     L"binding (a press that leaves another one empty is refused). Saved to dlaa.ini at once."), g_keys[a].ini, snRight);
         else
-            swprintf(p.desc, kD, L"%hs (dlaa.ini %hs). %hs, then press the new key or button: a key replaces the Keyboard part, a "
+            swprintf(p.desc, kD, TRF(L"%ls (dlaa.ini %hs). %hs, then press the new key or button: a key replaces the Keyboard part, a "
                      L"controller button or D-pad direction the Controller part. A key / button used by another action moves "
-                     L"here. Saved to dlaa.ini at once.", kMenuHkLines[sel - 1].name, g_keys[a].ini, snRight);
+                     L"here. Saved to dlaa.ini at once."), Lang::TrA(kMenuHkLines[sel - 1].name), g_keys[a].ini, snRight);
     }
     wchar_t f[3][128];
     if (g_hk.on && MenuIsMenuAction(MenuHkAction(g_hk.line))) {
-        swprintf(f[0], 128, L"press the new key / button   Esc cancel   (10 s)");
-        swprintf(f[1], 128, L"press a key / button   Esc cancel");
-        swprintf(f[2], 128, L"Esc cancel");
+        swprintf(f[0], 128, TRF(L"press the new key / button   Esc cancel   (10 s)"));
+        swprintf(f[1], 128, TRF(L"press a key / button   Esc cancel"));
+        swprintf(f[2], 128, TRF(L"Esc cancel"));
     } else if (g_hk.on) {
-        swprintf(f[0], 128, L"press the new key / button   %hs cancel   Backspace clear", snLeft);
-        swprintf(f[1], 128, L"%hs cancel   Backspace clear", snLeft);
-        swprintf(f[2], 128, L"%hs cancel", snLeft);
+        swprintf(f[0], 128, TRF(L"press the new key / button   %hs cancel   Backspace clear"), snLeft);
+        swprintf(f[1], 128, TRF(L"%hs cancel   Backspace clear"), snLeft);
+        swprintf(f[2], 128, TRF(L"%hs cancel"), snLeft);
     } else {
-        swprintf(f[0], 128, L"%hs / %hs select   %hs bind   %hs back   %hs close", snUp, snDown, snRight, snLeft, snMenu);
-        swprintf(f[1], 128, L"%hs bind   %hs back   %hs close", snRight, snLeft, snMenu);
-        swprintf(f[2], 128, L"%hs bind   %hs back", snRight, snLeft);
+        swprintf(f[0], 128, TRF(L"%hs / %hs select   %hs bind   %hs back   %hs close"), snUp, snDown, snRight, snLeft, snMenu);
+        swprintf(f[1], 128, TRF(L"%hs bind   %hs back   %hs close"), snRight, snLeft, snMenu);
+        swprintf(f[2], 128, TRF(L"%hs bind   %hs back"), snRight, snLeft);
     }
     const wchar_t* const cand[3] = { f[0], f[1], f[2] };
     MenuFitFooter(cand, 3, p.footer, sizeof(p.footer) / sizeof(wchar_t));
@@ -18683,13 +18882,13 @@ void MenuResetDecorate(TuningMenu::Panel& p, int sel) {
     if (sel != MR_RESET || !g_mrh.t0) return;
     TuningMenu::Row& r = p.rows[MR_RESET];
     constexpr size_t kK = sizeof(r.keys) / sizeof(wchar_t);
-    if (g_mrh.done) { swprintf(r.keys, kK, L"reset done"); return; }
+    if (g_mrh.done) { swprintf(r.keys, kK, TRF(L"reset done")); return; }
     if (GetTickCount64() - g_mrh.t0 < kMenuTapMs) return; // a tap shows nothing (as the bind bar)
     wchar_t bar[kMenuBindBar + 1];
     MenuHoldBar(g_mrh.bar, bar);
     char sn[40];
-    KeyShortName(KA_MENU_RIGHT, sn, sizeof(sn));
-    swprintf(r.keys, kK, L"hold %ls %hs", bar, sn);
+    KeyShortNameUi(KA_MENU_RIGHT, sn, sizeof(sn));
+    swprintf(r.keys, kK, TRF(L"hold %ls %hs"), bar, sn);
 }
 
 // One row: name, the hotkey text (+ "  (VR only)" / "  (flat only)" tag), greyed = not applicable now. The value is set by the caller.
@@ -18697,10 +18896,11 @@ void MenuRow(TuningMenu::Panel& p, int id, const wchar_t* name, const char* keys
     TuningMenu::Row& r = p.rows[id];
     if (MenuRowGroup(id) >= 0) swprintf(r.name, sizeof(r.name) / sizeof(r.name[0]), L"    %ls", name);   // phase 46b: a group's
     else                       wcsncpy_s(r.name, name, _TRUNCATE);                                             // rows are indented
-    char kb[128];
-    if (tag) snprintf(kb, sizeof(kb), "%s  (%s)", keys, tag);
-    else     snprintf(kb, sizeof(kb), "%s", keys);
-    MenuWiden(r.keys, sizeof(r.keys) / sizeof(r.keys[0]), kb);
+    MenuWiden(r.keys, sizeof(r.keys) / sizeof(r.keys[0]), keys);
+    if (tag) {                                            // phase 74: the tag in the menu's language
+        const size_t kK = sizeof(r.keys) / sizeof(r.keys[0]), l = wcslen(r.keys);
+        swprintf(r.keys + l, kK - l, L"  (%ls)", Lang::TrA(tag));
+    }
     r.greyed = greyed ? 1 : 0;
 }
 // The panel as it is now (built at every draw while open: a few dozen snprintf, nothing per frame when closed).
@@ -18709,69 +18909,72 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     const bool vr = MenuVr();
     if (g_menuPage == kMenuPageHotkeys) { MenuBuildHotkeysPanel(p, vr); return; }   // v0.12.1 phase 50: the Hotkeys page
     constexpr size_t kV = sizeof(p.rows[0].value) / sizeof(wchar_t);
-    swprintf(p.title, sizeof(p.title) / sizeof(wchar_t), L"ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu", DLAA_INJECTOR_VERSION);
+    swprintf(p.title, sizeof(p.title) / sizeof(wchar_t), TRF(L"ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"), DLAA_INJECTOR_VERSION);
     p.nRows = MR_COUNT;
     p.sel = g_menuSel;
+    swprintf(p.colHead[0], 32, TRF(L"Setting"));         // phase 74: the column heads in the menu's language (menu.cpp's
+    swprintf(p.colHead[1], 32, TRF(L"Value"));           //   defaults are the English ones)
+    swprintf(p.colHead[2], 32, TRF(L"Hotkey"));
     char k[128];
-    auto pair = [&](KeyAction a, KeyAction b) { snprintf(k, sizeof(k), "%s / %s", KeyName(a), KeyName(b)); return k; };
-    const wchar_t* const onOff[2] = { L"off", L"on" };
+    auto pair = [&](KeyAction a, KeyAction b) { snprintf(k, sizeof(k), "%s / %s", KeyNameUi(a), KeyNameUi(b)); return k; };
+    const wchar_t* const onOff[2] = { TR(L"off"), TR(L"on") };
     // v0.10.3 phase 29c: the SHORT names of the 5 menu keys (footer, Menu keys row, group headers, the two built descriptions)
     char snMenu[40], snUp[40], snDown[40], snLeft[40], snRight[40];
-    KeyShortName(KA_MENU, snMenu, sizeof(snMenu));
-    KeyShortName(KA_MENU_UP, snUp, sizeof(snUp));
-    KeyShortName(KA_MENU_DOWN, snDown, sizeof(snDown));
-    KeyShortName(KA_MENU_LEFT, snLeft, sizeof(snLeft));
-    KeyShortName(KA_MENU_RIGHT, snRight, sizeof(snRight));
+    KeyShortNameUi(KA_MENU, snMenu, sizeof(snMenu));
+    KeyShortNameUi(KA_MENU_UP, snUp, sizeof(snUp));
+    KeyShortNameUi(KA_MENU_DOWN, snDown, sizeof(snDown));
+    KeyShortNameUi(KA_MENU_LEFT, snLeft, sizeof(snLeft));
+    KeyShortNameUi(KA_MENU_RIGHT, snRight, sizeof(snRight));
     char holdS[16];                                       // v0.10.3 phase 29d: the Reset hold time ("5", "2.5")
     MenuHoldSecs(holdS, sizeof(holdS));
     // a group header row: "..." collapsed / "shown" expanded; the Hotkey column says what opens / closes it
     auto groupRow = [&](int id, const wchar_t* name) {
         const bool o = MenuGrpOpen(id);
-        snprintf(k, sizeof(k), "%s: %s", o ? snLeft : snRight, o ? "close" : "open");
-        wchar_t hn[48];                                   // phase 46b: an arrow shows the state (WGL4 glyphs: in Segoe UI)
-        swprintf(hn, 48, L"%lc %ls", o ? (wchar_t)0x25BC : (wchar_t)0x25BA, name);
+        snprintf(k, sizeof(k), "%s: %s", o ? snLeft : snRight, MenuUtf8(o ? TR(L"close") : TR(L"open")));   // phase 74: translated
+        wchar_t hn[64];                                   // phase 46b: an arrow shows the state (WGL4 glyphs: in Segoe UI)
+        swprintf(hn, 64, L"%lc %ls", o ? (wchar_t)0x25BC : (wchar_t)0x25BA, Lang::Tr(name));   // phase 74: every group title translated here
         MenuRow(p, id, hn, k, nullptr, false);
         const int gi = MenuGroupIndex(id);                // closed = "closed (N)" (the group's size), open = "open"
-        if (o || gi < 0) swprintf(p.rows[id].value, kV, L"%ls", o ? L"open" : L"closed");
-        else             swprintf(p.rows[id].value, kV, L"closed (%d)", kMenuGroups[gi].last - kMenuGroups[gi].header);
+        if (o || gi < 0) swprintf(p.rows[id].value, kV, L"%ls", o ? TR(L"open") : TR(L"closed"));
+        else             swprintf(p.rows[id].value, kV, TRF(L"closed (%d)"), kMenuGroups[gi].last - kMenuGroups[gi].header);
     };
 
-    MenuRow(p, MR_MODE, L"Mode", KeyName(KA_MODE_CYCLE), nullptr, false);
-    swprintf(p.rows[MR_MODE].value, kV, L"%ls", !g_dlaaOn.load() ? L"off" : (g_dlssUpscale.load() ? L"DLSS" : L"DLAA"));
-    MenuRow(p, MR_PROFILE, L"Performance profile", KeyName(KA_PROFILE), nullptr, false);
-    swprintf(p.rows[MR_PROFILE].value, kV, L"%hs", kProfName[g_profile < 0 || g_profile > 2 ? 0 : g_profile]);
-    snprintf(k, sizeof(k), "%s .. %s", KeyName(KA_MODEL1), KeyName(KA_MODEL4));
-    MenuRow(p, MR_MODEL, L"DLAA model", k, nullptr, false);
+    MenuRow(p, MR_MODE, TR(L"Mode"), KeyNameUi(KA_MODE_CYCLE), nullptr, false);
+    swprintf(p.rows[MR_MODE].value, kV, L"%ls", !g_dlaaOn.load() ? TR(L"off") : (g_dlssUpscale.load() ? TR(L"DLSS") : TR(L"DLAA")));
+    MenuRow(p, MR_PROFILE, TR(L"Performance profile"), KeyNameUi(KA_PROFILE), nullptr, false);
+    swprintf(p.rows[MR_PROFILE].value, kV, L"%ls", Lang::TrA(kProfName[g_profile < 0 || g_profile > 2 ? 0 : g_profile]));
+    snprintf(k, sizeof(k), "%s .. %s", KeyNameUi(KA_MODEL1), KeyNameUi(KA_MODEL4));
+    MenuRow(p, MR_MODEL, TR(L"DLAA model"), k, nullptr, false);
     {   // v0.10.0: show the model number the keys use + the preset letter (1 (K) / 2 (E) / 3 (F) / 4 (M))
         const char* pn = SceneDlaa::DlssPresetName();
         const char* num = !strcmp(pn, "E") ? "2" : (!strcmp(pn, "F") ? "3" : (!strcmp(pn, "M") ? "4" : (!strcmp(pn, "default") ? "1" : "?")));
         if (!strcmp(pn, "default"))      swprintf(p.rows[MR_MODEL].value, kV, L"1 (K)");     // "default" = the driver's pick = K
-        else if (num[0] == '?')          swprintf(p.rows[MR_MODEL].value, kV, L"%hs (dlaa.ini)", pn);   // J / L set in dlaa.ini
+        else if (num[0] == '?')          swprintf(p.rows[MR_MODEL].value, kV, TRF(L"%hs (dlaa.ini)"), pn);   // J / L set in dlaa.ini
         else                             swprintf(p.rows[MR_MODEL].value, kV, L"%hs (%hs)", num, pn);
     }
-    groupRow(MR_PICGRP, kMenuGroups[MenuGroupIndex(MR_PICGRP)].title);   // phase 43: menu categories
-    MenuRow(p, MR_SHARP, L"Sharpen strength", pair(KA_SHARPEN_DOWN, KA_SHARPEN_UP), nullptr, false);
+    groupRow(MR_PICGRP, Lang::Tr(kMenuGroups[MenuGroupIndex(MR_PICGRP)].title));   // phase 43: menu categories
+    MenuRow(p, MR_SHARP, TR(L"Sharpen strength"), pair(KA_SHARPEN_DOWN, KA_SHARPEN_UP), nullptr, false);
     const float sharp = SceneDlaa::Sharpness();
-    swprintf(p.rows[MR_SHARP].value, kV, sharp <= 0.0f ? L"%.1f (off)" : L"%.1f", (double)sharp);
-    MenuRow(p, MR_WIDTH, L"Sharpen width", pair(KA_WIDTH_DOWN, KA_WIDTH_UP), nullptr, false);
-    swprintf(p.rows[MR_WIDTH].value, kV, L"%.1f px", (double)SceneDlaa::SharpRadius());
-    MenuRow(p, MR_LOD, L"Texture sharpness", pair(KA_LOD_DOWN, KA_LOD_UP), nullptr, false);
-    swprintf(p.rows[MR_LOD].value, kV, g_lodBias == 0.0f ? L"%.2f (off)" : L"%.2f", (double)g_lodBias);
-    MenuRow(p, MR_LODCUT, L"Cut-out texture sharpness", pair(KA_LOD_CUT_DOWN, KA_LOD_CUT_UP), nullptr, false);
-    if (LodCutFollows()) swprintf(p.rows[MR_LODCUT].value, kV, L"same (%.2f)", (double)LodCutUserValue());
+    swprintf(p.rows[MR_SHARP].value, kV, sharp <= 0.0f ? TRF(L"%.1f (off)") : L"%.1f", (double)sharp);
+    MenuRow(p, MR_WIDTH, TR(L"Sharpen width"), pair(KA_WIDTH_DOWN, KA_WIDTH_UP), nullptr, false);
+    swprintf(p.rows[MR_WIDTH].value, kV, TRF(L"%.1f px"), (double)SceneDlaa::SharpRadius());
+    MenuRow(p, MR_LOD, TR(L"Texture sharpness"), pair(KA_LOD_DOWN, KA_LOD_UP), nullptr, false);
+    swprintf(p.rows[MR_LOD].value, kV, g_lodBias == 0.0f ? TRF(L"%.2f (off)") : L"%.2f", (double)g_lodBias);
+    MenuRow(p, MR_LODCUT, TR(L"Cut-out texture sharpness"), pair(KA_LOD_CUT_DOWN, KA_LOD_CUT_UP), nullptr, false);
+    if (LodCutFollows()) swprintf(p.rows[MR_LODCUT].value, kV, TRF(L"same (%.2f)"), (double)LodCutUserValue());
     else                 swprintf(p.rows[MR_LODCUT].value, kV, L"%.2f", (double)g_lodCutBias);
-    MenuRow(p, MR_AREA, L"DLAA area (VR)", pair(KA_AREA_DOWN, KA_AREA_UP), vr ? nullptr : "VR only", !vr);
+    MenuRow(p, MR_AREA, TR(L"DLAA area (VR)"), pair(KA_AREA_DOWN, KA_AREA_UP), vr ? nullptr : NA_("VR only"), !vr);
     if (vr) swprintf(p.rows[MR_AREA].value, kV, L"%d %%", SceneDlaa::Area());
-    else    swprintf(p.rows[MR_AREA].value, kV, L"100 %% (flat)");
-    groupRow(MR_MOTGRP, kMenuGroups[MenuGroupIndex(MR_MOTGRP)].title);   // phase 43: menu categories
-    MenuRow(p, MR_DRAWIDS, L"Per-part motion vectors", KeyName(KA_DRAWID_TOGGLE), nullptr, false);
-    swprintf(p.rows[MR_DRAWIDS].value, kV, L"%ls", g_objMode == 2 ? L"on" : (g_objMode == 1 ? L"old stencil ids" : L"off"));
-    MenuRow(p, MR_MIRROR, L"Mirror DLAA", KeyName(KA_MIRROR_TOGGLE), nullptr, false);
+    else    swprintf(p.rows[MR_AREA].value, kV, TRF(L"100 %% (flat)"));
+    groupRow(MR_MOTGRP, Lang::Tr(kMenuGroups[MenuGroupIndex(MR_MOTGRP)].title));   // phase 43: menu categories
+    MenuRow(p, MR_DRAWIDS, TR(L"Per-part motion vectors"), KeyNameUi(KA_DRAWID_TOGGLE), nullptr, false);
+    swprintf(p.rows[MR_DRAWIDS].value, kV, L"%ls", g_objMode == 2 ? TR(L"on") : (g_objMode == 1 ? TR(L"old stencil ids") : TR(L"off")));
+    MenuRow(p, MR_MIRROR, TR(L"Mirror DLAA"), KeyNameUi(KA_MIRROR_TOGGLE), nullptr, false);
     MirMenuValue(p.rows[MR_MIRROR].value, kV, vr);       // v0.10.2: the seven states (CycleMirrors)
     {   // phase 41: greyed while mirror DLAA is off; mode 3 is in turns anyway
         const bool mirLive = g_mirOn.load() && MirMode() != 0;
-        MenuRow(p, MR_MIRTURNS, L"Mirrors in turns", "dlaa.ini mirror_turns", nullptr, !mirLive || MirMode() == 3);
-        swprintf(p.rows[MR_MIRTURNS].value, kV, L"%ls", MirMode() == 3 ? L"on (mode 3)" : onOff[g_mirTurns ? 1 : 0]);
+        MenuRow(p, MR_MIRTURNS, TR(L"Mirrors in turns"), "dlaa.ini mirror_turns", nullptr, !mirLive || MirMode() == 3);
+        swprintf(p.rows[MR_MIRTURNS].value, kV, L"%ls", MirMode() == 3 ? TR(L"on (mode 3)") : onOff[g_mirTurns ? 1 : 0]);
     }
     {   // phase 69: the thin-wire switches (the same functions as Alt+F10 / Alt+F11 / Alt+F12)
 #ifdef WITH_DLAA
@@ -18779,216 +18982,229 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
 #else
         const bool mvDil = false;
 #endif
-        MenuRow(p, MR_WIREMV, L"Thin-wire motion", KeyName(KA_MV_DILATE), nullptr, false);
+        MenuRow(p, MR_WIREMV, TR(L"Thin-wire motion"), KeyNameUi(KA_MV_DILATE), nullptr, false);
         swprintf(p.rows[MR_WIREMV].value, kV, L"%ls", onOff[mvDil ? 1 : 0]);
-        MenuRow(p, MR_WIREDEPTH, L"Thin-wire depth", KeyName(KA_FWD_CONSERVATIVE), nullptr, false);
+        MenuRow(p, MR_WIREDEPTH, TR(L"Thin-wire depth"), KeyNameUi(KA_FWD_CONSERVATIVE), nullptr, false);
         const int fc = g_fwdConsOn.load();
-        swprintf(p.rows[MR_WIREDEPTH].value, kV, L"%ls", fc == 1 ? L"on" : (fc == 2 ? L"on (no A2C)" : L"off"));
-        MenuRow(p, MR_WIREWIDEN, L"Thin-wire widening", KeyName(KA_WIRE_WIDEN), nullptr, false);
-        swprintf(p.rows[MR_WIREWIDEN].value, kV, L"%ls", g_wireOn.load() ? L"on (experimental)" : L"off");
+        swprintf(p.rows[MR_WIREDEPTH].value, kV, L"%ls", fc == 1 ? TR(L"on") : (fc == 2 ? TR(L"on (no A2C)") : TR(L"off")));
+        MenuRow(p, MR_WIREWIDEN, TR(L"Thin-wire widening"), KeyNameUi(KA_WIRE_WIDEN), nullptr, false);
+        swprintf(p.rows[MR_WIREWIDEN].value, kV, L"%ls", g_wireOn.load() ? TR(L"on (experimental)") : TR(L"off"));
     }
-    MenuRow(p, MR_PRETM, L"DLAA before tonemap (flat)", KeyName(KA_PRE_TONEMAP), vr ? "flat only" : nullptr, vr);
-    swprintf(p.rows[MR_PRETM].value, kV, L"%ls", !g_preCfg ? L"off (dlaa.ini 0)" : onOff[g_preOn.load() ? 1 : 0]);
-    MenuRow(p, MR_FWD, L"See-through depth", KeyName(KA_FWD_DEPTH), nullptr, false);
-    swprintf(p.rows[MR_FWD].value, kV, L"%ls", !g_fwdCfg ? L"off (dlaa.ini 0)"
-                                              : (!g_fwdOn.load() ? (g_fwdAutoOff ? L"off (VR budget)" : L"off") : L"on"));
-    MenuRow(p, MR_BIAS, L"Light glow ghosting fix", "dlaa.ini dlss_bias_mask", nullptr, false);   // phase 49
+    MenuRow(p, MR_PRETM, TR(L"DLAA before tonemap (flat)"), KeyNameUi(KA_PRE_TONEMAP), vr ? NA_("flat only") : nullptr, vr);
+    swprintf(p.rows[MR_PRETM].value, kV, L"%ls", !g_preCfg ? TR(L"off (dlaa.ini 0)") : onOff[g_preOn.load() ? 1 : 0]);
+    MenuRow(p, MR_FWD, TR(L"See-through depth"), KeyNameUi(KA_FWD_DEPTH), nullptr, false);
+    swprintf(p.rows[MR_FWD].value, kV, L"%ls", !g_fwdCfg ? TR(L"off (dlaa.ini 0)")
+                                              : (!g_fwdOn.load() ? (g_fwdAutoOff ? TR(L"off (VR budget)") : TR(L"off")) : TR(L"on")));
+    MenuRow(p, MR_BIAS, TR(L"Light glow ghosting fix"), "dlaa.ini dlss_bias_mask", nullptr, false);   // phase 49
     if (g_biasCfg > 0) swprintf(p.rows[MR_BIAS].value, kV, L"%d %%", g_biasCfg);
-    else               swprintf(p.rows[MR_BIAS].value, kV, L"off");
+    else               swprintf(p.rows[MR_BIAS].value, kV, TRF(L"off"));
     groupRow(MR_UPGRP, kMenuGroups[MenuGroupIndex(MR_UPGRP)].title);   // phase 43: menu categories
-    MenuRow(p, MR_UPSCALE, L"DLSS upscale", KeyName(KA_UPSCALE_TOGGLE), nullptr, false);
+    MenuRow(p, MR_UPSCALE, TR(L"DLSS upscale"), KeyNameUi(KA_UPSCALE_TOGGLE), nullptr, false);
     swprintf(p.rows[MR_UPSCALE].value, kV, L"%ls", onOff[g_dlssUpscale.load() ? 1 : 0]);
-    MenuRow(p, MR_DLAA, L"DLAA on / off", KeyName(KA_DLAA_TOGGLE), nullptr, false);
+    MenuRow(p, MR_DLAA, TR(L"DLAA on / off"), KeyNameUi(KA_DLAA_TOGGLE), nullptr, false);
     swprintf(p.rows[MR_DLAA].value, kV, L"%ls", onOff[g_dlaaOn.load() ? 1 : 0]);
-    MenuRow(p, MR_OFXR, L"OFXR Bridge (VR frame gen)", "dlaa.ini ofxr_bridge", nullptr, !Ofxr::g_on.load());   // info row
-    if (!Ofxr::g_on.load())      swprintf(p.rows[MR_OFXR].value, kV, L"off (dlaa.ini 0)");
-    else if (Ofxr::Detected())   swprintf(p.rows[MR_OFXR].value, kV, L"found");   // (no live counter: it would rebuild the panel every frame)
-    else                         swprintf(p.rows[MR_OFXR].value, kV, L"not found");
-    MenuRow(p, MR_VECTORXR, L"VectorXR (VR layer)", "dlaa.ini vectorxr", nullptr, !Ofxr::g_onVxr.load());   // phase 56: info row
-    if (!Ofxr::g_onVxr.load())          swprintf(p.rows[MR_VECTORXR].value, kV, L"off (dlaa.ini 0)");
-    else if (Ofxr::DetectedVectorXr())  swprintf(p.rows[MR_VECTORXR].value, kV, L"found");
-    else                                swprintf(p.rows[MR_VECTORXR].value, kV, L"not found");
+    MenuRow(p, MR_OFXR, TR(L"OFXR Bridge (VR frame gen)"), "dlaa.ini ofxr_bridge", nullptr, !Ofxr::g_on.load());   // info row
+    if (!Ofxr::g_on.load())      swprintf(p.rows[MR_OFXR].value, kV, TRF(L"off (dlaa.ini 0)"));
+    else if (Ofxr::Detected())   swprintf(p.rows[MR_OFXR].value, kV, TRF(L"found"));   // (no live counter: it would rebuild the panel every frame)
+    else                         swprintf(p.rows[MR_OFXR].value, kV, TRF(L"not found"));
+    MenuRow(p, MR_VECTORXR, TR(L"VectorXR (VR layer)"), "dlaa.ini vectorxr", nullptr, !Ofxr::g_onVxr.load());   // phase 56: info row
+    if (!Ofxr::g_onVxr.load())          swprintf(p.rows[MR_VECTORXR].value, kV, TRF(L"off (dlaa.ini 0)"));
+    else if (Ofxr::DetectedVectorXr())  swprintf(p.rows[MR_VECTORXR].value, kV, TRF(L"found"));
+    else                                swprintf(p.rows[MR_VECTORXR].value, kV, TRF(L"not found"));
     groupRow(MR_VRPGRP, kMenuGroups[MenuGroupIndex(MR_VRPGRP)].title);   // phase 43: menu categories
-    MenuRow(p, MR_TURBO, L"Turbo mode (VR)", "dlaa.ini xr_turbo", vr ? nullptr : "VR only", !vr);   // phase 30
+    MenuRow(p, MR_TURBO, TR(L"Turbo mode (VR)"), "dlaa.ini xr_turbo", vr ? nullptr : NA_("VR only"), !vr);   // phase 30
     {
         const XrHook::TurboStats ts = XrHook::GetTurboStats();   // (no live counter: it would rebuild the panel every frame)
-        swprintf(p.rows[MR_TURBO].value, kV, L"%ls", !g_xrTurbo ? L"off" : (ts.failed ? L"on (stopped)" : L"on"));
+        swprintf(p.rows[MR_TURBO].value, kV, L"%ls", !g_xrTurbo ? TR(L"off") : (ts.failed ? TR(L"on (stopped)") : TR(L"on")));
     }
     {   // phase 34: foveated rendering (VRS); "not supported" once the first VR scene pass found no NVAPI VRS
         const bool noVrs = Vrs::Support() == 0;
-        MenuRow(p, MR_VRS, L"Foveated (VRS)", "dlaa.ini vrs", vr ? nullptr : "VR only", !vr || noVrs);
-        if (noVrs) swprintf(p.rows[MR_VRS].value, kV, L"%ls", g_vrsOn ? L"on (not supported)" : L"not supported");
+        MenuRow(p, MR_VRS, TR(L"Foveated (VRS)"), "dlaa.ini vrs", vr ? nullptr : NA_("VR only"), !vr || noVrs);
+        if (noVrs) swprintf(p.rows[MR_VRS].value, kV, L"%ls", g_vrsOn ? TR(L"on (not supported)") : TR(L"not supported"));
         else       swprintf(p.rows[MR_VRS].value, kV, L"%ls", onOff[g_vrsOn ? 1 : 0]);
-        MenuRow(p, MR_VRSSIZE, L"Foveated size", "dlaa.ini vrs_inner / vrs_outer", vr ? nullptr : "VR only", !vr || noVrs || !g_vrsOn);
+        MenuRow(p, MR_VRSSIZE, TR(L"Foveated size"), "dlaa.ini vrs_inner / vrs_outer", vr ? nullptr : NA_("VR only"), !vr || noVrs || !g_vrsOn);
         // phase 44: the size scaler ("80 %", + the preset name when it is one); custom dlaa.ini radii: "inner / outer %"
         const int si = VrsSizeIndex();
-        if (si >= 0)               swprintf(p.rows[MR_VRSSIZE].value, kV, L"%d %% (%ls)", g_vrsOuter, kVrsSizes[si].name);
+        if (si >= 0)               swprintf(p.rows[MR_VRSSIZE].value, kV, L"%d %% (%ls)", g_vrsOuter, Lang::Tr(kVrsSizes[si].name));
         else if (VrsSizeOnScale()) swprintf(p.rows[MR_VRSSIZE].value, kV, L"%d %%", g_vrsOuter);
         else                       swprintf(p.rows[MR_VRSSIZE].value, kV, L"%d / %d %%", g_vrsInner, g_vrsOuter);
-        MenuRow(p, MR_VRSPASS, L"Foveated passes", "dlaa.ini vrs_passes", vr ? nullptr : "VR only", !vr || noVrs || !g_vrsOn);   // phase 42
-        swprintf(p.rows[MR_VRSPASS].value, kV, L"%ls", g_vrsPasses ? L"scene + lighting" : L"scene");
-        MenuRow(p, MR_VRSSTR, L"Foveated strength", "dlaa.ini vrs_strength", vr ? nullptr : "VR only", !vr || noVrs || !g_vrsOn);   // phase 59f
-        swprintf(p.rows[MR_VRSSTR].value, kV, L"%ls", kVrsStrengthName[g_vrsStrength < 0 || g_vrsStrength > 2 ? 0 : g_vrsStrength]);
+        MenuRow(p, MR_VRSPASS, TR(L"Foveated passes"), "dlaa.ini vrs_passes", vr ? nullptr : NA_("VR only"), !vr || noVrs || !g_vrsOn);   // phase 42
+        swprintf(p.rows[MR_VRSPASS].value, kV, L"%ls", g_vrsPasses ? TR(L"scene + lighting") : TR(L"scene"));
+        MenuRow(p, MR_VRSSTR, TR(L"Foveated strength"), "dlaa.ini vrs_strength", vr ? nullptr : NA_("VR only"), !vr || noVrs || !g_vrsOn);   // phase 59f
+        swprintf(p.rows[MR_VRSSTR].value, kV, L"%ls", Lang::Tr(kVrsStrengthName[g_vrsStrength < 0 || g_vrsStrength > 2 ? 0 : g_vrsStrength]));
         // phase 59: eye-tracked foveation + the gaze state (the panel is rebuilt with the cost snapshot: no per-frame counter here)
-        MenuRow(p, MR_VRSEYE, L"Foveated eye tracking", "dlaa.ini vrs_eye", vr ? nullptr : "VR only", !vr || noVrs || !g_vrsOn);
+        MenuRow(p, MR_VRSEYE, TR(L"Foveated eye tracking"), "dlaa.ini vrs_eye", vr ? nullptr : NA_("VR only"), !vr || noVrs || !g_vrsOn);
         const XrHook::EyeGazeStats es = XrHook::GetEyeGazeStats();
-        const wchar_t* ev = !g_vrsEye ? L"off"
-                          : g_vrsEyeFake ? L"on (fake gaze)"
-                          : !g_vrsEyeAtStart ? L"on (restart the game)"
-                          : (es.ext == 1 || es.ext == 4 || es.system == 0) ? L"on (no eye tracker)"
-                          : (es.failed || es.setup < 0 || es.attachedBy < 0) ? L"on (failed, see log)"
-                          : (es.ext == 0 || es.system < 0) ? L"on (no OpenXR session yet)"
-                          : (es.ageMs >= 0.0 && es.ageMs < 200.0) ? L"on (gaze)" : L"on (waiting for gaze)";
+        const wchar_t* ev = !g_vrsEye ? TR(L"off")
+                          : g_vrsEyeFake ? TR(L"on (fake gaze)")
+                          : !g_vrsEyeAtStart ? TR(L"on (restart the game)")
+                          : (es.ext == 1 || es.ext == 4 || es.system == 0) ? TR(L"on (no eye tracker)")
+                          : (es.failed || es.setup < 0 || es.attachedBy < 0) ? TR(L"on (failed, see log)")
+                          : (es.ext == 0 || es.system < 0) ? TR(L"on (no OpenXR session yet)")
+                          : (es.ageMs >= 0.0 && es.ageMs < 200.0) ? TR(L"on (gaze)") : TR(L"on (waiting for gaze)");
         swprintf(p.rows[MR_VRSEYE].value, kV, L"%ls", ev);
     }
     {   // phase 40: hidden area mask; "not supported" once the runtime said it has no XR_KHR_visibility_mask (no live counter)
         const XrHook::HiddenStats hs = XrHook::GetHiddenStats();
         const bool noExt = hs.ext == 1 || hs.ext == 4;
-        MenuRow(p, MR_HMASK, L"Hidden area mask (VR)", "dlaa.ini xr_hidden_mask", vr ? nullptr : "VR only", !vr || noExt);
-        const wchar_t* val = !g_xrHiddenMask ? L"off"
-                           : noExt ? L"on (not supported)"
-                           : !g_xrHiddenMaskAtStart ? L"on (restart the game)"
-                           : hs.ext == 0 ? L"on (no OpenXR instance yet)"
-                           : (hs.failed ? L"on (failed, see log)" : L"on");
-        swprintf(p.rows[MR_HMASK].value, kV, L"%ls", (!g_xrHiddenMask && noExt) ? L"not supported" : val);
+        MenuRow(p, MR_HMASK, TR(L"Hidden area mask (VR)"), "dlaa.ini xr_hidden_mask", vr ? nullptr : NA_("VR only"), !vr || noExt);
+        const wchar_t* val = !g_xrHiddenMask ? TR(L"off")
+                           : noExt ? TR(L"on (not supported)")
+                           : !g_xrHiddenMaskAtStart ? TR(L"on (restart the game)")
+                           : hs.ext == 0 ? TR(L"on (no OpenXR instance yet)")
+                           : (hs.failed ? TR(L"on (failed, see log)") : TR(L"on"));
+        swprintf(p.rows[MR_HMASK].value, kV, L"%ls", (!g_xrHiddenMask && noExt) ? TR(L"not supported") : val);
     }
     if (g_xrTurbo && !XrTurboEffective())                 // phase 52: the VR FPS cap wins over turbo
-        swprintf(p.rows[MR_TURBO].value, kV, L"on (FPS cap wins)");
+        swprintf(p.rows[MR_TURBO].value, kV, TRF(L"on (FPS cap wins)"));
     groupRow(MR_FRGRP, kMenuGroups[MenuGroupIndex(MR_FRGRP)].title);   // phase 52: frame rate
     {   // phase 52: "not supported" once Reflex was refused / NVAPI is missing (FramePace::Support 0; no live counter)
         const bool noReflex = FramePace::Support() == 0;
-        MenuRow(p, MR_REFLEX, L"Reflex (flat)", "dlaa.ini reflex", vr ? "flat only" : nullptr, vr || noReflex);
-        static const wchar_t* const kRx[3] = { L"off", L"on", L"on + boost" };
-        if (noReflex) swprintf(p.rows[MR_REFLEX].value, kV, L"%ls", g_reflex ? L"on (not supported)" : L"not supported");
-        else          swprintf(p.rows[MR_REFLEX].value, kV, L"%ls", kRx[g_reflex < 0 || g_reflex > 2 ? 0 : g_reflex]);
-        MenuRow(p, MR_FPSCAP, L"FPS cap (flat)", "dlaa.ini fps_cap", vr ? "flat only" : nullptr, vr);
-        if (g_fpsCap) swprintf(p.rows[MR_FPSCAP].value, kV, L"%d fps", g_fpsCap);
-        else          swprintf(p.rows[MR_FPSCAP].value, kV, L"off");
-        MenuRow(p, MR_VRFPSCAP, L"VR FPS cap", "dlaa.ini vr_fps_cap", vr ? nullptr : "VR only", !vr);
+        MenuRow(p, MR_REFLEX, TR(L"Reflex (flat)"), "dlaa.ini reflex", vr ? NA_("flat only") : nullptr, vr || noReflex);
+        static const wchar_t* const kRx[3] = { N_(L"off"), N_(L"on"), N_(L"on + boost") };
+        if (noReflex) swprintf(p.rows[MR_REFLEX].value, kV, L"%ls", g_reflex ? TR(L"on (not supported)") : TR(L"not supported"));
+        else          swprintf(p.rows[MR_REFLEX].value, kV, L"%ls", Lang::Tr(kRx[g_reflex < 0 || g_reflex > 2 ? 0 : g_reflex]));
+        MenuRow(p, MR_FPSCAP, TR(L"FPS cap (flat)"), "dlaa.ini fps_cap", vr ? NA_("flat only") : nullptr, vr);
+        if (g_fpsCap) swprintf(p.rows[MR_FPSCAP].value, kV, TRF(L"%d fps"), g_fpsCap);
+        else          swprintf(p.rows[MR_FPSCAP].value, kV, TRF(L"off"));
+        MenuRow(p, MR_VRFPSCAP, TR(L"VR FPS cap"), "dlaa.ini vr_fps_cap", vr ? nullptr : NA_("VR only"), !vr);
         const int64_t per = XrHook::GetFpsCapStats().basePeriodNs;   // (atomics; the headset rate: a new session at most)
         if (g_vrFpsCap && per > 0)
-            swprintf(p.rows[MR_VRFPSCAP].value, kV, L"%ls (%.0f fps)", g_vrFpsCap == 2 ? L"half" : L"third",
+            swprintf(p.rows[MR_VRFPSCAP].value, kV, TRF(L"%ls (%.0f fps)"), g_vrFpsCap == 2 ? TR(L"half") : TR(L"third"),
                      1e9 / (double)per / (double)g_vrFpsCap);
         else
-            swprintf(p.rows[MR_VRFPSCAP].value, kV, L"%ls", g_vrFpsCap == 2 ? L"half" : g_vrFpsCap == 3 ? L"third" : L"off");
+            swprintf(p.rows[MR_VRFPSCAP].value, kV, L"%ls", g_vrFpsCap == 2 ? TR(L"half") : g_vrFpsCap == 3 ? TR(L"third") : TR(L"off"));
     }
     {   // phase 54: CPU tuning -- off / on (all three) / mixed (set in dlaa.ini); what the P-core part did is in the log
-        MenuRow(p, MR_CPU, L"CPU tuning", "dlaa.ini cpu_pcore / cpu_priority / cpu_no_throttle", nullptr, false);
+        MenuRow(p, MR_CPU, TR(L"CPU tuning"), "dlaa.ini cpu_pcore / cpu_priority / cpu_no_throttle", nullptr, false);
         const int cs = CpuTuningPick::Summary(g_cpuPcore, g_cpuPriority, g_cpuNoThrottle);
-        swprintf(p.rows[MR_CPU].value, kV, L"%ls", cs == 0 ? L"off" : (cs == 1 ? L"on" : L"mixed (dlaa.ini)"));
+        swprintf(p.rows[MR_CPU].value, kV, L"%ls", cs == 0 ? TR(L"off") : (cs == 1 ? TR(L"on") : TR(L"mixed (dlaa.ini)")));
     }
     {   // phase 39: the level + what logging costs (CPU ms per frame; changes only at the ~1-s snapshots: no rebuild per frame)
-        MenuRow(p, MR_LOG, L"Logging", "dlaa.ini log_level", nullptr, false);
+        MenuRow(p, MR_LOG, TR(L"Logging"), "dlaa.ini log_level", nullptr, false);
         const int lv = LogLevel();
-        swprintf(p.rows[MR_LOG].value, kV, L"%hs", LogLevelName(lv));   // phase 45: its CPU ms is in the cost column
+        swprintf(p.rows[MR_LOG].value, kV, L"%ls", Lang::TrA(LogLevelName(lv)));   // phase 45: its CPU ms is in the cost column
     }
-    groupRow(MR_PANELGRP, L"Panel settings");             // v0.10.3 phase 29c
+    {   // phase 74: the menu language; a missing font says so (in English: the menu is English then)
+        MenuRow(p, MR_LANGUAGE, TR(L"Language"), "dlaa.ini language", nullptr, false);
+        wchar_t* v = p.rows[MR_LANGUAGE].value;
+        if (Lang::FontMissing())                   swprintf(v, kV, TRF(L"%ls: font missing"), Lang::NativeName(Lang::Wanted()));
+        else if (!strcmp(Lang::Setting(), "auto")) swprintf(v, kV, TRF(L"auto (%ls)"), Lang::NativeName(Lang::Active()));
+        else                                       swprintf(v, kV, L"%ls", Lang::NativeName(Lang::Active()));
+    }
+    groupRow(MR_PANELGRP, TR(L"Panel settings"));             // v0.10.3 phase 29c
     const bool vrQuad = vr && MenuVrQuad();               // v0.10.3 phase 29b: the quad path -> the quad's distance
     const bool vrLock = vrQuad && g_menuVrLock;           // phase 70: fixed in the cab -> X / Y / depth edit its own spot
-    MenuRow(p, MR_PANELLOCK, L"Panel lock (VR)", "dlaa.ini menu_vr_lock", vrQuad ? nullptr : (vr ? "VR layer only" : "VR only"),
+    MenuRow(p, MR_PANELLOCK, TR(L"Panel lock (VR)"), "dlaa.ini menu_vr_lock", vrQuad ? nullptr : (vr ? NA_("VR layer only") : NA_("VR only")),
             !vrQuad);
-    swprintf(p.rows[MR_PANELLOCK].value, kV, L"%ls", g_menuVrLock ? L"Fixed in cab" : L"Follow head");
-    MenuRow(p, MR_POSX, L"Panel position X", vrLock ? "dlaa.ini menu_vr_lock_x" : (vr ? "dlaa.ini menu_vr_x" : "dlaa.ini menu_x"),
+    swprintf(p.rows[MR_PANELLOCK].value, kV, L"%ls", g_menuVrLock ? TR(L"Fixed in cab") : TR(L"Follow head"));
+    MenuRow(p, MR_POSX, TR(L"Panel position X"), vrLock ? "dlaa.ini menu_vr_lock_x" : (vr ? "dlaa.ini menu_vr_x" : "dlaa.ini menu_x"),
             nullptr, false);
-    if (vrLock)  swprintf(p.rows[MR_POSX].value, kV, L"%+d deg", g_menuVrLockX);
+    if (vrLock)  swprintf(p.rows[MR_POSX].value, kV, TRF(L"%+d deg"), g_menuVrLockX);
     else if (vr) swprintf(p.rows[MR_POSX].value, kV, L"%+d %%", g_menuVrX);
     else         swprintf(p.rows[MR_POSX].value, kV, L"%d %%", g_menuX);
-    MenuRow(p, MR_POSY, L"Panel position Y", vrLock ? "dlaa.ini menu_vr_lock_y" : (vr ? "dlaa.ini menu_vr_y" : "dlaa.ini menu_y"),
+    MenuRow(p, MR_POSY, TR(L"Panel position Y"), vrLock ? "dlaa.ini menu_vr_lock_y" : (vr ? "dlaa.ini menu_vr_y" : "dlaa.ini menu_y"),
             nullptr, false);
-    if (vrLock)  swprintf(p.rows[MR_POSY].value, kV, L"%+d deg", g_menuVrLockY);
+    if (vrLock)  swprintf(p.rows[MR_POSY].value, kV, TRF(L"%+d deg"), g_menuVrLockY);
     else if (vr) swprintf(p.rows[MR_POSY].value, kV, L"%+d %%", g_menuVrY);
     else         swprintf(p.rows[MR_POSY].value, kV, L"%d %%", g_menuY);
-    MenuRow(p, MR_SIZE, L"Panel size", vr ? "dlaa.ini menu_vr_scale" : "dlaa.ini menu_scale", nullptr, false);
+    MenuRow(p, MR_SIZE, TR(L"Panel size"), vr ? "dlaa.ini menu_vr_scale" : "dlaa.ini menu_scale", nullptr, false);
     swprintf(p.rows[MR_SIZE].value, kV, L"%.1f", (double)(vr ? g_menuVrScale : g_menuScale));
-    MenuRow(p, MR_DEPTH, L"Panel VR depth", vrLock ? "dlaa.ini menu_vr_lock_dist" : (vrQuad ? "dlaa.ini menu_vr_dist" :
-            "dlaa.ini menu_vr_depth"), vr ? nullptr : "VR only", !vr);
+    MenuRow(p, MR_DEPTH, TR(L"Panel VR depth"), vrLock ? "dlaa.ini menu_vr_lock_dist" : (vrQuad ? "dlaa.ini menu_vr_dist" :
+            "dlaa.ini menu_vr_depth"), vr ? nullptr : NA_("VR only"), !vr);
     if (vrLock)      swprintf(p.rows[MR_DEPTH].value, kV, L"%.2f m", (double)g_menuVrLockDist / 100.0);
     else if (vrQuad) swprintf(p.rows[MR_DEPTH].value, kV, L"%.2f m", (double)g_menuVrDist / 100.0);
-    else        swprintf(p.rows[MR_DEPTH].value, kV, L"%d px", g_menuVrDepth);
-    MenuRow(p, MR_FACE, L"Panel faces you (VR)", "dlaa.ini menu_vr_face", vr ? nullptr : "VR only", !vr);   // phase 16
+    else        swprintf(p.rows[MR_DEPTH].value, kV, TRF(L"%d px"), g_menuVrDepth);
+    MenuRow(p, MR_FACE, TR(L"Panel faces you (VR)"), "dlaa.ini menu_vr_face", vr ? nullptr : NA_("VR only"), !vr);   // phase 16
     swprintf(p.rows[MR_FACE].value, kV, L"%ls", onOff[g_menuVrFace ? 1 : 0]);
     // v0.10.2: the open key is the value, the 4 others the Hotkey column (v0.10.3 phase 29c: their short names; in the group).
     // v0.12.1 phase 50: Right opens the Hotkeys page on its "Menu: open / close" line (the row no longer binds)
     snprintf(k, sizeof(k), "%s / %s / %s / %s", snUp, snDown, snLeft, snRight);
-    MenuRow(p, MR_MENUKEYS, L"Menu keys", k, nullptr, false);
+    MenuRow(p, MR_MENUKEYS, TR(L"Menu keys"), k, nullptr, false);
     MenuWiden(p.rows[MR_MENUKEYS].value, kV, snMenu);
-    MenuRow(p, MR_FPS, L"FPS counter", "dlaa.ini fps_show / fps_text", nullptr, false);
-    swprintf(p.rows[MR_FPS].value, kV, L"%ls", !g_fpsShow ? L"Off" : FpsTextMenuName(g_fpsText));
-    groupRow(MR_FPSGRP, L"FPS counter settings");         // v0.10.3 phase 29c
-    MenuRow(p, MR_FPSLOCK, L"FPS counter lock", "dlaa.ini fps_vr_lock", vr ? nullptr : "VR only", !vr);   // v0.10.3 phase 28
-    swprintf(p.rows[MR_FPSLOCK].value, kV, L"%ls", g_fpsVrLock == 2 ? L"Attached to vehicle"   // phase 47
-                                                   : g_fpsVrLock ? L"Fixed in play space" : L"Follow head");   // phase 44: was "Fixed in cab"
+    MenuRow(p, MR_FPS, TR(L"FPS counter"), "dlaa.ini fps_show / fps_text", nullptr, false);
+    swprintf(p.rows[MR_FPS].value, kV, L"%ls", !g_fpsShow ? TR(L"Off") : FpsTextMenuName(g_fpsText));
+    groupRow(MR_FPSGRP, TR(L"FPS counter settings"));         // v0.10.3 phase 29c
+    MenuRow(p, MR_FPSLOCK, TR(L"FPS counter lock"), "dlaa.ini fps_vr_lock", vr ? nullptr : NA_("VR only"), !vr);   // v0.10.3 phase 28
+    swprintf(p.rows[MR_FPSLOCK].value, kV, L"%ls", g_fpsVrLock == 2 ? TR(L"Attached to vehicle")   // phase 47
+                                                   : g_fpsVrLock ? TR(L"Fixed in play space") : TR(L"Follow head"));   // phase 44: was "Fixed in cab"
     {                                                     // phase 51b: Position per vehicle (the attached box only)
         const bool att = vr && g_fpsVrLock == 2;
-        MenuRow(p, MR_FPSPROF, L"Position per vehicle", "dlaa.ini fps_profiles", att ? nullptr : "VR attached only", !att);
-        swprintf(p.rows[MR_FPSPROF].value, kV, L"%ls", g_fpsProfiles ? L"On" : L"Off");
-        MenuRow(p, MR_FPSREMEAS, L"Re-measure cab spot", "Right: now, Left: defaults", att ? nullptr : "VR attached only", !att);   // phase 51c / 51d
-        swprintf(p.rows[MR_FPSREMEAS].value, kV, L"%ls", g_fpsBoxDefaulted ? L"box defaults" : (FpsCab::GetLockInfo().remeasured ? L"done" : L"-"));
+        MenuRow(p, MR_FPSPROF, TR(L"Position per vehicle"), "dlaa.ini fps_profiles", att ? nullptr : NA_("VR attached only"), !att);
+        swprintf(p.rows[MR_FPSPROF].value, kV, L"%ls", g_fpsProfiles ? TR(L"On") : TR(L"Off"));
+        MenuRow(p, MR_FPSREMEAS, TR(L"Re-measure cab spot"), MenuUtf8(TR(L"Right: now, Left: defaults")), att ? nullptr : NA_("VR attached only"), !att);   // phase 51c / 51d
+        swprintf(p.rows[MR_FPSREMEAS].value, kV, L"%ls", g_fpsBoxDefaulted ? TR(L"box defaults") : (FpsCab::GetLockInfo().remeasured ? TR(L"done") : L"-"));
     }
-    MenuRow(p, MR_FPSX, L"FPS counter X", vr ? "dlaa.ini fps_vr_x" : "dlaa.ini fps_x", nullptr, false);
+    MenuRow(p, MR_FPSX, TR(L"FPS counter X"), vr ? "dlaa.ini fps_vr_x" : "dlaa.ini fps_x", nullptr, false);
     if (vr) swprintf(p.rows[MR_FPSX].value, kV, L"%+.1f %%", (double)g_fpsVrX);
     else    swprintf(p.rows[MR_FPSX].value, kV, L"%d %%", g_fpsX);
-    MenuRow(p, MR_FPSY, L"FPS counter Y", vr ? "dlaa.ini fps_vr_y" : "dlaa.ini fps_y", nullptr, false);
+    MenuRow(p, MR_FPSY, TR(L"FPS counter Y"), vr ? "dlaa.ini fps_vr_y" : "dlaa.ini fps_y", nullptr, false);
     if (vr) swprintf(p.rows[MR_FPSY].value, kV, L"%+.1f %%", (double)g_fpsVrY);
     else    swprintf(p.rows[MR_FPSY].value, kV, L"%d %%", g_fpsY);
-    MenuRow(p, MR_FPSYAW, L"FPS turn", "dlaa.ini fps_vr_yaw", vr ? nullptr : "VR only", !vr);
-    swprintf(p.rows[MR_FPSYAW].value, kV, L"%+d deg", g_fpsVrYaw);
-    MenuRow(p, MR_FPSPITCH, L"FPS tilt", "dlaa.ini fps_vr_pitch", vr ? nullptr : "VR only", !vr);
-    swprintf(p.rows[MR_FPSPITCH].value, kV, L"%+d deg", g_fpsVrPitch);
-    MenuRow(p, MR_FPSROLL, L"FPS rotate", "dlaa.ini fps_vr_roll", vr ? nullptr : "VR only", !vr);
-    swprintf(p.rows[MR_FPSROLL].value, kV, L"%+d deg", g_fpsVrRoll);
-    MenuRow(p, MR_FPSSIZE, L"FPS counter size", vr ? "dlaa.ini fps_vr_scale" : "dlaa.ini fps_scale", nullptr, false);
+    MenuRow(p, MR_FPSYAW, TR(L"FPS turn"), "dlaa.ini fps_vr_yaw", vr ? nullptr : NA_("VR only"), !vr);
+    swprintf(p.rows[MR_FPSYAW].value, kV, TRF(L"%+d deg"), g_fpsVrYaw);
+    MenuRow(p, MR_FPSPITCH, TR(L"FPS tilt"), "dlaa.ini fps_vr_pitch", vr ? nullptr : NA_("VR only"), !vr);
+    swprintf(p.rows[MR_FPSPITCH].value, kV, TRF(L"%+d deg"), g_fpsVrPitch);
+    MenuRow(p, MR_FPSROLL, TR(L"FPS rotate"), "dlaa.ini fps_vr_roll", vr ? nullptr : NA_("VR only"), !vr);
+    swprintf(p.rows[MR_FPSROLL].value, kV, TRF(L"%+d deg"), g_fpsVrRoll);
+    MenuRow(p, MR_FPSSIZE, TR(L"FPS counter size"), vr ? "dlaa.ini fps_vr_scale" : "dlaa.ini fps_scale", nullptr, false);
     swprintf(p.rows[MR_FPSSIZE].value, kV, L"%.1f", (double)(vr ? g_fpsVrScale : g_fpsScale));
     // phase 44: colour (flat and VR), VR distance and the VR turn
-    MenuRow(p, MR_FPSCOLOR, L"FPS colour", "dlaa.ini fps_color", nullptr, false);
-    swprintf(p.rows[MR_FPSCOLOR].value, kV, L"%ls", FpsPose::ColorOf(g_fpsColor).name);
-    MenuRow(p, MR_FPSBRIGHT, L"FPS brightness", "dlaa.ini fps_brightness", nullptr, false);   // phase 48
+    MenuRow(p, MR_FPSCOLOR, TR(L"FPS colour"), "dlaa.ini fps_color", nullptr, false);
+    swprintf(p.rows[MR_FPSCOLOR].value, kV, L"%ls", Lang::Tr(FpsPose::ColorOf(g_fpsColor).name));
+    MenuRow(p, MR_FPSBRIGHT, TR(L"FPS brightness"), "dlaa.ini fps_brightness", nullptr, false);   // phase 48
     swprintf(p.rows[MR_FPSBRIGHT].value, kV, L"%d %%", g_fpsBright);
-    MenuRow(p, MR_FPSOPAC, L"FPS opacity", "dlaa.ini fps_opacity", nullptr, false);   // phase 51f
+    MenuRow(p, MR_FPSOPAC, TR(L"FPS opacity"), "dlaa.ini fps_opacity", nullptr, false);   // phase 51f
     swprintf(p.rows[MR_FPSOPAC].value, kV, L"%d %%", g_fpsOpacity);
-    MenuRow(p, MR_FPSDIST, L"FPS distance (VR)", "dlaa.ini fps_vr_dist", vr ? nullptr : "VR only", !vr);
+    MenuRow(p, MR_FPSDIST, TR(L"FPS distance (VR)"), "dlaa.ini fps_vr_dist", vr ? nullptr : NA_("VR only"), !vr);
     swprintf(p.rows[MR_FPSDIST].value, kV, L"%.2f m", (double)g_fpsVrDist / 100.0);
-    snprintf(k, sizeof(k), "%s: open", snRight);          // v0.12.1 phase 50: the Hotkeys page
-    MenuRow(p, MR_HOTKEYS, L"Hotkeys...", k, nullptr, false);
-    swprintf(p.rows[MR_HOTKEYS].value, kV, L"%d actions", kMenuHkActions);
-    MenuRow(p, MR_SAVE, L"Save to dlaa.ini", KeyName(KA_SAVE), nullptr, false);
+    snprintf(k, sizeof(k), "%s: %s", snRight, MenuUtf8(TR(L"open")));          // v0.12.1 phase 50: the Hotkeys page
+    MenuRow(p, MR_HOTKEYS, TR(L"Hotkeys..."), k, nullptr, false);
+    swprintf(p.rows[MR_HOTKEYS].value, kV, TRF(L"%d actions"), kMenuHkActions);
+    MenuRow(p, MR_SAVE, TR(L"Save to dlaa.ini"), KeyNameUi(KA_SAVE), nullptr, false);
     swprintf(p.rows[MR_SAVE].value, kV, L"-");
-    snprintf(k, sizeof(k), "hold %s %s s", snRight, holdS);   // v0.10.3 phase 29d: was "dlaa.ini" (MenuResetTick)
-    MenuRow(p, MR_RESET, L"Reset to defaults", k, nullptr, false);
+    {   // v0.10.3 phase 29d: was "dlaa.ini" (MenuResetTick); phase 74: translated
+        wchar_t w[96];
+        swprintf(w, 96, TRF(L"hold %hs %hs s"), snRight, holdS);
+        snprintf(k, sizeof(k), "%s", MenuUtf8(w));
+    }
+    MenuRow(p, MR_RESET, TR(L"Reset to defaults"), k, nullptr, false);
     swprintf(p.rows[MR_RESET].value, kV, L"-");
-    MenuRow(p, MR_CLOSE, L"Close menu", KeyName(KA_MENU), nullptr, false);
+    MenuRow(p, MR_CLOSE, TR(L"Close menu"), KeyNameUi(KA_MENU), nullptr, false);
     swprintf(p.rows[MR_CLOSE].value, kV, L"-");
 
     const int sel = g_menuSel < 0 || g_menuSel >= MR_COUNT ? 0 : g_menuSel;
     MenuPerfLines(p, vr);                                 // v0.10.0: the GPU block + the GPU cost column (once-a-second figures)
-    swprintf(p.costHead, sizeof(p.costHead) / sizeof(wchar_t), L"%lcCPU%lc | %lcGPU%lc ms", TuningMenu::kInkCpu, TuningMenu::kInkEnd,
+    swprintf(p.costHead, sizeof(p.costHead) / sizeof(wchar_t), TRF(L"%lcCPU%lc | %lcGPU%lc ms"), TuningMenu::kInkCpu, TuningMenu::kInkEnd,
              TuningMenu::kInkGpu, TuningMenu::kInkEnd);   // phase 45: both per frame (VR: GPU = both eyes)
-    wchar_t sent[200];
+    wchar_t sent[400];                                    // (phase 74: 200 -> 400, longer languages)
     MenuPerfCosts(p, vr, sel, sent, sizeof(sent) / sizeof(sent[0]));
     constexpr size_t kD = sizeof(p.desc) / sizeof(wchar_t);
     if (sel == MR_RESET)                                  // v0.10.3 phase 29d: the hold first (no cost sentence on this row)
-        swprintf(p.desc, kD, L"Hold %hs for %hs s to reset. %ls", snRight, holdS, kMenuDesc[sel]);
-    else if (kMenuDesc[sel]) swprintf(p.desc, kD, L"%ls%ls%ls", kMenuDesc[sel], sent[0] ? L" " : L"", sent);
+        swprintf(p.desc, kD, TRF(L"Hold %hs for %hs s to reset. %ls"), snRight, holdS, Lang::Tr(kMenuDesc[sel]));
+    else if (kMenuDesc[sel]) swprintf(p.desc, kD, L"%ls%ls%ls", Lang::Tr(kMenuDesc[sel]), sent[0] ? L" " : L"", sent);
     else if (sel == MR_MENUKEYS)                          // v0.10.2 (v0.12.1 phase 50: set on the Hotkeys page)
-        swprintf(p.desc, kD, L"The 5 keys that open and drive this menu: %hs opens / closes it (the value), %hs / %hs / %hs / %hs "
+        swprintf(p.desc, kD, TRF(L"The 5 keys that open and drive this menu: %hs opens / closes it (the value), %hs / %hs / %hs / %hs "
                  L"move (Hotkey column). While the menu is open only these 5 are kept from the game. %hs: change them on the "
-                 L"Hotkeys page.", snMenu, snUp, snDown, snLeft, snRight, snRight);
-    else                swprintf(p.desc, kD, L"Closes the menu; the 5 menu keys go back to the game. %hs does the same from any "
-                                 L"row.", snMenu);
+                 L"Hotkeys page."), snMenu, snUp, snDown, snLeft, snRight, snRight);
+    else                swprintf(p.desc, kD, TRF(L"Closes the menu; the 5 menu keys go back to the game. %hs does the same from any "
+                                 L"row."), snMenu);
     // v0.10.3 phase 29c: ONE footer for every state (the Reset progress is in the row), from the short key names. It shares
     // its line with the licence line (menu.cpp), so the hint is shortened, then dropped, when the text does not fit left of
     // it (TuningMenu::FooterFits, measured with the panel's font; only when a menu key name changed: cached by the full text).
     // v0.12.1 phase 50: the hint names the Hotkeys row (was "hold a key: rebind").
     {
         constexpr size_t kF = sizeof(p.footer) / sizeof(wchar_t);
-        static const wchar_t* const kHint[] = { L"   keys: Hotkeys...", L"" };
+        wchar_t hint[64];                                 // phase 74: translated (was a static table)
+        swprintf(hint, 64, L"   %ls", TR(L"keys: Hotkeys..."));
+        const wchar_t* const kHint[] = { hint, L"" };
         constexpr size_t kT = 256;                        // (5 x 39 + the words: never truncated before the fit test)
         static wchar_t s_full[kT] = L"", s_shown[kT] = L"";
         wchar_t full[kT];
-        swprintf(full, kT, L"%hs / %hs select   %hs / %hs change   %hs close%ls", snUp, snDown, snLeft, snRight, snMenu, kHint[0]);
+        swprintf(full, kT, TRF(L"%hs / %hs select   %hs / %hs change   %hs close%ls"), snUp, snDown, snLeft, snRight, snMenu, kHint[0]);
         if (wcscmp(full, s_full)) {
             for (const wchar_t* h : kHint) {
-                swprintf(s_shown, kT, L"%hs / %hs select   %hs / %hs change   %hs close%ls", snUp, snDown, snLeft, snRight, snMenu, h);
+                swprintf(s_shown, kT, TRF(L"%hs / %hs select   %hs / %hs change   %hs close%ls"), snUp, snDown, snLeft, snRight, snMenu, h);
                 if (!h[0] || TuningMenu::FooterFits(s_shown)) break;
             }
             wcscpy_s(s_full, full);
@@ -19046,6 +19262,106 @@ void MenuClose(uint64_t n, const char* why) {
 }
 
 // Left / Right on row `row`. The step rows accept auto-repeat; the cycle / toggle / action rows act on a fresh press only.
+// phase 74: the Language row -- the next / previous of auto, English, the packed languages; live, Save writes it.
+void MenuStepLanguage(int dir, uint64_t n) {
+    const int cnt = Lang::Count();
+    int cur = 0;
+    for (int i = 0; i < cnt; ++i) if (!strcmp(Lang::CodeAt(i), Lang::Setting())) { cur = i; break; }
+    const int next = ((cur + (dir > 0 ? 1 : -1)) % cnt + cnt) % cnt;
+    Lang::SetSetting(Lang::CodeAt(next));
+    g_langExplicit = true;
+    Lang::Refresh();
+    TuningMenu::SetFace(Lang::Face());
+    PlayTones(1, 660, 40, 0);
+    Log("language: %s -> %s (menu, Present #%llu; Save writes it)", Lang::CodeAt(cur), Lang::Setting(), (unsigned long long)n);
+}
+// phase 74: dlaa.ini lang_dump = 1 -- at the first menu open of the session, the REAL panels in every language (English + the
+// packed ones), as the game shows them now: per language dlaa_lang_dump\<code>.txt (every row of the main page with all groups
+// open and of the Hotkeys page, the title, the perf lines, the footer, and the description of EVERY row: each row selected
+// once) and <code>_main.png / <code>_hotkeys.png (the panel with the first row selected). The panels are built here on the
+// render thread (a short hitch, once); the pictures are drawn (GDI) and saved (WIC) on a worker thread. The menu state and the
+// language are put back afterwards.
+struct MenuDumpJob { TuningMenu::Panel p; std::wstring face, path; };
+DWORD WINAPI MenuLangDumpThread(LPVOID arg) {
+    std::unique_ptr<std::vector<MenuDumpJob>> jobs(static_cast<std::vector<MenuDumpJob>*>(arg));
+    int ok = 0;
+    for (const MenuDumpJob& j : *jobs) if (TuningMenu::SavePanelPng(j.p, j.face.c_str(), 1.4f, j.path.c_str())) ++ok;
+    LogErr("language dump: %d / %u pictures written (dlaa_lang_dump next to the DLL)", ok, (unsigned)jobs->size());
+    return 0;
+}
+void MenuLangDump(uint64_t n) {
+    static bool s_done = false;
+    if (!g_langDump || s_done) return;
+    s_done = true;
+    wchar_t dir[MAX_PATH];
+    if (!PathNextToDll(L"dlaa_lang_dump\\", dir)) return;
+    CreateDirectoryW(dir, nullptr);
+    const std::string oldSet = Lang::Setting();
+    const int oldSel = g_menuSel, oldPage = g_menuPage, oldHk = g_hkSel;
+    bool oldGrp[kMenuGroupCount];
+    memcpy(oldGrp, g_menuGrpOpen, sizeof(oldGrp));
+    for (bool& o : g_menuGrpOpen) o = true;
+    auto* jobs = new std::vector<MenuDumpJob>();
+    std::unique_ptr<TuningMenu::Panel> p(new TuningMenu::Panel);
+    const int cnt = Lang::Count();
+    for (int i = 1; i < cnt; ++i) {                       // English, then every packed language
+        const char* code = Lang::CodeAt(i);
+        Lang::SetSetting(code);
+        Lang::Refresh();
+        TuningMenu::SetFace(Lang::Face());
+        std::wstring t;
+        wchar_t line[1024];
+        swprintf(line, 1024, L"language %hs (active %hs, font %ls%ls)\n", code, Lang::Active(), Lang::Face(),
+                 Lang::FontMissing() ? L", FONT MISSING" : L"");
+        t += line;
+        const std::wstring wcode(code, code + strlen(code));
+        auto rows = [&](const char* page) {
+            swprintf(line, 1024, L"\n== %hs\ntitle: %ls\n", page, p->title);
+            t += line;
+            for (int l = 0; l < TuningMenu::kPerfLines; ++l) { t += L"perf: "; t += p->perf[l]; t += L"\n"; }
+            swprintf(line, 1024, L"heads: %ls | %ls | %ls | %ls\nfooter: %ls\n", p->colHead[0], p->colHead[1], p->colHead[2],
+                     p->costHead, p->footer);
+            t += line;
+            for (int r = 0; r < p->nRows; ++r) {
+                const TuningMenu::Row& w = p->rows[r];
+                swprintf(line, 1024, L"row: %ls | %ls | %ls | %ls\n", w.name, w.value, w.keys, w.cost);
+                t += line;
+            }
+        };
+        g_menuPage = kMenuPageMain;
+        std::wstring descs;
+        for (int r = 0; r < MR_COUNT; ++r) {
+            g_menuSel = r;
+            MenuBuildPanel(*p);
+            if (r == 0) { rows("main"); jobs->push_back({ *p, Lang::Face(), std::wstring(dir) + wcode + L"_main.png" }); }
+            const int vs = p->sel >= 0 && p->sel < p->nRows ? p->sel : 0;
+            descs += L"desc ["; descs += p->rows[vs].name; descs += L"]: "; descs += p->desc; descs += L"\n";
+        }
+        g_menuPage = kMenuPageHotkeys;
+        for (int r = 0; r < kMenuHkCount; ++r) {
+            g_hkSel = r;
+            MenuBuildPanel(*p);
+            if (r == 0) { rows("hotkeys"); jobs->push_back({ *p, Lang::Face(), std::wstring(dir) + wcode + L"_hotkeys.png" }); }
+            descs += L"desc ["; descs += p->rows[r].name; descs += L"]: "; descs += p->desc; descs += L"\n";
+        }
+        t += L"\n== descriptions\n";
+        t += descs;
+        const int nb = WideCharToMultiByte(CP_UTF8, 0, t.c_str(), (int)t.size(), nullptr, 0, nullptr, nullptr);
+        std::string u8((size_t)(nb > 0 ? nb : 0), '\0');
+        if (nb > 0) WideCharToMultiByte(CP_UTF8, 0, t.c_str(), (int)t.size(), &u8[0], nb, nullptr, nullptr);
+        FILE* f = _wfsopen((std::wstring(dir) + wcode + L".txt").c_str(), L"wb", _SH_DENYNO);
+        if (f) { fwrite(u8.data(), 1, u8.size(), f); fclose(f); }
+    }
+    memcpy(g_menuGrpOpen, oldGrp, sizeof(oldGrp));
+    g_menuSel = oldSel; g_menuPage = oldPage; g_hkSel = oldHk;
+    Lang::SetSetting(oldSet.c_str());
+    Lang::Refresh();
+    TuningMenu::SetFace(Lang::Face());
+    LogErr("language dump: %d languages as text, %u pictures to draw (Present #%llu)", cnt - 1, (unsigned)jobs->size(),
+           (unsigned long long)n);
+    HANDLE h = CreateThread(nullptr, 0, MenuLangDumpThread, jobs, 0, nullptr);
+    if (h) CloseHandle(h); else delete jobs;
+}
 void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     const bool stepRow = row == MR_SHARP || row == MR_WIDTH || row == MR_LOD || row == MR_LODCUT || row == MR_AREA ||
                          row == MR_POSX || row == MR_POSY || row == MR_SIZE || row == MR_DEPTH || row == MR_FPSX ||
@@ -19093,6 +19409,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_FPSCAP:  StepFpsCap(dir, n, repeat); break;     // phase 52: the kCapSteps list (also in VR: kept for flat)
     case MR_VRFPSCAP: StepVrFpsCap(n, dir); break;          // phase 52: off / half / third (also in flat: kept for VR)
     case MR_LOG:     StepLogLevel(dir, n); break;           // phase 39: Right = more, Left = less (clamped)
+    case MR_LANGUAGE: MenuStepLanguage(dir, n); break;      // phase 74: auto, English, then the packed languages (wraps)
     case MR_PICGRP: case MR_MOTGRP: case MR_UPGRP: case MR_VRPGRP:   // phase 43: the four new groups
     case MR_FRGRP:                                          // phase 52
     case MR_PANELGRP: case MR_FPSGRP:                       // v0.10.3 phase 29c: Right opens the group, Left closes it (a fresh
@@ -19234,6 +19551,9 @@ void MenuKeys(uint64_t n) {
         if (!open) {
             g_menuOpen = true;
             g_menuMoved = false;
+            Lang::Refresh();                              // phase 74: the game's language / a changed lang file, at every open
+            TuningMenu::SetFace(Lang::Face());
+            MenuLangDump(n);                              // phase 74: dlaa.ini lang_dump = 1 (once per session)
             // v0.10.3 phase 29c: all groups start collapsed at every open; a selection inside one moves to its header
             for (bool& o : g_menuGrpOpen) o = false;
             if (g_menuSel < 0 || g_menuSel >= MR_COUNT) g_menuSel = 0;
@@ -21722,6 +22042,9 @@ void ResetPassTrackingCore(bool forceDlaaOff) {
     g_eyeMapN = 0; g_eyeMapLogged = false; g_prevBlitRt = nullptr; g_lastUnderflowBlit = 0;
     for (EyeMapEntry& e : g_eyeMap) e.score = 0;
     for (bool& b : g_eyeLogged) b = false;
+#ifdef WITH_DLAA
+    g_pvEyeN = 0;                                              // phase 73: no stale preview eye seeds a new game RT
+#endif
     g_tonemapLogged = false; g_passLogged = 0;                 // detection lines are logged again
     g_renderTid.store(0, std::memory_order_relaxed);
     if (forceDlaaOff) {
@@ -22693,6 +23016,8 @@ void LoadConfig() {
             if (!strcmp(key, "fps_profiles"))       { g_fpsProfiles = v != 0 ? 1 : 0; continue; }   // phase 51b
 #ifdef WITH_DLAA
             if (!strcmp(key, FpsProfile::kIniKey))  { if (FpsProfLoadLine(eq + 1)) ++g_fpsProfRead; else ++g_fpsProfBad; continue; }   // phase 51
+            if (!strcmp(key, "language"))           { Lang::SetSetting(eq + 1); g_langExplicit = true; continue; }   // phase 74
+            if (!strcmp(key, "lang_dump"))          { g_langDump = v != 0 ? 1 : 0; continue; }   // phase 74 (MenuLangDump)
 #endif
             // phase 39 (here for the same reason; debug moved out of the WITH_DLAA chain: the log-only build reads it too)
             if (!_stricmp(key, "log_level")) {           // (case-insensitive as log.h's reader)

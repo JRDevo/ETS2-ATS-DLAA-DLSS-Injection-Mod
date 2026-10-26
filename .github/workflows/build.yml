@@ -22,6 +22,12 @@ jobs:
       - name: Clone NVIDIA DLSS SDK
         run: git clone --depth 1 https://github.com/NVIDIA/DLSS external/DLSS
 
+      # phase 74: the menu translations -- lang/template.pot matches the code, every lang/*.po parses and keeps its placeholders
+      - name: Check menu translations (lang/*.po)
+        run: |
+          python scripts/lang_tool.py extract --check
+          python scripts/lang_tool.py check
+
       - name: Configure (Release)
         run: cmake -B build -G "Visual Studio 17 2022" -A x64
 
@@ -68,6 +74,8 @@ jobs:
           if not exist build\tests\frame_pace_test.exe exit /b 1
           call tests\build_vrs_gaze_test.bat
           if not exist build\tests\vrs_gaze_test.exe exit /b 1
+          call tests\build_lang_test.bat
+          if not exist build\tests\lang_test.exe exit /b 1
 
       - name: Test draw-id harness (did_shadow off)
         run: build\tests\drawid_harness.exe -1 0.1
@@ -98,6 +106,8 @@ jobs:
         run: build\tests\frame_pace_test.exe
       - name: Test eye-tracked foveation maths (phase 59 -- gaze mask row fill = FillMask, gaze -> ring centre, smoother)
         run: build\tests\vrs_gaze_test.exe
+      - name: Test menu translations (phase 74 -- .po parsing, placeholder guard, font pick)
+        run: build\tests\lang_test.exe
       - name: Smoke test menu_shot (renders the real tuning menu + fps box to PNG; outputs are not committed)
         shell: cmd
         run: |

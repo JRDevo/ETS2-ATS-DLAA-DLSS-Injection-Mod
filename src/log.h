@@ -12,6 +12,10 @@
 #include <vector>
 #include "cpu_prof.h"                                // phase 31: the "log" row of the CPU profiler
 
+#ifndef NA_
+#define NA_(s) s                                   // phase 74: marks a menu text (lang.h)
+#endif
+
 // Tiny file logger. Writes "dlaa_inject.log" next to the game executable
 // (i.e. inside bin\win_x64\). If that dir is read-only, change the path below.
 // Opened with _SH_DENYNO so other processes can read it while the game runs.
@@ -24,7 +28,7 @@
 // the tuning menu's Logging row changes the level live (LogSetLevel). The file is created at the first line that passes the
 // level: an "errors" user without an error gets no file at all.
 inline const char* LogLevelName(int l) {
-    static const char* const kN[5] = { "off", "errors", "warnings", "info", "debug" };
+    static const char* const kN[5] = { NA_("off"), NA_("errors"), NA_("warnings"), NA_("info"), NA_("debug") };   // phase 74: the menu translates them
     return l >= 0 && l <= 4 ? kN[l] : "?";
 }
 // The value of a log_level line: a number (clamped to 0..4) or a name (off / none, error(s), warn(ing(s)), info, debug);

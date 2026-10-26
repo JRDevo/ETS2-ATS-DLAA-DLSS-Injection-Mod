@@ -9,6 +9,8 @@
 > - Updates, release notes, the hotkey list and the troubleshooting guide live here and only here. If someone tells you to get the mod
 >   somewhere else, they are wrong.
 
+![ETS2 & ATS DLAA & DLSS Mod: a sharper, steadier picture, flat and VR, with an in-game menu in 43 languages](docs/images/banner.jpg)
+
 # ETS2 & ATS: DLAA & DLSS Injection Mod
 
 An **ETS2 DLSS mod** and **ATS DLSS mod**: NVIDIA DLAA and DLSS for
@@ -21,15 +23,12 @@ an in-game menu (`Delete`) and an optional text config.
 
 **An NVIDIA RTX GPU is required** (DLAA and DLSS only run on RTX cards).
 
-**Menu:** [Features](#features) · [Download](#-download) · [Requirements](#requirements) · [Install](#install) · [Modes](#modes--the-end-key) · [Flat or VR](#flat-or-vr) · [OFXR Bridge](#ofxr-bridge-vr-frame-generation) · [VectorXR](#vectorxr-vr-layer-suite) · [Render scale](#how-render-scale-works) · [Models](#models-presets--which-one-to-use) · [Controls](#controls) · [Tuning menu](#the-tuning-menu) · [dlaa.ini](#dlaaini) · [Performance](#performance) · [Troubleshooting](#troubleshooting) · [Multiplayer](#multiplayer) · [Build](#build-from-source) · [Report a problem](#reporting-a-problem-what-to-upload) · [Contributing](CONTRIBUTING.md) · [License](#license-and-credits)
+**Menu:** [Features](#features) · [Download](#-download) · [Requirements](#requirements) · [Install](#install) · [Modes](#modes--the-end-key) · [Flat or VR](#flat-or-vr) · [OFXR Bridge](#ofxr-bridge-vr-frame-generation) · [VectorXR](#vectorxr-vr-layer-suite) · [Render scale](#how-render-scale-works) · [Models](#models-presets--which-one-to-use) · [Controls](#controls) · [Tuning menu](#the-tuning-menu) · [Translations](#translations) · [dlaa.ini](#dlaaini) · [Performance](#performance) · [Troubleshooting](#troubleshooting) · [Multiplayer](#multiplayer) · [Build](#build-from-source) · [Report a problem](#reporting-a-problem-what-to-upload) · [Contributing](CONTRIBUTING.md) · [License](#license-and-credits)
 
-> **Where the project stands (v0.14.0).** The mod was built for as many use cases, devices and situations as
-> I could reach: flat and VR, one screen and three, keyboard, wheel and shifter, Reflex and frame rate caps,
-> foveated rendering, a hidden area mask, Turbo mode, CPU tuning, a tuning menu with every setting and its cost.
-> There are many options to tweak, and to tweak is paradise. The bells and whistles I know of are in; the ideas
-> left on my list are not worth their cost. From here on the main work is **performance tuning on your hardware**,
-> and that needs your logs: see [Contributing](CONTRIBUTING.md). If you have a suggestion,
-> a feature idea or a device I have not thought of, [open an issue](../../issues/new/choose) (Feature request).
+> **Where the project stands.** A lot of features have been added. From here on the work is about
+> **performance tuning and optimization** (your logs help: see [Contributing](CONTRIBUTING.md)). More
+> enhancements may come in time. If you have a suggestion, please [open a new issue](../../issues/new/choose)
+> (Feature request) and ask for it: I'll be happy to take a look.
 
 ## Features
 
@@ -38,7 +37,7 @@ an in-game menu (`Delete`) and an optional text config.
 - **Mirrors anti-aliased too**, trailer included.
 - **Exact motion for traffic**, wheels, trailers and plates: sharp, no ghosting.
 - Menu and truck-preview screens get anti-aliasing as well.
-- **Steadier near wires**: telephone and power wires stay calm while you drive. **new**
+- **Steadier near wires**: telephone and power wires stay calm while you drive.
 - Four DLSS models, switched live with a key.
 - Sharper texture text and adjustable sharpening.
 
@@ -46,12 +45,12 @@ an in-game menu (`Delete`) and an optional text config.
 - One DLL and one `dlaa.ini` for both; VR renders one pass per eye (OpenXR).
 - **Triple screens** in flat: every screen gets its own DLAA.
 - Windows HDR and NVIDIA Smooth Motion work in flat mode.
-- OFXR Bridge (VR frame generation) and **VectorXR** (VR layer suite) work alongside. **new: VectorXR**
+- OFXR Bridge (VR frame generation) and **VectorXR** (VR layer suite) work alongside.
 - Drivable cars (ATS) get DLAA / DLSS too.
 
 **VR extras and speed**
-- **Eye-tracked foveated rendering**: the sharp area follows your eyes (eye-tracked headsets, experimental). **new**
-- **Foveated strength**: Normal / Strong / Max outer ring for more GPU saving. **new**
+- **Eye-tracked foveated rendering**: the sharp area follows your eyes (eye-tracked headsets, experimental).
+- **Foveated strength**: Normal / Strong / Max outer ring for more GPU saving.
 - **VR fps counter attached to the vehicle**: rides with the cab; 20 colours.
 - Three VR speed-ups: hidden area mask, foveated lighting, mirrors in turns.
 - DLAA area: process only the middle of each eye.
@@ -60,7 +59,9 @@ an in-game menu (`Delete`) and an optional text config.
 **Menu**
 - **In-game menu** (`Delete`): every setting, its hotkey, its GPU cost, a short description.
 - Panel and fps counter can be moved and resized, flat and VR.
-- **VR panel fixed in the cab**: stays still while you look around; sharper text. **new**
+- **VR panel fixed in the cab**: stays still while you look around; sharper text.
+- **The menu in your language**: all 43 languages of the game, picked from the game's own setting. **new**
+- **Key names for your keyboard**: `Strg+F9` / `Entf` on a German keyboard, `Suppr` on a French one. **new**
 - Live CPU and GPU cost per part, and what limits your frame rate.
 
 **Setup**
@@ -83,7 +84,8 @@ an in-game menu (`Delete`) and an optional text config.
   the VR panel can stay fixed in the cab (`Panel lock (VR)`), and its text is drawn sharper.
 - **Eye-tracked foveated rendering (VR, experimental)** — on a headset with eye tracking (OpenXR eye gaze, tested on
   Varjo Aero) the sharp centre of `Foveated (VRS)` follows where you look; `Foveated strength` sets how coarse the outer
-  ring is (new in v0.14.0). See [the test guide](docs/EYE_TRACKING_TEST.md).
+  ring is (new in v0.14.0). See [the test guide](docs/EYE_TRACKING_TEST.md). Varjo testing by
+  [ejaypeppy-source](https://github.com/ejaypeppy-source), thank you!
 - **Steadier thin wires** — near telephone and power wires no longer break up while you drive (`Thin-wire motion`,
   `Thin-wire depth`, both on; `Thin-wire widening` is experimental and off). Far wires thinner than 1 pixel can still
   break up (new in v0.14.0).
@@ -156,7 +158,7 @@ This is an unofficial fan project. It is not affiliated with, or endorsed by, SC
 Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
-> Status: v0.14.0. New: eye-tracked foveated rendering (experimental, tested on Varjo), Foveated strength, steadier near wires while driving, VectorXR support (tested), and a VR menu panel that can stay fixed in the cab with sharper text. Eye tracking test guide: [docs/EYE_TRACKING_TEST.md](docs/EYE_TRACKING_TEST.md).
+> Status: v0.15.0. New: the tuning menu in all 43 game languages (AI translations, best effort, fixes welcome: [Translations](#translations)), key names for your keyboard, shimmer capture on the `Pause` key, and two VR eye pairing fixes (Varjo). Since v0.14.0: eye-tracked foveated rendering (experimental, tested on Varjo), steadier near wires, VectorXR support and a VR panel fixed in the cab. Eye tracking test guide: [docs/EYE_TRACKING_TEST.md](docs/EYE_TRACKING_TEST.md).
 > With this version the bells and whistles I know of are in. From here on the main work is performance tuning, from your logs; new ideas are still welcome. See [Contributing](CONTRIBUTING.md).
 > See the [Releases page](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/releases) for every version.
 > DLSS upscaling in VR is still being tuned; treat it as experimental.
@@ -240,6 +242,16 @@ Older versions need both. If you use an older version, install them with protont
 ```
 protontricks 227300 vcrun2026
 protontricks 227300 d3dcompiler_47
+```
+
+<a name="languages-and-fonts"></a>
+**Menu languages and fonts.** The menu uses the game's language. Most languages work at once. **Chinese,
+Japanese and Korean** need fonts that Proton does not have. Without them, the menu shows English, and the
+Language row says `font missing`. Install them once per game:
+
+```
+protontricks 227300 cjkfonts
+protontricks 270880 cjkfonts
 ```
 
 **AMD cards** work through [OptiScaler](https://github.com/optiscaler/OptiScaler). Rename
@@ -522,6 +534,7 @@ These need `log_level = 4` in `dlaa.ini`. They are for diagnostics and bug repor
 | `Ctrl+F7` | Passive mode on / off |
 | `Ctrl+F8` | Jitter-only debug on / off |
 | `Ctrl+F9` | Self-test (dumps frames) |
+| `Pause` | Shimmer capture: DLAA on and off frames + log + `dlaa.ini` in one folder (new in v0.15.0; works at any log level, `4` makes the copied log useful) |
 | `Ctrl+F10` | NGX input snapshot |
 | `Ctrl+F11` | Frame trace |
 | `Ctrl+F12` | Cycle NGX jitter sign |
@@ -557,7 +570,7 @@ it, what it costs or saves. **`Up` / `Down`** select a row,
 always shown. Then come the groups: `Picture` (sharpening, texture sharpness, DLAA area, tonemap, see-through depth),
 `Motion and mirrors`, `Upscaling and VR` (DLSS upscale, DLAA on / off, OFXR Bridge, VectorXR), `VR performance` (Turbo, foveated
 rendering, hidden area mask), `Frame rate and CPU` (Reflex, FPS cap, VR FPS cap, CPU tuning), `Panel settings` and `FPS counter settings`.
-After them: `FPS counter`, `Logging`,
+After them: `FPS counter`, `Logging`, `Language`,
 `Save`, `Reset` and `Close`. Select a group and press `Right` to open it, `Left` to close it. A closed group shows `►` and
 `closed (N)` (N = its rows); an open group shows `▼` and `open`, with its rows indented below it. All groups are closed again each time you open the menu.
 
@@ -727,6 +740,12 @@ The three green lines under the title show the game's GPU time per frame, what t
   `info` or `debug`, live. Its cost column shows what the logging costs on the CPU per frame (the description adds the
   lines per second; at `debug` also what the CPU profiler costs). `debug` also runs the mod's GPU timers and CPU
   profiler all the time; use it for bug reports, `errors` for play.
+- **Language** (`language`, `auto` by default): the language of the menu. `auto` = the game's own language (the mod
+  reads it from the game, not from Windows, so it also works under Proton). `Left` / `Right` pick another one; `Save`
+  keeps it. The menu has all 43 languages of the game, translated by AI as a best effort, so fixes are welcome
+  ([Translations](#translations)). A file `bin\win_x64\lang\<code>.po` next to `dinput8.dll` wins over the built-in
+  text, so you can test your own fixes. Linux / Proton: Chinese, Japanese and Korean need fonts
+  ([Linux / Proton](#languages-and-fonts)); without them the row says `font missing` and the menu is English.
 - **Hotkeys...** (v0.13.0) opens the Hotkeys page: every hotkey of the menu with its key and wheel button; bind one by
   pressing `Right` on its line and then the new key or button (see above).
 - **Save to dlaa.ini** (the same as `Shift+F12`) writes the live values, and the panel position / fps box once you
@@ -757,6 +776,27 @@ The three green lines under the title show the game's GPU time per frame, what t
 - **From the wheel:** the menu (and every other hotkey) can also be driven from a wheel's D-pad and buttons, e.g.
   `key_menu = Delete, Wheel10` and `key_menu_up = Up, WheelUp`; see
   [`docs/KEYS.md`](docs/KEYS.md#wheel-gamepad-and-joystick-buttons) for how to find the button number.
+
+</details>
+
+<a name="translations"></a>
+<details>
+<summary><h2>Translations — help wanted</h2></summary>
+
+The menu is available in **all 43 languages of ETS2 and ATS**. It uses the game's language by itself; the
+menu's `Language` row (or `language =` in `dlaa.ini`) picks another one.
+
+> [!IMPORTANT]
+> **Best effort.** The translations were created by **Claude** (AI) and reviewed by **Grok**, **Google Gemini**
+> and **ChatGPT**. An AI can never be as accurate as a native speaker, so some texts may still be wrong. If you
+> have a change or a suggestion, please open a new translation issue: it helps every player of your language.
+
+- **Found a wrong text?** [Report a translation problem](../../issues/new?template=translation.yml): the language,
+  what is wrong, what it should say, and a screenshot of the spot in the menu. Please write the explanation in
+  English, so that everybody can follow it; only the menu text itself is in your language.
+- **The translations area: [`lang/README.md`](lang/README.md).** The list of languages, how a language is chosen,
+  fonts on Linux / Proton, what to change in a language file, and how to test your fix in the game before you
+  send it.
 
 </details>
 
@@ -840,6 +880,7 @@ The table below lists the commonly used keys:
 | `controller_name` | *(empty)* | only read the wheels / gamepads whose name contains this text for `WheelN` / `WheelUp` hotkey bindings, e.g. `T300` when a shifter shares the wheel's button numbers; empty = every controller ([`docs/KEYS.md`](docs/KEYS.md#wheel-gamepad-and-joystick-buttons)) |
 | `key_<action>` | *(see KEYS.md)* | re-bind any hotkey, e.g. `key_dlaa_toggle = Ctrl+D`, or `none` to disable it. Full list and format: [`docs/KEYS.md`](docs/KEYS.md) |
 | `log_level` | `1` | how much goes into the log file `dlaa_inject.log`: `0` = off, `1` = errors only (without an error no file is created), `2` = + warnings (problems the mod works around), `3` = + info (start-up and every setting change), `4` = debug: + statistics every few seconds, and the mod's GPU timers and CPU profiler run. Bug reports need `4`. The names work too (`off`, `errors`, `warnings`, `info`, `debug`). The menu's `Logging` row changes it live. The old `debug = 1` still means `4`, but only when there is no `log_level` line |
+| `language` | `auto` | the menu's language: `auto` = the game's language, or a game language code (`de_de`, `ru_ru`, `ko_kr`, `pt_br`, `en_us` ...). The menu's `Language` row sets it; `Save` writes it |
 
 </details>
 
@@ -995,6 +1036,13 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   v0.14.0: update (GitHub issues #14 and #15).
 - **The VR menu panel shivers or jitters when you move your head (most with Turbo mode on):** set `Panel lock (VR)` to
   `Fixed in cab` (new in v0.14.0). **The VR panel text looks thick or soft at a small panel size:** fixed in v0.14.0: update.
+- **VR (Varjo Aero): no hidden area mask, or eye tracking used the wrong eye; the log shows `hidden area mask: eye 1 /
+  OpenXR view 1 does NOT match`:** fixed in v0.15.0: update (GitHub issue #21).
+- **VR: for about 2 seconds at the start of each drive the picture smears or the foveated centre sits in the wrong
+  eye:** fixed in v0.15.0: update.
+- **The menu is English although the game is in another language:** the `Language` row must be on `auto` (or delete the
+  `language` line in `dlaa.ini`). Linux / Proton with Chinese, Japanese or Korean: the row says `font missing`, see
+  [Linux / Proton](#languages-and-fonts).
 - **Faint dark line down the middle of the menu / truck-preview screen:** fixed in v0.8.1: update.
 - **Dark 1 px line on every silhouette (trees, poles, trucks) in flat mode:** fixed in v0.10.1: update. v0.10.0
   drew the game's fog pass one texel off.
@@ -1052,6 +1100,10 @@ the release zip. Architecture and internals: [`docs/DEVELOPMENT.md`](docs/DEVELO
 If something goes wrong, [open an issue](../../issues/new/choose) (**New issue** >
 **Bug report**) and attach the files below. Without the log I usually can't tell what
 happened.
+
+**Please write in English**, so that everybody can read your issue and help. Not everyone understands
+your language, but most people read English. A translation tool (DeepL, Google Translate) is fine. This is for
+every issue: bug reports, feature requests and translation problems (there, only the menu text itself is in your language).
 
 **Steps first:** put `log_level = 4` in `dlaa.ini` (without it the log has errors only), start the game, reproduce the problem, then **quit the game** and
 only then collect the files. Load a save and drive for about a minute before quitting, so the log covers the 3D scene and not just the menu. The log is written while the game runs, so grab it after
@@ -1119,6 +1171,8 @@ JRDevo gains nothing from this mod except a fixed problem and a shared solution:
 no paid versions. Made with love.
 
 **Thanks** to [Breno Assis](https://github.com/breno-assis) for the idea of the draw-id state shadow (`did_shadow`, the cheaper per-part motion vector record): his pull request showed the way, the version in the mod is a rewrite with extra safety checks.
+
+**Thanks** to [ejaypeppy-source](https://github.com/ejaypeppy-source) for testing eye-tracked foveated rendering on a Varjo Aero, round after round, with logs ([issue #21](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/issues/21)): the Varjo eye pairing fixes exist because of those tests.
 
 **Third-party parts** — each has its own terms, see [`THIRD_PARTY.md`](THIRD_PARTY.md):
 

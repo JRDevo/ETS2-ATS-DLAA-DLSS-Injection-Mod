@@ -1,0 +1,2382 @@
+# German translation of the ETS2 / ATS DLAA & DLSS mod menu.
+# Machine-translated draft (2026-10-25): native speakers, please fix it -- see CONTRIBUTING.md.
+msgid ""
+msgstr "Language: de_de\nX-Native-Name: Deutsch\nContent-Type: text/plain; charset=UTF-8\n"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "white"
+msgstr "weiß"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "yellow"
+msgstr "gelb"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "amber"
+msgstr "bernstein"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "orange"
+msgstr "orange"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "red"
+msgstr "rot"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "pink"
+msgstr "rosa"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "magenta"
+msgstr "magenta"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "purple"
+msgstr "lila"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "violet"
+msgstr "violett"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "blue"
+msgstr "blau"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "sky blue"
+msgstr "himmelblau"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "cyan"
+msgstr "cyan"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "teal"
+msgstr "petrol"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "mint"
+msgstr "mint"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "green"
+msgstr "grün"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "lime"
+msgstr "limette"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "olive"
+msgstr "oliv"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "gold"
+msgstr "gold"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "silver"
+msgstr "silber"
+
+#. Value column (about 20 Latin characters)
+#: src/fps_pose.h
+msgid "black on white"
+msgstr "schwarz auf weiß"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "high"
+msgstr "hoch"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "medium"
+msgstr "mittel"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "low"
+msgstr "niedrig"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Picture"
+msgstr "Bild"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Motion and mirrors"
+msgstr "Bewegung und Spiegel"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Upscaling and VR"
+msgstr "Upscaling und VR"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "VR performance"
+msgstr "VR-Leistung"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Frame rate and CPU"
+msgstr "Bildrate und CPU"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel settings"
+msgstr "Panel-Einstellungen"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS counter settings"
+msgstr "FPS-Anzeige-Einstellungen"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's "
+"Scaling is below 100 %. off = the game's own picture: use it to compare. Saved at once."
+msgstr ""
+"DLAA = saubere Kanten in der Renderauflösung des Spiels. DLSS = dasselbe, plus Upscaling, wenn "
+"die Skalierung des Spiels unter 100 % liegt. aus = Bild des Spiels zum Vergleichen. Wird sofort "
+"gespeichert."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Presets for your GPU. high = everything on (model 1). medium = model 2, half-size see-through "
+"depth, flat mirrors without part motion, lighter part-motion search. low = also no mirror DLAA, "
+"no see-through depth, VR area 60 %. Never changes a setting you set yourself."
+msgstr ""
+"Voreinstellungen für deine GPU. hoch = alles an (Modell 1). mittel = Modell 2, halbe "
+"Durchsicht-Tiefe, flache Spiegel ohne Teilebewegung, leichtere Suche. niedrig = auch kein "
+"Spiegel-DLAA, keine Durchsicht-Tiefe, VR-Bereich 60 %. Ändert nie, was du selbst gesetzt hast."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, least ghosting "
+"behind traffic: start here. 3 (F) = calmest on fences and wires, can smear moving detail, same "
+"cost as 2. 4 (M) = heaviest (about 5x), flat tests only."
+msgstr ""
+"1 (K) = meiste Details, schärfster Text, etwa 1,6x GPU-Last von 2. 2 (E) = ausgewogen, am "
+"wenigsten Geisterbilder hinter Verkehr: hier starten. 3 (F) = ruhigster Look bei Zäunen und "
+"Drähten, kann bewegte Details verschmieren, Kosten wie 2. 4 (M) = am schwersten (etwa 5x), nur "
+"für Flachtests."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Picture quality: sharpening, texture sharpness, the DLAA area and the see-through depth. Right "
+"opens the group, Left closes it; it starts closed every time the menu opens."
+msgstr ""
+"Bildqualität: Schärfung, Texturschärfe, DLAA-Bereich und Durchsicht-Tiefe. Rechts öffnet die "
+"Gruppe, Links schließt sie; sie ist bei jedem Menüstart zu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Sharpens the picture after DLAA, 0 (off) to 1.0. Raise it if the picture looks soft; too high "
+"gives bright halos on edges. Costs about 0.1 ms; 0 skips the pass."
+msgstr ""
+"Schärft das Bild nach DLAA, 0 (aus) bis 1,0. Erhöhen, wenn das Bild weich wirkt; zu hoch gibt "
+"helle Säume an Kanten. Kostet etwa 0,1 ms; 0 überspringt den Schritt."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How far the sharpening reaches, 1 to 4 px: small = fine detail, large = bolder edges. Change it "
+"if the sharpening looks too fine or too coarse; a picture drawn larger than the screen, as in VR, "
+"needs more than 1 px."
+msgstr ""
+"Reichweite der Schärfung, 1 bis 4 px: klein = feine Details, groß = kräftigere Kanten. Ändern, "
+"wenn sie zu fein oder zu grob wirkt; ein Bild größer als der Schirm (VR) braucht mehr als 1 px."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Sharper texture text (road signs, dashboard, GPS). 0 = off; more negative = sharper but more "
+"shimmer on fences; try -0.5 to -1 if text is blurry. No GPU time, only a little memory bandwidth."
+msgstr ""
+"Schärferer Texturtext (Schilder, Armaturen, GPS). 0 = aus; negativer = schärfer, aber mehr "
+"Flimmern an Zäunen; bei unscharfem Text -0,5 bis -1 probieren. Keine GPU-Zeit, nur etwas "
+"Speicherbandbreite."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The same for wire fences, grass and leaf cut-outs: raise it toward 0 if fences shimmer, lower it "
+"if grass looks soft. same = follows the row above. Acts only while Texture sharpness is not 0. No "
+"GPU time, a little memory."
+msgstr ""
+"Dasselbe für Maschenzäune, Gras und Blattausschnitte: Richtung 0 erhöhen, wenn Zäune flimmern, "
+"senken, wenn Gras weich wirkt. gleich = folgt der Zeile darüber. Wirkt nur, wenn Texturschärfe "
+"nicht 0 ist. Keine GPU-Zeit, etwas Speicher."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower "
+"it to afford a heavier model or win frame rate; 40 % costs about 40 % of the model. Also sets the "
+"garage / main-menu truck."
+msgstr ""
+"VR: nur die Mitte jedes Auges bekommt DLAA (20 bis 100 %); der Rand zeigt das Spielbild. Senken "
+"für ein schwereres Modell oder mehr Bildrate; 40 % kosten etwa 40 % des Modells. Gilt auch für "
+"den Garagen-/Hauptmenü-Truck."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
+"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
+"~60 frames to switch."
+msgstr ""
+"Nur Flachbild: DLAA vor Bloom/Tonemapping des Spiels, damit Spurmarkierungen, Drähte und Schienen "
+"weniger flimmern. Nur zum Vergleichen ändern. Nicht mit DLSS-Upscaling oder Windows-HDR. Gleiche "
+"Kosten; Umschalten dauert ~60 Bilder."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Gives wires, fences and glass their own distance instead of what is behind them, so they do not "
+"smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."
+msgstr ""
+"Gibt Drähten, Zäunen und Glas eine eigene Entfernung statt der des Hintergrunds, damit sie bei "
+"Bewegung nicht verschmieren. Ausschalten, wenn dort nichts verschmiert: spart 0,02 - 0,06 ms pro "
+"Auge."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Stops street-lamp and car-light glows leaving a trail behind them when you move: DLSS takes each "
+"glow from the current frame, not its history. 25 % steps; lower it if lamp glows flicker, 0 = "
+"off. Costs about 0.05 - 0.2 ms per eye."
+msgstr ""
+"Verhindert, dass Laternen- und Autolicht-Glühen bei Bewegung Schlieren ziehen: DLSS nimmt jedes "
+"Glühen aus dem aktuellen Bild, nicht aus dem Verlauf. 25-%-Schritte; senken, wenn Glühen "
+"flackert, 0 = aus. Kostet etwa 0,05 - 0,2 ms pro Auge."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How moving parts and truck mirrors are handled by DLAA. Right opens the group, Left closes it; it "
+"starts closed every time the menu opens."
+msgstr ""
+"Wie DLAA bewegte Teile und Truck-Spiegel behandelt. Rechts öffnet die Gruppe, Links schließt sie; "
+"sie ist bei jedem Menüstart zu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and "
+"does not ghost. Turn it off only to save about 0.5 ms per eye or to test: every pixel then moves "
+"with the camera and traffic smears."
+msgstr ""
+"Gibt jedem bewegten Teil (Verkehr, Räder, Kennzeichen) eigene Bewegung für DLAA, damit es scharf "
+"bleibt und nicht geistert. Nur ausschalten, um etwa 0,5 ms pro Auge zu sparen oder zu testen: "
+"dann bewegt sich jedes Pixel mit der Kamera und Verkehr verschmiert."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main "
+"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can ghost "
+"in the glass; else each part moves exactly in the glass."
+msgstr ""
+"Gibt Truck-Spiegeln ein eigenes DLAA, damit sie nicht flimmern. 1 Spiegel = nur der größte (der "
+"Hauptspiegel neben dir). alle = jeder Spiegel. Kamera = pro Spiegel am günstigsten, bewegter "
+"Verkehr kann im Glas geistern; sonst bewegt sich jedes Teil exakt im Glas."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"on = each mirror gets its DLAA every 2nd frame and shows its last clean picture in between: about "
+"half the mirror cost. Edges stay clean; moving things in the glass update at half rate. off = "
+"every mirror every frame."
+msgstr ""
+"an = jeder Spiegel bekommt sein DLAA nur jedes 2. Bild und zeigt dazwischen sein letztes sauberes "
+"Bild: etwa halbe Spiegelkosten. Kanten bleiben sauber; Bewegtes im Glas wird mit halber Rate "
+"aktualisiert. aus = jeder Spiegel jedes Bild."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
+"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
+"soft for a moment when it changes."
+msgstr ""
+"Dünne Drähte behalten beim Fahren ihre Bewegung: DLAA verteilt die Bewegungsdaten auf dünne "
+"Linien (DLSS-Motion-Dilation). an = Standard. aus = nur zum Vergleichen; nahe Drähte flimmern "
+"mehr. Das Bild ist beim Umschalten kurz weich."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
+"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
+msgstr ""
+"Dünne Drähte bekommen Tiefe an jedem berührten Pixel, nicht nur dort, wo sie eine Pixelmitte "
+"decken. an = Standard. an (ohne A2C) = auch für durchsichtige Kanten. aus = nur zum Vergleichen; "
+"nahe Drähte flimmern mehr."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
+"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+msgstr ""
+"Experimentell: zeichnet ferne Drähte, die dünner als 1 Pixel sind, als 1-Pixel-Linie, damit sie "
+"nicht in Striche zerfallen. Standardmäßig aus: ferne Drähte können dunkler wirken oder mehr "
+"flimmern. Ausprobieren und vergleichen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the "
+"group, Left closes it; it starts closed every time the menu opens."
+msgstr ""
+"DLSS-Upscaling, der DLAA-Schalter und die Infos zu OFXR Bridge / VectorXR. Rechts öffnet die "
+"Gruppe, Links schließt sie; sie ist bei jedem Menüstart zu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than "
+"the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at "
+"Scaling 100 %."
+msgstr ""
+"DLSS zeichnet das Bild wieder auf volle Größe, wenn die Skalierung des Spiels unter 100 % liegt: "
+"schärfer als das Strecken des Spiels, und weniger Pixel bedeuten mehr fps. Keine Zusatzkosten; "
+"wirkt nicht bei Skalierung 100 %."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
+"comparing. Off saves the cost of every part together."
+msgstr ""
+"Schaltet den ganzen Mod an oder aus und merkt sich den Modus; aus zeigt das Bild des Spiels zum "
+"Vergleichen. Aus spart die Kosten aller Teile zusammen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"OFXR Bridge = VR frame generation by djules75, a separate download "
+"(github.com/djules75/OFXR-Bridge). found = its layer is loaded in this game and the mod lets its "
+"work pass through. Start its tray app before the game."
+msgstr ""
+"OFXR Bridge = VR-Frame-Generierung von djules75, ein separater Download "
+"(github.com/djules75/OFXR-Bridge). gefunden = die Ebene ist im Spiel geladen und der Mod lässt "
+"ihre Arbeit durch. Tray-App vor dem Spiel starten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, "
+"Depth, frame generation; found = its layer is loaded in the game and the mod lets its work pass "
+"through. Run only one Turbo (its or the mod's)."
+msgstr ""
+"VectorXR = eine OpenXR-Erweiterungssuite von DienerTech (github.com/DienerTech/vectorxr): Turbo, "
+"Tiefe, Frame-Generierung; gefunden = die Ebene ist im Spiel geladen und der Mod lässt ihre Arbeit "
+"durch. Nur ein Turbo verwenden (seins oder das des Mods)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left "
+"closes it; it starts closed every time the menu opens."
+msgstr ""
+"VR-Beschleuniger: Turbo, Foveated Rendering und die Maske des verdeckten Bereichs. Rechts öffnet "
+"die Gruppe, Links schließt sie; sie ist bei jedem Menüstart zu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Turbo: no ASW / Motion Smoothing / SSW / reprojection. VR only. On = the game stops waiting for "
+"the headset each frame: more fps only when the CPU is the limit (busy cities, traffic). Turn it "
+"off if the picture judders. From OpenXR Toolkit."
+msgstr ""
+"Turbo: kein ASW / Motion Smoothing / SSW / Reprojektion. Nur VR. An = das Spiel wartet nicht mehr "
+"jedes Bild auf das Headset: mehr fps nur, wenn die CPU limitiert (volle Städte, Verkehr). Aus, "
+"wenn das Bild ruckelt. Aus OpenXR Toolkit."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR "
+"only. The outer ring is shaded once per 2 x 2 pixels; fences, grass and leaves keep full detail. "
+"Turn it off if the edge looks blocky."
+msgstr ""
+"Scharfe Mitte, weniger Details am Rand (nur NVIDIA RTX). Spart GPU-Zeit bei hoher Skalierung. Nur "
+"VR. Der äußere Ring wird einmal pro 2 x 2 Pixel schattiert; Zäune, Gras und Blätter behalten "
+"volle Details. Aus, wenn der Rand blockig wirkt."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How big the sharp centre of Foveated (VRS) is, 10 - 100 % in 5 % steps: bigger = more of the view "
+"sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
+"(balanced) is the default; 90 = wide, 65 = narrow."
+msgstr ""
+"Größe der scharfen Mitte von Foveated (VRS), 10 - 100 % in 5-%-Schritten: größer = mehr Sicht "
+"scharf, weniger Ersparnis; kleiner = mehr Ersparnis, weniger Details beginnen näher an der Mitte. "
+"80 % (ausgewogen) ist Standard; 90 = breit, 65 = schmal."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Which of the game's passes Foveated (VRS) acts on. scene = the 3D world only (default). scene + "
+"lighting = also the game's lighting pass, at the very edge only: more saving. Test it: look for "
+"blocky light or shadow edges at the side of your view."
+msgstr ""
+"Auf welche Render-Durchgänge des Spiels Foveated (VRS) wirkt. Szene = nur die 3D-Welt (Standard). "
+"Szene + Licht = auch der Lichtdurchgang, nur ganz am Rand: mehr Ersparnis. Testen: auf blockige "
+"Licht- oder Schattenkanten am Sichtrand achten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How coarse the outer ring of Foveated (VRS) is. Normal = 1 colour per 2 x 2 pixels (default). "
+"Strong = per 4 x 2, Max = per 4 x 4: more GPU saving, blockier edges. Best with eye tracking, "
+"where you never look at the outer ring."
+msgstr ""
+"Wie grob der äußere Ring von Foveated (VRS) ist. Normal = 1 Farbe pro 2 x 2 Pixel (Standard). "
+"Stark = pro 4 x 2, Max = pro 4 x 4: mehr GPU-Ersparnis, blockigere Kanten. Am besten mit "
+"Eye-Tracking, wo du nie auf den äußeren Ring schaust."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Experimental. The sharp centre of Foveated (VRS) follows your eyes on a headset with eye tracking "
+"(OpenXR eye gaze, for example Varjo); without one it stays at the lens centre. Needs Foveated "
+"(VRS) on at the game's start, else a restart. Almost no cost."
+msgstr ""
+"Experimentell. Die scharfe Mitte von Foveated (VRS) folgt deinen Augen bei einem Headset mit "
+"Eye-Tracking (OpenXR Eye Gaze, z. B. Varjo); ohne bleibt sie in der Linsenmitte. Foveated (VRS) "
+"muss beim Spielstart an sein, sonst Neustart. Fast keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. The game skips the lens corners you never see (the headset reports them), so it draws "
+"fewer pixels: more GPU headroom, the picture you see stays the same. The first switch-on needs a "
+"game restart. Turn it off if the edge of the view looks wrong."
+msgstr ""
+"Nur VR. Das Spiel überspringt die Linsenecken, die du nie siehst (das Headset meldet sie), und "
+"zeichnet weniger Pixel: mehr GPU-Reserve, das sichtbare Bild bleibt gleich. Das erste Einschalten "
+"braucht einen Spielneustart. Aus, wenn der Sichtrand falsch aussieht."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right "
+"opens the group, Left closes it; it starts closed every time the menu opens."
+msgstr ""
+"Bildratenlimits und CPU: NVIDIA Reflex und ein FPS-Limit für Flach, ein VR-FPS-Limit, CPU-Tuning. "
+"Rechts öffnet die Gruppe, Links schließt sie; sie ist bei jedem Menüstart zu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
+"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
+msgstr ""
+"Nur Flach, nur NVIDIA. An = Bilder des Spiels warten weniger in der GPU-Warteschlange: weniger "
+"Eingabeverzögerung, wenn die GPU limitiert. Boost hält zusätzlich die GPU-Takte oben. Gleiche "
+"fps; kleine Kosten. Nicht in VR."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
+"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
+"limiting. off = no limit."
+msgstr ""
+"Nur Flach. Hält das Spiel höchstens auf dieser Bildrate: gleichmäßige Frame-Zeit, weniger Hitze "
+"und Strom. Etwas unter dem setzen, was dein PC in einer vollen Stadt hält. Mit Reflex an begrenzt "
+"der NVIDIA-Treiber. aus = kein Limit."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
+"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
+"the fps swings. Turns Turbo off while on."
+msgstr ""
+"Nur VR. halb = das Spiel zeichnet jedes 2. Headset-Bild (72 Hz -> 36 fps), Drittel = jedes 3.; "
+"die Reprojektion des Headsets (ASW / Motion Smoothing) füllt den Rest im gleichmäßigen Takt. "
+"Nutzen, wenn die fps schwanken. Schaltet Turbo währenddessen aus."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
+"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
+"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
+"cpu_pcore, cpu_priority, cpu_no_throttle."
+msgstr ""
+"Drei CPU-Schalter zusammen: Haupt- und Render-Thread bevorzugen die P-Cores (nur "
+"Intel-Hybrid-CPUs), das Spiel läuft mit Priorität Höher als normal, und Windows darf es nicht "
+"drosseln (EcoQoS) oder seine Timer-Anfragen ignorieren. Hilft, wenn die CPU limitiert; keine "
+"Kosten. Einzeln in dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
+"it; it starts closed every time the menu opens."
+msgstr ""
+"Position, Größe, Tiefe und Ausrichtung des Panels sowie die Menütasten. Rechts öffnet die Gruppe, "
+"Links schließt sie; sie ist bei jedem Menüstart zu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
+"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
+"metres). Needs the VR layer (default). No cost."
+msgstr ""
+"Nur VR. Kopf folgen = das Panel bewegt sich mit dem Headset. In Kabine fixiert = es bleibt an "
+"einem Punkt vor deinem Sitz, ruhig beim Umschauen; X / Y / Tiefe stellen dann diesen Punkt ein "
+"(Grad, Meter). Braucht die VR-Ebene (Standard). Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
+"and VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr ""
+"Verschiebt das Panel seitwärts, in % des Bildschirms (VR in Kabine fixiert: Grad um deinen Sitz). "
+"Flach und VR haben je eine eigene Position. Nutzen, wenn das Panel etwas Wichtiges verdeckt. "
+"Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
+"VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr ""
+"Verschiebt das Panel auf / ab, in % des Bildschirms (VR in Kabine fixiert: Grad, Plus = unten). "
+"Flach und VR haben je eine eigene Position. Nutzen, wenn das Panel etwas Wichtiges verdeckt. "
+"Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
+"much. Flat and VR each keep their own size. No cost."
+msgstr ""
+"Macht das Panel größer oder kleiner. Erhöhen, wenn du es nicht lesen kannst, senken, wenn es zu "
+"viel verdeckt. Flach und VR haben je eine eigene Größe. Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
+"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
+"Change it if the panel is tiring to look at. No cost."
+msgstr ""
+"Nur VR, daher in Flach ausgegraut. Wie weit das Panel schwebt: in Metern (0,30 - 3,00) als "
+"VR-Ebene, Standard; in px Verschiebung nach innen pro Auge mit menu_vr_layer = 0. Gleiche Größe "
+"in jeder Tiefe. Ändern, wenn das Panel anstrengend anzusehen ist. Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
+"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
+"picture. No cost."
+msgstr ""
+"Nur VR, daher in Flach ausgegraut. An = das Panel dreht sich zu dir, wenn du es zur Seite "
+"schiebst, aus jedem Winkel gleich groß (als VR-Ebene, Standard, auch die kopffolgende "
+"FPS-Anzeige); aus = ein flaches Bild. Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see "
+"what a setting gains. Its GPU cost is measured: per frame, every picture it is drawn into; none "
+"when off. Save keeps it for the next start."
+msgstr ""
+"Eine kleine Live-Anzeige für fps und Frame-Zeit, auch bei geschlossenem Menü (Flach und VR). "
+"Zeigt, was eine Einstellung bringt. Die GPU-Kosten sind gemessen: pro Bild, jedes Bild, in das "
+"sie gezeichnet wird; keine, wenn aus. Speichern behält sie für den nächsten Start."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The fps box's lock, position, size, colour, VR distance and turn. Right opens the group, Left "
+"closes it; it starts closed every time the menu opens."
+msgstr ""
+"Fixierung, Position, Größe, Farbe, VR-Abstand und Drehung der FPS-Anzeige. Rechts öffnet die "
+"Gruppe, Links schließt sie; sie ist bei jedem Menüstart zu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
+"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
+"Per-part motion vectors). No cost."
+msgstr ""
+"Nur VR. Kopf folgen = bewegt sich mit dem Headset. Im Spielraum fixiert = ein Punkt um deinen "
+"Sitz, ignoriert das Wanken der Kabine. An Fahrzeug = an der Kabine befestigt, wankt mit ihr "
+"(braucht DLAA + Bewegungsvektoren je Teil). Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
+"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
+"for every vehicle. No cost."
+msgstr ""
+"Nur VR, nur An Fahrzeug. An = jeder Truck / jedes Auto behält seine eigene Position, Drehung, "
+"Größe, Farbe, Helligkeit und Text der FPS-Anzeige in der Kabine (beim Schließen des Menüs in "
+"dlaa.ini gespeichert). Aus = ein gemeinsamer Satz für alle Fahrzeuge. Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
+"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
+"vehicles keep theirs. The box is square to the cab."
+msgstr ""
+"Nur VR, nur An Fahrzeug. Rechts = Kabine jetzt neu vermessen (ruhig sitzen, geparkt), wenn die "
+"Anzeige falsch sitzt. Links = die Anzeige dieses Fahrzeugs zurück auf Standard (Position, "
+"Drehung, Größe, Farbe, Text); andere Fahrzeuge behalten ihre. Die Anzeige steht rechtwinklig zur "
+"Kabine."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves the fps box sideways, in % of the screen (VR fixed / attached: degrees around you). Flat "
+"and VR each keep their own position. No cost."
+msgstr ""
+"Verschiebt die FPS-Anzeige seitwärts, in % des Bildschirms (VR fixiert / befestigt: Grad um "
+"dich). Flach und VR haben je eine eigene Position. Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves the fps box up / down, in % of the screen (VR fixed / attached: degrees, minus = up). Flat "
+"and VR each keep their own position. No cost."
+msgstr ""
+"Verschiebt die FPS-Anzeige auf / ab, in % des Bildschirms (VR fixiert / befestigt: Grad, Minus = "
+"oben). Flach und VR haben je eine eigene Position. Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
+"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
+msgstr ""
+"Nur VR, daher in Flach ausgegraut. Dreht die FPS-Anzeige nach links / rechts um sich selbst, in "
+"Grad (+ = ihre Vorderseite dreht nach rechts). Zum Anwinkeln, wenn sie seitlich sitzt. 0 = sie "
+"schaut dich an. Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
+"lying on the dashboard). 0 = it faces you. No cost."
+msgstr ""
+"Nur VR, daher in Flach ausgegraut. Kippt die FPS-Anzeige, in Grad (+ = ihre Oberkante neigt sich "
+"von dir weg, wie auf dem Armaturenbrett liegend). 0 = sie schaut dich an. Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
+"upright. No cost."
+msgstr ""
+"Nur VR, daher in Flach ausgegraut. Rotiert die FPS-Anzeige in ihrer eigenen Ebene, in Grad (+ = "
+"im Uhrzeigersinn). 0 = aufrecht. Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Makes the fps box bigger or smaller (0.2 .. 3.0). Raise it if you cannot read it in the headset "
+"or on a big screen. No cost."
+msgstr ""
+"Macht die FPS-Anzeige größer oder kleiner (0,2 .. 3,0). Erhöhen, wenn du sie im Headset oder auf "
+"einem großen Bildschirm nicht lesen kannst. Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The colour of the fps box's text: 20 colours, each with an outline so it reads on any picture "
+"(black on white = dark text, white outline). Flat and VR. No cost."
+msgstr ""
+"Die Textfarbe der FPS-Anzeige: 20 Farben, jede mit Kontur, damit sie auf jedem Bild lesbar ist "
+"(schwarz auf weiß = dunkler Text, weiße Kontur). Flach und VR. Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How bright the fps box is, 10 - 100 %: 100 = the colour as it is, lower dims the text (the "
+"outline stays) toward black. Use it to tone the counter down at night or in the headset. Flat and "
+"VR. No cost."
+msgstr ""
+"Helligkeit der FPS-Anzeige, 10 - 100 %: 100 = Farbe unverändert, weniger dimmt den Text (die "
+"Kontur bleibt) Richtung Schwarz. Nutzen, um den Zähler nachts oder im Headset abzudunkeln. Flach "
+"und VR. Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How see-through the whole fps box is, 10 - 100 %: 100 = solid, lower fades the text AND its black "
+"outline together, so a dimmed box does not turn into a black blob. Flat and VR. No cost."
+msgstr ""
+"Wie durchsichtig die ganze FPS-Anzeige ist, 10 - 100 %: 100 = deckend, weniger blendet Text UND "
+"schwarze Kontur zusammen aus, damit eine gedimmte Anzeige kein schwarzer Klecks wird. Flach und "
+"VR. Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. How far away the fps box floats, 0.30 - 3.00 m. It keeps the same "
+"size in your view at every distance; only the depth changes. Put it near the depth you look at to "
+"read it without refocusing. No cost."
+msgstr ""
+"Nur VR, daher in Flach ausgegraut. Wie weit die FPS-Anzeige schwebt, 0,30 - 3,00 m. Sie bleibt in "
+"jedem Abstand gleich groß im Blickfeld; nur die Tiefe ändert sich. Nahe an die Tiefe setzen, auf "
+"die du schaust, um sie ohne Neufokussieren zu lesen. Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + "
+"problems worked around; info = + start-up and changes; debug = + statistics, and debug also runs "
+"the GPU timers and the CPU profiler."
+msgstr ""
+"Was in dlaa_inject.log landet: aus = nichts; Fehler = nur Fehlschläge (Standard); Warnungen = + "
+"umgangene Probleme; Info = + Start und Änderungen; Debug = + Statistik, und Debug startet auch "
+"die GPU-Timer und den CPU-Profiler."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The language of this menu. auto = the game's language (default); Left / Right picks another one. "
+"Linux / Proton: Chinese, Japanese and Korean need their fonts installed, see the README. A "
+"lang\\<code>.po file next to the DLL wins, for your own fixes. Save keeps it. No cost."
+msgstr ""
+"Die Sprache dieses Menüs. auto = die Sprache des Spiels (Standard); Links / Rechts wählt eine "
+"andere. Linux / Proton: Chinesisch, Japanisch und Koreanisch brauchen ihre Schriften, siehe "
+"README. Eine lang\\<code>.po neben der DLL hat Vorrang, für eigene Korrekturen. Speichern behält "
+"sie. Keine Kosten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Every hotkey of this menu, one line per action, with its keyboard key and controller button. "
+"Right opens the list; pick an action with Right, then press the new key or wheel button. Saved to "
+"dlaa.ini at once."
+msgstr ""
+"Jede Taste dieses Menüs, eine Zeile pro Aktion, mit Tastaturtaste und Controller-Taste. Rechts "
+"öffnet die Liste; Aktion mit Rechts wählen, dann die neue Taste oder Lenkradtaste drücken. Sofort "
+"in dlaa.ini gespeichert."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Writes everything shown here into dlaa.ini (settings, and the panel / fps box positions once you "
+"moved them), keeping every other line. Do it once you like what you see, or the changes are gone "
+"at the next start. Mode saves itself."
+msgstr ""
+"Schreibt alles hier Gezeigte in dlaa.ini (Einstellungen und, sobald verschoben, Panel- und "
+"FPS-Anzeige-Positionen), alle anderen Zeilen bleiben. Tu es, wenn dir das Ergebnis gefällt, sonst "
+"sind die Änderungen beim nächsten Start weg. Der Modus speichert sich selbst."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Puts every setting in this menu back to how the mod ships (model, sharpen, texture sharpness, "
+"DLAA area, motion, mirrors, profile, panel, fps box, turbo, foveated, frame rate, logging), live "
+"and in dlaa.ini, keeping your hotkeys and every other line."
+msgstr ""
+"Setzt jede Einstellung dieses Menüs auf den Auslieferungszustand des Mods zurück (Modell, "
+"Schärfung, Texturschärfe, DLAA-Bereich, Bewegung, Spiegel, Profil, Panel, FPS-Anzeige, Turbo, "
+"Foveated, Bildrate, Protokoll), live und in dlaa.ini; Tasten und alle anderen Zeilen bleiben."
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "wide"
+msgstr "breit"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "balanced"
+msgstr "ausgewogen"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "narrow"
+msgstr "schmal"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Normal (2 x 2)"
+msgstr "Normal (2 x 2)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Strong (4 x 2)"
+msgstr "Stark (4 x 2)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Max (4 x 4)"
+msgstr "Max (4 x 4)"
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+#, c-format
+msgid "Limit: ..."
+msgstr "Limit: ..."
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+#, c-format
+msgid "Limit: unknown"
+msgstr "Limit: unbekannt"
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+#, c-format
+msgid "Limit: headset (%.0f Hz)"
+msgstr "Limit: Headset (%.0f Hz)"
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+#, c-format
+msgid "Limit: CPU and GPU"
+msgstr "Limit: CPU und GPU"
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+msgid "Limit: CPU"
+msgstr "Limit: CPU"
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+msgid "Limit: CPU (or a game fps cap)"
+msgstr "Limit: CPU (oder FPS-Limit des Spiels)"
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+#, c-format
+msgid "Limit: GPU"
+msgstr "Limit: GPU"
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+#, c-format
+msgid "Limit: vsync / fps cap"
+msgstr "Limit: VSync / FPS-Limit"
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+#, c-format
+msgid "%.0f (%.1f ms, headset %.0f Hz)"
+msgstr "%.0f (%.1f ms, Headset %.0f Hz)"
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+#, c-format
+msgid "%.0f (%.1f ms)"
+msgstr "%.0f (%.1f ms)"
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+#, c-format
+msgid "%ls      fps %ls      frame busy %lc%ls%lc | %lc%ls%lc ms"
+msgstr "%ls      fps %ls      Frame belegt %lc%ls%lc | %lc%ls%lc ms"
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+#, c-format
+msgid "this mod: %lc%ls%lc | GPU n/a (the GPU timers could not start: timestamp queries failed)"
+msgstr ""
+"dieser Mod: %lc%ls%lc | GPU n/v (GPU-Timer konnten nicht starten: Zeitstempelabfragen "
+"fehlgeschlagen)"
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+#, c-format
+msgid "this mod: %lc%ls%lc | - ms -- nothing for the GPU on this screen; it works while you drive"
+msgstr "dieser Mod: %lc%ls%lc | - ms -- nichts für die GPU auf diesem Bildschirm; wirkt beim Fahren"
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+#, c-format
+msgid "this mod: %lc%ls%lc | %lc...%lc ms"
+msgstr "dieser Mod: %lc%ls%lc | %lc...%lc ms"
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"this mod: %lc%ls%lc | %lc%ls%lc ms -- GPU: NGX %.1f, part motion %.1f, camera %.1f, see-through "
+"%.1f, mirrors %.1f, sharpen %.1f, copies %.1f"
+msgstr ""
+"dieser Mod: %lc%ls%lc | %lc%ls%lc ms -- GPU: NGX %.1f, Teilebewegung %.1f, Kamera %.1f, "
+"Durchsicht %.1f, Spiegel %.1f, Schärfen %.1f, Kopien %.1f"
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+#, c-format
+msgid ", other threads %ls"
+msgstr ", andere Threads %ls"
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+#, c-format
+msgid "; measuring costs %ls ms CPU (taken out)"
+msgstr "; Messen kostet %ls ms CPU (herausgerechnet)"
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+#, c-format
+msgid "%lcCPU%lc | %lcGPU%lc ms per frame%ls. CPU = the game's render thread%ls%ls."
+msgstr "%lcCPU%lc | %lcGPU%lc ms pro Bild%ls. CPU = Render-Thread des Spiels%ls%ls."
+
+#. Performance line at the top (one line, small font)
+#: src/inject.cpp
+msgid " (GPU: both eyes)"
+msgstr " (GPU: beide Augen)"
+
+#. Cost column cell (about 10 Latin characters)
+#: src/inject.cpp src/log.h
+#, c-format
+msgid "off"
+msgstr "aus"
+
+#. Cost column cell (about 10 Latin characters)
+#: src/inject.cpp
+msgid "same"
+msgstr "gleich"
+
+#. Cost column cell (about 10 Latin characters)
+#: src/inject.cpp
+msgid "no extra"
+msgstr "kein Extra"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "%ls ms CPU + %ls ms GPU"
+msgstr "%ls ms CPU + %ls ms GPU"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "%ls ms CPU"
+msgstr "%ls ms CPU"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "%ls ms GPU"
+msgstr "%ls ms GPU"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Off now: the mod's DLAA / DLSS work costs nothing."
+msgstr "Jetzt aus: die DLAA-/DLSS-Arbeit des Mods kostet nichts."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The whole mod costs %ls per frame now; off saves most of it."
+msgstr "Der ganze Mod kostet jetzt %ls pro Bild; aus spart das meiste."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Costs nothing itself; watch the perf lines for what it saves."
+msgstr "Kostet selbst nichts; die Leistungszeilen zeigen, was es spart."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Off now."
+msgstr "Jetzt aus."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Costs %ls per frame now (GPU per eye: 1 (K) 1.0, 2 (E) / 3 (F) 0.6, 4 (M) ~3 ms)."
+msgstr "Kostet jetzt %ls pro Bild (GPU pro Auge: 1 (K) 1,0, 2 (E) / 3 (F) 0,6, 4 (M) ~3 ms)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Off now: sharpening costs nothing."
+msgstr "Jetzt aus: Schärfen kostet nichts."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Costs %ls GPU per frame now; 0 saves it."
+msgstr "Kostet jetzt %ls GPU pro Bild; 0 spart es."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Off now (Sharpen strength is 0): sharpening costs nothing."
+msgstr "Jetzt aus (Schärfungsstärke ist 0): Schärfen kostet nichts."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Same pass as Sharpen strength: costs %ls ms GPU per frame now."
+msgstr "Gleicher Schritt wie Schärfungsstärke: kostet jetzt %ls ms GPU pro Bild."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "CPU %ls ms per frame now (the sampler swaps)."
+msgstr "CPU %ls ms pro Bild jetzt (der Sampler wird getauscht)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed in flat: flat mode always uses the whole picture."
+msgstr "Im Flachbild ausgegraut: Flach nutzt immer das ganze Bild."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Off now: DLAA/DLSS costs nothing."
+msgstr "Jetzt aus: DLAA/DLSS kostet nichts."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "DLAA costs %ls per frame at %d %%; a smaller area costs less."
+msgstr "DLAA kostet %ls pro Bild bei %d %%; ein kleinerer Bereich kostet weniger."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Off now: costs nothing."
+msgstr "Jetzt aus: kostet nichts."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Costs %ls per frame now; the profiles medium / low cut it."
+msgstr "Kostet jetzt %ls pro Bild; die Profile mittel / niedrig senken es."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Costs %ls per frame now; fewer mirrors cost less."
+msgstr "Kostet jetzt %ls pro Bild; weniger Spiegel kosten weniger."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed: Mirror DLAA is off."
+msgstr "Ausgegraut: Spiegel-DLAA ist aus."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Always on: dlaa.ini mirror mode 3 is in turns already."
+msgstr "Immer an: Spiegelmodus 3 in dlaa.ini läuft schon abwechselnd."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The mirrors cost %ls per frame now."
+msgstr "Die Spiegel kosten jetzt %ls pro Bild."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed in VR: VR always runs DLAA on the finished picture."
+msgstr "In VR ausgegraut: VR rechnet DLAA immer auf dem fertigen Bild."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Switched off by the mod: it cost more than %.1f ms per eye (VR budget). Press its key to try "
+"again."
+msgstr ""
+"Vom Mod abgeschaltet: es kostete mehr als %.1f ms pro Auge (VR-Budget). Taste drücken, um es "
+"erneut zu versuchen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Costs %ls per frame now; off saves it."
+msgstr "Kostet jetzt %ls pro Bild; aus spart es."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Costs %ls ms GPU per frame now; most of it at night."
+msgstr "Kostet jetzt %ls ms GPU pro Bild; das meiste nachts."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "GPU cost: n/a (the GPU timers could not start)."
+msgstr "GPU-Kosten: n/v (die GPU-Timer konnten nicht starten)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "<0.001 ms"
+msgstr "<0,001 ms"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "%.3f ms"
+msgstr "%.3f ms"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Costs %ls GPU per frame now (all pictures together)."
+msgstr "Kostet jetzt %ls GPU pro Bild (alle Bilder zusammen)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed in flat: it changes the VR frame loop only."
+msgstr "Im Flachbild ausgegraut: ändert nur die VR-Bildschleife."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Not running now: VR FPS cap is on and wins."
+msgstr "Läuft gerade nicht: das VR-FPS-Limit ist an und gewinnt."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Stopped for this VR session: the runtime refused it (see the log)."
+msgstr "Für diese VR-Sitzung gestoppt: die Laufzeit hat es abgelehnt (siehe Protokoll)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Not available here: %hs."
+msgstr "Hier nicht verfügbar: %hs."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed in VR: the headset paces the game."
+msgstr "In VR ausgegraut: das Headset gibt dem Spiel den Takt vor."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed in VR: use VR FPS cap."
+msgstr "In VR ausgegraut: VR-FPS-Limit nutzen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Limited by the NVIDIA driver now (Reflex is on)."
+msgstr "Jetzt vom NVIDIA-Treiber begrenzt (Reflex ist an)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed in flat: use FPS cap."
+msgstr "Grau in Flach: FPS-Limit nutzen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Off now: nothing is written."
+msgstr "Jetzt aus: es wird nichts geschrieben."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "; at debug the CPU profiler adds %.2f ms"
+msgstr "; bei Debug kommt der CPU-Profiler mit %.2f ms dazu"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Costs %.2f ms CPU per frame now, %.0f lines/s%ls."
+msgstr "Kostet jetzt %.2f ms CPU pro Bild, %.0f Zeilen/s%ls."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed in flat: VR only."
+msgstr "Im Flachbild ausgegraut: nur VR."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Off now: every pixel is shaded."
+msgstr "Jetzt aus: jedes Pixel wird voll schattiert."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "CPU %ls ms per frame; it saves GPU time in the game's own figure."
+msgstr "CPU %ls ms pro Bild; es spart GPU-Zeit in der eigenen Zahl des Spiels."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "It saves time in the game's own GPU figure, not in the mod's."
+msgstr "Es spart Zeit in der GPU-Zahl des Spiels, nicht in der des Mods."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Foveated (VRS) is off: switch it on first."
+msgstr "Foveated (VRS) ist aus: zuerst einschalten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Off now: the sharp centre stays at the lens centre."
+msgstr "Jetzt aus: die scharfe Mitte bleibt in der Linsenmitte."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fake gaze (vrs_eye_fake = 1): the sharp area circles slowly, a test."
+msgstr "Falscher Blick (vrs_eye_fake = 1): der scharfe Bereich kreist langsam, ein Test."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Foveated (VRS) was off at the game's start: save (Shift+F12) and restart the game to ask the "
+"headset for eye gaze."
+msgstr ""
+"Foveated (VRS) war beim Spielstart aus: speichern (Shift+F12) und das Spiel neu starten, damit "
+"das Headset den Blick liefert."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "No eye tracker reported by this headset / runtime: the lens centre is used."
+msgstr "Dieses Headset / diese Laufzeit meldet keinen Eye-Tracker: die Linsenmitte wird genutzt."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Gaze valid in %.0f %% of %llu frames so far; mask refills %llu."
+msgstr "Blick in %.0f %% von %llu Bildern gültig; Maske neu gefüllt: %llu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Not available: this VR runtime reports no hidden area."
+msgstr "Nicht verfügbar: diese VR-Laufzeit meldet keinen verdeckten Bereich."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Off now: every pixel is drawn."
+msgstr "Jetzt aus: jedes Pixel wird gezeichnet."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Off now (the mod is off)."
+msgstr "Jetzt aus (der Mod ist aus)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Off now: the game's own stretch is used below Scaling 100 %%."
+msgstr "Jetzt aus: unter Skalierung 100 %% nutzt das Spiel sein eigenes Strecken."
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "1 mirror (largest)"
+msgstr "1 Spiegel (größter)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "1 mirror, camera"
+msgstr "1 Spiegel, Kamera"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "2 mirrors (largest)"
+msgstr "2 Spiegel (größte)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "2 mirrors, camera"
+msgstr "2 Spiegel, Kamera"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "all mirrors"
+msgstr "alle Spiegel"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "all, camera motion"
+msgstr "alle, Kamerabewegung"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "off (mode 0)"
+msgstr "aus (Modus 0)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "%d largest, camera"
+msgstr "%d größte, Kamera"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "%d largest"
+msgstr "%d größte"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all, 2nd fr., camera"
+msgstr "alle, 2. Bild, Kam."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all, every 2nd frame"
+msgstr "alle, jedes 2. Bild"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Mode (DLAA / DLSS / off)"
+msgstr "Modus (DLAA / DLSS / aus)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Performance profile"
+msgstr "Leistungsprofil"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA model 1 (K)"
+msgstr "DLAA-Modell 1 (K)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA model 2 (E)"
+msgstr "DLAA-Modell 2 (E)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA model 3 (F)"
+msgstr "DLAA-Modell 3 (F)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA model 4 (M)"
+msgstr "DLAA-Modell 4 (M)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Sharpen strength -"
+msgstr "Schärfungsstärke -"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Sharpen strength +"
+msgstr "Schärfungsstärke +"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Sharpen width -"
+msgstr "Schärfungsbreite -"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Sharpen width +"
+msgstr "Schärfungsbreite +"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Texture sharpness -"
+msgstr "Texturschärfe -"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Texture sharpness +"
+msgstr "Texturschärfe +"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Cut-out sharpness -"
+msgstr "Ausschnitt-Schärfe -"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Cut-out sharpness +"
+msgstr "Ausschnitt-Schärfe +"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area (VR) -"
+msgstr "DLAA-Bereich (VR) -"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area (VR) +"
+msgstr "DLAA-Bereich (VR) +"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Per-part motion vectors"
+msgstr "Bewegungsvektoren je Teil"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Mirror DLAA on / off"
+msgstr "Spiegel-DLAA an / aus"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA before tonemap (flat)"
+msgstr "DLAA vor Tonemap (flach)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "See-through depth"
+msgstr "Durchsicht-Tiefe"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Thin-wire motion (DLAA)"
+msgstr "Dünne-Drähte-Bewegung"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Thin-wire depth"
+msgstr "Dünne-Drähte-Tiefe"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Thin-wire widening"
+msgstr "Dünne Drähte verbreitern"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLSS upscale"
+msgstr "DLSS-Upscaling"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA on / off"
+msgstr "DLAA an / aus"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Shimmer capture"
+msgstr "Flimmer-Aufnahme"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Save to dlaa.ini"
+msgstr "In dlaa.ini speichern"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Menu: open / close"
+msgstr "Menü: öffnen / schließen"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Menu: up"
+msgstr "Menü: hoch"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Menu: down"
+msgstr "Menü: runter"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Menu: left"
+msgstr "Menü: links"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Menu: right"
+msgstr "Menü: rechts"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "ETS2 / ATS DLAA & DLSS mod v%hs - hotkeys"
+msgstr "ETS2 / ATS DLAA & DLSS Mod v%hs - Tastenbelegung"
+
+#. Heading of a column (short)
+#: src/inject.cpp
+#, c-format
+msgid "Action"
+msgstr "Aktion"
+
+#. Heading of a column (short)
+#: src/inject.cpp
+#, c-format
+msgid "Keyboard"
+msgstr "Tastatur"
+
+#. Heading of a column (short)
+#: src/inject.cpp
+#, c-format
+msgid "Controller"
+msgstr "Controller"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "< Back"
+msgstr "< Zurück"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%hs / %hs: main menu"
+msgstr "%hs / %hs: Hauptmenü"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "none"
+msgstr "keine"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "%ls -- press another"
+msgstr "%ls -- andere drücken"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Press a key or button...  (Esc = cancel, 10 s)"
+msgstr "Taste oder Knopf drücken...  (Esc = Abbruch, 10 s)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Press a key or button...  (%hs = cancel, Backspace = clear)"
+msgstr "Taste oder Knopf drücken...  (%hs = Abbruch, Backspace = löschen)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Back to the main menu. %hs does the same on every line of this page. Every key and controller "
+"button except the 5 menu keys still reaches the game while this menu is open, so you can keep "
+"driving."
+msgstr ""
+"Zurück zum Hauptmenü. %hs tut dasselbe in jeder Zeile dieser Seite. Jede Taste und jeder "
+"Controller-Knopf außer den 5 Menütasten erreicht das Spiel weiter, solange dieses Menü offen ist, "
+"du kannst also weiterfahren."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Press ONE new key or controller button for %ls: any key, also another menu key (it is taken from "
+"it). Keys / buttons already held now are ignored until released. Esc or Backspace cancels, so "
+"does 10 s without a press; menu keys cannot be cleared here."
+msgstr ""
+"EINE neue Taste oder EINEN Controller-Knopf für %ls drücken: jede Taste, auch eine andere "
+"Menütaste (sie wird ihr weggenommen). Jetzt gehaltene Tasten / Knöpfe werden bis zum Loslassen "
+"ignoriert. Esc oder Backspace bricht ab, ebenso 10 s ohne Druck; Menütasten lassen sich hier "
+"nicht löschen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Press ONE new key (Shift / Ctrl / Alt with it make a combination) or controller button / D-pad "
+"direction. Keys / buttons already held now (a shifter gear) are ignored until released; axes "
+"never bind. %hs or Esc cancels, Backspace clears to none, 10 s without a press cancels."
+msgstr ""
+"EINE neue Taste (Shift / Strg / Alt dazu ergibt eine Kombination) oder einen Controller-Knopf / "
+"D-Pad-Richtung drücken. Jetzt gehaltene Tasten / Knöpfe (ein Schalthebel-Gang) werden bis zum "
+"Loslassen ignoriert; Achsen werden nie belegt. %hs oder Esc bricht ab, Backspace löscht auf "
+"keine, 10 s ohne Druck brechen ab."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"One of the 5 keys that drive this menu (dlaa.ini %hs). %hs, then press the new key or button: the "
+"other menu keys can be taken too. These lines cannot be cleared, and each of the 5 must keep a "
+"binding (a press that leaves another one empty is refused). Saved to dlaa.ini at once."
+msgstr ""
+"Eine der 5 Tasten, die dieses Menü steuern (dlaa.ini %hs). %hs, dann die neue Taste oder den "
+"Knopf drücken: auch die anderen Menütasten können genommen werden. Diese Zeilen lassen sich nicht "
+"löschen, und jede der 5 muss eine Belegung behalten (ein Druck, der eine andere leer ließe, wird "
+"abgelehnt). Sofort in dlaa.ini gespeichert."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"%ls (dlaa.ini %hs). %hs, then press the new key or button: a key replaces the Keyboard part, a "
+"controller button or D-pad direction the Controller part. A key / button used by another action "
+"moves here. Saved to dlaa.ini at once."
+msgstr ""
+"%ls (dlaa.ini %hs). %hs, dann die neue Taste oder den Knopf drücken: eine Taste ersetzt den "
+"Tastatur-Teil, ein Controller-Knopf oder eine D-Pad-Richtung den Controller-Teil. Eine Taste / "
+"ein Knopf einer anderen Aktion wandert hierher. Sofort in dlaa.ini gespeichert."
+
+#. Footer line (shortened automatically when too long)
+#: src/inject.cpp
+#, c-format
+msgid "press the new key / button   Esc cancel   (10 s)"
+msgstr "neue Taste / Knopf drücken   Esc Abbruch   (10 s)"
+
+#. Footer line (shortened automatically when too long)
+#: src/inject.cpp
+#, c-format
+msgid "press a key / button   Esc cancel"
+msgstr "Taste / Knopf drücken   Esc Abbruch"
+
+#. Footer line (shortened automatically when too long)
+#: src/inject.cpp
+#, c-format
+msgid "Esc cancel"
+msgstr "Esc Abbruch"
+
+#. Footer line (shortened automatically when too long)
+#: src/inject.cpp
+#, c-format
+msgid "press the new key / button   %hs cancel   Backspace clear"
+msgstr "neue Taste / Knopf drücken   %hs Abbruch   Backspace löschen"
+
+#. Footer line (shortened automatically when too long)
+#: src/inject.cpp
+#, c-format
+msgid "%hs cancel   Backspace clear"
+msgstr "%hs Abbruch   Backspace löschen"
+
+#. Footer line (shortened automatically when too long)
+#: src/inject.cpp
+#, c-format
+msgid "%hs cancel"
+msgstr "%hs Abbruch"
+
+#. Footer line (shortened automatically when too long)
+#: src/inject.cpp
+#, c-format
+msgid "%hs / %hs select   %hs bind   %hs back   %hs close"
+msgstr "%hs / %hs wählen   %hs belegen   %hs zurück   %hs schließen"
+
+#. Footer line (shortened automatically when too long)
+#: src/inject.cpp
+#, c-format
+msgid "%hs bind   %hs back   %hs close"
+msgstr "%hs belegen   %hs zurück   %hs schließen"
+
+#. Footer line (shortened automatically when too long)
+#: src/inject.cpp
+#, c-format
+msgid "%hs bind   %hs back"
+msgstr "%hs belegen   %hs zurück"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "reset done"
+msgstr "zurückgesetzt"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "hold %ls %hs"
+msgstr "%ls %hs halten"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
+msgstr "ETS2 / ATS DLAA & DLSS Mod v%hs - Tuning-Menü"
+
+#. Heading of a column (short)
+#: src/inject.cpp
+#, c-format
+msgid "Setting"
+msgstr "Einstellung"
+
+#. Heading of a column (short)
+#: src/inject.cpp
+#, c-format
+msgid "Value"
+msgstr "Wert"
+
+#. Heading of a column (short)
+#: src/inject.cpp
+#, c-format
+msgid "Hotkey"
+msgstr "Taste"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on"
+msgstr "an"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "close"
+msgstr "zu"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "open"
+msgstr "auf"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "closed"
+msgstr "zu"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "closed (%d)"
+msgstr "zu (%d)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Mode"
+msgstr "Modus"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "DLSS"
+msgstr "DLSS"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "DLAA"
+msgstr "DLAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA model"
+msgstr "DLAA-Modell"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%hs (dlaa.ini)"
+msgstr "%hs (dlaa.ini)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Sharpen strength"
+msgstr "Schärfungsstärke"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%.1f (off)"
+msgstr "%.1f (aus)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Sharpen width"
+msgstr "Schärfungsbreite"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%.1f px"
+msgstr "%.1f px"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Texture sharpness"
+msgstr "Texturschärfe"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%.2f (off)"
+msgstr "%.2f (aus)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Cut-out texture sharpness"
+msgstr "Ausschnitt-Texturschärfe"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "same (%.2f)"
+msgstr "gleich (%.2f)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area (VR)"
+msgstr "DLAA-Bereich (VR)"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "VR only"
+msgstr "nur VR"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "100 %% (flat)"
+msgstr "100 %% (flach)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "old stencil ids"
+msgstr "alte Stencil-IDs"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Mirror DLAA"
+msgstr "Spiegel-DLAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Mirrors in turns"
+msgstr "Spiegel abwechselnd"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (mode 3)"
+msgstr "an (Modus 3)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Thin-wire motion"
+msgstr "Dünne-Drähte-Bewegung"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (no A2C)"
+msgstr "an (ohne A2C)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (experimental)"
+msgstr "an (experimentell)"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "flat only"
+msgstr "nur Flach"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "off (dlaa.ini 0)"
+msgstr "aus (dlaa.ini 0)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "off (VR budget)"
+msgstr "aus (VR-Budget)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Light glow ghosting fix"
+msgstr "Leuchtschlieren-Fix"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "OFXR Bridge (VR frame gen)"
+msgstr "OFXR Bridge (VR-Framegen.)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "found"
+msgstr "gefunden"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "not found"
+msgstr "nicht gefunden"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "VectorXR (VR layer)"
+msgstr "VectorXR (VR-Ebene)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode (VR)"
+msgstr "Turbo-Modus (VR)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (stopped)"
+msgstr "an (gestoppt)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Foveated (VRS)"
+msgstr "Foveated (VRS)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (not supported)"
+msgstr "an (nicht unterst.)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "not supported"
+msgstr "nicht unterstützt"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Foveated size"
+msgstr "Foveated-Größe"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Foveated passes"
+msgstr "Foveated-Durchgänge"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "scene + lighting"
+msgstr "Szene + Licht"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "scene"
+msgstr "Szene"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Foveated strength"
+msgstr "Foveated-Stärke"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Foveated eye tracking"
+msgstr "Foveated-Eye-Tracking"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (fake gaze)"
+msgstr "an (falscher Blick)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (restart the game)"
+msgstr "an (Neustart nötig)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (no eye tracker)"
+msgstr "an (kein Tracker)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (failed, see log)"
+msgstr "an (Fehler, s. Log)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (no OpenXR session yet)"
+msgstr "an (keine Sitzung)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (gaze)"
+msgstr "an (Blick)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (waiting for gaze)"
+msgstr "an (warte auf Blick)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hidden area mask (VR)"
+msgstr "Hidden-Area-Maske (VR)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (no OpenXR instance yet)"
+msgstr "an (keine Instanz)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "on (FPS cap wins)"
+msgstr "an (FPS-Limit gilt)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reflex (flat)"
+msgstr "Reflex (flach)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on + boost"
+msgstr "an + Boost"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap (flat)"
+msgstr "FPS-Limit (flach)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d fps"
+msgstr "%d fps"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "VR FPS cap"
+msgstr "VR-FPS-Limit"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%ls (%.0f fps)"
+msgstr "%ls (%.0f fps)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "half"
+msgstr "halb"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "third"
+msgstr "Drittel"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "CPU tuning"
+msgstr "CPU-Tuning"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "mixed (dlaa.ini)"
+msgstr "gemischt (dlaa.ini)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Logging"
+msgstr "Protokoll"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Language"
+msgstr "Sprache"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "%ls: font missing"
+msgstr "%ls: Schrift fehlt"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "auto (%ls)"
+msgstr "auto (%ls)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel lock (VR)"
+msgstr "Panel-Fixierung (VR)"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "VR layer only"
+msgstr "nur VR-Ebene"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Fixed in cab"
+msgstr "In Kabine fixiert"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Follow head"
+msgstr "Kopf folgen"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel position X"
+msgstr "Panel-Position X"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%+d deg"
+msgstr "%+d Grad"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel position Y"
+msgstr "Panel-Position Y"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel size"
+msgstr "Panelgröße"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel VR depth"
+msgstr "Panel-VR-Tiefe"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d px"
+msgstr "%d px"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel faces you (VR)"
+msgstr "Panel dir zugewandt (VR)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Menu keys"
+msgstr "Menütasten"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS counter"
+msgstr "FPS-Anzeige"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Off"
+msgstr "Aus"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS counter lock"
+msgstr "FPS-Anzeige-Fixierung"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Attached to vehicle"
+msgstr "An Fahrzeug"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Fixed in play space"
+msgstr "Im Spielraum fixiert"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Position per vehicle"
+msgstr "Position je Fahrzeug"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "VR attached only"
+msgstr "nur An Fahrzeug"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "On"
+msgstr "An"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Re-measure cab spot"
+msgstr "Kabine neu vermessen"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Right: now, Left: defaults"
+msgstr "Rechts: jetzt, Links: Std."
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "box defaults"
+msgstr "Anzeige-Standard"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "done"
+msgstr "fertig"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS counter X"
+msgstr "FPS-Anzeige X"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS counter Y"
+msgstr "FPS-Anzeige Y"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS turn"
+msgstr "FPS drehen"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS tilt"
+msgstr "FPS kippen"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS rotate"
+msgstr "FPS rotieren"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS counter size"
+msgstr "FPS-Anzeige Größe"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS colour"
+msgstr "FPS-Farbe"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS brightness"
+msgstr "FPS-Helligkeit"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS opacity"
+msgstr "FPS-Deckkraft"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS distance (VR)"
+msgstr "FPS-Abstand (VR)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hotkeys..."
+msgstr "Tastenbelegung..."
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d actions"
+msgstr "%d Aktionen"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "hold %hs %hs s"
+msgstr "%hs %hs s halten"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reset to defaults"
+msgstr "Auf Standard zurücksetzen"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Close menu"
+msgstr "Menü schließen"
+
+#. Heading of a column (short)
+#: src/inject.cpp
+#, c-format
+msgid "%lcCPU%lc | %lcGPU%lc ms"
+msgstr "%lcCPU%lc | %lcGPU%lc ms"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Hold %hs for %hs s to reset. %ls"
+msgstr "%hs %hs s halten zum Zurücksetzen. %ls"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"The 5 keys that open and drive this menu: %hs opens / closes it (the value), %hs / %hs / %hs / "
+"%hs move (Hotkey column). While the menu is open only these 5 are kept from the game. %hs: change "
+"them on the Hotkeys page."
+msgstr ""
+"Die 5 Tasten, die dieses Menü öffnen und steuern: %hs öffnet / schließt es (der Wert), %hs / %hs "
+"/ %hs / %hs bewegen (Spalte Taste). Bei offenem Menü behält das Spiel nur diese 5 nicht. %hs: auf "
+"der Tastenbelegungs-Seite ändern."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Closes the menu; the 5 menu keys go back to the game. %hs does the same from any row."
+msgstr ""
+"Schließt das Menü; die 5 Menütasten gehen ans Spiel zurück. %hs tut dasselbe von jeder Zeile aus."
+
+#. Footer line (shortened automatically when too long)
+#: src/inject.cpp
+msgid "keys: Hotkeys..."
+msgstr "Tasten: Belegung..."
+
+#. Footer line (shortened automatically when too long)
+#: src/inject.cpp
+#, c-format
+msgid "%hs / %hs select   %hs / %hs change   %hs close%ls"
+msgstr "%hs / %hs wählen   %hs / %hs ändern   %hs schließen%ls"
+
+#. Value column (about 20 Latin characters)
+#: src/log.h
+msgid "errors"
+msgstr "Fehler"
+
+#. Value column (about 20 Latin characters)
+#: src/log.h
+msgid "warnings"
+msgstr "Warnungen"
+
+#. Value column (about 20 Latin characters)
+#: src/log.h
+msgid "info"
+msgstr "Info"
+
+#. Value column (about 20 Latin characters)
+#: src/log.h
+msgid "debug"
+msgstr "Debug"
+

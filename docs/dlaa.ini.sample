@@ -44,6 +44,11 @@
 # This line has no '#' in front: just change the 1 to 4.
 log_level = 1
 
+# The tuning menu's language (v0.15.0): auto = the game's language (default), or a game language code: de_de, fr_fr,
+# ru_ru, pl_pl, ko_kr, ja_jp, zh_cn, pt_br, es_es, tr_tr, en_us ... (all 43 of the game). The menu's Language row sets it.
+# A file lang\<code>.po next to dinput8.dll wins over the built-in texts (for your own fixes).
+# language = auto
+
 # OFXR Bridge (VR frame generation, https://github.com/djules75/OFXR-Bridge) support, 0 / 1. 1 = default: the mod finds the
 # bridge's layer module (ofxr*.dll) in the game and lets that module's own D3D11 copies and draws pass through the hooks without
 # counting them as game draws, so they cannot be mistaken for the eye picture. 0 = no search, no pass-through (only for ruling

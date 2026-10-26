@@ -41,10 +41,10 @@ constexpr float kRefWidth = 760.0f;                  // panel width in reference
 constexpr float kWidgetRefW = 92.0f;                 // the fps box in reference px (scale 1)
 constexpr float kWidgetRefH = 44.0f;
 
-struct Row {
-    wchar_t name[48];
-    wchar_t value[72];                               // (v0.12.1 phase 50: was 40 -- the wide bind-mode line needs ~60)
-    wchar_t keys[72];                                // the hotkey(s) of the row + a "VR only" / "flat only" tag
+struct Row {                                         // (phase 74: name 48 -> 64, value / keys 72 -> 96: longer languages)
+    wchar_t name[64];
+    wchar_t value[96];                               // (v0.12.1 phase 50: was 40 -- the wide bind-mode line needs ~60)
+    wchar_t keys[96];                                // the hotkey(s) of the row + a "VR only" / "flat only" tag
     wchar_t cost[32];                                // the cost column: "<cpu> | <gpu>" with ink marks (phase 45), "off", "same", "-"
     unsigned char greyed;                            // 1 = not applicable in the current mode (drawn grey)
     unsigned char wide;                              // v0.12.1 phase 50: 1 = `value` spans the Value, Hotkey and Cost columns (keys /
@@ -53,16 +53,16 @@ struct Row {
 // Fill with memset 0 first: Draw compares the whole struct to decide whether the texture must be rebuilt (the caller keeps
 // every text stable between its once-a-second GPU snapshots, so the texture is not rebuilt every frame).
 struct Panel {
-    wchar_t title[112];
-    wchar_t perf[kPerfLines][224];                   // the perf block (Limit / fps / frame busy, the mod's CPU | GPU, the legend)
-    wchar_t costHead[24];                            // the 4th column's header ("CPU | GPU ms" with ink marks, phase 45)
-    wchar_t colHead[3][24];                          // v0.12.1 phase 50: the first 3 column headers; "" = "Setting" / "Value" /
+    wchar_t title[160];                              // (phase 74: title 112 -> 160, perf 224 -> 320, desc 480 -> 800, footer 96 -> 160)
+    wchar_t perf[kPerfLines][320];                   // the perf block (Limit / fps / frame busy, the mod's CPU | GPU, the legend)
+    wchar_t costHead[32];                            // the 4th column's header ("CPU | GPU ms" with ink marks, phase 45)
+    wchar_t colHead[3][32];                          // v0.12.1 phase 50: the first 3 column headers; "" = "Setting" / "Value" /
                                                      //   "Hotkey" (the Hotkeys page: "Action" / "Keyboard" / "Controller")
     Row     rows[kMaxRows];
     int     nRows;
     int     sel;
-    wchar_t desc[480];                               // the selected row's description + its cost sentence (word-wrapped, 3 lines)
-    wchar_t footer[96];
+    wchar_t desc[800];                               // the selected row's description + its cost sentence (word-wrapped, 3 lines)
+    wchar_t footer[160];
 };
 
 void  RegisterShaders();                             // VS + PS into ShaderCache (setup thread, before ShaderCache::Start)
@@ -71,6 +71,11 @@ float RefHeight(int nRows);                          // panel height in referenc
 // with GDI in the panel's small font (no device objects; a memory DC for the call). The caller shortens the text if not; Draw
 // clips the footer at the licence line anyway (end ellipsis), so a wrong answer never overlaps the two.
 bool  FooterFits(const wchar_t* footer);
+// phase 74: the GDI face of the panel (src/lang.h Lang::Face(): Segoe UI, or Malgun Gothic / Yu Gothic UI / Microsoft YaHei UI);
+// a change rebuilds the panel texture. The fps box always uses Segoe UI.
+void  SetFace(const wchar_t* face);
+// phase 74: the language dump (dlaa.ini lang_dump = 1): `p` rendered in `face` at `scale` reference px -> a PNG file. Any thread.
+bool  SavePanelPng(const Panel& p, const wchar_t* face, float scale, const wchar_t* path);
 // Draws `p` into `rtv` (a target of rtW x rtH px) with its top-left corner at (x0, y0) px and `scale` px per reference
 // px. The texture is rendered at `buildScale` (the GPU scales it by scale / buildScale) so two targets of different
 // sizes in one frame (VR eyes + the desktop mirror) do not rebuild it twice per frame. outMode = how the target stores

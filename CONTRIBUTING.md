@@ -4,7 +4,11 @@ With v0.13.0 the bells and whistles I know of are in, and the ideas left on my l
 their cost. From here on the main work is **performance tuning and fixing what the mod gets
 wrong**, and for that I need data from PCs that are not mine. New feature ideas are welcome too:
 [open an issue](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/issues/new/choose) with the **Feature request** template and say what it
-would do for you in the game. Three ways to help, from easy to hard.
+would do for you in the game. Four ways to help, from easy to hard.
+
+**Please write every issue in English** (bug reports, feature requests and translation problems), so that
+everybody can read it and help. Not everyone understands your language, but most people read English. A
+translation tool (DeepL, Google Translate) is fine.
 
 ### 1. Send a performance log
 
@@ -44,10 +48,25 @@ The mod has its own capture keys. They need `log_level = 4`.
    screen the same key takes a measuring capture (a short freeze).
 4. For a part that smears or a number plate that blinks, also press **`Alt+F8`** next to it: the
    per-part motion state of the next frame goes into the log (`MV dump` lines).
+   **The quick way (v0.15.0):** look at the spot and press **`Pause`** (shimmer capture). The mod saves 12
+   frames with DLAA on and 12 with DLAA off, plus the log and your `dlaa.ini`, into one folder
+   `dlaa_selftest\shimmer_<date>_<time>\`. Zip that folder and attach it.
 5. Zip `dlaa_selftest\` and `dlaa_snap\` and attach them with the log and `dlaa.ini`. Say what to look
    at (a pole on the left, the shop window, the trailer's plate) and where / when you were.
 
-### 3. Code
+### 3. Fix a translation
+
+The menu speaks every language the game has (43). The translations were created by Claude (AI) and reviewed
+by Grok, Google Gemini and ChatGPT. An AI can never be as accurate as a native speaker, so this is a best effort:
+a native speaker's changes and suggestions help everybody.
+
+- **Found a wrong text?** Open a [Translation problem](../../issues/new?template=translation.yml) issue: the
+  language, what is wrong, what it should say, and a screenshot of the spot in the menu.
+- **Want to fix more lines?** Everything you need (the languages, how one is chosen, what to change in the
+  `.po` file, how to test it in the game, how to send it) is in the translations area:
+  [`lang/README.md`](lang/README.md).
+
+### 4. Code
 
 - Build: see [Build from source](README.md#build-from-source). The internals, every phase and why it was
   built that way: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).

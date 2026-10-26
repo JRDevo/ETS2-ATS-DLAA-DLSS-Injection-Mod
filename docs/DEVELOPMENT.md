@@ -2151,6 +2151,35 @@ non-blocking readback timing -- so it is judged by the check totals and a verify
 - **Verified.** VR (ETS2, Quest 3 via Virtual Desktop, LOCAL layer space): the fixed panel holds still, text sharp at size 0.4.
   Not verified: a non-LOCAL layer space (pivot capture path for the panel).
 
+### Phase 74 (v0.15.0): the tuning menu in the game's 43 languages (`src/lang.h`)
+
+- **Why.** Russian and Korean players; the game itself has 43 languages (`locale.scs`: the same list in ETS2 and ATS).
+- **Keys = the English text (gettext).** `TR(L"...")` / `TRF(L"fmt")` at the use: a per-call-site static resolves the text
+  once per `Lang::Gen()` (an FNV-1a 64 hash of the UTF-16 English -> binary search), so a panel build costs one compare per
+  text. `TRF` = a printf format: the translation is used only when its conversions (+ the ink marks 0x01..0x03) equal the
+  English ones (`Specs`), else English + one log line -- a player's file can never make swprintf read the wrong argument.
+  Tables keep the English (`N_` / `NA_` marks for the extractor) and translate at the use (`Lang::Tr` / `TrA`). Narrow texts
+  (hotkey action names, `kProfName`, log level names, the row tags) go through `TrA` and `%ls`.
+- **Files.** `lang/template.pot` = every text (`scripts/lang_tool.py extract`, CI checks it is current), `lang/<code>.po` per
+  language (the game's codes; `update` merges new texts in). The build packs them (`lang_tool.py pack`, Python 3) into RCDATA
+  `LANGPACK`: hash + UTF-8 translation, no English copies. `lang\<code>.po` next to the DLL wins text by text and is re-read when
+  its time / size changes (at every menu open).
+- **Language.** dlaa.ini `language` (`auto` default). `auto` = the game's own: the last `uset g_lang "xx"` or `Selected
+  language: xx` in `Documents\<game>\game.log.txt` (this session; read with FILE_SHARE_WRITE, cached by size + time), else
+  `config.cfg` `g_lang` / `g_lang_init`, else English. Not the Windows UI language: Proton reports English there. Menu row
+  `Language` (`MR_LANGUAGE`, top level after Logging): auto, English, then the packed languages; Save writes it.
+- **Fonts.** No fonts are shipped (the zip stays small). Per language a face list (Segoe UI; Yu Gothic UI / Meiryo for ja,
+  Malgun Gothic for ko, Microsoft YaHei UI for zh_cn, Microsoft JhengHei UI for zh_tw, plus the usual Linux names) and every
+  character of the loaded texts is probed with `GetGlyphIndicesW` (font linking does not apply there, which is the point): the
+  first face with all of them wins, <= 1 % missing is accepted, else English + "font missing" in the row + an error line
+  (README: `protontricks <appid> cjkfonts`). `TuningMenu::SetFace` rebuilds the panel texture; the fps box keeps Segoe UI.
+- **Layout room.** Description 3 -> 4 lines (`kDescH` 64 -> 84), name / value columns +20 / +16 px (hotkeys -36), Panel buffers
+  larger (name 64, value / keys 96, desc 800, footer 160, title 160, perf 320).
+- **Tests.** `tests/lang_test.cpp` (CI): .po parsing, the placeholder guard, TrA, the font pick; `lang_test.exe fit lang` = a
+  width report per language for translators. CI also runs `lang_tool.py extract --check` and `check`.
+- **Not translated.** The fps box (numbers + units), the hotkey notes ("= Ctrl+F5 (taken from ...)"), the support reasons of
+  Reflex / VRS (`SupportText`), the licence line, every log line.
+
 ### The RenderDoc oracle (done in v0.2)
 
 Capture a frame of the unmodified game to learn empirically: which pass writes

@@ -13,6 +13,9 @@
 #include <cmath>
 #include <cstdint>
 
+#ifndef N_
+#define N_(s) s                                    // phase 74: marks a menu text (lang.h)
+#endif
 namespace FpsPose {
 
 // ---- colours (fps_color 0..kColorCount-1) -------------------------------------------------------------------------------
@@ -22,26 +25,26 @@ struct Color { const wchar_t* name; uint8_t tr, tg, tb, lr, lg, lb; };
 constexpr int kColorCount = 20;
 inline const Color& ColorOf(int i) {
     static const Color k[kColorCount] = {
-        { L"white",          255, 255, 255,   8,   8,   8 },   // 0: as before phase 44
-        { L"yellow",         255, 235,  59,   8,   8,   8 },
-        { L"amber",          255, 191,   0,   8,   8,   8 },
-        { L"orange",         255, 140,  20,   8,   8,   8 },
-        { L"red",            255,  72,  72,   8,   8,   8 },
-        { L"pink",           255, 140, 200,   8,   8,   8 },
-        { L"magenta",        255,  70, 255,   8,   8,   8 },
-        { L"purple",         196, 120, 255,   8,   8,   8 },
-        { L"violet",         160, 150, 255,   8,   8,   8 },
-        { L"blue",            90, 150, 255,   8,   8,   8 },
-        { L"sky blue",       130, 205, 255,   8,   8,   8 },
-        { L"cyan",             0, 230, 255,   8,   8,   8 },
-        { L"teal",             0, 200, 180,   8,   8,   8 },
-        { L"mint",           130, 255, 195,   8,   8,   8 },
-        { L"green",           70, 230,  70,   8,   8,   8 },
-        { L"lime",           195, 255,  60,   8,   8,   8 },
-        { L"olive",          195, 195,  95,   8,   8,   8 },
-        { L"gold",           255, 215,   0,   8,   8,   8 },
-        { L"silver",         192, 192, 204,   8,   8,   8 },
-        { L"black on white",  16,  16,  16, 255, 255, 255 },  // 19: dark text, white outline
+        { N_(L"white"),          255, 255, 255,   8,   8,   8 },   // 0: as before phase 44
+        { N_(L"yellow"),         255, 235,  59,   8,   8,   8 },
+        { N_(L"amber"),          255, 191,   0,   8,   8,   8 },
+        { N_(L"orange"),         255, 140,  20,   8,   8,   8 },
+        { N_(L"red"),            255,  72,  72,   8,   8,   8 },
+        { N_(L"pink"),           255, 140, 200,   8,   8,   8 },
+        { N_(L"magenta"),        255,  70, 255,   8,   8,   8 },
+        { N_(L"purple"),         196, 120, 255,   8,   8,   8 },
+        { N_(L"violet"),         160, 150, 255,   8,   8,   8 },
+        { N_(L"blue"),            90, 150, 255,   8,   8,   8 },
+        { N_(L"sky blue"),       130, 205, 255,   8,   8,   8 },
+        { N_(L"cyan"),             0, 230, 255,   8,   8,   8 },
+        { N_(L"teal"),             0, 200, 180,   8,   8,   8 },
+        { N_(L"mint"),           130, 255, 195,   8,   8,   8 },
+        { N_(L"green"),           70, 230,  70,   8,   8,   8 },
+        { N_(L"lime"),           195, 255,  60,   8,   8,   8 },
+        { N_(L"olive"),          195, 195,  95,   8,   8,   8 },
+        { N_(L"gold"),           255, 215,   0,   8,   8,   8 },
+        { N_(L"silver"),         192, 192, 204,   8,   8,   8 },
+        { N_(L"black on white"),  16,  16,  16, 255, 255, 255 },  // 19: dark text, white outline
     };
     return k[i < 0 || i >= kColorCount ? 0 : i];
 }
