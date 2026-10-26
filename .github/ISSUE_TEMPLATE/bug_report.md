@@ -5,6 +5,7 @@ title: "[Bug] "
 labels: bug
 ---
 
+<!-- Please write in ENGLISH, so that everybody can read your issue and help. Not everyone understands your language, but most people read English. A translation tool (DeepL, Google Translate) is fine. -->
 <!-- BEFORE you write: in dlaa.ini (next to dinput8.dll) change  log_level = 1  to  log_level = 4 . -->
 <!-- Start the game, load a save, drive 1-2 minutes where the problem shows, QUIT the game, then attach the files below. -->
 

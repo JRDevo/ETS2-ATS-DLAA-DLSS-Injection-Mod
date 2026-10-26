@@ -790,7 +790,8 @@ menu's `Language` row (or `language =` in `dlaa.ini`) picks another one.
 > have a change or a suggestion, please open a new translation issue: it helps every player of your language.
 
 - **Found a wrong text?** [Report a translation problem](../../issues/new?template=translation.yml): the language,
-  what is wrong, what it should say, and a screenshot of the spot in the menu.
+  what is wrong, what it should say, and a screenshot of the spot in the menu. Please write the explanation in
+  English, so that everybody can follow it; only the menu text itself is in your language.
 - **The translations area: [`lang/README.md`](lang/README.md).** The list of languages, how a language is chosen,
   fonts on Linux / Proton, what to change in a language file, and how to test your fix in the game before you
   send it.
@@ -1090,6 +1091,10 @@ the release zip. Architecture and internals: [`docs/DEVELOPMENT.md`](docs/DEVELO
 If something goes wrong, [open an issue](../../issues/new/choose) (**New issue** >
 **Bug report**) and attach the files below. Without the log I usually can't tell what
 happened.
+
+**Please write in English**, so that everybody can read your issue and help. Not everyone understands
+your language, but most people read English. A translation tool (DeepL, Google Translate) is fine. This is for
+every issue: bug reports, feature requests and translation problems (there, only the menu text itself is in your language).
 
 **Steps first:** put `log_level = 4` in `dlaa.ini` (without it the log has errors only), start the game, reproduce the problem, then **quit the game** and
 only then collect the files. Load a save and drive for about a minute before quitting, so the log covers the 3D scene and not just the menu. The log is written while the game runs, so grab it after

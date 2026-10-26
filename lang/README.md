@@ -107,6 +107,8 @@ msgstr "Schärfungsstärke"
 
 ## Send your fixes
 
+- **Please write in English.** Explain the problem in English, so that everybody can follow it (a translation
+  tool is fine). Only the menu text itself (what it says now, what it should say) is in your language.
 - **The easy way: [Report a translation problem](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/issues/new?template=translation.yml).** Pick the
   language, say what is wrong and what it should say, and add a **screenshot** of the menu that shows the spot.
   You can also attach your edited `.po` file there. No git needed.

@@ -4,7 +4,11 @@ With v0.13.0 the bells and whistles I know of are in, and the ideas left on my l
 their cost. From here on the main work is **performance tuning and fixing what the mod gets
 wrong**, and for that I need data from PCs that are not mine. New feature ideas are welcome too:
 [open an issue](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/issues/new/choose) with the **Feature request** template and say what it
-would do for you in the game. Three ways to help, from easy to hard.
+would do for you in the game. Four ways to help, from easy to hard.
+
+**Please write every issue in English** (bug reports, feature requests and translation problems), so that
+everybody can read it and help. Not everyone understands your language, but most people read English. A
+translation tool (DeepL, Google Translate) is fine.
 
 ### 1. Send a performance log
 

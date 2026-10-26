@@ -5,6 +5,7 @@ title: "[Feature] "
 labels: enhancement
 ---
 
+<!-- Please write in ENGLISH, so that everybody can read your issue and help. Not everyone understands your language, but most people read English. A translation tool (DeepL, Google Translate) is fine. -->
 <!-- Thanks. Ideas are welcome. Say what it would do for YOU in the game, not only how to build it. -->
 <!-- If a feature does not seem to work, that is a Bug report (with a log), not a feature request. -->
 
