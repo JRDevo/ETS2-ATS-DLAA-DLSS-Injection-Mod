@@ -780,16 +780,18 @@ The three green lines under the title show the game's GPU time per frame, what t
 </details>
 
 <a name="translations"></a>
+
+> [!NOTE]
+> **The menu speaks your language: all 43 languages of ETS2 and ATS, as a best effort.** The translations were
+> created by **Claude** (AI) and reviewed by **Grok**, **Google Gemini** and **ChatGPT**. An AI can never be as accurate
+> as a native speaker, so some texts may still be wrong. If you have a change or a suggestion, please
+> [open a new translation issue](../../issues/new?template=translation.yml): it helps every player of your language.
+
 <details>
 <summary><h2>Translations — help wanted</h2></summary>
 
 The menu is available in **all 43 languages of ETS2 and ATS**. It uses the game's language by itself; the
 menu's `Language` row (or `language =` in `dlaa.ini`) picks another one.
-
-> [!IMPORTANT]
-> **Best effort.** The translations were created by **Claude** (AI) and reviewed by **Grok**, **Google Gemini**
-> and **ChatGPT**. An AI can never be as accurate as a native speaker, so some texts may still be wrong. If you
-> have a change or a suggestion, please open a new translation issue: it helps every player of your language.
 
 - **Found a wrong text?** [Report a translation problem](../../issues/new?template=translation.yml): the language,
   what is wrong, what it should say, and a screenshot of the spot in the menu. Please write the explanation in
