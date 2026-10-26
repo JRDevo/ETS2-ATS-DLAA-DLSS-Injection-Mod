@@ -60,7 +60,8 @@ an in-game menu (`Delete`) and an optional text config.
 **Menu**
 - **In-game menu** (`Delete`): every setting, its hotkey, its GPU cost, a short description.
 - Panel and fps counter can be moved and resized, flat and VR.
-- **VR panel fixed in the cab**: stays still while you look around; sharper text. **new**
+- **VR panel fixed in the cab**: stays still while you look around; sharper text.
+- **The menu in your language**: all 43 languages of the game, picked from the game's own setting. **new**
 - Live CPU and GPU cost per part, and what limits your frame rate.
 
 **Setup**
@@ -241,6 +242,16 @@ Older versions need both. If you use an older version, install them with protont
 ```
 protontricks 227300 vcrun2026
 protontricks 227300 d3dcompiler_47
+```
+
+<a name="languages-and-fonts"></a>
+**Menu languages and fonts.** The menu uses the game's language. Most languages work at once. **Chinese,
+Japanese and Korean** need fonts that Proton does not have. Without them, the menu shows English, and the
+Language row says `font missing`. Install them once per game:
+
+```
+protontricks 227300 cjkfonts
+protontricks 270880 cjkfonts
 ```
 
 **AMD cards** work through [OptiScaler](https://github.com/optiscaler/OptiScaler). Rename
@@ -558,7 +569,7 @@ it, what it costs or saves. **`Up` / `Down`** select a row,
 always shown. Then come the groups: `Picture` (sharpening, texture sharpness, DLAA area, tonemap, see-through depth),
 `Motion and mirrors`, `Upscaling and VR` (DLSS upscale, DLAA on / off, OFXR Bridge, VectorXR), `VR performance` (Turbo, foveated
 rendering, hidden area mask), `Frame rate and CPU` (Reflex, FPS cap, VR FPS cap, CPU tuning), `Panel settings` and `FPS counter settings`.
-After them: `FPS counter`, `Logging`,
+After them: `FPS counter`, `Logging`, `Language`,
 `Save`, `Reset` and `Close`. Select a group and press `Right` to open it, `Left` to close it. A closed group shows `►` and
 `closed (N)` (N = its rows); an open group shows `▼` and `open`, with its rows indented below it. All groups are closed again each time you open the menu.
 
@@ -728,6 +739,12 @@ The three green lines under the title show the game's GPU time per frame, what t
   `info` or `debug`, live. Its cost column shows what the logging costs on the CPU per frame (the description adds the
   lines per second; at `debug` also what the CPU profiler costs). `debug` also runs the mod's GPU timers and CPU
   profiler all the time; use it for bug reports, `errors` for play.
+- **Language** (`language`, `auto` by default): the language of the menu. `auto` = the game's own language (the mod
+  reads it from the game, not from Windows, so it also works under Proton). `Left` / `Right` pick another one; `Save`
+  keeps it. The menu has all 43 languages of the game; the texts were machine-translated first, so fixes are welcome
+  ([CONTRIBUTING.md](CONTRIBUTING.md)). A file `bin\win_x64\lang\<code>.po` next to `dinput8.dll` wins over the built-in
+  text, so you can test your own fixes. Linux / Proton: Chinese, Japanese and Korean need fonts
+  ([Linux / Proton](#languages-and-fonts)); without them the row says `font missing` and the menu is English.
 - **Hotkeys...** (v0.13.0) opens the Hotkeys page: every hotkey of the menu with its key and wheel button; bind one by
   pressing `Right` on its line and then the new key or button (see above).
 - **Save to dlaa.ini** (the same as `Shift+F12`) writes the live values, and the panel position / fps box once you
@@ -841,6 +858,7 @@ The table below lists the commonly used keys:
 | `controller_name` | *(empty)* | only read the wheels / gamepads whose name contains this text for `WheelN` / `WheelUp` hotkey bindings, e.g. `T300` when a shifter shares the wheel's button numbers; empty = every controller ([`docs/KEYS.md`](docs/KEYS.md#wheel-gamepad-and-joystick-buttons)) |
 | `key_<action>` | *(see KEYS.md)* | re-bind any hotkey, e.g. `key_dlaa_toggle = Ctrl+D`, or `none` to disable it. Full list and format: [`docs/KEYS.md`](docs/KEYS.md) |
 | `log_level` | `1` | how much goes into the log file `dlaa_inject.log`: `0` = off, `1` = errors only (without an error no file is created), `2` = + warnings (problems the mod works around), `3` = + info (start-up and every setting change), `4` = debug: + statistics every few seconds, and the mod's GPU timers and CPU profiler run. Bug reports need `4`. The names work too (`off`, `errors`, `warnings`, `info`, `debug`). The menu's `Logging` row changes it live. The old `debug = 1` still means `4`, but only when there is no `log_level` line |
+| `language` | `auto` | the menu's language: `auto` = the game's language, or a game language code (`de_de`, `ru_ru`, `ko_kr`, `pt_br`, `en_us` ...). The menu's `Language` row sets it; `Save` writes it |
 
 </details>
 

@@ -22,6 +22,7 @@
 #include "menu.h"
 #include "shader_cache.h"
 #include "fps_pose.h"
+#include "lang.h"                                  // phase 74: --lang renders the menu in a language
 
 using TuningMenu::kInkCpu; using TuningMenu::kInkGpu; using TuningMenu::kInkEnd;
 
@@ -145,6 +146,10 @@ static std::wstring Ink(const wchar_t* s) {
     return o;
 }
 
+// phase 74: menu_shot.exe <dir> <xx_yy.po> <code> renders the main shots in that language (Lang::LoadForTest + its font)
+static bool g_lang = false;
+static const wchar_t* T(const wchar_t* s) { return s && g_lang ? Lang::Tr(s) : s; }
+
 // ---- the panel -----------------------------------------------------------------------------------------------------------
 static void Put(wchar_t* dst, size_t cap, const std::wstring& s) { wcsncpy_s(dst, cap, s.c_str(), _TRUNCATE); }
 
@@ -163,27 +168,32 @@ static void BuildPanel(TuningMenu::Panel& p, const bool open[G_COUNT], const wch
         const E& e = kRows[i];
         if (e.grp >= 0 && !e.hdr && !open[e.grp]) continue;       // a collapsed group's children are not in the panel
         TuningMenu::Row& r = p.rows[nv];
-        if (e.hdr)          swprintf(r.name, 48, L"%lc %ls", open[e.grp] ? (wchar_t)0x25BC : (wchar_t)0x25BA, e.name);   // as MenuBuildPanel
-        else if (e.grp >= 0) swprintf(r.name, 48, L"    %ls", e.name);                                         // (phase 46b)
-        else                wcsncpy_s(r.name, e.name, _TRUNCATE);
+        if (e.hdr)          swprintf(r.name, 64, L"%lc %ls", open[e.grp] ? (wchar_t)0x25BC : (wchar_t)0x25BA, T(e.name));   // as MenuBuildPanel
+        else if (e.grp >= 0) swprintf(r.name, 64, L"    %ls", T(e.name));                                         // (phase 46b)
+        else                wcsncpy_s(r.name, T(e.name), _TRUNCATE);
         wcsncpy_s(r.keys, e.keys, _TRUNCATE);
         r.greyed = e.greyed ? 1 : 0;
         if (e.hdr) {
             int n = 0;
             for (int j = 0; j < kNRows; ++j) if (kRows[j].grp == e.grp && !kRows[j].hdr) ++n;
-            if (open[e.grp]) wcsncpy_s(r.value, L"open", _TRUNCATE); else swprintf(r.value, 40, L"closed (%d)", n);
-            wcsncpy_s(r.keys, open[e.grp] ? L"Left: close" : L"Right: open", _TRUNCATE);
+            if (open[e.grp]) wcsncpy_s(r.value, T(L"open"), _TRUNCATE); else swprintf(r.value, 96, g_lang ? Lang::TrF(L"closed (%d)") : L"closed (%d)", n);
+            swprintf(r.keys, 96, L"%ls: %ls", open[e.grp] ? L"Left" : L"Right", open[e.grp] ? T(L"close") : T(L"open"));
         } else {
-            wcsncpy_s(r.value, e.value, _TRUNCATE);
+            wcsncpy_s(r.value, T(e.value), _TRUNCATE);
         }
         Put(r.cost, 32, e.cost[0] ? Ink(e.cost) : std::wstring(L"-"));
         if (!wcscmp(e.name, selName)) { p.sel = nv; sel = &e; }
         ++nv;
     }
     p.nRows = nv;
+    if (g_lang) {
+        wcsncpy_s(p.colHead[0], T(L"Setting"), _TRUNCATE);
+        wcsncpy_s(p.colHead[1], T(L"Value"), _TRUNCATE);
+        wcsncpy_s(p.colHead[2], T(L"Hotkey"), _TRUNCATE);
+    }
     if (sel && sel->desc) {
-        if (sel->sent) swprintf(p.desc, 480, L"%ls %ls", sel->desc, sel->sent);
-        else           wcsncpy_s(p.desc, sel->desc, _TRUNCATE);
+        if (sel->sent) swprintf(p.desc, 800, L"%ls %ls", T(sel->desc), sel->sent);
+        else           wcsncpy_s(p.desc, T(sel->desc), _TRUNCATE);
     }
 }
 
@@ -479,6 +489,22 @@ int main(int argc, char** argv) {
     printf("menu_shot -> %ls\n", g_dir.c_str());
     bool none[G_COUNT] = {}, vrp[G_COUNT] = {}, pic[G_COUNT] = {};
     vrp[G_VRP] = true; pic[G_PIC] = true;
+    if (argc >= 4) {                                                              // phase 74: one language
+        wchar_t po[MAX_PATH];
+        MultiByteToWideChar(CP_ACP, 0, argv[2], -1, po, MAX_PATH);
+        if (!Lang::LoadForTest(po, argv[3])) { printf("cannot read %s\n", argv[2]); return 1; }
+        g_lang = true;
+        TuningMenu::SetFace(Lang::Face());
+        printf("language %s, font %ls%s\n", argv[3], Lang::Face(), Lang::FontMissing() ? " (FONT MISSING: English)" : "");
+        bool none2[G_COUNT] = {}, all2[G_COUNT];
+        for (bool& o : all2) o = true;
+        std::wstring code(argv[3], argv[3] + strlen(argv[3]));
+        MenuShot(g, (L"menu-" + code + L".png").c_str(), none2, L"Mode");
+        MenuShot(g, (L"menu-" + code + L"-all-open.png").c_str(), all2, L"Sharpen strength");
+        g.ctx->Release();
+        g.dev->Release();
+        return g_fail ? 1 : 0;
+    }
     MenuShot(g, L"tuning-menu.png", none, L"Mode");
     MenuShot(g, L"tuning-menu-vr-performance.png", vrp, L"Foveated (VRS)");
     MenuShot(g, L"tuning-menu-picture.png", pic, L"Sharpen strength");

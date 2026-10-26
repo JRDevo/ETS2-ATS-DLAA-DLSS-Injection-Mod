@@ -6,6 +6,7 @@
 #include "log.h"
 #include <windows.h>
 #include <wrl/client.h>
+#include <wincodec.h>                                // phase 74: SavePanelPng (the language dump)
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -325,12 +326,12 @@ constexpr float kRowsY  = 102.0f, kRowH  = 19.0f;
 // rounds per scale (7 px font: 10 px = 20 ref px a line at 0.5; 20 px: 28 = 20 ref px at 1.4) and both rect edges round, so 3
 // lines need up to 62 ref px; 64 fits them at every scale 0.30 .. 5.00 for every row count (measured with GDI). RenderPanel also
 // draws only as many WHOLE lines as fit (<= kDescLines) and ellipsises what does not: never a cut or 4th line over the footer.
-constexpr float kDescGap = 6.0f,  kDescH = 64.0f;   // kDescLines lines
-constexpr int   kDescLines = 3;
+constexpr float kDescGap = 6.0f,  kDescH = 84.0f;   // kDescLines lines (phase 74: 4, was 3 = 64: longer languages)
+constexpr int   kDescLines = 4;
 constexpr float kFootGap = 2.0f,  kFootH = 18.0f, kBottom = 4.0f;
-constexpr float kNameX0 = 14.0f,  kNameX1 = 236.0f;
-constexpr float kValX0  = 240.0f, kValX1  = 384.0f;
-constexpr float kKeyX0  = 388.0f, kKeyX1  = 640.0f;
+constexpr float kNameX0 = 14.0f,  kNameX1 = 256.0f;   // phase 74: names / values 20 / 16 px wider, the hotkeys 36 px narrower
+constexpr float kValX0  = 260.0f, kValX1  = 420.0f;   //   (longer languages; the hotkey texts are short)
+constexpr float kKeyX0  = 424.0f, kKeyX1  = 640.0f;
 constexpr float kCostX0 = 644.0f, kCostX1 = 748.0f;
 // v0.10.3 phase 29c: the footer and the licence line share the bottom line (the footer left, the licence right-aligned); the
 // footer ends kFootGapX left of the licence text (it used to run under it: "overflows" in VR). TuningMenu::FooterFits tests it.
@@ -357,9 +358,11 @@ COLORREF Dim(COLORREF c) {
     return RGB((GetRValue(c) + GetRValue(kBg)) / 2, (GetGValue(c) + GetGValue(kBg)) / 2, (GetBValue(c) + GetBValue(kBg)) / 2);
 }
 
-HFONT MakeFont(float px, int weight) {
+// phase 74: the panel's face follows the menu language (TuningMenu::SetFace: Segoe UI, or a CJK face); the fps box keeps Segoe UI
+wchar_t g_face[64] = L"Segoe UI";
+HFONT MakeFont(float px, int weight, const wchar_t* face = g_face) {
     HFONT f = CreateFontW(-(int)std::lround(px), 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_TT_PRECIS,
-                          CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+                          CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_SWISS, face);
     return f;
 }
 
@@ -435,17 +438,18 @@ const wchar_t* DescFit(HDC dc, const wchar_t* t, LONG w, LONG maxH, wchar_t* out
     return out;
 }
 
-// GDI -> g_pixels (RGBA, w x h). False = GDI failed (logged once).
-bool RenderPanel(const TuningMenu::Panel& p, float s, uint32_t w, uint32_t h) {
+// GDI -> out (RGBA, w x h) in `face`. False = GDI failed (logged once). Touches no global but the fail flag, so the language dump
+// (phase 74) can run it on its own thread.
+bool RenderPanel(const TuningMenu::Panel& p, float s, uint32_t w, uint32_t h, const wchar_t* face, std::vector<uint32_t>& out) {
     static bool s_failLogged = false;
     Dib d;
     if (!DibBegin(d, w, h, "panel", s_failLogged)) return false;
     HDC dc = d.dc;
-    HFONT fBody  = MakeFont(15.0f * s, FW_NORMAL);
-    HFONT fTitle = MakeFont(17.0f * s, FW_BOLD);
-    HFONT fSmall = MakeFont(12.5f * s, FW_NORMAL);
-    HFONT fDesc  = MakeFont(14.0f * s, FW_NORMAL);
-    HFONT fPerf  = MakeFont(12.0f * s, FW_NORMAL);
+    HFONT fBody  = MakeFont(15.0f * s, FW_NORMAL, face);
+    HFONT fTitle = MakeFont(17.0f * s, FW_BOLD, face);
+    HFONT fSmall = MakeFont(12.5f * s, FW_NORMAL, face);
+    HFONT fDesc  = MakeFont(14.0f * s, FW_NORMAL, face);
+    HFONT fPerf  = MakeFont(12.0f * s, FW_NORMAL, face);
     HFONT stock  = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
     auto pick = [&](HFONT f) { return f ? f : stock; };
     HGDIOBJ oldFont = SelectObject(dc, pick(fBody));
@@ -559,7 +563,7 @@ bool RenderPanel(const TuningMenu::Panel& p, float s, uint32_t w, uint32_t h) {
     // licence line, bottom right: the GitHub page is the only place this mod exists
     text(fSmall, kHead, kLicence, W * 0.5f, footY, W - kFootX0, footY + kFootH, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_END_ELLIPSIS);
     SelectObject(dc, oldFont);
-    DibFinish(d, w, h, g_pixels);
+    DibFinish(d, w, h, out);
     if (fBody) DeleteObject(fBody);
     if (fTitle) DeleteObject(fTitle);
     if (fSmall) DeleteObject(fSmall);
@@ -577,8 +581,8 @@ bool RenderPanel(const TuningMenu::Panel& p, float s, uint32_t w, uint32_t h) {
 bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t w, uint32_t h) {
     static bool s_failLogged = false;
     static std::vector<uint32_t> s_mask;
-    HFONT fBig   = MakeFont(15.0f * s, FW_BOLD);
-    HFONT fSmall = MakeFont(12.0f * s, FW_NORMAL);
+    HFONT fBig   = MakeFont(15.0f * s, FW_BOLD, L"Segoe UI");
+    HFONT fSmall = MakeFont(12.0f * s, FW_NORMAL, L"Segoe UI");
     HFONT stock  = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
     auto pick = [&](HFONT f) { return f ? f : stock; };
     auto px = [&](float v) { return (LONG)std::lround(v * s); };
@@ -662,7 +666,7 @@ bool EnsureTexture(ID3D11Device* dev, ID3D11DeviceContext* ctx, const TuningMenu
     const uint32_t w = (uint32_t)std::lround(TuningMenu::kRefWidth * buildScale);
     const uint32_t h = (uint32_t)std::lround(TuningMenu::RefHeight(p.nRows) * buildScale);
     if (w < 16 || h < 16 || w > 8192 || h > 8192) return false;
-    if (!RenderPanel(p, buildScale, w, h)) return false;
+    if (!RenderPanel(p, buildScale, w, h, g_face, g_pixels)) return false;
     if (!UploadTexture(dev, ctx, g_tex, g_srv, g_texW, g_texH, w, h, g_pixels, "panel")) return false;
     g_texBuild = buildScale;
     memcpy(&g_last, &p, sizeof(p));
@@ -761,6 +765,44 @@ void RegisterShaders() {
     ShaderCache::Add(ShaderCache::kMenuVs, kMenuVs, sizeof(kMenuVs) - 1, "menu_vs", "VSMain", "vs_5_0");
     ShaderCache::Add(ShaderCache::kMenuPs, kMenuPs, sizeof(kMenuPs) - 1, "menu_ps", "PSMain", "ps_5_0");
     ShaderCache::Add(ShaderCache::kMenuCabVs, kMenuVs, sizeof(kMenuVs) - 1, "menu_cab_vs", "VSCab", "vs_5_0");   // phase 47
+}
+
+// phase 74: the language dump -- `p` rendered at `scale` in `face` (GDI, as Draw would) and saved as a PNG (WIC). Any thread
+// (COM is initialised here); no device objects.
+bool SavePanelPng(const Panel& p, const wchar_t* face, float scale, const wchar_t* path) {
+    const uint32_t w = (uint32_t)std::lround(kRefWidth * scale), h = (uint32_t)std::lround(RefHeight(p.nRows) * scale);
+    std::vector<uint32_t> px;
+    if (w < 16 || h < 16 || !RenderPanel(p, scale, w, h, face, px)) return false;
+    const HRESULT ci = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    bool ok = false;
+    {
+        ComPtr<IWICImagingFactory> f;
+        ComPtr<IWICStream> st;
+        ComPtr<IWICBitmapEncoder> enc;
+        ComPtr<IWICBitmapFrameEncode> fr;
+        WICPixelFormatGUID fmt = GUID_WICPixelFormat24bppBGR;   // (the PNG encoder takes BGR; 32bpp RGBA it refuses)
+        std::vector<BYTE> bgr((size_t)w * h * 3);
+        for (size_t i = 0; i < (size_t)w * h; ++i) {
+            const uint32_t v = px[i];                        // R, G, B, A in memory
+            bgr[i * 3 + 0] = (BYTE)(v >> 16); bgr[i * 3 + 1] = (BYTE)(v >> 8); bgr[i * 3 + 2] = (BYTE)v;
+        }
+        ok = SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f))) &&
+             SUCCEEDED(f->CreateStream(&st)) && SUCCEEDED(st->InitializeFromFilename(path, GENERIC_WRITE)) &&
+             SUCCEEDED(f->CreateEncoder(GUID_ContainerFormatPng, nullptr, &enc)) &&
+             SUCCEEDED(enc->Initialize(st.Get(), WICBitmapEncoderNoCache)) && SUCCEEDED(enc->CreateNewFrame(&fr, nullptr)) &&
+             SUCCEEDED(fr->Initialize(nullptr)) && SUCCEEDED(fr->SetSize(w, h)) && SUCCEEDED(fr->SetPixelFormat(&fmt)) &&
+             IsEqualGUID(fmt, GUID_WICPixelFormat24bppBGR) &&
+             SUCCEEDED(fr->WritePixels(h, w * 3u, (UINT)bgr.size(), bgr.data())) &&
+             SUCCEEDED(fr->Commit()) && SUCCEEDED(enc->Commit());
+    }
+    if (SUCCEEDED(ci)) CoUninitialize();
+    return ok;
+}
+
+void SetFace(const wchar_t* face) {
+    if (!face || !face[0] || !wcscmp(face, g_face)) return;
+    wcsncpy_s(g_face, face, _TRUNCATE);
+    g_haveLast = false;                                  // the next Draw rebuilds the panel texture in the new face
 }
 
 float RefHeight(int nRows) {

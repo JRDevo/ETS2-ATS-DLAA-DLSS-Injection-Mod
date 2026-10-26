@@ -120,7 +120,26 @@ if (WITH_DLAA)
                                    src/menu.cpp                             # v0.10.0 in-game tuning menu (GDI panel quad)
                                    src/hidden_mask.cpp                      # phase 40: VR hidden area mask (depth-only draw)
                                    src/fps_cab.cpp                          # phase 47: the VR fps box attached to the vehicle
-                                   src/wire_widen.cpp)                      # phase 61: sub-pixel wires drawn min-px wide (GS)
+                                   src/wire_widen.cpp                       # phase 61: sub-pixel wires drawn min-px wide (GS)
+                                   src/lang.cpp)                            # phase 74: the menu in the game's languages
+    # phase 74: lang/*.po -> one packed table (a hash of each English text + its translation) as RCDATA LANGPACK in the DLL
+    # (scripts/lang_tool.py pack). Needs Python 3; without it the DLL is English only (Lang logs "no packed translations").
+    find_package(Python3 COMPONENTS Interpreter)
+    if (Python3_Interpreter_FOUND)
+        file(GLOB _lang_po CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/lang/*.po")
+        set(_lang_bin "${CMAKE_CURRENT_BINARY_DIR}/lang/lang_pack.bin")
+        set(_lang_rc  "${CMAKE_CURRENT_BINARY_DIR}/lang/lang_pack.rc")
+        add_custom_command(
+            OUTPUT  "${_lang_bin}" "${_lang_rc}"
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/lang_tool.py" pack "${_lang_bin}" "${_lang_rc}"
+            DEPENDS ${_lang_po} "${CMAKE_CURRENT_SOURCE_DIR}/lang/template.pot" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/lang_tool.py"
+            COMMENT "Packing the menu translations (lang/*.po)"
+            VERBATIM)
+        target_sources(dinput8 PRIVATE "${_lang_rc}")
+        set_source_files_properties("${_lang_rc}" PROPERTIES GENERATED TRUE OBJECT_DEPENDS "${_lang_bin}")
+    else()
+        message(WARNING "Python 3 not found: the DLL is built without the menu translations (English only)")
+    endif()
     target_include_directories(dinput8 PRIVATE "${NGX_SDK_DIR}/include")
     target_compile_definitions(dinput8 PRIVATE WITH_DLAA=1)
     # d3dcompiler: runtime HLSL compile fallback (src/shader_cache.cpp) for a shader that has no embedded bytecode
@@ -131,7 +150,8 @@ if (WITH_DLAA)
     # CMake's default MSVC libs cover them, listed here so that stays true.
     target_link_libraries(dinput8 PRIVATE
         "$<IF:$<CONFIG:Debug>,${NGX_LIB_STATIC_DEBUG},${NGX_LIB_STATIC_RELEASE}>"
-        d3dcompiler delayimp advapi32 user32)
+        d3dcompiler delayimp advapi32 user32
+        windowscodecs ole32)                                   # phase 74: the language dump's PNGs (TuningMenu::SavePanelPng)
     if (MSVC)
         target_link_options(dinput8 PRIVATE "/DELAYLOAD:d3dcompiler_47.dll")
     endif()
