@@ -1,0 +1,73 @@
+name: Feature request
+description: An idea for the mod (a new setting, a menu row, a way to lower the cost of DLAA, a VR or wheel feature)
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! Ideas are welcome. Say what it would do for **you** in the game, not only how to build it.
+
+        **Please write in English**, so that everybody can read your idea and join in. A translation tool
+        (DeepL, Google Translate) is fine.
+
+        If a feature does not seem to work, that is a **Bug report** (with a log), not a feature request.
+  - type: textarea
+    id: what
+    attributes:
+      label: What should the mod do?
+      description: A short description of the feature. One or two sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why? What would it do for you in the game?
+      description: The problem it solves or the thing it improves (fps, picture, comfort, your wheel / shifter, VR).
+    validations:
+      required: true
+  - type: dropdown
+    id: often
+    attributes:
+      label: How often would you use it?
+      options:
+        - Every drive
+        - Now and then
+        - Once, to set up
+  - type: checkboxes
+    id: where
+    attributes:
+      label: Where would it live?
+      description: Tick all that fit.
+      options:
+        - label: A menu row (Picture / Motion and mirrors / Upscaling and VR / VR performance / Frame rate and CPU / Panel / FPS counter)
+        - label: A `dlaa.ini` key only
+        - label: A hotkey
+        - label: Don't know
+  - type: dropdown
+    id: game
+    attributes:
+      label: Game
+      options:
+        - Euro Truck Simulator 2
+        - American Truck Simulator
+        - Both
+  - type: dropdown
+    id: display
+    attributes:
+      label: Flat or VR
+      options:
+        - Flat
+        - VR
+        - Both
+  - type: input
+    id: setup
+    attributes:
+      label: Your setup (helps to judge the cost)
+      description: GPU, VR headset and runtime if VR, mod version.
+      placeholder: "Example: RTX 4070, Quest 3 via Virtual Desktop, v0.15.0"
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Links, screenshots, or a log (`log_level = 4`) if it shows the thing you want changed.
