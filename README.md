@@ -1,3 +1,5 @@
+![ETS2 & ATS DLAA & DLSS Mod: a sharper, steadier picture, flat and VR, with an in-game menu in 43 languages](docs/images/banner.jpg)
+
 > [!CAUTION]
 > ## THIS GITHUB PAGE IS THE ONLY PLACE THIS MOD EXISTS
 > **`https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod` is the only source of truth for this mod: the only place it is
