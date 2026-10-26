@@ -1,0 +1,100 @@
+name: Bug report
+description: Something doesn't work (crash, no DLAA / DLSS, visual glitch, VR problem, low fps)
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! The mod is a free community project, and reports like yours make it better for everyone.
+
+        **Please write in English**, so that everybody can read your issue and help. Not everyone understands your
+        language, but most people read English. A translation tool (DeepL, Google Translate) is fine.
+
+        **Before you write, make the log (it takes a minute):**
+        1. In `dlaa.ini` (next to `dinput8.dll` in the game's `bin\win_x64\` folder), change `log_level = 1` to `log_level = 4`.
+        2. Start the game, load a save, and play for 1 to 2 minutes where the problem shows.
+        3. **Quit the game.** Then attach the files below.
+
+        More help: [Reporting a problem (what to upload)](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod#reporting-a-problem-what-to-upload).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens?
+      description: What you see, and when (night, rain, in the mirrors, after a truck change, in the menu, ...).
+      placeholder: "Example: thin power lines flicker while I drive at night. With DLAA off (Shift+F11) they look fine."
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where in the game?
+      description: City, road or depot, and your map mods if any.
+      placeholder: "Example: ProMods, the A7 north of Hamburg"
+  - type: dropdown
+    id: game
+    attributes:
+      label: Game
+      options:
+        - Euro Truck Simulator 2
+        - American Truck Simulator
+        - Both
+    validations:
+      required: true
+  - type: dropdown
+    id: display
+    attributes:
+      label: Flat or VR
+      options:
+        - Flat (one screen)
+        - Flat (triple screens)
+        - VR
+    validations:
+      required: true
+  - type: input
+    id: headset
+    attributes:
+      label: VR headset and how it connects (VR only)
+      placeholder: "Example: Quest 3 via Virtual Desktop (VDXR)"
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and driver version
+      placeholder: "Example: RTX 4080, driver 581.57"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Mod version
+      description: The first line of the log says it (`DLAA injector v... loaded`).
+      placeholder: "Example: v0.15.0"
+    validations:
+      required: true
+  - type: input
+    id: mods
+    attributes:
+      label: Other graphics mods
+      description: ReShade, OptiScaler, other DLLs in `bin\win_x64\`. Write "none" if there are none.
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Files (drag them into this box)
+      description: |
+        **Required:** `dlaa_inject.log` (made with `log_level = 4`) and `dlaa.ini`, both in the game's `bin\win_x64\` folder.
+        Attach them as files; please do not paste the text. A screenshot or short video helps too.
+        No `dlaa_inject.log` at all? Write that here: then the mod did not load, and that is useful to know.
+        Do **not** attach `nvngx_dlss.dll` or any other NVIDIA DLL.
+      placeholder: Drop dlaa_inject.log and dlaa.ini here.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you send
+      options:
+        - label: I set `log_level = 4` and quit the game before I took the log.
+          required: true
+        - label: I tried with DLAA off (`Shift+F11`) to see if the game itself shows the problem.
