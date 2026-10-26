@@ -417,9 +417,9 @@ msgid ""
 "the headset each frame: more fps only when the CPU is the limit (busy cities, traffic). Turn it "
 "off if the picture judders. From OpenXR Toolkit."
 msgstr ""
-"Turbo: ei ASW / Motion Smoothing / SSW / reprojektiota. Vain VR. Päällä = peli ei odota "
-"kuulokkeita joka kuvalla: lisää fps:ää vain kun CPU rajoittaa (vilkkaat kaupungit, liikenne). "
-"Kytke pois jos kuva nykii. OpenXR Toolkitista."
+"Turbo: ei ASW / Motion Smoothing / SSW / reprojektiota. Vain VR. Päällä = peli ei odota VR-laseja "
+"joka kuvalla: lisää fps:ää vain kun CPU rajoittaa (vilkkaat kaupungit, liikenne). Kytke pois jos "
+"kuva nykii. OpenXR Toolkitista."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -472,9 +472,9 @@ msgid ""
 "(OpenXR eye gaze, for example Varjo); without one it stays at the lens centre. Needs Foveated "
 "(VRS) on at the game's start, else a restart. Almost no cost."
 msgstr ""
-"Kokeellinen. Foveated (VRS) -terävä keskusta seuraa silmiäsi silmänseurantakuulokkeilla (OpenXR "
-"eye gaze, esim. Varjo); ilman sitä se pysyy linssin keskellä. Vaatii Foveated (VRS) päällä pelin "
-"alussa, muuten uudelleenkäynnistyksen. Lähes ilmainen."
+"Kokeellinen. Foveated (VRS) -terävä keskusta seuraa silmiäsi silmänseurantaa tukevilla "
+"VR-laseilla (OpenXR eye gaze, esim. Varjo); ilman sitä se pysyy linssin keskellä. Vaatii Foveated "
+"(VRS) päällä pelin alussa, muuten uudelleenkäynnistyksen. Lähes ilmainen."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -483,7 +483,7 @@ msgid ""
 "fewer pixels: more GPU headroom, the picture you see stays the same. The first switch-on needs a "
 "game restart. Turn it off if the edge of the view looks wrong."
 msgstr ""
-"Vain VR. Peli ohittaa linssin kulmat joita et näe (kuulokkeet ilmoittavat ne), joten se piirtää "
+"Vain VR. Peli ohittaa linssin kulmat joita et näe (VR-lasit ilmoittavat ne), joten se piirtää "
 "vähemmän pikseleitä: enemmän GPU-varaa, näkemäsi kuva pysyy samana. Ensimmäinen kytkentä vaatii "
 "pelin uudelleenkäynnistyksen. Kytke pois jos näkymän reuna näyttää väärältä."
 
@@ -493,8 +493,8 @@ msgid ""
 "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right "
 "opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Kuvataajuusrajat ja CPU: NVIDIA Reflex ja FPS cap litteälle, VR FPS-raja, CPU-viritys. Oikea avaa "
-"ryhmän, vasen sulkee; se on aina kiinni kun valikko avataan."
+"Kuvataajuusrajat ja CPU: NVIDIA Reflex ja FPS-raja litteälle, VR FPS-raja, CPU-viritys. Oikea "
+"avaa ryhmän, vasen sulkee; se on aina kiinni kun valikko avataan."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -524,9 +524,9 @@ msgid ""
 "headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
 "the fps swings. Turns Turbo off while on."
 msgstr ""
-"Vain VR. puolet = peli piirtää joka 2. kuulokekuvan (72 Hz -> 36 fps), kolmannes = joka 3.; "
-"kuulokkeiden reprojektio (ASW / Motion Smoothing) täyttää loput tasaisella rytmillä. Käytä kun "
-"fps vaihtelee. Kytkee Turbon pois kun päällä."
+"Vain VR. puolet = peli piirtää joka 2. VR-lasien kuvan (72 Hz -> 36 fps), kolmannes = joka 3.; "
+"VR-lasien reprojektio (ASW / Motion Smoothing) täyttää loput tasaisella rytmillä. Käytä kun fps "
+"vaihtelee. Kytkee Turbon pois kun päällä."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -557,7 +557,7 @@ msgid ""
 "front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
 "metres). Needs the VR layer (default). No cost."
 msgstr ""
-"Vain VR. Seuraa päätä = paneeli liikkuu kuulokkeiden mukana. Kiinni ohjaamossa = pysyy yhdessä "
+"Vain VR. Seuraa päätä = paneeli liikkuu VR-lasien mukana. Kiinni ohjaamossa = pysyy yhdessä "
 "paikassa istuimesi edessä, vakaana kun katsot ympärille; X / Y / syvyys asettavat paikan (asteet, "
 "metrit). Vaatii VR layerin (oletus). Ilmainen."
 
@@ -619,7 +619,7 @@ msgid ""
 msgstr ""
 "Pieni live-fps- ja kuva-aikalaatikko, myös valikon ollessa kiinni (litteä ja VR). Käytä "
 "nähdäksesi mitä asetus tuo. GPU-hinta mitataan: kuvaa kohti, jokaiseen kuvaan johon se "
-"piirretään; ei mitään kun off. Tallennus pitää sen seuraavaan käynnistykseen."
+"piirretään; ei mitään kun pois. Tallennus pitää sen seuraavaan käynnistykseen."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -637,7 +637,7 @@ msgid ""
 "ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
 "Per-part motion vectors). No cost."
 msgstr ""
-"Vain VR. Seuraa päätä = liikkuu kuulokkeiden mukana. Kiinni tilassa = yksi paikka istuimesi "
+"Vain VR. Seuraa päätä = liikkuu VR-lasien mukana. Kiinni tilassa = yksi paikka istuimesi "
 "ympärillä, ei seuraa ohjaamon heilumista. Ajoneuvoon kiinni = kiinni ohjaamossa, heiluu sen "
 "mukana (vaatii DLAA + Osakohtaiset liikevektorit). Ilmainen."
 
@@ -714,8 +714,8 @@ msgid ""
 "Makes the fps box bigger or smaller (0.2 .. 3.0). Raise it if you cannot read it in the headset "
 "or on a big screen. No cost."
 msgstr ""
-"Suurentaa tai pienentää fps-laatikkoa (0.2 .. 3.0). Nosta jos et näe lukea kuulokkeissa tai "
-"isolla näytöllä. Ilmainen."
+"Suurentaa tai pienentää fps-laatikkoa (0.2 .. 3.0). Nosta jos et näe lukea VR-laseissa tai isolla "
+"näytöllä. Ilmainen."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -734,7 +734,7 @@ msgid ""
 "VR. No cost."
 msgstr ""
 "Fps-laatikon kirkkaus, 10 - 100 %: 100 = väri sellaisenaan, pienempi himmentää tekstiä (ääriviiva "
-"pysyy) kohti mustaa. Käytä laskurin hillitsemiseen yöllä tai kuulokkeissa. Litteä ja VR. Ilmainen."
+"pysyy) kohti mustaa. Käytä laskurin hillitsemiseen yöllä tai VR-laseissa. Litteä ja VR. Ilmainen."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -764,9 +764,9 @@ msgid ""
 "problems worked around; info = + start-up and changes; debug = + statistics, and debug also runs "
 "the GPU timers and the CPU profiler."
 msgstr ""
-"Mitä dlaa_inject.log:iin kirjoitetaan: pois = ei mitään; errors = vain viat (oletus); warnings = "
-"+ kierretyt ongelmat; info = + käynnistys ja muutokset; debug = + tilastot, ja debug käynnistää "
-"myös GPU-ajastimet ja CPU-profiloijan."
+"Mitä dlaa_inject.log:iin kirjoitetaan: pois = ei mitään; virheet = vain viat (oletus); "
+"varoitukset = + kierretyt ongelmat; info = + käynnistys ja muutokset; vianetsintä = + tilastot, "
+"ja vianetsintä käynnistää myös GPU-ajastimet ja CPU-profiloijan."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -858,7 +858,7 @@ msgstr "Raja: tuntematon"
 #: src/inject.cpp
 #, c-format
 msgid "Limit: headset (%.0f Hz)"
-msgstr "Raja: kuulokkeet (%.0f Hz)"
+msgstr "Raja: VR-lasit (%.0f Hz)"
 
 #. Performance line at the top (one line, small font)
 #: src/inject.cpp
@@ -892,7 +892,7 @@ msgstr "Raja: vsync / fps-raja"
 #: src/inject.cpp
 #, c-format
 msgid "%.0f (%.1f ms, headset %.0f Hz)"
-msgstr "%.0f (%.1f ms, kuulokkeet %.0f Hz)"
+msgstr "%.0f (%.1f ms, VR-lasit %.0f Hz)"
 
 #. Performance line at the top (one line, small font)
 #: src/inject.cpp
@@ -1080,7 +1080,7 @@ msgstr "Nyt pois: ei maksa mitään."
 #: src/inject.cpp
 #, c-format
 msgid "Costs %ls per frame now; the profiles medium / low cut it."
-msgstr "Maksaa nyt %ls kuvaa kohti; profiilit medium / low leikkaavat sitä."
+msgstr "Maksaa nyt %ls kuvaa kohti; profiilit keskitaso / low leikkaavat sitä."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1185,13 +1185,13 @@ msgstr "Ei saatavilla täällä: %hs."
 #: src/inject.cpp
 #, c-format
 msgid "Greyed in VR: the headset paces the game."
-msgstr "Harmaana VR:ssä: kuulokkeet tahdittavat pelin."
+msgstr "Harmaana VR:ssä: VR-lasit tahdittavat pelin."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Greyed in VR: use VR FPS cap."
-msgstr "Harmaana VR:ssä: käytä VR FPS-raja."
+msgstr "Harmaana VR:ssä: käytä VR FPS-rajaa."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1203,7 +1203,7 @@ msgstr "NVIDIA-ajuri rajoittaa nyt (Reflex on päällä)."
 #: src/inject.cpp
 #, c-format
 msgid "Greyed in flat: use FPS cap."
-msgstr "Harmaana litteässä: käytä FPS cap."
+msgstr "Harmaana litteässä: käytä FPS-rajaa."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1273,13 +1273,13 @@ msgid ""
 "headset for eye gaze."
 msgstr ""
 "Foveated (VRS) oli pois pelin alussa: tallenna (Shift+F12) ja käynnistä peli uudelleen "
-"pyytääksesi kuulokkeilta katsetta."
+"pyytääksesi VR-laseilta katsetta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "No eye tracker reported by this headset / runtime: the lens centre is used."
-msgstr "Kuulokkeet / runtime eivät ilmoita silmänseurantaa: käytetään linssin keskustaa."
+msgstr "VR-lasit / runtime eivät ilmoita silmänseurantaa: käytetään linssin keskustaa."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2035,7 +2035,7 @@ msgstr "päällä (ei OpenXR-instanssia)"
 #: src/inject.cpp
 #, c-format
 msgid "on (FPS cap wins)"
-msgstr "päällä (FPS cap voittaa)"
+msgstr "pääl. (FPS-raja voittaa)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2050,7 +2050,7 @@ msgstr "päällä + boost"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "FPS cap (flat)"
-msgstr "FPS cap (litteä)"
+msgstr "FPS-raja (litteä)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2166,7 +2166,7 @@ msgstr "%d px"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Panel faces you (VR)"
-msgstr "Paneeli kasvoihin (VR)"
+msgstr "Paneeli kohti sinua (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2354,12 +2354,12 @@ msgstr "%hs / %hs valitse   %hs / %hs muuta   %hs sulje%ls"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "errors"
-msgstr "errors"
+msgstr "virheet"
 
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "warnings"
-msgstr "warnings"
+msgstr "varoitukset"
 
 #. Value column (about 20 Latin characters)
 #: src/log.h
@@ -2369,5 +2369,5 @@ msgstr "info"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "debug"
-msgstr "debug"
+msgstr "vianetsintä"
 

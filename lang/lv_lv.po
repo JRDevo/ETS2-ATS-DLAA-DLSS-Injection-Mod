@@ -160,7 +160,7 @@ msgid ""
 "Scaling is below 100 %. off = the game's own picture: use it to compare. Saved at once."
 msgstr ""
 "DLAA = tīras malas spēles renderēšanas izmērā. DLSS = tas pats, un palielina attēlu, ja spēles "
-"Scaling ir zem 100 %. off = pašas spēles attēls: salīdzināšanai. Saglabājas uzreiz."
+"Scaling ir zem 100 %. izslēgts = pašas spēles attēls: salīdzināšanai. Saglabājas uzreiz."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -231,8 +231,8 @@ msgid ""
 "GPU time, a little memory."
 msgstr ""
 "Tas pats tīkla žogiem, zālei un lapu izgriezumiem: palieliniet uz 0 pusi, ja žogi mirgo, "
-"samaziniet, ja zāle mīksta. same = seko augstākai rindai. Darbojas tikai, kad Texture sharpness "
-"nav 0. Neprasa GPU laiku, nedaudz atmiņas."
+"samaziniet, ja zāle mīksta. tāpat = seko augstākai rindai. Darbojas tikai, kad Tekstūru asums nav "
+"0. Neprasa GPU laiku, nedaudz atmiņas."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -415,8 +415,8 @@ msgid ""
 "the headset each frame: more fps only when the CPU is the limit (busy cities, traffic). Turn it "
 "off if the picture judders. From OpenXR Toolkit."
 msgstr ""
-"Turbo: bez ASW / Motion Smoothing / SSW / reprojekcijas. Tikai VR. Ieslēgts = spēle negaida "
-"austiņas katrā kadrā: vairāk FPS tikai tad, kad ierobežo CPU (pārpildītas pilsētas, satiksme). "
+"Turbo: bez ASW / Motion Smoothing / SSW / reprojekcijas. Tikai VR. Ieslēgts = spēle negaida VR "
+"brilles katrā kadrā: vairāk FPS tikai tad, kad ierobežo CPU (pārpildītas pilsētas, satiksme). "
 "Izslēdziet, ja attēls raustās. No OpenXR Toolkit."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -470,7 +470,7 @@ msgid ""
 "(OpenXR eye gaze, for example Varjo); without one it stays at the lens centre. Needs Foveated "
 "(VRS) on at the game's start, else a restart. Almost no cost."
 msgstr ""
-"Eksperimentāls. Foveated (VRS) asais centrs seko acīm austiņās ar acu izsekošanu (OpenXR eye "
+"Eksperimentāls. Foveated (VRS) asais centrs seko acīm VR brillēs ar acu izsekošanu (OpenXR eye "
 "gaze, piem. Varjo); bez tās paliek lēcas centrā. Vajag, lai Foveated (VRS) būtu ieslēgts spēles "
 "sākumā, citādi restartējiet. Gandrīz bez izmaksām."
 
@@ -481,9 +481,9 @@ msgid ""
 "fewer pixels: more GPU headroom, the picture you see stays the same. The first switch-on needs a "
 "game restart. Turn it off if the edge of the view looks wrong."
 msgstr ""
-"Tikai VR. Spēle izlaiž lēcu stūrus, ko neredzat (austiņas tos paziņo), tāpēc zīmē mazāk pikseļu: "
-"vairāk GPU rezerves, redzamais attēls tāds pats. Pirmajai ieslēgšanai vajag restartēt spēli. "
-"Izslēdziet, ja skata mala izskatās nepareizi."
+"Tikai VR. Spēle izlaiž lēcu stūrus, ko neredzat (VR brilles tos paziņo), tāpēc zīmē mazāk "
+"pikseļu: vairāk GPU rezerves, redzamais attēls tāds pats. Pirmajai ieslēgšanai vajag restartēt "
+"spēli. Izslēdziet, ja skata mala izskatās nepareizi."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -491,8 +491,8 @@ msgid ""
 "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right "
 "opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Kadru ātruma ierobežojumi un CPU: NVIDIA Reflex un FPS cap plakanam, VR FPS robeža, CPU regulēšana. Pa "
-"labi atver grupu, pa kreisi aizver; atverot izvēlni, tā vienmēr ir aizvērta."
+"Kadru ātruma ierobežojumi un CPU: NVIDIA Reflex un FPS robeža plakanam, VR FPS robeža, CPU "
+"regulēšana. Pa labi atver grupu, pa kreisi aizver; atverot izvēlni, tā vienmēr ir aizvērta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -513,7 +513,7 @@ msgid ""
 msgstr ""
 "Tikai plakans. Notur spēli ne augstāk par šo kadru ātrumu: vienmērīgs kadra laiks, mazāk siltuma "
 "un enerģijas. Iestatiet nedaudz zem tā, ko jūsu PC notur pārpildītā pilsētā. Ar ieslēgtu Reflex "
-"ierobežo NVIDIA draiveris. off = bez ierobežojuma."
+"ierobežo NVIDIA draiveris. izslēgts = bez ierobežojuma."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -522,9 +522,9 @@ msgid ""
 "headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
 "the fps swings. Turns Turbo off while on."
 msgstr ""
-"Tikai VR. half = spēle zīmē katru 2. austiņu kadru (72 Hz -> 36 fps), third = katru 3.; austiņu "
-"reprojekcija (ASW / Motion Smoothing) aizpilda pārējo vienmērīgā ritmā. Izmantojiet, kad FPS "
-"svārstās. Ieslēdzot izslēdz Turbo."
+"Tikai VR. puse = spēle zīmē katru 2. VR briļļu kadru (72 Hz -> 36 fps), trešdaļa = katru 3.; VR "
+"briļļu reprojekcija (ASW / Motion Smoothing) aizpilda pārējo vienmērīgā ritmā. Izmantojiet, kad "
+"FPS svārstās. Ieslēdzot izslēdz Turbo."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -555,7 +555,7 @@ msgid ""
 "front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
 "metres). Needs the VR layer (default). No cost."
 msgstr ""
-"Tikai VR. Seko galvai = panelis kustas līdzi austiņām. Fiksēts kabīnē = paliek vienā vietā jūsu "
+"Tikai VR. Seko galvai = panelis kustas līdzi VR brillēm. Fiksēts kabīnē = paliek vienā vietā jūsu "
 "sēdekļa priekšā, stabils, skatoties apkārt; X / Y / dziļums iestata šo vietu (grādi, metri). "
 "Vajag VR slāni (noklusējums). Bez izmaksām."
 
@@ -635,7 +635,7 @@ msgid ""
 "ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
 "Per-part motion vectors). No cost."
 msgstr ""
-"Tikai VR. Seko galvai = kustas līdzi austiņām. Fiksēts telpā = viena vieta ap sēdekli, ignorē "
+"Tikai VR. Seko galvai = kustas līdzi VR brillēm. Fiksēts telpā = viena vieta ap sēdekli, ignorē "
 "kabīnes šūpošanos. Pie transportlīdz. = pielipis pie kabīnes, šūpojas līdzi (vajag DLAA + Daļu "
 "kustības vektorus). Bez izmaksām."
 
@@ -713,8 +713,8 @@ msgid ""
 "Makes the fps box bigger or smaller (0.2 .. 3.0). Raise it if you cannot read it in the headset "
 "or on a big screen. No cost."
 msgstr ""
-"Padara fps lodziņu lielāku vai mazāku (0.2 .. 3.0). Palieliniet, ja nevarat izlasīt austiņās vai "
-"lielā ekrānā. Bez izmaksām."
+"Padara fps lodziņu lielāku vai mazāku (0.2 .. 3.0). Palieliniet, ja nevarat izlasīt VR brillēs "
+"vai lielā ekrānā. Bez izmaksām."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -733,7 +733,7 @@ msgid ""
 "VR. No cost."
 msgstr ""
 "FPS lodziņa spilgtums, 10 - 100 %: 100 = krāsa kā ir, zemāks aptumšo tekstu (apmale paliek) uz "
-"melnu. Izmantojiet skaitītāja pieklusināšanai naktī vai austiņās. Plakanais un VR. Bez izmaksām."
+"melnu. Izmantojiet skaitītāja pieklusināšanai naktī vai VR brillēs. Plakanais un VR. Bez izmaksām."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -763,9 +763,9 @@ msgid ""
 "problems worked around; info = + start-up and changes; debug = + statistics, and debug also runs "
 "the GPU timers and the CPU profiler."
 msgstr ""
-"Kas tiek rakstīts dlaa_inject.log: off = nekas; errors = tikai kļūdas (noklusējums); warnings = + "
-"apieti sarežģījumi; info = + palaišana un izmaiņas; debug = + statistika, un debug arī palaiž GPU "
-"taimerus un CPU profilētāju."
+"Kas tiek rakstīts dlaa_inject.log: izslēgts = nekas; kļūdas = tikai kļūdas (noklusējums); "
+"brīdinājumi = + apieti sarežģījumi; info = + palaišana un izmaiņas; atkļūdošana = + statistika, "
+"un atkļūdošana arī palaiž GPU taimerus un CPU profilētāju."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -776,7 +776,7 @@ msgid ""
 msgstr ""
 "Šīs izvēlnes valoda. auto = spēles valoda (noklusējums); pa kreisi / pa labi izvēlas citu. Linux "
 "/ Proton: ķīniešu, japāņu un korejiešu valodai vajag fontus, skatiet README. Blakus DLL esošs "
-"lang\\<code>.po uzvar, jūsu pašu labojumiem. Save to saglabā. Bez izmaksām."
+"lang\\<code>.po uzvar, jūsu pašu labojumiem. Saglabāt dlaa.ini to saglabā. Bez izmaksām."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -798,7 +798,7 @@ msgid ""
 msgstr ""
 "Ieraksta visu šeit redzamo dlaa.ini (iestatījumus un paneļa / fps lodziņa pozīcijas, kad esat tos "
 "pārvietojuši), saglabājot visas pārējās rindas. Dariet to, kad patīk redzamais, citādi izmaiņas "
-"pazudīs nākamajā palaišanā. Mode saglabājas pats."
+"pazudīs nākamajā palaišanā. Režīms saglabājas pats."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -858,7 +858,7 @@ msgstr "Ierobežo: nezināms"
 #: src/inject.cpp
 #, c-format
 msgid "Limit: headset (%.0f Hz)"
-msgstr "Ierobežo: austiņas (%.0f Hz)"
+msgstr "Ierobežo: VR brilles (%.0f Hz)"
 
 #. Performance line at the top (one line, small font)
 #: src/inject.cpp
@@ -892,7 +892,7 @@ msgstr "Ierobežo: vsync / fps robeža"
 #: src/inject.cpp
 #, c-format
 msgid "%.0f (%.1f ms, headset %.0f Hz)"
-msgstr "%.0f (%.1f ms, austiņas %.0f Hz)"
+msgstr "%.0f (%.1f ms, VR brilles %.0f Hz)"
 
 #. Performance line at the top (one line, small font)
 #: src/inject.cpp
@@ -1167,7 +1167,7 @@ msgstr "Plakanajā pelēks: maina tikai VR kadru ciklu."
 #: src/inject.cpp
 #, c-format
 msgid "Not running now: VR FPS cap is on and wins."
-msgstr "Tagad nedarbojas: VR FPS robeža ir ieslēgts un uzvar."
+msgstr "Tagad nedarbojas: VR FPS robeža ir ieslēgta un uzvar."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1185,13 +1185,13 @@ msgstr "Šeit nav pieejams: %hs."
 #: src/inject.cpp
 #, c-format
 msgid "Greyed in VR: the headset paces the game."
-msgstr "VR pelēks: austiņas nosaka spēles ritmu."
+msgstr "VR pelēks: VR brilles nosaka spēles ritmu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Greyed in VR: use VR FPS cap."
-msgstr "VR pelēks: izmantojiet VR FPS robeža."
+msgstr "VR pelēks: izmantojiet VR FPS robežu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1203,7 +1203,7 @@ msgstr "Tagad ierobežo NVIDIA draiveris (Reflex ir ieslēgts)."
 #: src/inject.cpp
 #, c-format
 msgid "Greyed in flat: use FPS cap."
-msgstr "Plakanajā pelēks: izmantojiet FPS cap."
+msgstr "Plakanajā pelēks: izmantojiet FPS robežu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1273,13 +1273,13 @@ msgid ""
 "headset for eye gaze."
 msgstr ""
 "Foveated (VRS) spēles sākumā bija izslēgts: saglabājiet (Shift+F12) un restartējiet spēli, lai "
-"pieprasītu austiņu skatienu."
+"pieprasītu VR briļļu skatienu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "No eye tracker reported by this headset / runtime: the lens centre is used."
-msgstr "Šīs austiņas / runtime nepaziņo par acu izsekošanu: tiek izmantots lēcas centrs."
+msgstr "Šīs VR brilles / runtime nepaziņo par acu izsekošanu: tiek izmantots lēcas centrs."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2034,7 +2034,7 @@ msgstr "iesl. (vēl nav OpenXR)"
 #: src/inject.cpp
 #, c-format
 msgid "on (FPS cap wins)"
-msgstr "iesl. (FPS cap uzvar)"
+msgstr "iesl. (FPS robeža uzvar)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2049,7 +2049,7 @@ msgstr "iesl. + boost"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "FPS cap (flat)"
-msgstr "FPS cap (plakans)"
+msgstr "FPS robeža (plakans)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2353,12 +2353,12 @@ msgstr "%hs / %hs izvēlēties   %hs / %hs mainīt   %hs aizvērt%ls"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "errors"
-msgstr "errors"
+msgstr "kļūdas"
 
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "warnings"
-msgstr "warnings"
+msgstr "brīdinājumi"
 
 #. Value column (about 20 Latin characters)
 #: src/log.h
@@ -2368,5 +2368,5 @@ msgstr "info"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "debug"
-msgstr "debug"
+msgstr "atkļūdošana"
 

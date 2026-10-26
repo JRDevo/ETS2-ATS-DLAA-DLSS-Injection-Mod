@@ -352,7 +352,7 @@ msgstr ""
 msgid ""
 "Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
 "comparing. Off saves the cost of every part together."
-msgstr "모드 전체를 켜거나 끄고 모드는 유지합니다. 끔 = 게임 원래 화면, 비교용. 끄면 모든 부분의 부하가 사라집니다."
+msgstr "Mod 전체를 켜거나 끄고 모드 설정은 유지합니다. 끔 = 게임 원래 화면, 비교용. 끄면 모든 부분의 부하가 사라집니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -362,7 +362,7 @@ msgid ""
 "work pass through. Start its tray app before the game."
 msgstr ""
 "OFXR Bridge = djules75의 VR 프레임 생성, 별도 다운로드 (github.com/djules75/OFXR-Bridge). 발견 = 이 게임에 그 레이어가 "
-"로드되어 있고 모드가 그 작업을 통과시킵니다. 게임 전에 트레이 앱을 먼저 실행하세요."
+"로드되어 있고 Mod가 그 작업을 통과시킵니다. 게임 전에 트레이 앱을 먼저 실행하세요."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -372,7 +372,7 @@ msgid ""
 "through. Run only one Turbo (its or the mod's)."
 msgstr ""
 "VectorXR = DienerTech의 OpenXR 향상 모음 (github.com/DienerTech/vectorxr): 터보, 깊이, 프레임 생성. 발견 = 게임에 그 "
-"레이어가 로드되어 있고 모드가 그 작업을 통과시킵니다. 터보는 하나만 쓰세요 (그쪽 또는 이 모드)."
+"레이어가 로드되어 있고 Mod가 그 작업을 통과시킵니다. 터보는 하나만 쓰세요 (그쪽 또는 이 Mod)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -675,8 +675,8 @@ msgid ""
 "How see-through the whole fps box is, 10 - 100 %: 100 = solid, lower fades the text AND its black "
 "outline together, so a dimmed box does not turn into a black blob. Flat and VR. No cost."
 msgstr ""
-"fps 상자 전체의 투명도, 10 - 100 %: 100 = 불투명, 낮추면 글자와 검정 외곽선이 함께 흐려져 어두운 상자가 검은 덩어리가 되지 않습니다. 일반 화면과 VR. "
-"부하 없음."
+"fps 상자 전체의 불투명도, 10 - 100 %: 100 = 불투명, 낮추면 글자와 검정 외곽선이 함께 흐려져 어두운 상자가 검은 덩어리가 되지 않습니다. 일반 화면과 "
+"VR. 부하 없음."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -735,7 +735,7 @@ msgid ""
 "DLAA area, motion, mirrors, profile, panel, fps box, turbo, foveated, frame rate, logging), live "
 "and in dlaa.ini, keeping your hotkeys and every other line."
 msgstr ""
-"이 메뉴의 모든 설정을 모드 출시 상태로 되돌립니다 (모델, 선명도, 텍스처 선명도, DLAA 영역, 모션, 거울, 프로필, 패널, fps 상자, 터보, 포비티드, 프레임 "
+"이 메뉴의 모든 설정을 Mod 출시 상태로 되돌립니다 (모델, 선명도, 텍스처 선명도, DLAA 영역, 모션, 거울, 프로필, 패널, fps 상자, 터보, 포비티드, 프레임 "
 "속도, 로그). 실시간과 dlaa.ini 모두, 단축키와 다른 줄은 유지."
 
 #. Value column (about 20 Latin characters)
@@ -836,19 +836,19 @@ msgstr "%ls      fps %ls      프레임 처리 %lc%ls%lc | %lc%ls%lc ms"
 #: src/inject.cpp
 #, c-format
 msgid "this mod: %lc%ls%lc | GPU n/a (the GPU timers could not start: timestamp queries failed)"
-msgstr "이 모드: %lc%ls%lc | GPU 사용 불가 (GPU 타이머를 시작할 수 없음: 타임스탬프 쿼리 실패)"
+msgstr "이 Mod: %lc%ls%lc | GPU 사용 불가 (GPU 타이머를 시작할 수 없음: 타임스탬프 쿼리 실패)"
 
 #. Performance line at the top (one line, small font)
 #: src/inject.cpp
 #, c-format
 msgid "this mod: %lc%ls%lc | - ms -- nothing for the GPU on this screen; it works while you drive"
-msgstr "이 모드: %lc%ls%lc | - ms -- 이 화면에서는 GPU 작업 없음, 운전 중에 작동합니다"
+msgstr "이 Mod: %lc%ls%lc | - ms -- 이 화면에서는 GPU 작업 없음, 운전 중에 작동합니다"
 
 #. Performance line at the top (one line, small font)
 #: src/inject.cpp
 #, c-format
 msgid "this mod: %lc%ls%lc | %lc...%lc ms"
-msgstr "이 모드: %lc%ls%lc | %lc...%lc ms"
+msgstr "이 Mod: %lc%ls%lc | %lc...%lc ms"
 
 #. Performance line at the top (one line, small font)
 #: src/inject.cpp
@@ -857,7 +857,7 @@ msgid ""
 "this mod: %lc%ls%lc | %lc%ls%lc ms -- GPU: NGX %.1f, part motion %.1f, camera %.1f, see-through "
 "%.1f, mirrors %.1f, sharpen %.1f, copies %.1f"
 msgstr ""
-"이 모드: %lc%ls%lc | %lc%ls%lc ms -- GPU: NGX %.1f, 부품 모션 %.1f, 카메라 %.1f, 투과 %.1f, 거울 %.1f, 선명도 "
+"이 Mod: %lc%ls%lc | %lc%ls%lc ms -- GPU: NGX %.1f, 부품 모션 %.1f, 카메라 %.1f, 투과 %.1f, 거울 %.1f, 선명도 "
 "%.1f, 복사 %.1f"
 
 #. Performance line at the top (one line, small font)
@@ -921,13 +921,13 @@ msgstr "%ls ms GPU"
 #: src/inject.cpp
 #, c-format
 msgid "Off now: the mod's DLAA / DLSS work costs nothing."
-msgstr "현재 꺼짐: 모드의 DLAA / DLSS 작업 부하가 없습니다."
+msgstr "현재 꺼짐: Mod의 DLAA / DLSS 작업 부하가 없습니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "The whole mod costs %ls per frame now; off saves most of it."
-msgstr "모드 전체의 현재 프레임당 부하는 %ls. 끄면 대부분 절약됩니다."
+msgstr "Mod 전체의 현재 프레임당 부하는 %ls. 끄면 대부분 절약됩니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1043,7 +1043,7 @@ msgstr "VR에서는 회색: VR은 항상 완성된 화면에 DLAA를 적용합�
 msgid ""
 "Switched off by the mod: it cost more than %.1f ms per eye (VR budget). Press its key to try "
 "again."
-msgstr "모드가 껐습니다: 눈당 %.1f ms를 넘었습니다 (VR 예산). 키를 누르면 다시 시도합니다."
+msgstr "Mod가 껐습니다: 눈당 %.1f ms를 넘었습니다 (VR 예산). 키를 누르면 다시 시도합니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1168,7 +1168,7 @@ msgstr "CPU 프레임당 %ls ms. 게임 자체 수치에서 GPU 시간을 절약
 #: src/inject.cpp
 #, c-format
 msgid "It saves time in the game's own GPU figure, not in the mod's."
-msgstr "게임 자체 GPU 수치에서는 시간을 절약하지만 모드의 수치에서는 아닙니다."
+msgstr "게임 자체 GPU 수치에서는 시간을 절약하지만 Mod의 수치에서는 아닙니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1224,7 +1224,7 @@ msgstr "현재 꺼짐: 모든 픽셀을 그립니다."
 #: src/inject.cpp
 #, c-format
 msgid "Off now (the mod is off)."
-msgstr "현재 꺼짐 (모드가 꺼짐)."
+msgstr "현재 꺼짐 (Mod가 꺼짐)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1454,7 +1454,7 @@ msgstr "메뉴: 오른쪽"
 #: src/inject.cpp
 #, c-format
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - hotkeys"
-msgstr "ETS2 / ATS DLAA & DLSS 모드 v%hs - 단축키"
+msgstr "ETS2 / ATS DLAA & DLSS Mod v%hs - 단축키"
 
 #. Heading of a column (short)
 #: src/inject.cpp
@@ -1634,7 +1634,7 @@ msgstr "%ls %hs 길게"
 #: src/inject.cpp
 #, c-format
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
-msgstr "ETS2 / ATS DLAA & DLSS 모드 v%hs - 튜닝 메뉴"
+msgstr "ETS2 / ATS DLAA & DLSS Mod v%hs - 튜닝 메뉴"
 
 #. Heading of a column (short)
 #: src/inject.cpp
@@ -1825,7 +1825,7 @@ msgstr "불빛 잔상 보정"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
-msgstr "OFXR Bridge (VR FG)"
+msgstr "OFXR Bridge (VR 프레임 생성)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2189,7 +2189,7 @@ msgstr "FPS 밝기"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "FPS opacity"
-msgstr "FPS 투명도"
+msgstr "FPS 불투명도"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp

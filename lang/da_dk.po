@@ -634,8 +634,8 @@ msgid ""
 "ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
 "Per-part motion vectors). No cost."
 msgstr ""
-"Kun VR. Følg hoved = følger headsettet. Fast i legerum = ét sted omkring dit sæde, ignorerer "
-"førerhusets vuggen. Fast på køretøj = sidder på førerhuset, vugger med (kræver DLAA + "
+"Kun VR. Følg hoved = følger headsettet. Fast i spilleområdet = ét sted omkring dit sæde, "
+"ignorerer førerhusets vuggen. Fast på køretøj = sidder på førerhuset, vugger med (kræver DLAA + "
 "bevægelsesvektorer pr. del). Ingen omkostning."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -764,8 +764,8 @@ msgid ""
 "the GPU timers and the CPU profiler."
 msgstr ""
 "Hvad der skrives i dlaa_inject.log: fra = intet; fejl = kun fejl (standard); advarsler = + "
-"omgåede problemer; info = + opstart og ændringer; debug = + statistik, og debug kører også "
-"GPU-timerne og CPU-profileren."
+"omgåede problemer; info = + opstart og ændringer; fejlsøgning = + statistik, og fejlsøgning kører "
+"også GPU-timerne og CPU-profileren."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2192,7 +2192,7 @@ msgstr "Fast på køretøj"
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Fixed in play space"
-msgstr "Fast i legerum"
+msgstr "Fast i spilleområdet"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2365,5 +2365,5 @@ msgstr "info"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "debug"
-msgstr "debug"
+msgstr "fejlsøgning"
 

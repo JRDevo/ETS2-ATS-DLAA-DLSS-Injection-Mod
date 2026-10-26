@@ -633,7 +633,7 @@ msgid ""
 "ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
 "Per-part motion vectors). No cost."
 msgstr ""
-"Kun VR. Følg hode = følger headsettet. Fast i lekerom = ett sted rundt setet ditt, ignorerer "
+"Kun VR. Følg hode = følger headsettet. Fast i spillområdet = ett sted rundt setet ditt, ignorerer "
 "førerhusets vugging. Festet til kjøretøy = sitter på førerhuset, vugger med (krever DLAA + "
 "bevegelsesvektorer per del). Ingen kostnad."
 
@@ -762,8 +762,8 @@ msgid ""
 "the GPU timers and the CPU profiler."
 msgstr ""
 "Hva som havner i dlaa_inject.log: av = ingenting; feil = bare feil (standard); advarsler = + "
-"omgåtte problemer; info = + oppstart og endringer; debug = + statistikk, og debug kjører også "
-"GPU-timerne og CPU-profileren."
+"omgåtte problemer; info = + oppstart og endringer; feilsøking = + statistikk, og feilsøking "
+"kjører også GPU-timerne og CPU-profileren."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2191,7 +2191,7 @@ msgstr "Festet til kjøretøy"
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Fixed in play space"
-msgstr "Fast i lekerom"
+msgstr "Fast i spillområdet"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2364,5 +2364,5 @@ msgstr "info"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "debug"
-msgstr "debug"
+msgstr "feilsøking"
 

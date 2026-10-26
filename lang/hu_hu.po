@@ -151,7 +151,7 @@ msgstr "Panel beállításai"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "FPS counter settings"
-msgstr "FPS-számláló beáll."
+msgstr "FPS-számláló beállításai"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -169,9 +169,9 @@ msgid ""
 "depth, flat mirrors without part motion, lighter part-motion search. low = also no mirror DLAA, "
 "no see-through depth, VR area 60 %. Never changes a setting you set yourself."
 msgstr ""
-"Előbeállítások a GPU-hoz. high = minden be (1. modell). medium = 2. modell, félméretű átlátszó "
-"mélység, sík tükrök alkatrészmozgás nélkül, könnyebb mozgáskeresés. low = a tükör-DLAA is ki, "
-"nincs átlátszó mélység, VR-terület 60 %. Soha nem írja felül az általad állított értéket."
+"Előbeállítások a GPU-hoz. magas = minden be (1. modell). közepes = 2. modell, félméretű átlátszó "
+"mélység, sík tükrök alkatrészmozgás nélkül, könnyebb mozgáskeresés. alacsony = a tükör-DLAA is "
+"ki, nincs átlátszó mélység, VR-terület 60 %. Soha nem írja felül az általad állított értéket."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -231,7 +231,7 @@ msgid ""
 "GPU time, a little memory."
 msgstr ""
 "Ugyanez drótkerítésre, fűre és levélkivágásokra: növeld 0 felé, ha a kerítés villog, csökkentsd, "
-"ha a fű puha. same = a fenti sort követi. Csak akkor hat, ha a Texture sharpness nem 0. Nincs "
+"ha a fű puha. azonos = a fenti sort követi. Csak akkor hat, ha a Textúraélesség nem 0. Nincs "
 "GPU-idő, kevés memória."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -386,7 +386,7 @@ msgid ""
 "work pass through. Start its tray app before the game."
 msgstr ""
 "OFXR Bridge = VR képkockagenerálás djules75-től, külön letöltés "
-"(github.com/djules75/OFXR-Bridge). found = a rétege be van töltve ebben a játékban, és a mod "
+"(github.com/djules75/OFXR-Bridge). megvan = a rétege be van töltve ebben a játékban, és a mod "
 "átengedi a munkáját. Indítsd el a tálcaalkalmazását a játék előtt."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -397,7 +397,7 @@ msgid ""
 "through. Run only one Turbo (its or the mod's)."
 msgstr ""
 "VectorXR = OpenXR fejlesztőcsomag a DienerTech-től (github.com/DienerTech/vectorxr): Turbo, "
-"Depth, képkockagenerálás; found = a rétege be van töltve a játékban, és a mod átengedi a "
+"Depth, képkockagenerálás; megvan = a rétege be van töltve a játékban, és a mod átengedi a "
 "munkáját. Csak egy Turbót futtass (az övét vagy a modét)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -440,7 +440,7 @@ msgid ""
 msgstr ""
 "A Foveated (VRS) éles közepének mérete, 10 - 100 %, 5 %-os lépésekkel: nagyobb = több éles kép, "
 "kisebb megtakarítás; kisebb = több megtakarítás, a kisebb részlet közelebb kezdődik. 80 % "
-"(balanced) az alapérték; 90 = széles, 65 = keskeny."
+"(kiegyens.) az alapérték; 90 = széles, 65 = keskeny."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -556,7 +556,7 @@ msgid ""
 "front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
 "metres). Needs the VR layer (default). No cost."
 msgstr ""
-"Csak VR. Follow head = a panel a headsettel mozog. Fixed in cab = egy ponton marad az ülésed "
+"Csak VR. Fejet követ = a panel a headsettel mozog. Fülkéhez rögzítve = egy ponton marad az ülésed "
 "előtt, nyugodtan, amíg körülnézel; X / Y / depth ezt a pontot adja (fok, méter). VR-réteg kell "
 "(alap). Ingyen."
 
@@ -635,9 +635,9 @@ msgid ""
 "ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
 "Per-part motion vectors). No cost."
 msgstr ""
-"Csak VR. Follow head = a headsettel mozog. Fixed in play space = egy pont az ülésed körül, nem "
-"követi a fülke ringását. Attached to vehicle = a fülkéhez tapadva, vele leng (DLAA + Per-part "
-"motion vectors kell). Ingyen."
+"Csak VR. Fejet követ = a headsettel mozog. Térben rögzítve = egy pont az ülésed körül, nem követi "
+"a fülke ringását. Járműhöz tapad = a fülkéhez tapadva, vele leng (DLAA + Alkatrészenkénti mozgás "
+"kell). Ingyen."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -646,9 +646,9 @@ msgid ""
 "size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
 "for every vehicle. No cost."
 msgstr ""
-"VR, csak Attached to vehicle. Be = minden kamion / autó saját FPS-doboz helyet, elfordulást, "
-"méretet, színt, fényerőt és szöveget jegyez (a menü zárásakor dlaa.ini-be mentve). Ki = egy közös "
-"készlet minden járműnek. Ingyen."
+"VR, csak Járműhöz tapad. Be = minden kamion / autó saját FPS-doboz helyet, elfordulást, méretet, "
+"színt, fényerőt és szöveget jegyez (a menü zárásakor dlaa.ini-be mentve). Ki = egy közös készlet "
+"minden járműnek. Ingyen."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -657,8 +657,8 @@ msgid ""
 "sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
 "vehicles keep theirs. The box is square to the cab."
 msgstr ""
-"VR, csak Attached to vehicle. Jobbra = újra megméri a fülkét (ülj nyugodtan, parkolva), ha a "
-"doboz rossz helyen van. Balra = ennek a járműnek a doboza alapra (hely, elfordulás, méret, szín, "
+"VR, csak Járműhöz tapad. Jobbra = újra megméri a fülkét (ülj nyugodtan, parkolva), ha a doboz "
+"rossz helyen van. Balra = ennek a járműnek a doboza alapra (hely, elfordulás, méret, szín, "
 "szöveg); a többi jármű megtartja a sajátját. A doboz merőleges a fülkére."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -722,7 +722,7 @@ msgid ""
 "(black on white = dark text, white outline). Flat and VR. No cost."
 msgstr ""
 "Az FPS-doboz szövegének színe: 20 szín, mindegyik kontúrral, hogy bármilyen képen olvasható "
-"legyen (black on white = sötét szöveg, fehér kontúr). Sík és VR. Ingyen."
+"legyen (fekete fehéren = sötét szöveg, fehér kontúr). Sík és VR. Ingyen."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -774,7 +774,7 @@ msgid ""
 msgstr ""
 "A menü nyelve. auto = a játék nyelve (alap); Balra / Jobbra másikat választ. Linux / Proton: "
 "kínai, japán és koreai a fontok telepítését kéri, lásd a README-t. A DLL melletti lang\\<code>.po "
-"fájl előnyt élvez, saját javításokhoz. A Save megőrzi. Ingyen."
+"fájl előnyt élvez, saját javításokhoz. A Mentés dlaa.ini-be megőrzi. Ingyen."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -796,7 +796,7 @@ msgid ""
 msgstr ""
 "Mindent a dlaa.ini-be ír, ami itt látszik (beállítások, és a panel / FPS-doboz helye, ha "
 "mozgattad), a többi sort meghagyva. Tedd meg, ha tetszik a látvány, különben a változások "
-"elvesznek a következő indításkor. A Mode magát menti."
+"elvesznek a következő indításkor. A Mód magát menti."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -817,7 +817,7 @@ msgstr "széles"
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "balanced"
-msgstr "kiegyens."
+msgstr "kiegyensúlyozott"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1035,13 +1035,13 @@ msgstr "Most %ls GPU képkockánként; a 0 ezt megspórolja."
 #: src/inject.cpp
 #, c-format
 msgid "Off now (Sharpen strength is 0): sharpening costs nothing."
-msgstr "Most ki (a Sharpen strength 0): az élesítés nem kerül semmibe."
+msgstr "Most ki (az Élesítés ereje 0): az élesítés nem kerül semmibe."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Same pass as Sharpen strength: costs %ls ms GPU per frame now."
-msgstr "Ugyanaz a lépés, mint a Sharpen strength: most %ls ms GPU képkockánként."
+msgstr "Ugyanaz a lépés, mint az Élesítés ereje: most %ls ms GPU képkockánként."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1077,7 +1077,7 @@ msgstr "Most ki: nem kerül semmibe."
 #: src/inject.cpp
 #, c-format
 msgid "Costs %ls per frame now; the profiles medium / low cut it."
-msgstr "Most %ls képkockánként; a medium / low profil csökkenti."
+msgstr "Most %ls képkockánként; a közepes / low profil csökkenti."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2355,7 +2355,7 @@ msgstr "hibák"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "warnings"
-msgstr "figyelm."
+msgstr "figyelmeztetések"
 
 #. Value column (about 20 Latin characters)
 #: src/log.h

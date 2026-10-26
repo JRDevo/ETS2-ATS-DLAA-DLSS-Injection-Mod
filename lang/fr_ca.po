@@ -2225,7 +2225,7 @@ msgstr "Remesurer place en cabine"
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Right: now, Left: defaults"
-msgstr "Dr. : mesurer, G. : défauts"
+msgstr "D. : mesurer, G. : défauts"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp

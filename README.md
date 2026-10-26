@@ -23,13 +23,10 @@ an in-game menu (`Delete`) and an optional text config.
 
 **Menu:** [Features](#features) · [Download](#-download) · [Requirements](#requirements) · [Install](#install) · [Modes](#modes--the-end-key) · [Flat or VR](#flat-or-vr) · [OFXR Bridge](#ofxr-bridge-vr-frame-generation) · [VectorXR](#vectorxr-vr-layer-suite) · [Render scale](#how-render-scale-works) · [Models](#models-presets--which-one-to-use) · [Controls](#controls) · [Tuning menu](#the-tuning-menu) · [Translations](#translations) · [dlaa.ini](#dlaaini) · [Performance](#performance) · [Troubleshooting](#troubleshooting) · [Multiplayer](#multiplayer) · [Build](#build-from-source) · [Report a problem](#reporting-a-problem-what-to-upload) · [Contributing](CONTRIBUTING.md) · [License](#license-and-credits)
 
-> **Where the project stands (v0.14.0).** The mod was built for as many use cases, devices and situations as
-> I could reach: flat and VR, one screen and three, keyboard, wheel and shifter, Reflex and frame rate caps,
-> foveated rendering, a hidden area mask, Turbo mode, CPU tuning, a tuning menu with every setting and its cost.
-> There are many options to tweak, and to tweak is paradise. The bells and whistles I know of are in; the ideas
-> left on my list are not worth their cost. From here on the main work is **performance tuning on your hardware**,
-> and that needs your logs: see [Contributing](CONTRIBUTING.md). If you have a suggestion,
-> a feature idea or a device I have not thought of, [open an issue](../../issues/new/choose) (Feature request).
+> **Where the project stands.** A lot of features have been added. From here on the work is about
+> **performance tuning and optimization** (your logs help: see [Contributing](CONTRIBUTING.md)). More
+> enhancements may come in time. If you have a suggestion, please [open a new issue](../../issues/new/choose)
+> (Feature request) and ask for it: I'll be happy to take a look.
 
 ## Features
 
@@ -741,8 +738,8 @@ The three green lines under the title show the game's GPU time per frame, what t
   profiler all the time; use it for bug reports, `errors` for play.
 - **Language** (`language`, `auto` by default): the language of the menu. `auto` = the game's own language (the mod
   reads it from the game, not from Windows, so it also works under Proton). `Left` / `Right` pick another one; `Save`
-  keeps it. The menu has all 43 languages of the game; the texts were machine-translated first, so fixes are welcome
-  ([CONTRIBUTING.md](CONTRIBUTING.md)). A file `bin\win_x64\lang\<code>.po` next to `dinput8.dll` wins over the built-in
+  keeps it. The menu has all 43 languages of the game, translated by AI as a best effort, so fixes are welcome
+  ([Translations](#translations)). A file `bin\win_x64\lang\<code>.po` next to `dinput8.dll` wins over the built-in
   text, so you can test your own fixes. Linux / Proton: Chinese, Japanese and Korean need fonts
   ([Linux / Proton](#languages-and-fonts)); without them the row says `font missing` and the menu is English.
 - **Hotkeys...** (v0.13.0) opens the Hotkeys page: every hotkey of the menu with its key and wheel button; bind one by
@@ -786,8 +783,9 @@ The menu is available in **all 43 languages of ETS2 and ATS**. It uses the game'
 menu's `Language` row (or `language =` in `dlaa.ini`) picks another one.
 
 > [!IMPORTANT]
-> **Every translation was made by an AI, not by native speakers, so it can be wrong.** If you speak one of
-> the languages, please look at the menu in your language and tell me what is wrong.
+> **Best effort.** The translations were created by **Claude** (AI) and reviewed by **Grok**, **Google Gemini**
+> and **ChatGPT**. An AI can never be as accurate as a native speaker, so some texts may still be wrong. If you
+> have a change or a suggestion, please open a new translation issue: it helps every player of your language.
 
 - **Found a wrong text?** [Report a translation problem](../../issues/new?template=translation.yml): the language,
   what is wrong, what it should say, and a screenshot of the spot in the menu.

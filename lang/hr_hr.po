@@ -169,8 +169,8 @@ msgid ""
 "depth, flat mirrors without part motion, lighter part-motion search. low = also no mirror DLAA, "
 "no see-through depth, VR area 60 %. Never changes a setting you set yourself."
 msgstr ""
-"Predlošci za vaš GPU. high = sve uključeno (model 1). medium = model 2, prozirna dubina u pola "
-"veličine, ravni retrovizori bez pokreta dijelova, lakše traženje pokreta. low = i bez DLAA na "
+"Predlošci za vaš GPU. visoko = sve uključeno (model 1). srednje = model 2, prozirna dubina u pola "
+"veličine, ravni retrovizori bez pokreta dijelova, lakše traženje pokreta. nisko = i bez DLAA na "
 "retrovizorima, bez prozirne dubine, VR područje 60 %. Nikad ne mijenja postavku koju ste sami "
 "postavili."
 
@@ -231,7 +231,7 @@ msgid ""
 "GPU time, a little memory."
 msgstr ""
 "Isto za žičane ograde, travu i izrezano lišće: povećajte prema 0 ako ograde trepere, smanjite ako "
-"je trava mutna. same = prati gornji red. Radi samo dok Texture sharpness nije 0. Bez GPU vremena, "
+"je trava mutna. isto = prati gornji red. Radi samo dok Oštrina tekstura nije 0. Bez GPU vremena, "
 "malo memorije."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -252,7 +252,7 @@ msgid ""
 "~60 frames to switch."
 msgstr ""
 "Samo ravno: DLAA prije bloom / tonemap igre, pa linije na cesti, žice i tračnice manje trepere. "
-"Mijenjajte samo za usporedbu. Ne koristi se uz DLSS upscale ni Windows HDR. Ista cijena; "
+"Mijenjajte samo za usporedbu. Ne koristi se uz DLSS povećanje ni Windows HDR. Ista cijena; "
 "prebacivanje traje ~60 sličica."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -354,7 +354,7 @@ msgid ""
 "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the "
 "group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"DLSS upscale, DLAA uključivanje / isključivanje te informacije o OFXR Bridge / VectorXR. Desno "
+"DLSS povećanje, DLAA uključivanje / isključivanje te informacije o OFXR Bridge / VectorXR. Desno "
 "otvara skupinu, Lijevo je zatvara; pri svakom otvaranju izbornika je zatvorena."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -385,7 +385,7 @@ msgid ""
 "work pass through. Start its tray app before the game."
 msgstr ""
 "OFXR Bridge = VR generiranje sličica od djules75, zasebno preuzimanje "
-"(github.com/djules75/OFXR-Bridge). found = njegov sloj je učitan u ovoj igri i mod propušta "
+"(github.com/djules75/OFXR-Bridge). pronađen = njegov sloj je učitan u ovoj igri i mod propušta "
 "njegov rad. Pokrenite njegovu tray aplikaciju prije igre."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -396,7 +396,7 @@ msgid ""
 "through. Run only one Turbo (its or the mod's)."
 msgstr ""
 "VectorXR = OpenXR paket poboljšanja od DienerTech (github.com/DienerTech/vectorxr): Turbo, Depth, "
-"generiranje sličica; found = njegov sloj je učitan u igri i mod propušta njegov rad. Pokrenite "
+"generiranje sličica; pronađen = njegov sloj je učitan u igri i mod propušta njegov rad. Pokrenite "
 "samo jedan Turbo (njegov ili moda)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -438,7 +438,7 @@ msgid ""
 "(balanced) is the default; 90 = wide, 65 = narrow."
 msgstr ""
 "Veličina oštrog centra za Foveated (VRS), 10 - 100 % u koracima od 5 %: veće = više oštrog "
-"prizora, manje uštede; manje = više uštede, manje detalja bliže sredini. 80 % (balanced) je "
+"prizora, manje uštede; manje = više uštede, manje detalja bliže sredini. 80 % (uravnoteženo) je "
 "zadano; 90 = široko, 65 = usko."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -491,8 +491,9 @@ msgid ""
 "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right "
 "opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Ograničenja broja sličica i CPU: NVIDIA Reflex i FPS cap za ravno, VR FPS cap, CPU podešavanje. "
-"Desno otvara skupinu, Lijevo je zatvara; pri svakom otvaranju izbornika je zatvorena."
+"Ograničenja broja sličica i CPU: NVIDIA Reflex i FPS ograničenje za ravno, VR FPS ograničenje, "
+"CPU podešavanje. Desno otvara skupinu, Lijevo je zatvara; pri svakom otvaranju izbornika je "
+"zatvorena."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -554,7 +555,7 @@ msgid ""
 "front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
 "metres). Needs the VR layer (default). No cost."
 msgstr ""
-"Samo VR. Follow head = panel se kreće sa slušalicama. Fixed in cab = ostaje na jednom mjestu "
+"Samo VR. Prati glavu = panel se kreće sa slušalicama. Fiksno u kabini = ostaje na jednom mjestu "
 "ispred sjedala, miran dok gledate uokolo; X / Y / depth tada određuju to mjesto (stupnjevi, "
 "metri). Treba VR sloj (zadano). Bez cijene."
 
@@ -634,9 +635,9 @@ msgid ""
 "ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
 "Per-part motion vectors). No cost."
 msgstr ""
-"Samo VR. Follow head = kreće se sa slušalicama. Fixed in play space = jedno mjesto oko sjedala, "
-"ne prati njihanje kabine. Attached to vehicle = zalijepljen na kabinu, njiše se s njom (treba "
-"DLAA + Per-part motion vectors). Bez cijene."
+"Samo VR. Prati glavu = kreće se sa slušalicama. Fiksno u prostoru = jedno mjesto oko sjedala, ne "
+"prati njihanje kabine. Zalijepljeno na vozilo = zalijepljen na kabinu, njiše se s njom (treba "
+"DLAA + Pokret po dijelovima). Bez cijene."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -645,9 +646,9 @@ msgid ""
 "size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
 "for every vehicle. No cost."
 msgstr ""
-"Samo VR, Attached to vehicle. Uklj. = svaki kamion / auto pamti svoje mjesto FPS okvira u kabini, "
-"okretanje, veličinu, boju, svjetlinu i tekst (sprema se u dlaa.ini pri zatvaranju izbornika). "
-"Isklj. = jedan zajednički skup za sva vozila. Bez cijene."
+"Samo VR, Zalijepljeno na vozilo. Uklj. = svaki kamion / auto pamti svoje mjesto FPS okvira u "
+"kabini, okretanje, veličinu, boju, svjetlinu i tekst (sprema se u dlaa.ini pri zatvaranju "
+"izbornika). Isklj. = jedan zajednički skup za sva vozila. Bez cijene."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -656,9 +657,9 @@ msgid ""
 "sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
 "vehicles keep theirs. The box is square to the cab."
 msgstr ""
-"Samo VR, Attached to vehicle. Desno = ponovno izmjeri kabinu sada (mirno sjedite, parkirano) ako "
-"okvir ne stoji dobro. Lijevo = okvir ovog vozila na zadano (mjesto, okretanje, veličina, boja, "
-"tekst); druga vozila zadržavaju svoje. Okvir je pravokutan na kabinu."
+"Samo VR, Zalijepljeno na vozilo. Desno = ponovno izmjeri kabinu sada (mirno sjedite, parkirano) "
+"ako okvir ne stoji dobro. Lijevo = okvir ovog vozila na zadano (mjesto, okretanje, veličina, "
+"boja, tekst); druga vozila zadržavaju svoje. Okvir je pravokutan na kabinu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -720,7 +721,7 @@ msgid ""
 "The colour of the fps box's text: 20 colours, each with an outline so it reads on any picture "
 "(black on white = dark text, white outline). Flat and VR. No cost."
 msgstr ""
-"Boja teksta FPS okvira: 20 boja, svaka s obrubom da se čita na svakoj slici (black on white = "
+"Boja teksta FPS okvira: 20 boja, svaka s obrubom da se čita na svakoj slici (crno na bijelom = "
 "tamni tekst, bijeli obrub). Ravno i VR. Bez cijene."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -773,7 +774,7 @@ msgid ""
 msgstr ""
 "Jezik ovog izbornika. auto = jezik igre (zadano); Lijevo / Desno bira drugi. Linux / Proton: "
 "kineski, japanski i korejski traže instalirane fontove, vidi README. Datoteka lang\\<code>.po uz "
-"DLL ima prednost, za vaše ispravke. Save je pamti. Bez cijene."
+"DLL ima prednost, za vaše ispravke. Spremi u dlaa.ini ga pamti. Bez cijene."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -795,7 +796,7 @@ msgid ""
 msgstr ""
 "Zapisuje sve prikazano ovdje u dlaa.ini (postavke te položaje panela / FPS okvira kad ste ih "
 "pomaknuli), zadržavajući sve ostale retke. Učinite to kad vam se sviđa što vidite, inače se "
-"promjene gube pri sljedećem pokretanju. Mode se sprema sam."
+"promjene gube pri sljedećem pokretanju. Način se sprema sam."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -870,7 +871,7 @@ msgstr "Ograničenje: CPU"
 #. Performance line at the top (one line, small font)
 #: src/inject.cpp
 msgid "Limit: CPU (or a game fps cap)"
-msgstr "Ograničenje: CPU (ili fps cap igre)"
+msgstr "Ograničenje: CPU (ili fps ograničenje igre)"
 
 #. Performance line at the top (one line, small font)
 #: src/inject.cpp
@@ -882,7 +883,7 @@ msgstr "Ograničenje: GPU"
 #: src/inject.cpp
 #, c-format
 msgid "Limit: vsync / fps cap"
-msgstr "Ograničenje: vsync / fps cap"
+msgstr "Ograničenje: vsync / fps ograničenje"
 
 #. Performance line at the top (one line, small font)
 #: src/inject.cpp
@@ -1034,13 +1035,13 @@ msgstr "Sada košta %ls GPU po sličici; 0 to štedi."
 #: src/inject.cpp
 #, c-format
 msgid "Off now (Sharpen strength is 0): sharpening costs nothing."
-msgstr "Sada isključeno (Sharpen strength je 0): oštrenje ne košta ništa."
+msgstr "Sada isključeno (Jačina oštrenja je 0): oštrenje ne košta ništa."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Same pass as Sharpen strength: costs %ls ms GPU per frame now."
-msgstr "Isti prolaz kao Sharpen strength: sada košta %ls ms GPU po sličici."
+msgstr "Isti prolaz kao Jačina oštrenja: sada košta %ls ms GPU po sličici."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1076,7 +1077,7 @@ msgstr "Sada isključeno: ne košta ništa."
 #: src/inject.cpp
 #, c-format
 msgid "Costs %ls per frame now; the profiles medium / low cut it."
-msgstr "Sada košta %ls po sličici; profili medium / low to smanjuju."
+msgstr "Sada košta %ls po sličici; profili srednje / low to smanjuju."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1088,7 +1089,7 @@ msgstr "Sada košta %ls po sličici; manje retrovizora košta manje."
 #: src/inject.cpp
 #, c-format
 msgid "Greyed: Mirror DLAA is off."
-msgstr "Sivo: Mirror DLAA je isključen."
+msgstr "Sivo: DLAA retrovizora je isključen."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1163,7 +1164,7 @@ msgstr "Sivo u ravnom: mijenja samo VR petlju sličica."
 #: src/inject.cpp
 #, c-format
 msgid "Not running now: VR FPS cap is on and wins."
-msgstr "Sada ne radi: VR FPS cap je uključen i ima prednost."
+msgstr "Sada ne radi: VR FPS ograničenje je uključeno i ima prednost."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1187,7 +1188,7 @@ msgstr "Sivo u VR-u: slušalice određuju tempo igre."
 #: src/inject.cpp
 #, c-format
 msgid "Greyed in VR: use VR FPS cap."
-msgstr "Sivo u VR-u: koristite VR FPS cap."
+msgstr "Sivo u VR-u: koristite VR FPS ograničenje."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1199,7 +1200,7 @@ msgstr "Sada ograničava NVIDIA driver (Reflex je uključen)."
 #: src/inject.cpp
 #, c-format
 msgid "Greyed in flat: use FPS cap."
-msgstr "Sivo u ravnom: koristite FPS cap."
+msgstr "Sivo u ravnom: koristite FPS ograničenje."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1453,7 +1454,7 @@ msgstr "Pokret po dijelovima"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Mirror DLAA on / off"
-msgstr "Mirror DLAA uklj. / isklj."
+msgstr "DLAA retrovizora uklj. / isklj."
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -1617,7 +1618,7 @@ msgid ""
 msgstr ""
 "Pritisnite JEDNU novu tipku (Shift / Ctrl / Alt uz nju čine kombinaciju) ili gumb kontrolera / "
 "smjer D-pada. Tipke / gumbi koji su već pritisnuti (stupanj mjenjača) ignoriraju se dok se ne "
-"otpuste; osi se nikad ne vežu. %hs ili Esc odustaje, Backspace briše u none, 10 s bez pritiska "
+"otpuste; osi se nikad ne vežu. %hs ili Esc odustaje, Backspace briše u nema, 10 s bez pritiska "
 "odustaje."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -1854,7 +1855,7 @@ msgstr "stari stencil ID-ovi"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Mirror DLAA"
-msgstr "Mirror DLAA"
+msgstr "DLAA retrovizora"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2028,7 +2029,7 @@ msgstr "uklj. (nema OpenXR instance)"
 #: src/inject.cpp
 #, c-format
 msgid "on (FPS cap wins)"
-msgstr "uklj. (FPS cap je jači)"
+msgstr "uklj. (FPS ogr. je jače)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2043,7 +2044,7 @@ msgstr "uklj. + boost"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "FPS cap (flat)"
-msgstr "FPS cap (ravno)"
+msgstr "FPS ograničenje (ravno)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2279,7 +2280,7 @@ msgstr "FPS udaljenost (VR)"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Hotkeys..."
-msgstr "Tipke..."
+msgstr "Prečaci..."
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2325,7 +2326,7 @@ msgid ""
 msgstr ""
 "5 tipki koje otvaraju i upravljaju ovim izbornikom: %hs otvara / zatvara (vrijednost), %hs / %hs "
 "/ %hs / %hs pomiču (stupac Tipka). Dok je izbornik otvoren, igri se uskraćuje samo ovih 5. %hs: "
-"mijenjajte ih na stranici Tipke."
+"mijenjajte ih na stranici Prečaci."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2336,7 +2337,7 @@ msgstr "Zatvara izbornik; 5 tipki izbornika vraća se igri. %hs radi isto iz bil
 #. Footer line (shortened automatically when too long)
 #: src/inject.cpp
 msgid "keys: Hotkeys..."
-msgstr "tipke: Tipke..."
+msgstr "tipke: Prečaci..."
 
 #. Footer line (shortened automatically when too long)
 #: src/inject.cpp

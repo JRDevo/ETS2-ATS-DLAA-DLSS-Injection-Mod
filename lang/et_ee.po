@@ -491,8 +491,8 @@ msgid ""
 "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right "
 "opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Kaadrisageduse piirid ja CPU: NVIDIA Reflex ja FPS cap lamedale, VR FPS-piir, CPU häälestus. Parem "
-"avab rühma, vasak sulgeb; menüü avamisel on see alati suletud."
+"Kaadrisageduse piirid ja CPU: NVIDIA Reflex ja FPS-piir lamedale, VR FPS-piir, CPU häälestus. "
+"Parem avab rühma, vasak sulgeb; menüü avamisel on see alati suletud."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -761,9 +761,9 @@ msgid ""
 "problems worked around; info = + start-up and changes; debug = + statistics, and debug also runs "
 "the GPU timers and the CPU profiler."
 msgstr ""
-"Mis läheb faili dlaa_inject.log: väljas = mitte midagi; errors = ainult tõrked (vaikimisi); "
-"warnings = + möödaviidud probleemid; info = + käivitus ja muudatused; debug = + statistika, ja "
-"debug käivitab ka GPU taimerid ja CPU profileerija."
+"Mis läheb faili dlaa_inject.log: väljas = mitte midagi; vead = ainult tõrked (vaikimisi); "
+"hoiatused = + möödaviidud probleemid; info = + käivitus ja muudatused; silumine = + statistika, "
+"ja silumine käivitab ka GPU taimerid ja CPU profileerija."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1078,7 +1078,7 @@ msgstr "Praegu väljas: ei maksa midagi."
 #: src/inject.cpp
 #, c-format
 msgid "Costs %ls per frame now; the profiles medium / low cut it."
-msgstr "Maksab praegu %ls kaadri kohta; profiilid medium / low vähendavad seda."
+msgstr "Maksab praegu %ls kaadri kohta; profiilid keskmine / low vähendavad seda."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1188,7 +1188,7 @@ msgstr "Hall VR-is: peakomplekt taktib mängu."
 #: src/inject.cpp
 #, c-format
 msgid "Greyed in VR: use VR FPS cap."
-msgstr "Hall VR-is: kasuta VR FPS-piir."
+msgstr "Hall VR-is: kasuta VR FPS-piiri."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1200,7 +1200,7 @@ msgstr "Praegu piirab NVIDIA draiver (Reflex on sees)."
 #: src/inject.cpp
 #, c-format
 msgid "Greyed in flat: use FPS cap."
-msgstr "Hall lamedas: kasuta FPS cap."
+msgstr "Hall lamedas: kasuta FPS-piiri."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2029,7 +2029,7 @@ msgstr "sees (OpenXR inst. pole)"
 #: src/inject.cpp
 #, c-format
 msgid "on (FPS cap wins)"
-msgstr "sees (FPS cap võidab)"
+msgstr "sees (FPS-piir võidab)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2044,7 +2044,7 @@ msgstr "sees + boost"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "FPS cap (flat)"
-msgstr "FPS cap (lame)"
+msgstr "FPS-piir (lame)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2348,12 +2348,12 @@ msgstr "%hs / %hs vali   %hs / %hs muuda   %hs sulge%ls"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "errors"
-msgstr "errors"
+msgstr "vead"
 
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "warnings"
-msgstr "warnings"
+msgstr "hoiatused"
 
 #. Value column (about 20 Latin characters)
 #: src/log.h
@@ -2363,5 +2363,5 @@ msgstr "info"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "debug"
-msgstr "debug"
+msgstr "silumine"
 

@@ -743,7 +743,7 @@ msgid ""
 "How see-through the whole fps box is, 10 - 100 %: 100 = solid, lower fades the text AND its black "
 "outline together, so a dimmed box does not turn into a black blob. Flat and VR. No cost."
 msgstr ""
-"Aký priehľadný je celý box fps, 10 - 100 %: 100 = plný, nižšie slabne text AJ jeho čierny obrys "
+"Aký nepriehľadný je celý box fps, 10 - 100 %: 100 = plný, nižšie slabne text AJ jeho čierny obrys "
 "spoločne, takže stlmený box neprejde na čiernu škvrnu. Plochý režim aj VR. Bez ceny."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -765,8 +765,8 @@ msgid ""
 "the GPU timers and the CPU profiler."
 msgstr ""
 "Čo sa zapisuje do dlaa_inject.log: vyp. = nič; chyby = len zlyhania (predvolené); varovania = + "
-"obídené problémy; info = + štart a zmeny; debug = + štatistiky a debug aj spúšťa časovače GPU a "
-"profiler CPU."
+"obídené problémy; info = + štart a zmeny; ladenie = + štatistiky a ladenie aj spúšťa časovače GPU "
+"a profiler CPU."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2275,7 +2275,7 @@ msgstr "Jas FPS"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "FPS opacity"
-msgstr "Priehľadnosť FPS"
+msgstr "Krytie FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2285,7 +2285,7 @@ msgstr "Vzdialenosť FPS (VR)"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Hotkeys..."
-msgstr "Klávesy..."
+msgstr "Skratky..."
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2331,7 +2331,7 @@ msgid ""
 msgstr ""
 "5 klávesov, ktoré otvárajú a ovládajú toto menu: %hs menu otvára / zatvára (hodnota), %hs / %hs / "
 "%hs / %hs sa pohybujú (stĺpec Kláves). Pri otvorenom menu sa hre berie len týchto 5. %hs: zmeníte "
-"ich na stránke Klávesy."
+"ich na stránke Skratky."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2342,7 +2342,7 @@ msgstr "Zatvorí menu; 5 klávesov menu sa vráti hre. %hs robí to isté z ktor
 #. Footer line (shortened automatically when too long)
 #: src/inject.cpp
 msgid "keys: Hotkeys..."
-msgstr "klávesy: Klávesy..."
+msgstr "klávesy: Skratky..."
 
 #. Footer line (shortened automatically when too long)
 #: src/inject.cpp
@@ -2368,5 +2368,5 @@ msgstr "info"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "debug"
-msgstr "debug"
+msgstr "ladenie"
 

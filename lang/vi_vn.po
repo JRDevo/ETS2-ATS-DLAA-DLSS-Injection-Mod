@@ -250,8 +250,8 @@ msgid ""
 "~60 frames to switch."
 msgstr ""
 "Chỉ màn hình phẳng: DLAA trước bloom / tonemap của game, nên vạch kẻ đường, dây điện và đường ray "
-"ít nhấp nháy hơn. Chỉ đổi để so sánh. Không dùng với DLSS upscale hoặc Windows HDR. Tốn như nhau; "
-"mất khoảng 60 khung để chuyển."
+"ít nhấp nháy hơn. Chỉ đổi để so sánh. Không dùng với DLSS nâng độ phân giải hoặc Windows HDR. Tốn "
+"như nhau; mất khoảng 60 khung để chuyển."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -349,8 +349,8 @@ msgid ""
 "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the "
 "group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"DLSS upscale, công tắc DLAA bật / tắt và thông tin OFXR Bridge / VectorXR. Phải mở nhóm, Trái "
-"đóng; mỗi lần mở menu nhóm luôn đóng sẵn."
+"DLSS nâng độ phân giải, công tắc DLAA bật / tắt và thông tin OFXR Bridge / VectorXR. Phải mở "
+"nhóm, Trái đóng; mỗi lần mở menu nhóm luôn đóng sẵn."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp

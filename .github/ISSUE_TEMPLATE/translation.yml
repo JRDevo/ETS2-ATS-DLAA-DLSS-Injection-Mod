@@ -6,8 +6,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping! Every menu translation was made by an AI, so it can be wrong. Fixes from native
-        speakers make the menu better for everyone who speaks your language.
+        Thanks for helping! The menu translations were created by Claude (AI) and reviewed by Grok, Google Gemini
+        and ChatGPT. An AI can never be as accurate as a native speaker, so this is a best effort: your change or
+        suggestion makes the menu better for everyone who speaks your language.
         How the translations work and how to test a fix in the game: [lang/README.md](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/blob/dev/lang/README.md).
   - type: dropdown
     id: language

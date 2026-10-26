@@ -418,7 +418,7 @@ msgid ""
 "the headset each frame: more fps only when the CPU is the limit (busy cities, traffic). Turn it "
 "off if the picture judders. From OpenXR Toolkit."
 msgstr ""
-"Turbo: brez ASW / Motion Smoothing / SSW / reprojekcije. Samo VR. vkl. = igra ne čaka na slušalke "
+"Turbo: brez ASW / Motion Smoothing / SSW / reprojekcije. Samo VR. vkl. = igra ne čaka na VR očala "
 "vsako sličico: več fps le, ko omejuje CPU (zasedena mesta, promet). Izklopite, če slika zatika. "
 "Iz OpenXR Toolkit."
 
@@ -473,7 +473,7 @@ msgid ""
 "(OpenXR eye gaze, for example Varjo); without one it stays at the lens centre. Needs Foveated "
 "(VRS) on at the game's start, else a restart. Almost no cost."
 msgstr ""
-"Poskusno. Oster center Foveated (VRS) sledi vašim očem na slušalkah s sledenjem očem (pogled "
+"Poskusno. Oster center Foveated (VRS) sledi vašim očem na VR očalih s sledenjem očem (pogled "
 "OpenXR, na primer Varjo); brez njega ostane v središču leče. Zahteva vklopljen Foveated (VRS) ob "
 "zagonu igre, sicer ponovni zagon. Skoraj brez cene."
 
@@ -484,7 +484,7 @@ msgid ""
 "fewer pixels: more GPU headroom, the picture you see stays the same. The first switch-on needs a "
 "game restart. Turn it off if the edge of the view looks wrong."
 msgstr ""
-"Samo VR. Igra preskoči vogale leč, ki jih nikoli ne vidite (slušalke jih sporočijo), zato nariše "
+"Samo VR. Igra preskoči vogale leč, ki jih nikoli ne vidite (VR očala jih sporočijo), zato nariše "
 "manj pikslov: več rezerve GPU, vidna slika ostane enaka. Prvi vklop zahteva ponovni zagon igre. "
 "Izklopite, če rob pogleda izgleda narobe."
 
@@ -525,8 +525,8 @@ msgid ""
 "headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
 "the fps swings. Turns Turbo off while on."
 msgstr ""
-"Samo VR. polovica = igra nariše vsako 2. sličico slušalk (72 Hz -> 36 fps), tretjina = vsako 3.; "
-"reprojekcija slušalk (ASW / Motion Smoothing) napolni ostalo v enakomernem ritmu. Uporabite, ko "
+"Samo VR. polovica = igra nariše vsako 2. sličico VR očal (72 Hz -> 36 fps), tretjina = vsako 3.; "
+"reprojekcija VR očal (ASW / Motion Smoothing) napolni ostalo v enakomernem ritmu. Uporabite, ko "
 "fps nihajo. Medtem ko je vklopljeno, izklopi Turbo."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -558,9 +558,9 @@ msgid ""
 "front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
 "metres). Needs the VR layer (default). No cost."
 msgstr ""
-"Samo VR. Sledi glavi = plošča se premika s slušalkami. Fiksno v kabini = ostane na enem mestu "
-"pred sedežem, stabilno ob razgledovanju; X / Y / globina nato nastavijo to mesto (stopinje, "
-"metri). Zahteva sloj VR (privzeto). Brez cene."
+"Samo VR. Sledi glavi = plošča se premika z VR očali. Fiksno v kabini = ostane na enem mestu pred "
+"sedežem, stabilno ob razgledovanju; X / Y / globina nato nastavijo to mesto (stopinje, metri). "
+"Zahteva sloj VR (privzeto). Brez cene."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -638,7 +638,7 @@ msgid ""
 "ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
 "Per-part motion vectors). No cost."
 msgstr ""
-"Samo VR. Sledi glavi = premika se s slušalkami. Fiksno v igralnem prostoru = eno mesto okoli "
+"Samo VR. Sledi glavi = premika se z VR očali. Fiksno v igralnem prostoru = eno mesto okoli "
 "sedeža, ne upošteva nihanja kabine. Pritrjeno na vozilo = prilepljeno na kabino, niha z njo "
 "(zahteva DLAA + vektorje gibanja delov). Brez cene."
 
@@ -716,7 +716,7 @@ msgid ""
 "Makes the fps box bigger or smaller (0.2 .. 3.0). Raise it if you cannot read it in the headset "
 "or on a big screen. No cost."
 msgstr ""
-"Polje fps poveča ali zmanjša (0,2 .. 3,0). Povečajte, če ga v slušalkah ali na velikem zaslonu ne "
+"Polje fps poveča ali zmanjša (0,2 .. 3,0). Povečajte, če ga v VR očalih ali na velikem zaslonu ne "
 "morete prebrati. Brez cene."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -736,7 +736,7 @@ msgid ""
 "VR. No cost."
 msgstr ""
 "Svetlost polja fps, 10 - 100 %: 100 = barva nespremenjena, nižje zatemni besedilo (obroba ostane) "
-"proti črni. Uporabite za zatemnitev števca ponoči ali v slušalkah. Ravni način in VR. Brez cene."
+"proti črni. Uporabite za zatemnitev števca ponoči ali v VR očalih. Ravni način in VR. Brez cene."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -744,8 +744,9 @@ msgid ""
 "How see-through the whole fps box is, 10 - 100 %: 100 = solid, lower fades the text AND its black "
 "outline together, so a dimmed box does not turn into a black blob. Flat and VR. No cost."
 msgstr ""
-"Kako prosojno je celotno polje fps, 10 - 100 %: 100 = polno, nižje bledi besedilo IN njegova črna "
-"obroba skupaj, zato se zatemnjeno polje ne spremeni v črno packo. Ravni način in VR. Brez cene."
+"Kako neprosojno je celotno polje fps, 10 - 100 %: 100 = polno, nižje bledi besedilo IN njegova "
+"črna obroba skupaj, zato se zatemnjeno polje ne spremeni v črno packo. Ravni način in VR. Brez "
+"cene."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -766,8 +767,8 @@ msgid ""
 "the GPU timers and the CPU profiler."
 msgstr ""
 "Kaj gre v dlaa_inject.log: izk. = nič; napake = samo odpovedi (privzeto); opozorila = + obhojene "
-"težave; info = + zagon in spremembe; debug = + statistika, debug pa zažene tudi časovnike GPU in "
-"profiler CPU."
+"težave; info = + zagon in spremembe; razhroščevanje = + statistika, razhroščevanje pa zažene tudi "
+"časovnike GPU in profiler CPU."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -859,7 +860,7 @@ msgstr "Omejitev: neznana"
 #: src/inject.cpp
 #, c-format
 msgid "Limit: headset (%.0f Hz)"
-msgstr "Omejitev: slušalke (%.0f Hz)"
+msgstr "Omejitev: VR očala (%.0f Hz)"
 
 #. Performance line at the top (one line, small font)
 #: src/inject.cpp
@@ -893,7 +894,7 @@ msgstr "Omejitev: vsync / omejitev fps"
 #: src/inject.cpp
 #, c-format
 msgid "%.0f (%.1f ms, headset %.0f Hz)"
-msgstr "%.0f (%.1f ms, slušalke %.0f Hz)"
+msgstr "%.0f (%.1f ms, VR očala %.0f Hz)"
 
 #. Performance line at the top (one line, small font)
 #: src/inject.cpp
@@ -1186,7 +1187,7 @@ msgstr "Tu ni na voljo: %hs."
 #: src/inject.cpp
 #, c-format
 msgid "Greyed in VR: the headset paces the game."
-msgstr "Zasivljeno v VR: tempo igre določajo slušalke."
+msgstr "Zasivljeno v VR: tempo igre določajo VR očala."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1273,14 +1274,14 @@ msgid ""
 "Foveated (VRS) was off at the game's start: save (Shift+F12) and restart the game to ask the "
 "headset for eye gaze."
 msgstr ""
-"Foveated (VRS) je bil ob zagonu igre izk.: shranite (Shift+F12) in znova zaženite igro, da "
-"slušalke zaprosijo za pogled oči."
+"Foveated (VRS) je bil ob zagonu igre izk.: shranite (Shift+F12) in znova zaženite igro, da VR "
+"očala zaprosijo za pogled oči."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "No eye tracker reported by this headset / runtime: the lens centre is used."
-msgstr "Te slušalke / runtime ne sporočajo sledilnika oči: uporabljeno je središče leče."
+msgstr "Ta VR očala / runtime ne sporočajo sledilnika oči: uporabljeno je središče leče."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2275,7 +2276,7 @@ msgstr "Svetlost FPS"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "FPS opacity"
-msgstr "Prosojnost FPS"
+msgstr "Neprosojnost FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2368,5 +2369,5 @@ msgstr "info"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "debug"
-msgstr "debug"
+msgstr "razhroščevanje"
 

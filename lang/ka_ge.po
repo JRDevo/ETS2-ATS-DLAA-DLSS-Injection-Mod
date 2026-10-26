@@ -1897,7 +1897,7 @@ msgstr "შუქის აჩრდილის შესწორ."
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
-msgstr "OFXR Bridge (VR FG)"
+msgstr "OFXR Bridge (VR კადრები)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp

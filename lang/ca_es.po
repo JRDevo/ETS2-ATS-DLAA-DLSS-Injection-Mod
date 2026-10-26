@@ -146,7 +146,7 @@ msgstr "Taxa de fotogrames i CPU"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Panel settings"
-msgstr "Tauler"
+msgstr "Panell"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -549,7 +549,7 @@ msgid ""
 "The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
 "it; it starts closed every time the menu opens."
 msgstr ""
-"Posició, mida, profunditat i orientació del tauler, i les tecles del menú. Dreta obre el grup, "
+"Posició, mida, profunditat i orientació del panell, i les tecles del menú. Dreta obre el grup, "
 "Esquerra el tanca; comença tancat cada cop que s'obre el menú."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -559,7 +559,7 @@ msgid ""
 "front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
 "metres). Needs the VR layer (default). No cost."
 msgstr ""
-"Només VR. Seguir el cap = el tauler segueix el visor. Fix a la cabina = es queda en un punt "
+"Només VR. Seguir el cap = el panell segueix el visor. Fix a la cabina = es queda en un punt "
 "davant del teu seient, estable quan mires al voltant; X / Y / profunditat fixen aquest punt "
 "(graus, metres). Cal la capa VR (per defecte). Sense cost."
 
@@ -569,8 +569,8 @@ msgid ""
 "Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
 "and VR each keep their own position. Use it if the panel covers something you need. No cost."
 msgstr ""
-"Mou aquest tauler als costats, en % de la pantalla (VR fix a la cabina: graus al voltant del "
-"seient). Pantalla plana i VR guarden cadascun la seva posició. Fes-ho servir si el tauler tapa "
+"Mou aquest panell als costats, en % de la pantalla (VR fix a la cabina: graus al voltant del "
+"seient). Pantalla plana i VR guarden cadascun la seva posició. Fes-ho servir si el panell tapa "
 "alguna cosa que necessites. Sense cost."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -579,8 +579,8 @@ msgid ""
 "Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
 "VR each keep their own position. Use it if the panel covers something you need. No cost."
 msgstr ""
-"Mou aquest tauler amunt / avall, en % de la pantalla (VR fix a la cabina: graus, més = avall). "
-"Pantalla plana i VR guarden cadascun la seva posició. Fes-ho servir si el tauler tapa alguna cosa "
+"Mou aquest panell amunt / avall, en % de la pantalla (VR fix a la cabina: graus, més = avall). "
+"Pantalla plana i VR guarden cadascun la seva posició. Fes-ho servir si el panell tapa alguna cosa "
 "que necessites. Sense cost."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -589,7 +589,7 @@ msgid ""
 "Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
 "much. Flat and VR each keep their own size. No cost."
 msgstr ""
-"Fa aquest tauler més gran o més petit. Puja-ho si no pots llegir-lo, baixa-ho si tapa massa. "
+"Fa aquest panell més gran o més petit. Puja-ho si no pots llegir-lo, baixa-ho si tapa massa. "
 "Pantalla plana i VR guarden cadascun la seva mida. Sense cost."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -599,7 +599,7 @@ msgid ""
 "the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
 "Change it if the panel is tiring to look at. No cost."
 msgstr ""
-"Només VR, en gris en pantalla plana. A quina distància flota el tauler: en metres (0,30 - 3,00) "
+"Només VR, en gris en pantalla plana. A quina distància flota el panell: en metres (0,30 - 3,00) "
 "com a capa VR, per defecte; en px de desplaçament per ull amb menu_vr_layer = 0. Mateixa mida a "
 "qualsevol profunditat. Canvia-ho si cansa mirar-lo. Sense cost."
 
@@ -610,7 +610,7 @@ msgid ""
 "size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
 "picture. No cost."
 msgstr ""
-"Només VR, en gris en pantalla plana. Activat = el tauler es gira cap a tu quan el mous cap al "
+"Només VR, en gris en pantalla plana. Activat = el panell es gira cap a tu quan el mous cap al "
 "costat, mateixa mida des de qualsevol angle (com a capa VR, per defecte, també el quadre de fps "
 "que segueix el cap); desactivat = imatge plana. Sense cost."
 
@@ -702,7 +702,7 @@ msgid ""
 "lying on the dashboard). 0 = it faces you. No cost."
 msgstr ""
 "Només VR, en gris en pantalla plana. Inclina el quadre de fps, en graus (+ = la part de dalt "
-"s'allunya de tu, com estirat al tauler). 0 = et mira de cara. Sense cost."
+"s'allunya de tu, com estirat al panell). 0 = et mira de cara. Sense cost."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -770,8 +770,8 @@ msgid ""
 "the GPU timers and the CPU profiler."
 msgstr ""
 "Què va al dlaa_inject.log: desactivat = res; errors = només errors (per defecte); avisos = + "
-"problemes esquivats; info = + inici i canvis; debug = + estadístiques, i debug també activa els "
-"temporitzadors de la GPU i el profiler de la CPU."
+"problemes esquivats; info = + inici i canvis; depuració = + estadístiques, i depuració també "
+"activa els temporitzadors de la GPU i el profiler de la CPU."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -803,8 +803,8 @@ msgid ""
 "moved them), keeping every other line. Do it once you like what you see, or the changes are gone "
 "at the next start. Mode saves itself."
 msgstr ""
-"Escriu tot el que es veu aquí al dlaa.ini (ajustos, i les posicions del tauler / quadre de fps un "
-"cop mogudes), conservant les altres línies. Fes-ho quan et agradi el resultat, o els canvis es "
+"Escriu tot el que es veu aquí al dlaa.ini (ajustos, i les posicions del panell / quadre de fps un "
+"cop mogudes), conservant les altres línies. Fes-ho quan t'agradi el resultat, o els canvis es "
 "perden a l'inici següent. El mode es desa sol."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -815,7 +815,7 @@ msgid ""
 "and in dlaa.ini, keeping your hotkeys and every other line."
 msgstr ""
 "Torna tots els ajustos d'aquest menú a com els porta el mod (model, nitidesa, nitidesa de "
-"textura, àrea DLAA, moviment, retrovisors, perfil, tauler, quadre de fps, turbo, foveated, taxa "
+"textura, àrea DLAA, moviment, retrovisors, perfil, panell, quadre de fps, turbo, foveated, taxa "
 "de fotogrames, registre), en directe i al dlaa.ini, conservant les teves dreceres i les altres "
 "línies."
 
@@ -2121,7 +2121,7 @@ msgstr "auto (%ls)"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Panel lock (VR)"
-msgstr "Bloqueig tauler (VR)"
+msgstr "Bloqueig panell (VR)"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2141,7 +2141,7 @@ msgstr "Seguir el cap"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Panel position X"
-msgstr "Posició X del tauler"
+msgstr "Posició X del panell"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2152,17 +2152,17 @@ msgstr "%+d graus"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Panel position Y"
-msgstr "Posició Y del tauler"
+msgstr "Posició Y del panell"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Panel size"
-msgstr "Mida del tauler"
+msgstr "Mida del panell"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Panel VR depth"
-msgstr "Profunditat VR tauler"
+msgstr "Profunditat VR panell"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2173,7 +2173,7 @@ msgstr "%d px"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Panel faces you (VR)"
-msgstr "Tauler de cara (VR)"
+msgstr "Panell de cara (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2366,7 +2366,7 @@ msgstr "errors"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "warnings"
-msgstr "warnings"
+msgstr "avisos"
 
 #. Value column (about 20 Latin characters)
 #: src/log.h
@@ -2376,5 +2376,5 @@ msgstr "info"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "debug"
-msgstr "debug"
+msgstr "depuració"
 

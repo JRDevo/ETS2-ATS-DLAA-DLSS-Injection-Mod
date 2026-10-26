@@ -169,7 +169,7 @@ msgid ""
 "depth, flat mirrors without part motion, lighter part-motion search. low = also no mirror DLAA, "
 "no see-through depth, VR area 60 %. Never changes a setting you set yourself."
 msgstr ""
-"Förinställningar för ditt GPU. hög = allt på (modell 1). medel = modell 2, halvt genomskinligt "
+"Förinställningar för din GPU. hög = allt på (modell 1). medel = modell 2, halvt genomskinligt "
 "djup, platta speglar utan delrörelse, lättare sökning. låg = också ingen spegel-DLAA, inget "
 "genomskinligt djup, VR-yta 60 %. Ändrar aldrig något du ställt in själv."
 
@@ -633,7 +633,7 @@ msgid ""
 "ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
 "Per-part motion vectors). No cost."
 msgstr ""
-"Endast VR. Följ huvud = följer headsetet. Fast i spelrum = en plats runt din stol, ignorerar "
+"Endast VR. Följ huvud = följer headsetet. Fast i spelytan = en plats runt din stol, ignorerar "
 "hyttens gungande. Fäst vid fordon = sitter på hytten, gungar med (kräver DLAA + rörelsevektorer "
 "per del). Ingen kostnad."
 
@@ -763,8 +763,8 @@ msgid ""
 "the GPU timers and the CPU profiler."
 msgstr ""
 "Vad som hamnar i dlaa_inject.log: av = inget; fel = bara fel (standard); varningar = + kringgådda "
-"problem; info = + start och ändringar; debug = + statistik, och debug kör även GPU-timrarna och "
-"CPU-profileraren."
+"problem; info = + start och ändringar; felsökning = + statistik, och felsökning kör även "
+"GPU-timrarna och CPU-profileraren."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2194,7 +2194,7 @@ msgstr "Fäst vid fordon"
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Fixed in play space"
-msgstr "Fast i spelrum"
+msgstr "Fast i spelytan"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2368,5 +2368,5 @@ msgstr "info"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "debug"
-msgstr "debug"
+msgstr "felsökning"
 

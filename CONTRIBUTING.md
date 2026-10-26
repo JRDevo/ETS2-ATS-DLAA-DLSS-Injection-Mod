@@ -49,8 +49,9 @@ The mod has its own capture keys. They need `log_level = 4`.
 
 ### 3. Fix a translation
 
-The menu speaks every language the game has (43). **Every translation was made by an AI**, so it can be
-wrong: a native speaker's fixes are very welcome.
+The menu speaks every language the game has (43). The translations were created by Claude (AI) and reviewed
+by Grok, Google Gemini and ChatGPT. An AI can never be as accurate as a native speaker, so this is a best effort:
+a native speaker's changes and suggestions help everybody.
 
 - **Found a wrong text?** Open a [Translation problem](../../issues/new?template=translation.yml) issue: the
   language, what is wrong, what it should say, and a screenshot of the spot in the menu.

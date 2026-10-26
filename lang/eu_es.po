@@ -159,9 +159,9 @@ msgid ""
 "DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's "
 "Scaling is below 100 %. off = the game's own picture: use it to compare. Saved at once."
 msgstr ""
-"DLAA = ertz garbiak jokoaren errendatze-tamainan. DLSS = bera bera, eta eskalatu egiten du "
-"jokoaren Eskala %100 baino txikiagoa denean. ezgaituta = jokoaren irudia, alderatzeko. Berehala "
-"gordetzen da."
+"DLAA = ertz garbiak jokoaren errendatze-tamainan. DLSS = berdina, eta eskalatu egiten du jokoaren "
+"Eskala %100 baino txikiagoa denean. ezgaituta = jokoaren irudia, alderatzeko. Berehala gordetzen "
+"da."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -777,8 +777,8 @@ msgid ""
 "the GPU timers and the CPU profiler."
 msgstr ""
 "dlaa_inject.log-era zer doan: ezgaituta = ezer ez; erroreak = hutsegiteak bakarrik (lehenetsia); "
-"abisuak = + saihestutako arazoak; info = + hasiera eta aldaketak; debug = + estatistikak, eta "
-"debug-ek GPU tenporizadoreak eta CPU profilerra ere martxan jartzen ditu."
+"abisuak = + saihestutako arazoak; info = + hasiera eta aldaketak; arazketa = + estatistikak, eta "
+"arazketak GPU tenporizadoreak eta CPU profilerra ere martxan jartzen ditu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2387,5 +2387,5 @@ msgstr "info"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "debug"
-msgstr "debug"
+msgstr "arazketa"
 

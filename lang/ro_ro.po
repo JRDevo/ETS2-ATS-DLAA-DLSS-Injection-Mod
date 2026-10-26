@@ -170,10 +170,10 @@ msgid ""
 "depth, flat mirrors without part motion, lighter part-motion search. low = also no mirror DLAA, "
 "no see-through depth, VR area 60 %. Never changes a setting you set yourself."
 msgstr ""
-"Presetări pentru GPU-ul tău. high = totul activ (modelul 1). medium = modelul 2, adâncime "
+"Presetări pentru GPU-ul tău. ridicat = totul activ (modelul 1). mediu = modelul 2, adâncime "
 "transparentă la jumătate de dimensiune, oglinzi plate fără mișcarea pieselor, căutare de mișcare "
-"mai ușoară. low = și fără DLAA pe oglinzi, fără adâncime transparentă, zonă VR 60 %. Nu schimbă "
-"niciodată o setare făcută de tine."
+"mai ușoară. scăzut = și fără DLAA pe oglinzi, fără adâncime transparentă, zonă VR 60 %. Nu "
+"schimbă niciodată o setare făcută de tine."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -234,8 +234,8 @@ msgid ""
 "GPU time, a little memory."
 msgstr ""
 "La fel pentru garduri de sârmă, iarbă și frunze decupate: crește spre 0 dacă gardurile licăresc, "
-"scade dacă iarba e moale. same = urmează rândul de sus. Merge doar cât Texture sharpness nu e 0. "
-"Fără timp GPU, puțină memorie."
+"scade dacă iarba e moale. la fel = urmează rândul de sus. Merge doar cât Claritate texturi nu e "
+"0. Fără timp GPU, puțină memorie."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -256,7 +256,7 @@ msgid ""
 "~60 frames to switch."
 msgstr ""
 "Doar plat: DLAA înainte de bloom / tonemap-ul jocului, deci marcajele, firele și șinele licăresc "
-"mai puțin. Schimbă doar pentru comparație. Nu se folosește cu DLSS upscale sau Windows HDR. "
+"mai puțin. Schimbă doar pentru comparație. Nu se folosește cu DLSS mărire sau Windows HDR. "
 "Același cost; schimbarea durează ~60 de cadre."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -358,7 +358,7 @@ msgid ""
 "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the "
 "group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"DLSS upscale, comutatorul DLAA pornit / oprit și informații OFXR Bridge / VectorXR. Dreapta "
+"DLSS mărire, comutatorul DLAA pornit / oprit și informații OFXR Bridge / VectorXR. Dreapta "
 "deschide grupul, Stânga îl închide; pornește închis la fiecare deschidere a meniului."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -389,7 +389,7 @@ msgid ""
 "work pass through. Start its tray app before the game."
 msgstr ""
 "OFXR Bridge = generare de cadre VR de djules75, descărcare separată "
-"(github.com/djules75/OFXR-Bridge). found = stratul lui e încărcat în acest joc și modul lasă "
+"(github.com/djules75/OFXR-Bridge). găsit = stratul lui e încărcat în acest joc și modul lasă "
 "munca lui să treacă. Pornește aplicația lui din tray înainte de joc."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -400,7 +400,7 @@ msgid ""
 "through. Run only one Turbo (its or the mod's)."
 msgstr ""
 "VectorXR = set de îmbunătățiri OpenXR de la DienerTech (github.com/DienerTech/vectorxr): Turbo, "
-"Depth, generare de cadre; found = stratul lui e încărcat în joc și modul lasă munca lui să "
+"Depth, generare de cadre; găsit = stratul lui e încărcat în joc și modul lasă munca lui să "
 "treacă. Rulează un singur Turbo (al lui sau al modului)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -443,7 +443,7 @@ msgid ""
 msgstr ""
 "Cât de mare e centrul clar Foveated (VRS), 10 - 100 % în pași de 5 %: mai mare = mai mult din "
 "vedere clar, economie mai mică; mai mic = economie mai mare, detaliu redus mai aproape de mijloc. "
-"80 % (balanced) e implicit; 90 = larg, 65 = îngust."
+"80 % (echilibrat) e implicit; 90 = larg, 65 = îngust."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -559,7 +559,7 @@ msgid ""
 "front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
 "metres). Needs the VR layer (default). No cost."
 msgstr ""
-"Doar VR. Follow head = panoul se mișcă cu casca. Fixed in cab = rămâne într-un loc în fața "
+"Doar VR. Urmează capul = panoul se mișcă cu casca. Fix în cabină = rămâne într-un loc în fața "
 "scaunului, stabil când te uiți în jur; X / Y / depth stabilesc atunci locul (grade, metri). Cere "
 "stratul VR (implicit). Fără cost."
 
@@ -639,9 +639,9 @@ msgid ""
 "ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
 "Per-part motion vectors). No cost."
 msgstr ""
-"Doar VR. Follow head = se mișcă cu casca. Fixed in play space = un loc în jurul scaunului, ignoră "
-"balansul cabinei. Attached to vehicle = lipită de cabină, se balansează cu ea (cere DLAA + "
-"Per-part motion vectors). Fără cost."
+"Doar VR. Urmează capul = se mișcă cu casca. Fix în spațiu = un loc în jurul scaunului, ignoră "
+"balansul cabinei. Atașat vehiculului = lipită de cabină, se balansează cu ea (cere DLAA + Mișcare "
+"pe piese). Fără cost."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -650,7 +650,7 @@ msgid ""
 "size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
 "for every vehicle. No cost."
 msgstr ""
-"VR, doar Attached to vehicle. Pornit = fiecare camion / mașină își ține locul casetei fps în "
+"VR, doar Atașat vehiculului. Pornit = fiecare camion / mașină își ține locul casetei fps în "
 "cabină, rotirea, dimensiunea, culoarea, luminozitatea și textul (salvate în dlaa.ini la "
 "închiderea meniului). Oprit = un set comun pentru toate vehiculele. Fără cost."
 
@@ -661,7 +661,7 @@ msgid ""
 "sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
 "vehicles keep theirs. The box is square to the cab."
 msgstr ""
-"VR, doar Attached to vehicle. Dreapta = măsoară cabina din nou acum (stai nemișcat, parcat) dacă "
+"VR, doar Atașat vehiculului. Dreapta = măsoară cabina din nou acum (stai nemișcat, parcat) dacă "
 "caseta stă prost. Stânga = caseta acestui vehicul înapoi la implicit (loc, rotire, dimensiune, "
 "culoare, text); celelalte vehicule își păstrează setările. Caseta e dreaptă față de cabină."
 
@@ -727,7 +727,7 @@ msgid ""
 "(black on white = dark text, white outline). Flat and VR. No cost."
 msgstr ""
 "Culoarea textului casetei fps: 20 de culori, fiecare cu contur ca să se citească pe orice imagine "
-"(black on white = text închis, contur alb). Plat și VR. Fără cost."
+"(negru pe alb = text închis, contur alb). Plat și VR. Fără cost."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -780,7 +780,8 @@ msgid ""
 msgstr ""
 "Limba acestui meniu. auto = limba jocului (implicit); Stânga / Dreapta alege alta. Linux / "
 "Proton: chineza, japoneza și coreeana cer fonturi instalate, vezi README. Un fișier "
-"lang\\<code>.po lângă DLL are prioritate, pentru corecturile tale. Save o păstrează. Fără cost."
+"lang\\<code>.po lângă DLL are prioritate, pentru corecturile tale. Salvează în dlaa.ini o "
+"păstrează. Fără cost."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -802,7 +803,7 @@ msgid ""
 msgstr ""
 "Scrie tot ce se vede aici în dlaa.ini (setări, și pozițiile panoului / casetei fps după ce le-ai "
 "mutat), păstrând toate celelalte linii. Fă-o când îți place ce vezi, altfel schimbările se pierd "
-"la următorul start. Mode se salvează singur."
+"la următorul start. Mod se salvează singur."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1041,13 +1042,13 @@ msgstr "Costă acum %ls GPU pe cadru; 0 le economisește."
 #: src/inject.cpp
 #, c-format
 msgid "Off now (Sharpen strength is 0): sharpening costs nothing."
-msgstr "Oprit acum (Sharpen strength e 0): claritatea nu costă nimic."
+msgstr "Oprit acum (Putere claritate e 0): claritatea nu costă nimic."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Same pass as Sharpen strength: costs %ls ms GPU per frame now."
-msgstr "Același pas ca Sharpen strength: costă acum %ls ms GPU pe cadru."
+msgstr "Același pas ca Putere claritate: costă acum %ls ms GPU pe cadru."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1083,7 +1084,7 @@ msgstr "Oprit acum: nu costă nimic."
 #: src/inject.cpp
 #, c-format
 msgid "Costs %ls per frame now; the profiles medium / low cut it."
-msgstr "Costă acum %ls pe cadru; profilurile medium / low îl reduc."
+msgstr "Costă acum %ls pe cadru; profilurile mediu / low îl reduc."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1626,7 +1627,7 @@ msgstr ""
 "Apasă O SINGURĂ tastă nouă (Shift / Ctrl / Alt împreună cu ea fac o combinație) sau buton de "
 "controler / direcție D-pad. Tastele / butoanele ținute deja apăsate (o treaptă de schimbător) "
 "sunt ignorate până la eliberare; axele nu se leagă niciodată. %hs sau Esc anulează, Backspace "
-"șterge la none, 10 s fără apăsare anulează."
+"șterge la niciuna, 10 s fără apăsare anulează."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp

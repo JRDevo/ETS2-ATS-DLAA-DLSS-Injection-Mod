@@ -767,8 +767,8 @@ msgid ""
 "the GPU timers and the CPU profiler."
 msgstr ""
 "Que vai ao dlaa_inject.log: desactivado = nada; erros = só fallos (predeterminado); avisos = + "
-"problemas sorteados; info = + inicio e cambios; debug = + estatísticas, e debug tamén activa os "
-"temporizadores da GPU e o profiler da CPU."
+"problemas sorteados; info = + inicio e cambios; depuración = + estatísticas, e depuración tamén "
+"activa os temporizadores da GPU e o profiler da CPU."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -802,7 +802,7 @@ msgid ""
 msgstr ""
 "Escribe todo o que se ve aquí no dlaa.ini (axustes, e as posicións do panel / caixa de fps unha "
 "vez movidas), mantendo as outras liñas. Fai isto cando che guste o resultado, ou os cambios "
-"perdense no próximo inicio. O modo gárdase só."
+"pérdense no próximo inicio. O modo gárdase só."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2356,12 +2356,12 @@ msgstr "%hs / %hs escoller   %hs / %hs cambiar   %hs pechar%ls"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "errors"
-msgstr "errors"
+msgstr "erros"
 
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "warnings"
-msgstr "warnings"
+msgstr "avisos"
 
 #. Value column (about 20 Latin characters)
 #: src/log.h
@@ -2371,5 +2371,5 @@ msgstr "info"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "debug"
-msgstr "debug"
+msgstr "depuración"
 

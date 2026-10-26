@@ -3,9 +3,10 @@
 The tuning menu (the `Delete` key in the game) is available in **all 43 languages of ETS2 and ATS**.
 
 > [!WARNING]
-> **Help wanted.** Every translation here was made by an AI (large language models), not by native speakers.
-> The texts can be wrong, clumsy or too formal. If you speak one of these languages, please check your
-> language in the game and tell me what is wrong. It takes 5 minutes and helps every player of your language.
+> **Best effort — help wanted.** The translations were created by **Claude** (AI) and reviewed by **Grok**,
+> **Google Gemini** and **ChatGPT**. An AI can never be as accurate as a native speaker, so some texts may still
+> be wrong, clumsy or too formal. If you have a change or a suggestion, please open a new translation issue:
+> it helps every player of your language.
 > **[Report a translation problem](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/issues/new?template=translation.yml)**
 
 ## The languages

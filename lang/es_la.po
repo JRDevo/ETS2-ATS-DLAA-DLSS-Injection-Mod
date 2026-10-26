@@ -771,8 +771,8 @@ msgid ""
 "the GPU timers and the CPU profiler."
 msgstr ""
 "Qué va a dlaa_inject.log: desactivado = nada; errores = solo fallos (por defecto); avisos = + "
-"problemas sorteados; info = + inicio y cambios; debug = + estadísticas, y debug también activa "
-"los temporizadores de GPU y el perfilador de CPU."
+"problemas sorteados; info = + inicio y cambios; depuración = + estadísticas, y depuración también "
+"activa los temporizadores de GPU y el perfilador de CPU."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -816,7 +816,7 @@ msgid ""
 "and in dlaa.ini, keeping your hotkeys and every other line."
 msgstr ""
 "Devuelve cada ajuste de este menú a como viene el mod (modelo, nitidez, nitidez de texturas, área "
-"DLAA, movimiento, espejos, perfil, panel, cuadro de fps, turbo, foveado, fotogramas, registro), "
+"DLAA, movimiento, espejos, perfil, panel, cuadro de fps, turbo, Foveated, fotogramas, registro), "
 "en vivo y en dlaa.ini, conservando tus teclas y las demás líneas."
 
 #. Value column (about 20 Latin characters)
@@ -1643,8 +1643,8 @@ msgid ""
 msgstr ""
 "Una de las 5 teclas que manejan este menú (dlaa.ini %hs). %hs, luego presiona la nueva tecla o "
 "botón: también se pueden quitar las otras teclas del menú. Estas líneas no se pueden borrar, y "
-"cada una de las 5 debe tener asignación (una presionación que deje otra vacía se rechaza). Se "
-"guarda al instante en dlaa.ini."
+"cada una de las 5 debe tener asignación (una pulsación que deje otra vacía se rechaza). Se guarda "
+"al instante en dlaa.ini."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1966,12 +1966,12 @@ msgstr "no soportado"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Foveated size"
-msgstr "Tamaño foveado"
+msgstr "Tamaño Foveated"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Foveated passes"
-msgstr "Pases foveado"
+msgstr "Pases Foveated"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1986,12 +1986,12 @@ msgstr "escena"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Foveated strength"
-msgstr "Fuerza foveado"
+msgstr "Fuerza Foveated"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Foveated eye tracking"
-msgstr "Seguimiento ocular foveado"
+msgstr "Seguimiento ocular Foveated"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2293,7 +2293,7 @@ msgstr "Distancia contador (VR)"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Hotkeys..."
-msgstr "Teclas..."
+msgstr "Atajos..."
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2339,7 +2339,7 @@ msgid ""
 msgstr ""
 "Las 5 teclas que abren y manejan este menú: %hs lo abre / cierra (el valor), %hs / %hs / %hs / "
 "%hs mueven (columna Tecla). Con el menú abierto solo estas 5 se quitan al juego. %hs: cámbialas "
-"en la página Teclas."
+"en la página Atajos."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2351,7 +2351,7 @@ msgstr ""
 #. Footer line (shortened automatically when too long)
 #: src/inject.cpp
 msgid "keys: Hotkeys..."
-msgstr "teclas: Teclas..."
+msgstr "teclas: Atajos..."
 
 #. Footer line (shortened automatically when too long)
 #: src/inject.cpp
@@ -2377,5 +2377,5 @@ msgstr "info"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "debug"
-msgstr "debug"
+msgstr "depuración"
 

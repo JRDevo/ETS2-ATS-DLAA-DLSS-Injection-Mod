@@ -768,8 +768,8 @@ msgid ""
 "the GPU timers and the CPU profiler."
 msgstr ""
 "O que vai no dlaa_inject.log: desligado = nada; erros = só falhas (padrão); avisos = + problemas "
-"contornados; info = + início e mudanças; debug = + estatísticas, e debug também liga os timers da "
-"GPU e o profiler da CPU."
+"contornados; info = + início e mudanças; depuração = + estatísticas, e depuração também liga os "
+"timers da GPU e o profiler da CPU."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2355,12 +2355,12 @@ msgstr "%hs / %hs escolher   %hs / %hs mudar   %hs fechar%ls"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "errors"
-msgstr "errors"
+msgstr "erros"
 
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "warnings"
-msgstr "warnings"
+msgstr "avisos"
 
 #. Value column (about 20 Latin characters)
 #: src/log.h
@@ -2370,5 +2370,5 @@ msgstr "info"
 #. Value column (about 20 Latin characters)
 #: src/log.h
 msgid "debug"
-msgstr "debug"
+msgstr "depuração"
 
