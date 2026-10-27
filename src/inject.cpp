@@ -1,3 +1,6 @@
+// v0.15.1 -- phase 75 (wire widening binds / unbinds no longer pause VRS: InDlaaFlag::Quiet; ~4600 NVAPI table switches per frame
+//           in dense ATS VR scenes -> ~85, "vrs" CPU 1.9 -> 0.06 ms) + phase 76 (a VR eye blit into the same eye texture as the
+//           previous blit of the Present = the game's fade re-draw: no pass consumed, no DLAA / composite; issue #24, drive-start black eye).
 // v0.15.0 -- phase 74 (the tuning menu in all 43 game languages: lang.cpp / lang.h, TR / TRF, dlaa.ini language, the menu's
 //           Language row, key names for the player's keyboard layout) + everything of v0.14.1 below (never a full release).
 // v0.14.1 -- phase 71 (shimmer capture on the Pause key), phase 72 (VR eye -> OpenXR view by the optical centre before the
