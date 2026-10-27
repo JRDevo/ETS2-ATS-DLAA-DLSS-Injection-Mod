@@ -2701,6 +2701,8 @@ uint64_t         g_cEyeCorrections = 0;          // eye map entries flipped by v
 uint64_t         g_cRbSkipFull   = 0;            // clean blits not read back because the staging ring was full
 uint64_t         g_cRbFailed     = 0;            // readbacks dropped (Map failed with something other than STILL_DRAWING)
 void*            g_prevBlitRt    = nullptr;      // RT of the previous matched blit (clean-blit filter)
+uint64_t         g_prevBlitFrame = ~0ull;        // phase 76: the Present count at that blit
+uint64_t         g_cSameRtRedraw = 0;            // phase 76: VR eye blits skipped as a re-draw of the same eye picture
 uint64_t         g_lastUnderflowBlit = 0;        // g_blitCount of the most recent FIFO underflow (0 = none)
 uint64_t         g_cRbThrottled  = 0;            // v0.5.6: clean blits not read back because the eye map is settled
 uint64_t         g_settledClean  = 0;            // v0.5.6: clean blits since the eye map became settled
@@ -11114,7 +11116,7 @@ void DropPassesForModeSwitch() {
     while (g_fifoHead < g_passSeq) g_ring[SlotOf(g_fifoHead++)].consumed = true;
     g_flatMode = false; g_vrMode = false;                // re-detected at the next matched blit
     g_fv.Reset(); g_fvPhaseOff = 0; g_fvPerm.Reset();                    // v0.12.0 issue #12: flat multi-view detected again
-    g_eyeMapN = 0; g_eyeMapLogged = false; g_prevBlitRt = nullptr; g_lastUnderflowBlit = 0;
+    g_eyeMapN = 0; g_eyeMapLogged = false; g_prevBlitRt = nullptr; g_prevBlitFrame = ~0ull; g_lastUnderflowBlit = 0;
     for (EyeMapEntry& e : g_eyeMap) e.score = 0;
     for (bool& b : g_eyeLogged) b = false;
     g_resetNext = true;
@@ -11887,6 +11889,8 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     g_prevBlitRt = rtPtr;
     (void)prevRt;
     const uint64_t frame = g_frames.load();
+    const bool sameRtThisFrame = prevRt == rtPtr && g_prevBlitFrame == frame;   // phase 76 (see the FIFO consume below)
+    g_prevBlitFrame = frame;
     if (!g_tonemapLogged) {
         g_tonemapLogged = true;
         Log("swapchain blit detected on the game context %p: src %ux%u fmt=%d -> %s %ux%u (verts=%u, scene depth %ux%u)%s",
@@ -12045,6 +12049,22 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         g_rateBlit0 = g_blitCount; g_rateT0 = cpuT.t0;
     }
 
+    // phase 76: a VR eye blit into the SAME eye texture as the previous blit of this Present is the game drawing that eye picture
+    // again (ATS VR drive start, ~2 s fade from black: 2 draws per eye per frame, RTs #1 #1 #2 | #3 #4 #4 ...), not a new pass. It
+    // consumed the OTHER eye's pass (wrong-eye MVs / DLSS history = right-eye flicker) and the DLSS composite painted an un-faded
+    // picture over one eye only (left eye black ~1 s longer, 2026-10-26; gone with the mod not loaded). Now: no pass, no DLAA, no
+    // composite -- the game's re-draw stays as it is, and the other eye's own blit takes its pass.
+    if (sameRtThisFrame && !isBackbuffer && g_vrMode) {
+        if (g_cSameRtRedraw++ < 5)
+            LogWarn("VR eye blit #%llu re-draws the same eye texture as the previous blit of Present #%llu (game fade / re-draw) -- "
+                "no pass consumed, DLAA skipped for it (phase 76; #%llu)", (unsigned long long)g_blitCount,
+                (unsigned long long)frame, (unsigned long long)g_cSameRtRedraw);
+        if (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)    // menu / fps box: still drawn on a known eye RT (as underflow)
+            for (int i = 0; i < g_eyeMapN; ++i)
+                if (g_eyeMap[i].rt == rtPtr) { g_menuBlitEye = g_eyeMap[i].eye; g_menuBlitRt = rtPtr; break; }
+        tex->Release();
+        return;
+    }
     // FIFO: this blit belongs to the OLDEST unconsumed pass.
     if (g_fifoHead >= g_passSeq) {
         g_lastUnderflowBlit = g_blitCount;
@@ -22046,7 +22066,7 @@ void ResetPassTrackingCore(bool forceDlaaOff) {
     g_needFirstPass = true;                                    // next G-buffer bind starts a pass
     g_flatMode = false; g_vrMode = false;                      // re-detected at the next matched blit
     g_fv.Reset(); g_fvPhaseOff = 0; g_fvPerm.Reset();                          // v0.12.0 issue #12: flat multi-view detected again
-    g_eyeMapN = 0; g_eyeMapLogged = false; g_prevBlitRt = nullptr; g_lastUnderflowBlit = 0;
+    g_eyeMapN = 0; g_eyeMapLogged = false; g_prevBlitRt = nullptr; g_prevBlitFrame = ~0ull; g_lastUnderflowBlit = 0;
     for (EyeMapEntry& e : g_eyeMap) e.score = 0;
     for (bool& b : g_eyeLogged) b = false;
 #ifdef WITH_DLAA
