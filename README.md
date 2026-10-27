@@ -158,7 +158,7 @@ This is an unofficial fan project. It is not affiliated with, or endorsed by, SC
 Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
-> Status: v0.15.0. New: the tuning menu in all 43 game languages (AI translations, best effort, fixes welcome: [Translations](#translations)), key names for your keyboard, shimmer capture on the `Pause` key, and two VR eye pairing fixes (Varjo). Since v0.14.0: eye-tracked foveated rendering (experimental, tested on Varjo), steadier near wires, VectorXR support and a VR panel fixed in the cab. Eye tracking test guide: [docs/EYE_TRACKING_TEST.md](docs/EYE_TRACKING_TEST.md).
+> Status: v0.15.1. Fixed: VR one eye black / flickering for 1-2 s when a drive starts or you come back from the menu, and faster busy scenes with wire widening + VRS. v0.15.0 brought the tuning menu in all 43 game languages (AI translations, best effort, fixes welcome: [Translations](#translations)), key names for your keyboard, shimmer capture on the `Pause` key, and two VR eye pairing fixes (Varjo). Since v0.14.0: eye-tracked foveated rendering (experimental, tested on Varjo), steadier near wires, VectorXR support and a VR panel fixed in the cab. Eye tracking test guide: [docs/EYE_TRACKING_TEST.md](docs/EYE_TRACKING_TEST.md).
 > With this version the bells and whistles I know of are in. From here on the main work is performance tuning, from your logs; new ideas are still welcome. See [Contributing](CONTRIBUTING.md).
 > See the [Releases page](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/releases) for every version.
 > DLSS upscaling in VR is still being tuned; treat it as experimental.
@@ -1042,6 +1042,11 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   OpenXR view 1 does NOT match`:** fixed in v0.15.0: update (GitHub issue #21).
 - **VR: for about 2 seconds at the start of each drive the picture smears or the foveated centre sits in the wrong
   eye:** fixed in v0.15.0: update.
+- **VR: when a drive starts or you come back from the menu, one eye stays black 1-2 seconds longer, or flickers inside
+  the DLAA area:** fixed in v0.15.1: update (GitHub issue #24). The old log shows `fifo underflow` and `rt parity mismatch`
+  lines right at the drive start.
+- **VR with wire widening and Foveated (VRS) on: low fps in towns with many wires and poles (the CPU profiler's `vrs` row
+  above 1 ms):** fixed in v0.15.1: update.
 - **The menu is English although the game is in another language:** the `Language` row must be on `auto` (or delete the
   `language` line in `dlaa.ini`). Linux / Proton with Chinese, Japanese or Korean: the row says `font missing`, see
   [Linux / Proton](#languages-and-fonts).

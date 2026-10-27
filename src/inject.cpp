@@ -1,3 +1,6 @@
+// v0.15.1 -- phase 75 (wire widening binds / unbinds no longer pause VRS: InDlaaFlag::Quiet; ~4600 NVAPI table switches per frame
+//           in dense ATS VR scenes -> ~85, "vrs" CPU 1.9 -> 0.06 ms) + phase 76 (a VR eye blit into the same eye texture as the
+//           previous blit of the Present = the game's fade re-draw: no pass consumed, no DLAA / composite; issue #24, drive-start black eye).
 // v0.15.0 -- phase 74 (the tuning menu in all 43 game languages: lang.cpp / lang.h, TR / TRF, dlaa.ini language, the menu's
 //           Language row, key names for the player's keyboard layout) + everything of v0.14.1 below (never a full release).
 // v0.14.1 -- phase 71 (shimmer capture on the Pause key), phase 72 (VR eye -> OpenXR view by the optical centre before the
@@ -2304,6 +2307,11 @@ struct InDlaaFlag {
         }
         return *this;
     }
+    // phase 75 (perf): the mod's own work that rasterises nothing (state binds, UpdateSubresource, CopySubresourceRegion) -- the
+    // hooks pass through as usual, but VRS is NOT paused: VRS acts on rasterisation only, and the pause + resume cost two NVAPI
+    // table switches. The wire widening binds / unbinds 2 x ~600 draws per eye pass in dense scenes (ATS VR 2026-10-26: 2600
+    // pauses + 4600 switches per frame, "vrs" 1.9 ms/frame CPU, 66 fps instead of 72).
+    void Quiet(bool b) { v = b; }
     operator bool() const { return v; }
 };
 thread_local InDlaaFlag t_inDlaa = {};           // re-entrancy guard for our own work
@@ -2696,6 +2704,8 @@ uint64_t         g_cEyeCorrections = 0;          // eye map entries flipped by v
 uint64_t         g_cRbSkipFull   = 0;            // clean blits not read back because the staging ring was full
 uint64_t         g_cRbFailed     = 0;            // readbacks dropped (Map failed with something other than STILL_DRAWING)
 void*            g_prevBlitRt    = nullptr;      // RT of the previous matched blit (clean-blit filter)
+uint64_t         g_prevBlitFrame = ~0ull;        // phase 76: the Present count at that blit
+uint64_t         g_cSameRtRedraw = 0;            // phase 76: VR eye blits skipped as a re-draw of the same eye picture
 uint64_t         g_lastUnderflowBlit = 0;        // g_blitCount of the most recent FIFO underflow (0 = none)
 uint64_t         g_cRbThrottled  = 0;            // v0.5.6: clean blits not read back because the eye map is settled
 uint64_t         g_settledClean  = 0;            // v0.5.6: clean blits since the eye map became settled
@@ -11109,7 +11119,7 @@ void DropPassesForModeSwitch() {
     while (g_fifoHead < g_passSeq) g_ring[SlotOf(g_fifoHead++)].consumed = true;
     g_flatMode = false; g_vrMode = false;                // re-detected at the next matched blit
     g_fv.Reset(); g_fvPhaseOff = 0; g_fvPerm.Reset();                    // v0.12.0 issue #12: flat multi-view detected again
-    g_eyeMapN = 0; g_eyeMapLogged = false; g_prevBlitRt = nullptr; g_lastUnderflowBlit = 0;
+    g_eyeMapN = 0; g_eyeMapLogged = false; g_prevBlitRt = nullptr; g_prevBlitFrame = ~0ull; g_lastUnderflowBlit = 0;
     for (EyeMapEntry& e : g_eyeMap) e.score = 0;
     for (bool& b : g_eyeLogged) b = false;
     g_resetNext = true;
@@ -11882,6 +11892,8 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     g_prevBlitRt = rtPtr;
     (void)prevRt;
     const uint64_t frame = g_frames.load();
+    const bool sameRtThisFrame = prevRt == rtPtr && g_prevBlitFrame == frame;   // phase 76 (see the FIFO consume below)
+    g_prevBlitFrame = frame;
     if (!g_tonemapLogged) {
         g_tonemapLogged = true;
         Log("swapchain blit detected on the game context %p: src %ux%u fmt=%d -> %s %ux%u (verts=%u, scene depth %ux%u)%s",
@@ -12040,6 +12052,22 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         g_rateBlit0 = g_blitCount; g_rateT0 = cpuT.t0;
     }
 
+    // phase 76: a VR eye blit into the SAME eye texture as the previous blit of this Present is the game drawing that eye picture
+    // again (ATS VR drive start, ~2 s fade from black: 2 draws per eye per frame, RTs #1 #1 #2 | #3 #4 #4 ...), not a new pass. It
+    // consumed the OTHER eye's pass (wrong-eye MVs / DLSS history = right-eye flicker) and the DLSS composite painted an un-faded
+    // picture over one eye only (left eye black ~1 s longer, 2026-10-26; gone with the mod not loaded). Now: no pass, no DLAA, no
+    // composite -- the game's re-draw stays as it is, and the other eye's own blit takes its pass.
+    if (sameRtThisFrame && !isBackbuffer && g_vrMode) {
+        if (g_cSameRtRedraw++ < 5)
+            LogWarn("VR eye blit #%llu re-draws the same eye texture as the previous blit of Present #%llu (game fade / re-draw) -- "
+                "no pass consumed, DLAA skipped for it (phase 76; #%llu)", (unsigned long long)g_blitCount,
+                (unsigned long long)frame, (unsigned long long)g_cSameRtRedraw);
+        if (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)    // menu / fps box: still drawn on a known eye RT (as underflow)
+            for (int i = 0; i < g_eyeMapN; ++i)
+                if (g_eyeMap[i].rt == rtPtr) { g_menuBlitEye = g_eyeMap[i].eye; g_menuBlitRt = rtPtr; break; }
+        tex->Release();
+        return;
+    }
     // FIFO: this blit belongs to the OLDEST unconsumed pass.
     if (g_fifoHead >= g_passSeq) {
         g_lastUnderflowBlit = g_blitCount;
@@ -13303,9 +13331,9 @@ HRESULT STDMETHODCALLTYPE hkMap(ID3D11DeviceContext* ctx, ID3D11Resource* r, UIN
     if (type == D3D11_MAP_WRITE_DISCARD && r && g_passSeq && !t_inDlaa && IsGameCtx(ctx)) {
         ObjRecord& rec = g_objRing[SlotOf(g_passSeq - 1)];
         if (rec.HasOpenRing(r)) {                         // v0.9.0 r3: any of the pass's (up to 3) rings
-            t_inDlaa = true;
+            t_inDlaa.Quiet(true);                         // phase 75: a copy only, VRS stays as it is
             const bool sealed = rec.OnDiscard(ctx, r);    // THAT ring's copy, queued before the discard (old contents)
-            t_inDlaa = false;
+            t_inDlaa.Quiet(false);
             if (sealed && g_objInScene) {                 // later draws from this buffer go to a new ring slot
                 ++g_objTornN; ++g_objTornTotal;
                 if (g_objTornTotal <= 3)
@@ -15012,7 +15040,7 @@ void DidOnDiscardMap(ID3D11DeviceContext* ctx, ID3D11Resource* r) {
             ++g_didForcedCapped;
         }
     }
-    if (rec.HasOpenRing(r)) { t_inDlaa = true; rec.OnDiscard(ctx, r); t_inDlaa = false; }
+    if (rec.HasOpenRing(r)) { t_inDlaa.Quiet(true); rec.OnDiscard(ctx, r); t_inDlaa.Quiet(false); }
     // v0.10.0 phase 3: the same for the pending forward draws (replayed into the forward ids first)
     // v0.10.0 phase 10: their forward depth too (FwdBatch: the depth batch of the pending draws, then their ids); the pixel
     // shader's cbuffers / SRVs are in the pending set as well
@@ -15025,12 +15053,12 @@ void DidOnDiscardMap(ID3D11DeviceContext* ctx, ID3D11Resource* r) {
             ++g_didFwdForcedCapped;
         }
     }
-    if (fr.HasOpenRing(r)) { t_inDlaa = true; fr.OnDiscard(ctx, r); t_inDlaa = false; }
+    if (fr.HasOpenRing(r)) { t_inDlaa.Quiet(true); fr.OnDiscard(ctx, r); t_inDlaa.Quiet(false); }
     // phase 49: the same for the pending glow draws (their VS / PS buffers): re-drawn into the glow sum now
     DrawIdRecord* const br = g_didBiasRing[SlotOf(g_passSeq - 1)];
     if ((br[0].PendingDepth() > 0 && br[0].ReferencesPending(r)) || (br[1].PendingDepth() > 0 && br[1].ReferencesPending(r)))
         BiasBatch(ctx, g_passSeq - 1, 1);
-    for (int k = 0; k < 2; ++k) if (br[k].HasOpenRing(r)) { t_inDlaa = true; br[k].OnDiscard(ctx, r); t_inDlaa = false; }
+    for (int k = 0; k < 2; ++k) if (br[k].HasOpenRing(r)) { t_inDlaa.Quiet(true); br[k].OnDiscard(ctx, r); t_inDlaa.Quiet(false); }
 }
 
 void DidOnContextReset() {
@@ -21746,15 +21774,15 @@ void STDMETHODCALLTYPE hkDrawIndexedInstanced(ID3D11DeviceContext* ctx, UINT ic,
     // v0.10.0 phase 11 LOD bias scope: the sampler set this draw needs (solid / see-through blend state)
     if (!inDlaa && g_lodPerDraw.load(std::memory_order_relaxed) && IsGameCtx(ctx)) LodOnDraw(ctx);
     if (g_menuLateBound >= 0 && !inDlaa && IsGameCtx(ctx)) MenuLateCountDraw();   // v0.10.0 phase 16 VR late panel
-    if (Vrs::g_want && !inDlaa && IsGameCtx(ctx)) VrsOnDraw(ctx);   // phase 34 (as hkDrawIndexed)
     if (g_lightBind && !inDlaa && IsGameCtx(ctx)) LightRedrawOnDraw(ctx);   // phase 55 (as hkDrawIndexed)
     // phase 66: the street lights are ONE instanced G-buffer draw (pair B's PS 34860eed with the instanced VS a484ef85) -> the same
     // solid GS + dither PS copy as the lattice towers (SolidOnDraw; cheap reject on the current PS first), and after the draw its
     // record in the pass's forward record (the band's depth + id; the replay issues DrawIndexedInstanced with the recorded instances)
     const bool solidGs = g_gbufPass && g_jitterPass && !inDlaa && IsGameCtx(ctx) && SolidOnDraw(ctx, true);
+    if (Vrs::g_want && !inDlaa && !solidGs && IsGameCtx(ctx)) VrsOnDraw(ctx);   // phase 34 (as hkDrawIndexed; phase 75: after SolidOnDraw)
     CPU_ORIG(oDrawIndexedInstanced(ctx, ic, inst, si, bv, sinst));
     if (solidGs) {
-        t_inDlaa = true; WireWiden::Unbind(ctx); t_inDlaa = false;
+        t_inDlaa.Quiet(true); WireWiden::Unbind(ctx); t_inDlaa.Quiet(false);
         if (g_lastSolidKind && g_fwdCfg && g_fwdOn.load(std::memory_order_relaxed) && FwdLive()) {   // (as hkDrawIndexed, phase 64)
             g_nextFwdGsKind = (uint8_t)(1 + g_lastSolidKind);
             DidFwdOnDraw(ctx, ic, si, bv, inst, sinst, true);
@@ -21784,10 +21812,10 @@ bool SolidOnDraw(ID3D11DeviceContext* ctx, bool instanced) {
     const bool ok = WireWiden::IsSolidVs(vs, kind);
     if (vs) vs->Release();
     if (!ok) return false;
-    t_inDlaa = true;
+    t_inDlaa.Quiet(true);                             // phase 75: binds only, VRS stays as it is
     const bool bound = WireWiden::BindSolid(ctx, kind, g_gameVp[0].Width, g_gameVp[0].Height, g_wireMinPx,
                                             (uint32_t)g_frames.load(std::memory_order_relaxed), g_wireSolidMinShare);
-    t_inDlaa = false;
+    t_inDlaa.Quiet(false);
     // VRS (phase 34) decided this draw's rate from the GAME's PS (solid -> coarse allowed in the periphery); the dither copy must run
     // per pixel (coarse shading would keep / drop 2 x 2 .. 4 x 4 blocks together) -> full rate for this draw, like a cut-out PS
     if (bound && Vrs::g_want) Vrs::OnDraw(ctx, true, Vrs::kSkipCutout);
@@ -21821,9 +21849,9 @@ bool WireOnDraw(ID3D11DeviceContext* ctx) {
     if (!wireVs) return false;
     ID3D11BlendState* bs = nullptr; FLOAT bf[4] = {}; UINT mask = 0;
     ctx->OMGetBlendState(&bs, bf, &mask);
-    t_inDlaa = true;
+    t_inDlaa.Quiet(true);                             // phase 75: binds only, VRS stays as it is
     const bool bound = WireWiden::Bind(ctx, bs, g_gameVp[0].Width, g_gameVp[0].Height, g_wireMinPx, psKind);
-    t_inDlaa = false;
+    t_inDlaa.Quiet(false);
     if (bs) bs->Release();
     if (bound && !g_wireLogged) {
         g_wireLogged = true;
@@ -21952,15 +21980,17 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
     if (gameCtx && !inDlaa && g_lodPerDraw.load(std::memory_order_relaxed)) LodOnDraw(ctx);
 #ifdef WITH_DLAA
     if (g_menuLateN && gameCtx && !inDlaa && indexCount <= 6) MenuLateOnDraw(ctx, "DrawIndexed", indexCount, _ReturnAddress());
-    if (Vrs::g_want && gameCtx && !inDlaa) VrsOnDraw(ctx);   // phase 34: full rate for a cut-out / SV_Depth / unknown PS
     if (g_lightBind && gameCtx && !inDlaa) LightRedrawOnDraw(ctx);   // phase 55: a lighting-pass mesh redraw -> the G-buffer's viewport
     // phase 61: a wire draw of the main world forward pass -> WireWiden's geometry shader for this one draw
     // phase 63: in the G-buffer, the solid far wires / lattice towers -> the solid GS + the dither PS copy (SolidOnDraw)
     const bool wireGs = gameCtx && g_jitterPass && !inDlaa && (g_gbufPass ? SolidOnDraw(ctx) : WireOnDraw(ctx));
+    // phase 34: full rate for a cut-out / SV_Depth / unknown PS. phase 75: after SolidOnDraw -- a dithered solid draw already set
+    // full rate there (one table switch instead of coarse then full again)
+    if (Vrs::g_want && gameCtx && !inDlaa && !(wireGs && g_gbufPass)) VrsOnDraw(ctx);
 #endif
     CPU_ORIG(oDrawIndexed(ctx, indexCount, startIndex, baseVertex));
 #ifdef WITH_DLAA
-    if (wireGs) { t_inDlaa = true; WireWiden::Unbind(ctx); t_inDlaa = false; }   // phase 61
+    if (wireGs) { t_inDlaa.Quiet(true); WireWiden::Unbind(ctx); t_inDlaa.Quiet(false); }   // phase 61
     // phase 64: a widened SOLID G-buffer draw (phase 63) also goes into the pass's forward record: the forward-depth batch and the
     // forward-id replay draw its full band (no dither) -> every band pixel carries the wire's depth and id, not the background's
     if (wireGs && g_gbufPass && g_lastSolidKind && g_fwdCfg && g_fwdOn.load(std::memory_order_relaxed) && FwdLive()) {
@@ -22039,7 +22069,7 @@ void ResetPassTrackingCore(bool forceDlaaOff) {
     g_needFirstPass = true;                                    // next G-buffer bind starts a pass
     g_flatMode = false; g_vrMode = false;                      // re-detected at the next matched blit
     g_fv.Reset(); g_fvPhaseOff = 0; g_fvPerm.Reset();                          // v0.12.0 issue #12: flat multi-view detected again
-    g_eyeMapN = 0; g_eyeMapLogged = false; g_prevBlitRt = nullptr; g_lastUnderflowBlit = 0;
+    g_eyeMapN = 0; g_eyeMapLogged = false; g_prevBlitRt = nullptr; g_prevBlitFrame = ~0ull; g_lastUnderflowBlit = 0;
     for (EyeMapEntry& e : g_eyeMap) e.score = 0;
     for (bool& b : g_eyeLogged) b = false;
 #ifdef WITH_DLAA
