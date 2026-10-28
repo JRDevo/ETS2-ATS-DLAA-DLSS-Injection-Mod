@@ -12,6 +12,8 @@ wrote it, so the choice was gone after a restart. The checks:
   3. every key Save writes is read back by LoadConfig
   4. every "explicit" mark a menu row / hotkey sets (g_xxxExplicit = true, g_profExplicit[PK_X] = true outside LoadConfig)
      is looked at by Save -- the mark means "the user's choice", Save must write it
+  5. every such mark is cleared by Reset
+The behaviour itself (press a row, Save, restart, the menu shows the same) is tests/settings_roundtrip_test.cpp.
 """
 import os
 import re
@@ -95,6 +97,11 @@ def main():
         if mk not in save_txt:
             errors.append("4. %s is set by %s, but SaveSettings never looks at it: the change is not saved"
                           % (mk, ", ".join(sorted(marks[mk]))))
+    # 5. Reset clears every explicit mark (else the next Save writes the old choice back: the Language row did, found by
+    #    tests/settings_roundtrip_test.cpp)
+    for mk in sorted(marks):
+        if mk in save_txt and not re.search(re.escape(mk) + r"\s*=", reset_txt):
+            errors.append("5. %s is not cleared by ResetSettings: after Reset, the next Save writes the old choice back" % mk)
 
     if errors:
         print("settings_check: %d problem(s) in src/inject.cpp" % len(errors))

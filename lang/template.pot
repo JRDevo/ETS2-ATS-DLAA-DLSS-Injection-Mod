@@ -1697,12 +1697,6 @@ msgstr ""
 msgid "flat only"
 msgstr ""
 
-#. Value column (about 20 Latin characters)
-#: src/inject.cpp
-#, c-format
-msgid "off (dlaa.ini 0)"
-msgstr ""
-
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "off (VR budget)"
@@ -1716,6 +1710,12 @@ msgstr ""
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "off (dlaa.ini 0)"
 msgstr ""
 
 #. Value column (about 20 Latin characters)

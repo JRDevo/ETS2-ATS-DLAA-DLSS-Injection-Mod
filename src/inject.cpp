@@ -3229,7 +3229,7 @@ void SaveSettings(uint64_t n) {
     const float lodBias = g_lodBias;                      // v0.9.0 (Ctrl+F1 / Ctrl+F2)
     const int   objMode = g_objMode;                      // v0.10.0 phase 2 (Alt+F5 switches 2 <-> 0)
     const int   mirror  = g_mirOn.load() ? 1 : 0;         // v0.10.0 phase 2 (Alt+F6)
-    const int   preTm   = g_preOn.load() ? 1 : 0;         // v0.10.0 phase 4 (Alt+F7)
+    const int   preTm   = (g_preCfg && g_preOn.load()) ? 1 : 0;   // v0.10.0 phase 4 (Alt+F7); what the row shows
     // v0.10.0 phase 10: + perf_profile; dlss_preset / dlaa_area / mirror_dlaa only when EXPLICIT (in dlaa.ini or changed by their
     // own key) -- a value that only comes from the profile is not written, so the next profile switch still moves it
     IniKV kv[kIniMaxKeys] = {};                           // v0.10.0 tuning menu: was 11 (+ the 8 menu_* keys + the 7 fps_* keys)
@@ -11579,14 +11579,13 @@ void FwdOnLeave(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const*
 }
 
 void TogglePreTonemap(uint64_t n) {
-    const bool on = !g_preOn.load();
+    const bool on = !(g_preCfg && g_preOn.load());        // (as issue #26) off by dlaa.ini 0 reads as off too ...
     g_preOn = on;
-    if (on) { g_preFailed = false; g_preFailRun = 0; }
+    if (on) { g_preCfg = 1; g_preFailed = false; g_preFailRun = 0; }   // ... and the key / row turns it back on (as ResetSettings)
     g_preStage = -1;                                      // the next frame logs its stage again
-    Log("DLAA pre-tonemap %s (%s, Present #%llu) -- %s%s", on ? "ON" : "OFF", KeyName(KA_PRE_TONEMAP), (unsigned long long)n,
+    Log("DLAA pre-tonemap %s (%s, Present #%llu) -- %s", on ? "ON" : "OFF", KeyName(KA_PRE_TONEMAP), (unsigned long long)n,
         on ? "flat DLAA mode runs the main scene's DLAA in place on the RGBA16F scene colour before the game's tonemap"
-           : "the main scene's DLAA runs at the blit on the tone-mapped picture (v0.3.1 path)",
-        g_preCfg ? "" : " -- no effect: dlaa.ini dlaa_pre_tonemap = 0");
+           : "the main scene's DLAA runs at the blit on the tone-mapped picture (v0.3.1 path)");
     PlayTones(1, on ? 1200 : 300, 150, 0);
 }
 
@@ -17509,6 +17508,12 @@ void ResetSettings(uint64_t n) {
     g_logLevelExplicit = false;
     LogSetLevel(g_logDebugKey ? 4 : 1);
     ApplyLogLevelGates();
+    // phase 74: the menu language back to auto (the key is removed below; before, the live language stayed and the next Save
+    // wrote it back -- found by tests\settings_roundtrip_test.cpp)
+    Lang::SetSetting("auto");
+    g_langExplicit = false;
+    Lang::Refresh();
+    TuningMenu::SetFace(Lang::Face());
     OnLiveTuningChange();                                 // the timing windows restart (new pipeline state)
 
     // dlaa.ini: remove the 35 keys (empty value); everything else stays byte-for-byte (v0.10.2: + mirror_mv = 32; v0.10.3 phase 28:
@@ -19023,10 +19028,10 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         swprintf(p.rows[MR_WIREWIDEN].value, kV, L"%ls", g_wireOn.load() ? TR(L"on (experimental)") : TR(L"off"));
     }
     MenuRow(p, MR_PRETM, TR(L"DLAA before tonemap (flat)"), KeyNameUi(KA_PRE_TONEMAP), vr ? NA_("flat only") : nullptr, vr);
-    swprintf(p.rows[MR_PRETM].value, kV, L"%ls", !g_preCfg ? TR(L"off (dlaa.ini 0)") : onOff[g_preOn.load() ? 1 : 0]);
+    swprintf(p.rows[MR_PRETM].value, kV, L"%ls", onOff[(g_preCfg && g_preOn.load()) ? 1 : 0]);   // (the row switches a dlaa.ini 0 on too)
     MenuRow(p, MR_FWD, TR(L"See-through depth"), KeyNameUi(KA_FWD_DEPTH), nullptr, false);
-    swprintf(p.rows[MR_FWD].value, kV, L"%ls", !g_fwdCfg ? TR(L"off (dlaa.ini 0)")
-                                              : (!g_fwdOn.load() ? (g_fwdAutoOff ? TR(L"off (VR budget)") : TR(L"off")) : TR(L"on")));
+    swprintf(p.rows[MR_FWD].value, kV, L"%ls", (g_fwdCfg && g_fwdOn.load()) ? TR(L"on")   // issue #26: dlaa.ini 0 / the low
+                                              : (g_fwdAutoOff ? TR(L"off (VR budget)") : TR(L"off")));   //   profile: plain off
     MenuRow(p, MR_BIAS, TR(L"Light glow ghosting fix"), "dlaa.ini dlss_bias_mask", nullptr, false);   // phase 49
     if (g_biasCfg > 0) swprintf(p.rows[MR_BIAS].value, kV, L"%d %%", g_biasCfg);
     else               swprintf(p.rows[MR_BIAS].value, kV, TRF(L"off"));

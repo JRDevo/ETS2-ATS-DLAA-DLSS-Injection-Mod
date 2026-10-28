@@ -80,6 +80,8 @@ jobs:
           if not exist build\tests\vrs_gaze_test.exe exit /b 1
           call tests\build_lang_test.bat
           if not exist build\tests\lang_test.exe exit /b 1
+          call tests\build_settings_roundtrip_test.bat
+          if not exist build\tests\settings_rt\settings_roundtrip_test.exe exit /b 1
 
       - name: Test draw-id harness (did_shadow off)
         run: build\tests\drawid_harness.exe -1 0.1
@@ -112,6 +114,8 @@ jobs:
         run: build\tests\vrs_gaze_test.exe
       - name: Test menu translations (phase 74 -- .po parsing, placeholder guard, font pick)
         run: build\tests\lang_test.exe
+      - name: Test settings survive a restart (issue 26 -- every menu row Left / Right, Save, restart; Reset; flat, VR, low profile)
+        run: build\tests\settings_rt\settings_roundtrip_test.exe
       - name: Smoke test menu_shot (renders the real tuning menu + fps box to PNG; outputs are not committed)
         shell: cmd
         run: |
