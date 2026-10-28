@@ -79,7 +79,10 @@ a native speaker's changes and suggestions help everybody.
 - A new setting the menu or a hotkey changes: write it in `SaveSettings`, remove it in `ResetSettings`, read it in
   `LoadConfig`. `python scripts/settings_check.py` (also in CI) fails when one of the three is missing;
   `tests\build_settings_roundtrip_test.bat` + `build\tests\settings_rt\settings_roundtrip_test.exe` (also in CI) presses every
-  menu row, saves, restarts and fails when the menu shows something else after the restart.
+  menu row, saves, restarts and fails when the menu shows something else after the restart, or when a row reads "on" while
+  the code it switches cannot run.
+- After a game test: `python scripts\feature_check.py <game>\bin\win_x64\dlaa_inject.log` lists every feature with PASS /
+  FAIL / OFF / NOT USED from the log (`log_level = 4` for the full proof). Put its table in the pull request.
 - Rules for published text: never name another ETS2 / ATS anti-aliasing mod, VR = OpenXR only,
   game paths as `bin\win_x64\`, say what was tested and what was not.
 - Tell me what you tested in game (game, flat / VR, where, when) in the pull request, with a log.
