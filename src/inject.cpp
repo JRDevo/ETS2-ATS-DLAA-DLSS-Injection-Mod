@@ -18993,11 +18993,12 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     MenuRow(p, MR_SHARP, TR(L"Sharpen strength"), pair(KA_SHARPEN_DOWN, KA_SHARPEN_UP), nullptr, false);
     const float sharp = SceneDlaa::Sharpness();
     swprintf(p.rows[MR_SHARP].value, kV, sharp <= 0.0f ? TRF(L"%.1f (off)") : L"%.1f", (double)sharp);
-    MenuRow(p, MR_WIDTH, TR(L"Sharpen width"), pair(KA_WIDTH_DOWN, KA_WIDTH_UP), nullptr, false);
+    MenuRow(p, MR_WIDTH, TR(L"Sharpen width"), pair(KA_WIDTH_DOWN, KA_WIDTH_UP), nullptr, sharp <= 0.0f);   // greyed: no sharpening
     swprintf(p.rows[MR_WIDTH].value, kV, TRF(L"%.1f px"), (double)SceneDlaa::SharpRadius());
     MenuRow(p, MR_LOD, TR(L"Texture sharpness"), pair(KA_LOD_DOWN, KA_LOD_UP), nullptr, false);
     swprintf(p.rows[MR_LOD].value, kV, g_lodBias == 0.0f ? TRF(L"%.2f (off)") : L"%.2f", (double)g_lodBias);
-    MenuRow(p, MR_LODCUT, TR(L"Cut-out texture sharpness"), pair(KA_LOD_CUT_DOWN, KA_LOD_CUT_UP), nullptr, false);
+    MenuRow(p, MR_LODCUT, TR(L"Cut-out texture sharpness"), pair(KA_LOD_CUT_DOWN, KA_LOD_CUT_UP), nullptr,
+            g_lodBias == 0.0f);                           // greyed: the cut-out bias is 0 while Texture sharpness is off
     if (LodCutFollows()) swprintf(p.rows[MR_LODCUT].value, kV, TRF(L"same (%.2f)"), (double)LodCutUserValue());
     else                 swprintf(p.rows[MR_LODCUT].value, kV, L"%.2f", (double)g_lodCutBias);
     MenuRow(p, MR_AREA, TR(L"DLAA area (VR)"), pair(KA_AREA_DOWN, KA_AREA_UP), vr ? nullptr : NA_("VR only"), !vr);
@@ -19021,7 +19022,8 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
 #endif
         MenuRow(p, MR_WIREMV, TR(L"Thin-wire motion"), KeyNameUi(KA_MV_DILATE), nullptr, false);
         swprintf(p.rows[MR_WIREMV].value, kV, L"%ls", onOff[mvDil ? 1 : 0]);
-        MenuRow(p, MR_WIREDEPTH, TR(L"Thin-wire depth"), KeyNameUi(KA_FWD_CONSERVATIVE), nullptr, false);
+        MenuRow(p, MR_WIREDEPTH, TR(L"Thin-wire depth"), KeyNameUi(KA_FWD_CONSERVATIVE), nullptr,
+                !(g_fwdCfg && g_fwdOn.load()));           // greyed: it is part of the See-through depth pass (kept for it)
         const int fc = g_fwdConsOn.load();
         swprintf(p.rows[MR_WIREDEPTH].value, kV, L"%ls", fc == 1 ? TR(L"on") : (fc == 2 ? TR(L"on (no A2C)") : TR(L"off")));
         MenuRow(p, MR_WIREWIDEN, TR(L"Thin-wire widening"), KeyNameUi(KA_WIRE_WIDEN), nullptr, false);

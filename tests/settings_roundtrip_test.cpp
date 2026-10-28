@@ -7,10 +7,15 @@
 //   ... --row <MR_ id> --dir <+1|-1>       (child) start, press the row, Save, write the panel
 //   ... --show                             (child) start, write the panel
 //   ... --reset                            (child) start, press every row once, Reset, write the panel
+//   ... --gates <row>                      (child) start, press <row>, then every row in turn: after EACH press the menu must
+//                                          agree with the switches the render code reads (below), exit 1 when not
 //
 // For each row, Right and Left, flat and VR: the value column after the press must be the same after the restart -- for that row
 // AND every other row (a press that changes a neighbour has to save the neighbour too). A press that changes nothing (a greyed
 // row, an information row) is counted, not failed. Issue #26 (See-through depth back to "on" after a restart) fails here.
+// The menu must not lie either (the other half of issue #26: the row read one thing, the code did another). GateCheck compares
+// what a row shows (value, greyed) with the gate the render code itself tests -- PreIneligible for the pre-tonemap stage,
+// g_fwdCfg && g_fwdOn for the forward-depth batch (FwdLive), the forward-depth replay for Thin-wire depth, XrTurboEffective, ...
 // The ini lives next to this exe (PathNextToDll): build\tests\settings_rt\dlaa.ini, written fresh for every case.
 #include "../src/inject.cpp"
 
@@ -68,7 +73,7 @@ static void WritePanel() {
     BuildPanel();
     FILE* f = nullptr;
     if (_wfopen_s(&f, OutPath().c_str(), L"wb") != 0 || !f) { printf("cannot write panel.txt\n"); ExitProcess(3); }
-    for (int r = 0; r < MR_COUNT; ++r) fwprintf(f, L"%ls\n", s_panel.rows[r].value);
+    for (int r = 0; r < MR_COUNT; ++r) fwprintf(f, L"%ls%ls\n", s_panel.rows[r].greyed ? L"(greyed) " : L"", s_panel.rows[r].value);
     fclose(f);
 }
 
@@ -85,6 +90,51 @@ static bool SkipRow(int r) {
     default:
         return false;
     }
+}
+
+// ---- the menu against the render code's gates -----------------------------------------------------------------------------------
+static const char* RowName(int r);
+static int GateCheck(const char* after) {
+    BuildPanel();
+    int bad = 0;
+    auto val = [](int r) { return (const wchar_t*)s_panel.rows[r].value; };
+    auto grey = [](int r) { return s_panel.rows[r].greyed != 0; };
+    auto on = [&](int r) { return !wcsncmp(val(r), L"on", 2); };
+    auto off = [&](int r) { return !wcsncmp(val(r), L"off", 3); };
+    auto expect = [&](bool ok, int r, const char* rule) {
+        if (ok) return;
+        ++bad;
+        char v[128];
+        WideCharToMultiByte(CP_UTF8, 0, val(r), -1, v, sizeof(v), nullptr, nullptr);
+        printf("FAIL (%s, after %s): row \"%s\" shows \"%s\"%s -- %s\n", g_vrMode ? "VR" : "flat", after, RowName(r), v,
+               grey(r) ? " (greyed)" : "", rule);
+    };
+    const bool fwd = g_fwdCfg && g_fwdOn.load();       // the forward-depth batch's switches (FwdLive / FwdOnDraw)
+    const char* pre = PreIneligible();                 // the pre-tonemap stage decision (its mode reasons the user switches)
+    const bool preUser = !(pre && (!strcmp(pre, "dlaa_pre_tonemap = 0") || !strncmp(pre, "pre-tonemap switched off", 24)));
+    expect(on(MR_FWD) == fwd, MR_FWD, "See-through depth: the menu and g_fwdCfg && g_fwdOn disagree");
+    expect(on(MR_PRETM) == preUser, MR_PRETM, "DLAA before tonemap: the menu and PreIneligible() disagree");
+    expect(!(on(MR_WIREDEPTH) && !grey(MR_WIREDEPTH)) || (fwd && g_fwdConsOn.load() >= 1), MR_WIREDEPTH,
+           "Thin-wire depth reads on, but the forward-depth replay does not run it (See-through depth off)");
+    expect(on(MR_WIREDEPTH) == (g_fwdConsOn.load() >= 1), MR_WIREDEPTH, "Thin-wire depth: the menu and g_fwdConsOn disagree");
+    expect(on(MR_WIREWIDEN) == (g_wireCfg && g_wireOn.load()), MR_WIREWIDEN, "Thin-wire widening: the menu and WireOnDraw's switch disagree");
+    expect(on(MR_WIREMV) == DlaaProcessor::MvDilate(), MR_WIREMV, "Thin-wire motion: the menu and the NGX dilation flag disagree");
+    expect(on(MR_DRAWIDS) == (g_objMode == 2 && g_didCfg), MR_DRAWIDS, "Per-part motion vectors: the menu and g_didCfg disagree");
+    expect(grey(MR_WIDTH) == (SceneDlaa::Sharpness() <= 0.0f), MR_WIDTH, "Sharpen width is live only while Sharpen strength > 0");
+    expect(grey(MR_LODCUT) == (g_lodBias == 0.0f), MR_LODCUT, "Cut-out texture sharpness is live only while Texture sharpness is on");
+    expect(off(MR_MIRROR) == !(g_mirOn.load() && MirMode() != 0), MR_MIRROR, "Mirror DLAA: the menu and g_mirOn / MirMode() disagree");
+    expect(grey(MR_MIRTURNS) || (g_mirOn.load() && MirMode() != 0 && MirMode() != 3), MR_MIRTURNS,
+           "Mirrors in turns is not greyed, but mirror DLAA does not take turns (off / mode 3)");
+    expect(off(MR_BIAS) == (SceneDlaa::BiasStrength() == 0) && g_biasCfg == SceneDlaa::BiasStrength(), MR_BIAS,
+           "Light glow ghosting fix: the menu and SceneDlaa's bias strength disagree");
+    expect(off(MR_MODE) == !g_dlaaOn.load() && on(MR_DLAA) == g_dlaaOn.load(), MR_MODE, "Mode / DLAA on-off and g_dlaaOn disagree");
+    expect(on(MR_UPSCALE) == g_dlssUpscale.load(), MR_UPSCALE, "DLSS upscale: the menu and g_dlssUpscale disagree");
+    if (g_vrMode) {
+        expect(!wcscmp(val(MR_TURBO), L"on") == XrTurboEffective(), MR_TURBO, "Turbo mode reads \"on\" exactly when XrTurboEffective()");
+        for (int r : { MR_VRSSIZE, MR_VRSPASS, MR_VRSSTR, MR_VRSEYE })
+            expect(grey(r) || g_vrsOn, r, "a Foveated sub-row is not greyed while Foveated (VRS) is off");
+    }
+    return bad;
 }
 
 // ---- the parent ----------------------------------------------------------------------------------------------------------------
@@ -176,6 +226,16 @@ static int Parent() {
             }                                                              //   a saved off must switch back on, and that saves too)
         }
 
+        // the menu against the gates: from the start state, each row first, then every row in turn (many combinations)
+        for (int r = 0; r < MR_COUNT; ++r) {
+            if (SkipRow(r)) continue;
+            WriteBaseIni();
+            wchar_t a[48];
+            swprintf(a, 48, L"--gates %d%ls", r, vrArg);
+            ++s_checks;
+            if (!RunChild(a)) { ++s_fails; printf("  ^ %s: gates after row \"%s\" first\n", what, RowName(r)); }
+        }
+
         // Reset (fresh install only: Reset removes perf_profile): every row pressed once, Saved, then Reset -> the fresh panel,
         // live and after a restart
         if (s_base != 0) continue;
@@ -201,21 +261,37 @@ static int Parent() {
 
 int wmain(int argc, wchar_t** argv) {
     bool vr = false, show = false, reset = false;
-    int row = -1, dir = 1;
+    int row = -1, dir = 1, gates = -1;
     for (int i = 1; i < argc; ++i) {
         if (!wcscmp(argv[i], L"--vr")) vr = true;
         else if (!wcscmp(argv[i], L"--show")) show = true;
         else if (!wcscmp(argv[i], L"--reset")) reset = true;
         else if (!wcscmp(argv[i], L"--row") && i + 1 < argc) row = _wtoi(argv[++i]);
         else if (!wcscmp(argv[i], L"--dir") && i + 1 < argc) dir = _wtoi(argv[++i]);
+        else if (!wcscmp(argv[i], L"--gates") && i + 1 < argc) gates = _wtoi(argv[++i]);
     }
-    if (!show && !reset && row < 0) {
+    if (!show && !reset && row < 0 && gates < 0) {
         wchar_t p[MAX_PATH];
         GetModuleFileNameW(nullptr, p, MAX_PATH);
         s_exe = p;
         return Parent();
     }
     Boot(vr);
+    if (gates >= 0) {                                  // the menu against the gates after every press, four rounds over all rows:
+        int bad = GateCheck("the start");              //   one Right, one Left, then every row to its low end and its high end
+        MenuChange(gates, 1, false, 1000);             //   (12 presses: Sharpen strength 0 = off, the LOD bias 0, the caps, ...)
+        bad += GateCheck(RowName(gates));
+        static const int kDir[4] = { 1, -1, -1, 1 }, kPresses[4] = { 1, 1, 12, 12 };
+        for (int round = 0; round < 4; ++round)
+            for (int r = 0; r < MR_COUNT; ++r) {
+                if (SkipRow(r) || SessionOnly(r)) continue;
+                for (int i = 0; i < kPresses[round]; ++i) {
+                    MenuChange(r, kDir[round], false, 1001);
+                    bad += GateCheck(RowName(r));
+                }
+            }
+        return bad ? 1 : 0;
+    }
     if (row >= 0) {                                    // the user: Right / Left on the row, then the Save row
         MenuChange(row, dir, false, 1000);
         MenuChange(MR_SAVE, 1, false, 1001);
