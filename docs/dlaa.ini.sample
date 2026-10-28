@@ -460,7 +460,8 @@ log_level = 1
 # see-through (blended) and leave no depth of their own, so they used to move like whatever is behind them (a wire in
 # front of the sky moved like the sky -> trails behind wires in DLSS mode while driving). 1 = those draws are drawn once
 # more, depth only (nothing visible changes), so their pixels move with their own depth; 0 = off. Ctrl+F3 switches it
-# live for an A/B check (Ctrl+F6 view: yellow = pixels that took that depth)
+# live for an A/B check (Ctrl+F6 view: yellow = pixels that took that depth); the menu's See-through depth row too, and
+# Save writes it (issue #26: before, the row's choice was lost at the next start)
 # v0.9.0 r11: only a depth inside the world range counts (a rain / dirt / glare layer on the windscreen used to make the
 # road and trees behind the glass move like the cabin)
 # mv_fwd_depth = 1

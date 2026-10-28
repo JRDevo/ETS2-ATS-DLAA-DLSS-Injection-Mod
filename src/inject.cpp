@@ -3229,7 +3229,7 @@ void SaveSettings(uint64_t n) {
     const float lodBias = g_lodBias;                      // v0.9.0 (Ctrl+F1 / Ctrl+F2)
     const int   objMode = g_objMode;                      // v0.10.0 phase 2 (Alt+F5 switches 2 <-> 0)
     const int   mirror  = g_mirOn.load() ? 1 : 0;         // v0.10.0 phase 2 (Alt+F6)
-    const int   preTm   = g_preOn.load() ? 1 : 0;         // v0.10.0 phase 4 (Alt+F7)
+    const int   preTm   = (g_preCfg && g_preOn.load()) ? 1 : 0;   // v0.10.0 phase 4 (Alt+F7); what the row shows
     // v0.10.0 phase 10: + perf_profile; dlss_preset / dlaa_area / mirror_dlaa only when EXPLICIT (in dlaa.ini or changed by their
     // own key) -- a value that only comes from the profile is not written, so the next profile switch still moves it
     IniKV kv[kIniMaxKeys] = {};                           // v0.10.0 tuning menu: was 11 (+ the 8 menu_* keys + the 7 fps_* keys)
@@ -3325,6 +3325,8 @@ void SaveSettings(uint64_t n) {
     if (g_vrsPassesExplicit) snprintf(add("vrs_passes"), sizeof(kv[0].val), "%d", g_vrsPasses);   // phase 42 (Foveated passes)
     if (g_vrsStrengthExplicit) snprintf(add("vrs_strength"), sizeof(kv[0].val), "%d", g_vrsStrength);   // phase 59f (Foveated strength)
     if (g_vrsEyeExplicit) snprintf(add("vrs_eye"), sizeof(kv[0].val), "%d", g_vrsEye);   // phase 59 (Foveated eye tracking)
+    if (g_profExplicit[PK_FWD_DEPTH])                     // issue #26: the See-through depth row / Ctrl+F3 (was never written)
+        snprintf(add("mv_fwd_depth"), sizeof(kv[0].val), "%d", (g_fwdCfg && g_fwdOn.load()) ? 1 : 0);
     if (g_fwdConsExplicit) snprintf(add("mv_fwd_conservative"), sizeof(kv[0].val), "%d", g_fwdConsOn.load());   // phase 60 (Alt+F11)
     if (g_wireExplicit) snprintf(add("wire_widen"), sizeof(kv[0].val), "%d", g_wireOn.load() ? 1 : 0);   // phase 61 (Alt+F12)
 #ifdef WITH_DLAA
@@ -3510,16 +3512,18 @@ void ToggleFwdConservative(uint64_t n) {
     PlayTones(m == 0 ? 1 : m, m == 0 ? 300 : 1200, 150, 100);
 }
 // Ctrl+F3 (key_fwd_depth): v0.9.0 r5 forward depth for the MVs (A/B switch).
+extern bool g_fwdAutoOff;                            // (the VR budget guard, defined with the FORWARD DEPTH block)
 void ToggleFwdDepth(uint64_t n) {
-    const bool on = !g_fwdOn.load();
+    const bool on = !(g_fwdCfg && g_fwdOn.load());   // issue #26: off by dlaa.ini 0 / the low profile reads as off too
     g_fwdOn = on;
+    if (on) g_fwdCfg = true;                         // ... and the key / row turns it back on (as ApplyProfile switches it live)
+    g_fwdAutoOff = false;                            // the user's choice now: the row no longer reads "off (VR budget)"
     g_profExplicit[PK_FWD_DEPTH] = true;             // v0.10.0 phase 10: the user's choice (no profile / VR budget)
     Log("MV forward depth %s (%s, Present #%llu)%s", on ? "ON" : "OFF", KeyName(KA_FWD_DEPTH),
         (unsigned long long)n,
-        !g_fwdCfg ? " -- no effect: dlaa.ini mv_fwd_depth = 0"
-        : (on ? " -- alpha-blended forward draws (wires, cables, fences) give their pixels their own depth for "
+        on ? " -- alpha-blended forward draws (wires, cables, fences) give their pixels their own depth for "
                 "the motion vectors (Ctrl+F6 view: yellow)"
-              : " -- motion vectors use the scene depth alone (wires over the sky move like the sky)"));
+              : " -- motion vectors use the scene depth alone (wires over the sky move like the sky)");
     PlayTones(1, on ? 1200 : 300, 150, 0);
 }
 #endif
@@ -11575,14 +11579,13 @@ void FwdOnLeave(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const*
 }
 
 void TogglePreTonemap(uint64_t n) {
-    const bool on = !g_preOn.load();
+    const bool on = !(g_preCfg && g_preOn.load());        // (as issue #26) off by dlaa.ini 0 reads as off too ...
     g_preOn = on;
-    if (on) { g_preFailed = false; g_preFailRun = 0; }
+    if (on) { g_preCfg = 1; g_preFailed = false; g_preFailRun = 0; }   // ... and the key / row turns it back on (as ResetSettings)
     g_preStage = -1;                                      // the next frame logs its stage again
-    Log("DLAA pre-tonemap %s (%s, Present #%llu) -- %s%s", on ? "ON" : "OFF", KeyName(KA_PRE_TONEMAP), (unsigned long long)n,
+    Log("DLAA pre-tonemap %s (%s, Present #%llu) -- %s", on ? "ON" : "OFF", KeyName(KA_PRE_TONEMAP), (unsigned long long)n,
         on ? "flat DLAA mode runs the main scene's DLAA in place on the RGBA16F scene colour before the game's tonemap"
-           : "the main scene's DLAA runs at the blit on the tone-mapped picture (v0.3.1 path)",
-        g_preCfg ? "" : " -- no effect: dlaa.ini dlaa_pre_tonemap = 0");
+           : "the main scene's DLAA runs at the blit on the tone-mapped picture (v0.3.1 path)");
     PlayTones(1, on ? 1200 : 300, 150, 0);
 }
 
@@ -17505,6 +17508,12 @@ void ResetSettings(uint64_t n) {
     g_logLevelExplicit = false;
     LogSetLevel(g_logDebugKey ? 4 : 1);
     ApplyLogLevelGates();
+    // phase 74: the menu language back to auto (the key is removed below; before, the live language stayed and the next Save
+    // wrote it back -- found by tests\settings_roundtrip_test.cpp)
+    Lang::SetSetting("auto");
+    g_langExplicit = false;
+    Lang::Refresh();
+    TuningMenu::SetFace(Lang::Face());
     OnLiveTuningChange();                                 // the timing windows restart (new pipeline state)
 
     // dlaa.ini: remove the 35 keys (empty value); everything else stays byte-for-byte (v0.10.2: + mirror_mv = 32; v0.10.3 phase 28:
@@ -18984,11 +18993,12 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     MenuRow(p, MR_SHARP, TR(L"Sharpen strength"), pair(KA_SHARPEN_DOWN, KA_SHARPEN_UP), nullptr, false);
     const float sharp = SceneDlaa::Sharpness();
     swprintf(p.rows[MR_SHARP].value, kV, sharp <= 0.0f ? TRF(L"%.1f (off)") : L"%.1f", (double)sharp);
-    MenuRow(p, MR_WIDTH, TR(L"Sharpen width"), pair(KA_WIDTH_DOWN, KA_WIDTH_UP), nullptr, false);
+    MenuRow(p, MR_WIDTH, TR(L"Sharpen width"), pair(KA_WIDTH_DOWN, KA_WIDTH_UP), nullptr, sharp <= 0.0f);   // greyed: no sharpening
     swprintf(p.rows[MR_WIDTH].value, kV, TRF(L"%.1f px"), (double)SceneDlaa::SharpRadius());
     MenuRow(p, MR_LOD, TR(L"Texture sharpness"), pair(KA_LOD_DOWN, KA_LOD_UP), nullptr, false);
     swprintf(p.rows[MR_LOD].value, kV, g_lodBias == 0.0f ? TRF(L"%.2f (off)") : L"%.2f", (double)g_lodBias);
-    MenuRow(p, MR_LODCUT, TR(L"Cut-out texture sharpness"), pair(KA_LOD_CUT_DOWN, KA_LOD_CUT_UP), nullptr, false);
+    MenuRow(p, MR_LODCUT, TR(L"Cut-out texture sharpness"), pair(KA_LOD_CUT_DOWN, KA_LOD_CUT_UP), nullptr,
+            g_lodBias == 0.0f);                           // greyed: the cut-out bias is 0 while Texture sharpness is off
     if (LodCutFollows()) swprintf(p.rows[MR_LODCUT].value, kV, TRF(L"same (%.2f)"), (double)LodCutUserValue());
     else                 swprintf(p.rows[MR_LODCUT].value, kV, L"%.2f", (double)g_lodCutBias);
     MenuRow(p, MR_AREA, TR(L"DLAA area (VR)"), pair(KA_AREA_DOWN, KA_AREA_UP), vr ? nullptr : NA_("VR only"), !vr);
@@ -19012,17 +19022,18 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
 #endif
         MenuRow(p, MR_WIREMV, TR(L"Thin-wire motion"), KeyNameUi(KA_MV_DILATE), nullptr, false);
         swprintf(p.rows[MR_WIREMV].value, kV, L"%ls", onOff[mvDil ? 1 : 0]);
-        MenuRow(p, MR_WIREDEPTH, TR(L"Thin-wire depth"), KeyNameUi(KA_FWD_CONSERVATIVE), nullptr, false);
+        MenuRow(p, MR_WIREDEPTH, TR(L"Thin-wire depth"), KeyNameUi(KA_FWD_CONSERVATIVE), nullptr,
+                !(g_fwdCfg && g_fwdOn.load()));           // greyed: it is part of the See-through depth pass (kept for it)
         const int fc = g_fwdConsOn.load();
         swprintf(p.rows[MR_WIREDEPTH].value, kV, L"%ls", fc == 1 ? TR(L"on") : (fc == 2 ? TR(L"on (no A2C)") : TR(L"off")));
         MenuRow(p, MR_WIREWIDEN, TR(L"Thin-wire widening"), KeyNameUi(KA_WIRE_WIDEN), nullptr, false);
         swprintf(p.rows[MR_WIREWIDEN].value, kV, L"%ls", g_wireOn.load() ? TR(L"on (experimental)") : TR(L"off"));
     }
     MenuRow(p, MR_PRETM, TR(L"DLAA before tonemap (flat)"), KeyNameUi(KA_PRE_TONEMAP), vr ? NA_("flat only") : nullptr, vr);
-    swprintf(p.rows[MR_PRETM].value, kV, L"%ls", !g_preCfg ? TR(L"off (dlaa.ini 0)") : onOff[g_preOn.load() ? 1 : 0]);
+    swprintf(p.rows[MR_PRETM].value, kV, L"%ls", onOff[(g_preCfg && g_preOn.load()) ? 1 : 0]);   // (the row switches a dlaa.ini 0 on too)
     MenuRow(p, MR_FWD, TR(L"See-through depth"), KeyNameUi(KA_FWD_DEPTH), nullptr, false);
-    swprintf(p.rows[MR_FWD].value, kV, L"%ls", !g_fwdCfg ? TR(L"off (dlaa.ini 0)")
-                                              : (!g_fwdOn.load() ? (g_fwdAutoOff ? TR(L"off (VR budget)") : TR(L"off")) : TR(L"on")));
+    swprintf(p.rows[MR_FWD].value, kV, L"%ls", (g_fwdCfg && g_fwdOn.load()) ? TR(L"on")   // issue #26: dlaa.ini 0 / the low
+                                              : (g_fwdAutoOff ? TR(L"off (VR budget)") : TR(L"off")));   //   profile: plain off
     MenuRow(p, MR_BIAS, TR(L"Light glow ghosting fix"), "dlaa.ini dlss_bias_mask", nullptr, false);   // phase 49
     if (g_biasCfg > 0) swprintf(p.rows[MR_BIAS].value, kV, L"%d %%", g_biasCfg);
     else               swprintf(p.rows[MR_BIAS].value, kV, TRF(L"off"));

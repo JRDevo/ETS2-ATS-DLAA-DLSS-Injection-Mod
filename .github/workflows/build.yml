@@ -22,6 +22,14 @@ jobs:
       - name: Clone NVIDIA DLSS SDK
         run: git clone --depth 1 https://github.com/NVIDIA/DLSS external/DLSS
 
+      # issue #26: every setting the menu / a hotkey changes is written by Save, removed by Reset and read at start
+      - name: Check settings are saved (dlaa.ini keys)
+        run: python scripts/settings_check.py
+
+      # the in-game feature check (scripts/feature_check.py reads dlaa_inject.log: which feature was on and really ran)
+      - name: Test the log feature check
+        run: python tests/feature_check_test.py
+
       # phase 74: the menu translations -- lang/template.pot matches the code, every lang/*.po parses and keeps its placeholders
       - name: Check menu translations (lang/*.po)
         run: |
@@ -76,6 +84,8 @@ jobs:
           if not exist build\tests\vrs_gaze_test.exe exit /b 1
           call tests\build_lang_test.bat
           if not exist build\tests\lang_test.exe exit /b 1
+          call tests\build_settings_roundtrip_test.bat
+          if not exist build\tests\settings_rt\settings_roundtrip_test.exe exit /b 1
 
       - name: Test draw-id harness (did_shadow off)
         run: build\tests\drawid_harness.exe -1 0.1
@@ -108,6 +118,8 @@ jobs:
         run: build\tests\vrs_gaze_test.exe
       - name: Test menu translations (phase 74 -- .po parsing, placeholder guard, font pick)
         run: build\tests\lang_test.exe
+      - name: Test settings survive a restart (issue 26 -- every menu row Left / Right, Save, restart; Reset; flat, VR, low profile)
+        run: build\tests\settings_rt\settings_roundtrip_test.exe
       - name: Smoke test menu_shot (renders the real tuning menu + fps box to PNG; outputs are not committed)
         shell: cmd
         run: |
