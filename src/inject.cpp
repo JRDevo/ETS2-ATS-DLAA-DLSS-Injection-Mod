@@ -3325,6 +3325,8 @@ void SaveSettings(uint64_t n) {
     if (g_vrsPassesExplicit) snprintf(add("vrs_passes"), sizeof(kv[0].val), "%d", g_vrsPasses);   // phase 42 (Foveated passes)
     if (g_vrsStrengthExplicit) snprintf(add("vrs_strength"), sizeof(kv[0].val), "%d", g_vrsStrength);   // phase 59f (Foveated strength)
     if (g_vrsEyeExplicit) snprintf(add("vrs_eye"), sizeof(kv[0].val), "%d", g_vrsEye);   // phase 59 (Foveated eye tracking)
+    if (g_profExplicit[PK_FWD_DEPTH])                     // issue #26: the See-through depth row / Ctrl+F3 (was never written)
+        snprintf(add("mv_fwd_depth"), sizeof(kv[0].val), "%d", (g_fwdCfg && g_fwdOn.load()) ? 1 : 0);
     if (g_fwdConsExplicit) snprintf(add("mv_fwd_conservative"), sizeof(kv[0].val), "%d", g_fwdConsOn.load());   // phase 60 (Alt+F11)
     if (g_wireExplicit) snprintf(add("wire_widen"), sizeof(kv[0].val), "%d", g_wireOn.load() ? 1 : 0);   // phase 61 (Alt+F12)
 #ifdef WITH_DLAA
@@ -3510,16 +3512,18 @@ void ToggleFwdConservative(uint64_t n) {
     PlayTones(m == 0 ? 1 : m, m == 0 ? 300 : 1200, 150, 100);
 }
 // Ctrl+F3 (key_fwd_depth): v0.9.0 r5 forward depth for the MVs (A/B switch).
+extern bool g_fwdAutoOff;                            // (the VR budget guard, defined with the FORWARD DEPTH block)
 void ToggleFwdDepth(uint64_t n) {
-    const bool on = !g_fwdOn.load();
+    const bool on = !(g_fwdCfg && g_fwdOn.load());   // issue #26: off by dlaa.ini 0 / the low profile reads as off too
     g_fwdOn = on;
+    if (on) g_fwdCfg = true;                         // ... and the key / row turns it back on (as ApplyProfile switches it live)
+    g_fwdAutoOff = false;                            // the user's choice now: the row no longer reads "off (VR budget)"
     g_profExplicit[PK_FWD_DEPTH] = true;             // v0.10.0 phase 10: the user's choice (no profile / VR budget)
     Log("MV forward depth %s (%s, Present #%llu)%s", on ? "ON" : "OFF", KeyName(KA_FWD_DEPTH),
         (unsigned long long)n,
-        !g_fwdCfg ? " -- no effect: dlaa.ini mv_fwd_depth = 0"
-        : (on ? " -- alpha-blended forward draws (wires, cables, fences) give their pixels their own depth for "
+        on ? " -- alpha-blended forward draws (wires, cables, fences) give their pixels their own depth for "
                 "the motion vectors (Ctrl+F6 view: yellow)"
-              : " -- motion vectors use the scene depth alone (wires over the sky move like the sky)"));
+              : " -- motion vectors use the scene depth alone (wires over the sky move like the sky)");
     PlayTones(1, on ? 1200 : 300, 150, 0);
 }
 #endif

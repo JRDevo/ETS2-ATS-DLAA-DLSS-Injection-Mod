@@ -76,6 +76,8 @@ a native speaker's changes and suggestions help everybody.
   = pass). GitHub Actions runs them on every push. Pure logic goes into a header with a test
   (`src\fps_pose.h`, `src\frame_pace.h`, `src\hotkey_scan.h` are examples); the DX11 hooks stay
   in `src\inject.cpp`, the OpenXR hooks in `src\xr_hook.cpp`.
+- A new setting the menu or a hotkey changes: write it in `SaveSettings`, remove it in `ResetSettings`, read it in
+  `LoadConfig`. `python scripts/settings_check.py` (also in CI) fails when one of the three is missing.
 - Rules for published text: never name another ETS2 / ATS anti-aliasing mod, VR = OpenXR only,
   game paths as `bin\win_x64\`, say what was tested and what was not.
 - Tell me what you tested in game (game, flat / VR, where, when) in the pull request, with a log.

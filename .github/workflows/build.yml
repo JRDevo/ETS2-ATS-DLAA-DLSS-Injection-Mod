@@ -22,6 +22,10 @@ jobs:
       - name: Clone NVIDIA DLSS SDK
         run: git clone --depth 1 https://github.com/NVIDIA/DLSS external/DLSS
 
+      # issue #26: every setting the menu / a hotkey changes is written by Save, removed by Reset and read at start
+      - name: Check settings are saved (dlaa.ini keys)
+        run: python scripts/settings_check.py
+
       # phase 74: the menu translations -- lang/template.pot matches the code, every lang/*.po parses and keeps its placeholders
       - name: Check menu translations (lang/*.po)
         run: |
