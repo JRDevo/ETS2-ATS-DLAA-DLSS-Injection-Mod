@@ -382,17 +382,18 @@ msgid ""
 "mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
 "right, to compare."
 msgstr ""
-"Bara när spelets kantutjämning är TAA. av = bara modden (sätt spelets AA till Av). mix = TAA "
-"och DLAA / DLSS i samma bild, blandade. delad = vänster modden, höger TAA, för jämförelse."
+"Bara när spelets kantutjämning är TAA. av = bara modden (sätt spelets AA till Av). mix = TAA och "
+"DLAA / DLSS i samma bild, blandade. delad = vänster modden, höger TAA, för jämförelse."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
 msgstr ""
 "Hur stor del av mixen som är spelets TAA, 0 - 100 % i steg om 10 %: mer = lugnare och mjukare "
-"(TAA), mindre = skarpare (DLAA / DLSS). Används bara när Spelets TAA är mix. Ingen extra kostnad."
+"(TAA), mindre = skarpare (DLAA / DLSS). Används när Spelets TAA är mix, eller delad med en "
+"mix-sida. Ingen extra kostnad."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -400,8 +401,19 @@ msgid ""
 "Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
 "on the left of it, the game's TAA on the right. Used only when Game TAA is split."
 msgstr ""
-"Var linjen för Spelets TAA delad ligger, 0 - 100 % av bredden i steg om 5 %: till vänster "
-"moddens DLAA / DLSS, till höger spelets TAA. Används bara när Spelets TAA är delad."
+"Var linjen för Spelets TAA delad ligger, 0 - 100 % av bredden i steg om 5 %: till vänster moddens "
+"DLAA / DLSS, till höger spelets TAA. Används bara när Spelets TAA är delad."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"Vad Spelets TAA delad visar på de två sidorna: DLAA | TAA (modden till vänster, spelets TAA "
+"till höger), mix | TAA eller DLAA | mix (mix = de två blandade efter Andel av spelets TAA). "
+"DLSS i stället för DLAA vid uppskalning. Används bara när Spelets TAA är delad."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2023,6 +2035,21 @@ msgstr "Delningsposition"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Split compares"
+msgstr "Delad jämför"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr "mix | TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
+msgstr "DLAA | mix"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (VR-framegen)"
 
@@ -2490,15 +2517,6 @@ msgstr "info"
 msgid "debug"
 msgstr "felsökning"
 
-#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
-#~ msgstr "Bara när spelets kantutjämning är TAA. av = bara modden (sätt spelets AA till Av). mix = TAA och DLAA / DLSS i samma bild, blandade. endast TAA = ingen DLAA, för jämförelse. delad = vänster modden, höger TAA."
-
-#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
-#~ msgstr "Spelets TAA körs nu: sätt spelets kantutjämning till Av, eller välj mix, endast TAA eller delad."
-
-#~ msgid "The game's TAA is running now: TAA only (see the log)."
-#~ msgstr "Spelets TAA körs nu: endast TAA (se loggen)."
-
-#~ msgid "TAA only"
-#~ msgstr "endast TAA"
+#~ msgid "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+#~ msgstr "Hur stor del av mixen som är spelets TAA, 0 - 100 % i steg om 10 %: mer = lugnare och mjukare (TAA), mindre = skarpare (DLAA / DLSS). Används bara när Spelets TAA är mix. Ingen extra kostnad."
 

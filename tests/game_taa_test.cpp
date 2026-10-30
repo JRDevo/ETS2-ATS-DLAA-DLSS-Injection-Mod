@@ -117,6 +117,29 @@ static void TestMenuSteps() {
     CHECK(!strcmp(ModeName(kOff), "off") && !strcmp(ModeName(kMix), "mix") && !strcmp(ModeName(kSplit), "split"), "mode names");
 }
 
+static void TestSplitOverlay() {
+    CHECK(SplitLineWidth(1080) == 2.0f && SplitLineWidth(2160) == 4.0f && SplitLineWidth(720) == 2.0f && SplitLineWidth(1440) == 3.0f,
+          "the red line: 2 px per 1080 px of height, at least 2");
+    const Label l = PackLabel("DLAA (OFF)");
+    CHECK(l.n == 10 && (l.p[0] & 31u) == 1u && ((l.p[0] >> 5) & 31u) == 2u && (l.p[1] & 31u) == 0u && ((l.p[1] >> 5) & 31u) == 8u &&
+          (l.p[2] & 31u) == 7u && ((l.p[2] >> 5) & 31u) == 9u, "DLAA (OFF) packs D L A A | space ( O F | F )");
+    const Label m = PackLabel("MIX 50%");
+    CHECK(m.n == 7 && (m.p[0] & 31u) == 10u && ((m.p[0] >> 5) & 31u) == 11u && ((m.p[0] >> 10) & 31u) == 12u &&
+          ((m.p[1]) & 31u) == 14u + 5u && ((m.p[1] >> 5) & 31u) == 14u && ((m.p[1] >> 10) & 31u) == 13u, "MIX 50%% packs M I X | 5 0 %%");
+    CHECK(PackLabel("TAA").n == 3 && PackLabel("taa").p[0] == PackLabel("TAA").p[0] && PackLabel(nullptr).n == 0, "case, null");
+    CHECK(PackLabel("DLSS (OFF)").p[0] < (1u << 20), "a packed part is exact in a float (20 bits)");
+    char b[16];
+    SideLabel(kSideMod, false, true, true, 50, b, sizeof(b));   CHECK(!strcmp(b, "DLAA"), "mod side: %s", b);
+    SideLabel(kSideMod, true, false, true, 50, b, sizeof(b));   CHECK(!strcmp(b, "DLSS (OFF)"), "DLSS that did not run: %s", b);
+    SideLabel(kSideTaa, false, true, false, 50, b, sizeof(b));  CHECK(!strcmp(b, "TAA (OFF)"), "TAA not running: %s", b);
+    SideLabel(kSideMix, false, true, true, 30, b, sizeof(b));   CHECK(!strcmp(b, "MIX 30%"), "mix side: %s", b);
+    SideLabel(kSideMix, false, false, true, 30, b, sizeof(b));  CHECK(!strcmp(b, "MIX (OFF)"), "mix without the mod: %s", b);
+    int ls = -1, rs = -1;
+    PairSides(kPairDlaaTaa, &ls, &rs); CHECK(ls == kSideMod && rs == kSideTaa, "DLAA | TAA");
+    PairSides(kPairMixTaa, &ls, &rs);  CHECK(ls == kSideMix && rs == kSideTaa, "Mix | TAA");
+    PairSides(kPairDlaaMix, &ls, &rs); CHECK(ls == kSideMod && rs == kSideMix, "DLAA | Mix");
+}
+
 static void TestMix() {
     Mix x = MixOf(kMix, 50);
     CHECK(x.modShare > 0.499f && x.modShare < 0.501f && !x.split, "mix 50 %% = half the mod");
@@ -125,7 +148,14 @@ static void TestMix() {
     x = MixOf(kMix, 0);
     CHECK(x.modShare == 1.0f, "TAA share 0 %% = all the mod");
     x = MixOf(kSplit, 30);
-    CHECK(x.modShare == 1.0f && x.split, "split: the mod at full share left of the middle");
+    CHECK(x.modShare == 1.0f && x.split && x.rightShare == 0.0f, "split DLAA | TAA: the mod left, TAA right");
+    x = MixOf(kSplit, 30, kPairMixTaa);
+    CHECK(x.modShare > 0.699f && x.modShare < 0.701f && x.rightShare == 0.0f, "split Mix | TAA: the mix left (70 %% mod), TAA right");
+    x = MixOf(kSplit, 30, kPairDlaaMix);
+    CHECK(x.modShare == 1.0f && x.rightShare > 0.699f && x.rightShare < 0.701f, "split DLAA | Mix: the mod left, the mix right");
+    CHECK(ShareUsed(kMix, 0) && !ShareUsed(kSplit, kPairDlaaTaa) && ShareUsed(kSplit, kPairMixTaa) && ShareUsed(kSplit, kPairDlaaMix) &&
+          !ShareUsed(kOff, kPairMixTaa), "the share row is live in mix and in a split with a Mix side");
+    CHECK(NextPair(0, 1) == 1 && NextPair(2, 1) == 0 && NextPair(0, -1) == 2 && ClampPair(5) == 0, "pair steps");
     x = MixOf(kOff, 30);
     CHECK(x.modShare == 1.0f && !x.split, "off: the composite as before");
 }
@@ -183,12 +213,26 @@ static void TestShadowRotation() {
         sh.OnMap(r, r); sh.OnUnmap(r, Copy);
         bool grown = false;
         sh.Learn(r, kW, 100000u);
-        CHECK(!sh.Read(r, 100000u, 61, out, 64, &grown) && grown, "an offset outside the window misses and grows it");
+        CHECK(!sh.Read(r, 100000u, 61, out, 64, &grown) && grown, "an offset outside the window misses (the range now includes it)");
         r = s_ring[64 % 3];
         fill(64, 100000u, 5e-5f);
         sh.OnMap(r, r); sh.OnUnmap(r, Copy);
         sh.Learn(r, kW, 100000u);
         CHECK(sh.Read(r, 100000u, 64, out, 64) && out[32] == 5e-5f, "the window follows the new place");
+    }
+    {   // game test 2: offsets far apart in use at the same time (12 KB / 186 KB / 327 KB / 368 KB): once seen, every one is covered
+        const uint32_t offs[4] = { 12032u, 185856u, 326656u, 368384u };
+        for (uint32_t o : offs) sh.Learn(s_ring[1], kW, o);
+        int ok = 0;
+        for (int k = 0; k < 4; ++k) {
+            const int f = 70 + 3 * k;                    // ring 1 each time
+            fill(f, offs[k], 7e-5f + 1e-6f * (float)k);
+            sh.OnMap(s_ring[1], s_ring[1]); sh.OnUnmap(s_ring[1], Copy);
+            sh.Learn(s_ring[1], kW, offs[k]);
+            if (sh.Read(s_ring[1], offs[k], (uint64_t)f, out, 64) && out[32] == 7e-5f + 1e-6f * (float)k) ++ok;
+        }
+        CHECK(ok == 4, "the window spans the range of the offsets in use: %d of 4 read", ok);
+        CHECK(sh.Span() <= CbShadow::kMaxSpan && sh.Span() >= 368384u - 12032u, "span %u within the cap and over the range", sh.Span());
     }
     {   // UpdateSubresource of a watched buffer
         unsigned char src[512];
@@ -210,6 +254,7 @@ int main() {
     TestDecide();
     TestMenuSteps();
     TestMix();
+    TestSplitOverlay();
     printf("game_taa_test: %d checks, %d failed\n", s_checks, s_fails);
     return s_fails ? 1 : 0;
 }

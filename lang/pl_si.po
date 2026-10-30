@@ -394,10 +394,11 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
 msgstr ""
 "Jako czynść miksu to TAA gry, 0 - 100 % co 10 %: wiyncyj = spokojniyj i miyńczyj (TAA), mynij = "
-"ôstrzyj (DLAA / DLSS). Używane yno kej TAA gry je miks. Bez dodatkowego kosztu."
+"ôstrzyj (DLAA / DLSS). Używane, kej TAA gry je miks, abo podział ze strōnōm miks. Bez "
+"dodatkowego kosztu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -405,8 +406,19 @@ msgid ""
 "Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
 "on the left of it, the game's TAA on the right. Used only when Game TAA is split."
 msgstr ""
-"Kaj leży linijŏ podziału TAA gry, 0 - 100 % szyrzki co 5 %: na lewo ôd niyj DLAA / DLSS moda, "
-"na prawo TAA gry. Używane yno kej TAA gry je podział."
+"Kaj leży linijŏ podziału TAA gry, 0 - 100 % szyrzki co 5 %: na lewo ôd niyj DLAA / DLSS moda, na "
+"prawo TAA gry. Używane yno kej TAA gry je podział."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"Co podział TAA gry pokazuje na ôbu strōnach: DLAA | TAA (z lewyj mod, z prawyj TAA gry), miks | "
+"TAA abo DLAA | miks (miks = ôba pomieszane wedle Udziału TAA gry). DLSS na miejsce DLAA przi "
+"skalowaniu. Używane yno kej TAA gry je podział."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2024,6 +2036,21 @@ msgstr "Pozycyjŏ podziału"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Split compares"
+msgstr "Podział porōwnuje"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr "miks | TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
+msgstr "DLAA | miks"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (klatki VR)"
 
@@ -2490,15 +2517,6 @@ msgstr "info"
 msgid "debug"
 msgstr "debug"
 
-#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
-#~ msgstr "Yno kej antyaliasing gry je na TAA. wył. = yno mod (ustow AA gry na Wyłōnczone). miks = TAA i DLAA / DLSS we tyj samyj klatce, pomieszane. yno TAA = bez DLAA, do porōwnaniŏ. podział = z lewyj mod, z prawyj TAA."
-
-#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
-#~ msgstr "TAA gry terŏz robi: ustow antyaliasing gry na Wyłōnczone abo wybier miks, yno TAA abo podział."
-
-#~ msgid "The game's TAA is running now: TAA only (see the log)."
-#~ msgstr "TAA gry terŏz robi: yno TAA (glej log)."
-
-#~ msgid "TAA only"
-#~ msgstr "yno TAA"
+#~ msgid "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+#~ msgstr "Jako czynść miksu to TAA gry, 0 - 100 % co 10 %: wiyncyj = spokojniyj i miyńczyj (TAA), mynij = ôstrzyj (DLAA / DLSS). Używane yno kej TAA gry je miks. Bez dodatkowego kosztu."
 

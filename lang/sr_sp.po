@@ -385,17 +385,17 @@ msgid ""
 "right, to compare."
 msgstr ""
 "Samo kad je izglađivanje ivica igre na TAA. isklj. = samo mod (postavi AA igre na Isključeno). "
-"miks = TAA i DLAA / DLSS na istoj slici, pomešani. podeljeno = levo mod, desno TAA, za "
-"poređenje."
+"miks = TAA i DLAA / DLSS na istoj slici, pomešani. podeljeno = levo mod, desno TAA, za poređenje."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
 msgstr ""
-"Koliki deo miksa je TAA igre, 0 - 100 % u koracima od 10 %: više = mirnije i mekše (TAA), manje = "
-"oštrije (DLAA / DLSS). Koristi se samo kad je TAA igre miks. Bez dodatnog troška."
+"Koliki deo miksa je TAA igre, 0 - 100 % u koracima od 10 %: više = mirnije i mekše (TAA), manje "
+"= oštrije (DLAA / DLSS). Koristi se kad je TAA igre miks, ili podeljeno sa stranom miks. Bez "
+"dodatnog troška."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -405,6 +405,17 @@ msgid ""
 msgstr ""
 "Gde je linija podeljenog TAA igre, 0 - 100 % širine u koracima od 5 %: levo od nje DLAA / DLSS "
 "moda, desno TAA igre. Koristi se samo kad je TAA igre podeljeno."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"Šta podeljeni TAA igre prikazuje na dve strane: DLAA | TAA (levo mod, desno TAA igre), miks | "
+"TAA ili DLAA | miks (miks = oba pomešana prema Udelu TAA igre). DLSS umesto DLAA pri povećanju. "
+"Koristi se samo kad je TAA igre podeljeno."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1149,8 +1160,7 @@ msgstr "TAA igre sada ne radi: mod radi sam."
 msgid ""
 "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
 msgstr ""
-"TAA igre sada radi: postavi izglađivanje ivica igre na Isključeno ili izaberi miks ili "
-"podeljeno."
+"TAA igre sada radi: postavi izglađivanje ivica igre na Isključeno ili izaberi miks ili podeljeno."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2021,6 +2031,21 @@ msgstr "Položaj podele"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Split compares"
+msgstr "Podela upoređuje"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr "miks | TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
+msgstr "DLAA | miks"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (VR kadrovi)"
 
@@ -2487,15 +2512,6 @@ msgstr "informacije"
 msgid "debug"
 msgstr "dijagnostika"
 
-#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
-#~ msgstr "Samo kad je izglađivanje ivica igre na TAA. isklj. = samo mod (postavi AA igre na Isključeno). miks = TAA i DLAA / DLSS na istoj slici, pomešani. samo TAA = bez DLAA, za poređenje. podeljeno = levo mod, desno TAA."
-
-#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
-#~ msgstr "TAA igre sada radi: postavi izglađivanje ivica igre na Isključeno ili izaberi miks, samo TAA ili podeljeno."
-
-#~ msgid "The game's TAA is running now: TAA only (see the log)."
-#~ msgstr "TAA igre sada radi: samo TAA (vidi log)."
-
-#~ msgid "TAA only"
-#~ msgstr "samo TAA"
+#~ msgid "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+#~ msgstr "Koliki deo miksa je TAA igre, 0 - 100 % u koracima od 10 %: više = mirnije i mekše (TAA), manje = oštrije (DLAA / DLSS). Koristi se samo kad je TAA igre miks. Bez dodatnog troška."
 

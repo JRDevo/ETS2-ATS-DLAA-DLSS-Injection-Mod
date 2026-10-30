@@ -392,10 +392,11 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
 msgstr ""
 "Kui suur osa segust on mängu TAA, 0 - 100 % 10 % sammuga: rohkem = rahulikum ja pehmem (TAA), "
-"vähem = teravam (DLAA / DLSS). Kasutatakse ainult siis, kui Mängu TAA on segu. Lisakulu pole."
+"vähem = teravam (DLAA / DLSS). Kasutatakse, kui Mängu TAA on segu, või poolitatud segu küljega. "
+"Lisakulu pole."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -405,6 +406,17 @@ msgid ""
 msgstr ""
 "Kus on Mängu TAA poolitatud joon, 0 - 100 % laiusest 5 % sammuga: sellest vasakul modi DLAA / "
 "DLSS, paremal mängu TAA. Kasutatakse ainult siis, kui Mängu TAA on poolitatud."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"Mida Mängu TAA poolitatud näitab oma kahel küljel: DLAA | TAA (vasakul mod, paremal mängu TAA), "
+"segu | TAA või DLAA | segu (segu = mõlemad segatud Mängu TAA osakaalu järgi). DLSS DLAA asemel "
+"skaleerimisel. Kasutatakse ainult siis, kui Mängu TAA on poolitatud."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1150,7 +1162,8 @@ msgstr "Mängu TAA ei tööta praegu: mod töötab üksi."
 #, c-format
 msgid ""
 "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
-msgstr "Mängu TAA töötab praegu: pane mängu antialiasing olekusse Keelatud või vali segu või poolitatud."
+msgstr ""
+"Mängu TAA töötab praegu: pane mängu antialiasing olekusse Keelatud või vali segu või poolitatud."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2020,6 +2033,21 @@ msgstr "Poolituse asukoht"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Split compares"
+msgstr "Poolitus võrdleb"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr "segu | TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
+msgstr "DLAA | segu"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (VR kaadrigen.)"
 
@@ -2486,15 +2514,6 @@ msgstr "info"
 msgid "debug"
 msgstr "silumine"
 
-#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
-#~ msgstr "Ainult siis, kui mängu antialiasing on TAA. väljas = ainult mod (pane mängu AA olekusse Keelatud). segu = TAA ja DLAA / DLSS samal kaadril, segatud. ainult TAA = ilma DLAA-ta, võrdlemiseks. poolitatud = vasakul mod, paremal TAA."
-
-#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
-#~ msgstr "Mängu TAA töötab praegu: pane mängu antialiasing olekusse Keelatud või vali segu, ainult TAA või poolitatud."
-
-#~ msgid "The game's TAA is running now: TAA only (see the log)."
-#~ msgstr "Mängu TAA töötab praegu: ainult TAA (vt logi)."
-
-#~ msgid "TAA only"
-#~ msgstr "ainult TAA"
+#~ msgid "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+#~ msgstr "Kui suur osa segust on mängu TAA, 0 - 100 % 10 % sammuga: rohkem = rahulikum ja pehmem (TAA), vähem = teravam (DLAA / DLSS). Kasutatakse ainult siis, kui Mängu TAA on segu. Lisakulu pole."
 

@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 namespace GameTaa {
@@ -133,33 +134,105 @@ inline Act Decide(const PassIn& in, const char** why, int* whyCode = nullptr) {
     return kActTaaOnly;
 }
 
+// The split overlay (drawn after the game's blit, every frame while game_taa = 2): an opaque red line of SplitLineWidth px (2 px per
+// 1080 px of the picture's height, at least 2) and two labels in a 5 x 7 pixel font. PackLabel: glyph codes 0 space, 1 D, 2 L, 3 A,
+// 4 S, 5 T, 6 O, 7 F, 8 (, 9 ), 10 M, 11 I, 12 X, 13 %, 14..23 the digits 0..9 -- 5 bits each, 4 per part (exact in a float), 3
+// parts = up to 12 characters (case-insensitive; other characters = space).
+inline float SplitLineWidth(uint32_t h) { const float w = std::floor(2.0f * (float)h / 1080.0f + 0.5f); return w < 2.0f ? 2.0f : w; }
+inline uint32_t GlyphCode(char c) {
+    if (c >= '0' && c <= '9') return 14u + (uint32_t)(c - '0');
+    switch (c >= 'a' && c <= 'z' ? (char)(c - 'a' + 'A') : c) {
+    case 'D': return 1; case 'L': return 2; case 'A': return 3; case 'S': return 4; case 'T': return 5;
+    case 'O': return 6; case 'F': return 7; case '(': return 8; case ')': return 9; case 'M': return 10; case 'I': return 11;
+    case 'X': return 12; case '%': return 13; default: return 0;
+    }
+}
+struct Label { uint32_t p[3] = { 0, 0, 0 }; uint32_t n = 0; };
+inline Label PackLabel(const char* s) {
+    Label l;
+    for (uint32_t i = 0; s && s[i] && i < 12; ++i) {
+        l.p[i / 4u] |= GlyphCode(s[i]) << (5u * (i % 4u));
+        l.n = i + 1;
+    }
+    return l;
+}
+// one side's label: "DLAA" / "DLSS" (the mod; + " (OFF)" when it did not run on this pass), "TAA" (+ " (OFF)" when the game's TAA is
+// not running), "MIX 50%" (the blend; + " (OFF)" when either is missing). `out` gets up to 12 characters.
+enum Side : int { kSideMod = 0, kSideTaa = 1, kSideMix = 2 };
+inline void SideLabel(int side, bool dlss, bool modRan, bool taaLive, int taaPct, char* out, size_t cap) {
+    if (!out || !cap) return;
+    const char* off = " (OFF)";
+    if (side == kSideTaa) snprintf(out, cap, "TAA%s", taaLive ? "" : off);
+    else if (side == kSideMix) {
+        if (modRan && taaLive) snprintf(out, cap, "MIX %d%%", ClampMix(taaPct)); else snprintf(out, cap, "MIX%s", off);
+    } else snprintf(out, cap, "%s%s", dlss ? "DLSS" : "DLAA", modRan ? "" : off);
+}
+
 // The composite's parameters for a mode: the mod's share (alpha) and the split.
-struct Mix { float modShare = 1.0f; bool split = false; };
-inline Mix MixOf(int mode, int taaPct) {
+// game_taa_pair (menu "Split compares", only in split): what the two sides show -- 0 "DLAA | TAA" (default: the mod left, the game's
+// TAA right), 1 "Mix | TAA", 2 "DLAA | Mix"; Mix = the mod's result blended with the game's TAA at game_taa_mix.
+enum Pair : int { kPairDlaaTaa = 0, kPairMixTaa = 1, kPairDlaaMix = 2, kPairCount = 3 };
+inline int ClampPair(int p) { return p < 0 || p >= kPairCount ? kPairDlaaTaa : p; }
+inline int NextPair(int p, int dir) { return (ClampPair(p) + (dir < 0 ? kPairCount - 1 : 1)) % kPairCount; }
+inline bool PairHasMix(int p) { return ClampPair(p) != kPairDlaaTaa; }
+inline const char* PairName(int p) {
+    switch (ClampPair(p)) { case kPairMixTaa: return "Mix | TAA"; case kPairDlaaMix: return "DLAA | Mix"; default: return "DLAA | TAA"; }
+}
+// the share row matters: mode mix, or split with a Mix side
+inline bool ShareUsed(int mode, int pair) { return ClampMode(mode) == kMix || (ClampMode(mode) == kSplit && PairHasMix(pair)); }
+
+// The composite's parameters for a mode: the mod's share (alpha) -- left of the split line in split -- and right of it.
+struct Mix { float modShare = 1.0f; bool split = false; float rightShare = 0.0f; };
+inline Mix MixOf(int mode, int taaPct, int pair = kPairDlaaTaa) {
     Mix x;
-    if (ClampMode(mode) == kMix) x.modShare = 1.0f - (float)ClampMix(taaPct) / 100.0f;
-    else if (ClampMode(mode) == kSplit) x.split = true;
+    const float mixShare = 1.0f - (float)ClampMix(taaPct) / 100.0f;
+    if (ClampMode(mode) == kMix) x.modShare = mixShare;
+    else if (ClampMode(mode) == kSplit) {
+        x.split = true;
+        switch (ClampPair(pair)) {
+        case kPairMixTaa: x.modShare = mixShare; x.rightShare = 0.0f; break;
+        case kPairDlaaMix: x.modShare = 1.0f; x.rightShare = mixShare; break;
+        default: x.modShare = 1.0f; x.rightShare = 0.0f; break;
+        }
+    }
     return x;
+}
+// the two sides of a pair
+inline void PairSides(int pair, int* left, int* right) {
+    switch (ClampPair(pair)) {
+    case kPairMixTaa: *left = kSideMix; *right = kSideTaa; break;
+    case kPairDlaaMix: *left = kSideMod; *right = kSideMix; break;
+    default: *left = kSideMod; *right = kSideTaa; break;
+    }
 }
 
 // ---- CbShadow: a CPU copy of the TAA resolve's constants, taken at the game's own UPLOAD (first in-game test, ATS flat 2026-10-30) --
 // The resolve reads its cb0 from one of THREE 2 MB DYNAMIC constant-buffer rings that rotate per frame, at an offset that moves a
 // little (813824 -> 812800 bytes), and each ring is filled with ONE Map(WRITE_DISCARD) / Unmap per frame, on the game's MAIN thread,
 // before the render thread draws with it. So the copy cannot wait for "the buffer the resolve bound": it watches every buffer that a
-// resolve has read (kBufs, LRU), and at each Unmap / UpdateSubresource of a watched buffer copies a WINDOW of it around the offset the
-// resolve last used (any buffer; +- half, 16-byte aligned, clamped). The resolve's draw then reads its offset from the copy of THE
-// BUFFER IT BOUND when the window covers it and that copy is newer than this buffer's previous read (or from the same frame: a VR
-// pair at two offsets). A miss because the offset left the window doubles the window (up to kMaxHalf) and is counted.
+// resolve has read (kBufs, LRU), and at each Unmap / UpdateSubresource of a watched buffer copies a WINDOW of it: the RANGE of the
+// offsets resolves used recently (all buffers, min .. max + 256, re-measured every kPeriod reads) + kPad each side, 16-byte aligned,
+// clamped, at most kMaxSpan (then centred on the last offset). Game test 2: the offset jumped 12 KB -> 186 KB -> 327 KB -> 368 KB in
+// the first frames (the old +- 64 KB window around the LAST offset missed at each jump). The resolve's draw then reads its offset from
+// the copy of THE BUFFER IT BOUND when the window covers it and that copy is newer than this buffer's previous read (or from the same
+// frame: a VR pair at two offsets). A miss (the offset was new when the ring was filled) is counted; the next fill covers it.
 // Thread-safety is the caller's (inject.cpp: one mutex; Map / Unmap come from the main thread, the resolve draw from the render one).
 class CbShadow {
 public:
     static constexpr int      kBufs = 4;
-    static constexpr uint32_t kMinHalf = 64u * 1024u, kMaxHalf = 512u * 1024u;
+    static constexpr uint32_t kPad = 64u * 1024u, kMaxSpan = 1536u * 1024u, kPeriod = 900u;
     typedef void (*CopyFn)(void* dst, const void* src, size_t n);   // inject.cpp passes a write-combined-friendly copy
 
     // a resolve draw bound `buf` (ByteWidth `width`) at byte offset `off`: watch it, and centre the next windows on `off`
     void Learn(const void* buf, uint32_t width, uint32_t off) {
         m_centre = off;
+        const uint32_t end = off + 256u;
+        if (!m_have) { m_lo = m_pLo = off; m_hi = m_pHi = end; m_have = true; }
+        if (off < m_lo) m_lo = off;
+        if (end > m_hi) m_hi = end;
+        if (off < m_pLo) m_pLo = off;
+        if (end > m_pHi) m_pHi = end;
+        if (++m_learns % kPeriod == 0) { m_lo = m_pLo; m_hi = m_pHi; m_pLo = off; m_pHi = end; }   // forget offsets no longer used
         Entry* e = Find(buf);
         if (!e) {
             e = Lru();
@@ -192,7 +265,7 @@ public:
         if (!e || !e->copies) return false;
         const uint64_t bytes = (uint64_t)n * 4u;
         if (off < e->lo || (uint64_t)off + bytes > (uint64_t)e->lo + e->len) {
-            if (m_half < kMaxHalf) { m_half *= 2; if (grown) *grown = true; }
+            if (grown) *grown = true;                    // (Learn already widened the range: the next fill covers it)
             return false;
         }
         const bool fresh = e->copies != e->readCopies || frame == e->readFrame;
@@ -202,9 +275,14 @@ public:
         for (size_t i = 0; i < n; ++i) { float f; unsigned char* d = (unsigned char*)&f; for (int k = 0; k < 4; ++k) d[k] = s[4 * i + k]; out[i] = f; }
         return true;
     }
-    uint32_t Half() const { return m_half; }
+    uint32_t Half() const { return Span() / 2u; }        // (log: half the window copied per upload)
+    uint32_t Span() const {
+        if (!m_have) return 2u * kPad;
+        const uint32_t s = m_hi - m_lo + 2u * kPad;
+        return s > kMaxSpan ? kMaxSpan : s;
+    }
     uint64_t Uploads() const { return m_uploads; }
-    void Reset() { for (Entry& e : m_e) { delete[] e.data; e = Entry{}; } m_half = kMinHalf; m_centre = 0; }
+    void Reset() { for (Entry& e : m_e) { delete[] e.data; e = Entry{}; } m_have = false; m_centre = 0; m_learns = 0; }
     ~CbShadow() { for (Entry& e : m_e) delete[] e.data; }
     CbShadow() = default;
     CbShadow(const CbShadow&) = delete;
@@ -229,21 +307,27 @@ private:
     }
     bool Upload(Entry& e, const void* src, uint32_t srcLeft, uint32_t srcLen, CopyFn copy) {
         const uint32_t width = e.width ? e.width : srcLeft + srcLen;
-        uint32_t lo = m_centre > m_half ? ((m_centre - m_half) & ~15u) : 0u;
-        uint64_t hi = (uint64_t)m_centre + m_half;
+        uint32_t lo0 = m_have ? m_lo : m_centre, hi0 = m_have ? m_hi : m_centre + 256u;
+        if (hi0 - lo0 + 2u * kPad > kMaxSpan) {          // too wide: centred on the last offset
+            lo0 = m_centre > kMaxSpan / 2u - kPad ? m_centre - (kMaxSpan / 2u - kPad) : 0u;
+            hi0 = lo0 + kMaxSpan - 2u * kPad;
+        }
+        uint32_t lo = lo0 > kPad ? ((lo0 - kPad) & ~15u) : 0u;
+        uint64_t hi = (uint64_t)hi0 + kPad;
         if (hi > width) hi = width;
         if (lo < srcLeft) lo = srcLeft;
         if (hi > (uint64_t)srcLeft + srcLen) hi = (uint64_t)srcLeft + srcLen;
         if (hi <= lo) return false;
         const uint32_t n = (uint32_t)(hi - lo);
-        if (e.cap < n) { delete[] e.data; e.data = new unsigned char[2u * m_half + 64u]; e.cap = 2u * m_half + 64u; if (e.cap < n) return false; }
+        if (e.cap < n) { delete[] e.data; e.cap = n + 64u * 1024u; e.data = new unsigned char[e.cap]; }
         copy(e.data, static_cast<const unsigned char*>(src) + (lo - srcLeft), n);
         e.lo = lo; e.len = n; ++e.copies; ++m_uploads;
         return true;
     }
     Entry    m_e[kBufs];
-    uint32_t m_half = kMinHalf, m_centre = 0;
-    uint64_t m_tick = 0, m_uploads = 0;
+    uint32_t m_centre = 0, m_lo = 0, m_hi = 0, m_pLo = 0, m_pHi = 0;
+    bool     m_have = false;
+    uint64_t m_tick = 0, m_uploads = 0, m_learns = 0;
 };
 
 }  // namespace GameTaa

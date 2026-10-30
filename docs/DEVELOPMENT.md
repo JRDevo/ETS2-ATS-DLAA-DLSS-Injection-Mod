@@ -2445,6 +2445,26 @@ non-blocking readback timing -- so it is judged by the check totals and a verify
   detection, share, path, fallback reason); `the TAA resolve reads cb0 = buffer ...` when it learns the buffer (says if the Unmap hook
   is missing); a WARN once at `game_taa = 0` with a running TAA; at log level 4 a stats line every 1800 Presents (passes per path,
   jitter misses, copies by kind). The menu's Game TAA row says whether the game's TAA runs now.
+- **Round 3 (game test 2, d4b0b4e, ATS flat 4K, split): 479 of 594 passes fell back to the game's TAA, no split line seen.** Cause:
+  the composite needs an SRV of the unit's result, and `SceneDlaa` made `m_outSrv` / `m_sharpSrv` ONLY for upscaling units -- a
+  native-size unit with `SetCompositeOut` evaluated (the log: `first DLAA evaluate OK BEFORE THE TONEMAP`, ngx 0.96 ms) but could
+  never arm its composite (no `DLAA: upscale composite ready` line in the whole log): every HDR pass reported "the HDR run or its
+  blend did not happen", and the re-issued-tonemap passes drew nothing. Both SRVs are made for every unit now. Also: a unit built
+  while the jitter is held gets MVJittered at its creation (`DlaaProcessor::PresetMvJittered`; the log had create-then-recreate for
+  each colour set); the jitter-copy window is the RANGE of the offsets in recent use + 64 KB each side (max 1.5 MB, re-measured every
+  900 reads; the offsets jumped 12 KB -> 186 KB -> 327 KB -> 368 KB in the first frames); per-reason fallback counters
+  (`fallbacks by reason`) and the stats every 600 Presents at log level 4. The stage hysteresis (post-tonemap -> pre-tonemap after 60
+  passes) is the one path change seen at the start, not a per-pass flap.
+- **Split line (round 3, user request):** an opaque RED vertical line of `GameTaa::SplitLineWidth` px (2 px per 1080 px of height:
+  4 px at 4K) at `game_taa_split` %, with the labels, drawn EVERY frame while `game_taa = 2` right after the game's blit of the main
+  scene (`TaaDrawSplitOverlay` -> `SceneDlaa::DrawSplitOverlay`: the blit's output rect -- output resolution with DLSS, each eye's
+  picture in VR, independent of the DLAA area), also when the pass fell back (the mod's label then reads "DLAA (OFF)" / "DLSS (OFF)";
+  "TAA (OFF)" when the game's TAA is not running). The composite itself only cuts at the line.
+- **Split compares (round 3, `game_taa_pair`, menu row, saved, live only in split):** 0 DLAA | TAA (default), 1 Mix | TAA, 2 DLAA | Mix
+  -- the left side is the first. Mix = the mod's result blended with the game's TAA at `game_taa_mix` (the share row is live in mix
+  and in a split with a Mix side, `GameTaa::ShareUsed`). The composite gets the mod's share left (`Params[3].x`) and right
+  (`Params[3].z`) of the line (`GameTaa::MixOf(mode, mix, pair)`); the labels name each side ("DLAA" / "DLSS", "TAA", "MIX 50%", each
+  " (OFF)" when that side's input is missing this pass; `GameTaa::SideLabel` / `PairSides`; the font has D L A S T O F M I X ( ) % 0-9).
 - **Not verified in game yet / limits.** Whether SCS TAA runs in VR (if not: VR stays exactly mode 0). Whether the constants come
   through the window copy for every frame (round 2; a window miss grows it and is logged). The
   jitter sign (cb0[8].xy taken as the geometry shift). MVJittered (see above). Mirrors keep the mod's own mirror jitter (if the game

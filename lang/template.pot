@@ -332,7 +332,7 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
 msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -340,6 +340,14 @@ msgstr ""
 msgid ""
 "Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
 "on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
 msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -1819,6 +1827,21 @@ msgstr ""
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Split position"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split compares"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
 msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)

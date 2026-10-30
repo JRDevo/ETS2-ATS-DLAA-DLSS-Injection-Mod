@@ -281,12 +281,16 @@ public:
     // game's picture, a 1 px black divider each side of the middle). Read by Composite() / CompositeInto() at their draw.
     // split: the line at splitPct % of the output width; deco = the composite draws the line + labels itself (false: DrawSplitOverlay
     // draws them later -- the HDR path, whose composite goes into the tonemap's input before the tonemap)
-    void SetMix(float modShare, bool split, int splitPct = 50, bool deco = true) {
+    // rightShare = the mod's share right of the split line (game_taa_pair: 0 = the game's TAA, the mix share = Mix)
+    void SetMix(float modShare, bool split, int splitPct = 50, bool deco = true, float rightShare = 0.0f) {
         m_mixShare = modShare < 0.0f ? 0.0f : (modShare > 1.0f ? 1.0f : modShare); m_mixSplit = split;
         m_splitPct = splitPct < 0 ? 0 : (splitPct > 100 ? 100 : splitPct); m_splitDeco = deco;
+        m_mixRight = rightShare < 0.0f ? 0.0f : (rightShare > 1.0f ? 1.0f : rightShare);
     }
-    // the split line + labels alone over the bound RT0 (viewport x0, y0, w x h; "DLSS" or "DLAA" on the mod's side)
-    bool DrawSplitOverlay(ID3D11DeviceContext* ctx, uint32_t x0, uint32_t y0, uint32_t w, uint32_t h, int pct, bool dlss);
+    // the split line (opaque red, GameTaa::SplitLineWidth) + the two labels alone over the bound RT0, viewport x0, y0, w x h (the
+    // game's blit output: output resolution with DLSS, each eye's picture in VR); labels like "DLAA", "DLSS (OFF)", "TAA"
+    bool DrawSplitOverlay(ID3D11DeviceContext* ctx, uint32_t x0, uint32_t y0, uint32_t w, uint32_t h, int pct, const char* left,
+                          const char* right);
     static float LabelCell(uint32_t h) { const float c = (float)(h / 540u); return c < 1.0f ? 1.0f : c; }   // label px per font cell
     // The pending composite (a Run with SetCompositeOut, no upscaling) drawn into `dst` (scene-sized, e.g. the game's tonemap INPUT,
     // RGBA16F) through an RTV of our own: the game's RTs / DSV and PS SRV slots 0..7 are saved first and put back after (binding
@@ -473,6 +477,7 @@ private:
     bool                                              m_mixSplit = false;
     int                                               m_splitPct = 50;       // phase 82: the split line in % of the width
     bool                                              m_splitDeco = true;    // phase 82: the composite draws the line + labels
+    float                                             m_mixRight = 0.0f;     // phase 82: the mod's share right of the split line
     bool                                              m_mvJittered = false;  // phase 82 SetMvJittered
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView>    m_intoRtv;             // phase 82 CompositeInto: RTV of m_intoTex
     ID3D11Texture2D*                                  m_intoTex = nullptr;   //   (identity; the RTV holds the reference)
@@ -540,7 +545,7 @@ private:
     bool                                              m_compPending = false; // Run produced a result for Composite()
     ID3D11ShaderResourceView*                         m_compSrc = nullptr;   // m_sharpSrv or m_outSrv (owned by them)
     ID3D11Texture2D*                                  m_result = nullptr;    // ResultTex() (owned by m_out / m_sharp)
-    float                                             m_compData[20] = {};   // last written m_compParams (phase 82: + [3] mix, [4] labels)
+    float                                             m_compData[28] = {};   // last written m_compParams (phase 82: + [3] mix, [4..5] overlay)
     bool                                              m_compDataValid = false;
 
     // Timestamps: 0 start, 1 after copy-in, 2 after depth convert, 3 after MV, 4 after NGX evaluate,

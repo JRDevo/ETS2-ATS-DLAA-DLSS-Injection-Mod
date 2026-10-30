@@ -385,19 +385,19 @@ msgid ""
 "mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
 "right, to compare."
 msgstr ""
-"Csak akkor, ha a játék élsimítása TAA. ki = csak a mod (állítsd a játék AA-ját Letiltva "
-"értékre). kevert = TAA és DLAA / DLSS ugyanazon a képkockán, keverve. osztott = balra a mod, "
-"jobbra a TAA, összehasonlításhoz."
+"Csak akkor, ha a játék élsimítása TAA. ki = csak a mod (állítsd a játék AA-ját Letiltva értékre). "
+"kevert = TAA és DLAA / DLSS ugyanazon a képkockán, keverve. osztott = balra a mod, jobbra a TAA, "
+"összehasonlításhoz."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
 msgstr ""
 "A keverék mekkora része a játék TAA-ja, 0 - 100 % 10 %-os lépésekben: több = nyugodtabb és "
-"lágyabb (TAA), kevesebb = élesebb (DLAA / DLSS). Csak akkor él, ha a Játék TAA értéke kevert. "
-"Nincs extra költség."
+"lágyabb (TAA), kevesebb = élesebb (DLAA / DLSS). Akkor él, ha a Játék TAA értéke kevert, vagy "
+"osztott kevert oldallal. Nincs extra költség."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -407,6 +407,17 @@ msgid ""
 msgstr ""
 "Hol van a Játék TAA osztott vonala, a szélesség 0 - 100 %-a 5 %-os lépésekben: tőle balra a mod "
 "DLAA / DLSS-e, jobbra a játék TAA-ja. Csak akkor él, ha a Játék TAA értéke osztott."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"Mit mutat a Játék TAA osztott a két oldalán: DLAA | TAA (balra a mod, jobbra a játék TAA-ja), "
+"kevert | TAA vagy DLAA | kevert (kevert = a kettő keverve a Játék TAA aránya szerint). "
+"Felskálázáskor DLAA helyett DLSS. Csak akkor él, ha a Játék TAA értéke osztott."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2024,6 +2035,21 @@ msgstr "Osztás helye"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Split compares"
+msgstr "Osztás összehasonlít"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr "kevert | TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
+msgstr "DLAA | kevert"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (VR képgen.)"
 
@@ -2491,15 +2517,6 @@ msgstr "infó"
 msgid "debug"
 msgstr "hibakeresés"
 
-#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
-#~ msgstr "Csak akkor, ha a játék élsimítása TAA. ki = csak a mod (állítsd a játék AA-ját Letiltva értékre). kevert = TAA és DLAA / DLSS ugyanazon a képkockán, keverve. csak TAA = DLAA nélkül, összehasonlításhoz. osztott = balra a mod, jobbra a TAA."
-
-#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
-#~ msgstr "A játék TAA-ja most fut: állítsd a játék élsimítását Letiltva értékre, vagy válassz kevert, csak TAA vagy osztott módot."
-
-#~ msgid "The game's TAA is running now: TAA only (see the log)."
-#~ msgstr "A játék TAA-ja most fut: csak TAA (lásd a naplót)."
-
-#~ msgid "TAA only"
-#~ msgstr "csak TAA"
+#~ msgid "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+#~ msgstr "A keverék mekkora része a játék TAA-ja, 0 - 100 % 10 %-os lépésekben: több = nyugodtabb és lágyabb (TAA), kevesebb = élesebb (DLAA / DLSS). Csak akkor él, ha a Játék TAA értéke kevert. Nincs extra költség."
 

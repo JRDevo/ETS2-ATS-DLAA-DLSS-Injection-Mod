@@ -379,17 +379,17 @@ msgid ""
 "right, to compare."
 msgstr ""
 "Chỉ khi Khử răng cưa của game đặt ở TAA. tắt = chỉ mod (đặt AA của game là Tắt). trộn = TAA và "
-"DLAA / DLSS trên cùng một khung hình, hòa trộn. chia đôi = bên trái mod, bên phải TAA, để so "
-"sánh."
+"DLAA / DLSS trên cùng một khung hình, hòa trộn. chia đôi = bên trái mod, bên phải TAA, để so sánh."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
 msgstr ""
-"TAA của game chiếm bao nhiêu trong phần trộn, 0 - 100 % theo bước 10 %: nhiều hơn = êm và mềm hơn "
-"(TAA), ít hơn = nét hơn (DLAA / DLSS). Chỉ dùng khi TAA của game là trộn. Không tốn thêm."
+"TAA của game chiếm bao nhiêu trong phần trộn, 0 - 100 % theo bước 10 %: nhiều hơn = êm và mềm "
+"hơn (TAA), ít hơn = nét hơn (DLAA / DLSS). Dùng khi TAA của game là trộn, hoặc chia đôi có một "
+"bên trộn. Không tốn thêm."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -399,6 +399,17 @@ msgid ""
 msgstr ""
 "Vị trí đường chia của TAA của game ở chế độ chia đôi, 0 - 100 % chiều rộng theo bước 5 %: bên "
 "trái là DLAA / DLSS của mod, bên phải là TAA của game. Chỉ dùng khi TAA của game là chia đôi."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"TAA của game ở chế độ chia đôi hiển thị gì ở hai bên: DLAA | TAA (bên trái mod, bên phải TAA "
+"của game), trộn | TAA hoặc DLAA | trộn (trộn = hai thứ hòa trộn theo Tỉ lệ TAA của game). DLSS "
+"thay cho DLAA khi nâng độ phân giải. Chỉ dùng khi TAA của game là chia đôi."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2006,6 +2017,21 @@ msgstr "Vị trí chia"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Split compares"
+msgstr "Chia đôi so sánh"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr "trộn | TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
+msgstr "DLAA | trộn"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (tạo khung VR)"
 
@@ -2471,15 +2497,6 @@ msgstr "thông tin"
 msgid "debug"
 msgstr "gỡ lỗi"
 
-#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
-#~ msgstr "Chỉ khi Khử răng cưa của game đặt ở TAA. tắt = chỉ mod (đặt AA của game là Tắt). trộn = TAA và DLAA / DLSS trên cùng một khung hình, hòa trộn. chỉ TAA = không DLAA, để so sánh. chia đôi = bên trái mod, bên phải TAA."
-
-#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
-#~ msgstr "TAA của game đang chạy: đặt khử răng cưa của game là Tắt, hoặc chọn trộn, chỉ TAA hay chia đôi."
-
-#~ msgid "The game's TAA is running now: TAA only (see the log)."
-#~ msgstr "TAA của game đang chạy: chỉ TAA (xem nhật ký)."
-
-#~ msgid "TAA only"
-#~ msgstr "chỉ TAA"
+#~ msgid "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+#~ msgstr "TAA của game chiếm bao nhiêu trong phần trộn, 0 - 100 % theo bước 10 %: nhiều hơn = êm và mềm hơn (TAA), ít hơn = nét hơn (DLAA / DLSS). Chỉ dùng khi TAA của game là trộn. Không tốn thêm."
 

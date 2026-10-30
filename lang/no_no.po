@@ -383,18 +383,18 @@ msgid ""
 "mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
 "right, to compare."
 msgstr ""
-"Bare når spillets kantutjevning er TAA. av = bare modden (sett spillets AA til Deaktivert). mix "
-"= TAA og DLAA / DLSS i samme bilde, blandet. delt = venstre modden, høyre TAA, for "
-"sammenligning."
+"Bare når spillets kantutjevning er TAA. av = bare modden (sett spillets AA til Deaktivert). mix = "
+"TAA og DLAA / DLSS i samme bilde, blandet. delt = venstre modden, høyre TAA, for sammenligning."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
 msgstr ""
-"Hvor stor del av miksen som er spillets TAA, 0 - 100 % i trinn på 10 %: mer = roligere og mykere "
-"(TAA), mindre = skarpere (DLAA / DLSS). Brukes bare når Spillets TAA er mix. Ingen ekstra kostnad."
+"Hvor stor del av miksen som er spillets TAA, 0 - 100 % i trinn på 10 %: mer = roligere og "
+"mykere (TAA), mindre = skarpere (DLAA / DLSS). Brukes når Spillets TAA er mix, eller delt med "
+"en mix-side. Ingen ekstra kostnad."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -404,6 +404,17 @@ msgid ""
 msgstr ""
 "Hvor linjen for Spillets TAA delt ligger, 0 - 100 % av bredden i trinn på 5 %: til venstre "
 "moddens DLAA / DLSS, til høyre spillets TAA. Brukes bare når Spillets TAA er delt."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"Hva Spillets TAA delt viser på de to sidene: DLAA | TAA (modden til venstre, spillets TAA til "
+"høyre), mix | TAA eller DLAA | mix (mix = de to blandet etter Andel av spillets TAA). DLSS i "
+"stedet for DLAA ved oppskalering. Brukes bare når Spillets TAA er delt."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1150,7 +1161,8 @@ msgstr "Spillets TAA kjører ikke nå: modden kjører alene."
 #, c-format
 msgid ""
 "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
-msgstr "Spillets TAA kjører nå: sett spillets kantutjevning til Deaktivert, eller velg mix eller delt."
+msgstr ""
+"Spillets TAA kjører nå: sett spillets kantutjevning til Deaktivert, eller velg mix eller delt."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2021,6 +2033,21 @@ msgstr "Delingsposisjon"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Split compares"
+msgstr "Delt sammenligner"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr "mix | TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
+msgstr "DLAA | mix"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (VR-framegen)"
 
@@ -2487,15 +2514,6 @@ msgstr "info"
 msgid "debug"
 msgstr "feilsøking"
 
-#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
-#~ msgstr "Bare når spillets kantutjevning er TAA. av = bare modden (sett spillets AA til Deaktivert). mix = TAA og DLAA / DLSS i samme bilde, blandet. kun TAA = ingen DLAA, for sammenligning. delt = venstre modden, høyre TAA."
-
-#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
-#~ msgstr "Spillets TAA kjører nå: sett spillets kantutjevning til Deaktivert, eller velg mix, kun TAA eller delt."
-
-#~ msgid "The game's TAA is running now: TAA only (see the log)."
-#~ msgstr "Spillets TAA kjører nå: kun TAA (se loggen)."
-
-#~ msgid "TAA only"
-#~ msgstr "kun TAA"
+#~ msgid "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+#~ msgstr "Hvor stor del av miksen som er spillets TAA, 0 - 100 % i trinn på 10 %: mer = roligere og mykere (TAA), mindre = skarpere (DLAA / DLSS). Brukes bare når Spillets TAA er mix. Ingen ekstra kostnad."
 

@@ -399,11 +399,11 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
 msgstr ""
-"Nahastearen zenbat den jokoaren TAA, 0 - 100 % 10 %-ko urratsetan: gehiago = lasaiago eta leunago "
-"(TAA), gutxiago = zorrotzago (DLAA / DLSS). Jokoaren TAA nahastea denean soilik erabiltzen da. "
-"Kostu gehigarririk gabe."
+"Nahastearen zenbat den jokoaren TAA, 0 - 100 % 10 %-ko urratsetan: gehiago = lasaiago eta "
+"leunago (TAA), gutxiago = zorrotzago (DLAA / DLSS). Jokoaren TAA nahastea denean erabiltzen da, "
+"edo zatitua nahastea alde batean duenean. Kostu gehigarririk gabe."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -413,6 +413,18 @@ msgid ""
 msgstr ""
 "Jokoaren TAA zatituaren lerroa non dagoen, zabaleraren 0 - 100 % 5 %-ko urratsetan: ezkerrean "
 "mod-aren DLAA / DLSS, eskuinean jokoaren TAA. Jokoaren TAA zatitua denean soilik erabiltzen da."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"Jokoaren TAA zatituak bere bi aldeetan zer erakusten duen: DLAA | TAA (ezkerrean mod-a, "
+"eskuinean jokoaren TAA), nahastea | TAA edo DLAA | nahastea (nahastea = biak nahastuta Jokoaren "
+"TAA zatiaren arabera). DLSS DLAA ordez eskalatzean. Jokoaren TAA zatitua denean soilik "
+"erabiltzen da."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2045,6 +2057,21 @@ msgstr "Zatiketaren posizioa"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Split compares"
+msgstr "Zatiketak alderatzen du"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr "nahastea | TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
+msgstr "DLAA | nahastea"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (VR fotogr.)"
 
@@ -2513,15 +2540,6 @@ msgstr "info"
 msgid "debug"
 msgstr "arazketa"
 
-#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
-#~ msgstr "Jokoaren anti-aliasing-a TAA denean soilik. ezgaituta = mod-a bakarrik (jarri jokoaren AA Ezgaituta moduan). nahastea = TAA eta DLAA / DLSS fotograma berean, nahastuta. TAA soilik = DLAA gabe, alderatzeko. zatitua = ezkerrean mod-a, eskuinean TAA."
-
-#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
-#~ msgstr "Jokoaren TAA martxan dago orain: jarri jokoaren anti-aliasing-a Ezgaituta moduan, edo aukeratu nahastea, TAA soilik edo zatitua."
-
-#~ msgid "The game's TAA is running now: TAA only (see the log)."
-#~ msgstr "Jokoaren TAA martxan dago orain: TAA soilik (ikusi erregistroa)."
-
-#~ msgid "TAA only"
-#~ msgstr "TAA soilik"
+#~ msgid "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+#~ msgstr "Nahastearen zenbat den jokoaren TAA, 0 - 100 % 10 %-ko urratsetan: gehiago = lasaiago eta leunago (TAA), gutxiago = zorrotzago (DLAA / DLSS). Jokoaren TAA nahastea denean soilik erabiltzen da. Kostu gehigarririk gabe."
 

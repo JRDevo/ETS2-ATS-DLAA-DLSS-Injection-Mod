@@ -134,7 +134,11 @@ static int GateCheck(const char* after) {
         static const wchar_t* const kTaa[GameTaa::kModeCount] = { L"off", L"mix", L"split" };
         expect(!wcscmp(val(MR_GAMETAA), kTaa[GameTaa::ClampMode(g_gameTaa)]) && g_gameTaa == GameTaa::ClampMode(g_gameTaa), MR_GAMETAA,
                "Game TAA: the menu and g_gameTaa disagree");
-        expect(grey(MR_TAAMIX) == (g_gameTaa != GameTaa::kMix), MR_TAAMIX, "Game TAA share is live exactly in mode mix");
+        expect(grey(MR_TAAMIX) == !GameTaa::ShareUsed(g_gameTaa, g_gameTaaPair), MR_TAAMIX,
+               "Game TAA share is live exactly in mode mix and in split with a Mix side");
+        static const wchar_t* const kPair[GameTaa::kPairCount] = { L"DLAA | TAA", L"Mix | TAA", L"DLAA | Mix" };
+        expect(!wcscmp(val(MR_TAAPAIR), kPair[GameTaa::ClampPair(g_gameTaaPair)]) && grey(MR_TAAPAIR) == (g_gameTaa != GameTaa::kSplit),
+               MR_TAAPAIR, "Split compares: the menu and g_gameTaaPair disagree, or not greyed exactly outside split");
         wchar_t pct[16];
         swprintf(pct, 16, L"%d %%", g_gameTaaMix);
         expect(!wcscmp(val(MR_TAAMIX), pct) && g_gameTaaMix % GameTaa::kMixStep == 0, MR_TAAMIX,

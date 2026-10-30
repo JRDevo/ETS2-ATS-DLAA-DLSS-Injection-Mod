@@ -386,18 +386,18 @@ msgid ""
 "right, to compare."
 msgstr ""
 "Yalnızca oyunun Kenar yumuşatması TAA iken. kapalı = yalnız mod (oyunun AA'sını Devre dışı "
-"yapın). karışık = TAA ve DLAA / DLSS aynı karede, harmanlanmış. bölünmüş = solda mod, sağda "
-"TAA, karşılaştırma için."
+"yapın). karışık = TAA ve DLAA / DLSS aynı karede, harmanlanmış. bölünmüş = solda mod, sağda TAA, "
+"karşılaştırma için."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
 msgstr ""
-"Karışımın ne kadarının oyunun TAA'sı olduğu, 0 - 100 %, 10 % adımlarla: daha çok = daha sakin ve "
-"yumuşak (TAA), daha az = daha keskin (DLAA / DLSS). Yalnızca Oyun TAA'sı karışık iken kullanılır. "
-"Ek maliyet yok."
+"Karışımın ne kadarının oyunun TAA'sı olduğu, 0 - 100 %, 10 % adımlarla: daha çok = daha sakin "
+"ve yumuşak (TAA), daha az = daha keskin (DLAA / DLSS). Oyun TAA'sı karışık iken veya karışık "
+"tarafı olan bölünmüş iken kullanılır. Ek maliyet yok."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -407,6 +407,17 @@ msgid ""
 msgstr ""
 "Oyun TAA'sı bölünmüş çizgisinin yeri, genişliğin 0 - 100 %, 5 % adımlarla: solunda modun DLAA / "
 "DLSS'i, sağında oyunun TAA'sı. Yalnızca Oyun TAA'sı bölünmüş iken kullanılır."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"Oyun TAA'sı bölünmüş iki tarafında ne gösterir: DLAA | TAA (solda mod, sağda oyunun TAA'sı), "
+"karışık | TAA veya DLAA | karışık (karışık = ikisi Oyun TAA payına göre harmanlanır). "
+"Ölçeklemede DLAA yerine DLSS. Yalnızca Oyun TAA'sı bölünmüş iken kullanılır."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2023,6 +2034,21 @@ msgstr "Bölme konumu"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Split compares"
+msgstr "Bölme karşılaştırır"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr "karışık | TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
+msgstr "DLAA | karışık"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (VR kare üretimi)"
 
@@ -2489,15 +2515,6 @@ msgstr "bilgi"
 msgid "debug"
 msgstr "hata ayıklama"
 
-#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
-#~ msgstr "Yalnızca oyunun Kenar yumuşatması TAA iken. kapalı = yalnız mod (oyunun AA'sını Devre dışı yapın). karışık = TAA ve DLAA / DLSS aynı karede, harmanlanmış. yalnız TAA = DLAA yok, karşılaştırma için. bölünmüş = solda mod, sağda TAA."
-
-#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
-#~ msgstr "Oyunun TAA'sı şu an çalışıyor: oyunun kenar yumuşatmasını Devre dışı yapın ya da karışık, yalnız TAA veya bölünmüş seçin."
-
-#~ msgid "The game's TAA is running now: TAA only (see the log)."
-#~ msgstr "Oyunun TAA'sı şu an çalışıyor: yalnız TAA (günlüğe bakın)."
-
-#~ msgid "TAA only"
-#~ msgstr "yalnız TAA"
+#~ msgid "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+#~ msgstr "Karışımın ne kadarının oyunun TAA'sı olduğu, 0 - 100 %, 10 % adımlarla: daha çok = daha sakin ve yumuşak (TAA), daha az = daha keskin (DLAA / DLSS). Yalnızca Oyun TAA'sı karışık iken kullanılır. Ek maliyet yok."
 

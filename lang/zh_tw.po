@@ -332,27 +332,35 @@ msgid ""
 "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
 "mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
 "right, to compare."
-msgstr ""
-"僅當遊戲的反鋸齒為TAA時有效。關 = 僅Mod (將遊戲的AA設為停用)。混合 = "
-"在同一影格中混合TAA與DLAA / DLSS。分割 = "
-"左側Mod，右側TAA，用於比較。"
+msgstr "僅當遊戲的反鋸齒為TAA時有效。關 = 僅Mod (將遊戲的AA設為停用)。混合 = 在同一影格中混合TAA與DLAA / DLSS。分割 = 左側Mod，右側TAA，用於比較。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
 msgstr ""
-"混合中遊戲TAA所佔比例，0 - 100 %，每步10 %: 越高 = 越穩定柔和 (TAA)，越低 = 越銳利 (DLAA / DLSS)。僅在遊戲TAA為混合時使用。沒有額外負擔。"
+"混合中遊戲TAA所佔比例，0 - 100 %，每步10 %: 越高 = 越穩定柔和 "
+"(TAA)，越低 = 越銳利 (DLAA / "
+"DLSS)。遊戲TAA為混合，或帶混合一側的分割時使用。沒有額外負擔。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
 "on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr "遊戲TAA分割線的位置 (佔寬度的0 - 100 %，每步5 %): 線左側為Mod的DLAA / DLSS，右側為遊戲的TAA。僅在遊戲TAA為分割時使用。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
 msgstr ""
-"遊戲TAA分割線的位置 (佔寬度的0 - 100 %，每步5 %): "
-"線左側為Mod的DLAA / DLSS，右側為遊戲的TAA。僅在遊戲TAA為分割時使用。"
+"遊戲TAA分割在兩側顯示的內容: DLAA | TAA "
+"(左側Mod，右側遊戲的TAA)，混合 | TAA 或 DLAA | 混合 (混合 = "
+"按遊戲TAA佔比混合兩者)。升頻時用DLSS代替DLAA。僅在遊戲TAA為分割時使用。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1872,6 +1880,21 @@ msgstr "分割位置"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Split compares"
+msgstr "分割比較"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr "混合 | TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
+msgstr "DLAA | 混合"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (VR幀生成)"
 
@@ -2336,15 +2359,6 @@ msgstr "資訊"
 msgid "debug"
 msgstr "偵錯"
 
-#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
-#~ msgstr "僅當遊戲的反鋸齒為TAA時有效。關 = 僅Mod (將遊戲的AA設為停用)。混合 = 在同一影格中混合TAA與DLAA / DLSS。僅TAA = 不用DLAA，用於比較。分割 = 左側Mod，右側TAA。"
-
-#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
-#~ msgstr "遊戲的TAA目前正在執行: 請將遊戲的反鋸齒設為停用，或選擇混合、僅TAA或分割。"
-
-#~ msgid "The game's TAA is running now: TAA only (see the log)."
-#~ msgstr "遊戲的TAA目前正在執行: 僅TAA (見記錄檔)。"
-
-#~ msgid "TAA only"
-#~ msgstr "僅TAA"
+#~ msgid "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+#~ msgstr "混合中遊戲TAA所佔比例，0 - 100 %，每步10 %: 越高 = 越穩定柔和 (TAA)，越低 = 越銳利 (DLAA / DLSS)。僅在遊戲TAA為混合時使用。沒有額外負擔。"
 

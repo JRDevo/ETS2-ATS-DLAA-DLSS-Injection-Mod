@@ -386,18 +386,18 @@ msgid ""
 "right, to compare."
 msgstr ""
 "Само кога Anti-aliasing на играта е на TAA. искл. = само модот (поставете го AA на играта на "
-"Исклучено). мешавина = TAA и DLAA / DLSS на истата слика, измешани. поделено = лево модот, "
-"десно TAA, за споредба."
+"Исклучено). мешавина = TAA и DLAA / DLSS на истата слика, измешани. поделено = лево модот, десно "
+"TAA, за споредба."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
 msgstr ""
 "Колкав дел од мешавината е TAA на играта, 0 - 100 % во чекори од 10 %: повеќе = поспокојно и "
-"помеко (TAA), помалку = поостро (DLAA / DLSS). Се користи само кога TAA на играта е мешавина. Без "
-"дополнителен трошок."
+"помеко (TAA), помалку = поостро (DLAA / DLSS). Се користи кога TAA на играта е мешавина, или "
+"поделено со страна мешавина. Без дополнителен трошок."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -407,6 +407,17 @@ msgid ""
 msgstr ""
 "Каде е линијата на TAA на играта поделено, 0 - 100 % од ширината во чекори од 5 %: лево од неа "
 "DLAA / DLSS на модот, десно TAA на играта. Се користи само кога TAA на играта е поделено."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"Што прикажува TAA на играта поделено на двете страни: DLAA | TAA (лево модот, десно TAA на "
+"играта), мешавина | TAA или DLAA | мешавина (мешавина = двете измешани според Дел од TAA на "
+"играта). DLSS наместо DLAA при скалирање. Се користи само кога TAA на играта е поделено."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2027,6 +2038,21 @@ msgstr "Позиција на поделба"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Split compares"
+msgstr "Поделбата споредува"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr "мешавина | TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
+msgstr "DLAA | мешавина"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (VR кадри)"
 
@@ -2494,15 +2520,6 @@ msgstr "инфо"
 msgid "debug"
 msgstr "дебаг"
 
-#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
-#~ msgstr "Само кога Anti-aliasing на играта е на TAA. искл. = само модот (поставете го AA на играта на Исклучено). мешавина = TAA и DLAA / DLSS на истата слика, измешани. само TAA = без DLAA, за споредба. поделено = лево модот, десно TAA."
-
-#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
-#~ msgstr "TAA на играта сега работи: поставете го Anti-aliasing на играта на Исклучено или изберете мешавина, само TAA или поделено."
-
-#~ msgid "The game's TAA is running now: TAA only (see the log)."
-#~ msgstr "TAA на играта сега работи: само TAA (видете дневник)."
-
-#~ msgid "TAA only"
-#~ msgstr "само TAA"
+#~ msgid "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+#~ msgstr "Колкав дел од мешавината е TAA на играта, 0 - 100 % во чекори од 10 %: повеќе = поспокојно и помеко (TAA), помалку = поостро (DLAA / DLSS). Се користи само кога TAA на играта е мешавина. Без дополнителен трошок."
 

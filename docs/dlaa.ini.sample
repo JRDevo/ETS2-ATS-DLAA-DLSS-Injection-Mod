@@ -575,6 +575,9 @@ log_level = 1
 # game_taa_mix = 50
 # Where the split line is, in % of the width (0..100, menu: 5 % steps; VR: the same % of each eye's picture)
 # game_taa_split = 50
+# What split compares (menu "Split compares", only in split): 0 = DLAA | TAA (default: the mod left, the game's TAA right; DLSS when
+# upscaling), 1 = Mix | TAA, 2 = DLAA | Mix (Mix = the two blended at game_taa_mix). The labels at the top name each side.
+# game_taa_pair = 0
 # Written by Save with game_taa (the numbering of game_taa above); do not change it by hand
 # game_taa_ver = 2
 # Whether DLSS is told that the motion vectors carry the game's jitter (NGX MVJittered) in modes 1..3: -1 = auto (default: on,

@@ -1066,6 +1066,7 @@ int               g_gameTaa = GameTaa::kOff;
 int               g_gameTaaMix = GameTaa::kMixDefault;
 bool              g_gameTaaExplicit = false;  // set in dlaa.ini or changed in the menu -> SaveSettings writes game_taa + game_taa_mix
 int               g_gameTaaSplit = GameTaa::kSplitDefault;   // dlaa.ini game_taa_split: the split line in % of the width (menu "Split position")
+int               g_gameTaaPair = GameTaa::kPairDlaaTaa;      // dlaa.ini game_taa_pair: what split compares (menu "Split compares")
 int               g_gameTaaIniRaw = -1;       // LoadConfig: game_taa as written / game_taa_ver (absent = 0: the first build's 0..3 numbering)
 int               g_gameTaaIniVer = 0;
 int               g_taaLastWhy = 0;           // GameTaa::Why of the last held pass that fell back to TAA (the menu's status line)
@@ -3374,6 +3375,7 @@ void SaveSettings(uint64_t n) {
         snprintf(add("game_taa_ver"), sizeof(kv[0].val), "%d", GameTaa::kIniVersion);
         snprintf(add("game_taa_mix"), sizeof(kv[0].val), "%d", g_gameTaaMix);
         snprintf(add("game_taa_split"), sizeof(kv[0].val), "%d", g_gameTaaSplit);
+        snprintf(add("game_taa_pair"), sizeof(kv[0].val), "%d", g_gameTaaPair);
     }
     if (g_cpuTuneExplicit) {                              // phase 54 (CPU tuning row)
         snprintf(add("cpu_pcore"), sizeof(kv[0].val), "%d", g_cpuPcore);
@@ -3397,7 +3399,7 @@ void SaveSettings(uint64_t n) {
 #ifdef WITH_DLAA
     if (g_mvDilateExplicit) snprintf(add("dlaa_mv_dilate"), sizeof(kv[0].val), "%d", DlaaProcessor::MvDilate() ? 1 : 0);   // phase 60 (Alt+F10)
 #endif
-    char vrsW[320] = "";                                  // (phase 82: 288, + game_taa; phase 39: was 64, + log_level; phase 40: + xr_hidden_mask; phase 42: + vrs_passes;
+    char vrsW[352] = "";                                  // (phase 82: 288, + game_taa; phase 39: was 64, + log_level; phase 40: + xr_hidden_mask; phase 42: + vrs_passes;
                                                           //  phase 49: 128 -> 160, + dlss_bias_mask; phase 52: 160 -> 208, + the frame rate keys;
                                                           //  phase 59: 224, + vrs_eye; phase 59f: 256, + vrs_strength)
     if (g_vrsExplicit) snprintf(vrsW, sizeof(vrsW), " vrs=%d vrs_inner=%d vrs_outer=%d", g_vrsOn, g_vrsInner, g_vrsOuter);
@@ -3423,7 +3425,8 @@ void SaveSettings(uint64_t n) {
     }
     if (g_gameTaaExplicit) {                              // phase 82
         const size_t vl = strlen(vrsW);
-        snprintf(vrsW + vl, sizeof(vrsW) - vl, " game_taa=%d game_taa_mix=%d game_taa_split=%d", g_gameTaa, g_gameTaaMix, g_gameTaaSplit);
+        snprintf(vrsW + vl, sizeof(vrsW) - vl, " game_taa=%d game_taa_mix=%d game_taa_split=%d game_taa_pair=%d", g_gameTaa, g_gameTaaMix,
+                 g_gameTaaSplit, g_gameTaaPair);
     }
     if (g_logLevelExplicit) {
         const size_t vl = strlen(vrsW);
@@ -12542,10 +12545,10 @@ bool PreTonemapRun(ID3D11DeviceContext1* ctx, PassSlot& slot, ID3D11Texture2D* F
     SceneDlaa& dl = g_dlaa[0];
     // phase 82: a held pass composites (TaaOnTonemap), the game's jitter is in its motion vectors; else in place, exactly as before
     {
-        const GameTaa::Mix mx = GameTaa::MixOf(g_gameTaa, g_gameTaaMix);
+        const GameTaa::Mix mx = GameTaa::MixOf(g_gameTaa, g_gameTaaMix, g_gameTaaPair);
         dl.SetCompositeOut(slot.taaHold);
         dl.SetMvJittered(slot.taaHold && TaaMvJittered());
-        dl.SetMix(slot.taaHold ? mx.modShare : 1.0f, slot.taaHold && mx.split, g_gameTaaSplit, false);   // (HDR: the line comes later)
+        dl.SetMix(slot.taaHold ? mx.modShare : 1.0f, slot.taaHold && mx.split, g_gameTaaSplit, false, mx.rightShare);
     }
     if (g_resetNext) { g_resetEyes = (1 << kMaxViews) - 1; g_resetNext = false; }
     bool reset = (g_resetEyes & 1) != 0;
@@ -12755,9 +12758,15 @@ ID3D11ShaderResourceView* TaaRawSrvFor(ID3D11Device* dev, ID3D11Texture2D* raw) 
 // the re-issued tonemap's texture too (TaaPostAfterDraw: same state, RT0 swapped, a read of the tonemap target swapped for ours), so
 // the mod's picture has them and the composite does not cover them. Armed from the game's tonemap draw (after it) to the pass's blit.
 struct TaaPost { bool pendingArm = false, armed = false; void* rt = nullptr; int idx = 0; uint32_t n = 0; };
-// the HDR path's split: the line + labels are drawn right after the game's tonemap draw into its 8-bit target (w x h)
-struct TaaOverlay { bool pending = false; uint32_t w = 0, h = 0; };
-TaaOverlay g_taaOverlay;
+// game_taa = 2 (split): the red split line + the labels, drawn EVERY frame right after the game's blit of the main scene (over the
+// mod's composite, at the blit's output size: output resolution with DLSS, each eye's picture in VR) -- also when the pass fell back
+// to the game's TAA (then the mod's label reads "DLAA (OFF)"). Armed by HandlePossibleBlit, drawn by hkDraw after the blit Draw.
+struct TaaSplitOv { bool pending = false; void* rt = nullptr; int eye = 0; uint32_t x = 0, y = 0, w = 0, h = 0; bool dlss = false,
+                    modRan = false, taaLive = false; };
+TaaSplitOv g_taaSplitOv;
+uint64_t   g_taaSplitOvDrawn = 0, g_taaSplitOvMissed = 0;
+uint64_t   g_taaWhyN[GameTaa::kWhyCount] = {};       // fallbacks by reason (stats line)
+uint64_t   g_taaLdrRunFails = 0;                    // re-issued tonemap passes whose blit-unit Run did not evaluate
 TaaPost  g_taaPost;
 uint64_t g_taaPostReplays = 0, g_taaPostSrvSwaps = 0;
 
@@ -12920,8 +12929,8 @@ void TaaOnResolve(ID3D11DeviceContext* ctx) {
             got = g_taaCb.Read(cb, off, now, f, 64, &grown);
         }
         if (grown && g_taaCbGrown++ < 4)
-            Log("game TAA (phase 82): the resolve's offset %u left the copied window -- the window grows to +- %u KB", off,
-                g_taaCb.Half() / 1024u);
+            Log("game TAA (phase 82): the resolve's offset %u was outside the copied window -- the window now spans %u KB (the range of "
+                "recent offsets + 64 KB each side)", off, g_taaCb.Span() / 1024u);
         float sx = 0.0f, sy = 0.0f;
         if (got && GameTaa::ParseJitter(f, 64, g_sceneW, g_sceneH, &sx, &sy)) {
             ok = true;
@@ -13086,8 +13095,6 @@ void TaaOnTonemap(ID3D11DeviceContext* ctx, ID3D11Texture2D* src, void* rtPtr, c
         if (!ok) {
             act = GameTaa::kActTaaOnly; why = "the HDR run or its blend did not happen this pass (NGX create budget / failure)";
             whyCode = GameTaa::kWhyRunFailed;
-        } else if (g_gameTaa == GameTaa::kSplit) {        // the line + labels go into the 8-bit picture after the game's tonemap
-            g_taaOverlay.pending = true; g_taaOverlay.w = rtDesc.Width; g_taaOverlay.h = rtDesc.Height;
         }
     } else if (act == GameTaa::kActLdr) {
         if (!TaaReissueTonemap(ctx, slot, rtDesc, rvd, verts)) {
@@ -13098,6 +13105,7 @@ void TaaOnTonemap(ID3D11DeviceContext* ctx, ID3D11Texture2D* src, void* rtPtr, c
     slot.taaAct = act;
     g_taaLastAct = act;
     g_taaLastWhy = act == GameTaa::kActTaaOnly ? whyCode : GameTaa::kWhyNone;
+    if (act == GameTaa::kActTaaOnly) ++g_taaWhyN[whyCode % GameTaa::kWhyCount];
     g_taaChainS = UINT64_MAX;                            // the chain ends at its tonemap
     ++g_taaActN[act & 3];
     TaaNote(act, why);
@@ -13111,7 +13119,7 @@ void TaaOnPassStart(uint64_t frame, bool hold) {
 }
 // the stats line (every 1800 Presents while game_taa != 0 and the resolve is live): what the passes got
 void TaaStats(uint64_t now) {
-    if (g_gameTaa == GameTaa::kOff || !GameTaa::Live(g_taaLastSeen, now) || now - g_taaStatsAt < 1800) return;
+    if (g_gameTaa == GameTaa::kOff || !GameTaa::Live(g_taaLastSeen, now) || now - g_taaStatsAt < 600) return;
     g_taaStatsAt = now;
     LogDbg("game TAA (phase 82) stats: mode=%s share=%d %% | resolves %llu (shape misses %llu), no game jitter %llu | passes: HDR mix "
         "%llu, re-issued tonemap %llu, TAA only %llu, unheld %llu | raw scene from the compress pass %llu | blits: on the re-issued "
@@ -13122,6 +13130,40 @@ void TaaStats(uint64_t now) {
         (unsigned long long)g_taaActN[GameTaa::kActNone], (unsigned long long)g_taaRawFromCompress,
         (unsigned long long)g_taaLdrBlits, (unsigned long long)g_taaOnlyBlits, (unsigned long long)g_taaCbCopies[1],
         (unsigned long long)g_taaCbCopies[2], (unsigned long long)g_taaCbCopies[3]);
+    LogDbg("game TAA (phase 82) fallbacks by reason: no resolve %llu, no jitter %llu, no raw scene %llu, HDR run / blend failed %llu, "
+        "HDR output %llu, DLAA off %llu, no tonemap %llu | re-issued passes whose Run / composite did not happen %llu | window misses "
+        "%llu (window +- %u KB) | split overlay drawn %llu, missed %llu", (unsigned long long)g_taaWhyN[GameTaa::kWhyNoResolve],
+        (unsigned long long)g_taaWhyN[GameTaa::kWhyNoJitter], (unsigned long long)g_taaWhyN[GameTaa::kWhyNoRaw],
+        (unsigned long long)g_taaWhyN[GameTaa::kWhyRunFailed], (unsigned long long)g_taaWhyN[GameTaa::kWhyHdrOut],
+        (unsigned long long)g_taaWhyN[GameTaa::kWhyDlaaOff], (unsigned long long)g_taaWhyN[GameTaa::kWhyNoTonemap],
+        (unsigned long long)g_taaLdrRunFails, (unsigned long long)g_taaCbGrown, g_taaCb.Half() / 1024u,
+        (unsigned long long)g_taaSplitOvDrawn, (unsigned long long)g_taaSplitOvMissed);
+}
+
+// the armed split overlay right after the blit's Draw (and its composite): RT0 must still be the blit's target
+void TaaDrawSplitOverlay(ID3D11DeviceContext* ctx) {
+    g_taaSplitOv.pending = false;
+    const int eye = g_taaSplitOv.eye;
+    if (eye < 0 || eye >= kMaxViews) return;
+    ID3D11RenderTargetView* rtv = nullptr;
+    ctx->OMGetRenderTargets(1, &rtv, nullptr);
+    ID3D11Resource* res = nullptr;
+    if (rtv) { rtv->GetResource(&res); rtv->Release(); }
+    const bool same = res && (void*)res == g_taaSplitOv.rt;
+    if (res) res->Release();
+    if (!same) { ++g_taaSplitOvMissed; return; }
+    int ls = 0, rs = 0;
+    GameTaa::PairSides(g_gameTaaPair, &ls, &rs);
+    char left[16], right[16];
+    GameTaa::SideLabel(ls, g_taaSplitOv.dlss, g_taaSplitOv.modRan, g_taaSplitOv.taaLive, g_gameTaaMix, left, sizeof(left));
+    GameTaa::SideLabel(rs, g_taaSplitOv.dlss, g_taaSplitOv.modRan, g_taaSplitOv.taaLive, g_gameTaaMix, right, sizeof(right));
+    t_inDlaa = true;
+    const bool ok = g_dlaa[eye].DrawSplitOverlay(ctx, g_taaSplitOv.x, g_taaSplitOv.y, g_taaSplitOv.w, g_taaSplitOv.h, g_gameTaaSplit,
+                                                 left, right);
+    t_inDlaa = false;
+    if (ok) { if (g_taaSplitOvDrawn++ == 0) Log("game TAA (phase 82): split line drawn (first; red, %.0f px at %u px height, at %d %% of %u px)",
+                                               (double)GameTaa::SplitLineWidth(g_taaSplitOv.h), g_taaSplitOv.h, g_gameTaaSplit, g_taaSplitOv.w); }
+    else ++g_taaSplitOvMissed;
 }
 #endif
 
@@ -13306,7 +13348,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     // in both axes AND larger in one; else the v0.6.5 DLAA path. The scene vs RT size IS the render scale
     // (r_scale_x / r_scale_y shrink only the scene texture).
     uint32_t upX = 0, upY = 0, upW = 0, upH = 0;         // output rect in RT0 (upW = 0: no upscale)
-    uint32_t blitOx = 0, blitOy = 0;                     // phase 82: the blit's output origin in RT0 (a native-size composite)
+    uint32_t blitOx = 0, blitOy = 0, blitOw = 0, blitOh = 0;   // phase 82: the blit's output rect in RT0 (composite / split overlay)
     const bool srgbDecode = svd.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB || svd.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
     {
         uint32_t ox = 0, oy = 0, ow = bd.Width, oh = bd.Height;
@@ -13331,7 +13373,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
             ox = (uint32_t)flatPl.eff.x; oy = (uint32_t)flatPl.eff.y; ow = (uint32_t)flatPl.eff.w; oh = (uint32_t)flatPl.eff.h;
             vpUsed = true;
         }
-        blitOx = ox; blitOy = oy;
+        blitOx = ox; blitOy = oy; blitOw = ow; blitOh = oh;
         const bool sizeUp = ow >= d.Width && oh >= d.Height && (ow > d.Width || oh > d.Height);
         char sizes[48];
         snprintf(sizes, sizeof(sizes), "%ux%u->%ux%u", d.Width, d.Height, ow, oh);
@@ -13805,6 +13847,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     }
     // v0.10.0 phase 4: a slot whose pre-tonemap run was tried was classified there (phase 7: its verdict is reused)
     const bool candBad = slot.pre ? slot.candBad : ClassifyRecord(eye, slot, dl.Mv().InvalidateCount(), cpuT.t0, eyeIvMs);
+    bool taaModRan = false;                               // phase 82: the mod's mix / split ran on this pass (the split overlay's label)
     // We run between the game's blit state setup and its Draw. Do NOT use
     // SwapDeviceContextState here: NGX evaluates fine once, then fails with
     // PlatformError and the device is removed (tested 2026-10-03). NGX and our
@@ -13836,6 +13879,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         if (slot.taaAct < 0) {                            // the tonemap rule never saw this pass: say why once
             g_taaLastAct = GameTaa::kActTaaOnly;
             g_taaLastWhy = g_hdrOut ? GameTaa::kWhyHdrOut : GameTaa::kWhyNoTonemap;
+            ++g_taaWhyN[g_taaLastWhy];
             TaaNote(GameTaa::kActTaaOnly, g_hdrOut ? "HDR output (Windows HDR on): the game's 8-bit tonemap the mix works on is not "
                                                      "drawn -- modes mix / split fall back to the game's TAA; use game_taa 0 or Windows HDR off"
                                                    : "no tonemap draw was recognised for this pass");
@@ -13900,10 +13944,10 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         g_taaPost.armed = g_taaPost.pendingArm = false;  // the blit reads the tonemap target: its post-tonemap draws are over
         const bool taaLdr = slot.taaHold && slot.taaAct == GameTaa::kActLdr && slot.taaLdr;
         {
-            const GameTaa::Mix mx = GameTaa::MixOf(g_gameTaa, g_gameTaaMix);
+            const GameTaa::Mix mx = GameTaa::MixOf(g_gameTaa, g_gameTaaMix, g_gameTaaPair);
             dl.SetCompositeOut(taaLdr);
             dl.SetMvJittered(slot.taaHold && TaaMvJittered());
-            dl.SetMix(taaLdr ? mx.modShare : 1.0f, taaLdr && mx.split, g_gameTaaSplit, true);
+            dl.SetMix(taaLdr ? mx.modShare : 1.0f, taaLdr && mx.split, g_gameTaaSplit, true, mx.rightShare);
             if (taaLdr) ++g_taaLdrBlits;
         }
         ID3D11Texture2D* const runTex = taaLdr ? slot.taaLdr.Get() : tex;
@@ -13912,6 +13956,10 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
                                g_mvDebug.load(), candBad, upW, upH, g_objCfg ? objRec : nullptr,
                                g_didCfg ? didRec : nullptr, g_didCfg ? didFwdRec : nullptr);
         t_inDlaa = false;
+        if (taaLdr) {                                    // phase 82: the mix ran when it evaluated and its composite is armed
+            taaModRan = ok && dl.CompositePending();
+            if (!taaModRan) { ++g_taaLdrRunFails; ++g_taaWhyN[GameTaa::kWhyRunFailed]; g_taaLastWhy = GameTaa::kWhyRunFailed; }
+        }
         UpdateMedoidDrop(eye, dl);                       // v0.10.0 phase 8
         // phase 41: the main view's history reset (a camera cut, a teleport, a DLAA key) -> the mirrors run out of turn this frame
         // and the next (MirTurnsNoteCut: only while mirror_turns / mode 3 is on)
@@ -13972,6 +14020,16 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
                 }
             }
         }
+    }
+    // phase 82: game_taa = 2 -> the split line + labels over this blit's output, after its Draw (and the composite), every frame
+    if (g_gameTaa == GameTaa::kSplit && !viewUnknown && !passive) {
+        if (slot.taaAct == GameTaa::kActHdr && slot.pre == 1) taaModRan = true;   // (the HDR path blended before the tonemap)
+        g_taaSplitOv.pending = true; g_taaSplitOv.rt = rtPtr; g_taaSplitOv.eye = eye;
+        g_taaSplitOv.x = blitOw ? blitOx : 0; g_taaSplitOv.y = blitOw ? blitOy : 0;
+        g_taaSplitOv.w = blitOw ? blitOw : bd.Width; g_taaSplitOv.h = blitOw ? blitOh : bd.Height;
+        g_taaSplitOv.dlss = upW != 0;
+        g_taaSplitOv.taaLive = slot.taaHold;
+        g_taaSplitOv.modRan = slot.taaHold ? taaModRan : g_dlaaOn.load(std::memory_order_relaxed);
     }
     if (eye == 0) {                        // self-test dumps eye 0 only (once per frame)
         t_inDlaa = true;                   // our own work: keep context hooks passive
@@ -14196,13 +14254,8 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
     }
 #ifdef WITH_DLAA
     if ((g_taaPost.armed || g_taaPost.pendingArm) && !t_inDlaa) TaaPostAfterDraw(ctx, 0, vertexCount, startVertex, 0);   // phase 82
-    if (g_taaOverlay.pending && !t_inDlaa) {             // phase 82: the HDR path's split line + labels, after the game's tonemap
-        g_taaOverlay.pending = false;
-        t_inDlaa = true;
-        g_dlaa[0].DrawSplitOverlay(ctx, 0, 0, g_taaOverlay.w, g_taaOverlay.h, g_gameTaaSplit, false);
-        t_inDlaa = false;
-    }
     if (g_compEye >= 0 && !t_inDlaa) RunPendingComposite(ctx);   // v0.7.0 (before the scene span closes)
+    if (g_taaSplitOv.pending && !t_inDlaa) TaaDrawSplitOverlay(ctx);   // phase 82: after the composite, over the blit
     if (g_menuBlitEye >= 0 && !t_inDlaa) MenuDrawVr(ctx);         // v0.10.0 tuning menu: VR panel + fps box over this eye's picture
     if (pvMenuIdx >= 0 && !t_inDlaa) MenuDrawPreview(ctx, pvMenuIdx, 'a');   // v0.10.0 phase 15: ... on a VR menu-screen eye
 #endif
@@ -18311,7 +18364,7 @@ enum MenuRowId {
     MR_WIREMV, MR_WIREDEPTH, MR_WIREWIDEN,                // phase 69: the thin-wire switches (dlaa_mv_dilate / mv_fwd_conservative / wire_widen)
     MR_UPGRP,                                             // phase 43: group "Upscaling and VR"
     MR_UPSCALE, MR_DLAA,
-    MR_GAMETAA, MR_TAAMIX, MR_TAASPLIT,                   // phase 82: the game's own TAA with the mod (game_taa / _mix / _split)
+    MR_GAMETAA, MR_TAAMIX, MR_TAASPLIT, MR_TAAPAIR,       // phase 82: the game's own TAA with the mod (game_taa / _mix / _split / _pair)
     MR_OFXR,
     MR_VECTORXR,                                          // phase 56: VectorXR info row (dlaa.ini vectorxr)
     MR_VRPGRP,                                            // phase 43: group "VR performance"
@@ -18368,7 +18421,7 @@ static_assert(MR_PICGRP + 1 == MR_SHARP && MR_BIAS + 1 == MR_MOTGRP && MR_MOTGRP
               MR_FPSDIST + 1 == MR_LOG,
               "tuning menu: a group's children must follow its header and fill it up to its last row");
 static_assert(MR_SHARP < MR_WIDTH && MR_WIDTH < MR_LOD && MR_LOD < MR_LODCUT && MR_LODCUT < MR_AREA && MR_AREA < MR_PRETM &&
-              MR_PRETM < MR_FWD && MR_FWD < MR_BIAS && MR_DRAWIDS < MR_MIRROR && MR_MIRROR < MR_MIRTURNS && MR_MIRTURNS < MR_WIREMV && MR_WIREMV < MR_WIREDEPTH && MR_WIREDEPTH < MR_WIREWIDEN && MR_UPSCALE < MR_DLAA && MR_DLAA < MR_GAMETAA && MR_GAMETAA < MR_TAAMIX && MR_TAAMIX < MR_TAASPLIT && MR_TAASPLIT < MR_OFXR && MR_OFXR < MR_VECTORXR &&
+              MR_PRETM < MR_FWD && MR_FWD < MR_BIAS && MR_DRAWIDS < MR_MIRROR && MR_MIRROR < MR_MIRTURNS && MR_MIRTURNS < MR_WIREMV && MR_WIREMV < MR_WIREDEPTH && MR_WIREDEPTH < MR_WIREWIDEN && MR_UPSCALE < MR_DLAA && MR_DLAA < MR_GAMETAA && MR_GAMETAA < MR_TAAMIX && MR_TAAMIX < MR_TAASPLIT && MR_TAASPLIT < MR_TAAPAIR && MR_TAAPAIR < MR_OFXR && MR_OFXR < MR_VECTORXR &&
               MR_TURBO < MR_VRS && MR_VRS < MR_VRSSIZE && MR_VRSSIZE < MR_VRSPASS && MR_VRSPASS < MR_VRSSTR && MR_VRSSTR < MR_VRSEYE && MR_VRSEYE < MR_HMASK &&
               MR_REFLEX < MR_FPSCAP && MR_FPSCAP < MR_VRFPSCAP && MR_VRFPSCAP < MR_CPU &&
               MR_POSX < MR_POSY && MR_POSY < MR_SIZE && MR_SIZE < MR_DEPTH && MR_DEPTH < MR_FACE && MR_FACE < MR_MENUKEYS &&
@@ -18432,9 +18485,11 @@ const wchar_t* const kMenuDesc[] = {
     N_(L"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS "
     L"on the same frame, blended. split = the mod on the left, TAA on the right, to compare."),
     N_(L"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / "
-    L"DLSS). Used only when Game TAA is mix. No extra cost."),
+    L"DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."),
     N_(L"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS on the left of it, the game's "
     L"TAA on the right. Used only when Game TAA is split."),
+    N_(L"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix | TAA or DLAA | Mix (Mix = "
+    L"the two blended at Game TAA share). DLSS instead of DLAA when upscaling. Used only when Game TAA is split."),
     N_(L"OFXR Bridge = VR frame generation by djules75, a separate download (github.com/djules75/OFXR-Bridge). found = its layer "
     L"is loaded in this game and the mod lets its work pass through. Start its tray app before the game."),
     // phase 56 (MR_VECTORXR)
@@ -18943,6 +18998,14 @@ void StepGameTaaSplit(int dir, uint64_t n) {
         g_gameTaa == GameTaa::kSplit ? "" : " (used in mode split; game_taa is not split now)");
     PlayTones(1, 400 + 6 * g_gameTaaSplit, 120, 0);
 }
+// phase 82: the menu's Split compares row -- dlaa.ini game_taa_pair: DLAA | TAA, Mix | TAA, DLAA | Mix; kept while greyed
+void StepGameTaaPair(int dir, uint64_t n) {
+    g_gameTaaPair = GameTaa::NextPair(g_gameTaaPair, dir);
+    g_gameTaaExplicit = true;
+    Log("Game TAA split compares (phase 82): game_taa_pair=%d (%s) (tuning menu, Present #%llu)%s", g_gameTaaPair,
+        GameTaa::PairName(g_gameTaaPair), (unsigned long long)n, g_gameTaa == GameTaa::kSplit ? "" : " (used in mode split)");
+    PlayTones(1, 500 + 200 * g_gameTaaPair, 120, 0);
+}
 // phase 82: the main scene runs the mod's DLAA / DLSS now (the DLAA quality rows are greyed when not: mode off / passive, or the game's
 // TAA mix / split fell back to the game's TAA)
 bool MainDlaaRuns() {
@@ -19170,6 +19233,7 @@ void ResetSettings(uint64_t n) {
     g_gameTaa = GameTaa::kOff;                            // phase 82: the mod's own scope (the next pass releases the jitter hold)
     g_gameTaaMix = GameTaa::kMixDefault;
     g_gameTaaSplit = GameTaa::kSplitDefault;
+    g_gameTaaPair = GameTaa::kPairDlaaTaa;
     g_gameTaaExplicit = false;
     // phase 39: logging back to the level dlaa.ini gives without log_level (the key is removed below; `debug` stays in the file,
     // so debug = 1 there = level 4, as at the next start; else 1 = errors)
@@ -19217,7 +19281,7 @@ void ResetSettings(uint64_t n) {
         "cpu_pcore", "cpu_priority", "cpu_no_throttle",                                                 // phase 54
         "fps_profiles",                                                                                 // phase 51b
         "dlaa_mv_dilate", "mv_fwd_conservative", "wire_widen",                                       // phase 60 / 61 (69: menu rows)
-        "game_taa", "game_taa_ver", "game_taa_mix", "game_taa_split",                                   // phase 82
+        "game_taa", "game_taa_ver", "game_taa_mix", "game_taa_split", "game_taa_pair",                  // phase 82
     };
     constexpr int kNKeys = (int)(sizeof(kKeys) / sizeof(kKeys[0]));
     static_assert(kNKeys <= kIniMaxKeys, "WriteIniPreserving handles at most kIniMaxKeys keys");
@@ -19233,7 +19297,7 @@ void ResetSettings(uint64_t n) {
             "menu_scale = 1.0 menu_vr_x = 0 menu_vr_y = -5 menu_vr_scale = 1.0 menu_vr_depth = 12 menu_vr_dist = 100 menu_vr_face = 1 "
             "menu_vr_lock = 0 menu_vr_lock_x = 0 menu_vr_lock_y = 10 menu_vr_lock_dist = 80 "
             "fps_show = 0 fps_text = 0 "
-            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_opacity = 100 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 fps_profiles = 1 xr_turbo = 0 reflex = 0 fps_cap = 0 vr_fps_cap = 0 cpu_pcore = 0 cpu_priority = 0 cpu_no_throttle = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 vrs_strength = 0 vrs_eye = 0 dlaa_mv_dilate = 1 mv_fwd_conservative = 1 wire_widen = 0 xr_hidden_mask = 0 dlss_bias_mask = 100 game_taa = 0 game_taa_mix = 50 game_taa_split = 50 log_level = %d (%s) -- profile: %s -- "
+            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_opacity = 100 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 fps_profiles = 1 xr_turbo = 0 reflex = 0 fps_cap = 0 vr_fps_cap = 0 cpu_pcore = 0 cpu_priority = 0 cpu_no_throttle = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 vrs_strength = 0 vrs_eye = 0 dlaa_mv_dilate = 1 mv_fwd_conservative = 1 wire_widen = 0 xr_hidden_mask = 0 dlss_bias_mask = 100 game_taa = 0 game_taa_mix = 50 game_taa_split = 50 game_taa_pair = 0 log_level = %d (%s) -- profile: %s -- "
             "dlaa.ini: %d keys removed (hotkeys and other lines kept)", (unsigned long long)n, g_dlaaOn.load() ? "DLSS" : "off",
             (double)kFpsVrScaleDefault, LogLevel(), g_logDebugKey ? "no key: debug = 1 in dlaa.ini" : "no key", changed, kNKeys);
         BeepSeq b;                                        // success: rising two-tone 600 -> 900 Hz, 120 ms each (as SaveSettings)
@@ -20739,10 +20803,13 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         MenuRow(p, MR_GAMETAA, TR(L"Game TAA"), "dlaa.ini game_taa", nullptr, false);
         const wchar_t* const kTaaVal[GameTaa::kModeCount] = { TR(L"off"), TR(L"mix"), TR(L"split") };
         swprintf(p.rows[MR_GAMETAA].value, kV, L"%ls", kTaaVal[GameTaa::ClampMode(g_gameTaa)]);
-        MenuRow(p, MR_TAAMIX, TR(L"Game TAA share"), "dlaa.ini game_taa_mix", nullptr, g_gameTaa != GameTaa::kMix);
+        MenuRow(p, MR_TAAMIX, TR(L"Game TAA share"), "dlaa.ini game_taa_mix", nullptr, !GameTaa::ShareUsed(g_gameTaa, g_gameTaaPair));
         swprintf(p.rows[MR_TAAMIX].value, kV, L"%d %%", g_gameTaaMix);
         MenuRow(p, MR_TAASPLIT, TR(L"Split position"), "dlaa.ini game_taa_split", nullptr, g_gameTaa != GameTaa::kSplit);
         swprintf(p.rows[MR_TAASPLIT].value, kV, L"%d %%", g_gameTaaSplit);
+        MenuRow(p, MR_TAAPAIR, TR(L"Split compares"), "dlaa.ini game_taa_pair", nullptr, g_gameTaa != GameTaa::kSplit);
+        const wchar_t* const kPairVal[GameTaa::kPairCount] = { L"DLAA | TAA", TR(L"Mix | TAA"), TR(L"DLAA | Mix") };
+        swprintf(p.rows[MR_TAAPAIR].value, kV, L"%ls", kPairVal[GameTaa::ClampPair(g_gameTaaPair)]);
     }
     MenuRow(p, MR_OFXR, TR(L"OFXR Bridge (VR frame gen)"), "dlaa.ini ofxr_bridge", nullptr, !Ofxr::g_on.load());   // info row
     if (!Ofxr::g_on.load())      swprintf(p.rows[MR_OFXR].value, kV, TRF(L"off (dlaa.ini 0)"));
@@ -21139,6 +21206,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_GAMETAA: StepGameTaa(dir, n); break;            // phase 82: off -> mix -> TAA only -> split (Left back)
     case MR_TAAMIX:  StepGameTaaMix(dir, n); break;         // phase 82: 10 % steps (kept while greyed)
     case MR_TAASPLIT: StepGameTaaSplit(dir, n); break;      // phase 82: 5 % steps (kept while greyed)
+    case MR_TAAPAIR: StepGameTaaPair(dir, n); break;        // phase 82: DLAA | TAA -> Mix | TAA -> DLAA | Mix (kept while greyed)
     case MR_OFXR:    break;                                 // information only (dlaa.ini ofxr_bridge, read at start)
     case MR_VECTORXR: break;                                // phase 56: information only (dlaa.ini vectorxr, read at start)
     case MR_TURBO:   ToggleXrTurbo(n); break;               // phase 30: Left and Right both switch it (also flat: kept for VR)
@@ -24741,6 +24809,7 @@ void LoadConfig() {
             if (!strcmp(key, "game_taa"))     { g_gameTaaIniRaw = (int)v; g_gameTaaExplicit = true; continue; }   // phase 82 (after the loop)
             if (!strcmp(key, "game_taa_ver")) { g_gameTaaIniVer = (int)v; continue; }                             // phase 82
             if (!strcmp(key, "game_taa_split")) { g_gameTaaSplit = GameTaa::ClampMix((int)v); g_gameTaaExplicit = true; continue; }
+            if (!strcmp(key, "game_taa_pair")) { g_gameTaaPair = GameTaa::ClampPair((int)v); g_gameTaaExplicit = true; continue; }
             if (!strcmp(key, "game_taa_mix")) { g_gameTaaMix = GameTaa::ClampMix((int)v); g_gameTaaExplicit = true; continue; }   // phase 82
             if (!strcmp(key, "game_taa_mvjit")) { g_gameTaaMvJit = v < 0 ? -1 : (v > 0 ? 1 : 0); continue; }   // phase 82, startup only
             if (!strcmp(key, "light_redraw_jitter")) { g_lightRedrawCfg = v != 0 ? 1 : 0; continue; }   // phase 55 (outside the chain: C1061)
@@ -25280,8 +25349,9 @@ void LoadConfig() {
     Log("DLSS bias mask (phase 49): dlss_bias_mask=%d %% (%s)", g_biasCfg, g_biasCfg
         ? "the additive light glows of the world forward pass go to NGX as its bias current colour mask (no glow trails)"
         : "off: NGX gets no mask");
-    Log("game TAA (phase 82): game_taa=%d (%s) game_taa_mix=%d %% game_taa_split=%d %% game_taa_mvjit=%d -- %s", g_gameTaa,
-        GameTaa::ModeName(g_gameTaa), g_gameTaaMix, g_gameTaaSplit, g_gameTaaMvJit,
+    Log("game TAA (phase 82): game_taa=%d (%s) game_taa_mix=%d %% game_taa_split=%d %% game_taa_pair=%d (%s) game_taa_mvjit=%d -- %s",
+        g_gameTaa, GameTaa::ModeName(g_gameTaa), g_gameTaaMix, g_gameTaaSplit, g_gameTaaPair, GameTaa::PairName(g_gameTaaPair),
+        g_gameTaaMvJit,
         g_gameTaa == GameTaa::kOff ? "the mod's own scope: set the game's Anti-aliasing to Disabled (r_aa 0); a TAA resolve seen is "
                                      "logged once"
                                    : "with the game's Anti-aliasing = TAA: while its TAA resolve draws, the mod's jitter is held and "

@@ -384,19 +384,19 @@ msgid ""
 "mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
 "right, to compare."
 msgstr ""
-"Tikai tad, ja spēles Anti-aliasing ir TAA. izslēgts = tikai modifikācija (iestatiet spēles AA "
-"uz Izslēgts). maisījums = TAA un DLAA / DLSS vienā kadrā, sajaukti. sadalīts = pa kreisi "
+"Tikai tad, ja spēles Anti-aliasing ir TAA. izslēgts = tikai modifikācija (iestatiet spēles AA uz "
+"Izslēgts). maisījums = TAA un DLAA / DLSS vienā kadrā, sajaukti. sadalīts = pa kreisi "
 "modifikācija, pa labi TAA, salīdzināšanai."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
 msgstr ""
 "Cik liela daļa no maisījuma ir spēles TAA, 0 - 100 % ar soli 10 %: vairāk = mierīgāk un mīkstāk "
-"(TAA), mazāk = asāk (DLAA / DLSS). Izmanto tikai tad, ja Spēles TAA ir maisījums. Bez papildu "
-"izmaksām."
+"(TAA), mazāk = asāk (DLAA / DLSS). Izmanto, ja Spēles TAA ir maisījums, vai sadalīts ar "
+"maisījuma pusi. Bez papildu izmaksām."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -406,6 +406,17 @@ msgid ""
 msgstr ""
 "Kur ir Spēles TAA sadalījuma līnija, 0 - 100 % no platuma ar soli 5 %: pa kreisi no tās "
 "modifikācijas DLAA / DLSS, pa labi spēles TAA. Izmanto tikai tad, ja Spēles TAA ir sadalīts."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"Ko Spēles TAA sadalīts rāda abās pusēs: DLAA | TAA (pa kreisi modifikācija, pa labi spēles "
+"TAA), maisījums | TAA vai DLAA | maisījums (maisījums = abi sajaukti pēc Spēles TAA daļas). "
+"DLSS DLAA vietā palielinot. Izmanto tikai tad, ja Spēles TAA ir sadalīts."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2028,6 +2039,21 @@ msgstr "Sadalījuma vieta"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Split compares"
+msgstr "Sadalījums salīdzina"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr "maisījums | TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
+msgstr "DLAA | maisījums"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (VR kadru ģen.)"
 
@@ -2494,15 +2520,6 @@ msgstr "info"
 msgid "debug"
 msgstr "atkļūdošana"
 
-#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
-#~ msgstr "Tikai tad, ja spēles Anti-aliasing ir TAA. izslēgts = tikai modifikācija (iestatiet spēles AA uz Izslēgts). maisījums = TAA un DLAA / DLSS vienā kadrā, sajaukti. tikai TAA = bez DLAA, salīdzināšanai. sadalīts = pa kreisi modifikācija, pa labi TAA."
-
-#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
-#~ msgstr "Spēles TAA tagad darbojas: iestatiet spēles Anti-aliasing uz Izslēgts vai izvēlieties maisījums, tikai TAA vai sadalīts."
-
-#~ msgid "The game's TAA is running now: TAA only (see the log)."
-#~ msgstr "Spēles TAA tagad darbojas: tikai TAA (skatiet žurnālu)."
-
-#~ msgid "TAA only"
-#~ msgstr "tikai TAA"
+#~ msgid "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+#~ msgstr "Cik liela daļa no maisījuma ir spēles TAA, 0 - 100 % ar soli 10 %: vairāk = mierīgāk un mīkstāk (TAA), mazāk = asāk (DLAA / DLSS). Izmanto tikai tad, ja Spēles TAA ir maisījums. Bez papildu izmaksām."
 

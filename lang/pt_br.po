@@ -389,17 +389,18 @@ msgid ""
 "right, to compare."
 msgstr ""
 "Só com o Antialiasing do jogo em TAA. desligado = só o mod (ponha o AA do jogo em Desligado). "
-"mistura = TAA e DLAA / DLSS no mesmo quadro, misturados. dividido = à esquerda o mod, à direita "
-"o TAA, para comparar."
+"mistura = TAA e DLAA / DLSS no mesmo quadro, misturados. dividido = à esquerda o mod, à direita o "
+"TAA, para comparar."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
 msgstr ""
-"Quanto da mistura é o TAA do jogo, 0 - 100 % em passos de 10 %: mais = mais calmo e suave (TAA), "
-"menos = mais nítido (DLAA / DLSS). Só é usado quando TAA do jogo está em mistura. Sem custo extra."
+"Quanto da mistura é o TAA do jogo, 0 - 100 % em passos de 10 %: mais = mais calmo e suave "
+"(TAA), menos = mais nítido (DLAA / DLSS). Usado quando TAA do jogo está em mistura, ou em "
+"dividido com um lado mistura. Sem custo extra."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -409,6 +410,18 @@ msgid ""
 msgstr ""
 "Onde fica a linha do TAA do jogo dividido, 0 - 100 % da largura em passos de 5 %: à esquerda o "
 "DLAA / DLSS do mod, à direita o TAA do jogo. Só é usado quando TAA do jogo está em dividido."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"O que o TAA do jogo dividido mostra nos dois lados: DLAA | TAA (à esquerda o mod, à direita o "
+"TAA do jogo), mistura | TAA ou DLAA | mistura (mistura = os dois misturados conforme Parte do "
+"TAA do jogo). DLSS em vez de DLAA ao fazer upscale. Só é usado quando TAA do jogo está em "
+"dividido."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1156,8 +1169,8 @@ msgstr "O TAA do jogo não está rodando agora: o mod roda sozinho."
 msgid ""
 "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
 msgstr ""
-"O TAA do jogo está rodando agora: ponha o Antialiasing do jogo em Desligado ou escolha mistura "
-"ou dividido."
+"O TAA do jogo está rodando agora: ponha o Antialiasing do jogo em Desligado ou escolha mistura ou "
+"dividido."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2029,6 +2042,21 @@ msgstr "Posição da divisão"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Split compares"
+msgstr "O dividido compara"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr "mistura | TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
+msgstr "DLAA | mistura"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (VR quadros)"
 
@@ -2495,15 +2523,6 @@ msgstr "info"
 msgid "debug"
 msgstr "depuração"
 
-#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
-#~ msgstr "Só com o Antialiasing do jogo em TAA. desligado = só o mod (ponha o AA do jogo em Desligado). mistura = TAA e DLAA / DLSS no mesmo quadro, misturados. só TAA = sem DLAA, para comparar. dividido = à esquerda o mod, à direita o TAA."
-
-#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
-#~ msgstr "O TAA do jogo está rodando agora: ponha o Antialiasing do jogo em Desligado ou escolha mistura, só TAA ou dividido."
-
-#~ msgid "The game's TAA is running now: TAA only (see the log)."
-#~ msgstr "O TAA do jogo está rodando agora: só TAA (veja o log)."
-
-#~ msgid "TAA only"
-#~ msgstr "só TAA"
+#~ msgid "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+#~ msgstr "Quanto da mistura é o TAA do jogo, 0 - 100 % em passos de 10 %: mais = mais calmo e suave (TAA), menos = mais nítido (DLAA / DLSS). Só é usado quando TAA do jogo está em mistura. Sem custo extra."
 

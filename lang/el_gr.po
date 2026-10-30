@@ -395,11 +395,11 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
 msgstr ""
 "Πόσο από το μίγμα είναι το TAA του παιχνιδιού, 0 - 100 % ανά 10 %: περισσότερο = πιο ήρεμο και "
-"απαλό (TAA), λιγότερο = πιο ευκρινές (DLAA / DLSS). Χρησιμοποιείται μόνο όταν το TAA παιχνιδιού "
-"είναι μίγμα. Χωρίς επιπλέον κόστος."
+"απαλό (TAA), λιγότερο = πιο ευκρινές (DLAA / DLSS). Χρησιμοποιείται όταν το TAA παιχνιδιού "
+"είναι μίγμα, ή χωρισμένο με πλευρά μίγμα. Χωρίς επιπλέον κόστος."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -407,9 +407,21 @@ msgid ""
 "Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
 "on the left of it, the game's TAA on the right. Used only when Game TAA is split."
 msgstr ""
-"Πού βρίσκεται η γραμμή του TAA παιχνιδιού χωρισμένο, 0 - 100 % του πλάτους ανά 5 %: αριστερά "
-"της το DLAA / DLSS του mod, δεξιά το TAA του παιχνιδιού. Χρησιμοποιείται μόνο όταν το TAA "
-"παιχνιδιού είναι χωρισμένο."
+"Πού βρίσκεται η γραμμή του TAA παιχνιδιού χωρισμένο, 0 - 100 % του πλάτους ανά 5 %: αριστερά της "
+"το DLAA / DLSS του mod, δεξιά το TAA του παιχνιδιού. Χρησιμοποιείται μόνο όταν το TAA παιχνιδιού "
+"είναι χωρισμένο."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"Τι δείχνει το TAA παιχνιδιού χωρισμένο στις δύο πλευρές του: DLAA | TAA (αριστερά το mod, δεξιά "
+"το TAA του παιχνιδιού), μίγμα | TAA ή DLAA | μίγμα (μίγμα = τα δύο αναμεμιγμένα με το Μερίδιο "
+"TAA παιχνιδιού). DLSS αντί για DLAA στη μεγέθυνση. Χρησιμοποιείται μόνο όταν το TAA παιχνιδιού "
+"είναι χωρισμένο."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2035,6 +2047,21 @@ msgstr "Θέση διαχωρισμού"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Split compares"
+msgstr "Σύγκριση διαχωρισμού"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr "μίγμα | TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
+msgstr "DLAA | μίγμα"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (καρέ VR)"
 
@@ -2503,15 +2530,6 @@ msgstr "πληροφορίες"
 msgid "debug"
 msgstr "αποσφαλμάτωση"
 
-#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
-#~ msgstr "Μόνο όταν το Anti-aliasing του παιχνιδιού είναι σε TAA. ανενεργό = μόνο το mod (βάλε το AA του παιχνιδιού σε Απενεργοποιημένο). μίγμα = TAA και DLAA / DLSS στο ίδιο καρέ, αναμεμιγμένα. μόνο TAA = χωρίς DLAA, για σύγκριση. χωρισμένο = αριστερά το mod, δεξιά TAA."
-
-#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
-#~ msgstr "Το TAA του παιχνιδιού τρέχει τώρα: βάλε το Anti-aliasing του παιχνιδιού σε Απενεργοποιημένο ή διάλεξε μίγμα, μόνο TAA ή χωρισμένο."
-
-#~ msgid "The game's TAA is running now: TAA only (see the log)."
-#~ msgstr "Το TAA του παιχνιδιού τρέχει τώρα: μόνο TAA (δες το log)."
-
-#~ msgid "TAA only"
-#~ msgstr "μόνο TAA"
+#~ msgid "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+#~ msgstr "Πόσο από το μίγμα είναι το TAA του παιχνιδιού, 0 - 100 % ανά 10 %: περισσότερο = πιο ήρεμο και απαλό (TAA), λιγότερο = πιο ευκρινές (DLAA / DLSS). Χρησιμοποιείται μόνο όταν το TAA παιχνιδιού είναι μίγμα. Χωρίς επιπλέον κόστος."
 

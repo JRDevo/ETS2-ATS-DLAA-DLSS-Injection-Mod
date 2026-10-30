@@ -91,6 +91,9 @@ public:
     static bool MvDilate();
 
     void SetEye(int e) { m_eye = e; }          // v0.5.7: log tag only
+    // phase 82: the MVJittered creation flag a feature NOT created yet will get (a unit built while game_taa holds the jitter is created
+    // with it at once -- no create-then-recreate, game test 2 lines 491 / 641); an existing feature recreates at its next Evaluate
+    void PresetMvJittered(bool on) { if (!m_feature) m_mvJittered = on; }
 
     // v0.7.8 NGX pre-warm, called once at the first Present (render thread, the game's immediate context, its device):
     // initialises NGX, PINS it (one reference held for the process life, so it never shuts down and is never

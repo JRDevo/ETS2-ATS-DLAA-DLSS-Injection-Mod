@@ -393,11 +393,11 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
 msgstr ""
 "Какая доля микса приходится на TAA игры, 0 - 100 % с шагом 10 %: больше = спокойнее и мягче "
-"(TAA), меньше = резче (DLAA / DLSS). Используется только когда TAA игры = микс. Без "
-"дополнительных затрат."
+"(TAA), меньше = резче (DLAA / DLSS). Используется, когда TAA игры = микс, или разделение со "
+"стороной микс. Без дополнительных затрат."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -405,8 +405,19 @@ msgid ""
 "Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
 "on the left of it, the game's TAA on the right. Used only when Game TAA is split."
 msgstr ""
-"Где проходит линия разделения TAA игры, 0 - 100 % ширины с шагом 5 %: левее неё DLAA / DLSS "
-"мода, правее TAA игры. Используется только когда TAA игры = разделение."
+"Где проходит линия разделения TAA игры, 0 - 100 % ширины с шагом 5 %: левее неё DLAA / DLSS мода, "
+"правее TAA игры. Используется только когда TAA игры = разделение."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"Что показывает TAA игры в режиме разделения по двум сторонам: DLAA | TAA (слева мод, справа TAA "
+"игры), микс | TAA или DLAA | микс (микс = оба, смешанные по Доле TAA игры). DLSS вместо DLAA "
+"при масштабировании. Используется только когда TAA игры = разделение."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2021,6 +2032,21 @@ msgstr "Позиция разделения"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Split compares"
+msgstr "Разделение сравнивает"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr "микс | TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
+msgstr "DLAA | микс"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (VR кадры)"
 
@@ -2487,15 +2513,6 @@ msgstr "инфо"
 msgid "debug"
 msgstr "отладка"
 
-#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
-#~ msgstr "Только если сглаживание игры стоит на TAA. выкл = только мод (поставьте AA игры на Отключено). микс = TAA и DLAA / DLSS в одном кадре, смешанные. только TAA = без DLAA, для сравнения. разделение = слева мод, справа TAA."
-
-#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
-#~ msgstr "TAA игры сейчас работает: поставьте сглаживание игры на Отключено или выберите микс, только TAA или разделение."
-
-#~ msgid "The game's TAA is running now: TAA only (see the log)."
-#~ msgstr "TAA игры сейчас работает: только TAA (см. лог)."
-
-#~ msgid "TAA only"
-#~ msgstr "только TAA"
+#~ msgid "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+#~ msgstr "Какая доля микса приходится на TAA игры, 0 - 100 % с шагом 10 %: больше = спокойнее и мягче (TAA), меньше = резче (DLAA / DLSS). Используется только когда TAA игры = микс. Без дополнительных затрат."
 

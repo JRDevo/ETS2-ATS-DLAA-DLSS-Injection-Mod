@@ -408,10 +408,11 @@ float4 VSMain(uint id : SV_VertexID) : SV_Position {
 // Params (t1, Buffer<float4>; no constant-buffer slot is touched): [0] = RT-space origin of the rect (px) and
 // its size, [1] = feather x / y (output px), Blend, SrgbDecode, [2] = EdgeOn (left, top, right, bottom).
 // phase 82 (game_taa): [3] = the mod's share (alpha multiplier; 1 = as before), the split column in RT px (< 0 = no split: right
-// of it alpha 0 = the game's TAA picture stays), the divider half-width in px (0 = none; a 1 px white core between 1 px black sides,
-// visible in any colour space) and flags (1 = overlay only: no source, only the divider / labels; 2 = labels); [4] = the label cell
-// size in px, the labels' top row (RT px), the mod's label (0 "DLAA", 1 "DLSS"). Labels: a 5 x 7 pixel font (D L A S T), white on a
-// translucent black box, "DLAA" / "DLSS" left of the split line, "TAA" right of it.
+// of it alpha 0 = the game's TAA picture stays), the line width (px) and the OVERLAY flag: w = 1 draws only the split line (opaque
+// red, centred on the column) and the labels -- DrawSplitOverlay, every frame after the game's blit; [4] = the label cell size (px),
+// the labels' top row (RT px), the left / right label lengths; [5] / [6] = the left / right label's glyph codes (GameTaa::PackLabel:
+// a 5 x 7 pixel font, D L A S T O F M I X ( ) % 0-9 and space; white on a translucent black box). In the composite itself (w = 0) z is
+// the mod's share RIGHT of the split line (game_taa_pair: 0 = TAA, the mix share = Mix).
 // kCompositePs-BEGIN (the build validates this block with fxc, ps_5_0 / PSMain)
 const char kCompositePs[] = R"(
 Texture2D<float4> Src    : register(t0);
@@ -421,18 +422,30 @@ float3 SrgbToLinear(float3 c) {
     return (c <= 0.04045) ? c / 12.92 : pow(abs((c + 0.055) / 1.055), 2.4);   // (UNORM texels: never negative)
 }
 
-// 5 x 7 glyphs, row by row (bit 4 = left column): 0 D, 1 L, 2 A, 3 S, 4 T
-static const uint kGlyph[35] = { 30, 17, 17, 17, 17, 17, 30,   16, 16, 16, 16, 16, 16, 31,   14, 17, 17, 31, 17, 17, 17,
-                                 15, 16, 16, 14, 1, 1, 30,     31, 4, 4, 4, 4, 4, 4 };
-// a label of n glyphs (3-bit codes) with its top-left at o, cells of s px: 0 = outside, 1 = its box, 2 = a lit glyph pixel
-float LabelHit(float2 p, float2 o, uint codes, uint n, float s) {
+// 5 x 7 glyphs, row by row (bit 4 = left column): 0 space, 1 D, 2 L, 3 A, 4 S, 5 T, 6 O, 7 F, 8 (, 9 ), 10 M, 11 I, 12 X, 13 %,
+// 14..23 the digits 0..9
+static const uint kGlyph[168] = { 0, 0, 0, 0, 0, 0, 0,          30, 17, 17, 17, 17, 17, 30,   16, 16, 16, 16, 16, 16, 31,
+                                  14, 17, 17, 31, 17, 17, 17,   15, 16, 16, 14, 1, 1, 30,     31, 4, 4, 4, 4, 4, 4,
+                                  14, 17, 17, 17, 17, 17, 14,   31, 16, 16, 30, 16, 16, 16,   2, 4, 8, 8, 8, 4, 2,
+                                  8, 4, 2, 2, 2, 4, 8,          17, 27, 21, 21, 17, 17, 17,   14, 4, 4, 4, 4, 4, 14,
+                                  17, 17, 10, 4, 10, 17, 17,    25, 26, 2, 4, 8, 11, 19,      14, 17, 19, 21, 25, 17, 14,
+                                  4, 12, 4, 4, 4, 4, 14,        14, 17, 1, 2, 4, 8, 31,       31, 2, 4, 2, 1, 17, 14,
+                                  2, 6, 10, 18, 31, 2, 2,       31, 16, 30, 1, 1, 17, 14,     6, 8, 16, 30, 17, 17, 14,
+                                  31, 1, 2, 4, 8, 8, 8,         14, 17, 17, 14, 17, 17, 14,   14, 17, 17, 15, 1, 2, 12 };
+// the glyph code of character i of a label packed 4 per float-exact part (5 bits each: GameTaa::PackLabel)
+uint LabelCode(float3 packed, uint i) {
+    const uint part = (uint)(i < 4u ? packed.x : (i < 8u ? packed.y : packed.z));
+    return (part >> (5u * (i % 4u))) & 31u;
+}
+// a label of n glyphs with its top-left at o, cells of s px: 0 = outside, 1 = its box, 2 = a lit glyph pixel
+float LabelHit(float2 p, float2 o, float3 packed, uint n, float s) {
     const float2 q = (p - o) / s;
     const float w = (float)n * 6.0 - 1.0;
-    if (q.x < -1.0 || q.y < -1.0 || q.x >= w + 1.0 || q.y >= 8.0) return 0.0;
+    if (n == 0u || q.x < -1.0 || q.y < -1.0 || q.x >= w + 1.0 || q.y >= 8.0) return 0.0;
     if (q.x < 0.0 || q.y < 0.0 || q.y >= 7.0) return 1.0;
     const uint gi = (uint)q.x / 6u, cx = (uint)q.x % 6u, cy = (uint)q.y;
     if (gi >= n || cx >= 5u) return 1.0;
-    const uint g = (codes >> (3u * gi)) & 7u;
+    const uint g = min(LabelCode(packed, gi), 23u);
     return ((kGlyph[g * 7u + cy] >> (4u - cx)) & 1u) != 0u ? 2.0 : 1.0;
 }
 
@@ -441,21 +454,17 @@ float4 PSMain(float4 pos : SV_Position) : SV_Target {
     const float4 p1 = Params[1];
     const float4 e  = Params[2];
     const float4 m  = Params[3];
-    const float4 l  = Params[4];
-    const uint   fl = (uint)m.w;
-    if (m.y >= 0.0) {                                        // phase 82 split: the divider and the labels over everything
-        const float dx = abs(pos.x - m.y);
-        if (m.z > 0.0 && dx < m.z) return dx < 0.5 * m.z ? float4(1.0, 1.0, 1.0, 1.0) : float4(0.0, 0.0, 0.0, 1.0);
-        if ((fl & 2u) != 0u) {
-            const float s = l.x, gap = 4.0 * l.x;
-            const uint modCodes = l.z > 0.5 ? (0u | (1u << 3) | (3u << 6) | (3u << 9)) : (0u | (1u << 3) | (2u << 6) | (2u << 9));
-            float h = LabelHit(pos.xy, float2(m.y - gap - 23.0 * s, l.y), modCodes, 4u, s);
-            if (h == 0.0) h = LabelHit(pos.xy, float2(m.y + gap, l.y), 4u | (2u << 3) | (2u << 6), 3u, s);
-            if (h > 1.5) return float4(1.0, 1.0, 1.0, 1.0);
-            if (h > 0.5) return float4(0.0, 0.0, 0.0, 0.6);
-        }
+    if (m.w > 0.5) {                                         // phase 82 split OVERLAY: the red line + the labels, nothing else
+        const float4 l = Params[4], tl = Params[5], tr = Params[6];
+        if (abs(pos.x - m.y) < 0.5 * m.z) return float4(1.0, 0.0, 0.0, 1.0);
+        const float s = l.x, gap = 4.0 * l.x;
+        const uint nl = (uint)l.z, nr = (uint)l.w;
+        float h = LabelHit(pos.xy, float2(m.y - gap - ((float)nl * 6.0 - 1.0) * s, l.y), tl.xyz, nl, s);
+        if (h == 0.0) h = LabelHit(pos.xy, float2(m.y + gap, l.y), tr.xyz, nr, s);
+        if (h > 1.5) return float4(1.0, 1.0, 1.0, 1.0);
+        if (h > 0.5) return float4(0.0, 0.0, 0.0, 0.6);
+        return float4(0.0, 0.0, 0.0, 0.0);
     }
-    if ((fl & 1u) != 0u) return float4(0.0, 0.0, 0.0, 0.0);   // overlay only: the picture below stays
     const float2 size = p0.zw;
     const int2   ip   = clamp(int2(pos.xy - p0.xy), int2(0, 0), int2(size) - 1);
     float3 c = Src.Load(int3(ip, 0)).rgb;
@@ -469,8 +478,8 @@ float4 PSMain(float4 pos : SV_Position) : SV_Target {
         if (p1.y > 0.0) ry = min(e.y > 0.5 ? saturate(lo.y / p1.y) : 1.0, e.w > 0.5 ? saturate(hi.y / p1.y) : 1.0);
         a = smoothstep(0.0, 1.0, rx) * smoothstep(0.0, 1.0, ry);
     }
-    a *= m.x;
-    if (m.y >= 0.0 && pos.x >= m.y) a = 0.0;
+    // phase 82: the mod's share (game_taa_mix); split: m.x left of the line, m.z right of it (0 = the game's TAA picture stays)
+    a *= (m.y >= 0.0 && pos.x >= m.y) ? m.z : m.x;
     return float4(c, a);
 }
 )";
@@ -928,8 +937,10 @@ bool SceneDlaa::BuildColourSet(ID3D11Device* dev, bool hdr, bool keepsOther) {
         FAILED(hr = dev->CreateUnorderedAccessView(m_out.Get(), nullptr, &m_outUav))) {
         LogErr("DLAA: output create hr=0x%lx", hr); return false;
     }
-    if (m_up && FAILED(hr = dev->CreateShaderResourceView(m_out.Get(), nullptr, &m_outSrv))) {
-        LogErr("DLAA: output SRV create hr=0x%lx", hr); return false;   // v0.7.0: the composite needs it
+    // v0.7.0: the upscale composite reads it. phase 82 (game TAA test 2): a native-size unit needs it too -- SetCompositeOut draws the
+    // result with the same composite; without these SRVs (made only when upscaling before) no game_taa mix / split was ever drawn
+    if (FAILED(hr = dev->CreateShaderResourceView(m_out.Get(), nullptr, &m_outSrv))) {
+        LogErr("DLAA: output SRV create hr=0x%lx", hr); return false;
     }
 
     // v0.5.6 sharpen target + shader. v0.5.7: created even at sharpness 0 (Shift+PageUp can raise it live);
@@ -939,10 +950,9 @@ bool SceneDlaa::BuildColourSet(ID3D11Device* dev, bool hdr, bool keepsOther) {
     hr = S_OK;
     if (EnsureSharpen(dev) &&
         (m_outSrv || SUCCEEDED(hr = dev->CreateShaderResourceView(m_out.Get(), nullptr, &m_outSrv))) &&
-        SUCCEEDED(hr = MakeTex(dev, ow, oh, colorFmt,
-                               D3D11_BIND_UNORDERED_ACCESS | (m_up ? D3D11_BIND_SHADER_RESOURCE : 0u), &m_sharp)) &&
+        SUCCEEDED(hr = MakeTex(dev, ow, oh, colorFmt, D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE, &m_sharp)) &&
         SUCCEEDED(hr = dev->CreateUnorderedAccessView(m_sharp.Get(), nullptr, &m_sharpUav)) &&
-        (!m_up || SUCCEEDED(hr = dev->CreateShaderResourceView(m_sharp.Get(), nullptr, &m_sharpSrv)))) {
+        SUCCEEDED(hr = dev->CreateShaderResourceView(m_sharp.Get(), nullptr, &m_sharpSrv))) {   // phase 82: always (composite source)
         m_sharpRes = true;
         if (m_up)
             Log("DLAA: sharpen (RCAS) ready for eye %d -- strength %.2f r=%.1f output px%s, %ux%u target created "
@@ -959,8 +969,7 @@ bool SceneDlaa::BuildColourSet(ID3D11Device* dev, bool hdr, bool keepsOther) {
     } else {
         LogErr("DLAA: sharpen setup failed hr=0x%lx for eye %d -- sharpening OFF (DLAA continues)%s", (unsigned long)hr,
             m_eye, (m_crop && !m_up) ? "; DLAA area border blend OFF too (hard rect edge)" : "");
-        m_sharp.Reset(); m_sharpUav.Reset(); m_sharpSrv.Reset();
-        if (!m_up) m_outSrv.Reset();          // v0.7.0: upscale keeps it (composite source)
+        m_sharp.Reset(); m_sharpUav.Reset(); m_sharpSrv.Reset();   // (m_outSrv stays: the composite source; phase 82: always)
     }
 
     // Reversed-Z scene depth -> create the feature with DepthInverted from the start.
@@ -1741,6 +1750,8 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
                     const DrawIdRecord* didFwdRec) {
     CpuProf::Block cpb(CpuProf::kBDlaaRun);            // phase 31 CPU profiler (cpu_prof.h)
     if (m_compPending) CancelComposite(ctx);           // v0.7.0: never left open (Composite always follows Run)
+    m_dlaa.PresetMvJittered(m_mvJittered);             // phase 82: a set built now gets the flag at its creation
+    m_park.dlaa.PresetMvJittered(m_mvJittered);
     m_oaaArmed = false;                                // phase 81: armed again below for this Run's composite
     m_deferred = false;
     m_altFailed = false;                               // v0.10.0 phase 7
@@ -2106,7 +2117,7 @@ bool SceneDlaa::Composite(ID3D11DeviceContext* ctx, uint32_t vpX, uint32_t vpY, 
     const bool blend = m_crop;
     const float fx = blend ? (float)s_feather * (float)ofw / (float)m_fullW : 0.0f;
     const float fy = blend ? (float)s_feather * (float)ofh / (float)m_fullH : 0.0f;
-    const float data[20] = {
+    const float data[28] = {
         (float)(vpX + m_oxc), (float)(vpY + m_oyc), (float)m_ow, (float)m_oh,
         fx, fy, blend ? 1.0f : 0.0f, srgbDecode ? 1.0f : 0.0f,
         (blend && m_oxc > 0) ? 1.0f : 0.0f,                       // left edge inside the image
@@ -2115,9 +2126,8 @@ bool SceneDlaa::Composite(ID3D11DeviceContext* ctx, uint32_t vpX, uint32_t vpY, 
         (blend && m_oyc + m_oh < ofh) ? 1.0f : 0.0f,              // bottom
         m_mixShare,                                               // phase 82: the mod's share (1 = as before)
         m_mixSplit ? GameTaa::SplitX((float)vpX, (float)ofw, m_splitPct) : -1.0f,   //   split column (RT px) / none
-        m_mixSplit && m_splitDeco ? 1.5f : 0.0f,                  //   divider half-width (px; 0 = drawn later by DrawSplitOverlay)
-        m_mixSplit && m_splitDeco ? 2.0f : 0.0f,                  //   flags: labels
-        LabelCell(ofh), (float)vpY + 2.0f * LabelCell(ofh), m_up ? 1.0f : 0.0f, 0.0f };   // [4] label cell, top, DLSS
+        m_mixRight, 0.0f,                                         //   the share right of it; (the line + labels: DrawSplitOverlay)
+        0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
     if (!m_compDataValid || memcmp(data, m_compData, sizeof(data)) != 0) {
         D3D11_MAPPED_SUBRESOURCE mp{};
         if (FAILED(ctx->Map(m_compParams.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) {
@@ -2190,11 +2200,20 @@ bool SceneDlaa::Composite(ID3D11DeviceContext* ctx, uint32_t vpX, uint32_t vpY, 
 
 // phase 82: the split line + labels alone over the bound RT0 (the HDR path: after the game's tonemap, into its 8-bit target), viewport
 // (x0, y0, w, h). Needs the composite shaders (a composite ran before). Inside the caller's re-entrancy guard.
-bool SceneDlaa::DrawSplitOverlay(ID3D11DeviceContext* ctx, uint32_t x0, uint32_t y0, uint32_t w, uint32_t h, int pct, bool dlss) {
-    if (!m_compVs || !m_compPs || !m_compParamsSrv || !w || !h) return false;
-    const float data[20] = { (float)x0, (float)y0, (float)w, (float)h, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                             0.0f, GameTaa::SplitX((float)x0, (float)w, pct), 1.5f, 3.0f,
-                             LabelCell(h), (float)y0 + 2.0f * LabelCell(h), dlss ? 1.0f : 0.0f, 0.0f };
+bool SceneDlaa::DrawSplitOverlay(ID3D11DeviceContext* ctx, uint32_t x0, uint32_t y0, uint32_t w, uint32_t h, int pct,
+                                 const char* left, const char* right) {
+    if (!w || !h) return false;
+    {
+        Microsoft::WRL::ComPtr<ID3D11Device> dev;
+        ctx->GetDevice(&dev);
+        if (!dev || !EnsureComposite(dev.Get())) return false;
+    }
+    const GameTaa::Label ll = GameTaa::PackLabel(left), lr = GameTaa::PackLabel(right);
+    const float cell = LabelCell(h);
+    const float data[28] = { (float)x0, (float)y0, (float)w, (float)h, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                             0.0f, GameTaa::SplitX((float)x0, (float)w, pct), GameTaa::SplitLineWidth(h), 1.0f,
+                             cell, (float)y0 + 3.0f * cell, (float)ll.n, (float)lr.n,
+                             (float)ll.p[0], (float)ll.p[1], (float)ll.p[2], 0.0f, (float)lr.p[0], (float)lr.p[1], (float)lr.p[2], 0.0f };
     if (!m_compDataValid || memcmp(data, m_compData, sizeof(data)) != 0) {
         D3D11_MAPPED_SUBRESOURCE mp{};
         if (FAILED(ctx->Map(m_compParams.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) return false;
