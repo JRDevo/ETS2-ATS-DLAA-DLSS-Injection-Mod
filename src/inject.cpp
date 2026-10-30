@@ -814,6 +814,7 @@
 #include "cpu_pin.h"                                // phase 32: keep the game on the V-Cache cores (cpu_cache_pin; both builds)
 #include "cutout_mips.h"                            // phase 77: coverage-preserving binary alpha mips (cut-out BC3; pure logic; both builds)
 #include "light_fs.h"                               // phase 78: the lighting pass's full-screen draws -- the lost edge rects (both builds)
+#include "game_taa.h"                               // phase 82: the game's own TAA together with the mod (game_taa; pure logic; both builds)
 #include "cpu_tuning.h"                            // phase 54: P-core preference / priority / EcoQoS opt-out (cpu_pcore, cpu_priority, cpu_no_throttle)
 #include "flat_views.h"                             // v0.12.0 issue #12: flat multi-view (multi-monitor) detection (both builds)
 
@@ -1058,6 +1059,21 @@ int               g_wireDiagWindows = 0;
 // (default 100; 0 = off: NGX gets no mask), live from the menu's "Light glow ghosting fix" row (25 % steps)
 int               g_biasCfg = 100;
 bool              g_biasExplicit = false;   // set in dlaa.ini or changed in the menu -> SaveSettings writes dlss_bias_mask
+// phase 82 GAME TAA (src/game_taa.h; the "phase 82" block above HandlePossibleBlit): dlaa.ini game_taa 0 off / 1 mix / 2 TAA only /
+// 3 split (default 0) and game_taa_mix = the TAA share of the mix in % (default 50), live from the menu's "Game TAA" / "Game TAA
+// share" rows (Upscaling group)
+int               g_gameTaa = GameTaa::kOff;
+int               g_gameTaaMix = GameTaa::kMixDefault;
+bool              g_gameTaaExplicit = false;  // set in dlaa.ini or changed in the menu -> SaveSettings writes game_taa + game_taa_mix
+uint64_t          g_taaLastSeen = 0;          // Present number of the last TAA resolve draw (0 = never; GameTaa::Live)
+bool              g_taaHoldPass = false;      // the newest world pass holds the mod's jitter (ReconcileViewports: no world shift)
+int               g_taaLastAct = -1;          // GameTaa::Act of the last held pass's tonemap (the menu's status sentence), -1 = none
+std::atomic<void*> g_taaResolvePs{nullptr};   // the game's TAA resolve PS / range-compress PS (identity, by DXBC checksum at
+std::atomic<void*> g_taaCompressPs{nullptr};  //   CreatePixelShader; any thread)
+bool              g_taaUnmapHooked = false;   // the Unmap hook is in (the TAA constants copy needs it for a Map'ed buffer)
+#ifdef WITH_DLAA
+void TaaOnPassStart(uint64_t frame, bool hold);  // (the phase 82 block above HandlePossibleBlit)
+#endif
 float             g_fwdMinM = 0.5f;     // v0.9.0 r11 dlaa.ini mv_fwd_min_m (0.1..5): an origin nearer = an overlay
 // v0.10.0 phase 10 PERFORMANCE PROFILES (dlaa.ini perf_profile = high | medium | low, Alt+F9 cycles live, Shift+F12 saves): a
 // profile only gives DEFAULTS to the keys below; a key set in dlaa.ini -- or changed by its own hotkey this session (Alt+F6,
@@ -2425,6 +2441,16 @@ struct PassSlot {
     // it at the pass end; ref held until the slot's next StartPass) and the glow draws recorded in this pass
     Microsoft::WRL::ComPtr<ID3D11Texture2D> biasF;
     uint32_t   biasDraws = 0;
+    // phase 82 GAME TAA (src/game_taa.h): taaHold = the mod's world jitter was held for this pass (game_taa 1..3 + a live TAA
+    // resolve, StartPass); the resolve's draw sets taaSeen / taaJitOk (and jx / jy = the GAME's shift, px); the compress pass's t0 =
+    // taaRaw (the raw jittered scene, ref held; else the forward colour from the stage decision); taaAct = what the tonemap decided
+    // (GameTaa::Act); taaPreHdr = the stage decision wanted the HDR unit (deferred to the tonemap, its DlaaStageOut kept); taaLdr =
+    // the game's tonemap re-issued on the raw scene (LDR path; the blit unit's input)
+    bool       taaHold = false, taaSeen = false, taaJitOk = false, taaPreHdr = false;
+    int        taaAct = 0;
+    int        taaStageSwitched = 0;
+    bool       taaStageForced = false;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> taaRaw, taaLdr;
 #endif
     // ---- v0.6.1 flight recorder: plain counters on the NEWEST slot, reset in StartPass, logged at the blit
     // only for a bad record (PASS ANOMALY) or as a periodic reference (pass sample). Record counts = cand.
@@ -2593,6 +2619,8 @@ uint64_t         g_fwdTwoColours = 0;           // passes with two different for
 int              g_fwdLeaveLogs = 0, g_fwdReentryLogs = 0;
 struct PassSlot;
 void PreTonemapPoint(ID3D11DeviceContext1* ctx, PassSlot& slot, bool atLeave);
+bool PreTonemapRun(ID3D11DeviceContext1* ctx, PassSlot& slot, ID3D11Texture2D* F, const D3D11_TEXTURE2D_DESC& td, int switched,
+                   bool forced, bool atLeave);   // phase 82: split out of PreTonemapPoint (also called at the tonemap)
 void FwdOnBind(void* fwd);
 void FwdOnLeave(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* rtvs, ID3D11Resource* bindDepth);
 void MirOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* rtvs, ID3D11Resource* depthRes,
@@ -3331,6 +3359,10 @@ void SaveSettings(uint64_t n) {
     }
     if (g_xrHiddenMaskExplicit) snprintf(add("xr_hidden_mask"), sizeof(kv[0].val), "%d", g_xrHiddenMask);   // phase 40
     if (g_biasExplicit) snprintf(add("dlss_bias_mask"), sizeof(kv[0].val), "%d", g_biasCfg);   // phase 49 (glow ghosting row)
+    if (g_gameTaaExplicit) {                              // phase 82 (the Game TAA rows)
+        snprintf(add("game_taa"), sizeof(kv[0].val), "%d", g_gameTaa);
+        snprintf(add("game_taa_mix"), sizeof(kv[0].val), "%d", g_gameTaaMix);
+    }
     if (g_cpuTuneExplicit) {                              // phase 54 (CPU tuning row)
         snprintf(add("cpu_pcore"), sizeof(kv[0].val), "%d", g_cpuPcore);
         snprintf(add("cpu_priority"), sizeof(kv[0].val), "%d", g_cpuPriority);
@@ -3353,7 +3385,7 @@ void SaveSettings(uint64_t n) {
 #ifdef WITH_DLAA
     if (g_mvDilateExplicit) snprintf(add("dlaa_mv_dilate"), sizeof(kv[0].val), "%d", DlaaProcessor::MvDilate() ? 1 : 0);   // phase 60 (Alt+F10)
 #endif
-    char vrsW[256] = "";                                  // (phase 39: was 64, + log_level; phase 40: + xr_hidden_mask; phase 42: + vrs_passes;
+    char vrsW[288] = "";                                  // (phase 82: 288, + game_taa; phase 39: was 64, + log_level; phase 40: + xr_hidden_mask; phase 42: + vrs_passes;
                                                           //  phase 49: 128 -> 160, + dlss_bias_mask; phase 52: 160 -> 208, + the frame rate keys;
                                                           //  phase 59: 224, + vrs_eye; phase 59f: 256, + vrs_strength)
     if (g_vrsExplicit) snprintf(vrsW, sizeof(vrsW), " vrs=%d vrs_inner=%d vrs_outer=%d", g_vrsOn, g_vrsInner, g_vrsOuter);
@@ -3376,6 +3408,10 @@ void SaveSettings(uint64_t n) {
     if (g_biasExplicit) {                                 // phase 49
         const size_t vl = strlen(vrsW);
         snprintf(vrsW + vl, sizeof(vrsW) - vl, " dlss_bias_mask=%d", g_biasCfg);
+    }
+    if (g_gameTaaExplicit) {                              // phase 82
+        const size_t vl = strlen(vrsW);
+        snprintf(vrsW + vl, sizeof(vrsW) - vl, " game_taa=%d game_taa_mix=%d", g_gameTaa, g_gameTaaMix);
     }
     if (g_logLevelExplicit) {
         const size_t vl = strlen(vrsW);
@@ -7750,7 +7786,13 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
     n.predView = fvN >= 2 ? g_fv.ViewOfBlitIndex(g_fvPerm.BlitOfPos(n.framePos)) : -1;   // round 5: via the learned permutation
     const bool fvBeyondCap = fvN > FlatViews::kMaxViews &&
                              n.predView >= FlatViews::kMaxViews;
-    if (g_jitterEnabled && !WorldJitterHeld() && !fvBeyondCap) JitterOfPhase(n.phase, &n.jx, &n.jy);   // v0.7.9: held until VR is real
+    // phase 82: game_taa 1..3 with a live TAA resolve -> the GAME jitters this pass (its projection): the mod's own shift is held (no
+    // viewport shift, no overscan); jx / jy get the game's shift at the resolve's draw (TaaOnResolve)
+    g_taaHoldPass = GameTaa::Hold(g_gameTaa, g_taaLastSeen, n.frameN);
+#ifdef WITH_DLAA
+    if (g_gameTaa) TaaOnPassStart(n.frameN, g_taaHoldPass);   // (logs: the mode on but no live resolve = the mod as at 0; stats)
+#endif
+    if (g_jitterEnabled && !WorldJitterHeld() && !fvBeyondCap && !g_taaHoldPass) JitterOfPhase(n.phase, &n.jx, &n.jy);   // v0.7.9: held until VR is real
     else { n.jx = 0.0f; n.jy = 0.0f; }
     n.snap = false;
     n.rastSeen = false; n.rastShifted = false; n.rastJx = n.rastJy = 0.0f;   // v0.12.0 issue #12 round 4
@@ -7774,6 +7816,9 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
     n.twin.biasValid = false; n.twin.biasOpen = false;   // phase 49: this pass's glow bias mask is written at its pass end
     n.stageDone = false; n.stageAtLeave = false; n.fallback = false; n.warmHdr = false; n.candBad = false;
     n.warmTex.Reset();
+    n.taaHold = g_taaHoldPass; n.taaSeen = false; n.taaJitOk = false; n.taaPreHdr = false; n.taaAct = -1;   // phase 82 (-1 = undecided)
+    n.taaStageSwitched = 0; n.taaStageForced = false;
+    n.taaRaw.Reset(); n.taaLdr.Reset();
     PassViewSetup(n);                                     // v0.10.0 phase 9: area clip + forward-depth resolution of this pass
     ObjOnPassStart(ctx, s);                               // v0.9.0: the previous record flushed, this pass's record empty
     DidOnPassStart(ctx, s);                               // v0.10.0: the previous pass replayed if it still waits, new record
@@ -8409,7 +8454,7 @@ void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
     // phase 78: + a full-screen Draw of the main lighting bind (g_lightFsShift, set around that one Draw by hkDraw): the same
     // shift, but the game's W x H size (no overscan, see `over` below)
     const bool lightMain = (g_lightRedrawShift || g_lightFsShift) && g_lightBind == 1;
-    const bool worldShift = (g_jitterPass || lightMain) && JitterLive() && !WorldJitterHeld() && g_sceneW &&   // v0.7.9: see g_eyeBlitEver
+    const bool worldShift = (g_jitterPass || lightMain) && JitterLive() && !WorldJitterHeld() && !g_taaHoldPass && g_sceneW &&   // v0.7.9: see g_eyeBlitEver; phase 82: the game jitters
                             (UINT)g_gameVp[0].Width == g_sceneW && (UINT)g_gameVp[0].Height == g_sceneH;
     // v0.7.8: the profile-screen preview pass shifts viewport 0 too (when its size is the preview RT's size, g_pvW x
     // g_pvH), by the frame's own jitter (g_pvJx / g_pvJy: no G-buffer pass advances g_jx / g_jy on that screen).
@@ -9530,6 +9575,13 @@ HRESULT STDMETHODCALLTYPE hkCreatePixelShader(ID3D11Device* dev, const void* cod
         LodPsNote(*pp, cls, dep);
 #ifdef WITH_DLAA
         WireWiden::NotePs(*pp, code, len);               // phase 61: the wire PS (by its DXBC checksum)
+        // phase 82: the game's TAA resolve and its range-compress pass (src/game_taa.h); a later shader at the same address
+        // with other bytecode clears the note
+        void* const p = (void*)*pp;
+        if (GameTaa::ChecksumIs(code, len, GameTaa::kResolvePs)) g_taaResolvePs.store(p, std::memory_order_release);
+        else { void* e = p; g_taaResolvePs.compare_exchange_strong(e, nullptr, std::memory_order_acq_rel); }
+        if (GameTaa::ChecksumIs(code, len, GameTaa::kCompressPs)) g_taaCompressPs.store(p, std::memory_order_release);
+        else { void* e = p; g_taaCompressPs.compare_exchange_strong(e, nullptr, std::memory_order_acq_rel); }
 #endif
     }
     return hr;
@@ -10129,8 +10181,46 @@ const void* OnUpload(ID3D11Resource* dst, UINT sub, const D3D11_BOX* box, const 
 }
 } // namespace Cutout
 
+// ---- phase 82 GAME TAA: a CPU copy of the TAA resolve's constants (its jitter, cb0[8].xy) -------------------------------------
+// NGX takes the jitter as CPU floats at its evaluate, and the game writes it into a GPU constant buffer. A readback of that buffer
+// would stall the CPU on the GPU (or arrive frames late), so the game's own UPLOAD is copied as it happens: the resolve's draw names
+// its cb0 buffer + offset (TaaOnResolve learns them: `buf`, `off`), and from then on the game's Map (WRITE_DISCARD / NO_OVERWRITE)
+// + Unmap of that buffer (hkMap / hkUnmap: 256 bytes at `off` copied right before the Unmap, the mapping still valid) or its
+// UpdateSubresource(1) (the source bytes) refresh `f`. The next resolve draw takes `f` when it is a fresh copy at the offset that
+// draw binds and GameTaa::ParseJitter accepts it (row 11 = the target size, a sub-pixel jitter): a ring buffer whose offset moves
+// every frame, or a buffer the copy never sees, gives no jitter -> the pass falls back to TAA only (logged, counted). Only while
+// game_taa != 0 (mode 0: one pointer test per Map / Unmap / UpdateSubresource).
+struct TaaCbShadow {
+    void*    buf = nullptr;      // the resolve's cb0 buffer (identity, no ref), learned at its draw
+    UINT     off = 0;            // the byte offset its draw bound (first constant * 16)
+    UINT     width = 0;          // ByteWidth of buf
+    void*    mapPtr = nullptr;   // the open Map of buf (WRITE_DISCARD / NO_OVERWRITE), nullptr = none
+    int      kind = 0;           // how the last copy came: 1 Map WRITE_DISCARD, 2 Map NO_OVERWRITE, 3 UpdateSubresource(1)
+    float    f[64] = {};         // 256 bytes at `off`
+    UINT     fOff = 0;           // the offset `f` was copied at
+    uint64_t serial = 0, used = 0;   // copies so far / the copy the last resolve draw took
+};
+TaaCbShadow g_taaCb;
+uint64_t    g_taaCbCopies[4] = {};   // copies by kind (stats)
+inline void TaaCbCopy(const void* base, UINT baseOff, UINT len, int kind) {   // base = the buffer's bytes from byte baseOff on
+    const UINT off = g_taaCb.off;
+    if (!base || off < baseOff || off >= baseOff + len) return;
+    UINT n = baseOff + len - off;
+    if (n > sizeof(g_taaCb.f)) n = sizeof(g_taaCb.f);
+    memset(g_taaCb.f, 0, sizeof(g_taaCb.f));
+    memcpy(g_taaCb.f, static_cast<const uint8_t*>(base) + (off - baseOff), n);
+    g_taaCb.fOff = off; g_taaCb.kind = kind; ++g_taaCb.serial;
+    ++g_taaCbCopies[kind & 3];
+}
+inline void TaaCbOnUpdate(ID3D11Resource* dst, const D3D11_BOX* box, const void* src) {
+    if (!g_gameTaa || !dst || (void*)dst != g_taaCb.buf || !src) return;
+    const UINT left = box ? box->left : 0, right = box ? box->right : g_taaCb.width;
+    if (right > left) TaaCbCopy(src, left, right - left, 3);
+}
+
 void STDMETHODCALLTYPE hkUpdateSubresource1(ID3D11DeviceContext1* c, ID3D11Resource* dst, UINT sub, const D3D11_BOX* box,
                                             const void* src, UINT rp, UINT dp, UINT fl) {
+    if (g_gameTaa && !t_inDlaa) TaaCbOnUpdate(dst, box, src);   // phase 82
     if ((g_cutoutMips || LogLevel() >= 4) && !Cutout::t_cutoutIn && !t_inDlaa) {
         if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oUpdateSubresource1(c, dst, sub, box, src, rp, dp, fl); return; }
         std::vector<uint8_t> scratch;
@@ -10146,6 +10236,7 @@ void STDMETHODCALLTYPE hkUpdateSubresource1(ID3D11DeviceContext1* c, ID3D11Resou
 }
 void STDMETHODCALLTYPE hkUpdateSubresource(ID3D11DeviceContext* c, ID3D11Resource* dst, UINT sub, const D3D11_BOX* box,
                                            const void* src, UINT rp, UINT dp) {
+    if (g_gameTaa && !t_inDlaa) TaaCbOnUpdate(dst, box, src);   // phase 82
     if ((g_cutoutMips || LogLevel() >= 4) && !Cutout::t_cutoutIn && !t_inDlaa) {
         if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oUpdateSubresource(c, dst, sub, box, src, rp, dp); return; }
         std::vector<uint8_t> scratch;
@@ -12322,6 +12413,18 @@ void PreTonemapPoint(ID3D11DeviceContext1* ctx, PassSlot& slot, bool atLeave) {
     slot.warmHdr = false;
     slot.warmTex.Reset();
     slot.fallback = false;
+    // phase 82: a held pass (game_taa) remembers its forward colour = the raw jittered scene; the game's TAA compress pass, when seen,
+    // replaces it with its own input (TaaOnCompress). Both stay untouched by the game until the tonemap.
+    if (slot.taaHold && slot.fwdTex && !slot.taaRaw) {
+        ID3D11RenderTargetView* rtv = nullptr;
+        ctx->OMGetRenderTargets(1, &rtv, nullptr);
+        if (rtv) {
+            Microsoft::WRL::ComPtr<ID3D11Resource> r;
+            rtv->GetResource(&r);
+            rtv->Release();
+            if (r && (void*)r.Get() == slot.fwdTex) r.As(&slot.taaRaw);
+        }
+    }
     const char* inel = PreIneligible();
     if (inel) {
         DlaaStageIn in;
@@ -12392,6 +12495,31 @@ void PreTonemapPoint(ID3D11DeviceContext1* ctx, PassSlot& slot, bool atLeave) {
     }
     if (o.warmHdr && F) { slot.warmHdr = true; slot.warmTex = F; }
     if (!o.runPre) return;
+    // phase 82: the mod's jitter is held for this pass (game_taa 1..3, a live TAA resolve): the HDR run waits for the pass's tonemap
+    // (TaaOnTonemap) -- after the game's TAA resolve, whose draw gives the GAME's jitter of this pass; the decision is kept
+    if (slot.taaHold) {
+        slot.taaPreHdr = true;
+        slot.taaStageSwitched = o.switched;
+        slot.taaStageForced = o.forced;
+        return;
+    }
+    PreTonemapRun(ctx, slot, F.Get(), td, o.switched, o.forced, atLeave);
+}
+
+// v0.10.0 phase 4 / 7: the HDR unit's run of a pass whose stage decision chose pre-tonemap (o.runPre): in place on the forward colour
+// F at the decision point (PreTonemapPoint), or -- phase 82, the mod's jitter held for game_taa -- at the pass's tonemap on the raw
+// jittered scene with SetCompositeOut (nothing written back: TaaOnTonemap blends the result into the tonemap's input). `switched` /
+// `forced` = the decision's DlaaStageOut fields. Returns whether NGX evaluated.
+bool PreTonemapRun(ID3D11DeviceContext1* ctx, PassSlot& slot, ID3D11Texture2D* F, const D3D11_TEXTURE2D_DESC& td, int switched,
+                   bool forced, bool atLeave) {
+    SceneDlaa& dl = g_dlaa[0];
+    // phase 82: a held pass composites (TaaOnTonemap), the game's jitter is in its motion vectors; else in place, exactly as before
+    {
+        const GameTaa::Mix mx = GameTaa::MixOf(g_gameTaa, g_gameTaaMix);
+        dl.SetCompositeOut(slot.taaHold);
+        dl.SetMvJittered(slot.taaHold);
+        dl.SetMix(slot.taaHold ? mx.modShare : 1.0f, slot.taaHold && mx.split);
+    }
     if (g_resetNext) { g_resetEyes = (1 << kMaxViews) - 1; g_resetNext = false; }
     bool reset = (g_resetEyes & 1) != 0;
     g_resetEyes &= ~1;
@@ -12411,15 +12539,15 @@ void PreTonemapPoint(ID3D11DeviceContext1* ctx, PassSlot& slot, bool atLeave) {
     GpuPerf::SetPass(slot.s);                             // v0.10.0 phase 8: flat = eye 0
     GpuPerf::NoteEye(slot.s, 0);
     t_inDlaa = true;
-    const bool ok = dl.Run(ctx, F.Get(), PassDepth(slot), &slot.twin, &slot.cand, njx, njy, reset, g_mvOn.load(), false, candBad,
+    const bool ok = dl.Run(ctx, F, PassDepth(slot), &slot.twin, &slot.cand, njx, njy, reset, g_mvOn.load(), false, candBad,
                            0, 0, g_objCfg ? &g_objRing[k] : nullptr, g_didCfg ? &g_didRing[k] : nullptr,
                            g_didCfg ? &g_didFwdRing[k] : nullptr);
     t_inDlaa = false;
     UpdateMedoidDrop(0, dl);                              // v0.10.0 phase 8
     if (ok && dl.LastReset()) MirTurnsNoteCut(0);         // phase 41: a camera cut -> the mirrors run out of turn (if in turns)
-    if (o.switched > 0)
+    if (switched > 0)
         PreStage(true, nullptr, td.Width, td.Height,
-                 o.forced ? "switched after 2 x the hysteresis without a warm HDR unit (its history starts over)"
+                 forced ? "switched after 2 x the hysteresis without a warm HDR unit (its history starts over)"
                           : "switched after the hysteresis; the HDR unit was warmed on the last passes: no history reset");
     if (ok) {
         slot.pre = 1;
@@ -12429,9 +12557,9 @@ void PreTonemapPoint(ID3D11DeviceContext1* ctx, PassSlot& slot, bool atLeave) {
         g_stage.OnPreRun(true);
         PreStage(true, nullptr, td.Width, td.Height);
         t_inDlaa = true;
-        SnapshotStep(ctx, 0, F.Get(), SnapInfo{ g_blitCount + 1, slot.phase, slot.jx, slot.jy, njx, njy, reset, g_mvOn.load(), true });
+        SnapshotStep(ctx, 0, F, SnapInfo{ g_blitCount + 1, slot.phase, slot.jx, slot.jy, njx, njy, reset, g_mvOn.load(), true });
         t_inDlaa = false;
-        return;
+        return true;
     }
     // not evaluated: this pass goes to the blit unit (a fallback; the HDR unit is NOT torn down)
     slot.pre = 2;
@@ -12451,6 +12579,7 @@ void PreTonemapPoint(ID3D11DeviceContext1* ctx, PassSlot& slot, bool atLeave) {
                  g_preLastMiss);
         PreStage(false, why, 0, 0, "the blit unit ran in all of them: no history reset, the HDR unit stays alive");
     }
+    return false;
 }
 
 // v0.10.0 phase 7: hkOMSetRenderTargets, a main forward bind (1 RTV RGBA16F scene-size + the scene depth) of the newest pass:
@@ -12540,6 +12669,323 @@ void RequestMvDump(uint64_t n) {
         "around eye 0's %s uv (%.3f, %.3f)", why, optKnown ? "optical centre" : (g_vrMode ? "image centre (optical centre not "
         "known yet)" : "image centre"), (double)pu, (double)pv);
     PlayTones(1, 900, 80, 0);
+}
+#endif
+
+#ifdef WITH_DLAA
+// ---- phase 82: GAME TAA together with the mod (dlaa.ini game_taa / game_taa_mix; src/game_taa.h) -------------------------------
+// Default game_taa 0 = the mod as before. 1 mix / 2 TAA only / 3 split need the game's AA set to TAA; while its TAA resolve is live
+// (seen within GameTaa::kLiveFrames Presents) each world pass HOLDS the mod's viewport jitter (StartPass, ReconcileViewports) -- the
+// game jitters its own projection -- and per pass:
+//  * the RESOLVE draw (PS 524, by DXBC checksum + its shape: 2 RGBA16F scene-size targets) -> TaaOnResolve: the pass's taaSeen and
+//    the GAME's jitter (cb0[8].xy, from TaaCbShadow) into slot.jx / jy (pixels; NGX gets jitter_sign x it, as with the mod's own);
+//  * the COMPRESS draw (PS 535) -> TaaOnCompress: its t0 = the raw jittered lit scene = the DLAA / DLSS input (slot.taaRaw; until
+//    then the forward colour from the stage decision);
+//  * the TONEMAP draw (HandlePossibleBlit's tonemap rule, BEFORE the game's draw) -> TaaOnTonemap decides (GameTaa::Decide):
+//      kActHdr (flat DLAA, the stage logic wanted the pre-tonemap HDR unit; its run was deferred here): PreTonemapRun on the raw scene
+//        with SetCompositeOut, then SceneDlaa::CompositeInto the tonemap's INPUT (the TAA'd linear HDR after the game's sharpen /
+//        inverse compress -- same linear space): lerp by the TAA share (mix) or the split. The resolve's outputs and history are
+//        never written (the history stays pure TAA). The blit then has nothing to do (slot.pre 1).
+//      kActLdr (DLSS upscaling, VR, the post-tonemap stage): the game's tonemap draw is RE-ISSUED once with t0 = the raw scene into a
+//        mod texture of the tonemap target's shape (TaaReissueTonemap); at the blit the unit runs on THAT (the raw frame, tonemapped
+//        exactly like the game's) and its result is composited over the game's own blit (the TAA picture, stretched when upscaling)
+//        with alpha = the mod's share (SetCompositeOut for DLAA, the upscale composite for DLSS) or the split.
+//      kActTaaOnly (mode 2, or a held pass the mix cannot take: no resolve / no jitter / no raw scene / a failed run): the mod's
+//        main-scene DLAA / DLSS is skipped for the pass (the game's TAA picture; MV history kept rolling). Never DLAA on the TAA'd
+//        frame (that stacked blur is what the feature removes).
+// The main units' NGX features get MVJittered while the jitter is held (the reprojected MVPs carry the game's jitter). Logs: one INFO
+// line when the mode / the detection / the path changes ("game TAA (phase 82): ..."), a WARN once when a resolve is seen at
+// game_taa 0, and a stats line every 1800 Presents while it runs; no per-frame lines.
+uint64_t g_taaResolves = 0, g_taaShapeMiss = 0, g_taaJitMiss = 0, g_taaActN[4] = {}, g_taaRawFromCompress = 0, g_taaRawDiffers = 0;
+uint64_t g_taaOnlyBlits = 0, g_taaLdrBlits = 0, g_taaStatsAt = 0;
+bool     g_taaWarned0 = false;
+int      g_taaLogs = 0;
+struct TaaLogKey { int mode = -1; bool live = false; int act = -2; const char* why = nullptr; bool up = false; int share = -1; };
+TaaLogKey g_taaLogged;
+float    g_taaLastJx = 0.0f, g_taaLastJy = 0.0f;
+Microsoft::WRL::ComPtr<ID3D11Texture2D>          g_taaLdrTex[2];   // TaaReissueTonemap targets (2: a VR pair can be tonemapped
+Microsoft::WRL::ComPtr<ID3D11RenderTargetView>   g_taaLdrRtv[2];   //   before either blit)
+int      g_taaLdrNext = 0;
+Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> g_taaRawSrv;      // SRV of the raw scene (cached per texture; the view holds a ref)
+void*    g_taaRawSrvTex = nullptr;
+
+const char* TaaActText(int a, bool up) {
+    switch (a) {
+    case GameTaa::kActHdr: return "DLAA: the HDR unit runs at the tonemap on the raw jittered scene, its result blended into the "
+                                  "tonemap's linear input (pre-tonemap)";
+    case GameTaa::kActLdr: return up ? "DLSS: the game's tonemap re-issued on the raw jittered scene, DLSS upscales it, composited over "
+                                       "the game's stretched TAA picture"
+                                     : "DLAA at the blit: the game's tonemap re-issued on the raw jittered scene, DLAA on it, composited "
+                                       "over the game's TAA picture";
+    case GameTaa::kActTaaOnly: return "TAA only: the mod's main-scene DLAA / DLSS is skipped";
+    default: return "the mod as with game_taa 0 (own jitter, no mix)";
+    }
+}
+// one INFO line whenever the mode, the detection, the share or the path changes (rate-limited)
+void TaaNote(int act, const char* why) {
+    const uint64_t now = g_frames.load(std::memory_order_relaxed);
+    TaaLogKey k;
+    k.mode = g_gameTaa; k.live = GameTaa::Live(g_taaLastSeen, now); k.act = act; k.why = why;
+    k.up = strcmp(g_upTag, "off") != 0; k.share = g_gameTaa == GameTaa::kMix ? g_gameTaaMix : -1;
+    if (k.mode == g_taaLogged.mode && k.live == g_taaLogged.live && k.act == g_taaLogged.act && k.why == g_taaLogged.why &&
+        k.up == g_taaLogged.up && k.share == g_taaLogged.share) return;
+    g_taaLogged = k;
+    if (g_taaLogs++ >= 60) return;
+    const char* src = g_taaCb.kind == 3 ? "UpdateSubresource" : (g_taaCb.kind == 2 ? "Map NO_OVERWRITE / Unmap"
+                                                                                    : (g_taaCb.kind == 1 ? "Map DISCARD / Unmap" : "none yet"));
+    char share[48] = "";
+    if (k.mode == GameTaa::kMix) snprintf(share, sizeof(share), " (TAA share %d %%)", g_gameTaaMix);
+    Log("game TAA (phase 82): mode=%s%s | TAA resolve %s%s | jitter: %s | path: %s%s%s | Present #%llu",
+        GameTaa::ModeName(k.mode), share,
+        k.live ? "DETECTED (PS 6b3e199e, 2 x RGBA16F scene-size)" : "not seen (game AA is not TAA, or no TAA here)",
+        g_taaResolvePs.load(std::memory_order_relaxed) ? "" : " [the resolve shader was never created: other game version?]",
+        act == GameTaa::kActNone ? "the mod's own viewport jitter"
+                                 : (act == GameTaa::kActTaaOnly && why ? "n/a" : "the GAME's (TAA resolve cb0[8].xy)"),
+        TaaActText(act, k.up), why ? " -- because " : "", why ? why : "", (unsigned long long)now);
+    if (act != GameTaa::kActNone && act != GameTaa::kActTaaOnly)
+        Log("game TAA (phase 82): jitter copy from the resolve's cbuffer %p (%u bytes, offset %u) by %s, last (%+.3f, %+.3f) px -> NGX "
+            "(%+.3f, %+.3f) (jitter_sign %+d,%+d); NGX MVJittered on the main units", g_taaCb.buf, g_taaCb.width, g_taaCb.off, src,
+            (double)g_taaLastJx, (double)g_taaLastJy, (double)(g_signX * g_taaLastJx), (double)(g_signY * g_taaLastJy), g_signX, g_signY);
+}
+
+// Which pass a post-processing draw belongs to: the pass of the current TAA chain (compress -> resolve -> tonemap; its pass is found
+// by the compress pass's input = that pass's forward colour, so a VR frame that renders both eyes' scenes before their post chains
+// still pairs each chain with its own eye's pass), else the newest pass.
+uint64_t g_taaChainS = UINT64_MAX;
+PassSlot* TaaNewest() {
+    if (g_passSeq <= g_fifoHead) return nullptr;
+    if (g_taaChainS != UINT64_MAX && g_taaChainS >= g_fifoHead && g_taaChainS < g_passSeq) {
+        PassSlot& c = g_ring[SlotOf(g_taaChainS)];
+        if (c.s == g_taaChainS) return &c;
+    }
+    return &g_ring[SlotOf(g_passSeq - 1)];
+}
+
+// the compress draw (PS 535): t0 = the raw jittered lit scene; its pass = the outstanding pass whose forward colour it is
+void TaaOnCompress(ID3D11DeviceContext* ctx) {
+    ID3D11ShaderResourceView* v = nullptr;
+    ctx->PSGetShaderResources(0, 1, &v);
+    if (!v) return;
+    Microsoft::WRL::ComPtr<ID3D11Resource> r;
+    v->GetResource(&r);
+    v->Release();
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> t;
+    if (!r || FAILED(r.As(&t)) || !t) return;
+    D3D11_TEXTURE2D_DESC d{};
+    t->GetDesc(&d);
+    if (d.Format != DXGI_FORMAT_R16G16B16A16_FLOAT || d.SampleDesc.Count != 1 || d.MipLevels != 1 || d.ArraySize != 1) return;
+    g_taaChainS = UINT64_MAX;
+    for (uint64_t q = g_fifoHead; q < g_passSeq; ++q) {
+        const PassSlot& c = g_ring[SlotOf(q)];
+        if (c.s == q && (c.fwdTex == (void*)t.Get() || c.taaRaw.Get() == t.Get())) g_taaChainS = q;   // (the newest such pass)
+    }
+    PassSlot* const s = TaaNewest();
+    if (!s || !s->taaHold) return;
+    if (s->taaRaw && s->taaRaw.Get() != t.Get() && g_taaRawDiffers++ == 0)
+        Log("game TAA (phase 82): the TAA input (compress pass t0 %p) is NOT the pass's forward colour %p -- the TAA input is used",
+            (void*)t.Get(), (void*)s->taaRaw.Get());
+    s->taaRaw = t;
+    ++g_taaRawFromCompress;
+}
+
+// the resolve draw (PS 524): shape check, liveness, the pass's game jitter
+void TaaOnResolve(ID3D11DeviceContext* ctx) {
+    ID3D11RenderTargetView* rtv[2] = {};
+    ctx->OMGetRenderTargets(2, rtv, nullptr);
+    bool shape = rtv[0] && rtv[1];
+    for (int i = 0; i < 2 && shape; ++i) {
+        Microsoft::WRL::ComPtr<ID3D11Resource> r;
+        rtv[i]->GetResource(&r);
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> t;
+        D3D11_TEXTURE2D_DESC d{};
+        if (r && SUCCEEDED(r.As(&t)) && t) t->GetDesc(&d);
+        shape = t && d.Format == DXGI_FORMAT_R16G16B16A16_FLOAT && d.SampleDesc.Count == 1 &&
+                (i == 1 || (d.Width == g_sceneW && d.Height == g_sceneH));
+    }
+    for (auto* v : rtv) if (v) v->Release();
+    if (!shape) { ++g_taaShapeMiss; return; }
+    const uint64_t now = g_frames.load(std::memory_order_relaxed);
+    g_taaLastSeen = now ? now : 1;
+    ++g_taaResolves;
+    if (g_gameTaa == GameTaa::kOff) {
+        if (!g_taaWarned0) {
+            g_taaWarned0 = true;
+            LogWarn("game TAA (phase 82): the game's own TAA is ON (its resolve pass draws, Present #%llu) while game_taa = 0 -- the mod's "
+                "DLAA / DLSS now runs on an already TAA'd picture and both jitter (blur, shimmer). Set the game's Anti-aliasing to "
+                "Disabled (r_aa 0), or set the menu's Game TAA row (dlaa.ini game_taa) to mix / TAA only / split",
+                (unsigned long long)now);
+        }
+        return;
+    }
+    PassSlot* const s = TaaNewest();
+    if (!s) return;
+    s->taaSeen = true;
+    // the resolve's cb0: learn its buffer / offset, take the copy of its constants made at the game's upload
+    ID3D11Buffer* cb = nullptr;
+    UINT first = 0, num = 0;
+    {
+        ID3D11DeviceContext1* c1 = nullptr;
+        if (SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&c1)) && c1) {
+            c1->PSGetConstantBuffers1(0, 1, &cb, &first, &num);
+            c1->Release();
+        } else {
+            ctx->PSGetConstantBuffers(0, 1, &cb);
+        }
+    }
+    bool ok = false;
+    if (cb) {
+        const UINT off = first * 16u;
+        if ((void*)cb != g_taaCb.buf || off != g_taaCb.off) {
+            D3D11_BUFFER_DESC bd{};
+            cb->GetDesc(&bd);
+            static int s_learnLogs = 0;
+            if (s_learnLogs++ < 6)
+                Log("game TAA (phase 82): the TAA resolve reads cb0 = buffer %p (%u bytes, usage %d, cpu 0x%x) at offset %u (%u constants)%s"
+                    " -- its constants are copied at the game's next upload (Map / Unmap%s, UpdateSubresource)", (void*)cb, bd.ByteWidth,
+                    (int)bd.Usage, bd.CPUAccessFlags, off, num, g_taaCb.buf ? " (it changed)" : "",
+                    g_taaUnmapHooked ? "" : ": NO Unmap hook");
+            g_taaCb.buf = cb; g_taaCb.off = off; g_taaCb.width = bd.ByteWidth; g_taaCb.mapPtr = nullptr;
+            g_taaCb.used = g_taaCb.serial;            // an older copy is of another region
+        }
+        float sx = 0.0f, sy = 0.0f;
+        if (g_taaCb.serial != g_taaCb.used && g_taaCb.fOff == off &&
+            GameTaa::ParseJitter(g_taaCb.f, sizeof(g_taaCb.f) / sizeof(float), g_sceneW, g_sceneH, &sx, &sy)) {
+            ok = true;
+            if (s->taaHold) { s->jx = sx; s->jy = sy; s->taaJitOk = true; }
+            g_taaLastJx = sx; g_taaLastJy = sy;
+        }
+        g_taaCb.used = g_taaCb.serial;
+        cb->Release();
+    }
+    if (!ok) ++g_taaJitMiss;
+}
+
+// the game's tonemap draw re-issued once into our own target of the tonemap target's shape, with t0 = the raw scene (kActLdr)
+bool TaaReissueTonemap(ID3D11DeviceContext* ctx, PassSlot& slot, const D3D11_TEXTURE2D_DESC& rtDesc,
+                       const D3D11_RENDER_TARGET_VIEW_DESC& rvd, UINT verts) {
+    Microsoft::WRL::ComPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    if (!dev || !slot.taaRaw) return false;
+    const int i = g_taaLdrNext;
+    g_taaLdrNext ^= 1;
+    D3D11_TEXTURE2D_DESC cur{};
+    if (g_taaLdrTex[i]) g_taaLdrTex[i]->GetDesc(&cur);
+    if (!g_taaLdrTex[i] || cur.Width != rtDesc.Width || cur.Height != rtDesc.Height || cur.Format != rtDesc.Format) {
+        g_taaLdrRtv[i].Reset();
+        g_taaLdrTex[i].Reset();
+        D3D11_TEXTURE2D_DESC td = rtDesc;
+        td.MipLevels = 1; td.ArraySize = 1; td.SampleDesc.Count = 1; td.SampleDesc.Quality = 0;
+        td.Usage = D3D11_USAGE_DEFAULT; td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        td.CPUAccessFlags = 0; td.MiscFlags = 0;
+        D3D11_RENDER_TARGET_VIEW_DESC rd = rvd;
+        rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+        rd.Texture2D.MipSlice = 0;
+        HRESULT hr = dev->CreateTexture2D(&td, nullptr, &g_taaLdrTex[i]);
+        if (SUCCEEDED(hr)) hr = dev->CreateRenderTargetView(g_taaLdrTex[i].Get(), &rd, &g_taaLdrRtv[i]);
+        if (FAILED(hr)) {
+            static int s_fail = 0;
+            if (s_fail++ < 3)
+                LogErr("game TAA (phase 82): the re-issued tonemap's target %ux%u fmt=%d (RTV fmt %d) could not be created hr=0x%lx",
+                    td.Width, td.Height, (int)td.Format, (int)rd.Format, hr);
+            g_taaLdrRtv[i].Reset(); g_taaLdrTex[i].Reset();
+            return false;
+        }
+        Log("game TAA (phase 82): re-issued tonemap target %d created -- %ux%u fmt=%d, RTV fmt %d (the game's tonemap target's shape)", i,
+            td.Width, td.Height, (int)td.Format, (int)rd.Format);
+    }
+    if (slot.taaRaw.Get() != g_taaRawSrvTex || !g_taaRawSrv) {
+        g_taaRawSrv.Reset();
+        g_taaRawSrvTex = nullptr;
+        if (FAILED(dev->CreateShaderResourceView(slot.taaRaw.Get(), nullptr, &g_taaRawSrv)) || !g_taaRawSrv) return false;
+        g_taaRawSrvTex = slot.taaRaw.Get();
+    }
+    ID3D11ShaderResourceView* s0 = nullptr;
+    ID3D11RenderTargetView*   rts[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
+    ID3D11DepthStencilView*   dsv = nullptr;
+    ctx->PSGetShaderResources(0, 1, &s0);
+    ctx->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, rts, &dsv);
+    ID3D11ShaderResourceView* raw = g_taaRawSrv.Get();
+    ID3D11RenderTargetView*   ours = g_taaLdrRtv[i].Get();
+    ctx->OMSetRenderTargets(1, &ours, dsv);
+    ctx->PSSetShaderResources(0, 1, &raw);
+    t_inDlaa = true;
+    oDraw(ctx, verts, g_blitStartVertex);
+    t_inDlaa = false;
+    ctx->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, rts, dsv);
+    ctx->PSSetShaderResources(0, 1, &s0);
+    if (s0) s0->Release();
+    for (auto*& r : rts) if (r) { r->Release(); r = nullptr; }
+    if (dsv) dsv->Release();
+    slot.taaLdr = g_taaLdrTex[i];
+    return true;
+}
+
+// the tonemap draw (HandlePossibleBlit, before the game's draw): src = its t0 (the TAA'd linear HDR), rtDesc / rvd = its target
+void TaaOnTonemap(ID3D11DeviceContext* ctx, ID3D11Texture2D* src, const D3D11_TEXTURE2D_DESC& rtDesc,
+                  const D3D11_RENDER_TARGET_VIEW_DESC& rvd, UINT verts) {
+    if (g_gameTaa == GameTaa::kOff) return;
+    PassSlot* const s = TaaNewest();
+    if (!s || s->taaAct >= 0) return;                    // decided at its first tonemap
+    PassSlot& slot = *s;
+    D3D11_TEXTURE2D_DESC sd{}, rd{};
+    src->GetDesc(&sd);
+    bool rawOk = false;
+    if (slot.taaRaw) {
+        slot.taaRaw->GetDesc(&rd);
+        rawOk = slot.taaRaw.Get() != src && rd.Format == DXGI_FORMAT_R16G16B16A16_FLOAT && rd.Width == sd.Width &&
+                rd.Height == sd.Height && rd.SampleDesc.Count == 1 && rd.MipLevels == 1;
+    }
+    GameTaa::PassIn in;
+    in.mode = g_gameTaa; in.hold = slot.taaHold; in.resolveSeen = slot.taaSeen; in.jitterOk = slot.taaJitOk; in.rawOk = rawOk;
+    in.preHdr = slot.taaPreHdr;
+    const char* why = nullptr;
+    int act = GameTaa::Decide(in, &why);
+    if (act != GameTaa::kActNone && act != GameTaa::kActTaaOnly &&
+        (!g_dlaaOn.load(std::memory_order_relaxed) || g_passive.load(std::memory_order_relaxed) ||
+         g_jitterOnly.load(std::memory_order_relaxed) || !SceneDlaa::ShadersReady())) {
+        act = GameTaa::kActTaaOnly; why = "DLAA is off / passive / jitter-only / warming up";
+    }
+    if (act == GameTaa::kActHdr) {
+        Microsoft::WRL::ComPtr<ID3D11DeviceContext1> c1;
+        bool ok = SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)c1.GetAddressOf())) && c1 &&
+                  PreTonemapRun(c1.Get(), slot, slot.taaRaw.Get(), rd, slot.taaStageSwitched, slot.taaStageForced, false);
+        if (ok) {
+            t_inDlaa = true;
+            ok = g_dlaa[0].CompositeInto(ctx, src);
+            t_inDlaa = false;
+        } else if (g_dlaa[0].CompositePending()) {
+            t_inDlaa = true; g_dlaa[0].CancelComposite(ctx); t_inDlaa = false;
+        }
+        if (!ok) { act = GameTaa::kActTaaOnly; why = "the HDR run or its blend did not happen this pass (NGX create budget / failure)"; }
+    } else if (act == GameTaa::kActLdr) {
+        if (!TaaReissueTonemap(ctx, slot, rtDesc, rvd, verts)) { act = GameTaa::kActTaaOnly; why = "the tonemap could not be re-issued"; }
+    }
+    slot.taaAct = act;
+    g_taaLastAct = act;
+    g_taaChainS = UINT64_MAX;                            // the chain ends at its tonemap
+    ++g_taaActN[act & 3];
+    TaaNote(act, why);
+}
+
+// StartPass (game_taa != 0): an unheld pass = the mod as at 0 (one line when that changes); the stats line
+void TaaStats(uint64_t now);
+void TaaOnPassStart(uint64_t frame, bool hold) {
+    if (!hold) TaaNote(GameTaa::kActNone, nullptr);
+    TaaStats(frame);
+}
+// the stats line (every 1800 Presents while game_taa != 0 and the resolve is live): what the passes got
+void TaaStats(uint64_t now) {
+    if (g_gameTaa == GameTaa::kOff || !GameTaa::Live(g_taaLastSeen, now) || now - g_taaStatsAt < 1800) return;
+    g_taaStatsAt = now;
+    LogDbg("game TAA (phase 82) stats: mode=%s share=%d %% | resolves %llu (shape misses %llu), no game jitter %llu | passes: HDR mix "
+        "%llu, re-issued tonemap %llu, TAA only %llu, unheld %llu | raw scene from the compress pass %llu | blits: on the re-issued "
+        "tonemap %llu, skipped (TAA only) %llu | cbuffer copies: Map DISCARD %llu, Map NO_OVERWRITE %llu, UpdateSubresource %llu",
+        GameTaa::ModeName(g_gameTaa), g_gameTaaMix, (unsigned long long)g_taaResolves, (unsigned long long)g_taaShapeMiss,
+        (unsigned long long)g_taaJitMiss, (unsigned long long)g_taaActN[GameTaa::kActHdr],
+        (unsigned long long)g_taaActN[GameTaa::kActLdr], (unsigned long long)g_taaActN[GameTaa::kActTaaOnly],
+        (unsigned long long)g_taaActN[GameTaa::kActNone], (unsigned long long)g_taaRawFromCompress,
+        (unsigned long long)g_taaLdrBlits, (unsigned long long)g_taaOnlyBlits, (unsigned long long)g_taaCbCopies[1],
+        (unsigned long long)g_taaCbCopies[2], (unsigned long long)g_taaCbCopies[3]);
 }
 #endif
 
@@ -12649,6 +13095,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
                 g_tonemapTex = rtPtr;
 #ifdef WITH_DLAA
                 if (g_flatMvCfg) FvNoteTonemap(srcPtr, rtPtr);   // v0.12.0 issue #12 round 5: which pass this LDR RT now shows
+                if (g_gameTaa) TaaOnTonemap(ctx, tex, bd, rvd, vertexCount);   // phase 82: before the game's tonemap draw
 #endif
                 tex->Release();
                 return;
@@ -12723,6 +13170,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     // in both axes AND larger in one; else the v0.6.5 DLAA path. The scene vs RT size IS the render scale
     // (r_scale_x / r_scale_y shrink only the scene texture).
     uint32_t upX = 0, upY = 0, upW = 0, upH = 0;         // output rect in RT0 (upW = 0: no upscale)
+    uint32_t blitOx = 0, blitOy = 0;                     // phase 82: the blit's output origin in RT0 (a native-size composite)
     const bool srgbDecode = svd.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB || svd.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
     {
         uint32_t ox = 0, oy = 0, ow = bd.Width, oh = bd.Height;
@@ -12747,6 +13195,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
             ox = (uint32_t)flatPl.eff.x; oy = (uint32_t)flatPl.eff.y; ow = (uint32_t)flatPl.eff.w; oh = (uint32_t)flatPl.eff.h;
             vpUsed = true;
         }
+        blitOx = ox; blitOy = oy;
         const bool sizeUp = ow >= d.Width && oh >= d.Height && (ow > d.Width || oh > d.Height);
         char sizes[48];
         snprintf(sizes, sizeof(sizes), "%ux%u->%ux%u", d.Width, d.Height, ow, oh);
@@ -13241,6 +13690,11 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         if (waits++ == 0)
             Log("DLAA waits for the shader warm-up (eye %d, blit #%llu) -- frames pass through untouched until it is done",
                 eye, (unsigned long long)g_blitCount);
+    } else if (g_dlaaOn.load() && slot.taaHold && slot.pre != 1 && slot.taaAct != GameTaa::kActLdr) {
+        // phase 82 (game_taa): a held pass the tonemap did not hand to the blit unit -- TAA only (mode 2, or the mix could not run:
+        // TaaOnTonemap logged why). The game's TAA picture stays; never DLAA on the TAA'd frame. MV history keeps rolling.
+        if (dl.Mv().Ready()) dl.Mv().Commit(ctx, slot.cand);
+        ++g_taaOnlyBlits;
     } else if (g_dlaaOn.load() && slot.pre == 2 && !slot.twin.valid) {
         // v0.10.0 phase 7: the pre-tonemap run was tried and consumed the depth snapshot without a result (evaluate failed):
         // no depth for the blit unit -> this frame passes un-anti-aliased (rare; logged as failed in the stats)
@@ -13295,8 +13749,20 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         else dl.SetOpticalCentre(g_optC[eye].u, g_optC[eye].v);
         // v0.9.0 r8: which FIFO pass this blit consumed (only the "MV objects: mask dropout" diagnostic prints it)
         dl.Mv().SetObjPassInfo(slot.s, (int)(g_passSeq - g_fifoHead), g_cOverflow, g_passSeq);
+        // phase 82 (game_taa): a held pass the tonemap handed to the blit unit runs on the game's tonemap RE-ISSUED on the raw jittered
+        // scene (TaaReissueTonemap; same shape as `tex`) and composites over the game's blit (the TAA picture) with the mod's share /
+        // the split; NGX gets the game's jitter (slot.jx / jy) and MVJittered. Every other pass: exactly as before.
+        const bool taaLdr = slot.taaHold && slot.taaAct == GameTaa::kActLdr && slot.taaLdr;
+        {
+            const GameTaa::Mix mx = GameTaa::MixOf(g_gameTaa, g_gameTaaMix);
+            dl.SetCompositeOut(taaLdr);
+            dl.SetMvJittered(slot.taaHold);
+            dl.SetMix(taaLdr ? mx.modShare : 1.0f, taaLdr && mx.split);
+            if (taaLdr) ++g_taaLdrBlits;
+        }
+        ID3D11Texture2D* const runTex = taaLdr ? slot.taaLdr.Get() : tex;
         t_inDlaa = true;
-        const bool ok = dl.Run(ctx, tex, PassDepth(slot), &slot.twin, &slot.cand, njx, njy, resetUsed, g_mvOn.load(),
+        const bool ok = dl.Run(ctx, runTex, PassDepth(slot), &slot.twin, &slot.cand, njx, njy, resetUsed, g_mvOn.load(),
                                g_mvDebug.load(), candBad, upW, upH, g_objCfg ? objRec : nullptr,
                                g_didCfg ? didRec : nullptr, g_didCfg ? didFwdRec : nullptr);
         t_inDlaa = false;
@@ -13324,8 +13790,8 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
                 (unsigned long long)g_frames.load(std::memory_order_relaxed));
         }
         // v0.7.0: arm the composite for the Draw that follows (hkDraw, after the game's blit).
-        if (dl.CompositePending()) {
-            g_compEye = eye; g_compRt = rtPtr; g_compX = upX; g_compY = upY; g_compSrgb = srgbDecode;
+        if (dl.CompositePending()) {   // phase 82: a native-size composite (game_taa) at the blit's own origin
+            g_compEye = eye; g_compRt = rtPtr; g_compX = upW ? upX : blitOx; g_compY = upW ? upY : blitOy; g_compSrgb = srgbDecode;
         }
         // v0.7.0: NGX / texture init failed for the UPSCALE sizes -> block exactly these sizes (both eyes) so the
         // next blits rebuild as DLAA at render res instead of staying un-anti-aliased. Long low tone. Ctrl+F4 ON
@@ -13338,7 +13804,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         }
         // v0.7.0 upscale: the snapshot "out" and the self-test dump the DLSS output (output rect size), since the
         // blit source itself is no longer modified.
-        ID3D11Texture2D* const outTex = (ok && dl.Upscaling() && dl.ResultTex()) ? dl.ResultTex() : tex;
+        ID3D11Texture2D* const outTex = (ok && (dl.Upscaling() || dl.CompositeOut()) && dl.ResultTex()) ? dl.ResultTex() : tex;
         if (ok) stTex = outTex;
         if (ok) {
             t_inDlaa = true;
@@ -13503,6 +13969,12 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
     }
     CountGameDraw(t_inDlaa, ctx, vertexCount, false);   // v0.8.1: frame-end rule + present-layer bookkeeping
 #ifdef WITH_DLAA
+    // phase 82 (game_taa): the game's TAA resolve / range-compress draws (by the PS the game bound; one compare each otherwise)
+    if (!t_inDlaa && g_lodPsCur) {
+        void* const ps = (void*)g_lodPsCur;
+        if (ps == g_taaResolvePs.load(std::memory_order_relaxed)) TaaOnResolve(ctx);
+        else if (g_gameTaa && ps == g_taaCompressPs.load(std::memory_order_relaxed)) TaaOnCompress(ctx);
+    }
     if (g_menuLateBound >= 0 && !t_inDlaa) MenuLateCountDraw();   // v0.10.0 phase 16: a game draw into a recorded eye picture
     // v0.7.8 profile-screen preview: a matched composite only marks its target pending; any other Draw while a pending
     // target is the current RT0 (trigger (a): flat UI, VR verts=96 Draw) runs that target's DLAA before the Draw.
@@ -14312,7 +14784,25 @@ HRESULT STDMETHODCALLTYPE hkMap(ID3D11DeviceContext* ctx, ID3D11Resource* r, UIN
     if (type == D3D11_MAP_WRITE_DISCARD && r && g_mirCur >= 0 && !t_inDlaa && IsGameCtx(ctx)) MirOnDiscardMap(ctx, r);
     HRESULT hr;
     CPU_ORIG(hr = oMap(ctx, r, sub, type, flags, out));
+    // phase 82: the TAA resolve's constant buffer -- its bytes are copied at the Unmap (TaaCbShadow)
+    if (g_gameTaa && r && (void*)r == g_taaCb.buf && !t_inDlaa && SUCCEEDED(hr) && out && out->pData &&
+        (type == D3D11_MAP_WRITE_DISCARD || type == D3D11_MAP_WRITE_NO_OVERWRITE)) {
+        g_taaCb.mapPtr = out->pData;
+        g_taaCb.kind = type == D3D11_MAP_WRITE_DISCARD ? 1 : 2;
+    }
     return hr;
+}
+
+// phase 82: Unmap (context vtable 15) -- only the TAA resolve's constant buffer: its new bytes at the resolve's offset are copied
+// while the mapping is still valid (TaaCbShadow). Everything else passes straight through.
+typedef void (STDMETHODCALLTYPE* Unmap_t)(ID3D11DeviceContext*, ID3D11Resource*, UINT);
+Unmap_t oUnmap = nullptr;
+void STDMETHODCALLTYPE hkUnmap(ID3D11DeviceContext* ctx, ID3D11Resource* r, UINT sub) {
+    if (g_taaCb.mapPtr && r && (void*)r == g_taaCb.buf && !t_inDlaa) {
+        TaaCbCopy(g_taaCb.mapPtr, 0, g_taaCb.width, g_taaCb.kind);
+        g_taaCb.mapPtr = nullptr;
+    }
+    oUnmap(ctx, r, sub);
 }
 
 // v0.9.0 r3: ring statistics of a finished pass record (ObjOnPassStart, after its last flush). The first multi-ring passes
@@ -17667,7 +18157,9 @@ enum MenuRowId {
     MR_MIRTURNS,                                          // phase 41: mirrors in turns (dlaa.ini mirror_turns)
     MR_WIREMV, MR_WIREDEPTH, MR_WIREWIDEN,                // phase 69: the thin-wire switches (dlaa_mv_dilate / mv_fwd_conservative / wire_widen)
     MR_UPGRP,                                             // phase 43: group "Upscaling and VR"
-    MR_UPSCALE, MR_DLAA, MR_OFXR,
+    MR_UPSCALE, MR_DLAA,
+    MR_GAMETAA, MR_TAAMIX,                                // phase 82: the game's own TAA with the mod (dlaa.ini game_taa / game_taa_mix)
+    MR_OFXR,
     MR_VECTORXR,                                          // phase 56: VectorXR info row (dlaa.ini vectorxr)
     MR_VRPGRP,                                            // phase 43: group "VR performance"
     MR_TURBO,                                             // phase 30: VR Turbo mode (dlaa.ini xr_turbo; OpenXR Toolkit port)
@@ -17723,7 +18215,7 @@ static_assert(MR_PICGRP + 1 == MR_SHARP && MR_BIAS + 1 == MR_MOTGRP && MR_MOTGRP
               MR_FPSDIST + 1 == MR_LOG,
               "tuning menu: a group's children must follow its header and fill it up to its last row");
 static_assert(MR_SHARP < MR_WIDTH && MR_WIDTH < MR_LOD && MR_LOD < MR_LODCUT && MR_LODCUT < MR_AREA && MR_AREA < MR_PRETM &&
-              MR_PRETM < MR_FWD && MR_FWD < MR_BIAS && MR_DRAWIDS < MR_MIRROR && MR_MIRROR < MR_MIRTURNS && MR_MIRTURNS < MR_WIREMV && MR_WIREMV < MR_WIREDEPTH && MR_WIREDEPTH < MR_WIREWIDEN && MR_UPSCALE < MR_DLAA && MR_DLAA < MR_OFXR && MR_OFXR < MR_VECTORXR &&
+              MR_PRETM < MR_FWD && MR_FWD < MR_BIAS && MR_DRAWIDS < MR_MIRROR && MR_MIRROR < MR_MIRTURNS && MR_MIRTURNS < MR_WIREMV && MR_WIREMV < MR_WIREDEPTH && MR_WIREDEPTH < MR_WIREWIDEN && MR_UPSCALE < MR_DLAA && MR_DLAA < MR_GAMETAA && MR_GAMETAA < MR_TAAMIX && MR_TAAMIX < MR_OFXR && MR_OFXR < MR_VECTORXR &&
               MR_TURBO < MR_VRS && MR_VRS < MR_VRSSIZE && MR_VRSSIZE < MR_VRSPASS && MR_VRSPASS < MR_VRSSTR && MR_VRSSTR < MR_VRSEYE && MR_VRSEYE < MR_HMASK &&
               MR_REFLEX < MR_FPSCAP && MR_FPSCAP < MR_VRFPSCAP && MR_VRFPSCAP < MR_CPU &&
               MR_POSX < MR_POSY && MR_POSY < MR_SIZE && MR_SIZE < MR_DEPTH && MR_DEPTH < MR_FACE && MR_FACE < MR_MENUKEYS &&
@@ -17783,6 +18275,11 @@ const wchar_t* const kMenuDesc[] = {
     L"fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."),
     N_(L"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for comparing. Off saves the cost "
     L"of every part together."),
+    // phase 82 (MR_GAMETAA, MR_TAAMIX)
+    N_(L"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS "
+    L"on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."),
+    N_(L"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / "
+    L"DLSS). Used only when Game TAA is mix. No extra cost."),
     N_(L"OFXR Bridge = VR frame generation by djules75, a separate download (github.com/djules75/OFXR-Bridge). found = its layer "
     L"is loaded in this game and the mod lets its work pass through. Start its tray app before the game."),
     // phase 56 (MR_VECTORXR)
@@ -18254,6 +18751,32 @@ void StepBiasMask(int dir, uint64_t n) {
                                          : "off: NGX gets no mask, the glows come from the history as before phase 49");
     PlayTones(1, g_biasCfg ? 400 + 8 * g_biasCfg : 300, 120, 0);
 }
+// phase 82: the menu's Game TAA row -- dlaa.ini game_taa live: off -> mix -> TAA only -> split (Left goes back). The next world pass
+// holds / releases the mod's jitter; every DLAA history starts over (the jitter source changes). Logged + beeped.
+void StepGameTaa(int dir, uint64_t n) {
+    g_gameTaa = GameTaa::NextMode(g_gameTaa, dir);
+    g_gameTaaExplicit = true;
+    g_resetNext = true;
+    const bool live = GameTaa::Live(g_taaLastSeen, g_frames.load(std::memory_order_relaxed));
+    Log("Game TAA (phase 82): game_taa=%d (%s) (tuning menu, Present #%llu) -- %s", g_gameTaa, GameTaa::ModeName(g_gameTaa),
+        (unsigned long long)n,
+        g_gameTaa == GameTaa::kOff ? "the mod's own scope (its jitter; the game's AA should be Disabled)"
+        : (live ? "the game's TAA resolve is live: the mod's jitter is held from the next pass, NGX gets the game's jitter"
+                : "the game's TAA resolve was not seen: nothing changes until the game's Anti-aliasing is TAA"));
+    PlayTones(1, g_gameTaa ? 500 + 200 * g_gameTaa : 300, 120, 0);
+}
+// phase 82: the menu's Game TAA share row -- dlaa.ini game_taa_mix (the TAA share of the mix) in 10 % steps, 0..100; kept while the
+// row is greyed (another mode) for when mix is picked again
+void StepGameTaaMix(int dir, uint64_t n) {
+    const int next = GameTaa::StepMix(g_gameTaaMix, dir);
+    if (next == g_gameTaaMix) { PlayTones(1, 200, 120, 0); return; }
+    g_gameTaaMix = next;
+    g_gameTaaExplicit = true;
+    Log("Game TAA share (phase 82): game_taa_mix=%d %% (tuning menu, Present #%llu) -- %d %% the game's TAA, %d %% the mod's DLAA / "
+        "DLSS%s", g_gameTaaMix, (unsigned long long)n, g_gameTaaMix, 100 - g_gameTaaMix,
+        g_gameTaa == GameTaa::kMix ? "" : " (used in mode mix; game_taa is not mix now)");
+    PlayTones(1, 400 + 6 * g_gameTaaMix, 120, 0);
+}
 // phase 40: the menu's Hidden area mask (VR) row -- dlaa.ini xr_hidden_mask live (the next eye scene clear draws / skips it). The
 // OpenXR extension is only requested when it was on at the game's start: switched on later, it waits for a restart (logged; the
 // row says so). Logged + beeped like the other toggles; also switchable in flat (kept for VR; the row is greyed there).
@@ -18471,6 +18994,9 @@ void ResetSettings(uint64_t n) {
     g_biasCfg = 100;                                      // phase 49: the glow bias mask at full strength
     g_biasExplicit = false;
     SceneDlaa::SetBiasStrength(g_biasCfg);
+    g_gameTaa = GameTaa::kOff;                            // phase 82: the mod's own scope (the next pass releases the jitter hold)
+    g_gameTaaMix = GameTaa::kMixDefault;
+    g_gameTaaExplicit = false;
     // phase 39: logging back to the level dlaa.ini gives without log_level (the key is removed below; `debug` stays in the file,
     // so debug = 1 there = level 4, as at the next start; else 1 = errors)
     g_logLevelKey = -1;
@@ -18517,6 +19043,7 @@ void ResetSettings(uint64_t n) {
         "cpu_pcore", "cpu_priority", "cpu_no_throttle",                                                 // phase 54
         "fps_profiles",                                                                                 // phase 51b
         "dlaa_mv_dilate", "mv_fwd_conservative", "wire_widen",                                       // phase 60 / 61 (69: menu rows)
+        "game_taa", "game_taa_mix",                                                                     // phase 82
     };
     constexpr int kNKeys = (int)(sizeof(kKeys) / sizeof(kKeys[0]));
     static_assert(kNKeys <= kIniMaxKeys, "WriteIniPreserving handles at most kIniMaxKeys keys");
@@ -18532,7 +19059,7 @@ void ResetSettings(uint64_t n) {
             "menu_scale = 1.0 menu_vr_x = 0 menu_vr_y = -5 menu_vr_scale = 1.0 menu_vr_depth = 12 menu_vr_dist = 100 menu_vr_face = 1 "
             "menu_vr_lock = 0 menu_vr_lock_x = 0 menu_vr_lock_y = 10 menu_vr_lock_dist = 80 "
             "fps_show = 0 fps_text = 0 "
-            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_opacity = 100 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 fps_profiles = 1 xr_turbo = 0 reflex = 0 fps_cap = 0 vr_fps_cap = 0 cpu_pcore = 0 cpu_priority = 0 cpu_no_throttle = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 vrs_strength = 0 vrs_eye = 0 dlaa_mv_dilate = 1 mv_fwd_conservative = 1 wire_widen = 0 xr_hidden_mask = 0 dlss_bias_mask = 100 log_level = %d (%s) -- profile: %s -- "
+            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_opacity = 100 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 fps_profiles = 1 xr_turbo = 0 reflex = 0 fps_cap = 0 vr_fps_cap = 0 cpu_pcore = 0 cpu_priority = 0 cpu_no_throttle = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 vrs_strength = 0 vrs_eye = 0 dlaa_mv_dilate = 1 mv_fwd_conservative = 1 wire_widen = 0 xr_hidden_mask = 0 dlss_bias_mask = 100 game_taa = 0 game_taa_mix = 50 log_level = %d (%s) -- profile: %s -- "
             "dlaa.ini: %d keys removed (hotkeys and other lines kept)", (unsigned long long)n, g_dlaaOn.load() ? "DLSS" : "off",
             (double)kFpsVrScaleDefault, LogLevel(), g_logDebugKey ? "no key: debug = 1 in dlaa.ini" : "no key", changed, kNKeys);
         BeepSeq b;                                        // success: rising two-tone 600 -> 900 Hz, 120 ms each (as SaveSettings)
@@ -19145,6 +19672,16 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
     case MR_PRETM:
         if (vr) swprintf(sent, sentCap, TRF(L"Greyed in VR: VR always runs DLAA on the finished picture."));
         break;
+    case MR_GAMETAA: {                                    // phase 82: is the game's TAA running, and what the mix does with it
+        const bool live = GameTaa::Live(g_taaLastSeen, g_frames.load(std::memory_order_relaxed));
+        if (!live)                             swprintf(sent, sentCap, TRF(L"The game's TAA is not running now: the mod runs alone."));
+        else if (g_gameTaa == GameTaa::kOff)   swprintf(sent, sentCap, TRF(L"The game's TAA is running now: set the game's "
+                                                        L"Anti-aliasing to Disabled, or pick mix, TAA only or split."));
+        else if (g_taaLastAct == GameTaa::kActHdr || g_taaLastAct == GameTaa::kActLdr)
+                                               swprintf(sent, sentCap, TRF(L"The game's TAA is running now: the mix is on."));
+        else                                   swprintf(sent, sentCap, TRF(L"The game's TAA is running now: TAA only (see the log)."));
+        break;
+    }
     case MR_FWD:
         if (g_fwdCfg && g_fwdAutoOff && !g_fwdOn.load())
                         swprintf(sent, sentCap, TRF(L"Switched off by the mod: it cost more than %.1f ms per eye (VR budget). "
@@ -20012,6 +20549,13 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     swprintf(p.rows[MR_UPSCALE].value, kV, L"%ls", onOff[g_dlssUpscale.load() ? 1 : 0]);
     MenuRow(p, MR_DLAA, TR(L"DLAA on / off"), KeyNameUi(KA_DLAA_TOGGLE), nullptr, false);
     swprintf(p.rows[MR_DLAA].value, kV, L"%ls", onOff[g_dlaaOn.load() ? 1 : 0]);
+    {   // phase 82: the game's own TAA with the mod; the share row is live only in mode mix (kept while greyed)
+        MenuRow(p, MR_GAMETAA, TR(L"Game TAA"), "dlaa.ini game_taa", nullptr, false);
+        const wchar_t* const kTaaVal[GameTaa::kModeCount] = { TR(L"off"), TR(L"mix"), TR(L"TAA only"), TR(L"split") };
+        swprintf(p.rows[MR_GAMETAA].value, kV, L"%ls", kTaaVal[GameTaa::ClampMode(g_gameTaa)]);
+        MenuRow(p, MR_TAAMIX, TR(L"Game TAA share"), "dlaa.ini game_taa_mix", nullptr, g_gameTaa != GameTaa::kMix);
+        swprintf(p.rows[MR_TAAMIX].value, kV, L"%d %%", g_gameTaaMix);
+    }
     MenuRow(p, MR_OFXR, TR(L"OFXR Bridge (VR frame gen)"), "dlaa.ini ofxr_bridge", nullptr, !Ofxr::g_on.load());   // info row
     if (!Ofxr::g_on.load())      swprintf(p.rows[MR_OFXR].value, kV, TRF(L"off (dlaa.ini 0)"));
     else if (Ofxr::Detected())   swprintf(p.rows[MR_OFXR].value, kV, TRF(L"found"));   // (no live counter: it would rebuild the panel every frame)
@@ -20404,6 +20948,8 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_BIAS:    StepBiasMask(dir, n); break;           // phase 49: 25 % steps, Right = stronger, Left = weaker (0 = off)
     case MR_UPSCALE: ToggleUpscale(n); break;
     case MR_DLAA:    ToggleDlaa(n); break;
+    case MR_GAMETAA: StepGameTaa(dir, n); break;            // phase 82: off -> mix -> TAA only -> split (Left back)
+    case MR_TAAMIX:  StepGameTaaMix(dir, n); break;         // phase 82: 10 % steps (kept while greyed)
     case MR_OFXR:    break;                                 // information only (dlaa.ini ofxr_bridge, read at start)
     case MR_VECTORXR: break;                                // phase 56: information only (dlaa.ini vectorxr, read at start)
     case MR_TURBO:   ToggleXrTurbo(n); break;               // phase 30: Left and Right both switch it (also flat: kept for VR)
@@ -23691,6 +24237,8 @@ bool DlaaOffFilePresent() {
 //   light_redraw_jitter            0/1 (default 1, phase 55): the lighting pass's mesh redraws get the G-buffer's jittered viewport
 //   light_fs_jitter                0/1 (default 1, phase 78): the lighting pass's full-screen draws get the G-buffer's shift (W x H)
 //   outside_aa                     0/1/2 (default 2, phase 81): outside the DLAA area rect 1 = unjitter, 2 = + edge AA, 0 = raw frame
+//   game_taa                       0..3 (default 0, phase 82): the game's own TAA with the mod -- 0 off, 1 mix, 2 TAA only, 3 split
+//   game_taa_mix                   0..100 (default 50, phase 82): the TAA share of the mix in % (menu: 10 % steps)
 //   jitter_phases                  Halton phase count (default 8 since v0.5.7, was 16; NVIDIA: 8 x render ratio)
 //   mv_enabled                     0/1 camera-reprojection motion vectors (default 1; Ctrl+F5 toggles)
 //   gpu_timing                     -1 auto (VR only, default) / 0 off / 1 on: timestamp queries around each
@@ -24000,6 +24548,8 @@ void LoadConfig() {
             if (!strcmp(key, "menu_vr_lock_dist")) { g_menuVrLockDist = v < 30 ? 30 : (v > 300 ? 300 : (int)v); continue; }
             if (!strcmp(key, "xr_hidden_mask"))     { g_xrHiddenMask = v != 0 ? 1 : 0; g_xrHiddenMaskExplicit = true; continue; }   // phase 40
             if (!strcmp(key, "dlss_bias_mask"))     { g_biasCfg = v < 0 ? 0 : (v > 100 ? 100 : (int)v); g_biasExplicit = true; continue; }   // phase 49
+            if (!strcmp(key, "game_taa"))     { g_gameTaa = GameTaa::ClampMode((int)v); g_gameTaaExplicit = true; continue; }   // phase 82
+            if (!strcmp(key, "game_taa_mix")) { g_gameTaaMix = GameTaa::ClampMix((int)v); g_gameTaaExplicit = true; continue; }   // phase 82
             if (!strcmp(key, "light_redraw_jitter")) { g_lightRedrawCfg = v != 0 ? 1 : 0; continue; }   // phase 55 (outside the chain: C1061)
             if (!strcmp(key, "light_fs_jitter"))     { g_lightFsCfg = v != 0 ? 1 : 0; continue; }       // phase 78 (outside the chain: C1061)
             if (!strcmp(key, "outside_aa"))          { g_outsideAaCfg = v <= 0 ? 0 : (v >= 2 ? 2 : 1); continue; }   // phase 81
@@ -24524,6 +25074,11 @@ void LoadConfig() {
     Log("DLSS bias mask (phase 49): dlss_bias_mask=%d %% (%s)", g_biasCfg, g_biasCfg
         ? "the additive light glows of the world forward pass go to NGX as its bias current colour mask (no glow trails)"
         : "off: NGX gets no mask");
+    Log("game TAA (phase 82): game_taa=%d (%s) game_taa_mix=%d %% -- %s", g_gameTaa, GameTaa::ModeName(g_gameTaa), g_gameTaaMix,
+        g_gameTaa == GameTaa::kOff ? "the mod's own scope: set the game's Anti-aliasing to Disabled (r_aa 0); a TAA resolve seen is "
+                                     "logged once"
+                                   : "with the game's Anti-aliasing = TAA: while its TAA resolve draws, the mod's jitter is held and "
+                                     "DLAA / DLSS run on the same raw jittered frame (the GAME's jitter); without it, the mod as at 0");
 #endif
     if (g_controllerName[0])                             // v0.10.1
         Log("controller_name = \"%s\" (only controllers whose name contains it are read for WheelN / WheelUp ... bindings; "
@@ -25096,6 +25651,9 @@ DWORD WINAPI SetupThread(LPVOID) {
                                   reinterpret_cast<void**>(&oOMSetDepthStencilState));
             const bool b = HookFn("Map", cvtbl[14], reinterpret_cast<void*>(&hkMap), reinterpret_cast<void**>(&oMap));
             if (a && b) g_objHooked.store(true, std::memory_order_release);
+            // phase 82: Unmap = 15 (game_taa: the TAA resolve's constants are copied at the game's Unmap)
+            if (b && HookFn("Unmap", cvtbl[15], reinterpret_cast<void*>(&hkUnmap), reinterpret_cast<void**>(&oUnmap)))
+                g_taaUnmapHooked = true;
         }
         // v0.10.0 per-draw MVs: DrawIndexedInstanced = 20 (instanced G-buffer draws are recorded; without the hook they
         // simply keep the camera motion vector)

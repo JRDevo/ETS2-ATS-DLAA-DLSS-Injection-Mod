@@ -271,6 +271,22 @@ public:
     // v0.8.1: per instance -- true = this unit runs as if the sharpness were 0 (preview units with dlaa.ini
     // preview_sharpen = 0; the RCAS pass is then skipped exactly like at sharpness 0). Default false.
     void SetNoSharpen(bool on) { m_noSharpen = on; }
+    // ---- phase 82 GAME TAA (dlaa.ini game_taa, inject.cpp "phase 82"; src/game_taa.h) ----
+    // SetCompositeOut(true): a Run WITHOUT upscaling copies nothing back either -- like the upscale path it arms Composite()
+    // (CompositePending), and no RCAS border blend / phase-81 outside AA runs (in place or upscaled: the composite's feather is the
+    // border). The game's own picture (its TAA) stays where the mod's result is not drawn. false (default) = exactly as before.
+    void SetCompositeOut(bool on) { m_compOut = on; }
+    bool CompositeOut() const { return m_compOut; }
+    // The composite's mix: the mod's share (alpha multiplier, 1 = as before) and the split view (left half the mod, right half the
+    // game's picture, a 1 px black divider each side of the middle). Read by Composite() / CompositeInto() at their draw.
+    void SetMix(float modShare, bool split) { m_mixShare = modShare < 0.0f ? 0.0f : (modShare > 1.0f ? 1.0f : modShare); m_mixSplit = split; }
+    // The pending composite (a Run with SetCompositeOut, no upscaling) drawn into `dst` (scene-sized, e.g. the game's tonemap INPUT,
+    // RGBA16F) through an RTV of our own: the game's RTs / DSV and PS SRV slots 0..7 are saved first and put back after (binding
+    // dst as a target unbinds it as a shader input). Inside the caller's re-entrancy guard. false = nothing drawn.
+    bool CompositeInto(ID3D11DeviceContext* ctx, ID3D11Texture2D* dst);
+    // NGX motion vectors carry the jitter (the game jitters its projection, and the per-draw MVPs the mod reprojects with include it):
+    // the unit's feature is created with MVJittered (a creation flag: a change recreates it at the next Run, history reset).
+    void SetMvJittered(bool on) { m_mvJittered = on; }
     // v0.10.0 phase 17: a menu / truck-preview unit (eye tags 10 / 11; default false = world / mirror units, unchanged):
     //  * runs once the CORE shader group is compiled (CoreShadersReady; it never uses the per-object / per-draw shaders);
     //  * STILL-CAMERA FALLBACK: a frame whose candidate record has no MV candidate (the screen's first frames) runs with
@@ -444,6 +460,12 @@ private:
     bool                                              m_sharpCbValid = false;
     bool                                              m_sharpRes = false;    // m_sharp* + CS + CB valid for m_w x m_h
     bool                                              m_noSharpen = false;   // v0.8.1 SetNoSharpen (sharpness treated as 0)
+    bool                                              m_compOut = false;     // phase 82 SetCompositeOut
+    float                                             m_mixShare = 1.0f;     // phase 82 SetMix
+    bool                                              m_mixSplit = false;
+    bool                                              m_mvJittered = false;  // phase 82 SetMvJittered
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView>    m_intoRtv;             // phase 82 CompositeInto: RTV of m_intoTex
+    ID3D11Texture2D*                                  m_intoTex = nullptr;   //   (identity; the RTV holds the reference)
     static float                                      s_sharpness;
     static float                                      s_sharpRadius;  // v0.5.8: RCAS ring-tap radius in texels (1..4)
     static int                                        s_area;         // v0.6.4 dlaa_area (kAreaMin..100; phase 15: 20..100; now 10..100)
@@ -508,7 +530,7 @@ private:
     bool                                              m_compPending = false; // Run produced a result for Composite()
     ID3D11ShaderResourceView*                         m_compSrc = nullptr;   // m_sharpSrv or m_outSrv (owned by them)
     ID3D11Texture2D*                                  m_result = nullptr;    // ResultTex() (owned by m_out / m_sharp)
-    float                                             m_compData[12] = {};   // last written m_compParams
+    float                                             m_compData[16] = {};   // last written m_compParams (phase 82: + [3] mix)
     bool                                              m_compDataValid = false;
 
     // Timestamps: 0 start, 1 after copy-in, 2 after depth convert, 3 after MV, 4 after NGX evaluate,

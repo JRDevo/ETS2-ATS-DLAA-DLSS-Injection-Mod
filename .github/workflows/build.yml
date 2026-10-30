@@ -74,6 +74,8 @@ jobs:
           if not exist build\tests\light_fs_test.exe exit /b 1
           call tests\build_outside_aa_test.bat
           if not exist build\tests\outside_aa_test.exe exit /b 1
+          call tests\build_game_taa_test.bat
+          if not exist build\tests\game_taa_test.exe exit /b 1
           call tests\build_menu_shot.bat
           if not exist build\tests\menu_shot.exe exit /b 1
           call tests\build_flat_views_test.bat
@@ -116,6 +118,8 @@ jobs:
         run: build\tests\light_fs_test.exe
       - name: Test outside AA (phase 81 -- src/outside_aa.h feather bands; WARP: unjitter of jittered-viewport frames, in place + upscale, sign mutation)
         run: build\tests\outside_aa_test.exe
+      - name: Test game TAA with the mod (phase 82 -- src/game_taa.h checksum, live window / jitter hold, resolve-constants jitter, per-pass decision, menu steps)
+        run: build\tests\game_taa_test.exe
       - name: Test flat multi-view (src/flat_views.h layout, view index, confirm / drop, shared jitter phase)
         run: build\tests\flat_views_test.exe
       - name: Test fps box attached to the vehicle (src/fps_cab.h maths; DrawIdRecord + FpsCab + the VSCab draw, zero-lag cab sway)

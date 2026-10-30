@@ -2378,6 +2378,54 @@ non-blocking readback timing -- so it is judged by the check totals and a verify
   (e) If the shift sign were wrong in game, the outside would shake at ~2x the raw amplitude (the test's mutation); `outside_aa =
   0` reverts.
 
+### Phase 82: the game's own TAA together with the mod (`game_taa`, default 0; `game_taa_mix`, default 50)
+
+- **Why.** The mod's scope is the game's Anti-aliasing = Disabled (`r_aa 0`). With the game's TAA on (`r_aa 5`) the mod's DLAA ran on
+  an already TAA'd frame (stacked = blur) and the game's projection jitter and the mod's viewport jitter fought. `game_taa` (menu
+  rows "Game TAA" / "Game TAA share", Upscaling group; saved like every other key) lets a player run both on purpose:
+  0 off (default, the mod exactly as before; a TAA resolve seen logs one WARN), 1 mix (the game's TAA and the mod's DLAA / DLSS on the
+  SAME raw jittered frame, blended by `game_taa_mix` = the TAA share), 2 TAA only (the mod's main-scene DLAA / DLSS skipped; an A/B),
+  3 split (left the mod, right the game's TAA, a 1 px black line each side of the middle).
+- **The game's TAA** (RenderDoc, ATS flat 3840x2160, `captures/taa_2026-10-30/FINDINGS.md`; `src/game_taa.h` header): PS 535
+  range-compress (t0 = the raw jittered lit scene), PS 533 nearest depth, PS 524 the resolve (2 RGBA16F targets = result + next
+  history, `cb0[8].xy` = the jitter in UV, `cb0[11].xy` = the target size), PS 534 sharpen + inverse compress (= the tonemap's linear
+  HDR input), PS 327 tonemap, then the blit.
+- **Detection** (robust, not by event order): the resolve and compress pixel shaders by their DXBC checksum at `CreatePixelShader`
+  (`GameTaa::kResolvePs` / `kCompressPs`, RenderDoc's "Shader hash" dword order), plus the resolve's shape (2 RGBA16F targets, RT0
+  scene-size) at its `Draw`. Live = a resolve within `GameTaa::kLiveFrames` (30) Presents. A post chain (compress -> resolve ->
+  tonemap) is paired with its pass by the compress input = that pass's forward colour (`TaaNewest`), so a VR frame that renders both
+  eye scenes first still pairs correctly; else the newest pass.
+- **Jitter.** In modes 1..3 with a live resolve every world pass HOLDS the mod's viewport jitter (`StartPass` `g_taaHoldPass`,
+  `ReconcileViewports` no world shift / overscan; light redraw / full-screen jitter follow). NGX gets the GAME's jitter of the pass:
+  the resolve's `cb0[8].xy` x the target size = the geometry shift in px (same axes as the mod's own shift; NGX = `jitter_sign` x it,
+  so the existing jitter-sign key flips it if it is wrong in game). A GPU readback would stall or be late, so the resolve's draw learns
+  its cb0 buffer + offset and the game's next UPLOAD of that buffer is copied (`TaaCbShadow`: `hkMap` WRITE_DISCARD / NO_OVERWRITE +
+  the new `hkUnmap` (vtable 15) copy 256 bytes before the Unmap; `hkUpdateSubresource(1)` copy the source). `GameTaa::ParseJitter`
+  accepts it only when row 11 is the target size and the jitter is sub-pixel (else: no jitter -> the pass is TAA only). The main
+  units' NGX features get `MVJittered` while held (`DlaaFrameParams::mvJittered`, a creation flag: recreated once at a change): the
+  per-draw MVPs the mod reprojects with carry the game's projection jitter.
+- **Per pass, at its tonemap** (`TaaOnTonemap`, before the game's tonemap draw; `GameTaa::Decide`):
+  - `kActHdr` (flat DLAA, the stage logic wanted the pre-tonemap HDR unit -- `PreTonemapPoint` defers its run in a held pass):
+    `PreTonemapRun` (split out of `PreTonemapPoint`) on the raw scene with `SceneDlaa::SetCompositeOut` (no copy-back), then
+    `SceneDlaa::CompositeInto` the tonemap's INPUT (own RTV; RTs / DSV / PS SRV 0..7 saved and put back): `lerp(TAA, mod, 1 - share)`
+    in linear HDR, or the split. The resolve's outputs / history are never written (pure TAA history). The blit does nothing (`pre 1`).
+  - `kActLdr` (DLSS upscaling, VR, the post-tonemap stage): the game's tonemap draw is re-issued once with t0 = the raw scene into a
+    mod texture of the tonemap target's shape (`TaaReissueTonemap`, 2 textures ping-pong); at the blit the unit runs on THAT and
+    composites over the game's own blit (the TAA picture, stretched when upscaling) -- `SetCompositeOut` for native size (the
+    upscale composite as before for DLSS), alpha x the mod's share, or the split (`kCompositePs` Params[3]). No RCAS border blend /
+    outside AA in that mode (outside the DLAA rect the game's TAA picture stays).
+  - `kActTaaOnly` (mode 2, or a held pass the mix cannot take: no resolve in the pass, no jitter copy, no raw scene, a failed /
+    deferred run): the mod's main-scene DLAA / DLSS is skipped for the pass (MV history kept rolling). Never DLAA on the TAA'd frame.
+- **Logs.** `game TAA (phase 82): mode=... | TAA resolve DETECTED / not seen | jitter: ... | path: ...` once per change (mode,
+  detection, share, path, fallback reason); `the TAA resolve reads cb0 = buffer ...` when it learns the buffer (says if the Unmap hook
+  is missing); a WARN once at `game_taa = 0` with a running TAA; at log level 4 a stats line every 1800 Presents (passes per path,
+  jitter misses, copies by kind). The menu's Game TAA row says whether the game's TAA runs now.
+- **Not verified in game yet / limits.** Whether SCS TAA runs in VR (if not: VR stays exactly mode 0). Whether the constants come
+  through Map / Unmap or UpdateSubresource of a buffer whose offset is stable (a ring with a moving offset -> TAA only, logged). The
+  jitter sign (cb0[8].xy taken as the geometry shift). Mirrors keep the mod's own mirror jitter (if the game also jitters the mirror
+  projection, they double-jitter). The re-issued tonemap misses the game's 2 small draws into the tonemap target after its tonemap.
+  `tests/game_taa_test.cpp` (CI) covers the pure logic; the settings round-trip test checks the two rows against `g_gameTaa`.
+
 ### The RenderDoc oracle (done in v0.2)
 
 Capture a frame of the unmodified game to learn empirically: which pass writes
