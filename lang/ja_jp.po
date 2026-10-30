@@ -130,13 +130,8 @@ msgstr "モーションとミラー"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Upscaling and VR"
-msgstr "アップスケールとVR"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "In-game UI (VR)"
-msgstr ""
+msgid "Frame rate"
+msgstr "フレームレート"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -145,18 +140,23 @@ msgstr "VRパフォーマンス"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Frame rate and CPU"
-msgstr "フレームレートとCPU"
+msgid "In-game UI (VR)"
+msgstr "ゲーム内UI (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "パネル設定"
+msgid "FPS counter"
+msgstr "FPSカウンター"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "FPSカウンター設定"
+msgid "Menu panel"
+msgstr "メニューパネル"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Compare and test"
+msgstr "比較とテスト"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -231,26 +231,6 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower "
-"it to afford a heavier model or win frame rate; 40 % costs about 40 % of the model. Also sets the "
-"garage / main-menu truck."
-msgstr ""
-"VR: 各目の中央部だけにDLAAをかけ (20～100 %)、周辺はゲームの映像のままです。重いモデルを使う、またはフレームレートを稼ぐには下げます。40 %でモデルの負荷の約40 "
-"%。ガレージ / メインメニューのトラックにも適用されます。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
-"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
-"~60 frames to switch."
-msgstr ""
-"非VRのみ: ゲームのブルーム / トーンマップ前にDLAAをかけ、車線の塗装、電線、レールのちらつきを減らします。比較したいときだけ変更。DLSSアップスケールやWindows "
-"HDRでは使いません。負荷は同じで、切り替えに約60フレームかかります。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
 "Gives wires, fences and glass their own distance instead of what is behind them, so they do not "
 "smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."
 msgstr "電線、フェンス、ガラスに背後ではなく専用の距離を与え、動いてもにじまないようにします。にじみが見えなければオフに: 片目あたり0.02 - 0.06 ms節約できます。"
@@ -264,6 +244,16 @@ msgid ""
 msgstr ""
 "動いたときに街灯や車のライトの光が尾を引くのを防ぎます: DLSSは履歴ではなく現在のフレームから光を取ります。25 %刻み。光がちらつくなら下げ、0 = オフ。負荷は片目あたり約0.05 - "
 "0.2 ms。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower "
+"it to afford a heavier model or win frame rate; 40 % costs about 40 % of the model. Also sets the "
+"garage / main-menu truck."
+msgstr ""
+"VR: 各目の中央部だけにDLAAをかけ (20～100 %)、周辺はゲームの映像のままです。重いモデルを使う、またはフレームレートを稼ぐには下げます。40 %でモデルの負荷の約40 "
+"%。ガレージ / メインメニューのトラックにも適用されます。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -305,146 +295,60 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
-"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
-"soft for a moment when it changes."
+"Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
+"the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"走行中も細い電線の動きを保ちます: DLAAが動きデータを細い線に広げます (DLSSモーション拡張)。オン = 既定。オフ = "
-"比較用のみ、近くの電線のちらつきが増えます。切り替え時、映像が一瞬ぼやけます。"
+"フレームレートとCPU: CPU最適化、非VR向けFPS上限とNVIDIA Reflex、VR "
+"FPS上限。右キーでグループを開き、左キーで閉じます。メニューを開くたびに閉じた状態から始まります。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
-"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
+"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
+"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
+"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
+"cpu_pcore, cpu_priority, cpu_no_throttle."
 msgstr ""
-"細い電線は、ピクセル中心を覆う所だけでなく触れたすべてのピクセルに深度を持ちます。オン = 既定。オン (A2Cなし) = 透過エッジにも適用。オフ = "
-"比較用のみ、近くの電線のちらつきが増えます。"
+"3つのCPUスイッチをまとめて: メインとレンダースレッドをPコアに優先 (Intelハイブリッドのみ)、ゲームを通常以上の優先度で実行、Windowsによるスロットル (EcoQoS) "
+"やタイマー要求の無視を禁止。CPUがボトルネックのとき有効、負荷なし。dlaa.iniに個別設定: cpu_pcore, cpu_priority, cpu_no_throttle。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
-"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
+"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
+"limiting. off = no limit."
 msgstr ""
-"実験的: 1ピクセルより細い遠くの電線を1ピクセルの線として描き、破線状に途切れるのを防ぎます。既定はオフ: 遠くの電線が暗く見えたりちらつきが増えたりすることがあります。試して比較してください。"
+"非VR専用。ゲームをこのフレームレート以下に保ちます: "
+"フレーム時間が安定し、発熱と消費電力が減ります。混雑した街でPCが維持できる値より少し低めに設定。ReflexオンではNVIDIAドライバーが制限します。オフ = 制限なし。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the "
-"group, Left closes it; it starts closed every time the menu opens."
+"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
+"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
 msgstr ""
-"DLSSアップスケール、DLAAのオン / オフ切り替え、OFXR Bridge / "
-"VectorXRの情報。右キーでグループを開き、左キーで閉じます。メニューを開くたびに閉じた状態から始まります。"
+"非VR専用、NVIDIAのみ。オン = ゲームのフレームがGPUキューで待つ時間が減ります: "
+"GPUがボトルネックのとき入力遅延が減少。ブーストはGPUクロックも維持。fpsは同じ。負荷は小。VRでは使いません。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than "
-"the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at "
-"Scaling 100 %."
+"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
+"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
+"the fps swings. Turns Turbo off while on."
 msgstr ""
-"ゲームのスケーリングが100 %未満のとき、DLSSが映像をフルサイズに描き戻します: "
-"ゲーム自身の引き伸ばしよりシャープで、描くピクセルが減るのでfpsも上がります。追加負荷なし。スケーリング100 %では何もしません。"
+"VR専用。1/2 = ゲームはヘッドセットの2フレームに1回描画 (72 Hz -> 36 fps)、1/3 = 3回に1回。残りはヘッドセットのリプロジェクション (ASW / Motion "
+"Smoothing) が一定のリズムで補います。fpsが乱高下するときに使用。オン中はターボがオフになります。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
-"comparing. Off saves the cost of every part together."
-msgstr "Mod全体をオン / オフし、モードは保持します。オフ = ゲーム本来の映像で、比較用です。オフにすると全処理の負荷がなくなります。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
-"right, to compare."
+"VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
+"are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"ゲームのアンチエイリアスがTAAのときのみ。オフ = Modのみ (ゲームのAAを無効にする)。ミックス = TAAとDLAA / DLSSを同じフレームで合成。分割 = "
-"左がMod、右がTAA、比較用。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
-msgstr ""
-"ミックスのうちゲームのTAAが占める割合 (0 - 100 %、10 %刻み)。多い = より落ち着いて柔らかい (TAA)、少ない = よりシャープ (DLAA / "
-"DLSS)。ゲームTAAがミックスのとき、またはミックス側のある分割のときに使用。追加の負荷はありません。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
-"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
-msgstr "ゲームTAA分割の境界線の位置 (幅の0 - 100 %、5 %刻み)。左側はModのDLAA / DLSS、右側はゲームのTAA。ゲームTAAが分割のときのみ使用。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
-"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
-"upscaling. Used only when Game TAA is split."
-msgstr ""
-"ゲームTAA分割が両側に表示する内容: DLAA | TAA (左がMod、右がゲームのTAA)、ミックス | TAA または DLAA | ミックス (ミックス = "
-"ゲームTAA比率で2つを合成)。アップスケール時はDLAAの代わりにDLSS。ゲームTAAが分割のときのみ使用。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"OFXR Bridge = VR frame generation by djules75, a separate download "
-"(github.com/djules75/OFXR-Bridge). found = its layer is loaded in this game and the mod lets its "
-"work pass through. Start its tray app before the game."
-msgstr ""
-"OFXR Bridge = djules75製のVRフレーム生成 (別途ダウンロード、github.com/djules75/OFXR-Bridge)。検出 = "
-"このゲームでそのレイヤーが読み込まれ、Modはその処理を通します。ゲームの前にトレイアプリを起動してください。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, "
-"Depth, frame generation; found = its layer is loaded in the game and the mod lets its work pass "
-"through. Run only one Turbo (its or the mod's)."
-msgstr ""
-"VectorXR = DienerTech製のOpenXR強化スイート (github.com/DienerTech/vectorxr): ターボ、深度、フレーム生成。検出 = "
-"ゲームでそのレイヤーが読み込まれ、Modはその処理を通します。ターボは片方だけ使ってください (VectorXRかModのどちらか)。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
-"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
-"(the game's menu screens)."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
-"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
-"own values when it exits)."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left "
-"closes it; it starts closed every time the menu opens."
-msgstr "VR高速化: ターボ、Foveatedレンダリング、非表示領域マスク。右キーでグループを開き、左キーで閉じます。メニューを開くたびに閉じた状態から始まります。"
+"VR高速化: ターボ、Foveatedレンダリング、非表示領域マスク、OFXR Bridge / "
+"VectorXRが見つかったかどうか。右キーでグループを開き、左キーで閉じます。メニューを開くたびに閉じた状態から始まります。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -519,108 +423,52 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
+"OFXR Bridge = VR frame generation by djules75, a separate download "
+"(github.com/djules75/OFXR-Bridge). found = its layer is loaded in this game and the mod lets its "
+"work pass through. Start its tray app before the game."
 msgstr ""
-"フレームレート制限とCPU: 非VR向けNVIDIA ReflexとFPS上限、VR "
-"FPS上限、CPU最適化。右キーでグループを開き、左キーで閉じます。メニューを開くたびに閉じた状態から始まります。"
+"OFXR Bridge = djules75製のVRフレーム生成 (別途ダウンロード、github.com/djules75/OFXR-Bridge)。検出 = "
+"このゲームでそのレイヤーが読み込まれ、Modはその処理を通します。ゲームの前にトレイアプリを起動してください。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
-"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
+"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, "
+"Depth, frame generation; found = its layer is loaded in the game and the mod lets its work pass "
+"through. Run only one Turbo (its or the mod's)."
 msgstr ""
-"非VR専用、NVIDIAのみ。オン = ゲームのフレームがGPUキューで待つ時間が減ります: "
-"GPUがボトルネックのとき入力遅延が減少。ブーストはGPUクロックも維持。fpsは同じ。負荷は小。VRでは使いません。"
+"VectorXR = DienerTech製のOpenXR強化スイート (github.com/DienerTech/vectorxr): ターボ、深度、フレーム生成。検出 = "
+"ゲームでそのレイヤーが読み込まれ、Modはその処理を通します。ターボは片方だけ使ってください (VectorXRかModのどちらか)。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
-"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
-"limiting. off = no limit."
+"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
+"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"非VR専用。ゲームをこのフレームレート以下に保ちます: "
-"フレーム時間が安定し、発熱と消費電力が減ります。混雑した街でPCが維持できる値より少し低めに設定。ReflexオンではNVIDIAドライバーが制限します。オフ = 制限なし。"
+"ゲーム自身のVR UI (HUD、メニュー) が浮かぶ位置。変更はModがゲームのコンソールに入力します。config.cfgにg_developerとg_console "
+"1が必要です。右キーでグループを開き、左キーで閉じます。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
-"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
-"the fps swings. Turns Turbo off while on."
-msgstr ""
-"VR専用。1/2 = ゲームはヘッドセットの2フレームに1回描画 (72 Hz -> 36 fps)、1/3 = 3回に1回。残りはヘッドセットのリプロジェクション (ASW / Motion "
-"Smoothing) が一定のリズムで補います。fpsが乱高下するときに使用。オン中はターボがオフになります。"
+"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
+"(the game's menu screens)."
+msgstr "下の行が動かすゲームのVR UIレイアウト: 運転 (運転中のHUD) またはメニュー (ゲームのメニュー画面)。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
-"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
-"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
-msgstr ""
-"3つのCPUスイッチをまとめて: メインとレンダースレッドをPコアに優先 (Intelハイブリッドのみ)、ゲームを通常以上の優先度で実行、Windowsによるスロットル (EcoQoS) "
-"やタイマー要求の無視を禁止。CPUがボトルネックのとき有効、負荷なし。dlaa.iniに個別設定: cpu_pcore, cpu_priority, cpu_no_throttle。"
+"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
+"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
+msgstr "ゲームのVR UIを小さなステップで動かします: 高さ、横、距離、傾き、回転、サイズ、曲率。ゲームには最後の操作から約0.4秒後に反映されます: コンソールは自動で開閉します。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
-"it; it starts closed every time the menu opens."
-msgstr "パネルの位置、サイズ、奥行き、向き、メニューキー。右キーでグループを開き、左キーで閉じます。メニューを開くたびに閉じた状態から始まります。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
-"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
-"metres). Needs the VR layer (default). No cost."
-msgstr ""
-"VR専用。頭に追従 = パネルがヘッドセットと一緒に動く。キャビン固定 = 座席の前の一点に留まり、見回しても安定。X / Y / 奥行きでその位置を設定 (度、メートル)。VRレイヤー "
-"(既定) が必要。負荷なし。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
-"and VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr "このパネルを左右に動かします (画面の%、VRキャビン固定は座席を中心とした度)。非VRとVRで位置は別々に保存。パネルが必要なものを隠すときに使用。負荷なし。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
-"VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr "このパネルを上下に動かします (画面の%、VRキャビン固定は度、プラス = 下)。非VRとVRで位置は別々に保存。パネルが必要なものを隠すときに使用。負荷なし。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
-"much. Flat and VR each keep their own size. No cost."
-msgstr "パネルを大きく / 小さくします。読めないときは上げ、広く隠すときは下げます。非VRとVRでサイズは別々に保存。負荷なし。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
-"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
-"Change it if the panel is tiring to look at. No cost."
-msgstr ""
-"VR専用なので非VRではグレー表示。パネルが浮かぶ距離: VRレイヤー (既定) ではメートル (0.30 - 3.00)、menu_vr_layer = 0 "
-"では片目あたりの内側シフトのpx。どの奥行きでも同じ大きさ。見ていて疲れるなら変更。負荷なし。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
-"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
-"picture. No cost."
-msgstr ""
-"VR専用なので非VRではグレー表示。オン = 横に動かしたときパネルがこちらを向き、どの角度でも同じ大きさ (VRレイヤー、既定、頭追従のFPSボックスも); オフ = 平面の絵。負荷なし。"
+"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
+"own values when it exits)."
+msgstr "右: 両レイアウトのすべての値を開始時のconfig.cfgの値に戻します (ゲームは終了時に自身の値を保存します)。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -642,36 +490,6 @@ msgstr "FPSボックスの固定、位置、サイズ、色、VR距離、回転�
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
-"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
-"Per-part motion vectors). No cost."
-msgstr ""
-"VR専用。頭に追従 = ヘッドセットと一緒に動く。プレイ空間に固定 = 座席周りの一点、キャビンの揺れを無視。車両に取り付け = キャビンに固定され一緒に揺れる "
-"(DLAAとパーツ別モーションベクターが必要)。負荷なし。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
-"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
-"for every vehicle. No cost."
-msgstr ""
-"VRの車両に取り付けのみ。オン = トラック / 車ごとにキャビン内のFPSボックスの位置、回転、サイズ、色、明るさ、文字を保持 (メニューを閉じるとdlaa.iniに保存)。オフ = "
-"全車両で共通の設定。負荷なし。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
-"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
-"vehicles keep theirs. The box is square to the cab."
-msgstr ""
-"VRの車両に取り付けのみ。右 = ボックスがずれているとき、キャビンを今すぐ再測定 (停車して静止)。左 = この車両のボックスを初期値に戻す (位置、回転、サイズ、色、文字); "
-"他の車両はそのまま。ボックスはキャビンに対して垂直です。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
 "Moves the fps box sideways, in % of the screen (VR fixed / attached: degrees around you). Flat "
 "and VR each keep their own position. No cost."
 msgstr "FPSボックスを左右に動かします (画面の%、VR固定 / 取り付けは自分を中心とした度)。非VRとVRで位置は別々に保存。負荷なし。"
@@ -682,27 +500,6 @@ msgid ""
 "Moves the fps box up / down, in % of the screen (VR fixed / attached: degrees, minus = up). Flat "
 "and VR each keep their own position. No cost."
 msgstr "FPSボックスを上下に動かします (画面の%、VR固定 / 取り付けは度、マイナス = 上)。非VRとVRで位置は別々に保存。負荷なし。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
-"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
-msgstr "VR専用なので非VRではグレー表示。FPSボックスをその場で左右に回します (度、+ = 面が右を向く)。端に置いたとき角度をつけるために使用。0 = 正面を向く。負荷なし。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
-"lying on the dashboard). 0 = it faces you. No cost."
-msgstr "VR専用なので非VRではグレー表示。FPSボックスを傾けます (度、+ = 上端が奥へ倒れる、ダッシュボードに寝かせたように)。0 = 正面を向く。負荷なし。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
-"upright. No cost."
-msgstr "VR専用なので非VRではグレー表示。FPSボックスを面内で回します (度、+ = 時計回り)。0 = 正立。負荷なし。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -738,12 +535,209 @@ msgstr "FPSボックス全体の透明度、10 - 100 %: 100 = 不透明、下げ
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
+"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
+"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
+"Per-part motion vectors). No cost."
+msgstr ""
+"VR専用。頭に追従 = ヘッドセットと一緒に動く。プレイ空間に固定 = 座席周りの一点、キャビンの揺れを無視。車両に取り付け = キャビンに固定され一緒に揺れる "
+"(DLAAとパーツ別モーションベクターが必要)。負荷なし。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
+"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
+"for every vehicle. No cost."
+msgstr ""
+"VRの車両に取り付けのみ。オン = トラック / 車ごとにキャビン内のFPSボックスの位置、回転、サイズ、色、明るさ、文字を保持 (メニューを閉じるとdlaa.iniに保存)。オフ = "
+"全車両で共通の設定。負荷なし。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
+"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
+"vehicles keep theirs. The box is square to the cab."
+msgstr ""
+"VRの車両に取り付けのみ。右 = ボックスがずれているとき、キャビンを今すぐ再測定 (停車して静止)。左 = この車両のボックスを初期値に戻す (位置、回転、サイズ、色、文字); "
+"他の車両はそのまま。ボックスはキャビンに対して垂直です。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
+"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
+msgstr "VR専用なので非VRではグレー表示。FPSボックスをその場で左右に回します (度、+ = 面が右を向く)。端に置いたとき角度をつけるために使用。0 = 正面を向く。負荷なし。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
+"lying on the dashboard). 0 = it faces you. No cost."
+msgstr "VR専用なので非VRではグレー表示。FPSボックスを傾けます (度、+ = 上端が奥へ倒れる、ダッシュボードに寝かせたように)。0 = 正面を向く。負荷なし。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
+"upright. No cost."
+msgstr "VR専用なので非VRではグレー表示。FPSボックスを面内で回します (度、+ = 時計回り)。0 = 正立。負荷なし。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
 "VR only, so greyed in flat. How far away the fps box floats, 0.30 - 3.00 m. It keeps the same "
 "size in your view at every distance; only the depth changes. Put it near the depth you look at to "
 "read it without refocusing. No cost."
 msgstr ""
 "VR専用なので非VRではグレー表示。FPSボックスが浮かぶ距離、0.30 - 3.00 "
 "m。どの距離でも視界での大きさは同じで、奥行きだけが変わります。見ている奥行きに近づけると、焦点を合わせ直さず読めます。負荷なし。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
+"it; it starts closed every time the menu opens."
+msgstr "パネルの位置、サイズ、奥行き、向き、メニューキー。右キーでグループを開き、左キーで閉じます。メニューを開くたびに閉じた状態から始まります。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
+"and VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr "このパネルを左右に動かします (画面の%、VRキャビン固定は座席を中心とした度)。非VRとVRで位置は別々に保存。パネルが必要なものを隠すときに使用。負荷なし。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
+"VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr "このパネルを上下に動かします (画面の%、VRキャビン固定は度、プラス = 下)。非VRとVRで位置は別々に保存。パネルが必要なものを隠すときに使用。負荷なし。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
+"much. Flat and VR each keep their own size. No cost."
+msgstr "パネルを大きく / 小さくします。読めないときは上げ、広く隠すときは下げます。非VRとVRでサイズは別々に保存。負荷なし。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
+"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
+"metres). Needs the VR layer (default). No cost."
+msgstr ""
+"VR専用。頭に追従 = パネルがヘッドセットと一緒に動く。キャビン固定 = 座席の前の一点に留まり、見回しても安定。X / Y / 奥行きでその位置を設定 (度、メートル)。VRレイヤー "
+"(既定) が必要。負荷なし。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
+"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
+"Change it if the panel is tiring to look at. No cost."
+msgstr ""
+"VR専用なので非VRではグレー表示。パネルが浮かぶ距離: VRレイヤー (既定) ではメートル (0.30 - 3.00)、menu_vr_layer = 0 "
+"では片目あたりの内側シフトのpx。どの奥行きでも同じ大きさ。見ていて疲れるなら変更。負荷なし。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
+"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
+"picture. No cost."
+msgstr ""
+"VR専用なので非VRではグレー表示。オン = 横に動かしたときパネルがこちらを向き、どの角度でも同じ大きさ (VRレイヤー、既定、頭追従のFPSボックスも); オフ = 平面の絵。負荷なし。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches for A/B checks: DLAA off, the game's own TAA mixed in or side by side, the thin-wire "
+"switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
+"group, Left closes it."
+msgstr ""
+"A/B比較用のスイッチ: DLAAオフ、ゲーム自身のTAAの混合または左右並べ、細線スイッチ、トーンマップ前のDLAA。通常の運転には不要です。右キーでグループを開き、左キーで閉じます。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
+"comparing. Off saves the cost of every part together."
+msgstr "Mod全体をオン / オフし、モードは保持します。オフ = ゲーム本来の映像で、比較用です。オフにすると全処理の負荷がなくなります。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
+msgstr ""
+"ゲームのアンチエイリアスがTAAのときのみ。オフ = Modのみ (ゲームのAAを無効にする)。ミックス = TAAとDLAA / DLSSを同じフレームで合成。分割 = "
+"左がMod、右がTAA、比較用。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
+msgstr ""
+"ミックスのうちゲームのTAAが占める割合 (0 - 100 %、10 %刻み)。多い = より落ち着いて柔らかい (TAA)、少ない = よりシャープ (DLAA / "
+"DLSS)。ゲームTAAがミックスのとき、またはミックス側のある分割のときに使用。追加の負荷はありません。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr "ゲームTAA分割の境界線の位置 (幅の0 - 100 %、5 %刻み)。左側はModのDLAA / DLSS、右側はゲームのTAA。ゲームTAAが分割のときのみ使用。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"ゲームTAA分割が両側に表示する内容: DLAA | TAA (左がMod、右がゲームのTAA)、ミックス | TAA または DLAA | ミックス (ミックス = "
+"ゲームTAA比率で2つを合成)。アップスケール時はDLAAの代わりにDLSS。ゲームTAAが分割のときのみ使用。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
+"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
+"soft for a moment when it changes."
+msgstr ""
+"走行中も細い電線の動きを保ちます: DLAAが動きデータを細い線に広げます (DLSSモーション拡張)。オン = 既定。オフ = "
+"比較用のみ、近くの電線のちらつきが増えます。切り替え時、映像が一瞬ぼやけます。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
+"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
+msgstr ""
+"細い電線は、ピクセル中心を覆う所だけでなく触れたすべてのピクセルに深度を持ちます。オン = 既定。オン (A2Cなし) = 透過エッジにも適用。オフ = "
+"比較用のみ、近くの電線のちらつきが増えます。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
+"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+msgstr ""
+"実験的: 1ピクセルより細い遠くの電線を1ピクセルの線として描き、破線状に途切れるのを防ぎます。既定はオフ: 遠くの電線が暗く見えたりちらつきが増えたりすることがあります。試して比較してください。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
+"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
+"~60 frames to switch."
+msgstr ""
+"非VRのみ: ゲームのブルーム / トーンマップ前にDLAAをかけ、車線の塗装、電線、レールのちらつきを減らします。比較したいときだけ変更。DLSSアップスケールやWindows "
+"HDRでは使いません。負荷は同じで、切り替えに約60フレームかかります。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -950,11 +944,6 @@ msgstr "オフ"
 msgid "same"
 msgstr "同じ"
 
-#. Cost column cell (about 10 Latin characters)
-#: src/inject.cpp
-msgid "no extra"
-msgstr "追加なし"
-
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
@@ -1097,7 +1086,7 @@ msgstr "VRではグレー表示: VRでは常に完成した映像にDLAAをか�
 #: src/inject.cpp
 #, c-format
 msgid "Greyed: VR only."
-msgstr ""
+msgstr "グレー表示: VR専用。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1105,13 +1094,13 @@ msgstr ""
 msgid ""
 "Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
 "game is closed."
-msgstr ""
+msgstr "グレー表示: ゲームのコンソールがオフです。ゲームを閉じた状態でconfig.cfgのg_developerとg_consoleを\"1\"にしてください。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Sending to the game's console..."
-msgstr ""
+msgstr "ゲームのコンソールへ送信中..."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1362,18 +1351,6 @@ msgstr "利用不可: このVRランタイムは非表示領域を報告しま�
 #, c-format
 msgid "Off now: every pixel is drawn."
 msgstr "現在オフ: 全ピクセルを描画します。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now (the mod is off)."
-msgstr "現在オフ (Modがオフ)。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-msgstr "現在オフ: スケーリング100 %%未満ではゲーム自身の拡大を使います。"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1960,6 +1937,11 @@ msgstr "光芒ゴースト修正"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "DLAA off to compare (not saved)"
+msgstr "DLAAオフ比較 (保存なし)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Game TAA"
 msgstr "ゲームTAA"
 
@@ -2029,62 +2011,62 @@ msgstr "VectorXR (VRレイヤー)"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Layout"
-msgstr ""
+msgstr "レイアウト"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "driving"
-msgstr ""
+msgstr "運転"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "menus"
-msgstr ""
+msgstr "メニュー"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Height"
-msgstr ""
+msgstr "高さ"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Side"
-msgstr ""
+msgstr "横"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Distance"
-msgstr ""
+msgstr "距離"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Tilt"
-msgstr ""
+msgstr "傾き"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Turn"
-msgstr ""
+msgstr "回転"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Size"
-msgstr ""
+msgstr "サイズ"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Curve"
-msgstr ""
+msgstr "曲率"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Reset to config.cfg"
-msgstr ""
+msgstr "config.cfgに戻す"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Right"
-msgstr ""
+msgstr "右"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2268,6 +2250,11 @@ msgstr "自動 (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel settings"
+msgstr "パネル設定"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Panel lock (VR)"
 msgstr "パネル固定 (VR)"
 
@@ -2328,15 +2315,15 @@ msgstr "パネル正対 (VR)"
 msgid "Menu keys"
 msgstr "メニューキー"
 
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter"
-msgstr "FPSカウンター"
-
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "Off"
 msgstr "オフ"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS counter settings"
+msgstr "FPSカウンター設定"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2524,4 +2511,31 @@ msgstr "情報"
 #: src/log.h
 msgid "debug"
 msgstr "デバッグ"
+
+#~ msgid "Upscaling and VR"
+#~ msgstr "アップスケールとVR"
+
+#~ msgid "Frame rate and CPU"
+#~ msgstr "フレームレートとCPU"
+
+#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "DLSSアップスケール、DLAAのオン / オフ切り替え、OFXR Bridge / VectorXRの情報。右キーでグループを開き、左キーで閉じます。メニューを開くたびに閉じた状態から始まります。"
+
+#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
+#~ msgstr "ゲームのスケーリングが100 %未満のとき、DLSSが映像をフルサイズに描き戻します: ゲーム自身の引き伸ばしよりシャープで、描くピクセルが減るのでfpsも上がります。追加負荷なし。スケーリング100 %では何もしません。"
+
+#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "VR高速化: ターボ、Foveatedレンダリング、非表示領域マスク。右キーでグループを開き、左キーで閉じます。メニューを開くたびに閉じた状態から始まります。"
+
+#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "フレームレート制限とCPU: 非VR向けNVIDIA ReflexとFPS上限、VR FPS上限、CPU最適化。右キーでグループを開き、左キーで閉じます。メニューを開くたびに閉じた状態から始まります。"
+
+#~ msgid "no extra"
+#~ msgstr "追加なし"
+
+#~ msgid "Off now (the mod is off)."
+#~ msgstr "現在オフ (Modがオフ)。"
+
+#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
+#~ msgstr "現在オフ: スケーリング100 %%未満ではゲーム自身の拡大を使います。"
 

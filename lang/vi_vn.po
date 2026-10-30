@@ -130,13 +130,8 @@ msgstr "Chuyển động và gương"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Upscaling and VR"
-msgstr "Upscale và VR"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "In-game UI (VR)"
-msgstr ""
+msgid "Frame rate"
+msgstr "Tốc độ khung hình"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -145,18 +140,23 @@ msgstr "Hiệu năng VR"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Frame rate and CPU"
-msgstr "Tốc độ khung hình và CPU"
+msgid "In-game UI (VR)"
+msgstr "Giao diện game (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Cài đặt bảng menu"
+msgid "FPS counter"
+msgstr "Bộ đếm FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "Cài đặt bộ đếm FPS"
+msgid "Menu panel"
+msgstr "Bảng menu"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Compare and test"
+msgstr "So sánh và thử"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -240,27 +240,6 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower "
-"it to afford a heavier model or win frame rate; 40 % costs about 40 % of the model. Also sets the "
-"garage / main-menu truck."
-msgstr ""
-"VR: chỉ phần giữa mỗi mắt được DLAA (20 đến 100 %); rìa giữ hình của game. Giảm để dùng model "
-"nặng hơn hoặc tăng fps; 40 % tốn khoảng 40 % của model. Cũng áp dụng cho xe ở gara / menu chính."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
-"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
-"~60 frames to switch."
-msgstr ""
-"Chỉ màn hình phẳng: DLAA trước bloom / tonemap của game, nên vạch kẻ đường, dây điện và đường ray "
-"ít nhấp nháy hơn. Chỉ đổi để so sánh. Không dùng với DLSS nâng độ phân giải hoặc Windows HDR. Tốn "
-"như nhau; mất khoảng 60 khung để chuyển."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
 "Gives wires, fences and glass their own distance instead of what is behind them, so they do not "
 "smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."
 msgstr ""
@@ -277,6 +256,16 @@ msgstr ""
 "Ngăn quầng sáng đèn đường và đèn xe để lại vệt khi di chuyển: DLSS lấy quầng sáng từ khung hiện "
 "tại, không từ lịch sử. Bước 25 %; giảm nếu quầng đèn nhấp nháy, 0 = tắt. Tốn khoảng 0,05 - 0,2 ms "
 "mỗi mắt."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower "
+"it to afford a heavier model or win frame rate; 40 % costs about 40 % of the model. Also sets the "
+"garage / main-menu truck."
+msgstr ""
+"VR: chỉ phần giữa mỗi mắt được DLAA (20 đến 100 %); rìa giữ hình của game. Giảm để dùng model "
+"nặng hơn hoặc tăng fps; 40 % tốn khoảng 40 % của model. Cũng áp dụng cho xe ở gara / menu chính."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -322,157 +311,65 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
-"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
-"soft for a moment when it changes."
+"Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
+"the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Dây mảnh giữ chuyển động khi bạn lái: DLAA lan dữ liệu chuyển động ra các đường mảnh (DLSS motion "
-"dilation). bật = mặc định. tắt = chỉ để so sánh; dây gần nhấp nháy hơn. Hình hơi mềm một lúc khi "
-"đổi."
+"Tốc độ khung hình và CPU: tinh chỉnh CPU, giới hạn FPS và NVIDIA Reflex cho màn hình phẳng, "
+"giới hạn FPS VR. Phải mở nhóm, Trái đóng; mỗi lần mở menu nhóm luôn đóng sẵn."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
-"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
+"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
+"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
+"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
+"cpu_pcore, cpu_priority, cpu_no_throttle."
 msgstr ""
-"Dây mảnh có độ sâu trên mọi điểm ảnh chúng chạm, không chỉ nơi phủ tâm điểm ảnh. bật = mặc định. "
-"bật (không A2C) = cả cho viền xuyên thấu. tắt = chỉ để so sánh; dây gần nhấp nháy hơn."
+"Ba công tắc CPU cùng lúc: luồng chính và luồng render ưu tiên P-core (chỉ CPU hybrid Intel), game "
+"chạy ở mức ưu tiên Above normal, và Windows không được bóp (EcoQoS) hay bỏ qua yêu cầu timer của "
+"nó. Giúp khi CPU là điểm nghẽn; không tốn. Cài đặt riêng trong dlaa.ini: cpu_pcore, cpu_priority, "
+"cpu_no_throttle."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
-"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
+"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
+"limiting. off = no limit."
 msgstr ""
-"Thử nghiệm: vẽ dây xa mảnh hơn 1 điểm ảnh thành đường 1 điểm ảnh, để không đứt thành nét rời. Mặc "
-"định tắt: dây xa có thể tối hơn hoặc nhấp nháy hơn. Hãy thử và so sánh."
+"Chỉ màn hình phẳng. Giữ game không vượt tốc độ khung hình này: thời gian khung đều, ít nóng và ít "
+"điện hơn. Đặt thấp hơn một chút mức PC giữ được ở thành phố đông. Khi bật Reflex, driver NVIDIA "
+"thực hiện việc giới hạn. tắt = không giới hạn."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the "
-"group, Left closes it; it starts closed every time the menu opens."
+"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
+"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
 msgstr ""
-"DLSS nâng độ phân giải, công tắc DLAA bật / tắt và thông tin OFXR Bridge / VectorXR. Phải mở "
-"nhóm, Trái đóng; mỗi lần mở menu nhóm luôn đóng sẵn."
+"Chỉ màn hình phẳng, chỉ NVIDIA. Bật = khung của game chờ ít hơn trong hàng đợi GPU: ít trễ điều "
+"khiển hơn khi GPU là điểm nghẽn. Boost còn giữ xung nhịp GPU cao. Cùng fps; tốn ít. Không dùng "
+"trong VR."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than "
-"the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at "
-"Scaling 100 %."
+"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
+"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
+"the fps swings. Turns Turbo off while on."
 msgstr ""
-"DLSS vẽ lại hình về kích thước đầy đủ khi Scaling của game dưới 100 %: nét hơn cách kéo giãn của "
-"game, và ít điểm ảnh hơn nên fps cao hơn. Không tốn thêm; không làm gì ở Scaling 100 %."
+"Chỉ VR. 1/2 = game vẽ mỗi khung thứ 2 của kính (72 Hz -> 36 fps), 1/3 = mỗi khung thứ 3; "
+"reprojection của kính (ASW / Motion Smoothing) lấp phần còn lại đều đặn. Dùng khi fps dao động. "
+"Khi bật sẽ tắt Turbo."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
-"comparing. Off saves the cost of every part together."
+"VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
+"are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Bật hoặc tắt toàn bộ mod và giữ chế độ; tắt hiện hình gốc của game, để so sánh. Tắt tiết kiệm chi "
-"phí của mọi phần cộng lại."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
-"right, to compare."
-msgstr ""
-"Chỉ khi Khử răng cưa của game đặt ở TAA. tắt = chỉ mod (đặt AA của game là Tắt). trộn = TAA và "
-"DLAA / DLSS trên cùng một khung hình, hòa trộn. chia đôi = bên trái mod, bên phải TAA, để so sánh."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
-msgstr ""
-"TAA của game chiếm bao nhiêu trong phần trộn, 0 - 100 % theo bước 10 %: nhiều hơn = êm và mềm hơn "
-"(TAA), ít hơn = nét hơn (DLAA / DLSS). Dùng khi TAA của game là trộn, hoặc chia đôi có một bên "
-"trộn. Không tốn thêm."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
-"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
-msgstr ""
-"Vị trí đường chia của TAA của game ở chế độ chia đôi, 0 - 100 % chiều rộng theo bước 5 %: bên "
-"trái là DLAA / DLSS của mod, bên phải là TAA của game. Chỉ dùng khi TAA của game là chia đôi."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
-"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
-"upscaling. Used only when Game TAA is split."
-msgstr ""
-"TAA của game ở chế độ chia đôi hiển thị gì ở hai bên: DLAA | TAA (bên trái mod, bên phải TAA của "
-"game), trộn | TAA hoặc DLAA | trộn (trộn = hai thứ hòa trộn theo Tỉ lệ TAA của game). DLSS thay "
-"cho DLAA khi nâng độ phân giải. Chỉ dùng khi TAA của game là chia đôi."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"OFXR Bridge = VR frame generation by djules75, a separate download "
-"(github.com/djules75/OFXR-Bridge). found = its layer is loaded in this game and the mod lets its "
-"work pass through. Start its tray app before the game."
-msgstr ""
-"OFXR Bridge = tạo khung VR của djules75, tải riêng (github.com/djules75/OFXR-Bridge). tìm thấy = "
-"lớp của nó đã nạp trong game và mod để nó hoạt động. Mở ứng dụng khay của nó trước game."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, "
-"Depth, frame generation; found = its layer is loaded in the game and the mod lets its work pass "
-"through. Run only one Turbo (its or the mod's)."
-msgstr ""
-"VectorXR = bộ nâng cấp OpenXR của DienerTech (github.com/DienerTech/vectorxr): Turbo, Depth, tạo "
-"khung; tìm thấy = lớp của nó đã nạp trong game và mod để nó hoạt động. Chỉ chạy một Turbo (của nó "
-"hoặc của mod)."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
-"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
-"(the game's menu screens)."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
-"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
-"own values when it exits)."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left "
-"closes it; it starts closed every time the menu opens."
-msgstr ""
-"Tăng tốc VR: Turbo, foveated rendering và mặt nạ vùng ẩn. Phải mở nhóm, Trái đóng; mỗi lần mở "
-"menu nhóm luôn đóng sẵn."
+"Tăng tốc VR: Turbo, foveated rendering, mặt nạ vùng ẩn và có tìm thấy OFXR Bridge / VectorXR "
+"không. Phải mở nhóm, Trái đóng; mỗi lần mở menu nhóm luôn đóng sẵn."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -553,124 +450,60 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
+"OFXR Bridge = VR frame generation by djules75, a separate download "
+"(github.com/djules75/OFXR-Bridge). found = its layer is loaded in this game and the mod lets its "
+"work pass through. Start its tray app before the game."
 msgstr ""
-"Giới hạn tốc độ khung hình và CPU: NVIDIA Reflex và giới hạn FPS cho màn hình phẳng, giới hạn FPS "
-"VR, tinh chỉnh CPU. Phải mở nhóm, Trái đóng; mỗi lần mở menu nhóm luôn đóng sẵn."
+"OFXR Bridge = tạo khung VR của djules75, tải riêng (github.com/djules75/OFXR-Bridge). tìm thấy = "
+"lớp của nó đã nạp trong game và mod để nó hoạt động. Mở ứng dụng khay của nó trước game."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
-"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
+"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, "
+"Depth, frame generation; found = its layer is loaded in the game and the mod lets its work pass "
+"through. Run only one Turbo (its or the mod's)."
 msgstr ""
-"Chỉ màn hình phẳng, chỉ NVIDIA. Bật = khung của game chờ ít hơn trong hàng đợi GPU: ít trễ điều "
-"khiển hơn khi GPU là điểm nghẽn. Boost còn giữ xung nhịp GPU cao. Cùng fps; tốn ít. Không dùng "
-"trong VR."
+"VectorXR = bộ nâng cấp OpenXR của DienerTech (github.com/DienerTech/vectorxr): Turbo, Depth, tạo "
+"khung; tìm thấy = lớp của nó đã nạp trong game và mod để nó hoạt động. Chỉ chạy một Turbo (của nó "
+"hoặc của mod)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
-"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
-"limiting. off = no limit."
+"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
+"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"Chỉ màn hình phẳng. Giữ game không vượt tốc độ khung hình này: thời gian khung đều, ít nóng và ít "
-"điện hơn. Đặt thấp hơn một chút mức PC giữ được ở thành phố đông. Khi bật Reflex, driver NVIDIA "
-"thực hiện việc giới hạn. tắt = không giới hạn."
+"Nơi giao diện VR riêng của game lơ lửng (HUD, menu). Mod gõ thay đổi vào console của game "
+"giúp bạn; cần g_developer và g_console 1 trong config.cfg. Phải mở nhóm, Trái đóng."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
-"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
-"the fps swings. Turns Turbo off while on."
+"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
+"(the game's menu screens)."
 msgstr ""
-"Chỉ VR. 1/2 = game vẽ mỗi khung thứ 2 của kính (72 Hz -> 36 fps), 1/3 = mỗi khung thứ 3; "
-"reprojection của kính (ASW / Motion Smoothing) lấp phần còn lại đều đặn. Dùng khi fps dao động. "
-"Khi bật sẽ tắt Turbo."
+"Các hàng bên dưới dịch chuyển bố cục giao diện VR nào của game: lái xe (HUD khi lái) hoặc "
+"menu (các màn hình menu của game)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
-"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
-"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
+"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
+"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
-"Ba công tắc CPU cùng lúc: luồng chính và luồng render ưu tiên P-core (chỉ CPU hybrid Intel), game "
-"chạy ở mức ưu tiên Above normal, và Windows không được bóp (EcoQoS) hay bỏ qua yêu cầu timer của "
-"nó. Giúp khi CPU là điểm nghẽn; không tốn. Cài đặt riêng trong dlaa.ini: cpu_pcore, cpu_priority, "
-"cpu_no_throttle."
+"Dịch chuyển giao diện VR của game: độ cao, bên, khoảng cách, độ nghiêng, xoay, kích thước "
+"hoặc độ cong, theo bước nhỏ. Game nhận mỗi thay đổi khoảng 0,4 s sau lần nhấn cuối: console "
+"tự mở và tự đóng."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
-"it; it starts closed every time the menu opens."
+"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
+"own values when it exits)."
 msgstr ""
-"Vị trí, kích thước, độ sâu, hướng của bảng và các phím menu. Phải mở nhóm, Trái đóng; mỗi lần mở "
-"menu nhóm luôn đóng sẵn."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
-"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
-"metres). Needs the VR layer (default). No cost."
-msgstr ""
-"Chỉ VR. Theo đầu = bảng di chuyển theo kính. Cố định trong cabin = ở một chỗ trước ghế, ổn định "
-"khi bạn nhìn quanh; X / Y / độ sâu đặt chỗ đó (độ, mét). Cần lớp VR (mặc định). Không tốn."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
-"and VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr ""
-"Dịch bảng này sang ngang, theo % màn hình (VR cố định trong cabin: độ quanh ghế). Phẳng và VR nhớ "
-"vị trí riêng. Dùng nếu bảng che thứ bạn cần. Không tốn."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
-"VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr ""
-"Dịch bảng này lên / xuống, theo % màn hình (VR cố định trong cabin: độ, dương = xuống). Phẳng và "
-"VR nhớ vị trí riêng. Dùng nếu bảng che thứ bạn cần. Không tốn."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
-"much. Flat and VR each keep their own size. No cost."
-msgstr ""
-"Làm bảng này to hơn hoặc nhỏ hơn. Tăng nếu không đọc được, giảm nếu che quá nhiều. Phẳng và VR "
-"nhớ kích thước riêng. Không tốn."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
-"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
-"Change it if the panel is tiring to look at. No cost."
-msgstr ""
-"Chỉ VR nên mờ đi ở màn hình phẳng. Bảng nổi cách bao xa: tính bằng mét (0,30 - 3,00) khi là lớp "
-"VR, mặc định; bằng px dịch vào trong mỗi mắt khi menu_vr_layer = 0. Cùng kích thước ở mọi độ sâu. "
-"Đổi nếu nhìn bảng mỏi mắt. Không tốn."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
-"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
-"picture. No cost."
-msgstr ""
-"Chỉ VR nên mờ đi ở màn hình phẳng. Bật = bảng quay mặt về phía bạn khi dời sang bên, cùng kích "
-"thước từ mọi góc (khi là lớp VR, mặc định, hộp fps theo đầu cũng vậy); tắt = hình phẳng. Không "
-"tốn."
+"Phải: mọi giá trị của cả hai bố cục về lại như config.cfg lúc đầu (game tự lưu giá trị của nó "
+"khi thoát)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -695,39 +528,6 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
-"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
-"Per-part motion vectors). No cost."
-msgstr ""
-"Chỉ VR. Theo đầu = di chuyển theo kính. Cố định trong không gian chơi = một chỗ quanh ghế, bỏ qua "
-"độ lắc của cabin. Gắn vào xe = dính vào cabin, lắc theo (cần DLAA + Vector chuyển động từng bộ "
-"phận). Không tốn."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
-"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
-"for every vehicle. No cost."
-msgstr ""
-"Chỉ VR, khi Gắn vào xe. Bật = mỗi xe tải / ô tô giữ riêng chỗ hộp fps trong cabin, độ xoay, kích "
-"thước, màu, độ sáng và chữ (lưu vào dlaa.ini khi đóng menu). Tắt = một bộ chung cho mọi xe. Không "
-"tốn."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
-"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
-"vehicles keep theirs. The box is square to the cab."
-msgstr ""
-"Chỉ VR, khi Gắn vào xe. Phải = đo lại cabin ngay (ngồi yên, xe đỗ) nếu hộp lệch chỗ. Trái = hộp "
-"của xe này về mặc định (chỗ, xoay, kích thước, màu, chữ); xe khác giữ nguyên. Hộp vuông góc với "
-"cabin."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
 "Moves the fps box sideways, in % of the screen (VR fixed / attached: degrees around you). Flat "
 "and VR each keep their own position. No cost."
 msgstr ""
@@ -742,33 +542,6 @@ msgid ""
 msgstr ""
 "Dịch hộp fps lên / xuống, theo % màn hình (VR cố định / gắn: độ, âm = lên). Phẳng và VR nhớ vị "
 "trí riêng. Không tốn."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
-"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
-msgstr ""
-"Chỉ VR nên mờ đi ở màn hình phẳng. Xoay hộp fps trái / phải tại chỗ, tính bằng độ (+ = mặt quay "
-"sang phải). Dùng để chỉnh góc khi hộp nằm lệch sang bên. 0 = hướng về bạn. Không tốn."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
-"lying on the dashboard). 0 = it faces you. No cost."
-msgstr ""
-"Chỉ VR nên mờ đi ở màn hình phẳng. Nghiêng hộp fps, tính bằng độ (+ = đỉnh ngả ra xa bạn, như nằm "
-"trên bảng đồng hồ). 0 = hướng về bạn. Không tốn."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
-"upright. No cost."
-msgstr ""
-"Chỉ VR nên mờ đi ở màn hình phẳng. Xoay hộp fps trong mặt phẳng của nó, tính bằng độ (+ = theo "
-"chiều kim đồng hồ). 0 = thẳng đứng. Không tốn."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -810,6 +583,66 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
+"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
+"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
+"Per-part motion vectors). No cost."
+msgstr ""
+"Chỉ VR. Theo đầu = di chuyển theo kính. Cố định trong không gian chơi = một chỗ quanh ghế, bỏ qua "
+"độ lắc của cabin. Gắn vào xe = dính vào cabin, lắc theo (cần DLAA + Vector chuyển động từng bộ "
+"phận). Không tốn."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
+"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
+"for every vehicle. No cost."
+msgstr ""
+"Chỉ VR, khi Gắn vào xe. Bật = mỗi xe tải / ô tô giữ riêng chỗ hộp fps trong cabin, độ xoay, kích "
+"thước, màu, độ sáng và chữ (lưu vào dlaa.ini khi đóng menu). Tắt = một bộ chung cho mọi xe. Không "
+"tốn."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
+"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
+"vehicles keep theirs. The box is square to the cab."
+msgstr ""
+"Chỉ VR, khi Gắn vào xe. Phải = đo lại cabin ngay (ngồi yên, xe đỗ) nếu hộp lệch chỗ. Trái = hộp "
+"của xe này về mặc định (chỗ, xoay, kích thước, màu, chữ); xe khác giữ nguyên. Hộp vuông góc với "
+"cabin."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
+"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
+msgstr ""
+"Chỉ VR nên mờ đi ở màn hình phẳng. Xoay hộp fps trái / phải tại chỗ, tính bằng độ (+ = mặt quay "
+"sang phải). Dùng để chỉnh góc khi hộp nằm lệch sang bên. 0 = hướng về bạn. Không tốn."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
+"lying on the dashboard). 0 = it faces you. No cost."
+msgstr ""
+"Chỉ VR nên mờ đi ở màn hình phẳng. Nghiêng hộp fps, tính bằng độ (+ = đỉnh ngả ra xa bạn, như nằm "
+"trên bảng đồng hồ). 0 = hướng về bạn. Không tốn."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
+"upright. No cost."
+msgstr ""
+"Chỉ VR nên mờ đi ở màn hình phẳng. Xoay hộp fps trong mặt phẳng của nó, tính bằng độ (+ = theo "
+"chiều kim đồng hồ). 0 = thẳng đứng. Không tốn."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
 "VR only, so greyed in flat. How far away the fps box floats, 0.30 - 3.00 m. It keeps the same "
 "size in your view at every distance; only the depth changes. Put it near the depth you look at to "
 "read it without refocusing. No cost."
@@ -817,6 +650,174 @@ msgstr ""
 "Chỉ VR nên mờ đi ở màn hình phẳng. Hộp fps nổi cách bao xa, 0,30 - 3,00 m. Giữ cùng kích thước "
 "trong tầm nhìn ở mọi khoảng cách; chỉ đổi độ sâu. Đặt gần độ sâu bạn đang nhìn để đọc không phải "
 "lấy nét lại. Không tốn."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
+"it; it starts closed every time the menu opens."
+msgstr ""
+"Vị trí, kích thước, độ sâu, hướng của bảng và các phím menu. Phải mở nhóm, Trái đóng; mỗi lần mở "
+"menu nhóm luôn đóng sẵn."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
+"and VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr ""
+"Dịch bảng này sang ngang, theo % màn hình (VR cố định trong cabin: độ quanh ghế). Phẳng và VR nhớ "
+"vị trí riêng. Dùng nếu bảng che thứ bạn cần. Không tốn."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
+"VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr ""
+"Dịch bảng này lên / xuống, theo % màn hình (VR cố định trong cabin: độ, dương = xuống). Phẳng và "
+"VR nhớ vị trí riêng. Dùng nếu bảng che thứ bạn cần. Không tốn."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
+"much. Flat and VR each keep their own size. No cost."
+msgstr ""
+"Làm bảng này to hơn hoặc nhỏ hơn. Tăng nếu không đọc được, giảm nếu che quá nhiều. Phẳng và VR "
+"nhớ kích thước riêng. Không tốn."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
+"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
+"metres). Needs the VR layer (default). No cost."
+msgstr ""
+"Chỉ VR. Theo đầu = bảng di chuyển theo kính. Cố định trong cabin = ở một chỗ trước ghế, ổn định "
+"khi bạn nhìn quanh; X / Y / độ sâu đặt chỗ đó (độ, mét). Cần lớp VR (mặc định). Không tốn."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
+"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
+"Change it if the panel is tiring to look at. No cost."
+msgstr ""
+"Chỉ VR nên mờ đi ở màn hình phẳng. Bảng nổi cách bao xa: tính bằng mét (0,30 - 3,00) khi là lớp "
+"VR, mặc định; bằng px dịch vào trong mỗi mắt khi menu_vr_layer = 0. Cùng kích thước ở mọi độ sâu. "
+"Đổi nếu nhìn bảng mỏi mắt. Không tốn."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
+"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
+"picture. No cost."
+msgstr ""
+"Chỉ VR nên mờ đi ở màn hình phẳng. Bật = bảng quay mặt về phía bạn khi dời sang bên, cùng kích "
+"thước từ mọi góc (khi là lớp VR, mặc định, hộp fps theo đầu cũng vậy); tắt = hình phẳng. Không "
+"tốn."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches for A/B checks: DLAA off, the game's own TAA mixed in or side by side, the thin-wire "
+"switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
+"group, Left closes it."
+msgstr ""
+"Công tắc cho kiểm tra A/B: DLAA tắt, TAA riêng của game trộn vào hoặc đặt cạnh nhau, các công "
+"tắc dây mảnh, DLAA trước tonemap. Không cái nào ở đây cần cho việc lái xe bình thường. Phải "
+"mở nhóm, Trái đóng."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
+"comparing. Off saves the cost of every part together."
+msgstr ""
+"Bật hoặc tắt toàn bộ mod và giữ chế độ; tắt hiện hình gốc của game, để so sánh. Tắt tiết kiệm chi "
+"phí của mọi phần cộng lại."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
+msgstr ""
+"Chỉ khi Khử răng cưa của game đặt ở TAA. tắt = chỉ mod (đặt AA của game là Tắt). trộn = TAA và "
+"DLAA / DLSS trên cùng một khung hình, hòa trộn. chia đôi = bên trái mod, bên phải TAA, để so sánh."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
+msgstr ""
+"TAA của game chiếm bao nhiêu trong phần trộn, 0 - 100 % theo bước 10 %: nhiều hơn = êm và mềm hơn "
+"(TAA), ít hơn = nét hơn (DLAA / DLSS). Dùng khi TAA của game là trộn, hoặc chia đôi có một bên "
+"trộn. Không tốn thêm."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+"Vị trí đường chia của TAA của game ở chế độ chia đôi, 0 - 100 % chiều rộng theo bước 5 %: bên "
+"trái là DLAA / DLSS của mod, bên phải là TAA của game. Chỉ dùng khi TAA của game là chia đôi."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"TAA của game ở chế độ chia đôi hiển thị gì ở hai bên: DLAA | TAA (bên trái mod, bên phải TAA của "
+"game), trộn | TAA hoặc DLAA | trộn (trộn = hai thứ hòa trộn theo Tỉ lệ TAA của game). DLSS thay "
+"cho DLAA khi nâng độ phân giải. Chỉ dùng khi TAA của game là chia đôi."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
+"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
+"soft for a moment when it changes."
+msgstr ""
+"Dây mảnh giữ chuyển động khi bạn lái: DLAA lan dữ liệu chuyển động ra các đường mảnh (DLSS motion "
+"dilation). bật = mặc định. tắt = chỉ để so sánh; dây gần nhấp nháy hơn. Hình hơi mềm một lúc khi "
+"đổi."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
+"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
+msgstr ""
+"Dây mảnh có độ sâu trên mọi điểm ảnh chúng chạm, không chỉ nơi phủ tâm điểm ảnh. bật = mặc định. "
+"bật (không A2C) = cả cho viền xuyên thấu. tắt = chỉ để so sánh; dây gần nhấp nháy hơn."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
+"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+msgstr ""
+"Thử nghiệm: vẽ dây xa mảnh hơn 1 điểm ảnh thành đường 1 điểm ảnh, để không đứt thành nét rời. Mặc "
+"định tắt: dây xa có thể tối hơn hoặc nhấp nháy hơn. Hãy thử và so sánh."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
+"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
+"~60 frames to switch."
+msgstr ""
+"Chỉ màn hình phẳng: DLAA trước bloom / tonemap của game, nên vạch kẻ đường, dây điện và đường ray "
+"ít nhấp nháy hơn. Chỉ đổi để so sánh. Không dùng với DLSS nâng độ phân giải hoặc Windows HDR. Tốn "
+"như nhau; mất khoảng 60 khung để chuyển."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1028,11 +1029,6 @@ msgstr "tắt"
 msgid "same"
 msgstr "giống"
 
-#. Cost column cell (about 10 Latin characters)
-#: src/inject.cpp
-msgid "no extra"
-msgstr "không thêm"
-
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
@@ -1175,7 +1171,7 @@ msgstr "Mờ trong VR: VR luôn chạy DLAA trên hình hoàn chỉnh."
 #: src/inject.cpp
 #, c-format
 msgid "Greyed: VR only."
-msgstr ""
+msgstr "Mờ: chỉ VR."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1184,12 +1180,14 @@ msgid ""
 "Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
 "game is closed."
 msgstr ""
+"Mờ: console của game đang tắt. Đặt g_developer và g_console thành \"1\" trong config.cfg khi "
+"game đã đóng."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Sending to the game's console..."
-msgstr ""
+msgstr "Đang gửi tới console của game..."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1442,18 +1440,6 @@ msgstr "Không có: runtime VR này không báo vùng ẩn."
 #, c-format
 msgid "Off now: every pixel is drawn."
 msgstr "Đang tắt: mọi điểm ảnh đều được vẽ."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now (the mod is off)."
-msgstr "Đang tắt (mod đang tắt)."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-msgstr "Đang tắt: dưới Scaling 100 %% dùng cách kéo giãn của chính game."
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2045,6 +2031,11 @@ msgstr "Sửa bóng mờ quầng đèn"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "DLAA off to compare (not saved)"
+msgstr "DLAA tắt (không lưu)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Game TAA"
 msgstr "TAA của game"
 
@@ -2114,62 +2105,62 @@ msgstr "VectorXR (lớp VR)"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Layout"
-msgstr ""
+msgstr "Bố cục"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "driving"
-msgstr ""
+msgstr "lái xe"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "menus"
-msgstr ""
+msgstr "menu"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Height"
-msgstr ""
+msgstr "Độ cao"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Side"
-msgstr ""
+msgstr "Bên"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Distance"
-msgstr ""
+msgstr "Khoảng cách"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Tilt"
-msgstr ""
+msgstr "Độ nghiêng"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Turn"
-msgstr ""
+msgstr "Xoay"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Size"
-msgstr ""
+msgstr "Kích thước"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Curve"
-msgstr ""
+msgstr "Độ cong"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Reset to config.cfg"
-msgstr ""
+msgstr "Về lại config.cfg"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Right"
-msgstr ""
+msgstr "Phải"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2353,6 +2344,11 @@ msgstr "tự động (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel settings"
+msgstr "Cài đặt bảng menu"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Panel lock (VR)"
 msgstr "Khóa bảng (VR)"
 
@@ -2413,15 +2409,15 @@ msgstr "Bảng quay về bạn (VR)"
 msgid "Menu keys"
 msgstr "Phím menu"
 
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter"
-msgstr "Bộ đếm FPS"
-
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "Off"
 msgstr "Tắt"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS counter settings"
+msgstr "Cài đặt bộ đếm FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2609,4 +2605,31 @@ msgstr "thông tin"
 #: src/log.h
 msgid "debug"
 msgstr "gỡ lỗi"
+
+#~ msgid "Upscaling and VR"
+#~ msgstr "Upscale và VR"
+
+#~ msgid "Frame rate and CPU"
+#~ msgstr "Tốc độ khung hình và CPU"
+
+#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "DLSS nâng độ phân giải, công tắc DLAA bật / tắt và thông tin OFXR Bridge / VectorXR. Phải mở nhóm, Trái đóng; mỗi lần mở menu nhóm luôn đóng sẵn."
+
+#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
+#~ msgstr "DLSS vẽ lại hình về kích thước đầy đủ khi Scaling của game dưới 100 %: nét hơn cách kéo giãn của game, và ít điểm ảnh hơn nên fps cao hơn. Không tốn thêm; không làm gì ở Scaling 100 %."
+
+#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "Tăng tốc VR: Turbo, foveated rendering và mặt nạ vùng ẩn. Phải mở nhóm, Trái đóng; mỗi lần mở menu nhóm luôn đóng sẵn."
+
+#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "Giới hạn tốc độ khung hình và CPU: NVIDIA Reflex và giới hạn FPS cho màn hình phẳng, giới hạn FPS VR, tinh chỉnh CPU. Phải mở nhóm, Trái đóng; mỗi lần mở menu nhóm luôn đóng sẵn."
+
+#~ msgid "no extra"
+#~ msgstr "không thêm"
+
+#~ msgid "Off now (the mod is off)."
+#~ msgstr "Đang tắt (mod đang tắt)."
+
+#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
+#~ msgstr "Đang tắt: dưới Scaling 100 %% dùng cách kéo giãn của chính game."
 

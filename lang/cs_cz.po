@@ -130,13 +130,8 @@ msgstr "Pohyb a zrcátka"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Upscaling and VR"
-msgstr "Škálování a VR"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "In-game UI (VR)"
-msgstr ""
+msgid "Frame rate"
+msgstr "Snímková frekvence"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -145,18 +140,23 @@ msgstr "Výkon VR"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Frame rate and CPU"
-msgstr "Snímky a CPU"
+msgid "In-game UI (VR)"
+msgstr "UI hry (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Nastavení panelu"
+msgid "FPS counter"
+msgstr "Počítadlo FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "Nastavení počítadla FPS"
+msgid "Menu panel"
+msgstr "Panel nabídky"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Compare and test"
+msgstr "Srovnání a test"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -242,28 +242,6 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower "
-"it to afford a heavier model or win frame rate; 40 % costs about 40 % of the model. Also sets the "
-"garage / main-menu truck."
-msgstr ""
-"VR: DLAA dostane jen střed každého oka (20 až 100 %); okraj zůstane s obrazem hry. Snižte pro "
-"těžší model nebo vyšší fps; 40 % stojí asi 40 % modelu. Nastavuje také náklaďák v garáži / "
-"hlavním menu."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
-"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
-"~60 frames to switch."
-msgstr ""
-"Jen plochý režim: DLAA před bloomem / tonemappingem hry, takže čáry na silnici, dráty a koleje "
-"blikají méně. Měňte jen pro srovnání. Nepoužije se s DLSS škálováním ani Windows HDR. Stejná "
-"cena; přepnutí trvá asi 60 snímků."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
 "Gives wires, fences and glass their own distance instead of what is behind them, so they do not "
 "smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."
 msgstr ""
@@ -280,6 +258,17 @@ msgstr ""
 "Zabraňuje, aby záře pouličních lamp a světel aut při pohybu táhla stopu: DLSS bere každou záři z "
 "aktuálního snímku, ne z historie. Kroky po 25 %; snižte, když záře blikají, 0 = vyp. Stojí asi "
 "0,05 - 0,2 ms na oko."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower "
+"it to afford a heavier model or win frame rate; 40 % costs about 40 % of the model. Also sets the "
+"garage / main-menu truck."
+msgstr ""
+"VR: DLAA dostane jen střed každého oka (20 až 100 %); okraj zůstane s obrazem hry. Snižte pro "
+"těžší model nebo vyšší fps; 40 % stojí asi 40 % modelu. Nastavuje také náklaďák v garáži / "
+"hlavním menu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -326,160 +315,64 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
-"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
-"soft for a moment when it changes."
+"Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
+"the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Tenké dráty při jízdě udrží pohyb: DLAA rozprostře data pohybu na tenké čáry (dilatace pohybu "
-"DLSS). zap. = výchozí. vyp. = jen pro srovnání; blízké dráty blikají víc. Při změně je obraz na "
-"chvíli měkký."
+"Snímková frekvence a CPU: ladění CPU, limit FPS a NVIDIA Reflex pro plochý režim, limit FPS "
+"pro VR. Doprava skupinu otevře, Doleva zavře; při každém otevření menu je zavřená."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
-"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
+"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
+"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
+"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
+"cpu_pcore, cpu_priority, cpu_no_throttle."
 msgstr ""
-"Tenké dráty dostanou hloubku v každém pixelu, kterého se dotknou, ne jen tam, kde pokrývají střed "
-"pixelu. zap. = výchozí. zap. (bez A2C) = také pro průhledné hrany. vyp. = jen pro srovnání; "
-"blízké dráty blikají víc."
+"Tři přepínače CPU dohromady: hlavní a renderovací vlákno preferují jádra P (jen hybridní CPU "
+"Intel), hra běží s prioritou Vyšší než normální a Windows ji nesmí škrtit (EcoQoS) ani ignorovat "
+"její požadavky na časovač. Pomáhá, když limituje CPU; bez ceny. Samostatná nastavení v dlaa.ini: "
+"cpu_pcore, cpu_priority, cpu_no_throttle."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
-"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
+"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
+"limiting. off = no limit."
 msgstr ""
-"Experimentální: vykreslí vzdálené dráty tenčí než 1 pixel jako čáru o 1 pixelu, aby se netrhaly "
-"na čárky. Výchozí vyp.: vzdálené dráty mohou vypadat tmavěji nebo blikat víc. Vyzkoušejte a "
-"porovnejte."
+"Jen plochý režim. Drží hru nanejvýš na této snímkové frekvenci: stálý čas snímku, méně tepla a "
+"energie. Nastavte kousek pod to, co váš PC drží v rušném městě. Se zapnutým Reflex limituje "
+"ovladač NVIDIA. vyp. = bez limitu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the "
-"group, Left closes it; it starts closed every time the menu opens."
+"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
+"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
 msgstr ""
-"Škálování DLSS, přepínač DLAA zap. / vyp. a informace o OFXR Bridge / VectorXR. Doprava skupinu "
-"otevře, Doleva zavře; při každém otevření menu je zavřená."
+"Jen plochý režim, jen NVIDIA. zap. = snímky hry čekají ve frontě GPU méně: menší zpoždění vstupu, "
+"když limituje GPU. Boost navíc drží vysoké takty GPU. Stejné fps; malá cena. Ve VR se nepoužije."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than "
-"the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at "
-"Scaling 100 %."
+"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
+"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
+"the fps swings. Turns Turbo off while on."
 msgstr ""
-"DLSS vykreslí obraz zpět na plnou velikost, když je Škálování hry pod 100 %: ostřeji než vlastní "
-"roztažení hry a méně pixelů znamená víc fps. Bez další ceny; při Škálování 100 % nic nedělá."
+"Jen VR. polovina = hra kreslí každý 2. snímek headsetu (72 Hz -> 36 fps), třetina = každý 3.; "
+"reprojekce headsetu (ASW / Motion Smoothing) doplní zbytek v rovnoměrném rytmu. Použijte, když "
+"fps kolísá. Po dobu zapnutí vypne Turbo."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
-"comparing. Off saves the cost of every part together."
+"VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
+"are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Zapne nebo vypne celý mod a zapamatuje si režim; vyp. ukáže obraz samotné hry pro srovnání. Vyp. "
-"ušetří cenu všech částí dohromady."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
-"right, to compare."
-msgstr ""
-"Jen když je vyhlazování hry nastaveno na TAA. vyp. = samotný mod (nastavte AA hry na Vypnuto). "
-"mix = TAA a DLAA / DLSS v jednom snímku, smíchané. rozděleno = vlevo mod, vpravo TAA, k porovnání."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
-msgstr ""
-"Jak velkou část mixu tvoří TAA hry, 0 - 100 % po 10 %: více = klidnější a měkčí (TAA), méně = "
-"ostřejší (DLAA / DLSS). Používá se při TAA hry = mix, nebo rozděleno se stranou mix. Bez dalších "
-"nákladů."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
-"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
-msgstr ""
-"Kde leží dělicí čára rozděleného TAA hry, 0 - 100 % šířky po 5 %: vlevo od ní DLAA / DLSS modu, "
-"vpravo TAA hry. Používá se jen při TAA hry = rozděleno."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
-"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
-"upscaling. Used only when Game TAA is split."
-msgstr ""
-"Co rozdělené TAA hry ukazuje na svých dvou stranách: DLAA | TAA (vlevo mod, vpravo TAA hry), mix "
-"| TAA nebo DLAA | mix (mix = obojí smíchané podle Podílu TAA hry). DLSS místo DLAA při škálování. "
-"Používá se jen při TAA hry = rozděleno."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"OFXR Bridge = VR frame generation by djules75, a separate download "
-"(github.com/djules75/OFXR-Bridge). found = its layer is loaded in this game and the mod lets its "
-"work pass through. Start its tray app before the game."
-msgstr ""
-"OFXR Bridge = generování snímků pro VR od djules75, samostatné stažení "
-"(github.com/djules75/OFXR-Bridge). nalezeno = jeho vrstva je v této hře načtena a mod nechává "
-"její práci projít. Spusťte jeho aplikaci v oznamovací oblasti před hrou."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, "
-"Depth, frame generation; found = its layer is loaded in the game and the mod lets its work pass "
-"through. Run only one Turbo (its or the mod's)."
-msgstr ""
-"VectorXR = sada vylepšení OpenXR od DienerTech (github.com/DienerTech/vectorxr): Turbo, hloubka, "
-"generování snímků; nalezeno = jeho vrstva je ve hře načtena a mod nechává její práci projít. "
-"Používejte jen jedno Turbo (jeho nebo modu)."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
-"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
-"(the game's menu screens)."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
-"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
-"own values when it exits)."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left "
-"closes it; it starts closed every time the menu opens."
-msgstr ""
-"Zrychlení VR: Turbo, foveated rendering a maska skryté oblasti. Doprava skupinu otevře, Doleva "
-"zavře; při každém otevření menu je zavřená."
+"Zrychlení VR: Turbo, foveated rendering, maska skryté oblasti a zda jsou nalezeny OFXR Bridge "
+"/ VectorXR. Doprava skupinu otevře, Doleva zavře; při každém otevření menu je zavřená."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -561,124 +454,61 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
+"OFXR Bridge = VR frame generation by djules75, a separate download "
+"(github.com/djules75/OFXR-Bridge). found = its layer is loaded in this game and the mod lets its "
+"work pass through. Start its tray app before the game."
 msgstr ""
-"Limity snímků a CPU: NVIDIA Reflex a limit FPS pro plochý režim, limit FPS pro VR, ladění CPU. "
-"Doprava skupinu otevře, Doleva zavře; při každém otevření menu je zavřená."
+"OFXR Bridge = generování snímků pro VR od djules75, samostatné stažení "
+"(github.com/djules75/OFXR-Bridge). nalezeno = jeho vrstva je v této hře načtena a mod nechává "
+"její práci projít. Spusťte jeho aplikaci v oznamovací oblasti před hrou."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
-"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
+"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, "
+"Depth, frame generation; found = its layer is loaded in the game and the mod lets its work pass "
+"through. Run only one Turbo (its or the mod's)."
 msgstr ""
-"Jen plochý režim, jen NVIDIA. zap. = snímky hry čekají ve frontě GPU méně: menší zpoždění vstupu, "
-"když limituje GPU. Boost navíc drží vysoké takty GPU. Stejné fps; malá cena. Ve VR se nepoužije."
+"VectorXR = sada vylepšení OpenXR od DienerTech (github.com/DienerTech/vectorxr): Turbo, hloubka, "
+"generování snímků; nalezeno = jeho vrstva je ve hře načtena a mod nechává její práci projít. "
+"Používejte jen jedno Turbo (jeho nebo modu)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
-"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
-"limiting. off = no limit."
+"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
+"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"Jen plochý režim. Drží hru nanejvýš na této snímkové frekvenci: stálý čas snímku, méně tepla a "
-"energie. Nastavte kousek pod to, co váš PC drží v rušném městě. Se zapnutým Reflex limituje "
-"ovladač NVIDIA. vyp. = bez limitu."
+"Kde se vznáší vlastní VR rozhraní hry (HUD, nabídky). Mod zadá změnu do konzole hry za vás; "
+"potřebuje g_developer a g_console 1 v config.cfg. Doprava skupinu otevře, Doleva zavře."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
-"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
-"the fps swings. Turns Turbo off while on."
+"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
+"(the game's menu screens)."
 msgstr ""
-"Jen VR. polovina = hra kreslí každý 2. snímek headsetu (72 Hz -> 36 fps), třetina = každý 3.; "
-"reprojekce headsetu (ASW / Motion Smoothing) doplní zbytek v rovnoměrném rytmu. Použijte, když "
-"fps kolísá. Po dobu zapnutí vypne Turbo."
+"Které z rozvržení VR rozhraní hry řádky níže posouvají: jízda (HUD při jízdě) nebo nabídky "
+"(obrazovky nabídek hry)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
-"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
-"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
+"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
+"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
-"Tři přepínače CPU dohromady: hlavní a renderovací vlákno preferují jádra P (jen hybridní CPU "
-"Intel), hra běží s prioritou Vyšší než normální a Windows ji nesmí škrtit (EcoQoS) ani ignorovat "
-"její požadavky na časovač. Pomáhá, když limituje CPU; bez ceny. Samostatná nastavení v dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
+"Posouvá VR rozhraní hry: výšku, stranu, vzdálenost, náklon, otočení, velikost nebo zakřivení, "
+"po malých krocích. Hra dostane každou změnu asi 0,4 s po posledním stisku: konzole se otevře "
+"a zavře sama."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
-"it; it starts closed every time the menu opens."
+"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
+"own values when it exits)."
 msgstr ""
-"Poloha, velikost, hloubka a natočení panelu a klávesy menu. Doprava skupinu otevře, Doleva zavře; "
-"při každém otevření menu je zavřená."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
-"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
-"metres). Needs the VR layer (default). No cost."
-msgstr ""
-"Jen VR. Za hlavou = panel se hýbe s headsetem. Pevný v kabině = zůstane na jednom místě před "
-"sedačkou, stabilní při rozhlížení; X / Y / hloubka pak toto místo nastaví (stupně, metry). "
-"Vyžaduje vrstvu VR (výchozí). Bez ceny."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
-"and VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr ""
-"Posouvá panel do stran, v % obrazovky (VR pevný v kabině: stupně kolem sedačky). Plochý režim a "
-"VR mají každý svou polohu. Použijte, když panel zakrývá něco, co potřebujete. Bez ceny."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
-"VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr ""
-"Posouvá panel nahoru / dolů, v % obrazovky (VR pevný v kabině: stupně, plus = dolů). Plochý režim "
-"a VR mají každý svou polohu. Použijte, když panel zakrývá něco, co potřebujete. Bez ceny."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
-"much. Flat and VR each keep their own size. No cost."
-msgstr ""
-"Zvětší nebo zmenší panel. Zvyšte, když ho nepřečtete, snižte, když zakrývá příliš. Plochý režim a "
-"VR mají každý svou velikost. Bez ceny."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
-"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
-"Change it if the panel is tiring to look at. No cost."
-msgstr ""
-"Jen VR, proto v plochém režimu šedé. Jak daleko panel plave: v metrech (0,30 - 3,00) jako vrstva "
-"VR, výchozí; v px posunu dovnitř na oko s menu_vr_layer = 0. Stejná velikost v každé hloubce. "
-"Změňte, když je pohled na panel namáhavý. Bez ceny."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
-"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
-"picture. No cost."
-msgstr ""
-"Jen VR, proto v plochém režimu šedé. zap. = panel se otočí k vám, když ho posunete do strany, "
-"stejná velikost z každého úhlu (jako vrstva VR, výchozí, také box fps sledující hlavu); vyp. = "
-"plochý obraz. Bez ceny."
+"Doprava: všechny hodnoty obou rozvržení zpět na to, co měl config.cfg na začátku (hra si své "
+"hodnoty ukládá při ukončení)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -703,39 +533,6 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
-"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
-"Per-part motion vectors). No cost."
-msgstr ""
-"Jen VR. Za hlavou = hýbe se s headsetem. Pevný v herním prostoru = jedno místo kolem sedačky, "
-"ignoruje houpání kabiny. Připojený k vozidlu = přilepený ke kabině, houpe se s ní (vyžaduje DLAA "
-"+ vektory pohybu dílů). Bez ceny."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
-"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
-"for every vehicle. No cost."
-msgstr ""
-"VR, jen Připojený k vozidlu. zap. = každý náklaďák / auto má vlastní místo boxu fps v kabině, "
-"natočení, velikost, barvu, jas a text (uloženo v dlaa.ini při zavření menu). vyp. = jedna "
-"společná sada pro všechna vozidla. Bez ceny."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
-"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
-"vehicles keep theirs. The box is square to the cab."
-msgstr ""
-"VR, jen Připojený k vozidlu. Doprava = znovu změřit kabinu hned (seďte v klidu, zaparkovaní), "
-"když box sedí vedle. Doleva = box tohoto vozidla zpět na výchozí (místo, natočení, velikost, "
-"barva, text); ostatní vozidla si ponechají svá. Box je kolmý ke kabině."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
 "Moves the fps box sideways, in % of the screen (VR fixed / attached: degrees around you). Flat "
 "and VR each keep their own position. No cost."
 msgstr ""
@@ -750,34 +547,6 @@ msgid ""
 msgstr ""
 "Posouvá box fps nahoru / dolů, v % obrazovky (VR pevný / připojený: stupně, mínus = nahoru). "
 "Plochý režim a VR mají každý svou polohu. Bez ceny."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
-"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
-msgstr ""
-"Jen VR, proto v plochém režimu šedé. Otáčí box fps doleva / doprava kolem vlastní osy, ve "
-"stupních (+ = jeho přední strana se otáčí doprava). Použijte k natočení boxu, když je u okraje. 0 "
-"= míří na vás. Bez ceny."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
-"lying on the dashboard). 0 = it faces you. No cost."
-msgstr ""
-"Jen VR, proto v plochém režimu šedé. Naklání box fps, ve stupních (+ = jeho horní okraj se "
-"odklání od vás, jako by ležel na palubní desce). 0 = míří na vás. Bez ceny."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
-"upright. No cost."
-msgstr ""
-"Jen VR, proto v plochém režimu šedé. Otáčí box fps ve vlastní rovině, ve stupních (+ = po směru "
-"hodinových ručiček). 0 = rovně. Bez ceny."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -819,6 +588,67 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
+"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
+"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
+"Per-part motion vectors). No cost."
+msgstr ""
+"Jen VR. Za hlavou = hýbe se s headsetem. Pevný v herním prostoru = jedno místo kolem sedačky, "
+"ignoruje houpání kabiny. Připojený k vozidlu = přilepený ke kabině, houpe se s ní (vyžaduje DLAA "
+"+ vektory pohybu dílů). Bez ceny."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
+"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
+"for every vehicle. No cost."
+msgstr ""
+"VR, jen Připojený k vozidlu. zap. = každý náklaďák / auto má vlastní místo boxu fps v kabině, "
+"natočení, velikost, barvu, jas a text (uloženo v dlaa.ini při zavření menu). vyp. = jedna "
+"společná sada pro všechna vozidla. Bez ceny."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
+"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
+"vehicles keep theirs. The box is square to the cab."
+msgstr ""
+"VR, jen Připojený k vozidlu. Doprava = znovu změřit kabinu hned (seďte v klidu, zaparkovaní), "
+"když box sedí vedle. Doleva = box tohoto vozidla zpět na výchozí (místo, natočení, velikost, "
+"barva, text); ostatní vozidla si ponechají svá. Box je kolmý ke kabině."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
+"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
+msgstr ""
+"Jen VR, proto v plochém režimu šedé. Otáčí box fps doleva / doprava kolem vlastní osy, ve "
+"stupních (+ = jeho přední strana se otáčí doprava). Použijte k natočení boxu, když je u okraje. 0 "
+"= míří na vás. Bez ceny."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
+"lying on the dashboard). 0 = it faces you. No cost."
+msgstr ""
+"Jen VR, proto v plochém režimu šedé. Naklání box fps, ve stupních (+ = jeho horní okraj se "
+"odklání od vás, jako by ležel na palubní desce). 0 = míří na vás. Bez ceny."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
+"upright. No cost."
+msgstr ""
+"Jen VR, proto v plochém režimu šedé. Otáčí box fps ve vlastní rovině, ve stupních (+ = po směru "
+"hodinových ručiček). 0 = rovně. Bez ceny."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
 "VR only, so greyed in flat. How far away the fps box floats, 0.30 - 3.00 m. It keeps the same "
 "size in your view at every distance; only the depth changes. Put it near the depth you look at to "
 "read it without refocusing. No cost."
@@ -826,6 +656,177 @@ msgstr ""
 "Jen VR, proto v plochém režimu šedé. Jak daleko box fps plave, 0,30 - 3,00 m. Zachovává stejnou "
 "velikost v záběru při každé vzdálenosti; mění se jen hloubka. Dejte ho blízko hloubky, na kterou "
 "se díváte, abyste ho přečetli bez zaostřování. Bez ceny."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
+"it; it starts closed every time the menu opens."
+msgstr ""
+"Poloha, velikost, hloubka a natočení panelu a klávesy menu. Doprava skupinu otevře, Doleva zavře; "
+"při každém otevření menu je zavřená."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
+"and VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr ""
+"Posouvá panel do stran, v % obrazovky (VR pevný v kabině: stupně kolem sedačky). Plochý režim a "
+"VR mají každý svou polohu. Použijte, když panel zakrývá něco, co potřebujete. Bez ceny."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
+"VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr ""
+"Posouvá panel nahoru / dolů, v % obrazovky (VR pevný v kabině: stupně, plus = dolů). Plochý režim "
+"a VR mají každý svou polohu. Použijte, když panel zakrývá něco, co potřebujete. Bez ceny."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
+"much. Flat and VR each keep their own size. No cost."
+msgstr ""
+"Zvětší nebo zmenší panel. Zvyšte, když ho nepřečtete, snižte, když zakrývá příliš. Plochý režim a "
+"VR mají každý svou velikost. Bez ceny."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
+"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
+"metres). Needs the VR layer (default). No cost."
+msgstr ""
+"Jen VR. Za hlavou = panel se hýbe s headsetem. Pevný v kabině = zůstane na jednom místě před "
+"sedačkou, stabilní při rozhlížení; X / Y / hloubka pak toto místo nastaví (stupně, metry). "
+"Vyžaduje vrstvu VR (výchozí). Bez ceny."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
+"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
+"Change it if the panel is tiring to look at. No cost."
+msgstr ""
+"Jen VR, proto v plochém režimu šedé. Jak daleko panel plave: v metrech (0,30 - 3,00) jako vrstva "
+"VR, výchozí; v px posunu dovnitř na oko s menu_vr_layer = 0. Stejná velikost v každé hloubce. "
+"Změňte, když je pohled na panel namáhavý. Bez ceny."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
+"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
+"picture. No cost."
+msgstr ""
+"Jen VR, proto v plochém režimu šedé. zap. = panel se otočí k vám, když ho posunete do strany, "
+"stejná velikost z každého úhlu (jako vrstva VR, výchozí, také box fps sledující hlavu); vyp. = "
+"plochý obraz. Bez ceny."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches for A/B checks: DLAA off, the game's own TAA mixed in or side by side, the thin-wire "
+"switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
+"group, Left closes it."
+msgstr ""
+"Přepínače pro kontroly A/B: DLAA vyp., vlastní TAA hry přimíchané nebo vedle sebe, přepínače "
+"tenkých drátů, DLAA před tonemap. Nic z toho není potřeba pro běžnou jízdu. Doprava skupinu "
+"otevře, Doleva zavře."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
+"comparing. Off saves the cost of every part together."
+msgstr ""
+"Zapne nebo vypne celý mod a zapamatuje si režim; vyp. ukáže obraz samotné hry pro srovnání. Vyp. "
+"ušetří cenu všech částí dohromady."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
+msgstr ""
+"Jen když je vyhlazování hry nastaveno na TAA. vyp. = samotný mod (nastavte AA hry na Vypnuto). "
+"mix = TAA a DLAA / DLSS v jednom snímku, smíchané. rozděleno = vlevo mod, vpravo TAA, k porovnání."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
+msgstr ""
+"Jak velkou část mixu tvoří TAA hry, 0 - 100 % po 10 %: více = klidnější a měkčí (TAA), méně = "
+"ostřejší (DLAA / DLSS). Používá se při TAA hry = mix, nebo rozděleno se stranou mix. Bez dalších "
+"nákladů."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+"Kde leží dělicí čára rozděleného TAA hry, 0 - 100 % šířky po 5 %: vlevo od ní DLAA / DLSS modu, "
+"vpravo TAA hry. Používá se jen při TAA hry = rozděleno."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"Co rozdělené TAA hry ukazuje na svých dvou stranách: DLAA | TAA (vlevo mod, vpravo TAA hry), mix "
+"| TAA nebo DLAA | mix (mix = obojí smíchané podle Podílu TAA hry). DLSS místo DLAA při škálování. "
+"Používá se jen při TAA hry = rozděleno."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
+"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
+"soft for a moment when it changes."
+msgstr ""
+"Tenké dráty při jízdě udrží pohyb: DLAA rozprostře data pohybu na tenké čáry (dilatace pohybu "
+"DLSS). zap. = výchozí. vyp. = jen pro srovnání; blízké dráty blikají víc. Při změně je obraz na "
+"chvíli měkký."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
+"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
+msgstr ""
+"Tenké dráty dostanou hloubku v každém pixelu, kterého se dotknou, ne jen tam, kde pokrývají střed "
+"pixelu. zap. = výchozí. zap. (bez A2C) = také pro průhledné hrany. vyp. = jen pro srovnání; "
+"blízké dráty blikají víc."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
+"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+msgstr ""
+"Experimentální: vykreslí vzdálené dráty tenčí než 1 pixel jako čáru o 1 pixelu, aby se netrhaly "
+"na čárky. Výchozí vyp.: vzdálené dráty mohou vypadat tmavěji nebo blikat víc. Vyzkoušejte a "
+"porovnejte."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
+"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
+"~60 frames to switch."
+msgstr ""
+"Jen plochý režim: DLAA před bloomem / tonemappingem hry, takže čáry na silnici, dráty a koleje "
+"blikají méně. Měňte jen pro srovnání. Nepoužije se s DLSS škálováním ani Windows HDR. Stejná "
+"cena; přepnutí trvá asi 60 snímků."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1039,11 +1040,6 @@ msgstr "vyp."
 msgid "same"
 msgstr "stejně"
 
-#. Cost column cell (about 10 Latin characters)
-#: src/inject.cpp
-msgid "no extra"
-msgstr "bez příplatku"
-
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
@@ -1186,7 +1182,7 @@ msgstr "Šedé ve VR: VR vždy spouští DLAA na hotovém obraze."
 #: src/inject.cpp
 #, c-format
 msgid "Greyed: VR only."
-msgstr ""
+msgstr "Šedé: jen VR."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1195,12 +1191,14 @@ msgid ""
 "Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
 "game is closed."
 msgstr ""
+"Šedé: konzole hry je vypnutá. Nastavte g_developer a g_console na \"1\" v config.cfg, když je "
+"hra zavřená."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Sending to the game's console..."
-msgstr ""
+msgstr "Odesílám do konzole hry..."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1454,18 +1452,6 @@ msgstr "Nedostupné: tento runtime VR nehlásí skrytou oblast."
 #, c-format
 msgid "Off now: every pixel is drawn."
 msgstr "Nyní vyp.: kreslí se každý pixel."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now (the mod is off)."
-msgstr "Nyní vyp. (mod je vyp.)."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-msgstr "Nyní vyp.: pod Škálováním 100 %% se používá roztažení hry."
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2058,6 +2044,11 @@ msgstr "Oprava duchů záře světel"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "DLAA off to compare (not saved)"
+msgstr "DLAA vyp. (neukládá se)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Game TAA"
 msgstr "TAA hry"
 
@@ -2127,62 +2118,62 @@ msgstr "VectorXR (vrstva VR)"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Layout"
-msgstr ""
+msgstr "Rozvržení"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "driving"
-msgstr ""
+msgstr "jízda"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "menus"
-msgstr ""
+msgstr "nabídky"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Height"
-msgstr ""
+msgstr "Výška"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Side"
-msgstr ""
+msgstr "Strana"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Distance"
-msgstr ""
+msgstr "Vzdálenost"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Tilt"
-msgstr ""
+msgstr "Náklon"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Turn"
-msgstr ""
+msgstr "Otočení"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Size"
-msgstr ""
+msgstr "Velikost"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Curve"
-msgstr ""
+msgstr "Zakřivení"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Reset to config.cfg"
-msgstr ""
+msgstr "Zpět na config.cfg"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Right"
-msgstr ""
+msgstr "Doprava"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2366,6 +2357,11 @@ msgstr "auto (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel settings"
+msgstr "Nastavení panelu"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Panel lock (VR)"
 msgstr "Zámek panelu (VR)"
 
@@ -2426,15 +2422,15 @@ msgstr "Panel k vám (VR)"
 msgid "Menu keys"
 msgstr "Klávesy menu"
 
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter"
-msgstr "Počítadlo FPS"
-
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "Off"
 msgstr "Vyp."
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS counter settings"
+msgstr "Nastavení počítadla FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2623,4 +2619,31 @@ msgstr "info"
 #: src/log.h
 msgid "debug"
 msgstr "ladění"
+
+#~ msgid "Upscaling and VR"
+#~ msgstr "Škálování a VR"
+
+#~ msgid "Frame rate and CPU"
+#~ msgstr "Snímky a CPU"
+
+#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "Škálování DLSS, přepínač DLAA zap. / vyp. a informace o OFXR Bridge / VectorXR. Doprava skupinu otevře, Doleva zavře; při každém otevření menu je zavřená."
+
+#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
+#~ msgstr "DLSS vykreslí obraz zpět na plnou velikost, když je Škálování hry pod 100 %: ostřeji než vlastní roztažení hry a méně pixelů znamená víc fps. Bez další ceny; při Škálování 100 % nic nedělá."
+
+#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "Zrychlení VR: Turbo, foveated rendering a maska skryté oblasti. Doprava skupinu otevře, Doleva zavře; při každém otevření menu je zavřená."
+
+#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "Limity snímků a CPU: NVIDIA Reflex a limit FPS pro plochý režim, limit FPS pro VR, ladění CPU. Doprava skupinu otevře, Doleva zavře; při každém otevření menu je zavřená."
+
+#~ msgid "no extra"
+#~ msgstr "bez příplatku"
+
+#~ msgid "Off now (the mod is off)."
+#~ msgstr "Nyní vyp. (mod je vyp.)."
+
+#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
+#~ msgstr "Nyní vyp.: pod Škálováním 100 %% se používá roztažení hry."
 

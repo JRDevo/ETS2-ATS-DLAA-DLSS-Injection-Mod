@@ -130,13 +130,8 @@ msgstr "動態與後照鏡"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Upscaling and VR"
-msgstr "升頻與VR"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "In-game UI (VR)"
-msgstr ""
+msgid "Frame rate"
+msgstr "幀率"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -145,18 +140,23 @@ msgstr "VR效能"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Frame rate and CPU"
-msgstr "幀率與CPU"
+msgid "In-game UI (VR)"
+msgstr "遊戲內UI (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "面板設定"
+msgid "FPS counter"
+msgstr "FPS計數器"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "FPS計數器設定"
+msgid "Menu panel"
+msgstr "選單面板"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Compare and test"
+msgstr "比較與測試"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -225,23 +225,6 @@ msgstr "對鐵絲網圍籬、草和樹葉鏤空材質同樣適用: 圍籬閃爍�
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower "
-"it to afford a heavier model or win frame rate; 40 % costs about 40 % of the model. Also sets the "
-"garage / main-menu truck."
-msgstr ""
-"VR: 只對每隻眼睛的中央部分做DLAA (20到100 %)，邊緣維持遊戲的畫面。調低可使用較重的模型或提升幀率；40 %約佔模型負擔的40 %。同時適用於車庫 / 主選單中的卡車。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
-"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
-"~60 frames to switch."
-msgstr "僅非VR: 在遊戲的泛光 / 色調對應之前做DLAA，使車道線、電線和鐵軌的閃爍更少。僅在比較時變更。DLSS升頻或Windows HDR下不使用。負擔相同；切換約需60個畫格。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
 "Gives wires, fences and glass their own distance instead of what is behind them, so they do not "
 "smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."
 msgstr "讓電線、圍籬和玻璃擁有自己的距離，而不是取其後方的距離，這樣移動時不會殘影。如果看不到殘影可以關閉: 每隻眼睛節省0.02 - 0.06 ms。"
@@ -253,6 +236,15 @@ msgid ""
 "glow from the current frame, not its history. 25 % steps; lower it if lamp glows flicker, 0 = "
 "off. Costs about 0.05 - 0.2 ms per eye."
 msgstr "防止移動時路燈和車燈的光暈留下拖尾: DLSS從目前畫格取光暈，而不是歷史畫格。以25 %為單位；燈光閃爍就調低，0 = 關。每隻眼睛約0.05 - 0.2 ms。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower "
+"it to afford a heavier model or win frame rate; 40 % costs about 40 % of the model. Also sets the "
+"garage / main-menu truck."
+msgstr ""
+"VR: 只對每隻眼睛的中央部分做DLAA (20到100 %)，邊緣維持遊戲的畫面。調低可使用較重的模型或提升幀率；40 %約佔模型負擔的40 %。同時適用於車庫 / 主選單中的卡車。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -290,135 +282,52 @@ msgstr "開 = 每面後照鏡每2個畫格做一次DLAA，中間顯示上一張�
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
-"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
-"soft for a moment when it changes."
-msgstr "行駛時細電線保持其動態: DLAA把動態資料擴散到細線上 (DLSS動態擴張)。開 = 預設。關 = 僅供比較，近處電線閃爍更多。切換時畫面會短暫變軟。"
+"Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
+"the group, Left closes it; it starts closed every time the menu opens."
+msgstr "幀率與CPU: CPU調校、非VR的FPS上限和NVIDIA Reflex、VR的FPS上限。按右鍵開啟群組，按左鍵關閉；每次開啟選單時都是關閉狀態。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
-"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
-msgstr "細電線在其接觸的每個像素上都有深度，而不只是覆蓋像素中心的地方。開 = 預設。開 (無A2C) = 鏤空邊緣也適用。關 = 僅供比較，近處電線閃爍更多。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
-"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
-msgstr "實驗性: 把比1像素更細的遠處電線畫成1像素的線，避免斷成虛線。預設關: 遠處電線可能更暗或閃爍更多。請試用並比較。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the "
-"group, Left closes it; it starts closed every time the menu opens."
-msgstr "DLSS升頻、DLAA開 / 關開關，以及OFXR Bridge / VectorXR資訊。按右鍵開啟群組，按左鍵關閉；每次開啟選單時都是關閉狀態。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than "
-"the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at "
-"Scaling 100 %."
-msgstr "當遊戲縮放低於100 %時，DLSS把畫面重新繪製到完整大小: 比遊戲內建的拉伸更銳利，繪製的像素更少，fps更高。無額外負擔；縮放100 %時不起作用。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
-"comparing. Off saves the cost of every part together."
-msgstr "開啟或關閉整個Mod並保留模式；關 = 遊戲原本的畫面，用於比較。關閉可省下所有部分的負擔。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
-"right, to compare."
-msgstr "僅當遊戲的反鋸齒為TAA時有效。關 = 僅Mod (將遊戲的AA設為停用)。混合 = 在同一影格中混合TAA與DLAA / DLSS。分割 = 左側Mod，右側TAA，用於比較。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
+"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
+"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
+"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
+"cpu_pcore, cpu_priority, cpu_no_throttle."
 msgstr ""
-"混合中遊戲TAA所佔比例，0 - 100 %，每步10 %: 越高 = 越穩定柔和 (TAA)，越低 = 越銳利 (DLAA / "
-"DLSS)。遊戲TAA為混合，或帶混合一側的分割時使用。沒有額外負擔。"
+"三個CPU開關合一: 主執行緒和算繪執行緒優先使用P-core (僅Intel混合架構CPU)，遊戲以高於正常的優先順序執行，Windows不得對其降速 (EcoQoS) "
+"或忽略其計時器要求。CPU是瓶頸時有幫助；無負擔。dlaa.ini中的獨立設定: cpu_pcore, cpu_priority, cpu_no_throttle。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
-"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
-msgstr "遊戲TAA分割線的位置 (佔寬度的0 - 100 %，每步5 %): 線左側為Mod的DLAA / DLSS，右側為遊戲的TAA。僅在遊戲TAA為分割時使用。"
+"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
+"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
+"limiting. off = no limit."
+msgstr "僅非VR。讓遊戲最高不超過此幀率: 畫格時間更穩定，發熱和耗電更低。設定得比你的電腦在繁忙城市能維持的值略低。開啟Reflex時由NVIDIA驅動程式負責限制。關 = 不限制。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
-"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
-"upscaling. Used only when Game TAA is split."
+"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
+"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
+msgstr "僅非VR，僅NVIDIA。開 = 遊戲畫格在GPU佇列中等待更少: GPU是瓶頸時輸入延遲更低。加速模式還會維持GPU時脈。fps相同；負擔小。VR中不使用。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
+"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
+"the fps swings. Turns Turbo off while on."
 msgstr ""
-"遊戲TAA分割在兩側顯示的內容: DLAA | TAA (左側Mod，右側遊戲的TAA)，混合 | TAA 或 DLAA | 混合 (混合 = "
-"按遊戲TAA佔比混合兩者)。升頻時用DLSS代替DLAA。僅在遊戲TAA為分割時使用。"
+"僅VR。1/2 = 遊戲每2個頭戴裝置畫格畫1格 (72 Hz -> 36 fps)，1/3 = 每3個畫1格；其餘由頭戴裝置的重投影 (ASW / Motion Smoothing) "
+"以穩定節奏補上。fps起伏時使用。開啟期間渦輪會關閉。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"OFXR Bridge = VR frame generation by djules75, a separate download "
-"(github.com/djules75/OFXR-Bridge). found = its layer is loaded in this game and the mod lets its "
-"work pass through. Start its tray app before the game."
-msgstr ""
-"OFXR Bridge = djules75的VR幀生成工具，需另外下載 (github.com/djules75/OFXR-Bridge)。已找到 = "
-"它的圖層已在本遊戲中載入，Mod讓它的工作直接通過。請在啟動遊戲前執行它的系統匣程式。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, "
-"Depth, frame generation; found = its layer is loaded in the game and the mod lets its work pass "
-"through. Run only one Turbo (its or the mod's)."
-msgstr ""
-"VectorXR = DienerTech的OpenXR增強套件 (github.com/DienerTech/vectorxr): 渦輪、深度、幀生成；已找到 = "
-"它的圖層已在遊戲中載入，Mod讓它的工作直接通過。渦輪只能用一個 (它的或Mod的)。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
-"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
-"(the game's menu screens)."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
-"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
-"own values when it exits)."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left "
-"closes it; it starts closed every time the menu opens."
-msgstr "VR加速: 渦輪模式、注視點算繪和隱藏區域遮罩。按右鍵開啟群組，按左鍵關閉；每次開啟選單時都是關閉狀態。"
+"VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
+"are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
+msgstr "VR加速: 渦輪模式、注視點算繪、隱藏區域遮罩，以及是否找到OFXR Bridge / VectorXR。按右鍵開啟群組，按左鍵關閉；每次開啟選單時都是關閉狀態。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -489,99 +398,52 @@ msgstr "僅VR。遊戲略過你永遠看不到的鏡片角落 (頭戴裝置會�
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
-msgstr "幀率限制與CPU: 非VR的NVIDIA Reflex和FPS上限、VR的FPS上限、CPU調校。按右鍵開啟群組，按左鍵關閉；每次開啟選單時都是關閉狀態。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
-"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
-msgstr "僅非VR，僅NVIDIA。開 = 遊戲畫格在GPU佇列中等待更少: GPU是瓶頸時輸入延遲更低。加速模式還會維持GPU時脈。fps相同；負擔小。VR中不使用。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
-"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
-"limiting. off = no limit."
-msgstr "僅非VR。讓遊戲最高不超過此幀率: 畫格時間更穩定，發熱和耗電更低。設定得比你的電腦在繁忙城市能維持的值略低。開啟Reflex時由NVIDIA驅動程式負責限制。關 = 不限制。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
-"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
-"the fps swings. Turns Turbo off while on."
+"OFXR Bridge = VR frame generation by djules75, a separate download "
+"(github.com/djules75/OFXR-Bridge). found = its layer is loaded in this game and the mod lets its "
+"work pass through. Start its tray app before the game."
 msgstr ""
-"僅VR。1/2 = 遊戲每2個頭戴裝置畫格畫1格 (72 Hz -> 36 fps)，1/3 = 每3個畫1格；其餘由頭戴裝置的重投影 (ASW / Motion Smoothing) "
-"以穩定節奏補上。fps起伏時使用。開啟期間渦輪會關閉。"
+"OFXR Bridge = djules75的VR幀生成工具，需另外下載 (github.com/djules75/OFXR-Bridge)。已找到 = "
+"它的圖層已在本遊戲中載入，Mod讓它的工作直接通過。請在啟動遊戲前執行它的系統匣程式。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
-"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
-"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
+"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, "
+"Depth, frame generation; found = its layer is loaded in the game and the mod lets its work pass "
+"through. Run only one Turbo (its or the mod's)."
 msgstr ""
-"三個CPU開關合一: 主執行緒和算繪執行緒優先使用P-core (僅Intel混合架構CPU)，遊戲以高於正常的優先順序執行，Windows不得對其降速 (EcoQoS) "
-"或忽略其計時器要求。CPU是瓶頸時有幫助；無負擔。dlaa.ini中的獨立設定: cpu_pcore, cpu_priority, cpu_no_throttle。"
+"VectorXR = DienerTech的OpenXR增強套件 (github.com/DienerTech/vectorxr): 渦輪、深度、幀生成；已找到 = "
+"它的圖層已在遊戲中載入，Mod讓它的工作直接通過。渦輪只能用一個 (它的或Mod的)。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
-"it; it starts closed every time the menu opens."
-msgstr "面板的位置、大小、深度、朝向和選單按鍵。按右鍵開啟群組，按左鍵關閉；每次開啟選單時都是關閉狀態。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
-"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
-"metres). Needs the VR layer (default). No cost."
-msgstr "僅VR。跟隨頭部 = 面板隨頭戴裝置移動。固定在駕駛艙 = 停在座椅前的一個位置，環顧四周時保持穩定；X / Y / 深度則設定該位置 (度、公尺)。需要VR圖層 (預設)。無負擔。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
-"and VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr "左右移動此面板，單位為螢幕的 % (VR固定在駕駛艙: 以座椅為中心的度數)。非VR和VR各自記住位置。面板擋住需要的內容時使用。無負擔。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
-"VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr "上下移動此面板，單位為螢幕的 % (VR固定在駕駛艙: 度數，正 = 向下)。非VR和VR各自記住位置。面板擋住需要的內容時使用。無負擔。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
-"much. Flat and VR each keep their own size. No cost."
-msgstr "放大或縮小此面板。看不清就調大，遮擋太多就調小。非VR和VR各自記住大小。無負擔。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
-"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
-"Change it if the panel is tiring to look at. No cost."
+"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
+"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"僅VR，所以在非VR中為灰色。面板懸浮的距離: 預設作為VR圖層時單位為公尺 (0.30 - 3.00)；menu_vr_layer = "
-"0時為每隻眼睛向內位移的px。任何深度下大小相同。看著累就更改。無負擔。"
+"遊戲內建VR介面 (HUD、選單) 浮動的位置。Mod會替你把變更輸入遊戲主控台；需要在config.cfg中設定g_developer和g_console "
+"1。按右鍵開啟群組，按左鍵關閉。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
-"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
-"picture. No cost."
-msgstr "僅VR，所以在非VR中為灰色。開 = 把面板移到一側時它會轉向你，從任何角度大小相同 (作為VR圖層，預設，跟隨頭部的fps框也一樣)；關 = 平面圖片。無負擔。"
+"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
+"(the game's menu screens)."
+msgstr "下方的列移動遊戲的哪種VR介面配置: 駕駛 (駕駛時的HUD) 或選單 (遊戲的選單畫面)。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
+"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
+msgstr "以小步移動遊戲的VR介面: 高度、左右、距離、傾斜、轉向、大小或弧度。遊戲在你最後一次按鍵後約0.4秒收到每次變更: 主控台會自動開啟並關閉。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
+"own values when it exits)."
+msgstr "右: 兩種配置的所有值恢復為開始時config.cfg中的值 (遊戲結束時會儲存自己的值)。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -601,31 +463,6 @@ msgstr "fps框的鎖定方式、位置、大小、顏色、VR距離和旋轉。�
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
-"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
-"Per-part motion vectors). No cost."
-msgstr "僅VR。跟隨頭部 = 隨頭戴裝置移動。固定在遊玩空間 = 座椅周圍的一個位置，忽略駕駛艙的晃動。附著於載具 = 貼在駕駛艙上並隨之晃動 (需要DLAA + 逐零件動態向量)。無負擔。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
-"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
-"for every vehicle. No cost."
-msgstr "僅VR、附著於載具時。開 = 每輛卡車 / 汽車在駕駛艙中各自保存fps框的位置、旋轉、大小、顏色、亮度和文字 (選單關閉時存入dlaa.ini)。關 = 所有載具共用一組。無負擔。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
-"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
-"vehicles keep theirs. The box is square to the cab."
-msgstr ""
-"僅VR、附著於載具時。右 = 如果框的位置不對，立即重新測量駕駛艙 (停好車、保持不動)。左 = 把此載具的框恢復預設 (位置、旋轉、大小、顏色、文字)；其他載具維持不變。框與駕駛艙保持垂直。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
 "Moves the fps box sideways, in % of the screen (VR fixed / attached: degrees around you). Flat "
 "and VR each keep their own position. No cost."
 msgstr "左右移動fps框，單位為螢幕的 % (VR固定 / 附著: 以你為中心的度數)。非VR和VR各自記住位置。無負擔。"
@@ -636,27 +473,6 @@ msgid ""
 "Moves the fps box up / down, in % of the screen (VR fixed / attached: degrees, minus = up). Flat "
 "and VR each keep their own position. No cost."
 msgstr "上下移動fps框，單位為螢幕的 % (VR固定 / 附著: 度數，負 = 向上)。非VR和VR各自記住位置。無負擔。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
-"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
-msgstr "僅VR，所以在非VR中為灰色。讓fps框原地左右轉動，單位為度 (+ = 正面轉向右側)。框在側邊時用它調整角度。0 = 正對你。無負擔。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
-"lying on the dashboard). 0 = it faces you. No cost."
-msgstr "僅VR，所以在非VR中為灰色。傾斜fps框，單位為度 (+ = 頂部向遠處傾倒，像平放在儀表板上)。0 = 正對你。無負擔。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
-"upright. No cost."
-msgstr "僅VR，所以在非VR中為灰色。讓fps框在自身平面內旋轉，單位為度 (+ = 順時針)。0 = 正立。無負擔。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -690,10 +506,189 @@ msgstr "整個fps框的透明程度，10 - 100 %: 100 = 不透明，調低會讓
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
+"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
+"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
+"Per-part motion vectors). No cost."
+msgstr "僅VR。跟隨頭部 = 隨頭戴裝置移動。固定在遊玩空間 = 座椅周圍的一個位置，忽略駕駛艙的晃動。附著於載具 = 貼在駕駛艙上並隨之晃動 (需要DLAA + 逐零件動態向量)。無負擔。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
+"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
+"for every vehicle. No cost."
+msgstr "僅VR、附著於載具時。開 = 每輛卡車 / 汽車在駕駛艙中各自保存fps框的位置、旋轉、大小、顏色、亮度和文字 (選單關閉時存入dlaa.ini)。關 = 所有載具共用一組。無負擔。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
+"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
+"vehicles keep theirs. The box is square to the cab."
+msgstr ""
+"僅VR、附著於載具時。右 = 如果框的位置不對，立即重新測量駕駛艙 (停好車、保持不動)。左 = 把此載具的框恢復預設 (位置、旋轉、大小、顏色、文字)；其他載具維持不變。框與駕駛艙保持垂直。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
+"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
+msgstr "僅VR，所以在非VR中為灰色。讓fps框原地左右轉動，單位為度 (+ = 正面轉向右側)。框在側邊時用它調整角度。0 = 正對你。無負擔。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
+"lying on the dashboard). 0 = it faces you. No cost."
+msgstr "僅VR，所以在非VR中為灰色。傾斜fps框，單位為度 (+ = 頂部向遠處傾倒，像平放在儀表板上)。0 = 正對你。無負擔。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
+"upright. No cost."
+msgstr "僅VR，所以在非VR中為灰色。讓fps框在自身平面內旋轉，單位為度 (+ = 順時針)。0 = 正立。無負擔。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
 "VR only, so greyed in flat. How far away the fps box floats, 0.30 - 3.00 m. It keeps the same "
 "size in your view at every distance; only the depth changes. Put it near the depth you look at to "
 "read it without refocusing. No cost."
 msgstr "僅VR，所以在非VR中為灰色。fps框懸浮的距離，0.30 - 3.00 m。在任何距離下它在視野中的大小不變，只改變深度。放在你注視的深度附近，就不用重新對焦即可閱讀。無負擔。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
+"it; it starts closed every time the menu opens."
+msgstr "面板的位置、大小、深度、朝向和選單按鍵。按右鍵開啟群組，按左鍵關閉；每次開啟選單時都是關閉狀態。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
+"and VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr "左右移動此面板，單位為螢幕的 % (VR固定在駕駛艙: 以座椅為中心的度數)。非VR和VR各自記住位置。面板擋住需要的內容時使用。無負擔。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
+"VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr "上下移動此面板，單位為螢幕的 % (VR固定在駕駛艙: 度數，正 = 向下)。非VR和VR各自記住位置。面板擋住需要的內容時使用。無負擔。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
+"much. Flat and VR each keep their own size. No cost."
+msgstr "放大或縮小此面板。看不清就調大，遮擋太多就調小。非VR和VR各自記住大小。無負擔。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
+"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
+"metres). Needs the VR layer (default). No cost."
+msgstr "僅VR。跟隨頭部 = 面板隨頭戴裝置移動。固定在駕駛艙 = 停在座椅前的一個位置，環顧四周時保持穩定；X / Y / 深度則設定該位置 (度、公尺)。需要VR圖層 (預設)。無負擔。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
+"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
+"Change it if the panel is tiring to look at. No cost."
+msgstr ""
+"僅VR，所以在非VR中為灰色。面板懸浮的距離: 預設作為VR圖層時單位為公尺 (0.30 - 3.00)；menu_vr_layer = "
+"0時為每隻眼睛向內位移的px。任何深度下大小相同。看著累就更改。無負擔。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
+"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
+"picture. No cost."
+msgstr "僅VR，所以在非VR中為灰色。開 = 把面板移到一側時它會轉向你，從任何角度大小相同 (作為VR圖層，預設，跟隨頭部的fps框也一樣)；關 = 平面圖片。無負擔。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches for A/B checks: DLAA off, the game's own TAA mixed in or side by side, the thin-wire "
+"switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
+"group, Left closes it."
+msgstr "用於A/B比較的開關: DLAA關閉、混入或並排顯示遊戲內建的TAA、細線開關、色調對應前DLAA。正常駕駛不需要這裡的任何選項。按右鍵開啟群組，按左鍵關閉。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
+"comparing. Off saves the cost of every part together."
+msgstr "開啟或關閉整個Mod並保留模式；關 = 遊戲原本的畫面，用於比較。關閉可省下所有部分的負擔。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
+msgstr "僅當遊戲的反鋸齒為TAA時有效。關 = 僅Mod (將遊戲的AA設為停用)。混合 = 在同一影格中混合TAA與DLAA / DLSS。分割 = 左側Mod，右側TAA，用於比較。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
+msgstr ""
+"混合中遊戲TAA所佔比例，0 - 100 %，每步10 %: 越高 = 越穩定柔和 (TAA)，越低 = 越銳利 (DLAA / "
+"DLSS)。遊戲TAA為混合，或帶混合一側的分割時使用。沒有額外負擔。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr "遊戲TAA分割線的位置 (佔寬度的0 - 100 %，每步5 %): 線左側為Mod的DLAA / DLSS，右側為遊戲的TAA。僅在遊戲TAA為分割時使用。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"遊戲TAA分割在兩側顯示的內容: DLAA | TAA (左側Mod，右側遊戲的TAA)，混合 | TAA 或 DLAA | 混合 (混合 = "
+"按遊戲TAA佔比混合兩者)。升頻時用DLSS代替DLAA。僅在遊戲TAA為分割時使用。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
+"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
+"soft for a moment when it changes."
+msgstr "行駛時細電線保持其動態: DLAA把動態資料擴散到細線上 (DLSS動態擴張)。開 = 預設。關 = 僅供比較，近處電線閃爍更多。切換時畫面會短暫變軟。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
+"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
+msgstr "細電線在其接觸的每個像素上都有深度，而不只是覆蓋像素中心的地方。開 = 預設。開 (無A2C) = 鏤空邊緣也適用。關 = 僅供比較，近處電線閃爍更多。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
+"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+msgstr "實驗性: 把比1像素更細的遠處電線畫成1像素的線，避免斷成虛線。預設關: 遠處電線可能更暗或閃爍更多。請試用並比較。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
+"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
+"~60 frames to switch."
+msgstr "僅非VR: 在遊戲的泛光 / 色調對應之前做DLAA，使車道線、電線和鐵軌的閃爍更少。僅在比較時變更。DLSS升頻或Windows HDR下不使用。負擔相同；切換約需60個畫格。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -897,11 +892,6 @@ msgstr "關"
 msgid "same"
 msgstr "相同"
 
-#. Cost column cell (about 10 Latin characters)
-#: src/inject.cpp
-msgid "no extra"
-msgstr "無額外"
-
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
@@ -1044,7 +1034,7 @@ msgstr "在VR中為灰色: VR一律對完成的畫面執行DLAA。"
 #: src/inject.cpp
 #, c-format
 msgid "Greyed: VR only."
-msgstr ""
+msgstr "灰色: 僅VR。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1052,13 +1042,13 @@ msgstr ""
 msgid ""
 "Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
 "game is closed."
-msgstr ""
+msgstr "灰色: 遊戲主控台已關閉。請在遊戲關閉時，將config.cfg中的g_developer和g_console設為\"1\"。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Sending to the game's console..."
-msgstr ""
+msgstr "正在傳送到遊戲主控台..."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1309,18 +1299,6 @@ msgstr "無法使用: 此VR執行階段未回報隱藏區域。"
 #, c-format
 msgid "Off now: every pixel is drawn."
 msgstr "目前為關: 繪製每個像素。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now (the mod is off)."
-msgstr "目前為關 (Mod已關閉)。"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-msgstr "目前為關: 縮放低於100 %%時使用遊戲自己的拉伸。"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1906,6 +1884,11 @@ msgstr "光暈殘影修正"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "DLAA off to compare (not saved)"
+msgstr "DLAA關閉比較 (不儲存)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Game TAA"
 msgstr "遊戲TAA"
 
@@ -1975,62 +1958,62 @@ msgstr "VectorXR (VR圖層)"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Layout"
-msgstr ""
+msgstr "配置"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "driving"
-msgstr ""
+msgstr "駕駛"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "menus"
-msgstr ""
+msgstr "選單"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Height"
-msgstr ""
+msgstr "高度"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Side"
-msgstr ""
+msgstr "左右"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Distance"
-msgstr ""
+msgstr "距離"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Tilt"
-msgstr ""
+msgstr "傾斜"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Turn"
-msgstr ""
+msgstr "轉向"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Size"
-msgstr ""
+msgstr "大小"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Curve"
-msgstr ""
+msgstr "弧度"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Reset to config.cfg"
-msgstr ""
+msgstr "恢復為config.cfg"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Right"
-msgstr ""
+msgstr "右"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2214,6 +2197,11 @@ msgstr "自動 (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel settings"
+msgstr "面板設定"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Panel lock (VR)"
 msgstr "面板鎖定 (VR)"
 
@@ -2274,15 +2262,15 @@ msgstr "面板朝向你 (VR)"
 msgid "Menu keys"
 msgstr "選單鍵"
 
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter"
-msgstr "FPS計數器"
-
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "Off"
 msgstr "關"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS counter settings"
+msgstr "FPS計數器設定"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2469,4 +2457,31 @@ msgstr "資訊"
 #: src/log.h
 msgid "debug"
 msgstr "偵錯"
+
+#~ msgid "Upscaling and VR"
+#~ msgstr "升頻與VR"
+
+#~ msgid "Frame rate and CPU"
+#~ msgstr "幀率與CPU"
+
+#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "DLSS升頻、DLAA開 / 關開關，以及OFXR Bridge / VectorXR資訊。按右鍵開啟群組，按左鍵關閉；每次開啟選單時都是關閉狀態。"
+
+#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
+#~ msgstr "當遊戲縮放低於100 %時，DLSS把畫面重新繪製到完整大小: 比遊戲內建的拉伸更銳利，繪製的像素更少，fps更高。無額外負擔；縮放100 %時不起作用。"
+
+#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "VR加速: 渦輪模式、注視點算繪和隱藏區域遮罩。按右鍵開啟群組，按左鍵關閉；每次開啟選單時都是關閉狀態。"
+
+#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "幀率限制與CPU: 非VR的NVIDIA Reflex和FPS上限、VR的FPS上限、CPU調校。按右鍵開啟群組，按左鍵關閉；每次開啟選單時都是關閉狀態。"
+
+#~ msgid "no extra"
+#~ msgstr "無額外"
+
+#~ msgid "Off now (the mod is off)."
+#~ msgstr "目前為關 (Mod已關閉)。"
+
+#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
+#~ msgstr "目前為關: 縮放低於100 %%時使用遊戲自己的拉伸。"
 

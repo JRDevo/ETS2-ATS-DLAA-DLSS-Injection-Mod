@@ -43,10 +43,12 @@ menu and the garage / truck dealer screens, before a save is loaded).
 |-----|-------------|
 | `Delete` | Open / close the menu |
 | `Up` / `Down` | Select a row (hold to scroll) |
-| `Left` / `Right` | Change the selected row. Number rows step and repeat while held; switches, the mode, the profile and the model change once per press. On a group row (`Panel settings`, `FPS counter settings`) `Right` opens the group, `Left` closes it |
+| `Left` / `Right` | Change the selected row. Number rows step and repeat while held; switches, the mode, the profile and the model change once per press. On a group row (`Picture`, `Menu panel`, `FPS counter`, ...) `Right` opens the group, `Left` closes it |
 
-- **Two groups keep the list short** (v0.10.3): **Panel settings** (`Panel lock (VR)`, `Panel position X`, `Panel position Y`, `Panel size`,
-  `Panel VR depth`, `Panel faces you (VR)`, `Menu keys`) and **FPS counter settings** (`FPS counter lock`, `FPS counter X`,
+- **Groups keep the list short** (phase 84: Picture, Motion and mirrors, Frame rate, VR performance, In-game UI (VR), FPS counter,
+  Menu panel, Compare and test; rows of the other mode -- flat / VR -- are hidden, `dlaa.ini menu_show_all = 1` shows all). E.g.
+  **Menu panel** (`Panel lock (VR)`, `Panel position X`, `Panel position Y`, `Panel size`,
+  `Panel VR depth`, `Panel faces you (VR)`, `Menu keys`) and **FPS counter** (`FPS counter lock`, `FPS counter X`,
   `FPS counter Y`, `FPS counter size`; the `FPS counter` on / off row itself stays in the main list, right above the
   group). Both are **closed every time the menu opens** (the value shows `...`): select the group row and press `Right` to
   show its rows (`shown`), `Left` on the group row hides them again. `Up` / `Down` skip the rows of a closed group, and
@@ -181,7 +183,7 @@ The log says what changed, e.g.
   and their wheel buttons) cannot be bound on the other lines: there `Up` / `Down` / `Right` do nothing and `Left`
   cancels.
 - **The five menu-key lines** (`Menu: open / close`, `up`, `down`, `left`, `right`; the `Menu keys` row in the
-  **Panel settings** group shows them and `Right` on it opens the Hotkeys page there): here every key counts, the menu
+  **Menu panel** group shows them and `Right` on it opens the Hotkeys page there): here every key counts, the menu
   keys too -- `Left` binds instead of cancelling and the open key binds instead of closing the menu. To get out without
   binding press `Esc` or `Backspace`, or wait 10 seconds. These lines cannot be cleared, and a press that would take the
   **only** binding away from any of the five menu actions (`key_menu`, `key_menu_up` ... `key_menu_right`) is refused

@@ -130,13 +130,8 @@ msgstr "Mozgás és tükrök"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Upscaling and VR"
-msgstr "Felskálázás és VR"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "In-game UI (VR)"
-msgstr ""
+msgid "Frame rate"
+msgstr "Képkockasebesség"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -145,18 +140,23 @@ msgstr "VR teljesítmény"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Frame rate and CPU"
-msgstr "Képfrissítés és CPU"
+msgid "In-game UI (VR)"
+msgstr "Játék UI (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Panel beállításai"
+msgid "FPS counter"
+msgstr "FPS-számláló"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "FPS-számláló beállításai"
+msgid "Menu panel"
+msgstr "Menüpanel"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Compare and test"
+msgstr "Összehasonlítás, teszt"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -242,28 +242,6 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower "
-"it to afford a heavier model or win frame rate; 40 % costs about 40 % of the model. Also sets the "
-"garage / main-menu truck."
-msgstr ""
-"VR: csak minden szem közepe kap DLAA-t (20-100 %); a szél a játék képe marad. Csökkentsd nehezebb "
-"modellhez vagy több fps-hez; 40 % a modell kb. 40 %-ába kerül. A garázs / főmenü kamionját is "
-"beállítja."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
-"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
-"~60 frames to switch."
-msgstr ""
-"Csak sík: DLAA a játék bloom / tonemap lépése előtt, így az útfestés, vezetékek és sínek kevésbé "
-"villognak. Csak összehasonlításhoz változtasd. DLSS felskálázással vagy Windows HDR-rel nem "
-"használható. Ugyanaz az ár; ~60 képkocka a váltás."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
 "Gives wires, fences and glass their own distance instead of what is behind them, so they do not "
 "smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."
 msgstr ""
@@ -280,6 +258,17 @@ msgstr ""
 "Megakadályozza, hogy az utcai lámpák és autófények fénye csíkot húzzon mozgás közben: a DLSS "
 "minden fényt az aktuális képkockából vesz, nem az előzményekből. 25 %-os lépések; csökkentsd, ha "
 "a fény villog, 0 = ki. Szemenként kb. 0,05 - 0,2 ms."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower "
+"it to afford a heavier model or win frame rate; 40 % costs about 40 % of the model. Also sets the "
+"garage / main-menu truck."
+msgstr ""
+"VR: csak minden szem közepe kap DLAA-t (20-100 %); a szél a játék képe marad. Csökkentsd nehezebb "
+"modellhez vagy több fps-hez; 40 % a modell kb. 40 %-ába kerül. A garázs / főmenü kamionját is "
+"beállítja."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -326,162 +315,66 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
-"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
-"soft for a moment when it changes."
+"Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
+"the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"A vékony vezetékek megtartják a mozgásukat vezetés közben: a DLAA a mozgásadatot vékony vonalakra "
-"szórja (DLSS motion dilation). be = alapérték. ki = csak összehasonlításhoz; közeli vezetékek "
-"jobban villognak. Váltáskor a kép egy pillanatra puha."
+"Képkockasebesség és CPU: CPU-hangolás, FPS-korlát és NVIDIA Reflex síkhoz, VR FPS-korlát. "
+"Jobbra nyitja a csoportot, Balra zárja; a menü megnyitásakor mindig zárt."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
-"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
+"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
+"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
+"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
+"cpu_pcore, cpu_priority, cpu_no_throttle."
 msgstr ""
-"A vékony vezetékek minden érintett pixelen kapnak mélységet, nem csak ahol a pixel közepét fedik. "
-"be = alapérték. be (no A2C) = az átlátszó élekre is. ki = csak összehasonlításhoz; közeli "
-"vezetékek jobban villognak."
+"Három CPU-kapcsoló együtt: a fő- és renderszál a P-magokat részesíti előnyben (csak hibrid Intel "
+"CPU), a játék Above normal prioritással fut, és a Windows nem fojthatja vissza (EcoQoS), sem "
+"figyelmen kívül hagyni az időzítőkéréseit. Segít, ha a CPU a korlát; ingyen. Külön beállítások a "
+"dlaa.ini-ben: cpu_pcore, cpu_priority, cpu_no_throttle."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
-"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
+"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
+"limiting. off = no limit."
 msgstr ""
-"Kísérleti: az 1 pixelnél vékonyabb távoli vezetékeket 1 pixeles vonalként rajzolja, hogy ne "
-"szakadozzanak. Alapból ki: a távoli vezetékek sötétebbnek tűnhetnek vagy jobban villoghatnak. "
-"Próbáld ki és hasonlítsd össze."
+"Csak sík. A játékot legfeljebb ennyi képkockán tartja: egyenletes képidő, kevesebb hő és áram. "
+"Állítsd kicsit arra alá, amit a gép forgalmas városban tart. Reflexszel az NVIDIA-driver "
+"korlátoz. ki = nincs korlát."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the "
-"group, Left closes it; it starts closed every time the menu opens."
+"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
+"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
 msgstr ""
-"DLSS-felskálázás, a DLAA be / ki kapcsoló és az OFXR Bridge / VectorXR infó. Jobbra nyitja a "
-"csoportot, Balra zárja; a menü megnyitásakor mindig zárt."
+"Csak sík, csak NVIDIA. Be = a játék képkockái kevesebbet várnak a GPU-sorban: kisebb input lag, "
+"ha a GPU a korlát. A Boost a GPU órajelét is fenntartja. Ugyanaz az fps; kis ár. VR-ben nem "
+"használt."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than "
-"the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at "
-"Scaling 100 %."
+"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
+"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
+"the fps swings. Turns Turbo off while on."
 msgstr ""
-"A DLSS teljes méretre rajzolja vissza a képet, ha a játék Scaling értéke 100 % alatt van: élesebb "
-"a játék saját nyújtásánál, és a kevesebb pixel több fps. Nincs extra ár; Scaling 100 %-nál nem "
-"csinál semmit."
+"Csak VR. fél = a játék minden 2. headset-képkockát rajzol (72 Hz -> 36 fps), harmad = minden "
+"3.-at; a headset reprojekciója (ASW / Motion Smoothing) egyenletes ritmusban tölti ki a többit. "
+"Használd, ha az fps ingadozik. Bekapcsolva kikapcsolja a Turbót."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
-"comparing. Off saves the cost of every part together."
+"VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
+"are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Az egész modot be- vagy kikapcsolja és megjegyzi az üzemmódot; ki a játék saját képét mutatja, "
-"összehasonlításhoz. Kikapcsolva megspórolod az összes rész árát."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
-"right, to compare."
-msgstr ""
-"Csak akkor, ha a játék élsimítása TAA. ki = csak a mod (állítsd a játék AA-ját Letiltva értékre). "
-"kevert = TAA és DLAA / DLSS ugyanazon a képkockán, keverve. osztott = balra a mod, jobbra a TAA, "
-"összehasonlításhoz."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
-msgstr ""
-"A keverék mekkora része a játék TAA-ja, 0 - 100 % 10 %-os lépésekben: több = nyugodtabb és "
-"lágyabb (TAA), kevesebb = élesebb (DLAA / DLSS). Akkor él, ha a Játék TAA értéke kevert, vagy "
-"osztott kevert oldallal. Nincs extra költség."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
-"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
-msgstr ""
-"Hol van a Játék TAA osztott vonala, a szélesség 0 - 100 %-a 5 %-os lépésekben: tőle balra a mod "
-"DLAA / DLSS-e, jobbra a játék TAA-ja. Csak akkor él, ha a Játék TAA értéke osztott."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
-"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
-"upscaling. Used only when Game TAA is split."
-msgstr ""
-"Mit mutat a Játék TAA osztott a két oldalán: DLAA | TAA (balra a mod, jobbra a játék TAA-ja), "
-"kevert | TAA vagy DLAA | kevert (kevert = a kettő keverve a Játék TAA aránya szerint). "
-"Felskálázáskor DLAA helyett DLSS. Csak akkor él, ha a Játék TAA értéke osztott."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"OFXR Bridge = VR frame generation by djules75, a separate download "
-"(github.com/djules75/OFXR-Bridge). found = its layer is loaded in this game and the mod lets its "
-"work pass through. Start its tray app before the game."
-msgstr ""
-"OFXR Bridge = VR képkockagenerálás djules75-től, külön letöltés "
-"(github.com/djules75/OFXR-Bridge). megvan = a rétege be van töltve ebben a játékban, és a mod "
-"átengedi a munkáját. Indítsd el a tálcaalkalmazását a játék előtt."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, "
-"Depth, frame generation; found = its layer is loaded in the game and the mod lets its work pass "
-"through. Run only one Turbo (its or the mod's)."
-msgstr ""
-"VectorXR = OpenXR fejlesztőcsomag a DienerTech-től (github.com/DienerTech/vectorxr): Turbo, "
-"Depth, képkockagenerálás; megvan = a rétege be van töltve a játékban, és a mod átengedi a "
-"munkáját. Csak egy Turbót futtass (az övét vagy a modét)."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
-"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
-"(the game's menu screens)."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
-"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
-"own values when it exits)."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left "
-"closes it; it starts closed every time the menu opens."
-msgstr ""
-"VR gyorsítások: Turbo, foveated rendering és a rejtett terület maszk. Jobbra nyitja a csoportot, "
-"Balra zárja; a menü megnyitásakor mindig zárt."
+"VR gyorsítások: Turbo, foveated rendering, a rejtett terület maszk, és hogy megtalálhatók-e "
+"az OFXR Bridge / VectorXR. Jobbra nyitja a csoportot, Balra zárja; a menü megnyitásakor "
+"mindig zárt."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -563,124 +456,62 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
+"OFXR Bridge = VR frame generation by djules75, a separate download "
+"(github.com/djules75/OFXR-Bridge). found = its layer is loaded in this game and the mod lets its "
+"work pass through. Start its tray app before the game."
 msgstr ""
-"Képfrissítési korlátok és CPU: NVIDIA Reflex és FPS-korlát síkhoz, VR FPS-korlát, CPU-hangolás. "
-"Jobbra nyitja a csoportot, Balra zárja; a menü megnyitásakor mindig zárt."
+"OFXR Bridge = VR képkockagenerálás djules75-től, külön letöltés "
+"(github.com/djules75/OFXR-Bridge). megvan = a rétege be van töltve ebben a játékban, és a mod "
+"átengedi a munkáját. Indítsd el a tálcaalkalmazását a játék előtt."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
-"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
+"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, "
+"Depth, frame generation; found = its layer is loaded in the game and the mod lets its work pass "
+"through. Run only one Turbo (its or the mod's)."
 msgstr ""
-"Csak sík, csak NVIDIA. Be = a játék képkockái kevesebbet várnak a GPU-sorban: kisebb input lag, "
-"ha a GPU a korlát. A Boost a GPU órajelét is fenntartja. Ugyanaz az fps; kis ár. VR-ben nem "
-"használt."
+"VectorXR = OpenXR fejlesztőcsomag a DienerTech-től (github.com/DienerTech/vectorxr): Turbo, "
+"Depth, képkockagenerálás; megvan = a rétege be van töltve a játékban, és a mod átengedi a "
+"munkáját. Csak egy Turbót futtass (az övét vagy a modét)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
-"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
-"limiting. off = no limit."
+"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
+"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"Csak sík. A játékot legfeljebb ennyi képkockán tartja: egyenletes képidő, kevesebb hő és áram. "
-"Állítsd kicsit arra alá, amit a gép forgalmas városban tart. Reflexszel az NVIDIA-driver "
-"korlátoz. ki = nincs korlát."
+"Hol lebeg a játék saját VR UI-ja (HUD, menük). A mod helyetted begépeli a változtatást a "
+"játék konzoljába; kell hozzá a g_developer és a g_console 1 a config.cfg-ben. Jobbra nyitja a "
+"csoportot, Balra zárja."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
-"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
-"the fps swings. Turns Turbo off while on."
+"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
+"(the game's menu screens)."
 msgstr ""
-"Csak VR. fél = a játék minden 2. headset-képkockát rajzol (72 Hz -> 36 fps), harmad = minden "
-"3.-at; a headset reprojekciója (ASW / Motion Smoothing) egyenletes ritmusban tölti ki a többit. "
-"Használd, ha az fps ingadozik. Bekapcsolva kikapcsolja a Turbót."
+"A játék VR UI-jának melyik elrendezését mozgatják az alábbi sorok: vezetés (a HUD vezetés "
+"közben) vagy menük (a játék menüképernyői)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
-"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
-"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
+"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
+"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
-"Három CPU-kapcsoló együtt: a fő- és renderszál a P-magokat részesíti előnyben (csak hibrid Intel "
-"CPU), a játék Above normal prioritással fut, és a Windows nem fojthatja vissza (EcoQoS), sem "
-"figyelmen kívül hagyni az időzítőkéréseit. Segít, ha a CPU a korlát; ingyen. Külön beállítások a "
-"dlaa.ini-ben: cpu_pcore, cpu_priority, cpu_no_throttle."
+"A játék VR UI-ját mozgatja: magasság, oldal, távolság, dőlés, forgatás, méret vagy görbület, "
+"kis lépésekben. A játék minden változtatást kb. 0,4 s-mal az utolsó lenyomás után kap meg: a "
+"konzol magától nyílik és záródik."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
-"it; it starts closed every time the menu opens."
+"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
+"own values when it exits)."
 msgstr ""
-"A panel helye, mérete, mélysége, elfordulása és a menübillentyűk. Jobbra nyitja a csoportot, "
-"Balra zárja; a menü megnyitásakor mindig zárt."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
-"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
-"metres). Needs the VR layer (default). No cost."
-msgstr ""
-"Csak VR. Fejet követ = a panel a headsettel mozog. Fülkéhez rögzítve = egy ponton marad az ülésed "
-"előtt, nyugodtan, amíg körülnézel; X / Y / depth ezt a pontot adja (fok, méter). VR-réteg kell "
-"(alap). Ingyen."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
-"and VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr ""
-"Oldalra tolja a panelt, a képernyő %-ában (VR fixed in cab: fok az ülés körül). Sík és VR külön "
-"helyet jegyez. Használd, ha a panel eltakar valamit. Ingyen."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
-"VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr ""
-"Fel / le tolja a panelt, a képernyő %-ában (VR fixed in cab: fok, plusz = le). Sík és VR külön "
-"helyet jegyez. Használd, ha a panel eltakar valamit. Ingyen."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
-"much. Flat and VR each keep their own size. No cost."
-msgstr ""
-"Nagyobbá vagy kisebbé teszi a panelt. Növeld, ha nem olvasod, csökkentsd, ha túl sokat takar. Sík "
-"és VR külön méretet jegyez. Ingyen."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
-"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
-"Change it if the panel is tiring to look at. No cost."
-msgstr ""
-"Csak VR, síkban szürke. Milyen messze lebeg a panel: méterben (0,30 - 3,00) VR-rétegként, "
-"alapból; menu_vr_layer = 0 mellett szemenkénti befelé tolás pxben. Minden mélységben ugyanakkora. "
-"Módosítsd, ha fárasztó nézni. Ingyen."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
-"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
-"picture. No cost."
-msgstr ""
-"Csak VR, síkban szürke. Be = a panel feléd fordul, ha oldalra viszed, minden szögből ugyanakkora "
-"(VR-rétegként, alapból, és a fejet követő FPS-doboz is); ki = lapos kép. Ingyen."
+"Jobbra: mindkét elrendezés minden értéke vissza arra, ami a config.cfg-ben az elején volt (a "
+"játék kilépéskor menti a saját értékeit)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -705,39 +536,6 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
-"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
-"Per-part motion vectors). No cost."
-msgstr ""
-"Csak VR. Fejet követ = a headsettel mozog. Térben rögzítve = egy pont az ülésed körül, nem követi "
-"a fülke ringását. Járműhöz tapad = a fülkéhez tapadva, vele leng (DLAA + Alkatrészenkénti mozgás "
-"kell). Ingyen."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
-"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
-"for every vehicle. No cost."
-msgstr ""
-"VR, csak Járműhöz tapad. Be = minden kamion / autó saját FPS-doboz helyet, elfordulást, méretet, "
-"színt, fényerőt és szöveget jegyez (a menü zárásakor dlaa.ini-be mentve). Ki = egy közös készlet "
-"minden járműnek. Ingyen."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
-"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
-"vehicles keep theirs. The box is square to the cab."
-msgstr ""
-"VR, csak Járműhöz tapad. Jobbra = újra megméri a fülkét (ülj nyugodtan, parkolva), ha a doboz "
-"rossz helyen van. Balra = ennek a járműnek a doboza alapra (hely, elfordulás, méret, szín, "
-"szöveg); a többi jármű megtartja a sajátját. A doboz merőleges a fülkére."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
 "Moves the fps box sideways, in % of the screen (VR fixed / attached: degrees around you). Flat "
 "and VR each keep their own position. No cost."
 msgstr ""
@@ -752,33 +550,6 @@ msgid ""
 msgstr ""
 "Fel / le tolja az FPS-dobozt, a képernyő %-ában (VR fixed / attached: fok, mínusz = fel). Sík és "
 "VR külön helyet jegyez. Ingyen."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
-"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
-msgstr ""
-"Csak VR, síkban szürke. Balra / jobbra forgatja az FPS-dobozt, fokban (+ = az arca jobbra "
-"fordul). Szögbe állításhoz, ha oldalt van. 0 = feléd néz. Ingyen."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
-"lying on the dashboard). 0 = it faces you. No cost."
-msgstr ""
-"Csak VR, síkban szürke. Megdönti az FPS-dobozt, fokban (+ = teteje eldől tőled, mintha a "
-"műszerfalon feküdne). 0 = feléd néz. Ingyen."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
-"upright. No cost."
-msgstr ""
-"Csak VR, síkban szürke. Elforgatja az FPS-dobozt a saját síkjában, fokban (+ = óramutató "
-"irányába). 0 = függőleges. Ingyen."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -820,6 +591,66 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
+"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
+"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
+"Per-part motion vectors). No cost."
+msgstr ""
+"Csak VR. Fejet követ = a headsettel mozog. Térben rögzítve = egy pont az ülésed körül, nem követi "
+"a fülke ringását. Járműhöz tapad = a fülkéhez tapadva, vele leng (DLAA + Alkatrészenkénti mozgás "
+"kell). Ingyen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
+"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
+"for every vehicle. No cost."
+msgstr ""
+"VR, csak Járműhöz tapad. Be = minden kamion / autó saját FPS-doboz helyet, elfordulást, méretet, "
+"színt, fényerőt és szöveget jegyez (a menü zárásakor dlaa.ini-be mentve). Ki = egy közös készlet "
+"minden járműnek. Ingyen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
+"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
+"vehicles keep theirs. The box is square to the cab."
+msgstr ""
+"VR, csak Járműhöz tapad. Jobbra = újra megméri a fülkét (ülj nyugodtan, parkolva), ha a doboz "
+"rossz helyen van. Balra = ennek a járműnek a doboza alapra (hely, elfordulás, méret, szín, "
+"szöveg); a többi jármű megtartja a sajátját. A doboz merőleges a fülkére."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
+"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
+msgstr ""
+"Csak VR, síkban szürke. Balra / jobbra forgatja az FPS-dobozt, fokban (+ = az arca jobbra "
+"fordul). Szögbe állításhoz, ha oldalt van. 0 = feléd néz. Ingyen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
+"lying on the dashboard). 0 = it faces you. No cost."
+msgstr ""
+"Csak VR, síkban szürke. Megdönti az FPS-dobozt, fokban (+ = teteje eldől tőled, mintha a "
+"műszerfalon feküdne). 0 = feléd néz. Ingyen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
+"upright. No cost."
+msgstr ""
+"Csak VR, síkban szürke. Elforgatja az FPS-dobozt a saját síkjában, fokban (+ = óramutató "
+"irányába). 0 = függőleges. Ingyen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
 "VR only, so greyed in flat. How far away the fps box floats, 0.30 - 3.00 m. It keeps the same "
 "size in your view at every distance; only the depth changes. Put it near the depth you look at to "
 "read it without refocusing. No cost."
@@ -827,6 +658,177 @@ msgstr ""
 "Csak VR, síkban szürke. Milyen messze lebeg az FPS-doboz, 0,30 - 3,00 m. Minden távolságban "
 "ugyanakkorának látszik; csak a mélység változik. Tedd oda, ahová nézel, hogy fókuszváltás nélkül "
 "olvasd. Ingyen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
+"it; it starts closed every time the menu opens."
+msgstr ""
+"A panel helye, mérete, mélysége, elfordulása és a menübillentyűk. Jobbra nyitja a csoportot, "
+"Balra zárja; a menü megnyitásakor mindig zárt."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
+"and VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr ""
+"Oldalra tolja a panelt, a képernyő %-ában (VR fixed in cab: fok az ülés körül). Sík és VR külön "
+"helyet jegyez. Használd, ha a panel eltakar valamit. Ingyen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
+"VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr ""
+"Fel / le tolja a panelt, a képernyő %-ában (VR fixed in cab: fok, plusz = le). Sík és VR külön "
+"helyet jegyez. Használd, ha a panel eltakar valamit. Ingyen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
+"much. Flat and VR each keep their own size. No cost."
+msgstr ""
+"Nagyobbá vagy kisebbé teszi a panelt. Növeld, ha nem olvasod, csökkentsd, ha túl sokat takar. Sík "
+"és VR külön méretet jegyez. Ingyen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
+"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
+"metres). Needs the VR layer (default). No cost."
+msgstr ""
+"Csak VR. Fejet követ = a panel a headsettel mozog. Fülkéhez rögzítve = egy ponton marad az ülésed "
+"előtt, nyugodtan, amíg körülnézel; X / Y / depth ezt a pontot adja (fok, méter). VR-réteg kell "
+"(alap). Ingyen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
+"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
+"Change it if the panel is tiring to look at. No cost."
+msgstr ""
+"Csak VR, síkban szürke. Milyen messze lebeg a panel: méterben (0,30 - 3,00) VR-rétegként, "
+"alapból; menu_vr_layer = 0 mellett szemenkénti befelé tolás pxben. Minden mélységben ugyanakkora. "
+"Módosítsd, ha fárasztó nézni. Ingyen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
+"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
+"picture. No cost."
+msgstr ""
+"Csak VR, síkban szürke. Be = a panel feléd fordul, ha oldalra viszed, minden szögből ugyanakkora "
+"(VR-rétegként, alapból, és a fejet követő FPS-doboz is); ki = lapos kép. Ingyen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches for A/B checks: DLAA off, the game's own TAA mixed in or side by side, the thin-wire "
+"switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
+"group, Left closes it."
+msgstr ""
+"Kapcsolók A/B-ellenőrzésekhez: DLAA ki, a játék saját TAA-ja belekeverve vagy egymás mellett, "
+"a vékony vezeték kapcsolók, DLAA tonemap előtt. Normál vezetéshez semmi sem kell ezekből. "
+"Jobbra nyitja a csoportot, Balra zárja."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
+"comparing. Off saves the cost of every part together."
+msgstr ""
+"Az egész modot be- vagy kikapcsolja és megjegyzi az üzemmódot; ki a játék saját képét mutatja, "
+"összehasonlításhoz. Kikapcsolva megspórolod az összes rész árát."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
+msgstr ""
+"Csak akkor, ha a játék élsimítása TAA. ki = csak a mod (állítsd a játék AA-ját Letiltva értékre). "
+"kevert = TAA és DLAA / DLSS ugyanazon a képkockán, keverve. osztott = balra a mod, jobbra a TAA, "
+"összehasonlításhoz."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
+msgstr ""
+"A keverék mekkora része a játék TAA-ja, 0 - 100 % 10 %-os lépésekben: több = nyugodtabb és "
+"lágyabb (TAA), kevesebb = élesebb (DLAA / DLSS). Akkor él, ha a Játék TAA értéke kevert, vagy "
+"osztott kevert oldallal. Nincs extra költség."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+"Hol van a Játék TAA osztott vonala, a szélesség 0 - 100 %-a 5 %-os lépésekben: tőle balra a mod "
+"DLAA / DLSS-e, jobbra a játék TAA-ja. Csak akkor él, ha a Játék TAA értéke osztott."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"Mit mutat a Játék TAA osztott a két oldalán: DLAA | TAA (balra a mod, jobbra a játék TAA-ja), "
+"kevert | TAA vagy DLAA | kevert (kevert = a kettő keverve a Játék TAA aránya szerint). "
+"Felskálázáskor DLAA helyett DLSS. Csak akkor él, ha a Játék TAA értéke osztott."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
+"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
+"soft for a moment when it changes."
+msgstr ""
+"A vékony vezetékek megtartják a mozgásukat vezetés közben: a DLAA a mozgásadatot vékony vonalakra "
+"szórja (DLSS motion dilation). be = alapérték. ki = csak összehasonlításhoz; közeli vezetékek "
+"jobban villognak. Váltáskor a kép egy pillanatra puha."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
+"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
+msgstr ""
+"A vékony vezetékek minden érintett pixelen kapnak mélységet, nem csak ahol a pixel közepét fedik. "
+"be = alapérték. be (no A2C) = az átlátszó élekre is. ki = csak összehasonlításhoz; közeli "
+"vezetékek jobban villognak."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
+"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+msgstr ""
+"Kísérleti: az 1 pixelnél vékonyabb távoli vezetékeket 1 pixeles vonalként rajzolja, hogy ne "
+"szakadozzanak. Alapból ki: a távoli vezetékek sötétebbnek tűnhetnek vagy jobban villoghatnak. "
+"Próbáld ki és hasonlítsd össze."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
+"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
+"~60 frames to switch."
+msgstr ""
+"Csak sík: DLAA a játék bloom / tonemap lépése előtt, így az útfestés, vezetékek és sínek kevésbé "
+"villognak. Csak összehasonlításhoz változtasd. DLSS felskálázással vagy Windows HDR-rel nem "
+"használható. Ugyanaz az ár; ~60 képkocka a váltás."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1040,11 +1042,6 @@ msgstr "ki"
 msgid "same"
 msgstr "azonos"
 
-#. Cost column cell (about 10 Latin characters)
-#: src/inject.cpp
-msgid "no extra"
-msgstr "nincs extra"
-
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
@@ -1187,7 +1184,7 @@ msgstr "VR-ben szürke: a VR mindig a kész képen futtatja a DLAA-t."
 #: src/inject.cpp
 #, c-format
 msgid "Greyed: VR only."
-msgstr ""
+msgstr "Szürke: csak VR."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1196,12 +1193,14 @@ msgid ""
 "Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
 "game is closed."
 msgstr ""
+"Szürke: a játék konzolja ki van kapcsolva. Állítsd a g_developer és g_console értékét "
+"\"1\"-re a config.cfg-ben, amíg a játék zárva van."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Sending to the game's console..."
-msgstr ""
+msgstr "Küldés a játék konzoljába..."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1458,18 +1457,6 @@ msgstr "Nem elérhető: ez a VR runtime nem jelent rejtett területet."
 #, c-format
 msgid "Off now: every pixel is drawn."
 msgstr "Most ki: minden pixel rajzolva van."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now (the mod is off)."
-msgstr "Most ki (a mod ki van kapcsolva)."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-msgstr "Most ki: Scaling 100 %% alatt a játék saját nyújtása használt."
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2063,6 +2050,11 @@ msgstr "Fényfátyol-javítás"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "DLAA off to compare (not saved)"
+msgstr "DLAA ki (nem mentődik)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Game TAA"
 msgstr "Játék TAA"
 
@@ -2132,62 +2124,62 @@ msgstr "VectorXR (VR réteg)"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Layout"
-msgstr ""
+msgstr "Elrendezés"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "driving"
-msgstr ""
+msgstr "vezetés"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "menus"
-msgstr ""
+msgstr "menük"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Height"
-msgstr ""
+msgstr "Magasság"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Side"
-msgstr ""
+msgstr "Oldal"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Distance"
-msgstr ""
+msgstr "Távolság"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Tilt"
-msgstr ""
+msgstr "Dőlés"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Turn"
-msgstr ""
+msgstr "Forgatás"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Size"
-msgstr ""
+msgstr "Méret"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Curve"
-msgstr ""
+msgstr "Görbület"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Reset to config.cfg"
-msgstr ""
+msgstr "Vissza: config.cfg"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Right"
-msgstr ""
+msgstr "Jobbra"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2371,6 +2363,11 @@ msgstr "auto (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel settings"
+msgstr "Panel beállításai"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Panel lock (VR)"
 msgstr "Panel rögzítés (VR)"
 
@@ -2431,15 +2428,15 @@ msgstr "Panel feléd fordul (VR)"
 msgid "Menu keys"
 msgstr "Menübillentyűk"
 
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter"
-msgstr "FPS-számláló"
-
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "Off"
 msgstr "Ki"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS counter settings"
+msgstr "FPS-számláló beállításai"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2629,4 +2626,31 @@ msgstr "infó"
 #: src/log.h
 msgid "debug"
 msgstr "hibakeresés"
+
+#~ msgid "Upscaling and VR"
+#~ msgstr "Felskálázás és VR"
+
+#~ msgid "Frame rate and CPU"
+#~ msgstr "Képfrissítés és CPU"
+
+#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "DLSS-felskálázás, a DLAA be / ki kapcsoló és az OFXR Bridge / VectorXR infó. Jobbra nyitja a csoportot, Balra zárja; a menü megnyitásakor mindig zárt."
+
+#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
+#~ msgstr "A DLSS teljes méretre rajzolja vissza a képet, ha a játék Scaling értéke 100 % alatt van: élesebb a játék saját nyújtásánál, és a kevesebb pixel több fps. Nincs extra ár; Scaling 100 %-nál nem csinál semmit."
+
+#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "VR gyorsítások: Turbo, foveated rendering és a rejtett terület maszk. Jobbra nyitja a csoportot, Balra zárja; a menü megnyitásakor mindig zárt."
+
+#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "Képfrissítési korlátok és CPU: NVIDIA Reflex és FPS-korlát síkhoz, VR FPS-korlát, CPU-hangolás. Jobbra nyitja a csoportot, Balra zárja; a menü megnyitásakor mindig zárt."
+
+#~ msgid "no extra"
+#~ msgstr "nincs extra"
+
+#~ msgid "Off now (the mod is off)."
+#~ msgstr "Most ki (a mod ki van kapcsolva)."
+
+#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
+#~ msgstr "Most ki: Scaling 100 %% alatt a játék saját nyújtása használt."
 

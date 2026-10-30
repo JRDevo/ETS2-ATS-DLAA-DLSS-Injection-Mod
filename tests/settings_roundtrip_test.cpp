@@ -53,6 +53,7 @@ static void Boot(bool vr) {
     QueryPerformanceFrequency(&qf);
     g_qpcFreq = qf.QuadPart;
     LoadConfig();
+    g_menuShowAll = true;                                // phase 84: every row in the panel (p.rows[r] = row r; flat / VR rows hidden otherwise)
     g_launchVr = vr ? 1 : 0;
     g_vrMode = vr;
     g_vrArea = SceneDlaa::Area();
@@ -85,7 +86,7 @@ static bool SessionOnly(int r) {                       // Shift+F11 compare; the
 // rows the round trip leaves out: group headers (open / close only), actions and pages, information rows
 static bool SkipRow(int r) {
     switch (r) {
-    case MR_PICGRP: case MR_MOTGRP: case MR_UPGRP: case MR_VRPGRP: case MR_FRGRP: case MR_PANELGRP: case MR_FPSGRP:
+    case MR_PICGRP: case MR_MOTGRP: case MR_CMPGRP: case MR_VRPGRP: case MR_FRGRP: case MR_PANELGRP: case MR_FPSGRP:
     case MR_FPSREMEAS: case MR_MENUKEYS: case MR_HOTKEYS: case MR_SAVE: case MR_RESET: case MR_CLOSE:
     case MR_OFXR: case MR_VECTORXR:
     case MR_UIGRP: case MR_UIRESET:                    // phase 83: a header and an action
@@ -132,7 +133,6 @@ static int GateCheck(const char* after) {
     expect(off(MR_BIAS) == (SceneDlaa::BiasStrength() == 0) && g_biasCfg == SceneDlaa::BiasStrength(), MR_BIAS,
            "Light glow ghosting fix: the menu and SceneDlaa's bias strength disagree");
     expect(off(MR_MODE) == !g_dlaaOn.load() && on(MR_DLAA) == g_dlaaOn.load(), MR_MODE, "Mode / DLAA on-off and g_dlaaOn disagree");
-    expect(on(MR_UPSCALE) == g_dlssUpscale.load(), MR_UPSCALE, "DLSS upscale: the menu and g_dlssUpscale disagree");
     {   // phase 82: the Game TAA row names the mode the render code reads (g_gameTaa); its share row is live only in mode mix
         static const wchar_t* const kTaa[GameTaa::kModeCount] = { L"off", L"mix", L"split" };
         expect(!wcscmp(val(MR_GAMETAA), kTaa[GameTaa::ClampMode(g_gameTaa)]) && g_gameTaa == GameTaa::ClampMode(g_gameTaa), MR_GAMETAA,

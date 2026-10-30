@@ -40,7 +40,7 @@ body:
       label: Where would it live?
       description: Tick all that fit.
       options:
-        - label: A menu row (Picture / Motion and mirrors / Upscaling and VR / VR performance / Frame rate and CPU / Panel / FPS counter)
+        - label: A menu row (Picture / Motion and mirrors / Frame rate / VR performance / In-game UI (VR) / FPS counter / Menu panel / Compare and test)
         - label: A `dlaa.ini` key only
         - label: A hotkey
         - label: Don't know

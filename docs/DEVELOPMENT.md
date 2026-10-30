@@ -2529,6 +2529,23 @@ non-blocking readback timing -- so it is judged by the check totals and a verify
   three `vr_ui_keys` modes are there to find out); a console the player left open would be closed by the toggle; the menu-screen
   cvars may only apply on the menu screens. `tests/vr_ui_test.cpp` (CI): parsing, steps, debounce / queue, the keystroke plan.
 
+### Phase 84: menu regroup -- most-used first, rows of the other mode hidden
+
+- **Layout** (`enum MenuRowId`, `kMenuGroups`, `kMenuDesc` reordered by a script, the contiguity `static_assert` regenerated): top
+  Mode / Profile / Model; Picture (sharpen strength / width, texture / cut-out sharpness, see-through depth, light glow fix, DLAA area);
+  Motion and mirrors (part motion, mirror DLAA, mirrors in turns); Frame rate (was "Frame rate and CPU": CPU tuning, FPS cap, Reflex,
+  VR FPS cap); VR performance (Turbo, the Foveated rows, hidden area mask, OFXR Bridge, VectorXR); In-game UI (VR) (phase 83); the
+  `FPS counter` row + its group (was "FPS counter settings"; flat / both rows first, then the VR ones); Menu panel (was "Panel
+  settings"); Compare and test (new `MR_CMPGRP`: "DLAA off to compare (not saved)" = the old DLAA on / off row, Game TAA + share +
+  split position + split compares, the three thin-wire switches, DLAA before tonemap); Logging, Language, Hotkeys, Save, Reset, Close.
+  The DLSS upscale row (`MR_UPSCALE`) and its group "Upscaling and VR" are gone: the Mode row cycles off / DLAA / DLSS on the same
+  `g_dlssUpscale`; its hotkey and `dlss_upscale` stay. No dlaa.ini key changed.
+- **Visibility:** `MenuRowMode(id)` (Both / Flat / VR) in `MenuRowVisible`: rows of the other mode (by `MenuVr()`, so the VR main
+  menu / preview counts as VR) are hidden; a group header whose rows are all hidden is hidden; grey keeps its "not applicable right
+  now" meaning. `dlaa.ini menu_show_all = 1` (startup only) shows everything, greyed as before (the settings round-trip test boots
+  with it). After a flat <-> VR flip a hidden selection steps to the next visible row (`MenuBuildPanel`).
+- **Tests:** settings round-trip (show-all, the header list, no DLSS upscale row), `tests/menu_shot.cpp` (the VR layout).
+
 ### The RenderDoc oracle (done in v0.2)
 
 Capture a frame of the unmodified game to learn empirically: which pass writes

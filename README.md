@@ -343,7 +343,7 @@ own thread are not mistaken for the game's.
 - **In the log** (`log_level = 3` or `4`): `VectorXR: layer module ... loaded` when VectorXR's layer shows up in the game (it loads
   when the game creates its OpenXR instance, so it can appear a little after start), `VectorXR: settings found` / `not installed`
   at start, `VectorXR: layer found in the game` once, and `OFXR Bridge / VectorXR: N calls passed through so far`. The tuning
-  menu's `VectorXR (VR layer)` row (group `Upscaling and VR`) shows `found` / `not found` / `off`.
+  menu's `VectorXR (VR layer)` row (group `VR performance`) shows `found` / `not found` / `off`.
 
 Status: tested on a Quest 3 (Virtual Desktop): the game and the mod run with VectorXR's layer loaded. With VectorXR's frame
 generation on, the game itself runs at half the frame rate and VectorXR fills the rest, as SSW / ASW do: on that PC it was no
@@ -566,11 +566,15 @@ it, what it costs or saves. **`Up` / `Down`** select a row,
 | **Hotkey** | The key that does the same thing without the menu, or the `dlaa.ini` key for rows that have no hotkey. |
 | **CPU \| GPU ms** | What this row costs right now, in ms per frame: the CPU figure in **blue**, the GPU figure in **orange**, e.g. `0.12 \| 0.62` (`-` = that side does not apply or is not measured, `...` = still measuring, `off` = switched off, `same` / `no extra` = no extra cost). |
 
-**Categories (phase 43):** the menu is in groups you open and close. `Mode`, `Performance profile` and `DLAA model` are
-always shown. Then come the groups: `Picture` (sharpening, texture sharpness, DLAA area, tonemap, see-through depth),
-`Motion and mirrors`, `Upscaling and VR` (DLSS upscale, DLAA on / off, OFXR Bridge, VectorXR), `VR performance` (Turbo, foveated
-rendering, hidden area mask), `Frame rate and CPU` (Reflex, FPS cap, VR FPS cap, CPU tuning), `Panel settings` and `FPS counter settings`.
-After them: `FPS counter`, `Logging`, `Language`,
+**Categories (phase 84 regroup):** the menu is in groups you open and close, most-used first. `Mode`, `Performance profile` and
+`DLAA model` are always shown. Then come the groups: `Picture` (sharpening, texture sharpness, see-through depth, light glow fix,
+DLAA area), `Motion and mirrors` (part motion, mirror DLAA, mirrors in turns), `Frame rate` (CPU tuning, FPS cap, Reflex, VR FPS
+cap), `VR performance` (Turbo, foveated rendering, hidden area mask, OFXR Bridge, VectorXR), `In-game UI (VR)` (the game's own VR
+HUD / menus placement), then the `FPS counter` row with its `FPS counter` group, `Menu panel`, and `Compare and test` (DLAA off to
+compare, the game's TAA mix / split, the thin-wire switches, DLAA before tonemap -- nothing there is needed for normal driving).
+**Rows of the other mode are hidden:** flat shows no VR rows and VR shows no flat-only rows (`dlaa.ini menu_show_all = 1` shows
+everything, greyed as before). The DLSS upscale row is gone: the `Mode` row (DLAA / DLSS / off) does the same; its hotkey stays.
+After them: `Logging`, `Language`,
 `Save`, `Reset` and `Close`. Select a group and press `Right` to open it, `Left` to close it. A closed group shows `►` and
 `closed (N)` (N = its rows); an open group shows `▼` and `open`, with its rows indented below it. All groups are closed again each time you open the menu.
 
@@ -608,13 +612,13 @@ The three green lines under the title show the game's GPU time per frame, what t
   settings` group shows them; `Right` on it opens the Hotkeys page there. See
   [`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu).
 - **Groups (v0.10.3):** the panel rows (`Panel lock (VR)`, `Panel position X` / `Y`, `Panel size`, `Panel VR depth`, `Panel faces you`,
-  `Menu keys`) sit in the **Panel settings** group and the fps box rows (`FPS counter lock`, `X`, `Y`, `turn`, `tilt`, `rotate`, `size`, `colour`,
+  `Menu keys`) sit in the **Menu panel** group and the fps box rows (`FPS counter lock`, `X`, `Y`, `turn`, `tilt`, `rotate`, `size`, `colour`,
   `brightness`, `distance`) in the
-  **FPS counter settings** group, right under the `FPS counter` row. Both groups are closed every time the menu
+  **FPS counter** group, right under the `FPS counter` row. Both groups are closed every time the menu
   opens: select the group row and press `Right` to show its rows, `Left` to hide them again.
 - Every row calls the same function as its hotkey: the hotkeys keep working while the menu is open, and every change
   beeps and logs exactly like its key. Number rows repeat while you hold `Left` / `Right`.
-- **Move the widgets:** the panel and the fps counter both move. For the panel open `Panel settings` and use the `Panel position X`, `Panel position Y` and `Panel size` rows (and `Panel VR depth` in VR,
+- **Move the widgets:** the panel and the fps counter both move. For the panel open `Menu panel` and use the `Panel position X`, `Panel position Y` and `Panel size` rows (and `Panel VR depth` in VR,
   which brings the panel nearer). Flat and VR keep their own position (`menu_x`, `menu_y`, `menu_scale`,
   `menu_vr_x`, `menu_vr_y`, `menu_vr_scale`, `menu_vr_dist` / `menu_vr_depth`, `menu_vr_face` in `dlaa.ini`).
 - **VR: the panel faces you.** Move it to the side or up / down and it turns towards your eye like a real screen,
@@ -639,7 +643,7 @@ The three green lines under the title show the game's GPU time per frame, what t
 - **Live fps counter:** ![fps counter](docs/images/fps-counter.png) the `FPS counter` row (Right / Left step `Off`, `72 fps + 13.9 ms`, `72 fps`, `13.9 ms`, and the same as plain numbers: `72 + 13.9`, `72`, `13.9`) switches on a small fps box: the fps and the frame time as text with a dark outline, no background (`60 fps` /
   `16.7 ms`, updated twice a second) that stays on screen also when the menu is closed (flat, and in VR in both eyes).
   Its own GPU cost is measured and shown in the row's cost column, per frame (all the pictures it is drawn into together).
-  `FPS counter X`, `FPS counter Y` and `FPS counter size` (in the `FPS counter settings` group) move it; flat and VR keep their own position (`fps_show`,
+  `FPS counter X`, `FPS counter Y` and `FPS counter size` (in the `FPS counter` group) move it; flat and VR keep their own position (`fps_show`,
   `fps_x`, `fps_y`, `fps_scale`, `fps_vr_x`, `fps_vr_y`, `fps_vr_scale` in `dlaa.ini`). Off, it costs nothing.
   The size goes from `0.2` to `3.0`; in VR it starts at `0.3` (small but readable in the headset).
   - **FPS colour:** 20 colours (white, yellow, amber, orange, red, pink, magenta, purple, violet, blue, sky blue, cyan,
@@ -720,7 +724,7 @@ The three green lines under the title show the game's GPU time per frame, what t
   picture that the headset lenses never show (the VR runtime reports them). Fewer pixels drawn = more GPU headroom; what
   you see stays the same. The first time you switch it on, save (`Shift+F12`) and restart the game; after that the row
   switches it live. If your VR runtime has no such mask the row says `not supported`.
-- **Frame rate and CPU** group (all off by default, all live):
+- **Frame rate** group (all off by default, all live):
   - **Reflex (flat)** (`reflex`): `off`, `on`, `on + boost`. NVIDIA only. The game's frames wait less in the GPU queue,
     so the input lag drops when the GPU is the limit. `on + boost` also keeps the GPU clocks up. On another GPU, or a
     driver that refuses it, the row says `not supported`. Not used in VR.

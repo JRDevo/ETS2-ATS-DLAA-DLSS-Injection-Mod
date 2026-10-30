@@ -130,13 +130,8 @@ msgstr "Ruch i szpigle"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Upscaling and VR"
-msgstr "Skalowanie i VR"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "In-game UI (VR)"
-msgstr ""
+msgid "Frame rate"
+msgstr "Ilość klatek"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -145,18 +140,23 @@ msgstr "Wydajność VR"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Frame rate and CPU"
-msgstr "Klatki i CPU"
+msgid "In-game UI (VR)"
+msgstr "Interfejs gry (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Sztelowanie panelu"
+msgid "FPS counter"
+msgstr "Licznik FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "Sztelowanie licznika FPS"
+msgid "Menu panel"
+msgstr "Panel menu"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Compare and test"
+msgstr "Porōwnanie i test"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -244,28 +244,6 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower "
-"it to afford a heavier model or win frame rate; 40 % costs about 40 % of the model. Also sets the "
-"garage / main-menu truck."
-msgstr ""
-"VR: yno srodek kożdego ôka dostŏwŏ DLAA (20 do 100 %); brzeg zostŏwŏ ôbrŏz gry. Zmyńsz, żeby "
-"uciōng cięższy model abo mieć wiyncyj klatek; 40 % kosztuje kole 40 % modelu. Sztelowuje tyż fůra "
-"w garażu / menu głōwnym."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
-"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
-"~60 frames to switch."
-msgstr ""
-"Yno płŏski: DLAA przed bloomym / tonemappingym gry, tōż farby na drógach, drŏty i szyny migocõ "
-"myni. Zmiyń yno do porōwnań. Niy robi z DLSS skalowaniym ani Windows HDR. Taki sam koszt; "
-"przełōnczanie trwŏ kole 60 klatek."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
 "Gives wires, fences and glass their own distance instead of what is behind them, so they do not "
 "smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."
 msgstr ""
@@ -282,6 +260,17 @@ msgstr ""
 "Niy pozwŏlŏ, żeby blask lamp i świateł aut ciōngnōł smugã za sobõ w ruchu: DLSS bierze kożdy "
 "blask z terŏźnyj klatki, niy z historyji. Kroki ôd 25 %; zmyńsz, jak blaski migocõ, 0 = wył. "
 "Kosztuje kole 0,05 - 0,2 ms na ôko."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower "
+"it to afford a heavier model or win frame rate; 40 % costs about 40 % of the model. Also sets the "
+"garage / main-menu truck."
+msgstr ""
+"VR: yno srodek kożdego ôka dostŏwŏ DLAA (20 do 100 %); brzeg zostŏwŏ ôbrŏz gry. Zmyńsz, żeby "
+"uciōng cięższy model abo mieć wiyncyj klatek; 40 % kosztuje kole 40 % modelu. Sztelowuje tyż fůra "
+"w garażu / menu głōwnym."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -328,161 +317,65 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
-"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
-"soft for a moment when it changes."
+"Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
+"the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Cienkie drŏty trzimiõ ruch, jak jedziesz: DLAA rozkłŏdŏ dane ruchu na cienkie linie (dylatacyjŏ "
-"ruchu DLSS). włōn. = domyślnie. wył. = yno do porōwnań; blisko drŏty migocõ barzyj. Ôbrŏz na "
-"chwila miynknie przi zmianie."
+"Ilość klatek i CPU: sztelowanie CPU, limit FPS i NVIDIA Reflex dlŏ trybu płŏskiego, limit FPS "
+"VR. Prawo ôtwiyra grupa, Lewo jã zawiyrŏ; przi kożdym ôtwarciu menu je zawarto."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
-"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
+"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
+"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
+"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
+"cpu_pcore, cpu_priority, cpu_no_throttle."
 msgstr ""
-"Cienkie drŏty dostŏwajõ szpyr na kożdym pikselu, kerego sie tykajõ, niy yno tam, kaj kryjõ srodek "
-"piksela. włōn. = domyślnie. włōn. (bez A2C) = tyż dlŏ przezrŏczistych krawynżni. wył. = yno do "
-"porōwnań; blisko drŏty migocõ barzyj."
+"Trzi przełōncznikie CPU naroz: wōntek głōwny i renderujōncy wolõ rdzynie P (yno hybrydowe CPU "
+"Intela), gra robi z priorytetym Wyżyj normalnego, a Windows niy może jij dławić (EcoQoS) ani "
+"ignorować jij żōdań zygara. Pomŏgŏ, jak limitym je CPU; bez kosztu. Ôsobne sztelunki w dlaa.ini: "
+"cpu_pcore, cpu_priority, cpu_no_throttle."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
-"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
+"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
+"limiting. off = no limit."
 msgstr ""
-"Ekspyrymyntalne: rysuje daleke drŏty cieńsze niż 1 piksel jako linia 1 piksela, coby sie niy "
-"rwały na kreski. Domyślnie wył.: daleke drŏty mogõ być ciymniejsze abo barzyj migotać. Sprōbuj i "
-"porōwnej."
+"Yno tryb płŏski. Trzimie grã nojwyżyj na tyj liczbie klatek: stały czas klatki, myni cepła i "
+"prōndu. Sztelnij trocha pod tym, co PC trzimie w ruchliwym mieście. Przi włōnczōnym Reflex "
+"limituje sterownik NVIDIA. wył. = bez limitu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the "
-"group, Left closes it; it starts closed every time the menu opens."
+"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
+"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
 msgstr ""
-"Skalowanie DLSS, przełōncznik DLAA włōn. / wył. i informacyje ô OFXR Bridge / VectorXR. Prawo "
-"ôtwiyra grupa, Lewo jã zawiyrŏ; przi kożdym ôtwarciu menu je zawarto."
+"Yno tryb płŏski, yno NVIDIA. włōn. = klatki gry krōcij czekajõ w kolejce GPU: myńsze ôpōźnienie "
+"wejścia, jak limitym je GPU. Boost trzimie tyż wysoke zygary GPU. Te same fps; małe koszta. Niy "
+"robi we VR."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than "
-"the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at "
-"Scaling 100 %."
+"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
+"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
+"the fps swings. Turns Turbo off while on."
 msgstr ""
-"DLSS rysuje ôbrŏz nazŏd do pełnyj srogości, jak Skalowanie gry je pod 100 %: ôstrzyj niż włŏsne "
-"rozciōnganie gry, a myni pikseli to wiyncyj fps. Bez dodatkowego kosztu; nic niy robi przi "
-"Skalowaniu 100 %."
+"Yno VR. połowa = gra rysuje co 2. klatka gogli (72 Hz -> 36 fps), trzecia = co 3.; reprojekcyjŏ "
+"gogli (ASW / Motion Smoothing) wypełniŏ resztã we stałym rytmie. Użyj, jak fps sie hupiõ. Na czas "
+"robiynia wyłōnczŏ Turbo."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
-"comparing. Off saves the cost of every part together."
+"VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
+"are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Włōnczŏ abo wyłōnczŏ cały mod i pamiyntŏ tryb; wył. pokazuje ôbrŏz samyj gry, do porōwnań. Wył. "
-"ôszczyndzŏ koszt wszyskich tajli naroz."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
-"right, to compare."
-msgstr ""
-"Yno kej antyaliasing gry je na TAA. wył. = yno mod (ustow AA gry na Wyłōnczone). miks = TAA i "
-"DLAA / DLSS we tyj samyj klatce, pomieszane. podział = z lewyj mod, z prawyj TAA, do porōwnaniŏ."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
-msgstr ""
-"Jako czynść miksu to TAA gry, 0 - 100 % co 10 %: wiyncyj = spokojniyj i miyńczyj (TAA), mynij = "
-"ôstrzyj (DLAA / DLSS). Używane, kej TAA gry je miks, abo podział ze strōnōm miks. Bez dodatkowego "
-"kosztu."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
-"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
-msgstr ""
-"Kaj leży linijŏ podziału TAA gry, 0 - 100 % szyrzki co 5 %: na lewo ôd niyj DLAA / DLSS moda, na "
-"prawo TAA gry. Używane yno kej TAA gry je podział."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
-"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
-"upscaling. Used only when Game TAA is split."
-msgstr ""
-"Co podział TAA gry pokazuje na ôbu strōnach: DLAA | TAA (z lewyj mod, z prawyj TAA gry), miks | "
-"TAA abo DLAA | miks (miks = ôba pomieszane wedle Udziału TAA gry). DLSS na miejsce DLAA przi "
-"skalowaniu. Używane yno kej TAA gry je podział."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"OFXR Bridge = VR frame generation by djules75, a separate download "
-"(github.com/djules75/OFXR-Bridge). found = its layer is loaded in this game and the mod lets its "
-"work pass through. Start its tray app before the game."
-msgstr ""
-"OFXR Bridge = generowanie klatek VR ôd djules75, ôsobne pobranie "
-"(github.com/djules75/OFXR-Bridge). znaleziōne = jego warstwa je załadowano we tyj grze, a mod "
-"przepuszcza jij robota. Włōncz jego aplikacyjõ w zasôbniku przed grõ."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, "
-"Depth, frame generation; found = its layer is loaded in the game and the mod lets its work pass "
-"through. Run only one Turbo (its or the mod's)."
-msgstr ""
-"VectorXR = zestŏw ulepszyń OpenXR ôd DienerTech (github.com/DienerTech/vectorxr): Turbo, szpyr, "
-"generowanie klatek; znaleziōne = jego warstwa je załadowano we grze, a mod przepuszcza jij "
-"robota. Używej yno jednego Turbo (jego abo moda)."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
-"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
-"(the game's menu screens)."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
-"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
-"own values when it exits)."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left "
-"closes it; it starts closed every time the menu opens."
-msgstr ""
-"Przispieszynia VR: Turbo, renderowanie foveated i maska skrytego ôbszaru. Prawo ôtwiyra grupa, "
-"Lewo jã zawiyrŏ; przi kożdym ôtwarciu menu je zawarto."
+"Przispieszynia VR: Turbo, renderowanie foveated, maska skrytego ôbszaru i czy znejdziōne OFXR "
+"Bridge / VectorXR. Prawo ôtwiyra grupa, Lewo jã zawiyrŏ; przi kożdym ôtwarciu menu je zawarto."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -564,125 +457,61 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
+"OFXR Bridge = VR frame generation by djules75, a separate download "
+"(github.com/djules75/OFXR-Bridge). found = its layer is loaded in this game and the mod lets its "
+"work pass through. Start its tray app before the game."
 msgstr ""
-"Limity klatek i CPU: NVIDIA Reflex i limit FPS dlŏ trybu płŏskiego, limit FPS VR, sztelowanie "
-"CPU. Prawo ôtwiyra grupa, Lewo jã zawiyrŏ; przi kożdym ôtwarciu menu je zawarto."
+"OFXR Bridge = generowanie klatek VR ôd djules75, ôsobne pobranie "
+"(github.com/djules75/OFXR-Bridge). znaleziōne = jego warstwa je załadowano we tyj grze, a mod "
+"przepuszcza jij robota. Włōncz jego aplikacyjõ w zasôbniku przed grõ."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
-"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
+"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, "
+"Depth, frame generation; found = its layer is loaded in the game and the mod lets its work pass "
+"through. Run only one Turbo (its or the mod's)."
 msgstr ""
-"Yno tryb płŏski, yno NVIDIA. włōn. = klatki gry krōcij czekajõ w kolejce GPU: myńsze ôpōźnienie "
-"wejścia, jak limitym je GPU. Boost trzimie tyż wysoke zygary GPU. Te same fps; małe koszta. Niy "
-"robi we VR."
+"VectorXR = zestŏw ulepszyń OpenXR ôd DienerTech (github.com/DienerTech/vectorxr): Turbo, szpyr, "
+"generowanie klatek; znaleziōne = jego warstwa je załadowano we grze, a mod przepuszcza jij "
+"robota. Używej yno jednego Turbo (jego abo moda)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
-"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
-"limiting. off = no limit."
+"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
+"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"Yno tryb płŏski. Trzimie grã nojwyżyj na tyj liczbie klatek: stały czas klatki, myni cepła i "
-"prōndu. Sztelnij trocha pod tym, co PC trzimie w ruchliwym mieście. Przi włōnczōnym Reflex "
-"limituje sterownik NVIDIA. wył. = bez limitu."
+"Kaj wisi interfejs VR gry (HUD, menu). Mod wpisuje zmianã do konsoli gry za ciebie; "
+"potrzebuje g_developer i g_console 1 we config.cfg. Prawo ôtwiyra grupa, Lewo jã zawiyrŏ."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
-"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
-"the fps swings. Turns Turbo off while on."
+"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
+"(the game's menu screens)."
 msgstr ""
-"Yno VR. połowa = gra rysuje co 2. klatka gogli (72 Hz -> 36 fps), trzecia = co 3.; reprojekcyjŏ "
-"gogli (ASW / Motion Smoothing) wypełniŏ resztã we stałym rytmie. Użyj, jak fps sie hupiõ. Na czas "
-"robiynia wyłōnczŏ Turbo."
+"Kery ze układōw interfejsu VR gry przesuwajōm placy niżyj: jazda (HUD przi jazdie) abo menu "
+"(ekrany menu gry)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
-"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
-"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
+"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
+"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
-"Trzi przełōncznikie CPU naroz: wōntek głōwny i renderujōncy wolõ rdzynie P (yno hybrydowe CPU "
-"Intela), gra robi z priorytetym Wyżyj normalnego, a Windows niy może jij dławić (EcoQoS) ani "
-"ignorować jij żōdań zygara. Pomŏgŏ, jak limitym je CPU; bez kosztu. Ôsobne sztelunki w dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
+"Przesuwa interfejs VR gry: wysokość, bok, ôdlygłość, nachylynie, ôbrōt, rozmiar abo "
+"krziwiznã, małymi krokami. Gra dostŏwŏ kożdõ zmianã kole 0,4 s po ôstatnim naciśniyńciu: "
+"konsola ôtwiyra sie i zawiyrŏ sama."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
-"it; it starts closed every time the menu opens."
+"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
+"own values when it exits)."
 msgstr ""
-"Pozycyjŏ, srogość, szpyr i kierunek panelu a klawisze menu. Prawo ôtwiyra grupa, Lewo jã zawiyrŏ; "
-"przi kożdym ôtwarciu menu je zawarto."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
-"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
-"metres). Needs the VR layer (default). No cost."
-msgstr ""
-"Yno VR. Za głowõ = panel ruszŏ sie z goglami. Stały w kabinie = zostŏwŏ na jednym placu przed "
-"fotelym, stabilny, jak sie rozglōndŏsz; X / Y / szpyr sztelujõ tyn plac (stopnie, metry). "
-"Potrzebuje warstwy VR (domyślnie). Bez kosztu."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
-"and VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr ""
-"Przesuwŏ panel na boki, w % ekranu (VR stały w kabinie: stopnie wkoło fotela). Płŏski i VR majõ "
-"ôsobne pozycyje. Użyj, jak panel zasłŏnia cosik potrzebnego. Bez kosztu."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
-"VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr ""
-"Przesuwŏ panel w gōra / w dōł, w % ekranu (VR stały w kabinie: stopnie, plus = w dōł). Płŏski i "
-"VR majõ ôsobne pozycyje. Użyj, jak panel zasłŏnia cosik potrzebnego. Bez kosztu."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
-"much. Flat and VR each keep their own size. No cost."
-msgstr ""
-"Zwiynkszŏ abo zmyńszŏ panel. Zwiynksz, jak niy idzie go przeczytać, zmyńsz, jak zasłŏnia za "
-"wiela. Płŏski i VR majõ ôsobne srogości. Bez kosztu."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
-"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
-"Change it if the panel is tiring to look at. No cost."
-msgstr ""
-"Yno VR, tōż we trybie płŏskim zeszarzone. Jak daleko unosi sie panel: w metrach (0,30 - 3,00) "
-"jako warstwa VR, domyślnie; w px przesuniyńcia do srodka na ôko przi menu_vr_layer = 0. Ta sama "
-"srogość na kożdym szpyrze. Zmiyń, jak patrzynie na panel mynczy. Bez kosztu."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
-"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
-"picture. No cost."
-msgstr ""
-"Yno VR, tōż we trybie płŏskim zeszarzone. włōn. = panel ôbraca sie do ciebie, jak go przesuniesz "
-"na bok, ta sama srogość pod kożdym kōntym (jako warstwa VR, domyślnie, tyż pole fps idōnce za "
-"głowõ); wył. = płŏski ôbrŏz. Bez kosztu."
+"Prawo: wszyskie warty ôbu układōw wracajōm do tego, co mioł config.cfg na zôczątku (gra "
+"zapisuje swoje warty przi wyjściu)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -707,39 +536,6 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
-"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
-"Per-part motion vectors). No cost."
-msgstr ""
-"Yno VR. Za głowõ = ruszŏ sie z goglami. Stały w przestrzyni gry = jedyn plac wkoło fotela, "
-"ignoruje kołysanie kabiny. Przymocowany do pojazdu = przilepiōny do kabiny, kołysze sie z nią "
-"(potrzebuje DLAA + wektorōw ruchu tajli). Bez kosztu."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
-"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
-"for every vehicle. No cost."
-msgstr ""
-"VR, yno Przymocowany do pojazdu. włōn. = kożdŏ fůra / auto ma włŏsny plac pola fps w kabinie, "
-"ôbrōt, srogość, farba, jasność i tekst (zapisane w dlaa.ini przi zawarciu menu). wył. = jedyn "
-"wspōlny zestŏw dlŏ wszyskich pojazdōw. Bez kosztu."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
-"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
-"vehicles keep theirs. The box is square to the cab."
-msgstr ""
-"VR, yno Przymocowany do pojazdu. Prawo = zmierz kabina jeszcze roz teraz (siedź spokojnie, na "
-"postoju), jak pole stoji źle. Lewo = pole tego pojazdu nazŏd do domyślnych (plac, ôbrōt, srogość, "
-"farba, tekst); inksze pojazdy zachowujõ swoje. Pole je prostopadłe do kabiny."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
 "Moves the fps box sideways, in % of the screen (VR fixed / attached: degrees around you). Flat "
 "and VR each keep their own position. No cost."
 msgstr ""
@@ -754,34 +550,6 @@ msgid ""
 msgstr ""
 "Przesuwŏ pole fps w gōra / w dōł, w % ekranu (VR stały / przymocowany: stopnie, minus = w gōra). "
 "Płŏski i VR majõ ôsobne pozycyje. Bez kosztu."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
-"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
-msgstr ""
-"Yno VR, tōż we trybie płŏskim zeszarzone. Ôbraca pole fps w lewo / w prawo wkoło swojij ôsi, w "
-"stopniach (+ = jego przōd skryncŏ w prawo). Użyj, coby ustawić pole pod kōntym, jak je z boku. 0 "
-"= patrzi na ciebie. Bez kosztu."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
-"lying on the dashboard). 0 = it faces you. No cost."
-msgstr ""
-"Yno VR, tōż we trybie płŏskim zeszarzone. Przechylŏ pole fps, w stopniach (+ = jego wiyrch "
-"ôdchylŏ sie ôd ciebie, jakby leżało na desce). 0 = patrzi na ciebie. Bez kosztu."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
-"upright. No cost."
-msgstr ""
-"Yno VR, tōż we trybie płŏskim zeszarzone. Ôbraca pole fps we jego płaszczyźnie, w stopniach (+ = "
-"po zygarze). 0 = prosto. Bez kosztu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -823,6 +591,67 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
+"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
+"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
+"Per-part motion vectors). No cost."
+msgstr ""
+"Yno VR. Za głowõ = ruszŏ sie z goglami. Stały w przestrzyni gry = jedyn plac wkoło fotela, "
+"ignoruje kołysanie kabiny. Przymocowany do pojazdu = przilepiōny do kabiny, kołysze sie z nią "
+"(potrzebuje DLAA + wektorōw ruchu tajli). Bez kosztu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
+"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
+"for every vehicle. No cost."
+msgstr ""
+"VR, yno Przymocowany do pojazdu. włōn. = kożdŏ fůra / auto ma włŏsny plac pola fps w kabinie, "
+"ôbrōt, srogość, farba, jasność i tekst (zapisane w dlaa.ini przi zawarciu menu). wył. = jedyn "
+"wspōlny zestŏw dlŏ wszyskich pojazdōw. Bez kosztu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
+"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
+"vehicles keep theirs. The box is square to the cab."
+msgstr ""
+"VR, yno Przymocowany do pojazdu. Prawo = zmierz kabina jeszcze roz teraz (siedź spokojnie, na "
+"postoju), jak pole stoji źle. Lewo = pole tego pojazdu nazŏd do domyślnych (plac, ôbrōt, srogość, "
+"farba, tekst); inksze pojazdy zachowujõ swoje. Pole je prostopadłe do kabiny."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
+"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
+msgstr ""
+"Yno VR, tōż we trybie płŏskim zeszarzone. Ôbraca pole fps w lewo / w prawo wkoło swojij ôsi, w "
+"stopniach (+ = jego przōd skryncŏ w prawo). Użyj, coby ustawić pole pod kōntym, jak je z boku. 0 "
+"= patrzi na ciebie. Bez kosztu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
+"lying on the dashboard). 0 = it faces you. No cost."
+msgstr ""
+"Yno VR, tōż we trybie płŏskim zeszarzone. Przechylŏ pole fps, w stopniach (+ = jego wiyrch "
+"ôdchylŏ sie ôd ciebie, jakby leżało na desce). 0 = patrzi na ciebie. Bez kosztu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
+"upright. No cost."
+msgstr ""
+"Yno VR, tōż we trybie płŏskim zeszarzone. Ôbraca pole fps we jego płaszczyźnie, w stopniach (+ = "
+"po zygarze). 0 = prosto. Bez kosztu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
 "VR only, so greyed in flat. How far away the fps box floats, 0.30 - 3.00 m. It keeps the same "
 "size in your view at every distance; only the depth changes. Put it near the depth you look at to "
 "read it without refocusing. No cost."
@@ -830,6 +659,177 @@ msgstr ""
 "Yno VR, tōż we trybie płŏskim zeszarzone. Jak daleko unosi sie pole fps, 0,30 - 3,00 m. Zachowuje "
 "tã samã srogość w widoku na kożdyj ôdległości; zmiynia sie yno szpyr. Sztelnij blisko szpyru, na "
 "kery patrzisz, coby czytać bez zmiany ôstrości. Bez kosztu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
+"it; it starts closed every time the menu opens."
+msgstr ""
+"Pozycyjŏ, srogość, szpyr i kierunek panelu a klawisze menu. Prawo ôtwiyra grupa, Lewo jã zawiyrŏ; "
+"przi kożdym ôtwarciu menu je zawarto."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
+"and VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr ""
+"Przesuwŏ panel na boki, w % ekranu (VR stały w kabinie: stopnie wkoło fotela). Płŏski i VR majõ "
+"ôsobne pozycyje. Użyj, jak panel zasłŏnia cosik potrzebnego. Bez kosztu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
+"VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr ""
+"Przesuwŏ panel w gōra / w dōł, w % ekranu (VR stały w kabinie: stopnie, plus = w dōł). Płŏski i "
+"VR majõ ôsobne pozycyje. Użyj, jak panel zasłŏnia cosik potrzebnego. Bez kosztu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
+"much. Flat and VR each keep their own size. No cost."
+msgstr ""
+"Zwiynkszŏ abo zmyńszŏ panel. Zwiynksz, jak niy idzie go przeczytać, zmyńsz, jak zasłŏnia za "
+"wiela. Płŏski i VR majõ ôsobne srogości. Bez kosztu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
+"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
+"metres). Needs the VR layer (default). No cost."
+msgstr ""
+"Yno VR. Za głowõ = panel ruszŏ sie z goglami. Stały w kabinie = zostŏwŏ na jednym placu przed "
+"fotelym, stabilny, jak sie rozglōndŏsz; X / Y / szpyr sztelujõ tyn plac (stopnie, metry). "
+"Potrzebuje warstwy VR (domyślnie). Bez kosztu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
+"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
+"Change it if the panel is tiring to look at. No cost."
+msgstr ""
+"Yno VR, tōż we trybie płŏskim zeszarzone. Jak daleko unosi sie panel: w metrach (0,30 - 3,00) "
+"jako warstwa VR, domyślnie; w px przesuniyńcia do srodka na ôko przi menu_vr_layer = 0. Ta sama "
+"srogość na kożdym szpyrze. Zmiyń, jak patrzynie na panel mynczy. Bez kosztu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
+"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
+"picture. No cost."
+msgstr ""
+"Yno VR, tōż we trybie płŏskim zeszarzone. włōn. = panel ôbraca sie do ciebie, jak go przesuniesz "
+"na bok, ta sama srogość pod kożdym kōntym (jako warstwa VR, domyślnie, tyż pole fps idōnce za "
+"głowõ); wył. = płŏski ôbrŏz. Bez kosztu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches for A/B checks: DLAA off, the game's own TAA mixed in or side by side, the thin-wire "
+"switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
+"group, Left closes it."
+msgstr ""
+"Przełōnczniki do testōw A/B: DLAA wył., ôrginalne TAA gry domieszane abo ôbok siebie, "
+"przełōnczniki cienkich drŏtōw, DLAA przed tonemap. Nic stōnd niy je potrzebne do normalnyj "
+"jazdy. Prawo ôtwiyra grupa, Lewo jã zawiyrŏ."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
+"comparing. Off saves the cost of every part together."
+msgstr ""
+"Włōnczŏ abo wyłōnczŏ cały mod i pamiyntŏ tryb; wył. pokazuje ôbrŏz samyj gry, do porōwnań. Wył. "
+"ôszczyndzŏ koszt wszyskich tajli naroz."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
+msgstr ""
+"Yno kej antyaliasing gry je na TAA. wył. = yno mod (ustow AA gry na Wyłōnczone). miks = TAA i "
+"DLAA / DLSS we tyj samyj klatce, pomieszane. podział = z lewyj mod, z prawyj TAA, do porōwnaniŏ."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
+msgstr ""
+"Jako czynść miksu to TAA gry, 0 - 100 % co 10 %: wiyncyj = spokojniyj i miyńczyj (TAA), mynij = "
+"ôstrzyj (DLAA / DLSS). Używane, kej TAA gry je miks, abo podział ze strōnōm miks. Bez dodatkowego "
+"kosztu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+"Kaj leży linijŏ podziału TAA gry, 0 - 100 % szyrzki co 5 %: na lewo ôd niyj DLAA / DLSS moda, na "
+"prawo TAA gry. Używane yno kej TAA gry je podział."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"Co podział TAA gry pokazuje na ôbu strōnach: DLAA | TAA (z lewyj mod, z prawyj TAA gry), miks | "
+"TAA abo DLAA | miks (miks = ôba pomieszane wedle Udziału TAA gry). DLSS na miejsce DLAA przi "
+"skalowaniu. Używane yno kej TAA gry je podział."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
+"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
+"soft for a moment when it changes."
+msgstr ""
+"Cienkie drŏty trzimiõ ruch, jak jedziesz: DLAA rozkłŏdŏ dane ruchu na cienkie linie (dylatacyjŏ "
+"ruchu DLSS). włōn. = domyślnie. wył. = yno do porōwnań; blisko drŏty migocõ barzyj. Ôbrŏz na "
+"chwila miynknie przi zmianie."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
+"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
+msgstr ""
+"Cienkie drŏty dostŏwajõ szpyr na kożdym pikselu, kerego sie tykajõ, niy yno tam, kaj kryjõ srodek "
+"piksela. włōn. = domyślnie. włōn. (bez A2C) = tyż dlŏ przezrŏczistych krawynżni. wył. = yno do "
+"porōwnań; blisko drŏty migocõ barzyj."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
+"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+msgstr ""
+"Ekspyrymyntalne: rysuje daleke drŏty cieńsze niż 1 piksel jako linia 1 piksela, coby sie niy "
+"rwały na kreski. Domyślnie wył.: daleke drŏty mogõ być ciymniejsze abo barzyj migotać. Sprōbuj i "
+"porōwnej."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
+"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
+"~60 frames to switch."
+msgstr ""
+"Yno płŏski: DLAA przed bloomym / tonemappingym gry, tōż farby na drógach, drŏty i szyny migocõ "
+"myni. Zmiyń yno do porōwnań. Niy robi z DLSS skalowaniym ani Windows HDR. Taki sam koszt; "
+"przełōnczanie trwŏ kole 60 klatek."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1042,11 +1042,6 @@ msgstr "wył."
 msgid "same"
 msgstr "tak samo"
 
-#. Cost column cell (about 10 Latin characters)
-#: src/inject.cpp
-msgid "no extra"
-msgstr "bez dodatku"
-
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
@@ -1189,7 +1184,7 @@ msgstr "Zeszarzone we VR: VR zawdy robi DLAA na gotowym ôbrazie."
 #: src/inject.cpp
 #, c-format
 msgid "Greyed: VR only."
-msgstr ""
+msgstr "Zeszarzone: yno VR."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1198,12 +1193,14 @@ msgid ""
 "Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
 "game is closed."
 msgstr ""
+"Zeszarzone: konsola gry je wyłōnczono. Ustow g_developer i g_console na \"1\" we config.cfg, "
+"jak gra je zawarto."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Sending to the game's console..."
-msgstr ""
+msgstr "Wysyłanie do konsoli gry..."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1458,18 +1455,6 @@ msgstr "Niydostympne: tyn runtime VR niy zgłŏszŏ skrytego ôbszaru."
 #, c-format
 msgid "Off now: every pixel is drawn."
 msgstr "Terŏz wył.: rysowany je kożdy piksel."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now (the mod is off)."
-msgstr "Terŏz wył. (mod je wył.)."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-msgstr "Terŏz wył.: pod Skalowaniym 100 %% używane je rozciōnganie gry."
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2064,6 +2049,11 @@ msgstr "Poprawka smug ôd świateł"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "DLAA off to compare (not saved)"
+msgstr "DLAA wył. (niy zapisuje sie)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Game TAA"
 msgstr "TAA gry"
 
@@ -2133,62 +2123,62 @@ msgstr "VectorXR (warstwa VR)"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Layout"
-msgstr ""
+msgstr "Układ"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "driving"
-msgstr ""
+msgstr "jazda"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "menus"
-msgstr ""
+msgstr "menu"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Height"
-msgstr ""
+msgstr "Wysokość"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Side"
-msgstr ""
+msgstr "Bok"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Distance"
-msgstr ""
+msgstr "Ôdlygłość"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Tilt"
-msgstr ""
+msgstr "Nachylynie"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Turn"
-msgstr ""
+msgstr "Ôbrōt"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Size"
-msgstr ""
+msgstr "Rozmiar"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Curve"
-msgstr ""
+msgstr "Krziwizna"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Reset to config.cfg"
-msgstr ""
+msgstr "Nazôd do config.cfg"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Right"
-msgstr ""
+msgstr "Prawo"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2372,6 +2362,11 @@ msgstr "auto (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel settings"
+msgstr "Sztelowanie panelu"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Panel lock (VR)"
 msgstr "Zamek panelu (VR)"
 
@@ -2432,15 +2427,15 @@ msgstr "Panel ku tobie (VR)"
 msgid "Menu keys"
 msgstr "Klawisze menu"
 
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter"
-msgstr "Licznik FPS"
-
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "Off"
 msgstr "Wył."
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS counter settings"
+msgstr "Sztelowanie licznika FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2629,4 +2624,31 @@ msgstr "info"
 #: src/log.h
 msgid "debug"
 msgstr "debug"
+
+#~ msgid "Upscaling and VR"
+#~ msgstr "Skalowanie i VR"
+
+#~ msgid "Frame rate and CPU"
+#~ msgstr "Klatki i CPU"
+
+#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "Skalowanie DLSS, przełōncznik DLAA włōn. / wył. i informacyje ô OFXR Bridge / VectorXR. Prawo ôtwiyra grupa, Lewo jã zawiyrŏ; przi kożdym ôtwarciu menu je zawarto."
+
+#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
+#~ msgstr "DLSS rysuje ôbrŏz nazŏd do pełnyj srogości, jak Skalowanie gry je pod 100 %: ôstrzyj niż włŏsne rozciōnganie gry, a myni pikseli to wiyncyj fps. Bez dodatkowego kosztu; nic niy robi przi Skalowaniu 100 %."
+
+#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "Przispieszynia VR: Turbo, renderowanie foveated i maska skrytego ôbszaru. Prawo ôtwiyra grupa, Lewo jã zawiyrŏ; przi kożdym ôtwarciu menu je zawarto."
+
+#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "Limity klatek i CPU: NVIDIA Reflex i limit FPS dlŏ trybu płŏskiego, limit FPS VR, sztelowanie CPU. Prawo ôtwiyra grupa, Lewo jã zawiyrŏ; przi kożdym ôtwarciu menu je zawarto."
+
+#~ msgid "no extra"
+#~ msgstr "bez dodatku"
+
+#~ msgid "Off now (the mod is off)."
+#~ msgstr "Terŏz wył. (mod je wył.)."
+
+#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
+#~ msgstr "Terŏz wył.: pod Skalowaniym 100 %% używane je rozciōnganie gry."
 

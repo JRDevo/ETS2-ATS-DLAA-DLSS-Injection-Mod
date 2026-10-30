@@ -130,13 +130,8 @@ msgstr "Рух і дзеркала"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Upscaling and VR"
-msgstr "Масштабування і VR"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "In-game UI (VR)"
-msgstr ""
+msgid "Frame rate"
+msgstr "Частота кадрів"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -145,18 +140,23 @@ msgstr "Продуктивність VR"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Frame rate and CPU"
-msgstr "Частота кадрів і CPU"
+msgid "In-game UI (VR)"
+msgstr "Інтерфейс гри (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Налаштування панелі"
+msgid "FPS counter"
+msgstr "Лічильник FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "Налаштування FPS"
+msgid "Menu panel"
+msgstr "Панель меню"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Compare and test"
+msgstr "Порівняння і тест"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -241,28 +241,6 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower "
-"it to afford a heavier model or win frame rate; 40 % costs about 40 % of the model. Also sets the "
-"garage / main-menu truck."
-msgstr ""
-"VR: DLAA отримує лише середина кожного ока (20-100 %), краї лишаються як у грі. Менше = можна "
-"важчу модель або більше fps; 40 % коштує близько 40 % моделі. Задає й вантажівку в гаражі / "
-"головному меню."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
-"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
-"~60 frames to switch."
-msgstr ""
-"Лише плаский режим: DLAA до блуму / тонмапінгу гри, розмітка, дроти й рейки мерехтять менше. "
-"Змінюйте лише для порівняння. Не з апскейлом DLSS і не з Windows HDR. Ціна та сама; перемикання "
-"~60 кадрів."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
 "Gives wires, fences and glass their own distance instead of what is behind them, so they do not "
 "smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."
 msgstr ""
@@ -278,6 +256,17 @@ msgid ""
 msgstr ""
 "Прибирає шлейф за сяйвом ліхтарів і фар під час руху: DLSS бере сяйво з поточного кадру, а не з "
 "історії. Крок 25 %; нижче, якщо сяйво мерехтить, 0 = вимк. Близько 0,05 - 0,2 мс на око."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower "
+"it to afford a heavier model or win frame rate; 40 % costs about 40 % of the model. Also sets the "
+"garage / main-menu truck."
+msgstr ""
+"VR: DLAA отримує лише середина кожного ока (20-100 %), краї лишаються як у грі. Менше = можна "
+"важчу модель або більше fps; 40 % коштує близько 40 % моделі. Задає й вантажівку в гаражі / "
+"головному меню."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -324,162 +313,66 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
-"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
-"soft for a moment when it changes."
+"Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
+"the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Тонкі дроти зберігають рух під час їзди: DLAA розтягує дані руху на тонкі лінії (розширення руху "
-"DLSS). увімк. = типово. вимк. = лише для порівняння; ближні дроти мерехтять сильніше. Під час "
-"зміни картинка ненадовго м'яка."
+"Частота кадрів і CPU: налаштування CPU, ліміт FPS і NVIDIA Reflex для плаского режиму, ліміт "
+"FPS VR. Вправо відкриває групу, вліво закриває; при кожному відкритті меню вона закрита."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
-"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
+"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
+"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
+"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
+"cpu_pcore, cpu_priority, cpu_no_throttle."
 msgstr ""
-"Тонкі дроти отримують глибину в кожному зачепленому пікселі, а не лише там, де покривають центр "
-"пікселя. увімк. = типово. увімк. (без A2C) = і для прозорих країв. вимк. = лише для порівняння; "
-"ближні дроти мерехтять сильніше."
+"Три перемикачі CPU разом: головний і рендер-потоки віддають перевагу P-ядрам (лише гібридні CPU "
+"Intel), гра працює з пріоритетом «Вище за звичайний», а Windows не душить її (EcoQoS) і не "
+"ігнорує її запити таймера. Допомагає, коли впираєтесь у CPU; без витрат. Окремо в dlaa.ini: "
+"cpu_pcore, cpu_priority, cpu_no_throttle."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
-"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
+"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
+"limiting. off = no limit."
 msgstr ""
-"Експеримент: далекі дроти тонші за 1 піксель малюються лінією в 1 піксель, щоб не рватися на "
-"штрихи. Типово вимк.: далекі дроти можуть бути темнішими або мерехтіти сильніше. Спробуйте й "
-"порівняйте."
+"Лише плаский режим. Тримає гру не вище за цю частоту кадрів: рівний час кадру, менше нагріву й "
+"енергії. Ставте трохи нижче за те, що ПК тримає в жвавому місті. З Reflex ліміт ставить драйвер "
+"NVIDIA. вимк. = без ліміту."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the "
-"group, Left closes it; it starts closed every time the menu opens."
+"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
+"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
 msgstr ""
-"Масштабування DLSS, перемикач DLAA увімк. / вимк. і відомості про OFXR Bridge / VectorXR. Вправо "
-"відкриває групу, вліво закриває; при кожному відкритті меню вона закрита."
+"Лише плаский режим, лише NVIDIA. Увімк. = кадри гри менше чекають у черзі GPU: менша затримка "
+"вводу, коли впираєтесь у GPU. Boost ще тримає частоти GPU. Той самий fps; невелика ціна. У VR не "
+"працює."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than "
-"the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at "
-"Scaling 100 %."
+"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
+"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
+"the fps swings. Turns Turbo off while on."
 msgstr ""
-"DLSS домальовує картинку до повного розміру, коли «Масштабування» в грі нижче 100 %: чіткіше за "
-"рідне розтягування гри, а менше пікселів = більше fps. Без додаткового навантаження; при 100 % "
-"нічого не робить."
+"Лише VR. половина = гра малює кожен 2-й кадр шолома (72 Гц -> 36 fps), третина = кожен 3-й; "
+"репроєкція шолома (ASW / Motion Smoothing) заповнює решту в рівному ритмі. Користуйтеся при "
+"стрибках fps. Поки ввімкнено, Turbo вимк."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
-"comparing. Off saves the cost of every part together."
+"VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
+"are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Вмикає й вимикає весь мод та пам'ятає режим; вимк. показує рідну картинку гри, для порівняння. "
-"Вимк. прибирає витрати всіх частин разом."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
-"right, to compare."
-msgstr ""
-"Лише коли згладжування гри встановлено на TAA. вимк. = лише мод (поставте AA гри на Вимкнено). "
-"мікс = TAA і DLAA / DLSS в одному кадрі, змішані. поділ = ліворуч мод, праворуч TAA, для "
-"порівняння."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
-msgstr ""
-"Яка частка міксу припадає на TAA гри, 0 - 100 % кроком 10 %: більше = спокійніше й м'якше (TAA), "
-"менше = різкіше (DLAA / DLSS). Використовується, коли TAA гри = мікс, або поділ зі стороною мікс. "
-"Без додаткових витрат."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
-"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
-msgstr ""
-"Де проходить лінія поділу TAA гри, 0 - 100 % ширини кроком 5 %: ліворуч від неї DLAA / DLSS мода, "
-"праворуч TAA гри. Використовується лише коли TAA гри = поділ."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
-"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
-"upscaling. Used only when Game TAA is split."
-msgstr ""
-"Що показує TAA гри в режимі поділу з двох боків: DLAA | TAA (ліворуч мод, праворуч TAA гри), мікс "
-"| TAA або DLAA | мікс (мікс = обидва, змішані за Часткою TAA гри). DLSS замість DLAA при "
-"масштабуванні. Використовується лише коли TAA гри = поділ."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"OFXR Bridge = VR frame generation by djules75, a separate download "
-"(github.com/djules75/OFXR-Bridge). found = its layer is loaded in this game and the mod lets its "
-"work pass through. Start its tray app before the game."
-msgstr ""
-"OFXR Bridge = генерація кадрів для VR від djules75, окреме завантаження "
-"(github.com/djules75/OFXR-Bridge). знайдено = його шар завантажено в грі, мод не заважає його "
-"роботі. Запустіть його трей-програму до гри."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, "
-"Depth, frame generation; found = its layer is loaded in the game and the mod lets its work pass "
-"through. Run only one Turbo (its or the mod's)."
-msgstr ""
-"VectorXR = набір покращень OpenXR від DienerTech (github.com/DienerTech/vectorxr): Turbo, "
-"глибина, генерація кадрів; знайдено = його шар завантажено в грі, мод не заважає його роботі. "
-"Вмикайте лише один Turbo (його або мода)."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
-"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
-"(the game's menu screens)."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
-"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
-"own values when it exits)."
-msgstr ""
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left "
-"closes it; it starts closed every time the menu opens."
-msgstr ""
-"Прискорення VR: Turbo, фовеальний рендеринг і маска прихованої області. Вправо відкриває групу, "
-"вліво закриває; при кожному відкритті меню вона закрита."
+"Прискорення VR: Turbo, фовеальний рендеринг, маска прихованої області і чи знайдено OFXR "
+"Bridge / VectorXR. Вправо відкриває групу, вліво закриває; при кожному відкритті меню вона "
+"закрита."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -561,125 +454,61 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
+"OFXR Bridge = VR frame generation by djules75, a separate download "
+"(github.com/djules75/OFXR-Bridge). found = its layer is loaded in this game and the mod lets its "
+"work pass through. Start its tray app before the game."
 msgstr ""
-"Ліміти частоти кадрів і CPU: NVIDIA Reflex та ліміт FPS для плаского режиму, ліміт FPS VR, "
-"налаштування CPU. Вправо відкриває групу, вліво закриває; при кожному відкритті меню вона закрита."
+"OFXR Bridge = генерація кадрів для VR від djules75, окреме завантаження "
+"(github.com/djules75/OFXR-Bridge). знайдено = його шар завантажено в грі, мод не заважає його "
+"роботі. Запустіть його трей-програму до гри."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
-"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
+"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, "
+"Depth, frame generation; found = its layer is loaded in the game and the mod lets its work pass "
+"through. Run only one Turbo (its or the mod's)."
 msgstr ""
-"Лише плаский режим, лише NVIDIA. Увімк. = кадри гри менше чекають у черзі GPU: менша затримка "
-"вводу, коли впираєтесь у GPU. Boost ще тримає частоти GPU. Той самий fps; невелика ціна. У VR не "
-"працює."
+"VectorXR = набір покращень OpenXR від DienerTech (github.com/DienerTech/vectorxr): Turbo, "
+"глибина, генерація кадрів; знайдено = його шар завантажено в грі, мод не заважає його роботі. "
+"Вмикайте лише один Turbo (його або мода)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
-"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
-"limiting. off = no limit."
+"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
+"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"Лише плаский режим. Тримає гру не вище за цю частоту кадрів: рівний час кадру, менше нагріву й "
-"енергії. Ставте трохи нижче за те, що ПК тримає в жвавому місті. З Reflex ліміт ставить драйвер "
-"NVIDIA. вимк. = без ліміту."
+"Де висить власний VR-інтерфейс гри (HUD, меню). Мод вводить зміну в консоль гри за вас; "
+"потрібні g_developer і g_console 1 у config.cfg. Вправо відкриває групу, вліво закриває."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
-"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
-"the fps swings. Turns Turbo off while on."
+"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
+"(the game's menu screens)."
 msgstr ""
-"Лише VR. половина = гра малює кожен 2-й кадр шолома (72 Гц -> 36 fps), третина = кожен 3-й; "
-"репроєкція шолома (ASW / Motion Smoothing) заповнює решту в рівному ритмі. Користуйтеся при "
-"стрибках fps. Поки ввімкнено, Turbo вимк."
+"Яку з розкладок VR-інтерфейсу гри рухають рядки нижче: їзда (HUD під час їзди) або меню "
+"(екрани меню гри)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
-"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
-"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
+"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
+"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
-"Три перемикачі CPU разом: головний і рендер-потоки віддають перевагу P-ядрам (лише гібридні CPU "
-"Intel), гра працює з пріоритетом «Вище за звичайний», а Windows не душить її (EcoQoS) і не "
-"ігнорує її запити таймера. Допомагає, коли впираєтесь у CPU; без витрат. Окремо в dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
+"Рухає VR-інтерфейс гри: висота, сторона, відстань, нахил, поворот, розмір або кривина, "
+"маленькими кроками. Гра отримує кожну зміну приблизно через 0,4 с після останнього "
+"натискання: консоль сама відкривається і закривається."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
-"it; it starts closed every time the menu opens."
+"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
+"own values when it exits)."
 msgstr ""
-"Положення, розмір, глибина панелі, поворот до вас і клавіші меню. Вправо відкриває групу, вліво "
-"закриває; при кожному відкритті меню вона закрита."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
-"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
-"metres). Needs the VR layer (default). No cost."
-msgstr ""
-"Лише VR. За головою = панель рухається з шоломом. У кабіні = стоїть на одному місці перед "
-"сидінням, нерухома під час поворотів голови; X / Y / глибина задають це місце (градуси, метри). "
-"Потрібен шар VR (типово). Без витрат."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
-"and VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr ""
-"Зсуває панель убік, у % екрана (VR, у кабіні: градуси навколо сидіння). Плаский режим і VR "
-"зберігають свої положення. Користуйтеся, якщо панель закриває потрібне. Без витрат."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
-"VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr ""
-"Зсуває панель угору / вниз, у % екрана (VR, у кабіні: градуси, плюс = вниз). Плаский режим і VR "
-"зберігають свої положення. Користуйтеся, якщо панель закриває потрібне. Без витрат."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
-"much. Flat and VR each keep their own size. No cost."
-msgstr ""
-"Збільшує або зменшує панель. Збільште, якщо не прочитати, зменште, якщо закриває багато. Плаский "
-"режим і VR зберігають свій розмір. Без витрат."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
-"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
-"Change it if the panel is tiring to look at. No cost."
-msgstr ""
-"Лише VR, у пласкому сіро. Як далеко ширяє панель: у метрах (0,30 - 3,00) як шар VR, типово; у px "
-"зсуву всередину на око при menu_vr_layer = 0. Розмір однаковий на будь-якій глибині. Змінюйте, "
-"якщо на панель втомливо дивитись. Без витрат."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
-"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
-"picture. No cost."
-msgstr ""
-"Лише VR, у пласкому сіро. Увімк. = панель повертається до вас при зсуві вбік, розмір однаковий "
-"під будь-яким кутом (як шар VR, типово, і лічильник fps за головою); вимк. = пласка картинка. Без "
-"витрат."
+"Вправо: усі значення обох розкладок повертаються до тих, що були в config.cfg на початку (гра "
+"зберігає власні значення під час виходу)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -704,39 +533,6 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
-"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
-"Per-part motion vectors). No cost."
-msgstr ""
-"Лише VR. За головою = рухається з шоломом. У просторі = одне місце навколо сидіння, не гойдається "
-"з кабіною. До авто = приклеєний до кабіни, гойдається з нею (потрібні DLAA + вектори руху по "
-"частинах). Без витрат."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
-"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
-"for every vehicle. No cost."
-msgstr ""
-"VR, лише «До авто». Увімк. = у кожної вантажівки / авто своє місце лічильника fps у кабіні, "
-"поворот, розмір, колір, яскравість і текст (у dlaa.ini при закритті меню). Вимк. = один спільний "
-"набір для всіх. Без витрат."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
-"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
-"vehicles keep theirs. The box is square to the cab."
-msgstr ""
-"VR, лише «До авто». Вправо = заново виміряти кабіну зараз (сидіть нерухомо на стоянці), якщо "
-"віконце зміщене. Вліво = віконце цього авто до типових (місце, поворот, розмір, колір, текст); в "
-"інших авто лишається своє. Віконце рівно до кабіни."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
 "Moves the fps box sideways, in % of the screen (VR fixed / attached: degrees around you). Flat "
 "and VR each keep their own position. No cost."
 msgstr ""
@@ -751,33 +547,6 @@ msgid ""
 msgstr ""
 "Зсуває віконце fps угору / вниз, у % екрана (VR у просторі / до авто: градуси, мінус = угору). "
 "Плаский режим і VR зберігають свої положення. Без витрат."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
-"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
-msgstr ""
-"Лише VR, у пласкому сіро. Повертає віконце fps ліворуч / праворуч навколо себе, у градусах (+ = "
-"обличчям праворуч). Для нахилу, коли воно збоку. 0 = дивиться на вас. Без витрат."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
-"lying on the dashboard). 0 = it faces you. No cost."
-msgstr ""
-"Лише VR, у пласкому сіро. Нахиляє віконце fps, у градусах (+ = верх іде від вас, наче лежить на "
-"торпеді). 0 = дивиться на вас. Без витрат."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
-"upright. No cost."
-msgstr ""
-"Лише VR, у пласкому сіро. Обертає віконце fps у його площині, у градусах (+ = за годинниковою). 0 "
-"= рівно. Без витрат."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -819,6 +588,66 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
+"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
+"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
+"Per-part motion vectors). No cost."
+msgstr ""
+"Лише VR. За головою = рухається з шоломом. У просторі = одне місце навколо сидіння, не гойдається "
+"з кабіною. До авто = приклеєний до кабіни, гойдається з нею (потрібні DLAA + вектори руху по "
+"частинах). Без витрат."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
+"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
+"for every vehicle. No cost."
+msgstr ""
+"VR, лише «До авто». Увімк. = у кожної вантажівки / авто своє місце лічильника fps у кабіні, "
+"поворот, розмір, колір, яскравість і текст (у dlaa.ini при закритті меню). Вимк. = один спільний "
+"набір для всіх. Без витрат."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
+"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
+"vehicles keep theirs. The box is square to the cab."
+msgstr ""
+"VR, лише «До авто». Вправо = заново виміряти кабіну зараз (сидіть нерухомо на стоянці), якщо "
+"віконце зміщене. Вліво = віконце цього авто до типових (місце, поворот, розмір, колір, текст); в "
+"інших авто лишається своє. Віконце рівно до кабіни."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
+"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
+msgstr ""
+"Лише VR, у пласкому сіро. Повертає віконце fps ліворуч / праворуч навколо себе, у градусах (+ = "
+"обличчям праворуч). Для нахилу, коли воно збоку. 0 = дивиться на вас. Без витрат."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
+"lying on the dashboard). 0 = it faces you. No cost."
+msgstr ""
+"Лише VR, у пласкому сіро. Нахиляє віконце fps, у градусах (+ = верх іде від вас, наче лежить на "
+"торпеді). 0 = дивиться на вас. Без витрат."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
+"upright. No cost."
+msgstr ""
+"Лише VR, у пласкому сіро. Обертає віконце fps у його площині, у градусах (+ = за годинниковою). 0 "
+"= рівно. Без витрат."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
 "VR only, so greyed in flat. How far away the fps box floats, 0.30 - 3.00 m. It keeps the same "
 "size in your view at every distance; only the depth changes. Put it near the depth you look at to "
 "read it without refocusing. No cost."
@@ -826,6 +655,178 @@ msgstr ""
 "Лише VR, у пласкому сіро. Як далеко ширяє віконце fps, 0,30 - 3,00 м. У вашому полі зору розмір "
 "однаковий на будь-якій дистанції; змінюється лише глибина. Поставте на глибину, куди дивитесь: "
 "читається без зміни фокуса. Без витрат."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
+"it; it starts closed every time the menu opens."
+msgstr ""
+"Положення, розмір, глибина панелі, поворот до вас і клавіші меню. Вправо відкриває групу, вліво "
+"закриває; при кожному відкритті меню вона закрита."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
+"and VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr ""
+"Зсуває панель убік, у % екрана (VR, у кабіні: градуси навколо сидіння). Плаский режим і VR "
+"зберігають свої положення. Користуйтеся, якщо панель закриває потрібне. Без витрат."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
+"VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr ""
+"Зсуває панель угору / вниз, у % екрана (VR, у кабіні: градуси, плюс = вниз). Плаский режим і VR "
+"зберігають свої положення. Користуйтеся, якщо панель закриває потрібне. Без витрат."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
+"much. Flat and VR each keep their own size. No cost."
+msgstr ""
+"Збільшує або зменшує панель. Збільште, якщо не прочитати, зменште, якщо закриває багато. Плаский "
+"режим і VR зберігають свій розмір. Без витрат."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
+"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
+"metres). Needs the VR layer (default). No cost."
+msgstr ""
+"Лише VR. За головою = панель рухається з шоломом. У кабіні = стоїть на одному місці перед "
+"сидінням, нерухома під час поворотів голови; X / Y / глибина задають це місце (градуси, метри). "
+"Потрібен шар VR (типово). Без витрат."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
+"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
+"Change it if the panel is tiring to look at. No cost."
+msgstr ""
+"Лише VR, у пласкому сіро. Як далеко ширяє панель: у метрах (0,30 - 3,00) як шар VR, типово; у px "
+"зсуву всередину на око при menu_vr_layer = 0. Розмір однаковий на будь-якій глибині. Змінюйте, "
+"якщо на панель втомливо дивитись. Без витрат."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
+"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
+"picture. No cost."
+msgstr ""
+"Лише VR, у пласкому сіро. Увімк. = панель повертається до вас при зсуві вбік, розмір однаковий "
+"під будь-яким кутом (як шар VR, типово, і лічильник fps за головою); вимк. = пласка картинка. Без "
+"витрат."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches for A/B checks: DLAA off, the game's own TAA mixed in or side by side, the thin-wire "
+"switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
+"group, Left closes it."
+msgstr ""
+"Перемикачі для перевірок A/B: DLAA вимк., власний TAA гри в суміші або поруч, перемикачі "
+"тонких дротів, DLAA до тонмапінгу. Для звичайної їзди тут нічого не потрібно. Вправо "
+"відкриває групу, вліво закриває."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
+"comparing. Off saves the cost of every part together."
+msgstr ""
+"Вмикає й вимикає весь мод та пам'ятає режим; вимк. показує рідну картинку гри, для порівняння. "
+"Вимк. прибирає витрати всіх частин разом."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
+msgstr ""
+"Лише коли згладжування гри встановлено на TAA. вимк. = лише мод (поставте AA гри на Вимкнено). "
+"мікс = TAA і DLAA / DLSS в одному кадрі, змішані. поділ = ліворуч мод, праворуч TAA, для "
+"порівняння."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
+"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
+msgstr ""
+"Яка частка міксу припадає на TAA гри, 0 - 100 % кроком 10 %: більше = спокійніше й м'якше (TAA), "
+"менше = різкіше (DLAA / DLSS). Використовується, коли TAA гри = мікс, або поділ зі стороною мікс. "
+"Без додаткових витрат."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+"Де проходить лінія поділу TAA гри, 0 - 100 % ширини кроком 5 %: ліворуч від неї DLAA / DLSS мода, "
+"праворуч TAA гри. Використовується лише коли TAA гри = поділ."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
+"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
+"upscaling. Used only when Game TAA is split."
+msgstr ""
+"Що показує TAA гри в режимі поділу з двох боків: DLAA | TAA (ліворуч мод, праворуч TAA гри), мікс "
+"| TAA або DLAA | мікс (мікс = обидва, змішані за Часткою TAA гри). DLSS замість DLAA при "
+"масштабуванні. Використовується лише коли TAA гри = поділ."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
+"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
+"soft for a moment when it changes."
+msgstr ""
+"Тонкі дроти зберігають рух під час їзди: DLAA розтягує дані руху на тонкі лінії (розширення руху "
+"DLSS). увімк. = типово. вимк. = лише для порівняння; ближні дроти мерехтять сильніше. Під час "
+"зміни картинка ненадовго м'яка."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
+"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
+msgstr ""
+"Тонкі дроти отримують глибину в кожному зачепленому пікселі, а не лише там, де покривають центр "
+"пікселя. увімк. = типово. увімк. (без A2C) = і для прозорих країв. вимк. = лише для порівняння; "
+"ближні дроти мерехтять сильніше."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
+"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+msgstr ""
+"Експеримент: далекі дроти тонші за 1 піксель малюються лінією в 1 піксель, щоб не рватися на "
+"штрихи. Типово вимк.: далекі дроти можуть бути темнішими або мерехтіти сильніше. Спробуйте й "
+"порівняйте."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
+"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
+"~60 frames to switch."
+msgstr ""
+"Лише плаский режим: DLAA до блуму / тонмапінгу гри, розмітка, дроти й рейки мерехтять менше. "
+"Змінюйте лише для порівняння. Не з апскейлом DLSS і не з Windows HDR. Ціна та сама; перемикання "
+"~60 кадрів."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1038,11 +1039,6 @@ msgstr "вимк."
 msgid "same"
 msgstr "так само"
 
-#. Cost column cell (about 10 Latin characters)
-#: src/inject.cpp
-msgid "no extra"
-msgstr "без дод."
-
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
@@ -1185,7 +1181,7 @@ msgstr "Сіро у VR: VR завжди застосовує DLAA до гото�
 #: src/inject.cpp
 #, c-format
 msgid "Greyed: VR only."
-msgstr ""
+msgstr "Сіро: лише VR."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1194,12 +1190,14 @@ msgid ""
 "Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
 "game is closed."
 msgstr ""
+"Сіро: консоль гри вимкнена. Задайте g_developer і g_console рівними \"1\" у config.cfg, поки "
+"гра закрита."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Sending to the game's console..."
-msgstr ""
+msgstr "Надсилання в консоль гри..."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1454,18 +1452,6 @@ msgstr "Недоступно: середовище VR не повідомляє 
 #, c-format
 msgid "Off now: every pixel is drawn."
 msgstr "Зараз вимк.: малюється кожен піксель."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now (the mod is off)."
-msgstr "Зараз вимк. (мод вимк.)."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-msgstr "Зараз вимк.: нижче «Масштабування» 100 %% працює рідне розтягування гри."
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2058,6 +2044,11 @@ msgstr "Виправлення шлейфу світла"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "DLAA off to compare (not saved)"
+msgstr "DLAA вимк. (не збер.)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Game TAA"
 msgstr "TAA гри"
 
@@ -2127,62 +2118,62 @@ msgstr "VectorXR (шар VR)"
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Layout"
-msgstr ""
+msgstr "Розкладка"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "driving"
-msgstr ""
+msgstr "їзда"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "menus"
-msgstr ""
+msgstr "меню"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Height"
-msgstr ""
+msgstr "Висота"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Side"
-msgstr ""
+msgstr "Сторона"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Distance"
-msgstr ""
+msgstr "Відстань"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Tilt"
-msgstr ""
+msgstr "Нахил"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Turn"
-msgstr ""
+msgstr "Поворот"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Size"
-msgstr ""
+msgstr "Розмір"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Curve"
-msgstr ""
+msgstr "Кривина"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Reset to config.cfg"
-msgstr ""
+msgstr "Повернути config.cfg"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Right"
-msgstr ""
+msgstr "Вправо"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2366,6 +2357,11 @@ msgstr "авто (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel settings"
+msgstr "Налаштування панелі"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Panel lock (VR)"
 msgstr "Замок панелі (VR)"
 
@@ -2426,15 +2422,15 @@ msgstr "Панель до вас (VR)"
 msgid "Menu keys"
 msgstr "Клавіші меню"
 
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter"
-msgstr "Лічильник FPS"
-
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "Off"
 msgstr "Вимк."
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS counter settings"
+msgstr "Налаштування FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2623,4 +2619,31 @@ msgstr "інфо"
 #: src/log.h
 msgid "debug"
 msgstr "налагодження"
+
+#~ msgid "Upscaling and VR"
+#~ msgstr "Масштабування і VR"
+
+#~ msgid "Frame rate and CPU"
+#~ msgstr "Частота кадрів і CPU"
+
+#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "Масштабування DLSS, перемикач DLAA увімк. / вимк. і відомості про OFXR Bridge / VectorXR. Вправо відкриває групу, вліво закриває; при кожному відкритті меню вона закрита."
+
+#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
+#~ msgstr "DLSS домальовує картинку до повного розміру, коли «Масштабування» в грі нижче 100 %: чіткіше за рідне розтягування гри, а менше пікселів = більше fps. Без додаткового навантаження; при 100 % нічого не робить."
+
+#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "Прискорення VR: Turbo, фовеальний рендеринг і маска прихованої області. Вправо відкриває групу, вліво закриває; при кожному відкритті меню вона закрита."
+
+#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
+#~ msgstr "Ліміти частоти кадрів і CPU: NVIDIA Reflex та ліміт FPS для плаского режиму, ліміт FPS VR, налаштування CPU. Вправо відкриває групу, вліво закриває; при кожному відкритті меню вона закрита."
+
+#~ msgid "no extra"
+#~ msgstr "без дод."
+
+#~ msgid "Off now (the mod is off)."
+#~ msgstr "Зараз вимк. (мод вимк.)."
+
+#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
+#~ msgstr "Зараз вимк.: нижче «Масштабування» 100 %% працює рідне розтягування гри."
 
