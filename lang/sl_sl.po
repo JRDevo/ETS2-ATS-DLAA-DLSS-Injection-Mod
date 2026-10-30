@@ -384,12 +384,12 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = "
-"left the mod, right TAA."
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
 msgstr ""
 "Samo če je glajenje robov igre nastavljeno na TAA. izk. = samo mod (nastavite AA igre na "
-"Izklopljeno). mešanica = TAA in DLAA / DLSS na isti sličici, pomešana. samo TAA = brez DLAA, za "
-"primerjavo. razdeljeno = levo mod, desno TAA."
+"Izklopljeno). mešanica = TAA in DLAA / DLSS na isti sličici, pomešana. razdeljeno = levo mod, "
+"desno TAA, za primerjavo."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -399,6 +399,15 @@ msgid ""
 msgstr ""
 "Kolikšen del mešanice je TAA igre, 0 - 100 % v korakih po 10 %: več = mirneje in mehkeje (TAA), "
 "manj = ostreje (DLAA / DLSS). Uporabljeno samo, ko je TAA igre mešanica. Brez dodatnih stroškov."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+"Kje je črta razdeljenega TAA igre, 0 - 100 % širine v korakih po 5 %: levo od nje DLAA / DLSS "
+"moda, desno TAA igre. Uporabljeno samo, ko je TAA igre razdeljeno."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1144,11 +1153,16 @@ msgstr "TAA igre zdaj ne teče: mod teče sam."
 #: src/inject.cpp
 #, c-format
 msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or "
-"split."
+"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
 msgstr ""
-"TAA igre zdaj teče: nastavite glajenje robov igre na Izklopljeno ali izberite mešanica, samo "
-"TAA ali razdeljeno."
+"TAA igre zdaj teče: nastavite glajenje robov igre na Izklopljeno ali izberite mešanica ali "
+"razdeljeno."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: split is on."
+msgstr "TAA igre zdaj teče: razdeljeno je vklopljeno."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1159,8 +1173,44 @@ msgstr "TAA igre zdaj teče: mešanica je vklopljena."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "The game's TAA is running now: TAA only (see the log)."
-msgstr "TAA igre zdaj teče: samo TAA (glej dnevnik)."
+msgid "Fell back to the game's TAA: its TAA pass did not run in this frame."
+msgstr "Povratek na TAA igre: njegov prehod TAA na tej sličici ni stekel."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's jitter could not be read (see the log)."
+msgstr "Povratek na TAA igre: jitterja igre ni bilo mogoče prebrati (glej dnevnik)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the picture before the game's TAA was not found."
+msgstr "Povratek na TAA igre: slika pred TAA igre ni bila najdena."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: mix and split do not work with Windows HDR."
+msgstr "Povratek na TAA igre: mešanica in razdeljeno ne delujeta z Windows HDR."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA is off."
+msgstr "Povratek na TAA igre: DLAA je izk."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's tonemap was not found (see the log)."
+msgstr "Povratek na TAA igre: tonemap igre ni bil najden (glej dnevnik)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA did not run on this frame (see the log)."
+msgstr "Povratek na TAA igre: DLAA na tej sličici ni stekel (glej dnevnik)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1963,11 +2013,6 @@ msgstr "mešanica"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
-msgid "TAA only"
-msgstr "samo TAA"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
 msgid "split"
 msgstr "razdeljeno"
 
@@ -1975,6 +2020,11 @@ msgstr "razdeljeno"
 #: src/inject.cpp
 msgid "Game TAA share"
 msgstr "Delež TAA igre"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split position"
+msgstr "Položaj delitve"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2443,4 +2493,16 @@ msgstr "info"
 #: src/log.h
 msgid "debug"
 msgstr "razhroščevanje"
+
+#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
+#~ msgstr "Samo če je glajenje robov igre nastavljeno na TAA. izk. = samo mod (nastavite AA igre na Izklopljeno). mešanica = TAA in DLAA / DLSS na isti sličici, pomešana. samo TAA = brez DLAA, za primerjavo. razdeljeno = levo mod, desno TAA."
+
+#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
+#~ msgstr "TAA igre zdaj teče: nastavite glajenje robov igre na Izklopljeno ali izberite mešanica, samo TAA ali razdeljeno."
+
+#~ msgid "The game's TAA is running now: TAA only (see the log)."
+#~ msgstr "TAA igre zdaj teče: samo TAA (glej dnevnik)."
+
+#~ msgid "TAA only"
+#~ msgstr "samo TAA"
 

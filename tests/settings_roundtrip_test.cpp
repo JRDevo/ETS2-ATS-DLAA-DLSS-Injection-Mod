@@ -120,7 +120,8 @@ static int GateCheck(const char* after) {
     expect(on(MR_WIREWIDEN) == (g_wireCfg && g_wireOn.load()), MR_WIREWIDEN, "Thin-wire widening: the menu and WireOnDraw's switch disagree");
     expect(on(MR_WIREMV) == DlaaProcessor::MvDilate(), MR_WIREMV, "Thin-wire motion: the menu and the NGX dilation flag disagree");
     expect(on(MR_DRAWIDS) == (g_objMode == 2 && g_didCfg), MR_DRAWIDS, "Per-part motion vectors: the menu and g_didCfg disagree");
-    expect(grey(MR_WIDTH) == (SceneDlaa::Sharpness() <= 0.0f), MR_WIDTH, "Sharpen width is live only while Sharpen strength > 0");
+    expect(grey(MR_WIDTH) == (SceneDlaa::Sharpness() <= 0.0f || !MainDlaaRuns()), MR_WIDTH,
+           "Sharpen width is live only while Sharpen strength > 0 and the main scene runs DLAA");
     expect(grey(MR_LODCUT) == (g_lodBias == 0.0f), MR_LODCUT, "Cut-out texture sharpness is live only while Texture sharpness is on");
     expect(off(MR_MIRROR) == !(g_mirOn.load() && MirMode() != 0), MR_MIRROR, "Mirror DLAA: the menu and g_mirOn / MirMode() disagree");
     expect(grey(MR_MIRTURNS) || (g_mirOn.load() && MirMode() != 0 && MirMode() != 3), MR_MIRTURNS,
@@ -130,7 +131,7 @@ static int GateCheck(const char* after) {
     expect(off(MR_MODE) == !g_dlaaOn.load() && on(MR_DLAA) == g_dlaaOn.load(), MR_MODE, "Mode / DLAA on-off and g_dlaaOn disagree");
     expect(on(MR_UPSCALE) == g_dlssUpscale.load(), MR_UPSCALE, "DLSS upscale: the menu and g_dlssUpscale disagree");
     {   // phase 82: the Game TAA row names the mode the render code reads (g_gameTaa); its share row is live only in mode mix
-        static const wchar_t* const kTaa[GameTaa::kModeCount] = { L"off", L"mix", L"TAA only", L"split" };
+        static const wchar_t* const kTaa[GameTaa::kModeCount] = { L"off", L"mix", L"split" };
         expect(!wcscmp(val(MR_GAMETAA), kTaa[GameTaa::ClampMode(g_gameTaa)]) && g_gameTaa == GameTaa::ClampMode(g_gameTaa), MR_GAMETAA,
                "Game TAA: the menu and g_gameTaa disagree");
         expect(grey(MR_TAAMIX) == (g_gameTaa != GameTaa::kMix), MR_TAAMIX, "Game TAA share is live exactly in mode mix");
@@ -138,6 +139,13 @@ static int GateCheck(const char* after) {
         swprintf(pct, 16, L"%d %%", g_gameTaaMix);
         expect(!wcscmp(val(MR_TAAMIX), pct) && g_gameTaaMix % GameTaa::kMixStep == 0, MR_TAAMIX,
                "Game TAA share: the menu and g_gameTaaMix disagree (or off the 10 % grid after a press)");
+        expect(grey(MR_TAASPLIT) == (g_gameTaa != GameTaa::kSplit), MR_TAASPLIT, "Split position is live exactly in mode split");
+        swprintf(pct, 16, L"%d %%", g_gameTaaSplit);
+        expect(!wcscmp(val(MR_TAASPLIT), pct) && g_gameTaaSplit % GameTaa::kSplitStep == 0, MR_TAASPLIT,
+               "Split position: the menu and g_gameTaaSplit disagree (or off the 5 % grid after a press)");
+        // the DLAA quality rows are greyed exactly while the main scene runs no DLAA (MainDlaaRuns)
+        for (int r : { MR_MODEL, MR_SHARP, MR_BIAS })
+            expect(grey(r) == !MainDlaaRuns(), r, "a DLAA quality row is greyed exactly while the main scene runs no DLAA");
     }
     if (g_vrMode) {
         expect(!wcscmp(val(MR_TURBO), L"on") == XrTurboEffective(), MR_TURBO, "Turbo mode reads \"on\" exactly when XrTurboEffective()");

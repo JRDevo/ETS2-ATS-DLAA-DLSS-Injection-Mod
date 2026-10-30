@@ -378,12 +378,12 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = "
-"left the mod, right TAA."
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
 msgstr ""
 "მხოლოდ მაშინ, როცა თამაშის ანტიალიასინგი TAA-ზეა. გამორთ. = მხოლოდ მოდი (დააყენეთ თამაშის AA "
-"გამორთულზე). შერევა = TAA და DLAA / DLSS ერთსა და იმავე კადრზე, შერეული. მხოლოდ TAA = DLAA-ს "
-"გარეშე, შესადარებლად. გაყოფა = მარცხნივ მოდი, მარჯვნივ TAA."
+"გამორთულზე). შერევა = TAA და DLAA / DLSS ერთსა და იმავე კადრზე, შერეული. გაყოფა = მარცხნივ "
+"მოდი, მარჯვნივ TAA, შესადარებლად."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -394,6 +394,15 @@ msgstr ""
 "შერევაში თამაშის TAA-ს რა წილია, 0 - 100 % 10 %-იანი ბიჯით: მეტი = უფრო მშვიდი და რბილი (TAA), "
 "ნაკლები = უფრო მკვეთრი (DLAA / DLSS). გამოიყენება მხოლოდ მაშინ, როცა თამაშის TAA შერევაზეა. "
 "დამატებითი ხარჯი არ არის."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+"სად არის თამაშის TAA გაყოფის ხაზი, სიგანის 0 - 100 % 5 %-იანი ბიჯით: მის მარცხნივ მოდის DLAA / "
+"DLSS, მარჯვნივ თამაშის TAA. გამოიყენება მხოლოდ მაშინ, როცა თამაშის TAA გაყოფაზეა."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1134,11 +1143,14 @@ msgstr "თამაშის TAA ახლა არ მუშაობს: მ
 #: src/inject.cpp
 #, c-format
 msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or "
-"split."
-msgstr ""
-"თამაშის TAA ახლა მუშაობს: დააყენეთ თამაშის ანტიალიასინგი გამორთულზე ან აირჩიეთ შერევა, მხოლოდ "
-"TAA ან გაყოფა."
+"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
+msgstr "თამაშის TAA ახლა მუშაობს: დააყენეთ თამაშის ანტიალიასინგი გამორთულზე ან აირჩიეთ შერევა ან გაყოფა."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: split is on."
+msgstr "თამაშის TAA ახლა მუშაობს: გაყოფა ჩართულია."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1149,8 +1161,44 @@ msgstr "თამაშის TAA ახლა მუშაობს: შერ�
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "The game's TAA is running now: TAA only (see the log)."
-msgstr "თამაშის TAA ახლა მუშაობს: მხოლოდ TAA (იხილეთ ჟურნალი)."
+msgid "Fell back to the game's TAA: its TAA pass did not run in this frame."
+msgstr "დაბრუნდა თამაშის TAA-ზე: მისი TAA გავლა ამ კადრში არ შესრულდა."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's jitter could not be read (see the log)."
+msgstr "დაბრუნდა თამაშის TAA-ზე: თამაშის jitter-ის წაკითხვა ვერ მოხერხდა (იხილეთ ჟურნალი)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the picture before the game's TAA was not found."
+msgstr "დაბრუნდა თამაშის TAA-ზე: თამაშის TAA-მდე გამოსახულება ვერ მოიძებნა."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: mix and split do not work with Windows HDR."
+msgstr "დაბრუნდა თამაშის TAA-ზე: შერევა და გაყოფა Windows HDR-თან არ მუშაობს."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA is off."
+msgstr "დაბრუნდა თამაშის TAA-ზე: DLAA გამორთულია."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's tonemap was not found (see the log)."
+msgstr "დაბრუნდა თამაშის TAA-ზე: თამაშის tonemap ვერ მოიძებნა (იხილეთ ჟურნალი)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA did not run on this frame (see the log)."
+msgstr "დაბრუნდა თამაშის TAA-ზე: DLAA ამ კადრში არ შესრულდა (იხილეთ ჟურნალი)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1949,11 +1997,6 @@ msgstr "შერევა"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
-msgid "TAA only"
-msgstr "მხოლოდ TAA"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
 msgid "split"
 msgstr "გაყოფა"
 
@@ -1961,6 +2004,11 @@ msgstr "გაყოფა"
 #: src/inject.cpp
 msgid "Game TAA share"
 msgstr "თამაშის TAA წილი"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split position"
+msgstr "გაყოფის პოზიცია"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2429,4 +2477,16 @@ msgstr "ინფორმაცია"
 #: src/log.h
 msgid "debug"
 msgstr "გამართვა"
+
+#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
+#~ msgstr "მხოლოდ მაშინ, როცა თამაშის ანტიალიასინგი TAA-ზეა. გამორთ. = მხოლოდ მოდი (დააყენეთ თამაშის AA გამორთულზე). შერევა = TAA და DLAA / DLSS ერთსა და იმავე კადრზე, შერეული. მხოლოდ TAA = DLAA-ს გარეშე, შესადარებლად. გაყოფა = მარცხნივ მოდი, მარჯვნივ TAA."
+
+#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
+#~ msgstr "თამაშის TAA ახლა მუშაობს: დააყენეთ თამაშის ანტიალიასინგი გამორთულზე ან აირჩიეთ შერევა, მხოლოდ TAA ან გაყოფა."
+
+#~ msgid "The game's TAA is running now: TAA only (see the log)."
+#~ msgstr "თამაშის TAA ახლა მუშაობს: მხოლოდ TAA (იხილეთ ჟურნალი)."
+
+#~ msgid "TAA only"
+#~ msgstr "მხოლოდ TAA"
 

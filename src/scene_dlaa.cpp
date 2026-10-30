@@ -5,6 +5,7 @@
 #include "gpu_perf.h"
 #include "outside_aa.h"                                // phase 81
 #include "shader_cache.h"
+#include "game_taa.h"                                  // phase 82: GameTaa::SplitX
 #include "log.h"
 #include <cmath>
 #include <cstring>
@@ -407,7 +408,10 @@ float4 VSMain(uint id : SV_VertexID) : SV_Position {
 // Params (t1, Buffer<float4>; no constant-buffer slot is touched): [0] = RT-space origin of the rect (px) and
 // its size, [1] = feather x / y (output px), Blend, SrgbDecode, [2] = EdgeOn (left, top, right, bottom).
 // phase 82 (game_taa): [3] = the mod's share (alpha multiplier; 1 = as before), the split column in RT px (< 0 = no split: right
-// of it alpha 0 = the game's TAA picture stays) and the divider half-width in px (black, alpha 1 -- black in any colour space).
+// of it alpha 0 = the game's TAA picture stays), the divider half-width in px (0 = none; a 1 px white core between 1 px black sides,
+// visible in any colour space) and flags (1 = overlay only: no source, only the divider / labels; 2 = labels); [4] = the label cell
+// size in px, the labels' top row (RT px), the mod's label (0 "DLAA", 1 "DLSS"). Labels: a 5 x 7 pixel font (D L A S T), white on a
+// translucent black box, "DLAA" / "DLSS" left of the split line, "TAA" right of it.
 // kCompositePs-BEGIN (the build validates this block with fxc, ps_5_0 / PSMain)
 const char kCompositePs[] = R"(
 Texture2D<float4> Src    : register(t0);
@@ -417,11 +421,41 @@ float3 SrgbToLinear(float3 c) {
     return (c <= 0.04045) ? c / 12.92 : pow(abs((c + 0.055) / 1.055), 2.4);   // (UNORM texels: never negative)
 }
 
+// 5 x 7 glyphs, row by row (bit 4 = left column): 0 D, 1 L, 2 A, 3 S, 4 T
+static const uint kGlyph[35] = { 30, 17, 17, 17, 17, 17, 30,   16, 16, 16, 16, 16, 16, 31,   14, 17, 17, 31, 17, 17, 17,
+                                 15, 16, 16, 14, 1, 1, 30,     31, 4, 4, 4, 4, 4, 4 };
+// a label of n glyphs (3-bit codes) with its top-left at o, cells of s px: 0 = outside, 1 = its box, 2 = a lit glyph pixel
+float LabelHit(float2 p, float2 o, uint codes, uint n, float s) {
+    const float2 q = (p - o) / s;
+    const float w = (float)n * 6.0 - 1.0;
+    if (q.x < -1.0 || q.y < -1.0 || q.x >= w + 1.0 || q.y >= 8.0) return 0.0;
+    if (q.x < 0.0 || q.y < 0.0 || q.y >= 7.0) return 1.0;
+    const uint gi = (uint)q.x / 6u, cx = (uint)q.x % 6u, cy = (uint)q.y;
+    if (gi >= n || cx >= 5u) return 1.0;
+    const uint g = (codes >> (3u * gi)) & 7u;
+    return ((kGlyph[g * 7u + cy] >> (4u - cx)) & 1u) != 0u ? 2.0 : 1.0;
+}
+
 float4 PSMain(float4 pos : SV_Position) : SV_Target {
     const float4 p0 = Params[0];
     const float4 p1 = Params[1];
     const float4 e  = Params[2];
     const float4 m  = Params[3];
+    const float4 l  = Params[4];
+    const uint   fl = (uint)m.w;
+    if (m.y >= 0.0) {                                        // phase 82 split: the divider and the labels over everything
+        const float dx = abs(pos.x - m.y);
+        if (m.z > 0.0 && dx < m.z) return dx < 0.5 * m.z ? float4(1.0, 1.0, 1.0, 1.0) : float4(0.0, 0.0, 0.0, 1.0);
+        if ((fl & 2u) != 0u) {
+            const float s = l.x, gap = 4.0 * l.x;
+            const uint modCodes = l.z > 0.5 ? (0u | (1u << 3) | (3u << 6) | (3u << 9)) : (0u | (1u << 3) | (2u << 6) | (2u << 9));
+            float h = LabelHit(pos.xy, float2(m.y - gap - 23.0 * s, l.y), modCodes, 4u, s);
+            if (h == 0.0) h = LabelHit(pos.xy, float2(m.y + gap, l.y), 4u | (2u << 3) | (2u << 6), 3u, s);
+            if (h > 1.5) return float4(1.0, 1.0, 1.0, 1.0);
+            if (h > 0.5) return float4(0.0, 0.0, 0.0, 0.6);
+        }
+    }
+    if ((fl & 1u) != 0u) return float4(0.0, 0.0, 0.0, 0.0);   // overlay only: the picture below stays
     const float2 size = p0.zw;
     const int2   ip   = clamp(int2(pos.xy - p0.xy), int2(0, 0), int2(size) - 1);
     float3 c = Src.Load(int3(ip, 0)).rgb;
@@ -436,10 +470,7 @@ float4 PSMain(float4 pos : SV_Position) : SV_Target {
         a = smoothstep(0.0, 1.0, rx) * smoothstep(0.0, 1.0, ry);
     }
     a *= m.x;
-    if (m.y >= 0.0) {
-        if (abs(pos.x - m.y) < m.z) return float4(0.0, 0.0, 0.0, 1.0);
-        if (pos.x >= m.y) a = 0.0;
-    }
+    if (m.y >= 0.0 && pos.x >= m.y) a = 0.0;
     return float4(c, a);
 }
 )";
@@ -2075,7 +2106,7 @@ bool SceneDlaa::Composite(ID3D11DeviceContext* ctx, uint32_t vpX, uint32_t vpY, 
     const bool blend = m_crop;
     const float fx = blend ? (float)s_feather * (float)ofw / (float)m_fullW : 0.0f;
     const float fy = blend ? (float)s_feather * (float)ofh / (float)m_fullH : 0.0f;
-    const float data[16] = {
+    const float data[20] = {
         (float)(vpX + m_oxc), (float)(vpY + m_oyc), (float)m_ow, (float)m_oh,
         fx, fy, blend ? 1.0f : 0.0f, srgbDecode ? 1.0f : 0.0f,
         (blend && m_oxc > 0) ? 1.0f : 0.0f,                       // left edge inside the image
@@ -2083,8 +2114,10 @@ bool SceneDlaa::Composite(ID3D11DeviceContext* ctx, uint32_t vpX, uint32_t vpY, 
         (blend && m_oxc + m_ow < ofw) ? 1.0f : 0.0f,              // right
         (blend && m_oyc + m_oh < ofh) ? 1.0f : 0.0f,              // bottom
         m_mixShare,                                               // phase 82: the mod's share (1 = as before)
-        m_mixSplit ? (float)vpX + 0.5f * (float)ofw : -1.0f,      //   split column (RT px; the image middle) / none
-        1.0f, 0.0f };                                             //   divider half-width (px)
+        m_mixSplit ? GameTaa::SplitX((float)vpX, (float)ofw, m_splitPct) : -1.0f,   //   split column (RT px) / none
+        m_mixSplit && m_splitDeco ? 1.5f : 0.0f,                  //   divider half-width (px; 0 = drawn later by DrawSplitOverlay)
+        m_mixSplit && m_splitDeco ? 2.0f : 0.0f,                  //   flags: labels
+        LabelCell(ofh), (float)vpY + 2.0f * LabelCell(ofh), m_up ? 1.0f : 0.0f, 0.0f };   // [4] label cell, top, DLSS
     if (!m_compDataValid || memcmp(data, m_compData, sizeof(data)) != 0) {
         D3D11_MAPPED_SUBRESOURCE mp{};
         if (FAILED(ctx->Map(m_compParams.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) {
@@ -2152,6 +2185,43 @@ bool SceneDlaa::Composite(ID3D11DeviceContext* ctx, uint32_t vpX, uint32_t vpY, 
             m_eye, m_ow, m_oh, vpX + m_oxc, vpY + m_oyc, (double)fx, (double)fy, blend ? "" : " (area 100: alpha 1)",
             (int)srgbDecode, m_hdr ? " (HDR: linear RGBA16F into the game's float output target)" : "");
     }
+    return true;
+}
+
+// phase 82: the split line + labels alone over the bound RT0 (the HDR path: after the game's tonemap, into its 8-bit target), viewport
+// (x0, y0, w, h). Needs the composite shaders (a composite ran before). Inside the caller's re-entrancy guard.
+bool SceneDlaa::DrawSplitOverlay(ID3D11DeviceContext* ctx, uint32_t x0, uint32_t y0, uint32_t w, uint32_t h, int pct, bool dlss) {
+    if (!m_compVs || !m_compPs || !m_compParamsSrv || !w || !h) return false;
+    const float data[20] = { (float)x0, (float)y0, (float)w, (float)h, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                             0.0f, GameTaa::SplitX((float)x0, (float)w, pct), 1.5f, 3.0f,
+                             LabelCell(h), (float)y0 + 2.0f * LabelCell(h), dlss ? 1.0f : 0.0f, 0.0f };
+    if (!m_compDataValid || memcmp(data, m_compData, sizeof(data)) != 0) {
+        D3D11_MAPPED_SUBRESOURCE mp{};
+        if (FAILED(ctx->Map(m_compParams.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) return false;
+        memcpy(mp.pData, data, sizeof(data));
+        ctx->Unmap(m_compParams.Get(), 0);
+        memcpy(m_compData, data, sizeof(data));
+        m_compDataValid = true;
+    }
+    GfxState saved;
+    saved.Save(ctx);
+    D3D11_VIEWPORT vp{ (float)x0, (float)y0, (float)w, (float)h, 0.0f, 1.0f };
+    ID3D11ShaderResourceView* srv[2] = { nullptr, m_compParamsSrv.Get() };
+    const FLOAT bf[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    ctx->IASetInputLayout(nullptr);
+    ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    ctx->VSSetShader(m_compVs.Get(), nullptr, 0);
+    ctx->HSSetShader(nullptr, nullptr, 0);
+    ctx->DSSetShader(nullptr, nullptr, 0);
+    ctx->GSSetShader(nullptr, nullptr, 0);
+    ctx->PSSetShader(m_compPs.Get(), nullptr, 0);
+    ctx->PSSetShaderResources(0, 2, srv);
+    ctx->RSSetState(m_compRs.Get());
+    ctx->RSSetViewports(1, &vp);
+    ctx->OMSetBlendState(m_compBlend.Get(), bf, 0xffffffffu);
+    ctx->OMSetDepthStencilState(m_compDss.Get(), 0);
+    ctx->Draw(3, 0);
+    saved.Restore(ctx);
     return true;
 }
 

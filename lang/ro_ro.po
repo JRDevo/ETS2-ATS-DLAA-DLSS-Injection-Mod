@@ -385,12 +385,12 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = "
-"left the mod, right TAA."
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
 msgstr ""
 "Doar cu Anti-aliasing-ul jocului pe TAA. oprit = doar modul (setează AA-ul jocului pe "
-"Dezactivat). mixaj = TAA și DLAA / DLSS în același cadru, amestecate. doar TAA = fără DLAA, "
-"pentru comparație. împărțit = în stânga modul, în dreapta TAA."
+"Dezactivat). mixaj = TAA și DLAA / DLSS în același cadru, amestecate. împărțit = în stânga "
+"modul, în dreapta TAA, pentru comparație."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -399,8 +399,18 @@ msgid ""
 "less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
 msgstr ""
 "Cât din mixaj este TAA-ul jocului, 0 - 100 % în pași de 10 %: mai mult = mai calm și mai moale "
-"(TAA), mai puțin = mai clar (DLAA / DLSS). Folosit doar când TAA-ul jocului este mixaj. Fără "
-"cost suplimentar."
+"(TAA), mai puțin = mai clar (DLAA / DLSS). Folosit doar când TAA-ul jocului este mixaj. Fără cost "
+"suplimentar."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+"Unde se află linia TAA-ului jocului împărțit, 0 - 100 % din lățime în pași de 5 %: la stânga ei "
+"DLAA / DLSS al modului, la dreapta TAA-ul jocului. Folosit doar când TAA-ul jocului este "
+"împărțit."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1147,11 +1157,16 @@ msgstr "TAA-ul jocului nu rulează acum: modul rulează singur."
 #: src/inject.cpp
 #, c-format
 msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or "
-"split."
+"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
 msgstr ""
-"TAA-ul jocului rulează acum: setează Anti-aliasing-ul jocului pe Dezactivat sau alege mixaj, "
-"doar TAA ori împărțit."
+"TAA-ul jocului rulează acum: setează Anti-aliasing-ul jocului pe Dezactivat sau alege mixaj ori "
+"împărțit."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: split is on."
+msgstr "TAA-ul jocului rulează acum: împărțit este pornit."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1162,8 +1177,44 @@ msgstr "TAA-ul jocului rulează acum: mixajul este pornit."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "The game's TAA is running now: TAA only (see the log)."
-msgstr "TAA-ul jocului rulează acum: doar TAA (vezi jurnalul)."
+msgid "Fell back to the game's TAA: its TAA pass did not run in this frame."
+msgstr "Revenire la TAA-ul jocului: pasul său TAA nu a rulat în acest cadru."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's jitter could not be read (see the log)."
+msgstr "Revenire la TAA-ul jocului: jitterul jocului nu a putut fi citit (vezi jurnalul)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the picture before the game's TAA was not found."
+msgstr "Revenire la TAA-ul jocului: imaginea dinaintea TAA-ului jocului nu a fost găsită."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: mix and split do not work with Windows HDR."
+msgstr "Revenire la TAA-ul jocului: mixaj și împărțit nu merg cu Windows HDR."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA is off."
+msgstr "Revenire la TAA-ul jocului: DLAA este oprit."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's tonemap was not found (see the log)."
+msgstr "Revenire la TAA-ul jocului: tonemap-ul jocului nu a fost găsit (vezi jurnalul)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA did not run on this frame (see the log)."
+msgstr "Revenire la TAA-ul jocului: DLAA nu a rulat în acest cadru (vezi jurnalul)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1967,11 +2018,6 @@ msgstr "mixaj"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
-msgid "TAA only"
-msgstr "doar TAA"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
 msgid "split"
 msgstr "împărțit"
 
@@ -1979,6 +2025,11 @@ msgstr "împărțit"
 #: src/inject.cpp
 msgid "Game TAA share"
 msgstr "Partea TAA a jocului"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split position"
+msgstr "Poziția împărțirii"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2449,4 +2500,16 @@ msgstr "informații"
 #: src/log.h
 msgid "debug"
 msgstr "depanare"
+
+#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
+#~ msgstr "Doar cu Anti-aliasing-ul jocului pe TAA. oprit = doar modul (setează AA-ul jocului pe Dezactivat). mixaj = TAA și DLAA / DLSS în același cadru, amestecate. doar TAA = fără DLAA, pentru comparație. împărțit = în stânga modul, în dreapta TAA."
+
+#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
+#~ msgstr "TAA-ul jocului rulează acum: setează Anti-aliasing-ul jocului pe Dezactivat sau alege mixaj, doar TAA ori împărțit."
+
+#~ msgid "The game's TAA is running now: TAA only (see the log)."
+#~ msgstr "TAA-ul jocului rulează acum: doar TAA (vezi jurnalul)."
+
+#~ msgid "TAA only"
+#~ msgstr "doar TAA"
 

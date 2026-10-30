@@ -381,12 +381,12 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = "
-"left the mod, right TAA."
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
 msgstr ""
 "Jen když je vyhlazování hry nastaveno na TAA. vyp. = samotný mod (nastavte AA hry na Vypnuto). "
-"mix = TAA a DLAA / DLSS v jednom snímku, smíchané. jen TAA = bez DLAA, k porovnání. rozděleno = "
-"vlevo mod, vpravo TAA."
+"mix = TAA a DLAA / DLSS v jednom snímku, smíchané. rozděleno = vlevo mod, vpravo TAA, k "
+"porovnání."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -396,6 +396,15 @@ msgid ""
 msgstr ""
 "Jak velkou část mixu tvoří TAA hry, 0 - 100 % po 10 %: více = klidnější a měkčí (TAA), méně = "
 "ostřejší (DLAA / DLSS). Používá se jen při TAA hry = mix. Bez dalších nákladů."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+"Kde leží dělicí čára rozděleného TAA hry, 0 - 100 % šířky po 5 %: vlevo od ní DLAA / DLSS modu, "
+"vpravo TAA hry. Používá se jen při TAA hry = rozděleno."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1139,9 +1148,14 @@ msgstr "TAA hry teď neběží: mod běží sám."
 #: src/inject.cpp
 #, c-format
 msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or "
-"split."
-msgstr "TAA hry teď běží: nastavte vyhlazování hry na Vypnuto, nebo zvolte mix, jen TAA či rozděleno."
+"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
+msgstr "TAA hry teď běží: nastavte vyhlazování hry na Vypnuto, nebo zvolte mix či rozděleno."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: split is on."
+msgstr "TAA hry teď běží: rozděleno je zapnuté."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1152,8 +1166,44 @@ msgstr "TAA hry teď běží: mix je zapnutý."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "The game's TAA is running now: TAA only (see the log)."
-msgstr "TAA hry teď běží: jen TAA (viz log)."
+msgid "Fell back to the game's TAA: its TAA pass did not run in this frame."
+msgstr "Návrat k TAA hry: jeho průchod TAA v tomto snímku neproběhl."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's jitter could not be read (see the log)."
+msgstr "Návrat k TAA hry: jitter hry se nepodařilo přečíst (viz log)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the picture before the game's TAA was not found."
+msgstr "Návrat k TAA hry: obraz před TAA hry nebyl nalezen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: mix and split do not work with Windows HDR."
+msgstr "Návrat k TAA hry: mix a rozděleno nefungují s Windows HDR."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA is off."
+msgstr "Návrat k TAA hry: DLAA je vyp."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's tonemap was not found (see the log)."
+msgstr "Návrat k TAA hry: tonemap hry nebyl nalezen (viz log)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA did not run on this frame (see the log)."
+msgstr "Návrat k TAA hry: DLAA v tomto snímku neproběhlo (viz log)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1954,11 +2004,6 @@ msgstr "mix"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
-msgid "TAA only"
-msgstr "jen TAA"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
 msgid "split"
 msgstr "rozděleno"
 
@@ -1966,6 +2011,11 @@ msgstr "rozděleno"
 #: src/inject.cpp
 msgid "Game TAA share"
 msgstr "Podíl TAA hry"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split position"
+msgstr "Poloha dělení"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2434,4 +2484,16 @@ msgstr "info"
 #: src/log.h
 msgid "debug"
 msgstr "ladění"
+
+#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
+#~ msgstr "Jen když je vyhlazování hry nastaveno na TAA. vyp. = samotný mod (nastavte AA hry na Vypnuto). mix = TAA a DLAA / DLSS v jednom snímku, smíchané. jen TAA = bez DLAA, k porovnání. rozděleno = vlevo mod, vpravo TAA."
+
+#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
+#~ msgstr "TAA hry teď běží: nastavte vyhlazování hry na Vypnuto, nebo zvolte mix, jen TAA či rozděleno."
+
+#~ msgid "The game's TAA is running now: TAA only (see the log)."
+#~ msgstr "TAA hry teď běží: jen TAA (viz log)."
+
+#~ msgid "TAA only"
+#~ msgstr "jen TAA"
 

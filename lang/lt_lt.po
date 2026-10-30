@@ -384,12 +384,12 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = "
-"left the mod, right TAA."
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
 msgstr ""
 "Tik kai žaidimo glotninimas nustatytas į TAA. išjungta = tik modifikacija (nustatykite žaidimo "
-"AA į Išjungta). mišinys = TAA ir DLAA / DLSS tame pačiame kadre, sumaišyti. tik TAA = be DLAA, "
-"palyginimui. padalinta = kairėje modifikacija, dešinėje TAA."
+"AA į Išjungta). mišinys = TAA ir DLAA / DLSS tame pačiame kadre, sumaišyti. padalinta = kairėje "
+"modifikacija, dešinėje TAA, palyginimui."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -398,8 +398,16 @@ msgid ""
 "less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
 msgstr ""
 "Kokia mišinio dalis yra žaidimo TAA, 0 - 100 % po 10 %: daugiau = ramiau ir minkščiau (TAA), "
-"mažiau = ryškiau (DLAA / DLSS). Naudojama tik kai Žaidimo TAA yra mišinys. Papildomų sąnaudų "
-"nėra."
+"mažiau = ryškiau (DLAA / DLSS). Naudojama tik kai Žaidimo TAA yra mišinys. Papildomų sąnaudų nėra."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+"Kur yra Žaidimo TAA padalinimo linija, 0 - 100 % pločio po 5 %: iš kairės modifikacijos DLAA / "
+"DLSS, iš dešinės žaidimo TAA. Naudojama tik kai Žaidimo TAA yra padalinta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1146,11 +1154,16 @@ msgstr "Žaidimo TAA dabar neveikia: modifikacija veikia viena."
 #: src/inject.cpp
 #, c-format
 msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or "
-"split."
+"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
 msgstr ""
-"Žaidimo TAA dabar veikia: nustatykite žaidimo glotninimą į Išjungta arba pasirinkite mišinys, "
-"tik TAA ar padalinta."
+"Žaidimo TAA dabar veikia: nustatykite žaidimo glotninimą į Išjungta arba pasirinkite mišinys ar "
+"padalinta."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: split is on."
+msgstr "Žaidimo TAA dabar veikia: padalinta įjungta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1161,8 +1174,44 @@ msgstr "Žaidimo TAA dabar veikia: mišinys įjungtas."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "The game's TAA is running now: TAA only (see the log)."
-msgstr "Žaidimo TAA dabar veikia: tik TAA (žr. žurnalą)."
+msgid "Fell back to the game's TAA: its TAA pass did not run in this frame."
+msgstr "Grįžta prie žaidimo TAA: jo TAA praėjimas šiame kadre nevyko."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's jitter could not be read (see the log)."
+msgstr "Grįžta prie žaidimo TAA: nepavyko nuskaityti žaidimo jitter (žr. žurnalą)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the picture before the game's TAA was not found."
+msgstr "Grįžta prie žaidimo TAA: vaizdas prieš žaidimo TAA nerastas."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: mix and split do not work with Windows HDR."
+msgstr "Grįžta prie žaidimo TAA: mišinys ir padalinta neveikia su Windows HDR."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA is off."
+msgstr "Grįžta prie žaidimo TAA: DLAA išjungta."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's tonemap was not found (see the log)."
+msgstr "Grįžta prie žaidimo TAA: žaidimo tonemap nerastas (žr. žurnalą)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA did not run on this frame (see the log)."
+msgstr "Grįžta prie žaidimo TAA: DLAA šiame kadre nevyko (žr. žurnalą)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1967,11 +2016,6 @@ msgstr "mišinys"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
-msgid "TAA only"
-msgstr "tik TAA"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
 msgid "split"
 msgstr "padalinta"
 
@@ -1979,6 +2023,11 @@ msgstr "padalinta"
 #: src/inject.cpp
 msgid "Game TAA share"
 msgstr "Žaidimo TAA dalis"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split position"
+msgstr "Padalinimo vieta"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2447,4 +2496,16 @@ msgstr "info"
 #: src/log.h
 msgid "debug"
 msgstr "derinimas"
+
+#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
+#~ msgstr "Tik kai žaidimo glotninimas nustatytas į TAA. išjungta = tik modifikacija (nustatykite žaidimo AA į Išjungta). mišinys = TAA ir DLAA / DLSS tame pačiame kadre, sumaišyti. tik TAA = be DLAA, palyginimui. padalinta = kairėje modifikacija, dešinėje TAA."
+
+#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
+#~ msgstr "Žaidimo TAA dabar veikia: nustatykite žaidimo glotninimą į Išjungta arba pasirinkite mišinys, tik TAA ar padalinta."
+
+#~ msgid "The game's TAA is running now: TAA only (see the log)."
+#~ msgstr "Žaidimo TAA dabar veikia: tik TAA (žr. žurnalą)."
+
+#~ msgid "TAA only"
+#~ msgstr "tik TAA"
 

@@ -330,12 +330,12 @@ msgstr "開啟或關閉整個Mod並保留模式；關 = 遊戲原本的畫面，
 #: src/inject.cpp
 msgid ""
 "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = "
-"left the mod, right TAA."
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
 msgstr ""
 "僅當遊戲的反鋸齒為TAA時有效。關 = 僅Mod (將遊戲的AA設為停用)。混合 = "
-"在同一影格中混合TAA與DLAA / DLSS。僅TAA = "
-"不用DLAA，用於比較。分割 = 左側Mod，右側TAA。"
+"在同一影格中混合TAA與DLAA / DLSS。分割 = "
+"左側Mod，右側TAA，用於比較。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -343,9 +343,16 @@ msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
 "less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
 msgstr ""
-"混合中遊戲TAA所佔比例，0 - 100 %，每步10 %: 越高 = 越穩定柔和 "
-"(TAA)，越低 = 越銳利 (DLAA / "
-"DLSS)。僅在遊戲TAA為混合時使用。沒有額外負擔。"
+"混合中遊戲TAA所佔比例，0 - 100 %，每步10 %: 越高 = 越穩定柔和 (TAA)，越低 = 越銳利 (DLAA / DLSS)。僅在遊戲TAA為混合時使用。沒有額外負擔。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+"遊戲TAA分割線的位置 (佔寬度的0 - 100 %，每步5 %): "
+"線左側為Mod的DLAA / DLSS，右側為遊戲的TAA。僅在遊戲TAA為分割時使用。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1004,9 +1011,14 @@ msgstr "遊戲的TAA目前未執行: Mod單獨執行。"
 #: src/inject.cpp
 #, c-format
 msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or "
-"split."
-msgstr "遊戲的TAA目前正在執行: 請將遊戲的反鋸齒設為停用，或選擇混合、僅TAA或分割。"
+"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
+msgstr "遊戲的TAA目前正在執行: 請將遊戲的反鋸齒設為停用，或選擇混合或分割。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: split is on."
+msgstr "遊戲的TAA目前正在執行: 分割已開啟。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1017,8 +1029,44 @@ msgstr "遊戲的TAA目前正在執行: 混合已開啟。"
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "The game's TAA is running now: TAA only (see the log)."
-msgstr "遊戲的TAA目前正在執行: 僅TAA (見記錄檔)。"
+msgid "Fell back to the game's TAA: its TAA pass did not run in this frame."
+msgstr "已退回遊戲的TAA: 其TAA階段在這一影格中沒有執行。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's jitter could not be read (see the log)."
+msgstr "已退回遊戲的TAA: 無法讀取遊戲的抖動 (見記錄檔)。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the picture before the game's TAA was not found."
+msgstr "已退回遊戲的TAA: 找不到遊戲TAA之前的畫面。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: mix and split do not work with Windows HDR."
+msgstr "已退回遊戲的TAA: 混合和分割無法與Windows HDR一起使用。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA is off."
+msgstr "已退回遊戲的TAA: DLAA已關。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's tonemap was not found (see the log)."
+msgstr "已退回遊戲的TAA: 找不到遊戲的色調映射 (見記錄檔)。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA did not run on this frame (see the log)."
+msgstr "已退回遊戲的TAA: DLAA在這一影格中沒有執行 (見記錄檔)。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1809,11 +1857,6 @@ msgstr "混合"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
-msgid "TAA only"
-msgstr "僅TAA"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
 msgid "split"
 msgstr "分割"
 
@@ -1821,6 +1864,11 @@ msgstr "分割"
 #: src/inject.cpp
 msgid "Game TAA share"
 msgstr "遊戲TAA佔比"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split position"
+msgstr "分割位置"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2287,4 +2335,16 @@ msgstr "資訊"
 #: src/log.h
 msgid "debug"
 msgstr "偵錯"
+
+#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
+#~ msgstr "僅當遊戲的反鋸齒為TAA時有效。關 = 僅Mod (將遊戲的AA設為停用)。混合 = 在同一影格中混合TAA與DLAA / DLSS。僅TAA = 不用DLAA，用於比較。分割 = 左側Mod，右側TAA。"
+
+#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
+#~ msgstr "遊戲的TAA目前正在執行: 請將遊戲的反鋸齒設為停用，或選擇混合、僅TAA或分割。"
+
+#~ msgid "The game's TAA is running now: TAA only (see the log)."
+#~ msgstr "遊戲的TAA目前正在執行: 僅TAA (見記錄檔)。"
+
+#~ msgid "TAA only"
+#~ msgstr "僅TAA"
 

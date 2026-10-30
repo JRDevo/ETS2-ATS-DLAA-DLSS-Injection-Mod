@@ -82,18 +82,18 @@ static void TestDecide() {
     CHECK(Decide(in, &why) == kActLdr && !why, "DLSS / VR / post-tonemap -> the re-issued tonemap path");
     in.mode = kSplit;
     CHECK(Decide(in, &why) == kActLdr, "split uses the same paths");
-    in.mode = kTaaOnly;
-    CHECK(Decide(in, &why) == kActTaaOnly && !why, "TAA only skips the mod's main-scene DLAA (no fallback reason)");
     // every case the mix cannot take is TAA only, never kActNone (= the mod's DLAA on the TAA'd frame)
     const int kMixModes[2] = { kMix, kSplit };
     for (int m : kMixModes) {
         in.mode = m; in.preHdr = true;
+        int code = -1;
         in.resolveSeen = false; in.jitterOk = true; in.rawOk = true;
-        CHECK(Decide(in, &why) == kActTaaOnly && why, "mode %d, no resolve in the pass -> TAA only (%s)", m, why ? why : "?");
+        CHECK(Decide(in, &why, &code) == kActTaaOnly && why && code == kWhyNoResolve, "mode %d, no resolve in the pass -> TAA only (%s)",
+              m, why ? why : "?");
         in.resolveSeen = true; in.jitterOk = false;
-        CHECK(Decide(in, &why) == kActTaaOnly && why, "mode %d, no game jitter -> TAA only", m);
+        CHECK(Decide(in, &why, &code) == kActTaaOnly && why && code == kWhyNoJitter, "mode %d, no game jitter -> TAA only", m);
         in.jitterOk = true; in.rawOk = false;
-        CHECK(Decide(in, &why) == kActTaaOnly && why, "mode %d, no raw scene -> TAA only", m);
+        CHECK(Decide(in, &why, &code) == kActTaaOnly && why && code == kWhyNoRaw, "mode %d, no raw scene -> TAA only", m);
         in.rawOk = true;
     }
     in.mode = 9;
@@ -101,16 +101,20 @@ static void TestDecide() {
 }
 
 static void TestMenuSteps() {
-    CHECK(NextMode(kOff, 1) == kMix && NextMode(kMix, 1) == kTaaOnly && NextMode(kTaaOnly, 1) == kSplit && NextMode(kSplit, 1) == kOff,
-          "Right cycles off -> mix -> TAA only -> split -> off");
-    CHECK(NextMode(kOff, -1) == kSplit && NextMode(kSplit, -1) == kTaaOnly, "Left goes back");
+    CHECK(NextMode(kOff, 1) == kMix && NextMode(kMix, 1) == kSplit && NextMode(kSplit, 1) == kOff, "Right cycles off -> mix -> split -> off");
+    CHECK(NextMode(kOff, -1) == kSplit && NextMode(kSplit, -1) == kMix, "Left goes back");
+    CHECK(MigrateMode(0) == kOff && MigrateMode(1) == kMix && MigrateMode(2) == kOff && MigrateMode(3) == kSplit && MigrateMode(7) == kOff,
+          "first-build values: 2 (TAA only) -> off, 3 (split) -> split");
+    CHECK(StepSplit(50, 1) == 55 && StepSplit(50, -1) == 45 && StepSplit(100, 1) == 100 && StepSplit(0, -1) == 0 && StepSplit(52, 1) == 55,
+          "split position: 5 %% steps, clamped, snapped");
+    CHECK(SplitX(0.0f, 3840.0f, 50) == 1920.0f && SplitX(100.0f, 1000.0f, 25) == 350.0f && SplitX(0.0f, 2000.0f, 0) == 0.0f,
+          "split column = x0 + width x %%");
     CHECK(StepMix(50, 1) == 60 && StepMix(50, -1) == 40, "10 %% steps");
     CHECK(StepMix(100, 1) == 100 && StepMix(0, -1) == 0, "clamped at the ends (no wrap)");
     CHECK(StepMix(45, 1) == 50 && StepMix(45, -1) == 40, "an off-grid dlaa.ini value snaps to the grid");
     CHECK(StepMix(95, 1) == 100 && StepMix(5, -1) == 0, "off-grid near the ends");
-    CHECK(ClampMix(-5) == 0 && ClampMix(150) == 100 && ClampMode(4) == kOff && ClampMode(2) == kTaaOnly, "clamps");
-    CHECK(!strcmp(ModeName(kOff), "off") && !strcmp(ModeName(kMix), "mix") && !strcmp(ModeName(kTaaOnly), "TAA only") &&
-          !strcmp(ModeName(kSplit), "split"), "mode names");
+    CHECK(ClampMix(-5) == 0 && ClampMix(150) == 100 && ClampMode(3) == kOff && ClampMode(2) == kSplit, "clamps");
+    CHECK(!strcmp(ModeName(kOff), "off") && !strcmp(ModeName(kMix), "mix") && !strcmp(ModeName(kSplit), "split"), "mode names");
 }
 
 static void TestMix() {
@@ -126,7 +130,80 @@ static void TestMix() {
     CHECK(x.modShare == 1.0f && !x.split, "off: the composite as before");
 }
 
+// The first in-game test (ATS flat): the resolve's cb0 rotates over 3 x 2 MB rings, its offset moves 813824 -> 812800, each ring is
+// filled by ONE Map / Unmap per frame BEFORE the resolve binds it (and on another thread). Simulated here frame by frame, plus a VR
+// frame (two resolves at two offsets of the same ring) and an offset jump beyond the window (it grows, a later frame reads).
+static void Copy(void* d, const void* s, size_t n) { memcpy(d, s, n); }
+static unsigned char s_ring[3][2u * 1024u * 1024u];
+static void TestShadowRotation() {
+    const uint32_t kW = 2u * 1024u * 1024u;
+    CbShadow sh;
+    float out[64];
+    auto off = [](int f) -> uint32_t { return 813824u - (uint32_t)(f % 7) * 256u; };
+    auto fill = [&](int f, uint32_t o, float j) {
+        float c[64];
+        memset(c, 0, sizeof(c));
+        c[32] = j; c[33] = -j; c[44] = 3840.0f; c[45] = 2160.0f;
+        memcpy(&s_ring[f % 3][o], c, sizeof(c));
+    };
+    int got = 0, misses = 0;
+    for (int f = 0; f < 60; ++f) {
+        unsigned char* const r = s_ring[f % 3];
+        const float j = 1e-5f * (float)(f % 9 + 1);
+        fill(f, off(f), j);
+        // the game: one Map / Unmap of this frame's ring (all its constants written), then the render thread draws
+        if (sh.Watched(r)) { sh.OnMap(r, r); sh.OnUnmap(r, Copy); }
+        sh.Learn(r, kW, off(f));
+        if (sh.Read(r, off(f), (uint64_t)f, out, 64)) {
+            ++got;
+            float sx = 0, sy = 0;
+            CHECK(ParseJitter(out, 64, 3840, 2160, &sx, &sy) && out[32] == j, "frame %d: the copy holds THIS frame's jitter", f);
+        } else {
+            ++misses;
+        }
+    }
+    CHECK(misses == 3 && got == 57, "3 rotating rings: only each ring's first frame misses (got %d, missed %d)", got, misses);
+    CHECK(!sh.Read(s_ring[59 % 3], off(59), 60, out, 64), "no fresh upload since the last read -> no jitter (never a stale one)");
+    {   // VR: two eyes' resolves in one frame, the same ring at two offsets
+        unsigned char* const r = s_ring[60 % 3];
+        fill(60, 700000u, 2e-5f);
+        fill(60, 700256u, 3e-5f);
+        sh.OnMap(r, r); sh.OnUnmap(r, Copy);
+        sh.Learn(r, kW, 700000u);
+        bool grown = false;
+        bool ok = sh.Read(r, 700000u, 60, out, 64, &grown);
+        if (!ok && grown) { sh.OnMap(r, r); sh.OnUnmap(r, Copy); ok = sh.Read(r, 700000u, 60, out, 64); }   // (the offset jumped 110 KB)
+        CHECK(ok && out[32] == 2e-5f, "VR eye 0 reads its offset");
+        sh.Learn(r, kW, 700256u);
+        CHECK(sh.Read(r, 700256u, 60, out, 64) && out[32] == 3e-5f, "VR eye 1 reads its offset of the same upload");
+    }
+    {   // an offset far outside the window: that frame misses, the window grows / follows, a later frame there reads
+        unsigned char* r = s_ring[61 % 3];
+        fill(61, 100000u, 4e-5f);
+        sh.OnMap(r, r); sh.OnUnmap(r, Copy);
+        bool grown = false;
+        sh.Learn(r, kW, 100000u);
+        CHECK(!sh.Read(r, 100000u, 61, out, 64, &grown) && grown, "an offset outside the window misses and grows it");
+        r = s_ring[64 % 3];
+        fill(64, 100000u, 5e-5f);
+        sh.OnMap(r, r); sh.OnUnmap(r, Copy);
+        sh.Learn(r, kW, 100000u);
+        CHECK(sh.Read(r, 100000u, 64, out, 64) && out[32] == 5e-5f, "the window follows the new place");
+    }
+    {   // UpdateSubresource of a watched buffer
+        unsigned char src[512];
+        float c[64] = {};
+        c[32] = 6e-5f; c[44] = 3840.0f; c[45] = 2160.0f;
+        memcpy(src + 256, c, sizeof(c));
+        sh.Learn(s_ring[0], kW, 100256u);
+        CHECK(sh.OnUpdate(s_ring[0], src, 100000u, 512u, Copy), "an UpdateSubresource of a watched buffer is copied");
+        CHECK(sh.Read(s_ring[0], 100256u, 65, out, 64) && out[32] == 6e-5f, "... and read at the resolve's offset");
+    }
+    CHECK(!sh.Watched(nullptr) && !sh.OnUpdate(&got, &got, 0, 4, Copy), "an unwatched buffer is ignored");
+}
+
 int main() {
+    TestShadowRotation();
     TestChecksum();
     TestLiveHold();
     TestParseJitter();

@@ -382,12 +382,12 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = "
-"left the mod, right TAA."
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
 msgstr ""
 "Csak akkor, ha a játék élsimítása TAA. ki = csak a mod (állítsd a játék AA-ját Letiltva "
-"értékre). kevert = TAA és DLAA / DLSS ugyanazon a képkockán, keverve. csak TAA = DLAA nélkül, "
-"összehasonlításhoz. osztott = balra a mod, jobbra a TAA."
+"értékre). kevert = TAA és DLAA / DLSS ugyanazon a képkockán, keverve. osztott = balra a mod, "
+"jobbra a TAA, összehasonlításhoz."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -398,6 +398,15 @@ msgstr ""
 "A keverék mekkora része a játék TAA-ja, 0 - 100 % 10 %-os lépésekben: több = nyugodtabb és "
 "lágyabb (TAA), kevesebb = élesebb (DLAA / DLSS). Csak akkor él, ha a Játék TAA értéke kevert. "
 "Nincs extra költség."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+"Hol van a Játék TAA osztott vonala, a szélesség 0 - 100 %-a 5 %-os lépésekben: tőle balra a mod "
+"DLAA / DLSS-e, jobbra a játék TAA-ja. Csak akkor él, ha a Játék TAA értéke osztott."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1140,11 +1149,16 @@ msgstr "A játék TAA-ja most nem fut: a mod egyedül működik."
 #: src/inject.cpp
 #, c-format
 msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or "
-"split."
+"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
 msgstr ""
-"A játék TAA-ja most fut: állítsd a játék élsimítását Letiltva értékre, vagy válassz kevert, "
-"csak TAA vagy osztott módot."
+"A játék TAA-ja most fut: állítsd a játék élsimítását Letiltva értékre, vagy válassz kevert vagy "
+"osztott módot."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: split is on."
+msgstr "A játék TAA-ja most fut: az osztott be van kapcsolva."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1155,8 +1169,44 @@ msgstr "A játék TAA-ja most fut: a keverés be van kapcsolva."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "The game's TAA is running now: TAA only (see the log)."
-msgstr "A játék TAA-ja most fut: csak TAA (lásd a naplót)."
+msgid "Fell back to the game's TAA: its TAA pass did not run in this frame."
+msgstr "Visszaesett a játék TAA-jára: a TAA menete nem futott le ezen a képkockán."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's jitter could not be read (see the log)."
+msgstr "Visszaesett a játék TAA-jára: a játék jitterét nem sikerült kiolvasni (lásd a naplót)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the picture before the game's TAA was not found."
+msgstr "Visszaesett a játék TAA-jára: a játék TAA-ja előtti kép nem található."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: mix and split do not work with Windows HDR."
+msgstr "Visszaesett a játék TAA-jára: a kevert és az osztott nem működik Windows HDR-rel."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA is off."
+msgstr "Visszaesett a játék TAA-jára: a DLAA ki van kapcsolva."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's tonemap was not found (see the log)."
+msgstr "Visszaesett a játék TAA-jára: a játék tonemapja nem található (lásd a naplót)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA did not run on this frame (see the log)."
+msgstr "Visszaesett a játék TAA-jára: a DLAA nem futott le ezen a képkockán (lásd a naplót)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1959,11 +2009,6 @@ msgstr "kevert"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
-msgid "TAA only"
-msgstr "csak TAA"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
 msgid "split"
 msgstr "osztott"
 
@@ -1971,6 +2016,11 @@ msgstr "osztott"
 #: src/inject.cpp
 msgid "Game TAA share"
 msgstr "Játék TAA aránya"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split position"
+msgstr "Osztás helye"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2440,4 +2490,16 @@ msgstr "infó"
 #: src/log.h
 msgid "debug"
 msgstr "hibakeresés"
+
+#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
+#~ msgstr "Csak akkor, ha a játék élsimítása TAA. ki = csak a mod (állítsd a játék AA-ját Letiltva értékre). kevert = TAA és DLAA / DLSS ugyanazon a képkockán, keverve. csak TAA = DLAA nélkül, összehasonlításhoz. osztott = balra a mod, jobbra a TAA."
+
+#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
+#~ msgstr "A játék TAA-ja most fut: állítsd a játék élsimítását Letiltva értékre, vagy válassz kevert, csak TAA vagy osztott módot."
+
+#~ msgid "The game's TAA is running now: TAA only (see the log)."
+#~ msgstr "A játék TAA-ja most fut: csak TAA (lásd a naplót)."
+
+#~ msgid "TAA only"
+#~ msgstr "csak TAA"
 

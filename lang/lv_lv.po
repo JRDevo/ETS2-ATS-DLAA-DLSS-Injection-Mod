@@ -381,12 +381,12 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = "
-"left the mod, right TAA."
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
 msgstr ""
 "Tikai tad, ja spēles Anti-aliasing ir TAA. izslēgts = tikai modifikācija (iestatiet spēles AA "
-"uz Izslēgts). maisījums = TAA un DLAA / DLSS vienā kadrā, sajaukti. tikai TAA = bez DLAA, "
-"salīdzināšanai. sadalīts = pa kreisi modifikācija, pa labi TAA."
+"uz Izslēgts). maisījums = TAA un DLAA / DLSS vienā kadrā, sajaukti. sadalīts = pa kreisi "
+"modifikācija, pa labi TAA, salīdzināšanai."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -397,6 +397,15 @@ msgstr ""
 "Cik liela daļa no maisījuma ir spēles TAA, 0 - 100 % ar soli 10 %: vairāk = mierīgāk un mīkstāk "
 "(TAA), mazāk = asāk (DLAA / DLSS). Izmanto tikai tad, ja Spēles TAA ir maisījums. Bez papildu "
 "izmaksām."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+"Kur ir Spēles TAA sadalījuma līnija, 0 - 100 % no platuma ar soli 5 %: pa kreisi no tās "
+"modifikācijas DLAA / DLSS, pa labi spēles TAA. Izmanto tikai tad, ja Spēles TAA ir sadalīts."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1143,11 +1152,16 @@ msgstr "Spēles TAA tagad nedarbojas: modifikācija darbojas viena."
 #: src/inject.cpp
 #, c-format
 msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or "
-"split."
+"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
 msgstr ""
-"Spēles TAA tagad darbojas: iestatiet spēles Anti-aliasing uz Izslēgts vai izvēlieties "
-"maisījums, tikai TAA vai sadalīts."
+"Spēles TAA tagad darbojas: iestatiet spēles Anti-aliasing uz Izslēgts vai izvēlieties maisījums "
+"vai sadalīts."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: split is on."
+msgstr "Spēles TAA tagad darbojas: sadalīts ir ieslēgts."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1158,8 +1172,44 @@ msgstr "Spēles TAA tagad darbojas: maisījums ir ieslēgts."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "The game's TAA is running now: TAA only (see the log)."
-msgstr "Spēles TAA tagad darbojas: tikai TAA (skatiet žurnālu)."
+msgid "Fell back to the game's TAA: its TAA pass did not run in this frame."
+msgstr "Atgriezts pie spēles TAA: tā TAA caurlaide šajā kadrā nenotika."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's jitter could not be read (see the log)."
+msgstr "Atgriezts pie spēles TAA: spēles jitter nevarēja nolasīt (skatiet žurnālu)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the picture before the game's TAA was not found."
+msgstr "Atgriezts pie spēles TAA: attēls pirms spēles TAA netika atrasts."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: mix and split do not work with Windows HDR."
+msgstr "Atgriezts pie spēles TAA: maisījums un sadalīts nedarbojas ar Windows HDR."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA is off."
+msgstr "Atgriezts pie spēles TAA: DLAA ir izslēgts."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's tonemap was not found (see the log)."
+msgstr "Atgriezts pie spēles TAA: spēles tonemap netika atrasts (skatiet žurnālu)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA did not run on this frame (see the log)."
+msgstr "Atgriezts pie spēles TAA: DLAA šajā kadrā nedarbojās (skatiet žurnālu)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1963,11 +2013,6 @@ msgstr "maisījums"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
-msgid "TAA only"
-msgstr "tikai TAA"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
 msgid "split"
 msgstr "sadalīts"
 
@@ -1975,6 +2020,11 @@ msgstr "sadalīts"
 #: src/inject.cpp
 msgid "Game TAA share"
 msgstr "Spēles TAA daļa"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split position"
+msgstr "Sadalījuma vieta"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2443,4 +2493,16 @@ msgstr "info"
 #: src/log.h
 msgid "debug"
 msgstr "atkļūdošana"
+
+#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
+#~ msgstr "Tikai tad, ja spēles Anti-aliasing ir TAA. izslēgts = tikai modifikācija (iestatiet spēles AA uz Izslēgts). maisījums = TAA un DLAA / DLSS vienā kadrā, sajaukti. tikai TAA = bez DLAA, salīdzināšanai. sadalīts = pa kreisi modifikācija, pa labi TAA."
+
+#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
+#~ msgstr "Spēles TAA tagad darbojas: iestatiet spēles Anti-aliasing uz Izslēgts vai izvēlieties maisījums, tikai TAA vai sadalīts."
+
+#~ msgid "The game's TAA is running now: TAA only (see the log)."
+#~ msgstr "Spēles TAA tagad darbojas: tikai TAA (skatiet žurnālu)."
+
+#~ msgid "TAA only"
+#~ msgstr "tikai TAA"
 

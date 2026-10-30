@@ -354,13 +354,12 @@ msgstr "Mod全体をオン / オフし、モードは保持します。オフ = 
 #: src/inject.cpp
 msgid ""
 "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = "
-"left the mod, right TAA."
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
 msgstr ""
 "ゲームのアンチエイリアスがTAAのときのみ。オフ = Modのみ "
 "(ゲームのAAを無効にする)。ミックス = TAAとDLAA / "
-"DLSSを同じフレームで合成。TAAのみ = DLAAなし、比較用。分割 = "
-"左がMod、右がTAA。"
+"DLSSを同じフレームで合成。分割 = 左がMod、右がTAA、比較用。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -368,9 +367,18 @@ msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
 "less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
 msgstr ""
-"ミックスのうちゲームのTAAが占める割合 (0 - 100 %、10 %刻み)。多い "
-"= より落ち着いて柔らかい (TAA)、少ない = よりシャープ (DLAA / "
+"ミックスのうちゲームのTAAが占める割合 (0 - 100 %、10 %刻み)。多い = より落ち着いて柔らかい (TAA)、少ない = よりシャープ (DLAA / "
 "DLSS)。ゲームTAAがミックスのときのみ使用。追加の負荷はありません。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+"ゲームTAA分割の境界線の位置 (幅の0 - 100 %、5 "
+"%刻み)。左側はModのDLAA / "
+"DLSS、右側はゲームのTAA。ゲームTAAが分割のときのみ使用。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1056,11 +1064,16 @@ msgstr "ゲームのTAAは現在動作していません: Modが単独で動作�
 #: src/inject.cpp
 #, c-format
 msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or "
-"split."
+"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
 msgstr ""
 "ゲームのTAAが現在動作しています: "
-"ゲームのアンチエイリアスを無効にするか、ミックス、TAAのみ、分割を選んでください。"
+"ゲームのアンチエイリアスを無効にするか、ミックスまたは分割を選んでください。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: split is on."
+msgstr "ゲームのTAAが現在動作しています: 分割が有効です。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1071,8 +1084,50 @@ msgstr "ゲームのTAAが現在動作しています: ミックスが有効で�
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "The game's TAA is running now: TAA only (see the log)."
-msgstr "ゲームのTAAが現在動作しています: TAAのみ (ログ参照)。"
+msgid "Fell back to the game's TAA: its TAA pass did not run in this frame."
+msgstr "ゲームのTAAに切り替えました: このフレームではTAAパスが実行されませんでした。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's jitter could not be read (see the log)."
+msgstr "ゲームのTAAに切り替えました: ゲームのジッターを読み取れませんでした (ログ参照)。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the picture before the game's TAA was not found."
+msgstr "ゲームのTAAに切り替えました: ゲームのTAA前の画像が見つかりませんでした。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: mix and split do not work with Windows HDR."
+msgstr ""
+"ゲームのTAAに切り替えました: ミックスと分割はWindows "
+"HDRでは動作しません。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA is off."
+msgstr "ゲームのTAAに切り替えました: DLAAがオフです。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's tonemap was not found (see the log)."
+msgstr ""
+"ゲームのTAAに切り替えました: ゲームのトーンマップが見つかりませんでした "
+"(ログ参照)。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA did not run on this frame (see the log)."
+msgstr ""
+"ゲームのTAAに切り替えました: このフレームではDLAAが実行されませんでした "
+"(ログ参照)。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1864,11 +1919,6 @@ msgstr "ミックス"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
-msgid "TAA only"
-msgstr "TAAのみ"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
 msgid "split"
 msgstr "分割"
 
@@ -1876,6 +1926,11 @@ msgstr "分割"
 #: src/inject.cpp
 msgid "Game TAA share"
 msgstr "ゲームTAA比率"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split position"
+msgstr "分割位置"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2343,4 +2398,16 @@ msgstr "情報"
 #: src/log.h
 msgid "debug"
 msgstr "デバッグ"
+
+#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
+#~ msgstr "ゲームのアンチエイリアスがTAAのときのみ。オフ = Modのみ (ゲームのAAを無効にする)。ミックス = TAAとDLAA / DLSSを同じフレームで合成。TAAのみ = DLAAなし、比較用。分割 = 左がMod、右がTAA。"
+
+#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
+#~ msgstr "ゲームのTAAが現在動作しています: ゲームのアンチエイリアスを無効にするか、ミックス、TAAのみ、分割を選んでください。"
+
+#~ msgid "The game's TAA is running now: TAA only (see the log)."
+#~ msgstr "ゲームのTAAが現在動作しています: TAAのみ (ログ参照)。"
+
+#~ msgid "TAA only"
+#~ msgstr "TAAのみ"
 

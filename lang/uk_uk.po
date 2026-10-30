@@ -380,12 +380,12 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = "
-"left the mod, right TAA."
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
 msgstr ""
 "Лише коли згладжування гри встановлено на TAA. вимк. = лише мод (поставте AA гри на Вимкнено). "
-"мікс = TAA і DLAA / DLSS в одному кадрі, змішані. лише TAA = без DLAA, для порівняння. поділ = "
-"ліворуч мод, праворуч TAA."
+"мікс = TAA і DLAA / DLSS в одному кадрі, змішані. поділ = ліворуч мод, праворуч TAA, для "
+"порівняння."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -393,9 +393,17 @@ msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
 "less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
 msgstr ""
-"Яка частка міксу припадає на TAA гри, 0 - 100 % кроком 10 %: більше = спокійніше й м'якше "
-"(TAA), менше = різкіше (DLAA / DLSS). Використовується лише коли TAA гри = мікс. Без додаткових "
-"витрат."
+"Яка частка міксу припадає на TAA гри, 0 - 100 % кроком 10 %: більше = спокійніше й м'якше (TAA), "
+"менше = різкіше (DLAA / DLSS). Використовується лише коли TAA гри = мікс. Без додаткових витрат."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+"Де проходить лінія поділу TAA гри, 0 - 100 % ширини кроком 5 %: ліворуч від неї DLAA / DLSS "
+"мода, праворуч TAA гри. Використовується лише коли TAA гри = поділ."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1138,11 +1146,14 @@ msgstr "TAA гри зараз не працює: мод працює сам."
 #: src/inject.cpp
 #, c-format
 msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or "
-"split."
-msgstr ""
-"TAA гри зараз працює: поставте згладжування гри на Вимкнено або виберіть мікс, лише TAA чи "
-"поділ."
+"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
+msgstr "TAA гри зараз працює: поставте згладжування гри на Вимкнено або виберіть мікс чи поділ."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: split is on."
+msgstr "TAA гри зараз працює: поділ увімкнено."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1153,8 +1164,44 @@ msgstr "TAA гри зараз працює: мікс увімкнено."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "The game's TAA is running now: TAA only (see the log)."
-msgstr "TAA гри зараз працює: лише TAA (див. журнал)."
+msgid "Fell back to the game's TAA: its TAA pass did not run in this frame."
+msgstr "Повернення до TAA гри: його прохід TAA не виконувався в цьому кадрі."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's jitter could not be read (see the log)."
+msgstr "Повернення до TAA гри: не вдалося прочитати джитер гри (див. журнал)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the picture before the game's TAA was not found."
+msgstr "Повернення до TAA гри: зображення до TAA гри не знайдено."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: mix and split do not work with Windows HDR."
+msgstr "Повернення до TAA гри: мікс і поділ не працюють з Windows HDR."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA is off."
+msgstr "Повернення до TAA гри: DLAA вимк."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's tonemap was not found (see the log)."
+msgstr "Повернення до TAA гри: тонмапінг гри не знайдено (див. журнал)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA did not run on this frame (see the log)."
+msgstr "Повернення до TAA гри: DLAA не виконувався в цьому кадрі (див. журнал)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1956,11 +2003,6 @@ msgstr "мікс"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
-msgid "TAA only"
-msgstr "лише TAA"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
 msgid "split"
 msgstr "поділ"
 
@@ -1968,6 +2010,11 @@ msgstr "поділ"
 #: src/inject.cpp
 msgid "Game TAA share"
 msgstr "Частка TAA гри"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split position"
+msgstr "Позиція поділу"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2436,4 +2483,16 @@ msgstr "інфо"
 #: src/log.h
 msgid "debug"
 msgstr "налагодження"
+
+#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
+#~ msgstr "Лише коли згладжування гри встановлено на TAA. вимк. = лише мод (поставте AA гри на Вимкнено). мікс = TAA і DLAA / DLSS в одному кадрі, змішані. лише TAA = без DLAA, для порівняння. поділ = ліворуч мод, праворуч TAA."
+
+#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
+#~ msgstr "TAA гри зараз працює: поставте згладжування гри на Вимкнено або виберіть мікс, лише TAA чи поділ."
+
+#~ msgid "The game's TAA is running now: TAA only (see the log)."
+#~ msgstr "TAA гри зараз працює: лише TAA (див. журнал)."
+
+#~ msgid "TAA only"
+#~ msgstr "лише TAA"
 

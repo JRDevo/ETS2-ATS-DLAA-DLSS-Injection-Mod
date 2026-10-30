@@ -358,12 +358,12 @@ msgstr "Mod 전체를 켜거나 끄고 모드 설정은 유지합니다. 끔 = �
 #: src/inject.cpp
 msgid ""
 "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = "
-"left the mod, right TAA."
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
 msgstr ""
 "게임의 안티앨리어싱이 TAA일 때만. 끔 = Mod만 (게임 AA를 끔으로 "
-"설정). 믹스 = 같은 프레임에서 TAA와 DLAA / DLSS를 섞음. "
-"TAA만 = DLAA 없이, 비교용. 분할 = 왼쪽은 Mod, 오른쪽은 TAA."
+"설정). 믹스 = 같은 프레임에서 TAA와 DLAA / DLSS를 섞음. 분할 "
+"= 왼쪽은 Mod, 오른쪽은 TAA, 비교용."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -371,9 +371,18 @@ msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
 "less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
 msgstr ""
-"믹스 중 게임 TAA의 비율 (0 - 100 %, 10 % 단위): 높음 = "
-"더 안정적이고 부드러움 (TAA), 낮음 = 더 선명함 (DLAA / "
-"DLSS). 게임 TAA가 믹스일 때만 사용. 추가 부하 없음."
+"믹스 중 게임 TAA의 비율 (0 - 100 %, 10 % 단위): 높음 = 더 안정적이고 부드러움 (TAA), 낮음 = 더 선명함 (DLAA / DLSS). 게임 TAA가 "
+"믹스일 때만 사용. 추가 부하 없음."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+"게임 TAA 분할선의 위치 (너비의 0 - 100 %, 5 % 단위): 왼쪽은 "
+"Mod의 DLAA / DLSS, 오른쪽은 게임의 TAA. 게임 TAA가 분할일 "
+"때만 사용."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1068,11 +1077,16 @@ msgstr "게임의 TAA가 지금 실행 중이 아닙니다: Mod 단독으로 실
 #: src/inject.cpp
 #, c-format
 msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or "
-"split."
+"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
 msgstr ""
 "게임의 TAA가 지금 실행 중입니다: 게임의 안티앨리어싱을 끔으로 설정하거나 "
-"믹스, TAA만, 분할을 선택하세요."
+"믹스 또는 분할을 선택하세요."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: split is on."
+msgstr "게임의 TAA가 지금 실행 중입니다: 분할이 켜져 있습니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1083,8 +1097,48 @@ msgstr "게임의 TAA가 지금 실행 중입니다: 믹스가 켜져 있습니�
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "The game's TAA is running now: TAA only (see the log)."
-msgstr "게임의 TAA가 지금 실행 중입니다: TAA만 (로그 참조)."
+msgid "Fell back to the game's TAA: its TAA pass did not run in this frame."
+msgstr "게임의 TAA로 되돌렸습니다: 이 프레임에서 TAA 패스가 실행되지 않았습니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's jitter could not be read (see the log)."
+msgstr "게임의 TAA로 되돌렸습니다: 게임의 지터를 읽을 수 없습니다 (로그 참조)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the picture before the game's TAA was not found."
+msgstr "게임의 TAA로 되돌렸습니다: 게임의 TAA 이전 화면을 찾지 못했습니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: mix and split do not work with Windows HDR."
+msgstr ""
+"게임의 TAA로 되돌렸습니다: 믹스와 분할은 Windows HDR에서 작동하지 "
+"않습니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA is off."
+msgstr "게임의 TAA로 되돌렸습니다: DLAA가 꺼져 있습니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's tonemap was not found (see the log)."
+msgstr "게임의 TAA로 되돌렸습니다: 게임의 톤맵을 찾지 못했습니다 (로그 참조)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA did not run on this frame (see the log)."
+msgstr ""
+"게임의 TAA로 되돌렸습니다: 이 프레임에서 DLAA가 실행되지 않았습니다 "
+"(로그 참조)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1877,11 +1931,6 @@ msgstr "믹스"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
-msgid "TAA only"
-msgstr "TAA만"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
 msgid "split"
 msgstr "분할"
 
@@ -1889,6 +1938,11 @@ msgstr "분할"
 #: src/inject.cpp
 msgid "Game TAA share"
 msgstr "게임 TAA 비율"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split position"
+msgstr "분할 위치"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2356,4 +2410,16 @@ msgstr "정보"
 #: src/log.h
 msgid "debug"
 msgstr "디버그"
+
+#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
+#~ msgstr "게임의 안티앨리어싱이 TAA일 때만. 끔 = Mod만 (게임 AA를 끔으로 설정). 믹스 = 같은 프레임에서 TAA와 DLAA / DLSS를 섞음. TAA만 = DLAA 없이, 비교용. 분할 = 왼쪽은 Mod, 오른쪽은 TAA."
+
+#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
+#~ msgstr "게임의 TAA가 지금 실행 중입니다: 게임의 안티앨리어싱을 끔으로 설정하거나 믹스, TAA만, 분할을 선택하세요."
+
+#~ msgid "The game's TAA is running now: TAA only (see the log)."
+#~ msgstr "게임의 TAA가 지금 실행 중입니다: TAA만 (로그 참조)."
+
+#~ msgid "TAA only"
+#~ msgstr "TAA만"
 

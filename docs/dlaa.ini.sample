@@ -565,13 +565,18 @@ log_level = 1
 #   0 = off (default): the mod as always; a running game TAA is logged once as a WARN
 #   1 = mix: the game's TAA and the mod's DLAA / DLSS work on the SAME raw jittered frame (the mod's own jitter is off, DLSS gets
 #       the game's jitter) and the two results are blended; game_taa_mix = the TAA share
-#   2 = TAA only: the mod's main-scene DLAA / DLSS is skipped (compare; mirrors keep their DLAA)
-#   3 = split: left half the mod, right half the game's TAA, a thin black line between (compare)
+#   2 = split: the mod left of game_taa_split, the game's TAA right of it, a thin line and "DLAA" / "DLSS" | "TAA" labels at the
+#       top (compare). (The game's TAA alone = DLAA off. A first-build dlaa.ini without game_taa_ver: 2 -> 0, 3 -> 2, logged.)
+# When mix / split cannot run for a frame (e.g. Windows HDR on) the game's TAA picture is shown; the menu's Game TAA row says why.
 # Without a running game TAA (or where the game has none, e.g. VR if SCS TAA does not run there) 1..3 behave as 0. The tuning
 # menu's "Game TAA" / "Game TAA share" rows (Upscaling group) change them live; Shift+F12 / Save writes both.
 # game_taa = 0
 # TAA share of the mix in %, 0..100 (menu: 10 % steps): more = calmer, softer; less = sharper (DLAA / DLSS)
 # game_taa_mix = 50
+# Where the split line is, in % of the width (0..100, menu: 5 % steps; VR: the same % of each eye's picture)
+# game_taa_split = 50
+# Written by Save with game_taa (the numbering of game_taa above); do not change it by hand
+# game_taa_ver = 2
 # Whether DLSS is told that the motion vectors carry the game's jitter (NGX MVJittered) in modes 1..3: -1 = auto (default: on,
 # unless the game's world-pass viewports have a fractional origin = the game jitters the viewport, not its projection), 0 = off,
 # 1 = on. Startup only. Try the other value if mix / split wobbles or smears on a parked view (the log names the auto verdict).

@@ -383,12 +383,12 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = "
-"left the mod, right TAA."
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
 msgstr ""
 "Vain kun pelin reunanpehmennys on TAA. pois = pelkkä modi (aseta pelin AA tilaan Pois "
-"käytöstä). sekoitus = TAA ja DLAA / DLSS samassa kuvassa, sekoitettuna. vain TAA = ilman "
-"DLAA:ta, vertailuun. jaettu = vasemmalla modi, oikealla TAA."
+"käytöstä). sekoitus = TAA ja DLAA / DLSS samassa kuvassa, sekoitettuna. jaettu = vasemmalla "
+"modi, oikealla TAA, vertailuun."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -396,9 +396,18 @@ msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
 "less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
 msgstr ""
-"Kuinka suuri osa sekoituksesta on pelin TAA:ta, 0 - 100 % 10 %:n askelin: enemmän = "
-"rauhallisempi ja pehmeämpi (TAA), vähemmän = terävämpi (DLAA / DLSS). Käytössä vain, kun Pelin "
-"TAA on sekoitus. Ei lisäkustannusta."
+"Kuinka suuri osa sekoituksesta on pelin TAA:ta, 0 - 100 % 10 %:n askelin: enemmän = rauhallisempi "
+"ja pehmeämpi (TAA), vähemmän = terävämpi (DLAA / DLSS). Käytössä vain, kun Pelin TAA on sekoitus. "
+"Ei lisäkustannusta."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+"Missä Pelin TAA jaettu -viiva on, 0 - 100 % leveydestä 5 %:n askelin: sen vasemmalla modin DLAA "
+"/ DLSS, oikealla pelin TAA. Käytössä vain, kun Pelin TAA on jaettu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1143,11 +1152,16 @@ msgstr "Pelin TAA ei ole nyt käynnissä: modi toimii yksin."
 #: src/inject.cpp
 #, c-format
 msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or "
-"split."
+"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
 msgstr ""
 "Pelin TAA on nyt käynnissä: aseta pelin reunanpehmennys tilaan Pois käytöstä tai valitse "
-"sekoitus, vain TAA tai jaettu."
+"sekoitus tai jaettu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: split is on."
+msgstr "Pelin TAA on nyt käynnissä: jaettu on päällä."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1158,8 +1172,44 @@ msgstr "Pelin TAA on nyt käynnissä: sekoitus on päällä."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "The game's TAA is running now: TAA only (see the log)."
-msgstr "Pelin TAA on nyt käynnissä: vain TAA (katso loki)."
+msgid "Fell back to the game's TAA: its TAA pass did not run in this frame."
+msgstr "Palattiin pelin TAA:han: sen TAA-ajo ei käynyt tässä kuvassa."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's jitter could not be read (see the log)."
+msgstr "Palattiin pelin TAA:han: pelin jitteriä ei voitu lukea (katso loki)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the picture before the game's TAA was not found."
+msgstr "Palattiin pelin TAA:han: kuvaa ennen pelin TAA:ta ei löytynyt."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: mix and split do not work with Windows HDR."
+msgstr "Palattiin pelin TAA:han: sekoitus ja jaettu eivät toimi Windows HDR:n kanssa."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA is off."
+msgstr "Palattiin pelin TAA:han: DLAA on pois."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's tonemap was not found (see the log)."
+msgstr "Palattiin pelin TAA:han: pelin tonemappia ei löytynyt (katso loki)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA did not run on this frame (see the log)."
+msgstr "Palattiin pelin TAA:han: DLAA ei toiminut tässä kuvassa (katso loki)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1964,11 +2014,6 @@ msgstr "sekoitus"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
-msgid "TAA only"
-msgstr "vain TAA"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
 msgid "split"
 msgstr "jaettu"
 
@@ -1976,6 +2021,11 @@ msgstr "jaettu"
 #: src/inject.cpp
 msgid "Game TAA share"
 msgstr "Pelin TAA:n osuus"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split position"
+msgstr "Jaon paikka"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2444,4 +2494,16 @@ msgstr "info"
 #: src/log.h
 msgid "debug"
 msgstr "vianetsintä"
+
+#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
+#~ msgstr "Vain kun pelin reunanpehmennys on TAA. pois = pelkkä modi (aseta pelin AA tilaan Pois käytöstä). sekoitus = TAA ja DLAA / DLSS samassa kuvassa, sekoitettuna. vain TAA = ilman DLAA:ta, vertailuun. jaettu = vasemmalla modi, oikealla TAA."
+
+#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
+#~ msgstr "Pelin TAA on nyt käynnissä: aseta pelin reunanpehmennys tilaan Pois käytöstä tai valitse sekoitus, vain TAA tai jaettu."
+
+#~ msgid "The game's TAA is running now: TAA only (see the log)."
+#~ msgstr "Pelin TAA on nyt käynnissä: vain TAA (katso loki)."
+
+#~ msgid "TAA only"
+#~ msgstr "vain TAA"
 

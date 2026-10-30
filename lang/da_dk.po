@@ -381,12 +381,12 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = "
-"left the mod, right TAA."
+"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
+"right, to compare."
 msgstr ""
 "Kun når spillets anti-aliasing er TAA. fra = kun modden (sæt spillets AA til Deaktiveret). mix "
-"= TAA og DLAA / DLSS i samme billede, blandet. kun TAA = ingen DLAA, til sammenligning. delt = "
-"til venstre modden, til højre TAA."
+"= TAA og DLAA / DLSS i samme billede, blandet. delt = til venstre modden, til højre TAA, til "
+"sammenligning."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -395,8 +395,17 @@ msgid ""
 "less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
 msgstr ""
 "Hvor stor en del af mixet der er spillets TAA, 0 - 100 % i trin på 10 %: mere = roligere og "
-"blødere (TAA), mindre = skarpere (DLAA / DLSS). Bruges kun når Spillets TAA er mix. Ingen "
-"ekstra omkostning."
+"blødere (TAA), mindre = skarpere (DLAA / DLSS). Bruges kun når Spillets TAA er mix. Ingen ekstra "
+"omkostning."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
+"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+msgstr ""
+"Hvor linjen for Spillets TAA delt ligger, 0 - 100 % af bredden i trin på 5 %: til venstre "
+"moddens DLAA / DLSS, til højre spillets TAA. Bruges kun når Spillets TAA er delt."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1142,11 +1151,14 @@ msgstr "Spillets TAA kører ikke nu: modden kører alene."
 #: src/inject.cpp
 #, c-format
 msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or "
-"split."
-msgstr ""
-"Spillets TAA kører nu: sæt spillets anti-aliasing til Deaktiveret, eller vælg mix, kun TAA "
-"eller delt."
+"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
+msgstr "Spillets TAA kører nu: sæt spillets anti-aliasing til Deaktiveret, eller vælg mix eller delt."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: split is on."
+msgstr "Spillets TAA kører nu: delt er slået til."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1157,8 +1169,44 @@ msgstr "Spillets TAA kører nu: mixet er slået til."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "The game's TAA is running now: TAA only (see the log)."
-msgstr "Spillets TAA kører nu: kun TAA (se loggen)."
+msgid "Fell back to the game's TAA: its TAA pass did not run in this frame."
+msgstr "Faldt tilbage til spillets TAA: dets TAA-pass kørte ikke i dette billede."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's jitter could not be read (see the log)."
+msgstr "Faldt tilbage til spillets TAA: spillets jitter kunne ikke læses (se loggen)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the picture before the game's TAA was not found."
+msgstr "Faldt tilbage til spillets TAA: billedet før spillets TAA blev ikke fundet."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: mix and split do not work with Windows HDR."
+msgstr "Faldt tilbage til spillets TAA: mix og delt virker ikke med Windows HDR."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA is off."
+msgstr "Faldt tilbage til spillets TAA: DLAA er fra."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's tonemap was not found (see the log)."
+msgstr "Faldt tilbage til spillets TAA: spillets tonemap blev ikke fundet (se loggen)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA did not run on this frame (see the log)."
+msgstr "Faldt tilbage til spillets TAA: DLAA kørte ikke i dette billede (se loggen)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1960,11 +2008,6 @@ msgstr "mix"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
-msgid "TAA only"
-msgstr "kun TAA"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
 msgid "split"
 msgstr "delt"
 
@@ -1972,6 +2015,11 @@ msgstr "delt"
 #: src/inject.cpp
 msgid "Game TAA share"
 msgstr "Andel af spillets TAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split position"
+msgstr "Delingsposition"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2440,4 +2488,16 @@ msgstr "info"
 #: src/log.h
 msgid "debug"
 msgstr "fejlsøgning"
+
+#~ msgid "Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = left the mod, right TAA."
+#~ msgstr "Kun når spillets anti-aliasing er TAA. fra = kun modden (sæt spillets AA til Deaktiveret). mix = TAA og DLAA / DLSS i samme billede, blandet. kun TAA = ingen DLAA, til sammenligning. delt = til venstre modden, til højre TAA."
+
+#~ msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or split."
+#~ msgstr "Spillets TAA kører nu: sæt spillets anti-aliasing til Deaktiveret, eller vælg mix, kun TAA eller delt."
+
+#~ msgid "The game's TAA is running now: TAA only (see the log)."
+#~ msgstr "Spillets TAA kører nu: kun TAA (se loggen)."
+
+#~ msgid "TAA only"
+#~ msgstr "kun TAA"
 
