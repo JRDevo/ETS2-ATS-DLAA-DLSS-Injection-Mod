@@ -1084,6 +1084,7 @@ int               g_gameTaaMvJit = -1;
 uint64_t          g_taaVpFrac = 0, g_taaVpInt = 0;   // held world-pass viewports with a fractional / an integer origin
 #ifdef WITH_DLAA
 void TaaOnPassStart(uint64_t frame, bool hold);  // (the phase 82 block above HandlePossibleBlit)
+void TaaKeepRawOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* rtvs);   // (ditto)
 bool TaaMvJittered();                             // (ditto)
 #endif
 float             g_fwdMinM = 0.5f;     // v0.9.0 r11 dlaa.ini mv_fwd_min_m (0.1..5): an origin nearer = an overlay
@@ -4467,6 +4468,9 @@ void STDMETHODCALLTYPE hkClearRTV(ID3D11DeviceContext* ctx, ID3D11RenderTargetVi
     CPU_HOOK(kHkClearRtv);                                 // phase 31 CPU profiler (cpu_prof.h)
     if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); CPU_ORIG(oClearRTV(ctx, v, c)); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     TraceClearRtv(ctx, v, c);
+#ifdef WITH_DLAA
+    if (g_gameTaa && v && !t_inDlaa && IsGameCtx(ctx)) TaaKeepRawOnBind(ctx, 1, &v);   // phase 82: a clear writes too
+#endif
     CPU_ORIG(oClearRTV(ctx, v, c));
 }
 #ifdef WITH_DLAA
@@ -11145,6 +11149,7 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
         return;
     }
 #ifdef WITH_DLAA
+    if (g_gameTaa && n && rtvs) TaaKeepRawOnBind(ctx, n, rtvs);   // phase 82: a held pass's raw scene about to be overwritten -> kept
     const bool gpOn = GpuPass::On();                  // phase 36: GPU time per pass type (debug = 1 / perf_timers)
     int gpCls = 7;                                    // (GpuPass::kBindWork until classified)
     if (gpOn) GpuPass::BindTop(ctx);                  // ... timestamp 1: the game's work under the previous bind ends here
@@ -12756,6 +12761,58 @@ ID3D11ShaderResourceView* TaaRawSrvFor(ID3D11Device* dev, ID3D11Texture2D* raw) 
     lru->tex = raw; lru->use = g_taaRawSrvTick; ++g_taaRawSrvMade;
     return lru->srv.Get();
 }
+// VR game test 3 (57882fb; the probe: eye 0's re-issued tonemap 38 / 46 / 55 vs the game's TAA picture 109 / 134 / 168, everything
+// downstream faithful; eye 1 equal): eye 0's RAW scene (the compress pass's t0, slot.taaRaw) was no longer raw at the tonemap -- the
+// game's pooled scene-size RGBA16F targets are reused and in VR one of them, free once the compress pass read it, is bound as a
+// target again before the pass's tonemap (TAA resolve / history / sharpen of the same eye: a compressed-range picture, tonemapped as
+// linear = the same picture, midtones ~0.34 x, highlights near white). Flat and eye 1 get another pool order. So: when the game binds
+// an outstanding held pass's raw scene as a render target before that pass's tonemap, the raw is copied first (the bind itself writes
+// nothing) into a kept texture (2: a VR pair) and the pass reads the copy.
+Microsoft::WRL::ComPtr<ID3D11Texture2D> g_taaRawKeep[2];
+int      g_taaRawKeepNext = 0;
+uint64_t g_taaRawKept = 0;
+void TaaKeepRawOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* rtvs) {
+    if (g_passSeq <= g_fifoHead) return;
+    for (uint64_t q = g_fifoHead; q < g_passSeq; ++q) {
+        PassSlot& s = g_ring[SlotOf(q)];
+        if (s.s != q || !s.taaHold || s.taaAct >= 0 || !s.taaRaw) continue;
+        bool hit = false;
+        for (UINT i = 0; i < n && !hit; ++i) {
+            if (!rtvs[i]) continue;
+            ID3D11Resource* r = nullptr;
+            rtvs[i]->GetResource(&r);
+            hit = r && (void*)r == (void*)s.taaRaw.Get();
+            if (r) r->Release();
+        }
+        if (!hit) continue;
+        bool isKeep = false;
+        for (auto& k : g_taaRawKeep) isKeep = isKeep || k.Get() == s.taaRaw.Get();
+        if (isKeep) continue;                            // (already a copy)
+        D3D11_TEXTURE2D_DESC d{};
+        s.taaRaw->GetDesc(&d);
+        const int i = g_taaRawKeepNext;
+        g_taaRawKeepNext ^= 1;
+        D3D11_TEXTURE2D_DESC cur{};
+        if (g_taaRawKeep[i]) g_taaRawKeep[i]->GetDesc(&cur);
+        if (!g_taaRawKeep[i] || cur.Width != d.Width || cur.Height != d.Height || cur.Format != d.Format) {
+            g_taaRawKeep[i].Reset();
+            Microsoft::WRL::ComPtr<ID3D11Device> dev;
+            ctx->GetDevice(&dev);
+            D3D11_TEXTURE2D_DESC td = d;
+            td.MipLevels = 1; td.ArraySize = 1; td.SampleDesc.Count = 1; td.SampleDesc.Quality = 0; td.Usage = D3D11_USAGE_DEFAULT;
+            td.BindFlags = D3D11_BIND_SHADER_RESOURCE; td.CPUAccessFlags = 0; td.MiscFlags = 0;
+            if (!dev || FAILED(dev->CreateTexture2D(&td, nullptr, &g_taaRawKeep[i]))) { g_taaRawKeep[i].Reset(); continue; }
+        }
+        t_inDlaa = true;
+        ctx->CopyResource(g_taaRawKeep[i].Get(), s.taaRaw.Get());
+        t_inDlaa = false;
+        if (g_taaRawKept++ < 4)
+            Log("game TAA (phase 82): the game binds pass s=%llu's raw scene %p as a render target before its tonemap -- the raw is kept "
+                "(copy #%llu into kept texture %d, %ux%u fmt=%d; VR test 3: eye 0's re-issued tonemap was dark from this)",
+                (unsigned long long)s.s, (void*)s.taaRaw.Get(), (unsigned long long)g_taaRawKept, i, d.Width, d.Height, (int)d.Format);
+        s.taaRaw = g_taaRawKeep[i];
+    }
+}
 // phase 82 (audit item 1): the game draws into its tonemap target AFTER the tonemap and before the blit (frame15407: 2 x DrawIndexed,
 // PS 674, no texture inputs; not in the r_aa 0 capture ats_roof_flicker_frame5519). On the LDR path those draws are replayed into
 // the re-issued tonemap's texture too (TaaPostAfterDraw: same state, RT0 swapped, a read of the tonemap target swapped for ours), so
@@ -13123,13 +13180,13 @@ bool TaaReissueTonemap(ID3D11DeviceContext* ctx, PassSlot& slot, const D3D11_TEX
     ctx->PSGetShaderResources(0, 1, &s0);
     ctx->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, rts, &dsv);
     ID3D11RenderTargetView*   ours = g_taaLdrRtv[i].Get();
+    t_inDlaa = true;                                     // (the mod's own binds: never the game-bind path of the hooks)
     ctx->OMSetRenderTargets(1, &ours, dsv);
     ctx->PSSetShaderResources(0, 1, &raw);
-    t_inDlaa = true;
     oDraw(ctx, verts, g_blitStartVertex);
-    t_inDlaa = false;
     ctx->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, rts, dsv);
     ctx->PSSetShaderResources(0, 1, &s0);
+    t_inDlaa = false;
     if (s0) s0->Release();
     for (auto*& r : rts) if (r) { r->Release(); r = nullptr; }
     if (dsv) dsv->Release();
@@ -13173,13 +13230,13 @@ void TaaPostAfterDraw(ID3D11DeviceContext* ctx, int kind, UINT a, UINT b, INT c)
             if (r) r->Release();
         }
         ID3D11RenderTargetView* rt = g_taaLdrRtv[i].Get();
+        t_inDlaa = true;                                 // (the mod's own binds: never the game-bind path of the hooks)
         ctx->OMSetRenderTargets(1, &rt, dsv);
         if (swapped) { ctx->PSSetShaderResources(0, 16, sub); ++g_taaPostSrvSwaps; }
-        t_inDlaa = true;
         if (kind == 0) oDraw(ctx, a, b); else oDrawIndexed(ctx, a, b, c);
-        t_inDlaa = false;
         ctx->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, rts, dsv);
         if (swapped) ctx->PSSetShaderResources(0, 16, srv);
+        t_inDlaa = false;
         for (auto*& s : srv) if (s) { s->Release(); s = nullptr; }
         ++pe->n;
         if (g_taaPostReplays++ == 0)

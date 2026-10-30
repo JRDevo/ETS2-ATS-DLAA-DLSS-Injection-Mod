@@ -2487,6 +2487,16 @@ non-blocking readback timing -- so it is judged by the check totals and a verify
   eye: `game TAA (phase 82) probe eye N` -- the mean colour of 32 x 32 px at the DLAA rect centre in the re-issued tonemap, the game's
   TAA picture, the DLAA input, the NGX output and the composite source (staging copies after 240 such blits, read without waiting);
   all should be about equal.
+- **VR game test 3 (57882fb): the cause of the dark square.** The probe (log at 21:16:44): eye 0's re-issued tonemap 38.0 / 45.5 /
+  55.0 vs the game's TAA picture 109.4 / 133.8 / 168.2 at the same spot, the DLAA input / NGX output / composite source equal to the
+  re-issued value; eye 1 all ~109 / 134 / 168. So the re-issued tonemap of eye 0 was already dark: its RAW scene (the compress pass's
+  t0) was no longer raw at the tonemap -- the game reuses its pooled scene-size RGBA16F targets, and in VR the one eye 0's compress
+  read is bound again as a render target before eye 0's tonemap (a compressed-range picture of the same eye: tonemapped as linear =
+  midtones ~0.34 x, highlights near white). Fix (`TaaKeepRawOnBind`, from `hkOMSetRenderTargets` and `hkClearRTV`): when the game
+  binds / clears an outstanding held pass's raw scene before that pass's tonemap, the raw is copied first into a kept texture (2) and
+  the pass reads the copy (logged, first 4). (The 57882fb premise -- both tonemaps before the blits -- was wrong: the log has tonemap0
+  -> blit0 -> tonemap1 -> blit1; the per-target replay change is harmless.) The mod's own binds in the re-issue / replay now run
+  inside its re-entrancy guard. A compute shader writing the raw through a UAV is not watched (not seen so far).
 - **Not verified in game yet / limits.** Whether SCS TAA runs in VR (if not: VR stays exactly mode 0). Whether the constants come
   through the window copy for every frame (round 2; a window miss grows it and is logged). The
   jitter sign (cb0[8].xy taken as the geometry shift). MVJittered (see above). Mirrors keep the mod's own mirror jitter (if the game
