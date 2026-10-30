@@ -572,6 +572,10 @@ log_level = 1
 # game_taa = 0
 # TAA share of the mix in %, 0..100 (menu: 10 % steps): more = calmer, softer; less = sharper (DLAA / DLSS)
 # game_taa_mix = 50
+# Whether DLSS is told that the motion vectors carry the game's jitter (NGX MVJittered) in modes 1..3: -1 = auto (default: on,
+# unless the game's world-pass viewports have a fractional origin = the game jitters the viewport, not its projection), 0 = off,
+# 1 = on. Startup only. Try the other value if mix / split wobbles or smears on a parked view (the log names the auto verdict).
+# game_taa_mvjit = -1
 
 # GPU timing logs (per-stage DLAA cost + depth snapshot cost, every 600): -1 = with log_level = 4 (phase 45; before: always in
 # VR), 0 off, 1 on

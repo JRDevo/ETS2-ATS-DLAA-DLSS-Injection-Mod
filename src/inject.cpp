@@ -1071,8 +1071,14 @@ int               g_taaLastAct = -1;          // GameTaa::Act of the last held p
 std::atomic<void*> g_taaResolvePs{nullptr};   // the game's TAA resolve PS / range-compress PS (identity, by DXBC checksum at
 std::atomic<void*> g_taaCompressPs{nullptr};  //   CreatePixelShader; any thread)
 bool              g_taaUnmapHooked = false;   // the Unmap hook is in (the TAA constants copy needs it for a Map'ed buffer)
+// dlaa.ini game_taa_mvjit (startup only): -1 auto (default), 0 / 1 = NGX MVJittered off / on for the held passes. The mod's MVs come
+// from the game's per-draw MVPs: a game that jitters its PROJECTION puts the jitter into them (MVJittered on); one that jitters the
+// VIEWPORT (a fractional TopLeft) does not (off). Auto watches the game's viewport origin in the held world passes.
+int               g_gameTaaMvJit = -1;
+uint64_t          g_taaVpFrac = 0, g_taaVpInt = 0;   // held world-pass viewports with a fractional / an integer origin
 #ifdef WITH_DLAA
 void TaaOnPassStart(uint64_t frame, bool hold);  // (the phase 82 block above HandlePossibleBlit)
+bool TaaMvJittered();                             // (ditto)
 #endif
 float             g_fwdMinM = 0.5f;     // v0.9.0 r11 dlaa.ini mv_fwd_min_m (0.1..5): an origin nearer = an overlay
 // v0.10.0 phase 10 PERFORMANCE PROFILES (dlaa.ini perf_profile = high | medium | low, Alt+F9 cycles live, Shift+F12 saves): a
@@ -7788,6 +7794,14 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
                              n.predView >= FlatViews::kMaxViews;
     // phase 82: game_taa 1..3 with a live TAA resolve -> the GAME jitters this pass (its projection): the mod's own shift is held (no
     // viewport shift, no overscan); jx / jy get the game's shift at the resolve's draw (TaaOnResolve)
+#ifdef WITH_DLAA
+    // audit item 4a: the previous pass was held, has had its blit and drew no TAA resolve -> the game's TAA is gone (its AA switched
+    // off): release the hold now, not after the 30-Present live window (those passes would have no AA at all)
+    if (s > 0 && g_taaLastSeen) {
+        const PassSlot& pv = g_ring[SlotOf(s - 1)];
+        if (pv.s == s - 1 && pv.taaHold && pv.consumed && !pv.taaSeen) g_taaLastSeen = 0;
+    }
+#endif
     g_taaHoldPass = GameTaa::Hold(g_gameTaa, g_taaLastSeen, n.frameN);
 #ifdef WITH_DLAA
     if (g_gameTaa) TaaOnPassStart(n.frameN, g_taaHoldPass);   // (logs: the mode on but no live resolve = the mod as at 0; stats)
@@ -8629,6 +8643,10 @@ void STDMETHODCALLTYPE hkRSSetViewports(ID3D11DeviceContext* ctx, UINT n, const 
         n = D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
     memcpy(g_gameVp, vps, n * sizeof(D3D11_VIEWPORT));
     g_gameVpN = n;
+    if (g_taaHoldPass && g_jitterPass) {                  // phase 82: does the GAME jitter its viewport? (game_taa_mvjit auto)
+        const float fx = vps[0].TopLeftX - std::floor(vps[0].TopLeftX), fy = vps[0].TopLeftY - std::floor(vps[0].TopLeftY);
+        if ((fx > 1e-4f && fx < 1.0f - 1e-4f) || (fy > 1e-4f && fy < 1.0f - 1e-4f)) ++g_taaVpFrac; else ++g_taaVpInt;
+    }
     ReconcileViewports(ctx, true);
 }
 
@@ -10186,31 +10204,54 @@ const void* OnUpload(ID3D11Resource* dst, UINT sub, const D3D11_BOX* box, const 
 // would stall the CPU on the GPU (or arrive frames late), so the game's own UPLOAD is copied as it happens: the resolve's draw names
 // its cb0 buffer + offset (TaaOnResolve learns them: `buf`, `off`), and from then on the game's Map (WRITE_DISCARD / NO_OVERWRITE)
 // + Unmap of that buffer (hkMap / hkUnmap: 256 bytes at `off` copied right before the Unmap, the mapping still valid) or its
-// UpdateSubresource(1) (the source bytes) refresh `f`. The next resolve draw takes `f` when it is a fresh copy at the offset that
-// draw binds and GameTaa::ParseJitter accepts it (row 11 = the target size, a sub-pixel jitter): a ring buffer whose offset moves
+// UpdateSubresource(1) (the source bytes) refresh the entry of each offset the resolve has bound (`e`: up to kTaaCbN offsets, LRU --
+// VR: the two eyes' resolves may read the same buffer at two offsets). The next resolve draw takes its offset's entry when it is a
+// fresh copy and GameTaa::ParseJitter accepts it (row 11 = the target size, a sub-pixel jitter): a ring buffer whose offset moves
 // every frame, or a buffer the copy never sees, gives no jitter -> the pass falls back to TAA only (logged, counted). Only while
 // game_taa != 0 (mode 0: one pointer test per Map / Unmap / UpdateSubresource).
-struct TaaCbShadow {
-    void*    buf = nullptr;      // the resolve's cb0 buffer (identity, no ref), learned at its draw
-    UINT     off = 0;            // the byte offset its draw bound (first constant * 16)
-    UINT     width = 0;          // ByteWidth of buf
-    void*    mapPtr = nullptr;   // the open Map of buf (WRITE_DISCARD / NO_OVERWRITE), nullptr = none
-    int      kind = 0;           // how the last copy came: 1 Map WRITE_DISCARD, 2 Map NO_OVERWRITE, 3 UpdateSubresource(1)
+constexpr int kTaaCbN = 4;
+struct TaaCbEntry {
+    bool     valid = false;
+    UINT     off = 0;            // the byte offset a resolve draw bound (first constant * 16)
     float    f[64] = {};         // 256 bytes at `off`
-    UINT     fOff = 0;           // the offset `f` was copied at
-    uint64_t serial = 0, used = 0;   // copies so far / the copy the last resolve draw took
+    uint64_t serial = 0, used = 0;   // copies so far / the copy the last resolve draw at this offset took
+    uint64_t lastUse = 0;        // LRU stamp (resolve draws)
+};
+struct TaaCbShadow {
+    void*      buf = nullptr;    // the resolve's cb0 buffer (identity, no ref), learned at its draw (a new buffer clears `e`)
+    UINT       width = 0;        // ByteWidth of buf
+    void*      mapPtr = nullptr; // the open Map of buf (WRITE_DISCARD / NO_OVERWRITE), nullptr = none
+    int        kind = 0;         // how the last copy came: 1 Map WRITE_DISCARD, 2 Map NO_OVERWRITE, 3 UpdateSubresource(1)
+    UINT       lastOff = 0;      // the offset the last resolve draw bound (log)
+    uint64_t   tick = 0;
+    TaaCbEntry e[kTaaCbN];
 };
 TaaCbShadow g_taaCb;
 uint64_t    g_taaCbCopies[4] = {};   // copies by kind (stats)
 inline void TaaCbCopy(const void* base, UINT baseOff, UINT len, int kind) {   // base = the buffer's bytes from byte baseOff on
-    const UINT off = g_taaCb.off;
-    if (!base || off < baseOff || off >= baseOff + len) return;
-    UINT n = baseOff + len - off;
-    if (n > sizeof(g_taaCb.f)) n = sizeof(g_taaCb.f);
-    memset(g_taaCb.f, 0, sizeof(g_taaCb.f));
-    memcpy(g_taaCb.f, static_cast<const uint8_t*>(base) + (off - baseOff), n);
-    g_taaCb.fOff = off; g_taaCb.kind = kind; ++g_taaCb.serial;
-    ++g_taaCbCopies[kind & 3];
+    if (!base) return;
+    for (TaaCbEntry& e : g_taaCb.e) {
+        if (!e.valid || e.off < baseOff || e.off >= baseOff + len) continue;
+        UINT n = baseOff + len - e.off;
+        if (n > sizeof(e.f)) n = sizeof(e.f);
+        memset(e.f, 0, sizeof(e.f));
+        memcpy(e.f, static_cast<const uint8_t*>(base) + (e.off - baseOff), n);
+        ++e.serial;
+        g_taaCb.kind = kind;
+        ++g_taaCbCopies[kind & 3];
+    }
+}
+// the entry of offset `off` (a new one replaces the least recently used; its first copy comes with the game's next upload)
+inline TaaCbEntry& TaaCbEntryFor(UINT off) {
+    ++g_taaCb.tick;
+    TaaCbEntry* lru = &g_taaCb.e[0];
+    for (TaaCbEntry& e : g_taaCb.e) {
+        if (e.valid && e.off == off) { e.lastUse = g_taaCb.tick; return e; }
+        if (!e.valid || (lru->valid && e.lastUse < lru->lastUse)) lru = &e;
+    }
+    *lru = TaaCbEntry{};
+    lru->valid = true; lru->off = off; lru->lastUse = g_taaCb.tick;
+    return *lru;
 }
 inline void TaaCbOnUpdate(ID3D11Resource* dst, const D3D11_BOX* box, const void* src) {
     if (!g_gameTaa || !dst || (void*)dst != g_taaCb.buf || !src) return;
@@ -12517,7 +12558,7 @@ bool PreTonemapRun(ID3D11DeviceContext1* ctx, PassSlot& slot, ID3D11Texture2D* F
     {
         const GameTaa::Mix mx = GameTaa::MixOf(g_gameTaa, g_gameTaaMix);
         dl.SetCompositeOut(slot.taaHold);
-        dl.SetMvJittered(slot.taaHold);
+        dl.SetMvJittered(slot.taaHold && TaaMvJittered());
         dl.SetMix(slot.taaHold ? mx.modShare : 1.0f, slot.taaHold && mx.split);
     }
     if (g_resetNext) { g_resetEyes = (1 << kMaxViews) - 1; g_resetNext = false; }
@@ -12706,8 +12747,30 @@ float    g_taaLastJx = 0.0f, g_taaLastJy = 0.0f;
 Microsoft::WRL::ComPtr<ID3D11Texture2D>          g_taaLdrTex[2];   // TaaReissueTonemap targets (2: a VR pair can be tonemapped
 Microsoft::WRL::ComPtr<ID3D11RenderTargetView>   g_taaLdrRtv[2];   //   before either blit)
 int      g_taaLdrNext = 0;
-Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> g_taaRawSrv;      // SRV of the raw scene (cached per texture; the view holds a ref)
-void*    g_taaRawSrvTex = nullptr;
+Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> g_taaLdrSrv[2];   //   + their SRVs (post-tonemap replays that read the target)
+// SRVs of the raw scenes (one per texture: VR alternates the eyes' forward colours; the view holds a ref), LRU of 4
+struct TaaRawSrv { Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv; void* tex = nullptr; uint64_t use = 0; };
+TaaRawSrv g_taaRawSrv[4];
+uint64_t  g_taaRawSrvTick = 0, g_taaRawSrvMade = 0;
+ID3D11ShaderResourceView* TaaRawSrvFor(ID3D11Device* dev, ID3D11Texture2D* raw) {
+    ++g_taaRawSrvTick;
+    TaaRawSrv* lru = &g_taaRawSrv[0];
+    for (TaaRawSrv& e : g_taaRawSrv) {
+        if (e.srv && e.tex == (void*)raw) { e.use = g_taaRawSrvTick; return e.srv.Get(); }
+        if (!e.srv || (lru->srv && e.use < lru->use)) lru = &e;
+    }
+    lru->srv.Reset(); lru->tex = nullptr;
+    if (FAILED(dev->CreateShaderResourceView(raw, nullptr, &lru->srv)) || !lru->srv) return nullptr;
+    lru->tex = raw; lru->use = g_taaRawSrvTick; ++g_taaRawSrvMade;
+    return lru->srv.Get();
+}
+// phase 82 (audit item 1): the game draws into its tonemap target AFTER the tonemap and before the blit (frame15407: 2 x DrawIndexed,
+// PS 674, no texture inputs; not in the r_aa 0 capture ats_roof_flicker_frame5519). On the LDR path those draws are replayed into
+// the re-issued tonemap's texture too (TaaPostAfterDraw: same state, RT0 swapped, a read of the tonemap target swapped for ours), so
+// the mod's picture has them and the composite does not cover them. Armed from the game's tonemap draw (after it) to the pass's blit.
+struct TaaPost { bool pendingArm = false, armed = false; void* rt = nullptr; int idx = 0; uint32_t n = 0; };
+TaaPost  g_taaPost;
+uint64_t g_taaPostReplays = 0, g_taaPostSrvSwaps = 0;
 
 const char* TaaActText(int a, bool up) {
     switch (a) {
@@ -12744,14 +12807,32 @@ void TaaNote(int act, const char* why) {
         TaaActText(act, k.up), why ? " -- because " : "", why ? why : "", (unsigned long long)now);
     if (act != GameTaa::kActNone && act != GameTaa::kActTaaOnly)
         Log("game TAA (phase 82): jitter copy from the resolve's cbuffer %p (%u bytes, offset %u) by %s, last (%+.3f, %+.3f) px -> NGX "
-            "(%+.3f, %+.3f) (jitter_sign %+d,%+d); NGX MVJittered on the main units", g_taaCb.buf, g_taaCb.width, g_taaCb.off, src,
-            (double)g_taaLastJx, (double)g_taaLastJy, (double)(g_signX * g_taaLastJx), (double)(g_signY * g_taaLastJy), g_signX, g_signY);
+            "(%+.3f, %+.3f) (jitter_sign %+d,%+d); NGX MVJittered %s on the main units (game_taa_mvjit %d: %s)", g_taaCb.buf, g_taaCb.width,
+            g_taaCb.lastOff, src, (double)g_taaLastJx, (double)g_taaLastJy, (double)(g_signX * g_taaLastJx),
+            (double)(g_signY * g_taaLastJy), g_signX, g_signY, TaaMvJittered() ? "ON" : "OFF", g_gameTaaMvJit,
+            g_gameTaaMvJit >= 0 ? "set in dlaa.ini" : "auto from the game's viewport origin");
 }
 
 // Which pass a post-processing draw belongs to: the pass of the current TAA chain (compress -> resolve -> tonemap; its pass is found
 // by the compress pass's input = that pass's forward colour, so a VR frame that renders both eyes' scenes before their post chains
 // still pairs each chain with its own eye's pass), else the newest pass.
 uint64_t g_taaChainS = UINT64_MAX;
+// game_taa_mvjit: the set value, or auto = MVJittered unless the game's held world-pass viewports carry a fractional origin (then the
+// game jitters the viewport, the MVPs are clean). The auto verdict is logged when it changes.
+bool TaaMvJittered() {
+    if (g_gameTaaMvJit >= 0) return g_gameTaaMvJit != 0;
+    const bool vpJitter = g_taaVpFrac > 8 && g_taaVpFrac * 4 > g_taaVpInt;
+    static int s_logged = -1;
+    if (s_logged != (vpJitter ? 0 : 1)) {
+        s_logged = vpJitter ? 0 : 1;
+        Log("game TAA (phase 82): NGX MVJittered %s (game_taa_mvjit auto) -- held world-pass viewports: %llu with a fractional origin, "
+            "%llu integer -> the game jitters its %s", vpJitter ? "OFF" : "ON", (unsigned long long)g_taaVpFrac,
+            (unsigned long long)g_taaVpInt, vpJitter ? "VIEWPORT (the MVPs the mod reprojects with carry no jitter)"
+                                                     : "PROJECTION (assumed: its jitter is in the MVPs the mod reprojects with)");
+    }
+    return !vpJitter;
+}
+
 PassSlot* TaaNewest() {
     if (g_passSeq <= g_fifoHead) return nullptr;
     if (g_taaChainS != UINT64_MAX && g_taaChainS >= g_fifoHead && g_taaChainS < g_passSeq) {
@@ -12835,26 +12916,31 @@ void TaaOnResolve(ID3D11DeviceContext* ctx) {
     bool ok = false;
     if (cb) {
         const UINT off = first * 16u;
-        if ((void*)cb != g_taaCb.buf || off != g_taaCb.off) {
+        bool known = false;
+        for (const TaaCbEntry& e : g_taaCb.e) known = known || (e.valid && e.off == off);
+        if ((void*)cb != g_taaCb.buf || !known) {
             D3D11_BUFFER_DESC bd{};
             cb->GetDesc(&bd);
             static int s_learnLogs = 0;
             if (s_learnLogs++ < 6)
                 Log("game TAA (phase 82): the TAA resolve reads cb0 = buffer %p (%u bytes, usage %d, cpu 0x%x) at offset %u (%u constants)%s"
                     " -- its constants are copied at the game's next upload (Map / Unmap%s, UpdateSubresource)", (void*)cb, bd.ByteWidth,
-                    (int)bd.Usage, bd.CPUAccessFlags, off, num, g_taaCb.buf ? " (it changed)" : "",
-                    g_taaUnmapHooked ? "" : ": NO Unmap hook");
-            g_taaCb.buf = cb; g_taaCb.off = off; g_taaCb.width = bd.ByteWidth; g_taaCb.mapPtr = nullptr;
-            g_taaCb.used = g_taaCb.serial;            // an older copy is of another region
+                    (int)bd.Usage, bd.CPUAccessFlags, off, num, (void*)cb != g_taaCb.buf && g_taaCb.buf ? " (a new buffer)" :
+                    (g_taaCb.buf ? " (a new offset)" : ""), g_taaUnmapHooked ? "" : ": NO Unmap hook");
+            if ((void*)cb != g_taaCb.buf) {
+                for (TaaCbEntry& e : g_taaCb.e) e = TaaCbEntry{};
+                g_taaCb.buf = cb; g_taaCb.width = bd.ByteWidth; g_taaCb.mapPtr = nullptr;
+            }
         }
+        g_taaCb.lastOff = off;
+        TaaCbEntry& e = TaaCbEntryFor(off);
         float sx = 0.0f, sy = 0.0f;
-        if (g_taaCb.serial != g_taaCb.used && g_taaCb.fOff == off &&
-            GameTaa::ParseJitter(g_taaCb.f, sizeof(g_taaCb.f) / sizeof(float), g_sceneW, g_sceneH, &sx, &sy)) {
+        if (e.serial != e.used && GameTaa::ParseJitter(e.f, sizeof(e.f) / sizeof(float), g_sceneW, g_sceneH, &sx, &sy)) {
             ok = true;
             if (s->taaHold) { s->jx = sx; s->jy = sy; s->taaJitOk = true; }
             g_taaLastJx = sx; g_taaLastJy = sy;
         }
-        g_taaCb.used = g_taaCb.serial;
+        e.used = e.serial;
         cb->Release();
     }
     if (!ok) ++g_taaJitMiss;
@@ -12880,31 +12966,32 @@ bool TaaReissueTonemap(ID3D11DeviceContext* ctx, PassSlot& slot, const D3D11_TEX
         D3D11_RENDER_TARGET_VIEW_DESC rd = rvd;
         rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
         rd.Texture2D.MipSlice = 0;
+        D3D11_SHADER_RESOURCE_VIEW_DESC sv{};
+        sv.Format = rd.Format;
+        sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        sv.Texture2D.MostDetailedMip = 0; sv.Texture2D.MipLevels = 1;
+        g_taaLdrSrv[i].Reset();
         HRESULT hr = dev->CreateTexture2D(&td, nullptr, &g_taaLdrTex[i]);
         if (SUCCEEDED(hr)) hr = dev->CreateRenderTargetView(g_taaLdrTex[i].Get(), &rd, &g_taaLdrRtv[i]);
+        if (SUCCEEDED(hr)) hr = dev->CreateShaderResourceView(g_taaLdrTex[i].Get(), &sv, &g_taaLdrSrv[i]);
         if (FAILED(hr)) {
             static int s_fail = 0;
             if (s_fail++ < 3)
                 LogErr("game TAA (phase 82): the re-issued tonemap's target %ux%u fmt=%d (RTV fmt %d) could not be created hr=0x%lx",
                     td.Width, td.Height, (int)td.Format, (int)rd.Format, hr);
-            g_taaLdrRtv[i].Reset(); g_taaLdrTex[i].Reset();
+            g_taaLdrRtv[i].Reset(); g_taaLdrSrv[i].Reset(); g_taaLdrTex[i].Reset();
             return false;
         }
         Log("game TAA (phase 82): re-issued tonemap target %d created -- %ux%u fmt=%d, RTV fmt %d (the game's tonemap target's shape)", i,
             td.Width, td.Height, (int)td.Format, (int)rd.Format);
     }
-    if (slot.taaRaw.Get() != g_taaRawSrvTex || !g_taaRawSrv) {
-        g_taaRawSrv.Reset();
-        g_taaRawSrvTex = nullptr;
-        if (FAILED(dev->CreateShaderResourceView(slot.taaRaw.Get(), nullptr, &g_taaRawSrv)) || !g_taaRawSrv) return false;
-        g_taaRawSrvTex = slot.taaRaw.Get();
-    }
+    ID3D11ShaderResourceView* raw = TaaRawSrvFor(dev.Get(), slot.taaRaw.Get());
+    if (!raw) return false;
     ID3D11ShaderResourceView* s0 = nullptr;
     ID3D11RenderTargetView*   rts[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
     ID3D11DepthStencilView*   dsv = nullptr;
     ctx->PSGetShaderResources(0, 1, &s0);
     ctx->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, rts, &dsv);
-    ID3D11ShaderResourceView* raw = g_taaRawSrv.Get();
     ID3D11RenderTargetView*   ours = g_taaLdrRtv[i].Get();
     ctx->OMSetRenderTargets(1, &ours, dsv);
     ctx->PSSetShaderResources(0, 1, &raw);
@@ -12917,13 +13004,65 @@ bool TaaReissueTonemap(ID3D11DeviceContext* ctx, PassSlot& slot, const D3D11_TEX
     for (auto*& r : rts) if (r) { r->Release(); r = nullptr; }
     if (dsv) dsv->Release();
     slot.taaLdr = g_taaLdrTex[i];
+    g_taaPost.idx = i;
     return true;
 }
 
+// a Draw / DrawIndexed of the game right after its own call (kind 0 Draw: a = vertices, b = start; 1 DrawIndexed: a = indices,
+// b = start index, c = base vertex), while armed: the tonemap draw itself only arms; a later draw into the tonemap target is
+// replayed into the re-issued tonemap's texture (see TaaPost)
+void TaaPostAfterDraw(ID3D11DeviceContext* ctx, int kind, UINT a, UINT b, INT c) {
+    if (g_taaPost.pendingArm) { g_taaPost.pendingArm = false; g_taaPost.armed = true; g_taaPost.n = 0; return; }
+    if (!g_taaPost.armed) return;
+    ID3D11RenderTargetView* rts[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
+    ID3D11DepthStencilView* dsv = nullptr;
+    ctx->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, rts, &dsv);
+    bool ours = false;
+    if (rts[0]) {
+        ID3D11Resource* r = nullptr;
+        rts[0]->GetResource(&r);
+        ours = r && (void*)r == g_taaPost.rt;
+        if (r) r->Release();
+    }
+    const int i = g_taaPost.idx;
+    if (ours && g_taaLdrRtv[i] && g_taaPost.n < 32) {
+        ID3D11ShaderResourceView* srv[16] = {};
+        ctx->PSGetShaderResources(0, 16, srv);
+        ID3D11ShaderResourceView* sub[16];
+        bool swapped = false;
+        for (int k = 0; k < 16; ++k) {
+            sub[k] = srv[k];
+            if (!srv[k]) continue;
+            ID3D11Resource* r = nullptr;
+            srv[k]->GetResource(&r);
+            if (r && (void*)r == g_taaPost.rt && g_taaLdrSrv[i]) { sub[k] = g_taaLdrSrv[i].Get(); swapped = true; }
+            if (r) r->Release();
+        }
+        ID3D11RenderTargetView* rt = g_taaLdrRtv[i].Get();
+        ctx->OMSetRenderTargets(1, &rt, dsv);
+        if (swapped) { ctx->PSSetShaderResources(0, 16, sub); ++g_taaPostSrvSwaps; }
+        t_inDlaa = true;
+        if (kind == 0) oDraw(ctx, a, b); else oDrawIndexed(ctx, a, b, c);
+        t_inDlaa = false;
+        ctx->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, rts, dsv);
+        if (swapped) ctx->PSSetShaderResources(0, 16, srv);
+        for (auto*& s : srv) if (s) { s->Release(); s = nullptr; }
+        ++g_taaPost.n;
+        if (g_taaPostReplays++ == 0)
+            Log("game TAA (phase 82): a game %s (%u %s) into its tonemap target after the tonemap is replayed into the re-issued "
+                "tonemap's texture too (first one; %s) -- the mod's picture keeps the game's post-tonemap draws",
+                kind ? "DrawIndexed" : "Draw", a, kind ? "indices" : "vertices",
+                swapped ? "it reads the tonemap target: ours is bound instead" : "it reads no copy of the tonemap target");
+    }
+    for (auto*& r : rts) if (r) { r->Release(); r = nullptr; }
+    if (dsv) dsv->Release();
+}
+
 // the tonemap draw (HandlePossibleBlit, before the game's draw): src = its t0 (the TAA'd linear HDR), rtDesc / rvd = its target
-void TaaOnTonemap(ID3D11DeviceContext* ctx, ID3D11Texture2D* src, const D3D11_TEXTURE2D_DESC& rtDesc,
+void TaaOnTonemap(ID3D11DeviceContext* ctx, ID3D11Texture2D* src, void* rtPtr, const D3D11_TEXTURE2D_DESC& rtDesc,
                   const D3D11_RENDER_TARGET_VIEW_DESC& rvd, UINT verts) {
     if (g_gameTaa == GameTaa::kOff) return;
+    g_taaPost.armed = g_taaPost.pendingArm = false;     // a new tonemap: the previous one's replays end
     PassSlot* const s = TaaNewest();
     if (!s || s->taaAct >= 0) return;                    // decided at its first tonemap
     PassSlot& slot = *s;
@@ -12959,6 +13098,7 @@ void TaaOnTonemap(ID3D11DeviceContext* ctx, ID3D11Texture2D* src, const D3D11_TE
         if (!ok) { act = GameTaa::kActTaaOnly; why = "the HDR run or its blend did not happen this pass (NGX create budget / failure)"; }
     } else if (act == GameTaa::kActLdr) {
         if (!TaaReissueTonemap(ctx, slot, rtDesc, rvd, verts)) { act = GameTaa::kActTaaOnly; why = "the tonemap could not be re-issued"; }
+        else { g_taaPost.rt = rtPtr; g_taaPost.pendingArm = true; }   // the game's draws into rtPtr after its tonemap follow
     }
     slot.taaAct = act;
     g_taaLastAct = act;
@@ -13095,7 +13235,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
                 g_tonemapTex = rtPtr;
 #ifdef WITH_DLAA
                 if (g_flatMvCfg) FvNoteTonemap(srcPtr, rtPtr);   // v0.12.0 issue #12 round 5: which pass this LDR RT now shows
-                if (g_gameTaa) TaaOnTonemap(ctx, tex, bd, rvd, vertexCount);   // phase 82: before the game's tonemap draw
+                if (g_gameTaa) TaaOnTonemap(ctx, tex, rtPtr, bd, rvd, vertexCount);   // phase 82: before the game's tonemap draw
 #endif
                 tex->Release();
                 return;
@@ -13232,6 +13372,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
                 (int)g_dlssUpscale.load());
         }
     }
+    g_taaPost.armed = g_taaPost.pendingArm = false;     // phase 82: a blit ends the post-tonemap draw replays (TaaPost)
 #endif
     ++g_blitCount;
     if (g_blitCount == 1)   // v0.7.10: first scene->screen blit matched this process (the copy DLAA/DLSS hooks into)
@@ -13695,6 +13836,11 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         // TaaOnTonemap logged why). The game's TAA picture stays; never DLAA on the TAA'd frame. MV history keeps rolling.
         if (dl.Mv().Ready()) dl.Mv().Commit(ctx, slot.cand);
         ++g_taaOnlyBlits;
+        g_taaPost.armed = g_taaPost.pendingArm = false;
+        if (slot.taaAct < 0)                              // the tonemap rule never saw this pass: say why once
+            TaaNote(GameTaa::kActTaaOnly, g_hdrOut ? "HDR output (Windows HDR on): the game's 8-bit tonemap the mix works on is not "
+                                                     "drawn -- modes mix / split stay TAA only; use game_taa 0 or Windows HDR off"
+                                                   : "no tonemap draw was recognised for this pass");
     } else if (g_dlaaOn.load() && slot.pre == 2 && !slot.twin.valid) {
         // v0.10.0 phase 7: the pre-tonemap run was tried and consumed the depth snapshot without a result (evaluate failed):
         // no depth for the blit unit -> this frame passes un-anti-aliased (rare; logged as failed in the stats)
@@ -13752,11 +13898,12 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         // phase 82 (game_taa): a held pass the tonemap handed to the blit unit runs on the game's tonemap RE-ISSUED on the raw jittered
         // scene (TaaReissueTonemap; same shape as `tex`) and composites over the game's blit (the TAA picture) with the mod's share /
         // the split; NGX gets the game's jitter (slot.jx / jy) and MVJittered. Every other pass: exactly as before.
+        g_taaPost.armed = g_taaPost.pendingArm = false;  // the blit reads the tonemap target: its post-tonemap draws are over
         const bool taaLdr = slot.taaHold && slot.taaAct == GameTaa::kActLdr && slot.taaLdr;
         {
             const GameTaa::Mix mx = GameTaa::MixOf(g_gameTaa, g_gameTaaMix);
             dl.SetCompositeOut(taaLdr);
-            dl.SetMvJittered(slot.taaHold);
+            dl.SetMvJittered(slot.taaHold && TaaMvJittered());
             dl.SetMix(taaLdr ? mx.modShare : 1.0f, taaLdr && mx.split);
             if (taaLdr) ++g_taaLdrBlits;
         }
@@ -14049,6 +14196,7 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
         ReconcileViewports(ctx, false);                  // (no-op when the edge fill already issued the game's viewport)
     }
 #ifdef WITH_DLAA
+    if ((g_taaPost.armed || g_taaPost.pendingArm) && !t_inDlaa) TaaPostAfterDraw(ctx, 0, vertexCount, startVertex, 0);   // phase 82
     if (g_compEye >= 0 && !t_inDlaa) RunPendingComposite(ctx);   // v0.7.0 (before the scene span closes)
     if (g_menuBlitEye >= 0 && !t_inDlaa) MenuDrawVr(ctx);         // v0.10.0 tuning menu: VR panel + fps box over this eye's picture
     if (pvMenuIdx >= 0 && !t_inDlaa) MenuDrawPreview(ctx, pvMenuIdx, 'a');   // v0.10.0 phase 15: ... on a VR menu-screen eye
@@ -23529,6 +23677,7 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
 #endif
     CPU_ORIG(oDrawIndexed(ctx, indexCount, startIndex, baseVertex));
 #ifdef WITH_DLAA
+    if (g_taaPost.armed && gameCtx && !inDlaa) TaaPostAfterDraw(ctx, 1, indexCount, startIndex, baseVertex);   // phase 82
     if (wireGs) { t_inDlaa.Quiet(true); WireWiden::Unbind(ctx); t_inDlaa.Quiet(false); }   // phase 61
     // phase 64: a widened SOLID G-buffer draw (phase 63) also goes into the pass's forward record: the forward-depth batch and the
     // forward-id replay draw its full band (no dither) -> every band pixel carries the wire's depth and id, not the background's
@@ -24550,6 +24699,7 @@ void LoadConfig() {
             if (!strcmp(key, "dlss_bias_mask"))     { g_biasCfg = v < 0 ? 0 : (v > 100 ? 100 : (int)v); g_biasExplicit = true; continue; }   // phase 49
             if (!strcmp(key, "game_taa"))     { g_gameTaa = GameTaa::ClampMode((int)v); g_gameTaaExplicit = true; continue; }   // phase 82
             if (!strcmp(key, "game_taa_mix")) { g_gameTaaMix = GameTaa::ClampMix((int)v); g_gameTaaExplicit = true; continue; }   // phase 82
+            if (!strcmp(key, "game_taa_mvjit")) { g_gameTaaMvJit = v < 0 ? -1 : (v > 0 ? 1 : 0); continue; }   // phase 82, startup only
             if (!strcmp(key, "light_redraw_jitter")) { g_lightRedrawCfg = v != 0 ? 1 : 0; continue; }   // phase 55 (outside the chain: C1061)
             if (!strcmp(key, "light_fs_jitter"))     { g_lightFsCfg = v != 0 ? 1 : 0; continue; }       // phase 78 (outside the chain: C1061)
             if (!strcmp(key, "outside_aa"))          { g_outsideAaCfg = v <= 0 ? 0 : (v >= 2 ? 2 : 1); continue; }   // phase 81
