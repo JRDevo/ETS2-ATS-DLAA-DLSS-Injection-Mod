@@ -135,8 +135,18 @@ msgstr "Képkockasebesség"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Performance"
+msgstr "Teljesítmény"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "VR teljesítmény"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "In-game UI"
+msgstr "Játék UI"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -318,8 +328,8 @@ msgid ""
 "Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
 "the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Képkockasebesség és CPU: CPU-hangolás, FPS-korlát és NVIDIA Reflex síkhoz, VR FPS-korlát. "
-"Jobbra nyitja a csoportot, Balra zárja; a menü megnyitásakor mindig zárt."
+"Képkockasebesség és CPU: CPU-hangolás, FPS-korlát és NVIDIA Reflex síkhoz, VR FPS-korlát. Jobbra "
+"nyitja a csoportot, Balra zárja; a menü megnyitásakor mindig zárt."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -372,9 +382,8 @@ msgid ""
 "VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
 "are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"VR gyorsítások: Turbo, foveated rendering, a rejtett terület maszk, és hogy megtalálhatók-e "
-"az OFXR Bridge / VectorXR. Jobbra nyitja a csoportot, Balra zárja; a menü megnyitásakor "
-"mindig zárt."
+"VR gyorsítások: Turbo, foveated rendering, a rejtett terület maszk, és hogy megtalálhatók-e az "
+"OFXR Bridge / VectorXR. Jobbra nyitja a csoportot, Balra zárja; a menü megnyitásakor mindig zárt."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -481,8 +490,8 @@ msgid ""
 "Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
 "for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"Hol lebeg a játék saját VR UI-ja (HUD, menük). A mod helyetted begépeli a változtatást a "
-"játék konzoljába; kell hozzá a g_developer és a g_console 1 a config.cfg-ben. Jobbra nyitja a "
+"Hol lebeg a játék saját VR UI-ja (HUD, menük). A mod helyetted begépeli a változtatást a játék "
+"konzoljába; kell hozzá a g_developer és a g_console 1 a config.cfg-ben. Jobbra nyitja a "
 "csoportot, Balra zárja."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -491,8 +500,8 @@ msgid ""
 "Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
 "(the game's menu screens)."
 msgstr ""
-"A játék VR UI-jának melyik elrendezését mozgatják az alábbi sorok: vezetés (a HUD vezetés "
-"közben) vagy menük (a játék menüképernyői)."
+"A játék VR UI-jának melyik elrendezését mozgatják az alábbi sorok: vezetés (a HUD vezetés közben) "
+"vagy menük (a játék menüképernyői)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -500,9 +509,9 @@ msgid ""
 "Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
 "game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
-"A játék VR UI-ját mozgatja: magasság, oldal, távolság, dőlés, forgatás, méret vagy görbület, "
-"kis lépésekben. A játék minden változtatást kb. 0,4 s-mal az utolsó lenyomás után kap meg: a "
-"konzol magától nyílik és záródik."
+"A játék VR UI-ját mozgatja: magasság, oldal, távolság, dőlés, forgatás, méret vagy görbület, kis "
+"lépésekben. A játék minden változtatást kb. 0,4 s-mal az utolsó lenyomás után kap meg: a konzol "
+"magától nyílik és záródik."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -734,9 +743,9 @@ msgid ""
 "switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
 "group, Left closes it."
 msgstr ""
-"Kapcsolók A/B-ellenőrzésekhez: DLAA ki, a játék saját TAA-ja belekeverve vagy egymás mellett, "
-"a vékony vezeték kapcsolók, DLAA tonemap előtt. Normál vezetéshez semmi sem kell ezekből. "
-"Jobbra nyitja a csoportot, Balra zárja."
+"Kapcsolók A/B-ellenőrzésekhez: DLAA ki, a játék saját TAA-ja belekeverve vagy egymás mellett, a "
+"vékony vezeték kapcsolók, DLAA tonemap előtt. Normál vezetéshez semmi sem kell ezekből. Jobbra "
+"nyitja a csoportot, Balra zárja."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1193,14 +1202,28 @@ msgid ""
 "Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
 "game is closed."
 msgstr ""
-"Szürke: a játék konzolja ki van kapcsolva. Állítsd a g_developer és g_console értékét "
-"\"1\"-re a config.cfg-ben, amíg a játék zárva van."
+"Szürke: a játék konzolja ki van kapcsolva. Állítsd a g_developer és g_console értékét \"1\"-re a "
+"config.cfg-ben, amíg a játék zárva van."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr "Várakozás: kattints a játék ablakára az asztalon. A mod csak akkor ír a játék konzoljába, amikor a játék ablaka fókuszban van."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Sending to the game's console..."
 msgstr "Küldés a játék konzoljába..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "A játék naplója nem erősítette meg az utolsó módosítást: lásd a mod naplóját."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1868,6 +1891,21 @@ msgstr "tartsd %ls %hs"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "ETS2 / ATS DLAA & DLSS mod v%hs - hangolómenü"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "minden beállítás (sík és VR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "VR beállítások"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "Sík beállítások"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1987,6 +2025,11 @@ msgstr "azonos (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "DLAA-terület (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "DLAA-terület"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -2032,6 +2075,11 @@ msgstr "be (A2C nélkül)"
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "be (kísérleti)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA before tonemap"
+msgstr "DLAA tonemap előtt"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2186,6 +2234,11 @@ msgstr "Jobbra"
 msgid "Turbo mode (VR)"
 msgstr "Turbo mód (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "Turbo mód"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (stopped)"
@@ -2276,6 +2329,11 @@ msgstr "be (tekintetre vár)"
 msgid "Hidden area mask (VR)"
 msgstr "Rejtett terület maszk (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hidden area mask"
+msgstr "Rejtett terület maszk"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no OpenXR instance yet)"
@@ -2292,6 +2350,11 @@ msgstr "be (korlát erősebb)"
 msgid "Reflex (flat)"
 msgstr "Reflex (sík)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reflex"
+msgstr "Reflex"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on + boost"
@@ -2301,6 +2364,11 @@ msgstr "be + boost"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "FPS-korlát (sík)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "FPS-korlát"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2363,13 +2431,13 @@ msgstr "auto (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Panel beállításai"
+msgid "Panel lock (VR)"
+msgstr "Panel rögzítés (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel lock (VR)"
-msgstr "Panel rögzítés (VR)"
+msgid "Panel lock"
+msgstr "Panel rögzítés"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2412,6 +2480,11 @@ msgstr "Panel mérete"
 msgid "Panel VR depth"
 msgstr "Panel VR-mélység"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "Panel mélység"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2425,6 +2498,11 @@ msgstr "Panel feléd fordul (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel faces you"
+msgstr "Panel feléd fordul"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Menu keys"
 msgstr "Menübillentyűk"
 
@@ -2432,11 +2510,6 @@ msgstr "Menübillentyűk"
 #: src/inject.cpp
 msgid "Off"
 msgstr "Ki"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "FPS-számláló beállításai"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2540,6 +2613,11 @@ msgstr "FPS távolság (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS distance"
+msgstr "FPS távolság"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Hotkeys..."
 msgstr "Gyorsgombok..."
 
@@ -2627,30 +2705,9 @@ msgstr "infó"
 msgid "debug"
 msgstr "hibakeresés"
 
-#~ msgid "Upscaling and VR"
-#~ msgstr "Felskálázás és VR"
+#~ msgid "Panel settings"
+#~ msgstr "Panel beállításai"
 
-#~ msgid "Frame rate and CPU"
-#~ msgstr "Képfrissítés és CPU"
-
-#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "DLSS-felskálázás, a DLAA be / ki kapcsoló és az OFXR Bridge / VectorXR infó. Jobbra nyitja a csoportot, Balra zárja; a menü megnyitásakor mindig zárt."
-
-#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
-#~ msgstr "A DLSS teljes méretre rajzolja vissza a képet, ha a játék Scaling értéke 100 % alatt van: élesebb a játék saját nyújtásánál, és a kevesebb pixel több fps. Nincs extra ár; Scaling 100 %-nál nem csinál semmit."
-
-#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "VR gyorsítások: Turbo, foveated rendering és a rejtett terület maszk. Jobbra nyitja a csoportot, Balra zárja; a menü megnyitásakor mindig zárt."
-
-#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Képfrissítési korlátok és CPU: NVIDIA Reflex és FPS-korlát síkhoz, VR FPS-korlát, CPU-hangolás. Jobbra nyitja a csoportot, Balra zárja; a menü megnyitásakor mindig zárt."
-
-#~ msgid "no extra"
-#~ msgstr "nincs extra"
-
-#~ msgid "Off now (the mod is off)."
-#~ msgstr "Most ki (a mod ki van kapcsolva)."
-
-#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-#~ msgstr "Most ki: Scaling 100 %% alatt a játék saját nyújtása használt."
+#~ msgid "FPS counter settings"
+#~ msgstr "FPS-számláló beállításai"
 

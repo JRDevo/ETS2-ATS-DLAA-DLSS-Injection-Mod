@@ -135,8 +135,18 @@ msgstr "Kaadrisagedus"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Performance"
+msgstr "Jõudlus"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "VR jõudlus"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "In-game UI"
+msgstr "Mängu UI"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -317,8 +327,8 @@ msgid ""
 "Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
 "the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Kaadrisagedus ja CPU: CPU häälestus, FPS-piir ja NVIDIA Reflex lamedale, VR FPS-piir. Parem "
-"avab rühma, vasak sulgeb; menüü avamisel on see alati suletud."
+"Kaadrisagedus ja CPU: CPU häälestus, FPS-piir ja NVIDIA Reflex lamedale, VR FPS-piir. Parem avab "
+"rühma, vasak sulgeb; menüü avamisel on see alati suletud."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -479,8 +489,8 @@ msgid ""
 "Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
 "for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"Kus hõljub mängu enda VR UI (HUD, menüüd). Mod sisestab muudatuse sinu eest mängu konsooli; "
-"vajab g_developer ja g_console 1 failis config.cfg. Parem avab rühma, vasak sulgeb."
+"Kus hõljub mängu enda VR UI (HUD, menüüd). Mod sisestab muudatuse sinu eest mängu konsooli; vajab "
+"g_developer ja g_console 1 failis config.cfg. Parem avab rühma, vasak sulgeb."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -488,8 +498,8 @@ msgid ""
 "Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
 "(the game's menu screens)."
 msgstr ""
-"Millist mängu VR UI paigutust allolevad read liigutavad: sõit (HUD sõidu ajal) või menüüd "
-"(mängu menüüekraanid)."
+"Millist mängu VR UI paigutust allolevad read liigutavad: sõit (HUD sõidu ajal) või menüüd (mängu "
+"menüüekraanid)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -498,8 +508,8 @@ msgid ""
 "game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
 "Liigutab mängu VR UI-d: kõrgus, külg, kaugus, kalle, pööre, suurus või kumerus, väikeste "
-"sammudega. Mäng saab iga muudatuse umbes 0,4 s pärast sinu viimast vajutust: konsool avaneb "
-"ja sulgub ise."
+"sammudega. Mäng saab iga muudatuse umbes 0,4 s pärast sinu viimast vajutust: konsool avaneb ja "
+"sulgub ise."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -733,8 +743,8 @@ msgid ""
 "group, Left closes it."
 msgstr ""
 "Lülitid A/B-kontrollideks: DLAA väljas, mängu enda TAA sisse segatud või kõrvuti, õhukeste "
-"juhtmete lülitid, DLAA enne tonemapi. Tavasõiduks pole siin midagi vaja. Parem avab rühma, "
-"vasak sulgeb."
+"juhtmete lülitid, DLAA enne tonemapi. Tavasõiduks pole siin midagi vaja. Parem avab rühma, vasak "
+"sulgeb."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1192,14 +1202,28 @@ msgid ""
 "Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
 "game is closed."
 msgstr ""
-"Hall: mängu konsool on väljas. Sea g_developer ja g_console väärtuseks \"1\" failis "
-"config.cfg, kui mäng on suletud."
+"Hall: mängu konsool on väljas. Sea g_developer ja g_console väärtuseks \"1\" failis config.cfg, "
+"kui mäng on suletud."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr "Ootan: klõpsa töölaual mängu aknal. Mod kirjutab mängu konsooli ainult siis, kui mängu aken on fookuses."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Sending to the game's console..."
 msgstr "Saadan mängu konsooli..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "Mängu logi ei kinnitanud viimast muudatust: vaata modi logi."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1864,6 +1888,21 @@ msgstr "hoia %ls %hs"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "ETS2 / ATS DLAA & DLSS mod v%hs - häälestusmenüü"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "kõik seaded (lame ja VR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "VR seaded"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "Lameda seaded"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1983,6 +2022,11 @@ msgstr "sama (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "DLAA ala (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "DLAA ala"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -2028,6 +2072,11 @@ msgstr "sees (no A2C)"
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "sees (katseline)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA before tonemap"
+msgstr "DLAA enne tonemapi"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2182,6 +2231,11 @@ msgstr "Parem"
 msgid "Turbo mode (VR)"
 msgstr "Turbo (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "Turbo"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (stopped)"
@@ -2272,6 +2326,11 @@ msgstr "sees (ootab pilku)"
 msgid "Hidden area mask (VR)"
 msgstr "Peidetud ala mask (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hidden area mask"
+msgstr "Peidetud ala mask"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no OpenXR instance yet)"
@@ -2288,6 +2347,11 @@ msgstr "sees (FPS-piir võidab)"
 msgid "Reflex (flat)"
 msgstr "Reflex (lame)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reflex"
+msgstr "Reflex"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on + boost"
@@ -2297,6 +2361,11 @@ msgstr "sees + boost"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "FPS-piir (lame)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "FPS-piir"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2359,13 +2428,13 @@ msgstr "automaat (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Paneel"
+msgid "Panel lock (VR)"
+msgstr "Paneeli lukk (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel lock (VR)"
-msgstr "Paneeli lukk (VR)"
+msgid "Panel lock"
+msgstr "Paneeli lukk"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2408,6 +2477,11 @@ msgstr "Paneeli suurus"
 msgid "Panel VR depth"
 msgstr "Paneeli VR sügavus"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "Paneeli sügavus"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2421,6 +2495,11 @@ msgstr "Paneel sinu poole (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel faces you"
+msgstr "Paneel sinu poole"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Menu keys"
 msgstr "Menüü klahvid"
 
@@ -2428,11 +2507,6 @@ msgstr "Menüü klahvid"
 #: src/inject.cpp
 msgid "Off"
 msgstr "Väljas"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "FPS-näidik"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2536,6 +2610,11 @@ msgstr "FPS kaugus (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS distance"
+msgstr "FPS kaugus"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Hotkeys..."
 msgstr "Kiirklahvid..."
 
@@ -2622,30 +2701,9 @@ msgstr "info"
 msgid "debug"
 msgstr "silumine"
 
-#~ msgid "Upscaling and VR"
-#~ msgstr "Skaleerimine ja VR"
+#~ msgid "Panel settings"
+#~ msgstr "Paneel"
 
-#~ msgid "Frame rate and CPU"
-#~ msgstr "Kaadrisagedus ja CPU"
-
-#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "DLSS skaleerimine, DLAA sisse / välja lüliti ja OFXR Bridge / VectorXR info. Parem avab rühma, vasak sulgeb; menüü avamisel on see alati suletud."
-
-#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
-#~ msgstr "DLSS joonistab pildi tagasi täissuuruseks, kui mängu Scaling on alla 100 %: teravam kui mängu enda venitus ja vähem pikslit tähendab rohkem fps-i. Lisakulu pole; Scaling 100 % juures ei tee midagi."
-
-#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "VR kiirendused: Turbo, foveated renderdus ja peidetud ala mask. Parem avab rühma, vasak sulgeb; menüü avamisel on see alati suletud."
-
-#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Kaadrisageduse piirid ja CPU: NVIDIA Reflex ja FPS-piir lamedale, VR FPS-piir, CPU häälestus. Parem avab rühma, vasak sulgeb; menüü avamisel on see alati suletud."
-
-#~ msgid "no extra"
-#~ msgstr "lisakulu pole"
-
-#~ msgid "Off now (the mod is off)."
-#~ msgstr "Praegu väljas (mod on väljas)."
-
-#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-#~ msgstr "Praegu väljas: kasutatakse mängu enda venitust Scaling 100 %% all."
+#~ msgid "FPS counter settings"
+#~ msgstr "FPS-näidik"
 

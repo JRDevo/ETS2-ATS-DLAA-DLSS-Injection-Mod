@@ -135,8 +135,18 @@ msgstr "Rată de cadre"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Performance"
+msgstr "Performanță"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "Performanță VR"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "In-game UI"
+msgstr "UI-ul jocului"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -321,8 +331,8 @@ msgid ""
 "Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
 "the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Rată de cadre și CPU: reglaj CPU, limită FPS și NVIDIA Reflex pentru plat, limită FPS VR. "
-"Dreapta deschide grupul, Stânga îl închide; pornește închis la fiecare deschidere a meniului."
+"Rată de cadre și CPU: reglaj CPU, limită FPS și NVIDIA Reflex pentru plat, limită FPS VR. Dreapta "
+"deschide grupul, Stânga îl închide; pornește închis la fiecare deschidere a meniului."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -375,9 +385,9 @@ msgid ""
 "VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
 "are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Accelerări VR: Turbo, foveated rendering, masca zonei ascunse și dacă OFXR Bridge / VectorXR "
-"sunt găsite. Dreapta deschide grupul, Stânga îl închide; pornește închis la fiecare "
-"deschidere a meniului."
+"Accelerări VR: Turbo, foveated rendering, masca zonei ascunse și dacă OFXR Bridge / VectorXR sunt "
+"găsite. Dreapta deschide grupul, Stânga îl închide; pornește închis la fiecare deschidere a "
+"meniului."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -484,9 +494,9 @@ msgid ""
 "Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
 "for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"Unde plutește UI-ul VR propriu al jocului (HUD, meniuri). Modul tastează schimbarea în "
-"consola jocului în locul tău; necesită g_developer și g_console 1 în config.cfg. Dreapta "
-"deschide grupul, Stânga îl închide."
+"Unde plutește UI-ul VR propriu al jocului (HUD, meniuri). Modul tastează schimbarea în consola "
+"jocului în locul tău; necesită g_developer și g_console 1 în config.cfg. Dreapta deschide grupul, "
+"Stânga îl închide."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -503,9 +513,9 @@ msgid ""
 "Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
 "game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
-"Mută UI-ul VR al jocului: înălțime, lateral, distanță, înclinare, rotire, mărime sau curbură, "
-"în pași mici. Jocul primește fiecare schimbare la cca 0,4 s după ultima apăsare: consola se "
-"deschide și se închide singură."
+"Mută UI-ul VR al jocului: înălțime, lateral, distanță, înclinare, rotire, mărime sau curbură, în "
+"pași mici. Jocul primește fiecare schimbare la cca 0,4 s după ultima apăsare: consola se deschide "
+"și se închide singură."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -740,9 +750,9 @@ msgid ""
 "switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
 "group, Left closes it."
 msgstr ""
-"Comutatoare pentru verificări A/B: DLAA oprit, TAA-ul propriu al jocului amestecat sau "
-"alăturat, comutatoarele pentru fire subțiri, DLAA înainte de tonemap. Nimic de aici nu e "
-"necesar pentru condus normal. Dreapta deschide grupul, Stânga îl închide."
+"Comutatoare pentru verificări A/B: DLAA oprit, TAA-ul propriu al jocului amestecat sau alăturat, "
+"comutatoarele pentru fire subțiri, DLAA înainte de tonemap. Nimic de aici nu e necesar pentru "
+"condus normal. Dreapta deschide grupul, Stânga îl închide."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1200,14 +1210,28 @@ msgid ""
 "Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
 "game is closed."
 msgstr ""
-"Gri: consola jocului e oprită. Setează g_developer și g_console la \"1\" în config.cfg cât "
-"timp jocul e închis."
+"Gri: consola jocului e oprită. Setează g_developer și g_console la \"1\" în config.cfg cât timp "
+"jocul e închis."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr "Se așteaptă: fă clic pe fereastra jocului de pe desktop. Modul scrie în consola jocului doar cât timp fereastra jocului are focusul."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Sending to the game's console..."
 msgstr "Se trimite la consola jocului..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "Jurnalul jocului nu a confirmat ultima modificare: vezi jurnalul modului."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1876,6 +1900,21 @@ msgstr "ține %ls %hs"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "ETS2 / ATS DLAA & DLSS mod v%hs - meniu de reglaj"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "toate setările (plat și VR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "Setări VR"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "Setări plate"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1995,6 +2034,11 @@ msgstr "la fel (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "Zonă DLAA (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "Zonă DLAA"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -2040,6 +2084,11 @@ msgstr "pornit (fără A2C)"
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "pornit (experimental)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA before tonemap"
+msgstr "DLAA pre-tonemap"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2194,6 +2243,11 @@ msgstr "Dreapta"
 msgid "Turbo mode (VR)"
 msgstr "Mod Turbo (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "Mod Turbo"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (stopped)"
@@ -2284,6 +2338,11 @@ msgstr "pornit (așteaptă ochii)"
 msgid "Hidden area mask (VR)"
 msgstr "Mască zonă ascunsă (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hidden area mask"
+msgstr "Mască zonă ascunsă"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no OpenXR instance yet)"
@@ -2300,6 +2359,11 @@ msgstr "pornit (cap FPS decide)"
 msgid "Reflex (flat)"
 msgstr "Reflex (plat)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reflex"
+msgstr "Reflex"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on + boost"
@@ -2309,6 +2373,11 @@ msgstr "pornit + boost"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "Limită FPS (plat)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "Limită FPS"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2371,13 +2440,13 @@ msgstr "auto (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Setări panou"
+msgid "Panel lock (VR)"
+msgstr "Fixare panou (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel lock (VR)"
-msgstr "Fixare panou (VR)"
+msgid "Panel lock"
+msgstr "Fixare panou"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2420,6 +2489,11 @@ msgstr "Dimensiune panou"
 msgid "Panel VR depth"
 msgstr "Adâncime panou VR"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "Adâncime panou"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2433,6 +2507,11 @@ msgstr "Panou spre tine (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel faces you"
+msgstr "Panou spre tine"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Menu keys"
 msgstr "Taste meniu"
 
@@ -2440,11 +2519,6 @@ msgstr "Taste meniu"
 #: src/inject.cpp
 msgid "Off"
 msgstr "Oprit"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "Setări contor FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2548,6 +2622,11 @@ msgstr "Distanță FPS (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS distance"
+msgstr "Distanță FPS"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Hotkeys..."
 msgstr "Taste rapide..."
 
@@ -2636,30 +2715,9 @@ msgstr "informații"
 msgid "debug"
 msgstr "depanare"
 
-#~ msgid "Upscaling and VR"
-#~ msgstr "Upscaling și VR"
+#~ msgid "Panel settings"
+#~ msgstr "Setări panou"
 
-#~ msgid "Frame rate and CPU"
-#~ msgstr "Cadre și CPU"
-
-#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "DLSS mărire, comutatorul DLAA pornit / oprit și informații OFXR Bridge / VectorXR. Dreapta deschide grupul, Stânga îl închide; pornește închis la fiecare deschidere a meniului."
-
-#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
-#~ msgstr "DLSS aduce imaginea la dimensiunea completă când Scaling-ul jocului e sub 100 %: mai clar decât întinderea proprie a jocului, iar mai puțini pixeli înseamnă mai mulți fps. Fără cost extra; nu face nimic la Scaling 100 %."
-
-#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Accelerări VR: Turbo, foveated rendering și masca zonei ascunse. Dreapta deschide grupul, Stânga îl închide; pornește închis la fiecare deschidere a meniului."
-
-#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Limite de cadre și CPU: NVIDIA Reflex și limită FPS pentru plat, limită FPS VR, reglaj CPU. Dreapta deschide grupul, Stânga îl închide; pornește închis la fiecare deschidere a meniului."
-
-#~ msgid "no extra"
-#~ msgstr "fără extra"
-
-#~ msgid "Off now (the mod is off)."
-#~ msgstr "Oprit acum (modul e oprit)."
-
-#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-#~ msgstr "Oprit acum: sub Scaling 100 %% se folosește întinderea proprie a jocului."
+#~ msgid "FPS counter settings"
+#~ msgstr "Setări contor FPS"
 

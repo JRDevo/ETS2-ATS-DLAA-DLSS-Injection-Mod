@@ -135,8 +135,18 @@ msgstr "帧率"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Performance"
+msgstr "性能"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "VR性能"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "In-game UI"
+msgstr "游戏内UI"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -420,8 +430,7 @@ msgid ""
 "Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
 "for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"游戏自带VR界面 (HUD、菜单) 悬浮的位置。Mod会替你把更改输入游戏控制台；需要在config.cfg中设置g_developer和g_console "
-"1。按右键打开分组，按左键关闭。"
+"游戏自带VR界面 (HUD、菜单) 悬浮的位置。Mod会替你把更改输入游戏控制台；需要在config.cfg中设置g_developer和g_console 1。按右键打开分组，按左键关闭。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1046,8 +1055,22 @@ msgstr "灰色: 游戏控制台已关闭。请在游戏关闭时，将config.cfg
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr "等待中：请在桌面上点击游戏窗口。仅当游戏窗口获得焦点时，模组才会向游戏控制台输入。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "Sending to the game's console..."
 msgstr "正在发送到游戏控制台..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "游戏日志未确认最近一次更改：请查看模组日志。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1700,6 +1723,21 @@ msgstr "长按 %ls %hs"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "ETS2 / ATS DLAA & DLSS Mod v%hs - 调节菜单"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "所有设置 (非VR和VR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "VR设置"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "非VR设置"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1819,6 +1857,11 @@ msgstr "相同 (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "DLAA区域 (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "DLAA区域"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -1864,6 +1907,11 @@ msgstr "开 (无A2C)"
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "开 (实验性)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA before tonemap"
+msgstr "色调映射前DLAA"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2018,6 +2066,11 @@ msgstr "右"
 msgid "Turbo mode (VR)"
 msgstr "加速模式 (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "加速模式"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (stopped)"
@@ -2108,6 +2161,11 @@ msgstr "开 (等待注视)"
 msgid "Hidden area mask (VR)"
 msgstr "隐藏区域遮罩 (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hidden area mask"
+msgstr "隐藏区域遮罩"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no OpenXR instance yet)"
@@ -2124,6 +2182,11 @@ msgstr "开 (FPS上限优先)"
 msgid "Reflex (flat)"
 msgstr "Reflex (非VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reflex"
+msgstr "Reflex"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on + boost"
@@ -2133,6 +2196,11 @@ msgstr "开 + 增强"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "FPS上限 (非VR)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "FPS上限"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2195,13 +2263,13 @@ msgstr "自动 (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "面板设置"
+msgid "Panel lock (VR)"
+msgstr "面板锁定 (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel lock (VR)"
-msgstr "面板锁定 (VR)"
+msgid "Panel lock"
+msgstr "面板锁定"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2244,6 +2312,11 @@ msgstr "面板大小"
 msgid "Panel VR depth"
 msgstr "面板VR深度"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "面板深度"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2257,6 +2330,11 @@ msgstr "面板朝向你 (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel faces you"
+msgstr "面板朝向你"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Menu keys"
 msgstr "菜单键"
 
@@ -2264,11 +2342,6 @@ msgstr "菜单键"
 #: src/inject.cpp
 msgid "Off"
 msgstr "关"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "FPS计数器设置"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2372,6 +2445,11 @@ msgstr "FPS 距离 (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS distance"
+msgstr "FPS 距离"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Hotkeys..."
 msgstr "快捷键..."
 
@@ -2456,30 +2534,9 @@ msgstr "信息"
 msgid "debug"
 msgstr "调试"
 
-#~ msgid "Upscaling and VR"
-#~ msgstr "超分与VR"
+#~ msgid "Panel settings"
+#~ msgstr "面板设置"
 
-#~ msgid "Frame rate and CPU"
-#~ msgstr "帧率与CPU"
-
-#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "DLSS放大、DLAA开 / 关开关，以及OFXR Bridge / VectorXR信息。按右键打开分组，按左键关闭；每次打开菜单时都是关闭状态。"
-
-#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
-#~ msgstr "当游戏缩放低于100 %时，DLSS把画面重新绘制到完整尺寸: 比游戏自带的拉伸更锐利，绘制的像素更少，fps更高。无额外开销；缩放100 %时不起作用。"
-
-#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "VR加速: 加速模式、注视点渲染和隐藏区域遮罩。按右键打开分组，按左键关闭；每次打开菜单时都是关闭状态。"
-
-#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "帧率限制与CPU: 非VR的NVIDIA Reflex和FPS上限、VR的FPS上限、CPU调优。按右键打开分组，按左键关闭；每次打开菜单时都是关闭状态。"
-
-#~ msgid "no extra"
-#~ msgstr "无额外"
-
-#~ msgid "Off now (the mod is off)."
-#~ msgstr "当前为关 (Mod已关闭)。"
-
-#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-#~ msgstr "当前为关: 缩放低于100 %%时使用游戏自己的拉伸。"
+#~ msgid "FPS counter settings"
+#~ msgstr "FPS计数器设置"
 

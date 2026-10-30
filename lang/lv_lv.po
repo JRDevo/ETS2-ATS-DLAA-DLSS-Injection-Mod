@@ -135,8 +135,18 @@ msgstr "Kadru ātrums"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Performance"
+msgstr "Veiktspēja"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "VR veiktspēja"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "In-game UI"
+msgstr "Spēles UI"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -318,8 +328,8 @@ msgid ""
 "Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
 "the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Kadru ātrums un CPU: CPU regulēšana, FPS robeža un NVIDIA Reflex plakanam, VR FPS robeža. Pa "
-"labi atver grupu, pa kreisi aizver; atverot izvēlni, tā vienmēr ir aizvērta."
+"Kadru ātrums un CPU: CPU regulēšana, FPS robeža un NVIDIA Reflex plakanam, VR FPS robeža. Pa labi "
+"atver grupu, pa kreisi aizver; atverot izvēlni, tā vienmēr ir aizvērta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -372,8 +382,8 @@ msgid ""
 "VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
 "are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"VR paātrinājumi: Turbo, foveated renderēšana, slēptās zonas maska un vai atrasti OFXR Bridge "
-"/ VectorXR. Pa labi atver grupu, pa kreisi aizver; atverot izvēlni, tā vienmēr ir aizvērta."
+"VR paātrinājumi: Turbo, foveated renderēšana, slēptās zonas maska un vai atrasti OFXR Bridge / "
+"VectorXR. Pa labi atver grupu, pa kreisi aizver; atverot izvēlni, tā vienmēr ir aizvērta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -480,9 +490,8 @@ msgid ""
 "Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
 "for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"Kur peld pašas spēles VR UI (HUD, izvēlnes). Modifikācija ieraksta izmaiņu spēles konsolē "
-"jūsu vietā; vajag g_developer un g_console 1 failā config.cfg. Pa labi atver grupu, pa kreisi "
-"aizver."
+"Kur peld pašas spēles VR UI (HUD, izvēlnes). Modifikācija ieraksta izmaiņu spēles konsolē jūsu "
+"vietā; vajag g_developer un g_console 1 failā config.cfg. Pa labi atver grupu, pa kreisi aizver."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -490,8 +499,8 @@ msgid ""
 "Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
 "(the game's menu screens)."
 msgstr ""
-"Kuru spēles VR UI izkārtojumu pārbīda zemāk esošās rindas: braukšana (HUD braucot) vai "
-"izvēlnes (spēles izvēlņu ekrāni)."
+"Kuru spēles VR UI izkārtojumu pārbīda zemāk esošās rindas: braukšana (HUD braucot) vai izvēlnes "
+"(spēles izvēlņu ekrāni)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -500,8 +509,8 @@ msgid ""
 "game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
 "Pārbīda spēles VR UI: augstumu, pusi, attālumu, slīpumu, pagriezienu, izmēru vai izliekumu, "
-"nelieliem soļiem. Spēle saņem katru izmaiņu apmēram 0,4 s pēc pēdējā nospiediena: konsole "
-"pati atveras un aizveras."
+"nelieliem soļiem. Spēle saņem katru izmaiņu apmēram 0,4 s pēc pēdējā nospiediena: konsole pati "
+"atveras un aizveras."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -509,8 +518,8 @@ msgid ""
 "Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
 "own values when it exits)."
 msgstr ""
-"Pa labi: visas abu izkārtojumu vērtības atgriežas pie tā, kas config.cfg bija sākumā (spēle "
-"savas vērtības saglabā, izejot)."
+"Pa labi: visas abu izkārtojumu vērtības atgriežas pie tā, kas config.cfg bija sākumā (spēle savas "
+"vērtības saglabā, izejot)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -736,9 +745,9 @@ msgid ""
 "switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
 "group, Left closes it."
 msgstr ""
-"Slēdži A/B pārbaudēm: DLAA izslēgts, pašas spēles TAA piejaukts vai blakus, plānu vadu "
-"slēdži, DLAA pirms tonemap. Parastai braukšanai šeit nekas nav vajadzīgs. Pa labi atver "
-"grupu, pa kreisi aizver."
+"Slēdži A/B pārbaudēm: DLAA izslēgts, pašas spēles TAA piejaukts vai blakus, plānu vadu slēdži, "
+"DLAA pirms tonemap. Parastai braukšanai šeit nekas nav vajadzīgs. Pa labi atver grupu, pa kreisi "
+"aizver."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1196,14 +1205,28 @@ msgid ""
 "Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
 "game is closed."
 msgstr ""
-"Pelēks: spēles konsole ir izslēgta. Iestatiet g_developer un g_console uz \"1\" failā "
-"config.cfg, kamēr spēle ir aizvērta."
+"Pelēks: spēles konsole ir izslēgta. Iestatiet g_developer un g_console uz \"1\" failā config.cfg, "
+"kamēr spēle ir aizvērta."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr "Gaida: noklikšķiniet uz spēles loga darbvirsmā. Mods raksta spēles konsolē tikai tad, kad spēles logam ir fokuss."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Sending to the game's console..."
 msgstr "Sūta uz spēles konsoli..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "Spēles žurnāls neapstiprināja pēdējo izmaiņu: skatiet moda žurnālu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1872,6 +1895,21 @@ msgstr "turiet %ls %hs"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "ETS2 / ATS DLAA & DLSS modifikācija v%hs - regulēšanas izvēlne"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "visi iestatījumi (plakans un VR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "VR iestatījumi"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "Plakanā režīma iestatījumi"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1991,6 +2029,11 @@ msgstr "tāpat (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "DLAA zona (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "DLAA zona"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -2036,6 +2079,11 @@ msgstr "iesl. (no A2C)"
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "iesl. (eksperimentāls)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA before tonemap"
+msgstr "DLAA pirms tonemap"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2190,6 +2238,11 @@ msgstr "Pa labi"
 msgid "Turbo mode (VR)"
 msgstr "Turbo (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "Turbo"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (stopped)"
@@ -2280,6 +2333,11 @@ msgstr "iesl. (gaida skatienu)"
 msgid "Hidden area mask (VR)"
 msgstr "Slēptās zonas maska (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hidden area mask"
+msgstr "Slēptās zonas maska"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no OpenXR instance yet)"
@@ -2296,6 +2354,11 @@ msgstr "iesl. (FPS robeža uzvar)"
 msgid "Reflex (flat)"
 msgstr "Reflex (plakans)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reflex"
+msgstr "Reflex"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on + boost"
@@ -2305,6 +2368,11 @@ msgstr "iesl. + boost"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "FPS robeža (plakans)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "FPS robeža"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2367,13 +2435,13 @@ msgstr "auto (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Panelis"
+msgid "Panel lock (VR)"
+msgstr "Paneļa fiksācija (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel lock (VR)"
-msgstr "Paneļa fiksācija (VR)"
+msgid "Panel lock"
+msgstr "Paneļa fiksācija"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2416,6 +2484,11 @@ msgstr "Paneļa izmērs"
 msgid "Panel VR depth"
 msgstr "Paneļa VR dziļums"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "Paneļa dziļums"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2429,6 +2502,11 @@ msgstr "Panelis pret jums (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel faces you"
+msgstr "Panelis pret jums"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Menu keys"
 msgstr "Izvēlnes taustiņi"
 
@@ -2436,11 +2514,6 @@ msgstr "Izvēlnes taustiņi"
 #: src/inject.cpp
 msgid "Off"
 msgstr "Izslēgts"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "FPS skaitītājs"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2544,6 +2617,11 @@ msgstr "FPS attālums (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS distance"
+msgstr "FPS attālums"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Hotkeys..."
 msgstr "Karstie taustiņi..."
 
@@ -2630,30 +2708,9 @@ msgstr "info"
 msgid "debug"
 msgstr "atkļūdošana"
 
-#~ msgid "Upscaling and VR"
-#~ msgstr "Palielināšana un VR"
+#~ msgid "Panel settings"
+#~ msgstr "Panelis"
 
-#~ msgid "Frame rate and CPU"
-#~ msgstr "Kadru ātrums un CPU"
-
-#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "DLSS palielināšana, DLAA ieslēgšanas / izslēgšanas slēdzis un OFXR Bridge / VectorXR info. Pa labi atver grupu, pa kreisi aizver; atverot izvēlni, tā vienmēr ir aizvērta."
-
-#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
-#~ msgstr "DLSS uzzīmē attēlu atpakaļ pilnā izmērā, ja spēles Scaling ir zem 100 %: asāk nekā pašas spēles stiepšana, un mazāk pikseļu nozīmē vairāk FPS. Papildu izmaksu nav; pie Scaling 100 % neko nedara."
-
-#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "VR paātrinājumi: Turbo, foveated renderēšana un slēptās zonas maska. Pa labi atver grupu, pa kreisi aizver; atverot izvēlni, tā vienmēr ir aizvērta."
-
-#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Kadru ātruma ierobežojumi un CPU: NVIDIA Reflex un FPS robeža plakanam, VR FPS robeža, CPU regulēšana. Pa labi atver grupu, pa kreisi aizver; atverot izvēlni, tā vienmēr ir aizvērta."
-
-#~ msgid "no extra"
-#~ msgstr "bez papildu"
-
-#~ msgid "Off now (the mod is off)."
-#~ msgstr "Tagad izslēgts (modifikācija ir izslēgta)."
-
-#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-#~ msgstr "Tagad izslēgts: zem Scaling 100 %% tiek izmantota pašas spēles stiepšana."
+#~ msgid "FPS counter settings"
+#~ msgstr "FPS skaitītājs"
 

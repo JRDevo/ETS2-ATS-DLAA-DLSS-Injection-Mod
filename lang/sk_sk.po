@@ -135,8 +135,18 @@ msgstr "Snímková frekvencia"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Performance"
+msgstr "Výkon"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "Výkon VR"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "In-game UI"
+msgstr "UI hry"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -319,8 +329,8 @@ msgid ""
 "Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
 "the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Snímková frekvencia a CPU: ladenie CPU, limit FPS a NVIDIA Reflex pre plochý režim, limit FPS "
-"pre VR. Doprava skupinu otvorí, Doľava zatvorí; pri každom otvorení menu je zatvorená."
+"Snímková frekvencia a CPU: ladenie CPU, limit FPS a NVIDIA Reflex pre plochý režim, limit FPS pre "
+"VR. Doprava skupinu otvorí, Doľava zatvorí; pri každom otvorení menu je zatvorená."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -499,9 +509,9 @@ msgid ""
 "Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
 "game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
-"Posúva VR rozhranie hry: výšku, stranu, vzdialenosť, náklon, otočenie, veľkosť alebo "
-"zakrivenie, po malých krokoch. Hra dostane každú zmenu asi 0,4 s po poslednom stlačení: "
-"konzola sa otvorí a zatvorí sama."
+"Posúva VR rozhranie hry: výšku, stranu, vzdialenosť, náklon, otočenie, veľkosť alebo zakrivenie, "
+"po malých krokoch. Hra dostane každú zmenu asi 0,4 s po poslednom stlačení: konzola sa otvorí a "
+"zatvorí sama."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -509,8 +519,8 @@ msgid ""
 "Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
 "own values when it exits)."
 msgstr ""
-"Doprava: všetky hodnoty oboch rozložení späť na to, čo malo config.cfg na začiatku (hra si "
-"svoje hodnoty ukladá pri ukončení)."
+"Doprava: všetky hodnoty oboch rozložení späť na to, čo malo config.cfg na začiatku (hra si svoje "
+"hodnoty ukladá pri ukončení)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1194,14 +1204,28 @@ msgid ""
 "Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
 "game is closed."
 msgstr ""
-"Sivé: konzola hry je vypnutá. Nastavte g_developer a g_console na \"1\" v config.cfg, keď je "
-"hra zatvorená."
+"Sivé: konzola hry je vypnutá. Nastavte g_developer a g_console na \"1\" v config.cfg, keď je hra "
+"zatvorená."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr "Čakám: kliknite na okno hry na ploche. Mod zapisuje do konzoly hry, iba keď má okno hry fokus."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Sending to the game's console..."
 msgstr "Odosielam do konzoly hry..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "Log hry nepotvrdil poslednú zmenu: pozri log modu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1868,6 +1892,21 @@ msgstr "držte %ls %hs"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "Mód ETS2 / ATS DLAA & DLSS v%hs - menu ladenia"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "všetky nastavenia (plochý režim a VR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "Nastavenia VR"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "Nastavenia plochého režimu"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1987,6 +2026,11 @@ msgstr "rovnako (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "Oblasť DLAA (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "Oblasť DLAA"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -2032,6 +2076,11 @@ msgstr "zap. (bez A2C)"
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "zap. (experiment.)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA before tonemap"
+msgstr "DLAA pred tonemap"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2186,6 +2235,11 @@ msgstr "Doprava"
 msgid "Turbo mode (VR)"
 msgstr "Režim Turbo (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "Režim Turbo"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (stopped)"
@@ -2276,6 +2330,11 @@ msgstr "zap. (čaká na pohľad)"
 msgid "Hidden area mask (VR)"
 msgstr "Maska skrytej oblasti (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hidden area mask"
+msgstr "Maska skrytej oblasti"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no OpenXR instance yet)"
@@ -2292,6 +2351,11 @@ msgstr "zap. (vyhráva limit FPS)"
 msgid "Reflex (flat)"
 msgstr "Reflex (plochý)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reflex"
+msgstr "Reflex"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on + boost"
@@ -2301,6 +2365,11 @@ msgstr "zap. + boost"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "Limit FPS (plochý)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "Limit FPS"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2363,13 +2432,13 @@ msgstr "auto (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Nastavenia panela"
+msgid "Panel lock (VR)"
+msgstr "Zámok panela (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel lock (VR)"
-msgstr "Zámok panela (VR)"
+msgid "Panel lock"
+msgstr "Zámok panela"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2412,6 +2481,11 @@ msgstr "Veľkosť panela"
 msgid "Panel VR depth"
 msgstr "Hĺbka panela VR"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "Hĺbka panela"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2425,6 +2499,11 @@ msgstr "Panel k vám (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel faces you"
+msgstr "Panel k vám"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Menu keys"
 msgstr "Klávesy menu"
 
@@ -2432,11 +2511,6 @@ msgstr "Klávesy menu"
 #: src/inject.cpp
 msgid "Off"
 msgstr "Vyp."
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "Nastavenia počítadla FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2540,6 +2614,11 @@ msgstr "Vzdialenosť FPS (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS distance"
+msgstr "Vzdialenosť FPS"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Hotkeys..."
 msgstr "Skratky..."
 
@@ -2626,30 +2705,9 @@ msgstr "info"
 msgid "debug"
 msgstr "ladenie"
 
-#~ msgid "Upscaling and VR"
-#~ msgstr "Škálovanie a VR"
+#~ msgid "Panel settings"
+#~ msgstr "Nastavenia panela"
 
-#~ msgid "Frame rate and CPU"
-#~ msgstr "Snímky a CPU"
-
-#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Škálovanie DLSS, prepínač DLAA zap. / vyp. a informácie o OFXR Bridge / VectorXR. Doprava skupinu otvorí, Doľava zatvorí; pri každom otvorení menu je zatvorená."
-
-#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
-#~ msgstr "DLSS vykreslí obraz späť na plnú veľkosť, keď je Škálovanie hry pod 100 %: ostrejšie než vlastné roztiahnutie hry a menej pixelov znamená viac fps. Bez ďalšej ceny; pri Škálovaní 100 % nerobí nič."
-
-#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Zrýchlenia VR: Turbo, foveated rendering a maska skrytej oblasti. Doprava skupinu otvorí, Doľava zatvorí; pri každom otvorení menu je zatvorená."
-
-#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Limity snímok a CPU: NVIDIA Reflex a limit FPS pre plochý režim, limit FPS pre VR, ladenie CPU. Doprava skupinu otvorí, Doľava zatvorí; pri každom otvorení menu je zatvorená."
-
-#~ msgid "no extra"
-#~ msgstr "bez príplatku"
-
-#~ msgid "Off now (the mod is off)."
-#~ msgstr "Teraz vyp. (mód je vyp.)."
-
-#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-#~ msgstr "Teraz vyp.: pod Škálovaním 100 %% sa používa roztiahnutie hry."
+#~ msgid "FPS counter settings"
+#~ msgstr "Nastavenia počítadla FPS"
 

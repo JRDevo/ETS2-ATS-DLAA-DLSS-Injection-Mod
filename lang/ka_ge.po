@@ -135,8 +135,18 @@ msgstr "კადრების სიხშირე"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Performance"
+msgstr "წარმადობა"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "VR წარმადობა"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "In-game UI"
+msgstr "თამაშის UI"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -316,8 +326,8 @@ msgid ""
 "Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
 "the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"კადრების სიხშირე და CPU: CPU დაყენება, FPS ლიმიტი და NVIDIA Reflex ბრტყელისთვის, VR FPS "
-"ლიმიტი. მარჯვენა ხსნის ჯგუფს, მარცხენა კეტავს; მენიუს ყოველ გახსნაზე დახურულია."
+"კადრების სიხშირე და CPU: CPU დაყენება, FPS ლიმიტი და NVIDIA Reflex ბრტყელისთვის, VR FPS ლიმიტი. "
+"მარჯვენა ხსნის ჯგუფს, მარცხენა კეტავს; მენიუს ყოველ გახსნაზე დახურულია."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -478,8 +488,8 @@ msgid ""
 "for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
 "სად ტივტივებს თამაშის საკუთარი VR UI (HUD, მენიუები). მოდი ცვლილებას თამაშის კონსოლში თქვენ "
-"მაგივრად აკრეფს; საჭიროა g_developer და g_console 1 config.cfg-ში. მარჯვენა ხსნის ჯგუფს, "
-"მარცხენა კეტავს."
+"მაგივრად აკრეფს; საჭიროა g_developer და g_console 1 config.cfg-ში. მარჯვენა ხსნის ჯგუფს, მარცხენა "
+"კეტავს."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -487,8 +497,8 @@ msgid ""
 "Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
 "(the game's menu screens)."
 msgstr ""
-"თამაშის VR UI-ის რომელ განლაგებას ამოძრავებს ქვემოთ მწკრივები: მართვა (HUD მართვისას) ან "
-"მენიუები (თამაშის მენიუს ეკრანები)."
+"თამაშის VR UI-ის რომელ განლაგებას ამოძრავებს ქვემოთ მწკრივები: მართვა (HUD მართვისას) ან მენიუები "
+"(თამაშის მენიუს ეკრანები)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -496,9 +506,9 @@ msgid ""
 "Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
 "game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
-"ამოძრავებს თამაშის VR UI-ს: სიმაღლე, მხარე, მანძილი, დახრა, შებრუნება, ზომა ან გამრუდება, "
-"პატარა ნაბიჯებით. თამაში ყოველ ცვლილებას იღებს ბოლო დაჭერიდან დაახლოებით 0,4 წმ-ში: კონსოლი "
-"თავისით იხსნება და იხურება."
+"ამოძრავებს თამაშის VR UI-ს: სიმაღლე, მხარე, მანძილი, დახრა, შებრუნება, ზომა ან გამრუდება, პატარა "
+"ნაბიჯებით. თამაში ყოველ ცვლილებას იღებს ბოლო დაჭერიდან დაახლოებით 0,4 წმ-ში: კონსოლი თავისით "
+"იხსნება და იხურება."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1192,8 +1202,22 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr "ლოდინი: დააწკაპუნეთ თამაშის ფანჯარაზე სამუშაო მაგიდაზე. მოდი თამაშის კონსოლში წერს მხოლოდ მაშინ, როცა თამაშის ფანჯარა ფოკუსშია."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "Sending to the game's console..."
 msgstr "იგზავნება თამაშის კონსოლში..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "თამაშის ლოგმა ბოლო ცვლილება არ დაადასტურა: იხილეთ მოდის ლოგი."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1856,6 +1880,21 @@ msgstr "დააჭირეთ %ls %hs"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "ETS2 / ATS DLAA & DLSS მოდი v%hs - მოწყობის მენიუ"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "ყველა პარამეტრი (ბრტყელი და VR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "VR პარამეტრები"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "ბრტყელი პარამეტრები"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1975,6 +2014,11 @@ msgstr "იგივე (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "DLAA არე (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "DLAA არე"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -2020,6 +2064,11 @@ msgstr "ჩართ. (A2C-გარეშე)"
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "ჩართ. (ექსპერიმ.)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA before tonemap"
+msgstr "DLAA tonemap-მდე"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2174,6 +2223,11 @@ msgstr "მარჯვნივ"
 msgid "Turbo mode (VR)"
 msgstr "Turbo რეჟიმი (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "Turbo რეჟიმი"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (stopped)"
@@ -2264,6 +2318,11 @@ msgstr "ჩართ. (ელოდება)"
 msgid "Hidden area mask (VR)"
 msgstr "დამალ. არის ნიღაბი (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hidden area mask"
+msgstr "დამალ. არის ნიღაბი"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no OpenXR instance yet)"
@@ -2280,6 +2339,11 @@ msgstr "ჩართ. (FPS ლიმ.)"
 msgid "Reflex (flat)"
 msgstr "Reflex (ბრტყელი)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reflex"
+msgstr "Reflex"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on + boost"
@@ -2289,6 +2353,11 @@ msgstr "ჩართ. + boost"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "FPS ლიმიტი (ბრტყელი)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "FPS ლიმიტი"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2351,13 +2420,13 @@ msgstr "ავტო (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "პანელის პარამეტრები"
+msgid "Panel lock (VR)"
+msgstr "პანელის ჩაკეტვა (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel lock (VR)"
-msgstr "პანელის ჩაკეტვა (VR)"
+msgid "Panel lock"
+msgstr "პანელის ჩაკეტვა"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2400,6 +2469,11 @@ msgstr "პანელის ზომა"
 msgid "Panel VR depth"
 msgstr "პანელის VR სიღრმე"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "პანელის სიღრმე"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2413,6 +2487,11 @@ msgstr "პანელი თქვენკენ (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel faces you"
+msgstr "პანელი თქვენკენ"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Menu keys"
 msgstr "მენიუს კლავიშები"
 
@@ -2420,11 +2499,6 @@ msgstr "მენიუს კლავიშები"
 #: src/inject.cpp
 msgid "Off"
 msgstr "გამორთ."
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "FPS მრიცხველი"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2528,6 +2602,11 @@ msgstr "FPS დისტანცია (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS distance"
+msgstr "FPS დისტანცია"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Hotkeys..."
 msgstr "ცხელი კლავიშები..."
 
@@ -2614,30 +2693,9 @@ msgstr "ინფორმაცია"
 msgid "debug"
 msgstr "გამართვა"
 
-#~ msgid "Upscaling and VR"
-#~ msgstr "გაზრდა და VR"
+#~ msgid "Panel settings"
+#~ msgstr "პანელის პარამეტრები"
 
-#~ msgid "Frame rate and CPU"
-#~ msgstr "კადრების სიხშირე და CPU"
-
-#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "DLSS გაზრდა, DLAA ჩართვა / გამორთვის გადამრთველი და OFXR Bridge / VectorXR-ის ინფორმაცია. მარჯვენა ხსნის ჯგუფს, მარცხენა კეტავს; მენიუს ყოველ გახსნაზე დახურულია."
-
-#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
-#~ msgstr "DLSS სურათს სრულ ზომამდე აბრუნებს, როცა თამაშის Scaling 100 %-ზე ნაკლებია: უფრო მკვეთრია, ვიდრე თამაშის გაწელვა, და ნაკლები პიქსელი ნიშნავს მეტ fps-ს. დამატებითი ფასი არაა; Scaling 100 %-ზე არაფერს აკეთებს."
-
-#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "VR აჩქარებები: Turbo, foveated რენდერი და დამალული არის ნიღაბი. მარჯვენა ხსნის ჯგუფს, მარცხენა კეტავს; მენიუს ყოველ გახსნაზე დახურულია."
-
-#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "კადრთა სიხშირის ლიმიტები და CPU: NVIDIA Reflex და FPS ლიმიტი ბრტყ.-ზე, VR FPS ლიმიტი, CPU დაყენება. მარჯვენა ხსნის ჯგუფს, მარცხენა კეტავს; მენიუს გახსნისას დახურულია."
-
-#~ msgid "no extra"
-#~ msgstr "დამატ. არა"
-
-#~ msgid "Off now (the mod is off)."
-#~ msgstr "გამორთ. (მოდი გამორთ.)."
-
-#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-#~ msgstr "გამორთ.: Scaling 100 %%-ზე ნაკლებისას თამაშის გაწელვა გამოიყენება."
+#~ msgid "FPS counter settings"
+#~ msgstr "FPS მრიცხველი"
 

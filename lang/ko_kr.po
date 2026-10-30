@@ -135,8 +135,18 @@ msgstr "프레임 속도"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Performance"
+msgstr "성능"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "VR 성능"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "In-game UI"
+msgstr "게임 내 UI"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -302,8 +312,8 @@ msgid ""
 "Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
 "the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"프레임 속도와 CPU: CPU 튜닝, 일반 화면용 FPS 제한과 NVIDIA Reflex, VR FPS 제한. 오른쪽 키로 그룹을 열고 왼쪽 키로 닫습니다. 메뉴를 열 "
-"때마다 닫힌 상태로 시작합니다."
+"프레임 속도와 CPU: CPU 튜닝, 일반 화면용 FPS 제한과 NVIDIA Reflex, VR FPS 제한. 오른쪽 키로 그룹을 열고 왼쪽 키로 닫습니다. 메뉴를 열 때마다 "
+"닫힌 상태로 시작합니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -352,8 +362,8 @@ msgid ""
 "VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
 "are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"VR 가속: 터보, 포비티드 렌더링, 숨김 영역 마스크, OFXR Bridge / VectorXR 발견 여부. 오른쪽 키로 그룹을 열고 왼쪽 키로 닫습니다. 메뉴를 열 "
-"때마다 닫힌 상태로 시작합니다."
+"VR 가속: 터보, 포비티드 렌더링, 숨김 영역 마스크, OFXR Bridge / VectorXR 발견 여부. 오른쪽 키로 그룹을 열고 왼쪽 키로 닫습니다. 메뉴를 열 때마다 "
+"닫힌 상태로 시작합니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -451,8 +461,8 @@ msgid ""
 "Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
 "for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"게임 자체 VR UI (HUD, 메뉴) 가 떠 있는 위치. Mod가 변경 사항을 게임 콘솔에 대신 입력합니다. config.cfg에 g_developer와 "
-"g_console 1이 필요합니다. 오른쪽 키로 그룹을 열고 왼쪽 키로 닫습니다."
+"게임 자체 VR UI (HUD, 메뉴) 가 떠 있는 위치. Mod가 변경 사항을 게임 콘솔에 대신 입력합니다. config.cfg에 g_developer와 g_console "
+"1이 필요합니다. 오른쪽 키로 그룹을 열고 왼쪽 키로 닫습니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -467,8 +477,8 @@ msgid ""
 "Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
 "game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
-"게임의 VR UI를 작은 단계로 움직입니다: 높이, 좌우, 거리, 기울기, 회전, 크기, 곡률. 게임은 마지막 입력 약 0.4초 후에 변경을 받습니다: 콘솔이 스스로 "
-"열리고 닫힙니다."
+"게임의 VR UI를 작은 단계로 움직입니다: 높이, 좌우, 거리, 기울기, 회전, 크기, 곡률. 게임은 마지막 입력 약 0.4초 후에 변경을 받습니다: 콘솔이 스스로 열리고 "
+"닫힙니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -671,8 +681,8 @@ msgid ""
 "switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
 "group, Left closes it."
 msgstr ""
-"A/B 비교용 스위치: DLAA 끄기, 게임 자체 TAA 혼합 또는 나란히 보기, 가는 전선 스위치, 톤맵 전 DLAA. 평소 주행에는 필요 없습니다. 오른쪽 키로 "
-"그룹을 열고 왼쪽 키로 닫습니다."
+"A/B 비교용 스위치: DLAA 끄기, 게임 자체 TAA 혼합 또는 나란히 보기, 가는 전선 스위치, 톤맵 전 DLAA. 평소 주행에는 필요 없습니다. 오른쪽 키로 그룹을 "
+"열고 왼쪽 키로 닫습니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1116,8 +1126,22 @@ msgstr "회색: 게임 콘솔이 꺼져 있습니다. 게임을 닫은 상태에
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr "대기 중: 바탕화면에서 게임 창을 클릭하세요. 모드는 게임 창에 포커스가 있을 때만 게임 콘솔에 입력합니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "Sending to the game's console..."
 msgstr "게임 콘솔로 전송 중..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "게임 로그가 마지막 변경을 확인하지 못했습니다: 모드 로그를 확인하세요."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1773,6 +1797,21 @@ msgstr "%ls %hs 길게"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "ETS2 / ATS DLAA & DLSS Mod v%hs - 튜닝 메뉴"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "모든 설정 (일반 및 VR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "VR 설정"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "일반 설정"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1892,6 +1931,11 @@ msgstr "같음 (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "DLAA 영역 (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "DLAA 영역"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -1937,6 +1981,11 @@ msgstr "켬 (A2C 없음)"
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "켬 (실험적)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA before tonemap"
+msgstr "톤맵 전 DLAA"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2091,6 +2140,11 @@ msgstr "오른쪽"
 msgid "Turbo mode (VR)"
 msgstr "터보 모드 (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "터보 모드"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (stopped)"
@@ -2181,6 +2235,11 @@ msgstr "켬 (시선 대기)"
 msgid "Hidden area mask (VR)"
 msgstr "숨김 영역 마스크 (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hidden area mask"
+msgstr "숨김 영역 마스크"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no OpenXR instance yet)"
@@ -2197,6 +2256,11 @@ msgstr "켬 (FPS 제한 우선)"
 msgid "Reflex (flat)"
 msgstr "Reflex (일반)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reflex"
+msgstr "Reflex"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on + boost"
@@ -2206,6 +2270,11 @@ msgstr "켬 + 부스트"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "FPS 제한 (일반)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "FPS 제한"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2268,13 +2337,13 @@ msgstr "자동 (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "패널 설정"
+msgid "Panel lock (VR)"
+msgstr "패널 고정 (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel lock (VR)"
-msgstr "패널 고정 (VR)"
+msgid "Panel lock"
+msgstr "패널 고정"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2317,6 +2386,11 @@ msgstr "패널 크기"
 msgid "Panel VR depth"
 msgstr "패널 VR 깊이"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "패널 깊이"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2330,6 +2404,11 @@ msgstr "패널 정면 향함 (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel faces you"
+msgstr "패널 정면 향함"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Menu keys"
 msgstr "메뉴 키"
 
@@ -2337,11 +2416,6 @@ msgstr "메뉴 키"
 #: src/inject.cpp
 msgid "Off"
 msgstr "끔"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "FPS 카운터 설정"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2445,6 +2519,11 @@ msgstr "FPS 거리 (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS distance"
+msgstr "FPS 거리"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Hotkeys..."
 msgstr "단축키..."
 
@@ -2530,30 +2609,9 @@ msgstr "정보"
 msgid "debug"
 msgstr "디버그"
 
-#~ msgid "Upscaling and VR"
-#~ msgstr "업스케일링과 VR"
+#~ msgid "Panel settings"
+#~ msgstr "패널 설정"
 
-#~ msgid "Frame rate and CPU"
-#~ msgstr "프레임 속도와 CPU"
-
-#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "DLSS 업스케일, DLAA 켜기 / 끄기 스위치, OFXR Bridge / VectorXR 정보. 오른쪽 키로 그룹을 열고 왼쪽 키로 닫습니다. 메뉴를 열 때마다 닫힌 상태로 시작합니다."
-
-#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
-#~ msgstr "게임 스케일링이 100 % 미만일 때 DLSS가 화면을 원래 크기로 다시 그립니다: 게임 자체 확대보다 선명하고, 그리는 픽셀이 적어 fps가 오릅니다. 추가 부하 없음. 스케일링 100 %에서는 아무 효과 없음."
-
-#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "VR 가속: 터보, 포비티드 렌더링, 숨김 영역 마스크. 오른쪽 키로 그룹을 열고 왼쪽 키로 닫습니다. 메뉴를 열 때마다 닫힌 상태로 시작합니다."
-
-#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "프레임 속도 제한과 CPU: 일반 화면용 NVIDIA Reflex와 FPS 제한, VR FPS 제한, CPU 튜닝. 오른쪽 키로 그룹을 열고 왼쪽 키로 닫습니다. 메뉴를 열 때마다 닫힌 상태로 시작합니다."
-
-#~ msgid "no extra"
-#~ msgstr "추가 없음"
-
-#~ msgid "Off now (the mod is off)."
-#~ msgstr "현재 꺼짐 (Mod가 꺼짐)."
-
-#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-#~ msgstr "현재 꺼짐: 스케일링 100 %% 미만에서는 게임 자체 확대를 씁니다."
+#~ msgid "FPS counter settings"
+#~ msgstr "FPS 카운터 설정"
 

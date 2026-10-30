@@ -135,8 +135,18 @@ msgstr "Hitrost sličic"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Performance"
+msgstr "Zmogljivost"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "Zmogljivost VR"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "In-game UI"
+msgstr "UI igre"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -320,8 +330,8 @@ msgid ""
 "Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
 "the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Hitrost sličic in CPU: nastavitev CPU, omejitev FPS in NVIDIA Reflex za ravni način, omejitev "
-"FPS za VR. Desno skupino odpre, Levo jo zapre; ob vsakem odprtju menija je zaprta."
+"Hitrost sličic in CPU: nastavitev CPU, omejitev FPS in NVIDIA Reflex za ravni način, omejitev FPS "
+"za VR. Desno skupino odpre, Levo jo zapre; ob vsakem odprtju menija je zaprta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -482,8 +492,8 @@ msgid ""
 "Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
 "for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"Kje lebdi igri lasten VR vmesnik (HUD, meniji). Mod vnese spremembo v konzolo igre namesto "
-"vas; potrebuje g_developer in g_console 1 v config.cfg. Desno skupino odpre, Levo jo zapre."
+"Kje lebdi igri lasten VR vmesnik (HUD, meniji). Mod vnese spremembo v konzolo igre namesto vas; "
+"potrebuje g_developer in g_console 1 v config.cfg. Desno skupino odpre, Levo jo zapre."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -501,8 +511,8 @@ msgid ""
 "game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
 "Premika VR vmesnik igre: višino, stran, razdaljo, nagib, zasuk, velikost ali ukrivljenost, v "
-"majhnih korakih. Igra prejme vsako spremembo približno 0,4 s po vašem zadnjem pritisku: "
-"konzola se odpre in zapre sama."
+"majhnih korakih. Igra prejme vsako spremembo približno 0,4 s po vašem zadnjem pritisku: konzola "
+"se odpre in zapre sama."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -510,8 +520,8 @@ msgid ""
 "Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
 "own values when it exits)."
 msgstr ""
-"Desno: vse vrednosti obeh postavitev se vrnejo na to, kar je imel config.cfg na začetku (igra "
-"ob izhodu shrani svoje vrednosti)."
+"Desno: vse vrednosti obeh postavitev se vrnejo na to, kar je imel config.cfg na začetku (igra ob "
+"izhodu shrani svoje vrednosti)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -737,9 +747,9 @@ msgid ""
 "switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
 "group, Left closes it."
 msgstr ""
-"Stikala za preverjanja A/B: DLAA izk., lasten TAA igre primešan ali ob strani, stikala za "
-"tanke žice, DLAA pred tonemap. Nič od tega ni potrebno za običajno vožnjo. Desno skupino "
-"odpre, Levo jo zapre."
+"Stikala za preverjanja A/B: DLAA izk., lasten TAA igre primešan ali ob strani, stikala za tanke "
+"žice, DLAA pred tonemap. Nič od tega ni potrebno za običajno vožnjo. Desno skupino odpre, Levo jo "
+"zapre."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1202,8 +1212,22 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr "Čakanje: kliknite okno igre na namizju. Mod tipka v konzolo igre samo, ko je okno igre v fokusu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "Sending to the game's console..."
 msgstr "Pošiljanje v konzolo igre..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "Dnevnik igre ni potrdil zadnje spremembe: glej dnevnik moda."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1871,6 +1895,21 @@ msgstr "držite %ls %hs"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "Mod ETS2 / ATS DLAA & DLSS v%hs - meni nastavitev"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "vse nastavitve (ravni in VR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "Nastavitve VR"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "Ravne nastavitve"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1990,6 +2029,11 @@ msgstr "enako (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "Območje DLAA (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "Območje DLAA"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -2035,6 +2079,11 @@ msgstr "vkl. (brez A2C)"
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "vkl. (poskusno)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA before tonemap"
+msgstr "DLAA pred tonemap"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2189,6 +2238,11 @@ msgstr "Desno"
 msgid "Turbo mode (VR)"
 msgstr "Način Turbo (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "Način Turbo"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (stopped)"
@@ -2279,6 +2333,11 @@ msgstr "vkl. (čaka na pogled)"
 msgid "Hidden area mask (VR)"
 msgstr "Maska skritega območja (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hidden area mask"
+msgstr "Maska skritega območja"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no OpenXR instance yet)"
@@ -2295,6 +2354,11 @@ msgstr "vkl. (prevlada FPS)"
 msgid "Reflex (flat)"
 msgstr "Reflex (ravni)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reflex"
+msgstr "Reflex"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on + boost"
@@ -2304,6 +2368,11 @@ msgstr "vkl. + boost"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "Omejitev FPS (ravni)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "Omejitev FPS"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2366,13 +2435,13 @@ msgstr "auto (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Nastavitve plošče"
+msgid "Panel lock (VR)"
+msgstr "Zaklep plošče (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel lock (VR)"
-msgstr "Zaklep plošče (VR)"
+msgid "Panel lock"
+msgstr "Zaklep plošče"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2415,6 +2484,11 @@ msgstr "Velikost plošče"
 msgid "Panel VR depth"
 msgstr "Globina plošče VR"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "Globina plošče"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2428,6 +2502,11 @@ msgstr "Plošča proti vam (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel faces you"
+msgstr "Plošča proti vam"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Menu keys"
 msgstr "Tipke menija"
 
@@ -2435,11 +2514,6 @@ msgstr "Tipke menija"
 #: src/inject.cpp
 msgid "Off"
 msgstr "Izk."
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "Nastavitve števca FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2543,6 +2617,11 @@ msgstr "Razdalja FPS (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS distance"
+msgstr "Razdalja FPS"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Hotkeys..."
 msgstr "Bližnjice..."
 
@@ -2629,30 +2708,9 @@ msgstr "info"
 msgid "debug"
 msgstr "razhroščevanje"
 
-#~ msgid "Upscaling and VR"
-#~ msgstr "Prilagajanje in VR"
+#~ msgid "Panel settings"
+#~ msgstr "Nastavitve plošče"
 
-#~ msgid "Frame rate and CPU"
-#~ msgstr "Sličice in CPU"
-
-#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Povečevanje DLSS, stikalo DLAA vkl. / izk. in informacije o OFXR Bridge / VectorXR. Desno skupino odpre, Levo jo zapre; ob vsakem odprtju menija je zaprta."
-
-#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
-#~ msgstr "DLSS nariše sliko nazaj v polni velikosti, ko je Prilagajanje igre pod 100 %: ostreje kot lastno raztegovanje igre, manj pikslov pa pomeni več fps. Brez dodatne cene; pri Prilagajanju 100 % ne naredi nič."
-
-#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Pospešitve VR: Turbo, foveated rendering in maska skritega območja. Desno skupino odpre, Levo jo zapre; ob vsakem odprtju menija je zaprta."
-
-#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Omejitve sličic in CPU: NVIDIA Reflex in omejitev FPS za ravni način, omejitev FPS za VR, nastavitev CPU. Desno skupino odpre, Levo jo zapre; ob vsakem odprtju menija je zaprta."
-
-#~ msgid "no extra"
-#~ msgstr "brez dodatka"
-
-#~ msgid "Off now (the mod is off)."
-#~ msgstr "Zdaj izk. (mod je izk.)."
-
-#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-#~ msgstr "Zdaj izk.: pod Prilagajanjem 100 %% se uporablja raztegovanje igre."
+#~ msgid "FPS counter settings"
+#~ msgstr "Nastavitve števca FPS"
 

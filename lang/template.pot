@@ -136,7 +136,17 @@ msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Performance"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "In-game UI"
 msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)
@@ -1006,7 +1016,21 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "Sending to the game's console..."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
 msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -1653,6 +1677,21 @@ msgstr ""
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr ""
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr ""
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1772,6 +1811,11 @@ msgstr ""
 msgid "DLAA area (VR)"
 msgstr ""
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr ""
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -1816,6 +1860,11 @@ msgstr ""
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (experimental)"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA before tonemap"
 msgstr ""
 
 #. Keys: the Hotkey column (about 26 Latin characters)
@@ -1971,6 +2020,11 @@ msgstr ""
 msgid "Turbo mode (VR)"
 msgstr ""
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr ""
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (stopped)"
@@ -2061,6 +2115,11 @@ msgstr ""
 msgid "Hidden area mask (VR)"
 msgstr ""
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hidden area mask"
+msgstr ""
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no OpenXR instance yet)"
@@ -2077,6 +2136,11 @@ msgstr ""
 msgid "Reflex (flat)"
 msgstr ""
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reflex"
+msgstr ""
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on + boost"
@@ -2085,6 +2149,11 @@ msgstr ""
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "FPS cap (flat)"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
 msgstr ""
 
 #. Value column (about 20 Latin characters)
@@ -2148,12 +2217,12 @@ msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
+msgid "Panel lock (VR)"
 msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel lock (VR)"
+msgid "Panel lock"
 msgstr ""
 
 #. Keys: the Hotkey column (about 26 Latin characters)
@@ -2197,6 +2266,11 @@ msgstr ""
 msgid "Panel VR depth"
 msgstr ""
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr ""
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2210,17 +2284,17 @@ msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel faces you"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Menu keys"
 msgstr ""
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "Off"
-msgstr ""
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter settings"
 msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)
@@ -2321,6 +2395,11 @@ msgstr ""
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "FPS distance (VR)"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS distance"
 msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)

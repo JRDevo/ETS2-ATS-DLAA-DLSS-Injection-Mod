@@ -135,8 +135,18 @@ msgstr "フレームレート"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Performance"
+msgstr "パフォーマンス"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "VRパフォーマンス"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "In-game UI"
+msgstr "ゲーム内UI"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -298,8 +308,7 @@ msgid ""
 "Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
 "the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"フレームレートとCPU: CPU最適化、非VR向けFPS上限とNVIDIA Reflex、VR "
-"FPS上限。右キーでグループを開き、左キーで閉じます。メニューを開くたびに閉じた状態から始まります。"
+"フレームレートとCPU: CPU最適化、非VR向けFPS上限とNVIDIA Reflex、VR FPS上限。右キーでグループを開き、左キーで閉じます。メニューを開くたびに閉じた状態から始まります。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1099,8 +1108,22 @@ msgstr "グレー表示: ゲームのコンソールがオフです。ゲーム�
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr "待機中: デスクトップ上のゲームウィンドウをクリックしてください。MODは、ゲームウィンドウにフォーカスがある間だけゲームのコンソールに入力します。"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "Sending to the game's console..."
 msgstr "ゲームのコンソールへ送信中..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "ゲームのログで最後の変更を確認できませんでした: MODのログを参照してください。"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1755,6 +1778,21 @@ msgstr "%ls %hs 長押し"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "ETS2 / ATS DLAA & DLSS Mod v%hs - チューニングメニュー"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "すべての設定 (非VRとVR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "VR設定"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "非VR設定"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1874,6 +1912,11 @@ msgstr "同じ (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "DLAA範囲 (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "DLAA範囲"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -1919,6 +1962,11 @@ msgstr "オン (A2Cなし)"
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "オン (実験的)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA before tonemap"
+msgstr "トーンマップ前DLAA"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2073,6 +2121,11 @@ msgstr "右"
 msgid "Turbo mode (VR)"
 msgstr "ターボモード (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "ターボモード"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (stopped)"
@@ -2163,6 +2216,11 @@ msgstr "オン (視線待ち)"
 msgid "Hidden area mask (VR)"
 msgstr "非表示領域マスク (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hidden area mask"
+msgstr "非表示領域マスク"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no OpenXR instance yet)"
@@ -2179,6 +2237,11 @@ msgstr "オン (FPS上限優先)"
 msgid "Reflex (flat)"
 msgstr "Reflex (非VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reflex"
+msgstr "Reflex"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on + boost"
@@ -2188,6 +2251,11 @@ msgstr "オン + ブースト"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "FPS上限 (非VR)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "FPS上限"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2250,13 +2318,13 @@ msgstr "自動 (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "パネル設定"
+msgid "Panel lock (VR)"
+msgstr "パネル固定 (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel lock (VR)"
-msgstr "パネル固定 (VR)"
+msgid "Panel lock"
+msgstr "パネル固定"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2299,6 +2367,11 @@ msgstr "パネルサイズ"
 msgid "Panel VR depth"
 msgstr "パネルVR奥行き"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "パネル奥行き"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2312,6 +2385,11 @@ msgstr "パネル正対 (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel faces you"
+msgstr "パネル正対"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Menu keys"
 msgstr "メニューキー"
 
@@ -2319,11 +2397,6 @@ msgstr "メニューキー"
 #: src/inject.cpp
 msgid "Off"
 msgstr "オフ"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "FPSカウンター設定"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2427,6 +2500,11 @@ msgstr "FPS 距離 (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS distance"
+msgstr "FPS 距離"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Hotkeys..."
 msgstr "ホットキー..."
 
@@ -2512,30 +2590,9 @@ msgstr "情報"
 msgid "debug"
 msgstr "デバッグ"
 
-#~ msgid "Upscaling and VR"
-#~ msgstr "アップスケールとVR"
+#~ msgid "Panel settings"
+#~ msgstr "パネル設定"
 
-#~ msgid "Frame rate and CPU"
-#~ msgstr "フレームレートとCPU"
-
-#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "DLSSアップスケール、DLAAのオン / オフ切り替え、OFXR Bridge / VectorXRの情報。右キーでグループを開き、左キーで閉じます。メニューを開くたびに閉じた状態から始まります。"
-
-#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
-#~ msgstr "ゲームのスケーリングが100 %未満のとき、DLSSが映像をフルサイズに描き戻します: ゲーム自身の引き伸ばしよりシャープで、描くピクセルが減るのでfpsも上がります。追加負荷なし。スケーリング100 %では何もしません。"
-
-#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "VR高速化: ターボ、Foveatedレンダリング、非表示領域マスク。右キーでグループを開き、左キーで閉じます。メニューを開くたびに閉じた状態から始まります。"
-
-#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "フレームレート制限とCPU: 非VR向けNVIDIA ReflexとFPS上限、VR FPS上限、CPU最適化。右キーでグループを開き、左キーで閉じます。メニューを開くたびに閉じた状態から始まります。"
-
-#~ msgid "no extra"
-#~ msgstr "追加なし"
-
-#~ msgid "Off now (the mod is off)."
-#~ msgstr "現在オフ (Modがオフ)。"
-
-#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-#~ msgstr "現在オフ: スケーリング100 %%未満ではゲーム自身の拡大を使います。"
+#~ msgid "FPS counter settings"
+#~ msgstr "FPSカウンター設定"
 

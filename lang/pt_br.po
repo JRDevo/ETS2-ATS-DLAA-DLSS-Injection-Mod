@@ -136,8 +136,18 @@ msgstr "Taxa de quadros"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Performance"
+msgstr "Desempenho"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "Desempenho VR"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "In-game UI"
+msgstr "IU do jogo"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -321,8 +331,8 @@ msgid ""
 "Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
 "the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Taxa de quadros e CPU: ajuste da CPU, limite de FPS e NVIDIA Reflex para tela plana, limite "
-"de FPS VR. Direita abre o grupo, Esquerda fecha; ele começa fechado a cada abertura do menu."
+"Taxa de quadros e CPU: ajuste da CPU, limite de FPS e NVIDIA Reflex para tela plana, limite de "
+"FPS VR. Direita abre o grupo, Esquerda fecha; ele começa fechado a cada abertura do menu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -375,9 +385,9 @@ msgid ""
 "VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
 "are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Acelerações VR: Turbo, renderização foveada, a máscara de área oculta e se OFXR Bridge / "
-"VectorXR foram encontrados. Direita abre o grupo, Esquerda fecha; ele começa fechado a cada "
-"abertura do menu."
+"Acelerações VR: Turbo, renderização foveada, a máscara de área oculta e se OFXR Bridge / VectorXR "
+"foram encontrados. Direita abre o grupo, Esquerda fecha; ele começa fechado a cada abertura do "
+"menu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -484,9 +494,8 @@ msgid ""
 "Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
 "for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"Onde flutua a IU VR do próprio jogo (HUD, menus). O mod digita a mudança no console do jogo "
-"por você; precisa de g_developer e g_console 1 em config.cfg. Direita abre o grupo, Esquerda "
-"fecha."
+"Onde flutua a IU VR do próprio jogo (HUD, menus). O mod digita a mudança no console do jogo por "
+"você; precisa de g_developer e g_console 1 em config.cfg. Direita abre o grupo, Esquerda fecha."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -494,8 +503,8 @@ msgid ""
 "Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
 "(the game's menu screens)."
 msgstr ""
-"Qual dos layouts da IU VR do jogo as linhas abaixo movem: dirigindo (o HUD enquanto se "
-"dirige) ou menus (as telas de menu do jogo)."
+"Qual dos layouts da IU VR do jogo as linhas abaixo movem: dirigindo (o HUD enquanto se dirige) ou "
+"menus (as telas de menu do jogo)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -504,8 +513,8 @@ msgid ""
 "game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
 "Move a IU VR do jogo: altura, lado, distância, inclinação, giro, tamanho ou curva, em passos "
-"pequenos. O jogo recebe cada mudança cerca de 0,4 s depois do seu último toque: o console "
-"abre e fecha sozinho."
+"pequenos. O jogo recebe cada mudança cerca de 0,4 s depois do seu último toque: o console abre e "
+"fecha sozinho."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -739,9 +748,9 @@ msgid ""
 "switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
 "group, Left closes it."
 msgstr ""
-"Chaves para verificações A/B: DLAA desligado, o TAA do próprio jogo misturado ou lado a lado, "
-"as chaves de fios finos, DLAA antes do tonemap. Nada aqui é necessário para dirigir "
-"normalmente. Direita abre o grupo, Esquerda fecha."
+"Chaves para verificações A/B: DLAA desligado, o TAA do próprio jogo misturado ou lado a lado, as "
+"chaves de fios finos, DLAA antes do tonemap. Nada aqui é necessário para dirigir normalmente. "
+"Direita abre o grupo, Esquerda fecha."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1198,14 +1207,28 @@ msgid ""
 "Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
 "game is closed."
 msgstr ""
-"Cinza: o console do jogo está desligado. Defina g_developer e g_console como \"1\" em "
-"config.cfg com o jogo fechado."
+"Cinza: o console do jogo está desligado. Defina g_developer e g_console como \"1\" em config.cfg "
+"com o jogo fechado."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr "Aguardando: clique na janela do jogo na área de trabalho. O mod só digita no console do jogo enquanto a janela do jogo tem o foco."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Sending to the game's console..."
 msgstr "Enviando ao console do jogo..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "O log do jogo não confirmou a última alteração: veja o log do mod."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1873,6 +1896,21 @@ msgstr "segure %ls %hs"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "ETS2 / ATS DLAA & DLSS mod v%hs - menu de ajustes"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "todos os ajustes (plano e VR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "Ajustes VR"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "Ajustes planos"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1992,6 +2030,11 @@ msgstr "igual (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "Área DLAA (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "Área DLAA"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -2037,6 +2080,11 @@ msgstr "ligado (sem A2C)"
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "ligado (experimental)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA before tonemap"
+msgstr "DLAA pré-tonemap"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2191,6 +2239,11 @@ msgstr "Direita"
 msgid "Turbo mode (VR)"
 msgstr "Modo Turbo (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "Modo Turbo"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (stopped)"
@@ -2281,6 +2334,11 @@ msgstr "lig. (esperando olhar)"
 msgid "Hidden area mask (VR)"
 msgstr "Máscara de área oculta (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hidden area mask"
+msgstr "Máscara de área oculta"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no OpenXR instance yet)"
@@ -2297,6 +2355,11 @@ msgstr "lig. (limite FPS vale)"
 msgid "Reflex (flat)"
 msgstr "Reflex (plano)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reflex"
+msgstr "Reflex"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on + boost"
@@ -2306,6 +2369,11 @@ msgstr "ligado + boost"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "Limite de FPS (plano)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "Limite de FPS"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2368,13 +2436,13 @@ msgstr "auto (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Painel"
+msgid "Panel lock (VR)"
+msgstr "Trava do painel (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel lock (VR)"
-msgstr "Trava do painel (VR)"
+msgid "Panel lock"
+msgstr "Trava do painel"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2417,6 +2485,11 @@ msgstr "Tamanho do painel"
 msgid "Panel VR depth"
 msgstr "Profundidade VR painel"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "Profundidade do painel"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2430,6 +2503,11 @@ msgstr "Painel de frente (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel faces you"
+msgstr "Painel de frente"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Menu keys"
 msgstr "Teclas do menu"
 
@@ -2437,11 +2515,6 @@ msgstr "Teclas do menu"
 #: src/inject.cpp
 msgid "Off"
 msgstr "Desligado"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "Contador de FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2545,6 +2618,11 @@ msgstr "Distância do FPS (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS distance"
+msgstr "Distância do FPS"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Hotkeys..."
 msgstr "Atalhos..."
 
@@ -2631,30 +2709,9 @@ msgstr "info"
 msgid "debug"
 msgstr "depuração"
 
-#~ msgid "Upscaling and VR"
-#~ msgstr "Upscaling e VR"
+#~ msgid "Panel settings"
+#~ msgstr "Painel"
 
-#~ msgid "Frame rate and CPU"
-#~ msgstr "Taxa de quadros e CPU"
-
-#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Upscale DLSS, o interruptor liga / desliga do DLAA e a info do OFXR Bridge / VectorXR. Direita abre o grupo, Esquerda fecha; ele começa fechado a cada abertura do menu."
-
-#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
-#~ msgstr "O DLSS redesenha a imagem em tamanho total quando a Escala do jogo é menor que 100 %: mais nítido que o esticamento do jogo, e menos pixels significam mais fps. Sem custo extra; nada faz com Escala 100 %."
-
-#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Acelerações VR: Turbo, renderização foveada e a máscara de área oculta. Direita abre o grupo, Esquerda fecha; ele começa fechado a cada abertura do menu."
-
-#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Limites de taxa de quadros e CPU: NVIDIA Reflex e limite de FPS para tela plana, limite de FPS VR, ajuste da CPU. Direita abre o grupo, Esquerda fecha; ele começa fechado a cada abertura do menu."
-
-#~ msgid "no extra"
-#~ msgstr "sem extra"
-
-#~ msgid "Off now (the mod is off)."
-#~ msgstr "Desl. agora (mod desligado)."
-
-#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-#~ msgstr "Desligado agora: usa-se o esticamento do jogo abaixo de Escala 100 %%."
+#~ msgid "FPS counter settings"
+#~ msgstr "Contador de FPS"
 

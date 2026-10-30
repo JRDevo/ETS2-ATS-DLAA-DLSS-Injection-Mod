@@ -135,8 +135,18 @@ msgstr "Kare hızı"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Performance"
+msgstr "Performans"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "VR performansı"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "In-game UI"
+msgstr "Oyun içi arayüz"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -318,8 +328,8 @@ msgid ""
 "Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
 "the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Kare hızı ve CPU: CPU ayarı, düz mod için FPS sınırı ve NVIDIA Reflex, VR FPS sınırı. Sağ "
-"grubu açar, Sol kapatır; menü her açıldığında kapalı başlar."
+"Kare hızı ve CPU: CPU ayarı, düz mod için FPS sınırı ve NVIDIA Reflex, VR FPS sınırı. Sağ grubu "
+"açar, Sol kapatır; menü her açıldığında kapalı başlar."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -372,8 +382,8 @@ msgid ""
 "VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
 "are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"VR hızlandırmaları: Turbo, foveated render, gizli alan maskesi ve OFXR Bridge / VectorXR "
-"bulundu mu. Sağ grubu açar, Sol kapatır; menü her açıldığında kapalı başlar."
+"VR hızlandırmaları: Turbo, foveated render, gizli alan maskesi ve OFXR Bridge / VectorXR bulundu "
+"mu. Sağ grubu açar, Sol kapatır; menü her açıldığında kapalı başlar."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -480,9 +490,9 @@ msgid ""
 "Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
 "for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"Oyunun kendi VR arayüzünün nerede durduğu (HUD, menüler). Mod değişikliği sizin yerinize "
-"oyunun konsoluna yazar; config.cfg içinde g_developer ve g_console 1 gerekir. Sağ grubu açar, "
-"Sol kapatır."
+"Oyunun kendi VR arayüzünün nerede durduğu (HUD, menüler). Mod değişikliği sizin yerinize oyunun "
+"konsoluna yazar; config.cfg içinde g_developer ve g_console 1 gerekir. Sağ grubu açar, Sol "
+"kapatır."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -490,8 +500,8 @@ msgid ""
 "Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
 "(the game's menu screens)."
 msgstr ""
-"Aşağıdaki satırların oyunun hangi VR arayüz düzenini taşıdığı: sürüş (sürerken HUD) veya "
-"menüler (oyunun menü ekranları)."
+"Aşağıdaki satırların oyunun hangi VR arayüz düzenini taşıdığı: sürüş (sürerken HUD) veya menüler "
+"(oyunun menü ekranları)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -500,8 +510,8 @@ msgid ""
 "game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
 "Oyunun VR arayüzünü küçük adımlarla taşır: yükseklik, yan, mesafe, eğim, dönüş, boyut veya "
-"eğrilik. Oyun her değişikliği son basışınızdan yaklaşık 0,4 s sonra alır: konsol "
-"kendiliğinden açılıp kapanır."
+"eğrilik. Oyun her değişikliği son basışınızdan yaklaşık 0,4 s sonra alır: konsol kendiliğinden "
+"açılıp kapanır."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -509,8 +519,8 @@ msgid ""
 "Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
 "own values when it exits)."
 msgstr ""
-"Sağ: iki düzenin tüm değerleri başlangıçta config.cfg'de olana geri döner (oyun kendi "
-"değerlerini çıkarken kaydeder)."
+"Sağ: iki düzenin tüm değerleri başlangıçta config.cfg'de olana geri döner (oyun kendi değerlerini "
+"çıkarken kaydeder)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -733,9 +743,9 @@ msgid ""
 "switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
 "group, Left closes it."
 msgstr ""
-"A/B kontrolleri için anahtarlar: DLAA kapalı, oyunun kendi TAA'sı karıştırılmış veya yan "
-"yana, ince tel anahtarları, tonemap öncesi DLAA. Normal sürüş için buradakilerin hiçbiri "
-"gerekmez. Sağ grubu açar, Sol kapatır."
+"A/B kontrolleri için anahtarlar: DLAA kapalı, oyunun kendi TAA'sı karıştırılmış veya yan yana, "
+"ince tel anahtarları, tonemap öncesi DLAA. Normal sürüş için buradakilerin hiçbiri gerekmez. Sağ "
+"grubu açar, Sol kapatır."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1198,8 +1208,22 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr "Bekleniyor: masaüstündeki oyun penceresine tıklayın. Mod, oyunun konsoluna yalnızca oyun penceresi odaktayken yazar."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "Sending to the game's console..."
 msgstr "Oyunun konsoluna gönderiliyor..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "Oyunun günlüğü son değişikliği doğrulamadı: modun günlüğüne bakın."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1866,6 +1890,21 @@ msgstr "%ls %hs basılı tut"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "ETS2 / ATS DLAA & DLSS modu v%hs - ayar menüsü"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "tüm ayarlar (düz ve VR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "VR ayarları"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "Düz ayarlar"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1985,6 +2024,11 @@ msgstr "aynı (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "DLAA alanı (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "DLAA alanı"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -2030,6 +2074,11 @@ msgstr "açık (no A2C)"
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "açık (deneysel)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA before tonemap"
+msgstr "Tonemap öncesi DLAA"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2184,6 +2233,11 @@ msgstr "Sağ"
 msgid "Turbo mode (VR)"
 msgstr "Turbo (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "Turbo"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (stopped)"
@@ -2274,6 +2328,11 @@ msgstr "açık (bakış bekleniyor)"
 msgid "Hidden area mask (VR)"
 msgstr "Gizli alan maskesi (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hidden area mask"
+msgstr "Gizli alan maskesi"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no OpenXR instance yet)"
@@ -2290,6 +2349,11 @@ msgstr "açık (FPS sınırı geçerli)"
 msgid "Reflex (flat)"
 msgstr "Reflex (düz)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reflex"
+msgstr "Reflex"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on + boost"
@@ -2299,6 +2363,11 @@ msgstr "açık + boost"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "FPS sınırı (düz)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "FPS sınırı"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2361,13 +2430,13 @@ msgstr "otomatik (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Panel"
+msgid "Panel lock (VR)"
+msgstr "Panel kilidi (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel lock (VR)"
-msgstr "Panel kilidi (VR)"
+msgid "Panel lock"
+msgstr "Panel kilidi"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2410,6 +2479,11 @@ msgstr "Panel boyutu"
 msgid "Panel VR depth"
 msgstr "Panel VR derinliği"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "Panel derinliği"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2423,6 +2497,11 @@ msgstr "Panel size döner (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel faces you"
+msgstr "Panel size döner"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Menu keys"
 msgstr "Menü tuşları"
 
@@ -2430,11 +2509,6 @@ msgstr "Menü tuşları"
 #: src/inject.cpp
 msgid "Off"
 msgstr "Kapalı"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "FPS sayacı"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2538,6 +2612,11 @@ msgstr "FPS mesafesi (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS distance"
+msgstr "FPS mesafesi"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Hotkeys..."
 msgstr "Kısayollar..."
 
@@ -2624,30 +2703,9 @@ msgstr "bilgi"
 msgid "debug"
 msgstr "hata ayıklama"
 
-#~ msgid "Upscaling and VR"
-#~ msgstr "Ölçekleme ve VR"
+#~ msgid "Panel settings"
+#~ msgstr "Panel"
 
-#~ msgid "Frame rate and CPU"
-#~ msgstr "Kare hızı ve CPU"
-
-#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "DLSS ölçekleme, DLAA açma / kapama anahtarı ve OFXR Bridge / VectorXR bilgisi. Sağ grubu açar, Sol kapatır; menü her açıldığında kapalı başlar."
-
-#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
-#~ msgstr "Oyunun Scaling değeri %100'ün altındayken DLSS görüntüyü tam boyuta geri çizer: oyunun kendi germesinden daha keskin ve daha az piksel daha çok fps demek. Ek maliyet yok; Scaling %100'de bir şey yapmaz."
-
-#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "VR hızlandırmaları: Turbo, foveated render ve gizli alan maskesi. Sağ grubu açar, Sol kapatır; menü her açıldığında kapalı başlar."
-
-#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Kare hızı sınırları ve CPU: düz mod için NVIDIA Reflex ve FPS sınırı, VR FPS sınırı, CPU ayarı. Sağ grubu açar, Sol kapatır; menü her açıldığında kapalı başlar."
-
-#~ msgid "no extra"
-#~ msgstr "ek yok"
-
-#~ msgid "Off now (the mod is off)."
-#~ msgstr "Şu an kapalı (mod kapalı)."
-
-#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-#~ msgstr "Şu an kapalı: Scaling %%100'ün altında oyunun kendi germesi kullanılır."
+#~ msgid "FPS counter settings"
+#~ msgstr "FPS sayacı"
 

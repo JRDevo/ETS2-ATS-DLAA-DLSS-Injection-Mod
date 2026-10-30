@@ -135,8 +135,18 @@ msgstr "Kuvataajuus"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Performance"
+msgstr "Suorituskyky"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "VR-suorituskyky"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "In-game UI"
+msgstr "Pelin käyttöliittymä"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -373,8 +383,8 @@ msgid ""
 "VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
 "are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"VR-nopeutukset: Turbo, foveated-renderöinti, piilotetun alueen maski ja löytyvätkö OFXR "
-"Bridge / VectorXR. Oikea avaa ryhmän, vasen sulkee; se on aina kiinni kun valikko avataan."
+"VR-nopeutukset: Turbo, foveated-renderöinti, piilotetun alueen maski ja löytyvätkö OFXR Bridge / "
+"VectorXR. Oikea avaa ryhmän, vasen sulkee; se on aina kiinni kun valikko avataan."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -491,8 +501,8 @@ msgid ""
 "Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
 "(the game's menu screens)."
 msgstr ""
-"Minkä pelin VR-käyttöliittymän asettelun alla olevat rivit siirtävät: ajo (HUD ajon aikana) "
-"vai valikot (pelin valikkonäytöt)."
+"Minkä pelin VR-käyttöliittymän asettelun alla olevat rivit siirtävät: ajo (HUD ajon aikana) vai "
+"valikot (pelin valikkonäytöt)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -501,8 +511,8 @@ msgid ""
 "game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
 "Siirtää pelin VR-käyttöliittymää: korkeus, sivu, etäisyys, kallistus, käännös, koko tai "
-"kaarevuus, pienin askelin. Peli saa jokaisen muutoksen noin 0,4 s viimeisen painalluksen "
-"jälkeen: konsoli avautuu ja sulkeutuu itse."
+"kaarevuus, pienin askelin. Peli saa jokaisen muutoksen noin 0,4 s viimeisen painalluksen jälkeen: "
+"konsoli avautuu ja sulkeutuu itse."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -736,9 +746,9 @@ msgid ""
 "switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
 "group, Left closes it."
 msgstr ""
-"Kytkimet A/B-vertailuun: DLAA pois, pelin oma TAA sekoitettuna tai rinnakkain, ohuiden "
-"johtojen kytkimet, DLAA ennen sävykartoitusta. Mitään tästä ei tarvita tavallisessa ajossa. "
-"Oikea avaa ryhmän, vasen sulkee."
+"Kytkimet A/B-vertailuun: DLAA pois, pelin oma TAA sekoitettuna tai rinnakkain, ohuiden johtojen "
+"kytkimet, DLAA ennen sävykartoitusta. Mitään tästä ei tarvita tavallisessa ajossa. Oikea avaa "
+"ryhmän, vasen sulkee."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1201,8 +1211,22 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr "Odotetaan: napsauta pelin ikkunaa työpöydällä. Modi kirjoittaa pelin konsoliin vain, kun pelin ikkunalla on kohdistus."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "Sending to the game's console..."
 msgstr "Lähetetään pelin konsoliin..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "Pelin loki ei vahvistanut viimeistä muutosta: katso modin loki."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1872,6 +1896,21 @@ msgstr "pidä %ls %hs"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "ETS2 / ATS DLAA & DLSS -modi v%hs - säätövalikko"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "kaikki asetukset (litteä ja VR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "VR-asetukset"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "Litteän tilan asetukset"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1991,6 +2030,11 @@ msgstr "sama (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "DLAA-alue (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "DLAA-alue"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -2036,6 +2080,11 @@ msgstr "päällä (no A2C)"
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "päällä (kokeellinen)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA before tonemap"
+msgstr "DLAA ennen sävykart."
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2190,6 +2239,11 @@ msgstr "Oikea"
 msgid "Turbo mode (VR)"
 msgstr "Turbo (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "Turbo"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (stopped)"
@@ -2280,6 +2334,11 @@ msgstr "päällä (odottaa)"
 msgid "Hidden area mask (VR)"
 msgstr "Piilotetun alueen maski (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hidden area mask"
+msgstr "Piilotetun alueen maski"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no OpenXR instance yet)"
@@ -2296,6 +2355,11 @@ msgstr "pääl. (FPS-raja voittaa)"
 msgid "Reflex (flat)"
 msgstr "Reflex (litteä)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reflex"
+msgstr "Reflex"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on + boost"
@@ -2305,6 +2369,11 @@ msgstr "päällä + boost"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "FPS-raja (litteä)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "FPS-raja"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2367,13 +2436,13 @@ msgstr "autom. (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Paneeli"
+msgid "Panel lock (VR)"
+msgstr "Paneelin lukitus (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel lock (VR)"
-msgstr "Paneelin lukitus (VR)"
+msgid "Panel lock"
+msgstr "Paneelin lukitus"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2416,6 +2485,11 @@ msgstr "Paneelin koko"
 msgid "Panel VR depth"
 msgstr "Paneelin VR-syvyys"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "Paneelin syvyys"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2429,6 +2503,11 @@ msgstr "Paneeli kohti sinua (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel faces you"
+msgstr "Paneeli kohti sinua"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Menu keys"
 msgstr "Valikkonäppäimet"
 
@@ -2436,11 +2515,6 @@ msgstr "Valikkonäppäimet"
 #: src/inject.cpp
 msgid "Off"
 msgstr "Pois"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "FPS-laskuri"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2544,6 +2618,11 @@ msgstr "FPS-etäisyys (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS distance"
+msgstr "FPS-etäisyys"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Hotkeys..."
 msgstr "Pikanäppäimet..."
 
@@ -2630,30 +2709,9 @@ msgstr "info"
 msgid "debug"
 msgstr "vianetsintä"
 
-#~ msgid "Upscaling and VR"
-#~ msgstr "Skaalaus ja VR"
+#~ msgid "Panel settings"
+#~ msgstr "Paneeli"
 
-#~ msgid "Frame rate and CPU"
-#~ msgstr "Kuvataajuus ja CPU"
-
-#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "DLSS-skaalaus, DLAA:n päällä / pois -kytkin ja OFXR Bridge / VectorXR -tiedot. Oikea avaa ryhmän, vasen sulkee; se on aina kiinni kun valikko avataan."
-
-#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
-#~ msgstr "DLSS piirtää kuvan takaisin täyteen kokoon kun pelin Scaling on alle 100 %: terävämpi kuin pelin oma venytys, ja vähemmän pikseleitä tarkoittaa enemmän fps:ää. Ei lisäkustannusta; ei tee mitään Scaling 100 %:ssa."
-
-#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "VR-nopeutukset: Turbo, foveated-renderöinti ja piilotetun alueen maski. Oikea avaa ryhmän, vasen sulkee; se on aina kiinni kun valikko avataan."
-
-#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Kuvataajuusrajat ja CPU: NVIDIA Reflex ja FPS-raja litteälle, VR FPS-raja, CPU-viritys. Oikea avaa ryhmän, vasen sulkee; se on aina kiinni kun valikko avataan."
-
-#~ msgid "no extra"
-#~ msgstr "ei lisää"
-
-#~ msgid "Off now (the mod is off)."
-#~ msgstr "Nyt pois (modi on pois)."
-
-#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-#~ msgstr "Nyt pois: käytetään pelin omaa venytystä Scaling 100 %%:n alla."
+#~ msgid "FPS counter settings"
+#~ msgstr "FPS-laskuri"
 

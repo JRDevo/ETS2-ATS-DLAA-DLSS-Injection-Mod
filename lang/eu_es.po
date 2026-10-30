@@ -135,8 +135,18 @@ msgstr "Fotograma-tasa"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Performance"
+msgstr "Errendimendua"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "VR errendimendua"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "In-game UI"
+msgstr "Jokoaren UI"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -323,9 +333,9 @@ msgid ""
 "Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
 "the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Fotograma-tasa eta CPUa: CPU doikuntza, FPS muga eta NVIDIA Reflex pantaila lauarentzat, VR "
-"FPS muga. Eskuinak taldea irekitzen du, Ezkerrak ixten; menua irekitzen den bakoitzean itxita "
-"hasten da."
+"Fotograma-tasa eta CPUa: CPU doikuntza, FPS muga eta NVIDIA Reflex pantaila lauarentzat, VR FPS "
+"muga. Eskuinak taldea irekitzen du, Ezkerrak ixten; menua irekitzen den bakoitzean itxita hasten "
+"da."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -378,9 +388,9 @@ msgid ""
 "VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
 "are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"VR bizkortzeak: Turbo, errendatze foveatua, eremu ezkutuaren maskara eta OFXR Bridge / "
-"VectorXR aurkitu diren. Eskuinak taldea irekitzen du, Ezkerrak ixten; menua irekitzen den "
-"bakoitzean itxita hasten da."
+"VR bizkortzeak: Turbo, errendatze foveatua, eremu ezkutuaren maskara eta OFXR Bridge / VectorXR "
+"aurkitu diren. Eskuinak taldea irekitzen du, Ezkerrak ixten; menua irekitzen den bakoitzean "
+"itxita hasten da."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -498,8 +508,8 @@ msgid ""
 "Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
 "(the game's menu screens)."
 msgstr ""
-"Jokoaren VR UIaren zein diseinu mugitzen duten beheko errenkadek: gidatzea (HUDa gidatzean) "
-"edo menuak (jokoaren menu-pantailak)."
+"Jokoaren VR UIaren zein diseinu mugitzen duten beheko errenkadek: gidatzea (HUDa gidatzean) edo "
+"menuak (jokoaren menu-pantailak)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -508,8 +518,8 @@ msgid ""
 "game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
 "Jokoaren VR UIa mugitzen du: altuera, aldea, distantzia, inklinazioa, biraketa, tamaina edo "
-"kurbadura, urrats txikitan. Jokoak aldaketa bakoitza zure azken sakatzetik 0,4 s inguru "
-"geroago jasotzen du: kontsola bere kabuz irekitzen eta ixten da."
+"kurbadura, urrats txikitan. Jokoak aldaketa bakoitza zure azken sakatzetik 0,4 s inguru geroago "
+"jasotzen du: kontsola bere kabuz irekitzen eta ixten da."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -748,9 +758,9 @@ msgid ""
 "switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
 "group, Left closes it."
 msgstr ""
-"A/B egiaztapenetarako etengailuak: DLAA ezgaituta, jokoaren TAA propioa nahastuta edo aldez "
-"alde, alanbre finen etengailuak, DLAA tonemap aurretik. Hemen ez da ezer behar ohiko "
-"gidaketarako. Eskuinak taldea irekitzen du, Ezkerrak ixten."
+"A/B egiaztapenetarako etengailuak: DLAA ezgaituta, jokoaren TAA propioa nahastuta edo aldez alde, "
+"alanbre finen etengailuak, DLAA tonemap aurretik. Hemen ez da ezer behar ohiko gidaketarako. "
+"Eskuinak taldea irekitzen du, Ezkerrak ixten."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1211,14 +1221,28 @@ msgid ""
 "Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
 "game is closed."
 msgstr ""
-"Grisez: jokoaren kontsola ezgaituta dago. Ezarri g_developer eta g_console \"1\"ean "
-"config.cfg-n jokoa itxita dagoenean."
+"Grisez: jokoaren kontsola ezgaituta dago. Ezarri g_developer eta g_console \"1\"ean config.cfg-n "
+"jokoa itxita dagoenean."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr "Itxaroten: egin klik mahaigaineko jokoaren leihoan. Mod-ak jokoaren kontsolan soilik idazten du jokoaren leihoak fokua duenean."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Sending to the game's console..."
 msgstr "Jokoaren kontsolara bidaltzen..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "Jokoaren log-ak ez zuen azken aldaketa berretsi: ikusi mod-aren log-a."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1889,6 +1913,21 @@ msgstr "eutsi %ls %hs"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "ETS2 / ATS DLAA & DLSS mod v%hs - doikuntza-menua"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "doikuntza guztiak (laua eta VR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "VR doikuntzak"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "Doikuntza lauak"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -2008,6 +2047,11 @@ msgstr "berdina (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "DLAA eremua (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "DLAA eremua"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -2053,6 +2097,11 @@ msgstr "gaituta (no A2C)"
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "gaituta (esperimentala)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA before tonemap"
+msgstr "DLAA tonemap aurretik"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2207,6 +2256,11 @@ msgstr "Eskuina"
 msgid "Turbo mode (VR)"
 msgstr "Turbo modua (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "Turbo modua"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (stopped)"
@@ -2297,6 +2351,11 @@ msgstr "gait. (begiradaren zain)"
 msgid "Hidden area mask (VR)"
 msgstr "Ezkutu-eremu maskara (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hidden area mask"
+msgstr "Ezkutu-eremu maskara"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no OpenXR instance yet)"
@@ -2313,6 +2372,11 @@ msgstr "gait. (FPS muga nagusi)"
 msgid "Reflex (flat)"
 msgstr "Reflex (laua)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reflex"
+msgstr "Reflex"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on + boost"
@@ -2322,6 +2386,11 @@ msgstr "gaituta + boost"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "FPS muga (laua)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "FPS muga"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2384,13 +2453,13 @@ msgstr "auto (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Panela"
+msgid "Panel lock (VR)"
+msgstr "Panel blokeoa (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel lock (VR)"
-msgstr "Panel blokeoa (VR)"
+msgid "Panel lock"
+msgstr "Panel blokeoa"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2433,6 +2502,11 @@ msgstr "Panelaren tamaina"
 msgid "Panel VR depth"
 msgstr "Panelaren VR sakonera"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "Panelaren sakonera"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2446,6 +2520,11 @@ msgstr "Panela zuri begira (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel faces you"
+msgstr "Panela zuri begira"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Menu keys"
 msgstr "Menu teklak"
 
@@ -2453,11 +2532,6 @@ msgstr "Menu teklak"
 #: src/inject.cpp
 msgid "Off"
 msgstr "Ezgaituta"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "FPS kontagailua"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2561,6 +2635,11 @@ msgstr "FPS distantzia (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS distance"
+msgstr "FPS distantzia"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Hotkeys..."
 msgstr "Lasterbideak..."
 
@@ -2649,30 +2728,9 @@ msgstr "info"
 msgid "debug"
 msgstr "arazketa"
 
-#~ msgid "Upscaling and VR"
-#~ msgstr "Eskalatzea eta VR"
+#~ msgid "Panel settings"
+#~ msgstr "Panela"
 
-#~ msgid "Frame rate and CPU"
-#~ msgstr "Fotograma-tasa eta CPU"
-
-#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "DLSS eskalatzea, DLAAren gaitu / desgaitu etengailua eta OFXR Bridge / VectorXR informazioa. Eskuinak taldea irekitzen du, Ezkerrak ixten; menua irekitzen den bakoitzean itxita hasten da."
-
-#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
-#~ msgstr "DLSSk irudia tamaina osora marrazten du berriro jokoaren Eskala %100 baino txikiagoa denean: jokoaren luzapena baino zorrotzagoa, eta pixel gutxiagok fps gehiago esan nahi du. Kostu gehigarririk ez; ez du ezer egiten Eskala %100ean."
-
-#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "VR bizkortzeak: Turbo, errendatze foveatua eta eremu ezkutuaren maskara. Eskuinak taldea irekitzen du, Ezkerrak ixten; menua irekitzen den bakoitzean itxita hasten da."
-
-#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Fotograma-tasaren mugak eta CPUa: NVIDIA Reflex eta FPS muga pantaila lauarentzat, VR FPS muga, CPU doikuntza. Eskuinak taldea irekitzen du, Ezkerrak ixten; menua irekitzen den bakoitzean itxita hasten da."
-
-#~ msgid "no extra"
-#~ msgstr "gehigarririk ez"
-
-#~ msgid "Off now (the mod is off)."
-#~ msgstr "Ezgaituta orain (mod ezgaituta dago)."
-
-#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-#~ msgstr "Ezgaituta orain: jokoaren luzapena erabiltzen da Eskala %%100 azpitik."
+#~ msgid "FPS counter settings"
+#~ msgstr "FPS kontagailua"
 

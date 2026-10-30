@@ -135,8 +135,18 @@ msgstr "Кадрова честота"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Performance"
+msgstr "Производителност"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "Производителност VR"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "In-game UI"
+msgstr "Интерфейс на играта"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -320,8 +330,8 @@ msgid ""
 "Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
 "the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Кадри и CPU: настройка на CPU, лимит на FPS и NVIDIA Reflex за плосък режим, лимит на FPS за "
-"VR. Надясно отваря групата, наляво я затваря; при всяко отваряне на менюто е затворена."
+"Кадри и CPU: настройка на CPU, лимит на FPS и NVIDIA Reflex за плосък режим, лимит на FPS за VR. "
+"Надясно отваря групата, наляво я затваря; при всяко отваряне на менюто е затворена."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -374,9 +384,8 @@ msgid ""
 "VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
 "are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Ускорения за VR: Turbo, фовеален рендер, маска на скритата област и дали са намерени OFXR "
-"Bridge / VectorXR. Надясно отваря групата, наляво я затваря; при всяко отваряне на менюто е "
-"затворена."
+"Ускорения за VR: Turbo, фовеален рендер, маска на скритата област и дали са намерени OFXR Bridge "
+"/ VectorXR. Надясно отваря групата, наляво я затваря; при всяко отваряне на менюто е затворена."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -484,8 +493,8 @@ msgid ""
 "for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
 "Къде се носи собственият VR интерфейс на играта (HUD, менюта). Модът въвежда промяната в "
-"конзолата на играта вместо вас; изисква g_developer и g_console 1 в config.cfg. Надясно "
-"отваря групата, наляво я затваря."
+"конзолата на играта вместо вас; изисква g_developer и g_console 1 в config.cfg. Надясно отваря "
+"групата, наляво я затваря."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -503,8 +512,8 @@ msgid ""
 "game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
 "Мести VR интерфейса на играта: височина, страна, разстояние, наклон, завъртане, размер или "
-"кривина, на малки стъпки. Играта получава всяка промяна около 0,4 s след последното ви "
-"натискане: конзолата се отваря и затваря сама."
+"кривина, на малки стъпки. Играта получава всяка промяна около 0,4 s след последното ви натискане: "
+"конзолата се отваря и затваря сама."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -512,8 +521,8 @@ msgid ""
 "Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
 "own values when it exits)."
 msgstr ""
-"Надясно: всички стойности на двете оформления се връщат към тези в config.cfg в началото "
-"(играта записва собствените си стойности при изход)."
+"Надясно: всички стойности на двете оформления се връщат към тези в config.cfg в началото (играта "
+"записва собствените си стойности при изход)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -740,9 +749,9 @@ msgid ""
 "switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
 "group, Left closes it."
 msgstr ""
-"Превключватели за A/B проверки: DLAA изкл., собственият TAA на играта в смес или един до "
-"друг, превключвателите за тънки жици, DLAA преди тонмап. Нищо тук не е нужно за нормално "
-"шофиране. Надясно отваря групата, наляво я затваря."
+"Превключватели за A/B проверки: DLAA изкл., собственият TAA на играта в смес или един до друг, "
+"превключвателите за тънки жици, DLAA преди тонмап. Нищо тук не е нужно за нормално шофиране. "
+"Надясно отваря групата, наляво я затваря."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1199,14 +1208,28 @@ msgid ""
 "Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
 "game is closed."
 msgstr ""
-"Сиво: конзолата на играта е изкл. Задайте g_developer и g_console на \"1\" в config.cfg, "
-"докато играта е затворена."
+"Сиво: конзолата на играта е изкл. Задайте g_developer и g_console на \"1\" в config.cfg, докато "
+"играта е затворена."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr "Изчакване: щракнете върху прозореца на играта на работния плот. Модът пише в конзолата на играта само докато прозорецът на играта е на фокус."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Sending to the game's console..."
 msgstr "Изпращане към конзолата на играта..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "Логът на играта не потвърди последната промяна: вижте лога на мода."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1875,6 +1898,21 @@ msgstr "задръжте %ls %hs"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "Мод ETS2 / ATS DLAA и DLSS v%hs - меню за настройка"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "всички настройки (плоски и VR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "VR настройки"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "Плоски настройки"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1994,6 +2032,11 @@ msgstr "същата (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "Област на DLAA (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "Област на DLAA"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -2039,6 +2082,11 @@ msgstr "вкл. (без A2C)"
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "вкл. (експеримент)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA before tonemap"
+msgstr "DLAA преди тонмап"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2193,6 +2241,11 @@ msgstr "Надясно"
 msgid "Turbo mode (VR)"
 msgstr "Turbo режим (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "Turbo режим"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (stopped)"
@@ -2283,6 +2336,11 @@ msgstr "вкл. (чака поглед)"
 msgid "Hidden area mask (VR)"
 msgstr "Маска на скрита област (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hidden area mask"
+msgstr "Маска на скрита област"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no OpenXR instance yet)"
@@ -2299,6 +2357,11 @@ msgstr "вкл. (FPS лимит)"
 msgid "Reflex (flat)"
 msgstr "Reflex (плоск.)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reflex"
+msgstr "Reflex"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on + boost"
@@ -2308,6 +2371,11 @@ msgstr "вкл. + boost"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "FPS лимит (плоск.)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "FPS лимит"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2370,13 +2438,13 @@ msgstr "авто (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Настройки на панела"
+msgid "Panel lock (VR)"
+msgstr "Заключване на панела (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel lock (VR)"
-msgstr "Заключване на панела (VR)"
+msgid "Panel lock"
+msgstr "Заключване на панела"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2419,6 +2487,11 @@ msgstr "Размер на панела"
 msgid "Panel VR depth"
 msgstr "Дълбочина на панела VR"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "Дълбочина на панела"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2432,6 +2505,11 @@ msgstr "Панелът към вас (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel faces you"
+msgstr "Панелът към вас"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Menu keys"
 msgstr "Клавиши на менюто"
 
@@ -2439,11 +2517,6 @@ msgstr "Клавиши на менюто"
 #: src/inject.cpp
 msgid "Off"
 msgstr "Изкл."
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "Настройки на брояча FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2547,6 +2620,11 @@ msgstr "Разстояние FPS (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS distance"
+msgstr "Разстояние FPS"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Hotkeys..."
 msgstr "Преки пътища..."
 
@@ -2633,30 +2711,9 @@ msgstr "инфо"
 msgid "debug"
 msgstr "дебъг"
 
-#~ msgid "Upscaling and VR"
-#~ msgstr "Мащабиране и VR"
+#~ msgid "Panel settings"
+#~ msgstr "Настройки на панела"
 
-#~ msgid "Frame rate and CPU"
-#~ msgstr "Кадри и CPU"
-
-#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "DLSS мащабиране, превключвателят DLAA вкл. / изкл. и информация за OFXR Bridge / VectorXR. Надясно отваря групата, наляво я затваря; при всяко отваряне на менюто е затворена."
-
-#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
-#~ msgstr "DLSS дорисува картината до пълен размер, когато «Мащабиране» в играта е под 100 %: по-ясно от разтягането на самата игра, а по-малко пиксели = повече fps. Без допълнителна цена; при 100 % не прави нищо."
-
-#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Ускорения за VR: Turbo, фовеален рендер и маска на скритата област. Надясно отваря групата, наляво я затваря; при всяко отваряне на менюто е затворена."
-
-#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Ограничения на кадрите и CPU: NVIDIA Reflex и лимит на FPS за плосък режим, лимит на FPS за VR, настройка на CPU. Надясно отваря групата, наляво я затваря; при всяко отваряне на менюто е затворена."
-
-#~ msgid "no extra"
-#~ msgstr "без доп."
-
-#~ msgid "Off now (the mod is off)."
-#~ msgstr "Сега изкл. (модът е изкл.)."
-
-#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-#~ msgstr "Сега изкл.: под Мащабиране 100 %% се ползва собственото разтягане на играта."
+#~ msgid "FPS counter settings"
+#~ msgstr "Настройки на брояча FPS"
 

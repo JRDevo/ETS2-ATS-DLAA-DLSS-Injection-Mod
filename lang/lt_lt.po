@@ -135,8 +135,18 @@ msgstr "Kadrų dažnis"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Performance"
+msgstr "Našumas"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "VR našumas"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "In-game UI"
+msgstr "Žaidimo UI"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -374,8 +384,8 @@ msgid ""
 "VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
 "are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"VR pagreitinimai: Turbo, foveated atvaizdavimas, paslėptos srities kaukė ir ar rasti OFXR "
-"Bridge / VectorXR. Dešinė atveria grupę, kairė uždaro; atidarius meniu ji visada uždaryta."
+"VR pagreitinimai: Turbo, foveated atvaizdavimas, paslėptos srities kaukė ir ar rasti OFXR Bridge "
+"/ VectorXR. Dešinė atveria grupę, kairė uždaro; atidarius meniu ji visada uždaryta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -482,9 +492,8 @@ msgid ""
 "Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
 "for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"Kur sklando paties žaidimo VR UI (HUD, meniu). Modifikacija pakeitimą įveda į žaidimo konsolę "
-"už jus; reikia g_developer ir g_console 1 faile config.cfg. Dešinė atveria grupę, kairė "
-"uždaro."
+"Kur sklando paties žaidimo VR UI (HUD, meniu). Modifikacija pakeitimą įveda į žaidimo konsolę už "
+"jus; reikia g_developer ir g_console 1 faile config.cfg. Dešinė atveria grupę, kairė uždaro."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -492,8 +501,8 @@ msgid ""
 "Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
 "(the game's menu screens)."
 msgstr ""
-"Kurį žaidimo VR UI išdėstymą stumdo toliau esančios eilutės: vairavimas (HUD vairuojant) ar "
-"meniu (žaidimo meniu ekranai)."
+"Kurį žaidimo VR UI išdėstymą stumdo toliau esančios eilutės: vairavimas (HUD vairuojant) ar meniu "
+"(žaidimo meniu ekranai)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -502,8 +511,8 @@ msgid ""
 "game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
 "Stumdo žaidimo VR UI: aukštį, pusę, atstumą, posvyrį, posūkį, dydį ar išlenkimą, mažais "
-"žingsniais. Žaidimas gauna kiekvieną pakeitimą maždaug 0,4 s po paskutinio paspaudimo: "
-"konsolė pati atsidaro ir užsidaro."
+"žingsniais. Žaidimas gauna kiekvieną pakeitimą maždaug 0,4 s po paskutinio paspaudimo: konsolė "
+"pati atsidaro ir užsidaro."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -511,8 +520,8 @@ msgid ""
 "Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
 "own values when it exits)."
 msgstr ""
-"Dešinė: visos abiejų išdėstymų reikšmės grįžta į tai, ką config.cfg turėjo pradžioje "
-"(žaidimas savo reikšmes išsaugo išeidamas)."
+"Dešinė: visos abiejų išdėstymų reikšmės grįžta į tai, ką config.cfg turėjo pradžioje (žaidimas "
+"savo reikšmes išsaugo išeidamas)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -738,9 +747,9 @@ msgid ""
 "switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
 "group, Left closes it."
 msgstr ""
-"Jungikliai A/B patikroms: DLAA išjungtas, paties žaidimo TAA įmaišytas arba šalia, plonų "
-"laidų jungikliai, DLAA prieš tonemap. Įprastam vairavimui čia nieko nereikia. Dešinė atveria "
-"grupę, kairė uždaro."
+"Jungikliai A/B patikroms: DLAA išjungtas, paties žaidimo TAA įmaišytas arba šalia, plonų laidų "
+"jungikliai, DLAA prieš tonemap. Įprastam vairavimui čia nieko nereikia. Dešinė atveria grupę, "
+"kairė uždaro."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1198,14 +1207,28 @@ msgid ""
 "Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
 "game is closed."
 msgstr ""
-"Pilka: žaidimo konsolė išjungta. Nustatykite g_developer ir g_console į \"1\" faile "
-"config.cfg, kai žaidimas uždarytas."
+"Pilka: žaidimo konsolė išjungta. Nustatykite g_developer ir g_console į \"1\" faile config.cfg, "
+"kai žaidimas uždarytas."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr "Laukiama: spustelėkite žaidimo langą darbalaukyje. Modas rašo į žaidimo konsolę tik tada, kai žaidimo langas yra fokuse."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "Sending to the game's console..."
 msgstr "Siunčiama į žaidimo konsolę..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "Žaidimo žurnalas nepatvirtino paskutinio pakeitimo: žr. modo žurnalą."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1875,6 +1898,21 @@ msgstr "laikykite %ls %hs"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "ETS2 / ATS DLAA & DLSS modifikacija v%hs - derinimo meniu"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "visi nustatymai (plokščias ir VR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "VR nustatymai"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "Plokščio režimo nustatymai"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1994,6 +2032,11 @@ msgstr "tas pats (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "DLAA sritis (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "DLAA sritis"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -2039,6 +2082,11 @@ msgstr "įj. (no A2C)"
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "įj. (eksperimentinis)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA before tonemap"
+msgstr "DLAA prieš tonemap"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2193,6 +2241,11 @@ msgstr "Dešinė"
 msgid "Turbo mode (VR)"
 msgstr "Turbo (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "Turbo"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (stopped)"
@@ -2283,6 +2336,11 @@ msgstr "įj. (laukia žvilgsnio)"
 msgid "Hidden area mask (VR)"
 msgstr "Paslėptos srities kaukė (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Hidden area mask"
+msgstr "Paslėptos srities kaukė"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no OpenXR instance yet)"
@@ -2299,6 +2357,11 @@ msgstr "įj. (FPS riba nugali)"
 msgid "Reflex (flat)"
 msgstr "Reflex (plokščias)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reflex"
+msgstr "Reflex"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on + boost"
@@ -2308,6 +2371,11 @@ msgstr "įj. + boost"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "FPS riba (plokščias)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "FPS riba"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2370,13 +2438,13 @@ msgstr "autom. (%ls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Skydelis"
+msgid "Panel lock (VR)"
+msgstr "Skydelio užraktas (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel lock (VR)"
-msgstr "Skydelio užraktas (VR)"
+msgid "Panel lock"
+msgstr "Skydelio užraktas"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2419,6 +2487,11 @@ msgstr "Skydelio dydis"
 msgid "Panel VR depth"
 msgstr "Skydelio VR gylis"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "Skydelio gylis"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2432,6 +2505,11 @@ msgstr "Skydelis į jus (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Panel faces you"
+msgstr "Skydelis į jus"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Menu keys"
 msgstr "Meniu klavišai"
 
@@ -2439,11 +2517,6 @@ msgstr "Meniu klavišai"
 #: src/inject.cpp
 msgid "Off"
 msgstr "Išjungta"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "FPS skaitiklis"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2547,6 +2620,11 @@ msgstr "FPS atstumas (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS distance"
+msgstr "FPS atstumas"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Hotkeys..."
 msgstr "Spartieji klavišai..."
 
@@ -2633,30 +2711,9 @@ msgstr "info"
 msgid "debug"
 msgstr "derinimas"
 
-#~ msgid "Upscaling and VR"
-#~ msgstr "Didinimas ir VR"
+#~ msgid "Panel settings"
+#~ msgstr "Skydelis"
 
-#~ msgid "Frame rate and CPU"
-#~ msgstr "Kadrų dažnis ir CPU"
-
-#~ msgid "DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "DLSS didinimas, DLAA įjungimo / išjungimo jungiklis ir OFXR Bridge / VectorXR informacija. Dešinė atveria grupę, kairė uždaro; atidarius meniu ji visada uždaryta."
-
-#~ msgid "DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at Scaling 100 %."
-#~ msgstr "DLSS atkuria vaizdą iki pilno dydžio, kai žaidimo Scaling mažesnis nei 100 %: ryškiau nei paties žaidimo tempimas, o mažiau pikselių reiškia daugiau FPS. Papildomos kainos nėra; ties Scaling 100 % nieko nedaro."
-
-#~ msgid "VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "VR pagreitinimai: Turbo, foveated atvaizdavimas ir paslėptos srities kaukė. Dešinė atveria grupę, kairė uždaro; atidarius meniu ji visada uždaryta."
-
-#~ msgid "Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right opens the group, Left closes it; it starts closed every time the menu opens."
-#~ msgstr "Kadrų dažnio ribos ir CPU: NVIDIA Reflex ir FPS riba plokščiam, VR FPS riba, CPU derinimas. Dešinė atveria grupę, kairė uždaro; atidarius meniu ji visada uždaryta."
-
-#~ msgid "no extra"
-#~ msgstr "be papildomo"
-
-#~ msgid "Off now (the mod is off)."
-#~ msgstr "Dabar išjungta (modifikacija išjungta)."
-
-#~ msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-#~ msgstr "Dabar išjungta: žemiau Scaling 100 %% naudojamas paties žaidimo tempimas."
+#~ msgid "FPS counter settings"
+#~ msgstr "FPS skaitiklis"
 
