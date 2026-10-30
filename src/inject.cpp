@@ -23634,7 +23634,9 @@ void MenuOverlaySet() {
     const unsigned long armTid = g_menuLateTid.load(std::memory_order_relaxed);
     p.drawTid   = armTid ? armTid : GetCurrentThreadId();
     p.panelW    = (uint32_t)std::lround(TuningMenu::kRefWidth * kOvPanelMax);
-    p.panelH    = (uint32_t)std::ceil(TuningMenu::RefHeight(TuningMenu::kMaxRows) * kOvPanelMax);
+    // phase 84 fix: kMaxRows 88 made this 4.6k px, over XrHook's 4096 cap -> the whole quad path failed (panel back in the eye
+    // picture, Panel lock greyed). The draw scale already clamps to the image (MenuOverlayDraw: min(.., h / refH)), so cap it.
+    p.panelH    = (uint32_t)(std::min)(4096.0f, std::ceil(TuningMenu::RefHeight(TuningMenu::kMaxRows) * kOvPanelMax));
     p.fpsW      = (uint32_t)std::lround(TuningMenu::kWidgetRefW * kOvFpsMax);
     p.fpsH      = (uint32_t)std::lround(TuningMenu::kWidgetRefH * kOvFpsMax);
     // phase 57: the content generations (XrHook redraws a quad's image only when its generation changes); the panel is built here
