@@ -363,7 +363,10 @@ game's fog triangle in the forward pass, which samples the scene by interpolated
 picture (shift + the phase-23 scale), at every silhouette the neighbour's depth: a dark 1 px line on the horizon and around bushes
 (ATS flat 2026-10-10, `Ctrl+F10` color_in: sky 204 / line 25 / hill 120; gone with DLAA off). Log line `jitter (v0.10.0 phase 25)`.
 Phase 55: the LIGHTING pass (2 RTVs + scene depth) stays unjittered, except its mesh redraws, which get the G-buffer's shifted
-viewport per draw (`light_redraw_jitter`, default 1; see "Phase 55" below).
+viewport per draw (`light_redraw_jitter`, default 1; see "Phase 55" below). Phase 78: and its FULL-SCREEN draws (the deferred
+sun light), which get the G-buffer's shift at the game's W x H, no overscan, plus an unshifted scissored re-draw of the far
+column / row a negative shift loses (`light_fs_jitter`, default 1; see "Phase 78" below). The light volumes keep the game's
+viewport.
 
 ## Motion vectors
 
@@ -2115,7 +2118,8 @@ non-blocking readback timing -- so it is judged by the check totals and a verify
   the unit's `jitOn`). A qualifying draw sets `g_lightRedrawShift`; `ReconcileViewports` then issues the G-buffer's viewport: the
   pass's `g_jx` / `g_jy` (main; per eye the order is G-buffer, lighting, forward, as the forward pass relies on) or the view's own
   shift (mirror), with the overscan, only when the game's viewport is the pass size. Any other draw of the binding gets the game's
-  viewport back: a `Draw` (the full-screen light passes, `hkDraw`), a non-qualifying `DrawIndexed`, or a depth-stencil state change
+  viewport back: a `Draw` (the full-screen light passes, `hkDraw`; since phase 78 those get the G-buffer's shift themselves, see
+  "Phase 78"), a non-qualifying `DrawIndexed`, or a depth-stencil state change
   to a non-qualifying state (`LightRedrawOnDss`, covers a following unhooked draw). Viewports are issued only when the
   qualification changes (one `RSSetViewports` at the start and one at the end of a run of redraws). The two state verdicts are
   cached per state object (64 entries each, ref held, dropped at a game context change). The game's own `RSSetViewports` inside the
@@ -2179,6 +2183,200 @@ non-blocking readback timing -- so it is judged by the check totals and a verify
   width report per language for translators. CI also runs `lang_tool.py extract --check` and `check`.
 - **Not translated.** The fps box (numbers + units), the hotkey notes ("= Ctrl+F5 (taken from ...)"), the support reasons of
   Reflex / VRS (`SupportText`), the licence line, every log line.
+
+### Phase 77: coverage-preserving alpha mips for cut-out textures (`cutout_mips`, default 0, startup only)
+
+- **Why.** Far chain-link fences shimmer and vanish. The game's BC3 alpha mips are binary 0 / 255 from a 2x2 box + a 0.5
+  threshold, so 1-2 texel wires drop out: the ATS fence (128x2048, 12 mips; `captures/ats_flat_fence_frame1634.fence_dump`)
+  covers 17.5 % at mip 0 (alpha >= 0.05, the PS cut: `lt r1.x, r1.x, l(0.049988); discard_nz`), then 16.0, 9.9, 6.7, 6.6, 7.8,
+  14.1, 6.2, 0, 0, 0, 0 %. The fence PS reuses the alpha after the discard (`mul o1.xyz, r0.wwww, cb0[1].xyz`, G-buffer RT1), so
+  the output stays BINARY (no soft Castano alpha scaling).
+- **How the game uploads** (a temporary probe, ATS 2026-10-28): `CreateTexture2D` with `D3D11_USAGE_DEFAULT`, bind SRV, no CPU
+  access and NO initial data (5500 of 5500 BC3 textures); right after, on the same loader thread, the IMMEDIATE context's
+  `ID3D11DeviceContext1::UpdateSubresource1` (vtable 116) uploads mip by mip, mip 0 first (DstSubresource = the mip, array size 1,
+  whole mip). No `UpdateSubresource`, `CopySubresourceRegion`, `CopyResource` or deferred-context upload into BC3.
+- **What** (`src/cutout_mips.h`, pure; `Cutout::` in `src/inject.cpp`). `hkUpdateSubresource1` (+ `hkUpdateSubresource`, vtable 48,
+  the same way for safety; `t_cutoutIn` stops a second pass when one calls the other) skips the mod's own work (`t_inDlaa`) and
+  OFXR / VectorXR. Mip 0 of a `BC3_UNORM` / `_SRGB` Texture2D, no box (ATS sends a box with every mip upload; a box that covers the whole mip, block aligned, counts as no box -- found in the first game test, when all 1500 textures were skipped as `size`): shape rule (array 1, the full mip chain, 64 <= W, H <=
+  4096) -> FNV-1a 64 of the alpha halves -> the cache (64 MB / 4096 entries, rejections too) or `Analyse`: decode the alpha;
+  BINARY = >= 97 % of the texels <= 0.02 or >= 0.6 (early stop: a soft alpha costs ~0.06 ms); coverage at the 0.05 cut 2 .. 60 %;
+  a REAL LOSS = the game rule (box of mip 0 >= 0.5, texels >= 128 for the alpha sum) keeps < 70 % of cov0 on some mip 2..(last
+  >= 4 px). Then per mip L >= 1 (not 1x1): the mip-0 footprint counts (an exact partition, NPOT too; halved axes summed from the
+  mip above), K_L = round(cov0 x W_L x H_L) texels opaque by key (covered count, then >= 128 count, then a fixed per-texel
+  dither; `nth_element`), encoded as binary BC3 alpha blocks (a0 = 255, a1 = 0, index 0 / 1: exact; texels outside a < 4 px mip
+  = 0). A per-texture record (resource pointer + W / H / mips / format, 10 s, dropped after the last mip or at a new mip 0)
+  waits for mips 1..N: `Replace` measures the game's own mip and, below 85 % of cov0, uploads a scratch copy of the game's
+  blocks with our alpha half (same row pitch; the colour 8 bytes untouched).
+- **Diagnostic** (permanent, instead of the probe): at log level 4, also with `cutout_mips = 0`, the Texture2D mip-0 uploads are
+  counted per DXGI format (BC1 / BC2 / BC3 / BC4 / BC5 / BC6H / BC7 / RGBA8 / other) in the stats line: do cut-outs also come as
+  BC1 (1-bit alpha) or BC7? Per-call cost while off and below level 4: an int + an atomic load.
+- **Log.** Start: `cut-out mips (phase 77): on|off (cutout_mips=N cutout_max_dim=N, 77c: analysis on a worker thread)`; 77c adds `cut-out mips (phase 77c): worker thread started` and, at the first rebuilt texture, the device creation flags. Level 3: `cut-out mips: first texture rebuilt WxH mips N fmt F
+  hash H cov mip0 ..% game rule mips2..7 a/b/.. % -> ours a/b/.. %, .. ms`. Level 4: one line per candidate (first 200), and
+  `cut-out mips: seen S patched P skipped K (soft, coverage, no loss, size) cache hits H cpu total .. ms max .. ms | mips
+  replaced R, left to the game G | uploads by format (...)` every 500 BC3 textures (every 2000 uploads while off) and at exit.
+  `scripts/feature_check.py` row "Cut-out alpha mips".
+- **Tests.** `tests/cutout_mips_test.cpp` (CI): block codec round trip, shape / soft / grey / no-loss / coverage rejections, a
+  synthetic 128x2048 chain-link (1 + 2 texel wires, period 16; the game rule loses everything from mip 2) with exact coverage on
+  every replaced mip, colour bytes and row padding untouched, a kept mip left alone, NPOT 96x40 / 96x64 / 100x68, padded pitches;
+  plus the captured ATS fence when `captures/` is there (local only): game 9.9 / 6.7 / 6.6 / 7.8 / 14.1 / 6.2 / 0 % on mips 2..8 ->
+  17.5 % on mips 2..5. CPU (the test's timing): ~1.8 ms for 128x2048 or 512x512, ~6 ms 1024x1024, ~24 ms 2048x2048 per rebuilt
+  texture (once; reloads hit the cache).
+- **Risks / not verified.** Nothing in game yet: the fence look near and far (VR + flat), load-time hitches, the counts. A BC3
+  whose alpha is binary but NOT a cut-out (a binary gloss / emissive mask) gets coverage-preserving mips too (still a sane
+  binary downsample). Textures uploaded with a partial box, as an array, or without the full chain are left alone. BC1 / BC7 cut-outs are
+  not handled (see the format counts first).
+
+### Phase 78: the lighting pass's full-screen draws get the G-buffer's jitter (`light_fs_jitter`, default 1, startup only)
+
+- **Report** (ATS flat, DLSS 2880x2160 -> 3840x2160, 2026-10-28, OBS video + RenderDoc frame1890): a shed roof in the soft edge of a
+  shadow (sunlit, penumbra) flickers dark while the mod jitters; Shift+F11 (jitter off) removes it.
+- **Cause** (Fable analysis of the capture): the deferred sun light is a full-screen `Draw(3)` of the lighting bind (EID 19329, PS
+  R188, 2 RTVs + the scene depth). It fetches the G-buffer with `ld` at `ftoi(v1.xy * size)` (point) and rebuilds the position as
+  `viewZ * (v1.xy * scale + offset, 1)`; `v1` = the full-screen triangle's UV = the UNSHIFTED pixel centre, while the G-buffer texel
+  was rasterised with the jitter. On the grazing roof (0.275 m of view z per row) a +-0.46 px y shift moves the rebuilt point
+  +-0.13 m: the shadow lookup (cascades + a world-projected dither texture) lands elsewhere in the penumbra on every phase (luma
+  96-99 vs 88-91, with the sign of the y shift). Until now every `Draw` of the lighting bind kept the game's viewport (phases 25 / 55).
+- **Fix** (`src/inject.cpp` `hkDraw`, block above `hkRSSetViewports`; `src/light_fs.h`): a `Draw` with 3 / 4 vertices in the main
+  lighting bind (`g_lightBind == 1`) or the open jittered mirror view's (`g_lightBind == 2`, `g_mirLight`), on the game context,
+  not our work, not in a jitter pass / preview pass, viewport depth 0..1, jitter live (`JitterLive() && !WorldJitterHeld()`;
+  mirror: `g_mirLight` = the unit's `jitOn`) sets `g_lightFsShift` for that one Draw. `ReconcileViewports` then issues viewport 0 =
+  the game's + the pass's `g_jx` / `g_jy` (mirror: `g_mirShX` / `g_mirShY`) -- only when the game's viewport is the pass size
+  (`g_sceneW x g_sceneH`; mirror `g_mirW x g_mirH`) -- with NO overscan (`over` is false while `g_lightFsShift`). Math: UV at
+  pixel p = (p + 0.5 - s) / W, so the ray matches the geometry the G-buffer stored in texel p, and `ftoi(uv * W)` = p for every
+  |s| < 0.5 (the rasterizer's 1/256 px snap moves that limit to ~0.498; 8 Halton phases reach 0.4375). The overscan viewport
+  would scale uv by W / (W + 1) and read the wrong texel toward the far edge (the phase-25 defect). After the Draw:
+  `LightFsEdgeFill` -- by the phase-23 edge rule a W x H viewport with a negative shift loses the LAST column / row; those pixels
+  (`LightFs::EdgeRects`: column full height, row left of it, the corner once) are drawn again with the game's own viewport and a
+  scissor (a cached scissor-enabled twin of the game's rasterizer state; if the game's state already scissors, its rect 0 is
+  intersected instead), so every pixel is written exactly once (additive light blends stay right). The game's rasterizer state and
+  scissor rects are restored; then `g_lightFsShift = false` + `ReconcileViewports` = the game's viewport again (the lighting bind
+  stays unshifted between draws). A phase-55 redraw run ending at this Draw goes straight to the full-screen shift (one viewport
+  call, not two). The 36-vertex light-volume `DrawIndexed` calls keep the game's viewport (out of scope).
+- **Bind tracking**: `g_lightBind` is now set when `light_redraw_jitter` OR `light_fs_jitter` is on; `LightRedrawOnDraw` checks
+  `light_redraw_jitter` itself. Context reset: `LightFsOnContextReset` drops the scissor twins.
+- **Log**: start `lighting full-screen jitter (phase 78): light_fs_jitter=N (...)`; once `lighting full-screen jitter (phase 78):
+  first main / mirror lighting-pass full-screen draw (verts=3) issued with the G-buffer's shift (..), game viewport WxH, no overscan`
+  (a WARNING tail if not shifted); level 4: the phase-55 stats line ends with `| phase 78 light_fs_jitter N: full-screen light draws
+  shifted A, full-screen NOT shifted B, edge re-draws C, scissor twins D`. `scripts/feature_check.py` "Lighting redraw jitter" row:
+  PASS on shifted redraws OR shifted full-screen draws (`tests/feature_check_test.py` `TestLightFsJitter`).
+- **Test** `tests/light_fs_test.cpp` (WARP, CI): the mod's sequence with a full-screen triangle whose PS point-fetches at
+  `ftoi(uv * size)` with an additive blend, 3 sizes x 13 shifts (the 8 Halton phases, +-0.49, -0.001, 0): every pixel written once,
+  its own texel read, uv * size = p + 0.5 - s (edge pixels p + 0.5); mutations: no edge fill -> holes in the last column / row,
+  overscan viewport -> wrong texels. Plus `EdgeRects` / `Clip` cases.
+- **Risks / not verified**: nothing in game yet (the roof, VR, mirrors, the counts). Any OTHER full-screen draw of the lighting bind
+  that samples the G-buffer BILINEARLY by UV now samples half-way between texels by the shift (blends neighbours at silhouettes, the
+  phase-25 line class) -- audit 2026-10-28: every Draw(3) of every lighting bind (main, mirrors, a 2048x512 view) in 4 ATS captures reads the G-buffer with point `ld` only (PS R188 / R298 / R148 / R142), none samples a screen-sized target by UV; `light_fs_jitter = 0` reverts. VR: per eye the order is
+  G-buffer, lighting, forward, so `g_jx` / `g_jy` are that eye's; a lighting viewport not of the eye's scene size is left alone
+  (counted NOT shifted). `DrawInstanced` / indirect full-screen draws are not hooked (stay unshifted).
+
+### Phase 80: AI cars are not dithered as far wires (`wire_solid_static_only`, default 1, startup only)
+
+- **Report** (ATS VR drive 2026-10-29, log level 4, `wire_widen = 1`; phase-79 rewind captures `shimmer_20261029_2024xx`): a near
+  van shows one-frame bright 1 px lines / small boxes on its bumper and undercarriage (not at the silhouette, a new place every
+  frame); a far car's outline changes every frame (no history at all). Pairing was healthy (96.6-99.2 %), and "instanced draws
+  with a moving parent 0".
+- **Facts** (RenderDoc, `scripts`-style replay of the last G-buffer writer per pixel + a per-draw VS / PS hash list):
+  every AI car pixel tested in `amtrucks_2026.10.09_21.10.01_frame5633` (pass 4, 3840x2160: parked cars ~80-90 m away),
+  `..._frame7227` (pass 2: 6 cars incl. a ~40 px far one) and the ambulance in the mirror pass of `ats_roof_flicker_frame5519` is
+  written by a plain `DrawIndexed` (no instancing), VS `07dfaa00`, a per-draw MVP in cb0 rows 4..7 (rows 0..3 = model-view, row 7
+  = the w row), a FullKey unique in the pass (IB / VB offsets per car) -- the pairing handles them. But 11 of the 33 draws with
+  VS `07dfaa00` + PS `b67da69f` in frame5633 are car parts (windows, the wheel draw, trims: draws 74-84, origin w 78-87 m): that
+  is the phase-63 SOLID pair A ("far high-voltage wires"). With `wire_widen = 1` every such draw goes through `GSolidA` + the
+  dither PS copy: each triangle whose estimated 3D face width is under `wire_min_px / 2` becomes a band whose pixels are kept with
+  a share k that changes every frame (`g_q.x`), and its G-buffer id replay (no GS) leaves the band pixels without an id. A far
+  car's triangles are all that small (its pair-A parts are dithered whole: no stable coverage, no history -- the body draws use
+  other PSs, e.g. draws 137 / 142); on a near van only the small trims and bolts are (the 1 px lines). The VR log: 78-108 solid G-buffer draws dithered per pass while driving (21 at the start, before
+  traffic). The cars are not instanced and pair normally; the dither is the cause the captures support (not proven pixel by
+  pixel for the VR van itself: no RenderDoc capture of that drive).
+- **Fix** (`DrawIdMv::SolidDitherOk`, `src/draw_ids.cpp` next to `StaticSkip`; `src/inject.cpp` `SolidOnDraw`): `DidOnDraw` keeps
+  the FullKey it just recorded (`g_didLastKey`, cleared before each G-buffer `DrawIndexed`); `SolidOnDraw`, after the shader
+  match, asks the phase-14 static table: a NON-instanced draw is dithered only when its key has a fresh deep-static verdict
+  (streak >= 1, seen within `kStatFresh` = 16 frames) and did not move within `kStatQuiet` = 60 frames. A mover, a key with no
+  verdict yet (a car that just appeared, an LOD switch) or only shallow-static (a car at the player's speed) is drawn by the
+  game's own shaders (no GS, no dither, no phase-64 forward record). Unchanged (old rule): instanced draws (the phase-66 street
+  lights: not in the static table), a draw without a recorded key (`mv_objects` not 2, record full), `mv_replay_static_frames 0`,
+  or `wire_solid_static_only = 0`. Wires / towers / parked cars are dithered as before once the table knows them (2-4 frames after
+  they appear; a table clear -- a 1-frame consensus failure -- leaves them undithered for those frames: the game's own dashes).
+- **Log**: start `solid dither gate (phase 80): wire_solid_static_only=N (...)`; level 4: the `wire widening (phase 61, ...)` stats
+  line ends with `| phase 80 solid dither gate (wire_solid_static_only N) per pass: known static .., old rule (instanced / no key /
+  gate off) .., NOT dithered: moving .., no static verdict ..`.
+- **Test**: `tests/drawid_harness.cpp` S15 (and its VR eye runs, scene 16) asks `SolidDitherOk` every frame with the frame's real
+  keys after the real pairing / readback: the overtaking car, its plate and the oncoming car must never be dithered from frame 12
+  (264 checks), the parked van, the ground and the 10 boxes must be known static from frame 20 (936 checks; 4 frames after a
+  static-table clear are not checked -- S15 has 2 one-frame consensus failures; fewer than 720 static checks = FAIL, so the grace
+  cannot hide a broken table). `mutsolid` (the gate off) fails S15 and both VR eye runs (264 car checks each); every other
+  scene passes either way. Full run 154393 / 154393.
+- **Risks / not verified**: nothing in game yet (does the van's line / the far car's flicker go; do far wires and towers still
+  get the dither in VR). The harness checks the gate's decision, not `SolidOnDraw`'s use of it (inject.cpp is not in the
+  harness). Parked cars ARE dithered once known static (their motion is the camera's, so DLSS averages the dither like a wire;
+  with the dither they look slightly see-through at distance, as before). A car stopped at a light becomes static after 60
+  frames without motion and is dithered until its next moving verdict (2-4 frames of dither when it pulls away). The phase-63
+  dither of the real far wires is unchanged; mirrors / cabin never ran it.
+
+### Phase 81: outside AA -- the picture outside the DLAA area no longer shakes with the jitter (`outside_aa`, default 2, startup only)
+
+- **Report** (VR video, still head, `dlaa_area = 50`, `dlss_upscale = 1`: DLSS Quality, render rect 2072x2928 of 4136x5848 ->
+  output 2761x2928 of 5512x5848, x1.333 / x1.0; also in plain DLAA): strong flicker on thin dark edges against a bright sky
+  (bridge railings and undersides, sign gantries, street-light heads, sign rims). 89 % of the strong-flicker pixels lie OUTSIDE the
+  AA rect; inside it the same railing is steady to 0.01 px.
+- **Cause**: `scene_dlaa.h` -- outside the rect the image is the raw frame, and the mod's viewport jitter
+  (`ReconcileViewports`: viewport 0 `TopLeft += (g_jx, g_jy)`, [-0.5, +0.5) px, 8 Halton phases, `jitter_overscan` (W+1) x (H+1))
+  moves all of it every frame -- worse than the game without the mod (no jitter at all).
+- **Fix** (`src/outside_aa.h`: geometry + the HLSL block `kOutsideAaShader`; `src/scene_dlaa.cpp` `OaaInPlace` / `OaaCopyBack` /
+  `OaaArm` / `OaaDrawBands`): every pixel whose feather mask (the rect's own `dlaa_area_feather` ramp, `kRcasShader` /
+  `kCompositePs`) is below 1 gets, instead of the raw value:
+  1. **unjitter** -- the raw frame resampled at `o_c * render / output + s` (uv `o_c / output + s / render`), s = the pass's viewport
+     shift in RENDER px = NGX jitter x `jitter_sign` (inject.cpp tells NGX `njx = g_signX * slot.jx`; `OutsideAa::ShiftFromNgx`;
+     the sign reaches `SceneDlaa::SetJitterSign` once per Present). The shifted viewport puts the scene point of render position X
+     at X + s, so sampling at X + s gives the shift-0 picture; jitter_overscan's (W+1)/W scale is the same every frame and is what
+     DLSS sees inside the rect, so it stays. Kernel: 5-tap Catmull-Rom (the 9-tap bilinear-optimised bicubic without its 4 corner
+     taps, renormalised) clamped into the 2x2 texels around the sample -- bilinear would be sharp at fraction 0 and blurred at 0.5
+     (sharpness pulsing with the phase).
+  2. **edge AA** (`outside_aa = 2`) -- FXAA 3.11 "console" on the unjittered grid (offsets in render texels). Luma: encoded LDR as
+     is; an `_SRGB` view (linear) and HDR (`l / (1 + l)`) through `sqrt`.
+  The seam: `mask * DLAA + (1 - mask) * outsideAA` (was `... * raw`).
+  - **DLAA in place**: right after the NGX evaluate (before the copy-back) a CS reads the game's colour (an SRV made per texture:
+    TYPELESS / UNORM -> the UNORM view = the encoded bytes like colorIn; `_SRGB`-only -> the `_SRGB` view + re-encode; RGBA16F) and
+    writes a full-size scratch (the unit's colour format, ~92 MB RGBA8 / 185 MB RGBA16F at 4136x5848; threads in the mask-1
+    interior return at once). RCAS's border blend reads its raw side from the scratch (`Mode.yz` = the rect origin, t1 = the
+    scratch; 0 / colorIn as before when the pass did not run) and the 4 outer bands are copied back after the rect. Skipped (counted,
+    WARN once) when the colour is bound as a render target at Run time (the runtime would null the SRV) -- the BGRA truck-preview
+    path now unbinds its scratch RT after its format copy for that reason.
+  - **DLSS upscale**: Run arms it (`OaaArm`: the shift, the colour texture's identity); `Composite` draws, after its GfxState save
+    and before the DLSS draw, one `Draw(3)` per band (`OutsideAa::Bands`: the complement of the mask-1 interior in output space,
+    feather = Composite's per-axis output-px feather) with the composite's VS / blend (alpha 1 = replace, RGB only) / rasterizer /
+    depth state, the source = the game's blit SRV0 (checked to be the texture Run was handed; its view decodes sRGB exactly like the
+    game's stretch), PS sampler 0 saved / restored. The DLSS draw then blends over it with the feather as before.
+  - Runs wherever a unit with a crop runs (VR world eyes, VR truck-preview units at the VR area; mirrors and flat use area 100 =
+    nothing). Nothing at `dlaa_area = 100` (no crop), with `outside_aa = 0`, with DLAA off / passive / jitter-only (no Run), with the
+    jitter off or held (Run gets (0, 0)), or after a failed evaluate.
+- **Cost** (estimate, not measured in game): mode 1 = 5 bilinear + 4 point fetches per outside pixel, mode 2 + 8 bilinear; at
+  `dlaa_area = 50` ~75 % of the pixels are outside (~24 M per eye at 5512x5848 output). In place also copies the outer bands back.
+  Expect a few tenths of a ms per eye on an RTX 40/50, above the 0.15 ms aimed at. GpuPerf section `outside-aa` (level 4 `perf eye`
+  lines; the menu counts it with the copies).
+- **Log**: start `outside AA (phase 81): outside_aa=N (...)`; once per unit and path `outside AA (phase 81): eye N first
+  outside-AA draw (in place | upscale, drawn over the game's stretch) -- ... rect, band(s), shift (sx, sy) render px (= NGX jitter x
+  jitter sign), source ...`; in place also `... in-place scratch WxH ... created (N MB)`; WARN once for a skip (colour bound as a
+  render target / not readable / blit SRV0 not the DLSS texture), ERROR for shader / resource failures.
+  `scripts/feature_check.py` row "Outside-AA (outside the area)" (VR; PASS on the `outside-aa` section of a main eye's `perf eye`
+  line, or the first-draw line at level 3; NOT USED at `dlaa_area` 100; `tests/feature_check_test.py` `TestOutsideAa`).
+- **Test** `tests/outside_aa_test.cpp` (WARP, CI): the feather interior / bands against a brute-force mask (640 cases), Catmull-Rom
+  weights, `ShiftFromNgx`, `FillParams`; then frames RASTERISED with the mod's jittered (W+1) x (H+1) viewport for the 8 Halton
+  phases through the real HLSL: in place (RGBA16F, mode 1) the outside matches the shift-0 frame (mean error 3.5 % of the raw
+  frame's jitter error, max 0.011), the interior is never written, the OPPOSITE sign is worse than raw (~2x) -- the sign is
+  checked against what D3D does with a viewport shift, with NGX jitter of both signs; mode 2 stays within 15 % of its own shift-0
+  output (edge AA blurs smooth texture by design, but does not move with the phase); upscale (PS per band, origin offset, 72x80 ->
+  96x80) matches the analytic shift-0 picture (mean error 0.0006 vs the game's bilinear stretch 0.009-0.038), interior and RT
+  margin untouched, every band pixel written, opposite sign fails.
+- **Risks / not verified**: nothing in game yet. (a) SUB-PIXEL lines: unjitter cannot steady them -- which pixels a 0.7 px line
+  covers changes with the phase (aliasing); resampling moves the pattern back but does not fill it in. The WARP thin-line scene:
+  per-pixel spread over the 8 phases raw 0.40, mode 1 0.43 (slightly worse), mode 2 0.30 (-26 %). The vanilla game (no jitter)
+  is steady there; only a temporal (history) pass outside the rect would get close, which needs the camera reprojection outside
+  the crop (not built). (b) Edge AA softens fine texture outside the rect (FXAA). (c) In place: the colour texture must be readable
+  (SHADER_RESOURCE, not an array / MSAA) and not bound as a render target at Run; else it stays raw (WARN once). (d) Upscale: the
+  game's blit is assumed to stretch the WHOLE colour texture across its viewport (the composite's rect mapping assumes the same).
+  (e) If the shift sign were wrong in game, the outside would shake at ~2x the raw amplitude (the test's mutation); `outside_aa =
+  0` reverts.
 
 ### The RenderDoc oracle (done in v0.2)
 

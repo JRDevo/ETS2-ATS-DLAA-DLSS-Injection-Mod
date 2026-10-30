@@ -166,6 +166,13 @@ log_level = 1
 # 0 = the game's own viewport for the whole lighting pass (before phase 55): such lit areas switch off on some frames (flicker).
 # light_redraw_jitter = 1
 
+# Phase 78: the lighting pass's FULL-SCREEN draws (the deferred sunlight) rebuild each pixel's position from its unshifted
+# screen position, but the G-buffer texel there was drawn with the jitter. On surfaces seen at a grazing angle (a shed roof in
+# a shadow's soft edge) that moves the shadow lookup each jitter phase: a dark flicker. 1 = default: those draws get the
+# G-buffer's jitter shift (at the game's size; the far column / row a negative shift misses is drawn again unshifted).
+# 0 = the game's own viewport for them (before phase 78). Startup only.
+# light_fs_jitter = 1
+
 # Camera-reprojection motion vectors: 1 on, 0 = zero MVs (Ctrl+F5 toggles live)
 # mv_enabled = 1
 
@@ -502,11 +509,46 @@ log_level = 1
 # far wires about a third darker than the game's own and flicker more). Lower = closer to the
 # wire's real (very faint) darkness but it can twinkle; higher = steadier and darker.
 # wire_solid_min_share = 0.1
+# Phase 80: the far high-voltage wires share their shaders with the windows, wheels and trims of the AI cars. Dithering a MOVING
+# car part gives it different pixels every frame, so DLAA / DLSS can never keep its history: one-frame bright outlines on a
+# near car, a far car that never gets smooth. With 1 (default) the dither is only applied to parts the per-draw motion vectors
+# know as standing still (wires, towers, parked cars); a car part that moves, or was not seen standing still yet, is drawn by the
+# game's own shaders. 0 = every match is dithered (as before phase 80). Needs mv_objects = 2 (and mv_replay_static_frames above
+# 0); without them every match is dithered as before. Startup only (restart the game after a change). Only matters with
+# wire_widen = 1. The log says "solid dither gate (phase 80): wire_solid_static_only=1"; at log_level 4 the "wire widening"
+# stats line ends with the per-pass counts (known static / old rule / not dithered: moving, no static verdict).
+# wire_solid_static_only = 1
 # wire_widen = 0
 # The band width in pixels, 0.5 .. 3 (default 1.0). Larger = steadier but softer / wider far wires.
 # Phase 67: the band has soft edges (darkest in the middle, fading to nothing at 1 x wire_min_px either side), so a sloped far
 # wire stays an even line under DLAA instead of a row of beads / stair steps (a hard 1 px band did that).
 # wire_min_px = 1.0
+
+# EXPERIMENTAL, off by default (phase 77, startup only: no menu row, no key; restart the game after a change).
+# Far chain-link fences, railings and other cut-out (see-through) textures shimmer and vanish with distance: the game builds
+# the smaller versions (mip maps) of their transparency by averaging 2 x 2 texels and keeping only what is more than half
+# covered, so a 1-2 texel wire is gone after 2-3 halvings (the ATS fence: 17.5 % covered up close, 6 % further away, then
+# nothing). With this on, the mod rebuilds those smaller versions while the game loads the texture: each keeps the same share
+# of covered texels as the full-size one (the most-covered spots first, still fully see-through or fully solid), so a far
+# fence thins into an even pattern for DLAA instead of disappearing. Only textures whose transparency is a clean cut-out
+# (fully see-through or solid) with 2 .. 60 % coverage that really lose coverage in the game's own versions; the colour is
+# untouched. The work runs on a background thread at low priority, so loading does not wait for it (the loading thread
+# only copies the texture, about 1 ms for 2048 x 2048). The rebuilt versions are used only once the texture is drawn as a
+# see-through cut-out, so car paint and other textures with a different use of alpha keep the game's. 1 = on, 0 = off (default).
+# The log says "cut-out mips (phase 77): on"; log_level 3 adds "cut-out mips: first texture rebuilt ...", log_level 4 one line
+# per candidate texture + a "cut-out mips: seen .. patched .." count (with log_level 4 the texture uploads are also counted per
+# format, on or off).
+# cutout_mips = 0
+# phase 77: the largest texture side the cut-out rebuild looks at (64..4096, default 4096). Lower it only to save memory
+# (a 4096 x 4096 texture needs about 80 MB for a moment on the background thread).
+# cutout_max_dim = 4096
+
+# Phase 79 REWIND for the shimmer capture key (Insert) -- a TEST TOOL, off by default. The capture itself starts about 1.5 s after the key, when the
+# flicker you saw is often gone. With this on, the mod keeps a copy of the last N frames (eye 0 in VR) on the graphics card
+# all the time; the key saves them too, as rewind_NN.bmp in the same dlaa_selftest\shimmer_* folder (rewind_00 = the last
+# frame before the key). 0 = off (default), 2..240 frames (64 = about 0.9 s at 72 fps). Costs about 32 MB of graphics memory
+# per frame at a 2761 x 2928 eye (64 frames = about 2 GB; capped at 2.5 GB) and one picture copy per frame. Startup only.
+# rewind_frames = 0
 # v0.9.0 r11: a see-through draw whose centre point (origin) lies within this many metres of the camera (windscreen
 # drops, dirt, glare) is not drawn into that depth at all (0.1..5)
 # mv_fwd_min_m = 0.5
@@ -547,13 +589,20 @@ log_level = 1
 
 # v0.6.4 DLAA area: run DLAA only on a rect of this % of each eye image's width AND height (10..100, v0.10.0; was
 # 40..100; pixel count ~ area^2, e.g. 70 -> 49 %, 20 -> 4 %), centred on the eye's optical centre. 100 = whole image
-# (v0.6.3 behaviour). Outside the rect the image is the raw jittered frame. VR only (flat always uses 100); v0.10.0: also
+# (v0.6.3 behaviour). Outside the rect: see outside_aa below. VR only (flat always uses 100); v0.10.0: also
 # the truck picture of the VR main menu / garage / truck dealer screens. Start state; Shift+F5 / Shift+F6 change it live
 # in 10 % steps (Shift+F12 saves)
 # dlaa_area = 100
 # blend ramp (px, 0..512) from the raw frame to the DLAA result at the rect edges inside the image; 0 = hard edge
 # (render px; with DLSS upscaling it is scaled to output px per axis)
 # dlaa_area_feather = 96
+# Phase 81: what OUTSIDE the DLAA area rect looks like (only while dlaa_area is below 100). The mod's sub-pixel jitter moves the
+# whole picture every frame; inside the rect DLAA / DLSS takes it out, outside it the raw frame used to shake with it (thin dark
+# railings, gantries and lamp heads against the sky flickered more than in the game without the mod).
+# 2 = default: the outside is resampled at the frame's jitter shift (sharp bicubic, so it no longer moves) and its edges are
+#     smoothed (FXAA-style); 1 = the resampling only; 0 = the raw jittered frame (before phase 81).
+# Blended into the rect with dlaa_area_feather. Nothing runs at dlaa_area 100, with the jitter or DLAA off. Startup only.
+# outside_aa = 2
 
 # v0.7.0 DLSS upscaling: 1 = when the eye texture / backbuffer is larger than the scene (game r_scale_x / r_scale_y
 # below 1), NGX renders from the scene size to that size and replaces the game's bilinear stretch; 0 = always DLAA

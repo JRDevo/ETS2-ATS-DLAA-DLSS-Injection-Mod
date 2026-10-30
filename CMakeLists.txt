@@ -237,6 +237,8 @@ if (WITH_DLAA)
             "src/draw_ids.cpp@kFwdInitShader@ps_5_0@PSInit1"    #   1/2 resolution (min of 2x2)
             "src/draw_ids.cpp@kBiasNormShader@ps_5_0@PSNorm"    # phase 49 glow bias mask: glow share of the pixel
             "src/scene_dlaa.cpp@kBiasPrepShader"                # phase 49 crop + last frame's glow along the MVs
+            "src/outside_aa.h@kOutsideAaShader@cs_5_0@CSMain"   # phase 81 outside AA: in place (CS)
+            "src/outside_aa.h@kOutsideAaShader@ps_5_0@PSMain"   #   upscale band draws (PS)
             "src/inject.cpp@kPvStatsShader"                     # v0.7.8 Ctrl+F10 preview capture metrics
             "src/inject.cpp@kPvDepthAsmShader"                  # v0.7.8 tiled preview picture depth
             "src/inject.cpp@kPvEdgeFillShader")                 # v0.8.1 preview tile edge (zero-guarded fill)
@@ -254,6 +256,7 @@ if (WITH_DLAA)
                     "-DEMBED_CPP=${_shader_embed_cpp}"
                     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/validate_shaders.cmake"
             DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/scene_dlaa.cpp"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/src/outside_aa.h"      # phase 81 (kOutsideAaShader)
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/motion_vectors.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/preview_blit.cpp"
                     "${CMAKE_CURRENT_SOURCE_DIR}/src/hidden_mask.cpp"

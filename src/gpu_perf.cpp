@@ -27,6 +27,7 @@ const SecInfo kInfo[kCount] = {
     { "dbg-view", true, false },      { "mirrors", true, false },      { "mirror-NGX", false, false },
     { "fps-box", false, false, true },                                                             // v0.10.3 phase 29b
     { "bias-mask", true, false },                                                                  // phase 49
+    { "outside-aa", true, false },                                                                 // phase 81
 };
 static_assert(sizeof(kInfo) / sizeof(kInfo[0]) == kCount, "section table");
 

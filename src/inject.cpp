@@ -1,3 +1,12 @@
+// phase 77 -- COVERAGE-PRESERVING ALPHA MIPS for cut-out BC3 textures (cutout_mips.h; dlaa.ini cutout_mips 0/1, default 0,
+//           startup only, no menu row / key). Far chain-link fences shimmered and vanished: SCS's alpha mips are a 2x2 box + 0.5
+//           threshold (1-2 texel wires gone after 2-3 mips; ATS fence coverage 17.5 % -> 6.2 % -> 0). The UpdateSubresource1
+//           hook sees mip 0 (the game uploads mip by mip), checks binary alpha / coverage 2..60 % / a real loss under the game's
+//           rule, and rebuilds every smaller mip with the same coverage (binary, top-K footprints); the colour half untouched.
+//           Level 4 also counts the Texture2D uploads per DXGI format (cutout_mips 0 too). tests\cutout_mips_test.cpp.
+//           77b: the load keeps the GAME's mips; ours go in only once the texture is drawn by a DISCARD pixel shader (car / tyre
+//           textures with a binary gloss alpha matched the test and sparkled; user test 2026-10-29).
+//           77c: the analysis + rebuild run on a worker thread (no CPU budget), size cap 1024 -> 4096 (the ATS fence is 128 x 2048).
 // v0.15.1 -- phase 75 (wire widening binds / unbinds no longer pause VRS: InDlaaFlag::Quiet; ~4600 NVAPI table switches per frame
 //           in dense ATS VR scenes -> ~85, "vrs" CPU 1.9 -> 0.06 ms) + phase 76 (a VR eye blit into the same eye texture as the
 //           previous blit of the Present = the game's fade re-draw: no pass consumed, no DLAA / composite; issue #24, drive-start black eye).
@@ -803,6 +812,8 @@
 #include "fps_profile.h"                            // phase 51: per-vehicle fps box placement (fps_profile lines; pure logic)
 #endif
 #include "cpu_pin.h"                                // phase 32: keep the game on the V-Cache cores (cpu_cache_pin; both builds)
+#include "cutout_mips.h"                            // phase 77: coverage-preserving binary alpha mips (cut-out BC3; pure logic; both builds)
+#include "light_fs.h"                               // phase 78: the lighting pass's full-screen draws -- the lost edge rects (both builds)
 #include "cpu_tuning.h"                            // phase 54: P-core preference / priority / EcoQoS opt-out (cpu_pcore, cpu_priority, cpu_no_throttle)
 #include "flat_views.h"                             // v0.12.0 issue #12: flat multi-view (multi-monitor) detection (both builds)
 
@@ -1032,6 +1043,14 @@ bool              g_wireLogged = false;
 bool              g_solidLogged = false;          // phase 63
 bool              g_solidInstLogged = false;      // phase 66: the instanced street lights' first line
 int               g_lastSolidKind = 0;            // phase 64: the kind SolidOnDraw bound for this draw (1 A / 2 B)
+// phase 80 SOLID DITHER GATE (dlaa.ini wire_solid_static_only 0/1, default 1, startup only): the phase-63 pair A (VS 07dfaa00 +
+// PS b67da69f) is also the shader pair of AI car windows / wheels / trims -- dithering a MOVING car part gives it a new coverage
+// every frame (no DLSS history: one-frame outlines on a near car, a far car that never anti-aliases). With 1 a non-instanced solid
+// draw is dithered only when the per-draw motion vectors know its key as deep static (DrawIdMv::SolidDitherOk); 0 = phase 63-68.
+int               g_solidStaticOnlyCfg = 1;
+uint64_t          g_didLastKey = 0;               // the FullKey DidOnDraw just recorded for THIS G-buffer draw (0 = none)
+uint64_t          g_solidGate[4] = {};            // SolidDitherOk verdicts since the last stats line: [why] (0 old rule, 1 static,
+                                                  //   2 moved -> not dithered, 3 no static verdict -> not dithered)
 uint8_t           g_nextFwdGsKind = 0;            // phase 64: the widening kind DidFwdOnDraw stamps on the draw it records
 bool              g_wireDiagLogged = false, g_wireFullLogged = false;   // one-shot diagnostics
 int               g_wireDiagWindows = 0;
@@ -1281,7 +1300,7 @@ KeyBind g_keys[KA_COUNT] = {
     { "key_mv_dilate",       "Alt+F10",   0, 0, "", false },   // phase 60: DLSS MV dilation in DLAA (thin wires) on / off
     { "key_mv_conservative", "Alt+F11",   0, 0, "", false },   // phase 60: conservative raster for the wire depth on / off
     { "key_wire_widen",      "Alt+F12",   0, 0, "", false },   // phase 61: far wires drawn at least wire_min_px wide on / off
-    { "key_shimmer_capture", "Pause",     0, 0, "", false },   // phase 71: shimmer capture -> dlaa_selftest\shimmer_<time>
+    { "key_shimmer_capture", "Insert",    0, 0, "", false },   // phase 71: shimmer capture -> dlaa_selftest\shimmer_<time> (v0.15.2: was Pause = the game's own pause menu)
                                                                //   (one key, not used by the games; not PrintScreen: Windows 11 opens the Snipping Tool)
     { "key_lod_cutout_down", "Ctrl+Shift+F1", 0, 0, "", false },   // v0.10.0 phase 13: tex_lod_bias_cutout -0.25 (2 beeps)
     { "key_lod_cutout_up",   "Ctrl+Shift+F2", 0, 0, "", false },   // v0.10.0 phase 13: tex_lod_bias_cutout +0.25 (2 beeps)
@@ -1995,6 +2014,8 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
         }
         if (g_menuLateN) MenuLateAtPresent(n);   // v0.10.0 phase 16 VR late panel: finished eye pictures end here
         MenuOverlaySet();                        // v0.10.3 phase 29: the VR quad layers (XrHook; VR launches only)
+        SceneDlaa::SetJitterSign(g_signX, g_signY);   // phase 81: outside AA undoes the SHIFT (NGX jitter = sign x shift); every
+                                                      // writer (dlaa.ini, the sign key, the F9 self-test) runs between Presents
         if (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)
             MenuDrawAtPresent(sc, bctx);         // v0.10.0 tuning menu panel + fps box (flat / mirror)
 #endif
@@ -6955,6 +6976,8 @@ void PreviewFlush(ID3D11DeviceContext* ctx, int idx) {
     } else {
         PreviewBlit::SaveState(ctx);
         PreviewBlit::Draw(ctx, t.tgtSrv.Get(), t.scratchRtv.Get(), td.Width, td.Height);          // target -> RGBA8 scratch
+        ctx->OMSetRenderTargets(0, nullptr, nullptr);   // phase 81: the scratch is read by outside AA (an SRV of a bound RT would
+                                                        // be nulled); RestoreState puts the game's targets back
         ok = t.dl.Run(ctx, t.scratch.Get(), nullptr, depth, &rs.ps.cand, njx, njy, reset, g_mvOn.load(), g_mvDebug.load(), false, 0, 0);
         if (ok) PreviewBlit::Draw(ctx, t.scratchSrv.Get(), t.tgtRtv.Get(), td.Width, td.Height);  // result -> target
         PreviewBlit::RestoreState(ctx);
@@ -8224,6 +8247,21 @@ bool           g_lightRedrawShift = false; // ReconcileViewports shifts the ligh
 uint64_t       g_cLightBinds = 0, g_cLightRedraws = 0, g_cLightRuns = 0, g_cLightUnDraw = 0, g_cLightUnIdx = 0, g_cLightUnDss = 0;   // stats window
 uint64_t       g_cLightNoShift = 0;        // stats window: qualifying redraws whose viewport could not be shifted (not the pass size)
 uint64_t       g_cLightRedrawsTotal = 0;   // since the start (the first one is logged)
+// phase 78 LIGHTING-PASS FULL-SCREEN DRAWS (the block below ReconcileViewports): dlaa.ini light_fs_jitter (default 1). A full-screen
+// Draw(3 / 4) of the lighting bind (the deferred sun light) is issued with the G-buffer's SHIFT but the game's W x H size (no
+// overscan): ReconcileViewports treats g_lightFsShift as "shift, no overscan" for the duration of that one Draw.
+int            g_lightFsCfg       = 1;     // dlaa.ini light_fs_jitter: 1 = the lighting bind's full-screen draws get the G-buffer's shift
+// phase 81 OUTSIDE AA (src/outside_aa.h, scene_dlaa.cpp): dlaa.ini outside_aa, startup only. 0 = outside the DLAA area rect the picture
+// is the raw jittered frame (before phase 81: it shook with the jitter -- 89 % of the strong VR flicker pixels of a still-head video
+// were there), 1 = resampled at the pass's shift (unjitter), 2 = + an FXAA-console edge pass (default). Read in both builds (the
+// log-only build has no DLAA area); handed to SceneDlaa after the load.
+int            g_outsideAaCfg     = 2;
+// phase 79 dlaa.ini rewind_frames 0..240 (startup only), 0 = off (default: a test tool, ~2 GB VRAM at 64). Defined here, outside
+// WITH_DLAA, because LoadConfig reads it in both builds (the log-only build has no rewind ring; tests/build_lod_scope_test.bat).
+int            g_rewindFrames     = 0;
+bool           g_lightFsShift     = false; // ReconcileViewports: shift the lighting bind's viewport for the full-screen Draw now running
+uint64_t       g_cLightFs = 0, g_cLightFsNoShift = 0, g_cLightFsEdge = 0;   // stats window: shifted / NOT shifted / edge-fill draws
+uint64_t       g_cLightFsTotal = 0;        // since the start (the first one is logged)
 #ifdef WITH_DLAA
 void LightRedrawStatsLog(uint64_t blit, uint64_t blitsInWindow);   // (defined with the lighting redraws, above hkOMSetDepthStencilState)
 #endif
@@ -8368,7 +8406,9 @@ void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
     if (g_gameVpN == 0) return;
     // phase 55: a qualifying mesh redraw of the main lighting bind (g_lightRedrawShift, set per draw by LightRedrawOnDraw) gets
     // exactly the G-buffer's viewport: the same shift and, with jitter_overscan, the same (W+1) x (H+1) size
-    const bool lightMain = g_lightRedrawShift && g_lightBind == 1;
+    // phase 78: + a full-screen Draw of the main lighting bind (g_lightFsShift, set around that one Draw by hkDraw): the same
+    // shift, but the game's W x H size (no overscan, see `over` below)
+    const bool lightMain = (g_lightRedrawShift || g_lightFsShift) && g_lightBind == 1;
     const bool worldShift = (g_jitterPass || lightMain) && JitterLive() && !WorldJitterHeld() && g_sceneW &&   // v0.7.9: see g_eyeBlitEver
                             (UINT)g_gameVp[0].Width == g_sceneW && (UINT)g_gameVp[0].Height == g_sceneH;
     // v0.7.8: the profile-screen preview pass shifts viewport 0 too (when its size is the preview RT's size, g_pvW x
@@ -8383,7 +8423,8 @@ void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
     // v0.10.0 phase 2: the open mirror view's G-buffer / forward pass (g_mirJit) shifts viewport 0 by ITS unit's jitter when
     // the viewport is the mirror's full size (the lighting pass and the 256^2 down-sample are never g_mirJit)
     // phase 55: + a qualifying mesh redraw of the open view's lighting bind (g_mirLight, the view's own shift / size)
-    const bool mirLight = g_lightRedrawShift && g_lightBind == 2 && g_mirLight;
+    // phase 78: + a full-screen Draw of that lighting bind (g_lightFsShift; the view's own shift, its W x H size)
+    const bool mirLight = (g_lightRedrawShift || g_lightFsShift) && g_lightBind == 2 && g_mirLight;
     const bool mirShift = !worldShift && !pvShift && (g_mirJit || mirLight) && g_mirW && JitterLive() &&
                           (UINT)g_gameVp[0].Width == g_mirW && (UINT)g_gameVp[0].Height == g_mirH;
     const float sx = pvShift ? g_pvJx * pvKx : (mirShift ? g_mirShX : g_jx),
@@ -8406,7 +8447,9 @@ void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
     // no longer drops the last column / bottom row. Every jittered world / mirror pass gets it, whatever the sign, so the
     // (tiny) scale of the picture is the same on every frame. The preview passes keep W x H: their tiles are shifted by up to
     // +-0.875 px and the round 4/5 edge fix (PvFixTileEdges) repairs the edge they lose.
-    const bool over = g_jitterOverscan && (worldShift || mirShift);
+    // phase 78: never for a lighting-bind full-screen draw -- it maps its UV across the viewport (the (W+1)/W scale would read the
+    // wrong G-buffer texel toward the far edge, the phase-25 defect); its lost far column / row is re-drawn by LightFsEdgeFill
+    const bool over = g_jitterOverscan && (worldShift || mirShift) && !g_lightFsShift;
     if (!gameJustSet && shift == g_vpShifted && over == g_vpOver &&
         (!shift || (g_vpShiftX == sx && g_vpShiftY == sy))) return;
     CpuProf::Drv cpd(gameJustSet, CpuProf::kHkRSSetVp);   // phase 31: the game's own viewport call (from hkRSSetViewports)
@@ -8421,6 +8464,103 @@ void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
         oRSSetViewports(ctx, g_gameVpN, g_gameVp);
     }
     g_vpShifted = shift; g_vpShiftX = sx; g_vpShiftY = sy; g_vpOver = over;
+}
+
+// ---- phase 78: the lighting pass's FULL-SCREEN draws get the G-buffer's jitter (dlaa.ini light_fs_jitter, default 1) ----------
+// REPORT (ATS flat, DLSS 2880x2160 -> 3840x2160, 2026-10-28, OBS video + RenderDoc frame1890): a sunlit-but-penumbra shed roof
+// flickers dark while the mod jitters (Shift+F11 off: steady). CAUSE: the deferred sun light is a full-screen Draw(3) of the
+// lighting bind (EID 19329, PS R188). It fetches the G-buffer with `ld` at ftoi(uv * size) (point) and rebuilds the position as
+// viewZ * (uv * scale + offset, 1), uv = the full-screen triangle's interpolated UV = the UNSHIFTED pixel centre -- while the
+// G-buffer texel was rasterised with the jitter. On the grazing roof (0.275 m of view z per row) a +-0.46 px y shift moves the
+// rebuilt point +-0.13 m, so the shadow lookup (cascades + a world-projected dither) lands elsewhere in the penumbra each phase
+// (luma 96-99 vs 88-91 with the y-shift sign). Until phase 78 every Draw of the lighting bind kept the game's viewport (phase 55).
+// FIX (hkDraw): a full-screen Draw (3 / 4 vertices, viewport depth 0..1) of the main lighting bind (or of the open jittered mirror
+// view's, g_mirLight) with the jitter live gets viewport 0 = the game's + the G-buffer's shift (g_jx / g_jy; mirror: g_mirShX /
+// g_mirShY) at the game's W x H -- NO overscan (ReconcileViewports with g_lightFsShift). UV at pixel p = (p + 0.5 - s) / W: the
+// ray now matches the geometry the G-buffer stored in texel p, and ftoi(uv * W) = floor(p + 0.5 - s) = p for every |s| < 0.5, so
+// the point fetch still reads texel p. The overscan viewport would scale uv by W / (W + 1) and read the wrong texel toward the far
+// edge (phase 25). Price of W x H: the phase-23 edge rule -- a negative shift leaves the LAST column / row unrasterised; that edge
+// is drawn again right after with the game's own viewport, scissored to exactly those pixels (LightFsEdgeFill), so every pixel is
+// written once (additive light blends stay correct). Restore: g_lightFsShift = false + ReconcileViewports after the Draw = the
+// game's viewport again (the lighting bind is unshifted between draws, phase 55).
+struct LightFsRsEnt { ID3D11RasterizerState* key; ID3D11RasterizerState* clone; };   // key: the game's state (ref held; null = default)
+constexpr int kLightFsRsMax = 64;                        // as phase 55 (kLightCacheMax); full = one WARNING, the edge then stays unlit
+LightFsRsEnt g_lightFsRs[kLightFsRsMax];
+int          g_lightFsRsN = 0;
+
+// The scissor-enabled twin of the game's rasterizer state `rs` (null = the D3D11 default state); null when it cannot be made
+// (the failure is cached too: no create per draw).
+ID3D11RasterizerState* LightFsScissorRs(ID3D11DeviceContext* ctx, ID3D11RasterizerState* rs) {
+    for (int i = 0; i < g_lightFsRsN; ++i) if (g_lightFsRs[i].key == rs) return g_lightFsRs[i].clone;
+    if (g_lightFsRsN >= kLightFsRsMax) {
+        static bool warned = false;
+        if (!warned) { warned = true; LogWarn("lighting full-screen jitter (phase 78): WARNING scissor twin cache full (%d game rasterizer states) -- "
+                                              "the edge re-draw is skipped for new states (a 1 px unlit edge on negative-shift frames)", kLightFsRsMax); }
+        return nullptr;
+    }
+    D3D11_RASTERIZER_DESC d{};
+    if (rs) rs->GetDesc(&d);
+    else { d.FillMode = D3D11_FILL_SOLID; d.CullMode = D3D11_CULL_BACK; d.DepthClipEnable = TRUE; }
+    d.ScissorEnable = TRUE;
+    ID3D11Device* dev = nullptr;
+    ctx->GetDevice(&dev);
+    ID3D11RasterizerState* c = nullptr;
+    if (!dev || FAILED(dev->CreateRasterizerState(&d, &c))) c = nullptr;
+    if (dev) dev->Release();
+    if (!c) Log("lighting full-screen jitter (phase 78): WARNING -- the scissor twin of a rasterizer state could not be created; "
+                "the far edge of a shifted full-screen light draw stays unlit on negative-shift frames");
+    if (rs) rs->AddRef();                                  // the key stays alive (no pointer reuse)
+    g_lightFsRs[g_lightFsRsN++] = { rs, c };
+    return c;
+}
+
+void LightFsOnContextReset() {
+    for (int i = 0; i < g_lightFsRsN; ++i) {
+        if (g_lightFsRs[i].key) g_lightFsRs[i].key->Release();
+        if (g_lightFsRs[i].clone) g_lightFsRs[i].clone->Release();
+    }
+    g_lightFsRsN = 0;
+    g_lightFsShift = false;
+}
+
+// After the game's full-screen Draw ran with the shifted W x H viewport (hkDraw, g_vpShifted): the far column / row that viewport
+// did not cover (floor(TopLeft + shift + size) < floor(TopLeft + size): a negative shift) is drawn again with the game's OWN
+// viewport, scissored to exactly those pixels (column: full height; row: left of the column, so the corner is drawn once). The
+// game's scissor (when its rasterizer state enables one) is intersected; else a scissor twin of its state is bound for the fill.
+// Leaves the game's own viewport issued (g_vpShifted = false) and the game's rasterizer state + scissor rects restored. No-op
+// (nothing touched) when no edge was lost.
+void LightFsEdgeFill(ID3D11DeviceContext* ctx, UINT vertexCount, UINT startVertex) {
+    D3D11_RECT r[2];
+    const int nr = LightFs::EdgeRects(g_gameVp[0], g_vpShiftX, g_vpShiftY, r);   // (src/light_fs.h; tests/light_fs_test.cpp)
+    if (!nr) return;
+    ID3D11RasterizerState* rs = nullptr;
+    ctx->RSGetState(&rs);                                  // (+1 ref)
+    D3D11_RASTERIZER_DESC rd{};
+    if (rs) rs->GetDesc(&rd);
+    const bool gameScissor = rs && rd.ScissorEnable;
+    D3D11_RECT sc[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
+    UINT ns = 0;
+    ctx->RSGetScissorRects(&ns, nullptr);                  // count first, then the rects
+    if (ns > D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE) ns = D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
+    if (ns) ctx->RSGetScissorRects(&ns, sc);
+    ID3D11RasterizerState* twin = gameScissor ? nullptr : LightFsScissorRs(ctx, rs);
+    if (gameScissor || twin) {
+        oRSSetViewports(ctx, g_gameVpN, g_gameVp);         // the game's own viewport (= what an unshifted Draw rasterises)
+        g_vpShifted = false; g_vpOver = false;
+        if (twin) ctx->RSSetState(twin);
+        for (int i = 0; i < nr; ++i) {
+            D3D11_RECT e = r[i];
+            if (gameScissor) {                             // the game's own scissor still limits the draw
+                if (!ns || !LightFs::Clip(e, sc[0])) continue;   // (scissor on, no rect bound = nothing is drawn)
+            }
+            ctx->RSSetScissorRects(1, &e);
+            oDraw(ctx, vertexCount, startVertex);          // (the original: the game's Draw again, not through hkDraw)
+            ++g_cLightFsEdge;
+        }
+        ctx->RSSetScissorRects(ns, ns ? sc : nullptr);
+        if (twin) ctx->RSSetState(rs);
+    }
+    if (rs) rs->Release();
 }
 
 void STDMETHODCALLTYPE hkRSSetViewports(ID3D11DeviceContext* ctx, UINT n, const D3D11_VIEWPORT* vps) {
@@ -9407,6 +9547,619 @@ HRESULT STDMETHODCALLTYPE hkCreateVertexShader(ID3D11Device* dev, const void* co
     return hr;
 }
 
+// ---- phase 77: COVERAGE-PRESERVING ALPHA MIPS for cut-out BC3 textures (cutout_mips.h; dlaa.ini cutout_mips, startup only) ----
+// The game uploads its textures mip by mip (measured 2026-10-28, ATS): CreateTexture2D with D3D11_USAGE_DEFAULT and NO initial
+// data, then on the same loader thread the IMMEDIATE context's UpdateSubresource1 (ID3D11DeviceContext1 vtable 116) for sub 0,
+// 1 .. N-1 in order (DstSubresource = the mip, array size 1, whole mip, row pitch = bytes per block row). No UpdateSubresource /
+// Copy* / deferred-context uploads into BC3. So: mip 0 arrives -> CutoutMips::Analyse decides + builds our binary alpha for every
+// smaller mip (a per-texture record) -> mip L arrives -> CutoutMips::Replace: the game's blocks into a scratch copy with our
+// alpha half (when the game's own mip lost coverage), the original is called with the scratch pointer. UpdateSubresource
+// (vtable 48) is hooked the same way for safety (t_cutoutIn: one pass when one calls the other inside d3d11.dll).
+// log_level 4, also with cutout_mips = 0: the Texture2D mip-0 uploads are counted per DXGI format (BC1 / BC3 / BC7 ...) for the
+// stats line -- do cut-outs come as BC1 (1-bit alpha) or BC7 too? The per-call cost while cutout_mips = 0 and log_level < 4:
+// one int read + one atomic load.
+int g_cutoutMips = 0;                                    // dlaa.ini cutout_mips 0/1 (default 0), startup only: no menu row, no key
+int g_cutoutMaxDim = 4096;                               // dlaa.ini cutout_max_dim 64..4096 (default 4096, phase 77c): bigger ones are left alone
+// phase 77c: the analysis runs on a worker thread (no CPU budget any more); the loader thread only hashes + copies the mips.
+typedef void (STDMETHODCALLTYPE* UpdateSubresource_t)(ID3D11DeviceContext*, ID3D11Resource*, UINT, const D3D11_BOX*, const void*,
+                                                       UINT, UINT);
+typedef void (STDMETHODCALLTYPE* UpdateSubresource1_t)(ID3D11DeviceContext1*, ID3D11Resource*, UINT, const D3D11_BOX*,
+                                                        const void*, UINT, UINT, UINT);
+UpdateSubresource_t  oUpdateSubresource  = nullptr;
+UpdateSubresource1_t oUpdateSubresource1 = nullptr;
+namespace Cutout {
+thread_local bool t_cutoutIn = false;                    // inside our hook (UpdateSubresource -> UpdateSubresource1 inside d3d11)
+enum Fmt { kFBc1, kFBc2, kFBc3, kFBc4, kFBc5, kFBc6, kFBc7, kFRgba8, kFOther, kFCount };
+const char* const kFmtName[kFCount] = { "BC1", "BC2", "BC3", "BC4", "BC5", "BC6H", "BC7", "RGBA8", "other" };
+std::atomic<uint32_t> g_fmtCount[kFCount];               // Texture2D mip-0 uploads per format (counted at log_level 4 only)
+std::atomic<uint32_t> g_tex0Uploads{0};
+inline int FmtBucket(DXGI_FORMAT f) {
+    switch (f) {
+    case DXGI_FORMAT_BC1_TYPELESS: case DXGI_FORMAT_BC1_UNORM: case DXGI_FORMAT_BC1_UNORM_SRGB: return kFBc1;
+    case DXGI_FORMAT_BC2_TYPELESS: case DXGI_FORMAT_BC2_UNORM: case DXGI_FORMAT_BC2_UNORM_SRGB: return kFBc2;
+    case DXGI_FORMAT_BC3_TYPELESS: case DXGI_FORMAT_BC3_UNORM: case DXGI_FORMAT_BC3_UNORM_SRGB: return kFBc3;
+    case DXGI_FORMAT_BC4_TYPELESS: case DXGI_FORMAT_BC4_UNORM: case DXGI_FORMAT_BC4_SNORM: return kFBc4;
+    case DXGI_FORMAT_BC5_TYPELESS: case DXGI_FORMAT_BC5_UNORM: case DXGI_FORMAT_BC5_SNORM: return kFBc5;
+    case DXGI_FORMAT_BC6H_TYPELESS: case DXGI_FORMAT_BC6H_UF16: case DXGI_FORMAT_BC6H_SF16: return kFBc6;
+    case DXGI_FORMAT_BC7_TYPELESS: case DXGI_FORMAT_BC7_UNORM: case DXGI_FORMAT_BC7_UNORM_SRGB: return kFBc7;
+    case DXGI_FORMAT_R8G8B8A8_TYPELESS: case DXGI_FORMAT_R8G8B8A8_UNORM: case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+    case DXGI_FORMAT_B8G8R8A8_TYPELESS: case DXGI_FORMAT_B8G8R8A8_UNORM: case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: return kFRgba8;
+    default: return kFOther;
+    }
+}
+// phase 77c (77b drive 2026-10-29: only 182 of 13475 BC3 textures patched -- 2980 "size" (the ATS fence itself is 128 x 2048,
+// over the old 1024 cap) + 315 cut by the 8 ms CPU budget): the loader thread now only hashes mip 0 (the cache key) and COPIES
+// the mips; the analysis + the rebuild run on one worker thread at below-normal priority (no CPU budget, cap 4096). The worker
+// makes no D3D call: its result (a Done) goes back to the render thread (Drain, from the draw hooks), which checks the
+// texture's upload number (kSeqTag: a new mip 0 meanwhile = stale, dropped), tags it (kCutTag, 77b: our mips go up at its
+// first discard draw) and releases the reference the job held. Every Set/GetPrivateData runs under g_mx (Fable audit: the
+// device may be SINGLETHREADED; loader + render thread both touch the tags).
+// A texture between its mip 0 and its last mip (the resource pointer + its shape: a reused pointer must match).
+struct Record {
+    std::shared_ptr<const CutoutMips::Plan> plan;        // a cache hit (patched); null = the worker analyses mip[0]
+    UINT     w = 0, h = 0, mips = 0;
+    DXGI_FORMAT fmt = DXGI_FORMAT_UNKNOWN;
+    uint64_t tick = 0;                                   // GetTickCount64 at mip 0
+    uint64_t seq = 0;                                    // kSeqTag at mip 0
+    uint64_t key = 0;                                    // the cache key (HashAlpha of mip 0)
+    std::vector<std::vector<uint8_t>> mip;               // the GAME's blocks per mip (copies; mip 0 only for an analysis)
+    std::vector<UINT> rp;
+    size_t   bytes = 0;
+};
+// phase 77b (user test 2026-10-29: sparkles on CARS and black TYRES from the day phase 77 went on, gone with cutout_mips = 0):
+// the binary-alpha test also matches BC3 textures whose alpha is NOT coverage (a gloss / mask channel of a car or tyre texture),
+// and rebuilding their far mips speckles them. So a patched texture now keeps the GAME's mips at load, and ours go in (one
+// UpdateSubresource per mip, immediate context, render thread) only when the texture is first seen bound to a pixel shader
+// that DISCARDS (LodPsLookup class 2: the alpha really is a cut-out). Identity: the texture carries kCutTag (private data =
+// the id of its Pending entry); a new mip 0 removes the tag, so a re-upload never gets stale blocks.
+// {6F0C5E1B-77B0-4C2A-9D3E-5A1B7C0D9E42}
+const GUID kCutTag = { 0x6f0c5e1b, 0x77b0, 0x4c2a, { 0x9d, 0x3e, 0x5a, 0x1b, 0x7c, 0x0d, 0x9e, 0x42 } };
+// {6F0C5E1C-77C0-4C2A-9D3E-5A1B7C0D9E43} phase 77c: the upload number of the texture's last mip 0
+const GUID kSeqTag = { 0x6f0c5e1c, 0x77c0, 0x4c2a, { 0x9d, 0x3e, 0x5a, 0x1b, 0x7c, 0x0d, 0x9e, 0x43 } };
+struct Pending {
+    uint64_t id = 0;
+    std::vector<std::vector<uint8_t>> mip;
+    std::vector<UINT> rp;
+    size_t   bytes = 0;
+};
+constexpr size_t kPendMaxB = 64ull << 20;               // waiting blocks: 64 MB, oldest out (a texture never drawn see-through)
+std::vector<Pending> g_pending;                          // g_mx
+size_t   g_pendBytes = 0;
+uint64_t g_pendNextId = 1;
+std::atomic<uint32_t> g_pendN{0};                        // entries in g_pending (the draw hooks' one atomic load)
+std::atomic<uint32_t> g_pendGen{0};                      // +1 per new entry (the draw side's SRV memo is cleared)
+uint32_t g_applied = 0, g_evicted = 0, g_deferred = 0;   // g_mx (stats)
+// phase 77c: the worker queue (g_mx) + the finished jobs for the render thread (g_mx)
+struct Job  { ID3D11Resource* res = nullptr; Record r; };                 // res: one reference of ours
+struct Done { ID3D11Resource* res = nullptr; uint64_t seq = 0; Pending p; };
+constexpr size_t kQueueMaxB = 256ull << 20;              // copied game blocks waiting for the worker: 256 MB ...
+constexpr size_t kQueueMaxN = 1024;                      // ... and 1024 textures (over: that texture keeps the game's mips;
+                                                         // 64 dropped 133 textures at a world load, drive 2026-10-29 16:55)
+std::vector<Job>  g_jobs;
+size_t            g_jobBytes = 0;
+std::vector<Done> g_done;
+std::atomic<uint32_t> g_doneN{0};                        // entries in g_done (the draw hooks' gate, with g_pendN)
+uint64_t g_seqNext = 1;
+uint32_t g_stale = 0;                                    // g_mx: finished jobs whose texture got a new mip 0 meanwhile
+// the worker sleeps on a Win32 event (no CRT destructor at exit; a thread parked in a wait is ended by ExitProcess before
+// DLL_PROCESS_DETACH). A FreeLibrary unload while it runs is not handled (the injector is never unloaded before exit).
+HANDLE g_jobEvent = nullptr;
+std::once_flag g_workerOnce;
+constexpr size_t   kMaxRecords    = 64;                  // one loader thread uploads one texture at a time: a few at most
+constexpr uint64_t kRecordMaxMs   = 10000;               // mips later than this after mip 0: not trusted (pointer reuse)
+constexpr size_t   kCacheMaxB     = 64ull << 20;         // the rebuild cache (FNV-1a of the mip-0 alpha): 64 MB ...
+constexpr size_t   kCacheMaxN     = 4096;                // ... and 4096 entries, oldest out first
+constexpr unsigned kDecisionLines = 200;                 // level-4 lines, one per mip-0 decision
+std::mutex g_mx;                                         // records, cache, queue, stats, tags (BC3 uploads only: the loader's rate)
+std::vector<std::pair<ID3D11Resource*, Record>> g_records;
+struct CacheEnt { uint64_t key; std::shared_ptr<const CutoutMips::Plan> plan; size_t bytes; };
+std::vector<CacheEnt> g_cache;                           // FIFO (a linear find per BC3 mip 0: ~1 us at 4096 entries)
+size_t g_cacheBytes = 0;
+struct Stats {
+    uint32_t seen = 0, patched = 0, why[CutoutMips::kReasonCount] = {}, cacheHits = 0, mipsReplaced = 0, mipsKept = 0, lines = 0;
+    uint32_t queueFull = 0;                               // of why[kSize]: the worker queue was full (not cached)
+    uint32_t szArray = 0, szChain = 0, szDim = 0, szBox = 0;   // of why[kSize]: array / not the full mip chain / over the cap / partial box
+    double   cpuMs = 0.0, cpuMaxMs = 0.0;                 // the worker's analysis + rebuild time
+    double   upMaxMs = 0.0;                               // the loader thread's longest mip-0 hash + copy
+    bool     firstLogged = false;
+} g_st;
+
+// the periodic line (level 4; feature_check.py reads it). Never waits for g_mx (process exit).
+void StatsLine(const char* why) {
+    if (LogLevel() < 4) return;
+    std::unique_lock<std::mutex> lk(g_mx, std::try_to_lock);
+    if (!lk.owns_lock()) return;
+    char fm[256];
+    size_t u = 0;
+    fm[0] = 0;
+    for (int i = 0; i < kFCount && u < sizeof(fm); ++i)
+        u += (size_t)snprintf(fm + u, sizeof(fm) - u, "%s%s %u", i ? ", " : "", kFmtName[i], g_fmtCount[i].load(std::memory_order_relaxed));
+    const Stats& s = g_st;
+    LogDbg("cut-out mips%s: seen %u patched %u skipped %u (soft %u, coverage %u, no loss %u, size %u, queue full %u) cache hits %u "
+           "worker cpu total %.1f ms max %.2f ms, loader max %.2f ms | size: array %u, not full mip chain %u, over %d px %u, partial "
+           "box %u | mips replaced %u, left to the game %u | worker queue %u (%.1f MB), stale %u | phase 77b: waiting for a "
+           "see-through draw %u (%.1f MB), applied %u, dropped %u of %u | uploads by format (Texture2D mip 0, %s): %s",
+           g_cutoutMips ? "" : " (off: upload counts only)", s.seen, s.patched,
+           s.why[CutoutMips::kSoft] + s.why[CutoutMips::kCoverage] + s.why[CutoutMips::kNoLoss] + s.why[CutoutMips::kSize],
+           s.why[CutoutMips::kSoft], s.why[CutoutMips::kCoverage], s.why[CutoutMips::kNoLoss], s.why[CutoutMips::kSize], s.queueFull,
+           s.cacheHits, s.cpuMs, s.cpuMaxMs, s.upMaxMs, s.szArray, s.szChain, g_cutoutMaxDim, s.szDim, s.szBox, s.mipsReplaced,
+           s.mipsKept, (unsigned)g_jobs.size(), (double)g_jobBytes / (1024.0 * 1024.0), g_stale, (unsigned)g_pending.size(),
+           (double)g_pendBytes / (1024.0 * 1024.0), g_applied, g_evicted, g_deferred, why, fm);
+}
+
+// one level-4 line per decision (the first kDecisionLines)
+void DecisionLine(UINT w, UINT h, UINT mips, UINT arr, int fmt, const char* boxNote, const CutoutMips::Plan& p, const char* reason,
+                  double ms, bool hit, uint64_t key) {
+    const unsigned hash32 = (unsigned)(key ^ (key >> 32));
+    if (p.reason == CutoutMips::kPatched || p.reason == CutoutMips::kNoLoss)
+        LogDbg("cut-out mips: %ux%u mips %u fmt %d hash %08x cov %.1f%% soft %.1f%% game rule worst %.2f -> %s, %.2f ms%s",
+               w, h, mips, fmt, hash32, 100.0 * p.cov0, 100.0 * p.soft, p.minRatio, CutoutMips::ReasonName(p.reason), ms,
+               hit ? " (cache hit)" : "");
+    else
+        LogDbg("cut-out mips: %ux%u mips %u array %u fmt %d%s -> skip: %s (cov %.1f%% soft %.1f%%), %.2f ms%s", w, h, mips, arr, fmt,
+               boxNote, reason, 100.0 * p.cov0, 100.0 * p.soft, ms, hit ? " (cache hit)" : "");
+}
+
+void WorkerMain();
+void StartWorker() {                                     // g_mx held (the event exists before the first job is pushed)
+    std::call_once(g_workerOnce, [] {
+        g_jobEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        HANDLE t = g_jobEvent ? CreateThread(nullptr, 0, [](LPVOID) -> DWORD { WorkerMain(); return 0; }, nullptr, 0, nullptr) : nullptr;
+        if (t) { SetThreadPriority(t, THREAD_PRIORITY_BELOW_NORMAL); CloseHandle(t); }
+        Log("cut-out mips (phase 77c): worker thread %s", t ? "started (analysis + rebuild off the loader thread)" : "FAILED");
+    });
+}
+
+// the bytes the game's upload really holds: full pitch for every block row but the last, which is only its blocks long
+// (crash 2026-10-29 19:55 ATS VR: rp * rows read past the game's buffer when rp > the row's bytes -> access violation)
+size_t SrcBytes(UINT rp, UINT w, UINT h) {
+    const size_t bh = CutoutMips::Blocks(h), row = (size_t)CutoutMips::Blocks(w) * 16;
+    return bh ? (size_t)rp * (bh - 1) + row : 0;
+}
+
+// mip 0 of a BC3 Texture2D (g_mx NOT held): the upload number, the cache, a record when it may be patched
+void OnMip0(ID3D11Resource* dst, const D3D11_TEXTURE2D_DESC& d, const D3D11_BOX* box, const void* src, UINT rp) {
+    LARGE_INTEGER t0, t1;
+    QueryPerformanceCounter(&t0);
+    uint64_t seq;
+    {
+        std::lock_guard<std::mutex> lk(g_mx);
+        seq = g_seqNext++;
+        dst->SetPrivateData(kCutTag, 0, nullptr);        // phase 77b: new content -> no waiting blocks of an older upload apply
+        dst->SetPrivateData(kSeqTag, sizeof(seq), &seq); // phase 77c: a job of an older upload still on the worker is dropped
+        // a new mip 0 for this pointer drops its old record (a re-upload / a reused pointer)
+        for (size_t i = 0; i < g_records.size(); ++i)
+            if (g_records[i].first == dst) { g_records.erase(g_records.begin() + i); break; }
+    }
+    const bool shape = !box && src && CutoutMips::ShapeOk(d.Width, d.Height, d.MipLevels, d.ArraySize) &&
+                       d.Width <= (UINT)g_cutoutMaxDim && d.Height <= (UINT)g_cutoutMaxDim && rp >= CutoutMips::Blocks(d.Width) * 16;
+    std::shared_ptr<const CutoutMips::Plan> plan;
+    bool hit = false;
+    uint64_t key = 0;
+    if (shape) {
+        key = CutoutMips::HashAlpha(static_cast<const uint8_t*>(src), rp, d.Width, d.Height, d.MipLevels);
+        std::lock_guard<std::mutex> lk(g_mx);
+        for (const CacheEnt& e : g_cache) if (e.key == key) { plan = e.plan; hit = true; break; }
+    }
+    if (!shape || (hit && plan->reason != CutoutMips::kPatched)) {   // decided now: no copies, no job
+        CutoutMips::Plan rej;
+        if (!shape) { rej.reason = CutoutMips::kSize; rej.w = d.Width; rej.h = d.Height; rej.mips = d.MipLevels; }
+        const CutoutMips::Plan& p = shape ? *plan : rej;
+        QueryPerformanceCounter(&t1);
+        const double ms = 1000.0 * (double)(t1.QuadPart - t0.QuadPart) / (double)g_qpcFreq;
+        bool line = false, periodic = false;
+        {
+            std::lock_guard<std::mutex> lk(g_mx);
+            Stats& s = g_st;
+            ++s.seen;
+            ++s.why[p.reason];
+            if (!shape) {
+                if (d.ArraySize != 1) ++s.szArray;
+                else if (box) ++s.szBox;
+                else if (d.Width > (UINT)g_cutoutMaxDim || d.Height > (UINT)g_cutoutMaxDim) ++s.szDim;
+                else ++s.szChain;                        // not the full chain, under 64 px, or no data / short pitch
+            }
+            s.cacheHits += hit ? 1u : 0u;
+            if (ms > s.upMaxMs) s.upMaxMs = ms;
+            line = s.lines < kDecisionLines;
+            if (line) ++s.lines;
+            periodic = (s.seen % 500) == 0;
+        }
+        if (line && LogLevel() >= 4)
+            DecisionLine(d.Width, d.Height, d.MipLevels, d.ArraySize, (int)d.Format, box ? " partial box" : "", p,
+                         CutoutMips::ReasonName(p.reason), ms, hit, key);
+        if (periodic) StatsLine("every 500 BC3 textures");
+        return;
+    }
+    Record r;
+    r.plan = hit ? plan : nullptr;
+    r.w = d.Width; r.h = d.Height; r.mips = d.MipLevels; r.fmt = d.Format; r.tick = GetTickCount64(); r.seq = seq; r.key = key;
+    r.mip.resize(d.MipLevels);
+    r.rp.resize(d.MipLevels, 0);
+    if (!hit) {                                          // the worker analyses this copy of mip 0
+        const uint8_t* s = static_cast<const uint8_t*>(src);
+        r.mip[0].assign(s, s + SrcBytes(rp, d.Width, d.Height));
+        r.rp[0] = rp;
+        r.bytes = r.mip[0].size();
+    }
+    QueryPerformanceCounter(&t1);
+    const double ms = 1000.0 * (double)(t1.QuadPart - t0.QuadPart) / (double)g_qpcFreq;
+    bool periodic = false;
+    {
+        std::lock_guard<std::mutex> lk(g_mx);
+        if (g_records.size() >= kMaxRecords) g_records.erase(g_records.begin());   // oldest out
+        g_records.emplace_back(dst, std::move(r));
+        Stats& s = g_st;
+        ++s.seen;
+        if (hit) { ++s.patched; ++s.cacheHits; }         // a miss is counted by the worker when it decides
+        if (ms > s.upMaxMs) s.upMaxMs = ms;
+        periodic = (s.seen % 500) == 0;
+    }
+    if (periodic) StatsLine("every 500 BC3 textures");
+}
+
+// g_mx held: record i is complete (its last mip arrived) -> a job for the worker (the resource AddRef'd), or nothing
+void FinishRecord(ID3D11Resource* dst, size_t i) {
+    Record& r = g_records[i].second;
+    bool any = false;
+    for (size_t L = 1; L < r.mip.size(); ++L) if (!r.mip[L].empty()) { any = true; break; }
+    if (any) {
+        if (g_jobs.size() >= kQueueMaxN || g_jobBytes + r.bytes > kQueueMaxB) {
+            ++g_st.queueFull;                            // that texture keeps the game's mips (a miss is not cached: a reload retries)
+            if (!r.plan) ++g_st.why[CutoutMips::kSize];
+        } else {
+            StartWorker();
+            dst->AddRef();                               // held until the render thread drains the Done
+            Job j;
+            j.res = dst;
+            j.r = std::move(r);
+            g_jobBytes += j.r.bytes;
+            g_jobs.push_back(std::move(j));
+            if (g_jobEvent) SetEvent(g_jobEvent);
+        }
+    }
+    g_records.erase(g_records.begin() + i);
+}
+
+// mip L >= 1 of a BC3 Texture2D: phase 77c -- copy the game's blocks into the record (the upload always carries the game's mip)
+void OnMipL(ID3D11Resource* dst, const D3D11_TEXTURE2D_DESC& d, UINT sub, const D3D11_BOX* box, const void* src, UINT rp) {
+    bool want = false;
+    {
+        std::lock_guard<std::mutex> lk(g_mx);
+        if (g_records.empty()) return;
+        size_t i = 0;
+        for (; i < g_records.size(); ++i) if (g_records[i].first == dst) break;
+        if (i == g_records.size()) return;
+        const Record& r = g_records[i].second;
+        if (r.w != d.Width || r.h != d.Height || r.mips != d.MipLevels || r.fmt != d.Format ||
+            GetTickCount64() - r.tick > kRecordMaxMs) {
+            g_records.erase(g_records.begin() + i);      // another texture at the same address, or a stale record
+            return;
+        }
+        want = !box && src && sub < r.mips && (!r.plan || ((int)sub < CutoutMips::kMaxMips && !r.plan->alpha[sub].empty()));
+        if (!want) {                                     // nothing to copy: the last mip still completes the record
+            if (sub + 1 >= r.mips) FinishRecord(dst, i);
+            return;
+        }
+    }
+    const uint8_t* s = static_cast<const uint8_t*>(src);
+    std::vector<uint8_t> copy(s, s + SrcBytes(rp, CutoutMips::MipDim(d.Width, (int)sub), CutoutMips::MipDim(d.Height, (int)sub)));
+    std::lock_guard<std::mutex> lk(g_mx);
+    for (size_t i = 0; i < g_records.size(); ++i) {      // the record again (still ours: the same loader thread, in order)
+        if (g_records[i].first != dst) continue;
+        Record& r = g_records[i].second;
+        r.bytes += copy.size();
+        r.mip[sub] = std::move(copy);
+        r.rp[sub] = rp;
+        if (sub + 1 >= r.mips) FinishRecord(dst, i);     // the last mip: to the worker
+        break;
+    }
+}
+
+// the worker: one job at a time -- analysis (a cache miss), the rebuild per mip, the Done for the render thread. No D3D call.
+void Work(Job& j) {
+    Record& r = j.r;
+    LARGE_INTEGER t0, t1;
+    QueryPerformanceCounter(&t0);
+    std::shared_ptr<const CutoutMips::Plan> plan = r.plan;
+    const bool hit = plan != nullptr;
+    if (!plan) {
+        auto p = std::make_shared<CutoutMips::Plan>();
+        CutoutMips::Analyse(r.mip[0].data(), r.rp[0], r.w, r.h, r.mips, *p);
+        plan = p;
+        std::vector<uint8_t>().swap(r.mip[0]);
+    }
+    Done dn;
+    dn.res = j.res;
+    dn.seq = r.seq;
+    uint32_t rep = 0, kept = 0;
+    if (plan->reason == CutoutMips::kPatched) {
+        dn.p.mip.resize(r.mips);
+        dn.p.rp.resize(r.mips, 0);
+        for (UINT L = 1; L < r.mips; ++L) {
+            if (r.mip[L].empty()) continue;
+            std::vector<uint8_t> out(r.mip[L].size());
+            if (CutoutMips::Replace(*plan, (int)L, r.mip[L].data(), r.rp[L], out.data())) {
+                dn.p.bytes += out.size();
+                dn.p.rp[L] = r.rp[L];
+                dn.p.mip[L] = std::move(out);
+                ++rep;
+            } else ++kept;
+            std::vector<uint8_t>().swap(r.mip[L]);
+        }
+    }
+    QueryPerformanceCounter(&t1);
+    const double ms = 1000.0 * (double)(t1.QuadPart - t0.QuadPart) / (double)g_qpcFreq;
+    const CutoutMips::Plan& p = *plan;
+    bool first = false, line = false;
+    {
+        std::lock_guard<std::mutex> lk(g_mx);
+        if (!hit) {                                      // cache it (the rejections too: a reload then costs one hash)
+            const size_t b = p.Bytes();
+            g_cache.push_back({ r.key, plan, b });
+            g_cacheBytes += b;
+            while (!g_cache.empty() && (g_cache.size() > kCacheMaxN || g_cacheBytes > kCacheMaxB)) {
+                g_cacheBytes -= g_cache.front().bytes;
+                g_cache.erase(g_cache.begin());
+            }
+            if (p.reason == CutoutMips::kPatched) ++g_st.patched; else ++g_st.why[p.reason];
+            line = g_st.lines < kDecisionLines;
+            if (line) ++g_st.lines;
+        }
+        Stats& s = g_st;
+        s.mipsReplaced += rep;
+        s.mipsKept += kept;
+        s.cpuMs += ms;
+        if (ms > s.cpuMaxMs) s.cpuMaxMs = ms;
+        if (p.reason == CutoutMips::kPatched && !s.firstLogged) { s.firstLogged = true; first = true; }
+        g_done.push_back(std::move(dn));                 // always: the render thread releases the reference
+        g_doneN.store((uint32_t)g_done.size(), std::memory_order_release);
+    }
+    const unsigned hash32 = (unsigned)(r.key ^ (r.key >> 32));
+    if (first) {                                         // level 3: the one proof line (feature_check.py)
+        char g[96], o[96];
+        size_t ug = 0, uo = 0;
+        g[0] = o[0] = 0;
+        for (int L = 2; L <= 7 && L < (int)p.mips; ++L) {
+            const double n = (double)CutoutMips::MipDim(p.w, L) * CutoutMips::MipDim(p.h, L);
+            ug += (size_t)snprintf(g + ug, sizeof(g) - ug, "%s%.1f", L > 2 ? "/" : "", 100.0 * p.gameRule[L]);
+            uo += (size_t)snprintf(o + uo, sizeof(o) - uo, "%s%.1f", L > 2 ? "/" : "", 100.0 * p.target[L] / n);
+        }
+        Log("cut-out mips: first texture rebuilt %ux%u mips %u fmt %d hash %08x cov mip0 %.1f%% game rule mips2..7 %s %% -> ours "
+            "%s %%, %.2f ms (worker)%s", p.w, p.h, p.mips, (int)r.fmt, hash32, 100.0 * p.cov0, g, o, ms, hit ? " (cache hit)" : "");
+    }
+    if (line && LogLevel() >= 4)
+        DecisionLine(r.w, r.h, r.mips, 1, (int)r.fmt, "", p, CutoutMips::ReasonName(p.reason), ms, hit, r.key);
+}
+void WorkerMain() {
+    for (;;) {
+        Job j;
+        bool got = false;
+        {
+            std::lock_guard<std::mutex> lk(g_mx);
+            if (!g_jobs.empty()) {
+                j = std::move(g_jobs.front());
+                g_jobs.erase(g_jobs.begin());
+                g_jobBytes -= j.r.bytes;
+                got = true;
+            }
+        }
+        if (!got) { WaitForSingleObject(g_jobEvent, INFINITE); continue; }
+        try { Work(j); }
+        catch (...) {                                    // bad_alloc: still hand the reference back (an empty Done)
+            try {
+                std::lock_guard<std::mutex> lk(g_mx);
+                Done dn;
+                dn.res = j.res;
+                g_done.push_back(std::move(dn));
+                g_doneN.store((uint32_t)g_done.size(), std::memory_order_release);
+            } catch (...) {}                             // no memory even for that: the reference leaks (one texture)
+        }
+    }
+}
+
+// render thread (draw hooks, game context): the finished jobs -> tag the texture (77b waits for its discard draw) + release
+bool g_flagsLogged = false;
+void Drain() {
+    std::vector<Done> d;
+    {
+        std::lock_guard<std::mutex> lk(g_mx);
+        d.swap(g_done);
+        g_doneN.store(0, std::memory_order_release);
+    }
+    for (Done& x : d) {
+        if (!g_flagsLogged) {                            // once: the device threading mode (Fable audit)
+            g_flagsLogged = true;
+            ID3D11Device* dev = nullptr;
+            x.res->GetDevice(&dev);
+            if (dev) {
+                const UINT f = dev->GetCreationFlags();
+                Log("cut-out mips (phase 77c): first rebuilt texture handed to the render thread (device flags 0x%x%s)", f,
+                    (f & D3D11_CREATE_DEVICE_SINGLETHREADED) ? " SINGLETHREADED" : "");
+                dev->Release();
+            }
+        }
+        if (x.p.bytes) {
+            std::lock_guard<std::mutex> lk(g_mx);
+            uint64_t seq = 0;
+            UINT sz = sizeof(seq);
+            if (FAILED(x.res->GetPrivateData(kSeqTag, &sz, &seq)) || sz != sizeof(seq) || seq != x.seq) ++g_stale;
+            else {
+                x.p.id = g_pendNextId++;
+                if (SUCCEEDED(x.res->SetPrivateData(kCutTag, sizeof(x.p.id), &x.p.id))) {
+                    g_pendBytes += x.p.bytes;
+                    g_pending.push_back(std::move(x.p));
+                    ++g_deferred;
+                    while (g_pending.size() > 1 && g_pendBytes > kPendMaxB) {   // oldest out (its texture keeps the game's mips)
+                        g_pendBytes -= g_pending.front().bytes;
+                        g_pending.erase(g_pending.begin());
+                        ++g_evicted;
+                    }
+                    g_pendN.store((uint32_t)g_pending.size(), std::memory_order_release);
+                    g_pendGen.fetch_add(1, std::memory_order_release);   // Fable audit: the SRV memo forgets this texture
+                }
+            }
+        }
+        x.res->Release();
+    }
+}
+
+// ---- phase 77b draw side (render thread, game context): a waiting texture bound to a DISCARD pixel shader gets our mips ----
+// Cost while nothing waits: one atomic load per draw. While something waits: per draw of a discard PS, one PSGetShaderResources
+// (slots 0..7) and, per view not seen since the last new entry, one GetResource + GetPrivateData. Views without the tag go into
+// a small memo (cleared when a new texture starts waiting, or when full).
+constexpr uint32_t kSrvMemoSize = 1024;                  // power of two
+const void* g_srvMemo[kSrvMemoSize] = {};
+uint32_t    g_srvMemoN = 0, g_srvMemoGen = 0;
+bool        g_appliedLogged = false;
+inline uint32_t SrvMemoSlot(const void* p) {
+    uint64_t x = (uint64_t)(uintptr_t)p;
+    x ^= x >> 29; x *= 0xBF58476D1CE4E5B9ull; x ^= x >> 32;
+    return (uint32_t)x & (kSrvMemoSize - 1);
+}
+bool SrvMemoHas(const void* p) {
+    for (uint32_t i = SrvMemoSlot(p), n = 0; n < kSrvMemoSize; ++n, i = (i + 1) & (kSrvMemoSize - 1)) {
+        if (g_srvMemo[i] == p) return true;
+        if (!g_srvMemo[i]) return false;
+    }
+    return false;
+}
+void SrvMemoAdd(const void* p) {
+    if (g_srvMemoN >= kSrvMemoSize / 2) { memset(g_srvMemo, 0, sizeof(g_srvMemo)); g_srvMemoN = 0; }
+    for (uint32_t i = SrvMemoSlot(p), n = 0; n < kSrvMemoSize; ++n, i = (i + 1) & (kSrvMemoSize - 1))
+        if (!g_srvMemo[i]) { g_srvMemo[i] = p; ++g_srvMemoN; return; }
+}
+// the tagged texture `res` (id) is drawn see-through: upload our mips, drop the entry and the tag
+void Apply(ID3D11DeviceContext* ctx, ID3D11Resource* res, uint64_t id) {
+    Pending p;
+    bool found = false;
+    {
+        std::lock_guard<std::mutex> lk(g_mx);
+        for (size_t i = 0; i < g_pending.size(); ++i) {
+            if (g_pending[i].id != id) continue;
+            p = std::move(g_pending[i]);
+            g_pendBytes -= p.bytes;
+            g_pending.erase(g_pending.begin() + i);
+            g_pendN.store((uint32_t)g_pending.size(), std::memory_order_release);
+            found = true;
+            break;
+        }
+        res->SetPrivateData(kCutTag, 0, nullptr);        // applied, or its entry was dropped: either way never again (g_mx: 77c)
+    }
+    if (!found) return;
+    UINT mips = 0;
+    t_cutoutIn = true;                                   // our own upload: not analysed again (UpdateSubresource -> ...1 inside d3d11)
+    for (size_t L = 1; L < p.mip.size(); ++L) {
+        if (p.mip[L].empty()) continue;
+        ctx->UpdateSubresource(res, (UINT)L, nullptr, p.mip[L].data(), p.rp[L], 0);   // through our hook: t_cutoutIn passes it on
+        ++mips;
+    }
+    t_cutoutIn = false;
+    bool first = false;
+    {
+        std::lock_guard<std::mutex> lk(g_mx);
+        ++g_applied;
+        if (!g_appliedLogged) { g_appliedLogged = true; first = true; }
+    }
+    if (first)
+        Log("cut-out mips (phase 77b): first texture drawn see-through (pixel shader %p discards) -> our %u mips uploaded now "
+            "(%.1f KB); textures never drawn with a discard keep the game's mips (Present #%llu)", (void*)g_lodPsCur, mips,
+            (double)p.bytes / 1024.0, (unsigned long long)g_frames.load(std::memory_order_relaxed));
+}
+void OnDraw(ID3D11DeviceContext* ctx) {
+    if (LodCurPsClass() != 2) return;                    // only a pixel shader that discards proves the alpha is a cut-out
+    const uint32_t gen = g_pendGen.load(std::memory_order_acquire);
+    if (gen != g_srvMemoGen) { memset(g_srvMemo, 0, sizeof(g_srvMemo)); g_srvMemoN = 0; g_srvMemoGen = gen; }
+    ID3D11ShaderResourceView* v[8] = {};
+    ctx->PSGetShaderResources(0, 8, v);
+    for (ID3D11ShaderResourceView* s : v) {
+        if (!s) continue;
+        if (!SrvMemoHas(s)) {
+            ID3D11Resource* r = nullptr;
+            s->GetResource(&r);
+            uint64_t id = 0;
+            UINT sz = sizeof(id);
+            bool tagged = false;
+            if (r) {
+                std::lock_guard<std::mutex> lk(g_mx);    // phase 77c: every tag access under g_mx
+                tagged = SUCCEEDED(r->GetPrivateData(kCutTag, &sz, &id)) && sz == sizeof(id) && id;
+            }
+            if (tagged) Apply(ctx, r, id);
+            SrvMemoAdd(s);                                // tagged ones are untagged now: no second look either way
+            if (r) r->Release();
+        }
+        s->Release();
+    }
+}
+inline bool Busy() { return g_pendN.load(std::memory_order_relaxed) || g_doneN.load(std::memory_order_relaxed); }
+inline void MaybeOnDraw(ID3D11DeviceContext* ctx) {
+    if (g_doneN.load(std::memory_order_relaxed)) {
+        try { Drain(); } catch (...) {}                  // phase 77c: the worker's finished textures
+    }
+    if (g_pendN.load(std::memory_order_relaxed)) {
+        try { OnDraw(ctx); } catch (...) {}              // no exception (bad_alloc) into the game
+    }
+}
+
+// both hooks: -> the source pointer to pass on (the game's, or our scratch copy)
+const void* OnUpload(ID3D11Resource* dst, UINT sub, const D3D11_BOX* box, const void* src, UINT rp, std::vector<uint8_t>& scratch) {
+    if (!dst) return src;
+    D3D11_RESOURCE_DIMENSION dim = D3D11_RESOURCE_DIMENSION_UNKNOWN;
+    dst->GetType(&dim);
+    if (dim != D3D11_RESOURCE_DIMENSION_TEXTURE2D) return src;
+    D3D11_TEXTURE2D_DESC d{};
+    static_cast<ID3D11Texture2D*>(dst)->GetDesc(&d);
+    if (sub == 0 && LogLevel() >= 4) {                   // the format diagnostic
+        g_fmtCount[FmtBucket(d.Format)].fetch_add(1, std::memory_order_relaxed);
+        if ((g_tex0Uploads.fetch_add(1, std::memory_order_relaxed) + 1) % 2000 == 0 && !g_cutoutMips)
+            StatsLine("every 2000 Texture2D uploads");
+    }
+    if (!g_cutoutMips || (d.Format != DXGI_FORMAT_BC3_UNORM && d.Format != DXGI_FORMAT_BC3_UNORM_SRGB)) return src;
+    // game test 2026-10-28: ATS passes a box with EVERY mip upload (the whole mip) -- a box that covers the whole mip (block
+    // aligned: right / bottom up to the next multiple of 4) is the same as no box; a real partial box stays "box" (left alone)
+    if (box && sub < d.MipLevels) {
+        const UINT mw = CutoutMips::MipDim(d.Width, (int)sub), mh = CutoutMips::MipDim(d.Height, (int)sub);
+        if (box->left == 0 && box->top == 0 && box->front == 0 && box->back == 1 && box->right >= mw && box->right <= ((mw + 3u) & ~3u) &&
+            box->bottom >= mh && box->bottom <= ((mh + 3u) & ~3u))
+            box = nullptr;
+    }
+    if (sub == 0) { OnMip0(dst, d, box, src, rp); return src; }   // mip 0 itself goes up as the game sent it
+    OnMipL(dst, d, sub, box, src, rp);
+    return src;
+}
+} // namespace Cutout
+
+void STDMETHODCALLTYPE hkUpdateSubresource1(ID3D11DeviceContext1* c, ID3D11Resource* dst, UINT sub, const D3D11_BOX* box,
+                                            const void* src, UINT rp, UINT dp, UINT fl) {
+    if ((g_cutoutMips || LogLevel() >= 4) && !Cutout::t_cutoutIn && !t_inDlaa) {
+        if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oUpdateSubresource1(c, dst, sub, box, src, rp, dp, fl); return; }
+        std::vector<uint8_t> scratch;
+        Cutout::t_cutoutIn = true;
+        const void* s = src;
+        try { s = Cutout::OnUpload(dst, sub, box, src, rp, scratch); }   // audit: no exception (bad_alloc) into the game
+        catch (...) { s = src; }
+        oUpdateSubresource1(c, dst, sub, box, s, rp, dp, fl);
+        Cutout::t_cutoutIn = false;
+        return;
+    }
+    oUpdateSubresource1(c, dst, sub, box, src, rp, dp, fl);
+}
+void STDMETHODCALLTYPE hkUpdateSubresource(ID3D11DeviceContext* c, ID3D11Resource* dst, UINT sub, const D3D11_BOX* box,
+                                           const void* src, UINT rp, UINT dp) {
+    if ((g_cutoutMips || LogLevel() >= 4) && !Cutout::t_cutoutIn && !t_inDlaa) {
+        if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); oUpdateSubresource(c, dst, sub, box, src, rp, dp); return; }
+        std::vector<uint8_t> scratch;
+        Cutout::t_cutoutIn = true;
+        const void* s = src;
+        try { s = Cutout::OnUpload(dst, sub, box, src, rp, scratch); }   // audit: no exception (bad_alloc) into the game
+        catch (...) { s = src; }
+        oUpdateSubresource(c, dst, sub, box, s, rp, dp);
+        Cutout::t_cutoutIn = false;
+        return;
+    }
+    oUpdateSubresource(c, dst, sub, box, src, rp, dp);
+}
+
 #ifdef WITH_DLAA   // VRS: DLAA build only (the eye of a pass comes from the DLAA eye map / blit tracking)
 // ---- phase 34: VRS FIXED FOVEATED RENDERING -- the bracket and the per-draw rule (the NVAPI side: vrs.h / vrs.cpp) ----------
 // WHERE coarse shading may happen: only while the game's binding is an eye's WORLD SCENE pass -- g_jitterPass (the 4-RTV G-buffer
@@ -10356,7 +11109,9 @@ void STDMETHODCALLTYPE hkOMSetRenderTargets(ID3D11DeviceContext* ctx, UINT n,
     // unshifted (ReconcileViewports below).
     g_lightRedrawShift = false;
 #ifdef WITH_DLAA
-    g_lightBind = !g_lightRedrawCfg ? 0 : ((sceneDsv && n == 2) ? 1 : (g_mirLight ? 2 : 0));
+    // phase 78: the bind is also tracked for light_fs_jitter alone (its full-screen draws, hkDraw); LightRedrawOnDraw checks
+    // light_redraw_jitter itself
+    g_lightBind = !(g_lightRedrawCfg || g_lightFsCfg) ? 0 : ((sceneDsv && n == 2) ? 1 : (g_mirLight ? 2 : 0));
     if (g_lightBind) ++g_cLightBinds;
 #else
     g_lightBind = 0;                               // (no depth-stencil state hook without WITH_DLAA: no redraw is recognised)
@@ -10660,12 +11415,183 @@ void FinishSelfTest() {
         (int)g_savedOn, (int)g_savedJo, g_signX, g_signY);
 }
 
+// ---- phase 79: REWIND for the shimmer capture (dlaa.ini rewind_frames, default 0 = off; 64 for testing) ----
+// User finding 2026-10-29 (VR): by the time the Insert key is pressed the flicker is gone -- the capture starts 90 frames
+// AFTER the key. So eye 0's picture of every frame is copied on the GPU into a ring (one CopyResource per frame, ~2 GB VRAM at
+// 64 x 2761 x 2928 RGBA8); the key freezes the ring and the capture writes it as rewind_NN.bmp (NN = frames before the key,
+// 00 = the last one) -- one readback per frame while the capture runs, the BMP itself written on a background thread.
+// g_rewindFrames (dlaa.ini rewind_frames) is defined with the other config globals (read in both builds).
+namespace Rewind {
+constexpr uint64_t kMaxBytes = 2560ull << 20;            // VRAM cap of the ring: fewer slots for big / RGBA16F pictures
+struct Slot { ID3D11Texture2D* tex = nullptr; uint64_t present = 0; int phase = 0; float vx = 0, vy = 0, njx = 0, njy = 0; };
+std::vector<Slot> g_ring;
+UINT g_w = 0, g_h = 0; DXGI_FORMAT g_fmt = DXGI_FORMAT_UNKNOWN;
+int g_head = 0, g_count = 0;                             // next slot to write, filled slots
+int g_drainNext = 0, g_drainLeft = 0, g_drainTotal = 0;  // frozen ring being written (k = 0 is the oldest)
+wchar_t g_dir[MAX_PATH] = {};
+bool g_failed = false;                                   // a texture create failed: rewind stays off (logged once)
+ID3D11Texture2D* g_stag = nullptr;
+struct WJob { wchar_t path[MAX_PATH]; std::vector<uint8_t> px; UINT w = 0, h = 0, pitch = 0; bool f16 = false; };
+std::mutex g_wmx;
+std::vector<WJob> g_wq;
+HANDLE g_wEvent = nullptr;
+std::once_flag g_wOnce;
+std::atomic<int> g_wPending{0};                          // jobs queued or being written
+std::atomic<int> g_wOk{0}, g_wFail{0};
+
+void Writer() {
+    for (;;) {
+        WaitForSingleObject(g_wEvent, INFINITE);
+        for (;;) {
+            WJob j;
+            {
+                std::lock_guard<std::mutex> lk(g_wmx);
+                if (g_wq.empty()) break;
+                j = std::move(g_wq.front());
+                g_wq.erase(g_wq.begin());
+            }
+            const bool ok = j.f16 ? WriteBmpRgba16f(j.path, j.px.data(), j.pitch, j.w, j.h)
+                                  : WriteBmp(j.path, j.px.data(), j.pitch, j.w, j.h);
+            (ok ? g_wOk : g_wFail).fetch_add(1);
+            g_wPending.fetch_sub(1);
+        }
+    }
+}
+
+void ReleaseRing() {
+    for (Slot& s : g_ring) if (s.tex) { s.tex->Release(); s.tex = nullptr; }
+    g_ring.clear();
+    g_head = g_count = 0;
+    g_drainLeft = 0;
+}
+
+bool Draining() { return g_drainLeft > 0; }
+
+// eye 0's picture of this frame -> the ring (render thread, not during a capture / a drain)
+void Record(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase, float vx, float vy, float njx, float njy) {
+    if (g_rewindFrames <= 0 || g_failed || !ctx || !tex || Draining()) return;
+    D3D11_TEXTURE2D_DESC d{}; tex->GetDesc(&d);
+    const bool f16 = d.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
+    if (!f16 && !IsRgbaBgraFamily(d.Format)) return;      // not dumpable (same rule as the capture's BMPs)
+    if (d.Width != g_w || d.Height != g_h || d.Format != g_fmt || g_ring.empty()) {
+        ReleaseRing();                                     // a new picture size: the old frames are not comparable
+        const uint64_t bytes = (uint64_t)d.Width * d.Height * (f16 ? 8 : 4);
+        int n = g_rewindFrames;
+        if (bytes && (uint64_t)n * bytes > kMaxBytes) n = (int)(kMaxBytes / bytes);
+        if (n < 2) return;
+        g_ring.resize(n);
+        g_w = d.Width; g_h = d.Height; g_fmt = d.Format;
+        Log("rewind (phase 79): ring of %d frames for %ux%u fmt=%d (%.0f MB VRAM, filled as frames arrive)",
+            n, d.Width, d.Height, (int)d.Format, (double)n * bytes / 1048576.0);
+    }
+    Slot& s = g_ring[g_head];
+    if (!s.tex) {                                          // created on first use: no one-time allocation hitch
+        ID3D11Device* dev = nullptr; tex->GetDevice(&dev);
+        if (!dev) return;
+        D3D11_TEXTURE2D_DESC sd = d;
+        sd.Usage = D3D11_USAGE_DEFAULT; sd.BindFlags = 0; sd.CPUAccessFlags = 0; sd.MiscFlags = 0;
+        const HRESULT hr = dev->CreateTexture2D(&sd, nullptr, &s.tex);
+        dev->Release();
+        if (FAILED(hr) || !s.tex) {
+            s.tex = nullptr;
+            LogWarn("rewind (phase 79): texture create failed at slot %d (hr=0x%lx) -- rewind off for this session", g_head, (unsigned long)hr);
+            g_failed = true;
+            ReleaseRing();
+            return;
+        }
+    }
+    ctx->CopyResource(s.tex, tex);
+    s.present = g_frames.load(std::memory_order_relaxed);
+    s.phase = phase; s.vx = vx; s.vy = vy; s.njx = njx; s.njy = njy;
+    g_head = (g_head + 1) % (int)g_ring.size();
+    if (g_count < (int)g_ring.size()) ++g_count;
+}
+
+// the capture's key: freeze the ring, its frames go into `dir` (info.txt gets one line each)
+void Freeze(const wchar_t* dir) {
+    if (Draining())
+        LogWarn("rewind (phase 79): a new capture before the last rewind was written -- %d of its frames dropped", g_drainLeft);
+    g_drainLeft = 0;
+    if (g_stag) { g_stag->Release(); g_stag = nullptr; }  // made for the ring's size at the first DrainOne
+    if (g_count <= 0) { Log("rewind (phase 79): nothing recorded yet (rewind_frames=%d)", g_rewindFrames); return; }
+    wcscpy_s(g_dir, dir);
+    const int n = (int)g_ring.size();
+    g_drainTotal = g_drainLeft = g_count;
+    g_drainNext = (g_head - g_count + n) % n;
+    g_wOk = 0; g_wFail = 0;
+    wchar_t ip[MAX_PATH]; wcscpy_s(ip, g_dir); wcscat_s(ip, L"info.txt");
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, ip, L"a") == 0 && f) {
+        fprintf(f, "rewind (phase 79): %d frames from BEFORE the key, eye 0, DLAA as it was (rewind_NN = NN frames before the key)\n", g_count);
+        for (int k = 0; k < g_count; ++k) {
+            const Slot& s = g_ring[(g_drainNext + k) % n];
+            fprintf(f, "rewind_%02d.bmp | Present #%llu | phase=%d | shift=(%+.4f,%+.4f) | ngx=(%+.4f,%+.4f)\n", g_count - 1 - k,
+                    (unsigned long long)s.present, s.phase, s.vx, s.vy, s.njx, s.njy);
+        }
+        fclose(f);
+    }
+    Log("rewind (phase 79): saving the %d frames before the key (%.2f s at 72 fps) as rewind_NN.bmp", g_count, g_count / 72.0);
+}
+
+// one frozen frame -> CPU -> the writer thread (render thread; skipped while the writer is behind)
+void DrainOne(ID3D11DeviceContext* ctx) {
+    if (!Draining() || g_wPending.load() >= 3) return;
+    std::call_once(g_wOnce, [] {
+        g_wEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        HANDLE t = g_wEvent ? CreateThread(nullptr, 0, [](LPVOID) -> DWORD { Writer(); return 0; }, nullptr, 0, nullptr) : nullptr;
+        if (t) { SetThreadPriority(t, THREAD_PRIORITY_BELOW_NORMAL); CloseHandle(t); }
+    });
+    if (!g_wEvent) { g_drainLeft = 0; return; }
+    const int n = (int)g_ring.size();
+    const int k = g_drainTotal - g_drainLeft;
+    Slot& s = g_ring[(g_drainNext + k) % n];
+    const bool f16 = g_fmt == DXGI_FORMAT_R16G16B16A16_FLOAT;
+    D3D11_TEXTURE2D_DESC sd{}; s.tex->GetDesc(&sd);
+    if (!g_stag) {
+        ID3D11Device* dev = nullptr; s.tex->GetDevice(&dev);
+        if (!dev) return;
+        D3D11_TEXTURE2D_DESC td = sd;
+        td.Usage = D3D11_USAGE_STAGING; td.BindFlags = 0; td.MiscFlags = 0; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        td.MipLevels = 1; td.ArraySize = 1;
+        dev->CreateTexture2D(&td, nullptr, &g_stag);
+        dev->Release();
+        if (!g_stag) { LogErr("rewind (phase 79): staging create failed"); g_drainLeft = 0; return; }
+    }
+    ctx->CopySubresourceRegion(g_stag, 0, 0, 0, 0, s.tex, 0, nullptr);
+    D3D11_MAPPED_SUBRESOURCE mp{};
+    if (FAILED(ctx->Map(g_stag, 0, D3D11_MAP_READ, 0, &mp))) { LogErr("rewind (phase 79): Map failed"); g_drainLeft = 0; return; }
+    WJob j;
+    const UINT row = sd.Width * (f16 ? 8 : 4);
+    j.w = sd.Width; j.h = sd.Height; j.pitch = row; j.f16 = f16;
+    j.px.resize((size_t)row * sd.Height);
+    for (UINT y = 0; y < sd.Height; ++y) memcpy(&j.px[(size_t)y * row], (const uint8_t*)mp.pData + (size_t)y * mp.RowPitch, row);
+    ctx->Unmap(g_stag, 0);
+    wchar_t nm[32]; swprintf_s(nm, L"rewind_%02d.bmp", g_drainTotal - 1 - k);
+    wcscpy_s(j.path, g_dir); wcscat_s(j.path, nm);
+    g_wPending.fetch_add(1);
+    {
+        std::lock_guard<std::mutex> lk(g_wmx);
+        g_wq.push_back(std::move(j));
+    }
+    SetEvent(g_wEvent);
+    if (--g_drainLeft == 0) {
+        Log("rewind (phase 79): all %d frames read back (the last BMPs finish on the writer thread)", g_drainTotal);
+        g_head = g_count = 0;                              // recording starts fresh after the capture
+        if (g_stag) { g_stag->Release(); g_stag = nullptr; }
+    }
+}
+} // namespace Rewind
+
 // Called once per frame from the tonemap-detection point, after DLAA ran / was skipped.
 // `phase`, `vx`, `vy`, `njx`, `njy` are the values of the frame just rendered.
 void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
                   float vx, float vy, float njx, float njy) {
     if (!g_testRunning) {
-        if (!g_selfTestRequest.exchange(false)) return;
+        if (!g_selfTestRequest.exchange(false)) {
+            if (Rewind::Draining()) Rewind::DrainOne(ctx);  // phase 79: the rest of a rewind after the capture ended
+            else Rewind::Record(ctx, tex, phase, vx, vy, njx, njy);
+            return;
+        }
         if (g_gameDeviceChanged) { LogDbg("self-test refused: the game render device changed (DLAA stays OFF)"); return; }
         g_savedOn = g_dlaaOn.load(); g_savedJo = g_jitterOnly.load();
         g_savedSx = g_signX; g_savedSy = g_signY;
@@ -10692,6 +11618,7 @@ void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
                     t.wHour, t.wMinute, t.wSecond, kSettleFrames, TestDumpFrames(), g_phases, (int)g_jitterEnabled);
             fclose(f);
         }
+        if (g_testShimmer) Rewind::Freeze(g_testDir);      // phase 79: after info.txt's header (Freeze appends its lines)
         g_testRunning = true; g_testMode = 0;
         g_testFinalFmtLogs = 0; g_testFinalPending = false;   // v0.10.0 phase 26
         LogDbg("self-test: started, dumping to dlaa_selftest\\ (%ux%u); saved state dlaa=%d jo=%d sign=%+d,%+d",
@@ -10699,6 +11626,7 @@ void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
         ApplyTestMode(0);
         return;
     }
+    Rewind::DrainOne(ctx);                                 // phase 79: one rewind frame per frame while the capture runs
     if (g_testSettle > 0) { --g_testSettle; return; }
 
     const TestMode& m = TestModes()[g_testMode];
@@ -12589,6 +13517,7 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
         HandlePossibleBlit(ctx, vertexCount);
     }
     if (!t_inDlaa && g_lodPerDraw.load(std::memory_order_relaxed)) LodOnDraw(ctx);   // v0.10.0 phase 11 LOD bias scope
+    if (!t_inDlaa && Cutout::Busy() && IsGameCtx(ctx)) Cutout::MaybeOnDraw(ctx);   // phase 77b
 #ifdef WITH_DLAA
     // v0.10.0 phase 16 VR late panel: a small Draw that READS a recorded eye picture (PS SRV 0..7 since phase 20; the copy into the OpenXR
     // swapchain image) gets the panel into that picture first
@@ -12604,7 +13533,29 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
     // composited by their own rule, and never our own draws).
     // phase 55: a Draw in the lighting bind (the full-screen light passes, Draw(3)) is never a mesh redraw: back to the game's
     // own viewport if the previous draw was a shifted redraw (LightRedrawOnDraw)
-    if (g_lightRedrawShift && !t_inDlaa) { g_lightRedrawShift = false; ++g_cLightUnDraw; ReconcileViewports(ctx, false); }
+    // phase 78: ...unless it is a FULL-SCREEN light draw (3 / 4 vertices, viewport depth 0..1, never in a jitter pass / preview)
+    // with the jitter live: it gets the G-buffer's shift at the game's W x H (g_lightFsShift; block above hkRSSetViewports), the
+    // edge it loses is re-drawn after it and the game's viewport restored. The viewport-size check is ReconcileViewports' (scene
+    // size; mirror: the view's size) -- a full-screen draw at another size keeps the game's viewport (counted NOT shifted).
+    const bool lightFs = g_lightFsCfg && g_lightBind && !t_inDlaa && !g_jitterPass && !g_mirJit && !g_previewPass &&
+                         vertexCount - 3u <= 1u && g_gameVpN > 0 && g_gameVp[0].MinDepth == 0.0f && g_gameVp[0].MaxDepth == 1.0f &&
+                         (g_lightBind == 2 ? g_mirLight : (JitterLive() && !WorldJitterHeld()));
+    if (g_lightRedrawShift && !t_inDlaa) {
+        g_lightRedrawShift = false; ++g_cLightUnDraw;
+        if (!lightFs) ReconcileViewports(ctx, false);   // (a full-screen light draw re-issues it just below)
+    }
+    if (lightFs) {
+        g_lightFsShift = true;
+        ReconcileViewports(ctx, false);
+        if (g_vpShifted && !g_vpOver) ++g_cLightFs; else ++g_cLightFsNoShift;
+        if (g_cLightFsTotal++ == 0)
+            Log("lighting full-screen jitter (phase 78): first %s lighting-pass full-screen draw (verts=%u) issued with the G-buffer's "
+                "shift (%+.4f,%+.4f), game viewport %.0fx%.0f, no overscan (Present #%llu) -- the light rebuilds each pixel's position "
+                "from the same sub-pixel point the G-buffer texel holds; the far column / row a negative shift loses is re-drawn with "
+                "the game's viewport%s", g_lightBind == 2 ? "mirror" : "main", vertexCount, (double)g_vpShiftX, (double)g_vpShiftY,
+                g_gameVp[0].Width, g_gameVp[0].Height, (unsigned long long)g_frames.load(std::memory_order_relaxed),
+                g_vpShifted && !g_vpOver ? "" : " -- WARNING: the viewport was NOT shifted (game viewport is not the pass size)");
+    }
     const bool fsUnshift = !t_inDlaa && g_vpShifted && (g_jitterPass || g_mirJit) && !g_previewPass && vertexCount <= 4 &&
                            g_gameVpN > 0 && g_gameVp[0].MinDepth == 0.0f && g_gameVp[0].MaxDepth == 1.0f;
     if (fsUnshift) {
@@ -12620,6 +13571,11 @@ void STDMETHODCALLTYPE hkDraw(ID3D11DeviceContext* ctx, UINT vertexCount, UINT s
 #endif
     CPU_ORIG(oDraw(ctx, vertexCount, startVertex));
     if (fsUnshift) { g_vpShifted = false; g_vpOver = false; ReconcileViewports(ctx, false); }   // back to the pass's shift
+    if (lightFs) {                                       // phase 78: the lost far edge, then the game's own viewport again
+        if (g_vpShifted && !g_vpOver) LightFsEdgeFill(ctx, vertexCount, startVertex);
+        g_lightFsShift = false;
+        ReconcileViewports(ctx, false);                  // (no-op when the edge fill already issued the game's viewport)
+    }
 #ifdef WITH_DLAA
     if (g_compEye >= 0 && !t_inDlaa) RunPendingComposite(ctx);   // v0.7.0 (before the scene span closes)
     if (g_menuBlitEye >= 0 && !t_inDlaa) MenuDrawVr(ctx);         // v0.10.0 tuning menu: VR panel + fps box over this eye's picture
@@ -13269,7 +14225,7 @@ void LightFirstLog(ID3D11DeviceContext* ctx) {
 // hkDrawIndexed / hkDrawIndexedInstanced (game context, not our work, g_lightBind != 0), before the game's draw.
 void LightRedrawOnDraw(ID3D11DeviceContext* ctx) {
     bool want = false;
-    if (g_objHooked.load(std::memory_order_relaxed) && !g_previewPass &&
+    if (g_lightRedrawCfg && g_objHooked.load(std::memory_order_relaxed) && !g_previewPass &&   // (phase 78: g_lightBind may be set for light_fs_jitter alone)
         LightCached<ID3D11DepthStencilState, D3D11_DEPTH_STENCIL_DESC>(g_lightDss, g_lightDssN, LightGameDss(ctx), &LightDssOk) &&
         (g_lightBind == 2 ? g_mirLight : (JitterLive() && !WorldJitterHeld()))) {
         ID3D11RasterizerState* rs = nullptr;
@@ -13311,11 +14267,14 @@ void LightRedrawStatsLog(uint64_t blit, uint64_t blitsInWindow) {
     const double perBlit = blitsInWindow ? (double)g_cLightRedraws / (double)blitsInWindow : 0.0;
     LogDbg("lighting redraws (phase 55, light_redraw_jitter %d) @blit %llu: %llu shifted redraws in %llu lighting binds (%.1f per "
         "blit), %llu runs; back to the game's viewport at a Draw %llu, a non-qualifying DrawIndexed %llu, a depth-stencil state %llu; "
-        "redraws NOT shifted (viewport not the pass size) %llu; cached states: depth-stencil %d, rasterizer %d",
+        "redraws NOT shifted (viewport not the pass size) %llu; cached states: depth-stencil %d, rasterizer %d | phase 78 "
+        "light_fs_jitter %d: full-screen light draws shifted %llu, full-screen NOT shifted %llu, edge re-draws %llu, scissor twins %d",
         g_lightRedrawCfg, (unsigned long long)blit, (unsigned long long)g_cLightRedraws, (unsigned long long)g_cLightBinds,
         perBlit, (unsigned long long)g_cLightRuns, (unsigned long long)g_cLightUnDraw, (unsigned long long)g_cLightUnIdx,
-        (unsigned long long)g_cLightUnDss, (unsigned long long)g_cLightNoShift, g_lightDssN, g_lightRsN);
+        (unsigned long long)g_cLightUnDss, (unsigned long long)g_cLightNoShift, g_lightDssN, g_lightRsN, g_lightFsCfg,
+        (unsigned long long)g_cLightFs, (unsigned long long)g_cLightFsNoShift, (unsigned long long)g_cLightFsEdge, g_lightFsRsN);
     g_cLightBinds = g_cLightRedraws = g_cLightRuns = g_cLightUnDraw = g_cLightUnIdx = g_cLightUnDss = g_cLightNoShift = 0;
+    g_cLightFs = g_cLightFsNoShift = g_cLightFsEdge = 0;                                                   // phase 78
 }
 
 void STDMETHODCALLTYPE hkOMSetDepthStencilState(ID3D11DeviceContext* ctx, ID3D11DepthStencilState* dss, UINT ref) {
@@ -14022,14 +14981,21 @@ void FwdOnPassStart(ID3D11DeviceContext* ctx) {
         if (g_fwdStatLogs < 200)
             LogDbg("wire widening (phase 61, %s, wire_min_px %.2f) over %llu passes: %.1f wire draws widened per pass (%.1f of them pole "
                 "hardware, phase 62) + %.1f solid G-buffer draws dithered (phase 63), skipped: blend %llu, game GS %llu, shader not ready %llu, "
-                "constant-buffer updates %llu | wire shaders known: %d VS, %d PS (%d pole hardware), solid %d / 5",
+                "constant-buffer updates %llu | wire shaders known: %d VS, %d PS (%d pole hardware), solid %d / 5 | phase 80 solid dither "
+                "gate (wire_solid_static_only %d) per pass: known static %.1f, old rule (instanced / no key / gate off) %.1f, NOT "
+                "dithered: moving %.1f, no static verdict %.1f",
                 (g_wireCfg && g_wireOn.load()) ? "on" : "off",
                 (double)g_wireMinPx, (unsigned long long)g_fwdPassesLive,
                 g_fwdPassesLive ? (double)ws.bound / (double)g_fwdPassesLive : 0.0,
                 g_fwdPassesLive ? (double)ws.boundCut / (double)g_fwdPassesLive : 0.0,
                 g_fwdPassesLive ? (double)ws.boundSolid / (double)g_fwdPassesLive : 0.0, (unsigned long long)ws.skipBlend,
                 (unsigned long long)ws.skipGs, (unsigned long long)ws.skipNotReady, (unsigned long long)ws.cbUpdates,
-                WireWiden::KnownVs(), WireWiden::KnownPs(), WireWiden::KnownPsCut(), WireWiden::KnownSolid());
+                WireWiden::KnownVs(), WireWiden::KnownPs(), WireWiden::KnownPsCut(), WireWiden::KnownSolid(), g_solidStaticOnlyCfg,
+                g_fwdPassesLive ? (double)g_solidGate[1] / (double)g_fwdPassesLive : 0.0,
+                g_fwdPassesLive ? (double)g_solidGate[0] / (double)g_fwdPassesLive : 0.0,
+                g_fwdPassesLive ? (double)g_solidGate[2] / (double)g_fwdPassesLive : 0.0,
+                g_fwdPassesLive ? (double)g_solidGate[3] / (double)g_fwdPassesLive : 0.0);
+        for (uint64_t& g : g_solidGate) g = 0;          // phase 80: the same window as the wire stats
     }
     if (g_fwdStatLogs++ < 200)
         LogDbg("MV forward depth: per pass over %llu passes -- forward draws %.1f, recorded for the batch %.1f (over-blended, depth test "
@@ -14981,7 +15947,10 @@ void DidOnDraw(ID3D11DeviceContext* ctx, UINT ic, UINT inst, UINT si, INT bv, UI
     const uint64_t t0 = MeasureOn() ? __rdtsc() : 0;      // phase 35: TSC (was QPC, see TscToQpc); phase 45: only while measuring
     DidShadow::SetAlias(ctx);                             // phase 35: the context the game's Set calls name
     DrawIdRecord& rec = g_didRing[SlotOf(g_passSeq - 1)];
-    if (rec.Record(g_ctx1, ic, inst, si, bv, sinst, instanced)) { ++g_didRecDraws; if (instanced) ++g_didRecInst; }
+    if (rec.Record(g_ctx1, ic, inst, si, bv, sinst, instanced)) {
+        ++g_didRecDraws; if (instanced) ++g_didRecInst;
+        g_didLastKey = rec.FullKey(rec.Count() - 1);      // phase 80: SolidOnDraw (same game draw) asks the static table about it
+    }
     else ++g_didRecFull;
     if (t0) g_didTicksRec += TscToQpc(__rdtsc() - t0);
 }
@@ -17609,6 +18578,7 @@ int MenuCostGroup(int sec) {
     case GpuPerf::kMirror:   case GpuPerf::kMirNgx:    return MG_MIR;
     case GpuPerf::kRcas:     return MG_SHARP;
     case GpuPerf::kCopyIn:   case GpuPerf::kCopyOut:   case GpuPerf::kDbgView:  return MG_COPY;
+    case GpuPerf::kOutsideAa: return MG_COPY;         // phase 81: outside AA (no menu row of its own: counted with the copies)
     default:                 return -1;          // kReplayInst / kReplayRest: a sampled breakdown of kReplay (counted there)
     }
 }
@@ -21784,6 +22754,7 @@ void STDMETHODCALLTYPE hkDrawIndexedInstanced(ID3D11DeviceContext* ctx, UINT ic,
     }
     // v0.10.0 phase 11 LOD bias scope: the sampler set this draw needs (solid / see-through blend state)
     if (!inDlaa && g_lodPerDraw.load(std::memory_order_relaxed) && IsGameCtx(ctx)) LodOnDraw(ctx);
+    if (!inDlaa && Cutout::Busy() && IsGameCtx(ctx)) Cutout::MaybeOnDraw(ctx);   // phase 77b
     if (g_menuLateBound >= 0 && !inDlaa && IsGameCtx(ctx)) MenuLateCountDraw();   // v0.10.0 phase 16 VR late panel
     if (g_lightBind && !inDlaa && IsGameCtx(ctx)) LightRedrawOnDraw(ctx);   // phase 55 (as hkDrawIndexed)
     // phase 66: the street lights are ONE instanced G-buffer draw (pair B's PS 34860eed with the instanced VS a484ef85) -> the same
@@ -21823,6 +22794,15 @@ bool SolidOnDraw(ID3D11DeviceContext* ctx, bool instanced) {
     const bool ok = WireWiden::IsSolidVs(vs, kind);
     if (vs) vs->Release();
     if (!ok) return false;
+    // phase 80: a car part (same shader pair as the far wires) is dithered only once the per-draw MVs know it as static
+    {
+        int why = 0;
+        const uint64_t key = instanced ? 0ull : g_didLastKey;
+        g_didLastKey = 0;
+        const bool dither = DrawIdMv::SolidDitherOk(key, instanced, &why);
+        ++g_solidGate[why & 3];
+        if (!dither) return false;                    // the game's own shaders draw it (no GS, no dither, no forward record)
+    }
     t_inDlaa.Quiet(true);                             // phase 75: binds only, VRS stays as it is
     const bool bound = WireWiden::BindSolid(ctx, kind, g_gameVp[0].Width, g_gameVp[0].Height, g_wireMinPx,
                                             (uint32_t)g_frames.load(std::memory_order_relaxed), g_wireSolidMinShare);
@@ -21953,6 +22933,7 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
                 objSlot = ObjOnDraw(ctx, indexCount, startIndex, baseVertex);
                 if (t1) g_objTicks += TscToQpc(__rdtsc() - t1);
             }
+            g_didLastKey = 0;                                // phase 80: no stale key from an earlier draw reaches SolidOnDraw
             if (g_didOn && !inDlaa)                          // v0.10.0 per-draw MVs: the draw's whole input state
                 DidOnDraw(ctx, indexCount, 1, startIndex, baseVertex, 0, false);
 #endif
@@ -21989,6 +22970,7 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
 #endif
     // v0.10.0 phase 11 LOD bias scope: the sampler set this draw needs (solid / see-through blend state)
     if (gameCtx && !inDlaa && g_lodPerDraw.load(std::memory_order_relaxed)) LodOnDraw(ctx);
+    if (gameCtx && !inDlaa && Cutout::Busy()) Cutout::MaybeOnDraw(ctx);   // phase 77b
 #ifdef WITH_DLAA
     if (g_menuLateN && gameCtx && !inDlaa && indexCount <= 6) MenuLateOnDraw(ctx, "DrawIndexed", indexCount, _ReturnAddress());
     if (g_lightBind && gameCtx && !inDlaa) LightRedrawOnDraw(ctx);   // phase 55: a lighting-pass mesh redraw -> the G-buffer's viewport
@@ -22076,6 +23058,7 @@ void ResetPassTrackingCore(bool forceDlaaOff) {
 #endif
     g_gameVpN = 0; g_vpShifted = false; g_vpShiftX = g_vpShiftY = 0.0f; g_vpOver = false;
     g_lightBind = 0; g_lightRedrawShift = false;               // phase 55
+    LightFsOnContextReset();                                   // phase 78: the scissor twins (old device refs)
     while (g_fifoHead < g_passSeq) g_ring[SlotOf(g_fifoHead++)].consumed = true;   // drop outstanding passes
     g_needFirstPass = true;                                    // next G-buffer bind starts a pass
     g_flatMode = false; g_vrMode = false;                      // re-detected at the next matched blit
@@ -22706,6 +23689,8 @@ bool DlaaOffFilePresent() {
 //   jitter_enabled                 0/1 (default 1)
 //   jitter_overscan                0/1 (default 1, v0.10.0 phase 23): jittered world / mirror viewport 1 px larger right / bottom
 //   light_redraw_jitter            0/1 (default 1, phase 55): the lighting pass's mesh redraws get the G-buffer's jittered viewport
+//   light_fs_jitter                0/1 (default 1, phase 78): the lighting pass's full-screen draws get the G-buffer's shift (W x H)
+//   outside_aa                     0/1/2 (default 2, phase 81): outside the DLAA area rect 1 = unjitter, 2 = + edge AA, 0 = raw frame
 //   jitter_phases                  Halton phase count (default 8 since v0.5.7, was 16; NVIDIA: 8 x render ratio)
 //   mv_enabled                     0/1 camera-reprojection motion vectors (default 1; Ctrl+F5 toggles)
 //   gpu_timing                     -1 auto (VR only, default) / 0 off / 1 on: timestamp queries around each
@@ -23007,12 +23992,17 @@ void LoadConfig() {
 #endif
             // phase 70: the VR panel fixed in the cab (outside the else-if chain: C1061)
             if (!strcmp(key, "menu_vr_lock"))      { g_menuVrLock = v != 0 ? 1 : 0; continue; }
+            if (!strcmp(key, "cutout_mips"))       { g_cutoutMips = v != 0 ? 1 : 0; continue; }   // phase 77, startup only (C1061)
+            if (!strcmp(key, "cutout_max_dim"))    { g_cutoutMaxDim = v < 64 ? 64 : (v > 4096 ? 4096 : (int)v); continue; }
+            if (!strcmp(key, "rewind_frames"))     { g_rewindFrames = v < 0 ? 0 : (v > 240 ? 240 : (int)v); continue; }   // phase 79 (C1061)
             if (!strcmp(key, "menu_vr_lock_x"))    { g_menuVrLockX = v < -90 ? -90 : (v > 90 ? 90 : (int)v); continue; }
             if (!strcmp(key, "menu_vr_lock_y"))    { g_menuVrLockY = v < -60 ? -60 : (v > 60 ? 60 : (int)v); continue; }
             if (!strcmp(key, "menu_vr_lock_dist")) { g_menuVrLockDist = v < 30 ? 30 : (v > 300 ? 300 : (int)v); continue; }
             if (!strcmp(key, "xr_hidden_mask"))     { g_xrHiddenMask = v != 0 ? 1 : 0; g_xrHiddenMaskExplicit = true; continue; }   // phase 40
             if (!strcmp(key, "dlss_bias_mask"))     { g_biasCfg = v < 0 ? 0 : (v > 100 ? 100 : (int)v); g_biasExplicit = true; continue; }   // phase 49
             if (!strcmp(key, "light_redraw_jitter")) { g_lightRedrawCfg = v != 0 ? 1 : 0; continue; }   // phase 55 (outside the chain: C1061)
+            if (!strcmp(key, "light_fs_jitter"))     { g_lightFsCfg = v != 0 ? 1 : 0; continue; }       // phase 78 (outside the chain: C1061)
+            if (!strcmp(key, "outside_aa"))          { g_outsideAaCfg = v <= 0 ? 0 : (v >= 2 ? 2 : 1); continue; }   // phase 81
             // phase 60: thin wires -- DLSS MV dilation in DLAA (Alt+F10) and the conservative forward depth (Alt+F11), 0/1, default 1
             // (outside the else-if chain: C1061)
             if (!strcmp(key, "mv_fwd_conservative")) {
@@ -23020,6 +24010,7 @@ void LoadConfig() {
             }
             // phase 61: far wires drawn min-px wide (outside the else-if chain: C1061)
             if (!strcmp(key, "wire_widen")) { g_wireCfg = v != 0; g_wireOn = g_wireCfg; g_wireExplicit = true; continue; }
+            if (!strcmp(key, "wire_solid_static_only")) { g_solidStaticOnlyCfg = v != 0 ? 1 : 0; continue; }   // phase 80 (C1061)
             if (!strcmp(key, "wire_solid_min_share")) {   // phase 63, 0 .. 1 (default 0.1 since phase 68)
                 const double m = strtod(eq + 1, nullptr);
                 g_wireSolidMinShare = (float)(m < 0.0 ? 0.0 : (m > 1.0 ? 1.0 : m));
@@ -23498,11 +24489,37 @@ void LoadConfig() {
         ? "the lighting pass's mesh redraws (depth GREATER_EQUAL / EQUAL, no depth write, depth bias) are rasterized with the "
           "G-buffer's jittered viewport, so they match its depth on every jitter phase"
         : "off: the lighting pass keeps the game's viewport; its redraws can miss the jittered G-buffer depth (lit areas flicker)");
+    Log("lighting full-screen jitter (phase 78): light_fs_jitter=%d (%s)", g_lightFsCfg, g_lightFsCfg
+        ? "the lighting pass's full-screen draws (the deferred sun light) get the G-buffer's jitter shift at the game's size, so "
+          "each pixel's rebuilt position matches its G-buffer texel; the far column / row a negative shift loses is re-drawn"
+        : "off: the full-screen light draws keep the game's viewport; shadow penumbrae on grazing surfaces can flicker with the jitter");
     Log("OFXR Bridge support: ofxr_bridge=%d (%s)", (int)Ofxr::g_on.load(),
         Ofxr::g_on.load() ? "on: the layer's calls pass through the hooks" : "off");
     Log("VectorXR support: vectorxr=%d (%s)", (int)Ofxr::g_onVxr.load(),
         Ofxr::g_onVxr.load() ? "on: the layer's calls pass through the hooks" : "off");   // phase 56
+    Log("rewind (phase 79): rewind_frames=%d (%s)", g_rewindFrames, g_rewindFrames > 0
+        ? "the shimmer capture key also saves the frames from BEFORE the key, eye 0" : "off");
+    Log("cut-out mips (phase 77): %s (cutout_mips=%d cutout_max_dim=%d, 77c: analysis on a worker thread)%s", g_cutoutMips ? "on" : "off",
+        g_cutoutMips, g_cutoutMaxDim, g_cutoutMips
+        ? " -- binary cut-out BC3 textures get coverage-preserving alpha mips at upload (far fences / wires keep their density)"
+        : "");
 #ifdef WITH_DLAA
+    DrawIdMv::SetSolidStaticOnly(g_solidStaticOnlyCfg != 0);   // phase 80
+    Log("solid dither gate (phase 80): wire_solid_static_only=%d (%s)", g_solidStaticOnlyCfg, g_solidStaticOnlyCfg
+        ? "with wire_widen, the far-wire / tower dither (phase 63) is only applied to draws the per-draw motion vectors know as "
+          "static -- AI car windows / wheels / trims share the far wires' shaders and are drawn by the game's own shaders while "
+          "they move or have no verdict yet (needs mv_objects=2 and mv_replay_static_frames > 0, else every match is dithered)"
+        : "off: every draw with the far-wire / tower shaders is dithered, moving cars too (phases 63-68)");
+    SceneDlaa::SetOutsideAa(g_outsideAaCfg);             // phase 81
+    SceneDlaa::SetJitterSign(g_signX, g_signY);
+    Log("outside AA (phase 81): outside_aa=%d (%s)", g_outsideAaCfg, g_outsideAaCfg
+        ? (g_outsideAaCfg >= 2
+           ? "outside the DLAA area rect (dlaa_area < 100) the raw jittered frame is resampled at the pass's jitter shift "
+             "(Catmull-Rom) and edge-smoothed (FXAA console), blended into the rect by the feather; nothing at dlaa_area 100, "
+             "with the jitter off, or with DLAA off"
+           : "outside the DLAA area rect (dlaa_area < 100) the raw jittered frame is resampled at the pass's jitter shift "
+             "(Catmull-Rom), no edge pass; nothing at dlaa_area 100, with the jitter off, or with DLAA off")
+        : "off: outside the DLAA area rect the picture is the raw jittered frame");
     SceneDlaa::SetBiasStrength(g_biasCfg);              // phase 49
     Log("DLSS bias mask (phase 49): dlss_bias_mask=%d %% (%s)", g_biasCfg, g_biasCfg
         ? "the additive light glows of the world forward pass go to NGX as its bias current colour mask (no glow trails)"
@@ -24093,6 +25110,9 @@ DWORD WINAPI SetupThread(LPVOID) {
                reinterpret_cast<void**>(&oCopySubresourceRegion));
         HookFn("CopyResource", cvtbl[47], reinterpret_cast<void*>(&hkCopyResource),
                reinterpret_cast<void**>(&oCopyResource));
+        // phase 77: UpdateSubresource = 48 (the game uploads with UpdateSubresource1; this one the same way, for safety)
+        HookFn("UpdateSubresource", cvtbl[48], reinterpret_cast<void*>(&hkUpdateSubresource),
+               reinterpret_cast<void**>(&oUpdateSubresource));
         HookFn("ClearRenderTargetView", cvtbl[50], reinterpret_cast<void*>(&hkClearRTV),
                reinterpret_cast<void**>(&oClearRTV));
         HookFn("ClearDepthStencilView", cvtbl[53], reinterpret_cast<void*>(&hkClearDSV),
@@ -24104,6 +25124,10 @@ DWORD WINAPI SetupThread(LPVOID) {
             void** c1vtbl = *reinterpret_cast<void***>(ctx1);   // ID3D11DeviceContext1: CopySubresourceRegion1 = 115
             HookFn("CopySubresourceRegion1", c1vtbl[115], reinterpret_cast<void*>(&hkCopySubresourceRegion1),
                    reinterpret_cast<void**>(&oCopySubresourceRegion1));
+            // phase 77 cut-out alpha mips: UpdateSubresource1 = 116, the game's texture upload (+ the level-4 upload-format
+            // counts). Installed always: with cutout_mips = 0 and log_level < 4 the hook only passes through.
+            HookFn("UpdateSubresource1", c1vtbl[116], reinterpret_cast<void*>(&hkUpdateSubresource1),
+                   reinterpret_cast<void**>(&oUpdateSubresource1));
             // v0.5.3 (indices from d3d11_1.h ID3D11DeviceContext1Vtbl): DiscardResource 117, DiscardView 118, DiscardView1 133.
             HookFn("DiscardResource", c1vtbl[117], reinterpret_cast<void*>(&hkDiscardResource),
                    reinterpret_cast<void**>(&oDiscardResource));
@@ -24285,6 +25309,7 @@ void StartInjection() {
 // either way we only log and do nothing else.
 void OnProcessDetach(bool processTerminating) {
     LogExiting().store(true, std::memory_order_relaxed);   // never block on the log mutex from here on
+    Cutout::StatsLine("exit");                           // phase 77 (level 4; try-lock only)
 #ifdef WITH_DLAA
     FpsProfileSave(processTerminating ? "process exit" : "DLL unload");   // phase 51: changed vehicle profiles (a file write only)
 #endif

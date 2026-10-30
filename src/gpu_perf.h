@@ -60,6 +60,7 @@ enum Sec : int {
                       // the per-eye mod total
     kBias,            // phase 49: the glow bias mask -- the pass-end re-draw of the additive forward draws + the share pass (pass
                       // time, EXACT) and the crop / reprojection step before NGX (blit time)
+    kOutsideAa,       // phase 81: outside AA -- in place: the CS pass + the outer-band copy-back; upscale: the band draws (blit time)
     kCount
 };
 

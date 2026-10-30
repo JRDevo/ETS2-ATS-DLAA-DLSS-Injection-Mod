@@ -534,7 +534,7 @@ These need `log_level = 4` in `dlaa.ini`. They are for diagnostics and bug repor
 | `Ctrl+F7` | Passive mode on / off |
 | `Ctrl+F8` | Jitter-only debug on / off |
 | `Ctrl+F9` | Self-test (dumps frames) |
-| `Pause` | Shimmer capture: DLAA on and off frames + log + `dlaa.ini` in one folder (new in v0.15.0; works at any log level, `4` makes the copied log useful) |
+| `Insert` | Shimmer capture (was `Pause` before v0.15.2: the game uses `Pause` for its pause menu): DLAA on and off frames + log + `dlaa.ini` in one folder (new in v0.15.0; works at any log level, `4` makes the copied log useful) |
 | `Ctrl+F10` | NGX input snapshot |
 | `Ctrl+F11` | Frame trace |
 | `Ctrl+F12` | Cycle NGX jitter sign |
@@ -839,6 +839,7 @@ The table below lists the commonly used keys:
 | `jitter_sign_x` / `jitter_sign_y` | `1` | flip if the image shimmers or looks doubled (try the 4 combinations) |
 | `dlss_bias_mask` | `100` | light glow ghosting fix (phase 49): strength in % `0`..`100`, `0` = off. Street lamp and car light glows are told to DLSS as a mask so they leave no trail at night. Lower it (25 % steps) if glows flicker. The menu's `Light glow ghosting fix` row |
 | `light_redraw_jitter` | `1` | phase 55: `1` = the lighting pass's mesh redraws (sunlight through canopies, emissive surfaces) use the same jittered viewport as the G-buffer; `0` = the game's viewport for the whole lighting pass (lit areas can flicker). Startup only |
+| `light_fs_jitter` | `1` | phase 78: `1` = the lighting pass's full-screen sunlight draw uses the same jitter shift as the G-buffer, so shadow edges on sunlit surfaces seen at a grazing angle (roofs) no longer flicker darker / lighter with the jitter; `0` = the game's viewport for it (before phase 78). Startup only |
 | `dlss_hdr` | `1` | HDR only: `1` = tell DLSS the picture is HDR (normal); `0` = try this if HDR brightness or colours look wrong with DLAA on |
 | `beeps` | `1` | `0` = silence the hotkey beeps |
 | `menu_x` / `menu_y` / `menu_scale` | `2` / `8` / `1.0` | tuning menu panel, flat: left / top edge in % of the picture, size `0.3`..`2.0`. The menu's Panel rows change them live |

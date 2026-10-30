@@ -28,6 +28,11 @@
 // pass, not to the colour format) and are NOT invalidated by a swap. Only a size / area / upscale change rebuilds (both sets
 // go). Warm() evaluates the parked set on the same pass's MV / depth without touching the game's texture (a coming stage
 // switch then needs no history reset); KindIdleRuns() tells the caller how stale a set's history is.
+// phase 81 OUTSIDE AA (dlaa.ini outside_aa, src/outside_aa.h): at dlaa_area < 100 the pixels outside the rect (the complement of
+// the feather ramp) are no longer the raw jittered frame -- they are resampled at the pass's jitter shift (unjitter, Catmull-Rom)
+// and, at 2, edge-smoothed (FXAA console). In place: a CS writes a full-size scratch before the copy-back, RCAS's border blend
+// reads its "raw" side from it, the 4 outer bands are copied back. Upscale: Composite() first draws the bands into RT0 from the
+// game's blit SRV0, then the DLSS result as before. Nothing runs at area 100, with outside_aa 0, or when the jitter is (0, 0).
 #pragma once
 #ifdef WITH_DLAA
 
@@ -289,6 +294,13 @@ public:
     // units drop their glow history). Process-wide. A Run whose pass carries a mask (DepthTwin::biasValid) -- or whose unit had
     // one last frame -- crops it, adds last frame's glow pixels carried along this frame's motion vectors (where the history
     // still holds the glow that has moved on) and hands NGX strength x that as its bias current colour mask.
+    // phase 81 OUTSIDE AA (dlaa.ini outside_aa, startup only; process-wide): 0 = off (the raw jittered frame outside the rect, as
+    // before), 1 = unjitter, 2 = unjitter + edge AA (default). SetJitterSign = inject.cpp's jitter_sign_x / _y (NGX jitter = sign *
+    // viewport shift), kept in step at every change: the unjitter needs the SHIFT, Run is handed the NGX jitter.
+    static void SetOutsideAa(int mode) { s_oaaMode = mode < 0 ? 0 : (mode > 2 ? 2 : mode); }
+    static int  OutsideAaMode() { return s_oaaMode; }
+    static void SetJitterSign(int sx, int sy) { s_oaaSignX = sx < 0 ? -1 : 1; s_oaaSignY = sy < 0 ? -1 : 1; }
+    uint64_t OutsideRuns() const { return m_oaaRuns; }   // Runs / composites that replaced the outside (log)
     static void SetBiasStrength(int pct) { s_biasPct = pct < 0 ? 0 : (pct > 100 ? 100 : pct); }
     static int  BiasStrength() { return s_biasPct; }
     uint64_t BiasRuns() const { return m_biasRuns; }   // Runs that handed NGX a mask (log / menu)
@@ -372,6 +384,19 @@ private:
     ID3D11ShaderResourceView* BiasPrep(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11ShaderResourceView* passMask,
                                        bool reset);
     void BiasShutdown();
+    // phase 81 outside AA (see the header comment and src/outside_aa.h)
+    bool OaaCommon(ID3D11Device* dev);                     // params buffer + SRV + linear-clamp sampler
+    // in place: the CS pass (tonemap -> m_oaaTex) right after NGX; true = m_oaaTex holds this frame's outside (RCAS + copy-back)
+    bool OaaInPlace(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, DXGI_FORMAT fmt, float jitterX,
+                    float jitterY);
+    void OaaCopyBack(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap);   // the 4 outer bands of m_oaaTex -> tonemap
+    // upscale: Run arms it (shift + the colour texture), Composite draws the bands from the game's blit SRV0 before its own draw
+    void OaaArm(ID3D11Device* dev, ID3D11Texture2D* tonemap, float jitterX, float jitterY);
+    void OaaDrawBands(ID3D11DeviceContext* ctx, ID3D11ShaderResourceView* gameSrv0, uint32_t vpX, uint32_t vpY, float fx, float fy,
+                      const bool edges[4]);
+    bool OaaUpload(ID3D11DeviceContext* ctx, const float* p);   // Params, re-uploaded only when they changed
+    void OaaFirstLog(const char* what, uint32_t bands, int luma, float sx, float sy);
+    void OaaShutdown();
 
     DlaaProcessor m_dlaa;
     CameraMv m_cam;
@@ -441,6 +466,35 @@ private:
     bool                                              m_biasPrevHad = false;  // last frame's pass carried a mask
     bool                                              m_biasFailed = false;   // shader / textures could not be made (logged once)
     uint64_t                                          m_biasRuns = 0;
+
+    // ---- phase 81 outside AA (OaaInPlace / OaaArm + OaaDrawBands) ----
+    static int                                        s_oaaMode;      // dlaa.ini outside_aa (0..2, default 2)
+    static int                                        s_oaaSignX, s_oaaSignY;   // jitter_sign_x / _y (+1 / -1)
+    Microsoft::WRL::ComPtr<ID3D11ComputeShader>       m_oaaCs;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader>         m_oaaPs;
+    Microsoft::WRL::ComPtr<ID3D11Buffer>              m_oaaParams;    // 5 x float4, DYNAMIC, read as Buffer<float4> (t1)
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>  m_oaaParamsSrv;
+    Microsoft::WRL::ComPtr<ID3D11SamplerState>        m_oaaSampler;   // linear clamp (s0)
+    Microsoft::WRL::ComPtr<ID3D11Texture2D>           m_oaaTex;       // in place: full-size scratch (colour format of the unit)
+    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_oaaUav;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>  m_oaaSrv;       // RCAS's border-blend source (Orig) when the pass ran
+    uint32_t                                          m_oaaW = 0, m_oaaH = 0;
+    DXGI_FORMAT                                       m_oaaFmt = DXGI_FORMAT_UNKNOWN;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>  m_oaaSrcSrv;    // in place: SRV of the game's colour texture (cached)
+    ID3D11Texture2D*                                  m_oaaSrcTex = nullptr;   // the texture m_oaaSrcSrv was made for (identity)
+    int                                               m_oaaSrcLuma = 0;        // its luma mode (0 encoded, 1 sRGB view, 2 HDR)
+    bool                                              m_oaaSrcEncode = false;  // _SRGB-only texture: the CS re-encodes
+    float                                             m_oaaData[20] = {};     // last uploaded Params (OutsideAa::kParamFloats)
+    bool                                              m_oaaDataValid = false;
+    bool                                              m_oaaArmed = false;     // upscale: Composite draws the bands
+    ID3D11Texture2D*                                  m_oaaRunTex = nullptr;  // upscale: Run's colour texture (identity, no ref)
+    float                                             m_oaaSx = 0.0f, m_oaaSy = 0.0f;   // upscale: the pass's shift (render px)
+    bool                                              m_oaaCsTried = false, m_oaaPsTried = false, m_oaaCommonTried = false;
+    bool                                              m_oaaTexFailed = false; // scratch creation failed at m_oaaW x m_oaaH
+    bool                                              m_oaaLogged[2] = {};    // "first" line per path (in place / upscale)
+    uint64_t                                          m_oaaRuns = 0;
+    uint64_t                                          m_oaaSkipBound = 0, m_oaaSkipSrc = 0;   // skipped: colour bound for
+                                                                                              // output / SRV0 not Run's texture
 
     // ---- v0.7.0 upscale composite (VS + PS draw into the game's RT0 after its blit) ----
     Microsoft::WRL::ComPtr<ID3D11VertexShader>        m_compVs;

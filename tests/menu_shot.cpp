@@ -379,7 +379,7 @@ static void HotkeysShot(Gpu& g, const wchar_t* file) {
         { L"DLAA before tonemap (flat)", L"Alt+F7", L"-" }, { L"See-through depth", L"Ctrl+F3", L"-" },
         { L"Thin-wire motion (DLAA)", L"Alt+F10", L"-" }, { L"Thin-wire depth", L"Alt+F11", L"-" }, { L"Thin-wire widening", L"Alt+F12", L"-" },
         { L"DLSS upscale", L"Ctrl+F4", L"-" }, { L"DLAA on / off", L"Shift+F11", L"-" },
-        { L"Shimmer capture", L"Pause", L"-" }, { L"Save to dlaa.ini", L"Shift+F12", L"-" },
+        { L"Shimmer capture", L"Insert", L"-" }, { L"Save to dlaa.ini", L"Shift+F12", L"-" },
         { L"Menu: open / close", L"Delete", L"Wheel10" }, { L"Menu: up", L"Up", L"WheelUp" }, { L"Menu: down", L"Down", L"WheelDown" },
         { L"Menu: left", L"Left", L"WheelLeft" }, { L"Menu: right", L"Right", L"WheelRight" },
     };

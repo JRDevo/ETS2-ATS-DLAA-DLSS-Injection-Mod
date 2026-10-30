@@ -305,5 +305,168 @@ class TestParsing(Base):
         self.assertTrue(any(n == 2 and t.startswith("VR eye blit") for t, n in counts.items()), counts)
 
 
+class TestCutoutMips(Base):
+    """phase 77: the "Cut-out alpha mips" row (dlaa.ini cutout_mips, startup only)."""
+
+    @staticmethod
+    def stats(seen, patched, soft=0, cov=0, noloss=0, size=0, off=False):
+        sk = soft + cov + noloss + size
+        return ("cut-out mips%s: seen %d patched %d skipped %d (soft %d, coverage %d, no loss %d, size %d) cache hits 0 cpu total "
+                "12.5 ms max 1.90 ms | mips replaced %d, left to the game 0 | uploads by format (Texture2D mip 0, every 500 BC3 "
+                "textures): BC1 900, BC2 0, BC3 %d, BC4 0, BC5 40, BC6H 0, BC7 0, RGBA8 3, other 12"
+                % (" (off: upload counts only)" if off else "", seen, patched, sk, soft, cov, noloss, size, patched * 10, seen))
+
+    def lines(self, on, extra, version="0.15.2", level=4):
+        start = "cut-out mips (phase 77): %s (cutout_mips=%d)" % ("on" if on else "off", 1 if on else 0)
+        return head(version=version, level=level, extra=[start]) + vr_world() + list(extra) + [unload(600, 1200)]
+
+    def test_off(self):
+        sess, rows, _ = self.run_log(self.lines(False, [self.stats(0, 0, off=True)]), ini="")
+        self.verdict(rows, "Cut-out alpha mips", "OFF")
+
+    def test_off_default_no_line(self):
+        lines = head(version="0.15.2") + vr_world() + [unload(600, 1200)]
+        sess, rows, _ = self.run_log(lines, ini="")
+        self.verdict(rows, "Cut-out alpha mips", "OFF")
+
+    def test_pass_level4(self):
+        sess, rows, _ = self.run_log(self.lines(True, [self.stats(500, 7, soft=450, cov=30, noloss=5, size=8)]), ini="")
+        self.verdict(rows, "Cut-out alpha mips", "PASS")
+        self.assertIn("7 of 500", rows["Cut-out alpha mips"][2])
+
+    def test_pass_level3(self):
+        first = ("cut-out mips: first texture rebuilt 128x2048 mips 12 fmt 77 hash 1a2b3c4d cov mip0 17.5% game rule mips2..7 "
+                 "18.2/11.2/1.6/1.6/0.0/0.0 % -> ours 17.5/17.5/17.5/17.6/17.2/18.8 %, 1.82 ms")
+        sess, rows, _ = self.run_log(self.lines(True, [first], level=3), ini="cutout_mips = 1\n")
+        self.verdict(rows, "Cut-out alpha mips", "PASS")
+
+    def test_low_log(self):
+        sess, rows, _ = self.run_log(self.lines(True, [], level=3), ini="cutout_mips = 1\n")
+        self.verdict(rows, "Cut-out alpha mips", "LOW LOG")
+
+    def test_fail_seen_but_nothing(self):
+        sess, rows, _ = self.run_log(self.lines(True, [self.stats(500, 0)]), ini="")
+        self.verdict(rows, "Cut-out alpha mips", "FAIL")
+
+    def test_not_used_all_skipped(self):
+        sess, rows, _ = self.run_log(self.lines(True, [self.stats(500, 0, soft=480, cov=20)]), ini="")
+        self.verdict(rows, "Cut-out alpha mips", "NOT USED")
+
+    def test_off_but_patched(self):
+        sess, rows, _ = self.run_log(self.lines(False, [self.stats(500, 3, soft=497, off=True)]), ini="")
+        self.verdict(rows, "Cut-out alpha mips", "FAIL")
+
+    def test_error_line(self):
+        extra = [self.stats(500, 7, soft=493), "ERROR cut-out mips: something failed"]
+        sess, rows, _ = self.run_log(self.lines(True, extra), ini="")
+        self.verdict(rows, "Cut-out alpha mips", "FAIL")
+
+    def test_older_version(self):
+        sess, rows, _ = self.run_log(head(version="0.15.1") + vr_world() + [unload(600, 1200)], ini="")
+        self.verdict(rows, "Cut-out alpha mips", "N/A")
+
+
+
+class TestLightFsJitter(Base):
+    """phase 78: the phase-55 stats line ends with the full-screen light draws; the "Lighting redraw jitter" row also passes on them."""
+
+    @staticmethod
+    def light(blit, redraws, fs, fs_no=0, noshift=0):
+        return ("lighting redraws (phase 55, light_redraw_jitter 1) @blit %d: %d shifted redraws in 309 lighting binds (0.0 per "
+                "blit), %d runs; back to the game's viewport at a Draw 0, a non-qualifying DrawIndexed 0, a depth-stencil state 0; "
+                "redraws NOT shifted (viewport not the pass size) %d; cached states: depth-stencil 2, rasterizer 1 | phase 78 "
+                "light_fs_jitter 1: full-screen light draws shifted %d, full-screen NOT shifted %d, edge re-draws %d, scissor twins 1"
+                % (blit, redraws, redraws, noshift, fs, fs_no, fs // 2))
+
+    def lines(self, fs, fs_no=0, redraws=0):
+        world = [l for l in vr_world() if not l.startswith("lighting redraws (phase 55")]
+        world += [self.light(600, redraws, fs, fs_no), self.light(1200, redraws, fs, fs_no)]
+        return head() + world + [unload(600, 1200)]
+
+    def test_pass_on_full_screen_only(self):
+        sess, rows, _ = self.run_log(self.lines(fs=1200), ini="")
+        self.verdict(rows, "Lighting redraw jitter", "PASS")
+        self.assertIn("2400 full-screen light draws shifted", rows["Lighting redraw jitter"][2])
+
+    def test_pass_both(self):
+        sess, rows, _ = self.run_log(self.lines(fs=1200, redraws=232), ini="")
+        self.verdict(rows, "Lighting redraw jitter", "PASS")
+        self.assertIn("464 lighting redraws shifted", rows["Lighting redraw jitter"][2])
+
+    def test_fail_full_screen_not_shifted(self):
+        sess, rows, _ = self.run_log(self.lines(fs=0, fs_no=1200), ini="")
+        self.verdict(rows, "Lighting redraw jitter", "FAIL")
+
+    def test_not_used_nothing_drawn(self):
+        sess, rows, _ = self.run_log(self.lines(fs=0), ini="")
+        self.verdict(rows, "Lighting redraw jitter", "NOT USED")
+
+    def test_old_line_still_parsed(self):
+        sess, rows, _ = self.run_log(head() + vr_world() + [unload(600, 1200)], ini="")   # the pre-phase-78 line (no tail)
+        self.verdict(rows, "Lighting redraw jitter", "PASS")
+
+class TestOutsideAa(Base):
+    """phase 81: the "Outside-AA (outside the area)" row (dlaa.ini outside_aa, startup only; VR, dlaa_area < 100)."""
+    ROW = "Outside-AA (outside the area)"
+
+    @staticmethod
+    def perf(blit, eye, oaa=None):
+        tail = " outside-aa %.3f/%.3f" % (oaa, oaa * 1.5) if oaa is not None else ""
+        return ("perf eye %d @blit %d: mod GPU 1.234 avg / 2.000 max ms per pass (300 passes; everything except NGX; NGX 0.600 "
+                "avg, mirror NGX 0.000 avg) | GPU spans scene 9.00 ms/frame (n=300) | ms avg/max: copy-in 0.010/0.020 rcas "
+                "0.040/0.050 copy-out 0.020/0.030%s" % (eye, blit, tail))
+
+    def lines(self, mode=2, extra=(), level=4, area=50, version="0.15.2"):
+        start = "outside AA (phase 81): outside_aa=%d (%s)" % (mode, "on" if mode else "off: outside the DLAA area rect the "
+                                                                "picture is the raw jittered frame")
+        world = [l.replace("area=50", "area=%d" % area) for l in vr_world()]
+        h = [l.replace("dlaa_area=50", "dlaa_area=%d" % area) for l in head(version=version, level=level, extra=[start])]
+        return h + world + list(extra) + [unload(600, 1200)]
+
+    def test_pass_level4(self):
+        extra = [self.perf(600, 0, 0.21), self.perf(600, 1, 0.20), self.perf(1200, 0, 0.22), self.perf(1200, 1, 0.21)]
+        sess, rows, _ = self.run_log(self.lines(extra=extra), ini="")
+        self.verdict(rows, self.ROW, "PASS")
+        self.assertIn("0.220 ms", rows[self.ROW][2])
+
+    def test_pass_level3(self):
+        first = ("outside AA (phase 81): eye 0 first outside-AA draw (upscale, drawn over the game's stretch) -- outside_aa=2 "
+                 "(unjitter + edge AA), rect (1380,0) 2761x2928 of 5512x5848 output px, 3 band(s) around it, shift (-0.2500, "
+                 "+0.1667) render px (= NGX jitter x jitter sign +1 / +1), source R8G8B8A8 _SRGB view (linear, sqrt luma)")
+        sess, rows, _ = self.run_log(self.lines(extra=[first], level=3), ini="outside_aa = 2\n")
+        self.verdict(rows, self.ROW, "PASS")
+
+    def test_low_log(self):
+        sess, rows, _ = self.run_log(self.lines(level=3), ini="outside_aa = 2\n")
+        self.verdict(rows, self.ROW, "LOW LOG")
+
+    def test_off(self):
+        sess, rows, _ = self.run_log(self.lines(mode=0, extra=[self.perf(600, 0), self.perf(1200, 0)]), ini="")
+        self.verdict(rows, self.ROW, "OFF")
+
+    def test_fail_never_ran(self):
+        sess, rows, _ = self.run_log(self.lines(extra=[self.perf(600, 0), self.perf(1200, 0)]), ini="")
+        self.verdict(rows, self.ROW, "FAIL")
+
+    def test_not_used_area_100(self):
+        sess, rows, _ = self.run_log(self.lines(area=100, extra=[self.perf(600, 0), self.perf(1200, 0)]), ini="")
+        self.verdict(rows, self.ROW, "NOT USED")
+
+    def test_fail_on_skip_warning(self):
+        extra = [self.perf(600, 0, 0.0), "WARN  outside AA (phase 81): eye 0 the blit's SRV0 is not the texture DLSS ran on -- "
+                 "outside left as the game's stretch (logged once)", self.perf(1200, 0)]
+        sess, rows, _ = self.run_log(self.lines(extra=extra), ini="")
+        self.verdict(rows, self.ROW, "FAIL")
+
+    def test_preview_eye_ignored(self):
+        extra = [self.perf(600, 10, 0.05), self.perf(600, 0, 0.2), self.perf(1200, 0, 0.2)]
+        sess, rows, _ = self.run_log(self.lines(extra=extra), ini="")
+        self.verdict(rows, self.ROW, "PASS")
+
+    def test_older_version(self):
+        sess, rows, _ = self.run_log(head(version="0.15.1") + vr_world() + [unload(600, 1200)], ini="")
+        self.verdict(rows, self.ROW, "N/A")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

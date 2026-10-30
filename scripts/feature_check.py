@@ -255,7 +255,7 @@ DEFAULTS = {
     "cpu_cache_pin": "0", "light_redraw_jitter": "1", "jitter_enabled": "1", "mv_enabled": "1", "tex_aniso": "0",
     "mirror_turns": "0", "reflex": "0", "fps_cap": "0", "vr_fps_cap": "0", "xr_hidden_mask": "0", "xr_turbo": "0",
     "vrs": "0", "vrs_passes": "0", "vrs_eye": "0", "fps_show": "0", "tex_lod_bias": "0",
-    "cpu_pcore": "0", "cpu_priority": "0", "cpu_no_throttle": "0",
+    "cpu_pcore": "0", "cpu_priority": "0", "cpu_no_throttle": "0", "cutout_mips": "0", "outside_aa": "2",
 }
 
 _SKIP_STARTUP = re.compile(r"^(hotkeys:|DirectInput|controller )")
@@ -768,7 +768,18 @@ def ev_aniso(s, tl):
 
 
 def st_lightjit(s):
-    return key_timeline(s, "light_redraw_jitter", to_bool)
+    # phase 78: the row covers both lighting jitters -- on when light_redraw_jitter (phase 55) OR light_fs_jitter (phase 78) is on
+    a = key_timeline(s, "light_redraw_jitter", to_bool)
+    b = key_timeline(s, "light_fs_jitter", to_bool)
+    if not b.ev:
+        return a
+    tl = Timeline()
+    for i in sorted({j for j, _, _ in a.ev} | {j for j, _, _ in b.ev}):
+        va, vb = a.at(i), b.at(i)
+        if va is None and vb is None:
+            continue
+        tl.add(i, bool(va) or bool(vb), "dlaa.ini" if i < 0 else "log")
+    return tl
 
 
 def ev_lightjit(s, tl):
@@ -776,17 +787,29 @@ def ev_lightjit(s, tl):
     ev = Ev(need=4)
     tot = 0
     noshift = 0
+    fs = fs_noshift = 0
+    # phase 78: the same line ends with the full-screen light draws (the deferred sun light) shifted / NOT shifted
+    fs_rx = re.compile(r"full-screen light draws shifted (\d+), full-screen NOT shifted (\d+)")
     for ln, m in log.grep(r"^lighting redraws \(phase 55, light_redraw_jitter (\d)\) @blit \d+: (\d+) shifted redraws in (\d+) "
                           r"lighting binds.*?redraws NOT shifted \(viewport not the pass size\) (\d+)"):
-        ev.sample(ln.i, int(m.group(2)) > 0)
+        f = fs_rx.search(ln.text)
+        nfs = int(f.group(1)) if f else 0
+        ev.sample(ln.i, int(m.group(2)) > 0 or nfs > 0)
         tot += int(m.group(2))
         noshift += int(m.group(4))
+        if f:
+            fs += nfs
+            fs_noshift += int(f.group(2))
     if tot:
         ev.proof.append("%d lighting redraws shifted with the jitter" % tot)
-    elif ev.samples and not noshift:
-        ev.notused = "the lighting pass drew no light-mesh redraw to shift (0 shifted, 0 missed: few lights, daytime?)"
-    elif noshift:
-        ev.fails.append("%d lighting redraws NOT shifted (viewport not the pass size), 0 shifted" % noshift)
+    if fs:
+        ev.proof.append("%d full-screen light draws shifted (phase 78)" % fs)
+    if not tot and not fs:
+        if ev.samples and not noshift and not fs_noshift:
+            ev.notused = "the lighting pass drew no light-mesh redraw to shift (0 shifted, 0 missed: few lights, daytime?)"
+        elif noshift or fs_noshift:
+            ev.fails.append("%d lighting redraws / %d full-screen light draws NOT shifted (viewport not the pass size), 0 shifted"
+                            % (noshift, fs_noshift))
     return ev
 
 
@@ -849,6 +872,41 @@ def ev_wire(s, tl):
     return ev
 
 
+def st_cutout(s):
+    # phase 77: startup only (no menu row, no key): "cut-out mips (phase 77): on (cutout_mips=1)"
+    return key_timeline(s, "cutout_mips", to_bool)
+
+
+_CUTOUT_STATS = (r"^cut-out mips(?: \([^)]*\))?: seen (\d+) patched (\d+) skipped (\d+) \(soft (\d+), coverage (\d+), "
+                 r"no loss (\d+), size (\d+)(?:, (?:CPU budget|queue full) (\d+))?\)")
+
+
+def ev_cutout(s, tl):
+    log = s.log
+    ev = Ev(need=4)
+    seen = patched = skipped = 0
+    for ln, m in log.grep(_CUTOUT_STATS):
+        seen, patched, skipped = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        ev.sample(ln.i, patched > 0)                 # the counters are totals since the start
+    if patched:
+        ev.proof.append("%d of %d cut-out candidate textures rebuilt" % (patched, seen))
+    r = log.grep(r"^cut-out mips: first texture rebuilt")
+    if r:
+        if not ev.samples:
+            ev.need = 3
+        ev.sample(r[0][0].i, True)
+        if not patched:
+            ev.proof.append("'cut-out mips: first texture rebuilt' line (level 3 proof)")
+    if ev.samples and not any(x for _, x in ev.samples):
+        if seen == 0:
+            ev.notused = "no BC3 texture upload seen (no world loaded?)"
+        elif skipped > 0:
+            ev.notused = "%d BC3 textures seen, none needed it (every one skipped for a reason)" % seen
+        # seen > 0, patched 0, no skip reason: falls through to FAIL (every counter 0)
+    errs(log, ev, r"^cut-out mips: ", lvl=("E",))
+    return ev
+
+
 def st_bias(s):
     return key_timeline(s, "dlss_bias_mask", lambda v: None if num(v) is None else num(v) > 0, extra=[
         (r"^Light glow ghosting fix \(phase 49\): dlss_bias_mask=(\d+)", lambda m: int(m.group(1)) > 0),
@@ -877,6 +935,49 @@ def ev_bias(s, tl):
     if ev.samples and not any_glow and not masks:
         ev.notused = "no light glow was drawn (daytime?)"
     errs(log, ev, r"^DLSS bias mask: (OFF for this session|.*no glow bias)")
+    return ev
+
+
+def st_oaa(s):
+    # phase 81: startup only (no menu row, no key): "outside AA (phase 81): outside_aa=2 (...)"; 1 and 2 are both "on"
+    return key_timeline(s, "outside_aa", lambda v: None if num(v) is None else num(v) > 0)
+
+
+_OAA_PERF = re.compile(r"\boutside-aa ([\d.]+)/([\d.]+)")
+
+
+def ev_oaa(s, tl):
+    """phase 81: the GpuPerf "outside-aa" section of the main eyes (level 4), else the 'first outside-AA draw' line (level 3).
+    It only exists at dlaa_area < 100 (VR; flat forces 100)."""
+    log = s.log
+    ev = Ev(need=4)
+    best = 0.0
+    for ln, m in log.grep(r"^perf eye (\d+) @blit \d+: mod GPU"):
+        if not main_eye(m.group(1)):
+            continue
+        p = _OAA_PERF.search(ln.text)
+        ms = num(p.group(1), 0) if p else 0
+        ev.sample(ln.i, ms > 0)
+        best = max(best, ms)
+    if best:
+        ev.proof.append("outside-AA pass ran (up to %.3f ms avg per eye pass)" % best)
+    first = [(ln, m) for ln, m in log.grep(r"^outside AA \(phase 81\): eye (\d+) first outside-AA draw \(([^)]*)\)")
+             if main_eye(m.group(1))]
+    if first and not ev.samples:
+        ev.need = 3
+        ev.sample(first[0][0].i, True)
+        ev.proof.append("'first outside-AA draw (%s)' line (level 3 proof)" % first[0][1].group(2))
+    if not any(r for _, r in ev.samples):
+        areas = [int(m.group(1)) for _, m in log.grep(r"^DLAA GPU cost eye \d+: .*? area=(\d+)")]
+        areas += [int(m.group(1)) for _, m in log.grep(r"^config \(.*?\bdlaa_area=(\d+)")]
+        if areas and min(areas) >= 100:
+            ev.notused = "dlaa_area 100: the whole picture gets DLAA, there is no outside"
+    for ln, m in log.grep(r"^outside AA \(phase 81\): eye (\d+) .*(unavailable|create hr|cannot read its colour|"
+                          r"bound as a render target|SRV0 is not the texture)"):
+        if main_eye(m.group(1)):
+            ev.fails.append("%s %s" % (ln.ts, short(ln.text)))
+            ev.found_any = True
+    errs(log, ev, r"^outside AA \(phase 81\): (params|sampler)", lvl=("E",))
     return ev
 
 
@@ -1272,7 +1373,9 @@ FEATURES = [
     ("Texture LOD bias",              "both", True,  st_lod,        ev_lod),
     ("Anisotropic filter",            "both", True,  st_aniso,      ev_aniso),
     ("Wire widening",                 "both", True,  st_wire,       ev_wire),
+    ("Cut-out alpha mips",            "both", False, st_cutout,     ev_cutout),
     ("Light glow fix (bias mask)",    "both", True,  st_bias,       ev_bias),
+    ("Outside-AA (outside the area)", "vr",   True,  st_oaa,        ev_oaa),
     ("Menu truck-preview DLAA",       "both", False, st_preview,    ev_preview),
     ("Triple screens (multi-view)",   "flat", True,  st_multiview,  ev_multiview),
     ("Foveated (VRS)",                "vr",   True,  st_vrs,        ev_vrs),
@@ -1299,7 +1402,8 @@ SINCE = {
     "Foveated passes (lighting)": "0.12.0", "Hidden area mask": "0.12.0", "Mirrors in turns": "0.12.0",
     "Triple screens (multi-view)": "0.12.0", "fps box attached to vehicle": "0.12.0", "Lighting redraw jitter": "0.13.0",
     "Light glow fix (bias mask)": "0.13.0", "Reflex": "0.13.0", "FPS cap (flat)": "0.13.0", "VR FPS cap": "0.13.0",
-    "CPU tuning": "0.13.0", "Wire widening": "0.14.0", "Eye tracking (VRS)": "0.14.0",
+    "CPU tuning": "0.13.0", "Wire widening": "0.14.0", "Eye tracking (VRS)": "0.14.0", "Cut-out alpha mips": "0.15.2",
+    "Outside-AA (outside the area)": "0.15.2",
 }
 
 

@@ -623,6 +623,17 @@ public:
     static uint64_t StaticClears(int why);
     // keys in the table seen lately (*atThreshold: of them at / over the streak threshold, *held: held by a rigid-parent mark)
     static int  StaticKeys(int* atThreshold, int* held);
+    // phase 80 SOLID DITHER GATE (dlaa.ini wire_solid_static_only, default 1; inject.cpp SolidOnDraw). The phase-63 solid dither
+    // (wire_widen: VS 07dfaa00 + PS b67da69f) also matches AI CAR parts -- windows, wheels, trims (RenderDoc 2026-10-29: 11 of the
+    // 33 pair-A draws of amtrucks_2026.10.09_21.10.01_frame5633 are car parts) -- and a dithered moving part has no stable
+    // coverage (its pixels flip between car and background every frame: no DLSS history). With the gate on, a NON-instanced draw is
+    // dithered only when the static table above KNOWS its FullKey as deep static (a verdict within kStatFresh frames, streak >= 1)
+    // and it has not moved within kStatQuiet frames; a mover / a key without such a verdict is drawn by the game's own shaders.
+    // why: 0 = rule off / instanced / key 0 / table off (mv_replay_static_frames 0) -> true as before phase 80, 1 = known static,
+    // 2 = moved lately, 3 = no static verdict (new key, stale, shallow-static).
+    static bool SolidDitherOk(uint64_t fullKey, bool instanced, int* why = nullptr);
+    static void SetSolidStaticOnly(bool on);
+    static bool SolidStaticOnly();
     // polls the diagnostics readbacks of every main (non-quiet) unit now (non-blocking) -- inject.cpp DidReplay calls it right
     // before a gated replay, so a verdict that landed since the last blit (a parked car that started) counts one frame earlier
     static void PollMain(ID3D11DeviceContext* ctx);

@@ -4586,6 +4586,26 @@ void DrawIdMv::StaticClear(int why) {
     if (why >= 0 && why < kStatClrN) ++g_statClears[why];
 }
 uint64_t DrawIdMv::StaticClears(int why) { return (why >= 0 && why < kStatClrN) ? g_statClears[why] : 0; }
+// phase 80 SOLID DITHER GATE (see draw_ids.h): reads the COLD half (the gate runs only for the few draws whose shaders matched)
+static bool g_solidStaticOnly = true;
+void DrawIdMv::SetSolidStaticOnly(bool on) { g_solidStaticOnly = on; }
+bool DrawIdMv::SolidStaticOnly() { return g_solidStaticOnly; }
+bool DrawIdMv::SolidDitherOk(uint64_t key, bool instanced, int* why) {
+    int w = 0;
+    bool ok = true;
+    if (g_solidStaticOnly && !instanced && key && g_statFrames > 0u) {
+        const int h = StatFind(key, false);
+        if (h < 0) { w = 3; ok = false; }
+        else {
+            const StatCold& e = g_statCold[h];
+            if (e.moved && e.moved + kStatQuiet > g_instFrame) { w = 2; ok = false; }          // a mover (any route) lately
+            else if (e.streak == 0u || e.seen + kStatFresh < g_instFrame) { w = 3; ok = false; }   // no fresh deep-static verdict
+            else w = 1;
+        }
+    }
+    if (why) *why = w;
+    return ok;
+}
 int DrawIdMv::StaticKeys(int* atThreshold, int* held) {
     int n = 0, at = 0, hd = 0;
     for (int h = 0; h < kStatTab; ++h) {
