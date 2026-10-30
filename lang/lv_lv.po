@@ -135,6 +135,11 @@ msgstr "Palielināšana un VR"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "In-game UI (VR)"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "VR veiktspēja"
 
@@ -395,8 +400,8 @@ msgid ""
 "less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
 msgstr ""
 "Cik liela daļa no maisījuma ir spēles TAA, 0 - 100 % ar soli 10 %: vairāk = mierīgāk un mīkstāk "
-"(TAA), mazāk = asāk (DLAA / DLSS). Izmanto, ja Spēles TAA ir maisījums, vai sadalīts ar "
-"maisījuma pusi. Bez papildu izmaksām."
+"(TAA), mazāk = asāk (DLAA / DLSS). Izmanto, ja Spēles TAA ir maisījums, vai sadalīts ar maisījuma "
+"pusi. Bez papildu izmaksām."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -414,9 +419,9 @@ msgid ""
 "| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
 "upscaling. Used only when Game TAA is split."
 msgstr ""
-"Ko Spēles TAA sadalīts rāda abās pusēs: DLAA | TAA (pa kreisi modifikācija, pa labi spēles "
-"TAA), maisījums | TAA vai DLAA | maisījums (maisījums = abi sajaukti pēc Spēles TAA daļas). "
-"DLSS DLAA vietā palielinot. Izmanto tikai tad, ja Spēles TAA ir sadalīts."
+"Ko Spēles TAA sadalīts rāda abās pusēs: DLAA | TAA (pa kreisi modifikācija, pa labi spēles TAA), "
+"maisījums | TAA vai DLAA | maisījums (maisījums = abi sajaukti pēc Spēles TAA daļas). DLSS DLAA "
+"vietā palielinot. Izmanto tikai tad, ja Spēles TAA ir sadalīts."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -439,6 +444,34 @@ msgstr ""
 "VectorXR = OpenXR uzlabojumu komplekts (DienerTech) (github.com/DienerTech/vectorxr): Turbo, "
 "Depth, kadru ģenerēšana; atrasts = tā slānis ir ielādēts spēlē un modifikācija ļauj tā darbam iet "
 "cauri. Izmantojiet tikai vienu Turbo (tā vai modifikācijas)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
+"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
+"(the game's menu screens)."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
+"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
+"own values when it exits)."
+msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1152,6 +1185,26 @@ msgstr "Spoguļi tagad maksā %ls uz kadru."
 #, c-format
 msgid "Greyed in VR: VR always runs DLAA on the finished picture."
 msgstr "VR pelēks: VR vienmēr palaiž DLAA uz gatavā attēla."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed: VR only."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
+"game is closed."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Sending to the game's console..."
+msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2082,6 +2135,66 @@ msgstr "VectorXR (VR slānis)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Layout"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "driving"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "menus"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Height"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Side"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Distance"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Tilt"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Size"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Curve"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reset to config.cfg"
+msgstr ""
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Right"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Turbo mode (VR)"
 msgstr "Turbo (VR)"
 
@@ -2519,7 +2632,4 @@ msgstr "info"
 #: src/log.h
 msgid "debug"
 msgstr "atkļūdošana"
-
-#~ msgid "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
-#~ msgstr "Cik liela daļa no maisījuma ir spēles TAA, 0 - 100 % ar soli 10 %: vairāk = mierīgāk un mīkstāk (TAA), mazāk = asāk (DLAA / DLSS). Izmanto tikai tad, ja Spēles TAA ir maisījums. Bez papildu izmaksām."
 

@@ -498,4 +498,11 @@ const wchar_t* NativeName(const char* code) {
     return TrA(code);
 }
 
+std::string ReadGameConfig(std::wstring* path) {     // phase 83
+    std::wstring docs;
+    if (!GameDocs(docs)) return std::string();
+    if (path) *path = docs + L"config.cfg";
+    return ReadAll(docs + L"config.cfg", 1u << 20);
+}
+
 }  // namespace Lang

@@ -17,6 +17,8 @@
 #pragma once
 #include <cstdint>
 
+#include <string>
+
 namespace Lang {
 
 uint32_t        Gen();                              // bumped whenever the active texts change (the TR sites re-resolve)
@@ -55,6 +57,9 @@ int             Count();                            // the languages the menu ro
 const char*     CodeAt(int i);                      // "auto", "en_us", "de_de" ...
 const wchar_t*  NativeName(const char* code);       // "Deutsch", L"English" ...; the code itself when unknown
 bool            LoadForTest(const wchar_t* poPath, const char* code);   // tests: that .po file active as `code` (no pack)
+// phase 83: the game's config.cfg (Documents\<game>\config.cfg, the game by the exe name) as text, "" when missing; `path` (optional)
+// gets the file's path for log lines
+std::string     ReadGameConfig(std::wstring* path = nullptr);
 
 }  // namespace Lang
 

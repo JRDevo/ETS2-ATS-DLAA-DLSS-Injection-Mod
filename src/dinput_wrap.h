@@ -69,6 +69,22 @@ void ControllerState(uint32_t buttons[4], unsigned* povDirs, uint32_t* freshSlot
 constexpr int kHideNone = 0, kHideMenuInputs = 1, kHideAll = 2;
 constexpr int kMaxHide = 8;
 void SetMenuHide(int mode, const int* vks, const int* joys, int n);
+int  MenuHideMode();                                   // the mode set last (phase 83: no typing into the game in bind mode)
+
+// phase 83 (src/vr_ui.h): SYNTHETIC KEYS for the game -- the mod types console commands (the VR UI placement cvars). Render thread.
+//  InjectDiKey: a DirectInput key event for the game's keyboard device -- the key's state byte reads pressed in GetDeviceState
+//    while held, and one buffered entry (press / release) is appended to the game's next GetDeviceData (queued, in order).
+//  InjectWindowKey / InjectWindowChar: WM_KEYDOWN / WM_KEYUP / WM_CHAR posted to the game window (the subclassed one; scan code 0:
+//    marks them as the mod's, so the menu's key filter and the player-typing watch both ignore them).
+//  LastUserKeyMs: GetTickCount64 of the last key the PLAYER pressed that reached the game (a DirectInput press entry or a key / char
+//    message; hidden menu keys and the mod's own keys excluded) -- the mod never types while the player types (console, chat).
+//  GameWindowKnown / KeyboardDeviceSeen: the two delivery paths exist.
+void InjectDiKey(uint8_t dik, bool down);
+bool InjectWindowKey(uint8_t vk, bool down);
+bool InjectWindowChar(char c);
+uint64_t LastUserKeyMs();
+bool GameWindowKnown();
+bool KeyboardDeviceSeen();
 }
 
 // v0.10.1 inject.cpp: dlaa.ini controller_name filter -- true = this controller (product name) is tapped / filtered. Empty

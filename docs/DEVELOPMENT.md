@@ -2494,6 +2494,31 @@ non-blocking readback timing -- so it is judged by the check totals and a verify
   either way).
   `tests/game_taa_test.cpp` (CI) covers the pure logic; the settings round-trip test checks the two rows against `g_gameTaa`.
 
+### Phase 83: the game's in-game VR UI placement, live from the menu (group "In-game UI (VR)", `src/vr_ui.h`)
+
+- **What.** The game places its VR UI with console variables: `r_manual_stereo_ui_<y x dist pitch yaw fov radius>_game` while
+  driving and the same without `_game` on the menu screens (config.cfg; `uset r_manual_stereo_ui_y_game "-0.4"` in the console moves
+  the HUD at once -- user test, ATS). The group's rows: Layout (driving / menus, session only), Height, Side, Distance, Tilt, Turn,
+  Size, Curve (steps 0.05 / 0.05 / 0.1 / 0.05 / 0.05 / 1 / 0.5) and "Reset to config.cfg" (Right). VR only (hidden / greyed flat).
+- **Values.** Read from `Documents\<game>\config.cfg` (`Lang::ReadGameConfig`, the folder by the exe name) at the first use and at
+  every menu open (only the values not changed this session). Never written to config.cfg (the game saves its own cvars at exit)
+  or to dlaa.ini. Needs the console: config.cfg `g_developer "1"` and `g_console "1"` (`VrUi::ConsoleEnabled`); else the rows are
+  greyed and their description says how to enable it. Startup INFO line: what was read.
+- **How a change reaches the game.** The mod TYPES the console command. `VrUi::Debounce`: a changed value is sent once it stayed
+  0.4 s, one command per changed cvar, nothing when it went back to the game's value. `VrUiTick` (once per Present, render thread)
+  starts a batch only when the player typed nothing that reached the game for 2 s (`KeySwallow::LastUserKeyMs`: DirectInput key
+  presses and key / char window messages the menu did not hide -- console or chat in use) and never in Hotkeys-page bind mode.
+  `VrUi::KeyPlan`: console key (DIK_GRAVE) down / 50 ms / up, 150 ms, the text, Enter down / 50 ms / up, 100 ms per command, console
+  key again. Delivery (`dinput_wrap.cpp`, `dlaa.ini vr_ui_keys`, startup only): 0 (default) = the console key and Enter as
+  DirectInput events on the game's keyboard device (the key's state byte reads pressed in GetDeviceState while held + one buffered
+  entry appended to the game's GetDeviceData, queued in order, PEEK-safe), the text as WM_CHAR posted to the game window, Enter also
+  as WM_KEYDOWN / WM_CHAR '\r' / WM_KEYUP; 1 = window messages only; 2 = DirectInput only (letters as US-layout scan codes). The
+  mod's posted messages carry scan code 0: the menu's key filter and the player-typing watch pass / ignore them; the menu hides only
+  its own 5 inputs, so the console key, Enter and the text reach the game while the menu is open. One INFO line per sent command.
+- **Risks / not verified in game.** Whether SCS's console takes the toggle / Enter from DirectInput and the text from WM_CHAR (the
+  three `vr_ui_keys` modes are there to find out); a console the player left open would be closed by the toggle; the menu-screen
+  cvars may only apply on the menu screens. `tests/vr_ui_test.cpp` (CI): parsing, steps, debounce / queue, the keystroke plan.
+
 ### The RenderDoc oracle (done in v0.2)
 
 Capture a frame of the unmodified game to learn empirically: which pass writes

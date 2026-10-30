@@ -135,6 +135,11 @@ msgstr "Escalat i VR"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "In-game UI (VR)"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "Rendiment VR"
 
@@ -397,9 +402,9 @@ msgid ""
 "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
 "less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
 msgstr ""
-"Quanta part de la mescla és el TAA del joc, 0 - 100 % en passos del 10 %: més = més calmat i "
-"suau (TAA), menys = més nítid (DLAA / DLSS). S'usa quan TAA del joc és mescla, o dividit amb un "
-"costat mescla. Sense cost addicional."
+"Quanta part de la mescla és el TAA del joc, 0 - 100 % en passos del 10 %: més = més calmat i suau "
+"(TAA), menys = més nítid (DLAA / DLSS). S'usa quan TAA del joc és mescla, o dividit amb un costat "
+"mescla. Sense cost addicional."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -417,9 +422,9 @@ msgid ""
 "| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
 "upscaling. Used only when Game TAA is split."
 msgstr ""
-"El que mostra TAA del joc dividit a cada costat: DLAA | TAA (el mod a l'esquerra, el TAA del "
-"joc a la dreta), mescla | TAA o DLAA | mescla (mescla = les dues barrejades segons Part del TAA "
-"del joc). DLSS en lloc de DLAA en escalar. Només s'usa quan TAA del joc és dividit."
+"El que mostra TAA del joc dividit a cada costat: DLAA | TAA (el mod a l'esquerra, el TAA del joc "
+"a la dreta), mescla | TAA o DLAA | mescla (mescla = les dues barrejades segons Part del TAA del "
+"joc). DLSS en lloc de DLAA en escalar. Només s'usa quan TAA del joc és dividit."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -442,6 +447,34 @@ msgstr ""
 "VectorXR = un conjunt de millores OpenXR de DienerTech (github.com/DienerTech/vectorxr): Turbo, "
 "profunditat, generació de fotogrames; trobat = la seva capa està carregada al joc i el mod deixa "
 "passar la seva feina. Fes servir un sol Turbo (el seu o el del mod)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
+"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
+"(the game's menu screens)."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
+"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
+"own values when it exits)."
+msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1161,6 +1194,26 @@ msgstr "Els retrovisors costen %ls per fotograma ara."
 #, c-format
 msgid "Greyed in VR: VR always runs DLAA on the finished picture."
 msgstr "En gris en VR: el VR sempre aplica el DLAA a la imatge acabada."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed: VR only."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
+"game is closed."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Sending to the game's console..."
+msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2090,6 +2143,66 @@ msgstr "VectorXR (capa VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Layout"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "driving"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "menus"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Height"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Side"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Distance"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Tilt"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Size"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Curve"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reset to config.cfg"
+msgstr ""
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Right"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Turbo mode (VR)"
 msgstr "Mode Turbo (VR)"
 
@@ -2527,7 +2640,4 @@ msgstr "info"
 #: src/log.h
 msgid "debug"
 msgstr "depuració"
-
-#~ msgid "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
-#~ msgstr "Quanta part de la mescla és el TAA del joc, 0 - 100 % en passos del 10 %: més = més calmat i suau (TAA), menys = més nítid (DLAA / DLSS). Només s'usa quan TAA del joc és mescla. Sense cost addicional."
 

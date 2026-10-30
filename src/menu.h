@@ -21,7 +21,7 @@
 
 namespace TuningMenu {
 
-constexpr int   kMaxRows  = 72;                      // (phase 82: 68 -> 72, + the 2 Game TAA rows; phase 69: 64 -> 68, + 3 thin-wire rows; phase 59f: 60 -> 64, + Foveated strength; phase 52: 50 -> 56 -> 60 at the 51b merge, + the Frame rate group header and its 3 rows; was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
+constexpr int   kMaxRows  = 88;                      // (phase 83: 72 -> 88, + the 10 In-game UI (VR) rows; phase 82: 68 -> 72, + the 2 Game TAA rows; phase 69: 64 -> 68, + 3 thin-wire rows; phase 59f: 60 -> 64, + Foveated strength; phase 52: 50 -> 56 -> 60 at the 51b merge, + the Frame rate group header and its 3 rows; was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
                                                      //  28 before the v0.10.3 phase 28 FPS counter lock row, 29 before the phase 29c
                                                      //  group header rows, 31 before the phase 30 Turbo mode row, 32 before the
                                                      //  phase 34 Foveated rows, 34 before the phase 39 Logging row, 35 before the

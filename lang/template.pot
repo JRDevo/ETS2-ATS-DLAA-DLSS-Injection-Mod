@@ -136,6 +136,11 @@ msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "In-game UI (VR)"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr ""
 
@@ -364,6 +369,34 @@ msgid ""
 "VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, "
 "Depth, frame generation; found = its layer is loaded in the game and the mod lets its work pass "
 "through. Run only one Turbo (its or the mod's)."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
+"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
+"(the game's menu screens)."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
+"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
+"own values when it exits)."
 msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -966,6 +999,26 @@ msgstr ""
 #: src/inject.cpp
 #, c-format
 msgid "Greyed in VR: VR always runs DLAA on the finished picture."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed: VR only."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
+"game is closed."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Sending to the game's console..."
 msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -1870,6 +1923,66 @@ msgstr ""
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VectorXR (VR layer)"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Layout"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "driving"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "menus"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Height"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Side"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Distance"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Tilt"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Size"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Curve"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reset to config.cfg"
+msgstr ""
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Right"
 msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)

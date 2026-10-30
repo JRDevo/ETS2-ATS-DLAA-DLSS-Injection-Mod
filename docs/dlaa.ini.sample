@@ -585,6 +585,12 @@ log_level = 1
 # 1 = on. Startup only. Try the other value if mix / split wobbles or smears on a parked view (the log names the auto verdict).
 # game_taa_mvjit = -1
 
+# Phase 83 In-game UI (VR): the menu group moves the game's own VR UI (r_manual_stereo_ui_* in config.cfg) by typing the command
+# into the game's console (needs g_developer "1" and g_console "1" in config.cfg). How the keys reach the game (startup only):
+# 0 = the console key and Enter as DirectInput keys, the text as window characters (default), 1 = window messages only,
+# 2 = DirectInput only (US layout). Try another value if the console opens but nothing is typed, or does not open at all.
+# vr_ui_keys = 0
+
 # GPU timing logs (per-stage DLAA cost + depth snapshot cost, every 600): -1 = with log_level = 4 (phase 45; before: always in
 # VR), 0 off, 1 on
 # gpu_timing = -1

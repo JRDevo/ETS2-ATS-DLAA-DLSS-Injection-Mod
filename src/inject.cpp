@@ -815,6 +815,7 @@
 #include "cutout_mips.h"                            // phase 77: coverage-preserving binary alpha mips (cut-out BC3; pure logic; both builds)
 #include "light_fs.h"                               // phase 78: the lighting pass's full-screen draws -- the lost edge rects (both builds)
 #include "game_taa.h"                               // phase 82: the game's own TAA together with the mod (game_taa; pure logic; both builds)
+#include "vr_ui.h"                                  // phase 83: the game's VR UI placement typed into its console (pure logic; both builds)
 #include "cpu_tuning.h"                            // phase 54: P-core preference / priority / EcoQoS opt-out (cpu_pcore, cpu_priority, cpu_no_throttle)
 #include "flat_views.h"                             // v0.12.0 issue #12: flat multi-view (multi-monitor) detection (both builds)
 
@@ -1626,6 +1627,7 @@ inline bool JoyPartDown(int joy, const uint32_t btn[4], unsigned pov) {
     if (joy >= 1 && joy <= KeySwallow::kJoyMaxButton) return (btn[(joy - 1) >> 5] & (1u << ((joy - 1) & 31))) != 0;
     return (pov & KeySwallow::JoyPovBit(joy)) != 0;
 }
+void VrUiTick();                         // phase 83 (the In-game UI (VR) rows; defined with the menu)
 void PollKeys() {
     CpuProf::Block cpb(CpuProf::kBKeys);               // phase 31 CPU profiler (cpu_prof.h)
     const bool fg = IsForeground();
@@ -1936,6 +1938,7 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
 #endif
     {                                           // v0.7.7 re-bindable hotkeys (dlaa.ini key_*, see PollKeys)
         PollKeys();                              // down-edges for this Present (exact modifiers, foreground only)
+        VrUiTick();                              // phase 83: the In-game UI (VR) rows' console commands (debounced, typed)
 
         // frame trace key. Handled before TraceAtPresent so the request is consumed this same frame.
         if (KeyHit(KA_TRACE)) {
@@ -18529,6 +18532,8 @@ enum MenuRowId {
     MR_GAMETAA, MR_TAAMIX, MR_TAASPLIT, MR_TAAPAIR,       // phase 82: the game's own TAA with the mod (game_taa / _mix / _split / _pair)
     MR_OFXR,
     MR_VECTORXR,                                          // phase 56: VectorXR info row (dlaa.ini vectorxr)
+    MR_UIGRP,                                             // phase 83: group "In-game UI (VR)" (the game's VR UI placement)
+    MR_UISET, MR_UIY, MR_UIX, MR_UIDIST, MR_UIPITCH, MR_UIYAW, MR_UIFOV, MR_UIRADIUS, MR_UIRESET,
     MR_VRPGRP,                                            // phase 43: group "VR performance"
     MR_TURBO,                                             // phase 30: VR Turbo mode (dlaa.ini xr_turbo; OpenXR Toolkit port)
     MR_VRS, MR_VRSSIZE,                                   // phase 34: VR foveated rendering (dlaa.ini vrs; vrs_inner / vrs_outer preset)
@@ -18570,6 +18575,7 @@ constexpr MenuGroupDef kMenuGroups[] = {
     { MR_PICGRP,   MR_BIAS,     N_(L"Picture") },                    // phase 49: last row MR_FWD -> MR_BIAS
     { MR_MOTGRP,   MR_WIREWIDEN, N_(L"Motion and mirrors") },
     { MR_UPGRP,    MR_VECTORXR, N_(L"Upscaling and VR") },      // phase 56: last row MR_OFXR -> MR_VECTORXR
+    { MR_UIGRP,    MR_UIRESET,  N_(L"In-game UI (VR)") },       // phase 83
     { MR_VRPGRP,   MR_HMASK,    N_(L"VR performance") },
     { MR_FRGRP,    MR_CPU,      N_(L"Frame rate and CPU") },         // phase 52; + phase 54 CPU tuning
     { MR_PANELGRP, MR_MENUKEYS, N_(L"Panel settings") },
@@ -18577,7 +18583,7 @@ constexpr MenuGroupDef kMenuGroups[] = {
 };
 constexpr int kMenuGroupCount = (int)(sizeof(kMenuGroups) / sizeof(kMenuGroups[0]));
 static_assert(MR_PICGRP + 1 == MR_SHARP && MR_BIAS + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_WIREWIDEN + 1 == MR_UPGRP &&
-              MR_UPGRP + 1 == MR_UPSCALE && MR_VECTORXR + 1 == MR_VRPGRP && MR_VRPGRP + 1 == MR_TURBO && MR_HMASK + 1 == MR_FRGRP &&
+              MR_UPGRP + 1 == MR_UPSCALE && MR_VECTORXR + 1 == MR_UIGRP && MR_UIGRP + 1 == MR_UISET && MR_UIRESET + 1 == MR_VRPGRP && MR_VRPGRP + 1 == MR_TURBO && MR_HMASK + 1 == MR_FRGRP &&
               MR_FRGRP + 1 == MR_REFLEX && MR_VRFPSCAP + 1 == MR_CPU && MR_CPU + 1 == MR_PANELGRP &&
               MR_PANELGRP + 1 == MR_PANELLOCK && MR_PANELLOCK + 1 == MR_POSX && MR_MENUKEYS + 1 == MR_FPS && MR_FPSGRP + 1 == MR_FPSLOCK && MR_FPSLOCK + 1 == MR_FPSPROF && MR_FPSPROF + 1 == MR_FPSREMEAS &&
               MR_FPSDIST + 1 == MR_LOG,
@@ -18657,6 +18663,25 @@ const wchar_t* const kMenuDesc[] = {
     // phase 56 (MR_VECTORXR)
     N_(L"VectorXR = an OpenXR enhancement suite by DienerTech (github.com/DienerTech/vectorxr): Turbo, Depth, frame generation; found = "
     L"its layer is loaded in the game and the mod lets its work pass through. Run only one Turbo (its or the mod's)."),
+    // phase 83 (MR_UIGRP .. MR_UIRESET): the game's own VR UI placement
+    N_(L"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console for you; needs g_developer "
+    L"and g_console 1 in config.cfg. Right opens the group, Left closes it."),
+    N_(L"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus (the game's menu screens)."),
+    N_(L"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The game gets each change about "
+    L"0.4 s after your last press: the console opens and closes by itself."),
+    N_(L"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The game gets each change about "
+    L"0.4 s after your last press: the console opens and closes by itself."),
+    N_(L"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The game gets each change about "
+    L"0.4 s after your last press: the console opens and closes by itself."),
+    N_(L"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The game gets each change about "
+    L"0.4 s after your last press: the console opens and closes by itself."),
+    N_(L"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The game gets each change about "
+    L"0.4 s after your last press: the console opens and closes by itself."),
+    N_(L"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The game gets each change about "
+    L"0.4 s after your last press: the console opens and closes by itself."),
+    N_(L"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The game gets each change about "
+    L"0.4 s after your last press: the console opens and closes by itself."),
+    N_(L"Right: every value of both layouts back to what config.cfg had at the start (the game saves its own values when it exits)."),
     // phase 43: menu categories (VR performance)
     N_(L"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed every "
     L"time the menu opens."),
@@ -19160,6 +19185,139 @@ void StepGameTaaSplit(int dir, uint64_t n) {
         g_gameTaa == GameTaa::kSplit ? "" : " (used in mode split; game_taa is not split now)");
     PlayTones(1, 400 + 6 * g_gameTaaSplit, 120, 0);
 }
+// ---- phase 83: the game's IN-GAME VR UI placement, live from the menu (group "In-game UI (VR)"; src/vr_ui.h) --------------------
+// The game places its VR UI with console variables (r_manual_stereo_ui_<y x dist pitch yaw fov radius>[_game]); the mod TYPES the
+// command into the game's console: a changed value is sent once it has stayed 0.4 s (VrUi::Debounce), never while the player types
+// (no key of the player for 2 s: KeySwallow::LastUserKeyMs) or while the Hotkeys page waits for a key, one console session per batch
+// (VrUi::KeyPlan: console key, text, Enter per command, console key), played here once per Present and delivered by dinput_wrap
+// (the console key / Enter as DirectInput key events on the game's keyboard device, the text as WM_CHAR, Enter also as window
+// messages -- dlaa.ini vr_ui_keys switches: 1 window messages only, 2 DirectInput only). Values come from config.cfg (at the first
+// use and at every menu open, for the values not changed this session); nothing is written to config.cfg or dlaa.ini.
+int        g_vrUiKeys = VrUi::kKeysMixed;            // dlaa.ini vr_ui_keys 0..2 (startup only)
+bool       g_vrUiRead = false, g_vrUiConsole = false;
+float      g_vrUiVal[VrUi::kSetCount][VrUi::kFieldCount], g_vrUiCfg[VrUi::kSetCount][VrUi::kFieldCount];
+bool       g_vrUiTouched[VrUi::kSetCount][VrUi::kFieldCount] = {};
+int        g_vrUiSet = VrUi::kDriving;               // the layout the rows move (session only)
+VrUi::Debounce g_vrUiDeb;
+std::vector<VrUi::KeyStep> g_vrUiPlan;
+std::vector<std::string> g_vrUiCmds;
+size_t     g_vrUiStep = 0;
+uint64_t   g_vrUiWaitUntil = 0, g_vrUiSent = 0;
+void VrUiRead(bool first) {
+    std::wstring path;
+    const std::string cfg = Lang::ReadGameConfig(&path);
+    g_vrUiConsole = VrUi::ConsoleEnabled(cfg);
+    char line[900];
+    int o = snprintf(line, sizeof(line), "In-game UI (phase 83): config.cfg %s, console %s --", cfg.empty() ? "NOT found" : "read",
+                     g_vrUiConsole ? "on (g_developer 1, g_console 1)" : "OFF (needs g_developer \"1\" and g_console \"1\": rows greyed)");
+    for (int s = 0; s < VrUi::kSetCount; ++s)
+        for (int f = 0; f < VrUi::kFieldCount; ++f) {
+            float v = VrUi::kFields[f].def;
+            const bool have = VrUi::ParseCfg(cfg, VrUi::VarName(s, f), &v);
+            if (first || !g_vrUiTouched[s][f]) {
+                g_vrUiVal[s][f] = v; g_vrUiCfg[s][f] = v;
+                g_vrUiDeb.Known(s, f, v);
+            }
+            if (o > 0 && o < (int)sizeof(line))
+                o += snprintf(line + o, sizeof(line) - (size_t)o, " %s=%s%s", VrUi::VarName(s, f).c_str(), VrUi::Format(f, v).c_str(),
+                              have ? "" : "(default)");
+        }
+    g_vrUiRead = true;
+    static int s_logs = 0;
+    if (first || s_logs++ < 8) Log("%s", line);
+}
+inline void VrUiEnsure() { if (!g_vrUiRead) VrUiRead(true); }
+bool VrUiUsable() { VrUiEnsure(); return g_vrMode && g_vrUiConsole; }
+// one plan step to the game (see vr_ui.h kKeys*)
+void VrUiDeliver(const VrUi::KeyStep& s) {
+    const int m = g_vrUiKeys;
+    if (s.kind == VrUi::kKeyDown || s.kind == VrUi::kKeyUp) {
+        const bool down = s.kind == VrUi::kKeyDown;
+        if (m != VrUi::kKeysWindow) KeySwallow::InjectDiKey(s.dik, down);
+        if (m == VrUi::kKeysWindow || (m == VrUi::kKeysMixed && s.vk == VrUi::kVkReturn)) {
+            KeySwallow::InjectWindowKey(s.vk, down);
+            if (down && s.vk == VrUi::kVkReturn) KeySwallow::InjectWindowChar('\r');
+        }
+    } else if (s.kind == VrUi::kChar) {
+        if (m != VrUi::kKeysDirectInput) { KeySwallow::InjectWindowChar(s.ch); return; }
+        bool shift = false;
+        const uint8_t dik = VrUi::DikOfChar(s.ch, &shift);
+        if (!dik) return;
+        if (shift) KeySwallow::InjectDiKey(0x2A, true);
+        KeySwallow::InjectDiKey(dik, true);
+        KeySwallow::InjectDiKey(dik, false);
+        if (shift) KeySwallow::InjectDiKey(0x2A, false);
+    }
+}
+// once per Present (render thread): play the running plan, or start one for the values that are due
+void VrUiTick() {
+    const uint64_t now = GetTickCount64();
+    if (!g_vrUiPlan.empty()) {
+        while (g_vrUiStep < g_vrUiPlan.size()) {
+            const VrUi::KeyStep& s = g_vrUiPlan[g_vrUiStep];
+            if (s.kind == VrUi::kWait) {
+                if (!g_vrUiWaitUntil) g_vrUiWaitUntil = now + (uint64_t)s.ms;
+                if (now < g_vrUiWaitUntil) return;
+                g_vrUiWaitUntil = 0;
+            } else {
+                VrUiDeliver(s);
+            }
+            ++g_vrUiStep;
+        }
+        static const char* const kHow[3] = { "the console key + Enter as DirectInput keys, the text as WM_CHAR",
+                                             "window messages only", "DirectInput keys only" };
+        for (const std::string& c : g_vrUiCmds)
+            Log("In-game UI (phase 83): sent `%s` to the game's console (%s; vr_ui_keys %d) -- command #%llu", c.c_str(),
+                kHow[g_vrUiKeys % 3], g_vrUiKeys, (unsigned long long)++g_vrUiSent);
+        g_vrUiPlan.clear(); g_vrUiCmds.clear(); g_vrUiStep = 0; g_vrUiWaitUntil = 0;
+        return;
+    }
+    if (!g_vrUiDeb.AnyDirty() || !VrUiUsable()) return;
+    if (now - KeySwallow::LastUserKeyMs() < VrUi::kUserQuietMs) return;     // the player is typing (console / chat): later
+    if (KeySwallow::MenuHideMode() == KeySwallow::kHideAll) return;         // the Hotkeys page waits for a key
+    const std::vector<VrUi::Pending> due = g_vrUiDeb.Due(now);
+    if (due.empty()) return;
+    for (const VrUi::Pending& p : due) g_vrUiCmds.push_back(VrUi::Command(p.set, p.field, p.value));
+    g_vrUiPlan = VrUi::KeyPlan(g_vrUiCmds);
+    if (!KeySwallow::KeyboardDeviceSeen() && g_vrUiKeys != VrUi::kKeysWindow) {
+        static bool s_warned = false;
+        if (!s_warned) { s_warned = true; LogWarn("In-game UI (phase 83): the game has no DirectInput keyboard device (yet) -- the console "
+                                                  "key may not reach it; dlaa.ini vr_ui_keys = 1 types with window messages only"); }
+    }
+    if (!KeySwallow::GameWindowKnown() && g_vrUiKeys != VrUi::kKeysDirectInput) {
+        static bool s_warned2 = false;
+        if (!s_warned2) { s_warned2 = true; LogWarn("In-game UI (phase 83): the game window is not known (not subclassed) -- the typed text "
+                                                    "cannot reach the console; dlaa.ini vr_ui_keys = 2 types with DirectInput keys only"); }
+    }
+}
+// the menu rows
+void StepVrUi(int field, int dir, uint64_t n) {
+    if (!VrUiUsable()) { PlayTones(1, 200, 120, 0); return; }
+    const int s = g_vrUiSet;
+    const float v = VrUi::Step(field, g_vrUiVal[s][field], dir);
+    if (VrUi::Format(field, v) == VrUi::Format(field, g_vrUiVal[s][field])) { PlayTones(1, 200, 120, 0); return; }
+    g_vrUiVal[s][field] = v;
+    g_vrUiTouched[s][field] = true;
+    g_vrUiDeb.Changed(s, field, v, GetTickCount64());
+    LogDbg("In-game UI (phase 83): %s -> %s (menu, Present #%llu; sent to the console 0.4 s after the last press)",
+        VrUi::VarName(s, field).c_str(), VrUi::Format(field, v).c_str(), (unsigned long long)n);
+    PlayTones(1, 700, 60, 0);
+}
+void VrUiReset(uint64_t n, bool quiet = false) {     // quiet: from the mod's Reset row (ResetSettings: no tones, no refusal)
+    g_vrUiSet = VrUi::kDriving;
+    if (!VrUiUsable()) { if (!quiet) PlayTones(1, 200, 120, 0); return; }
+    const uint64_t now = GetTickCount64();
+    int changed = 0;
+    for (int s = 0; s < VrUi::kSetCount; ++s)
+        for (int f = 0; f < VrUi::kFieldCount; ++f) {
+            if (VrUi::Format(f, g_vrUiVal[s][f]) != VrUi::Format(f, g_vrUiCfg[s][f])) { g_vrUiDeb.Changed(s, f, g_vrUiCfg[s][f], now); ++changed; }
+            g_vrUiVal[s][f] = g_vrUiCfg[s][f];
+            g_vrUiTouched[s][f] = false;
+        }
+    Log("In-game UI (phase 83): reset to the config.cfg values (%d changed; %s, Present #%llu)", changed, quiet ? "the Reset row" : "menu",
+        (unsigned long long)n);
+    if (!quiet) PlayTones(1, 500, 120, 0);
+}
 // phase 82: the menu's Split compares row -- dlaa.ini game_taa_pair: DLAA | TAA, Mix | TAA, DLAA | Mix; kept while greyed
 void StepGameTaaPair(int dir, uint64_t n) {
     g_gameTaaPair = GameTaa::NextPair(g_gameTaaPair, dir);
@@ -19397,6 +19555,7 @@ void ResetSettings(uint64_t n) {
     g_gameTaaSplit = GameTaa::kSplitDefault;
     g_gameTaaPair = GameTaa::kPairDlaaTaa;
     g_gameTaaExplicit = false;
+    VrUiReset(n, true);                                   // phase 83: the game's VR UI back to its config.cfg values (typed), layout driving
     // phase 39: logging back to the level dlaa.ini gives without log_level (the key is removed below; `debug` stays in the file,
     // so debug = 1 there = level 4, as at the next start; else 1 = errors)
     g_logLevelKey = -1;
@@ -20071,6 +20230,14 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         break;
     case MR_PRETM:
         if (vr) swprintf(sent, sentCap, TRF(L"Greyed in VR: VR always runs DLAA on the finished picture."));
+        break;
+    case MR_UIGRP: case MR_UISET: case MR_UIY: case MR_UIX: case MR_UIDIST: case MR_UIPITCH: case MR_UIYAW: case MR_UIFOV:
+    case MR_UIRADIUS: case MR_UIRESET:                    // phase 83
+        if (!vr)                     swprintf(sent, sentCap, TRF(L"Greyed: VR only."));
+        else if (!VrUiUsable())      swprintf(sent, sentCap, TRF(L"Greyed: the game's console is off. Set g_developer and g_console to "
+                                              L"\"1\" in config.cfg while the game is closed."));
+        else if (!g_vrUiPlan.empty() || g_vrUiDeb.AnyDirty())
+                                     swprintf(sent, sentCap, TRF(L"Sending to the game's console..."));
         break;
     case MR_GAMETAA: {                                    // phase 82: is the game's TAA running, and what the mix does with it
         const bool live = GameTaa::Live(g_taaLastSeen, g_frames.load(std::memory_order_relaxed));
@@ -20981,6 +21148,22 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     if (!Ofxr::g_onVxr.load())          swprintf(p.rows[MR_VECTORXR].value, kV, TRF(L"off (dlaa.ini 0)"));
     else if (Ofxr::DetectedVectorXr())  swprintf(p.rows[MR_VECTORXR].value, kV, TRF(L"found"));
     else                                swprintf(p.rows[MR_VECTORXR].value, kV, TRF(L"not found"));
+    {   // phase 83: the game's own VR UI placement (typed into the game's console); greyed in flat / without the console
+        groupRow(MR_UIGRP, kMenuGroups[MenuGroupIndex(MR_UIGRP)].title);
+        const bool on = VrUiUsable();
+        const char* tag = vr ? nullptr : NA_("VR only");
+        MenuRow(p, MR_UISET, TR(L"Layout"), "config.cfg", tag, !on);
+        swprintf(p.rows[MR_UISET].value, kV, L"%ls", g_vrUiSet == VrUi::kDriving ? TR(L"driving") : TR(L"menus"));
+        const wchar_t* const kName[VrUi::kFieldCount] = { TR(L"Height"), TR(L"Side"), TR(L"Distance"), TR(L"Tilt"), TR(L"Turn"),
+                                                          TR(L"Size"), TR(L"Curve") };
+        for (int f = 0; f < VrUi::kFieldCount; ++f) {
+            const int r = MR_UIY + f;
+            MenuRow(p, r, kName[f], VrUi::kFields[f].key, tag, !on);
+            swprintf(p.rows[r].value, kV, L"%hs", VrUi::Format(f, g_vrUiVal[g_vrUiSet][f]).c_str());
+        }
+        MenuRow(p, MR_UIRESET, TR(L"Reset to config.cfg"), MenuUtf8(TR(L"Right")), tag, !on);
+        swprintf(p.rows[MR_UIRESET].value, kV, L"-");
+    }
     groupRow(MR_VRPGRP, kMenuGroups[MenuGroupIndex(MR_VRPGRP)].title);   // phase 43: menu categories
     MenuRow(p, MR_TURBO, TR(L"Turbo mode (VR)"), "dlaa.ini xr_turbo", vr ? nullptr : NA_("VR only"), !vr);   // phase 30
     {
@@ -21369,6 +21552,10 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_TAAMIX:  StepGameTaaMix(dir, n); break;         // phase 82: 10 % steps (kept while greyed)
     case MR_TAASPLIT: StepGameTaaSplit(dir, n); break;      // phase 82: 5 % steps (kept while greyed)
     case MR_TAAPAIR: StepGameTaaPair(dir, n); break;        // phase 82: DLAA | TAA -> Mix | TAA -> DLAA | Mix (kept while greyed)
+    case MR_UISET:   if (VrUiUsable()) { g_vrUiSet ^= 1; PlayTones(1, g_vrUiSet ? 900 : 600, 80, 0); } else PlayTones(1, 200, 120, 0); break;
+    case MR_UIY: case MR_UIX: case MR_UIDIST: case MR_UIPITCH: case MR_UIYAW: case MR_UIFOV: case MR_UIRADIUS:
+                     StepVrUi(row - MR_UIY, dir, n); break; // phase 83: typed into the game's console 0.4 s after the last press
+    case MR_UIRESET: if (dir > 0) VrUiReset(n); break;      // phase 83: Right = the config.cfg values
     case MR_OFXR:    break;                                 // information only (dlaa.ini ofxr_bridge, read at start)
     case MR_VECTORXR: break;                                // phase 56: information only (dlaa.ini vectorxr, read at start)
     case MR_TURBO:   ToggleXrTurbo(n); break;               // phase 30: Left and Right both switch it (also flat: kept for VR)
@@ -21536,6 +21723,7 @@ void MenuKeys(uint64_t n) {
             g_menuPage = kMenuPageMain;                   // v0.12.1 phase 50: every open starts on the main page, no bind
             g_hk = MenuHkBind();
             g_mrh = MenuResetHold();                      // v0.10.3 phase 29d: no Reset hold carried over
+            VrUiRead(!g_vrUiRead);                        // phase 83: config.cfg again (the values not changed this session)
             PlayTones(2, 880, 60, 60);
             Log("tuning menu opened (%s, Present #%llu) -- %s / %s select a row, %s / %s change it; hotkeys are set on the "
                 "Hotkeys... row; only the 5 menu keys / buttons are kept from the game while the menu is open", KeyName(KA_MENU),
@@ -24971,6 +25159,7 @@ void LoadConfig() {
             if (!strcmp(key, "game_taa"))     { g_gameTaaIniRaw = (int)v; g_gameTaaExplicit = true; continue; }   // phase 82 (after the loop)
             if (!strcmp(key, "game_taa_ver")) { g_gameTaaIniVer = (int)v; continue; }                             // phase 82
             if (!strcmp(key, "game_taa_split")) { g_gameTaaSplit = GameTaa::ClampMix((int)v); g_gameTaaExplicit = true; continue; }
+            if (!strcmp(key, "vr_ui_keys")) { g_vrUiKeys = v <= 0 ? 0 : (v >= 2 ? 2 : (int)v); continue; }   // phase 83, startup only
             if (!strcmp(key, "game_taa_pair")) { g_gameTaaPair = GameTaa::ClampPair((int)v); g_gameTaaExplicit = true; continue; }
             if (!strcmp(key, "game_taa_mix")) { g_gameTaaMix = GameTaa::ClampMix((int)v); g_gameTaaExplicit = true; continue; }   // phase 82
             if (!strcmp(key, "game_taa_mvjit")) { g_gameTaaMvJit = v < 0 ? -1 : (v > 0 ? 1 : 0); continue; }   // phase 82, startup only

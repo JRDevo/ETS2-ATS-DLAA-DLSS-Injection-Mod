@@ -136,6 +136,11 @@ msgstr "Mise à l'échelle et VR"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "In-game UI (VR)"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "VR performance"
 msgstr "Performances VR"
 
@@ -421,10 +426,10 @@ msgid ""
 "| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
 "upscaling. Used only when Game TAA is split."
 msgstr ""
-"Ce que TAA du jeu partagé montre de chaque côté : DLAA | TAA (à gauche le mod, à droite le TAA "
-"du jeu), mélange | TAA ou DLAA | mélange (mélange = les deux mélangés selon Part du TAA du "
-"jeu). DLSS à la place de DLAA lors de l'agrandissement. Utilisé seulement quand TAA du jeu est "
-"sur partagé."
+"Ce que TAA du jeu partagé montre de chaque côté : DLAA | TAA (à gauche le mod, à droite le TAA du "
+"jeu), mélange | TAA ou DLAA | mélange (mélange = les deux mélangés selon Part du TAA du jeu). "
+"DLSS à la place de DLAA lors de l'agrandissement. Utilisé seulement quand TAA du jeu est sur "
+"partagé."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -447,6 +452,34 @@ msgstr ""
 "VectorXR = suite d'améliorations OpenXR par DienerTech (github.com/DienerTech/vectorxr) : Turbo, "
 "Depth, génération d'images ; trouvé = sa couche est chargée dans le jeu et le mod la laisse "
 "travailler. N'utilisez qu'un seul Turbo (le sien ou celui du mod)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
+"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
+"(the game's menu screens)."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
+"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
+"own values when it exits)."
+msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1158,6 +1191,26 @@ msgstr "Les rétros coûtent %ls par image."
 #, c-format
 msgid "Greyed in VR: VR always runs DLAA on the finished picture."
 msgstr "Grisé en VR : la VR applique toujours le DLAA à l'image finie."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed: VR only."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
+"game is closed."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Sending to the game's console..."
+msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2089,6 +2142,66 @@ msgstr "VectorXR (couche VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Layout"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "driving"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "menus"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Height"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Side"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Distance"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Tilt"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Size"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Curve"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reset to config.cfg"
+msgstr ""
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Right"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Turbo mode (VR)"
 msgstr "Mode Turbo (VR)"
 
@@ -2527,7 +2640,4 @@ msgstr "infos"
 #: src/log.h
 msgid "debug"
 msgstr "debug"
-
-#~ msgid "How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
-#~ msgstr "Part du TAA du jeu dans le mélange, 0 - 100 % par pas de 10 % : plus = plus calme et plus doux (TAA), moins = plus net (DLAA / DLSS). Utilisé seulement quand TAA du jeu est sur mélange. Sans coût supplémentaire."
 

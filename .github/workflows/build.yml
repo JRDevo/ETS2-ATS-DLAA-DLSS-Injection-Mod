@@ -76,6 +76,8 @@ jobs:
           if not exist build\tests\outside_aa_test.exe exit /b 1
           call tests\build_game_taa_test.bat
           if not exist build\tests\game_taa_test.exe exit /b 1
+          call tests\build_vr_ui_test.bat
+          if not exist build\tests\vr_ui_test.exe exit /b 1
           call tests\build_menu_shot.bat
           if not exist build\tests\menu_shot.exe exit /b 1
           call tests\build_flat_views_test.bat
@@ -120,6 +122,8 @@ jobs:
         run: build\tests\outside_aa_test.exe
       - name: Test game TAA with the mod (phase 82 -- src/game_taa.h checksum, live window / jitter hold, resolve-constants jitter, per-pass decision, menu steps)
         run: build\tests\game_taa_test.exe
+      - name: Test the in-game VR UI placement (phase 83 -- src/vr_ui.h config.cfg parsing, steps, debounce / queue, keystroke plan)
+        run: build\tests\vr_ui_test.exe
       - name: Test flat multi-view (src/flat_views.h layout, view index, confirm / drop, shared jitter phase)
         run: build\tests\flat_views_test.exe
       - name: Test fps box attached to the vehicle (src/fps_cab.h maths; DrawIdRecord + FpsCab + the VSCab draw, zero-lag cab sway)

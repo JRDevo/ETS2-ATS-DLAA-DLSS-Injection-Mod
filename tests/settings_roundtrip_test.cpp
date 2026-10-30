@@ -78,7 +78,9 @@ static void WritePanel() {
 }
 
 // rows that are a live A/B switch on purpose (the saved choice is another row): after a restart they are back as they started
-static bool SessionOnly(int r) { return r == MR_DLAA; }   // Shift+F11 compare; the Mode row (End) is the saved one
+static bool SessionOnly(int r) {                       // Shift+F11 compare; the Mode row (End) is the saved one; phase 83: the game's
+    return r == MR_DLAA || (r >= MR_UISET && r <= MR_UIRADIUS);   //   own VR UI cvars (config.cfg is the game's, never dlaa.ini)
+}
 
 // rows the round trip leaves out: group headers (open / close only), actions and pages, information rows
 static bool SkipRow(int r) {
@@ -86,6 +88,7 @@ static bool SkipRow(int r) {
     case MR_PICGRP: case MR_MOTGRP: case MR_UPGRP: case MR_VRPGRP: case MR_FRGRP: case MR_PANELGRP: case MR_FPSGRP:
     case MR_FPSREMEAS: case MR_MENUKEYS: case MR_HOTKEYS: case MR_SAVE: case MR_RESET: case MR_CLOSE:
     case MR_OFXR: case MR_VECTORXR:
+    case MR_UIGRP: case MR_UIRESET:                    // phase 83: a header and an action
         return true;
     default:
         return false;
@@ -147,6 +150,9 @@ static int GateCheck(const char* after) {
         swprintf(pct, 16, L"%d %%", g_gameTaaSplit);
         expect(!wcscmp(val(MR_TAASPLIT), pct) && g_gameTaaSplit % GameTaa::kSplitStep == 0, MR_TAASPLIT,
                "Split position: the menu and g_gameTaaSplit disagree (or off the 5 % grid after a press)");
+        // phase 83: the In-game UI (VR) rows are live exactly in VR with the game's console on (config.cfg)
+        for (int r = MR_UISET; r <= MR_UIRESET; ++r)
+            expect(grey(r) == !(g_vrMode && g_vrUiConsole), r, "an In-game UI (VR) row is live exactly in VR with the game's console on");
         // the DLAA quality rows are greyed exactly while the main scene runs no DLAA (MainDlaaRuns)
         for (int r : { MR_MODEL, MR_SHARP, MR_BIAS })
             expect(grey(r) == !MainDlaaRuns(), r, "a DLAA quality row is greyed exactly while the main scene runs no DLAA");
