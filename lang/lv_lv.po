@@ -380,6 +380,27 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
+"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
+"mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = "
+"left the mod, right TAA."
+msgstr ""
+"Tikai tad, ja spēles Anti-aliasing ir TAA. izslēgts = tikai modifikācija (iestatiet spēles AA "
+"uz Izslēgts). maisījums = TAA un DLAA / DLSS vienā kadrā, sajaukti. tikai TAA = bez DLAA, "
+"salīdzināšanai. sadalīts = pa kreisi modifikācija, pa labi TAA."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
+"less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+msgstr ""
+"Cik liela daļa no maisījuma ir spēles TAA, 0 - 100 % ar soli 10 %: vairāk = mierīgāk un mīkstāk "
+"(TAA), mazāk = asāk (DLAA / DLSS). Izmanto tikai tad, ja Spēles TAA ir maisījums. Bez papildu "
+"izmaksām."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
 "OFXR Bridge = VR frame generation by djules75, a separate download "
 "(github.com/djules75/OFXR-Bridge). found = its layer is loaded in this game and the mod lets its "
 "work pass through. Start its tray app before the game."
@@ -1111,6 +1132,34 @@ msgstr "Spoguļi tagad maksā %ls uz kadru."
 #, c-format
 msgid "Greyed in VR: VR always runs DLAA on the finished picture."
 msgstr "VR pelēks: VR vienmēr palaiž DLAA uz gatavā attēla."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is not running now: the mod runs alone."
+msgstr "Spēles TAA tagad nedarbojas: modifikācija darbojas viena."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or "
+"split."
+msgstr ""
+"Spēles TAA tagad darbojas: iestatiet spēles Anti-aliasing uz Izslēgts vai izvēlieties "
+"maisījums, tikai TAA vai sadalīts."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: the mix is on."
+msgstr "Spēles TAA tagad darbojas: maisījums ir ieslēgts."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: TAA only (see the log)."
+msgstr "Spēles TAA tagad darbojas: tikai TAA (skatiet žurnālu)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1892,12 +1941,6 @@ msgstr "iesl. (eksperimentāls)"
 msgid "flat only"
 msgstr "tikai plakans"
 
-#. Value column (about 20 Latin characters)
-#: src/inject.cpp
-#, c-format
-msgid "off (dlaa.ini 0)"
-msgstr "izsl. (dlaa.ini 0)"
-
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "off (VR budget)"
@@ -1910,8 +1953,39 @@ msgstr "Mirdzuma rēgu labojums"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Game TAA"
+msgstr "Spēles TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "mix"
+msgstr "maisījums"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "TAA only"
+msgstr "tikai TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "split"
+msgstr "sadalīts"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Game TAA share"
+msgstr "Spēles TAA daļa"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (VR kadru ģen.)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "off (dlaa.ini 0)"
+msgstr "izsl. (dlaa.ini 0)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp

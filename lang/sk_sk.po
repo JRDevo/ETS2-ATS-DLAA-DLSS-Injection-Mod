@@ -382,6 +382,26 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
+"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
+"mix = TAA and DLAA / DLSS on the same frame, blended. TAA only = no DLAA, to compare. split = "
+"left the mod, right TAA."
+msgstr ""
+"Len keď je vyhladzovanie hry nastavené na TAA. vyp. = samotný mód (nastavte AA hry na Vypnuté). "
+"mix = TAA a DLAA / DLSS v jednej snímke, zmiešané. len TAA = bez DLAA, na porovnanie. rozdelené "
+"= vľavo mód, vpravo TAA."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
+"less = sharper (DLAA / DLSS). Used only when Game TAA is mix. No extra cost."
+msgstr ""
+"Aký veľký podiel mixu tvorí TAA hry, 0 - 100 % po 10 %: viac = pokojnejšie a mäkšie (TAA), "
+"menej = ostrejšie (DLAA / DLSS). Používa sa len pri TAA hry = mix. Bez ďalších nákladov."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
 "OFXR Bridge = VR frame generation by djules75, a separate download "
 "(github.com/djules75/OFXR-Bridge). found = its layer is loaded in this game and the mod lets its "
 "work pass through. Start its tray app before the game."
@@ -1111,6 +1131,34 @@ msgstr "Zrkadlá teraz stoja %ls na snímku."
 #, c-format
 msgid "Greyed in VR: VR always runs DLAA on the finished picture."
 msgstr "Sivé vo VR: VR vždy spúšťa DLAA na hotovom obraze."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is not running now: the mod runs alone."
+msgstr "TAA hry teraz nebeží: mód beží sám."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix, TAA only or "
+"split."
+msgstr ""
+"TAA hry teraz beží: nastavte vyhladzovanie hry na Vypnuté alebo zvoľte mix, len TAA či "
+"rozdelené."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: the mix is on."
+msgstr "TAA hry teraz beží: mix je zapnutý."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: TAA only (see the log)."
+msgstr "TAA hry teraz beží: len TAA (pozri log)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1892,12 +1940,6 @@ msgstr "zap. (experiment.)"
 msgid "flat only"
 msgstr "len plochý"
 
-#. Value column (about 20 Latin characters)
-#: src/inject.cpp
-#, c-format
-msgid "off (dlaa.ini 0)"
-msgstr "vyp. (dlaa.ini 0)"
-
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "off (VR budget)"
@@ -1910,8 +1952,39 @@ msgstr "Oprava duchov žiary svetiel"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Game TAA"
+msgstr "TAA hry"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "mix"
+msgstr "mix"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "TAA only"
+msgstr "len TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "split"
+msgstr "rozdelené"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Game TAA share"
+msgstr "Podiel TAA hry"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (snímky VR)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "off (dlaa.ini 0)"
+msgstr "vyp. (dlaa.ini 0)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
