@@ -170,7 +170,12 @@ static void TestMix() {
 // filled by ONE Map / Unmap per frame BEFORE the resolve binds it (and on another thread). Simulated here frame by frame, plus a VR
 // frame (two resolves at two offsets of the same ring) and an offset jump beyond the window (it grows, a later frame reads).
 static void Copy(void* d, const void* s, size_t n) { memcpy(d, s, n); }
-static unsigned char s_ring[3][2u * 1024u * 1024u];
+static unsigned char s_ring[6][2u * 1024u * 1024u];
+// inject.cpp's Map hook: a DISCARD Map of a buffer of the learned shape is watched from that Map (phase 85), then copied at Unmap
+static void GameFill(CbShadow& sh, unsigned char* r, uint32_t width) {
+    if (!sh.Watched(r) && sh.Shape() && sh.Shape() == width) sh.Watch(r, width);
+    if (sh.Watched(r)) { sh.OnMap(r, r); sh.OnUnmap(r, Copy); }
+}
 static void TestShadowRotation() {
     const uint32_t kW = 2u * 1024u * 1024u;
     CbShadow sh;
@@ -188,7 +193,7 @@ static void TestShadowRotation() {
         const float j = 1e-5f * (float)(f % 9 + 1);
         fill(f, off(f), j);
         // the game: one Map / Unmap of this frame's ring (all its constants written), then the render thread draws
-        if (sh.Watched(r)) { sh.OnMap(r, r); sh.OnUnmap(r, Copy); }
+        GameFill(sh, r, kW);
         sh.Learn(r, kW, off(f));
         if (sh.Read(r, off(f), (uint64_t)f, out, 64)) {
             ++got;
@@ -198,7 +203,7 @@ static void TestShadowRotation() {
             ++misses;
         }
     }
-    CHECK(misses == 3 && got == 57, "3 rotating rings: only each ring's first frame misses (got %d, missed %d)", got, misses);
+    CHECK(misses == 1 && got == 59, "3 rotating rings, watched by shape: only the very first frame misses (got %d, missed %d)", got, misses);
     CHECK(!sh.Read(s_ring[59 % 3], off(59), 60, out, 64), "no fresh upload since the last read -> no jitter (never a stale one)");
     {   // VR: two eyes' resolves in one frame, the same ring at two offsets
         unsigned char* const r = s_ring[60 % 3];
@@ -237,8 +242,9 @@ static void TestShadowRotation() {
             sh.Learn(s_ring[1], kW, offs[k]);
             if (sh.Read(s_ring[1], offs[k], (uint64_t)f, out, 64) && out[32] == 7e-5f + 1e-6f * (float)k) ++ok;
         }
-        CHECK(ok == 4, "the window spans the range of the offsets in use: %d of 4 read", ok);
-        CHECK(sh.Span() <= CbShadow::kMaxSpan && sh.Span() >= 368384u - 12032u, "span %u within the cap and over the range", sh.Span());
+        CHECK(ok == 4, "every offset in use is covered: %d of 4 read", ok);
+        CHECK(sh.Span() <= CbShadow::kMaxSpan && sh.Clusters() >= 4, "%d clusters, %u KB per upload (within the cap; phase 85: no "
+              "longer the whole 12 KB .. 368 KB range)", sh.Clusters(), sh.Span() / 1024u);
     }
     {   // UpdateSubresource of a watched buffer
         unsigned char src[512];
@@ -252,8 +258,58 @@ static void TestShadowRotation() {
     CHECK(!sh.Watched(nullptr) && !sh.OnUpdate(&got, &got, 0, 4, Copy), "an unwatched buffer is ignored");
 }
 
+// phase 85 (VR audit): SIX 2 MB rings rotate and the two eyes' resolves read the SAME ring at both ENDS of it (eye 0 near the start,
+// eye 1 near the end), offsets drifting a little per frame. Phase 82's CbShadow (kBufs 4, one min..max window centred on the last
+// offset) missed in bursts; now every ring is watched by its shape from its first fill and the copy holds one cluster per end.
+static void TestShadowVr() {
+    const uint32_t kW = 2u * 1024u * 1024u;
+    CbShadow sh;
+    float out[64];
+    auto put = [&](int ring, uint32_t o, float j) {
+        float c[64];
+        memset(c, 0, sizeof(c));
+        c[32] = j; c[33] = -j; c[44] = 2448.0f; c[45] = 2448.0f;
+        memcpy(&s_ring[ring][o], c, sizeof(c));
+    };
+    int got = 0, missed = 0, gotLate = 0;
+    for (int f = 0; f < 240; ++f) {
+        const int ring = f % 6;
+        const uint32_t o0 = 4096u + (uint32_t)(f % 5) * 256u;              // eye 0: near the start
+        const uint32_t o1 = kW - 8192u - (uint32_t)(f % 4) * 256u;         // eye 1: near the end
+        const float j = 1e-5f * (float)(f % 8 + 1);
+        put(ring, o0, j);
+        put(ring, o1, j);
+        GameFill(sh, s_ring[ring], kW);
+        for (int eye = 0; eye < 2; ++eye) {
+            const uint32_t o = eye ? o1 : o0;
+            sh.Learn(s_ring[ring], kW, o);
+            if (sh.Read(s_ring[ring], o, (uint64_t)f, out, 64) && out[32] == j) { ++got; if (f >= 6) ++gotLate; }
+            else ++missed;
+        }
+    }
+    CHECK(missed <= 2 && gotLate == 2 * (240 - 6), "VR, 6 rings, eyes at both ends: misses only in the first frame (got %d, missed %d)",
+          got, missed);
+    CHECK(sh.Clusters() == 2, "the copy is two clusters (one per eye), not one 2 MB range: %d", sh.Clusters());
+    CHECK(sh.Span() < 200u * 1024u, "one upload copies %u KB (phase 82: up to 1.5 MB)", sh.Span() / 1024u);
+    {   // an offset right at the end of the ring: its cluster continues at the start (circular)
+        CbShadow c;
+        c.Learn(s_ring[0], kW, kW - 512u);
+        CHECK(c.Clusters() == 2, "an offset 512 bytes before the end also covers the ring's start (2 segments): %d", c.Clusters());
+    }
+    {   // a 13th buffer of the shape evicts the least recently used; 12 rings stay watched together
+        CbShadow c;
+        static unsigned char dummy[13];
+        c.Learn(s_ring[0], kW, 4096u);
+        for (int i = 0; i < 11; ++i) c.Watch(&dummy[i], kW);
+        CHECK(c.Watched(s_ring[0]) && c.Watched(&dummy[10]), "12 buffers watched at once (kBufs %d)", CbShadow::kBufs);
+        c.Watch(&dummy[11], kW);
+        CHECK(!c.Watched(s_ring[0]) && c.Watched(&dummy[11]), "the 13th evicts the least recently used");
+    }
+}
+
 int main() {
     TestShadowRotation();
+    TestShadowVr();
     TestChecksum();
     TestLiveHold();
     TestParseJitter();

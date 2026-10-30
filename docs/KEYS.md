@@ -45,10 +45,11 @@ menu and the garage / truck dealer screens, before a save is loaded).
 | `Up` / `Down` | Select a row (hold to scroll) |
 | `Left` / `Right` | Change the selected row. Number rows step and repeat while held; switches, the mode, the profile and the model change once per press. On a group row (`Picture`, `Menu panel`, `FPS counter`, ...) `Right` opens the group, `Left` closes it |
 
-- **Groups keep the list short** (phase 84: Picture, Motion and mirrors, Frame rate, VR performance, In-game UI (VR), FPS counter,
-  Menu panel, Compare and test; rows of the other mode -- flat / VR -- are hidden, `dlaa.ini menu_show_all = 1` shows all). E.g.
-  **Menu panel** (`Panel lock (VR)`, `Panel position X`, `Panel position Y`, `Panel size`,
-  `Panel VR depth`, `Panel faces you (VR)`, `Menu keys`) and **FPS counter** (`FPS counter lock`, `FPS counter X`,
+- **Groups keep the list short** (phase 84: Picture, Motion and mirrors, Frame rate, Performance (VR), In-game UI (VR), FPS counter,
+  Menu panel, Compare and test; rows of the other mode -- flat / VR -- are hidden, `dlaa.ini menu_show_all = 1` shows all; phase 85:
+  the title line says `VR settings` / `Flat settings`, so the row titles drop their "(VR)" / "(flat)"). E.g.
+  **Menu panel** (`Panel lock`, `Panel position X`, `Panel position Y`, `Panel size`,
+  `Panel depth`, `Panel faces you`, `Menu keys`) and **FPS counter** (`FPS counter lock`, `FPS counter X`,
   `FPS counter Y`, `FPS counter size`; the `FPS counter` on / off row itself stays in the main list, right above the
   group). Both are **closed every time the menu opens** (the value shows `...`): select the group row and press `Right` to
   show its rows (`shown`), `Left` on the group row hides them again. `Up` / `Down` skip the rows of a closed group, and
@@ -72,25 +73,25 @@ menu and the garage / truck dealer screens, before a save is loaded).
   open, and the menu shows their changes at once. Each change logs and beeps like its key.
 - The selected row shows a description under the list, in plain words: what the row does, when you would change it, and
   what it costs or saves (the measured figure is added while the GPU timers run). A greyed row does not apply to the
-  current mode and says why (`DLAA area`, `Panel VR depth` and `Panel faces you` are VR only; `DLAA before tonemap` is flat
+  current mode and says why (`DLAA area`, `Panel depth` and `Panel faces you` are VR only; `DLAA before tonemap` is flat
   only; `OFXR Bridge` is greyed when `ofxr_bridge = 0`, `VectorXR (VR layer)` when `vectorxr = 0`); it stays in the list. The **Performance profile** description
   lists what `medium` and `low` change; **Save to dlaa.ini** says what it writes.
 - **Panel position X / Y, Panel size** move and size the panel (repeat makes it fast); flat and VR each keep their own
-  values. **Panel VR depth** (VR only) shifts the panel inward per eye so it sits nearer than infinity: raise it if the
-  panel is tiring to look at. **Panel faces you (VR)** (on by default, `menu_vr_face`): moved off the centre, the panel
+  values. **Panel depth** (VR only) shifts the panel inward per eye so it sits nearer than infinity: raise it if the
+  panel is tiring to look at. **Panel faces you** (on by default, `menu_vr_face`): moved off the centre, the panel
   turns towards your eye like a real screen and keeps its size from every angle; off = a flat picture. In VR the panel and
   the fps box are drawn on top of the game's own menu (garage / truck dealer screens) once the mod has confirmed where the
   game hands each eye picture on (a few frames after the menu opens). **v0.10.3, `menu_vr_layer = 1` (default):** in VR
   the panel and the fps box are separate OpenXR quad layers the headset's compositor places itself -- steady (no swimming
   with the reprojection), the panel 1 m (default) and the fps box 0.8 m away, never covered by the game's menus. There
-  **Panel VR depth** is the panel's real distance, shown in metres (`menu_vr_dist`, 0.30 - 3.00 m in 5 cm steps; the panel
-  keeps its size, only its depth changes), and **Panel faces you (VR)** turns the panel -- and the fps box while it
+  **Panel depth** is the panel's real distance, shown in metres (`menu_vr_dist`, 0.30 - 3.00 m in 5 cm steps; the panel
+  keeps its size, only its depth changes), and **Panel faces you** turns the panel -- and the fps box while it
   follows your head -- towards you as a true 3-D layer (off = parallel to your view, a flat picture seen at an angle).
   With `menu_vr_layer = 0` (the panel drawn into the picture; also the automatic fallback when the layers are not
-  possible) **Panel VR depth** is the inward shift in px (`menu_vr_depth`) as above.
-- **Panel lock (VR)** (v0.14.0, no key, `menu_vr_lock`): `Follow head` (default) or `Fixed in cab` -- the panel stays at
+  possible) **Panel depth** is the inward shift in px (`menu_vr_depth`) as above.
+- **Panel lock** (v0.14.0, no key, `menu_vr_lock`): `Follow head` (default) or `Fixed in cab` -- the panel stays at
   one spot in front of your seat and keeps still while you look around. While fixed, **Panel position X / Y** set that spot
-  in degrees around the seat (Y: plus = down) and **Panel VR depth** its distance from the seat (`menu_vr_lock_x`,
+  in degrees around the seat (Y: plus = down) and **Panel depth** its distance from the seat (`menu_vr_lock_x`,
   `menu_vr_lock_y`, `menu_vr_lock_dist`, default 0.80 m); the head-locked position is kept for when you switch back.
   Needs the VR layer (`menu_vr_layer = 1`); greyed otherwise and in flat.
 - **FPS counter** (on / off), **FPS counter X / Y, FPS counter size**: a small live fps box: the fps and the frame time as text with a dark outline, no background
@@ -147,7 +148,7 @@ menu and the garage / truck dealer screens, before a save is loaded).
 `Save to dlaa.ini`) and press `Right`. The panel shows the **Hotkeys page**: `< Back` first, then one line per action --
 `Mode`, `Performance profile`, `DLAA model 1` .. `4`, `Sharpen strength -` / `+`, `Sharpen width -` / `+`,
 `Texture sharpness -` / `+`, `Cut-out sharpness -` / `+`, `DLAA area (VR) -` / `+`, `Per-part motion vectors`,
-`Mirror DLAA on / off`, `DLAA before tonemap (flat)`, `See-through depth`, `DLSS upscale`, `DLAA on / off`,
+`Mirror DLAA on / off`, `DLAA before tonemap`, `See-through depth`, `DLSS upscale`, `DLAA on / off`,
 `Save to dlaa.ini` and the five menu keys (`Menu: open / close`, `up`, `down`, `left`, `right`). The `Keyboard` column
 shows the key, the `Controller` column the wheel / gamepad button or D-pad direction (`-` = none). `Up` / `Down` select a
 line; `Left` (or `Right` on `< Back`) goes back to the main menu; the open key closes the menu as everywhere.

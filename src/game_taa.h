@@ -218,45 +218,52 @@ inline void PairSides(int pair, int* left, int* right) {
 }
 
 // ---- CbShadow: a CPU copy of the TAA resolve's constants, taken at the game's own UPLOAD (first in-game test, ATS flat 2026-10-30) --
-// The resolve reads its cb0 from one of THREE 2 MB DYNAMIC constant-buffer rings that rotate per frame, at an offset that moves a
-// little (813824 -> 812800 bytes), and each ring is filled with ONE Map(WRITE_DISCARD) / Unmap per frame, on the game's MAIN thread,
-// before the render thread draws with it. So the copy cannot wait for "the buffer the resolve bound": it watches every buffer that a
-// resolve has read (kBufs, LRU), and at each Unmap / UpdateSubresource of a watched buffer copies a WINDOW of it: the RANGE of the
-// offsets resolves used recently (all buffers, min .. max + 256, re-measured every kPeriod reads) + kPad each side, 16-byte aligned,
-// clamped, at most kMaxSpan (then centred on the last offset). Game test 2: the offset jumped 12 KB -> 186 KB -> 327 KB -> 368 KB in
-// the first frames (the old +- 64 KB window around the LAST offset missed at each jump). The resolve's draw then reads its offset from
-// the copy of THE BUFFER IT BOUND when the window covers it and that copy is newer than this buffer's previous read (or from the same
-// frame: a VR pair at two offsets). A miss (the offset was new when the ring was filled) is counted; the next fill covers it.
+// The resolve reads its cb0 from one of several 2 MB DYNAMIC constant-buffer rings that rotate per frame (3 seen in flat, SIX in VR),
+// at an offset that moves a little (813824 -> 812800 bytes), and each ring is filled with ONE Map(WRITE_DISCARD) / Unmap per frame,
+// on the game's MAIN thread, before the render thread draws with it. So the copy cannot wait for "the buffer the resolve bound".
+// Phase 85 (VR audit: jitter misses in bursts): (1) WATCH BY SHAPE -- once a resolve has shown the ring's ByteWidth, every DYNAMIC
+// constant buffer of that width is watched from its first Map (Watch; kBufs 12, LRU), so a ring is copied at its very first fill
+// (with kBufs 4 and 6 rings the LRU evicted each ring before it came round = a miss every time); (2) PER-OFFSET CLUSTERS -- the
+// copy is not one min..max range of every offset any more (VR: the two eyes' offsets sit at both ends of the ring, so one range
+// was ~2 MB, capped, centred on the last offset = the other eye missed) but the CLUSTERS of the recent offsets (kHist, all
+// buffers: the rings share their layout), each offset + 256 bytes + kPad each side, circular mod ByteWidth (an offset near the end
+// also covers the start), merged, most recent first up to kMaxSpan. That also cuts the per-Unmap copy out of write-combined
+// memory from up to 1.5 MB to ~2 x 64 KB. The resolve's draw reads its offset from the copy of THE BUFFER IT BOUND when one of the
+// copied segments covers it and that copy is newer than this buffer's previous read (or from the same frame: a VR pair). A miss
+// (the offset was new when the ring was filled: grown) is counted; the next fill covers it.
 // Thread-safety is the caller's (inject.cpp: one mutex; Map / Unmap come from the main thread, the resolve draw from the render one).
 class CbShadow {
 public:
-    static constexpr int      kBufs = 4;
-    static constexpr uint32_t kPad = 64u * 1024u, kMaxSpan = 1536u * 1024u, kPeriod = 900u;
+    static constexpr int      kBufs = 12, kHist = 32, kMaxSeg = 8;
+    static constexpr uint32_t kPad = 32u * 1024u, kMaxSpan = 1024u * 1024u;
     typedef void (*CopyFn)(void* dst, const void* src, size_t n);   // inject.cpp passes a write-combined-friendly copy
 
-    // a resolve draw bound `buf` (ByteWidth `width`) at byte offset `off`: watch it, and centre the next windows on `off`
+    // a resolve draw bound `buf` (ByteWidth `width`) at byte offset `off`: watch it, learn the ring's shape, remember the offset
     void Learn(const void* buf, uint32_t width, uint32_t off) {
-        m_centre = off;
-        const uint32_t end = off + 256u;
-        if (!m_have) { m_lo = m_pLo = off; m_hi = m_pHi = end; m_have = true; }
-        if (off < m_lo) m_lo = off;
-        if (end > m_hi) m_hi = end;
-        if (off < m_pLo) m_pLo = off;
-        if (end > m_pHi) m_pHi = end;
-        if (++m_learns % kPeriod == 0) { m_lo = m_pLo; m_hi = m_pHi; m_pLo = off; m_pHi = end; }   // forget offsets no longer used
+        m_width = width;
+        m_recent[m_histN % kHist] = off;
+        ++m_histN;
+        Watch(buf, width);
+    }
+    // the ring's ByteWidth seen at the resolves (0 = none yet): a DYNAMIC constant buffer of this width is watched from its first Map
+    uint32_t Shape() const { return m_width; }
+    // watch `buf` (a buffer of the ring's shape, or one a resolve bound); the oldest watched buffer makes room
+    void Watch(const void* buf, uint32_t width) {
+        if (!buf) return;
         Entry* e = Find(buf);
         if (!e) {
             e = Lru();
             *e = Entry{};
             e->buf = buf;
+            ++m_watches;
         }
         e->width = width;
         e->use = ++m_tick;
     }
     bool Watched(const void* buf) const { return buf && FindC(buf) != nullptr; }
     // the game's Map of a watched buffer returned `ptr` (the whole buffer); the copy is taken at its Unmap
-    void OnMap(const void* buf, const void* ptr) { if (Entry* e = Find(buf)) e->mapPtr = ptr; }
-    // Unmap: the window of the bytes the Map returned
+    void OnMap(const void* buf, const void* ptr) { if (Entry* e = Find(buf)) { e->mapPtr = ptr; e->use = ++m_tick; } }
+    // Unmap: the segments of the bytes the Map returned
     bool OnUnmap(const void* buf, CopyFn copy) {
         Entry* e = Find(buf);
         if (!e || !e->mapPtr) return false;
@@ -269,43 +276,53 @@ public:
         Entry* e = Find(buf);
         return e && src && Upload(*e, src, left, len, copy);
     }
-    // the resolve draw: `n` floats from `off` of the copy of `buf` (false = no fresh copy covers it; *grown = the window grew)
+    // the resolve draw: `n` floats from `off` of the copy of `buf` (false = no fresh copy covers it; *grown = the offset was not
+    // covered: it was new when the buffer was filled, the next fill covers it)
     bool Read(const void* buf, uint32_t off, uint64_t frame, float* out, size_t n, bool* grown = nullptr) {
         if (grown) *grown = false;
         Entry* e = Find(buf);
         if (!e || !e->copies) return false;
         const uint64_t bytes = (uint64_t)n * 4u;
-        if (off < e->lo || (uint64_t)off + bytes > (uint64_t)e->lo + e->len) {
-            if (grown) *grown = true;                    // (Learn already widened the range: the next fill covers it)
-            return false;
-        }
+        const Seg* sg = nullptr;
+        for (int i = 0; i < e->nSeg; ++i)
+            if (off >= e->seg[i].lo && (uint64_t)off + bytes <= (uint64_t)e->seg[i].lo + e->seg[i].len) { sg = &e->seg[i]; break; }
+        if (!sg) { if (grown) *grown = true; return false; }
         const bool fresh = e->copies != e->readCopies || frame == e->readFrame;
         if (!fresh) return false;
         e->readCopies = e->copies; e->readFrame = frame;
-        const unsigned char* s = e->data + (off - e->lo);
+        const unsigned char* s = e->data + sg->at + (off - sg->lo);
         for (size_t i = 0; i < n; ++i) { float f; unsigned char* d = (unsigned char*)&f; for (int k = 0; k < 4; ++k) d[k] = s[4 * i + k]; out[i] = f; }
         return true;
     }
-    uint32_t Half() const { return Span() / 2u; }        // (log: half the window copied per upload)
+    uint32_t Half() const { return Span() / 2u; }        // (log: half the bytes copied per upload)
+    // the bytes one upload copies now (the merged clusters of the recent offsets; 2 x kPad before any)
     uint32_t Span() const {
-        if (!m_have) return 2u * kPad;
-        const uint32_t s = m_hi - m_lo + 2u * kPad;
-        return s > kMaxSpan ? kMaxSpan : s;
+        Seg s[kMaxSeg];
+        int n = 0;
+        uint32_t total = 0;
+        Segments(m_width ? m_width : 0xFFFFFFFFu, s, &n);
+        for (int i = 0; i < n; ++i) total += s[i].len;
+        return n ? total : 2u * kPad;
     }
+    int  Clusters() const { Seg s[kMaxSeg]; int n = 0; Segments(m_width ? m_width : 0xFFFFFFFFu, s, &n); return n; }
     uint64_t Uploads() const { return m_uploads; }
-    void Reset() { for (Entry& e : m_e) { delete[] e.data; e = Entry{}; } m_have = false; m_centre = 0; m_learns = 0; }
+    uint64_t Watches() const { return m_watches; }
+    void Reset() { for (Entry& e : m_e) { delete[] e.data; e = Entry{}; } m_width = 0; m_histN = 0; }
     ~CbShadow() { for (Entry& e : m_e) delete[] e.data; }
     CbShadow() = default;
     CbShadow(const CbShadow&) = delete;
     CbShadow& operator=(const CbShadow&) = delete;
 
 private:
+    struct Seg { uint32_t lo = 0, len = 0, at = 0; };   // bytes [lo, lo + len) of the buffer, at `at` in the copy
     struct Entry {
         const void*    buf = nullptr;
         uint32_t       width = 0;
         const void*    mapPtr = nullptr;
-        unsigned char* data = nullptr;   // the window copy (capacity cap bytes)
-        uint32_t       cap = 0, lo = 0, len = 0;
+        unsigned char* data = nullptr;   // the segments' copies, back to back (capacity cap bytes)
+        uint32_t       cap = 0;
+        Seg            seg[kMaxSeg];
+        int            nSeg = 0;
         uint64_t       copies = 0, readCopies = 0, readFrame = ~0ull, use = 0;
     };
     Entry* Find(const void* buf) { for (Entry& e : m_e) if (e.buf && e.buf == buf) return &e; return nullptr; }
@@ -316,29 +333,89 @@ private:
         delete[] l->data;
         return l;
     }
+    // the merged clusters of the recent offsets inside [0, width): each offset -> [off - kPad, off + 256 + kPad), circular (the part
+    // past the end continues at 0, the part before 0 at the end), newest offsets first until kMaxSpan, sorted by lo
+    void Segments(uint32_t width, Seg* out, int* n) const {
+        *n = 0;
+        const int have = m_histN < (uint64_t)kHist ? (int)m_histN : kHist;
+        if (!have || width < 256u) return;
+        Seg iv[kHist * 2];
+        int ni = 0;
+        uint64_t total = 0;
+        for (int k = 0; k < have; ++k) {                  // newest first
+            const uint32_t off = m_recent[(m_histN - 1 - (uint64_t)k) % kHist];
+            if (off >= width) continue;
+            const uint64_t span = 256u + 2u * (uint64_t)kPad;
+            const int64_t lo = (int64_t)off - (int64_t)kPad;
+            Seg a[2];
+            int na = 0;
+            if (span >= width) { a[na++] = Seg{ 0, width, 0 }; }
+            else if (lo < 0) {
+                a[na++] = Seg{ 0, (uint32_t)(lo + (int64_t)span), 0 };
+                a[na++] = Seg{ (uint32_t)((int64_t)width + lo), (uint32_t)(-lo), 0 };
+            } else if ((uint64_t)lo + span > width) {
+                a[na++] = Seg{ (uint32_t)lo, width - (uint32_t)lo, 0 };
+                a[na++] = Seg{ 0, (uint32_t)((uint64_t)lo + span - width), 0 };
+            } else {
+                a[na++] = Seg{ (uint32_t)lo, (uint32_t)span, 0 };
+            }
+            // an offset already inside the kept intervals adds nothing; a new one is kept while the total stays within kMaxSpan
+            bool inside = false;
+            for (int i = 0; i < ni && !inside; ++i) inside = off >= iv[i].lo && (uint64_t)off + 256u <= (uint64_t)iv[i].lo + iv[i].len;
+            if (inside) continue;
+            uint64_t add = 0;
+            for (int j = 0; j < na; ++j) add += a[j].len;
+            if (ni && total + add > kMaxSpan) continue;
+            for (int j = 0; j < na; ++j) iv[ni++] = a[j];
+            total += add;
+        }
+        for (int i = 1; i < ni; ++i)                      // sort by lo (few entries: insertion sort)
+            for (int j = i; j > 0 && iv[j].lo < iv[j - 1].lo; --j) { const Seg t = iv[j]; iv[j] = iv[j - 1]; iv[j - 1] = t; }
+        for (int i = 0; i < ni; ++i) {                    // merge overlapping / touching
+            if (*n && iv[i].lo <= out[*n - 1].lo + out[*n - 1].len) {
+                const uint64_t e = (uint64_t)iv[i].lo + iv[i].len, pe = (uint64_t)out[*n - 1].lo + out[*n - 1].len;
+                if (e > pe) out[*n - 1].len = (uint32_t)(e - out[*n - 1].lo);
+            } else if (*n < kMaxSeg) {
+                out[(*n)++] = iv[i];
+            }
+        }
+        for (int i = 0; i < *n; ++i) {                    // 16-byte aligned starts (the streaming copy)
+            const uint32_t a = out[i].lo & 15u;
+            out[i].lo -= a; out[i].len += a;
+        }
+    }
     bool Upload(Entry& e, const void* src, uint32_t srcLeft, uint32_t srcLen, CopyFn copy) {
         const uint32_t width = e.width ? e.width : srcLeft + srcLen;
-        uint32_t lo0 = m_have ? m_lo : m_centre, hi0 = m_have ? m_hi : m_centre + 256u;
-        if (hi0 - lo0 + 2u * kPad > kMaxSpan) {          // too wide: centred on the last offset
-            lo0 = m_centre > kMaxSpan / 2u - kPad ? m_centre - (kMaxSpan / 2u - kPad) : 0u;
-            hi0 = lo0 + kMaxSpan - 2u * kPad;
+        Seg s[kMaxSeg];
+        int n = 0;
+        Segments(width, s, &n);
+        if (!n) return false;
+        uint32_t need = 0;
+        for (int i = 0; i < n; ++i) {                     // clip to the uploaded bytes
+            uint64_t lo = s[i].lo, hi = (uint64_t)s[i].lo + s[i].len;
+            if (lo < srcLeft) lo = srcLeft;
+            if (hi > (uint64_t)srcLeft + srcLen) hi = (uint64_t)srcLeft + srcLen;
+            if (hi > width) hi = width;
+            s[i].lo = (uint32_t)lo;
+            s[i].len = hi > lo ? (uint32_t)(hi - lo) : 0u;
+            s[i].at = need;
+            need += (s[i].len + 15u) & ~15u;
         }
-        uint32_t lo = lo0 > kPad ? ((lo0 - kPad) & ~15u) : 0u;
-        uint64_t hi = (uint64_t)hi0 + kPad;
-        if (hi > width) hi = width;
-        if (lo < srcLeft) lo = srcLeft;
-        if (hi > (uint64_t)srcLeft + srcLen) hi = (uint64_t)srcLeft + srcLen;
-        if (hi <= lo) return false;
-        const uint32_t n = (uint32_t)(hi - lo);
-        if (e.cap < n) { delete[] e.data; e.cap = n + 64u * 1024u; e.data = new unsigned char[e.cap]; }
-        copy(e.data, static_cast<const unsigned char*>(src) + (lo - srcLeft), n);
-        e.lo = lo; e.len = n; ++e.copies; ++m_uploads;
+        if (!need) return false;
+        if (e.cap < need) { delete[] e.data; e.cap = need + 64u * 1024u; e.data = new unsigned char[e.cap]; }
+        e.nSeg = 0;
+        for (int i = 0; i < n; ++i) {
+            if (!s[i].len) continue;
+            copy(e.data + s[i].at, static_cast<const unsigned char*>(src) + (s[i].lo - srcLeft), s[i].len);
+            e.seg[e.nSeg++] = s[i];
+        }
+        ++e.copies; ++m_uploads;
         return true;
     }
     Entry    m_e[kBufs];
-    uint32_t m_centre = 0, m_lo = 0, m_hi = 0, m_pLo = 0, m_pHi = 0;
-    bool     m_have = false;
-    uint64_t m_tick = 0, m_uploads = 0, m_learns = 0;
+    uint32_t m_width = 0;
+    uint32_t m_recent[kHist] = {};
+    uint64_t m_histN = 0, m_tick = 0, m_uploads = 0, m_watches = 0;
 };
 
 }  // namespace GameTaa

@@ -40,8 +40,8 @@ struct E {
     const wchar_t* desc;       // the description (kMenuDesc) -- only the rows a shot selects need one
     const wchar_t* sent;       // the live cost sentence MenuPerfCosts appends
 };
-// phase 84: the regrouped menu as the VR player sees it (flat-only rows hidden)
-static const wchar_t* const kGroups[] = { L"Picture", L"Motion and mirrors", L"Frame rate", L"VR performance", L"In-game UI (VR)",
+// phase 84: the regrouped menu as the VR player sees it (flat-only rows hidden; phase 85: no mode words in the titles)
+static const wchar_t* const kGroups[] = { L"Picture", L"Motion and mirrors", L"Frame rate", L"Performance", L"In-game UI",
                                           L"FPS counter", L"Menu panel", L"Compare and test" };
 enum { G_PIC, G_MOT, G_FR, G_VRP, G_UI, G_FPSG, G_PANEL, G_CMP, G_COUNT };
 static const E kRows[] = {
@@ -63,18 +63,18 @@ static const E kRows[] = {
     { G_PIC, false, L"Cut-out texture sharpness", L"same (-0.50)", L"Ctrl+Shift+F1 / Ctrl+Shift+F2", L"<c>0.02</> | -", false, nullptr, nullptr },
     { G_PIC, false, L"See-through depth", L"on", L"Ctrl+F3", L"<c>0.05</> | <g>0.52</>", false, nullptr, nullptr },
     { G_PIC, false, L"Light glow ghosting fix", L"100 %", L"dlaa.ini dlss_bias_mask", L"", false, nullptr, nullptr },   // phase 49
-    { G_PIC, false, L"DLAA area (VR)", L"40 %", L"Shift+F5 / Shift+F6", L"<c>0.12</> | <g>1.2</>", false, nullptr, nullptr },
+    { G_PIC, false, L"DLAA area", L"40 %", L"Shift+F5 / Shift+F6", L"<c>0.12</> | <g>1.2</>", false, nullptr, nullptr },
     { G_MOT, true, L"Motion and mirrors", L"", L"", L"", false, nullptr, nullptr },
     { G_MOT, false, L"Per-part motion vectors", L"on", L"Alt+F5", L"<c>0.18</> | <g>0.70</>", false, nullptr, nullptr },
     { G_MOT, false, L"Mirror DLAA", L"2 mirrors (largest)", L"Alt+F6", L"<c>0.08</> | <g>0.34</>", false, nullptr, nullptr },
     { G_MOT, false, L"Mirrors in turns", L"on", L"dlaa.ini mirror_turns", L"<c>0.08</> | <g>0.34</>", false, nullptr, nullptr },
     { G_FR, true, L"Frame rate", L"", L"", L"", false, nullptr, nullptr },
     { G_FR, false, L"CPU tuning", L"off", L"dlaa.ini cpu_pcore / cpu_priority / cpu_no_throttle", L"", false, nullptr, nullptr },   // phase 54
-    { G_FR, false, L"VR FPS cap", L"off", L"dlaa.ini vr_fps_cap", L"", false, nullptr, nullptr },
-    { G_VRP, true, L"VR performance", L"", L"", L"", false,
+    { G_FR, false, L"FPS cap", L"off", L"dlaa.ini vr_fps_cap", L"", false, nullptr, nullptr },
+    { G_VRP, true, L"Performance", L"", L"", L"", false,
       L"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed "
       L"every time the menu opens.", nullptr },
-    { G_VRP, false, L"Turbo mode (VR)", L"off", L"dlaa.ini xr_turbo", L"", false, nullptr, nullptr },
+    { G_VRP, false, L"Turbo mode", L"off", L"dlaa.ini xr_turbo", L"", false, nullptr, nullptr },
     { G_VRP, false, L"Foveated (VRS)", L"on", L"dlaa.ini vrs", L"<c>0.04</> | -", false,
       L"Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR only. The outer ring is shaded "
       L"once per 2 x 2 pixels; fences, grass and leaves keep full detail. Turn it off if the edge looks blocky.",
@@ -83,10 +83,10 @@ static const E kRows[] = {
     { G_VRP, false, L"Foveated passes", L"scene", L"dlaa.ini vrs_passes", L"<c>0.04</> | -", false, nullptr, nullptr },
     { G_VRP, false, L"Foveated strength", L"Normal (2 x 2)", L"dlaa.ini vrs_strength", L"<c>0.04</> | -", false, nullptr, nullptr },   // phase 59f
     { G_VRP, false, L"Foveated eye tracking", L"off", L"dlaa.ini vrs_eye", L"<c>0.04</> | -", false, nullptr, nullptr },   // phase 59
-    { G_VRP, false, L"Hidden area mask (VR)", L"on", L"dlaa.ini xr_hidden_mask", L"<c>0.02</> | -", false, nullptr, nullptr },
+    { G_VRP, false, L"Hidden area mask", L"on", L"dlaa.ini xr_hidden_mask", L"<c>0.02</> | -", false, nullptr, nullptr },
     { G_VRP, false, L"OFXR Bridge (VR frame gen)", L"not found", L"dlaa.ini ofxr_bridge", L"", false, nullptr, nullptr },
     { G_VRP, false, L"VectorXR (VR layer)", L"not found", L"dlaa.ini vectorxr", L"", false, nullptr, nullptr },   // phase 56
-    { G_UI, true, L"In-game UI (VR)", L"", L"", L"", false, nullptr, nullptr },
+    { G_UI, true, L"In-game UI", L"", L"", L"", false, nullptr, nullptr },
     { G_UI, false, L"Layout", L"driving", L"config.cfg", L"", false, nullptr, nullptr },
     { G_UI, false, L"Height", L"-0.40", L"y", L"", false, nullptr, nullptr },
     { G_UI, false, L"Side", L"0.00", L"x", L"", false, nullptr, nullptr },
@@ -110,15 +110,15 @@ static const E kRows[] = {
     { G_FPSG, false, L"FPS turn", L"+0 deg", L"dlaa.ini fps_vr_yaw", L"", false, nullptr, nullptr },
     { G_FPSG, false, L"FPS tilt", L"+0 deg", L"dlaa.ini fps_vr_pitch", L"", false, nullptr, nullptr },
     { G_FPSG, false, L"FPS rotate", L"+0 deg", L"dlaa.ini fps_vr_roll", L"", false, nullptr, nullptr },
-    { G_FPSG, false, L"FPS distance (VR)", L"0.80 m", L"dlaa.ini fps_vr_dist", L"", false, nullptr, nullptr },
+    { G_FPSG, false, L"FPS distance", L"0.80 m", L"dlaa.ini fps_vr_dist", L"", false, nullptr, nullptr },
     { G_PANEL, true, L"Menu panel", L"", L"", L"", false, nullptr, nullptr },
     { G_PANEL, false, L"Panel position X", L"+0 %", L"dlaa.ini menu_vr_x", L"", false, nullptr, nullptr },
     { G_PANEL, false, L"Panel position Y", L"+0 %", L"dlaa.ini menu_vr_y", L"", false, nullptr, nullptr },
     { G_PANEL, false, L"Panel size", L"1.0", L"dlaa.ini menu_vr_scale", L"", false, nullptr, nullptr },
     { G_PANEL, false, L"Menu keys", L"Delete", L"Up / Down / Left / Right", L"", false, nullptr, nullptr },
-    { G_PANEL, false, L"Panel lock (VR)", L"Follow head", L"dlaa.ini menu_vr_lock", L"", false, nullptr, nullptr },   // phase 70
-    { G_PANEL, false, L"Panel VR depth", L"1.00 m", L"dlaa.ini menu_vr_dist", L"", false, nullptr, nullptr },
-    { G_PANEL, false, L"Panel faces you (VR)", L"on", L"dlaa.ini menu_vr_face", L"", false, nullptr, nullptr },
+    { G_PANEL, false, L"Panel lock", L"Follow head", L"dlaa.ini menu_vr_lock", L"", false, nullptr, nullptr },   // phase 70
+    { G_PANEL, false, L"Panel depth", L"1.00 m", L"dlaa.ini menu_vr_dist", L"", false, nullptr, nullptr },
+    { G_PANEL, false, L"Panel faces you", L"on", L"dlaa.ini menu_vr_face", L"", false, nullptr, nullptr },
     { G_CMP, true, L"Compare and test", L"", L"", L"", false, nullptr, nullptr },
     { G_CMP, false, L"DLAA off to compare (not saved)", L"on", L"Shift+F11", L"", false, nullptr, nullptr },
     { G_CMP, false, L"Game TAA", L"off", L"dlaa.ini game_taa", L"", false, nullptr, nullptr },

@@ -1,4 +1,4 @@
-// VrUi -- phase 83: the game's in-game VR UI placement, live from the mod's menu (group "In-game UI (VR)"). Pure logic, no D3D / no
+// VrUi -- phase 83: the game's in-game VR UI placement, live from the mod's menu (group "In-game UI", VR only). Pure logic, no D3D / no
 // Win32: inject.cpp feeds it, dinput_wrap.cpp delivers the keys, tests\vr_ui_test.cpp drives it.
 //
 // The game places its VR UI with console variables (config.cfg, `uset <var> "<value>"`): r_manual_stereo_ui_<field>_game while
@@ -6,7 +6,7 @@
 // fov (size) and radius (curve). Typing `uset r_manual_stereo_ui_y_game "-0.4"` into the game's console moves the HUD at once (user
 // test, ATS). The mod has no other way to set a game cvar, so it TYPES the command into the console: open it (the console key),
 // type the text, Enter, close it -- KeyPlan builds that step list, the render thread plays it (inject.cpp VrUiTick) and dinput_wrap
-// delivers each step to the game (KeySwallow::InjectKey / InjectChar). Values come from config.cfg (start, and when the group opens)
+// delivers each step to the game (phase 85: SendInput by default, KeySwallow::SendScanKey / SendUnicodeChar; see kKeys*). Values come from config.cfg (start, and when the group opens)
 // and are never written there or to dlaa.ini: the game saves its own cvars when it exits.
 // The console needs g_developer "1" and g_console "1" in config.cfg (ConsoleEnabled); without them the rows are greyed.
 #pragma once
@@ -119,10 +119,45 @@ constexpr uint8_t kDikGrave = 0x29, kDikReturn = 0x1C;
 constexpr uint8_t kVkGrave = 0xC0 /* VK_OEM_3 */, kVkReturn = 0x0D;
 enum StepKind : int { kKeyDown = 0, kKeyUp, kChar, kWait };
 struct KeyStep { int kind = kWait; uint8_t dik = 0, vk = 0; char ch = 0; int ms = 0; };
-// how the keys reach the game (dlaa.ini vr_ui_keys): 0 mixed (default: the console key and Enter as DirectInput key events, the text
-// as WM_CHAR messages, Enter also as WM_KEYDOWN / WM_CHAR), 1 window messages only, 2 DirectInput only (letters as scan codes, US
-// layout). Each step carries the key for both paths; the player (inject.cpp / dinput_wrap.cpp) delivers what the mode says.
-constexpr int kKeysMixed = 0, kKeysWindow = 1, kKeysDirectInput = 2;
+// how the keys reach the game (dlaa.ini vr_ui_keys; phase 85 renumbered: the phase 83 modes never reached the console, ATS binds it
+// on `sys.keyboard` = raw input / window messages):
+//   0 SendInput (default): the console key and Enter by scan code (KEYEVENTF_SCANCODE), the text as Unicode characters
+//     (KEYEVENTF_UNICODE = VK_PACKET -> WM_CHAR) -- real keyboard input, the game sees it as the player's keys
+//   1 SendInput scan codes: also the text as scan codes on the game's keyboard layout (VkKeyScanExW; for a game that reads the
+//     characters from raw input, where Unicode events carry no key)
+//   2 the phase 83 mix: console key + Enter as DirectInput events on the game's keyboard device, the text as posted WM_CHAR
+//   3 posted window messages only, 4 DirectInput events only (letters as US-layout scan codes)
+// SendInput goes to the FOREGROUND window: every step waits for the game window to have the focus (all modes).
+// Each step carries the key for every path; the player (inject.cpp / dinput_wrap.cpp) delivers what the mode says.
+constexpr int kKeysSendInput = 0, kKeysSendScan = 1, kKeysMixed = 2, kKeysWindow = 3, kKeysDirectInput = 4, kKeysModes = 5;
+inline const char* KeysName(int m) {
+    switch (m) {
+    case kKeysSendInput:   return "SendInput: console key + Enter by scan code, the text as Unicode characters";
+    case kKeysSendScan:    return "SendInput: everything by scan code (the game's keyboard layout)";
+    case kKeysMixed:       return "console key + Enter as DirectInput events, the text as posted WM_CHAR";
+    case kKeysWindow:      return "posted window messages only";
+    case kKeysDirectInput: return "DirectInput events only";
+    default:               return "?";
+    }
+}
+inline bool KeysUseSendInput(int m) { return m == kKeysSendInput || m == kKeysSendScan; }
+inline int  ClampKeys(long v) { return v <= 0 ? 0 : (v >= kKeysModes - 1 ? kKeysModes - 1 : (int)v); }
+
+// ---- delivery confirmation: the game echoes each executed console command into Documents\<game>\game.log.txt as
+// "<time> : uset <var> "<value>"" (seen for the config.cfg exec at start; typed commands assumed the same -- the log line says
+// "NOT confirmed" when it never shows up). `log` = the bytes appended since the batch started.
+inline bool Echoed(const std::string& log, const std::string& cmd) {
+    size_t pos = 0;
+    while ((pos = log.find(cmd, pos)) != std::string::npos) {
+        const size_t e = pos + cmd.size();
+        const bool endOk = e == log.size() || log[e] == '\r' || log[e] == '\n' || log[e] == ' ';
+        const bool startOk = pos == 0 || log[pos - 1] == ' ' || log[pos - 1] == '>' || log[pos - 1] == '\n' || log[pos - 1] == ']';
+        if (endOk && startOk) return true;
+        pos = e;
+    }
+    return false;
+}
+constexpr uint64_t kConfirmMs = 2000;   // the echo must show up within this after the batch's last key
 constexpr int kKeyMs = 50;        // a key held this long (several game input polls at 60-90 fps)
 constexpr int kOpenMs = 150;      // after the console key: the console opens
 constexpr int kAfterEnterMs = 100;

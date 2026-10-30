@@ -81,7 +81,7 @@ an in-game menu (`Delete`) and an optional text config.
   not see those keys while the menu is open. See [The tuning menu](#the-tuning-menu).
 - **Movable widgets** — the tuning panel and the live fps counter can both be moved and resized from the menu
   (position X / Y and size), flat and VR each with their own place. In VR the panel turns to face you. New in v0.14.0:
-  the VR panel can stay fixed in the cab (`Panel lock (VR)`), and its text is drawn sharper.
+  the VR panel can stay fixed in the cab (`Panel lock`), and its text is drawn sharper.
 - **Eye-tracked foveated rendering (VR, experimental)** — on a headset with eye tracking (OpenXR eye gaze, tested on
   Varjo Aero) the sharp centre of `Foveated (VRS)` follows where you look; `Foveated strength` sets how coarse the outer
   ring is (new in v0.14.0). See [the test guide](docs/EYE_TRACKING_TEST.md). Varjo testing by
@@ -135,7 +135,7 @@ an in-game menu (`Delete`) and an optional text config.
   get sharper textures while DLAA / DLSS keeps them from shimmering. Off by default, adjust live with
   `Ctrl+F1` / `Ctrl+F2`.
 - **Adjustable sharpening** — strength and width, live.
-- **DLAA area (VR)** — process only the middle of each eye to save GPU time.
+- **DLAA area** — process only the middle of each eye to save GPU time.
 - **Hotkeys with beeps** — made to use blind in a headset; every key can be re-bound in `dlaa.ini`.
 - **Bring your own `nvngx_dlss.dll`** — drop in a newer one at any time to get NVIDIA's newer models.
 - **Small and simple** — a single `dinput8.dll`. No launcher, no account. Delete the file
@@ -343,7 +343,7 @@ own thread are not mistaken for the game's.
 - **In the log** (`log_level = 3` or `4`): `VectorXR: layer module ... loaded` when VectorXR's layer shows up in the game (it loads
   when the game creates its OpenXR instance, so it can appear a little after start), `VectorXR: settings found` / `not installed`
   at start, `VectorXR: layer found in the game` once, and `OFXR Bridge / VectorXR: N calls passed through so far`. The tuning
-  menu's `VectorXR (VR layer)` row (group `VR performance`) shows `found` / `not found` / `off`.
+  menu's `VectorXR (VR layer)` row (group `Performance`) shows `found` / `not found` / `off`.
 
 Status: tested on a Quest 3 (Virtual Desktop): the game and the mod run with VectorXR's layer loaded. With VectorXR's frame
 generation on, the game itself runs at half the frame rate and VectorXR fills the rest, as SSW / ASW do: on that PC it was no
@@ -569,11 +569,13 @@ it, what it costs or saves. **`Up` / `Down`** select a row,
 **Categories (phase 84 regroup):** the menu is in groups you open and close, most-used first. `Mode`, `Performance profile` and
 `DLAA model` are always shown. Then come the groups: `Picture` (sharpening, texture sharpness, see-through depth, light glow fix,
 DLAA area), `Motion and mirrors` (part motion, mirror DLAA, mirrors in turns), `Frame rate` (CPU tuning, FPS cap, Reflex, VR FPS
-cap), `VR performance` (Turbo, foveated rendering, hidden area mask, OFXR Bridge, VectorXR), `In-game UI (VR)` (the game's own VR
+cap), `Performance` (Turbo, foveated rendering, hidden area mask, OFXR Bridge, VectorXR), `In-game UI` (the game's own VR
 HUD / menus placement), then the `FPS counter` row with its `FPS counter` group, `Menu panel`, and `Compare and test` (DLAA off to
 compare, the game's TAA mix / split, the thin-wire switches, DLAA before tonemap -- nothing there is needed for normal driving).
 **Rows of the other mode are hidden:** flat shows no VR rows and VR shows no flat-only rows (`dlaa.ini menu_show_all = 1` shows
-everything, greyed as before). The DLSS upscale row is gone: the `Mode` row (DLAA / DLSS / off) does the same; its hotkey stays.
+everything, greyed as before). Phase 85: the panel's title line says which set you see (`VR settings` / `Flat settings`), so the
+row and group titles carry no "(VR)" / "(flat)" any more (`menu_show_all = 1` keeps the old titles with the mode words). In VR
+`In-game UI` is greyed and does not open while the game's console is off (its line says how to switch it on). The DLSS upscale row is gone: the `Mode` row (DLAA / DLSS / off) does the same; its hotkey stays.
 After them: `Logging`, `Language`,
 `Save`, `Reset` and `Close`. Select a group and press `Right` to open it, `Left` to close it. A closed group shows `►` and
 `closed (N)` (N = its rows); an open group shows `▼` and `open`, with its rows indented below it. All groups are closed again each time you open the menu.
@@ -611,32 +613,32 @@ The three green lines under the title show the game's GPU time per frame, what t
   key first. The **Menu keys** row in the `Panel
   settings` group shows them; `Right` on it opens the Hotkeys page there. See
   [`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu).
-- **Groups (v0.10.3):** the panel rows (`Panel lock (VR)`, `Panel position X` / `Y`, `Panel size`, `Panel VR depth`, `Panel faces you`,
+- **Groups (v0.10.3):** the panel rows (`Panel lock`, `Panel position X` / `Y`, `Panel size`, `Panel depth`, `Panel faces you`,
   `Menu keys`) sit in the **Menu panel** group and the fps box rows (`FPS counter lock`, `X`, `Y`, `turn`, `tilt`, `rotate`, `size`, `colour`,
   `brightness`, `distance`) in the
   **FPS counter** group, right under the `FPS counter` row. Both groups are closed every time the menu
   opens: select the group row and press `Right` to show its rows, `Left` to hide them again.
 - Every row calls the same function as its hotkey: the hotkeys keep working while the menu is open, and every change
   beeps and logs exactly like its key. Number rows repeat while you hold `Left` / `Right`.
-- **Move the widgets:** the panel and the fps counter both move. For the panel open `Menu panel` and use the `Panel position X`, `Panel position Y` and `Panel size` rows (and `Panel VR depth` in VR,
+- **Move the widgets:** the panel and the fps counter both move. For the panel open `Menu panel` and use the `Panel position X`, `Panel position Y` and `Panel size` rows (and `Panel depth` in VR,
   which brings the panel nearer). Flat and VR keep their own position (`menu_x`, `menu_y`, `menu_scale`,
   `menu_vr_x`, `menu_vr_y`, `menu_vr_scale`, `menu_vr_dist` / `menu_vr_depth`, `menu_vr_face` in `dlaa.ini`).
 - **VR: the panel faces you.** Move it to the side or up / down and it turns towards your eye like a real screen,
-  keeping its size from every angle (`Panel faces you (VR)` row, `menu_vr_face`, on by default; off = a flat picture).
+  keeping its size from every angle (`Panel faces you` row, `menu_vr_face`, on by default; off = a flat picture).
   On the garage / truck dealer screens the panel and the fps box are drawn on top of the game's own menu, not under it
   (the mod finds where the game hands each eye picture to the headset in the first frames after the menu opens).
 - **VR: rock-steady panel (v0.10.3).** By default (`menu_vr_layer = 1`) the panel and the fps box are separate OpenXR
   layers: the headset's compositor shows them itself, on top of the game picture, so they do not swim or jitter with
   the reprojection, sit at a real distance (the panel 1 m away by default, the fps box 0.8 m) and are never covered by
-  the game's menus. `Panel VR depth` then sets the panel's distance in metres (`menu_vr_dist`, 0.30 - 3.00 m, 5 cm
+  the game's menus. `Panel depth` then sets the panel's distance in metres (`menu_vr_dist`, 0.30 - 3.00 m, 5 cm
   steps; it keeps its size, only the depth changes) and `Panel faces you` turns the panel -- and the fps box when it
   follows your head -- towards you as a true 3-D layer. With `menu_vr_layer = 0` (the panel drawn into the picture, as
-  before; also the automatic fallback when the layers are not possible) `Panel VR depth` is the inward shift in px
+  before; also the automatic fallback when the layers are not possible) `Panel depth` is the inward shift in px
   (`menu_vr_depth`).
-- **VR: panel fixed in the cab (new in v0.14.0).** The `Panel lock (VR)` row: `Follow head` (default) = the panel moves
+- **VR: panel fixed in the cab (new in v0.14.0).** The `Panel lock` row: `Follow head` (default) = the panel moves
   with the headset; `Fixed in cab` = it stays at one spot in front of your seat and keeps still while you look around.
   While it is fixed, `Panel position X` / `Y` set the spot in degrees around your seat (Y: plus = down) and
-  `Panel VR depth` its distance from the seat (`menu_vr_lock`, `menu_vr_lock_x`, `menu_vr_lock_y`, `menu_vr_lock_dist`;
+  `Panel depth` its distance from the seat (`menu_vr_lock`, `menu_vr_lock_x`, `menu_vr_lock_y`, `menu_vr_lock_dist`;
   0.80 m by default). The head-locked position is kept for when you switch back. Needs the VR layer
   (`menu_vr_layer = 1`, the default); with `menu_vr_layer = 0` the panel always follows your head.
   Also new in v0.14.0: the VR panel text is drawn with twice the pixels, so small panel sizes stay sharp.
@@ -698,7 +700,7 @@ The three green lines under the title show the game's GPU time per frame, what t
   `Alt+F10`) and **Thin-wire depth** (`mv_fwd_conservative`, on, `Alt+F11`) keep near telephone and power wires steady
   while you drive. Switch them off only to compare. **Thin-wire widening** (`wire_widen`, off, `Alt+F12`) is experimental:
   it draws far wires thinner than 1 pixel as a 1-pixel line. Far wires may look darker or flicker more with it.
-- **Turbo mode (VR)** (`xr_turbo`, off by default; from OpenXR Toolkit): the game stops waiting for the headset each
+- **Turbo mode** (`xr_turbo`, off by default; from OpenXR Toolkit): the game stops waiting for the headset each
   frame. More fps only when the CPU is the limit. Warning: frame smoothing (ASW, Motion Smoothing, Motion Reprojection,
   SSW) does not work while it is on. Switch it off again if the picture judders.
 - **Foveated (VRS)** (`vrs`, off by default; VR only, NVIDIA RTX only; from OpenXR Toolkit): sharp centre, lower detail
@@ -720,19 +722,19 @@ The three green lines under the title show the game's GPU time per frame, what t
   switch-on needs a save (`Shift+F12`) and a game restart. To SEE it work, set `log_level = 4` and `vrs_debug = 1`: the
   blocky outer ring in the desktop mirror then moves with your eyes. The log's `Eye tracking` lines say whether the
   headset sent a gaze (send that log when you test it).
-- **Hidden area mask (VR)** (`xr_hidden_mask`, off by default; VR only): the game stops drawing the corners of each eye
+- **Hidden area mask** (`xr_hidden_mask`, off by default; VR only): the game stops drawing the corners of each eye
   picture that the headset lenses never show (the VR runtime reports them). Fewer pixels drawn = more GPU headroom; what
   you see stays the same. The first time you switch it on, save (`Shift+F12`) and restart the game; after that the row
   switches it live. If your VR runtime has no such mask the row says `not supported`.
 - **Frame rate** group (all off by default, all live):
-  - **Reflex (flat)** (`reflex`): `off`, `on`, `on + boost`. NVIDIA only. The game's frames wait less in the GPU queue,
+  - **Reflex** (`reflex`): `off`, `on`, `on + boost`. NVIDIA only. The game's frames wait less in the GPU queue,
     so the input lag drops when the GPU is the limit. `on + boost` also keeps the GPU clocks up. On another GPU, or a
     driver that refuses it, the row says `not supported`. Not used in VR.
-  - **FPS cap (flat)** (`fps_cap`): `off` or 30 - 360 fps (`dlaa.ini` takes any value from 20 to 1000). The game never
+  - **FPS cap** (`fps_cap`): `off` or 30 - 360 fps (`dlaa.ini` takes any value from 20 to 1000). The game never
     runs faster than this. A cap a bit below what your PC holds in a busy city gives a steady frame time, less heat and
     less power. With Reflex on, the NVIDIA driver does the limiting; otherwise the mod waits after each frame (a precise
     timer, no drift).
-  - **VR FPS cap** (`vr_fps_cap`): `off`, `half` or `third` of the headset rate (72 Hz: 36 or 24 fps; 90 Hz: 45 or 30).
+  - **FPS cap** (`vr_fps_cap`): `off`, `half` or `third` of the headset rate (72 Hz: 36 or 24 fps; 90 Hz: 45 or 30).
     The game draws every 2nd (or 3rd) headset frame and the headset's reprojection (ASW, Motion Smoothing, Motion
     Reprojection, SSW) fills the frames in between at a steady rhythm. Use it when your fps swings around the headset
     rate: a steady half rate judders less than a rate that jumps. Make sure the headset's reprojection is on. Turbo mode
@@ -846,7 +848,7 @@ The table below lists the commonly used keys:
 | `game_taa_mix` | `50` | phase 82: the game's TAA share of `game_taa = 1` (mix) in % `0`..`100`: more = calmer and softer, less = sharper. The menu's `Game TAA share` row (10 % steps) |
 | `game_taa_split` | `50` | phase 82: where the line of `game_taa = 2` (split) is, in % of the width `0`..`100` (VR: of each eye). The menu's `Split position` row (5 % steps) |
 | `game_taa_pair` | `0` | phase 82: what split compares: `0` = DLAA \| TAA (DLSS when upscaling), `1` = Mix \| TAA, `2` = DLAA \| Mix (Mix = blended at `game_taa_mix`). The menu's `Split compares` row |
-| `vr_ui_keys` | `0` | phase 83, startup only: how the menu's `In-game UI (VR)` rows type into the game's console: `0` console key + Enter as DirectInput keys and the text as window characters, `1` window messages only, `2` DirectInput only. Needs `g_developer "1"` and `g_console "1"` in the game's config.cfg |
+| `vr_ui_keys` | `0` | phase 83 / 85, startup only: how the menu's `In-game UI` rows (VR) type into the game's console. `0` = real keyboard input (SendInput: the console key and Enter by scan code, the text as characters), `1` = the same with the text as scan codes on your keyboard layout, `2` = console key + Enter as DirectInput keys and the text as window characters (phase 83), `3` = window messages only, `4` = DirectInput only. With `0` / `1` **the game window must have the focus on the desktop** (click it once; the row says so while it waits). Each change is confirmed by its echo in the game's `game.log.txt` (the mod's log says `CONFIRMED` / `NOT confirmed`). Needs `g_developer "1"` and `g_console "1"` in the game's config.cfg |
 | `game_taa_mvjit` | `-1` | phase 82, startup only: tell DLSS the motion vectors carry the game's jitter: `-1` auto, `0` off, `1` on. Try the other value if mix / split wobbles |
 | `light_redraw_jitter` | `1` | phase 55: `1` = the lighting pass's mesh redraws (sunlight through canopies, emissive surfaces) use the same jittered viewport as the G-buffer; `0` = the game's viewport for the whole lighting pass (lit areas can flicker). Startup only |
 | `light_fs_jitter` | `1` | phase 78: `1` = the lighting pass's full-screen sunlight draw uses the same jitter shift as the G-buffer, so shadow edges on sunlit surfaces seen at a grazing angle (roofs) no longer flicker darker / lighter with the jitter; `0` = the game's viewport for it (before phase 78). Startup only |
@@ -854,10 +856,10 @@ The table below lists the commonly used keys:
 | `beeps` | `1` | `0` = silence the hotkey beeps |
 | `menu_x` / `menu_y` / `menu_scale` | `2` / `8` / `1.0` | tuning menu panel, flat: left / top edge in % of the picture, size `0.3`..`2.0`. The menu's Panel rows change them live |
 | `menu_vr_x` / `menu_vr_y` / `menu_vr_scale` / `menu_vr_depth` | `0` / `-5` / `1.0` / `12` | tuning menu panel, VR: centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size (1 = 54 % of the eye width), inward shift per eye in px |
-| `menu_vr_dist` | `100` | tuning menu panel, VR layer (v0.10.3, `menu_vr_layer = 1`): the panel's distance in cm (`30`..`300`); it keeps the same size at every distance, only the stereo depth changes. The menu's `Panel VR depth` row sets it in 5 cm steps on the layer path (`menu_vr_depth` is the in-picture shift) |
-| `menu_vr_face` | `1` | tuning menu panel, VR: `1` = the panel turns to face your eye when moved off the centre (a tilted 3-D panel, same size from every angle), `0` = a flat picture. On the VR layer path (default) also the fps box when it follows your head, turned by the compositor. The menu's `Panel faces you (VR)` row switches it live |
-| `menu_vr_lock` | `0` | tuning menu panel, VR layer (new in v0.14.0): `0` = follows the headset, `1` = fixed in the cab at one spot in front of your seat (steady while you look around). The menu's `Panel lock (VR)` row |
-| `menu_vr_lock_x` / `menu_vr_lock_y` / `menu_vr_lock_dist` | `0` / `10` / `80` | the fixed panel's spot (v0.14.0, `menu_vr_lock = 1`): degrees around your seat (x `-90`..`90`, + = right; y `-60`..`60`, + = down) and its distance from the seat in cm (`30`..`300`). The `Panel position X` / `Y` and `Panel VR depth` rows set them while the panel is fixed |
+| `menu_vr_dist` | `100` | tuning menu panel, VR layer (v0.10.3, `menu_vr_layer = 1`): the panel's distance in cm (`30`..`300`); it keeps the same size at every distance, only the stereo depth changes. The menu's `Panel depth` row sets it in 5 cm steps on the layer path (`menu_vr_depth` is the in-picture shift) |
+| `menu_vr_face` | `1` | tuning menu panel, VR: `1` = the panel turns to face your eye when moved off the centre (a tilted 3-D panel, same size from every angle), `0` = a flat picture. On the VR layer path (default) also the fps box when it follows your head, turned by the compositor. The menu's `Panel faces you` row switches it live |
+| `menu_vr_lock` | `0` | tuning menu panel, VR layer (new in v0.14.0): `0` = follows the headset, `1` = fixed in the cab at one spot in front of your seat (steady while you look around). The menu's `Panel lock` row |
+| `menu_vr_lock_x` / `menu_vr_lock_y` / `menu_vr_lock_dist` | `0` / `10` / `80` | the fixed panel's spot (v0.14.0, `menu_vr_lock = 1`): degrees around your seat (x `-90`..`90`, + = right; y `-60`..`60`, + = down) and its distance from the seat in cm (`30`..`300`). The `Panel position X` / `Y` and `Panel depth` rows set them while the panel is fixed |
 | `menu_vr_layer` | `1` | VR (v0.10.3): `1` = the panel and the fps box are separate OpenXR quad layers the headset's compositor places itself: rock-steady (no swimming with the reprojection), at a real distance (panel `menu_vr_dist`, default 1 m; fps box 0.8 m), facing you with `menu_vr_face = 1`, never covered by the game's menus; `menu_vr_depth` is then unused. `0` = drawn into the eye picture as before (also the automatic fallback; `menu_vr_dist` unused) |
 | `fps_show` | `0` | live fps box: `1` = a small fps / frame-time box stays on screen, also while the menu is closed. The menu's `FPS counter` row switches it live |
 | `fps_text` | `0` | what the fps box shows: `0` = fps and frame time (two lines), `1` = fps only, `2` = frame time (ms) only, and the same as plain numbers without `fps` / `ms`: `3` = both, `4` = the fps number, `5` = the ms number. The menu's `FPS counter` row steps `Off` / `72 fps + 13.9 ms` / `72 fps` / `13.9 ms` / `72 + 13.9` / `72` / `13.9` |
@@ -867,9 +869,9 @@ The table below lists the commonly used keys:
 | `fps_color` | `0` | fps box colour (phase 44): `0`..`19` = white, yellow, amber, orange, red, pink, magenta, purple, violet, blue, sky blue, cyan, teal, mint, green, lime, olive, gold, silver, black on white. The menu's `FPS colour` row |
 | `fps_brightness` | `100` | fps box brightness in % (phase 48): `10`..`100`, 100 = the colour as it is, lower dims it toward black. The menu's `FPS brightness` row |
 | `fps_opacity` | `100` | fps box opacity in % (phase 51f): `10`..`100`, 100 = solid, lower fades the text AND its outline together (stored per vehicle in the `fps_profile` lines). The menu's `FPS opacity` row |
-| `fps_vr_dist` | `80` | fps box, VR (phase 44): distance in cm (`30`..`300`), same angular size at every distance. The menu's `FPS distance (VR)` row |
+| `fps_vr_dist` | `80` | fps box, VR (phase 44): distance in cm (`30`..`300`), same angular size at every distance. The menu's `FPS distance` row |
 | `fps_vr_yaw` / `fps_vr_pitch` / `fps_vr_roll` | `0` / `0` / `0` | fps box, VR (phase 44): the box's own turn in degrees: yaw `-90`..`90` (+ = its face turns right), pitch `-90`..`90` (+ = its top leans away), roll `-180`..`180` (+ = clockwise). The menu's `FPS turn` / `FPS tilt` / `FPS rotate` rows (1 degree steps) |
-| `xr_turbo` | `0` | VR: `1` = **Turbo mode** (from OpenXR Toolkit): the game no longer waits for the headset each frame, so it can start the next frame sooner. **It turns off the headset's frame smoothing**: ASW (Meta / Oculus), Motion Smoothing, Motion Reprojection (Windows Mixed Reality) and SSW (Virtual Desktop) cannot work with it. It helps only when the CPU is the limit (busy cities, heavy traffic); when the GPU is the limit it gains nothing. The menu's `Turbo mode (VR)` row switches it live, `Shift+F12` saves |
+| `xr_turbo` | `0` | VR: `1` = **Turbo mode** (from OpenXR Toolkit): the game no longer waits for the headset each frame, so it can start the next frame sooner. **It turns off the headset's frame smoothing**: ASW (Meta / Oculus), Motion Smoothing, Motion Reprojection (Windows Mixed Reality) and SSW (Virtual Desktop) cannot work with it. It helps only when the CPU is the limit (busy cities, heavy traffic); when the GPU is the limit it gains nothing. The menu's `Turbo mode` row switches it live, `Shift+F12` saves |
 | `vrs` | `0` | VR, NVIDIA RTX only: `1` = **foveated rendering** (from OpenXR Toolkit): the outer ring of each eye picture is shaded once per 2 x 2 pixels, the centre stays sharp; saves GPU time at a high in-game Scaling. Fences, grass, leaves and the mod's own passes keep full detail. The menu's `Foveated (VRS)` row switches it live, `Shift+F12` saves |
 | `vrs_inner` / `vrs_outer` | `55` / `80` | foveated rendering: ring sizes in % of the half picture around each eye's centre (`10`..`150`); full detail inside `vrs_outer` (with `vrs_quality = 1`), 2 x 2 outside. The menu's `Foveated size` row sets `vrs_outer` 10..100 in 5 % steps and `vrs_inner` = max(10, `vrs_outer` - 25): `wide` = 65 / 90, `balanced` = 55 / 80, `narrow` = 40 / 65; other values from `dlaa.ini` keep working (shown as inner / outer) |
 | `vrs_quality` | `1` | foveated rendering: `1` = full detail inside `vrs_outer`; `0` = the ring between `vrs_inner` and `vrs_outer` is shaded per 2 x 1 pixels too (more saving) |
@@ -879,10 +881,10 @@ The table below lists the commonly used keys:
 | `vrs_eye_smooth` | `20` | eye-tracked foveation: how calmly the sharp centre follows the gaze, a time constant in ms (`0`..`100`; `0` = every gaze sample at once). A big eye jump (a saccade) is followed four times faster |
 | `vrs_eye_fake` | `0` | eye-tracked foveation, test only: `1` (with `vrs_eye = 1`) = a made-up gaze that circles slowly (about 14 degrees, one turn in 6 s) instead of the eye tracker, to check the moving sharp area on a headset without one. OpenXR eye gaze is then not requested |
 | `vrs_debug` | `0` | foveated rendering, test only (needs `log_level = 4`): `1` = middle ring 2 x 2, outer ring 4 x 4, to see the pattern |
-| `xr_hidden_mask` | `0` | VR: `1` = **hidden area mask**: the game skips the corners of each eye picture that the lenses never show (the VR runtime reports them), so it draws fewer pixels. What you see stays the same. Needs a game restart the first time (the mod asks the runtime for the mask when the game starts); after that the menu's `Hidden area mask (VR)` row switches it live, `Shift+F12` saves |
-| `reflex` | `0` | flat, NVIDIA only: `1` = **NVIDIA Reflex** low latency (the game's frames wait less in the GPU queue: less input lag when the GPU is the limit), `2` = the same + boost (the GPU clocks stay up). On another GPU or a driver that refuses it, it stays off and the menu row says `not supported`. Not used in VR. The menu's `Reflex (flat)` row switches it live, `Shift+F12` saves |
-| `fps_cap` | `0` | flat: the most fps the game may run at, `20`..`1000` (`0` = no cap). With Reflex on, the NVIDIA driver limits; otherwise the mod waits after each frame (a precise timer, no drift). Not used in VR (see `vr_fps_cap`). The menu's `FPS cap (flat)` row steps through 30 - 360, `Shift+F12` saves |
-| `vr_fps_cap` | `0` | VR: `2` = the game runs at **half** the headset rate (72 Hz: 36 fps), `3` = a **third** (72 Hz: 24 fps); the headset's reprojection (ASW, Motion Smoothing, Motion Reprojection, SSW) fills the frames in between at a steady rhythm. `0` = off. While it is on, `xr_turbo` is ignored (the cap wins). The menu's `VR FPS cap` row switches it live, `Shift+F12` saves |
+| `xr_hidden_mask` | `0` | VR: `1` = **hidden area mask**: the game skips the corners of each eye picture that the lenses never show (the VR runtime reports them), so it draws fewer pixels. What you see stays the same. Needs a game restart the first time (the mod asks the runtime for the mask when the game starts); after that the menu's `Hidden area mask` row switches it live, `Shift+F12` saves |
+| `reflex` | `0` | flat, NVIDIA only: `1` = **NVIDIA Reflex** low latency (the game's frames wait less in the GPU queue: less input lag when the GPU is the limit), `2` = the same + boost (the GPU clocks stay up). On another GPU or a driver that refuses it, it stays off and the menu row says `not supported`. Not used in VR. The menu's `Reflex` row switches it live, `Shift+F12` saves |
+| `fps_cap` | `0` | flat: the most fps the game may run at, `20`..`1000` (`0` = no cap). With Reflex on, the NVIDIA driver limits; otherwise the mod waits after each frame (a precise timer, no drift). Not used in VR (see `vr_fps_cap`). The menu's `FPS cap` row steps through 30 - 360, `Shift+F12` saves |
+| `vr_fps_cap` | `0` | VR: `2` = the game runs at **half** the headset rate (72 Hz: 36 fps), `3` = a **third** (72 Hz: 24 fps); the headset's reprojection (ASW, Motion Smoothing, Motion Reprojection, SSW) fills the frames in between at a steady rhythm. `0` = off. While it is on, `xr_turbo` is ignored (the cap wins). The menu's `FPS cap` row switches it live, `Shift+F12` saves |
 | `cpu_cache_pin` | `0` | `1` = on AMD X3D CPUs with V-Cache on one half only (e.g. 7950X3D / 9950X3D) the game is kept on the V-Cache cores (read at game start only). Does nothing on other CPUs. Off by default: no fps gain was measured yet, try it and compare |
 | `cpu_pcore` | `0` | `1` = on Intel CPUs with P-cores and E-cores, the game's main thread and its render thread prefer the P-cores (a soft preference, other threads are not touched). Does nothing on other CPUs, and nothing when `cpu_cache_pin` or a launcher already narrowed the game's cores (that wins). The log says what it did. Read at game start; the menu's `CPU tuning` row switches it live |
 | `cpu_priority` | `0` | `1` = the game runs at Above normal priority. Never High or Realtime. The menu's `CPU tuning` row switches it live |
@@ -1047,7 +1049,7 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   `Thin-wire depth`, both on by default). Far wires thinner than 1 pixel can still break up.
 - **The log shows `ERROR` lines although nothing is wrong, or the flat stats line shows only one screen:** fixed in
   v0.14.0: update (GitHub issues #14 and #15).
-- **The VR menu panel shivers or jitters when you move your head (most with Turbo mode on):** set `Panel lock (VR)` to
+- **The VR menu panel shivers or jitters when you move your head (most with Turbo mode on):** set `Panel lock` to
   `Fixed in cab` (new in v0.14.0). **The VR panel text looks thick or soft at a small panel size:** fixed in v0.14.0: update.
 - **VR (Varjo Aero): no hidden area mask, or eye tracking used the wrong eye; the log shows `hidden area mask: eye 1 /
   OpenXR view 1 does NOT match`:** fixed in v0.15.0: update (GitHub issue #21).

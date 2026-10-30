@@ -165,6 +165,72 @@ static int GateCheck(const char* after) {
     return bad;
 }
 
+// ---- phase 85: the menu's mode rules (menu_show_all = 0, as the player sees it) ---------------------------------------------------
+// the panel row whose name contains `name` (rows are compacted: hidden ones are left out), nullptr = not shown
+static const TuningMenu::Row* FindRow(const wchar_t* name) {
+    for (int i = 0; i < s_panel.nRows; ++i) if (wcsstr(s_panel.rows[i].name, name)) return &s_panel.rows[i];
+    return nullptr;
+}
+static void MenuRules() {
+    const bool vr0 = g_vrMode, all0 = g_menuShowAll, con0 = g_vrUiConsole;
+    const int sel0 = g_menuSel;
+    VrUiEnsure();
+    g_menuShowAll = false;
+    for (int vr = 0; vr <= 1; ++vr) {
+        g_vrMode = vr != 0;
+        // "closed (N)" counts only the rows this mode shows (Frame rate: flat CPU / FPS cap / Reflex = 3, VR CPU / FPS cap = 2)
+        for (bool& o : g_menuGrpOpen) o = false;
+        g_menuSel = MR_MODE;
+        MenuBuildPanel(s_panel);
+        const TuningMenu::Row* fr = FindRow(L"Frame rate");
+        CHECK(fr && !wcscmp(fr->value, vr ? L"closed (2)" : L"closed (3)"), "%s: Frame rate reads \"%ls\" (only this mode's rows "
+              "counted)", vr ? "VR" : "flat", fr ? fr->value : L"(not shown)");
+        // the mode label in the title, no mode words in the shown row / group titles
+        CHECK(wcsstr(s_panel.title, vr ? L"VR settings" : L"Flat settings") != nullptr, "%s: the title names the mode: \"%ls\"",
+              vr ? "VR" : "flat", s_panel.title);
+        for (bool& o : g_menuGrpOpen) o = true;
+        MenuBuildPanel(s_panel);
+        for (int i = 0; i < s_panel.nRows; ++i) {
+            const wchar_t* n = s_panel.rows[i].name;
+            const bool word = wcsstr(n, L"(VR)") || wcsstr(n, L"(flat)") || wcsstr(n, L"VR performance") || wcsstr(n, L"VR FPS") ||
+                              wcsstr(n, L"Panel VR");
+            CHECK(!word, "%s: row \"%ls\" still carries a mode word (the title says the mode)", vr ? "VR" : "flat", n);
+        }
+        CHECK(FindRow(vr ? L"Turbo mode" : L"Reflex") && FindRow(L"FPS cap"), "%s: the renamed rows are shown", vr ? "VR" : "flat");
+    }
+    // a row hidden by the mode inside an OPEN group moves the selection (flat -> VR flip on Reflex, the Frame rate group open)
+    g_vrMode = false;
+    for (bool& o : g_menuGrpOpen) o = true;
+    g_menuSel = MR_REFLEX;
+    MenuBuildPanel(s_panel);
+    CHECK(g_menuSel == MR_REFLEX, "flat: Reflex stays selected (%d)", g_menuSel);
+    g_vrMode = true;
+    MenuBuildPanel(s_panel);
+    CHECK(g_menuSel != MR_REFLEX && MenuRowForMode(g_menuSel), "VR: the selection left the hidden Reflex row (now %s)", RowName(g_menuSel));
+    // ... but a row hidden only by its COLLAPSED group keeps its place (it shows the header)
+    g_menuSel = MR_VRFPSCAP;
+    MenuGrpOpen(MR_FRGRP) = false;
+    MenuBuildPanel(s_panel);
+    CHECK(g_menuSel == MR_VRFPSCAP, "VR: a row in a collapsed group stays selected (%s)", RowName(g_menuSel));
+    // the console off: the In-game UI group is greyed and cannot be opened; on: it opens (VR)
+    g_vrUiConsole = false;
+    MenuGrpOpen(MR_UIGRP) = false;
+    MenuChange(MR_UIGRP, 1, false, 900);
+    CHECK(!MenuGrpOpen(MR_UIGRP), "console off: Right does not open the In-game UI group");
+    g_menuSel = MR_MODE;
+    MenuBuildPanel(s_panel);
+    const TuningMenu::Row* ui = FindRow(L"In-game UI");
+    CHECK(ui && ui->greyed, "console off: the In-game UI group header is greyed");
+    g_vrUiConsole = true;
+    MenuChange(MR_UIGRP, 1, false, 901);
+    CHECK(MenuGrpOpen(MR_UIGRP), "console on: Right opens the In-game UI group");
+    MenuBuildPanel(s_panel);
+    ui = FindRow(L"In-game UI");
+    CHECK(ui && !ui->greyed && FindRow(L"Height"), "console on (VR): the group is live and its rows are shown");
+    g_vrMode = vr0; g_menuShowAll = all0; g_vrUiConsole = con0; g_menuSel = sel0;
+    for (bool& o : g_menuGrpOpen) o = false;
+}
+
 // ---- the parent ----------------------------------------------------------------------------------------------------------------
 static std::wstring s_exe;
 static bool RunChild(const std::wstring& args) {
@@ -233,6 +299,7 @@ static void Case(int r, int dir, int presses, const wchar_t* vrArg, const char* 
 static int Parent() {
     if (IniPath().empty()) { printf("FAIL: no dlaa.ini path\n"); return 1; }
     Boot(false);                                       // (row names for the messages)
+    MenuRules();                                       // phase 85
     int changed = 0, unchanged = 0;
     for (s_base = 0; s_base < (int)(sizeof(kBaseIni) / sizeof(kBaseIni[0])); ++s_base)
     for (int vr = 0; vr <= 1; ++vr) {

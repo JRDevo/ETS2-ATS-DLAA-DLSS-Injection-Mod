@@ -10231,6 +10231,7 @@ uint64_t          g_taaCbCopies[4] = {};     // copies by kind (stats)
 uint64_t          g_taaCbGrown = 0;          // reads that missed because the offset left the window (it doubled)
 void*             g_taaCbLastBuf = nullptr;  // the last resolve's cb0 buffer / offset / width (log)
 UINT              g_taaCbLastOff = 0, g_taaCbLastWidth = 0;
+std::atomic<uint32_t> g_taaCbShape{0};       // phase 85: the resolve ring's ByteWidth (0 = no resolve yet): read by every Map
 // the window copy out of a mapping: write-combined memory reads fastest with 16-byte streaming loads (SSE4.1 MOVNTDQA)
 void TaaCopyWc(void* dst, const void* src, size_t n) {
     const uintptr_t s = (uintptr_t)src;
@@ -12736,6 +12737,16 @@ void RequestMvDump(uint64_t n) {
 // game_taa 0, and a stats line every 1800 Presents while it runs; no per-frame lines.
 uint64_t g_taaResolves = 0, g_taaShapeMiss = 0, g_taaJitMiss = 0, g_taaActN[4] = {}, g_taaRawFromCompress = 0, g_taaRawDiffers = 0;
 uint64_t g_taaOnlyBlits = 0, g_taaLdrBlits = 0, g_taaStatsAt = 0;
+// phase 85: jitter reuse on a miss -- the last jitter read in this Present (its pass serial, value), the last one ever; counts
+uint64_t g_taaFrameJitAt = UINT64_MAX, g_taaFrameJitSlot = UINT64_MAX;
+float    g_taaFrameJx = 0.0f, g_taaFrameJy = 0.0f;
+bool     g_taaHaveJit = false;
+uint64_t g_taaJitReuseEye = 0, g_taaJitReuseLast = 0, g_taaJitPairSame = 0, g_taaJitPairDiff = 0;
+// phase 85: the Present a pass last ran the mod (unheld, or the mix / split ran): the quality rows / the Game TAA sentence grey only
+// after kTaaModRanHold Presents without one (one fallback pass among many no longer flickers them)
+uint64_t g_taaLastModRanFrame = 0;
+constexpr uint64_t kTaaModRanHold = 30;
+inline bool TaaModRanRecently(uint64_t now) { return g_taaLastModRanFrame && now - g_taaLastModRanFrame <= kTaaModRanHold; }
 bool     g_taaWarned0 = false;
 int      g_taaLogs = 0;
 struct TaaLogKey { int mode = -1; bool live = false; int act = -2; const char* why = nullptr; bool up = false; int share = -1; };
@@ -12953,7 +12964,16 @@ void TaaNote(int act, const char* why) {
     if (k.mode == g_taaLogged.mode && k.live == g_taaLogged.live && k.act == g_taaLogged.act && k.why == g_taaLogged.why &&
         k.up == g_taaLogged.up && k.share == g_taaLogged.share) return;
     g_taaLogged = k;
-    if (g_taaLogs++ >= 60) return;
+    {   // phase 85: the 60-line cap is PER REASON (one flapping reason no longer silences the others)
+        struct Cap { int act; const char* why; int n; };
+        static Cap s_cap[24];
+        static int s_capN = 0;
+        Cap* c = nullptr;
+        for (int i = 0; i < s_capN && !c; ++i) if (s_cap[i].act == act && s_cap[i].why == why) c = &s_cap[i];
+        if (!c && s_capN < 24) { c = &s_cap[s_capN++]; c->act = act; c->why = why; c->n = 0; }
+        if (!c || c->n++ >= 60) return;
+        ++g_taaLogs;
+    }
     const char* src = g_taaCbKind == 3 ? "UpdateSubresource" : (g_taaCbKind == 2 ? "Map NO_OVERWRITE / Unmap"
                                                                                   : (g_taaCbKind == 1 ? "Map DISCARD / Unmap" : "none yet"));
     char share[48] = "";
@@ -13083,6 +13103,7 @@ void TaaOnResolve(ID3D11DeviceContext* ctx) {
                 "every buffer it reads is watched and copied around that offset at the game's uploads (Map / Unmap%s, UpdateSubresource)",
                 (void*)cb, bd.ByteWidth, (int)bd.Usage, bd.CPUAccessFlags, off, num, g_taaUnmapHooked ? "" : ": NO Unmap hook");
         g_taaCbLastBuf = cb; g_taaCbLastOff = off; g_taaCbLastWidth = bd.ByteWidth;
+        g_taaCbShape.store(bd.ByteWidth, std::memory_order_relaxed);   // phase 85: buffers of this width are watched from their first Map
         float f[64];
         bool grown = false, got = false;
         {
@@ -13091,17 +13112,37 @@ void TaaOnResolve(ID3D11DeviceContext* ctx) {
             got = g_taaCb.Read(cb, off, now, f, 64, &grown);
         }
         if (grown && g_taaCbGrown++ < 4)
-            Log("game TAA (phase 82): the resolve's offset %u was outside the copied window -- the window now spans %u KB (the range of "
-                "recent offsets + 64 KB each side)", off, g_taaCb.Span() / 1024u);
+            Log("game TAA (phase 82/85): the resolve's offset %u was not in the copied clusters (new when its ring was filled) -- copies "
+                "now cover %d cluster(s), %u KB per upload (recent offsets + %u KB each side, circular)", off, g_taaCb.Clusters(),
+                g_taaCb.Span() / 1024u, GameTaa::CbShadow::kPad / 1024u);
         float sx = 0.0f, sy = 0.0f;
         if (got && GameTaa::ParseJitter(f, 64, g_sceneW, g_sceneH, &sx, &sy)) {
             ok = true;
+            if (g_taaFrameJitAt == now && g_taaFrameJitSlot != s->s) {   // phase 85: a VR pair -- do the two eyes share the jitter?
+                if (fabsf(g_taaFrameJx - sx) < 1e-4f && fabsf(g_taaFrameJy - sy) < 1e-4f) ++g_taaJitPairSame;
+                else if (g_taaJitPairDiff++ < 4)
+                    Log("game TAA (phase 85): the two resolves of Present #%llu read DIFFERENT jitters (%+.4f, %+.4f) vs (%+.4f, %+.4f) px -- "
+                        "a missed eye then reuses the last jitter, not the other eye's", (unsigned long long)now, (double)g_taaFrameJx,
+                        (double)g_taaFrameJy, (double)sx, (double)sy);
+            }
+            g_taaFrameJitAt = now; g_taaFrameJitSlot = s->s; g_taaFrameJx = sx; g_taaFrameJy = sy;
             if (s->taaHold) { s->jx = sx; s->jy = sy; s->taaJitOk = true; }
-            g_taaLastJx = sx; g_taaLastJy = sy;
+            g_taaLastJx = sx; g_taaLastJy = sy; g_taaHaveJit = true;
         }
         cb->Release();
     }
-    if (!ok) ++g_taaJitMiss;
+    if (!ok) {
+        ++g_taaJitMiss;
+        // phase 85: a miss no longer falls back to the game's TAA (VR: one eye missed in bursts = the picture popped between the mix
+        // and the game's TAA). The same Present's other eye's jitter when one was read (and the pairs read so far agree), else the
+        // last jitter read (one frame's sub-pixel shift: far less visible than the pop)
+        if (s->taaHold && g_taaHaveJit) {
+            const bool eye = g_taaFrameJitAt == now && g_taaFrameJitSlot != s->s && g_taaJitPairDiff == 0;
+            s->jx = eye ? g_taaFrameJx : g_taaLastJx; s->jy = eye ? g_taaFrameJy : g_taaLastJy;
+            s->taaJitOk = true;
+            ++(eye ? g_taaJitReuseEye : g_taaJitReuseLast);
+        }
+    }
 }
 
 // the game's tonemap draw re-issued once into our own target of the tonemap target's shape, with t0 = the raw scene (kActLdr)
@@ -13311,6 +13352,7 @@ void TaaOnTonemap(ID3D11DeviceContext* ctx, ID3D11Texture2D* src, void* rtPtr, c
     }
     slot.taaAct = act;
     g_taaLastAct = act;
+    if (act == GameTaa::kActHdr || act == GameTaa::kActLdr) g_taaLastModRanFrame = g_frames.load(std::memory_order_relaxed);   // phase 85
     g_taaLastWhy = act == GameTaa::kActTaaOnly ? whyCode : GameTaa::kWhyNone;
     if (act == GameTaa::kActTaaOnly) ++g_taaWhyN[whyCode % GameTaa::kWhyCount];
     g_taaChainS = UINT64_MAX;                            // the chain ends at its tonemap
@@ -13321,7 +13363,7 @@ void TaaOnTonemap(ID3D11DeviceContext* ctx, ID3D11Texture2D* src, void* rtPtr, c
 // StartPass (game_taa != 0): an unheld pass = the mod as at 0 (one line when that changes); the stats line
 void TaaStats(uint64_t now);
 void TaaOnPassStart(uint64_t frame, bool hold) {
-    if (!hold) TaaNote(GameTaa::kActNone, nullptr);
+    if (!hold) { TaaNote(GameTaa::kActNone, nullptr); g_taaLastModRanFrame = frame ? frame : 1; }   // phase 85: an unheld pass runs the mod
     TaaStats(frame);
 }
 // the stats line (every 1800 Presents while game_taa != 0 and the resolve is live): what the passes got
@@ -13339,11 +13381,14 @@ void TaaStats(uint64_t now) {
         (unsigned long long)g_taaCbCopies[2], (unsigned long long)g_taaCbCopies[3]);
     LogDbg("game TAA (phase 82) fallbacks by reason: no resolve %llu, no jitter %llu, no raw scene %llu, HDR run / blend failed %llu, "
         "HDR output %llu, DLAA off %llu, no tonemap %llu | re-issued passes whose Run / composite did not happen %llu | window misses "
-        "%llu (window +- %u KB) | split overlay drawn %llu, missed %llu", (unsigned long long)g_taaWhyN[GameTaa::kWhyNoResolve],
+        "%llu (copy %u KB in %d cluster(s), %llu buffers watched) | jitter reused on a miss: other eye %llu, last %llu (VR pairs same %llu, "
+        "different %llu) | split overlay drawn %llu, missed %llu", (unsigned long long)g_taaWhyN[GameTaa::kWhyNoResolve],
         (unsigned long long)g_taaWhyN[GameTaa::kWhyNoJitter], (unsigned long long)g_taaWhyN[GameTaa::kWhyNoRaw],
         (unsigned long long)g_taaWhyN[GameTaa::kWhyRunFailed], (unsigned long long)g_taaWhyN[GameTaa::kWhyHdrOut],
         (unsigned long long)g_taaWhyN[GameTaa::kWhyDlaaOff], (unsigned long long)g_taaWhyN[GameTaa::kWhyNoTonemap],
-        (unsigned long long)g_taaLdrRunFails, (unsigned long long)g_taaCbGrown, g_taaCb.Half() / 1024u,
+        (unsigned long long)g_taaLdrRunFails, (unsigned long long)g_taaCbGrown, g_taaCb.Span() / 1024u, g_taaCb.Clusters(),
+        (unsigned long long)g_taaCb.Watches(), (unsigned long long)g_taaJitReuseEye, (unsigned long long)g_taaJitReuseLast,
+        (unsigned long long)g_taaJitPairSame, (unsigned long long)g_taaJitPairDiff,
         (unsigned long long)g_taaSplitOvDrawn, (unsigned long long)g_taaSplitOvMissed);
 }
 
@@ -15215,7 +15260,29 @@ HRESULT STDMETHODCALLTYPE hkMap(ID3D11DeviceContext* ctx, ID3D11Resource* r, UIN
     // phase 82: a buffer a TAA resolve has read -- its bytes around the resolve's offset are copied at the Unmap (GameTaa::CbShadow)
     if (g_gameTaa && r && !t_inDlaa && SUCCEEDED(hr) && out && out->pData &&
         (type == D3D11_MAP_WRITE_DISCARD || type == D3D11_MAP_WRITE_NO_OVERWRITE)) {
+        // phase 85: WATCH BY SHAPE -- a DISCARD Map of a dynamic constant buffer with the resolve ring's ByteWidth is watched from
+        // this first fill (the rings rotate: 6 in VR; waiting for a resolve to bind it missed every ring's fill)
+        uint32_t shapeW = 0;
+        const uint32_t shape = g_taaCbShape.load(std::memory_order_relaxed);
+        if (shape && type == D3D11_MAP_WRITE_DISCARD) {
+            // (a per-thread cache of resources already found NOT to be a ring: most DISCARD Maps skip the two calls)
+            thread_local const void* t_notRing[256] = {};
+            thread_local uint32_t t_notRingShape = 0;
+            if (t_notRingShape != shape) { memset(t_notRing, 0, sizeof(t_notRing)); t_notRingShape = shape; }
+            const void*& slotNr = t_notRing[((uintptr_t)r >> 4) & 255u];
+            if (slotNr != (const void*)r) {
+                D3D11_RESOURCE_DIMENSION dim = D3D11_RESOURCE_DIMENSION_UNKNOWN;
+                r->GetType(&dim);
+                if (dim == D3D11_RESOURCE_DIMENSION_BUFFER) {
+                    D3D11_BUFFER_DESC bd{};
+                    static_cast<ID3D11Buffer*>(r)->GetDesc(&bd);
+                    if (bd.ByteWidth == shape && bd.Usage == D3D11_USAGE_DYNAMIC && (bd.BindFlags & D3D11_BIND_CONSTANT_BUFFER)) shapeW = shape;
+                }
+                if (!shapeW) slotNr = r;
+            }
+        }
         std::lock_guard<std::mutex> lk(g_taaCbMx);
+        if (shapeW && !g_taaCb.Watched(r)) g_taaCb.Watch(r, shapeW);
         if (g_taaCb.Watched(r)) { g_taaCb.OnMap(r, out->pData); g_taaCbKind = type == D3D11_MAP_WRITE_DISCARD ? 1 : 2; }
     }
     return hr;
@@ -18594,16 +18661,18 @@ enum MenuRowId {
 static_assert(MR_COUNT <= TuningMenu::kMaxRows, "tuning menu: too many rows");
 // phase 43: menu categories -- ONE table for all collapsible groups: each group = its header + the rows right after it up to
 // `last` (v0.10.3 phase 29c layout). MenuRowGroup / MenuGrpOpen / MenuRowVisible / MenuChange / the open-state array use it.
-struct MenuGroupDef { int header, last; const wchar_t* title; };
+// phase 85: `title` = the name while only the current mode's rows show (the panel's title line says "VR settings" / "Flat
+// settings"), `titleAll` = the name with dlaa.ini menu_show_all = 1 (both modes' rows: the mode word kept), nullptr = the same
+struct MenuGroupDef { int header, last; const wchar_t* title; const wchar_t* titleAll; };
 constexpr MenuGroupDef kMenuGroups[] = {
-    { MR_PICGRP,   MR_AREA,     N_(L"Picture") },   // phase 43 / 84
-    { MR_MOTGRP,   MR_MIRTURNS, N_(L"Motion and mirrors") },   // phase 43 / 84
-    { MR_FRGRP,    MR_VRFPSCAP, N_(L"Frame rate") },   // phase 52 / 84 (was "Frame rate and CPU")
-    { MR_VRPGRP,   MR_VECTORXR, N_(L"VR performance") },   // phase 43 / 84 (+ OFXR / VectorXR)
-    { MR_UIGRP,    MR_UIRESET,  N_(L"In-game UI (VR)") },   // phase 83
-    { MR_FPSGRP,   MR_FPSDIST,  N_(L"FPS counter") },   // v0.10.3 / 84 (was "FPS counter settings")
-    { MR_PANELGRP, MR_FACE,     N_(L"Menu panel") },   // v0.10.3 / 84 (was "Panel settings")
-    { MR_CMPGRP,   MR_PRETM,    N_(L"Compare and test") },   // phase 84
+    { MR_PICGRP,   MR_AREA,     N_(L"Picture"), nullptr },   // phase 43 / 84
+    { MR_MOTGRP,   MR_MIRTURNS, N_(L"Motion and mirrors"), nullptr },   // phase 43 / 84
+    { MR_FRGRP,    MR_VRFPSCAP, N_(L"Frame rate"), nullptr },   // phase 52 / 84 (was "Frame rate and CPU")
+    { MR_VRPGRP,   MR_VECTORXR, N_(L"Performance"), N_(L"VR performance") },   // phase 43 / 84 (+ OFXR / VectorXR); 85: mode word off
+    { MR_UIGRP,    MR_UIRESET,  N_(L"In-game UI"), N_(L"In-game UI (VR)") },   // phase 83; 85: mode word off
+    { MR_FPSGRP,   MR_FPSDIST,  N_(L"FPS counter"), nullptr },   // v0.10.3 / 84 (was "FPS counter settings")
+    { MR_PANELGRP, MR_FACE,     N_(L"Menu panel"), nullptr },   // v0.10.3 / 84 (was "Panel settings")
+    { MR_CMPGRP,   MR_PRETM,    N_(L"Compare and test"), nullptr },   // phase 84
 };
 constexpr int kMenuGroupCount = (int)(sizeof(kMenuGroups) / sizeof(kMenuGroups[0]));
 static_assert(MR_PICGRP + 1 == MR_SHARP && MR_AREA + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_MIRTURNS + 1 == MR_FRGRP &&
@@ -18838,6 +18907,12 @@ inline bool MenuRowForMode(int id) {
     if (g_menuShowAll) return true;
     const int m = MenuRowMode(id);
     return m == kMmBoth || (m == kMmVr) == MenuVr();
+}
+// phase 85: a group's title (English; groupRow translates it): with menu_show_all the one with the mode word
+inline const wchar_t* MenuGroupTitle(int header) {
+    const int i = MenuGroupIndex(header);
+    if (i < 0) return L"";
+    return g_menuShowAll && kMenuGroups[i].titleAll ? kMenuGroups[i].titleAll : kMenuGroups[i].title;
 }
 inline bool MenuHeaderHasRows(int header) {
     const int i = MenuGroupIndex(header);
@@ -19232,15 +19307,18 @@ void StepGameTaaSplit(int dir, uint64_t n) {
         g_gameTaa == GameTaa::kSplit ? "" : " (used in mode split; game_taa is not split now)");
     PlayTones(1, 400 + 6 * g_gameTaaSplit, 120, 0);
 }
-// ---- phase 83: the game's IN-GAME VR UI placement, live from the menu (group "In-game UI (VR)"; src/vr_ui.h) --------------------
+// ---- phase 83: the game's IN-GAME VR UI placement, live from the menu (group "In-game UI", VR only; src/vr_ui.h) ----------------
 // The game places its VR UI with console variables (r_manual_stereo_ui_<y x dist pitch yaw fov radius>[_game]); the mod TYPES the
 // command into the game's console: a changed value is sent once it has stayed 0.4 s (VrUi::Debounce), never while the player types
 // (no key of the player for 2 s: KeySwallow::LastUserKeyMs) or while the Hotkeys page waits for a key, one console session per batch
-// (VrUi::KeyPlan: console key, text, Enter per command, console key), played here once per Present and delivered by dinput_wrap
-// (the console key / Enter as DirectInput key events on the game's keyboard device, the text as WM_CHAR, Enter also as window
-// messages -- dlaa.ini vr_ui_keys switches: 1 window messages only, 2 DirectInput only). Values come from config.cfg (at the first
-// use and at every menu open, for the values not changed this session); nothing is written to config.cfg or dlaa.ini.
-int        g_vrUiKeys = VrUi::kKeysMixed;            // dlaa.ini vr_ui_keys 0..2 (startup only)
+// (VrUi::KeyPlan: console key, text, Enter per command, console key), played here once per Present and delivered by dinput_wrap.
+// Phase 85 (VR test: nothing ever reached the console -- ATS binds it on `sys.keyboard`, raw input, not DirectInput): SendInput is
+// the default (scan codes for the console key / Enter, Unicode characters for the text; vr_ui_keys 1 = all scan codes, 2 .. 4 =
+// the phase 83 paths), every step waits for the game window to be the FOREGROUND window (the row says "click the game window"),
+// the mod's own keys never count as the player's typing (dwExtraInfo mark), and each batch is CONFIRMED by its echo in
+// game.log.txt (or logged "NOT confirmed after 2 s"). Values come from config.cfg (at the first use and at every menu open, for
+// the values not changed this session); nothing is written to config.cfg or dlaa.ini.
+int        g_vrUiKeys = VrUi::kKeysSendInput;        // dlaa.ini vr_ui_keys 0..4 (startup only; phase 85: 0 = SendInput)
 bool       g_vrUiRead = false, g_vrUiConsole = false;
 float      g_vrUiVal[VrUi::kSetCount][VrUi::kFieldCount], g_vrUiCfg[VrUi::kSetCount][VrUi::kFieldCount];
 bool       g_vrUiTouched[VrUi::kSetCount][VrUi::kFieldCount] = {};
@@ -19250,13 +19328,24 @@ std::vector<VrUi::KeyStep> g_vrUiPlan;
 std::vector<std::string> g_vrUiCmds;
 size_t     g_vrUiStep = 0;
 uint64_t   g_vrUiWaitUntil = 0, g_vrUiSent = 0;
+// phase 85: the focus gate (SendInput types into the FOREGROUND window) and the delivery check (the game echoes executed commands
+// into game.log.txt): the commands of the last batch, the log's size when the batch started, the bytes read since, the deadline
+bool       g_vrUiNoFocus = false;                    // a batch waits for the game window to have the focus (the row says so)
+int        g_vrUiFocusLogs = 0;
+std::vector<std::string> g_vrUiConfirm;
+std::vector<bool> g_vrUiConfirmed;
+std::wstring g_vrUiLogPath;
+uint64_t   g_vrUiLogPos = 0, g_vrUiConfirmUntil = 0, g_vrUiConfirmPoll = 0, g_vrUiBatchEnd = 0;
+std::string g_vrUiLogTail;
+int        g_vrUiResult = 0;                         // the last batch: 0 none yet, 1 confirmed, 2 NOT confirmed
+uint64_t   g_vrUiConfirmedN = 0, g_vrUiUnconfirmedN = 0;
 void VrUiRead(bool first) {
     std::wstring path;
     const std::string cfg = Lang::ReadGameConfig(&path);
     g_vrUiConsole = VrUi::ConsoleEnabled(cfg);
     char line[900];
     int o = snprintf(line, sizeof(line), "In-game UI (phase 83): config.cfg %s, console %s --", cfg.empty() ? "NOT found" : "read",
-                     g_vrUiConsole ? "on (g_developer 1, g_console 1)" : "OFF (needs g_developer \"1\" and g_console \"1\": rows greyed)");
+                     g_vrUiConsole ? "on (g_developer 1, g_console 1)" : "OFF (needs g_developer \"1\" and g_console \"1\": group greyed)");
     for (int s = 0; s < VrUi::kSetCount; ++s)
         for (int f = 0; f < VrUi::kFieldCount; ++f) {
             float v = VrUi::kFields[f].def;
@@ -19275,10 +19364,45 @@ void VrUiRead(bool first) {
 }
 inline void VrUiEnsure() { if (!g_vrUiRead) VrUiRead(true); }
 bool VrUiUsable() { VrUiEnsure(); return g_vrMode && g_vrUiConsole; }
-// one plan step to the game (see vr_ui.h kKeys*)
-void VrUiDeliver(const VrUi::KeyStep& s) {
+// the size of game.log.txt now (0 = missing)
+uint64_t VrUiLogSize() {
+    if (g_vrUiLogPath.empty()) g_vrUiLogPath = Lang::GameLogPath();
+    WIN32_FILE_ATTRIBUTE_DATA a{};
+    if (g_vrUiLogPath.empty() || !GetFileAttributesExW(g_vrUiLogPath.c_str(), GetFileExInfoStandard, &a)) return 0;
+    return ((uint64_t)a.nFileSizeHigh << 32) | a.nFileSizeLow;
+}
+// the bytes game.log.txt grew by since g_vrUiLogPos (appended to g_vrUiLogTail; at most 256 KB per batch)
+void VrUiReadLogTail() {
+    const uint64_t size = VrUiLogSize();
+    if (size < g_vrUiLogPos) { g_vrUiLogPos = 0; g_vrUiLogTail.clear(); }     // (a new log: the game restarted it)
+    if (size <= g_vrUiLogPos || g_vrUiLogTail.size() >= (256u << 10)) return;
+    HANDLE h = CreateFileW(g_vrUiLogPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    LARGE_INTEGER at; at.QuadPart = (LONGLONG)g_vrUiLogPos;
+    if (SetFilePointerEx(h, at, nullptr, FILE_BEGIN)) {
+        char buf[16384];
+        DWORD got = 0;
+        uint64_t want = size - g_vrUiLogPos;
+        while (want && g_vrUiLogTail.size() < (256u << 10) &&
+               ReadFile(h, buf, (DWORD)(want < sizeof(buf) ? want : sizeof(buf)), &got, nullptr) && got) {
+            g_vrUiLogTail.append(buf, got);
+            g_vrUiLogPos += got;
+            want = want > got ? want - got : 0;
+        }
+    }
+    CloseHandle(h);
+}
+// one plan step to the game (see vr_ui.h kKeys*); false = the send failed (SendInput blocked)
+bool VrUiDeliver(const VrUi::KeyStep& s) {
     const int m = g_vrUiKeys;
-    if (s.kind == VrUi::kKeyDown || s.kind == VrUi::kKeyUp) {
+    if (VrUi::KeysUseSendInput(m)) {                      // phase 85: real keyboard input (the default)
+        if (s.kind == VrUi::kKeyDown || s.kind == VrUi::kKeyUp) return KeySwallow::SendScanKey(s.dik, s.kind == VrUi::kKeyDown);
+        if (s.kind != VrUi::kChar) return true;
+        if (m == VrUi::kKeysSendScan && KeySwallow::SendCharScan((wchar_t)(unsigned char)s.ch)) return true;
+        return KeySwallow::SendUnicodeChar((wchar_t)(unsigned char)s.ch);   // (scan mode: a character the layout has no key for)
+    }
+    if (s.kind == VrUi::kKeyDown || s.kind == VrUi::kKeyUp) {   // the phase 83 paths (vr_ui_keys 2 .. 4)
         const bool down = s.kind == VrUi::kKeyDown;
         if (m != VrUi::kKeysWindow) KeySwallow::InjectDiKey(s.dik, down);
         if (m == VrUi::kKeysWindow || (m == VrUi::kKeysMixed && s.vk == VrUi::kVkReturn)) {
@@ -19286,19 +19410,49 @@ void VrUiDeliver(const VrUi::KeyStep& s) {
             if (down && s.vk == VrUi::kVkReturn) KeySwallow::InjectWindowChar('\r');
         }
     } else if (s.kind == VrUi::kChar) {
-        if (m != VrUi::kKeysDirectInput) { KeySwallow::InjectWindowChar(s.ch); return; }
+        if (m != VrUi::kKeysDirectInput) { KeySwallow::InjectWindowChar(s.ch); return true; }
         bool shift = false;
         const uint8_t dik = VrUi::DikOfChar(s.ch, &shift);
-        if (!dik) return;
+        if (!dik) return true;
         if (shift) KeySwallow::InjectDiKey(0x2A, true);
         KeySwallow::InjectDiKey(dik, true);
         KeySwallow::InjectDiKey(dik, false);
         if (shift) KeySwallow::InjectDiKey(0x2A, false);
     }
+    return true;
+}
+// the delivery check of the last batch (render thread, every 200 ms until all are confirmed or kConfirmMs passed)
+void VrUiCheckConfirm(uint64_t now) {
+    if (g_vrUiConfirm.empty() || now - g_vrUiConfirmPoll < 200) return;
+    g_vrUiConfirmPoll = now;
+    VrUiReadLogTail();
+    bool all = true;
+    for (size_t i = 0; i < g_vrUiConfirm.size(); ++i) {
+        if (!g_vrUiConfirmed[i] && VrUi::Echoed(g_vrUiLogTail, g_vrUiConfirm[i])) {
+            g_vrUiConfirmed[i] = true;
+            ++g_vrUiConfirmedN;
+            Log("In-game UI (phase 85): `%s` CONFIRMED -- game.log.txt echoed it %llu ms after the batch's last key",
+                g_vrUiConfirm[i].c_str(), (unsigned long long)(now - g_vrUiBatchEnd));
+        }
+        all = all && g_vrUiConfirmed[i];
+    }
+    if (all) { g_vrUiResult = 1; g_vrUiConfirm.clear(); return; }
+    if (now < g_vrUiConfirmUntil) return;
+    for (size_t i = 0; i < g_vrUiConfirm.size(); ++i)
+        if (!g_vrUiConfirmed[i]) {
+            ++g_vrUiUnconfirmedN;
+            LogWarn("In-game UI (phase 85): `%s` NOT confirmed after %llu s -- game.log.txt did not echo it (%s; the console key, Enter or "
+                    "the text did not reach the console, or the game does not log typed commands; dlaa.ini vr_ui_keys %d = %s, 0 .. 4 "
+                    "switch the delivery)", g_vrUiConfirm[i].c_str(), (unsigned long long)(VrUi::kConfirmMs / 1000),
+                    g_vrUiLogPath.empty() ? "no game.log.txt path" : "log read", g_vrUiKeys, VrUi::KeysName(g_vrUiKeys));
+        }
+    g_vrUiResult = 2;
+    g_vrUiConfirm.clear();
 }
 // once per Present (render thread): play the running plan, or start one for the values that are due
 void VrUiTick() {
     const uint64_t now = GetTickCount64();
+    VrUiCheckConfirm(now);
     if (!g_vrUiPlan.empty()) {
         while (g_vrUiStep < g_vrUiPlan.size()) {
             const VrUi::KeyStep& s = g_vrUiPlan[g_vrUiStep];
@@ -19307,34 +19461,59 @@ void VrUiTick() {
                 if (now < g_vrUiWaitUntil) return;
                 g_vrUiWaitUntil = 0;
             } else {
-                VrUiDeliver(s);
+                if (!KeySwallow::GameHasFocus()) {        // phase 85: hold the batch at this step until the game window has the focus
+                    if (!g_vrUiNoFocus && g_vrUiFocusLogs++ < 8)
+                        Log("In-game UI (phase 85): the game window lost the focus in the middle of a batch (step %zu of %zu) -- held "
+                            "until it is the foreground window again", g_vrUiStep, g_vrUiPlan.size());
+                    g_vrUiNoFocus = true;
+                    return;
+                }
+                g_vrUiNoFocus = false;
+                if (!VrUiDeliver(s)) {
+                    static int s_fails = 0;
+                    if (s_fails++ < 4)
+                        LogWarn("In-game UI (phase 85): SendInput failed (%lu) at step %zu -- input blocked (a window of higher integrity "
+                                "in front, or the secure desktop); dlaa.ini vr_ui_keys 2 .. 4 use the older paths", GetLastError(), g_vrUiStep);
+                }
             }
             ++g_vrUiStep;
         }
-        static const char* const kHow[3] = { "the console key + Enter as DirectInput keys, the text as WM_CHAR",
-                                             "window messages only", "DirectInput keys only" };
+        KeySwallow::ClearInjected();                      // phase 85: nothing of this batch left to burst out later (DirectInput)
         for (const std::string& c : g_vrUiCmds)
-            Log("In-game UI (phase 83): sent `%s` to the game's console (%s; vr_ui_keys %d) -- command #%llu", c.c_str(),
-                kHow[g_vrUiKeys % 3], g_vrUiKeys, (unsigned long long)++g_vrUiSent);
+            Log("In-game UI (phase 85): typed `%s` into the game's console (vr_ui_keys %d: %s) -- command #%llu; checking game.log.txt",
+                c.c_str(), g_vrUiKeys, VrUi::KeysName(g_vrUiKeys), (unsigned long long)++g_vrUiSent);
+        g_vrUiConfirm = g_vrUiCmds;
+        g_vrUiConfirmed.assign(g_vrUiConfirm.size(), false);
+        g_vrUiBatchEnd = now; g_vrUiConfirmUntil = now + VrUi::kConfirmMs; g_vrUiConfirmPoll = 0;
         g_vrUiPlan.clear(); g_vrUiCmds.clear(); g_vrUiStep = 0; g_vrUiWaitUntil = 0;
         return;
     }
-    if (!g_vrUiDeb.AnyDirty() || !VrUiUsable()) return;
+    if (!g_vrUiDeb.AnyDirty() || !VrUiUsable()) { g_vrUiNoFocus = false; return; }
     if (now - KeySwallow::LastUserKeyMs() < VrUi::kUserQuietMs) return;     // the player is typing (console / chat): later
     if (KeySwallow::MenuHideMode() == KeySwallow::kHideAll) return;         // the Hotkeys page waits for a key
+    if (!KeySwallow::GameHasFocus()) {                    // phase 85: SendInput types into the foreground window -- wait for the game
+        if (!g_vrUiNoFocus && g_vrUiFocusLogs++ < 8)
+            Log("In-game UI (phase 85): a change waits for the game window to have the focus on the desktop (the mod types with "
+                "SendInput into the foreground window; click the game window)");
+        g_vrUiNoFocus = true;
+        return;
+    }
+    g_vrUiNoFocus = false;
     const std::vector<VrUi::Pending> due = g_vrUiDeb.Due(now);
     if (due.empty()) return;
     for (const VrUi::Pending& p : due) g_vrUiCmds.push_back(VrUi::Command(p.set, p.field, p.value));
     g_vrUiPlan = VrUi::KeyPlan(g_vrUiCmds);
-    if (!KeySwallow::KeyboardDeviceSeen() && g_vrUiKeys != VrUi::kKeysWindow) {
+    g_vrUiConfirm.clear();                                // (a newer batch: the older check ends here)
+    g_vrUiLogPos = VrUiLogSize(); g_vrUiLogTail.clear(); g_vrUiResult = 0;
+    if (!KeySwallow::KeyboardDeviceSeen() && (g_vrUiKeys == VrUi::kKeysMixed || g_vrUiKeys == VrUi::kKeysDirectInput)) {
         static bool s_warned = false;
         if (!s_warned) { s_warned = true; LogWarn("In-game UI (phase 83): the game has no DirectInput keyboard device (yet) -- the console "
-                                                  "key may not reach it; dlaa.ini vr_ui_keys = 1 types with window messages only"); }
+                                                  "key may not reach it; dlaa.ini vr_ui_keys 0 (SendInput) types as real keyboard input"); }
     }
-    if (!KeySwallow::GameWindowKnown() && g_vrUiKeys != VrUi::kKeysDirectInput) {
+    if (!KeySwallow::GameWindowKnown() && (g_vrUiKeys == VrUi::kKeysMixed || g_vrUiKeys == VrUi::kKeysWindow)) {
         static bool s_warned2 = false;
-        if (!s_warned2) { s_warned2 = true; LogWarn("In-game UI (phase 83): the game window is not known (not subclassed) -- the typed text "
-                                                    "cannot reach the console; dlaa.ini vr_ui_keys = 2 types with DirectInput keys only"); }
+        if (!s_warned2) { s_warned2 = true; LogWarn("In-game UI (phase 83): the game window is not known (not subclassed) -- posted "
+                                                    "messages cannot reach the console; dlaa.ini vr_ui_keys 0 (SendInput) types as real keyboard input"); }
     }
 }
 // the menu rows
@@ -19377,8 +19556,10 @@ void StepGameTaaPair(int dir, uint64_t n) {
 // TAA mix / split fell back to the game's TAA)
 bool MainDlaaRuns() {
     if (!g_dlaaOn.load(std::memory_order_relaxed) || g_passive.load(std::memory_order_relaxed)) return false;
-    return !(g_gameTaa != GameTaa::kOff && GameTaa::Live(g_taaLastSeen, g_frames.load(std::memory_order_relaxed)) &&
-             g_taaLastAct == GameTaa::kActTaaOnly);
+    // phase 85: not the LAST pass's verdict (VR / one fallback pass among many greyed the rows per frame and rebuilt the panel each
+    // time) -- greyed only when no pass ran the mod for kTaaModRanHold Presents
+    const uint64_t now = g_frames.load(std::memory_order_relaxed);
+    return !(g_gameTaa != GameTaa::kOff && GameTaa::Live(g_taaLastSeen, now) && !TaaModRanRecently(now));
 }
 // phase 40: the menu's Hidden area mask (VR) row -- dlaa.ini xr_hidden_mask live (the next eye scene clear draws / skips it). The
 // OpenXR extension is only requested when it was on at the game's start: switched on later, it waits for a restart (logged; the
@@ -20282,15 +20463,19 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         if (!vr)                     swprintf(sent, sentCap, TRF(L"Greyed: VR only."));
         else if (!VrUiUsable())      swprintf(sent, sentCap, TRF(L"Greyed: the game's console is off. Set g_developer and g_console to "
                                               L"\"1\" in config.cfg while the game is closed."));
-        else if (!g_vrUiPlan.empty() || g_vrUiDeb.AnyDirty())
+        else if (g_vrUiNoFocus && (!g_vrUiPlan.empty() || g_vrUiDeb.AnyDirty()))   // phase 85: SendInput needs the foreground
+                                     swprintf(sent, sentCap, TRF(L"Waiting: click the game window on the desktop. The mod types into the "
+                                              L"game's console only while the game window has the focus."));
+        else if (!g_vrUiPlan.empty() || g_vrUiDeb.AnyDirty() || !g_vrUiConfirm.empty())
                                      swprintf(sent, sentCap, TRF(L"Sending to the game's console..."));
+        else if (g_vrUiResult == 2)  swprintf(sent, sentCap, TRF(L"The game's log did not confirm the last change: see the mod's log."));
         break;
     case MR_GAMETAA: {                                    // phase 82: is the game's TAA running, and what the mix does with it
         const bool live = GameTaa::Live(g_taaLastSeen, g_frames.load(std::memory_order_relaxed));
         if (!live)                             swprintf(sent, sentCap, TRF(L"The game's TAA is not running now: the mod runs alone."));
         else if (g_gameTaa == GameTaa::kOff)   swprintf(sent, sentCap, TRF(L"The game's TAA is running now: set the game's "
                                                         L"Anti-aliasing to Disabled, or pick mix or split."));
-        else if (g_taaLastAct == GameTaa::kActHdr || g_taaLastAct == GameTaa::kActLdr)
+        else if (TaaModRanRecently(g_frames.load(std::memory_order_relaxed)))   // phase 85: the same hold as MainDlaaRuns
             swprintf(sent, sentCap, g_gameTaa == GameTaa::kSplit ? TRF(L"The game's TAA is running now: split is on.")
                                                                  : TRF(L"The game's TAA is running now: the mix is on."));
         else {                                            // a FALLBACK to the game's TAA: say why (the log has the long text)
@@ -21074,6 +21259,12 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     if (g_menuPage == kMenuPageHotkeys) { MenuBuildHotkeysPanel(p, vr); return; }   // v0.12.1 phase 50: the Hotkeys page
     constexpr size_t kV = sizeof(p.rows[0].value) / sizeof(wchar_t);
     swprintf(p.title, sizeof(p.title) / sizeof(wchar_t), TRF(L"ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"), DLAA_INJECTOR_VERSION);
+    {   // phase 85: ONE mode label for the whole panel (the rows of the other mode are hidden, their titles carry no mode word)
+        const bool all = g_menuShowAll;
+        const size_t kT = sizeof(p.title) / sizeof(wchar_t), l = wcslen(p.title);
+        swprintf(p.title + l, kT - l, L" - %ls", all ? TR(L"all settings (flat and VR)") : (MenuVr() ? TR(L"VR settings") : TR(L"Flat settings")));
+    }
+    const bool all = g_menuShowAll;                       // phase 85: menu_show_all keeps the mode words in the row titles
     p.nRows = MR_COUNT;
     p.sel = g_menuSel;
     swprintf(p.colHead[0], 32, TRF(L"Setting"));         // phase 74: the column heads in the menu's language (menu.cpp's
@@ -21092,15 +21283,19 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     char holdS[16];                                       // v0.10.3 phase 29d: the Reset hold time ("5", "2.5")
     MenuHoldSecs(holdS, sizeof(holdS));
     // a group header row: "..." collapsed / "shown" expanded; the Hotkey column says what opens / closes it
-    auto groupRow = [&](int id, const wchar_t* name) {
+    auto groupRow = [&](int id, const wchar_t* name, bool locked = false) {   // phase 85: locked = greyed, cannot be opened
+        if (locked && !g_menuShowAll) MenuGrpOpen(id) = false;   // (menu_show_all: its rows stay listed, greyed, as before)
         const bool o = MenuGrpOpen(id);
-        snprintf(k, sizeof(k), "%s: %s", o ? snLeft : snRight, MenuUtf8(o ? TR(L"close") : TR(L"open")));   // phase 74: translated
+        if (locked) snprintf(k, sizeof(k), "-");
+        else snprintf(k, sizeof(k), "%s: %s", o ? snLeft : snRight, MenuUtf8(o ? TR(L"close") : TR(L"open")));   // phase 74: translated
         wchar_t hn[64];                                   // phase 46b: an arrow shows the state (WGL4 glyphs: in Segoe UI)
         swprintf(hn, 64, L"%lc %ls", o ? (wchar_t)0x25BC : (wchar_t)0x25BA, Lang::Tr(name));   // phase 74: every group title translated here
-        MenuRow(p, id, hn, k, nullptr, false);
-        const int gi = MenuGroupIndex(id);                // closed = "closed (N)" (the group's size), open = "open"
+        MenuRow(p, id, hn, k, nullptr, locked);
+        const int gi = MenuGroupIndex(id);                // closed = "closed (N)" (the rows shown in this mode), open = "open"
+        int n = 0;                                        // phase 85: rows hidden by the mode (flat / VR) are not counted
+        if (gi >= 0) for (int r = kMenuGroups[gi].header + 1; r <= kMenuGroups[gi].last; ++r) if (MenuRowForMode(r)) ++n;
         if (o || gi < 0) swprintf(p.rows[id].value, kV, L"%ls", o ? TR(L"open") : TR(L"closed"));
-        else             swprintf(p.rows[id].value, kV, TRF(L"closed (%d)"), kMenuGroups[gi].last - kMenuGroups[gi].header);
+        else             swprintf(p.rows[id].value, kV, TRF(L"closed (%d)"), n);
     };
 
     MenuRow(p, MR_MODE, TR(L"Mode"), KeyNameUi(KA_MODE_CYCLE), nullptr, false);
@@ -21117,7 +21312,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         else if (num[0] == '?')          swprintf(p.rows[MR_MODEL].value, kV, TRF(L"%hs (dlaa.ini)"), pn);   // J / L set in dlaa.ini
         else                             swprintf(p.rows[MR_MODEL].value, kV, L"%hs (%hs)", num, pn);
     }
-    groupRow(MR_PICGRP, Lang::Tr(kMenuGroups[MenuGroupIndex(MR_PICGRP)].title));   // phase 43: menu categories
+    groupRow(MR_PICGRP, MenuGroupTitle(MR_PICGRP));      // phase 43: menu categories
     MenuRow(p, MR_SHARP, TR(L"Sharpen strength"), pair(KA_SHARPEN_DOWN, KA_SHARPEN_UP), nullptr, !mainDlaa);
     const float sharp = SceneDlaa::Sharpness();
     swprintf(p.rows[MR_SHARP].value, kV, sharp <= 0.0f ? TRF(L"%.1f (off)") : L"%.1f", (double)sharp);
@@ -21129,10 +21324,10 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
             g_lodBias == 0.0f);                           // greyed: the cut-out bias is 0 while Texture sharpness is off
     if (LodCutFollows()) swprintf(p.rows[MR_LODCUT].value, kV, TRF(L"same (%.2f)"), (double)LodCutUserValue());
     else                 swprintf(p.rows[MR_LODCUT].value, kV, L"%.2f", (double)g_lodCutBias);
-    MenuRow(p, MR_AREA, TR(L"DLAA area (VR)"), pair(KA_AREA_DOWN, KA_AREA_UP), vr ? nullptr : NA_("VR only"), !vr);
+    MenuRow(p, MR_AREA, all ? TR(L"DLAA area (VR)") : TR(L"DLAA area"), pair(KA_AREA_DOWN, KA_AREA_UP), vr ? nullptr : NA_("VR only"), !vr);
     if (vr) swprintf(p.rows[MR_AREA].value, kV, L"%d %%", SceneDlaa::Area());
     else    swprintf(p.rows[MR_AREA].value, kV, TRF(L"100 %% (flat)"));
-    groupRow(MR_MOTGRP, Lang::Tr(kMenuGroups[MenuGroupIndex(MR_MOTGRP)].title));   // phase 43: menu categories
+    groupRow(MR_MOTGRP, MenuGroupTitle(MR_MOTGRP));      // phase 43: menu categories
     MenuRow(p, MR_DRAWIDS, TR(L"Per-part motion vectors"), KeyNameUi(KA_DRAWID_TOGGLE), nullptr, false);
     swprintf(p.rows[MR_DRAWIDS].value, kV, L"%ls", g_objMode == 2 ? TR(L"on") : (g_objMode == 1 ? TR(L"old stencil ids") : TR(L"off")));
     MenuRow(p, MR_MIRROR, TR(L"Mirror DLAA"), KeyNameUi(KA_MIRROR_TOGGLE), nullptr, false);
@@ -21157,7 +21352,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         MenuRow(p, MR_WIREWIDEN, TR(L"Thin-wire widening"), KeyNameUi(KA_WIRE_WIDEN), nullptr, false);
         swprintf(p.rows[MR_WIREWIDEN].value, kV, L"%ls", g_wireOn.load() ? TR(L"on (experimental)") : TR(L"off"));
     }
-    MenuRow(p, MR_PRETM, TR(L"DLAA before tonemap (flat)"), KeyNameUi(KA_PRE_TONEMAP), vr ? NA_("flat only") : nullptr, vr || !mainDlaa);
+    MenuRow(p, MR_PRETM, all ? TR(L"DLAA before tonemap (flat)") : TR(L"DLAA before tonemap"), KeyNameUi(KA_PRE_TONEMAP), vr ? NA_("flat only") : nullptr, vr || !mainDlaa);
     swprintf(p.rows[MR_PRETM].value, kV, L"%ls", onOff[(g_preCfg && g_preOn.load()) ? 1 : 0]);   // (the row switches a dlaa.ini 0 on too)
     MenuRow(p, MR_FWD, TR(L"See-through depth"), KeyNameUi(KA_FWD_DEPTH), nullptr, false);
     swprintf(p.rows[MR_FWD].value, kV, L"%ls", (g_fwdCfg && g_fwdOn.load()) ? TR(L"on")   // issue #26: dlaa.ini 0 / the low
@@ -21166,7 +21361,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     if (g_biasCfg > 0) swprintf(p.rows[MR_BIAS].value, kV, L"%d %%", g_biasCfg);
     else               swprintf(p.rows[MR_BIAS].value, kV, TRF(L"off"));
     // phase 84: the DLSS upscale row is gone (the Mode row cycles off / DLAA / DLSS on the same g_dlssUpscale; its hotkey stays)
-    groupRow(MR_CMPGRP, kMenuGroups[MenuGroupIndex(MR_CMPGRP)].title);   // phase 84: Compare and test
+    groupRow(MR_CMPGRP, MenuGroupTitle(MR_CMPGRP));      // phase 84: Compare and test
     MenuRow(p, MR_DLAA, TR(L"DLAA off to compare (not saved)"), KeyNameUi(KA_DLAA_TOGGLE), nullptr, false);
     swprintf(p.rows[MR_DLAA].value, kV, L"%ls", onOff[g_dlaaOn.load() ? 1 : 0]);
     {   // phase 82: the game's own TAA with the mod; the share row is live only in mode mix (kept while greyed)
@@ -21190,8 +21385,8 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     else if (Ofxr::DetectedVectorXr())  swprintf(p.rows[MR_VECTORXR].value, kV, TRF(L"found"));
     else                                swprintf(p.rows[MR_VECTORXR].value, kV, TRF(L"not found"));
     {   // phase 83: the game's own VR UI placement (typed into the game's console); greyed in flat / without the console
-        groupRow(MR_UIGRP, kMenuGroups[MenuGroupIndex(MR_UIGRP)].title);
         const bool on = VrUiUsable();
+        groupRow(MR_UIGRP, MenuGroupTitle(MR_UIGRP), !g_vrUiConsole);   // phase 85: the console off = greyed, cannot be opened
         const char* tag = vr ? nullptr : NA_("VR only");
         MenuRow(p, MR_UISET, TR(L"Layout"), "config.cfg", tag, !on);
         swprintf(p.rows[MR_UISET].value, kV, L"%ls", g_vrUiSet == VrUi::kDriving ? TR(L"driving") : TR(L"menus"));
@@ -21205,8 +21400,8 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         MenuRow(p, MR_UIRESET, TR(L"Reset to config.cfg"), MenuUtf8(TR(L"Right")), tag, !on);
         swprintf(p.rows[MR_UIRESET].value, kV, L"-");
     }
-    groupRow(MR_VRPGRP, kMenuGroups[MenuGroupIndex(MR_VRPGRP)].title);   // phase 43: menu categories
-    MenuRow(p, MR_TURBO, TR(L"Turbo mode (VR)"), "dlaa.ini xr_turbo", vr ? nullptr : NA_("VR only"), !vr);   // phase 30
+    groupRow(MR_VRPGRP, MenuGroupTitle(MR_VRPGRP));      // phase 43: menu categories (85: "Performance")
+    MenuRow(p, MR_TURBO, all ? TR(L"Turbo mode (VR)") : TR(L"Turbo mode"), "dlaa.ini xr_turbo", vr ? nullptr : NA_("VR only"), !vr);   // phase 30
     {
         const XrHook::TurboStats ts = XrHook::GetTurboStats();   // (no live counter: it would rebuild the panel every frame)
         swprintf(p.rows[MR_TURBO].value, kV, L"%ls", !g_xrTurbo ? TR(L"off") : (ts.failed ? TR(L"on (stopped)") : TR(L"on")));
@@ -21241,7 +21436,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     {   // phase 40: hidden area mask; "not supported" once the runtime said it has no XR_KHR_visibility_mask (no live counter)
         const XrHook::HiddenStats hs = XrHook::GetHiddenStats();
         const bool noExt = hs.ext == 1 || hs.ext == 4;
-        MenuRow(p, MR_HMASK, TR(L"Hidden area mask (VR)"), "dlaa.ini xr_hidden_mask", vr ? nullptr : NA_("VR only"), !vr || noExt);
+        MenuRow(p, MR_HMASK, all ? TR(L"Hidden area mask (VR)") : TR(L"Hidden area mask"), "dlaa.ini xr_hidden_mask", vr ? nullptr : NA_("VR only"), !vr || noExt);
         const wchar_t* val = !g_xrHiddenMask ? TR(L"off")
                            : noExt ? TR(L"on (not supported)")
                            : !g_xrHiddenMaskAtStart ? TR(L"on (restart the game)")
@@ -21251,17 +21446,17 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     }
     if (g_xrTurbo && !XrTurboEffective())                 // phase 52: the VR FPS cap wins over turbo
         swprintf(p.rows[MR_TURBO].value, kV, TRF(L"on (FPS cap wins)"));
-    groupRow(MR_FRGRP, kMenuGroups[MenuGroupIndex(MR_FRGRP)].title);   // phase 52: frame rate
+    groupRow(MR_FRGRP, MenuGroupTitle(MR_FRGRP));        // phase 52: frame rate
     {   // phase 52: "not supported" once Reflex was refused / NVAPI is missing (FramePace::Support 0; no live counter)
         const bool noReflex = FramePace::Support() == 0;
-        MenuRow(p, MR_REFLEX, TR(L"Reflex (flat)"), "dlaa.ini reflex", vr ? NA_("flat only") : nullptr, vr || noReflex);
+        MenuRow(p, MR_REFLEX, all ? TR(L"Reflex (flat)") : TR(L"Reflex"), "dlaa.ini reflex", vr ? NA_("flat only") : nullptr, vr || noReflex);
         static const wchar_t* const kRx[3] = { N_(L"off"), N_(L"on"), N_(L"on + boost") };
         if (noReflex) swprintf(p.rows[MR_REFLEX].value, kV, L"%ls", g_reflex ? TR(L"on (not supported)") : TR(L"not supported"));
         else          swprintf(p.rows[MR_REFLEX].value, kV, L"%ls", Lang::Tr(kRx[g_reflex < 0 || g_reflex > 2 ? 0 : g_reflex]));
-        MenuRow(p, MR_FPSCAP, TR(L"FPS cap (flat)"), "dlaa.ini fps_cap", vr ? NA_("flat only") : nullptr, vr);
+        MenuRow(p, MR_FPSCAP, all ? TR(L"FPS cap (flat)") : TR(L"FPS cap"), "dlaa.ini fps_cap", vr ? NA_("flat only") : nullptr, vr);
         if (g_fpsCap) swprintf(p.rows[MR_FPSCAP].value, kV, TRF(L"%d fps"), g_fpsCap);
         else          swprintf(p.rows[MR_FPSCAP].value, kV, TRF(L"off"));
-        MenuRow(p, MR_VRFPSCAP, TR(L"VR FPS cap"), "dlaa.ini vr_fps_cap", vr ? nullptr : NA_("VR only"), !vr);
+        MenuRow(p, MR_VRFPSCAP, all ? TR(L"VR FPS cap") : TR(L"FPS cap"), "dlaa.ini vr_fps_cap", vr ? nullptr : NA_("VR only"), !vr);
         const int64_t per = XrHook::GetFpsCapStats().basePeriodNs;   // (atomics; the headset rate: a new session at most)
         if (g_vrFpsCap && per > 0)
             swprintf(p.rows[MR_VRFPSCAP].value, kV, TRF(L"%ls (%.0f fps)"), g_vrFpsCap == 2 ? TR(L"half") : TR(L"third"),
@@ -21286,10 +21481,10 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         else if (!strcmp(Lang::Setting(), "auto")) swprintf(v, kV, TRF(L"auto (%ls)"), Lang::NativeName(Lang::Active()));
         else                                       swprintf(v, kV, L"%ls", Lang::NativeName(Lang::Active()));
     }
-    groupRow(MR_PANELGRP, TR(L"Panel settings"));             // v0.10.3 phase 29c
+    groupRow(MR_PANELGRP, MenuGroupTitle(MR_PANELGRP));  // v0.10.3 phase 29c (85: the table's "Menu panel", was "Panel settings")
     const bool vrQuad = vr && MenuVrQuad();               // v0.10.3 phase 29b: the quad path -> the quad's distance
     const bool vrLock = vrQuad && g_menuVrLock;           // phase 70: fixed in the cab -> X / Y / depth edit its own spot
-    MenuRow(p, MR_PANELLOCK, TR(L"Panel lock (VR)"), "dlaa.ini menu_vr_lock", vrQuad ? nullptr : (vr ? NA_("VR layer only") : NA_("VR only")),
+    MenuRow(p, MR_PANELLOCK, all ? TR(L"Panel lock (VR)") : TR(L"Panel lock"), "dlaa.ini menu_vr_lock", vrQuad ? nullptr : (vr ? NA_("VR layer only") : NA_("VR only")),
             !vrQuad);
     swprintf(p.rows[MR_PANELLOCK].value, kV, L"%ls", g_menuVrLock ? TR(L"Fixed in cab") : TR(L"Follow head"));
     MenuRow(p, MR_POSX, TR(L"Panel position X"), vrLock ? "dlaa.ini menu_vr_lock_x" : (vr ? "dlaa.ini menu_vr_x" : "dlaa.ini menu_x"),
@@ -21304,12 +21499,12 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     else         swprintf(p.rows[MR_POSY].value, kV, L"%d %%", g_menuY);
     MenuRow(p, MR_SIZE, TR(L"Panel size"), vr ? "dlaa.ini menu_vr_scale" : "dlaa.ini menu_scale", nullptr, false);
     swprintf(p.rows[MR_SIZE].value, kV, L"%.1f", (double)(vr ? g_menuVrScale : g_menuScale));
-    MenuRow(p, MR_DEPTH, TR(L"Panel VR depth"), vrLock ? "dlaa.ini menu_vr_lock_dist" : (vrQuad ? "dlaa.ini menu_vr_dist" :
+    MenuRow(p, MR_DEPTH, all ? TR(L"Panel VR depth") : TR(L"Panel depth"), vrLock ? "dlaa.ini menu_vr_lock_dist" : (vrQuad ? "dlaa.ini menu_vr_dist" :
             "dlaa.ini menu_vr_depth"), vr ? nullptr : NA_("VR only"), !vr);
     if (vrLock)      swprintf(p.rows[MR_DEPTH].value, kV, L"%.2f m", (double)g_menuVrLockDist / 100.0);
     else if (vrQuad) swprintf(p.rows[MR_DEPTH].value, kV, L"%.2f m", (double)g_menuVrDist / 100.0);
     else        swprintf(p.rows[MR_DEPTH].value, kV, TRF(L"%d px"), g_menuVrDepth);
-    MenuRow(p, MR_FACE, TR(L"Panel faces you (VR)"), "dlaa.ini menu_vr_face", vr ? nullptr : NA_("VR only"), !vr);   // phase 16
+    MenuRow(p, MR_FACE, all ? TR(L"Panel faces you (VR)") : TR(L"Panel faces you"), "dlaa.ini menu_vr_face", vr ? nullptr : NA_("VR only"), !vr);   // phase 16
     swprintf(p.rows[MR_FACE].value, kV, L"%ls", onOff[g_menuVrFace ? 1 : 0]);
     // v0.10.2: the open key is the value, the 4 others the Hotkey column (v0.10.3 phase 29c: their short names; in the group).
     // v0.12.1 phase 50: Right opens the Hotkeys page on its "Menu: open / close" line (the row no longer binds)
@@ -21318,7 +21513,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     MenuWiden(p.rows[MR_MENUKEYS].value, kV, snMenu);
     MenuRow(p, MR_FPS, TR(L"FPS counter"), "dlaa.ini fps_show / fps_text", nullptr, false);
     swprintf(p.rows[MR_FPS].value, kV, L"%ls", !g_fpsShow ? TR(L"Off") : FpsTextMenuName(g_fpsText));
-    groupRow(MR_FPSGRP, TR(L"FPS counter settings"));         // v0.10.3 phase 29c
+    groupRow(MR_FPSGRP, MenuGroupTitle(MR_FPSGRP));      // v0.10.3 phase 29c (85: the table's "FPS counter")
     MenuRow(p, MR_FPSLOCK, TR(L"FPS counter lock"), "dlaa.ini fps_vr_lock", vr ? nullptr : NA_("VR only"), !vr);   // v0.10.3 phase 28
     swprintf(p.rows[MR_FPSLOCK].value, kV, L"%ls", g_fpsVrLock == 2 ? TR(L"Attached to vehicle")   // phase 47
                                                    : g_fpsVrLock ? TR(L"Fixed in play space") : TR(L"Follow head"));   // phase 44: was "Fixed in cab"
@@ -21350,7 +21545,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     swprintf(p.rows[MR_FPSBRIGHT].value, kV, L"%d %%", g_fpsBright);
     MenuRow(p, MR_FPSOPAC, TR(L"FPS opacity"), "dlaa.ini fps_opacity", nullptr, false);   // phase 51f
     swprintf(p.rows[MR_FPSOPAC].value, kV, L"%d %%", g_fpsOpacity);
-    MenuRow(p, MR_FPSDIST, TR(L"FPS distance (VR)"), "dlaa.ini fps_vr_dist", vr ? nullptr : NA_("VR only"), !vr);
+    MenuRow(p, MR_FPSDIST, all ? TR(L"FPS distance (VR)") : TR(L"FPS distance"), "dlaa.ini fps_vr_dist", vr ? nullptr : NA_("VR only"), !vr);
     swprintf(p.rows[MR_FPSDIST].value, kV, L"%.2f m", (double)g_fpsVrDist / 100.0);
     snprintf(k, sizeof(k), "%s: %s", snRight, MenuUtf8(TR(L"open")));          // v0.12.1 phase 50: the Hotkeys page
     MenuRow(p, MR_HOTKEYS, TR(L"Hotkeys..."), k, nullptr, false);
@@ -21368,8 +21563,11 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     swprintf(p.rows[MR_CLOSE].value, kV, L"-");
 
     if (g_menuSel < 0 || g_menuSel >= MR_COUNT) g_menuSel = 0;
-    // phase 84: a row (or a whole group) hidden by the mode (a flat <-> VR flip): the selection steps to the next visible row
-    if (!MenuRowVisible(g_menuSel) && !(MenuRowGroup(g_menuSel) >= 0 && MenuRowVisible(MenuRowGroup(g_menuSel))))
+    // phase 84: a row (or a whole group) hidden by the mode (a flat <-> VR flip): the selection steps to the next visible row.
+    // phase 85: only a row hidden by its COLLAPSED group keeps its place (it shows its header); a row hidden by the mode moves even
+    // inside an open group (it could be changed blind)
+    if (!MenuRowForMode(g_menuSel) ||
+        (!MenuRowVisible(g_menuSel) && !(MenuRowGroup(g_menuSel) >= 0 && MenuRowVisible(MenuRowGroup(g_menuSel)))))
         g_menuSel = MenuStepRow(g_menuSel, +1);
     const int sel = g_menuSel;
     MenuPerfLines(p, vr);                                 // v0.10.0: the GPU block + the GPU cost column (once-a-second figures)
@@ -21619,6 +21817,11 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_UIGRP: case MR_CMPGRP:                          // phase 83 / 84
     case MR_FRGRP:                                          // phase 52
     case MR_PANELGRP: case MR_FPSGRP:                       // v0.10.3 phase 29c: Right opens the group, Left closes it (a fresh
+        if (row == MR_UIGRP && dir > 0 && (VrUiEnsure(), !g_vrUiConsole)) {   // phase 85: the console is off -- it cannot open
+            MenuGrpOpen(row) = false;
+            PlayTones(1, 200, 120, 0);
+            break;
+        }
         MenuGrpOpen(row) = dir > 0;                         // press only: not a stepRow, so auto-repeat is ignored above)
         break;
     case MR_PANELLOCK:                                      // phase 70: Left and Right both switch it (also flat: kept for VR)
@@ -25207,7 +25410,7 @@ void LoadConfig() {
             if (!strcmp(key, "game_taa_ver")) { g_gameTaaIniVer = (int)v; continue; }                             // phase 82
             if (!strcmp(key, "game_taa_split")) { g_gameTaaSplit = GameTaa::ClampMix((int)v); g_gameTaaExplicit = true; continue; }
             if (!strcmp(key, "menu_show_all")) { g_menuShowAll = v != 0; continue; }   // phase 84, startup only
-            if (!strcmp(key, "vr_ui_keys")) { g_vrUiKeys = v <= 0 ? 0 : (v >= 2 ? 2 : (int)v); continue; }   // phase 83, startup only
+            if (!strcmp(key, "vr_ui_keys")) { g_vrUiKeys = VrUi::ClampKeys((long)v); continue; }   // phase 83 / 85 (0 .. 4), startup only
             if (!strcmp(key, "game_taa_pair")) { g_gameTaaPair = GameTaa::ClampPair((int)v); g_gameTaaExplicit = true; continue; }
             if (!strcmp(key, "game_taa_mix")) { g_gameTaaMix = GameTaa::ClampMix((int)v); g_gameTaaExplicit = true; continue; }   // phase 82
             if (!strcmp(key, "game_taa_mvjit")) { g_gameTaaMvJit = v < 0 ? -1 : (v > 0 ? 1 : 0); continue; }   // phase 82, startup only

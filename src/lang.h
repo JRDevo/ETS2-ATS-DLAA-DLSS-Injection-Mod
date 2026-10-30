@@ -60,6 +60,8 @@ bool            LoadForTest(const wchar_t* poPath, const char* code);   // tests
 // phase 83: the game's config.cfg (Documents\<game>\config.cfg, the game by the exe name) as text, "" when missing; `path` (optional)
 // gets the file's path for log lines
 std::string     ReadGameConfig(std::wstring* path = nullptr);
+// phase 85: Documents\<game>\game.log.txt (the In-game UI rows confirm a typed command by its echo there); "" = no Documents
+std::wstring    GameLogPath();
 
 }  // namespace Lang
 

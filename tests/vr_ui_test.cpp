@@ -96,7 +96,24 @@ static void TestPlan() {
         CHECK(DikOfChar(c, &sh) != 0, "every command character has a scan code: '%c'", c);
 }
 
+// phase 85: the delivery modes (vr_ui_keys, renumbered: 0 SendInput default) and the game.log.txt echo that confirms a command
+static void TestDelivery() {
+    CHECK(kKeysSendInput == 0 && KeysUseSendInput(0) && KeysUseSendInput(kKeysSendScan) && !KeysUseSendInput(kKeysMixed) &&
+          !KeysUseSendInput(kKeysWindow) && !KeysUseSendInput(kKeysDirectInput), "0 / 1 = SendInput, 2 .. 4 = the phase 83 paths");
+    CHECK(ClampKeys(-3) == 0 && ClampKeys(2) == 2 && ClampKeys(4) == 4 && ClampKeys(9) == 4, "vr_ui_keys clamped to 0 .. 4");
+    for (int m = 0; m < kKeysModes; ++m) CHECK(strcmp(KeysName(m), "?") != 0, "mode %d has a name for the log", m);
+    const std::string cmd = "uset r_manual_stereo_ui_y_game \"-0.45\"";
+    const std::string log = "00:02:13.004 : [sys] something\n00:02:13.511 : uset r_manual_stereo_ui_y_game \"-0.45\"\r\n";
+    CHECK(Echoed(log, cmd), "the echoed line confirms the command");
+    CHECK(!Echoed(log, "uset r_manual_stereo_ui_y_game \"-0.4\""), "another value is not confirmed (exact text)");
+    CHECK(!Echoed("00:00:01.000 : uset r_manual_stereo_ui_y_game \"-0.45\"5\n", cmd), "a longer value is not confirmed");
+    CHECK(!Echoed("00:00:01.000 : xuset r_manual_stereo_ui_y_game \"-0.45\"\n", cmd), "a word ending in it is not confirmed");
+    CHECK(Echoed(cmd, cmd) && Echoed("> " + cmd + "\n", cmd), "at the start of the read bytes / after a prompt");
+    CHECK(!Echoed("", cmd), "an empty log confirms nothing");
+}
+
 int main() {
+    TestDelivery();
     TestParse();
     TestStepFormat();
     TestDebounce();

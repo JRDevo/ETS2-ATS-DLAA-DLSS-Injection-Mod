@@ -2504,7 +2504,7 @@ non-blocking readback timing -- so it is judged by the check totals and a verify
   either way).
   `tests/game_taa_test.cpp` (CI) covers the pure logic; the settings round-trip test checks the two rows against `g_gameTaa`.
 
-### Phase 83: the game's in-game VR UI placement, live from the menu (group "In-game UI (VR)", `src/vr_ui.h`)
+### Phase 83: the game's in-game VR UI placement, live from the menu (group "In-game UI" (VR), `src/vr_ui.h`; delivery replaced in phase 85)
 
 - **What.** The game places its VR UI with console variables: `r_manual_stereo_ui_<y x dist pitch yaw fov radius>_game` while
   driving and the same without `_game` on the menu screens (config.cfg; `uset r_manual_stereo_ui_y_game "-0.4"` in the console moves
@@ -2545,6 +2545,50 @@ non-blocking readback timing -- so it is judged by the check totals and a verify
   now" meaning. `dlaa.ini menu_show_all = 1` (startup only) shows everything, greyed as before (the settings round-trip test boots
   with it). After a flat <-> VR flip a hidden selection steps to the next visible row (`MenuBuildPanel`).
 - **Tests:** settings round-trip (show-all, the header list, no DLSS upscale row), `tests/menu_shot.cpp` (the VR layout).
+
+### Phase 85: fix round after the VR test of 287b6f3 and two audits (Opus + Fable)
+
+- **In-game UI typing never reached the game.** ATS binds the console on `sys.keyboard` (controls.sii: raw input / window
+  messages; only joysticks are DirectInput) and game.log.txt had no `r_manual_stereo_ui_*` line, so none of phase 83's 15 "sent"
+  commands ran. The default delivery (`vr_ui_keys` renumbered, `VrUi::kKeys*`) is now **SendInput**: 0 = console key (0x29) and
+  Enter (0x1C) by `KEYEVENTF_SCANCODE`, the text as `KEYEVENTF_UNICODE` (VK_PACKET -> WM_CHAR); 1 = also the text by scan code on the
+  game thread's layout (`VkKeyScanExW` + `MapVirtualKeyExW`, Shift / Ctrl / Alt as the layout needs; a character without a key falls
+  back to Unicode); 2 / 3 / 4 = the phase 83 mix / window messages / DirectInput. Every step (and the batch start) waits for
+  `GetForegroundWindow() == GetAncestor(game window, GA_ROOT)` (`KeySwallow::GameHasFocus`); while it waits the row says "click the
+  game window" and one INFO line is logged. The mod's events carry `dwExtraInfo = 'DLAA'` (`KeySwallow::kInjectMark`): the window
+  procedure (`GetMessageExtraInfo`, plus VK_PACKET and a 250 ms self-typing window for the TranslateMessage WM_CHAR), WM_INPUT
+  (`RAWKEYBOARD.ExtraInformation`) and the DirectInput tap (the self-typing window: DirectInput has no extra info) neither stamp
+  `LastUserKeyMs` nor hide them. WM_INPUT keyboard make events of the PLAYER now stamp it too (a game that reads raw input only).
+  Injected DirectInput entries carry a timestamp and are dropped after 300 ms unread; `ClearInjected` empties the queue and the held
+  keys at every batch end. **Confirmation:** the log size is taken at the batch start; after the last key `VrUiCheckConfirm` reads
+  what game.log.txt grew by (every 200 ms, up to 2 s, 256 KB) and looks for the exact command (`VrUi::Echoed`): INFO "CONFIRMED ...
+  N ms after the batch's last key" or WARN "NOT confirmed after 2 s" (the row then says the log did not confirm). The echo of a
+  TYPED command is assumed to look like the config.cfg exec lines (`<time> : uset <var> "<value>"`); not verified yet -- if every
+  command is "NOT confirmed" while the HUD moves, the echo differs (log it and adapt `Echoed`). Not done: reading the console key
+  from controls.sii (scan 0x29 = the key under Esc is assumed).
+- **Jitter misses in VR.** `GameTaa::CbShadow`: six 2 MB rings rotate in VR but `kBufs` was 4 (the LRU evicted each ring before it
+  came round), and the copy window was one min..max range of every offset centred on the last one -- the two eyes sit at both ends of
+  the ring, so one eye missed in bursts. Now: watch by SHAPE (`g_taaCbShape` = the resolve buffer's ByteWidth; a DISCARD Map of a
+  DYNAMIC constant buffer of that width is watched from that first Map, with a per-thread cache of resources known not to match;
+  kBufs 12), the copy = merged CLUSTERS of the last 32 offsets (+ 256 + 32 KB each side, circular mod ByteWidth, newest first up to
+  1 MB, at most 8 segments) per upload -- ~2 x 64 KB instead of up to 1.5 MB of write-combined reads. A miss no longer falls back to
+  the game's TAA: the same Present's other eye's jitter (when the VR pairs read so far agree; a disagreement is logged and disables
+  this) else the last jitter read; counted in the stats line ("jitter reused ... other eye / last", "VR pairs same / different").
+  The TaaNote 60-line cap is per reason.
+- **Model row flicker.** `MainDlaaRuns()` used the LAST pass's verdict, so one fallback pass greyed the DLAA quality rows for a
+  frame and rebuilt the panel texture. Now greyed only after 30 Presents without a pass that ran the mod (`g_taaLastModRanFrame`:
+  a mix / split pass, or an unheld pass); the Game TAA row's sentence uses the same hold.
+- **Menu.** A row hidden by the MODE inside an open group now moves the selection (only a row hidden by its collapsed group keeps it);
+  "closed (N)" counts the rows of the current mode. Titles lose "(VR)" / "(flat)" / "VR " where the group / mode says it (DLAA area,
+  DLAA before tonemap, Turbo mode, Hidden area mask, Reflex, FPS cap x2, Panel lock / depth / faces you, FPS distance; groups
+  Performance, In-game UI); the panel title line ends in "VR settings" / "Flat settings" ("all settings (flat and VR)" with
+  `menu_show_all = 1`, which keeps the old titles: `MenuGroupDef::titleAll`). The FPS counter / Menu panel group rows now use the
+  table titles (they still built "FPS counter settings" / "Panel settings"). With the game's console off the In-game UI group header
+  is greyed and does not open (Right beeps; not force-closed with `menu_show_all`). 17 new texts, AI drafts in all 41 languages.
+- **Tests:** game_taa_test (rotation watched by shape: 1 miss instead of 3; VR: 6 rings, eyes at both ends, 240 frames = misses only
+  in frame 0, 2 clusters, < 200 KB per upload; circular end; 12 watched + LRU), vr_ui_test (modes, clamp, `Echoed`), settings
+  round-trip `MenuRules` (closed (N) per mode, the title label, no mode words in shown titles, the mode-hidden selection, the
+  console-locked group). The save set is unchanged (settings_check: Save writes 72 keys, Reset removes 73).
 
 ### The RenderDoc oracle (done in v0.2)
 
