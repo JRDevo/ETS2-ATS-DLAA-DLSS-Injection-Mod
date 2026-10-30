@@ -2465,6 +2465,18 @@ non-blocking readback timing -- so it is judged by the check totals and a verify
   and in a split with a Mix side, `GameTaa::ShareUsed`). The composite gets the mod's share left (`Params[3].x`) and right
   (`Params[3].z`) of the line (`GameTaa::MixOf(mode, mix, pair)`); the labels name each side ("DLAA" / "DLSS", "TAA", "MIX 50%", each
   " (OFF)" when that side's input is missing this pass; `GameTaa::SideLabel` / `PairSides`; the font has D L A S T O F M I X ( ) % 0-9).
+- **VR game test (ATS, 5512x5848 per eye, dlaa_area 50): the mix ran 4784 of 4802 passes, but two bugs.** (1) Two red lines: the line
+  was at the same % of each eye's PICTURE, and the eyes' optical centres are uv 0.379 / 0.621 -- a different view angle per eye, seen
+  double. The split (line AND the composite's cut) is now at the same offset from each eye's optical centre, `GameTaa::SplitXc`
+  (x0 + width * (cu + (pct - 50) / 100), clamped; flat cu = 0.5 = as before); the line is capped at 6 px (11 px at 5848 px before).
+  (2) A darker square on one eye (inside its DLAA rect): not found for certain from the code and the log. Fixed on suspicion: a tonemap
+  drawn in MORE than one draw had only its first draw re-issued (the rest of the mod's texture stayed unwritten = dark inside the rect
+  after the 70 % composite) and the further draw also ended the post-tonemap replays -- each further tonemap draw of the same pass is
+  now re-issued into the same texture (`TaaReissueTonemap(..., again)`, logged once). New diagnostics: `tonemap re-issue ... viewport
+  / scissor ... PARTIAL` (a partial tonemap draw) and per eye `eye N composite at RT ... rect ... unit centre uv ... DLAA input fmt ...
+  blit SRV0 view fmt ... sRGB decode` (on every rect change). Checked and ruled out from the code: the composite rect follows the unit's
+  rect every Run (`m_oxc` = the optical-centred crop); the two re-issued tonemap textures alternate per pass and the log shows each
+  eye's tonemap -> blit in order; both have the same format, and both eyes' blits decode sRGB.
 - **Not verified in game yet / limits.** Whether SCS TAA runs in VR (if not: VR stays exactly mode 0). Whether the constants come
   through the window copy for every frame (round 2; a window miss grows it and is logged). The
   jitter sign (cb0[8].xy taken as the geometry shift). MVJittered (see above). Mirrors keep the mod's own mirror jitter (if the game

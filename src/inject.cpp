@@ -12943,13 +12943,41 @@ void TaaOnResolve(ID3D11DeviceContext* ctx) {
 }
 
 // the game's tonemap draw re-issued once into our own target of the tonemap target's shape, with t0 = the raw scene (kActLdr)
+// again = a FURTHER tonemap draw of the same pass into the same target (VR game test: a darker square on one eye -- a tonemap drawn in
+// more than one draw left the rest of the mod's texture unwritten, and the second draw also ended the post-tonemap replays): it goes
+// into the same texture (g_taaPost.idx), which keeps its contents
+uint64_t g_taaReissueExtra = 0;
+int      g_taaTmDiagLogs = 0;
 bool TaaReissueTonemap(ID3D11DeviceContext* ctx, PassSlot& slot, const D3D11_TEXTURE2D_DESC& rtDesc,
-                       const D3D11_RENDER_TARGET_VIEW_DESC& rvd, UINT verts) {
+                       const D3D11_RENDER_TARGET_VIEW_DESC& rvd, UINT verts, bool again = false) {
     Microsoft::WRL::ComPtr<ID3D11Device> dev;
     ctx->GetDevice(&dev);
     if (!dev || !slot.taaRaw) return false;
-    const int i = g_taaLdrNext;
-    g_taaLdrNext ^= 1;
+    const int i = again ? g_taaPost.idx : g_taaLdrNext;
+    if (!again) g_taaLdrNext ^= 1;
+    {   // diagnostics (first draws): the tonemap draw's viewport / scissor vs its target -- a partial one leaves the rest unwritten
+        D3D11_VIEWPORT vp{};
+        UINT nvp = 1;
+        ctx->RSGetViewports(&nvp, &vp);
+        ID3D11RasterizerState* rs = nullptr;
+        ctx->RSGetState(&rs);
+        bool sc = false;
+        if (rs) { D3D11_RASTERIZER_DESC d{}; rs->GetDesc(&d); sc = d.ScissorEnable != FALSE; rs->Release(); }
+        D3D11_RECT r{};
+        UINT nsc = 1;
+        if (sc) ctx->RSGetScissorRects(&nsc, &r);
+        const bool partial = (nvp && (vp.TopLeftX > 0.5f || vp.TopLeftY > 0.5f || vp.Width + 0.5f < (float)rtDesc.Width ||
+                                      vp.Height + 0.5f < (float)rtDesc.Height)) ||
+                             (sc && (r.left > 0 || r.top > 0 || r.right < (LONG)rtDesc.Width || r.bottom < (LONG)rtDesc.Height));
+        if (g_taaTmDiagLogs < 8 || (partial && g_taaTmDiagLogs < 24)) {
+            ++g_taaTmDiagLogs;
+            Log("game TAA (phase 82): tonemap re-issue%s pass s=%llu -> texture %d: viewport %.0f,%.0f %.0fx%.0f, scissor %s (%ld,%ld)-(%ld,%ld), "
+                "target %ux%u fmt=%d, RTV fmt %d, verts %u%s", again ? " (a FURTHER tonemap draw of the same pass)" : "",
+                (unsigned long long)slot.s, i, (double)vp.TopLeftX, (double)vp.TopLeftY, (double)vp.Width, (double)vp.Height,
+                sc ? "on" : "off", (long)r.left, (long)r.top, (long)r.right, (long)r.bottom, rtDesc.Width, rtDesc.Height,
+                (int)rtDesc.Format, (int)rvd.Format, verts, partial ? " -- PARTIAL: only this part of the target is drawn" : "");
+        }
+    }
     D3D11_TEXTURE2D_DESC cur{};
     if (g_taaLdrTex[i]) g_taaLdrTex[i]->GetDesc(&cur);
     if (!g_taaLdrTex[i] || cur.Width != rtDesc.Width || cur.Height != rtDesc.Height || cur.Format != rtDesc.Format) {
@@ -13058,9 +13086,21 @@ void TaaPostAfterDraw(ID3D11DeviceContext* ctx, int kind, UINT a, UINT b, INT c)
 void TaaOnTonemap(ID3D11DeviceContext* ctx, ID3D11Texture2D* src, void* rtPtr, const D3D11_TEXTURE2D_DESC& rtDesc,
                   const D3D11_RENDER_TARGET_VIEW_DESC& rvd, UINT verts) {
     if (g_gameTaa == GameTaa::kOff) return;
-    g_taaPost.armed = g_taaPost.pendingArm = false;     // a new tonemap: the previous one's replays end
     PassSlot* const s = TaaNewest();
-    if (!s || s->taaAct >= 0) return;                    // decided at its first tonemap
+    if (!s) return;
+    if (s->taaAct >= 0) {                                // decided at its first tonemap draw; a further one of the same pass:
+        if (s->taaAct == GameTaa::kActLdr && s->taaLdr && rtPtr == g_taaPost.rt && (g_taaPost.armed || g_taaPost.pendingArm)) {
+            if (TaaReissueTonemap(ctx, *s, rtDesc, rvd, verts, true)) {   // into the same texture; the game's draw is not replayed
+                g_taaPost.pendingArm = true;
+                if (g_taaReissueExtra++ == 0)
+                    Log("game TAA (phase 82): pass s=%llu tonemaps its target in more than one draw -- each one is re-issued on the raw "
+                        "scene into the same texture (before: only the first; the rest of the mod's picture stayed unwritten)",
+                        (unsigned long long)s->s);
+            }
+        }
+        return;
+    }
+    g_taaPost.armed = g_taaPost.pendingArm = false;     // a new tonemap: the previous one's replays end
     PassSlot& slot = *s;
     D3D11_TEXTURE2D_DESC sd{}, rd{};
     src->GetDesc(&sd);
@@ -13958,6 +13998,22 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         t_inDlaa = false;
         if (taaLdr) {                                    // phase 82: the mix ran when it evaluated and its composite is armed
             taaModRan = ok && dl.CompositePending();
+            {   // per eye: the composite rect, the unit's rect / centre, the formats (VR game test: a darker square on one eye)
+                static uint32_t s_rx[kMaxViews] = {}, s_ry[kMaxViews] = {};
+                static int s_logs = 0;
+                if (ok && (dl.RectX() != s_rx[eye % kMaxViews] || dl.RectY() != s_ry[eye % kMaxViews]) && s_logs < 24) {
+                    ++s_logs;
+                    s_rx[eye % kMaxViews] = dl.RectX(); s_ry[eye % kMaxViews] = dl.RectY();
+                    D3D11_TEXTURE2D_DESC ld{};
+                    slot.taaLdr->GetDesc(&ld);
+                    Log("game TAA (phase 82): eye %d composite at RT (%u,%u) + rect (%u,%u) %ux%u (output rect (%u,%u) %ux%u) of %ux%u, unit "
+                        "centre uv (%.3f, %.3f) | DLAA input = re-issued tonemap texture fmt=%d %ux%u | game blit SRV0 view fmt=%d, sRGB "
+                        "decode %d | RT %ux%u fmt=%d | upscale %s", eye, upW ? upX : blitOx, upW ? upY : blitOy, dl.RectX(), dl.RectY(),
+                        dl.RectW(), dl.RectH(), dl.OutRectX(), dl.OutRectY(), dl.OutRectW(), dl.OutRectH(), dl.FullW(), dl.FullH(),
+                        (double)dl.CentreU(), (double)dl.CentreV(), (int)ld.Format, ld.Width, ld.Height, (int)svd.Format,
+                        (int)srgbDecode, bd.Width, bd.Height, (int)bd.Format, upW ? "on" : "off");
+                }
+            }
             if (!taaModRan) { ++g_taaLdrRunFails; ++g_taaWhyN[GameTaa::kWhyRunFailed]; g_taaLastWhy = GameTaa::kWhyRunFailed; }
         }
         UpdateMedoidDrop(eye, dl);                       // v0.10.0 phase 8

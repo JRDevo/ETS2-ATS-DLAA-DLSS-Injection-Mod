@@ -2125,7 +2125,7 @@ bool SceneDlaa::Composite(ID3D11DeviceContext* ctx, uint32_t vpX, uint32_t vpY, 
         (blend && m_oxc + m_ow < ofw) ? 1.0f : 0.0f,              // right
         (blend && m_oyc + m_oh < ofh) ? 1.0f : 0.0f,              // bottom
         m_mixShare,                                               // phase 82: the mod's share (1 = as before)
-        m_mixSplit ? GameTaa::SplitX((float)vpX, (float)ofw, m_splitPct) : -1.0f,   //   split column (RT px) / none
+        m_mixSplit ? GameTaa::SplitXc((float)vpX, (float)ofw, m_splitPct, m_cu) : -1.0f,   //   split column (RT px; VR: from the optical centre) / none
         m_mixRight, 0.0f,                                         //   the share right of it; (the line + labels: DrawSplitOverlay)
         0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
     if (!m_compDataValid || memcmp(data, m_compData, sizeof(data)) != 0) {
@@ -2202,6 +2202,7 @@ bool SceneDlaa::Composite(ID3D11DeviceContext* ctx, uint32_t vpX, uint32_t vpY, 
 // (x0, y0, w, h). Needs the composite shaders (a composite ran before). Inside the caller's re-entrancy guard.
 bool SceneDlaa::DrawSplitOverlay(ID3D11DeviceContext* ctx, uint32_t x0, uint32_t y0, uint32_t w, uint32_t h, int pct,
                                  const char* left, const char* right) {
+    // (the column: the same rule as the composite's cut -- pct from this unit's optical centre m_cu; 0.5 in flat)
     if (!w || !h) return false;
     {
         Microsoft::WRL::ComPtr<ID3D11Device> dev;
@@ -2211,7 +2212,7 @@ bool SceneDlaa::DrawSplitOverlay(ID3D11DeviceContext* ctx, uint32_t x0, uint32_t
     const GameTaa::Label ll = GameTaa::PackLabel(left), lr = GameTaa::PackLabel(right);
     const float cell = LabelCell(h);
     const float data[28] = { (float)x0, (float)y0, (float)w, (float)h, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                             0.0f, GameTaa::SplitX((float)x0, (float)w, pct), GameTaa::SplitLineWidth(h), 1.0f,
+                             0.0f, GameTaa::SplitXc((float)x0, (float)w, pct, m_cu), GameTaa::SplitLineWidth(h), 1.0f,
                              cell, (float)y0 + 3.0f * cell, (float)ll.n, (float)lr.n,
                              (float)ll.p[0], (float)ll.p[1], (float)ll.p[2], 0.0f, (float)lr.p[0], (float)lr.p[1], (float)lr.p[2], 0.0f };
     if (!m_compDataValid || memcmp(data, m_compData, sizeof(data)) != 0) {

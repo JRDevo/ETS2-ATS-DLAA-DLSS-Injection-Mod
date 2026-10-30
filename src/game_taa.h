@@ -70,6 +70,14 @@ inline int StepMix(int pct, int dir) { return StepGrid(pct, dir, kMixStep); }
 inline int StepSplit(int pct, int dir) { return StepGrid(pct, dir, kSplitStep); }
 // the split column in a target: x0 + round(width * pct / 100)
 inline float SplitX(float x0, float width, int pct) { return x0 + std::floor(width * (float)ClampMix(pct) / 100.0f + 0.5f); }
+// VR (VR game test: two red lines seen double): the split at the same offset from the picture's OPTICAL centre cu (uv) in every eye =
+// the same view angle (both eyes have the same total fov, so the same uv scale): x0 + width * (cu + (pct - 50) / 100), clamped into
+// the picture. Flat: cu = 0.5 = SplitX.
+inline float SplitXc(float x0, float width, int pct, float cu) {
+    float u = cu + ((float)ClampMix(pct) - 50.0f) / 100.0f;
+    u = u < 0.0f ? 0.0f : (u > 1.0f ? 1.0f : u);
+    return x0 + std::floor(width * u + 0.5f);
+}
 inline const char* ModeName(int m) {
     switch (ClampMode(m)) {
     case kMix: return "mix";
@@ -138,7 +146,10 @@ inline Act Decide(const PassIn& in, const char** why, int* whyCode = nullptr) {
 // 1080 px of the picture's height, at least 2) and two labels in a 5 x 7 pixel font. PackLabel: glyph codes 0 space, 1 D, 2 L, 3 A,
 // 4 S, 5 T, 6 O, 7 F, 8 (, 9 ), 10 M, 11 I, 12 X, 13 %, 14..23 the digits 0..9 -- 5 bits each, 4 per part (exact in a float), 3
 // parts = up to 12 characters (case-insensitive; other characters = space).
-inline float SplitLineWidth(uint32_t h) { const float w = std::floor(2.0f * (float)h / 1080.0f + 0.5f); return w < 2.0f ? 2.0f : w; }
+inline float SplitLineWidth(uint32_t h) {          // (capped at 6: a VR eye picture of 5848 px would give 11 px)
+    const float w = std::floor(2.0f * (float)h / 1080.0f + 0.5f);
+    return w < 2.0f ? 2.0f : (w > 6.0f ? 6.0f : w);
+}
 inline uint32_t GlyphCode(char c) {
     if (c >= '0' && c <= '9') return 14u + (uint32_t)(c - '0');
     switch (c >= 'a' && c <= 'z' ? (char)(c - 'a' + 'A') : c) {

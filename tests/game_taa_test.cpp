@@ -118,8 +118,14 @@ static void TestMenuSteps() {
 }
 
 static void TestSplitOverlay() {
-    CHECK(SplitLineWidth(1080) == 2.0f && SplitLineWidth(2160) == 4.0f && SplitLineWidth(720) == 2.0f && SplitLineWidth(1440) == 3.0f,
-          "the red line: 2 px per 1080 px of height, at least 2");
+    CHECK(SplitLineWidth(1080) == 2.0f && SplitLineWidth(2160) == 4.0f && SplitLineWidth(720) == 2.0f && SplitLineWidth(1440) == 3.0f &&
+          SplitLineWidth(5848) == 6.0f, "the red line: 2 px per 1080 px of height, at least 2, at most 6 (VR eye: 6, was 11)");
+    // VR (two lines seen double): the same angle in both eyes = the same offset from each eye's optical centre
+    const float w = 5512.0f, l0 = SplitXc(0.0f, w, 65, 0.379f), l1 = SplitXc(0.0f, w, 65, 0.621f);
+    CHECK(l0 == std::floor(w * 0.529f + 0.5f) && l1 == std::floor(w * 0.771f + 0.5f), "65 %% from optical centres 0.379 / 0.621: %.0f / %.0f",
+          l0, l1);
+    CHECK(SplitXc(0.0f, w, 65, 0.5f) == SplitX(0.0f, w, 65) && SplitXc(0.0f, w, 0, 0.379f) == 0.0f && SplitXc(0.0f, w, 100, 0.621f) == w,
+          "flat (0.5) = SplitX; clamped into the picture");
     const Label l = PackLabel("DLAA (OFF)");
     CHECK(l.n == 10 && (l.p[0] & 31u) == 1u && ((l.p[0] >> 5) & 31u) == 2u && (l.p[1] & 31u) == 0u && ((l.p[1] >> 5) & 31u) == 8u &&
           (l.p[2] & 31u) == 7u && ((l.p[2] >> 5) & 31u) == 9u, "DLAA (OFF) packs D L A A | space ( O F | F )");
