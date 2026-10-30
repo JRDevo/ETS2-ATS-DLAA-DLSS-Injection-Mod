@@ -2477,6 +2477,16 @@ non-blocking readback timing -- so it is judged by the check totals and a verify
   blit SRV0 view fmt ... sRGB decode` (on every rect change). Checked and ruled out from the code: the composite rect follows the unit's
   rect every Run (`m_oxc` = the optical-centred crop); the two re-issued tonemap textures alternate per pass and the log shows each
   eye's tonemap -> blit in order; both have the same format, and both eyes' blits decode sRGB.
+- **VR game test 2 (b7081e4): the darker square stayed -- eye 0 only, exactly the DLAA rect, only on the Mix side.** The recording
+  shows the inside darker by ~0.66-0.70 in sRGB while a white cloud stays white (a tone change, not a shift / ghost). The log shows
+  the order of a VR frame: pass 0's tonemap, pass 1's tonemap, then both blits (`tonemap re-issue pass s=10 / s=11` at the same time).
+  The post-tonemap replay (`TaaPost`) was ONE armed target and each new tonemap re-armed it: eye 0's post-tonemap draws (the 84-index
+  DrawIndexed into the tonemap target) came after eye 1's tonemap and were never replayed into eye 0's re-issued texture -- eye 0's
+  mod picture missed them, eye 1's had them. In flat (one tonemap per frame) this never happened. Now one entry per tonemap target
+  (`TaaPost::e[2]`), each armed from its own tonemap until the blit that reads that target (`Disarm(srcPtr)`). One-shot check per
+  eye: `game TAA (phase 82) probe eye N` -- the mean colour of 32 x 32 px at the DLAA rect centre in the re-issued tonemap, the game's
+  TAA picture, the DLAA input, the NGX output and the composite source (staging copies after 240 such blits, read without waiting);
+  all should be about equal.
 - **Not verified in game yet / limits.** Whether SCS TAA runs in VR (if not: VR stays exactly mode 0). Whether the constants come
   through the window copy for every frame (round 2; a window miss grows it and is logged). The
   jitter sign (cb0[8].xy taken as the geometry shift). MVJittered (see above). Mirrors keep the mod's own mirror jitter (if the game
