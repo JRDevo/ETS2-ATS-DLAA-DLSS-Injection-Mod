@@ -22139,6 +22139,10 @@ bool MenuPresentTarget(IDXGISwapChain* sc, ID3D11DeviceContext* bctx, ID3D11Devi
 
 // At Present (flat, and the VR desktop mirror at the FLAT placement): the panel while the menu is open, then the fps box while
 // it is on (on top of the panel).
+// phase 87b: flat text is built at 2x and drawn scaled down. GDI rounds every glyph's advance to whole device pixels, so at the
+// flat sizes (a 12-13 px small font) some letter pairs got a visible 1-px gap ("lim it", "gam e"); at 2x the error is half a
+// screen pixel. The VR textures already build at a higher density (g_menuVrBuild / the quad's 3.2 x).
+constexpr float kFlatTextSuper = 2.0f;
 void MenuDrawAtPresent(IDXGISwapChain* sc, ID3D11DeviceContext* bctx) {
     if (t_inDlaa) return;
     ID3D11DeviceContext* ctx = nullptr;
@@ -22155,14 +22159,14 @@ void MenuDrawAtPresent(IDXGISwapChain* sc, ID3D11DeviceContext* bctx) {
         // VR: the eyes' / quad's texture, scaled (v0.10.3 phase 29b: also while the panel IS a quad layer and MenuVr() is not
         // set yet -- the VR main menu -- else the two build scales alternate and the texture is rebuilt twice per frame)
         const bool vrTex = MenuVr() || (g_menuVrLayer && XrHook::OverlayActive(0));
-        const float build = (vrTex && g_menuVrBuild > 0.0f) ? g_menuVrBuild : scale;
+        const float build = (vrTex && g_menuVrBuild > 0.0f) ? g_menuVrBuild : scale * kFlatTextSuper;
         TuningMenu::Draw(ctx, rtv.Get(), td.Width, td.Height, (float)g_menuX / 100.0f * W, (float)g_menuY / 100.0f * H, scale,
                          build, outMode, p);
     }
     if (g_fpsShow) {
         const float scale = H / 1080.0f * g_fpsScale;
         const bool vrTex = MenuVr() || (g_menuVrLayer && XrHook::OverlayActive(1));   // (phase 29b: as the panel above)
-        const float build = (vrTex && g_fpsVrBuild > 0.0f) ? g_fpsVrBuild : scale;     // VR: the eyes' / quad's texture, scaled
+        const float build = (vrTex && g_fpsVrBuild > 0.0f) ? g_fpsVrBuild : scale * kFlatTextSuper;   // VR: the eyes' / quad's texture, scaled
         // kept inside the picture (fps_x / fps_y up to 95 % with a large box would push it off the edge)
         const float bw = TuningMenu::kWidgetRefW * scale, bh = TuningMenu::kWidgetRefH * scale;
         float x0 = (float)g_fpsX / 100.0f * W, y0 = (float)g_fpsY / 100.0f * H;
