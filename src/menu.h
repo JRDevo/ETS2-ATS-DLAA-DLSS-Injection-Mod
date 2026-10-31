@@ -40,6 +40,15 @@ constexpr wchar_t kInkCpu = 0x01, kInkGpu = 0x02, kInkEnd = 0x03;
 constexpr float kRefWidth = 760.0f;                  // panel width in reference px (scale 1; was 720 before the GPU cost column)
 constexpr float kWidgetRefW = 92.0f;                 // the fps box in reference px (scale 1)
 constexpr float kWidgetRefH = 44.0f;
+// phase 88 (dlaa.ini fps_graph): the fps box's HISTORY GRAPH -- a strip under the text, kGraphCols bars, oldest left; each bar =
+// the slowest frame of its slice of time, so a spike shows even when the average hides it. With the graph the text block is only
+// as tall as its lines (2 lines kWidgetText2H, 1 line kWidgetText1H, none = graph only) and the strip sits right under it
+// (WidgetRefH; the VR quad image is made for kWidgetRefHMax).
+constexpr int   kGraphCols    = 43;                  // 2 reference px each (86 px between the 3-px margins)
+constexpr float kWidgetGraphH = 20.0f;
+constexpr float kWidgetText2H = 42.0f;               // the two lines in y 4..24 / 24..40
+constexpr float kWidgetText1H = 24.0f;               // the one line (big font) in y 2..22
+constexpr float kWidgetRefHMax = kWidgetRefH + kWidgetGraphH;
 
 struct Row {                                         // (phase 74: name 48 -> 64, value / keys 72 -> 96: longer languages)
     wchar_t name[64];
@@ -120,6 +129,20 @@ void  SetWidgetColors(uint8_t tr, uint8_t tg, uint8_t tb, uint8_t lr, uint8_t lg
 // phase 51f (dlaa.ini fps_opacity): the fps box's alpha factor 0..1 (text AND outline); read by the pixel shader per draw, so a change
 // needs no texture rebuild. Applies to every draw path (flat, VR drawn-in, OpenXR quad layer image, attached to vehicle).
 void  SetWidgetOpacity(float a);
+// phase 88: the graph's columns (copied; any thread). `gen` changes whenever a column does: the texture then repaints ONLY the
+// strip (one partial upload); on / off rebuilds the box once. Bars: green up to 1.1 x targetMs, yellow up to 1.5 x, red above;
+// the strip's top = 2 x targetMs (a longer frame = a full red bar); a thin line marks targetMs.
+struct WidgetGraph {
+    bool     on = false;
+    uint32_t gen = 0;
+    float    targetMs = 0.0f;                        // > 0
+    float    colMs[kGraphCols] = {};                 // oldest first; 0 = no frame in that slice yet (no bar)
+};
+void  SetWidgetGraph(const WidgetGraph& g);
+// the box height in reference px for these lines: kWidgetRefH without the graph; with it the text block (WidgetTextRefH) +
+// kWidgetGraphH. Pass the lines DrawWidget gets (an empty / null line = not shown).
+float WidgetTextRefH(const wchar_t* line1, const wchar_t* line2, bool graphOn);
+float WidgetRefH(const wchar_t* line1, const wchar_t* line2);
 
 }  // namespace TuningMenu
 

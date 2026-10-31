@@ -453,6 +453,33 @@ static void FpsShots(Gpu& g) {
         TuningMenu::ReleaseWidget();
         if (ok) Save(L"fps-counter.png", px, W, H); else { wprintf(L"  fps-counter.png: render FAILED\n"); ++g_fail; }
     }
+    // fps-counter-graph.png (phase 88): the box with its history graph -- 72 Hz headset, mostly on time, a slow patch and two
+    // hitches -- in 4 layouts (fps + ms, fps only, the number only, graph only): the strip right under the last line every time
+    {
+        const float s = 2.0f;
+        const wchar_t* const k1[4] = { L"72 fps", L"72 fps", L"72", nullptr };
+        const wchar_t* const k2[4] = { L"13.9 ms", nullptr, nullptr, nullptr };
+        const int cw = (int)(TuningMenu::kWidgetRefW * s) + 20;
+        const int W = 4 * cw + 10, H = (int)(TuningMenu::kWidgetRefHMax * s) + 26;
+        TuningMenu::WidgetGraph gr;
+        gr.on = true; gr.gen = 1; gr.targetMs = 13.9f;
+        for (int i = 0; i < TuningMenu::kGraphCols; ++i) gr.colMs[i] = 13.4f + 0.5f * (float)((i * 7) % 3);
+        gr.colMs[9] = 19.5f; gr.colMs[10] = 18.0f; gr.colMs[11] = 17.2f;   // a busy city
+        gr.colMs[24] = 41.0f;                                               // a hitch
+        gr.colMs[35] = 27.0f;
+        TuningMenu::SetWidgetGraph(gr);
+        std::vector<uint32_t> px;
+        TuningMenu::SetWidgetColors(255, 255, 255, 8, 8, 8);
+        const bool ok = Render(g, W, H, [&](ID3D11DeviceContext* c, ID3D11RenderTargetView* rtv, uint32_t w, uint32_t h) {
+            for (int i = 0; i < 4; ++i)
+                if (!TuningMenu::DrawWidget(c, rtv, w, h, 15.0f + (float)(i * cw), 13.0f, s, s, TuningMenu::kOutRaw, k1[i], k2[i]))
+                    return false;
+            return true;
+        }, px);
+        TuningMenu::ReleaseWidget();
+        TuningMenu::SetWidgetGraph(TuningMenu::WidgetGraph());
+        if (ok) Save(L"fps-counter-graph.png", px, W, H); else { wprintf(L"  fps-counter-graph.png: render FAILED\n"); ++g_fail; }
+    }
     // fps-counter-colours.png: the 20 presets (src/fps_pose.h), 5 per row, each with its name
     {
         const float s = 1.1f;

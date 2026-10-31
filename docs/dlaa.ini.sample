@@ -795,6 +795,11 @@ log_level = 1
 # Phase 51f: the box's opacity in % (10..100, default 100 = solid). Fades the WHOLE box, text and its outline together (brightness
 # only dims the text colour, so a dim box keeps a black outline). Flat and VR (drawn in, quad layer, attached). Menu: FPS opacity.
 # fps_opacity = 100
+# Phase 88: a history graph under the fps box -- the seconds it shows: 0 (off, default), 2, 5, 10, 30 or 60. One bar per
+# slice of time = the slowest frame in it, so a single hitch stays visible. Green = on time, yellow = up to 1.5x, red = slower.
+# The line = the target: VR the headset rate (with vr_fps_cap: half / third), flat fps_cap, else your usual frame time.
+# Flat and VR. Menu: FPS graph.
+# fps_graph = 0
 # Phase 44, VR: the box's distance in cm (30..300, default 80). It keeps the same size in your view at every distance (the
 # VR layer and the fixed box: a real distance; drawn into the picture and following the head: an extra stereo shift on top
 # of menu_vr_depth). Menu: FPS distance (VR).

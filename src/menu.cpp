@@ -131,6 +131,13 @@ COLORREF                         g_wText = RGB(255, 255, 255), g_wLine = RGB(8, 
 COLORREF                         g_wLastText = 0, g_wLastLine = 0;
 float                            g_wOpacity = 1.0f;   // phase 51f (fps_opacity): the box's alpha factor, applied by the shader (no rebuild)
 std::vector<uint32_t>            g_wPixels;
+// phase 88: the history graph -- the columns as last handed over (under g_wGraphLock: SetWidgetGraph may run on another thread)
+// and what the cached texture shows (on / gen; the strip = the rows from g_wTextH down)
+SRWLOCK                          g_wGraphLock = SRWLOCK_INIT;
+TuningMenu::WidgetGraph          g_wGraph;
+bool                             g_wLastGraphOn = false;
+uint32_t                         g_wLastGraphGen = 0;
+uint32_t                         g_wTextH = 0;
 
 constexpr UINT kInst = 256;
 // PS SRV slots saved / restored (phase 16: was slot 0 only). The VR panel may now be drawn right before the game's own Draw
@@ -236,6 +243,7 @@ void DropWidget() {
     g_wTex.Reset(); g_wSrv.Reset();
     g_wTexW = g_wTexH = 0; g_wBuild = 0.0f;
     g_wHave = false;
+    g_wTextH = 0;
 }
 
 // Shaders + states for `dev` (once per device; a new device drops the old one's objects and both textures).
@@ -578,7 +586,8 @@ bool RenderPanel(const TuningMenu::Panel& p, float s, uint32_t w, uint32_t h, co
 // colour (black background, RGB 8,8,8 outline, white text) and (b) the mask (black background, outline + text all white);
 // the texture is RGB from (a), A = the red channel of (b) (the coverage: antialiased edges = partial alpha). The shader
 // draws it with the texture's alpha as it is. False = GDI failed (logged once).
-bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t w, uint32_t h) {
+// phase 88: tight = the history graph sits under the text (WidgetTextRefH): one line in y 2..22 instead of the centred 12..32.
+bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t w, uint32_t h, bool tight = false) {
     static bool s_failLogged = false;
     static std::vector<uint32_t> s_mask;
     HFONT fBig   = MakeFont(15.0f * s, FW_BOLD, L"Segoe UI");
@@ -617,7 +626,7 @@ bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t 
             line(fBig, line1, 4.0f, 24.0f);
             line(fSmall, line2, 24.0f, 40.0f);
         } else {
-            line(fBig, has1 ? line1 : line2, 12.0f, 32.0f);
+            line(fBig, has1 ? line1 : line2, tight ? 2.0f : 12.0f, tight ? 22.0f : 32.0f);
         }
         SelectObject(dc, oldFont);
         DibFinish(d, w, h, out);
@@ -680,24 +689,82 @@ void CopyLine(wchar_t (&dst)[kWLine], const wchar_t* src) {
     if (src) for (; src[i] && i + 1 < kWLine; ++i) dst[i] = src[i];
     dst[i] = 0;
 }
-// The fps box texture for the two lines at `buildScale`: rebuilt only when a line or the scale changed.
+// phase 88: the history graph strip into px (w x rows, RGBA; R = the low byte), s px per reference px. A dark see-through
+// background (3-px margins left / right, 2 px at the bottom), one bar per column from the bottom up (green / yellow / red against
+// targetMs, the top = 2 x targetMs), then the target line (half-way up) over the bars. Plain pixel writes, no GDI.
+void PaintGraph(uint32_t* px, uint32_t w, uint32_t rows, float s, const TuningMenu::WidgetGraph& g) {
+    std::fill(px, px + (size_t)w * rows, 0u);
+    const LONG m = std::max<LONG>(1, std::lround(3.0f * s)), b = std::max<LONG>(1, std::lround(2.0f * s));
+    const LONG x0 = m, x1 = (LONG)w - m, y1 = (LONG)rows - b;   // the strip: x0..x1, 0..y1 (y down)
+    if (x1 - x0 < TuningMenu::kGraphCols || y1 < 4 || !(g.targetMs > 0.0f)) return;
+    auto rgba = [](uint32_t r, uint32_t gg, uint32_t bb, uint32_t a) { return r | (gg << 8) | (bb << 16) | (a << 24); };
+    const uint32_t bg = rgba(0, 0, 0, 96), green = rgba(70, 205, 95, 255), yellow = rgba(245, 200, 50, 255),
+                   red = rgba(235, 60, 50, 255);
+    for (LONG y = 0; y < y1; ++y)
+        for (LONG x = x0; x < x1; ++x) px[(size_t)y * w + x] = bg;
+    const float top = 2.0f * g.targetMs;
+    for (LONG x = x0; x < x1; ++x) {
+        const int c = (int)((int64_t)(x - x0) * TuningMenu::kGraphCols / (x1 - x0));
+        const float ms = g.colMs[c];
+        if (!(ms > 0.0f)) continue;
+        const float f = ms >= top ? 1.0f : ms / top;
+        const LONG hgt = std::max<LONG>(1, std::lround(f * (float)y1));
+        const uint32_t col = ms <= 1.1f * g.targetMs ? green : (ms <= 1.5f * g.targetMs ? yellow : red);
+        for (LONG y = y1 - hgt; y < y1; ++y) px[(size_t)y * w + x] = col;
+    }
+    const LONG lt = std::max<LONG>(1, std::lround(0.5f * s)), ly = y1 / 2;
+    for (LONG y = ly; y < ly + lt && y < y1; ++y)
+        for (LONG x = x0; x < x1; ++x) {
+            uint32_t& p = px[(size_t)y * w + x];             // white at 150 / 255 over what is there (straight alpha "over")
+            const uint32_t a = 150, pa = p >> 24, oa = a + pa * (255 - a) / 255;
+            auto ch = [&](int sh) { const uint32_t pc = (p >> sh) & 0xFF;
+                                    return oa ? (255 * a + pc * pa * (255 - a) / 255) / oa : 0u; };
+            p = rgba(ch(0), ch(8), ch(16), oa);
+        }
+}
+
+// The fps box texture for the two lines at `buildScale`: rebuilt only when a line or the scale changed. phase 88: + the history
+// graph strip under the text (graph on): a new column repaints and uploads only the strip's rows.
 bool EnsureWidgetTexture(ID3D11Device* dev, ID3D11DeviceContext* ctx, const wchar_t* line1, const wchar_t* line2, float buildScale) {
     wchar_t l1[kWLine], l2[kWLine];
     CopyLine(l1, line1);
     CopyLine(l2, line2);
-    if (g_wTex && g_wHave && std::fabs(g_wBuild - buildScale) < 0.001f && !wcscmp(l1, g_wLast1) && !wcscmp(l2, g_wLast2) &&
-        g_wLastText == g_wText && g_wLastLine == g_wLine)    // phase 44: + the colours
-        return true;
+    static TuningMenu::WidgetGraph s_g;                      // (render thread only; 190 bytes)
+    AcquireSRWLockShared(&g_wGraphLock);
+    s_g = g_wGraph;
+    ReleaseSRWLockShared(&g_wGraphLock);
+    const bool same = g_wTex && g_wHave && std::fabs(g_wBuild - buildScale) < 0.001f && !wcscmp(l1, g_wLast1) && !wcscmp(l2, g_wLast2) &&
+        g_wLastText == g_wText && g_wLastLine == g_wLine && g_wLastGraphOn == s_g.on;   // phase 44: + the colours; 88: + graph on
+    if (same && (!s_g.on || s_g.gen == g_wLastGraphGen)) return true;
+    // phase 88: the text block as tall as its lines (graph on), the strip right under it
+    const float refT = TuningMenu::WidgetTextRefH(l1, l2, s_g.on);
     const uint32_t w = (uint32_t)std::lround(TuningMenu::kWidgetRefW * buildScale);
-    const uint32_t h = (uint32_t)std::lround(TuningMenu::kWidgetRefH * buildScale);
+    const uint32_t ht = (uint32_t)std::lround(refT * buildScale);
+    const uint32_t h = s_g.on ? (uint32_t)std::lround((refT + TuningMenu::kWidgetGraphH) * buildScale) : ht;
     if (w < 8 || h < 8 || w > 4096 || h > 4096) return false;
-    if (!RenderWidget(l1, l2, buildScale, w, h)) return false;
+    if (same && g_wTextH == ht && g_wTexH == h && g_wPixels.size() == (size_t)w * h) {   // phase 88: only a new column
+        uint32_t* const strip = g_wPixels.data() + (size_t)w * ht;
+        PaintGraph(strip, w, h - ht, buildScale, s_g);
+        const D3D11_BOX box{ 0, ht, 0, w, h, 1 };
+        ctx->UpdateSubresource(g_wTex.Get(), 0, &box, strip, w * 4u, 0);
+        g_wLastGraphGen = s_g.gen;
+        return true;
+    }
+    if (!ht) g_wPixels.clear();                              // phase 88: graph only (no line): no text rows
+    else if (!RenderWidget(l1, l2, buildScale, w, ht, s_g.on)) return false;
+    if (h > ht) {
+        g_wPixels.resize((size_t)w * h);
+        PaintGraph(g_wPixels.data() + (size_t)w * ht, w, h - ht, buildScale, s_g);
+    }
     if (!UploadTexture(dev, ctx, g_wTex, g_wSrv, g_wTexW, g_wTexH, w, h, g_wPixels, "fps box")) return false;
     g_wBuild = buildScale;
     memcpy(g_wLast1, l1, sizeof(l1));
     memcpy(g_wLast2, l2, sizeof(l2));
     g_wLastText = g_wText;
     g_wLastLine = g_wLine;
+    g_wLastGraphOn = s_g.on;
+    g_wLastGraphGen = s_g.gen;
+    g_wTextH = ht;
     g_wHave = true;
     return true;
 }
@@ -941,6 +1008,25 @@ void SetWidgetColors(uint8_t tr, uint8_t tg, uint8_t tb, uint8_t lr, uint8_t lg,
 }
 
 void SetWidgetOpacity(float a) { g_wOpacity = a < 0.0f ? 0.0f : (a > 1.0f ? 1.0f : a); }
+
+void SetWidgetGraph(const WidgetGraph& g) {                  // phase 88
+    AcquireSRWLockExclusive(&g_wGraphLock);
+    g_wGraph = g;
+    ReleaseSRWLockExclusive(&g_wGraphLock);
+}
+
+float WidgetTextRefH(const wchar_t* line1, const wchar_t* line2, bool graphOn) {
+    if (!graphOn) return kWidgetRefH;                        // (no graph: the box keeps its size, one line centred)
+    const int n = (line1 && line1[0] ? 1 : 0) + (line2 && line2[0] ? 1 : 0);
+    return n >= 2 ? kWidgetText2H : (n == 1 ? kWidgetText1H : 0.0f);
+}
+
+float WidgetRefH(const wchar_t* line1, const wchar_t* line2) {
+    AcquireSRWLockShared(&g_wGraphLock);
+    const bool on = g_wGraph.on;
+    ReleaseSRWLockShared(&g_wGraphLock);
+    return WidgetTextRefH(line1, line2, on) + (on ? kWidgetGraphH : 0.0f);
+}
 
 void ReleaseWidget() {
     DropWidget();
