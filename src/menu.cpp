@@ -696,7 +696,7 @@ void PaintGraph(uint32_t* px, uint32_t w, uint32_t rows, float s, const TuningMe
     std::fill(px, px + (size_t)w * rows, 0u);
     const LONG m = std::max<LONG>(1, std::lround(3.0f * s)), b = std::max<LONG>(1, std::lround(2.0f * s));
     const LONG x0 = m, x1 = (LONG)w - m, y1 = (LONG)rows - b;   // the strip: x0..x1, 0..y1 (y down)
-    if (x1 - x0 < TuningMenu::kGraphCols || y1 < 4 || !(g.targetMs > 0.0f)) return;
+    if (x1 - x0 < 4 || y1 < 4 || !(g.targetMs > 0.0f)) return;
     auto rgba = [](uint32_t r, uint32_t gg, uint32_t bb, uint32_t a) { return r | (gg << 8) | (bb << 16) | (a << 24); };
     const uint32_t bg = rgba(0, 0, 0, 96), green = rgba(70, 205, 95, 255), yellow = rgba(245, 200, 50, 255),
                    red = rgba(235, 60, 50, 255);
@@ -704,8 +704,11 @@ void PaintGraph(uint32_t* px, uint32_t w, uint32_t rows, float s, const TuningMe
         for (LONG x = x0; x < x1; ++x) px[(size_t)y * w + x] = bg;
     const float top = 2.0f * g.targetMs;
     for (LONG x = x0; x < x1; ++x) {
-        const int c = (int)((int64_t)(x - x0) * TuningMenu::kGraphCols / (x1 - x0));
-        const float ms = g.colMs[c];
+        // the columns under this pixel (more than one when the strip is narrower than kGraphCols px: a small fps_scale): the slowest
+        const int c0 = (int)((int64_t)(x - x0) * TuningMenu::kGraphCols / (x1 - x0));
+        const int c1 = (std::max)(c0 + 1, (int)((int64_t)(x + 1 - x0) * TuningMenu::kGraphCols / (x1 - x0)));
+        float ms = 0.0f;
+        for (int c = c0; c < c1 && c < TuningMenu::kGraphCols; ++c) ms = (std::max)(ms, g.colMs[c]);
         if (!(ms > 0.0f)) continue;
         const float f = ms >= top ? 1.0f : ms / top;
         const LONG hgt = std::max<LONG>(1, std::lround(f * (float)y1));

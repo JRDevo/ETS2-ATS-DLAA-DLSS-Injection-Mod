@@ -174,7 +174,31 @@ static const TuningMenu::Row* FindRow(const wchar_t* name) {
     for (int i = 0; i < s_panel.nRows; ++i) if (wcsstr(s_panel.rows[i].name, name)) return &s_panel.rows[i];
     return nullptr;
 }
+// phase 88: the fps box lines for every FPS counter value (a measured 72 fps / 13.9 ms) -- the line text the box draws, and the
+// height it is laid out with. (A phase 88 edit once dropped the line-1 copy: the box said "-- fps" for ever.)
+static void FpsBoxLines() {
+    const int text0 = g_fpsText, graph0 = g_fpsGraph;
+    const bool show0 = g_fpsShow;
+    g_fps.have = true; g_fps.fps = 72.0; g_fps.frameMs = 13.9;
+    g_fpsShow = true;
+    static const wchar_t* const kL1[kFpsTextModes] = { L"72 fps", L"72 fps", L"13.9 ms", L"72", L"72", L"13.9", L"" };
+    static const wchar_t* const kL2[kFpsTextModes] = { L"13.9 ms", L"", L"", L"13.9", L"", L"", L"" };
+    for (int v = 1; v < kFpsCounterValues; ++v) {
+        FpsCounterSet(v);
+        FpsSetLines();
+        const int t = g_fpsText;
+        CHECK(!wcscmp(g_fps.line1, kL1[t]) && !wcscmp(g_fps.line2, kL2[t]), "fps box value %d (fps_text %d): lines '%ls' / '%ls', "
+              "expected '%ls' / '%ls'", v, t, g_fps.line1, g_fps.line2, kL1[t], kL2[t]);
+        CHECK(FpsGraphShown() == (v % 2 == 0 || v == kFpsCounterValues - 1), "fps box value %d: graph shown %d", v, (int)FpsGraphShown());
+        CHECK(FpsCounterValue() == v, "fps box value %d reads back as %d", v, FpsCounterValue());
+    }
+    g_fpsText = text0; g_fpsGraph = graph0; g_fpsShow = show0;
+    g_fps = FpsMeter();
+    FpsSetLines();
+}
+
 static void MenuRules() {
+    FpsBoxLines();                                     // phase 88
     const bool vr0 = g_vrMode, all0 = g_menuShowAll, con0 = g_vrUiConsole;
     const int sel0 = g_menuSel;
     VrUiEnsure();

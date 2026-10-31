@@ -1002,19 +1002,19 @@ int      g_fpsVrLock = 0;
 int      g_fpsColor = 0;
 int      g_fpsBright = FpsPose::kBrightDefault;   // phase 48: dlaa.ini fps_brightness 10..100 % (the colour * pct / 100)
 int      g_fpsOpacity = FpsPose::kOpacityDefault; // phase 51f: dlaa.ini fps_opacity 10..100 % (the whole box's alpha: text AND outline)
-// phase 88: dlaa.ini fps_graph -- the fps box's history graph under the text: the seconds it shows (kFpsGraphSteps), 0 = off
-constexpr int kFpsGraphSteps[] = { 0, 2, 5, 10, 30, 60 };
+// phase 88: the fps box's history graph under the text -- dlaa.ini fps_graph (1 = the graph with the text, 0 = text only; fps_text 6
+// = the graph alone) and fps_graph_secs (how far back it shows: kFpsGraphSteps). The FPS counter row picks text + graph together.
+constexpr int kFpsGraphSteps[] = { 2, 5, 10, 30, 60 };
 constexpr int kFpsGraphNSteps = (int)(sizeof(kFpsGraphSteps) / sizeof(kFpsGraphSteps[0]));
-inline int ClampFpsGraph(long v) {                       // the nearest step at or above v (0 = off; above 60 = 60)
-    if (v <= 0) return 0;
+constexpr int kFpsGraphSecsDefault = 10;
+inline int ClampFpsGraphSecs(long v) {                   // the nearest step at or above v (above 60 = 60)
     for (int s : kFpsGraphSteps) if (s >= v) return s;
     return kFpsGraphSteps[kFpsGraphNSteps - 1];
 }
 int      g_fpsGraph = 0;
-constexpr int kFpsGraphOnlyDefault = 10;  // fps_text 6 (graph only) with fps_graph = 0: this many seconds (the box is never empty)
-inline int FpsGraphSecs() {               // the seconds the graph shows now, 0 = off
-    return g_fpsGraph > 0 ? g_fpsGraph : (g_fpsText == kFpsTextGraphOnly ? kFpsGraphOnlyDefault : 0);
-}
+int      g_fpsGraphSecs = kFpsGraphSecsDefault;
+inline bool FpsGraphShown() { return g_fpsGraph != 0 || g_fpsText == kFpsTextGraphOnly; }
+inline int  FpsGraphSecs() { return FpsGraphShown() ? g_fpsGraphSecs : 0; }   // the seconds the graph shows now, 0 = no graph
 int      g_fpsVrDist = FpsPose::kDistDefault;
 int      g_fpsVrYaw = 0, g_fpsVrPitch = 0, g_fpsVrRoll = 0;
 // phase 51b: dlaa.ini fps_profiles -- 1 = the attached box's placement / colour / brightness / text PER VEHICLE (fps_profile lines,
@@ -3376,7 +3376,8 @@ void SaveSettings(uint64_t n) {
         snprintf(add("fps_color"), sizeof(kv[0].val), "%d", g_fpsColor);      // phase 44
         snprintf(add("fps_brightness"), sizeof(kv[0].val), "%d", g_fpsBright);   // phase 48
         snprintf(add("fps_opacity"), sizeof(kv[0].val), "%d", g_fpsOpacity);     // phase 51f
-        snprintf(add("fps_graph"), sizeof(kv[0].val), "%d", g_fpsGraph);         // phase 88
+        snprintf(add("fps_graph"), sizeof(kv[0].val), "%d", g_fpsGraph ? 1 : 0); // phase 88
+        snprintf(add("fps_graph_secs"), sizeof(kv[0].val), "%d", g_fpsGraphSecs);
         snprintf(add("fps_vr_dist"), sizeof(kv[0].val), "%d", g_fpsVrDist);
         snprintf(add("fps_vr_yaw"), sizeof(kv[0].val), "%d", g_fpsVrYaw);
         snprintf(add("fps_vr_pitch"), sizeof(kv[0].val), "%d", g_fpsVrPitch);
@@ -3463,12 +3464,13 @@ void SaveSettings(uint64_t n) {
         snprintf(menuW, sizeof(menuW), " -- menu panel: menu_x=%d menu_y=%d menu_scale=%.1f menu_vr_x=%d menu_vr_y=%d menu_vr_scale=%.1f "
                  "menu_vr_depth=%d menu_vr_dist=%d menu_vr_face=%d", g_menuX, g_menuY, (double)g_menuScale, g_menuVrX, g_menuVrY,
                  (double)g_menuVrScale, g_menuVrDepth, g_menuVrDist, g_menuVrFace);
-    char fpsW[416] = "";                                  // (phase 44: was 160, + fps_color / fps_vr_dist / the turn; 51b: 352 -> 384)
+    char fpsW[448] = "";                                  // (phase 44: was 160, + fps_color / fps_vr_dist / the turn; 51b: 352 -> 384; 88: 448)
     if (g_fpsExplicit)
         snprintf(fpsW, sizeof(fpsW), " -- fps box: fps_show=%d fps_text=%d fps_x=%d fps_y=%d fps_scale=%.1f fps_vr_x=%.1f fps_vr_y=%.1f fps_vr_scale=%.1f "
-                 "fps_vr_lock=%d fps_color=%d (%ls) fps_brightness=%d fps_opacity=%d fps_vr_dist=%d fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d fps_profiles=%d", g_fpsShow ? 1 : 0,
+                 "fps_vr_lock=%d fps_color=%d (%ls) fps_brightness=%d fps_opacity=%d fps_vr_dist=%d fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d fps_profiles=%d fps_graph=%d fps_graph_secs=%d", g_fpsShow ? 1 : 0,
                  g_fpsText, g_fpsX, g_fpsY, (double)g_fpsScale, (double)g_fpsVrX, (double)g_fpsVrY, (double)g_fpsVrScale, g_fpsVrLock, g_fpsColor,
-                 FpsPose::ColorOf(g_fpsColor).name, g_fpsBright, g_fpsOpacity, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll, g_fpsProfiles);
+                 FpsPose::ColorOf(g_fpsColor).name, g_fpsBright, g_fpsOpacity, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll, g_fpsProfiles,
+                 g_fpsGraph, g_fpsGraphSecs);   // phase 88
     char notW[128];
     snprintf(notW, sizeof(notW), "%s%s%s%s%s", g_profExplicit[PK_PRESET] ? "" : " dlss_preset", g_profExplicit[PK_AREA] ? "" : " dlaa_area",
              g_profExplicit[PK_MIRROR_DLAA] ? "" : " mirror_dlaa", mirVrW ? "" : " mirror_vr_mode", mirFlatW ? "" : " mirror_flat_mode");
@@ -18797,8 +18799,8 @@ const wchar_t* const kMenuDesc[] = {
     N_(L"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The game gets each change about "
     L"0.4 s after your last press: the console opens and closes by itself."),
     N_(L"Right: every value of both layouts back to what config.cfg had at the start (the game saves its own values when it exits)."),                                              // MR_MENUKEYS: built with the key names (MenuBuildPanel)
-    N_(L"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see what a setting gains. "
-    L"Its GPU cost is measured: per frame, every picture it is drawn into; none when off. Save keeps it for the next start."),
+    N_(L"A small live fps and frame-time box, also while this menu is closed (flat and VR): fps, ms, numbers only, each with or "
+    L"without a graph of recent frame times (spikes show red), or the graph alone. Its GPU cost is measured. Save keeps it."),
     // v0.10.3 phase 29c (MR_FPSGRP)
     N_(L"The fps box's lock, position, size, colour, VR distance and turn. Right opens the group, Left closes it; it starts closed "
     L"every time the menu opens."),
@@ -18816,8 +18818,8 @@ const wchar_t* const kMenuDesc[] = {
     N_(L"How see-through the whole fps box is, 10 - 100 %: 100 = solid, lower fades the text AND its black outline together, so a "
     L"dimmed box does not turn into a black blob. Flat and VR. No cost."),
     // phase 88 (MR_FPSGRAPH)
-    N_(L"A small graph under the fps box: the last 2 - 60 s of frame times, one bar per slice (its slowest frame), so you see spikes. "
-    L"Green = on time, yellow = a bit slow, red = a hitch; the line = the headset rate / FPS cap / your usual. Almost no cost."),
+    N_(L"How far back the fps graph shows: 2 - 60 s. One bar per slice of time = its slowest frame, so you see spikes. Green = on "
+    L"time, yellow = a bit slow, red = a hitch; the line = the headset rate / FPS cap / your usual. Shown when FPS counter has a graph."),
     // v0.10.3 phase 28 (MR_FPSLOCK)
     N_(L"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, ignores the cab's sway. "
     L"Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Track moving parts). No cost."),
@@ -19052,6 +19054,7 @@ void FpsSetLines() {
         wcscpy_s(b, 24, units ? L"-- ms" : L"--");
     }
     if (g_fpsText == kFpsTextGraphOnly) { f.line1[0] = f.line2[0] = 0; return; }   // phase 88: graph only, no line
+    wcscpy_s(f.line1, 24, what == 2 ? b : a);             // ms only: ONE line, passed as line1
     if (what == 0) wcscpy_s(f.line2, 24, b); else f.line2[0] = 0;
 }
 // the fps_text modes as the menu row shows them (example values) and as the logs name them
@@ -19064,8 +19067,8 @@ const char* FpsTextLogName(int t) {
                                                   "fps number only", "ms number only", "graph only (no text)" };
     return t >= 0 && t < kFpsTextModes ? k[t] : "?";
 }
-// ---- phase 88: the fps box's HISTORY GRAPH (dlaa.ini fps_graph = the seconds it shows, 0 = off; TuningMenu::WidgetGraph) ----
-// Per Present (FpsTick): the time since the last Present = that frame's time. The fps_graph seconds are split into kGraphCols
+// ---- phase 88: the fps box's HISTORY GRAPH (dlaa.ini fps_graph 0 / 1 or fps_text 6, fps_graph_secs; TuningMenu::WidgetGraph) ----
+// Per Present (FpsTick): the time since the last Present = that frame's time. The fps_graph_secs seconds are split into kGraphCols
 // slices; a column keeps the SLOWEST frame of its slice (a single 50-ms hitch stays visible at every length). A finished slice
 // shifts the columns left; a frame longer than a slice (a load, alt-tab) fills every slice it covered. The target (the line, the
 // colours): VR = the headset's frame period (x 2 / x 3 with the VR FPS cap), flat = 1000 / fps_cap, else the median of the
@@ -19075,7 +19078,7 @@ struct FpsGraphState {
     LONGLONG last = 0;                           // the previous Present (QPC), 0 = none since the start / the reset
     LONGLONG colStart = 0;                       // the start of the current slice
     float    colMax = 0.0f;                      // its slowest frame so far, ms
-    int      secs = 0;                           // the fps_graph the columns were made for (a change starts afresh)
+    int      secs = 0;                           // the length the columns were made for (FpsGraphSecs; a change starts afresh)
     TuningMenu::WidgetGraph g;
 };
 FpsGraphState g_fpsGraphSt;
@@ -19101,9 +19104,12 @@ void FpsGraphTick(LONGLONG now, LONGLONG freq) {
     FpsGraphState& st = g_fpsGraphSt;
     const int secs = FpsGraphSecs();
     const bool on = g_fpsShow && secs > 0 && freq > 0;
+    if (!on && !st.g.on && !st.secs) return;     // no graph, nothing to clear
     if (!on || st.secs != secs) {          // off, or another length: empty columns (published once)
         const bool was = st.g.on;
+        const uint32_t gen = st.g.gen;           // (gen keeps counting: the texture sees the emptied columns as new)
         st = FpsGraphState();
+        st.g.gen = gen;
         st.secs = on ? secs : 0;
         st.g.on = on;
         if (on || was) FpsGraphPublish();
@@ -19142,7 +19148,7 @@ void FpsTick() {
         return;
     }
     ++f.count;
-    FpsGraphTick(now.QuadPart, f.freq);                // phase 88 (one branch while fps_graph = 0)
+    FpsGraphTick(now.QuadPart, f.freq);                // phase 88 (returns at once while no graph is shown)
     const double sec = f.freq > 0 ? (double)(now.QuadPart - f.t0.QuadPart) / (double)f.freq : 0.0;
     if (sec < kFpsEvery || !f.count) return;
     f.fps = (double)f.count / sec;
@@ -19185,18 +19191,38 @@ void ToggleFpsBox(uint64_t n) {
         g_fpsVrY, (double)g_fpsVrScale, MenuVrPathName());
     PlayTones(1, g_fpsShow ? 1200 : 300, 150, 0);
 }
-// The menu's FPS counter row: 7 values, Right = next, Left = previous, wrapping: Off -> fps + ms -> fps only -> ms only ->
-// numbers fps + ms -> fps number -> ms number -> Off. Stored as fps_show (on / off) + fps_text (0..5). Off <-> on goes through
-// ToggleFpsBox (texture drop, meter stop, beep).
+// The menu's FPS counter row, Right = next, Left = previous, wrapping. Stored as fps_show (on / off) + fps_text + (phase 88)
+// fps_graph. Off <-> on goes through ToggleFpsBox (texture drop, meter stop, beep).
+// phase 88: every text mode with and without the history graph, then the graph alone -- 14 values: 0 = Off, 1..12 = fps_text
+// (i - 1) / 2 without (odd) / with (even) the graph, 13 = graph only (fps_text 6). FpsCounterValue / FpsCounterSet map them.
+constexpr int kFpsCounterValues = 2 * kFpsTextGraphOnly + 2;
+inline int FpsCounterValue() {
+    if (!g_fpsShow) return 0;
+    if (g_fpsText == kFpsTextGraphOnly) return kFpsCounterValues - 1;
+    return 1 + 2 * g_fpsText + (g_fpsGraph ? 1 : 0);
+}
+inline void FpsCounterSet(int v) {                       // (v > 0; Off leaves the text and graph values as they are)
+    if (v >= kFpsCounterValues - 1) { g_fpsText = kFpsTextGraphOnly; return; }
+    g_fpsText = (v - 1) / 2;
+    g_fpsGraph = (v - 1) % 2;
+}
+// the FPS counter row's value: the text mode + " + graph", "graph only", "Off"
+void FpsCounterName(wchar_t* d, size_t cap) {
+    if (!g_fpsShow) { swprintf(d, cap, L"%ls", TR(L"Off")); return; }
+    if (g_fpsText == kFpsTextGraphOnly) { swprintf(d, cap, L"%ls", TR(L"graph only")); return; }
+    if (g_fpsGraph) swprintf(d, cap, L"%ls + %ls", FpsTextMenuName(g_fpsText), TR(L"graph"));
+    else            swprintf(d, cap, L"%ls", FpsTextMenuName(g_fpsText));
+}
 void CycleFpsMode(uint64_t n, int dir) {
-    const int cur = g_fpsShow ? 1 + g_fpsText : 0;
-    const int nxt = ((cur + (dir < 0 ? -1 : 1)) % (kFpsTextModes + 1) + (kFpsTextModes + 1)) % (kFpsTextModes + 1);
-    if (nxt > 0) g_fpsText = nxt - 1;
+    const int cur = FpsCounterValue();
+    const int nxt = ((cur + (dir < 0 ? -1 : 1)) % kFpsCounterValues + kFpsCounterValues) % kFpsCounterValues;
+    if (nxt > 0) FpsCounterSet(nxt);
     g_fpsExplicit = g_fpsMoved = true;
     FpsSetLines();                                        // (the texture rebuilds on the changed text, EnsureWidgetTexture)
     if (cur == 0 || nxt == 0) { ToggleFpsBox(n); return; }
-    Log("fps box text: %s (fps_text=%d, tuning menu, Present #%llu)", FpsTextLogName(g_fpsText), g_fpsText, (unsigned long long)n);
-    PlayTones(1, 900 + 150 * g_fpsText, 100, 0);
+    Log("fps box text: %s%s (fps_text=%d fps_graph=%d, tuning menu, Present #%llu)", FpsTextLogName(g_fpsText),
+        g_fpsGraph && g_fpsText != kFpsTextGraphOnly ? " + graph" : "", g_fpsText, g_fpsGraph, (unsigned long long)n);
+    PlayTones(1, 900 + 75 * nxt, 100, 0);
 }
 // v0.10.3 phase 28: the menu's FPS counter lock row -- the VR fps box follows the headset (0) / stays fixed in the cab (1).
 // Logged + beeped like ToggleFpsBox. Also switchable in flat (kept for VR; the row is greyed there).
@@ -19884,10 +19910,10 @@ void ResetSettings(uint64_t n) {
     g_fpsColor = 0;                                       // phase 44: white, 0.8 m, not turned
     g_fpsBright = FpsPose::kBrightDefault;                // phase 48
     g_fpsOpacity = FpsPose::kOpacityDefault;              // phase 51f
-    g_fpsGraph = 0;                                       // phase 88
+    g_fpsGraph = 0; g_fpsGraphSecs = kFpsGraphSecsDefault;   // phase 88
     g_fpsVrDist = FpsPose::kDistDefault;
     g_fpsVrYaw = g_fpsVrPitch = g_fpsVrRoll = 0;
-    g_fpsProfiles = 1;                                   // phase 51b: per vehicle (the fps_profile lines stay in dlaa.ini)
+    g_fpsProfiles = 1;                                    // phase 51b: per vehicle (the fps_profile lines stay in dlaa.ini)
     FpsProfUnbind();                                      // phase 51d: the defaults never reach the bound vehicle's profile -- the
                                                           // next lock-on in mode 2 loads that vehicle's own values again
     FpsVrLockReset();
@@ -19964,7 +19990,7 @@ void ResetSettings(uint64_t n) {
         "fps_color", "fps_vr_dist", "fps_vr_yaw", "fps_vr_pitch", "fps_vr_roll",                        // phase 44
         "fps_brightness",                                                                               // phase 48
         "fps_opacity",                                                                                  // phase 51f
-        "fps_graph",                                                                                    // phase 88
+        "fps_graph", "fps_graph_secs",                                                                  // phase 88
         "xr_turbo",                                                                                     // phase 30
         "reflex", "fps_cap", "vr_fps_cap",                                                              // phase 52
         "vrs", "vrs_inner", "vrs_outer",                                                                // phase 34
@@ -19996,7 +20022,7 @@ void ResetSettings(uint64_t n) {
             "menu_scale = 1.0 menu_vr_x = 0 menu_vr_y = -5 menu_vr_scale = 1.0 menu_vr_depth = 12 menu_vr_dist = 100 menu_vr_face = 1 "
             "menu_vr_lock = 0 menu_vr_lock_x = 0 menu_vr_lock_y = 10 menu_vr_lock_dist = 80 "
             "fps_show = 0 fps_text = 0 "
-            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_opacity = 100 fps_graph = 0 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 fps_profiles = 1 xr_turbo = 0 reflex = 0 fps_cap = 0 vr_fps_cap = 0 cpu_pcore = 0 cpu_priority = 0 cpu_no_throttle = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 vrs_strength = 0 vrs_eye = 0 dlaa_mv_dilate = 1 mv_fwd_conservative = 1 wire_widen = 0 xr_hidden_mask = 0 dlss_bias_mask = 100 game_taa = 0 game_taa_mix = 50 game_taa_split = 50 game_taa_pair = 0 log_level = %d (%s) -- profile: %s -- "
+            "fps_x = 1 fps_y = 1 fps_scale = 1.0 fps_vr_x = 0 fps_vr_y = -25 fps_vr_scale = %.1f fps_vr_lock = 0 fps_color = 0 (white) fps_brightness = 100 fps_opacity = 100 fps_graph = 0 fps_graph_secs = 10 fps_vr_dist = 80 fps_vr_yaw = 0 fps_vr_pitch = 0 fps_vr_roll = 0 fps_profiles = 1 xr_turbo = 0 reflex = 0 fps_cap = 0 vr_fps_cap = 0 cpu_pcore = 0 cpu_priority = 0 cpu_no_throttle = 0 vrs = 0 vrs_inner = 55 vrs_outer = 80 vrs_passes = 0 vrs_strength = 0 vrs_eye = 0 dlaa_mv_dilate = 1 mv_fwd_conservative = 1 wire_widen = 0 xr_hidden_mask = 0 dlss_bias_mask = 100 game_taa = 0 game_taa_mix = 50 game_taa_split = 50 game_taa_pair = 0 log_level = %d (%s) -- profile: %s -- "
             "dlaa.ini: %d keys removed (hotkeys and other lines kept)", (unsigned long long)n, g_dlaaOn.load() ? "DLSS" : "off",
             (double)kFpsVrScaleDefault, LogLevel(), g_logDebugKey ? "no key: debug = 1 in dlaa.ini" : "no key", changed, kNKeys);
         BeepSeq b;                                        // success: rising two-tone 600 -> 900 Hz, 120 ms each (as SaveSettings)
@@ -21689,7 +21715,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     MenuRow(p, MR_MENUKEYS, TR(L"Menu keys"), k, nullptr, false);
     MenuWiden(p.rows[MR_MENUKEYS].value, kV, snMenu);
     MenuRow(p, MR_FPS, TR(L"FPS counter"), "dlaa.ini fps_show / fps_text", nullptr, false);
-    swprintf(p.rows[MR_FPS].value, kV, L"%ls", !g_fpsShow ? TR(L"Off") : FpsTextMenuName(g_fpsText));
+    FpsCounterName(p.rows[MR_FPS].value, kV);            // phase 88: + the graph combos
     groupRow(MR_FPSGRP, MenuGroupTitle(MR_FPSGRP));      // v0.10.3 phase 29c (85: the table's "FPS counter")
     MenuRow(p, MR_FPSLOCK, TR(L"FPS counter lock"), "dlaa.ini fps_vr_lock", vr ? nullptr : NA_("VR only"), !vr);   // v0.10.3 phase 28
     swprintf(p.rows[MR_FPSLOCK].value, kV, L"%ls", g_fpsVrLock == 2 ? TR(L"Attached to vehicle")   // phase 47
@@ -21722,9 +21748,11 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     swprintf(p.rows[MR_FPSBRIGHT].value, kV, L"%d %%", g_fpsBright);
     MenuRow(p, MR_FPSOPAC, TR(L"FPS opacity"), "dlaa.ini fps_opacity", nullptr, false);   // phase 51f
     swprintf(p.rows[MR_FPSOPAC].value, kV, L"%d %%", g_fpsOpacity);
-    MenuRow(p, MR_FPSGRAPH, TR(L"FPS graph"), "dlaa.ini fps_graph", nullptr, false);   // phase 88
-    if (FpsGraphSecs() > 0) swprintf(p.rows[MR_FPSGRAPH].value, kV, L"%d s", FpsGraphSecs());
-    else                swprintf(p.rows[MR_FPSGRAPH].value, kV, L"%ls", TR(L"Off"));
+    {                                                     // phase 88: hidden while the FPS counter row shows no graph
+        const bool shown = g_fpsShow && FpsGraphShown();
+        MenuRow(p, MR_FPSGRAPH, TR(L"FPS graph length"), "dlaa.ini fps_graph_secs", shown ? nullptr : NA_("with a graph only"), !shown);
+        swprintf(p.rows[MR_FPSGRAPH].value, kV, L"%d s", g_fpsGraphSecs);
+    }
     MenuRow(p, MR_FPSDIST, all ? TR(L"FPS distance (VR)") : TR(L"FPS distance"), "dlaa.ini fps_vr_dist", vr ? nullptr : NA_("VR only"), !vr);
     swprintf(p.rows[MR_FPSDIST].value, kV, L"%.2f m", (double)g_fpsVrDist / 100.0);
     snprintf(k, sizeof(k), "%s: %s", snRight, MenuUtf8(TR(L"open")));          // v0.12.1 phase 50: the Hotkeys page
@@ -22057,7 +22085,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
                          : "the in-picture path: the panel drawn as a turned quad (phase 16); the fps box stays flat",
             (unsigned long long)n);
         break;
-    case MR_FPS:     CycleFpsMode(n, dir); break;           // 7 values: Off / fps_text 0..5 (Right next, Left previous)
+    case MR_FPS:     CycleFpsMode(n, dir); break;           // phase 88: 14 values: Off / fps_text 0..5 without / with graph / graph only
     case MR_FPSLOCK: ToggleFpsVrLock(n, dir); break;        // phase 47: 3 values, Right = next, Left = previous (also flat: kept for VR)
     case MR_FPSPROF: ToggleFpsProfiles(n); break;           // phase 51b: Left and Right both switch it (also when greyed: kept for VR)
     case MR_FPSREMEAS:                                      // phase 51c: Right = re-measure now; 51d: Left = this vehicle's box to defaults
@@ -22102,13 +22130,13 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
         g_fpsExplicit = g_fpsMoved = true;
         Log("fps box opacity: %d %% (fps_opacity, tuning menu, Present #%llu)", g_fpsOpacity, (unsigned long long)n);
         break;
-    case MR_FPSGRAPH: {                                     // phase 88: Off / 2 / 5 / 10 / 30 / 60 s, no wrap
+    case MR_FPSGRAPH: {                                     // phase 88: 2 / 5 / 10 / 30 / 60 s, no wrap (on / off: the FPS counter row)
         int i = 0;
-        while (i < kFpsGraphNSteps - 1 && kFpsGraphSteps[i] < FpsGraphSecs()) ++i;
-        i = MenuClampI(i + dir, g_fpsText == kFpsTextGraphOnly ? 1 : 0, kFpsGraphNSteps - 1);   // graph only: never Off
-        g_fpsGraph = kFpsGraphSteps[i];
+        while (i < kFpsGraphNSteps - 1 && kFpsGraphSteps[i] < g_fpsGraphSecs) ++i;
+        i = MenuClampI(i + dir, 0, kFpsGraphNSteps - 1);
+        g_fpsGraphSecs = kFpsGraphSteps[i];
         g_fpsExplicit = g_fpsMoved = true;
-        Log("fps box graph: %s%d s (fps_graph, tuning menu, Present #%llu)", g_fpsGraph ? "" : "off, ", g_fpsGraph, (unsigned long long)n);
+        Log("fps box graph length: %d s (fps_graph_secs, tuning menu, Present #%llu)", g_fpsGraphSecs, (unsigned long long)n);
         break;
     }
     case MR_FPSDIST:                                        // phase 44: 5 cm steps (also flat: kept for VR; the row is greyed)
@@ -25654,7 +25682,8 @@ void LoadConfig() {
             if (!strcmp(key, "fps_color"))          { g_fpsColor = FpsPose::ClampColor(v); continue; }
             if (!strcmp(key, "fps_brightness"))     { g_fpsBright = FpsPose::ClampBright(v); continue; }   // phase 48
             if (!strcmp(key, "fps_opacity"))        { g_fpsOpacity = FpsPose::ClampOpacity(v); continue; }   // phase 51f
-            if (!strcmp(key, "fps_graph"))          { g_fpsGraph = ClampFpsGraph(v); continue; }             // phase 88
+            if (!strcmp(key, "fps_graph"))          { g_fpsGraph = v != 0 ? 1 : 0; continue; }               // phase 88
+            if (!strcmp(key, "fps_graph_secs"))     { g_fpsGraphSecs = ClampFpsGraphSecs(v); continue; }
             if (!strcmp(key, "fps_vr_dist"))        { g_fpsVrDist = FpsPose::ClampI(v, FpsPose::kDistMin, FpsPose::kDistMax); continue; }
             if (!strcmp(key, "fps_vr_yaw"))         { g_fpsVrYaw = FpsPose::ClampI(v, -FpsPose::kYawMax, FpsPose::kYawMax); continue; }
             if (!strcmp(key, "fps_vr_pitch"))       { g_fpsVrPitch = FpsPose::ClampI(v, -FpsPose::kPitchMax, FpsPose::kPitchMax); continue; }
@@ -26181,15 +26210,17 @@ void LoadConfig() {
         g_bindHoldMs);
     Log("fps box (v0.10.0): fps_show=%d (%s), fps_text=%d (0 fps + ms, 1 fps only, 2 ms only), flat fps_x=%d fps_y=%d fps_scale=%.1f, VR fps_vr_x=%.1f fps_vr_y=%.1f fps_vr_scale=%.1f "
         "fps_vr_lock=%d (%s); phase 44: fps_color=%d (%ls) fps_brightness=%d %% fps_opacity=%d %% fps_vr_dist=%d cm fps_vr_yaw=%d fps_vr_pitch=%d fps_vr_roll=%d deg; phase 51b: "
-        "fps_profiles=%d (%s) (the tuning menu's FPS counter rows change them)", g_fpsShow ? 1 : 0,
+        "fps_profiles=%d (%s); phase 88: fps_graph=%d fps_graph_secs=%d (fps_text 6 = graph only) (the tuning menu's FPS counter rows "
+        "change them)", g_fpsShow ? 1 : 0,
         g_fpsShow ? "on: shown also while the menu is closed" : "off", g_fpsText, g_fpsX, g_fpsY, (double)g_fpsScale, (double)g_fpsVrX, (double)g_fpsVrY,
         (double)g_fpsVrScale, g_fpsVrLock, g_fpsVrLock == 2 ? "VR: ATTACHED TO THE VEHICLE (phase 47: drawn in, placed from a cab "
                                                          "draw's MVP on the GPU), fps_vr_x / fps_vr_y = yaw / pitch degrees at "
                                                          "fps_vr_dist at the lock-on" : g_fpsVrLock ? "VR: fixed in the play space, "
                                                          "fps_vr_x / fps_vr_y = yaw / pitch degrees at fps_vr_dist" : "VR: follows the headset",
         g_fpsColor, FpsPose::ColorOf(g_fpsColor).name, g_fpsBright, g_fpsOpacity, g_fpsVrDist, g_fpsVrYaw, g_fpsVrPitch, g_fpsVrRoll, g_fpsProfiles,
-        g_fpsProfiles ? "attached box: placement, colour, brightness and text per vehicle" : "one shared placement for every vehicle");
-    FpsSetLines();                                        // fps_text applies to the box's lines from the start
+        g_fpsProfiles ? "attached box: placement, colour, brightness and text per vehicle" : "one shared placement for every vehicle",
+        g_fpsGraph, g_fpsGraphSecs);
+    FpsSetLines();                                       // fps_text applies to the box's lines from the start
     // v0.10.0 phase 6b: the vote participation of instanced / no-MVP draws follows mv_drawid_instanced (default 1, even when the
     // key is absent) -- set it here, after the whole ini is parsed, so both the replay and the vote agree.
     DrawIdMv::SetInstanced(g_didInstancedCfg);
