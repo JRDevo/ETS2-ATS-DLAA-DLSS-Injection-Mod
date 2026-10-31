@@ -112,7 +112,23 @@ static void TestDelivery() {
     CHECK(!Echoed("", cmd), "an empty log confirms nothing");
 }
 
+// phase 86: the Game TAA row -> the game's r_aa (0 off, 5 TAA): what to type, or nothing
+static void TestRaa() {
+    CHECK(RaaFor(0) == 0 && RaaFor(1) == 5 && RaaFor(2) == 5, "off -> r_aa 0, mix / split -> r_aa 5");
+    CHECK(RaaDecide(1, true, kRaaUnknown) == 5 && RaaDecide(2, true, 0) == 5 && RaaDecide(0, true, 5) == 0 && RaaDecide(0, true, 2) == 0,
+          "a row change types the mode's value when the game's differs (or is unknown)");
+    CHECK(RaaDecide(1, true, 5) == kRaaUnknown && RaaDecide(2, true, 5) == kRaaUnknown && RaaDecide(0, true, 0) == kRaaUnknown,
+          "the game has that value already: nothing typed (mix -> split types nothing)");
+    for (int m = 0; m < 3; ++m)
+        for (int k : { kRaaUnknown, 0, 2, 5 }) CHECK(RaaDecide(m, false, k) == kRaaUnknown, "console off: nothing typed (mode %d, r_aa %d)", m, k);
+    const char q = 34;
+    CHECK(RaaCommand(5) == std::string("uset r_aa ") + q + "5" + q && RaaCommand(0) == std::string("uset r_aa ") + q + "0" + q, "the command text");
+    const std::string cfg = std::string("uset r_aa ") + q + "5" + q + "\nuset r_aa_x " + q + "3" + q + "\n";
+    CHECK(RaaFromCfg(cfg) == 5 && RaaFromCfg(std::string("uset g_lang ") + q + "en_us" + q + "\n") == kRaaUnknown, "config.cfg r_aa (exact name; missing = unknown)");
+}
+
 int main() {
+    TestRaa();
     TestDelivery();
     TestParse();
     TestStepFormat();

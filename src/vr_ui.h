@@ -158,6 +158,22 @@ inline bool Echoed(const std::string& log, const std::string& cmd) {
     return false;
 }
 constexpr uint64_t kConfirmMs = 2000;   // the echo must show up within this after the batch's last key
+
+// ---- phase 86: the Game TAA row switches the GAME's anti-aliasing (cvar r_aa: 0 = off, 5 = TAA, as captured; the game's TAA tuning /
+// sharpening cvars are never touched). Same delivery as the In-game UI rows (typed into the console, debounced, confirmed in
+// game.log.txt), in flat AND VR, only when the console is on, only on a row change (never at startup by itself), only when the game's
+// value as the mod knows it (config.cfg at start / menu open, then what the mod typed) differs.
+constexpr int kRaaOff = 0, kRaaTaa = 5, kRaaUnknown = -1;
+inline int RaaFor(int gameTaaMode) { return gameTaaMode == 0 ? kRaaOff : kRaaTaa; }   // game_taa 0 off -> r_aa 0; mix / split -> 5
+// the r_aa value to type for the row's mode, or kRaaUnknown = type nothing (console off, or the game has that value already)
+inline int RaaDecide(int gameTaaMode, bool console, int known) {
+    if (!console) return kRaaUnknown;
+    const int want = RaaFor(gameTaaMode);
+    return known == want ? kRaaUnknown : want;
+}
+inline std::string RaaCommand(int v) { char b[32]; snprintf(b, sizeof(b), "uset r_aa \"%d\"", v); return b; }
+// config.cfg's r_aa (kRaaUnknown = not there)
+inline int RaaFromCfg(const std::string& cfg) { float v = 0.0f; return ParseCfg(cfg, "r_aa", &v) ? (int)std::lround(v) : kRaaUnknown; }
 constexpr int kKeyMs = 50;        // a key held this long (several game input polls at 60-90 fps)
 constexpr int kOpenMs = 150;      // after the console key: the console opens
 constexpr int kAfterEnterMs = 100;

@@ -227,6 +227,24 @@ static void MenuRules() {
     MenuBuildPanel(s_panel);
     ui = FindRow(L"In-game UI");
     CHECK(ui && !ui->greyed && FindRow(L"Height"), "console on (VR): the group is live and its rows are shown");
+    // phase 86: a Game TAA row change asks for the game's r_aa (typed later by VrUiTick, not called here: it would really type), and
+    // r_aa is the game's: never written to dlaa.ini
+    {
+        const int taa0 = g_gameTaa;
+        g_raaPending = false;
+        MenuChange(MR_GAMETAA, 1, false, 902);
+        CHECK(g_raaPending, "a Game TAA row change requests the game's r_aa");
+        g_raaPending = false;
+        WriteBaseIni();
+        MenuChange(MR_SAVE, 1, false, 903);
+        FILE* f = nullptr;
+        std::string ini;
+        if (_wfopen_s(&f, IniPath().c_str(), L"rb") == 0 && f) { char b2[4096]; size_t n; while ((n = fread(b2, 1, sizeof(b2), f)) > 0) ini.append(b2, n); fclose(f); }
+        CHECK(!ini.empty() && ini.find("r_aa") == std::string::npos && ini.find("game_taa") != std::string::npos,
+              "Save writes game_taa but never the game's r_aa");
+        g_gameTaa = taa0;
+        g_gameTaaExplicit = false;
+    }
     g_vrMode = vr0; g_menuShowAll = all0; g_vrUiConsole = con0; g_menuSel = sel0;
     for (bool& o : g_menuGrpOpen) o = false;
 }

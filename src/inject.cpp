@@ -19272,10 +19272,12 @@ void StepBiasMask(int dir, uint64_t n) {
 }
 // phase 82: the menu's Game TAA row -- dlaa.ini game_taa live: off -> mix -> TAA only -> split (Left goes back). The next world pass
 // holds / releases the mod's jitter; every DLAA history starts over (the jitter source changes). Logged + beeped.
+void RaaRequest(uint64_t nowMs);                         // phase 86 (with the In-game UI block)
 void StepGameTaa(int dir, uint64_t n) {
     g_gameTaa = GameTaa::NextMode(g_gameTaa, dir);
     g_gameTaaExplicit = true;
     g_resetNext = true;
+    RaaRequest(GetTickCount64());                        // phase 86: the game's Anti-aliasing follows (typed when it differs, console on)
     const bool live = GameTaa::Live(g_taaLastSeen, g_frames.load(std::memory_order_relaxed));
     Log("Game TAA (phase 82): game_taa=%d (%s) (tuning menu, Present #%llu) -- %s", g_gameTaa, GameTaa::ModeName(g_gameTaa),
         (unsigned long long)n,
@@ -19339,6 +19341,15 @@ uint64_t   g_vrUiLogPos = 0, g_vrUiConfirmUntil = 0, g_vrUiConfirmPoll = 0, g_vr
 std::string g_vrUiLogTail;
 int        g_vrUiResult = 0;                         // the last batch: 0 none yet, 1 confirmed, 2 NOT confirmed
 uint64_t   g_vrUiConfirmedN = 0, g_vrUiUnconfirmedN = 0;
+// phase 86: the Game TAA row switches the game's r_aa (VrUi::Raa*): the game's value as the mod knows it (config.cfg, then what the mod
+// typed), a pending row change (debounced like the In-game UI rows), whether the mod switched it this session, the last switch's result
+int        g_raaKnown = VrUi::kRaaUnknown;
+bool       g_raaPending = false, g_raaTyped = false;
+uint64_t   g_raaAt = 0;
+std::string g_raaCmd;                                // the r_aa command of the batch in flight / last sent ("" = none)
+int        g_raaResult = 0;                          // 0 none / in flight, 1 confirmed, 2 NOT confirmed
+// a row change (or Reset) asks for the game's AA of the current game_taa mode (typed once stable kStableMs, in flat and VR)
+void RaaRequest(uint64_t nowMs) { g_raaPending = true; g_raaAt = nowMs; }
 void VrUiRead(bool first) {
     std::wstring path;
     const std::string cfg = Lang::ReadGameConfig(&path);
@@ -19358,6 +19369,7 @@ void VrUiRead(bool first) {
                 o += snprintf(line + o, sizeof(line) - (size_t)o, " %s=%s%s", VrUi::VarName(s, f).c_str(), VrUi::Format(f, v).c_str(),
                               have ? "" : "(default)");
         }
+    if (!g_raaTyped) g_raaKnown = VrUi::RaaFromCfg(cfg);   // phase 86 (once the mod typed it, its own value counts)
     g_vrUiRead = true;
     static int s_logs = 0;
     if (first || s_logs++ < 8) Log("%s", line);
@@ -19433,6 +19445,10 @@ void VrUiCheckConfirm(uint64_t now) {
             ++g_vrUiConfirmedN;
             Log("In-game UI (phase 85): `%s` CONFIRMED -- game.log.txt echoed it %llu ms after the batch's last key",
                 g_vrUiConfirm[i].c_str(), (unsigned long long)(now - g_vrUiBatchEnd));
+            if (g_vrUiConfirm[i] == g_raaCmd) {           // phase 86
+                g_raaResult = 1;
+                Log("Game AA (phase 86): the game's Anti-aliasing switch `%s` CONFIRMED by game.log.txt", g_raaCmd.c_str());
+            }
         }
         all = all && g_vrUiConfirmed[i];
     }
@@ -19441,6 +19457,11 @@ void VrUiCheckConfirm(uint64_t now) {
     for (size_t i = 0; i < g_vrUiConfirm.size(); ++i)
         if (!g_vrUiConfirmed[i]) {
             ++g_vrUiUnconfirmedN;
+            if (g_vrUiConfirm[i] == g_raaCmd) {           // phase 86
+                g_raaResult = 2;
+                Log("Game AA (phase 86): the game's Anti-aliasing switch `%s` NOT confirmed after 2 s (game.log.txt did not echo it)",
+                    g_raaCmd.c_str());
+            }
             LogWarn("In-game UI (phase 85): `%s` NOT confirmed after %llu s -- game.log.txt did not echo it (%s; the console key, Enter or "
                     "the text did not reach the console, or the game does not log typed commands; dlaa.ini vr_ui_keys %d = %s, 0 .. 4 "
                     "switch the delivery)", g_vrUiConfirm[i].c_str(), (unsigned long long)(VrUi::kConfirmMs / 1000),
@@ -19488,7 +19509,12 @@ void VrUiTick() {
         g_vrUiPlan.clear(); g_vrUiCmds.clear(); g_vrUiStep = 0; g_vrUiWaitUntil = 0;
         return;
     }
-    if (!g_vrUiDeb.AnyDirty() || !VrUiUsable()) { g_vrUiNoFocus = false; return; }
+    // phase 86: the game's r_aa runs in flat AND VR (the In-game UI rows only in VR with the console on)
+    VrUiEnsure();
+    const bool uiDirty = g_vrUiDeb.AnyDirty() && VrUiUsable();
+    if (g_raaPending && !g_vrUiConsole) g_raaPending = false;   // console off: the row works as before, nothing typed
+    const bool raaDue = g_raaPending && now - g_raaAt >= VrUi::kStableMs;
+    if (!uiDirty && !raaDue) { if (!g_raaPending) g_vrUiNoFocus = false; return; }
     if (now - KeySwallow::LastUserKeyMs() < VrUi::kUserQuietMs) return;     // the player is typing (console / chat): later
     if (KeySwallow::MenuHideMode() == KeySwallow::kHideAll) return;         // the Hotkeys page waits for a key
     if (!KeySwallow::GameHasFocus()) {                    // phase 85: SendInput types into the foreground window -- wait for the game
@@ -19499,9 +19525,21 @@ void VrUiTick() {
         return;
     }
     g_vrUiNoFocus = false;
-    const std::vector<VrUi::Pending> due = g_vrUiDeb.Due(now);
-    if (due.empty()) return;
+    std::vector<VrUi::Pending> due;
+    if (uiDirty) due = g_vrUiDeb.Due(now);
     for (const VrUi::Pending& p : due) g_vrUiCmds.push_back(VrUi::Command(p.set, p.field, p.value));
+    if (raaDue) {                                         // phase 86: only when the game's value differs
+        g_raaPending = false;
+        const int v = VrUi::RaaDecide(g_gameTaa, g_vrUiConsole, g_raaKnown);
+        if (v != VrUi::kRaaUnknown) {
+            g_raaCmd = VrUi::RaaCommand(v);
+            g_vrUiCmds.push_back(g_raaCmd);
+            Log("Game AA (phase 86): typing `%s` (Game TAA row: %s; the game's r_aa was %d as the mod knows it, -1 = unknown) -- the "
+                "game's Anti-aliasing %s", g_raaCmd.c_str(), GameTaa::ModeName(g_gameTaa), g_raaKnown, v ? "TAA" : "Disabled");
+            g_raaKnown = v; g_raaTyped = true; g_raaResult = 0;
+        }
+    }
+    if (g_vrUiCmds.empty()) return;
     g_vrUiPlan = VrUi::KeyPlan(g_vrUiCmds);
     g_vrUiConfirm.clear();                                // (a newer batch: the older check ends here)
     g_vrUiLogPos = VrUiLogSize(); g_vrUiLogTail.clear(); g_vrUiResult = 0;
@@ -19783,6 +19821,7 @@ void ResetSettings(uint64_t n) {
     g_gameTaaSplit = GameTaa::kSplitDefault;
     g_gameTaaPair = GameTaa::kPairDlaaTaa;
     g_gameTaaExplicit = false;
+    if (g_raaTyped) RaaRequest(GetTickCount64());         // phase 86: r_aa "0" back only if the mod switched it this session
     VrUiReset(n, true);                                   // phase 83: the game's VR UI back to its config.cfg values (typed), layout driving
     // phase 39: logging back to the level dlaa.ini gives without log_level (the key is removed below; `debug` stays in the file,
     // so debug = 1 there = level 4, as at the next start; else 1 = errors)
@@ -20488,6 +20527,23 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
             case GameTaa::kWhyNoTonemap: swprintf(sent, sentCap, TRF(L"Fell back to the game's TAA: the game's tonemap was not found (see the log).")); break;
             default:                     swprintf(sent, sentCap, TRF(L"Fell back to the game's TAA: DLAA did not run on this frame (see the log).")); break;
             }
+        }
+        {   // phase 86: the game's Anti-aliasing as the mod knows it, and the last switch (the row types r_aa when the console is on)
+            const size_t l = wcslen(sent);
+            wchar_t add[260] = L"";
+            VrUiEnsure();
+            if (!g_vrUiConsole)
+                swprintf(add, 260, L"%ls", TR(L"Turn on the game console to let the mod switch the game's Anti-aliasing."));
+            else {
+                const wchar_t* aa = g_raaKnown == VrUi::kRaaTaa ? TR(L"TAA") : (g_raaKnown == VrUi::kRaaOff ? TR(L"off")
+                                  : (g_raaKnown == VrUi::kRaaUnknown ? TR(L"unknown") : TR(L"other")));
+                const wchar_t* st = g_raaPending && g_vrUiNoFocus ? TR(L"waiting: click the game window")
+                                  : g_raaPending || (!g_raaCmd.empty() && g_raaResult == 0) ? TR(L"switching...")
+                                  : (g_raaResult == 1 ? TR(L"switch confirmed") : (g_raaResult == 2 ? TR(L"switch NOT confirmed (see the log)") : L""));
+                if (st[0]) swprintf(add, 260, TRF(L"Game AA: %ls, %ls."), aa, st);
+                else       swprintf(add, 260, TRF(L"Game AA: %ls."), aa);
+            }
+            if (add[0] && l + 2 < sentCap) swprintf(sent + l, sentCap - l, L"%ls%ls", l ? L" " : L"", add);
         }
         break;
     }

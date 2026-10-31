@@ -1102,6 +1102,58 @@ msgstr ""
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
+msgid "Turn on the game console to let the mod switch the game's Anti-aliasing."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "TAA"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "unknown"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "other"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "waiting: click the game window"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switching..."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch confirmed"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch NOT confirmed (see the log)"
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls, %ls."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
 #, c-format
 msgid ""
 "Switched off by the mod: it cost more than %.1f ms per eye (VR budget). Press its key to try "

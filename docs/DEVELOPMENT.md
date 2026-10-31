@@ -2590,6 +2590,26 @@ non-blocking readback timing -- so it is judged by the check totals and a verify
   round-trip `MenuRules` (closed (N) per mode, the title label, no mode words in shown titles, the mode-hidden selection, the
   console-locked group). The save set is unchanged (settings_check: Save writes 72 keys, Reset removes 73).
 
+### Phase 86: the Game TAA row switches the game's Anti-aliasing
+
+- **What.** A Game TAA row change (`StepGameTaa`) asks for the game's `r_aa` of the new mode (`VrUi::RaaFor`: off -> `0`, mix /
+  split -> `5` = TAA, as captured; the game's TAA tuning / sharpening cvars are not touched). `VrUiTick` types it with the phase 85
+  delivery (SendInput, focus gate, `dwExtraInfo` mark, game.log.txt confirmation) in the same console batch as any In-game UI command,
+  debounced like them (400 ms stable: off -> mix -> split in a row types once), in FLAT and VR (the In-game UI rows stay VR-only),
+  only with the console on (`g_developer` / `g_console`; off = the row works as before, its line says to turn the console on), only
+  when `VrUi::RaaDecide` says the game's value differs: `g_raaKnown` = config.cfg `r_aa` (`VrUi::RaaFromCfg`, at start / menu open
+  until the mod typed one), then the value the mod typed. Never at startup by itself; Reset to defaults asks for it (game_taa 0 ->
+  `r_aa "0"`) only if the mod typed `r_aa` this session. `r_aa` is never written to dlaa.ini.
+- **Status / log.** The Game TAA row's line ends in "Game AA: TAA / off / unknown / other" + "switching..." / "waiting: click the
+  game window" / "switch confirmed" / "switch NOT confirmed (see the log)". INFO lines "Game AA (phase 86): typing ...", "... CONFIRMED
+  by game.log.txt", "... NOT confirmed after 2 s".
+- **Not verified in game:** whether the game applies `r_aa` live from the console (assumed: the user's capture switched it);
+  the echo format assumption of phase 85 applies here too.
+- **Translations:** from now on new / changed menu texts go into `lang/template.pot` only (English fallback); the .po files are
+  translated once before a release.
+- **Tests:** vr_ui_test `TestRaa` (row -> command or nothing, console off -> nothing, unchanged -> nothing, config.cfg parse);
+  settings round-trip: a Game TAA row change requests r_aa, Save writes `game_taa` but never `r_aa`.
+
 ### The RenderDoc oracle (done in v0.2)
 
 Capture a frame of the unmodified game to learn empirically: which pass writes
