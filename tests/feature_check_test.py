@@ -143,7 +143,7 @@ class TestPass(Base):
         self.assertTrue(sess.world)
         for name in ("DLAA / DLSS (main view)", "Sharpen (RCAS)", "Motion vectors", "Per-draw motion vectors",
                      "See-through depth (fwd depth)", "Jitter", "Lighting redraw jitter", "Anisotropic filter",
-                     "Menu truck-preview DLAA", "Foveated (VRS)", "Hidden area mask", "Turbo mode", "fps box",
+                     "Menu truck-preview DLAA", "Foveated rendering", "Hidden area mask", "Turbo mode", "fps box",
                      "VR panel / fps box as quads"):
             self.verdict(rows, name, "PASS")
 
@@ -155,7 +155,7 @@ class TestPass(Base):
             "DLAA: eye 0 unit built in this Run: 40.0 ms (textures + NGX feature 30.0 ms, MV init + first eval 10.0 ms), ok=1",
             unload(876, 1390)]
         sess, rows, _ = self.run_log(lines, ini="")
-        self.verdict(rows, "Foveated (VRS)", "PASS")
+        self.verdict(rows, "Foveated rendering", "PASS")
         self.verdict(rows, "Hidden area mask", "PASS")
         self.verdict(rows, "DLAA / DLSS (main view)", "PASS")
 
@@ -165,7 +165,7 @@ class TestFail(Base):
         world = [l for l in vr_world() if not l.startswith("VRS @")] + [
             "VRS @12 s (Present #1219): 0 scene binds entered (eye 0 0 / eye 1 0), draws coarse-capable 0 (0.0 %), full rate"]
         sess, rows, _ = self.run_log(head() + world + [unload(600, 1200)], ini="")
-        self.verdict(rows, "Foveated (VRS)", "FAIL")
+        self.verdict(rows, "Foveated rendering", "FAIL")
 
     def test_off_but_ran(self):
         world = vr_world() + [
@@ -243,7 +243,7 @@ class TestNotApplicable(Base):
             "eye blit detected: eye=0 (pass s=60) src 3840x2160 -> RT 3840x2160 fmt=87 (flat backbuffer, Present #1301)",
             fifo(600, 600, 600, 0, mode="flat"), unload(600, 600, mode="flat")]
         sess, rows, _ = self.run_log(lines, ini="")
-        for name in ("Foveated (VRS)", "Hidden area mask", "Turbo mode", "VR FPS cap", "fps box attached to vehicle"):
+        for name in ("Foveated rendering", "Hidden area mask", "Turbo mode", "VR FPS cap", "fps box attached to vehicle"):
             self.verdict(rows, name, "N/A")
 
     def test_older_version(self):

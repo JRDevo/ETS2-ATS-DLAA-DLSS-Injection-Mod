@@ -171,7 +171,7 @@
 // v0.11.0 -- phase 34: VRS FIXED FOVEATED RENDERING, VR only (vrs.h / vrs.cpp; NVIDIA Variable Rate Shading through NVAPI, ideas
 //           ported from OpenXR Toolkit, MIT). dlaa.ini vrs (0 default), vrs_inner / vrs_outer (55 / 80 % of the NDC half-size
 //           around each eye's optical centre), vrs_quality (1 default: 1x1 inside vrs_outer; 0: 2x1 in the middle ring), vrs_debug
-//           (with debug = 1: 2x2 / 4x4 to show the pattern); menu rows "Foveated (VRS)" + "Foveated size" (wide / balanced /
+//           (with debug = 1: 2x2 / 4x4 to show the pattern); menu rows "Foveated rendering" + "Foveated size" (wide / balanced /
 //           narrow). Coarse (2x2) shading ONLY inside the eye's world scene bracket = the game's G-buffer and main forward binds
 //           (g_jitterPass, not a preview pass), entered after hkOMSetRenderTargets, left at the next one (VrsOnBind / the top of
 //           the hook). The mod's own work never runs coarse (t_inDlaa is now a flag type whose writes pause / resume VRS), and
@@ -950,7 +950,7 @@ int      g_vrsStrength = 0;
 bool     g_vrsStrengthExplicit = false;
 // phase 59: dlaa.ini vrs_eye -- 1 = EYE-TRACKED foveation: the VRS ring centre follows the gaze (XR_EXT_eye_gaze_interaction,
 // xr_hook.h EyeGaze) when the headset has an eye tracker, else the optical centre as before. The OpenXR extension is only requested
-// when it (phase 59g: or Foveated (VRS)) is on at the game's start (g_vrsEyeAtStart; not with vrs_eye_fake); the menu's Foveated eye tracking row switches it live
+// when it (phase 59g: or Foveated rendering) is on at the game's start (g_vrsEyeAtStart; not with vrs_eye_fake); the menu's Foveated eye tracking row switches it live
 // after that, SaveSettings writes it once explicit (own flag). vrs_eye_fake (debug, dlaa.ini only) = a made-up gaze circling slowly
 // (gaze_math.h FakeGaze) through the same path -- no OpenXR involved. vrs_eye_smooth = the centre's smoothing time constant in ms
 // (0..100, default 20; a saccade is followed 4x faster).
@@ -18737,17 +18737,17 @@ const wchar_t* const kMenuDesc[] = {
     // phase 34 (MR_VRS, MR_VRSSIZE)
     N_(L"Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR only. The outer ring is shaded "
     L"once per 2 x 2 pixels; fences, grass and leaves keep full detail. Turn it off if the edge looks blocky."),
-    N_(L"How big the sharp centre of Foveated (VRS) is, 10 - 100 % in 5 % steps: bigger = more of the view sharp, less saving; "
+    N_(L"How big the sharp centre of Foveated rendering is, 10 - 100 % in 5 % steps: bigger = more of the view sharp, less saving; "
     L"smaller = more saving, lower detail starts closer to the middle. 80 % (balanced) is the default; 90 = wide, 65 = narrow."),
     // phase 42 (MR_VRSPASS)
-    N_(L"Which of the game's passes Foveated (VRS) acts on. scene = the 3D world only (default). scene + lighting = also the game's "
+    N_(L"Which of the game's passes Foveated rendering acts on. scene = the 3D world only (default). scene + lighting = also the game's "
     L"lighting pass, at the very edge only: more saving. Test it: look for blocky light or shadow edges at the side of your view."),
     // phase 59f (MR_VRSSTR)
-    N_(L"How coarse the outer ring of Foveated (VRS) is. Normal = 1 colour per 2 x 2 pixels (default). Strong = per 4 x 2, Max = per "
+    N_(L"How coarse the outer ring of Foveated rendering is. Normal = 1 colour per 2 x 2 pixels (default). Strong = per 4 x 2, Max = per "
     L"4 x 4: more GPU saving, blockier edges. Best with eye tracking, where you never look at the outer ring."),
     // phase 59 (MR_VRSEYE)
-    N_(L"Experimental. The sharp centre of Foveated (VRS) follows your eyes on a headset with eye tracking (OpenXR eye gaze, for "
-    L"example Varjo); without one it stays at the lens centre. Needs Foveated (VRS) on at the game's start, else a restart. Almost no cost."),
+    N_(L"Experimental. The sharp centre of Foveated rendering follows your eyes on a headset with eye tracking (OpenXR eye gaze, for "
+    L"example Varjo); without one it stays at the lens centre. Needs Foveated rendering on at the game's start, else a restart. Almost no cost."),
     // phase 40 (MR_HMASK)
     N_(L"VR only. The game skips the lens corners you never see (the headset reports them), so it draws fewer pixels: more GPU "
     L"headroom, the picture you see stays the same. The first switch-on needs a game restart. Turn it off if the edge of the view "
@@ -19196,7 +19196,7 @@ void StepVrFpsCap(uint64_t n, int dir) {                  // Right: off -> half 
                   : "");
     PlayTones(1, g_vrFpsCap ? 900 + 200 * g_vrFpsCap : 300, 150, 0);
 }
-// phase 34: the menu's Foveated (VRS) / Foveated size rows -- dlaa.ini vrs / vrs_inner / vrs_outer live (Vrs::Configure: the next
+// phase 34: the menu's Foveated rendering / Foveated size rows -- dlaa.ini vrs / vrs_inner / vrs_outer live (Vrs::Configure: the next
 // scene bind uses them; a radii change builds new masks once). Logged + beeped like the other toggles; also switchable in flat
 // (kept for VR; the rows are greyed there).
 struct VrsSizePreset { int inner, outer; const wchar_t* name; const char* logName; };
@@ -19250,7 +19250,7 @@ void StepVrsSize(int dir, uint64_t n, bool repeat) {
         Log("Foveated size (VRS): %d %%%s%s -- vrs_inner=%d vrs_outer=%d (was %d / %d; %% of the NDC half-size around each eye's "
             "optical centre: 2 x 2 shading only past vrs_outer (vrs_quality 1), vrs_inner = max(10, size - 25); tuning menu, Present "
             "#%llu)%s", g_vrsOuter, si >= 0 ? " = " : "", si >= 0 ? kVrsSizes[si].logName : "", g_vrsInner, g_vrsOuter, oldIn, oldOut,
-            (unsigned long long)n, g_vrsOn ? "" : " -- Foveated (VRS) is off: used once it is on");
+            (unsigned long long)n, g_vrsOn ? "" : " -- Foveated rendering is off: used once it is on");
     else
         LogDbg("Foveated size (VRS): %d %% (vrs_inner=%d vrs_outer=%d, auto-repeat)", g_vrsOuter, g_vrsInner, g_vrsOuter);
     PlayTones(1, 300 + 9 * g_vrsOuter, 60, 0);
@@ -19638,7 +19638,7 @@ void ToggleVrsPasses(uint64_t n) {
         g_vrsPasses, (unsigned long long)n,
         g_vrsPasses ? "from the next frame the eye's lighting bind is shaded coarse in the outer ring too (middle ring stays 1x1)"
                     : "from the next frame only the world scene binds (G-buffer, forward)",
-        g_vrsOn ? "" : " -- Foveated (VRS) is off: used once it is on");
+        g_vrsOn ? "" : " -- Foveated rendering is off: used once it is on");
     PlayTones(1, g_vrsPasses ? 1200 : 300, 150, 0);
 }
 // phase 59f: the menu's Foveated strength row -- dlaa.ini vrs_strength live (Right = coarser, Left = finer, no wrap). The next
@@ -19652,7 +19652,7 @@ void StepVrsStrength(int dir, uint64_t n) {
     VrsApplyConfig();
     Log("Foveated strength (VRS): %ls (vrs_strength=%d, tuning menu, Present #%llu) -- the outer ring is shaded once per %s pixels "
         "from the next frame%s", kVrsStrengthName[to], to, (unsigned long long)n, to == 0 ? "2 x 2" : (to == 1 ? "4 x 2" : "4 x 4"),
-        g_vrsOn ? "" : " -- Foveated (VRS) is off: used once it is on");
+        g_vrsOn ? "" : " -- Foveated rendering is off: used once it is on");
     PlayTones(1, 600 + 300 * to, 120, 0);
 }
 // phase 59: the menu's Foveated eye tracking row -- dlaa.ini vrs_eye live (the next eye pass takes the gaze centre and the eye's
@@ -19669,7 +19669,7 @@ void ToggleVrsEye(uint64_t n) {
         : g_vrsEyeFake ? "FAKE gaze (vrs_eye_fake = 1)"
         : (!g_vrsEyeAtStart ? "the OpenXR eye gaze extension was not requested at this start: save (Shift+F12) and restart the game"
                             : "from the next eye pass the ring centre follows the gaze (optical centre while there is none)"),
-        g_vrsOn ? "" : " -- Foveated (VRS) is off: used once it is on", es.ext, es.system, es.attachedBy,
+        g_vrsOn ? "" : " -- Foveated rendering is off: used once it is on", es.ext, es.system, es.attachedBy,
         (unsigned long long)es.valid, (unsigned long long)es.locates);
     PlayTones(1, g_vrsEye ? 1200 : 300, 150, 0);
 }
@@ -20614,10 +20614,10 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         const uint64_t loc = es.locates ? es.locates : 1;
         if (Vrs::Support() == 0)     swprintf(sent, sentCap, TRF(L"Not available here: %hs."), Vrs::SupportText());
         else if (!vr)                swprintf(sent, sentCap, TRF(L"Greyed in flat: VR only."));
-        else if (!g_vrsOn)           swprintf(sent, sentCap, TRF(L"Foveated (VRS) is off: switch it on first."));
+        else if (!g_vrsOn)           swprintf(sent, sentCap, TRF(L"Foveated rendering is off: switch it on first."));
         else if (!g_vrsEye)          swprintf(sent, sentCap, TRF(L"Off now: the sharp centre stays at the lens centre."));
         else if (g_vrsEyeFake)       swprintf(sent, sentCap, TRF(L"Fake gaze (vrs_eye_fake = 1): the sharp area circles slowly, a test."));
-        else if (!g_vrsEyeAtStart)   swprintf(sent, sentCap, TRF(L"Foveated (VRS) was off at the game's start: save (Shift+F12) and restart "
+        else if (!g_vrsEyeAtStart)   swprintf(sent, sentCap, TRF(L"Foveated rendering was off at the game's start: save (Shift+F12) and restart "
                                               L"the game to ask the headset for eye gaze."));
         else if (es.ext == 1 || es.ext == 4 || es.system == 0)
                                      swprintf(sent, sentCap, TRF(L"No eye tracker reported by this headset / runtime: the lens centre is used."));
@@ -21464,7 +21464,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     }
     {   // phase 34: foveated rendering (VRS); "not supported" once the first VR scene pass found no NVAPI VRS
         const bool noVrs = Vrs::Support() == 0;
-        MenuRow(p, MR_VRS, TR(L"Foveated (VRS)"), "dlaa.ini vrs", vr ? nullptr : NA_("VR only"), !vr || noVrs);
+        MenuRow(p, MR_VRS, TR(L"Foveated rendering"), "dlaa.ini vrs", vr ? nullptr : NA_("VR only"), !vr || noVrs);
         if (noVrs) swprintf(p.rows[MR_VRS].value, kV, L"%ls", g_vrsOn ? TR(L"on (not supported)") : TR(L"not supported"));
         else       swprintf(p.rows[MR_VRS].value, kV, L"%ls", onOff[g_vrsOn ? 1 : 0]);
         MenuRow(p, MR_VRSSIZE, TR(L"Foveated size"), "dlaa.ini vrs_inner / vrs_outer", vr ? nullptr : NA_("VR only"), !vr || noVrs || !g_vrsOn);
@@ -25294,7 +25294,7 @@ bool DlaaOffFilePresent() {
 //                                  Ctrl+F7 passive / v0.7.0 Ctrl+F4 upscale toggles (kernel32 Beep on a worker thread)
 //   vrs                            0/1 (default 0, phase 34, VR only): fixed foveated rendering with NVIDIA VRS (NVAPI, RTX):
 //                                  the outer ring of each eye's world G-buffer / forward pass is shaded per 2 x 2 px; cut-outs,
-//                                  SV_Depth writers and the mod's own passes keep full rate. Menu row Foveated (VRS) (live)
+//                                  SV_Depth writers and the mod's own passes keep full rate. Menu row Foveated rendering (live)
 //   vrs_inner / vrs_outer          int 10..150 % (default 55 / 80): ring radii in % of the NDC half-size around each eye's
 //                                  optical centre (outer < inner is raised to inner). Menu row Foveated size: wide 65 / 90,
 //                                  balanced 55 / 80, narrow 40 / 65
@@ -26141,7 +26141,7 @@ void LoadConfig() {
         kVrsStrengthName[g_vrsStrength], g_vrsEye,
         g_vrsEye ? (g_vrsEyeFake ? "the ring centre follows a FAKE gaze" : "the ring centre follows the gaze") : "optical centre",
         g_vrsOn ? "VR only: the outer ring of each eye's world scene passes is shaded per 2 x 2 px (NVIDIA RTX; checked at the first "
-                  "VR scene pass)" : "off (the menu's Foveated (VRS) row switches it live in VR)");
+                  "VR scene pass)" : "off (the menu's Foveated rendering row switches it live in VR)");
     Log("phase 8 (v0.10.0): perf_timers=%d (%s) mv_vote_res=%u mv_vote_march_cap=%u mv_cons_cands=%u mv_medoid_drop=%u "
         "mv_cons_fail_tol=%u mirror_vr_mode=%d mirror_mv=%s mv_slot_pool=%d mv_inst_replay=%d (instanced draws: %s) -- %s; rigid-parent vote on every %u%s pixel in x / y with %u px march steps "
         "(listed draws with < 64 coarse samples: every 2nd pixel, 2 px steps), <= %u marches per frame, vote grid skipped when no "
@@ -26458,7 +26458,7 @@ DWORD WINAPI SetupThread(LPVOID) {
         g_xrHiddenMaskAtStart = g_xrHiddenMask;             // phase 40: the extension is asked for only when on at the start
         XrHook::HiddenMaskRequest(g_xrHiddenMask != 0);
         XrHook::HiddenMaskActive(g_xrHiddenMask != 0);
-        // phase 59: the eye gaze extension is asked for at the start only. phase 59g (issue #21): also when Foveated (VRS) is on,
+        // phase 59: the eye gaze extension is asked for at the start only. phase 59g (issue #21): also when Foveated rendering is on,
         // so the menu's Foveated eye tracking row works without a restart. Harmless while eye tracking is off: a runtime that
         // refuses it gets the game's own create again, and the gaze is only located while it is used (VrsEyeApply).
         g_vrsEyeAtStart = ((g_vrsEye || g_vrsOn) && !g_vrsEyeFake) ? 1 : 0;
@@ -26473,7 +26473,7 @@ DWORD WINAPI SetupThread(LPVOID) {
             g_vrsEyeFake && g_vrsEye ? "FAKE gaze: the ring centre circles slowly, OpenXR eye gaze NOT requested"
             : g_vrsEye ? "ON: XR_EXT_eye_gaze_interaction is added at the game's xrCreateInstance when the runtime offers it; the VRS "
                          "ring centre follows the gaze when the headset has an eye tracker"
-                       : g_vrsEyeAtStart ? "off, but Foveated (VRS) is on: XR_EXT_eye_gaze_interaction is requested anyway "
+                       : g_vrsEyeAtStart ? "off, but Foveated rendering is on: XR_EXT_eye_gaze_interaction is requested anyway "
                                            "(phase 59g), so the menu row can switch it on without a restart"
                                          : "off: the OpenXR extension is not requested; switching it on needs a game restart");
         Log("Turbo mode (phase 30, from OpenXR Toolkit): xr_turbo=%d (%s)", g_xrTurbo,

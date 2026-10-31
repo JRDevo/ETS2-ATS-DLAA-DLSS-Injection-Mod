@@ -83,7 +83,7 @@ an in-game menu (`Delete`) and an optional text config.
   (position X / Y and size), flat and VR each with their own place. In VR the panel turns to face you. New in v0.14.0:
   the VR panel can stay fixed in the cab (`Panel lock`), and its text is drawn sharper.
 - **Eye-tracked foveated rendering (VR, experimental)** — on a headset with eye tracking (OpenXR eye gaze, tested on
-  Varjo Aero) the sharp centre of `Foveated (VRS)` follows where you look; `Foveated strength` sets how coarse the outer
+  Varjo Aero) the sharp centre of `Foveated rendering` follows where you look; `Foveated strength` sets how coarse the outer
   ring is (new in v0.14.0). See [the test guide](docs/EYE_TRACKING_TEST.md). Varjo testing by
   [ejaypeppy-source](https://github.com/ejaypeppy-source), thank you!
 - **Steadier thin wires** — near telephone and power wires no longer break up while you drive (`Thin-wire motion`,
@@ -703,7 +703,7 @@ The three green lines under the title show the game's GPU time per frame, what t
 - **Turbo mode** (`xr_turbo`, off by default; from OpenXR Toolkit): the game stops waiting for the headset each
   frame. More fps only when the CPU is the limit. Warning: frame smoothing (ASW, Motion Smoothing, Motion Reprojection,
   SSW) does not work while it is on. Switch it off again if the picture judders.
-- **Foveated (VRS)** (`vrs`, off by default; VR only, NVIDIA RTX only; from OpenXR Toolkit): sharp centre, lower detail
+- **Foveated rendering** (`vrs`, off by default; VR only, NVIDIA RTX only; from OpenXR Toolkit): sharp centre, lower detail
   at the edge. The outer ring of each eye picture is shaded once per 2 x 2 pixels, which saves GPU time at a high in-game
   Scaling. Fences, grass and leaves keep full detail, and so does everything the mod draws itself. **Foveated size** sets
   how big the sharp centre is, from 100 % down to 10 % in 5 % steps (`Right` = bigger). 80 % is the default (`balanced`);
@@ -872,7 +872,7 @@ The table below lists the commonly used keys:
 | `fps_vr_dist` | `80` | fps box, VR (phase 44): distance in cm (`30`..`300`), same angular size at every distance. The menu's `FPS distance` row |
 | `fps_vr_yaw` / `fps_vr_pitch` / `fps_vr_roll` | `0` / `0` / `0` | fps box, VR (phase 44): the box's own turn in degrees: yaw `-90`..`90` (+ = its face turns right), pitch `-90`..`90` (+ = its top leans away), roll `-180`..`180` (+ = clockwise). The menu's `FPS turn` / `FPS tilt` / `FPS rotate` rows (1 degree steps) |
 | `xr_turbo` | `0` | VR: `1` = **Turbo mode** (from OpenXR Toolkit): the game no longer waits for the headset each frame, so it can start the next frame sooner. **It turns off the headset's frame smoothing**: ASW (Meta / Oculus), Motion Smoothing, Motion Reprojection (Windows Mixed Reality) and SSW (Virtual Desktop) cannot work with it. It helps only when the CPU is the limit (busy cities, heavy traffic); when the GPU is the limit it gains nothing. The menu's `Turbo mode` row switches it live, `Shift+F12` saves |
-| `vrs` | `0` | VR, NVIDIA RTX only: `1` = **foveated rendering** (from OpenXR Toolkit): the outer ring of each eye picture is shaded once per 2 x 2 pixels, the centre stays sharp; saves GPU time at a high in-game Scaling. Fences, grass, leaves and the mod's own passes keep full detail. The menu's `Foveated (VRS)` row switches it live, `Shift+F12` saves |
+| `vrs` | `0` | VR, NVIDIA RTX only: `1` = **foveated rendering** (from OpenXR Toolkit): the outer ring of each eye picture is shaded once per 2 x 2 pixels, the centre stays sharp; saves GPU time at a high in-game Scaling. Fences, grass, leaves and the mod's own passes keep full detail. The menu's `Foveated rendering` row switches it live, `Shift+F12` saves |
 | `vrs_inner` / `vrs_outer` | `55` / `80` | foveated rendering: ring sizes in % of the half picture around each eye's centre (`10`..`150`); full detail inside `vrs_outer` (with `vrs_quality = 1`), 2 x 2 outside. The menu's `Foveated size` row sets `vrs_outer` 10..100 in 5 % steps and `vrs_inner` = max(10, `vrs_outer` - 25): `wide` = 65 / 90, `balanced` = 55 / 80, `narrow` = 40 / 65; other values from `dlaa.ini` keep working (shown as inner / outer) |
 | `vrs_quality` | `1` | foveated rendering: `1` = full detail inside `vrs_outer`; `0` = the ring between `vrs_inner` and `vrs_outer` is shaded per 2 x 1 pixels too (more saving) |
 | `vrs_passes` | `0` | foveated rendering: what it acts on. `0` = the 3D world only; `1` = also the game's lighting pass, outer ring only (the middle ring stays sharp even with `vrs_quality = 0`). More saving; test it first. The menu's `Foveated passes` row switches it live, `Shift+F12` saves |
@@ -1058,7 +1058,7 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
 - **VR: when a drive starts or you come back from the menu, one eye stays black 1-2 seconds longer, or flickers inside
   the DLAA area:** fixed in v0.15.1: update (GitHub issue #24). The old log shows `fifo underflow` and `rt parity mismatch`
   lines right at the drive start.
-- **VR with wire widening and Foveated (VRS) on: low fps in towns with many wires and poles (the CPU profiler's `vrs` row
+- **VR with wire widening and Foveated rendering on: low fps in towns with many wires and poles (the CPU profiler's `vrs` row
   above 1 ms):** fixed in v0.15.1: update.
 - **The menu is English although the game is in another language:** the `Language` row must be on `auto` (or delete the
   `language` line in `dlaa.ini`). Linux / Proton with Chinese, Japanese or Korean: the row says `font missing`, see
@@ -1108,7 +1108,7 @@ cmake --build build --config Release
 Output: `build/Release/dinput8.dll`. Without `external/DLSS` the build is a
 logging-only injector (no DLAA). Without `external/nvapi` (NVIDIA NVAPI, MIT; its
 `nvapi64.lib` is linked statically) the build has no VR foveated rendering (the
-`Foveated (VRS)` row says `not supported`). `scripts/package.ps1` builds Release and assembles
+`Foveated rendering` row says `not supported`). `scripts/package.ps1` builds Release and assembles
 the release zip. Architecture and internals: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
 
 </details>

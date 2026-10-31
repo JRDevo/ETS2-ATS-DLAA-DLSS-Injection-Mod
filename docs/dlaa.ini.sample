@@ -89,7 +89,7 @@ log_level = 1
 
 # VR FOVEATED RENDERING (VRS, NVIDIA RTX only; from OpenXR Toolkit), 0 / 1, default 0. 1 = the outer ring of each eye picture is
 # shaded once per 2 x 2 pixels (the centre stays sharp), which saves GPU time at high in-game Scaling. Fences, grass and leaves
-# (alpha-tested) and everything the mod draws itself keep full detail. The tuning menu's Foveated (VRS) row switches it live;
+# (alpha-tested) and everything the mod draws itself keep full detail. The tuning menu's Foveated rendering row switches it live;
 # Shift+F12 / the Save row writes it here. Not available on other GPUs (the menu row then says "not supported").
 # vrs = 0
 # Ring sizes in % of the half picture around each eye's centre: inside vrs_inner full detail; with vrs_quality = 0 the ring

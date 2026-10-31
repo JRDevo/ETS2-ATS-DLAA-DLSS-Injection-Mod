@@ -75,7 +75,7 @@ static const E kRows[] = {
       L"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed "
       L"every time the menu opens.", nullptr },
     { G_VRP, false, L"Turbo mode", L"off", L"dlaa.ini xr_turbo", L"", false, nullptr, nullptr },
-    { G_VRP, false, L"Foveated (VRS)", L"on", L"dlaa.ini vrs", L"<c>0.04</> | -", false,
+    { G_VRP, false, L"Foveated rendering", L"on", L"dlaa.ini vrs", L"<c>0.04</> | -", false,
       L"Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR only. The outer ring is shaded "
       L"once per 2 x 2 pixels; fences, grass and leaves keep full detail. Turn it off if the edge looks blocky.",
       L"CPU 0.04 ms per frame; it saves GPU time in the game's own figure." },
@@ -519,7 +519,7 @@ int main(int argc, char** argv) {
         return g_fail ? 1 : 0;
     }
     MenuShot(g, L"tuning-menu.png", none, L"Mode");
-    MenuShot(g, L"tuning-menu-vr-performance.png", vrp, L"Foveated (VRS)");
+    MenuShot(g, L"tuning-menu-vr-performance.png", vrp, L"Foveated rendering");
     MenuShot(g, L"tuning-menu-picture.png", pic, L"Sharpen strength");
     bool all[G_COUNT]; for (bool& o : all) o = true;
     MenuShot(g, L"tuning-menu-all-open.png", all, L"Mode");                       // phase 46b: every group open

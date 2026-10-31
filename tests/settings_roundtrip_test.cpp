@@ -160,7 +160,7 @@ static int GateCheck(const char* after) {
     if (g_vrMode) {
         expect(!wcscmp(val(MR_TURBO), L"on") == XrTurboEffective(), MR_TURBO, "Turbo mode reads \"on\" exactly when XrTurboEffective()");
         for (int r : { MR_VRSSIZE, MR_VRSPASS, MR_VRSSTR, MR_VRSEYE })
-            expect(grey(r) || g_vrsOn, r, "a Foveated sub-row is not greyed while Foveated (VRS) is off");
+            expect(grey(r) || g_vrsOn, r, "a Foveated sub-row is not greyed while Foveated rendering is off");
     }
     return bad;
 }

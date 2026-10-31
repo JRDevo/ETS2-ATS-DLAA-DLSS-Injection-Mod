@@ -2300,10 +2300,10 @@ XrResult CreateInstanceImpl(int i, const XrInstanceCreateInfo* ci, XrInstance* o
             "available", s_slot[i].module, kVisMaskExt, r);
     }
     const bool egForce = s_egForce.load(std::memory_order_relaxed);
-    if (tryEg && !offEg && !egForce) {                   // phase 59g: asked only for Foveated (VRS): no blind try (no 2nd create)
+    if (tryEg && !offEg && !egForce) {                   // phase 59g: asked only for Foveated rendering: no blind try (no 2nd create)
         s_egExt.store(1, std::memory_order_relaxed);
         Log("Eye tracking: the OpenXR runtime %s does not list %s -- not asked for (eye tracking was off at the start, only "
-            "Foveated (VRS) on: no blind try)", s_slot[i].module, kEyeGazeExt);
+            "Foveated rendering on: no blind try)", s_slot[i].module, kEyeGazeExt);
     } else if (tryEg && !offEg) {
         s_egExt.store(1, std::memory_order_relaxed);
         LogWarn("Eye tracking: the OpenXR runtime %s does not LIST %s (enumerate result %d) -- asked for anyway (phase 59c: with "
