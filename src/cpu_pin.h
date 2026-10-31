@@ -5,7 +5,8 @@
 // and often gets it wrong. This pins the PROCESS affinity to the logical processors of the biggest L3 -- only when the CPU really
 // has L3 caches of DIFFERENT sizes (GetLogicalProcessorInformationEx(RelationCache), no driver / registry). Nothing else is touched:
 // single-CCD X3D, non-X3D, Intel (one shared L3), >1 processor group, an affinity the user / launcher already narrowed to a subset
-// -- all do nothing and say why in the log. Called ONCE from StartInjection (DllMain time: kernel32 only, no loads, no locks).
+// -- all do nothing and say why in the log. Called from StartInjection (DllMain time: kernel32 only, no loads, no locks) and, since
+// phase 87, live from the menu row (Present thread).
 #pragma once
 #include <windows.h>
 #include <vector>
@@ -33,26 +34,21 @@ inline unsigned long long PickMask(const std::vector<L3Entry>& l3, const char** 
     return m;
 }
 
-inline void Apply(int enabled) {
-    if (!enabled) { Log("cpu_cache_pin (phase 32): off (cpu_cache_pin=0) -- process affinity untouched"); return; }
-
+// phase 87: the topology part, once (cached): the V-Cache mask, or 0 + why (also the menu row's grey reason)
+struct Topo { bool read = false; unsigned long long want = 0; const char* why = ""; };
+inline Topo& TopoCache() { static Topo t; return t; }
+inline const Topo& Detect() {
+    Topo& t = TopoCache();
+    if (t.read) return t;
+    t.read = true;
     DWORD len = 0;
     GetLogicalProcessorInformationEx(RelationCache, nullptr, &len);
-    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || len == 0) {
-        LogErr("cpu_cache_pin (phase 32): cache topology not readable (error %lu) -- nothing done", GetLastError());
-        return;
-    }
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || len == 0) { t.why = "cache topology not readable"; return t; }
     std::vector<unsigned char> buf(len);
     if (!GetLogicalProcessorInformationEx(RelationCache, (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)buf.data(), &len)) {
-        LogErr("cpu_cache_pin (phase 32): cache topology not readable (error %lu) -- nothing done", GetLastError());
-        return;
+        t.why = "cache topology not readable"; return t;
     }
-    if (GetActiveProcessorGroupCount() > 1) {
-        Log("cpu_cache_pin (phase 32): %u processor groups -- nothing done (only a single group is handled)",
-            (unsigned)GetActiveProcessorGroupCount());
-        return;
-    }
-
+    if (GetActiveProcessorGroupCount() > 1) { t.why = "more than one processor group (only a single group is handled)"; return t; }
     std::vector<L3Entry> l3;
     for (DWORD off = 0; off < len;) {
         const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX* e = (const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*)(buf.data() + off);
@@ -70,15 +66,39 @@ inline void Apply(int enabled) {
         }
         off += e->Size;
     }
-
     for (const L3Entry& e : l3)
         Log("cpu_cache_pin (phase 32): L3 %lu MB mask 0x%llx (%d logical processors)", (unsigned long)(e.sizeBytes >> 20), e.mask,
             PopCount64(e.mask));
+    t.want = PickMask(l3, &t.why);
+    if (t.want && PopCount64(t.want) < 4) { t.want = 0; t.why = "the V-Cache group has fewer than 4 logical processors"; }
+    return t;
+}
+// a dual-CCD X3D part the pin can act on (the menu row is greyed otherwise)
+inline bool Supported() { return Detect().want != 0; }
 
-    const char* why = "";
-    const unsigned long long want = PickMask(l3, &why);
-    if (!want) { Log("cpu_cache_pin (phase 32): nothing done -- %s", why); return; }
+// the affinity before the pin (restored when it is switched off live); whether the pin is in force now
+struct State { bool applied = false; DWORD_PTR orig = 0; };
+inline State& Live() { static State s; return s; }
+inline bool Applied() { return Live().applied; }
 
+// phase 32, LIVE since phase 87 (the menu's "AMD cache cores (X3D)" row): on = the process affinity narrowed to the biggest L3,
+// off = the affinity from before the pin restored (only if the mod narrowed it). SetProcessAffinityMask is safe at any time: the
+// threads move at their next scheduling. An affinity the user / launcher narrowed already is left alone.
+inline void Apply(int enabled) {
+    State& st = Live();
+    if (!enabled) {
+        if (!st.applied) { Log("cpu_cache_pin (phase 32): off (cpu_cache_pin=0) -- process affinity untouched"); return; }
+        if (SetProcessAffinityMask(GetCurrentProcess(), st.orig))
+            Log("cpu_cache_pin (phase 87): off -- process affinity back to 0x%llx (as before the pin)", (unsigned long long)st.orig);
+        else
+            LogErr("cpu_cache_pin (phase 87): restoring the affinity 0x%llx failed (error %lu)", (unsigned long long)st.orig, GetLastError());
+        st.applied = false;
+        return;
+    }
+    if (st.applied) return;
+    const Topo& t = Detect();
+    if (!t.want) { Log("cpu_cache_pin (phase 32): nothing done -- %s", t.why); return; }
+    const unsigned long long want = t.want;
     DWORD_PTR procMask = 0, sysMask = 0;
     if (!GetProcessAffinityMask(GetCurrentProcess(), &procMask, &sysMask)) {
         LogErr("cpu_cache_pin (phase 32): GetProcessAffinityMask failed (error %lu) -- nothing done", GetLastError());
@@ -90,15 +110,13 @@ inline void Apply(int enabled) {
             want, (unsigned long long)procMask);
         return;
     }
-    if (keep < 4) {
-        Log("cpu_cache_pin (phase 32): nothing done -- the V-Cache mask 0x%llx has only %d logical processors (< 4)", want, keep);
-        return;
-    }
-    if (SetProcessAffinityMask(GetCurrentProcess(), (DWORD_PTR)want))
+    if (SetProcessAffinityMask(GetCurrentProcess(), (DWORD_PTR)want)) {
+        st.applied = true; st.orig = procMask;
         Log("cpu_cache_pin (phase 32): process affinity 0x%llx -> 0x%llx (the biggest L3 only: %d logical processors kept)",
             (unsigned long long)procMask, want, keep);
-    else
+    } else {
         LogErr("cpu_cache_pin (phase 32): SetProcessAffinityMask(0x%llx) failed (error %lu) -- affinity unchanged", want, GetLastError());
+    }
 }
 
 } // namespace CpuPin

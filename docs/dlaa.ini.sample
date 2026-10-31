@@ -101,7 +101,7 @@ log_level = 1
 # 1 (default) = full detail everywhere inside vrs_outer; 0 = also save in the middle ring (2 x 1).
 # vrs_quality = 1
 # What foveated rendering acts on: 0 (default) = the 3D world only; 1 = also the game's lighting pass, outer ring only
-# (more saving; test it first: look for blocky light or shadow edges at the side). The menu's Foveated passes row.
+# (more saving; test it first: look for blocky light or shadow edges at the side). The menu's Foveated: lighting too row.
 # vrs_passes = 0
 # How coarse the outer ring is: 0 (default) = Normal, 1 colour per 2 x 2 pixels; 1 = Strong, per 4 x 2; 2 = Max, per 4 x 4.
 # More GPU saving, blockier edges. Best with eye tracking (vrs_eye), where you never look at the outer ring.
@@ -127,8 +127,8 @@ log_level = 1
 # live and Shift+F12 / the Save row writes it here. If the runtime has no mask the row says "not supported".
 # xr_hidden_mask = 0
 
-# 1 = on AMD X3D CPUs with V-Cache on one half only (e.g. 7950X3D / 9950X3D) the game is kept on the V-Cache cores (read at game
-# start only). Does nothing on other CPUs. 0 (default) = off: no fps gain was measured yet, try it and compare.
+# 1 = on AMD X3D CPUs with V-Cache on one half only (e.g. 7950X3D / 9950X3D) the game is kept on the V-Cache cores. The menu's
+# AMD cache cores (X3D) row switches it live (phase 87; shown only on such a CPU). Does nothing on other CPUs. 0 (default) = off: no fps gain was measured yet, try it and compare.
 # cpu_cache_pin = 0
 
 # CPU TUNING, each 0 / 1, default 0 = off. The tuning menu's CPU tuning row switches the three together, live; Shift+F12 / the Save
@@ -274,13 +274,13 @@ log_level = 1
 # low: 4)
 # mirror_flat_mode = 1
 # v0.10.0 phase 9: with mirror_vr_mode = 2, how many mirror pictures per frame keep their DLAA (1..8, the largest ones)
-# (also mirror_flat_mode = 2). v0.10.2: the tuning menu's Mirror DLAA row sets it (1 mirror = 1, 2 mirrors = 2) together with
+# (also mirror_flat_mode = 2). v0.10.2: the tuning menu's Smooth mirrors row sets it (1 mirror = 1, 2 mirrors = 2) together with
 # mirror_vr_mode / mirror_flat_mode (all = 1, all camera motion only = 4); Shift+F12 / the Save row writes them.
 # mirror_vr_views = 2
 # v0.10.2: the motion of the mirrors that modes 1, 2 and 3 handle (one key for VR and flat): parts = each moving part (traffic,
 # wheels) gets its own motion in the glass (default; about 0.4 ms per mirror in VR), camera = camera motion only, no per-part
 # ids (about 0.15 ms per mirror; moving traffic can ghost in the glass). Mode 4 is always camera motion. The tuning menu's
-# Mirror DLAA row (Left / Right) cycles 7 states:
+# Smooth mirrors row (Left / Right) cycles 7 states:
 #   off -> 1 mirror -> 1 mirror, camera -> 2 mirrors -> 2 mirrors, camera -> all mirrors -> all, camera motion -> off
 #   1 mirror = mode 2, mirror_vr_views 1, parts      1 mirror, camera = mode 2, mirror_vr_views 1, camera
 #   2 mirrors = mode 2, mirror_vr_views 2, parts     2 mirrors, camera = mode 2, mirror_vr_views 2, camera
@@ -291,7 +291,7 @@ log_level = 1
 # between (half of the mirrors per frame, big and small ones split evenly): about half the mirror GPU cost, also at its peak.
 # Edges stay clean; moving things in the glass update at half the frame rate. A reset, a big camera jump or a frame without a
 # run updates a mirror at once. 0 = every mirror every frame (default). mirror_vr_mode / mirror_flat_mode 3 = every mirror in
-# turns whatever this says. The tuning menu's "Mirrors in turns" row switches it live; Shift+F12 / the Save row writes it.
+# turns whatever this says. The tuning menu's "Mirrors take turns (faster)" row switches it live; Shift+F12 / the Save row writes it.
 # mirror_turns = 0
 
 # ---- v0.10.0 phase 8 PERFORMANCE (each one has the fast setting as its default; the other value is the phase-7 behaviour) ----
@@ -467,7 +467,7 @@ log_level = 1
 # see-through (blended) and leave no depth of their own, so they used to move like whatever is behind them (a wire in
 # front of the sky moved like the sky -> trails behind wires in DLSS mode while driving). 1 = those draws are drawn once
 # more, depth only (nothing visible changes), so their pixels move with their own depth; 0 = off. Ctrl+F3 switches it
-# live for an A/B check (Ctrl+F6 view: yellow = pixels that took that depth); the menu's See-through depth row too, and
+# live for an A/B check (Ctrl+F6 view: yellow = pixels that took that depth); the menu's Glass and fence fix row too, and
 # Save writes it (issue #26: before, the row's choice was lost at the next start)
 # v0.9.0 r11: only a depth inside the world range counts (a rain / dirt / glare layer on the windscreen used to make the
 # road and trees behind the glass move like the cabin)
@@ -556,7 +556,7 @@ log_level = 1
 # light cones) are added on top of the picture and have no depth or motion of their own, so DLSS kept them in its history and
 # they left a trail behind them while driving at night. With this on, the mod draws those glows once more into a mask and tells
 # DLSS to take them (and the pixels where they were a frame ago) from the current frame. Lower it (25 % steps) if lamp glows
-# start to flicker. The tuning menu's "Light glow ghosting fix" row (Picture group) changes it live; Shift+F12 / Save writes it.
+# start to flicker. The tuning menu's "Light trail fix" row (Picture group) changes it live; Shift+F12 / Save writes it.
 # dlss_bias_mask = 100
 
 # Phase 82 GAME TAA: the game's own TAA together with the mod. The mod is made for the game's Anti-aliasing set to Disabled
@@ -569,13 +569,13 @@ log_level = 1
 #       top (compare). (The game's TAA alone = DLAA off. A first-build dlaa.ini without game_taa_ver: 2 -> 0, 3 -> 2, logged.)
 # When mix / split cannot run for a frame (e.g. Windows HDR on) the game's TAA picture is shown; the menu's Game TAA row says why.
 # Without a running game TAA (or where the game has none, e.g. VR if SCS TAA does not run there) 1..3 behave as 0. The tuning
-# menu's "Game TAA" / "Game TAA share" rows (Upscaling group) change them live; Shift+F12 / Save writes both.
+# menu's "Game TAA" / "Game TAA amount" rows (Upscaling group) change them live; Shift+F12 / Save writes both.
 # game_taa = 0
 # TAA share of the mix in %, 0..100 (menu: 10 % steps): more = calmer, softer; less = sharper (DLAA / DLSS)
 # game_taa_mix = 50
 # Where the split line is, in % of the width (0..100, menu: 5 % steps; VR: the same % of each eye's picture)
 # game_taa_split = 50
-# What split compares (menu "Split compares", only in split): 0 = DLAA | TAA (default: the mod left, the game's TAA right; DLSS when
+# What split compares (menu "Split: left | right", only in split): 0 = DLAA | TAA (default: the mod left, the game's TAA right; DLSS when
 # upscaling), 1 = Mix | TAA, 2 = DLAA | Mix (Mix = the two blended at game_taa_mix). The labels at the top name each side.
 # game_taa_pair = 0
 # Written by Save with game_taa (the numbering of game_taa above); do not change it by hand

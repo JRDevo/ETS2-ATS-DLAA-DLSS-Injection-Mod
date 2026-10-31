@@ -49,7 +49,7 @@ static const E kRows[] = {
       L"DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's Scaling is below 100 %. "
       L"off = the game's own picture: use it to compare. Saved at once.",
       L"The whole mod costs 0.31 ms CPU + 3.4 ms GPU per frame now; off saves most of it." },
-    { -1, false, L"Performance profile", L"high", L"Alt+F9", L"", false, nullptr, nullptr },
+    { -1, false, L"Quality preset", L"high", L"Alt+F9", L"", false, nullptr, nullptr },
     { -1, false, L"DLAA model", L"2 (E)", L"Shift+F1 .. Shift+F4", L"<c>0.12</> | <g>1.2</>", false, nullptr, nullptr },
     { G_PIC, true, L"Picture", L"", L"", L"", false,
       L"Picture quality: sharpening, texture sharpness, the DLAA area and the see-through depth. Right opens the group, Left closes "
@@ -58,18 +58,19 @@ static const E kRows[] = {
       L"Sharpens the picture after DLAA, 0 (off) to 1.0. Raise it if the picture looks soft; too high gives bright halos on edges. "
       L"Costs about 0.1 ms; 0 skips the pass.",
       L"Costs 0.12 GPU per frame now; 0 saves it." },
-    { G_PIC, false, L"Sharpen width", L"1.5 px", L"Shift+F9 / Shift+F10", L"- | <g>0.12</>", false, nullptr, nullptr },
+    { G_PIC, false, L"Sharpness size", L"1.5 px", L"Shift+F9 / Shift+F10", L"- | <g>0.12</>", false, nullptr, nullptr },
     { G_PIC, false, L"Texture sharpness", L"-0.50", L"Ctrl+F1 / Ctrl+F2", L"<c>0.02</> | -", false, nullptr, nullptr },
-    { G_PIC, false, L"Cut-out texture sharpness", L"same (-0.50)", L"Ctrl+Shift+F1 / Ctrl+Shift+F2", L"<c>0.02</> | -", false, nullptr, nullptr },
-    { G_PIC, false, L"See-through depth", L"on", L"Ctrl+F3", L"<c>0.05</> | <g>0.52</>", false, nullptr, nullptr },
-    { G_PIC, false, L"Light glow ghosting fix", L"100 %", L"dlaa.ini dlss_bias_mask", L"", false, nullptr, nullptr },   // phase 49
+    { G_PIC, false, L"Leaves and fences sharpness", L"same (-0.50)", L"Ctrl+Shift+F1 / Ctrl+Shift+F2", L"<c>0.02</> | -", false, nullptr, nullptr },
+    { G_PIC, false, L"Glass and fence fix", L"on", L"Ctrl+F3", L"<c>0.05</> | <g>0.52</>", false, nullptr, nullptr },
+    { G_PIC, false, L"Light trail fix", L"100 %", L"dlaa.ini dlss_bias_mask", L"", false, nullptr, nullptr },   // phase 49
     { G_PIC, false, L"DLAA area", L"40 %", L"Shift+F5 / Shift+F6", L"<c>0.12</> | <g>1.2</>", false, nullptr, nullptr },
     { G_MOT, true, L"Motion and mirrors", L"", L"", L"", false, nullptr, nullptr },
-    { G_MOT, false, L"Per-part motion vectors", L"on", L"Alt+F5", L"<c>0.18</> | <g>0.70</>", false, nullptr, nullptr },
-    { G_MOT, false, L"Mirror DLAA", L"2 mirrors (largest)", L"Alt+F6", L"<c>0.08</> | <g>0.34</>", false, nullptr, nullptr },
-    { G_MOT, false, L"Mirrors in turns", L"on", L"dlaa.ini mirror_turns", L"<c>0.08</> | <g>0.34</>", false, nullptr, nullptr },
+    { G_MOT, false, L"Track moving parts", L"on", L"Alt+F5", L"<c>0.18</> | <g>0.70</>", false, nullptr, nullptr },
+    { G_MOT, false, L"Smooth mirrors", L"2 mirrors (largest)", L"Alt+F6", L"<c>0.08</> | <g>0.34</>", false, nullptr, nullptr },
+    { G_MOT, false, L"Mirrors take turns (faster)", L"on", L"dlaa.ini mirror_turns", L"<c>0.08</> | <g>0.34</>", false, nullptr, nullptr },
     { G_FR, true, L"Frame rate", L"", L"", L"", false, nullptr, nullptr },
     { G_FR, false, L"CPU tuning", L"off", L"dlaa.ini cpu_pcore / cpu_priority / cpu_no_throttle", L"", false, nullptr, nullptr },   // phase 54
+    { G_FR, false, L"AMD cache cores (X3D)", L"off", L"dlaa.ini cpu_cache_pin", L"", true, nullptr, nullptr },   // phase 87
     { G_FR, false, L"FPS cap", L"off", L"dlaa.ini vr_fps_cap", L"", false, nullptr, nullptr },
     { G_VRP, true, L"Performance", L"", L"", L"", false,
       L"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left closes it; it starts closed "
@@ -80,10 +81,10 @@ static const E kRows[] = {
       L"once per 2 x 2 pixels; fences, grass and leaves keep full detail. Turn it off if the edge looks blocky.",
       L"CPU 0.04 ms per frame; it saves GPU time in the game's own figure." },
     { G_VRP, false, L"Foveated size", L"80 % (balanced)", L"dlaa.ini vrs_inner / vrs_outer", L"<c>0.04</> | -", false, nullptr, nullptr },
-    { G_VRP, false, L"Foveated passes", L"scene", L"dlaa.ini vrs_passes", L"<c>0.04</> | -", false, nullptr, nullptr },
+    { G_VRP, false, L"Foveated: lighting too", L"scene", L"dlaa.ini vrs_passes", L"<c>0.04</> | -", false, nullptr, nullptr },
     { G_VRP, false, L"Foveated strength", L"Normal (2 x 2)", L"dlaa.ini vrs_strength", L"<c>0.04</> | -", false, nullptr, nullptr },   // phase 59f
     { G_VRP, false, L"Foveated eye tracking", L"off", L"dlaa.ini vrs_eye", L"<c>0.04</> | -", false, nullptr, nullptr },   // phase 59
-    { G_VRP, false, L"Hidden area mask", L"on", L"dlaa.ini xr_hidden_mask", L"<c>0.02</> | -", false, nullptr, nullptr },
+    { G_VRP, false, L"Skip hidden edges", L"on", L"dlaa.ini xr_hidden_mask", L"<c>0.02</> | -", false, nullptr, nullptr },
     { G_VRP, false, L"OFXR Bridge (VR frame gen)", L"not found", L"dlaa.ini ofxr_bridge", L"", false, nullptr, nullptr },
     { G_VRP, false, L"VectorXR (VR layer)", L"not found", L"dlaa.ini vectorxr", L"", false, nullptr, nullptr },   // phase 56
     { G_UI, true, L"In-game UI", L"", L"", L"", false, nullptr, nullptr },
@@ -122,13 +123,13 @@ static const E kRows[] = {
     { G_CMP, true, L"Compare and test", L"", L"", L"", false, nullptr, nullptr },
     { G_CMP, false, L"DLAA off to compare (not saved)", L"on", L"Shift+F11", L"", false, nullptr, nullptr },
     { G_CMP, false, L"Game TAA", L"off", L"dlaa.ini game_taa", L"", false, nullptr, nullptr },
-    { G_CMP, false, L"Game TAA share", L"50 %", L"dlaa.ini game_taa_mix", L"", true, nullptr, nullptr },
-    { G_CMP, false, L"Split position", L"50 %", L"dlaa.ini game_taa_split", L"", true, nullptr, nullptr },
-    { G_CMP, false, L"Split compares", L"DLAA | TAA", L"dlaa.ini game_taa_pair", L"", true, nullptr, nullptr },
-    { G_CMP, false, L"Thin-wire motion", L"on", L"Alt+F10", L"", false, nullptr, nullptr },          // phase 69
-    { G_CMP, false, L"Thin-wire depth", L"on", L"Alt+F11", L"", false, nullptr, nullptr },
-    { G_CMP, false, L"Thin-wire widening", L"off", L"Alt+F12", L"", false, nullptr, nullptr },
-    { -1, false, L"Logging", L"errors", L"dlaa.ini log_level", L"<c>0.01</> | -", false, nullptr, nullptr },
+    { G_CMP, false, L"Game TAA amount", L"50 %", L"dlaa.ini game_taa_mix", L"", true, nullptr, nullptr },
+    { G_CMP, false, L"Split line position", L"50 %", L"dlaa.ini game_taa_split", L"", true, nullptr, nullptr },
+    { G_CMP, false, L"Split: left | right", L"DLAA | TAA", L"dlaa.ini game_taa_pair", L"", true, nullptr, nullptr },
+    { G_CMP, false, L"Wire fix: motion", L"on", L"Alt+F10", L"", false, nullptr, nullptr },          // phase 69
+    { G_CMP, false, L"Wire fix: depth", L"on", L"Alt+F11", L"", false, nullptr, nullptr },
+    { G_CMP, false, L"Thicker wires (test)", L"off", L"Alt+F12", L"", false, nullptr, nullptr },
+    { -1, false, L"Log detail", L"errors", L"dlaa.ini log_level", L"<c>0.01</> | -", false, nullptr, nullptr },
     { -1, false, L"Language", L"auto (English)", L"dlaa.ini language", L"", false, nullptr, nullptr },   // phase 74
     { -1, false, L"Hotkeys...", L"32 actions", L"Right: open", L"", false, nullptr, nullptr },   // v0.13.0 phase 50
     { -1, false, L"Save to dlaa.ini", L"-", L"Shift+F12", L"", false, nullptr, nullptr },
@@ -179,6 +180,7 @@ static void BuildPanel(TuningMenu::Panel& p, const bool open[G_COUNT], const wch
     for (int i = 0; i < kNRows; ++i) {
         const E& e = kRows[i];
         if (e.grp >= 0 && !e.hdr && !open[e.grp]) continue;       // a collapsed group's children are not in the panel
+        if (e.greyed) continue;                                   // phase 87: a row that cannot act now is hidden, not greyed
         TuningMenu::Row& r = p.rows[nv];
         if (e.hdr)          swprintf(r.name, 64, L"%lc %ls", open[e.grp] ? (wchar_t)0x25BC : (wchar_t)0x25BA, T(e.name));   // as MenuBuildPanel
         else if (e.grp >= 0) swprintf(r.name, 64, L"    %ls", T(e.name));                                         // (phase 46b)
@@ -187,7 +189,7 @@ static void BuildPanel(TuningMenu::Panel& p, const bool open[G_COUNT], const wch
         r.greyed = e.greyed ? 1 : 0;
         if (e.hdr) {
             int n = 0;
-            for (int j = 0; j < kNRows; ++j) if (kRows[j].grp == e.grp && !kRows[j].hdr) ++n;
+            for (int j = 0; j < kNRows; ++j) if (kRows[j].grp == e.grp && !kRows[j].hdr && !kRows[j].greyed) ++n;
             if (open[e.grp]) wcsncpy_s(r.value, T(L"open"), _TRUNCATE); else swprintf(r.value, 96, g_lang ? Lang::TrF(L"closed (%d)") : L"closed (%d)", n);
             swprintf(r.keys, 96, L"%ls: %ls", open[e.grp] ? L"Left" : L"Right", open[e.grp] ? T(L"close") : T(L"open"));
         } else {
@@ -378,7 +380,7 @@ static void MenuShot(Gpu& g, const wchar_t* file, const bool open[G_COUNT], cons
 static void HotkeysShot(Gpu& g, const wchar_t* file) {
     struct L { const wchar_t* name; const wchar_t* kb; const wchar_t* pad; };
     static const L kL[] = {
-        { L"Mode (DLAA / DLSS / off)", L"End", L"-" }, { L"Performance profile", L"Alt+F9", L"-" },
+        { L"Mode (DLAA / DLSS / off)", L"End", L"-" }, { L"Quality preset", L"Alt+F9", L"-" },
         { L"DLAA model 1 (K)", L"Shift+F1", L"-" }, { L"DLAA model 2 (E)", L"Shift+F2", L"-" },
         { L"DLAA model 3 (F)", L"Shift+F3", L"-" }, { L"DLAA model 4 (M)", L"Shift+F4", L"-" },
         { L"Sharpen strength -", L"Shift+F7", L"Wheel7" }, { L"Sharpen strength +", L"Shift+F8", L"Wheel8" },
@@ -386,9 +388,9 @@ static void HotkeysShot(Gpu& g, const wchar_t* file) {
         { L"Texture sharpness -", L"Ctrl+F1", L"-" }, { L"Texture sharpness +", L"Ctrl+F2", L"-" },
         { L"Cut-out sharpness -", L"Ctrl+Shift+F1", L"-" }, { L"Cut-out sharpness +", L"Ctrl+Shift+F2", L"-" },
         { L"DLAA area (VR) -", L"Shift+F5", L"-" }, { L"DLAA area (VR) +", L"Shift+F6", L"-" },
-        { L"Per-part motion vectors", L"Alt+F5", L"-" }, { L"Mirror DLAA on / off", L"Alt+F6", L"-" },
-        { L"DLAA before tonemap (flat)", L"Alt+F7", L"-" }, { L"See-through depth", L"Ctrl+F3", L"-" },
-        { L"Thin-wire motion (DLAA)", L"Alt+F10", L"-" }, { L"Thin-wire depth", L"Alt+F11", L"-" }, { L"Thin-wire widening", L"Alt+F12", L"-" },
+        { L"Track moving parts", L"Alt+F5", L"-" }, { L"Mirror DLAA on / off", L"Alt+F6", L"-" },
+        { L"DLAA before tonemap (flat)", L"Alt+F7", L"-" }, { L"Glass and fence fix", L"Ctrl+F3", L"-" },
+        { L"Thin-wire motion (DLAA)", L"Alt+F10", L"-" }, { L"Wire fix: depth", L"Alt+F11", L"-" }, { L"Thicker wires (test)", L"Alt+F12", L"-" },
         { L"DLSS upscale", L"Ctrl+F4", L"-" }, { L"DLAA on / off", L"Shift+F11", L"-" },
         { L"Shimmer capture", L"Insert", L"-" }, { L"Save to dlaa.ini", L"Shift+F12", L"-" },
         { L"Menu: open / close", L"Delete", L"Wheel10" }, { L"Menu: up", L"Up", L"WheelUp" }, { L"Menu: down", L"Down", L"WheelDown" },

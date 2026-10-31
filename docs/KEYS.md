@@ -72,9 +72,14 @@ menu and the garage / truck dealer screens, before a save is loaded).
 - **Every row names its hotkey**, so you can learn the keys from the menu. The hotkeys keep working while the menu is
   open, and the menu shows their changes at once. Each change logs and beeps like its key.
 - The selected row shows a description under the list, in plain words: what the row does, when you would change it, and
-  what it costs or saves (the measured figure is added while the GPU timers run). A greyed row does not apply to the
-  current mode and says why (`DLAA area`, `Panel depth` and `Panel faces you` are VR only; `DLAA before tonemap` is flat
-  only; `OFXR Bridge` is greyed when `ofxr_bridge = 0`, `VectorXR (VR layer)` when `vectorxr = 0`); it stays in the list. The **Performance profile** description
+  what it costs or saves (the measured figure is added while the GPU timers run). Phase 87: there are no greyed rows -- a row
+  that cannot do anything in your setup right now is HIDDEN (the other mode's rows; `AMD cache cores (X3D)` without a two-group
+  X3D CPU; `Low delay (Reflex)` without support; the Foveated rows without VRS, their sub-rows while Foveated rendering is off;
+  `Sharpness size` at Sharpen strength 0; `Leaves and fences sharpness` at Texture sharpness 0; `Mirrors take turns` with the
+  mirrors off; the Game TAA amount / split rows when the mode does not use them; `Panel lock` without the VR layer; the DLAA
+  quality rows while the main scene runs no DLAA; `OFXR Bridge` / `VectorXR` when not present; the `In-game UI` group while the
+  game's console is off -- set `g_developer "1"` and `g_console "1"` in the game's config.cfg with the game closed).
+  `dlaa.ini menu_show_all = 1` shows everything, greyed as before. The **Quality preset** description
   lists what `medium` and `low` change; **Save to dlaa.ini** says what it writes.
 - **Panel position X / Y, Panel size** move and size the panel (repeat makes it fast); flat and VR each keep their own
   values. **Panel depth** (VR only) shifts the panel inward per eye so it sits nearer than infinity: raise it if the
@@ -104,7 +109,7 @@ menu and the garage / truck dealer screens, before a save is loaded).
   `Fixed in cab` = it stays at one spot in the cab, 0.8 m from your seat position, like a cab instrument (`fps_vr_lock` in
   `dlaa.ini`). While fixed, **FPS counter X / Y** turn it around you in degrees (X + = right, Y + = down) and **FPS counter
   size** is its size at 0.8 m. It follows the headset again by itself while the game's VR view poses are not available.
-- **Mirror DLAA** (v0.10.2) has seven states, `Left` / `Right` step through them (wrapping around): `off` -> `1 mirror
+- **Smooth mirrors** (v0.10.2) has seven states, `Left` / `Right` step through them (wrapping around): `off` -> `1 mirror
   (largest)` -> `1 mirror, camera` -> `2 mirrors (largest)` -> `2 mirrors, camera` -> `all mirrors` -> `all, camera
   motion`. `1 mirror` keeps DLAA only on the largest mirror picture (the main mirror next to you), `2 mirrors` on the two
   largest, `all` on every mirror. Without `camera` each moving part (traffic, wheels) moves exactly in the glass (about
@@ -118,9 +123,9 @@ menu and the garage / truck dealer screens, before a save is loaded).
   with the state it had; a `dlaa.ini` / profile value that is none of the seven shows as it is (`3 largest`, `3 largest,
   camera`, `all, every 2nd frame`, `all, 2nd fr., camera`, `off (mode 0)`) and `Left` / `Right` go to the nearest state on
   that side.
-- **Mirrors in turns** (phase 41, `mirror_turns`, off by default): `Left` / `Right` switch it. On, each mirror gets its DLAA
-  every 2nd frame and shows its last clean picture in between: about half the mirror cost. Works with every Mirror DLAA
-  state; greyed while Mirror DLAA is off, and shows `on (mode 3)` with a `dlaa.ini` mirror mode 3 (already in turns).
+- **Mirrors take turns (faster)** (phase 41, `mirror_turns`, off by default): `Left` / `Right` switch it. On, each mirror gets its DLAA
+  every 2nd frame and shows its last clean picture in between: about half the mirror cost. Works with every Smooth mirrors
+  state; greyed while Smooth mirrors is off, and shows `on (mode 3)` with a `dlaa.ini` mirror mode 3 (already in turns).
   Beeps: high = on, low = off. `Shift+F12` / the Save row writes it, the Reset row removes it.
 - **Save to dlaa.ini** (or `Shift+F12`) writes the live values, and the panel position once you changed it
   (`menu_x`, `menu_y`, `menu_scale`, `menu_vr_x`, `menu_vr_y`, `menu_vr_scale`, `menu_vr_depth`, `menu_vr_dist`, `menu_vr_face`) and the fps box once you
@@ -146,9 +151,9 @@ menu and the garage / truck dealer screens, before a save is loaded).
 
 (v0.13.0; GitHub issue #16) Instead of editing `dlaa.ini`, open the menu, select **`Hotkeys...`** (near the bottom, above
 `Save to dlaa.ini`) and press `Right`. The panel shows the **Hotkeys page**: `< Back` first, then one line per action --
-`Mode`, `Performance profile`, `DLAA model 1` .. `4`, `Sharpen strength -` / `+`, `Sharpen width -` / `+`,
-`Texture sharpness -` / `+`, `Cut-out sharpness -` / `+`, `DLAA area (VR) -` / `+`, `Per-part motion vectors`,
-`Mirror DLAA on / off`, `DLAA before tonemap`, `See-through depth`, `DLSS upscale`, `DLAA on / off`,
+`Mode`, `Quality preset`, `DLAA model 1` .. `4`, `Sharpen strength -` / `+`, `Sharpen width -` / `+`,
+`Texture sharpness -` / `+`, `Cut-out sharpness -` / `+`, `DLAA area (VR) -` / `+`, `Track moving parts`,
+`Mirror DLAA on / off`, `Run DLAA earlier (test)`, `Glass and fence fix`, `DLSS upscale`, `DLAA on / off`,
 `Save to dlaa.ini` and the five menu keys (`Menu: open / close`, `up`, `down`, `left`, `right`). The `Keyboard` column
 shows the key, the `Controller` column the wheel / gamepad button or D-pad direction (`-` = none). `Up` / `Down` select a
 line; `Left` (or `Right` on `< Back`) goes back to the main menu; the open key closes the menu as everywhere.
@@ -216,7 +221,7 @@ Model select is direct: pressing the model that is already active just re-beeps 
 `Alt+F7` state) and `perf_profile` (the `Alt+F9` state) and leaves every other line of `dlaa.ini` untouched.
 v0.10.0: `dlss_preset`, `dlaa_area` and `mirror_dlaa` are only written when you set them yourself (in `dlaa.ini` or with
 their own key) -- a value that only comes from the performance profile is not written, so the next profile still moves it.
-v0.10.2: the same for `mirror_vr_mode` / `mirror_flat_mode` (set in `dlaa.ini` or with the menu's Mirror DLAA row);
+v0.10.2: the same for `mirror_vr_mode` / `mirror_flat_mode` (set in `dlaa.ini` or with the menu's Smooth mirrors row);
 `mirror_vr_views` is written with `mirror_vr_mode`, and with `mirror_flat_mode` when that is `2`; `mirror_mv` (`parts` /
 `camera`) is written with either mode. The menu's Reset row removes all four.
 

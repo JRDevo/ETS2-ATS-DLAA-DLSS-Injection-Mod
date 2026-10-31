@@ -2610,7 +2610,34 @@ non-blocking readback timing -- so it is judged by the check totals and a verify
 - **Tests:** vr_ui_test `TestRaa` (row -> command or nothing, console off -> nothing, unchanged -> nothing, config.cfg parse);
   settings round-trip: a Game TAA row change requests r_aa, Save writes `game_taa` but never `r_aa`.
 
-### The RenderDoc oracle (done in v0.2)
+### Phase 87: plain-language menu, AMD cache cores row, no greyed rows
+
+- **Row titles** (text only, dlaa.ini keys unchanged): Quality preset, Sharpness size, Leaves and fences sharpness, Track moving
+  parts, Smooth mirrors, Mirrors take turns (faster), Glass and fence fix, Light trail fix, Wire fix: motion / depth, Thicker wires
+  (test), Run DLAA earlier (test), Game TAA amount, Split line position, Split: left | right, Foveated: lighting too, Skip hidden
+  edges, Low delay (Reflex), Log detail. `kMenuDesc` help lines rewritten without jargon (history, motion vectors, tonemap,
+  reprojection, GPU queue ...). Not renamed: the Hotkeys page's action labels and feature_check.py's report labels (they match log
+  lines / name features, not rows). Strings English only (template.pot), per the translate-before-release rule.
+- **CPU tuning** help line says which part works where: prefer fast cores = Intel P-core / E-core CPUs only; priority + no Windows
+  power saving = every CPU.
+- **AMD cache cores (X3D)** (`MR_CPUPIN`, Frame rate group after CPU tuning, both modes): `cpu_cache_pin` LIVE. `cpu_pin.h`:
+  `Detect()` (topology once, cached: the V-Cache mask or why not; < 4 logical processors = not supported), `Supported()`,
+  `Apply(on)` narrows the process affinity to the biggest L3 and remembers the one before; `Apply(off)` restores it (only if the
+  mod narrowed it). SetProcessAffinityMask is safe at any time (threads move at their next scheduling). Startup still calls Apply
+  before `CpuTuning::Start`, so cpu_pcore still defers to a narrowed affinity; a LIVE pin after start does not re-run cpu_pcore's
+  decision, which only matters on a CPU with two efficiency classes -- an X3D part reports one. Saved once explicit
+  (`g_cpuPinExplicit`, also set by LoadConfig), Reset removes it and restores the affinity. settings_check: Save 73 keys, Reset 74.
+  kMaxRows 88 vs 80 rows; the VR overlay image size cap (287b6f3) depends on kMaxRows, unchanged.
+- **No greyed rows** (user amendment): `g_menuHide[]` = the panel's grey flags at the end of each MenuBuildPanel (unless
+  `menu_show_all`); `MenuRowForMode` returns false for a hidden row, so the group header hiding, the selection step, "closed (N)"
+  and the compaction all follow (a hidden header also hides its rows). The rules read settings / slow state (the DLAA quality rows
+  use MainDlaaRuns' 30-Present hold), so rows do not pop per frame; the state lags one panel build. OFXR / VectorXR rows now count
+  as greyed when not present. Kept visible on purpose: `Panel depth` and `Panel faces you` (both also work on the in-picture
+  fallback without the VR layer); only `Panel lock` needs the layer. Hidden rows are still saved / loaded (by globals).
+- **Tests:** settings round-trip `MenuRules`: no greyed row is shown, every row greyed with show-all is hidden without it, "closed
+  (N)" = the shown rows, a row hidden by its rule while selected moves the selection (Sharpen strength 0), the console-off In-game UI
+  group is hidden; gates for the new row (value = cpu_cache_pin, grey = !Supported). menu_shot leaves greyed table rows out.
+
 
 Capture a frame of the unmodified game to learn empirically: which pass writes
 the final HDR color, where the depth buffer is, and where the scene is blitted to

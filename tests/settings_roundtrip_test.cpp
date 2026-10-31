@@ -116,40 +116,43 @@ static int GateCheck(const char* after) {
     const bool fwd = g_fwdCfg && g_fwdOn.load();       // the forward-depth batch's switches (FwdLive / FwdOnDraw)
     const char* pre = PreIneligible();                 // the pre-tonemap stage decision (its mode reasons the user switches)
     const bool preUser = !(pre && (!strcmp(pre, "dlaa_pre_tonemap = 0") || !strncmp(pre, "pre-tonemap switched off", 24)));
-    expect(on(MR_FWD) == fwd, MR_FWD, "See-through depth: the menu and g_fwdCfg && g_fwdOn disagree");
-    expect(on(MR_PRETM) == preUser, MR_PRETM, "DLAA before tonemap: the menu and PreIneligible() disagree");
+    expect(on(MR_FWD) == fwd, MR_FWD, "Glass and fence fix: the menu and g_fwdCfg && g_fwdOn disagree");
+    expect(on(MR_PRETM) == preUser, MR_PRETM, "Run DLAA earlier (test): the menu and PreIneligible() disagree");
     expect(!(on(MR_WIREDEPTH) && !grey(MR_WIREDEPTH)) || (fwd && g_fwdConsOn.load() >= 1), MR_WIREDEPTH,
-           "Thin-wire depth reads on, but the forward-depth replay does not run it (See-through depth off)");
-    expect(on(MR_WIREDEPTH) == (g_fwdConsOn.load() >= 1), MR_WIREDEPTH, "Thin-wire depth: the menu and g_fwdConsOn disagree");
-    expect(on(MR_WIREWIDEN) == (g_wireCfg && g_wireOn.load()), MR_WIREWIDEN, "Thin-wire widening: the menu and WireOnDraw's switch disagree");
-    expect(on(MR_WIREMV) == DlaaProcessor::MvDilate(), MR_WIREMV, "Thin-wire motion: the menu and the NGX dilation flag disagree");
-    expect(on(MR_DRAWIDS) == (g_objMode == 2 && g_didCfg), MR_DRAWIDS, "Per-part motion vectors: the menu and g_didCfg disagree");
+           "Wire fix: depth reads on, but the forward-depth replay does not run it (See-through depth off)");
+    expect(on(MR_WIREDEPTH) == (g_fwdConsOn.load() >= 1), MR_WIREDEPTH, "Wire fix: depth: the menu and g_fwdConsOn disagree");
+    expect(on(MR_WIREWIDEN) == (g_wireCfg && g_wireOn.load()), MR_WIREWIDEN, "Thicker wires (test): the menu and WireOnDraw's switch disagree");
+    expect(on(MR_WIREMV) == DlaaProcessor::MvDilate(), MR_WIREMV, "Wire fix: motion: the menu and the NGX dilation flag disagree");
+    expect(on(MR_DRAWIDS) == (g_objMode == 2 && g_didCfg), MR_DRAWIDS, "Track moving parts: the menu and g_didCfg disagree");
     expect(grey(MR_WIDTH) == (SceneDlaa::Sharpness() <= 0.0f || !MainDlaaRuns()), MR_WIDTH,
-           "Sharpen width is live only while Sharpen strength > 0 and the main scene runs DLAA");
-    expect(grey(MR_LODCUT) == (g_lodBias == 0.0f), MR_LODCUT, "Cut-out texture sharpness is live only while Texture sharpness is on");
-    expect(off(MR_MIRROR) == !(g_mirOn.load() && MirMode() != 0), MR_MIRROR, "Mirror DLAA: the menu and g_mirOn / MirMode() disagree");
+           "Sharpness size is live only while Sharpen strength > 0 and the main scene runs DLAA");
+    expect(grey(MR_LODCUT) == (g_lodBias == 0.0f), MR_LODCUT, "Leaves and fences sharpness is live only while Texture sharpness is on");
+    expect(off(MR_MIRROR) == !(g_mirOn.load() && MirMode() != 0), MR_MIRROR, "Smooth mirrors: the menu and g_mirOn / MirMode() disagree");
     expect(grey(MR_MIRTURNS) || (g_mirOn.load() && MirMode() != 0 && MirMode() != 3), MR_MIRTURNS,
-           "Mirrors in turns is not greyed, but mirror DLAA does not take turns (off / mode 3)");
+           "Mirrors take turns (faster) is not greyed, but mirror DLAA does not take turns (off / mode 3)");
     expect(off(MR_BIAS) == (SceneDlaa::BiasStrength() == 0) && g_biasCfg == SceneDlaa::BiasStrength(), MR_BIAS,
-           "Light glow ghosting fix: the menu and SceneDlaa's bias strength disagree");
+           "Light trail fix: the menu and SceneDlaa's bias strength disagree");
     expect(off(MR_MODE) == !g_dlaaOn.load() && on(MR_DLAA) == g_dlaaOn.load(), MR_MODE, "Mode / DLAA on-off and g_dlaaOn disagree");
     {   // phase 82: the Game TAA row names the mode the render code reads (g_gameTaa); its share row is live only in mode mix
         static const wchar_t* const kTaa[GameTaa::kModeCount] = { L"off", L"mix", L"split" };
         expect(!wcscmp(val(MR_GAMETAA), kTaa[GameTaa::ClampMode(g_gameTaa)]) && g_gameTaa == GameTaa::ClampMode(g_gameTaa), MR_GAMETAA,
                "Game TAA: the menu and g_gameTaa disagree");
         expect(grey(MR_TAAMIX) == !GameTaa::ShareUsed(g_gameTaa, g_gameTaaPair), MR_TAAMIX,
-               "Game TAA share is live exactly in mode mix and in split with a Mix side");
+               "Game TAA amount is live exactly in mode mix and in split with a Mix side");
         static const wchar_t* const kPair[GameTaa::kPairCount] = { L"DLAA | TAA", L"Mix | TAA", L"DLAA | Mix" };
         expect(!wcscmp(val(MR_TAAPAIR), kPair[GameTaa::ClampPair(g_gameTaaPair)]) && grey(MR_TAAPAIR) == (g_gameTaa != GameTaa::kSplit),
-               MR_TAAPAIR, "Split compares: the menu and g_gameTaaPair disagree, or not greyed exactly outside split");
+               MR_TAAPAIR, "Split: left | right: the menu and g_gameTaaPair disagree, or not greyed exactly outside split");
         wchar_t pct[16];
         swprintf(pct, 16, L"%d %%", g_gameTaaMix);
         expect(!wcscmp(val(MR_TAAMIX), pct) && g_gameTaaMix % GameTaa::kMixStep == 0, MR_TAAMIX,
-               "Game TAA share: the menu and g_gameTaaMix disagree (or off the 10 % grid after a press)");
-        expect(grey(MR_TAASPLIT) == (g_gameTaa != GameTaa::kSplit), MR_TAASPLIT, "Split position is live exactly in mode split");
+               "Game TAA amount: the menu and g_gameTaaMix disagree (or off the 10 % grid after a press)");
+        // phase 87: the AMD cache cores row names cpu_cache_pin and is greyed exactly on a CPU the pin cannot act on
+        expect(!wcscmp(val(MR_CPUPIN), g_cpuCachePin ? L"on (auto)" : L"off") && grey(MR_CPUPIN) == !CpuPin::Supported(), MR_CPUPIN,
+               "AMD cache cores: the menu and cpu_cache_pin / CpuPin::Supported() disagree");
+        expect(grey(MR_TAASPLIT) == (g_gameTaa != GameTaa::kSplit), MR_TAASPLIT, "Split line position is live exactly in mode split");
         swprintf(pct, 16, L"%d %%", g_gameTaaSplit);
         expect(!wcscmp(val(MR_TAASPLIT), pct) && g_gameTaaSplit % GameTaa::kSplitStep == 0, MR_TAASPLIT,
-               "Split position: the menu and g_gameTaaSplit disagree (or off the 5 % grid after a press)");
+               "Split line position: the menu and g_gameTaaSplit disagree (or off the 5 % grid after a press)");
         // phase 83: the In-game UI (VR) rows are live exactly in VR with the game's console on (config.cfg)
         for (int r = MR_UISET; r <= MR_UIRESET; ++r)
             expect(grey(r) == !(g_vrMode && g_vrUiConsole), r, "an In-game UI (VR) row is live exactly in VR with the game's console on");
@@ -178,55 +181,87 @@ static void MenuRules() {
     g_menuShowAll = false;
     for (int vr = 0; vr <= 1; ++vr) {
         g_vrMode = vr != 0;
-        // "closed (N)" counts only the rows this mode shows (Frame rate: flat CPU / FPS cap / Reflex = 3, VR CPU / FPS cap = 2)
+        // "closed (N)" counts only the rows shown now (this mode, phase 87: not hidden by their rule; the hide state comes from
+        // the previous build, so the panel is built twice)
         for (bool& o : g_menuGrpOpen) o = false;
         g_menuSel = MR_MODE;
         MenuBuildPanel(s_panel);
+        MenuBuildPanel(s_panel);
+        int nFr = 0;
+        for (int r = MR_FRGRP + 1; r <= MR_VRFPSCAP; ++r) if (MenuRowForMode(r)) ++nFr;
+        wchar_t want[32];
+        swprintf(want, 32, L"closed (%d)", nFr);
         const TuningMenu::Row* fr = FindRow(L"Frame rate");
-        CHECK(fr && !wcscmp(fr->value, vr ? L"closed (2)" : L"closed (3)"), "%s: Frame rate reads \"%ls\" (only this mode's rows "
-              "counted)", vr ? "VR" : "flat", fr ? fr->value : L"(not shown)");
+        CHECK(fr && !wcscmp(fr->value, want) && nFr >= 2, "%s: Frame rate reads \"%ls\", want \"%ls\" (only the shown rows "
+              "counted)", vr ? "VR" : "flat", fr ? fr->value : L"(not shown)", want);
         // the mode label in the title, no mode words in the shown row / group titles
         CHECK(wcsstr(s_panel.title, vr ? L"VR settings" : L"Flat settings") != nullptr, "%s: the title names the mode: \"%ls\"",
               vr ? "VR" : "flat", s_panel.title);
         for (bool& o : g_menuGrpOpen) o = true;
+        MenuBuildPanel(s_panel);
         MenuBuildPanel(s_panel);
         for (int i = 0; i < s_panel.nRows; ++i) {
             const wchar_t* n = s_panel.rows[i].name;
             const bool word = wcsstr(n, L"(VR)") || wcsstr(n, L"(flat)") || wcsstr(n, L"VR performance") || wcsstr(n, L"VR FPS") ||
                               wcsstr(n, L"Panel VR");
             CHECK(!word, "%s: row \"%ls\" still carries a mode word (the title says the mode)", vr ? "VR" : "flat", n);
+            CHECK(!s_panel.rows[i].greyed, "%s: row \"%ls\" is shown GREYED (phase 87: such a row is hidden)", vr ? "VR" : "flat", n);
         }
-        CHECK(FindRow(vr ? L"Turbo mode" : L"Reflex") && FindRow(L"FPS cap"), "%s: the renamed rows are shown", vr ? "VR" : "flat");
+        CHECK(FindRow(vr ? L"Turbo mode" : L"Quality preset") && FindRow(L"FPS cap"), "%s: the renamed rows are shown", vr ? "VR" : "flat");
+        // phase 87: every row greyed with menu_show_all is hidden without it (and the others are shown, if their group is)
+        g_menuShowAll = true;
+        MenuBuildPanel(s_panel);
+        bool greyAll[MR_COUNT];
+        for (int r = 0; r < MR_COUNT; ++r) greyAll[r] = s_panel.rows[r].greyed != 0;
+        g_menuShowAll = false;
+        MenuBuildPanel(s_panel);
+        MenuBuildPanel(s_panel);
+        for (int r = 0; r < MR_COUNT; ++r)
+            if (greyAll[r]) CHECK(!MenuRowVisible(r), "%s: row \"%s\" is greyed with menu_show_all but not hidden without it", vr ? "VR" : "flat", RowName(r));
     }
-    // a row hidden by the mode inside an OPEN group moves the selection (flat -> VR flip on Reflex, the Frame rate group open)
+    // a row hidden by the mode inside an OPEN group moves the selection (flat -> VR flip on FPS cap (flat), the Frame rate group open)
     g_vrMode = false;
     for (bool& o : g_menuGrpOpen) o = true;
-    g_menuSel = MR_REFLEX;
+    g_menuSel = MR_FPSCAP;
     MenuBuildPanel(s_panel);
-    CHECK(g_menuSel == MR_REFLEX, "flat: Reflex stays selected (%d)", g_menuSel);
+    CHECK(g_menuSel == MR_FPSCAP, "flat: FPS cap stays selected (%d)", g_menuSel);
     g_vrMode = true;
     MenuBuildPanel(s_panel);
-    CHECK(g_menuSel != MR_REFLEX && MenuRowForMode(g_menuSel), "VR: the selection left the hidden Reflex row (now %s)", RowName(g_menuSel));
+    CHECK(g_menuSel != MR_FPSCAP && MenuRowForMode(g_menuSel), "VR: the selection left the hidden flat FPS cap row (now %s)", RowName(g_menuSel));
     // ... but a row hidden only by its COLLAPSED group keeps its place (it shows the header)
     g_menuSel = MR_VRFPSCAP;
     MenuGrpOpen(MR_FRGRP) = false;
     MenuBuildPanel(s_panel);
     CHECK(g_menuSel == MR_VRFPSCAP, "VR: a row in a collapsed group stays selected (%s)", RowName(g_menuSel));
-    // the console off: the In-game UI group is greyed and cannot be opened; on: it opens (VR)
+    // phase 87: a row that DISAPPEARS by its rule while selected moves the selection (Sharpness size, Sharpen strength -> 0)
+    {
+        const float sh0 = SceneDlaa::Sharpness();
+        for (bool& o : g_menuGrpOpen) o = true;
+        SceneDlaa::SetSharpness(0.5f);
+        g_menuSel = MR_WIDTH;
+        MenuBuildPanel(s_panel); MenuBuildPanel(s_panel);
+        const bool shown = MenuRowVisible(MR_WIDTH);
+        SceneDlaa::SetSharpness(0.0f);
+        MenuBuildPanel(s_panel); MenuBuildPanel(s_panel);
+        CHECK(!shown || (!MenuRowVisible(MR_WIDTH) && g_menuSel != MR_WIDTH), "Sharpen strength 0: Sharpness size hidden and the selection moved (%s)",
+              RowName(g_menuSel));
+        SceneDlaa::SetSharpness(sh0);
+    }
+    // the console off: the In-game UI group is hidden (and cannot be opened); on: it opens (VR)
     g_vrUiConsole = false;
     MenuGrpOpen(MR_UIGRP) = false;
     MenuChange(MR_UIGRP, 1, false, 900);
     CHECK(!MenuGrpOpen(MR_UIGRP), "console off: Right does not open the In-game UI group");
     g_menuSel = MR_MODE;
-    MenuBuildPanel(s_panel);
-    const TuningMenu::Row* ui = FindRow(L"In-game UI");
-    CHECK(ui && ui->greyed, "console off: the In-game UI group header is greyed");
+    MenuBuildPanel(s_panel); MenuBuildPanel(s_panel);
+    CHECK(!FindRow(L"In-game UI") && !FindRow(L"Height"), "console off: the In-game UI group is hidden");
     g_vrUiConsole = true;
+    MenuBuildPanel(s_panel); MenuBuildPanel(s_panel);
     MenuChange(MR_UIGRP, 1, false, 901);
     CHECK(MenuGrpOpen(MR_UIGRP), "console on: Right opens the In-game UI group");
-    MenuBuildPanel(s_panel);
-    ui = FindRow(L"In-game UI");
-    CHECK(ui && !ui->greyed && FindRow(L"Height"), "console on (VR): the group is live and its rows are shown");
+    MenuBuildPanel(s_panel); MenuBuildPanel(s_panel);
+    const TuningMenu::Row* ui = FindRow(L"In-game UI");
+    CHECK(ui && !ui->greyed && FindRow(L"Height"), "console on (VR): the group is shown and its rows too");
     // phase 86: a Game TAA row change asks for the game's r_aa (typed later by VrUiTick, not called here: it would really type), and
     // r_aa is the game's: never written to dlaa.ini
     {
@@ -246,6 +281,7 @@ static void MenuRules() {
         g_gameTaaExplicit = false;
     }
     g_vrMode = vr0; g_menuShowAll = all0; g_vrUiConsole = con0; g_menuSel = sel0;
+    for (bool& h : g_menuHide) h = false;
     for (bool& o : g_menuGrpOpen) o = false;
 }
 

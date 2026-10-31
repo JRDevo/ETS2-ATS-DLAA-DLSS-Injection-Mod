@@ -960,9 +960,11 @@ int      g_vrsEyeAtStart = 0;
 int      g_vrsEyeFake = 0;
 int      g_vrsEyeSmooth = 20;
 // phase 32: dlaa.ini cpu_cache_pin -- 0 (default) = never touch the affinity; 1 = on a CPU whose L3 caches differ in size (AMD X3D: V-Cache on one CCD only)
-// the process affinity is set to the logical processors of the biggest L3, once at startup (cpu_pin.h). Opt-in: no gain was measured.
-// Startup only: no menu row, so SaveSettings / ResetSettings have nothing to write or remove (the key stays as the user left it).
+// the process affinity is set to the logical processors of the biggest L3 (cpu_pin.h). Opt-in: no gain was measured.
+// phase 87: the menu row "AMD cache cores (X3D)" switches it LIVE (CpuPin::Apply sets / restores the affinity) and SaveSettings writes
+// it once explicit; Reset removes it.
 int      g_cpuCachePin = 0;
+bool     g_cpuPinExplicit = false;
 // phase 54: dlaa.ini cpu_pcore / cpu_priority / cpu_no_throttle (all 0 = off; cpu_tuning.h). Read at start; the menu's CPU tuning row
 // switches the three together live (CpuTuning::SetLive) and SaveSettings writes them once explicit (own flag: a saved 0 is not
 // written just because another row was touched).
@@ -3386,6 +3388,7 @@ void SaveSettings(uint64_t n) {
         snprintf(add("cpu_priority"), sizeof(kv[0].val), "%d", g_cpuPriority);
         snprintf(add("cpu_no_throttle"), sizeof(kv[0].val), "%d", g_cpuNoThrottle);
     }
+    if (g_cpuPinExplicit) snprintf(add("cpu_cache_pin"), sizeof(kv[0].val), "%d", g_cpuCachePin);   // phase 87 (AMD cache cores row)
     if (g_logLevelExplicit) snprintf(add("log_level"), sizeof(kv[0].val), "%d", LogLevel());  // phase 39 (Logging row)
     if (g_langExplicit) snprintf(add("language"), sizeof(kv[0].val), "%s", Lang::Setting());   // phase 74 (Language row)
     if (g_vrsExplicit) {                                  // phase 34 (the Foveated rows)
@@ -18647,7 +18650,7 @@ enum MenuRowId {
     MR_MODE, MR_PROFILE, MR_MODEL,
     MR_PICGRP, MR_SHARP, MR_WIDTH, MR_LOD, MR_LODCUT, MR_FWD, MR_BIAS, MR_AREA,
     MR_MOTGRP, MR_DRAWIDS, MR_MIRROR, MR_MIRTURNS,
-    MR_FRGRP, MR_CPU, MR_FPSCAP, MR_REFLEX, MR_VRFPSCAP,
+    MR_FRGRP, MR_CPU, MR_CPUPIN, MR_FPSCAP, MR_REFLEX, MR_VRFPSCAP,
     MR_VRPGRP, MR_TURBO, MR_VRS, MR_VRSSIZE, MR_VRSPASS, MR_VRSSTR, MR_VRSEYE, MR_HMASK, MR_OFXR, MR_VECTORXR,
     MR_UIGRP, MR_UISET, MR_UIY, MR_UIX, MR_UIDIST, MR_UIPITCH, MR_UIYAW, MR_UIFOV, MR_UIRADIUS, MR_UIRESET,
     MR_FPS,
@@ -18685,69 +18688,72 @@ const wchar_t* const kMenuDesc[] = {
     // characters (menu.cpp kDescH) = the description + the cost sentence MenuPerfCosts appends: keep both within ~320 characters.
     N_(L"DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's Scaling is below 100 %. "
     L"off = the game's own picture: use it to compare. Saved at once."),
-    N_(L"Presets for your GPU. high = everything on (model 1). medium = model 2, half-size see-through depth, flat mirrors without "
-    L"part motion, lighter part-motion search. low = also no mirror DLAA, no see-through depth, VR area 60 %. Never changes a "
-    L"setting you set yourself."),
-    N_(L"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, least ghosting behind traffic: start here. "
+    N_(L"Presets for your graphics card. high = everything on (model 1). medium = model 2, a lighter Glass and fence fix, mirrors "
+    L"without Track moving parts. low = also no Smooth mirrors, no Glass and fence fix, VR area 60 %. Never changes a setting you "
+    L"set yourself."),
+    N_(L"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, fewest trails behind traffic: start here. "
     L"3 (F) = calmest on fences and wires, can smear moving detail, same cost as 2. 4 (M) = heaviest (about 5x), flat tests only."),
     // phase 43: menu categories (Picture)
-    N_(L"Picture quality: sharpening, texture sharpness, the DLAA area and the see-through depth. Right opens the group, Left closes it; it "
-    L"starts closed every time the menu opens."),
+    N_(L"Picture quality: sharpening, texture sharpness, the Glass and fence fix, the Light trail fix and the DLAA area. Right opens "
+    L"the group, Left closes it; it starts closed every time the menu opens."),
     N_(L"Sharpens the picture after DLAA, 0 (off) to 1.0. Raise it if the picture looks soft; too high gives bright halos on edges. "
     L"Costs about 0.1 ms; 0 skips the pass."),
     N_(L"How far the sharpening reaches, 1 to 4 px: small = fine detail, large = bolder edges. Change it if the sharpening looks too "
     L"fine or too coarse; a picture drawn larger than the screen, as in VR, needs more than 1 px."),
     N_(L"Sharper texture text (road signs, dashboard, GPS). 0 = off; more negative = sharper but more shimmer on fences; try -0.5 to "
-    L"-1 if text is blurry. No GPU time, only a little memory bandwidth."),
-    N_(L"The same for wire fences, grass and leaf cut-outs: raise it toward 0 if fences shimmer, lower it if grass looks soft. same = "
-    L"follows the row above. Acts only while Texture sharpness is not 0. No GPU time, a little memory."),
-    N_(L"Gives wires, fences and glass their own distance instead of what is behind them, so they do not smear when you move. Turn "
-    L"it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."),
+    L"-1 if text is blurry. Almost no cost."),
+    N_(L"The same for wire fences, grass and leaves: raise it toward 0 if fences shimmer, lower it if grass looks soft. same = "
+    L"follows the row above. Works only while Texture sharpness is not 0. Almost no cost."),
+    N_(L"Wires, fences and windows are treated as the thing in front, not as what you see through them, so they do not smear when "
+    L"you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."),
     // phase 49 (MR_BIAS)
-    N_(L"Stops street-lamp and car-light glows leaving a trail behind them when you move: DLSS takes each glow from the current "
-    L"frame, not its history. 25 % steps; lower it if lamp glows flicker, 0 = off. Costs about 0.05 - 0.2 ms per eye."),
+    N_(L"Stops street-lamp and car-light glows leaving a trail behind them when you move: the glows are drawn fresh each frame "
+    L"instead of being blended with older frames. 25 % steps; lower it if lamp glows flicker, 0 = off. Costs about 0.05 - 0.2 ms per eye."),
     N_(L"VR: only the middle of each eye gets DLAA (20 to 100 %); the edge keeps the game's picture. Lower it to afford a heavier "
     L"model or win frame rate; 40 % costs about 40 % of the model. Also sets the garage / main-menu truck."),
     // phase 43: menu categories (Motion and mirrors)
     N_(L"How moving parts and truck mirrors are handled by DLAA. Right opens the group, Left closes it; it starts closed every time the "
     L"menu opens."),
-    N_(L"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and does not ghost. Turn it off "
-    L"only to save about 0.5 ms per eye or to test: every pixel then moves with the camera and traffic smears."),
-    N_(L"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main mirror next to you). "
-    L"all = every mirror. camera = cheapest per mirror, moving traffic can ghost in the glass; else each part moves exactly in the glass."),
+    N_(L"DLAA follows each moving thing on its own (traffic, wheels, number plates), so it stays sharp and leaves no trail. Turn it "
+    L"off only to save about 0.5 ms per eye or to test: everything then moves with the camera and traffic smears."),
+    N_(L"Smooths the truck mirrors too, so they do not shimmer. 1 mirror = only the largest (the main mirror next to you). all = "
+    L"every mirror. camera = cheapest per mirror, moving traffic can leave trails in the glass; the others follow each moving thing."),
     N_(L"on = each mirror gets its DLAA every 2nd frame and shows its last clean picture in between: about half the mirror cost. Edges "
     L"stay clean; moving things in the glass update at half rate. off = every mirror every frame."),
     // phase 52 / 84 (MR_FRGRP)
-    N_(L"Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens the group, Left closes it; it starts closed every time the menu opens."),
-    // phase 54 (MR_CPU)
-    N_(L"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs only), the game runs at Above "
-    L"normal priority, and Windows may not throttle it (EcoQoS) or ignore its timer requests. Helps when the CPU is the limit; no "
-    L"cost. Separate settings in dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle."),
+    N_(L"Frame rate and CPU: CPU tuning, AMD cache cores, an FPS cap and Low delay (Reflex) for flat, an FPS cap for VR. Right opens the group, Left closes it; it starts closed every time the menu opens."),
+    // phase 54 (MR_CPU); phase 87: which part works where
+    N_(L"Three CPU switches together. Prefer fast cores: only Intel CPUs with P-cores and E-cores. Higher priority and no Windows "
+    L"power saving for the game: every CPU, Intel and AMD. Helps when the CPU is the limit; no cost. Separate in dlaa.ini: "
+    L"cpu_pcore, cpu_priority, cpu_no_throttle."),
+    // phase 87 (MR_CPUPIN)
+    N_(L"AMD X3D CPUs with two core groups (7950X3D, 9950X3D): keeps the game on the cores with the big 3D V-Cache, which games "
+    L"like. Switches at once; off gives the game all cores back. Try it and compare in a busy city. No cost."),
     N_(L"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. Set it a bit below what your "
-    L"PC holds in a busy city. With Reflex on, the NVIDIA driver does the limiting. off = no limit."),
-    N_(L"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when the GPU is the limit. Boost "
-    L"also keeps the GPU clocks up. Same fps; small cost. Not used in VR."),
-    N_(L"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the headset's reprojection "
-    L"(ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when the fps swings. Turns Turbo off while on."),
+    L"PC holds in a busy city. With Low delay (Reflex) on, the NVIDIA driver does the limiting. off = no limit."),
+    N_(L"Flat only, NVIDIA only (NVIDIA Reflex). On = the game's frames wait less before the graphics card draws them: less delay "
+    L"between your steering and the picture when the card is the limit. Boost also keeps the card's clocks up. Same fps; small cost."),
+    N_(L"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the headset's frame smoothing "
+    L"(ASW / Motion Smoothing) fills in the rest at a steady rhythm. Use it when the fps swings. Turns Turbo off while on."),
     // phase 43 / 84 (MR_VRPGRP)
-    N_(L"VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR are found. Right opens the group, Left closes it; it starts closed every time the menu opens."),
+    N_(L"VR speed-ups: Turbo, foveated rendering, skipping the hidden lens edges, and whether OFXR Bridge / VectorXR are found. Right opens the group, Left closes it; it starts closed every time the menu opens."),
     // phase 30 (MR_TURBO): the warning first (the description shows while the row is selected)
-    N_(L"Turbo: no ASW / Motion Smoothing / SSW / reprojection. VR only. On = the game stops waiting for the headset each frame: "
-    L"more fps only when the CPU is the limit (busy cities, traffic). Turn it off if the picture judders. From OpenXR Toolkit."),
+    N_(L"Turbo switches off the headset's frame smoothing (ASW / Motion Smoothing / SSW). VR only. On = the game stops waiting for "
+    L"the headset each frame: more fps only when the CPU is the limit (busy cities, traffic). Turn it off if the picture judders."),
     // phase 34 (MR_VRS, MR_VRSSIZE)
-    N_(L"Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR only. The outer ring is shaded "
-    L"once per 2 x 2 pixels; fences, grass and leaves keep full detail. Turn it off if the edge looks blocky."),
+    N_(L"Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR only. The outer ring gets one "
+    L"colour per 2 x 2 pixels; fences, grass and leaves keep full detail. Turn it off if the edge looks blocky."),
     N_(L"How big the sharp centre of Foveated rendering is, 10 - 100 % in 5 % steps: bigger = more of the view sharp, less saving; "
     L"smaller = more saving, lower detail starts closer to the middle. 80 % (balanced) is the default; 90 = wide, 65 = narrow."),
     // phase 42 (MR_VRSPASS)
-    N_(L"Which of the game's passes Foveated rendering acts on. scene = the 3D world only (default). scene + lighting = also the game's "
-    L"lighting pass, at the very edge only: more saving. Test it: look for blocky light or shadow edges at the side of your view."),
+    N_(L"What Foveated rendering makes coarser. scene = the 3D world only (default). scene + lighting = also the game's lighting, at "
+    L"the very edge only: more saving. Test it: look for blocky light or shadow edges at the side of your view."),
     // phase 59f (MR_VRSSTR)
     N_(L"How coarse the outer ring of Foveated rendering is. Normal = 1 colour per 2 x 2 pixels (default). Strong = per 4 x 2, Max = per "
     L"4 x 4: more GPU saving, blockier edges. Best with eye tracking, where you never look at the outer ring."),
     // phase 59 (MR_VRSEYE)
-    N_(L"Experimental. The sharp centre of Foveated rendering follows your eyes on a headset with eye tracking (OpenXR eye gaze, for "
-    L"example Varjo); without one it stays at the lens centre. Needs Foveated rendering on at the game's start, else a restart. Almost no cost."),
+    N_(L"Experimental. The sharp centre of Foveated rendering follows your eyes on a headset with eye tracking (for example Varjo); "
+    L"without it the centre stays in the middle of the lens. Needs Foveated rendering on at the game's start, else a restart. Almost no cost."),
     // phase 40 (MR_HMASK)
     N_(L"VR only. The game skips the lens corners you never see (the headset reports them), so it draws fewer pixels: more GPU "
     L"headroom, the picture you see stays the same. The first switch-on needs a game restart. Turn it off if the edge of the view "
@@ -18796,7 +18802,7 @@ const wchar_t* const kMenuDesc[] = {
     L"dimmed box does not turn into a black blob. Flat and VR. No cost."),
     // v0.10.3 phase 28 (MR_FPSLOCK)
     N_(L"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, ignores the cab's sway. "
-    L"Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Per-part motion vectors). No cost."),
+    L"Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Track moving parts). No cost."),
     // phase 51b (MR_FPSPROF)
     N_(L"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, size, colour, brightness and "
     L"text (saved in dlaa.ini when the menu closes). Off = one shared set for every vehicle. No cost."),
@@ -18828,30 +18834,30 @@ const wchar_t* const kMenuDesc[] = {
     N_(L"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same size from every angle "
     L"(as a VR layer, the default, the head-following fps box too); off = a flat picture. No cost."),
     // phase 84 (MR_CMPGRP)
-    N_(L"Switches for A/B checks: DLAA off, the game's own TAA mixed in or side by side, the thin-wire switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the group, Left closes it."),
+    N_(L"Switches for comparing: DLAA off, the game's own TAA mixed in or side by side, the wire fixes, running DLAA earlier. Nothing here is needed for normal driving. Right opens the group, Left closes it."),
     N_(L"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for comparing. Off saves the cost "
     L"of every part together."),
     // phase 82 (MR_GAMETAA, MR_TAAMIX)
-    N_(L"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). mix = TAA and DLAA / DLSS "
-    L"on the same frame, blended. split = the mod on the left, TAA on the right, to compare."),
+    N_(L"Uses the game's own TAA smoothing too. off = the mod alone. mix = TAA and DLAA / DLSS on the same frame, blended. split = "
+    L"the mod on the left, TAA on the right, to compare. With the game's console on, the mod switches the game's Anti-aliasing for you."),
     N_(L"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / "
     L"DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."),
     N_(L"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS on the left of it, the game's "
     L"TAA on the right. Used only when Game TAA is split."),
     N_(L"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix | TAA or DLAA | Mix (Mix = "
-    L"the two blended at Game TAA share). DLSS instead of DLAA when upscaling. Used only when Game TAA is split."),
+    L"the two blended at Game TAA amount). DLSS instead of DLAA when upscaling. Used only when Game TAA is split."),
     // phase 69 (MR_WIREMV, MR_WIREDEPTH, MR_WIREWIDEN): the thin-wire switches, also on the Hotkeys page
-    N_(L"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS motion dilation). "
-    L"on = default. off = only to compare; near wires flicker more. The picture is soft for a moment when it changes."),
-    N_(L"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = default. "
-    L"on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."),
+    N_(L"Thin wires move correctly while you drive: their movement is spread over the whole thin line. on = default. off = only "
+    L"to compare; near wires flicker more. The picture is soft for a moment when you switch."),
+    N_(L"Thin wires count as in front on every pixel they touch, even where they cover only a sliver of it. on = default. on (no "
+    L"A2C) = also for see-through edges such as leaves. off = only to compare; near wires flicker more."),
     N_(L"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not break into dashes. "
     L"Off by default: far wires may look darker or flicker more. Try it and compare."),
-    N_(L"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. Change it only to compare. "
-    L"Not used with DLSS upscale or Windows HDR. Same cost either way; takes ~60 frames to switch."),
+    N_(L"Flat only: DLAA runs before the game adds its glow and colour look, so lane paint, wires and rails shimmer less. Change it "
+    L"only to compare. Not used with DLSS upscaling or Windows HDR. Same cost either way; takes about a second to switch."),
     // phase 39 (MR_LOG)
     N_(L"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + problems worked around; "
-    L"info = + start-up and changes; debug = + statistics, and debug also runs the GPU timers and the CPU profiler."),
+    L"info = + start-up and changes; debug = + statistics and timing measurements (a little slower)."),
     // phase 74 (MR_LANGUAGE)
     N_(L"The language of this menu. auto = the game's language (default); Left / Right picks another one. Linux / Proton: Chinese, "
     L"Japanese and Korean need their fonts installed, see the README. A lang\\<code>.po file next to the DLL wins, for your own fixes. "
@@ -18863,7 +18869,7 @@ const wchar_t* const kMenuDesc[] = {
     L"other line. Do it once you like what you see, or the changes are gone at the next start. Mode saves itself."),
     // v0.10.3 phase 29d (MR_RESET): MenuBuildPanel puts "Hold <menu Right> for <bind_hold_ms> s to reset. " in front of it
     N_(L"Puts every setting in this menu back to how the mod ships (model, sharpen, texture sharpness, DLAA area, motion, mirrors, "
-    L"profile, panel, fps box, turbo, foveated, frame rate, logging), live and in dlaa.ini, keeping your hotkeys and every other line."),
+    L"preset, panel, fps box, turbo, foveated, frame rate, CPU, log detail), live and in dlaa.ini, keeping your hotkeys and every other line."),
     nullptr,                                              // MR_CLOSE: "Closes the menu ..." (built with the key name)
 };
 static_assert(sizeof(kMenuDesc) / sizeof(kMenuDesc[0]) == MR_COUNT, "tuning menu: kMenuDesc must have one entry per row (MR_* order)");
@@ -18902,9 +18908,16 @@ constexpr int MenuRowMode(int id) {
     }
 }
 bool g_menuShowAll = false;                               // dlaa.ini menu_show_all (startup only): every row visible, greyed as before
+// phase 87: NO greyed rows -- a row that cannot do anything in the player's setup now (MenuBuildPanel's grey rule: no X3D CPU, no
+// VRS, Foveated off, sharpening 0, mirrors off, a Game TAA mode that does not use it, no VR layer, the main scene not running DLAA
+// (30-Present hold), the console off, OFXR / VectorXR not present ...) is HIDDEN like a row of the other mode. Filled from the panel's
+// grey flags at the end of each MenuBuildPanel (the rules read settings / slow state, so nothing pops in and out per frame);
+// menu_show_all = 1 keeps everything shown, greyed as before.
+bool g_menuHide[TuningMenu::kMaxRows] = {};
 bool MenuVr();
-inline bool MenuRowForMode(int id) {
+inline bool MenuRowForMode(int id) {                      // (phase 87: also false for a row hidden by its grey rule)
     if (g_menuShowAll) return true;
+    if (id >= 0 && id < TuningMenu::kMaxRows && g_menuHide[id]) return false;
     const int m = MenuRowMode(id);
     return m == kMmBoth || (m == kMmVr) == MenuVr();
 }
@@ -18924,7 +18937,7 @@ inline bool MenuRowVisible(int id) {
     if (!MenuRowForMode(id)) return false;
     if (MenuGroupIndex(id) >= 0) return MenuHeaderHasRows(id);
     const int g = MenuRowGroup(id);
-    return g < 0 || (MenuGrpOpen(g) && MenuHeaderHasRows(g));
+    return g < 0 || (MenuRowForMode(g) && MenuGrpOpen(g) && MenuHeaderHasRows(g));   // (phase 87: a hidden header hides its rows)
 }
 // The next VISIBLE row from `from` in direction dir (-1 / +1), wrapping around; `from` itself when nothing else is visible.
 int MenuStepRow(int from, int dir) {
@@ -19619,6 +19632,16 @@ void ToggleHiddenMask(uint64_t n) {
 // phase 54: the menu's CPU tuning row -- dlaa.ini cpu_pcore / cpu_priority / cpu_no_throttle live, all three together: all off ->
 // all on; all on or a mix -> all off. CpuTuning::SetLive applies / undoes the cpu sets, the priority class and the EcoQoS opt-out
 // (it logs what each part did or why not). Runs on the Present thread (the menu keys), which is what the thread part needs.
+// phase 87: the menu's AMD cache cores (X3D) row -- dlaa.ini cpu_cache_pin LIVE (CpuPin::Apply narrows the process affinity to the
+// biggest L3 / restores the one from before). Kept (and saved) on a CPU it cannot act on: the row is greyed and says why.
+void ToggleCpuPin(uint64_t n) {
+    g_cpuCachePin = g_cpuCachePin ? 0 : 1;
+    g_cpuPinExplicit = true;
+    Log("AMD cache cores (phase 87): %s (cpu_cache_pin=%d, tuning menu, Present #%llu)%s", g_cpuCachePin ? "ON" : "OFF", g_cpuCachePin,
+        (unsigned long long)n, CpuPin::Supported() ? "" : " -- this CPU has no second, bigger L3: nothing to pin (kept for the setting)");
+    CpuPin::Apply(g_cpuCachePin);
+    PlayTones(1, g_cpuCachePin ? 1200 : 300, 150, 0);
+}
 void ToggleCpuTuning(uint64_t n) {
     const int to = CpuTuningPick::NextRowState(CpuTuningPick::Summary(g_cpuPcore, g_cpuPriority, g_cpuNoThrottle));
     g_cpuPcore = g_cpuPriority = g_cpuNoThrottle = to;
@@ -19795,6 +19818,9 @@ void ResetSettings(uint64_t n) {
     g_cpuPcore = g_cpuPriority = g_cpuNoThrottle = 0;     // phase 54: CPU tuning off (live: cpu sets / priority / EcoQoS put back)
     g_cpuTuneExplicit = false;
     CpuTuning::SetLive({ 0, 0, 0 });
+    g_cpuCachePin = 0;                                    // phase 87: the AMD cache-core pin off (live: the affinity from before it)
+    g_cpuPinExplicit = false;
+    CpuPin::Apply(0);
     g_vrsOn = 0; g_vrsInner = 55; g_vrsOuter = 80;        // phase 34: foveated rendering off, balanced radii (vrs_quality /
     g_vrsExplicit = false;                                //   vrs_debug are dlaa.ini-only: left as they are)
     g_vrsPasses = 0;                                      // phase 42: scene binds only
@@ -19867,6 +19893,7 @@ void ResetSettings(uint64_t n) {
         "xr_hidden_mask",                                                                               // phase 40
         "dlss_bias_mask",                                                                               // phase 49
         "cpu_pcore", "cpu_priority", "cpu_no_throttle",                                                 // phase 54
+        "cpu_cache_pin",                                                                                // phase 87 (menu row)
         "fps_profiles",                                                                                 // phase 51b
         "dlaa_mv_dilate", "mv_fwd_conservative", "wire_widen",                                       // phase 60 / 61 (69: menu rows)
         "game_taa", "game_taa_ver", "game_taa_mix", "game_taa_split", "game_taa_pair",                  // phase 82
@@ -20490,9 +20517,15 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         else if ((fig = both(cpuMir, MG_MIR))) swprintf(sent, sentCap, TRF(L"Costs %ls per frame now; fewer mirrors cost less."), fig);
         break;
     case MR_MIRTURNS:                                     // phase 41
-        if (!mirOn)                        swprintf(sent, sentCap, TRF(L"Greyed: Mirror DLAA is off."));
+        if (!mirOn)                        swprintf(sent, sentCap, TRF(L"Greyed: Smooth mirrors is off."));
         else if (MirMode() == 3)           swprintf(sent, sentCap, TRF(L"Always on: dlaa.ini mirror mode 3 is in turns already."));
         else if ((fig = both(cpuMir, MG_MIR))) swprintf(sent, sentCap, TRF(L"The mirrors cost %ls per frame now."), fig);
+        break;
+    case MR_CPUPIN:                                       // phase 87
+        if (!CpuPin::Supported())    swprintf(sent, sentCap, TRF(L"Greyed: only for AMD X3D CPUs with two core groups (7950X3D, 9950X3D)."));
+        else if (g_cpuCachePin && CpuPin::Applied())
+                                     swprintf(sent, sentCap, TRF(L"On now: the game runs only on the cores with the big cache."));
+        else if (g_cpuCachePin)      swprintf(sent, sentCap, TRF(L"On, but not applied: the game's cores were already limited (see the log)."));
         break;
     case MR_PRETM:
         if (vr) swprintf(sent, sentCap, TRF(L"Greyed in VR: VR always runs DLAA on the finished picture."));
@@ -20580,7 +20613,7 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
     case MR_FPSCAP:                                       // phase 52
         if (vr)                      swprintf(sent, sentCap, TRF(L"Greyed in VR: use VR FPS cap."));
         else if (g_fpsCap && FramePace::ReflexRunning())
-                                     swprintf(sent, sentCap, TRF(L"Limited by the NVIDIA driver now (Reflex is on)."));
+                                     swprintf(sent, sentCap, TRF(L"Limited by the NVIDIA driver now (Low delay is on)."));
         break;
     case MR_VRFPSCAP:                                     // phase 52
         if (!vr)                     swprintf(sent, sentCap, TRF(L"Greyed in flat: use FPS cap."));
@@ -21356,7 +21389,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
 
     MenuRow(p, MR_MODE, TR(L"Mode"), KeyNameUi(KA_MODE_CYCLE), nullptr, false);
     swprintf(p.rows[MR_MODE].value, kV, L"%ls", !g_dlaaOn.load() ? TR(L"off") : (g_dlssUpscale.load() ? TR(L"DLSS") : TR(L"DLAA")));
-    MenuRow(p, MR_PROFILE, TR(L"Performance profile"), KeyNameUi(KA_PROFILE), nullptr, false);
+    MenuRow(p, MR_PROFILE, TR(L"Quality preset"), KeyNameUi(KA_PROFILE), nullptr, false);
     swprintf(p.rows[MR_PROFILE].value, kV, L"%ls", Lang::TrA(kProfName[g_profile < 0 || g_profile > 2 ? 0 : g_profile]));
     snprintf(k, sizeof(k), "%s .. %s", KeyNameUi(KA_MODEL1), KeyNameUi(KA_MODEL4));
     const bool mainDlaa = MainDlaaRuns();                 // phase 82: the DLAA quality rows are greyed while it does not run
@@ -21372,11 +21405,11 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     MenuRow(p, MR_SHARP, TR(L"Sharpen strength"), pair(KA_SHARPEN_DOWN, KA_SHARPEN_UP), nullptr, !mainDlaa);
     const float sharp = SceneDlaa::Sharpness();
     swprintf(p.rows[MR_SHARP].value, kV, sharp <= 0.0f ? TRF(L"%.1f (off)") : L"%.1f", (double)sharp);
-    MenuRow(p, MR_WIDTH, TR(L"Sharpen width"), pair(KA_WIDTH_DOWN, KA_WIDTH_UP), nullptr, sharp <= 0.0f || !mainDlaa);   // greyed: no sharpening
+    MenuRow(p, MR_WIDTH, TR(L"Sharpness size"), pair(KA_WIDTH_DOWN, KA_WIDTH_UP), nullptr, sharp <= 0.0f || !mainDlaa);   // greyed: no sharpening
     swprintf(p.rows[MR_WIDTH].value, kV, TRF(L"%.1f px"), (double)SceneDlaa::SharpRadius());
     MenuRow(p, MR_LOD, TR(L"Texture sharpness"), pair(KA_LOD_DOWN, KA_LOD_UP), nullptr, false);
     swprintf(p.rows[MR_LOD].value, kV, g_lodBias == 0.0f ? TRF(L"%.2f (off)") : L"%.2f", (double)g_lodBias);
-    MenuRow(p, MR_LODCUT, TR(L"Cut-out texture sharpness"), pair(KA_LOD_CUT_DOWN, KA_LOD_CUT_UP), nullptr,
+    MenuRow(p, MR_LODCUT, TR(L"Leaves and fences sharpness"), pair(KA_LOD_CUT_DOWN, KA_LOD_CUT_UP), nullptr,
             g_lodBias == 0.0f);                           // greyed: the cut-out bias is 0 while Texture sharpness is off
     if (LodCutFollows()) swprintf(p.rows[MR_LODCUT].value, kV, TRF(L"same (%.2f)"), (double)LodCutUserValue());
     else                 swprintf(p.rows[MR_LODCUT].value, kV, L"%.2f", (double)g_lodCutBias);
@@ -21384,13 +21417,13 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     if (vr) swprintf(p.rows[MR_AREA].value, kV, L"%d %%", SceneDlaa::Area());
     else    swprintf(p.rows[MR_AREA].value, kV, TRF(L"100 %% (flat)"));
     groupRow(MR_MOTGRP, MenuGroupTitle(MR_MOTGRP));      // phase 43: menu categories
-    MenuRow(p, MR_DRAWIDS, TR(L"Per-part motion vectors"), KeyNameUi(KA_DRAWID_TOGGLE), nullptr, false);
+    MenuRow(p, MR_DRAWIDS, TR(L"Track moving parts"), KeyNameUi(KA_DRAWID_TOGGLE), nullptr, false);
     swprintf(p.rows[MR_DRAWIDS].value, kV, L"%ls", g_objMode == 2 ? TR(L"on") : (g_objMode == 1 ? TR(L"old stencil ids") : TR(L"off")));
-    MenuRow(p, MR_MIRROR, TR(L"Mirror DLAA"), KeyNameUi(KA_MIRROR_TOGGLE), nullptr, false);
+    MenuRow(p, MR_MIRROR, TR(L"Smooth mirrors"), KeyNameUi(KA_MIRROR_TOGGLE), nullptr, false);
     MirMenuValue(p.rows[MR_MIRROR].value, kV, vr);       // v0.10.2: the seven states (CycleMirrors)
     {   // phase 41: greyed while mirror DLAA is off; mode 3 is in turns anyway
         const bool mirLive = g_mirOn.load() && MirMode() != 0;
-        MenuRow(p, MR_MIRTURNS, TR(L"Mirrors in turns"), "dlaa.ini mirror_turns", nullptr, !mirLive || MirMode() == 3);
+        MenuRow(p, MR_MIRTURNS, TR(L"Mirrors take turns (faster)"), "dlaa.ini mirror_turns", nullptr, !mirLive || MirMode() == 3);
         swprintf(p.rows[MR_MIRTURNS].value, kV, L"%ls", MirMode() == 3 ? TR(L"on (mode 3)") : onOff[g_mirTurns ? 1 : 0]);
     }
     {   // phase 69: the thin-wire switches (the same functions as Alt+F10 / Alt+F11 / Alt+F12)
@@ -21399,21 +21432,21 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
 #else
         const bool mvDil = false;
 #endif
-        MenuRow(p, MR_WIREMV, TR(L"Thin-wire motion"), KeyNameUi(KA_MV_DILATE), nullptr, false);
+        MenuRow(p, MR_WIREMV, TR(L"Wire fix: motion"), KeyNameUi(KA_MV_DILATE), nullptr, false);
         swprintf(p.rows[MR_WIREMV].value, kV, L"%ls", onOff[mvDil ? 1 : 0]);
-        MenuRow(p, MR_WIREDEPTH, TR(L"Thin-wire depth"), KeyNameUi(KA_FWD_CONSERVATIVE), nullptr,
+        MenuRow(p, MR_WIREDEPTH, TR(L"Wire fix: depth"), KeyNameUi(KA_FWD_CONSERVATIVE), nullptr,
                 !(g_fwdCfg && g_fwdOn.load()));           // greyed: it is part of the See-through depth pass (kept for it)
         const int fc = g_fwdConsOn.load();
         swprintf(p.rows[MR_WIREDEPTH].value, kV, L"%ls", fc == 1 ? TR(L"on") : (fc == 2 ? TR(L"on (no A2C)") : TR(L"off")));
-        MenuRow(p, MR_WIREWIDEN, TR(L"Thin-wire widening"), KeyNameUi(KA_WIRE_WIDEN), nullptr, false);
+        MenuRow(p, MR_WIREWIDEN, TR(L"Thicker wires (test)"), KeyNameUi(KA_WIRE_WIDEN), nullptr, false);
         swprintf(p.rows[MR_WIREWIDEN].value, kV, L"%ls", g_wireOn.load() ? TR(L"on (experimental)") : TR(L"off"));
     }
-    MenuRow(p, MR_PRETM, all ? TR(L"DLAA before tonemap (flat)") : TR(L"DLAA before tonemap"), KeyNameUi(KA_PRE_TONEMAP), vr ? NA_("flat only") : nullptr, vr || !mainDlaa);
+    MenuRow(p, MR_PRETM, all ? TR(L"Run DLAA earlier (test, flat)") : TR(L"Run DLAA earlier (test)"), KeyNameUi(KA_PRE_TONEMAP), vr ? NA_("flat only") : nullptr, vr || !mainDlaa);
     swprintf(p.rows[MR_PRETM].value, kV, L"%ls", onOff[(g_preCfg && g_preOn.load()) ? 1 : 0]);   // (the row switches a dlaa.ini 0 on too)
-    MenuRow(p, MR_FWD, TR(L"See-through depth"), KeyNameUi(KA_FWD_DEPTH), nullptr, false);
+    MenuRow(p, MR_FWD, TR(L"Glass and fence fix"), KeyNameUi(KA_FWD_DEPTH), nullptr, false);
     swprintf(p.rows[MR_FWD].value, kV, L"%ls", (g_fwdCfg && g_fwdOn.load()) ? TR(L"on")   // issue #26: dlaa.ini 0 / the low
                                               : (g_fwdAutoOff ? TR(L"off (VR budget)") : TR(L"off")));   //   profile: plain off
-    MenuRow(p, MR_BIAS, TR(L"Light glow ghosting fix"), "dlaa.ini dlss_bias_mask", nullptr, !mainDlaa);   // phase 49
+    MenuRow(p, MR_BIAS, TR(L"Light trail fix"), "dlaa.ini dlss_bias_mask", nullptr, !mainDlaa);   // phase 49
     if (g_biasCfg > 0) swprintf(p.rows[MR_BIAS].value, kV, L"%d %%", g_biasCfg);
     else               swprintf(p.rows[MR_BIAS].value, kV, TRF(L"off"));
     // phase 84: the DLSS upscale row is gone (the Mode row cycles off / DLAA / DLSS on the same g_dlssUpscale; its hotkey stays)
@@ -21424,19 +21457,19 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         MenuRow(p, MR_GAMETAA, TR(L"Game TAA"), "dlaa.ini game_taa", nullptr, false);
         const wchar_t* const kTaaVal[GameTaa::kModeCount] = { TR(L"off"), TR(L"mix"), TR(L"split") };
         swprintf(p.rows[MR_GAMETAA].value, kV, L"%ls", kTaaVal[GameTaa::ClampMode(g_gameTaa)]);
-        MenuRow(p, MR_TAAMIX, TR(L"Game TAA share"), "dlaa.ini game_taa_mix", nullptr, !GameTaa::ShareUsed(g_gameTaa, g_gameTaaPair));
+        MenuRow(p, MR_TAAMIX, TR(L"Game TAA amount"), "dlaa.ini game_taa_mix", nullptr, !GameTaa::ShareUsed(g_gameTaa, g_gameTaaPair));
         swprintf(p.rows[MR_TAAMIX].value, kV, L"%d %%", g_gameTaaMix);
-        MenuRow(p, MR_TAASPLIT, TR(L"Split position"), "dlaa.ini game_taa_split", nullptr, g_gameTaa != GameTaa::kSplit);
+        MenuRow(p, MR_TAASPLIT, TR(L"Split line position"), "dlaa.ini game_taa_split", nullptr, g_gameTaa != GameTaa::kSplit);
         swprintf(p.rows[MR_TAASPLIT].value, kV, L"%d %%", g_gameTaaSplit);
-        MenuRow(p, MR_TAAPAIR, TR(L"Split compares"), "dlaa.ini game_taa_pair", nullptr, g_gameTaa != GameTaa::kSplit);
+        MenuRow(p, MR_TAAPAIR, TR(L"Split: left | right"), "dlaa.ini game_taa_pair", nullptr, g_gameTaa != GameTaa::kSplit);
         const wchar_t* const kPairVal[GameTaa::kPairCount] = { L"DLAA | TAA", TR(L"Mix | TAA"), TR(L"DLAA | Mix") };
         swprintf(p.rows[MR_TAAPAIR].value, kV, L"%ls", kPairVal[GameTaa::ClampPair(g_gameTaaPair)]);
     }
-    MenuRow(p, MR_OFXR, TR(L"OFXR Bridge (VR frame gen)"), "dlaa.ini ofxr_bridge", nullptr, !Ofxr::g_on.load());   // info row
+    MenuRow(p, MR_OFXR, TR(L"OFXR Bridge (VR frame gen)"), "dlaa.ini ofxr_bridge", nullptr, !Ofxr::g_on.load() || !Ofxr::Detected());   // (87: hidden when not present)   // info row
     if (!Ofxr::g_on.load())      swprintf(p.rows[MR_OFXR].value, kV, TRF(L"off (dlaa.ini 0)"));
     else if (Ofxr::Detected())   swprintf(p.rows[MR_OFXR].value, kV, TRF(L"found"));   // (no live counter: it would rebuild the panel every frame)
     else                         swprintf(p.rows[MR_OFXR].value, kV, TRF(L"not found"));
-    MenuRow(p, MR_VECTORXR, TR(L"VectorXR (VR layer)"), "dlaa.ini vectorxr", nullptr, !Ofxr::g_onVxr.load());   // phase 56: info row
+    MenuRow(p, MR_VECTORXR, TR(L"VectorXR (VR layer)"), "dlaa.ini vectorxr", nullptr, !Ofxr::g_onVxr.load() || !Ofxr::DetectedVectorXr());   // phase 56: info row
     if (!Ofxr::g_onVxr.load())          swprintf(p.rows[MR_VECTORXR].value, kV, TRF(L"off (dlaa.ini 0)"));
     else if (Ofxr::DetectedVectorXr())  swprintf(p.rows[MR_VECTORXR].value, kV, TRF(L"found"));
     else                                swprintf(p.rows[MR_VECTORXR].value, kV, TRF(L"not found"));
@@ -21473,7 +21506,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         if (si >= 0)               swprintf(p.rows[MR_VRSSIZE].value, kV, L"%d %% (%ls)", g_vrsOuter, Lang::Tr(kVrsSizes[si].name));
         else if (VrsSizeOnScale()) swprintf(p.rows[MR_VRSSIZE].value, kV, L"%d %%", g_vrsOuter);
         else                       swprintf(p.rows[MR_VRSSIZE].value, kV, L"%d / %d %%", g_vrsInner, g_vrsOuter);
-        MenuRow(p, MR_VRSPASS, TR(L"Foveated passes"), "dlaa.ini vrs_passes", vr ? nullptr : NA_("VR only"), !vr || noVrs || !g_vrsOn);   // phase 42
+        MenuRow(p, MR_VRSPASS, TR(L"Foveated: lighting too"), "dlaa.ini vrs_passes", vr ? nullptr : NA_("VR only"), !vr || noVrs || !g_vrsOn);   // phase 42
         swprintf(p.rows[MR_VRSPASS].value, kV, L"%ls", g_vrsPasses ? TR(L"scene + lighting") : TR(L"scene"));
         MenuRow(p, MR_VRSSTR, TR(L"Foveated strength"), "dlaa.ini vrs_strength", vr ? nullptr : NA_("VR only"), !vr || noVrs || !g_vrsOn);   // phase 59f
         swprintf(p.rows[MR_VRSSTR].value, kV, L"%ls", Lang::Tr(kVrsStrengthName[g_vrsStrength < 0 || g_vrsStrength > 2 ? 0 : g_vrsStrength]));
@@ -21492,7 +21525,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     {   // phase 40: hidden area mask; "not supported" once the runtime said it has no XR_KHR_visibility_mask (no live counter)
         const XrHook::HiddenStats hs = XrHook::GetHiddenStats();
         const bool noExt = hs.ext == 1 || hs.ext == 4;
-        MenuRow(p, MR_HMASK, all ? TR(L"Hidden area mask (VR)") : TR(L"Hidden area mask"), "dlaa.ini xr_hidden_mask", vr ? nullptr : NA_("VR only"), !vr || noExt);
+        MenuRow(p, MR_HMASK, all ? TR(L"Skip hidden edges (VR)") : TR(L"Skip hidden edges"), "dlaa.ini xr_hidden_mask", vr ? nullptr : NA_("VR only"), !vr || noExt);
         const wchar_t* val = !g_xrHiddenMask ? TR(L"off")
                            : noExt ? TR(L"on (not supported)")
                            : !g_xrHiddenMaskAtStart ? TR(L"on (restart the game)")
@@ -21505,7 +21538,7 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     groupRow(MR_FRGRP, MenuGroupTitle(MR_FRGRP));        // phase 52: frame rate
     {   // phase 52: "not supported" once Reflex was refused / NVAPI is missing (FramePace::Support 0; no live counter)
         const bool noReflex = FramePace::Support() == 0;
-        MenuRow(p, MR_REFLEX, all ? TR(L"Reflex (flat)") : TR(L"Reflex"), "dlaa.ini reflex", vr ? NA_("flat only") : nullptr, vr || noReflex);
+        MenuRow(p, MR_REFLEX, all ? TR(L"Low delay (Reflex, flat)") : TR(L"Low delay (Reflex)"), "dlaa.ini reflex", vr ? NA_("flat only") : nullptr, vr || noReflex);
         static const wchar_t* const kRx[3] = { N_(L"off"), N_(L"on"), N_(L"on + boost") };
         if (noReflex) swprintf(p.rows[MR_REFLEX].value, kV, L"%ls", g_reflex ? TR(L"on (not supported)") : TR(L"not supported"));
         else          swprintf(p.rows[MR_REFLEX].value, kV, L"%ls", Lang::Tr(kRx[g_reflex < 0 || g_reflex > 2 ? 0 : g_reflex]));
@@ -21525,8 +21558,12 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         const int cs = CpuTuningPick::Summary(g_cpuPcore, g_cpuPriority, g_cpuNoThrottle);
         swprintf(p.rows[MR_CPU].value, kV, L"%ls", cs == 0 ? TR(L"off") : (cs == 1 ? TR(L"on") : TR(L"mixed (dlaa.ini)")));
     }
+    {   // phase 87: the AMD 3D V-Cache pin (cpu_cache_pin) -- live; greyed on a CPU without two different L3 caches
+        MenuRow(p, MR_CPUPIN, TR(L"AMD cache cores (X3D)"), "dlaa.ini cpu_cache_pin", nullptr, !CpuPin::Supported());
+        swprintf(p.rows[MR_CPUPIN].value, kV, L"%ls", g_cpuCachePin ? TR(L"on (auto)") : TR(L"off"));
+    }
     {   // phase 39: the level + what logging costs (CPU ms per frame; changes only at the ~1-s snapshots: no rebuild per frame)
-        MenuRow(p, MR_LOG, TR(L"Logging"), "dlaa.ini log_level", nullptr, false);
+        MenuRow(p, MR_LOG, TR(L"Log detail"), "dlaa.ini log_level", nullptr, false);
         const int lv = LogLevel();
         swprintf(p.rows[MR_LOG].value, kV, L"%ls", Lang::TrA(LogLevelName(lv)));   // phase 45: its CPU ms is in the cost column
     }
@@ -21618,6 +21655,8 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     MenuRow(p, MR_CLOSE, TR(L"Close menu"), KeyNameUi(KA_MENU), nullptr, false);
     swprintf(p.rows[MR_CLOSE].value, kV, L"-");
 
+    // phase 87: the grey rules become visibility (see g_menuHide); menu_show_all keeps everything, greyed
+    for (int id = 0; id < MR_COUNT; ++id) g_menuHide[id] = !g_menuShowAll && p.rows[id].greyed != 0;
     if (g_menuSel < 0 || g_menuSel >= MR_COUNT) g_menuSel = 0;
     // phase 84: a row (or a whole group) hidden by the mode (a flat <-> VR flip): the selection steps to the next visible row.
     // phase 85: only a row hidden by its COLLAPSED group keeps its place (it shows its header); a row hidden by the mode moves even
@@ -21861,6 +21900,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_VRSSIZE: StepVrsSize(dir, n, repeat); break;    // phase 44: Right = bigger sharp centre, Left = smaller (5 % steps)
     case MR_HMASK:   ToggleHiddenMask(n); break;            // phase 40: Left and Right both switch it (also flat: kept for VR)
     case MR_CPU:     ToggleCpuTuning(n); break;             // phase 54: Left and Right both switch it
+    case MR_CPUPIN:  ToggleCpuPin(n); break;                // phase 87: Left and Right both switch it (live)
     case MR_VRSPASS: ToggleVrsPasses(n); break;             // phase 42: two choices, Left and Right both switch
     case MR_VRSSTR:  StepVrsStrength(dir, n); break;        // phase 59f: Right = coarser, Left = finer
     case MR_VRSEYE:  ToggleVrsEye(n); break;                // phase 59: off / on, Left and Right both switch (also flat: kept for VR)
@@ -25796,7 +25836,7 @@ void LoadConfig() {
             else if (!strcmp(key, "menu_vr_dist"))   g_menuVrDist = v < 30 ? 30 : (v > 300 ? 300 : (int)v);   // v0.10.3 phase 29b
             else if (!strcmp(key, "menu_vr_face"))   g_menuVrFace = v != 0 ? 1 : 0;         // v0.10.0 phase 16
             else if (!strcmp(key, "menu_vr_layer"))  g_menuVrLayer = v != 0 ? 1 : 0;        // v0.10.3 phase 29
-            else if (!strcmp(key, "cpu_cache_pin"))  g_cpuCachePin = v != 0 ? 1 : 0;        // phase 32
+            else if (!strcmp(key, "cpu_cache_pin"))  { g_cpuCachePin = v != 0 ? 1 : 0; g_cpuPinExplicit = true; }   // phase 32 (87: menu row)
             else if (!strcmp(key, "xr_turbo"))       { g_xrTurbo = v != 0 ? 1 : 0; g_xrTurboExplicit = true; }   // phase 30
             // phase 34: VRS fixed foveated rendering (VR; the menu's Foveated rows switch vrs and the radii preset)
             else if (!strcmp(key, "vrs"))            { g_vrsOn = v != 0 ? 1 : 0; g_vrsExplicit = true; }
