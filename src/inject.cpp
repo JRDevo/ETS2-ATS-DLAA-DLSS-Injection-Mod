@@ -1986,7 +1986,9 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
 #endif
     {                                           // v0.7.7 re-bindable hotkeys (dlaa.ini key_*, see PollKeys)
         PollKeys();                              // down-edges for this Present (exact modifiers, foreground only)
+#ifdef WITH_DLAA
         VrUiTick();                              // phase 83: the In-game UI (VR) rows' console commands (debounced, typed)
+#endif
 
         // frame trace key. Handled before TraceAtPresent so the request is consumed this same frame.
         if (KeyHit(KA_TRACE)) {
@@ -26974,8 +26976,10 @@ void LoadConfig() {
             if (!strcmp(key, "game_taa"))     { g_gameTaaIniRaw = (int)v; g_gameTaaExplicit = true; continue; }   // phase 82 (after the loop)
             if (!strcmp(key, "game_taa_ver")) { g_gameTaaIniVer = (int)v; continue; }                             // phase 82
             if (!strcmp(key, "game_taa_split")) { g_gameTaaSplit = GameTaa::ClampMix((int)v); g_gameTaaExplicit = true; continue; }
+#ifdef WITH_DLAA
             if (!strcmp(key, "menu_show_all")) { g_menuShowAll = v != 0; continue; }   // phase 84, startup only
             if (!strcmp(key, "vr_ui_keys")) { g_vrUiKeys = VrUi::ClampKeys((long)v); continue; }   // phase 83 / 85 (0 .. 4), startup only
+#endif
             if (!strcmp(key, "game_taa_pair")) { g_gameTaaPair = GameTaa::ClampPair((int)v); g_gameTaaExplicit = true; continue; }
             if (!strcmp(key, "game_taa_mix")) { g_gameTaaMix = GameTaa::ClampMix((int)v); g_gameTaaExplicit = true; continue; }   // phase 82
             if (!strcmp(key, "game_taa_mvjit")) { g_gameTaaMvJit = v < 0 ? -1 : (v > 0 ? 1 : 0); continue; }   // phase 82, startup only
