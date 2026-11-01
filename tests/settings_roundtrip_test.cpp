@@ -240,8 +240,12 @@ static void MenuRules() {
         // phase 87: every row greyed with menu_show_all is hidden without it (and the others are shown, if their group is)
         g_menuShowAll = true;
         MenuBuildPanel(s_panel);
-        bool greyAll[MR_COUNT];
-        for (int r = 0; r < MR_COUNT; ++r) greyAll[r] = s_panel.rows[r].greyed != 0;
+        bool greyAll[MR_COUNT] = {};
+        {   // the panel lists only the visible rows, in MR order (MenuBuildPanel compacts them): map them back to their ids
+            int k = 0;
+            for (int r = 0; r < MR_COUNT && k < s_panel.nRows; ++r)
+                if (MenuRowVisible(r)) greyAll[r] = s_panel.rows[k++].greyed != 0;
+        }
         g_menuShowAll = false;
         MenuBuildPanel(s_panel);
         MenuBuildPanel(s_panel);
