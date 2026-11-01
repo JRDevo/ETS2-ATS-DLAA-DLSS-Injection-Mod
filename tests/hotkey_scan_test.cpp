@@ -175,7 +175,7 @@ static void TestHide() {
         d[2].dwOfs = 0x11; d[2].dwData = 0x80;      // W down: passes
         d[3].dwOfs = 0xD3; d[3].dwData = 0x80;      // Delete down: dropped
         DWORD n = 4;
-        kb.OnData(S_OK, sizeof(DIDEVICEOBJECTDATA), d, &n);
+        kb.OnData(S_OK, sizeof(DIDEVICEOBJECTDATA), d, &n, n, 0);
         CHECK(n == 2 && d[0].dwOfs == 0xC8 && d[0].dwData == 0 && d[1].dwOfs == 0x11, "B2 buffered filter kept %lu entries", (unsigned long)n);
     }
     // B3 bind mode hides every key; closed hides none
@@ -223,7 +223,7 @@ static void TestHide() {
         d[1].dwOfs = DIJOFS_BUTTON(9); d[1].dwData = 0x80;
         d[2].dwOfs = DIJOFS_BUTTON(9); d[2].dwData = 0x00;
         DWORD n = 3;
-        jt.OnData(S_OK, sizeof(DIDEVICEOBJECTDATA), d, &n);
+        jt.OnData(S_OK, sizeof(DIDEVICEOBJECTDATA), d, &n, n, 0);
         CHECK(n == 2 && d[0].dwOfs == DIJOFS_BUTTON(4) && d[1].dwOfs == DIJOFS_BUTTON(9) && d[1].dwData == 0,
               "B4 buffered: %lu entries kept (gear down + menu button up expected)", (unsigned long)n);
         // B5 ControllerState: the slot is known after a read; a failed read (cleared) makes it unknown
