@@ -572,7 +572,7 @@ These need `log_level = 4` in `dlaa.ini`. They are for diagnostics and bug repor
 | `Ctrl+F7` | Passive mode on / off |
 | `Ctrl+F8` | Jitter-only debug on / off |
 | `Ctrl+F9` | Self-test (dumps frames) |
-| `Insert` (twice) | One-press bug report: press it **twice within 1 s** -- system info, the logs, `dlaa.ini` and PNG frames (DLAA on / off; with `capture_mode = 2` also what DLSS got, the motion-vector view, motion off, jitter only) into `dlaa_selftest\shimmer_<date>_<time>\`, split into zips by kind (each at most 24 MB): `shimmer_<time>_main.zip` (always attach), `shimmer_<time>_full_partNN.zip` (only with `Capture includes` = full) and `shimmer_<time>_rewind_partNN.zip` (only with Rewind before key on). Works at any log level (it raises it for its own duration). See [How to send a bug report](#how-to-send-a-bug-report) |
+| `Insert` (twice) | One-press bug report: press it **twice within 1 s** -- system info, the logs, `dlaa.ini` and PNG frames (DLAA on / off; with `capture_mode = 2` also what DLSS got, the motion-vector view, motion off, jitter only) into `dlaa_selftest\shimmer_<date>_<time>\`, split into zips by kind (each at most 24 MB): `shimmer_<time>_main.zip` (always attach), `shimmer_<time>_full.zip` (only with `Capture includes` = full) and `shimmer_<time>_rewind.zip` (only with Rewind before key on). Works at any log level (it raises it for its own duration). See [How to send a bug report](#how-to-send-a-bug-report) |
 | `Ctrl+F10` | NGX input snapshot |
 | `Ctrl+F11` | Frame trace |
 | `Ctrl+F12` | Cycle NGX jitter sign |
@@ -1165,9 +1165,9 @@ a second or two: one beep = started, two rising beeps = done. The mod writes the
 `dlaa_selftest\shimmer_<date>_<time>\` in the game's `bin\win_x64\` folder, split into zips by kind (each at most 24 MB,
 so each opens on its own and fits a GitHub comment):
 
-- **`shimmer_<time>_main.zip`** — the logs, your `dlaa.ini`, system info and the DLAA on / off frames. **Always attach this one.**
-- **`shimmer_<time>_full_partNN.zip`** — the extra views, only written when `Capture includes` is set to **full**. Attach only if asked.
-- **`shimmer_<time>_rewind_partNN.zip`** — the frames from before the key, only written when **Rewind before key** is on. Attach only if asked.
+- **`shimmer_<time>_main.zip`** — the logs, your `dlaa.ini`, system info and the DLAA on / off frames. **Always attach this one** (a big VR capture can be `_main_part01.zip`, `_main_part02.zip` ...: then attach all `_main` parts).
+- **`shimmer_<time>_full.zip`** — the extra views, only written when `Capture includes` is set to **full**. Attach only if asked.
+- **`shimmer_<time>_rewind.zip`** — the frames from before the key, only written when **Rewind before key** is on. Attach only if asked.
 
 So for most reports you attach just the `_main` zip; add the others only when I ask for them. You can also upload the whole
 `shimmer_<date>_<time>` folder to Google Drive / OneDrive / Dropbox and paste the link. A file bigger than one part is cut into

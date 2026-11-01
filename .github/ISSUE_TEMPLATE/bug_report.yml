@@ -11,12 +11,17 @@ body:
         **Please write in English**, so that everybody can read your issue and help. Not everyone understands your
         language, but most people read English. A translation tool (DeepL, Google Translate) is fine.
 
-        **Easiest: the one-press bug report.** Where the problem shows in game, press `Insert` **twice**
-        within one second (or menu: Bug report > Capture now). Two rising beeps = done. Drag the newest
-        `dlaa_selftest\shimmer_<date>_<time>_main.zip` (next to `dinput8.dll`) into the Files box below. The `_full` and
-        `_rewind` zips are extras: attach them only if asked. Each zip is at most 24 MB (GitHub takes up to 25 MB). Or upload the capture folder to
-        Google Drive / OneDrive / Dropbox and paste the link. The parts hold the log, `dlaa.ini`, system info and a few
-        frames; your Windows user name and home folder are removed from them.
+        **Easiest: the one-press bug report (3 steps).**
+        1. In game, where the problem shows, press `Insert` **twice** within one second (or menu: Bug report > Capture now).
+           One beep = started. Keep playing for a second or two. Two rising beeps = done.
+        2. Open the game's `bin\win_x64\dlaa_selftest\` folder (next to `dinput8.dll`).
+        3. Drag the newest **`shimmer_<date>_<time>_main.zip`** into the Files box below. (A big VR capture can be
+           `_main_part01.zip`, `_main_part02.zip` ...: then drag all `_main` parts.)
+
+        The `_main` zip holds the log, your `dlaa.ini`, system info and pictures with DLAA on and off. Your Windows user
+        name and home folder are removed from it. The `_full` and `_rewind` zips are extras: attach them only if I ask.
+        Each zip is at most 24 MB (GitHub takes up to 25 MB). Too big or too many? Upload the folder to Google Drive /
+        OneDrive / Dropbox and paste the link.
 
         **Or make the log by hand (it takes a minute):**
         1. In `dlaa.ini` (next to `dinput8.dll` in the game's `bin\win_x64\` folder), change `log_level = 1` to `log_level = 4`.
@@ -63,6 +68,17 @@ body:
     attributes:
       label: VR headset and how it connects (VR only)
       placeholder: "Example: Quest 3 via Virtual Desktop (VDXR)"
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode (the menu's Mode row / End key)
+      options:
+        - DLAA
+        - DLSS
+        - Mix (TAA + DLAA)
+        - Mix (TAA + DLSS)
+        - off
+        - I don't know
   - type: input
     id: gpu
     attributes:
@@ -75,7 +91,7 @@ body:
     attributes:
       label: Mod version
       description: The first line of the log says it (`DLAA injector v... loaded`).
-      placeholder: "Example: v0.15.0"
+      placeholder: "Example: v0.16.0"
     validations:
       required: true
   - type: input
