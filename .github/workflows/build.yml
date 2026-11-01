@@ -118,9 +118,9 @@ jobs:
         run: build\tests\fps_pose_test.exe
       - name: Test cut-out alpha mips (src/cutout_mips.h detector, coverage-preserving binary BC3 alpha mips)
         run: build\tests\cutout_mips_test.exe
-      - name: Test lighting full-screen jitter (phase 78 -- src/light_fs.h edge rects; WARP: shifted draw + edge re-draw, each pixel once, own texel)
+      - name: 'Test lighting full-screen jitter (phase 78 -- src/light_fs.h edge rects; WARP: shifted draw + edge re-draw, each pixel once, own texel)'
         run: build\tests\light_fs_test.exe
-      - name: Test outside AA (phase 81 -- src/outside_aa.h feather bands; WARP: unjitter of jittered-viewport frames, in place + upscale, sign mutation)
+      - name: 'Test outside AA (phase 81 -- src/outside_aa.h feather bands; WARP: unjitter of jittered-viewport frames, in place + upscale, sign mutation)'
         run: build\tests\outside_aa_test.exe
       - name: Test bug report capture helpers (phase 89b-d -- src/bug_report.h; zip read back, privacy scrubber, plan, pruning, double press)
         run: build\tests\bug_report_test.exe
