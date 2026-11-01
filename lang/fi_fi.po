@@ -168,46 +168,63 @@ msgstr "Valikkopaneeli"
 msgid "Compare and test"
 msgstr "Vertailu ja testi"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Bug report"
+msgstr "Virheraportti"
+
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's "
-"Scaling is below 100 %. off = the game's own picture: use it to compare. Saved at once."
+"Scaling is below 100 %. Mix = the game's own TAA blended with DLAA / DLSS: calmer, a bit softer. "
+"off = the game's own picture. Saved at once."
 msgstr ""
-"DLAA = siistit reunat pelin renderöintikoossa. DLSS = sama, ja skaalaa ylös kun pelin Scaling on "
-"alle 100 %. pois = pelin oma kuva: vertailuun. Tallentuu heti."
+"DLAA = puhtaat reunat pelin renderöintikoossa. DLSS = sama, ja skaalaa ylös, kun pelin Skaalaus "
+"on alle 100 %. Sekoitus = pelin oma TAA sekoitettuna DLAA / DLSS:n kanssa: rauhallisempi, hieman "
+"pehmeämpi. pois = pelin oma kuva. Tallentuu heti."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Presets for your GPU. high = everything on (model 1). medium = model 2, half-size see-through "
-"depth, flat mirrors without part motion, lighter part-motion search. low = also no mirror DLAA, "
-"no see-through depth, VR area 60 %. Never changes a setting you set yourself."
+"How much of the Mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer, less = "
+"sharper. Shown while Mode is Mix, or a split has a Mix side. No extra cost."
 msgstr ""
-"Esiasetukset näytönohjaimelle. korkea = kaikki päällä (malli 1). keskitaso = malli 2, "
-"puolikokoinen läpinäkyvyyssyvyys, litteät peilit ilman osien liikettä, kevyempi liikehaku. matala "
-"= myös ei peili-DLAA:ta, ei läpinäkyvyyssyvyyttä, VR-alue 60 %. Ei muuta itse asettamaasi."
+"Kuinka suuri osa sekoituksesta on pelin TAA:ta, 0 - 100 % 10 %:n askelin: enemmän = rauhallisempi "
+"ja pehmeämpi, vähemmän = terävämpi. Näkyy, kun Tila on Sekoitus tai jaossa on sekoituspuoli. Ei "
+"lisäkustannusta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, least ghosting "
+"Presets for your graphics card. high = everything on (model 1). medium = model 2, a lighter Glass "
+"and fence fix, mirrors without Track moving parts. low = also no Smooth mirrors, no Glass and "
+"fence fix, VR area 60 %. Never changes a setting you set yourself."
+msgstr ""
+"Esiasetukset näytönohjaimellesi. korkea = kaikki päällä (malli 1). keskitaso = malli 2, kevyempi "
+"lasi- ja aitakorjaus, peilit ilman Seuraa liikkuvia osia. matala = myös ei Tasoita peilit, ei "
+"lasi- ja aitakorjausta, VR-alue 60 %. Ei koskaan muuta asetusta, jonka olet itse asettanut."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, fewest trails "
 "behind traffic: start here. 3 (F) = calmest on fences and wires, can smear moving detail, same "
 "cost as 2. 4 (M) = heaviest (about 5x), flat tests only."
 msgstr ""
-"1 (K) = eniten yksityiskohtia, terävin teksti, noin 1,6x GPU-kuorma verrattuna 2:een. 2 (E) = "
-"tasapainoinen, vähiten haamukuvia liikenteen takana: aloita tästä. 3 (F) = rauhallisin aidoilla "
-"ja johdoilla, voi tahrata liikkuvaa yksityiskohtaa, hinta kuin 2. 4 (M) = raskain (noin 5x), vain "
-"litteään tilaan."
+"1 (K) = eniten yksityiskohtia, terävin teksti, noin 1,6-kertainen GPU verrattuna 2:een. 2 (E) = "
+"tasapainoinen, vähiten jälkiä liikenteen perässä: aloita tästä. 3 (F) = rauhallisin aidoissa ja "
+"johdoissa, voi tahrata liikkuvia yksityiskohtia, sama hinta kuin 2. 4 (M) = raskain (noin "
+"5-kertainen), vain litteän testeihin."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Picture quality: sharpening, texture sharpness, the DLAA area and the see-through depth. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
+"Picture quality: sharpening, texture sharpness, the Glass and fence fix, the Light trail fix and "
+"the DLAA area. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Kuvanlaatu: terävöitys, tekstuurien terävyys, DLAA-alue ja läpinäkyvyyssyvyys. Oikea avaa ryhmän, "
-"vasen sulkee; se on aina kiinni kun valikko avataan."
+"Kuvanlaatu: terävöinti, tekstuurin terävyys, lasi- ja aitakorjaus, valojälkikorjaus ja DLAA-alue. "
+"Oikea avaa ryhmän, Vasen sulkee sen; se on suljettuna aina, kun valikko avataan."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -233,42 +250,44 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Sharper texture text (road signs, dashboard, GPS). 0 = off; more negative = sharper but more "
-"shimmer on fences; try -0.5 to -1 if text is blurry. No GPU time, only a little memory bandwidth."
+"shimmer on fences; try -0.5 to -1 if text is blurry. Almost no cost."
 msgstr ""
-"Terävämpi tekstuuriteksti (tienviitat, mittaristo, GPS). 0 = pois; mitä negatiivisempi, sitä "
-"terävämpi mutta aidat välkkyvät enemmän; kokeile -0.5...-1 jos teksti on sumeaa. Ei GPU-aikaa, "
-"vain vähän muistikaistaa."
+"Terävämpi teksti tekstuureissa (tienviitat, mittaristo, GPS). 0 = pois; mitä negatiivisempi, sitä "
+"terävämpi, mutta aidoissa enemmän välkettä; kokeile -0,5 - -1, jos teksti on sumeaa. Ei juuri "
+"maksa mitään."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"The same for wire fences, grass and leaf cut-outs: raise it toward 0 if fences shimmer, lower it "
-"if grass looks soft. same = follows the row above. Acts only while Texture sharpness is not 0. No "
-"GPU time, a little memory."
+"The same for wire fences, grass and leaves: raise it toward 0 if fences shimmer, lower it if "
+"grass looks soft. same = follows the row above. Works only while Texture sharpness is not 0. "
+"Almost no cost."
 msgstr ""
-"Sama verkkoaidoille, ruohoille ja lehtien leikkauksille: nosta kohti 0:aa jos aidat välkkyvät, "
-"laske jos ruoho on pehmeää. sama = seuraa ylempää riviä. Toimii vain kun Tekstuurin terävyys ei "
-"ole 0. Ei GPU-aikaa, vähän muistia."
+"Sama verkkoaidoille, ruoholle ja lehdille: nosta kohti 0:aa, jos aidat välkkyvät, laske, jos "
+"ruoho näyttää pehmeältä. sama = seuraa ylempää riviä. Toimii vain, kun Tekstuurin terävyys ei ole "
+"0. Ei juuri maksa mitään."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives wires, fences and glass their own distance instead of what is behind them, so they do not "
-"smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."
+"Wires, fences and windows are treated as the thing in front, not as what you see through them, so "
+"they do not smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms "
+"per eye."
 msgstr ""
-"Antaa johdoille, aidoille ja lasille oman etäisyyden taustan sijaan, jotta ne eivät tahraa "
-"liikkuessa. Kytke pois jos et näe tahraa: säästää 0,02 - 0,06 ms silmää kohti."
+"Johdot, aidat ja ikkunat käsitellään edessä olevana, ei sen takana näkyvänä, jotta ne eivät "
+"tahriudu liikkuessasi. Kytke pois, jos et näe tahriutumista siellä: säästää 0,02 - 0,06 ms silmää "
+"kohti."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Stops street-lamp and car-light glows leaving a trail behind them when you move: DLSS takes each "
-"glow from the current frame, not its history. 25 % steps; lower it if lamp glows flicker, 0 = "
-"off. Costs about 0.05 - 0.2 ms per eye."
+"Stops street-lamp and car-light glows leaving a trail behind them when you move: the glows are "
+"drawn fresh each frame instead of being blended with older frames. 25 % steps; lower it if lamp "
+"glows flicker, 0 = off. Costs about 0.05 - 0.2 ms per eye."
 msgstr ""
-"Estää katulamppujen ja autojen valojen hehkua jättämästä jälkeä liikkuessa: DLSS ottaa hehkun "
-"nykyisestä kuvasta, ei historiasta. 25 % askelin; laske jos lamppujen hehku välkkyy, 0 = pois. "
-"Kuluttaa noin 0,05 - 0,2 ms silmää kohti."
+"Estää katuvalojen ja autojen valojen hehkua jättämästä jälkeä perässään, kun liikut: hehku "
+"piirretään joka kuvassa uudestaan sen sijaan, että se sekoitettaisiin vanhempiin kuviin. 25 %:n "
+"askelin; laske, jos lampun hehku välkkyy, 0 = pois. Maksaa noin 0,05 - 0,2 ms silmää kohti."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -293,24 +312,24 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and "
-"does not ghost. Turn it off only to save about 0.5 ms per eye or to test: every pixel then moves "
+"DLAA follows each moving thing on its own (traffic, wheels, number plates), so it stays sharp and "
+"leaves no trail. Turn it off only to save about 0.5 ms per eye or to test: everything then moves "
 "with the camera and traffic smears."
 msgstr ""
-"Antaa jokaiselle liikkuvalle osalle (liikenne, pyörät, kilvet) oman liikkeen DLAA:lle, jotta se "
-"pysyy terävänä eikä haamuile. Kytke pois vain säästääksesi noin 0,5 ms silmää kohti tai testiin: "
-"silloin kaikki pikselit liikkuvat kameran mukana ja liikenne tahraa."
+"DLAA seuraa jokaista liikkuvaa asiaa erikseen (liikenne, pyörät, rekisterikilvet), joten kuva "
+"pysyy terävänä eikä jätä jälkiä. Kytke pois vain säästääksesi noin 0,5 ms silmää kohti tai "
+"testataksesi: silloin kaikki liikkuu kameran mukana ja liikenne tahriutuu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main "
-"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can ghost "
-"in the glass; else each part moves exactly in the glass."
+"Smooths the truck mirrors too, so they do not shimmer. 1 mirror = only the largest (the main "
+"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can leave "
+"trails in the glass; the others follow each moving thing."
 msgstr ""
-"Antaa auton peileille oman DLAA:n, jotta ne eivät välky. 1 peili = vain suurin (pääpeili "
-"vieressäsi). kaikki = kaikki peilit. kamera = halvin peiliä kohti, liikkuva liikenne voi "
-"haamuilla lasissa; muuten jokainen osa liikkuu lasissa tarkasti."
+"Tasoittaa myös rekan peilit, jotta ne eivät välky. 1 peili = vain suurin (pääpeili vieressäsi). "
+"kaikki = jokainen peili. kamera = halvin peiliä kohti, liikkuva liikenne voi jättää jälkiä "
+"lasiin; muut seuraavat jokaista liikkuvaa asiaa."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -326,131 +345,146 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
-"the group, Left closes it; it starts closed every time the menu opens."
+"Frame rate and CPU: CPU tuning, AMD cache cores, an FPS cap and Low delay (Reflex) for flat, an "
+"FPS cap for VR. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Kuvataajuus ja CPU: CPU-viritys, FPS-raja ja NVIDIA Reflex litteälle, VR FPS-raja. Oikea avaa "
-"ryhmän, vasen sulkee; se on aina kiinni kun valikko avataan."
+"Kuvataajuus ja CPU: CPU-viritys, AMD-välimuistiytimet, FPS-raja ja Matala viive (Reflex) "
+"litteälle, FPS-raja VR:lle. Oikea avaa ryhmän, Vasen sulkee sen; se on suljettuna aina, kun "
+"valikko avataan."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
-"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
-"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
+"Three CPU switches together. Prefer fast cores: only Intel CPUs with P-cores and E-cores. Higher "
+"priority and no Windows power saving for the game: every CPU, Intel and AMD. Helps when the CPU "
+"is the limit; no cost. Separate in dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle."
 msgstr ""
-"Kolme CPU-kytkintä yhdessä: pää- ja renderöintisäie suosivat P-ytimiä (vain Intel-hybridi-CPU:t), "
-"peli ajaa Above normal -prioriteetilla, eikä Windows saa kuristaa sitä (EcoQoS) tai ohittaa sen "
-"ajastinpyyntöjä. Auttaa kun CPU rajoittaa; ilmainen. Erilliset asetukset dlaa.ini:ssä: cpu_pcore, "
-"cpu_priority, cpu_no_throttle."
+"Kolme CPU-kytkintä yhdessä. Suosi nopeita ytimiä: vain Intel-prosessorit, joissa on P- ja "
+"E-ytimiä. Korkeampi prioriteetti ja ei Windowsin virransäästöä pelille: kaikki prosessorit, Intel "
+"ja AMD. Auttaa, kun CPU on rajoite; ei hintaa. Erikseen dlaa.ini:ssä: cpu_pcore, cpu_priority, "
+"cpu_no_throttle."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"AMD X3D CPUs with two core groups (7950X3D, 9950X3D): keeps the game on the cores with the big 3D "
+"V-Cache, which games like. Switches at once; off gives the game all cores back. Try it and "
+"compare in a busy city. No cost."
+msgstr ""
+"AMD X3D -prosessorit, joissa on kaksi ydinryhmää (7950X3D, 9950X3D): pitää pelin ytimillä, joissa "
+"on iso 3D V-Cache, josta pelit pitävät. Vaikuttaa heti; pois antaa pelille kaikki ytimet "
+"takaisin. Kokeile ja vertaa vilkkaassa kaupungissa. Ei hintaa."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
-"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
-"limiting. off = no limit."
+"Set it a bit below what your PC holds in a busy city. With Low delay (Reflex) on, the NVIDIA "
+"driver does the limiting. off = no limit."
 msgstr ""
 "Vain litteä. Pitää pelin enintään tässä kuvataajuudessa: tasainen kuva-aika, vähemmän lämpöä ja "
-"virtaa. Aseta hieman alle sen, minkä PC pitää vilkkaassa kaupungissa. Reflexin ollessa päällä "
-"NVIDIA-ajuri rajoittaa. pois = ei rajaa."
+"virtaa. Aseta se hieman alle sen, minkä tietokoneesi jaksaa vilkkaassa kaupungissa. Kun Matala "
+"viive (Reflex) on päällä, NVIDIA-ajuri rajoittaa. pois = ei rajaa."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
-"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
+"Flat only, NVIDIA only (NVIDIA Reflex). On = the game's frames wait less before the graphics card "
+"draws them: less delay between your steering and the picture when the card is the limit. Boost "
+"also keeps the card's clocks up. Same fps; small cost."
 msgstr ""
-"Vain litteä, vain NVIDIA. Päällä = pelin kuvat odottavat vähemmän GPU-jonossa: pienempi "
-"syöttöviive kun GPU rajoittaa. Boost pitää myös GPU:n kellot ylhäällä. Sama fps; pieni hinta. Ei "
-"VR:ssä."
+"Vain litteä, vain NVIDIA (NVIDIA Reflex). Päällä = pelin kuvat odottavat lyhyemmin ennen kuin "
+"näytönohjain piirtää ne: pienempi viive ohjauksen ja kuvan välillä, kun näytönohjain on rajoite. "
+"Boost pitää myös kortin kellotaajuudet ylhäällä. Samat fps; pieni hinta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
-"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
-"the fps swings. Turns Turbo off while on."
+"headset's frame smoothing (ASW / Motion Smoothing) fills in the rest at a steady rhythm. Use it "
+"when the fps swings. Turns Turbo off while on."
 msgstr ""
 "Vain VR. puolet = peli piirtää joka 2. VR-lasien kuvan (72 Hz -> 36 fps), kolmannes = joka 3.; "
-"VR-lasien reprojektio (ASW / Motion Smoothing) täyttää loput tasaisella rytmillä. Käytä kun fps "
-"vaihtelee. Kytkee Turbon pois kun päällä."
+"lasien kuvanpehmennys (ASW / Motion Smoothing) täyttää loput tasaisella rytmillä. Käytä, kun fps "
+"vaihtelee. Kytkee Turbon pois, kun se on päällä."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
-"are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
+"VR speed-ups: Turbo, foveated rendering, skipping the hidden lens edges, and whether OFXR Bridge "
+"/ VectorXR are found. Right opens the group, Left closes it; it starts closed every time the menu "
+"opens."
 msgstr ""
-"VR-nopeutukset: Turbo, foveated-renderöinti, piilotetun alueen maski ja löytyvätkö OFXR Bridge / "
-"VectorXR. Oikea avaa ryhmän, vasen sulkee; se on aina kiinni kun valikko avataan."
+"VR-nopeutukset: Turbo, foveated rendering, piilotettujen linssinreunojen ohitus ja löytyvätkö "
+"OFXR Bridge / VectorXR. Oikea avaa ryhmän, Vasen sulkee sen; se on suljettuna aina, kun valikko "
+"avataan."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Turbo: no ASW / Motion Smoothing / SSW / reprojection. VR only. On = the game stops waiting for "
-"the headset each frame: more fps only when the CPU is the limit (busy cities, traffic). Turn it "
-"off if the picture judders. From OpenXR Toolkit."
+"Turbo switches off the headset's frame smoothing (ASW / Motion Smoothing / SSW). VR only. On = "
+"the game stops waiting for the headset each frame: more fps only when the CPU is the limit (busy "
+"cities, traffic). Turn it off if the picture judders."
 msgstr ""
-"Turbo: ei ASW / Motion Smoothing / SSW / reprojektiota. Vain VR. Päällä = peli ei odota VR-laseja "
-"joka kuvalla: lisää fps:ää vain kun CPU rajoittaa (vilkkaat kaupungit, liikenne). Kytke pois jos "
-"kuva nykii. OpenXR Toolkitista."
+"Turbo kytkee pois VR-lasien kuvanpehmennyksen (ASW / Motion Smoothing / SSW). Vain VR. Päällä = "
+"peli lakkaa odottamasta VR-laseja joka kuvassa: enemmän fps vain, kun CPU on rajoite (vilkkaat "
+"kaupungit, liikenne). Kytke pois, jos kuva nykii."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR "
-"only. The outer ring is shaded once per 2 x 2 pixels; fences, grass and leaves keep full detail. "
+"only. The outer ring gets one colour per 2 x 2 pixels; fences, grass and leaves keep full detail. "
 "Turn it off if the edge looks blocky."
 msgstr ""
 "Terävä keskusta, matalampi tarkkuus reunalla (vain NVIDIA RTX). Säästää GPU-aikaa suurella "
-"Scalingilla. Vain VR. Ulkokehä varjostetaan kerran 2 x 2 pikseliä kohti; aidat, ruoho ja lehdet "
-"säilyttävät tarkkuuden. Kytke pois jos reuna näyttää lohkomaiselta."
+"Skaalauksella. Vain VR. Uloin rengas saa yhden värin 2 x 2 pikseliä kohti; aidat, ruoho ja lehdet "
+"säilyttävät täyden tarkkuuden. Kytke pois, jos reuna näyttää lohkomaiselta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How big the sharp centre of Foveated (VRS) is, 10 - 100 % in 5 % steps: bigger = more of the view "
-"sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
+"How big the sharp centre of Foveated rendering is, 10 - 100 % in 5 % steps: bigger = more of the "
+"view sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
 "(balanced) is the default; 90 = wide, 65 = narrow."
 msgstr ""
-"Foveated (VRS) -terävän keskustan koko, 10 - 100 % 5 %:n askelin: suurempi = enemmän kuvaa "
-"terävänä, vähemmän säästöä; pienempi = enemmän säästöä, matalampi tarkkuus alkaa lähempää "
-"keskustaa. 80 % (tasapainoinen) on oletus; 90 = leveä, 65 = kapea."
+"Kuinka suuri Foveated renderingin terävä keskusta on, 10 - 100 % 5 %:n askelin: suurempi = "
+"enemmän kuvasta terävää, vähemmän säästöä; pienempi = enemmän säästöä, matalampi tarkkuus alkaa "
+"lähempää keskustaa. 80 % (tasapainoinen) on oletus; 90 = leveä, 65 = kapea."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Which of the game's passes Foveated (VRS) acts on. scene = the 3D world only (default). scene + "
-"lighting = also the game's lighting pass, at the very edge only: more saving. Test it: look for "
-"blocky light or shadow edges at the side of your view."
+"What Foveated rendering makes coarser. scene = the 3D world only (default). scene + lighting = "
+"also the game's lighting, at the very edge only: more saving. Test it: look for blocky light or "
+"shadow edges at the side of your view."
 msgstr ""
-"Mihin pelin vaiheisiin Foveated (VRS) vaikuttaa. kohtaus = vain 3D-maailma (oletus). kohtaus + "
-"valaistus = myös valaistusvaihe, aivan reunalla: enemmän säästöä. Testaa: katso lohkomaisia valo- "
-"tai varjoreunoja näkökentän sivulla."
+"Mitä Foveated rendering tekee karkeammaksi. kohtaus = vain 3D-maailma (oletus). kohtaus + valo = "
+"myös pelin valaistus, vain aivan reunalla: enemmän säästöä. Testaa: etsi lohkomaisia valon tai "
+"varjon reunoja näkökenttäsi laidalta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How coarse the outer ring of Foveated (VRS) is. Normal = 1 colour per 2 x 2 pixels (default). "
+"How coarse the outer ring of Foveated rendering is. Normal = 1 colour per 2 x 2 pixels (default). "
 "Strong = per 4 x 2, Max = per 4 x 4: more GPU saving, blockier edges. Best with eye tracking, "
 "where you never look at the outer ring."
 msgstr ""
-"Foveated (VRS) -ulkokehän karkeus. Normaali = 1 väri per 2 x 2 pikseliä (oletus). Vahva = per 4 x "
-"2, Maksimi = per 4 x 4: enemmän GPU-säästöä, lohkomaisemmat reunat. Paras silmänseurannalla, "
-"jolloin et katso ulkokehää."
+"Kuinka karkea Foveated renderingin uloin rengas on. Normaali = 1 väri 2 x 2 pikseliä kohti "
+"(oletus). Vahva = 4 x 2:ta kohti, Max = 4 x 4:ää kohti: enemmän GPU-säästöä, lohkomaisemmat "
+"reunat. Paras silmänseurannan kanssa, jolloin et koskaan katso uloimpaan renkaaseen."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Experimental. The sharp centre of Foveated (VRS) follows your eyes on a headset with eye tracking "
-"(OpenXR eye gaze, for example Varjo); without one it stays at the lens centre. Needs Foveated "
-"(VRS) on at the game's start, else a restart. Almost no cost."
+"Experimental. The sharp centre of Foveated rendering follows your eyes on a headset with eye "
+"tracking (for example Varjo); without it the centre stays in the middle of the lens. Needs "
+"Foveated rendering on at the game's start, else a restart. Almost no cost."
 msgstr ""
-"Kokeellinen. Foveated (VRS) -terävä keskusta seuraa silmiäsi silmänseurantaa tukevilla "
-"VR-laseilla (OpenXR eye gaze, esim. Varjo); ilman sitä se pysyy linssin keskellä. Vaatii Foveated "
-"(VRS) päällä pelin alussa, muuten uudelleenkäynnistyksen. Lähes ilmainen."
+"Kokeellinen. Foveated renderingin terävä keskusta seuraa silmiäsi VR-laseissa, joissa on "
+"silmänseuranta (esimerkiksi Varjo); ilman sitä keskusta pysyy linssin keskellä. Foveated "
+"renderingin on oltava päällä pelin käynnistyessä, muuten tarvitaan uudelleenkäynnistys. Ei juuri "
+"maksa mitään."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -526,13 +560,13 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see "
-"what a setting gains. Its GPU cost is measured: per frame, every picture it is drawn into; none "
-"when off. Save keeps it for the next start."
+"A small live fps and frame-time box, also while this menu is closed (flat and VR): fps, ms, "
+"numbers only, each with or without a graph of recent frame times (spikes show red), or the graph "
+"alone. Its GPU cost is measured. Save keeps it."
 msgstr ""
-"Pieni live-fps- ja kuva-aikalaatikko, myös valikon ollessa kiinni (litteä ja VR). Käytä "
-"nähdäksesi mitä asetus tuo. GPU-hinta mitataan: kuvaa kohti, jokaiseen kuvaan johon se "
-"piirretään; ei mitään kun pois. Tallennus pitää sen seuraavaan käynnistykseen."
+"Pieni live-ruutu fps:lle ja kuva-ajalle, myös kun tämä valikko on kiinni (litteä ja VR): fps, ms, "
+"vain numerot, kukin kuvaajalla tai ilman, joka näyttää viimeaikaiset kuva-ajat (piikit näkyvät "
+"punaisina), tai vain kuvaaja. Sen GPU-hinta mitataan. Tallenna säilyttää sen."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -602,13 +636,24 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
-"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
-"Per-part motion vectors). No cost."
+"How far back the fps graph shows: 2 - 60 s. One bar per slice of time = its slowest frame, so you "
+"see spikes. Green = on time, yellow = a bit slow, red = a hitch; the line = the headset rate / "
+"FPS cap / your usual. Shown when FPS counter has a graph."
 msgstr ""
-"Vain VR. Seuraa päätä = liikkuu VR-lasien mukana. Kiinni tilassa = yksi paikka istuimesi "
-"ympärillä, ei seuraa ohjaamon heilumista. Ajoneuvoon kiinni = kiinni ohjaamossa, heiluu sen "
-"mukana (vaatii DLAA + Osakohtaiset liikevektorit). Ilmainen."
+"Kuinka kauas taaksepäin fps-kuvaaja näyttää: 2 - 60 s. Yksi pylväs aikajaksoa kohti = sen hitain "
+"kuva, joten näet piikit. Vihreä = ajoissa, keltainen = hieman hidas, punainen = nykäys; viiva = "
+"VR-lasien taajuus / FPS-raja / tavallinen arvosi. Näkyy, kun FPS-laskurilla on kuvaaja."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
+"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Track "
+"moving parts). No cost."
+msgstr ""
+"Vain VR. Seuraa päätä = liikkuu VR-lasien mukana. Kiinteä pelitilassa = yksi paikka istuimesi "
+"ympärillä, ohittaa ohjaamon heilunnan. Kiinni ajoneuvossa = kiinni ohjaamossa, heiluu sen mukana "
+"(vaatii DLAA + Seuraa liikkuvia osia). Ei hintaa."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -742,13 +787,12 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Switches for A/B checks: DLAA off, the game's own TAA mixed in or side by side, the thin-wire "
-"switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
-"group, Left closes it."
+"Switches for comparing: DLAA off, the game's own TAA mixed in or side by side, the wire fixes, "
+"running DLAA earlier. Nothing here is needed for normal driving. Right opens the group, Left "
+"closes it."
 msgstr ""
-"Kytkimet A/B-vertailuun: DLAA pois, pelin oma TAA sekoitettuna tai rinnakkain, ohuiden johtojen "
-"kytkimet, DLAA ennen sävykartoitusta. Mitään tästä ei tarvita tavallisessa ajossa. Oikea avaa "
-"ryhmän, vasen sulkee."
+"Kytkimiä vertailuun: DLAA pois, pelin oma TAA sekoitettuna tai rinnakkain, johtokorjaukset, DLAA "
+"aiemmin. Mitään näistä ei tarvita tavalliseen ajamiseen. Oikea avaa ryhmän, Vasen sulkee sen."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -762,64 +806,55 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
-"right, to compare."
+"on = the mod on the left, the game's own TAA on the right, to compare (Split line position, "
+"Split: left | right). Replaces Mix while on. With the game's console on, the mod switches the "
+"game's Anti-aliasing for you."
 msgstr ""
-"Vain kun pelin reunanpehmennys on TAA. pois = pelkkä modi (aseta pelin AA tilaan Pois käytöstä). "
-"sekoitus = TAA ja DLAA / DLSS samassa kuvassa, sekoitettuna. jaettu = vasemmalla modi, oikealla "
-"TAA, vertailuun."
+"päällä = modi vasemmalla, pelin oma TAA oikealla, vertailua varten (Jakoviivan paikka, Jako: "
+"vasen | oikea). Korvaa Sekoituksen, kun päällä. Kun pelin konsoli on päällä, modi vaihtaa pelin "
+"reunanpehmennyksen puolestasi."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
+"Where the split line is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS on the left "
+"of it, the game's TAA on the right. Used only while Split with game TAA is on."
 msgstr ""
-"Kuinka suuri osa sekoituksesta on pelin TAA:ta, 0 - 100 % 10 %:n askelin: enemmän = rauhallisempi "
-"ja pehmeämpi (TAA), vähemmän = terävämpi (DLAA / DLSS). Käytössä, kun Pelin TAA on sekoitus, tai "
-"jaettu sekoituspuolella. Ei lisäkustannusta."
+"Missä jakoviiva on, 0 - 100 % leveydestä 5 %:n askelin: sen vasemmalla puolella modin DLAA / "
+"DLSS, oikealla pelin TAA. Käytössä vain, kun Jako pelin TAA:lla on päällä."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
-"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+"What the split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix | TAA "
+"or DLAA | Mix (Mix = the two blended at Mix amount). DLSS instead of DLAA when upscaling. Used "
+"only while Split with game TAA is on."
 msgstr ""
-"Missä Pelin TAA jaettu -viiva on, 0 - 100 % leveydestä 5 %:n askelin: sen vasemmalla modin DLAA / "
-"DLSS, oikealla pelin TAA. Käytössä vain, kun Pelin TAA on jaettu."
+"Mitä jako näyttää kummallakin puolellaan: DLAA | TAA (modi vasemmalla, pelin TAA oikealla), "
+"sekoitus | TAA tai DLAA | sekoitus (sekoitus = molemmat sekoitettuna Sekoitusmäärän mukaan). DLSS "
+"DLAA:n sijaan skaalattaessa. Käytössä vain, kun Jako pelin TAA:lla on päällä."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
-"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
-"upscaling. Used only when Game TAA is split."
+"Thin wires move correctly while you drive: their movement is spread over the whole thin line. on "
+"= default. off = only to compare; near wires flicker more. The picture is soft for a moment when "
+"you switch."
 msgstr ""
-"Mitä Pelin TAA jaettu näyttää kummallakin puolellaan: DLAA | TAA (vasemmalla modi, oikealla pelin "
-"TAA), sekoitus | TAA tai DLAA | sekoitus (sekoitus = molemmat sekoitettuna Pelin TAA:n osuuden "
-"mukaan). DLSS DLAA:n sijaan skaalattaessa. Käytössä vain, kun Pelin TAA on jaettu."
+"Ohuet johdot liikkuvat oikein ajaessasi: niiden liike levitetään koko ohuen viivan yli. päällä = "
+"oletus. pois = vain vertailuun; lähellä olevat johdot välkkyvät enemmän. Kuva on hetken pehmeä, "
+"kun vaihdat."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
-"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
-"soft for a moment when it changes."
+"Thin wires count as in front on every pixel they touch, even where they cover only a sliver of "
+"it. on = default. on (no A2C) = also for see-through edges such as leaves. off = only to compare; "
+"near wires flicker more."
 msgstr ""
-"Ohuet johdot säilyttävät liikkeensä ajaessa: DLAA levittää liikedatan ohuille viivoille (DLSS "
-"motion dilation). päällä = oletus. pois = vain vertailuun; lähellä olevat johdot välkkyvät "
-"enemmän. Kuva on hetken pehmeä vaihdettaessa."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
-"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
-msgstr ""
-"Ohuet johdot saavat syvyyden jokaiselle koskettamalleen pikselille, ei vain pikselin keskipisteen "
-"peittäessään. päällä = oletus. päällä (no A2C) = myös läpinäkyville reunoille. pois = vain "
-"vertailuun; lähellä olevat johdot välkkyvät enemmän."
+"Ohuet johdot lasketaan edessä oleviksi jokaisella koskettamallaan pikselillä, vaikka ne "
+"peittäisivät siitä vain kapean kaistan. päällä = oletus. päällä (ei A2C) = myös läpikuultaville "
+"reunoille, kuten lehdille. pois = vain vertailuun; lähellä olevat johdot välkkyvät enemmän."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -834,24 +869,86 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
-"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
-"~60 frames to switch."
+"Flat only: DLAA runs before the game adds its glow and colour look, so lane paint, wires and "
+"rails shimmer less. Change it only to compare. Not used with DLSS upscaling or Windows HDR. Same "
+"cost either way; takes about a second to switch."
 msgstr ""
-"Vain litteä: DLAA ennen pelin bloomia / sävykartoitusta, jolloin kaistamaalit, johdot ja kiskot "
-"välkkyvät vähemmän. Muuta vain vertailuun. Ei DLSS-skaalauksella eikä Windows HDR:llä. Sama "
-"hinta; vaihto kestää ~60 kuvaa."
+"Vain litteä: DLAA ajetaan ennen kuin peli lisää hehkunsa ja värilookinsa, joten tienmerkinnät, "
+"johdot ja kiskot välkkyvät vähemmän. Muuta vain vertailua varten. Ei käytössä DLSS-skaalauksen "
+"tai Windows HDR:n kanssa. Sama hinta kummassakin; vaihto kestää noin sekunnin."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Bug report: press the capture key twice (or Capture now) where something looks wrong; the mod "
+"writes one zip you attach to a GitHub issue. Right opens the group, Left closes it."
+msgstr ""
+"Virheraportti: paina tallennusnäppäintä kahdesti (tai Tallenna nyt) siinä, missä jokin näyttää "
+"väärältä; modi kirjoittaa yhden zipin, jonka liität GitHub-issueen. Oikea avaa ryhmän, Vasen "
+"sulkee sen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"One switch for the most complete report: log detail debug, rewind 2 s, capture Full. Off puts the "
+"rows back as they were. Only this switch is saved; the forced values are never written to "
+"dlaa.ini."
+msgstr ""
+"Yksi kytkin kattavimmalle raportille: lokin tarkkuus debug, taaksepäin kelaus 2 s, tallenne "
+"Täysi. Pois palauttaa rivit entiselleen. Vain tämä kytkin tallennetaan; pakotettuja arvoja ei "
+"koskaan kirjoiteta dlaa.ini:hin."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + "
-"problems worked around; info = + start-up and changes; debug = + statistics, and debug also runs "
-"the GPU timers and the CPU profiler."
+"problems worked around; info = + start-up and changes; debug = + statistics and timing "
+"measurements (a little slower)."
 msgstr ""
-"Mitä dlaa_inject.log:iin kirjoitetaan: pois = ei mitään; virheet = vain viat (oletus); "
-"varoitukset = + kierretyt ongelmat; info = + käynnistys ja muutokset; vianetsintä = + tilastot, "
-"ja vianetsintä käynnistää myös GPU-ajastimet ja CPU-profiloijan."
+"Mitä dlaa_inject.log:iin kirjoitetaan: pois = ei mitään; virheet = vain epäonnistumiset (oletus); "
+"varoitukset = + kierretyt ongelmat; info = + käynnistys ja muutokset; vianetsintä = + tilastot ja "
+"ajanmittaukset (hieman hitaampi)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Keeps the last 0.5 - 3 s of frames on the graphics card all the time, so the report shows the "
+"moment BEFORE the key (+ what DLSS got for the last frames). Costs graphics memory (the MB in the "
+"cost column) and a picture copy per frame. off = none."
+msgstr ""
+"Pitää koko ajan viimeiset 0,5 - 3 s kuvia näytönohjaimella, jotta raportti näyttää hetken ENNEN "
+"näppäintä (+ mitä DLSS sai viimeisille kuville). Maksaa näytönmuistia (MB hintasarakkeessa) ja "
+"yhden kuvakopion kuvaa kohti. pois = ei mitään."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Quick = system info, logs, settings, your picture and DLAA off for a few frames (about 1 s). Full "
+"= + what DLSS got per frame (colour, motion, depth) and A/B sets: motion view, motion off, jitter "
+"only (about 2 - 4 s)."
+msgstr ""
+"Nopea = järjestelmätiedot, lokit, asetukset, kuvasi ja DLAA pois muutaman kuvan ajan (noin 1 s). "
+"Täysi = + mitä DLSS sai kuvaa kohti (väri, liike, syvyys) ja A/B-sarjat: liikenäkymä, liike pois, "
+"vain jitter (noin 2 - 4 s)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The capture key. Press it TWICE within 1 s while driving where it goes wrong (the first press "
+"only arms it: one short beep). Right opens the Hotkeys page on its line to change it."
+msgstr ""
+"Tallennusnäppäin. Paina sitä KAKSI kertaa 1 sekunnin sisällä ajaessasi siellä, missä jokin menee "
+"vikaan (ensimmäinen painallus vain virittää sen: yksi lyhyt piippaus). Oikea avaa "
+"Pikanäppäimet-sivun sen riville, jotta voit vaihtaa sen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How many captures stay in the dlaa_selftest folder next to the DLL: older ones (folder + zip) are "
+"deleted when a new one is written. all = never delete."
+msgstr ""
+"Kuinka monta tallennetta jää dlaa_selftest-kansioon DLL:n viereen: vanhemmat (kansio + zip) "
+"poistetaan, kun uusi kirjoitetaan. kaikki = ei koskaan poisteta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -890,12 +987,28 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Puts every setting in this menu back to how the mod ships (model, sharpen, texture sharpness, "
-"DLAA area, motion, mirrors, profile, panel, fps box, turbo, foveated, frame rate, logging), live "
-"and in dlaa.ini, keeping your hotkeys and every other line."
+"DLAA area, motion, mirrors, preset, panel, fps box, turbo, foveated, frame rate, CPU, log "
+"detail), live and in dlaa.ini, keeping your hotkeys and every other line."
 msgstr ""
-"Palauttaa kaikki valikon asetukset modin toimitustilaan (malli, terävöitys, tekstuurien terävyys, "
-"DLAA-alue, liike, peilit, profiili, paneeli, fps-laatikko, turbo, foveated, kuvataajuus, loki), "
-"livenä ja dlaa.ini:ssä, säilyttäen pikanäppäimesi ja kaikki muut rivit."
+"Palauttaa jokaisen tämän valikon asetuksen sellaiseksi kuin modi toimitetaan (malli, terävöinti, "
+"tekstuurin terävyys, DLAA-alue, liike, peilit, esiasetus, paneeli, fps-ruutu, turbo, foveated, "
+"kuvataajuus, CPU, lokin tarkkuus), livenä ja dlaa.ini:ssä, ja säilyttää pikanäppäimesi sekä "
+"kaikki muut rivit."
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Off"
+msgstr "Pois"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph only"
+msgstr "vain kuvaaja"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph"
+msgstr "kuvaaja"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1171,8 +1284,8 @@ msgstr "Maksaa nyt %ls kuvaa kohti; vähemmän peilejä maksaa vähemmän."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Greyed: Mirror DLAA is off."
-msgstr "Harmaana: Peili-DLAA on pois."
+msgid "Greyed: Smooth mirrors is off."
+msgstr "Harmaana: Tasoita peilit on pois."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1185,6 +1298,24 @@ msgstr "Aina päällä: dlaa.ini mirror mode 3 on jo vuorottelua."
 #, c-format
 msgid "The mirrors cost %ls per frame now."
 msgstr "Peilit maksavat nyt %ls kuvaa kohti."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed: only for AMD X3D CPUs with two core groups (7950X3D, 9950X3D)."
+msgstr "Harmaana: vain AMD X3D -prosessoreille, joissa on kaksi ydinryhmää (7950X3D, 9950X3D)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On now: the game runs only on the cores with the big cache."
+msgstr "Päällä nyt: peli pyörii vain ytimillä, joilla on iso välimuisti."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On, but not applied: the game's cores were already limited (see the log)."
+msgstr "Päällä, mutta ei käytössä: pelin ytimet oli jo rajattu (katso loki)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1214,7 +1345,9 @@ msgstr ""
 msgid ""
 "Waiting: click the game window on the desktop. The mod types into the game's console only while "
 "the game window has the focus."
-msgstr "Odotetaan: napsauta pelin ikkunaa työpöydällä. Modi kirjoittaa pelin konsoliin vain, kun pelin ikkunalla on kohdistus."
+msgstr ""
+"Odotetaan: napsauta pelin ikkunaa työpöydällä. Modi kirjoittaa pelin konsoliin vain, kun pelin "
+"ikkunalla on kohdistus."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1231,17 +1364,24 @@ msgstr "Pelin loki ei vahvistanut viimeistä muutosta: katso modin loki."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid "Mix and split need the game's TAA: set Anti-aliasing to TAA in the game's graphics settings."
+msgstr ""
+"Sekoitus ja jaettu tarvitsevat pelin TAA:n: aseta reunanpehmennys tilaan TAA pelin "
+"grafiikka-asetuksissa."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "The game's TAA is not running now: the mod runs alone."
 msgstr "Pelin TAA ei ole nyt käynnissä: modi toimii yksin."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
+msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or set Mode to Mix."
 msgstr ""
-"Pelin TAA on nyt käynnissä: aseta pelin reunanpehmennys tilaan Pois käytöstä tai valitse sekoitus "
-"tai jaettu."
+"Pelin TAA on nyt käynnissä: aseta pelin reunanpehmennys tilaan Pois käytöstä tai aseta Tila "
+"arvoon Sekoitus."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1299,6 +1439,67 @@ msgstr "Palattiin pelin TAA:han: DLAA ei toiminut tässä kuvassa (katso loki)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
+msgid ""
+"Or turn on the game console (g_developer and g_console 1 in config.cfg): then the mod switches it "
+"for you."
+msgstr ""
+"Tai kytke pelin konsoli päälle (g_developer ja g_console 1 tiedostossa config.cfg): silloin modi "
+"vaihtaa sen puolestasi."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn on the game console to let the mod switch the game's Anti-aliasing."
+msgstr "Kytke pelin konsoli päälle, jotta modi voi vaihtaa pelin Anti-aliasingin."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "TAA"
+msgstr "TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "unknown"
+msgstr "tuntematon"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "other"
+msgstr "muu"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "waiting: click the game window"
+msgstr "odottaa: napsauta pelin ikkunaa"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switching..."
+msgstr "vaihdetaan..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch confirmed"
+msgstr "vaihto vahvistettu"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch NOT confirmed (see the log)"
+msgstr "vaihtoa EI vahvistettu (katso loki)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls, %ls."
+msgstr "Pelin AA: %ls, %ls."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls."
+msgstr "Pelin AA: %ls."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
 #, c-format
 msgid ""
 "Switched off by the mod: it cost more than %.1f ms per eye (VR budget). Press its key to try "
@@ -1318,6 +1519,45 @@ msgstr "Maksaa nyt %ls kuvaa kohti; pois säästää sen."
 #, c-format
 msgid "Costs %ls ms GPU per frame now; most of it at night."
 msgstr "Maksaa nyt %ls ms GPU:ta kuvaa kohti; suurin osa yöllä."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"The last one: %d zips of at most 24 MB, %d MB in all (folder %.0f MB). Attach the _main zip; the "
+"others only if asked."
+msgstr "Viimeisin: %d zip-tiedostoa, enintään 24 MB, yhteensä %d MB (kansio %.0f MB). Liitä _main-zip; muut vain pyydettäessä."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Holds %.0f MB of graphics memory now."
+msgstr "Käyttää nyt %.0f MB näytönmuistia."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"%ls about %.0f MB graphics memory for the rewind; a capture takes about %.1f s and writes about "
+"%.0f MB."
+msgstr ""
+"%ls noin %.0f MB näytönmuistia taaksepäin kelaukseen; tallennus kestää noin %.1f s ja kirjoittaa "
+"noin %.0f MB."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "On, it costs"
+msgstr "Päällä se maksaa"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Costs now:"
+msgstr "Maksaa nyt:"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn off Send everything to change this."
+msgstr "Kytke Lähetä kaikki pois muuttaaksesi tätä."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1381,8 +1621,8 @@ msgstr "Harmaana VR:ssä: käytä VR FPS-rajaa."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Limited by the NVIDIA driver now (Reflex is on)."
-msgstr "NVIDIA-ajuri rajoittaa nyt (Reflex on päällä)."
+msgid "Limited by the NVIDIA driver now (Low delay is on)."
+msgstr "NVIDIA-ajuri rajoittaa nyt (Matala viive on päällä)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1435,8 +1675,8 @@ msgstr "Se säästää aikaa pelin omassa GPU-luvussa, ei modin."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Foveated (VRS) is off: switch it on first."
-msgstr "Foveated (VRS) on pois: kytke se ensin päälle."
+msgid "Foveated rendering is off: switch it on first."
+msgstr "Foveated rendering on pois: kytke se ensin päälle."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1454,11 +1694,11 @@ msgstr "Fake gaze (vrs_eye_fake = 1): terävä alue kiertää hitaasti, testi."
 #: src/inject.cpp
 #, c-format
 msgid ""
-"Foveated (VRS) was off at the game's start: save (Shift+F12) and restart the game to ask the "
+"Foveated rendering was off at the game's start: save (Shift+F12) and restart the game to ask the "
 "headset for eye gaze."
 msgstr ""
-"Foveated (VRS) oli pois pelin alussa: tallenna (Shift+F12) ja käynnistä peli uudelleen "
-"pyytääksesi VR-laseilta katsetta."
+"Foveated rendering oli pois pelin käynnistyessä: tallenna (Shift+F12) ja käynnistä peli "
+"uudelleen, jotta VR-laseilta pyydetään katsesuunta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1960,15 +2200,41 @@ msgstr "kiinni (%d)"
 msgid "Mode"
 msgstr "Tila"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLSS)"
+msgstr "Sekoitus (TAA + DLSS)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLAA)"
+msgstr "Sekoitus (TAA + DLAA)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLSS"
 msgstr "DLSS"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLAA"
 msgstr "DLAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Mix amount"
+msgstr "Sekoitusmäärä"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d %% TAA"
+msgstr "%d %% TAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Quality preset"
+msgstr "Laatuesiasetus"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -1994,8 +2260,8 @@ msgstr "%.1f (pois)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Sharpen width"
-msgstr "Terävöinnin leveys"
+msgid "Sharpness size"
+msgstr "Terävöinnin koko"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2016,8 +2282,8 @@ msgstr "%.2f (pois)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Cut-out texture sharpness"
-msgstr "Leikkaustekstuurin terävyys"
+msgid "Leaves and fences sharpness"
+msgstr "Lehtien ja aitojen terävyys"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2046,6 +2312,11 @@ msgstr "vain VR"
 msgid "100 %% (flat)"
 msgstr "100 %% (litteä)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Track moving parts"
+msgstr "Seuraa liikkuvia osia"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "old stencil ids"
@@ -2053,13 +2324,13 @@ msgstr "vanhat stencil-id:t"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirror DLAA"
-msgstr "Peili-DLAA"
+msgid "Smooth mirrors"
+msgstr "Tasoita peilit"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirrors in turns"
-msgstr "Peilit vuorotellen"
+msgid "Mirrors take turns (faster)"
+msgstr "Peilit vuorotellen (nopeampi)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2068,13 +2339,23 @@ msgstr "päällä (mode 3)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Thin-wire motion"
-msgstr "Ohuiden johtojen liike"
+msgid "Wire fix: motion"
+msgstr "Johtokorjaus: liike"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Wire fix: depth"
+msgstr "Johtokorjaus: syvyys"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no A2C)"
 msgstr "päällä (no A2C)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Thicker wires (test)"
+msgstr "Paksummat johdot (testi)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2083,13 +2364,23 @@ msgstr "päällä (kokeellinen)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "DLAA before tonemap"
-msgstr "DLAA ennen sävykart."
+msgid "Run DLAA earlier (test, flat)"
+msgstr "Aja DLAA aiemmin (testi, litt.)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Run DLAA earlier (test)"
+msgstr "Aja DLAA aiemmin (testi)"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "flat only"
 msgstr "vain litteä"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Glass and fence fix"
+msgstr "Lasi- ja aitakorjaus"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2098,8 +2389,8 @@ msgstr "pois (VR-budjetti)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Light glow ghosting fix"
-msgstr "Hehkun haamukuvakorjaus"
+msgid "Light trail fix"
+msgstr "Valojälkikorjaus"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2108,33 +2399,18 @@ msgstr "DLAA pois (ei tallennu)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Game TAA"
-msgstr "Pelin TAA"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid "mix"
-msgstr "sekoitus"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid "split"
-msgstr "jaettu"
+msgid "Split with game TAA"
+msgstr "Jako pelin TAA:lla"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Game TAA share"
-msgstr "Pelin TAA:n osuus"
+msgid "Split line position"
+msgstr "Jakoviivan paikka"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Split position"
-msgstr "Jaon paikka"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "Split compares"
-msgstr "Jako vertaa"
+msgid "Split: left | right"
+msgstr "Jako: vasen | oikea"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2251,8 +2527,8 @@ msgstr "päällä (pysäytetty)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated (VRS)"
-msgstr "Foveated (VRS)"
+msgid "Foveated rendering"
+msgstr "Foveated rendering"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2271,8 +2547,8 @@ msgstr "Foveated-koko"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated passes"
-msgstr "Foveated-vaiheet"
+msgid "Foveated: lighting too"
+msgstr "Foveated: myös valo"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2331,13 +2607,13 @@ msgstr "päällä (odottaa)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Hidden area mask (VR)"
-msgstr "Piilotetun alueen maski (VR)"
+msgid "Skip hidden edges (VR)"
+msgstr "Ohita piilot. reunat (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Hidden area mask"
-msgstr "Piilotetun alueen maski"
+msgid "Skip hidden edges"
+msgstr "Ohita piilotetut reunat"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2352,13 +2628,13 @@ msgstr "pääl. (FPS-raja voittaa)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Reflex (flat)"
-msgstr "Reflex (litteä)"
+msgid "Low delay (Reflex, flat)"
+msgstr "Matala viive (Reflex, litt.)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Reflex"
-msgstr "Reflex"
+msgid "Low delay (Reflex)"
+msgstr "Matala viive (Reflex)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2414,8 +2690,108 @@ msgstr "sekoitus (dlaa.ini)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Logging"
-msgstr "Lokitus"
+msgid "AMD cache cores (X3D)"
+msgstr "AMD-välimuistiytimet (X3D)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (auto)"
+msgstr "päällä (auto)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Send everything"
+msgstr "Lähetä kaikki"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Log detail"
+msgstr "Lokin tarkkuus"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Rewind before key"
+msgstr "Kelaus taaksepäin"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d frames (dlaa.ini)"
+msgstr "%d kuvaa (dlaa.ini)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture includes"
+msgstr "Tallenne sisältää"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Full"
+msgstr "Täysi"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Quick"
+msgstr "Nopea"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "change"
+msgstr "vaihda"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture key"
+msgstr "Tallennusnäppäin"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%hs (press twice)"
+msgstr "%hs (paina kahdesti)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Keep captures"
+msgstr "Säilytä tallenteet"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "all"
+msgstr "kaikki"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture now"
+msgstr "Tallenna nyt"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "capturing %d / %d"
+msgstr "tallennetaan %d / %d"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "writing (%d files)"
+msgstr "kirjoitus (%d tied.)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "done: %d parts, %d MB"
+msgstr "valmis %d osaa, %d MB"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "failed (see the log)"
+msgstr "epäonnistui (katso loki)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "ready"
+msgstr "valmis"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2510,11 +2886,6 @@ msgstr "Paneeli kohti sinua"
 #: src/inject.cpp
 msgid "Menu keys"
 msgstr "Valikkonäppäimet"
-
-#. Value column (about 20 Latin characters)
-#: src/inject.cpp
-msgid "Off"
-msgstr "Pois"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2613,6 +2984,16 @@ msgstr "FPS-peittävyys"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS graph length"
+msgstr "FPS-kuvaajan pituus"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "with a graph only"
+msgstr "vain kuvaajan kanssa"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "FPS distance (VR)"
 msgstr "FPS-etäisyys (VR)"
 
@@ -2664,6 +3045,20 @@ msgstr "Pidä %hs %hs s nollataksesi. %ls"
 #: src/inject.cpp
 #, c-format
 msgid ""
+"%hs = capture now (the menu closes first). The zip (dlaa_selftest folder next to the DLL) holds "
+"system info, the mod's and the game's log, dlaa.ini, your picture and DLAA off; Full adds what "
+"DLSS got and the A/B sets; rewind adds the moment before. Your user name and home folder are "
+"removed. %ls"
+msgstr ""
+"%hs = tallenna nyt (valikko sulkeutuu ensin). Zip (kansio dlaa_selftest DLL:n vieressä) sisältää "
+"järjestelmätiedot, modin ja pelin lokin, dlaa.ini:n, kuvasi ja DLAA pois; Täysi lisää sen, mitä "
+"DLSS sai, ja A/B-sarjat; kelaus taaksepäin lisää hetken sitä ennen. Käyttäjänimesi ja "
+"kotikansiosi poistetaan. %ls"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
 "The 5 keys that open and drive this menu: %hs opens / closes it (the value), %hs / %hs / %hs / "
 "%hs move (Hotkey column). While the menu is open only these 5 are kept from the game. %hs: change "
 "them on the Hotkeys page."
@@ -2709,9 +3104,6 @@ msgstr "info"
 msgid "debug"
 msgstr "vianetsintä"
 
-#~ msgid "Panel settings"
-#~ msgstr "Paneeli"
-
-#~ msgid "FPS counter settings"
-#~ msgstr "FPS-laskuri"
+#~ msgid "The last one: %d zip parts of at most 24 MB, %d MB in all (folder %.0f MB): attach them all."
+#~ msgstr "Viimeisin: %d zip-osaa, enintään 24 MB, yhteensä %d MB (kansio %.0f MB): liitä ne kaikki."
 

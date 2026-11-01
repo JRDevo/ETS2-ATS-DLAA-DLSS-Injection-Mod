@@ -168,47 +168,65 @@ msgstr "Πάνελ μενού"
 msgid "Compare and test"
 msgstr "Σύγκριση και δοκιμή"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Bug report"
+msgstr "Αναφορά σφάλματος"
+
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's "
-"Scaling is below 100 %. off = the game's own picture: use it to compare. Saved at once."
+"Scaling is below 100 %. Mix = the game's own TAA blended with DLAA / DLSS: calmer, a bit softer. "
+"off = the game's own picture. Saved at once."
 msgstr ""
-"DLAA = καθαρές άκρες στο μέγεθος απόδοσης του παιχνιδιού. DLSS = το ίδιο, και μεγεθύνει όταν το "
-"Scaling του παιχνιδιού είναι κάτω από 100 %. ανενεργό = η εικόνα του παιχνιδιού: για σύγκριση. "
+"DLAA = καθαρές ακμές στο μέγεθος απόδοσης του παιχνιδιού. DLSS = το ίδιο, και κάνει upscale όταν "
+"η Κλιμάκωση του παιχνιδιού είναι κάτω από 100 %. Μίγμα = το δικό του TAA του παιχνιδιού "
+"αναμεμειγμένο με DLAA / DLSS: πιο ήρεμο, λίγο πιο απαλό. off = η εικόνα του παιχνιδιού. "
 "Αποθηκεύεται αμέσως."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Presets for your GPU. high = everything on (model 1). medium = model 2, half-size see-through "
-"depth, flat mirrors without part motion, lighter part-motion search. low = also no mirror DLAA, "
-"no see-through depth, VR area 60 %. Never changes a setting you set yourself."
+"How much of the Mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer, less = "
+"sharper. Shown while Mode is Mix, or a split has a Mix side. No extra cost."
 msgstr ""
-"Προρυθμίσεις για την GPU σου. υψηλό = όλα ενεργά (μοντέλο 1). μεσαίο = μοντέλο 2, μισού μεγέθους "
-"διαφανές βάθος, επίπεδοι καθρέφτες χωρίς κίνηση εξαρτημάτων, ελαφρύτερη αναζήτηση κίνησης. χαμηλό "
-"= και χωρίς DLAA στους καθρέφτες, χωρίς διαφανές βάθος, περιοχή VR 60 %. Δεν αλλάζει ποτέ ρύθμιση "
-"που έβαλες εσύ."
+"Πόσο μίγμα είναι TAA, 0 - 100 % ανά 10 %: περισσότερο = πιο ήρεμο, απαλό, λιγότερο = πιο "
+"ευκρινές. Φαίνεται όταν η Λειτουργία είναι Μίγμα ή ο διαχωρισμός έχει πλευρά μίγματος. Χωρίς "
+"επιπλέον κόστος."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, least ghosting "
+"Presets for your graphics card. high = everything on (model 1). medium = model 2, a lighter Glass "
+"and fence fix, mirrors without Track moving parts. low = also no Smooth mirrors, no Glass and "
+"fence fix, VR area 60 %. Never changes a setting you set yourself."
+msgstr ""
+"Προφίλ για την κάρτα γραφικών σου. υψηλό = όλα ενεργά (μοντέλο 1). μεσαίο = μοντέλο 2, ελαφρύτερη "
+"Διόρθ. τζαμιών και φρακτών, καθρέφτες χωρίς Κίνηση ανά εξάρτημα. χαμηλό = επιπλέον χωρίς Ομαλούς "
+"καθρέφτες, χωρίς Διόρθ. τζαμιών και φρακτών, περιοχή VR 60 %. Δεν αλλάζει ποτέ ρύθμιση που έβαλες "
+"εσύ."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, fewest trails "
 "behind traffic: start here. 3 (F) = calmest on fences and wires, can smear moving detail, same "
 "cost as 2. 4 (M) = heaviest (about 5x), flat tests only."
 msgstr ""
-"1 (K) = περισσότερη λεπτομέρεια, πιο καθαρό κείμενο, ~1,6x GPU του 2. 2 (E) = ισορροπημένο, "
-"λιγότερα είδωλα πίσω από κίνηση: ξεκίνα εδώ. 3 (F) = πιο ήρεμο σε φράχτες και καλώδια, μπορεί να "
-"θαμπώσει λεπτομέρεια, κόστος όπως το 2. 4 (M) = το βαρύτερο (~5x), μόνο επίπεδα τεστ."
+"1 (K) = περισσότερη λεπτομέρεια, καθαρότερο κείμενο, ~1,6x η GPU του 2. 2 (E) = ισορροπημένο, "
+"λιγότερα ίχνη πίσω από οχήματα: ξεκίνα εδώ. 3 (F) = ηρεμότερο σε φράχτες και καλώδια, μπορεί να "
+"θολώνει κίνηση, κόστος ίδιο με το 2. 4 (M) = βαρύτερο (~5x), μόνο δοκιμές στο επίπεδο."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Picture quality: sharpening, texture sharpness, the DLAA area and the see-through depth. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
+"Picture quality: sharpening, texture sharpness, the Glass and fence fix, the Light trail fix and "
+"the DLAA area. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Ποιότητα εικόνας: ευκρίνεια, ευκρίνεια υφών, περιοχή DLAA και διαφανές βάθος. Δεξιά ανοίγει την "
-"ομάδα, Αριστερά την κλείνει· ξεκινά κλειστή σε κάθε άνοιγμα του μενού."
+"Ποιότητα εικόνας: ευκρίνεια, ευκρίνεια υφών, Διόρθ. τζαμιών και φρακτών, Διόρθωση ιχνών φωτός και "
+"Περιοχή DLAA. Δεξιά ανοίγει την ομάδα, Αριστερά την κλείνει· ξεκινά κλειστή κάθε φορά που ανοίγει "
+"το μενού."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -234,42 +252,44 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Sharper texture text (road signs, dashboard, GPS). 0 = off; more negative = sharper but more "
-"shimmer on fences; try -0.5 to -1 if text is blurry. No GPU time, only a little memory bandwidth."
+"shimmer on fences; try -0.5 to -1 if text is blurry. Almost no cost."
 msgstr ""
-"Πιο καθαρό κείμενο υφών (πινακίδες, ταμπλό, GPS). 0 = ανενεργό· πιο αρνητικό = πιο καθαρό αλλά "
-"περισσότερο τρεμόπαιγμα σε φράχτες· δοκίμασε -0,5 έως -1 αν το κείμενο θολώνει. Χωρίς χρόνο GPU, "
-"μόνο λίγο εύρος μνήμης."
+"Καθαρότερο κείμενο υφών (πινακίδες, ταμπλό, GPS). 0 = ανενεργό· πιο αρνητικό = πιο καθαρό, "
+"περισσότερο τρεμόπαιγμα σε φράχτες· δοκίμασε -0,5 έως -1 αν το κείμενο θολώνει. Σχεδόν χωρίς "
+"κόστος."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"The same for wire fences, grass and leaf cut-outs: raise it toward 0 if fences shimmer, lower it "
-"if grass looks soft. same = follows the row above. Acts only while Texture sharpness is not 0. No "
-"GPU time, a little memory."
+"The same for wire fences, grass and leaves: raise it toward 0 if fences shimmer, lower it if "
+"grass looks soft. same = follows the row above. Works only while Texture sharpness is not 0. "
+"Almost no cost."
 msgstr ""
-"Το ίδιο για συρμάτινους φράχτες, χόρτο και φύλλα: αύξησε προς το 0 αν οι φράχτες τρεμοπαίζουν, "
-"μείωσε αν το χόρτο είναι μαλακό. ίδιο = ακολουθεί την πάνω γραμμή. Δουλεύει μόνο όταν η Ευκρίνεια "
-"υφών δεν είναι 0. Χωρίς χρόνο GPU, λίγη μνήμη."
+"Το ίδιο για συρματοπλέγματα, γρασίδι και φύλλα: προς το 0 αν οι φράχτες τρεμοπαίζουν, χαμηλότερα "
+"αν το γρασίδι φαίνεται μαλακό. ίδιο = ακολουθεί την παραπάνω γραμμή. Δουλεύει μόνο όταν η "
+"Ευκρίνεια υφών δεν είναι 0. Σχεδόν χωρίς κόστος."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives wires, fences and glass their own distance instead of what is behind them, so they do not "
-"smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."
+"Wires, fences and windows are treated as the thing in front, not as what you see through them, so "
+"they do not smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms "
+"per eye."
 msgstr ""
-"Δίνει σε καλώδια, φράχτες και γυαλί δική τους απόσταση αντί γι' αυτή πίσω τους, ώστε να μη "
-"μουτζουρώνουν όταν κινείσαι. Κλείσ' το αν δεν βλέπεις μουτζούρα: γλιτώνει 0,02 - 0,06 ms ανά μάτι."
+"Καλώδια, φράχτες και παράθυρα θεωρούνται το αντικείμενο μπροστά, όχι αυτό που φαίνεται μέσα από "
+"αυτά, ώστε να μην μουτζουρώνουν όταν κινείσαι. Κλείστο αν δεν βλέπεις μουτζούρωμα εκεί: γλιτώνει "
+"0,02 - 0,06 ms ανά μάτι."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Stops street-lamp and car-light glows leaving a trail behind them when you move: DLSS takes each "
-"glow from the current frame, not its history. 25 % steps; lower it if lamp glows flicker, 0 = "
-"off. Costs about 0.05 - 0.2 ms per eye."
+"Stops street-lamp and car-light glows leaving a trail behind them when you move: the glows are "
+"drawn fresh each frame instead of being blended with older frames. 25 % steps; lower it if lamp "
+"glows flicker, 0 = off. Costs about 0.05 - 0.2 ms per eye."
 msgstr ""
-"Εμποδίζει τη λάμψη φαναριών και φώτων αυτοκινήτων να αφήνει ίχνος όταν κινείσαι: το DLSS παίρνει "
-"κάθε λάμψη από το τρέχον καρέ, όχι το ιστορικό. Βήματα 25 %· μείωσε αν η λάμψη τρεμοπαίζει, 0 = "
-"ανενεργό. Κοστίζει ~0,05 - 0,2 ms ανά μάτι."
+"Οι λάμψεις από φανοστάτες και φώτα αυτοκινήτων δεν αφήνουν ίχνος όταν κινείσαι: ζωγραφίζονται από "
+"την αρχή σε κάθε καρέ αντί να αναμειγνύονται με παλιότερα. Βήματα 25 %· χαμήλωσέ το αν οι λάμψεις "
+"τρεμοπαίζουν, 0 = ανενεργό. Κοστίζει περίπου 0,05 - 0,2 ms ανά μάτι."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -294,24 +314,24 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and "
-"does not ghost. Turn it off only to save about 0.5 ms per eye or to test: every pixel then moves "
+"DLAA follows each moving thing on its own (traffic, wheels, number plates), so it stays sharp and "
+"leaves no trail. Turn it off only to save about 0.5 ms per eye or to test: everything then moves "
 "with the camera and traffic smears."
 msgstr ""
-"Δίνει σε κάθε κινούμενο εξάρτημα (κίνηση, τροχοί, πινακίδες) δική του κίνηση για το DLAA, ώστε "
-"μένει καθαρό χωρίς είδωλα. Κλείσ' το μόνο για ~0,5 ms ανά μάτι ή για τεστ: όλα τα pixel κινούνται "
-"τότε με την κάμερα και η κίνηση μουτζουρώνει."
+"Το DLAA ακολουθεί κάθε κινούμενο αντικείμενο ξεχωριστά (οχήματα, τροχούς, πινακίδες), οπότε μένει "
+"καθαρό και δεν αφήνει ίχνος. Κλείστο μόνο για να γλιτώσεις περίπου 0,5 ms ανά μάτι ή για δοκιμή: "
+"όλα κινούνται τότε με την κάμερα και τα οχήματα μουτζουρώνουν."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main "
-"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can ghost "
-"in the glass; else each part moves exactly in the glass."
+"Smooths the truck mirrors too, so they do not shimmer. 1 mirror = only the largest (the main "
+"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can leave "
+"trails in the glass; the others follow each moving thing."
 msgstr ""
-"Δίνει στους καθρέφτες φορτηγού δικό τους DLAA για να μην τρεμοπαίζουν. 1 mirror = μόνο ο "
-"μεγαλύτερος (ο κύριος δίπλα σου). all = όλοι. camera = φθηνότερο ανά καθρέφτη, η κίνηση στο γυαλί "
-"μπορεί να αφήνει είδωλα· αλλιώς κάθε εξάρτημα κινείται ακριβώς στο γυαλί."
+"Εξομαλύνει και τους καθρέφτες του φορτηγού, χωρίς τρεμόπαιγμα. 1 καθρέφτης = μόνο ο μεγαλύτερος "
+"(ο κύριος δίπλα σου). όλοι οι καθρέφτες = όλοι. κάμερα = φθηνότερο ανά καθρέφτη, τα κινούμενα "
+"οχήματα μπορεί να αφήνουν ίχνη στο τζάμι· τα άλλα ακολουθούν κάθε κινούμενο αντικείμενο."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -327,132 +347,145 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
-"the group, Left closes it; it starts closed every time the menu opens."
+"Frame rate and CPU: CPU tuning, AMD cache cores, an FPS cap and Low delay (Reflex) for flat, an "
+"FPS cap for VR. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Ρυθμός καρέ και CPU: ρύθμιση CPU, όριο FPS και NVIDIA Reflex για επίπεδο, όριο FPS VR. Δεξιά "
-"ανοίγει την ομάδα, Αριστερά την κλείνει· ξεκινά κλειστή σε κάθε άνοιγμα του μενού."
+"Ρυθμός καρέ και CPU: Ρύθμιση CPU, πυρήνες cache AMD, Όριο FPS και Χαμηλή καθυστέρηση (Reflex) για "
+"επίπεδο, Όριο FPS για VR. Δεξιά ανοίγει την ομάδα, Αριστερά την κλείνει· ξεκινά κλειστή κάθε φορά "
+"που ανοίγει το μενού."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
-"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
-"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
+"Three CPU switches together. Prefer fast cores: only Intel CPUs with P-cores and E-cores. Higher "
+"priority and no Windows power saving for the game: every CPU, Intel and AMD. Helps when the CPU "
+"is the limit; no cost. Separate in dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle."
 msgstr ""
-"Τρεις διακόπτες CPU μαζί: το κύριο νήμα και το νήμα απόδοσης προτιμούν τους P-cores (μόνο "
-"υβριδικές CPU Intel), το παιχνίδι τρέχει με προτεραιότητα Above normal και τα Windows δεν μπορούν "
-"να το περιορίσουν (EcoQoS) ούτε να αγνοήσουν τα αιτήματα timer. Βοηθά όταν το όριο είναι η CPU· "
-"χωρίς κόστος. Ξεχωριστές ρυθμίσεις στο dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle."
+"Τρεις διακόπτες CPU μαζί. Προτίμηση γρήγορων πυρήνων: μόνο CPU Intel με P-cores και E-cores. "
+"Υψηλότερη προτεραιότητα και χωρίς εξοικονόμηση ενέργειας των Windows για το παιχνίδι: κάθε CPU, "
+"Intel και AMD. Βοηθά όταν όριο είναι η CPU· χωρίς κόστος. Ξεχωριστά στο dlaa.ini: cpu_pcore, "
+"cpu_priority, cpu_no_throttle."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"AMD X3D CPUs with two core groups (7950X3D, 9950X3D): keeps the game on the cores with the big 3D "
+"V-Cache, which games like. Switches at once; off gives the game all cores back. Try it and "
+"compare in a busy city. No cost."
+msgstr ""
+"CPU AMD X3D με δύο ομάδες πυρήνων (7950X3D, 9950X3D): κρατά το παιχνίδι στους πυρήνες με τη "
+"μεγάλη 3D V-Cache, που αρέσει στα παιχνίδια. Αλλάζει αμέσως· ανενεργό δίνει πίσω όλους τους "
+"πυρήνες. Δοκίμασέ το και σύγκρινε σε πολυσύχναστη πόλη. Χωρίς κόστος."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
-"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
-"limiting. off = no limit."
+"Set it a bit below what your PC holds in a busy city. With Low delay (Reflex) on, the NVIDIA "
+"driver does the limiting. off = no limit."
 msgstr ""
-"Μόνο επίπεδο. Κρατά το παιχνίδι το πολύ σε αυτά τα καρέ: σταθερός χρόνος καρέ, λιγότερη θερμότητα "
-"και ρεύμα. Βάλ' το λίγο κάτω από ό,τι κρατά το PC σου σε πολυσύχναστη πόλη. Με Reflex ενεργό, το "
-"όριο το βάζει το driver της NVIDIA. ανενεργό = χωρίς όριο."
+"Μόνο επίπεδο. Κρατά το παιχνίδι το πολύ σε αυτά τα καρέ: σταθερός χρόνος, λιγότερη θερμότητα και "
+"ισχύς. Βάλτο λίγο κάτω από όσο κρατά το PC σε πολυσύχναστη πόλη. Με ενεργή τη Χαμηλή καθυστέρηση "
+"(Reflex) το όριο το βάζει το driver NVIDIA. ανενεργό = χωρίς όριο."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
-"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
+"Flat only, NVIDIA only (NVIDIA Reflex). On = the game's frames wait less before the graphics card "
+"draws them: less delay between your steering and the picture when the card is the limit. Boost "
+"also keeps the card's clocks up. Same fps; small cost."
 msgstr ""
-"Μόνο επίπεδο, μόνο NVIDIA. Ενεργό = τα καρέ του παιχνιδιού περιμένουν λιγότερο στην ουρά GPU: "
-"λιγότερο input lag όταν το όριο είναι η GPU. Το Boost κρατά και τα ρολόγια GPU ψηλά. Ίδια fps· "
-"μικρό κόστος. Δεν χρησιμοποιείται σε VR."
+"Μόνο επίπεδο, μόνο NVIDIA (NVIDIA Reflex). Ενεργό = τα καρέ του παιχνιδιού περιμένουν λιγότερο "
+"πριν τα ζωγραφίσει η κάρτα γραφικών: λιγότερη καθυστέρηση ανάμεσα στο τιμόνι και την εικόνα όταν "
+"όριο είναι η κάρτα. Το boost κρατά και τα ρολόγια της κάρτας ψηλά. Ίδια fps· μικρό κόστος."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
-"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
-"the fps swings. Turns Turbo off while on."
+"headset's frame smoothing (ASW / Motion Smoothing) fills in the rest at a steady rhythm. Use it "
+"when the fps swings. Turns Turbo off while on."
 msgstr ""
 "Μόνο VR. μισό = το παιχνίδι ζωγραφίζει κάθε 2ο καρέ του headset (72 Hz -> 36 fps), τρίτο = κάθε "
-"3ο· το reprojection του headset (ASW / Motion Smoothing) γεμίζει τα υπόλοιπα σε σταθερό ρυθμό. "
-"Χρήση όταν τα fps κυμαίνονται. Κλείνει το Turbo όσο είναι ενεργό."
+"3ο· η εξομάλυνση καρέ του headset (ASW / Motion Smoothing) συμπληρώνει τα υπόλοιπα με σταθερό "
+"ρυθμό. Χρησιμοποίησέ το όταν τα fps αυξομειώνονται. Κλείνει το Turbo όσο είναι ενεργό."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
-"are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
+"VR speed-ups: Turbo, foveated rendering, skipping the hidden lens edges, and whether OFXR Bridge "
+"/ VectorXR are found. Right opens the group, Left closes it; it starts closed every time the menu "
+"opens."
 msgstr ""
-"Επιταχύνσεις VR: Turbo, foveated rendering, μάσκα κρυφής περιοχής και αν βρέθηκαν τα OFXR Bridge "
-"/ VectorXR. Δεξιά ανοίγει την ομάδα, Αριστερά την κλείνει· ξεκινά κλειστή σε κάθε άνοιγμα του "
-"μενού."
+"Επιταχύνσεις VR: Turbo, foveated rendering, παράλειψη των κρυφών άκρων των φακών και αν βρέθηκαν "
+"OFXR Bridge / VectorXR. Δεξιά ανοίγει την ομάδα, Αριστερά την κλείνει· ξεκινά κλειστή κάθε φορά "
+"που ανοίγει το μενού."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Turbo: no ASW / Motion Smoothing / SSW / reprojection. VR only. On = the game stops waiting for "
-"the headset each frame: more fps only when the CPU is the limit (busy cities, traffic). Turn it "
-"off if the picture judders. From OpenXR Toolkit."
+"Turbo switches off the headset's frame smoothing (ASW / Motion Smoothing / SSW). VR only. On = "
+"the game stops waiting for the headset each frame: more fps only when the CPU is the limit (busy "
+"cities, traffic). Turn it off if the picture judders."
 msgstr ""
-"Turbo: χωρίς ASW / Motion Smoothing / SSW / reprojection. Μόνο VR. Ενεργό = το παιχνίδι δεν "
-"περιμένει το headset σε κάθε καρέ: περισσότερα fps μόνο όταν το όριο είναι η CPU (πολυσύχναστες "
-"πόλεις, κίνηση). Κλείσ' το αν η εικόνα σπαρταράει. Από το OpenXR Toolkit."
+"Το Turbo κλείνει την εξομάλυνση καρέ του headset (ASW / Motion Smoothing / SSW). Μόνο VR. Ενεργό "
+"= το παιχνίδι δεν περιμένει το headset σε κάθε καρέ: περισσότερα fps μόνο όταν όριο είναι η CPU "
+"(πολυσύχναστες πόλεις, κίνηση). Κλείστο αν η εικόνα κόβεται."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR "
-"only. The outer ring is shaded once per 2 x 2 pixels; fences, grass and leaves keep full detail. "
+"only. The outer ring gets one colour per 2 x 2 pixels; fences, grass and leaves keep full detail. "
 "Turn it off if the edge looks blocky."
 msgstr ""
-"Καθαρό κέντρο, λιγότερη λεπτομέρεια στην άκρη (μόνο NVIDIA RTX). Γλιτώνει GPU σε υψηλό Scaling. "
-"Μόνο VR. Ο εξωτερικός δακτύλιος σκιάζεται μία φορά ανά 2 x 2 pixel· φράχτες, χόρτο και φύλλα "
-"κρατούν τη λεπτομέρεια. Κλείσ' το αν η άκρη φαίνεται τετραγωνισμένη."
+"Καθαρό κέντρο, λιγότερη λεπτομέρεια στην άκρη (μόνο NVIDIA RTX). Γλιτώνει χρόνο GPU σε υψηλό "
+"Scaling. Μόνο VR. Ο εξωτερικός δακτύλιος παίρνει ένα χρώμα ανά 2 x 2 pixel· φράχτες, γρασίδι και "
+"φύλλα κρατούν πλήρη λεπτομέρεια. Κλείστο αν η άκρη φαίνεται τετραγωνισμένη."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How big the sharp centre of Foveated (VRS) is, 10 - 100 % in 5 % steps: bigger = more of the view "
-"sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
+"How big the sharp centre of Foveated rendering is, 10 - 100 % in 5 % steps: bigger = more of the "
+"view sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
 "(balanced) is the default; 90 = wide, 65 = narrow."
 msgstr ""
-"Πόσο μεγάλο είναι το καθαρό κέντρο του Foveated (VRS), 10 - 100 % ανά 5 %: μεγαλύτερο = "
-"περισσότερη καθαρή εικόνα, λιγότερη οικονομία· μικρότερο = περισσότερη οικονομία, χαμηλότερη "
-"λεπτομέρεια πιο κοντά στη μέση. Το 80 % (ισορροπ.) είναι η προεπιλογή· 90 = ευρύ, 65 = στενό."
+"Πόσο μεγάλο είναι το καθαρό κέντρο του Foveated rendering, 10 - 100 % με βήμα 5 %: μεγαλύτερο = "
+"περισσότερη εικόνα καθαρή, λιγότερη οικονομία· μικρότερο = περισσότερη οικονομία, η χαμηλότερη "
+"λεπτομέρεια αρχίζει πιο κοντά στο κέντρο. Προεπιλογή 80 % (ισορροπημένο)· 90 = ευρύ, 65 = στενό."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Which of the game's passes Foveated (VRS) acts on. scene = the 3D world only (default). scene + "
-"lighting = also the game's lighting pass, at the very edge only: more saving. Test it: look for "
-"blocky light or shadow edges at the side of your view."
+"What Foveated rendering makes coarser. scene = the 3D world only (default). scene + lighting = "
+"also the game's lighting, at the very edge only: more saving. Test it: look for blocky light or "
+"shadow edges at the side of your view."
 msgstr ""
-"Σε ποια περάσματα του παιχνιδιού δρα το Foveated (VRS). σκηνή = μόνο ο 3D κόσμος (προεπιλογή). "
-"σκηνή + φως = και το πέρασμα φωτισμού, μόνο στην άκρη: μεγαλύτερη οικονομία. Δοκίμασε: ψάξε "
-"τετραγωνισμένες άκρες φωτός ή σκιάς στο πλάι της όρασης."
+"Τι κάνει πιο αδρό το Foveated rendering. σκηνή = μόνο ο 3D κόσμος (προεπιλογή). σκηνή + φως = και "
+"ο φωτισμός του παιχνιδιού, μόνο στην πολύ άκρη: περισσότερη οικονομία. Δοκίμασέ το: κοίτα για "
+"τετραγωνισμένες άκρες φωτός ή σκιών στο πλάι της εικόνας."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How coarse the outer ring of Foveated (VRS) is. Normal = 1 colour per 2 x 2 pixels (default). "
+"How coarse the outer ring of Foveated rendering is. Normal = 1 colour per 2 x 2 pixels (default). "
 "Strong = per 4 x 2, Max = per 4 x 4: more GPU saving, blockier edges. Best with eye tracking, "
 "where you never look at the outer ring."
 msgstr ""
-"Πόσο χοντρός είναι ο εξωτερικός δακτύλιος του Foveated (VRS). Κανονικό = 1 χρώμα ανά 2 x 2 pixel "
-"(προεπιλογή). Ισχυρό = ανά 4 x 2, Μέγιστο = ανά 4 x 4: περισσότερη οικονομία GPU, πιο "
+"Πόσο αδρός είναι ο εξωτερικός δακτύλιος του Foveated rendering. Κανονικό = 1 χρώμα ανά 2 x 2 "
+"pixel (προεπιλογή). Ισχυρό = ανά 4 x 2, Μέγιστο = ανά 4 x 4: περισσότερη οικονομία GPU, πιο "
 "τετραγωνισμένες άκρες. Ιδανικό με eye tracking, όπου δεν κοιτάς ποτέ τον εξωτερικό δακτύλιο."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Experimental. The sharp centre of Foveated (VRS) follows your eyes on a headset with eye tracking "
-"(OpenXR eye gaze, for example Varjo); without one it stays at the lens centre. Needs Foveated "
-"(VRS) on at the game's start, else a restart. Almost no cost."
+"Experimental. The sharp centre of Foveated rendering follows your eyes on a headset with eye "
+"tracking (for example Varjo); without it the centre stays in the middle of the lens. Needs "
+"Foveated rendering on at the game's start, else a restart. Almost no cost."
 msgstr ""
-"Πειραματικό. Το καθαρό κέντρο του Foveated (VRS) ακολουθεί τα μάτια σου σε headset με eye "
-"tracking (OpenXR eye gaze, π.χ. Varjo)· χωρίς αυτό μένει στο κέντρο του φακού. Θέλει Foveated "
-"(VRS) ενεργό στην εκκίνηση του παιχνιδιού, αλλιώς επανεκκίνηση. Σχεδόν χωρίς κόστος."
+"Πειραματικό. Το καθαρό κέντρο του Foveated rendering ακολουθεί τα μάτια σου σε headset με eye "
+"tracking (π.χ. Varjo)· χωρίς αυτό μένει στο κέντρο του φακού. Θέλει Foveated rendering ενεργό "
+"στην εκκίνηση του παιχνιδιού, αλλιώς επανεκκίνηση. Σχεδόν χωρίς κόστος."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -528,13 +561,13 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see "
-"what a setting gains. Its GPU cost is measured: per frame, every picture it is drawn into; none "
-"when off. Save keeps it for the next start."
+"A small live fps and frame-time box, also while this menu is closed (flat and VR): fps, ms, "
+"numbers only, each with or without a graph of recent frame times (spikes show red), or the graph "
+"alone. Its GPU cost is measured. Save keeps it."
 msgstr ""
-"Ένα μικρό ζωντανό κουτί fps και χρόνου καρέ, και με κλειστό το μενού (επίπεδο και VR). Δες τι "
-"κερδίζει μια ρύθμιση. Το κόστος GPU μετριέται: ανά καρέ, κάθε εικόνα όπου ζωγραφίζεται· μηδέν "
-"όταν είναι ανενεργό. Το Save το κρατά για την επόμενη εκκίνηση."
+"Ένα μικρό κουτί με ζωντανά fps και χρόνο καρέ, ακόμα και με κλειστό αυτό το μενού (επίπεδο και "
+"VR): fps, ms, μόνο αριθμοί, με ή χωρίς γράφημα των πρόσφατων χρόνων καρέ (οι αιχμές κοκκινίζουν), "
+"ή μόνο το γράφημα. Το κόστος GPU μετριέται. Η Αποθήκευση το κρατά."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -605,12 +638,23 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
+"How far back the fps graph shows: 2 - 60 s. One bar per slice of time = its slowest frame, so you "
+"see spikes. Green = on time, yellow = a bit slow, red = a hitch; the line = the headset rate / "
+"FPS cap / your usual. Shown when FPS counter has a graph."
+msgstr ""
+"Πόσο πίσω φτάνει το γράφημα fps: 2 - 60 s. Μία μπάρα ανά κομμάτι χρόνου = το πιο αργό καρέ του, "
+"ώστε να βλέπεις τις αιχμές. Πράσινο = εγκαίρως, κίτρινο = λίγο αργό, κόκκινο = κόλλημα· η γραμμή "
+"= ρυθμός headset / Όριο FPS / το συνηθισμένο σου. Φαίνεται όταν ο Μετρητής FPS έχει γράφημα."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
 "VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
-"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
-"Per-part motion vectors). No cost."
+"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Track "
+"moving parts). No cost."
 msgstr ""
 "Μόνο VR. Ακολουθεί κεφάλι = κινείται με το headset. Σταθερό στον χώρο = ένα σημείο γύρω από το "
-"κάθισμα, αγνοεί το κούνημα της καμπίνας. Δεμένο στο όχημα = κολλημένο στην καμπίνα, κουνιέται "
+"κάθισμά σου, αγνοεί το κούνημα της καμπίνας. Δεμένο στο όχημα = κολλημένο στην καμπίνα, κουνιέται "
 "μαζί της (θέλει DLAA + Κίνηση ανά εξάρτημα). Χωρίς κόστος."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -745,13 +789,13 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Switches for A/B checks: DLAA off, the game's own TAA mixed in or side by side, the thin-wire "
-"switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
-"group, Left closes it."
+"Switches for comparing: DLAA off, the game's own TAA mixed in or side by side, the wire fixes, "
+"running DLAA earlier. Nothing here is needed for normal driving. Right opens the group, Left "
+"closes it."
 msgstr ""
-"Διακόπτες για ελέγχους A/B: DLAA ανενεργό, το δικό του TAA του παιχνιδιού ανάμεικτο ή "
-"δίπλα-δίπλα, οι διακόπτες λεπτών καλωδίων, DLAA πριν το tonemap. Τίποτα εδώ δεν χρειάζεται για "
-"κανονική οδήγηση. Δεξιά ανοίγει την ομάδα, Αριστερά την κλείνει."
+"Διακόπτες για σύγκριση: DLAA ανενεργό, το TAA του ίδιου του παιχνιδιού αναμεμιγμένο ή "
+"δίπλα-δίπλα, οι διορθώσεις καλωδίων, DLAA νωρίτερα. Τίποτα εδώ δεν χρειάζεται για κανονική "
+"οδήγηση. Δεξιά ανοίγει την ομάδα, Αριστερά την κλείνει."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -765,66 +809,56 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
-"right, to compare."
+"on = the mod on the left, the game's own TAA on the right, to compare (Split line position, "
+"Split: left | right). Replaces Mix while on. With the game's console on, the mod switches the "
+"game's Anti-aliasing for you."
 msgstr ""
-"Μόνο όταν το Anti-aliasing του παιχνιδιού είναι σε TAA. ανενεργό = μόνο το mod (βάλε το AA του "
-"παιχνιδιού σε Απενεργοποιημένο). μίγμα = TAA και DLAA / DLSS στο ίδιο καρέ, αναμεμιγμένα. "
-"χωρισμένο = αριστερά το mod, δεξιά TAA, για σύγκριση."
+"on = το mod αριστερά, το δικό του TAA του παιχνιδιού δεξιά, για σύγκριση (Θέση διαχωρισμού, "
+"Διαχωρισμός: αριστ. | δεξιά). Αντικαθιστά το Μίγμα όσο είναι ενεργό. Με την κονσόλα του "
+"παιχνιδιού ανοιχτή, το mod αλλάζει το Anti-aliasing του παιχνιδιού για σένα."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
+"Where the split line is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS on the left "
+"of it, the game's TAA on the right. Used only while Split with game TAA is on."
 msgstr ""
-"Πόσο από το μίγμα είναι το TAA του παιχνιδιού, 0 - 100 % ανά 10 %: περισσότερο = πιο ήρεμο και "
-"απαλό (TAA), λιγότερο = πιο ευκρινές (DLAA / DLSS). Χρησιμοποιείται όταν το TAA παιχνιδιού είναι "
-"μίγμα, ή χωρισμένο με πλευρά μίγμα. Χωρίς επιπλέον κόστος."
+"Πού είναι η γραμμή διαχωρισμού, 0 - 100 % του πλάτους ανά 5 %: αριστερά της το DLAA / DLSS του "
+"mod, δεξιά το TAA του παιχνιδιού. Χρησιμοποιείται μόνο όσο ο Διαχωρισμός με TAA παιχνιδιού είναι "
+"ενεργός."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
-"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+"What the split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix | TAA "
+"or DLAA | Mix (Mix = the two blended at Mix amount). DLSS instead of DLAA when upscaling. Used "
+"only while Split with game TAA is on."
 msgstr ""
-"Πού βρίσκεται η γραμμή του TAA παιχνιδιού χωρισμένο, 0 - 100 % του πλάτους ανά 5 %: αριστερά της "
-"το DLAA / DLSS του mod, δεξιά το TAA του παιχνιδιού. Χρησιμοποιείται μόνο όταν το TAA παιχνιδιού "
-"είναι χωρισμένο."
+"Τι δείχνει ο διαχωρισμός: DLAA | TAA (το mod αριστερά, το TAA του παιχνιδιού δεξιά), μίγμα | TAA "
+"ή DLAA | μίγμα (μίγμα = τα δύο αναμεμειγμένα κατά την Ποσότητα μίγματος). DLSS αντί DLAA στο "
+"upscaling. Χρησιμοποιείται μόνο όσο ο Διαχωρισμός με TAA παιχνιδιού είναι ενεργός."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
-"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
-"upscaling. Used only when Game TAA is split."
+"Thin wires move correctly while you drive: their movement is spread over the whole thin line. on "
+"= default. off = only to compare; near wires flicker more. The picture is soft for a moment when "
+"you switch."
 msgstr ""
-"Τι δείχνει το TAA παιχνιδιού χωρισμένο στις δύο πλευρές του: DLAA | TAA (αριστερά το mod, δεξιά "
-"το TAA του παιχνιδιού), μίγμα | TAA ή DLAA | μίγμα (μίγμα = τα δύο αναμεμιγμένα με το Μερίδιο TAA "
-"παιχνιδιού). DLSS αντί για DLAA στη μεγέθυνση. Χρησιμοποιείται μόνο όταν το TAA παιχνιδιού είναι "
-"χωρισμένο."
+"Τα λεπτά καλώδια κινούνται σωστά όσο οδηγείς: η κίνησή τους απλώνεται σε όλη τη λεπτή γραμμή. "
+"ενεργό = προεπιλογή. ανενεργό = μόνο για σύγκριση· τα κοντινά καλώδια τρεμοπαίζουν περισσότερο. Η "
+"εικόνα θολώνει για λίγο όταν αλλάζεις."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
-"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
-"soft for a moment when it changes."
+"Thin wires count as in front on every pixel they touch, even where they cover only a sliver of "
+"it. on = default. on (no A2C) = also for see-through edges such as leaves. off = only to compare; "
+"near wires flicker more."
 msgstr ""
-"Τα λεπτά καλώδια κρατούν την κίνησή τους όσο οδηγείς: το DLAA απλώνει τα δεδομένα κίνησης σε "
-"λεπτές γραμμές (DLSS motion dilation). ενεργό = προεπιλογή. ανενεργό = μόνο για σύγκριση· κοντινά "
-"καλώδια τρεμοπαίζουν περισσότερο. Η εικόνα μαλακώνει στιγμιαία στην αλλαγή."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
-"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
-msgstr ""
-"Τα λεπτά καλώδια παίρνουν βάθος σε κάθε pixel που αγγίζουν, όχι μόνο στο κέντρο του. ενεργό = "
-"προεπιλογή. ενεργό (χωρίς A2C) = και για διαφανείς άκρες. ανενεργό = μόνο για σύγκριση· κοντινά "
-"καλώδια τρεμοπαίζουν περισσότερο."
+"Τα λεπτά καλώδια μετράνε ως μπροστά σε κάθε pixel που αγγίζουν, ακόμα κι αν καλύπτουν μόνο μια "
+"λωρίδα. ενεργό = προεπιλογή. ενεργό (χωρίς A2C) = και για διαφανείς άκρες όπως φύλλα. ανενεργό = "
+"μόνο σύγκριση· τα κοντινά καλώδια τρεμοπαίζουν περισσότερο."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -839,24 +873,86 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
-"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
-"~60 frames to switch."
+"Flat only: DLAA runs before the game adds its glow and colour look, so lane paint, wires and "
+"rails shimmer less. Change it only to compare. Not used with DLSS upscaling or Windows HDR. Same "
+"cost either way; takes about a second to switch."
 msgstr ""
-"Μόνο επίπεδο: DLAA πριν το bloom / tonemap του παιχνιδιού, ώστε διαγράμμιση, καλώδια και ράγες να "
-"τρεμοπαίζουν λιγότερο. Άλλαξέ το μόνο για σύγκριση. Δεν χρησιμοποιείται με DLSS μεγέθυνση ή "
-"Windows HDR. Ίδιο κόστος· η αλλαγή θέλει ~60 καρέ."
+"Μόνο επίπεδο: το DLAA τρέχει πριν το παιχνίδι προσθέσει λάμψη και όψη χρώματος, ώστε "
+"διαγραμμίσεις, καλώδια και ράγες να τρεμοπαίζουν λιγότερο. Άλλαξέ το μόνο για σύγκριση. Όχι με "
+"DLSS upscaling ή Windows HDR. Ίδιο κόστος· η αλλαγή παίρνει ~1 s."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Bug report: press the capture key twice (or Capture now) where something looks wrong; the mod "
+"writes one zip you attach to a GitHub issue. Right opens the group, Left closes it."
+msgstr ""
+"Αναφορά σφάλματος: πάτα δύο φορές το πλήκτρο καταγραφής (ή Καταγραφή τώρα) εκεί που κάτι φαίνεται "
+"λάθος· το mod γράφει ένα zip που επισυνάπτεις σε ένα GitHub issue. Δεξιά ανοίγει την ομάδα, "
+"Αριστερά την κλείνει."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"One switch for the most complete report: log detail debug, rewind 2 s, capture Full. Off puts the "
+"rows back as they were. Only this switch is saved; the forced values are never written to "
+"dlaa.ini."
+msgstr ""
+"Ένας διακόπτης για την πιο πλήρη αναφορά: log αποσφαλμάτωση, επαναφορά 2 s, καταγραφή Πλήρης. "
+"Ανενεργό επαναφέρει τις γραμμές. Αποθηκεύεται μόνο αυτός ο διακόπτης· οι αναγκαστικές τιμές δεν "
+"γράφονται στο dlaa.ini."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + "
-"problems worked around; info = + start-up and changes; debug = + statistics, and debug also runs "
-"the GPU timers and the CPU profiler."
+"problems worked around; info = + start-up and changes; debug = + statistics and timing "
+"measurements (a little slower)."
 msgstr ""
-"Τι γράφεται στο dlaa_inject.log: ανενεργό = τίποτα· σφάλματα = μόνο αποτυχίες (προεπιλογή)· "
-"προειδοπ. = + προβλήματα που παρακάμφθηκαν· πληροφορίες = + εκκίνηση και αλλαγές· αποσφαλμάτωση = "
-"+ στατιστικά, και τρέχει και χρονομετρητές GPU και profiler CPU."
+"Τι μπαίνει στο dlaa_inject.log: ανενεργό = τίποτα· σφάλματα = μόνο αποτυχίες (προεπιλογή)· "
+"προειδοποιήσεις = + προβλήματα που παρακάμφθηκαν· πληροφορίες = + εκκίνηση και αλλαγές· "
+"αποσφαλμάτωση = + στατιστικά και μετρήσεις χρόνου (λίγο πιο αργά)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Keeps the last 0.5 - 3 s of frames on the graphics card all the time, so the report shows the "
+"moment BEFORE the key (+ what DLSS got for the last frames). Costs graphics memory (the MB in the "
+"cost column) and a picture copy per frame. off = none."
+msgstr ""
+"Κρατά διαρκώς στην κάρτα γραφικών τα τελευταία 0,5 - 3 s καρέ, ώστε η αναφορά να δείχνει τη "
+"στιγμή ΠΡΙΝ το πλήκτρο (+ τι πήρε το DLSS για τα τελευταία καρέ). Κοστίζει μνήμη γραφικών (τα MB "
+"στη στήλη κόστους) και ένα αντίγραφο εικόνας ανά καρέ. ανενεργό = τίποτα."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Quick = system info, logs, settings, your picture and DLAA off for a few frames (about 1 s). Full "
+"= + what DLSS got per frame (colour, motion, depth) and A/B sets: motion view, motion off, jitter "
+"only (about 2 - 4 s)."
+msgstr ""
+"Γρήγορη = πληροφορίες συστήματος, logs, ρυθμίσεις, η εικόνα σου και DLAA ανενεργό για λίγα καρέ "
+"(περίπου 1 s). Πλήρης = + τι πήρε το DLSS ανά καρέ (χρώμα, κίνηση, βάθος) και σετ A/B: προβολή "
+"κίνησης, χωρίς κίνηση, μόνο jitter (περίπου 2 - 4 s)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The capture key. Press it TWICE within 1 s while driving where it goes wrong (the first press "
+"only arms it: one short beep). Right opens the Hotkeys page on its line to change it."
+msgstr ""
+"Το πλήκτρο καταγραφής. Πάτα το ΔΥΟ φορές μέσα σε 1 s ενώ οδηγείς εκεί που πάει στραβά (το πρώτο "
+"πάτημα μόνο το οπλίζει: ένα σύντομο μπιπ). Δεξιά ανοίγει τη σελίδα Συντομεύσεων στη γραμμή του "
+"για αλλαγή."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How many captures stay in the dlaa_selftest folder next to the DLL: older ones (folder + zip) are "
+"deleted when a new one is written. all = never delete."
+msgstr ""
+"Πόσες καταγραφές μένουν στον φάκελο dlaa_selftest δίπλα στο DLL: οι παλιότερες (φάκελος + zip) "
+"διαγράφονται όταν γράφεται νέα. όλες = καμία διαγραφή."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -896,12 +992,27 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Puts every setting in this menu back to how the mod ships (model, sharpen, texture sharpness, "
-"DLAA area, motion, mirrors, profile, panel, fps box, turbo, foveated, frame rate, logging), live "
-"and in dlaa.ini, keeping your hotkeys and every other line."
+"DLAA area, motion, mirrors, preset, panel, fps box, turbo, foveated, frame rate, CPU, log "
+"detail), live and in dlaa.ini, keeping your hotkeys and every other line."
 msgstr ""
-"Επαναφέρει κάθε ρύθμιση του μενού όπως έρχεται το mod (μοντέλο, ευκρίνεια, ευκρίνεια υφών, "
-"περιοχή DLAA, κίνηση, καθρέφτες, προφίλ, πάνελ, κουτί fps, turbo, foveated, καρέ, καταγραφή), "
-"ζωντανά και στο dlaa.ini, κρατώντας τα πλήκτρα σου και κάθε άλλη γραμμή."
+"Επαναφέρει κάθε ρύθμιση αυτού του μενού όπως έρχεται το mod (μοντέλο, ευκρίνεια, ευκρίνεια υφών, "
+"περιοχή DLAA, κίνηση, καθρέφτες, προφίλ, πάνελ, κουτί fps, turbo, foveated, ρυθμός καρέ, CPU, "
+"λεπτομέρεια log), live και στο dlaa.ini, κρατώντας τις συντομεύσεις σου και κάθε άλλη γραμμή."
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Off"
+msgstr "Ανενεργό"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph only"
+msgstr "μόνο γράφημα"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph"
+msgstr "γράφημα"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1178,8 +1289,8 @@ msgstr "Κοστίζει τώρα %ls ανά καρέ· λιγότεροι κα�
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Greyed: Mirror DLAA is off."
-msgstr "Γκρι: το Mirror DLAA είναι ανενεργό."
+msgid "Greyed: Smooth mirrors is off."
+msgstr "Γκρι: οι Ομαλοί καθρέφτες είναι ανενεργοί."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1192,6 +1303,25 @@ msgstr "Πάντα ενεργό: το dlaa.ini mirror mode 3 είναι ήδη �
 #, c-format
 msgid "The mirrors cost %ls per frame now."
 msgstr "Οι καθρέφτες κοστίζουν τώρα %ls ανά καρέ."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed: only for AMD X3D CPUs with two core groups (7950X3D, 9950X3D)."
+msgstr "Γκρι: μόνο για CPU AMD X3D με δύο ομάδες πυρήνων (7950X3D, 9950X3D)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On now: the game runs only on the cores with the big cache."
+msgstr "Ενεργό τώρα: το παιχνίδι τρέχει μόνο στους πυρήνες με τη μεγάλη cache."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On, but not applied: the game's cores were already limited (see the log)."
+msgstr ""
+"Ενεργό, αλλά δεν εφαρμόστηκε: οι πυρήνες του παιχνιδιού ήταν ήδη περιορισμένοι (δες το log)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1221,7 +1351,9 @@ msgstr ""
 msgid ""
 "Waiting: click the game window on the desktop. The mod types into the game's console only while "
 "the game window has the focus."
-msgstr "Αναμονή: κάντε κλικ στο παράθυρο του παιχνιδιού στην επιφάνεια εργασίας. Το mod πληκτρολογεί στην κονσόλα του παιχνιδιού μόνο όσο το παράθυρο του παιχνιδιού έχει εστίαση."
+msgstr ""
+"Αναμονή: κάνε κλικ στο παράθυρο του παιχνιδιού. Το mod πληκτρολογεί στην κονσόλα του παιχνιδιού "
+"μόνο όσο το παράθυρο έχει εστίαση."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1238,23 +1370,30 @@ msgstr "Το log του παιχνιδιού δεν επιβεβαίωσε τη�
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid "Mix and split need the game's TAA: set Anti-aliasing to TAA in the game's graphics settings."
+msgstr ""
+"Μίγμα και χωρισμένο θέλουν το TAA του παιχνιδιού: βάλε το Anti-aliasing σε TAA στα γραφικά του "
+"παιχνιδιού."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "The game's TAA is not running now: the mod runs alone."
 msgstr "Το TAA του παιχνιδιού δεν τρέχει τώρα: το mod τρέχει μόνο του."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
+msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or set Mode to Mix."
 msgstr ""
-"Το TAA του παιχνιδιού τρέχει τώρα: βάλε το Anti-aliasing του παιχνιδιού σε Απενεργοποιημένο ή "
-"διάλεξε μίγμα ή χωρισμένο."
+"Το TAA του παιχνιδιού τρέχει τώρα: βάλε το Anti-aliasing του παιχνιδιού σε Απενεργοποιημένο ή τη "
+"Λειτουργία σε Μίγμα."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
 msgid "The game's TAA is running now: split is on."
-msgstr "Το TAA του παιχνιδιού τρέχει τώρα: το χωρισμένο είναι ενεργό."
+msgstr "Το TAA του παιχνιδιού τρέχει: το χωρισμένο είναι ενεργό."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1272,9 +1411,7 @@ msgstr "Επιστροφή στο TAA του παιχνιδιού: το πέρα
 #: src/inject.cpp
 #, c-format
 msgid "Fell back to the game's TAA: the game's jitter could not be read (see the log)."
-msgstr ""
-"Επιστροφή στο TAA του παιχνιδιού: δεν ήταν δυνατή η ανάγνωση του jitter του παιχνιδιού (δες το "
-"log)."
+msgstr "Επιστροφή στο TAA του παιχνιδιού: το jitter του παιχνιδιού δεν διαβάστηκε (δες το log)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1292,7 +1429,7 @@ msgstr "Επιστροφή στο TAA του παιχνιδιού: το μίγμ
 #: src/inject.cpp
 #, c-format
 msgid "Fell back to the game's TAA: DLAA is off."
-msgstr "Επιστροφή στο TAA του παιχνιδιού: το DLAA είναι ανενεργό."
+msgstr "Επιστροφή στο TAA του παιχνιδιού: DLAA ανενεργό."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1305,6 +1442,67 @@ msgstr "Επιστροφή στο TAA του παιχνιδιού: δεν βρέ
 #, c-format
 msgid "Fell back to the game's TAA: DLAA did not run on this frame (see the log)."
 msgstr "Επιστροφή στο TAA του παιχνιδιού: το DLAA δεν έτρεξε σε αυτό το καρέ (δες το log)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Or turn on the game console (g_developer and g_console 1 in config.cfg): then the mod switches it "
+"for you."
+msgstr ""
+"Ή άνοιξε την κονσόλα του παιχνιδιού (g_developer και g_console 1 στο config.cfg): τότε το mod το "
+"αλλάζει για σένα."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn on the game console to let the mod switch the game's Anti-aliasing."
+msgstr "Άνοιξε την κονσόλα του παιχνιδιού για να αλλάζει το mod το Anti-aliasing του παιχνιδιού."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "TAA"
+msgstr "TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "unknown"
+msgstr "άγνωστο"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "other"
+msgstr "άλλο"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "waiting: click the game window"
+msgstr "αναμονή: κλικ στο παράθυρο παιχνιδιού"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switching..."
+msgstr "εναλλαγή..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch confirmed"
+msgstr "η εναλλαγή επιβεβαιώθηκε"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch NOT confirmed (see the log)"
+msgstr "η εναλλαγή ΔΕΝ επιβεβαιώθηκε (δες το log)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls, %ls."
+msgstr "AA παιχνιδιού: %ls, %ls."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls."
+msgstr "AA παιχνιδιού: %ls."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1327,6 +1525,45 @@ msgstr "Κοστίζει τώρα %ls/καρέ· το ανενεργό το γλ
 #, c-format
 msgid "Costs %ls ms GPU per frame now; most of it at night."
 msgstr "Κοστίζει τώρα %ls ms GPU ανά καρέ· κυρίως τη νύχτα."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"The last one: %d zips of at most 24 MB, %d MB in all (folder %.0f MB). Attach the _main zip; the "
+"others only if asked."
+msgstr "Η τελευταία: %d zip έως 24 MB, %d MB συνολικά (φάκελος %.0f MB). Επισύναψε το zip _main· τα άλλα μόνο αν ζητηθούν."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Holds %.0f MB of graphics memory now."
+msgstr "Κρατά τώρα %.0f MB μνήμης γραφικών."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"%ls about %.0f MB graphics memory for the rewind; a capture takes about %.1f s and writes about "
+"%.0f MB."
+msgstr ""
+"%ls περίπου %.0f MB μνήμης γραφικών για την επαναφορά· μια καταγραφή παίρνει περίπου %.1f s και "
+"γράφει περίπου %.0f MB."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "On, it costs"
+msgstr "Ενεργό, κοστίζει"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Costs now:"
+msgstr "Κοστίζει τώρα:"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn off Send everything to change this."
+msgstr "Κλείσε το Αποστολή όλων για να το αλλάξεις."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1390,8 +1627,8 @@ msgstr "Γκρι στο VR: χρησιμοποίησε το όριο FPS VR."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Limited by the NVIDIA driver now (Reflex is on)."
-msgstr "Περιορίζεται τώρα από το driver NVIDIA (το Reflex είναι ενεργό)."
+msgid "Limited by the NVIDIA driver now (Low delay is on)."
+msgstr "Περιορίζεται από το driver NVIDIA (Χαμηλή καθυστέρηση ενεργή)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1444,8 +1681,8 @@ msgstr "Γλιτώνει χρόνο στον δικό του αριθμό GPU τ
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Foveated (VRS) is off: switch it on first."
-msgstr "Το Foveated (VRS) είναι ανενεργό: άνοιξέ το πρώτα."
+msgid "Foveated rendering is off: switch it on first."
+msgstr "Το Foveated rendering είναι ανενεργό: άνοιξέ το πρώτα."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1463,11 +1700,11 @@ msgstr "Ψεύτικο βλέμμα (vrs_eye_fake = 1): η καθαρή περι
 #: src/inject.cpp
 #, c-format
 msgid ""
-"Foveated (VRS) was off at the game's start: save (Shift+F12) and restart the game to ask the "
+"Foveated rendering was off at the game's start: save (Shift+F12) and restart the game to ask the "
 "headset for eye gaze."
 msgstr ""
-"Το Foveated (VRS) ήταν ανενεργό στην εκκίνηση: αποθήκευσε (Shift+F12) και ξαναξεκίνα το παιχνίδι "
-"για να ζητήσεις eye gaze από το headset."
+"Το Foveated rendering ήταν ανενεργό στην εκκίνηση: αποθήκευσε (Shift+F12) και ξαναξεκίνα το "
+"παιχνίδι για να ζητήσεις eye gaze από το headset."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1968,15 +2205,41 @@ msgstr "κλειστό (%d)"
 msgid "Mode"
 msgstr "Λειτουργία"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLSS)"
+msgstr "Μίγμα (TAA + DLSS)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLAA)"
+msgstr "Μίγμα (TAA + DLAA)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLSS"
 msgstr "DLSS"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLAA"
 msgstr "DLAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Mix amount"
+msgstr "Ποσότητα μίγματος"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d %% TAA"
+msgstr "%d %% TAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Quality preset"
+msgstr "Προφίλ ποιότητας"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2002,7 +2265,7 @@ msgstr "%.1f (ανενεργό)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Sharpen width"
+msgid "Sharpness size"
 msgstr "Πλάτος ευκρίνειας"
 
 #. Value column (about 20 Latin characters)
@@ -2024,8 +2287,8 @@ msgstr "%.2f (ανενεργό)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Cut-out texture sharpness"
-msgstr "Ευκρίνεια υφών cut-out"
+msgid "Leaves and fences sharpness"
+msgstr "Ευκρίνεια φύλλων/φρακτών"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2054,6 +2317,11 @@ msgstr "μόνο VR"
 msgid "100 %% (flat)"
 msgstr "100 %% (επίπεδο)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Track moving parts"
+msgstr "Κίνηση ανά εξάρτημα"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "old stencil ids"
@@ -2061,13 +2329,13 @@ msgstr "παλιά stencil ID"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirror DLAA"
-msgstr "DLAA καθρεφτών"
+msgid "Smooth mirrors"
+msgstr "Ομαλοί καθρέφτες"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirrors in turns"
-msgstr "Καθρέφτες εναλλάξ"
+msgid "Mirrors take turns (faster)"
+msgstr "Καθρέφτες εναλλάξ (ταχ.)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2076,13 +2344,23 @@ msgstr "ενεργό (mode 3)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Thin-wire motion"
-msgstr "Κίνηση λεπτών καλωδίων"
+msgid "Wire fix: motion"
+msgstr "Διόρθ. καλωδίων: κίνηση"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Wire fix: depth"
+msgstr "Διόρθ. καλωδίων: βάθος"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no A2C)"
 msgstr "ενεργό (χωρίς A2C)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Thicker wires (test)"
+msgstr "Παχύτερα καλώδια (τεστ)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2091,13 +2369,23 @@ msgstr "ενεργό (πειραματικό)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "DLAA before tonemap"
-msgstr "DLAA πριν tonemap"
+msgid "Run DLAA earlier (test, flat)"
+msgstr "DLAA νωρίτερα (τεστ, επίπ.)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Run DLAA earlier (test)"
+msgstr "DLAA νωρίτερα (τεστ)"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "flat only"
 msgstr "μόνο επίπεδο"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Glass and fence fix"
+msgstr "Διόρθ. τζαμιών και φρακτών"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2106,8 +2394,8 @@ msgstr "ανενεργό (budget VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Light glow ghosting fix"
-msgstr "Διόρθ. ειδώλων λάμψης"
+msgid "Light trail fix"
+msgstr "Διόρθωση ιχνών φωτός"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2116,33 +2404,18 @@ msgstr "DLAA ανενεργό (όχι αποθ.)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Game TAA"
-msgstr "TAA παιχνιδιού"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid "mix"
-msgstr "μίγμα"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid "split"
-msgstr "χωρισμένο"
+msgid "Split with game TAA"
+msgstr "Διαχωρισμός με TAA"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Game TAA share"
-msgstr "Μερίδιο TAA παιχνιδιού"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "Split position"
+msgid "Split line position"
 msgstr "Θέση διαχωρισμού"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Split compares"
-msgstr "Σύγκριση διαχωρισμού"
+msgid "Split: left | right"
+msgstr "Διαχωρισμός: αριστ. | δεξιά"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2259,8 +2532,8 @@ msgstr "ενεργό (σταμάτησε)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated (VRS)"
-msgstr "Foveated (VRS)"
+msgid "Foveated rendering"
+msgstr "Foveated rendering"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2279,8 +2552,8 @@ msgstr "Μέγεθος Foveated"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated passes"
-msgstr "Περάσματα Foveated"
+msgid "Foveated: lighting too"
+msgstr "Foveated: και φωτισμός"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2339,13 +2612,13 @@ msgstr "ενεργ. (αναμονή)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Hidden area mask (VR)"
-msgstr "Μάσκα κρυφής περιοχής (VR)"
+msgid "Skip hidden edges (VR)"
+msgstr "Παράλ. κρυφών άκρων (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Hidden area mask"
-msgstr "Μάσκα κρυφής περιοχής"
+msgid "Skip hidden edges"
+msgstr "Παράλειψη κρυφών άκρων"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2360,13 +2633,13 @@ msgstr "ενεργ. (υπερισχύει cap)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Reflex (flat)"
-msgstr "Reflex (επίπεδο)"
+msgid "Low delay (Reflex, flat)"
+msgstr "Χαμ. καθυστ. (Reflex, επίπ.)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Reflex"
-msgstr "Reflex"
+msgid "Low delay (Reflex)"
+msgstr "Χαμηλή καθυστέρηση (Reflex)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2422,8 +2695,108 @@ msgstr "μικτό (dlaa.ini)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Logging"
-msgstr "Καταγραφή"
+msgid "AMD cache cores (X3D)"
+msgstr "Πυρήνες cache AMD (X3D)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (auto)"
+msgstr "ενεργό (auto)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Send everything"
+msgstr "Αποστολή όλων"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Log detail"
+msgstr "Λεπτομέρεια log"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Rewind before key"
+msgstr "Επαναφορά πριν το πλήκτρο"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d frames (dlaa.ini)"
+msgstr "%d καρέ (dlaa.ini)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture includes"
+msgstr "Η καταγραφή περιλαμβάνει"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Full"
+msgstr "Πλήρης"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Quick"
+msgstr "Γρήγορη"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "change"
+msgstr "αλλαγή"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture key"
+msgstr "Πλήκτρο καταγραφής"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%hs (press twice)"
+msgstr "%hs (πάτα δύο φορές)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Keep captures"
+msgstr "Κράτα καταγραφές"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "all"
+msgstr "όλες"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture now"
+msgstr "Καταγραφή τώρα"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "capturing %d / %d"
+msgstr "καταγραφή %d / %d"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "writing (%d files)"
+msgstr "γράφεται (%d αρχεία)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "done: %d parts, %d MB"
+msgstr "έγινε: %d μέρη, %d MB"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "failed (see the log)"
+msgstr "απέτυχε (δες το log)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "ready"
+msgstr "έτοιμο"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2518,11 +2891,6 @@ msgstr "Πάνελ προς εσένα"
 #: src/inject.cpp
 msgid "Menu keys"
 msgstr "Πλήκτρα μενού"
-
-#. Value column (about 20 Latin characters)
-#: src/inject.cpp
-msgid "Off"
-msgstr "Ανενεργό"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2621,6 +2989,16 @@ msgstr "FPS αδιαφάνεια"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS graph length"
+msgstr "Διάρκεια γραφήματος FPS"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "with a graph only"
+msgstr "μόνο με γράφημα"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "FPS distance (VR)"
 msgstr "FPS απόσταση (VR)"
 
@@ -2667,6 +3045,20 @@ msgstr "%lcCPU%lc | %lcGPU%lc ms"
 #, c-format
 msgid "Hold %hs for %hs s to reset. %ls"
 msgstr "Κράτα %hs για %hs s για επαναφορά. %ls"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"%hs = capture now (the menu closes first). The zip (dlaa_selftest folder next to the DLL) holds "
+"system info, the mod's and the game's log, dlaa.ini, your picture and DLAA off; Full adds what "
+"DLSS got and the A/B sets; rewind adds the moment before. Your user name and home folder are "
+"removed. %ls"
+msgstr ""
+"%hs = καταγραφή τώρα (το μενού κλείνει πρώτα). Το zip (φάκελος dlaa_selftest δίπλα στο DLL) έχει "
+"πληροφορίες συστήματος, το log του mod και του παιχνιδιού, dlaa.ini, την εικόνα σου και DLAA "
+"ανενεργό· η Πλήρης προσθέτει τι πήρε το DLSS και τα σετ A/B· η επαναφορά προσθέτει τη στιγμή "
+"πριν. Το όνομα χρήστη και ο προσωπικός φάκελος αφαιρούνται. %ls"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2719,9 +3111,6 @@ msgstr "πληροφορίες"
 msgid "debug"
 msgstr "αποσφαλμάτωση"
 
-#~ msgid "Panel settings"
-#~ msgstr "Ρυθμίσεις πάνελ"
-
-#~ msgid "FPS counter settings"
-#~ msgstr "Ρυθμίσεις μετρητή FPS"
+#~ msgid "The last one: %d zip parts of at most 24 MB, %d MB in all (folder %.0f MB): attach them all."
+#~ msgstr "Η τελευταία: %d μέρη zip έως 24 MB, %d MB συνολικά (φάκελος %.0f MB): επισύναψέ τα όλα."
 

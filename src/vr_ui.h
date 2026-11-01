@@ -27,8 +27,10 @@ constexpr FieldDef kFields[kFieldCount] = {
     { "y",      0.05f, -3.0f,   3.0f,  0.0f, 2 },
     { "x",      0.05f, -3.0f,   3.0f,  0.0f, 2 },
     { "dist",   0.10f,  0.2f,  10.0f,  1.0f, 2 },
-    { "pitch",  0.05f, -1.6f,   1.6f,  0.0f, 2 },
-    { "yaw",    0.05f, -3.15f,  3.15f, 0.0f, 2 },
+    // pitch / yaw are DEGREES (the game's VR UI; VR test 2026-11-01: the old 0.05 steps up to +-1.6 moved the UI by less than
+    // 2 degrees -- nothing visible). Step 5, like the fov row's whole numbers.
+    { "pitch",  5.0f,  -90.0f,  90.0f, 0.0f, 0 },
+    { "yaw",    5.0f, -180.0f, 180.0f, 0.0f, 0 },
     { "fov",    1.0f,  10.0f, 120.0f, 50.0f, 0 },
     { "radius", 0.5f,   0.0f,  20.0f,  0.0f, 1 },
 };
@@ -177,6 +179,9 @@ inline int RaaFromCfg(const std::string& cfg) { float v = 0.0f; return ParseCfg(
 constexpr int kKeyMs = 50;        // a key held this long (several game input polls at 60-90 fps)
 constexpr int kOpenMs = 150;      // after the console key: the console opens
 constexpr int kAfterEnterMs = 100;
+// a wait also lasts at least this many Presents (VR test 2026-11-01: `uset r_aa` makes the game and the mod rebuild their AA; a
+// 100+ ms frame took the console key's down AND up in one game frame, the close was lost and the console stayed open)
+constexpr int kMinWaitFrames = 3;
 // one console session for the commands: open, (text, Enter) per command, close
 inline std::vector<KeyStep> KeyPlan(const std::vector<std::string>& cmds) {
     std::vector<KeyStep> p;

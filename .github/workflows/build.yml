@@ -74,6 +74,8 @@ jobs:
           if not exist build\tests\light_fs_test.exe exit /b 1
           call tests\build_outside_aa_test.bat
           if not exist build\tests\outside_aa_test.exe exit /b 1
+          call tests\build_bug_report_test.bat
+          if not exist build\tests\bug_report_test.exe exit /b 1
           call tests\build_game_taa_test.bat
           if not exist build\tests\game_taa_test.exe exit /b 1
           call tests\build_vr_ui_test.bat
@@ -120,6 +122,8 @@ jobs:
         run: build\tests\light_fs_test.exe
       - name: Test outside AA (phase 81 -- src/outside_aa.h feather bands; WARP: unjitter of jittered-viewport frames, in place + upscale, sign mutation)
         run: build\tests\outside_aa_test.exe
+      - name: Test bug report capture helpers (phase 89b-d -- src/bug_report.h; zip read back, privacy scrubber, plan, pruning, double press)
+        run: build\tests\bug_report_test.exe
       - name: Test game TAA with the mod (phase 82 -- src/game_taa.h checksum, live window / jitter hold, resolve-constants jitter, per-pass decision, menu steps)
         run: build\tests\game_taa_test.exe
       - name: Test the in-game VR UI placement (phase 83 -- src/vr_ui.h config.cfg parsing, steps, debounce / queue, keystroke plan)

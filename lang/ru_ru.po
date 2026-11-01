@@ -168,47 +168,64 @@ msgstr "Панель меню"
 msgid "Compare and test"
 msgstr "Сравнение и тест"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Bug report"
+msgstr "Отчёт об ошибке"
+
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's "
-"Scaling is below 100 %. off = the game's own picture: use it to compare. Saved at once."
+"Scaling is below 100 %. Mix = the game's own TAA blended with DLAA / DLSS: calmer, a bit softer. "
+"off = the game's own picture. Saved at once."
 msgstr ""
-"DLAA = чистые края в размере кадра игры. DLSS = то же, плюс масштабирование, если "
-"«Масштабирование» в игре ниже 100 %. выкл = родная картинка игры, для сравнения. Сохраняется "
-"сразу."
+"DLAA = чистые края в размере рендера игры. DLSS = то же, плюс увеличение, когда Масштабирование "
+"игры ниже 100 %. Микс = собственный TAA игры, смешанный с DLAA / DLSS: спокойнее, чуть мягче. "
+"выкл. = собственная картинка игры. Сохраняется сразу."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Presets for your GPU. high = everything on (model 1). medium = model 2, half-size see-through "
-"depth, flat mirrors without part motion, lighter part-motion search. low = also no mirror DLAA, "
-"no see-through depth, VR area 60 %. Never changes a setting you set yourself."
+"How much of the Mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer, less = "
+"sharper. Shown while Mode is Mix, or a split has a Mix side. No extra cost."
 msgstr ""
-"Пресеты под вашу GPU. высокий = всё включено (модель 1). средний = модель 2, прозрачная глубина "
-"вдвое меньше, плоские зеркала без движения деталей, облегчённый поиск движения. низкий = ещё без "
-"DLAA зеркал и прозрачной глубины, область VR 60 %. Не меняет то, что вы задали сами."
+"Какая доля микса приходится на TAA игры, 0 - 100 % шагом 10 %: больше = спокойнее и мягче, меньше "
+"= чётче. Показывается, пока Режим - Микс или у разделения есть сторона с миксом. Без "
+"дополнительной нагрузки."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, least ghosting "
+"Presets for your graphics card. high = everything on (model 1). medium = model 2, a lighter Glass "
+"and fence fix, mirrors without Track moving parts. low = also no Smooth mirrors, no Glass and "
+"fence fix, VR area 60 %. Never changes a setting you set yourself."
+msgstr ""
+"Пресеты для вашей видеокарты. high = всё включено (модель 1). medium = модель 2, более лёгкое "
+"исправление стёкол и заборов, зеркала без отслеживания движущихся частей. low = ещё и без плавных "
+"зеркал, без исправления стёкол и заборов, область VR 60 %. Настройки, которые вы задали сами, не "
+"меняются."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, fewest trails "
 "behind traffic: start here. 3 (F) = calmest on fences and wires, can smear moving detail, same "
 "cost as 2. 4 (M) = heaviest (about 5x), flat tests only."
 msgstr ""
-"1 (K) = больше всего деталей, самый чёткий текст, около 1,6x GPU от 2. 2 (E) = баланс, меньше "
-"всего шлейфов за машинами: начните с неё. 3 (F) = спокойнее на заборах и проводах, может "
-"размазывать движение, нагрузка как у 2. 4 (M) = самая тяжёлая (около 5x), только для плоского "
-"режима."
+"1 (K) = больше всего деталей, самый чёткий текст, ~1,6x GPU от 2. 2 (E) = баланс, меньше всего "
+"шлейфов за транспортом: начните с неё. 3 (F) = самая спокойная на заборах и проводах, может "
+"размазывать движение, цена как у 2. 4 (M) = самая тяжёлая (~5x), только тесты в плоском режиме."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Picture quality: sharpening, texture sharpness, the DLAA area and the see-through depth. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
+"Picture quality: sharpening, texture sharpness, the Glass and fence fix, the Light trail fix and "
+"the DLAA area. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Качество картинки: резкость, резкость текстур, область DLAA и прозрачная глубина. Вправо "
-"открывает группу, влево закрывает; при каждом открытии меню она закрыта."
+"Качество картинки: резкость, чёткость текстур, исправление стёкол и заборов, исправление световых "
+"шлейфов и область DLAA. Вправо открывает группу, влево закрывает; при каждом открытии меню она "
+"закрыта."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -233,41 +250,43 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Sharper texture text (road signs, dashboard, GPS). 0 = off; more negative = sharper but more "
-"shimmer on fences; try -0.5 to -1 if text is blurry. No GPU time, only a little memory bandwidth."
+"shimmer on fences; try -0.5 to -1 if text is blurry. Almost no cost."
 msgstr ""
-"Чётче текст на текстурах (знаки, приборка, GPS). 0 = выкл; чем меньше (минус), тем чётче, но "
-"заборы мерцают сильнее; при размытом тексте попробуйте от -0,5 до -1. Без нагрузки на GPU, лишь "
-"немного памяти."
+"Чётче текст на текстурах (знаки, приборы, GPS). 0 = выкл; меньше = чётче, но больше мерцания на "
+"заборах; если текст мутный, попробуйте от -0,5 до -1. Почти бесплатно."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"The same for wire fences, grass and leaf cut-outs: raise it toward 0 if fences shimmer, lower it "
-"if grass looks soft. same = follows the row above. Acts only while Texture sharpness is not 0. No "
-"GPU time, a little memory."
+"The same for wire fences, grass and leaves: raise it toward 0 if fences shimmer, lower it if "
+"grass looks soft. same = follows the row above. Works only while Texture sharpness is not 0. "
+"Almost no cost."
 msgstr ""
-"То же для сетчатых заборов, травы и листвы: ближе к 0, если заборы мерцают; ниже, если трава "
-"мягкая. так же = как в строке выше. Действует, пока Резкость текстур не 0. Без нагрузки на GPU, "
-"немного памяти."
+"То же для сетчатых заборов, травы и листвы: поднимите ближе к 0, если заборы мерцают, опустите, "
+"если трава выглядит мягкой. так же = как строка выше. Работает, только пока Резкость текстур не "
+"0. Почти ничего не стоит."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives wires, fences and glass their own distance instead of what is behind them, so they do not "
-"smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."
+"Wires, fences and windows are treated as the thing in front, not as what you see through them, so "
+"they do not smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms "
+"per eye."
 msgstr ""
-"Даёт проводам, заборам и стеклу собственную дальность, а не то, что за ними, чтобы они не "
-"размазывались при движении. Выключите, если размазывания нет: экономия 0,02 - 0,06 мс на глаз."
+"Провода, заборы и окна считаются предметом на переднем плане, а не тем, что видно сквозь них, "
+"поэтому не размазываются при движении. Выключите, если размазывания нет: экономит 0,02 - 0,06 мс "
+"на глаз."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Stops street-lamp and car-light glows leaving a trail behind them when you move: DLSS takes each "
-"glow from the current frame, not its history. 25 % steps; lower it if lamp glows flicker, 0 = "
-"off. Costs about 0.05 - 0.2 ms per eye."
+"Stops street-lamp and car-light glows leaving a trail behind them when you move: the glows are "
+"drawn fresh each frame instead of being blended with older frames. 25 % steps; lower it if lamp "
+"glows flicker, 0 = off. Costs about 0.05 - 0.2 ms per eye."
 msgstr ""
-"Убирает шлейф за свечением фонарей и фар при движении: DLSS берёт свечение из текущего кадра, а "
-"не из истории. Шаг 25 %; ниже, если свечение мерцает, 0 = выкл. Около 0,05 - 0,2 мс на глаз."
+"Уличные фонари и фары больше не оставляют шлейф за собой при движении: свечение рисуется заново в "
+"каждом кадре, а не смешивается со старыми кадрами. Шаг 25 %; уменьшите, если свечение фонарей "
+"мерцает, 0 = выкл. Стоит около 0,05 - 0,2 мс на глаз."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -292,24 +311,24 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and "
-"does not ghost. Turn it off only to save about 0.5 ms per eye or to test: every pixel then moves "
+"DLAA follows each moving thing on its own (traffic, wheels, number plates), so it stays sharp and "
+"leaves no trail. Turn it off only to save about 0.5 ms per eye or to test: everything then moves "
 "with the camera and traffic smears."
 msgstr ""
-"Даёт каждой движущейся детали (машины, колёса, номера) своё движение для DLAA: она остаётся "
-"чёткой без шлейфов. Выключайте лишь ради ~0,5 мс на глаз или теста: тогда всё движется вместе с "
-"камерой, машины размазываются."
+"DLAA следит за каждым движущимся объектом отдельно (транспорт, колёса, номера), поэтому картинка "
+"остаётся чёткой и без шлейфов. Выключайте только ради экономии около 0,5 мс на глаз или для "
+"теста: тогда всё движется вместе с камерой, а транспорт размазывается."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main "
-"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can ghost "
-"in the glass; else each part moves exactly in the glass."
+"Smooths the truck mirrors too, so they do not shimmer. 1 mirror = only the largest (the main "
+"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can leave "
+"trails in the glass; the others follow each moving thing."
 msgstr ""
-"Даёт зеркалам грузовика свой DLAA, чтобы не мерцали. 1 зеркало = только самое большое (главное "
-"рядом с вами). все = каждое. камера = дешевле всего, машины в стекле могут давать шлейф; иначе "
-"детали движутся в стекле точно."
+"Сглаживает и зеркала грузовика, чтобы они не мерцали. 1 зеркало = только самое большое (главное "
+"зеркало рядом с вами). все = каждое зеркало. камера = дешевле всего на зеркало, движущийся "
+"транспорт может оставлять шлейфы в стекле; остальные режимы следят за каждым движущимся объектом."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -325,130 +344,145 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
-"the group, Left closes it; it starts closed every time the menu opens."
+"Frame rate and CPU: CPU tuning, AMD cache cores, an FPS cap and Low delay (Reflex) for flat, an "
+"FPS cap for VR. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Частота кадров и CPU: настройка CPU, лимит FPS и NVIDIA Reflex для плоского режима, лимит FPS VR. "
-"Вправо открывает группу, влево закрывает; при каждом открытии меню она закрыта."
+"Частота кадров и CPU: настройка CPU, кэш-ядра AMD, лимит FPS и малая задержка (Reflex) для "
+"плоского режима, лимит FPS для VR. Вправо открывает группу, влево закрывает; при каждом открытии "
+"меню она закрыта."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
-"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
-"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
+"Three CPU switches together. Prefer fast cores: only Intel CPUs with P-cores and E-cores. Higher "
+"priority and no Windows power saving for the game: every CPU, Intel and AMD. Helps when the CPU "
+"is the limit; no cost. Separate in dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle."
 msgstr ""
-"Три переключателя CPU вместе: главный и рендер-потоки предпочитают P-ядра (только гибридные CPU "
-"Intel), игра идёт с приоритетом «Выше среднего», а Windows не душит её (EcoQoS) и не игнорирует "
-"её запросы таймера. Помогает при упоре в CPU; без затрат. Отдельно в dlaa.ini: cpu_pcore, "
-"cpu_priority, cpu_no_throttle."
+"Три переключателя CPU вместе. Быстрые ядра в приоритете: только процессоры Intel с P- и E-ядрами. "
+"Высокий приоритет и без энергосбережения Windows для игры: любой CPU, Intel и AMD. Помогает, "
+"когда упор в CPU; ничего не стоит. По отдельности в dlaa.ini: cpu_pcore, cpu_priority, "
+"cpu_no_throttle."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"AMD X3D CPUs with two core groups (7950X3D, 9950X3D): keeps the game on the cores with the big 3D "
+"V-Cache, which games like. Switches at once; off gives the game all cores back. Try it and "
+"compare in a busy city. No cost."
+msgstr ""
+"Процессоры AMD X3D с двумя группами ядер (7950X3D, 9950X3D): держит игру на ядрах с большим 3D "
+"V-Cache, который игры любят. Включается сразу; выкл возвращает игре все ядра. Попробуйте и "
+"сравните в оживлённом городе. Ничего не стоит."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
-"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
-"limiting. off = no limit."
+"Set it a bit below what your PC holds in a busy city. With Low delay (Reflex) on, the NVIDIA "
+"driver does the limiting. off = no limit."
 msgstr ""
-"Только плоский режим. Держит игру не выше этой частоты кадров: ровное время кадра, меньше нагрева "
-"и энергии. Ставьте чуть ниже того, что ПК держит в оживлённом городе. С Reflex лимит ставит "
-"драйвер NVIDIA. выкл = без лимита."
+"Только плоский режим. Не даёт игре превышать эту частоту кадров: ровное время кадра, меньше тепла "
+"и энергии. Поставьте чуть ниже того, что ваш ПК держит в оживлённом городе. При включённой малой "
+"задержке (Reflex) ограничивает драйвер NVIDIA. выкл = без лимита."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
-"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
+"Flat only, NVIDIA only (NVIDIA Reflex). On = the game's frames wait less before the graphics card "
+"draws them: less delay between your steering and the picture when the card is the limit. Boost "
+"also keeps the card's clocks up. Same fps; small cost."
 msgstr ""
-"Только плоский режим, только NVIDIA. Вкл = кадры игры меньше ждут в очереди GPU: меньше задержка "
-"ввода при упоре в GPU. Boost ещё держит частоты GPU. Тот же fps; небольшая цена. В VR не работает."
+"Только плоский режим, только NVIDIA (NVIDIA Reflex). Вкл = кадры игры меньше ждут, прежде чем "
+"видеокарта их нарисует: меньше задержка между рулём и картинкой, когда упор в видеокарту. Boost "
+"ещё и держит частоты карты высокими. Те же fps; небольшая цена."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
-"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
-"the fps swings. Turns Turbo off while on."
+"headset's frame smoothing (ASW / Motion Smoothing) fills in the rest at a steady rhythm. Use it "
+"when the fps swings. Turns Turbo off while on."
 msgstr ""
 "Только VR. половина = игра рисует каждый 2-й кадр шлема (72 Гц -> 36 fps), треть = каждый 3-й; "
-"репроекция шлема (ASW / Motion Smoothing) заполняет остальное в ровном ритме. Используйте при "
-"скачках fps. Пока включено, Turbo выкл."
+"сглаживание кадров шлема (ASW / Motion Smoothing) заполняет остальное в ровном ритме. "
+"Используйте, когда fps скачет. Пока включено, Turbo выключен."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
-"are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
+"VR speed-ups: Turbo, foveated rendering, skipping the hidden lens edges, and whether OFXR Bridge "
+"/ VectorXR are found. Right opens the group, Left closes it; it starts closed every time the menu "
+"opens."
 msgstr ""
-"Ускорение VR: Turbo, фовеальный рендеринг, маска скрытой области и найдены ли OFXR Bridge / "
+"Ускорение VR: Turbo, foveated-рендеринг, пропуск скрытых краёв линз и найдены ли OFXR Bridge / "
 "VectorXR. Вправо открывает группу, влево закрывает; при каждом открытии меню она закрыта."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Turbo: no ASW / Motion Smoothing / SSW / reprojection. VR only. On = the game stops waiting for "
-"the headset each frame: more fps only when the CPU is the limit (busy cities, traffic). Turn it "
-"off if the picture judders. From OpenXR Toolkit."
+"Turbo switches off the headset's frame smoothing (ASW / Motion Smoothing / SSW). VR only. On = "
+"the game stops waiting for the headset each frame: more fps only when the CPU is the limit (busy "
+"cities, traffic). Turn it off if the picture judders."
 msgstr ""
-"Turbo: без ASW / Motion Smoothing / SSW / репроекции. Только VR. Вкл = игра не ждёт шлем в каждом "
-"кадре: больше fps, только если упор в CPU (города, трафик). Выключите, если картинка дёргается. "
-"Из OpenXR Toolkit."
+"Turbo отключает сглаживание кадров шлема (ASW / Motion Smoothing / SSW). Только VR. Вкл = игра не "
+"ждёт шлем в каждом кадре: больше fps, только когда упор в CPU (оживлённые города, транспорт). "
+"Выключите, если картинка дёргается."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR "
-"only. The outer ring is shaded once per 2 x 2 pixels; fences, grass and leaves keep full detail. "
+"only. The outer ring gets one colour per 2 x 2 pixels; fences, grass and leaves keep full detail. "
 "Turn it off if the edge looks blocky."
 msgstr ""
-"Чёткий центр, меньше деталей по краям (только NVIDIA RTX). Экономит GPU при высоком "
-"масштабировании. Только VR. Внешнее кольцо шейдится раз на 2 x 2 пикселя; заборы, трава и листва "
-"остаются детальными. Выключите, если край блочный."
+"Чёткий центр, меньше деталей по краям (только NVIDIA RTX). Экономит время GPU при высоком "
+"масштабе. Только VR. Внешнее кольцо получает один цвет на 2 x 2 пикселя; заборы, трава и листва "
+"сохраняют полную детализацию. Выключите, если край выглядит блочным."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How big the sharp centre of Foveated (VRS) is, 10 - 100 % in 5 % steps: bigger = more of the view "
-"sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
+"How big the sharp centre of Foveated rendering is, 10 - 100 % in 5 % steps: bigger = more of the "
+"view sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
 "(balanced) is the default; 90 = wide, 65 = narrow."
 msgstr ""
-"Размер чёткого центра Foveated (VRS), 10 - 100 % шагом 5 %: больше = чётче область, меньше "
-"экономия; меньше = больше экономия, падение детализации ближе к центру. По умолчанию 80 % "
-"(баланс); 90 = широко, 65 = узко."
+"Размер чёткого центра Foveated-рендеринга, 10 - 100 % с шагом 5 %: больше = чётче большая часть "
+"вида, меньше экономия; меньше = больше экономия, низкая детализация начинается ближе к центру. По "
+"умолчанию 80 % (баланс); 90 = широкая, 65 = узкая."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Which of the game's passes Foveated (VRS) acts on. scene = the 3D world only (default). scene + "
-"lighting = also the game's lighting pass, at the very edge only: more saving. Test it: look for "
-"blocky light or shadow edges at the side of your view."
+"What Foveated rendering makes coarser. scene = the 3D world only (default). scene + lighting = "
+"also the game's lighting, at the very edge only: more saving. Test it: look for blocky light or "
+"shadow edges at the side of your view."
 msgstr ""
-"К каким проходам игры применяется Foveated (VRS). сцена = только 3D-мир (по умолчанию). сцена + "
-"освещение = ещё проход освещения, лишь на самом краю: экономия больше. Проверьте: нет ли блочных "
-"краёв света и теней по бокам."
+"Что Foveated-рендеринг делает грубее. сцена = только 3D-мир (по умолчанию). сцена + освещение = "
+"ещё и освещение игры, только на самом краю: больше экономия. Проверьте: ищите блочные края света "
+"или теней сбоку поля зрения."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How coarse the outer ring of Foveated (VRS) is. Normal = 1 colour per 2 x 2 pixels (default). "
+"How coarse the outer ring of Foveated rendering is. Normal = 1 colour per 2 x 2 pixels (default). "
 "Strong = per 4 x 2, Max = per 4 x 4: more GPU saving, blockier edges. Best with eye tracking, "
 "where you never look at the outer ring."
 msgstr ""
-"Грубость внешнего кольца Foveated (VRS). Обычная = 1 цвет на 2 x 2 пикселя (по умолчанию). "
-"Сильная = на 4 x 2, Макс = на 4 x 4: больше экономия GPU, блочнее края. Лучше всего с "
-"отслеживанием глаз: на кольцо вы не смотрите."
+"Насколько грубое внешнее кольцо Foveated-рендеринга. Обычная = 1 цвет на 2 x 2 пикселя (по "
+"умолчанию). Сильная = на 4 x 2, Макс = на 4 x 4: больше экономия GPU, более блочные края. Лучше "
+"всего с отслеживанием глаз, когда вы никогда не смотрите на внешнее кольцо."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Experimental. The sharp centre of Foveated (VRS) follows your eyes on a headset with eye tracking "
-"(OpenXR eye gaze, for example Varjo); without one it stays at the lens centre. Needs Foveated "
-"(VRS) on at the game's start, else a restart. Almost no cost."
+"Experimental. The sharp centre of Foveated rendering follows your eyes on a headset with eye "
+"tracking (for example Varjo); without it the centre stays in the middle of the lens. Needs "
+"Foveated rendering on at the game's start, else a restart. Almost no cost."
 msgstr ""
-"Эксперимент. Чёткий центр Foveated (VRS) следует за глазами в шлеме с отслеживанием глаз (взгляд "
-"OpenXR, например Varjo); без него остаётся в центре линзы. Foveated (VRS) должен быть вкл при "
-"старте игры, иначе перезапуск. Почти без нагрузки."
+"Экспериментально. Чёткий центр Foveated-рендеринга следует за вашими глазами на шлеме с "
+"отслеживанием глаз (например, Varjo); без него центр остаётся посередине линзы. "
+"Foveated-рендеринг должен быть включён при запуске игры, иначе нужен перезапуск. Почти ничего не "
+"стоит."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -508,8 +542,8 @@ msgid ""
 "game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
 "Двигает VR-интерфейс игры: высота, сторона, расстояние, наклон, поворот, размер или кривизна, "
-"маленькими шагами. Игра получает каждое изменение примерно через 0,4 с после последнего нажатия: "
-"консоль сама открывается и закрывается."
+"малыми шагами. Игра получает изменение через 0,4 с после последнего нажатия; консоль открывается "
+"и закрывается сама."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -523,13 +557,13 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see "
-"what a setting gains. Its GPU cost is measured: per frame, every picture it is drawn into; none "
-"when off. Save keeps it for the next start."
+"A small live fps and frame-time box, also while this menu is closed (flat and VR): fps, ms, "
+"numbers only, each with or without a graph of recent frame times (spikes show red), or the graph "
+"alone. Its GPU cost is measured. Save keeps it."
 msgstr ""
-"Маленькое живое окошко с fps и временем кадра, и при закрытом меню (плоский и VR). Смотрите, что "
-"даёт настройка. Нагрузка на GPU измеряется: за кадр, во всех картинках, куда оно рисуется; выкл = "
-"ноль. Сохранение оставляет его на следующий запуск."
+"Маленькое окошко с fps и временем кадра, видно и при закрытом меню (плоский режим и VR): fps, мс, "
+"только числа, каждый вариант с графиком недавнего времени кадров (всплески красные) или без него, "
+"либо только график. Его цена для GPU измеряется. Сохранить запоминает."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -598,13 +632,24 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
-"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
-"Per-part motion vectors). No cost."
+"How far back the fps graph shows: 2 - 60 s. One bar per slice of time = its slowest frame, so you "
+"see spikes. Green = on time, yellow = a bit slow, red = a hitch; the line = the headset rate / "
+"FPS cap / your usual. Shown when FPS counter has a graph."
 msgstr ""
-"Только VR. За головой = двигается со шлемом. В пространстве = одно место вокруг сиденья, не "
-"качается с кабиной. К машине = приклеен к кабине, качается с ней (нужны DLAA + векторы движения "
-"по частям). Без затрат."
+"Насколько назад показывает график fps: 2 - 60 с. Один столбик на отрезок времени = его самый "
+"медленный кадр, видны всплески. Зелёный = вовремя, жёлтый = чуть медленно, красный = подвисание; "
+"линия = частота шлема / лимит FPS / обычный уровень. Если у счётчика FPS есть график."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
+"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Track "
+"moving parts). No cost."
+msgstr ""
+"Только VR. За головой = двигается вместе со шлемом. В пространстве = одно место вокруг вашего "
+"сиденья, не качается вместе с кабиной. К машине = приклеено к кабине, качается вместе с ней "
+"(нужны DLAA + отслеживание движущихся частей). Ничего не стоит."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -738,13 +783,13 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Switches for A/B checks: DLAA off, the game's own TAA mixed in or side by side, the thin-wire "
-"switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
-"group, Left closes it."
+"Switches for comparing: DLAA off, the game's own TAA mixed in or side by side, the wire fixes, "
+"running DLAA earlier. Nothing here is needed for normal driving. Right opens the group, Left "
+"closes it."
 msgstr ""
-"Переключатели для проверок A/B: DLAA выкл., собственный TAA игры в смеси или рядом, переключатели "
-"тонких проводов, DLAA до тонмапа. Для обычной езды здесь ничего не нужно. Вправо открывает "
-"группу, влево закрывает."
+"Переключатели для сравнения: DLAA выкл, собственный TAA игры вперемешку или рядом, исправления "
+"проводов, запуск DLAA раньше. Для обычной езды ничего из этого не нужно. Вправо открывает группу, "
+"влево закрывает."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -758,64 +803,55 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
-"right, to compare."
+"on = the mod on the left, the game's own TAA on the right, to compare (Split line position, "
+"Split: left | right). Replaces Mix while on. With the game's console on, the mod switches the "
+"game's Anti-aliasing for you."
 msgstr ""
-"Только если сглаживание игры стоит на TAA. выкл = только мод (поставьте AA игры на Отключено). "
-"микс = TAA и DLAA / DLSS в одном кадре, смешанные. разделение = слева мод, справа TAA, для "
-"сравнения."
+"вкл. = мод слева, собственный TAA игры справа, для сравнения (Позиция линии разделения, "
+"Разделение: слева | справа). Пока включено, заменяет Микс. Если консоль игры включена, мод сам "
+"переключает сглаживание игры."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
+"Where the split line is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS on the left "
+"of it, the game's TAA on the right. Used only while Split with game TAA is on."
 msgstr ""
-"Какая доля микса приходится на TAA игры, 0 - 100 % с шагом 10 %: больше = спокойнее и мягче "
-"(TAA), меньше = резче (DLAA / DLSS). Используется, когда TAA игры = микс, или разделение со "
-"стороной микс. Без дополнительных затрат."
+"Где проходит линия разделения, 0 - 100 % ширины шагом 5 %: слева от неё DLAA / DLSS мода, справа "
+"TAA игры. Используется, только пока включено Разделение с TAA игры."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
-"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+"What the split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix | TAA "
+"or DLAA | Mix (Mix = the two blended at Mix amount). DLSS instead of DLAA when upscaling. Used "
+"only while Split with game TAA is on."
 msgstr ""
-"Где проходит линия разделения TAA игры, 0 - 100 % ширины с шагом 5 %: левее неё DLAA / DLSS мода, "
-"правее TAA игры. Используется только когда TAA игры = разделение."
+"Что разделение показывает по обе стороны: DLAA | TAA (мод слева, TAA игры справа), микс | TAA или "
+"DLAA | микс (микс = оба, смешанные в пропорции Доли микса). DLSS вместо DLAA при увеличении. "
+"Используется, только пока включено Разделение с TAA игры."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
-"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
-"upscaling. Used only when Game TAA is split."
+"Thin wires move correctly while you drive: their movement is spread over the whole thin line. on "
+"= default. off = only to compare; near wires flicker more. The picture is soft for a moment when "
+"you switch."
 msgstr ""
-"Что показывает TAA игры в режиме разделения по двум сторонам: DLAA | TAA (слева мод, справа TAA "
-"игры), микс | TAA или DLAA | микс (микс = оба, смешанные по Доле TAA игры). DLSS вместо DLAA при "
-"масштабировании. Используется только когда TAA игры = разделение."
+"Тонкие провода правильно двигаются во время езды: их движение распределяется по всей тонкой "
+"линии. вкл = по умолчанию. выкл = только для сравнения; близкие провода мерцают сильнее. При "
+"переключении картинка на миг становится мягкой."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
-"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
-"soft for a moment when it changes."
+"Thin wires count as in front on every pixel they touch, even where they cover only a sliver of "
+"it. on = default. on (no A2C) = also for see-through edges such as leaves. off = only to compare; "
+"near wires flicker more."
 msgstr ""
-"Тонкие провода сохраняют движение при езде: DLAA растягивает данные движения на тонкие линии "
-"(расширение движения DLSS). вкл = по умолчанию. выкл = лишь для сравнения; ближние провода "
-"мерцают сильнее. При смене картинка ненадолго мягкая."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
-"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
-msgstr ""
-"Тонкие провода получают глубину в каждом затронутом пикселе, а не только там, где покрывают центр "
-"пикселя. вкл = по умолчанию. вкл (без A2C) = и для прозрачных краёв. выкл = лишь для сравнения; "
-"ближние провода мерцают сильнее."
+"Тонкие провода считаются передним планом на каждом пикселе, которого касаются, даже если "
+"закрывают лишь часть. вкл = по умолчанию. вкл (без A2C) = ещё и для прозрачных краёв (листва). "
+"выкл = только для сравнения; близкие провода мерцают сильнее."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -830,24 +866,86 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
-"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
-"~60 frames to switch."
+"Flat only: DLAA runs before the game adds its glow and colour look, so lane paint, wires and "
+"rails shimmer less. Change it only to compare. Not used with DLSS upscaling or Windows HDR. Same "
+"cost either way; takes about a second to switch."
 msgstr ""
-"Только плоский режим: DLAA до блума / тонмаппинга игры, разметка, провода и рельсы мерцают "
-"меньше. Меняйте лишь для сравнения. Не с апскейлом DLSS и не с Windows HDR. Цена та же; "
-"переключение ~60 кадров."
+"Только плоский режим: DLAA работает до того, как игра добавит свечение и цветовой вид, поэтому "
+"дорожная разметка, провода и рельсы мерцают меньше. Меняйте только для сравнения. Не используется "
+"с масштабированием DLSS и Windows HDR. Цена та же; переключение занимает около секунды."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Bug report: press the capture key twice (or Capture now) where something looks wrong; the mod "
+"writes one zip you attach to a GitHub issue. Right opens the group, Left closes it."
+msgstr ""
+"Отчёт об ошибке: нажмите клавишу захвата дважды (или Снять сейчас) там, где что-то выглядит "
+"неправильно; мод запишет один zip, который можно приложить к issue на GitHub. Вправо открывает "
+"группу, влево закрывает."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"One switch for the most complete report: log detail debug, rewind 2 s, capture Full. Off puts the "
+"rows back as they were. Only this switch is saved; the forced values are never written to "
+"dlaa.ini."
+msgstr ""
+"Один переключатель для самого полного отчёта: подробность журнала debug, перемотка 2 с, захват "
+"Полный. Выкл возвращает строки как были. Сохраняется только этот переключатель; принудительные "
+"значения никогда не пишутся в dlaa.ini."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + "
-"problems worked around; info = + start-up and changes; debug = + statistics, and debug also runs "
-"the GPU timers and the CPU profiler."
+"problems worked around; info = + start-up and changes; debug = + statistics and timing "
+"measurements (a little slower)."
 msgstr ""
-"Что пишется в dlaa_inject.log: выкл = ничего; ошибки = только сбои (по умолчанию); предупреждения "
-"= + обойдённые проблемы; инфо = + запуск и изменения; отладка = + статистика, а ещё включает "
-"таймеры GPU и профайлер CPU."
+"Что попадает в dlaa_inject.log: выкл = ничего; ошибки = только сбои (по умолчанию); "
+"предупреждения = + обойдённые проблемы; инфо = + запуск и изменения; отладка = + статистика и "
+"замеры времени (чуть медленнее)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Keeps the last 0.5 - 3 s of frames on the graphics card all the time, so the report shows the "
+"moment BEFORE the key (+ what DLSS got for the last frames). Costs graphics memory (the MB in the "
+"cost column) and a picture copy per frame. off = none."
+msgstr ""
+"Всё время хранит на видеокарте последние 0,5 - 3 с кадров, чтобы отчёт показывал момент ДО "
+"нажатия клавиши (+ что получил DLSS за последние кадры). Стоит видеопамяти (МБ в столбце цены) и "
+"копии картинки на каждый кадр. выкл = нет."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Quick = system info, logs, settings, your picture and DLAA off for a few frames (about 1 s). Full "
+"= + what DLSS got per frame (colour, motion, depth) and A/B sets: motion view, motion off, jitter "
+"only (about 2 - 4 s)."
+msgstr ""
+"Быстрый = информация о системе, логи, настройки, ваша картинка и DLAA выкл на несколько кадров "
+"(около 1 с). Полный = + что получил DLSS в каждом кадре (цвет, движение, глубина) и наборы A/B: "
+"вид движения, движение выкл, только джиттер (около 2 - 4 с)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The capture key. Press it TWICE within 1 s while driving where it goes wrong (the first press "
+"only arms it: one short beep). Right opens the Hotkeys page on its line to change it."
+msgstr ""
+"Клавиша захвата. Нажмите её ДВАЖДЫ за 1 с во время езды там, где что-то идёт не так (первое "
+"нажатие только взводит её: один короткий сигнал). Вправо открывает страницу горячих клавиш на её "
+"строке, чтобы изменить."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How many captures stay in the dlaa_selftest folder next to the DLL: older ones (folder + zip) are "
+"deleted when a new one is written. all = never delete."
+msgstr ""
+"Сколько захватов остаётся в папке dlaa_selftest рядом с DLL: старые (папка + zip) удаляются при "
+"записи нового. все = ничего не удалять."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -886,12 +984,27 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Puts every setting in this menu back to how the mod ships (model, sharpen, texture sharpness, "
-"DLAA area, motion, mirrors, profile, panel, fps box, turbo, foveated, frame rate, logging), live "
-"and in dlaa.ini, keeping your hotkeys and every other line."
+"DLAA area, motion, mirrors, preset, panel, fps box, turbo, foveated, frame rate, CPU, log "
+"detail), live and in dlaa.ini, keeping your hotkeys and every other line."
 msgstr ""
-"Возвращает все настройки меню к заводским (модель, резкость, резкость текстур, область DLAA, "
-"движение, зеркала, профиль, панель, окошко fps, turbo, foveated, частота кадров, лог) сразу и в "
-"dlaa.ini, сохраняя ваши горячие клавиши и остальные строки."
+"Возвращает все настройки этого меню к заводским (модель, резкость, чёткость текстур, область "
+"DLAA, движение, зеркала, пресет, панель, окошко fps, turbo, foveated, частота кадров, CPU, "
+"подробность журнала), сразу и в dlaa.ini, сохраняя ваши горячие клавиши и все остальные строки."
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Off"
+msgstr "Выкл"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph only"
+msgstr "только график"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph"
+msgstr "график"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1166,8 +1279,8 @@ msgstr "Сейчас стоит %ls на кадр; меньше зеркал = �
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Greyed: Mirror DLAA is off."
-msgstr "Серо: DLAA зеркал выкл."
+msgid "Greyed: Smooth mirrors is off."
+msgstr "Серо: плавные зеркала выкл."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1180,6 +1293,24 @@ msgstr "Всегда вкл: режим зеркал 3 в dlaa.ini уже «по
 #, c-format
 msgid "The mirrors cost %ls per frame now."
 msgstr "Зеркала сейчас стоят %ls на кадр."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed: only for AMD X3D CPUs with two core groups (7950X3D, 9950X3D)."
+msgstr "Серо: только для процессоров AMD X3D с двумя группами ядер (7950X3D, 9950X3D)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On now: the game runs only on the cores with the big cache."
+msgstr "Сейчас вкл: игра работает только на ядрах с большим кэшем."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On, but not applied: the game's cores were already limited (see the log)."
+msgstr "Вкл, но не применено: ядра игры уже были ограничены (см. лог)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1209,7 +1340,9 @@ msgstr ""
 msgid ""
 "Waiting: click the game window on the desktop. The mod types into the game's console only while "
 "the game window has the focus."
-msgstr "Ожидание: щёлкните окно игры на рабочем столе. Мод вводит текст в консоль игры, только пока окно игры в фокусе."
+msgstr ""
+"Ожидание: щёлкните окно игры на рабочем столе. Мод вводит текст в консоль игры, только пока окно "
+"игры в фокусе."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1226,17 +1359,21 @@ msgstr "Лог игры не подтвердил последнее измен�
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid "Mix and split need the game's TAA: set Anti-aliasing to TAA in the game's graphics settings."
+msgstr "Микс и разделение требуют TAA игры: поставьте сглаживание на TAA в настройках графики игры."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "The game's TAA is not running now: the mod runs alone."
 msgstr "TAA игры сейчас не работает: мод работает один."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
+msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or set Mode to Mix."
 msgstr ""
-"TAA игры сейчас работает: поставьте сглаживание игры на Отключено или выберите микс или "
-"разделение."
+"TAA игры сейчас работает: поставьте сглаживание игры на Отключено или поставьте Режим на Микс."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1294,6 +1431,67 @@ msgstr "Возврат к TAA игры: DLAA не выполнялся в это
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
+msgid ""
+"Or turn on the game console (g_developer and g_console 1 in config.cfg): then the mod switches it "
+"for you."
+msgstr ""
+"Или включите консоль игры (g_developer и g_console 1 в config.cfg): тогда мод переключит это за "
+"вас."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn on the game console to let the mod switch the game's Anti-aliasing."
+msgstr "Включите консоль игры, чтобы мод мог переключать сглаживание игры."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "TAA"
+msgstr "TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "unknown"
+msgstr "неизвестно"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "other"
+msgstr "другое"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "waiting: click the game window"
+msgstr "ожидание: щёлкните по окну игры"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switching..."
+msgstr "переключение..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch confirmed"
+msgstr "переключено"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch NOT confirmed (see the log)"
+msgstr "переключение НЕ подтверждено (см. лог)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls, %ls."
+msgstr "AA игры: %ls, %ls."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls."
+msgstr "AA игры: %ls."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
 #, c-format
 msgid ""
 "Switched off by the mod: it cost more than %.1f ms per eye (VR budget). Press its key to try "
@@ -1312,6 +1510,44 @@ msgstr "Сейчас стоит %ls на кадр; выкл это убирае�
 #, c-format
 msgid "Costs %ls ms GPU per frame now; most of it at night."
 msgstr "Сейчас %ls мс GPU на кадр; в основном ночью."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"The last one: %d zips of at most 24 MB, %d MB in all (folder %.0f MB). Attach the _main zip; the "
+"others only if asked."
+msgstr "Последний: %d zip до 24 МБ, всего %d МБ (папка %.0f МБ). Приложите zip _main; остальные только по запросу."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Holds %.0f MB of graphics memory now."
+msgstr "Сейчас занимает %.0f МБ видеопамяти."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"%ls about %.0f MB graphics memory for the rewind; a capture takes about %.1f s and writes about "
+"%.0f MB."
+msgstr ""
+"%ls около %.0f МБ видеопамяти на перемотку; захват занимает около %.1f с и пишет около %.0f МБ."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "On, it costs"
+msgstr "Во вкл. стоит"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Costs now:"
+msgstr "Сейчас стоит:"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn off Send everything to change this."
+msgstr "Выключите «Отправлять всё», чтобы изменить это."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1375,8 +1611,8 @@ msgstr "Серо в VR: используйте лимит FPS VR."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Limited by the NVIDIA driver now (Reflex is on)."
-msgstr "Сейчас лимит ставит драйвер NVIDIA (Reflex вкл)."
+msgid "Limited by the NVIDIA driver now (Low delay is on)."
+msgstr "Сейчас ограничивает драйвер NVIDIA (малая задержка включена)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1429,8 +1665,8 @@ msgstr "Экономит время в собственных цифрах GPU �
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Foveated (VRS) is off: switch it on first."
-msgstr "Foveated (VRS) выкл: сначала включите его."
+msgid "Foveated rendering is off: switch it on first."
+msgstr "Foveated-рендеринг выкл: сначала включите его."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1448,11 +1684,11 @@ msgstr "Ложный взгляд (vrs_eye_fake = 1): чёткая област�
 #: src/inject.cpp
 #, c-format
 msgid ""
-"Foveated (VRS) was off at the game's start: save (Shift+F12) and restart the game to ask the "
+"Foveated rendering was off at the game's start: save (Shift+F12) and restart the game to ask the "
 "headset for eye gaze."
 msgstr ""
-"Foveated (VRS) был выкл при старте игры: сохраните (Shift+F12) и перезапустите игру, чтобы "
-"запросить взгляд у шлема."
+"Foveated-рендеринг был выключен при запуске игры: сохраните (Shift+F12) и перезапустите игру, "
+"чтобы запросить взгляд у шлема."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1890,7 +2126,7 @@ msgstr "Мод ETS2 / ATS DLAA и DLSS v%hs - меню настройки"
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "all settings (flat and VR)"
-msgstr "все настройки (плоский режим и VR)"
+msgstr "все (плоский и VR)"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1900,7 +2136,7 @@ msgstr "Настройки VR"
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Flat settings"
-msgstr "Настройки плоского режима"
+msgstr "Плоский режим"
 
 #. Heading of a column (short)
 #: src/inject.cpp
@@ -1951,15 +2187,41 @@ msgstr "закрыта (%d)"
 msgid "Mode"
 msgstr "Режим"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLSS)"
+msgstr "Микс (TAA + DLSS)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLAA)"
+msgstr "Микс (TAA + DLAA)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLSS"
 msgstr "DLSS"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLAA"
 msgstr "DLAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Mix amount"
+msgstr "Доля микса"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d %% TAA"
+msgstr "%d %% TAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Quality preset"
+msgstr "Пресет качества"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -1985,8 +2247,8 @@ msgstr "%.1f (выкл)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Sharpen width"
-msgstr "Охват резкости"
+msgid "Sharpness size"
+msgstr "Размер резкости"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2007,8 +2269,8 @@ msgstr "%.2f (выкл)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Cut-out texture sharpness"
-msgstr "Резкость листвы"
+msgid "Leaves and fences sharpness"
+msgstr "Резкость листвы и заборов"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2037,6 +2299,11 @@ msgstr "только VR"
 msgid "100 %% (flat)"
 msgstr "100 %% (плоск.)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Track moving parts"
+msgstr "Отслеж. движущихся частей"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "old stencil ids"
@@ -2044,12 +2311,12 @@ msgstr "старые ID трафарета"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirror DLAA"
-msgstr "DLAA зеркал"
+msgid "Smooth mirrors"
+msgstr "Плавные зеркала"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirrors in turns"
+msgid "Mirrors take turns (faster)"
 msgstr "Зеркала по очереди"
 
 #. Value column (about 20 Latin characters)
@@ -2059,13 +2326,23 @@ msgstr "вкл (режим 3)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Thin-wire motion"
-msgstr "Движение тонких проводов"
+msgid "Wire fix: motion"
+msgstr "Провода: движение"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Wire fix: depth"
+msgstr "Провода: глубина"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no A2C)"
 msgstr "вкл (без A2C)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Thicker wires (test)"
+msgstr "Утолщение проводов (тест)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2074,13 +2351,23 @@ msgstr "вкл (эксперимент)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "DLAA before tonemap"
-msgstr "DLAA до тонмапа"
+msgid "Run DLAA earlier (test, flat)"
+msgstr "DLAA раньше (тест, плоск.)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Run DLAA earlier (test)"
+msgstr "DLAA раньше (тест)"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "flat only"
 msgstr "только плоск."
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Glass and fence fix"
+msgstr "Стёкла и заборы"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2089,8 +2376,8 @@ msgstr "выкл (бюджет VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Light glow ghosting fix"
-msgstr "Исправление шлейфа света"
+msgid "Light trail fix"
+msgstr "Световые шлейфы"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2099,33 +2386,18 @@ msgstr "DLAA выкл. (не сохр.)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Game TAA"
-msgstr "TAA игры"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid "mix"
-msgstr "микс"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid "split"
-msgstr "разделение"
+msgid "Split with game TAA"
+msgstr "Разделение с TAA игры"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Game TAA share"
-msgstr "Доля TAA игры"
+msgid "Split line position"
+msgstr "Позиция линии разделения"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Split position"
-msgstr "Позиция разделения"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "Split compares"
-msgstr "Разделение сравнивает"
+msgid "Split: left | right"
+msgstr "Разделение: слева | справа"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2242,8 +2514,8 @@ msgstr "вкл (остановлен)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated (VRS)"
-msgstr "Foveated (VRS)"
+msgid "Foveated rendering"
+msgstr "Foveated-рендеринг"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2262,8 +2534,8 @@ msgstr "Размер foveated"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated passes"
-msgstr "Проходы foveated"
+msgid "Foveated: lighting too"
+msgstr "Foveated: и освещение"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2322,13 +2594,13 @@ msgstr "вкл (ждёт взгляд)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Hidden area mask (VR)"
-msgstr "Маска скрытой области (VR)"
+msgid "Skip hidden edges (VR)"
+msgstr "Пропуск скрытых краёв (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Hidden area mask"
-msgstr "Маска скрытой области"
+msgid "Skip hidden edges"
+msgstr "Пропуск скрытых краёв"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2343,13 +2615,13 @@ msgstr "вкл (лимит FPS)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Reflex (flat)"
-msgstr "Reflex (плоск.)"
+msgid "Low delay (Reflex, flat)"
+msgstr "Малая задержка (Reflex)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Reflex"
-msgstr "Reflex"
+msgid "Low delay (Reflex)"
+msgstr "Малая задержка (Reflex)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2405,8 +2677,108 @@ msgstr "смешано (dlaa.ini)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Logging"
-msgstr "Журнал"
+msgid "AMD cache cores (X3D)"
+msgstr "Кэш-ядра AMD (X3D)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (auto)"
+msgstr "вкл (авто)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Send everything"
+msgstr "Отправлять всё"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Log detail"
+msgstr "Подробность журнала"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Rewind before key"
+msgstr "Перемотка до клавиши"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d frames (dlaa.ini)"
+msgstr "%d кадров (dlaa.ini)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture includes"
+msgstr "Что входит в захват"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Full"
+msgstr "Полный"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Quick"
+msgstr "Быстрый"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "change"
+msgstr "изменить"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture key"
+msgstr "Клавиша захвата"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%hs (press twice)"
+msgstr "%hs (дважды)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Keep captures"
+msgstr "Хранить захватов"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "all"
+msgstr "все"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture now"
+msgstr "Снять сейчас"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "capturing %d / %d"
+msgstr "снимаю %d / %d"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "writing (%d files)"
+msgstr "запись (%d файлов)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "done: %d parts, %d MB"
+msgstr "готово: %d ч., %d МБ"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "failed (see the log)"
+msgstr "сбой (см. лог)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "ready"
+msgstr "готов"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2501,11 +2873,6 @@ msgstr "Панель к вам"
 #: src/inject.cpp
 msgid "Menu keys"
 msgstr "Клавиши меню"
-
-#. Value column (about 20 Latin characters)
-#: src/inject.cpp
-msgid "Off"
-msgstr "Выкл"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2604,6 +2971,16 @@ msgstr "Непрозрачность FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS graph length"
+msgstr "Длина графика FPS"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "with a graph only"
+msgstr "только с графиком"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "FPS distance (VR)"
 msgstr "Дистанция FPS (VR)"
 
@@ -2655,6 +3032,20 @@ msgstr "Удерживайте %hs %hs с для сброса. %ls"
 #: src/inject.cpp
 #, c-format
 msgid ""
+"%hs = capture now (the menu closes first). The zip (dlaa_selftest folder next to the DLL) holds "
+"system info, the mod's and the game's log, dlaa.ini, your picture and DLAA off; Full adds what "
+"DLSS got and the A/B sets; rewind adds the moment before. Your user name and home folder are "
+"removed. %ls"
+msgstr ""
+"%hs = снять сейчас (сначала меню закроется). В zip (папка dlaa_selftest рядом с DLL) попадают "
+"информация о системе, лог мода и игры, dlaa.ini, ваша картинка и DLAA выкл; Полный добавляет то, "
+"что получил DLSS, и наборы A/B; перемотка добавляет момент до этого. Ваше имя пользователя и "
+"домашняя папка удаляются. %ls"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
 "The 5 keys that open and drive this menu: %hs opens / closes it (the value), %hs / %hs / %hs / "
 "%hs move (Hotkey column). While the menu is open only these 5 are kept from the game. %hs: change "
 "them on the Hotkeys page."
@@ -2700,9 +3091,6 @@ msgstr "инфо"
 msgid "debug"
 msgstr "отладка"
 
-#~ msgid "Panel settings"
-#~ msgstr "Настройки панели"
-
-#~ msgid "FPS counter settings"
-#~ msgstr "Настройки счётчика FPS"
+#~ msgid "The last one: %d zip parts of at most 24 MB, %d MB in all (folder %.0f MB): attach them all."
+#~ msgstr "Последний: %d частей zip до 24 МБ, всего %d МБ (папка %.0f МБ): приложите все."
 

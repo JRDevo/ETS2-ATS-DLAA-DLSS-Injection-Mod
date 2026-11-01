@@ -17,7 +17,7 @@ key with no modifier (like `End`) only fires when Shift, Ctrl and Alt are all up
 
 | Key | What it does |
 |-----|--------------|
-| `End` | Mode: DLAA → DLSS → off |
+| `End` | Mode: DLAA → DLSS → Mix (TAA + DLAA) → Mix (TAA + DLSS) → off |
 | `Alt+F9` | Performance profile: high → medium → low |
 | `Shift+F12` | Save the current live settings to `dlaa.ini` |
 | `Delete` | Tuning menu: every setting on one panel, arrow keys to change |
@@ -45,8 +45,8 @@ menu and the garage / truck dealer screens, before a save is loaded).
 | `Up` / `Down` | Select a row (hold to scroll) |
 | `Left` / `Right` | Change the selected row. Number rows step and repeat while held; switches, the mode, the profile and the model change once per press. On a group row (`Picture`, `Menu panel`, `FPS counter`, ...) `Right` opens the group, `Left` closes it |
 
-- **Groups keep the list short** (phase 84: Picture, Motion and mirrors, Frame rate, Performance (VR), In-game UI (VR), FPS counter,
-  Menu panel, Compare and test; rows of the other mode -- flat / VR -- are hidden, `dlaa.ini menu_show_all = 1` shows all; phase 85:
+- **Groups keep the list short** (Picture, Motion and mirrors, Frame rate, Performance (VR), In-game UI (VR), FPS counter,
+  Menu panel, Compare and test; rows of the other mode -- flat / VR -- are hidden, `dlaa.ini menu_show_all = 1` shows all;
   the title line says `VR settings` / `Flat settings`, so the row titles drop their "(VR)" / "(flat)"). E.g.
   **Menu panel** (`Panel lock`, `Panel position X`, `Panel position Y`, `Panel size`,
   `Panel depth`, `Panel faces you`, `Menu keys`) and **FPS counter** (`FPS counter lock`, `FPS counter X`,
@@ -59,24 +59,23 @@ menu and the garage / truck dealer screens, before a save is loaded).
   Delete close   keys: Hotkeys...`), whatever wheel buttons are bound too; it is the same on every row (the Reset hold shows
   its bar in the row itself). With long key names the hint is left out so the line fits.
 
-- **Only the 5 menu keys are kept from the game while the menu is open** (v0.13.0): `Delete`, `Up`, `Down`, `Left`,
+- **Only the 5 menu keys are kept from the game while the menu is open**: `Delete`, `Up`, `Down`, `Left`,
   `Right` (or whatever they are bound to, with any `Shift` / `Ctrl` / `Alt`, and their wheel buttons) -- the arrow keys
   steer, accelerate and brake in the default ETS2 / ATS layout. Every other key, every other wheel / gamepad button, the
   shifter, steering and pedals reach the game, so **you can keep driving with the menu open**. Only while the
   [Hotkeys page](#bind-a-key-in-the-menu) waits for a key (a few seconds at most) does the game get no keys or buttons at
   all, so the key you bind does nothing in the game. Key and button releases always reach the game; `Alt+F4` always
   works. When the menu is closed every key goes to the game as usual (the arrow keys do nothing for the mod then).
-  (v0.10.2 to v0.12.0 kept every key and button from the game while the menu was open; before that only the 5 menu keys.)
 - **Bind a key in the menu:** `Hotkeys...` row, `Right`, pick the action, `Right`, press the new key or button, see
   [Bind a key in the menu](#bind-a-key-in-the-menu).
 - **Every row names its hotkey**, so you can learn the keys from the menu. The hotkeys keep working while the menu is
   open, and the menu shows their changes at once. Each change logs and beeps like its key.
 - The selected row shows a description under the list, in plain words: what the row does, when you would change it, and
-  what it costs or saves (the measured figure is added while the GPU timers run). Phase 87: there are no greyed rows -- a row
+  what it costs or saves (the measured figure is added while the GPU timers run). There are no greyed rows -- a row
   that cannot do anything in your setup right now is HIDDEN (the other mode's rows; `AMD cache cores (X3D)` without a two-group
   X3D CPU; `Low delay (Reflex)` without support; the Foveated rows without VRS, their sub-rows while Foveated rendering is off;
   `Sharpness size` at Sharpen strength 0; `Leaves and fences sharpness` at Texture sharpness 0; `Mirrors take turns` with the
-  mirrors off; the Game TAA amount / split rows when the mode does not use them; `Panel lock` without the VR layer; the DLAA
+  mirrors off; the Mix amount / split rows when the mode does not use them; `Panel lock` without the VR layer; the DLAA
   quality rows while the main scene runs no DLAA; `OFXR Bridge` / `VectorXR` when not present; the `In-game UI` group while the
   game's console is off -- set `g_developer "1"` and `g_console "1"` in the game's config.cfg with the game closed).
   `dlaa.ini menu_show_all = 1` shows everything, greyed as before. The **Quality preset** description
@@ -86,7 +85,7 @@ menu and the garage / truck dealer screens, before a save is loaded).
   panel is tiring to look at. **Panel faces you** (on by default, `menu_vr_face`): moved off the centre, the panel
   turns towards your eye like a real screen and keeps its size from every angle; off = a flat picture. In VR the panel and
   the fps box are drawn on top of the game's own menu (garage / truck dealer screens) once the mod has confirmed where the
-  game hands each eye picture on (a few frames after the menu opens). **v0.10.3, `menu_vr_layer = 1` (default):** in VR
+  game hands each eye picture on (a few frames after the menu opens). **With `menu_vr_layer = 1` (default):** in VR
   the panel and the fps box are separate OpenXR quad layers the headset's compositor places itself -- steady (no swimming
   with the reprojection), the panel 1 m (default) and the fps box 0.8 m away, never covered by the game's menus. There
   **Panel depth** is the panel's real distance, shown in metres (`menu_vr_dist`, 0.30 - 3.00 m in 5 cm steps; the panel
@@ -94,7 +93,7 @@ menu and the garage / truck dealer screens, before a save is loaded).
   follows your head -- towards you as a true 3-D layer (off = parallel to your view, a flat picture seen at an angle).
   With `menu_vr_layer = 0` (the panel drawn into the picture; also the automatic fallback when the layers are not
   possible) **Panel depth** is the inward shift in px (`menu_vr_depth`) as above.
-- **Panel lock** (v0.14.0, no key, `menu_vr_lock`): `Follow head` (default) or `Fixed in cab` -- the panel stays at
+- **Panel lock** (no key, `menu_vr_lock`): `Follow head` (default) or `Fixed in cab` -- the panel stays at
   one spot in front of your seat and keeps still while you look around. While fixed, **Panel position X / Y** set that spot
   in degrees around the seat (Y: plus = down) and **Panel depth** its distance from the seat (`menu_vr_lock_x`,
   `menu_vr_lock_y`, `menu_vr_lock_dist`, default 0.80 m); the head-locked position is kept for when you switch back.
@@ -105,11 +104,11 @@ menu and the garage / truck dealer screens, before a save is loaded).
   `fps_vr_x`, `fps_vr_y`, `fps_vr_scale` in `dlaa.ini`); off, it costs nothing. On, its GPU cost is measured and shown in
   the row's cost column, per frame (every picture it is drawn into that frame together). **FPS counter size** goes from `0.2` to
   `3.0` (flat default `1.0`; VR default `0.3`, a saved `fps_vr_scale` keeps its size).
-- **FPS counter lock** (v0.10.3, VR only, greyed in flat): `Follow head` (default) = the fps box moves with the headset;
+- **FPS counter lock** (VR only, greyed in flat): `Follow head` (default) = the fps box moves with the headset;
   `Fixed in cab` = it stays at one spot in the cab, 0.8 m from your seat position, like a cab instrument (`fps_vr_lock` in
   `dlaa.ini`). While fixed, **FPS counter X / Y** turn it around you in degrees (X + = right, Y + = down) and **FPS counter
   size** is its size at 0.8 m. It follows the headset again by itself while the game's VR view poses are not available.
-- **Smooth mirrors** (v0.10.2) has seven states, `Left` / `Right` step through them (wrapping around): `off` -> `1 mirror
+- **Smooth mirrors** has seven states, `Left` / `Right` step through them (wrapping around): `off` -> `1 mirror
   (largest)` -> `1 mirror, camera` -> `2 mirrors (largest)` -> `2 mirrors, camera` -> `all mirrors` -> `all, camera
   motion`. `1 mirror` keeps DLAA only on the largest mirror picture (the main mirror next to you), `2 mirrors` on the two
   largest, `all` on every mirror. Without `camera` each moving part (traffic, wheels) moves exactly in the glass (about
@@ -123,7 +122,7 @@ menu and the garage / truck dealer screens, before a save is loaded).
   with the state it had; a `dlaa.ini` / profile value that is none of the seven shows as it is (`3 largest`, `3 largest,
   camera`, `all, every 2nd frame`, `all, 2nd fr., camera`, `off (mode 0)`) and `Left` / `Right` go to the nearest state on
   that side.
-- **Mirrors take turns (faster)** (phase 41, `mirror_turns`, off by default): `Left` / `Right` switch it. On, each mirror gets its DLAA
+- **Mirrors take turns (faster)** (`mirror_turns`, off by default): `Left` / `Right` switch it. On, each mirror gets its DLAA
   every 2nd frame and shows its last clean picture in between: about half the mirror cost. Works with every Smooth mirrors
   state; greyed while Smooth mirrors is off, and shows `on (mode 3)` with a `dlaa.ini` mirror mode 3 (already in turns).
   Beeps: high = on, low = off. `Shift+F12` / the Save row writes it, the Reset row removes it.
@@ -132,7 +131,7 @@ menu and the garage / truck dealer screens, before a save is loaded).
   changed it (the 7 `fps_*` keys), keeping every other line.
   The `Mode` row saves itself at once, like `End`.
 - **Reset to defaults** puts every row back to the fresh-install values, live and in `dlaa.ini` (the keys are removed
-  from the file; hotkeys and other lines stay). v0.10.3: **hold `Right` 5 s** on the row (the menu right key, keyboard or
+  from the file; hotkeys and other lines stay). **Hold `Right` 5 s** on the row (the menu right key, keyboard or
   its wheel button; the time is `bind_hold_ms`): the Hotkey column reads `hold Right 5 s`, fills a progress bar (one
   square per second), then resets once (`reset done` until you let go; press and hold again for another reset). Let go earlier =
   nothing happens; `Left` and a plain tap of `Right` do nothing. It beeps like Save (rising two-tone = done, one long low tone = the file
@@ -149,7 +148,7 @@ menu and the garage / truck dealer screens, before a save is loaded).
 
 ## Bind a key in the menu
 
-(v0.13.0; GitHub issue #16) Instead of editing `dlaa.ini`, open the menu, select **`Hotkeys...`** (near the bottom, above
+Instead of editing `dlaa.ini`, open the menu, select **`Hotkeys...`** (near the bottom, above
 `Save to dlaa.ini`) and press `Right`. The panel shows the **Hotkeys page**: `< Back` first, then one line per action --
 `Mode`, `Quality preset`, `DLAA model 1` .. `4`, `Sharpen strength -` / `+`, `Sharpen width -` / `+`,
 `Texture sharpness -` / `+`, `Cut-out sharpness -` / `+`, `DLAA area (VR) -` / `+`, `Track moving parts`,
@@ -168,8 +167,8 @@ The log says what changed, e.g.
 - **Only a new press counts.** A key or button that is already held when you press `Right` -- an H-shifter in gear (the
   shifter is a set of buttons, one held all the time), a pedal key, the `Right` you just pressed -- is ignored until you
   let go of it and press it again. A wheel the game has not read for a moment (it reads as "nothing pressed" then) does
-  not count as a release either. So an engaged gear can never be bound by accident (issue #16: with v0.10.2 to v0.12.0's
-  hold-to-bind, a player in gear bound the gear to the Mode row). Steering, pedals and other axes never bind. Two keys /
+  not count as a release either. So an engaged gear can never be bound by accident (issue #16: an earlier hold-to-bind
+  let a player in gear bind the gear to the Mode row). Steering, pedals and other axes never bind. Two keys /
   buttons pressed in the same frame are ignored: press one.
 - **Cancel:** the menu `Left` key, `Esc`, or 10 seconds without a press (one low beep, `cancelled` for 3 s); also closing
   the menu or switching to another window.
@@ -183,8 +182,7 @@ The log says what changed, e.g.
   another action, it is taken away from that one (its key or button becomes empty, also written to `dlaa.ini`); the line
   shows `taken from key_...` for 3 seconds and the log names it.
 - **The press does nothing else:** while a line waits, no hotkey fires and the game gets no key or button, and the key /
-  button you bind with stays hidden from the game until you let it go. (With v0.10.2 to v0.12.0's hold-to-bind the held
-  key did its old job once.)
+  button you bind with stays hidden from the game until you let it go.
 - **The menu's own keys** (`Delete`, `Up`, `Down`, `Left`, `Right`, or whatever they are bound to, also with modifiers,
   and their wheel buttons) cannot be bound on the other lines: there `Up` / `Down` / `Right` do nothing and `Left`
   cancels.
@@ -196,13 +194,13 @@ The log says what changed, e.g.
   (one long low tone, the line keeps waiting): the menu must stay reachable, and `Right` is what opens the groups, the
   Hotkeys page and Reset. To swap two menu keys, give one of them a third key first (`Menu: left` = `Numpad4`, then
   `Menu: right` = `Left`, then `Menu: left` = `Right`).
-- `bind_hold_ms` is no longer used for binding; it is only the [Reset row](#the-tuning-menu)'s hold time.
+- `bind_hold_ms` is the [Reset row](#the-tuning-menu)'s hold time (binding on the Hotkeys page is a single press).
 
 ## User keys — Shift + F-key (Ctrl and Alt NOT held)
 
 | Key        | Does                                   | Beep |
 |------------|----------------------------------------|------|
-| `End` (no modifier) | **Mode**: DLAA → DLSS → off → DLAA … (saved to `dlaa.ini` `mode` at once) | 1 high beep = DLAA, 2 high beeps = DLSS, 1 low beep = off |
+| `End` (no modifier) | **Mode**: DLAA → DLSS → Mix (TAA + DLAA) → Mix (TAA + DLSS) → off → DLAA … (saved to `dlaa.ini` `mode` / `game_taa` at once; Mix = `game_taa = 1`) | 1 / 2 / 3 / 4 high beeps = DLAA / DLSS / Mix + DLAA / Mix + DLSS, 1 low beep = off |
 | `Shift+F1` | Model 1 = preset `default` (driver)    | 1 beep |
 | `Shift+F2` | Model 2 = preset `E`                   | 2 beeps |
 | `Shift+F3` | Model 3 = preset `F`                   | 3 beeps |
@@ -219,9 +217,9 @@ The log says what changed, e.g.
 Model select is direct: pressing the model that is already active just re-beeps (no change).
 `Shift+F12` saves `dlss_preset`, `dlaa_area`, `sharpness`, `sharp_radius`, `dlss_upscale`, `tex_lod_bias`, `tex_lod_bias_cutout` (the `Ctrl+Shift+F1` / `F2` value), `mv_objects` and `mirror_dlaa` (the `Alt+F5` / `Alt+F6` states), `dlaa_pre_tonemap` (the
 `Alt+F7` state) and `perf_profile` (the `Alt+F9` state) and leaves every other line of `dlaa.ini` untouched.
-v0.10.0: `dlss_preset`, `dlaa_area` and `mirror_dlaa` are only written when you set them yourself (in `dlaa.ini` or with
+`dlss_preset`, `dlaa_area` and `mirror_dlaa` are only written when you set them yourself (in `dlaa.ini` or with
 their own key) -- a value that only comes from the performance profile is not written, so the next profile still moves it.
-v0.10.2: the same for `mirror_vr_mode` / `mirror_flat_mode` (set in `dlaa.ini` or with the menu's Smooth mirrors row);
+The same holds for `mirror_vr_mode` / `mirror_flat_mode` (set in `dlaa.ini` or with the menu's Smooth mirrors row);
 `mirror_vr_views` is written with `mirror_vr_mode`, and with `mirror_flat_mode` when that is `2`; `mirror_mv` (`parts` /
 `camera`) is written with either mode. The menu's Reset row removes all four.
 
@@ -237,12 +235,12 @@ v0.10.2: the same for `mirror_vr_mode` / `mirror_flat_mode` (set in `dlaa.ini` o
 The bias only acts while DLAA or DLSS is on (it is what removes the extra shimmer of the sharper
 textures) and only on the 3-D world and the menu truck-preview; the UI is never touched. Start
 with −0.5 to −1. Save it with `Shift+F12` (`tex_lod_bias` in `dlaa.ini`).
-v0.10.0: by default (`tex_lod_bias_scope = opaque`, `tex_aniso_scope = opaque` in `dlaa.ini`) the bias only reaches the
+By default (`tex_lod_bias_scope = opaque`, `tex_aniso_scope = opaque` in `dlaa.ini`) the bias only reaches the
 solid surfaces (signs, buildings, road, dashboard); see-through things (fences, wire mesh, wires, glass, plates, decals,
 grass / leaf cut-outs) keep the game's filtering, so fences no longer show extra moire at a distance. `solid` = alpha-tested
-cut-outs (wire-mesh fences, foliage) get the bias too; `all` = the v0.9.0 behaviour. The keys change only the bias value,
+cut-outs (wire-mesh fences, foliage) get the bias too; `all` = every draw. The keys change only the bias value,
 never the scope.
-v0.10.0: the alpha-tested draws (wire-mesh fences, chain-link, grass, leaf / bush cut-outs) have a bias of their own,
+The alpha-tested draws (wire-mesh fences, chain-link, grass, leaf / bush cut-outs) have a bias of their own,
 `tex_lod_bias_cutout` (default −0.5): fences moire with a strong negative bias, grass goes soft without one, and the game
 draws both the same way, so they share this value. `Ctrl+Shift+F1` / `Ctrl+Shift+F2` change it (0.25 steps within −3..0,
 two beeps); `Ctrl+F1` / `Ctrl+F2` keep changing the bias of the solid surfaces only. 0 = those draws keep the game's own
@@ -254,12 +252,12 @@ filtering. It only acts while `tex_lod_bias` is not 0. `Shift+F12` saves it (`te
 |------------|----------------------------------------|------|
 | `Alt+F5`   | Per-draw motion vectors on / off (`mv_objects` 2 ↔ 0, main view and mirrors). Off = every pixel uses the camera motion of its depth layer | high 1200 Hz = ON, low 300 Hz = OFF; one long low tone = ignored (`mv_objects = 1` in `dlaa.ini`) |
 | `Alt+F6`   | Mirror DLAA on / off (each truck / car mirror gets its own DLAA; off = the mirrors are left as the game draws them) | high 1200 Hz = ON, low 300 Hz = OFF |
-| `Alt+F7`   | DLAA before / after the game's tone-mapping (flat DLAA mode). ON = the main picture is anti-aliased on the game's own HDR colours before its brightness / bloom / tonemap step (calmer thin bright lines: lane paint, wires, rails); OFF = on the finished 8-bit picture as before v0.10.0. DLSS upscaling, VR and Windows HDR always use the after-tonemap path. OFF takes effect at once; ON after about 60 frames (v0.10.0 phase 7: the before-tonemap unit warms up first, so the switch shows no blur pulse) | high 1200 Hz = ON, low 300 Hz = OFF |
-| `Alt+F8`   | Diagnostic dump: writes the per-part motion state of the next frame into the log (`MV dump n/N` lines: licence plates, decals, small parts and -- v0.10.0 phase 5 -- every part that found no partner in the previous frame, with what it inherited; `MV dump fwd-skip` lines: the see-through parts of one frame that get no motion of their own). Needs `debug = 1`; press it next to a truck when asked for a plate report. v0.10.0 phase 21: the same press also writes `MV probe` lines -- a 5 x 5 grid of pixels 48 px apart around the centre of your view (VR: eye 0's optical centre; flat: the screen centre): for each pixel its depth, which surface won, cabin / world layer, the motion it got and the parts under it (`MV probe (...)` header + 25 pixel lines + one summary). Look straight at the problem spot (e.g. a pink shop window in the `Ctrl+F6` view) when you press it | 1 short 900 Hz beep = requested; 1 long low tone = not available (per-draw motion vectors off) |
+| `Alt+F7`   | DLAA before / after the game's tone-mapping (flat DLAA mode). ON = the main picture is anti-aliased on the game's own HDR colours before its brightness / bloom / tonemap step (calmer thin bright lines: lane paint, wires, rails); OFF = on the finished 8-bit picture. DLSS upscaling, VR and Windows HDR always use the after-tonemap path. OFF takes effect at once; ON after about 60 frames (the before-tonemap unit warms up first, so the switch shows no blur pulse) | high 1200 Hz = ON, low 300 Hz = OFF |
+| `Alt+F8`   | Diagnostic dump: writes the per-part motion state of the next frame into the log (`MV dump n/N` lines: licence plates, decals, small parts and every part that found no partner in the previous frame, with what it inherited; `MV dump fwd-skip` lines: the see-through parts of one frame that get no motion of their own). Needs `debug = 1`; press it next to a truck when asked for a plate report. The same press also writes `MV probe` lines -- a 5 x 5 grid of pixels 48 px apart around the centre of your view (VR: eye 0's optical centre; flat: the screen centre): for each pixel its depth, which surface won, cabin / world layer, the motion it got and the parts under it (`MV probe (...)` header + 25 pixel lines + one summary). Look straight at the problem spot (e.g. a pink shop window in the `Ctrl+F6` view) when you press it | 1 short 900 Hz beep = requested; 1 long low tone = not available (per-draw motion vectors off) |
 | `Alt+F9`   | Performance profile: cycles **high -> medium -> low**. high = everything on; medium = for mid-range GPUs (model E, cheaper mirror / see-through / plate work); low = for weak GPUs (+ no mirror DLAA, no see-through depth, VR DLAA area 60 %). A profile only changes the settings you did not set yourself in `dlaa.ini` or with their own key. `Shift+F12` saves it (`perf_profile`) | 1 / 2 / 3 beeps (660 Hz) = high / medium / low |
-| `Alt+F10`  | Thin-wire motion (phase 60): DLSS spreads the motion of a thin wire / cable to the pixels next to it (`dlaa_mv_dilate`). ON = far wires keep their history while driving. Switching recreates the DLAA features (a short reset) | 1 high tone = ON, 1 low tone = OFF |
-| `Alt+F11`  | Thin-wire depth (phase 60): every pixel a wire touches gets the wire's depth + motion (`mv_fwd_conservative`). Cycles mode **1 -> 2 -> 0**: 1 = on, 2 = on without the see-through test, 0 = off | 1 high tone = mode 1, 2 high tones = mode 2, 1 low tone = off |
-| `Alt+F12`  | Thin-wire widening (phase 61, **experimental, off by default**: no clear gain in tests so far): far wires drawn at least `wire_min_px` (1) pixel wide and faded to keep their darkness (`wire_widen`): no dashes that crawl while driving; also the pole hardware (phase 62) and the solid far high-voltage wires / lattice towers, whose widened band is dithered (phase 63, `wire_solid_min_share`) | 1 high tone = ON, 1 low tone = OFF |
+| `Alt+F10`  | Thin-wire motion: DLSS spreads the motion of a thin wire / cable to the pixels next to it (`dlaa_mv_dilate`). ON = far wires keep their history while driving. Switching recreates the DLAA features (a short reset) | 1 high tone = ON, 1 low tone = OFF |
+| `Alt+F11`  | Thin-wire depth: every pixel a wire touches gets the wire's depth + motion (`mv_fwd_conservative`). Cycles mode **1 -> 2 -> 0**: 1 = on, 2 = on without the see-through test, 0 = off | 1 high tone = mode 1, 2 high tones = mode 2, 1 low tone = off |
+| `Alt+F12`  | Thin-wire widening (**experimental, off by default**: no clear gain in tests so far): far wires drawn at least `wire_min_px` (1) pixel wide and faded to keep their darkness (`wire_widen`): no dashes that crawl while driving; also the pole hardware and the solid far high-voltage wires / lattice towers, whose widened band is dithered (`wire_solid_min_share`) | 1 high tone = ON, 1 low tone = OFF |
 
 `Alt+F5` .. `Alt+F7` start at their `dlaa.ini` value (`mv_objects = 2`, `mirror_dlaa = 1`, `dlaa_pre_tonemap = 1` by
 default) and `Shift+F12` saves them. While the `Ctrl+F6` view is on, the main picture uses the after-tonemap path (exact
@@ -275,7 +273,7 @@ debug colours).
 | `Ctrl+F6`  | MV debug view (see below)              | — |
 | `Ctrl+F7`  | Passive mode on / off                  | 1 low tone = ON, 2 low tones = OFF |
 | `Ctrl+F8`  | Jitter-only debug on / off             | — |
-| `Insert`   | Shimmer capture (v0.15.0; `Pause` before v0.15.2, which also opens the game's pause menu): DLAA on and off frames, the log and `dlaa.ini` in one folder `dlaa_selftest\shimmer_<date>_<time>\` | — |
+| `Insert` twice | One-press bug report: two presses within 1 s (the first arms: one short beep). System info, logs, `dlaa.ini`, PNG frames into `dlaa_selftest\shimmer_<date>_<time>\`, split into zips by kind of at most 24 MB each -- `shimmer_<time>_main.zip` (always attach), `shimmer_<time>_full_partNN.zip` (only with Capture includes = full) and `shimmer_<time>_rewind_partNN.zip` (only with Rewind before key on) (one beep = start, two rising = zips ready, one low = a file failed) | 1 short (armed), 1 (start), 2 rising (done) |
 | `Ctrl+F9`  | Self-test (dumps frames: `<mode>_<n>.bmp` = DLAA output, `final_<mode>_<n>.bmp` = the picture on screen, same frame) | — |
 | `Ctrl+F10` | NGX input snapshot, each press into its own folder `dlaa_snap\<n>_blit<blit>\` (on the menu / truck-preview screen: a measuring capture, short freeze) | — |
 | `Ctrl+F11` | Frame trace                            | — |
@@ -283,7 +281,7 @@ debug colours).
 
 MV debug view (`Ctrl+F6`, needs DLAA or DLSS on): the picture is replaced by the motion vectors —
 red = horizontal and green = vertical motion (still pixels are a flat olive), blue added = cabin
-(half blue = your own truck's exterior). With the per-draw motion vectors (`mv_objects = 2`, the default since v0.10.0)
+(half blue = your own truck's exterior). With the per-draw motion vectors (`mv_objects = 2`, the default)
 only MOVING parts stand out: **magenta** = a part that moves on its own (traffic, wheels, wipers, licence plates on a
 moving truck; neighbouring moving parts differ slightly in hue; **pale magenta** = it moves on its own, but by less than
 half a pixel against the camera here); everything that stands still is a **flat olive** (world) / **flat blue** (cabin)
@@ -291,17 +289,16 @@ half a pixel against the camera here); everything that stands still is a **flat 
 previous frame: it keeps the camera motion for that frame); **grey** = vegetation / small props drawn in batches (always
 the camera motion); a **yellow tint** on top = a see-through part drawn after the scene (licence plate, decal, glass,
 overhead wire) that got its own motion (a plate on a moving truck: magenta with a yellow tint); an **orange tint**
-(v0.10.0 phase 4) = a see-through part that sits on a moving part and takes that part's motion (a licence plate on a
-moving bus: strong magenta with an orange tint -- before phase 4 such a plate could show PALE magenta + yellow and stay
-jagged; since phase 5 also a solid part without a partner that sits on a moving part's centre); a **cyan tint** (v0.10.0
-phase 5) = a part that found no partner in the previous frame and took the motion of the part drawn with exactly the same
-placement (a licence plate on a moving truck: magenta with a cyan tint; on a parked truck: olive with a cyan tint -- before
-phase 5 such a plate was WHITE and stayed jagged); a **green tint** (v0.10.0 phase 6) = a part that found no partner and took
+= a see-through part that sits on a moving part and takes that part's motion (a licence plate on a
+moving bus: strong magenta with an orange tint; also a solid part without a partner that sits on a moving part's centre);
+a **cyan tint** = a part that found no partner in the previous frame and took the motion of the part drawn with exactly the same
+placement (a licence plate on a moving truck: magenta with a cyan tint; on a parked truck: olive with a cyan tint);
+a **green tint** = a part that found no partner and took
 the motion of the part it sits on (a licence plate the game rebuilds every frame, on a moving trailer: magenta with a green
 tint; on a parked trailer: olive with a green tint -- it wins over cyan / orange on the same part); no tint = sky, or a pixel
-no part could claim. With `mv_objects = 1` (the v0.9.0 stencil ids, legacy), moving objects that got their own motion
+no part could claim. With `mv_objects = 1` (the older stencil ids, legacy), moving objects that got their own motion
 vectors are tinted **magenta**; **orange** = an object id whose own motion could not be used this
-frame (it falls back to the camera motion; v0.9.0 r4: also when one of its parts did not move the way the object
+frame (it falls back to the camera motion; also when one of its parts did not move the way the object
 did, e.g. right after two identical cars swapped places in the game's draw order); **cyan** = something that looked like it was moving but was filtered out
 (repeated mesh such as grass or windows, unreliable match, your own truck, jumpy motion) and keeps the camera motion.
 While this view is on, one of the 15 object ids is used for the cyan marking.
@@ -363,7 +360,7 @@ Keys: `F1`-`F24`, `A`-`Z`, `0`-`9`, `Home`, `End`, `Insert`, `Delete`, `PageUp`,
 
 | `dlaa.ini` key | Action | Default |
 |----------------|--------|---------|
-| `key_mode_cycle` | Mode DLAA → DLSS → off | `End` |
+| `key_mode_cycle` | Mode DLAA → DLSS → Mix (TAA + DLAA) → Mix (TAA + DLSS) → off | `End` |
 | `key_model_1` … `key_model_4` | DLAA model 1..4 | `Shift+F1` … `Shift+F4` |
 | `key_area_down` / `key_area_up` | DLAA area −/+10 % | `Shift+F5` / `Shift+F6` |
 | `key_sharpen_down` / `key_sharpen_up` | Sharpen strength −/+0.1 | `Shift+F7` / `Shift+F8` |
@@ -379,7 +376,7 @@ Keys: `F1`-`F24`, `A`-`Z`, `0`-`9`, `Home`, `End`, `Insert`, `Delete`, `PageUp`,
 | `key_passive` | Passive mode | `Ctrl+F7` |
 | `key_jitter_only` | Jitter-only debug | `Ctrl+F8` |
 | `key_selftest` | Self-test | `Ctrl+F9` |
-| `key_shimmer_capture` | Shimmer capture (v0.15.0): 12 frames with DLAA on, 12 with DLAA off, the log and `dlaa.ini` into `dlaa_selftest\shimmer_<date>_<time>\` | `Insert` |
+| `key_shimmer_capture` | One-press bug report (press twice within 1 s): see the README's "How to send a bug report" | `Insert` |
 | `key_snapshot` | NGX input snapshot (menu / truck-preview screen: measuring capture) | `Ctrl+F10` |
 | `key_trace` | Frame trace | `Ctrl+F11` |
 | `key_jitter_sign` | Cycle NGX jitter sign | `Ctrl+F12` |
@@ -428,8 +425,8 @@ Empty (the default) = every controller.
 Only controllers the game opens through DirectInput are seen (wheels, most joysticks and button boxes; the log lists each
 one as `DirectInput: controller device wrapped`). XInput-only gamepads (Xbox controllers) are not.
 
-While the tuning menu is open the game sees no controller button and no D-pad at all (v0.10.2; before only the 5 menu
-bindings were hidden): buttons read as released, the D-pad as centred, so the D-pad does not also change the game's camera
+While the tuning menu is open the game sees no controller button and no D-pad at all: buttons read as released, the
+D-pad as centred, so the D-pad does not also change the game's camera
 or menu. Steering, pedals and other axes still pass. The press that **opens** the menu does reach the game (the menu is
 still closed at that moment), as with `Delete`: bind `key_menu` to a button the game does not use. Releases always reach
 the game. You can also bind the buttons in the menu itself: [Bind a key in the menu](#bind-a-key-in-the-menu).

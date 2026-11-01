@@ -549,6 +549,21 @@ log_level = 1
 # frame before the key). 0 = off (default), 2..240 frames (64 = about 0.9 s at 72 fps). Costs about 32 MB of graphics memory
 # per frame at a 2761 x 2928 eye (64 frames = about 2 GB; capped at 2.5 GB) and one picture copy per frame. Startup only.
 # rewind_frames = 0
+# Phase 89b-d ONE-PRESS BUG REPORT: press the capture key (key_shimmer_capture, Insert) TWICE within 1 s where something looks
+# wrong (or the tuning menu: Bug report > Capture now). The mod saves frames, system info, the logs and this file into
+# dlaa_selftest\shimmer_<date>_<time>\ and zips of at most 24 MB each next to it to attach to a GitHub issue: _main.zip (always), _full / _rewind (only if asked). Your Windows user name, home folder
+# and Steam library folder are removed from every text file in it. All of these are in the menu's Bug report group.
+# what the capture includes: 1 = quick (default: system info, logs, your picture + DLAA off, about 1 s), 2 = full (+ what DLSS got
+# per frame -- colour, motion vectors, depth -- and A/B sets: motion-vector view, motion off, jitter only)
+# capture_mode = 1
+# how many captures stay (3, 5, 10, 0 = all); older folders + zips are deleted when a new one is written
+# capture_keep = 5
+# the rewind in seconds (0, 0.5, 1, 2, 3; wins over rewind_frames above; live). About 32 MB of graphics memory per frame in VR.
+# rewind_secs = 0
+# for the last N rewind frames also keep what DLSS got (colour, motion vectors, depth: about 72 MB per frame in VR, capped 1 GB)
+# rewind_diag_frames = 4
+# 1 = Send everything: log level debug, rewind 2 s, capture full -- live; your own values above stay and come back at 0
+# report_all = 0
 # v0.9.0 r11: a see-through draw whose centre point (origin) lies within this many metres of the camera (windscreen
 # drops, dirt, glare) is not drawn into that depth at all (0.1..5)
 # mv_fwd_min_m = 0.5
@@ -569,7 +584,7 @@ log_level = 1
 #       top (compare). (The game's TAA alone = DLAA off. A first-build dlaa.ini without game_taa_ver: 2 -> 0, 3 -> 2, logged.)
 # When mix / split cannot run for a frame (e.g. Windows HDR on) the game's TAA picture is shown; the menu's Game TAA row says why.
 # Without a running game TAA (or where the game has none, e.g. VR if SCS TAA does not run there) 1..3 behave as 0. The tuning
-# menu's "Game TAA" / "Game TAA amount" rows (Upscaling group) change them live; Shift+F12 / Save writes both.
+# menu: phase 90 -- Mix is on the Mode row ("Mix (TAA + DLAA)" / "Mix (TAA + DLSS)", saved at once) with "Mix amount" under it; the split is "Split with game TAA" in Compare and test. Shift+F12 / Save writes all of them.
 # game_taa = 0
 # TAA share of the mix in %, 0..100 (menu: 10 % steps): more = calmer, softer; less = sharper (DLAA / DLSS)
 # game_taa_mix = 50

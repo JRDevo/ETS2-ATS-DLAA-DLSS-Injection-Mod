@@ -168,45 +168,63 @@ msgstr "Menü paneli"
 msgid "Compare and test"
 msgstr "Karşılaştır ve test et"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Bug report"
+msgstr "Hata raporu"
+
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's "
-"Scaling is below 100 %. off = the game's own picture: use it to compare. Saved at once."
+"Scaling is below 100 %. Mix = the game's own TAA blended with DLAA / DLSS: calmer, a bit softer. "
+"off = the game's own picture. Saved at once."
 msgstr ""
-"DLAA = oyunun render boyutunda temiz kenarlar. DLSS = aynısı, ayrıca oyunun Scaling değeri "
-"%100'ün altındaysa büyütür. kapalı = oyunun kendi görüntüsü: karşılaştırma için. Hemen kaydedilir."
+"DLAA = oyunun işleme boyutunda temiz kenarlar. DLSS = aynısı, ayrıca oyunun Ölçeklemesi %100'ün "
+"altındaysa yukarı ölçekler. Karışık = oyunun kendi TAA'sı DLAA / DLSS ile karıştırılır: daha "
+"sakin, biraz daha yumuşak. kapalı = oyunun kendi görüntüsü. Hemen kaydedilir."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Presets for your GPU. high = everything on (model 1). medium = model 2, half-size see-through "
-"depth, flat mirrors without part motion, lighter part-motion search. low = also no mirror DLAA, "
-"no see-through depth, VR area 60 %. Never changes a setting you set yourself."
+"How much of the Mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer, less = "
+"sharper. Shown while Mode is Mix, or a split has a Mix side. No extra cost."
 msgstr ""
-"GPU'nuz için profiller. yüksek = her şey açık (model 1). orta = model 2, yarım boyutlu saydamlık "
-"derinliği, parça hareketsiz düz aynalar, daha hafif hareket araması. düşük = ayrıca ayna DLAA "
-"yok, saydamlık derinliği yok, VR alanı %60. Kendi ayarladığınız hiçbir şeyi değiştirmez."
+"Karışımın ne kadarı oyunun TAA'sı, 0 - 100 % 10 %'luk adımlarla: fazla = daha sakin ve yumuşak, "
+"az = daha keskin. Mod Karışık iken ya da bölmenin bir tarafı karışıkken gösterilir. Ek maliyet "
+"yok."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, least ghosting "
+"Presets for your graphics card. high = everything on (model 1). medium = model 2, a lighter Glass "
+"and fence fix, mirrors without Track moving parts. low = also no Smooth mirrors, no Glass and "
+"fence fix, VR area 60 %. Never changes a setting you set yourself."
+msgstr ""
+"Ekran kartın için hazır ayarlar. yüksek = her şey açık (model 1). orta = model 2, daha hafif Cam "
+"ve çit düzeltmesi, aynalarda Parçaları izle yok. düşük = ayrıca Yumuşak aynalar yok, Cam ve çit "
+"düzeltmesi yok, VR alanı %60. Kendi yaptığın hiçbir ayarı değiştirmez."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, fewest trails "
 "behind traffic: start here. 3 (F) = calmest on fences and wires, can smear moving detail, same "
 "cost as 2. 4 (M) = heaviest (about 5x), flat tests only."
 msgstr ""
-"1 (K) = en çok ayrıntı, en keskin yazı, 2'ye göre yaklaşık 1,6x GPU. 2 (E) = dengeli, trafiğin "
-"arkasında en az hayalet: buradan başlayın. 3 (F) = çit ve tellerde en sakini, hareketli ayrıntıyı "
-"bulandırabilir, maliyeti 2 ile aynı. 4 (M) = en ağırı (yaklaşık 5x), yalnızca düz mod."
+"1 (K) = en çok ayrıntı, en keskin yazı, 2'nin yaklaşık 1,6 katı GPU. 2 (E) = dengeli, trafiğin "
+"arkasında en az iz: buradan başla. 3 (F) = çitlerde ve tellerde en sakin, hareketli ayrıntıyı "
+"bulanıklaştırabilir, maliyeti 2 ile aynı. 4 (M) = en ağırı (yaklaşık 5 kat), yalnızca düz ekran "
+"testleri için."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Picture quality: sharpening, texture sharpness, the DLAA area and the see-through depth. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
+"Picture quality: sharpening, texture sharpness, the Glass and fence fix, the Light trail fix and "
+"the DLAA area. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Görüntü kalitesi: keskinleştirme, doku keskinliği, DLAA alanı ve saydamlık derinliği. Sağ grubu "
-"açar, Sol kapatır; menü her açıldığında kapalı başlar."
+"Görüntü kalitesi: keskinleştirme, doku keskinliği, Cam ve çit düzeltmesi, Işık izi düzeltmesi ve "
+"DLAA alanı. Sağ grubu açar, Sol kapatır; menü her açıldığında kapalı başlar."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -232,42 +250,44 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Sharper texture text (road signs, dashboard, GPS). 0 = off; more negative = sharper but more "
-"shimmer on fences; try -0.5 to -1 if text is blurry. No GPU time, only a little memory bandwidth."
+"shimmer on fences; try -0.5 to -1 if text is blurry. Almost no cost."
 msgstr ""
 "Daha keskin doku yazısı (yol tabelaları, gösterge paneli, GPS). 0 = kapalı; ne kadar negatifse o "
-"kadar keskin ama çitler daha çok titrer; yazı bulanıksa -0.5 ile -1 deneyin. GPU süresi yok, "
-"yalnızca biraz bellek bant genişliği."
+"kadar keskin ama çitlerde daha çok titreme; yazı bulanıksa -0,5 ile -1 arasını dene. Neredeyse "
+"maliyeti yok."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"The same for wire fences, grass and leaf cut-outs: raise it toward 0 if fences shimmer, lower it "
-"if grass looks soft. same = follows the row above. Acts only while Texture sharpness is not 0. No "
-"GPU time, a little memory."
+"The same for wire fences, grass and leaves: raise it toward 0 if fences shimmer, lower it if "
+"grass looks soft. same = follows the row above. Works only while Texture sharpness is not 0. "
+"Almost no cost."
 msgstr ""
-"Tel çitler, çimen ve yaprak kesimleri için aynısı: çitler titriyorsa 0'a doğru artırın, çimen "
-"yumuşaksa düşürün. aynı = üstteki satırı izler. Yalnızca Doku keskinliği 0 değilken çalışır. GPU "
-"süresi yok, biraz bellek."
+"Tel çitler, çimen ve yapraklar için aynısı: çitler titriyorsa 0'a doğru artır, çimen yumuşak "
+"görünüyorsa azalt. aynı = yukarıdaki satırı izler. Yalnızca Doku keskinliği 0 değilken çalışır. "
+"Neredeyse maliyeti yok."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives wires, fences and glass their own distance instead of what is behind them, so they do not "
-"smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."
+"Wires, fences and windows are treated as the thing in front, not as what you see through them, so "
+"they do not smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms "
+"per eye."
 msgstr ""
-"Teller, çitler ve cama arkalarındakiler yerine kendi mesafesini verir, böylece hareket ederken "
-"bulanmazlar. Bulanma görmüyorsanız kapatın: göz başına 0,02 - 0,06 ms kazandırır."
+"Teller, çitler ve camlar, içlerinden görünen şey olarak değil, öndeki şey olarak ele alınır; "
+"böylece hareket ederken izlenmezler. Orada iz görmüyorsan kapat: göz başına 0,02 - 0,06 ms "
+"kazandırır."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Stops street-lamp and car-light glows leaving a trail behind them when you move: DLSS takes each "
-"glow from the current frame, not its history. 25 % steps; lower it if lamp glows flicker, 0 = "
-"off. Costs about 0.05 - 0.2 ms per eye."
+"Stops street-lamp and car-light glows leaving a trail behind them when you move: the glows are "
+"drawn fresh each frame instead of being blended with older frames. 25 % steps; lower it if lamp "
+"glows flicker, 0 = off. Costs about 0.05 - 0.2 ms per eye."
 msgstr ""
-"Sokak lambası ve araç farı parıltılarının hareket ederken iz bırakmasını önler: DLSS parıltıyı "
-"geçmişten değil mevcut kareden alır. %25 adımlarla; lamba parıltısı titriyorsa düşürün, 0 = "
-"kapalı. Göz başına yaklaşık 0,05 - 0,2 ms."
+"Sokak lambası ve araba ışığı parıltılarının hareket ederken arkalarında iz bırakmasını engeller: "
+"parıltılar eski karelerle karıştırılmak yerine her karede yeniden çizilir. %25'lik adımlar; "
+"parıltılar titriyorsa azalt, 0 = kapalı. Göz başına yaklaşık 0,05 - 0,2 ms tutar."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -292,24 +312,24 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and "
-"does not ghost. Turn it off only to save about 0.5 ms per eye or to test: every pixel then moves "
+"DLAA follows each moving thing on its own (traffic, wheels, number plates), so it stays sharp and "
+"leaves no trail. Turn it off only to save about 0.5 ms per eye or to test: everything then moves "
 "with the camera and traffic smears."
 msgstr ""
-"Her hareketli parçaya (trafik, tekerlekler, plakalar) DLAA için kendi hareketini verir, böylece "
-"keskin kalır ve hayalet yapmaz. Yalnızca göz başına ~0,5 ms kazanmak ya da test için kapatın: o "
-"zaman her piksel kamerayla hareket eder ve trafik bulanır."
+"DLAA hareket eden her şeyi ayrı izler (trafik, tekerlekler, plakalar); böylece keskin kalır ve iz "
+"bırakmaz. Yalnızca göz başına yaklaşık 0,5 ms kazanmak veya test etmek için kapat: o zaman her "
+"şey kamerayla birlikte hareket eder ve trafik bulanır."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main "
-"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can ghost "
-"in the glass; else each part moves exactly in the glass."
+"Smooths the truck mirrors too, so they do not shimmer. 1 mirror = only the largest (the main "
+"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can leave "
+"trails in the glass; the others follow each moving thing."
 msgstr ""
-"Kamyon aynalarına titremesinler diye kendi DLAA'sını verir. 1 ayna = yalnızca en büyüğü "
-"(yanınızdaki ana ayna). tümü = her ayna. kamera = ayna başına en ucuzu, hareketli trafik camda "
-"hayalet yapabilir; aksi halde her parça camda tam hareket eder."
+"Kamyon aynalarını da yumuşatır; titremezler. 1 ayna = yalnızca en büyüğü (yanındaki ana ayna). "
+"tümü = her ayna. kamera = ayna başına en ucuzu, hareketli trafik camda iz bırakabilir; diğerleri "
+"hareket eden her şeyi izler."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -325,131 +345,145 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
-"the group, Left closes it; it starts closed every time the menu opens."
+"Frame rate and CPU: CPU tuning, AMD cache cores, an FPS cap and Low delay (Reflex) for flat, an "
+"FPS cap for VR. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Kare hızı ve CPU: CPU ayarı, düz mod için FPS sınırı ve NVIDIA Reflex, VR FPS sınırı. Sağ grubu "
-"açar, Sol kapatır; menü her açıldığında kapalı başlar."
+"Kare hızı ve CPU: CPU ayarı, AMD önbellek çekirdekleri, düz ekran için FPS sınırı ve Düşük "
+"gecikme (Reflex), VR için FPS sınırı. Sağ grubu açar, Sol kapatır; menü her açıldığında kapalı "
+"başlar."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
-"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
-"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
+"Three CPU switches together. Prefer fast cores: only Intel CPUs with P-cores and E-cores. Higher "
+"priority and no Windows power saving for the game: every CPU, Intel and AMD. Helps when the CPU "
+"is the limit; no cost. Separate in dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle."
 msgstr ""
-"Üç CPU anahtarı birlikte: ana ve render iş parçacığı P-çekirdekleri tercih eder (yalnızca Intel "
-"hibrit CPU), oyun Above normal önceliğiyle çalışır ve Windows onu kısamaz (EcoQoS) ya da "
-"zamanlayıcı isteklerini yok sayamaz. CPU sınırlıyorsa yardımcı olur; bedava. dlaa.ini'de ayrı "
-"ayarlar: cpu_pcore, cpu_priority, cpu_no_throttle."
+"Üç CPU anahtarı bir arada. Hızlı çekirdekleri tercih et: yalnızca P ve E çekirdekli Intel "
+"CPU'lar. Oyun için daha yüksek öncelik ve Windows güç tasarrufu yok: her CPU, Intel ve AMD. CPU "
+"sınırlayıcıysa yardım eder; maliyeti yok. dlaa.ini içinde ayrı: cpu_pcore, cpu_priority, "
+"cpu_no_throttle."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"AMD X3D CPUs with two core groups (7950X3D, 9950X3D): keeps the game on the cores with the big 3D "
+"V-Cache, which games like. Switches at once; off gives the game all cores back. Try it and "
+"compare in a busy city. No cost."
+msgstr ""
+"İki çekirdek grubu olan AMD X3D CPU'lar (7950X3D, 9950X3D): oyunu oyunların sevdiği büyük 3D "
+"V-Cache'li çekirdeklerde tutar. Hemen değişir; kapalıyken oyun tüm çekirdekleri geri alır. "
+"Kalabalık bir şehirde dene ve karşılaştır. Maliyeti yok."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
-"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
-"limiting. off = no limit."
+"Set it a bit below what your PC holds in a busy city. With Low delay (Reflex) on, the NVIDIA "
+"driver does the limiting. off = no limit."
 msgstr ""
-"Yalnızca düz. Oyunu en çok bu kare hızında tutar: sabit kare süresi, daha az ısı ve güç. "
-"Kalabalık şehirde PC'nizin tuttuğunun biraz altına ayarlayın. Reflex açıkken sınırlamayı NVIDIA "
-"sürücüsü yapar. kapalı = sınırsız."
+"Yalnızca düz ekran. Oyunu en fazla bu kare hızında tutar: sabit kare süresi, daha az ısı ve güç. "
+"PC'nin kalabalık bir şehirde tuttuğu değerin biraz altına ayarla. Düşük gecikme (Reflex) açıkken "
+"sınırlamayı NVIDIA sürücüsü yapar. kapalı = sınır yok."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
-"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
+"Flat only, NVIDIA only (NVIDIA Reflex). On = the game's frames wait less before the graphics card "
+"draws them: less delay between your steering and the picture when the card is the limit. Boost "
+"also keeps the card's clocks up. Same fps; small cost."
 msgstr ""
-"Yalnızca düz, yalnızca NVIDIA. Açık = oyun kareleri GPU kuyruğunda daha az bekler: GPU "
-"sınırlıyorsa daha az giriş gecikmesi. Boost GPU saatlerini de yüksek tutar. Aynı fps; küçük "
-"maliyet. VR'de kullanılmaz."
+"Yalnızca düz ekran, yalnızca NVIDIA (NVIDIA Reflex). Açık = oyunun kareleri ekran kartı çizmeden "
+"önce daha az bekler: kart sınırlayıcıyken direksiyon ile görüntü arasında daha az gecikme. Boost "
+"ayrıca kartın saat hızlarını yüksek tutar. Aynı fps; küçük maliyet."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
-"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
-"the fps swings. Turns Turbo off while on."
+"headset's frame smoothing (ASW / Motion Smoothing) fills in the rest at a steady rhythm. Use it "
+"when the fps swings. Turns Turbo off while on."
 msgstr ""
-"Yalnızca VR. yarı = oyun VR gözlüğünün her 2. karesini çizer (72 Hz -> 36 fps), üçte bir = her "
-"3.; VR gözlüğünün yeniden yansıtması (ASW / Motion Smoothing) kalanı sabit bir ritimle doldurur. "
-"fps dalgalanıyorsa kullanın. Açıkken Turbo'yu kapatır."
+"Yalnızca VR. yarı = oyun her 2. başlık karesini çizer (72 Hz -> 36 fps), üçte bir = her 3.; "
+"başlığın kare yumuşatması (ASW / Motion Smoothing) kalanı sabit bir ritimle doldurur. fps "
+"dalgalanıyorsa kullan. Açıkken Turbo'yu kapatır."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
-"are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
+"VR speed-ups: Turbo, foveated rendering, skipping the hidden lens edges, and whether OFXR Bridge "
+"/ VectorXR are found. Right opens the group, Left closes it; it starts closed every time the menu "
+"opens."
 msgstr ""
-"VR hızlandırmaları: Turbo, foveated render, gizli alan maskesi ve OFXR Bridge / VectorXR bulundu "
-"mu. Sağ grubu açar, Sol kapatır; menü her açıldığında kapalı başlar."
+"VR hızlandırmaları: Turbo, foveated rendering, merceklerin gizli kenarlarını atlama ve OFXR "
+"Bridge / VectorXR'nin bulunup bulunmadığı. Sağ grubu açar, Sol kapatır; menü her açıldığında "
+"kapalı başlar."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Turbo: no ASW / Motion Smoothing / SSW / reprojection. VR only. On = the game stops waiting for "
-"the headset each frame: more fps only when the CPU is the limit (busy cities, traffic). Turn it "
-"off if the picture judders. From OpenXR Toolkit."
+"Turbo switches off the headset's frame smoothing (ASW / Motion Smoothing / SSW). VR only. On = "
+"the game stops waiting for the headset each frame: more fps only when the CPU is the limit (busy "
+"cities, traffic). Turn it off if the picture judders."
 msgstr ""
-"Turbo: ASW / Motion Smoothing / SSW / yeniden yansıtma yok. Yalnızca VR. Açık = oyun her karede "
-"VR gözlüğünü beklemez: yalnızca CPU sınırlıyorsa daha çok fps (kalabalık şehirler, trafik). "
-"Görüntü kasıyorsa kapatın. OpenXR Toolkit'ten."
+"Turbo, başlığın kare yumuşatmasını kapatır (ASW / Motion Smoothing / SSW). Yalnızca VR. Açık = "
+"oyun her karede başlığı beklemeyi bırakır: yalnızca CPU sınırlayıcıyken daha çok fps (kalabalık "
+"şehirler, trafik). Görüntü sarsılıyorsa kapat."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR "
-"only. The outer ring is shaded once per 2 x 2 pixels; fences, grass and leaves keep full detail. "
+"only. The outer ring gets one colour per 2 x 2 pixels; fences, grass and leaves keep full detail. "
 "Turn it off if the edge looks blocky."
 msgstr ""
-"Keskin merkez, kenarda daha az ayrıntı (yalnızca NVIDIA RTX). Yüksek Scaling'de GPU süresi "
-"kazandırır. Yalnızca VR. Dış halka 2 x 2 pikselde bir gölgelendirilir; çitler, çimen ve yapraklar "
-"tam ayrıntıyı korur. Kenar bloklu görünüyorsa kapatın."
+"Keskin orta, kenarda daha az ayrıntı (yalnızca NVIDIA RTX). Yüksek Ölçeklemede GPU süresi "
+"kazandırır. Yalnızca VR. Dış halka 2 x 2 pikselde bir renk alır; çitler, çimen ve yapraklar tüm "
+"ayrıntısını korur. Kenar karelenmiş görünüyorsa kapat."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How big the sharp centre of Foveated (VRS) is, 10 - 100 % in 5 % steps: bigger = more of the view "
-"sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
+"How big the sharp centre of Foveated rendering is, 10 - 100 % in 5 % steps: bigger = more of the "
+"view sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
 "(balanced) is the default; 90 = wide, 65 = narrow."
 msgstr ""
-"Foveated (VRS) keskin merkezinin boyutu, %10 - 100, %5 adımlarla: büyük = görüntünün daha çoğu "
-"keskin, daha az kazanç; küçük = daha çok kazanç, düşük ayrıntı ortaya daha yakın başlar. %80 "
-"(dengeli) varsayılan; 90 = geniş, 65 = dar."
+"Foveated rendering'in keskin ortasının büyüklüğü, %10 - %100, %5'lik adımlarla: büyük = "
+"görüntünün daha çoğu keskin, daha az kazanç; küçük = daha çok kazanç, düşük ayrıntı ortaya daha "
+"yakın başlar. %80 (dengeli) varsayılandır; 90 = geniş, 65 = dar."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Which of the game's passes Foveated (VRS) acts on. scene = the 3D world only (default). scene + "
-"lighting = also the game's lighting pass, at the very edge only: more saving. Test it: look for "
-"blocky light or shadow edges at the side of your view."
+"What Foveated rendering makes coarser. scene = the 3D world only (default). scene + lighting = "
+"also the game's lighting, at the very edge only: more saving. Test it: look for blocky light or "
+"shadow edges at the side of your view."
 msgstr ""
-"Foveated (VRS)'in oyunun hangi geçişlerine etki ettiği. sahne = yalnızca 3B dünya (varsayılan). "
-"sahne + ışık = oyunun ışık geçişi de, yalnızca en kenarda: daha çok kazanç. Deneyin: görüş "
-"alanınızın yanında bloklu ışık veya gölge kenarlarına bakın."
+"Foveated rendering'in neyi daha kaba yaptığı. sahne = yalnızca 3D dünya (varsayılan). sahne + "
+"ışık = oyunun ışığı da, yalnızca en uçta: daha çok kazanç. Dene: görüş alanının kenarında "
+"karelenmiş ışık veya gölge kenarları ara."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How coarse the outer ring of Foveated (VRS) is. Normal = 1 colour per 2 x 2 pixels (default). "
+"How coarse the outer ring of Foveated rendering is. Normal = 1 colour per 2 x 2 pixels (default). "
 "Strong = per 4 x 2, Max = per 4 x 4: more GPU saving, blockier edges. Best with eye tracking, "
 "where you never look at the outer ring."
 msgstr ""
-"Foveated (VRS) dış halkasının kabalığı. Normal = 2 x 2 pikselde 1 renk (varsayılan). Güçlü = 4 x "
-"2'de, Maks = 4 x 4'te: daha çok GPU kazancı, daha bloklu kenarlar. Dış halkaya bakmadığınız göz "
-"takibiyle en iyisi."
+"Foveated rendering'in dış halkası ne kadar kaba. Normal = 2 x 2 pikselde 1 renk (varsayılan). "
+"Güçlü = 4 x 2'de, Maks = 4 x 4'te: daha çok GPU kazancı, daha karelenmiş kenarlar. Dış halkaya "
+"hiç bakmadığın göz takibiyle en iyisi."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Experimental. The sharp centre of Foveated (VRS) follows your eyes on a headset with eye tracking "
-"(OpenXR eye gaze, for example Varjo); without one it stays at the lens centre. Needs Foveated "
-"(VRS) on at the game's start, else a restart. Almost no cost."
+"Experimental. The sharp centre of Foveated rendering follows your eyes on a headset with eye "
+"tracking (for example Varjo); without it the centre stays in the middle of the lens. Needs "
+"Foveated rendering on at the game's start, else a restart. Almost no cost."
 msgstr ""
-"Deneysel. Foveated (VRS) keskin merkezi, göz takipli VR gözlüğünde gözlerinizi izler (OpenXR eye "
-"gaze, örn. Varjo); yoksa mercek merkezinde kalır. Oyun başlangıcında Foveated (VRS) açık olmalı, "
-"yoksa yeniden başlatın. Neredeyse bedava."
+"Deneysel. Foveated rendering'in keskin ortası, göz takipli bir başlıkta (örneğin Varjo) gözlerini "
+"izler; olmadan orta mercek ortasında kalır. Oyun başlarken Foveated rendering açık olmalı, yoksa "
+"yeniden başlatma gerekir. Neredeyse maliyeti yok."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -525,13 +559,13 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see "
-"what a setting gains. Its GPU cost is measured: per frame, every picture it is drawn into; none "
-"when off. Save keeps it for the next start."
+"A small live fps and frame-time box, also while this menu is closed (flat and VR): fps, ms, "
+"numbers only, each with or without a graph of recent frame times (spikes show red), or the graph "
+"alone. Its GPU cost is measured. Save keeps it."
 msgstr ""
-"Küçük canlı fps ve kare süresi kutusu, bu menü kapalıyken de (düz ve VR). Bir ayarın ne "
-"kazandırdığını görmek için kullanın. GPU maliyeti ölçülür: kare başına, çizildiği her resim için; "
-"kapalıyken yok. Save sonraki açılış için saklar."
+"Bu menü kapalıyken de görünen küçük canlı fps ve kare süresi kutusu (düz ve VR): fps, ms, "
+"yalnızca sayılar, her biri son kare sürelerinin grafiğiyle veya grafiksiz ya da yalnızca grafik. "
+"GPU maliyeti ölçülür. Kaydet bunu korur."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -600,13 +634,24 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
-"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
-"Per-part motion vectors). No cost."
+"How far back the fps graph shows: 2 - 60 s. One bar per slice of time = its slowest frame, so you "
+"see spikes. Green = on time, yellow = a bit slow, red = a hitch; the line = the headset rate / "
+"FPS cap / your usual. Shown when FPS counter has a graph."
 msgstr ""
-"Yalnızca VR. Başı izle = VR gözlüğüyle hareket eder. Oyun alanında sabit = koltuğunuz çevresinde "
-"tek nokta, kabinin sallanmasını yok sayar. Araca bağlı = kabine yapışık, onunla sallanır (DLAA + "
-"Parça başı hareket vektörleri gerekir). Bedava."
+"FPS grafiğinin ne kadar geriye gösterdiği: 2 - 60 s. Zaman diliminin başına bir çubuk = en yavaş "
+"karesi, böylece ani düşüşleri görürsün. Yeşil = zamanında, sarı = biraz yavaş, kırmızı = takılma; "
+"çizgi = başlık hızı / FPS sınırı / olağan değerin. FPS sayacında grafik varsa görünür."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
+"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Track "
+"moving parts). No cost."
+msgstr ""
+"Yalnızca VR. Başı izle = başlıkla birlikte hareket eder. Oyun alanında sabit = koltuğunun "
+"etrafında tek bir nokta, kabinin sallanmasını yok sayar. Araca bağlı = kabine yapışık, onunla "
+"sallanır (DLAA + Parçaları izle gerekir). Maliyeti yok."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -739,12 +784,12 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Switches for A/B checks: DLAA off, the game's own TAA mixed in or side by side, the thin-wire "
-"switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
-"group, Left closes it."
+"Switches for comparing: DLAA off, the game's own TAA mixed in or side by side, the wire fixes, "
+"running DLAA earlier. Nothing here is needed for normal driving. Right opens the group, Left "
+"closes it."
 msgstr ""
-"A/B kontrolleri için anahtarlar: DLAA kapalı, oyunun kendi TAA'sı karıştırılmış veya yan yana, "
-"ince tel anahtarları, tonemap öncesi DLAA. Normal sürüş için buradakilerin hiçbiri gerekmez. Sağ "
+"Karşılaştırma anahtarları: DLAA kapalı, oyunun kendi TAA'sı karışık veya yan yana, tel "
+"düzeltmeleri, DLAA'yı daha erken çalıştırma. Normal sürüş için burada hiçbir şey gerekmez. Sağ "
 "grubu açar, Sol kapatır."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -759,64 +804,55 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
-"right, to compare."
+"on = the mod on the left, the game's own TAA on the right, to compare (Split line position, "
+"Split: left | right). Replaces Mix while on. With the game's console on, the mod switches the "
+"game's Anti-aliasing for you."
 msgstr ""
-"Yalnızca oyunun Kenar yumuşatması TAA iken. kapalı = yalnız mod (oyunun AA'sını Devre dışı "
-"yapın). karışık = TAA ve DLAA / DLSS aynı karede, harmanlanmış. bölünmüş = solda mod, sağda TAA, "
-"karşılaştırma için."
+"açık = mod solda, oyunun kendi TAA'sı sağda, karşılaştırmak için (Bölme çizgisi konumu, Bölme: "
+"sol | sağ). Açıkken Karışığın yerini alır. Oyunun konsolu açıkken mod, oyunun kenar yumuşatmasını "
+"sizin için değiştirir."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
+"Where the split line is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS on the left "
+"of it, the game's TAA on the right. Used only while Split with game TAA is on."
 msgstr ""
-"Karışımın ne kadarının oyunun TAA'sı olduğu, 0 - 100 %, 10 % adımlarla: daha çok = daha sakin ve "
-"yumuşak (TAA), daha az = daha keskin (DLAA / DLSS). Oyun TAA'sı karışık iken veya karışık tarafı "
-"olan bölünmüş iken kullanılır. Ek maliyet yok."
+"Bölme çizgisinin yeri, genişliğin 0 - 100 %'ü 5 %'lik adımlarla: solunda modun DLAA / DLSS'i, "
+"sağında oyunun TAA'sı. Yalnızca Oyun TAA'sı ile bölme açıkken kullanılır."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
-"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+"What the split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix | TAA "
+"or DLAA | Mix (Mix = the two blended at Mix amount). DLSS instead of DLAA when upscaling. Used "
+"only while Split with game TAA is on."
 msgstr ""
-"Oyun TAA'sı bölünmüş çizgisinin yeri, genişliğin 0 - 100 %, 5 % adımlarla: solunda modun DLAA / "
-"DLSS'i, sağında oyunun TAA'sı. Yalnızca Oyun TAA'sı bölünmüş iken kullanılır."
+"Bölmenin iki tarafında ne gösterdiği: DLAA | TAA (mod solda, oyunun TAA'sı sağda), karışık | TAA "
+"veya DLAA | karışık (karışık = ikisi Karışım miktarına göre karıştırılır). Yukarı ölçeklerken "
+"DLAA yerine DLSS. Yalnızca Oyun TAA'sı ile bölme açıkken kullanılır."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
-"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
-"upscaling. Used only when Game TAA is split."
+"Thin wires move correctly while you drive: their movement is spread over the whole thin line. on "
+"= default. off = only to compare; near wires flicker more. The picture is soft for a moment when "
+"you switch."
 msgstr ""
-"Oyun TAA'sı bölünmüş iki tarafında ne gösterir: DLAA | TAA (solda mod, sağda oyunun TAA'sı), "
-"karışık | TAA veya DLAA | karışık (karışık = ikisi Oyun TAA payına göre harmanlanır). Ölçeklemede "
-"DLAA yerine DLSS. Yalnızca Oyun TAA'sı bölünmüş iken kullanılır."
+"İnce teller sürerken doğru hareket eder: hareketleri tüm ince çizgiye yayılır. açık = varsayılan. "
+"kapalı = yalnızca karşılaştırma için; yakın teller daha çok titrer. Değiştirince görüntü bir an "
+"yumuşar."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
-"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
-"soft for a moment when it changes."
+"Thin wires count as in front on every pixel they touch, even where they cover only a sliver of "
+"it. on = default. on (no A2C) = also for see-through edges such as leaves. off = only to compare; "
+"near wires flicker more."
 msgstr ""
-"İnce teller sürüş sırasında hareketini korur: DLAA hareket verisini ince çizgilere yayar (DLSS "
-"motion dilation). açık = varsayılan. kapalı = yalnızca karşılaştırma için; yakın teller daha çok "
-"titrer. Değişince görüntü bir an yumuşar."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
-"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
-msgstr ""
-"İnce teller dokundukları her piksele derinlik alır, yalnızca piksel merkezini kapladıkları yere "
-"değil. açık = varsayılan. açık (no A2C) = saydam kenarlar için de. kapalı = yalnızca "
-"karşılaştırma için; yakın teller daha çok titrer."
+"İnce teller, dokundukları her pikselde, pikselin yalnızca bir dilimini kapatsalar bile önde "
+"sayılır. açık = varsayılan. açık (A2C yok) = yapraklar gibi yarı saydam kenarlar için de. kapalı "
+"= yalnızca karşılaştırma için; yakın teller daha çok titrer."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -831,24 +867,84 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
-"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
-"~60 frames to switch."
+"Flat only: DLAA runs before the game adds its glow and colour look, so lane paint, wires and "
+"rails shimmer less. Change it only to compare. Not used with DLSS upscaling or Windows HDR. Same "
+"cost either way; takes about a second to switch."
 msgstr ""
-"Yalnızca düz: DLAA, oyunun bloom / tonemap işleminden önce, böylece şerit boyası, teller ve "
-"raylar daha az titrer. Yalnızca karşılaştırmak için değiştirin. DLSS ölçekleme veya Windows HDR "
-"ile kullanılmaz. Maliyet aynı; geçiş ~60 kare sürer."
+"Yalnızca düz ekran: DLAA, oyun parıltı ve renk görünümünü eklemeden önce çalışır; böylece şerit "
+"boyası, teller ve raylar daha az titrer. Yalnızca karşılaştırmak için değiştir. DLSS ölçekleme "
+"veya Windows HDR ile kullanılmaz. İki durumda da aynı maliyet; geçiş yaklaşık bir saniye sürer."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Bug report: press the capture key twice (or Capture now) where something looks wrong; the mod "
+"writes one zip you attach to a GitHub issue. Right opens the group, Left closes it."
+msgstr ""
+"Hata raporu: bir şey yanlış görünen yerde yakalama tuşuna iki kez bas (veya Şimdi yakala); mod "
+"bir GitHub issue'suna ekleyeceğin tek bir zip yazar. Sağ grubu açar, Sol kapatır."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"One switch for the most complete report: log detail debug, rewind 2 s, capture Full. Off puts the "
+"rows back as they were. Only this switch is saved; the forced values are never written to "
+"dlaa.ini."
+msgstr ""
+"En eksiksiz rapor için tek anahtar: günlük ayrıntısı debug, 2 s geri sarma, Tam yakalama. "
+"Kapalıyken satırlar eski haline döner. Yalnızca bu anahtar kaydedilir; zorlanan değerler "
+"dlaa.ini'ye asla yazılmaz."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + "
-"problems worked around; info = + start-up and changes; debug = + statistics, and debug also runs "
-"the GPU timers and the CPU profiler."
+"problems worked around; info = + start-up and changes; debug = + statistics and timing "
+"measurements (a little slower)."
 msgstr ""
-"dlaa_inject.log'a ne yazılır: kapalı = hiçbir şey; hatalar = yalnızca hatalar (varsayılan); "
-"uyarılar = + aşılan sorunlar; bilgi = + başlangıç ve değişiklikler; hata ayıklama = + "
-"istatistikler, ve hata ayıklama ayrıca GPU zamanlayıcılarını ve CPU profilleyiciyi çalıştırır."
+"dlaa_inject.log'a ne yazılır: kapalı = hiçbir şey; hatalar = yalnızca başarısızlıklar "
+"(varsayılan); uyarılar = + aşılan sorunlar; bilgi = + başlangıç ve değişiklikler; hata ayıklama = "
+"+ istatistik ve süre ölçümleri (biraz yavaş)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Keeps the last 0.5 - 3 s of frames on the graphics card all the time, so the report shows the "
+"moment BEFORE the key (+ what DLSS got for the last frames). Costs graphics memory (the MB in the "
+"cost column) and a picture copy per frame. off = none."
+msgstr ""
+"Son 0,5 - 3 s kareyi sürekli ekran kartında tutar; böylece rapor tuştan ÖNCEKİ anı gösterir (+ "
+"DLSS'nin son karelerde aldığı). Video belleğine (maliyet sütunundaki MB) ve kare başına bir "
+"görüntü kopyasına mal olur. kapalı = yok."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Quick = system info, logs, settings, your picture and DLAA off for a few frames (about 1 s). Full "
+"= + what DLSS got per frame (colour, motion, depth) and A/B sets: motion view, motion off, jitter "
+"only (about 2 - 4 s)."
+msgstr ""
+"Hızlı = sistem bilgisi, günlükler, ayarlar, görüntün ve birkaç kare DLAA kapalı (yaklaşık 1 s). "
+"Tam = + DLSS'nin kare başına aldığı (renk, hareket, derinlik) ve A/B setleri: hareket görünümü, "
+"hareket kapalı, yalnızca jitter (yaklaşık 2 - 4 s)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The capture key. Press it TWICE within 1 s while driving where it goes wrong (the first press "
+"only arms it: one short beep). Right opens the Hotkeys page on its line to change it."
+msgstr ""
+"Yakalama tuşu. Sürerken bir şeyin ters gittiği yerde 1 s içinde İKİ KEZ bas (ilk basış yalnızca "
+"hazırlar: kısa bir bip). Sağ, değiştirmen için Kısayollar sayfasını bu satırda açar."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How many captures stay in the dlaa_selftest folder next to the DLL: older ones (folder + zip) are "
+"deleted when a new one is written. all = never delete."
+msgstr ""
+"DLL'nin yanındaki dlaa_selftest klasöründe kaç yakalama kalır: yenisi yazılınca eskiler (klasör + "
+"zip) silinir. tümü = asla silme."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -887,12 +983,27 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Puts every setting in this menu back to how the mod ships (model, sharpen, texture sharpness, "
-"DLAA area, motion, mirrors, profile, panel, fps box, turbo, foveated, frame rate, logging), live "
-"and in dlaa.ini, keeping your hotkeys and every other line."
+"DLAA area, motion, mirrors, preset, panel, fps box, turbo, foveated, frame rate, CPU, log "
+"detail), live and in dlaa.ini, keeping your hotkeys and every other line."
 msgstr ""
-"Menüdeki tüm ayarları modun gönderildiği haline döndürür (model, keskinleştirme, doku keskinliği, "
-"DLAA alanı, hareket, aynalar, profil, panel, fps kutusu, turbo, foveated, kare hızı, günlük), "
-"canlı ve dlaa.ini'de, kısayollarınızı ve diğer tüm satırları korur."
+"Bu menüdeki her ayarı modun gönderildiği haline döndürür (model, keskinleştirme, doku keskinliği, "
+"DLAA alanı, hareket, aynalar, hazır ayar, panel, fps kutusu, turbo, foveated, kare hızı, CPU, "
+"günlük ayrıntısı), canlı ve dlaa.ini'de; kısayollarını ve diğer tüm satırları korur."
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Off"
+msgstr "Kapalı"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph only"
+msgstr "yalnızca grafik"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph"
+msgstr "grafik"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1168,8 +1279,8 @@ msgstr "Şu an kare başına %ls tutuyor; daha az ayna daha az tutar."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Greyed: Mirror DLAA is off."
-msgstr "Gri: Ayna DLAA kapalı."
+msgid "Greyed: Smooth mirrors is off."
+msgstr "Gri: Yumuşak aynalar kapalı."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1182,6 +1293,24 @@ msgstr "Her zaman açık: dlaa.ini mirror mode 3 zaten sırayla."
 #, c-format
 msgid "The mirrors cost %ls per frame now."
 msgstr "Aynalar şu an kare başına %ls tutuyor."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed: only for AMD X3D CPUs with two core groups (7950X3D, 9950X3D)."
+msgstr "Gri: yalnızca iki çekirdek grubu olan AMD X3D CPU'lar için (7950X3D, 9950X3D)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On now: the game runs only on the cores with the big cache."
+msgstr "Şu an açık: oyun yalnızca büyük önbellekli çekirdeklerde çalışıyor."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On, but not applied: the game's cores were already limited (see the log)."
+msgstr "Açık ama uygulanmadı: oyunun çekirdekleri zaten sınırlıydı (günlüğe bak)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1211,7 +1340,9 @@ msgstr ""
 msgid ""
 "Waiting: click the game window on the desktop. The mod types into the game's console only while "
 "the game window has the focus."
-msgstr "Bekleniyor: masaüstündeki oyun penceresine tıklayın. Mod, oyunun konsoluna yalnızca oyun penceresi odaktayken yazar."
+msgstr ""
+"Bekleniyor: masaüstündeki oyun penceresine tıklayın. Mod, oyunun konsoluna yalnızca oyun "
+"penceresi odaktayken yazar."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1228,17 +1359,24 @@ msgstr "Oyunun günlüğü son değişikliği doğrulamadı: modun günlüğüne
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid "Mix and split need the game's TAA: set Anti-aliasing to TAA in the game's graphics settings."
+msgstr ""
+"Karışık ve bölünmüş, oyunun TAA'sını gerektirir: oyunun grafik ayarlarında kenar yumuşatmayı TAA "
+"yap."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "The game's TAA is not running now: the mod runs alone."
 msgstr "Oyunun TAA'sı şu an çalışmıyor: mod tek başına çalışıyor."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
+msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or set Mode to Mix."
 msgstr ""
-"Oyunun TAA'sı şu an çalışıyor: oyunun kenar yumuşatmasını Devre dışı yapın ya da karışık veya "
-"bölünmüş seçin."
+"Oyunun TAA'sı şu an çalışıyor: oyunun kenar yumuşatmasını Devre dışı yapın ya da Modu Karışık "
+"yapın."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1296,6 +1434,67 @@ msgstr "Oyunun TAA'sına dönüldü: DLAA bu karede çalışmadı (günlüğe ba
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
+msgid ""
+"Or turn on the game console (g_developer and g_console 1 in config.cfg): then the mod switches it "
+"for you."
+msgstr ""
+"Ya da oyun konsolunu aç (config.cfg içinde g_developer ve g_console 1): o zaman mod bunu senin "
+"yerine değiştirir."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn on the game console to let the mod switch the game's Anti-aliasing."
+msgstr "Modun oyunun Anti-aliasing'ini değiştirebilmesi için oyun konsolunu aç."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "TAA"
+msgstr "TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "unknown"
+msgstr "bilinmiyor"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "other"
+msgstr "diğer"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "waiting: click the game window"
+msgstr "bekleniyor: oyun penceresine tıkla"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switching..."
+msgstr "değiştiriliyor..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch confirmed"
+msgstr "geçiş onaylandı"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch NOT confirmed (see the log)"
+msgstr "geçiş onaylanmadı (günlüğe bak)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls, %ls."
+msgstr "Oyun AA: %ls, %ls."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls."
+msgstr "Oyun AA: %ls."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
 #, c-format
 msgid ""
 "Switched off by the mod: it cost more than %.1f ms per eye (VR budget). Press its key to try "
@@ -1315,6 +1514,45 @@ msgstr "Şu an kare başına %ls tutuyor; kapalı bunu kazandırır."
 #, c-format
 msgid "Costs %ls ms GPU per frame now; most of it at night."
 msgstr "Şu an kare başına %ls ms GPU tutuyor; çoğu gece."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"The last one: %d zips of at most 24 MB, %d MB in all (folder %.0f MB). Attach the _main zip; the "
+"others only if asked."
+msgstr "Sonuncusu: en çok 24 MB'lık %d zip, toplam %d MB (klasör %.0f MB). _main zip'ini ekle; diğerlerini yalnızca istenirse."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Holds %.0f MB of graphics memory now."
+msgstr "Şu an %.0f MB video belleği tutuyor."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"%ls about %.0f MB graphics memory for the rewind; a capture takes about %.1f s and writes about "
+"%.0f MB."
+msgstr ""
+"%ls geri sarma için yaklaşık %.0f MB video belleği; bir yakalama yaklaşık %.1f s sürer ve "
+"yaklaşık %.0f MB yazar."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "On, it costs"
+msgstr "Açıkken maliyeti"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Costs now:"
+msgstr "Şu an maliyeti:"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn off Send everything to change this."
+msgstr "Bunu değiştirmek için Her şeyi gönder'i kapat."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1378,8 +1616,8 @@ msgstr "VR'de gri: VR FPS sınırı kullanın."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Limited by the NVIDIA driver now (Reflex is on)."
-msgstr "Şu an NVIDIA sürücüsü sınırlıyor (Reflex açık)."
+msgid "Limited by the NVIDIA driver now (Low delay is on)."
+msgstr "Şu an NVIDIA sürücüsü sınırlıyor (Düşük gecikme açık)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1432,8 +1670,8 @@ msgstr "Modunkinde değil, oyunun kendi GPU göstergesinde süre kazandırır."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Foveated (VRS) is off: switch it on first."
-msgstr "Foveated (VRS) kapalı: önce açın."
+msgid "Foveated rendering is off: switch it on first."
+msgstr "Foveated rendering kapalı: önce aç."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1451,11 +1689,11 @@ msgstr "Fake gaze (vrs_eye_fake = 1): keskin alan yavaşça dönüyor, bir test.
 #: src/inject.cpp
 #, c-format
 msgid ""
-"Foveated (VRS) was off at the game's start: save (Shift+F12) and restart the game to ask the "
+"Foveated rendering was off at the game's start: save (Shift+F12) and restart the game to ask the "
 "headset for eye gaze."
 msgstr ""
-"Foveated (VRS) oyun başlangıcında kapalıydı: VR gözlüğünden bakış istemek için kaydedin "
-"(Shift+F12) ve oyunu yeniden başlatın."
+"Foveated rendering oyun başlarken kapalıydı: kaydet (Shift+F12) ve başlıktan bakış istemek için "
+"oyunu yeniden başlat."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1954,15 +2192,41 @@ msgstr "kapalı (%d)"
 msgid "Mode"
 msgstr "Mod"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLSS)"
+msgstr "Karışık (TAA + DLSS)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLAA)"
+msgstr "Karışık (TAA + DLAA)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLSS"
 msgstr "DLSS"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLAA"
 msgstr "DLAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Mix amount"
+msgstr "Karışım miktarı"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d %% TAA"
+msgstr "%d %% TAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Quality preset"
+msgstr "Kalite ayarı"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -1988,7 +2252,7 @@ msgstr "%.1f (kapalı)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Sharpen width"
+msgid "Sharpness size"
 msgstr "Keskinleştirme genişliği"
 
 #. Value column (about 20 Latin characters)
@@ -2010,8 +2274,8 @@ msgstr "%.2f (kapalı)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Cut-out texture sharpness"
-msgstr "Kesim doku keskinliği"
+msgid "Leaves and fences sharpness"
+msgstr "Yaprak ve çit keskinliği"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2040,6 +2304,11 @@ msgstr "yalnızca VR"
 msgid "100 %% (flat)"
 msgstr "%%100 (düz)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Track moving parts"
+msgstr "Hareketli parçaları izle"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "old stencil ids"
@@ -2047,13 +2316,13 @@ msgstr "eski stencil id'leri"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirror DLAA"
-msgstr "Ayna DLAA"
+msgid "Smooth mirrors"
+msgstr "Yumuşak aynalar"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirrors in turns"
-msgstr "Aynalar sırayla"
+msgid "Mirrors take turns (faster)"
+msgstr "Aynalar sırayla (hızlı)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2062,13 +2331,23 @@ msgstr "açık (mode 3)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Thin-wire motion"
-msgstr "İnce tel hareketi"
+msgid "Wire fix: motion"
+msgstr "Tel düzeltme: hareket"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Wire fix: depth"
+msgstr "Tel düzeltme: derinlik"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no A2C)"
 msgstr "açık (no A2C)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Thicker wires (test)"
+msgstr "Daha kalın teller (test)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2077,13 +2356,23 @@ msgstr "açık (deneysel)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "DLAA before tonemap"
-msgstr "Tonemap öncesi DLAA"
+msgid "Run DLAA earlier (test, flat)"
+msgstr "DLAA erken (test, düz)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Run DLAA earlier (test)"
+msgstr "DLAA erken (test)"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "flat only"
 msgstr "yalnızca düz"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Glass and fence fix"
+msgstr "Cam ve çit düzeltmesi"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2092,8 +2381,8 @@ msgstr "kapalı (VR bütçesi)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Light glow ghosting fix"
-msgstr "Parıltı hayaleti düzeltme"
+msgid "Light trail fix"
+msgstr "Işık izi düzeltmesi"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2102,33 +2391,18 @@ msgstr "DLAA kapalı (kaydedilmez)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Game TAA"
-msgstr "Oyun TAA'sı"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid "mix"
-msgstr "karışık"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid "split"
-msgstr "bölünmüş"
+msgid "Split with game TAA"
+msgstr "Oyun TAA'sı ile böl"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Game TAA share"
-msgstr "Oyun TAA payı"
+msgid "Split line position"
+msgstr "Bölme çizgisi konumu"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Split position"
-msgstr "Bölme konumu"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "Split compares"
-msgstr "Bölme karşılaştırır"
+msgid "Split: left | right"
+msgstr "Bölme: sol | sağ"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2245,8 +2519,8 @@ msgstr "açık (durduruldu)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated (VRS)"
-msgstr "Foveated (VRS)"
+msgid "Foveated rendering"
+msgstr "Foveated rendering"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2265,8 +2539,8 @@ msgstr "Foveated boyutu"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated passes"
-msgstr "Foveated geçişleri"
+msgid "Foveated: lighting too"
+msgstr "Foveated: ışık da"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2325,13 +2599,13 @@ msgstr "açık (bakış bekleniyor)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Hidden area mask (VR)"
-msgstr "Gizli alan maskesi (VR)"
+msgid "Skip hidden edges (VR)"
+msgstr "Gizli kenarları atla (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Hidden area mask"
-msgstr "Gizli alan maskesi"
+msgid "Skip hidden edges"
+msgstr "Gizli kenarları atla"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2346,13 +2620,13 @@ msgstr "açık (FPS sınırı geçerli)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Reflex (flat)"
-msgstr "Reflex (düz)"
+msgid "Low delay (Reflex, flat)"
+msgstr "Düşük gecikme (Reflex, düz)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Reflex"
-msgstr "Reflex"
+msgid "Low delay (Reflex)"
+msgstr "Düşük gecikme (Reflex)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2408,8 +2682,108 @@ msgstr "karışık (dlaa.ini)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Logging"
-msgstr "Günlük"
+msgid "AMD cache cores (X3D)"
+msgstr "AMD önbellek çekirdek (X3D)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (auto)"
+msgstr "açık (otomatik)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Send everything"
+msgstr "Her şeyi gönder"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Log detail"
+msgstr "Günlük ayrıntısı"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Rewind before key"
+msgstr "Tuştan önce geri sar"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d frames (dlaa.ini)"
+msgstr "%d kare (dlaa.ini)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture includes"
+msgstr "Yakalama içerir"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Full"
+msgstr "Tam"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Quick"
+msgstr "Hızlı"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "change"
+msgstr "değiştir"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture key"
+msgstr "Yakalama tuşu"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%hs (press twice)"
+msgstr "%hs (2 kez bas)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Keep captures"
+msgstr "Yakalamaları tut"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "all"
+msgstr "tümü"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture now"
+msgstr "Şimdi yakala"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "capturing %d / %d"
+msgstr "yakalanıyor %d / %d"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "writing (%d files)"
+msgstr "yazılıyor (%d dosya)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "done: %d parts, %d MB"
+msgstr "bitti: %d parça, %d MB"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "failed (see the log)"
+msgstr "başarısız (günlüğe bak)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "ready"
+msgstr "hazır"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2504,11 +2878,6 @@ msgstr "Panel size döner"
 #: src/inject.cpp
 msgid "Menu keys"
 msgstr "Menü tuşları"
-
-#. Value column (about 20 Latin characters)
-#: src/inject.cpp
-msgid "Off"
-msgstr "Kapalı"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2607,6 +2976,16 @@ msgstr "FPS opaklığı"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS graph length"
+msgstr "FPS grafiği uzunluğu"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "with a graph only"
+msgstr "yalnızca grafikle"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "FPS distance (VR)"
 msgstr "FPS mesafesi (VR)"
 
@@ -2658,6 +3037,20 @@ msgstr "Sıfırlamak için %hs tuşunu %hs sn tutun. %ls"
 #: src/inject.cpp
 #, c-format
 msgid ""
+"%hs = capture now (the menu closes first). The zip (dlaa_selftest folder next to the DLL) holds "
+"system info, the mod's and the game's log, dlaa.ini, your picture and DLAA off; Full adds what "
+"DLSS got and the A/B sets; rewind adds the moment before. Your user name and home folder are "
+"removed. %ls"
+msgstr ""
+"%hs = şimdi yakala (önce menü kapanır). Zip (DLL'nin yanındaki dlaa_selftest klasörü) sistem "
+"bilgisini, modun ve oyunun günlüğünü, dlaa.ini'yi, görüntünü ve DLAA kapalı görüntüyü içerir; "
+"Tam, DLSS'nin aldığını ve A/B setlerini ekler; geri sarma, tuştan önceki anı ekler. Kullanıcı "
+"adın ve ana klasörün çıkarılır. %ls"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
 "The 5 keys that open and drive this menu: %hs opens / closes it (the value), %hs / %hs / %hs / "
 "%hs move (Hotkey column). While the menu is open only these 5 are kept from the game. %hs: change "
 "them on the Hotkeys page."
@@ -2703,9 +3096,6 @@ msgstr "bilgi"
 msgid "debug"
 msgstr "hata ayıklama"
 
-#~ msgid "Panel settings"
-#~ msgstr "Panel"
-
-#~ msgid "FPS counter settings"
-#~ msgstr "FPS sayacı"
+#~ msgid "The last one: %d zip parts of at most 24 MB, %d MB in all (folder %.0f MB): attach them all."
+#~ msgstr "Sonuncusu: en çok 24 MB'lık %d zip parçası, toplam %d MB (klasör %.0f MB): hepsini ekle."
 

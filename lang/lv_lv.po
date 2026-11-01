@@ -168,45 +168,65 @@ msgstr "Izvēlnes panelis"
 msgid "Compare and test"
 msgstr "Salīdzināt un testēt"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Bug report"
+msgstr "Kļūdas ziņojums"
+
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's "
-"Scaling is below 100 %. off = the game's own picture: use it to compare. Saved at once."
+"Scaling is below 100 %. Mix = the game's own TAA blended with DLAA / DLSS: calmer, a bit softer. "
+"off = the game's own picture. Saved at once."
 msgstr ""
 "DLAA = tīras malas spēles renderēšanas izmērā. DLSS = tas pats, un palielina attēlu, ja spēles "
-"Scaling ir zem 100 %. izslēgts = pašas spēles attēls: salīdzināšanai. Saglabājas uzreiz."
+"Mērogošana ir zem 100 %. Maisījums = pašas spēles TAA, sajaukts ar DLAA / DLSS: mierīgāk, nedaudz "
+"maigāk. izsl. = pašas spēles attēls. Saglabājas uzreiz."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Presets for your GPU. high = everything on (model 1). medium = model 2, half-size see-through "
-"depth, flat mirrors without part motion, lighter part-motion search. low = also no mirror DLAA, "
-"no see-through depth, VR area 60 %. Never changes a setting you set yourself."
+"How much of the Mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer, less = "
+"sharper. Shown while Mode is Mix, or a split has a Mix side. No extra cost."
 msgstr ""
-"Profili jūsu GPU. augsts = viss ieslēgts (modelis 1). vidējs = modelis 2, uz pusi mazāks "
-"caurspīdīguma dziļums, plakani spoguļi bez daļu kustības, vieglāka kustības meklēšana. zems = arī "
-"bez spoguļu DLAA, bez caurspīdīguma dziļuma, VR zona 60 %. Nemaina to, ko iestatījāt paši."
+"Cik no maisījuma ir spēles TAA, 0 - 100 % ar soli 10 %: vairāk = mierīgāk un maigāk, mazāk = "
+"asāk. Redzams, kamēr Režīms ir Maisījums vai dalījuma vienā pusē ir maisījums. Papildu izmaksu "
+"nav."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, least ghosting "
+"Presets for your graphics card. high = everything on (model 1). medium = model 2, a lighter Glass "
+"and fence fix, mirrors without Track moving parts. low = also no Smooth mirrors, no Glass and "
+"fence fix, VR area 60 %. Never changes a setting you set yourself."
+msgstr ""
+"Sagatavotie iestatījumi jūsu videokartei. high = viss ieslēgts (modelis 1). medium = modelis 2, "
+"vieglāks stiklu un žogu labojums, spoguļi bez kustīgo daļu izsekošanas. low = arī bez gludajiem "
+"spoguļiem, bez stiklu un žogu labojuma, VR zona 60 %. Nekad nemaina iestatījumu, ko esat "
+"iestatījis pats."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, fewest trails "
 "behind traffic: start here. 3 (F) = calmest on fences and wires, can smear moving detail, same "
 "cost as 2. 4 (M) = heaviest (about 5x), flat tests only."
 msgstr ""
-"1 (K) = visvairāk detaļu, asākais teksts, apmēram 1,6x GPU slodzes nekā 2. 2 (E) = līdzsvarots, "
-"vismazāk rēgu aiz satiksmes: sāciet ar to. 3 (F) = mierīgākais uz žogiem un vadiem, var izsmērēt "
-"kustīgas detaļas, cena kā 2. 4 (M) = smagākais (apmēram 5x), tikai plakanam režīmam."
+"1 (K) = visvairāk detaļu, visasākais teksts, apmēram 1,6 reizes vairāk GPU nekā 2. 2 (E) = "
+"līdzsvars, vismazāk pēdu aiz satiksmes: sāciet ar to. 3 (F) = mierīgākais uz žogiem un vadiem, "
+"var izsmērēt kustīgas detaļas, tāda pati cena kā 2. 4 (M) = smagākais (apmēram 5x), tikai testiem "
+"plakanajā režīmā."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Picture quality: sharpening, texture sharpness, the DLAA area and the see-through depth. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
+"Picture quality: sharpening, texture sharpness, the Glass and fence fix, the Light trail fix and "
+"the DLAA area. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Attēla kvalitāte: asināšana, tekstūru asums, DLAA zona un caurspīdīguma dziļums. Pa labi atver "
-"grupu, pa kreisi aizver; atverot izvēlni, tā vienmēr ir aizvērta."
+"Attēla kvalitāte: asināšana, tekstūru asums, stiklu un žogu labojums, gaismas pēdu labojums un "
+"DLAA zona. Pa labi atver grupu, pa kreisi aizver; katru reizi, kad izvēlne tiek atvērta, tā ir "
+"aizvērta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -232,42 +252,44 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Sharper texture text (road signs, dashboard, GPS). 0 = off; more negative = sharper but more "
-"shimmer on fences; try -0.5 to -1 if text is blurry. No GPU time, only a little memory bandwidth."
+"shimmer on fences; try -0.5 to -1 if text is blurry. Almost no cost."
 msgstr ""
-"Asāks tekstūru teksts (ceļa zīmes, instrumentu panelis, GPS). 0 = izslēgts; jo negatīvāks, jo "
-"asāks, bet žogi vairāk mirgo; ja teksts izplūdis, mēģiniet no -0.5 līdz -1. Neprasa GPU laiku, "
-"tikai nedaudz atmiņas joslas platuma."
+"Asāks teksts uz tekstūrām (ceļa zīmes, instrumentu panelis, GPS). 0 = izslēgts; jo negatīvāk, jo "
+"asāk, bet vairāk mirgo žogi; ja teksts ir izplūdis, mēģiniet no -0,5 līdz -1. Gandrīz bez "
+"izmaksām."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"The same for wire fences, grass and leaf cut-outs: raise it toward 0 if fences shimmer, lower it "
-"if grass looks soft. same = follows the row above. Acts only while Texture sharpness is not 0. No "
-"GPU time, a little memory."
+"The same for wire fences, grass and leaves: raise it toward 0 if fences shimmer, lower it if "
+"grass looks soft. same = follows the row above. Works only while Texture sharpness is not 0. "
+"Almost no cost."
 msgstr ""
-"Tas pats tīkla žogiem, zālei un lapu izgriezumiem: palieliniet uz 0 pusi, ja žogi mirgo, "
-"samaziniet, ja zāle mīksta. tāpat = seko augstākai rindai. Darbojas tikai, kad Tekstūru asums nav "
-"0. Neprasa GPU laiku, nedaudz atmiņas."
+"Tas pats režģa žogiem, zālei un lapām: paceliet tuvāk 0, ja žogi mirgo, pazeminiet, ja zāle "
+"izskatās mīksta. tāpat = kā rindā virs. Darbojas tikai, kamēr Tekstūru asums nav 0. Gandrīz bez "
+"izmaksām."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives wires, fences and glass their own distance instead of what is behind them, so they do not "
-"smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."
+"Wires, fences and windows are treated as the thing in front, not as what you see through them, so "
+"they do not smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms "
+"per eye."
 msgstr ""
-"Dod vadiem, žogiem un stiklam savu attālumu, nevis to, kas aiz tiem, lai kustoties tie "
-"neizsmērētos. Izslēdziet, ja smērēšanos neredzat: ietaupa 0,02 - 0,06 ms uz aci."
+"Vadi, žogi un logi tiek uzskatīti par priekšplāna objektu, nevis par to, kas redzams caur tiem, "
+"tāpēc kustībā tie neizsmērējas. Izslēdziet, ja tur izsmērēšanās nav: ietaupa 0,02 - 0,06 ms uz "
+"aci."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Stops street-lamp and car-light glows leaving a trail behind them when you move: DLSS takes each "
-"glow from the current frame, not its history. 25 % steps; lower it if lamp glows flicker, 0 = "
-"off. Costs about 0.05 - 0.2 ms per eye."
+"Stops street-lamp and car-light glows leaving a trail behind them when you move: the glows are "
+"drawn fresh each frame instead of being blended with older frames. 25 % steps; lower it if lamp "
+"glows flicker, 0 = off. Costs about 0.05 - 0.2 ms per eye."
 msgstr ""
-"Neļauj ielas lukturu un auto gaismu mirdzumam atstāt pēdas kustoties: DLSS ņem mirdzumu no "
-"pašreizējā kadra, nevis vēstures. 25 % soļos; samaziniet, ja lukturu mirdzums mirgo, 0 = "
-"izslēgts. Maksā apmēram 0,05 - 0,2 ms uz aci."
+"Neļauj ielu lukturu un auto gaismu mirdzumam atstāt pēdas kustībā: mirdzums tiek zīmēts no jauna "
+"katrā kadrā, nevis sajaukts ar vecākiem kadriem. Solis 25 %; samaziniet, ja lukturu mirdzums "
+"mirgo, 0 = izslēgts. Maksā apmēram 0,05 - 0,2 ms uz aci."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -292,24 +314,24 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and "
-"does not ghost. Turn it off only to save about 0.5 ms per eye or to test: every pixel then moves "
+"DLAA follows each moving thing on its own (traffic, wheels, number plates), so it stays sharp and "
+"leaves no trail. Turn it off only to save about 0.5 ms per eye or to test: everything then moves "
 "with the camera and traffic smears."
 msgstr ""
-"Dod katrai kustīgai daļai (satiksme, riteņi, numurzīmes) savu kustību DLAA, lai tā paliek asa un "
-"neveido rēgus. Izslēdziet tikai, lai ietaupītu ~0,5 ms uz aci vai testam: tad katrs pikselis "
-"kustas līdzi kamerai un satiksme izsmērējas."
+"DLAA seko katram kustīgam objektam atsevišķi (satiksme, riteņi, numurzīmes), tāpēc attēls paliek "
+"ass un bez pēdām. Izslēdziet tikai, lai ietaupītu apmēram 0,5 ms uz aci vai testam: tad viss "
+"kustas līdz ar kameru un satiksme izsmērējas."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main "
-"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can ghost "
-"in the glass; else each part moves exactly in the glass."
+"Smooths the truck mirrors too, so they do not shimmer. 1 mirror = only the largest (the main "
+"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can leave "
+"trails in the glass; the others follow each moving thing."
 msgstr ""
-"Dod kravas auto spoguļiem savu DLAA, lai tie nemirgotu. 1 spogulis = tikai lielākais (galvenais "
-"spogulis blakus jums). visi = visi spoguļi. kamera = lētākais uz spoguli, kustīga satiksme var "
-"veidot rēgus stiklā; citādi katra daļa stiklā kustas precīzi."
+"Izlīdzina arī kravas auto spoguļus, lai tie nemirgotu. 1 spogulis = tikai lielākais (galvenais "
+"blakus jums). visi = katrs spogulis. kamera = lētākais uz spoguli, kustīga satiksme var atstāt "
+"pēdas stiklā; pārējie seko katram kustīgam objektam."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -325,131 +347,145 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
-"the group, Left closes it; it starts closed every time the menu opens."
+"Frame rate and CPU: CPU tuning, AMD cache cores, an FPS cap and Low delay (Reflex) for flat, an "
+"FPS cap for VR. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Kadru ātrums un CPU: CPU regulēšana, FPS robeža un NVIDIA Reflex plakanam, VR FPS robeža. Pa labi "
-"atver grupu, pa kreisi aizver; atverot izvēlni, tā vienmēr ir aizvērta."
+"Kadru ātrums un CPU: CPU regulēšana, AMD kešatmiņas kodoli, FPS robeža un zema aizture (Reflex) "
+"plakanajam režīmam, FPS robeža VR. Pa labi atver grupu, pa kreisi aizver; katru reizi, kad "
+"izvēlne tiek atvērta, tā ir aizvērta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
-"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
-"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
+"Three CPU switches together. Prefer fast cores: only Intel CPUs with P-cores and E-cores. Higher "
+"priority and no Windows power saving for the game: every CPU, Intel and AMD. Helps when the CPU "
+"is the limit; no cost. Separate in dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle."
 msgstr ""
-"Trīs CPU slēdži kopā: galvenā un renderēšanas pavedieni dod priekšroku P-kodoliem (tikai Intel "
-"hibrīda CPU), spēle darbojas ar Above normal prioritāti, un Windows nedrīkst to droselēt (EcoQoS) "
-"vai ignorēt tās taimera pieprasījumus. Palīdz, kad ierobežo CPU; bez izmaksām. Atsevišķi "
-"iestatījumi dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle."
+"Trīs CPU slēdži kopā. Dod priekšroku ātrajiem kodoliem: tikai Intel procesoriem ar P- un "
+"E-kodoliem. Augsta prioritāte un bez Windows enerģijas taupīšanas spēlei: jebkurš CPU, Intel un "
+"AMD. Palīdz, kad ierobežo CPU; bez izmaksām. Atsevišķi dlaa.ini: cpu_pcore, cpu_priority, "
+"cpu_no_throttle."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"AMD X3D CPUs with two core groups (7950X3D, 9950X3D): keeps the game on the cores with the big 3D "
+"V-Cache, which games like. Switches at once; off gives the game all cores back. Try it and "
+"compare in a busy city. No cost."
+msgstr ""
+"AMD X3D procesori ar divām kodolu grupām (7950X3D, 9950X3D): notur spēli uz kodoliem ar lielo 3D "
+"V-Cache, ko spēles mīl. Pārslēdzas uzreiz; izslēgts atdod spēlei visus kodolus. Izmēģiniet un "
+"salīdziniet noslogotā pilsētā. Bez izmaksām."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
-"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
-"limiting. off = no limit."
+"Set it a bit below what your PC holds in a busy city. With Low delay (Reflex) on, the NVIDIA "
+"driver does the limiting. off = no limit."
 msgstr ""
-"Tikai plakans. Notur spēli ne augstāk par šo kadru ātrumu: vienmērīgs kadra laiks, mazāk siltuma "
-"un enerģijas. Iestatiet nedaudz zem tā, ko jūsu PC notur pārpildītā pilsētā. Ar ieslēgtu Reflex "
-"ierobežo NVIDIA draiveris. izslēgts = bez ierobežojuma."
+"Tikai plakanais režīms. Notur spēli ne augstāk par šo kadru ātrumu: vienmērīgs kadra laiks, mazāk "
+"siltuma un enerģijas. Iestatiet nedaudz zem tā, ko jūsu dators notur noslogotā pilsētā. Ja zema "
+"aizture (Reflex) ir ieslēgta, ierobežo NVIDIA draiveris. izslēgts = bez robežas."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
-"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
+"Flat only, NVIDIA only (NVIDIA Reflex). On = the game's frames wait less before the graphics card "
+"draws them: less delay between your steering and the picture when the card is the limit. Boost "
+"also keeps the card's clocks up. Same fps; small cost."
 msgstr ""
-"Tikai plakans, tikai NVIDIA. Ieslēgts = spēles kadri GPU rindā gaida mazāk: mazāka ievades "
-"aizture, kad ierobežo GPU. Boost arī notur GPU takts augstu. Tas pats FPS; maza cena. Netiek "
-"lietots VR."
+"Tikai plakanais režīms, tikai NVIDIA (NVIDIA Reflex). Iesl. = spēles kadri gaida mazāk, pirms "
+"videokarte tos uzzīmē: mazāka aizture starp stūri un attēlu, kad ierobežo videokarte. Boost notur "
+"arī kartes takti augstu. Tie paši fps; neliela cena."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
-"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
-"the fps swings. Turns Turbo off while on."
+"headset's frame smoothing (ASW / Motion Smoothing) fills in the rest at a steady rhythm. Use it "
+"when the fps swings. Turns Turbo off while on."
 msgstr ""
-"Tikai VR. puse = spēle zīmē katru 2. VR briļļu kadru (72 Hz -> 36 fps), trešdaļa = katru 3.; VR "
-"briļļu reprojekcija (ASW / Motion Smoothing) aizpilda pārējo vienmērīgā ritmā. Izmantojiet, kad "
-"FPS svārstās. Ieslēdzot izslēdz Turbo."
+"Tikai VR. puse = spēle zīmē katru 2. austiņu kadru (72 Hz -> 36 fps), trešdaļa = katru 3.; "
+"austiņu kadru izlīdzināšana (ASW / Motion Smoothing) aizpilda pārējo vienmērīgā ritmā. "
+"Izmantojiet, kad fps lēkā. Kamēr ieslēgts, Turbo ir izslēgts."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
-"are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
+"VR speed-ups: Turbo, foveated rendering, skipping the hidden lens edges, and whether OFXR Bridge "
+"/ VectorXR are found. Right opens the group, Left closes it; it starts closed every time the menu "
+"opens."
 msgstr ""
-"VR paātrinājumi: Turbo, foveated renderēšana, slēptās zonas maska un vai atrasti OFXR Bridge / "
-"VectorXR. Pa labi atver grupu, pa kreisi aizver; atverot izvēlni, tā vienmēr ir aizvērta."
+"VR paātrinājumi: Turbo, foveated renderēšana, slēpto lēcu malu izlaišana un vai OFXR Bridge / "
+"VectorXR ir atrasti. Pa labi atver grupu, pa kreisi aizver; katru reizi, kad izvēlne tiek "
+"atvērta, tā ir aizvērta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Turbo: no ASW / Motion Smoothing / SSW / reprojection. VR only. On = the game stops waiting for "
-"the headset each frame: more fps only when the CPU is the limit (busy cities, traffic). Turn it "
-"off if the picture judders. From OpenXR Toolkit."
+"Turbo switches off the headset's frame smoothing (ASW / Motion Smoothing / SSW). VR only. On = "
+"the game stops waiting for the headset each frame: more fps only when the CPU is the limit (busy "
+"cities, traffic). Turn it off if the picture judders."
 msgstr ""
-"Turbo: bez ASW / Motion Smoothing / SSW / reprojekcijas. Tikai VR. Ieslēgts = spēle negaida VR "
-"brilles katrā kadrā: vairāk FPS tikai tad, kad ierobežo CPU (pārpildītas pilsētas, satiksme). "
-"Izslēdziet, ja attēls raustās. No OpenXR Toolkit."
+"Turbo izslēdz austiņu kadru izlīdzināšanu (ASW / Motion Smoothing / SSW). Tikai VR. Iesl. = spēle "
+"negaida austiņas katrā kadrā: vairāk fps tikai tad, kad ierobežo CPU (noslogotas pilsētas, "
+"satiksme). Izslēdziet, ja attēls raustās."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR "
-"only. The outer ring is shaded once per 2 x 2 pixels; fences, grass and leaves keep full detail. "
+"only. The outer ring gets one colour per 2 x 2 pixels; fences, grass and leaves keep full detail. "
 "Turn it off if the edge looks blocky."
 msgstr ""
 "Ass centrs, mazāk detaļu malā (tikai NVIDIA RTX). Ietaupa GPU laiku pie liela Scaling. Tikai VR. "
-"Ārējais gredzens tiek ēnots reizi uz 2 x 2 pikseļiem; žogi, zāle un lapas saglabā pilnu detaļu. "
-"Izslēdziet, ja mala izskatās kvadrātaina."
+"Ārējais gredzens saņem vienu krāsu uz 2 x 2 pikseļiem; žogi, zāle un lapas saglabā pilnu "
+"detalizāciju. Izslēdziet, ja mala izskatās kubiska."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How big the sharp centre of Foveated (VRS) is, 10 - 100 % in 5 % steps: bigger = more of the view "
-"sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
+"How big the sharp centre of Foveated rendering is, 10 - 100 % in 5 % steps: bigger = more of the "
+"view sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
 "(balanced) is the default; 90 = wide, 65 = narrow."
 msgstr ""
-"Foveated (VRS) asā centra izmērs, 10 - 100 % ar soli 5 %: lielāks = vairāk attēla ass, mazāk "
-"ietaupījuma; mazāks = vairāk ietaupījuma, zemākas detaļas sākas tuvāk vidum. 80 % (līdzsvarots) "
-"ir noklusējums; 90 = plats, 65 = šaurs."
+"Cik liels ir Foveated renderēšanas asais centrs, 10 - 100 % ar soli 5 %: lielāks = vairāk skata "
+"ass, mazāk ietaupījuma; mazāks = vairāk ietaupījuma, zemā detalizācija sākas tuvāk vidum. Pēc "
+"noklusējuma 80 % (līdzsvars); 90 = plašs, 65 = šaurs."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Which of the game's passes Foveated (VRS) acts on. scene = the 3D world only (default). scene + "
-"lighting = also the game's lighting pass, at the very edge only: more saving. Test it: look for "
-"blocky light or shadow edges at the side of your view."
+"What Foveated rendering makes coarser. scene = the 3D world only (default). scene + lighting = "
+"also the game's lighting, at the very edge only: more saving. Test it: look for blocky light or "
+"shadow edges at the side of your view."
 msgstr ""
-"Kurus spēles piegājienus ietekmē Foveated (VRS). aina = tikai 3D pasaule (noklusējums). aina + "
-"apgaismojums = arī apgaismojuma piegājiens, tikai pašā malā: vairāk ietaupījuma. Pārbaudiet: "
-"meklējiet kvadrātainas gaismas vai ēnu malas redzes sānos."
+"Ko Foveated renderēšana padara rupjāku. aina = tikai 3D pasaule (pēc noklusējuma). aina + "
+"apgaismojums = arī spēles apgaismojums, tikai pašā malā: lielāks ietaupījums. Pārbaudiet: "
+"meklējiet kubiskas gaismas vai ēnu malas skata sānos."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How coarse the outer ring of Foveated (VRS) is. Normal = 1 colour per 2 x 2 pixels (default). "
+"How coarse the outer ring of Foveated rendering is. Normal = 1 colour per 2 x 2 pixels (default). "
 "Strong = per 4 x 2, Max = per 4 x 4: more GPU saving, blockier edges. Best with eye tracking, "
 "where you never look at the outer ring."
 msgstr ""
-"Cik rupjš ir Foveated (VRS) ārējais gredzens. Parasts = 1 krāsa uz 2 x 2 pikseļiem (noklusējums). "
-"Spēcīgs = uz 4 x 2, Maks. = uz 4 x 4: vairāk GPU ietaupījuma, kvadrātaināki stūri. Vislabāk ar "
-"acu izsekošanu, kad uz ārējo gredzenu neskatāties."
+"Cik rupjš ir Foveated renderēšanas ārējais gredzens. Parasts = 1 krāsa uz 2 x 2 pikseļiem (pēc "
+"noklusējuma). Spēcīgs = uz 4 x 2, Maks. = uz 4 x 4: lielāks GPU ietaupījums, kubiskākas malas. "
+"Vislabāk ar acu izsekošanu, kur uz ārējo gredzenu nekad neskatāties."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Experimental. The sharp centre of Foveated (VRS) follows your eyes on a headset with eye tracking "
-"(OpenXR eye gaze, for example Varjo); without one it stays at the lens centre. Needs Foveated "
-"(VRS) on at the game's start, else a restart. Almost no cost."
+"Experimental. The sharp centre of Foveated rendering follows your eyes on a headset with eye "
+"tracking (for example Varjo); without it the centre stays in the middle of the lens. Needs "
+"Foveated rendering on at the game's start, else a restart. Almost no cost."
 msgstr ""
-"Eksperimentāls. Foveated (VRS) asais centrs seko acīm VR brillēs ar acu izsekošanu (OpenXR eye "
-"gaze, piem. Varjo); bez tās paliek lēcas centrā. Vajag, lai Foveated (VRS) būtu ieslēgts spēles "
-"sākumā, citādi restartējiet. Gandrīz bez izmaksām."
+"Eksperimentāli. Foveated renderēšanas asais centrs seko jūsu acīm austiņās ar acu izsekošanu "
+"(piemēram, Varjo); bez tās centrs paliek lēcas vidū. Foveated renderēšanai jābūt ieslēgtai spēles "
+"startā, citādi vajag restartu. Gandrīz bez izmaksām."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -524,13 +560,13 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see "
-"what a setting gains. Its GPU cost is measured: per frame, every picture it is drawn into; none "
-"when off. Save keeps it for the next start."
+"A small live fps and frame-time box, also while this menu is closed (flat and VR): fps, ms, "
+"numbers only, each with or without a graph of recent frame times (spikes show red), or the graph "
+"alone. Its GPU cost is measured. Save keeps it."
 msgstr ""
-"Mazs tiešais fps un kadra laika lodziņš, arī kad šī izvēlne ir aizvērta (plakanais un VR). "
-"Izmantojiet, lai redzētu, ko iestatījums dod. Tā GPU cena tiek mērīta: uz kadru, katrā attēlā, "
-"kurā tas zīmēts; nekas, kad izslēgts. Save to saglabā nākamajai palaišanai."
+"Neliela dzīva fps un kadra laika kaste, arī kad šī izvēlne ir aizvērta (plakanais režīms un VR): "
+"fps, ms, tikai skaitļi, katrs ar nesen kadru laiku grafiku (lēcieni ir sarkani) vai bez tā, vai "
+"tikai grafiks. Tās GPU cena ir izmērīta. Saglabāt to paturēs."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -600,13 +636,24 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
-"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
-"Per-part motion vectors). No cost."
+"How far back the fps graph shows: 2 - 60 s. One bar per slice of time = its slowest frame, so you "
+"see spikes. Green = on time, yellow = a bit slow, red = a hitch; the line = the headset rate / "
+"FPS cap / your usual. Shown when FPS counter has a graph."
 msgstr ""
-"Tikai VR. Seko galvai = kustas līdzi VR brillēm. Fiksēts telpā = viena vieta ap sēdekli, ignorē "
-"kabīnes šūpošanos. Pie transportlīdz. = pielipis pie kabīnes, šūpojas līdzi (vajag DLAA + Daļu "
-"kustības vektorus). Bez izmaksām."
+"Cik tālu atpakaļ rāda fps grafiks: 2 - 60 s. Viena kolonna uz laika posmu = tā lēnākais kadrs, "
+"tāpēc redzami lēcieni. Zaļš = laikā, dzeltens = mazliet lēni, sarkans = aizķeršanās; līnija = "
+"austiņu frekvence / FPS robeža / jūsu ierastais. Redzams, kad FPS skaitītājam ir grafiks."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
+"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Track "
+"moving parts). No cost."
+msgstr ""
+"Tikai VR. Seko galvai = kustas līdz ar austiņām. Fiksēts telpā = viena vieta ap jūsu sēdekli, "
+"nelīgojas līdz ar kabīni. Pie transportlīdz. = pielipināts pie kabīnes, līgojas līdz ar to (vajag "
+"DLAA + kustīgo daļu izsekošanu). Bez izmaksām."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -741,12 +788,12 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Switches for A/B checks: DLAA off, the game's own TAA mixed in or side by side, the thin-wire "
-"switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
-"group, Left closes it."
+"Switches for comparing: DLAA off, the game's own TAA mixed in or side by side, the wire fixes, "
+"running DLAA earlier. Nothing here is needed for normal driving. Right opens the group, Left "
+"closes it."
 msgstr ""
-"Slēdži A/B pārbaudēm: DLAA izslēgts, pašas spēles TAA piejaukts vai blakus, plānu vadu slēdži, "
-"DLAA pirms tonemap. Parastai braukšanai šeit nekas nav vajadzīgs. Pa labi atver grupu, pa kreisi "
+"Slēdži salīdzināšanai: DLAA izslēgts, spēles paša TAA sajaukts vai blakus, vadu labojumi, DLAA "
+"palaišana agrāk. Parastai braukšanai nekas no tā nav vajadzīgs. Pa labi atver grupu, pa kreisi "
 "aizver."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -761,64 +808,55 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
-"right, to compare."
+"on = the mod on the left, the game's own TAA on the right, to compare (Split line position, "
+"Split: left | right). Replaces Mix while on. With the game's console on, the mod switches the "
+"game's Anti-aliasing for you."
 msgstr ""
-"Tikai tad, ja spēles Anti-aliasing ir TAA. izslēgts = tikai modifikācija (iestatiet spēles AA uz "
-"Izslēgts). maisījums = TAA un DLAA / DLSS vienā kadrā, sajaukti. sadalīts = pa kreisi "
-"modifikācija, pa labi TAA, salīdzināšanai."
+"iesl. = modifikācija pa kreisi, pašas spēles TAA pa labi, salīdzināšanai (Dalījuma līnijas vieta, "
+"Dalījums: kreisā | labā). Kamēr ieslēgts, aizstāj Maisījumu. Ja spēles konsole ir ieslēgta, "
+"modifikācija jūsu vietā pārslēdz spēles Anti-aliasing."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
+"Where the split line is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS on the left "
+"of it, the game's TAA on the right. Used only while Split with game TAA is on."
 msgstr ""
-"Cik liela daļa no maisījuma ir spēles TAA, 0 - 100 % ar soli 10 %: vairāk = mierīgāk un mīkstāk "
-"(TAA), mazāk = asāk (DLAA / DLSS). Izmanto, ja Spēles TAA ir maisījums, vai sadalīts ar maisījuma "
-"pusi. Bez papildu izmaksām."
+"Kur atrodas dalījuma līnija, 0 - 100 % no platuma ar soli 5 %: pa kreisi no tās modifikācijas "
+"DLAA / DLSS, pa labi spēles TAA. Tiek izmantots tikai tad, kad Dalījums ar spēles TAA ir ieslēgts."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
-"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+"What the split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix | TAA "
+"or DLAA | Mix (Mix = the two blended at Mix amount). DLSS instead of DLAA when upscaling. Used "
+"only while Split with game TAA is on."
 msgstr ""
-"Kur ir Spēles TAA sadalījuma līnija, 0 - 100 % no platuma ar soli 5 %: pa kreisi no tās "
-"modifikācijas DLAA / DLSS, pa labi spēles TAA. Izmanto tikai tad, ja Spēles TAA ir sadalīts."
+"Ko dalījums rāda abās pusēs: DLAA | TAA (modifikācija pa kreisi, spēles TAA pa labi), maisījums | "
+"TAA vai DLAA | maisījums (maisījums = abi sajaukti pēc Maisījuma daudzuma). Palielinot attēlu, "
+"DLSS DLAA vietā. Tiek izmantots tikai tad, kad Dalījums ar spēles TAA ir ieslēgts."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
-"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
-"upscaling. Used only when Game TAA is split."
+"Thin wires move correctly while you drive: their movement is spread over the whole thin line. on "
+"= default. off = only to compare; near wires flicker more. The picture is soft for a moment when "
+"you switch."
 msgstr ""
-"Ko Spēles TAA sadalīts rāda abās pusēs: DLAA | TAA (pa kreisi modifikācija, pa labi spēles TAA), "
-"maisījums | TAA vai DLAA | maisījums (maisījums = abi sajaukti pēc Spēles TAA daļas). DLSS DLAA "
-"vietā palielinot. Izmanto tikai tad, ja Spēles TAA ir sadalīts."
+"Plānie vadi braukšanas laikā kustas pareizi: to kustība tiek izkliedēta pa visu plāno līniju. "
+"iesl. = pēc noklusējuma. izslēgts = tikai salīdzināšanai; tuvi vadi mirgo vairāk. Pārslēdzot "
+"attēls uz mirkli kļūst mīksts."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
-"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
-"soft for a moment when it changes."
+"Thin wires count as in front on every pixel they touch, even where they cover only a sliver of "
+"it. on = default. on (no A2C) = also for see-through edges such as leaves. off = only to compare; "
+"near wires flicker more."
 msgstr ""
-"Plānu vadu kustība saglabājas braucot: DLAA izplata kustības datus uz plānām līnijām (DLSS motion "
-"dilation). ieslēgts = noklusējums. izslēgts = tikai salīdzināšanai; tuvie vadi vairāk mirgo. "
-"Pārslēdzot attēls uz mirkli mīksts."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
-"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
-msgstr ""
-"Plāni vadi saņem dziļumu katram skartajam pikselim, ne tikai tur, kur tie sedz pikseļa centru. "
-"ieslēgts = noklusējums. ies. (no A2C) = arī caurspīdīgām malām. izslēgts = tikai salīdzināšanai; "
-"tuvie vadi vairāk mirgo."
+"Plānie vadi tiek skaitīti kā priekšplānā uz katra pikseļa, ko tie skar, pat ja tie aizsedz tikai "
+"mazu tā daļu. iesl. = pēc noklusējuma. iesl. (bez A2C) = arī caurspīdīgām malām, piemēram, lapām. "
+"izslēgts = tikai salīdzināšanai; tuvi vadi mirgo vairāk."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -833,24 +871,86 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
-"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
-"~60 frames to switch."
+"Flat only: DLAA runs before the game adds its glow and colour look, so lane paint, wires and "
+"rails shimmer less. Change it only to compare. Not used with DLSS upscaling or Windows HDR. Same "
+"cost either way; takes about a second to switch."
 msgstr ""
-"Tikai plakans: DLAA pirms spēles bloom / tonemap, tāpēc ceļa marķējums, vadi un sliedes mirgo "
-"mazāk. Mainiet tikai salīdzināšanai. Netiek lietots ar DLSS palielināšanu vai Windows HDR. Tā "
-"pati cena; pārslēgšana aizņem ~60 kadrus."
+"Tikai plakanais režīms: DLAA darbojas, pirms spēle pievieno mirdzumu un krāsu izskatu, tāpēc ceļa "
+"marķējums, vadi un sliedes mirgo mazāk. Mainiet tikai salīdzināšanai. Netiek izmantots ar DLSS "
+"palielināšanu un Windows HDR. Tāda pati cena; pārslēgšana aizņem apmēram sekundi."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Bug report: press the capture key twice (or Capture now) where something looks wrong; the mod "
+"writes one zip you attach to a GitHub issue. Right opens the group, Left closes it."
+msgstr ""
+"Kļūdas ziņojums: divreiz nospiediet tveršanas taustiņu (vai Tvert tagad) tur, kur kaut kas "
+"izskatās nepareizi; modifikācija ieraksta vienu zip, ko pievienojat GitHub issue. Pa labi atver "
+"grupu, pa kreisi aizver."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"One switch for the most complete report: log detail debug, rewind 2 s, capture Full. Off puts the "
+"rows back as they were. Only this switch is saved; the forced values are never written to "
+"dlaa.ini."
+msgstr ""
+"Viens slēdzis pilnīgākajam ziņojumam: žurnāla detalizācija debug, attīšana 2 s, tveršana Pilna. "
+"Izslēgts atgriež rindas, kā bija. Tiek saglabāts tikai šis slēdzis; piespiestās vērtības nekad "
+"netiek rakstītas dlaa.ini."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + "
-"problems worked around; info = + start-up and changes; debug = + statistics, and debug also runs "
-"the GPU timers and the CPU profiler."
+"problems worked around; info = + start-up and changes; debug = + statistics and timing "
+"measurements (a little slower)."
 msgstr ""
-"Kas tiek rakstīts dlaa_inject.log: izslēgts = nekas; kļūdas = tikai kļūdas (noklusējums); "
-"brīdinājumi = + apieti sarežģījumi; info = + palaišana un izmaiņas; atkļūdošana = + statistika, "
-"un atkļūdošana arī palaiž GPU taimerus un CPU profilētāju."
+"Kas nonāk dlaa_inject.log: izslēgts = nekas; kļūdas = tikai kļūmes (pēc noklusējuma); brīdinājumi "
+"= + apietās problēmas; info = + starts un izmaiņas; atkļūdošana = + statistika un laika mērījumi "
+"(mazliet lēnāk)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Keeps the last 0.5 - 3 s of frames on the graphics card all the time, so the report shows the "
+"moment BEFORE the key (+ what DLSS got for the last frames). Costs graphics memory (the MB in the "
+"cost column) and a picture copy per frame. off = none."
+msgstr ""
+"Visu laiku notur videokartē pēdējās 0,5 - 3 s kadru, lai ziņojums rādītu brīdi PIRMS taustiņa (+ "
+"ko DLSS saņēma pēdējos kadros). Maksā video atmiņu (MB izmaksu kolonnā) un attēla kopiju katrā "
+"kadrā. izslēgts = nav."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Quick = system info, logs, settings, your picture and DLAA off for a few frames (about 1 s). Full "
+"= + what DLSS got per frame (colour, motion, depth) and A/B sets: motion view, motion off, jitter "
+"only (about 2 - 4 s)."
+msgstr ""
+"Ātri = sistēmas info, žurnāli, iestatījumi, jūsu attēls un DLAA izslēgts dažus kadrus (apmēram 1 "
+"s). Pilni = + ko DLSS saņēma katrā kadrā (krāsa, kustība, dziļums) un A/B komplekti: kustības "
+"skats, kustība izslēgta, tikai džiters (apmēram 2 - 4 s)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The capture key. Press it TWICE within 1 s while driving where it goes wrong (the first press "
+"only arms it: one short beep). Right opens the Hotkeys page on its line to change it."
+msgstr ""
+"Tveršanas taustiņš. Nospiediet to DIVREIZ 1 s laikā braukšanas laikā tur, kur kaut kas noiet "
+"greizi (pirmais nospiedums to tikai sagatavo: viena īsa skaņa). Pa labi atver karsto taustiņu "
+"lapu uz tā rindas, lai to mainītu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How many captures stay in the dlaa_selftest folder next to the DLL: older ones (folder + zip) are "
+"deleted when a new one is written. all = never delete."
+msgstr ""
+"Cik tveršanu paliek mapē dlaa_selftest blakus DLL: vecākās (mape + zip) tiek dzēstas, kad raksta "
+"jaunu. visas = nekad nedzēš."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -889,13 +989,28 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Puts every setting in this menu back to how the mod ships (model, sharpen, texture sharpness, "
-"DLAA area, motion, mirrors, profile, panel, fps box, turbo, foveated, frame rate, logging), live "
-"and in dlaa.ini, keeping your hotkeys and every other line."
+"DLAA area, motion, mirrors, preset, panel, fps box, turbo, foveated, frame rate, CPU, log "
+"detail), live and in dlaa.ini, keeping your hotkeys and every other line."
 msgstr ""
-"Atiestata visus šīs izvēlnes iestatījumus uz modifikācijas piegādes stāvokli (modelis, asināšana, "
-"tekstūru asums, DLAA zona, kustība, spoguļi, profils, panelis, fps lodziņš, turbo, foveated, "
-"kadru ātrums, žurnāls), tieši un dlaa.ini, saglabājot jūsu karstos taustiņus un visas pārējās "
-"rindas."
+"Atgriež katru šīs izvēlnes iestatījumu tādu, kādu modifikācija tiek piegādāta (modelis, "
+"asināšana, tekstūru asums, DLAA zona, kustība, spoguļi, sagatave, panelis, fps kaste, turbo, "
+"foveated, kadru ātrums, CPU, žurnāla detalizācija), uzreiz un dlaa.ini, saglabājot jūsu karstos "
+"taustiņus un visas citas rindas."
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Off"
+msgstr "Izslēgts"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph only"
+msgstr "tikai grafiks"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph"
+msgstr "grafiks"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1171,8 +1286,8 @@ msgstr "Tagad maksā %ls uz kadru; mazāk spoguļu maksā mazāk."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Greyed: Mirror DLAA is off."
-msgstr "Pelēks: Spoguļu DLAA ir izslēgts."
+msgid "Greyed: Smooth mirrors is off."
+msgstr "Pelēks: gludie spoguļi ir izslēgti."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1185,6 +1300,24 @@ msgstr "Vienmēr ieslēgts: dlaa.ini mirror mode 3 jau ir pārmaiņus."
 #, c-format
 msgid "The mirrors cost %ls per frame now."
 msgstr "Spoguļi tagad maksā %ls uz kadru."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed: only for AMD X3D CPUs with two core groups (7950X3D, 9950X3D)."
+msgstr "Pelēks: tikai AMD X3D procesoriem ar divām kodolu grupām (7950X3D, 9950X3D)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On now: the game runs only on the cores with the big cache."
+msgstr "Tagad iesl.: spēle darbojas tikai uz kodoliem ar lielo kešatmiņu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On, but not applied: the game's cores were already limited (see the log)."
+msgstr "Iesl., bet nav pielietots: spēles kodoli jau bija ierobežoti (skat. žurnālu)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1214,7 +1347,9 @@ msgstr ""
 msgid ""
 "Waiting: click the game window on the desktop. The mod types into the game's console only while "
 "the game window has the focus."
-msgstr "Gaida: noklikšķiniet uz spēles loga darbvirsmā. Mods raksta spēles konsolē tikai tad, kad spēles logam ir fokuss."
+msgstr ""
+"Gaida: noklikšķiniet uz spēles loga darbvirsmā. Mods raksta spēles konsolē tikai tad, kad spēles "
+"logam ir fokuss."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1231,17 +1366,24 @@ msgstr "Spēles žurnāls neapstiprināja pēdējo izmaiņu: skatiet moda žurn�
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid "Mix and split need the game's TAA: set Anti-aliasing to TAA in the game's graphics settings."
+msgstr ""
+"Maisījumam un sadalīšanai vajag spēles TAA: spēles grafikas iestatījumos iestatiet Anti-aliasing "
+"uz TAA."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "The game's TAA is not running now: the mod runs alone."
 msgstr "Spēles TAA tagad nedarbojas: modifikācija darbojas viena."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
+msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or set Mode to Mix."
 msgstr ""
-"Spēles TAA tagad darbojas: iestatiet spēles Anti-aliasing uz Izslēgts vai izvēlieties maisījums "
-"vai sadalīts."
+"Spēles TAA tagad darbojas: iestatiet spēles Anti-aliasing uz Izslēgts vai iestatiet Režīmu uz "
+"Maisījums."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1299,6 +1441,67 @@ msgstr "Atgriezts pie spēles TAA: DLAA šajā kadrā nedarbojās (skatiet žurn
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
+msgid ""
+"Or turn on the game console (g_developer and g_console 1 in config.cfg): then the mod switches it "
+"for you."
+msgstr ""
+"Vai ieslēdziet spēles konsoli (g_developer un g_console 1 failā config.cfg): tad modifikācija to "
+"pārslēgs jūsu vietā."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn on the game console to let the mod switch the game's Anti-aliasing."
+msgstr "Ieslēdziet spēles konsoli, lai modifikācija varētu pārslēgt spēles izlīdzināšanu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "TAA"
+msgstr "TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "unknown"
+msgstr "nezināms"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "other"
+msgstr "cits"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "waiting: click the game window"
+msgstr "gaida: noklikšķiniet uz spēles loga"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switching..."
+msgstr "pārslēdz..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch confirmed"
+msgstr "apstiprināts"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch NOT confirmed (see the log)"
+msgstr "pārslēgšana NAV apstiprināta (skat. žurnālu)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls, %ls."
+msgstr "Spēles AA: %ls, %ls."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls."
+msgstr "Spēles AA: %ls."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
 #, c-format
 msgid ""
 "Switched off by the mod: it cost more than %.1f ms per eye (VR budget). Press its key to try "
@@ -1318,6 +1521,45 @@ msgstr "Tagad maksā %ls uz kadru; izslēgts to ietaupa."
 #, c-format
 msgid "Costs %ls ms GPU per frame now; most of it at night."
 msgstr "Tagad maksā %ls ms GPU uz kadru; lielākoties naktī."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"The last one: %d zips of at most 24 MB, %d MB in all (folder %.0f MB). Attach the _main zip; the "
+"others only if asked."
+msgstr "Pēdējais: %d zip faili līdz 24 MB, kopā %d MB (mape %.0f MB). Pievienojiet _main zip; pārējos tikai pēc pieprasījuma."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Holds %.0f MB of graphics memory now."
+msgstr "Tagad aizņem %.0f MB video atmiņas."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"%ls about %.0f MB graphics memory for the rewind; a capture takes about %.1f s and writes about "
+"%.0f MB."
+msgstr ""
+"%ls apmēram %.0f MB video atmiņas attīšanai; tveršana aizņem apmēram %.1f s un ieraksta apmēram "
+"%.0f MB."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "On, it costs"
+msgstr "Ieslēgts maksā"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Costs now:"
+msgstr "Tagad maksā:"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn off Send everything to change this."
+msgstr "Izslēdziet „Sūtīt visu“, lai to mainītu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1381,8 +1623,8 @@ msgstr "VR pelēks: izmantojiet VR FPS robežu."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Limited by the NVIDIA driver now (Reflex is on)."
-msgstr "Tagad ierobežo NVIDIA draiveris (Reflex ir ieslēgts)."
+msgid "Limited by the NVIDIA driver now (Low delay is on)."
+msgstr "Tagad ierobežo NVIDIA draiveris (zema aizture ir ieslēgta)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1435,8 +1677,8 @@ msgstr "Ietaupa laiku pašas spēles GPU rādījumā, nevis modifikācijas."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Foveated (VRS) is off: switch it on first."
-msgstr "Foveated (VRS) ir izslēgts: vispirms ieslēdziet to."
+msgid "Foveated rendering is off: switch it on first."
+msgstr "Foveated renderēšana ir izslēgta: vispirms ieslēdziet to."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1454,11 +1696,11 @@ msgstr "Fake gaze (vrs_eye_fake = 1): asā zona lēni riņķo, tests."
 #: src/inject.cpp
 #, c-format
 msgid ""
-"Foveated (VRS) was off at the game's start: save (Shift+F12) and restart the game to ask the "
+"Foveated rendering was off at the game's start: save (Shift+F12) and restart the game to ask the "
 "headset for eye gaze."
 msgstr ""
-"Foveated (VRS) spēles sākumā bija izslēgts: saglabājiet (Shift+F12) un restartējiet spēli, lai "
-"pieprasītu VR briļļu skatienu."
+"Foveated renderēšana bija izslēgta spēles startā: saglabājiet (Shift+F12) un restartējiet spēli, "
+"lai pieprasītu skatienu no austiņām."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1908,7 +2150,7 @@ msgstr "VR iestatījumi"
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Flat settings"
-msgstr "Plakanā režīma iestatījumi"
+msgstr "Plakanā režīma iest."
 
 #. Heading of a column (short)
 #: src/inject.cpp
@@ -1959,15 +2201,41 @@ msgstr "aizvērta (%d)"
 msgid "Mode"
 msgstr "Režīms"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLSS)"
+msgstr "Maisījums (TAA + DLSS)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLAA)"
+msgstr "Maisījums (TAA + DLAA)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLSS"
 msgstr "DLSS"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLAA"
 msgstr "DLAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Mix amount"
+msgstr "Maisījuma daudzums"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d %% TAA"
+msgstr "%d %% TAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Quality preset"
+msgstr "Kvalitātes sagatave"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -1993,8 +2261,8 @@ msgstr "%.1f (izsl.)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Sharpen width"
-msgstr "Asināšanas platums"
+msgid "Sharpness size"
+msgstr "Asināšanas izmērs"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2015,8 +2283,8 @@ msgstr "%.2f (izsl.)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Cut-out texture sharpness"
-msgstr "Izgriezumu tekstūru asums"
+msgid "Leaves and fences sharpness"
+msgstr "Lapu un žogu asums"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2045,6 +2313,11 @@ msgstr "tikai VR"
 msgid "100 %% (flat)"
 msgstr "100 %% (plakans)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Track moving parts"
+msgstr "Kustīgo daļu izsekošana"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "old stencil ids"
@@ -2052,13 +2325,13 @@ msgstr "veci stencil id"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirror DLAA"
-msgstr "Spoguļu DLAA"
+msgid "Smooth mirrors"
+msgstr "Gludie spoguļi"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirrors in turns"
-msgstr "Spoguļi pārmaiņus"
+msgid "Mirrors take turns (faster)"
+msgstr "Spoguļi pēc kārtas (ātrāk)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2067,13 +2340,23 @@ msgstr "iesl. (mode 3)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Thin-wire motion"
-msgstr "Plānu vadu kustība"
+msgid "Wire fix: motion"
+msgstr "Vadu labojums: kustība"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Wire fix: depth"
+msgstr "Vadu labojums: dziļums"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no A2C)"
 msgstr "iesl. (no A2C)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Thicker wires (test)"
+msgstr "Biezāki vadi (tests)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2082,13 +2365,23 @@ msgstr "iesl. (eksperimentāls)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "DLAA before tonemap"
-msgstr "DLAA pirms tonemap"
+msgid "Run DLAA earlier (test, flat)"
+msgstr "DLAA agrāk (tests, plak.)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Run DLAA earlier (test)"
+msgstr "DLAA agrāk (tests)"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "flat only"
 msgstr "tikai plakans"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Glass and fence fix"
+msgstr "Stiklu un žogu labojums"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2097,8 +2390,8 @@ msgstr "izsl. (VR budžets)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Light glow ghosting fix"
-msgstr "Mirdzuma rēgu labojums"
+msgid "Light trail fix"
+msgstr "Gaismas pēdu labojums"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2107,33 +2400,18 @@ msgstr "DLAA izsl. (nesaglabā)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Game TAA"
-msgstr "Spēles TAA"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid "mix"
-msgstr "maisījums"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid "split"
-msgstr "sadalīts"
+msgid "Split with game TAA"
+msgstr "Dalījums ar spēles TAA"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Game TAA share"
-msgstr "Spēles TAA daļa"
+msgid "Split line position"
+msgstr "Dalījuma līnijas vieta"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Split position"
-msgstr "Sadalījuma vieta"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "Split compares"
-msgstr "Sadalījums salīdzina"
+msgid "Split: left | right"
+msgstr "Dalījums: kreisā | labā"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2250,8 +2528,8 @@ msgstr "iesl. (apturēts)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated (VRS)"
-msgstr "Foveated (VRS)"
+msgid "Foveated rendering"
+msgstr "Foveated renderēšana"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2270,8 +2548,8 @@ msgstr "Foveated izmērs"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated passes"
-msgstr "Foveated piegājieni"
+msgid "Foveated: lighting too"
+msgstr "Foveated: arī apgaismojums"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2330,13 +2608,13 @@ msgstr "iesl. (gaida skatienu)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Hidden area mask (VR)"
-msgstr "Slēptās zonas maska (VR)"
+msgid "Skip hidden edges (VR)"
+msgstr "Slēpto malu izlaišana (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Hidden area mask"
-msgstr "Slēptās zonas maska"
+msgid "Skip hidden edges"
+msgstr "Slēpto malu izlaišana"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2351,13 +2629,13 @@ msgstr "iesl. (FPS robeža uzvar)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Reflex (flat)"
-msgstr "Reflex (plakans)"
+msgid "Low delay (Reflex, flat)"
+msgstr "Zema aizture (Reflex, plak.)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Reflex"
-msgstr "Reflex"
+msgid "Low delay (Reflex)"
+msgstr "Zema aizture (Reflex)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2413,8 +2691,108 @@ msgstr "jaukts (dlaa.ini)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Logging"
-msgstr "Žurnāls"
+msgid "AMD cache cores (X3D)"
+msgstr "AMD kešatm. kodoli (X3D)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (auto)"
+msgstr "iesl. (auto)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Send everything"
+msgstr "Sūtīt visu"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Log detail"
+msgstr "Žurnāla detalizācija"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Rewind before key"
+msgstr "Attīšana pirms taustiņa"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d frames (dlaa.ini)"
+msgstr "%d kadri (dlaa.ini)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture includes"
+msgstr "Ko ietver tveršana"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Full"
+msgstr "Pilni"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Quick"
+msgstr "Ātri"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "change"
+msgstr "mainīt"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture key"
+msgstr "Tveršanas taustiņš"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%hs (press twice)"
+msgstr "%hs (divreiz)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Keep captures"
+msgstr "Paturēt tveršanas"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "all"
+msgstr "visas"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture now"
+msgstr "Tvert tagad"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "capturing %d / %d"
+msgstr "tver %d / %d"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "writing (%d files)"
+msgstr "raksta (%d faili)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "done: %d parts, %d MB"
+msgstr "gatavs: %d d., %d MB"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "failed (see the log)"
+msgstr "neizdevās (skat. žurn.)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "ready"
+msgstr "gatavs"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2509,11 +2887,6 @@ msgstr "Panelis pret jums"
 #: src/inject.cpp
 msgid "Menu keys"
 msgstr "Izvēlnes taustiņi"
-
-#. Value column (about 20 Latin characters)
-#: src/inject.cpp
-msgid "Off"
-msgstr "Izslēgts"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2612,6 +2985,16 @@ msgstr "FPS necaurspīdīgums"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS graph length"
+msgstr "FPS grafika garums"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "with a graph only"
+msgstr "tikai ar grafiku"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "FPS distance (VR)"
 msgstr "FPS attālums (VR)"
 
@@ -2663,6 +3046,20 @@ msgstr "Turiet %hs %hs s, lai atiestatītu. %ls"
 #: src/inject.cpp
 #, c-format
 msgid ""
+"%hs = capture now (the menu closes first). The zip (dlaa_selftest folder next to the DLL) holds "
+"system info, the mod's and the game's log, dlaa.ini, your picture and DLAA off; Full adds what "
+"DLSS got and the A/B sets; rewind adds the moment before. Your user name and home folder are "
+"removed. %ls"
+msgstr ""
+"%hs = tvert tagad (izvēlne vispirms aizveras). Zip (mape dlaa_selftest blakus DLL) satur sistēmas "
+"info, modifikācijas un spēles žurnālu, dlaa.ini, jūsu attēlu un DLAA izslēgtu; Pilni pievieno to, "
+"ko DLSS saņēma, un A/B komplektus; attīšana pievieno brīdi pirms tam. Jūsu lietotājvārds un mājas "
+"mape tiek noņemti. %ls"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
 "The 5 keys that open and drive this menu: %hs opens / closes it (the value), %hs / %hs / %hs / "
 "%hs move (Hotkey column). While the menu is open only these 5 are kept from the game. %hs: change "
 "them on the Hotkeys page."
@@ -2708,9 +3105,6 @@ msgstr "info"
 msgid "debug"
 msgstr "atkļūdošana"
 
-#~ msgid "Panel settings"
-#~ msgstr "Panelis"
-
-#~ msgid "FPS counter settings"
-#~ msgstr "FPS skaitītājs"
+#~ msgid "The last one: %d zip parts of at most 24 MB, %d MB in all (folder %.0f MB): attach them all."
+#~ msgstr "Pēdējais: %d zip daļas līdz 24 MB, kopā %d MB (mape %.0f MB): pievienojiet visas."
 

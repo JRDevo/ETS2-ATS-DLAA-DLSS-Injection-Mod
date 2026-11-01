@@ -168,45 +168,61 @@ msgstr "მენიუს პანელი"
 msgid "Compare and test"
 msgstr "შედარება და ტესტი"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Bug report"
+msgstr "შეცდომის ანგარიში"
+
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's "
-"Scaling is below 100 %. off = the game's own picture: use it to compare. Saved at once."
+"Scaling is below 100 %. Mix = the game's own TAA blended with DLAA / DLSS: calmer, a bit softer. "
+"off = the game's own picture. Saved at once."
 msgstr ""
-"DLAA = სუფთა კიდეები თამაშის რენდერის ზომაზე. DLSS = იგივე, და ზრდის სურათს, როცა თამაშის Scaling "
-"100 %-ზე ნაკლებია. გამორთ. = თამაშის საკუთარი სურათი, შესადარებლად. ინახება მაშინვე."
+"DLAA = სუფთა კიდეები თამაშის რენდერის ზომაზე. DLSS = იგივე, და ზრდის სურათს, როცა თამაშის "
+"მასშტაბი 100 %-ზე ნაკლებია. შერევა = თამაშის TAA, შერეული DLAA / DLSS-თან: უფრო მშვიდი, ოდნავ "
+"რბილი. გამორთ. = თამაშის სურათი. ინახება მაშინვე."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Presets for your GPU. high = everything on (model 1). medium = model 2, half-size see-through "
-"depth, flat mirrors without part motion, lighter part-motion search. low = also no mirror DLAA, "
-"no see-through depth, VR area 60 %. Never changes a setting you set yourself."
+"How much of the Mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer, less = "
+"sharper. Shown while Mode is Mix, or a split has a Mix side. No extra cost."
 msgstr ""
-"პრესეტები GPU-სთვის. მაღალი = ყველაფერი ჩართ. (მოდელი 1). საშუალო = მოდელი 2, გამჭვირვალობის "
-"სიღრმე ნახევარი ზომით, ბრტყელი სარკეები მოძრაობის გარეშე, მსუბუქი ძიება. დაბალი = სარკეების DLAA "
-"და გამჭვირვ. სიღრმე გამორთ., VR არე 60 %. თქვენს პარამეტრს არ ცვლის."
+"შერევაში რამდენია TAA, 0 - 100 % 10 %-ით: მეტი = მშვიდი, რბილი, ნაკლები = მკვეთრი. ჩანს, როცა "
+"რეჟიმი შერევაა ან გაყოფის მხარე შერევაა. დამატებითი ხარჯი არ არის."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, least ghosting "
+"Presets for your graphics card. high = everything on (model 1). medium = model 2, a lighter Glass "
+"and fence fix, mirrors without Track moving parts. low = also no Smooth mirrors, no Glass and "
+"fence fix, VR area 60 %. Never changes a setting you set yourself."
+msgstr ""
+"პრესეტები ვიდეოქარდისთვის. მაღალი = ყველაფერი ჩართ. (მოდელი 1). საშუალო = მოდელი 2, მსუბუქი "
+"მინა-ღობის გასწორება, სარკეები ნაწილთა თვალთვალის გარეშე. დაბალი = ასევე რბილი სარკეების და "
+"მინა-ღობის გარეშე, VR არე 60 %. შენს პარამეტრს არ ცვლის."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, fewest trails "
 "behind traffic: start here. 3 (F) = calmest on fences and wires, can smear moving detail, same "
 "cost as 2. 4 (M) = heaviest (about 5x), flat tests only."
 msgstr ""
-"1 (K) = ყველაზე დეტალური, მკვეთრი, GPU ~1,6x ვიდრე 2. 2 (E) = დაბალანსებული, ნაკლები აჩრდილი "
-"ტრაფიკის უკან: დაიწყეთ აქედან. 3 (F) = მშვიდი ღობეებზე, სადენებზე, დეტალი შეიძლება დაიმღვრეს, "
-"ფასი = 2. 4 (M) = ყველაზე მძიმე (~5x), მხოლოდ ბრტყ. ტესტი."
+"1 (K) = მეტი დეტალი, მკვეთრი ტექსტი, GPU დაახლ. 1,6x ვიდრე 2. 2 (E) = დაბალანსებული, ტრაფიკის "
+"უკან ნაკლები კვალი: დაიწყე აქედან. 3 (F) = მშვიდი ღობეებზე, შეიძლება გააბუნდოვანოს, ღირებულება = "
+"2. 4 (M) = ყველაზე მძიმე (5x), მხოლოდ ბრტყელი ტესტი."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Picture quality: sharpening, texture sharpness, the DLAA area and the see-through depth. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
+"Picture quality: sharpening, texture sharpness, the Glass and fence fix, the Light trail fix and "
+"the DLAA area. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"სურათის ხარისხი: სიმკვეთრე, ტექსტურის სიმკვეთრე, DLAA არე და გამჭვირვალობის სიღრმე. მარჯვენა "
-"ხსნის ჯგუფს, მარცხენა კეტავს; მენიუს ყოველ გახსნაზე დახურულია."
+"სურათის ხარისხი: სიმკვეთრე, ტექსტურის სიმკვეთრე, მინისა და ღობის გასწორება, სინათლის კვალის "
+"გასწორება, DLAA არე. მარჯვნივ ხსნის ჯგუფს, მარცხნივ ხურავს; მენიუს ყოველ გახსნაზე დახურულია."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -232,42 +248,41 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Sharper texture text (road signs, dashboard, GPS). 0 = off; more negative = sharper but more "
-"shimmer on fences; try -0.5 to -1 if text is blurry. No GPU time, only a little memory bandwidth."
+"shimmer on fences; try -0.5 to -1 if text is blurry. Almost no cost."
 msgstr ""
-"უფრო მკვეთრი ტექსტურის ტექსტი (ნიშნები, ტაბლო, GPS). 0 = გამორთ.; უფრო უარყოფითი = მკვეთრი, "
-"მაგრამ ღობეები ციმციმებს; სცადეთ -0,5 – -1. GPU დრო არ სჭირდება, მხოლოდ ცოტა მეხსიერების "
-"გამტარობა."
+"მკვეთრი ტექსტი ტექსტურებზე (ნიშნები, პანელი, GPS). 0 = გამორთ.; უფრო უარყოფითი = მკვეთრი, მაგრამ "
+"ღობეები ციმციმებს; თუ ბუნდოვანია, სცადე -0,5...-1. თითქმის უფასო."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"The same for wire fences, grass and leaf cut-outs: raise it toward 0 if fences shimmer, lower it "
-"if grass looks soft. same = follows the row above. Acts only while Texture sharpness is not 0. No "
-"GPU time, a little memory."
+"The same for wire fences, grass and leaves: raise it toward 0 if fences shimmer, lower it if "
+"grass looks soft. same = follows the row above. Works only while Texture sharpness is not 0. "
+"Almost no cost."
 msgstr ""
-"იგივე ბადისებრი ღობეების, ბალახისა და ფოთლისთვის: გაზარდეთ 0-კენ, თუ ღობეები ციმციმებს, "
-"შეამცირეთ, თუ ბალახი რბილია. იგივე = ზედა სტრიქონის მსგავსად. მოქმედებს, თუ ტექსტურის სიმკვეთრე ≠ "
-"0. GPU დრო არ სჭირდება."
+"იგივე ღობეებზე, ბალახსა და ფოთლებზე: გაზარდე 0-კენ, თუ ღობეები ციმციმებს, შეამცირე, თუ ბალახი "
+"რბილია. იგივე = ზედა ხაზს მიჰყვება. მუშაობს, როცა ტექსტურის სიმკვეთრე არ არის 0. თითქმის უფასო."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives wires, fences and glass their own distance instead of what is behind them, so they do not "
-"smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."
+"Wires, fences and windows are treated as the thing in front, not as what you see through them, so "
+"they do not smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms "
+"per eye."
 msgstr ""
-"სადენებს, ღობეებსა და მინას საკუთარ დისტანციას აძლევს იმის ნაცვლად, რაც მათ უკანაა, რომ "
-"მოძრაობისას არ დაიმღვრეს. გამორთეთ, თუ დამღვრევას ვერ ხედავთ: თვალზე ზოგავს 0,02 - 0,06 ms."
+"სადენები, ღობეები და ფანჯრები განიხილება როგორც წინ მდგომი, და არა როგორც ის, რაც მათ მიღმა ჩანს, "
+"ამიტომ მოძრაობისას არ იწვალება. გამორთე, თუ იქ წაცხებას ვერ ხედავ: ზოგავს 0,02 - 0,06 ms-ს თვალზე."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Stops street-lamp and car-light glows leaving a trail behind them when you move: DLSS takes each "
-"glow from the current frame, not its history. 25 % steps; lower it if lamp glows flicker, 0 = "
-"off. Costs about 0.05 - 0.2 ms per eye."
+"Stops street-lamp and car-light glows leaving a trail behind them when you move: the glows are "
+"drawn fresh each frame instead of being blended with older frames. 25 % steps; lower it if lamp "
+"glows flicker, 0 = off. Costs about 0.05 - 0.2 ms per eye."
 msgstr ""
-"ქუჩის ლამპებისა და მანქანის შუქების ბზინვას აღარ ტოვებს კვალს მოძრაობისას: DLSS ბზინვას მიმდინარე "
-"კადრიდან იღებს, არა ისტორიიდან. ბიჯი 25 %; შეამცირეთ, თუ შუქები ციმციმებს, 0 = გამორთ. ღირს "
-"დაახლ. 0,05 - 0,2 ms თვალზე."
+"ქუჩის ლამპებისა და მანქანის შუქების ბზინვა მოძრაობისას კვალს აღარ ტოვებს: ბზინვა ყოველ კადრზე "
+"თავიდან იხატება და ძველ კადრებთან არ ირევა. 25 %-იანი ნაბიჯები; შეამცირე, თუ ბზინვა ციმციმებს, 0 "
+"= გამორთ. ღირს დაახლოებით 0,05 - 0,2 ms თვალზე."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -291,24 +306,24 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and "
-"does not ghost. Turn it off only to save about 0.5 ms per eye or to test: every pixel then moves "
+"DLAA follows each moving thing on its own (traffic, wheels, number plates), so it stays sharp and "
+"leaves no trail. Turn it off only to save about 0.5 ms per eye or to test: everything then moves "
 "with the camera and traffic smears."
 msgstr ""
-"თითოეულ მოძრავ ნაწილს (ტრაფიკი, ბორბლები, ნომრები) DLAA-სთვის საკუთარ მოძრაობას აძლევს, რომ "
-"მკვეთრი დარჩეს და აჩრდილი არ ჰქონდეს. გამორთეთ მხოლოდ ~0,5 ms/თვალის დასაზოგად ან ტესტისთვის: "
-"ტრაფიკი იმღვრევა."
+"DLAA ყველა მოძრავ ნივთს ცალკე მიჰყვება (ტრაფიკი, ბორბლები, ნომრები), ამიტომ მკვეთრია და კვალს არ "
+"ტოვებს. გამორთე მხოლოდ დაახლ. 0,5 ms-ის დასაზოგად თვალზე ან სატესტოდ: მაშინ ყველაფერი კამერასთან "
+"მოძრაობს და ტრაფიკი იწვალება."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main "
-"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can ghost "
-"in the glass; else each part moves exactly in the glass."
+"Smooths the truck mirrors too, so they do not shimmer. 1 mirror = only the largest (the main "
+"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can leave "
+"trails in the glass; the others follow each moving thing."
 msgstr ""
-"სატვირთოს სარკეებს საკუთარ DLAA-ს აძლევს, რომ არ ციმციმებდნენ. 1 სარკე = მხოლოდ უდიდესი (თქვენი "
-"გვერდითა). ყველა = ყველა სარკე. კამერა = ყველაზე იაფი, მოძრავ ტრაფიკს შუშაში აჩრდილი შეიძლება "
-"ჰქონდეს; სხვაგან ყველა ნაწილი შუშაში ზუსტად მოძრაობს."
+"სარკეებსაც არბილებს, რომ არ იციმციმონ. 1 სარკე = მხოლოდ ყველაზე დიდი (მთავარი სარკე შენს "
+"გვერდით). ყველა = ყველა სარკე. კამერა = ყველაზე იაფი სარკეზე, მოძრავმა ტრაფიკმა შეიძლება კვალი "
+"დატოვოს მინაზე; დანარჩენები მიჰყვება ყველა მოძრავ ნივთს."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -323,130 +338,144 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
-"the group, Left closes it; it starts closed every time the menu opens."
+"Frame rate and CPU: CPU tuning, AMD cache cores, an FPS cap and Low delay (Reflex) for flat, an "
+"FPS cap for VR. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"კადრების სიხშირე და CPU: CPU დაყენება, FPS ლიმიტი და NVIDIA Reflex ბრტყელისთვის, VR FPS ლიმიტი. "
-"მარჯვენა ხსნის ჯგუფს, მარცხენა კეტავს; მენიუს ყოველ გახსნაზე დახურულია."
+"კადრების სიხშირე და CPU: CPU დაყენება, AMD ქეშის ბირთვები, FPS ლიმიტი და დაბალი დაყოვნება "
+"(Reflex) ბრტყელისთვის, FPS ლიმიტი VR-ისთვის. მარჯვნივ ხსნის ჯგუფს, მარცხნივ ხურავს; გახსნაზე "
+"დახურულია."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
-"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
-"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
+"Three CPU switches together. Prefer fast cores: only Intel CPUs with P-cores and E-cores. Higher "
+"priority and no Windows power saving for the game: every CPU, Intel and AMD. Helps when the CPU "
+"is the limit; no cost. Separate in dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle."
 msgstr ""
-"სამი CPU გადამრთველი ერთად: მთავარი და რენდერის ნაკადი P-core-ებს ანიჭებს უპირატესობას (მხოლოდ "
-"Intel ჰიბრიდული CPU), თამაში Above normal პრიორიტეტით მუშაობს და Windows ვერ ახშობს (EcoQoS) ან "
-"უგულებელყოფს მის ტაიმერის მოთხოვნებს. ეხმარება, როცა CPU ზღვარია; ფასი არაა. ცალკე პარამეტრები "
-"dlaa.ini-ში: cpu_pcore, cpu_priority, cpu_no_throttle."
+"სამი CPU გადამრთველი. სწრაფი ბირთვები: მხოლოდ Intel CPU P და E ბირთვებით. მაღალი პრიორიტეტი და "
+"Windows-ის ენერგიის დაზოგვის გარეშე: ყველა CPU, Intel და AMD. ეხმარება, როცა CPU არის ზღვარი; "
+"უფასო. dlaa.ini-ში ცალკე: cpu_pcore, cpu_priority, cpu_no_throttle."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"AMD X3D CPUs with two core groups (7950X3D, 9950X3D): keeps the game on the cores with the big 3D "
+"V-Cache, which games like. Switches at once; off gives the game all cores back. Try it and "
+"compare in a busy city. No cost."
+msgstr ""
+"AMD X3D CPU-ები ორი ბირთვის ჯგუფით (7950X3D, 9950X3D): თამაშს ინახავს დიდი 3D V-Cache-ის "
+"ბირთვებზე, რაც თამაშებს უყვარს. იცვლება მაშინვე; გამორთვისას თამაში ყველა ბირთვს ღებულობს უკან. "
+"სცადე და შეადარე დატვირთულ ქალაქში. უფასოა."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
-"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
-"limiting. off = no limit."
+"Set it a bit below what your PC holds in a busy city. With Low delay (Reflex) on, the NVIDIA "
+"driver does the limiting. off = no limit."
 msgstr ""
-"მხოლოდ ბრტყ. თამაშს ამ სიხშირეზე მეტს არ აძლევს: სტაბილური კადრის დრო, ნაკლები სითბო და ენერგია. "
-"დააყენეთ ცოტა დაბლა, ვიდრე PC ქალაქში იცავს. Reflex-ისას ლიმიტს NVIDIA დრაივერი აკეთებს. გამორთ. "
-"= ლიმიტის გარეშე."
+"მხოლოდ ბრტყელი. თამაში არ აღემატება ამ სიხშირეს: მდგრადი კადრის დრო, ნაკლები სითბო. დააყენე შენი "
+"PC-ის სიხშირეზე ოდნავ დაბლა დატვირთულ ქალაქში. Reflex-ის ჩართვისას ზღვარს NVIDIA დრაივერი "
+"აწესებს. გამორთ. = ზღვარი არ არის."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
-"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
+"Flat only, NVIDIA only (NVIDIA Reflex). On = the game's frames wait less before the graphics card "
+"draws them: less delay between your steering and the picture when the card is the limit. Boost "
+"also keeps the card's clocks up. Same fps; small cost."
 msgstr ""
-"მხოლოდ ბრტყ., მხოლოდ NVIDIA. ჩართ. = კადრები ნაკლებს ელოდება GPU რიგში: ნაკლები დაგვიანება, როცა "
-"GPU ზღვარია. Boost GPU სიხშირეებსაც მაღლა ინახავს. იგივე fps; მცირე ფასი. VR-ში არ გამოიყენება."
+"მხოლოდ ბრტყელი, მხოლოდ NVIDIA (NVIDIA Reflex). ჩართ. = თამაშის კადრები ნაკლებს ელოდება, სანამ "
+"ვიდეოქარდი დახატავს: ნაკლები დაგვიანება საჭესა და სურათს შორის, როცა ქარდია ზღვარი. Boost ქარდის "
+"სიხშირეებსაც მაღლა ინახავს. იგივე fps; მცირე ღირებულება."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
-"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
-"the fps swings. Turns Turbo off while on."
+"headset's frame smoothing (ASW / Motion Smoothing) fills in the rest at a steady rhythm. Use it "
+"when the fps swings. Turns Turbo off while on."
 msgstr ""
-"მხოლოდ VR. ნახევარი = თამაში ხატავს ჰედსეტის ყოველ მე-2 კადრს (72 Hz -> 36 fps), მესამედი = ყოველ "
-"მე-3-ს; დანარჩენს ჰედსეტის reprojection (ASW / Motion Smoothing) ავსებს თანაბარი რიტმით. "
-"გამოიყენეთ, როცა fps ცვალებადია. ჩართვისას Turbo გამორთულია."
+"მხოლოდ VR. ნახევარი = თამაში ხატავს ყოველ მე-2 ჰედსეტის კადრს (72 Hz -> 36 fps), მესამედი = ყოველ "
+"მე-3-ს; ჰედსეტის კადრების გასწორება (ASW / Motion Smoothing) დანარჩენს მდგრადი რიტმით ავსებს. "
+"გამოიყენე, როცა fps ცვალებადია. ჩართვისას Turbo-ს ითიშავს."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
-"are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
+"VR speed-ups: Turbo, foveated rendering, skipping the hidden lens edges, and whether OFXR Bridge "
+"/ VectorXR are found. Right opens the group, Left closes it; it starts closed every time the menu "
+"opens."
 msgstr ""
-"VR აჩქარებები: Turbo, foveated რენდერი, დამალული არის ნიღაბი და ნაპოვნია თუ არა OFXR Bridge / "
-"VectorXR. მარჯვენა ხსნის ჯგუფს, მარცხენა კეტავს; მენიუს ყოველ გახსნაზე დახურულია."
+"VR აჩქარებები: Turbo, foveated rendering, ლინზების დამალული კიდეების გამოტოვება და ნაპოვნია თუ "
+"არა OFXR Bridge / VectorXR. მარჯვნივ ხსნის ჯგუფს, მარცხნივ ხურავს; მენიუს ყოველ გახსნაზე დახურული "
+"იწყება."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Turbo: no ASW / Motion Smoothing / SSW / reprojection. VR only. On = the game stops waiting for "
-"the headset each frame: more fps only when the CPU is the limit (busy cities, traffic). Turn it "
-"off if the picture judders. From OpenXR Toolkit."
+"Turbo switches off the headset's frame smoothing (ASW / Motion Smoothing / SSW). VR only. On = "
+"the game stops waiting for the headset each frame: more fps only when the CPU is the limit (busy "
+"cities, traffic). Turn it off if the picture judders."
 msgstr ""
-"Turbo: არა ASW / Motion Smoothing / SSW / reprojection. მხოლოდ VR. ჩართ. = თამაში ყოველ კადრზე "
-"ჰედსეტს აღარ ელოდება: მეტი fps მხოლოდ მაშინ, როცა CPU ზღვარია (დატვირთული ქალაქები, ტრაფიკი). "
-"გამორთეთ, თუ სურათი ირხევა. OpenXR Toolkit-იდან."
+"Turbo თიშავს ჰედსეტის კადრების გასწორებას (ASW / Motion Smoothing / SSW). მხოლოდ VR. ჩართ. = "
+"თამაში ყოველ კადრზე აღარ ელოდება ჰედსეტს: მეტი fps მხოლოდ მაშინ, როცა CPU არის ზღვარი (დატვირთული "
+"ქალაქები, ტრაფიკი). გამორთე, თუ სურათი ვიბრირებს."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR "
-"only. The outer ring is shaded once per 2 x 2 pixels; fences, grass and leaves keep full detail. "
+"only. The outer ring gets one colour per 2 x 2 pixels; fences, grass and leaves keep full detail. "
 "Turn it off if the edge looks blocky."
 msgstr ""
-"მკვეთრი ცენტრი, დაბალი დეტალი კიდეზე (მხოლოდ NVIDIA RTX). ზოგავს GPU-ს მაღალ Scaling-ზე. მხოლოდ "
-"VR. გარე რგოლი 2 x 2 პიქსელზე ერთხელ ინიღბება; ღობე, ბალახი, ფოთოლი სრულ დეტალს ინარჩუნებს. "
-"გამორთეთ, თუ კიდე კუბურია."
+"მკვეთრი ცენტრი, კიდეზე ნაკლები დეტალი (მხოლოდ NVIDIA RTX). ზოგავს GPU-ს მაღალ მასშტაბზე. მხოლოდ "
+"VR. გარე რგოლს ერთი ფერი აქვს 2 x 2 პიქსელზე; ღობეები, ბალახი, ფოთლები სრულ დეტალს ინარჩუნებს. "
+"გამორთე, თუ კიდე კუბიკებია."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How big the sharp centre of Foveated (VRS) is, 10 - 100 % in 5 % steps: bigger = more of the view "
-"sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
+"How big the sharp centre of Foveated rendering is, 10 - 100 % in 5 % steps: bigger = more of the "
+"view sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
 "(balanced) is the default; 90 = wide, 65 = narrow."
 msgstr ""
-"რამდენად დიდია Foveated (VRS)-ის მკვეთრი ცენტრი, 10 - 100 %, ბიჯი 5 %: დიდი = მეტი მკვეთრი არე, "
-"ნაკლები დანაზოგი; პატარა = მეტი დანაზოგი, დაბალი დეტალი ცენტრთან უფრო ახლოს იწყება. ნაგულისხმევი "
-"80 % (დაბალანსებული), 90 = ფართო, 65 = ვიწრო."
+"Foveated rendering-ის მკვეთრი ცენტრის ზომა, 10 - 100 %, 5 %-იანი ბიჯით: დიდი = მეტი მკვეთრი ხედი, "
+"ნაკლები დაზოგვა; პატარა = მეტი დაზოგვა. 80 % (დაბალანსებული) ნაგულისხმევია; 90 = ფართო, 65 = "
+"ვიწრო."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Which of the game's passes Foveated (VRS) acts on. scene = the 3D world only (default). scene + "
-"lighting = also the game's lighting pass, at the very edge only: more saving. Test it: look for "
-"blocky light or shadow edges at the side of your view."
+"What Foveated rendering makes coarser. scene = the 3D world only (default). scene + lighting = "
+"also the game's lighting, at the very edge only: more saving. Test it: look for blocky light or "
+"shadow edges at the side of your view."
 msgstr ""
-"თამაშის რომელ გავლებზე მოქმედებს Foveated (VRS). სცენა = მხოლოდ 3D სამყარო (ნაგულისხმევი). სცენა "
-"+ განათება = განათების გავლებაც, მხოლოდ უკიდურეს კიდეზე: მეტი დანაზოგი. შეამოწმეთ, კუბურია თუ არა "
-"შუქ-ჩრდილის კიდეები გვერდზე."
+"რას ხდის Foveated rendering უხეშს. სცენა = მხოლოდ 3D სამყარო (ნაგულისხმევი). სცენა + განათება = "
+"თამაშის განათებაც, მხოლოდ უკიდურეს კიდეზე: მეტი დაზოგვა. შეამოწმე: მოძებნე კუბიკებიანი შუქის ან "
+"ჩრდილის კიდეები ხედის გვერდზე."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How coarse the outer ring of Foveated (VRS) is. Normal = 1 colour per 2 x 2 pixels (default). "
+"How coarse the outer ring of Foveated rendering is. Normal = 1 colour per 2 x 2 pixels (default). "
 "Strong = per 4 x 2, Max = per 4 x 4: more GPU saving, blockier edges. Best with eye tracking, "
 "where you never look at the outer ring."
 msgstr ""
-"რამდენად უხეშია Foveated (VRS)-ის გარე რგოლი. ჩვეულებრივი = 1 ფერი 2 x 2 პიქსელზე (ნაგულისხმევი). "
-"ძლიერი = 4 x 2, მაქსიმუმი = 4 x 4: მეტი GPU დანაზოგი, კუბური კიდეები. საუკეთესოა თვალის "
-"თვალთვალთან."
+"რამდენად უხეშია Foveated rendering-ის გარე რგოლი. ნორმალური = 1 ფერი 2 x 2 პიქსელზე "
+"(ნაგულისხმევი). ძლიერი = 4 x 2, მაქსიმუმი = 4 x 4: მეტი დაზოგვა, უფრო კუბიკებიანი კიდეები. "
+"საუკეთესოა თვალთვალთან, სადაც გარე რგოლს არ უყურებ."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Experimental. The sharp centre of Foveated (VRS) follows your eyes on a headset with eye tracking "
-"(OpenXR eye gaze, for example Varjo); without one it stays at the lens centre. Needs Foveated "
-"(VRS) on at the game's start, else a restart. Almost no cost."
+"Experimental. The sharp centre of Foveated rendering follows your eyes on a headset with eye "
+"tracking (for example Varjo); without it the centre stays in the middle of the lens. Needs "
+"Foveated rendering on at the game's start, else a restart. Almost no cost."
 msgstr ""
-"ექსპერიმენტული. Foveated (VRS)-ის მკვეთრი ცენტრი თვალებს მიჰყვება ჰედსეტზე თვალის თვალთვალით "
-"(OpenXR eye gaze, მაგ. Varjo); მის გარეშე ლინზის ცენტრში რჩება. სჭირდება Foveated (VRS) ჩართული "
-"თამაშის დაწყებისას, სხვაგვარად გადატვირთვა. თითქმის არ ღირს."
+"ექსპერიმენტული. Foveated rendering-ის მკვეთრი ცენტრი მიჰყვება შენს თვალებს ჰედსეტზე თვალთვალით "
+"(მაგალითად Varjo); მის გარეშე ცენტრი რჩება ლინზის შუაში. სჭირდება ჩართული Foveated rendering "
+"თამაშის დაწყებისას, სხვაგვარად გადატვირთვა. თითქმის უფასოა."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -506,9 +535,8 @@ msgid ""
 "Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
 "game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
-"ამოძრავებს თამაშის VR UI-ს: სიმაღლე, მხარე, მანძილი, დახრა, შებრუნება, ზომა ან გამრუდება, პატარა "
-"ნაბიჯებით. თამაში ყოველ ცვლილებას იღებს ბოლო დაჭერიდან დაახლოებით 0,4 წმ-ში: კონსოლი თავისით "
-"იხსნება და იხურება."
+"ამოძრავებს თამაშის VR UI-ს: სიმაღლე, მხარე, მანძილი, დახრა, შებრ., ზომა ან გამრუდება, პატარა "
+"ბიჯებით. თამაში ცვლილებას დაჭერიდან დაახლ. 0,4 წმ-ში იღებს: კონსოლი თავისით იხსნება და იხურება."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -516,19 +544,19 @@ msgid ""
 "Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
 "own values when it exits)."
 msgstr ""
-"მარჯვნივ: ორივე განლაგების ყველა მნიშვნელობა უბრუნდება იმას, რაც config.cfg-ში იყო დასაწყისში "
-"(თამაში საკუთარ მნიშვნელობებს გასვლისას ინახავს)."
+"მარჯვნივ: ორივე განლაგების ყველა მნიშვნელობა უბრუნდება config.cfg-ის საწყისს (თამაში საკუთარს "
+"გასვლისას ინახავს)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see "
-"what a setting gains. Its GPU cost is measured: per frame, every picture it is drawn into; none "
-"when off. Save keeps it for the next start."
+"A small live fps and frame-time box, also while this menu is closed (flat and VR): fps, ms, "
+"numbers only, each with or without a graph of recent frame times (spikes show red), or the graph "
+"alone. Its GPU cost is measured. Save keeps it."
 msgstr ""
-"პატარა fps და კადრის დროის ყუთი, მენიუს დახურვისასაც (ბრტყ. და VR). ნახეთ, რას იძლევა პარამეტრი. "
-"GPU ფასი გაზომილია: კადრზე, თითო სურათზე, სადაც ხატავს; გამორთვისას არაა. შენახვა მომდევნო "
-"გაშვებისთვის ინარჩუნებს."
+"პატარა ცოცხალი fps და კადრის დროის ყუთი, მენიუს დახურვისასაც (ბრტყელი და VR): fps, ms, მხოლოდ "
+"ციფრები, თითო ბოლო კადრების გრაფიკით ან მის გარეშე (მწვერვალები წითელია), ან მხოლოდ გრაფიკი. GPU "
+"ღირებულება გაზომილია. შენახვა ინახავს."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -597,13 +625,24 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
-"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
-"Per-part motion vectors). No cost."
+"How far back the fps graph shows: 2 - 60 s. One bar per slice of time = its slowest frame, so you "
+"see spikes. Green = on time, yellow = a bit slow, red = a hitch; the line = the headset rate / "
+"FPS cap / your usual. Shown when FPS counter has a graph."
 msgstr ""
-"მხოლოდ VR. თავს მიჰყვება = ჰედსეტთან ერთად. ფიქსირებული სივრცეში = ერთი ადგილი სავარძლის გარშემო, "
-"კაბინის რყევას უგულებელყოფს. მიმაგრებული = კაბინაზე, მასთან ერთად ირხევა (სჭირდება DLAA + "
-"ნაწილების ვექტორები). ფასი არაა."
+"რამდენ ხანს უკან აჩვენებს fps გრაფიკი: 2 - 60 წმ. ერთი სვეტი დროის ნაჭერზე = მისი ყველაზე ნელი "
+"კადრი. მწვანე = დროულად, ყვითელი = ცოტა ნელი, წითელი = გაჭედვა; ხაზი = ჰედსეტის სიხშირე / FPS "
+"ლიმიტი / შენი ჩვეული. ჩანს, როცა FPS მრიცხველს გრაფიკი აქვს."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
+"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Track "
+"moving parts). No cost."
+msgstr ""
+"მხოლოდ VR. თავს მიჰყვება = ჰედსეტთან მოძრაობს. ფიქსირებული სივრცეში = ერთი წერტილი სავარძლის "
+"გარშემო, კაბინის რხევა არ აქვს. მიმაგრებული ტრანსპორტზე = კაბინას მიკრულია (სჭირდება DLAA + "
+"ნაწილთა თვალთვალი). უფასო."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -736,13 +775,13 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Switches for A/B checks: DLAA off, the game's own TAA mixed in or side by side, the thin-wire "
-"switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
-"group, Left closes it."
+"Switches for comparing: DLAA off, the game's own TAA mixed in or side by side, the wire fixes, "
+"running DLAA earlier. Nothing here is needed for normal driving. Right opens the group, Left "
+"closes it."
 msgstr ""
-"გადამრთველები A/B შემოწმებისთვის: DLAA გამორთ., თამაშის საკუთარი TAA შერეული ან გვერდიგვერდ, "
-"წვრილი სადენების გადამრთველები, DLAA tonemap-მდე. ჩვეულებრივი მართვისთვის აქ არაფერია საჭირო. "
-"მარჯვენა ხსნის ჯგუფს, მარცხენა კეტავს."
+"შესადარებელი გადამრთველები: DLAA გამორთ., თამაშის TAA შერეული ან გვერდიგვერდ, სადენების "
+"გასწორებები, DLAA-ს ადრე გაშვება. ჩვეულებრივ მართვას არაფერი სჭირდება. მარჯვნივ ხსნის ჯგუფს, "
+"მარცხნივ ხურავს."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -756,63 +795,54 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
-"right, to compare."
+"on = the mod on the left, the game's own TAA on the right, to compare (Split line position, "
+"Split: left | right). Replaces Mix while on. With the game's console on, the mod switches the "
+"game's Anti-aliasing for you."
 msgstr ""
-"მხოლოდ მაშინ, როცა თამაშის ანტიალიასინგი TAA-ზეა. გამორთ. = მხოლოდ მოდი (დააყენეთ თამაშის AA "
-"გამორთულზე). შერევა = TAA და DLAA / DLSS ერთსა და იმავე კადრზე, შერეული. გაყოფა = მარცხნივ მოდი, "
-"მარჯვნივ TAA, შესადარებლად."
+"ჩართ. = მოდი მარცხნივ, თამაშის საკუთარი TAA მარჯვნივ, შესადარებლად (გაყოფის ხაზის პოზიცია, "
+"გაყოფა: მარც. | მარჯ.). ჩართვისას ცვლის შერევას. თამაშის კონსოლის ჩართვისას მოდი თამაშის "
+"Anti-aliasing-ს თავად გადართავს."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
+"Where the split line is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS on the left "
+"of it, the game's TAA on the right. Used only while Split with game TAA is on."
 msgstr ""
-"შერევაში თამაშის TAA-ს რა წილია, 0 - 100 % 10 %-იანი ბიჯით: მეტი = უფრო მშვიდი და რბილი (TAA), "
-"ნაკლები = უფრო მკვეთრი (DLAA / DLSS). გამოიყენება, როცა თამაშის TAA შერევაზეა, ან გაყოფაზე "
-"შერევის მხარით. დამატებითი ხარჯი არ არის."
+"სად არის გაყოფის ხაზი, სიგანის 0 - 100 % 5 %-იანი ნაბიჯით: მისგან მარცხნივ მოდის DLAA / DLSS, "
+"მარჯვნივ თამაშის TAA. გამოიყენება მხოლოდ მაშინ, როცა გაყოფა თამაშის TAA-თი ჩართულია."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
-"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+"What the split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix | TAA "
+"or DLAA | Mix (Mix = the two blended at Mix amount). DLSS instead of DLAA when upscaling. Used "
+"only while Split with game TAA is on."
 msgstr ""
-"სად არის თამაშის TAA გაყოფის ხაზი, სიგანის 0 - 100 % 5 %-იანი ბიჯით: მის მარცხნივ მოდის DLAA / "
-"DLSS, მარჯვნივ თამაშის TAA. გამოიყენება მხოლოდ მაშინ, როცა თამაშის TAA გაყოფაზეა."
+"რას აჩვენებს გაყოფა: DLAA | TAA (მოდი მარცხნივ, თამაშის TAA მარჯვნივ), შერევა | TAA ან DLAA | "
+"შერევა (შერევა = ორივე შერეული შერევის რაოდენობით). გადიდებისას DLSS DLAA-ს ნაცვლად. გამოიყენება "
+"მხოლოდ მაშინ, როცა გაყოფა თამაშის TAA-თი ჩართულია."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
-"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
-"upscaling. Used only when Game TAA is split."
+"Thin wires move correctly while you drive: their movement is spread over the whole thin line. on "
+"= default. off = only to compare; near wires flicker more. The picture is soft for a moment when "
+"you switch."
 msgstr ""
-"რას აჩვენებს თამაშის TAA გაყოფა თავის ორ მხარეს: DLAA | TAA (მარცხნივ მოდი, მარჯვნივ თამაშის "
-"TAA), შერევა | TAA ან DLAA | შერევა (შერევა = ორივე შერეული თამაშის TAA წილის მიხედვით). "
-"გაზრდისას DLAA-ს ნაცვლად DLSS. გამოიყენება მხოლოდ მაშინ, როცა თამაშის TAA გაყოფაზეა."
+"წვრილი სადენები სწორად მოძრაობს მართვისას: მათი მოძრაობა მთელ წვრილ ხაზზე ნაწილდება. ჩართ. = "
+"ნაგულისხმევი. გამორთ. = შესადარებლად; ახლო სადენები მეტად ციმციმებს. გადართვისას სურათი წამით "
+"რბილდება."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
-"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
-"soft for a moment when it changes."
+"Thin wires count as in front on every pixel they touch, even where they cover only a sliver of "
+"it. on = default. on (no A2C) = also for see-through edges such as leaves. off = only to compare; "
+"near wires flicker more."
 msgstr ""
-"წვრილი სადენები მოძრაობას ინარჩუნებს: DLAA მოძრაობის მონაცემებს წვრილ ხაზებზე ავრცელებს (DLSS "
-"motion dilation). ჩართ. = ნაგულისხმევი. გამორთ. = შესადარებლად; ახლო სადენები ციმციმებს. "
-"შეცვლისას სურათი წამით რბილდება."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
-"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
-msgstr ""
-"წვრილ სადენებს სიღრმე აქვთ ყველა შეხებულ პიქსელზე. ჩართ. = ნაგულისხმევი. ჩართ. (A2C-გარეშე) = "
-"გამჭვირვალე კიდეებზეც. გამორთ. = შესადარებლად; ახლო სადენები ციმციმებს."
+"წვრილი სადენები წინ ითვლება ყველა პიქსელზე, რომელსაც ეხება, თუნდაც მცირედ ფარავდეს. ჩართ. = "
+"ნაგულისხმევი. ჩართ. (A2C-ის გარეშე) = გამჭვირვალე კიდეებზეც, მაგ. ფოთლები. გამორთ. = შესადარებლად."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -826,24 +856,83 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
-"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
-"~60 frames to switch."
+"Flat only: DLAA runs before the game adds its glow and colour look, so lane paint, wires and "
+"rails shimmer less. Change it only to compare. Not used with DLSS upscaling or Windows HDR. Same "
+"cost either way; takes about a second to switch."
 msgstr ""
-"მხოლოდ ბრტყ.: DLAA თამაშის bloom / tonemap-მდე, რომ ზოლები, სადენები და რელსები ნაკლებ "
-"ციმციმებდეს. შეცვალეთ მხოლოდ შესადარებლად. არ მუშაობს DLSS გაზრდასთან და Windows HDR-თან. ფასი "
-"იგივეა; გადართვა ~60 კადრი."
+"მხოლოდ ბრტყელი: DLAA გაიშვება თამაშის ბზინვისა და ფერის იერის წინ, ამიტომ გზის ხაზები, სადენები "
+"და რელსები ნაკლებად ციმციმებს. შეცვალე შესადარებლად. DLSS გაზრდასთან და Windows HDR-თან არ "
+"გამოიყენება. ღირებულება იგივეა; გადართვა ≈ 1 წმ."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Bug report: press the capture key twice (or Capture now) where something looks wrong; the mod "
+"writes one zip you attach to a GitHub issue. Right opens the group, Left closes it."
+msgstr ""
+"შეცდომის ანგარიში: დააჭირე გადაღების ღილაკს ორჯერ (ან გადაიღე ახლა) იქ, სადაც რაღაც არასწორია; "
+"მოდი წერს ერთ zip-ს, რომელსაც GitHub issue-ს ამატებ. მარჯვნივ ხსნის ჯგუფს, მარცხნივ ხურავს."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"One switch for the most complete report: log detail debug, rewind 2 s, capture Full. Off puts the "
+"rows back as they were. Only this switch is saved; the forced values are never written to "
+"dlaa.ini."
+msgstr ""
+"ერთი გადამრთველი სრული ანგარიშისთვის: ჟურნალი debug, 2 წმ უკან, სრული გადაღება. გამორთვა "
+"სტრიქონებს აბრუნებს. ინახება მხოლოდ გადამრთველი; იძულებითი მნიშვნელობები dlaa.ini-ში არ იწერება."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + "
-"problems worked around; info = + start-up and changes; debug = + statistics, and debug also runs "
-"the GPU timers and the CPU profiler."
+"problems worked around; info = + start-up and changes; debug = + statistics and timing "
+"measurements (a little slower)."
 msgstr ""
-"dlaa_inject.log: გამორთ. = არაფერი; შეცდომები = მხოლოდ წარუმატებლობა (ნაგულისხმევი); "
-"გაფრთხილებები = + გვერდის ავლილი პრობლემები; ინფორმაცია = + გაშვება, ცვლილებები; გამართვა = + "
-"სტატისტიკა, GPU ტაიმერები და CPU პროფაილერი."
+"რა მიდის dlaa_inject.log-ში: გამორთ. = არაფერი; შეცდომები = მხოლოდ მარცხი (ნაგულისხმევი); "
+"გაფრთხილებები = + გვერდავლილი პრობლემები; ინფორმაცია = + დაწყება, ცვლილებები; გამართვა = + "
+"სტატისტიკა, დროები (ოდნავ ნელი)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Keeps the last 0.5 - 3 s of frames on the graphics card all the time, so the report shows the "
+"moment BEFORE the key (+ what DLSS got for the last frames). Costs graphics memory (the MB in the "
+"cost column) and a picture copy per frame. off = none."
+msgstr ""
+"ვიდეოქარდზე მუდმივად ინახავს ბოლო 0,5 - 3 წმ კადრებს, ამიტომ ანგარიში აჩვენებს მომენტს ღილაკამდე "
+"(+ რა მიიღო DLSS-მა ბოლო კადრებზე). ღირს ვიდეომეხსიერება (MB ღირებულების სვეტში) და სურათის ერთი "
+"ასლი კადრზე. გამორთ. = არაფერი."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Quick = system info, logs, settings, your picture and DLAA off for a few frames (about 1 s). Full "
+"= + what DLSS got per frame (colour, motion, depth) and A/B sets: motion view, motion off, jitter "
+"only (about 2 - 4 s)."
+msgstr ""
+"სწრაფი = სისტემის ინფო, ჟურნალები, პარამეტრები, შენი სურათი და DLAA გამორთ. რამდენიმე კადრზე "
+"(დაახლ. 1 წმ). სრული = + რა მიიღო DLSS-მა კადრზე (ფერი, მოძრაობა, სიღრმე) და A/B ნაკრებები "
+"(დაახლ. 2 - 4 წმ)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The capture key. Press it TWICE within 1 s while driving where it goes wrong (the first press "
+"only arms it: one short beep). Right opens the Hotkeys page on its line to change it."
+msgstr ""
+"გადაღების ღილაკი. დააჭირე ორჯერ 1 წმ-ში მართვისას, სადაც რაღაც არასწორია (პირველი დაჭერა მხოლოდ "
+"ამზადებს: მოკლე ბიპი). მარჯვნივ ხსნის ცხელ კლავიშებს ამ სტრიქონზე."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How many captures stay in the dlaa_selftest folder next to the DLL: older ones (folder + zip) are "
+"deleted when a new one is written. all = never delete."
+msgstr ""
+"რამდენი გადაღება რჩება DLL-ის გვერდით dlaa_selftest საქაღალდეში: ძველები (საქაღალდე + zip) იშლება "
+"ახლის ჩაწერისას. ყველა = არასოდეს წაშლა."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -882,12 +971,27 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Puts every setting in this menu back to how the mod ships (model, sharpen, texture sharpness, "
-"DLAA area, motion, mirrors, profile, panel, fps box, turbo, foveated, frame rate, logging), live "
-"and in dlaa.ini, keeping your hotkeys and every other line."
+"DLAA area, motion, mirrors, preset, panel, fps box, turbo, foveated, frame rate, CPU, log "
+"detail), live and in dlaa.ini, keeping your hotkeys and every other line."
 msgstr ""
 "ამ მენიუს ყველა პარამეტრს აბრუნებს მოდის ნაგულისხმევზე (მოდელი, სიმკვეთრე, ტექსტურა, DLAA არე, "
-"მოძრაობა, სარკეები, პროფილი, პანელი, fps ყუთი, turbo, foveated, კადრთა სიხშირე, ჟურნალი), "
-"dlaa.ini-შიც; ცხელ კლავიშებს და სხვა სტრიქონებს ინარჩუნებს."
+"მოძრაობა, სარკეები, პრესეტი, პანელი, fps ყუთი, turbo, foveated, კადრების სიხშირე, CPU, ჟურნალი), "
+"ცოცხლად და dlaa.ini-ში; ცხელი კლავიშები რჩება."
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Off"
+msgstr "გამორთ."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph only"
+msgstr "მხოლოდ გრაფ."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph"
+msgstr "გრაფიკი"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1162,8 +1266,8 @@ msgstr "ახლა კადრზე %ls ღირს; ნაკლები 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Greyed: Mirror DLAA is off."
-msgstr "მიუწ.: სარკეების DLAA გამორთ."
+msgid "Greyed: Smooth mirrors is off."
+msgstr "მიუწ.: რბილი სარკეები გამორთულია."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1176,6 +1280,24 @@ msgstr "ყოველთვის ჩართ.: dlaa.ini სარკის �
 #, c-format
 msgid "The mirrors cost %ls per frame now."
 msgstr "სარკეები ახლა კადრზე %ls ღირს."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed: only for AMD X3D CPUs with two core groups (7950X3D, 9950X3D)."
+msgstr "მიუწ.: მხოლოდ AMD X3D CPU-ებისთვის ორი ბირთვის ჯგუფით (7950X3D, 9950X3D)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On now: the game runs only on the cores with the big cache."
+msgstr "ახლა ჩართულია: თამაში მუშაობს მხოლოდ დიდი ქეშის ბირთვებზე."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On, but not applied: the game's cores were already limited (see the log)."
+msgstr "ჩართ., მაგრამ არ გამოიყენება: ბირთვები უკვე შეზღუდულია (იხ. ჟურნალი)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1205,7 +1327,9 @@ msgstr ""
 msgid ""
 "Waiting: click the game window on the desktop. The mod types into the game's console only while "
 "the game window has the focus."
-msgstr "ლოდინი: დააწკაპუნეთ თამაშის ფანჯარაზე სამუშაო მაგიდაზე. მოდი თამაშის კონსოლში წერს მხოლოდ მაშინ, როცა თამაშის ფანჯარა ფოკუსშია."
+msgstr ""
+"ლოდინი: დააწკაპუნეთ თამაშის ფანჯარაზე სამუშაო მაგიდაზე. მოდი თამაშის კონსოლში წერს მხოლოდ მაშინ, "
+"როცა თამაშის ფანჯარა ფოკუსშია."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1222,16 +1346,22 @@ msgstr "თამაშის ლოგმა ბოლო ცვლილებ
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid "Mix and split need the game's TAA: set Anti-aliasing to TAA in the game's graphics settings."
+msgstr ""
+"შერევა და გაყოფა თამაშის TAA-ს საჭიროებს: გრაფიკის პარამეტრებში Anti-aliasing დააყენე TAA-ზე."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "The game's TAA is not running now: the mod runs alone."
 msgstr "თამაშის TAA ახლა არ მუშაობს: მოდი მარტო მუშაობს."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
+msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or set Mode to Mix."
 msgstr ""
-"თამაშის TAA ახლა მუშაობს: დააყენეთ თამაშის ანტიალიასინგი გამორთულზე ან აირჩიეთ შერევა ან გაყოფა."
+"თამაშის TAA ახლა მუშაობს: თამაშის Anti-aliasing დააყენე გამორთულზე ან რეჟიმი დააყენე შერევაზე."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1289,6 +1419,66 @@ msgstr "დაბრუნდა თამაშის TAA-ზე: DLAA ამ �
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
+msgid ""
+"Or turn on the game console (g_developer and g_console 1 in config.cfg): then the mod switches it "
+"for you."
+msgstr ""
+"ან ჩართე თამაშის კონსოლი (g_developer და g_console 1 config.cfg-ში): მაშინ მოდი თავად გადართავს."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn on the game console to let the mod switch the game's Anti-aliasing."
+msgstr "ჩართე თამაშის კონსოლი, რომ მოდმა შეცვალოს თამაშის Anti-aliasing."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "TAA"
+msgstr "TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "unknown"
+msgstr "უცნობია"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "other"
+msgstr "სხვა"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "waiting: click the game window"
+msgstr "ველოდები: დააწკაპე თამაშზე"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switching..."
+msgstr "გადაირთვება..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch confirmed"
+msgstr "დადასტურდა"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch NOT confirmed (see the log)"
+msgstr "გადართვა ვერ დადასტურდა (იხ. ჟურნალი)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls, %ls."
+msgstr "თამაშის AA: %ls, %ls."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls."
+msgstr "თამაშის AA: %ls."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
 #, c-format
 msgid ""
 "Switched off by the mod: it cost more than %.1f ms per eye (VR budget). Press its key to try "
@@ -1307,6 +1497,45 @@ msgstr "ახლა კადრზე %ls ღირს; გამორთვ�
 #, c-format
 msgid "Costs %ls ms GPU per frame now; most of it at night."
 msgstr "ახლა კადრზე %ls ms GPU ღირს; უმეტესობა ღამით."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"The last one: %d zips of at most 24 MB, %d MB in all (folder %.0f MB). Attach the _main zip; the "
+"others only if asked."
+msgstr "ბოლო: %d zip, თითო მაქსიმუმ 24 MB, სულ %d MB (საქაღალდე %.0f MB). დაურთე _main zip; დანარჩენი მხოლოდ მოთხოვნისას."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Holds %.0f MB of graphics memory now."
+msgstr "ახლა იკავებს %.0f MB ვიდეომეხსიერებას."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"%ls about %.0f MB graphics memory for the rewind; a capture takes about %.1f s and writes about "
+"%.0f MB."
+msgstr ""
+"%ls დაახლ. %.0f MB ვიდეომეხსიერება უკან გადასახვევად; გადაღებას დაახლ. %.1f წმ სჭირდება და წერს "
+"დაახლ. %.0f MB-ს."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "On, it costs"
+msgstr "ჩართვისას ღირს"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Costs now:"
+msgstr "ახლა ღირს:"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn off Send everything to change this."
+msgstr "შესაცვლელად გამორთე „გაგზავნე ყველაფერი“."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1370,8 +1599,8 @@ msgstr "VR-ში მიუწ.: VR FPS ლიმიტი."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Limited by the NVIDIA driver now (Reflex is on)."
-msgstr "ახლა NVIDIA დრაივერით შეზღუდულია (Reflex ჩართ.)."
+msgid "Limited by the NVIDIA driver now (Low delay is on)."
+msgstr "NVIDIA დრაივერი ზღვარს აწესებს (დაბალი დაყოვნება ჩართ.)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1424,8 +1653,8 @@ msgstr "ზოგავს დროს თამაშის საკუთა
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Foveated (VRS) is off: switch it on first."
-msgstr "Foveated (VRS) გამორთულია: ჯერ ჩართეთ."
+msgid "Foveated rendering is off: switch it on first."
+msgstr "Foveated rendering გამორთულია: ჯერ ჩართე."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1443,11 +1672,11 @@ msgstr "ყალბი მზერა (vrs_eye_fake = 1): მკვეთრ�
 #: src/inject.cpp
 #, c-format
 msgid ""
-"Foveated (VRS) was off at the game's start: save (Shift+F12) and restart the game to ask the "
+"Foveated rendering was off at the game's start: save (Shift+F12) and restart the game to ask the "
 "headset for eye gaze."
 msgstr ""
-"Foveated (VRS) გამორთ. იყო თამაშის დაწყებისას: შეინახეთ (Shift+F12) და გადატვირთეთ თამაში მზერის "
-"მოსათხოვნად."
+"Foveated rendering გამორთული იყო თამაშის დაწყებისას: შეინახე (Shift+F12) და გადატვირთე თამაში, "
+"რომ ჰედსეტს მზერა მოსთხოვოს."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1883,7 +2112,7 @@ msgstr "ETS2 / ATS DLAA & DLSS მოდი v%hs - მოწყობის მ�
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "all settings (flat and VR)"
-msgstr "ყველა პარამეტრი (ბრტყელი და VR)"
+msgstr "ყველა პარ. (ბრტყ. და VR)"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1893,7 +2122,7 @@ msgstr "VR პარამეტრები"
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Flat settings"
-msgstr "ბრტყელი პარამეტრები"
+msgstr "ბრტყელი პარ."
 
 #. Heading of a column (short)
 #: src/inject.cpp
@@ -1944,15 +2173,41 @@ msgstr "დახურული (%d)"
 msgid "Mode"
 msgstr "რეჟიმი"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLSS)"
+msgstr "შერევა (TAA + DLSS)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLAA)"
+msgstr "შერევა (TAA + DLAA)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLSS"
 msgstr "DLSS"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLAA"
 msgstr "DLAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Mix amount"
+msgstr "შერევის რაოდენობა"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d %% TAA"
+msgstr "%d %% TAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Quality preset"
+msgstr "ხარისხის პრესეტი"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -1978,7 +2233,7 @@ msgstr "%.1f (გამორთ.)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Sharpen width"
+msgid "Sharpness size"
 msgstr "სიმკვეთრის სიგანე"
 
 #. Value column (about 20 Latin characters)
@@ -2000,8 +2255,8 @@ msgstr "%.2f (გამორთ.)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Cut-out texture sharpness"
-msgstr "ამოჭრილის სიმკვეთრე"
+msgid "Leaves and fences sharpness"
+msgstr "ფოთლები და ღობე სიმკვ."
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2030,6 +2285,11 @@ msgstr "მხოლოდ VR"
 msgid "100 %% (flat)"
 msgstr "100 %% (ბრტყელი)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Track moving parts"
+msgstr "ნაწილთა თვალთვალი"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "old stencil ids"
@@ -2037,12 +2297,12 @@ msgstr "ძველი stencil id-ები"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirror DLAA"
-msgstr "სარკეების DLAA"
+msgid "Smooth mirrors"
+msgstr "რბილი სარკეები"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirrors in turns"
+msgid "Mirrors take turns (faster)"
 msgstr "სარკეები რიგრიგობით"
 
 #. Value column (about 20 Latin characters)
@@ -2052,13 +2312,23 @@ msgstr "ჩართ. (რეჟიმი 3)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Thin-wire motion"
-msgstr "წვრილი სადენის მოძრ."
+msgid "Wire fix: motion"
+msgstr "სადენის გასწ.: მოძრაობა"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Wire fix: depth"
+msgstr "სადენის გასწ.: სიღრმე"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no A2C)"
 msgstr "ჩართ. (A2C-გარეშე)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Thicker wires (test)"
+msgstr "სქელი სადენები (ტესტი)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2067,13 +2337,23 @@ msgstr "ჩართ. (ექსპერიმ.)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "DLAA before tonemap"
-msgstr "DLAA tonemap-მდე"
+msgid "Run DLAA earlier (test, flat)"
+msgstr "DLAA ადრე (ტესტი, ბრტყ.)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Run DLAA earlier (test)"
+msgstr "DLAA ადრე (ტესტი)"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "flat only"
 msgstr "მხოლოდ ბრტყელი"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Glass and fence fix"
+msgstr "მინა-ღობის გასწორება"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2082,8 +2362,8 @@ msgstr "გამორთ. (VR ბიუჯეტი)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Light glow ghosting fix"
-msgstr "შუქის აჩრდილის შესწორ."
+msgid "Light trail fix"
+msgstr "სინათლის კვალის გასწ."
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2092,33 +2372,18 @@ msgstr "DLAA გამორთ. (არ ინახება)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Game TAA"
-msgstr "თამაშის TAA"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid "mix"
-msgstr "შერევა"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid "split"
-msgstr "გაყოფა"
+msgid "Split with game TAA"
+msgstr "გაყოფა თამაშის TAA-თი"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Game TAA share"
-msgstr "თამაშის TAA წილი"
+msgid "Split line position"
+msgstr "გაყოფის ხაზის პოზიცია"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Split position"
-msgstr "გაყოფის პოზიცია"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "Split compares"
-msgstr "გაყოფა ადარებს"
+msgid "Split: left | right"
+msgstr "გაყოფა: მარც. | მარჯ."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2196,7 +2461,7 @@ msgstr "დახრა"
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "Turn"
-msgstr "შებრუნება"
+msgstr "შებრ."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2235,8 +2500,8 @@ msgstr "ჩართ. (გაჩერდა)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated (VRS)"
-msgstr "Foveated (VRS)"
+msgid "Foveated rendering"
+msgstr "Foveated rendering"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2255,8 +2520,8 @@ msgstr "Foveated ზომა"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated passes"
-msgstr "Foveated გავლებები"
+msgid "Foveated: lighting too"
+msgstr "Foveated: განათებაც"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2315,13 +2580,13 @@ msgstr "ჩართ. (ელოდება)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Hidden area mask (VR)"
-msgstr "დამალ. არის ნიღაბი (VR)"
+msgid "Skip hidden edges (VR)"
+msgstr "დამალული კიდეები (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Hidden area mask"
-msgstr "დამალ. არის ნიღაბი"
+msgid "Skip hidden edges"
+msgstr "დამალული კიდეები"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2336,13 +2601,13 @@ msgstr "ჩართ. (FPS ლიმ.)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Reflex (flat)"
-msgstr "Reflex (ბრტყელი)"
+msgid "Low delay (Reflex, flat)"
+msgstr "დაბალი დაყოვნება (Reflex)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Reflex"
-msgstr "Reflex"
+msgid "Low delay (Reflex)"
+msgstr "დაბალი დაყოვნება (Reflex)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2398,8 +2663,108 @@ msgstr "შერეული (dlaa.ini)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Logging"
-msgstr "ჟურნალი"
+msgid "AMD cache cores (X3D)"
+msgstr "AMD ქეშის ბირთვები (X3D)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (auto)"
+msgstr "ჩართ. (ავტო)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Send everything"
+msgstr "გაგზავნე ყველა"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Log detail"
+msgstr "ჟურნალის დეტალი"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Rewind before key"
+msgstr "უკან გადახვევა"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d frames (dlaa.ini)"
+msgstr "%d კადრი (dlaa.ini)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture includes"
+msgstr "გადაღება შეიცავს"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Full"
+msgstr "სრული"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Quick"
+msgstr "სწრაფი"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "change"
+msgstr "შეცვლა"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture key"
+msgstr "გადაღების ღილაკი"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%hs (press twice)"
+msgstr "%hs (დააჭირე 2-ჯერ)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Keep captures"
+msgstr "გადაღებების შენახვა"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "all"
+msgstr "ყველა"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture now"
+msgstr "გადაღება ახლა"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "capturing %d / %d"
+msgstr "ვიღებ %d / %d"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "writing (%d files)"
+msgstr "იწერება (%d ფაილი)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "done: %d parts, %d MB"
+msgstr "მზად: %d ნაწ., %d MB"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "failed (see the log)"
+msgstr "შეცდ. (იხ. ჟურნ.)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "ready"
+msgstr "მზადაა"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2494,11 +2859,6 @@ msgstr "პანელი თქვენკენ"
 #: src/inject.cpp
 msgid "Menu keys"
 msgstr "მენიუს კლავიშები"
-
-#. Value column (about 20 Latin characters)
-#: src/inject.cpp
-msgid "Off"
-msgstr "გამორთ."
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2597,6 +2957,16 @@ msgstr "FPS გაუმჭვირვალობა"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS graph length"
+msgstr "FPS გრაფიკის სიგრძე"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "with a graph only"
+msgstr "მხოლოდ გრაფიკით"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "FPS distance (VR)"
 msgstr "FPS დისტანცია (VR)"
 
@@ -2648,6 +3018,20 @@ msgstr "დააჭირეთ %hs %hs წმ გადასაყ. %ls"
 #: src/inject.cpp
 #, c-format
 msgid ""
+"%hs = capture now (the menu closes first). The zip (dlaa_selftest folder next to the DLL) holds "
+"system info, the mod's and the game's log, dlaa.ini, your picture and DLAA off; Full adds what "
+"DLSS got and the A/B sets; rewind adds the moment before. Your user name and home folder are "
+"removed. %ls"
+msgstr ""
+"%hs = გადაღება ახლა (მენიუ ჯერ იხურება). zip (DLL-ის გვერდით dlaa_selftest) შეიცავს სისტემის "
+"ინფოს, მოდისა და თამაშის ჟურნალს, dlaa.ini-ს, შენს სურათს და DLAA გამორთულს; სრული ამატებს "
+"DLSS-ის მონაცემებს და A/B ნაკრებებს; უკან გადახვევა წინა მომენტს. მომხმარებლის სახელი და პირადი "
+"საქაღალდე ამოღებულია. %ls"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
 "The 5 keys that open and drive this menu: %hs opens / closes it (the value), %hs / %hs / %hs / "
 "%hs move (Hotkey column). While the menu is open only these 5 are kept from the game. %hs: change "
 "them on the Hotkeys page."
@@ -2693,9 +3077,6 @@ msgstr "ინფორმაცია"
 msgid "debug"
 msgstr "გამართვა"
 
-#~ msgid "Panel settings"
-#~ msgstr "პანელის პარამეტრები"
-
-#~ msgid "FPS counter settings"
-#~ msgstr "FPS მრიცხველი"
+#~ msgid "The last one: %d zip parts of at most 24 MB, %d MB in all (folder %.0f MB): attach them all."
+#~ msgstr "ბოლო: %d zip ნაწილი, თითო მაქსიმუმ 24 MB, სულ %d MB (საქაღალდე %.0f MB): დაამატე ყველა."
 

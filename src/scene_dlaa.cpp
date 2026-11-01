@@ -2256,7 +2256,12 @@ bool SceneDlaa::CompositeInto(ID3D11DeviceContext* ctx, ID3D11Texture2D* dst) {
         ctx->GetDevice(&dev);
         D3D11_TEXTURE2D_DESC dd{};
         dst->GetDesc(&dd);
-        const HRESULT hr = dev ? dev->CreateRenderTargetView(dst, nullptr, &m_intoRtv) : E_FAIL;
+        // phase 90c: an LDR target (the game's blit source, VR test 2026-11-01) -- a TYPELESS one gets an _SRGB view, so like the
+        // post-blit composite the mix blends in linear: the composite decodes its bytes and the RTV re-encodes them
+        D3D11_RENDER_TARGET_VIEW_DESC rd{};
+        rd.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB; rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D; rd.Texture2D.MipSlice = 0;
+        const bool typeless = dd.Format == DXGI_FORMAT_R8G8B8A8_TYPELESS;
+        const HRESULT hr = dev ? dev->CreateRenderTargetView(dst, typeless ? &rd : nullptr, &m_intoRtv) : E_FAIL;
         if (FAILED(hr) || !m_intoRtv) {
             static int warned = 0;
             if (warned++ < 3)
@@ -2267,6 +2272,7 @@ bool SceneDlaa::CompositeInto(ID3D11DeviceContext* ctx, ID3D11Texture2D* dst) {
             return false;
         }
         m_intoTex = dst;
+        m_intoSrgb = typeless || dd.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB || dd.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
     }
     ID3D11RenderTargetView*   rtv[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
     ID3D11DepthStencilView*   dsv = nullptr;
@@ -2275,7 +2281,7 @@ bool SceneDlaa::CompositeInto(ID3D11DeviceContext* ctx, ID3D11Texture2D* dst) {
     ctx->PSGetShaderResources(0, 8, srv);                // before our bind: binding dst as a target unbinds it as an input
     ID3D11RenderTargetView* ours = m_intoRtv.Get();
     ctx->OMSetRenderTargets(1, &ours, nullptr);
-    const bool ok = Composite(ctx, 0, 0, false);
+    const bool ok = Composite(ctx, 0, 0, m_intoSrgb);
     ctx->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, rtv, dsv);
     ctx->PSSetShaderResources(0, 8, srv);
     for (auto*& r : rtv) if (r) { r->Release(); r = nullptr; }

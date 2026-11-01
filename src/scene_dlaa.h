@@ -473,6 +473,7 @@ private:
     bool                                              m_sharpRes = false;    // m_sharp* + CS + CB valid for m_w x m_h
     bool                                              m_noSharpen = false;   // v0.8.1 SetNoSharpen (sharpness treated as 0)
     bool                                              m_compOut = false;     // phase 82 SetCompositeOut
+    bool                                              m_intoSrgb = false;    // phase 90c: CompositeInto target is _SRGB
     float                                             m_mixShare = 1.0f;     // phase 82 SetMix
     bool                                              m_mixSplit = false;
     int                                               m_splitPct = 50;       // phase 82: the split line in % of the width

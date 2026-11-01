@@ -1,3 +1,7 @@
+// v0.16.0 -- phases 77-90: cut-out mips (77), roof / fence shadow jitter (78), rewind capture (79), outside AA (81), game TAA
+//           mix + split (82-86, 90: Mode row Mix (TAA + DLAA) / Mix (TAA + DLSS), console-off hint 90b, stretched-blit
+//           mix 90c), In-game UI (83-85), plain menu + hidden rows (87), fps graph (88), one-press bug report (89, zips
+//           by kind 89h), translations. Details per phase below and in docs/DEVELOPMENT.md.
 // phase 77 -- COVERAGE-PRESERVING ALPHA MIPS for cut-out BC3 textures (cutout_mips.h; dlaa.ini cutout_mips 0/1, default 0,
 //           startup only, no menu row / key). Far chain-link fences shimmered and vanished: SCS's alpha mips are a 2x2 box + 0.5
 //           threshold (1-2 texel wires gone after 2-3 mips; ATS fence coverage 17.5 % -> 6.2 % -> 0). The UpdateSubresource1
@@ -785,6 +789,10 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <functional>                                // phase 89b: the capture writer's jobs
+#include <condition_variable>                        // phase 89e: the writer pool
+#include <deque>
+#include <algorithm>
 #include <intrin.h>
 #include <MinHook.h>
 #include "log.h"
@@ -795,6 +803,8 @@
 #include "hotkey_scan.h"                           // v0.12.1 phase 50: the Hotkeys page's fresh-press detector (pure logic)
 #ifdef WITH_DLAA
 #include "scene_dlaa.h"
+#include <psapi.h>                                  // phase 89c: sysinfo module list (K32EnumProcessModules)
+#include <wincodec.h>                               // phase 89b: the capture's PNGs (WIC)
 #include "preview_blit.h"
 #include "menu.h"                                  // v0.10.0 in-game tuning menu panel
 #include "lang.h"                                  // phase 74: the menu in the game's languages (TR / TRF)
@@ -818,6 +828,7 @@
 #include "vr_ui.h"                                  // phase 83: the game's VR UI placement typed into its console (pure logic; both builds)
 #include "cpu_tuning.h"                            // phase 54: P-core preference / priority / EcoQoS opt-out (cpu_pcore, cpu_priority, cpu_no_throttle)
 #include "flat_views.h"                             // v0.12.0 issue #12: flat multi-view (multi-monitor) detection (both builds)
+#include "bug_report.h"                             // phase 89b: the one-press bug report (zip, scrubber, plan; both builds)
 
 namespace {
 
@@ -859,6 +870,8 @@ bool     g_vkWasDown[256] = {};          // edge detect per VK, refreshed every 
 // window / DirectInput threads get WHAT to hide from MenuPublishHide -> KeySwallow::SetMenuHide) and the panel placement
 // (dlaa.ini menu_*; flat and VR have their own).
 std::atomic<bool> g_menuOpen{false};
+bool g_capStatusOn = false;                      // phase 89e: the bug report status box shows (CaptureAtPresent, per Present)
+wchar_t g_capL1[64] = {}, g_capL2[64] = {};
 int      g_menuX = 2, g_menuY = 8;       // flat: % of the picture width / height to the panel's left / top edge (0..90)
 float    g_menuScale = 1.0f;             // flat: 0.5..2.0 (1 = 720 px wide at 1080 p, scales with the picture height)
 int      g_menuVrX = 0, g_menuVrY = -5;  // VR: % of the eye width / height, panel CENTRE from the eye's optical centre (-50..50)
@@ -1076,6 +1089,19 @@ int               g_wireDiagWindows = 0;
 // (default 100; 0 = off: NGX gets no mask), live from the menu's "Light glow ghosting fix" row (25 % steps)
 int               g_biasCfg = 100;
 bool              g_biasExplicit = false;   // set in dlaa.ini or changed in the menu -> SaveSettings writes dlss_bias_mask
+// phase 89b-d BUG REPORT (src/bug_report.h, the capture below SelfTestStep, the menu's "Bug report" group): dlaa.ini rewind_secs
+// (0 / 0.5 / 1 / 2 / 3 s, default 0 = off; -1 = not set: rewind_frames decides, the phase 79 key), rewind_diag_frames (the planes
+// DLSS got, for the last N rewind frames; default 8), capture_mode (1 quick, 2 full), capture_keep (3 / 5 / 10 / 0 = all, default 5),
+// report_all (Send everything: forces log_level debug, rewind 2 s, capture_mode 2 LIVE; only report_all itself is saved -- Save
+// writes the values from before it, g_ra*).
+float          g_rewindSecs       = -1.0f;
+int            g_rewindDiag       = 4;   // (phase 89e: 8 -> 4)
+int            g_captureMode      = BugReport::kCaptureQuick;
+int            g_captureKeep      = 5;
+int            g_reportAll        = 0;
+int            g_raLog = 1, g_raMode = BugReport::kCaptureQuick;   // report_all: the values from before it (restored at off)
+float          g_raRewind = 0.0f;
+bool           g_bugExplicit      = false;   // a Bug report row changed / the keys set in dlaa.ini -> SaveSettings writes them
 // phase 82 GAME TAA (src/game_taa.h; the "phase 82" block above HandlePossibleBlit): dlaa.ini game_taa 0 off / 1 mix / 2 TAA only /
 // 3 split (default 0) and game_taa_mix = the TAA share of the mix in % (default 50), live from the menu's "Game TAA" / "Game TAA
 // share" rows (Upscaling group)
@@ -1869,6 +1895,11 @@ void ToggleDrawIds(uint64_t n);          // v0.10.0 phase 2 Alt+F5: per-draw mot
 void ToggleMirrors(uint64_t n);          // v0.10.0 phase 2 Alt+F6: mirror DLAA on / off live
 void TogglePreTonemap(uint64_t n);       // v0.10.0 phase 4 Alt+F7: main-scene DLAA before / after the tonemap
 void RequestMvDump(uint64_t n);          // v0.10.0 phase 4 Alt+F8: per-draw MV dump of the next frame
+void CaptureRequest(uint64_t n, bool now, const char* who);   // phase 89b: the bug report capture (key: double press; row: now)
+void CaptureAtPresent(uint64_t n);       // phase 89b: frame-time ring + the capture watchdog (per Present)
+bool CaptureStatus(wchar_t* l1, wchar_t* l2, size_t cap);   // phase 89e: the status box's lines (false = none now)
+void MenuOpenAt(int row, uint64_t n, const char* why);      // phase 89e: open the menu (on a row)
+void MenuOpenCapNow(uint64_t n);                             // phase 89e: ... on the Capture now row
 void CycleProfile(uint64_t n, int dir = +1); // v0.10.0 phase 10 Alt+F9: perf_profile high -> medium -> low (dir -1: back)
 void ApplyProfile(bool live, char* changed, size_t cap);   // v0.10.0 phase 10: the profile's defaults for the non-explicit keys
 #endif
@@ -1964,6 +1995,7 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
         }
         TraceAtPresent(sc, n);                   // F11 frame-trace state machine (v0.4.3)
 #ifdef WITH_DLAA
+        CaptureAtPresent(n);                     // phase 89b: frame-time ring + the capture's watchdog
         CheckPresetFallback(n);                  // v0.5.7: a live preset create failed -> told by ear
         if (g_fpsShow || g_menuOpen.load(std::memory_order_relaxed)) FpsTick();   // v0.10.0 fps meter (box / menu)
         MenuKeys(n);                             // v0.10.0 tuning menu (Delete, arrows) -- before the other user keys
@@ -2038,11 +2070,7 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
                 g_selfTestRequest = true;
                 LogDbg("self-test requested (%s, Present #%llu)", KeyName(KA_SELFTEST), (unsigned long long)n);
             }
-            if (KeyHit(KA_SHIMMER_CAP)) {                      // phase 71: shimmer capture (DLAA on, then off)
-                g_selfTestShimmer = true;
-                g_selfTestRequest = true;
-                Log("shimmer capture requested (%s, Present #%llu)", KeyName(KA_SHIMMER_CAP), (unsigned long long)n);
-            }
+            if (KeyHit(KA_SHIMMER_CAP)) CaptureRequest(n, false, KeyName(KA_SHIMMER_CAP));   // phase 71 / 89b: double press
             if (KeyHit(KA_SNAPSHOT)) {                         // NGX input snapshot (old F10)
                 g_snapRequest = true;
                 LogDbg("NGX input snapshot requested (%s, Present #%llu)", KeyName(KA_SNAPSHOT), (unsigned long long)n);
@@ -2063,7 +2091,7 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
         MenuOverlaySet();                        // v0.10.3 phase 29: the VR quad layers (XrHook; VR launches only)
         SceneDlaa::SetJitterSign(g_signX, g_signY);   // phase 81: outside AA undoes the SHIFT (NGX jitter = sign x shift); every
                                                       // writer (dlaa.ini, the sign key, the F9 self-test) runs between Presents
-        if (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)
+        if (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow || g_capStatusOn)
             MenuDrawAtPresent(sc, bctx);         // v0.10.0 tuning menu panel + fps box (flat / mirror)
 #endif
     }
@@ -3210,7 +3238,7 @@ bool PathNextToDll(const wchar_t* name, wchar_t* path);   // defined below
 // v0.10.0 (Reset row): an entry with an EMPTY val ("") means "remove this key": every matching line is dropped (not replaced), and
 // the key is never appended. A missing file with only removals is left missing (nothing to write).
 // Returns true only if the temp was fully written AND the replace succeeded.
-constexpr int kIniMaxKeys = 80;                    // v0.10.3 phase 28: WriteIniPreserving's key cap (was 32; phase 44: 48 -> 56; phase 54: 64; phase 70: 80)
+constexpr int kIniMaxKeys = 96;                    // v0.10.3 phase 28: WriteIniPreserving's key cap (was 32; phase 44: 48 -> 56; phase 54: 64; phase 70: 80)
 struct IniKV { const char* key; char val[48]; };   // val[0] == 0: delete the key's line(s) (WriteIniPreserving)
                                                    // (v0.10.2: was 32 -- "Ctrl+Shift+Alt+NumpadSubtract, Wheel128" is 39)
 // phase 51: the raw read (binary: the line endings survive) and the safe write (dlaa.ini.tmp, then MoveFileExW over the
@@ -3300,7 +3328,15 @@ bool WriteIniPreserving(const IniKV* kv, int nkv) {
     return WriteIniAtomic(path, tmp, out);
 }
 
+namespace Cap { extern std::atomic<int> g_state; }        // phase 89 (defined with the bug report): 1 = the capture's sets run
 void SaveSettings(uint64_t n) {
+    // review fix (2026-11-01): during a capture's sets some switches hold capture values (motion parts off, log level 4);
+    // a Save then would write those instead of the player's own
+    if (Cap::g_state.load() == 1) {
+        LogWarn("settings save refused: a bug report capture is running (about 1 s) -- press Save again when it is done");
+        PlayTones(1, 200, 400, 0);
+        return;
+    }
     const char* preset = SceneDlaa::DlssPresetName();    // "default" / "E" / "F" / "M" (the name LoadConfig reads)
     const int   area   = g_launchVr == 0 ? g_vrArea : SceneDlaa::Area();   // v0.7.4: flat keeps the VR value in the file
     const float sharp  = SceneDlaa::Sharpness();
@@ -3392,6 +3428,12 @@ void SaveSettings(uint64_t n) {
     }
     if (g_xrHiddenMaskExplicit) snprintf(add("xr_hidden_mask"), sizeof(kv[0].val), "%d", g_xrHiddenMask);   // phase 40
     if (g_biasExplicit) snprintf(add("dlss_bias_mask"), sizeof(kv[0].val), "%d", g_biasCfg);   // phase 49 (glow ghosting row)
+    if (g_bugExplicit) {                                  // phase 89d (the Bug report rows; report_all's forced values never)
+        if (g_rewindSecs >= 0.0f) snprintf(add("rewind_secs"), sizeof(kv[0].val), "%.1f", (double)g_rewindSecs);
+        snprintf(add("capture_mode"), sizeof(kv[0].val), "%d", g_captureMode);
+        snprintf(add("capture_keep"), sizeof(kv[0].val), "%d", g_captureKeep);
+        snprintf(add("report_all"), sizeof(kv[0].val), "%d", g_reportAll);
+    }
     if (g_gameTaaExplicit) {                              // phase 82 (the Game TAA rows)
         snprintf(add("game_taa"), sizeof(kv[0].val), "%d", g_gameTaa);
         snprintf(add("game_taa_ver"), sizeof(kv[0].val), "%d", GameTaa::kIniVersion);
@@ -3405,7 +3447,7 @@ void SaveSettings(uint64_t n) {
         snprintf(add("cpu_no_throttle"), sizeof(kv[0].val), "%d", g_cpuNoThrottle);
     }
     if (g_cpuPinExplicit) snprintf(add("cpu_cache_pin"), sizeof(kv[0].val), "%d", g_cpuCachePin);   // phase 87 (AMD cache cores row)
-    if (g_logLevelExplicit) snprintf(add("log_level"), sizeof(kv[0].val), "%d", LogLevel());  // phase 39 (Logging row)
+    if (g_logLevelExplicit) snprintf(add("log_level"), sizeof(kv[0].val), "%d", g_reportAll ? g_raLog : LogLevel());   // 89d: not the forced one  // phase 39 (Logging row)
     if (g_langExplicit) snprintf(add("language"), sizeof(kv[0].val), "%s", Lang::Setting());   // phase 74 (Language row)
     if (g_vrsExplicit) {                                  // phase 34 (the Foveated rows)
         snprintf(add("vrs"), sizeof(kv[0].val), "%d", g_vrsOn);
@@ -3422,7 +3464,7 @@ void SaveSettings(uint64_t n) {
 #ifdef WITH_DLAA
     if (g_mvDilateExplicit) snprintf(add("dlaa_mv_dilate"), sizeof(kv[0].val), "%d", DlaaProcessor::MvDilate() ? 1 : 0);   // phase 60 (Alt+F10)
 #endif
-    char vrsW[352] = "";                                  // (phase 82: 288, + game_taa; phase 39: was 64, + log_level; phase 40: + xr_hidden_mask; phase 42: + vrs_passes;
+    char vrsW[384] = "";                                  // (phase 89: 384; phase 82: 288, + game_taa; phase 39: was 64, + log_level; phase 40: + xr_hidden_mask; phase 42: + vrs_passes;
                                                           //  phase 49: 128 -> 160, + dlss_bias_mask; phase 52: 160 -> 208, + the frame rate keys;
                                                           //  phase 59: 224, + vrs_eye; phase 59f: 256, + vrs_strength)
     if (g_vrsExplicit) snprintf(vrsW, sizeof(vrsW), " vrs=%d vrs_inner=%d vrs_outer=%d", g_vrsOn, g_vrsInner, g_vrsOuter);
@@ -3505,10 +3547,17 @@ void SaveSettings(uint64_t n) {
 //   0 = off  (raw game picture)                                             -- 1 low beep
 // The render size itself is the game's r_scale: at 100 % scaling modes 1 and 2 give the same picture.
 // v0.10.0: dir -1 walks the cycle backwards (the tuning menu's Left key); the End key is dir +1.
+void RaaRequest(uint64_t nowMs);                         // phase 86 (with the In-game UI block)
 void CycleMode(uint64_t n, int dir) {
     const bool wasOn = g_dlaaOn.load();
-    const int cur = !wasOn ? 0 : (g_dlssUpscale.load() ? 2 : 1);
-    int next = dir < 0 ? (cur + 2) % 3 : (cur + 1) % 3;   // forward: off -> DLAA -> DLSS -> off
+    // phase 90 (user request 2026-11-01): the Mode row / End key also reach the game's TAA mix: off -> DLAA -> DLSS ->
+    // Mix (TAA + DLAA) -> Mix (TAA + DLSS) -> off. Mix = game_taa 1 on top of the DLAA / DLSS mode; the split stays in the
+    // Compare and test group (a split is replaced by Mix here, and left alone by the plain modes).
+    const bool wasMix = wasOn && g_gameTaa == GameTaa::kMix;
+    const int curFull = (!wasOn ? 0 : (g_dlssUpscale.load() ? 2 : 1)) + (wasMix ? 2 : 0);
+    const int nextFull = dir < 0 ? (curFull + 4) % 5 : (curFull + 1) % 5;
+    const bool wantMix = nextFull >= 3;
+    int next = wantMix ? nextFull - 2 : nextFull;         // the mode key's value: 0 off, 1 DLAA, 2 DLSS
     if (next != 0 && !wasOn && g_gameDeviceChanged) {
         LogWarn("mode stays OFF (mode key, Present #%llu): the game render device changed -- restart the game", (unsigned long long)n);
         PlayTones(1, 200, 400, 0);
@@ -3521,13 +3570,24 @@ void CycleMode(uint64_t n, int dir) {
         if (!wasOn) MvInvalidate();                      // stale MV candidates from before the off period
     }
     g_dlaaOn = next != 0;
-    IniKV kv[1] = { { "mode", {} } };
+    // phase 90: into / out of Mix switches game_taa (and the game's Anti-aliasing, phase 86); saved at once like the mode
+    const bool taaChange = wantMix ? g_gameTaa != GameTaa::kMix : g_gameTaa == GameTaa::kMix;
+    if (taaChange) {
+        g_gameTaa = wantMix ? GameTaa::kMix : GameTaa::kOff;
+        g_gameTaaExplicit = true;
+        g_resetNext = true;
+        RaaRequest(GetTickCount64());
+    }
+    IniKV kv[3] = { { "mode", {} }, { "game_taa", {} }, { "game_taa_ver", {} } };
     snprintf(kv[0].val, sizeof(kv[0].val), "%d", next);
-    const bool saved = WriteIniPreserving(kv, 1);
-    Log("mode %s (mode key, Present #%llu)%s", next == 1 ? "DLAA" : (next == 2 ? "DLSS" : "OFF"), (unsigned long long)n,
+    snprintf(kv[1].val, sizeof(kv[1].val), "%d", g_gameTaa);
+    snprintf(kv[2].val, sizeof(kv[2].val), "%d", GameTaa::kIniVersion);
+    const bool saved = WriteIniPreserving(kv, taaChange ? 3 : 1);
+    Log("mode %s%s (mode key, Present #%llu)%s", next == 1 ? "DLAA" : (next == 2 ? "DLSS" : "OFF"),
+        wantMix ? " + game TAA mix (game_taa 1)" : (taaChange ? " (game TAA mix off: game_taa 0)" : ""), (unsigned long long)n,
         saved ? " -- saved to dlaa.ini" : " -- dlaa.ini save FAILED");
     if (next == 0) PlayTones(1, 300, 150, 0);
-    else           PlayTones(next, 1200, 150, 100);
+    else           PlayTones(nextFull, 1200, 150, 100);
     OnLiveTuningChange();
 }
 
@@ -4728,7 +4788,7 @@ bool PvIsBackbufferTarget(ID3D11Texture2D* tex) {
 
 // v0.10.0 phase 15: the VR tuning menu panel / fps box must go onto the menu / truck-preview eye pictures (MenuDrawPreview).
 inline bool MenuVrPreviewWanted() {
-    return g_launchVr == 1 && (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow);
+    return g_launchVr == 1 && (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow || g_capStatusOn);
 }
 // v0.10.0 phase 15: the preview MV candidate collection and the tile-layout / eye-verdict readbacks run while the preview DLAA
 // runs -- and in VR also while the panel / fps box is up with DLAA off or passive: MenuDrawPreview needs the eye of each
@@ -11508,6 +11568,8 @@ bool DumpFrame(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, const wchar_t* pa
 // v0.10.0 phase 26: called by hkPresent BEFORE the original Present. When SelfTestStep armed g_testFinalPending (same frame,
 // at the game's blit), dump the presenting swap chain's back buffer as final_<mode>_<n>.bmp. No reference on the back
 // buffer is kept (ResizeBuffers must stay possible).
+namespace Cap { bool SavePath(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, const D3D11_BOX* box, const std::wstring& path, bool raw);
+                const D3D11_BOX* CropOf(ID3D11Texture2D* tex, D3D11_BOX* b); }
 void SelfTestFinalDump(IDXGISwapChain* sc) {
     if (!g_testFinalPending) return;
     g_testFinalPending = false;
@@ -11530,7 +11592,11 @@ void SelfTestFinalDump(IDXGISwapChain* sc) {
     const wchar_t* nmW = wcsrchr(g_testFinalPath, L'\\');
     char nm[64]; WideCharToMultiByte(CP_UTF8, 0, nmW ? nmW + 1 : g_testFinalPath, -1, nm, sizeof(nm), nullptr, nullptr);
     t_inDlaa = true;                                       // our own work: keep context hooks passive
-    const bool ok = DumpFrameWith(ctx, bb.Get(), g_testFinalPath, g_stagingBb, g_stagBbW, g_stagBbH, g_stagBbFmt, bgra);
+    const size_t fl = wcslen(g_testFinalPath);
+    const bool png = fl > 4 && !_wcsicmp(g_testFinalPath + fl - 4, L".png");   // phase 89b: the capture's final picture (PNG, async)
+    D3D11_BOX fbox{};                                      // phase 89e: cropped like the frames (CropOf)
+    const bool ok = png ? Cap::SavePath(ctx, bb.Get(), Cap::CropOf(bb.Get(), &fbox), g_testFinalPath, false)   // (BGRA from the format itself)
+                        : DumpFrameWith(ctx, bb.Get(), g_testFinalPath, g_stagingBb, g_stagBbW, g_stagBbH, g_stagBbFmt, bgra);
     t_inDlaa = false;
     LogDbg("self-test: %s %s (back buffer %ux%u fmt=%d)", ok ? "wrote" : "FAILED to write", nm, bd.Width, bd.Height, (int)bd.Format);
 }
@@ -11551,186 +11617,793 @@ void CopyIntoTestDir(const wchar_t* name) {
     fclose(in);
 }
 
-void FinishSelfTest() {
-    g_dlaaOn = g_savedOn; g_jitterOnly = g_savedJo; g_signX = g_savedSx; g_signY = g_savedSy;
-    g_resetNext = true;
-    g_testRunning = false;
-    if (g_testShimmer) {                                   // phase 71
-        Log("shimmer capture done -- BMPs + dlaa_inject.log + dlaa.ini in the dlaa_selftest\\shimmer_* folder");
-        CopyIntoTestDir(L"dlaa_inject.log");
-        CopyIntoTestDir(L"dlaa.ini");
-        Beep(1200, 120); Beep(1600, 120);                  // two rising beeps = done
-    }
-    LogDbg("self-test done (restored dlaa=%d jitter-only=%d sign=%+d,%+d)",
-        (int)g_savedOn, (int)g_savedJo, g_signX, g_signY);
-}
+// ---- phase 89b/c: the ONE-PRESS BUG REPORT (Insert; src/bug_report.h) -------------------------------------------------------
+// One press pair of key_shimmer_capture (two presses within 1 s: the first only arms, one short beep) or the menu's "Capture now"
+// row writes dlaa_selftest\shimmer_<date>_<time>\ and, when everything is written, dlaa_selftest\shimmer_<date>_<time>.zip:
+//   * the rewind ring (rewind_secs / rewind_frames: the frames BEFORE the key) as PNG, + its diag planes (rewind_diag_frames);
+//   * consecutive frame sets, eye 0 (VR) / the main view (flat), PNG, cropped to the DLAA area square when the picture is bigger:
+//     capture_mode 1 (quick, default) = your settings + DLAA off; 2 (full) = + the planes DLSS got (colour in, NGX out, MV
+//     colour view made from the MVs, depth), raw MV / depth of one frame (.bin), the Ctrl+F6 view, moving
+//     parts off, all MVs off, jitter only (BugReport::Plan);
+//   * sysinfo.txt, info.txt (per frame: jitter / shift / NGX values), README.txt, dlaa_inject.log, dlaa.ini, the tail of the game's
+//     game.log.txt -- every text file through the privacy scrubber (user name in paths, home folder, Steam root).
+// The render thread only switches settings and reads textures back (one Map per plane and frame: a GPU sync, inside the capture
+// window); PNG encoding, the copies, the zip and the pruning (capture_keep) run on the rewind writer thread. Every switched
+// setting is restored at the end, also when the capture stops early (device change, no eye-0 blit for 120 Presents: the
+// watchdog in PresentFrameWork). The log level is raised to debug for the capture's own duration.
+namespace Cap {
+const BugReport::CapSet* g_plan = nullptr;
+int  g_planN = 0, g_set = 0, g_settle = 0, g_dumped = 0;
+struct Base { bool dlaa, jo, mvDebug, mvOn; int objMode; int logLevel; bool beeps; };
+Base g_base{};
+bool g_partsSwitched = false;
+uint64_t g_lastStep = 0;                          // Present of the last SelfTestStep while capturing (the watchdog)
+uint64_t g_dlFrames = 0;                          // g_dlaa[0].Frames() at the last diag dump (only a fresh Run is dumped)
+int  g_frameTotal = 0, g_frameDone = 0;
+int  g_skipped = 0;                               // review fix: frames not saved because the writer was > kQueueCap behind
+std::string g_sys;                                // sysinfo part 1 (render thread state at the key)
+std::atomic<int> g_state{0};                      // 0 ready, 1 capturing, 2 writing, 3 done, 4 failed
+std::atomic<int> g_zipMB{0};
+std::atomic<uint64_t> g_dirBytes{0};
+BugReport::DoublePress g_keyGuard;
+wchar_t g_zipPath[MAX_PATH] = {};
+std::atomic<int> g_zipParts{0};                   // phase 89g: the part zips of the last capture
+std::atomic<int> g_zipMain{0};                    // phase 89h: of them the _main zips (the ones to attach)
+std::atomic<int> g_zipPct{-1};                    // phase 89e: the zip's progress (the status box), -1 = not zipping
+char g_failWhy[96] = {};                          // phase 89e: why the capture failed / stopped early (the status box)
+LONGLONG g_t0 = 0, g_t1 = 0, g_t2 = 0;            // QPC: the key, the end of the sets, the zip ready (timings in the log)
+bool g_fromMenu = false, g_reopenMenu = false;    // phase 89e: started from the Capture now row -> the menu opens again after it
+LONGLONG Qpc() { LARGE_INTEGER q; QueryPerformanceCounter(&q); return q.QuadPart; }
+bool g_finishPending = false;                     // CaptureEnd ran; the finish job waits for the rewind drain (CaptureFinishTick)
+std::wstring g_finishDir;
 
-// ---- phase 79: REWIND for the shimmer capture (dlaa.ini rewind_frames, default 0 = off; 64 for testing) ----
-// User finding 2026-10-29 (VR): by the time the Insert key is pressed the flicker is gone -- the capture starts 90 frames
-// AFTER the key. So eye 0's picture of every frame is copied on the GPU into a ring (one CopyResource per frame, ~2 GB VRAM at
-// 64 x 2761 x 2928 RGBA8); the key freezes the ring and the capture writes it as rewind_NN.bmp (NN = frames before the key,
-// 00 = the last one) -- one readback per frame while the capture runs, the BMP itself written on a background thread.
-// g_rewindFrames (dlaa.ini rewind_frames) is defined with the other config globals (read in both builds).
+// the frame-time ring for sysinfo (last ~10 s at up to ~100 fps; one QPC + store per Present: TickFrame)
+constexpr int kFt = 1024;
+float g_ft[kFt] = {};
+int g_ftN = 0, g_ftHead = 0;
+LONGLONG g_ftLast = 0;
+void TickFrame() {
+    LARGE_INTEGER q; QueryPerformanceCounter(&q);
+    if (g_ftLast && g_qpcFreq > 0) {
+        g_ft[g_ftHead] = (float)((double)(q.QuadPart - g_ftLast) * 1000.0 / (double)g_qpcFreq);
+        g_ftHead = (g_ftHead + 1) % kFt;
+        if (g_ftN < kFt) ++g_ftN;
+    }
+    g_ftLast = q.QuadPart;
+}
+double PresentHz() {                              // the recent Present rate (rewind length in flat), 0 = unknown
+    double s = 0; int n = 0;
+    for (int i = 0; i < g_ftN && i < 120; ++i) { s += g_ft[(g_ftHead - 1 - i + kFt) % kFt]; ++n; }
+    return n && s > 0 ? 1000.0 * n / s : 0.0;
+}
+}  // namespace Cap
+
+int CaptureModeNow();                             // report_all forces Full (the Bug report rows, below)
+void ApplyLogLevelGates();                        // (the Logging row, below)
+float RewindSecsNow();
+
+// ---- phase 79: REWIND for the capture (dlaa.ini rewind_secs / rewind_frames; default off) ----
+// User finding 2026-10-29 (VR): by the time the key is pressed the flicker is gone. So eye 0's picture of every frame is copied on
+// the GPU into a ring (one CopyResource per frame); the key freezes the ring and the capture writes it as rewind_NN.png (NN = frames
+// before the key, 00 = the last one). phase 89c: + DIAG PLANES for the last rewind_diag_frames frames -- the jittered colour DLSS got,
+// its motion vectors (RG16F) and depth (R32F), at the AA square's own size (the unit's textures ARE the crop) -- written as
+// rw_color_in_NN.png / rw_mv_NN.png (the Ctrl+F6 colours) / rw_depth_NN.png (+ the raw .bin of frame 00 in capture_mode 2). The
+// ring follows the live length (the menu's Rewind row): a change releases it on the render thread before the next Record.
+// GpuPerf section "rewind" = the per-frame copies.
 namespace Rewind {
-constexpr uint64_t kMaxBytes = 2560ull << 20;            // VRAM cap of the ring: fewer slots for big / RGBA16F pictures
-struct Slot { ID3D11Texture2D* tex = nullptr; uint64_t present = 0; int phase = 0; float vx = 0, vy = 0, njx = 0, njy = 0; };
+constexpr uint64_t kMaxBytes = 2560ull << 20;            // VRAM cap of the colour ring: fewer slots for big / RGBA16F pictures
+constexpr uint64_t kDiagMaxBytes = 1024ull << 20;        // VRAM cap of the diag planes
+struct Slot { ID3D11Texture2D* tex = nullptr; uint64_t present = 0; int phase = 0; float vx = 0, vy = 0, njx = 0, njy = 0; int diag = -1; };
+struct Diag { ID3D11Texture2D* col = nullptr; ID3D11Texture2D* mv = nullptr; ID3D11Texture2D* dep = nullptr; uint64_t present = 0; };
 std::vector<Slot> g_ring;
+std::vector<Diag> g_diag;
+int g_diagHead = 0;
 UINT g_w = 0, g_h = 0; DXGI_FORMAT g_fmt = DXGI_FORMAT_UNKNOWN;
+UINT g_dw = 0, g_dh = 0; DXGI_FORMAT g_dfmt = DXGI_FORMAT_UNKNOWN;   // the diag planes' colour size / format (the unit's colorIn)
 int g_head = 0, g_count = 0;                             // next slot to write, filled slots
+int g_target = 0, g_diagTarget = 0;                      // the frame counts the ring was made for
 int g_drainNext = 0, g_drainLeft = 0, g_drainTotal = 0;  // frozen ring being written (k = 0 is the oldest)
+bool g_drainRaw = false;                                 // capture_mode 2: frame 00's raw MV / depth too
 wchar_t g_dir[MAX_PATH] = {};
 bool g_failed = false;                                   // a texture create failed: rewind stays off (logged once)
-ID3D11Texture2D* g_stag = nullptr;
-struct WJob { wchar_t path[MAX_PATH]; std::vector<uint8_t> px; UINT w = 0, h = 0, pitch = 0; bool f16 = false; };
+bool g_diagFailed = false;                               // a diag plane create failed: the colour ring goes on without planes
+std::atomic<uint64_t> g_vramBytes{0};                    // what the ring holds now (the menu's cost column)
+uint64_t g_lastDl = 0;                                   // g_dlaa[0].Frames() at the last diag copy
+
+// ---- the background writers (PNG encoding, file copies, the zip) ----
+// phase 89e: a POOL of min(4, max(1, cores / 4)) below-normal threads (one 4K PNG took ~0.5 s on the single phase 89b thread: the
+// queue cap was hit at once and the capture skipped frames until it stopped). HOLD: while the capture's sets run, nothing is
+// encoded -- the read-back pixels only wait in RAM (Cap::kQueueCap) -- so the capture window has the CPU for the game; CaptureEnd
+// releases them. Jobs run in any order across the threads; the finish job waits until it is the last one (WaitAlone).
 std::mutex g_wmx;
-std::vector<WJob> g_wq;
-HANDLE g_wEvent = nullptr;
+std::condition_variable g_wcv;
+std::deque<std::function<void()>> g_wq;
 std::once_flag g_wOnce;
-std::atomic<int> g_wPending{0};                          // jobs queued or being written
+bool g_wReady = false;
+std::atomic<bool> g_hold{false};
+std::atomic<int> g_wPending{0};                          // jobs queued or being run
 std::atomic<int> g_wOk{0}, g_wFail{0};
+std::atomic<int> g_wQueued{0}, g_wDone{0};               // since the capture started (the status box: "files done / queued")
+int g_wThreads = 0;
 
 void Writer() {
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);       // WIC (PNG)
     for (;;) {
-        WaitForSingleObject(g_wEvent, INFINITE);
-        for (;;) {
-            WJob j;
-            {
-                std::lock_guard<std::mutex> lk(g_wmx);
-                if (g_wq.empty()) break;
-                j = std::move(g_wq.front());
-                g_wq.erase(g_wq.begin());
-            }
-            const bool ok = j.f16 ? WriteBmpRgba16f(j.path, j.px.data(), j.pitch, j.w, j.h)
-                                  : WriteBmp(j.path, j.px.data(), j.pitch, j.w, j.h);
-            (ok ? g_wOk : g_wFail).fetch_add(1);
-            g_wPending.fetch_sub(1);
+        std::function<void()> j;
+        {
+            std::unique_lock<std::mutex> lk(g_wmx);
+            g_wcv.wait(lk, [] { return !g_wq.empty() && !g_hold.load(); });
+            j = std::move(g_wq.front());
+            g_wq.pop_front();
         }
+        // review fix (2026-11-01): an exception out of a job (bad_alloc on a 4K frame under memory pressure) would end the game on
+        // this raw thread; it fails the job instead (and g_wPending still drops, so WaitAlone never hangs)
+        try { j(); }
+        catch (...) { g_wFail.fetch_add(1); LogErr("capture writer: a job threw (out of memory?) -- that file is left out"); }
+        g_wDone.fetch_add(1);
+        { std::lock_guard<std::mutex> lk(g_wmx); g_wPending.fetch_sub(1); }
+        g_wcv.notify_all();
     }
 }
+void SetHold(bool on) {
+    { std::lock_guard<std::mutex> lk(g_wmx); g_hold = on; }
+    g_wcv.notify_all();
+}
+// the calling job (one of the writers) waits until every other job has run (the finish job: the files first, then the zip)
+void WaitAlone() {
+    std::unique_lock<std::mutex> lk(g_wmx);
+    g_wcv.wait(lk, [] { return g_wPending.load() <= 1; });
+}
+bool Queue(std::function<void()> j) {
+    std::call_once(g_wOnce, [] {
+        SYSTEM_INFO si{}; GetSystemInfo(&si);
+        const int n = (std::min)(4, (std::max)(1, (int)si.dwNumberOfProcessors / 4));
+        for (int i = 0; i < n; ++i) {
+            HANDLE t = CreateThread(nullptr, 0, [](LPVOID) -> DWORD { Writer(); return 0; }, nullptr, 0, nullptr);
+            if (t) { SetThreadPriority(t, THREAD_PRIORITY_BELOW_NORMAL); CloseHandle(t); ++g_wThreads; }
+        }
+        g_wReady = g_wThreads > 0;
+        Log("capture writer: %d thread(s) (below normal priority, %lu logical processors)", g_wThreads, si.dwNumberOfProcessors);
+    });
+    if (!g_wReady) return false;
+    { std::lock_guard<std::mutex> lk(g_wmx); g_wPending.fetch_add(1); g_wq.push_back(std::move(j)); }
+    g_wQueued.fetch_add(1);
+    g_wcv.notify_one();
+    return true;
+}
 
+void ReleaseDiag() {
+    for (Diag& d : g_diag) { if (d.col) d.col->Release(); if (d.mv) d.mv->Release(); if (d.dep) d.dep->Release(); }
+    g_diag.clear();
+    g_diagHead = 0;
+    for (Slot& s : g_ring) s.diag = -1;
+}
 void ReleaseRing() {
+    ReleaseDiag();
     for (Slot& s : g_ring) if (s.tex) { s.tex->Release(); s.tex = nullptr; }
     g_ring.clear();
     g_head = g_count = 0;
     g_drainLeft = 0;
+    g_target = g_diagTarget = 0;
+    g_vramBytes = 0;
 }
 
 bool Draining() { return g_drainLeft > 0; }
 
-// eye 0's picture of this frame -> the ring (render thread, not during a capture / a drain)
+// review fix: the rate is LATCHED -- taken when the length / mode changes, re-taken only after the measured rate stayed > 10 % off
+// for 2 s (flat's rolling Present rate moves every frame; following it would rebuild the ring every frame)
+double g_hzLatch = 0.0; float g_hzSecs = -2.0f; bool g_hzVr = false; int g_hzOff = 0;
+double LatchedHz(float secs) {
+    const int64_t per = g_vrMode ? XrHook::DisplayPeriodNs() : 0;
+    double now = per > 0 ? 1.0e9 / (double)per : Cap::PresentHz();
+    if (!(now > 1.0)) now = 60.0;
+    if (secs != g_hzSecs || g_vrMode != g_hzVr || !(g_hzLatch > 1.0)) {
+        g_hzSecs = secs; g_hzVr = g_vrMode; g_hzLatch = now; g_hzOff = 0;
+    } else if (std::fabs(now - g_hzLatch) > 0.10 * g_hzLatch) {
+        if (++g_hzOff > 2 * (int)g_hzLatch) { g_hzLatch = now; g_hzOff = 0; }   // ~2 s off by > 10 %: a new rate
+    } else g_hzOff = 0;
+    return g_hzLatch;
+}
+int TargetFrames() {                                     // rewind_secs at the display rate (VR headset / flat Presents), or rewind_frames
+    const float secs = RewindSecsNow();
+    if (secs >= 0.0f) {                                  // rewind_secs set (or Send everything): 0 = off
+        if (secs <= 0.0f) { g_hzSecs = -2.0f; return 0; }
+        return BugReport::RewindFramesFor(secs, LatchedHz(secs));
+    }
+    return g_rewindFrames;
+}
+
+ID3D11Texture2D* MakeLike(ID3D11Texture2D* src) {
+    D3D11_TEXTURE2D_DESC d{}; src->GetDesc(&d);
+    d.Usage = D3D11_USAGE_DEFAULT; d.BindFlags = 0; d.CPUAccessFlags = 0; d.MiscFlags = 0; d.MipLevels = 1; d.ArraySize = 1;
+    ID3D11Device* dev = nullptr; src->GetDevice(&dev);
+    if (!dev) return nullptr;
+    ID3D11Texture2D* t = nullptr;
+    if (FAILED(dev->CreateTexture2D(&d, nullptr, &t))) t = nullptr;
+    dev->Release();
+    return t;
+}
+uint64_t Bytes(ID3D11Texture2D* t) {
+    if (!t) return 0;
+    D3D11_TEXTURE2D_DESC d{}; t->GetDesc(&d);
+    const uint64_t px = (uint64_t)d.Width * d.Height;
+    switch (d.Format) {
+    case DXGI_FORMAT_R16G16B16A16_FLOAT: return px * 8;
+    default: return px * 4;                              // RGBA8 family, RG16F, R32F
+    }
+}
+
+// eye 0's picture of this frame -> the ring; `dl` = eye 0's unit (its colorIn / MV / depth = this frame's when it ran)
 void Record(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase, float vx, float vy, float njx, float njy) {
-    if (g_rewindFrames <= 0 || g_failed || !ctx || !tex || Draining()) return;
+    if (g_failed || !ctx || !tex || Draining()) return;
+    const int want = TargetFrames();
+    const int wantDiag = want > 0 && !g_diagFailed ? (std::min)(g_rewindDiag, want) : 0;
+    if (want <= 0) { if (!g_ring.empty()) { ReleaseRing(); Log("rewind (phase 79): off -- ring released"); } return; }
     D3D11_TEXTURE2D_DESC d{}; tex->GetDesc(&d);
     const bool f16 = d.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
-    if (!f16 && !IsRgbaBgraFamily(d.Format)) return;      // not dumpable (same rule as the capture's BMPs)
-    if (d.Width != g_w || d.Height != g_h || d.Format != g_fmt || g_ring.empty()) {
-        ReleaseRing();                                     // a new picture size: the old frames are not comparable
+    if (!f16 && !IsRgbaBgraFamily(d.Format)) return;      // not dumpable (same rule as the capture's frames)
+    if (d.Width != g_w || d.Height != g_h || d.Format != g_fmt || g_ring.empty() || want != g_target || wantDiag != g_diagTarget) {
+        ReleaseRing();                                     // a new size / length: the old frames are not comparable
         const uint64_t bytes = (uint64_t)d.Width * d.Height * (f16 ? 8 : 4);
-        int n = g_rewindFrames;
+        int n = want;
         if (bytes && (uint64_t)n * bytes > kMaxBytes) n = (int)(kMaxBytes / bytes);
         if (n < 2) return;
         g_ring.resize(n);
         g_w = d.Width; g_h = d.Height; g_fmt = d.Format;
-        Log("rewind (phase 79): ring of %d frames for %ux%u fmt=%d (%.0f MB VRAM, filled as frames arrive)",
-            n, d.Width, d.Height, (int)d.Format, (double)n * bytes / 1048576.0);
+        g_target = want; g_diagTarget = wantDiag;
+        g_dw = g_dh = 0; g_dfmt = DXGI_FORMAT_UNKNOWN;
+        Log("rewind (phase 79): ring of %d frames for %ux%u fmt=%d (%.0f MB VRAM when full) + %d diag frames -- filled as frames "
+            "arrive", n, d.Width, d.Height, (int)d.Format, (double)n * bytes / 1048576.0, wantDiag);
     }
+    GpuPerfScope gp(ctx, GpuPerf::kRewind);
     Slot& s = g_ring[g_head];
     if (!s.tex) {                                          // created on first use: no one-time allocation hitch
-        ID3D11Device* dev = nullptr; tex->GetDevice(&dev);
-        if (!dev) return;
-        D3D11_TEXTURE2D_DESC sd = d;
-        sd.Usage = D3D11_USAGE_DEFAULT; sd.BindFlags = 0; sd.CPUAccessFlags = 0; sd.MiscFlags = 0;
-        const HRESULT hr = dev->CreateTexture2D(&sd, nullptr, &s.tex);
-        dev->Release();
-        if (FAILED(hr) || !s.tex) {
-            s.tex = nullptr;
-            LogWarn("rewind (phase 79): texture create failed at slot %d (hr=0x%lx) -- rewind off for this session", g_head, (unsigned long)hr);
+        s.tex = MakeLike(tex);
+        if (!s.tex) {
+            LogWarn("rewind (phase 79): texture create failed at slot %d -- rewind off for this session", g_head);
             g_failed = true;
             ReleaseRing();
             return;
         }
+        g_vramBytes += Bytes(s.tex);
     }
     ctx->CopyResource(s.tex, tex);
     s.present = g_frames.load(std::memory_order_relaxed);
-    s.phase = phase; s.vx = vx; s.vy = vy; s.njx = njx; s.njy = njy;
+    s.phase = phase; s.vx = vx; s.vy = vy; s.njx = njx; s.njy = njy; s.diag = -1;
+    // phase 89c: the diag planes of this frame (only when eye 0's unit really ran this frame)
+    SceneDlaa& dl = g_dlaa[0];
+    if (g_diagTarget > 0 && dl.Frames() != g_lastDl && dl.ColorInTex() && dl.MvTex() && dl.DepthTex()) {
+        g_lastDl = dl.Frames();
+        D3D11_TEXTURE2D_DESC cd{}; dl.ColorInTex()->GetDesc(&cd);
+        if (cd.Width != g_dw || cd.Height != g_dh || cd.Format != g_dfmt) {   // the unit was rebuilt: new plane textures
+            uint64_t vb = g_vramBytes.load();
+            for (Diag& x : g_diag) vb -= Bytes(x.col) + Bytes(x.mv) + Bytes(x.dep);
+            g_vramBytes = vb;
+            ReleaseDiag();
+            g_dw = cd.Width; g_dh = cd.Height; g_dfmt = cd.Format;
+            const uint64_t per = Bytes(dl.ColorInTex()) + Bytes(dl.MvTex()) + Bytes(dl.DepthTex());
+            int n = g_diagTarget;
+            if (per && (uint64_t)n * per > kDiagMaxBytes) n = (int)(kDiagMaxBytes / per);
+            g_diag.resize(n < 1 ? 1 : n);
+        }
+        Diag& x = g_diag[g_diagHead];
+        bool planesOk = x.col != nullptr;
+        if (!x.col) {
+            ID3D11Texture2D* c = MakeLike(dl.ColorInTex());
+            ID3D11Texture2D* m = MakeLike(dl.MvTex());
+            ID3D11Texture2D* z = MakeLike(dl.DepthTex());
+            if (c && m && z) {
+                x.col = c; x.mv = m; x.dep = z;
+                g_vramBytes += Bytes(c) + Bytes(m) + Bytes(z);
+                planesOk = true;
+            } else {                                       // review fix: no use of `x` after this; the colour ring stays
+                if (c) c->Release();
+                if (m) m->Release();
+                if (z) z->Release();
+                uint64_t vb = g_vramBytes.load();
+                for (Diag& o : g_diag) vb -= Bytes(o.col) + Bytes(o.mv) + Bytes(o.dep);
+                g_vramBytes = vb;
+                ReleaseDiag();
+                g_diagFailed = true;
+                g_diagTarget = 0;                          // = wantDiag from now on: no ring rebuild
+                LogWarn("rewind (phase 89c): diag plane create failed -- the rewind goes on without the diag planes this session");
+            }
+        }
+        if (planesOk) {
+            ctx->CopyResource(x.col, dl.ColorInTex());
+            ctx->CopyResource(x.mv, dl.MvTex());
+            ctx->CopyResource(x.dep, dl.DepthTex());
+            x.present = s.present;
+            for (Slot& o : g_ring) if (o.diag == g_diagHead) o.diag = -1;   // that diag slot now belongs to this frame
+            s.diag = g_diagHead;
+            g_diagHead = (g_diagHead + 1) % (int)g_diag.size();
+        }
+    }
     g_head = (g_head + 1) % (int)g_ring.size();
     if (g_count < (int)g_ring.size()) ++g_count;
 }
+}  // namespace Rewind
 
-// the capture's key: freeze the ring, its frames go into `dir` (info.txt gets one line each)
+// ---- the capture's texture readback + its file jobs ----
+namespace Cap {
+struct Stag { ID3D11Texture2D* t = nullptr; UINT w = 0, h = 0; DXGI_FORMAT f = DXGI_FORMAT_UNKNOWN; void* dev = nullptr; };   // dev: identity
+std::vector<Stag> g_stag;
+void ReleaseStaging() { for (Stag& s : g_stag) if (s.t) s.t->Release(); g_stag.clear(); }
+struct Pix { std::vector<uint8_t> px; UINT w = 0, h = 0, pitch = 0; DXGI_FORMAT f = DXGI_FORMAT_UNKNOWN; bool bgra = false; };
+// review fix: the formats ToRgba8 converts; anything else (R10G10B10A2, R11G11B10, ...) is refused with a warning, never mis-read
+bool IsBgra8(DXGI_FORMAT f) { return f == DXGI_FORMAT_B8G8R8A8_UNORM || f == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB || f == DXGI_FORMAT_B8G8R8A8_TYPELESS ||
+                                     f == DXGI_FORMAT_B8G8R8X8_UNORM || f == DXGI_FORMAT_B8G8R8X8_UNORM_SRGB || f == DXGI_FORMAT_B8G8R8X8_TYPELESS; }
+bool IsRgba8(DXGI_FORMAT f) { return f == DXGI_FORMAT_R8G8B8A8_UNORM || f == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB || f == DXGI_FORMAT_R8G8B8A8_TYPELESS; }
+bool Convertible(DXGI_FORMAT f) {
+    return IsRgba8(f) || IsBgra8(f) || f == DXGI_FORMAT_R16G16B16A16_FLOAT || f == DXGI_FORMAT_R16G16_FLOAT || f == DXGI_FORMAT_R32_FLOAT;
+}
+// review fix: the RAM of the read-back pixels waiting for the writer (every Save job); above kQueueCap the capture waits
+std::atomic<uint64_t> g_queuedBytes{0};
+constexpr uint64_t kQueueCap = 1024ull << 20;          // (phase 89e: 512 -> 1024 MB: held during the sets, cropped frames)
+bool WriterBehind() { return g_queuedBytes.load() > kQueueCap; }
+// tex (or the box of it) -> CPU (render thread; one Map = a GPU sync). false = not read.
+bool Read(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, const D3D11_BOX* box, Pix& out) {
+    if (!tex) return false;
+    D3D11_TEXTURE2D_DESC d{}; tex->GetDesc(&d);
+    if (d.SampleDesc.Count != 1) return false;
+    if (!Convertible(d.Format)) {
+        static int warned = 0;
+        if (warned++ < 8) LogWarn("capture: a %ux%u texture of format %d is not saved (no converter for it)", d.Width, d.Height, (int)d.Format);
+        return false;
+    }
+    const UINT w = box ? box->right - box->left : d.Width, h = box ? box->bottom - box->top : d.Height;
+    if (!w || !h) return false;
+    ID3D11Device* devId = nullptr; tex->GetDevice(&devId);
+    if (!devId) return false;
+    devId->Release();                                 // (identity only: the texture keeps its device alive)
+    Stag* st = nullptr;
+    for (Stag& s : g_stag) if (s.w == w && s.h == h && s.f == d.Format && s.dev == (void*)devId) st = &s;
+    if (!st) {
+        if (g_stag.size() >= 8) ReleaseStaging();
+        ID3D11Device* dev = nullptr; tex->GetDevice(&dev);
+        if (!dev) return false;
+        D3D11_TEXTURE2D_DESC sd = d;
+        sd.Width = w; sd.Height = h; sd.Usage = D3D11_USAGE_STAGING; sd.BindFlags = 0; sd.MiscFlags = 0;
+        sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ; sd.MipLevels = 1; sd.ArraySize = 1;
+        Stag s; s.w = w; s.h = h; s.f = d.Format; s.dev = (void*)dev;
+        const HRESULT hr = dev->CreateTexture2D(&sd, nullptr, &s.t);
+        dev->Release();
+        if (FAILED(hr) || !s.t) return false;
+        g_stag.push_back(s);
+        st = &g_stag.back();
+    }
+    if (box) ctx->CopySubresourceRegion(st->t, 0, 0, 0, 0, tex, 0, box);
+    else     ctx->CopyResource(st->t, tex);
+    D3D11_MAPPED_SUBRESOURCE mp{};
+    if (FAILED(ctx->Map(st->t, 0, D3D11_MAP_READ, 0, &mp))) return false;
+    const UINT bpp = d.Format == DXGI_FORMAT_R16G16B16A16_FLOAT ? 8 : 4;
+    out.w = w; out.h = h; out.f = d.Format; out.pitch = w * bpp; out.bgra = IsBgra8(d.Format);
+    out.px.resize((size_t)out.pitch * h);
+    for (UINT y = 0; y < h; ++y) memcpy(&out.px[(size_t)y * out.pitch], (const uint8_t*)mp.pData + (size_t)y * mp.RowPitch, out.pitch);
+    ctx->Unmap(st->t, 0);
+    return true;
+}
+
+// phase 89e: notes the writers add while encoding (the exposure / MV range each picture got) -- appended to info.txt at the finish
+std::mutex g_noteMx;
+std::vector<std::string> g_notes;
+void Note(const std::wstring& path, const char* fmt, ...) {
+    char b[256];
+    va_list a; va_start(a, fmt); vsnprintf(b, sizeof(b), fmt, a); va_end(a);
+    char nm[128];
+    WideCharToMultiByte(CP_UTF8, 0, path.c_str() + path.find_last_of(L'\\') + 1, -1, nm, sizeof(nm), nullptr, nullptr);
+    std::lock_guard<std::mutex> lk(g_noteMx);
+    g_notes.push_back(std::string(nm) + ": " + b);
+}
+
+// any supported plane -> 8-bit RGBA for viewing: RGBA8 / BGRA8 as is; RGBA16F (the HDR colour DLSS gets, before the game's
+// tonemap) with an AUTO EXPOSURE (phase 89e: the log-average luma -> 0.18, then x / (1 + x) and sRGB -- without it the pictures were
+// pale, the game's own exposure is applied later in its tonemap); RG16F motion vectors auto-ranged (phase 89e: 0.5 + 0.5 * mv / S,
+// S = the 99th percentile of |mv| -- the old fixed /16 made every normal frame one flat colour; blue 0); R32F depth as grey
+// (reversed-Z: near = white, d^0.25). The exposure / S of each picture go into info.txt (Note).
+bool ToRgba8(const Pix& p, std::vector<uint8_t>& o, const std::wstring& path) {
+    if (!Convertible(p.f)) return false;
+    const bool bgra = p.bgra;
+    const size_t n = (size_t)p.w * p.h;
+    o.resize(n * 4);
+    auto u8 = [](float v) { return (uint8_t)(v <= 0.0f ? 0 : (v >= 1.0f ? 255 : (int)(v * 255.0f + 0.5f))); };
+    float expo = 1.0f, mvS = 1.0f;
+    if (p.f == DXGI_FORMAT_R16G16B16A16_FLOAT) {
+        std::vector<float> l;
+        l.reserve(n / 16 + 1);
+        for (UINT y = 0; y < p.h; y += 4) {
+            const uint16_t* r = (const uint16_t*)&p.px[(size_t)y * p.pitch];
+            for (UINT x = 0; x < p.w; x += 4)
+                l.push_back(0.2126f * HalfToFloat(r[x * 4]) + 0.7152f * HalfToFloat(r[x * 4 + 1]) + 0.0722f * HalfToFloat(r[x * 4 + 2]));
+        }
+        expo = BugReport::AutoExposure(l.data(), l.size());
+        Note(path, "HDR colour shown with auto exposure x%.3f (log-average luma -> 0.18), then x/(1+x) and sRGB", (double)expo);
+    } else if (p.f == DXGI_FORMAT_R16G16_FLOAT) {
+        std::vector<float> m;
+        m.reserve(n / 16 + 1);
+        for (UINT y = 0; y < p.h; y += 4) {
+            const uint16_t* r = (const uint16_t*)&p.px[(size_t)y * p.pitch];
+            for (UINT x = 0; x < p.w; x += 4) {
+                const float a = HalfToFloat(r[x * 2]), b = HalfToFloat(r[x * 2 + 1]);
+                const float mg = std::sqrt(a * a + b * b);
+                if (mg < 1.0e6f) m.push_back(mg);
+            }
+        }
+        mvS = BugReport::MvScale99(std::move(m));
+        Note(path, "motion vectors: colour = 0.5 + 0.5 * mv / %.2f px (the 99th percentile of |mv|); red = x, green = y", (double)mvS);
+    }
+    for (UINT y = 0; y < p.h; ++y) {
+        const uint8_t* s = &p.px[(size_t)y * p.pitch];
+        uint8_t* d = &o[(size_t)y * p.w * 4];
+        for (UINT x = 0; x < p.w; ++x, d += 4) {
+            switch (p.f) {
+            case DXGI_FORMAT_R16G16B16A16_FLOAT: {
+                const uint16_t* h = (const uint16_t*)s + x * 4;
+                for (int c = 0; c < 3; ++c) {
+                    float v = HalfToFloat(h[c]) * expo;
+                    v = v > 0.0f ? v / (1.0f + v) : 0.0f;
+                    v = v <= 0.0031308f ? 12.92f * v : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f;
+                    d[c] = u8(v);
+                }
+                d[3] = 255;
+                break;
+            }
+            case DXGI_FORMAT_R16G16_FLOAT: {
+                const uint16_t* h = (const uint16_t*)s + x * 2;
+                d[0] = u8(0.5f + 0.5f * HalfToFloat(h[0]) / mvS); d[1] = u8(0.5f + 0.5f * HalfToFloat(h[1]) / mvS); d[2] = 0; d[3] = 255;
+                break;
+            }
+            case DXGI_FORMAT_R32_FLOAT: {
+                float v; memcpy(&v, s + x * 4, 4);
+                const uint8_t g = u8(v > 0.0f ? std::sqrt(std::sqrt(v)) : 0.0f);
+                d[0] = d[1] = d[2] = g; d[3] = 255;
+                break;
+            }
+            default:
+                if (bgra) { d[0] = s[x * 4 + 2]; d[1] = s[x * 4 + 1]; d[2] = s[x * 4 + 0]; }
+                else      { d[0] = s[x * 4 + 0]; d[1] = s[x * 4 + 1]; d[2] = s[x * 4 + 2]; }
+                d[3] = 255;
+                break;
+            }
+        }
+    }
+    return true;
+}
+// writer thread (COM initialised). phase 89e: the PNG "Sub" filter (fast; the default adaptive filter is the slow part of WIC's
+// encoder) -- slightly bigger files, several times faster
+bool WritePng(const wchar_t* path, const std::vector<uint8_t>& rgba, UINT w, UINT h) {
+    Microsoft::WRL::ComPtr<IWICImagingFactory> f;
+    Microsoft::WRL::ComPtr<IWICStream> st;
+    Microsoft::WRL::ComPtr<IWICBitmapEncoder> enc;
+    Microsoft::WRL::ComPtr<IWICBitmapFrameEncode> fr;
+    Microsoft::WRL::ComPtr<IPropertyBag2> props;
+    WICPixelFormatGUID fmt = GUID_WICPixelFormat24bppBGR;
+    std::vector<BYTE> bgr((size_t)w * h * 3);
+    for (size_t i = 0; i < (size_t)w * h; ++i) { bgr[i * 3] = rgba[i * 4 + 2]; bgr[i * 3 + 1] = rgba[i * 4 + 1]; bgr[i * 3 + 2] = rgba[i * 4]; }
+    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f))) ||
+        FAILED(f->CreateStream(&st)) || FAILED(st->InitializeFromFilename(path, GENERIC_WRITE)) ||
+        FAILED(f->CreateEncoder(GUID_ContainerFormatPng, nullptr, &enc)) ||
+        FAILED(enc->Initialize(st.Get(), WICBitmapEncoderNoCache)) || FAILED(enc->CreateNewFrame(&fr, &props)))
+        return false;
+    if (props) {
+        PROPBAG2 opt{};
+        opt.pstrName = const_cast<LPOLESTR>(L"FilterOption");
+        VARIANT v{};                                     // (no VariantInit: no oleaut32 needed)
+        v.vt = VT_UI1; v.bVal = WICPngFilterSub;
+        props->Write(1, &opt, &v);                       // (ignored when the codec does not know it: the default filter)
+    }
+    return SUCCEEDED(fr->Initialize(props.Get())) && SUCCEEDED(fr->SetSize(w, h)) && SUCCEEDED(fr->SetPixelFormat(&fmt)) &&
+           IsEqualGUID(fmt, GUID_WICPixelFormat24bppBGR) && SUCCEEDED(fr->WritePixels(h, w * 3u, (UINT)bgr.size(), bgr.data())) &&
+           SUCCEEDED(fr->Commit()) && SUCCEEDED(enc->Commit());
+}
+// raw plane as uint32 'RAW1', w, h, comps + float32 data (R32F 1, RG16F 2)
+bool WriteRaw(const wchar_t* path, const Pix& p) {
+    const uint32_t comps = p.f == DXGI_FORMAT_R16G16_FLOAT ? 2 : 1;
+    if (p.f != DXGI_FORMAT_R16G16_FLOAT && p.f != DXGI_FORMAT_R32_FLOAT) return false;
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, path, L"wb") != 0 || !f) return false;
+    const uint32_t hdr[4] = { 0x31574152u /* "RAW1" */, p.w, p.h, comps };
+    bool ok = fwrite(hdr, 4, 4, f) == 4;
+    std::vector<float> row((size_t)p.w * comps);
+    for (UINT y = 0; ok && y < p.h; ++y) {
+        const uint8_t* s = &p.px[(size_t)y * p.pitch];
+        if (comps == 1) memcpy(row.data(), s, (size_t)p.w * 4);
+        else for (UINT i = 0; i < p.w * 2; ++i) row[i] = HalfToFloat(((const uint16_t*)s)[i]);
+        ok = fwrite(row.data(), sizeof(float), row.size(), f) == row.size();
+    }
+    return fclose(f) == 0 && ok;
+}
+// read now (render thread: the pixels wait in RAM), encode on a writer (after the hold). name = file name (".png" / ".bin").
+// (the BGRA byte order comes from the texture's own format: review fix)
+bool SavePath(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, const D3D11_BOX* box, const std::wstring& path, bool raw) {
+    auto p = std::make_shared<Pix>();
+    if (!Read(ctx, tex, box, *p)) { LogDbg("capture: %ls not read", path.c_str() + path.find_last_of(L'\\') + 1); Rewind::g_wFail.fetch_add(1); return false; }
+    const uint64_t bytes = p->px.size();
+    g_queuedBytes += bytes;
+    const bool q = Rewind::Queue([p, path, raw, bytes] {
+        bool ok;
+        if (raw) ok = WriteRaw(path.c_str(), *p);
+        else { std::vector<uint8_t> o; ok = ToRgba8(*p, o, path) && WritePng(path.c_str(), o, p->w, p->h); }
+        (ok ? Rewind::g_wOk : Rewind::g_wFail).fetch_add(1);
+        p->px.clear(); p->px.shrink_to_fit();
+        g_queuedBytes -= bytes;
+    });
+    if (!q) g_queuedBytes -= bytes;
+    return q;
+}
+void Save(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, const D3D11_BOX* box, const wchar_t* dir, const wchar_t* name, bool raw = false) {
+    SavePath(ctx, tex, box, std::wstring(dir) + name, raw);
+}
+void InfoLine(const char* fmt, ...) {             // info.txt (render thread: a few lines per frame)
+    wchar_t ip[MAX_PATH]; wcscpy_s(ip, g_testDir); wcscat_s(ip, L"info.txt");
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, ip, L"a") != 0 || !f) return;
+    va_list a; va_start(a, fmt); vfprintf(f, fmt, a); va_end(a);
+    fputc('\n', f);
+    fclose(f);
+}
+// phase 89e CROPS (size: a 4K frame PNG is ~9 MB, the 1920 x 1080 centre ~2.3 MB): the biggest saved part of a picture.
+// phase 89f: no crop -- the user's 4K test cut the gantry sign and missed the side signs (the flicker sits above / beside the
+// road, and in VR mostly OUTSIDE the DLAA area), so every saved picture is the whole one (zip ~4x bigger).
+void CropMax(uint32_t* w, uint32_t* h) { *w = UINT32_MAX; *h = UINT32_MAX; }
+D3D11_BOX ToD3d(const BugReport::Box& b) { return D3D11_BOX{ b.x0, b.y0, 0, b.x1, b.y1, 1 }; }
+// a frame (eye 0's picture as SelfTestStep / the rewind see it): the DLAA area rect when the picture is the unit's full one and the
+// rect is smaller, then its centre part of at most CropMax. nullptr = the whole picture.
+const D3D11_BOX* CropOf(ID3D11Texture2D* tex, D3D11_BOX* b) {
+    D3D11_TEXTURE2D_DESC d{}; tex->GetDesc(&d);
+    const SceneDlaa& dl = g_dlaa[0];
+    (void)dl;                                     // phase 89f: not cut to the DLAA area either (see CropMax)
+    BugReport::Box r{ 0, 0, d.Width, d.Height };
+    uint32_t mw, mh; CropMax(&mw, &mh);
+    BugReport::Box c;
+    BugReport::CentreCrop(r.W(), r.H(), mw, mh, 0.5f, 0.5f, &c);
+    c.x0 += r.x0; c.x1 += r.x0; c.y0 += r.y0; c.y1 += r.y0;
+    if (c.x0 == 0 && c.y0 == 0 && c.x1 == d.Width && c.y1 == d.Height) return nullptr;
+    *b = ToD3d(c);
+    return b;
+}
+// the planes DLSS got (render-size colour / MV / depth: the same centre part) and its output (the same scene part, scaled)
+struct PlaneCrops { D3D11_BOX in{}, out{}; bool inCrop = false, outCrop = false; };
+PlaneCrops PlaneCropsOf(ID3D11Texture2D* in, ID3D11Texture2D* out) {
+    PlaneCrops pc;
+    D3D11_TEXTURE2D_DESC di{}; in->GetDesc(&di);
+    uint32_t mw, mh; CropMax(&mw, &mh);
+    BugReport::Box bi;
+    pc.inCrop = BugReport::CentreCrop(di.Width, di.Height, mw, mh, 0.5f, 0.5f, &bi);
+    pc.in = ToD3d(bi);
+    if (out) {
+        D3D11_TEXTURE2D_DESC dout{}; out->GetDesc(&dout);
+        const BugReport::Box bo = BugReport::ScaleBox(bi, di.Width, di.Height, dout.Width, dout.Height);
+        pc.outCrop = bo.x0 || bo.y0 || bo.x1 != dout.Width || bo.y1 != dout.Height;
+        pc.out = ToD3d(bo);
+    }
+    return pc;
+}
+}  // namespace Cap
+
+namespace Rewind {
+std::vector<int> g_pick;                                 // phase 89e: the frames (0 = the oldest held) that are saved
+bool g_pickRaw = false;                                  // phase 89e: the rewind writes raw MV / depth (rw_*_00.bin) this capture
+constexpr int kPickRecent = 12, kPickOlder = 12;         //   the last 12 one by one + 12 spread over the rest
+// the capture's key: freeze the ring, the picked frames go into `dir` (info.txt gets one line each)
 void Freeze(const wchar_t* dir) {
     if (Draining())
         LogWarn("rewind (phase 79): a new capture before the last rewind was written -- %d of its frames dropped", g_drainLeft);
     g_drainLeft = 0;
-    if (g_stag) { g_stag->Release(); g_stag = nullptr; }  // made for the ring's size at the first DrainOne
-    if (g_count <= 0) { Log("rewind (phase 79): nothing recorded yet (rewind_frames=%d)", g_rewindFrames); return; }
+    g_pick.clear();
+    g_pickRaw = false;
+    if (g_count <= 0) { Log("rewind (phase 79): nothing recorded (rewind off or not filled yet)"); return; }
     wcscpy_s(g_dir, dir);
     const int n = (int)g_ring.size();
-    g_drainTotal = g_drainLeft = g_count;
     g_drainNext = (g_head - g_count + n) % n;
-    g_wOk = 0; g_wFail = 0;
-    wchar_t ip[MAX_PATH]; wcscpy_s(ip, g_dir); wcscat_s(ip, L"info.txt");
-    FILE* f = nullptr;
-    if (_wfopen_s(&f, ip, L"a") == 0 && f) {
-        fprintf(f, "rewind (phase 79): %d frames from BEFORE the key, eye 0, DLAA as it was (rewind_NN = NN frames before the key)\n", g_count);
-        for (int k = 0; k < g_count; ++k) {
-            const Slot& s = g_ring[(g_drainNext + k) % n];
-            fprintf(f, "rewind_%02d.bmp | Present #%llu | phase=%d | shift=(%+.4f,%+.4f) | ngx=(%+.4f,%+.4f)\n", g_count - 1 - k,
-                    (unsigned long long)s.present, s.phase, s.vx, s.vy, s.njx, s.njy);
-        }
-        fclose(f);
+    g_pick = BugReport::RewindPick(g_count, kPickRecent, kPickOlder);
+    g_drainTotal = g_drainLeft = (int)g_pick.size();
+    g_drainRaw = CaptureModeNow() >= BugReport::kCaptureFull;
+    {   // the newest picked frame has its planes: the raw .bin come from it (the sets then skip theirs: ~25 MB less)
+        const Slot& last = g_ring[(g_drainNext + g_pick.back()) % n];
+        g_pickRaw = g_drainRaw && last.diag >= 0;
     }
-    Log("rewind (phase 79): saving the %d frames before the key (%.2f s at 72 fps) as rewind_NN.bmp", g_count, g_count / 72.0);
+    Cap::InfoLine("rewind: %d frames held from BEFORE the key, eye 0 / main view, as it was; saved: the last %d one by one + %d spread "
+                  "over the older ones (rewind_NN = NN frames before the key; rw_*_NN = the planes DLSS got that frame)", g_count,
+                  (std::min)(kPickRecent, g_count), g_drainTotal - (std::min)(kPickRecent, g_count));
+    for (int k : g_pick) {
+        const Slot& s = g_ring[(g_drainNext + k) % n];
+        Cap::InfoLine("rewind_%02d.png | Present #%llu | phase=%d | shift=(%+.4f,%+.4f) | ngx=(%+.4f,%+.4f)%s", g_count - 1 - k,
+                      (unsigned long long)s.present, s.phase, s.vx, s.vy, s.njx, s.njy, s.diag >= 0 ? " | + rw_* planes" : "");
+    }
+    Log("rewind (phase 79): saving %d of the %d frames before the key as rewind_NN.png (after the capture's sets)", g_drainTotal, g_count);
 }
 
-// one frozen frame -> CPU -> the writer thread (render thread; skipped while the writer is behind)
+// one frozen frame -> CPU -> the writers (render thread, AFTER the capture's sets; skipped while the writers are far behind)
 void DrainOne(ID3D11DeviceContext* ctx) {
-    if (!Draining() || g_wPending.load() >= 3) return;
-    std::call_once(g_wOnce, [] {
-        g_wEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-        HANDLE t = g_wEvent ? CreateThread(nullptr, 0, [](LPVOID) -> DWORD { Writer(); return 0; }, nullptr, 0, nullptr) : nullptr;
-        if (t) { SetThreadPriority(t, THREAD_PRIORITY_BELOW_NORMAL); CloseHandle(t); }
-    });
-    if (!g_wEvent) { g_drainLeft = 0; return; }
+    if (!Draining() || Cap::WriterBehind()) return;      // review fix: the queued RAM cap
     const int n = (int)g_ring.size();
-    const int k = g_drainTotal - g_drainLeft;
+    const int k = g_pick[(size_t)(g_drainTotal - g_drainLeft)];
     Slot& s = g_ring[(g_drainNext + k) % n];
-    const bool f16 = g_fmt == DXGI_FORMAT_R16G16B16A16_FLOAT;
-    D3D11_TEXTURE2D_DESC sd{}; s.tex->GetDesc(&sd);
-    if (!g_stag) {
-        ID3D11Device* dev = nullptr; s.tex->GetDevice(&dev);
-        if (!dev) return;
-        D3D11_TEXTURE2D_DESC td = sd;
-        td.Usage = D3D11_USAGE_STAGING; td.BindFlags = 0; td.MiscFlags = 0; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-        td.MipLevels = 1; td.ArraySize = 1;
-        dev->CreateTexture2D(&td, nullptr, &g_stag);
-        dev->Release();
-        if (!g_stag) { LogErr("rewind (phase 79): staging create failed"); g_drainLeft = 0; return; }
+    const int nn = g_count - 1 - k;
+    wchar_t nm[48];
+    swprintf_s(nm, L"rewind_%02d.png", nn);
+    D3D11_BOX box{};
+    Cap::Save(ctx, s.tex, Cap::CropOf(s.tex, &box), g_dir, nm);
+    if (s.diag >= 0 && s.diag < (int)g_diag.size() && g_diag[s.diag].col && g_diag[s.diag].present == s.present) {
+        const Diag& x = g_diag[s.diag];
+        const Cap::PlaneCrops pc = Cap::PlaneCropsOf(x.col, nullptr);
+        const D3D11_BOX* bi = pc.inCrop ? &pc.in : nullptr;
+        swprintf_s(nm, L"rw_color_in_%02d.png", nn); Cap::Save(ctx, x.col, bi, g_dir, nm);
+        swprintf_s(nm, L"rw_mv_%02d.png", nn);       Cap::Save(ctx, x.mv, bi, g_dir, nm);
+        swprintf_s(nm, L"rw_depth_%02d.png", nn);    Cap::Save(ctx, x.dep, bi, g_dir, nm);
+        if (g_drainRaw && nn == 0) {
+            Cap::Save(ctx, x.mv, bi, g_dir, L"rw_mv_00.bin", true);
+            Cap::Save(ctx, x.dep, bi, g_dir, L"rw_depth_00.bin", true);
+        }
     }
-    ctx->CopySubresourceRegion(g_stag, 0, 0, 0, 0, s.tex, 0, nullptr);
-    D3D11_MAPPED_SUBRESOURCE mp{};
-    if (FAILED(ctx->Map(g_stag, 0, D3D11_MAP_READ, 0, &mp))) { LogErr("rewind (phase 79): Map failed"); g_drainLeft = 0; return; }
-    WJob j;
-    const UINT row = sd.Width * (f16 ? 8 : 4);
-    j.w = sd.Width; j.h = sd.Height; j.pitch = row; j.f16 = f16;
-    j.px.resize((size_t)row * sd.Height);
-    for (UINT y = 0; y < sd.Height; ++y) memcpy(&j.px[(size_t)y * row], (const uint8_t*)mp.pData + (size_t)y * mp.RowPitch, row);
-    ctx->Unmap(g_stag, 0);
-    wchar_t nm[32]; swprintf_s(nm, L"rewind_%02d.bmp", g_drainTotal - 1 - k);
-    wcscpy_s(j.path, g_dir); wcscat_s(j.path, nm);
-    g_wPending.fetch_add(1);
-    {
-        std::lock_guard<std::mutex> lk(g_wmx);
-        g_wq.push_back(std::move(j));
-    }
-    SetEvent(g_wEvent);
     if (--g_drainLeft == 0) {
-        Log("rewind (phase 79): all %d frames read back (the last BMPs finish on the writer thread)", g_drainTotal);
+        Log("rewind (phase 79): all %d saved frames read back (the writers finish the files)", g_drainTotal);
         g_head = g_count = 0;                              // recording starts fresh after the capture
-        if (g_stag) { g_stag->Release(); g_stag = nullptr; }
+        for (Slot& o : g_ring) o.diag = -1;
+        g_pick.clear();
     }
 }
-} // namespace Rewind
+}  // namespace Rewind
+
+// ---- the capture sets ----
+namespace Cap {
+// every switch back to the player's value; true = something that matters for the DLSS history changed (review fix: the history
+// is reset only then -- set 0 "on" is the player's own continuing picture)
+bool ApplyBase() {
+    bool hist = false;
+    if (g_dlaaOn.load() != g_base.dlaa) { g_dlaaOn = g_base.dlaa; hist = true; }
+    if (g_jitterOnly.load() != g_base.jo) { g_jitterOnly = g_base.jo; hist = true; }
+    if (g_mvDebug.load() != g_base.mvDebug) { g_mvDebug = g_base.mvDebug; DrawIdRecord::SetFullIdClear(g_base.mvDebug); }
+    if (g_mvOn.load() != g_base.mvOn) { g_mvOn = g_base.mvOn; MvInvalidate(); hist = true; }
+    if (g_partsSwitched) {
+        g_partsSwitched = false;
+        const bool b = g_beeps; g_beeps = false;
+        ToggleDrawIds(g_frames.load(std::memory_order_relaxed));   // 0 -> 2 again (quiet)
+        g_beeps = b;
+        hist = true;
+    }
+    if (hist) g_resetNext = true;
+    return hist;
+}
+void ApplySet(int i) {
+    ApplyBase();
+    const BugReport::CapSet& c = g_plan[i];
+    if (c.dlaa == 0) g_dlaaOn = false;
+    if (c.jitOnly) g_jitterOnly = true;
+    if (c.mvDebug) { g_mvDebug = true; DrawIdRecord::SetFullIdClear(true); }
+    if (c.mvOff && g_mvOn.load()) { g_mvOn = false; MvInvalidate(); }
+    if (c.partsOff && g_objMode == 2) {
+        const bool b = g_beeps; g_beeps = false;
+        ToggleDrawIds(g_frames.load(std::memory_order_relaxed));   // 2 -> 0 (quiet)
+        g_beeps = b;
+        g_partsSwitched = true;
+    }
+    // a DLSS history reset only when this set switches something the history depends on (set 0 never)
+    if ((c.dlaa == 0 && g_base.dlaa) || c.jitOnly || (c.mvOff && g_base.mvOn) || g_partsSwitched) g_resetNext = true;
+    g_settle = c.settle;
+    g_dumped = 0;
+    LogDbg("capture: set %d/%d '%s' (%s), settling %d frames", i + 1, g_planN, c.name, c.what, c.settle);
+}
+std::string SysInfoNow();                         // render-thread part of sysinfo.txt (defined below)
+void FinishJob(std::wstring dir, std::string sys, int level, int keep);
+}  // namespace Cap
+
+// phase 89b: the capture finished (or stopped early: `why`) -- restore every switched setting, the writer finishes the files
+void CaptureEnd(const char* why) {
+    Cap::ApplyBase();
+    if (LogLevel() != Cap::g_base.logLevel) { LogSetLevel(Cap::g_base.logLevel); ApplyLogLevelGates(); }
+    g_signX = g_savedSx; g_signY = g_savedSy;
+    g_testRunning = false;
+    g_testShimmer = false;
+    Cap::ReleaseStaging();
+    Rewind::SetHold(false);                           // phase 89e: the writers start encoding now (the capture window is over)
+    const double secs = g_qpcFreq > 0 ? (double)(Cap::Qpc() - Cap::g_t0) / (double)g_qpcFreq : 0.0;
+    Log("capture %s after %.2f s (%d sets of %d, %d frames not saved) -- every switched setting restored (DLAA %s, MV view %s, motion "
+        "vectors %s, log_level %d); %d writer thread(s) encode %d files, then the zip", why ? why : "frames done", secs,
+        Cap::g_set < Cap::g_planN ? Cap::g_set : Cap::g_planN, Cap::g_planN, Cap::g_skipped, g_dlaaOn.load() ? "on" : "off",
+        g_mvDebug.load() ? "on" : "off", g_mvOn.load() ? "on" : "off", LogLevel(), Rewind::g_wThreads, Rewind::g_wQueued.load());
+    if (why) snprintf(Cap::g_failWhy, sizeof(Cap::g_failWhy), "%s", why);
+    Cap::g_state = 2;
+    Cap::g_t1 = Cap::Qpc();
+    if (Cap::g_fromMenu) Cap::g_reopenMenu = true;    // phase 89e: the menu comes back (PresentFrameWork), on the Capture now row
+    Cap::g_finishDir = g_testDir;
+    Cap::g_finishPending = true;                      // queued once the rewind frames are read back too (CaptureFinishTick)
+}
+// phase 89b: the finish job goes behind the LAST file job -- the rewind drain can outlast the sets (it waits for the writer)
+void CaptureFinishTick(bool force) {
+    if (!Cap::g_finishPending) return;
+    if (Rewind::Draining() && !force) return;
+    if (Rewind::Draining()) {
+        LogWarn("capture: %d rewind frames not read back (no frames any more) -- the zip goes without them", Rewind::g_drainLeft);
+        Rewind::g_drainLeft = 0;
+        Rewind::g_head = Rewind::g_count = 0;
+    }
+    Cap::ReleaseStaging();                            // review fix: the drain re-made them; nothing reads back until the next capture
+    Cap::g_finishPending = false;
+    const std::wstring dir = Cap::g_finishDir;
+    const std::string sys = Cap::g_sys;
+    const int level = CaptureModeNow(), keep = g_captureKeep;
+    if (!Rewind::Queue([dir, sys, level, keep] { Cap::FinishJob(dir, sys, level, keep); })) Cap::g_state = 4;
+}
+
+void FinishSelfTest() {
+    if (g_testShimmer) { CaptureEnd(nullptr); return; }   // phase 89b: the capture restores its own set of switches
+    g_dlaaOn = g_savedOn; g_jitterOnly = g_savedJo; g_signX = g_savedSx; g_signY = g_savedSy;
+    g_resetNext = true;
+    g_testRunning = false;
+    LogDbg("self-test done (restored dlaa=%d jitter-only=%d sign=%+d,%+d)",
+        (int)g_savedOn, (int)g_savedJo, g_signX, g_signY);
+}
+
+// phase 89b: per Present -- the frame-time ring, and the watchdog: a capture that saw no eye-0 blit for 120 Presents (a loading
+// screen, the game paused its rendering, the device changed) stops and restores everything
+void CaptureAtPresent(uint64_t n) {
+    Cap::TickFrame();
+    g_capStatusOn = CaptureStatus(g_capL1, g_capL2, 64);   // phase 89e: the status box (drawn by the menu paths)
+    if (g_testRunning && g_testShimmer && n > Cap::g_lastStep + 120) CaptureEnd("STOPPED EARLY (no frame for 120 Presents)");
+    if (Cap::g_finishPending) CaptureFinishTick(n > Cap::g_lastStep + 240);   // (no eye-0 blits any more: finish without the rest)
+    if (Cap::g_reopenMenu && !g_testRunning) {        // phase 89e: started from the menu -> it opens again on the Capture now row
+        Cap::g_reopenMenu = false;
+        Cap::g_fromMenu = false;
+        MenuOpenCapNow(n);
+    }
+}
+// phase 89e: the status box's two lines (flat: over the presented picture; VR: into each eye picture after the blit -- never in a
+// saved frame: those are read at the blit, before it, and the flat final_ picture skips it). false = nothing to show.
+bool CaptureStatus(wchar_t* l1, wchar_t* l2, size_t cap) {
+    const int st = Cap::g_state.load();
+    const LONGLONG now = Cap::Qpc();
+    if (st == 1 && Cap::g_plan) {
+        const int i = Cap::g_set < Cap::g_planN ? Cap::g_set : Cap::g_planN - 1;
+        swprintf(l1, cap, L"Bug report: capturing %d / %d", i + 1, Cap::g_planN);
+        swprintf(l2, cap, L"%hs - keep driving", Cap::g_plan[i].what);
+        return true;
+    }
+    if (st == 2) {
+        swprintf(l1, cap, L"Bug report: writing");
+        if (Cap::g_zipPct.load() >= 0) swprintf(l2, cap, L"making the zips %d %%", Cap::g_zipPct.load());
+        else swprintf(l2, cap, L"files %d / %d", Rewind::g_wDone.load(), Rewind::g_wQueued.load());
+        return true;
+    }
+    const double since = g_qpcFreq > 0 ? (double)(now - Cap::g_t2) / (double)g_qpcFreq : 99.0;
+    if (st == 3 && since < 6.0) {
+        const wchar_t* nm = wcsrchr(Cap::g_zipPath, L'\\');
+        wchar_t stem[64];
+        wcsncpy_s(stem, nm ? nm + 1 : Cap::g_zipPath, _TRUNCATE);
+        if (wchar_t* q = wcsstr(stem, L"_main")) *q = 0;
+        swprintf(l1, cap, L"Bug report done: %d zip(s), %d MB", Cap::g_zipParts.load(), Cap::g_zipMB.load());
+        if (Cap::g_zipMain.load() > 1) swprintf(l2, cap, L"attach %ls_main_part01..%02d.zip", stem, Cap::g_zipMain.load());
+        else swprintf(l2, cap, L"attach %ls_main.zip", stem);
+        return true;
+    }
+    if (st == 4 && since < 10.0) {
+        swprintf(l1, cap, L"Bug report FAILED");
+        swprintf(l2, cap, L"%hs", Cap::g_failWhy[0] ? Cap::g_failWhy : "see dlaa_inject.log");
+        return true;
+    }
+    return false;
+}
+// phase 89b: the key (double press) or the menu row (now = true: no guard). Render-thread work starts at the next eye-0 blit.
+void CaptureRequest(uint64_t n, bool now, const char* who) {
+    if (g_testRunning || Cap::g_finishPending || Cap::g_state.load() == 1 || Cap::g_state.load() == 2) {
+        Log("capture request (%s) ignored: the last capture is still %s", who, g_testRunning ? "running" : "being written");
+        PlayTones(1, 200, 200, 0);
+        return;
+    }
+    if (!now) {
+        bool armed = false;
+        if (!Cap::g_keyGuard.Press(GetTickCount64(), &armed)) {
+            Log("capture armed (%s, Present #%llu): press it again within 1 s to capture", who, (unsigned long long)n);
+            PlayTones(1, 900, 60, 0);
+            return;
+        }
+    }
+    g_selfTestShimmer = true;
+    g_selfTestRequest = true;
+    Cap::g_fromMenu = now;                            // phase 89e: the menu opens again after it
+    Log("capture requested (%s, Present #%llu)", who, (unsigned long long)n);
+}
 
 // Called once per frame from the tonemap-detection point, after DLAA ran / was skipped.
 // `phase`, `vx`, `vy`, `njx`, `njy` are the values of the frame just rendered.
@@ -11738,25 +12411,63 @@ void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
                   float vx, float vy, float njx, float njy) {
     if (!g_testRunning) {
         if (!g_selfTestRequest.exchange(false)) {
-            if (Rewind::Draining()) Rewind::DrainOne(ctx);  // phase 79: the rest of a rewind after the capture ended
+            if (Rewind::Draining()) { Rewind::DrainOne(ctx); Cap::g_lastStep = g_frames.load(std::memory_order_relaxed); }   // phase 79: the rest
             else Rewind::Record(ctx, tex, phase, vx, vy, njx, njy);
             return;
         }
+        const bool shimmer = g_selfTestShimmer.exchange(false);
         if (g_gameDeviceChanged) { LogDbg("self-test refused: the game render device changed (DLAA stays OFF)"); return; }
         g_savedOn = g_dlaaOn.load(); g_savedJo = g_jitterOnly.load();
         g_savedSx = g_signX; g_savedSy = g_signY;
-        g_testShimmer = g_selfTestShimmer.exchange(false);
+        g_testShimmer = shimmer;
         if (!PathNextToDll(L"dlaa_selftest\\", g_testDir)) { LogErr("self-test: cannot resolve DLL path"); return; }
         CreateDirectoryW(g_testDir, nullptr);
-        if (g_testShimmer) {                               // phase 71: own folder per capture, nothing is overwritten
+        D3D11_TEXTURE2D_DESC d{}; tex->GetDesc(&d);
+        if (g_testShimmer) {                               // phase 71 / 89b: own folder per capture, nothing is overwritten
             SYSTEMTIME st; GetLocalTime(&st);
             wchar_t sub[48];
             swprintf_s(sub, L"shimmer_%04d%02d%02d_%02d%02d%02d\\", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
             wcscat_s(g_testDir, sub);
             CreateDirectoryW(g_testDir, nullptr);
-            Beep(1200, 120);                               // one beep = capture started
+            Cap::g_base = Cap::Base{ g_dlaaOn.load(), g_jitterOnly.load(), g_mvDebug.load(), g_mvOn.load(), g_objMode, LogLevel(), g_beeps };
+            Cap::g_partsSwitched = false;
+            if (LogLevel() < 4) { LogSetLevel(4); ApplyLogLevelGates(); }   // the capture's own duration only
+            const int level = CaptureModeNow();
+            Cap::g_plan = BugReport::Plan(level, &Cap::g_planN);
+            Cap::g_frameTotal = BugReport::PlanFrames(level);
+            Cap::g_frameDone = 0;
+            Cap::g_lastStep = g_frames.load(std::memory_order_relaxed);
+            Cap::g_dlFrames = 0;
+            Cap::g_skipped = 0;
+            Cap::g_zipPct = -1;
+            Cap::g_failWhy[0] = 0;
+            Cap::g_t0 = Cap::Qpc();
+            Rewind::g_wQueued = 0; Rewind::g_wDone = 0;
+            { std::lock_guard<std::mutex> lk(Cap::g_noteMx); Cap::g_notes.clear(); }
+            Rewind::SetHold(true);                         // phase 89e: nothing is encoded during the sets (only read back into RAM)
+            Cap::g_state = 1;
+            Cap::g_sys = Cap::SysInfoNow();
+            Rewind::g_wOk = 0; Rewind::g_wFail = 0;
+            SYSTEMTIME t; GetLocalTime(&t);
+            Cap::InfoLine("capture (phase 89b) %04d-%02d-%02d %02d:%02d:%02d, capture_mode %d (%s), picture %ux%u fmt=%d, jitter phases %d, "
+                          "jitter %s", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, level, level >= 2 ? "full" : "quick",
+                          d.Width, d.Height, (int)d.Format, g_phases, g_jitterEnabled ? "on" : "off");
+            Cap::InfoLine("file | phase | viewport shift (x,y) px | NGX jitter passed (x,y)");
+            Rewind::Freeze(g_testDir);
+            if (level >= BugReport::kCaptureFull) {        // phase 89c: the one-shot log tools ride along (their lines go into the log copy)
+                g_traceRequest = true;
+                const bool b = g_beeps; g_beeps = false;
+                RequestMvDump(g_frames.load(std::memory_order_relaxed));
+                g_beeps = b;
+            }
+            PlayTones(1, 1200, 100, 0);                    // one beep = capture started (async: no render-thread stall)
+            g_testRunning = true;
+            Cap::g_set = 0;
+            Cap::ApplySet(0);
+            LogDbg("capture: started, %d sets / %d frames, folder dlaa_selftest\\%ls", Cap::g_planN, Cap::g_frameTotal,
+                   wcsrchr(g_testDir, L'_') ? L"shimmer_*" : L"?");
+            return;
         }
-        D3D11_TEXTURE2D_DESC d{}; tex->GetDesc(&d);
         wchar_t ip[MAX_PATH]; wcscpy_s(ip, g_testDir); wcscat_s(ip, L"info.txt");
         FILE* f = nullptr;
         if (_wfopen_s(&f, ip, L"w") == 0 && f) {
@@ -11768,7 +12479,6 @@ void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
                     t.wHour, t.wMinute, t.wSecond, kSettleFrames, TestDumpFrames(), g_phases, (int)g_jitterEnabled);
             fclose(f);
         }
-        if (g_testShimmer) Rewind::Freeze(g_testDir);      // phase 79: after info.txt's header (Freeze appends its lines)
         g_testRunning = true; g_testMode = 0;
         g_testFinalFmtLogs = 0; g_testFinalPending = false;   // v0.10.0 phase 26
         LogDbg("self-test: started, dumping to dlaa_selftest\\ (%ux%u); saved state dlaa=%d jo=%d sign=%+d,%+d",
@@ -11776,7 +12486,71 @@ void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
         ApplyTestMode(0);
         return;
     }
-    Rewind::DrainOne(ctx);                                 // phase 79: one rewind frame per frame while the capture runs
+    if (g_testShimmer) {                                   // ---- phase 89b: the capture sets (phase 89e: the rewind drains after them) ----
+        Cap::g_lastStep = g_frames.load(std::memory_order_relaxed);
+        ++Cap::g_frameDone;
+        if (Cap::g_settle > 0) { --Cap::g_settle; return; }
+        if (Cap::WriterBehind()) {                     // review fix: > kQueueCap of pixels waiting -- wait (a gap in the set)
+            if (Cap::g_skipped++ % 30 == 0) {
+                Cap::InfoLine("(the writer is behind: %d frame(s) not saved so far -- the frames of this set are not all consecutive)",
+                              Cap::g_skipped);
+                LogDbg("capture: writer behind (%.0f MB queued) -- frame skipped (%d so far)",
+                       (double)Cap::g_queuedBytes.load() / 1048576.0, Cap::g_skipped);
+            }
+            if (Cap::g_skipped > 600) CaptureEnd("STOPPED EARLY (the writer stayed behind for 600 frames)");
+            return;
+        }
+        const BugReport::CapSet& c = Cap::g_plan[Cap::g_set];
+        const int k = Cap::g_dumped;
+        wchar_t nm[64];
+        D3D11_BOX box{};
+        const D3D11_BOX* crop = Cap::CropOf(tex, &box);
+        swprintf_s(nm, L"%hs_%d.png", c.name, k);
+        Cap::Save(ctx, tex, crop, g_testDir, nm);
+        if (crop && Cap::g_set == 0 && k == 0) Cap::Save(ctx, tex, nullptr, g_testDir, L"full_on_0.png");   // the whole picture once
+        if (crop && Cap::g_set == 0 && k == 0) {
+            D3D11_TEXTURE2D_DESC td2{}; tex->GetDesc(&td2);
+            Cap::InfoLine("(frames are cropped to %ux%u at (%u,%u) of %ux%u; full_on_0.png = the whole picture once)", box.right - box.left,
+                          box.bottom - box.top, box.left, box.top, td2.Width, td2.Height);
+        }
+        if (!g_vrMode && k == 0 && (Cap::g_set == 0 || c.dlaa == 0)) {   // flat: the presented picture of this frame too (hkPresent)
+            swprintf_s(g_testFinalPath, L"%lsfinal_%hs_0.png", g_testDir, c.name);
+            g_testFinalPending = true;
+        }
+        const bool jit = g_dlaaOn.load() && g_jitterEnabled;
+        char an[64]; WideCharToMultiByte(CP_UTF8, 0, nm, -1, an, sizeof(an), nullptr, nullptr);
+        if (!jit) Cap::InfoLine("%s | phase=n/a | shift=none | ngx=none", an);
+        else Cap::InfoLine("%s | phase=%d | shift=(%+.4f,%+.4f) | ngx=(%+.4f,%+.4f)", an, phase, vx, vy, njx, njy);
+        SceneDlaa& dl = g_dlaa[0];
+        // the planes of THIS frame's DLSS evaluation, the first kDiagFrames frames (skipped while the writers are far behind: RAM).
+        // phase 89e: the render-size planes cropped to their centre, NGX's output to the same scene part
+        if (c.diag && k < BugReport::kDiagFrames && dl.Frames() != Cap::g_dlFrames && dl.ColorInTex() && !Cap::WriterBehind()) {
+            Cap::g_dlFrames = dl.Frames();
+            const Cap::PlaneCrops pc = Cap::PlaneCropsOf(dl.ColorInTex(), dl.OutTex());
+            const D3D11_BOX* bi = pc.inCrop ? &pc.in : nullptr;
+            const D3D11_BOX* bo = pc.outCrop ? &pc.out : nullptr;
+            swprintf_s(nm, L"color_in_%d.png", k); Cap::Save(ctx, dl.ColorInTex(), bi, g_testDir, nm);
+            swprintf_s(nm, L"ngx_out_%d.png", k);  Cap::Save(ctx, dl.OutTex(), bo, g_testDir, nm);
+            swprintf_s(nm, L"mv_%d.png", k);       Cap::Save(ctx, dl.MvTex(), bi, g_testDir, nm);
+            swprintf_s(nm, L"depth_%d.png", k);    Cap::Save(ctx, dl.DepthTex(), bi, g_testDir, nm);
+            if (k == 0) {
+                if (!Rewind::g_pickRaw) {                  // (with rewind planes the raw data is rw_mv_00.bin / rw_depth_00.bin)
+                    Cap::Save(ctx, dl.MvTex(), bi, g_testDir, L"mv_0.bin", true);
+                    Cap::Save(ctx, dl.DepthTex(), bi, g_testDir, L"depth_0.bin", true);
+                }
+                if (pc.inCrop) {
+                    D3D11_TEXTURE2D_DESC td3{}; dl.ColorInTex()->GetDesc(&td3);
+                    Cap::InfoLine("(the planes are the %ux%u centre at (%u,%u) of the %ux%u picture DLSS got; ngx_out the same scene part)",
+                                  pc.in.right - pc.in.left, pc.in.bottom - pc.in.top, pc.in.left, pc.in.top, td3.Width, td3.Height);
+                }
+            }
+        }
+        if (++Cap::g_dumped >= c.frames) {
+            if (++Cap::g_set >= Cap::g_planN) CaptureEnd(nullptr);
+            else Cap::ApplySet(Cap::g_set);
+        }
+        return;
+    }
     if (g_testSettle > 0) { --g_testSettle; return; }
 
     const TestMode& m = TestModes()[g_testMode];
@@ -11805,6 +12579,337 @@ void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
         else ApplyTestMode(g_testMode);
     }
 }
+
+// ---- phase 89c: sysinfo.txt + the finish job (writer thread) ----
+namespace Cap {
+std::string Fmt(const char* fmt, ...) {
+    char b[2048];
+    va_list a; va_start(a, fmt); vsnprintf(b, sizeof(b), fmt, a); va_end(a);
+    return b;
+}
+std::string SysInfoNow() {                        // render thread, at the key
+    std::string s;
+    s += Fmt("mod: ETS2 / ATS DLAA injector %s\n", DLAA_INJECTOR_VERSION);
+    s += Fmt("mode: %s, %s, DLAA %s, upscale %s, jitter %s, passive %d, jitter-only %d\n", g_vrMode ? "VR" : "flat", DlaaModeStr(),
+             g_dlaaOn.load() ? "on" : "off", g_dlssUpscale.load() ? "allowed" : "off", g_jitterEnabled ? "on" : "off",
+             (int)g_passive.load(), (int)g_jitterOnly.load());
+    s += Fmt("scene (render) size: %ux%u, backbuffer %ux%u fmt=%d%s\n", g_sceneW, g_sceneH, g_bbW, g_bbH, (int)g_bbFmt,
+             g_hdrOut ? " (HDR output)" : "");
+    for (int e = 0; e < (g_vrMode ? 2 : 1); ++e) {
+        const SceneDlaa& dl = g_dlaa[e];
+        s += Fmt("unit eye %d: full %ux%u, DLAA area rect (%u,%u) %ux%u, output rect (%u,%u) %ux%u of %ux%u, %s, %s, model %s, "
+                 "frames %llu\n", e, dl.FullW(), dl.FullH(), dl.RectX(), dl.RectY(), dl.RectW(), dl.RectH(),
+                 dl.OutRectX(), dl.OutRectY(), dl.OutRectW(), dl.OutRectH(), dl.OutFullW(), dl.OutFullH(),
+                 dl.Upscaling() ? "DLSS upscale" : "native", dl.IsHdr() ? "HDR" : "LDR", dl.QualityName(),
+                 (unsigned long long)dl.Frames());
+    }
+    s += Fmt("settings: preset %s, sharpness %.2f radius %.2f, dlaa_area %d, feather %d, mv_objects %d, mirror DLAA %d, "
+             "dlss_bias_mask %d, outside_aa %d, game_taa %d, perf_profile %s, jitter sign %+d %+d, "
+             "log_level %d (the capture runs at 4)\n", SceneDlaa::DlssPresetName(), (double)SceneDlaa::Sharpness(),
+             (double)SceneDlaa::SharpRadius(), SceneDlaa::Area(), SceneDlaa::Feather(), g_objMode, (int)g_mirOn.load(),
+             g_biasCfg, g_outsideAaCfg, g_gameTaa,
+             kProfName[g_profile < 0 || g_profile > 2 ? 0 : g_profile], g_signX, g_signY, g_base.logLevel);
+    // frame times of the last ~10 s
+    {
+        std::vector<float> v;
+        double sum = 0.0;
+        for (int i = 0; i < g_ftN && sum < 10000.0; ++i) { const float ms = g_ft[(g_ftHead - 1 - i + kFt) % kFt]; v.push_back(ms); sum += ms; }
+        if (!v.empty()) {
+            std::vector<float> sv = v;
+            std::sort(sv.begin(), sv.end());
+            const float p99 = sv[(size_t)((sv.size() - 1) * 0.99)], mx = sv.back(), med = sv[sv.size() / 2];
+            s += Fmt("frame times (last %.1f s, %zu Presents): avg %.2f ms (%.1f fps), median %.2f, 99th pct %.2f, max %.2f ms\n",
+                     sum / 1000.0, v.size(), sum / v.size(), 1000.0 * v.size() / sum, (double)med, (double)p99, (double)mx);
+        }
+    }
+    // the graphics card of the game's device
+    if (ID3D11DeviceContext* ctx = g_gameCtx.load(std::memory_order_acquire)) {
+        Microsoft::WRL::ComPtr<ID3D11Device> dev;
+        ctx->GetDevice(&dev);
+        Microsoft::WRL::ComPtr<IDXGIDevice> dd;
+        Microsoft::WRL::ComPtr<IDXGIAdapter> ad;
+        DXGI_ADAPTER_DESC desc{};
+        if (dev && SUCCEEDED(dev.As(&dd)) && SUCCEEDED(dd->GetAdapter(&ad)) && SUCCEEDED(ad->GetDesc(&desc))) {
+            char name[256]; WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, name, sizeof(name), nullptr, nullptr);
+            LARGE_INTEGER umd{};
+            const bool haveUmd = SUCCEEDED(ad->CheckInterfaceSupport(__uuidof(IDXGIDevice), &umd));
+            s += Fmt("GPU: %s, %llu MB VRAM, vendor 0x%04x device 0x%04x, driver %u.%u.%u.%u%s\n", name,
+                     (unsigned long long)(desc.DedicatedVideoMemory >> 20), desc.VendorId, desc.DeviceId,
+                     haveUmd ? HIWORD(umd.HighPart) : 0, haveUmd ? LOWORD(umd.HighPart) : 0, haveUmd ? HIWORD(umd.LowPart) : 0,
+                     haveUmd ? LOWORD(umd.LowPart) : 0, haveUmd ? "" : " (unknown)");
+        }
+    }
+    s += Fmt("rewind: %d frames held (%.0f MB VRAM), %d diag frames; GPU timers %s, CPU profiler %s (their figures: the 'perf eye' / "
+             "'CPU profile' lines in dlaa_inject.log)\n", Rewind::g_count, (double)Rewind::g_vramBytes.load() / 1048576.0,
+             (int)Rewind::g_diag.size(), GpuPerf::On() ? "on" : "off", CpuProf::On() ? "on" : "off");
+    return s;
+}
+std::string FileVersion(const wchar_t* path) {
+    DWORD h = 0;
+    const DWORD n = GetFileVersionInfoSizeW(path, &h);
+    if (!n) return "?";
+    std::vector<uint8_t> b(n);
+    VS_FIXEDFILEINFO* fi = nullptr; UINT len = 0;
+    if (!GetFileVersionInfoW(path, 0, n, b.data()) || !VerQueryValueW(b.data(), L"\\", (void**)&fi, &len) || !fi) return "?";
+    return Fmt("%u.%u.%u.%u", HIWORD(fi->dwFileVersionMS), LOWORD(fi->dwFileVersionMS), HIWORD(fi->dwFileVersionLS), LOWORD(fi->dwFileVersionLS));
+}
+std::string U8(const wchar_t* w) { char b[2048]; WideCharToMultiByte(CP_UTF8, 0, w, -1, b, sizeof(b), nullptr, nullptr); return b; }
+std::string SysInfoLater() {                      // writer thread: files, modules, registry
+    std::string s;
+    wchar_t p[MAX_PATH];
+    if (GetModuleFileNameW(nullptr, p, MAX_PATH)) s += Fmt("game: %s, version %s\n", U8(p).c_str(), FileVersion(p).c_str());
+    {
+        HMODULE self = nullptr;
+        if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                               (LPCWSTR)&SysInfoLater, &self) && GetModuleFileNameW(self, p, MAX_PATH)) {
+            std::string dll;
+            BugReport::ReadFileText(p, dll, 64u << 20);
+            s += Fmt("mod DLL: %s, %zu bytes, CRC-32 %08X\n", U8(p).c_str(), dll.size(), BugReport::Crc32(dll.data(), dll.size()));
+        }
+    }
+    if (HMODULE m = GetModuleHandleW(L"nvngx_dlss.dll")) {
+        if (GetModuleFileNameW(m, p, MAX_PATH)) s += Fmt("nvngx_dlss.dll: %s, version %s\n", U8(p).c_str(), FileVersion(p).c_str());
+    } else s += "nvngx_dlss.dll: not loaded\n";
+    {   // Windows build (RtlGetVersion: GetVersionEx lies without a manifest)
+        typedef LONG(WINAPI* RtlGetVersionFn)(OSVERSIONINFOW*);
+        OSVERSIONINFOW vi{}; vi.dwOSVersionInfoSize = sizeof(vi);
+        if (auto fn = (RtlGetVersionFn)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion")) fn(&vi);
+        s += Fmt("Windows %lu.%lu build %lu\n", vi.dwMajorVersion, vi.dwMinorVersion, vi.dwBuildNumber);
+    }
+    {   // CPU
+        int r[4] = {}; char brand[49] = {};
+        __cpuid(r, 0x80000000);
+        if ((unsigned)r[0] >= 0x80000004u) for (int i = 0; i < 3; ++i) { __cpuid(r, 0x80000002 + i); memcpy(brand + 16 * i, r, 16); }
+        SYSTEM_INFO si{}; GetSystemInfo(&si);
+        s += Fmt("CPU: %s, %lu logical processors\n", brand[0] ? brand : "?", si.dwNumberOfProcessors);
+    }
+    {   // OpenXR runtime (the active one in the registry)
+        HKEY k = nullptr;
+        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Khronos\\OpenXR\\1", 0, KEY_READ, &k) == ERROR_SUCCESS) {
+            wchar_t v[MAX_PATH] = {}; DWORD sz = sizeof(v), type = 0;
+            if (RegQueryValueExW(k, L"ActiveRuntime", nullptr, &type, (LPBYTE)v, &sz) == ERROR_SUCCESS) s += "OpenXR active runtime: " + U8(v) + "\n";
+            RegCloseKey(k);
+        } else s += "OpenXR active runtime: none registered\n";
+    }
+    {   // modules outside Windows (ReShade, OptiScaler, overlays, OpenXR layers ...)
+        HMODULE mods[1024]; DWORD need = 0;
+        wchar_t win[MAX_PATH] = {}; GetWindowsDirectoryW(win, MAX_PATH);
+        const size_t wl = wcslen(win);
+        if (K32EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &need)) {
+            s += "loaded modules outside the Windows folder:\n";
+            for (DWORD i = 0; i < need / sizeof(HMODULE) && i < 1024; ++i) {
+                if (!GetModuleFileNameW(mods[i], p, MAX_PATH)) continue;
+                if (wl && !_wcsnicmp(p, win, wl)) continue;
+                s += "  " + U8(p) + "\n";
+            }
+        }
+    }
+    {   // the game's r_* lines (config.cfg)
+        const std::string cfg = Lang::ReadGameConfig();
+        s += "config.cfg render lines (uset r_*, g_vr*, g_developer, g_console):\n";
+        size_t i = 0;
+        while (i < cfg.size()) {
+            size_t e = cfg.find('\n', i);
+            if (e == std::string::npos) e = cfg.size();
+            const std::string ln = cfg.substr(i, e - i);
+            if (ln.find("uset r_") == 0 || ln.find("uset g_vr") == 0 || ln.find("uset g_developer") == 0 || ln.find("uset g_console") == 0)
+                s += "  " + ln + "\n";
+            i = e + 1;
+        }
+    }
+    {   // every active dlaa.ini line
+        if (PathNextToDll(L"dlaa.ini", p)) {
+            std::string ini;
+            BugReport::ReadFileText(p, ini, 1u << 20);
+            s += "dlaa.ini active lines:\n";
+            size_t i = 0;
+            while (i < ini.size()) {
+                size_t e = ini.find('\n', i);
+                if (e == std::string::npos) e = ini.size();
+                std::string ln = ini.substr(i, e - i);
+                while (!ln.empty() && (ln.back() == '\r' || ln.back() == ' ')) ln.pop_back();
+                size_t b = 0;
+                while (b < ln.size() && (ln[b] == ' ' || ln[b] == '\t')) ++b;
+                if (b < ln.size() && ln[b] != '#' && ln[b] != ';' && ln.find("fps_profile") == std::string::npos) s += "  " + ln.substr(b) + "\n";
+                i = e + 1;
+            }
+        }
+    }
+    return s;
+}
+const char* const kReadme =
+    "ETS2 / ATS DLAA injector -- bug report capture\r\n"
+    "This folder is packed next to it, by kind, into zips of at most 24 MB (GitHub takes files up to 25 MB, many per comment):\r\n"
+    "  shimmer_<date>_<time>_main.zip     the text files and your picture with DLAA on / off: ALWAYS attach this one\r\n"
+    "  shimmer_<date>_<time>_full.zip     the extra views (capture Full only): attach when asked\r\n"
+    "  shimmer_<date>_<time>_rewind.zip   the frames before the key (Rewind on only): attach when asked\r\n"
+    "A kind that needs more than 24 MB is _<kind>_part01.zip, _part02.zip ... (each opens on its own). Drag them into your\r\n"
+    "GitHub issue, or upload this folder to Google Drive / OneDrive / Dropbox and paste the link.\r\n"
+    "A file bigger than one part is cut into name.part01, name.part02 ... (in any of the zips): put the pieces in one folder and\r\n"
+    "join them with   copy /b name.part01 + name.part02 name   (Windows command prompt).\r\n"
+    "Personal paths (your Windows user name, home folder, Steam library folder) are replaced by <user>, %USERPROFILE%, <steam>\r\n"
+    "in every text file.\r\n\r\n"
+    "sysinfo.txt        mod / game / Windows / GPU / driver / DLSS DLL versions, VR runtime, resolutions, settings, frame times,\r\n"
+    "                   loaded add-ons (ReShade, OptiScaler ...), the game's render settings (config.cfg r_* lines)\r\n"
+    "info.txt           one line per saved frame: jitter phase, viewport shift and the jitter DLSS was told\r\n"
+    "dlaa_inject.log    the mod's log (the capture raised it to debug while it ran)\r\n"
+    "dlaa.ini           your settings file\r\n"
+    "game.log.txt       the last 2000 lines of the game's own log\r\n"
+    "PICTURES: every picture is the whole one (eye 0 in VR), not cropped.\r\n"
+    "rewind_NN.png      (rewind on) the frames BEFORE the key: rewind_00 = the last one (the last 12 one by one, older ones spread)\r\n"
+    "rw_color_in_NN.png / rw_mv_NN.png / rw_depth_NN.png   (rewind on) what DLSS got in those frames\r\n"
+    "on_N.png           your picture as you play (eye 0 in VR); full_on_0.png = the whole picture\r\n"
+    "off_N.png          DLAA / DLSS off: the game's raw jittered picture\r\n"
+    "--- capture_mode 2 (Full) adds ---\r\n"
+    "color_in_N.png     the jittered picture DLSS got   ngx_out_N.png  what DLSS made of it (before sharpening; the same part)\r\n"
+    "                   HDR planes (before the game's tonemap) are shown with an AUTO EXPOSURE: the log-average brightness is\r\n"
+    "                   put at 0.18, then x / (1 + x) and sRGB -- the game's own exposure is not known here; info.txt has the factor\r\n"
+    "mv_N.png           motion vectors as colours, AUTO-RANGED: 0.5 + 0.5 * mv / S (S = the 99th percentile of |mv| in px, in\r\n"
+    "                   info.txt); grey = still, red = x, green = y.   depth_N.png  depth (near = white, depth^0.25)\r\n"
+    "mv_0.bin / depth_0.bin   raw float data (rw_mv_00.bin / rw_depth_00.bin instead when the rewind has the planes):\r\n"
+    "                   uint32 'RAW1', width, height, components, then float32 values row by row (the same crop as the PNGs)\r\n"
+    "mvview_N.png       the mod's motion-vector view (Ctrl+F6)\r\n"
+    "partsoff_N.png     moving parts off (camera motion only)   mvoff_N.png  all motion vectors off   jitonly_N.png  DLSS skipped\r\n";
+void FinishJob(std::wstring dir, std::string sys, int level, int keep) {   // a writer thread, after every frame job (WaitAlone)
+    Rewind::WaitAlone();
+    const LONGLONG tFiles = Qpc();
+    wchar_t exe[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    const BugReport::Scrubber sc = BugReport::MakeScrubber(exe);
+    std::string text;
+    sys += SysInfoLater();
+    sys += Fmt("capture: capture_mode %d, %d files written, %d failed\n", level, Rewind::g_wOk.load(), Rewind::g_wFail.load());
+    BugReport::WriteFileText((dir + L"sysinfo.txt").c_str(), sc.Apply(sys));
+    BugReport::WriteFileText((dir + L"README.txt").c_str(), kReadme);
+    wchar_t p[MAX_PATH];
+    if (PathNextToDll(L"dlaa_inject.log", p) && BugReport::ReadFileText(p, text, 48u << 20))
+        BugReport::WriteFileText((dir + L"dlaa_inject.log").c_str(), sc.Apply(text));
+    if (PathNextToDll(L"dlaa.ini", p) && BugReport::ReadFileText(p, text, 1u << 20)) {
+        std::string out;                                  // (the fps_profile lines are per-vehicle data: left out)
+        size_t i = 0;
+        while (i < text.size()) {
+            size_t e = text.find('\n', i);
+            if (e == std::string::npos) e = text.size(); else ++e;
+            const std::string ln = text.substr(i, e - i);
+            if (ln.find("fps_profile") == std::string::npos) out += ln;
+            i = e;
+        }
+        BugReport::WriteFileText((dir + L"dlaa.ini").c_str(), sc.Apply(out));
+    }
+    {
+        const std::wstring gl = Lang::GameLogPath();
+        if (!gl.empty() && BugReport::ReadFileText(gl.c_str(), text, 16u << 20))
+            BugReport::WriteFileText((dir + L"game.log.txt").c_str(), sc.Apply(BugReport::TailLines(text, 2000)));
+    }
+    if (BugReport::ReadFileText((dir + L"info.txt").c_str(), text, 8u << 20)) {
+        {   // phase 89e: how each picture was made viewable (exposure / MV range), from the writers
+            std::lock_guard<std::mutex> lk(g_noteMx);
+            std::sort(g_notes.begin(), g_notes.end());
+            if (!g_notes.empty()) text += "--- how the pictures were made viewable ---\n";
+            for (const std::string& nl : g_notes) text += nl + "\n";
+            g_notes.clear();
+        }
+        BugReport::WriteFileText((dir + L"info.txt").c_str(), sc.Apply(text));
+    }
+    // phase 89g: the folder as INDEPENDENT zips of at most 24 MB each (GitHub takes files up to 25 MB, many per comment):
+    // shimmer_<time>_part01.zip, _part02.zip ... -- every part opens alone (BugReport::PackParts: the text files and the most
+    // important pictures first; a file bigger than a part is cut into name.partNN pieces). Each part is checked against ZIP32.
+    std::wstring folder = dir;
+    if (!folder.empty() && folder.back() == L'\\') folder.pop_back();
+    const size_t slash = folder.find_last_of(L'\\');
+    const std::string top = U8(folder.substr(slash + 1).c_str());
+    std::vector<BugReport::PackFile> files;
+    std::vector<std::wstring> wnames;
+    {
+        WIN32_FIND_DATAW fd;
+        HANDLE h = FindFirstFileW((dir + L"*").c_str(), &fd);
+        if (h != INVALID_HANDLE_VALUE) {
+            do {
+                if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+                files.push_back(BugReport::PackFile{ U8(fd.cFileName), ((uint64_t)fd.nFileSizeHigh << 32) | fd.nFileSizeLow });
+                wnames.push_back(fd.cFileName);
+            } while (FindNextFileW(h, &fd));
+            FindClose(h);
+        }
+    }
+    // phase 89h: packed BY KIND (BugReport::PackGroup): _main (always attach), _full, _rewind -- each kind into its own zips
+    struct Zp { int group; size_t index, count; std::vector<BugReport::PackItem> items; };
+    std::vector<Zp> parts;
+    for (int g = 0; g < BugReport::kGroupCount; ++g) {
+        std::vector<BugReport::PackFile> sub;
+        std::vector<size_t> map;
+        for (size_t i = 0; i < files.size(); ++i)
+            if (BugReport::PackGroup(files[i].name) == g) { sub.push_back(files[i]); map.push_back(i); }
+        if (sub.empty()) continue;
+        std::vector<std::vector<BugReport::PackItem>> gp = BugReport::PackParts(sub);
+        for (size_t k = 0; k < gp.size(); ++k) {
+            for (BugReport::PackItem& it : gp[k]) it.file = map[it.file];
+            parts.push_back(Zp{ g, k, gp.size(), std::move(gp[k]) });
+        }
+    }
+    size_t itemsTotal = 0, itemsDone = 0, split = 0;
+    for (const Zp& p : parts) itemsTotal += p.items.size();
+    for (const Zp& p : parts) for (const BugReport::PackItem& it : p.items) split += it.entry != files[it.file].name ? 1 : 0;
+    bool ok = !parts.empty();
+    uint64_t zipBytes = 0;
+    std::string partList;
+    int mainParts = 0;
+    g_zipPct = 0;
+    g_zipPath[0] = 0;
+    for (size_t pi = 0; pi < parts.size(); ++pi) {
+        const std::wstring zp = BugReport::PartZipName(folder, parts[pi].group, parts[pi].index, parts[pi].count);
+        uint64_t sum = 0;
+        for (const BugReport::PackItem& it : parts[pi].items) sum += it.len;
+        BugReport::Zip z;
+        bool pok = BugReport::Zip::FitsZip32(sum, parts[pi].items.size()) && z.Open(zp.c_str());
+        for (const BugReport::PackItem& it : parts[pi].items) {
+            if (!pok) break;
+            const std::string en = top + "/" + it.entry;
+            const std::wstring src = dir + wnames[it.file];
+            const bool whole = it.off == 0 && it.len == files[it.file].size;
+            if (!(whole ? z.AddFile(en.c_str(), src.c_str()) : z.AddFileRange(en.c_str(), src.c_str(), it.off, it.len))) {
+                if (z.Bad()) { pok = false; break; }
+                LogWarn("capture: %s could not be read for %s -- left out", it.entry.c_str(), U8(zp.c_str() + slash + 1).c_str());
+            }
+            g_zipPct = (int)(++itemsDone * 100 / (itemsTotal ? itemsTotal : 1));
+        }
+        pok = z.Close() && pok;
+        if (!pok) {
+            DeleteFileW(zp.c_str());                       // never leave a corrupt archive behind
+            LogErr("capture: writing %s failed (disk full?) -- it was deleted, the folder is kept", U8(zp.c_str() + slash + 1).c_str());
+            ok = false;
+            continue;
+        }
+        WIN32_FILE_ATTRIBUTE_DATA za{};
+        const uint64_t zb = GetFileAttributesExW(zp.c_str(), GetFileExInfoStandard, &za)
+                          ? (((uint64_t)za.nFileSizeHigh << 32) | za.nFileSizeLow) : 0;
+        zipBytes += zb;
+        char one[128];
+        snprintf(one, sizeof(one), "%s%s (%.1f MB, %zu files)", partList.empty() ? "" : ", ", U8(zp.c_str() + slash + 1).c_str(),
+                 (double)zb / 1048576.0, z.Count());
+        partList += one;
+        if (parts[pi].group == BugReport::kGroupMain) { ++mainParts; if (!g_zipPath[0]) wcscpy_s(g_zipPath, zp.c_str()); }
+    }
+    if (!ok && !g_failWhy[0]) snprintf(g_failWhy, sizeof(g_failWhy), "%s", parts.empty() ? "nothing to pack" : "a zip part could not be written");
+    g_zipParts = (int)parts.size();
+    g_zipMain = mainParts;
+    const uint64_t dirBytes = BugReport::DirBytes(folder);
+    // review fix (2026-11-01): a failed capture never deletes an older good one (it would count as one of the `keep` newest)
+    const int pruned = ok ? BugReport::Prune(folder.substr(0, slash), keep) : 0;
+    g_dirBytes = dirBytes;
+    g_zipMB = (int)((zipBytes + (1u << 19)) >> 20);
+    g_t2 = Qpc();
+    g_zipPct = -1;
+    g_state = ok ? 3 : 4;
+    const double f = g_qpcFreq > 0 ? 1.0 / (double)g_qpcFreq : 0.0;
+    Log("capture ready: %zu zip(s), %.1f MB in all, at most 24 MB each (attach the _main one(s); the rest when asked): %s -- %zu file(s) cut into pieces; folder "
+        "%.1f MB; %d older capture(s) removed, capture_keep %d%s -- timings: sets %.2f s, encoding %.2f s (%d writer threads), zips %.2f s",
+        parts.size(), (double)zipBytes / 1048576.0, partList.c_str(), split, (double)dirBytes / 1048576.0, pruned, keep,
+        ok ? "" : " -- SOME PARTS FAILED", (double)(g_t1 - g_t0) * f, (double)(tFiles - g_t1) * f, Rewind::g_wThreads,
+        (double)(g_t2 - tFiles) * f);
+    if (g_beeps) { if (ok) { Beep(1200, 120); Beep(1600, 120); } else Beep(300, 400); }   // writer thread: two rising beeps = the zips are ready
+}
+}  // namespace Cap
 
 // ---- F10 snapshot: exactly what NGX received, lossless, 2 consecutive frames ------------
 struct SnapInfo {
@@ -13893,7 +14998,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
             LogWarn("VR eye blit #%llu re-draws the same eye texture as the previous blit of Present #%llu (game fade / re-draw) -- "
                 "no pass consumed, DLAA skipped for it (phase 76; #%llu)", (unsigned long long)g_blitCount,
                 (unsigned long long)frame, (unsigned long long)g_cSameRtRedraw);
-        if (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)    // menu / fps box: still drawn on a known eye RT (as underflow)
+        if (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow || g_capStatusOn)    // menu / fps box: still drawn on a known eye RT (as underflow)
             for (int i = 0; i < g_eyeMapN; ++i)
                 if (g_eyeMap[i].rt == rtPtr) { g_menuBlitEye = g_eyeMap[i].eye; g_menuBlitRt = rtPtr; break; }
         tex->Release();
@@ -13908,7 +15013,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
 #ifdef WITH_DLAA
         DrawIdMv::StaticClear(DrawIdMv::kStatClrFifo);   // v0.10.0 phase 14: the pass / blit pairing slipped -> replay everything
 #endif
-        if (!isBackbuffer && (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow))   // v0.10.0 menu / fps box: still drawn on a known eye RT
+        if (!isBackbuffer && (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow || g_capStatusOn))   // v0.10.0 menu / fps box: still drawn on a known eye RT
             for (int i = 0; i < g_eyeMapN; ++i)
                 if (g_eyeMap[i].rt == rtPtr) { g_menuBlitEye = g_eyeMap[i].eye; g_menuBlitRt = rtPtr; break; }
         tex->Release();
@@ -14039,7 +15144,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
 #endif
         g_vrLastBlitS = slot.s; g_vrLastBlitEye = eye;
     }
-    if (!isBackbuffer && (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)) { g_menuBlitEye = eye; g_menuBlitRt = rtPtr; }   // v0.10.0 menu / fps box
+    if (!isBackbuffer && (g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow || g_capStatusOn)) { g_menuBlitEye = eye; g_menuBlitRt = rtPtr; }   // v0.10.0 menu / fps box
 #ifdef WITH_DLAA
     if (!isBackbuffer) FpsCabBlit(ctx, eye, *didRec, slot.s, frame);   // phase 47: the fps box attached to the vehicle (mode 2 only)
     GpuPerf::SetPass(slot.s);                             // v0.10.0 phase 8: this pass's sections belong to `eye`
@@ -14244,6 +15349,20 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
                         (double)dl.CentreU(), (double)dl.CentreV(), (int)ld.Format, ld.Width, ld.Height, (int)svd.Format,
                         (int)srgbDecode, bd.Width, bd.Height, (int)bd.Format, upW ? "on" : "off");
                 }
+            }
+            // phase 90c (VR test 2026-11-01, r_scale_x 0.75 / r_scale_y 1: a shifted, narrower copy of the DLAA square in each eye):
+            // without DLSS the composite draws 1:1 in RENDER px after the blit, but the game's blit STRETCHES the render size to its
+            // output rect -- so then the mix goes into the blit's source before the blit, and the game's own stretch scales it too
+            if (taaModRan && !upW && blitOw && (blitOw != dl.FullW() || blitOh != dl.FullH())) {
+                static bool s_into = false;
+                if (!s_into) {
+                    s_into = true;
+                    Log("game TAA (phase 90c): eye %d the blit stretches %ux%u -> %ux%u -- the mix is drawn into the blit's source "
+                        "before the blit (not after it in render px)", eye, dl.FullW(), dl.FullH(), blitOw, blitOh);
+                }
+                t_inDlaa = true;
+                if (!dl.CompositeInto(ctx, tex)) taaModRan = false;
+                t_inDlaa = false;
             }
             if (!taaModRan) { ++g_taaLdrRunFails; ++g_taaWhyN[GameTaa::kWhyRunFailed]; g_taaLastWhy = GameTaa::kWhyRunFailed; }
         }
@@ -18664,7 +19783,7 @@ enum MenuRowId {
     // phase 84 (menu regroup): top level Mode / Profile / Model, then the collapsible groups (header + contiguous children,
     // kMenuGroups below; most-used first), FPS counter on / off above its group, Logging, Language, Hotkeys, Save, Reset, Close.
     // kMenuDesc is in THIS order. Rows of the other mode (flat / VR) are hidden: MenuRowMode.
-    MR_MODE, MR_PROFILE, MR_MODEL,
+    MR_MODE, MR_TAAMIX, MR_PROFILE, MR_MODEL,           // phase 90: Mix amount under Mode (shown only while Mix is used)
     MR_PICGRP, MR_SHARP, MR_WIDTH, MR_LOD, MR_LODCUT, MR_FWD, MR_BIAS, MR_AREA,
     MR_MOTGRP, MR_DRAWIDS, MR_MIRROR, MR_MIRTURNS,
     MR_FRGRP, MR_CPU, MR_CPUPIN, MR_FPSCAP, MR_REFLEX, MR_VRFPSCAP,
@@ -18674,8 +19793,9 @@ enum MenuRowId {
     MR_FPSGRP, MR_FPSX, MR_FPSY, MR_FPSSIZE, MR_FPSCOLOR, MR_FPSBRIGHT, MR_FPSOPAC, MR_FPSGRAPH, MR_FPSLOCK, MR_FPSPROF, MR_FPSREMEAS,
     MR_FPSYAW, MR_FPSPITCH, MR_FPSROLL, MR_FPSDIST,
     MR_PANELGRP, MR_POSX, MR_POSY, MR_SIZE, MR_MENUKEYS, MR_PANELLOCK, MR_DEPTH, MR_FACE,
-    MR_CMPGRP, MR_DLAA, MR_GAMETAA, MR_TAAMIX, MR_TAASPLIT, MR_TAAPAIR, MR_WIREMV, MR_WIREDEPTH, MR_WIREWIDEN, MR_PRETM,
-    MR_LOG, MR_LANGUAGE, MR_HOTKEYS, MR_SAVE, MR_RESET, MR_CLOSE,
+    MR_CMPGRP, MR_DLAA, MR_GAMETAA, MR_TAASPLIT, MR_TAAPAIR, MR_WIREMV, MR_WIREDEPTH, MR_WIREWIDEN, MR_PRETM,
+    MR_BUGGRP, MR_REPALL, MR_LOG, MR_REWIND, MR_CAPMODE, MR_CAPKEY, MR_CAPKEEP, MR_CAPNOW,   // phase 89d: the Bug report group
+    MR_LANGUAGE, MR_HOTKEYS, MR_SAVE, MR_RESET, MR_CLOSE,
     MR_COUNT
 };
 static_assert(MR_COUNT <= TuningMenu::kMaxRows, "tuning menu: too many rows");
@@ -18693,18 +19813,23 @@ constexpr MenuGroupDef kMenuGroups[] = {
     { MR_FPSGRP,   MR_FPSDIST,  N_(L"FPS counter"), nullptr },   // v0.10.3 / 84 (was "FPS counter settings")
     { MR_PANELGRP, MR_FACE,     N_(L"Menu panel"), nullptr },   // v0.10.3 / 84 (was "Panel settings")
     { MR_CMPGRP,   MR_PRETM,    N_(L"Compare and test"), nullptr },   // phase 84
+    { MR_BUGGRP,   MR_CAPNOW,   N_(L"Bug report"), nullptr },         // phase 89d (Log detail moved in here)
 };
 constexpr int kMenuGroupCount = (int)(sizeof(kMenuGroups) / sizeof(kMenuGroups[0]));
 static_assert(MR_PICGRP + 1 == MR_SHARP && MR_AREA + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_MIRTURNS + 1 == MR_FRGRP &&
               MR_FRGRP + 1 == MR_CPU && MR_VRFPSCAP + 1 == MR_VRPGRP && MR_VRPGRP + 1 == MR_TURBO && MR_VECTORXR + 1 == MR_UIGRP &&
               MR_UIGRP + 1 == MR_UISET && MR_UIRESET + 1 == MR_FPS && MR_FPSGRP + 1 == MR_FPSX && MR_FPSDIST + 1 == MR_PANELGRP &&
-              MR_PANELGRP + 1 == MR_POSX && MR_FACE + 1 == MR_CMPGRP && MR_CMPGRP + 1 == MR_DLAA && MR_PRETM + 1 == MR_LOG,
+              MR_PANELGRP + 1 == MR_POSX && MR_FACE + 1 == MR_CMPGRP && MR_CMPGRP + 1 == MR_DLAA && MR_PRETM + 1 == MR_BUGGRP &&
+              MR_BUGGRP + 1 == MR_REPALL && MR_CAPNOW + 1 == MR_LANGUAGE,
               "tuning menu: a group's children must follow its header and fill it up to its last row");
 const wchar_t* const kMenuDesc[] = {
     // v0.10.0: every row = what it does, when a player would change it, what it costs. The panel shows 3 lines of about 105
     // characters (menu.cpp kDescH) = the description + the cost sentence MenuPerfCosts appends: keep both within ~320 characters.
     N_(L"DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's Scaling is below 100 %. "
-    L"off = the game's own picture: use it to compare. Saved at once."),
+    L"Mix = the game's own TAA blended with DLAA / DLSS: calmer, a bit softer. off = the game's own picture. Saved at once."),
+    // phase 90 (MR_TAAMIX, moved here from Compare and test)
+    N_(L"How much of the Mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer, less = sharper. Shown while "
+    L"Mode is Mix, or a split has a Mix side. No extra cost."),
     N_(L"Presets for your graphics card. high = everything on (model 1). medium = model 2, a lighter Glass and fence fix, mirrors "
     L"without Track moving parts. low = also no Smooth mirrors, no Glass and fence fix, VR area 60 %. Never changes a setting you "
     L"set yourself."),
@@ -18857,15 +19982,13 @@ const wchar_t* const kMenuDesc[] = {
     N_(L"Switches for comparing: DLAA off, the game's own TAA mixed in or side by side, the wire fixes, running DLAA earlier. Nothing here is needed for normal driving. Right opens the group, Left closes it."),
     N_(L"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for comparing. Off saves the cost "
     L"of every part together."),
-    // phase 82 (MR_GAMETAA, MR_TAAMIX)
-    N_(L"Uses the game's own TAA smoothing too. off = the mod alone. mix = TAA and DLAA / DLSS on the same frame, blended. split = "
-    L"the mod on the left, TAA on the right, to compare. With the game's console on, the mod switches the game's Anti-aliasing for you."),
-    N_(L"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), less = sharper (DLAA / "
-    L"DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."),
-    N_(L"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS on the left of it, the game's "
-    L"TAA on the right. Used only when Game TAA is split."),
-    N_(L"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix | TAA or DLAA | Mix (Mix = "
-    L"the two blended at Game TAA amount). DLSS instead of DLAA when upscaling. Used only when Game TAA is split."),
+    // phase 82 (MR_GAMETAA); phase 90: the split only (Mix is on the Mode row)
+    N_(L"on = the mod on the left, the game's own TAA on the right, to compare (Split line position, Split: left | right). Replaces "
+    L"Mix while on. With the game's console on, the mod switches the game's Anti-aliasing for you."),
+    N_(L"Where the split line is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS on the left of it, the game's "
+    L"TAA on the right. Used only while Split with game TAA is on."),
+    N_(L"What the split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix | TAA or DLAA | Mix (Mix = "
+    L"the two blended at Mix amount). DLSS instead of DLAA when upscaling. Used only while Split with game TAA is on."),
     // phase 69 (MR_WIREMV, MR_WIREDEPTH, MR_WIREWIDEN): the thin-wire switches, also on the Hotkeys page
     N_(L"Thin wires move correctly while you drive: their movement is spread over the whole thin line. on = default. off = only "
     L"to compare; near wires flicker more. The picture is soft for a moment when you switch."),
@@ -18875,9 +19998,24 @@ const wchar_t* const kMenuDesc[] = {
     L"Off by default: far wires may look darker or flicker more. Try it and compare."),
     N_(L"Flat only: DLAA runs before the game adds its glow and colour look, so lane paint, wires and rails shimmer less. Change it "
     L"only to compare. Not used with DLSS upscaling or Windows HDR. Same cost either way; takes about a second to switch."),
+    // phase 89d (MR_BUGGRP, MR_REPALL)
+    N_(L"Bug report: press the capture key twice (or Capture now) where something looks wrong; the mod writes one zip you attach to "
+    L"a GitHub issue. Right opens the group, Left closes it."),
+    N_(L"One switch for the most complete report: log detail debug, rewind 2 s, capture Full. Off puts the rows back as they were. "
+    L"Only this switch is saved; the forced values are never written to dlaa.ini."),
     // phase 39 (MR_LOG)
     N_(L"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + problems worked around; "
     L"info = + start-up and changes; debug = + statistics and timing measurements (a little slower)."),
+    // phase 89d (MR_REWIND, MR_CAPMODE, MR_CAPKEY, MR_CAPKEEP, MR_CAPNOW)
+    N_(L"Keeps the last 0.5 - 3 s of frames on the graphics card all the time, so the report shows the moment BEFORE the key (+ what "
+    L"DLSS got for the last frames). Costs graphics memory (the MB in the cost column) and a picture copy per frame. off = none."),
+    N_(L"Quick = system info, logs, settings, your picture and DLAA off for a few frames (about 1 s). Full = + what DLSS got per "
+    L"frame (colour, motion, depth) and A/B sets: motion view, motion off, jitter only (about 2 - 4 s)."),
+    N_(L"The capture key. Press it TWICE within 1 s while driving where it goes wrong (the first press only arms it: one short "
+    L"beep). Right opens the Hotkeys page on its line to change it."),
+    N_(L"How many captures stay in the dlaa_selftest folder next to the DLL: older ones (folder + zip) are deleted when a new one "
+    L"is written. all = never delete."),
+    nullptr,                                              // MR_CAPNOW: built with the status and the zip's contents (MenuBuildPanel)
     // phase 74 (MR_LANGUAGE)
     N_(L"The language of this menu. auto = the game's language (default); Left / Right picks another one. Linux / Proton: Chinese, "
     L"Japanese and Korean need their fonts installed, see the README. A lang\\<code>.po file next to the DLL wins, for your own fixes. "
@@ -19391,11 +20529,59 @@ void StepBiasMask(int dir, uint64_t n) {
                                          : "off: NGX gets no mask, the glows come from the history as before phase 49");
     PlayTones(1, g_biasCfg ? 400 + 8 * g_biasCfg : 300, 120, 0);
 }
+// ---- phase 89d: the Bug report rows ----
+int CaptureModeNow() { return g_reportAll ? BugReport::kCaptureFull : g_captureMode; }
+float RewindSecsNow() { return g_reportAll ? 2.0f : g_rewindSecs; }   // -1 = rewind_secs not set: rewind_frames decides
+void ApplyLogLevelGates();
+void ReportAllSet(bool on, uint64_t n, const char* why) {
+    if (on == (g_reportAll != 0)) return;
+    if (Cap::g_state.load() == 1) {                       // review fix (2026-11-01): the capture holds a forced log level now
+        LogWarn("Send everything: not switched while a bug report capture is running (%s)", why);
+        PlayTones(1, 200, 400, 0);
+        return;
+    }
+    if (on) {
+        g_raLog = LogLevel(); g_raRewind = g_rewindSecs; g_raMode = g_captureMode;
+        g_reportAll = 1;
+        if (LogLevel() < 4) { LogSetLevel(4); ApplyLogLevelGates(); }
+    } else {
+        g_reportAll = 0;
+        if (LogLevel() != g_raLog) { LogSetLevel(g_raLog); ApplyLogLevelGates(); }
+    }
+    Log("Send everything (phase 89d): %s (%s, Present #%llu) -- log_level %d, rewind %.1f s, capture_mode %d now%s", on ? "ON" : "OFF",
+        why, (unsigned long long)n, LogLevel(), (double)(RewindSecsNow() < 0.0f ? 0.0f : RewindSecsNow()), CaptureModeNow(),
+        on ? " (forced; dlaa.ini keeps your own values)" : " (your own values again)");
+}
+void StepRewindSecs(int dir, uint64_t n) {
+    // review fix: with only the old rewind_frames set (rewind_secs unset), start from its nearest seconds step (Left reaches off)
+    float cur = g_rewindSecs < 0.0f ? 0.0f : g_rewindSecs;
+    if (g_rewindSecs < 0.0f && g_rewindFrames > 0) {
+        const int64_t per = MenuVr() ? XrHook::DisplayPeriodNs() : 0;
+        const double hz = per > 0 ? 1.0e9 / (double)per : (Cap::PresentHz() > 1.0 ? Cap::PresentHz() : 60.0);
+        const double secs = (double)g_rewindFrames / hz;
+        int best = 1;
+        for (int i = 1; i < BugReport::kRewindNSteps; ++i)
+            if (std::fabs(BugReport::kRewindSteps[i] - secs) < std::fabs(BugReport::kRewindSteps[best] - secs)) best = i;
+        cur = BugReport::kRewindSteps[best];
+    }
+    int i = 0;
+    while (i < BugReport::kRewindNSteps - 1 && BugReport::kRewindSteps[i] < cur - 1e-4f) ++i;
+    const int j = i + (dir > 0 ? 1 : -1);
+    if (j < 0 || j >= BugReport::kRewindNSteps) { PlayTones(1, 200, 120, 0); return; }
+    g_rewindSecs = BugReport::kRewindSteps[j];
+    g_bugExplicit = true;
+    Log("rewind before the key (phase 89d): %.1f s (rewind_secs, tuning menu, Present #%llu) -- the ring is %s at the next frame",
+        (double)g_rewindSecs, (unsigned long long)n, g_rewindSecs > 0.0f ? "(re)made" : "released");
+    PlayTones(1, 400 + 200 * j, 120, 0);
+}
 // phase 82: the menu's Game TAA row -- dlaa.ini game_taa live: off -> mix -> TAA only -> split (Left goes back). The next world pass
 // holds / releases the mod's jitter; every DLAA history starts over (the jitter source changes). Logged + beeped.
 void RaaRequest(uint64_t nowMs);                         // phase 86 (with the In-game UI block)
 void StepGameTaa(int dir, uint64_t n) {
-    g_gameTaa = GameTaa::NextMode(g_gameTaa, dir);
+    // phase 90: the Compare and test row is the split only: Right = split on (replaces Mix), Left = split off (Mix lives on the Mode row)
+    const int want = dir > 0 ? GameTaa::kSplit : (g_gameTaa == GameTaa::kSplit ? GameTaa::kOff : g_gameTaa);
+    if (g_gameTaa == want) { PlayTones(1, 200, 120, 0); return; }
+    g_gameTaa = want;
     g_gameTaaExplicit = true;
     g_resetNext = true;
     RaaRequest(GetTickCount64());                        // phase 86: the game's Anti-aliasing follows (typed when it differs, console on)
@@ -19451,6 +20637,7 @@ std::vector<VrUi::KeyStep> g_vrUiPlan;
 std::vector<std::string> g_vrUiCmds;
 size_t     g_vrUiStep = 0;
 uint64_t   g_vrUiWaitUntil = 0, g_vrUiSent = 0;
+int        g_vrUiWaitFrames = 0;                     // Presents seen in the current wait step (VrUi::kMinWaitFrames)
 // phase 85: the focus gate (SendInput types into the FOREGROUND window) and the delivery check (the game echoes executed commands
 // into game.log.txt): the commands of the last batch, the log's size when the batch started, the bytes read since, the deadline
 bool       g_vrUiNoFocus = false;                    // a batch waits for the game window to have the focus (the row says so)
@@ -19599,8 +20786,8 @@ void VrUiTick() {
         while (g_vrUiStep < g_vrUiPlan.size()) {
             const VrUi::KeyStep& s = g_vrUiPlan[g_vrUiStep];
             if (s.kind == VrUi::kWait) {
-                if (!g_vrUiWaitUntil) g_vrUiWaitUntil = now + (uint64_t)s.ms;
-                if (now < g_vrUiWaitUntil) return;
+                if (!g_vrUiWaitUntil) { g_vrUiWaitUntil = now + (uint64_t)s.ms; g_vrUiWaitFrames = 0; }
+                if (now < g_vrUiWaitUntil || g_vrUiWaitFrames++ < VrUi::kMinWaitFrames) return;   // ms AND Presents (a long frame)
                 g_vrUiWaitUntil = 0;
             } else {
                 if (!KeySwallow::GameHasFocus()) {        // phase 85: hold the batch at this step until the game window has the focus
@@ -19627,7 +20814,7 @@ void VrUiTick() {
         g_vrUiConfirm = g_vrUiCmds;
         g_vrUiConfirmed.assign(g_vrUiConfirm.size(), false);
         g_vrUiBatchEnd = now; g_vrUiConfirmUntil = now + VrUi::kConfirmMs; g_vrUiConfirmPoll = 0;
-        g_vrUiPlan.clear(); g_vrUiCmds.clear(); g_vrUiStep = 0; g_vrUiWaitUntil = 0;
+        g_vrUiPlan.clear(); g_vrUiCmds.clear(); g_vrUiStep = 0; g_vrUiWaitUntil = 0; g_vrUiWaitFrames = 0;
         return;
     }
     // phase 86: the game's r_aa runs in flat AND VR (the In-game UI rows only in VR with the console on)
@@ -19951,6 +21138,11 @@ void ResetSettings(uint64_t n) {
     g_biasCfg = 100;                                      // phase 49: the glow bias mask at full strength
     g_biasExplicit = false;
     SceneDlaa::SetBiasStrength(g_biasCfg);
+    ReportAllSet(false, n, "Reset row");                  // phase 89d: the Bug report rows (the log level is reset below anyway)
+    g_rewindSecs = -1.0f;
+    g_captureMode = BugReport::kCaptureQuick;
+    g_captureKeep = 5;
+    g_bugExplicit = false;
     g_gameTaa = GameTaa::kOff;                            // phase 82: the mod's own scope (the next pass releases the jitter hold)
     g_gameTaaMix = GameTaa::kMixDefault;
     g_gameTaaSplit = GameTaa::kSplitDefault;
@@ -20002,6 +21194,7 @@ void ResetSettings(uint64_t n) {
         "mirror_turns",                                                                                 // phase 41
         "xr_hidden_mask",                                                                               // phase 40
         "dlss_bias_mask",                                                                               // phase 49
+        "rewind_secs", "capture_mode", "capture_keep", "report_all",                                    // phase 89d
         "cpu_pcore", "cpu_priority", "cpu_no_throttle",                                                 // phase 54
         "cpu_cache_pin",                                                                                // phase 87 (menu row)
         "fps_profiles",                                                                                 // phase 51b
@@ -20051,7 +21244,7 @@ void ResetSettings(uint64_t n) {
 // COST WHILE CLOSED: nothing of this runs (MenuPerfTick is called only while open); the profiler / GPU timers / g_measure go back
 // to the dlaa.ini + log level state at the close (MenuPerfClose): below level 4 every profiler scope is one relaxed load + a
 // not-taken branch, every GPU timer section one call + a flag test, every legacy CPU timer one relaxed load (MeasureOn).
-enum MenuCostGrp { MG_NGX, MG_PART, MG_CAM, MG_FWD, MG_MIR, MG_SHARP, MG_COPY, MG_BIAS, MG_COUNT };   // phase 49: + MG_BIAS
+enum MenuCostGrp { MG_NGX, MG_PART, MG_CAM, MG_FWD, MG_MIR, MG_SHARP, MG_COPY, MG_BIAS, MG_REWIND, MG_COUNT };   // phase 49: + MG_BIAS; 89c: + MG_REWIND
 int MenuCostGroup(int sec) {
     switch (sec) {
     case GpuPerf::kNgx:      return MG_NGX;
@@ -20069,6 +21262,7 @@ int MenuCostGroup(int sec) {
     case GpuPerf::kRcas:     return MG_SHARP;
     case GpuPerf::kCopyIn:   case GpuPerf::kCopyOut:   case GpuPerf::kDbgView:  return MG_COPY;
     case GpuPerf::kOutsideAa: return MG_COPY;         // phase 81: outside AA (no menu row of its own: counted with the copies)
+    case GpuPerf::kRewind:   return MG_REWIND;        // phase 89c: the rewind ring's per-frame copies (the Rewind row)
     default:                 return -1;          // kReplayInst / kReplayRest: a sampled breakdown of kReplay (counted there)
     }
 }
@@ -20545,6 +21739,12 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
     if (fwdOn) cell(MR_FWD, cpuS(cpuFwd), gpuS(MG_FWD));         else txt(MR_FWD, TR(L"off"));
     // phase 49: GPU only (its CPU -- the glow draws' recording -- is inside the see-through depth's figure)
     if (dlaaOn && g_biasCfg > 0) cell(MR_BIAS, nullptr, gpuS(MG_BIAS)); else txt(MR_BIAS, TR(L"off"));
+    if (Rewind::g_vramBytes.load()) {                     // phase 89d: the rewind ring's real VRAM + its copies' GPU ms
+        wchar_t mb[24];
+        swprintf(mb, 24, L"%.0f MB", (double)Rewind::g_vramBytes.load() / 1048576.0);
+        cell(MR_REWIND, mb, gpuS(MG_REWIND));
+        cell(MR_REPALL, mb, gpuS(MG_REWIND));
+    } else { txt(MR_REWIND, TR(L"off")); txt(MR_REPALL, g_reportAll ? L"-" : TR(L"off")); }
     if (dlaaOn) cell(MR_DLAA, cpuS(cpuAll), gpuS(-1));           else txt(MR_DLAA, TR(L"off"));
     // v0.10.3 phase 29b: the fps box's own measured GPU cost, ms PER FRAME (GpuPerf::kOverlay: the quad image or the eye pictures +
     // the desktop mirror together); its CPU is inside the menu block (not separable)
@@ -20586,7 +21786,8 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         return f;
     };
     const wchar_t* fig = nullptr;
-    switch (sel) {
+    // phase 90: Mode = Mix shows the Game TAA status sentence (is the game's TAA running, did the mix fall back, r_aa switching)
+    switch (sel == MR_MODE && dlaaOn && g_gameTaa == GameTaa::kMix ? (int)MR_GAMETAA : (int)sel) {
     case MR_MODE: case MR_DLAA:
         if (!dlaaOn)                       swprintf(sent, sentCap, TRF(L"Off now: the mod's DLAA / DLSS work costs nothing."));
         else if ((fig = both(cpuAll, -1))) swprintf(sent, sentCap, TRF(L"The whole mod costs %ls per frame now; off saves most of it."), fig);
@@ -20654,9 +21855,14 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         break;
     case MR_GAMETAA: {                                    // phase 82: is the game's TAA running, and what the mix does with it
         const bool live = GameTaa::Live(g_taaLastSeen, g_frames.load(std::memory_order_relaxed));
-        if (!live)                             swprintf(sent, sentCap, TRF(L"The game's TAA is not running now: the mod runs alone."));
+        VrUiEnsure();
+        // phase 90b (user request): Mix / split chosen, the game's TAA off and no console to switch it -- say how to get it
+        const bool aaHint = !live && g_gameTaa != GameTaa::kOff && !g_vrUiConsole;
+        if (aaHint)                            swprintf(sent, sentCap, TRF(L"Mix and split need the game's TAA: set Anti-aliasing "
+                                                        L"to TAA in the game's graphics settings."));
+        else if (!live)                        swprintf(sent, sentCap, TRF(L"The game's TAA is not running now: the mod runs alone."));
         else if (g_gameTaa == GameTaa::kOff)   swprintf(sent, sentCap, TRF(L"The game's TAA is running now: set the game's "
-                                                        L"Anti-aliasing to Disabled, or pick mix or split."));
+                                                        L"Anti-aliasing to Disabled, or set Mode to Mix."));
         else if (TaaModRanRecently(g_frames.load(std::memory_order_relaxed)))   // phase 85: the same hold as MainDlaaRuns
             swprintf(sent, sentCap, g_gameTaa == GameTaa::kSplit ? TRF(L"The game's TAA is running now: split is on.")
                                                                  : TRF(L"The game's TAA is running now: the mix is on."));
@@ -20674,8 +21880,10 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         {   // phase 86: the game's Anti-aliasing as the mod knows it, and the last switch (the row types r_aa when the console is on)
             const size_t l = wcslen(sent);
             wchar_t add[260] = L"";
-            VrUiEnsure();
-            if (!g_vrUiConsole)
+            if (aaHint)
+                swprintf(add, 260, L"%ls", TR(L"Or turn on the game console (g_developer and g_console 1 in config.cfg): "
+                                              L"then the mod switches it for you."));
+            else if (!g_vrUiConsole)
                 swprintf(add, 260, L"%ls", TR(L"Turn on the game console to let the mod switch the game's Anti-aliasing."));
             else {
                 const wchar_t* aa = g_raaKnown == VrUi::kRaaTaa ? TR(L"TAA") : (g_raaKnown == VrUi::kRaaOff ? TR(L"off")
@@ -20702,6 +21910,39 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
         else if (timers && gf.have)        { MenuNum(f, 64, gf.grp[MG_BIAS]);
                                              swprintf(sent, sentCap, TRF(L"Costs %ls ms GPU per frame now; most of it at night."), f); }
         break;
+    case MR_REPALL: case MR_REWIND: case MR_CAPMODE: case MR_CAPNOW: {   // phase 89d: what a capture costs now / would cost
+        const int row = sel;
+        const int level = MR_REPALL == row && !g_reportAll ? BugReport::kCaptureFull : CaptureModeNow();
+        const float rs = MR_REPALL == row && !g_reportAll ? 2.0f : RewindSecsNow();
+        const SceneDlaa& d0 = g_dlaa[0];
+        uint32_t cmw, cmh; Cap::CropMax(&cmw, &cmh);           // phase 89e: the saved pictures are cropped to at most this
+        const double pxFull = (double)(d0.OutRectW() ? d0.OutRectW() : 1920) * (double)(d0.OutRectH() ? d0.OutRectH() : 1080);
+        const double px = (std::min)(pxFull, (double)cmw * cmh);
+        const int64_t per = vr ? XrHook::DisplayPeriodNs() : 0;
+        const double hz = per > 0 ? 1.0e9 / (double)per : (Cap::PresentHz() > 1.0 ? Cap::PresentHz() : 60.0);
+        const int rwN = rs > 0.0f ? BugReport::RewindFramesFor(rs, hz) : (rs < 0.0f ? g_rewindFrames : 0);
+        const int rwD = rwN > 0 ? (std::min)(g_rewindDiag, rwN) : 0;
+        int nSets = 0, pngs = 0;
+        const BugReport::CapSet* pl = BugReport::Plan(level, &nSets);
+        for (int i = 0; i < nSets; ++i) pngs += pl[i].frames * (pl[i].diag ? 5 : 1);
+        pngs += (std::min)(rwN, Rewind::kPickRecent + Rewind::kPickOlder) + 3 * rwD;   // (the rewind frames actually saved)
+        const double vramMB = (rwN * pxFull * 4.0 + rwD * pxFull * 0.75 * 12.0) / 1048576.0;   // (diag planes at the render size: ~0.75 x)
+        const double zipMB = pngs * px * 1.1 / 1048576.0 + (level >= 2 ? px * 0.75 * 12.0 / 1048576.0 : 0.0) + 2.0;
+        const double secs = BugReport::PlanFrames(level) / hz + 0.3;   // (the capture window; the files are written after it)
+        if (row == MR_CAPNOW && Cap::g_state.load() == 3)
+            swprintf(sent, sentCap, TRF(L"The last one: %d zips of at most 24 MB, %d MB in all (folder %.0f MB). Attach the _main zip; the others only if asked."), Cap::g_zipParts.load(), Cap::g_zipMB.load(),
+                     (double)Cap::g_dirBytes.load() / 1048576.0);
+        else if (row == MR_REWIND && Rewind::g_vramBytes.load())
+            swprintf(sent, sentCap, TRF(L"Holds %.0f MB of graphics memory now."), (double)Rewind::g_vramBytes.load() / 1048576.0);
+        else if (row == MR_REWIND || row == MR_REPALL || row == MR_CAPMODE || row == MR_CAPNOW)
+            swprintf(sent, sentCap, TRF(L"%ls about %.0f MB graphics memory for the rewind; a capture takes about %.1f s and writes "
+                     L"about %.0f MB."), row == MR_REPALL && !g_reportAll ? TR(L"On, it costs") : TR(L"Costs now:"), vramMB, secs, zipMB);
+        if (g_reportAll && (row == MR_REWIND || row == MR_CAPMODE)) {
+            const size_t l = wcslen(sent);
+            swprintf(sent + l, sentCap - l, L" %ls", TR(L"Turn off Send everything to change this."));
+        }
+        break;
+    }
     case MR_FPS:                                          // v0.10.3 phase 29b
         if (!g_fpsShow)       swprintf(sent, sentCap, TRF(L"Off now: costs nothing."));
         else if (!timers)     swprintf(sent, sentCap, TRF(L"GPU cost: n/a (the GPU timers could not start)."));
@@ -21498,7 +22739,14 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     };
 
     MenuRow(p, MR_MODE, TR(L"Mode"), KeyNameUi(KA_MODE_CYCLE), nullptr, false);
-    swprintf(p.rows[MR_MODE].value, kV, L"%ls", !g_dlaaOn.load() ? TR(L"off") : (g_dlssUpscale.load() ? TR(L"DLSS") : TR(L"DLAA")));
+    {   // phase 90: + Mix (the game's TAA blended with DLAA / DLSS; game_taa 1)
+        const bool on = g_dlaaOn.load(), mix = on && g_gameTaa == GameTaa::kMix;
+        swprintf(p.rows[MR_MODE].value, kV, L"%ls", !on ? TR(L"off")
+                 : (mix ? (g_dlssUpscale.load() ? TR(L"Mix (TAA + DLSS)") : TR(L"Mix (TAA + DLAA)"))
+                        : (g_dlssUpscale.load() ? TR(L"DLSS") : TR(L"DLAA"))));
+    }
+    MenuRow(p, MR_TAAMIX, TR(L"Mix amount"), "dlaa.ini game_taa_mix", nullptr, !GameTaa::ShareUsed(g_gameTaa, g_gameTaaPair));
+    swprintf(p.rows[MR_TAAMIX].value, kV, TRF(L"%d %% TAA"), g_gameTaaMix);   // phase 90: under Mode (was in Compare and test)
     MenuRow(p, MR_PROFILE, TR(L"Quality preset"), KeyNameUi(KA_PROFILE), nullptr, false);
     swprintf(p.rows[MR_PROFILE].value, kV, L"%ls", Lang::TrA(kProfName[g_profile < 0 || g_profile > 2 ? 0 : g_profile]));
     snprintf(k, sizeof(k), "%s .. %s", KeyNameUi(KA_MODEL1), KeyNameUi(KA_MODEL4));
@@ -21563,12 +22811,9 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     groupRow(MR_CMPGRP, MenuGroupTitle(MR_CMPGRP));      // phase 84: Compare and test
     MenuRow(p, MR_DLAA, TR(L"DLAA off to compare (not saved)"), KeyNameUi(KA_DLAA_TOGGLE), nullptr, false);
     swprintf(p.rows[MR_DLAA].value, kV, L"%ls", onOff[g_dlaaOn.load() ? 1 : 0]);
-    {   // phase 82: the game's own TAA with the mod; the share row is live only in mode mix (kept while greyed)
-        MenuRow(p, MR_GAMETAA, TR(L"Game TAA"), "dlaa.ini game_taa", nullptr, false);
-        const wchar_t* const kTaaVal[GameTaa::kModeCount] = { TR(L"off"), TR(L"mix"), TR(L"split") };
-        swprintf(p.rows[MR_GAMETAA].value, kV, L"%ls", kTaaVal[GameTaa::ClampMode(g_gameTaa)]);
-        MenuRow(p, MR_TAAMIX, TR(L"Game TAA amount"), "dlaa.ini game_taa_mix", nullptr, !GameTaa::ShareUsed(g_gameTaa, g_gameTaaPair));
-        swprintf(p.rows[MR_TAAMIX].value, kV, L"%d %%", g_gameTaaMix);
+    {   // phase 82: the game's own TAA with the mod. Phase 90: this row is the SPLIT only (off / on); Mix is on the Mode row
+        MenuRow(p, MR_GAMETAA, TR(L"Split with game TAA"), "dlaa.ini game_taa", nullptr, false);
+        swprintf(p.rows[MR_GAMETAA].value, kV, L"%ls", onOff[g_gameTaa == GameTaa::kSplit ? 1 : 0]);
         MenuRow(p, MR_TAASPLIT, TR(L"Split line position"), "dlaa.ini game_taa_split", nullptr, g_gameTaa != GameTaa::kSplit);
         swprintf(p.rows[MR_TAASPLIT].value, kV, L"%d %%", g_gameTaaSplit);
         MenuRow(p, MR_TAAPAIR, TR(L"Split: left | right"), "dlaa.ini game_taa_pair", nullptr, g_gameTaa != GameTaa::kSplit);
@@ -21672,10 +22917,40 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         MenuRow(p, MR_CPUPIN, TR(L"AMD cache cores (X3D)"), "dlaa.ini cpu_cache_pin", nullptr, !CpuPin::Supported());
         swprintf(p.rows[MR_CPUPIN].value, kV, L"%ls", g_cpuCachePin ? TR(L"on (auto)") : TR(L"off"));
     }
+    groupRow(MR_BUGGRP, MenuGroupTitle(MR_BUGGRP));      // phase 89d: Bug report
+    MenuRow(p, MR_REPALL, TR(L"Send everything"), "dlaa.ini report_all", nullptr, false);
+    swprintf(p.rows[MR_REPALL].value, kV, L"%ls", onOff[g_reportAll ? 1 : 0]);
     {   // phase 39: the level + what logging costs (CPU ms per frame; changes only at the ~1-s snapshots: no rebuild per frame)
         MenuRow(p, MR_LOG, TR(L"Log detail"), "dlaa.ini log_level", nullptr, false);
         const int lv = LogLevel();
-        swprintf(p.rows[MR_LOG].value, kV, L"%ls", Lang::TrA(LogLevelName(lv)));   // phase 45: its CPU ms is in the cost column
+        if (g_reportAll) swprintf(p.rows[MR_LOG].value, kV, L"%ls (%ls)", Lang::TrA(LogLevelName(lv)), TR(L"Send everything"));
+        else             swprintf(p.rows[MR_LOG].value, kV, L"%ls", Lang::TrA(LogLevelName(lv)));   // phase 45: its CPU ms is in the cost column
+    }
+    MenuRow(p, MR_REWIND, TR(L"Rewind before key"), "dlaa.ini rewind_secs", nullptr, Rewind::g_failed);
+    {
+        const float rs = RewindSecsNow();
+        if (g_reportAll)              swprintf(p.rows[MR_REWIND].value, kV, L"%.1f s (%ls)", (double)rs, TR(L"Send everything"));
+        else if (rs > 0.0f)           swprintf(p.rows[MR_REWIND].value, kV, L"%.1f s", (double)rs);
+        else if (rs < 0.0f && g_rewindFrames > 0) swprintf(p.rows[MR_REWIND].value, kV, TRF(L"%d frames (dlaa.ini)"), g_rewindFrames);
+        else                          swprintf(p.rows[MR_REWIND].value, kV, L"%ls", TR(L"off"));
+    }
+    MenuRow(p, MR_CAPMODE, TR(L"Capture includes"), "dlaa.ini capture_mode", nullptr, !mainDlaa);
+    if (g_reportAll) swprintf(p.rows[MR_CAPMODE].value, kV, L"%ls (%ls)", TR(L"Full"), TR(L"Send everything"));
+    else             swprintf(p.rows[MR_CAPMODE].value, kV, L"%ls", g_captureMode >= 2 ? TR(L"Full") : TR(L"Quick"));
+    snprintf(k, sizeof(k), "%s: %s", snRight, MenuUtf8(TR(L"change")));
+    MenuRow(p, MR_CAPKEY, TR(L"Capture key"), k, nullptr, false);
+    swprintf(p.rows[MR_CAPKEY].value, kV, TRF(L"%hs (press twice)"), KeyNameUi(KA_SHIMMER_CAP));
+    MenuRow(p, MR_CAPKEEP, TR(L"Keep captures"), "dlaa.ini capture_keep", nullptr, false);
+    if (g_captureKeep) swprintf(p.rows[MR_CAPKEEP].value, kV, L"%d", g_captureKeep);
+    else               swprintf(p.rows[MR_CAPKEEP].value, kV, L"%ls", TR(L"all"));
+    snprintf(k, sizeof(k), "%s", snRight);
+    MenuRow(p, MR_CAPNOW, TR(L"Capture now"), k, nullptr, false);
+    switch (Cap::g_state.load()) {
+    case 1:  swprintf(p.rows[MR_CAPNOW].value, kV, TRF(L"capturing %d / %d"), Cap::g_frameDone, Cap::g_frameTotal); break;
+    case 2:  swprintf(p.rows[MR_CAPNOW].value, kV, TRF(L"writing (%d files)"), Rewind::g_wOk.load()); break;
+    case 3:  swprintf(p.rows[MR_CAPNOW].value, kV, TRF(L"done: %d parts, %d MB"), Cap::g_zipParts.load(), Cap::g_zipMB.load()); break;
+    case 4:  swprintf(p.rows[MR_CAPNOW].value, kV, L"%ls", TR(L"failed (see the log)")); break;
+    default: swprintf(p.rows[MR_CAPNOW].value, kV, L"%ls", TR(L"ready")); break;
     }
     {   // phase 74: the menu language; a missing font says so (in English: the menu is English then)
         MenuRow(p, MR_LANGUAGE, TR(L"Language"), "dlaa.ini language", nullptr, false);
@@ -21789,6 +23064,10 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
     if (sel == MR_RESET)                                  // v0.10.3 phase 29d: the hold first (no cost sentence on this row)
         swprintf(p.desc, kD, TRF(L"Hold %hs for %hs s to reset. %ls"), snRight, holdS, Lang::Tr(kMenuDesc[sel]));
     else if (kMenuDesc[sel]) swprintf(p.desc, kD, L"%ls%ls%ls", Lang::Tr(kMenuDesc[sel]), sent[0] ? L" " : L"", sent);
+    else if (sel == MR_CAPNOW)                            // phase 89d: what the zip holds + where it went
+        swprintf(p.desc, kD, TRF(L"%hs = capture now (the menu closes first). The zip (dlaa_selftest folder next to the DLL) holds "
+                 L"system info, the mod's and the game's log, dlaa.ini, your picture and DLAA off; Full adds what DLSS got and the "
+                 L"A/B sets; rewind adds the moment before. Your user name and home folder are removed. %ls"), snRight, sent);
     else if (sel == MR_MENUKEYS)                          // v0.10.2 (v0.12.1 phase 50: set on the Hotkeys page)
         swprintf(p.desc, kD, TRF(L"The 5 keys that open and drive this menu: %hs opens / closes it (the value), %hs / %hs / %hs / %hs "
                  L"move (Hotkey column). While the menu is open only these 5 are kept from the game. %hs: change them on the "
@@ -22000,7 +23279,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_FWD:     ToggleFwdDepth(n); break;
     case MR_BIAS:    StepBiasMask(dir, n); break;           // phase 49: 25 % steps, Right = stronger, Left = weaker (0 = off)
     case MR_DLAA:    ToggleDlaa(n); break;
-    case MR_GAMETAA: StepGameTaa(dir, n); break;            // phase 82: off -> mix -> TAA only -> split (Left back)
+    case MR_GAMETAA: StepGameTaa(dir, n); break;            // phase 90: the split only, Right on / Left off (Mix: the Mode row)
     case MR_TAAMIX:  StepGameTaaMix(dir, n); break;         // phase 82: 10 % steps (kept while greyed)
     case MR_TAASPLIT: StepGameTaaSplit(dir, n); break;      // phase 82: 5 % steps (kept while greyed)
     case MR_TAAPAIR: StepGameTaaPair(dir, n); break;        // phase 82: DLAA | TAA -> Mix | TAA -> DLAA | Mix (kept while greyed)
@@ -22022,10 +23301,38 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_REFLEX:  StepReflex(n, dir); break;             // phase 52: off / on / on + boost (also in VR: kept for flat)
     case MR_FPSCAP:  StepFpsCap(dir, n, repeat); break;     // phase 52: the kCapSteps list (also in VR: kept for flat)
     case MR_VRFPSCAP: StepVrFpsCap(n, dir); break;          // phase 52: off / half / third (also in flat: kept for VR)
-    case MR_LOG:     StepLogLevel(dir, n); break;           // phase 39: Right = more, Left = less (clamped)
+    case MR_LOG:                                            // phase 39: Right = more, Left = less (clamped); 89d: locked by Send everything
+        if (g_reportAll) PlayTones(1, 200, 120, 0); else StepLogLevel(dir, n);
+        break;
+    case MR_REPALL:  ReportAllSet(!g_reportAll, n, "tuning menu"); g_bugExplicit = true; PlayTones(1, g_reportAll ? 1200 : 300, 150, 0); break;
+    case MR_REWIND:  if (g_reportAll) PlayTones(1, 200, 120, 0); else StepRewindSecs(dir, n); break;
+    case MR_CAPMODE:
+        if (g_reportAll) { PlayTones(1, 200, 120, 0); break; }
+        g_captureMode = dir > 0 ? BugReport::kCaptureFull : BugReport::kCaptureQuick;
+        g_bugExplicit = true;
+        Log("capture includes (phase 89d): capture_mode %d (%s; tuning menu, Present #%llu)", g_captureMode,
+            g_captureMode >= 2 ? "full" : "quick", (unsigned long long)n);
+        PlayTones(1, g_captureMode >= 2 ? 900 : 500, 120, 0);
+        break;
+    case MR_CAPKEY:  if (dir > 0) MenuHkOpen(MenuHkLineOf(KA_SHIMMER_CAP), n); break;   // phase 89d: the Hotkeys page on its line
+    case MR_CAPKEEP: {
+        int i = 3;                                          // review fix: the slot of any value (0 = all = the last; 7 -> the 10 slot)
+        if (g_captureKeep > 0) { i = 0; while (i < 2 && BugReport::kKeepSteps[i] < g_captureKeep) ++i; }
+        i = MenuClampI(i + dir, 0, 3);
+        g_captureKeep = BugReport::kKeepSteps[i];
+        g_bugExplicit = true;
+        Log("keep captures (phase 89d): capture_keep %d (%s; tuning menu, Present #%llu)", g_captureKeep,
+            g_captureKeep ? "older ones are deleted when a new one is written" : "all kept", (unsigned long long)n);
+        PlayTones(1, 600, 80, 0);
+        break;
+    }
+    case MR_CAPNOW:                                         // phase 89d: no double press; the menu closes first (not in the frames)
+        if (dir > 0) { MenuClose(n, "Capture now row"); CaptureRequest(n, true, "menu Capture now"); }
+        break;
     case MR_LANGUAGE: MenuStepLanguage(dir, n); break;      // phase 74: auto, English, then the packed languages (wraps)
     case MR_PICGRP: case MR_MOTGRP: case MR_VRPGRP:       // phase 43 groups
     case MR_UIGRP: case MR_CMPGRP:                          // phase 83 / 84
+    case MR_BUGGRP:                                         // phase 89d
     case MR_FRGRP:                                          // phase 52
     case MR_PANELGRP: case MR_FPSGRP:                       // v0.10.3 phase 29c: Right opens the group, Left closes it (a fresh
         if (row == MR_UIGRP && dir > 0 && (VrUiEnsure(), !g_vrUiConsole)) {   // phase 85: the console is off -- it cannot open
@@ -22170,6 +23477,36 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
 }
 
 // Per Present, before the other user keys (PresentFrameWork).
+// the menu opens (the open key; phase 89e: also after a capture started from the Capture now row, on that row: row >= 0 opens its
+// group and selects it). The caller publishes the hidden inputs (MenuPublishHide).
+void MenuOpenAt(int row, uint64_t n, const char* why) {
+    g_menuOpen = true;
+    g_menuMoved = false;
+    Lang::Refresh();                              // phase 74: the game's language / a changed lang file, at every open
+    TuningMenu::SetFace(Lang::Face());
+    MenuLangDump(n);                              // phase 74: dlaa.ini lang_dump = 1 (once per session)
+    // v0.10.3 phase 29c: all groups start collapsed at every open; a selection inside one moves to its header
+    for (bool& o : g_menuGrpOpen) o = false;
+    if (row >= 0 && row < MR_COUNT) {
+        g_menuSel = row;
+        if (MenuRowGroup(row) >= 0) MenuGrpOpen(MenuRowGroup(row)) = true;
+    }
+    if (g_menuSel < 0 || g_menuSel >= MR_COUNT) g_menuSel = 0;
+    if (!MenuRowVisible(g_menuSel)) g_menuSel = MenuRowGroup(g_menuSel);
+    if (g_menuSel < 0) g_menuSel = 0;
+    MenuPerfOpen();                               // GPU timers on while open (debug = 0) + fresh figures
+    g_menuPage = kMenuPageMain;                   // v0.12.1 phase 50: every open starts on the main page, no bind
+    g_hk = MenuHkBind();
+    g_mrh = MenuResetHold();                      // v0.10.3 phase 29d: no Reset hold carried over
+    VrUiRead(!g_vrUiRead);                        // phase 83: config.cfg again (the values not changed this session)
+    PlayTones(2, 880, 60, 60);
+    Log("tuning menu opened (%s, Present #%llu) -- %s / %s select a row, %s / %s change it; hotkeys are set on the "
+        "Hotkeys... row; only the 5 menu keys / buttons are kept from the game while the menu is open", why,
+        (unsigned long long)n, KeyName(KA_MENU_UP), KeyName(KA_MENU_DOWN), KeyName(KA_MENU_LEFT),
+        KeyName(KA_MENU_RIGHT));
+    if (row >= 0) MenuPublishHide();
+}
+void MenuOpenCapNow(uint64_t n) { if (!g_menuOpen.load()) MenuOpenAt(MR_CAPNOW, n, "after the capture (Capture now row)"); }
 void MenuKeys(uint64_t n) {
     CpuProf::Block cpb(CpuProf::kBMenu);               // phase 31 CPU profiler (cpu_prof.h)
     const bool open = g_menuOpen.load(std::memory_order_relaxed);
@@ -22178,25 +23515,7 @@ void MenuKeys(uint64_t n) {
     const bool openKeyBinds = open && g_menuPage == kMenuPageHotkeys && g_hk.on && MenuIsMenuAction(MenuHkAction(g_hk.line));
     if (KeyHit(KA_MENU) && !openKeyBinds) {
         if (!open) {
-            g_menuOpen = true;
-            g_menuMoved = false;
-            Lang::Refresh();                              // phase 74: the game's language / a changed lang file, at every open
-            TuningMenu::SetFace(Lang::Face());
-            MenuLangDump(n);                              // phase 74: dlaa.ini lang_dump = 1 (once per session)
-            // v0.10.3 phase 29c: all groups start collapsed at every open; a selection inside one moves to its header
-            for (bool& o : g_menuGrpOpen) o = false;
-            if (g_menuSel < 0 || g_menuSel >= MR_COUNT) g_menuSel = 0;
-            if (!MenuRowVisible(g_menuSel)) g_menuSel = MenuRowGroup(g_menuSel);
-            MenuPerfOpen();                               // GPU timers on while open (debug = 0) + fresh figures
-            g_menuPage = kMenuPageMain;                   // v0.12.1 phase 50: every open starts on the main page, no bind
-            g_hk = MenuHkBind();
-            g_mrh = MenuResetHold();                      // v0.10.3 phase 29d: no Reset hold carried over
-            VrUiRead(!g_vrUiRead);                        // phase 83: config.cfg again (the values not changed this session)
-            PlayTones(2, 880, 60, 60);
-            Log("tuning menu opened (%s, Present #%llu) -- %s / %s select a row, %s / %s change it; hotkeys are set on the "
-                "Hotkeys... row; only the 5 menu keys / buttons are kept from the game while the menu is open", KeyName(KA_MENU),
-                (unsigned long long)n, KeyName(KA_MENU_UP), KeyName(KA_MENU_DOWN), KeyName(KA_MENU_LEFT),
-                KeyName(KA_MENU_RIGHT));
+            MenuOpenAt(-1, n, KeyName(KA_MENU));
         } else {
             MenuClose(n, KeyName(KA_MENU));
         }
@@ -22301,6 +23620,13 @@ void MenuDrawAtPresent(IDXGISwapChain* sc, ID3D11DeviceContext* bctx) {
         GpuPerfScope gp(ctx, GpuPerf::kOverlay);          // v0.10.3 phase 29b: the fps box's own GPU cost (per frame)
         FpsSyncColor();                                   // phase 44
         TuningMenu::DrawWidget(ctx, rtv.Get(), td.Width, td.Height, x0, y0, scale, build, outMode, g_fps.line1, g_fps.line2);
+    }
+    // phase 89e: the bug report status box, top centre -- not on the Present whose back buffer the capture saves (final_*.png)
+    if (g_capStatusOn && !g_testFinalPending) {
+        const float scale = H / 1080.0f * 1.25f;
+        const float bw = TuningMenu::kStatusRefW * scale;
+        TuningMenu::DrawStatus(ctx, rtv.Get(), td.Width, td.Height, 0.5f * (W - bw), 0.06f * H, scale, scale * kFlatTextSuper, outMode,
+                               g_capL1, g_capL2);
     }
     t_inDlaa = false;
 }
@@ -22980,7 +24306,7 @@ void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv
     // exactly (the quad with menu_vr_layer = 1, MenuOverlaySet asks for it then) -- one box per eye picture, one kind per frame
     const bool cabOn = g_fpsVrLock == 2 && FpsCab::Attached();
     const bool fpsShow = g_fpsShow && (cabOn || !(g_menuVrLayer && XrHook::OverlayActive(1)));
-    if (eye < 0 || eye >= kMaxEyes || t_inDlaa || !rtv || !(menuOpen || fpsShow)) return;
+    if (eye < 0 || eye >= kMaxEyes || t_inDlaa || !rtv || !(menuOpen || fpsShow || g_capStatusOn)) return;
     Microsoft::WRL::ComPtr<ID3D11Resource> res;
     rtv->GetResource(res.GetAddressOf());
     Microsoft::WRL::ComPtr<ID3D11Texture2D> t;
@@ -23001,6 +24327,16 @@ void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv
     const float inward = std::fabs(u - 0.5f) > 0.01f ? (u > 0.5f ? 1.0f : -1.0f) : (eye == 0 ? -1.0f : 1.0f);
     const float shift = (float)g_menuVrDepth * inward;
     const int outMode = MenuOutMode(rd.Format, false);
+    // phase 89e: the bug report status box in each eye picture, above the optical centre (drawn after the blit: the capture reads its
+    // frames AT the blit, from the DLSS result / blit source, so the box is never in a saved frame). A lambda: the cab-attached fps
+    // box returns early below, and the box must be drawn then too (VR test 2026-11-01: no status box with fps_vr_lock = 2).
+    auto drawCapStatus = [&]() {
+        if (!g_capStatusOn) return;
+        const float s = W / 1920.0f * 1.1f;
+        const float bw = TuningMenu::kStatusRefW * s, bh = TuningMenu::kWidgetRefH * s;
+        const float cx = u * W + shift, cy = v * H - 0.14f * H;
+        TuningMenu::DrawStatus(ctx, rtv, td.Width, td.Height, cx - 0.5f * bw, cy - 0.5f * bh, s, s, outMode, g_capL1, g_capL2);
+    };
     t_inDlaa = true;
     if (menuOpen) {
         // text size as with the 720-px panel at 45 % of the eye width (the GPU cost column made the panel 860 px wide: ~54 %)
@@ -23030,6 +24366,7 @@ void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv
         // phase 47b: an attached frame draws the attached box or (this eye cannot have it now) NOTHING -- never the fixed one too
         if (cabOn) {
             FpsCabDraw(ctx, eye, rtv, t.Get(), rd, td.Width, td.Height, outMode);
+            drawCapStatus();
             t_inDlaa = false;
             return;
         }
@@ -23079,6 +24416,7 @@ void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv
             FpsDrawnInLog(eye, locked, extra, ipd, ffx, wantTurn, turned);
         }
     }
+    drawCapStatus();
     t_inDlaa = false;
 }
 
@@ -23089,7 +24427,7 @@ void MenuDrawVr(ID3D11DeviceContext* ctx) {
     const int eye = g_menuBlitEye;
     void* const rt = g_menuBlitRt;
     g_menuBlitEye = -1; g_menuBlitRt = nullptr;
-    if (eye < 0 || eye >= kMaxEyes || t_inDlaa || !(g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)) return;
+    if (eye < 0 || eye >= kMaxEyes || t_inDlaa || !(g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow || g_capStatusOn)) return;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv;
     ctx->OMGetRenderTargets(1, rtv.GetAddressOf(), nullptr);
     if (!rtv) return;
@@ -23470,7 +24808,7 @@ void MenuLateRetire(int eye, bool reset) {
 // already read end here (their draws-over-the-panel count is final). Unread records stay (Present is not a reliable frame
 // boundary in VR: their read may still come).
 void MenuLateAtPresent(uint64_t n) {
-    const bool want = g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow;
+    const bool want = g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow || g_capStatusOn;
     for (int e = 0; e < kMaxEyes; ++e) {
         const MenuLateEye& ey = g_menuLateEye[e];
         if (want && ey.arm.fr == n && ey.drawnFr != n) {
@@ -23529,7 +24867,7 @@ inline bool MenuDrawsIntoEyes() {
 // it is the eye's last picture of the frame pattern and the eye has no panel this Present yet) + watched.
 void MenuLateArm(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv, char kind) {
     if (eye < 0 || eye >= kMaxEyes || !rtv || t_inDlaa) return;
-    if (!(g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow)) return;
+    if (!(g_menuOpen.load(std::memory_order_relaxed) || g_fpsShow || g_capStatusOn)) return;
     g_menuLateTid.store(GetCurrentThreadId(), std::memory_order_relaxed);   // phase 27: XrHook draws on this thread only
     // phase 57: nothing goes into the eye picture (both are quads) -> not armed. (The thread above is still stored: XrHook's drawTid
     // for the quads.) A record of this eye left from before the quads took over is retired without a verdict (reset: no miss, no
@@ -25644,6 +26982,14 @@ void LoadConfig() {
             if (!strcmp(key, "light_redraw_jitter")) { g_lightRedrawCfg = v != 0 ? 1 : 0; continue; }   // phase 55 (outside the chain: C1061)
             if (!strcmp(key, "light_fs_jitter"))     { g_lightFsCfg = v != 0 ? 1 : 0; continue; }       // phase 78 (outside the chain: C1061)
             if (!strcmp(key, "outside_aa"))          { g_outsideAaCfg = v <= 0 ? 0 : (v >= 2 ? 2 : 1); continue; }   // phase 81
+            // phase 89: the steady-edge filter was removed (2026-10-31: it added flicker); old dlaa.ini lines are ignored
+            if (!strncmp(key, "steady_edge", 11))     continue;
+            // phase 89d bug report (outside the else-if chain: C1061)
+            if (!strcmp(key, "rewind_secs"))          { g_rewindSecs = BugReport::ClampRewindSecs(strtod(eq + 1, nullptr)); g_bugExplicit = true; continue; }
+            if (!strcmp(key, "rewind_diag_frames"))   { g_rewindDiag = v < 0 ? 0 : (v > 64 ? 64 : (int)v); continue; }
+            if (!strcmp(key, "capture_mode"))         { g_captureMode = v >= 2 ? BugReport::kCaptureFull : BugReport::kCaptureQuick; g_bugExplicit = true; continue; }
+            if (!strcmp(key, "capture_keep"))         { g_captureKeep = BugReport::ClampKeep(v); g_bugExplicit = true; continue; }
+            if (!strcmp(key, "report_all"))           { g_reportAll = v != 0 ? 1 : 0; g_bugExplicit = true; continue; }
             // phase 60: thin wires -- DLSS MV dilation in DLAA (Alt+F10) and the conservative forward depth (Alt+F11), 0/1, default 1
             // (outside the else-if chain: C1061)
             if (!strcmp(key, "mv_fwd_conservative")) {
@@ -26177,6 +27523,13 @@ void LoadConfig() {
              "(Catmull-Rom), no edge pass; nothing at dlaa_area 100, with the jitter off, or with DLAA off")
         : "off: outside the DLAA area rect the picture is the raw jittered frame");
     SceneDlaa::SetBiasStrength(g_biasCfg);              // phase 49
+    if (g_reportAll) {                                   // phase 89d: Send everything from dlaa.ini -- forced from the start
+        g_reportAll = 0;
+        ReportAllSet(true, 0, "dlaa.ini report_all = 1");
+    }
+    Log("bug report (phase 89d): capture key %s (double press), capture_mode %d, rewind_secs %.1f (rewind_frames %d), "
+        "rewind_diag_frames %d, capture_keep %d, report_all %d", KeyName(KA_SHIMMER_CAP), CaptureModeNow(), (double)RewindSecsNow(),
+        g_rewindFrames, g_rewindDiag, g_captureKeep, g_reportAll);
     Log("DLSS bias mask (phase 49): dlss_bias_mask=%d %% (%s)", g_biasCfg, g_biasCfg
         ? "the additive light glows of the world forward pass go to NGX as its bias current colour mask (no glow trails)"
         : "off: NGX gets no mask");

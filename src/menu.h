@@ -21,7 +21,7 @@
 
 namespace TuningMenu {
 
-constexpr int   kMaxRows  = 88;                      // (phase 83: 72 -> 88, + the 10 In-game UI (VR) rows; phase 82: 68 -> 72, + the 2 Game TAA rows; phase 69: 64 -> 68, + 3 thin-wire rows; phase 59f: 60 -> 64, + Foveated strength; phase 52: 50 -> 56 -> 60 at the 51b merge, + the Frame rate group header and its 3 rows; was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
+constexpr int   kMaxRows  = 96;                      // (phase 89d: 88 -> 96, + the Bug report group; phase 83: 72 -> 88, + the 10 In-game UI (VR) rows; phase 82: 68 -> 72, + the 2 Game TAA rows; phase 69: 64 -> 68, + 3 thin-wire rows; phase 59f: 60 -> 64, + Foveated strength; phase 52: 50 -> 56 -> 60 at the 51b merge, + the Frame rate group header and its 3 rows; was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
                                                      //  28 before the v0.10.3 phase 28 FPS counter lock row, 29 before the phase 29c
                                                      //  group header rows, 31 before the phase 30 Turbo mode row, 32 before the
                                                      //  phase 34 Foveated rows, 34 before the phase 39 Logging row, 35 before the
@@ -111,6 +111,10 @@ void  ReleaseTargets();                              // drops the panel texture 
 bool  DrawWidget(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
                  float scale, float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2);
 void  ReleaseWidget();                               // drops the fps box texture (the box switched off)
+// phase 89e: the bug report status box (kStatusRefW x kWidgetRefH reference px, the fps box's look, white): same arguments as DrawWidget
+constexpr float kStatusRefW = 300.0f;
+bool  DrawStatus(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
+                 float scale, float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2);
 // phase 44: the fps box as a turned quad (fps_vr_yaw / fps_vr_pitch / fps_vr_roll, the drawn-in VR fallback): `clip` = its 4
 // corners in clip space as DrawCorners (top-left, top-right, bottom-left, bottom-right; w > 0). Texture / states as DrawWidget.
 bool  DrawWidgetCorners(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, const float clip[4][4],

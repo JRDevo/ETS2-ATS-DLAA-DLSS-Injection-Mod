@@ -2658,3 +2658,103 @@ injector survives game updates that break index-based hooks.
   always injected by Steam) detours dxgi Present and calls back through the
   vtable, which made a vtable hook recurse forever. A thread-local depth guard
   remains as a safety net.
+
+### Phase 89: steady edge (removed)
+
+- A post-DLSS anti-ghost clip (`steady_edge`, a YCoCg variance box of the input 3x3, + an edge history) was tried on 2026-10-31
+  and removed the same day: in game it added flicker; DLAA alone looked best. Old `steady_edge*` dlaa.ini lines are ignored.
+
+### Phase 89b-d: the one-press bug report (Insert twice, menu group "Bug report")
+
+- **What** (`src/bug_report.h`: CRC-32, stored ZIP writer, privacy scrubber, capture plan, rewind length, keep-N pruning, double
+  press; `inject.cpp` namespaces `Cap` / `Rewind`, `CaptureRequest` / `CaptureEnd` / `CaptureAtPresent`, the shimmer branch of
+  `SelfTestStep`): the phase 71 shimmer capture becomes a bug report. `key_shimmer_capture` needs TWO presses within 1 s (the
+  first arms, one short beep); the menu's `Capture now` row closes the menu and captures at once.
+- **Sets** (`BugReport::Plan`, eye 0 / main view, consecutive frames, PNG via WIC on the writer thread, cropped to the DLAA area
+  rect when the picture is bigger; `full_on_0.png` once uncropped; flat: `final_<set>_0.png` = the presented back buffer):
+  Quick (`capture_mode 1`) = `on` (8, no settle: the player's own picture) + `off` (2 + 4). Full (`2`) = `on` with the planes
+  (`color_in`, `ngx_out`, `mv` colour view made from the RG16F MVs, `depth`, + `mv_0.bin` / `depth_0.bin` raw: uint32 'RAW1', w,
+  h, comps, float32), `mvview` (Ctrl+F6), `partsoff` (ToggleDrawIds,
+  quiet), `mvoff`, `jitonly`, `off`. 124 frames incl. settles (Quick: 14).
+- **Restore**: `Cap::ApplyBase` puts every switch back before each set and at the end; `CaptureEnd` also restores the log level
+  (raised to debug for the capture) and the jitter sign; the watchdog (`CaptureAtPresent`: no eye-0 blit for 120 Presents) stops
+  the capture early with the same restore. Requests while one runs / is being written are refused (low beep).
+- **Rewind** (phase 79 ring, now PNG): length `rewind_secs` (0 / 0.5 / 1 / 2 / 3 s at the headset rate, flat: the measured
+  Present rate; -1 = unset: `rewind_frames`), LIVE (a change releases the ring at the next Record, never while draining).
+  Diag planes for the last `rewind_diag_frames` (default 8): copies of eye 0's colorIn / MV / depth (the unit's own crop-size
+  textures), only for frames whose Run really happened (`SceneDlaa::Frames` changed). GpuPerf section `rewind`; real VRAM in
+  `Rewind::g_vramBytes` (the menu's cost column). Default stays OFF (Fable design): estimate VR 2761 x 2928, 72 Hz, 0.5 s = 36 x
+  32 MB = 1.15 GB + 8 x 72 MB diag = 0.58 GB and ~0.2 - 0.4 ms of copies per frame -- over the 600 MB / 0.1 ms bar.
+- **Finish job** (writer thread, after every frame job): `sysinfo.txt` (render-thread part at the key + versions, OpenXR
+  ActiveRuntime, modules outside the Windows folder, config.cfg `uset r_*` / `g_vr*` lines, active dlaa.ini lines without
+  `fps_profile`), `README.txt`, copies of `dlaa_inject.log` (last 48 MB), `dlaa.ini` (without `fps_profile`), the last 2000 lines
+  of `game.log.txt`, `info.txt` -- all through `BugReport::MakeScrubber` (USERPROFILE, the user name as a path component, the Steam
+  library root) -- then `shimmer_<time>.zip` (stored), `capture_keep` pruning, "capture ready: <zip>" + two beeps.
+- **Menu** group `Bug report` (`MR_BUGGRP` after Compare and test, kMaxRows 88 -> 96): Send everything (`report_all`: forces
+  debug / 2 s / Full LIVE via `CaptureModeNow` / `RewindSecsNow`, saves only itself; Save writes the pre-forcing log level),
+  Log detail (moved here; locked while Send everything is on), Rewind before key, Capture includes (hidden without DLAA),
+  Capture key (Right = Hotkeys page line), Keep captures, Capture now (status). Cost sentences estimate VRAM / seconds / MB.
+- **Not done**: the Ctrl+F10 snapshot is not triggered (the Full planes are the same data); the GPU timer / CPU profiler figures
+  are only in the copied log, not summarised in sysinfo.txt. **Not tested in game.**
+- **Test** `tests/bug_report_test.cpp` (CI): zip read back byte by byte, scrubber (three path spellings), plan, pruning, guard.
+
+### Phase 89e: the capture after the first in-game test (ATS flat 4K, 2026-10-31)
+
+- **Found** (two Full captures, `shimmer_20261031_201805` / `_201905`): one writer thread encoded a 4K PNG in ~0.5 s, the 538 MB
+  queue cap was hit at once, 600 frames were skipped and the capture STOPPED EARLY at set 7 / 9 both times -- DLAA off was never
+  saved. Zips 1.3 GB (80 rewind frames at 4K, ~8.7 MB per PNG). HDR planes pale (no exposure), the MV picture one flat colour
+  (/16 far too small). The menu closed at Capture now and never came back; nothing showed progress.
+- **Writers**: a pool of min(4, max(1, cores / 4)) below-normal threads; HOLD during the sets (pixels only read back into RAM, cap
+  1 GB), released at CaptureEnd; the finish job waits until it is the last (WaitAlone). PNG filter "Sub" (WIC FilterOption).
+- **Order**: on, off, then mvview / partsoff / mvoff / jitonly (BugReport::Plan; 58 frames incl. settles in Full, 12 in Quick).
+- **Size**: every saved picture is the centre of the picture (or of the DLAA area rect) at most 1920 x 1080 flat / 1440 x 1440
+  VR (CentreCrop; the planes DLSS got: their centre, NGX output the same scene part via ScaleBox) + `full_on_0.png` once. The
+  Phase 89f: CropMax = no limit and no DLAA-area cut -- the 4K centre crop cut the gantry sign and missed the side signs
+  (user test 2026-10-31), so every picture is whole again (zip ~4x). The rewind drains AFTER the sets and saves the last 12 frames + 12 spread over the rest (RewindPick); `rewind_diag_frames` 8 -> 4;
+  the raw .bin pair once (from the rewind planes when there are any).
+- **Pictures**: HDR planes auto-exposed (log-average luma -> 0.18, AutoExposure), MVs auto-ranged (99th percentile, MvScale99);
+  each factor goes into info.txt ("how the pictures were made viewable").
+- **Status box** (`TuningMenu::DrawStatus`, the fps box's look, 300 ref px, white): "capturing i / n: <set>", "writing files a / b",
+  "making the zip p %", "done (N MB)" for 6 s, "FAILED: <why>" for 10 s. Flat: over the presented picture, but not on the Present
+  whose back buffer the capture saves (final_*.png); VR: into each eye picture after the blit (the capture reads its frames AT the
+  blit, so the box is never in one). Started from the menu: the menu opens again on the Capture now row when the sets end.
+- **Estimate** (not measured in game yet; PNG ~1.1 B/px from the 4K captures): flat 4K Full + 2 s rewind ~ 200 MB zip (rewind 24 x
+  ~2.5 MB, planes 4 x ~5 MB + raw 25 MB, sets 21 x ~2.5 MB, full picture 9 MB, final 2 x 2.5 MB, planes of the sets 3 x ~7 MB);
+  Quick without rewind ~ 40 MB. Capture window Full ~0.8 s of frames at 70 fps + the read-back syncs; encoding ~2 - 4 s on 4 threads.
+- **Removed** with it: the steady-edge filter (phase 89) and its capture sets.
+
+### Phase 89g: the capture in GitHub-sized parts
+
+- GitHub issue attachments take at most 25 MB per file (many per comment; .zip yes, .001 no). FinishJob now writes INDEPENDENT
+  stored zips `shimmer_<time>_part01.zip`, `_part02.zip` ... of at most 24 MB each (always `_partNN`, also for one part); every
+  part opens alone. `BugReport::PackParts`: priority order (text files, on_0 / off_0, the rest of on / off / final / full, rewind
+  newest first, rw_* planes, the other sets, .bin last), first fit by size. A file bigger than one part is CUT into
+  `name.part01`, `name.part02` ... (its own entries; README.txt: `copy /b name.part01 + name.part02 name`) -- no deflate in the
+  project (no zlib / miniz), and downscaling would lose the raw data. FitsZip32 per part; a failed part is deleted.
+- `capture_keep`: a capture = its folder + every `_partNN.zip` (`CaptureStem`). Status box / menu row / log: "N parts, X MB".
+- Test (bug_report_test): parts <= 24 MB, every byte in exactly one piece, part 1 = the text files then off_0 / on_0, a 66 MB
+  .bin -> 3 pieces, the pieces written with a 100 KB limit and read back byte-exact, pruning with part zips.
+
+### Phase 90: VR test fixes (2026-11-01) and Mix on the Mode row
+
+- **Bug report status box in VR**: `MenuDrawVrOn` returned right after `FpsCabDraw` (fps box attached to the cab,
+  `fps_vr_lock = 2`), so the status box was never drawn. It is now a lambda (`drawCapStatus`) called on both paths.
+- **In-game UI tilt / turn**: the game's `r_manual_stereo_ui_pitch[_game]` / `_yaw[_game]` are DEGREES. The rows stepped
+  0.05 up to +-1.6 (under 2 degrees: nothing visible). Now step 5, pitch -90..90, yaw -180..180 (`VrUi::kFields`).
+- **FPS graph**: no dark background (the game shows through); the target line is white with a dark edge above and below.
+- **Mix on the Mode row** (user request): `CycleMode` (Mode row and `End`) walks off -> DLAA -> DLSS -> Mix (TAA + DLAA) ->
+  Mix (TAA + DLSS) -> off. Mix = `game_taa 1` on top of `mode` 1 / 2; into / out of Mix writes `game_taa` + `game_taa_ver`
+  at once (like `mode`) and asks for the game's `r_aa` (phase 86). `MR_TAAMIX` ("Mix amount", value "N % TAA") moved under
+  Mode; the Compare and test row `MR_GAMETAA` is now "Split with game TAA" (off / on; Right replaces Mix, Left only turns the
+  split off). The Mode row shows the Game TAA status sentence while Mix is on. No dlaa.ini key changed.
+- **review3 fixes** (Sonnet / Opus / Fable on `src` since v0.15.1): the capture writer catches a job's exception (was
+  std::terminate), a failed capture no longer prunes older ones, `Crc32`'s table is a magic static, Save and Send everything
+  are refused while a capture's sets run (`Cap::g_state == 1`).
+- Tests: settings_roundtrip (Mode values incl. Mix, Mode -> Mix writes game_taa, split row on / off), vr_ui_test.- **Console stuck open (flat test 2026-11-01):** after `uset r_aa "5"` the game and the mod rebuild their AA (NGX features recreated,
+  the rewind ring re-made) -- a 100+ ms frame took the closing console key's down AND up in one game frame, the game missed the
+  toggle and the console stayed open (the next batch then toggled it the wrong way: `r_aa "0"` NOT confirmed). Every wait step of
+  the key plan now lasts its ms AND at least `VrUi::kMinWaitFrames` (3) Presents.
+- **Console-off hint (phase 90b, user request):** Mix and the split stay visible with the console off (they work when the player sets
+  the game's Anti-aliasing to TAA by hand). When Mix / split is chosen, the game's TAA is not running and the console is off, the
+  help line (Mode row in Mix, Split with game TAA row) says to set Anti-aliasing to TAA in the game's graphics settings, or to turn on
+  the console (`g_developer` / `g_console` 1 in config.cfg) so the mod switches it.

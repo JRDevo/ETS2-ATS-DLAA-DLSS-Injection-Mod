@@ -90,6 +90,7 @@ static bool SkipRow(int r) {
     case MR_FPSREMEAS: case MR_MENUKEYS: case MR_HOTKEYS: case MR_SAVE: case MR_RESET: case MR_CLOSE:
     case MR_OFXR: case MR_VECTORXR:
     case MR_UIGRP: case MR_UIRESET:                    // phase 83: a header and an action
+    case MR_BUGGRP: case MR_CAPKEY: case MR_CAPNOW:    // phase 89d: a header, the Hotkeys page, an action
         return true;
     default:
         return false;
@@ -134,16 +135,20 @@ static int GateCheck(const char* after) {
            "Light trail fix: the menu and SceneDlaa's bias strength disagree");
     expect(off(MR_MODE) == !g_dlaaOn.load() && on(MR_DLAA) == g_dlaaOn.load(), MR_MODE, "Mode / DLAA on-off and g_dlaaOn disagree");
     {   // phase 82: the Game TAA row names the mode the render code reads (g_gameTaa); its share row is live only in mode mix
-        static const wchar_t* const kTaa[GameTaa::kModeCount] = { L"off", L"mix", L"split" };
-        expect(!wcscmp(val(MR_GAMETAA), kTaa[GameTaa::ClampMode(g_gameTaa)]) && g_gameTaa == GameTaa::ClampMode(g_gameTaa), MR_GAMETAA,
-               "Game TAA: the menu and g_gameTaa disagree");
+        // phase 90: the Compare row is the split only (on / off); Mode names Mix exactly while DLAA runs with game_taa mix
+        expect(!wcscmp(val(MR_GAMETAA), g_gameTaa == GameTaa::kSplit ? L"on" : L"off") && g_gameTaa == GameTaa::ClampMode(g_gameTaa),
+               MR_GAMETAA, "Split with game TAA: the menu and g_gameTaa disagree");
+        const bool modeOn = g_dlaaOn.load(), modeMix = modeOn && g_gameTaa == GameTaa::kMix, up = g_dlssUpscale.load();
+        const wchar_t* const modeWant = !modeOn ? L"off" : modeMix ? (up ? L"Mix (TAA + DLSS)" : L"Mix (TAA + DLAA)")
+                                                                   : (up ? L"DLSS" : L"DLAA");
+        expect(!wcscmp(val(MR_MODE), modeWant), MR_MODE, "Mode: the menu and g_dlaaOn / g_dlssUpscale / g_gameTaa disagree");
         expect(grey(MR_TAAMIX) == !GameTaa::ShareUsed(g_gameTaa, g_gameTaaPair), MR_TAAMIX,
                "Game TAA amount is live exactly in mode mix and in split with a Mix side");
         static const wchar_t* const kPair[GameTaa::kPairCount] = { L"DLAA | TAA", L"Mix | TAA", L"DLAA | Mix" };
         expect(!wcscmp(val(MR_TAAPAIR), kPair[GameTaa::ClampPair(g_gameTaaPair)]) && grey(MR_TAAPAIR) == (g_gameTaa != GameTaa::kSplit),
                MR_TAAPAIR, "Split: left | right: the menu and g_gameTaaPair disagree, or not greyed exactly outside split");
         wchar_t pct[16];
-        swprintf(pct, 16, L"%d %%", g_gameTaaMix);
+        swprintf(pct, 16, L"%d %% TAA", g_gameTaaMix);
         expect(!wcscmp(val(MR_TAAMIX), pct) && g_gameTaaMix % GameTaa::kMixStep == 0, MR_TAAMIX,
                "Game TAA amount: the menu and g_gameTaaMix disagree (or off the 10 % grid after a press)");
         // phase 87: the AMD cache cores row names cpu_cache_pin and is greyed exactly on a CPU the pin cannot act on
@@ -286,11 +291,21 @@ static void MenuRules() {
     MenuBuildPanel(s_panel); MenuBuildPanel(s_panel);
     const TuningMenu::Row* ui = FindRow(L"In-game UI");
     CHECK(ui && !ui->greyed && FindRow(L"Height"), "console on (VR): the group is shown and its rows too");
+    // review fix (phase 89d): EVERY group header opens with Right and closes with Left (the Bug report header once did nothing)
+    for (int gi = 0; gi < kMenuGroupCount; ++gi) {
+        const int h = kMenuGroups[gi].header;
+        MenuGrpOpen(h) = false;
+        MenuChange(h, 1, false, 910 + gi);
+        CHECK(MenuGrpOpen(h), "group header \"%s\": Right does not open it", RowName(h));
+        MenuChange(h, -1, false, 930 + gi);
+        CHECK(!MenuGrpOpen(h), "group header \"%s\": Left does not close it", RowName(h));
+    }
     // phase 86: a Game TAA row change asks for the game's r_aa (typed later by VrUiTick, not called here: it would really type), and
     // r_aa is the game's: never written to dlaa.ini
     {
         const int taa0 = g_gameTaa;
         g_raaPending = false;
+        g_gameTaa = GameTaa::kOff;                        // phase 90: the row's Right = split on (from off)
         MenuChange(MR_GAMETAA, 1, false, 902);
         CHECK(g_raaPending, "a Game TAA row change requests the game's r_aa");
         g_raaPending = false;
@@ -301,6 +316,27 @@ static void MenuRules() {
         if (_wfopen_s(&f, IniPath().c_str(), L"rb") == 0 && f) { char b2[4096]; size_t n; while ((n = fread(b2, 1, sizeof(b2), f)) > 0) ini.append(b2, n); fclose(f); }
         CHECK(!ini.empty() && ini.find("r_aa") == std::string::npos && ini.find("game_taa") != std::string::npos,
               "Save writes game_taa but never the game's r_aa");
+        // phase 90: the Mode row walks off -> DLAA -> DLSS -> Mix (TAA + DLAA) -> Mix (TAA + DLSS) -> off; into / out of Mix asks for
+        // r_aa and writes game_taa at once (like mode), and a split is replaced by Mix
+        const bool on0 = g_dlaaOn.load(), up0 = g_dlssUpscale.load();
+        g_gameTaa = GameTaa::kSplit;
+        g_dlaaOn = true; g_dlssUpscale = true;            // DLSS -> Right = Mix (TAA + DLAA)
+        g_raaPending = false;
+        MenuChange(MR_MODE, 1, false, 904);
+        CHECK(g_dlaaOn.load() && !g_dlssUpscale.load() && g_gameTaa == GameTaa::kMix && g_raaPending,
+              "Mode Right from DLSS: Mix (TAA + DLAA), game_taa mix (the split replaced), r_aa requested");
+        std::string ini2;
+        if (_wfopen_s(&f, IniPath().c_str(), L"rb") == 0 && f) { char b2[4096]; size_t n; while ((n = fread(b2, 1, sizeof(b2), f)) > 0) ini2.append(b2, n); fclose(f); }
+        CHECK(ini2.find("game_taa = 1") != std::string::npos || ini2.find("game_taa=1") != std::string::npos,
+              "Mode into Mix writes game_taa 1 to dlaa.ini at once");
+        MenuChange(MR_MODE, 1, false, 905);
+        CHECK(g_dlssUpscale.load() && g_gameTaa == GameTaa::kMix, "Mode Right from Mix (TAA + DLAA): Mix (TAA + DLSS)");
+        g_raaPending = false;
+        MenuChange(MR_MODE, 1, false, 906);
+        CHECK(!g_dlaaOn.load() && g_gameTaa == GameTaa::kOff && g_raaPending, "Mode Right from Mix (TAA + DLSS): off, game_taa off");
+        MenuChange(MR_MODE, -1, false, 907);
+        CHECK(g_dlaaOn.load() && g_dlssUpscale.load() && g_gameTaa == GameTaa::kMix, "Mode Left from off: Mix (TAA + DLSS)");
+        g_dlaaOn = on0; g_dlssUpscale = up0;
         g_gameTaa = taa0;
         g_gameTaaExplicit = false;
     }
@@ -374,10 +410,81 @@ static void Case(int r, int dir, int presses, const wchar_t* vrArg, const char* 
               SessionOnly(r) ? " (a session-only switch must not be saved)" : " (not saved)");
 }
 
+// ---- phase 89 review fixes: the capture / rewind helpers that need no GPU ------------------------------------------------------
+static void CaptureRules() {
+    // #2 the rewind length does not follow a rolling flat Present rate frame by frame
+    const float secs0 = g_rewindSecs; const int frames0 = g_rewindFrames; const bool vr0 = g_vrMode;
+    g_vrMode = false;
+    g_rewindSecs = 1.0f;
+    auto fill = [](float ms) { for (int i = 0; i < Cap::kFt; ++i) Cap::g_ft[i] = ms; Cap::g_ftN = Cap::kFt; Cap::g_ftHead = 0; };
+    fill(1000.0f / 72.0f);
+    const int n72 = Rewind::TargetFrames();
+    CHECK(n72 == 72, "rewind 1 s at 72 fps = %d frames (72)", n72);
+    int changes = 0, last = n72;
+    for (int k = 0; k < 200; ++k) {                    // +-4 % jitter of the measured rate: never a new length
+        fill(1000.0f / (72.0f * (k % 2 ? 1.04f : 0.96f)));
+        const int t = Rewind::TargetFrames();
+        changes += t != last; last = t;
+    }
+    CHECK(changes == 0, "rewind length changed %d times under +-4 %% rate noise (the ring would be rebuilt each time)", changes);
+    fill(1000.0f / 45.0f);                             // a real new rate: taken after it stayed > 10 % off for ~2 s
+    int t = 0;
+    for (int k = 0; k < 400; ++k) t = Rewind::TargetFrames();
+    CHECK(t == 45, "rewind 1 s after a lasting drop to 45 fps = %d frames (45)", t);
+    // #7 StepRewindSecs from the old rewind_frames alone: Left reaches off
+    g_rewindSecs = -1.0f; g_rewindFrames = 64;
+    fill(1000.0f / 60.0f);
+    StepRewindSecs(-1, 1);                             // 64 frames at 60 fps ~ 1.07 s -> nearest 1 s -> Left = 0.5 s
+    CHECK(g_rewindSecs == 0.5f, "rewind_frames 64 at 60 fps, Left: %.1f s (0.5)", (double)g_rewindSecs);
+    StepRewindSecs(-1, 2);
+    CHECK(g_rewindSecs == 0.0f, "Left again: off (%.1f)", (double)g_rewindSecs);
+    g_rewindSecs = secs0; g_rewindFrames = frames0; g_vrMode = vr0;
+    // #3 a capture's set 0 / the restore without a change does not reset the DLSS history
+    Cap::g_base = Cap::Base{ g_dlaaOn.load(), g_jitterOnly.load(), g_mvDebug.load(), g_mvOn.load(), g_objMode, LogLevel(), g_beeps };
+    Cap::g_partsSwitched = false;
+    for (int level : { 1, 2 }) {
+        Cap::g_plan = BugReport::Plan(level, &Cap::g_planN);
+        g_resetNext = false;
+        Cap::ApplySet(0);
+        CHECK(!g_resetNext, "capture_mode %d: set 0 (the player's picture) reset the DLSS history", level);
+        CHECK(!Cap::ApplyBase() && !g_resetNext, "capture_mode %d: the restore without a change reset the DLSS history", level);
+        Cap::ApplySet(1);                              // phase 89e: set 1 = DLAA off (the second set)
+        CHECK(!g_dlaaOn.load() && g_resetNext, "capture_mode %d: the DLAA-off set", level);
+        g_resetNext = false;
+        CHECK(Cap::ApplyBase() && g_dlaaOn.load() == Cap::g_base.dlaa && g_resetNext, "capture_mode %d: the restore after DLAA off", level);
+    }
+    // #5 formats: BGRA from the format, unknown formats refused
+    CHECK(Cap::IsBgra8(DXGI_FORMAT_B8G8R8A8_UNORM_SRGB) && !Cap::IsBgra8(DXGI_FORMAT_R8G8B8A8_UNORM) &&
+          !Cap::Convertible(DXGI_FORMAT_R10G10B10A2_UNORM) && !Cap::Convertible(DXGI_FORMAT_R11G11B10_FLOAT) &&
+          Cap::Convertible(DXGI_FORMAT_R16G16_FLOAT), "capture formats");
+    {   Cap::Pix p; p.w = 1; p.h = 1; p.pitch = 4; p.f = DXGI_FORMAT_B8G8R8A8_UNORM; p.bgra = true; p.px = { 10, 20, 30, 255 };
+        std::vector<uint8_t> o;
+        CHECK(Cap::ToRgba8(p, o, L"t.png") && o[0] == 30 && o[1] == 20 && o[2] == 10, "BGRA -> RGBA byte order");
+        p.f = DXGI_FORMAT_R10G10B10A2_UNORM;
+        CHECK(!Cap::ToRgba8(p, o, L"t.png"), "R10G10B10A2 is refused, not mis-read"); }
+    {   // phase 89e: the MV picture is auto-ranged (8 px = full red), the HDR plane auto-exposed (0.045 grey -> ~0.18 -> sRGB ~117)
+        Cap::Pix p; p.w = 1; p.h = 1; p.pitch = 4; p.f = DXGI_FORMAT_R16G16_FLOAT; p.px = { 0x00, 0x48, 0x00, 0x00 };   // (8.0, 0.0) half
+        std::vector<uint8_t> o;
+        CHECK(Cap::ToRgba8(p, o, L"mv.png") && o[0] == 255 && o[1] == 128, "MV auto range: 8 px -> red %d green %d (255 / 128)", o[0], o[1]);
+        p.pitch = 8; p.f = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        p.px = { 0xC3, 0x29, 0xC3, 0x29, 0xC3, 0x29, 0x00, 0x3C };   // 0.045 grey (half 0x29C3), alpha 1
+        CHECK(Cap::ToRgba8(p, o, L"c.png") && o[0] > 105 && o[0] < 130, "HDR auto exposure: 0.045 grey -> %d (about 117)", o[0]);
+        std::lock_guard<std::mutex> lk(Cap::g_noteMx);
+        CHECK(Cap::g_notes.size() >= 2, "the exposure / MV range notes for info.txt");
+        Cap::g_notes.clear();
+    }
+    // #10 the writer's RAM cap
+    Cap::g_queuedBytes = Cap::kQueueCap + 1;
+    CHECK(Cap::WriterBehind(), "writer behind above the cap");
+    Cap::g_queuedBytes = 0;
+    CHECK(!Cap::WriterBehind(), "not behind at 0");
+}
+
 static int Parent() {
     if (IniPath().empty()) { printf("FAIL: no dlaa.ini path\n"); return 1; }
     Boot(false);                                       // (row names for the messages)
     MenuRules();                                       // phase 85
+    CaptureRules();                                    // phase 89 review fixes
     int changed = 0, unchanged = 0;
     for (s_base = 0; s_base < (int)(sizeof(kBaseIni) / sizeof(kBaseIni[0])); ++s_base)
     for (int vr = 0; vr <= 1; ++vr) {

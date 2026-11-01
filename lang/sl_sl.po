@@ -168,47 +168,64 @@ msgstr "Plošča menija"
 msgid "Compare and test"
 msgstr "Primerjava in test"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Bug report"
+msgstr "Poročilo o napaki"
+
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's "
-"Scaling is below 100 %. off = the game's own picture: use it to compare. Saved at once."
+"Scaling is below 100 %. Mix = the game's own TAA blended with DLAA / DLSS: calmer, a bit softer. "
+"off = the game's own picture. Saved at once."
 msgstr ""
-"DLAA = čisti robovi v velikosti izrisa igre. DLSS = isto, poleg tega povečuje, ko je Prilagajanje "
-"igre pod 100 %. izk. = izvorna slika igre: za primerjavo. Shrani se takoj."
+"DLAA = čisti robovi v velikosti upodabljanja igre. DLSS = isto, in poveča sliko, ko je "
+"Prilagajanje velikosti igre pod 100 %. Mešanica = lasten TAA igre, pomešan z DLAA / DLSS: "
+"mirneje, malo mehkeje. izklop = lastna slika igre. Shrani se takoj."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Presets for your GPU. high = everything on (model 1). medium = model 2, half-size see-through "
-"depth, flat mirrors without part motion, lighter part-motion search. low = also no mirror DLAA, "
-"no see-through depth, VR area 60 %. Never changes a setting you set yourself."
+"How much of the Mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer, less = "
+"sharper. Shown while Mode is Mix, or a split has a Mix side. No extra cost."
+msgstr ""
+"Koliko mešanice je TAA igre, 0 - 100 % v korakih po 10 %: več = mirneje in mehkeje, manj = "
+"ostreje. Prikazano, dokler je Način Mešanica ali ima delitev stran z mešanico. Brez dodatnih "
+"stroškov."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Presets for your graphics card. high = everything on (model 1). medium = model 2, a lighter Glass "
+"and fence fix, mirrors without Track moving parts. low = also no Smooth mirrors, no Glass and "
+"fence fix, VR area 60 %. Never changes a setting you set yourself."
 msgstr ""
 "Prednastavitve za vašo grafično kartico. visoka = vse vklopljeno (model 1). srednja = model 2, "
-"polovična globina prosojnosti, ravna ogledala brez gibanja delov, lažje iskanje gibanja delov. "
-"nizka = tudi brez DLAA ogledal, brez globine prosojnosti, območje VR 60 %. Nikoli ne spremeni "
-"tistega, kar ste nastavili sami."
+"lažji popravek stekel in ograj, ogledala brez sledenja gibljivim delom. nizka = tudi brez gladkih "
+"ogledal, brez popravka stekel in ograj, območje VR 60 %. Nikoli ne spremeni nastavitve, ki ste jo "
+"nastavili sami."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, least ghosting "
+"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, fewest trails "
 "behind traffic: start here. 3 (F) = calmest on fences and wires, can smear moving detail, same "
 "cost as 2. 4 (M) = heaviest (about 5x), flat tests only."
 msgstr ""
-"1 (K) = največ podrobnosti, najostrejše besedilo, približno 1,6x GPU modela 2. 2 (E) = "
-"uravnotežen, najmanj duhov za prometom: začnite tu. 3 (F) = najmirnejši na ograjah in žicah, "
-"lahko zamegli premikajoče se podrobnosti, enaka cena kot 2. 4 (M) = najtežji (približno 5x), samo "
-"za teste v ravnem načinu."
+"1 (K) = največ podrobnosti, najostrejše besedilo, približno 1,6-krat več GPU kot 2. 2 (E) = "
+"uravnotežen, najmanj sledi za prometom: začnite tu. 3 (F) = najmirnejši na ograjah in žicah, "
+"lahko zamaže gibljive podrobnosti, enaka cena kot 2. 4 (M) = najzahtevnejši (približno 5-krat), "
+"samo za teste v ravnem načinu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Picture quality: sharpening, texture sharpness, the DLAA area and the see-through depth. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
+"Picture quality: sharpening, texture sharpness, the Glass and fence fix, the Light trail fix and "
+"the DLAA area. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Kakovost slike: ostrenje, ostrina tekstur, območje DLAA in globina prosojnosti. Desno skupino "
-"odpre, Levo jo zapre; ob vsakem odprtju menija je zaprta."
+"Kakovost slike: ostrenje, ostrina tekstur, popravek stekel in ograj, popravek sledi luči in "
+"območje DLAA. Desno skupino odpre, levo zapre; ob vsakem odprtju menija je zaprta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -234,42 +251,44 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Sharper texture text (road signs, dashboard, GPS). 0 = off; more negative = sharper but more "
-"shimmer on fences; try -0.5 to -1 if text is blurry. No GPU time, only a little memory bandwidth."
+"shimmer on fences; try -0.5 to -1 if text is blurry. Almost no cost."
 msgstr ""
-"Ostrejše besedilo v teksturah (prometni znaki, armaturna plošča, GPS). 0 = izk.; bolj negativno = "
-"ostreje, a več utripanja na ograjah; poskusite -0,5 do -1, če je besedilo zamegljeno. Brez "
-"obremenitve GPU, le malo pasovne širine pomnilnika."
+"Ostrejše besedilo na teksturah (prometni znaki, armaturna plošča, GPS). 0 = izk.; bolj negativno "
+"= ostreje, a ograje bolj utripajo; poskusite -0,5 do -1, če je besedilo zamegljeno. Skoraj nič ne "
+"stane."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"The same for wire fences, grass and leaf cut-outs: raise it toward 0 if fences shimmer, lower it "
-"if grass looks soft. same = follows the row above. Acts only while Texture sharpness is not 0. No "
-"GPU time, a little memory."
+"The same for wire fences, grass and leaves: raise it toward 0 if fences shimmer, lower it if "
+"grass looks soft. same = follows the row above. Works only while Texture sharpness is not 0. "
+"Almost no cost."
 msgstr ""
-"Isto za žičnate ograje, travo in listje: povečajte proti 0, če ograje utripajo, zmanjšajte, če je "
-"trava mehka. enako = sledi vrstici zgoraj. Deluje le, če Ostrina tekstur ni 0. Brez obremenitve "
-"GPU, nekaj pomnilnika."
+"Isto za žičnate ograje, travo in listje: povečajte proti 0, če ograje utripajo, zmanjšajte, če "
+"trava izgleda mehko. enako = sledi vrstici zgoraj. Deluje samo, ko Ostrina tekstur ni 0. Skoraj "
+"nič ne stane."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives wires, fences and glass their own distance instead of what is behind them, so they do not "
-"smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."
+"Wires, fences and windows are treated as the thing in front, not as what you see through them, so "
+"they do not smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms "
+"per eye."
 msgstr ""
-"Žicam, ograjam in steklu da lastno razdaljo namesto tiste od ozadja, zato se ob premikanju ne "
-"mažejo. Izklopite, če tam ne vidite razmazanosti: prihrani 0,02 - 0,06 ms na oko."
+"Žice, ograje in okna se obravnavajo kot tisto, kar je spredaj, ne kot tisto, kar vidite skozi "
+"njih, zato se med premikanjem ne razmažejo. Izklopite, če tam ne vidite razmazanosti: prihrani "
+"0,02 - 0,06 ms na oko."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Stops street-lamp and car-light glows leaving a trail behind them when you move: DLSS takes each "
-"glow from the current frame, not its history. 25 % steps; lower it if lamp glows flicker, 0 = "
-"off. Costs about 0.05 - 0.2 ms per eye."
+"Stops street-lamp and car-light glows leaving a trail behind them when you move: the glows are "
+"drawn fresh each frame instead of being blended with older frames. 25 % steps; lower it if lamp "
+"glows flicker, 0 = off. Costs about 0.05 - 0.2 ms per eye."
 msgstr ""
-"Prepreči, da bi sijaj uličnih svetilk in avtomobilskih luči pri premikanju vlekel sled: DLSS "
-"vzame vsak sijaj iz trenutne sličice, ne iz zgodovine. Koraki po 25 %; zmanjšajte, če sijaji "
-"utripajo, 0 = izk. Stane približno 0,05 - 0,2 ms na oko."
+"Prepreči, da bi sij uličnih svetilk in avtomobilskih luči za seboj puščal sled, ko se premikate: "
+"sij se v vsaki sličici nariše na novo namesto mešanja s starejšimi sličicami. Koraki po 25 %; "
+"zmanjšajte, če sij utripa, 0 = izk. Stane približno 0,05 - 0,2 ms na oko."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -294,24 +313,24 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and "
-"does not ghost. Turn it off only to save about 0.5 ms per eye or to test: every pixel then moves "
+"DLAA follows each moving thing on its own (traffic, wheels, number plates), so it stays sharp and "
+"leaves no trail. Turn it off only to save about 0.5 ms per eye or to test: everything then moves "
 "with the camera and traffic smears."
 msgstr ""
-"Vsakemu premičnemu delu (promet, kolesa, tablice) da lastno gibanje za DLAA, zato ostane oster in "
-"ne vleče duhov. Izklopite le za prihranek približno 0,5 ms na oko ali za test: potem se vsak "
-"piksel premika s kamero in promet se maže."
+"DLAA vsako premikajočo se stvar spremlja posebej (promet, kolesa, registrske tablice), zato "
+"ostane ostra in ne pušča sledi. Izklopite le za prihranek približno 0,5 ms na oko ali za test: "
+"potem se vse premika s kamero in promet se razmaže."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main "
-"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can ghost "
-"in the glass; else each part moves exactly in the glass."
+"Smooths the truck mirrors too, so they do not shimmer. 1 mirror = only the largest (the main "
+"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can leave "
+"trails in the glass; the others follow each moving thing."
 msgstr ""
-"Ogledalom tovornjaka da lasten DLAA, da ne utripajo. 1 ogledalo = le največje (glavno ob vas). "
-"vsa = vsako ogledalo. kamera = najcenejše na ogledalo, premikajoč se promet lahko v steklu vleče "
-"duhove; sicer se vsak del premika natančno v steklu."
+"Zgladi tudi ogledala tovornjaka, da ne utripajo. 1 ogledalo = samo največje (glavno poleg vas). "
+"vsa = vsako ogledalo. kamera = najcenejše na ogledalo, vozila v gibanju lahko pustijo sledi v "
+"steklu; ostali načini sledijo vsaki premikajoči se stvari."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -327,131 +346,143 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Frame rate and CPU: CPU tuning, an FPS cap and NVIDIA Reflex for flat, a VR FPS cap. Right opens "
-"the group, Left closes it; it starts closed every time the menu opens."
+"Frame rate and CPU: CPU tuning, AMD cache cores, an FPS cap and Low delay (Reflex) for flat, an "
+"FPS cap for VR. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Hitrost sličic in CPU: nastavitev CPU, omejitev FPS in NVIDIA Reflex za ravni način, omejitev FPS "
-"za VR. Desno skupino odpre, Levo jo zapre; ob vsakem odprtju menija je zaprta."
+"Hitrost sličic in CPU: nastavitev CPU, jedra z AMD predpomnilnikom, omejitev FPS in Nizka "
+"zakasnitev (Reflex) za ravni način, omejitev FPS za VR. Desno skupino odpre, levo zapre; ob "
+"vsakem odprtju menija je zaprta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
-"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
-"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
+"Three CPU switches together. Prefer fast cores: only Intel CPUs with P-cores and E-cores. Higher "
+"priority and no Windows power saving for the game: every CPU, Intel and AMD. Helps when the CPU "
+"is the limit; no cost. Separate in dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle."
 msgstr ""
-"Tri stikala CPU skupaj: glavna in renderirna nit raje uporabljata jedra P (samo hibridni Intelovi "
-"CPU), igra teče s prioriteto Nad običajno, Windows pa je ne sme dušiti (EcoQoS) ali prezreti "
-"njenih zahtev za časovnik. Pomaga, ko omejuje CPU; brez cene. Ločene nastavitve v dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
+"Tri stikala CPU skupaj. Prednost hitrim jedrom: samo procesorji Intel z jedri P in E. Višja "
+"prioriteta in brez varčevanja z energijo Windows za igro: vsak CPU, Intel in AMD. Pomaga, ko je "
+"omejitev CPU; nič ne stane. Ločeno v dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"AMD X3D CPUs with two core groups (7950X3D, 9950X3D): keeps the game on the cores with the big 3D "
+"V-Cache, which games like. Switches at once; off gives the game all cores back. Try it and "
+"compare in a busy city. No cost."
+msgstr ""
+"Procesorji AMD X3D z dvema skupinama jeder (7950X3D, 9950X3D): igro drži na jedrih z velikim "
+"predpomnilnikom 3D V-Cache, ki ga igre ljubijo. Preklopi takoj; izk. igri vrne vsa jedra. "
+"Poskusite in primerjajte v prometnem mestu. Nič ne stane."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
-"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
-"limiting. off = no limit."
+"Set it a bit below what your PC holds in a busy city. With Low delay (Reflex) on, the NVIDIA "
+"driver does the limiting. off = no limit."
 msgstr ""
-"Samo ravni način. Drži igro največ na tej hitrosti sličic: stalen čas sličice, manj toplote in "
-"energije. Nastavite malo pod tisto, kar vaš računalnik drži v zasedenem mestu. Z vklopljenim "
-"Reflex omejuje gonilnik NVIDIA. izk. = brez omejitve."
+"Samo ravni način. Igro drži največ pri tej hitrosti sličic: enakomeren čas sličice, manj toplote "
+"in energije. Nastavite nekoliko pod tisto, kar vaš računalnik zdrži v prometnem mestu. Ko je "
+"Nizka zakasnitev (Reflex) vklopljena, omejuje gonilnik NVIDIA. izk. = brez omejitve."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
-"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
+"Flat only, NVIDIA only (NVIDIA Reflex). On = the game's frames wait less before the graphics card "
+"draws them: less delay between your steering and the picture when the card is the limit. Boost "
+"also keeps the card's clocks up. Same fps; small cost."
 msgstr ""
-"Samo ravni način, samo NVIDIA. vkl. = sličice igre čakajo v čakalni vrsti GPU manj: manjši zamik "
-"vnosa, ko omejuje GPU. Boost dodatno drži visoke takte GPU. Enaki fps; majhna cena. V VR se ne "
-"uporablja."
+"Samo ravni način, samo NVIDIA (NVIDIA Reflex). Vkl. = sličice igre čakajo manj, preden jih "
+"grafična kartica nariše: manjša zakasnitev med krmiljenjem in sliko, ko je omejitev kartica. "
+"Boost dodatno drži visoke takte kartice. Enak FPS; majhna cena."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
-"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
-"the fps swings. Turns Turbo off while on."
+"headset's frame smoothing (ASW / Motion Smoothing) fills in the rest at a steady rhythm. Use it "
+"when the fps swings. Turns Turbo off while on."
 msgstr ""
-"Samo VR. polovica = igra nariše vsako 2. sličico VR očal (72 Hz -> 36 fps), tretjina = vsako 3.; "
-"reprojekcija VR očal (ASW / Motion Smoothing) napolni ostalo v enakomernem ritmu. Uporabite, ko "
-"fps nihajo. Medtem ko je vklopljeno, izklopi Turbo."
+"Samo VR. polovica = igra nariše vsako 2. sličico očal (72 Hz -> 36 fps), tretjina = vsako 3.; "
+"glajenje sličic očal (ASW / Motion Smoothing) napolni ostalo v enakomernem ritmu. Uporabite, ko "
+"FPS niha. Ko je vklopljeno, izklopi Turbo."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR speed-ups: Turbo, foveated rendering, the hidden area mask, and whether OFXR Bridge / VectorXR "
-"are found. Right opens the group, Left closes it; it starts closed every time the menu opens."
+"VR speed-ups: Turbo, foveated rendering, skipping the hidden lens edges, and whether OFXR Bridge "
+"/ VectorXR are found. Right opens the group, Left closes it; it starts closed every time the menu "
+"opens."
 msgstr ""
-"Pospešitve VR: Turbo, foveated rendering, maska skritega območja in ali sta OFXR Bridge / "
-"VectorXR najdena. Desno skupino odpre, Levo jo zapre; ob vsakem odprtju menija je zaprta."
+"Pohitritve VR: Turbo, foveated rendering, preskok skritih robov leč in ali sta najdena OFXR "
+"Bridge / VectorXR. Desno skupino odpre, levo zapre; ob vsakem odprtju menija je zaprta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Turbo: no ASW / Motion Smoothing / SSW / reprojection. VR only. On = the game stops waiting for "
-"the headset each frame: more fps only when the CPU is the limit (busy cities, traffic). Turn it "
-"off if the picture judders. From OpenXR Toolkit."
+"Turbo switches off the headset's frame smoothing (ASW / Motion Smoothing / SSW). VR only. On = "
+"the game stops waiting for the headset each frame: more fps only when the CPU is the limit (busy "
+"cities, traffic). Turn it off if the picture judders."
 msgstr ""
-"Turbo: brez ASW / Motion Smoothing / SSW / reprojekcije. Samo VR. vkl. = igra ne čaka na VR očala "
-"vsako sličico: več fps le, ko omejuje CPU (zasedena mesta, promet). Izklopite, če slika zatika. "
-"Iz OpenXR Toolkit."
+"Turbo izklopi glajenje sličic očal (ASW / Motion Smoothing / SSW). Samo VR. Vkl. = igra v vsaki "
+"sličici ne čaka na očala: več FPS le, ko je omejitev CPU (prometna mesta, promet). Izklopite, če "
+"slika trza."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR "
-"only. The outer ring is shaded once per 2 x 2 pixels; fences, grass and leaves keep full detail. "
+"only. The outer ring gets one colour per 2 x 2 pixels; fences, grass and leaves keep full detail. "
 "Turn it off if the edge looks blocky."
 msgstr ""
-"Oster center, manj podrobnosti na robu (samo NVIDIA RTX). Prihrani GPU pri visokem Prilagajanju. "
-"Samo VR. Zunanji obroč se senči enkrat na 2 x 2 piksla; ograje, trava in listje obdržijo polno "
-"podrobnost. Izklopite, če rob izgleda kockasto."
+"Oster center, manj podrobnosti na robu (samo NVIDIA RTX). Prihrani čas GPU pri visokem "
+"Skaliranju. Samo VR. Zunanji obroč dobi eno barvo na 2 x 2 piksla; ograje, trava in listje "
+"ohranijo polne podrobnosti. Izklopite, če rob izgleda kockasto."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How big the sharp centre of Foveated (VRS) is, 10 - 100 % in 5 % steps: bigger = more of the view "
-"sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
+"How big the sharp centre of Foveated rendering is, 10 - 100 % in 5 % steps: bigger = more of the "
+"view sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
 "(balanced) is the default; 90 = wide, 65 = narrow."
 msgstr ""
-"Kako velik je oster center Foveated (VRS), 10 - 100 % v korakih po 5 %: večji = več ostrega "
-"pogleda, manj prihranka; manjši = več prihranka, nižja podrobnost se začne bliže sredini. 80 % "
-"(uravnotežen) je privzeto; 90 = širok, 65 = ozek."
+"Kako velik je oster center Foveated rendering, 10 - 100 % v korakih po 5 %: večji = več slike "
+"ostre, manj prihranka; manjši = več prihranka, manj podrobnosti se začne bližje sredini. Privzeto "
+"je 80 % (uravnotežen); 90 = širok, 65 = ozek."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Which of the game's passes Foveated (VRS) acts on. scene = the 3D world only (default). scene + "
-"lighting = also the game's lighting pass, at the very edge only: more saving. Test it: look for "
-"blocky light or shadow edges at the side of your view."
+"What Foveated rendering makes coarser. scene = the 3D world only (default). scene + lighting = "
+"also the game's lighting, at the very edge only: more saving. Test it: look for blocky light or "
+"shadow edges at the side of your view."
 msgstr ""
-"Na katere prehode igre deluje Foveated (VRS). prizor = samo 3D svet (privzeto). prizor + "
-"osvetlitev = tudi prehod osvetlitve igre, samo na skrajnem robu: več prihranka. Preizkusite: "
-"iščite kockaste robove luči ali senc ob strani pogleda."
+"Kaj Foveated rendering naredi bolj grobo. prizor = samo 3D svet (privzeto). prizor + osvetlitev = "
+"tudi osvetlitev igre, samo na samem robu: več prihranka. Preizkusite: iščite kockaste robove luči "
+"ali senc ob strani vidnega polja."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How coarse the outer ring of Foveated (VRS) is. Normal = 1 colour per 2 x 2 pixels (default). "
+"How coarse the outer ring of Foveated rendering is. Normal = 1 colour per 2 x 2 pixels (default). "
 "Strong = per 4 x 2, Max = per 4 x 4: more GPU saving, blockier edges. Best with eye tracking, "
 "where you never look at the outer ring."
 msgstr ""
-"Kako grob je zunanji obroč Foveated (VRS). Običajen = 1 barva na 2 x 2 piksla (privzeto). Močan = "
-"na 4 x 2, Maks. = na 4 x 4: več prihranka GPU, bolj kockasti robovi. Najbolje s sledenjem očem, "
-"kjer na zunanji obroč nikoli ne gledate."
+"Kako grob je zunanji obroč Foveated rendering. Običajen = 1 barva na 2 x 2 piksla (privzeto). "
+"Močan = na 4 x 2, Maks. = na 4 x 4: več prihranka GPU, bolj kockasti robovi. Najbolje s sledenjem "
+"očem, kjer na zunanji obroč nikoli ne gledate."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Experimental. The sharp centre of Foveated (VRS) follows your eyes on a headset with eye tracking "
-"(OpenXR eye gaze, for example Varjo); without one it stays at the lens centre. Needs Foveated "
-"(VRS) on at the game's start, else a restart. Almost no cost."
+"Experimental. The sharp centre of Foveated rendering follows your eyes on a headset with eye "
+"tracking (for example Varjo); without it the centre stays in the middle of the lens. Needs "
+"Foveated rendering on at the game's start, else a restart. Almost no cost."
 msgstr ""
-"Poskusno. Oster center Foveated (VRS) sledi vašim očem na VR očalih s sledenjem očem (pogled "
-"OpenXR, na primer Varjo); brez njega ostane v središču leče. Zahteva vklopljen Foveated (VRS) ob "
-"zagonu igre, sicer ponovni zagon. Skoraj brez cene."
+"Poskusno. Oster center Foveated rendering sledi vašim očem na očalih s sledenjem očem (na primer "
+"Varjo); brez tega ostane center na sredini leče. Zahteva vklopljeno Foveated rendering ob zagonu "
+"igre, sicer ponovni zagon. Skoraj nič ne stane."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -526,13 +557,13 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see "
-"what a setting gains. Its GPU cost is measured: per frame, every picture it is drawn into; none "
-"when off. Save keeps it for the next start."
+"A small live fps and frame-time box, also while this menu is closed (flat and VR): fps, ms, "
+"numbers only, each with or without a graph of recent frame times (spikes show red), or the graph "
+"alone. Its GPU cost is measured. Save keeps it."
 msgstr ""
-"Majhno živo polje s fps in časom sličice, tudi ko je ta meni zaprt (ravni način in VR). Uporabite "
-"ga, da vidite, kaj nastavitev prinese. Njegova cena GPU je izmerjena: na sličico, vsaka slika, v "
-"katero se riše; nič, ko je izklopljeno. Shrani ga obdrži do naslednjega zagona."
+"Majhno živo okno s FPS in časom sličice, tudi ko je meni zaprt (ravni način in VR): fps, ms, samo "
+"številke, vsako z grafom zadnjih časov sličic (konice so rdeče) ali brez, ali samo graf. Njegova "
+"cena GPU je izmerjena. Shranjevanje ga ohrani."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -602,13 +633,24 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
-"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
-"Per-part motion vectors). No cost."
+"How far back the fps graph shows: 2 - 60 s. One bar per slice of time = its slowest frame, so you "
+"see spikes. Green = on time, yellow = a bit slow, red = a hitch; the line = the headset rate / "
+"FPS cap / your usual. Shown when FPS counter has a graph."
 msgstr ""
-"Samo VR. Sledi glavi = premika se z VR očali. Fiksno v igralnem prostoru = eno mesto okoli "
-"sedeža, ne upošteva nihanja kabine. Pritrjeno na vozilo = prilepljeno na kabino, niha z njo "
-"(zahteva DLAA + vektorje gibanja delov). Brez cene."
+"Kako daleč nazaj sega graf FPS: 2 - 60 s. En stolpec na časovni odsek = njegova najpočasnejša "
+"sličica, zato vidite konice. Zelena = pravočasno, rumena = malo počasi, rdeča = zatikanje; črta = "
+"hitrost očal / omejitev FPS / vaša običajna. Prikazano, ko ima Števec FPS graf."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
+"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Track "
+"moving parts). No cost."
+msgstr ""
+"Samo VR. Sledi glavi = premika se z očali. Fiksno v igralnem prostoru = ena točka okoli vašega "
+"sedeža, ne upošteva zibanja kabine. Pritrjeno na vozilo = prilepljeno na kabino, ziblje se z njo "
+"(potrebuje DLAA + Sledi gibljivim delom). Nič ne stane."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -743,13 +785,12 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Switches for A/B checks: DLAA off, the game's own TAA mixed in or side by side, the thin-wire "
-"switches, DLAA before the tonemap. Nothing here is needed for normal driving. Right opens the "
-"group, Left closes it."
+"Switches for comparing: DLAA off, the game's own TAA mixed in or side by side, the wire fixes, "
+"running DLAA earlier. Nothing here is needed for normal driving. Right opens the group, Left "
+"closes it."
 msgstr ""
-"Stikala za preverjanja A/B: DLAA izk., lasten TAA igre primešan ali ob strani, stikala za tanke "
-"žice, DLAA pred tonemap. Nič od tega ni potrebno za običajno vožnjo. Desno skupino odpre, Levo jo "
-"zapre."
+"Stikala za primerjavo: DLAA izk., lasten TAA igre primešan ali ob strani, popravki žic, zgodnejši "
+"zagon DLAA. Nič od tega ni potrebno za običajno vožnjo. Desno skupino odpre, levo zapre."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -763,64 +804,55 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Only with the game's Anti-aliasing at TAA. off = the mod alone (set the game's AA to Disabled). "
-"mix = TAA and DLAA / DLSS on the same frame, blended. split = the mod on the left, TAA on the "
-"right, to compare."
+"on = the mod on the left, the game's own TAA on the right, to compare (Split line position, "
+"Split: left | right). Replaces Mix while on. With the game's console on, the mod switches the "
+"game's Anti-aliasing for you."
 msgstr ""
-"Samo če je glajenje robov igre nastavljeno na TAA. izk. = samo mod (nastavite AA igre na "
-"Izklopljeno). mešanica = TAA in DLAA / DLSS na isti sličici, pomešana. razdeljeno = levo mod, "
-"desno TAA, za primerjavo."
+"vklop = mod levo, lasten TAA igre desno, za primerjavo (Položaj ločilne črte, Delitev: levo | "
+"desno). Dokler je vklopljeno, nadomesti Mešanico. Ko je konzola igre vklopljena, mod namesto vas "
+"preklopi glajenje robov igre."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How much of the mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer (TAA), "
-"less = sharper (DLAA / DLSS). Used when Game TAA is mix, or split with a Mix side. No extra cost."
+"Where the split line is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS on the left "
+"of it, the game's TAA on the right. Used only while Split with game TAA is on."
 msgstr ""
-"Kolikšen del mešanice je TAA igre, 0 - 100 % v korakih po 10 %: več = mirneje in mehkeje (TAA), "
-"manj = ostreje (DLAA / DLSS). Uporabljeno, ko je TAA igre mešanica, ali razdeljeno s stranjo "
-"mešanica. Brez dodatnih stroškov."
+"Kje je ločilna črta, 0 - 100 % širine v korakih po 5 %: levo od nje DLAA / DLSS moda, desno TAA "
+"igre. Uporabljeno samo, dokler je Delitev s TAA igre vklopljena."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Where the line of Game TAA split is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS "
-"on the left of it, the game's TAA on the right. Used only when Game TAA is split."
+"What the split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix | TAA "
+"or DLAA | Mix (Mix = the two blended at Mix amount). DLSS instead of DLAA when upscaling. Used "
+"only while Split with game TAA is on."
 msgstr ""
-"Kje je črta razdeljenega TAA igre, 0 - 100 % širine v korakih po 5 %: levo od nje DLAA / DLSS "
-"moda, desno TAA igre. Uporabljeno samo, ko je TAA igre razdeljeno."
+"Kaj delitev prikaže na obeh straneh: DLAA | TAA (mod levo, TAA igre desno), mešanica | TAA ali "
+"DLAA | mešanica (mešanica = oboje pomešano po Količini mešanice). DLSS namesto DLAA pri povečavi. "
+"Uporabljeno samo, dokler je Delitev s TAA igre vklopljena."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"What Game TAA split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix "
-"| TAA or DLAA | Mix (Mix = the two blended at Game TAA share). DLSS instead of DLAA when "
-"upscaling. Used only when Game TAA is split."
+"Thin wires move correctly while you drive: their movement is spread over the whole thin line. on "
+"= default. off = only to compare; near wires flicker more. The picture is soft for a moment when "
+"you switch."
 msgstr ""
-"Kaj razdeljeni TAA igre prikazuje na obeh straneh: DLAA | TAA (levo mod, desno TAA igre), "
-"mešanica | TAA ali DLAA | mešanica (mešanica = oboje pomešano po Deležu TAA igre). DLSS namesto "
-"DLAA pri povečevanju. Uporabljeno samo, ko je TAA igre razdeljeno."
+"Tanke žice se med vožnjo pravilno premikajo: njihovo gibanje se razporedi po celotni tanki črti. "
+"vkl. = privzeto. izk. = samo za primerjavo; bližnje žice bolj utripajo. Slika je ob preklopu za "
+"trenutek mehka."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
-"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
-"soft for a moment when it changes."
+"Thin wires count as in front on every pixel they touch, even where they cover only a sliver of "
+"it. on = default. on (no A2C) = also for see-through edges such as leaves. off = only to compare; "
+"near wires flicker more."
 msgstr ""
-"Tanke žice med vožnjo obdržijo gibanje: DLAA razširi podatke gibanja na tanke črte (dilatacija "
-"gibanja DLSS). vkl. = privzeto. izk. = samo za primerjavo; bližnje žice bolj utripajo. Ob "
-"spremembi je slika za trenutek mehka."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
-"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
-msgstr ""
-"Tanke žice dobijo globino na vsakem pikslu, ki se ga dotaknejo, ne le tam, kjer prekrivajo "
-"središče piksla. vkl. = privzeto. vkl. (brez A2C) = tudi za prosojne robove. izk. = samo za "
-"primerjavo; bližnje žice bolj utripajo."
+"Tanke žice štejejo kot spredaj na vsakem pikslu, ki se ga dotaknejo, tudi če ga pokrivajo le "
+"delček. vkl. = privzeto. vkl. (brez A2C) = tudi za prosojne robove, na primer listje. izk. = samo "
+"za primerjavo; bližnje žice bolj utripajo."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -835,24 +867,84 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
-"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
-"~60 frames to switch."
+"Flat only: DLAA runs before the game adds its glow and colour look, so lane paint, wires and "
+"rails shimmer less. Change it only to compare. Not used with DLSS upscaling or Windows HDR. Same "
+"cost either way; takes about a second to switch."
 msgstr ""
-"Samo ravni način: DLAA pred bloomom / tonemappingom igre, zato črte na cesti, žice in tirnice "
-"utripajo manj. Spreminjajte le za primerjavo. Ne velja z DLSS povečevanjem ali Windows HDR. Enaka "
-"cena; preklop traja približno 60 sličic."
+"Samo ravni način: DLAA teče, preden igra doda sij in barvni videz, zato barva na cesti, žice in "
+"tirnice manj utripajo. Spreminjajte samo za primerjavo. Ni v uporabi pri skaliranju DLSS ali "
+"Windows HDR. Enaka cena; preklop traja približno sekundo."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Bug report: press the capture key twice (or Capture now) where something looks wrong; the mod "
+"writes one zip you attach to a GitHub issue. Right opens the group, Left closes it."
+msgstr ""
+"Poročilo o napaki: dvakrat pritisnite tipko za zajem (ali Zajemi zdaj) tam, kjer nekaj izgleda "
+"narobe; mod zapiše en zip, ki ga priložite zadevi na GitHubu. Desno skupino odpre, levo zapre."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"One switch for the most complete report: log detail debug, rewind 2 s, capture Full. Off puts the "
+"rows back as they were. Only this switch is saved; the forced values are never written to "
+"dlaa.ini."
+msgstr ""
+"Eno stikalo za najpopolnejše poročilo: podrobnost dnevnika debug, previjanje 2 s, zajem Polni. "
+"Izk. vrne vrstice, kot so bile. Shrani se samo to stikalo; vsiljene vrednosti se nikoli ne "
+"zapišejo v dlaa.ini."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + "
-"problems worked around; info = + start-up and changes; debug = + statistics, and debug also runs "
-"the GPU timers and the CPU profiler."
+"problems worked around; info = + start-up and changes; debug = + statistics and timing "
+"measurements (a little slower)."
 msgstr ""
-"Kaj gre v dlaa_inject.log: izk. = nič; napake = samo odpovedi (privzeto); opozorila = + obhojene "
-"težave; info = + zagon in spremembe; razhroščevanje = + statistika, razhroščevanje pa zažene tudi "
-"časovnike GPU in profiler CPU."
+"Kaj gre v dlaa_inject.log: izk. = nič; napake = samo odpovedi (privzeto); opozorila = + zaobidene "
+"težave; info = + zagon in spremembe; razhroščevanje = + statistika in meritve časa (nekoliko "
+"počasneje)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Keeps the last 0.5 - 3 s of frames on the graphics card all the time, so the report shows the "
+"moment BEFORE the key (+ what DLSS got for the last frames). Costs graphics memory (the MB in the "
+"cost column) and a picture copy per frame. off = none."
+msgstr ""
+"Ves čas drži zadnjih 0,5 - 3 s sličic na grafični kartici, zato poročilo pokaže trenutek PRED "
+"tipko (+ kaj je DLSS dobil v zadnjih sličicah). Stane grafični pomnilnik (MB v stolpcu cene) in "
+"kopijo slike na sličico. izk. = nič."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Quick = system info, logs, settings, your picture and DLAA off for a few frames (about 1 s). Full "
+"= + what DLSS got per frame (colour, motion, depth) and A/B sets: motion view, motion off, jitter "
+"only (about 2 - 4 s)."
+msgstr ""
+"Hiter = podatki o sistemu, dnevniki, nastavitve, vaša slika in DLAA izk. za nekaj sličic "
+"(približno 1 s). Polni = + kaj je DLSS dobil na sličico (barva, gibanje, globina) in kompleti "
+"A/B: pogled gibanja, gibanje izk., samo jitter (približno 2 - 4 s)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The capture key. Press it TWICE within 1 s while driving where it goes wrong (the first press "
+"only arms it: one short beep). Right opens the Hotkeys page on its line to change it."
+msgstr ""
+"Tipka za zajem. Pritisnite jo DVAKRAT v 1 s med vožnjo tam, kjer gre kaj narobe (prvi pritisk jo "
+"samo pripravi: en kratek pisk). Desno odpre stran Bližnjic na njeni vrstici, kjer jo spremenite."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How many captures stay in the dlaa_selftest folder next to the DLL: older ones (folder + zip) are "
+"deleted when a new one is written. all = never delete."
+msgstr ""
+"Koliko zajemov ostane v mapi dlaa_selftest ob DLL: starejši (mapa + zip) se izbrišejo, ko nastane "
+"nov. vsi = nikoli ne briši."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -891,12 +983,28 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Puts every setting in this menu back to how the mod ships (model, sharpen, texture sharpness, "
-"DLAA area, motion, mirrors, profile, panel, fps box, turbo, foveated, frame rate, logging), live "
-"and in dlaa.ini, keeping your hotkeys and every other line."
+"DLAA area, motion, mirrors, preset, panel, fps box, turbo, foveated, frame rate, CPU, log "
+"detail), live and in dlaa.ini, keeping your hotkeys and every other line."
 msgstr ""
-"Vsako nastavitev tega menija vrne na tovarniško (model, ostrenje, ostrina tekstur, območje DLAA, "
-"gibanje, ogledala, profil, plošča, polje fps, turbo, foveated, hitrost sličic, beleženje), v živo "
-"in v dlaa.ini, vaše bližnjice in vse druge vrstice pa ohrani."
+"Vrne vsako nastavitev v tem meniju na stanje, v katerem pride mod (model, ostrenje, ostrina "
+"tekstur, območje DLAA, gibanje, ogledala, prednastavitev, plošča, okno fps, turbo, foveated, "
+"hitrost sličic, CPU, podrobnost dnevnika), sproti in v dlaa.ini, vaše bližnjice in vse druge "
+"vrstice pa ohrani."
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Off"
+msgstr "Izk."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph only"
+msgstr "samo graf"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph"
+msgstr "graf"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1172,8 +1280,8 @@ msgstr "Zdaj stane %ls na sličico; manj ogledal stane manj."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Greyed: Mirror DLAA is off."
-msgstr "Zasivljeno: DLAA ogledal je izk."
+msgid "Greyed: Smooth mirrors is off."
+msgstr "Zasivljeno: Gladka ogledala so izk."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1186,6 +1294,24 @@ msgstr "Vedno vkl.: način ogledal 3 v dlaa.ini je že v izmenjavanju."
 #, c-format
 msgid "The mirrors cost %ls per frame now."
 msgstr "Ogledala zdaj stanejo %ls na sličico."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed: only for AMD X3D CPUs with two core groups (7950X3D, 9950X3D)."
+msgstr "Zasivljeno: samo za procesorje AMD X3D z dvema skupinama jeder (7950X3D, 9950X3D)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On now: the game runs only on the cores with the big cache."
+msgstr "Zdaj vkl.: igra teče samo na jedrih z velikim predpomnilnikom."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On, but not applied: the game's cores were already limited (see the log)."
+msgstr "Vkl., a ni uporabljeno: jedra igre so bila že omejena (glejte dnevnik)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1215,7 +1341,8 @@ msgstr ""
 msgid ""
 "Waiting: click the game window on the desktop. The mod types into the game's console only while "
 "the game window has the focus."
-msgstr "Čakanje: kliknite okno igre na namizju. Mod tipka v konzolo igre samo, ko je okno igre v fokusu."
+msgstr ""
+"Čakanje: kliknite okno igre na namizju. Mod tipka v konzolo igre samo, ko je okno igre v fokusu."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1232,17 +1359,23 @@ msgstr "Dnevnik igre ni potrdil zadnje spremembe: glej dnevnik moda."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid "Mix and split need the game's TAA: set Anti-aliasing to TAA in the game's graphics settings."
+msgstr ""
+"Mešanica in razdelitev potrebujeta TAA igre: v grafičnih nastavitvah igre nastavite glajenje "
+"robov na TAA."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "The game's TAA is not running now: the mod runs alone."
 msgstr "TAA igre zdaj ne teče: mod teče sam."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid ""
-"The game's TAA is running now: set the game's Anti-aliasing to Disabled, or pick mix or split."
+msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or set Mode to Mix."
 msgstr ""
-"TAA igre zdaj teče: nastavite glajenje robov igre na Izklopljeno ali izberite mešanica ali "
-"razdeljeno."
+"TAA igre zdaj teče: nastavite glajenje robov igre na Izklopljeno ali nastavite Način na Mešanica."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1300,6 +1433,67 @@ msgstr "Povratek na TAA igre: DLAA na tej sličici ni stekel (glej dnevnik)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
+msgid ""
+"Or turn on the game console (g_developer and g_console 1 in config.cfg): then the mod switches it "
+"for you."
+msgstr ""
+"Ali vklopite konzolo igre (g_developer in g_console 1 v config.cfg): potem mod to preklopi "
+"namesto vas."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn on the game console to let the mod switch the game's Anti-aliasing."
+msgstr "Vklopite konzolo igre, da lahko mod preklaplja Anti-aliasing igre."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "TAA"
+msgstr "TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "unknown"
+msgstr "neznano"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "other"
+msgstr "drugo"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "waiting: click the game window"
+msgstr "čakam: kliknite okno igre"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switching..."
+msgstr "preklapljam..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch confirmed"
+msgstr "preklopljeno"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch NOT confirmed (see the log)"
+msgstr "preklop NI potrjen (glejte dnevnik)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls, %ls."
+msgstr "AA igre: %ls, %ls."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls."
+msgstr "AA igre: %ls."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
 #, c-format
 msgid ""
 "Switched off by the mod: it cost more than %.1f ms per eye (VR budget). Press its key to try "
@@ -1319,6 +1513,45 @@ msgstr "Zdaj stane %ls na sličico; izk. to prihrani."
 #, c-format
 msgid "Costs %ls ms GPU per frame now; most of it at night."
 msgstr "Zdaj stane %ls ms GPU na sličico; večinoma ponoči."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"The last one: %d zips of at most 24 MB, %d MB in all (folder %.0f MB). Attach the _main zip; the "
+"others only if asked."
+msgstr "Zadnji: %d zipov po največ 24 MB, skupaj %d MB (mapa %.0f MB). Priložite zip _main; ostale samo na zahtevo."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Holds %.0f MB of graphics memory now."
+msgstr "Zdaj drži %.0f MB grafičnega pomnilnika."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"%ls about %.0f MB graphics memory for the rewind; a capture takes about %.1f s and writes about "
+"%.0f MB."
+msgstr ""
+"%ls približno %.0f MB grafičnega pomnilnika za previjanje; zajem traja približno %.1f s in zapiše "
+"približno %.0f MB."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "On, it costs"
+msgstr "Vkl., stane"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Costs now:"
+msgstr "Zdaj stane:"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn off Send everything to change this."
+msgstr "Izklopite Pošlji vse, da to spremenite."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1382,8 +1615,8 @@ msgstr "Zasivljeno v VR: uporabite Omejitev FPS VR."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Limited by the NVIDIA driver now (Reflex is on)."
-msgstr "Zdaj omejuje gonilnik NVIDIA (Reflex je vklopljen)."
+msgid "Limited by the NVIDIA driver now (Low delay is on)."
+msgstr "Zdaj omejuje gonilnik NVIDIA (Nizka zakasnitev je vkl.)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1436,8 +1669,8 @@ msgstr "Prihrani čas v številki GPU same igre, ne moda."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Foveated (VRS) is off: switch it on first."
-msgstr "Foveated (VRS) je izk.: najprej ga vklopite."
+msgid "Foveated rendering is off: switch it on first."
+msgstr "Foveated rendering je izk.: najprej ga vklopite."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1455,11 +1688,11 @@ msgstr "Lažni pogled (vrs_eye_fake = 1): ostro območje počasi kroži, test."
 #: src/inject.cpp
 #, c-format
 msgid ""
-"Foveated (VRS) was off at the game's start: save (Shift+F12) and restart the game to ask the "
+"Foveated rendering was off at the game's start: save (Shift+F12) and restart the game to ask the "
 "headset for eye gaze."
 msgstr ""
-"Foveated (VRS) je bil ob zagonu igre izk.: shranite (Shift+F12) in znova zaženite igro, da VR "
-"očala zaprosijo za pogled oči."
+"Foveated rendering je bil ob zagonu igre izk.: shranite (Shift+F12) in znova zaženite igro, da "
+"očala zaprosijo za smer pogleda."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1959,15 +2192,41 @@ msgstr "zaprto (%d)"
 msgid "Mode"
 msgstr "Način"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLSS)"
+msgstr "Mešanica (TAA + DLSS)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLAA)"
+msgstr "Mešanica (TAA + DLAA)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLSS"
 msgstr "DLSS"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLAA"
 msgstr "DLAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Mix amount"
+msgstr "Količina mešanice"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d %% TAA"
+msgstr "%d %% TAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Quality preset"
+msgstr "Prednastavitev kakovosti"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -1993,7 +2252,7 @@ msgstr "%.1f (izk.)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Sharpen width"
+msgid "Sharpness size"
 msgstr "Širina ostrenja"
 
 #. Value column (about 20 Latin characters)
@@ -2015,8 +2274,8 @@ msgstr "%.2f (izk.)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Cut-out texture sharpness"
-msgstr "Ostrina tekstur ograj in listja"
+msgid "Leaves and fences sharpness"
+msgstr "Ostrina listja in ograj"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2045,6 +2304,11 @@ msgstr "samo VR"
 msgid "100 %% (flat)"
 msgstr "100 %% (ravni)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Track moving parts"
+msgstr "Sledi gibljivim delom"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "old stencil ids"
@@ -2052,13 +2316,13 @@ msgstr "stari stencil id"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirror DLAA"
-msgstr "DLAA ogledal"
+msgid "Smooth mirrors"
+msgstr "Gladka ogledala"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirrors in turns"
-msgstr "Ogledala izmenično"
+msgid "Mirrors take turns (faster)"
+msgstr "Ogledala izmenično (hitreje)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2067,13 +2331,23 @@ msgstr "vkl. (način 3)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Thin-wire motion"
-msgstr "Gibanje tankih žic"
+msgid "Wire fix: motion"
+msgstr "Popravek žic: gibanje"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Wire fix: depth"
+msgstr "Popravek žic: globina"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no A2C)"
 msgstr "vkl. (brez A2C)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Thicker wires (test)"
+msgstr "Debelejše žice (test)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2082,13 +2356,23 @@ msgstr "vkl. (poskusno)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "DLAA before tonemap"
-msgstr "DLAA pred tonemap"
+msgid "Run DLAA earlier (test, flat)"
+msgstr "DLAA prej (test, ravni)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Run DLAA earlier (test)"
+msgstr "DLAA prej (test)"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "flat only"
 msgstr "samo ravni"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Glass and fence fix"
+msgstr "Popravek stekel in ograj"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2097,8 +2381,8 @@ msgstr "izk. (proračun VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Light glow ghosting fix"
-msgstr "Popravek duhov sijaja luči"
+msgid "Light trail fix"
+msgstr "Popravek sledi luči"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2107,33 +2391,18 @@ msgstr "DLAA izk. (se ne shrani)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Game TAA"
-msgstr "TAA igre"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid "mix"
-msgstr "mešanica"
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid "split"
-msgstr "razdeljeno"
+msgid "Split with game TAA"
+msgstr "Delitev s TAA igre"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Game TAA share"
-msgstr "Delež TAA igre"
+msgid "Split line position"
+msgstr "Položaj ločilne črte"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Split position"
-msgstr "Položaj delitve"
-
-#. Setting / action name column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "Split compares"
-msgstr "Delitev primerja"
+msgid "Split: left | right"
+msgstr "Delitev: levo | desno"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2250,8 +2519,8 @@ msgstr "vkl. (ustavljeno)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated (VRS)"
-msgstr "Foveated (VRS)"
+msgid "Foveated rendering"
+msgstr "Foveated rendering"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2270,8 +2539,8 @@ msgstr "Velikost foveated"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated passes"
-msgstr "Prehodi foveated"
+msgid "Foveated: lighting too"
+msgstr "Foveated: tudi osvetlitev"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2330,13 +2599,13 @@ msgstr "vkl. (čaka na pogled)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Hidden area mask (VR)"
-msgstr "Maska skritega območja (VR)"
+msgid "Skip hidden edges (VR)"
+msgstr "Preskoči skrite robove (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Hidden area mask"
-msgstr "Maska skritega območja"
+msgid "Skip hidden edges"
+msgstr "Preskoči skrite robove"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2351,13 +2620,13 @@ msgstr "vkl. (prevlada FPS)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Reflex (flat)"
-msgstr "Reflex (ravni)"
+msgid "Low delay (Reflex, flat)"
+msgstr "Nizka zakasnitev (Reflex, rav.)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Reflex"
-msgstr "Reflex"
+msgid "Low delay (Reflex)"
+msgstr "Nizka zakasnitev (Reflex)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2413,8 +2682,108 @@ msgstr "mešano (dlaa.ini)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Logging"
-msgstr "Beleženje"
+msgid "AMD cache cores (X3D)"
+msgstr "AMD jedra s predpom. (X3D)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (auto)"
+msgstr "vkl. (samodejno)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Send everything"
+msgstr "Pošlji vse"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Log detail"
+msgstr "Podrobnost dnevnika"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Rewind before key"
+msgstr "Previjanje pred tipko"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d frames (dlaa.ini)"
+msgstr "%d sličic (dlaa.ini)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture includes"
+msgstr "Zajem vsebuje"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Full"
+msgstr "Polni"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Quick"
+msgstr "Hiter"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "change"
+msgstr "spremeni"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture key"
+msgstr "Tipka za zajem"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%hs (press twice)"
+msgstr "%hs (dvakrat)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Keep captures"
+msgstr "Koliko zajemov ohraniti"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "all"
+msgstr "vsi"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture now"
+msgstr "Zajemi zdaj"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "capturing %d / %d"
+msgstr "zajem %d / %d"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "writing (%d files)"
+msgstr "pišem (%d datotek)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "done: %d parts, %d MB"
+msgstr "gotovo: %d kos, %d MB"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "failed (see the log)"
+msgstr "napaka (glej dnevnik)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "ready"
+msgstr "pripravljeno"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2509,11 +2878,6 @@ msgstr "Plošča proti vam"
 #: src/inject.cpp
 msgid "Menu keys"
 msgstr "Tipke menija"
-
-#. Value column (about 20 Latin characters)
-#: src/inject.cpp
-msgid "Off"
-msgstr "Izk."
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2612,6 +2976,16 @@ msgstr "Neprosojnost FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS graph length"
+msgstr "Dolžina grafa FPS"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "with a graph only"
+msgstr "samo z grafom"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "FPS distance (VR)"
 msgstr "Razdalja FPS (VR)"
 
@@ -2663,6 +3037,20 @@ msgstr "Držite %hs %hs s za ponastavitev. %ls"
 #: src/inject.cpp
 #, c-format
 msgid ""
+"%hs = capture now (the menu closes first). The zip (dlaa_selftest folder next to the DLL) holds "
+"system info, the mod's and the game's log, dlaa.ini, your picture and DLAA off; Full adds what "
+"DLSS got and the A/B sets; rewind adds the moment before. Your user name and home folder are "
+"removed. %ls"
+msgstr ""
+"%hs = zajemi zdaj (meni se najprej zapre). Zip (mapa dlaa_selftest ob DLL) vsebuje podatke o "
+"sistemu, dnevnik moda in igre, dlaa.ini, vašo sliko in DLAA izk.; Polni doda, kar je dobil DLSS, "
+"in komplete A/B; previjanje doda trenutek pred tipko. Vaše uporabniško ime in domača mapa sta "
+"odstranjena. %ls"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
 "The 5 keys that open and drive this menu: %hs opens / closes it (the value), %hs / %hs / %hs / "
 "%hs move (Hotkey column). While the menu is open only these 5 are kept from the game. %hs: change "
 "them on the Hotkeys page."
@@ -2708,9 +3096,6 @@ msgstr "info"
 msgid "debug"
 msgstr "razhroščevanje"
 
-#~ msgid "Panel settings"
-#~ msgstr "Nastavitve plošče"
-
-#~ msgid "FPS counter settings"
-#~ msgstr "Nastavitve števca FPS"
+#~ msgid "The last one: %d zip parts of at most 24 MB, %d MB in all (folder %.0f MB): attach them all."
+#~ msgstr "Zadnji: %d delov zipa po največ 24 MB, skupaj %d MB (mapa %.0f MB): priložite vse."
 

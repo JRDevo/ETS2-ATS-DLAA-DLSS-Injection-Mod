@@ -689,19 +689,17 @@ void CopyLine(wchar_t (&dst)[kWLine], const wchar_t* src) {
     if (src) for (; src[i] && i + 1 < kWLine; ++i) dst[i] = src[i];
     dst[i] = 0;
 }
-// phase 88: the history graph strip into px (w x rows, RGBA; R = the low byte), s px per reference px. A dark see-through
-// background (3-px margins left / right, 2 px at the bottom), one bar per column from the bottom up (green / yellow / red against
-// targetMs, the top = 2 x targetMs), then the target line (half-way up) over the bars. Plain pixel writes, no GDI.
+// phase 88: the history graph strip into px (w x rows, RGBA; R = the low byte), s px per reference px. 3-px margins left / right,
+// 2 px at the bottom; one bar per column from the bottom up (green / yellow / red against targetMs, the top = 2 x targetMs), then
+// the target line (half-way up) over the bars. Plain pixel writes, no GDI. Phase 88c (VR test 2026-11-01): no dark background any
+// more -- the game shows through; the target line is white with a dark edge above and below, so it reads on sky and on road.
 void PaintGraph(uint32_t* px, uint32_t w, uint32_t rows, float s, const TuningMenu::WidgetGraph& g) {
     std::fill(px, px + (size_t)w * rows, 0u);
     const LONG m = std::max<LONG>(1, std::lround(3.0f * s)), b = std::max<LONG>(1, std::lround(2.0f * s));
     const LONG x0 = m, x1 = (LONG)w - m, y1 = (LONG)rows - b;   // the strip: x0..x1, 0..y1 (y down)
     if (x1 - x0 < 4 || y1 < 4 || !(g.targetMs > 0.0f)) return;
     auto rgba = [](uint32_t r, uint32_t gg, uint32_t bb, uint32_t a) { return r | (gg << 8) | (bb << 16) | (a << 24); };
-    const uint32_t bg = rgba(0, 0, 0, 96), green = rgba(70, 205, 95, 255), yellow = rgba(245, 200, 50, 255),
-                   red = rgba(235, 60, 50, 255);
-    for (LONG y = 0; y < y1; ++y)
-        for (LONG x = x0; x < x1; ++x) px[(size_t)y * w + x] = bg;
+    const uint32_t green = rgba(70, 205, 95, 255), yellow = rgba(245, 200, 50, 255), red = rgba(235, 60, 50, 255);
     const float top = 2.0f * g.targetMs;
     for (LONG x = x0; x < x1; ++x) {
         // the columns under this pixel (more than one when the strip is narrower than kGraphCols px: a small fps_scale): the slowest
@@ -715,15 +713,20 @@ void PaintGraph(uint32_t* px, uint32_t w, uint32_t rows, float s, const TuningMe
         const uint32_t col = ms <= 1.1f * g.targetMs ? green : (ms <= 1.5f * g.targetMs ? yellow : red);
         for (LONG y = y1 - hgt; y < y1; ++y) px[(size_t)y * w + x] = col;
     }
-    const LONG lt = std::max<LONG>(1, std::lround(0.5f * s)), ly = y1 / 2;
-    for (LONG y = ly; y < ly + lt && y < y1; ++y)
-        for (LONG x = x0; x < x1; ++x) {
-            uint32_t& p = px[(size_t)y * w + x];             // white at 150 / 255 over what is there (straight alpha "over")
-            const uint32_t a = 150, pa = p >> 24, oa = a + pa * (255 - a) / 255;
-            auto ch = [&](int sh) { const uint32_t pc = (p >> sh) & 0xFF;
-                                    return oa ? (255 * a + pc * pa * (255 - a) / 255) / oa : 0u; };
-            p = rgba(ch(0), ch(8), ch(16), oa);
-        }
+    const LONG lt = std::max<LONG>(1, std::lround(0.75f * s)), ly = y1 / 2, edge = std::max<LONG>(1, std::lround(0.5f * s));
+    // "over" what is there (straight alpha): c at alpha a
+    auto over = [&](uint32_t& p, uint32_t c, uint32_t a) {
+        const uint32_t pa = p >> 24, oa = a + pa * (255 - a) / 255;
+        auto ch = [&](int sh) { const uint32_t pc = (p >> sh) & 0xFF, cc = (c >> sh) & 0xFF;
+                                return oa ? (cc * a + pc * pa * (255 - a) / 255) / oa : 0u; };
+        p = rgba(ch(0), ch(8), ch(16), oa);
+    };
+    for (LONG y = ly - edge; y < ly + lt + edge && y < y1; ++y) {
+        if (y < 0) continue;
+        const bool core = y >= ly && y < ly + lt;
+        for (LONG x = x0; x < x1; ++x)
+            over(px[(size_t)y * w + x], core ? rgba(255, 255, 255, 0) : rgba(0, 0, 0, 0), core ? 235u : 150u);
+    }
 }
 
 // The fps box texture for the two lines at `buildScale`: rebuilt only when a line or the scale changed. phase 88: + the history
@@ -948,6 +951,42 @@ bool DrawWidget(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t 
     if (!EnsureWidgetTexture(dev.Get(), ctx, line1, line2, buildScale)) return false;
     const float k = scale / g_wBuild;
     DrawQuad(ctx, rtv, rtW, rtH, x0, y0, (float)g_wTexW * k, (float)g_wTexH * k, outMode, g_wSrv.Get(), true);
+    return true;
+}
+
+// phase 89e: the bug report's status box -- the fps box's look (outlined text, no background) at kStatusRefW x kWidgetRefH, always
+// white on a black outline at full opacity (not the fps_color / fps_opacity of the box). Own texture cache keyed on the lines + scale.
+namespace { ComPtr<ID3D11Texture2D> g_sTex; ComPtr<ID3D11ShaderResourceView> g_sSrv; uint32_t g_sTexW = 0, g_sTexH = 0;
+            float g_sBuild = 0.0f; wchar_t g_sLast1[64] = {}, g_sLast2[64] = {}; }
+bool DrawStatus(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
+                float scale, float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2) {
+    if (!ctx || !rtv || !rtW || !rtH || !(scale > 0.0f) || !(buildScale > 0.0f)) return false;
+    ComPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    if (!dev || !Ensure(dev.Get())) return false;
+    wchar_t l1[64], l2[64];
+    wcsncpy_s(l1, line1 ? line1 : L"", _TRUNCATE);
+    wcsncpy_s(l2, line2 ? line2 : L"", _TRUNCATE);
+    if (!g_sTex || std::fabs(g_sBuild - buildScale) > 0.001f || wcscmp(l1, g_sLast1) || wcscmp(l2, g_sLast2)) {
+        const uint32_t w = (uint32_t)std::lround(kStatusRefW * buildScale), h = (uint32_t)std::lround(kWidgetRefH * buildScale);
+        const COLORREF t0 = g_wText, o0 = g_wLine;
+        g_wText = RGB(255, 255, 255); g_wLine = RGB(8, 8, 8);
+        std::vector<uint32_t> keep;
+        keep.swap(g_wPixels);                                // (RenderWidget paints into g_wPixels: the fps box's own pixels kept)
+        const bool ok = RenderWidget(l1, l2, buildScale, w, h);
+        std::vector<uint32_t> px;
+        px.swap(g_wPixels);
+        g_wPixels.swap(keep);
+        g_wText = t0; g_wLine = o0;
+        if (!ok || !UploadTexture(dev.Get(), ctx, g_sTex, g_sSrv, g_sTexW, g_sTexH, w, h, px, "status box")) return false;
+        g_sBuild = buildScale;
+        wcscpy_s(g_sLast1, l1); wcscpy_s(g_sLast2, l2);
+    }
+    const float a0 = g_wOpacity;
+    g_wOpacity = 1.0f;
+    const float k = scale / g_sBuild;
+    DrawQuad(ctx, rtv, rtW, rtH, x0, y0, (float)g_sTexW * k, (float)g_sTexH * k, outMode, g_sSrv.Get(), true);
+    g_wOpacity = a0;
     return true;
 }
 
