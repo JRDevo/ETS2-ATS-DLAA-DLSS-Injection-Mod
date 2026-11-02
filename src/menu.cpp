@@ -8,6 +8,7 @@
 #include <wrl/client.h>
 #include <wincodec.h>                                // phase 74: SavePanelPng (the language dump)
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <cwchar>
@@ -587,9 +588,13 @@ bool RenderPanel(const TuningMenu::Panel& p, float s, uint32_t w, uint32_t h, co
 // the texture is RGB from (a), A = the red channel of (b) (the coverage: antialiased edges = partial alpha). The shader
 // draws it with the texture's alpha as it is. False = GDI failed (logged once).
 // phase 88: tight = the history graph sits under the text (WidgetTextRefH): one line in y 2..22 instead of the centred 12..32.
-bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t w, uint32_t h, bool tight = false) {
-    static bool s_failLogged = false;
-    static std::vector<uint32_t> s_mask;
+// phase 91: the pixels go to `out` and the colours are arguments (were g_wPixels / g_wText / g_wLine, the mask a static): the status
+// box paints from two threads (the eyes on the render thread, the desktop mirror at Present), each into its own buffer, no shared state.
+bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t w, uint32_t h, bool tight, std::vector<uint32_t>& out,
+                  COLORREF textCol, COLORREF lineCol) {
+    static std::atomic<bool> s_failLogged{ false };
+    bool failLogged = s_failLogged.load(std::memory_order_relaxed);
+    std::vector<uint32_t> maskPx;
     HFONT fBig   = MakeFont(15.0f * s, FW_BOLD, L"Segoe UI");
     HFONT fSmall = MakeFont(12.0f * s, FW_NORMAL, L"Segoe UI");
     HFONT stock  = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
@@ -598,9 +603,9 @@ bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t 
     const float W = (float)w / s;                            // reference px
     const LONG o = std::max<LONG>(1, (LONG)std::lround(1.0f * s));   // outline offset in device px
     // One DIB: mask = true draws the outline and the text all in white, false the colour version.
-    auto paint = [&](bool mask, std::vector<uint32_t>& out) -> bool {
+    auto paint = [&](bool mask, std::vector<uint32_t>& dst) -> bool {
         Dib d;
-        if (!DibBegin(d, w, h, "fps box", s_failLogged)) return false;
+        if (!DibBegin(d, w, h, "fps box", failLogged)) return false;
         HDC dc = d.dc;
         HGDIOBJ oldFont = SelectObject(dc, pick(fBig));
         SetBkMode(dc, TRANSPARENT);                          // the DIB starts black (zeroed)
@@ -608,14 +613,14 @@ bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t 
             if (!t || !t[0]) return;
             SelectObject(dc, pick(f));
             const UINT fl = DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_END_ELLIPSIS | DT_NOPREFIX;
-            SetTextColor(dc, mask ? RGB(255, 255, 255) : g_wLine);   // phase 44: fps_color's outline (was RGB 8,8,8)
+            SetTextColor(dc, mask ? RGB(255, 255, 255) : lineCol);   // phase 44: fps_color's outline (was RGB 8,8,8)
             for (LONG dy = -o; dy <= o; dy += o)
                 for (LONG dx = -o; dx <= o; dx += o) {
                     if (!dx && !dy) continue;
                     RECT r{ px(3.0f) + dx, px(y0) + dy, px(W - 3.0f) + dx, px(y1) + dy };
                     DrawTextW(dc, t, -1, &r, fl);
                 }
-            SetTextColor(dc, mask ? RGB(255, 255, 255) : g_wText);   // phase 44: fps_color's text (was white)
+            SetTextColor(dc, mask ? RGB(255, 255, 255) : textCol);   // phase 44: fps_color's text (was white)
             RECT r{ px(3.0f), px(y0), px(W - 3.0f), px(y1) };
             DrawTextW(dc, t, -1, &r, fl);
         };
@@ -629,15 +634,14 @@ bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t 
             line(fBig, has1 ? line1 : line2, tight ? 2.0f : 12.0f, tight ? 22.0f : 32.0f);
         }
         SelectObject(dc, oldFont);
-        DibFinish(d, w, h, out);
+        DibFinish(d, w, h, dst);
         return true;
     };
-    const bool ok = paint(false, g_wPixels) && paint(true, s_mask) && s_mask.size() == g_wPixels.size();
+    const bool ok = paint(false, out) && paint(true, maskPx) && maskPx.size() == out.size();
+    if (failLogged) s_failLogged.store(true, std::memory_order_relaxed);
     if (ok)
-        for (size_t i = 0, e = g_wPixels.size(); i < e; ++i)
-            g_wPixels[i] = (g_wPixels[i] & 0x00FFFFFFu) | ((s_mask[i] & 0xFFu) << 24);   // A = the mask's red (RGBA: R is the low byte)
-    s_mask.clear();
-    s_mask.shrink_to_fit();
+        for (size_t i = 0, e = out.size(); i < e; ++i)
+            out[i] = (out[i] & 0x00FFFFFFu) | ((maskPx[i] & 0xFFu) << 24);   // A = the mask's red (RGBA: R is the low byte)
     if (fBig) DeleteObject(fBig);
     if (fSmall) DeleteObject(fSmall);
     return ok;
@@ -757,7 +761,7 @@ bool EnsureWidgetTexture(ID3D11Device* dev, ID3D11DeviceContext* ctx, const wcha
         return true;
     }
     if (!ht) g_wPixels.clear();                              // phase 88: graph only (no line): no text rows
-    else if (!RenderWidget(l1, l2, buildScale, w, ht, s_g.on)) return false;
+    else if (!RenderWidget(l1, l2, buildScale, w, ht, s_g.on, g_wPixels, g_wText, g_wLine)) return false;
     if (h > ht) {
         g_wPixels.resize((size_t)w * h);
         PaintGraph(g_wPixels.data() + (size_t)w * ht, w, h - ht, buildScale, s_g);
@@ -780,11 +784,12 @@ bool EnsureWidgetTexture(ID3D11Device* dev, ID3D11DeviceContext* ctx, const wcha
 // phase 47: vsCab != null = that vertex shader (VSCab) with `vsSrv` at VS t0 instead of VSMain (saved / restored as well).
 void DrawCb(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, CbData& cb, int outMode,
             ID3D11ShaderResourceView* srv, bool textureAlpha, ID3D11VertexShader* vsCab = nullptr,
-            ID3D11ShaderResourceView* vsSrv = nullptr) {
+            ID3D11ShaderResourceView* vsSrv = nullptr, float alphaOverride = -1.0f) {
     const bool overlay = (outMode & TuningMenu::kOutOverlay) != 0;   // v0.10.3 phase 29: blend off, RGBA written
     outMode &= ~TuningMenu::kOutOverlay;
     cb.opt[0] = (float)(outMode < TuningMenu::kOutRaw ? TuningMenu::kOutRaw : (outMode > TuningMenu::kOutPq ? TuningMenu::kOutPq : outMode));
-    cb.opt[1] = textureAlpha ? g_wOpacity : 0.88f;           // panel: its 88 % background; fps box: fps_opacity (phase 51f)
+    cb.opt[1] = textureAlpha ? (alphaOverride >= 0.0f ? alphaOverride : g_wOpacity) : 0.88f;   // panel: its 88 % background; fps box:
+                                                             // fps_opacity (phase 51f); phase 91: the status box passes its own 1.0
     cb.opt[2] = textureAlpha ? 1.0f : 0.0f;                  // 1 = the fps box: alpha comes from the texture
     ctx->UpdateSubresource(g_cb.Get(), 0, nullptr, &cb, 0, 0);
     SaveState(ctx, vsCab != nullptr);
@@ -819,7 +824,7 @@ void DrawCb(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW,
 
 // One textured quad of `srv` (w x h px, top-left at x0, y0 rounded to whole pixels) into `rtv` (DrawCb).
 void DrawQuad(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
-              float w, float h, int outMode, ID3D11ShaderResourceView* srv, bool textureAlpha) {
+              float w, float h, int outMode, ID3D11ShaderResourceView* srv, bool textureAlpha, float alphaOverride = -1.0f) {
     const float px0 = std::floor(x0 + 0.5f), py0 = std::floor(y0 + 0.5f);   // whole pixels: 1:1 texels stay sharp
     CbData cb{};
     cb.rect[0] = px0 / (float)rtW * 2.0f - 1.0f;
@@ -827,7 +832,7 @@ void DrawQuad(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rt
     cb.rect[2] = (px0 + w) / (float)rtW * 2.0f - 1.0f;
     cb.rect[3] = 1.0f - (py0 + h) / (float)rtH * 2.0f;
     cb.opt[3] = 0.0f;                                        // the rect
-    DrawCb(ctx, rtv, rtW, rtH, cb, outMode, srv, textureAlpha);
+    DrawCb(ctx, rtv, rtW, rtH, cb, outMode, srv, textureAlpha, nullptr, nullptr, alphaOverride);
 }
 
 } // namespace
@@ -956,37 +961,41 @@ bool DrawWidget(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t 
 
 // phase 89e: the bug report's status box -- the fps box's look (outlined text, no background) at kStatusRefW x kWidgetRefH, always
 // white on a black outline at full opacity (not the fps_color / fps_opacity of the box). Own texture cache keyed on the lines + scale.
-namespace { ComPtr<ID3D11Texture2D> g_sTex; ComPtr<ID3D11ShaderResourceView> g_sSrv; uint32_t g_sTexW = 0, g_sTexH = 0;
-            float g_sBuild = 0.0f; wchar_t g_sLast1[64] = {}, g_sLast2[64] = {}; }
+// phase 91: ONE cache slot per caller (kStatusEyes / kStatusFlat). There was one cache for both, and the two build at different scales
+// (the eyes W / 1920 x 1.1, the desktop mirror H / 1080 x 1.25 x 2), so with both on EVERY call rebuilt it -- GDI + texture create +
+// upload, 1.58 ms/frame measured while the capture ran. Each slot owns its texture and pixels; RenderWidget paints into the slot's
+// buffer with explicit colours and the opacity goes to the draw as an argument, so the eyes (render thread) and the mirror (Present)
+// share no mutable state here any more (they swapped the fps box's g_wPixels / g_wText / g_wLine / g_wOpacity under each other).
+namespace {
+struct StatusSlot {
+    ComPtr<ID3D11Texture2D> tex; ComPtr<ID3D11ShaderResourceView> srv; uint32_t texW = 0, texH = 0;
+    float build = 0.0f; wchar_t last1[64] = {}, last2[64] = {}; std::vector<uint32_t> px;
+};
+StatusSlot g_status[TuningMenu::kStatusSlots];
+}
 bool DrawStatus(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
-                float scale, float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2) {
-    if (!ctx || !rtv || !rtW || !rtH || !(scale > 0.0f) || !(buildScale > 0.0f)) return false;
+                float scale, float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2, int slot) {
+    if (!ctx || !rtv || !rtW || !rtH || !(scale > 0.0f) || !(buildScale > 0.0f) || slot < 0 || slot >= kStatusSlots) return false;
     ComPtr<ID3D11Device> dev;
     ctx->GetDevice(&dev);
     if (!dev || !Ensure(dev.Get())) return false;
+    StatusSlot& c = g_status[slot];
     wchar_t l1[64], l2[64];
     wcsncpy_s(l1, line1 ? line1 : L"", _TRUNCATE);
     wcsncpy_s(l2, line2 ? line2 : L"", _TRUNCATE);
-    if (!g_sTex || std::fabs(g_sBuild - buildScale) > 0.001f || wcscmp(l1, g_sLast1) || wcscmp(l2, g_sLast2)) {
+    if (!c.tex || std::fabs(c.build - buildScale) > 0.001f || wcscmp(l1, c.last1) || wcscmp(l2, c.last2)) {
         const uint32_t w = (uint32_t)std::lround(kStatusRefW * buildScale), h = (uint32_t)std::lround(kWidgetRefH * buildScale);
-        const COLORREF t0 = g_wText, o0 = g_wLine;
-        g_wText = RGB(255, 255, 255); g_wLine = RGB(8, 8, 8);
-        std::vector<uint32_t> keep;
-        keep.swap(g_wPixels);                                // (RenderWidget paints into g_wPixels: the fps box's own pixels kept)
-        const bool ok = RenderWidget(l1, l2, buildScale, w, h);
-        std::vector<uint32_t> px;
-        px.swap(g_wPixels);
-        g_wPixels.swap(keep);
-        g_wText = t0; g_wLine = o0;
-        if (!ok || !UploadTexture(dev.Get(), ctx, g_sTex, g_sSrv, g_sTexW, g_sTexH, w, h, px, "status box")) return false;
-        g_sBuild = buildScale;
-        wcscpy_s(g_sLast1, l1); wcscpy_s(g_sLast2, l2);
+        if (w < 8 || h < 8 || w > 8192 || h > 4096) return false;
+        if (!RenderWidget(l1, l2, buildScale, w, h, false, c.px, RGB(255, 255, 255), RGB(8, 8, 8)) ||
+            !UploadTexture(dev.Get(), ctx, c.tex, c.srv, c.texW, c.texH, w, h, c.px, "status box")) {
+            c.tex.Reset(); c.srv.Reset(); c.texW = c.texH = 0;   // (no half-updated cache: the next call tries again)
+            return false;
+        }
+        c.build = buildScale;
+        wcscpy_s(c.last1, l1); wcscpy_s(c.last2, l2);
     }
-    const float a0 = g_wOpacity;
-    g_wOpacity = 1.0f;
-    const float k = scale / g_sBuild;
-    DrawQuad(ctx, rtv, rtW, rtH, x0, y0, (float)g_sTexW * k, (float)g_sTexH * k, outMode, g_sSrv.Get(), true);
-    g_wOpacity = a0;
+    const float k = scale / c.build;
+    DrawQuad(ctx, rtv, rtW, rtH, x0, y0, (float)c.texW * k, (float)c.texH * k, outMode, c.srv.Get(), true, 1.0f);
     return true;
 }
 

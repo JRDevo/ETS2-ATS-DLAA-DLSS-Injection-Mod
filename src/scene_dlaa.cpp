@@ -1196,6 +1196,7 @@ float SceneDlaa::s_sharpness = 0.4f;     // dlaa.ini sharpness (default 0.4; 0 =
 float SceneDlaa::s_sharpRadius = 1.5f;   // v0.5.8 dlaa.ini sharp_radius (default 1.5; clamp 1..4)
 int   SceneDlaa::s_biasPct = 100;         // phase 49 dlaa.ini dlss_bias_mask (default 100 %; 0 = off)
 int   SceneDlaa::s_area = 100;           // v0.6.4 dlaa.ini dlaa_area (default 100 = whole image; clamp kAreaMin (10)..100)
+uint32_t SceneDlaa::s_rectMoves = 0;     // phase 91: every unit's rect moves (RectMoves)
 int   SceneDlaa::s_feather = 96;         // v0.6.4 dlaa.ini dlaa_area_feather (default 96 px; clamp 0..512)
 bool  SceneDlaa::s_hdrLinear = true;     // v0.8.0 dlaa.ini dlss_hdr (default 1 = IsHDR for HDR units)
 int   SceneDlaa::s_oaaMode = 2;          // phase 81 dlaa.ini outside_aa (default 2 = unjitter + edge AA; 0 = off)
@@ -1807,6 +1808,7 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
         m_rx = rx; m_ry = ry;
         m_resetPending = true;
         m_park.resetPending = true;                    // v0.10.0 phase 7: the parked set's history is for the old window too
+        if (!m_menuUnit) ++s_rectMoves;                // phase 91: the Mix scissor draws full for a frame (inject.cpp TaaScissorBox)
     }
     if (m_resetPending) { reset = true; m_resetPending = false; }
 

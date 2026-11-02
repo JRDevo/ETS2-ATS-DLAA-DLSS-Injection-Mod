@@ -112,9 +112,12 @@ bool  DrawWidget(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t
                  float scale, float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2);
 void  ReleaseWidget();                               // drops the fps box texture (the box switched off)
 // phase 89e: the bug report status box (kStatusRefW x kWidgetRefH reference px, the fps box's look, white): same arguments as DrawWidget
+// phase 91: + `slot` = the caller's own texture cache (kStatusEyes: the VR eye pictures, render thread; kStatusFlat: flat / the VR
+// desktop mirror at Present) -- the two build at different scales, one shared cache rebuilt on every call.
 constexpr float kStatusRefW = 300.0f;
+constexpr int   kStatusEyes = 0, kStatusFlat = 1, kStatusSlots = 2;
 bool  DrawStatus(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
-                 float scale, float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2);
+                 float scale, float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2, int slot);
 // phase 44: the fps box as a turned quad (fps_vr_yaw / fps_vr_pitch / fps_vr_roll, the drawn-in VR fallback): `clip` = its 4
 // corners in clip space as DrawCorners (top-left, top-right, bottom-left, bottom-right; w > 0). Texture / states as DrawWidget.
 bool  DrawWidgetCorners(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, const float clip[4][4],

@@ -2758,3 +2758,45 @@ injector survives game updates that break index-based hooks.
   the game's Anti-aliasing to TAA by hand). When Mix / split is chosen, the game's TAA is not running and the console is off, the
   help line (Mode row in Mix, Split with game TAA row) says to set Anti-aliasing to TAA in the game's graphics settings, or to turn on
   the console (`g_developer` / `g_console` 1 in config.cfg) so the mod switches it.
+
+### Phase 91: performance pass (status box, menu at Present, Mix tonemap scissor)
+
+- **Status box cache per caller** (`TuningMenu::DrawStatus`, `slot` = `kStatusEyes` / `kStatusFlat`): one cache served the VR eyes
+  (build scale W / 1920 x 1.1) and the desktop mirror (H / 1080 x 1.25 x 2), so with both drawing every call rebuilt it (GDI
+  `RenderWidget` + texture create + upload): 1.58 ms/frame measured while the capture ran (`Cap::g_state == 3`, 6 s). Each slot
+  owns its texture and pixels; `RenderWidget` paints into a caller's buffer with explicit colours and the status box passes its
+  opacity to the draw, so the eyes (render thread) and the mirror (Present) no longer swap the fps box's `g_wPixels` /
+  `g_wText` / `g_wLine` / `g_wOpacity` under each other.
+- **Menu panel built once per Present** in VR: `MenuDrawAtPresent` reuses the panel `MenuOvPanelUpdate` built in the same
+  Present on the same thread (`t_presentPanel`, cleared before `MenuOverlaySet` every Present) -- was two `MenuBuildPanel`.
+- **Mix (`kActLdr`) re-issued tonemap scissored**: `TaaReissueTonemap` drew the game's tonemap over the whole eye picture, but
+  only the DLAA rect of that texture is read (Run copies the rect, `SetCompositeOut` = no outside AA / no copy-back, the
+  composite / split / `CompositeInto` draw the unit's rect-sized output). Now it draws inside one box = the union of the rects
+  the blits will use (`SceneDlaa::CropRect`, every known optical centre + the image centre) + 64 px, via a ScissorEnable twin of
+  the game's rasterizer state (phase 78's `LightFsScissorRs`); the game's state and scissor rects are restored. The kept raw
+  scene (`TaaKeepRawOnBind`, a whole-resource copy of 134 MB in the VR test) copies only that box when the pass gets it. Full
+  draw / copy as before at dlaa_area 100, during a capture / self-test / rewind write-out, with the MV debug view, and for one
+  frame after any unit's rect moved (`SceneDlaa::RectMoves`). The blit checks that its rect lies inside the pass's box
+  (`TaaScissorCovers`); if not, that pass shows the game's TAA (log "phase 91 ... not inside"). Stats in the game TAA LogDbg block.
+  **91b**: ATS draws its tonemap with its own scissor on (rect = the whole target), and a review fix had made that case a full draw,
+  so the first VR test logged "re-issues scissored 0". Now the game's rect 0 is intersected with the box (its own state, no twin);
+  no rect / an empty intersection = the full draw.
+- **CPU profiler rows** splitting "frame-work": `fw-overlay` (MenuOverlaySet), `fw-menudraw` (MenuDrawAtPresent), `fw-boundary`
+  (back buffer refresh + OnPresentBoundary), `fw-ticks` (VrUiTick .. FpsProfileTick, incl. MenuKeys / FpsTick), `fw-late`
+  (MenuLateAtPresent).
+- **Not done**: caching the back buffer RTV in `MenuPresentTarget` -- a view kept across Presents holds a reference on the back
+  buffer, and the mod has no `ResizeBuffers` hook (the game's resize would fail) nor sees the game release its swapchain (a kept
+  reference keeps it alive; a new flip-model swapchain on the same window then fails). One view per Present stays.
+
+### Phase 92: bug report capture fixes (VR test 2026-11-02)
+
+- **Full capture stalled and stopped early**: the writers are HELD while the sets run (phase 89e), and since phase 89f every
+  picture is the whole one (3448x4872 RGBA8 = 67 MB in VR). In DLAA mode the 1 GB queue cap (`Cap::kQueueCap`) filled in set 3
+  of 6; `WriterBehind` then waited for writers that could not run, 600 frames (~9 s, with the `partsoff` setting live), and
+  `CaptureEnd("STOPPED EARLY")` lost the last 3 sets. Now `WriterBehind` ends the hold (`Rewind::SetHold(false)`, LogDbg "the
+  writers start now, during the sets"). VR re-test: both Full captures 2.0 s, 6 of 6 sets (some frames inside a set skipped).
+- **Mix capture saved only the DLAA square before the mix** (`on_N` 1728x2440 = the unit's `ResultTex`). After a 90c
+  `CompositeInto(ctx, tex)` the capture now saves `tex`: the whole eye picture with the mix in it. Rewind frames in Mix are still
+  the square (not changed).
+- **False "game's own TAA is ON while game_taa = 0" warning** right after leaving Mix: the game draws its TAA ~1 s more until the
+  typed `uset r_aa "0"` lands. `TaaOnResolve` skips the warning while `RaaSwitching()` (as the menu's "switching...").

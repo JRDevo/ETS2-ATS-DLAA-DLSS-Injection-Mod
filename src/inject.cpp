@@ -1884,6 +1884,7 @@ void MenuLateArm(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv,
 void MenuLateAtPresent(uint64_t n);
 void MenuLateOnXrRelease(void* swapchain, void* tex);   // v0.10.3 phase 27: XrHook callback, right before xrReleaseSwapchainImage
 void MenuOverlaySet();                  // v0.10.3 phase 29: the VR quad layers' parameters for XrHook, per Present
+void MenuPresentPanelReset();            // phase 91: forget the panel MenuOverlaySet built (before it runs, every Present)
 void FpsTick();                        // v0.10.0 fps meter (the fps box + the menu's fps figure), per Present while either is on
 void CheckPresetFallback(uint64_t n);    // v0.5.7: beep + log when a live preset fell back to default
 void OnLiveTuningChange();               // v0.5.7; v0.6.2 also DLAA toggle / passive / MV (restarts the GPU spans window)
@@ -1986,6 +1987,8 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
 #endif
     {                                           // v0.7.7 re-bindable hotkeys (dlaa.ini key_*, see PollKeys)
         PollKeys();                              // down-edges for this Present (exact modifiers, foreground only)
+        {                                        // phase 91 CPU profiler row "fw-ticks": VrUiTick .. FpsProfileTick (frame-work split up)
+        CpuProf::Block cpTicks(CpuProf::kBFwTicks);
 #ifdef WITH_DLAA
         VrUiTick();                              // phase 83: the In-game UI (VR) rows' console commands (debounced, typed)
 #endif
@@ -2003,6 +2006,7 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
         MenuKeys(n);                             // v0.10.0 tuning menu (Delete, arrows) -- before the other user keys
         FpsProfileTick();                        // phase 51: per-vehicle fps box profiles (lock-on / edits / save at menu close)
 #endif
+        }                                        // (phase 91: end of "fw-ticks")
 
         // ---- user keys -------------------------------------------------------------------------------
         if (KeyHit(KA_DLAA_TOGGLE)) {            // DLAA on/off (old plain-End behaviour + beeps)
@@ -2089,7 +2093,11 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
                 Log("jitter sign now X=%+d Y=%+d (%s)", g_signX, g_signY, KeyName(KA_JITTER_SIGN));
             }
         }
-        if (g_menuLateN) MenuLateAtPresent(n);   // v0.10.0 phase 16 VR late panel: finished eye pictures end here
+        if (g_menuLateN) {                       // v0.10.0 phase 16 VR late panel: finished eye pictures end here
+            CpuProf::Block cpLate(CpuProf::kBFwLate);   // phase 91 CPU profiler row "fw-late"
+            MenuLateAtPresent(n);
+        }
+        MenuPresentPanelReset();                 // phase 91: MenuDrawAtPresent reuses only THIS Present's build
         MenuOverlaySet();                        // v0.10.3 phase 29: the VR quad layers (XrHook; VR launches only)
         SceneDlaa::SetJitterSign(g_signX, g_signY);   // phase 81: outside AA undoes the SHIFT (NGX jitter = sign x shift); every
                                                       // writer (dlaa.ini, the sign key, the F9 self-test) runs between Presents
@@ -2104,6 +2112,7 @@ void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx,
     // v0.5: VR -- eye targets via the same device-context hooks.
     // v0.6: ImGui overlay (HOME / Ctrl+P) for live tuning + preset menu.
     // ----------------------------------------------------------------------
+    CpuProf::Block cpBound(CpuProf::kBFwBoundary);                       // phase 91 CPU profiler row "fw-boundary"
     if (sc) RefreshBackbufferFromSwapchain(sc, n);                       // normal: the presenting swapchain IS the game's
     else if (bctx) LayerBackbufferAtBoundary(bctx, n, fromRule);         // v0.8.1 present layer: the game side
     OnPresentBoundary(n);
@@ -2512,6 +2521,13 @@ struct PassSlot {
     int        taaStageSwitched = 0;
     bool       taaStageForced = false;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> taaRaw, taaLdr;
+    // phase 91: the Mix re-issue's scissor box (TaaScissorBox) in a taaScW x taaScH picture; taaScOn = this pass has one (its raw copy
+    // and every re-issue of the pass use it, the blit checks its rect lies inside); taaRawPart = the kept raw copy that holds only the
+    // box (identity only; valid while taaRaw is it)
+    bool       taaScOn = false;
+    D3D11_RECT taaScBox{};
+    uint32_t   taaScW = 0, taaScH = 0;
+    ID3D11Texture2D* taaRawPart = nullptr;
 #endif
     // ---- v0.6.1 flight recorder: plain counters on the NEWEST slot, reset in StartPass, logged at the blit
     // only for a bad record (PASS ANOMALY) or as a periodic reference (pass sample). Record counts = cand.
@@ -7931,6 +7947,7 @@ void StartPass(ID3D11DeviceContext* ctx, bool allowSnapshot) {
     n.taaHold = g_taaHoldPass; n.taaSeen = false; n.taaJitOk = false; n.taaPreHdr = false; n.taaAct = -1;   // phase 82 (-1 = undecided)
     n.taaStageSwitched = 0; n.taaStageForced = false;
     n.taaRaw.Reset(); n.taaLdr.Reset();
+    n.taaScOn = false; n.taaScBox = D3D11_RECT{}; n.taaScW = n.taaScH = 0; n.taaRawPart = nullptr;   // phase 91
     PassViewSetup(n);                                     // v0.10.0 phase 9: area clip + forward-depth resolution of this pass
     ObjOnPassStart(ctx, s);                               // v0.9.0: the previous record flushed, this pass's record empty
     DidOnPassStart(ctx, s);                               // v0.10.0: the previous pass replayed if it still waits, new record
@@ -12493,6 +12510,14 @@ void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
         ++Cap::g_frameDone;
         if (Cap::g_settle > 0) { --Cap::g_settle; return; }
         if (Cap::WriterBehind()) {                     // review fix: > kQueueCap of pixels waiting -- wait (a gap in the set)
+            // phase 92: the hold must end here -- while held nothing drains, so this waited the 600 frames and stopped (2026-11-02
+            // VR test: whole 3448x4872 eye pictures since phase 89f = 67 MB each, the cap full in set 3 of 6; 9 s with the
+            // 'partsoff' setting live, the last 3 sets never saved). The writers now encode during the sets
+            if (Rewind::g_hold.load()) {
+                Rewind::SetHold(false);
+                LogDbg("capture: %.0f MB of pixels waiting (cap %llu MB) -- the writers start now, during the sets",
+                       (double)Cap::g_queuedBytes.load() / 1048576.0, (unsigned long long)(Cap::kQueueCap >> 20));
+            }
             if (Cap::g_skipped++ % 30 == 0) {
                 Cap::InfoLine("(the writer is behind: %d frame(s) not saved so far -- the frames of this set are not all consecutive)",
                               Cap::g_skipped);
@@ -13909,6 +13934,66 @@ ID3D11ShaderResourceView* TaaRawSrvFor(ID3D11Device* dev, ID3D11Texture2D* raw) 
 Microsoft::WRL::ComPtr<ID3D11Texture2D> g_taaRawKeep[2];
 int      g_taaRawKeepNext = 0;
 uint64_t g_taaRawKept = 0;
+// ---- phase 91 (perf): the Mix re-issue (kActLdr) SCISSORED to the DLAA rects ---------------------------------------------------
+// TaaReissueTonemap redrew the game's tonemap over the WHOLE picture per eye, and TaaKeepRawOnBind copied the whole raw scene (an
+// RGBA16F eye picture: 134 MB in the VR test) -- but only the DLAA rect of the re-issued texture is read afterwards: Run copies the
+// rect into its crop (colorIn; NGX, the MVs and RCAS work on the crop), SetCompositeOut keeps outside AA off and writes nothing back,
+// the composite / split / CompositeInto draw the unit's rect-sized output, the probe reads the rect centre. So both are limited to
+// ONE box: the union of the rects the blit will use (SceneDlaa::CropRect with this picture's size, the DLAA area and an optical
+// centre: every known g_optC, + the image centre a blit uses while its eye's is not known / for a backbuffer target) + kTaaScMargin
+// px, clamped. Full draw / whole copy as before when: dlaa_area 100, a capture / self-test / rewind write-out runs, the MV debug
+// view is on, or for one frame after any unit's rect moved (SceneDlaa::RectMoves). A pass keeps the box it got (PassSlot taaScBox):
+// its raw copy and its re-issues use the same one, and the blit checks that its rect lies inside (TaaScissorCovers) -- a rect
+// outside (an optical centre re-adopted between the tonemap and the blit) shows the game's TAA for that pass, never stale pixels.
+// The scissor = a twin of the game's rasterizer state with ScissorEnable (LightFsScissorRs, phase 78's cache: one per game state,
+// dropped at a context change); a game state that scissors already is intersected. Both restored after the draw.
+constexpr LONG kTaaScMargin = 64;
+uint32_t g_taaScMovesSeen = 0;
+uint64_t g_taaScMoveFrame = 0;
+bool     g_taaScMoveKnown = false;
+uint64_t g_taaScUsed = 0, g_taaScFull = 0, g_taaScMiss = 0, g_taaScRawPart = 0;
+bool     g_taaScLogged = false;
+uint32_t g_taaScLastW = 0, g_taaScLastH = 0;             // the last re-issued target's size (a raw copy's box is only taken for it)
+// the rect a blit's unit uses in a W x H picture (as HandlePossibleBlit: SetOpticalCentre, then Run's Geometry)
+void TaaUnitRect(uint32_t W, uint32_t H, bool centre, int eye, uint32_t* x, uint32_t* y, uint32_t* w, uint32_t* h) {
+    const bool c = !centre && eye >= 0 && eye < kMaxEyes && g_optC[eye].have;
+    SceneDlaa::CropRect(W, H, SceneDlaa::Area(), c ? g_optC[eye].u : 0.5f, c ? g_optC[eye].v : 0.5f, x, y, w, h);
+}
+// The box for a W x H re-issue (true), or none = the full draw (false).
+bool TaaScissorBox(uint32_t W, uint32_t H, D3D11_RECT* box) {
+    const uint64_t now = g_frames.load(std::memory_order_relaxed);
+    const uint32_t moves = SceneDlaa::RectMoves();
+    if (moves != g_taaScMovesSeen) { g_taaScMovesSeen = moves; g_taaScMoveFrame = now; g_taaScMoveKnown = true; }
+    const int cs = Cap::g_state.load(std::memory_order_relaxed);
+    if (SceneDlaa::Area() >= 100 || !W || !H || g_testRunning || g_selfTestRequest.load(std::memory_order_relaxed) || cs == 1 ||
+        cs == 2 || Rewind::Draining() || g_mvDebug.load(std::memory_order_relaxed) ||
+        (g_taaScMoveKnown && now - g_taaScMoveFrame <= 1)) { ++g_taaScFull; return false; }
+    LONG l = (LONG)W, t = (LONG)H, r = 0, b = 0;
+    for (int e = -1; e < kMaxEyes; ++e) {                // -1 = the image centre
+        if (e >= 0 && !g_optC[e].have) continue;
+        uint32_t x = 0, y = 0, w = 0, h = 0;
+        TaaUnitRect(W, H, e < 0, e, &x, &y, &w, &h);
+        l = (std::min)(l, (LONG)x); t = (std::min)(t, (LONG)y);
+        r = (std::max)(r, (LONG)(x + w)); b = (std::max)(b, (LONG)(y + h));
+    }
+    l = (std::max)(0L, l - kTaaScMargin); t = (std::max)(0L, t - kTaaScMargin);
+    r = (std::min)((LONG)W, r + kTaaScMargin); b = (std::min)((LONG)H, b + kTaaScMargin);
+    if (l >= r || t >= b || (l == 0 && t == 0 && r == (LONG)W && b == (LONG)H)) { ++g_taaScFull; return false; }   // (no gain)
+    *box = D3D11_RECT{ l, t, r, b };
+    return true;
+}
+// The blit (a scissored Mix pass): does its unit's rect lie inside the pass's box?
+bool TaaScissorCovers(const PassSlot& slot, int eye, bool isBackbuffer) {
+    if (!slot.taaScOn) return true;
+    if (!slot.taaLdr) return false;
+    D3D11_TEXTURE2D_DESC d{};
+    slot.taaLdr->GetDesc(&d);
+    if (d.Width != slot.taaScW || d.Height != slot.taaScH) return false;
+    uint32_t x = 0, y = 0, w = 0, h = 0;
+    TaaUnitRect(d.Width, d.Height, isBackbuffer, eye, &x, &y, &w, &h);
+    const D3D11_RECT& bx = slot.taaScBox;
+    return (LONG)x >= bx.left && (LONG)y >= bx.top && (LONG)(x + w) <= bx.right && (LONG)(y + h) <= bx.bottom;
+}
 void TaaKeepRawOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* const* rtvs) {
     if (g_passSeq <= g_fifoHead) return;
     for (uint64_t q = g_fifoHead; q < g_passSeq; ++q) {
@@ -13941,14 +14026,28 @@ void TaaKeepRawOnBind(ID3D11DeviceContext* ctx, UINT n, ID3D11RenderTargetView* 
             td.BindFlags = D3D11_BIND_SHADER_RESOURCE; td.CPUAccessFlags = 0; td.MiscFlags = 0;
             if (!dev || FAILED(dev->CreateTexture2D(&td, nullptr, &g_taaRawKeep[i]))) { g_taaRawKeep[i].Reset(); continue; }
         }
+        // phase 91: only the pass's scissor box when its re-issue will be scissored to it (the same box: given to the pass here when
+        // it has none yet). Not for a pass the stage logic hands to the HDR unit (kActHdr reads the raw scene itself), nor before a
+        // re-issue of this picture size was seen (the box is in the re-issued target's pixels).
+        D3D11_RECT box{};
+        const bool part = !s.taaPreHdr && d.Width == g_taaScLastW && d.Height == g_taaScLastH &&
+                          (s.taaScOn ? (s.taaScW == d.Width && s.taaScH == d.Height) : TaaScissorBox(d.Width, d.Height, &box));
+        if (part && !s.taaScOn) { s.taaScOn = true; s.taaScBox = box; s.taaScW = d.Width; s.taaScH = d.Height; }
         t_inDlaa = true;
-        ctx->CopyResource(g_taaRawKeep[i].Get(), s.taaRaw.Get());
+        if (part) {
+            const D3D11_BOX bx{ (UINT)s.taaScBox.left, (UINT)s.taaScBox.top, 0, (UINT)s.taaScBox.right, (UINT)s.taaScBox.bottom, 1 };
+            ctx->CopySubresourceRegion(g_taaRawKeep[i].Get(), 0, bx.left, bx.top, 0, s.taaRaw.Get(), 0, &bx);
+            ++g_taaScRawPart;
+        } else {
+            ctx->CopyResource(g_taaRawKeep[i].Get(), s.taaRaw.Get());
+        }
         t_inDlaa = false;
         if (g_taaRawKept++ < 4)
             Log("game TAA (phase 82): the game binds pass s=%llu's raw scene %p as a render target before its tonemap -- the raw is kept "
                 "(copy #%llu into kept texture %d, %ux%u fmt=%d; VR test 3: eye 0's re-issued tonemap was dark from this)",
                 (unsigned long long)s.s, (void*)s.taaRaw.Get(), (unsigned long long)g_taaRawKept, i, d.Width, d.Height, (int)d.Format);
         s.taaRaw = g_taaRawKeep[i];
+        s.taaRawPart = part ? g_taaRawKeep[i].Get() : nullptr;   // phase 91
     }
 }
 // phase 82 (audit item 1): the game draws into its tonemap target AFTER the tonemap and before the blit (frame15407: 2 x DrawIndexed,
@@ -14177,6 +14276,7 @@ void TaaOnCompress(ID3D11DeviceContext* ctx) {
 }
 
 // the resolve draw (PS 524): shape check, liveness, the pass's game jitter
+bool RaaSwitching();                                     // (phase 86 r_aa state, below)
 void TaaOnResolve(ID3D11DeviceContext* ctx) {
     ID3D11RenderTargetView* rtv[2] = {};
     ctx->OMGetRenderTargets(2, rtv, nullptr);
@@ -14196,7 +14296,9 @@ void TaaOnResolve(ID3D11DeviceContext* ctx) {
     g_taaLastSeen = now ? now : 1;
     ++g_taaResolves;
     if (g_gameTaa == GameTaa::kOff) {
-        if (!g_taaWarned0) {
+        // phase 92: not while the mod itself switches the game's AA off (Mix -> DLAA / DLSS: the game draws its TAA ~1 s more
+        // until the typed `uset r_aa "0"` lands -- the 2026-11-02 log warned then, a false alarm, and never again)
+        if (!g_taaWarned0 && !RaaSwitching()) {
             g_taaWarned0 = true;
             LogWarn("game TAA (phase 82): the game's own TAA is ON (its resolve pass draws, Present #%llu) while game_taa = 0 -- the mod's "
                 "DLAA / DLSS now runs on an already TAA'd picture and both jitter (blur, shimmer). Set the game's Anti-aliasing to "
@@ -14309,6 +14411,25 @@ bool TaaReissueTonemap(ID3D11DeviceContext* ctx, PassSlot& slot, const D3D11_TEX
                 (int)rtDesc.Format, (int)rvd.Format, verts, partial ? " -- PARTIAL: only this part of the target is drawn" : "");
         }
     }
+    // phase 91: the scissor box of this pass (TaaScissorBox; the one its raw copy was made with, else a new one at its first re-issue)
+    const bool rawPart = slot.taaRawPart && slot.taaRaw.Get() == slot.taaRawPart;
+    bool scissor = false;
+    if (slot.taaScOn && slot.taaScW == rtDesc.Width && slot.taaScH == rtDesc.Height) {
+        scissor = true;
+    } else if (rawPart) {                                // (TaaKeepRawOnBind takes the box only for the last re-issue's size)
+        static int s_logs = 0;
+        if (s_logs++ < 3)
+            LogWarn("game TAA (phase 91): pass s=%llu kept only the scissor box of its raw scene (%ux%u) but its tonemap target is %ux%u -- "
+                "not re-issued (the game's TAA for this pass)", (unsigned long long)slot.s, slot.taaScW, slot.taaScH, rtDesc.Width,
+                rtDesc.Height);
+        return false;
+    } else if (!again && TaaScissorBox(rtDesc.Width, rtDesc.Height, &slot.taaScBox)) {
+        slot.taaScOn = true; slot.taaScW = rtDesc.Width; slot.taaScH = rtDesc.Height;
+        scissor = true;
+    } else if (!again) {
+        slot.taaScOn = false;                            // (a full draw: nothing for the blit to check)
+    }
+    g_taaScLastW = rtDesc.Width; g_taaScLastH = rtDesc.Height;
     D3D11_TEXTURE2D_DESC cur{};
     if (g_taaLdrTex[i]) g_taaLdrTex[i]->GetDesc(&cur);
     if (!g_taaLdrTex[i] || cur.Width != rtDesc.Width || cur.Height != rtDesc.Height || cur.Format != rtDesc.Format) {
@@ -14349,12 +14470,62 @@ bool TaaReissueTonemap(ID3D11DeviceContext* ctx, PassSlot& slot, const D3D11_TEX
     ctx->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, rts, &dsv);
     ID3D11RenderTargetView*   ours = g_taaLdrRtv[i].Get();
     t_inDlaa = true;                                     // (the mod's own binds: never the game-bind path of the hooks)
+    // phase 91: the scissor (the game's rasterizer state + scissor rects saved; its own scissor, when on, is intersected)
+    ID3D11RasterizerState* rs0 = nullptr;
+    ID3D11RasterizerState* twin = nullptr;
+    D3D11_RECT sc0[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
+    UINT ns0 = 0;
+    if (scissor) {
+        ctx->RSGetState(&rs0);                           // (+1 ref)
+        D3D11_RASTERIZER_DESC rd{};
+        if (rs0) rs0->GetDesc(&rd);
+        const bool gameSc = rs0 && rd.ScissorEnable;
+        ctx->RSGetScissorRects(&ns0, nullptr);           // count first, then the rects
+        if (ns0 > D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE) ns0 = D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
+        if (ns0) ctx->RSGetScissorRects(&ns0, sc0);
+        D3D11_RECT e = slot.taaScBox;
+        if (gameSc) {                                    // the game's own scissor is on (ATS: always, as the whole target): its
+            // state already scissors, so no twin -- its rect 0 (one viewport) n the box. Pixels outside the game's rect are drawn by
+            // neither (as before phase 91), so the blit's box check stays right. No rect / an empty one: the draw as the game made
+            // it (full; the end of this function keeps taaScOn only for a partial raw copy)
+            if (ns0) {
+                e.left  = (std::max)(e.left, sc0[0].left);   e.top    = (std::max)(e.top, sc0[0].top);
+                e.right = (std::min)(e.right, sc0[0].right); e.bottom = (std::min)(e.bottom, sc0[0].bottom);
+            }
+            if (!ns0 || e.left >= e.right || e.top >= e.bottom) scissor = false;
+        } else {
+            twin = LightFsScissorRs(ctx, rs0);
+            if (!twin) scissor = false;                  // (no twin: the full draw, as before)
+        }
+        if (scissor) {
+            if (twin) ctx->RSSetState(twin);
+            ctx->RSSetScissorRects(1, &e);
+        }
+    }
     ctx->OMSetRenderTargets(1, &ours, dsv);
     ctx->PSSetShaderResources(0, 1, &raw);
     oDraw(ctx, verts, g_blitStartVertex);
     ctx->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, rts, dsv);
     ctx->PSSetShaderResources(0, 1, &s0);
+    if (scissor) {
+        ctx->RSSetScissorRects(ns0, ns0 ? sc0 : nullptr);
+        if (twin) ctx->RSSetState(rs0);
+    }
+    if (rs0) rs0->Release();
     t_inDlaa = false;
+    if (scissor) {
+        ++g_taaScUsed;
+        if (!g_taaScLogged) {
+            g_taaScLogged = true;
+            const D3D11_RECT& b = slot.taaScBox;
+            Log("game TAA (phase 91): the re-issued tonemap is scissored to the DLAA rects -- box (%ld,%ld)-(%ld,%ld) of %ux%u = %.0f %% "
+                "of the picture (area %d %%, margin %ld px)%s", (long)b.left, (long)b.top, (long)b.right, (long)b.bottom, rtDesc.Width,
+                rtDesc.Height, 100.0 * (double)(b.right - b.left) * (double)(b.bottom - b.top) / ((double)rtDesc.Width * rtDesc.Height),
+                SceneDlaa::Area(), (long)kTaaScMargin, rawPart ? "; its kept raw scene was copied for the box only" : "");
+        }
+    } else if (slot.taaScOn && !again) {
+        slot.taaScOn = rawPart;                          // (a full draw after all: the blit has nothing to check -- unless the raw is partial)
+    }
     if (s0) s0->Release();
     for (auto*& r : rts) if (r) { r->Release(); r = nullptr; }
     if (dsv) dsv->Release();
@@ -14451,6 +14622,10 @@ void TaaOnTonemap(ID3D11DeviceContext* ctx, ID3D11Texture2D* src, void* rtPtr, c
     const char* why = nullptr;
     int whyCode = GameTaa::kWhyNone;
     int act = GameTaa::Decide(in, &why, &whyCode);
+    if (act == GameTaa::kActHdr && slot.taaRawPart && slot.taaRaw.Get() == slot.taaRawPart) {   // phase 91 (never expected: the raw
+        act = GameTaa::kActTaaOnly; why = "the kept raw scene holds only the scissor box";        // copy takes the box only for !taaPreHdr)
+        whyCode = GameTaa::kWhyRunFailed;
+    }
     if (act != GameTaa::kActNone && act != GameTaa::kActTaaOnly &&
         (!g_dlaaOn.load(std::memory_order_relaxed) || g_passive.load(std::memory_order_relaxed) ||
          g_jitterOnly.load(std::memory_order_relaxed) || !SceneDlaa::ShadersReady())) {
@@ -14506,6 +14681,9 @@ void TaaStats(uint64_t now) {
         (unsigned long long)g_taaActN[GameTaa::kActNone], (unsigned long long)g_taaRawFromCompress,
         (unsigned long long)g_taaLdrBlits, (unsigned long long)g_taaOnlyBlits, (unsigned long long)g_taaCbCopies[1],
         (unsigned long long)g_taaCbCopies[2], (unsigned long long)g_taaCbCopies[3]);
+    LogDbg("game TAA (phase 91) scissor: re-issues scissored %llu, full %llu (area 100 / capture / MV debug / a rect moved / no gain), "
+        "blits outside the box %llu, raw copies of the box only %llu", (unsigned long long)g_taaScUsed, (unsigned long long)g_taaScFull,
+        (unsigned long long)g_taaScMiss, (unsigned long long)g_taaScRawPart);
     LogDbg("game TAA (phase 82) fallbacks by reason: no resolve %llu, no jitter %llu, no raw scene %llu, HDR run / blend failed %llu, "
         "HDR output %llu, DLAA off %llu, no tonemap %llu | re-issued passes whose Run / composite did not happen %llu | window misses "
         "%llu (copy %u KB in %d cluster(s), %llu buffers watched) | jitter reused on a miss: other eye %llu, last %llu (VR pairs same %llu, "
@@ -15227,6 +15405,15 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     // v0.10.0 phase 4: a slot whose pre-tonemap run was tried was classified there (phase 7: its verdict is reused)
     const bool candBad = slot.pre ? slot.candBad : ClassifyRecord(eye, slot, dl.Mv().InvalidateCount(), cpuT.t0, eyeIvMs);
     bool taaModRan = false;                               // phase 82: the mod's mix / split ran on this pass (the split overlay's label)
+    // phase 91: a scissored Mix pass whose unit rect is not inside its box (an optical centre re-adopted between its tonemap and this
+    // blit): the game's TAA for this pass (the fallback branch below), never a picture with stale pixels at the rect's edge
+    if (slot.taaHold && slot.taaAct == GameTaa::kActLdr && slot.taaLdr && slot.taaScOn && !TaaScissorCovers(slot, eye, isBackbuffer)) {
+        slot.taaAct = GameTaa::kActTaaOnly;
+        if (g_taaScMiss++ < 8)
+            Log("game TAA (phase 91): eye %d pass s=%llu -- its DLAA rect is not inside the re-issue's scissor box (%ld,%ld)-(%ld,%ld): the "
+                "game's TAA for this pass", eye, (unsigned long long)slot.s, (long)slot.taaScBox.left, (long)slot.taaScBox.top,
+                (long)slot.taaScBox.right, (long)slot.taaScBox.bottom);
+    }
     // We run between the game's blit state setup and its Draw. Do NOT use
     // SwapDeviceContextState here: NGX evaluates fine once, then fails with
     // PlatformError and the device is removed (tested 2026-10-03). NGX and our
@@ -15238,6 +15425,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     const float stVx = slot.jx, stVy = slot.jy;
     const float stNx = (float)g_signX * slot.jx, stNy = (float)g_signY * slot.jy;
     ID3D11Texture2D* stTex = tex;          // v0.7.0: what the self-test dumps (upscale + evaluated: the DLSS output)
+    bool taaInto = false;                  // phase 92: the Mix went into tex (90c) -- the capture saves tex = the picture as seen
     if (passive) {
         // v0.6.2 passive mode: no DLAA, no commit (nothing was collected); history reset on leaving (TogglePassive).
     } else if (g_dlaaOn.load() && g_jitterOnly.load()) {
@@ -15364,6 +15552,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
                 }
                 t_inDlaa = true;
                 if (!dl.CompositeInto(ctx, tex)) taaModRan = false;
+                else taaInto = true;
                 t_inDlaa = false;
             }
             if (!taaModRan) { ++g_taaLdrRunFails; ++g_taaWhyN[GameTaa::kWhyRunFailed]; g_taaLastWhy = GameTaa::kWhyRunFailed; }
@@ -15407,7 +15596,9 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         // v0.7.0 upscale: the snapshot "out" and the self-test dump the DLSS output (output rect size), since the
         // blit source itself is no longer modified.
         ID3D11Texture2D* const outTex = (ok && (dl.Upscaling() || dl.CompositeOut()) && dl.ResultTex()) ? dl.ResultTex() : tex;
-        if (ok) stTex = outTex;
+        // phase 92: in Mix the unit's output is only the DLAA square before the mix (the 2026-11-02 captures: on_N 1728x2440, the
+        // square's edge -- what a Mix report is about -- not in it); after a 90c CompositeInto, tex holds the whole mixed picture
+        if (ok) stTex = taaInto ? tex : outTex;
         if (ok) {
             t_inDlaa = true;
             SnapshotStep(ctx, eye, outTex, SnapInfo{ g_blitCount, slot.phase, stVx, stVy, njx, njy, resetUsed, g_mvOn.load(), useSnap });
@@ -20660,6 +20851,8 @@ std::string g_raaCmd;                                // the r_aa command of the 
 int        g_raaResult = 0;                          // 0 none / in flight, 1 confirmed, 2 NOT confirmed
 // a row change (or Reset) asks for the game's AA of the current game_taa mode (typed once stable kStableMs, in flat and VR)
 void RaaRequest(uint64_t nowMs) { g_raaPending = true; g_raaAt = nowMs; }
+// the mod is switching the game's AA now (as the menu's "switching..."): asked, typed and not confirmed yet
+bool RaaSwitching() { return g_raaPending || (!g_raaCmd.empty() && g_raaResult == 0); }
 void VrUiRead(bool first) {
     std::wstring path;
     const std::string cfg = Lang::ReadGameConfig(&path);
@@ -23588,8 +23781,14 @@ bool MenuPresentTarget(IDXGISwapChain* sc, ID3D11DeviceContext* bctx, ID3D11Devi
 // flat sizes (a 12-13 px small font) some letter pairs got a visible 1-px gap ("lim it", "gam e"); at 2x the error is half a
 // screen pixel. The VR textures already build at a higher density (g_menuVrBuild / the quad's 3.2 x).
 constexpr float kFlatTextSuper = 2.0f;
+// phase 91: the panel MenuOvPanelUpdate built in THIS Present on this thread (null = none: MenuDrawAtPresent builds its own). Was
+// two MenuBuildPanel per Present while the menu is open in VR (the quad's, then the desktop mirror's). Cleared before
+// MenuOverlaySet at every Present (PresentFrameWork), so a build is never reused in a later Present.
+thread_local const TuningMenu::Panel* t_presentPanel = nullptr;
+void MenuPresentPanelReset() { t_presentPanel = nullptr; }
 void MenuDrawAtPresent(IDXGISwapChain* sc, ID3D11DeviceContext* bctx) {
     if (t_inDlaa) return;
+    CpuProf::Block cpb(CpuProf::kBFwMenuDraw);          // phase 91 CPU profiler row "fw-menudraw"
     ID3D11DeviceContext* ctx = nullptr;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv;
     D3D11_TEXTURE2D_DESC td{};
@@ -23598,8 +23797,12 @@ void MenuDrawAtPresent(IDXGISwapChain* sc, ID3D11DeviceContext* bctx) {
     const float W = (float)td.Width, H = (float)td.Height;
     t_inDlaa = true;
     if (g_menuOpen.load(std::memory_order_relaxed)) {
-        TuningMenu::Panel p;
-        MenuBuildPanel(p);
+        // phase 91: the panel MenuOverlaySet built a moment ago on this thread in this same Present (VR quad: MenuOvPanelUpdate) --
+        // nothing between the two changes the menu (only SceneDlaa::SetJitterSign runs in between), so it is not built twice
+        TuningMenu::Panel own;
+        const TuningMenu::Panel* pp = t_presentPanel;
+        if (!pp) { MenuBuildPanel(own); pp = &own; }
+        const TuningMenu::Panel& p = *pp;
         const float scale = H / 1080.0f * g_menuScale;
         // VR: the eyes' / quad's texture, scaled (v0.10.3 phase 29b: also while the panel IS a quad layer and MenuVr() is not
         // set yet -- the VR main menu -- else the two build scales alternate and the texture is rebuilt twice per frame)
@@ -23628,7 +23831,7 @@ void MenuDrawAtPresent(IDXGISwapChain* sc, ID3D11DeviceContext* bctx) {
         const float scale = H / 1080.0f * 1.25f;
         const float bw = TuningMenu::kStatusRefW * scale;
         TuningMenu::DrawStatus(ctx, rtv.Get(), td.Width, td.Height, 0.5f * (W - bw), 0.06f * H, scale, scale * kFlatTextSuper, outMode,
-                               g_capL1, g_capL2);
+                               g_capL1, g_capL2, TuningMenu::kStatusFlat);   // phase 91: its own cache (the eyes build at another scale)
     }
     t_inDlaa = false;
 }
@@ -24337,7 +24540,8 @@ void MenuDrawVrOn(ID3D11DeviceContext* ctx, int eye, ID3D11RenderTargetView* rtv
         const float s = W / 1920.0f * 1.1f;
         const float bw = TuningMenu::kStatusRefW * s, bh = TuningMenu::kWidgetRefH * s;
         const float cx = u * W + shift, cy = v * H - 0.14f * H;
-        TuningMenu::DrawStatus(ctx, rtv, td.Width, td.Height, cx - 0.5f * bw, cy - 0.5f * bh, s, s, outMode, g_capL1, g_capL2);
+        TuningMenu::DrawStatus(ctx, rtv, td.Width, td.Height, cx - 0.5f * bw, cy - 0.5f * bh, s, s, outMode, g_capL1, g_capL2,
+                               TuningMenu::kStatusEyes);         // phase 91: the eyes' own cache (the mirror's scale differs)
     };
     t_inDlaa = true;
     if (menuOpen) {
@@ -25301,6 +25505,7 @@ uint32_t MenuOvPanelUpdate(bool want) {
     }
     static TuningMenu::Panel s_build;                    // (30 KB: not on the stack; MenuOverlaySet's thread only)
     MenuBuildPanel(s_build);
+    t_presentPanel = &s_build;                           // phase 91: MenuDrawAtPresent (this Present, this thread) reuses it
     const float scale = g_menuVrScale;
     if (!g_ovPanelValid || scale != g_ovPanelScale || memcmp(&s_build, &g_ovPanel, sizeof(s_build)) != 0) {
         AcquireSRWLockExclusive(&g_ovPanelLock);
@@ -25383,6 +25588,7 @@ void MenuOvRtvPut(int k, const void* dev, const void* tex, int64_t fmt, ID3D11Re
 }
 void MenuOverlaySet() {
     if (g_launchVr != 1) return;                         // (XrHook is installed for VR launches only)
+    CpuProf::Block cpb(CpuProf::kBFwOverlay);           // phase 91 CPU profiler row "fw-overlay"
     XrHook::OverlayParams p;
     p.enabled   = g_menuVrLayer != 0;
     p.menuOpen  = g_menuOpen.load(std::memory_order_relaxed);

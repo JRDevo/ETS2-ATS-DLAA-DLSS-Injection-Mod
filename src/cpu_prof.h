@@ -74,6 +74,12 @@ enum Cat : uint8_t {
     kBProf,                // this profiler's own report
     kBVrs,                 // phase 34: VRS bracket enter / leave + the per-draw full-rate rule (vrs.cpp NVAPI calls included)
     kBHmask,               // phase 40: VR hidden area mask (the eye / mesh decision + the depth-only draw at the scene clear)
+    // phase 91: frame-work split up (each was part of "frame-work")
+    kBFwOverlay,           // MenuOverlaySet: the VR quad layers' parameters (+ the panel build for the quad, FpsCab latch)
+    kBFwMenuDraw,          // MenuDrawAtPresent: the panel / fps box / status box on the flat back buffer or the VR desktop mirror
+    kBFwBoundary,          // RefreshBackbufferFromSwapchain / LayerBackbufferAtBoundary + OnPresentBoundary
+    kBFwTicks,             // VrUiTick, TraceAtPresent, CaptureAtPresent, CheckPresetFallback, FpsTick, MenuKeys, FpsProfileTick
+    kBFwLate,              // MenuLateAtPresent (the VR late panel's finished eye pictures)
     kModEnd,
     // ---- outside the mod: the game's own call inside each hook ----
     kDrvFirst = kModEnd,
@@ -87,7 +93,8 @@ inline const char* Name(int c) {
         "Map", "Dispatch", "CopyRes", "CopySub", "Resolve", "ClearRtv", "ClearDsv", "Discard", "CreatePS", "xrWaitFrame",
         "xrBeginFrame", "xrEndFrame", "xrAcquire", "xrRelease", "xrLocateViews", "xrOther", "StateSet",
         "blit", "dlaa-run", "ngx-eval", "mv-gen", "did-rec", "did-replay", "fwd-depth", "mv-collect", "obj-ids", "snapshot",
-        "lod", "frame-end", "mirror", "menu", "preview", "frame-work", "keys", "gpu-timers", "log", "prof", "vrs", "hmask" };
+        "lod", "frame-end", "mirror", "menu", "preview", "frame-work", "keys", "gpu-timers", "log", "prof", "vrs", "hmask",
+        "fw-overlay", "fw-menudraw", "fw-boundary", "fw-ticks", "fw-late" };   // (phase 91)
     if (c < 0 || c >= kCount) return "?";
     return c < kModEnd ? kN[c] : kN[c - kDrvFirst];
 }

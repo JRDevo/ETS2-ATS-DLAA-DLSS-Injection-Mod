@@ -316,6 +316,9 @@ public:
     static constexpr int kAreaMin = 10;   // v0.10.0: 10 (was 20; 40 before phase 15)
     static void SetArea(int a) { s_area = a < kAreaMin ? kAreaMin : (a > 100 ? 100 : a); }
     static int  Area() { return s_area; }
+    // phase 91: how many times any unit's rect moved (Run's "rect moved" path; render thread). inject.cpp's Mix scissor (the
+    // re-issued tonemap drawn only inside the DLAA rects) draws full for one frame after a change.
+    static uint32_t RectMoves() { return s_rectMoves; }
     static void SetFeather(int f) { s_feather = f < 0 ? 0 : (f > 512 ? 512 : f); }
     static int  Feather() { return s_feather; }
     // phase 49 GLOW BIAS MASK strength, % 0..100 (dlaa.ini dlss_bias_mask, live from the menu; 0 = off: NGX gets no mask, the
@@ -485,6 +488,7 @@ private:
     static float                                      s_sharpness;
     static float                                      s_sharpRadius;  // v0.5.8: RCAS ring-tap radius in texels (1..4)
     static int                                        s_area;         // v0.6.4 dlaa_area (kAreaMin..100; phase 15: 20..100; now 10..100)
+    static uint32_t                                   s_rectMoves;    // phase 91: RectMoves()
     static int                                        s_feather;      // v0.6.4 dlaa_area_feather (0..512 px)
     static bool                                       s_hdrLinear;    // v0.8.0 dlaa.ini dlss_hdr (IsHDR for HDR units)
     static int                                        s_biasPct;      // phase 49 dlaa.ini dlss_bias_mask (0..100 %)
