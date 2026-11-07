@@ -3770,6 +3770,25 @@ int ViewForImage(void* tex, uint32_t slice, int32_t rect[4]) {
     ReleaseSRWLockShared(&s_poseLock);
     return view;
 }
+int UniqueViewOfImage(void* tex) {
+    if (!tex) return -1;
+    XrSwapchain sc = nullptr;
+    AcquireSRWLockShared(&s_scLock);
+    for (const ScEntry& e : s_sc) {
+        if (!e.sc) continue;
+        for (uint32_t k = 0; k < e.n && !sc; ++k) if (e.img[k] == tex) sc = e.sc;
+        if (sc) break;
+    }
+    ReleaseSRWLockShared(&s_scLock);
+    if (!sc) return -1;
+    int view = -1, n = 0;
+    AcquireSRWLockShared(&s_poseLock);
+    if (s_haveLayout)
+        for (int v = 0; v < 2; ++v)
+            if (s_layout[v].sc == sc) { view = v; ++n; }
+    ReleaseSRWLockShared(&s_poseLock);
+    return n == 1 ? view : -1;
+}
 bool SubmittedFov(float fov[2][4]) {
     AcquireSRWLockShared(&s_poseLock);
     const bool have = s_haveLayout;

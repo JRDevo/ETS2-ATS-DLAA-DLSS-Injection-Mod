@@ -2,6 +2,9 @@
 //           mix + split (82-86, 90: Mode row Mix (TAA + DLAA) / Mix (TAA + DLSS), console-off hint 90b, stretched-blit
 //           mix 90c), In-game UI (83-85), plain menu + hidden rows (87), fps graph (88), one-press bug report (89, zips
 //           by kind 89h), translations. Details per phase below and in docs/DEVELOPMENT.md.
+// v0.16.0-rc2 -- issue #28: VR eye map from the OpenXR view of each swapchain image (EyeOfXrView; drive + preview). A
+//           symmetric-fov headset (no projection verdict) with a changing blit eye order fed one DLSS eye both eyes' pictures:
+//           a ghost of near objects (the steering wheel) one IPD to the side.
 // phase 77 -- COVERAGE-PRESERVING ALPHA MIPS for cut-out BC3 textures (cutout_mips.h; dlaa.ini cutout_mips 0/1, default 0,
 //           startup only, no menu row / key). Far chain-link fences shimmered and vanished: SCS's alpha mips are a 2x2 box + 0.5
 //           threshold (1-2 texel wires gone after 2-3 mips; ATS fence coverage 17.5 % -> 6.2 % -> 0). The UpdateSubresource1
@@ -2814,7 +2817,10 @@ constexpr uint32_t kFlatFallbackBlits = 60;
 inline bool WorldJitterHeld() { return g_launchVr == 1 && !g_eyeBlitEver; }
 int              g_resetEyes     = 0;            // per-eye reset bitmask (fed from g_resetNext at the next blit)
 // ---- VR eye identity (v0.5.4): from the blit render target, not from pass order ------------------------
-struct EyeMapEntry { void* rt; int eye; int parity; int score; };   // score: v0.5.5 projection verdicts (+ = eye 0)
+struct EyeMapEntry { void* rt; int eye; int parity; int score; bool viewLocked; };   // score: v0.5.5 projection verdicts (+ = eye 0)
+                                                    // viewLocked: issue #28 -- the eye comes from the RT's OpenXR view
+uint64_t         g_cEyeViewFixes = 0;            // issue #28: eye map entries the OpenXR view corrected
+uint64_t         g_cEyeVerdictVsView = 0;        // issue #28: projection verdicts that disagreed with a view-locked entry
 constexpr int    kEyeMapCap      = 16;
 EyeMapEntry      g_eyeMap[kEyeMapCap];
 int              g_eyeMapN       = 0;
@@ -3719,6 +3725,12 @@ void ApplyEyeVerdict(void* rt, int verdictEye, float p) {
     for (int i = 0; i < g_eyeMapN; ++i) {
         EyeMapEntry& e = g_eyeMap[i];
         if (e.rt != rt) continue;
+        if (e.viewLocked) {                              // issue #28: the OpenXR view of the RT rules
+            if (verdictEye != e.eye && g_cEyeVerdictVsView++ < 4)
+                LogWarn("eye map: RT %p projection verdict says eye %d, its OpenXR view says eye %d -- the view is kept (p=%.4f)",
+                    rt, verdictEye, e.eye, (double)p);
+            return;
+        }
         e.score += verdictEye == 0 ? +1 : -1;
         if (e.score > 6) e.score = 6;
         if (e.score < -6) e.score = -6;
@@ -3747,9 +3759,42 @@ int PvDecidedEye(void* rt);
 // the first verdicts: wrong-eye MVs, hidden-mask relearning, a VRS eye miss at every drive start. The preview's eye
 // numbering matches this map's only while both eyes' reference tile is the same corner of the 2x2 composite (true in
 // every log so far); the seed keeps score 0, so a wrong seed is corrected by 2 verdicts, as the old guess was.
+// Issue #28: the eye of a VR swapchain image from the OpenXR view its swapchain is submitted as (eye 0 = the right eye =
+// view 1, the numbering the verdicts and the hidden mask use), -1 = not known. A symmetric-fov headset (Pico: L-52 R+52)
+// gives no projection verdict ever (verdicts == no-vote), so the pair-index guess stayed for good -- and when the game
+// blits the eyes in a changing order (that headset: an eye -> view change every frame) one DLSS eye got the pictures of
+// BOTH eyes: a ghost copy of near objects (the steering wheel) one IPD to the side.
+int EyeOfXrView(void* rt) {
+#ifdef WITH_DLAA                                         // xr_hook.cpp is part of the DLAA build only (unit tests: the old guess)
+    if (g_launchVr != 1) return -1;
+    const int v = XrHook::UniqueViewOfImage(rt);
+    return v < 0 ? -1 : (v ^ 1);
+#else
+    (void)rt;
+    return -1;
+#endif
+}
 int EyeOfRT(void* rt, int pairIdx) {
     for (int i = 0; i < g_eyeMapN; ++i) {
         if (g_eyeMap[i].rt != rt) continue;
+        if (!g_eyeMap[i].viewLocked) {                   // issue #28: until the view is known, check it at each blit
+            EyeMapEntry& e = g_eyeMap[i];
+            const int ve = EyeOfXrView(rt);
+            if (ve >= 0) {
+                e.viewLocked = true;
+                e.score = ve == 0 ? 6 : -6;
+                if (ve != e.eye) {
+                    ++g_cEyeViewFixes;
+                    if (g_cEyeViewFixes <= 16)
+                        LogWarn("eye map: RT %p corrected eye %d -> %d by its OpenXR view (correction #%llu) -- both eyes' history dropped",
+                            rt, e.eye, ve, (unsigned long long)g_cEyeViewFixes);
+                    e.eye = ve;
+                    g_resetNext = true;
+                    MvInvalidate();
+                    LogEyeMap();
+                }
+            }
+        }
         if (g_eyeMap[i].parity != pairIdx) {
             if (g_cRtParityMismatch++ < 10)
                 LogDbg("eye map: RT %p (eye %d) arrived with pair index %d, first seen with %d (rt parity mismatch #%llu; map kept)",
@@ -3763,17 +3808,19 @@ int EyeOfRT(void* rt, int pairIdx) {
         for (EyeMapEntry& e : g_eyeMap) e.score = 0;
     }
     int eye = pairIdx & 1;
+    const int ve = EyeOfXrView(rt);                       // issue #28: the OpenXR view first
 #ifdef WITH_DLAA
-    const int pv = PvDecidedEye(rt);
+    const int pv = ve >= 0 ? -1 : PvDecidedEye(rt);
     if (pv >= 0) eye = pv;
 #else
     const int pv = -1;
 #endif
-    g_eyeMap[g_eyeMapN] = { rt, eye, pairIdx, 0 };
+    if (ve >= 0) eye = ve;
+    g_eyeMap[g_eyeMapN] = { rt, eye, pairIdx, ve >= 0 ? (ve == 0 ? 6 : -6) : 0, ve >= 0 };
     ++g_eyeMapN;
     if (g_eyeMapN <= 8)
         LogDbg("eye map: new blit RT %p -> eye %d (%s, pair index %d, entry #%d)", rt, eye,
-            pv >= 0 ? "menu preview verdict" : "pair-index guess", pairIdx, g_eyeMapN);
+            ve >= 0 ? "its OpenXR view" : (pv >= 0 ? "menu preview verdict" : "pair-index guess"), pairIdx, g_eyeMapN);
     if (g_eyeMapN == 6 && !g_eyeMapLogged) { g_eyeMapLogged = true; LogEyeMap(); }
     return eye;
 }
@@ -4752,7 +4799,7 @@ void PreviewInvalidate() {
 // score (+1 per eye-0 verdict, -1 per eye-1, clamped +-6); a flip needs |score| >= 2 against it and drops both units'
 // history (PreviewInvalidate). Two targets of one frame mapped to the same unit: the second one is left untouched.
 // Render thread only; flat (one target, launch mode flat) never uses any of it.
-struct PvEyeEntry { void* rt; int eye; int score; uint64_t firstFrame; };   // eye -1 = not decided yet
+struct PvEyeEntry { void* rt; int eye; int score; uint64_t firstFrame; bool viewLocked; };   // eye -1 = not decided yet; viewLocked = issue #28
 constexpr int      kPvEyeCap      = 16;
 constexpr int      kPvRbRing      = 4;
 constexpr int      kPvRbMvps      = 8;           // MVPs read back per target (world layer, record order)
@@ -4832,12 +4879,26 @@ int PvUnitOf(int idx, uint64_t fr) {
                 g_pvEyeN = 0;
             }
             e = g_pvEyeN++;
-            g_pvEye[e] = { rt, -1, 0, fr };
+            g_pvEye[e] = { rt, -1, 0, fr, false };
             if (g_pvEyeN <= 8)
                 LogDbg("preview eye map: new target RT %p (composite order %d, entry #%d) -- eye from the next projection verdict",
                     rt, idx, g_pvEyeN);
         }
         PvEyeEntry& en = g_pvEye[e];
+        if (!en.viewLocked) {                            // issue #28: the RT's OpenXR view decides (no verdict on a symmetric fov)
+            const int ve = EyeOfXrView(rt);
+            if (ve >= 0) {
+                en.viewLocked = true;
+                en.score = ve == 0 ? 6 : -6;
+                if (en.eye != ve) {
+                    static int viewLogs = 0;
+                    if (viewLogs++ < 8)
+                        LogDbg("preview eye map: RT %p -> eye %d by its OpenXR view (was %d)", rt, ve, en.eye);
+                    if (en.eye >= 0) PreviewInvalidate();
+                    en.eye = ve;
+                }
+            }
+        }
         if (en.eye < 0 && fr - en.firstFrame > kPvGuessFrames) {
             en.eye = idx;
             static int guessLogs = 0;
@@ -4909,6 +4970,7 @@ void PvApplyVerdict(void* rt, int eye, double p) {
     const int i = PvEyeFind(rt);
     if (i < 0) return;                                   // map cleared since the readback was queued
     PvEyeEntry& e = g_pvEye[i];
+    if (e.viewLocked) return;                            // issue #28: the OpenXR view rules
     if (e.eye < 0) {                                     // first verdict decides an undecided RT directly
         e.eye = eye;
         e.score = eye == 0 ? 1 : -1;

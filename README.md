@@ -1067,6 +1067,10 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   the per-object motion and leaves the camera motion only.
   Then please send the log, see *Reporting a problem*.
 
+- **VR: a faint second copy of near objects (the steering wheel) beside the real one?** Fixed in
+  v0.16.0-rc2: update. On headsets whose two eye views have the same shape, one eye's DLAA could get
+  the pictures of both eyes. Old log sign: `eye -> OpenXR view changes so far` growing all the time.
+
 - **The log has only errors by default.** Put `log_level = 4` in `dlaa.ini` (next to `dinput8.dll`)
   and start the game again: `dlaa_inject.log` is then written next to the DLL. It
   records the version, which hooks installed, and whether DLAA/DLSS started. It is
