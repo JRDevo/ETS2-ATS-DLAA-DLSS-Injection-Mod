@@ -939,6 +939,7 @@ The table below lists the commonly used keys:
 | `cpu_priority` | `0` | `1` = the game runs at Above normal priority. Never High or Realtime. The menu's `CPU tuning` row switches it live |
 | `cpu_no_throttle` | `0` | `1` = Windows may not slow the game down to save power (EcoQoS) and honours its timer requests while the window is minimized or hidden. Needs Windows 11 for the timer part. The menu's `CPU tuning` row switches it live |
 | `did_shadow` | `1` | CPU saving for the per-part motion vectors (read at game start only): `1` = the mod remembers the game's drawing settings as the game sets them instead of asking the graphics driver for them at every draw (input layout, vertex shader, its constant buffers and samplers, rasterizer state); `2` = also the vertex / index buffers (faster only when the game reuses buffers between draws); `0` = ask at every draw (as before). The log's `did_shadow=` line at startup says which one ran |
+| `did_shadow_ps` | `1` | with `did_shadow` on (read at game start only): `1` = the mod also remembers the pixel shader, its constant buffers and samplers and the depth / blend state of the forward-pass draws instead of asking the driver at every draw (CPU saving; the picture is the same); `0` = ask at every draw. The log's `did_shadow_ps=` line at startup says which one ran |
 | `did_shadow_verify` | `-1` | test only: every Nth draw the remembered settings are compared with the driver's; a difference is logged (`MISMATCH`) and the mod asks the driver for the rest of that frame. `-1` = every 64th draw with `log_level = 4`, off otherwise; `0` = off |
 | `menu_show_all` | `0` | tuning menu: `0` = hide rows that cannot do anything in your setup right now and the other mode's rows; `1` = show every row, greyed, with the "(VR)" / "(flat)" titles (for support) |
 | `bind_hold_ms` | `5000` | tuning menu: how long (ms, `500`..`10000`) the menu `Right` must be held on the `Reset to defaults` row. It binds a hotkey on the Hotkeys page with one press, [`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu) |
@@ -1070,6 +1071,11 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
 - **VR: a faint second copy of near objects (the steering wheel) beside the real one?** Fixed in
   v0.16.0-rc2: update. On headsets whose two eye views have the same shape, one eye's DLAA could get
   the pictures of both eyes. Old log sign: `eye -> OpenXR view changes so far` growing all the time.
+
+- **VR eye tracking stays at "waiting for gaze" in one game, with OpenXR Toolkit on?** Fixed in
+  v0.16.0-rc3: update. When the game starts its VR session a second time, OpenXR Toolkit sends its eye
+  tracker setup again, and the mod's own eye tracker link was lost. Old log sign: `Eye tracking: the eye
+  gaze suggestion from above the runtime with ours appended FAILED (-47`.
 
 - **The log has only errors by default.** Put `log_level = 4` in `dlaa.ini` (next to `dinput8.dll`)
   and start the game again: `dlaa_inject.log` is then written next to the DLL. It

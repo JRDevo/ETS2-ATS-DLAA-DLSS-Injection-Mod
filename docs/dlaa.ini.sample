@@ -313,6 +313,11 @@ log_level = 1
 # and the getters are used for the rest of that frame (after 8 such frames: for the rest of the session).
 # -1 = 64 with log_level = 4 at the start, else 0 (default); 0 = off
 # did_shadow_verify = -1
+# phase 93: with did_shadow on, also the forward draws' depth-stencil / blend state + vertex shader and the forward records' pixel
+# shader, its cbuffers and samplers from the hooked Set calls (the pixel shader's textures are still read at every draw).
+# 1 = default, 0 = the getters (as before phase 93). Startup only; the log's "did_shadow_ps=" line says which mode ran and the
+# "MV draw-ids" line has a "PS/OM bank" field (did_shadow_verify checks it too).
+# did_shadow_ps = 1
 # how finely the "which vehicle does this plate sit on" search looks at the picture: 4 = every 4th pixel, small plates every
 # 2nd (default), 2 = every 2nd pixel for everything (before phase 8)
 # mv_vote_res = 4

@@ -2640,22 +2640,45 @@ struct DrawIdRecord::PsState {
     ID3D11Buffer* cb[kPsCb]; UINT cbFirst[kPsCb], cbNum[kPsCb];
     ID3D11ShaderResourceView* srv[kPsSrv];
     ID3D11SamplerState* smp[kPsSmp];
+    uint32_t own;                                // phase 93: the ps / cb / smp pointers this draw holds a reference on (kPO*);
+                                                 //   the SRVs are always owned (always read through the getter)
 };
+// phase 93: PsState::own bits
+namespace {
+constexpr uint32_t kPOPs = 1u << 0, kPOCb0 = 1u << 1, kPOSmp0 = 1u << 5, kPOwnAll = (1u << 13) - 1u;
+static_assert(DrawIdRecord::kPsCb == 4 && DrawIdRecord::kPsSmp == 8, "phase 93 own bits assume 4 PS cbuffer / 8 PS sampler slots");
+static_assert(DidShadow::kPsCbN == DrawIdRecord::kPsCb && DidShadow::kPsSmpN == DrawIdRecord::kPsSmp, "the PS bank's slot counts");
+}
 
 // phase 57 (perf): no memset of the whole PsState (~300 B per draw) -- only the pointers it releases are nulled. Record overwrites
 // every field before the slot is replayed again (PSGetShader / PSGetConstantBuffers1 / PSGetShaderResources / PSGetSamplers write
 // all their slots), but two readers rely on a released slot holding NO pointers: Record's "SRV unchanged since this record's
 // previous draw" test reads m_ps[m_n - 1] even when that draw is already released (a stale match would keep a resource out of
 // the pending-resource set restarted by the replay), and a second release of the same slot must not Release twice.
+// phase 93: ps / cb / smp released only where `own` says so (a draw filled from the PS bank shares its previous draw's references);
+// every pointer is nulled either way.
 void DrawIdRecord::ReleasePs(int from, int to) {
     if (!m_ps) return;
     for (int i = from; i < to; ++i) {
         PsState& p = m_ps[i];
-        if (p.ps) { p.ps->Release(); p.ps = nullptr; }
-        for (auto*& x : p.cb) if (x) { x->Release(); x = nullptr; }
+        const uint32_t o = p.own;
+        if (p.ps) { if (o & kPOPs) p.ps->Release(); p.ps = nullptr; }
+        for (int t = 0; t < kPsCb; ++t) if (p.cb[t]) { if (o & (kPOCb0 << t)) p.cb[t]->Release(); p.cb[t] = nullptr; }
         for (auto*& x : p.srv) if (x) { x->Release(); x = nullptr; }
-        for (auto*& x : p.smp) if (x) { x->Release(); x = nullptr; }
+        for (int t = 0; t < kPsSmp; ++t) if (p.smp[t]) { if (o & (kPOSmp0 << t)) p.smp[t]->Release(); p.smp[t] = nullptr; }
+        p.own = 0;
     }
+}
+// phase 93: the PS half of OwnAll (draw i takes a reference on every ps / cb / smp pointer it names but does not own yet)
+void DrawIdRecord::OwnAllPs(int i) {
+    if (!m_ps || i < 0 || i >= m_n) return;
+    PsState& p = m_ps[i];
+    const uint32_t miss = kPOwnAll & ~p.own;
+    if (!miss) return;
+    auto take = [&](IUnknown* q, uint32_t bit) { if (q && (miss & bit)) { q->AddRef(); p.own |= bit; } };
+    take(p.ps, kPOPs);
+    for (int t = 0; t < kPsCb; ++t) take(p.cb[t], kPOCb0 << t);
+    for (int t = 0; t < kPsSmp; ++t) take(p.smp[t], kPOSmp0 << t);
 }
 
 DrawIdRecord::DrawIdRecord() {}
@@ -2688,7 +2711,7 @@ void DrawIdRecord::OwnAll(int i) {
 
 void DrawIdRecord::ReleaseRange(int from, int to) {
     if (!m_st) return;
-    if (from < to && to < m_n) OwnAll(to);               // phase 35: before the release (see OwnAll)
+    if (from < to && to < m_n) { OwnAll(to); OwnAllPs(to); }   // phase 35 / 93: before the release (see OwnAll)
     for (int i = from; i < to; ++i) ReleaseState(m_st[i]);
     ReleasePs(from, to);                                 // v0.10.0 phase 10
 }
@@ -2900,6 +2923,14 @@ struct Sh {
     ID3D11Buffer* cb[kCbN]; UINT cbFirst[kCbN], cbNum[kCbN];
     ID3D11SamplerState* smp[kSmpN];
     ID3D11RasterizerState* rs;
+    // phase 93: the PS / OM bank (valid only while g_armedPs; every pointer carries one reference of ours, like the rest)
+    uint32_t psValid;                            // PsField bits
+    uint32_t hazPsCb;                            // slot bits: an output-capable PS cbuffer (the group is read by the getter)
+    ID3D11PixelShader* ps;
+    ID3D11Buffer* psCb[kPsCbN]; UINT psCbFirst[kPsCbN], psCbNum[kPsCbN];
+    ID3D11SamplerState* psSmp[kPsSmpN];
+    ID3D11DepthStencilState* dss;
+    ID3D11BlendState* bs;
 };
 Sh                    s_h = {};                  // the owner thread only (every pointer in it carries one reference of ours)
 std::atomic<void*>    s_ctx{nullptr}, s_alias{nullptr};
@@ -2910,14 +2941,16 @@ std::atomic<bool>     s_disabled{false};         // 8 frames with mismatches: th
 std::atomic<uint64_t> s_kills[kKillN];
 std::atomic<uint64_t> s_fallbackFrames{0};
 std::atomic<bool> s_on{false};                  // Configure (the setup thread) -> every Record (release / acquire)
+std::atomic<bool> s_psOn{false};                // phase 93: ConfigurePs (all PS / OM hooks in)
+uint64_t s_psVerifyCtr = 0;                      // phase 93: the PS bank's own verify cadence (the first bank's is unchanged)
 int      s_verifyEvery = 0;
 uint32_t s_groups = (1u << kFieldN) - 1u;        // Field bits the shadow keeps (the rest: always the getters, Notes ignored)
 uint64_t s_verifyCtr = 0, s_recSerial = 0;
 int      s_mismatchLogs = 0;
 int      s_badFrames = 0;                        // (FrameStart's thread)
 int      s_vtN = 0;                              // hook liveness (SetHookTargets)
-int      s_vtIdx[16] = {};
-void*    s_vtExp[16] = {};
+int      s_vtIdx[24] = {};                       // (phase 93: 16 -> 24, + the 6 PS / OM entries)
+void*    s_vtExp[24] = {};
 int      s_vtLogs = 0;
 Stats    s_st;                                   // the owner thread's counters (TakeStats reads them on the same thread)
 
@@ -2948,9 +2981,16 @@ void ReleaseAll() {
     for (auto* p : h.cb) if (p) p->Release();
     for (auto* p : h.smp) if (p) p->Release();
     if (h.rs) h.rs->Release();
+    if (h.ps) h.ps->Release();                           // phase 93: the PS / OM bank
+    for (auto* p : h.psCb) if (p) p->Release();
+    for (auto* p : h.psSmp) if (p) p->Release();
+    if (h.dss) h.dss->Release();
+    if (h.bs) h.bs->Release();
     memset(&h, 0, sizeof(h));
+    g_armedPs.store(false, std::memory_order_relaxed);   // phase 93: its Notes stop until a forward use re-arms it
 }
 inline void KillNow(int why) {
+    g_armedPs.store(false, std::memory_order_relaxed);   // phase 93 (the PS bank never outlives the first one)
     g_armed.store(false, std::memory_order_relaxed);   // the hooks go idle; the owner's next Record drops + re-reads
     s_kill.store(true, std::memory_order_relaxed);
     s_kills[why].fetch_add(1, std::memory_order_relaxed);
@@ -2962,6 +3002,123 @@ inline bool Mine(void* ctx) {
     return !s_kill.load(std::memory_order_relaxed);
 }
 inline void Unknown(int f) { s_h.valid &= ~(1u << f); }   // an unusual call: the group is re-read at the next Record
+inline void UnknownPs(int f) { s_h.psValid &= ~(1u << f); }   // phase 93: the same for the PS / OM bank
+// The calls a Record / FwdStates may take the shadow for: not in a verify fallback, every hooked vtable entry still the hooked one.
+// count: a Record's statistics (records through the getters, vtable misses; logged); false = the getters.
+bool ShUsable(ID3D11DeviceContext1* ctx, bool count) {
+    if (s_fallback.load(std::memory_order_relaxed)) { if (count) ++s_st.recGet; return false; }
+    if (s_vtN) {
+        void* const* vt = *reinterpret_cast<void* const* const*>(ctx);
+        for (int i = 0; i < s_vtN; ++i)
+            if (vt[s_vtIdx[i]] != s_vtExp[i]) {
+                if (g_armed.load(std::memory_order_relaxed)) KillNow(kKVtable);
+                if (count) {
+                    ++s_st.vtMiss;
+                    ++s_st.recGet;
+                    if (s_vtLogs < 5) {
+                        ++s_vtLogs;
+                        LogWarn("MV draw-ids shadow: the context's vtable entry %d is %p, not the hooked %p (%d/5) -- a Set could bypass "
+                            "the hooks: this draw's state is read through the getters", s_vtIdx[i], vt[s_vtIdx[i]], s_vtExp[i],
+                            s_vtLogs);
+                    }
+                }
+                return false;
+            }
+    }
+    return true;
+}
+// Drop + re-arm when needed (dropped, not armed, another context or thread), then read every unknown group of the first bank and,
+// with `ps` (phase 93), arm the PS / OM bank and read its unknown groups. The getters' references become the shadow's.
+// (phase 93: moved here from CaptureShadow unchanged, so FwdStates / CapturePsShadow arm the same way)
+void ArmAndSeed(ID3D11DeviceContext1* ctx, bool ps) {
+    Sh& h = s_h;
+    void* const id = static_cast<ID3D11DeviceContext*>(ctx);
+    const uint32_t tid = Tid();
+    // ---- drop + re-arm: dropped (kill), not armed (pass / frame start, draw-ids switched on), another context or thread ----
+    if (s_kill.load(std::memory_order_relaxed) || !g_armed.load(std::memory_order_relaxed) ||
+        s_ctx.load(std::memory_order_relaxed) != id || s_tid.load(std::memory_order_relaxed) != tid) {
+        void* const was = s_ctx.load(std::memory_order_relaxed);
+        if (was && was != id) s_kills[kKCtx].fetch_add(1, std::memory_order_relaxed);
+        ReleaseAll();                                    // (valid = psValid = 0, the PS bank disarmed: re-read below)
+        s_ctx.store(id, std::memory_order_relaxed);
+        s_tid.store(tid, std::memory_order_relaxed);
+        s_kill.store(false, std::memory_order_relaxed);
+        g_armed.store(true, std::memory_order_relaxed);
+        ++s_st.reseeds;
+    }
+    // ---- unknown groups: read into the shadow (the getter's reference becomes the shadow's) ----
+    if ((h.valid & s_groups) != s_groups) {
+        const bool full = h.valid == 0;
+        auto seeded = [&](int f) { h.valid |= 1u << f; if (!full) ++s_st.groupSeed[f]; };
+        if ((s_groups & (1u << kFIl)) && !(h.valid & (1u << kFIl))) { ID3D11InputLayout* p = nullptr; ctx->IAGetInputLayout(&p); Adopt(h.il, p); seeded(kFIl); }
+        if ((s_groups & (1u << kFVb)) && !(h.valid & (1u << kFVb))) {
+            ID3D11Buffer* p[kVbN] = {};
+            ctx->IAGetVertexBuffers(0, kVbN, p, h.vbStride, h.vbOff);
+            h.hazVb = 0;
+            for (int t = 0; t < kVbN; ++t) { Adopt(h.vb[t], p[t]); if (OutCap(p[t])) h.hazVb |= 1u << t; }
+            seeded(kFVb);
+        }
+        if ((s_groups & (1u << kFIb)) && !(h.valid & (1u << kFIb))) {
+            ID3D11Buffer* p = nullptr;
+            ctx->IAGetIndexBuffer(&p, &h.ibFmt, &h.ibOff);
+            Adopt(h.ib, p);
+            h.hazIb = OutCap(p);
+            seeded(kFIb);
+        }
+        if ((s_groups & (1u << kFVs)) && !(h.valid & (1u << kFVs))) { ID3D11VertexShader* p = nullptr; ctx->VSGetShader(&p, nullptr, nullptr); Adopt(h.vs, p); seeded(kFVs); }
+        if ((s_groups & (1u << kFCb)) && !(h.valid & (1u << kFCb))) {
+            ID3D11Buffer* p[kCbN] = {};
+            ctx->VSGetConstantBuffers1(0, kCbN, p, h.cbFirst, h.cbNum);
+            h.hazCb = 0;
+            for (int t = 0; t < kCbN; ++t) { Adopt(h.cb[t], p[t]); if (OutCap(p[t])) h.hazCb |= 1u << t; }
+            seeded(kFCb);
+        }
+        if ((s_groups & (1u << kFSmp)) && !(h.valid & (1u << kFSmp))) {
+            ID3D11SamplerState* p[kSmpN] = {};
+            ctx->VSGetSamplers(0, kSmpN, p);
+            for (int t = 0; t < kSmpN; ++t) Adopt(h.smp[t], p[t]);
+            seeded(kFSmp);
+        }
+        if ((s_groups & (1u << kFRs)) && !(h.valid & (1u << kFRs))) { ID3D11RasterizerState* p = nullptr; ctx->RSGetState(&p); Adopt(h.rs, p); seeded(kFRs); }
+    }
+    if (!ps) return;
+    // ---- phase 93: the PS / OM bank. Armed only here (a forward use), so the Notes of the G-buffer pass stay one load each.
+    // psValid is 0 whenever g_armedPs is false: only the Notes set its bits and they run only while it is true, and every disarm
+    // goes through ReleaseAll (the owner: drop / re-arm above) or a kill (the next use re-arms above through ReleaseAll). ----
+    if (!g_armedPs.load(std::memory_order_relaxed)) g_armedPs.store(true, std::memory_order_relaxed);
+    constexpr uint32_t kAllPs = (1u << kPsFieldN) - 1u;
+    if (h.psValid != kAllPs) {
+        auto seeded = [&](int f) { h.psValid |= 1u << f; ++s_st.psSeed[f]; };
+        if (!(h.psValid & (1u << kPFPs))) { ID3D11PixelShader* p = nullptr; ctx->PSGetShader(&p, nullptr, nullptr); Adopt(h.ps, p); seeded(kPFPs); }
+        if (!(h.psValid & (1u << kPFCb))) {
+            ID3D11Buffer* p[kPsCbN] = {};
+            ctx->PSGetConstantBuffers1(0, kPsCbN, p, h.psCbFirst, h.psCbNum);
+            h.hazPsCb = 0;
+            for (int t = 0; t < kPsCbN; ++t) { Adopt(h.psCb[t], p[t]); if (OutCap(p[t])) h.hazPsCb |= 1u << t; }
+            seeded(kPFCb);
+        }
+        if (!(h.psValid & (1u << kPFSmp))) {
+            ID3D11SamplerState* p[kPsSmpN] = {};
+            ctx->PSGetSamplers(0, kPsSmpN, p);
+            for (int t = 0; t < kPsSmpN; ++t) Adopt(h.psSmp[t], p[t]);
+            seeded(kPFSmp);
+        }
+        if (!(h.psValid & (1u << kPFDss))) {
+            ID3D11DepthStencilState* p = nullptr; UINT ref = 0;
+            ctx->OMGetDepthStencilState(&p, &ref);
+            Adopt(h.dss, p);
+            seeded(kPFDss);
+        }
+        if (!(h.psValid & (1u << kPFBs))) {
+            ID3D11BlendState* p = nullptr; FLOAT bf[4] = {}; UINT mask = 0;
+            ctx->OMGetBlendState(&p, bf, &mask);
+            Adopt(h.bs, p);
+            seeded(kPFBs);
+        }
+    }
+}
+// phase 93: a PS-bank call on the tracked context by the owner thread while the bank is live (another thread: the shadow drops)
+inline bool MinePs(void* ctx) { return Mine(ctx) && g_armedPs.load(std::memory_order_relaxed); }
 } // namespace
 
 const char* FieldName(int f) {
@@ -2979,7 +3136,7 @@ uint32_t Groups() { return s_groups; }
 void SetAlias(void* ctx) { s_alias.store(ctx, std::memory_order_relaxed); }
 void SetHookTargets(const int* idx, void* const* expect, int n) {
     s_vtN = 0;
-    for (int i = 0; i < n && i < 16; ++i) { s_vtIdx[i] = idx[i]; s_vtExp[i] = expect[i]; s_vtN = i + 1; }
+    for (int i = 0; i < n && i < 24; ++i) { s_vtIdx[i] = idx[i]; s_vtExp[i] = expect[i]; s_vtN = i + 1; }   // (phase 93: 24)
 }
 
 void NoteIlSlow(void* ctx, ID3D11InputLayout* il) {
@@ -3067,6 +3224,7 @@ void InvalidateSlow(void* ctx, int why) {
 }
 void Drop(int why) {
     if (!s_on.load(std::memory_order_relaxed)) return;
+    g_armedPs.store(false, std::memory_order_relaxed);   // phase 93
     const bool was = g_armed.exchange(false, std::memory_order_relaxed);
     if (Tid() == s_tid.load(std::memory_order_relaxed)) ReleaseAll();     // the next Record re-reads (not armed)
     else if (was) s_kill.store(true, std::memory_order_relaxed);
@@ -3074,6 +3232,7 @@ void Drop(int why) {
 }
 void FrameStart() {
     if (!s_on.load(std::memory_order_relaxed)) return;
+    g_armedPs.store(false, std::memory_order_relaxed);   // phase 93
     if (g_armed.exchange(false, std::memory_order_relaxed)) {
         s_kill.store(true, std::memory_order_relaxed);
         s_kills[kKFrame].fetch_add(1, std::memory_order_relaxed);
@@ -3086,6 +3245,109 @@ void FrameStart() {
                 "read every draw's state, as with did_shadow = 0)", s_badFrames);
         }
     }
+}
+// ---- phase 93: the PS / OM bank (see 14. in draw_ids.h) ----
+const char* PsFieldName(int f) {
+    static const char* const kN[kPsFieldN] = { "ps", "pscb", "pssmp", "dss", "bs" };
+    return f >= 0 && f < kPsFieldN ? kN[f] : "?";
+}
+void ConfigurePs(bool on) { s_psOn.store(on, std::memory_order_release); }
+bool PsConfigured() { return s_psOn.load(std::memory_order_acquire) && Configured(); }
+void NotePsSlow(void* ctx, ID3D11PixelShader* ps) {
+    if (!MinePs(ctx)) return;
+    ++s_st.psNotes;
+    Put(s_h.ps, ps);
+    s_h.psValid |= 1u << kPFPs;
+}
+// as NoteCbSlow (the same runtime normalisation rules), for PS slots 0..kPsCbN-1
+void NotePsCbSlow(void* ctx, UINT start, UINT num, ID3D11Buffer* const* b, const UINT* first, const UINT* count, bool legacy) {
+    if (!MinePs(ctx) || num == 0) return;
+    if (start >= D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT ||
+        num > D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT - start || !b ||
+        (!legacy && ((first == nullptr) != (count == nullptr)))) { UnknownPs(kPFCb); return; }
+    if (!legacy && first)
+        for (UINT j = 0; j < num; ++j)
+            if (b[j] && ((first[j] & 15u) || (count[j] & 15u) || count[j] > 4096u)) { UnknownPs(kPFCb); return; }
+    ++s_st.psNotes;
+    Sh& h = s_h;
+    for (UINT j = 0; j < num && start + j < (UINT)kPsCbN; ++j) {
+        const UINT i = start + j;
+        ID3D11Buffer* p = b[j];
+        if (Put(h.psCb[i], p)) { if (OutCap(p)) h.hazPsCb |= 1u << i; else h.hazPsCb &= ~(1u << i); }
+        const bool win = p && !legacy && first;
+        h.psCbFirst[i] = win ? first[j] : 0u;
+        h.psCbNum[i] = win ? count[j] : 4096u;
+    }
+    if (start == 0 && num >= (UINT)kPsCbN) h.psValid |= 1u << kPFCb;
+}
+// the samplers actually bound (inject.cpp hands the LOD twins it substituted, not the game's array)
+void NotePsSmpSlow(void* ctx, UINT start, UINT num, ID3D11SamplerState* const* s) {
+    if (!MinePs(ctx) || num == 0) return;
+    if (start >= D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT || num > D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT - start || !s) {
+        UnknownPs(kPFSmp); return;
+    }
+    ++s_st.psNotes;
+    for (UINT j = 0; j < num && start + j < (UINT)kPsSmpN; ++j) Put(s_h.psSmp[start + j], s[j]);
+    if (start == 0 && num >= (UINT)kPsSmpN) s_h.psValid |= 1u << kPFSmp;
+}
+// the state actually bound (inject.cpp: also the v0.9.0 stencil-id twins it binds through the trampoline)
+void NoteDssSlow(void* ctx, ID3D11DepthStencilState* dss) {
+    if (!MinePs(ctx)) return;
+    ++s_st.psNotes;
+    Put(s_h.dss, dss);
+    s_h.psValid |= 1u << kPFDss;
+}
+void NoteBsSlow(void* ctx, ID3D11BlendState* bs) {
+    if (!MinePs(ctx)) return;
+    ++s_st.psNotes;
+    Put(s_h.bs, bs);
+    s_h.psValid |= 1u << kPFBs;
+}
+bool FwdStates(ID3D11DeviceContext1* ctx, ID3D11DepthStencilState** dss, ID3D11BlendState** bs, ID3D11VertexShader** vs) {
+    if (!ctx || !PsConfigured() || !(s_groups & (1u << kFVs))) return false;
+    if (!ShUsable(ctx, false)) { ++s_st.fwdGet; return false; }
+    ArmAndSeed(ctx, true);
+    Sh& h = s_h;
+    // verify (did_shadow_verify N): every Nth PS-bank use also reads the getters; a difference = the getters for the rest of the frame
+    if (s_verifyEvery > 0 && ++s_psVerifyCtr >= (uint64_t)s_verifyEvery) {
+        s_psVerifyCtr = 0;
+        ++s_st.psVerified;
+        ID3D11DepthStencilState* gd = nullptr; UINT ref = 0;
+        ctx->OMGetDepthStencilState(&gd, &ref);
+        ID3D11BlendState* gb = nullptr; FLOAT bf[4] = {}; UINT mask = 0;
+        ctx->OMGetBlendState(&gb, bf, &mask);
+        ID3D11VertexShader* gv = nullptr;
+        ctx->VSGetShader(&gv, nullptr, nullptr);
+        const bool bd = gd != h.dss, bb = gb != h.bs, bv = gv != h.vs;
+        if (bd || bb || bv) {
+            ++s_st.psMismatchRecs;
+            if (bd) ++s_st.psMismatch[kPFDss];
+            if (bb) ++s_st.psMismatch[kPFBs];
+            if (bv) ++s_st.mismatch[kFVs];
+            if (s_mismatchLogs < 20) {
+                ++s_mismatchLogs;
+                LogWarn("MV draw-ids shadow: PS/OM bank MISMATCH %d/20 (forward draw, verify every %d): dss shadow %p runtime %p, bs "
+                    "shadow %p runtime %p, vs shadow %p runtime %p -- this draw reads the getters, so does every draw for the rest of "
+                    "the frame", s_mismatchLogs, s_verifyEvery, (void*)h.dss, (void*)gd, (void*)h.bs, (void*)gb, (void*)h.vs,
+                    (void*)gv);
+            }
+            if (gd) gd->Release();
+            if (gb) gb->Release();
+            if (gv) gv->Release();
+            s_fallback.store(true, std::memory_order_relaxed);
+            KillNow(kKVerify);
+            ++s_st.fwdGet;
+            return false;
+        }
+        if (gd) gd->Release();
+        if (gb) gb->Release();
+        if (gv) gv->Release();
+    }
+    *dss = h.dss;
+    *bs = h.bs;
+    *vs = h.vs;
+    ++s_st.fwdShadow;
+    return true;
 }
 void Shutdown() {
     g_armed.store(false, std::memory_order_relaxed);
@@ -3136,76 +3398,11 @@ void DrawIdRecord::CaptureGet(ID3D11DeviceContext1* ctx, State& s) {
 
 bool DrawIdRecord::CaptureShadow(ID3D11DeviceContext1* ctx, State& s, const State* prev, uint32_t* testBits) {
     using namespace DidShadow;
-    if (s_fallback.load(std::memory_order_relaxed)) { if (!testBits) ++s_st.recGet; return false; }
-    // hook liveness: every hooked entry of this context's (writable) vtable must still be the one the hooks sit on
-    if (s_vtN) {
-        void* const* vt = *reinterpret_cast<void* const* const*>(ctx);
-        for (int i = 0; i < s_vtN; ++i)
-            if (vt[s_vtIdx[i]] != s_vtExp[i]) {
-                if (g_armed.load(std::memory_order_relaxed)) KillNow(kKVtable);
-                if (!testBits) {
-                    ++s_st.vtMiss;
-                    ++s_st.recGet;
-                    if (s_vtLogs < 5) {
-                        ++s_vtLogs;
-                        LogWarn("MV draw-ids shadow: the context's vtable entry %d is %p, not the hooked %p (%d/5) -- a Set could bypass "
-                            "the hooks: this draw's state is read through the getters", s_vtIdx[i], vt[s_vtIdx[i]], s_vtExp[i],
-                            s_vtLogs);
-                    }
-                }
-                return false;
-            }
-    }
+    // not in a verify fallback; hook liveness: every hooked entry of this context's (writable) vtable must still be the one the hooks
+    // sit on (phase 93: ShUsable, shared with the PS / OM bank)
+    if (!ShUsable(ctx, !testBits)) return false;
     Sh& h = s_h;
-    void* const id = static_cast<ID3D11DeviceContext*>(ctx);
-    const uint32_t tid = Tid();
-    // ---- drop + re-arm: dropped (kill), not armed (pass / frame start, draw-ids switched on), another context or thread ----
-    if (s_kill.load(std::memory_order_relaxed) || !g_armed.load(std::memory_order_relaxed) ||
-        s_ctx.load(std::memory_order_relaxed) != id || s_tid.load(std::memory_order_relaxed) != tid) {
-        void* const was = s_ctx.load(std::memory_order_relaxed);
-        if (was && was != id) s_kills[kKCtx].fetch_add(1, std::memory_order_relaxed);
-        ReleaseAll();                                    // (valid = 0: every group is re-read below)
-        s_ctx.store(id, std::memory_order_relaxed);
-        s_tid.store(tid, std::memory_order_relaxed);
-        s_kill.store(false, std::memory_order_relaxed);
-        g_armed.store(true, std::memory_order_relaxed);
-        ++s_st.reseeds;
-    }
-    // ---- unknown groups: read into the shadow (the getter's reference becomes the shadow's) ----
-    if ((h.valid & s_groups) != s_groups) {
-        const bool full = h.valid == 0;
-        auto seeded = [&](int f) { h.valid |= 1u << f; if (!full) ++s_st.groupSeed[f]; };
-        if ((s_groups & (1u << kFIl)) && !(h.valid & (1u << kFIl))) { ID3D11InputLayout* p = nullptr; ctx->IAGetInputLayout(&p); Adopt(h.il, p); seeded(kFIl); }
-        if ((s_groups & (1u << kFVb)) && !(h.valid & (1u << kFVb))) {
-            ID3D11Buffer* p[kVbN] = {};
-            ctx->IAGetVertexBuffers(0, kVbN, p, h.vbStride, h.vbOff);
-            h.hazVb = 0;
-            for (int t = 0; t < kVbN; ++t) { Adopt(h.vb[t], p[t]); if (OutCap(p[t])) h.hazVb |= 1u << t; }
-            seeded(kFVb);
-        }
-        if ((s_groups & (1u << kFIb)) && !(h.valid & (1u << kFIb))) {
-            ID3D11Buffer* p = nullptr;
-            ctx->IAGetIndexBuffer(&p, &h.ibFmt, &h.ibOff);
-            Adopt(h.ib, p);
-            h.hazIb = OutCap(p);
-            seeded(kFIb);
-        }
-        if ((s_groups & (1u << kFVs)) && !(h.valid & (1u << kFVs))) { ID3D11VertexShader* p = nullptr; ctx->VSGetShader(&p, nullptr, nullptr); Adopt(h.vs, p); seeded(kFVs); }
-        if ((s_groups & (1u << kFCb)) && !(h.valid & (1u << kFCb))) {
-            ID3D11Buffer* p[kCbN] = {};
-            ctx->VSGetConstantBuffers1(0, kCbN, p, h.cbFirst, h.cbNum);
-            h.hazCb = 0;
-            for (int t = 0; t < kCbN; ++t) { Adopt(h.cb[t], p[t]); if (OutCap(p[t])) h.hazCb |= 1u << t; }
-            seeded(kFCb);
-        }
-        if ((s_groups & (1u << kFSmp)) && !(h.valid & (1u << kFSmp))) {
-            ID3D11SamplerState* p[kSmpN] = {};
-            ctx->VSGetSamplers(0, kSmpN, p);
-            for (int t = 0; t < kSmpN; ++t) Adopt(h.smp[t], p[t]);
-            seeded(kFSmp);
-        }
-        if ((s_groups & (1u << kFRs)) && !(h.valid & (1u << kFRs))) { ID3D11RasterizerState* p = nullptr; ctx->RSGetState(&p); Adopt(h.rs, p); seeded(kFRs); }
-    }
+    ArmAndSeed(ctx, false);                              // phase 93: drop + re-arm + the unknown groups (moved, unchanged)
     // ---- always through the getters (owned): topology (1 ns), VS SRVs (hazard-prone), viewports + scissors (no refs) ----
     uint32_t own = 0, fromSh = 0;
     ctx->IAGetPrimitiveTopology(&s.topo);
@@ -3377,6 +3574,96 @@ bool DrawIdRecord::CaptureShadow(ID3D11DeviceContext1* ctx, State& s, const Stat
     return true;
 }
 
+// phase 93: the PS / PS cbuffers / PS samplers of a forward record from the DidShadow PS bank (see 14. in draw_ids.h). A pointer
+// the previous unreleased draw of this record already names is held through that draw (own bit clear, as State::own); a PS cbuffer
+// group naming an output-capable buffer is read through the getter. false = not available: the caller reads the getters.
+bool DrawIdRecord::CapturePsShadow(ID3D11DeviceContext1* ctx, PsState& p, const PsState* prev) {
+    using namespace DidShadow;
+    if (!PsConfigured()) return false;
+    if (!ShUsable(ctx, false)) { ++s_st.psRecGet; return false; }
+    ArmAndSeed(ctx, true);
+    Sh& h = s_h;
+    constexpr uint32_t kCbBits = 0xFu * kPOCb0, kSmpBits = 0xFFu * kPOSmp0;
+    uint32_t own = 0, fromSh = 0;
+    p.ps = h.ps;
+    fromSh |= kPOPs;
+    if (h.hazPsCb) {
+        ctx->PSGetConstantBuffers1(0, kPsCb, p.cb, p.cbFirst, p.cbNum);
+        for (int t = 0; t < kPsCb; ++t) if (p.cb[t]) own |= kPOCb0 << t;
+        ++s_st.psHazGet;
+    } else {
+        memcpy(p.cb, h.psCb, sizeof(p.cb)); memcpy(p.cbFirst, h.psCbFirst, sizeof(p.cbFirst)); memcpy(p.cbNum, h.psCbNum, sizeof(p.cbNum));
+        fromSh |= kCbBits;
+    }
+    memcpy(p.smp, h.psSmp, sizeof(p.smp));
+    fromSh |= kSmpBits;
+    // ---- verify (did_shadow_verify = N): every Nth PS-bank use also reads the shadowed groups through the getters ----
+    if (s_verifyEvery > 0 && ++s_psVerifyCtr >= (uint64_t)s_verifyEvery) {
+        s_psVerifyCtr = 0;
+        ++s_st.psVerified;
+        ID3D11PixelShader* gps = nullptr;
+        ID3D11Buffer* gcb[kPsCb] = {};
+        UINT gf[kPsCb] = {}, gn[kPsCb] = {};
+        ID3D11SamplerState* gsm[kPsSmp] = {};
+        ctx->PSGetShader(&gps, nullptr, nullptr);
+        if (fromSh & kCbBits) ctx->PSGetConstantBuffers1(0, kPsCb, gcb, gf, gn);
+        ctx->PSGetSamplers(0, kPsSmp, gsm);
+        uint32_t bad = 0;
+        char txt[600];
+        int len = 0;
+        txt[0] = 0;
+        auto note = [&](int f, const char* what, int slot, const void* sh, const void* rt) {
+            bad |= 1u << f;
+            if (s_mismatchLogs < 20 && len >= 0 && len < (int)sizeof(txt) - 80) {
+                const int w = snprintf(txt + len, sizeof(txt) - (size_t)len, " %s%d shadow %p runtime %p;", what, slot, sh, rt);
+                if (w > 0) len += w < (int)sizeof(txt) - len ? w : (int)sizeof(txt) - len - 1;
+            }
+        };
+        if (gps != p.ps) note(kPFPs, "ps", 0, p.ps, gps);
+        if (fromSh & kCbBits)
+            for (int t = 0; t < kPsCb; ++t)
+                if (gcb[t] != p.cb[t] || gf[t] != p.cbFirst[t] || gn[t] != p.cbNum[t]) note(kPFCb, "pscb", t, p.cb[t], gcb[t]);
+        for (int t = 0; t < kPsSmp; ++t) if (gsm[t] != p.smp[t]) note(kPFSmp, "pssmp", t, p.smp[t], gsm[t]);
+        if (bad) {
+            ++s_st.psMismatchRecs;
+            for (int f = 0; f < kPsFieldN; ++f) if (bad & (1u << f)) ++s_st.psMismatch[f];
+            if (s_mismatchLogs < 20) {
+                ++s_mismatchLogs;
+                LogWarn("MV draw-ids shadow: PS/OM bank MISMATCH %d/20 (forward record, verify every %d):%s -- this record takes the "
+                    "runtime's state, the getters read every draw for the rest of the frame", s_mismatchLogs, s_verifyEvery, txt);
+            }
+            // the record keeps the RUNTIME's values of every compared group (the getters' references move to p)
+            p.ps = gps;
+            if (fromSh & kCbBits) { memcpy(p.cb, gcb, sizeof(p.cb)); memcpy(p.cbFirst, gf, sizeof(p.cbFirst)); memcpy(p.cbNum, gn, sizeof(p.cbNum)); }
+            memcpy(p.smp, gsm, sizeof(p.smp));
+            own |= fromSh;                               // (a null pointer's own bit is never used)
+            fromSh = 0;
+            s_fallback.store(true, std::memory_order_relaxed);
+            KillNow(kKVerify);
+        } else {
+            if (gps) gps->Release();
+            for (auto* x : gcb) if (x) x->Release();
+            for (auto* x : gsm) if (x) x->Release();
+        }
+    }
+    // ---- references: a shadow pointer the previous draw of this record already names is held through that draw ----
+    if (fromSh) {
+        auto take = [&](IUnknown* q, const IUnknown* pq, uint32_t bit) {
+            if (!(fromSh & bit) || !q) return;
+            if (q == pq) { ++s_st.psRefsSkipped; return; }
+            q->AddRef();
+            own |= bit;
+            ++s_st.psRefsTaken;
+        };
+        take(p.ps, prev ? prev->ps : nullptr, kPOPs);
+        for (int t = 0; t < kPsCb; ++t) take(p.cb[t], prev ? prev->cb[t] : nullptr, kPOCb0 << t);
+        for (int t = 0; t < kPsSmp; ++t) take(p.smp[t], prev ? prev->smp[t] : nullptr, kPOSmp0 << t);
+    }
+    p.own = own;
+    ++s_st.psRecShadow;
+    return true;
+}
+
 bool DrawIdRecord::Record(ID3D11DeviceContext1* ctx, UINT ic, UINT inst, UINT si, INT bv, UINT sinst, bool instanced) {
     const uint8_t gsKind = m_nextGs;                     // phase 64: consumed by THIS call, also when it records nothing (a full
     m_nextGs = 0;                                        //   record must not leave the stamp armed for another pass's draw)
@@ -3400,10 +3687,15 @@ bool DrawIdRecord::Record(ID3D11DeviceContext1* ctx, UINT ic, UINT inst, UINT si
     }
     if (m_capPs && m_ps) {
         PsState& p = m_ps[m_n];
-        ctx->PSGetShader(&p.ps, nullptr, nullptr);
-        ctx->PSGetConstantBuffers1(0, kPsCb, p.cb, p.cbFirst, p.cbNum);
+        // phase 93: PS, PS cbuffers, PS samplers from the DidShadow PS bank (references shared with the previous unreleased draw);
+        // else the getters as before. The SRVs always through the getter (hazard-prone, see 14. in draw_ids.h).
+        if (!CapturePsShadow(ctx, p, m_n > m_releasedTo ? &m_ps[m_n - 1] : nullptr)) {
+            ctx->PSGetShader(&p.ps, nullptr, nullptr);
+            ctx->PSGetConstantBuffers1(0, kPsCb, p.cb, p.cbFirst, p.cbNum);
+            ctx->PSGetSamplers(0, kPsSmp, p.smp);
+            p.own = kPOwnAll;
+        }
         ctx->PSGetShaderResources(0, kPsSrv, p.srv);
-        ctx->PSGetSamplers(0, kPsSmp, p.smp);
         // pending-resource set (hkMap): the cbuffers, and the SRVs whose view changed since this record's previous draw
         for (int t = 0; t < kPsCb; ++t) if (p.cb[t]) NoteRes(p.cb[t]);
         for (int t = 0; t < kPsSrv; ++t) {
@@ -3661,7 +3953,10 @@ void DrawIdRecord::SetReplayGs(ReplayGsFn fn, ID3D11BlendState* noA2c) { g_repla
 //  - VRS bracket, LightRedraw, MenuLate*, Ofxr pass-through counters: per-draw paths test !inDlaa or are not reached -- nothing.
 // KEPT THROUGH THE HOOKS (pass level, once per replay): OMSetRenderTargets, the id-target clear, OMSetDepthStencilState /
 // OMSetBlendState, our PSSetShader, GS / HS / DS = null, GfxSave::Save / Restore. NOT HOOKED (direct vtable calls, nothing to
-// gain): IASetPrimitiveTopology, VSSetShaderResources, RSSetScissorRects, PSSetConstantBuffers1, PSSetShaderResources.
+// gain): IASetPrimitiveTopology, VSSetShaderResources, RSSetScissorRects, PSSetShaderResources. Phase 93: PSSetConstantBuffers1 is
+// hooked now (the DidShadow PS / OM bank) and joins the trampoline calls (kRawPsCb1); its hook has no t_inDlaa branch (CPU_HOOK_COUNT
+// idle at depth > 0, the original, the PS-bank Note) and GfxSave::Restore puts every PS cbuffer slot the loop set back through the
+// hook (slot 0 always, 0..3 in the depth batch = psAll), so the bank ends on the game's values either way, as the IA / VS sets above.
 // Another tool that detoured the same function AFTER us is skipped by the trampoline call too (as inject.cpp's existing direct
 // oClearDSV / oOMSetDepthStencilState / oRSSetViewports calls already do).
 // ---- phase 58c: DrawIndexed / DrawIndexedInstanced are resolved PER DRAW ----
@@ -3711,7 +4006,7 @@ int               g_rawMissN = 0;
 static_assert(DrawIdRecord::kRawN <= 32, "RawFn bits are a uint32_t mask");
 const char* const kRawName[DrawIdRecord::kRawN] = {
     "IASetInputLayout", "IASetVertexBuffers", "IASetIndexBuffer", "VSSetShader", "VSSetConstantBuffers1", "VSSetSamplers",
-    "RSSetState", "RSSetViewports", "PSSetShader", "PSSetSamplers", "DrawIndexed", "DrawIndexedInstanced" };
+    "RSSetState", "RSSetViewports", "PSSetShader", "PSSetSamplers", "PSSetConstantBuffers1", "DrawIndexed", "DrawIndexedInstanced" };
 // the replay's per-draw calls: a trampoline, or null = the vtable call (ctx->X)
 struct RawCalls {
     void (STDMETHODCALLTYPE* il)(ID3D11DeviceContext*, ID3D11InputLayout*);
@@ -3724,6 +4019,7 @@ struct RawCalls {
     void (STDMETHODCALLTYPE* vp)(ID3D11DeviceContext*, UINT, const D3D11_VIEWPORT*);
     void (STDMETHODCALLTYPE* ps)(ID3D11DeviceContext*, ID3D11PixelShader*, ID3D11ClassInstance* const*, UINT);
     void (STDMETHODCALLTYPE* psSmp)(ID3D11DeviceContext*, UINT, UINT, ID3D11SamplerState* const*);
+    void (STDMETHODCALLTYPE* psCb1)(ID3D11DeviceContext1*, UINT, UINT, ID3D11Buffer* const*, const UINT*, const UINT*);   // phase 93
     // phase 58c: di / dii are registered-or-null; the replay loop takes them only while VtNow(ctx, diVt) == diT (per draw)
     void (STDMETHODCALLTYPE* di)(ID3D11DeviceContext*, UINT, UINT, INT);
     void (STDMETHODCALLTYPE* dii)(ID3D11DeviceContext*, UINT, UINT, UINT, INT, UINT);
@@ -3795,6 +4091,7 @@ uint32_t RawResolve(ID3D11DeviceContext1* ctx, RawCalls& rc) {
     RawPick(rc.vp, DrawIdRecord::kRawVp, vt, m);
     RawPick(rc.ps, DrawIdRecord::kRawPs, vt, m);
     RawPick(rc.psSmp, DrawIdRecord::kRawPsSmp, vt, m);
+    RawPick(rc.psCb1, DrawIdRecord::kRawPsCb1, vt, m);   // phase 93
     RawPickPerDraw(rc.di, rc.diT, rc.diVt, DrawIdRecord::kRawDi, m);
     RawPickPerDraw(rc.dii, rc.diiT, rc.diiVt, DrawIdRecord::kRawDii, m);
     if (m != g_rawLogMask && g_rawLogs < 8) {            // the first replay + every change of the set (a rewritten vtable entry)
@@ -4104,7 +4401,7 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
                     f[c] = valid ? p.cbFirst[c] : 0;
                     nm[c] = valid ? p.cbNum[c] : 4096;
                 }
-                ctx->PSSetConstantBuffers1(0, kPsCb, p.cb, f, nm);
+                if (rc.psCb1) rc.psCb1(ctx, 0, kPsCb, p.cb, f, nm); else ctx->PSSetConstantBuffers1(0, kPsCb, p.cb, f, nm);   // phase 93
             }
             if (!curPs || memcmp(curPs->srv, p.srv, sizeof(p.srv))) ctx->PSSetShaderResources(0, kPsSrv, p.srv);
             if (!curPs || memcmp(curPs->smp, p.smp, sizeof(p.smp))) {
@@ -4114,7 +4411,8 @@ DrawIdRecord::ReplayResult DrawIdRecord::ReplayImpl(ID3D11DeviceContext1* ctx, I
             curPs = &p;
         } else {
             const UINT first = drawId * 16u, num = 16u;
-            ctx->PSSetConstantBuffers1(0, 1, &idCb, &first, &num);
+            if (rc.psCb1) rc.psCb1(ctx, 0, 1, &idCb, &first, &num);   // phase 93: hooked now -> its trampoline (as PSSetShader)
+            else ctx->PSSetConstantBuffers1(0, 1, &idCb, &first, &num);
         }
         // phase 58c: the draw's trampoline only while its vtable entry is the hooked function NOW (after this draw's sets); else
         // the vtable -- d3d11's Amortized entry after a command-buffer submit runs its prologue, restores the entry, enters our hook

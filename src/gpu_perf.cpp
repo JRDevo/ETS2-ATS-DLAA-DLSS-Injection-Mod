@@ -57,6 +57,8 @@ uint64_t g_tag = 0;
 bool     g_mirror = false;
 uint32_t g_gen = 1;                    // token generation (low bits of the set index)
 uint32_t g_restarts = 0;               // Restart() calls (Restarts())
+uint64_t g_every = kFrameEveryClosed;  // phase 93: frames per timed frame (SetFrameEvery; 1 while the tuning menu is open)
+uint64_t g_everyWin = 0;               // phase 93: the largest g_every a set of this window was opened with (LogWindow's note)
 
 // tag -> eye (ring)
 struct TagEye { uint64_t tag; int eyeP1; };   // eyeP1 = eye + 1 (0 = empty)
@@ -138,10 +140,12 @@ bool OpenCur(ID3D11DeviceContext* ctx) {
 Set* Cur(ID3D11DeviceContext* ctx) {
     if (!g_on || g_broken || !ctx) return nullptr;
     if (g_cur >= 0 && g_set[g_cur].frame != g_frame) CloseCur(ctx);
+    if (!FrameTimed()) return nullptr;                 // phase 93: not a timed frame -- no query, no section
     if (g_cur < 0) {
         CpuProf::Block cpb(CpuProf::kBGpuPerf);        // phase 31 CPU profiler: landing the old sets + opening a new one
         Poll(ctx);
         if (!OpenCur(ctx)) { ++g_w.dropped; return nullptr; }
+        if (g_every > g_everyWin) g_everyWin = g_every;   // phase 93
     }
     return &g_set[g_cur];
 }
@@ -182,7 +186,9 @@ void SetPass(uint64_t tag) { g_tag = tag; }
 uint64_t Pass() { return g_tag; }
 void SetMirror(bool on) { g_mirror = on; }
 bool Mirror() { return g_mirror; }
-bool Sampled(uint64_t tag) { return g_on && (tag % kSampleEvery) == 0; }
+bool Sampled(uint64_t tag) { return g_on && (tag % kSampleEvery) == 0 && FrameTimed(); }   // phase 93: + a timed frame
+void SetFrameEvery(int n) { g_every = n > 1 ? (uint64_t)n : 1u; }
+bool FrameTimed() { return g_every <= 1 || (g_frame % g_every) == 0; }
 
 int Begin(ID3D11DeviceContext* ctx, int sec) {
     Set* s = Cur(ctx);
@@ -318,7 +324,7 @@ FrameStat FrameStats(int sec) {
 
 uint64_t Unattributed() { return g_w.unattributed; }
 uint64_t Dropped() { return g_w.dropped; }
-void Restart() { g_w = Win(); ++g_restarts; }
+void Restart() { g_w = Win(); ++g_restarts; g_everyWin = 0; }
 uint32_t Restarts() { return g_restarts; }
 
 void LogWindow(uint64_t blit, double sceneMs, uint32_t sceneN) {
@@ -327,9 +333,11 @@ void LogWindow(uint64_t blit, double sceneMs, uint32_t sceneN) {
         EyeStats st;
         if (!Stats(eye, &st)) continue;
         char buf[3072];
-        int o = snprintf(buf, sizeof(buf), "perf eye %d @blit %llu: mod GPU %.3f avg / %.3f max ms per pass (%llu passes; "
+        char every[48] = "";                          // phase 93: the frame sampling of this window
+        if (g_everyWin > 1) snprintf(every, sizeof(every), ", sampled 1/%llu frames", (unsigned long long)g_everyWin);
+        int o = snprintf(buf, sizeof(buf), "perf eye %d @blit %llu: mod GPU %.3f avg / %.3f max ms per pass (%llu passes%s; "
                          "everything except NGX; NGX %.3f avg, mirror NGX %.3f avg) | GPU spans scene ", eye,
-                         (unsigned long long)blit, st.total, st.totalMax, (unsigned long long)st.passes, st.avg[kNgx],
+                         (unsigned long long)blit, st.total, st.totalMax, (unsigned long long)st.passes, every, st.avg[kNgx],
                          st.avg[kMirNgx]);
         if (sceneMs >= 0.0) o += snprintf(buf + o, sizeof(buf) - (size_t)o, "%.2f ms/frame (n=%u)", sceneMs, sceneN);
         else o += snprintf(buf + o, sizeof(buf) - (size_t)o, "n/a");

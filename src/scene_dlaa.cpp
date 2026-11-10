@@ -2350,6 +2350,72 @@ bool SceneDlaa::OaaUpload(ID3D11DeviceContext* ctx, const float* p) {
     return true;
 }
 
+// phase 93: the visibility mask of this eye's OpenXR view (scene_dlaa.h SetVisibleMask)
+void SceneDlaa::SetVisibleMask(const float* t, uint32_t tris, uint64_t key) {
+    if (!t || !tris || !key) {
+        if (m_visKey) { m_visKey = 0; m_clipInN[0] = m_clipInN[1] = -1; }
+        return;
+    }
+    if (key == m_visKey) return;
+    m_visTri.assign(t, t + 6 * (size_t)tris);
+    m_visTris = tris;
+    m_visKey = key;
+    m_visBuiltKey = 0;
+    m_clipInN[0] = m_clipInN[1] = -1;
+}
+
+// phase 93: the bands clipped to the visible area (outside_aa.h SplitClip). No mask: the bands themselves (picture as before).
+// The per-row table is built once per (mask, image size) -- one pass over the rows x triangles (~1-3 ms at 2900 rows, logged);
+// the clip itself is cached per caller and recomputed only when its bands move (the rect follows dlaa_area / the optical centre).
+int SceneDlaa::OaaClip(int which, uint32_t w, uint32_t h, const OutsideAa::Box* b, int n, OutsideAa::Box* out) {
+    which &= 1;
+    if (!m_visKey) {
+        for (int i = 0; i < n; ++i) out[i] = b[i];
+        return n;
+    }
+    // phase 93 review: keyed on the size the rows were BUILT for (a failed build leaves m_vis empty = w 0, which re-ran this every blit)
+    if (m_visBuiltKey != m_visKey || m_visBuiltW != w || m_visBuiltH != h) {
+        {
+            LARGE_INTEGER t0{}, t1{}, fq{};
+            QueryPerformanceCounter(&t0);
+            const bool ok = OutsideAa::BuildVisRows(m_visTri.data(), m_visTris, w, h, OutsideAa::kClipMarginPx, &m_vis);
+            QueryPerformanceCounter(&t1);
+            QueryPerformanceFrequency(&fq);
+            m_visBuiltKey = m_visKey;
+            m_visBuiltW = w; m_visBuiltH = h;
+            m_visBuildFailed = !ok;
+            if (!ok) m_vis = OutsideAa::VisRows();
+            Log("outside AA (phase 93): eye %d visibility clip %s for %ux%u -- %u of %u rows show something, %u hidden triangles, "
+                "%u px margin (built in %.2f ms)", m_eye, ok ? "ready" : "NOT usable (bands drawn whole)", w, h, m_vis.visRows, h,
+                m_visTris, (unsigned)OutsideAa::kClipMarginPx,
+                fq.QuadPart ? (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)fq.QuadPart : 0.0);
+        }
+        m_clipInN[0] = m_clipInN[1] = -1;
+    }
+    if (m_clipInN[which] != n || m_clipInW[which] != w || m_clipInH[which] != h ||
+        memcmp(m_clipIn[which], b, sizeof(OutsideAa::Box) * (size_t)n) != 0) {
+        m_clipInN[which] = n; m_clipInW[which] = w; m_clipInH[which] = h;
+        memcpy(m_clipIn[which], b, sizeof(OutsideAa::Box) * (size_t)n);
+        m_clipArea[which] = m_clipKept[which] = 0;
+        m_clipOutN[which] = OutsideAa::SplitClip(m_vis, b, n, m_clipOut[which], &m_clipArea[which], &m_clipKept[which]);
+    }
+    const int m = m_clipOutN[which];
+    for (int i = 0; i < m; ++i) out[i] = m_clipOut[which][i];
+    if (which == 0) {                                    // the log: the computed / drawn bands only
+        m_oaaAreaWin += m_clipArea[0];
+        m_oaaKeptWin += m_clipKept[0];
+        if (++m_oaaClipRuns >= 600) {
+            LogDbg("outside AA (phase 93): eye %d visible-area clip -- %.1f %% of the band pixels skipped over the last %llu runs "
+                "(%.2f of %.2f Mpx per run kept, %d boxes; the lens corners the headset never shows)", m_eye,
+                m_oaaAreaWin ? 100.0 * (double)(m_oaaAreaWin - m_oaaKeptWin) / (double)m_oaaAreaWin : 0.0,
+                (unsigned long long)m_oaaClipRuns, (double)m_oaaKeptWin / (double)m_oaaClipRuns / 1.0e6,
+                (double)m_oaaAreaWin / (double)m_oaaClipRuns / 1.0e6, m);
+            m_oaaAreaWin = m_oaaKeptWin = m_oaaClipRuns = 0;
+        }
+    }
+    return m;
+}
+
 void SceneDlaa::OaaFirstLog(const char* what, uint32_t bands, int luma, float sx, float sy) {
     const bool up = m_up;
     Log("outside AA (phase 81): eye %d first outside-AA draw (%s) -- outside_aa=%d (%s), rect (%u,%u) %ux%u of %ux%u %s px, %u "
@@ -2447,6 +2513,10 @@ bool SceneDlaa::OaaInPlace(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11Te
         }
         Log("outside AA (phase 81): eye %d in-place scratch %ux%u %s created (%.0f MB)", m_eye, m_fullW, m_fullH,
             m_hdr ? "RGBA16F" : "RGBA8", (double)m_fullW * (double)m_fullH * (m_hdr ? 8.0 : 4.0) / (1024.0 * 1024.0));
+        // phase 93: zeroed once -- with the visibility clip, scratch pixels in the hidden lens corners are never computed, yet the
+        // copy-back's clipped boxes and RCAS's feather read can still reach some of them: they must hold finite values (never shown)
+        const FLOAT zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        ctx->ClearUnorderedAccessViewFloat(m_oaaUav.Get(), zero);
     }
     // Params. The feather is the one RCAS blends with -- only when its resources exist (m_sharpRes); else the copy-back is a hard
     // edge and the interior is the whole rect.
@@ -2457,6 +2527,20 @@ bool SceneDlaa::OaaInPlace(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11Te
     const float sx = OutsideAa::ShiftFromNgx(jitterX, s_oaaSignX), sy = OutsideAa::ShiftFromNgx(jitterY, s_oaaSignY);
     float p[OutsideAa::kParamFloats];
     OutsideAa::FillParams(p, in, m_fullW, m_fullH, m_fullW, m_fullH, sx, sy, s_oaaMode, m_oaaSrcLuma, m_oaaSrcEncode, 0.0f, 0.0f);
+    // phase 93: only the bands' visible part is computed -- one dispatch over the union box of the clipped bands (Params[4].zw =
+    // its origin). Without a mask: the whole image from (0, 0) as before (the CS skips the interior itself).
+    UINT gx = (m_fullW + 7) / 8, gy = (m_fullH + 7) / 8;
+    if (m_visKey) {
+        OutsideAa::Box bands[4], clip[4 * OutsideAa::kClipStrips];
+        const int nb = OutsideAa::Bands(m_fullW, m_fullH, in, bands);
+        const int nc = OaaClip(0, m_fullW, m_fullH, bands, nb, clip);
+        const OutsideAa::Box u = OutsideAa::UnionBox(clip, nc);
+        if (OutsideAa::Empty(u)) { gx = gy = 0; }
+        else {
+            p[18] = (float)u.x0; p[19] = (float)u.y0;
+            gx = (UINT)(u.x1 - u.x0 + 7) / 8; gy = (UINT)(u.y1 - u.y0 + 7) / 8;
+        }
+    }
     if (!OaaUpload(ctx, p)) return false;
     // UAVs first (all 8 slots: NGX may have left one bound; CsState restores the game's), then the SRVs -- as the RCAS pass does
     ID3D11UnorderedAccessView* uav[8] = { m_oaaUav.Get() };
@@ -2467,9 +2551,9 @@ bool SceneDlaa::OaaInPlace(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11Te
     ctx->CSSetUnorderedAccessViews(0, 8, uav, keep);
     ctx->CSSetShaderResources(0, 2, srv);
     ctx->CSSetSamplers(0, 1, &smp);
-    {
+    if (gx && gy) {
         GpuPerfScope gp(ctx, GpuPerf::kOutsideAa);
-        ctx->Dispatch((m_fullW + 7) / 8, (m_fullH + 7) / 8, 1);
+        ctx->Dispatch(gx, gy, 1);
     }
     ID3D11ShaderResourceView* ns[2] = {};
     ID3D11UnorderedAccessView* nu = nullptr;
@@ -2488,8 +2572,9 @@ bool SceneDlaa::OaaInPlace(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11Te
 
 void SceneDlaa::OaaCopyBack(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap) {
     const OutsideAa::Box rect{ (int32_t)m_rx, (int32_t)m_ry, (int32_t)(m_rx + m_w), (int32_t)(m_ry + m_h) };
-    OutsideAa::Box b[4];
-    const int n = OutsideAa::OuterBands(m_fullW, m_fullH, rect, b);
+    OutsideAa::Box ob[4], b[4 * OutsideAa::kClipStrips];
+    const int nob = OutsideAa::OuterBands(m_fullW, m_fullH, rect, ob);
+    const int n = OaaClip(1, m_fullW, m_fullH, ob, nob, b);   // phase 93: the visible part only (no mask: the 4 bands)
     GpuPerfScope gp(ctx, GpuPerf::kOutsideAa);
     for (int i = 0; i < n; ++i) {
         const D3D11_BOX box{ (UINT)b[i].x0, (UINT)b[i].y0, 0, (UINT)b[i].x1, (UINT)b[i].y1, 1 };
@@ -2541,8 +2626,9 @@ void SceneDlaa::OaaDrawBands(ID3D11DeviceContext* ctx, ID3D11ShaderResourceView*
     const int luma = m_hdr ? 2 : (srgb ? 1 : 0);
     const OutsideAa::Box rect{ (int32_t)m_oxc, (int32_t)m_oyc, (int32_t)(m_oxc + m_ow), (int32_t)(m_oyc + m_oh) };
     const OutsideAa::Box in = OutsideAa::Interior(rect, fx, fy, edges);
-    OutsideAa::Box b[4];
-    const int n = OutsideAa::Bands(m_outFullW, m_outFullH, in, b);
+    OutsideAa::Box bands[4], b[4 * OutsideAa::kClipStrips];
+    const int nb = OutsideAa::Bands(m_outFullW, m_outFullH, in, bands);
+    const int n = OaaClip(0, m_outFullW, m_outFullH, bands, nb, b);   // phase 93: the visible part only (no mask: the bands)
     if (n <= 0) return;
     float p[OutsideAa::kParamFloats];
     OutsideAa::FillParams(p, in, m_outFullW, m_outFullH, m_fullW, m_fullH, m_oaaSx, m_oaaSy, s_oaaMode, luma, false, (float)vpX,

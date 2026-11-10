@@ -91,6 +91,96 @@ static void PartA() {
     std::printf("part A: %d feather cases\n", cases);
 }
 
+// ---- Part C (phase 93, no D3D): the bands clipped to a visibility mask ---------------------------------------------------------
+// A lens-like hidden mesh (the square minus a 64-gon of radius 0.93, as quads between the polygon and its radial projection onto the
+// square border + the corner wedge where two border points lie on different sides; shared edges in both orders) at several
+// image sizes and rects. Brute force: a pixel is VISIBLE when its centre lies in no triangle (edges included, the Coverage rule).
+// Checks: every visible pixel outside the feather interior lies in some clip box (the clip never drops a shown pixel), the boxes stay
+// inside the bands, the clip skips a real share of the band pixels, no mask = the bands unchanged.
+static bool InTri(const float* v, float px, float py) {
+    auto E = [](float ax, float ay, float bx, float by, float x, float y) { return (bx - ax) * (y - ay) - (by - ay) * (x - ax); };
+    const float e0 = E(v[0], v[1], v[2], v[3], px, py), e1 = E(v[2], v[3], v[4], v[5], px, py), e2 = E(v[4], v[5], v[0], v[1], px, py);
+    return (e0 >= 0.0f && e1 >= 0.0f && e2 >= 0.0f) || (e0 <= 0.0f && e1 <= 0.0f && e2 <= 0.0f);
+}
+static void PartC() {
+    std::vector<float> tri;
+    const int N = 64;
+    const float R = 0.93f;
+    for (int i = 0; i < N; ++i) {
+        const double a0 = 2.0 * 3.14159265358979 * i / N, a1 = 2.0 * 3.14159265358979 * (i + 1) / N;
+        const float p0x = (float)(R * std::cos(a0)), p0y = (float)(R * std::sin(a0) * 0.97);   // slightly elliptic
+        const float p1x = (float)(R * std::cos(a1)), p1y = (float)(R * std::sin(a1) * 0.97);
+        auto proj = [](float x, float y, float* qx, float* qy) {
+            const float m = std::fabs(x) > std::fabs(y) ? std::fabs(x) : std::fabs(y);
+            *qx = x / m; *qy = y / m;
+        };
+        float q0x, q0y, q1x, q1y;
+        proj(p0x, p0y, &q0x, &q0y);
+        proj(p1x, p1y, &q1x, &q1y);
+        const float t0[6] = { p0x, p0y, p1x, p1y, q1x, q1y }, t1[6] = { p0x, p0y, q1x, q1y, q0x, q0y };
+        tri.insert(tri.end(), t0, t0 + 6);
+        tri.insert(tri.end(), t1, t1 + 6);
+        if (std::fabs(q0x) != std::fabs(q1x) && (std::fabs(q0x) == 1.0f) != (std::fabs(q1x) == 1.0f)) {   // around a corner
+            const float cx = std::fabs(q0x) == 1.0f ? q0x : q1x, cy = std::fabs(q0y) == 1.0f ? q0y : q1y;
+            const float t2[6] = { q0x, q0y, q1x, q1y, cx, cy };
+            tri.insert(tri.end(), t2, t2 + 6);
+        }
+    }
+    const uint32_t tris = (uint32_t)(tri.size() / 6);
+    struct Case { uint32_t w, h; Box rect; float f; };
+    const Case cases[] = { { 320, 360, { 80, 90, 240, 270 }, 24.0f }, { 257, 301, { 64, 75, 192, 225 }, 0.0f },
+                           { 400, 300, { 130, 60, 290, 250 }, 12.5f }, { 96, 128, { 20, 30, 70, 100 }, 6.0f } };
+    for (const Case& c : cases) {
+        OutsideAa::VisRows v;
+        CHECK(OutsideAa::BuildVisRows(tri.data(), tris, c.w, c.h, OutsideAa::kClipMarginPx, &v), "BuildVisRows %ux%u", c.w, c.h);
+        const bool e[4] = { true, true, true, true };
+        const Box in = OutsideAa::Interior(c.rect, c.f, c.f, e);
+        Box bands[4], clip[4 * OutsideAa::kClipStrips];
+        const int nb = OutsideAa::Bands(c.w, c.h, in, bands);
+        uint64_t area = 0, kept = 0;
+        const int nc = OutsideAa::SplitClip(v, bands, nb, clip, &area, &kept);
+        int missed = 0, outsideBands = 0;
+        for (int i = 0; i < nc; ++i) {
+            bool inside = false;
+            for (int k = 0; k < nb; ++k)
+                inside = inside || (clip[i].x0 >= bands[k].x0 && clip[i].x1 <= bands[k].x1 && clip[i].y0 >= bands[k].y0 &&
+                                    clip[i].y1 <= bands[k].y1);
+            if (!inside) ++outsideBands;
+        }
+        uint64_t visBand = 0;
+        for (uint32_t y = 0; y < c.h; ++y)
+            for (uint32_t x = 0; x < c.w; ++x) {
+                if (In(in, (int)x, (int)y)) continue;
+                const float px = 2.0f * ((float)x + 0.5f) / (float)c.w - 1.0f, py = 1.0f - 2.0f * ((float)y + 0.5f) / (float)c.h;
+                bool hidden = false;
+                for (uint32_t k = 0; k < tris && !hidden; ++k) hidden = InTri(&tri[6 * k], px, py);
+                if (hidden) continue;
+                ++visBand;
+                bool covered = false;
+                for (int i = 0; i < nc && !covered; ++i) covered = In(clip[i], (int)x, (int)y);
+                if (!covered) ++missed;
+            }
+        CHECK(missed == 0, "%ux%u: %d visible band pixels outside every clip box", c.w, c.h, missed);
+        CHECK(outsideBands == 0, "%ux%u: %d clip boxes not inside a band", c.w, c.h, outsideBands);
+        CHECK(kept <= area && kept >= visBand && (c.w < 200 || kept * 10 < area * 9), "%ux%u: kept %llu of %llu band px (visible "
+              "%llu)", c.w, c.h, (unsigned long long)kept, (unsigned long long)area, (unsigned long long)visBand);
+        std::printf("part C %ux%u: %d boxes, %.1f %% of the band pixels skipped (visible band pixels %llu, kept %llu of %llu)\n",
+                    c.w, c.h, nc, area ? 100.0 * (double)(area - kept) / (double)area : 0.0, (unsigned long long)visBand,
+                    (unsigned long long)kept, (unsigned long long)area);
+        // no mask: the bands as they are
+        OutsideAa::VisRows none;
+        Box same[4 * OutsideAa::kClipStrips];
+        const int ns = OutsideAa::SplitClip(none, bands, nb, same, nullptr, nullptr);
+        bool eq = ns == nb;
+        for (int i = 0; i < ns && eq; ++i)
+            eq = same[i].x0 == bands[i].x0 && same[i].y0 == bands[i].y0 && same[i].x1 == bands[i].x1 && same[i].y1 == bands[i].y1;
+        CHECK(eq, "%ux%u: no mask must leave the bands unchanged", c.w, c.h);
+    }
+    // degenerate input: nothing usable -> no table (the caller draws the bands whole)
+    OutsideAa::VisRows v0;
+    CHECK(!OutsideAa::BuildVisRows(nullptr, 0, 100, 100, 8, &v0) && v0.w == 0, "BuildVisRows without triangles");
+}
+
 // ---- Part B (WARP) -----------------------------------------------------------------------------------------------------------
 static const char* kSceneHlsl = R"(
 cbuffer C : register(b0) { float2 size; float kind; float pad; };
@@ -261,6 +351,49 @@ static void RunPs(Gpu& g, const Tex& src, const Tex& rt, const float* p, const B
     g.ctx->PSSetShaderResources(0, 2, ns);
     ID3D11RenderTargetView* none = nullptr;
     g.ctx->OMSetRenderTargets(1, &none, nullptr);
+}
+
+// phase 93 B5: CSMain with a dispatch origin (Params[4].zw, the in-place visibility clip) writes exactly the pixels of the
+// full-image dispatch inside the dispatched box (bit for bit) and nothing outside it.
+static void CsOrigin(Gpu& g) {
+    const UINT W = 97, H = 83;
+    Tex raw = MakeTex(g, W, H, DXGI_FORMAT_R16G16B16A16_FLOAT, false), a = MakeTex(g, W, H, DXGI_FORMAT_R16G16B16A16_FLOAT, true),
+        b = MakeTex(g, W, H, DXGI_FORMAT_R16G16B16A16_FLOAT, true);
+    RenderRaw(g, raw, 0.31f, -0.22f, 0);
+    const bool e[4] = { true, true, true, true };
+    const Box in = OutsideAa::Interior(Box{ 25, 20, 70, 60 }, 4.0f, 4.0f, e);
+    float p[OutsideAa::kParamFloats];
+    OutsideAa::FillParams(p, in, W, H, W, H, 0.31f, -0.22f, 2, 2, false, 0.0f, 0.0f);
+    RunCs(g, raw, a, p);                                        // the whole image (origin 0)
+    const std::vector<float> fa = ReadR(g, a);
+    const UINT ox = 13, oy = 9, gx = 6, gy = 5;                 // a box (13, 9) .. (61, 49), partly over the interior
+    p[18] = (float)ox; p[19] = (float)oy;
+    SetParams(g, p);
+    const float zero[4] = { 0, 0, 0, 0 };
+    g.ctx->ClearUnorderedAccessViewFloat(b.uav, zero);
+    ID3D11ShaderResourceView* srv[2] = { raw.srv, g.paramsSrv };
+    g.ctx->CSSetShader(g.oaaCs, nullptr, 0);
+    g.ctx->CSSetShaderResources(0, 2, srv);
+    g.ctx->CSSetUnorderedAccessViews(0, 1, &b.uav, nullptr);
+    g.ctx->CSSetSamplers(0, 1, &g.lin);
+    g.ctx->Dispatch(gx, gy, 1);
+    ID3D11ShaderResourceView* ns[2] = {};
+    ID3D11UnorderedAccessView* nu = nullptr;
+    g.ctx->CSSetShaderResources(0, 2, ns);
+    g.ctx->CSSetUnorderedAccessViews(0, 1, &nu, nullptr);
+    const std::vector<float> fb = ReadR(g, b);
+    int diff = 0, stray = 0, written = 0;
+    for (UINT y = 0; y < H; ++y)
+        for (UINT x = 0; x < W; ++x) {
+            const bool inBox = x >= ox && x < ox + gx * 8 && y >= oy && y < oy + gy * 8;
+            const float va = fa[(size_t)y * W + x], vb = fb[(size_t)y * W + x];
+            if (inBox) { if (std::memcmp(&va, &vb, sizeof(float)) != 0) ++diff; if (vb != 0.0f) ++written; }
+            else if (vb != 0.0f) ++stray;
+        }
+    CHECK(diff == 0 && stray == 0 && written > 0, "CS origin: %d pixels differ from the full dispatch inside the box, %d written "
+          "outside it, %d written inside", diff, stray, written);
+    std::printf("B5 CS origin: %d pixels written inside the box, identical to the full dispatch\n", written);
+    raw.Release(); a.Release(); b.Release();
 }
 
 static void Phase(int i, float* sx, float* sy) { *sx = Halton(i + 1, 2) - 0.5f; *sy = Halton(i + 1, 3) - 0.5f; }
@@ -442,6 +575,7 @@ static void Upscale(Gpu& g) {
 
 int main() {
     PartA();
+    PartC();                                                         // phase 93
     Gpu g;
     const D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_11_0;
     if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, &fl, 1, D3D11_SDK_VERSION, &g.dev, nullptr, &g.ctx))) {
@@ -480,6 +614,7 @@ int main() {
     InPlace(g, DXGI_FORMAT_R8G8B8A8_UNORM, 2, 0, "B2 in place RGBA8 mode 2 (vs mode 2 at shift 0)", 0.35, 0.08, true);
     ThinLines(g);
     Upscale(g);
+    CsOrigin(g);                                                     // phase 93
 
     std::printf("%s: %d checks, %d failed\n", g_fail ? "FAILED" : "all passed", g_checks, g_fail);
     return g_fail ? 1 : 0;

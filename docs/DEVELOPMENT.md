@@ -2800,3 +2800,66 @@ injector survives game updates that break index-based hooks.
   the square (not changed).
 - **False "game's own TAA is ON while game_taa = 0" warning** right after leaving Mix: the game draws its TAA ~1 s more until the
   typed `uset r_aa "0"` lands. `TaaOnResolve` skips the warning while `RaaSwitching()` (as the menu's "switching...").
+
+### Phase 93: performance pass (Fable audit 2026-11-09)
+
+A Fable audit of `captures/ats_2026-11-02_1717_phase92_rc1.log` (ATS VR, 72 Hz, log level 4). Read-only / scheduling changes: the
+picture is meant to stay the same (item 2 only skips pixels the headset never shows).
+- **93a, DidShadow PS / OM bank (`draw_ids.h` 14., `draw_ids.cpp`, `inject.cpp`; dlaa.ini `did_shadow_ps`, default 1, startup
+  only, needs `did_shadow` >= 1).** Why: ~265 ns per forward-pass entry (the `fwd-depth` CPU row) -- `FwdOnDraw` read the
+  depth-stencil / blend state + the VS through the getters and every forward record (`SetCapturePs`: the forward-depth batch, the
+  glow bias records, the mirror units) the PS, PS cbuffers 0..3 + windows, 16 PS SRVs and 8 PS samplers, each pointer an AddRef /
+  Release. How: a second shadow bank fed by the already-hooked `PSSetShader` / `PSSetSamplers` / `OMSetBlendState` /
+  `OMSetDepthStencilState` + new `PSSetConstantBuffers` (16) / `PSSetConstantBuffers1` (123) hooks, and by every direct trampoline
+  call of two of them (`ShNotePsSmp`: the LOD sampler sets in `LodEnter` / `LodLeave` / `LodBindSet`; `NoteDss`: the v0.9.0
+  stencil-id twins in `ObjBindForGame` / `ObjLeave` / `hkDrawIndexed`). The hooks note what was ACTUALLY bound (the LOD twins, the
+  stencil twins), right after the original call. Armed only by a forward use (`FwdStates` / `CapturePsShadow` -> `ArmAndSeed(ctx,
+  true)`), so the G-buffer pass's Notes stay one relaxed load; dropped with the first bank on every drop / kill / pass start /
+  frame start / ClearState / ExecuteCommandList / SwapDeviceContextState / other thread / vtable change (the 6 entries joined the
+  liveness targets). Exactness rules as phase 35: an output-capable PS cbuffer reads its group through the getter; the PS SRVs
+  ALWAYS read the getter (the runtime's hazard tracking unbinds an SRV whose resource is bound as an output -- not tracked); the
+  record AddRefs only a pointer its previous unreleased draw does not already name (`PsState::own`, `OwnAllPs` before a partial
+  release, `ReleasePs` honours it). `FwdStates` hands BORROWED pointers (the binding holds them while the draw hook runs;
+  `FwdDrawStates::borrowed` releases nothing, `BiasOnDraw` takes them as before). The replay's per-draw `PSSetConstantBuffers1`
+  goes through its trampoline (`kRawPsCb1`, phase 58b rules: `GfxSave::Restore` puts every PS cbuffer slot back through the hook).
+  `CaptureShadow`'s arm / seed code moved into `ShUsable` + `ArmAndSeed` unchanged. Verify mode (`did_shadow_verify`, 64 at log
+  level 4) compares the bank too: fields ps / pscb / pssmp / dss / bs (vs in the first bank's field). Expected saving: most of
+  the ~6 refcount pairs of `FwdOnDraw` + the ~13 of each PS record's shader / cbuffers / samplers (the PS SRV getter stays), on
+  the order of 0.05-0.1 ms per VR frame. **Check in the VR log:** startup `did_shadow_ps=1 (phase 93)`; the "MV draw-ids" stats
+  line's new `| PS/OM bank (phase 93): forward draws N/pass from it ... verify: X compared, 0 mismatching`; no `PS/OM bank
+  MISMATCH` warnings; the `fwd-depth` row of `CPU prof` (was ~0.16-0.21 ms/frame). Kill switch: `did_shadow_ps = 0`.
+  WARP harness: `drawid_harness.exe -1 0.1 didshadow=1 didshadowps=1 shverify=1` (new CI step) -- 2408 PS records from the bank,
+  0 mismatches, MV dump byte-identical to the HEAD build's default run; `FwdStates` itself is not in the harness (no `FwdOnDraw`
+  there): its verify runs in game.
+- **93b, outside-AA bands clipped to the VR visibility mask (`outside_aa.h` `BuildVisRows` / `ClipBox` / `SplitClip`,
+  `scene_dlaa.cpp` `SetVisibleMask` / `OaaClip`, `inject.cpp` `HmVisibleMask`).** Why: 0.207 ms per eye (GpuPerf `outside-aa`) over
+  the whole picture outside the rect, lens corners included. How: per eye, the hidden triangles of its OpenXR view (`g_hm.tri`,
+  phase 40, NDC from the SUBMITTED fov = the compositor's own mapping) only when phase 40's eye -> view check accepted that view's
+  current mesh for this eye (`HmCheckEye`'s cached verdict) and `xr_hidden_mask` is on; no mask = no clip (the bands as before). A
+  per-row CONSERVATIVE visible span (each row's centre line cut exactly against every triangle, float gaps between triangles count
+  as visible, the hull of what is left, + 8 px and +- 8 rows), each band cut into 8 strips along its long side, each strip shrunk
+  to the bounding box of its visible pixels (cached per unit until the bands or the mask move). Upscale path: one draw per box
+  (same PS, smaller viewports). In-place path: one CS dispatch over the union box (new `Params[4].zw` = the dispatch origin; 0 =
+  the old whole-image dispatch) + the copy-back of the clipped outer bands; the scratch is zeroed once at creation (hidden pixels
+  the copy-back / RCAS feather can still reach hold finite values). Tests: `outside_aa_test` part C (a lens-like mesh, 4 sizes:
+  every visible band pixel inside a box, boxes inside the bands, no mask = unchanged; 22-26 % of the band pixels skipped at
+  257..400 px images) and B5 (WARP: the CS with an origin writes exactly the full dispatch's pixels inside its box, nothing else).
+  **Check in the VR log:** `outside AA (phase 93): eye N visibility clip ready for WxH` (once per mesh / size, with its build time),
+  the LogDbg `visible-area clip -- X % of the band pixels skipped` every 600 runs per eye, and the `outside-aa` figure of the
+  `perf eye N` lines (was 0.207 ms).
+- **93c, preview depth assembly at half rate: NOT done.** The assembled picture depth (`PvAssembleTile`, 8 tile passes, 1.02 ms
+  per frame on the truck / profile screen) is THIS frame's NGX depth input and the depth the preview MVs reproject with: keeping the
+  previous frame's on every second frame changes what DLSS gets (the truck turns, the head moves in VR) -- not picture-identical.
+  (`A.frameMask` / `twin.valid` are also reset at every Present, so "keep the previous result" would need a validity change too.)
+- **93d, profiler self-cost at log level 4.** (a) `CPU_HOOK_COUNT` (`cpu_prof.h` `HookCount`): the light state Set hooks
+  (StateSet incl. the new PS cbuffer hooks, PSSetShader, PSSetSamplers, OMSetBlendState, OMSetDepthStencilState, RSSetViewports;
+  ~500 game calls per VR frame) count their calls but read no clock (a timed hook = 4 TSC reads, ~30 ns). The scope keeps a ghost
+  stack entry (`kGhost` bit) so hooked calls issued inside stay the mod's and a Block inside is still timed (Push charges nothing to
+  a ghost; `Drv` inside one is not timed either). Their hook-body time and the game's own call now land in "outside the hooks"; the
+  report prints them as `Name calls n/t`. (b) GpuPerf frame sampling: with the tuning menu closed only every 8th Present frame opens
+  a query set (`GpuPerf::SetFrameEvery`, `FrameTimed`; `Sampled()` also needs a timed frame); the menu sets 1 while open (its cost
+  column). Averages stay per timed pass; the `perf eye N` line says `sampled 1/8 frames`. The WARP harness keeps every frame.
+  **Check:** `CPU prof` line `profiler ~x ms/frame (N timer reads/frame ...)` (was 2081 reads/frame, ~0.014 ms) and `gpu-timers`
+  (was 0.015 ms/frame, 73 entries).
+- **Not verified in game:** every figure above; `FwdStates`' verify; the visibility clip on the user's headset (Virtual Desktop) and
+  its savings at the real mesh / 2928 px eyes; the in-place clip path (not the user's config).

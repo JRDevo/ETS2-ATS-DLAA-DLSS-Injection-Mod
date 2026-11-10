@@ -2089,6 +2089,50 @@ void EgOnDestroySession(XrSession ses) {
     s_egGaze = EgGaze();
     ReleaseSRWLockExclusive(&s_egLock);
 }
+// issue #29: a fresh (never attached) action set + gaze pose action for instance `inst`, replacing s_eg.set / s_eg.act, for a
+// foreign eye gaze suggestion that came after our old set was attached (SuggestImpl, ALREADY_ATTACHED). Takes s_egMx -- the
+// caller must NOT hold s_egSugMx (lock order s_egMx -> s_egSugMx). Only while no game session is live (the case of issue #29: the
+// suggestion comes inside the game's next xrCreateSession, after it destroyed the old one): a live session still syncs and
+// locates the old set, so it is never swapped under it. The old set is destroyed. Returns {null} when nothing is made.
+XrActionSuggestedBinding EgRemakeSetForResuggest(XrInstance inst, XrPath binding) {
+    static std::atomic<uint32_t> s_gen{1};
+    std::lock_guard<std::mutex> lk(s_egMx);
+    const EgFns& o = s_eg.fn;
+    if (inst != s_eg.inst || !s_eg.set || s_eg.ses || !binding || s_egSetup.load(std::memory_order_relaxed) != 1 || !o.createSet ||
+        !o.createAction || !o.destroySet)
+        return XrActionSuggestedBinding{};
+    const uint32_t gen = s_gen.fetch_add(1, std::memory_order_relaxed) + 1;   // (no cap: the old set is destroyed each time)
+    XrActionSetCreateInfo si{};
+    si.type = kTypeActionSetCreateInfo;
+    sprintf_s(si.actionSetName, "dlaa_eye_gaze_%u", gen);           // (a new name: some runtimes keep a destroyed set's name taken)
+    sprintf_s(si.localizedActionSetName, "DLAA mod eye gaze %u", gen);
+    si.priority = 0;
+    XrActionSet set = nullptr;
+    XrAction act = nullptr;
+    ++t_depth;
+    XrResult r = o.createSet(inst, &si, &set);
+    if (r >= 0) {
+        XrActionCreateInfo ai{};
+        ai.type = kTypeActionCreateInfo;
+        strcpy_s(ai.actionName, "gaze_pose");
+        ai.actionType = kActionTypePoseInput;
+        strcpy_s(ai.localizedActionName, "Eye gaze");
+        r = o.createAction(set, &ai, &act);
+        if (r < 0) { o.destroySet(set); set = nullptr; act = nullptr; }
+    }
+    const XrActionSet old = s_eg.set;
+    if (r >= 0) o.destroySet(old);                       // (no live session: nothing uses it any more; its action goes with it)
+    --t_depth;
+    if (r < 0) {
+        LogErr("Eye tracking: making a fresh gaze set for the new session FAILED -> %d = %s -- no eye gaze", r, XrResultName(r));
+        return XrActionSuggestedBinding{};
+    }
+    s_eg.set = set;
+    s_eg.act = act;
+    s_egSyncSet.store(set, std::memory_order_relaxed);
+    Log("Eye tracking: fresh gaze set \"%s\" %p + pose action %p (old set %p destroyed)", si.actionSetName, set, act, old);
+    return XrActionSuggestedBinding{ act, binding };
+}
 void EgFailLocked(const char* what, XrResult r) {   // under s_egMx: gaze off for this session (logged once per session)
     if (s_eg.failed) return;
     s_eg.failed = true;
@@ -3381,6 +3425,30 @@ XrResult SuggestImpl(int i, XrInstance inst, const XrInteractionProfileSuggested
             Log("Eye tracking: %u eye gaze binding(s) suggested from above the runtime (the game or a layer such as OpenXR Toolkit) "
                 "-- ours appended (it would be replaced) -> %d = %s", n, r, XrResultName(r));
         return r;
+    }
+    // issue #29: the game made a NEW session on the same instance (ETS2 does: session 1 is destroyed right after the attach) and
+    // the layer suggests its eye gaze binding again inside that xrCreateSession. Our set was attached to the old session, so it
+    // can never take a new binding (ALREADY_ATTACHED), and their call alone would replace ours -> 0 valid gazes. A fresh,
+    // never-attached set + action carries our binding instead; the new session attaches that one.
+    if (r == kErrActionSetsAlreadyAttached) {
+        const XrActionSuggestedBinding fresh = EgRemakeSetForResuggest(inst, ours.binding);
+        if (fresh.action) {
+            all[n] = fresh;
+            ++t_depth;
+            const XrResult r2 = real(inst, &c);
+            --t_depth;
+            if (r2 >= 0) {
+                std::lock_guard<std::mutex> sl(s_egSugMx);
+                if (s_egSugInst == inst) s_egOurs = fresh;
+                Log("Eye tracking: %u eye gaze binding(s) suggested from above the runtime again (a new session; our old set was "
+                    "attached -> ALREADY_ATTACHED) -- ours appended with a FRESH gaze set -> %d = %s (issue #29)", n, r2, XrResultName(r2));
+                return r2;
+            }
+            r = r2;
+            // the old action is destroyed and the fresh one has no binding: a later foreign suggestion must not append a dead handle
+            std::lock_guard<std::mutex> sl(s_egSugMx);
+            if (s_egSugInst == inst) s_egOurs = XrActionSuggestedBinding{};
+        }
     }
     const XrResult rOurs = r;
     r = pass();

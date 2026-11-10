@@ -5,6 +5,10 @@
 // v0.16.0-rc2 -- issue #28: VR eye map from the OpenXR view of each swapchain image (EyeOfXrView; drive + preview). A
 //           symmetric-fov headset (no projection verdict) with a changing blit eye order fed one DLSS eye both eyes' pictures:
 //           a ghost of near objects (the steering wheel) one IPD to the side.
+// v0.16.0-rc3 -- phase 93 perf pass (Fable audit: DidShadow PS / OM bank did_shadow_ps, outside-AA bands clipped to the VR
+//           visibility mask, counter-only CPU profiler hooks, GpuPerf 1 frame in 8 with the menu closed) + issue #29: eye gaze
+//           with OpenXR Toolkit when the game re-creates its session (xr_hook.cpp EgRemakeSetForResuggest: a fresh gaze set
+//           when the layer's re-suggestion hits ALREADY_ATTACHED -- before, 0 valid gazes, "waiting for gaze").
 // phase 77 -- COVERAGE-PRESERVING ALPHA MIPS for cut-out BC3 textures (cutout_mips.h; dlaa.ini cutout_mips 0/1, default 0,
 //           startup only, no menu row / key). Far chain-link fences shimmered and vanished: SCS's alpha mips are a 2x2 box + 0.5
 //           threshold (1-2 texel wires gone after 2-3 mips; ATS fence coverage 17.5 % -> 6.2 % -> 0). The UpdateSubresource1
@@ -2610,6 +2614,9 @@ int              g_didShadowCfg    = 1;         // did_shadow: 1 = the IA / VS /
 int              g_didShadowVerify = -1;        // did_shadow_verify: every Nth record compared with the getters (-1 = 64 with
                                                 // debug = 1, else 0; phase 39: at log level 4 at the start)
 bool             g_didShadowOn     = false;     // every shadow hook is in and DidShadow is configured (SetupThread)
+int              g_didShadowPsCfg  = 1;         // phase 93 did_shadow_ps (startup only, needs did_shadow >= 1): 1 = the PS / OM bank
+                                                // (draw_ids.h 14.: FwdOnDraw's DSS / blend / VS + the forward records' PS state)
+bool             g_didShadowPsOn   = false;     // phase 93: its hooks are all in and DidShadow::ConfigurePs ran (SetupThread)
 uint32_t         g_didOnLogs = 0;               // "MV draw-ids: ACTIVE / inactive" lines written (cap 20)
 // v0.10.0 phase 8 performance (the "phase 8 (v0.10.0)" config line, the "perf eye N" / "perf cuts" lines)
 int              g_perfCfg = -1;                // dlaa.ini perf_timers: -1 = on with debug = 1 (default), 0 off, 1 on
@@ -2724,14 +2731,17 @@ void FwdOnContextReset();
 // phase 57 (perf): a world forward draw's depth-stencil + blend state, fetched ONCE per draw (FwdOnDraw) and handed on to BiasOnDraw
 // (both test them; the OM getters were called twice per forward draw). The refs are released when the draw's hook returns.
 // have = false: not fetched (FwdOnDraw did not run or left before) -- BiasOnDraw fetches them itself, as before.
+// phase 93: borrowed = the pointers came from the DidShadow PS / OM bank (DidShadow::FwdStates) -- no reference of ours, the
+// context's binding holds them for the whole draw hook -- so nothing is released.
 struct FwdDrawStates {
     ID3D11DepthStencilState* dss = nullptr;
     ID3D11BlendState*        bs = nullptr;
     bool                     have = false;
+    bool                     borrowed = false;      // phase 93
     FwdDrawStates() = default;
     FwdDrawStates(const FwdDrawStates&) = delete;
     FwdDrawStates& operator=(const FwdDrawStates&) = delete;
-    ~FwdDrawStates() { if (dss) dss->Release(); if (bs) bs->Release(); }
+    ~FwdDrawStates() { if (borrowed) return; if (dss) dss->Release(); if (bs) bs->Release(); }
 };
 // phase 49 glow bias mask (the "GLOW BIAS MASK" block above hkDrawIndexed)
 void BiasOnDraw(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT baseVertex, const FwdDrawStates& st);
@@ -3052,9 +3062,15 @@ void CpuProfReport(bool report, int64_t q, uint64_t tscNow) {
             for (int a = 0; a < kHookCount && len > 0 && len < (int)sizeof(line) - 64; ++a) {
                 const int h = ho[a];
                 if (!w.c[h]) break;
-                len += snprintf(line + len, sizeof(line) - (size_t)len, " %s %.1f %.3f", Name(h), (double)w.c[h] / fr,
-                                ms(w.d[kDrvFirst + h]) / fr);
+                if (CountOnly(h))                         // phase 93: counter-only scope -- its time is in "outside the hooks"
+                    len += snprintf(line + len, sizeof(line) - (size_t)len, " %s %.1f n/t", Name(h), (double)w.c[h] / fr);
+                else
+                    len += snprintf(line + len, sizeof(line) - (size_t)len, " %s %.1f %.3f", Name(h), (double)w.c[h] / fr,
+                                    ms(w.d[kDrvFirst + h]) / fr);
             }
+            if (len > 0 && len < (int)sizeof(line) - 96)
+                len += snprintf(line + len, sizeof(line) - (size_t)len, " (n/t = counted, not timed: phase 93, the hook body and "
+                                "the game's call are in \"outside the hooks\")");
             if (len > 0 && len < (int)sizeof(line) - 160)
                 snprintf(line + len, sizeof(line) - (size_t)len, " | profiler ~%.3f ms/frame (%.0f timer reads/frame x %.1f ns, "
                          "inside the figures above)%s", (double)w.trans * g_transTicks / tscPerMs / fr, (double)w.trans / fr,
@@ -8800,7 +8816,7 @@ void LightFsEdgeFill(ID3D11DeviceContext* ctx, UINT vertexCount, UINT startVerte
 }
 
 void STDMETHODCALLTYPE hkRSSetViewports(ID3D11DeviceContext* ctx, UINT n, const D3D11_VIEWPORT* vps) {
-    CPU_HOOK(kHkRSSetVp);                                 // phase 31 CPU profiler (cpu_prof.h)
+    CPU_HOOK_COUNT(kHkRSSetVp);                                 // phase 31 CPU profiler (cpu_prof.h)
     if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); CPU_ORIG(oRSSetViewports(ctx, n, vps)); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     TraceVp(ctx, n, vps);
     if (!IsGameCtx(ctx)) {                         // v0.6.2: other contexts never touch g_gameVp / ReconcileViewports
@@ -8930,6 +8946,16 @@ void STDMETHODCALLTYPE hkRSSetViewports(ID3D11DeviceContext* ctx, UINT n, const 
 // tex_lod_bias_cutout = 0 with the default opaque scope = phase 12 exactly (cut-outs keep the game's samplers).
 typedef void (STDMETHODCALLTYPE* PSSetSamplers_t)(ID3D11DeviceContext*, UINT, UINT, ID3D11SamplerState* const*);
 PSSetSamplers_t      oPSSetSamplers = nullptr;
+// phase 93: every direct trampoline call of PSSetSamplers / OMSetDepthStencilState (the LOD sampler sets, the v0.9.0 stencil-id twins)
+// reports what it bound to the DidShadow PS / OM bank, exactly as the hooks do -- a set the bank never saw would leave it wrong
+// (draw_ids.h 14.). One relaxed load while the bank is not live; nothing without WITH_DLAA.
+inline void ShNotePsSmp(ID3D11DeviceContext* c, UINT start, UINT num, ID3D11SamplerState* const* p) {
+#ifdef WITH_DLAA
+    DidShadow::NotePsSmp(c, start, num, p);
+#else
+    (void)c; (void)start; (void)num; (void)p;
+#endif
+}
 std::atomic<bool>    g_lodHooked{false};          // PSSetSamplers hook installed (oPSSetSamplers valid)
 constexpr UINT       kLodSlots   = D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT;   // 16 PS sampler slots
 constexpr uint32_t   kLodTabBits = 13;
@@ -9257,7 +9283,7 @@ void LodEnter(ID3D11DeviceContext* ctx, uint8_t set) {
         LodSlotMasks(i);
         if (bind[i] != cur[i]) { if (lo < 0) lo = (int)i; hi = (int)i; ++g_lodSubst; }
     }
-    if (lo >= 0) oPSSetSamplers(ctx, (UINT)lo, (UINT)(hi - lo + 1), bind + lo);
+    if (lo >= 0) { oPSSetSamplers(ctx, (UINT)lo, (UINT)(hi - lo + 1), bind + lo); ShNotePsSmp(ctx, (UINT)lo, (UINT)(hi - lo + 1), bind + lo); }
     for (ID3D11SamplerState* s : cur) if (s) s->Release();   // PSGetSamplers refs (bound ones stay referenced by the runtime)
     g_lodSet = set;
     ++g_lodEnters;
@@ -9275,6 +9301,7 @@ void LodLeave(ID3D11DeviceContext* ctx) {
     _BitScanForward(&lo, m);
     _BitScanReverse(&hi, m);
     oPSSetSamplers(ctx, (UINT)lo, (UINT)(hi - lo + 1), g_lodShadow + lo);
+    ShNotePsSmp(ctx, (UINT)lo, (UINT)(hi - lo + 1), g_lodShadow + lo);   // phase 93
 }
 // phase 11, scene state: bind another set (one PSSetSamplers over the slots where the bound set and the new one differ,
 // none if they are equal). phase 12: three sets -- the differing slots are found per call (<= 16 pointer compares over the
@@ -9296,6 +9323,7 @@ void LodBindSet(ID3D11DeviceContext* ctx, uint8_t set) {
     _BitScanForward(&lo, diff);
     _BitScanReverse(&hi, diff);
     oPSSetSamplers(ctx, (UINT)lo, (UINT)(hi - lo + 1), to + lo);
+    ShNotePsSmp(ctx, (UINT)lo, (UINT)(hi - lo + 1), to + lo);   // phase 93
     ++g_lodSwaps;
 }
 // phase 11: BlendEnable off on RT0 and AlphaToCoverageEnable off (= a solid draw); memoised per state object.
@@ -9711,10 +9739,11 @@ void LodStatsTag(char* buf, size_t cap) {
 // PSSetSamplers (v0.9.0): outside scene state (and for other contexts / our own work) the original call, nothing else.
 // phase 11: in scene state the bound set's member of each new sampler (both members and the original are tracked).
 void STDMETHODCALLTYPE hkPSSetSamplers(ID3D11DeviceContext* ctx, UINT start, UINT num, ID3D11SamplerState* const* pp) {
-    CPU_HOOK(kHkPSSetSamplers);                                 // phase 31 CPU profiler (cpu_prof.h)
+    CPU_HOOK_COUNT(kHkPSSetSamplers);                                 // phase 31 CPU profiler (cpu_prof.h)
     if (!g_lodInScene.load(std::memory_order_relaxed) || !IsGameCtx(ctx) || t_inDlaa || !pp || start >= kLodSlots ||
         num == 0 || num > kLodSlots - start) {
         CPU_ORIG(oPSSetSamplers(ctx, start, num, pp));
+        ShNotePsSmp(ctx, start, num, pp);                // phase 93: the DidShadow PS / OM bank
         return;
     }
     ID3D11SamplerState* bind[kLodSlots];
@@ -9737,18 +9766,22 @@ void STDMETHODCALLTYPE hkPSSetSamplers(ID3D11DeviceContext* ctx, UINT start, UIN
         if (b != s) { changed = true; ++g_lodSubst; }
     }
     CPU_ORIG(oPSSetSamplers(ctx, start, num, changed ? bind : pp));
+    ShNotePsSmp(ctx, start, num, changed ? bind : pp);   // phase 93: the samplers actually bound (the LOD twins)
 }
 
 // phase 11: OMSetBlendState (vtable 35) -- the game's current blend state for the per-draw scope (identity only).
 void STDMETHODCALLTYPE hkOMSetBlendState(ID3D11DeviceContext* ctx, ID3D11BlendState* bs, const FLOAT f[4], UINT mask) {
-    CPU_HOOK(kHkOMSetBlend);                                 // phase 31 CPU profiler (cpu_prof.h)
+    CPU_HOOK_COUNT(kHkOMSetBlend);                                 // phase 31 CPU profiler (cpu_prof.h)
     if (!t_inDlaa && IsGameCtx(ctx)) g_lodBlendCur = bs;
     CPU_ORIG(oOMSetBlendState(ctx, bs, f, mask));
+#ifdef WITH_DLAA
+    DidShadow::NoteBs(ctx, bs);                          // phase 93: the DidShadow PS / OM bank (any caller, as the IA / VS hooks)
+#endif
 }
 
 // phase 12: PSSetShader (context vtable 9) -- the game's current pixel shader for the cut-out rule (identity only).
 void STDMETHODCALLTYPE hkPSSetShader(ID3D11DeviceContext* ctx, ID3D11PixelShader* ps, ID3D11ClassInstance* const* ci, UINT n) {
-    CPU_HOOK(kHkPSSetShader);                                 // phase 31 CPU profiler (cpu_prof.h)
+    CPU_HOOK_COUNT(kHkPSSetShader);                                 // phase 31 CPU profiler (cpu_prof.h)
     if (!t_inDlaa && IsGameCtx(ctx)) {
         g_lodPsCur = ps;
 #ifdef WITH_DLAA
@@ -9756,6 +9789,9 @@ void STDMETHODCALLTYPE hkPSSetShader(ID3D11DeviceContext* ctx, ID3D11PixelShader
 #endif
     }
     CPU_ORIG(oPSSetShader(ctx, ps, ci, n));
+#ifdef WITH_DLAA
+    DidShadow::NotePs(ctx, ps);                          // phase 93: the DidShadow PS / OM bank
+#endif
 }
 // phase 12: CreatePixelShader (device vtable 15, any thread) -- one DXBC scan per created shader (a few hundred tokens).
 // A validation-only call (ppPixelShader null) and failures pass through untouched.
@@ -11028,6 +11064,22 @@ bool HmCheckEye(int eye, int view) {
             "submitted fov, or the eye -> view map is wrong)", eye, view, u, v, (double)mu, (double)mv, du, dv, scaleTxt);
     }
     return ok;
+}
+// phase 93: the hidden triangles (NDC of the whole eye picture) of `eye`'s OpenXR view for the outside-AA band clip
+// (SceneDlaa::SetVisibleMask), or false. Only the eye -> view pairing the phase-40 check already ACCEPTED for the view's current mesh
+// (HmCheckEye's cached verdict: the view's fov centre / scale = the eye's measured projection), with xr_hidden_mask on; nothing is
+// decided or logged here (the blit calls it per eye pass). The mesh maps to the picture's pixels with the SUBMITTED fov -- the same
+// mapping the compositor uses to pick what it shows -- so the clip is in the headset's own terms. Key: changes with the mesh / view.
+bool HmVisibleMask(int eye, const float** tri, uint32_t* tris, uint64_t* key) {
+    if (!g_xrHiddenMask || eye < 0 || eye >= kMaxEyes) return false;
+    const int view = g_hm.checkedView[eye];
+    if (view < 0 || view > 1 || !g_hm.checkOk[eye] || !g_hm.gen[view] || g_hm.checkedGen[eye] != g_hm.gen[view] ||
+        !g_hm.usable[view] || !g_hm.tris[view])
+        return false;
+    *tri = g_hm.tri[view];
+    *tris = g_hm.tris[view];
+    *key = (g_hm.gen[view] << 1 | (uint64_t)view) + 1;
+    return true;
 }
 // ---- phase 59: EYE-TRACKED FOVEATION (dlaa.ini vrs_eye / vrs_eye_fake / vrs_eye_smooth; gaze_math.h, xr_hook.h EyeGaze) -------
 // The ring centre of an eye's VRS bracket = the eye's optical centre + the gaze offset (GazeMath::GazeUv: u = cu + 0.5 |P00| tx,
@@ -15435,6 +15487,13 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     }
     SceneDlaa& dl = g_dlaa[eye];
     dl.SetEye(eye);
+    {   // phase 93: the outside-AA bands skip the lens corners the headset never shows (VR eye pictures only)
+        const float* vt = nullptr;
+        uint32_t vn = 0;
+        uint64_t vk = 0;
+        if (g_vrMode && !isBackbuffer && HmVisibleMask(eye, &vt, &vn, &vk)) dl.SetVisibleMask(vt, vn, vk);
+        else dl.SetVisibleMask(nullptr, 0, 0);
+    }
     // v0.6.1: classify this pass's candidate record before anything consumes it (anomaly / sample log).
     g_renderTid.store(GetCurrentThreadId(), std::memory_order_relaxed);
     const double eyeIvMs = g_eyeLastBlitT[eye] && g_qpcFreq > 0
@@ -16431,10 +16490,11 @@ void ObjBindForGame(ID3D11DeviceContext* ctx) {
     if (e && e->gbuf == kObjDssConflict) {
         ObjDisable(ctx, "the game binds a depth-stencil state in the G-buffer pass that cannot carry object ids", e);
         oOMSetDepthStencilState(ctx, g_objGameDss, g_objGameRef);
+        DidShadow::NoteDss(ctx, g_objGameDss);           // phase 93 (every trampoline call reports what it bound)
         return;
     }
-    if (e && e->twin) { oOMSetDepthStencilState(ctx, e->twin, ObjStaticRef()); ++g_objTwinBinds; }
-    else oOMSetDepthStencilState(ctx, g_objGameDss, g_objGameRef);
+    if (e && e->twin) { oOMSetDepthStencilState(ctx, e->twin, ObjStaticRef()); DidShadow::NoteDss(ctx, e->twin); ++g_objTwinBinds; }
+    else { oOMSetDepthStencilState(ctx, g_objGameDss, g_objGameRef); DidShadow::NoteDss(ctx, g_objGameDss); }
 }
 
 void ObjEnter(ID3D11DeviceContext* ctx) {
@@ -16451,6 +16511,7 @@ void ObjLeave(ID3D11DeviceContext* ctx) {
     g_objInScene = false;
     g_objCur = nullptr;
     oOMSetDepthStencilState(ctx, g_objGameDss, g_objGameRef);   // exactly what the engine believes is bound
+    DidShadow::NoteDss(ctx, g_objGameDss);                // phase 93
     if (g_passSeq) {
         ObjRecord& rec = g_objRing[SlotOf(g_passSeq - 1)];
         t_inDlaa = true;
@@ -16617,11 +16678,12 @@ void LightRedrawStatsLog(uint64_t blit, uint64_t blitsInWindow) {
 }
 
 void STDMETHODCALLTYPE hkOMSetDepthStencilState(ID3D11DeviceContext* ctx, ID3D11DepthStencilState* dss, UINT ref) {
-    CPU_HOOK(kHkOMSetDss);                                 // phase 31 CPU profiler (cpu_prof.h)
-    if (t_inDlaa || !IsGameCtx(ctx)) { CPU_ORIG(oOMSetDepthStencilState(ctx, dss, ref)); return; }
+    CPU_HOOK_COUNT(kHkOMSetDss);                                 // phase 31 CPU profiler (cpu_prof.h)
+    if (t_inDlaa || !IsGameCtx(ctx)) { CPU_ORIG(oOMSetDepthStencilState(ctx, dss, ref)); DidShadow::NoteDss(ctx, dss); return; }   // phase 93
     g_objGameDss = dss; g_objGameRef = ref; g_objGameKnown = true;
-    if (g_objInScene) { ObjBindForGame(ctx); return; }
+    if (g_objInScene) { ObjBindForGame(ctx); return; }   // (phase 93: it notes the state it binds)
     CPU_ORIG(oOMSetDepthStencilState(ctx, dss, ref));
+    DidShadow::NoteDss(ctx, dss);                         // phase 93: right after the call (the helpers below may bind more)
     if (g_lightRedrawShift) LightRedrawOnDss(ctx, dss);   // phase 55: a non-qualifying state ends the redraw run here
     if (g_objSceneDsv && g_objOn) ObjWatch(ctx);
 }
@@ -17419,10 +17481,27 @@ void FwdOnDraw(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT b
         if (g_didOn) DidFwdNoteDraw(ctx, indexCount, false, 1, nullptr, nullptr);   // v0.10.0 phase 3 diagnostic
         return;
     }
-    UINT ref = 0;
-    ctx->OMGetDepthStencilState(&st.dss, &ref);
-    FLOAT bf[4] = {}; UINT mask = 0;
-    ctx->OMGetBlendState(&st.bs, bf, &mask);
+    // phase 93: the depth-stencil / blend state + the VS from the DidShadow PS / OM bank (BORROWED: no AddRef / Release, the binding
+    // holds them; ~6 refcount operations per forward draw saved), else through the getters as before (owned, released at the hook's end)
+    // phase 93 review: a re-arm inside DidFwdOnDraw (ArmAndSeed -> ReleaseAll) drops the bank's own refs to these three; they stay
+    // valid only because the context still binds them -- no Set call may run between here and the last use (BiasOnDraw via fst)
+    ID3D11VertexShader* shVs = nullptr;
+    if (g_didShadowPsOn) {
+        if (g_ctx1Owner != ctx) {
+            if (g_ctx1) { g_ctx1->Release(); g_ctx1 = nullptr; }
+            ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&g_ctx1);
+            g_ctx1Owner = ctx;
+        }
+        DidShadow::SetAlias(ctx);                         // (as DidFwdOnDraw: the context the game's Set calls name)
+        if (g_ctx1 && DidShadow::FwdStates(g_ctx1, &st.dss, &st.bs, &shVs)) st.borrowed = true;
+        else { st.dss = nullptr; st.bs = nullptr; shVs = nullptr; }
+    }
+    if (!st.borrowed) {
+        UINT ref = 0;
+        ctx->OMGetDepthStencilState(&st.dss, &ref);
+        FLOAT bf[4] = {}; UINT mask = 0;
+        ctx->OMGetBlendState(&st.bs, bf, &mask);
+    }
     st.have = true;
     ID3D11DepthStencilState* const dss = st.dss;
     ID3D11BlendState* const bs = st.bs;
@@ -17430,11 +17509,11 @@ void FwdOnDraw(ID3D11DeviceContext* ctx, UINT indexCount, UINT startIndex, INT b
     const bool statesOk = qualifies && FwdEnsureStates(ctx);   // once per draw (r11: the near-camera step needs it)
     bool nearCam = false;                                 // v0.9.0 r11: a near-camera identity (overlay): no re-draw
     if (statesOk) {
-        ID3D11VertexShader* vs = nullptr;                 // phase 57: read once for the identity and the MVP row
-        ctx->VSGetShader(&vs, nullptr, nullptr);
+        ID3D11VertexShader* vs = shVs;                    // phase 57: read once for the identity and the MVP row (93: or borrowed)
+        if (!st.borrowed) ctx->VSGetShader(&vs, nullptr, nullptr);
         const uint64_t fid = FwdIdentity(ctx, indexCount, startIndex, baseVertex, vs);
         FwdNoteMvp(ctx, fid, indexCount, dss, bs, vs);    // every qualifying draw: its verdict stays fresh
-        if (vs) vs->Release();
+        if (vs && !st.borrowed) vs->Release();
         nearCam = FwdIsNear(fid);
     }
     if (!qualifies) {
@@ -17754,6 +17833,9 @@ void FwdBatch(ID3D11DeviceContext* ctx, uint64_t pass, bool restoreTargets, int 
     if (!g_ctx1) return;
     const int64_t t0 = MeasureOn() ? Qpc() : 0;           // phase 45: the clock only while measuring (g_measure)
     if (rec.PendingDepth() > 0) {
+        // phase 93 review: the replay's per-draw PS sets go through raw trampolines (no Note) -- drop the PS / OM bank first, as
+        // DidOnLeave does (re-seeded at the next Record); without it only sv.Restore's hooked re-binds keep the bank right
+        DidShadow::Drop(DidShadow::kKPass);
         ++g_fwdBatchSegs;
         if (why == 1) ++g_fwdBatchForced;
         const bool first = !t.fwdValid;
@@ -18677,6 +18759,24 @@ void DidStatsTag(char* buf, size_t cap, uint64_t passes) {
                      (unsigned long long)sh.mismatch[0], (unsigned long long)sh.mismatch[1], (unsigned long long)sh.mismatch[2],
                      (unsigned long long)sh.mismatch[3], (unsigned long long)sh.mismatch[4], (unsigned long long)sh.mismatch[5],
                      (unsigned long long)sh.mismatch[6], (unsigned long long)sh.fallbackFrames);
+            // phase 93: the PS / OM bank (did_shadow_ps): forward draws (FwdOnDraw) and PS records from it, its AddRefs, its verify
+            const size_t u6 = strlen(buf);
+            if (u6 < cap && !g_didShadowPsOn) {
+                snprintf(buf + u6, cap - u6, " | PS/OM bank: off (did_shadow_ps %d)", g_didShadowPsCfg);
+            } else if (u6 < cap) {
+                const uint64_t pr = sh.psRefsTaken + sh.psRefsSkipped;
+                snprintf(buf + u6, cap - u6, " | PS/OM bank (phase 93): forward draws %.0f/pass from it (%.0f/pass getters), PS records "
+                         "%.0f/pass from it (%.0f/pass getters), record AddRefs %.0f/pass (%.1f %% avoided), %.0f Set calls/pass applied, "
+                         "output-capable PS cbuffer getter reads %llu, group reads ps %llu pscb %llu pssmp %llu dss %llu bs %llu | verify: "
+                         "%llu compared, %llu mismatching (ps %llu pscb %llu pssmp %llu dss %llu bs %llu, vs in the line above)",
+                         (double)sh.fwdShadow / p, (double)sh.fwdGet / p, (double)sh.psRecShadow / p, (double)sh.psRecGet / p,
+                         (double)sh.psRefsTaken / p, pr ? 100.0 * (double)sh.psRefsSkipped / (double)pr : 0.0, (double)sh.psNotes / p,
+                         (unsigned long long)sh.psHazGet, (unsigned long long)sh.psSeed[0], (unsigned long long)sh.psSeed[1],
+                         (unsigned long long)sh.psSeed[2], (unsigned long long)sh.psSeed[3], (unsigned long long)sh.psSeed[4],
+                         (unsigned long long)sh.psVerified, (unsigned long long)sh.psMismatchRecs,
+                         (unsigned long long)sh.psMismatch[0], (unsigned long long)sh.psMismatch[1], (unsigned long long)sh.psMismatch[2],
+                         (unsigned long long)sh.psMismatch[3], (unsigned long long)sh.psMismatch[4]);
+            }
         }
     }
     s0 = s;
@@ -21597,6 +21697,7 @@ void MenuPerfOpen() {
     MenuPerfState& m = g_menuPerf;
     m = MenuPerfState();
     const bool spansOn = GpuTimingOn() || GpuPerf::On();   // the scene span was running: its last figure is current
+    GpuPerf::SetFrameEvery(1);                   // phase 93: the cost column needs every frame (closed: 1 frame in 8)
     if (!GpuPerf::On()) {
         GpuPerf::SetOn(true);
         GpuPerf::Restart();
@@ -21621,6 +21722,7 @@ void MenuPerfOpen() {
 void MenuPerfClose() {
     if (g_menuPerf.forced) GpuPerf::SetOn(g_perfCfg > 0 || (g_perfCfg < 0 && LogDebugLevel()));
     g_menuPerf.forced = false;
+    GpuPerf::SetFrameEvery(GpuPerf::kFrameEveryClosed);   // phase 93: the log's timers sample 1 frame in 8 again
     if (g_menuPerf.cpuForced) CpuProfSetOn(g_cpuProfCfg > 0 || (g_cpuProfCfg < 0 && LogDebugLevel()));   // phase 45
     g_menuPerf.cpuForced = false;
     MeasureUpdate();                             // phase 45 (g_menuOpen is false already: MenuClose)
@@ -26204,7 +26306,7 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
     if (g_ptBoundIdx >= 0 && !inDlaa && IsGameCtx(ctx)) { pvMenuIdx = g_ptBoundIdx; PreviewFlush(ctx, pvMenuIdx); }
     // v0.9.0: a tagged draw writes its id into the stencil upper nibble (the twin with ref id << 4 for this one draw)
     const bool objTag = objSlot && g_objInScene && g_objCur && g_objCur->twin;
-    if (objTag) oOMSetDepthStencilState(ctx, g_objCur->twin, ObjStaticRef() | ((UINT)objSlot << 4));
+    if (objTag) { oOMSetDepthStencilState(ctx, g_objCur->twin, ObjStaticRef() | ((UINT)objSlot << 4)); DidShadow::NoteDss(ctx, g_objCur->twin); }
 #endif
     // v0.10.0 phase 11 LOD bias scope: the sampler set this draw needs (solid / see-through blend state)
     if (gameCtx && !inDlaa && g_lodPerDraw.load(std::memory_order_relaxed)) LodOnDraw(ctx);
@@ -26230,7 +26332,7 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
         DidFwdOnDraw(ctx, indexCount, startIndex, baseVertex);
         g_nextFwdGsKind = 0;
     }
-    if (objTag) oOMSetDepthStencilState(ctx, g_objCur->twin, ObjStaticRef());   // back to the static ref
+    if (objTag) { oOMSetDepthStencilState(ctx, g_objCur->twin, ObjStaticRef()); DidShadow::NoteDss(ctx, g_objCur->twin); }   // back to the static ref
     if (pvMenuIdx >= 0 && !inDlaa) MenuDrawPreview(ctx, pvMenuIdx, 'a');      // v0.10.0 phase 15 (VR menu-screen eye)
     // v0.9.0 r5: a world FORWARD-pass draw (1 RTV RGBA16F + scene DSV, not the G-buffer) -> forward depth re-draw
     FwdDrawStates fst;                                    // phase 57: its depth-stencil / blend state, fetched once (released here)
@@ -27221,6 +27323,7 @@ void LoadConfig() {
 #ifdef WITH_DLAA
             if (!strcmp(key, "did_shadow"))        { g_didShadowCfg = v >= 2 ? 2 : (v == 1 ? 1 : 0); continue; }   // startup only
             if (!strcmp(key, "did_shadow_verify")) { g_didShadowVerify = v < 0 ? -1 : (int)(v > 100000 ? 100000 : v); continue; }
+            if (!strcmp(key, "did_shadow_ps"))     { g_didShadowPsCfg = v != 0 ? 1 : 0; continue; }   // phase 93, startup only
             // phase 40 / 41 / 42 (outside the else-if chain too: C1061 at the dev merge)
             if (!strcmp(key, "mirror_turns"))       { g_mirTurns = v > 0 ? 1 : 0; g_mirTurnsExplicit = true; continue; }   // phase 41
             // phase 52: frame rate (outside the else-if chain: C1061; the menu's Frame rate rows switch them live)
@@ -28158,6 +28261,9 @@ typedef void (STDMETHODCALLTYPE* RSSetState_t)(ID3D11DeviceContext*, ID3D11Raste
 typedef void (STDMETHODCALLTYPE* ClearState_t)(ID3D11DeviceContext*);
 typedef void (STDMETHODCALLTYPE* ExecuteCommandList_t)(ID3D11DeviceContext*, ID3D11CommandList*, BOOL);
 typedef void (STDMETHODCALLTYPE* SwapDeviceContextState_t)(ID3D11DeviceContext1*, ID3DDeviceContextState*, ID3DDeviceContextState**);
+typedef void (STDMETHODCALLTYPE* PSSetConstantBuffers_t)(ID3D11DeviceContext*, UINT, UINT, ID3D11Buffer* const*);   // phase 93
+typedef void (STDMETHODCALLTYPE* PSSetConstantBuffers1_t)(ID3D11DeviceContext1*, UINT, UINT, ID3D11Buffer* const*, const UINT*,
+                                                           const UINT*);
 IASetInputLayout_t       oIASetInputLayout = nullptr;
 IASetVertexBuffers_t     oIASetVertexBuffers = nullptr;
 IASetIndexBuffer_t       oIASetIndexBuffer = nullptr;
@@ -28169,61 +28275,75 @@ RSSetState_t             oRSSetState = nullptr;
 ClearState_t             oClearState = nullptr;
 ExecuteCommandList_t     oExecuteCommandList = nullptr;
 SwapDeviceContextState_t oSwapDeviceContextState = nullptr;
+PSSetConstantBuffers_t   oPSSetConstantBuffers = nullptr;    // phase 93 (did_shadow_ps)
+PSSetConstantBuffers1_t  oPSSetConstantBuffers1 = nullptr;
 
 void STDMETHODCALLTYPE hkIASetInputLayout(ID3D11DeviceContext* ctx, ID3D11InputLayout* il) {
-    CPU_HOOK(kHkStateSet);
+    CPU_HOOK_COUNT(kHkStateSet);
     CPU_ORIG(oIASetInputLayout(ctx, il));
     DidShadow::NoteIl(ctx, il);
 }
 void STDMETHODCALLTYPE hkIASetVertexBuffers(ID3D11DeviceContext* ctx, UINT start, UINT num, ID3D11Buffer* const* vb,
                                             const UINT* strides, const UINT* offs) {
-    CPU_HOOK(kHkStateSet);
+    CPU_HOOK_COUNT(kHkStateSet);
     CPU_ORIG(oIASetVertexBuffers(ctx, start, num, vb, strides, offs));
     DidShadow::NoteVb(ctx, start, num, vb, strides, offs);
 }
 void STDMETHODCALLTYPE hkIASetIndexBuffer(ID3D11DeviceContext* ctx, ID3D11Buffer* ib, DXGI_FORMAT fmt, UINT off) {
-    CPU_HOOK(kHkStateSet);
+    CPU_HOOK_COUNT(kHkStateSet);
     CPU_ORIG(oIASetIndexBuffer(ctx, ib, fmt, off));
     DidShadow::NoteIb(ctx, ib, fmt, off);
 }
 void STDMETHODCALLTYPE hkVSSetShader(ID3D11DeviceContext* ctx, ID3D11VertexShader* vs, ID3D11ClassInstance* const* ci, UINT n) {
-    CPU_HOOK(kHkStateSet);
+    CPU_HOOK_COUNT(kHkStateSet);
     CPU_ORIG(oVSSetShader(ctx, vs, ci, n));
     DidShadow::NoteVs(ctx, vs);
 }
 void STDMETHODCALLTYPE hkVSSetConstantBuffers(ID3D11DeviceContext* ctx, UINT start, UINT num, ID3D11Buffer* const* cb) {
-    CPU_HOOK(kHkStateSet);
+    CPU_HOOK_COUNT(kHkStateSet);
     CPU_ORIG(oVSSetConstantBuffers(ctx, start, num, cb));
     DidShadow::NoteCb(ctx, start, num, cb, nullptr, nullptr, true);
 }
 void STDMETHODCALLTYPE hkVSSetConstantBuffers1(ID3D11DeviceContext1* ctx, UINT start, UINT num, ID3D11Buffer* const* cb,
                                                const UINT* first, const UINT* count) {
-    CPU_HOOK(kHkStateSet);
+    CPU_HOOK_COUNT(kHkStateSet);
     CPU_ORIG(oVSSetConstantBuffers1(ctx, start, num, cb, first, count));
     DidShadow::NoteCb(static_cast<ID3D11DeviceContext*>(ctx), start, num, cb, first, count, false);
 }
 void STDMETHODCALLTYPE hkVSSetSamplers(ID3D11DeviceContext* ctx, UINT start, UINT num, ID3D11SamplerState* const* smp) {
-    CPU_HOOK(kHkStateSet);
+    CPU_HOOK_COUNT(kHkStateSet);
     CPU_ORIG(oVSSetSamplers(ctx, start, num, smp));
     DidShadow::NoteSmp(ctx, start, num, smp);
 }
 void STDMETHODCALLTYPE hkRSSetState(ID3D11DeviceContext* ctx, ID3D11RasterizerState* rs) {
-    CPU_HOOK(kHkStateSet);
+    CPU_HOOK_COUNT(kHkStateSet);
     CPU_ORIG(oRSSetState(ctx, rs));
     DidShadow::NoteRs(ctx, rs);
 }
+// phase 93 (did_shadow_ps): the PS cbuffer Set calls for the DidShadow PS / OM bank (installed only with it; pass-through + Note)
+void STDMETHODCALLTYPE hkPSSetConstantBuffers(ID3D11DeviceContext* ctx, UINT start, UINT num, ID3D11Buffer* const* cb) {
+    CPU_HOOK_COUNT(kHkStateSet);
+    CPU_ORIG(oPSSetConstantBuffers(ctx, start, num, cb));
+    DidShadow::NotePsCb(ctx, start, num, cb, nullptr, nullptr, true);
+}
+void STDMETHODCALLTYPE hkPSSetConstantBuffers1(ID3D11DeviceContext1* ctx, UINT start, UINT num, ID3D11Buffer* const* cb,
+                                               const UINT* first, const UINT* count) {
+    CPU_HOOK_COUNT(kHkStateSet);
+    CPU_ORIG(oPSSetConstantBuffers1(ctx, start, num, cb, first, count));
+    DidShadow::NotePsCb(static_cast<ID3D11DeviceContext*>(ctx), start, num, cb, first, count, false);
+}
 void STDMETHODCALLTYPE hkClearState(ID3D11DeviceContext* ctx) {
-    CPU_HOOK(kHkStateSet);
+    CPU_HOOK_COUNT(kHkStateSet);
     CPU_ORIG(oClearState(ctx));
     DidShadow::Invalidate(ctx, DidShadow::kKClearState);
 }
 void STDMETHODCALLTYPE hkExecuteCommandList(ID3D11DeviceContext* ctx, ID3D11CommandList* cl, BOOL restore) {
-    CPU_HOOK(kHkStateSet);
+    CPU_HOOK_COUNT(kHkStateSet);
     CPU_ORIG(oExecuteCommandList(ctx, cl, restore));
     DidShadow::Invalidate(ctx, DidShadow::kKExecCmd);
 }
 void STDMETHODCALLTYPE hkSwapDeviceContextState(ID3D11DeviceContext1* ctx, ID3DDeviceContextState* st, ID3DDeviceContextState** prev) {
-    CPU_HOOK(kHkStateSet);
+    CPU_HOOK_COUNT(kHkStateSet);
     CPU_ORIG(oSwapDeviceContextState(ctx, st, prev));
     DidShadow::Invalidate(static_cast<ID3D11DeviceContext*>(ctx), DidShadow::kKSwapState);
 }
@@ -28501,11 +28621,50 @@ DWORD WINAPI SetupThread(LPVOID) {
             const int verify = g_didShadowVerify >= 0 ? g_didShadowVerify : (LogDebugLevel() ? 64 : 0);   // phase 39: level 4
             const uint32_t all = (1u << DidShadow::kFieldN) - 1u;
             const uint32_t groups = vbib ? all : all & ~((1u << DidShadow::kFVb) | (1u << DidShadow::kFIb));
+            // phase 93 (did_shadow_ps, default 1): the PS / OM bank -- PSSetShader / PSSetSamplers / OMSetBlendState /
+            // OMSetDepthStencilState are hooked above for other features; + PSSetConstantBuffers (16) / PSSetConstantBuffers1 (123)
+            // here. All six or no bank (a missing one would leave it wrong); the first bank does not depend on it. Their detoured
+            // bodies join the liveness targets (a rewritten entry drops both banks).
+            int psIdx[6] = {};
+            void* psTgt[6] = {};
+            int psN = 0;
+            bool psOk = ok && g_didShadowPsCfg && g_lodPsHooked.load(std::memory_order_acquire) &&
+                        g_lodHooked.load(std::memory_order_acquire) && g_lodBlendHooked.load(std::memory_order_acquire) &&
+                        oOMSetDepthStencilState != nullptr;
+            if (psOk) {
+                ID3D11DeviceContext1* pc1 = nullptr;
+                psOk = SUCCEEDED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1), (void**)&pc1)) && pc1;
+                void** pv1 = psOk ? *reinterpret_cast<void***>(pc1) : nullptr;
+                psOk = psOk && HookFn("PSSetConstantBuffers", cvtbl[16], reinterpret_cast<void*>(&hkPSSetConstantBuffers),
+                                      reinterpret_cast<void**>(&oPSSetConstantBuffers));
+                psOk = psOk && HookFn("PSSetConstantBuffers1", pv1[123], reinterpret_cast<void*>(&hkPSSetConstantBuffers1),
+                                      reinterpret_cast<void**>(&oPSSetConstantBuffers1));
+                if (psOk) {
+                    const int vi[6] = { 9, 10, 16, 35, 36, 123 };
+                    for (int k = 0; k < 6; ++k) { psIdx[k] = vi[k]; psTgt[k] = k == 5 ? pv1[123] : cvtbl[vi[k]]; }
+                    psN = 6;
+                    DrawIdRecord::SetRawCall(DrawIdRecord::kRawPsCb1, 123, pv1[123], reinterpret_cast<void*>(oPSSetConstantBuffers1));
+                }
+                if (pc1) pc1->Release();
+            }
             if (ok) {
-                DidShadow::SetHookTargets(idx, tgt, n);
+                int allIdx[24] = {};
+                void* allTgt[24] = {};
+                int an = 0;
+                for (int k = 0; k < n && an < 24; ++k) { allIdx[an] = idx[k]; allTgt[an] = tgt[k]; ++an; }
+                for (int k = 0; k < psN && an < 24; ++k) { allIdx[an] = psIdx[k]; allTgt[an] = psTgt[k]; ++an; }
+                DidShadow::SetHookTargets(allIdx, allTgt, an);
                 DidShadow::Configure(true, verify, groups);
                 g_didShadowOn = true;
+                if (psOk && (groups & (1u << DidShadow::kFVs))) {
+                    DidShadow::ConfigurePs(true);
+                    g_didShadowPsOn = true;
+                }
             }
+            Log("did_shadow_ps=%d (phase 93)%s", g_didShadowPsOn ? 1 : 0,
+                g_didShadowPsOn ? " -- the forward draws' depth-stencil / blend state + VS and the forward records' PS, PS cbuffers 0..3 + "
+                                  "windows and PS samplers 0..7 come from the hooked Set calls (PS SRVs still read the getter)"
+                                : (!g_didShadowPsCfg ? " -- off in dlaa.ini: the getters" : " -- a PS / OM hook is missing: the getters"));
             Log("did_shadow=%d did_shadow_verify=%d (phase 35)%s", ok ? g_didShadowCfg : 0, ok ? verify : 0,
                 !ok ? " -- did_shadow was asked for but a hook could not be installed: the getters read every draw's state (as "
                       "did_shadow = 0)"

@@ -81,7 +81,16 @@ constexpr uint64_t kSampleEvery = 31;   // sampled sections: 1 pass in 31 (odd: 
                                         // prime, so every flat multi-view view gets sampled for any view count up to 30)
 constexpr int kViews = 8;               // v0.12.0 issue #12: eyes / views with their own statistics (VR 0..1, flat multi-view 0..7;
                                         // = FlatViews::kMaxViews in inject.cpp)
-bool Sampled(uint64_t tag);
+bool Sampled(uint64_t tag);             // (phase 93: and the current frame is a timed one, FrameTimed)
+// phase 93 FRAME SAMPLING: why -- at log level 4 the timers ran in every frame (~73 timestamp Ends + a disjoint query per frame on
+// the render thread, "gpu-timers 0.015 ms/frame" in the CPU profile, plus the GPU's own query writes) only to print a 10-s average.
+// How -- with the tuning menu closed only every kFrameEveryClosed-th Present frame opens a query set; every section of the other
+// frames returns at once (no query, not counted as dropped). The averages stay per timed pass (a pass whose sections straddle a
+// frame boundary into an untimed frame lands partly: rare, the blits follow their passes in the same frame). The menu sets 1 (its
+// ~1-s cost column needs every frame). The "perf eye" lines say "sampled 1/N frames".
+constexpr int kFrameEveryClosed = 8;
+void SetFrameEvery(int n);              // 1 = every frame (the tuning menu is open), kFrameEveryClosed otherwise
+bool FrameTimed();                      // the current frame (SetFrame) opens a query set
 
 // Timed section: Begin -> token (-1 = not timed: off / set full), Next = End(tok) + Begin(sec) sharing one timestamp.
 int  Begin(ID3D11DeviceContext* ctx, int sec);

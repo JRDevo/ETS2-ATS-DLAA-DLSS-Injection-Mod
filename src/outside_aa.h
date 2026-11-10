@@ -36,8 +36,11 @@
 // COST (estimate, not measured): 5 bilinear + 4 point fetches per pixel (mode 1), + 8 bilinear (mode 2), on 75 % of the pixels at
 // dlaa_area 50; the in-place path also copies the outer bands back. GpuPerf section "outside-aa" measures it per eye.
 #pragma once
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <utility>
+#include <vector>
 
 namespace OutsideAa {
 
@@ -98,6 +101,149 @@ inline int Bands(uint32_t w, uint32_t h, const Box& in, Box out[4]) {
 // The 4 OUTER bands (outside the rect itself) -- the in-place path copies these back next to the rect.
 inline int OuterBands(uint32_t w, uint32_t h, const Box& rect, Box out[4]) { return Bands(w, h, rect, out); }
 
+// ---- phase 93: the bands clipped to the VR visibility mask ----
+// WHY (Fable audit 2026-11-09, ATS VR 72 Hz): the outside-AA bands cost 0.207 ms per eye (GpuPerf "outside-aa") and cover the whole
+// picture outside the rect -- the lens corners included, which the headset never shows (XR_KHR_visibility_mask's HIDDEN mesh, the
+// one phase 40 already draws into the scene depth). Pixels there are never seen, so not drawing outside AA over them changes
+// nothing in the headset (they keep the raw / stretched frame, finite values).
+// HOW: VisRows = per image row, a CONSERVATIVE visible x-span [lo, hi): the row's centre line is cut exactly against every hidden
+// triangle (the covered intervals merged only where they really overlap -- a float gap between two triangles counts as visible),
+// the span is the hull of what is left (min .. max visible x), widened by `margin` px on both sides and over +- margin rows (the
+// compositor filters across a few pixels; nothing between two row centres is lost). ClipBox = the bounding box of the visible spans
+// inside a box (empty = skip). SplitClip cuts each band into kClipStrips pieces along its long side first, so the curved lens edge
+// trims each piece on its own. Everything is in the image's pixel grid (NDC y up -> row 0 at the top, as MapToNdc / the viewport).
+constexpr int kClipStrips = 8;                   // pieces per band (<= 4 bands -> <= 32 boxes)
+constexpr int kClipMarginPx = 8;                 // the "few px" of safety around the visible area
+struct VisRows {
+    uint32_t w = 0, h = 0;
+    std::vector<int32_t> lo, hi;                 // per row; lo >= hi = no visible pixel in this row
+    uint32_t visRows = 0;                        // rows with a visible span (log)
+};
+// The hidden triangles (3 * tris vertices, (x, y) NDC each) of the view -> the visible spans of a w x h image. False = no usable
+// input (the caller clips nothing).
+inline bool BuildVisRows(const float* tri, uint32_t tris, uint32_t w, uint32_t h, int margin, VisRows* out) {
+    if (!out) return false;
+    *out = VisRows();
+    if (!tri || !tris || !w || !h || w > 65536 || h > 65536) return false;
+    out->w = w; out->h = h;
+    std::vector<int32_t> lo(h), hi(h);
+    std::vector<std::pair<float, float>> iv;
+    iv.reserve(tris);
+    for (uint32_t r = 0; r < h; ++r) {
+        const float y = 1.0f - 2.0f * ((float)r + 0.5f) / (float)h;
+        iv.clear();
+        for (uint32_t k = 0; k < tris; ++k) {
+            const float* v = tri + 6 * k;
+            if (y < (std::min)((std::min)(v[1], v[3]), v[5]) || y > (std::max)((std::max)(v[1], v[3]), v[5])) continue;
+            float xmn = 1e30f, xmx = -1e30f;
+            int hits = 0;
+            for (int e = 0; e < 3; ++e) {
+                // the edge's endpoints in a fixed order (by y, then x), so two triangles sharing it compute the same x
+                float ax = v[2 * e], ay = v[2 * e + 1], bx = v[2 * ((e + 1) % 3)], by = v[2 * ((e + 1) % 3) + 1];
+                if (by < ay || (by == ay && bx < ax)) { std::swap(ax, bx); std::swap(ay, by); }
+                if (y < ay || y > by) continue;
+                const float x = by > ay ? ax + (y - ay) * (bx - ax) / (by - ay) : ax;
+                if (by == ay) { xmn = (std::min)(xmn, (std::min)(ax, bx)); xmx = (std::max)(xmx, (std::max)(ax, bx)); }
+                else { xmn = (std::min)(xmn, x); xmx = (std::max)(xmx, x); }
+                ++hits;
+            }
+            if (hits && xmx > xmn) iv.emplace_back(xmn, xmx);   // (a zero-width crossing hides nothing)
+        }
+        std::sort(iv.begin(), iv.end());
+        // visible = [-1, 1] minus the union; the hull of the visible part: its first and last point
+        float vmin = 2.0f, vmax = -2.0f;
+        float cur = -1.0f;                               // everything left of `cur` is decided
+        for (const auto& p : iv) {
+            if (p.first > cur) {                         // a visible gap (cur, p.first)
+                vmin = (std::min)(vmin, cur);
+                vmax = (std::max)(vmax, (std::min)(p.first, 1.0f));
+            }
+            if (p.second > cur) cur = p.second;
+            if (cur >= 1.0f) break;
+        }
+        if (cur < 1.0f) { vmin = (std::min)(vmin, cur); vmax = 1.0f; }
+        if (vmax > vmin && vmax > -1.0f && vmin < 1.0f) {
+            // NDC -> pixel columns: centre c + 0.5 = (x + 1) * w / 2
+            const double fx0 = ((double)vmin + 1.0) * 0.5 * (double)w, fx1 = ((double)vmax + 1.0) * 0.5 * (double)w;
+            lo[r] = (int32_t)std::floor(fx0) - margin;
+            hi[r] = (int32_t)std::ceil(fx1) + margin;
+        } else {
+            lo[r] = INT32_MAX; hi[r] = INT32_MIN;
+        }
+    }
+    // +- margin rows, then the image bounds
+    out->lo.assign(h, INT32_MAX);
+    out->hi.assign(h, INT32_MIN);
+    for (uint32_t r = 0; r < h; ++r) {
+        if (lo[r] >= hi[r]) continue;
+        const int64_t a = (int64_t)r - margin, b = (int64_t)r + margin;
+        for (int64_t q = a < 0 ? 0 : a; q <= b && q < (int64_t)h; ++q) {
+            out->lo[(size_t)q] = (std::min)(out->lo[(size_t)q], lo[r]);
+            out->hi[(size_t)q] = (std::max)(out->hi[(size_t)q], hi[r]);
+        }
+    }
+    for (uint32_t r = 0; r < h; ++r) {
+        int32_t& l = out->lo[r];
+        int32_t& u = out->hi[r];
+        if (l >= u) { l = 0; u = 0; continue; }
+        if (l < 0) l = 0;
+        if (u > (int32_t)w) u = (int32_t)w;
+        if (l >= u) { l = 0; u = 0; continue; }
+        ++out->visRows;
+    }
+    return true;
+}
+// The bounding box of the visible pixels of `b` (empty Box = none visible). No VisRows (w == 0): `b` itself.
+inline Box ClipBox(const VisRows& v, const Box& b) {
+    if (!v.w || !v.h || Empty(b)) return b;
+    Box o{ INT32_MAX, INT32_MAX, INT32_MIN, INT32_MIN };
+    const int32_t y0 = b.y0 < 0 ? 0 : b.y0, y1 = b.y1 > (int32_t)v.h ? (int32_t)v.h : b.y1;
+    for (int32_t y = y0; y < y1; ++y) {
+        const int32_t l = (std::max)(v.lo[(size_t)y], b.x0), u = (std::min)(v.hi[(size_t)y], b.x1);
+        if (l >= u) continue;
+        if (y < o.y0) o.y0 = y;
+        o.y1 = y + 1;
+        if (l < o.x0) o.x0 = l;
+        if (u > o.x1) o.x1 = u;
+    }
+    if (o.x0 >= o.x1 || o.y0 >= o.y1) return Box{ b.x0, b.y0, b.x0, b.y0 };
+    return o;
+}
+// Bands -> up to 4 * kClipStrips clipped boxes (empty ones left out). No VisRows: the bands as they are. *area / *clipped = the
+// pixels of the bands / of the boxes returned (the log's skipped share).
+inline int SplitClip(const VisRows& v, const Box* bands, int n, Box* out, uint64_t* area, uint64_t* clipped) {
+    int m = 0;
+    for (int i = 0; i < n; ++i) {
+        const Box& b = bands[i];
+        if (Empty(b)) continue;
+        if (area) *area += (uint64_t)(b.x1 - b.x0) * (uint64_t)(b.y1 - b.y0);
+        if (!v.w) { out[m++] = b; if (clipped) *clipped += (uint64_t)(b.x1 - b.x0) * (uint64_t)(b.y1 - b.y0); continue; }
+        const bool wide = (b.x1 - b.x0) >= (b.y1 - b.y0);
+        const int32_t len = wide ? b.x1 - b.x0 : b.y1 - b.y0;
+        for (int s = 0; s < kClipStrips; ++s) {
+            const int32_t a0 = (int32_t)((int64_t)len * s / kClipStrips), a1 = (int32_t)((int64_t)len * (s + 1) / kClipStrips);
+            if (a1 <= a0) continue;
+            const Box piece = wide ? Box{ b.x0 + a0, b.y0, b.x0 + a1, b.y1 } : Box{ b.x0, b.y0 + a0, b.x1, b.y0 + a1 };
+            const Box c = ClipBox(v, piece);
+            if (Empty(c)) continue;
+            out[m++] = c;
+            if (clipped) *clipped += (uint64_t)(c.x1 - c.x0) * (uint64_t)(c.y1 - c.y0);
+        }
+    }
+    return m;
+}
+// The union bounding box of boxes (the in-place CS dispatch covers it once; empty if n == 0).
+inline Box UnionBox(const Box* b, int n) {
+    Box o{ INT32_MAX, INT32_MAX, INT32_MIN, INT32_MIN };
+    for (int i = 0; i < n; ++i) {
+        if (Empty(b[i])) continue;
+        o.x0 = (std::min)(o.x0, b[i].x0); o.y0 = (std::min)(o.y0, b[i].y0);
+        o.x1 = (std::max)(o.x1, b[i].x1); o.y1 = (std::max)(o.y1, b[i].y1);
+    }
+    if (o.x0 >= o.x1 || o.y0 >= o.y1) return Box{ 0, 0, 0, 0 };
+    return o;
+}
+
 // The viewport shift a pass was rasterised with, from the jitter NGX was told (inject.cpp: NGX jitter = jitter_sign * shift).
 inline float ShiftFromNgx(float ngx, int sign) { return sign < 0 ? -ngx : ngx; }
 
@@ -115,7 +261,8 @@ inline void CatmullRomW(float f, float w[4]) {
 //  [2] render texel size (1 / render size) xy, render size zw
 //  [3] x = mode (1 unjitter, 2 + edge AA), y = luma (0 encoded LDR, 1 linear LDR, 2 HDR), z = 1: re-encode linear -> sRGB on the
 //      way out (CSMain only: an _SRGB-only colour texture read through its _SRGB view, written back as bytes), w unused
-//  [4] xy = the output image's origin in the render target (PSMain: SV_Position - origin = output pixel), zw unused
+//  [4] xy = the output image's origin in the render target (PSMain: SV_Position - origin = output pixel), zw = phase 93: CSMain's
+//      dispatch origin (image px; 0 = the dispatch covers the image from (0, 0)) -- set after FillParams by the in-place path
 constexpr int kParamFloats = 20;
 inline void FillParams(float p[kParamFloats], const Box& interior, uint32_t outW, uint32_t outH, uint32_t renderW, uint32_t renderH,
                        float shiftX, float shiftY, int mode, int luma, bool encode, float originX, float originY) {
@@ -221,13 +368,14 @@ float3 LinearToSrgb(float3 c) {
 void CSMain(uint3 id : SV_DispatchThreadID) {
     uint w, h;
     Dst.GetDimensions(w, h);
-    if (id.x >= w || id.y >= h) return;
+    const uint2 q = id.xy + (uint2)Params[4].zw;   // phase 93: the dispatch origin (the visible-area clip; 0 = the whole image)
+    if (q.x >= w || q.y >= h) return;
     const float4 ib = Params[0];
-    const float2 p  = float2(id.xy);
+    const float2 p  = float2(q);
     if (p.x >= ib.x && p.x < ib.z && p.y >= ib.y && p.y < ib.w) return;   // feather mask 1: DLAA only, nothing to do
     float3 c = OutsideValue(p + 0.5);
     if (Params[3].z > 0.5) c = LinearToSrgb(c);
-    Dst[id.xy] = float4(c, Src.Load(int3(id.xy, 0)).a);
+    Dst[q] = float4(c, Src.Load(int3(q, 0)).a);
 }
 
 float4 PSMain(float4 pos : SV_Position) : SV_Target {

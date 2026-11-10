@@ -86,6 +86,15 @@ enum Cat : uint8_t {
     kCount = kDrvFirst + kHookCount
 };
 static_assert(kCount <= 255, "category ids are uint8_t");
+// phase 93: a COUNTER-ONLY hook scope (HookCount below) sits on the stack as its category | kGhost -- no clock read for it, and the
+// scopes opened inside it do not charge time to it
+constexpr uint8_t kGhost = 0x80;
+static_assert(kCount < kGhost, "category ids must leave the kGhost bit free");
+// phase 93: the hooks whose scope is counter-only (the light state Set hooks, ~500 game calls per VR frame): the report marks them
+inline bool CountOnly(int c) {
+    return c == kHkStateSet || c == kHkPSSetShader || c == kHkPSSetSamplers || c == kHkOMSetBlend || c == kHkOMSetDss ||
+           c == kHkRSSetVp;
+}
 
 inline const char* Name(int c) {
     static const char* const kN[kModEnd] = {
@@ -183,7 +192,7 @@ inline void FrameMark(int kind) {
 // Push / pop with exclusive charging (one TSC read each).
 inline void Push(Tls& t, uint8_t c) {
     const uint64_t now = __rdtsc();
-    if (t.depth > 0) {
+    if (t.depth > 0 && !(t.stack[t.depth - 1] & kGhost)) {   // phase 93: a counter-only hook below is charged nothing
         const uint8_t top = t.stack[t.depth - 1];
         const uint64_t d = now - t.last;
         Add(t.ticks[top], d);
@@ -222,9 +231,31 @@ struct Hook {
     Hook(const Hook&) = delete;
     Hook& operator=(const Hook&) = delete;
 };
+// phase 93: a hooked entry point counted but NOT timed (the light state Set hooks, CountOnly above). Why: a timed hook reads the
+// TSC four times per call (hook push, driver push / pop, hook pop: ~30 ns at ~7-10 ns per read) -- ~500 such calls per VR frame
+// cost ~15 us/frame at log level 4 for rows that measured 0.001 ms/frame each. How: an outermost call counts itself (the hook row
+// and its "game calls" entry) and holds a ghost stack entry, so a hooked call its body issues still sees depth > 0 (the mod's,
+// never a game call) and a Block opened inside is timed as usual (Push charges nothing to a ghost). No clock read: the hook body's
+// time and the game's own call fall into the thread's "outside the hooks" figure (the report marks these rows "counted, not timed").
+struct HookCount {
+    Tls* tp = nullptr;
+    explicit HookCount(uint8_t c) {
+        if (!On()) return;
+        Tls* t = TP();
+        if (!t || t->depth != 0) return;
+        tp = t;
+        Add(t->calls[c], 1);
+        Add(t->calls[kDrvFirst + c], 1);
+        t->stack[t->depth++] = (uint8_t)(c | kGhost);
+    }
+    ~HookCount() { if (tp && tp->depth > 0) --tp->depth; }
+    HookCount(const HookCount&) = delete;
+    HookCount& operator=(const HookCount&) = delete;
+};
 // The game's own call inside an active hook: charged to that hook's driver category (outside the mod).
 struct Orig {
     Tls* tp;
+    explicit Orig(const HookCount&) : tp(nullptr) {}   // phase 93: counter-only hooks time nothing
     explicit Orig(const Hook& h) : tp(h.tp) { if (tp) Push(*tp, (uint8_t)(kDrvFirst + h.cat)); }
     ~Orig() { if (tp) Pop(*tp); }
     Orig(const Orig&) = delete;
@@ -238,6 +269,7 @@ struct Drv {
         if (!want || !On()) return;
         Tls* t = TP();
         if (!t || t->depth <= 0) return;
+        if (t->stack[t->depth - 1] & kGhost) return;   // phase 93: inside a counter-only hook -- not timed either
         tp = t;
         Push(*t, (uint8_t)(kDrvFirst + hookCat));
     }
@@ -279,4 +311,5 @@ inline void Calibrate() {
 
 // Hook / pass-through helpers (one statement each; `cph` is the hook's scope object)
 #define CPU_HOOK(cat)   CpuProf::Hook cph(CpuProf::cat)
+#define CPU_HOOK_COUNT(cat) CpuProf::HookCount cph(CpuProf::cat)   // phase 93: counted, not timed (CountOnly)
 #define CPU_ORIG(expr)  do { CpuProf::Orig cpo_(cph); expr; } while (0)

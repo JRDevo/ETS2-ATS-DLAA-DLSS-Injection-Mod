@@ -38,6 +38,8 @@
 
 #include <d3d11.h>
 #include <wrl/client.h>
+#include <vector>
+#include "outside_aa.h"                               // phase 93: OutsideAa::VisRows / Box (the visible-area clip)
 #include <cstdint>
 #include "dlaa.h"
 #include "motion_vectors.h"
@@ -332,6 +334,11 @@ public:
     static int  OutsideAaMode() { return s_oaaMode; }
     static void SetJitterSign(int sx, int sy) { s_oaaSignX = sx < 0 ? -1 : 1; s_oaaSignY = sy < 0 ? -1 : 1; }
     uint64_t OutsideRuns() const { return m_oaaRuns; }   // Runs / composites that replaced the outside (log)
+    // phase 93: the VR visibility mask of this eye's OpenXR view (hidden triangles in NDC, 3 vertices x (x, y) each; inject.cpp
+    // hands g_hm.tri[view] once its eye -> view check passed) -- the outside-AA bands skip what the headset never shows
+    // (outside_aa.h BuildVisRows / SplitClip). key = any value that changes with the mesh / view (0 or ndcTris null = no clip).
+    // Copied when the key changes; the per-row table is built lazily per image size.
+    void SetVisibleMask(const float* ndcTris, uint32_t tris, uint64_t key);
     static void SetBiasStrength(int pct) { s_biasPct = pct < 0 ? 0 : (pct > 100 ? 100 : pct); }
     static int  BiasStrength() { return s_biasPct; }
     uint64_t BiasRuns() const { return m_biasRuns; }   // Runs that handed NGX a mask (log / menu)
@@ -537,6 +544,25 @@ private:
     uint64_t                                          m_oaaRuns = 0;
     uint64_t                                          m_oaaSkipBound = 0, m_oaaSkipSrc = 0;   // skipped: colour bound for
                                                                                               // output / SRV0 not Run's texture
+    // ---- phase 93: the visibility-mask clip of the bands (SetVisibleMask, OaaClip) ----
+    std::vector<float>                                m_visTri;               // the hidden triangles (NDC), copied
+    uint32_t                                          m_visTris = 0;
+    uint64_t                                          m_visKey = 0;           // 0 = no mask: no clip
+    OutsideAa::VisRows                                m_vis;                  // per-row visible spans for m_visW x m_visH
+    uint64_t                                          m_visBuiltKey = 0;      // the key m_vis was built from (0 = none)
+    uint32_t                                          m_visBuiltW = 0, m_visBuiltH = 0;   // the size m_vis was built for (phase 93 review)
+    bool                                              m_visBuildFailed = false;
+    // OaaClip's cache, one per caller (0 = the bands the outside value is computed / drawn in, 1 = the in-place copy-back's outer
+    // bands): the last input and its result
+    OutsideAa::Box                                    m_clipIn[2][4] = {};
+    int                                               m_clipInN[2] = { -1, -1 };
+    uint32_t                                          m_clipInW[2] = {}, m_clipInH[2] = {};
+    OutsideAa::Box                                    m_clipOut[2][4 * OutsideAa::kClipStrips] = {};
+    int                                               m_clipOutN[2] = {};
+    uint64_t                                          m_clipArea[2] = {}, m_clipKept[2] = {};   // that result's band / kept px
+    uint64_t                                          m_oaaAreaWin = 0, m_oaaKeptWin = 0, m_oaaClipRuns = 0;   // log window
+    // the bands `b[0..n)` of a w x h image clipped to the visible area (cached per `which` on the same input); the box count
+    int  OaaClip(int which, uint32_t w, uint32_t h, const OutsideAa::Box* b, int n, OutsideAa::Box* out);
 
     // ---- v0.7.0 upscale composite (VS + PS draw into the game's RT0 after its blit) ----
     Microsoft::WRL::ComPtr<ID3D11VertexShader>        m_compVs;
