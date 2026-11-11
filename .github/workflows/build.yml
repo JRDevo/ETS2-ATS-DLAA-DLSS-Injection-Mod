@@ -72,6 +72,10 @@ jobs:
           if not exist build\tests\cutout_mips_test.exe exit /b 1
           call tests\build_light_fs_test.bat
           if not exist build\tests\light_fs_test.exe exit /b 1
+          call tests\build_water_ps_test.bat
+          if not exist build\tests\water_ps_test.exe exit /b 1
+          call tests\build_other_mods_test.bat
+          if not exist build\tests\other_mods_test.exe exit /b 1
           call tests\build_outside_aa_test.bat
           if not exist build\tests\outside_aa_test.exe exit /b 1
           call tests\build_bug_report_test.bat
@@ -123,6 +127,10 @@ jobs:
         run: build\tests\cutout_mips_test.exe
       - name: 'Test lighting full-screen jitter (phase 78 -- src/light_fs.h edge rects; WARP: shifted draw + edge re-draw, each pixel once, own texel)'
         run: build\tests\light_fs_test.exe
+      - name: 'Test new SCS water without overscan (phase 97 -- src/water_ps.h DXBC classifier on look-alikes; WARP: checker cell = pixel at W x H + edge re-draw, overscan mutation)'
+        run: build\tests\water_ps_test.exe
+      - name: 'Test other mods in the log (phase 94 -- src/other_mods.h game.log.txt mod / plugin lines, once-per-run filter)'
+        run: build\tests\other_mods_test.exe
       - name: 'Test outside AA (phase 81 -- src/outside_aa.h feather bands; WARP: unjitter of jittered-viewport frames, in place + upscale, sign mutation)'
         run: build\tests\outside_aa_test.exe
       - name: Test bug report capture helpers (phase 89b-d -- src/bug_report.h; zip read back, privacy scrubber, plan, pruning, double press)

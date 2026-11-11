@@ -173,6 +173,12 @@ log_level = 1
 # 0 = the game's own viewport for them (before phase 78). Startup only.
 # light_fs_jitter = 1
 
+# Phase 97: the new SCS water (Iceland DLC and later) stores its surface and its bed on a checkerboard and finds its cell from
+# the interpolated screen position, which the 1 px larger jitter viewport (jitter_overscan) moves off the pixel: the water
+# vanished in big blocks that moved with the jitter. 1 = default: those water draws get the jitter shift at the game's size
+# (the far column / row a negative shift misses is drawn again unshifted). 0 = the overscan viewport for them too. Startup only.
+# water_overscan_fix = 1
+
 # Camera-reprojection motion vectors: 1 on, 0 = zero MVs (Ctrl+F5 toggles live)
 # mv_enabled = 1
 

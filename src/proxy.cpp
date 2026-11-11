@@ -55,7 +55,16 @@ HRESULT WINAPI DllUnregisterServer()  { return p_DllUnregisterServer ? p_DllUnre
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID lpReserved) {
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(inst);
+        // phase 95 (issue #31): PIN this DLL in memory until the process ends. The game FreeLibrary's dinput8 at shutdown, but
+        // the hooks stay in other modules' code (kernelbase / kernel32 GetProcAddress in VR, the D3D11 / DXGI hooks): after an
+        // unload the next GetProcAddress jumped into unmapped memory = 0xC0000005 at game close (proven with a test exe:
+        // LoadLibrary, FreeLibrary, GetProcAddress). Pinned, FreeLibrary is a no-op and the hooks always have their code.
+        HMODULE pinned = nullptr;
+        const BOOL pinOk = GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                                              (LPCWSTR)&DllMain, &pinned);
         LoadReal();
+        if (pinOk) Log("DLL pinned until the game exits (phase 95: the hooks never outlive their code)");
+        else LogErr("DLL pin failed (%lu): a game that unloads dinput8 before exit may crash at close", GetLastError());
         StartInjection();     // spawns a worker thread; never do D3D work under loader lock
     } else if (reason == DLL_PROCESS_DETACH) {
         // v0.7.10: final log line only. lpReserved != null = the process is terminating; either way we just log

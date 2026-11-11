@@ -2863,3 +2863,52 @@ picture is meant to stay the same (item 2 only skips pixels the headset never sh
   (was 0.015 ms/frame, 73 entries).
 - **Not verified in game:** every figure above; `FwdStates`' verify; the visibility clip on the user's headset (Virtual Desktop) and
   its savings at the real mesh / 2928 px eyes; the in-place clip path (not the user's config).
+
+### Phase 97: the new SCS water without the jitter overscan (`water_overscan_fix`, default 1, startup only)
+
+- **Report**: issue #30 (Iceland DLC water, flat triple screen, AMD + OptiScaler) and the user's VR: ponds / sea vanish in big
+  rectangular blocks that move with the jitter phase (the gravel bed shows). VR A/B: `jitter_overscan = 0` -> the water is steady.
+- **Cause** (`captures/ets2_pond_water_audit.md`, RenderDoc ETS2 2026-11-11 frames 2564 / 3700): the new water keeps the bed's
+  G-buffer and the water surface on a checkerboard of the same G-buffer. Its G-buffer writer (PS `c369f136-...`) discards on
+  `(ftou(v5.yz / v5.x * cb0[17].xy) sum + cb0[20].x) & 1`, its forward reader (PS `185d5b7a-...`) picks the water / bed cell by the
+  same parity from its own interpolant; both use the INTERPOLATED clip position x the scene size, not `SV_Position`. A W x H
+  viewport shifted by |s| < 0.5 keeps that cell = the rasterised pixel; the phase-23 (W+1) x (H+1) viewport scales it by W / (W+1),
+  so beyond x = (0.5 - s) W / y = (0.5 - s) H the cell is 1 px off in that axis, the parity flips where exactly ONE axis is off,
+  and the reader takes the bed cell for the water cell. The model predicted all 8 VR phases of the user's capture.
+- **Fix** (`src/water_ps.h`, `src/inject.cpp` block above `hkCreatePixelShader`, `ReconcileViewports`, `hkDrawIndexed`,
+  `hkDrawIndexedInstanced`): every created pixel shader is classified once (`WaterPs::Classify`, a DXBC taint walk): **checker
+  writer** = a `div` of an input register by a component of the same input register (perspective divide), times a cbuffer value,
+  `ftou` / `ftoi`, `and ..., l(1)` of that integer, a `discard` on the parity; **checker reader** = the same parity chain and an `ld`
+  whose address carries the integer pixel AND the parity; **material flag** (PS `4b5eb7ed-...`, the G-buffer draw that writes the
+  water's depth + RT3 id before the writer tests GREATER_EQUAL against it) = no inputs, no resources, >= 4 outputs, only
+  `mov oN, l(...)` with an integer immediate; **hash** = the three audited checksums when no structural rule matched. Resource
+  fetches do not pass the address taint on (a flag bit loaded at the pixel is data, not the pixel's parity). The classified shader
+  objects live in a small lock-free-read table (`g_waterPs`, 64 slots; a shader created at a released one's address replaces / clears
+  its slot). A `DrawIndexed` / `DrawIndexedInstanced` of a jittered world / mirror pass (`g_jitterPass || g_mirJit`, not a preview)
+  whose current PS is classified sets `g_waterNoOver` BEFORE anything records the draw: `ReconcileViewports` issues the game's
+  viewport 0 + the pass's shift at the game's W x H (no overscan; TopLeft and size are the game's own, so one wide view, an offset
+  viewport and the flat multi-view passes get their own). After the draw (after `FwdOnDraw` / `BiasOnDraw`): the far column / row a
+  negative shift lost is re-drawn with the game's own viewport + scissor (`VpEdgeFill` = phase 78's `LightFsEdgeFill` body as a
+  template; cells there are exact too), then `g_waterNoOver = false` + `ReconcileViewports` = the overscan viewport again.
+- **MV replay**: `DidOnDraw` / `MirOnDraw` / `FwdOnDraw` read the viewport with `RSGetViewports` at the draw, so the draw-id replay
+  (depth EQUAL) re-issues these draws with the same W x H viewport and their ids line up. The edge re-draws are not recorded (that
+  1 px column / row of water gets no draw id on negative-shift frames: camera MVs there).
+- **Log**: start `water overscan exempt (phase 97): water_overscan_fix=N (...)`; one line per classified shader `water overscan
+  exempt (phase 97): PS <ptr> <checksum> classified: <rule> -- known hash (2026-11 audit) / NEW shader (...)` (a WARNING for a
+  hash-only match or a full table; 48 lines cap); once `first water draw (G-buffer / forward / mirror pass, ...) issued with the
+  pass's shift (..) at the game's viewport 0 = x,y WxH (no overscan; N viewport(s))`; level 4: the phase-55 / 78 stats line ends
+  with `| phase 97 water_overscan_fix N: water draws without overscan A, water draws NOT shifted B, water edge re-draws C, water
+  shaders D`.
+- **Test** `tests/water_ps_test.cpp` (CI): `Classify` on fxc look-alikes of the three game shaders (their disassembly matches the
+  audit's instruction for instruction in the parity chain; the reader compiles to `swapc` instead of the game's `movc`, both are
+  covered) -> writer / reader / flag, on SM4 too; negatives (soft-particle depth fetch, screen-space decal, `SV_Position` checker,
+  a loaded flag bit `& 1` + discard, a constant float colour, a VS, truncated / random-garbage blobs) -> none; patched known
+  checksums -> the hash fallback. WARP: a perspective quad whose PS writes the game's cell: W x H shifted by the 8 Halton phases ->
+  cell = pixel everywhere, holes exactly the edge rule's; + the edge re-draw -> no holes; mutation (W+1) x (H+1) -> 43-84 % wrong
+  parity, matching the audit's model. `water_ps_test.exe <folder>` classifies every `*.dxbc` in it: 0 matches over 333 game pixel
+  shaders of the older ETS2 / ATS captures (`ets2_flat_frame1969`, `ats_roof_flicker_frame1890`,
+  `amtrucks_2026.10.18_19.23.51_frame2443`) and the 10 PS in `captures/*.dxbc`.
+- **Not verified**: nothing in game. The real water bytecode was not available to the test (the 2026-11-11 `.rdc` files are gone;
+  the rules were written from the audit's disassembly). Multi-view: the exemption keeps the game's own viewport 0 per pass, but the
+  water's `cb0[17]` = viewport size assumption was only seen in a single-view capture. The water picture sits up to x / W px off the
+  overscanned ground around it (static, not per frame); `Draw` / `DrawInstanced` / indirect water draws are not hooked.

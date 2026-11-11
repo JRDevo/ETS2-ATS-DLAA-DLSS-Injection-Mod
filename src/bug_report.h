@@ -202,7 +202,23 @@ private:
 inline Scrubber MakeScrubber(const wchar_t* exePath) {
     Scrubber s;
     wchar_t b[MAX_PATH];
-    if (GetEnvironmentVariableW(L"USERPROFILE", b, MAX_PATH)) s.AddWide(b, "%USERPROFILE%");
+    if (GetEnvironmentVariableW(L"USERPROFILE", b, MAX_PATH)) {
+        s.AddWide(b, "%USERPROFILE%");
+        // phase 94b (Fable audit): the 8.3 short form too (C:\Users\JOHNDO~1 -- TEMP is often short): the home folder, and its last
+        // component as a path part (\JOHNDO~1 -> \<user>)
+        wchar_t sh[MAX_PATH];
+        const DWORD n8 = GetShortPathNameW(b, sh, MAX_PATH);
+        if (n8 > 0 && n8 < MAX_PATH && _wcsicmp(sh, b) != 0) {
+            s.AddWide(sh, "%USERPROFILE%");
+            const wchar_t* last = wcsrchr(sh, L'\\');
+            char u8[512];
+            if (last && last[1] && WideCharToMultiByte(CP_UTF8, 0, last + 1, -1, u8, sizeof(u8), nullptr, nullptr) > 0) {
+                s.AddExact(std::string("\\\\") + u8, "\\\\<user>");
+                s.AddExact(std::string("\\") + u8, "\\<user>");
+                s.AddExact(std::string("/") + u8, "/<user>");
+            }
+        }
+    }
     if (exePath) {
         std::wstring e = exePath, lower = e;
         for (wchar_t& c : lower) c = (wchar_t)towlower(c);

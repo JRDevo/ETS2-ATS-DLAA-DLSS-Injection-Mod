@@ -831,10 +831,12 @@
 #include "cpu_pin.h"                                // phase 32: keep the game on the V-Cache cores (cpu_cache_pin; both builds)
 #include "cutout_mips.h"                            // phase 77: coverage-preserving binary alpha mips (cut-out BC3; pure logic; both builds)
 #include "light_fs.h"                               // phase 78: the lighting pass's full-screen draws -- the lost edge rects (both builds)
+#include "water_ps.h"                               // phase 97: the new SCS water's checkerboard shaders (DXBC rule, both builds)
 #include "game_taa.h"                               // phase 82: the game's own TAA together with the mod (game_taa; pure logic; both builds)
 #include "vr_ui.h"                                  // phase 83: the game's VR UI placement typed into its console (pure logic; both builds)
 #include "cpu_tuning.h"                            // phase 54: P-core preference / priority / EcoQoS opt-out (cpu_pcore, cpu_priority, cpu_no_throttle)
 #include "flat_views.h"                             // v0.12.0 issue #12: flat multi-view (multi-monitor) detection (both builds)
+#include "other_mods.h"                             // phase 94: the other mods in the plain log (issue #31)
 #include "bug_report.h"                             // phase 89b: the one-press bug report (zip, scrubber, plan; both builds)
 
 namespace {
@@ -1958,6 +1960,9 @@ void RefreshBackbufferFromSwapchain(IDXGISwapChain* sc, uint64_t n) {
 }
 
 #ifdef WITH_DLAA
+namespace OtherMods { void OnPresent(); }       // phase 94: the other mods in the log (defined after the bug report code)
+#endif
+#ifdef WITH_DLAA
 inline bool XrTurboEffective();                 // phase 56: defined with the Turbo mode code (phase 52), used by the VectorXR notice below
 #endif
 // The per-frame work (v0.8.1: was the body of hkPresent at depth 0). Normal mode: hkPresent, sc = the presenting
@@ -1967,6 +1972,9 @@ inline bool XrTurboEffective();                 // phase 56: defined with the Tu
 void PresentFrameWork(IDXGISwapChain* sc, uint64_t n, ID3D11DeviceContext* bctx, bool fromRule) {
     if (!sc) CpuProfFrameMark(CpuProf::kMarkPresent);   // phase 31: present-layer mode -- the game-thread frame boundary is the frame
     CpuProf::Block cpb(CpuProf::kBFrameWork);               // phase 31 CPU profiler (cpu_prof.h)
+#ifdef WITH_DLAA                                // (defined in the WITH_DLAA part: the bug report code)
+    OtherMods::OnPresent();                     // phase 94: the other mods in the log (a few short runs, own threads)
+#endif
     Ofxr::OnPresent(n);                         // v0.10.0 OFXR Bridge: layer-module rescan cadence + pass-through stats
     {   // phase 56: VectorXR found in the game -- say once what it means, and warn about the two settings that fight it
         static bool s_vxrNoted = false;
@@ -8514,6 +8522,16 @@ int            g_rewindFrames     = 0;
 bool           g_lightFsShift     = false; // ReconcileViewports: shift the lighting bind's viewport for the full-screen Draw now running
 uint64_t       g_cLightFs = 0, g_cLightFsNoShift = 0, g_cLightFsEdge = 0;   // stats window: shifted / NOT shifted / edge-fill draws
 uint64_t       g_cLightFsTotal = 0;        // since the start (the first one is logged)
+// phase 97 WATER (the block below LightFsEdgeFill; src/water_ps.h): dlaa.ini water_overscan_fix (default 1). The new SCS water's
+// draws (G-buffer material flag + checker writer, forward reader) are issued with the pass's SHIFT but the game's W x H size: their
+// shaders compute the checker cell from the interpolated clip position, which the (W+1)/W overscan scale moves off the rasterised
+// pixel (issue #30). ReconcileViewports treats g_waterNoOver as "shift, no overscan" for the duration of that one draw.
+int            g_psDumpCfg        = 0;     // phase 97b dlaa.ini ps_dump: 1 = every pixel shader the game creates -> dlaa_selftest/ps_dump/
+int            g_waterFixCfg      = 1;     // dlaa.ini water_overscan_fix: 1 = the water draws get no overscan; 0 = phase 23 as before
+bool           g_waterNoOver      = false; // ReconcileViewports: no overscan for the water draw now running
+uint64_t       g_cWaterDraws = 0, g_cWaterNoShift = 0, g_cWaterEdge = 0;
+uint64_t       g_cWaterSkip[4] = {};      // phase 97c: water PS drawn but NOT exempt: no jittered pass / preview / no game viewport / overscan off   // stats window: shifted W x H / NOT shifted / edge-fill draws
+uint64_t       g_cWaterTotal = 0;          // since the start (the first one is logged)
 #ifdef WITH_DLAA
 void LightRedrawStatsLog(uint64_t blit, uint64_t blitsInWindow);   // (defined with the lighting redraws, above hkOMSetDepthStencilState)
 #endif
@@ -8701,7 +8719,10 @@ void ReconcileViewports(ID3D11DeviceContext* ctx, bool gameJustSet) {
     // +-0.875 px and the round 4/5 edge fix (PvFixTileEdges) repairs the edge they lose.
     // phase 78: never for a lighting-bind full-screen draw -- it maps its UV across the viewport (the (W+1)/W scale would read the
     // wrong G-buffer texel toward the far edge, the phase-25 defect); its lost far column / row is re-drawn by LightFsEdgeFill
-    const bool over = g_jitterOverscan && (worldShift || mirShift) && !g_lightFsShift;
+    // phase 97: never for a draw of the new SCS water (g_waterNoOver, set around that one draw by WaterOnDrawBegin / End) -- its
+    // checker cell comes from the interpolated clip position x the scene size; the (W+1)/W scale flips the cell parity in big
+    // rectangles (the water vanishes there, issue #30); its lost far column / row is re-drawn by WaterOnDrawEnd
+    const bool over = g_jitterOverscan && (worldShift || mirShift) && !g_lightFsShift && !g_waterNoOver;
     if (!gameJustSet && shift == g_vpShifted && over == g_vpOver &&
         (!shift || (g_vpShiftX == sx && g_vpShiftY == sy))) return;
     CpuProf::Drv cpd(gameJustSet, CpuProf::kHkRSSetVp);   // phase 31: the game's own viewport call (from hkRSSetViewports)
@@ -8781,10 +8802,12 @@ void LightFsOnContextReset() {
 // game's scissor (when its rasterizer state enables one) is intersected; else a scissor twin of its state is bound for the fill.
 // Leaves the game's own viewport issued (g_vpShifted = false) and the game's rasterizer state + scissor rects restored. No-op
 // (nothing touched) when no edge was lost.
-void LightFsEdgeFill(ID3D11DeviceContext* ctx, UINT vertexCount, UINT startVertex) {
+// phase 97: the body is VpEdgeFill (any re-draw: the water's DrawIndexed too); returns the number of edge re-draws issued.
+template <class F> int VpEdgeFill(ID3D11DeviceContext* ctx, F&& redraw) {
+    int drawn = 0;
     D3D11_RECT r[2];
     const int nr = LightFs::EdgeRects(g_gameVp[0], g_vpShiftX, g_vpShiftY, r);   // (src/light_fs.h; tests/light_fs_test.cpp)
-    if (!nr) return;
+    if (!nr) return 0;
     ID3D11RasterizerState* rs = nullptr;
     ctx->RSGetState(&rs);                                  // (+1 ref)
     D3D11_RASTERIZER_DESC rd{};
@@ -8806,13 +8829,17 @@ void LightFsEdgeFill(ID3D11DeviceContext* ctx, UINT vertexCount, UINT startVerte
                 if (!ns || !LightFs::Clip(e, sc[0])) continue;   // (scissor on, no rect bound = nothing is drawn)
             }
             ctx->RSSetScissorRects(1, &e);
-            oDraw(ctx, vertexCount, startVertex);          // (the original: the game's Draw again, not through hkDraw)
-            ++g_cLightFsEdge;
+            redraw();                                      // (the original: the game's draw again, not through the hook)
+            ++drawn;
         }
         ctx->RSSetScissorRects(ns, ns ? sc : nullptr);
         if (twin) ctx->RSSetState(rs);
     }
     if (rs) rs->Release();
+    return drawn;
+}
+void LightFsEdgeFill(ID3D11DeviceContext* ctx, UINT vertexCount, UINT startVertex) {
+    g_cLightFsEdge += (uint64_t)VpEdgeFill(ctx, [&] { oDraw(ctx, vertexCount, startVertex); });
 }
 
 void STDMETHODCALLTYPE hkRSSetViewports(ID3D11DeviceContext* ctx, UINT n, const D3D11_VIEWPORT* vps) {
@@ -9793,6 +9820,165 @@ void STDMETHODCALLTYPE hkPSSetShader(ID3D11DeviceContext* ctx, ID3D11PixelShader
     DidShadow::NotePs(ctx, ps);                          // phase 93: the DidShadow PS / OM bank
 #endif
 }
+// ---- phase 97: the new SCS water without the jitter overscan (dlaa.ini water_overscan_fix, default 1) ---------------------------
+// REPORT: issue #30 (Iceland DLC ponds / sea, flat triple screen) and the user's VR: the water disappears in big rectangular blocks
+// that move with the jitter phase (the bed shows); dlaa.ini jitter_overscan = 0 -> steady. AUDIT (captures/ets2_pond_water_audit.md,
+// RenderDoc ETS2 2026-11-11): the water keeps the bed's G-buffer and the water surface on a CHECKERBOARD of the same G-buffer; each of
+// its shaders computes the checker cell from the INTERPOLATED clip position x the scene size, not from SV_Position. With the game's
+// W x H viewport shifted by |s| < 0.5 that cell is the rasterised pixel; with the phase-23 (W+1) x (H+1) viewport it is 1 px off in
+// one axis beyond x = (0.5 - s) W / y = (0.5 - s) H, the parity flips where exactly one axis is off, and the forward pass reads the
+// bed cell as the water cell (tests/water_ps_test.cpp reproduces it on WARP: 43-84 % of the pixels per Halton phase; W x H: 0).
+// FIX: the water's draws get the pass's shift at the game's W x H (ReconcileViewports with g_waterNoOver, set around the draw by
+// WaterOnDrawBegin / End in hkDrawIndexed / hkDrawIndexedInstanced). Which draws: their pixel shader, classified ONCE at
+// CreatePixelShader by its DXBC (WaterPs::Classify: the checker writer / reader by structure, the material-flag draw by shape, the
+// three audited checksums as the fallback; one log line per classified shader). All three must share the mapping: the flag draw
+// writes the depth the checker writer tests GREATER_EQUAL against, and the reader's cells must be the writer's.
+// Per viewport: only viewport 0 is ever shifted (ReconcileViewports); the exempt one is the game's own viewport 0 (its TopLeft and
+// W x H, whatever the layout: one wide view or one pass per screen in flat multi-view) + the shift -- nothing is assumed about the
+// target. The draw-id / MV replay records the draw's viewport with RSGetViewports at the draw (DidOnDraw / MirOnDraw / FwdOnDraw,
+// all before WaterOnDrawEnd), so its depth-EQUAL replay uses the same W x H viewport as the game draw.
+// EDGE: a negative shift leaves the last column / row of these draws unrasterised (the phase-23 edge rule): WaterOnDrawEnd re-draws
+// exactly those pixels with the game's own viewport (VpEdgeFill, as phase 78), whose cells are also exact (floor(p + 0.5) = p).
+// phase 97c: an OPEN-ADDRESSING table (the 2026-11-11 triple-screen run: 75 matching shaders -- 73 readers + the writer + the flag --
+// against the old 64-slot list: the three that matter are created last, at the pond, and were dropped; 0 draws exempt). A key is never
+// removed: a released shader's slot keeps its address with rule 0 (WaterPsNote overwrites it when that address is reused).
+constexpr int        kWaterPsMax = 1024;          // power of two; distinct water shader addresses seen (75 in a full ETS2 session)
+inline uint32_t WaterPsHash(const void* p) {
+    return (uint32_t)((((uint64_t)(uintptr_t)p >> 4) * 0x9E3779B97F4A7C15ull) >> 54) & (kWaterPsMax - 1);
+}
+std::atomic<void*>   g_waterPs[kWaterPsMax];      // the shader objects (identity; null = free slot)
+std::atomic<uint8_t> g_waterPsRule[kWaterPsMax];  // WaterPs::Rule per slot
+std::atomic<int>     g_waterPsN{0};               // slots in use = the scan bound (never shrinks; freed slots are reused)
+std::atomic<int>     g_waterPsLive{0};            // classified shaders alive (stats)
+std::atomic<uint32_t> g_waterPsGen{0};            // bumped by every change (invalidates the render thread's memo)
+std::atomic<uint32_t> g_waterPsLogs{0};
+SRWLOCK              g_waterPsLock = SRWLOCK_INIT;   // writers only (CreatePixelShader, any thread); the draw path reads lock-free
+const void*          g_waterMemoPs = nullptr;     // render thread: the PS the memo is for ...
+uint32_t             g_waterMemoGen = ~0u;        // ... at this generation
+int                  g_waterMemoRule = 0;
+
+// CreatePixelShader (any thread): classify the new shader object; a shader created at the address of a released one replaces
+// (or clears) that slot.
+void WaterPsNote(ID3D11PixelShader* ps, const void* code, SIZE_T len) {
+    const WaterPs::Result r = WaterPs::Classify(code, (size_t)len);
+    bool changed = false, full = false;
+    AcquireSRWLockExclusive(&g_waterPsLock);
+    int at = -1, empty = -1;
+    for (int k = 0, i = (int)WaterPsHash(ps); k < kWaterPsMax; ++k, i = (i + 1) & (kWaterPsMax - 1)) {
+        void* const p = g_waterPs[i].load(std::memory_order_relaxed);
+        if (p == (void*)ps) { at = i; break; }
+        if (!p) { empty = i; break; }                    // end of the probe chain: not in the table
+    }
+    if (at >= 0) {                                       // the address of a released shader: new rule (0 = not water any more)
+        const uint8_t old = g_waterPsRule[at].load(std::memory_order_relaxed);
+        if (old != (uint8_t)r.rule) {
+            g_waterPsRule[at].store((uint8_t)r.rule, std::memory_order_release);
+            if (old && !r.rule) g_waterPsLive.fetch_sub(1, std::memory_order_relaxed);
+            if (!old && r.rule) g_waterPsLive.fetch_add(1, std::memory_order_relaxed);
+            changed = true;
+        }
+    } else if (r.rule) {
+        if (empty >= 0 && g_waterPsN.load(std::memory_order_relaxed) < kWaterPsMax * 3 / 4) {   // keep probe chains short
+            g_waterPsRule[empty].store((uint8_t)r.rule, std::memory_order_relaxed);
+            g_waterPs[empty].store((void*)ps, std::memory_order_release);   // (the rule is visible before the key)
+            g_waterPsN.fetch_add(1, std::memory_order_release);
+            g_waterPsLive.fetch_add(1, std::memory_order_relaxed);
+            changed = true;
+        } else {
+            full = true;
+        }
+    }
+    if (changed) g_waterPsGen.fetch_add(1, std::memory_order_release);
+    ReleaseSRWLockExclusive(&g_waterPsLock);
+    if (!r.rule) return;
+    if (r.rule == WaterPs::kRuleCheckerRead && g_waterPsLogs.fetch_add(1, std::memory_order_relaxed) >= 16) return;   // phase 97c: readers capped (73 seen)   // (a game reload creates them again: cap the lines)
+    char sum[40];
+    WaterPs::SumText(r.sum, sum, sizeof(sum));
+    if (full)
+        LogWarn("water overscan exempt (phase 97): WARNING PS %p %s matched (%s) but the table is full (%d) -- that water keeps the "
+                "overscan viewport", (void*)ps, sum, WaterPs::RuleName(r.rule), kWaterPsMax);
+    else if (r.rule == WaterPs::kRuleHash)
+        LogWarn("water overscan exempt (phase 97): PS %p %s = one of the audited water shaders by its checksum, but the structural "
+                "rules did NOT match it (a DXBC the classifier does not understand?) -- exempt by the hash fallback%s", (void*)ps, sum,
+                g_waterFixCfg ? "" : " (water_overscan_fix=0: not used)");
+    else
+        Log("water overscan exempt (phase 97): PS %p %s classified: %s -- %s%s", (void*)ps, sum, WaterPs::RuleName(r.rule),
+            r.known >= 0 ? "known hash (2026-11 audit)" : "NEW shader (not one of the 3 audited checksums: structural match)",
+            g_waterFixCfg ? (g_jitterOverscan ? "" : " (jitter_overscan=0: nothing to exempt)") : " (water_overscan_fix=0: not used)");
+}
+
+// render thread: the rule of the game's current PS (0 = not water); one compare while the PS and the table do not change
+inline int WaterPsRuleCur() {
+    const void* const ps = (const void*)g_lodPsCur;
+    const uint32_t gen = g_waterPsGen.load(std::memory_order_acquire);
+    if (ps != g_waterMemoPs || gen != g_waterMemoGen) {
+        int rule = 0;
+        if (ps) {
+            for (int k = 0, i = (int)WaterPsHash(ps); k < kWaterPsMax; ++k, i = (i + 1) & (kWaterPsMax - 1)) {   // phase 97c: O(1)
+                const void* const p = g_waterPs[i].load(std::memory_order_acquire);
+                if (p == ps) { rule = g_waterPsRule[i].load(std::memory_order_acquire); break; }
+                if (!p) break;
+            }
+        }
+        g_waterMemoPs = ps; g_waterMemoGen = gen; g_waterMemoRule = rule;
+    }
+    return g_waterMemoRule;
+}
+
+// hkDrawIndexed / hkDrawIndexedInstanced (game context, not the mod's own work), BEFORE the draw is recorded / issued: a water draw of
+// a jittered world / mirror pass gets the shift without the overscan. true = WaterOnDrawEnd must follow the game's draw.
+bool WaterOnDrawBegin(ID3D11DeviceContext* ctx) {
+    if (!g_waterFixCfg || g_waterPsN.load(std::memory_order_relaxed) == 0) return false;   // (one load when no water shader exists)
+    const int rule = WaterPsRuleCur();
+    if (!rule) return false;
+    // phase 97c: why a water draw is left alone (the 22:27 test: 0 exempt and no way to tell why)
+    if (!(g_jitterPass || g_mirJit)) { ++g_cWaterSkip[0]; return false; }
+    if (g_previewPass) { ++g_cWaterSkip[1]; return false; }
+    if (g_gameVpN == 0) { ++g_cWaterSkip[2]; return false; }
+    if (!g_jitterOverscan) { ++g_cWaterSkip[3]; return false; }
+    g_waterNoOver = true;
+    ReconcileViewports(ctx, false);
+    const bool shifted = g_vpShifted && !g_vpOver;
+    if (shifted) ++g_cWaterDraws; else ++g_cWaterNoShift;
+    if (shifted && g_cWaterTotal++ == 0)
+        Log("water overscan exempt (phase 97): first water draw (%s pass, PS %p, %s) issued with the pass's shift (%+.4f,%+.4f) at "
+            "the game's viewport 0 = %.0f,%.0f %.0fx%.0f (no overscan; %u viewport(s)) -- its checker cells match the rasterised "
+            "pixels (Present #%llu)", g_mirJit ? "mirror" : (g_gbufPass ? "G-buffer" : "forward"), (void*)g_lodPsCur,
+            WaterPs::RuleName(rule), (double)g_vpShiftX, (double)g_vpShiftY, g_gameVp[0].TopLeftX, g_gameVp[0].TopLeftY,
+            g_gameVp[0].Width, g_gameVp[0].Height, g_gameVpN, (unsigned long long)g_frames.load(std::memory_order_relaxed));
+    return true;
+}
+// ... after the game's draw (and after everything that records it): the far column / row a negative shift lost, re-drawn with the
+// game's own viewport (redraw = the original draw call, not the hook), then the pass's overscan viewport again.
+template <class F> void WaterOnDrawEnd(ID3D11DeviceContext* ctx, F&& redraw) {
+    if (g_vpShifted && !g_vpOver) g_cWaterEdge += (uint64_t)VpEdgeFill(ctx, redraw);
+    g_waterNoOver = false;
+    ReconcileViewports(ctx, false);
+}
+
+// phase 97b dlaa.ini ps_dump = 1 (debug, default 0): every pixel shader the game creates is written ONCE to
+// dlaa_selftest\ps_dump\<checksum>_<water rule>.dxbc (the raw DXBC; checksum in RenderDoc's form) -- the real bytecode for the
+// phase 97 classifier (the first rules were written from an audit without the game's own blobs). Any thread; file I/O only.
+void PsDumpOne(const void* code, SIZE_T len) {
+    if (!code || len < 32 || len > (8u << 20)) return;
+    static bool s_dirOk = false; static wchar_t s_dir[MAX_PATH];
+    static SRWLOCK s_lk = SRWLOCK_INIT;
+    AcquireSRWLockExclusive(&s_lk);
+    if (!s_dirOk && PathNextToDll(L"dlaa_selftest\\", s_dir)) {
+        CreateDirectoryW(s_dir, nullptr); wcscat_s(s_dir, L"ps_dump\\"); CreateDirectoryW(s_dir, nullptr); s_dirOk = true;
+        Log("ps_dump (phase 97b): writing every created pixel shader to dlaa_selftest\\ps_dump\\ (debug; set ps_dump = 0 after)");
+    }
+    ReleaseSRWLockExclusive(&s_lk);
+    if (!s_dirOk) return;
+    const WaterPs::Result r = WaterPs::Classify(code, (size_t)len);
+    char sum[40]; WaterPs::SumText(r.sum, sum, sizeof(sum));
+    wchar_t path[MAX_PATH];
+    swprintf_s(path, L"%ls%hs_r%d.dxbc", s_dir, sum, r.rule);
+    if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) return;
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, path, L"wb") == 0 && f) { fwrite(code, 1, len, f); fclose(f); }
+}
+
 // phase 12: CreatePixelShader (device vtable 15, any thread) -- one DXBC scan per created shader (a few hundred tokens).
 // A validation-only call (ppPixelShader null) and failures pass through untouched.
 HRESULT STDMETHODCALLTYPE hkCreatePixelShader(ID3D11Device* dev, const void* code, SIZE_T len, ID3D11ClassLinkage* cl,
@@ -9804,6 +9990,8 @@ HRESULT STDMETHODCALLTYPE hkCreatePixelShader(ID3D11Device* dev, const void* cod
         bool dep = false;                                // v0.10.0 phase 21: + the SV_Depth output flag
         const int cls = DxbcPsClass(code, len, &dep);
         LodPsNote(*pp, cls, dep);
+        WaterPsNote(*pp, code, len);                     // phase 97: the new SCS water's checkerboard shaders
+        if (g_psDumpCfg) PsDumpOne(code, len);           // phase 97b: debug dump of the game's pixel shaders (dlaa.ini ps_dump)
 #ifdef WITH_DLAA
         WireWiden::NotePs(*pp, code, len);               // phase 61: the wire PS (by its DXBC checksum)
         // phase 82: the game's TAA resolve and its range-compress pass (src/game_taa.h); a later shader at the same address
@@ -11702,7 +11890,8 @@ bool DumpFrame(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, const wchar_t* pa
 // at the game's blit), dump the presenting swap chain's back buffer as final_<mode>_<n>.bmp. No reference on the back
 // buffer is kept (ResizeBuffers must stay possible).
 namespace Cap { bool SavePath(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, const D3D11_BOX* box, const std::wstring& path, bool raw);
-                const D3D11_BOX* CropOf(ID3D11Texture2D* tex, D3D11_BOX* b); }
+                const D3D11_BOX* CropOf(ID3D11Texture2D* tex, D3D11_BOX* b, int unit = 0, bool raw = false); }
+bool g_stRawUp = false;   // phase 96b: the picture SelfTestStep gets this frame is the game's render-size one while DLSS upscales
 void SelfTestFinalDump(IDXGISwapChain* sc) {
     if (!g_testFinalPending) return;
     g_testFinalPending = false;
@@ -11826,7 +12015,8 @@ float RewindSecsNow();
 namespace Rewind {
 constexpr uint64_t kMaxBytes = 2560ull << 20;            // VRAM cap of the colour ring: fewer slots for big / RGBA16F pictures
 constexpr uint64_t kDiagMaxBytes = 1024ull << 20;        // VRAM cap of the diag planes
-struct Slot { ID3D11Texture2D* tex = nullptr; uint64_t present = 0; int phase = 0; float vx = 0, vy = 0, njx = 0, njy = 0; int diag = -1; };
+struct Slot { ID3D11Texture2D* tex = nullptr; uint64_t present = 0; int phase = 0; float vx = 0, vy = 0, njx = 0, njy = 0; int diag = -1;
+              bool raw = false; };   // phase 96b: raw = the game's render-size picture while DLSS upscaled (CropOf)
 struct Diag { ID3D11Texture2D* col = nullptr; ID3D11Texture2D* mv = nullptr; ID3D11Texture2D* dep = nullptr; uint64_t present = 0; };
 std::vector<Slot> g_ring;
 std::vector<Diag> g_diag;
@@ -11842,6 +12032,20 @@ bool g_failed = false;                                   // a texture create fai
 bool g_diagFailed = false;                               // a diag plane create failed: the colour ring goes on without planes
 std::atomic<uint64_t> g_vramBytes{0};                    // what the ring holds now (the menu's cost column)
 uint64_t g_lastDl = 0;                                   // g_dlaa[0].Frames() at the last diag copy
+// phase 96: EYE 1 (VR: the left eye) -- a second, short ring of the last kEye1Frames pictures + the colour DLSS got, paired with the
+// eye-0 frames by Present number at the drain (rewind_eye1_NN.png, rw_color_in_eye1_NN.png). A flicker seen in only one eye was
+// not in any capture before (eye 0 only).
+constexpr int kEye1Frames = 12;
+constexpr uint64_t kEye1MaxBytes = 1280ull << 20;        // VRAM cap of the eye-1 ring (colour + colour in)
+struct Slot1 { ID3D11Texture2D* tex = nullptr; ID3D11Texture2D* in = nullptr; uint64_t present = 0; bool hasIn = false, raw = false; };
+std::vector<Slot1> g_ring1;
+int g_head1 = 0, g_count1 = 0;
+UINT g_w1 = 0, g_h1 = 0; DXGI_FORMAT g_fmt1 = DXGI_FORMAT_UNKNOWN;
+UINT g_iw1 = 0, g_ih1 = 0; DXGI_FORMAT g_ifmt1 = DXGI_FORMAT_UNKNOWN;
+uint64_t g_lastDl1 = 0;                                  // g_dlaa[1].Frames() at the last colour-in copy
+uint64_t g_ring1Bytes = 0;                               // the eye-1 ring's part of g_vramBytes
+bool g_failed1 = false;
+bool g_inFailed1 = false;                                // phase 96b: a colour-in texture create failed (no retry per frame)
 
 // ---- the background writers (PNG encoding, file copies, the zip) ----
 // phase 89e: a POOL of min(4, max(1, cores / 4)) below-normal threads (one 4K PNG took ~0.5 s on the single phase 89b thread: the
@@ -11911,7 +12115,21 @@ void ReleaseDiag() {
     g_diagHead = 0;
     for (Slot& s : g_ring) s.diag = -1;
 }
+void ReleaseRing1() {                                    // phase 96
+    for (Slot1& s : g_ring1) {
+        if (s.tex) { s.tex->Release(); s.tex = nullptr; }
+        if (s.in) { s.in->Release(); s.in = nullptr; }
+    }
+    const uint64_t vb = g_vramBytes.load();
+    g_vramBytes = vb > g_ring1Bytes ? vb - g_ring1Bytes : 0;
+    g_ring1Bytes = 0;
+    g_ring1.clear();
+    g_head1 = g_count1 = 0;
+    g_w1 = g_h1 = 0; g_fmt1 = DXGI_FORMAT_UNKNOWN;
+    g_iw1 = g_ih1 = 0; g_ifmt1 = DXGI_FORMAT_UNKNOWN;
+}
 void ReleaseRing() {
+    ReleaseRing1();
     ReleaseDiag();
     for (Slot& s : g_ring) if (s.tex) { s.tex->Release(); s.tex = nullptr; }
     g_ring.clear();
@@ -12002,7 +12220,7 @@ void Record(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase, float vx,
     }
     ctx->CopyResource(s.tex, tex);
     s.present = g_frames.load(std::memory_order_relaxed);
-    s.phase = phase; s.vx = vx; s.vy = vy; s.njx = njx; s.njy = njy; s.diag = -1;
+    s.phase = phase; s.vx = vx; s.vy = vy; s.njx = njx; s.njy = njy; s.diag = -1; s.raw = g_stRawUp;
     // phase 89c: the diag planes of this frame (only when eye 0's unit really ran this frame)
     SceneDlaa& dl = g_dlaa[0];
     if (g_diagTarget > 0 && dl.Frames() != g_lastDl && dl.ColorInTex() && dl.MvTex() && dl.DepthTex()) {
@@ -12054,6 +12272,60 @@ void Record(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase, float vx,
     }
     g_head = (g_head + 1) % (int)g_ring.size();
     if (g_count < (int)g_ring.size()) ++g_count;
+}
+
+// phase 96: eye 1's picture of this frame -> the short eye-1 ring (+ the colour its unit got, when that unit ran this frame).
+// Only while the eye-0 ring records (same on / off rules), never during a capture's sets or its drain.
+void Record1(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, bool raw) {
+    if (g_failed1 || g_failed || !ctx || !tex || Draining() || g_ring.empty()) { if (g_ring.empty() && !g_ring1.empty()) ReleaseRing1(); return; }
+    D3D11_TEXTURE2D_DESC d{}; tex->GetDesc(&d);
+    const bool f16 = d.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
+    if (!f16 && !IsRgbaBgraFamily(d.Format)) return;
+    SceneDlaa& dl = g_dlaa[1];
+    ID3D11Texture2D* const cin = dl.ColorInTex();
+    D3D11_TEXTURE2D_DESC cd{}; if (cin) cin->GetDesc(&cd);
+    if (d.Width != g_w1 || d.Height != g_h1 || d.Format != g_fmt1 || g_ring1.empty() ||
+        (cin && (cd.Width != g_iw1 || cd.Height != g_ih1 || cd.Format != g_ifmt1))) {
+        ReleaseRing1();
+        const uint64_t per = (uint64_t)d.Width * d.Height * (f16 ? 8 : 4) + (cin ? Bytes(cin) : 0);
+        int n = kEye1Frames;
+        if (per && (uint64_t)n * per > kEye1MaxBytes) n = (int)(kEye1MaxBytes / per);
+        if (n < 2) return;
+        g_ring1.resize(n);
+        g_w1 = d.Width; g_h1 = d.Height; g_fmt1 = d.Format;
+        if (cin) { g_iw1 = cd.Width; g_ih1 = cd.Height; g_ifmt1 = cd.Format; }
+        Log("rewind (phase 96): eye-1 ring of %d frames for %ux%u fmt=%d (+ colour in %ux%u) -- %.0f MB VRAM when full", n, d.Width,
+            d.Height, (int)d.Format, g_iw1, g_ih1, (double)n * per / 1048576.0);
+    }
+    GpuPerfScope gp(ctx, GpuPerf::kRewind);
+    Slot1& s = g_ring1[g_head1];
+    if (!s.tex) {
+        s.tex = MakeLike(tex);
+        if (!s.tex) { LogWarn("rewind (phase 96): eye-1 texture create failed -- eye 1 off for this session"); g_failed1 = true; ReleaseRing1(); return; }
+        g_ring1Bytes += Bytes(s.tex); g_vramBytes += Bytes(s.tex);
+    }
+    ctx->CopyResource(s.tex, tex);
+    s.present = g_frames.load(std::memory_order_relaxed);
+    s.hasIn = false; s.raw = raw;
+    if (cin && dl.Frames() != g_lastDl1) {               // the unit ran this frame: its colour in is this frame's
+        g_lastDl1 = dl.Frames();
+        if (!s.in && !g_inFailed1) {
+            s.in = MakeLike(cin);
+            if (s.in) { g_ring1Bytes += Bytes(s.in); g_vramBytes += Bytes(s.in); }
+            else { g_inFailed1 = true; LogWarn("rewind (phase 96): eye-1 colour-in texture create failed -- eye 1 saved without it this session"); }
+        }
+        if (s.in) { ctx->CopyResource(s.in, cin); s.hasIn = true; }
+    }
+    g_head1 = (g_head1 + 1) % (int)g_ring1.size();
+    if (g_count1 < (int)g_ring1.size()) ++g_count1;
+}
+// the eye-1 frame of Present `present` (frozen ring), nullptr = none held
+const Slot1* Eye1Of(uint64_t present) {
+    for (int i = 0; i < g_count1; ++i) {
+        const Slot1& s = g_ring1[(g_head1 - 1 - i + 2 * (int)g_ring1.size()) % (int)g_ring1.size()];
+        if (s.tex && s.present == present) return &s;
+    }
+    return nullptr;
 }
 }  // namespace Rewind
 
@@ -12282,11 +12554,16 @@ void CropMax(uint32_t* w, uint32_t* h) { *w = UINT32_MAX; *h = UINT32_MAX; }
 D3D11_BOX ToD3d(const BugReport::Box& b) { return D3D11_BOX{ b.x0, b.y0, 0, b.x1, b.y1, 1 }; }
 // a frame (eye 0's picture as SelfTestStep / the rewind see it): the DLAA area rect when the picture is the unit's full one and the
 // rect is smaller, then its centre part of at most CropMax. nullptr = the whole picture.
-const D3D11_BOX* CropOf(ID3D11Texture2D* tex, D3D11_BOX* b) {
+const D3D11_BOX* CropOf(ID3D11Texture2D* tex, D3D11_BOX* b, int unit, bool raw) {
     D3D11_TEXTURE2D_DESC d{}; tex->GetDesc(&d);
-    const SceneDlaa& dl = g_dlaa[0];
-    (void)dl;                                     // phase 89f: not cut to the DLAA area either (see CropMax)
+    const SceneDlaa& dl = g_dlaa[unit];
+    // phase 89f: not cut to the DLAA area (see CropMax). phase 96: EXCEPT the game's own render-size picture while DLSS UPSCALES
+    // (DLAA off sets, a frame where the unit did not run): the "on" pictures are then the unit's output = the DLSS area only, so
+    // the off picture is cut to the same area (the 2026-11-11 ETS2 capture: on_N = the area, off_N = the whole eye -- not comparable).
     BugReport::Box r{ 0, 0, d.Width, d.Height };
+    if (raw && dl.Upscaling() && d.Width == dl.FullW() && d.Height == dl.FullH() && dl.RectW() && dl.RectH() &&
+        (dl.RectW() < d.Width || dl.RectH() < d.Height) && dl.RectX() + dl.RectW() <= d.Width && dl.RectY() + dl.RectH() <= d.Height)
+        r = BugReport::Box{ dl.RectX(), dl.RectY(), dl.RectX() + dl.RectW(), dl.RectY() + dl.RectH() };
     uint32_t mw, mh; CropMax(&mw, &mh);
     BugReport::Box c;
     BugReport::CentreCrop(r.W(), r.H(), mw, mh, 0.5f, 0.5f, &c);
@@ -12339,11 +12616,18 @@ void Freeze(const wchar_t* dir) {
     Cap::InfoLine("rewind: %d frames held from BEFORE the key, eye 0 / main view, as it was; saved: the last %d one by one + %d spread "
                   "over the older ones (rewind_NN = NN frames before the key; rw_*_NN = the planes DLSS got that frame)", g_count,
                   (std::min)(kPickRecent, g_count), g_drainTotal - (std::min)(kPickRecent, g_count));
+    int e1 = 0;
     for (int k : g_pick) {
         const Slot& s = g_ring[(g_drainNext + k) % n];
-        Cap::InfoLine("rewind_%02d.png | Present #%llu | phase=%d | shift=(%+.4f,%+.4f) | ngx=(%+.4f,%+.4f)%s", g_count - 1 - k,
-                      (unsigned long long)s.present, s.phase, s.vx, s.vy, s.njx, s.njy, s.diag >= 0 ? " | + rw_* planes" : "");
+        const Slot1* o = Eye1Of(s.present);
+        if (o) ++e1;
+        Cap::InfoLine("rewind_%02d.png | Present #%llu | phase=%d | shift=(%+.4f,%+.4f) | ngx=(%+.4f,%+.4f)%s%s", g_count - 1 - k,
+                      (unsigned long long)s.present, s.phase, s.vx, s.vy, s.njx, s.njy, s.diag >= 0 ? " | + rw_* planes" : "",
+                      !o ? "" : (o->hasIn ? " | + eye 1 (rewind_eye1, rw_color_in_eye1)" : " | + eye 1 (rewind_eye1)"));
     }
+    if (g_count1 > 0)
+        Cap::InfoLine("rewind eye 1 (phase 96; VR: eye 0 = the right eye, eye 1 = the left eye): %d of the saved frames have the other eye "
+                      "too, same Present", e1);
     Log("rewind (phase 79): saving %d of the %d frames before the key as rewind_NN.png (after the capture's sets)", g_drainTotal, g_count);
 }
 
@@ -12357,7 +12641,7 @@ void DrainOne(ID3D11DeviceContext* ctx) {
     wchar_t nm[48];
     swprintf_s(nm, L"rewind_%02d.png", nn);
     D3D11_BOX box{};
-    Cap::Save(ctx, s.tex, Cap::CropOf(s.tex, &box), g_dir, nm);
+    Cap::Save(ctx, s.tex, Cap::CropOf(s.tex, &box, 0, s.raw), g_dir, nm);
     if (s.diag >= 0 && s.diag < (int)g_diag.size() && g_diag[s.diag].col && g_diag[s.diag].present == s.present) {
         const Diag& x = g_diag[s.diag];
         const Cap::PlaneCrops pc = Cap::PlaneCropsOf(x.col, nullptr);
@@ -12370,9 +12654,21 @@ void DrainOne(ID3D11DeviceContext* ctx) {
             Cap::Save(ctx, x.dep, bi, g_dir, L"rw_depth_00.bin", true);
         }
     }
+    if (const Slot1* o = Eye1Of(s.present)) {             // phase 96: the other eye of the same Present
+        D3D11_BOX b1{};
+        swprintf_s(nm, L"rewind_eye1_%02d.png", nn);
+        Cap::Save(ctx, o->tex, Cap::CropOf(o->tex, &b1, 1, o->raw), g_dir, nm);
+        if (o->hasIn && o->in) {
+            const Cap::PlaneCrops pc = Cap::PlaneCropsOf(o->in, nullptr);
+            swprintf_s(nm, L"rw_color_in_eye1_%02d.png", nn);
+            Cap::Save(ctx, o->in, pc.inCrop ? &pc.in : nullptr, g_dir, nm);
+        }
+    }
     if (--g_drainLeft == 0) {
         Log("rewind (phase 79): all %d saved frames read back (the writers finish the files)", g_drainTotal);
         g_head = g_count = 0;                              // recording starts fresh after the capture
+        g_head1 = g_count1 = 0;                            // phase 96 (the eye-1 ring too)
+        g_lastDl = g_dlaa[0].Frames(); g_lastDl1 = g_dlaa[1].Frames();   // phase 96b: a unit run during the capture is not this frame
         for (Slot& o : g_ring) o.diag = -1;
         g_pick.clear();
     }
@@ -12645,7 +12941,7 @@ void SelfTestStep(ID3D11DeviceContext* ctx, ID3D11Texture2D* tex, int phase,
         const int k = Cap::g_dumped;
         wchar_t nm[64];
         D3D11_BOX box{};
-        const D3D11_BOX* crop = Cap::CropOf(tex, &box);
+        const D3D11_BOX* crop = Cap::CropOf(tex, &box, 0, g_stRawUp);
         swprintf_s(nm, L"%hs_%d.png", c.name, k);
         Cap::Save(ctx, tex, crop, g_testDir, nm);
         if (crop && Cap::g_set == 0 && k == 0) Cap::Save(ctx, tex, nullptr, g_testDir, L"full_on_0.png");   // the whole picture once
@@ -12896,9 +13192,12 @@ const char* const kReadme =
     "dlaa_inject.log    the mod's log (the capture raised it to debug while it ran)\r\n"
     "dlaa.ini           your settings file\r\n"
     "game.log.txt       the last 2000 lines of the game's own log\r\n"
-    "PICTURES: every picture is the whole one (eye 0 in VR), not cropped.\r\n"
+    "PICTURES: every picture is the whole one (eye 0 in VR), not cropped -- except off_N while DLSS upscales: cut to the DLSS area\r\n"
+    "                   like on_N (the same part of the view, at the game's render size).\r\n"
     "rewind_NN.png      (rewind on) the frames BEFORE the key: rewind_00 = the last one (the last 12 one by one, older ones spread)\r\n"
     "rw_color_in_NN.png / rw_mv_NN.png / rw_depth_NN.png   (rewind on) what DLSS got in those frames\r\n"
+    "rewind_eye1_NN.png / rw_color_in_eye1_NN.png   (VR) the OTHER eye of the same frame (eye 0 = the right eye, eye 1 = the left\r\n"
+    "                   eye), up to the last 12 frames (fewer for very big pictures: the VRAM cap)\r\n"
     "on_N.png           your picture as you play (eye 0 in VR); full_on_0.png = the whole picture\r\n"
     "off_N.png          DLAA / DLSS off: the game's raw jittered picture\r\n"
     "--- capture_mode 2 (Full) adds ---\r\n"
@@ -13051,6 +13350,113 @@ void FinishJob(std::wstring dir, std::string sys, int level, int keep) {   // a 
     if (g_beeps) { if (ok) { Beep(1200, 120); Beep(1600, 120); } else Beep(300, 400); }   // writer thread: two rising beeps = the zips are ready
 }
 }  // namespace Cap
+
+// ---- phase 94 (issue #31): the OTHER mods in the plain log ("other mods:" lines; src/other_mods.h) ----------------------------
+// OnPresent (the Present frame work, one compare per frame) starts ONE short run 2 s after the first Present (game start).
+// The run is its own thread that holds a reference on this DLL while it works (FreeLibraryAndExitThread at the end): a game
+// that unloads dinput8 at shutdown never leaves a thread of ours parked in unmapped code. No run at exit. It logs
+//   * every loaded DLL outside the Windows folder (overlays, injectors, OpenXR layers, telemetry plugins),
+//   * the files in the game's bin\win_x64\plugins folder (SCS telemetry SDK plugins),
+//   * the files in Documents\<game>\mod (installed local mods),
+//   * the Steam Workshop items of the game (steamapps\workshop\content\<app id>: subscribed mods, folder = item id),
+//   * the game.log.txt lines so far that name a mod or a plugin (the profile's "[mods] Active ..." lines come later, at
+//     profile load, so they are usually not there yet).
+// Every path goes through the bug report's privacy scrubber (user name, home, Steam root).
+namespace OtherMods {
+std::vector<std::string> g_seenDll, g_seenLog;          // one run at a time (g_busy)
+std::atomic<bool> g_busy{false};
+int g_run = 0;                                          // runs started (the Present thread only)
+ULONGLONG g_t0 = 0;                                     // GetTickCount64 of the first run
+
+void ListDir(const BugReport::Scrubber& sc, const std::wstring& dir, const char* what) {
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((dir + L"*").c_str(), &fd);
+    int n = 0;
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (!wcscmp(fd.cFileName, L".") || !wcscmp(fd.cFileName, L"..")) continue;
+            if (++n <= 100) Log("other mods: %s: %s%s", what, sc.Apply(Cap::U8(fd.cFileName)).c_str(),
+                                (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? "\\" : "");
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    Log("other mods: %s: %d %s%s", what, n, n == 1 ? "entry" : "entries", n > 100 ? " (the first 100 listed)" : "");
+}
+
+DWORD WINAPI Run(LPVOID param) {
+    const bool first = param != nullptr;
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
+    wchar_t exe[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    const BugReport::Scrubber sc = BugReport::MakeScrubber(exe);
+    wchar_t win[MAX_PATH] = {};
+    GetWindowsDirectoryW(win, MAX_PATH);
+    const size_t wl = wcslen(win);
+    {   // DLLs outside the Windows folder
+        static HMODULE mods[1024];
+        DWORD need = 0;
+        int n = 0;
+        if (K32EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &need)) {
+            for (DWORD i = 0; i < need / sizeof(HMODULE) && i < 1024; ++i) {
+                wchar_t p[MAX_PATH];
+                if (!GetModuleFileNameW(mods[i], p, MAX_PATH)) continue;
+                if (wl && !_wcsnicmp(p, win, wl)) continue;
+                const std::string s = sc.Apply(Cap::U8(p));
+                if (!OtherModsText::FirstTime(g_seenDll, s)) continue;
+                if (first) Log("other mods: DLL %s", s.c_str());
+                else Log("other mods: DLL loaded later: %s", s.c_str());
+                ++n;
+            }
+        }
+        if (first) Log("other mods: %d DLLs outside the Windows folder", n);
+    }
+    const std::wstring gameLog = Lang::GameLogPath();
+    if (first) {
+        const std::wstring dir = exe;
+        const size_t k = dir.find_last_of(L'\\');
+        if (k != std::wstring::npos) ListDir(sc, dir.substr(0, k + 1) + L"plugins\\", "game plugins folder (bin\\win_x64\\plugins)");
+        if (!gameLog.empty())
+            ListDir(sc, gameLog.substr(0, gameLog.find_last_of(L'\\') + 1) + L"mod\\", "local mod folder (Documents\\<game>\\mod)");
+        std::wstring low = dir;
+        for (wchar_t& c : low) c = (wchar_t)towlower(c);
+        const size_t sa = low.find(L"\\steamapps\\");
+        if (sa != std::wstring::npos) {
+            const bool ats = low.find(L"amtrucks.exe") != std::wstring::npos;
+            ListDir(sc, dir.substr(0, sa) + (ats ? L"\\steamapps\\workshop\\content\\270880\\" : L"\\steamapps\\workshop\\content\\227300\\"),
+                    "Steam Workshop items (steamapps\\workshop\\content)");
+        }
+    }
+    if (!gameLog.empty()) {   // game.log.txt: only when the game rewrote it in this run (not the last run's file)
+        FILETIME created{}, x1{}, x2{}, x3{};
+        GetProcessTimes(GetCurrentProcess(), &created, &x1, &x2, &x3);
+        WIN32_FILE_ATTRIBUTE_DATA fa{};
+        std::string text;
+        if (GetFileAttributesExW(gameLog.c_str(), GetFileExInfoStandard, &fa) && CompareFileTime(&fa.ftLastWriteTime, &created) > 0 &&
+            BugReport::ReadFileText(gameLog.c_str(), text, 8u << 20))
+            for (const std::string& ln : OtherModsText::ModLines(text))
+                if (OtherModsText::FirstTime(g_seenLog, ln)) Log("other mods: game.log: %s", sc.Apply(ln).c_str());
+    }
+    g_busy.store(false, std::memory_order_release);
+    HMODULE self = nullptr;                             // the reference OnPresent took
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCWSTR)&Run, &self);
+    FreeLibraryAndExitThread(self, 0);
+}
+
+// The Present frame work (render thread): one compare per frame except at a scheduled run.
+void OnPresent() {
+    static const ULONGLONG kAt[] = { 0 };               // ms after the first run: ONE run at game start
+    if (g_run >= (int)(sizeof(kAt) / sizeof(kAt[0]))) return;
+    const ULONGLONG now = GetTickCount64();
+    if (!g_t0) g_t0 = now + 2000;                       // the first run 2 s after the first Present
+    if (now < g_t0 + kAt[g_run] || g_busy.load(std::memory_order_acquire)) return;
+    HMODULE self = nullptr;                             // + 1 reference: the run's FreeLibraryAndExitThread drops it
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)&Run, &self)) { ++g_run; return; }
+    g_busy.store(true, std::memory_order_release);
+    if (HANDLE h = CreateThread(nullptr, 0, Run, g_run == 0 ? (LPVOID)1 : nullptr, 0, nullptr)) CloseHandle(h);
+    else { g_busy.store(false, std::memory_order_release); FreeLibrary(self); }
+    ++g_run;
+}
+} // namespace OtherMods
 
 // ---- F10 snapshot: exactly what NGX received, lossless, 2 consecutive frames ------------
 struct SnapInfo {
@@ -15753,7 +16159,13 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
     }
     if (eye == 0) {                        // self-test dumps eye 0 only (once per frame)
         t_inDlaa = true;                   // our own work: keep context hooks passive
+        g_stRawUp = stTex == tex && dl.Upscaling();   // phase 96b: the game's own render-size picture (DLAA off / not run)
         SelfTestStep(ctx, stTex, slot.phase, stVx, stVy, stNx, stNy);
+        t_inDlaa = false;
+    }
+    else if (eye == 1 && !g_testRunning) {   // phase 96: the rewind keeps the other eye too (its short ring)
+        t_inDlaa = true;
+        Rewind::Record1(ctx, stTex, stTex == tex && dl.Upscaling());
         t_inDlaa = false;
     }
     // v0.10.0 phase 8 (mv_slot_pool): the pass is consumed -- its depth twin / forward depth / draw-id textures go back to the
@@ -16668,13 +17080,20 @@ void LightRedrawStatsLog(uint64_t blit, uint64_t blitsInWindow) {
     LogDbg("lighting redraws (phase 55, light_redraw_jitter %d) @blit %llu: %llu shifted redraws in %llu lighting binds (%.1f per "
         "blit), %llu runs; back to the game's viewport at a Draw %llu, a non-qualifying DrawIndexed %llu, a depth-stencil state %llu; "
         "redraws NOT shifted (viewport not the pass size) %llu; cached states: depth-stencil %d, rasterizer %d | phase 78 "
-        "light_fs_jitter %d: full-screen light draws shifted %llu, full-screen NOT shifted %llu, edge re-draws %llu, scissor twins %d",
+        "light_fs_jitter %d: full-screen light draws shifted %llu, full-screen NOT shifted %llu, edge re-draws %llu, scissor twins %d | "
+        "phase 97 water_overscan_fix %d: water draws without overscan %llu, water draws NOT shifted %llu, water edge re-draws %llu, "
+        "water shaders %d; water draws skipped: no jittered pass %llu, preview %llu, no viewport %llu, overscan off %llu",
         g_lightRedrawCfg, (unsigned long long)blit, (unsigned long long)g_cLightRedraws, (unsigned long long)g_cLightBinds,
         perBlit, (unsigned long long)g_cLightRuns, (unsigned long long)g_cLightUnDraw, (unsigned long long)g_cLightUnIdx,
         (unsigned long long)g_cLightUnDss, (unsigned long long)g_cLightNoShift, g_lightDssN, g_lightRsN, g_lightFsCfg,
-        (unsigned long long)g_cLightFs, (unsigned long long)g_cLightFsNoShift, (unsigned long long)g_cLightFsEdge, g_lightFsRsN);
+        (unsigned long long)g_cLightFs, (unsigned long long)g_cLightFsNoShift, (unsigned long long)g_cLightFsEdge, g_lightFsRsN,
+        g_waterFixCfg, (unsigned long long)g_cWaterDraws, (unsigned long long)g_cWaterNoShift, (unsigned long long)g_cWaterEdge,
+        g_waterPsLive.load(std::memory_order_relaxed), (unsigned long long)g_cWaterSkip[0], (unsigned long long)g_cWaterSkip[1],
+        (unsigned long long)g_cWaterSkip[2], (unsigned long long)g_cWaterSkip[3]);
     g_cLightBinds = g_cLightRedraws = g_cLightRuns = g_cLightUnDraw = g_cLightUnIdx = g_cLightUnDss = g_cLightNoShift = 0;
     g_cLightFs = g_cLightFsNoShift = g_cLightFsEdge = 0;                                                   // phase 78
+    g_cWaterDraws = g_cWaterNoShift = g_cWaterEdge = 0;                                                    // phase 97
+    for (uint64_t& c : g_cWaterSkip) c = 0;                                                                // phase 97c
 }
 
 void STDMETHODCALLTYPE hkOMSetDepthStencilState(ID3D11DeviceContext* ctx, ID3D11DepthStencilState* dss, UINT ref) {
@@ -24417,9 +24836,21 @@ bool WriteIniProfiles(const FpsProfile::Store& st) {
     if (out == in) return true;                          // nothing to write
     return WriteIniAtomic(path, tmp, out);
 }
-void FpsProfileSave(const char* why) {
+void FpsProfileSave(const char* why, bool exiting) {
     if (!g_fpsProfDirty) return;
-    const std::unique_ptr<FpsProfile::Store> st = FpsProfCopy();   // phase 51b: the copy is written (no lock around the file I/O)
+    std::unique_ptr<FpsProfile::Store> st;
+    if (exiting) {
+        // phase 95b (Fable audit): with the DLL pinned, the exit save always runs at process termination, after Windows has ended
+        // every other thread -- a thread that died holding the profile lock would hang the game here. Try-lock only; skip if busy.
+        if (!TryAcquireSRWLockShared(&g_fpsProfLock)) {
+            LogWarn("fps profile: the profile lock is held at exit -- the changed vehicle profiles are NOT saved (%s)", why);
+            return;
+        }
+        st.reset(new (std::nothrow) FpsProfile::Store());
+        if (st) *st = g_fpsProf;
+        ReleaseSRWLockShared(&g_fpsProfLock);
+        if (!st) return;
+    } else st = FpsProfCopy();                          // phase 51b: the copy is written (no lock around the file I/O)
     if (!WriteIniProfiles(*st)) {
         LogWarn("fps profile: writing the vehicle profiles to dlaa.ini FAILED (%s) -- dlaa.ini unchanged, trying again at the next "
                 "menu close / exit", why);
@@ -24545,7 +24976,7 @@ void FpsProfileTick() {
             }
     }
     const bool open = g_menuOpen.load(std::memory_order_relaxed);
-    if (g_fpsProfMenuWas && !open) FpsProfileSave("tuning menu closed");
+    if (g_fpsProfMenuWas && !open) FpsProfileSave("tuning menu closed", false);
     g_fpsProfMenuWas = open;
 }
 // phase 51d: the menu's Left on "Re-measure cab spot" -- the box of THIS vehicle back to the defaults (placement + colour / brightness /
@@ -24591,7 +25022,7 @@ void ToggleFpsProfiles(uint64_t n) {
     g_fpsProfiles = g_fpsProfiles ? 0 : 1;
     g_fpsExplicit = true;                                 // (Save writes fps_profiles with the other fps_* keys)
     if (g_fpsProfiles) g_fpsProfSess.locks = ~0ull;       // the held lock counts as a new lock-on (FpsProfileTick)
-    else { FpsProfileSave("per-vehicle profiles switched off"); g_fpsProfSess.Unbind(); }
+    else { FpsProfileSave("per-vehicle profiles switched off", false); g_fpsProfSess.Unbind(); }
     Log("fps box: position per vehicle %s (fps_profiles=%d, tuning menu, Present #%llu) -- %s", g_fpsProfiles ? "ON" : "OFF", g_fpsProfiles,
         (unsigned long long)n, g_fpsProfiles ? "each vehicle keeps its own placement / colour / brightness / text (fps_profile lines)"
                                             : "one shared placement for every vehicle (the fps_profile lines are kept, not used)");
@@ -26085,6 +26516,7 @@ void STDMETHODCALLTYPE hkDrawIndexedInstanced(ID3D11DeviceContext* ctx, UINT ic,
     CPU_HOOK(kHkDrawIdxInst);                                 // phase 31 CPU profiler (cpu_prof.h)
     if (Ofxr::FromOfxr(_ReturnAddress())) { Ofxr::NotePassed(); CPU_ORIG(oDrawIndexedInstanced(ctx, ic, inst, si, bv, sinst)); return; }   // v0.10.0 OFXR Bridge: the layer's own D3D11 work on the game context is not ours to track
     const bool inDlaa = t_inDlaa;                         // phase 57: the TLS flag read once per call (see hkDrawIndexed)
+    const bool waterEx = !inDlaa && IsGameCtx(ctx) && WaterOnDrawBegin(ctx);   // phase 97 (as hkDrawIndexed)
     // v0.10.0: only recorded (world G-buffer, per-draw MVs live, not our own work); every other call passes straight through
     if (g_didOn && g_gbufPass && g_passSeq && !inDlaa && IsGameCtx(ctx)) DidOnDraw(ctx, ic, inst, si, bv, sinst, true);
     else if (g_mirGbuf && g_didOn && !inDlaa && IsGameCtx(ctx)) MirOnDraw(ctx, ic, inst, si, bv, sinst, true);   // v0.10.0 phase 2
@@ -26111,6 +26543,7 @@ void STDMETHODCALLTYPE hkDrawIndexedInstanced(ID3D11DeviceContext* ctx, UINT ic,
             g_nextFwdGsKind = 0;
         }
     }
+    if (waterEx) WaterOnDrawEnd(ctx, [&] { oDrawIndexedInstanced(ctx, ic, inst, si, bv, sinst); });   // phase 97
 }
 #endif
 
@@ -26223,6 +26656,9 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
         if (g_menuLateBound >= 0 && !inDlaa) MenuLateCountDraw();   // v0.10.0 phase 16 (a game draw into a recorded eye picture)
 #endif
     }
+    // phase 97: a draw of the new SCS water -> the pass's shift WITHOUT the overscan, before anything records the draw's viewport
+    // (DidOnDraw / MirOnDraw / FwdOnDraw read it with RSGetViewports: the MV replay then uses the same viewport); undone at the end
+    const bool waterEx = gameCtx && !inDlaa && WaterOnDrawBegin(ctx);
 #ifdef WITH_DLAA
     int objSlot = 0;                                      // v0.9.0: stencil object id of this draw (0 = untagged)
 #endif
@@ -26346,6 +26782,8 @@ void STDMETHODCALLTYPE hkDrawIndexed(ID3D11DeviceContext* ctx, UINT indexCount, 
     // phase 49: an additive glow draw of the main forward binding -> the pass's glow record (GLOW BIAS MASK)
     if (gameCtx && g_jitterPass && !g_gbufPass && !inDlaa && g_fwdBound && BiasLive()) BiasOnDraw(ctx, indexCount, startIndex, baseVertex, fst);
 #endif
+    // phase 97: the far column / row a negative shift lost (game viewport, scissored), then the pass's overscan viewport again
+    if (waterEx) WaterOnDrawEnd(ctx, [&] { oDrawIndexed(ctx, indexCount, startIndex, baseVertex); });
 }
 
 // ---- v0.6.2 game render context (hkPresent, depth 0) -------------------------------------------------------------
@@ -26400,6 +26838,7 @@ void ResetPassTrackingCore(bool forceDlaaOff) {
     g_gameVpN = 0; g_vpShifted = false; g_vpShiftX = g_vpShiftY = 0.0f; g_vpOver = false;
     g_lightBind = 0; g_lightRedrawShift = false;               // phase 55
     LightFsOnContextReset();                                   // phase 78: the scissor twins (old device refs)
+    g_waterNoOver = false;                                     // phase 97 (the water shader table is per shader object: kept)
     while (g_fifoHead < g_passSeq) g_ring[SlotOf(g_fifoHead++)].consumed = true;   // drop outstanding passes
     g_needFirstPass = true;                                    // next G-buffer bind starts a pass
     g_flatMode = false; g_vrMode = false;                      // re-detected at the next matched blit
@@ -27031,6 +27470,7 @@ bool DlaaOffFilePresent() {
 //   jitter_overscan                0/1 (default 1, v0.10.0 phase 23): jittered world / mirror viewport 1 px larger right / bottom
 //   light_redraw_jitter            0/1 (default 1, phase 55): the lighting pass's mesh redraws get the G-buffer's jittered viewport
 //   light_fs_jitter                0/1 (default 1, phase 78): the lighting pass's full-screen draws get the G-buffer's shift (W x H)
+//   water_overscan_fix             0/1 (default 1, phase 97): the new SCS water's draws get the shift without the overscan (W x H)
 //   outside_aa                     0/1/2 (default 2, phase 81): outside the DLAA area rect 1 = unjitter, 2 = + edge AA, 0 = raw frame
 //   game_taa                       0..3 (default 0, phase 82): the game's own TAA with the mod -- 0 off, 1 mix, 2 TAA only, 3 split
 //   game_taa_mix                   0..100 (default 50, phase 82): the TAA share of the mix in % (menu: 10 % steps)
@@ -27356,6 +27796,8 @@ void LoadConfig() {
             if (!strcmp(key, "game_taa_mvjit")) { g_gameTaaMvJit = v < 0 ? -1 : (v > 0 ? 1 : 0); continue; }   // phase 82, startup only
             if (!strcmp(key, "light_redraw_jitter")) { g_lightRedrawCfg = v != 0 ? 1 : 0; continue; }   // phase 55 (outside the chain: C1061)
             if (!strcmp(key, "light_fs_jitter"))     { g_lightFsCfg = v != 0 ? 1 : 0; continue; }       // phase 78 (outside the chain: C1061)
+            if (!strcmp(key, "ps_dump"))             { g_psDumpCfg = v != 0 ? 1 : 0; continue; }        // phase 97b (debug)
+            if (!strcmp(key, "water_overscan_fix"))  { g_waterFixCfg = v != 0 ? 1 : 0; continue; }      // phase 97 (outside the chain: C1061)
             if (!strcmp(key, "outside_aa"))          { g_outsideAaCfg = v <= 0 ? 0 : (v >= 2 ? 2 : 1); continue; }   // phase 81
             // phase 89: the steady-edge filter was removed (2026-10-31: it added flicker); old dlaa.ini lines are ignored
             if (!strncmp(key, "steady_edge", 11))     continue;
@@ -27870,6 +28312,12 @@ void LoadConfig() {
         ? "the lighting pass's full-screen draws (the deferred sun light) get the G-buffer's jitter shift at the game's size, so "
           "each pixel's rebuilt position matches its G-buffer texel; the far column / row a negative shift loses is re-drawn"
         : "off: the full-screen light draws keep the game's viewport; shadow penumbrae on grazing surfaces can flicker with the jitter");
+    Log("water overscan exempt (phase 97): water_overscan_fix=%d (%s)", g_waterFixCfg, !g_waterFixCfg
+        ? "off: the new SCS water (Iceland) is drawn with the overscan viewport like everything else -- it vanishes in moving blocks"
+        : (g_jitterOverscan ? "the new SCS water's draws (checkerboard G-buffer writer, its flag draw, the forward reader; classified "
+                              "by their pixel shader) get the pass's jitter shift at the game's size, so their checker cells stay on "
+                              "the rasterised pixels; the far column / row a negative shift loses is re-drawn"
+                            : "nothing to do: jitter_overscan=0"));
     Log("OFXR Bridge support: ofxr_bridge=%d (%s)", (int)Ofxr::g_on.load(),
         Ofxr::g_on.load() ? "on: the layer's calls pass through the hooks" : "off");
     Log("VectorXR support: vectorxr=%d (%s)", (int)Ofxr::g_onVxr.load(),
@@ -28763,7 +29211,7 @@ void OnProcessDetach(bool processTerminating) {
     LogExiting().store(true, std::memory_order_relaxed);   // never block on the log mutex from here on
     Cutout::StatsLine("exit");                           // phase 77 (level 4; try-lock only)
 #ifdef WITH_DLAA
-    FpsProfileSave(processTerminating ? "process exit" : "DLL unload");   // phase 51: changed vehicle profiles (a file write only)
+    FpsProfileSave(processTerminating ? "process exit" : "DLL unload", processTerminating);   // phase 51: changed vehicle profiles (a file write only)
 #endif
     // v0.8.1: + the present-layer verdict, only when that mode was on (presents= then counts game frames).
     char plTail[200] = "";

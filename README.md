@@ -901,6 +901,7 @@ The table below lists the commonly used keys:
 | `game_taa_mvjit` | `-1` | startup only: tell DLSS the motion vectors carry the game's jitter: `-1` auto, `0` off, `1` on. Try the other value if mix / split wobbles |
 | `light_redraw_jitter` | `1` | `1` = the lighting pass's mesh redraws (sunlight through canopies, emissive surfaces) use the same jittered viewport as the G-buffer; `0` = the game's viewport for the whole lighting pass (lit areas can flicker). Startup only |
 | `light_fs_jitter` | `1` | `1` = the lighting pass's full-screen sunlight draw uses the same jitter shift as the G-buffer, so shadow edges on sunlit surfaces seen at a grazing angle (roofs) no longer flicker darker / lighter with the jitter; `0` = the game's viewport for it. Startup only |
+| `water_overscan_fix` | `1` | `1` = the new SCS water (Iceland and later) is drawn with the jitter shift at the game's size, so it no longer vanishes in big moving blocks; `0` = the 1 px larger jitter viewport for it too. Startup only |
 | `dlss_hdr` | `1` | HDR only: `1` = tell DLSS the picture is HDR (normal); `0` = try this if HDR brightness or colours look wrong with DLAA on |
 | `beeps` | `1` | `0` = silence the hotkey beeps |
 | `menu_x` / `menu_y` / `menu_scale` | `2` / `8` / `1.0` | tuning menu panel, flat: left / top edge in % of the picture, size `0.3`..`2.0`. The menu's Panel rows change them live |
