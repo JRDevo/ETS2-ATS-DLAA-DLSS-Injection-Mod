@@ -12046,7 +12046,7 @@ uint64_t g_lastDl = 0;                                   // g_dlaa[0].Frames() a
 // phase 96: EYE 1 (VR: the left eye) -- a second, short ring of the last kEye1Frames pictures + the colour DLSS got, paired with the
 // eye-0 frames by Present number at the drain (rewind_eye1_NN.png, rw_color_in_eye1_NN.png). A flicker seen in only one eye was
 // not in any capture before (eye 0 only).
-constexpr int kEye1Frames = 12;
+constexpr int kEye1Frames = 6;                          // phase 98c (Fable): 12 -> 6 (~450 MB at 3448x4872; report_all forces the rewind on)
 constexpr uint64_t kEye1MaxBytes = 1280ull << 20;        // VRAM cap of the eye-1 ring (colour + colour in)
 struct Slot1 { ID3D11Texture2D* tex = nullptr; ID3D11Texture2D* in = nullptr; uint64_t present = 0; bool hasIn = false, raw = false; };
 std::vector<Slot1> g_ring1;
@@ -13208,7 +13208,7 @@ const char* const kReadme =
     "rewind_NN.png      (rewind on) the frames BEFORE the key: rewind_00 = the last one (the last 12 one by one, older ones spread)\r\n"
     "rw_color_in_NN.png / rw_mv_NN.png / rw_depth_NN.png   (rewind on) what DLSS got in those frames\r\n"
     "rewind_eye1_NN.png / rw_color_in_eye1_NN.png   (VR) the OTHER eye of the same frame (eye 0 = the right eye, eye 1 = the left\r\n"
-    "                   eye), up to the last 12 frames (fewer for very big pictures: the VRAM cap)\r\n"
+    "                   eye), up to the last 6 frames (fewer for very big pictures: the VRAM cap)\r\n"
     "on_N.png           your picture as you play (eye 0 in VR); full_on_0.png = the whole picture\r\n"
     "off_N.png          DLAA / DLSS off: the game's raw jittered picture\r\n"
     "--- capture_mode 2 (Full) adds ---\r\n"
@@ -16174,7 +16174,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
         SelfTestStep(ctx, stTex, slot.phase, stVx, stVy, stNx, stNy);
         t_inDlaa = false;
     }
-    else if (eye == 1 && !g_testRunning) {   // phase 96: the rewind keeps the other eye too (its short ring)
+    else if (eye == 1 && g_vrMode && !g_testRunning) {   // phase 96: the rewind keeps the other eye too (98c: VR only -- flat multi-view uses eye = view)
         t_inDlaa = true;
         Rewind::Record1(ctx, stTex, stTex == tex && dl.Upscaling());
         t_inDlaa = false;

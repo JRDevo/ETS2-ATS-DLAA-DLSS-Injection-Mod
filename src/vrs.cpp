@@ -558,9 +558,11 @@ void Leave(ID3D11DeviceContext* ctx) {
 void OnDraw(ID3D11DeviceContext* ctx, bool exclude, int why) {
 #ifdef WITH_VRS
     if (!g_want || ctx != s_ctx) return;
-    if (exclude) { if (why >= 0 && why < kSkipCount) ++s_stats.drawsSkip[why]; ++s_stats.drawsFullCls[s_cls]; }
-    if (why == kSkipWater && s_cls == kClsGbuf) s_waterPass = true;   // phase 98b
-    else { ++s_stats.drawsVrs; ++s_stats.drawsVrsCls[s_cls]; }
+    if (exclude) {
+        if (why >= 0 && why < kSkipCount) ++s_stats.drawsSkip[why];
+        ++s_stats.drawsFullCls[s_cls];
+        if (why == kSkipWater && s_cls == kClsGbuf) s_waterPass = true;   // phase 98b (98c: inside the block -- it had taken the else)
+    } else { ++s_stats.drawsVrs; ++s_stats.drawsVrsCls[s_cls]; }
     s_excl = exclude;
     const bool want = !exclude && !s_mod;
     if (want != s_hw) SetHw(ctx, want);

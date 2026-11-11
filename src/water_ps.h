@@ -206,7 +206,7 @@ inline Result ClassifyImpl(const void* code, size_t len) {
             if (i + 1 >= n) return r;
             ilen = Rd(b, base + (size_t)(i + 1) * 4);
         }
-        if (ilen == 0 || i + ilen > n) return r;
+        if (ilen == 0 || ilen > n - i) return r;                 // (98c: no 32-bit wrap on a huge customdata length)
         const uint32_t end = i + ilen;
         if (IsDecl(opc)) {
             if (opc >= 98u && opc <= 100u) ++nInputs;            // dcl_input_ps / _siv / _sgv
