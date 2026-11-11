@@ -1078,6 +1078,16 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   tracker setup again, and the mod's own eye tracker link was lost. Old log sign: `Eye tracking: the eye
   gaze suggestion from above the runtime with ours appended FAILED (-47`.
 
+- **New SCS water (Iceland and later) shows moving rectangular blocks, or the pond seems to switch off and
+  on?** Fixed in v0.16.0-rc4: update. The new water stores its surface on a pixel checkerboard, and the
+  mod's 1 px larger jitter viewport shifted that checkerboard by one pixel in big areas of the screen. In VR
+  with foveated rendering, white specks at the shoreline at the edges of the view are fixed too. Flat,
+  triple screen and VR.
+
+- **VR: the game crashes when you close it (`0xc0000005`)?** Fixed in v0.16.0-rc4: update. The game
+  unloaded the mod before it finished closing while the mod's hooks were still in place. The log now
+  says `DLL pinned until the game exits` near the top.
+
 - **The log has only errors by default.** Put `log_level = 4` in `dlaa.ini` (next to `dinput8.dll`)
   and start the game again: `dlaa_inject.log` is then written next to the DLL. It
   records the version, which hooks installed, and whether DLAA/DLSS started. It is
