@@ -167,7 +167,7 @@ inline bool IsDot(uint32_t opc) { return opc == 15u || opc == 16u || opc == 17u;
 }  // namespace detail
 
 // Classifies a DXBC blob. Pure function (any thread).
-inline Result Classify(const void* code, size_t len) {
+inline Result ClassifyImpl(const void* code, size_t len) {
     using namespace detail;
     Result r;
     if (!code || len < 32) return r;
@@ -324,6 +324,14 @@ inline void SumText(const uint32_t s[4], char* buf, size_t n) {
         if (i < 3) buf[p++] = '-';
     }
     if (p < n) buf[p] = 0; else if (n) buf[n - 1] = 0;
+}
+
+// phase 98 (Fable audit): an audited checksum is honoured even when the parse gives up early (ClassifyImpl's early returns
+// left kRuleNone although `known` was set).
+inline Result Classify(const void* code, size_t len) {
+    Result r = ClassifyImpl(code, len);
+    if (r.rule == kRuleNone && r.known >= 0) r.rule = kRuleHash;
+    return r;
 }
 
 }  // namespace WaterPs

@@ -9863,11 +9863,12 @@ void WaterPsNote(ID3D11PixelShader* ps, const void* code, SIZE_T len) {
     const WaterPs::Result r = WaterPs::Classify(code, (size_t)len);
     bool changed = false, full = false;
     AcquireSRWLockExclusive(&g_waterPsLock);
-    int at = -1, empty = -1;
+    int at = -1, empty = -1, dead = -1;
     for (int k = 0, i = (int)WaterPsHash(ps); k < kWaterPsMax; ++k, i = (i + 1) & (kWaterPsMax - 1)) {
         void* const p = g_waterPs[i].load(std::memory_order_relaxed);
         if (p == (void*)ps) { at = i; break; }
         if (!p) { empty = i; break; }                    // end of the probe chain: not in the table
+        if (dead < 0 && !g_waterPsRule[i].load(std::memory_order_relaxed)) dead = i;   // phase 98: a released water shader's slot
     }
     if (at >= 0) {                                       // the address of a released shader: new rule (0 = not water any more)
         const uint8_t old = g_waterPsRule[at].load(std::memory_order_relaxed);
@@ -9877,6 +9878,11 @@ void WaterPsNote(ID3D11PixelShader* ps, const void* code, SIZE_T len) {
             if (!old && r.rule) g_waterPsLive.fetch_add(1, std::memory_order_relaxed);
             changed = true;
         }
+    } else if (r.rule && dead >= 0) {                    // phase 98 (Fable audit): reuse a dead slot (long sessions re-create shaders
+        g_waterPs[dead].store((void*)ps, std::memory_order_release);   //   at new addresses; the chain stays unbroken: never null)
+        g_waterPsRule[dead].store((uint8_t)r.rule, std::memory_order_release);
+        g_waterPsLive.fetch_add(1, std::memory_order_relaxed);
+        changed = true;
     } else if (r.rule) {
         if (empty >= 0 && g_waterPsN.load(std::memory_order_relaxed) < kWaterPsMax * 3 / 4) {   // keep probe chains short
             g_waterPsRule[empty].store((uint8_t)r.rule, std::memory_order_relaxed);
@@ -9891,9 +9897,11 @@ void WaterPsNote(ID3D11PixelShader* ps, const void* code, SIZE_T len) {
     if (changed) g_waterPsGen.fetch_add(1, std::memory_order_release);
     ReleaseSRWLockExclusive(&g_waterPsLock);
     if (!r.rule) return;
-    if (r.rule == WaterPs::kRuleCheckerRead && g_waterPsLogs.fetch_add(1, std::memory_order_relaxed) >= 16) return;   // phase 97c: readers capped (73 seen)   // (a game reload creates them again: cap the lines)
+    if (!full && r.rule == WaterPs::kRuleCheckerRead && g_waterPsLogs.fetch_add(1, std::memory_order_relaxed) >= 16) return;   // phase 97c: readers capped (73 seen)   // (a game reload creates them again: cap the lines)
     char sum[40];
     WaterPs::SumText(r.sum, sum, sizeof(sum));
+    static std::atomic<int> s_fullLogs{0};               // phase 98: always reported (no longer hidden by the reader cap), 8 lines max
+    if (full && s_fullLogs.fetch_add(1, std::memory_order_relaxed) >= 8) return;
     if (full)
         LogWarn("water overscan exempt (phase 97): WARNING PS %p %s matched (%s) but the table is full (%d) -- that water keeps the "
                 "overscan viewport", (void*)ps, sum, WaterPs::RuleName(r.rule), kWaterPsMax);
@@ -9973,7 +9981,7 @@ void PsDumpOne(const void* code, SIZE_T len) {
     const WaterPs::Result r = WaterPs::Classify(code, (size_t)len);
     char sum[40]; WaterPs::SumText(r.sum, sum, sizeof(sum));
     wchar_t path[MAX_PATH];
-    swprintf_s(path, L"%ls%hs_r%d.dxbc", s_dir, sum, r.rule);
+    if (_snwprintf_s(path, MAX_PATH, _TRUNCATE, L"%ls%hs_r%d.dxbc", s_dir, sum, r.rule) < 0) return;   // (a long game path: skip)
     if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) return;
     FILE* f = nullptr;
     if (_wfopen_s(&f, path, L"wb") == 0 && f) { fwrite(code, 1, len, f); fclose(f); }
@@ -10838,7 +10846,10 @@ void VrsOnDraw(ID3D11DeviceContext* ctx) {
         g_vrsPsGen = gen;
         g_vrsPsOk = true;
     }
-    Vrs::OnDraw(ctx, g_vrsPsWhy >= 0, g_vrsPsWhy);
+    // phase 98: the new SCS water always at full rate (its checkerboard cells; not gated on water_overscan_fix or the jitter:
+    // the coarse-block specks happen without jitter too, they only blink with it). One memoised lookup per PS change.
+    const bool water = g_waterPsN.load(std::memory_order_relaxed) != 0 && WaterPsRuleCur() != 0;
+    Vrs::OnDraw(ctx, g_vrsPsWhy >= 0 || water, water ? (int)Vrs::kSkipWater : g_vrsPsWhy);
 }
 // The eye pass s is predicted to be (-1 = not known yet).
 // The certain eye of the world scene bind of pass s (-1 = none: the bind stays at full rate). src = bits of the sources that
