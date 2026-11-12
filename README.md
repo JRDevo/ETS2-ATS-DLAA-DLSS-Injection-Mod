@@ -6,6 +6,9 @@
 > - There is **no website** for this mod. There **never will be** one. No Discord, no Patreon, no Nexus, no Steam Workshop, no app store.
 > - **DO NOT DOWNLOAD THIS MOD FROM ANYWHERE ELSE.** Any other site, mirror, "launcher", "installer", video link or forum attachment that
 >   offers it is not mine and may carry anything. If it did not come from this GitHub page, do not run it.
+> - **Fake copies exist on GitHub too.** Other accounts have made repos with this mod's exact name. They do not contain this mod.
+>   Check that the address starts with `github.com/JRDevo/`. If you find a copy, do not download from it. You can report it to
+>   GitHub with **Report repository** on its page.
 > - Updates, release notes, the hotkey list and the troubleshooting guide live here and only here. If someone tells you to get the mod
 >   somewhere else, they are wrong.
 
@@ -1070,21 +1073,21 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   Then please send the log, see *Reporting a problem*.
 
 - **VR: a faint second copy of near objects (the steering wheel) beside the real one?** Fixed in
-  v0.16.0-rc2: update. On headsets whose two eye views have the same shape, one eye's DLAA could get
+  v0.16.0: update. On headsets whose two eye views have the same shape, one eye's DLAA could get
   the pictures of both eyes. Old log sign: `eye -> OpenXR view changes so far` growing all the time.
 
 - **VR eye tracking stays at "waiting for gaze" in one game, with OpenXR Toolkit on?** Fixed in
-  v0.16.0-rc3: update. When the game starts its VR session a second time, OpenXR Toolkit sends its eye
+  v0.16.0: update. When the game starts its VR session a second time, OpenXR Toolkit sends its eye
   tracker setup again, and the mod's own eye tracker link was lost. Old log sign: `Eye tracking: the eye
   gaze suggestion from above the runtime with ours appended FAILED (-47`.
 
 - **New SCS water (Iceland and later) shows moving rectangular blocks, or the pond seems to switch off and
-  on?** Fixed in v0.16.0-rc4: update. The new water stores its surface on a pixel checkerboard, and the
+  on?** Fixed in v0.16.0: update. The new water stores its surface on a pixel checkerboard, and the
   mod's 1 px larger jitter viewport shifted that checkerboard by one pixel in big areas of the screen. In VR
   with foveated rendering, white specks at the shoreline at the edges of the view are fixed too. Flat,
   triple screen and VR.
 
-- **VR: the game crashes when you close it (`0xc0000005`)?** Fixed in v0.16.0-rc4: update. The game
+- **VR: the game crashes when you close it (`0xc0000005`)?** Fixed in v0.16.0: update. The game
   unloaded the mod before it finished closing while the mod's hooks were still in place. The log now
   says `DLL pinned until the game exits` near the top.
 
