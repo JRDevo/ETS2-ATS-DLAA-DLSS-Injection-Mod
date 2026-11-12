@@ -48,9 +48,9 @@ The mod has its own capture keys. They need `log_level = 4`.
    screen the same key takes a measuring capture (a short freeze).
 4. For a part that smears or a number plate that blinks, also press **`Alt+F8`** next to it: the
    per-part motion state of the next frame goes into the log (`MV dump` lines).
-   **The quick way (v0.15.0):** look at the spot and press **`Pause`** (shimmer capture). The mod saves 12
-   frames with DLAA on and 12 with DLAA off, plus the log and your `dlaa.ini`, into one folder
-   `dlaa_selftest\shimmer_<date>_<time>\`. Zip that folder and attach it.
+   **The quick way:** look at the spot and press **`Insert`** twice within 1 s (the one-press bug report). The mod saves
+   frames with DLAA on and off, the log and your `dlaa.ini`, and packs them into `dlaa_selftest\shimmer_<date>_<time>_main.zip`.
+   Attach that zip. The `_full` and `_rewind` zips are extras: attach them only if asked.
 5. Zip `dlaa_selftest\` and `dlaa_snap\` and attach them with the log and `dlaa.ini`. Say what to look
    at (a pole on the left, the shop window, the trailer's plate) and where / when you were.
 
@@ -76,6 +76,13 @@ a native speaker's changes and suggestions help everybody.
   = pass). GitHub Actions runs them on every push. Pure logic goes into a header with a test
   (`src\fps_pose.h`, `src\frame_pace.h`, `src\hotkey_scan.h` are examples); the DX11 hooks stay
   in `src\inject.cpp`, the OpenXR hooks in `src\xr_hook.cpp`.
+- A new setting the menu or a hotkey changes: write it in `SaveSettings`, remove it in `ResetSettings`, read it in
+  `LoadConfig`. `python scripts/settings_check.py` (also in CI) fails when one of the three is missing;
+  `tests\build_settings_roundtrip_test.bat` + `build\tests\settings_rt\settings_roundtrip_test.exe` (also in CI) presses every
+  menu row, saves, restarts and fails when the menu shows something else after the restart, or when a row reads "on" while
+  the code it switches cannot run.
+- After a game test: `python scripts\feature_check.py <game>\bin\win_x64\dlaa_inject.log` lists every feature with PASS /
+  FAIL / OFF / NOT USED from the log (`log_level = 4` for the full proof). Put its table in the pull request.
 - Rules for published text: never name another ETS2 / ATS anti-aliasing mod, VR = OpenXR only,
   game paths as `bin\win_x64\`, say what was tested and what was not.
 - Tell me what you tested in game (game, flat / VR, where, when) in the pull request, with a log.

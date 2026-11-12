@@ -69,6 +69,39 @@ void ControllerState(uint32_t buttons[4], unsigned* povDirs, uint32_t* freshSlot
 constexpr int kHideNone = 0, kHideMenuInputs = 1, kHideAll = 2;
 constexpr int kMaxHide = 8;
 void SetMenuHide(int mode, const int* vks, const int* joys, int n);
+int  MenuHideMode();                                   // the mode set last (phase 83: no typing into the game in bind mode)
+
+// phase 83 (src/vr_ui.h): SYNTHETIC KEYS for the game -- the mod types console commands (the VR UI placement cvars). Render thread.
+//  InjectDiKey: a DirectInput key event for the game's keyboard device -- the key's state byte reads pressed in GetDeviceState
+//    while held, and one buffered entry (press / release) is appended to the game's next GetDeviceData (queued, in order).
+//  InjectWindowKey / InjectWindowChar: WM_KEYDOWN / WM_KEYUP / WM_CHAR posted to the game window (the subclassed one; scan code 0:
+//    marks them as the mod's, so the menu's key filter and the player-typing watch both ignore them).
+//  LastUserKeyMs: GetTickCount64 of the last key the PLAYER pressed that reached the game (a DirectInput press entry or a key / char
+//    message; hidden menu keys and the mod's own keys excluded) -- the mod never types while the player types (console, chat).
+//  GameWindowKnown / KeyboardDeviceSeen: the two delivery paths exist.
+void InjectDiKey(uint8_t dik, bool down);
+bool InjectWindowKey(uint8_t vk, bool down);
+bool InjectWindowChar(char c);
+uint64_t LastUserKeyMs();
+bool GameWindowKnown();
+bool KeyboardDeviceSeen();
+// phase 85 (VR test of phase 83: the console key is bound on `sys.keyboard` = raw input / window messages, not DirectInput, so
+// nothing typed ever reached the console): the DEFAULT delivery is SendInput -- real keyboard input, the same path as the player's
+// keys (raw input + window messages + DirectInput). Every event carries dwExtraInfo = kInjectMark, so the window procedure
+// (GetMessageExtraInfo), WM_INPUT (RAWKEYBOARD.ExtraInformation) and the DirectInput tap (a short window after each send: DirectInput
+// has no extra info) do NOT count the mod's keys as the player's (no LastUserKeyMs stamp) and never hide them. SendInput goes to
+// the FOREGROUND window: GameHasFocus first (inject.cpp holds the batch, the row says "click the game window").
+//  SendScanKey: one key by its scan code (KEYEVENTF_SCANCODE; dik = the set-1 scan code, + 0x80 = extended).
+//  SendUnicodeChar: one character as KEYEVENTF_UNICODE (VK_PACKET -> WM_CHAR), down + up.
+//  SendCharScan: one character as scan codes on the GAME thread's keyboard layout (VkKeyScanExW + MapVirtualKeyExW), with Shift /
+//    Ctrl / Alt as the layout needs; false = the layout has no key for it.
+//  ClearInjected: the DirectInput queue + held synthetic keys dropped (end of a batch: nothing stale bursts out later).
+constexpr unsigned long kInjectMark = 0x444C4141ul;   // 'DLAA'
+bool GameHasFocus();
+bool SendScanKey(uint8_t dik, bool down);
+bool SendUnicodeChar(wchar_t c);
+bool SendCharScan(wchar_t c);
+void ClearInjected();
 }
 
 // v0.10.1 inject.cpp: dlaa.ini controller_name filter -- true = this controller (product name) is tapped / filtered. Empty

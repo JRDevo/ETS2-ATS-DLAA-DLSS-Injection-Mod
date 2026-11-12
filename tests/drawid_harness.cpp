@@ -64,6 +64,9 @@
 // position in the vertices), non-instanced and instanced (2 / 3 / 8 instances), beside an overtaking car, an oncoming car and a
 // parked van: every clump pixel must keep the exact camera motion; the instance counts the shaders saw are checked end to end.
 // "mutcr" (the origin-free rule off) must FAIL S15; "mutinst" (multi-instance draws listed again, the round-4 rule) fails it too.
+// Phase 80: S15 also asks the SOLID DITHER GATE (DrawIdMv::SolidDitherOk, inject.cpp SolidOnDraw) about every frame's keys: the
+// overtaking / oncoming car and its plate (movers) must never be dithered from frame 12, the parked van, the boxes and the ground
+// (static, like a far wire) must be known static from frame 20. "mutsolid" (the gate off = phases 63-68) must FAIL S15.
 // v0.10.0 phase 19: S17 / S17b CAR (see RunCarScene; scene 17, last in the full run): the interior's big draws keep their MVP one
 // cb0 row later (S17, the ATS car signature) / a valid interior with one big body draw (S17b), camera-relative overlays, VR head
 // motion -- every interior pixel the exact cabin motion. "mutshape" (the MVP-shape rule off) must FAIL S17, "cabsmall=0"
@@ -108,6 +111,8 @@ bool g_hw = false;        // v0.10.0 phase 18: "hw" = the hardware adapter (GPU 
 int  g_vpOver = 0;        // v0.10.0 phase 23 "overscan": the jittered scene viewports are (W+1) x (H+1) like the DLL's jitter_overscan=1
 int  g_didShadow = 0;      // phase 35 "didshadow=1|2": the state-Set hooks (vtable patch) + DrawIdRecord's shadow path (2: + VB / IB)
 int  g_shVerify = 0;       // phase 35 "shverify=N": did_shadow_verify
+int  g_didShadowPs = 0;    // phase 93 "didshadowps=1" (with didshadow=1|2): + the PS / OM bank (PSSetShader / PSSetSamplers /
+                           // PSSetConstantBuffers(1) / OMSetBlendState / OMSetDepthStencilState patched with its Notes)
 unsigned g_rstatic = 0;     // v0.10.0 phase 14: "rstatic=E" -- S1-S4 / S13 replay with the static gate (0 = off)
 double   g_yawJerk = 0.0;   // phase 14 round 5 "jerk=X": S1-S4 / S13 / S14 camera yaw rate + X rad / frame from frame 60
 constexpr int kLagMax = 2;  // most frames in a row a skipped MOVER may keep the camera R (readback latency + the stagger)
@@ -536,6 +541,11 @@ typedef void (STDMETHODCALLTYPE* ClrFn)(ID3D11DeviceContext*);
 typedef void (STDMETHODCALLTYPE* EclFn)(ID3D11DeviceContext*, ID3D11CommandList*, BOOL);
 typedef void (STDMETHODCALLTYPE* SwapFn)(ID3D11DeviceContext1*, ID3DDeviceContextState*, ID3DDeviceContextState**);
 IlFn oIl; VbFn oVb; IbFn oIb; VsFn oVs; CbFn oCb; Cb1Fn oCb1; SmpFn oSmp; RsFn oRs; ClrFn oClr; EclFn oEcl; SwapFn oSwap;
+// phase 93: the PS / OM bank's Set calls (didshadowps=1)
+typedef void (STDMETHODCALLTYPE* PsFn)(ID3D11DeviceContext*, ID3D11PixelShader*, ID3D11ClassInstance* const*, UINT);
+typedef void (STDMETHODCALLTYPE* BsFn)(ID3D11DeviceContext*, ID3D11BlendState*, const FLOAT*, UINT);
+typedef void (STDMETHODCALLTYPE* DssFn)(ID3D11DeviceContext*, ID3D11DepthStencilState*, UINT);
+PsFn oPs; SmpFn oPsSmp; CbFn oPsCb; Cb1Fn oPsCb1; BsFn oBs; DssFn oDss;
 bool g_on = false, g_mut = false;
 void STDMETHODCALLTYPE hIl(ID3D11DeviceContext* c, ID3D11InputLayout* p) { oIl(c, p); DidShadow::NoteIl(c, p); }
 void STDMETHODCALLTYPE hVb(ID3D11DeviceContext* c, UINT s, UINT n, ID3D11Buffer* const* b, const UINT* st, const UINT* of) {
@@ -553,6 +563,18 @@ void STDMETHODCALLTYPE hCb1(ID3D11DeviceContext1* c, UINT s, UINT n, ID3D11Buffe
 }
 void STDMETHODCALLTYPE hSmp(ID3D11DeviceContext* c, UINT s, UINT n, ID3D11SamplerState* const* p) { oSmp(c, s, n, p); DidShadow::NoteSmp(c, s, n, p); }
 void STDMETHODCALLTYPE hRs(ID3D11DeviceContext* c, ID3D11RasterizerState* r) { oRs(c, r); DidShadow::NoteRs(c, r); }
+void STDMETHODCALLTYPE hPs(ID3D11DeviceContext* c, ID3D11PixelShader* p, ID3D11ClassInstance* const* ci, UINT n) {
+    oPs(c, p, ci, n); DidShadow::NotePs(c, p);
+}
+void STDMETHODCALLTYPE hPsSmp(ID3D11DeviceContext* c, UINT s, UINT n, ID3D11SamplerState* const* p) { oPsSmp(c, s, n, p); DidShadow::NotePsSmp(c, s, n, p); }
+void STDMETHODCALLTYPE hPsCb(ID3D11DeviceContext* c, UINT s, UINT n, ID3D11Buffer* const* b) {
+    oPsCb(c, s, n, b); DidShadow::NotePsCb(c, s, n, b, nullptr, nullptr, true);
+}
+void STDMETHODCALLTYPE hPsCb1(ID3D11DeviceContext1* c, UINT s, UINT n, ID3D11Buffer* const* b, const UINT* f, const UINT* k) {
+    oPsCb1(c, s, n, b, f, k); DidShadow::NotePsCb(static_cast<ID3D11DeviceContext*>(c), s, n, b, f, k, false);
+}
+void STDMETHODCALLTYPE hBs(ID3D11DeviceContext* c, ID3D11BlendState* b, const FLOAT* f, UINT m) { oBs(c, b, f, m); DidShadow::NoteBs(c, b); }
+void STDMETHODCALLTYPE hDss(ID3D11DeviceContext* c, ID3D11DepthStencilState* d, UINT r) { oDss(c, d, r); DidShadow::NoteDss(c, d); }
 void Rehook(void* ctx);
 void STDMETHODCALLTYPE hClr(ID3D11DeviceContext* c) { oClr(c); if (!g_mut) DidShadow::Invalidate(c, DidShadow::kKClearState); }
 void STDMETHODCALLTYPE hEcl(ID3D11DeviceContext* c, ID3D11CommandList* l, BOOL r) {
@@ -581,11 +603,16 @@ bool Install(ID3D11DeviceContext1* ctx) {
                     Patch(vt, 19, &hIb, &oIb) && Patch(vt, 26, &hSmp, &oSmp) && Patch(vt, 43, &hRs, &oRs) &&
                     Patch(vt, 58, &hEcl, &oEcl) && Patch(vt, 110, &hClr, &oClr) && Patch(vt, 119, &hCb1, &oCb1) &&
                     Patch(vt, 131, &hSwap, &oSwap);
-    static const int idx[11] = { 7, 11, 17, 18, 19, 26, 43, 58, 110, 119, 131 };
-    void* const exp[11] = { (void*)&hCb, (void*)&hVs, (void*)&hIl, (void*)&hVb, (void*)&hIb, (void*)&hSmp, (void*)&hRs, (void*)&hEcl,
-                            (void*)&hClr, (void*)&hCb1, (void*)&hSwap };
-    DidShadow::SetHookTargets(idx, exp, 11);
-    return ok;
+    static const int idx[17] = { 7, 11, 17, 18, 19, 26, 43, 58, 110, 119, 131, 9, 10, 16, 35, 36, 123 };
+    void* const exp[17] = { (void*)&hCb, (void*)&hVs, (void*)&hIl, (void*)&hVb, (void*)&hIb, (void*)&hSmp, (void*)&hRs, (void*)&hEcl,
+                            (void*)&hClr, (void*)&hCb1, (void*)&hSwap,
+                            (void*)&hPs, (void*)&hPsSmp, (void*)&hPsCb, (void*)&hBs, (void*)&hDss, (void*)&hPsCb1 };   // phase 93
+    bool okPs = true;
+    if (g_didShadowPs)                                  // phase 93: the PS / OM bank's Set calls
+        okPs = Patch(vt, 9, &hPs, &oPs) && Patch(vt, 10, &hPsSmp, &oPsSmp) && Patch(vt, 16, &hPsCb, &oPsCb) &&
+               Patch(vt, 35, &hBs, &oBs) && Patch(vt, 36, &hDss, &oDss) && Patch(vt, 123, &hPsCb1, &oPsCb1);
+    DidShadow::SetHookTargets(idx, exp, g_didShadowPs ? 17 : 11);
+    return ok && okPs;
 }
 // The runtime rewrites the immediate context's (per-object, writable) vtable on ExecuteCommandList / SwapDeviceContextState
 // (measured on WARP). An entry it put back with the ORIGINAL function is patched again: inject.cpp's MinHook detours sit on the
@@ -601,6 +628,10 @@ void Rehook(void* ctx) {
     re(7, (void*)oCb, (void*)&hCb); re(11, (void*)oVs, (void*)&hVs); re(17, (void*)oIl, (void*)&hIl); re(18, (void*)oVb, (void*)&hVb);
     re(19, (void*)oIb, (void*)&hIb); re(26, (void*)oSmp, (void*)&hSmp); re(43, (void*)oRs, (void*)&hRs); re(58, (void*)oEcl, (void*)&hEcl);
     re(110, (void*)oClr, (void*)&hClr); re(119, (void*)oCb1, (void*)&hCb1); re(131, (void*)oSwap, (void*)&hSwap);
+    if (g_didShadowPs) {                                // phase 93
+        re(9, (void*)oPs, (void*)&hPs); re(10, (void*)oPsSmp, (void*)&hPsSmp); re(16, (void*)oPsCb, (void*)&hPsCb);
+        re(35, (void*)oBs, (void*)&hBs); re(36, (void*)oDss, (void*)&hDss); re(123, (void*)oPsCb1, (void*)&hPsCb1);
+    }
 }
 void SetEntry(void* ctx, int i, void* fn) {
     void** vt = *reinterpret_cast<void***>(ctx);
@@ -5812,6 +5843,7 @@ int RunViewUnit(Env& E, Totals& tot) {
 // the float residues only), and the nearest lateral miss of the depth-ok draws (posts / the car crossing the eye plane) lies over
 // the 0.25 tolerance.
 int g_s15Mut = 0;
+bool g_solidMut = false;   // phase 80 "mutsolid": the solid dither gate off (wire_solid_static_only 0) -- S15 must FAIL
 int RunRoadsideScene(Env& E, float snapPx, Totals& tot, int mut, int eye) {
     const int frames = 100;
     const double eyeX = eye == 1 ? -0.032 : (eye == 2 ? 0.032 : 0.0), eyeY = eye ? 0.002 : 0.0, eyeZ = eye ? -0.004 : 0.0;
@@ -5890,7 +5922,17 @@ int RunRoadsideScene(Env& E, float snapPx, Totals& tot, int mut, int eye) {
     double worstClump = 0.0, worstCamPx = 0.0;
     DrawIdMv::Stats st0{};
     uint64_t rb0 = 0;
-    if (g_rstatic) DrawIdMv::StaticClear(DrawIdMv::kStatClrConfig);
+    // phase 80: the solid dither gate reads the static table -- no verdicts from the previous scene / eye run (same keys)
+    DrawIdMv::StaticClear(DrawIdMv::kStatClrConfig);
+    const bool solidSaved = DrawIdMv::SolidStaticOnly();
+    DrawIdMv::SetSolidStaticOnly(!g_solidMut);
+    int solidCarDither = 0, solidCarChecks = 0, solidStatOk = 0, solidStatChecks = 0, solidStatMiss = 0, solidGraceFrames = 0;
+    // a table clear (a 1-frame consensus failure -> kStatClrCamR, as in game) forgets every verdict: the static world is unknown
+    // (= not dithered, the game's own look) until the next readbacks -- kSolidGrace frames after a clear are not checked
+    constexpr int kSolidGrace = 4;
+    auto statClears = []() { uint64_t n = 0; for (int w = 0; w < DrawIdMv::kStatClrN; ++w) n += DrawIdMv::StaticClears(w); return n; };
+    uint64_t solidClr0 = statClears();
+    int solidGraceTo = -1;
     M4 VprevX = I4();
     const M4 Pw = Proj(kNearWorld);
     const FLOAT zero[4] = { 0, 0, 0, 0 };
@@ -6111,6 +6153,40 @@ int RunRoadsideScene(Env& E, float snapPx, Totals& tot, int mut, int eye) {
             ++ipFrames;
             if (stCur[oIP] == DrawIdMv::kStMover && parentOf[oIP] == tabIdx[oCarO]) ++ipParentOk;
         }
+        // ---- phase 80 SOLID DITHER GATE: the question inject.cpp SolidOnDraw asks for a draw with the far-wire shaders (AI car
+        // windows / wheels / trims share them: RenderDoc amtrucks_2026.10.09_21.10.01_frame5633). From frame 12 (the first verdicts
+        // are in) a MOVING car's draws must never be dithered (a dithered mover has new pixels every frame: no DLSS history);
+        // from frame 20 the static world (parked van, unique boxes, ground: what a far wire / tower is) must be dithered again
+        if (f >= 12) {
+            for (int o : { oCarO, oPlateO, oCarC }) {
+                ++checks; ++solidCarChecks;
+                if (DrawIdMv::SolidDitherOk(rec.FullKey(tabIdx[o]), false)) {
+                    ++fails; ++solidCarDither;
+                    if (solidCarDither <= 3) printf("   FAIL frame %d: %s would be DITHERED by the phase-63 solid gate (a moving car part)\n",
+                                                    f, objs[o].name);
+                }
+            }
+        }
+        {
+            const uint64_t clr = statClears();
+            if (clr != solidClr0) { solidClr0 = clr; solidGraceTo = f + kSolidGrace; }
+        }
+        if (f >= 20 && f <= solidGraceTo) ++solidGraceFrames;
+        if (f >= 20 && f > solidGraceTo) {
+            std::vector<int> stw;
+            stw.push_back(oVan); stw.push_back(oGround);
+            for (int k = 0; k < 10; ++k) stw.push_back(oBox[k]);
+            for (int o : stw) {
+                ++checks; ++solidStatChecks;
+                int why = 0;
+                if (DrawIdMv::SolidDitherOk(rec.FullKey(tabIdx[o]), false, &why) && (g_solidMut || why == 1)) ++solidStatOk;
+                else {
+                    ++fails; ++solidStatMiss;
+                    if (solidStatMiss <= 3) printf("   FAIL frame %d: static %s NOT known static to the solid gate (why %d): far wires would "
+                                                   "lose the dither\n", f, objs[o].name, why);
+                }
+            }
+        }
         if (f == 10) { st0 = cam.DrawIds().GetStats(); rb0 = st0.rbFrames; }
         // ---- expected motion per object: the cars (+ their plates) their own exact R, everything else the camera R ----
         std::vector<M4> Rexp(nObj, RcamG);
@@ -6219,6 +6295,17 @@ int RunRoadsideScene(Env& E, float snapPx, Totals& tot, int mut, int eye) {
            "%d draw-frames (frames with one a MOVER: %d); instanced batches with a parent: %d, not state 4: %d; car within 5 px of a "
            "clump in %d frames\n", clumpBadPx, clumpPx, clumpBadFrames, worstClump, crNotStatic, crMoverFrames, ibParent, ibNotInst,
            carNearClump);
+    printf("   phase 80 solid dither gate (wire_solid_static_only %d%s): moving car draws it would dither %d of %d checks (must be 0), static "
+           "world draws known static %d of %d (must be all; %d frames not checked: within %d frames of a static-table clear)\n",
+           g_solidMut ? 0 : 1, g_solidMut ? ", MUTATION mutsolid" : "", solidCarDither, solidCarChecks, solidStatOk, solidStatChecks,
+           solidGraceFrames, kSolidGrace);
+    // not vacuous: the grace window must not swallow the static checks (a table cleared every frame would skip them all)
+    ++checks;
+    if (solidStatChecks < 12 * 60) {
+        ++fails; printf("   FAIL phase 80: only %d static gate checks ran (want >= %d): the static table was cleared too often\n",
+                        solidStatChecks, 12 * 60);
+    }
+    DrawIdMv::SetSolidStaticOnly(solidSaved);
     printf("   static world px off: %lld of %lld; car + node plate px off: %lld of %lld; 1-instance instanced plate: took the car in %d of "
            "%d frames, px off %lld of %lld (informational: phase 6b); camera R consensus %d frames, worst vs exact %.4f px\n",
            worldBadPx, worldPx, carBadPx, carPx, ipParentOk, ipFrames, ipBadPx, ipPx, consFrames, worstCamPx);
@@ -7138,6 +7225,10 @@ void AccumShadowStats() {
     g_shAcc.recShadow += s.recShadow; g_shAcc.recGet += s.recGet; g_shAcc.reseeds += s.reseeds;
     g_shAcc.verified += s.verified; g_shAcc.mismatchRecs += s.mismatchRecs; g_shAcc.fallbackFrames += s.fallbackFrames;
     g_shAcc.refsTaken += s.refsTaken; g_shAcc.refsSkipped += s.refsSkipped; g_shAcc.notes += s.notes; g_shAcc.vtMiss += s.vtMiss;
+    g_shAcc.psRecShadow += s.psRecShadow; g_shAcc.psRecGet += s.psRecGet; g_shAcc.psVerified += s.psVerified;   // phase 93
+    g_shAcc.psMismatchRecs += s.psMismatchRecs; g_shAcc.psRefsTaken += s.psRefsTaken; g_shAcc.psRefsSkipped += s.psRefsSkipped;
+    g_shAcc.psNotes += s.psNotes; g_shAcc.psHazGet += s.psHazGet;
+    for (int f = 0; f < DidShadow::kPsFieldN; ++f) { g_shAcc.psMismatch[f] += s.psMismatch[f]; g_shAcc.psSeed[f] += s.psSeed[f]; }
     for (int f = 0; f < DidShadow::kFieldN; ++f) {
         g_shAcc.hazGet[f] += s.hazGet[f]; g_shAcc.groupSeed[f] += s.groupSeed[f]; g_shAcc.mismatch[f] += s.mismatch[f];
     }
@@ -7168,6 +7259,14 @@ void PrintShadowStats(const char* tag) {
            (unsigned long long)a.mismatch[3], (unsigned long long)a.mismatch[4], (unsigned long long)a.mismatch[5],
            (unsigned long long)a.mismatch[6], (unsigned long long)a.fallbackFrames, (unsigned long long)a.vtMiss,
            a.disabled ? " -- DISABLED" : "");
+    if (g_didShadowPs)                                  // phase 93
+        printf("   PS/OM bank (%s): %llu PS records from it, %llu through the getters; AddRefs taken %llu / avoided %llu; %llu Set calls "
+               "applied; output-capable PS cbuffer getter reads %llu; verify %llu compared, %llu mismatching (ps %llu pscb %llu pssmp %llu "
+               "dss %llu bs %llu)\n", tag, (unsigned long long)a.psRecShadow, (unsigned long long)a.psRecGet,
+               (unsigned long long)a.psRefsTaken, (unsigned long long)a.psRefsSkipped, (unsigned long long)a.psNotes,
+               (unsigned long long)a.psHazGet, (unsigned long long)a.psVerified, (unsigned long long)a.psMismatchRecs,
+               (unsigned long long)a.psMismatch[0], (unsigned long long)a.psMismatch[1], (unsigned long long)a.psMismatch[2],
+               (unsigned long long)a.psMismatch[3], (unsigned long long)a.psMismatch[4]);
     (void)rec;
 }
 
@@ -7555,6 +7654,7 @@ int main(int argc, char** argv) {
         else if (!strncmp(s, "jerk=", 5)) g_yawJerk = atof(s + 5);   // phase 14 round 5
         else if (!strcmp(s, "mutcr")) g_s15Mut = 4;                  // phase 14 round 6: S15 with the origin-free rule off (must FAIL)
         else if (!strcmp(s, "mutinst")) g_s15Mut = 8;                //   S15 with multi-instance draws listed again (round-4 rule)
+        else if (!strcmp(s, "mutsolid")) g_solidMut = true;          // phase 80: S15 with the solid dither gate off (must FAIL)
         else if (!strcmp(s, "mutr6")) g_s15Mut = 16;                 // round 7: S15 with the round-6 origin-free rule (VR eyes FAIL)
         else if (!strcmp(s, "mutshape")) g_s17Mut = 32;              // v0.10.0 phase 19: S17 with the MVP-shape rule off
         else if (!strcmp(s, "mutlayout")) g_layMut = 64;             // v0.10.0 phase 22: S17 / S18 with rows 4..7 (must FAIL both)
@@ -7567,6 +7667,7 @@ int main(int argc, char** argv) {
         else if (!strncmp(s, "cands=", 6)) DrawIdMv::SetConsCands((unsigned)atoi(s + 6));
         else if (!strncmp(s, "didshadow=", 10)) g_didShadow = atoi(s + 10) >= 2 ? 2 : (atoi(s + 10) == 1 ? 1 : 0);   // phase 35
         else if (!strncmp(s, "shverify=", 9)) g_shVerify = atoi(s + 9);             //   did_shadow_verify (0 = off)
+        else if (!strncmp(s, "didshadowps=", 12)) g_didShadowPs = atoi(s + 12) ? 1 : 0;   // phase 93: + the PS / OM bank
         else if (!strcmp(s, "mutshadow")) ShHook::g_mut = true;                      //   S19 must FAIL
         else if (!strcmp(s, "mutclip")) g_shadowMut = 1;     // v0.10.0 phase 9 (S11 / S12 must FAIL)
         else if (!strcmp(s, "mutview")) g_shadowMut = 2;
@@ -7611,11 +7712,13 @@ int main(int argc, char** argv) {
         if (!ShHook::Install(E.ctx1.Get())) { printf("phase 35: vtable patch failed\n"); return 1; }
         DidShadow::SetAlias(E.ctx.Get());
         DidShadow::Configure(true, g_shVerify, g_didShadow == 2 ? (1u << DidShadow::kFieldN) - 1u : ((1u << DidShadow::kFieldN) - 1u) & ~((1u << DidShadow::kFVb) | (1u << DidShadow::kFIb)));
+        if (g_didShadowPs) DidShadow::ConfigurePs(true);   // phase 93
     }
     printf("phase 35: did_shadow %d (did_shadow_verify %d%s), context %p / ID3D11DeviceContext1 %p\n", g_didShadow, g_shVerify,
            ShHook::g_mut ? ", MUTATION: no ClearState / ExecuteCommandList / SwapDeviceContextState invalidation" : "",
            (void*)E.ctx.Get(), (void*)static_cast<ID3D11DeviceContext*>(E.ctx1.Get()));
     GpuPerf::SetOn(true);                               // v0.10.0 phase 8: every section timed (WARP figures)
+    GpuPerf::SetFrameEvery(1);                          // phase 93: every frame (the DLL samples 1 in 8 with the menu closed)
     CameraMv::RegisterShaders();
     SceneDlaa::RegisterShaders();                       // v0.10.0 phase 7: S9 runs the real SceneDlaa
     ShaderCache::Start();
@@ -8023,7 +8126,7 @@ int main(int argc, char** argv) {
     // phase 35: S19 state shadow (didshadow=1 only; last in the full run); the verify mode's mismatches of S1-S18 are failures
     if (g_didShadow) {
         AccumShadowStats();
-        const uint64_t mmScenes = g_shAcc.mismatchRecs;
+        const uint64_t mmScenes = g_shAcc.mismatchRecs + g_shAcc.psMismatchRecs;   // phase 93: + the PS / OM bank
         PrintShadowStats("S1-S18");
         if (g_shVerify > 0) {
             ++tot.checks;

@@ -6,6 +6,9 @@
 > - There is **no website** for this mod. There **never will be** one. No Discord, no Patreon, no Nexus, no Steam Workshop, no app store.
 > - **DO NOT DOWNLOAD THIS MOD FROM ANYWHERE ELSE.** Any other site, mirror, "launcher", "installer", video link or forum attachment that
 >   offers it is not mine and may carry anything. If it did not come from this GitHub page, do not run it.
+> - **Fake copies exist on GitHub too.** Other accounts have made repos with this mod's exact name. They do not contain this mod.
+>   Check that the address starts with `github.com/JRDevo/`. If you find a copy, do not download from it. You can report it to
+>   GitHub with **Report repository** on its page.
 > - Updates, release notes, the hotkey list and the troubleshooting guide live here and only here. If someone tells you to get the mod
 >   somewhere else, they are wrong.
 
@@ -23,6 +26,8 @@ an in-game menu (`Delete`) and an optional text config.
 
 **An NVIDIA RTX GPU is required** (DLAA and DLSS only run on RTX cards).
 
+**Short guide in your language:** [Български](docs/readme/README.bg_bg.md) · [Català](docs/readme/README.ca_es.md) · [Česky](docs/readme/README.cs_cz.md) · [Dansk](docs/readme/README.da_dk.md) · [Deutsch](docs/readme/README.de_de.md) · [Ελληνικά](docs/readme/README.el_gr.md) · [Español](docs/readme/README.es_es.md) · [Español (Am. Latina)](docs/readme/README.es_la.md) · [Eesti](docs/readme/README.et_ee.md) · [Euskara](docs/readme/README.eu_es.md) · [Suomi](docs/readme/README.fi_fi.md) · [Français (Québec)](docs/readme/README.fr_ca.md) · [Français (France)](docs/readme/README.fr_fr.md) · [Galego](docs/readme/README.gl_es.md) · [Hrvatski](docs/readme/README.hr_hr.md) · [Magyar](docs/readme/README.hu_hu.md) · [Italiano](docs/readme/README.it_it.md) · [日本語](docs/readme/README.ja_jp.md) · [ქართული](docs/readme/README.ka_ge.md) · [한국어](docs/readme/README.ko_kr.md) · [Lietuviškai](docs/readme/README.lt_lt.md) · [Latviešu](docs/readme/README.lv_lv.md) · [Македонски](docs/readme/README.mk_mk.md) · [Nederlands](docs/readme/README.nl_nl.md) · [Norsk (bokmål)](docs/readme/README.no_no.md) · [Polski](docs/readme/README.pl_pl.md) · [Ślōnskŏ gŏdka](docs/readme/README.pl_si.md) · [Português (Brasil)](docs/readme/README.pt_br.md) · [Português (Portugal)](docs/readme/README.pt_pt.md) · [Română](docs/readme/README.ro_ro.md) · [Русский](docs/readme/README.ru_ru.md) · [Slovenčina](docs/readme/README.sk_sk.md) · [Slovenščina](docs/readme/README.sl_sl.md) · [Srpski (latinica)](docs/readme/README.sr_sp.md) · [Српски (ћирилица)](docs/readme/README.sr_sr.md) · [Svenska](docs/readme/README.sv_se.md) · [Türkçe](docs/readme/README.tr_tr.md) · [Українська](docs/readme/README.uk_uk.md) · [Tiếng Việt](docs/readme/README.vi_vn.md) · [简体中文](docs/readme/README.zh_cn.md) · [繁體中文](docs/readme/README.zh_tw.md)
+
 **Menu:** [Features](#features) · [Download](#-download) · [Requirements](#requirements) · [Install](#install) · [Modes](#modes--the-end-key) · [Flat or VR](#flat-or-vr) · [OFXR Bridge](#ofxr-bridge-vr-frame-generation) · [VectorXR](#vectorxr-vr-layer-suite) · [Render scale](#how-render-scale-works) · [Models](#models-presets--which-one-to-use) · [Controls](#controls) · [Tuning menu](#the-tuning-menu) · [Translations](#translations) · [dlaa.ini](#dlaaini) · [Performance](#performance) · [Troubleshooting](#troubleshooting) · [Multiplayer](#multiplayer) · [Build](#build-from-source) · [Report a problem](#reporting-a-problem-what-to-upload) · [Contributing](CONTRIBUTING.md) · [License](#license-and-credits)
 
 > **Where the project stands.** A lot of features have been added. From here on the work is about
@@ -34,10 +39,13 @@ an in-game menu (`Delete`) and an optional text config.
 
 **Picture quality**
 - **DLAA / DLSS** on the whole picture: no shimmer on fences, wires, road marks and shadows.
+- **Calm edges outside the DLAA area**: thin dark edges against the sky (bridge rails, sign gantries, street-light heads) stay steady, not just inside the processed square.
 - **Mirrors anti-aliased too**, trailer included.
 - **Exact motion for traffic**, wheels, trailers and plates: sharp, no ghosting.
 - Menu and truck-preview screens get anti-aliasing as well.
 - **Steadier near wires**: telephone and power wires stay calm while you drive.
+- **Sharper far fences**: distant chain-link fences keep their wires.
+- **Mix with the game's own TAA**: blend DLAA / DLSS with TAA, or split the screen to compare.
 - Four DLSS models, switched live with a key.
 - Sharper texture text and adjustable sharpening.
 
@@ -52,22 +60,27 @@ an in-game menu (`Delete`) and an optional text config.
 - **Eye-tracked foveated rendering**: the sharp area follows your eyes (eye-tracked headsets, experimental).
 - **Foveated strength**: Normal / Strong / Max outer ring for more GPU saving.
 - **VR fps counter attached to the vehicle**: rides with the cab; 20 colours.
+- **Move the game's own VR UI** (In-game UI): height, side, distance, tilt, turn, size and curve, live.
 - Three VR speed-ups: hidden area mask, foveated lighting, mirrors in turns.
 - DLAA area: process only the middle of each eye.
 - **Frame rate limits**: NVIDIA Reflex and an FPS cap in flat, a half / third rate VR FPS cap.
+- **AMD cache cores (X3D)**: keep the game on the big-cache cores on an AMD X3D CPU.
 
 **Menu**
 - **In-game menu** (`Delete`): every setting, its hotkey, its GPU cost, a short description.
+- **A simple menu**: plain row names, grouped most-used first, rows that cannot work in your setup hidden.
 - Panel and fps counter can be moved and resized, flat and VR.
 - **VR panel fixed in the cab**: stays still while you look around; sharper text.
-- **The menu in your language**: all 43 languages of the game, picked from the game's own setting. **new**
-- **Key names for your keyboard**: `Strg+F9` / `Entf` on a German keyboard, `Suppr` on a French one. **new**
+- **FPS graph**: a small bar graph of the slowest frame over the last 2 / 5 / 10 / 30 / 60 s.
+- **The menu in your language**: all 43 languages of the game, picked from the game's own setting.
+- **Key names for your keyboard**: `Strg+F9` / `Entf` on a German keyboard, `Suppr` on a French one.
 - Live CPU and GPU cost per part, and what limits your frame rate.
 
 **Setup**
 - A single `dinput8.dll`; delete it to uninstall.
 - Hotkeys with beeps, usable blind in a headset; every key can be re-bound.
 - Drop in a newer `nvngx_dlss.dll` any time for NVIDIA's newer models.
+- **One-press bug report**: press `Insert` twice and the mod packs the logs, settings and before/after pictures into ready-to-upload zips.
 - Debug log for bug reports (off by default).
 
 <details><summary><h3>More detail on each feature</h3></summary>
@@ -80,41 +93,64 @@ an in-game menu (`Delete`) and an optional text config.
   costs on the GPU and a short description; `Up` / `Down` select, `Left` / `Right` change. Flat and VR (both eyes); the game does
   not see those keys while the menu is open. See [The tuning menu](#the-tuning-menu).
 - **Movable widgets** — the tuning panel and the live fps counter can both be moved and resized from the menu
-  (position X / Y and size), flat and VR each with their own place. In VR the panel turns to face you. New in v0.14.0:
-  the VR panel can stay fixed in the cab (`Panel lock (VR)`), and its text is drawn sharper.
+  (position X / Y and size), flat and VR each with their own place. In VR the panel turns to face you, and it
+  can stay fixed in the cab (`Panel lock`); its text is drawn sharp.
+- **Calm edges outside the DLAA area** — outside the processed `dlaa_area` square the picture would be the raw
+  shaking frame; thin dark edges against the sky (bridge rails, sign gantries, street-light heads) steady and
+  smooth instead, with DLAA and with DLSS (`outside_aa`, on by default).
 - **Eye-tracked foveated rendering (VR, experimental)** — on a headset with eye tracking (OpenXR eye gaze, tested on
-  Varjo Aero) the sharp centre of `Foveated (VRS)` follows where you look; `Foveated strength` sets how coarse the outer
-  ring is (new in v0.14.0). See [the test guide](docs/EYE_TRACKING_TEST.md). Varjo testing by
+  Varjo Aero) the sharp centre of `Foveated rendering` follows where you look; `Foveated strength` sets how coarse the outer
+  ring is. See [the test guide](docs/EYE_TRACKING_TEST.md). Varjo testing by
   [ejaypeppy-source](https://github.com/ejaypeppy-source), thank you!
-- **Steadier thin wires** — near telephone and power wires no longer break up while you drive (`Thin-wire motion`,
-  `Thin-wire depth`, both on; `Thin-wire widening` is experimental and off). Far wires thinner than 1 pixel can still
-  break up (new in v0.14.0).
+- **Steadier thin wires** — near telephone and power wires no longer break up while you drive (`Wire fix: motion`,
+  `Wire fix: depth`, both on; `Thicker wires (test)` is experimental and off). Far wires thinner than 1 pixel can still
+  break up.
+- **Sharper far fences** — distant chain-link fences keep their wires: the mod rebuilds the small texture versions
+  the game would otherwise drop (`cutout_mips`, off by default).
 - **Live CPU and GPU cost** — the menu shows what each part of this mod costs on the CPU and the GPU, in ms, and what
   limits your frame rate right now (CPU, GPU or the headset).
-- **Triple screens (flat)** — with the game's multi-monitor mode every screen gets its own DLAA (new in v0.12.0).
+- **Triple screens (flat)** — with the game's multi-monitor mode every screen gets its own DLAA.
 - **VR speed-ups** — hidden area mask (the lens corners are not drawn), foveated rendering also on the lighting pass,
-  mirrors in turns; all off by default, each a menu row (new in v0.12.0).
+  mirrors in turns; all off by default, each a menu row.
+- **AMD cache cores (X3D)** — on an AMD X3D CPU where only one half of the cores has the big cache, the game can be kept
+  on those cores (`cpu_cache_pin`, a menu row in `Frame rate`, off by default).
 - **VR fps counter attached to the vehicle** — rides with the cab on bumps, braking and hills; 20 colours, brightness,
-  distance and turn (new in v0.12.0). New in v0.13.0: the box sits on the cab itself and keeps its place after menus and recentring, every vehicle keeps its own box (place, size, colour, brightness, text, opacity), and the text has 7 choices.
+  distance and turn. The box sits on the cab itself and keeps its place after menus and recentring, every vehicle keeps its own box (place, size, colour, brightness, text, opacity), and the text has 7 choices.
+- **FPS graph** — a small bar graph under the fps box shows the last 2 / 5 / 10 / 30 / 60 s; each bar is the slowest
+  frame of its slice, so a single hitch stays visible (green = on target, yellow = slow, red = very slow). The `FPS counter`
+  row has every text mode with and without the graph, and `graph only`.
 - **Frame rate limits** — in flat, NVIDIA Reflex (less input lag when the GPU is the limit) and an FPS cap (a steady
   frame time, less heat). In VR, a cap at half or a third of the headset rate, so the headset's reprojection (ASW /
-  Motion Smoothing) fills the frames in between at a steady rhythm. All off by default, each a menu row (new in v0.13.0).
+  Motion Smoothing) fills the frames in between at a steady rhythm. All off by default, each a menu row.
+- **In-game UI (VR)** — move the game's own VR HUD and menus live: height, side, distance, tilt, turn, size and curve,
+  for driving and for menus. A menu group; the mod types the commands into the game console, so the game console must be on
+  (`g_developer "1"` and `g_console "1"` in `config.cfg`). The values are not saved in `dlaa.ini`.
 - **Night light glow fix** — street lamp and car light glows no longer leave a trail behind them at night; a menu row
-  (`Light glow ghosting fix`, `dlss_bias_mask`) sets the strength (new in v0.13.0).
+  (`Light trail fix`, `dlss_bias_mask`) sets the strength.
 - **Lit areas under canopies** — the game's lighting pass draws some meshes a second time (sunlight through a tent
-  canopy); they now match the DLAA picture and no longer flicker on and off (`light_redraw_jitter`, new in v0.13.0).
+  canopy); they now match the DLAA picture and no longer flicker on and off (`light_redraw_jitter`).
+- **Steady shadow edges** — sun-shadow edges on flat roofs and wooden fence planks no longer flicker with the jitter
+  (`light_fs_jitter`, on by default).
 - **CPU tuning** — optional: Intel P-cores for the game's main threads, Above normal priority, no power throttling;
-  one menu row, off by default (new in v0.13.0).
+  one menu row, off by default.
 - **Hotkeys page** — bind every menu hotkey in the menu itself with one press; only the five menu keys are kept from the
-  game while the menu is open (new in v0.13.0).
+  game while the menu is open.
 - **Windows HDR** — works with HDR on in flat mode.
 - **NVIDIA Smooth Motion** — works with the driver's frame generation switched on, in flat mode.
 - **OFXR Bridge (VR frame generation)** — runs together with the bridge, which adds in-between frames to the
   finished eye pictures (see [OFXR Bridge](#ofxr-bridge-vr-frame-generation)).
 - **VectorXR (VR layer suite)** — runs together with VectorXR (Turbo, Depth, frame generation, on-screen display); the mod leaves
-  its work inside the game alone (see [VectorXR](#vectorxr-vr-layer-suite); new in v0.14.0, tested on a Quest 3).
-- **Lower CPU cost** — a performance pass in v0.14.0: the VR panel and fps box are only redrawn when their text changes,
-  and the per-part motion work in busy scenes takes less CPU time.
+  its work inside the game alone (see [VectorXR](#vectorxr-vr-layer-suite); tested on a Quest 3).
+- **Low CPU cost** — the VR panel and fps box are only redrawn when their text changes, and the per-part motion work in
+  busy scenes is cheap on the CPU.
+- **Mix with the game's own TAA** — the `Mode` row (and the `End` key) can blend the game's TAA with DLAA or DLSS
+  (`Mix (TAA + DLAA)` / `Mix (TAA + DLSS)`); `Mix amount` sets how much is TAA. `Split with game TAA` shows the mod on
+  one side of a line and the game's TAA on the other, to compare. The mod switches the game's `Anti-aliasing` (`r_aa`)
+  through the game console for you, so the game console must be on (`g_developer "1"` and `g_console "1"` in `config.cfg`;
+  without the console, set the game's `Anti-aliasing` to TAA yourself). Default is DLAA, no Mix.
+- **One-press bug report** — press `Insert` twice (or the menu's `Bug report > Capture now`) where something looks wrong
+  and the mod packs the logs, system info, your `dlaa.ini` and before/after pictures into a `shimmer_<time>_main.zip` (plus
+  optional extra zips), ready to drop on a GitHub issue; your Windows user name and folders are removed from the text files.
 - **Drivable cars (ATS)** — DLAA / DLSS also runs while you drive a car.
 - **Menu and truck-preview screens** get anti-aliasing too, not only the drive.
 - **Four DLSS models** to pick from, switched live with a key, from light to heavy.
@@ -135,7 +171,7 @@ an in-game menu (`Delete`) and an optional text config.
   get sharper textures while DLAA / DLSS keeps them from shimmering. Off by default, adjust live with
   `Ctrl+F1` / `Ctrl+F2`.
 - **Adjustable sharpening** — strength and width, live.
-- **DLAA area (VR)** — process only the middle of each eye to save GPU time.
+- **DLAA area** — process only the middle of each eye to save GPU time.
 - **Hotkeys with beeps** — made to use blind in a headset; every key can be re-bound in `dlaa.ini`.
 - **Bring your own `nvngx_dlss.dll`** — drop in a newer one at any time to get NVIDIA's newer models.
 - **Small and simple** — a single `dinput8.dll`. No launcher, no account. Delete the file
@@ -144,9 +180,11 @@ an in-game menu (`Delete`) and an optional text config.
 
 </details>
 
-| Tuning menu, groups closed | Tuning menu, groups open | FPS counter colours |
+| Tuning menu — Flat screen (every group open) | Tuning menu — VR (every group open) | FPS counter + graph |
 |---|---|---|
-| ![The tuning menu, all groups closed](docs/images/tuning-menu.png) | ![The tuning menu, all groups open](docs/images/tuning-menu-all-open.png) | ![The fps counter in its 20 colours](docs/images/fps-counter-colours.png) |
+| ![The tuning menu on a flat screen, every group open](docs/images/tuning-menu-all-open.png) | ![The tuning menu in VR, every group open](docs/images/tuning-menu-all-open-vr.png) | ![The fps counter with its graph](docs/images/fps-counter.png) ![The fps counter in its 20 colours](docs/images/fps-counter-colours.png) |
+
+The menu pictures show every row the mod has. Some rows show only on some PCs, for example `AMD cache cores (X3D)` on an AMD X3D CPU.
 
 ## ⬇ Download
 
@@ -158,22 +196,16 @@ This is an unofficial fan project. It is not affiliated with, or endorsed by, SC
 Software or NVIDIA. Euro Truck Simulator 2 and American Truck Simulator are
 trademarks of SCS Software; DLSS and DLAA are trademarks of NVIDIA Corporation.
 
-> Status: v0.15.1. Fixed: VR one eye black / flickering for 1-2 s when a drive starts or you come back from the menu, and faster busy scenes with wire widening + VRS. v0.15.0 brought the tuning menu in all 43 game languages (AI translations, best effort, fixes welcome: [Translations](#translations)), key names for your keyboard, shimmer capture on the `Pause` key, and two VR eye pairing fixes (Varjo). Since v0.14.0: eye-tracked foveated rendering (experimental, tested on Varjo), steadier near wires, VectorXR support and a VR panel fixed in the cab. Eye tracking test guide: [docs/EYE_TRACKING_TEST.md](docs/EYE_TRACKING_TEST.md).
-> With this version the bells and whistles I know of are in. From here on the main work is performance tuning, from your logs; new ideas are still welcome. See [Contributing](CONTRIBUTING.md).
+> **Status.** The mod replaces the game's anti-aliasing with DLAA, or upscales with DLSS, on a flat screen and in VR,
+> and can blend with the game's own TAA. Thin edges stay steady inside and outside the processed area; mirrors, traffic,
+> wires and plates are handled. The tuning menu is in all 43 game languages (AI translations, best effort, fixes welcome:
+> [Translations](#translations)). Eye-tracked foveated rendering is experimental (tested on Varjo); see the eye tracking
+> test guide: [docs/EYE_TRACKING_TEST.md](docs/EYE_TRACKING_TEST.md).
+> The feature set is settled; the main work from here is performance tuning, from your logs, and new ideas are welcome. See [Contributing](CONTRIBUTING.md).
 > See the [Releases page](https://github.com/JRDevo/ETS2-ATS-DLAA-DLSS-Injection-Mod/releases) for every version.
 > DLSS upscaling in VR is still being tuned; treat it as experimental.
 
-<details><summary><h3>Older versions</h3></summary>
-
-v0.13.0: NVIDIA Reflex and frame rate caps, a Hotkeys page in the menu, a per-vehicle fps box in VR, a night light glow fix, CPU tuning, and fixes for Linux / Proton.
-
-v0.12.0: triple screens in flat, the VR fps counter attached to the vehicle, a menu in categories with a CPU | GPU cost column, hidden area mask, foveated lighting pass and mirrors in turns.
-
-v0.11.0: Turbo mode (VR), foveated rendering (VRS), logging levels in the menu, about half the GPU cost for the per-part motion vectors in busy cities, fixes for issue #8 (OptiScaler: mirror DLAA starts off) and issue #9 (DLSS stopped on the eyes after a VR minimize / restore). v0.10.3: in VR the tuning menu and the fps box are OpenXR quad layers placed by the headset (`menu_vr_layer`): steady, never covered by the game's menus, at a real distance (`menu_vr_dist`), with the fps box optionally fixed in the cab (`fps_vr_lock`). Hold a key or wheel button on a menu row to bind it; Reset to defaults is a 5 s hold; Panel / FPS settings are collapsible groups. v0.10.2 (unpublished): VR performance pass (`mv_cons_fail_tol`, mirror units pre-built on the loading screen, `mv_area_clip`, camera-only mirrors `mirror_mv`), the 7-choice Mirror DLAA row, wheel / D-pad bindings. The DLSS
-*upscaling* path (render below native, reconstruct up) runs in VR but is still
-being tuned. Treat upscaling as experimental. The OFXR Bridge handling is not yet tested in a headset with the bridge armed.
-
-</details>
+The OFXR Bridge handling is not yet tested in a headset with the bridge armed.
 
 ---
 
@@ -276,10 +308,19 @@ Press **`End`** in game (no modifier) to cycle the mode. The choice is saved to
 |------|--------------|------|
 | **DLAA** | NVIDIA AA at the game's render resolution; the game stretches the result to the output size | 1 high beep |
 | **DLSS** | NVIDIA reconstructs from the render resolution **up** to the output size (upscaling) | 2 high beeps |
+| **Mix (TAA + DLAA)** | DLAA blended with the game's own TAA on the same frame: calmer, a bit softer | 3 high beeps |
+| **Mix (TAA + DLSS)** | DLSS blended with the game's own TAA | 4 high beeps |
 | **off** | the game's own picture, no injection | 1 low beep |
 
 At 100 % render scale DLAA and DLSS produce the same picture; the difference only
 shows once you render below native (see render scale below).
+
+**Mix** blends the mod with the game's own TAA. `Mix amount` (right under `Mode` in the menu) sets how much is TAA,
+in 10 % steps; calmer and softer with more TAA, sharper with less. For Mix (and the split view) the mod switches the
+game's `Anti-aliasing` to TAA for you through the game console, so **the game console must be on**: set `g_developer "1"`
+and `g_console "1"` in `config.cfg` (game closed). Without the console, set `Anti-aliasing` to **TAA** in the game's
+graphics settings yourself. To compare side by side, use `Split with game TAA` in the `Compare and test` group (`Split
+line position` moves the dividing line; `Split: left | right` picks what each side shows).
 
 </details>
 
@@ -343,7 +384,7 @@ own thread are not mistaken for the game's.
 - **In the log** (`log_level = 3` or `4`): `VectorXR: layer module ... loaded` when VectorXR's layer shows up in the game (it loads
   when the game creates its OpenXR instance, so it can appear a little after start), `VectorXR: settings found` / `not installed`
   at start, `VectorXR: layer found in the game` once, and `OFXR Bridge / VectorXR: N calls passed through so far`. The tuning
-  menu's `VectorXR (VR layer)` row (group `Upscaling and VR`) shows `found` / `not found` / `off`.
+  menu's `VectorXR (VR layer)` row (group `Performance`) shows `found` / `not found` / `off`.
 
 Status: tested on a Quest 3 (Virtual Desktop): the game and the mod run with VectorXR's layer loaded. With VectorXR's frame
 generation on, the game itself runs at half the frame rate and VectorXR fills the rest, as SSW / ASW do: on that PC it was no
@@ -483,7 +524,7 @@ and the defaults are tuned already.
 
 | Key | What it does |
 |-----|--------------|
-| `End` | Mode: DLAA → DLSS → off (saved at once) |
+| `End` | Mode: DLAA → DLSS → Mix (TAA + DLAA) → Mix (TAA + DLSS) → off (saved at once) |
 | `Alt+F9` | Performance profile: high → medium → low. high = everything on; medium = for mid-range GPUs (model E, cheaper mirror / see-through / plate work); low = for weak GPUs (also no mirror DLAA, no see-through depth, VR DLAA area 60 %) |
 | `Shift+F12` | Save the current live settings to `dlaa.ini` |
 | `Delete` | Tuning menu: every setting with its hotkey; arrow keys select and change, see [The tuning menu](#the-tuning-menu) |
@@ -534,7 +575,7 @@ These need `log_level = 4` in `dlaa.ini`. They are for diagnostics and bug repor
 | `Ctrl+F7` | Passive mode on / off |
 | `Ctrl+F8` | Jitter-only debug on / off |
 | `Ctrl+F9` | Self-test (dumps frames) |
-| `Pause` | Shimmer capture: DLAA on and off frames + log + `dlaa.ini` in one folder (new in v0.15.0; works at any log level, `4` makes the copied log useful) |
+| `Insert` (twice) | One-press bug report: press it **twice within 1 s** -- system info, the logs, `dlaa.ini` and PNG frames (DLAA on / off; with `capture_mode = 2` also what DLSS got, the motion-vector view, motion off, jitter only) into `dlaa_selftest\shimmer_<date>_<time>\`, split into zips by kind (each at most 24 MB): `shimmer_<time>_main.zip` (always attach), `shimmer_<time>_full.zip` (only with `Capture includes` = full) and `shimmer_<time>_rewind.zip` (only with Rewind before key on). Works at any log level (it raises it for its own duration). See [How to send a bug report](#how-to-send-a-bug-report) |
 | `Ctrl+F10` | NGX input snapshot |
 | `Ctrl+F11` | Frame trace |
 | `Ctrl+F12` | Cycle NGX jitter sign |
@@ -550,7 +591,9 @@ The full sheet with every beep pattern is in [`docs/KEYS.md`](docs/KEYS.md).
 <details>
 <summary><h2>The tuning menu</h2></summary>
 
-![The tuning menu](docs/images/tuning-menu.png)
+| Flat screen, every group open | VR, every group open |
+|---|---|
+| ![The tuning menu on a flat screen with all groups open](docs/images/tuning-menu-all-open.png) | ![The tuning menu in VR with all groups open](docs/images/tuning-menu-all-open-vr.png) |
 
 Press **`Delete`** in game and a panel with every setting opens over the picture: name, current
 value, the hotkey for it, the CPU and GPU cost, and for the selected row a description: what it does, when you would change
@@ -561,20 +604,33 @@ it, what it costs or saves. **`Up` / `Down`** select a row,
 
 | Column | What it shows |
 |--------|---------------|
-| **Setting** | The name of the setting. A greyed row does not apply right now (for example VR-only rows in flat mode). |
+| **Setting** | The name of the setting. Rows that do not apply right now are hidden (`menu_show_all = 1` shows them greyed). |
 | **Value** | The current value. `Left` / `Right` change it. |
 | **Hotkey** | The key that does the same thing without the menu, or the `dlaa.ini` key for rows that have no hotkey. |
 | **CPU \| GPU ms** | What this row costs right now, in ms per frame: the CPU figure in **blue**, the GPU figure in **orange**, e.g. `0.12 \| 0.62` (`-` = that side does not apply or is not measured, `...` = still measuring, `off` = switched off, `same` / `no extra` = no extra cost). |
 
-**Categories (phase 43):** the menu is in groups you open and close. `Mode`, `Performance profile` and `DLAA model` are
-always shown. Then come the groups: `Picture` (sharpening, texture sharpness, DLAA area, tonemap, see-through depth),
-`Motion and mirrors`, `Upscaling and VR` (DLSS upscale, DLAA on / off, OFXR Bridge, VectorXR), `VR performance` (Turbo, foveated
-rendering, hidden area mask), `Frame rate and CPU` (Reflex, FPS cap, VR FPS cap, CPU tuning), `Panel settings` and `FPS counter settings`.
-After them: `FPS counter`, `Logging`, `Language`,
+**Categories:** the menu is in groups you open and close, most-used first. `Mode`, `Quality preset` and
+`DLAA model` are always shown. Then come the groups: `Picture` (sharpening, texture sharpness, see-through depth, light glow fix,
+DLAA area), `Motion and mirrors` (part motion, mirror DLAA, mirrors in turns), `Frame rate` (CPU tuning, AMD cache cores, FPS cap, Reflex, VR FPS
+cap), `Performance` (Turbo, foveated rendering, hidden area mask, OFXR Bridge, VectorXR), `In-game UI` (the game's own VR
+HUD / menus placement), then the `FPS counter` row with its `FPS counter` group, `Menu panel`, and `Compare and test` (DLAA off to
+compare, the game's TAA mix / split, the thin-wire switches, DLAA before tonemap -- nothing there is needed for normal driving).
+**Rows of the other mode are hidden:** flat shows no VR rows and VR shows no flat-only rows (`dlaa.ini menu_show_all = 1` shows
+everything, greyed). The panel's title line says which set you see (`VR settings` / `Flat settings`), so the
+row and group titles carry no "(VR)" / "(flat)" (`menu_show_all = 1` keeps the old titles with the mode words). In VR
+`In-game UI` is hidden while the game's console is off: set `g_developer "1"` and `g_console "1"` in the game's config.cfg (game
+closed) to get it. **No greyed rows:** a row that cannot do anything in your setup right now is hidden too (no X3D CPU,
+no VRS / Reflex support, Foveated off, sharpening 0, mirrors off, a Game TAA mode that does not use the row, no VR layer, the
+main scene not running DLAA, OFXR Bridge / VectorXR not present); `menu_show_all = 1` shows everything greyed, for support. There is no DLSS upscale row: the `Mode` row (DLAA / DLSS / off) does the same; its hotkey stays.
+After them: `Log detail`, `Language`,
 `Save`, `Reset` and `Close`. Select a group and press `Right` to open it, `Left` to close it. A closed group shows `►` and
 `closed (N)` (N = its rows); an open group shows `▼` and `open`, with its rows indented below it. All groups are closed again each time you open the menu.
 
-![The tuning menu, all groups open](docs/images/tuning-menu-all-open.png)
+| Flat screen, groups closed | VR, groups closed |
+|---|---|
+| ![The tuning menu on a flat screen](docs/images/tuning-menu.png) | ![The tuning menu in VR](docs/images/tuning-menu-vr.png) |
+
+This is how the menu opens: every group closed. The pictures above show every row the mod has, including rows only some PCs see (for example `AMD cache cores (X3D)`, which appears only on an AMD X3D CPU).
 
 (These pictures are rendered by the real menu code, see `tests/menu_shot.cpp`; the figures in them are examples.)
 
@@ -583,11 +639,11 @@ The three green lines under the title show the game's GPU time per frame, what t
 - **Flat:** the panel sits near the top-left corner of the screen.
 - **VR:** the panel shows in both eyes, centred in front of you, and on the desktop mirror window -- also on the
   VR main menu and the garage / truck dealer screens, before a save is loaded.
-- **You can keep driving with the menu open (v0.13.0):** only the five menu keys / buttons (by default `Delete` and the
+- **You can keep driving with the menu open:** only the five menu keys / buttons (by default `Delete` and the
   arrow keys) are kept from the game while the menu is open; every other key, wheel and gamepad button, your shifter, the
-  steering and the pedals reach the game as usual. (v0.10.2 to v0.12.0 kept every key and button from the game.) Closed,
+  steering and the pedals reach the game as usual. Closed,
   the menu keys belong to the game again.
-- **Hotkeys page (v0.13.0):** select **`Hotkeys...`** (near the bottom, above `Save`) and press `Right`: the panel shows
+- **Hotkeys page:** select **`Hotkeys...`** (near the bottom, above `Save`) and press `Right`: the panel shows
   one line per hotkey action (`Sharpen strength -` and `Sharpen strength +` are separate lines, so are the four models and
   the five menu keys) with its keyboard key and its wheel / gamepad button. `Up` / `Down` select a line, `Left` (or
   `Right` on `< Back`) goes back to the main menu.
@@ -607,39 +663,39 @@ The three green lines under the title show the game's GPU time per frame, what t
   key first. The **Menu keys** row in the `Panel
   settings` group shows them; `Right` on it opens the Hotkeys page there. See
   [`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu).
-- **Groups (v0.10.3):** the panel rows (`Panel lock (VR)`, `Panel position X` / `Y`, `Panel size`, `Panel VR depth`, `Panel faces you`,
-  `Menu keys`) sit in the **Panel settings** group and the fps box rows (`FPS counter lock`, `X`, `Y`, `turn`, `tilt`, `rotate`, `size`, `colour`,
+- **Groups:** the panel rows (`Panel lock`, `Panel position X` / `Y`, `Panel size`, `Panel depth`, `Panel faces you`,
+  `Menu keys`) sit in the **Menu panel** group and the fps box rows (`FPS counter lock`, `X`, `Y`, `turn`, `tilt`, `rotate`, `size`, `colour`,
   `brightness`, `distance`) in the
-  **FPS counter settings** group, right under the `FPS counter` row. Both groups are closed every time the menu
+  **FPS counter** group, right under the `FPS counter` row. Both groups are closed every time the menu
   opens: select the group row and press `Right` to show its rows, `Left` to hide them again.
 - Every row calls the same function as its hotkey: the hotkeys keep working while the menu is open, and every change
   beeps and logs exactly like its key. Number rows repeat while you hold `Left` / `Right`.
-- **Move the widgets:** the panel and the fps counter both move. For the panel open `Panel settings` and use the `Panel position X`, `Panel position Y` and `Panel size` rows (and `Panel VR depth` in VR,
+- **Move the widgets:** the panel and the fps counter both move. For the panel open `Menu panel` and use the `Panel position X`, `Panel position Y` and `Panel size` rows (and `Panel depth` in VR,
   which brings the panel nearer). Flat and VR keep their own position (`menu_x`, `menu_y`, `menu_scale`,
   `menu_vr_x`, `menu_vr_y`, `menu_vr_scale`, `menu_vr_dist` / `menu_vr_depth`, `menu_vr_face` in `dlaa.ini`).
 - **VR: the panel faces you.** Move it to the side or up / down and it turns towards your eye like a real screen,
-  keeping its size from every angle (`Panel faces you (VR)` row, `menu_vr_face`, on by default; off = a flat picture).
+  keeping its size from every angle (`Panel faces you` row, `menu_vr_face`, on by default; off = a flat picture).
   On the garage / truck dealer screens the panel and the fps box are drawn on top of the game's own menu, not under it
   (the mod finds where the game hands each eye picture to the headset in the first frames after the menu opens).
-- **VR: rock-steady panel (v0.10.3).** By default (`menu_vr_layer = 1`) the panel and the fps box are separate OpenXR
+- **VR: rock-steady panel.** By default (`menu_vr_layer = 1`) the panel and the fps box are separate OpenXR
   layers: the headset's compositor shows them itself, on top of the game picture, so they do not swim or jitter with
   the reprojection, sit at a real distance (the panel 1 m away by default, the fps box 0.8 m) and are never covered by
-  the game's menus. `Panel VR depth` then sets the panel's distance in metres (`menu_vr_dist`, 0.30 - 3.00 m, 5 cm
+  the game's menus. `Panel depth` then sets the panel's distance in metres (`menu_vr_dist`, 0.30 - 3.00 m, 5 cm
   steps; it keeps its size, only the depth changes) and `Panel faces you` turns the panel -- and the fps box when it
   follows your head -- towards you as a true 3-D layer. With `menu_vr_layer = 0` (the panel drawn into the picture, as
-  before; also the automatic fallback when the layers are not possible) `Panel VR depth` is the inward shift in px
+  before; also the automatic fallback when the layers are not possible) `Panel depth` is the inward shift in px
   (`menu_vr_depth`).
-- **VR: panel fixed in the cab (new in v0.14.0).** The `Panel lock (VR)` row: `Follow head` (default) = the panel moves
+- **VR: panel fixed in the cab.** The `Panel lock` row: `Follow head` (default) = the panel moves
   with the headset; `Fixed in cab` = it stays at one spot in front of your seat and keeps still while you look around.
   While it is fixed, `Panel position X` / `Y` set the spot in degrees around your seat (Y: plus = down) and
-  `Panel VR depth` its distance from the seat (`menu_vr_lock`, `menu_vr_lock_x`, `menu_vr_lock_y`, `menu_vr_lock_dist`;
+  `Panel depth` its distance from the seat (`menu_vr_lock`, `menu_vr_lock_x`, `menu_vr_lock_y`, `menu_vr_lock_dist`;
   0.80 m by default). The head-locked position is kept for when you switch back. Needs the VR layer
   (`menu_vr_layer = 1`, the default); with `menu_vr_layer = 0` the panel always follows your head.
-  Also new in v0.14.0: the VR panel text is drawn with twice the pixels, so small panel sizes stay sharp.
+  The VR panel text is drawn with twice the pixels, so small panel sizes stay sharp.
 - **Live fps counter:** ![fps counter](docs/images/fps-counter.png) the `FPS counter` row (Right / Left step `Off`, `72 fps + 13.9 ms`, `72 fps`, `13.9 ms`, and the same as plain numbers: `72 + 13.9`, `72`, `13.9`) switches on a small fps box: the fps and the frame time as text with a dark outline, no background (`60 fps` /
   `16.7 ms`, updated twice a second) that stays on screen also when the menu is closed (flat, and in VR in both eyes).
   Its own GPU cost is measured and shown in the row's cost column, per frame (all the pictures it is drawn into together).
-  `FPS counter X`, `FPS counter Y` and `FPS counter size` (in the `FPS counter settings` group) move it; flat and VR keep their own position (`fps_show`,
+  `FPS counter X`, `FPS counter Y` and `FPS counter size` (in the `FPS counter` group) move it; flat and VR keep their own position (`fps_show`,
   `fps_x`, `fps_y`, `fps_scale`, `fps_vr_x`, `fps_vr_y`, `fps_vr_scale` in `dlaa.ini`). Off, it costs nothing.
   The size goes from `0.2` to `3.0`; in VR it starts at `0.3` (small but readable in the headset).
   - **FPS colour:** 20 colours (white, yellow, amber, orange, red, pink, magenta, purple, violet, blue, sky blue, cyan,
@@ -663,7 +719,7 @@ The three green lines under the title show the game's GPU time per frame, what t
       placed where it was when you picked this choice (`X` / `Y` / distance / turn still move it, inside the cab).
       With all turns at 0 it is square to the cab (upright with the cab, facing your seat along the cab's own axes),
       wherever you recentred the headset, so the same `X` / `Y` mean the same spot in every truck.
-      It needs DLAA on with `Per-part motion vectors` on (the defaults). Without them, in the outside camera, in menus
+      It needs DLAA on with `Track moving parts` on (the defaults). Without them, in the outside camera, in menus
       and while loading it is exactly the `Fixed in play space` box (also as a quad layer) until you are steadily back
       in the cab. It only takes its spot when both eyes see the cab and the headset position is known. After a truck
       change it finds the new cab by itself after about a second.
@@ -681,54 +737,54 @@ The three green lines under the title show the game's GPU time per frame, what t
 
     Which to pick: `Attached to vehicle` if you want it to look like part of the dashboard; `Fixed in play space` if
     you want it calm while the cab shakes; `Follow head` if you always want to see it.
-- **Mirror DLAA** picks how many mirrors get DLAA and how they move: `off`, `1 mirror (largest)` (only the main mirror
+- **Smooth mirrors** picks how many mirrors get DLAA and how they move: `off`, `1 mirror (largest)` (only the main mirror
   next to you), `1 mirror, camera`, `2 mirrors (largest)`, `2 mirrors, camera`, `all mirrors`, `all, camera motion`.
   Without `camera` each moving part moves exactly in the glass (about 0.4 ms per mirror in VR); with `camera` the mirror
   uses the camera motion only: the cheapest per mirror (about 0.15 ms), but moving traffic can ghost in the glass
   (`mirror_mv` in `dlaa.ini`). `Alt+F6` still switches it on / off.
-- **Mirrors in turns** (`mirror_turns`, off by default): each mirror gets its DLAA only every 2nd frame and shows its
+- **Mirrors take turns (faster)** (`mirror_turns`, off by default): each mirror gets its DLAA only every 2nd frame and shows its
   last clean picture in between. That is about half the mirror cost. Edges in the glass stay clean; moving things in the
   glass update at half the frame rate (a slight judder on passing traffic). A reset or a big camera jump updates every
   mirror at once.
-- **Thin wires** (3 rows in the same group, also on the Hotkeys page): **Thin-wire motion** (`dlaa_mv_dilate`, on,
-  `Alt+F10`) and **Thin-wire depth** (`mv_fwd_conservative`, on, `Alt+F11`) keep near telephone and power wires steady
-  while you drive. Switch them off only to compare. **Thin-wire widening** (`wire_widen`, off, `Alt+F12`) is experimental:
+- **Thin wires** (3 rows in the same group, also on the Hotkeys page): **Wire fix: motion** (`dlaa_mv_dilate`, on,
+  `Alt+F10`) and **Wire fix: depth** (`mv_fwd_conservative`, on, `Alt+F11`) keep near telephone and power wires steady
+  while you drive. Switch them off only to compare. **Thicker wires (test)** (`wire_widen`, off, `Alt+F12`) is experimental:
   it draws far wires thinner than 1 pixel as a 1-pixel line. Far wires may look darker or flicker more with it.
-- **Turbo mode (VR)** (`xr_turbo`, off by default; from OpenXR Toolkit): the game stops waiting for the headset each
+- **Turbo mode** (`xr_turbo`, off by default; from OpenXR Toolkit): the game stops waiting for the headset each
   frame. More fps only when the CPU is the limit. Warning: frame smoothing (ASW, Motion Smoothing, Motion Reprojection,
   SSW) does not work while it is on. Switch it off again if the picture judders.
-- **Foveated (VRS)** (`vrs`, off by default; VR only, NVIDIA RTX only; from OpenXR Toolkit): sharp centre, lower detail
+- **Foveated rendering** (`vrs`, off by default; VR only, NVIDIA RTX only; from OpenXR Toolkit): sharp centre, lower detail
   at the edge. The outer ring of each eye picture is shaded once per 2 x 2 pixels, which saves GPU time at a high in-game
   Scaling. Fences, grass and leaves keep full detail, and so does everything the mod draws itself. **Foveated size** sets
   how big the sharp centre is, from 100 % down to 10 % in 5 % steps (`Right` = bigger). 80 % is the default (`balanced`);
   90 % = `wide`, 65 % = `narrow` (`vrs_outer` = the size, `vrs_inner` = 25 less, at least 10). On another GPU the
   row says `not supported`. Look for blocky edges at the side of your view; switch it off if they bother you.
-  **Foveated passes** (`vrs_passes`) picks what it acts on: `scene` (default) = the 3D world only; `scene + lighting`
+  **Foveated: lighting too** (`vrs_passes`) picks what it acts on: `scene` (default) = the 3D world only; `scene + lighting`
   = also the game's lighting pass, at the very edge only, for more saving. Test it before you keep it: look for blocky
   light or shadow edges at the side of your view.
   **Foveated strength** (`vrs_strength`) sets how coarse the outer ring is: `Normal` (default, 1 colour per 2 x 2
-  pixels), `Strong` (4 x 2) or `Max` (4 x 4), also for the lighting pass when Foveated passes is `scene + lighting`.
+  pixels), `Strong` (4 x 2) or `Max` (4 x 4), also for the lighting pass when Foveated: lighting too is `scene + lighting`.
   More saving, blockier edges; best with eye tracking.
-  **Foveated eye tracking** (`vrs_eye`, off by default; **experimental**, new in v0.14.0): on a headset with eye tracking
+  **Foveated eye tracking** (`vrs_eye`, off by default; **experimental**): on a headset with eye tracking
   that the VR runtime reports through OpenXR (`XR_EXT_eye_gaze_interaction`, for example Varjo; other
   eye-tracked headsets may work too), the sharp centre follows where you look instead of staying at the lens centre. Without an eye tracker the row
   says `no eye tracker` and nothing changes. The mod asks the runtime for eye gaze when the game starts, so the first
   switch-on needs a save (`Shift+F12`) and a game restart. To SEE it work, set `log_level = 4` and `vrs_debug = 1`: the
   blocky outer ring in the desktop mirror then moves with your eyes. The log's `Eye tracking` lines say whether the
   headset sent a gaze (send that log when you test it).
-- **Hidden area mask (VR)** (`xr_hidden_mask`, off by default; VR only): the game stops drawing the corners of each eye
+- **Skip hidden edges** (`xr_hidden_mask`, off by default; VR only): the game stops drawing the corners of each eye
   picture that the headset lenses never show (the VR runtime reports them). Fewer pixels drawn = more GPU headroom; what
   you see stays the same. The first time you switch it on, save (`Shift+F12`) and restart the game; after that the row
   switches it live. If your VR runtime has no such mask the row says `not supported`.
-- **Frame rate and CPU** group (all off by default, all live):
-  - **Reflex (flat)** (`reflex`): `off`, `on`, `on + boost`. NVIDIA only. The game's frames wait less in the GPU queue,
+- **Frame rate** group (all off by default, all live):
+  - **Low delay (Reflex)** (`reflex`): `off`, `on`, `on + boost`. NVIDIA only. The game's frames wait less in the GPU queue,
     so the input lag drops when the GPU is the limit. `on + boost` also keeps the GPU clocks up. On another GPU, or a
     driver that refuses it, the row says `not supported`. Not used in VR.
-  - **FPS cap (flat)** (`fps_cap`): `off` or 30 - 360 fps (`dlaa.ini` takes any value from 20 to 1000). The game never
+  - **FPS cap** (`fps_cap`): `off` or 30 - 360 fps (`dlaa.ini` takes any value from 20 to 1000). The game never
     runs faster than this. A cap a bit below what your PC holds in a busy city gives a steady frame time, less heat and
     less power. With Reflex on, the NVIDIA driver does the limiting; otherwise the mod waits after each frame (a precise
     timer, no drift).
-  - **VR FPS cap** (`vr_fps_cap`): `off`, `half` or `third` of the headset rate (72 Hz: 36 or 24 fps; 90 Hz: 45 or 30).
+  - **FPS cap** (`vr_fps_cap`): `off`, `half` or `third` of the headset rate (72 Hz: 36 or 24 fps; 90 Hz: 45 or 30).
     The game draws every 2nd (or 3rd) headset frame and the headset's reprojection (ASW, Motion Smoothing, Motion
     Reprojection, SSW) fills the frames in between at a steady rhythm. Use it when your fps swings around the headset
     rate: a steady half rate judders less than a rate that jumps. Make sure the headset's reprojection is on. Turbo mode
@@ -736,7 +792,7 @@ The three green lines under the title show the game's GPU time per frame, what t
   - **CPU tuning** (`cpu_pcore`, `cpu_priority`, `cpu_no_throttle`): `off` or `on` (all three together); `mixed (dlaa.ini)`
     when they differ in `dlaa.ini`. Flat and VR. The game runs at Above normal priority, Windows may not slow it down to
     save power, and on Intel CPUs with P-cores and E-cores the game's main and render thread prefer the P-cores.
-- **Logging** (`log_level`, `errors` by default): how much goes into `dlaa_inject.log` -- `off`, `errors`, `warnings`,
+- **Log detail** (`log_level`, `errors` by default): how much goes into `dlaa_inject.log` -- `off`, `errors`, `warnings`,
   `info` or `debug`, live. Its cost column shows what the logging costs on the CPU per frame (the description adds the
   lines per second; at `debug` also what the CPU profiler costs). `debug` also runs the mod's GPU timers and CPU
   profiler all the time; use it for bug reports, `errors` for play.
@@ -746,7 +802,7 @@ The three green lines under the title show the game's GPU time per frame, what t
   ([Translations](#translations)). A file `bin\win_x64\lang\<code>.po` next to `dinput8.dll` wins over the built-in
   text, so you can test your own fixes. Linux / Proton: Chinese, Japanese and Korean need fonts
   ([Linux / Proton](#languages-and-fonts)); without them the row says `font missing` and the menu is English.
-- **Hotkeys...** (v0.13.0) opens the Hotkeys page: every hotkey of the menu with its key and wheel button; bind one by
+- **Hotkeys...** opens the Hotkeys page: every hotkey of the menu with its key and wheel button; bind one by
   pressing `Right` on its line and then the new key or button (see above).
 - **Save to dlaa.ini** (the same as `Shift+F12`) writes the live values, and the panel position / fps box once you
   changed them.
@@ -766,7 +822,7 @@ The three green lines under the title show the game's GPU time per frame, what t
     measuring itself costs (already taken out of every figure).
 
   The cost column shows each row's share: `Mode` and `DLAA on / off` show the whole mod, `DLSS upscale` `no extra`, the
-  texture sharpness rows CPU only (no GPU pass of their own), the Foveated and Hidden area mask rows CPU only (what they
+  texture sharpness rows CPU only (no GPU pass of their own), the Foveated and Skip hidden edges rows CPU only (what they
   save shows up in the game's own GPU time, not in the mod's). All figures are milliseconds **per frame** (VR: the GPU
   figure covers both eyes), measured live and refreshed once a second; right after you open the menu they read `...` for
   about a second. **Measuring costs nothing while the menu is closed:** the mod's CPU profiler and GPU timers run only
@@ -824,64 +880,81 @@ The table below lists the commonly used keys:
 | `sharpness` | `0.4` | sharpening after DLAA, `0`..`1` (`0` = off) |
 | `sharp_radius` | `1.5` | sharpening width in texels, `1`..`4` |
 | `dlaa_area` | `100` | run DLAA on the centre `N` % of each eye image (VR performance), `10`..`100`. VR only: in flat mode the whole picture is always used. Also used for the truck on the VR main menu / garage screens |
+| `outside_aa` | `2` | calm the picture outside the `dlaa_area` square (so thin dark edges against the sky do not shake): `2` = steady the pixels and smooth them with FXAA (default, on), `1` = steady only, `0` = off. Works with DLAA and DLSS |
 | `mv_objects` | `2` | motion vectors for moving traffic: `2` = every moving part gets its own exact motion (default), `0` = camera motion only (`1` = the older method, for comparison) |
-| `mirror_dlaa` | `1` | DLAA on the truck / car mirrors: `1` = each mirror gets its own DLAA (default), `0` = mirrors are left as the game draws them. `Alt+F6` switches it live, `Shift+F12` saves. With OptiScaler next to the game exe (v0.11.0) it starts off by itself unless this key is set: its DLSS 5 bridge crashes on the mirror frames (issue #8). |
-| `mirror_mv` | `parts` | motion in the mirrors (v0.10.2, VR and flat): `parts` = each moving part gets its own exact motion in the glass (default, about 0.4 ms per mirror in VR), `camera` = camera motion only (about 0.15 ms per mirror, moving traffic can ghost in the glass). Used with `mirror_vr_mode` / `mirror_flat_mode` 1, 2 and 3; mode 4 is always camera motion. The menu's Mirror DLAA row sets it live, `Shift+F12` saves |
-| `mirror_turns` | `0` | mirrors in turns (VR and flat): `1` = each mirror gets its DLAA every 2nd frame and shows its last clean picture in between (about half the mirror cost; moving things in the glass update at half rate), `0` = every mirror every frame (default). The menu's `Mirrors in turns` row switches it live, `Shift+F12` saves |
-| `dlaa_mv_dilate` | `1` | thin wires: `1` = DLSS spreads the motion data over thin lines in DLAA mode, so near wires keep their motion while driving; `0` = off (compare only). Menu row `Thin-wire motion`, `Alt+F10` |
-| `mv_fwd_conservative` | `1` | thin wires: `1` = a wire gets depth on every pixel it touches; `2` = the same without alpha-to-coverage; `0` = off (compare only). Menu row `Thin-wire depth`, `Alt+F11` |
-| `wire_widen` | `0` | thin wires, experimental: `1` = far wires thinner than 1 pixel are drawn 1 pixel wide (`wire_min_px`). Menu row `Thin-wire widening`, `Alt+F12` |
+| `mirror_dlaa` | `1` | DLAA on the truck / car mirrors: `1` = each mirror gets its own DLAA (default), `0` = mirrors are left as the game draws them. `Alt+F6` switches it live, `Shift+F12` saves. With OptiScaler next to the game exe  it starts off by itself unless this key is set: its DLSS 5 bridge crashes on the mirror frames (issue #8). |
+| `mirror_mv` | `parts` | motion in the mirrors (VR and flat): `parts` = each moving part gets its own exact motion in the glass (default, about 0.4 ms per mirror in VR), `camera` = camera motion only (about 0.15 ms per mirror, moving traffic can ghost in the glass). Used with `mirror_vr_mode` / `mirror_flat_mode` 1, 2 and 3; mode 4 is always camera motion. The menu's Smooth mirrors row sets it live, `Shift+F12` saves |
+| `mirror_turns` | `0` | mirrors in turns (VR and flat): `1` = each mirror gets its DLAA every 2nd frame and shows its last clean picture in between (about half the mirror cost; moving things in the glass update at half rate), `0` = every mirror every frame (default). The menu's `Mirrors take turns (faster)` row switches it live, `Shift+F12` saves |
+| `dlaa_mv_dilate` | `1` | thin wires: `1` = DLSS spreads the motion data over thin lines in DLAA mode, so near wires keep their motion while driving; `0` = off (compare only). Menu row `Wire fix: motion`, `Alt+F10` |
+| `mv_fwd_conservative` | `1` | thin wires: `1` = a wire gets depth on every pixel it touches; `2` = the same without alpha-to-coverage; `0` = off (compare only). Menu row `Wire fix: depth`, `Alt+F11` |
+| `wire_widen` | `0` | thin wires, experimental: `1` = far wires thinner than 1 pixel are drawn 1 pixel wide (`wire_min_px`). Menu row `Thicker wires (test)`, `Alt+F12` |
 | `dlaa_pre_tonemap` | `1` | DLAA before the game's tonemap (flat DLAA mode): `1` = on the game's HDR colours (default), `0` = on the finished picture at the end of the frame. `Alt+F7` switches it live, `Shift+F12` saves |
 | `tex_lod_bias` | `0` | sharper texture text: texture mip LOD bias for the 3-D world while DLAA / DLSS runs, `-3`..`1`, `0` = off. Try `-0.5` to `-1`; more negative = sharper but more shimmer on fine patterns. `Ctrl+F1` / `F2` change it live, `Shift+F12` saves |
 | `tex_lod_bias_auto` | `0` | `1` = while DLSS upscales, add log2(render width / output width) on top of `tex_lod_bias` (e.g. 75 % render width → −0.42) |
 | `tex_aniso` | `0` | anisotropic filtering for the world textures: `0` = the game's own setting; `2`..`16` = at least this level (trilinear textures become anisotropic) |
+| `cutout_mips` | `0` | sharper far fences: `1` = rebuild the small texture versions of alpha-tested cut-outs (chain-link fences, wire mesh) so distant wires keep their detail instead of fading away; `0` = off (default). `cutout_max_dim` (default 4096) caps the texture size it rebuilds |
 | `preview_dlaa` | `1` | `1` = also anti-alias the profile / truck-preview screen (flat and VR); `0` = leave that screen untouched. VR at eye resolution needs a lot of GPU memory and time there, turn it off if that screen stutters. That screen always uses model 2 (preset E); the model keys change the drive only |
 | `jitter_sign_x` / `jitter_sign_y` | `1` | flip if the image shimmers or looks doubled (try the 4 combinations) |
-| `dlss_bias_mask` | `100` | light glow ghosting fix (phase 49): strength in % `0`..`100`, `0` = off. Street lamp and car light glows are told to DLSS as a mask so they leave no trail at night. Lower it (25 % steps) if glows flicker. The menu's `Light glow ghosting fix` row |
-| `light_redraw_jitter` | `1` | phase 55: `1` = the lighting pass's mesh redraws (sunlight through canopies, emissive surfaces) use the same jittered viewport as the G-buffer; `0` = the game's viewport for the whole lighting pass (lit areas can flicker). Startup only |
+| `dlss_bias_mask` | `100` | light glow ghosting fix: strength in % `0`..`100`, `0` = off. Street lamp and car light glows are told to DLSS as a mask so they leave no trail at night. Lower it (25 % steps) if glows flicker. The menu's `Light trail fix` row |
+| `game_taa` | `0` | only with the game's Anti-aliasing = TAA: `0` = off (the mod alone; set the game's AA to Disabled), `1` = mix (the game's TAA and DLAA / DLSS on the same raw frame, blended), `2` = split (the mod left of `game_taa_split`, TAA right of it, a thin line and labels). Without the game's TAA running, `1`..`2` act as `0`; DLAA off = the game's TAA alone. Phase 90: Mix is on the menu's `Mode` row (`Mix (TAA + DLAA)` / `Mix (TAA + DLSS)`, with `Mix amount` right under it); the split is the `Split with game TAA` row in Compare and test. Both rows (with the game's console on -- `g_developer "1"` and `g_console "1"` in config.cfg -- changing the row also switches the game's Anti-aliasing: `off` types `uset r_aa "0"`, `mix` / `split` type `uset r_aa "5"` (TAA), only when the game's value differs, flat and VR, never at startup; Reset to defaults puts `r_aa "0"` back only if the mod switched it. The game window must have the focus. The row's line shows `Game AA: TAA` / `off` and whether the switch was confirmed in game.log.txt. `r_aa` is the game's setting, never saved in dlaa.ini; the game's TAA tuning / sharpening are not touched) |
+| `game_taa_mix` | `50` | the game's TAA share of `game_taa = 1` (mix) in % `0`..`100`: more = calmer and softer, less = sharper. The menu's `Mix amount` row under Mode (10 % steps) |
+| `game_taa_split` | `50` | where the line of `game_taa = 2` (split) is, in % of the width `0`..`100` (VR: of each eye). The menu's `Split line position` row (5 % steps) |
+| `game_taa_pair` | `0` | what split compares: `0` = DLAA \| TAA (DLSS when upscaling), `1` = Mix \| TAA, `2` = DLAA \| Mix (Mix = blended at `game_taa_mix`). The menu's `Split: left | right` row |
+| `vr_ui_keys` | `0` | startup only: how the menu's `In-game UI` rows (VR) type into the game's console. `0` = real keyboard input (SendInput: the console key and Enter by scan code, the text as characters), `1` = the same with the text as scan codes on your keyboard layout, `2` = console key + Enter as DirectInput keys and the text as window characters, `3` = window messages only, `4` = DirectInput only. With `0` / `1` **the game window must have the focus on the desktop** (click it once; the row says so while it waits). Each change is confirmed by its echo in the game's `game.log.txt` (the mod's log says `CONFIRMED` / `NOT confirmed`). Needs `g_developer "1"` and `g_console "1"` in the game's config.cfg |
+| `game_taa_mvjit` | `-1` | startup only: tell DLSS the motion vectors carry the game's jitter: `-1` auto, `0` off, `1` on. Try the other value if mix / split wobbles |
+| `light_redraw_jitter` | `1` | `1` = the lighting pass's mesh redraws (sunlight through canopies, emissive surfaces) use the same jittered viewport as the G-buffer; `0` = the game's viewport for the whole lighting pass (lit areas can flicker). Startup only |
+| `light_fs_jitter` | `1` | `1` = the lighting pass's full-screen sunlight draw uses the same jitter shift as the G-buffer, so shadow edges on sunlit surfaces seen at a grazing angle (roofs) no longer flicker darker / lighter with the jitter; `0` = the game's viewport for it. Startup only |
+| `water_overscan_fix` | `1` | `1` = the new SCS water (Iceland and later) is drawn with the jitter shift at the game's size, so it no longer vanishes in big moving blocks; `0` = the 1 px larger jitter viewport for it too. Startup only |
 | `dlss_hdr` | `1` | HDR only: `1` = tell DLSS the picture is HDR (normal); `0` = try this if HDR brightness or colours look wrong with DLAA on |
 | `beeps` | `1` | `0` = silence the hotkey beeps |
 | `menu_x` / `menu_y` / `menu_scale` | `2` / `8` / `1.0` | tuning menu panel, flat: left / top edge in % of the picture, size `0.3`..`2.0`. The menu's Panel rows change them live |
 | `menu_vr_x` / `menu_vr_y` / `menu_vr_scale` / `menu_vr_depth` | `0` / `-5` / `1.0` / `12` | tuning menu panel, VR: centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size (1 = 54 % of the eye width), inward shift per eye in px |
-| `menu_vr_dist` | `100` | tuning menu panel, VR layer (v0.10.3, `menu_vr_layer = 1`): the panel's distance in cm (`30`..`300`); it keeps the same size at every distance, only the stereo depth changes. The menu's `Panel VR depth` row sets it in 5 cm steps on the layer path (`menu_vr_depth` is the in-picture shift) |
-| `menu_vr_face` | `1` | tuning menu panel, VR: `1` = the panel turns to face your eye when moved off the centre (a tilted 3-D panel, same size from every angle), `0` = a flat picture. On the VR layer path (default) also the fps box when it follows your head, turned by the compositor. The menu's `Panel faces you (VR)` row switches it live |
-| `menu_vr_lock` | `0` | tuning menu panel, VR layer (new in v0.14.0): `0` = follows the headset, `1` = fixed in the cab at one spot in front of your seat (steady while you look around). The menu's `Panel lock (VR)` row |
-| `menu_vr_lock_x` / `menu_vr_lock_y` / `menu_vr_lock_dist` | `0` / `10` / `80` | the fixed panel's spot (v0.14.0, `menu_vr_lock = 1`): degrees around your seat (x `-90`..`90`, + = right; y `-60`..`60`, + = down) and its distance from the seat in cm (`30`..`300`). The `Panel position X` / `Y` and `Panel VR depth` rows set them while the panel is fixed |
-| `menu_vr_layer` | `1` | VR (v0.10.3): `1` = the panel and the fps box are separate OpenXR quad layers the headset's compositor places itself: rock-steady (no swimming with the reprojection), at a real distance (panel `menu_vr_dist`, default 1 m; fps box 0.8 m), facing you with `menu_vr_face = 1`, never covered by the game's menus; `menu_vr_depth` is then unused. `0` = drawn into the eye picture as before (also the automatic fallback; `menu_vr_dist` unused) |
+| `menu_vr_dist` | `100` | tuning menu panel, VR layer (`menu_vr_layer = 1`): the panel's distance in cm (`30`..`300`); it keeps the same size at every distance, only the stereo depth changes. The menu's `Panel depth` row sets it in 5 cm steps on the layer path (`menu_vr_depth` is the in-picture shift) |
+| `menu_vr_face` | `1` | tuning menu panel, VR: `1` = the panel turns to face your eye when moved off the centre (a tilted 3-D panel, same size from every angle), `0` = a flat picture. On the VR layer path (default) also the fps box when it follows your head, turned by the compositor. The menu's `Panel faces you` row switches it live |
+| `menu_vr_lock` | `0` | tuning menu panel, VR layer: `0` = follows the headset, `1` = fixed in the cab at one spot in front of your seat (steady while you look around). The menu's `Panel lock` row |
+| `menu_vr_lock_x` / `menu_vr_lock_y` / `menu_vr_lock_dist` | `0` / `10` / `80` | the fixed panel's spot (`menu_vr_lock = 1`): degrees around your seat (x `-90`..`90`, + = right; y `-60`..`60`, + = down) and its distance from the seat in cm (`30`..`300`). The `Panel position X` / `Y` and `Panel depth` rows set them while the panel is fixed |
+| `menu_vr_layer` | `1` | VR : `1` = the panel and the fps box are separate OpenXR quad layers the headset's compositor places itself: rock-steady (no swimming with the reprojection), at a real distance (panel `menu_vr_dist`, default 1 m; fps box 0.8 m), facing you with `menu_vr_face = 1`, never covered by the game's menus; `menu_vr_depth` is then unused. `0` = drawn into the eye picture as before (also the automatic fallback; `menu_vr_dist` unused) |
 | `fps_show` | `0` | live fps box: `1` = a small fps / frame-time box stays on screen, also while the menu is closed. The menu's `FPS counter` row switches it live |
 | `fps_text` | `0` | what the fps box shows: `0` = fps and frame time (two lines), `1` = fps only, `2` = frame time (ms) only, and the same as plain numbers without `fps` / `ms`: `3` = both, `4` = the fps number, `5` = the ms number. The menu's `FPS counter` row steps `Off` / `72 fps + 13.9 ms` / `72 fps` / `13.9 ms` / `72 + 13.9` / `72` / `13.9` |
 | `fps_x` / `fps_y` / `fps_scale` | `1` / `1` / `1.0` | fps box, flat: left / top edge in % of the picture (`0`..`95`), size `0.2`..`3.0` (1 = 92 x 44 px at 1080 p) |
 | `fps_vr_x` / `fps_vr_y` / `fps_vr_scale` | `0` / `-25` / `0.3` | fps box, VR: centre offset from the eye's centre in % (`-50`..`50`, negative y = up), size `0.2`..`3.0` (1 = 8 % of the eye width) |
-| `fps_vr_lock` | `0` | fps box, VR (v0.10.3): `0` = follows the headset, `1` = fixed in the play space, `fps_vr_dist` from your seat; `fps_vr_x` / `fps_vr_y` are then degrees around you (+ = right / down). It does not follow the cab's sway. `2` = attached to the vehicle (phase 47): placed like `1` when picked, then it moves with the cab (needs DLAA + per-part motion vectors; otherwise it acts like `1`). The menu's `FPS counter lock` row switches it |
-| `fps_color` | `0` | fps box colour (phase 44): `0`..`19` = white, yellow, amber, orange, red, pink, magenta, purple, violet, blue, sky blue, cyan, teal, mint, green, lime, olive, gold, silver, black on white. The menu's `FPS colour` row |
-| `fps_brightness` | `100` | fps box brightness in % (phase 48): `10`..`100`, 100 = the colour as it is, lower dims it toward black. The menu's `FPS brightness` row |
-| `fps_opacity` | `100` | fps box opacity in % (phase 51f): `10`..`100`, 100 = solid, lower fades the text AND its outline together (stored per vehicle in the `fps_profile` lines). The menu's `FPS opacity` row |
-| `fps_vr_dist` | `80` | fps box, VR (phase 44): distance in cm (`30`..`300`), same angular size at every distance. The menu's `FPS distance (VR)` row |
-| `fps_vr_yaw` / `fps_vr_pitch` / `fps_vr_roll` | `0` / `0` / `0` | fps box, VR (phase 44): the box's own turn in degrees: yaw `-90`..`90` (+ = its face turns right), pitch `-90`..`90` (+ = its top leans away), roll `-180`..`180` (+ = clockwise). The menu's `FPS turn` / `FPS tilt` / `FPS rotate` rows (1 degree steps) |
-| `xr_turbo` | `0` | VR: `1` = **Turbo mode** (from OpenXR Toolkit): the game no longer waits for the headset each frame, so it can start the next frame sooner. **It turns off the headset's frame smoothing**: ASW (Meta / Oculus), Motion Smoothing, Motion Reprojection (Windows Mixed Reality) and SSW (Virtual Desktop) cannot work with it. It helps only when the CPU is the limit (busy cities, heavy traffic); when the GPU is the limit it gains nothing. The menu's `Turbo mode (VR)` row switches it live, `Shift+F12` saves |
-| `vrs` | `0` | VR, NVIDIA RTX only: `1` = **foveated rendering** (from OpenXR Toolkit): the outer ring of each eye picture is shaded once per 2 x 2 pixels, the centre stays sharp; saves GPU time at a high in-game Scaling. Fences, grass, leaves and the mod's own passes keep full detail. The menu's `Foveated (VRS)` row switches it live, `Shift+F12` saves |
+| `fps_vr_lock` | `0` | fps box, VR : `0` = follows the headset, `1` = fixed in the play space, `fps_vr_dist` from your seat; `fps_vr_x` / `fps_vr_y` are then degrees around you (+ = right / down). It does not follow the cab's sway. `2` = attached to the vehicle: placed like `1` when picked, then it moves with the cab (needs DLAA + per-part motion vectors; otherwise it acts like `1`). The menu's `FPS counter lock` row switches it |
+| `fps_color` | `0` | fps box colour: `0`..`19` = white, yellow, amber, orange, red, pink, magenta, purple, violet, blue, sky blue, cyan, teal, mint, green, lime, olive, gold, silver, black on white. The menu's `FPS colour` row |
+| `fps_brightness` | `100` | fps box brightness in %: `10`..`100`, 100 = the colour as it is, lower dims it toward black. The menu's `FPS brightness` row |
+| `fps_opacity` | `100` | fps box opacity in %: `10`..`100`, 100 = solid, lower fades the text AND its outline together (stored per vehicle in the `fps_profile` lines). The menu's `FPS opacity` row |
+| `fps_vr_dist` | `80` | fps box, VR: distance in cm (`30`..`300`), same angular size at every distance. The menu's `FPS distance` row |
+| `fps_vr_yaw` / `fps_vr_pitch` / `fps_vr_roll` | `0` / `0` / `0` | fps box, VR: the box's own turn in degrees: yaw `-90`..`90` (+ = its face turns right), pitch `-90`..`90` (+ = its top leans away), roll `-180`..`180` (+ = clockwise). The menu's `FPS turn` / `FPS tilt` / `FPS rotate` rows (1 degree steps) |
+| `xr_turbo` | `0` | VR: `1` = **Turbo mode** (from OpenXR Toolkit): the game no longer waits for the headset each frame, so it can start the next frame sooner. **It turns off the headset's frame smoothing**: ASW (Meta / Oculus), Motion Smoothing, Motion Reprojection (Windows Mixed Reality) and SSW (Virtual Desktop) cannot work with it. It helps only when the CPU is the limit (busy cities, heavy traffic); when the GPU is the limit it gains nothing. The menu's `Turbo mode` row switches it live, `Shift+F12` saves |
+| `vrs` | `0` | VR, NVIDIA RTX only: `1` = **foveated rendering** (from OpenXR Toolkit): the outer ring of each eye picture is shaded once per 2 x 2 pixels, the centre stays sharp; saves GPU time at a high in-game Scaling. Fences, grass, leaves and the mod's own passes keep full detail. The menu's `Foveated rendering` row switches it live, `Shift+F12` saves |
 | `vrs_inner` / `vrs_outer` | `55` / `80` | foveated rendering: ring sizes in % of the half picture around each eye's centre (`10`..`150`); full detail inside `vrs_outer` (with `vrs_quality = 1`), 2 x 2 outside. The menu's `Foveated size` row sets `vrs_outer` 10..100 in 5 % steps and `vrs_inner` = max(10, `vrs_outer` - 25): `wide` = 65 / 90, `balanced` = 55 / 80, `narrow` = 40 / 65; other values from `dlaa.ini` keep working (shown as inner / outer) |
 | `vrs_quality` | `1` | foveated rendering: `1` = full detail inside `vrs_outer`; `0` = the ring between `vrs_inner` and `vrs_outer` is shaded per 2 x 1 pixels too (more saving) |
-| `vrs_passes` | `0` | foveated rendering: what it acts on. `0` = the 3D world only; `1` = also the game's lighting pass, outer ring only (the middle ring stays sharp even with `vrs_quality = 0`). More saving; test it first. The menu's `Foveated passes` row switches it live, `Shift+F12` saves |
+| `vrs_passes` | `0` | foveated rendering: what it acts on. `0` = the 3D world only; `1` = also the game's lighting pass, outer ring only (the middle ring stays sharp even with `vrs_quality = 0`). More saving; test it first. The menu's `Foveated: lighting too` row switches it live, `Shift+F12` saves |
 | `vrs_strength` | `0` | foveated rendering: how coarse the outer ring is. `0` = Normal (2 x 2), `1` = Strong (4 x 2), `2` = Max (4 x 4). More saving, blockier edges; best with `vrs_eye = 1`. The menu's `Foveated strength` row changes it live, `Shift+F12` saves |
-| `vrs_eye` | `0` | foveated rendering, **experimental** (phase 59, new in v0.14.0): `1` = the sharp centre follows your gaze on a headset with eye tracking (OpenXR `XR_EXT_eye_gaze_interaction`, for example Varjo); without one it stays at the lens centre. The mod asks the runtime for eye gaze at the game's start when this or `vrs` is on, so with `vrs = 1` the menu's `Foveated eye tracking` row switches it live with no restart (with `vrs = 0` at the start: restart once), `Shift+F12` saves. The log's `Eye tracking` lines show what the headset sent |
+| `vrs_eye` | `0` | foveated rendering, **experimental**: `1` = the sharp centre follows your gaze on a headset with eye tracking (OpenXR `XR_EXT_eye_gaze_interaction`, for example Varjo); without one it stays at the lens centre. The mod asks the runtime for eye gaze at the game's start when this or `vrs` is on, so with `vrs = 1` the menu's `Foveated eye tracking` row switches it live with no restart (with `vrs = 0` at the start: restart once), `Shift+F12` saves. The log's `Eye tracking` lines show what the headset sent |
 | `vrs_eye_smooth` | `20` | eye-tracked foveation: how calmly the sharp centre follows the gaze, a time constant in ms (`0`..`100`; `0` = every gaze sample at once). A big eye jump (a saccade) is followed four times faster |
 | `vrs_eye_fake` | `0` | eye-tracked foveation, test only: `1` (with `vrs_eye = 1`) = a made-up gaze that circles slowly (about 14 degrees, one turn in 6 s) instead of the eye tracker, to check the moving sharp area on a headset without one. OpenXR eye gaze is then not requested |
 | `vrs_debug` | `0` | foveated rendering, test only (needs `log_level = 4`): `1` = middle ring 2 x 2, outer ring 4 x 4, to see the pattern |
-| `xr_hidden_mask` | `0` | VR: `1` = **hidden area mask**: the game skips the corners of each eye picture that the lenses never show (the VR runtime reports them), so it draws fewer pixels. What you see stays the same. Needs a game restart the first time (the mod asks the runtime for the mask when the game starts); after that the menu's `Hidden area mask (VR)` row switches it live, `Shift+F12` saves |
-| `reflex` | `0` | flat, NVIDIA only: `1` = **NVIDIA Reflex** low latency (the game's frames wait less in the GPU queue: less input lag when the GPU is the limit), `2` = the same + boost (the GPU clocks stay up). On another GPU or a driver that refuses it, it stays off and the menu row says `not supported`. Not used in VR. The menu's `Reflex (flat)` row switches it live, `Shift+F12` saves |
-| `fps_cap` | `0` | flat: the most fps the game may run at, `20`..`1000` (`0` = no cap). With Reflex on, the NVIDIA driver limits; otherwise the mod waits after each frame (a precise timer, no drift). Not used in VR (see `vr_fps_cap`). The menu's `FPS cap (flat)` row steps through 30 - 360, `Shift+F12` saves |
-| `vr_fps_cap` | `0` | VR: `2` = the game runs at **half** the headset rate (72 Hz: 36 fps), `3` = a **third** (72 Hz: 24 fps); the headset's reprojection (ASW, Motion Smoothing, Motion Reprojection, SSW) fills the frames in between at a steady rhythm. `0` = off. While it is on, `xr_turbo` is ignored (the cap wins). The menu's `VR FPS cap` row switches it live, `Shift+F12` saves |
-| `cpu_cache_pin` | `0` | `1` = on AMD X3D CPUs with V-Cache on one half only (e.g. 7950X3D / 9950X3D) the game is kept on the V-Cache cores (read at game start only). Does nothing on other CPUs. Off by default: no fps gain was measured yet, try it and compare |
+| `xr_hidden_mask` | `0` | VR: `1` = **hidden area mask**: the game skips the corners of each eye picture that the lenses never show (the VR runtime reports them), so it draws fewer pixels. What you see stays the same. Needs a game restart the first time (the mod asks the runtime for the mask when the game starts); after that the menu's `Skip hidden edges` row switches it live, `Shift+F12` saves |
+| `reflex` | `0` | flat, NVIDIA only: `1` = **NVIDIA Reflex** low latency (the game's frames wait less in the GPU queue: less input lag when the GPU is the limit), `2` = the same + boost (the GPU clocks stay up). On another GPU or a driver that refuses it, it stays off and the menu row says `not supported`. Not used in VR. The menu's `Low delay (Reflex)` row switches it live, `Shift+F12` saves |
+| `fps_cap` | `0` | flat: the most fps the game may run at, `20`..`1000` (`0` = no cap). With Reflex on, the NVIDIA driver limits; otherwise the mod waits after each frame (a precise timer, no drift). Not used in VR (see `vr_fps_cap`). The menu's `FPS cap` row steps through 30 - 360, `Shift+F12` saves |
+| `vr_fps_cap` | `0` | VR: `2` = the game runs at **half** the headset rate (72 Hz: 36 fps), `3` = a **third** (72 Hz: 24 fps); the headset's reprojection (ASW, Motion Smoothing, Motion Reprojection, SSW) fills the frames in between at a steady rhythm. `0` = off. While it is on, `xr_turbo` is ignored (the cap wins). The menu's `FPS cap` row switches it live, `Shift+F12` saves |
+| `cpu_cache_pin` | `0` | `1` = on AMD X3D CPUs with V-Cache on one half only (e.g. 7950X3D / 9950X3D) the game is kept on the V-Cache cores Does nothing on other CPUs. Off by default: no fps gain was measured yet, try it and compare. Phase 87: the menu's `AMD cache cores (X3D)` row (group Frame rate, shown only on such a CPU) switches it live; off gives the game its cores back |
 | `cpu_pcore` | `0` | `1` = on Intel CPUs with P-cores and E-cores, the game's main thread and its render thread prefer the P-cores (a soft preference, other threads are not touched). Does nothing on other CPUs, and nothing when `cpu_cache_pin` or a launcher already narrowed the game's cores (that wins). The log says what it did. Read at game start; the menu's `CPU tuning` row switches it live |
 | `cpu_priority` | `0` | `1` = the game runs at Above normal priority. Never High or Realtime. The menu's `CPU tuning` row switches it live |
 | `cpu_no_throttle` | `0` | `1` = Windows may not slow the game down to save power (EcoQoS) and honours its timer requests while the window is minimized or hidden. Needs Windows 11 for the timer part. The menu's `CPU tuning` row switches it live |
 | `did_shadow` | `1` | CPU saving for the per-part motion vectors (read at game start only): `1` = the mod remembers the game's drawing settings as the game sets them instead of asking the graphics driver for them at every draw (input layout, vertex shader, its constant buffers and samplers, rasterizer state); `2` = also the vertex / index buffers (faster only when the game reuses buffers between draws); `0` = ask at every draw (as before). The log's `did_shadow=` line at startup says which one ran |
+| `did_shadow_ps` | `1` | with `did_shadow` on (read at game start only): `1` = the mod also remembers the pixel shader, its constant buffers and samplers and the depth / blend state of the forward-pass draws instead of asking the driver at every draw (CPU saving; the picture is the same); `0` = ask at every draw. The log's `did_shadow_ps=` line at startup says which one ran |
 | `did_shadow_verify` | `-1` | test only: every Nth draw the remembered settings are compared with the driver's; a difference is logged (`MISMATCH`) and the mod asks the driver for the rest of that frame. `-1` = every 64th draw with `log_level = 4`, off otherwise; `0` = off |
-| `bind_hold_ms` | `5000` | tuning menu: how long (ms, `500`..`10000`) the menu `Right` must be held on the `Reset to defaults` row. (Up to v0.12.0 it was also the hold-to-bind time; v0.13.0 binds on the Hotkeys page with one press, [`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu)) |
+| `menu_show_all` | `0` | tuning menu: `0` = hide rows that cannot do anything in your setup right now and the other mode's rows; `1` = show every row, greyed, with the "(VR)" / "(flat)" titles (for support) |
+| `bind_hold_ms` | `5000` | tuning menu: how long (ms, `500`..`10000`) the menu `Right` must be held on the `Reset to defaults` row. It binds a hotkey on the Hotkeys page with one press, [`docs/KEYS.md`](docs/KEYS.md#bind-a-key-in-the-menu) |
 | `controller_name` | *(empty)* | only read the wheels / gamepads whose name contains this text for `WheelN` / `WheelUp` hotkey bindings, e.g. `T300` when a shifter shares the wheel's button numbers; empty = every controller ([`docs/KEYS.md`](docs/KEYS.md#wheel-gamepad-and-joystick-buttons)) |
 | `key_<action>` | *(see KEYS.md)* | re-bind any hotkey, e.g. `key_dlaa_toggle = Ctrl+D`, or `none` to disable it. Full list and format: [`docs/KEYS.md`](docs/KEYS.md) |
-| `log_level` | `1` | how much goes into the log file `dlaa_inject.log`: `0` = off, `1` = errors only (without an error no file is created), `2` = + warnings (problems the mod works around), `3` = + info (start-up and every setting change), `4` = debug: + statistics every few seconds, and the mod's GPU timers and CPU profiler run. Bug reports need `4`. The names work too (`off`, `errors`, `warnings`, `info`, `debug`). The menu's `Logging` row changes it live. The old `debug = 1` still means `4`, but only when there is no `log_level` line |
+| `capture_mode` | `1` | the bug report capture (`Insert` twice): `1` = Quick (system info, logs, settings, your picture and DLAA off), `2` = Full (+ what DLSS got per frame and the A/B sets). The menu's `Capture includes` row |
+| `capture_keep` | `5` | how many captures stay in `dlaa_selftest\` (`3`, `5`, `10`, `0` = all); older folders and zips are deleted when a new one is written. The menu's `Keep captures` row |
+| `rewind_secs` | *(off)* | keep the last `0.5`, `1`, `2` or `3` s of frames on the graphics card so the capture also has the moment BEFORE the key (`0` = off). VR at a 2761 x 2928 DLAA area: about 32 MB per frame (72 fps: 1 s = about 2.3 GB, capped at 2.5 GB) + the diag planes below; one picture copy per frame. Applies live. The menu's `Rewind before key` row. Without this key the older `rewind_frames` (a frame count, startup only) decides |
+| `rewind_diag_frames` | `8` | for the last N rewind frames also keep what DLSS got (colour, motion vectors, depth; about 72 MB per frame in VR, capped at 1 GB) |
+| `report_all` | `0` | `1` = Send everything: log level debug, rewind 2 s and capture Full, LIVE; your own values stay in `dlaa.ini` and come back when it is off. The menu's `Send everything` row |
+| `log_level` | `1` | how much goes into the log file `dlaa_inject.log`: `0` = off, `1` = errors only (without an error no file is created), `2` = + warnings (problems the mod works around), `3` = + info (start-up and every setting change), `4` = debug: + statistics every few seconds, and the mod's GPU timers and CPU profiler run. Bug reports need `4`. The names work too (`off`, `errors`, `warnings`, `info`, `debug`). The menu's `Log detail` row changes it live. The old `debug = 1` still means `4`, but only when there is no `log_level` line |
 | `language` | `auto` | the menu's language: `auto` = the game's language, or a game language code (`de_de`, `ru_ru`, `ko_kr`, `pt_br`, `en_us` ...). The menu's `Language` row sets it; `Save` writes it |
 
 </details>
@@ -920,7 +993,7 @@ The game held its 72 fps cap the whole time.
 | Sharpen (`sharpness`, `Shift+F7/F8`) | 0.1 ms | 0 = the pass is skipped |
 | Texture LOD bias (`tex_lod_bias`, `Ctrl+F1/F2`) | none measurable | sharper textures can shimmer more on fine meshes |
 | DLAA before the tone-map (`dlaa_pre_tonemap`, `Alt+F7`) | none measurable | same NGX work, different input |
-| Debug log + timers (`log_level = 4`) | 0.1 - 0.3 ms CPU | `log_level = 1` for play, 4 for bug reports; the menu's `Logging` row shows what it costs |
+| Debug log + timers (`log_level = 4`) | 0.1 - 0.3 ms CPU | `log_level = 1` for play, 4 for bug reports; the menu's `Log detail` row shows what it costs |
 | Colour view (`Ctrl+F6`) | small | debug only |
 | Stereo buffer scale 2.0 (VR, `r_manual_stereo_buffer_scale`) | 4x the pixels of 1.0 | the user setting that decides most of the VR cost |
 
@@ -946,7 +1019,7 @@ where the mod does almost all of its work. The figures are live and refresh once
 |---|---|---|
 | `headset (72 Hz)` | VR: the game already keeps the headset's rate | nothing needed; you have headroom |
 | `GPU` | the GPU is busy for (almost) the whole frame | lower Scaling, DLAA area, a lighter model, fewer mirrors |
-| `CPU` | the game's frame loop is busy the whole frame and never waits for the GPU | fewer mirrors, `Performance profile` medium / low, Turbo mode (VR), the `CPU tuning` row (Intel P-cores, Above normal priority, no power throttling; off by default, try it and compare) |
+| `CPU` | the game's frame loop is busy the whole frame and never waits for the GPU | fewer mirrors, `Quality preset` medium / low, Turbo mode (VR), the `CPU tuning` row (Intel P-cores, Above normal priority, no power throttling; off by default, try it and compare) |
 | `CPU (or a game fps cap)` | flat: the same, or the game's own fps limit (it looks the same from inside) | check the game's fps limit first |
 | `CPU and GPU` | both are at the limit | either list above |
 | `vsync / fps cap` | flat: the frame waits for the display, the GPU is not full | nothing; raise the cap if you want more fps |
@@ -960,7 +1033,7 @@ bar is lower). In VR, first: if the game keeps the headset's rate, it says `head
 **What measuring costs:** while the menu is open the mod's CPU profiler and GPU timers run; the profiler costs about
 27 ns per D3D11 call of the game (measured on a Ryzen 9 9950X3D), typically 0.1 - 0.3 ms per frame. The menu shows that figure
 (`measuring costs ...`) and takes it out of every number. When the menu is closed (and `log_level` is below 4) nothing
-is measured: each measuring point is then one skipped check. Since phase 45 also `gpu_timing = -1` (the DLAA stage
+is measured: each measuring point is then one skipped check. The `gpu_timing = -1` setting (the DLAA stage
 timers in the log) runs only at `log_level = 4`, not always in VR.
 
 **Static redraw skip:** the per-part motion vectors redraw every world object once more each frame to learn which
@@ -972,13 +1045,13 @@ frames at most (4 = 1/18 s at 72 fps), usually after 1-2. Only objects that move
 `mv_replay_static_eps_px`, default 0.02 px): a truck you follow at the same speed is never skipped. `mv_replay_static_frames = 0`
 switches it off.
 
-VR: not measured yet with v0.10. Both eyes run the whole chain at 4592x6496 each (stereo buffer scale 2.0), so expect
+VR: not measured yet. Both eyes run the whole chain at 4592x6496 each (stereo buffer scale 2.0), so expect
 roughly double. `mirror_vr_mode` (0 off, 1 all mirrors, 2 only the two largest, 3 every mirror every 2nd frame) and
-`mirror_dlaa = 0` are the first knobs to turn if VR drops below the headset rate (the menu's Mirror DLAA row sets them live:
-`1 mirror (largest)` is the cheapest clean choice; v0.10.2: `1 mirror, camera` / `mirror_mv = camera` drops the per-part
+`mirror_dlaa = 0` are the first knobs to turn if VR drops below the headset rate (the menu's Smooth mirrors row sets them live:
+`1 mirror (largest)` is the cheapest clean choice; `1 mirror, camera` / `mirror_mv = camera` drops the per-part
 motion in the mirrors, about 0.15 ms per mirror instead of 0.4 ms).
 
-**Mirrors in turns** (`mirror_turns = 1`, the menu's `Mirrors in turns` row): every mirror still gets DLAA, but only
+**Mirrors take turns (faster)** (`mirror_turns = 1`, the menu's `Mirrors take turns (faster)` row): every mirror still gets DLAA, but only
 every 2nd frame; in between it shows its last clean picture. Each frame does about half of the mirrors (big and small
 mirrors are split evenly), so the mirror cost per frame drops to about half, also at its peak. The game renders each
 mirror once per frame, also in VR, so this is the only way to share the work. Watch for: moving traffic in the glass
@@ -996,8 +1069,27 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
 
 - **Traffic, trailers or buildings look wrong (wobble, smear, pink in the `Ctrl+F6`
   view)?** Press `Alt+F5` (or set `mv_objects = 0` in `dlaa.ini`). That turns off
-  the per-object motion and leaves the camera motion only, the way v0.8.x worked.
+  the per-object motion and leaves the camera motion only.
   Then please send the log, see *Reporting a problem*.
+
+- **VR: a faint second copy of near objects (the steering wheel) beside the real one?** Fixed in
+  v0.16.0: update. On headsets whose two eye views have the same shape, one eye's DLAA could get
+  the pictures of both eyes. Old log sign: `eye -> OpenXR view changes so far` growing all the time.
+
+- **VR eye tracking stays at "waiting for gaze" in one game, with OpenXR Toolkit on?** Fixed in
+  v0.16.0: update. When the game starts its VR session a second time, OpenXR Toolkit sends its eye
+  tracker setup again, and the mod's own eye tracker link was lost. Old log sign: `Eye tracking: the eye
+  gaze suggestion from above the runtime with ours appended FAILED (-47`.
+
+- **New SCS water (Iceland and later) shows moving rectangular blocks, or the pond seems to switch off and
+  on?** Fixed in v0.16.0: update. The new water stores its surface on a pixel checkerboard, and the
+  mod's 1 px larger jitter viewport shifted that checkerboard by one pixel in big areas of the screen. In VR
+  with foveated rendering, white specks at the shoreline at the edges of the view are fixed too. Flat,
+  triple screen and VR.
+
+- **VR: the game crashes when you close it (`0xc0000005`)?** Fixed in v0.16.0: update. The game
+  unloaded the mod before it finished closing while the mod's hooks were still in place. The log now
+  says `DLL pinned until the game exits` near the top.
 
 - **The log has only errors by default.** Put `log_level = 4` in `dlaa.ini` (next to `dinput8.dll`)
   and start the game again: `dlaa_inject.log` is then written next to the DLL. It
@@ -1008,53 +1100,31 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   DLL. A `dxgi.dll`/`dinput8.dll` from another mod still present will also conflict.
 - **No DLAA, or a crash referencing NGX/DLSS:** `nvngx_dlss.dll` is missing or too
   old — add or update it (see Install step 6).
-- **Windows HDR:** supported from v0.8.0 in flat mode (driving and the menu / truck-preview screen). Older
-  versions do nothing with HDR on (the log shows `blits=0`): update. If brightness or colours change when you
+- **Windows HDR:** works in flat mode (driving and the menu / truck-preview screen). If brightness or colours change when you
   switch DLAA on and off in HDR, put `dlss_hdr = 0` in `dlaa.ini` and report it.
-- **NVIDIA Smooth Motion:** supported from v0.8.1 in flat mode (driving and the menu / truck-preview
-  screen). Older versions do nothing with Smooth Motion on (the log shows `passes=0 blits=0` and
-  `caller=NvPresent64.dll`): update. Smooth Motion only adds frames on the monitor; it does nothing for
+- **NVIDIA Smooth Motion:** works in flat mode (driving and the menu / truck-preview
+  screen). Smooth Motion only adds frames on the monitor; it does nothing for
   the headset picture in VR, so switch it off for VR. The mod's `reflex` and `fps_cap` do not run while Smooth Motion is
   on (they would also hold back its generated frames); use the frame limit in the NVIDIA app / control panel instead.
 - **OFXR Bridge (VR frame generation):** see the section above.
 - **VectorXR (VR layer suite):** see the [VectorXR](#vectorxr-vr-layer-suite) section above (one Turbo only, `vr_fps_cap = 0` with its frame generation).
-- **Picture freezes in the interior camera with OptiScaler (DLSS 5 / Neural Rendering):** OptiScaler's DX12
-  bridge loses its device on the small HDR mirror DLSS frames that appear with the mirrors in view. Since v0.11.0
-  the mod sees OptiScaler next to the game exe and starts with mirror DLAA off (look for `env: OptiScaler
-  detected` in the log). On v0.10.3 set `mirror_dlaa = 0` in `dlaa.ini` or press `Alt+F6`. OptiScaler is not
-  supported or tested by this mod; it happens to work for the main picture.
-- **Light trails behind street lamps and car lights at night:** fixed in v0.13.0: update (`dlss_bias_mask`, menu row
-  `Light glow ghosting fix`). Lower it if glows start to flicker.
-- **Lit areas under tent canopies switch off on some frames (flicker):** fixed in v0.13.0: update (`light_redraw_jitter = 1`).
-- **Linux / Proton: the game does not start or the shaders fail with the mod:** fixed in v0.13.0: update (GitHub issues #14 and #15;
-  the mod needs no extra runtime library and carries its shaders prebuilt). See [Linux / Proton](#linux--proton).
-- **Hotkeys could not be re-bound in the menu, or held keys reached the game (hold-to-bind):** fixed in v0.13.0: update
-  (the Hotkeys page, GitHub issue #16).
-- **The VR fps box moved after a menu or a recentre, or sat in the wrong place in a second truck:** fixed in v0.13.0: update
-  (the box is saved on the cab itself, per vehicle).
-- **Near telephone / power wires flicker or break up while driving:** fixed in v0.14.0: update (`Thin-wire motion` and
-  `Thin-wire depth`, both on by default). Far wires thinner than 1 pixel can still break up.
-- **The log shows `ERROR` lines although nothing is wrong, or the flat stats line shows only one screen:** fixed in
-  v0.14.0: update (GitHub issues #14 and #15).
-- **The VR menu panel shivers or jitters when you move your head (most with Turbo mode on):** set `Panel lock (VR)` to
-  `Fixed in cab` (new in v0.14.0). **The VR panel text looks thick or soft at a small panel size:** fixed in v0.14.0: update.
-- **VR (Varjo Aero): no hidden area mask, or eye tracking used the wrong eye; the log shows `hidden area mask: eye 1 /
-  OpenXR view 1 does NOT match`:** fixed in v0.15.0: update (GitHub issue #21).
-- **VR: for about 2 seconds at the start of each drive the picture smears or the foveated centre sits in the wrong
-  eye:** fixed in v0.15.0: update.
-- **VR: when a drive starts or you come back from the menu, one eye stays black 1-2 seconds longer, or flickers inside
-  the DLAA area:** fixed in v0.15.1: update (GitHub issue #24). The old log shows `fifo underflow` and `rt parity mismatch`
-  lines right at the drive start.
-- **VR with wire widening and Foveated (VRS) on: low fps in towns with many wires and poles (the CPU profiler's `vrs` row
-  above 1 ms):** fixed in v0.15.1: update.
+- **Most display or VR glitches from older builds are already fixed — update to the latest version first.** That covers
+  night-time light trails behind lamps and headlights, lit areas under tent canopies flickering off, near telephone /
+  power wires breaking up while driving, the VR fps box moving after a menu or recentre, VR eye-pairing problems on Varjo
+  (wrong eye, no hidden area mask), a smear or wrong-eye foveated centre at the start of a drive, one eye staying black or
+  flickering 1-2 seconds at a drive start, low fps in wire-heavy towns, stray `ERROR` log lines, Linux / Proton shader or
+  start-up failures, and the old hold-to-bind hotkey problems. Grab the newest release and the issue is gone.
+- **Picture freezes in the interior camera with OptiScaler:** OptiScaler's bridge loses its device on the small HDR
+  mirror DLSS frames that appear with the mirrors in view. The mod sees OptiScaler next to the game exe and starts with
+  mirror DLAA off (look for `env: OptiScaler detected` in the log); if it does not, set `mirror_dlaa = 0` in `dlaa.ini`
+  or press `Alt+F6`. OptiScaler is not supported or tested by this mod; it happens to work for the main picture.
+- **The VR menu panel shivers or jitters when you move your head (most with Turbo mode on):** set `Panel lock` to
+  `Fixed in cab`.
+- **Far telephone / power wires thinner than 1 pixel can still break up** — a limit of the game's own rendering, not a
+  bug. `Thicker wires (test)` (`wire_widen`, `Alt+F12`) is an experimental attempt and off by default.
 - **The menu is English although the game is in another language:** the `Language` row must be on `auto` (or delete the
   `language` line in `dlaa.ini`). Linux / Proton with Chinese, Japanese or Korean: the row says `font missing`, see
   [Linux / Proton](#languages-and-fonts).
-- **Faint dark line down the middle of the menu / truck-preview screen:** fixed in v0.8.1: update.
-- **Dark 1 px line on every silhouette (trees, poles, trucks) in flat mode:** fixed in v0.10.1: update. v0.10.0
-  drew the game's fog pass one texel off.
-- **No DLAA / DLSS while you drive a car (ATS):** fixed in v0.8.2: update. Older versions work in the menu
-  but do nothing in the car (the log shows many `fifo underflow` lines).
 - **No log file with `log_level = 4`:** the line must not start with `#`. The packaged `dlaa.ini` has a plain
   `log_level = 1` line: change the 1 to 4. An older `dlaa.ini` with `debug = 1` works too, as long as it has no
   `log_level` line.
@@ -1095,7 +1165,7 @@ cmake --build build --config Release
 Output: `build/Release/dinput8.dll`. Without `external/DLSS` the build is a
 logging-only injector (no DLAA). Without `external/nvapi` (NVIDIA NVAPI, MIT; its
 `nvapi64.lib` is linked statically) the build has no VR foveated rendering (the
-`Foveated (VRS)` row says `not supported`). `scripts/package.ps1` builds Release and assembles
+`Foveated rendering` row says `not supported`). `scripts/package.ps1` builds Release and assembles
 the release zip. Architecture and internals: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
 
 </details>
@@ -1112,7 +1182,39 @@ happened.
 your language, but most people read English. A translation tool (DeepL, Google Translate) is fine. This is for
 every issue: bug reports, feature requests and translation problems (there, only the menu text itself is in your language).
 
-**Steps first:** put `log_level = 4` in `dlaa.ini` (without it the log has errors only), start the game, reproduce the problem, then **quit the game** and
+<a name="how-to-send-a-bug-report"></a>
+**How to send a bug report (one press):** where the problem shows in game, press **`Insert` twice within
+one second** (the first press only arms it: one short beep; or open the menu: **Bug report > Capture now**). Keep driving for
+a second or two: one beep = started, two rising beeps = done. The mod writes the capture into
+`dlaa_selftest\shimmer_<date>_<time>\` in the game's `bin\win_x64\` folder, split into zips by kind (each at most 24 MB,
+so each opens on its own and fits a GitHub comment):
+
+- **`shimmer_<time>_main.zip`** — the logs, your `dlaa.ini`, system info and the DLAA on / off frames. **Always attach this one** (a big VR capture can be `_main_part01.zip`, `_main_part02.zip` ...: then attach all `_main` parts).
+- **`shimmer_<time>_full.zip`** — the extra views, only written when `Capture includes` is set to **full**. Attach only if asked.
+- **`shimmer_<time>_rewind.zip`** — the frames from before the key, only written when **Rewind before key** is on. Attach only if asked.
+
+So for most reports you attach just the `_main` zip; add the others only when I ask for them. You can also upload the whole
+`shimmer_<date>_<time>` folder to Google Drive / OneDrive / Dropbox and paste the link. A file bigger than one part is cut into
+`name.part01`, `name.part02` ... (joined again with `copy /b name.part01 + name.part02 name`).
+
+What the main zip holds (its `README.txt` lists every file): `sysinfo.txt` (mod / game / Windows / graphics card / driver / DLSS
+versions, VR runtime, resolutions, your settings, frame times, add-ons such as ReShade or OptiScaler, the game's render
+settings), `dlaa_inject.log` (the capture switches the log to debug while it runs), `dlaa.ini`, the last 2000 lines of the
+game's `game.log.txt`, `info.txt` (the jitter of every saved frame) and PNG frames of your picture with DLAA on and off,
+the whole picture (in VR: the left eye). **Privacy:** your Windows user name (in paths), home folder and Steam library folder are replaced by
+`<user>`, `%USERPROFILE%`, `<steam>` in every text file; per-vehicle fps box data is
+left out.
+
+The menu's **Bug report** group sets it up: **Send everything** (one switch: debug log, 2 s rewind, Full capture; off puts
+your values back), **Log detail**, **Rewind before key** (off / 0.5 / 1 / 2 / 3 s: the frames *before* the key, kept on the
+graphics card all the time -- the cost column shows the memory it really holds), **Capture includes** (Quick = the above, about
+1 s; Full = + the colour / motion vectors / depth DLSS got per frame, raw motion and depth of one frame, the motion-vector view,
+moving parts off, all motion vectors off, jitter only: about 1.5 - 2 s), **Capture key** (Right opens the
+Hotkeys page), **Keep captures** (3 / 5 / 10 / all: older captures are deleted) and **Capture now**. While it captures and writes, a small status line shows at the top of the picture (in VR: in front of you);
+it is never in the saved frames. Pictures are the whole picture, not cut (signs and wires sit above and beside the road).
+Size (estimates, flat 4K): Quick about 150 MB, Full with a 2 s rewind about 400 MB.
+
+**By hand, the old way:** put `log_level = 4` in `dlaa.ini` (without it the log has errors only), start the game, reproduce the problem, then **quit the game** and
 only then collect the files. Load a save and drive for about a minute before quitting, so the log covers the 3D scene and not just the menu. The log is written while the game runs, so grab it after
 the game has exited (or at least after the problem has happened).
 

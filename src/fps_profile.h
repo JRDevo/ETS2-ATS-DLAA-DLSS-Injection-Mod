@@ -100,7 +100,7 @@ struct Vals {
     bool operator!=(const Vals& o) const { return !(*this == o); }
     bool HasLook() const { return color >= 0 || bright >= 0 || text >= 0 || opacity >= 0; }
 };
-constexpr int kTextModes = 6;                            // fps_text 0..5 (inject.cpp kFpsTextModes)
+constexpr int kTextModes = 7;                            // fps_text 0..6 (inject.cpp kFpsTextModes; phase 88: 6 = graph only)
 inline float ClampF(double v, double lo, double hi, float def) { return v != v ? def : (float)(v < lo ? lo : (v > hi ? hi : v)); }
 inline Vals Clamped(const Vals& v) {                     // the LoadConfig ranges of the fps_vr_* keys
     Vals o = v;

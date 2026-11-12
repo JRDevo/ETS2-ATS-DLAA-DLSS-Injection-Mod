@@ -5,7 +5,7 @@
 
 ## What it does
 
-Foveated rendering (menu row **Foveated (VRS)**) draws the edge of each eye picture at a lower detail. Until now the sharp area stayed in the centre of the lens.
+Foveated rendering (menu row **Foveated rendering**) draws the edge of each eye picture at a lower detail. Until now the sharp area stayed in the centre of the lens.
 
 With **eye tracking on**, the sharp area moves to where you look. Then the sharp area can be smaller, and you get more fps.
 
@@ -37,7 +37,7 @@ log_level=4
    - `on (gaze)` → good, eye data comes in.
    - `on (waiting for gaze)` → the mod asked for eye data, but none comes yet.
    - `on (no eye tracker)` → the runtime does not offer eye tracking to the game.
-   - `on (restart the game)` → Foveated (VRS) was off when the game started, so no eye data was asked for. Restart the game.
+   - `on (restart the game)` → Foveated rendering was off when the game started, so no eye data was asked for. Restart the game.
    - `on (failed, see log)` → something went wrong. The log says what.
    - `on (no OpenXR session yet)` → VR has not started yet. Wait until you sit in the truck.
 4. Quit the game. Send me the log file `dlaa_inject.log` (same folder as the DLL).

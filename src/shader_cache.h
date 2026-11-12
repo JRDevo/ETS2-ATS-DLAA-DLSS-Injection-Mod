@@ -82,6 +82,8 @@ enum Id : int {
     kSolidGsB,             // wire_widen.cpp     kSolidGs / GSolidB      gs_5_0 (phase 63: lattice towers)
     kSolidPsA,             // wire_widen.cpp     kSolidPs / PSSolidA     ps_5_0 (phase 63: copy of G-buffer PS b67da69f + dither)
     kSolidPsB,             // wire_widen.cpp     kSolidPs / PSSolidB     ps_5_0 (phase 63: copy of G-buffer PS 34860eed + dither)
+    kOutsideAaCs,          // outside_aa.h       kOutsideAaShader / CSMain cs_5_0 (phase 81: outside AA, in place)
+    kOutsideAaPs,          // outside_aa.h       kOutsideAaShader / PSMain ps_5_0 (phase 81: outside AA, upscale band draws)
     kCount,
     kCoreLast = kPvEdgeFill  // v0.10.0 phase 17: ids 0..kCoreLast = the core group (compiled first, CoreDone)
 };

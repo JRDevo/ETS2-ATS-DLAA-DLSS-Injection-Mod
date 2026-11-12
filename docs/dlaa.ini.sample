@@ -89,7 +89,7 @@ log_level = 1
 
 # VR FOVEATED RENDERING (VRS, NVIDIA RTX only; from OpenXR Toolkit), 0 / 1, default 0. 1 = the outer ring of each eye picture is
 # shaded once per 2 x 2 pixels (the centre stays sharp), which saves GPU time at high in-game Scaling. Fences, grass and leaves
-# (alpha-tested) and everything the mod draws itself keep full detail. The tuning menu's Foveated (VRS) row switches it live;
+# (alpha-tested) and everything the mod draws itself keep full detail. The tuning menu's Foveated rendering row switches it live;
 # Shift+F12 / the Save row writes it here. Not available on other GPUs (the menu row then says "not supported").
 # vrs = 0
 # Ring sizes in % of the half picture around each eye's centre: inside vrs_inner full detail; with vrs_quality = 0 the ring
@@ -101,7 +101,7 @@ log_level = 1
 # 1 (default) = full detail everywhere inside vrs_outer; 0 = also save in the middle ring (2 x 1).
 # vrs_quality = 1
 # What foveated rendering acts on: 0 (default) = the 3D world only; 1 = also the game's lighting pass, outer ring only
-# (more saving; test it first: look for blocky light or shadow edges at the side). The menu's Foveated passes row.
+# (more saving; test it first: look for blocky light or shadow edges at the side). The menu's Foveated: lighting too row.
 # vrs_passes = 0
 # How coarse the outer ring is: 0 (default) = Normal, 1 colour per 2 x 2 pixels; 1 = Strong, per 4 x 2; 2 = Max, per 4 x 4.
 # More GPU saving, blockier edges. Best with eye tracking (vrs_eye), where you never look at the outer ring.
@@ -127,8 +127,8 @@ log_level = 1
 # live and Shift+F12 / the Save row writes it here. If the runtime has no mask the row says "not supported".
 # xr_hidden_mask = 0
 
-# 1 = on AMD X3D CPUs with V-Cache on one half only (e.g. 7950X3D / 9950X3D) the game is kept on the V-Cache cores (read at game
-# start only). Does nothing on other CPUs. 0 (default) = off: no fps gain was measured yet, try it and compare.
+# 1 = on AMD X3D CPUs with V-Cache on one half only (e.g. 7950X3D / 9950X3D) the game is kept on the V-Cache cores. The menu's
+# AMD cache cores (X3D) row switches it live (phase 87; shown only on such a CPU). Does nothing on other CPUs. 0 (default) = off: no fps gain was measured yet, try it and compare.
 # cpu_cache_pin = 0
 
 # CPU TUNING, each 0 / 1, default 0 = off. The tuning menu's CPU tuning row switches the three together, live; Shift+F12 / the Save
@@ -165,6 +165,19 @@ log_level = 1
 # without depth write, with a depth bias) get the same jittered viewport as the G-buffer, so they match on every jitter phase.
 # 0 = the game's own viewport for the whole lighting pass (before phase 55): such lit areas switch off on some frames (flicker).
 # light_redraw_jitter = 1
+
+# Phase 78: the lighting pass's FULL-SCREEN draws (the deferred sunlight) rebuild each pixel's position from its unshifted
+# screen position, but the G-buffer texel there was drawn with the jitter. On surfaces seen at a grazing angle (a shed roof in
+# a shadow's soft edge) that moves the shadow lookup each jitter phase: a dark flicker. 1 = default: those draws get the
+# G-buffer's jitter shift (at the game's size; the far column / row a negative shift misses is drawn again unshifted).
+# 0 = the game's own viewport for them (before phase 78). Startup only.
+# light_fs_jitter = 1
+
+# Phase 97: the new SCS water (Iceland DLC and later) stores its surface and its bed on a checkerboard and finds its cell from
+# the interpolated screen position, which the 1 px larger jitter viewport (jitter_overscan) moves off the pixel: the water
+# vanished in big blocks that moved with the jitter. 1 = default: those water draws get the jitter shift at the game's size
+# (the far column / row a negative shift misses is drawn again unshifted). 0 = the overscan viewport for them too. Startup only.
+# water_overscan_fix = 1
 
 # Camera-reprojection motion vectors: 1 on, 0 = zero MVs (Ctrl+F5 toggles live)
 # mv_enabled = 1
@@ -267,13 +280,13 @@ log_level = 1
 # low: 4)
 # mirror_flat_mode = 1
 # v0.10.0 phase 9: with mirror_vr_mode = 2, how many mirror pictures per frame keep their DLAA (1..8, the largest ones)
-# (also mirror_flat_mode = 2). v0.10.2: the tuning menu's Mirror DLAA row sets it (1 mirror = 1, 2 mirrors = 2) together with
+# (also mirror_flat_mode = 2). v0.10.2: the tuning menu's Smooth mirrors row sets it (1 mirror = 1, 2 mirrors = 2) together with
 # mirror_vr_mode / mirror_flat_mode (all = 1, all camera motion only = 4); Shift+F12 / the Save row writes them.
 # mirror_vr_views = 2
 # v0.10.2: the motion of the mirrors that modes 1, 2 and 3 handle (one key for VR and flat): parts = each moving part (traffic,
 # wheels) gets its own motion in the glass (default; about 0.4 ms per mirror in VR), camera = camera motion only, no per-part
 # ids (about 0.15 ms per mirror; moving traffic can ghost in the glass). Mode 4 is always camera motion. The tuning menu's
-# Mirror DLAA row (Left / Right) cycles 7 states:
+# Smooth mirrors row (Left / Right) cycles 7 states:
 #   off -> 1 mirror -> 1 mirror, camera -> 2 mirrors -> 2 mirrors, camera -> all mirrors -> all, camera motion -> off
 #   1 mirror = mode 2, mirror_vr_views 1, parts      1 mirror, camera = mode 2, mirror_vr_views 1, camera
 #   2 mirrors = mode 2, mirror_vr_views 2, parts     2 mirrors, camera = mode 2, mirror_vr_views 2, camera
@@ -284,7 +297,7 @@ log_level = 1
 # between (half of the mirrors per frame, big and small ones split evenly): about half the mirror GPU cost, also at its peak.
 # Edges stay clean; moving things in the glass update at half the frame rate. A reset, a big camera jump or a frame without a
 # run updates a mirror at once. 0 = every mirror every frame (default). mirror_vr_mode / mirror_flat_mode 3 = every mirror in
-# turns whatever this says. The tuning menu's "Mirrors in turns" row switches it live; Shift+F12 / the Save row writes it.
+# turns whatever this says. The tuning menu's "Mirrors take turns (faster)" row switches it live; Shift+F12 / the Save row writes it.
 # mirror_turns = 0
 
 # ---- v0.10.0 phase 8 PERFORMANCE (each one has the fast setting as its default; the other value is the phase-7 behaviour) ----
@@ -306,6 +319,11 @@ log_level = 1
 # and the getters are used for the rest of that frame (after 8 such frames: for the rest of the session).
 # -1 = 64 with log_level = 4 at the start, else 0 (default); 0 = off
 # did_shadow_verify = -1
+# phase 93: with did_shadow on, also the forward draws' depth-stencil / blend state + vertex shader and the forward records' pixel
+# shader, its cbuffers and samplers from the hooked Set calls (the pixel shader's textures are still read at every draw).
+# 1 = default, 0 = the getters (as before phase 93). Startup only; the log's "did_shadow_ps=" line says which mode ran and the
+# "MV draw-ids" line has a "PS/OM bank" field (did_shadow_verify checks it too).
+# did_shadow_ps = 1
 # how finely the "which vehicle does this plate sit on" search looks at the picture: 4 = every 4th pixel, small plates every
 # 2nd (default), 2 = every 2nd pixel for everything (before phase 8)
 # mv_vote_res = 4
@@ -460,7 +478,8 @@ log_level = 1
 # see-through (blended) and leave no depth of their own, so they used to move like whatever is behind them (a wire in
 # front of the sky moved like the sky -> trails behind wires in DLSS mode while driving). 1 = those draws are drawn once
 # more, depth only (nothing visible changes), so their pixels move with their own depth; 0 = off. Ctrl+F3 switches it
-# live for an A/B check (Ctrl+F6 view: yellow = pixels that took that depth)
+# live for an A/B check (Ctrl+F6 view: yellow = pixels that took that depth); the menu's Glass and fence fix row too, and
+# Save writes it (issue #26: before, the row's choice was lost at the next start)
 # v0.9.0 r11: only a depth inside the world range counts (a rain / dirt / glare layer on the windscreen used to make the
 # road and trees behind the glass move like the cabin)
 # mv_fwd_depth = 1
@@ -501,11 +520,61 @@ log_level = 1
 # far wires about a third darker than the game's own and flicker more). Lower = closer to the
 # wire's real (very faint) darkness but it can twinkle; higher = steadier and darker.
 # wire_solid_min_share = 0.1
+# Phase 80: the far high-voltage wires share their shaders with the windows, wheels and trims of the AI cars. Dithering a MOVING
+# car part gives it different pixels every frame, so DLAA / DLSS can never keep its history: one-frame bright outlines on a
+# near car, a far car that never gets smooth. With 1 (default) the dither is only applied to parts the per-draw motion vectors
+# know as standing still (wires, towers, parked cars); a car part that moves, or was not seen standing still yet, is drawn by the
+# game's own shaders. 0 = every match is dithered (as before phase 80). Needs mv_objects = 2 (and mv_replay_static_frames above
+# 0); without them every match is dithered as before. Startup only (restart the game after a change). Only matters with
+# wire_widen = 1. The log says "solid dither gate (phase 80): wire_solid_static_only=1"; at log_level 4 the "wire widening"
+# stats line ends with the per-pass counts (known static / old rule / not dithered: moving, no static verdict).
+# wire_solid_static_only = 1
 # wire_widen = 0
 # The band width in pixels, 0.5 .. 3 (default 1.0). Larger = steadier but softer / wider far wires.
 # Phase 67: the band has soft edges (darkest in the middle, fading to nothing at 1 x wire_min_px either side), so a sloped far
 # wire stays an even line under DLAA instead of a row of beads / stair steps (a hard 1 px band did that).
 # wire_min_px = 1.0
+
+# EXPERIMENTAL, off by default (phase 77, startup only: no menu row, no key; restart the game after a change).
+# Far chain-link fences, railings and other cut-out (see-through) textures shimmer and vanish with distance: the game builds
+# the smaller versions (mip maps) of their transparency by averaging 2 x 2 texels and keeping only what is more than half
+# covered, so a 1-2 texel wire is gone after 2-3 halvings (the ATS fence: 17.5 % covered up close, 6 % further away, then
+# nothing). With this on, the mod rebuilds those smaller versions while the game loads the texture: each keeps the same share
+# of covered texels as the full-size one (the most-covered spots first, still fully see-through or fully solid), so a far
+# fence thins into an even pattern for DLAA instead of disappearing. Only textures whose transparency is a clean cut-out
+# (fully see-through or solid) with 2 .. 60 % coverage that really lose coverage in the game's own versions; the colour is
+# untouched. The work runs on a background thread at low priority, so loading does not wait for it (the loading thread
+# only copies the texture, about 1 ms for 2048 x 2048). The rebuilt versions are used only once the texture is drawn as a
+# see-through cut-out, so car paint and other textures with a different use of alpha keep the game's. 1 = on, 0 = off (default).
+# The log says "cut-out mips (phase 77): on"; log_level 3 adds "cut-out mips: first texture rebuilt ...", log_level 4 one line
+# per candidate texture + a "cut-out mips: seen .. patched .." count (with log_level 4 the texture uploads are also counted per
+# format, on or off).
+# cutout_mips = 0
+# phase 77: the largest texture side the cut-out rebuild looks at (64..4096, default 4096). Lower it only to save memory
+# (a 4096 x 4096 texture needs about 80 MB for a moment on the background thread).
+# cutout_max_dim = 4096
+
+# Phase 79 REWIND for the shimmer capture key (Insert) -- a TEST TOOL, off by default. The capture itself starts about 1.5 s after the key, when the
+# flicker you saw is often gone. With this on, the mod keeps a copy of the last N frames (eye 0 in VR) on the graphics card
+# all the time; the key saves them too, as rewind_NN.bmp in the same dlaa_selftest\shimmer_* folder (rewind_00 = the last
+# frame before the key). 0 = off (default), 2..240 frames (64 = about 0.9 s at 72 fps). Costs about 32 MB of graphics memory
+# per frame at a 2761 x 2928 eye (64 frames = about 2 GB; capped at 2.5 GB) and one picture copy per frame. Startup only.
+# rewind_frames = 0
+# Phase 89b-d ONE-PRESS BUG REPORT: press the capture key (key_shimmer_capture, Insert) TWICE within 1 s where something looks
+# wrong (or the tuning menu: Bug report > Capture now). The mod saves frames, system info, the logs and this file into
+# dlaa_selftest\shimmer_<date>_<time>\ and zips of at most 24 MB each next to it to attach to a GitHub issue: _main.zip (always), _full / _rewind (only if asked). Your Windows user name, home folder
+# and Steam library folder are removed from every text file in it. All of these are in the menu's Bug report group.
+# what the capture includes: 1 = quick (default: system info, logs, your picture + DLAA off, about 1 s), 2 = full (+ what DLSS got
+# per frame -- colour, motion vectors, depth -- and A/B sets: motion-vector view, motion off, jitter only)
+# capture_mode = 1
+# how many captures stay (3, 5, 10, 0 = all); older folders + zips are deleted when a new one is written
+# capture_keep = 5
+# the rewind in seconds (0, 0.5, 1, 2, 3; wins over rewind_frames above; live). About 32 MB of graphics memory per frame in VR.
+# rewind_secs = 0
+# for the last N rewind frames also keep what DLSS got (colour, motion vectors, depth: about 72 MB per frame in VR, capped 1 GB)
+# rewind_diag_frames = 4
+# 1 = Send everything: log level debug, rewind 2 s, capture full -- live; your own values above stay and come back at 0
+# report_all = 0
 # v0.9.0 r11: a see-through draw whose centre point (origin) lies within this many metres of the camera (windscreen
 # drops, dirt, glare) is not drawn into that depth at all (0.1..5)
 # mv_fwd_min_m = 0.5
@@ -513,8 +582,43 @@ log_level = 1
 # light cones) are added on top of the picture and have no depth or motion of their own, so DLSS kept them in its history and
 # they left a trail behind them while driving at night. With this on, the mod draws those glows once more into a mask and tells
 # DLSS to take them (and the pixels where they were a frame ago) from the current frame. Lower it (25 % steps) if lamp glows
-# start to flicker. The tuning menu's "Light glow ghosting fix" row (Picture group) changes it live; Shift+F12 / Save writes it.
+# start to flicker. The tuning menu's "Light trail fix" row (Picture group) changes it live; Shift+F12 / Save writes it.
 # dlss_bias_mask = 100
+
+# Phase 82 GAME TAA: the game's own TAA together with the mod. The mod is made for the game's Anti-aliasing set to Disabled
+# (r_aa 0) -- keep game_taa = 0 then. With the game's Anti-aliasing = TAA (r_aa 5) the mod's DLAA would run on an already TAA'd
+# picture (blur) and both jitter; game_taa picks what happens instead:
+#   0 = off (default): the mod as always; a running game TAA is logged once as a WARN
+#   1 = mix: the game's TAA and the mod's DLAA / DLSS work on the SAME raw jittered frame (the mod's own jitter is off, DLSS gets
+#       the game's jitter) and the two results are blended; game_taa_mix = the TAA share
+#   2 = split: the mod left of game_taa_split, the game's TAA right of it, a thin line and "DLAA" / "DLSS" | "TAA" labels at the
+#       top (compare). (The game's TAA alone = DLAA off. A first-build dlaa.ini without game_taa_ver: 2 -> 0, 3 -> 2, logged.)
+# When mix / split cannot run for a frame (e.g. Windows HDR on) the game's TAA picture is shown; the menu's Game TAA row says why.
+# Without a running game TAA (or where the game has none, e.g. VR if SCS TAA does not run there) 1..3 behave as 0. The tuning
+# menu: phase 90 -- Mix is on the Mode row ("Mix (TAA + DLAA)" / "Mix (TAA + DLSS)", saved at once) with "Mix amount" under it; the split is "Split with game TAA" in Compare and test. Shift+F12 / Save writes all of them.
+# game_taa = 0
+# TAA share of the mix in %, 0..100 (menu: 10 % steps): more = calmer, softer; less = sharper (DLAA / DLSS)
+# game_taa_mix = 50
+# Where the split line is, in % of the width (0..100, menu: 5 % steps; VR: the same % of each eye's picture)
+# game_taa_split = 50
+# What split compares (menu "Split: left | right", only in split): 0 = DLAA | TAA (default: the mod left, the game's TAA right; DLSS when
+# upscaling), 1 = Mix | TAA, 2 = DLAA | Mix (Mix = the two blended at game_taa_mix). The labels at the top name each side.
+# game_taa_pair = 0
+# Written by Save with game_taa (the numbering of game_taa above); do not change it by hand
+# game_taa_ver = 2
+# Whether DLSS is told that the motion vectors carry the game's jitter (NGX MVJittered) in modes 1..3: -1 = auto (default: on,
+# unless the game's world-pass viewports have a fractional origin = the game jitters the viewport, not its projection), 0 = off,
+# 1 = on. Startup only. Try the other value if mix / split wobbles or smears on a parked view (the log names the auto verdict).
+# game_taa_mvjit = -1
+
+# Phase 83 In-game UI (VR): the menu group moves the game's own VR UI (r_manual_stereo_ui_* in config.cfg) by typing the command
+# into the game's console (needs g_developer "1" and g_console "1" in config.cfg). How the keys reach the game (startup only;
+# phase 85 renumbered): 0 = real keyboard input (SendInput: console key + Enter by scan code, the text as characters; default),
+# 1 = the same with the text as scan codes on the keyboard layout, 2 = console key + Enter as DirectInput keys and the text as
+# window characters (phase 83), 3 = window messages only, 4 = DirectInput only (US layout). With 0 / 1 the game window must have
+# the focus on the desktop. The mod's log says CONFIRMED / NOT confirmed per command (its echo in game.log.txt); try another
+# value if it stays NOT confirmed.
+# vr_ui_keys = 0
 
 # GPU timing logs (per-stage DLAA cost + depth snapshot cost, every 600): -1 = with log_level = 4 (phase 45; before: always in
 # VR), 0 off, 1 on
@@ -546,13 +650,20 @@ log_level = 1
 
 # v0.6.4 DLAA area: run DLAA only on a rect of this % of each eye image's width AND height (10..100, v0.10.0; was
 # 40..100; pixel count ~ area^2, e.g. 70 -> 49 %, 20 -> 4 %), centred on the eye's optical centre. 100 = whole image
-# (v0.6.3 behaviour). Outside the rect the image is the raw jittered frame. VR only (flat always uses 100); v0.10.0: also
+# (v0.6.3 behaviour). Outside the rect: see outside_aa below. VR only (flat always uses 100); v0.10.0: also
 # the truck picture of the VR main menu / garage / truck dealer screens. Start state; Shift+F5 / Shift+F6 change it live
 # in 10 % steps (Shift+F12 saves)
 # dlaa_area = 100
 # blend ramp (px, 0..512) from the raw frame to the DLAA result at the rect edges inside the image; 0 = hard edge
 # (render px; with DLSS upscaling it is scaled to output px per axis)
 # dlaa_area_feather = 96
+# Phase 81: what OUTSIDE the DLAA area rect looks like (only while dlaa_area is below 100). The mod's sub-pixel jitter moves the
+# whole picture every frame; inside the rect DLAA / DLSS takes it out, outside it the raw frame used to shake with it (thin dark
+# railings, gantries and lamp heads against the sky flickered more than in the game without the mod).
+# 2 = default: the outside is resampled at the frame's jitter shift (sharp bicubic, so it no longer moves) and its edges are
+#     smoothed (FXAA-style); 1 = the resampling only; 0 = the raw jittered frame (before phase 81).
+# Blended into the rect with dlaa_area_feather. Nothing runs at dlaa_area 100, with the jitter or DLAA off. Startup only.
+# outside_aa = 2
 
 # v0.7.0 DLSS upscaling: 1 = when the eye texture / backbuffer is larger than the scene (game r_scale_x / r_scale_y
 # below 1), NGX renders from the scene size to that size and replaces the game's bilinear stretch; 0 = always DLAA
@@ -654,8 +765,9 @@ log_level = 1
 # 1 = show the box, 0 = off (nothing is measured or drawn then)
 # fps_show = 0
 # What the box shows: 0 = fps and frame time (two lines), 1 = fps only, 2 = frame time (ms) only; the same as numbers only,
-# without "fps" / "ms": 3 = both ("72" + "13.9"), 4 = the fps number ("72"), 5 = the ms number ("13.9"). The menu's FPS
-# counter row steps Off / 72 fps + 13.9 ms / 72 fps / 13.9 ms / 72 + 13.9 / 72 / 13.9 (Right = next, Left = previous)
+# without "fps" / "ms": 3 = both ("72" + "13.9"), 4 = the fps number ("72"), 5 = the ms number ("13.9"); 6 = no text, only
+# the history graph (phase 88, fps_graph below). The menu's FPS counter row steps Off / 72 fps + 13.9 ms / the same + graph /
+# 72 fps / + graph / 13.9 ms / + graph / 72 + 13.9 / + graph / 72 / + graph / 13.9 / + graph / graph only (Right = next)
 # fps_text = 0
 # Flat: left / top edge of the box in % of the picture width / height (0..95; kept inside the picture), size 0.2..3.0
 # (1 = 92 x 44 px at a 1080 p picture, scales with the picture height)
@@ -710,6 +822,13 @@ log_level = 1
 # Phase 51f: the box's opacity in % (10..100, default 100 = solid). Fades the WHOLE box, text and its outline together (brightness
 # only dims the text colour, so a dim box keeps a black outline). Flat and VR (drawn in, quad layer, attached). Menu: FPS opacity.
 # fps_opacity = 100
+# Phase 88: a history graph under the fps box text: fps_graph = 1 shows it, 0 = text only (default). fps_text = 6 = the graph
+# alone (no text). fps_graph_secs = how far back it shows: 2, 5, 10 (default), 30 or 60. One bar per slice of time = the slowest
+# frame in it, so a single hitch stays visible. Green = on time, yellow = up to 1.5x, red = slower. The line = the target: VR the
+# headset rate (with vr_fps_cap: half / third), flat fps_cap, else your usual frame time. Flat and VR.
+# Menu: FPS counter (every text choice with or without "+ graph", and "graph only"), FPS graph length.
+# fps_graph = 0
+# fps_graph_secs = 10
 # Phase 44, VR: the box's distance in cm (30..300, default 80). It keeps the same size in your view at every distance (the
 # VR layer and the fixed box: a real distance; drawn into the picture and following the head: an extra stereo shift on top
 # of menu_vr_depth). Menu: FPS distance (VR).

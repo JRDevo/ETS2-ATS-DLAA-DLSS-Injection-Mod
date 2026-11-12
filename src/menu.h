@@ -21,7 +21,7 @@
 
 namespace TuningMenu {
 
-constexpr int   kMaxRows  = 68;                      // (phase 69: 64 -> 68, + 3 thin-wire rows; phase 59f: 60 -> 64, + Foveated strength; phase 52: 50 -> 56 -> 60 at the 51b merge, + the Frame rate group header and its 3 rows; was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
+constexpr int   kMaxRows  = 96;                      // (phase 89d: 88 -> 96, + the Bug report group; phase 83: 72 -> 88, + the 10 In-game UI (VR) rows; phase 82: 68 -> 72, + the 2 Game TAA rows; phase 69: 64 -> 68, + 3 thin-wire rows; phase 59f: 60 -> 64, + Foveated strength; phase 52: 50 -> 56 -> 60 at the 51b merge, + the Frame rate group header and its 3 rows; was 24 before the 4 fps box rows, 26 before the Reset row, 27 before v0.10.2 Menu keys,
                                                      //  28 before the v0.10.3 phase 28 FPS counter lock row, 29 before the phase 29c
                                                      //  group header rows, 31 before the phase 30 Turbo mode row, 32 before the
                                                      //  phase 34 Foveated rows, 34 before the phase 39 Logging row, 35 before the
@@ -40,6 +40,15 @@ constexpr wchar_t kInkCpu = 0x01, kInkGpu = 0x02, kInkEnd = 0x03;
 constexpr float kRefWidth = 760.0f;                  // panel width in reference px (scale 1; was 720 before the GPU cost column)
 constexpr float kWidgetRefW = 92.0f;                 // the fps box in reference px (scale 1)
 constexpr float kWidgetRefH = 44.0f;
+// phase 88 (dlaa.ini fps_graph): the fps box's HISTORY GRAPH -- a strip under the text, kGraphCols bars, oldest left; each bar =
+// the slowest frame of its slice of time, so a spike shows even when the average hides it. With the graph the text block is only
+// as tall as its lines (2 lines kWidgetText2H, 1 line kWidgetText1H, none = graph only) and the strip sits right under it
+// (WidgetRefH; the VR quad image is made for kWidgetRefHMax).
+constexpr int   kGraphCols    = 43;                  // 2 reference px each (86 px between the 3-px margins)
+constexpr float kWidgetGraphH = 20.0f;
+constexpr float kWidgetText2H = 42.0f;               // the two lines in y 4..24 / 24..40
+constexpr float kWidgetText1H = 24.0f;               // the one line (big font) in y 2..22
+constexpr float kWidgetRefHMax = kWidgetRefH + kWidgetGraphH;
 
 struct Row {                                         // (phase 74: name 48 -> 64, value / keys 72 -> 96: longer languages)
     wchar_t name[64];
@@ -102,6 +111,13 @@ void  ReleaseTargets();                              // drops the panel texture 
 bool  DrawWidget(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
                  float scale, float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2);
 void  ReleaseWidget();                               // drops the fps box texture (the box switched off)
+// phase 89e: the bug report status box (kStatusRefW x kWidgetRefH reference px, the fps box's look, white): same arguments as DrawWidget
+// phase 91: + `slot` = the caller's own texture cache (kStatusEyes: the VR eye pictures, render thread; kStatusFlat: flat / the VR
+// desktop mirror at Present) -- the two build at different scales, one shared cache rebuilt on every call.
+constexpr float kStatusRefW = 300.0f;
+constexpr int   kStatusEyes = 0, kStatusFlat = 1, kStatusSlots = 2;
+bool  DrawStatus(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
+                 float scale, float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2, int slot);
 // phase 44: the fps box as a turned quad (fps_vr_yaw / fps_vr_pitch / fps_vr_roll, the drawn-in VR fallback): `clip` = its 4
 // corners in clip space as DrawCorners (top-left, top-right, bottom-left, bottom-right; w > 0). Texture / states as DrawWidget.
 bool  DrawWidgetCorners(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, const float clip[4][4],
@@ -120,6 +136,20 @@ void  SetWidgetColors(uint8_t tr, uint8_t tg, uint8_t tb, uint8_t lr, uint8_t lg
 // phase 51f (dlaa.ini fps_opacity): the fps box's alpha factor 0..1 (text AND outline); read by the pixel shader per draw, so a change
 // needs no texture rebuild. Applies to every draw path (flat, VR drawn-in, OpenXR quad layer image, attached to vehicle).
 void  SetWidgetOpacity(float a);
+// phase 88: the graph's columns (copied; any thread). `gen` changes whenever a column does: the texture then repaints ONLY the
+// strip (one partial upload); on / off rebuilds the box once. Bars: green up to 1.1 x targetMs, yellow up to 1.5 x, red above;
+// the strip's top = 2 x targetMs (a longer frame = a full red bar); a thin line marks targetMs.
+struct WidgetGraph {
+    bool     on = false;
+    uint32_t gen = 0;
+    float    targetMs = 0.0f;                        // > 0
+    float    colMs[kGraphCols] = {};                 // oldest first; 0 = no frame in that slice yet (no bar)
+};
+void  SetWidgetGraph(const WidgetGraph& g);
+// the box height in reference px for these lines: kWidgetRefH without the graph; with it the text block (WidgetTextRefH) +
+// kWidgetGraphH. Pass the lines DrawWidget gets (an empty / null line = not shown).
+float WidgetTextRefH(const wchar_t* line1, const wchar_t* line2, bool graphOn);
+float WidgetRefH(const wchar_t* line1, const wchar_t* line2);
 
 }  // namespace TuningMenu
 

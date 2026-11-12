@@ -130,8 +130,13 @@ msgstr "Moviment i retrovisors"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Upscaling and VR"
-msgstr "Escalat i VR"
+msgid "Frame rate"
+msgstr "Taxa de fotogrames"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Performance"
+msgstr "Rendiment"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -140,60 +145,87 @@ msgstr "Rendiment VR"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Frame rate and CPU"
-msgstr "Taxa de fotogrames i CPU"
+msgid "In-game UI"
+msgstr "IU del joc"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Panell"
+msgid "In-game UI (VR)"
+msgstr "IU del joc (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "FPS counter settings"
+msgid "FPS counter"
 msgstr "Comptador de FPS"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Menu panel"
+msgstr "Quadre del menú"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Compare and test"
+msgstr "Compara i prova"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Bug report"
+msgstr "Informe d'error"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's "
-"Scaling is below 100 %. off = the game's own picture: use it to compare. Saved at once."
+"Scaling is below 100 %. Mix = the game's own TAA blended with DLAA / DLSS: calmer, a bit softer. "
+"off = the game's own picture. Saved at once."
 msgstr ""
-"DLAA = vores netes a la mida de renderització del joc. DLSS = el mateix, i escala quan l'Escala "
-"del joc és inferior al 100 %. desactivat = la imatge del joc, per comparar. Es desa a l'instant."
+"DLAA = vores nets a la mida de renderitzat del joc. DLSS = el mateix, i escala cap amunt quan "
+"l'Escalat del joc és inferior al 100 %. Mescla = el TAA propi del joc barrejat amb DLAA / DLSS: "
+"més calmat, una mica més suau. off = la imatge del joc. Es desa a l'instant."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Presets for your GPU. high = everything on (model 1). medium = model 2, half-size see-through "
-"depth, flat mirrors without part motion, lighter part-motion search. low = also no mirror DLAA, "
-"no see-through depth, VR area 60 %. Never changes a setting you set yourself."
+"How much of the Mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer, less = "
+"sharper. Shown while Mode is Mix, or a split has a Mix side. No extra cost."
 msgstr ""
-"Perfils per a la teva GPU. alt = tot activat (model 1). mitjà = model 2, profunditat translúcida "
-"a mitja resolució, retrovisors plans sense moviment de peces, cerca de moviment més lleugera. "
-"baix = també sense DLAA als retrovisors, sense profunditat translúcida, àrea VR 60 %. Mai canvia "
-"el que has ajustat."
+"Quant de la mescla és el TAA del joc, 0 - 100 % en passos del 10 %: més = més calmat i suau, "
+"menys = més nítid. Es mostra mentre el Mode és Mescla, o una divisió té un costat de mescla. "
+"Sense cost addicional."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, least ghosting "
+"Presets for your graphics card. high = everything on (model 1). medium = model 2, a lighter Glass "
+"and fence fix, mirrors without Track moving parts. low = also no Smooth mirrors, no Glass and "
+"fence fix, VR area 60 %. Never changes a setting you set yourself."
+msgstr ""
+"Perfils per a la teva targeta gràfica. high = tot activat (model 1). medium = model 2, un "
+"arranjament de vidres i tanques més lleuger, retrovisors sense Seguir peces mòbils. low = a més "
+"sense Retrovisors suaus, sense arranjament de vidres i tanques, àrea VR 60 %. Mai canvia un ajust "
+"que hagis posat tu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, fewest trails "
 "behind traffic: start here. 3 (F) = calmest on fences and wires, can smear moving detail, same "
 "cost as 2. 4 (M) = heaviest (about 5x), flat tests only."
 msgstr ""
-"1 (K) = més detall, text més nítid, uns 1,6x la GPU del 2. 2 (E) = equilibrat, menys rastre "
-"darrere del trànsit: comença aquí. 3 (F) = més calmat en tanques i cables, pot esborronar detall "
-"en moviment, mateix cost que el 2. 4 (M) = el més pesat (uns 5x), només per a proves en pantalla "
-"plana."
+"1 (K) = més detall, text més nítid, uns 1,6 cops la GPU del 2. 2 (E) = equilibrat, menys rastres "
+"darrere el trànsit: comença aquí. 3 (F) = el més tranquil en tanques i cables, pot esborrar "
+"detalls en moviment, mateix cost que el 2. 4 (M) = el més pesat (uns 5 cops), només proves en pla."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Picture quality: sharpening, texture sharpness, the DLAA area and the see-through depth. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
+"Picture quality: sharpening, texture sharpness, the Glass and fence fix, the Light trail fix and "
+"the DLAA area. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Qualitat d'imatge: nitidesa, nitidesa de textura, àrea del DLAA i profunditat translúcida. Dreta "
-"obre el grup, Esquerra el tanca; comença tancat cada cop que s'obre el menú."
+"Qualitat d'imatge: nitidesa, nitidesa de textura, arranjament de vidres i tanques, arranjament de "
+"rastres de llum i l'àrea DLAA. Dreta obre el grup, Esquerra el tanca; comença tancat cada cop que "
+"s'obre el menú."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -219,22 +251,43 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Sharper texture text (road signs, dashboard, GPS). 0 = off; more negative = sharper but more "
-"shimmer on fences; try -0.5 to -1 if text is blurry. No GPU time, only a little memory bandwidth."
+"shimmer on fences; try -0.5 to -1 if text is blurry. Almost no cost."
 msgstr ""
 "Text de textura més nítid (senyals, tauler, GPS). 0 = desactivat; més negatiu = més nítid però "
-"més parpelleig a les tanques; prova -0,5 a -1 si el text es veu borrós. Sense cost de GPU, només "
-"una mica d'ample de banda."
+"més parpelleig a les tanques; prova de -0,5 a -1 si el text es veu borrós. Gairebé sense cost."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"The same for wire fences, grass and leaf cut-outs: raise it toward 0 if fences shimmer, lower it "
-"if grass looks soft. same = follows the row above. Acts only while Texture sharpness is not 0. No "
-"GPU time, a little memory."
+"The same for wire fences, grass and leaves: raise it toward 0 if fences shimmer, lower it if "
+"grass looks soft. same = follows the row above. Works only while Texture sharpness is not 0. "
+"Almost no cost."
 msgstr ""
-"El mateix per a tanques de filferro, herba i retalls de fulles: puja cap a 0 si les tanques "
-"parpellegen, baixa si l'herba es veu suau. igual = segueix la fila de dalt. Només actua si la "
-"Nitidesa de textura no és 0. Sense cost de GPU."
+"El mateix per a tanques de filferro, herba i fulles: puja cap a 0 si les tanques parpellegen, "
+"baixa si l'herba es veu tova. igual = segueix la fila de dalt. Només funciona si Nitidesa de "
+"textura no és 0. Gairebé sense cost."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Wires, fences and windows are treated as the thing in front, not as what you see through them, so "
+"they do not smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms "
+"per eye."
+msgstr ""
+"Cables, tanques i vidres es tracten com allò que és al davant, no com allò que es veu a través, "
+"perquè no s'esborrin en moure't. Desactiva-ho si no veus esborrat: estalvia 0,02 - 0,06 ms per "
+"ull."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Stops street-lamp and car-light glows leaving a trail behind them when you move: the glows are "
+"drawn fresh each frame instead of being blended with older frames. 25 % steps; lower it if lamp "
+"glows flicker, 0 = off. Costs about 0.05 - 0.2 ms per eye."
+msgstr ""
+"Evita que els resplendors de fanals i llums de cotxe deixin rastre en moure't: els resplendors es "
+"dibuixen de nou a cada fotograma en lloc de barrejar-se amb els anteriors. Passos del 25 %; "
+"baixa-ho si els resplendors parpellegen, 0 = desactivat. Costa uns 0,05 - 0,2 ms per ull."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -250,37 +303,6 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
-"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
-"~60 frames to switch."
-msgstr ""
-"Només pantalla plana: DLAA abans del bloom / tonemap del joc, perquè línies, cables i rails "
-"parpellegin menys. Canvia-ho només per comparar. No val amb upscale DLSS ni HDR de Windows. "
-"Mateix cost; triga ~60 fotogrames a canviar."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Gives wires, fences and glass their own distance instead of what is behind them, so they do not "
-"smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."
-msgstr ""
-"Dona a cables, tanques i vidres la seva pròpia distància en lloc de la del fons, perquè no "
-"s'esborronin en moure't. Desactiva-ho si no hi veus esborronat: estalvia 0,02 - 0,06 ms per ull."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Stops street-lamp and car-light glows leaving a trail behind them when you move: DLSS takes each "
-"glow from the current frame, not its history. 25 % steps; lower it if lamp glows flicker, 0 = "
-"off. Costs about 0.05 - 0.2 ms per eye."
-msgstr ""
-"Evita que el resplendor de fanals i llums de cotxe deixi rastre en moure't: el DLSS agafa cada "
-"resplendor del fotograma actual, no de l'historial. Passos del 25 %; baixa-ho si els resplendors "
-"parpellegen, 0 = desactivat. Costa uns 0,05 - 0,2 ms per ull."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
 "How moving parts and truck mirrors are handled by DLAA. Right opens the group, Left closes it; it "
 "starts closed every time the menu opens."
 msgstr ""
@@ -290,24 +312,24 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and "
-"does not ghost. Turn it off only to save about 0.5 ms per eye or to test: every pixel then moves "
+"DLAA follows each moving thing on its own (traffic, wheels, number plates), so it stays sharp and "
+"leaves no trail. Turn it off only to save about 0.5 ms per eye or to test: everything then moves "
 "with the camera and traffic smears."
 msgstr ""
-"Dona a cada peça mòbil (trànsit, rodes, matrícules) el seu propi moviment per al DLAA, perquè es "
-"mantingui nítida i sense rastre. Desactiva-ho només per estalviar uns 0,5 ms per ull o per "
-"provar: cada píxel segueix la càmera i el trànsit s'esborrona."
+"El DLAA segueix cada cosa en moviment per separat (trànsit, rodes, matrícules), així es manté "
+"nítid i sense rastres. Desactiva-ho només per estalviar uns 0,5 ms per ull o per provar: tot es "
+"mou amb la càmera i el trànsit s'esborra."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main "
-"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can ghost "
-"in the glass; else each part moves exactly in the glass."
+"Smooths the truck mirrors too, so they do not shimmer. 1 mirror = only the largest (the main "
+"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can leave "
+"trails in the glass; the others follow each moving thing."
 msgstr ""
-"Dona als retrovisors el seu propi DLAA perquè no parpellegin. 1 retrovisor = només el més gran "
-"(el principal al teu costat). tots = cada retrovisor. càmera = més barat per mirall, el trànsit "
-"pot deixar rastre al vidre; si no, cada peça es mou ben bé al vidre."
+"Suavitza també els retrovisors del camió, perquè no parpellegin. 1 retrovisor = només el més gran "
+"(el principal al teu costat). tots = cada retrovisor. càmera = el més barat per retrovisor, el "
+"trànsit en moviment pot deixar rastres al vidre; els altres segueixen cada cosa en moviment."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -323,62 +345,156 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
-"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
-"soft for a moment when it changes."
+"Frame rate and CPU: CPU tuning, AMD cache cores, an FPS cap and Low delay (Reflex) for flat, an "
+"FPS cap for VR. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Els cables fins conserven el moviment mentre condueixes: el DLAA escampa les dades de moviment "
-"per les línies fines (dilatació de moviment del DLSS). activat = per defecte. desactivat = només "
-"per comparar; els cables propers parpellegen més. La imatge es veu suau un instant en canviar."
+"Taxa de fotogrames i CPU: ajust de CPU, nuclis de memòria cau AMD, límit de fps i Baixa latència "
+"(Reflex) en pla, límit de fps en VR. Dreta obre el grup, Esquerra el tanca; comença tancat cada "
+"cop que s'obre el menú."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
-"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
+"Three CPU switches together. Prefer fast cores: only Intel CPUs with P-cores and E-cores. Higher "
+"priority and no Windows power saving for the game: every CPU, Intel and AMD. Helps when the CPU "
+"is the limit; no cost. Separate in dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle."
 msgstr ""
-"Els cables fins reben profunditat a cada píxel que toquen, no només on cobreixen el centre del "
-"píxel. activat = per defecte. activat (no A2C) = també en vores translúcides. desactivat = només "
-"per comparar; els cables propers parpellegen més."
+"Tres interruptors de CPU junts. Preferir nuclis ràpids: només CPU Intel amb P-cores i E-cores. "
+"Prioritat més alta i sense estalvi d'energia de Windows per al joc: totes les CPU, Intel i AMD. "
+"Ajuda quan limita la CPU; sense cost. Per separat a dlaa.ini: cpu_pcore, cpu_priority, "
+"cpu_no_throttle."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
-"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+"AMD X3D CPUs with two core groups (7950X3D, 9950X3D): keeps the game on the cores with the big 3D "
+"V-Cache, which games like. Switches at once; off gives the game all cores back. Try it and "
+"compare in a busy city. No cost."
 msgstr ""
-"Experimental: dibuixa els cables llunyans més fins d'1 píxel com a línia d'1 píxel, perquè no es "
-"trenquin en trossos. Desactivat per defecte: els cables llunyans poden veure's més foscos o "
-"parpellejar més. Prova-ho i compara."
+"CPU AMD X3D amb dos grups de nuclis (7950X3D, 9950X3D): manté el joc als nuclis amb la gran "
+"V-Cache 3D, que als jocs els agrada. Canvia a l'instant; desactivat retorna tots els nuclis al "
+"joc. Prova-ho i compara en una ciutat amb molt de trànsit. Sense cost."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the "
-"group, Left closes it; it starts closed every time the menu opens."
+"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
+"Set it a bit below what your PC holds in a busy city. With Low delay (Reflex) on, the NVIDIA "
+"driver does the limiting. off = no limit."
 msgstr ""
-"Upscale DLSS, l'interruptor d'activar / desactivar el DLAA i la info de l'OFXR Bridge / VectorXR. "
-"Dreta obre el grup, Esquerra el tanca; comença tancat cada cop que s'obre el menú."
+"Només en pla. Manté el joc com a màxim a aquesta taxa: temps de fotograma estable, menys calor i "
+"consum. Posa-ho una mica per sota del que el teu PC aguanta en una ciutat amb molt de trànsit. "
+"Amb Baixa latència (Reflex) activada, limita el controlador NVIDIA. desactivat = sense límit."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than "
-"the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at "
-"Scaling 100 %."
+"Flat only, NVIDIA only (NVIDIA Reflex). On = the game's frames wait less before the graphics card "
+"draws them: less delay between your steering and the picture when the card is the limit. Boost "
+"also keeps the card's clocks up. Same fps; small cost."
 msgstr ""
-"El DLSS redibuixa la imatge a mida completa quan l'Escala del joc és inferior al 100 %: més nítid "
-"que l'estirament del joc, i menys píxels vol dir més fps. Sense cost extra; no fa res amb Escala "
-"100 %."
+"Només en pla, només NVIDIA (NVIDIA Reflex). Activat = els fotogrames del joc esperen menys abans "
+"que la targeta gràfica els dibuixi: menys retard entre el volant i la imatge quan limita la "
+"targeta. Boost també manté alts els rellotges de la targeta. Mateixos fps; cost petit."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
-"comparing. Off saves the cost of every part together."
+"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
+"headset's frame smoothing (ASW / Motion Smoothing) fills in the rest at a steady rhythm. Use it "
+"when the fps swings. Turns Turbo off while on."
 msgstr ""
-"Activa o desactiva tot el mod i en conserva el mode; desactivat mostra la imatge del joc, per "
-"comparar. Desactivat estalvia el cost de totes les parts juntes."
+"Només VR. meitat = el joc dibuixa un de cada 2 fotogrames del visor (72 Hz -> 36 fps), terç = un "
+"de cada 3; el suavitzat del visor (ASW / Motion Smoothing) omple la resta a un ritme estable. "
+"Fes-ho servir quan els fps oscil·len. Apaga el Turbo mentre és actiu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR speed-ups: Turbo, foveated rendering, skipping the hidden lens edges, and whether OFXR Bridge "
+"/ VectorXR are found. Right opens the group, Left closes it; it starts closed every time the menu "
+"opens."
+msgstr ""
+"Acceleracions VR: Turbo, Foveated rendering, saltar les vores amagades de les lents i si es "
+"troben OFXR Bridge / VectorXR. Dreta obre el grup, Esquerra el tanca; comença tancat cada cop que "
+"s'obre el menú."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Turbo switches off the headset's frame smoothing (ASW / Motion Smoothing / SSW). VR only. On = "
+"the game stops waiting for the headset each frame: more fps only when the CPU is the limit (busy "
+"cities, traffic). Turn it off if the picture judders."
+msgstr ""
+"El Turbo apaga el suavitzat de fotogrames del visor (ASW / Motion Smoothing / SSW). Només VR. "
+"Activat = el joc deixa d'esperar el visor a cada fotograma: més fps només quan limita la CPU "
+"(ciutats amb molt de trànsit). Desactiva-ho si la imatge fa sacsejades."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR "
+"only. The outer ring gets one colour per 2 x 2 pixels; fences, grass and leaves keep full detail. "
+"Turn it off if the edge looks blocky."
+msgstr ""
+"Centre nítid, menys detall a la vora (només NVIDIA RTX). Estalvia temps de GPU amb Escalat alt. "
+"Només VR. L'anell exterior rep un color per cada 2 x 2 píxels; tanques, herba i fulles mantenen "
+"tot el detall. Desactiva-ho si la vora es veu a blocs."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How big the sharp centre of Foveated rendering is, 10 - 100 % in 5 % steps: bigger = more of the "
+"view sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
+"(balanced) is the default; 90 = wide, 65 = narrow."
+msgstr ""
+"Quina mida té el centre nítid del Foveated rendering, 10 - 100 % en passos del 5 %: més gran = "
+"més vista nítida, menys estalvi; més petit = més estalvi, el detall baix comença més a prop del "
+"centre. 80 % (equilibrat) és el valor per defecte; 90 = ample, 65 = estret."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Foveated rendering makes coarser. scene = the 3D world only (default). scene + lighting = "
+"also the game's lighting, at the very edge only: more saving. Test it: look for blocky light or "
+"shadow edges at the side of your view."
+msgstr ""
+"Què fa més gruixut el Foveated rendering. escena = només el món 3D (per defecte). escena + "
+"il·luminació = també la il·luminació del joc, només a la vora extrema: més estalvi. Prova-ho: "
+"busca vores de llum o ombra a blocs al costat de la teva vista."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How coarse the outer ring of Foveated rendering is. Normal = 1 colour per 2 x 2 pixels (default). "
+"Strong = per 4 x 2, Max = per 4 x 4: more GPU saving, blockier edges. Best with eye tracking, "
+"where you never look at the outer ring."
+msgstr ""
+"Quin gruix té l'anell exterior del Foveated rendering. Normal = 1 color per cada 2 x 2 píxels "
+"(per defecte). Fort = per 4 x 2, Màx = per 4 x 4: més estalvi de GPU, vores més a blocs. El "
+"millor amb seguiment ocular, on mai mires l'anell exterior."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Experimental. The sharp centre of Foveated rendering follows your eyes on a headset with eye "
+"tracking (for example Varjo); without it the centre stays in the middle of the lens. Needs "
+"Foveated rendering on at the game's start, else a restart. Almost no cost."
+msgstr ""
+"Experimental. El centre nítid del Foveated rendering segueix els teus ulls en un visor amb "
+"seguiment ocular (per exemple Varjo); sense, es queda al centre de la lent. Cal el Foveated "
+"rendering activat en iniciar el joc, si no, un reinici. Gairebé sense cost."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. The game skips the lens corners you never see (the headset reports them), so it draws "
+"fewer pixels: more GPU headroom, the picture you see stays the same. The first switch-on needs a "
+"game restart. Turn it off if the edge of the view looks wrong."
+msgstr ""
+"Només VR. El joc se salta les cantonades de la lent que mai veus (el visor les informa), dibuixa "
+"menys píxels: més marge de GPU, la imatge que veus és la mateixa. La primera activació demana "
+"reiniciar el joc. Desactiva-ho si la vora de la vista es veu estranya."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -405,225 +521,49 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left "
-"closes it; it starts closed every time the menu opens."
+"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
+"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"Acceleracions VR: Turbo, renderització foveada i la màscara d'àrea oculta. Dreta obre el grup, "
-"Esquerra el tanca; comença tancat cada cop que s'obre el menú."
+"On flota la IU VR pròpia del joc (HUD, menús). El mod escriu el canvi a la consola del joc per "
+"tu; cal g_developer i g_console 1 a config.cfg. Dreta obre el grup, Esquerra el tanca."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Turbo: no ASW / Motion Smoothing / SSW / reprojection. VR only. On = the game stops waiting for "
-"the headset each frame: more fps only when the CPU is the limit (busy cities, traffic). Turn it "
-"off if the picture judders. From OpenXR Toolkit."
+"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
+"(the game's menu screens)."
 msgstr ""
-"Turbo: sense ASW / Motion Smoothing / SSW / reprojecció. Només VR. Activat = el joc deixa "
-"d'esperar el visor a cada fotograma: més fps només quan la CPU és el límit (ciutats plenes, "
-"trànsit). Desactiva-ho si la imatge va a batzegades. De l'OpenXR Toolkit."
+"Quina de les disposicions de la IU VR del joc mouen les files de sota: conducció (el HUD mentre "
+"condueixes) o menús (les pantalles de menú del joc)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR "
-"only. The outer ring is shaded once per 2 x 2 pixels; fences, grass and leaves keep full detail. "
-"Turn it off if the edge looks blocky."
+"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
+"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
-"Centre nítid, menys detall a la vora (només NVIDIA RTX). Estalvia GPU amb Escala alta. Només VR. "
-"L'anell exterior s'ombreja un cop per 2 x 2 píxels; tanques, herba i fulles conserven el detall. "
-"Desactiva-ho si la vora es veu a blocs."
+"Mou la IU VR del joc: alçada, costat, distància, inclinació, gir, mida o corba, a petits passos. "
+"El joc rep cada canvi uns 0,4 s després de l'última pulsació: la consola s'obre i es tanca sola."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How big the sharp centre of Foveated (VRS) is, 10 - 100 % in 5 % steps: bigger = more of the view "
-"sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
-"(balanced) is the default; 90 = wide, 65 = narrow."
+"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
+"own values when it exits)."
 msgstr ""
-"Mida del centre nítid del Foveated (VRS), 10 - 100 % en passos de 5 %: més gran = més vista "
-"nítida, menys estalvi; més petit = més estalvi, menys detall a prop del mig. 80 % (equilibrat) és "
-"el per defecte; 90 = ample, 65 = estret."
+"Dreta: tots els valors de les dues disposicions tornen al que tenia config.cfg a l'inici (el joc "
+"desa els seus valors en sortir)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Which of the game's passes Foveated (VRS) acts on. scene = the 3D world only (default). scene + "
-"lighting = also the game's lighting pass, at the very edge only: more saving. Test it: look for "
-"blocky light or shadow edges at the side of your view."
+"A small live fps and frame-time box, also while this menu is closed (flat and VR): fps, ms, "
+"numbers only, each with or without a graph of recent frame times (spikes show red), or the graph "
+"alone. Its GPU cost is measured. Save keeps it."
 msgstr ""
-"En quins passos del joc actua el Foveated (VRS). escena = només el món 3D (per defecte). escena + "
-"il·luminació = també la il·luminació, només a la vora extrema: més estalvi. Prova-ho: busca vores "
-"de llum o ombra a blocs als costats de la vista."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"How coarse the outer ring of Foveated (VRS) is. Normal = 1 colour per 2 x 2 pixels (default). "
-"Strong = per 4 x 2, Max = per 4 x 4: more GPU saving, blockier edges. Best with eye tracking, "
-"where you never look at the outer ring."
-msgstr ""
-"Com de gruixut és l'anell exterior del Foveated (VRS). Normal = 1 color per 2 x 2 píxels (per "
-"defecte). Fort = per 4 x 2, Màx = per 4 x 4: més estalvi de GPU, vores a blocs. Millor amb eye "
-"tracking, on mai mires l'anell exterior."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Experimental. The sharp centre of Foveated (VRS) follows your eyes on a headset with eye tracking "
-"(OpenXR eye gaze, for example Varjo); without one it stays at the lens centre. Needs Foveated "
-"(VRS) on at the game's start, else a restart. Almost no cost."
-msgstr ""
-"Experimental. El centre nítid del Foveated (VRS) segueix els teus ulls en un visor amb eye "
-"tracking (mirada OpenXR, p. ex. Varjo); sense, es queda al centre de la lent. Cal el Foveated "
-"(VRS) activat en iniciar el joc, si no reinicia. Gairebé sense cost."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. The game skips the lens corners you never see (the headset reports them), so it draws "
-"fewer pixels: more GPU headroom, the picture you see stays the same. The first switch-on needs a "
-"game restart. Turn it off if the edge of the view looks wrong."
-msgstr ""
-"Només VR. El joc se salta les cantonades de la lent que mai veus (el visor les informa), dibuixa "
-"menys píxels: més marge de GPU, la imatge que veus és la mateixa. La primera activació demana "
-"reiniciar el joc. Desactiva-ho si la vora de la vista es veu estranya."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
-msgstr ""
-"Límits de taxa de fotogrames i CPU: NVIDIA Reflex i límit de FPS per a pantalla plana, límit de "
-"FPS VR, ajust de la CPU. Dreta obre el grup, Esquerra el tanca; comença tancat cada cop que "
-"s'obre el menú."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
-"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
-msgstr ""
-"Només pantalla plana, només NVIDIA. Activat = els fotogrames del joc esperen menys a la cua de la "
-"GPU: menys input lag quan la GPU és el límit. Boost també manté alts els rellotges de la GPU. "
-"Mateixos fps; cost petit. No s'usa en VR."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
-"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
-"limiting. off = no limit."
-msgstr ""
-"Només pantalla plana. Limita el joc com a màxim a aquesta taxa: temps de fotograma estable, menys "
-"calor i consum. Posa-ho una mica per sota del que el teu PC sosté en una ciutat plena. Amb Reflex "
-"activat, ho limita el controlador NVIDIA. desactivat = sense límit."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
-"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
-"the fps swings. Turns Turbo off while on."
-msgstr ""
-"Només VR. meitat = el joc dibuixa 1 de cada 2 fotogrames del visor (72 Hz -> 36 fps), terç = 1 de "
-"cada 3; la reprojecció del visor (ASW / Motion Smoothing) omple la resta a ritme estable. Fes-ho "
-"servir si els fps oscil·len. Desactiva el Turbo mentre és actiu."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
-"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
-"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
-msgstr ""
-"Tres ajustos de CPU junts: els fils principal i de render prefereixen els P-cores (només CPU "
-"híbrides Intel), el joc corre amb prioritat Per sobre del normal, i Windows no el pot limitar "
-"(EcoQoS) ni ignorar els seus temporitzadors. Ajuda si la CPU és el límit; sense cost. Ajustos "
-"separats al dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
-"it; it starts closed every time the menu opens."
-msgstr ""
-"Posició, mida, profunditat i orientació del panell, i les tecles del menú. Dreta obre el grup, "
-"Esquerra el tanca; comença tancat cada cop que s'obre el menú."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
-"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
-"metres). Needs the VR layer (default). No cost."
-msgstr ""
-"Només VR. Seguir el cap = el panell segueix el visor. Fix a la cabina = es queda en un punt "
-"davant del teu seient, estable quan mires al voltant; X / Y / profunditat fixen aquest punt "
-"(graus, metres). Cal la capa VR (per defecte). Sense cost."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
-"and VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr ""
-"Mou aquest panell als costats, en % de la pantalla (VR fix a la cabina: graus al voltant del "
-"seient). Pantalla plana i VR guarden cadascun la seva posició. Fes-ho servir si el panell tapa "
-"alguna cosa que necessites. Sense cost."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
-"VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr ""
-"Mou aquest panell amunt / avall, en % de la pantalla (VR fix a la cabina: graus, més = avall). "
-"Pantalla plana i VR guarden cadascun la seva posició. Fes-ho servir si el panell tapa alguna cosa "
-"que necessites. Sense cost."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
-"much. Flat and VR each keep their own size. No cost."
-msgstr ""
-"Fa aquest panell més gran o més petit. Puja-ho si no pots llegir-lo, baixa-ho si tapa massa. "
-"Pantalla plana i VR guarden cadascun la seva mida. Sense cost."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
-"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
-"Change it if the panel is tiring to look at. No cost."
-msgstr ""
-"Només VR, en gris en pantalla plana. A quina distància flota el panell: en metres (0,30 - 3,00) "
-"com a capa VR, per defecte; en px de desplaçament per ull amb menu_vr_layer = 0. Mateixa mida a "
-"qualsevol profunditat. Canvia-ho si cansa mirar-lo. Sense cost."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
-"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
-"picture. No cost."
-msgstr ""
-"Només VR, en gris en pantalla plana. Activat = el panell es gira cap a tu quan el mous cap al "
-"costat, mateixa mida des de qualsevol angle (com a capa VR, per defecte, també el quadre de fps "
-"que segueix el cap); desactivat = imatge plana. Sense cost."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see "
-"what a setting gains. Its GPU cost is measured: per frame, every picture it is drawn into; none "
-"when off. Save keeps it for the next start."
-msgstr ""
-"Un petit quadre de fps i temps de fotograma en directe, també amb aquest menú tancat (pla i VR). "
-"Fes-lo servir per veure què guanya un ajust. El cost de GPU es mesura: per fotograma, cada imatge "
-"on es dibuixa; cap en desactivat. Desar el conserva per al proper inici."
+"Un petit quadre en directe amb fps i temps de fotograma, també amb aquest menú tancat (pla i VR): "
+"fps, ms, només números, cadascun amb o sense gràfic dels temps recents (els pics surten en "
+"vermell), o només el gràfic. El seu cost de GPU està mesurat. Desar el conserva."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -633,39 +573,6 @@ msgid ""
 msgstr ""
 "Fixació, posició, mida, color, distància VR i gir del quadre de fps. Dreta obre el grup, Esquerra "
 "el tanca; comença tancat cada cop que s'obre el menú."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
-"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
-"Per-part motion vectors). No cost."
-msgstr ""
-"Només VR. Seguir el cap = segueix el visor. Fix a l'àrea de joc = un punt al voltant del teu "
-"seient, ignora el balanceig de la cabina. Enganxat al vehicle = enganxat a la cabina, es "
-"balanceja amb ella (cal DLAA + vectors de moviment per peça). Sense cost."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
-"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
-"for every vehicle. No cost."
-msgstr ""
-"VR, només Enganxat al vehicle. Activat = cada camió / cotxe conserva el lloc del seu quadre de "
-"fps a la cabina, gir, mida, color, brillantor i text (es desa al dlaa.ini en tancar el menú). "
-"Desactivat = un sol conjunt per a tots els vehicles. Sense cost."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
-"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
-"vehicles keep theirs. The box is square to the cab."
-msgstr ""
-"VR, només Enganxat al vehicle. Dreta = mesurar la cabina de nou ara (quiet, aparcat) si el quadre "
-"queda fora de lloc. Esquerra = el quadre d'aquest vehicle torna al per defecte (lloc, gir, mida, "
-"color, text); els altres vehicles conserven el seu. El quadre queda recte amb la cabina."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -684,34 +591,6 @@ msgid ""
 msgstr ""
 "Mou el quadre de fps amunt / avall, en % de la pantalla (VR fix / enganxat: graus, menys = "
 "amunt). Pantalla plana i VR guarden cadascun la seva posició. Sense cost."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
-"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
-msgstr ""
-"Només VR, en gris en pantalla plana. Gira el quadre de fps a esquerra / dreta, en graus (+ = la "
-"cara gira a la dreta). Fes-ho servir per orientar el quadre quan és al costat. 0 = et mira de "
-"cara. Sense cost."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
-"lying on the dashboard). 0 = it faces you. No cost."
-msgstr ""
-"Només VR, en gris en pantalla plana. Inclina el quadre de fps, en graus (+ = la part de dalt "
-"s'allunya de tu, com estirat al panell). 0 = et mira de cara. Sense cost."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
-"upright. No cost."
-msgstr ""
-"Només VR, en gris en pantalla plana. Gira el quadre de fps en el seu propi pla, en graus (+ = "
-"sentit horari). 0 = dret. Sense cost."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -754,6 +633,79 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
+"How far back the fps graph shows: 2 - 60 s. One bar per slice of time = its slowest frame, so you "
+"see spikes. Green = on time, yellow = a bit slow, red = a hitch; the line = the headset rate / "
+"FPS cap / your usual. Shown when FPS counter has a graph."
+msgstr ""
+"Fins on arriba enrere el gràfic de fps: 2 - 60 s. Una barra per cada tros de temps = el seu "
+"fotograma més lent, així veus els pics. Verd = a temps, groc = una mica lent, vermell = una "
+"sacsejada; la línia = la taxa del visor / límit de fps / el teu habitual. Es mostra quan "
+"Comptador de FPS té gràfic."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
+"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Track "
+"moving parts). No cost."
+msgstr ""
+"Només VR. Seguir el cap = es mou amb el visor. Fix a l'espai de joc = un punt al voltant del teu "
+"seient, ignora el balanceig de la cabina. Enganxat al vehicle = enganxat a la cabina, es "
+"balanceja amb ella (necessita DLAA + Seguir peces mòbils). Sense cost."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
+"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
+"for every vehicle. No cost."
+msgstr ""
+"VR, només Enganxat al vehicle. Activat = cada camió / cotxe conserva el lloc del seu quadre de "
+"fps a la cabina, gir, mida, color, brillantor i text (es desa al dlaa.ini en tancar el menú). "
+"Desactivat = un sol conjunt per a tots els vehicles. Sense cost."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
+"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
+"vehicles keep theirs. The box is square to the cab."
+msgstr ""
+"VR, només Enganxat al vehicle. Dreta = mesurar la cabina de nou ara (quiet, aparcat) si el quadre "
+"queda fora de lloc. Esquerra = el quadre d'aquest vehicle torna al per defecte (lloc, gir, mida, "
+"color, text); els altres vehicles conserven el seu. El quadre queda recte amb la cabina."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
+"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
+msgstr ""
+"Només VR, en gris en pantalla plana. Gira el quadre de fps a esquerra / dreta, en graus (+ = la "
+"cara gira a la dreta). Fes-ho servir per orientar el quadre quan és al costat. 0 = et mira de "
+"cara. Sense cost."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
+"lying on the dashboard). 0 = it faces you. No cost."
+msgstr ""
+"Només VR, en gris en pantalla plana. Inclina el quadre de fps, en graus (+ = la part de dalt "
+"s'allunya de tu, com estirat al panell). 0 = et mira de cara. Sense cost."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
+"upright. No cost."
+msgstr ""
+"Només VR, en gris en pantalla plana. Gira el quadre de fps en el seu propi pla, en graus (+ = "
+"sentit horari). 0 = dret. Sense cost."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
 "VR only, so greyed in flat. How far away the fps box floats, 0.30 - 3.00 m. It keeps the same "
 "size in your view at every distance; only the depth changes. Put it near the depth you look at to "
 "read it without refocusing. No cost."
@@ -765,13 +717,241 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + "
-"problems worked around; info = + start-up and changes; debug = + statistics, and debug also runs "
-"the GPU timers and the CPU profiler."
+"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
+"it; it starts closed every time the menu opens."
 msgstr ""
-"Què va al dlaa_inject.log: desactivat = res; errors = només errors (per defecte); avisos = + "
-"problemes esquivats; info = + inici i canvis; depuració = + estadístiques, i depuració també "
-"activa els temporitzadors de la GPU i el profiler de la CPU."
+"Posició, mida, profunditat i orientació del panell, i les tecles del menú. Dreta obre el grup, "
+"Esquerra el tanca; comença tancat cada cop que s'obre el menú."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
+"and VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr ""
+"Mou aquest panell als costats, en % de la pantalla (VR fix a la cabina: graus al voltant del "
+"seient). Pantalla plana i VR guarden cadascun la seva posició. Fes-ho servir si el panell tapa "
+"alguna cosa que necessites. Sense cost."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
+"VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr ""
+"Mou aquest panell amunt / avall, en % de la pantalla (VR fix a la cabina: graus, més = avall). "
+"Pantalla plana i VR guarden cadascun la seva posició. Fes-ho servir si el panell tapa alguna cosa "
+"que necessites. Sense cost."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
+"much. Flat and VR each keep their own size. No cost."
+msgstr ""
+"Fa aquest panell més gran o més petit. Puja-ho si no pots llegir-lo, baixa-ho si tapa massa. "
+"Pantalla plana i VR guarden cadascun la seva mida. Sense cost."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
+"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
+"metres). Needs the VR layer (default). No cost."
+msgstr ""
+"Només VR. Seguir el cap = el panell segueix el visor. Fix a la cabina = es queda en un punt "
+"davant del teu seient, estable quan mires al voltant; X / Y / profunditat fixen aquest punt "
+"(graus, metres). Cal la capa VR (per defecte). Sense cost."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
+"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
+"Change it if the panel is tiring to look at. No cost."
+msgstr ""
+"Només VR, en gris en pantalla plana. A quina distància flota el panell: en metres (0,30 - 3,00) "
+"com a capa VR, per defecte; en px de desplaçament per ull amb menu_vr_layer = 0. Mateixa mida a "
+"qualsevol profunditat. Canvia-ho si cansa mirar-lo. Sense cost."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
+"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
+"picture. No cost."
+msgstr ""
+"Només VR, en gris en pantalla plana. Activat = el panell es gira cap a tu quan el mous cap al "
+"costat, mateixa mida des de qualsevol angle (com a capa VR, per defecte, també el quadre de fps "
+"que segueix el cap); desactivat = imatge plana. Sense cost."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches for comparing: DLAA off, the game's own TAA mixed in or side by side, the wire fixes, "
+"running DLAA earlier. Nothing here is needed for normal driving. Right opens the group, Left "
+"closes it."
+msgstr ""
+"Interruptors per comparar: DLAA desactivat, el TAA propi del joc barrejat o un al costat de "
+"l'altre, els arranjaments de cables, DLAA abans. Res d'aquí no cal per conduir amb normalitat. "
+"Dreta obre el grup, Esquerra el tanca."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
+"comparing. Off saves the cost of every part together."
+msgstr ""
+"Activa o desactiva tot el mod i en conserva el mode; desactivat mostra la imatge del joc, per "
+"comparar. Desactivat estalvia el cost de totes les parts juntes."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"on = the mod on the left, the game's own TAA on the right, to compare (Split line position, "
+"Split: left | right). Replaces Mix while on. With the game's console on, the mod switches the "
+"game's Anti-aliasing for you."
+msgstr ""
+"on = el mod a l'esquerra, el TAA propi del joc a la dreta, per comparar (Posició de la línia, "
+"Divisió: esq. | dreta). Substitueix la Mescla mentre està activat. Amb la consola del joc "
+"activada, el mod canvia l'Antialiàsing del joc per tu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the split line is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS on the left "
+"of it, the game's TAA on the right. Used only while Split with game TAA is on."
+msgstr ""
+"On és la línia de divisió, 0 - 100 % de l'amplada en passos del 5 %: a l'esquerra el DLAA / DLSS "
+"del mod, a la dreta el TAA del joc. Només s'usa mentre Divisió amb TAA del joc està activat."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What the split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix | TAA "
+"or DLAA | Mix (Mix = the two blended at Mix amount). DLSS instead of DLAA when upscaling. Used "
+"only while Split with game TAA is on."
+msgstr ""
+"Què mostra la divisió als seus dos costats: DLAA | TAA (el mod a l'esquerra, el TAA del joc a la "
+"dreta), mescla | TAA o DLAA | mescla (mescla = les dues barrejades segons la Quantitat de "
+"mescla). DLSS en lloc de DLAA en escalar. Només s'usa mentre Divisió amb TAA del joc està activat."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires move correctly while you drive: their movement is spread over the whole thin line. on "
+"= default. off = only to compare; near wires flicker more. The picture is soft for a moment when "
+"you switch."
+msgstr ""
+"Els cables fins es mouen bé mentre condueixes: el seu moviment s'escampa per tota la línia fina. "
+"activat = per defecte. desactivat = només per comparar; els cables propers parpellegen més. La "
+"imatge es veu tova un moment en canviar."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires count as in front on every pixel they touch, even where they cover only a sliver of "
+"it. on = default. on (no A2C) = also for see-through edges such as leaves. off = only to compare; "
+"near wires flicker more."
+msgstr ""
+"Els cables fins compten com a davant a cada píxel que toquen, fins i tot on en cobreixen només "
+"una tira. activat = per defecte. activat (sense A2C) = també per a vores translúcides com les "
+"fulles. desactivat = només per comparar; els cables propers parpellegen més."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
+"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+msgstr ""
+"Experimental: dibuixa els cables llunyans més fins d'1 píxel com a línia d'1 píxel, perquè no es "
+"trenquin en trossos. Desactivat per defecte: els cables llunyans poden veure's més foscos o "
+"parpellejar més. Prova-ho i compara."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Flat only: DLAA runs before the game adds its glow and colour look, so lane paint, wires and "
+"rails shimmer less. Change it only to compare. Not used with DLSS upscaling or Windows HDR. Same "
+"cost either way; takes about a second to switch."
+msgstr ""
+"Només en pla: el DLAA s'executa abans que el joc afegeixi la seva resplendor i l'aspecte de "
+"color, així les marques vials, cables i baranes parpellegen menys. Canvia-ho només per comparar. "
+"No s'usa amb l'escalat DLSS ni amb HDR de Windows. Mateix cost en tots dos casos; triga un segon "
+"a canviar."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Bug report: press the capture key twice (or Capture now) where something looks wrong; the mod "
+"writes one zip you attach to a GitHub issue. Right opens the group, Left closes it."
+msgstr ""
+"Informe d'error: prem dues vegades la tecla de captura (o Captura ara) on alguna cosa es vegi "
+"malament; el mod escriu un zip que adjuntes a una issue de GitHub. Dreta obre el grup, Esquerra "
+"el tanca."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"One switch for the most complete report: log detail debug, rewind 2 s, capture Full. Off puts the "
+"rows back as they were. Only this switch is saved; the forced values are never written to "
+"dlaa.ini."
+msgstr ""
+"Un sol interruptor per a l'informe més complet: detall del registre debug, rebobinat 2 s, captura "
+"Completa. Desactivat torna les files a com eren. Només aquest interruptor es desa; els valors "
+"forçats mai s'escriuen a dlaa.ini."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + "
+"problems worked around; info = + start-up and changes; debug = + statistics and timing "
+"measurements (a little slower)."
+msgstr ""
+"Què entra a dlaa_inject.log: desactivat = res; errors = només fallades (per defecte); avisos = + "
+"problemes esquivats; info = + inici i canvis; debug = + estadístiques i mesures de temps (una "
+"mica més lent)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Keeps the last 0.5 - 3 s of frames on the graphics card all the time, so the report shows the "
+"moment BEFORE the key (+ what DLSS got for the last frames). Costs graphics memory (the MB in the "
+"cost column) and a picture copy per frame. off = none."
+msgstr ""
+"Guarda sempre a la targeta gràfica els últims 0,5 - 3 s de fotogrames, així l'informe mostra el "
+"moment ABANS de la tecla (+ el que va rebre DLSS en els últims fotogrames). Gasta memòria gràfica "
+"(els MB de la columna de cost) i una còpia d'imatge per fotograma. desactivat = cap."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Quick = system info, logs, settings, your picture and DLAA off for a few frames (about 1 s). Full "
+"= + what DLSS got per frame (colour, motion, depth) and A/B sets: motion view, motion off, jitter "
+"only (about 2 - 4 s)."
+msgstr ""
+"Ràpida = info del sistema, registres, ajusts, la teva imatge i DLAA desactivat uns fotogrames "
+"(uns 1 s). Completa = + el que va rebre DLSS per fotograma (color, moviment, profunditat) i jocs "
+"A/B: vista de moviment, sense moviment, només jitter (uns 2 - 4 s)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The capture key. Press it TWICE within 1 s while driving where it goes wrong (the first press "
+"only arms it: one short beep). Right opens the Hotkeys page on its line to change it."
+msgstr ""
+"La tecla de captura. Prem-la DUES vegades en 1 s mentre condueixes on alguna cosa falli (la "
+"primera pulsació només l'arma: un xiulet curt). Dreta obre la pàgina Dreceres a la seva línia per "
+"canviar-la."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How many captures stay in the dlaa_selftest folder next to the DLL: older ones (folder + zip) are "
+"deleted when a new one is written. all = never delete."
+msgstr ""
+"Quantes captures es queden a la carpeta dlaa_selftest al costat de la DLL: les més antigues "
+"(carpeta + zip) s'esborren quan se n'escriu una de nova. totes = no esborrar mai."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -811,13 +991,28 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Puts every setting in this menu back to how the mod ships (model, sharpen, texture sharpness, "
-"DLAA area, motion, mirrors, profile, panel, fps box, turbo, foveated, frame rate, logging), live "
-"and in dlaa.ini, keeping your hotkeys and every other line."
+"DLAA area, motion, mirrors, preset, panel, fps box, turbo, foveated, frame rate, CPU, log "
+"detail), live and in dlaa.ini, keeping your hotkeys and every other line."
 msgstr ""
-"Torna tots els ajustos d'aquest menú a com els porta el mod (model, nitidesa, nitidesa de "
-"textura, àrea DLAA, moviment, retrovisors, perfil, panell, quadre de fps, turbo, foveated, taxa "
-"de fotogrames, registre), en directe i al dlaa.ini, conservant les teves dreceres i les altres "
+"Torna cada ajust d'aquest menú a com ve el mod (model, nitidesa, nitidesa de textura, àrea DLAA, "
+"moviment, retrovisors, perfil, panell, comptador fps, turbo, foveated, taxa de fotogrames, CPU, "
+"detall del registre), en directe i a dlaa.ini, conservant les teves dreceres i totes les altres "
 "línies."
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Off"
+msgstr "Desactivat"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph only"
+msgstr "només gràfic"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph"
+msgstr "gràfic"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -978,11 +1173,6 @@ msgstr "desactivat"
 msgid "same"
 msgstr "igual"
 
-#. Cost column cell (about 10 Latin characters)
-#: src/inject.cpp
-msgid "no extra"
-msgstr "sense extra"
-
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
@@ -1100,8 +1290,8 @@ msgstr "Costa %ls per fotograma ara; menys retrovisors costen menys."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Greyed: Mirror DLAA is off."
-msgstr "En gris: DLAA retrovisors desactivat."
+msgid "Greyed: Smooth mirrors is off."
+msgstr "En gris: Retrovisors suaus està desactivat."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1118,8 +1308,201 @@ msgstr "Els retrovisors costen %ls per fotograma ara."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid "Greyed: only for AMD X3D CPUs with two core groups (7950X3D, 9950X3D)."
+msgstr "En gris: només per a CPU AMD X3D amb dos grups de nuclis (7950X3D, 9950X3D)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On now: the game runs only on the cores with the big cache."
+msgstr "Activat ara: el joc només fa servir els nuclis amb la gran memòria cau."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On, but not applied: the game's cores were already limited (see the log)."
+msgstr "Activat, però no aplicat: els nuclis del joc ja estaven limitats (mira el registre)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "Greyed in VR: VR always runs DLAA on the finished picture."
 msgstr "En gris en VR: el VR sempre aplica el DLAA a la imatge acabada."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed: VR only."
+msgstr "En gris: només VR."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
+"game is closed."
+msgstr ""
+"En gris: la consola del joc està desactivada. Posa g_developer i g_console a \"1\" a config.cfg "
+"amb el joc tancat."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr ""
+"Esperant: fes clic a la finestra del joc a l'escriptori. El mod només escriu a la consola del joc "
+"mentre la finestra del joc té el focus."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Sending to the game's console..."
+msgstr "Enviant a la consola del joc..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "El log del joc no ha confirmat l'últim canvi: mira el log del mod."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Mix and split need the game's TAA: set Anti-aliasing to TAA in the game's graphics settings."
+msgstr ""
+"Mescla i dividit necessiten el TAA del joc: posa l'Antialiàsing en TAA a la configuració gràfica "
+"del joc."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is not running now: the mod runs alone."
+msgstr "El TAA del joc no s'està executant ara: el mod funciona sol."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or set Mode to Mix."
+msgstr ""
+"El TAA del joc s'està executant ara: posa l'Antialiàsing del joc en Desactivat, o posa el Mode en "
+"Mescla."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: split is on."
+msgstr "El TAA del joc s'està executant ara: dividit està activat."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: the mix is on."
+msgstr "El TAA del joc s'està executant ara: la mescla està activada."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: its TAA pass did not run in this frame."
+msgstr "S'ha tornat al TAA del joc: el seu pas de TAA no s'ha executat en aquest fotograma."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's jitter could not be read (see the log)."
+msgstr "S'ha tornat al TAA del joc: no s'ha pogut llegir el jitter del joc (mira el registre)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the picture before the game's TAA was not found."
+msgstr "S'ha tornat al TAA del joc: no s'ha trobat la imatge anterior al TAA del joc."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: mix and split do not work with Windows HDR."
+msgstr "S'ha tornat al TAA del joc: mescla i dividit no funcionen amb el HDR de Windows."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA is off."
+msgstr "S'ha tornat al TAA del joc: DLAA està desactivat."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's tonemap was not found (see the log)."
+msgstr "S'ha tornat al TAA del joc: no s'ha trobat el tonemap del joc (mira el registre)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA did not run on this frame (see the log)."
+msgstr "S'ha tornat al TAA del joc: DLAA no s'ha executat en aquest fotograma (mira el registre)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Or turn on the game console (g_developer and g_console 1 in config.cfg): then the mod switches it "
+"for you."
+msgstr ""
+"O activa la consola del joc (g_developer i g_console 1 a config.cfg): llavors el mod ho canvia "
+"per tu."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn on the game console to let the mod switch the game's Anti-aliasing."
+msgstr "Activa la consola del joc perquè el mod canviï l'antialiàsing del joc."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "TAA"
+msgstr "TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "unknown"
+msgstr "desconegut"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "other"
+msgstr "altre"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "waiting: click the game window"
+msgstr "esperant: fes clic a la finestra del joc"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switching..."
+msgstr "canviant..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch confirmed"
+msgstr "canvi confirmat"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch NOT confirmed (see the log)"
+msgstr "canvi NO confirmat (mira el registre)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls, %ls."
+msgstr "AA del joc: %ls, %ls."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls."
+msgstr "AA del joc: %ls."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1142,6 +1525,45 @@ msgstr "Costa %ls per fotograma ara; desactivat ho estalvia."
 #, c-format
 msgid "Costs %ls ms GPU per frame now; most of it at night."
 msgstr "Costa %ls ms de GPU per fotograma ara; la major part de nit."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"The last one: %d zips of at most 24 MB, %d MB in all (folder %.0f MB). Attach the _main zip; the "
+"others only if asked."
+msgstr "L'última: %d zips d'un màxim de 24 MB, %d MB en total (carpeta %.0f MB). Adjunta el zip _main; els altres només si te'ls demanen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Holds %.0f MB of graphics memory now."
+msgstr "Ara ocupa %.0f MB de memòria gràfica."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"%ls about %.0f MB graphics memory for the rewind; a capture takes about %.1f s and writes about "
+"%.0f MB."
+msgstr ""
+"%ls uns %.0f MB de memòria gràfica per al rebobinat; una captura triga uns %.1f s i escriu uns "
+"%.0f MB."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "On, it costs"
+msgstr "Activat, costa"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Costs now:"
+msgstr "Costa ara:"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn off Send everything to change this."
+msgstr "Desactiva Envia-ho tot per canviar això."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1205,8 +1627,8 @@ msgstr "En gris en VR: fes servir el límit de FPS VR."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Limited by the NVIDIA driver now (Reflex is on)."
-msgstr "Limitat pel controlador NVIDIA ara (Reflex està activat)."
+msgid "Limited by the NVIDIA driver now (Low delay is on)."
+msgstr "Limitat ara pel controlador NVIDIA (Baixa latència està activada)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1259,8 +1681,8 @@ msgstr "Estalvia temps a la xifra de GPU del propi joc, no a la del mod."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Foveated (VRS) is off: switch it on first."
-msgstr "Foveated (VRS) està desactivat: activa'l primer."
+msgid "Foveated rendering is off: switch it on first."
+msgstr "El Foveated rendering està desactivat: activa'l primer."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1278,10 +1700,10 @@ msgstr "Mirada falsa (vrs_eye_fake = 1): l'àrea nítida gira lentament, una pro
 #: src/inject.cpp
 #, c-format
 msgid ""
-"Foveated (VRS) was off at the game's start: save (Shift+F12) and restart the game to ask the "
+"Foveated rendering was off at the game's start: save (Shift+F12) and restart the game to ask the "
 "headset for eye gaze."
 msgstr ""
-"Foveated (VRS) estava desactivat en iniciar el joc: desa (Shift+F12) i reinicia el joc per "
+"El Foveated rendering estava desactivat en iniciar el joc: desa (Shift+F12) i reinicia el joc per "
 "demanar la mirada al visor."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
@@ -1307,18 +1729,6 @@ msgstr "No disponible: aquest runtime VR no informa cap àrea oculta."
 #, c-format
 msgid "Off now: every pixel is drawn."
 msgstr "Desactivat ara: tots els píxels es dibuixen."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now (the mod is off)."
-msgstr "Desact. ara (mod desactivat)."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-msgstr "Desactivat ara: s'usa l'estirament del joc per sota d'Escala 100 %%."
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1730,6 +2140,21 @@ msgstr "mantén %ls %hs"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "ETS2 / ATS DLAA & DLSS mod v%hs - menú d'ajustos"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "tots els ajustos (pla i VR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "Ajustos VR"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "Ajustos plans"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1779,15 +2204,41 @@ msgstr "tancat (%d)"
 msgid "Mode"
 msgstr "Mode"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLSS)"
+msgstr "Mescla (TAA + DLSS)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLAA)"
+msgstr "Mescla (TAA + DLAA)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLSS"
 msgstr "DLSS"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLAA"
 msgstr "DLAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Mix amount"
+msgstr "Quantitat de mescla"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d %% TAA"
+msgstr "%d %% TAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Quality preset"
+msgstr "Perfil de qualitat"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -1813,8 +2264,8 @@ msgstr "%.1f (desactivat)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Sharpen width"
-msgstr "Ample de nitidesa"
+msgid "Sharpness size"
+msgstr "Mida de la nitidesa"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1835,8 +2286,8 @@ msgstr "%.2f (desactivat)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Cut-out texture sharpness"
-msgstr "Nitidesa de retalls"
+msgid "Leaves and fences sharpness"
+msgstr "Nitidesa fulles i tanques"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1849,6 +2300,11 @@ msgstr "igual (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "Àrea DLAA (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "Àrea DLAA"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -1860,6 +2316,11 @@ msgstr "només VR"
 msgid "100 %% (flat)"
 msgstr "100 %% (pla)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Track moving parts"
+msgstr "Seguir peces mòbils"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "old stencil ids"
@@ -1867,13 +2328,13 @@ msgstr "ids stencil antics"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirror DLAA"
-msgstr "DLAA retrovisors"
+msgid "Smooth mirrors"
+msgstr "Retrovisors suaus"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirrors in turns"
-msgstr "Retrovisors per torns"
+msgid "Mirrors take turns (faster)"
+msgstr "Retrovisors per torns (ràpid)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1882,29 +2343,48 @@ msgstr "activat (mode 3)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Thin-wire motion"
-msgstr "Mov. de cables fins"
+msgid "Wire fix: motion"
+msgstr "Fix cables: moviment"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Wire fix: depth"
+msgstr "Fix cables: profunditat"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no A2C)"
 msgstr "activat (sense A2C)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Thicker wires (test)"
+msgstr "Cables més gruixuts (prova)"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "activat (experimental)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Run DLAA earlier (test, flat)"
+msgstr "DLAA abans (prova, pla)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Run DLAA earlier (test)"
+msgstr "DLAA abans (prova)"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "flat only"
 msgstr "només pla"
 
-#. Value column (about 20 Latin characters)
+#. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-#, c-format
-msgid "off (dlaa.ini 0)"
-msgstr "desactivat (dlaa.ini 0)"
+msgid "Glass and fence fix"
+msgstr "Fix vidres i tanques"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1913,13 +2393,49 @@ msgstr "desact. (pres. VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Light glow ghosting fix"
-msgstr "Fix rastre de resplendor"
+msgid "Light trail fix"
+msgstr "Fix rastre de llum"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA off to compare (not saved)"
+msgstr "DLAA desact. (no es desa)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split with game TAA"
+msgstr "Divisió amb TAA del joc"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split line position"
+msgstr "Posició de la línia"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split: left | right"
+msgstr "Divisió: esq. | dreta"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr "mescla | TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
+msgstr "DLAA | mescla"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (VR fotogr.)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "off (dlaa.ini 0)"
+msgstr "desactivat (dlaa.ini 0)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1940,8 +2456,73 @@ msgstr "VectorXR (capa VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Layout"
+msgstr "Disposició"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "driving"
+msgstr "conducció"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "menus"
+msgstr "menús"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Height"
+msgstr "Alçada"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Side"
+msgstr "Costat"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Distance"
+msgstr "Distància"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Tilt"
+msgstr "Inclinació"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn"
+msgstr "Gir"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Size"
+msgstr "Mida"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Curve"
+msgstr "Corba"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reset to config.cfg"
+msgstr "Torna a config.cfg"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Right"
+msgstr "Dreta"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Turbo mode (VR)"
 msgstr "Mode Turbo (VR)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "Mode Turbo"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1950,8 +2531,8 @@ msgstr "activat (aturat)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated (VRS)"
-msgstr "Foveated (VRS)"
+msgid "Foveated rendering"
+msgstr "Foveated rendering"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1970,8 +2551,8 @@ msgstr "Mida foveated"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated passes"
-msgstr "Passos foveated"
+msgid "Foveated: lighting too"
+msgstr "Foveated: també llums"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2030,8 +2611,13 @@ msgstr "act. (esperant mirada)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Hidden area mask (VR)"
-msgstr "Màscara d'àrea oculta (VR)"
+msgid "Skip hidden edges (VR)"
+msgstr "Saltar vores amagades (VR)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Skip hidden edges"
+msgstr "Saltar vores amagades"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2046,8 +2632,13 @@ msgstr "act. (límit FPS preval)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Reflex (flat)"
-msgstr "Reflex (pla)"
+msgid "Low delay (Reflex, flat)"
+msgstr "Baixa latència (Reflex, pla)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Low delay (Reflex)"
+msgstr "Baixa latència (Reflex)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2058,6 +2649,11 @@ msgstr "activat + boost"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "Límit de FPS (pla)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "Límit de FPS"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2098,8 +2694,108 @@ msgstr "mixt (dlaa.ini)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Logging"
-msgstr "Registre"
+msgid "AMD cache cores (X3D)"
+msgstr "Nuclis cau AMD (X3D)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (auto)"
+msgstr "activat (auto)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Send everything"
+msgstr "Envia-ho tot"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Log detail"
+msgstr "Detall del registre"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Rewind before key"
+msgstr "Rebobinar abans tecla"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d frames (dlaa.ini)"
+msgstr "%d fotog. (dlaa.ini)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture includes"
+msgstr "La captura inclou"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Full"
+msgstr "Completa"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Quick"
+msgstr "Ràpida"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "change"
+msgstr "canvia"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture key"
+msgstr "Tecla de captura"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%hs (press twice)"
+msgstr "%hs (prem 2 cops)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Keep captures"
+msgstr "Conserva captures"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "all"
+msgstr "totes"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture now"
+msgstr "Captura ara"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "capturing %d / %d"
+msgstr "capturant %d / %d"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "writing (%d files)"
+msgstr "escrivint (%d arxius)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "done: %d parts, %d MB"
+msgstr "fet: %d parts, %d MB"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "failed (see the log)"
+msgstr "fallat (mira el registre)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "ready"
+msgstr "a punt"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2122,6 +2818,11 @@ msgstr "auto (%ls)"
 #: src/inject.cpp
 msgid "Panel lock (VR)"
 msgstr "Bloqueig panell (VR)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel lock"
+msgstr "Bloqueig panell"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2164,6 +2865,11 @@ msgstr "Mida del panell"
 msgid "Panel VR depth"
 msgstr "Profunditat VR panell"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "Profunditat del panell"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2177,18 +2883,13 @@ msgstr "Panell de cara (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Menu keys"
-msgstr "Tecles del menú"
+msgid "Panel faces you"
+msgstr "Panell de cara"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "FPS counter"
-msgstr "Comptador de FPS"
-
-#. Value column (about 20 Latin characters)
-#: src/inject.cpp
-msgid "Off"
-msgstr "Desactivat"
+msgid "Menu keys"
+msgstr "Tecles del menú"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2287,8 +2988,23 @@ msgstr "Opacitat FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS graph length"
+msgstr "Durada gràfic FPS"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "with a graph only"
+msgstr "només amb gràfic"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "FPS distance (VR)"
 msgstr "Distància FPS (VR)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS distance"
+msgstr "Distància FPS"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2328,6 +3044,20 @@ msgstr "%lcCPU%lc | %lcGPU%lc ms"
 #, c-format
 msgid "Hold %hs for %hs s to reset. %ls"
 msgstr "Mantén %hs durant %hs s per restablir. %ls"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"%hs = capture now (the menu closes first). The zip (dlaa_selftest folder next to the DLL) holds "
+"system info, the mod's and the game's log, dlaa.ini, your picture and DLAA off; Full adds what "
+"DLSS got and the A/B sets; rewind adds the moment before. Your user name and home folder are "
+"removed. %ls"
+msgstr ""
+"%hs = captura ara (abans es tanca el menú). El zip (carpeta dlaa_selftest al costat de la DLL) "
+"conté info del sistema, el registre del mod i del joc, dlaa.ini, la teva imatge i DLAA "
+"desactivat; Completa afegeix el que va rebre DLSS i els jocs A/B; el rebobinat afegeix el moment "
+"anterior. El teu nom d'usuari i la carpeta personal s'eliminen. %ls"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2377,4 +3107,7 @@ msgstr "info"
 #: src/log.h
 msgid "debug"
 msgstr "depuració"
+
+#~ msgid "The last one: %d zip parts of at most 24 MB, %d MB in all (folder %.0f MB): attach them all."
+#~ msgstr "L'última: %d parts zip d'un màxim de 24 MB, %d MB en total (carpeta %.0f MB): adjunta-les totes."
 

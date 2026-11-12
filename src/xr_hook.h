@@ -83,6 +83,10 @@ void PoseDiagArm(int seconds);
 // sub-image rect (x, y, w, h px). -1 = not known (no xrEndFrame seen, `tex` is not a swapchain image -- an intermediate eye
 // texture -- or not in the layer).
 int ViewForImage(void* tex, uint32_t slice, int32_t rect[4]);
+// Issue #28: the OpenXR view of swapchain image `tex` when its swapchain is used by exactly ONE view of the last projection
+// layer (any slice), else -1 (unknown, no layout yet, or one swapchain shared by both views = the image says nothing about
+// the eye). Lets the eye maps follow the real view instead of the blit order.
+int UniqueViewOfImage(void* tex);
 // phase 72: the fov (L, R, U, D radians) the game submitted for view 0 / 1 in its last xrEndFrame projection layer. False = no
 // xrEndFrame seen yet.
 bool SubmittedFov(float fov[2][4]);

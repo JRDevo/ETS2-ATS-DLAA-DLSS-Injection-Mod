@@ -130,8 +130,13 @@ msgstr "Rörelse och speglar"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Upscaling and VR"
-msgstr "Uppskalning och VR"
+msgid "Frame rate"
+msgstr "Bildfrekvens"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Performance"
+msgstr "Prestanda"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -140,58 +145,84 @@ msgstr "VR-prestanda"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Frame rate and CPU"
-msgstr "Bildfrekvens och CPU"
+msgid "In-game UI"
+msgstr "Spelets UI"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "Panelinställningar"
+msgid "In-game UI (VR)"
+msgstr "Spelets UI (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "Inställningar för fps-räknare"
+msgid "FPS counter"
+msgstr "Fps-räknare"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Menu panel"
+msgstr "Menypanel"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Compare and test"
+msgstr "Jämför och testa"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Bug report"
+msgstr "Felrapport"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's "
-"Scaling is below 100 %. off = the game's own picture: use it to compare. Saved at once."
+"Scaling is below 100 %. Mix = the game's own TAA blended with DLAA / DLSS: calmer, a bit softer. "
+"off = the game's own picture. Saved at once."
 msgstr ""
-"DLAA = rena kanter i spelets renderstorlek. DLSS = samma sak, och uppskalar när spelets Skalning "
-"är under 100 %. av = spelets egen bild: för jämförelse. Sparas direkt."
+"DLAA = rena kanter i spelets renderingsstorlek. DLSS = samma sak, och skalar upp när spelets "
+"Skalning är under 100 %. Mix = spelets eget TAA blandat med DLAA / DLSS: lugnare, lite mjukare. "
+"av = spelets egen bild. Sparas direkt."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Presets for your GPU. high = everything on (model 1). medium = model 2, half-size see-through "
-"depth, flat mirrors without part motion, lighter part-motion search. low = also no mirror DLAA, "
-"no see-through depth, VR area 60 %. Never changes a setting you set yourself."
+"How much of the Mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer, less = "
+"sharper. Shown while Mode is Mix, or a split has a Mix side. No extra cost."
 msgstr ""
-"Förinställningar för din GPU. hög = allt på (modell 1). medel = modell 2, halvt genomskinligt "
-"djup, platta speglar utan delrörelse, lättare sökning. låg = också ingen spegel-DLAA, inget "
-"genomskinligt djup, VR-yta 60 %. Ändrar aldrig något du ställt in själv."
+"Hur mycket av mixen som är spelets TAA, 0 - 100 % i steg om 10 %: mer = lugnare och mjukare, "
+"mindre = skarpare. Visas medan Läge är Mix eller en delning har en Mix-sida. Ingen extra kostnad."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, least ghosting "
+"Presets for your graphics card. high = everything on (model 1). medium = model 2, a lighter Glass "
+"and fence fix, mirrors without Track moving parts. low = also no Smooth mirrors, no Glass and "
+"fence fix, VR area 60 %. Never changes a setting you set yourself."
+msgstr ""
+"Förval för ditt grafikkort. hög = allt på (modell 1). medel = modell 2, en lättare glas- och "
+"stängselfix, speglar utan Följ rörliga delar. låg = också inga Jämna ut speglar, ingen glas- och "
+"stängselfix, VR-yta 60 %. Ändrar aldrig en inställning du har satt själv."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, fewest trails "
 "behind traffic: start here. 3 (F) = calmest on fences and wires, can smear moving detail, same "
 "cost as 2. 4 (M) = heaviest (about 5x), flat tests only."
 msgstr ""
-"1 (K) = mest detaljer, skarpast text, ca 1,6x GPU av 2. 2 (E) = balanserad, minst spökbilder "
-"bakom trafik: börja här. 3 (F) = lugnast vid staket och ledningar, kan smeta rörliga detaljer, "
-"samma kostnad som 2. 4 (M) = tyngst (ca 5x), endast för platta tester."
+"1 (K) = mest detaljer, skarpast text, ungefär 1,6 gånger GPU:n för 2. 2 (E) = balanserad, minst "
+"spår bakom trafik: börja här. 3 (F) = lugnast på stängsel och ledningar, kan smeta rörliga "
+"detaljer, samma kostnad som 2. 4 (M) = tyngst (ungefär 5 gånger), bara för tester i platt."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Picture quality: sharpening, texture sharpness, the DLAA area and the see-through depth. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
+"Picture quality: sharpening, texture sharpness, the Glass and fence fix, the Light trail fix and "
+"the DLAA area. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Bildkvalitet: skärpning, texturskärpa, DLAA-ytan och genomskinligt djup. Höger öppnar gruppen, "
-"vänster stänger den; den är stängd varje gång menyn öppnas."
+"Bildkvalitet: skärpning, texturskärpa, glas- och stängselfixen, ljusspårsfixen och DLAA-ytan. "
+"Höger öppnar gruppen, Vänster stänger den; den börjar stängd varje gång menyn öppnas."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -216,20 +247,42 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Sharper texture text (road signs, dashboard, GPS). 0 = off; more negative = sharper but more "
-"shimmer on fences; try -0.5 to -1 if text is blurry. No GPU time, only a little memory bandwidth."
+"shimmer on fences; try -0.5 to -1 if text is blurry. Almost no cost."
 msgstr ""
-"Skarpare text i texturer (skyltar, instrumentpanel, GPS). 0 = av; mer negativ = skarpare men mer "
-"flimmer på staket; prova -0,5 till -1 vid suddig text. Ingen GPU-tid, bara lite minnesbandbredd."
+"Skarpare text i texturer (vägskyltar, instrumentpanel, GPS). 0 = av; mer negativ = skarpare, men "
+"mer flimmer på stängsel; prova -0,5 till -1 om text är suddig. Kostar nästan inget."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"The same for wire fences, grass and leaf cut-outs: raise it toward 0 if fences shimmer, lower it "
-"if grass looks soft. same = follows the row above. Acts only while Texture sharpness is not 0. No "
-"GPU time, a little memory."
+"The same for wire fences, grass and leaves: raise it toward 0 if fences shimmer, lower it if "
+"grass looks soft. same = follows the row above. Works only while Texture sharpness is not 0. "
+"Almost no cost."
 msgstr ""
-"Samma för nätstaket, gräs och bladutklipp: höj mot 0 om staket flimrar, sänk om gräs är mjukt. "
-"samma = följer raden ovan. Verkar bara när Texturskärpa inte är 0. Ingen GPU-tid, lite minne."
+"Samma sak för nätstaket, gräs och löv: höj mot 0 om stängsel flimrar, sänk om gräs ser mjukt ut. "
+"samma = följer raden ovanför. Fungerar bara medan Texturskärpa inte är 0. Kostar nästan inget."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Wires, fences and windows are treated as the thing in front, not as what you see through them, so "
+"they do not smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms "
+"per eye."
+msgstr ""
+"Ledningar, stängsel och rutor behandlas som det som är framför, inte som det du ser genom dem, så "
+"de smetar inte när du rör dig. Stäng av det om du inte ser smetning där: sparar 0,02 - 0,06 ms "
+"per öga."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Stops street-lamp and car-light glows leaving a trail behind them when you move: the glows are "
+"drawn fresh each frame instead of being blended with older frames. 25 % steps; lower it if lamp "
+"glows flicker, 0 = off. Costs about 0.05 - 0.2 ms per eye."
+msgstr ""
+"Hindrar att sken från gatlyktor och billjus lämnar ett spår när du rör dig: skenet ritas på nytt "
+"i varje bild i stället för att blandas med äldre bilder. Steg på 25 %; sänk det om lyktskenet "
+"flimrar, 0 = av. Kostar ungefär 0,05 - 0,2 ms per öga."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -245,37 +298,6 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
-"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
-"~60 frames to switch."
-msgstr ""
-"Endast plattskärm: DLAA före spelets bloom/tonemap, så vägmarkeringar, ledningar och räls flimrar "
-"mindre. Ändra bara för jämförelse. Inte med DLSS-uppskalning eller Windows-HDR. Samma kostnad; "
-"bytet tar ~60 bildrutor."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Gives wires, fences and glass their own distance instead of what is behind them, so they do not "
-"smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."
-msgstr ""
-"Ger ledningar, staket och glas eget avstånd i stället för det bakom, så de inte smetar vid "
-"rörelse. Stäng av om inget smetar: sparar 0,02 - 0,06 ms per öga."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Stops street-lamp and car-light glows leaving a trail behind them when you move: DLSS takes each "
-"glow from the current frame, not its history. 25 % steps; lower it if lamp glows flicker, 0 = "
-"off. Costs about 0.05 - 0.2 ms per eye."
-msgstr ""
-"Hindrar att glöd från gatlyktor och bilbelysning drar ett spår vid rörelse: DLSS tar varje glöd "
-"från aktuell bild, inte historiken. Steg om 25 %; sänk om glöden flimrar, 0 = av. Kostar ca 0,05 "
-"- 0,2 ms per öga."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
 "How moving parts and truck mirrors are handled by DLAA. Right opens the group, Left closes it; it "
 "starts closed every time the menu opens."
 msgstr ""
@@ -285,24 +307,24 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and "
-"does not ghost. Turn it off only to save about 0.5 ms per eye or to test: every pixel then moves "
+"DLAA follows each moving thing on its own (traffic, wheels, number plates), so it stays sharp and "
+"leaves no trail. Turn it off only to save about 0.5 ms per eye or to test: everything then moves "
 "with the camera and traffic smears."
 msgstr ""
-"Ger varje rörlig del (trafik, hjul, registreringsskyltar) egen rörelse för DLAA, så den förblir "
-"skarp utan spökbilder. Stäng bara av för att spara ca 0,5 ms per öga eller testa: varje pixel "
-"följer då kameran och trafik smetar."
+"DLAA följer varje rörlig sak för sig (trafik, hjul, registreringsskyltar), så det förblir skarpt "
+"och lämnar inga spår. Stäng bara av det för att spara ungefär 0,5 ms per öga eller för att testa: "
+"då rör sig allt med kameran och trafiken smetar."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main "
-"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can ghost "
-"in the glass; else each part moves exactly in the glass."
+"Smooths the truck mirrors too, so they do not shimmer. 1 mirror = only the largest (the main "
+"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can leave "
+"trails in the glass; the others follow each moving thing."
 msgstr ""
-"Ger lastbilsspeglar eget DLAA så de inte flimrar. 1 spegel = bara den största (huvudspegeln "
-"bredvid dig). alla = varje spegel. kamera = billigast per spegel, trafik kan spöka i glaset; "
-"annars rör sig varje del exakt i glaset."
+"Jämnar också ut lastbilens speglar, så de inte flimrar. 1 spegel = bara den största (huvudspegeln "
+"bredvid dig). alla = varje spegel. kamera = billigast per spegel, trafik i rörelse kan lämna spår "
+"i glaset; de andra följer varje rörlig sak."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -318,62 +340,156 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
-"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
-"soft for a moment when it changes."
+"Frame rate and CPU: CPU tuning, AMD cache cores, an FPS cap and Low delay (Reflex) for flat, an "
+"FPS cap for VR. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"Tunna ledningar behåller sin rörelse under körning: DLAA sprider rörelsedata över tunna linjer "
-"(DLSS motion dilation). på = standard. av = bara för jämförelse; nära ledningar flimrar mer. "
-"Bilden är kort mjuk vid byte."
+"Bildfrekvens och CPU: CPU-tuning, AMD-cachekärnor, en fps-gräns och Låg fördröjning (Reflex) för "
+"platt, en fps-gräns för VR. Höger öppnar gruppen, Vänster stänger den; den börjar stängd varje "
+"gång menyn öppnas."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
-"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
+"Three CPU switches together. Prefer fast cores: only Intel CPUs with P-cores and E-cores. Higher "
+"priority and no Windows power saving for the game: every CPU, Intel and AMD. Helps when the CPU "
+"is the limit; no cost. Separate in dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle."
 msgstr ""
-"Tunna ledningar får djup på varje pixel de rör, inte bara där de täcker en pixelmitt. på = "
-"standard. på (utan A2C) = även för genomskinliga kanter. av = bara för jämförelse; nära ledningar "
-"flimrar mer."
+"Tre CPU-reglage tillsammans. Föredra snabba kärnor: bara Intel-processorer med P-kärnor och "
+"E-kärnor. Högre prioritet och ingen Windows-strömsparning för spelet: alla processorer, Intel och "
+"AMD. Hjälper när CPU:n är gränsen; ingen kostnad. Var för sig i dlaa.ini: cpu_pcore, "
+"cpu_priority, cpu_no_throttle."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
-"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+"AMD X3D CPUs with two core groups (7950X3D, 9950X3D): keeps the game on the cores with the big 3D "
+"V-Cache, which games like. Switches at once; off gives the game all cores back. Try it and "
+"compare in a busy city. No cost."
 msgstr ""
-"Experimentellt: ritar avlägsna ledningar tunnare än 1 pixel som en linje på 1 pixel, så de inte "
-"bryts i streck. Av som standard: avlägsna ledningar kan se mörkare ut eller flimra mer. Prova och "
-"jämför."
+"AMD X3D-processorer med två kärngrupper (7950X3D, 9950X3D): håller spelet på kärnorna med den "
+"stora 3D V-Cache, som spel gillar. Verkar direkt; av ger spelet alla kärnor tillbaka. Prova och "
+"jämför i en livlig stad. Ingen kostnad."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the "
-"group, Left closes it; it starts closed every time the menu opens."
+"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
+"Set it a bit below what your PC holds in a busy city. With Low delay (Reflex) on, the NVIDIA "
+"driver does the limiting. off = no limit."
 msgstr ""
-"DLSS-uppskalning, DLAA-strömbrytaren och info om OFXR Bridge / VectorXR. Höger öppnar gruppen, "
-"vänster stänger den; den är stängd varje gång menyn öppnas."
+"Bara platt. Håller spelet på högst denna bildfrekvens: jämn bildtid, mindre värme och ström. Sätt "
+"den lite under vad din dator klarar i en livlig stad. Med Låg fördröjning (Reflex) på är det "
+"NVIDIA-drivrutinen som begränsar. av = ingen gräns."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than "
-"the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at "
-"Scaling 100 %."
+"Flat only, NVIDIA only (NVIDIA Reflex). On = the game's frames wait less before the graphics card "
+"draws them: less delay between your steering and the picture when the card is the limit. Boost "
+"also keeps the card's clocks up. Same fps; small cost."
 msgstr ""
-"DLSS ritar bilden tillbaka i full storlek när spelets Skalning är under 100 %: skarpare än "
-"spelets egen sträckning, och färre pixlar ger fler fps. Ingen extra kostnad; gör inget vid "
-"Skalning 100 %."
+"Bara platt, bara NVIDIA (NVIDIA Reflex). På = spelets bilder väntar kortare innan grafikkortet "
+"ritar dem: mindre fördröjning mellan styrningen och bilden när kortet är gränsen. Boost håller "
+"också kortets klockfrekvenser uppe. Samma fps; liten kostnad."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
-"comparing. Off saves the cost of every part together."
+"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
+"headset's frame smoothing (ASW / Motion Smoothing) fills in the rest at a steady rhythm. Use it "
+"when the fps swings. Turns Turbo off while on."
 msgstr ""
-"Slår på eller av hela modden och minns läget; av visar spelets egen bild för jämförelse. Av "
-"sparar kostnaden för alla delar tillsammans."
+"Bara VR. halv = spelet ritar var 2:a headsetbild (72 Hz -> 36 fps), tredjedel = var 3:e; "
+"headsetets bildutjämning (ASW / Motion Smoothing) fyller i resten i jämn takt. Använd det när fps "
+"svänger. Stänger av Turbo medan det är på."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR speed-ups: Turbo, foveated rendering, skipping the hidden lens edges, and whether OFXR Bridge "
+"/ VectorXR are found. Right opens the group, Left closes it; it starts closed every time the menu "
+"opens."
+msgstr ""
+"VR-snabbare: Turbo, foveated rendering, att hoppa över de dolda linskanterna, och om OFXR Bridge "
+"/ VectorXR hittas. Höger öppnar gruppen, Vänster stänger den; den börjar stängd varje gång menyn "
+"öppnas."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Turbo switches off the headset's frame smoothing (ASW / Motion Smoothing / SSW). VR only. On = "
+"the game stops waiting for the headset each frame: more fps only when the CPU is the limit (busy "
+"cities, traffic). Turn it off if the picture judders."
+msgstr ""
+"Turbo stänger av headsetets bildutjämning (ASW / Motion Smoothing / SSW). Bara VR. På = spelet "
+"slutar vänta på headsetet i varje bild: fler fps bara när CPU:n är gränsen (livliga städer, "
+"trafik). Stäng av det om bilden hackar."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR "
+"only. The outer ring gets one colour per 2 x 2 pixels; fences, grass and leaves keep full detail. "
+"Turn it off if the edge looks blocky."
+msgstr ""
+"Skarpt centrum, mindre detaljer i kanten (bara NVIDIA RTX). Sparar GPU-tid vid hög Skalning. Bara "
+"VR. Den yttre ringen får en färg per 2 x 2 pixlar; stängsel, gräs och löv behåller full detalj. "
+"Stäng av det om kanten ser blockig ut."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How big the sharp centre of Foveated rendering is, 10 - 100 % in 5 % steps: bigger = more of the "
+"view sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
+"(balanced) is the default; 90 = wide, 65 = narrow."
+msgstr ""
+"Hur stort det skarpa centrumet i Foveated rendering är, 10 - 100 % i steg om 5 %: större = mer av "
+"bilden skarp, mindre besparing; mindre = mer besparing, lägre detaljer börjar närmare mitten. 80 "
+"% (balanserad) är standard; 90 = bred, 65 = smal."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Foveated rendering makes coarser. scene = the 3D world only (default). scene + lighting = "
+"also the game's lighting, at the very edge only: more saving. Test it: look for blocky light or "
+"shadow edges at the side of your view."
+msgstr ""
+"Vad Foveated rendering gör grövre. scen = bara 3D-världen (standard). scen + ljus = också spelets "
+"belysning, bara längst ut: mer besparing. Testa det: leta efter blockiga ljus- eller skuggkanter "
+"i sidan av din syn."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How coarse the outer ring of Foveated rendering is. Normal = 1 colour per 2 x 2 pixels (default). "
+"Strong = per 4 x 2, Max = per 4 x 4: more GPU saving, blockier edges. Best with eye tracking, "
+"where you never look at the outer ring."
+msgstr ""
+"Hur grov den yttre ringen i Foveated rendering är. Normal = 1 färg per 2 x 2 pixlar (standard). "
+"Stark = per 4 x 2, Max = per 4 x 4: mer GPU-besparing, blockigare kanter. Bäst med eyetracking, "
+"där du aldrig tittar på den yttre ringen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Experimental. The sharp centre of Foveated rendering follows your eyes on a headset with eye "
+"tracking (for example Varjo); without it the centre stays in the middle of the lens. Needs "
+"Foveated rendering on at the game's start, else a restart. Almost no cost."
+msgstr ""
+"Experimentell. Det skarpa centrumet i Foveated rendering följer dina ögon på ett headset med "
+"eyetracking (till exempel Varjo); utan det stannar centrumet i mitten av linsen. Foveated "
+"rendering måste vara på vid spelstart, annars krävs en omstart. Kostar nästan inget."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. The game skips the lens corners you never see (the headset reports them), so it draws "
+"fewer pixels: more GPU headroom, the picture you see stays the same. The first switch-on needs a "
+"game restart. Turn it off if the edge of the view looks wrong."
+msgstr ""
+"Endast VR. Spelet hoppar över linshörnen du aldrig ser (headsetet rapporterar dem) och ritar "
+"färre pixlar: mer GPU-utrymme, bilden du ser är densamma. Första påslaget kräver omstart av "
+"spelet. Av om synfältets kant ser fel ut."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -400,222 +516,50 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left "
-"closes it; it starts closed every time the menu opens."
+"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
+"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"VR-snabbare: Turbo, foveated rendering och masken för dolt område. Höger öppnar gruppen, vänster "
-"stänger den; den är stängd varje gång menyn öppnas."
+"Var spelets eget VR-UI svävar (HUD, menyer). Modden skriver in ändringen i spelets konsol åt dig; "
+"kräver g_developer och g_console 1 i config.cfg. Höger öppnar gruppen, vänster stänger den."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Turbo: no ASW / Motion Smoothing / SSW / reprojection. VR only. On = the game stops waiting for "
-"the headset each frame: more fps only when the CPU is the limit (busy cities, traffic). Turn it "
-"off if the picture judders. From OpenXR Toolkit."
+"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
+"(the game's menu screens)."
 msgstr ""
-"Turbo: ingen ASW / Motion Smoothing / SSW / reprojektion. Endast VR. På = spelet väntar inte på "
-"headsetet varje bildruta: fler fps bara när CPU är gränsen (trånga städer, trafik). Av om bilden "
-"hackar. Från OpenXR Toolkit."
+"Vilken av spelets VR-UI-layouter raderna nedan flyttar: körning (HUD:en under körning) eller "
+"menyer (spelets menyskärmar)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR "
-"only. The outer ring is shaded once per 2 x 2 pixels; fences, grass and leaves keep full detail. "
-"Turn it off if the edge looks blocky."
+"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
+"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
-"Skarpt centrum, mindre detalj i kanten (endast NVIDIA RTX). Sparar GPU-tid vid hög Skalning. "
-"Endast VR. Yttre ringen skuggas en gång per 2 x 2 pixlar; staket, gräs och löv behåller full "
-"detalj. Av om kanten ser blockig ut."
+"Flyttar spelets VR-UI: höjd, sida, avstånd, lutning, vridning, storlek eller krökning, i små "
+"steg. Spelet får varje ändring ca 0,4 s efter ditt sista tryck: konsolen öppnas och stängs av sig "
+"själv."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How big the sharp centre of Foveated (VRS) is, 10 - 100 % in 5 % steps: bigger = more of the view "
-"sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
-"(balanced) is the default; 90 = wide, 65 = narrow."
+"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
+"own values when it exits)."
 msgstr ""
-"Hur stort det skarpa centret i Foveated (VRS) är, 10 - 100 % i steg om 5 %: större = mer av "
-"synfältet skarpt, mindre besparing; mindre = mer besparing, lägre detalj börjar närmare mitten. "
-"80 % (balanserad) är standard; 90 = bred, 65 = smal."
+"Höger: alla värden i båda layouterna tillbaka till vad config.cfg hade i början (spelet sparar "
+"sina egna värden när det avslutas)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Which of the game's passes Foveated (VRS) acts on. scene = the 3D world only (default). scene + "
-"lighting = also the game's lighting pass, at the very edge only: more saving. Test it: look for "
-"blocky light or shadow edges at the side of your view."
+"A small live fps and frame-time box, also while this menu is closed (flat and VR): fps, ms, "
+"numbers only, each with or without a graph of recent frame times (spikes show red), or the graph "
+"alone. Its GPU cost is measured. Save keeps it."
 msgstr ""
-"Vilka av spelets renderpass Foveated (VRS) verkar på. scen = bara 3D-världen (standard). scen + "
-"ljus = även ljuspasset, bara längst ut: mer besparing. Testa: titta efter blockiga ljus- eller "
-"skuggkanter i sidan av synfältet."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"How coarse the outer ring of Foveated (VRS) is. Normal = 1 colour per 2 x 2 pixels (default). "
-"Strong = per 4 x 2, Max = per 4 x 4: more GPU saving, blockier edges. Best with eye tracking, "
-"where you never look at the outer ring."
-msgstr ""
-"Hur grov yttre ringen i Foveated (VRS) är. Normal = 1 färg per 2 x 2 pixlar (standard). Kraftig = "
-"per 4 x 2, Max = per 4 x 4: mer GPU-besparing, blockigare kanter. Bäst med eyetracking, där du "
-"aldrig tittar på yttre ringen."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Experimental. The sharp centre of Foveated (VRS) follows your eyes on a headset with eye tracking "
-"(OpenXR eye gaze, for example Varjo); without one it stays at the lens centre. Needs Foveated "
-"(VRS) on at the game's start, else a restart. Almost no cost."
-msgstr ""
-"Experimentellt. Det skarpa centret i Foveated (VRS) följer dina ögon på ett headset med "
-"eyetracking (OpenXR eye gaze, t.ex. Varjo); utan stannar det i linscentrum. Foveated (VRS) måste "
-"vara på vid spelstart, annars omstart. Nästan ingen kostnad."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. The game skips the lens corners you never see (the headset reports them), so it draws "
-"fewer pixels: more GPU headroom, the picture you see stays the same. The first switch-on needs a "
-"game restart. Turn it off if the edge of the view looks wrong."
-msgstr ""
-"Endast VR. Spelet hoppar över linshörnen du aldrig ser (headsetet rapporterar dem) och ritar "
-"färre pixlar: mer GPU-utrymme, bilden du ser är densamma. Första påslaget kräver omstart av "
-"spelet. Av om synfältets kant ser fel ut."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
-msgstr ""
-"Bildfrekvensgränser och CPU: NVIDIA Reflex och en fps-gräns för platt, en VR-fps-gräns, "
-"CPU-tuning. Höger öppnar gruppen, vänster stänger den; den är stängd varje gång menyn öppnas."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
-"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
-msgstr ""
-"Endast platt, endast NVIDIA. På = spelets bildrutor väntar mindre i GPU-kön: mindre "
-"inputfördröjning när GPU är gränsen. Boost håller också GPU-klockorna uppe. Samma fps; liten "
-"kostnad. Inte i VR."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
-"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
-"limiting. off = no limit."
-msgstr ""
-"Endast platt. Håller spelet på högst denna bildfrekvens: jämn frametid, mindre värme och ström. "
-"Sätt den lite under vad din dator klarar i en trång stad. Med Reflex på begränsar "
-"NVIDIA-drivrutinen. av = ingen gräns."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
-"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
-"the fps swings. Turns Turbo off while on."
-msgstr ""
-"Endast VR. halv = spelet ritar var 2:a headsetbildruta (72 Hz -> 36 fps), tredjedel = var 3:e; "
-"headsetets reprojektion (ASW / Motion Smoothing) fyller i resten i jämn takt. Använd när fps "
-"varierar. Stänger av Turbo medan det är på."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
-"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
-"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
-msgstr ""
-"Tre CPU-omkopplare tillsammans: huvud- och rendertråden föredrar P-cores (endast "
-"Intel-hybrid-CPU:er), spelet körs med prioritet Över normal, och Windows får inte strypa det "
-"(EcoQoS) eller ignorera dess timerförfrågningar. Hjälper när CPU är gränsen; ingen kostnad. "
-"Separat i dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
-"it; it starts closed every time the menu opens."
-msgstr ""
-"Panelens position, storlek, djup och riktning samt menytangenterna. Höger öppnar gruppen, vänster "
-"stänger den; den är stängd varje gång menyn öppnas."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
-"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
-"metres). Needs the VR layer (default). No cost."
-msgstr ""
-"Endast VR. Följ huvud = panelen följer headsetet. Fast i hytten = den stannar på en plats framför "
-"din stol, stadig när du ser dig om; X / Y / djup styr då platsen (grader, meter). Kräver "
-"VR-lagret (standard). Ingen kostnad."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
-"and VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr ""
-"Flyttar panelen i sidled, i % av skärmen (VR fast i hytten: grader runt din stol). Platt och VR "
-"har var sin position. Använd om panelen täcker något du behöver. Ingen kostnad."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
-"VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr ""
-"Flyttar panelen upp / ned, i % av skärmen (VR fast i hytten: grader, plus = ned). Platt och VR "
-"har var sin position. Använd om panelen täcker något du behöver. Ingen kostnad."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
-"much. Flat and VR each keep their own size. No cost."
-msgstr ""
-"Gör panelen större eller mindre. Höj om du inte kan läsa den, sänk om den täcker för mycket. "
-"Platt och VR har var sin storlek. Ingen kostnad."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
-"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
-"Change it if the panel is tiring to look at. No cost."
-msgstr ""
-"Endast VR, därför grå i platt. Hur långt bort panelen svävar: i meter (0,30 - 3,00) som VR-lager, "
-"standard; i px inåtförskjutning per öga med menu_vr_layer = 0. Samma storlek på alla djup. Ändra "
-"om panelen är tröttande att titta på. Ingen kostnad."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
-"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
-"picture. No cost."
-msgstr ""
-"Endast VR, därför grå i platt. På = panelen vrider sig mot dig när du flyttar den åt sidan, samma "
-"storlek från alla vinklar (som VR-lager, standard, även den huvudföljande fps-räknaren); av = en "
-"platt bild. Ingen kostnad."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see "
-"what a setting gains. Its GPU cost is measured: per frame, every picture it is drawn into; none "
-"when off. Save keeps it for the next start."
-msgstr ""
-"En liten live-ruta med fps och frametid, även när menyn är stängd (platt och VR). Använd den för "
-"att se vad en inställning ger. GPU-kostnaden är mätt: per bildruta, varje bild den ritas i; ingen "
-"när av. Spara behåller den till nästa start."
+"En liten live-ruta med fps och bildtid, också när menyn är stängd (platt och VR): fps, ms, bara "
+"siffror, var och en med eller utan en graf över de senaste bildtiderna (toppar är röda), eller "
+"bara grafen. GPU-kostnaden mäts. Spara behåller den."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -625,39 +569,6 @@ msgid ""
 msgstr ""
 "Fps-räknarens lås, position, storlek, färg, VR-avstånd och vridning. Höger öppnar gruppen, "
 "vänster stänger den; den är stängd varje gång menyn öppnas."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
-"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
-"Per-part motion vectors). No cost."
-msgstr ""
-"Endast VR. Följ huvud = följer headsetet. Fast i spelytan = en plats runt din stol, ignorerar "
-"hyttens gungande. Fäst vid fordon = sitter på hytten, gungar med (kräver DLAA + rörelsevektorer "
-"per del). Ingen kostnad."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
-"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
-"for every vehicle. No cost."
-msgstr ""
-"Endast VR, endast Fäst vid fordon. På = varje lastbil / bil behåller egen plats, vridning, "
-"storlek, färg, ljusstyrka och text för fps-räknaren i hytten (sparas i dlaa.ini när menyn "
-"stängs). Av = en gemensam uppsättning för alla fordon. Ingen kostnad."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
-"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
-"vehicles keep theirs. The box is square to the cab."
-msgstr ""
-"Endast VR, endast Fäst vid fordon. Höger = mät hytten igen nu (sitt still, parkerad) om rutan "
-"sitter fel. Vänster = detta fordons ruta tillbaka till standard (plats, vridning, storlek, färg, "
-"text); andra fordon behåller sina. Rutan står vinkelrätt mot hytten."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -676,34 +587,6 @@ msgid ""
 msgstr ""
 "Flyttar fps-räknaren upp / ned, i % av skärmen (VR fast / fäst: grader, minus = upp). Platt och "
 "VR har var sin position. Ingen kostnad."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
-"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
-msgstr ""
-"Endast VR, därför grå i platt. Vrider fps-räknaren åt vänster / höger runt sig själv, i grader (+ "
-"= framsidan vrids åt höger). Använd för att vinkla den när den sitter vid sidan. 0 = den vänder "
-"mot dig. Ingen kostnad."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
-"lying on the dashboard). 0 = it faces you. No cost."
-msgstr ""
-"Endast VR, därför grå i platt. Lutar fps-räknaren, i grader (+ = toppen lutar bort från dig, som "
-"om den låg på instrumentpanelen). 0 = den vänder mot dig. Ingen kostnad."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
-"upright. No cost."
-msgstr ""
-"Endast VR, därför grå i platt. Roterar fps-räknaren i sitt eget plan, i grader (+ = medurs). 0 = "
-"upprätt. Ingen kostnad."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -747,6 +630,78 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
+"How far back the fps graph shows: 2 - 60 s. One bar per slice of time = its slowest frame, so you "
+"see spikes. Green = on time, yellow = a bit slow, red = a hitch; the line = the headset rate / "
+"FPS cap / your usual. Shown when FPS counter has a graph."
+msgstr ""
+"Hur långt tillbaka fps-grafen visar: 2 - 60 s. En stapel per tidsbit = dess långsammaste bild, så "
+"du ser toppar. Grön = i tid, gul = lite långsam, röd = ett hack; linjen = headsetets takt / "
+"fps-gräns / ditt vanliga. Visas när Fps-räknare har en graf."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
+"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Track "
+"moving parts). No cost."
+msgstr ""
+"Bara VR. Följ huvudet = rör sig med headsetet. Fast i spelrummet = en plats runt din stol, "
+"ignorerar hyttens gungning. Fäst vid fordonet = sitter fast på hytten och gungar med (kräver DLAA "
+"+ Följ rörliga delar). Ingen kostnad."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
+"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
+"for every vehicle. No cost."
+msgstr ""
+"Endast VR, endast Fäst vid fordon. På = varje lastbil / bil behåller egen plats, vridning, "
+"storlek, färg, ljusstyrka och text för fps-räknaren i hytten (sparas i dlaa.ini när menyn "
+"stängs). Av = en gemensam uppsättning för alla fordon. Ingen kostnad."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
+"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
+"vehicles keep theirs. The box is square to the cab."
+msgstr ""
+"Endast VR, endast Fäst vid fordon. Höger = mät hytten igen nu (sitt still, parkerad) om rutan "
+"sitter fel. Vänster = detta fordons ruta tillbaka till standard (plats, vridning, storlek, färg, "
+"text); andra fordon behåller sina. Rutan står vinkelrätt mot hytten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
+"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
+msgstr ""
+"Endast VR, därför grå i platt. Vrider fps-räknaren åt vänster / höger runt sig själv, i grader (+ "
+"= framsidan vrids åt höger). Använd för att vinkla den när den sitter vid sidan. 0 = den vänder "
+"mot dig. Ingen kostnad."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
+"lying on the dashboard). 0 = it faces you. No cost."
+msgstr ""
+"Endast VR, därför grå i platt. Lutar fps-räknaren, i grader (+ = toppen lutar bort från dig, som "
+"om den låg på instrumentpanelen). 0 = den vänder mot dig. Ingen kostnad."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
+"upright. No cost."
+msgstr ""
+"Endast VR, därför grå i platt. Roterar fps-räknaren i sitt eget plan, i grader (+ = medurs). 0 = "
+"upprätt. Ingen kostnad."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
 "VR only, so greyed in flat. How far away the fps box floats, 0.30 - 3.00 m. It keeps the same "
 "size in your view at every distance; only the depth changes. Put it near the depth you look at to "
 "read it without refocusing. No cost."
@@ -758,13 +713,238 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + "
-"problems worked around; info = + start-up and changes; debug = + statistics, and debug also runs "
-"the GPU timers and the CPU profiler."
+"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
+"it; it starts closed every time the menu opens."
 msgstr ""
-"Vad som hamnar i dlaa_inject.log: av = inget; fel = bara fel (standard); varningar = + kringgådda "
-"problem; info = + start och ändringar; felsökning = + statistik, och felsökning kör även "
-"GPU-timrarna och CPU-profileraren."
+"Panelens position, storlek, djup och riktning samt menytangenterna. Höger öppnar gruppen, vänster "
+"stänger den; den är stängd varje gång menyn öppnas."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
+"and VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr ""
+"Flyttar panelen i sidled, i % av skärmen (VR fast i hytten: grader runt din stol). Platt och VR "
+"har var sin position. Använd om panelen täcker något du behöver. Ingen kostnad."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
+"VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr ""
+"Flyttar panelen upp / ned, i % av skärmen (VR fast i hytten: grader, plus = ned). Platt och VR "
+"har var sin position. Använd om panelen täcker något du behöver. Ingen kostnad."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
+"much. Flat and VR each keep their own size. No cost."
+msgstr ""
+"Gör panelen större eller mindre. Höj om du inte kan läsa den, sänk om den täcker för mycket. "
+"Platt och VR har var sin storlek. Ingen kostnad."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
+"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
+"metres). Needs the VR layer (default). No cost."
+msgstr ""
+"Endast VR. Följ huvud = panelen följer headsetet. Fast i hytten = den stannar på en plats framför "
+"din stol, stadig när du ser dig om; X / Y / djup styr då platsen (grader, meter). Kräver "
+"VR-lagret (standard). Ingen kostnad."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
+"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
+"Change it if the panel is tiring to look at. No cost."
+msgstr ""
+"Endast VR, därför grå i platt. Hur långt bort panelen svävar: i meter (0,30 - 3,00) som VR-lager, "
+"standard; i px inåtförskjutning per öga med menu_vr_layer = 0. Samma storlek på alla djup. Ändra "
+"om panelen är tröttande att titta på. Ingen kostnad."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
+"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
+"picture. No cost."
+msgstr ""
+"Endast VR, därför grå i platt. På = panelen vrider sig mot dig när du flyttar den åt sidan, samma "
+"storlek från alla vinklar (som VR-lager, standard, även den huvudföljande fps-räknaren); av = en "
+"platt bild. Ingen kostnad."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches for comparing: DLAA off, the game's own TAA mixed in or side by side, the wire fixes, "
+"running DLAA earlier. Nothing here is needed for normal driving. Right opens the group, Left "
+"closes it."
+msgstr ""
+"Reglage för jämförelse: DLAA av, spelets egen TAA inblandad eller sida vid sida, ledningsfixarna, "
+"DLAA tidigare. Inget här behövs för vanlig körning. Höger öppnar gruppen, Vänster stänger den."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
+"comparing. Off saves the cost of every part together."
+msgstr ""
+"Slår på eller av hela modden och minns läget; av visar spelets egen bild för jämförelse. Av "
+"sparar kostnaden för alla delar tillsammans."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"on = the mod on the left, the game's own TAA on the right, to compare (Split line position, "
+"Split: left | right). Replaces Mix while on. With the game's console on, the mod switches the "
+"game's Anti-aliasing for you."
+msgstr ""
+"på = modden till vänster, spelets eget TAA till höger, för jämförelse (Delningslinjens plats, "
+"Delning: vänster | höger). Ersätter Mix medan den är på. När spelets konsol är på byter modden "
+"spelets kantutjämning åt dig."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the split line is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS on the left "
+"of it, the game's TAA on the right. Used only while Split with game TAA is on."
+msgstr ""
+"Var delningslinjen ligger, 0 - 100 % av bredden i steg om 5 %: till vänster om den modens DLAA / "
+"DLSS, till höger spelets TAA. Används bara medan Delning med spelets TAA är på."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What the split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix | TAA "
+"or DLAA | Mix (Mix = the two blended at Mix amount). DLSS instead of DLAA when upscaling. Used "
+"only while Split with game TAA is on."
+msgstr ""
+"Vad delningen visar på sina två sidor: DLAA | TAA (modden till vänster, spelets TAA till höger), "
+"mix | TAA eller DLAA | mix (mix = de två blandade efter Mixmängd). DLSS i stället för DLAA vid "
+"uppskalning. Används bara medan Delning med spelets TAA är på."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires move correctly while you drive: their movement is spread over the whole thin line. on "
+"= default. off = only to compare; near wires flicker more. The picture is soft for a moment when "
+"you switch."
+msgstr ""
+"Tunna ledningar rör sig rätt medan du kör: deras rörelse sprids över hela den tunna linjen. på = "
+"standard. av = bara för jämförelse; nära ledningar flimrar mer. Bilden är mjuk en stund när du "
+"byter."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires count as in front on every pixel they touch, even where they cover only a sliver of "
+"it. on = default. on (no A2C) = also for see-through edges such as leaves. off = only to compare; "
+"near wires flicker more."
+msgstr ""
+"Tunna ledningar räknas som framför på varje pixel de rör, även där de bara täcker en remsa av "
+"den. på = standard. på (utan A2C) = också för genomskinliga kanter som löv. av = bara för "
+"jämförelse; nära ledningar flimrar mer."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
+"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+msgstr ""
+"Experimentellt: ritar avlägsna ledningar tunnare än 1 pixel som en linje på 1 pixel, så de inte "
+"bryts i streck. Av som standard: avlägsna ledningar kan se mörkare ut eller flimra mer. Prova och "
+"jämför."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Flat only: DLAA runs before the game adds its glow and colour look, so lane paint, wires and "
+"rails shimmer less. Change it only to compare. Not used with DLSS upscaling or Windows HDR. Same "
+"cost either way; takes about a second to switch."
+msgstr ""
+"Bara platt: DLAA körs innan spelet lägger till sitt sken och sin färglook, så vägmarkeringar, "
+"ledningar och räls flimrar mindre. Ändra det bara för jämförelse. Används inte med "
+"DLSS-uppskalning eller Windows HDR. Samma kostnad åt båda håll; det tar ungefär en sekund att "
+"byta."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Bug report: press the capture key twice (or Capture now) where something looks wrong; the mod "
+"writes one zip you attach to a GitHub issue. Right opens the group, Left closes it."
+msgstr ""
+"Felrapport: tryck två gånger på inspelningstangenten (eller Spela in nu) där något ser fel ut; "
+"modden skriver en zip som du bifogar till ett GitHub-issue. Höger öppnar gruppen, Vänster stänger "
+"den."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"One switch for the most complete report: log detail debug, rewind 2 s, capture Full. Off puts the "
+"rows back as they were. Only this switch is saved; the forced values are never written to "
+"dlaa.ini."
+msgstr ""
+"Ett reglage för den mest kompletta rapporten: loggdetalj debug, spola tillbaka 2 s, inspelning "
+"Full. Av sätter tillbaka raderna som de var. Bara detta reglage sparas; de påtvingade värdena "
+"skrivs aldrig till dlaa.ini."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + "
+"problems worked around; info = + start-up and changes; debug = + statistics and timing "
+"measurements (a little slower)."
+msgstr ""
+"Vad som hamnar i dlaa_inject.log: av = inget; fel = bara fel (standard); varningar = + problem "
+"som kringgåtts; info = + start och ändringar; felsökning = + statistik och tidsmätningar (lite "
+"långsammare)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Keeps the last 0.5 - 3 s of frames on the graphics card all the time, so the report shows the "
+"moment BEFORE the key (+ what DLSS got for the last frames). Costs graphics memory (the MB in the "
+"cost column) and a picture copy per frame. off = none."
+msgstr ""
+"Håller hela tiden de senaste 0,5 - 3 s av bilder på grafikkortet, så rapporten visar ögonblicket "
+"INNAN tangenten (+ vad DLSS fick för de sista bilderna). Kostar grafikminne (MB i "
+"kostnadskolumnen) och en bildkopia per bild. av = ingen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Quick = system info, logs, settings, your picture and DLAA off for a few frames (about 1 s). Full "
+"= + what DLSS got per frame (colour, motion, depth) and A/B sets: motion view, motion off, jitter "
+"only (about 2 - 4 s)."
+msgstr ""
+"Snabb = systeminfo, loggar, inställningar, din bild och DLAA av i några bilder (ungefär 1 s). "
+"Full = + vad DLSS fick per bild (färg, rörelse, djup) och A/B-set: rörelsevy, rörelse av, bara "
+"jitter (ungefär 2 - 4 s)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The capture key. Press it TWICE within 1 s while driving where it goes wrong (the first press "
+"only arms it: one short beep). Right opens the Hotkeys page on its line to change it."
+msgstr ""
+"Inspelningstangenten. Tryck på den TVÅ gånger inom 1 s under körning där det går fel (första "
+"trycket gör den bara redo: ett kort pip). Höger öppnar sidan Kortkommandon på dess rad för att "
+"ändra den."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How many captures stay in the dlaa_selftest folder next to the DLL: older ones (folder + zip) are "
+"deleted when a new one is written. all = never delete."
+msgstr ""
+"Hur många inspelningar som blir kvar i mappen dlaa_selftest bredvid DLL:en: äldre (mapp + zip) "
+"raderas när en ny skrivs. alla = radera aldrig."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -803,12 +983,27 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Puts every setting in this menu back to how the mod ships (model, sharpen, texture sharpness, "
-"DLAA area, motion, mirrors, profile, panel, fps box, turbo, foveated, frame rate, logging), live "
-"and in dlaa.ini, keeping your hotkeys and every other line."
+"DLAA area, motion, mirrors, preset, panel, fps box, turbo, foveated, frame rate, CPU, log "
+"detail), live and in dlaa.ini, keeping your hotkeys and every other line."
 msgstr ""
-"Återställer varje inställning i den här menyn till hur modden levereras (modell, skärpning, "
-"texturskärpa, DLAA-yta, rörelse, speglar, profil, panel, fps-räknare, turbo, foveated, "
-"bildfrekvens, loggning), live och i dlaa.ini; dina kortkommandon och alla andra rader bevaras."
+"Sätter tillbaka varje inställning i den här menyn till hur modden levereras (modell, skärpning, "
+"texturskärpa, DLAA-yta, rörelse, speglar, förval, panel, fps-ruta, turbo, foveated, bildfrekvens, "
+"CPU, loggdetalj), live och i dlaa.ini, och behåller dina kortkommandon och alla andra rader."
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Off"
+msgstr "Av"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph only"
+msgstr "bara graf"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph"
+msgstr "graf"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -968,11 +1163,6 @@ msgstr "av"
 msgid "same"
 msgstr "samma"
 
-#. Cost column cell (about 10 Latin characters)
-#: src/inject.cpp
-msgid "no extra"
-msgstr "ingen extra"
-
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
@@ -1090,8 +1280,8 @@ msgstr "Kostar nu %ls per bildruta; färre speglar kostar mindre."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Greyed: Mirror DLAA is off."
-msgstr "Grå: spegel-DLAA är av."
+msgid "Greyed: Smooth mirrors is off."
+msgstr "Grå: Jämna ut speglar är av."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1108,8 +1298,197 @@ msgstr "Speglarna kostar nu %ls per bildruta."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid "Greyed: only for AMD X3D CPUs with two core groups (7950X3D, 9950X3D)."
+msgstr "Grå: bara för AMD X3D-processorer med två kärngrupper (7950X3D, 9950X3D)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On now: the game runs only on the cores with the big cache."
+msgstr "På nu: spelet körs bara på kärnorna med den stora cachen."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On, but not applied: the game's cores were already limited (see the log)."
+msgstr "På, men inte tillämpat: spelets kärnor var redan begränsade (se loggen)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "Greyed in VR: VR always runs DLAA on the finished picture."
 msgstr "Grå i VR: VR kör alltid DLAA på den färdiga bilden."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed: VR only."
+msgstr "Grå: endast VR."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
+"game is closed."
+msgstr ""
+"Grå: spelets konsol är av. Sätt g_developer och g_console till \"1\" i config.cfg medan spelet är "
+"stängt."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr ""
+"Väntar: klicka på spelfönstret på skrivbordet. Modden skriver bara i spelets konsol medan "
+"spelfönstret har fokus."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Sending to the game's console..."
+msgstr "Skickar till spelets konsol..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "Spelets logg bekräftade inte den senaste ändringen: se moddens logg."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Mix and split need the game's TAA: set Anti-aliasing to TAA in the game's graphics settings."
+msgstr ""
+"Mix och delad behöver spelets TAA: sätt kantutjämning till TAA i spelets grafikinställningar."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is not running now: the mod runs alone."
+msgstr "Spelets TAA körs inte nu: modden körs ensam."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or set Mode to Mix."
+msgstr "Spelets TAA körs nu: sätt spelets kantutjämning till Av, eller sätt Läge till Mix."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: split is on."
+msgstr "Spelets TAA körs nu: delad är på."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: the mix is on."
+msgstr "Spelets TAA körs nu: mixen är på."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: its TAA pass did not run in this frame."
+msgstr "Föll tillbaka till spelets TAA: dess TAA-pass kördes inte i den här bilden."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's jitter could not be read (see the log)."
+msgstr "Föll tillbaka till spelets TAA: spelets jitter kunde inte läsas (se loggen)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the picture before the game's TAA was not found."
+msgstr "Föll tillbaka till spelets TAA: bilden före spelets TAA hittades inte."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: mix and split do not work with Windows HDR."
+msgstr "Föll tillbaka till spelets TAA: mix och delad fungerar inte med Windows HDR."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA is off."
+msgstr "Föll tillbaka till spelets TAA: DLAA är av."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's tonemap was not found (see the log)."
+msgstr "Föll tillbaka till spelets TAA: spelets tonemap hittades inte (se loggen)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA did not run on this frame (see the log)."
+msgstr "Föll tillbaka till spelets TAA: DLAA kördes inte i den här bilden (se loggen)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Or turn on the game console (g_developer and g_console 1 in config.cfg): then the mod switches it "
+"for you."
+msgstr ""
+"Eller slå på spelkonsolen (g_developer och g_console 1 i config.cfg): då byter modden det åt dig."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn on the game console to let the mod switch the game's Anti-aliasing."
+msgstr "Slå på spelkonsolen så att modden kan byta spelets Anti-aliasing."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "TAA"
+msgstr "TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "unknown"
+msgstr "okänd"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "other"
+msgstr "annan"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "waiting: click the game window"
+msgstr "väntar: klicka på spelfönstret"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switching..."
+msgstr "byter..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch confirmed"
+msgstr "bytet bekräftat"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch NOT confirmed (see the log)"
+msgstr "bytet INTE bekräftat (se loggen)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls, %ls."
+msgstr "Spelets AA: %ls, %ls."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls."
+msgstr "Spelets AA: %ls."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1132,6 +1511,45 @@ msgstr "Kostar nu %ls per bildruta; av sparar det."
 #, c-format
 msgid "Costs %ls ms GPU per frame now; most of it at night."
 msgstr "Kostar nu %ls ms GPU per bildruta; mest på natten."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"The last one: %d zips of at most 24 MB, %d MB in all (folder %.0f MB). Attach the _main zip; the "
+"others only if asked."
+msgstr "Den senaste: %d zip-filer på högst 24 MB, %d MB totalt (mapp %.0f MB). Bifoga _main-zip; de andra bara om någon frågar."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Holds %.0f MB of graphics memory now."
+msgstr "Använder nu %.0f MB grafikminne."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"%ls about %.0f MB graphics memory for the rewind; a capture takes about %.1f s and writes about "
+"%.0f MB."
+msgstr ""
+"%ls ungefär %.0f MB grafikminne för tillbakaspolningen; en inspelning tar ungefär %.1f s och "
+"skriver ungefär %.0f MB."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "On, it costs"
+msgstr "På kostar det"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Costs now:"
+msgstr "Kostar nu:"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn off Send everything to change this."
+msgstr "Stäng av Skicka allt för att ändra detta."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1195,8 +1613,8 @@ msgstr "Grå i VR: använd VR-fps-gränsen."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Limited by the NVIDIA driver now (Reflex is on)."
-msgstr "Begränsas nu av NVIDIA-drivrutinen (Reflex är på)."
+msgid "Limited by the NVIDIA driver now (Low delay is on)."
+msgstr "Begränsas av NVIDIA-drivrutinen nu (Låg fördröjning är på)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1249,8 +1667,8 @@ msgstr "Det sparar tid i spelets egen GPU-siffra, inte moddens."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Foveated (VRS) is off: switch it on first."
-msgstr "Foveated (VRS) är av: slå på det först."
+msgid "Foveated rendering is off: switch it on first."
+msgstr "Foveated rendering är av: slå på det först."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1268,11 +1686,11 @@ msgstr "Falsk blick (vrs_eye_fake = 1): det skarpa området cirklar långsamt, e
 #: src/inject.cpp
 #, c-format
 msgid ""
-"Foveated (VRS) was off at the game's start: save (Shift+F12) and restart the game to ask the "
+"Foveated rendering was off at the game's start: save (Shift+F12) and restart the game to ask the "
 "headset for eye gaze."
 msgstr ""
-"Foveated (VRS) var av vid spelstart: spara (Shift+F12) och starta om spelet för att be headsetet "
-"om blickdata."
+"Foveated rendering var av vid spelstart: spara (Shift+F12) och starta om spelet för att be "
+"headsetet om blickdata."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1297,18 +1715,6 @@ msgstr "Inte tillgängligt: denna VR-runtime rapporterar inget dolt område."
 #, c-format
 msgid "Off now: every pixel is drawn."
 msgstr "Av nu: varje pixel ritas."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now (the mod is off)."
-msgstr "Av nu (modden är av)."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-msgstr "Av nu: under Skalning 100 %% används spelets egen sträckning."
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1721,6 +2127,21 @@ msgstr "håll %ls %hs"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "ETS2 / ATS DLAA & DLSS-mod v%hs - tuningmeny"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "alla inställningar (platt och VR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "VR-inställningar"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "Platta inställningar"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1770,15 +2191,41 @@ msgstr "stängd (%d)"
 msgid "Mode"
 msgstr "Läge"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLSS)"
+msgstr "Mix (TAA + DLSS)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLAA)"
+msgstr "Mix (TAA + DLAA)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLSS"
 msgstr "DLSS"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLAA"
 msgstr "DLAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Mix amount"
+msgstr "Mixmängd"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d %% TAA"
+msgstr "%d %% TAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Quality preset"
+msgstr "Kvalitetsförval"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -1804,8 +2251,8 @@ msgstr "%.1f (av)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Sharpen width"
-msgstr "Skärpningsbredd"
+msgid "Sharpness size"
+msgstr "Skärpestorlek"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1826,8 +2273,8 @@ msgstr "%.2f (av)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Cut-out texture sharpness"
-msgstr "Urklipp-texturskärpa"
+msgid "Leaves and fences sharpness"
+msgstr "Löv- och stängselskärpa"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1840,6 +2287,11 @@ msgstr "samma (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "DLAA-yta (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "DLAA-yta"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -1851,6 +2303,11 @@ msgstr "endast VR"
 msgid "100 %% (flat)"
 msgstr "100 %% (platt)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Track moving parts"
+msgstr "Följ rörliga delar"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "old stencil ids"
@@ -1858,13 +2315,13 @@ msgstr "gamla stencil-id:n"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirror DLAA"
-msgstr "Spegel-DLAA"
+msgid "Smooth mirrors"
+msgstr "Jämna ut speglar"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirrors in turns"
-msgstr "Speglar växelvis"
+msgid "Mirrors take turns (faster)"
+msgstr "Speglar i tur (snabbare)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1873,29 +2330,48 @@ msgstr "på (läge 3)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Thin-wire motion"
-msgstr "Tunna ledn.: rörelse"
+msgid "Wire fix: motion"
+msgstr "Ledningsfix: rörelse"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Wire fix: depth"
+msgstr "Ledningsfix: djup"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no A2C)"
 msgstr "på (utan A2C)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Thicker wires (test)"
+msgstr "Tjockare ledningar (test)"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "på (experimentell)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Run DLAA earlier (test, flat)"
+msgstr "Kör DLAA tidigare (test, platt)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Run DLAA earlier (test)"
+msgstr "Kör DLAA tidigare (test)"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "flat only"
 msgstr "endast platt"
 
-#. Value column (about 20 Latin characters)
+#. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-#, c-format
-msgid "off (dlaa.ini 0)"
-msgstr "av (dlaa.ini 0)"
+msgid "Glass and fence fix"
+msgstr "Glas- och stängselfix"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1904,13 +2380,49 @@ msgstr "av (VR-budget)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Light glow ghosting fix"
-msgstr "Ljusglöd-spökfix"
+msgid "Light trail fix"
+msgstr "Ljusspårsfix"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA off to compare (not saved)"
+msgstr "DLAA av (sparas inte)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split with game TAA"
+msgstr "Delning med spelets TAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split line position"
+msgstr "Delningslinjens plats"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split: left | right"
+msgstr "Delning: vänster | höger"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr "mix | TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
+msgstr "DLAA | mix"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (VR-framegen)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "off (dlaa.ini 0)"
+msgstr "av (dlaa.ini 0)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1931,8 +2443,73 @@ msgstr "VectorXR (VR-lager)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Layout"
+msgstr "Layout"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "driving"
+msgstr "körning"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "menus"
+msgstr "menyer"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Height"
+msgstr "Höjd"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Side"
+msgstr "Sida"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Distance"
+msgstr "Avstånd"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Tilt"
+msgstr "Lutning"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn"
+msgstr "Vridning"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Size"
+msgstr "Storlek"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Curve"
+msgstr "Krökning"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reset to config.cfg"
+msgstr "Tillbaka till config.cfg"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Right"
+msgstr "Höger"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Turbo mode (VR)"
 msgstr "Turboläge (VR)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "Turboläge"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1941,8 +2518,8 @@ msgstr "på (stoppad)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated (VRS)"
-msgstr "Foveated (VRS)"
+msgid "Foveated rendering"
+msgstr "Foveated rendering"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1961,8 +2538,8 @@ msgstr "Foveated-storlek"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated passes"
-msgstr "Foveated-pass"
+msgid "Foveated: lighting too"
+msgstr "Foveated: även ljus"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2021,8 +2598,13 @@ msgstr "på (väntar på blick)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Hidden area mask (VR)"
-msgstr "Mask dold yta (VR)"
+msgid "Skip hidden edges (VR)"
+msgstr "Hoppa över dolda kanter (VR)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Skip hidden edges"
+msgstr "Hoppa över dolda kanter"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2037,8 +2619,13 @@ msgstr "på (gräns vinner)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Reflex (flat)"
-msgstr "Reflex (platt)"
+msgid "Low delay (Reflex, flat)"
+msgstr "Låg fördröjning (Reflex, platt)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Low delay (Reflex)"
+msgstr "Låg fördröjning (Reflex)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2049,6 +2636,11 @@ msgstr "på + boost"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "Fps-gräns (platt)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "Fps-gräns"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2089,8 +2681,108 @@ msgstr "blandat (dlaa.ini)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Logging"
-msgstr "Loggning"
+msgid "AMD cache cores (X3D)"
+msgstr "AMD-cachekärnor (X3D)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (auto)"
+msgstr "på (auto)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Send everything"
+msgstr "Skicka allt"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Log detail"
+msgstr "Loggdetalj"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Rewind before key"
+msgstr "Spola tillbaka före tangent"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d frames (dlaa.ini)"
+msgstr "%d bilder (dlaa.ini)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture includes"
+msgstr "Inspelningen innehåller"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Full"
+msgstr "Full"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Quick"
+msgstr "Snabb"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "change"
+msgstr "ändra"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture key"
+msgstr "Inspelningstangent"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%hs (press twice)"
+msgstr "%hs (tryck två gånger)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Keep captures"
+msgstr "Behåll inspelningar"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "all"
+msgstr "alla"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture now"
+msgstr "Spela in nu"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "capturing %d / %d"
+msgstr "spelar in %d / %d"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "writing (%d files)"
+msgstr "skriver (%d filer)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "done: %d parts, %d MB"
+msgstr "klart: %d delar, %d MB"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "failed (see the log)"
+msgstr "misslyckat (se loggen)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "ready"
+msgstr "redo"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2113,6 +2805,11 @@ msgstr "auto (%ls)"
 #: src/inject.cpp
 msgid "Panel lock (VR)"
 msgstr "Panellås (VR)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel lock"
+msgstr "Panellås"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2155,6 +2852,11 @@ msgstr "Panelstorlek"
 msgid "Panel VR depth"
 msgstr "Panel VR-djup"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "Paneldjup"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2168,18 +2870,13 @@ msgstr "Panel vänd mot dig (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Menu keys"
-msgstr "Menytangenter"
+msgid "Panel faces you"
+msgstr "Panel vänd mot dig"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "FPS counter"
-msgstr "Fps-räknare"
-
-#. Value column (about 20 Latin characters)
-#: src/inject.cpp
-msgid "Off"
-msgstr "Av"
+msgid "Menu keys"
+msgstr "Menytangenter"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2278,8 +2975,23 @@ msgstr "Fps-opacitet"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS graph length"
+msgstr "Fps-grafens längd"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "with a graph only"
+msgstr "bara med graf"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "FPS distance (VR)"
 msgstr "Fps-avstånd (VR)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS distance"
+msgstr "Fps-avstånd"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2319,6 +3031,20 @@ msgstr "%lcCPU%lc | %lcGPU%lc ms"
 #, c-format
 msgid "Hold %hs for %hs s to reset. %ls"
 msgstr "Håll %hs i %hs s för att återställa. %ls"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"%hs = capture now (the menu closes first). The zip (dlaa_selftest folder next to the DLL) holds "
+"system info, the mod's and the game's log, dlaa.ini, your picture and DLAA off; Full adds what "
+"DLSS got and the A/B sets; rewind adds the moment before. Your user name and home folder are "
+"removed. %ls"
+msgstr ""
+"%hs = spela in nu (menyn stängs först). Zippen (mappen dlaa_selftest bredvid DLL:en) innehåller "
+"systeminfo, loggen från modden och spelet, dlaa.ini, din bild och DLAA av; Full lägger till vad "
+"DLSS fick och A/B-seten; tillbakaspolning lägger till ögonblicket före. Ditt användarnamn och din "
+"hemmapp tas bort. %ls"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2369,4 +3095,7 @@ msgstr "info"
 #: src/log.h
 msgid "debug"
 msgstr "felsökning"
+
+#~ msgid "The last one: %d zip parts of at most 24 MB, %d MB in all (folder %.0f MB): attach them all."
+#~ msgstr "Den senaste: %d zip-delar på högst 24 MB, %d MB totalt (mapp %.0f MB): bifoga alla."
 

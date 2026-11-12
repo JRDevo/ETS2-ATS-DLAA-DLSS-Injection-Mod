@@ -95,13 +95,17 @@ void OnModWork(bool begin);
 void Abandon();
 
 // Statistics (render thread writes; the log reads).
-enum SkipWhy { kSkipCutout = 0, kSkipDepth = 1, kSkipUnknown = 2, kSkipCount = 3 };
+// phase 98: kSkipWater = a draw of the new SCS water (inject.cpp WaterPsRuleCur): its shaders pick a G-buffer CHECKERBOARD cell from
+// the interpolated position -- one coarse (4x4 / 2x2) shading sample per block broadcasts one cell to the whole block, which at the
+// shore gives bright 4x4 specks that blink with the jitter (2026-11-11 VR capture, outer ring of eye 0 only).
+enum SkipWhy { kSkipCutout = 0, kSkipDepth = 1, kSkipUnknown = 2, kSkipWater = 3, kSkipCount = 4 };
 struct Stats {
     uint64_t enters = 0, entersEye[2] = {}, leaves = 0;
     uint64_t drawsVrs = 0, drawsSkip[kSkipCount] = {};
     uint64_t modPauses = 0, switches = 0, nvFails = 0;
     uint64_t masksBuilt = 0;
     uint64_t eyeChecks = 0, eyeMisses = 0;
+    uint64_t lightWater = 0;                     // phase 98b: lighting binds kept at full rate (the pass drew the new SCS water)
     uint64_t bindNoEye = 0, bindNoCentre = 0;    // scene binds left alone: no certain eye / no optical centre measured yet
     // phase 34b (inject.cpp VrsDecideEye): entered binds per eye source (0 own blit, 1 blit-RT cycle, 2 forward colour,
     // 3 frame pair; a bind may count in several) and binds left alone because two sources disagreed

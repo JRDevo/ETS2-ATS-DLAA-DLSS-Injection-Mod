@@ -130,8 +130,13 @@ msgstr "모션과 거울"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Upscaling and VR"
-msgstr "업스케일링과 VR"
+msgid "Frame rate"
+msgstr "프레임 속도"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Performance"
+msgstr "성능"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -140,54 +145,80 @@ msgstr "VR 성능"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Frame rate and CPU"
-msgstr "프레임 속도와 CPU"
+msgid "In-game UI"
+msgstr "게임 내 UI"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Panel settings"
-msgstr "패널 설정"
+msgid "In-game UI (VR)"
+msgstr "게임 내 UI (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "FPS counter settings"
-msgstr "FPS 카운터 설정"
+msgid "FPS counter"
+msgstr "FPS 카운터"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Menu panel"
+msgstr "메뉴 패널"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Compare and test"
+msgstr "비교 및 테스트"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Bug report"
+msgstr "버그 리포트"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
 "DLAA = clean edges at the game's render size. DLSS = the same, and it upscales when the game's "
-"Scaling is below 100 %. off = the game's own picture: use it to compare. Saved at once."
+"Scaling is below 100 %. Mix = the game's own TAA blended with DLAA / DLSS: calmer, a bit softer. "
+"off = the game's own picture. Saved at once."
 msgstr ""
-"DLAA = 게임 렌더 크기에서 가장자리를 깨끗하게 합니다. DLSS = 동일하며, 게임 스케일링이 100 % 미만이면 업스케일도 합니다. 끔 = 게임 원래 화면, "
-"비교용입니다. 바로 저장됩니다."
+"DLAA = 게임의 렌더링 크기에서 가장자리를 깔끔하게 합니다. DLSS = 같은 효과에 더해, 게임의 크기 조정이 100 % 미만이면 업스케일합니다. 믹스 = 게임 자체의 "
+"TAA를 DLAA / DLSS와 섞음: 더 차분하고 조금 부드럽습니다. 끔 = 게임 자체의 화면. 즉시 저장됩니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Presets for your GPU. high = everything on (model 1). medium = model 2, half-size see-through "
-"depth, flat mirrors without part motion, lighter part-motion search. low = also no mirror DLAA, "
-"no see-through depth, VR area 60 %. Never changes a setting you set yourself."
+"How much of the Mix is the game's TAA, 0 - 100 % in 10 % steps: more = calmer and softer, less = "
+"sharper. Shown while Mode is Mix, or a split has a Mix side. No extra cost."
 msgstr ""
-"GPU용 프리셋. 높음 = 모두 켬 (모델 1). 보통 = 모델 2, 절반 크기 투과 깊이, 부품 움직임 없는 평면 거울, 가벼운 부품 움직임 탐색. 낮음 = 거울 DLAA도 "
-"없음, 투과 깊이 없음, VR 영역 60 %. 직접 바꾼 설정은 건드리지 않습니다."
+"믹스에서 게임의 TAA가 차지하는 비율입니다. 0 - 100 %, 10 % 단위: 높을수록 차분하고 부드럽고, 낮을수록 선명합니다. 모드가 믹스이거나 분할의 한쪽이 믹스일 때 "
+"표시됩니다. 추가 비용 없음."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, least ghosting "
+"Presets for your graphics card. high = everything on (model 1). medium = model 2, a lighter Glass "
+"and fence fix, mirrors without Track moving parts. low = also no Smooth mirrors, no Glass and "
+"fence fix, VR area 60 %. Never changes a setting you set yourself."
+msgstr ""
+"그래픽 카드용 프리셋입니다. 높음 = 모두 켬 (모델 1). 보통 = 모델 2, 가벼운 유리·울타리 보정, 거울은 움직이는 부품 추적 없음. 낮음 = 부드러운 거울 없음, "
+"유리·울타리 보정 없음, VR 영역 60 %. 직접 정한 설정은 바꾸지 않습니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"1 (K) = most detail, sharpest text, about 1.6x the GPU of 2. 2 (E) = balanced, fewest trails "
 "behind traffic: start here. 3 (F) = calmest on fences and wires, can smear moving detail, same "
 "cost as 2. 4 (M) = heaviest (about 5x), flat tests only."
 msgstr ""
-"1 (K) = 디테일 최고, 글자 가장 선명, GPU 부하는 2의 약 1.6배. 2 (E) = 균형형, 차량 뒤 잔상 최소: 여기서 시작하세요. 3 (F) = 울타리와 전선이 "
-"가장 안정적, 움직이는 디테일이 번질 수 있음, 부하는 2와 동일. 4 (M) = 가장 무거움 (약 5배), 일반 화면 테스트 전용."
+"1 (K) = 가장 세밀하고 글자가 가장 또렷함, GPU 부하는 2의 약 1.6배. 2 (E) = 균형형, 차량 뒤 잔상이 가장 적음: 여기서 시작하세요. 3 (F) = "
+"울타리와 전선이 가장 차분함, 움직이는 디테일이 번질 수 있음, 부하는 2와 같음. 4 (M) = 가장 무거움 (약 5배), 일반 화면 테스트 전용."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Picture quality: sharpening, texture sharpness, the DLAA area and the see-through depth. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
-msgstr "화질: 선명도, 텍스처 선명도, DLAA 영역, 투과 깊이. 오른쪽 키로 그룹을 열고 왼쪽 키로 닫습니다. 메뉴를 열 때마다 닫힌 상태로 시작합니다."
+"Picture quality: sharpening, texture sharpness, the Glass and fence fix, the Light trail fix and "
+"the DLAA area. Right opens the group, Left closes it; it starts closed every time the menu opens."
+msgstr ""
+"화질: 선명도, 텍스처 선명도, 유리·울타리 보정, 빛 꼬리 보정, DLAA 영역. 오른쪽으로 그룹을 열고 왼쪽으로 닫습니다. 메뉴를 열 때마다 닫힌 상태로 시작합니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -212,20 +243,40 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Sharper texture text (road signs, dashboard, GPS). 0 = off; more negative = sharper but more "
-"shimmer on fences; try -0.5 to -1 if text is blurry. No GPU time, only a little memory bandwidth."
+"shimmer on fences; try -0.5 to -1 if text is blurry. Almost no cost."
 msgstr ""
-"텍스처 글자 (도로 표지판, 계기판, GPS)를 더 선명하게. 0 = 끔, 더 음수일수록 선명하지만 울타리 일렁임이 늘어납니다. 글자가 흐리면 -0.5 ~ -1을 시도하세요. "
-"GPU 시간은 없고 메모리 대역폭만 조금 씁니다."
+"텍스처 속 글자 (도로 표지판, 계기판, GPS)를 더 또렷하게 합니다. 0 = 끔. 더 낮은 음수일수록 또렷하지만 울타리 일렁임이 늘어납니다. 글자가 흐리면 -0.5 ~ "
+"-1을 써 보세요. 부하는 거의 없습니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"The same for wire fences, grass and leaf cut-outs: raise it toward 0 if fences shimmer, lower it "
-"if grass looks soft. same = follows the row above. Acts only while Texture sharpness is not 0. No "
-"GPU time, a little memory."
+"The same for wire fences, grass and leaves: raise it toward 0 if fences shimmer, lower it if "
+"grass looks soft. same = follows the row above. Works only while Texture sharpness is not 0. "
+"Almost no cost."
 msgstr ""
-"철망 울타리, 풀, 나뭇잎 컷아웃에도 같은 설정. 울타리가 일렁이면 0 쪽으로 올리고, 풀이 흐리면 내리세요. 같음 = 윗줄을 따름. 텍스처 선명도가 0이 아닐 때만 작동. "
-"GPU 시간 없음, 메모리 약간."
+"철망 울타리, 풀, 잎에 같은 조정을 합니다. 울타리가 일렁이면 0 쪽으로 올리고, 풀이 흐릿하면 내리세요. 같음 = 위 줄을 따릅니다. 텍스처 선명도가 0이 아닐 때만 "
+"작동합니다. 부하는 거의 없습니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Wires, fences and windows are treated as the thing in front, not as what you see through them, so "
+"they do not smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms "
+"per eye."
+msgstr ""
+"전선, 울타리, 창문을 그 너머에 보이는 것이 아니라 앞에 있는 것으로 다뤄, 움직여도 번지지 않게 합니다. 번짐이 보이지 않으면 끌 수 있습니다: 눈 하나당 0.02 - "
+"0.06 ms 절약."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Stops street-lamp and car-light glows leaving a trail behind them when you move: the glows are "
+"drawn fresh each frame instead of being blended with older frames. 25 % steps; lower it if lamp "
+"glows flicker, 0 = off. Costs about 0.05 - 0.2 ms per eye."
+msgstr ""
+"가로등과 자동차 불빛의 번짐이 움직일 때 꼬리를 남기지 않게 합니다. 불빛을 오래된 프레임과 섞지 않고 매 프레임 새로 그립니다. 25 % 단위. 불빛이 깜빡이면 낮추세요, "
+"0 = 끔. 눈 하나당 약 0.05 - 0.2 ms가 듭니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -240,33 +291,6 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Flat only: DLAA before the game's bloom / tonemap, so lane paint, wires and rails shimmer less. "
-"Change it only to compare. Not used with DLSS upscale or Windows HDR. Same cost either way; takes "
-"~60 frames to switch."
-msgstr ""
-"일반 화면 전용: 게임의 블룸 / 톤맵 전에 DLAA를 적용해 차선 페인트, 전선, 레일의 일렁임을 줄입니다. 비교할 때만 바꾸세요. DLSS 업스케일이나 Windows "
-"HDR에서는 쓰지 않습니다. 부하는 같고, 전환에 약 60프레임 걸립니다."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Gives wires, fences and glass their own distance instead of what is behind them, so they do not "
-"smear when you move. Turn it off if you see no smearing there: saves 0.02 - 0.06 ms per eye."
-msgstr "전선, 울타리, 유리에 뒤 배경이 아닌 자신만의 거리를 줘서 움직일 때 번지지 않게 합니다. 번짐이 안 보이면 끄세요: 눈당 0.02 - 0.06 ms 절약."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Stops street-lamp and car-light glows leaving a trail behind them when you move: DLSS takes each "
-"glow from the current frame, not its history. 25 % steps; lower it if lamp glows flicker, 0 = "
-"off. Costs about 0.05 - 0.2 ms per eye."
-msgstr ""
-"움직일 때 가로등과 차량 불빛이 꼬리를 남기는 것을 막습니다: DLSS가 기록이 아닌 현재 프레임에서 빛을 가져옵니다. 25 % 단위, 불빛이 깜빡이면 낮추세요, 0 = 끔. "
-"눈당 약 0.05 - 0.2 ms."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
 "How moving parts and truck mirrors are handled by DLAA. Right opens the group, Left closes it; it "
 "starts closed every time the menu opens."
 msgstr "DLAA가 움직이는 부품과 트럭 거울을 다루는 방식. 오른쪽 키로 그룹을 열고 왼쪽 키로 닫습니다. 메뉴를 열 때마다 닫힌 상태로 시작합니다."
@@ -274,22 +298,22 @@ msgstr "DLAA가 움직이는 부품과 트럭 거울을 다루는 방식. 오른
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives each moving part (traffic, wheels, plates) its own motion for DLAA, so it stays sharp and "
-"does not ghost. Turn it off only to save about 0.5 ms per eye or to test: every pixel then moves "
+"DLAA follows each moving thing on its own (traffic, wheels, number plates), so it stays sharp and "
+"leaves no trail. Turn it off only to save about 0.5 ms per eye or to test: everything then moves "
 "with the camera and traffic smears."
 msgstr ""
-"움직이는 부품 (차량, 바퀴, 번호판)마다 DLAA용 고유 모션을 줘서 선명하게 유지하고 잔상을 막습니다. 눈당 약 0.5 ms를 아끼거나 테스트할 때만 끄세요: 그러면 모든 "
-"픽셀이 카메라와 함께 움직여 차량이 번집니다."
+"DLAA가 움직이는 것 (차량, 바퀴, 번호판)을 하나씩 따라가서 또렷하게 유지되고 꼬리를 남기지 않습니다. 눈 하나당 약 0.5 ms를 아끼거나 테스트할 때만 끄세요: 모든 "
+"것이 카메라와 함께 움직이고 차량이 번집니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Gives truck mirrors their own DLAA so they do not shimmer. 1 mirror = only the largest (the main "
-"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can ghost "
-"in the glass; else each part moves exactly in the glass."
+"Smooths the truck mirrors too, so they do not shimmer. 1 mirror = only the largest (the main "
+"mirror next to you). all = every mirror. camera = cheapest per mirror, moving traffic can leave "
+"trails in the glass; the others follow each moving thing."
 msgstr ""
-"트럭 거울에 전용 DLAA를 적용해 일렁임을 막습니다. 거울 1개 = 가장 큰 것만 (옆의 주 거울). 전부 = 모든 거울. 카메라 = 거울당 가장 가벼움, 유리 속 움직이는 "
-"차량에 잔상 가능. 그 외에는 각 부품이 유리 속에서 정확히 움직입니다."
+"트럭 거울도 부드럽게 해서 일렁이지 않게 합니다. 1개 = 가장 큰 것만 (옆의 메인 거울). 모든 거울 = 전부. 카메라 = 거울당 가장 가벼움, 움직이는 차량이 유리에 "
+"꼬리를 남길 수 있음. 나머지는 움직이는 것을 하나씩 따라갑니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -304,55 +328,141 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires keep their motion while you drive: DLAA spreads the motion data over thin lines (DLSS "
-"motion dilation). on = default. off = only to compare; near wires flicker more. The picture is "
-"soft for a moment when it changes."
+"Frame rate and CPU: CPU tuning, AMD cache cores, an FPS cap and Low delay (Reflex) for flat, an "
+"FPS cap for VR. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
-"운전 중에도 가는 전선이 움직임을 유지합니다: DLAA가 모션 데이터를 가는 선으로 퍼뜨립니다 (DLSS 모션 확장). 켬 = 기본. 끔 = 비교용만, 가까운 전선이 더 "
-"깜빡입니다. 바꿀 때 화면이 잠깐 흐려집니다."
+"프레임 속도와 CPU: CPU 튜닝, AMD 캐시 코어, 일반 화면용 FPS 제한과 저지연 (Reflex), VR용 FPS 제한. 오른쪽으로 그룹을 열고 왼쪽으로 닫습니다. "
+"메뉴를 열 때마다 닫힌 상태로 시작합니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Thin wires get depth on every pixel they touch, not only where they cover a pixel centre. on = "
-"default. on (no A2C) = also for see-through edges. off = only to compare; near wires flicker more."
+"Three CPU switches together. Prefer fast cores: only Intel CPUs with P-cores and E-cores. Higher "
+"priority and no Windows power saving for the game: every CPU, Intel and AMD. Helps when the CPU "
+"is the limit; no cost. Separate in dlaa.ini: cpu_pcore, cpu_priority, cpu_no_throttle."
 msgstr ""
-"가는 전선이 픽셀 중심을 덮는 곳뿐 아니라 닿는 모든 픽셀에 깊이를 갖습니다. 켬 = 기본. 켬 (A2C 없음) = 투과 가장자리에도. 끔 = 비교용만, 가까운 전선이 더 "
-"깜빡입니다."
+"CPU 스위치 세 개를 함께 다룹니다. 빠른 코어 우선: P코어와 E코어가 있는 Intel CPU만. 게임 우선순위 높임과 Windows 절전 끔: 모든 CPU (Intel, "
+"AMD). CPU가 한계일 때 도움이 됩니다. 부하 없음. dlaa.ini에서는 따로: cpu_pcore, cpu_priority, cpu_no_throttle."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
-"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+"AMD X3D CPUs with two core groups (7950X3D, 9950X3D): keeps the game on the cores with the big 3D "
+"V-Cache, which games like. Switches at once; off gives the game all cores back. Try it and "
+"compare in a busy city. No cost."
 msgstr ""
-"실험적: 1픽셀보다 가는 먼 전선을 1픽셀 선으로 그려 점선처럼 끊기지 않게 합니다. 기본은 끔: 먼 전선이 더 어둡거나 더 깜빡일 수 있습니다. 시도해 보고 비교하세요."
+"코어 그룹이 둘인 AMD X3D CPU (7950X3D, 9950X3D)용: 게임을 큰 3D V-Cache가 있는 코어에 고정합니다. 게임에 유리합니다. 바로 적용되며 끄면 "
+"모든 코어를 돌려줍니다. 붐비는 도시에서 비교해 보세요. 부하 없음."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"DLSS upscale, the DLAA on / off switch and the OFXR Bridge / VectorXR info. Right opens the "
-"group, Left closes it; it starts closed every time the menu opens."
+"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
+"Set it a bit below what your PC holds in a busy city. With Low delay (Reflex) on, the NVIDIA "
+"driver does the limiting. off = no limit."
 msgstr ""
-"DLSS 업스케일, DLAA 켜기 / 끄기 스위치, OFXR Bridge / VectorXR 정보. 오른쪽 키로 그룹을 열고 왼쪽 키로 닫습니다. 메뉴를 열 때마다 닫힌 "
-"상태로 시작합니다."
+"일반 화면 전용. 게임을 이 프레임 속도 이하로 유지합니다: 프레임 시간이 안정되고 열과 전력이 줄어듭니다. 붐비는 도시에서 PC가 내는 값보다 약간 낮게 정하세요. 저지연 "
+"(Reflex)이 켜져 있으면 NVIDIA 드라이버가 제한합니다. 끔 = 제한 없음."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"DLSS draws the picture back up to full size when the game's Scaling is below 100 %: sharper than "
-"the game's own stretch, and fewer pixels drawn means more fps. No extra cost; does nothing at "
-"Scaling 100 %."
+"Flat only, NVIDIA only (NVIDIA Reflex). On = the game's frames wait less before the graphics card "
+"draws them: less delay between your steering and the picture when the card is the limit. Boost "
+"also keeps the card's clocks up. Same fps; small cost."
 msgstr ""
-"게임 스케일링이 100 % 미만일 때 DLSS가 화면을 원래 크기로 다시 그립니다: 게임 자체 확대보다 선명하고, 그리는 픽셀이 적어 fps가 오릅니다. 추가 부하 없음. "
-"스케일링 100 %에서는 아무 효과 없음."
+"일반 화면 전용, NVIDIA 전용 (NVIDIA Reflex). 켬 = 게임 프레임이 그래픽 카드가 그리기 전에 덜 기다려서, 카드가 한계일 때 조향부터 화면까지의 지연이 "
+"줄어듭니다. 부스트는 카드 클럭도 높게 유지합니다. fps는 같고 부하는 작습니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
-"comparing. Off saves the cost of every part together."
-msgstr "Mod 전체를 켜거나 끄고 모드 설정은 유지합니다. 끔 = 게임 원래 화면, 비교용. 끄면 모든 부분의 부하가 사라집니다."
+"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
+"headset's frame smoothing (ASW / Motion Smoothing) fills in the rest at a steady rhythm. Use it "
+"when the fps swings. Turns Turbo off while on."
+msgstr ""
+"VR 전용. 1/2 = 게임이 헤드셋 프레임 2개 중 1개만 그림 (72 Hz -> 36 fps), 1/3 = 3개 중 1개. 나머지는 헤드셋의 프레임 보간 (ASW / "
+"Motion Smoothing)이 일정한 박자로 채웁니다. fps가 오르내릴 때 쓰세요. 켜져 있는 동안 터보는 꺼집니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR speed-ups: Turbo, foveated rendering, skipping the hidden lens edges, and whether OFXR Bridge "
+"/ VectorXR are found. Right opens the group, Left closes it; it starts closed every time the menu "
+"opens."
+msgstr ""
+"VR 가속: 터보, Foveated 렌더링, 보이지 않는 렌즈 가장자리 건너뛰기, OFXR Bridge / VectorXR 발견 여부. 오른쪽으로 그룹을 열고 왼쪽으로 "
+"닫습니다. 메뉴를 열 때마다 닫힌 상태로 시작합니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Turbo switches off the headset's frame smoothing (ASW / Motion Smoothing / SSW). VR only. On = "
+"the game stops waiting for the headset each frame: more fps only when the CPU is the limit (busy "
+"cities, traffic). Turn it off if the picture judders."
+msgstr ""
+"터보는 헤드셋의 프레임 보간 (ASW / Motion Smoothing / SSW)을 끕니다. VR 전용. 켬 = 게임이 매 프레임 헤드셋을 기다리지 않아, CPU가 한계일 "
+"때 (붐비는 도시, 교통) 만 fps가 늘어납니다. 화면이 끊기면 끄세요."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR "
+"only. The outer ring gets one colour per 2 x 2 pixels; fences, grass and leaves keep full detail. "
+"Turn it off if the edge looks blocky."
+msgstr ""
+"중앙은 또렷하게, 가장자리는 디테일을 낮춥니다 (NVIDIA RTX 전용). 높은 스케일링에서 GPU 시간을 아낍니다. VR 전용. 바깥 고리는 2 x 2 픽셀당 한 색이 "
+"되고, 울타리, 풀, 잎은 디테일을 유지합니다. 가장자리가 네모나게 보이면 끄세요."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How big the sharp centre of Foveated rendering is, 10 - 100 % in 5 % steps: bigger = more of the "
+"view sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
+"(balanced) is the default; 90 = wide, 65 = narrow."
+msgstr ""
+"Foveated 렌더링의 또렷한 중앙 크기, 10 - 100 %를 5 % 단위로: 클수록 또렷한 범위가 넓고 절약은 작음, 작을수록 절약이 크고 낮은 디테일이 중앙에 가까이 "
+"시작. 기본값 80 % (균형), 90 = 넓음, 65 = 좁음."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What Foveated rendering makes coarser. scene = the 3D world only (default). scene + lighting = "
+"also the game's lighting, at the very edge only: more saving. Test it: look for blocky light or "
+"shadow edges at the side of your view."
+msgstr ""
+"Foveated 렌더링이 거칠게 만드는 대상. 장면 = 3D 세계만 (기본값). 장면 + 조명 = 게임 조명도, 맨 가장자리에서만: 절약이 더 큼. 시야 옆쪽에서 빛이나 "
+"그림자 가장자리가 네모나게 보이는지 확인해 보세요."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How coarse the outer ring of Foveated rendering is. Normal = 1 colour per 2 x 2 pixels (default). "
+"Strong = per 4 x 2, Max = per 4 x 4: more GPU saving, blockier edges. Best with eye tracking, "
+"where you never look at the outer ring."
+msgstr ""
+"Foveated 렌더링 바깥 고리의 거친 정도. 보통 = 2 x 2 픽셀당 한 색 (기본값). 강함 = 4 x 2, 최대 = 4 x 4: GPU 절약은 늘고 가장자리는 더 "
+"네모남. 바깥 고리를 보지 않는 시선 추적과 가장 잘 맞습니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Experimental. The sharp centre of Foveated rendering follows your eyes on a headset with eye "
+"tracking (for example Varjo); without it the centre stays in the middle of the lens. Needs "
+"Foveated rendering on at the game's start, else a restart. Almost no cost."
+msgstr ""
+"실험적 기능. 시선 추적이 있는 헤드셋 (예: Varjo)에서 Foveated 렌더링의 또렷한 중앙이 눈을 따라갑니다. 없으면 렌즈 중앙에 머뭅니다. 게임 시작 때 "
+"Foveated 렌더링이 켜져 있어야 하며, 아니면 재시작이 필요합니다. 부하는 거의 없습니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. The game skips the lens corners you never see (the headset reports them), so it draws "
+"fewer pixels: more GPU headroom, the picture you see stays the same. The first switch-on needs a "
+"game restart. Turn it off if the edge of the view looks wrong."
+msgstr ""
+"VR 전용. 게임이 보이지 않는 렌즈 모서리를 건너뜁니다 (헤드셋이 알려 줌). 그려야 할 픽셀이 줄어 GPU 여유가 생기고 보이는 화면은 그대로입니다. 처음 켤 때 게임 "
+"재시작 필요. 시야 가장자리가 이상하면 끄세요."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -377,199 +487,44 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"VR speed-ups: Turbo, foveated rendering and the hidden area mask. Right opens the group, Left "
-"closes it; it starts closed every time the menu opens."
-msgstr "VR 가속: 터보, 포비티드 렌더링, 숨김 영역 마스크. 오른쪽 키로 그룹을 열고 왼쪽 키로 닫습니다. 메뉴를 열 때마다 닫힌 상태로 시작합니다."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Turbo: no ASW / Motion Smoothing / SSW / reprojection. VR only. On = the game stops waiting for "
-"the headset each frame: more fps only when the CPU is the limit (busy cities, traffic). Turn it "
-"off if the picture judders. From OpenXR Toolkit."
+"Where the game's own VR UI floats (HUD, menus). The mod types the change into the game's console "
+"for you; needs g_developer and g_console 1 in config.cfg. Right opens the group, Left closes it."
 msgstr ""
-"터보: ASW / Motion Smoothing / SSW / 재투영 없음. VR 전용. 켬 = 게임이 매 프레임 헤드셋을 기다리지 않음: CPU가 한계일 때 (붐비는 도시, "
-"차량)만 fps가 오릅니다. 화면이 덜컥거리면 끄세요. OpenXR Toolkit 기반."
+"게임 자체 VR UI (HUD, 메뉴) 가 떠 있는 위치. Mod가 변경 사항을 게임 콘솔에 대신 입력합니다. config.cfg에 g_developer와 g_console "
+"1이 필요합니다. 오른쪽 키로 그룹을 열고 왼쪽 키로 닫습니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"Sharp centre, lower detail at the edge (NVIDIA RTX only). Saves GPU time at high Scaling. VR "
-"only. The outer ring is shaded once per 2 x 2 pixels; fences, grass and leaves keep full detail. "
-"Turn it off if the edge looks blocky."
+"Which of the game's VR UI layouts the rows below move: driving (the HUD while driving) or menus "
+"(the game's menu screens)."
+msgstr "아래 행이 움직이는 게임 VR UI 레이아웃: 주행 (주행 중 HUD) 또는 메뉴 (게임 메뉴 화면)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves the game's VR UI: height, side, distance, tilt, turn, size or curve, in small steps. The "
+"game gets each change about 0.4 s after your last press: the console opens and closes by itself."
 msgstr ""
-"가운데는 선명, 가장자리는 낮은 디테일 (NVIDIA RTX 전용). 높은 스케일링에서 GPU 시간 절약. VR 전용. 바깥 고리는 2 x 2 픽셀당 한 번 셰이딩되며, "
-"울타리, 풀, 나뭇잎은 디테일을 유지합니다. 가장자리가 깍두기처럼 보이면 끄세요."
+"게임의 VR UI를 작은 단계로 움직입니다: 높이, 좌우, 거리, 기울기, 회전, 크기, 곡률. 게임은 마지막 입력 약 0.4초 후에 변경을 받습니다: 콘솔이 스스로 열리고 "
+"닫힙니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"How big the sharp centre of Foveated (VRS) is, 10 - 100 % in 5 % steps: bigger = more of the view "
-"sharp, less saving; smaller = more saving, lower detail starts closer to the middle. 80 % "
-"(balanced) is the default; 90 = wide, 65 = narrow."
+"Right: every value of both layouts back to what config.cfg had at the start (the game saves its "
+"own values when it exits)."
+msgstr "오른쪽: 두 레이아웃의 모든 값을 시작 시 config.cfg의 값으로 되돌립니다 (게임은 종료할 때 자체 값을 저장합니다)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"A small live fps and frame-time box, also while this menu is closed (flat and VR): fps, ms, "
+"numbers only, each with or without a graph of recent frame times (spikes show red), or the graph "
+"alone. Its GPU cost is measured. Save keeps it."
 msgstr ""
-"Foveated (VRS)의 선명한 중심 크기, 10 - 100 %, 5 % 단위: 클수록 선명한 범위가 넓고 절약은 적음, 작을수록 절약이 크고 낮은 디테일이 중앙에서 "
-"가깝게 시작. 기본 80 % (균형), 90 = 넓음, 65 = 좁음."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Which of the game's passes Foveated (VRS) acts on. scene = the 3D world only (default). scene + "
-"lighting = also the game's lighting pass, at the very edge only: more saving. Test it: look for "
-"blocky light or shadow edges at the side of your view."
-msgstr ""
-"Foveated (VRS)가 적용되는 게임 패스. 장면 = 3D 월드만 (기본). 장면 + 조명 = 맨 가장자리에서만 게임 조명 패스에도: 더 절약. 시야 옆쪽의 빛이나 "
-"그림자 가장자리가 깍두기처럼 보이는지 확인하세요."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"How coarse the outer ring of Foveated (VRS) is. Normal = 1 colour per 2 x 2 pixels (default). "
-"Strong = per 4 x 2, Max = per 4 x 4: more GPU saving, blockier edges. Best with eye tracking, "
-"where you never look at the outer ring."
-msgstr ""
-"Foveated (VRS) 바깥 고리의 거칠기. 보통 = 2 x 2 픽셀당 1색 (기본). 강함 = 4 x 2, 최대 = 4 x 4: GPU 절약이 크고 가장자리가 더 "
-"깍두기. 바깥 고리를 보지 않는 시선 추적과 함께 쓸 때 최적."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Experimental. The sharp centre of Foveated (VRS) follows your eyes on a headset with eye tracking "
-"(OpenXR eye gaze, for example Varjo); without one it stays at the lens centre. Needs Foveated "
-"(VRS) on at the game's start, else a restart. Almost no cost."
-msgstr ""
-"실험적. Foveated (VRS)의 선명한 중심이 시선 추적 헤드셋 (OpenXR 시선, 예: Varjo)에서 눈을 따라갑니다. 없으면 렌즈 중앙에 머뭅니다. 게임 시작 때 "
-"Foveated (VRS)가 켜져 있어야 하며 아니면 재시작. 부하 거의 없음."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. The game skips the lens corners you never see (the headset reports them), so it draws "
-"fewer pixels: more GPU headroom, the picture you see stays the same. The first switch-on needs a "
-"game restart. Turn it off if the edge of the view looks wrong."
-msgstr ""
-"VR 전용. 게임이 보이지 않는 렌즈 모서리를 건너뜁니다 (헤드셋이 알려 줌). 그려야 할 픽셀이 줄어 GPU 여유가 생기고 보이는 화면은 그대로입니다. 처음 켤 때 게임 "
-"재시작 필요. 시야 가장자리가 이상하면 끄세요."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Frame rate limits and CPU: NVIDIA Reflex and an FPS cap for flat, a VR FPS cap, CPU tuning. Right "
-"opens the group, Left closes it; it starts closed every time the menu opens."
-msgstr ""
-"프레임 속도 제한과 CPU: 일반 화면용 NVIDIA Reflex와 FPS 제한, VR FPS 제한, CPU 튜닝. 오른쪽 키로 그룹을 열고 왼쪽 키로 닫습니다. 메뉴를 열 "
-"때마다 닫힌 상태로 시작합니다."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Flat only, NVIDIA only. On = the game's frames wait less in the GPU queue: less input lag when "
-"the GPU is the limit. Boost also keeps the GPU clocks up. Same fps; small cost. Not used in VR."
-msgstr ""
-"일반 화면 전용, NVIDIA 전용. 켬 = 게임 프레임이 GPU 대기열에서 덜 기다림: GPU가 한계일 때 입력 지연 감소. 부스트는 GPU 클럭도 유지. fps는 동일, "
-"부하 작음. VR에서는 쓰지 않음."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Flat only. Holds the game at most at this frame rate: a steady frame time, less heat and power. "
-"Set it a bit below what your PC holds in a busy city. With Reflex on, the NVIDIA driver does the "
-"limiting. off = no limit."
-msgstr ""
-"일반 화면 전용. 게임을 이 프레임 속도 이하로 유지: 프레임 시간이 일정해지고 발열과 전력이 줄어듭니다. 붐비는 도시에서 PC가 유지하는 값보다 조금 낮게 설정하세요. "
-"Reflex가 켜져 있으면 NVIDIA 드라이버가 제한합니다. 끔 = 제한 없음."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. half = the game draws every 2nd headset frame (72 Hz -> 36 fps), third = every 3rd; the "
-"headset's reprojection (ASW / Motion Smoothing) fills the rest at a steady rhythm. Use it when "
-"the fps swings. Turns Turbo off while on."
-msgstr ""
-"VR 전용. 1/2 = 게임이 헤드셋 프레임 2개 중 1개만 그림 (72 Hz -> 36 fps), 1/3 = 3개 중 1개. 나머지는 헤드셋 재투영 (ASW / Motion "
-"Smoothing)이 일정한 리듬으로 채웁니다. fps가 들쭉날쭉할 때 사용. 켜져 있는 동안 터보는 꺼집니다."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Three CPU switches together: the main and render thread prefer the P-cores (Intel hybrid CPUs "
-"only), the game runs at Above normal priority, and Windows may not throttle it (EcoQoS) or ignore "
-"its timer requests. Helps when the CPU is the limit; no cost. Separate settings in dlaa.ini: "
-"cpu_pcore, cpu_priority, cpu_no_throttle."
-msgstr ""
-"CPU 스위치 세 가지를 함께: 메인과 렌더 스레드가 P-core를 선호 (Intel 하이브리드 CPU만), 게임을 보통 이상 우선순위로 실행, Windows가 제한 "
-"(EcoQoS)하거나 타이머 요청을 무시하지 못하게 함. CPU가 한계일 때 도움, 부하 없음. dlaa.ini의 개별 설정: cpu_pcore, cpu_priority, "
-"cpu_no_throttle."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
-"it; it starts closed every time the menu opens."
-msgstr "패널의 위치, 크기, 깊이, 방향과 메뉴 키. 오른쪽 키로 그룹을 열고 왼쪽 키로 닫습니다. 메뉴를 열 때마다 닫힌 상태로 시작합니다."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
-"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
-"metres). Needs the VR layer (default). No cost."
-msgstr ""
-"VR 전용. 머리 따라가기 = 패널이 헤드셋과 함께 움직임. 캐빈 고정 = 좌석 앞 한 지점에 머물러 둘러봐도 안정적. X / Y / 깊이로 그 지점을 설정 (도, 미터). "
-"VR 레이어 (기본) 필요. 부하 없음."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
-"and VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr ""
-"이 패널을 좌우로 이동, 화면의 % 단위 (VR 캐빈 고정: 좌석 둘레의 도). 일반 화면과 VR은 각각 위치를 저장. 패널이 필요한 것을 가리면 사용. 부하 없음."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
-"VR each keep their own position. Use it if the panel covers something you need. No cost."
-msgstr ""
-"이 패널을 상하로 이동, 화면의 % 단위 (VR 캐빈 고정: 도, 플러스 = 아래). 일반 화면과 VR은 각각 위치를 저장. 패널이 필요한 것을 가리면 사용. 부하 없음."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
-"much. Flat and VR each keep their own size. No cost."
-msgstr "패널을 크게 / 작게. 읽기 어려우면 올리고 너무 많이 가리면 내리세요. 일반 화면과 VR은 각각 크기를 저장. 부하 없음."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
-"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
-"Change it if the panel is tiring to look at. No cost."
-msgstr ""
-"VR 전용이므로 일반 화면에서는 회색. 패널이 떠 있는 거리: VR 레이어 (기본)에서는 미터 (0.30 - 3.00), menu_vr_layer = 0이면 눈당 안쪽 이동 "
-"px. 어떤 깊이에서도 같은 크기. 보기 피곤하면 바꾸세요. 부하 없음."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
-"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
-"picture. No cost."
-msgstr ""
-"VR 전용이므로 일반 화면에서는 회색. 켬 = 옆으로 옮기면 패널이 당신을 향하고 어느 각도에서나 같은 크기 (VR 레이어 기본, 머리 따라가는 fps 상자도); 끔 = "
-"평평한 그림. 부하 없음."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"A small live fps and frame-time box, also while this menu is closed (flat and VR). Use it to see "
-"what a setting gains. Its GPU cost is measured: per frame, every picture it is drawn into; none "
-"when off. Save keeps it for the next start."
-msgstr ""
-"작은 실시간 fps 및 프레임 시간 상자, 이 메뉴가 닫혀 있어도 표시 (일반 화면과 VR). 설정의 효과를 볼 때 사용. GPU 부하는 측정됨: 그려지는 화면마다 프레임당, "
-"끄면 없음. 저장하면 다음 시작에도 유지."
+"작은 실시간 fps 및 프레임 시간 상자로, 이 메뉴를 닫아도 표시됩니다 (일반 화면과 VR): fps, ms, 숫자만. 최근 프레임 시간 그래프 (스파이크는 빨강)가 있는 "
+"것과 없는 것, 또는 그래프만 고를 수 있습니다. GPU 부하가 측정됩니다. 저장하면 유지됩니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -577,36 +532,6 @@ msgid ""
 "The fps box's lock, position, size, colour, VR distance and turn. Right opens the group, Left "
 "closes it; it starts closed every time the menu opens."
 msgstr "fps 상자의 고정, 위치, 크기, 색, VR 거리, 회전. 오른쪽 키로 그룹을 열고 왼쪽 키로 닫습니다. 메뉴를 열 때마다 닫힌 상태로 시작합니다."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
-"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + "
-"Per-part motion vectors). No cost."
-msgstr ""
-"VR 전용. 머리 따라가기 = 헤드셋과 함께 움직임. 플레이 공간 고정 = 좌석 둘레의 한 지점, 캐빈의 흔들림 무시. 차량에 부착 = 캐빈에 붙어 함께 흔들림 (DLAA + "
-"부품별 모션 벡터 필요). 부하 없음."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
-"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
-"for every vehicle. No cost."
-msgstr ""
-"VR, 차량에 부착일 때만. 켬 = 트럭 / 차량마다 캐빈 안 fps 상자 위치, 회전, 크기, 색, 밝기, 텍스트를 따로 보관 (메뉴를 닫을 때 dlaa.ini에 저장). "
-"끔 = 모든 차량이 하나의 설정 공유. 부하 없음."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
-"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
-"vehicles keep theirs. The box is square to the cab."
-msgstr ""
-"VR, 차량에 부착일 때만. 오른쪽 = 상자 위치가 어긋나면 지금 캐빈을 다시 측정 (정차하고 가만히). 왼쪽 = 이 차량의 상자를 기본값으로 (위치, 회전, 크기, 색, "
-"텍스트); 다른 차량은 유지. 상자는 캐빈에 수직입니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -621,29 +546,6 @@ msgid ""
 "Moves the fps box up / down, in % of the screen (VR fixed / attached: degrees, minus = up). Flat "
 "and VR each keep their own position. No cost."
 msgstr "fps 상자를 상하로 이동, 화면의 % 단위 (VR 고정 / 부착: 도, 마이너스 = 위). 일반 화면과 VR은 각각 위치를 저장. 부하 없음."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
-"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
-msgstr ""
-"VR 전용이므로 일반 화면에서는 회색. fps 상자를 제자리에서 좌우로 돌립니다, 도 단위 (+ = 앞면이 오른쪽으로). 상자가 옆에 있을 때 각도를 줄 때 사용. 0 = "
-"정면. 부하 없음."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
-"lying on the dashboard). 0 = it faces you. No cost."
-msgstr "VR 전용이므로 일반 화면에서는 회색. fps 상자를 기울입니다, 도 단위 (+ = 윗부분이 멀어짐, 대시보드에 눕힌 것처럼). 0 = 정면. 부하 없음."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-msgid ""
-"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
-"upright. No cost."
-msgstr "VR 전용이므로 일반 화면에서는 회색. fps 상자를 같은 평면에서 회전, 도 단위 (+ = 시계 방향). 0 = 똑바로. 부하 없음."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -681,6 +583,69 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
+"How far back the fps graph shows: 2 - 60 s. One bar per slice of time = its slowest frame, so you "
+"see spikes. Green = on time, yellow = a bit slow, red = a hitch; the line = the headset rate / "
+"FPS cap / your usual. Shown when FPS counter has a graph."
+msgstr ""
+"fps 그래프가 돌아보는 시간: 2 - 60초. 시간 조각마다 막대 하나 = 그 구간에서 가장 느린 프레임이라 스파이크가 보입니다. 초록 = 제때, 노랑 = 약간 느림, 빨강 "
+"= 끊김. 선 = 헤드셋 주사율 / FPS 제한 / 평소 값. FPS 카운터에 그래프가 있을 때 표시됩니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = moves with the headset. Fixed in play space = one spot around your seat, "
+"ignores the cab's sway. Attached to vehicle = stuck to the cab, sways with it (needs DLAA + Track "
+"moving parts). No cost."
+msgstr ""
+"VR 전용. 머리 따라가기 = 헤드셋과 함께 움직임. 플레이 공간 고정 = 좌석 주변 한 지점, 캐빈의 흔들림은 무시. 차량에 부착 = 캐빈에 붙어 함께 흔들림 (DLAA와 "
+"움직이는 부품 추적 필요). 부하 없음."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. On = each truck / car keeps its own fps box spot in the cab, turn, "
+"size, colour, brightness and text (saved in dlaa.ini when the menu closes). Off = one shared set "
+"for every vehicle. No cost."
+msgstr ""
+"VR, 차량에 부착일 때만. 켬 = 트럭 / 차량마다 캐빈 안 fps 상자 위치, 회전, 크기, 색, 밝기, 텍스트를 따로 보관 (메뉴를 닫을 때 dlaa.ini에 저장). "
+"끔 = 모든 차량이 하나의 설정 공유. 부하 없음."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR, Attached to vehicle only. Right = measure the cab again now (sit still, parked) if the box "
+"sits off. Left = this vehicle's box back to the defaults (spot, turn, size, colour, text); other "
+"vehicles keep theirs. The box is square to the cab."
+msgstr ""
+"VR, 차량에 부착일 때만. 오른쪽 = 상자 위치가 어긋나면 지금 캐빈을 다시 측정 (정차하고 가만히). 왼쪽 = 이 차량의 상자를 기본값으로 (위치, 회전, 크기, 색, "
+"텍스트); 다른 차량은 유지. 상자는 캐빈에 수직입니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Turns the fps box left / right on itself, in degrees (+ = its face "
+"turns to the right). Use it to angle the box when it sits at the side. 0 = it faces you. No cost."
+msgstr ""
+"VR 전용이므로 일반 화면에서는 회색. fps 상자를 제자리에서 좌우로 돌립니다, 도 단위 (+ = 앞면이 오른쪽으로). 상자가 옆에 있을 때 각도를 줄 때 사용. 0 = "
+"정면. 부하 없음."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Tilts the fps box, in degrees (+ = its top leans away from you, as if "
+"lying on the dashboard). 0 = it faces you. No cost."
+msgstr "VR 전용이므로 일반 화면에서는 회색. fps 상자를 기울입니다, 도 단위 (+ = 윗부분이 멀어짐, 대시보드에 눕힌 것처럼). 0 = 정면. 부하 없음."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. Rotates the fps box in its own plane, in degrees (+ = clockwise). 0 = "
+"upright. No cost."
+msgstr "VR 전용이므로 일반 화면에서는 회색. fps 상자를 같은 평면에서 회전, 도 단위 (+ = 시계 방향). 0 = 똑바로. 부하 없음."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
 "VR only, so greyed in flat. How far away the fps box floats, 0.30 - 3.00 m. It keeps the same "
 "size in your view at every distance; only the depth changes. Put it near the depth you look at to "
 "read it without refocusing. No cost."
@@ -691,12 +656,210 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
-"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + "
-"problems worked around; info = + start-up and changes; debug = + statistics, and debug also runs "
-"the GPU timers and the CPU profiler."
+"The panel's position, size, depth, facing and the menu keys. Right opens the group, Left closes "
+"it; it starts closed every time the menu opens."
+msgstr "패널의 위치, 크기, 깊이, 방향과 메뉴 키. 오른쪽 키로 그룹을 열고 왼쪽 키로 닫습니다. 메뉴를 열 때마다 닫힌 상태로 시작합니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel sideways, in % of the screen (VR fixed in cab: degrees around your seat). Flat "
+"and VR each keep their own position. Use it if the panel covers something you need. No cost."
 msgstr ""
-"dlaa_inject.log에 기록하는 내용: 끔 = 없음; 오류 = 실패만 (기본); 경고 = + 우회한 문제; 정보 = + 시작과 변경; 디버그 = + 통계, 그리고 "
-"GPU 타이머와 CPU 프로파일러도 실행합니다."
+"이 패널을 좌우로 이동, 화면의 % 단위 (VR 캐빈 고정: 좌석 둘레의 도). 일반 화면과 VR은 각각 위치를 저장. 패널이 필요한 것을 가리면 사용. 부하 없음."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Moves this panel up / down, in % of the screen (VR fixed in cab: degrees, plus = down). Flat and "
+"VR each keep their own position. Use it if the panel covers something you need. No cost."
+msgstr ""
+"이 패널을 상하로 이동, 화면의 % 단위 (VR 캐빈 고정: 도, 플러스 = 아래). 일반 화면과 VR은 각각 위치를 저장. 패널이 필요한 것을 가리면 사용. 부하 없음."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Makes this panel bigger or smaller. Raise it if you cannot read it, lower it if it covers too "
+"much. Flat and VR each keep their own size. No cost."
+msgstr "패널을 크게 / 작게. 읽기 어려우면 올리고 너무 많이 가리면 내리세요. 일반 화면과 VR은 각각 크기를 저장. 부하 없음."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only. Follow head = the panel moves with the headset. Fixed in cab = it stays at one spot in "
+"front of your seat, steady while you look around; X / Y / depth then set that spot (degrees, "
+"metres). Needs the VR layer (default). No cost."
+msgstr ""
+"VR 전용. 머리 따라가기 = 패널이 헤드셋과 함께 움직임. 캐빈 고정 = 좌석 앞 한 지점에 머물러 둘러봐도 안정적. X / Y / 깊이로 그 지점을 설정 (도, 미터). "
+"VR 레이어 (기본) 필요. 부하 없음."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. How far away the panel floats: in metres (0.30 - 3.00) as a VR layer, "
+"the default; in px of inward shift per eye with menu_vr_layer = 0. Same size at every depth. "
+"Change it if the panel is tiring to look at. No cost."
+msgstr ""
+"VR 전용이므로 일반 화면에서는 회색. 패널이 떠 있는 거리: VR 레이어 (기본)에서는 미터 (0.30 - 3.00), menu_vr_layer = 0이면 눈당 안쪽 이동 "
+"px. 어떤 깊이에서도 같은 크기. 보기 피곤하면 바꾸세요. 부하 없음."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"VR only, so greyed in flat. On = the panel turns to face you when you move it to the side, same "
+"size from every angle (as a VR layer, the default, the head-following fps box too); off = a flat "
+"picture. No cost."
+msgstr ""
+"VR 전용이므로 일반 화면에서는 회색. 켬 = 옆으로 옮기면 패널이 당신을 향하고 어느 각도에서나 같은 크기 (VR 레이어 기본, 머리 따라가는 fps 상자도); 끔 = "
+"평평한 그림. 부하 없음."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches for comparing: DLAA off, the game's own TAA mixed in or side by side, the wire fixes, "
+"running DLAA earlier. Nothing here is needed for normal driving. Right opens the group, Left "
+"closes it."
+msgstr ""
+"비교용 스위치: DLAA 끄기, 게임 자체 TAA 섞기 또는 나란히 보기, 전선 보정, DLAA 더 일찍 실행. 평소 운전에는 필요 없습니다. 오른쪽으로 그룹을 열고 왼쪽으로 "
+"닫습니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Switches the whole mod on or off and keeps the mode; off shows the game's own picture, for "
+"comparing. Off saves the cost of every part together."
+msgstr "Mod 전체를 켜거나 끄고 모드 설정은 유지합니다. 끔 = 게임 원래 화면, 비교용. 끄면 모든 부분의 부하가 사라집니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"on = the mod on the left, the game's own TAA on the right, to compare (Split line position, "
+"Split: left | right). Replaces Mix while on. With the game's console on, the mod switches the "
+"game's Anti-aliasing for you."
+msgstr ""
+"켬 = 왼쪽은 모드, 오른쪽은 게임 자체의 TAA로 비교합니다(분할선 위치, 분할: 왼쪽 | 오른쪽). 켜져 있는 동안 믹스를 대신합니다. 게임 콘솔이 켜져 있으면 모드가 "
+"게임의 안티앨리어싱을 대신 바꿉니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Where the split line is, 0 - 100 % of the width in 5 % steps: the mod's DLAA / DLSS on the left "
+"of it, the game's TAA on the right. Used only while Split with game TAA is on."
+msgstr ""
+"분할선의 위치입니다. 너비의 0 - 100 %, 5 % 단위: 선의 왼쪽은 모드의 DLAA / DLSS, 오른쪽은 게임의 TAA입니다. 게임 TAA와 분할이 켜져 있을 때만 "
+"사용됩니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What the split shows on its two sides: DLAA | TAA (the mod left, the game's TAA right), Mix | TAA "
+"or DLAA | Mix (Mix = the two blended at Mix amount). DLSS instead of DLAA when upscaling. Used "
+"only while Split with game TAA is on."
+msgstr ""
+"분할이 양쪽에 보여주는 것: DLAA | TAA(왼쪽 모드, 오른쪽 게임 TAA), 믹스 | TAA 또는 DLAA | 믹스(믹스 = 믹스 양에 따라 둘을 섞음). 업스케일 "
+"시에는 DLAA 대신 DLSS. 게임 TAA와 분할이 켜져 있을 때만 사용됩니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires move correctly while you drive: their movement is spread over the whole thin line. on "
+"= default. off = only to compare; near wires flicker more. The picture is soft for a moment when "
+"you switch."
+msgstr ""
+"가는 전선이 운전 중에도 올바르게 움직입니다: 움직임이 가는 선 전체에 퍼집니다. 켬 = 기본값. 끔 = 비교용만. 가까운 전선이 더 깜빡입니다. 바꾼 직후에는 화면이 잠깐 "
+"부드러워집니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Thin wires count as in front on every pixel they touch, even where they cover only a sliver of "
+"it. on = default. on (no A2C) = also for see-through edges such as leaves. off = only to compare; "
+"near wires flicker more."
+msgstr ""
+"가는 전선은 일부만 덮더라도 닿는 모든 픽셀에서 앞에 있는 것으로 칩니다. 켬 = 기본값. 켬 (A2C 없음) = 잎처럼 비치는 가장자리에도 적용. 끔 = 비교용만. 가까운 "
+"전선이 더 깜빡입니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Experimental: draws far wires that are thinner than 1 pixel as a 1 pixel line, so they do not "
+"break into dashes. Off by default: far wires may look darker or flicker more. Try it and compare."
+msgstr ""
+"실험적: 1픽셀보다 가는 먼 전선을 1픽셀 선으로 그려 점선처럼 끊기지 않게 합니다. 기본은 끔: 먼 전선이 더 어둡거나 더 깜빡일 수 있습니다. 시도해 보고 비교하세요."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Flat only: DLAA runs before the game adds its glow and colour look, so lane paint, wires and "
+"rails shimmer less. Change it only to compare. Not used with DLSS upscaling or Windows HDR. Same "
+"cost either way; takes about a second to switch."
+msgstr ""
+"일반 화면 전용: 게임이 빛 번짐과 색감을 입히기 전에 DLAA가 돌아서 차선 도색, 전선, 레일의 일렁임이 줄어듭니다. 비교할 때만 바꾸세요. DLSS 업스케일이나 "
+"Windows HDR에서는 쓰이지 않습니다. 부하는 같고 전환에 약 1초 걸립니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Bug report: press the capture key twice (or Capture now) where something looks wrong; the mod "
+"writes one zip you attach to a GitHub issue. Right opens the group, Left closes it."
+msgstr ""
+"버그 리포트: 이상한 곳에서 캡처 키를 두 번 누르세요 (또는 지금 캡처). 모드가 zip 하나를 만들며 GitHub 이슈에 첨부하면 됩니다. 오른쪽으로 그룹을 열고 왼쪽으로 "
+"닫습니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"One switch for the most complete report: log detail debug, rewind 2 s, capture Full. Off puts the "
+"rows back as they were. Only this switch is saved; the forced values are never written to "
+"dlaa.ini."
+msgstr ""
+"가장 완전한 리포트를 위한 스위치 하나: 로그 상세 디버그, 되감기 2초, 캡처 전체. 끄면 각 줄이 원래대로 돌아갑니다. 이 스위치만 저장되며 강제된 값은 dlaa.ini에 "
+"쓰이지 않습니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"What goes into dlaa_inject.log: off = nothing; errors = failures only (default); warnings = + "
+"problems worked around; info = + start-up and changes; debug = + statistics and timing "
+"measurements (a little slower)."
+msgstr ""
+"dlaa_inject.log에 들어가는 내용: 끔 = 없음. 오류 = 실패만 (기본값). 경고 = + 우회한 문제. 정보 = + 시작과 변경. 디버그 = + 통계와 시간 측정 "
+"(조금 느려짐)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Keeps the last 0.5 - 3 s of frames on the graphics card all the time, so the report shows the "
+"moment BEFORE the key (+ what DLSS got for the last frames). Costs graphics memory (the MB in the "
+"cost column) and a picture copy per frame. off = none."
+msgstr ""
+"마지막 0.5 - 3초의 프레임을 항상 그래픽 카드에 보관해서, 리포트에 키를 누르기 직전의 순간 (+ 마지막 프레임에 DLSS가 받은 것)이 담깁니다. 그래픽 메모리 (부하 "
+"열의 MB)와 프레임마다 화면 복사가 듭니다. 끔 = 없음."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Quick = system info, logs, settings, your picture and DLAA off for a few frames (about 1 s). Full "
+"= + what DLSS got per frame (colour, motion, depth) and A/B sets: motion view, motion off, jitter "
+"only (about 2 - 4 s)."
+msgstr ""
+"빠름 = 시스템 정보, 로그, 설정, 화면, 몇 프레임의 DLAA 끔 (약 1초). 전체 = + 프레임마다 DLSS가 받은 것 (색, 모션, 깊이)과 A/B 세트: 모션 "
+"보기, 모션 끔, 지터만 (약 2 - 4초)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"The capture key. Press it TWICE within 1 s while driving where it goes wrong (the first press "
+"only arms it: one short beep). Right opens the Hotkeys page on its line to change it."
+msgstr ""
+"캡처 키. 문제가 생기는 곳에서 운전 중 1초 안에 두 번 누르세요 (첫 번째는 준비만: 짧은 삐 소리). 오른쪽을 누르면 단축키 페이지가 그 줄에서 열려 바꿀 수 있습니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"How many captures stay in the dlaa_selftest folder next to the DLL: older ones (folder + zip) are "
+"deleted when a new one is written. all = never delete."
+msgstr "DLL 옆 dlaa_selftest 폴더에 남길 캡처 수: 새로 쓸 때 오래된 것 (폴더 + zip)이 삭제됩니다. 모두 = 삭제 안 함."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -732,11 +895,26 @@ msgstr ""
 #: src/inject.cpp
 msgid ""
 "Puts every setting in this menu back to how the mod ships (model, sharpen, texture sharpness, "
-"DLAA area, motion, mirrors, profile, panel, fps box, turbo, foveated, frame rate, logging), live "
-"and in dlaa.ini, keeping your hotkeys and every other line."
+"DLAA area, motion, mirrors, preset, panel, fps box, turbo, foveated, frame rate, CPU, log "
+"detail), live and in dlaa.ini, keeping your hotkeys and every other line."
 msgstr ""
-"이 메뉴의 모든 설정을 Mod 출시 상태로 되돌립니다 (모델, 선명도, 텍스처 선명도, DLAA 영역, 모션, 거울, 프로필, 패널, fps 상자, 터보, 포비티드, 프레임 "
-"속도, 로그). 실시간과 dlaa.ini 모두, 단축키와 다른 줄은 유지."
+"이 메뉴의 모든 설정을 출시 상태로 되돌립니다 (모델, 선명도, 텍스처 선명도, DLAA 영역, 모션, 거울, 프리셋, 패널, fps 상자, 터보, Foveated, 프레임 "
+"속도, CPU, 로그 상세). 즉시 적용되고 dlaa.ini에도 반영되며, 단축키와 다른 줄은 유지됩니다."
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Off"
+msgstr "끔"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph only"
+msgstr "그래프만"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "graph"
+msgstr "그래프"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -894,11 +1072,6 @@ msgstr "끔"
 msgid "same"
 msgstr "같음"
 
-#. Cost column cell (about 10 Latin characters)
-#: src/inject.cpp
-msgid "no extra"
-msgstr "추가 없음"
-
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
@@ -1016,8 +1189,8 @@ msgstr "현재 프레임당 %ls. 거울이 적을수록 가볍습니다."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Greyed: Mirror DLAA is off."
-msgstr "회색: 거울 DLAA가 꺼져 있습니다."
+msgid "Greyed: Smooth mirrors is off."
+msgstr "회색: 부드러운 거울이 꺼져 있습니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1034,8 +1207,191 @@ msgstr "거울의 현재 프레임당 부하는 %ls."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid "Greyed: only for AMD X3D CPUs with two core groups (7950X3D, 9950X3D)."
+msgstr "회색: 코어 그룹이 둘인 AMD X3D CPU (7950X3D, 9950X3D) 전용입니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On now: the game runs only on the cores with the big cache."
+msgstr "현재 켜짐: 게임이 큰 캐시가 있는 코어에서만 실행됩니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "On, but not applied: the game's cores were already limited (see the log)."
+msgstr "켜져 있지만 적용 안 됨: 게임의 코어가 이미 제한되어 있었습니다 (로그 참조)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "Greyed in VR: VR always runs DLAA on the finished picture."
 msgstr "VR에서는 회색: VR은 항상 완성된 화면에 DLAA를 적용합니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Greyed: VR only."
+msgstr "회색: VR 전용."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Greyed: the game's console is off. Set g_developer and g_console to \"1\" in config.cfg while the "
+"game is closed."
+msgstr "회색: 게임 콘솔이 꺼져 있습니다. 게임을 닫은 상태에서 config.cfg의 g_developer와 g_console을 \"1\"로 설정하세요."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"Waiting: click the game window on the desktop. The mod types into the game's console only while "
+"the game window has the focus."
+msgstr "대기 중: 바탕화면에서 게임 창을 클릭하세요. 모드는 게임 창에 포커스가 있을 때만 게임 콘솔에 입력합니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Sending to the game's console..."
+msgstr "게임 콘솔로 전송 중..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's log did not confirm the last change: see the mod's log."
+msgstr "게임 로그가 마지막 변경을 확인하지 못했습니다: 모드 로그를 확인하세요."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Mix and split need the game's TAA: set Anti-aliasing to TAA in the game's graphics settings."
+msgstr "믹스와 분할에는 게임의 TAA가 필요합니다: 게임 그래픽 설정에서 안티앨리어싱을 TAA로 설정하세요."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is not running now: the mod runs alone."
+msgstr "게임의 TAA가 지금 실행 중이 아닙니다: Mod 단독으로 실행됩니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: set the game's Anti-aliasing to Disabled, or set Mode to Mix."
+msgstr "게임의 TAA가 지금 실행 중입니다: 게임의 안티앨리어싱을 끔으로 설정하거나 모드를 믹스로 설정하세요."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: split is on."
+msgstr "게임의 TAA가 지금 실행 중입니다: 분할이 켜져 있습니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "The game's TAA is running now: the mix is on."
+msgstr "게임의 TAA가 지금 실행 중입니다: 믹스가 켜져 있습니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: its TAA pass did not run in this frame."
+msgstr "게임의 TAA로 되돌렸습니다: 이 프레임에서 TAA 패스가 실행되지 않았습니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's jitter could not be read (see the log)."
+msgstr "게임의 TAA로 되돌렸습니다: 게임의 지터를 읽을 수 없습니다 (로그 참조)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the picture before the game's TAA was not found."
+msgstr "게임의 TAA로 되돌렸습니다: 게임의 TAA 이전 화면을 찾지 못했습니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: mix and split do not work with Windows HDR."
+msgstr "게임의 TAA로 되돌렸습니다: 믹스와 분할은 Windows HDR에서 작동하지 않습니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA is off."
+msgstr "게임의 TAA로 되돌렸습니다: DLAA가 꺼져 있습니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: the game's tonemap was not found (see the log)."
+msgstr "게임의 TAA로 되돌렸습니다: 게임의 톤맵을 찾지 못했습니다 (로그 참조)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Fell back to the game's TAA: DLAA did not run on this frame (see the log)."
+msgstr "게임의 TAA로 되돌렸습니다: 이 프레임에서 DLAA가 실행되지 않았습니다 (로그 참조)."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
+"Or turn on the game console (g_developer and g_console 1 in config.cfg): then the mod switches it "
+"for you."
+msgstr "또는 게임 콘솔을 켜세요 (config.cfg의 g_developer 및 g_console 1): 그러면 모드가 대신 바꿔 줍니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn on the game console to let the mod switch the game's Anti-aliasing."
+msgstr "모드가 게임의 안티앨리어싱을 바꿀 수 있도록 게임 콘솔을 켜세요."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "TAA"
+msgstr "TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "unknown"
+msgstr "알 수 없음"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "other"
+msgstr "기타"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "waiting: click the game window"
+msgstr "대기 중: 게임 창을 클릭하세요"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switching..."
+msgstr "전환 중..."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch confirmed"
+msgstr "전환 확인됨"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "switch NOT confirmed (see the log)"
+msgstr "전환 확인 안 됨 (로그 참조)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls, %ls."
+msgstr "게임 AA: %ls, %ls."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Game AA: %ls."
+msgstr "게임 AA: %ls."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1056,6 +1412,43 @@ msgstr "현재 프레임당 %ls. 끄면 절약됩니다."
 #, c-format
 msgid "Costs %ls ms GPU per frame now; most of it at night."
 msgstr "현재 프레임당 GPU %ls ms. 대부분 밤에 발생합니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"The last one: %d zips of at most 24 MB, %d MB in all (folder %.0f MB). Attach the _main zip; the "
+"others only if asked."
+msgstr "최근 것: 최대 24 MB zip %d개, 총 %d MB (폴더 %.0f MB). _main zip을 첨부하고, 나머지는 요청 시에만."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Holds %.0f MB of graphics memory now."
+msgstr "현재 그래픽 메모리 %.0f MB를 사용 중입니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"%ls about %.0f MB graphics memory for the rewind; a capture takes about %.1f s and writes about "
+"%.0f MB."
+msgstr "%ls 되감기용 그래픽 메모리 약 %.0f MB. 캡처는 약 %.1f초 걸리고 약 %.0f MB를 씁니다."
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "On, it costs"
+msgstr "켜면 드는 부하"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Costs now:"
+msgstr "현재 부하:"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn off Send everything to change this."
+msgstr "이것을 바꾸려면 모두 보내기를 끄세요."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1119,8 +1512,8 @@ msgstr "VR에서는 회색: VR FPS 제한을 쓰세요."
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Limited by the NVIDIA driver now (Reflex is on)."
-msgstr "현재 NVIDIA 드라이버가 제한 중 (Reflex 켜짐)."
+msgid "Limited by the NVIDIA driver now (Low delay is on)."
+msgstr "현재 NVIDIA 드라이버가 제한 중 (저지연 켜짐)."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1173,8 +1566,8 @@ msgstr "게임 자체 GPU 수치에서는 시간을 절약하지만 Mod의 수�
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
-msgid "Foveated (VRS) is off: switch it on first."
-msgstr "Foveated (VRS)가 꺼져 있음: 먼저 켜세요."
+msgid "Foveated rendering is off: switch it on first."
+msgstr "Foveated 렌더링이 꺼져 있습니다: 먼저 켜세요."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1192,9 +1585,9 @@ msgstr "가짜 시선 (vrs_eye_fake = 1): 선명한 영역이 천천히 원을 �
 #: src/inject.cpp
 #, c-format
 msgid ""
-"Foveated (VRS) was off at the game's start: save (Shift+F12) and restart the game to ask the "
+"Foveated rendering was off at the game's start: save (Shift+F12) and restart the game to ask the "
 "headset for eye gaze."
-msgstr "Foveated (VRS)가 게임 시작 때 꺼져 있었음: 저장 (Shift+F12) 후 게임을 재시작하면 헤드셋에 시선을 요청합니다."
+msgstr "게임 시작 때 Foveated 렌더링이 꺼져 있었습니다: 저장 (Shift+F12)하고 게임을 다시 시작하면 헤드셋에 시선을 요청합니다."
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1219,18 +1612,6 @@ msgstr "사용 불가: 이 VR 런타임은 숨김 영역을 보고하지 않습�
 #, c-format
 msgid "Off now: every pixel is drawn."
 msgstr "현재 꺼짐: 모든 픽셀을 그립니다."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now (the mod is off)."
-msgstr "현재 꺼짐 (Mod가 꺼짐)."
-
-#. Description of the selected row (up to 4 lines together with the cost sentence)
-#: src/inject.cpp
-#, c-format
-msgid "Off now: the game's own stretch is used below Scaling 100 %%."
-msgstr "현재 꺼짐: 스케일링 100 %% 미만에서는 게임 자체 확대를 씁니다."
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1636,6 +2017,21 @@ msgstr "%ls %hs 길게"
 msgid "ETS2 / ATS DLAA & DLSS mod v%hs - tuning menu"
 msgstr "ETS2 / ATS DLAA & DLSS Mod v%hs - 튜닝 메뉴"
 
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "all settings (flat and VR)"
+msgstr "모든 설정 (일반 및 VR)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "VR settings"
+msgstr "VR 설정"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Flat settings"
+msgstr "일반 설정"
+
 #. Heading of a column (short)
 #: src/inject.cpp
 #, c-format
@@ -1685,15 +2081,41 @@ msgstr "닫힘 (%d)"
 msgid "Mode"
 msgstr "모드"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLSS)"
+msgstr "믹스 (TAA + DLSS)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix (TAA + DLAA)"
+msgstr "믹스 (TAA + DLAA)"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLSS"
 msgstr "DLSS"
 
-#. Value column (about 20 Latin characters)
+#. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid "DLAA"
 msgstr "DLAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Mix amount"
+msgstr "믹스 양"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d %% TAA"
+msgstr "%d %% TAA"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Quality preset"
+msgstr "화질 프리셋"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -1719,7 +2141,7 @@ msgstr "%.1f (끔)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Sharpen width"
+msgid "Sharpness size"
 msgstr "선명도 폭"
 
 #. Value column (about 20 Latin characters)
@@ -1741,8 +2163,8 @@ msgstr "%.2f (끔)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Cut-out texture sharpness"
-msgstr "컷아웃 텍스처 선명도"
+msgid "Leaves and fences sharpness"
+msgstr "잎·울타리 선명도"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1755,6 +2177,11 @@ msgstr "같음 (%.2f)"
 msgid "DLAA area (VR)"
 msgstr "DLAA 영역 (VR)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA area"
+msgstr "DLAA 영역"
+
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "VR only"
@@ -1766,6 +2193,11 @@ msgstr "VR 전용"
 msgid "100 %% (flat)"
 msgstr "100 %% (일반)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Track moving parts"
+msgstr "움직이는 부품 추적"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "old stencil ids"
@@ -1773,13 +2205,13 @@ msgstr "구 스텐실 ID"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirror DLAA"
-msgstr "거울 DLAA"
+msgid "Smooth mirrors"
+msgstr "부드러운 거울"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Mirrors in turns"
-msgstr "거울 번갈아 처리"
+msgid "Mirrors take turns (faster)"
+msgstr "거울 번갈아 처리 (빠름)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1788,29 +2220,48 @@ msgstr "켬 (모드 3)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Thin-wire motion"
-msgstr "가는 전선 모션"
+msgid "Wire fix: motion"
+msgstr "전선 보정: 모션"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Wire fix: depth"
+msgstr "전선 보정: 깊이"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (no A2C)"
 msgstr "켬 (A2C 없음)"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Thicker wires (test)"
+msgstr "굵은 전선 (테스트)"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 msgid "on (experimental)"
 msgstr "켬 (실험적)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Run DLAA earlier (test, flat)"
+msgstr "DLAA 일찍 실행 (테스트,일반)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Run DLAA earlier (test)"
+msgstr "DLAA 일찍 실행 (테스트)"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "flat only"
 msgstr "일반 화면 전용"
 
-#. Value column (about 20 Latin characters)
+#. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-#, c-format
-msgid "off (dlaa.ini 0)"
-msgstr "끔 (dlaa.ini 0)"
+msgid "Glass and fence fix"
+msgstr "유리·울타리 보정"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -1819,13 +2270,49 @@ msgstr "끔 (VR 예산)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Light glow ghosting fix"
-msgstr "불빛 잔상 보정"
+msgid "Light trail fix"
+msgstr "빛 꼬리 보정"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "DLAA off to compare (not saved)"
+msgstr "DLAA 끄기 (저장 안 됨)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split with game TAA"
+msgstr "게임 TAA와 분할"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split line position"
+msgstr "분할선 위치"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Split: left | right"
+msgstr "분할: 왼쪽 | 오른쪽"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Mix | TAA"
+msgstr "믹스 | TAA"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "DLAA | Mix"
+msgstr "DLAA | 믹스"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "OFXR Bridge (VR frame gen)"
 msgstr "OFXR Bridge (VR 프레임 생성)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "off (dlaa.ini 0)"
+msgstr "끔 (dlaa.ini 0)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1846,8 +2333,73 @@ msgstr "VectorXR (VR 레이어)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Layout"
+msgstr "레이아웃"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "driving"
+msgstr "주행"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "menus"
+msgstr "메뉴"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Height"
+msgstr "높이"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Side"
+msgstr "좌우"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Distance"
+msgstr "거리"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Tilt"
+msgstr "기울기"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Turn"
+msgstr "회전"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Size"
+msgstr "크기"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid "Curve"
+msgstr "곡률"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Reset to config.cfg"
+msgstr "config.cfg로 되돌리기"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Right"
+msgstr "오른쪽"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Turbo mode (VR)"
 msgstr "터보 모드 (VR)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Turbo mode"
+msgstr "터보 모드"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1856,8 +2408,8 @@ msgstr "켬 (중지됨)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated (VRS)"
-msgstr "Foveated (VRS)"
+msgid "Foveated rendering"
+msgstr "Foveated 렌더링"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1876,8 +2428,8 @@ msgstr "Foveated 크기"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Foveated passes"
-msgstr "Foveated 패스"
+msgid "Foveated: lighting too"
+msgstr "Foveated: 조명도"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1936,8 +2488,13 @@ msgstr "켬 (시선 대기)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Hidden area mask (VR)"
-msgstr "숨김 영역 마스크 (VR)"
+msgid "Skip hidden edges (VR)"
+msgstr "숨은 가장자리 건너뛰기 (VR)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Skip hidden edges"
+msgstr "숨은 가장자리 건너뛰기"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1952,8 +2509,13 @@ msgstr "켬 (FPS 제한 우선)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Reflex (flat)"
-msgstr "Reflex (일반)"
+msgid "Low delay (Reflex, flat)"
+msgstr "저지연 (Reflex, 일반)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Low delay (Reflex)"
+msgstr "저지연 (Reflex)"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -1964,6 +2526,11 @@ msgstr "켬 + 부스트"
 #: src/inject.cpp
 msgid "FPS cap (flat)"
 msgstr "FPS 제한 (일반)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS cap"
+msgstr "FPS 제한"
 
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
@@ -2004,8 +2571,108 @@ msgstr "혼합 (dlaa.ini)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Logging"
-msgstr "로그"
+msgid "AMD cache cores (X3D)"
+msgstr "AMD 캐시 코어 (X3D)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "on (auto)"
+msgstr "켬 (자동)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Send everything"
+msgstr "모두 보내기"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Log detail"
+msgstr "로그 상세"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Rewind before key"
+msgstr "키 이전 되감기"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d frames (dlaa.ini)"
+msgstr "%d프레임 (dlaa.ini)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture includes"
+msgstr "캡처에 포함"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Full"
+msgstr "전체"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "Quick"
+msgstr "빠름"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "change"
+msgstr "변경"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture key"
+msgstr "캡처 키"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%hs (press twice)"
+msgstr "%hs (두 번 누르기)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Keep captures"
+msgstr "캡처 보관 수"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "all"
+msgstr "모두"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Capture now"
+msgstr "지금 캡처"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "capturing %d / %d"
+msgstr "캡처 중 %d / %d"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "writing (%d files)"
+msgstr "쓰는 중 (파일 %d개)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "done: %d parts, %d MB"
+msgstr "완료: %d개, %d MB"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "failed (see the log)"
+msgstr "실패 (로그 참조)"
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+msgid "ready"
+msgstr "준비됨"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2028,6 +2695,11 @@ msgstr "자동 (%ls)"
 #: src/inject.cpp
 msgid "Panel lock (VR)"
 msgstr "패널 고정 (VR)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel lock"
+msgstr "패널 고정"
 
 #. Keys: the Hotkey column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2070,6 +2742,11 @@ msgstr "패널 크기"
 msgid "Panel VR depth"
 msgstr "패널 VR 깊이"
 
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Panel depth"
+msgstr "패널 깊이"
+
 #. Value column (about 20 Latin characters)
 #: src/inject.cpp
 #, c-format
@@ -2083,18 +2760,13 @@ msgstr "패널 정면 향함 (VR)"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "Menu keys"
-msgstr "메뉴 키"
+msgid "Panel faces you"
+msgstr "패널 정면 향함"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
-msgid "FPS counter"
-msgstr "FPS 카운터"
-
-#. Value column (about 20 Latin characters)
-#: src/inject.cpp
-msgid "Off"
-msgstr "끔"
+msgid "Menu keys"
+msgstr "메뉴 키"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2193,8 +2865,23 @@ msgstr "FPS 불투명도"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "FPS graph length"
+msgstr "FPS 그래프 길이"
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "with a graph only"
+msgstr "그래프 있을 때만"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "FPS distance (VR)"
 msgstr "FPS 거리 (VR)"
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "FPS distance"
+msgstr "FPS 거리"
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
@@ -2234,6 +2921,18 @@ msgstr "%lcCPU%lc | %lcGPU%lc ms"
 #, c-format
 msgid "Hold %hs for %hs s to reset. %ls"
 msgstr "%hs를 %hs초 길게 눌러 초기화. %ls"
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid ""
+"%hs = capture now (the menu closes first). The zip (dlaa_selftest folder next to the DLL) holds "
+"system info, the mod's and the game's log, dlaa.ini, your picture and DLAA off; Full adds what "
+"DLSS got and the A/B sets; rewind adds the moment before. Your user name and home folder are "
+"removed. %ls"
+msgstr ""
+"%hs = 지금 캡처 (메뉴가 먼저 닫힙니다). zip (DLL 옆 dlaa_selftest 폴더)에는 시스템 정보, 모드와 게임의 로그, dlaa.ini, 화면, DLAA "
+"끈 화면이 들어갑니다. 전체는 DLSS가 받은 것과 A/B 세트를 더하고, 되감기는 키 이전 순간을 더합니다. 사용자 이름과 홈 폴더는 제거됩니다. %ls"
 
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
@@ -2282,4 +2981,7 @@ msgstr "정보"
 #: src/log.h
 msgid "debug"
 msgstr "디버그"
+
+#~ msgid "The last one: %d zip parts of at most 24 MB, %d MB in all (folder %.0f MB): attach them all."
+#~ msgstr "최근 것: 최대 24 MB zip %d개, 총 %d MB (폴더 %.0f MB): 모두 첨부하세요."
 

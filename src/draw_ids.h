@@ -110,6 +110,19 @@
 //      start, on ClearState / ExecuteCommandList / SwapDeviceContextState, on any Set from another thread, on an unusual call
 //      (slot range past the API limit, half-null first / count arrays) and on a context change. Verify mode compares both paths
 //      every Nth record and falls back to the getters for the rest of the frame on any difference.
+// Phase 93 PS / OM BANK (DidShadow::ConfigurePs; dlaa.ini did_shadow_ps, default 1, startup only, with did_shadow >= 1):
+//  14. The Fable audit of 2026-11-09 (ATS VR 72 Hz) measured ~265 ns per forward-pass entry (the "fwd-depth" CPU row): FwdOnDraw
+//      read the depth-stencil / blend state + the VS through the getters and every forward record (SetCapturePs: the forward depth
+//      batch, the glow bias records, the mirror units) the PS, PS cbuffers 0..3 + windows, 16 PS SRVs and 8 PS samplers -- each
+//      pointer an AddRef / Release. The hooked PSSetShader / PSSetSamplers / PSSetConstantBuffers(1) / OMSetBlendState /
+//      OMSetDepthStencilState (+ the mod's own direct trampoline calls of two of them: the LOD sampler sets, the v0.9.0 stencil-id
+//      twins) keep a second shadow bank exactly like the IA / VS / RS one: armed only by a forward use (FwdStates / a PS record), so
+//      the G-buffer pass pays nothing; dropped with the first bank (every drop / kill / frame start / pass start); a PS cbuffer
+//      naming an output-capable buffer reads its group through the getter; the PS SRVs ALWAYS read the getter (the runtime's hazard
+//      tracking unbinds an SRV whose resource becomes an output -- not tracked here); the record takes a reference only on a pointer
+//      its previous draw does not already name (PsState::own, as State::own). FwdStates hands BORROWED pointers (the context's
+//      binding holds them for the whole draw hook; FwdDrawStates releases nothing then). Verify mode compares the bank every Nth
+//      use too (fields ps / pscb / pssmp / dss / bs in the shadow log line).
 // Compiled only when WITH_DLAA=1. Render thread only (the game's immediate context).
 #pragma once
 #ifdef WITH_DLAA
@@ -182,6 +195,31 @@ inline void NoteCb(void* c, UINT s, UINT n, ID3D11Buffer* const* b, const UINT* 
 inline void NoteSmp(void* c, UINT s, UINT n, ID3D11SamplerState* const* p) { if (g_armed.load(std::memory_order_relaxed)) NoteSmpSlow(c, s, n, p); }
 inline void NoteRs(void* c, ID3D11RasterizerState* rs) { if (g_armed.load(std::memory_order_relaxed)) NoteRsSlow(c, rs); }
 inline void Invalidate(void* c, int why) { if (g_armed.load(std::memory_order_relaxed)) InvalidateSlow(c, why); }
+// ---- phase 93: the PS / OM bank (see 14. in the header comment) ----
+enum PsField : int { kPFPs = 0, kPFCb, kPFSmp, kPFDss, kPFBs, kPsFieldN };
+constexpr int kPsCbN = 4, kPsSmpN = 8;           // = DrawIdRecord::kPsCb / kPsSmp (static_assert in draw_ids.cpp)
+const char* PsFieldName(int f);
+inline std::atomic<bool> g_armedPs{false};       // the bank is live (implies g_armed); false = its Notes are one relaxed load
+void ConfigurePs(bool on);                       // once, after every PS / OM hook is in (inject.cpp); default off (the harness)
+bool PsConfigured();                             // on and the first bank Configured()
+void NotePsSlow(void* ctx, ID3D11PixelShader* ps);
+void NotePsCbSlow(void* ctx, UINT start, UINT num, ID3D11Buffer* const* b, const UINT* first, const UINT* count, bool legacy);
+void NotePsSmpSlow(void* ctx, UINT start, UINT num, ID3D11SamplerState* const* s);
+void NoteDssSlow(void* ctx, ID3D11DepthStencilState* dss);
+void NoteBsSlow(void* ctx, ID3D11BlendState* bs);
+inline void NotePs(void* c, ID3D11PixelShader* ps) { if (g_armedPs.load(std::memory_order_relaxed)) NotePsSlow(c, ps); }
+inline void NotePsCb(void* c, UINT s, UINT n, ID3D11Buffer* const* b, const UINT* f, const UINT* k, bool legacy) {
+    if (g_armedPs.load(std::memory_order_relaxed)) NotePsCbSlow(c, s, n, b, f, k, legacy);
+}
+inline void NotePsSmp(void* c, UINT s, UINT n, ID3D11SamplerState* const* p) {
+    if (g_armedPs.load(std::memory_order_relaxed)) NotePsSmpSlow(c, s, n, p);
+}
+inline void NoteDss(void* c, ID3D11DepthStencilState* d) { if (g_armedPs.load(std::memory_order_relaxed)) NoteDssSlow(c, d); }
+inline void NoteBs(void* c, ID3D11BlendState* b) { if (g_armedPs.load(std::memory_order_relaxed)) NoteBsSlow(c, b); }
+// FwdOnDraw (render thread, the game context's ID3D11DeviceContext1): the bound depth-stencil state, blend state and VS from the
+// shadow, BORROWED (no reference taken: the context's binding holds them while the draw hook runs). false = not available (the
+// caller reads the getters and owns what they return).
+bool FwdStates(ID3D11DeviceContext1* ctx, ID3D11DepthStencilState** dss, ID3D11BlendState** bs, ID3D11VertexShader** vs);
 // The context the game calls the hooks with when it differs from the one Record is given (inject.cpp: the game's
 // ID3D11DeviceContext next to its QueryInterface'd ID3D11DeviceContext1; normally the same address).
 void SetAlias(void* ctx);
@@ -203,6 +241,13 @@ struct Stats {
     uint64_t notes = 0;                          // Set calls applied to the shadow
     uint64_t vtMiss = 0;                         // records that found a hooked vtable entry changed (getters used)
     bool     disabled = false;
+    // phase 93: the PS / OM bank
+    uint64_t psRecShadow = 0, psRecGet = 0;      // PS records from the bank / through the getters
+    uint64_t fwdShadow = 0, fwdGet = 0;          // FwdStates from the bank / not available
+    uint64_t psHazGet = 0;                       // PS cbuffer groups read by the getter (an output-capable buffer bound)
+    uint64_t psSeed[kPsFieldN] = {};             // PS-bank groups read into it (re-arm or after an unusual call)
+    uint64_t psVerified = 0, psMismatchRecs = 0, psMismatch[kPsFieldN] = {};
+    uint64_t psRefsTaken = 0, psRefsSkipped = 0, psNotes = 0;
 };
 void TakeStats(Stats* out);                      // the window since the last call (+ restarts it)
 }
@@ -315,8 +360,10 @@ public:
     // state, our PS, GS / HS / DS) and GfxSave::Restore keep going through the hooks, so every tracker sees the game's state
     // come back. Registration: once, at hook install (before the first replay); fn = RawFn, vtIndex into the
     // ID3D11DeviceContext1 vtable (ID3D11DeviceContext's own entries keep their indices there).
-    enum RawFn : int { kRawIl = 0, kRawVb, kRawIb, kRawVs, kRawVsCb1, kRawVsSmp, kRawRs, kRawVp, kRawPs, kRawPsSmp, kRawDi, kRawDii,
-                       kRawN };
+    // phase 93: + kRawPsCb1 (PSSetConstantBuffers1 is hooked now: the id replay sets the id cbuffer per draw, the depth batch the
+    // game's PS cbuffers)
+    enum RawFn : int { kRawIl = 0, kRawVb, kRawIb, kRawVs, kRawVsCb1, kRawVsSmp, kRawRs, kRawVp, kRawPs, kRawPsSmp, kRawPsCb1, kRawDi,
+                       kRawDii, kRawN };
     // (a null target / raw or an out-of-range fn / vtIndex is ignored = that call keeps the vtable). Logged (info) at the first
     // replay and whenever the set of raw calls changes: "MV draw-ids: replay calls ... through the hook trampolines".
     // phase 58c: a draw that found another entry is logged once per distinct entry (address, module + offset, PE stamp / size).
@@ -468,6 +515,10 @@ private:
                                                  // depthDss != null = the forward-depth batch (ReplayDepth)
     struct PsState;                              // v0.10.0 phase 10: per-draw pixel-shader state (draw_ids.cpp)
     void ReleasePs(int from, int to);
+    // phase 93: the PS, PS cbuffers and PS samplers of `p` from the DidShadow PS bank (the SRVs are the caller's getter); false = not
+    // available (the caller reads the getters). prev = the record's previous unreleased draw (null: none)
+    static bool CapturePsShadow(ID3D11DeviceContext1* ctx, PsState& p, const PsState* prev);
+    void OwnAllPs(int i);                        // phase 93: draw i takes a reference on every PS pointer it names (see OwnAll)
     uint8_t m_nextGs = 0;                        // phase 64: SetNextGs
     struct State;                                // per-draw captured state (draw_ids.cpp)
     // phase 35: fills the IA / VS / RS part of `s` from DidShadow (+ the always-read fields); false = not available (the caller
@@ -623,6 +674,17 @@ public:
     static uint64_t StaticClears(int why);
     // keys in the table seen lately (*atThreshold: of them at / over the streak threshold, *held: held by a rigid-parent mark)
     static int  StaticKeys(int* atThreshold, int* held);
+    // phase 80 SOLID DITHER GATE (dlaa.ini wire_solid_static_only, default 1; inject.cpp SolidOnDraw). The phase-63 solid dither
+    // (wire_widen: VS 07dfaa00 + PS b67da69f) also matches AI CAR parts -- windows, wheels, trims (RenderDoc 2026-10-29: 11 of the
+    // 33 pair-A draws of amtrucks_2026.10.09_21.10.01_frame5633 are car parts) -- and a dithered moving part has no stable
+    // coverage (its pixels flip between car and background every frame: no DLSS history). With the gate on, a NON-instanced draw is
+    // dithered only when the static table above KNOWS its FullKey as deep static (a verdict within kStatFresh frames, streak >= 1)
+    // and it has not moved within kStatQuiet frames; a mover / a key without such a verdict is drawn by the game's own shaders.
+    // why: 0 = rule off / instanced / key 0 / table off (mv_replay_static_frames 0) -> true as before phase 80, 1 = known static,
+    // 2 = moved lately, 3 = no static verdict (new key, stale, shallow-static).
+    static bool SolidDitherOk(uint64_t fullKey, bool instanced, int* why = nullptr);
+    static void SetSolidStaticOnly(bool on);
+    static bool SolidStaticOnly();
     // polls the diagnostics readbacks of every main (non-quiet) unit now (non-blocking) -- inject.cpp DidReplay calls it right
     // before a gated replay, so a verdict that landed since the last blit (a parked car that started) counts one frame earlier
     static void PollMain(ID3D11DeviceContext* ctx);

@@ -56,6 +56,7 @@ bool g_want = false;
 namespace {
 std::atomic<int> s_on{0}, s_inner{55}, s_outer{80}, s_quality{1}, s_debug{0}, s_passes{0};
 std::atomic<int> s_strength{0};                      // phase 59f: dlaa.ini vrs_strength (0 Normal, 1 Strong, 2 Max)
+bool             s_waterPass = false;               // phase 98b: this eye pass drew a water G-buffer draw (OnDraw, kSkipWater)
 int              s_cls = kClsGbuf;                   // the bind kind of the open bracket (render thread; stats per kind)
 uint64_t         s_lastLogFrame = 0;                 // the Present count at the last stats line (per-frame figures)
 int              s_support = -1;                     // render thread (Probe)
@@ -480,9 +481,14 @@ bool Enter(ID3D11DeviceContext* ctx, uint32_t w, uint32_t h, int eye, float cu, 
            bool dynamic, float grow) {
 #ifdef WITH_VRS
     if (g_want) Leave(ctx);                            // (never expected: every game bind leaves first)
+    if (cls == kClsGbuf) s_waterPass = false;          // phase 98b: a new eye pass (G-buffer bind) -- no water drawn yet
     if (!s_on.load(std::memory_order_relaxed) || !ctx || !w || !h) return false;
     if (cls < 0 || cls >= kNCls) cls = kClsGbuf;
     if (cls == kClsLight && !s_passes.load(std::memory_order_relaxed)) return false;   // phase 42: vrs_passes = 0
+    // phase 98b: the lighting of a pass that drew the new SCS water stays at full rate: it lights the G-buffer CHECKERBOARD cells
+    // (water surface / bed interleaved per pixel) that the forward water shader reads back one by one -- one coarse sample per
+    // block lit both kinds of cell alike and left bright specks at the shore in the outer ring (2026-11-11 VR captures).
+    if (cls == kClsLight && s_waterPass) { ++s_stats.lightWater; return false; }
     ID3D11Device* dev = nullptr;
     ctx->GetDevice(&dev);
     if (!dev) return false;
@@ -552,8 +558,11 @@ void Leave(ID3D11DeviceContext* ctx) {
 void OnDraw(ID3D11DeviceContext* ctx, bool exclude, int why) {
 #ifdef WITH_VRS
     if (!g_want || ctx != s_ctx) return;
-    if (exclude) { if (why >= 0 && why < kSkipCount) ++s_stats.drawsSkip[why]; ++s_stats.drawsFullCls[s_cls]; }
-    else { ++s_stats.drawsVrs; ++s_stats.drawsVrsCls[s_cls]; }
+    if (exclude) {
+        if (why >= 0 && why < kSkipCount) ++s_stats.drawsSkip[why];
+        ++s_stats.drawsFullCls[s_cls];
+        if (why == kSkipWater && s_cls == kClsGbuf) s_waterPass = true;   // phase 98b (98c: inside the block -- it had taken the else)
+    } else { ++s_stats.drawsVrs; ++s_stats.drawsVrsCls[s_cls]; }
     s_excl = exclude;
     const bool want = !exclude && !s_mod;
     if (want != s_hw) SetHw(ctx, want);
@@ -594,17 +603,19 @@ void MaybeLogStats(uint64_t frame) {
     const Stats& p = s_lastLog;
     const uint64_t vrs = c.drawsVrs - p.drawsVrs, cut = c.drawsSkip[kSkipCutout] - p.drawsSkip[kSkipCutout];
     const uint64_t dep = c.drawsSkip[kSkipDepth] - p.drawsSkip[kSkipDepth], unk = c.drawsSkip[kSkipUnknown] - p.drawsSkip[kSkipUnknown];
-    const uint64_t all = vrs + cut + dep + unk;
+    const uint64_t wat = c.drawsSkip[kSkipWater] - p.drawsSkip[kSkipWater];   // phase 98
+    const uint64_t all = vrs + cut + dep + unk + wat;
     (void)all;                                         // (phase 59: unused when built with VRS_NO_LOG -- testsrs_gaze_test.cpp)
     LogDbg("VRS @%.0f s (Present #%llu): %llu scene binds entered (eye 0 %llu / eye 1 %llu), draws coarse-capable %llu (%.1f %%), "
-        "full rate: cut-out %llu / SV_Depth %llu / unknown shader %llu; mod-work pauses %llu, table switches %llu, eye prediction "
+        "full rate: cut-out %llu / SV_Depth %llu / unknown shader %llu / water %llu, lighting binds kept full (water) %llu; mod-work pauses %llu, table switches %llu, eye prediction "
         "misses %llu of %llu checked blits, masks %llu, NVAPI failures %llu; eye sources (entered binds): blit-RT cycle %llu / "
         "forward colour %llu / frame pair %llu / own blit %llu; binds left alone: no certain eye %llu, sources disagree %llu, "
         "no optical centre yet %llu; GPU support: %s",
         (double)(now - s_lastLogMs) / 1000.0, (unsigned long long)frame, (unsigned long long)(c.enters - p.enters),
         (unsigned long long)(c.entersEye[0] - p.entersEye[0]), (unsigned long long)(c.entersEye[1] - p.entersEye[1]),
         (unsigned long long)vrs, all ? 100.0 * (double)vrs / (double)all : 0.0, (unsigned long long)cut, (unsigned long long)dep,
-        (unsigned long long)unk, (unsigned long long)(c.modPauses - p.modPauses), (unsigned long long)(c.switches - p.switches),
+        (unsigned long long)unk, (unsigned long long)wat, (unsigned long long)(c.lightWater - p.lightWater),
+        (unsigned long long)(c.modPauses - p.modPauses), (unsigned long long)(c.switches - p.switches),
         (unsigned long long)(c.eyeMisses - p.eyeMisses), (unsigned long long)(c.eyeChecks - p.eyeChecks),
         (unsigned long long)c.masksBuilt, (unsigned long long)c.nvFails,
         (unsigned long long)(c.eyeSrc[1] - p.eyeSrc[1]), (unsigned long long)(c.eyeSrc[2] - p.eyeSrc[2]),

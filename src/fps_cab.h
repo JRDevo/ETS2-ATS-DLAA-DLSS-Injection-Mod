@@ -245,22 +245,23 @@ struct Settings {
     int distCm = FpsPose::kDistDefault;                 // fps_vr_dist
     int yaw = 0, pitch = 0, roll = 0;                   // fps_vr_yaw / _pitch / _roll (the box's own turn)
     double scale = 0.3;                                 // fps_vr_scale (1 = 8 % of the eye's fov width at the distance)
+    double aspect = 44.0 / 92.0;                        // phase 88: the box texture's height / width (TuningMenu::WidgetRefH() / kWidgetRefW)
     bool operator==(const Settings& o) const {
-        return x == o.x && y == o.y && distCm == o.distCm && yaw == o.yaw && pitch == o.pitch && roll == o.roll && scale == o.scale;
+        return x == o.x && y == o.y && distCm == o.distCm && yaw == o.yaw && pitch == o.pitch && roll == o.roll && scale == o.scale &&
+               aspect == o.aspect;
     }
     bool operator!=(const Settings& o) const { return !(*this == o); }
 };
 // LOCAL space: the anchor turns around the space origin (the seat), forward = -z (pivot 0, yaw0 0); any other space: around the
 // eyes' midpoint at the lock, forward = the head's yaw then (the mode-1 pivot rule). fw = tan R - tan L of the eye's fov.
 struct LockFrame { double pivot[3] = { 0.0, 0.0, 0.0 }; double yaw0 = 0.0; double fw = 1.6; };
-constexpr double kAspect = 44.0 / 92.0;                  // TuningMenu::kWidgetRefH / kWidgetRefW (the box texture)
 // out[k] = corner k (top-left, top-right, bottom-left, bottom-right: the order of TuningMenu's Corner[]) in the play space,
 // *centre = the box centre. The box faces the pivot (+z of its local frame towards it, +y up, no roll), then its own turn
 // (FpsPose::TurnQuat in the local frame) -- the OvBuildQuadLocked fixed-box pose, the same size wM = d fw 0.08 scale.
 inline void BoxPlay(const Settings& s, const LockFrame& l, double out[4][3], double centre[3], double* widthM = nullptr) {
     const double kRad = 0.017453292519943295;
     const double d = (double)s.distCm / 100.0;
-    const double wM = d * l.fw * 0.08 * s.scale, hM = wM * kAspect;
+    const double wM = d * l.fw * 0.08 * s.scale, hM = wM * s.aspect;
     const double yaw = l.yaw0 + (double)s.x * kRad, pitch = -(double)s.y * kRad;
     const double dir[3] = { std::sin(yaw) * std::cos(pitch), std::sin(pitch), -std::cos(yaw) * std::cos(pitch) };
     const double c[3] = { l.pivot[0] + d * dir[0], l.pivot[1] + d * dir[1], l.pivot[2] + d * dir[2] };

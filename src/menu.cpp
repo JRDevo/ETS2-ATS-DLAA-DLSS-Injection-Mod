@@ -8,6 +8,7 @@
 #include <wrl/client.h>
 #include <wincodec.h>                                // phase 74: SavePanelPng (the language dump)
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <cwchar>
@@ -131,6 +132,13 @@ COLORREF                         g_wText = RGB(255, 255, 255), g_wLine = RGB(8, 
 COLORREF                         g_wLastText = 0, g_wLastLine = 0;
 float                            g_wOpacity = 1.0f;   // phase 51f (fps_opacity): the box's alpha factor, applied by the shader (no rebuild)
 std::vector<uint32_t>            g_wPixels;
+// phase 88: the history graph -- the columns as last handed over (under g_wGraphLock: SetWidgetGraph may run on another thread)
+// and what the cached texture shows (on / gen; the strip = the rows from g_wTextH down)
+SRWLOCK                          g_wGraphLock = SRWLOCK_INIT;
+TuningMenu::WidgetGraph          g_wGraph;
+bool                             g_wLastGraphOn = false;
+uint32_t                         g_wLastGraphGen = 0;
+uint32_t                         g_wTextH = 0;
 
 constexpr UINT kInst = 256;
 // PS SRV slots saved / restored (phase 16: was slot 0 only). The VR panel may now be drawn right before the game's own Draw
@@ -236,6 +244,7 @@ void DropWidget() {
     g_wTex.Reset(); g_wSrv.Reset();
     g_wTexW = g_wTexH = 0; g_wBuild = 0.0f;
     g_wHave = false;
+    g_wTextH = 0;
 }
 
 // Shaders + states for `dev` (once per device; a new device drops the old one's objects and both textures).
@@ -578,9 +587,14 @@ bool RenderPanel(const TuningMenu::Panel& p, float s, uint32_t w, uint32_t h, co
 // colour (black background, RGB 8,8,8 outline, white text) and (b) the mask (black background, outline + text all white);
 // the texture is RGB from (a), A = the red channel of (b) (the coverage: antialiased edges = partial alpha). The shader
 // draws it with the texture's alpha as it is. False = GDI failed (logged once).
-bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t w, uint32_t h) {
-    static bool s_failLogged = false;
-    static std::vector<uint32_t> s_mask;
+// phase 88: tight = the history graph sits under the text (WidgetTextRefH): one line in y 2..22 instead of the centred 12..32.
+// phase 91: the pixels go to `out` and the colours are arguments (were g_wPixels / g_wText / g_wLine, the mask a static): the status
+// box paints from two threads (the eyes on the render thread, the desktop mirror at Present), each into its own buffer, no shared state.
+bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t w, uint32_t h, bool tight, std::vector<uint32_t>& out,
+                  COLORREF textCol, COLORREF lineCol) {
+    static std::atomic<bool> s_failLogged{ false };
+    bool failLogged = s_failLogged.load(std::memory_order_relaxed);
+    std::vector<uint32_t> maskPx;
     HFONT fBig   = MakeFont(15.0f * s, FW_BOLD, L"Segoe UI");
     HFONT fSmall = MakeFont(12.0f * s, FW_NORMAL, L"Segoe UI");
     HFONT stock  = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
@@ -589,9 +603,9 @@ bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t 
     const float W = (float)w / s;                            // reference px
     const LONG o = std::max<LONG>(1, (LONG)std::lround(1.0f * s));   // outline offset in device px
     // One DIB: mask = true draws the outline and the text all in white, false the colour version.
-    auto paint = [&](bool mask, std::vector<uint32_t>& out) -> bool {
+    auto paint = [&](bool mask, std::vector<uint32_t>& dst) -> bool {
         Dib d;
-        if (!DibBegin(d, w, h, "fps box", s_failLogged)) return false;
+        if (!DibBegin(d, w, h, "fps box", failLogged)) return false;
         HDC dc = d.dc;
         HGDIOBJ oldFont = SelectObject(dc, pick(fBig));
         SetBkMode(dc, TRANSPARENT);                          // the DIB starts black (zeroed)
@@ -599,14 +613,14 @@ bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t 
             if (!t || !t[0]) return;
             SelectObject(dc, pick(f));
             const UINT fl = DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_END_ELLIPSIS | DT_NOPREFIX;
-            SetTextColor(dc, mask ? RGB(255, 255, 255) : g_wLine);   // phase 44: fps_color's outline (was RGB 8,8,8)
+            SetTextColor(dc, mask ? RGB(255, 255, 255) : lineCol);   // phase 44: fps_color's outline (was RGB 8,8,8)
             for (LONG dy = -o; dy <= o; dy += o)
                 for (LONG dx = -o; dx <= o; dx += o) {
                     if (!dx && !dy) continue;
                     RECT r{ px(3.0f) + dx, px(y0) + dy, px(W - 3.0f) + dx, px(y1) + dy };
                     DrawTextW(dc, t, -1, &r, fl);
                 }
-            SetTextColor(dc, mask ? RGB(255, 255, 255) : g_wText);   // phase 44: fps_color's text (was white)
+            SetTextColor(dc, mask ? RGB(255, 255, 255) : textCol);   // phase 44: fps_color's text (was white)
             RECT r{ px(3.0f), px(y0), px(W - 3.0f), px(y1) };
             DrawTextW(dc, t, -1, &r, fl);
         };
@@ -617,18 +631,17 @@ bool RenderWidget(const wchar_t* line1, const wchar_t* line2, float s, uint32_t 
             line(fBig, line1, 4.0f, 24.0f);
             line(fSmall, line2, 24.0f, 40.0f);
         } else {
-            line(fBig, has1 ? line1 : line2, 12.0f, 32.0f);
+            line(fBig, has1 ? line1 : line2, tight ? 2.0f : 12.0f, tight ? 22.0f : 32.0f);
         }
         SelectObject(dc, oldFont);
-        DibFinish(d, w, h, out);
+        DibFinish(d, w, h, dst);
         return true;
     };
-    const bool ok = paint(false, g_wPixels) && paint(true, s_mask) && s_mask.size() == g_wPixels.size();
+    const bool ok = paint(false, out) && paint(true, maskPx) && maskPx.size() == out.size();
+    if (failLogged) s_failLogged.store(true, std::memory_order_relaxed);
     if (ok)
-        for (size_t i = 0, e = g_wPixels.size(); i < e; ++i)
-            g_wPixels[i] = (g_wPixels[i] & 0x00FFFFFFu) | ((s_mask[i] & 0xFFu) << 24);   // A = the mask's red (RGBA: R is the low byte)
-    s_mask.clear();
-    s_mask.shrink_to_fit();
+        for (size_t i = 0, e = out.size(); i < e; ++i)
+            out[i] = (out[i] & 0x00FFFFFFu) | ((maskPx[i] & 0xFFu) << 24);   // A = the mask's red (RGBA: R is the low byte)
     if (fBig) DeleteObject(fBig);
     if (fSmall) DeleteObject(fSmall);
     return ok;
@@ -680,24 +693,88 @@ void CopyLine(wchar_t (&dst)[kWLine], const wchar_t* src) {
     if (src) for (; src[i] && i + 1 < kWLine; ++i) dst[i] = src[i];
     dst[i] = 0;
 }
-// The fps box texture for the two lines at `buildScale`: rebuilt only when a line or the scale changed.
+// phase 88: the history graph strip into px (w x rows, RGBA; R = the low byte), s px per reference px. 3-px margins left / right,
+// 2 px at the bottom; one bar per column from the bottom up (green / yellow / red against targetMs, the top = 2 x targetMs), then
+// the target line (half-way up) over the bars. Plain pixel writes, no GDI. Phase 88c (VR test 2026-11-01): no dark background any
+// more -- the game shows through; the target line is white with a dark edge above and below, so it reads on sky and on road.
+void PaintGraph(uint32_t* px, uint32_t w, uint32_t rows, float s, const TuningMenu::WidgetGraph& g) {
+    std::fill(px, px + (size_t)w * rows, 0u);
+    const LONG m = std::max<LONG>(1, std::lround(3.0f * s)), b = std::max<LONG>(1, std::lround(2.0f * s));
+    const LONG x0 = m, x1 = (LONG)w - m, y1 = (LONG)rows - b;   // the strip: x0..x1, 0..y1 (y down)
+    if (x1 - x0 < 4 || y1 < 4 || !(g.targetMs > 0.0f)) return;
+    auto rgba = [](uint32_t r, uint32_t gg, uint32_t bb, uint32_t a) { return r | (gg << 8) | (bb << 16) | (a << 24); };
+    const uint32_t green = rgba(70, 205, 95, 255), yellow = rgba(245, 200, 50, 255), red = rgba(235, 60, 50, 255);
+    const float top = 2.0f * g.targetMs;
+    for (LONG x = x0; x < x1; ++x) {
+        // the columns under this pixel (more than one when the strip is narrower than kGraphCols px: a small fps_scale): the slowest
+        const int c0 = (int)((int64_t)(x - x0) * TuningMenu::kGraphCols / (x1 - x0));
+        const int c1 = (std::max)(c0 + 1, (int)((int64_t)(x + 1 - x0) * TuningMenu::kGraphCols / (x1 - x0)));
+        float ms = 0.0f;
+        for (int c = c0; c < c1 && c < TuningMenu::kGraphCols; ++c) ms = (std::max)(ms, g.colMs[c]);
+        if (!(ms > 0.0f)) continue;
+        const float f = ms >= top ? 1.0f : ms / top;
+        const LONG hgt = std::max<LONG>(1, std::lround(f * (float)y1));
+        const uint32_t col = ms <= 1.1f * g.targetMs ? green : (ms <= 1.5f * g.targetMs ? yellow : red);
+        for (LONG y = y1 - hgt; y < y1; ++y) px[(size_t)y * w + x] = col;
+    }
+    const LONG lt = std::max<LONG>(1, std::lround(0.75f * s)), ly = y1 / 2, edge = std::max<LONG>(1, std::lround(0.5f * s));
+    // "over" what is there (straight alpha): c at alpha a
+    auto over = [&](uint32_t& p, uint32_t c, uint32_t a) {
+        const uint32_t pa = p >> 24, oa = a + pa * (255 - a) / 255;
+        auto ch = [&](int sh) { const uint32_t pc = (p >> sh) & 0xFF, cc = (c >> sh) & 0xFF;
+                                return oa ? (cc * a + pc * pa * (255 - a) / 255) / oa : 0u; };
+        p = rgba(ch(0), ch(8), ch(16), oa);
+    };
+    for (LONG y = ly - edge; y < ly + lt + edge && y < y1; ++y) {
+        if (y < 0) continue;
+        const bool core = y >= ly && y < ly + lt;
+        for (LONG x = x0; x < x1; ++x)
+            over(px[(size_t)y * w + x], core ? rgba(255, 255, 255, 0) : rgba(0, 0, 0, 0), core ? 235u : 150u);
+    }
+}
+
+// The fps box texture for the two lines at `buildScale`: rebuilt only when a line or the scale changed. phase 88: + the history
+// graph strip under the text (graph on): a new column repaints and uploads only the strip's rows.
 bool EnsureWidgetTexture(ID3D11Device* dev, ID3D11DeviceContext* ctx, const wchar_t* line1, const wchar_t* line2, float buildScale) {
     wchar_t l1[kWLine], l2[kWLine];
     CopyLine(l1, line1);
     CopyLine(l2, line2);
-    if (g_wTex && g_wHave && std::fabs(g_wBuild - buildScale) < 0.001f && !wcscmp(l1, g_wLast1) && !wcscmp(l2, g_wLast2) &&
-        g_wLastText == g_wText && g_wLastLine == g_wLine)    // phase 44: + the colours
-        return true;
+    static TuningMenu::WidgetGraph s_g;                      // (render thread only; 190 bytes)
+    AcquireSRWLockShared(&g_wGraphLock);
+    s_g = g_wGraph;
+    ReleaseSRWLockShared(&g_wGraphLock);
+    const bool same = g_wTex && g_wHave && std::fabs(g_wBuild - buildScale) < 0.001f && !wcscmp(l1, g_wLast1) && !wcscmp(l2, g_wLast2) &&
+        g_wLastText == g_wText && g_wLastLine == g_wLine && g_wLastGraphOn == s_g.on;   // phase 44: + the colours; 88: + graph on
+    if (same && (!s_g.on || s_g.gen == g_wLastGraphGen)) return true;
+    // phase 88: the text block as tall as its lines (graph on), the strip right under it
+    const float refT = TuningMenu::WidgetTextRefH(l1, l2, s_g.on);
     const uint32_t w = (uint32_t)std::lround(TuningMenu::kWidgetRefW * buildScale);
-    const uint32_t h = (uint32_t)std::lround(TuningMenu::kWidgetRefH * buildScale);
+    const uint32_t ht = (uint32_t)std::lround(refT * buildScale);
+    const uint32_t h = s_g.on ? (uint32_t)std::lround((refT + TuningMenu::kWidgetGraphH) * buildScale) : ht;
     if (w < 8 || h < 8 || w > 4096 || h > 4096) return false;
-    if (!RenderWidget(l1, l2, buildScale, w, h)) return false;
+    if (same && g_wTextH == ht && g_wTexH == h && g_wPixels.size() == (size_t)w * h) {   // phase 88: only a new column
+        uint32_t* const strip = g_wPixels.data() + (size_t)w * ht;
+        PaintGraph(strip, w, h - ht, buildScale, s_g);
+        const D3D11_BOX box{ 0, ht, 0, w, h, 1 };
+        ctx->UpdateSubresource(g_wTex.Get(), 0, &box, strip, w * 4u, 0);
+        g_wLastGraphGen = s_g.gen;
+        return true;
+    }
+    if (!ht) g_wPixels.clear();                              // phase 88: graph only (no line): no text rows
+    else if (!RenderWidget(l1, l2, buildScale, w, ht, s_g.on, g_wPixels, g_wText, g_wLine)) return false;
+    if (h > ht) {
+        g_wPixels.resize((size_t)w * h);
+        PaintGraph(g_wPixels.data() + (size_t)w * ht, w, h - ht, buildScale, s_g);
+    }
     if (!UploadTexture(dev, ctx, g_wTex, g_wSrv, g_wTexW, g_wTexH, w, h, g_wPixels, "fps box")) return false;
     g_wBuild = buildScale;
     memcpy(g_wLast1, l1, sizeof(l1));
     memcpy(g_wLast2, l2, sizeof(l2));
     g_wLastText = g_wText;
     g_wLastLine = g_wLine;
+    g_wLastGraphOn = s_g.on;
+    g_wLastGraphGen = s_g.gen;
+    g_wTextH = ht;
     g_wHave = true;
     return true;
 }
@@ -707,11 +784,12 @@ bool EnsureWidgetTexture(ID3D11Device* dev, ID3D11DeviceContext* ctx, const wcha
 // phase 47: vsCab != null = that vertex shader (VSCab) with `vsSrv` at VS t0 instead of VSMain (saved / restored as well).
 void DrawCb(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, CbData& cb, int outMode,
             ID3D11ShaderResourceView* srv, bool textureAlpha, ID3D11VertexShader* vsCab = nullptr,
-            ID3D11ShaderResourceView* vsSrv = nullptr) {
+            ID3D11ShaderResourceView* vsSrv = nullptr, float alphaOverride = -1.0f) {
     const bool overlay = (outMode & TuningMenu::kOutOverlay) != 0;   // v0.10.3 phase 29: blend off, RGBA written
     outMode &= ~TuningMenu::kOutOverlay;
     cb.opt[0] = (float)(outMode < TuningMenu::kOutRaw ? TuningMenu::kOutRaw : (outMode > TuningMenu::kOutPq ? TuningMenu::kOutPq : outMode));
-    cb.opt[1] = textureAlpha ? g_wOpacity : 0.88f;           // panel: its 88 % background; fps box: fps_opacity (phase 51f)
+    cb.opt[1] = textureAlpha ? (alphaOverride >= 0.0f ? alphaOverride : g_wOpacity) : 0.88f;   // panel: its 88 % background; fps box:
+                                                             // fps_opacity (phase 51f); phase 91: the status box passes its own 1.0
     cb.opt[2] = textureAlpha ? 1.0f : 0.0f;                  // 1 = the fps box: alpha comes from the texture
     ctx->UpdateSubresource(g_cb.Get(), 0, nullptr, &cb, 0, 0);
     SaveState(ctx, vsCab != nullptr);
@@ -746,7 +824,7 @@ void DrawCb(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW,
 
 // One textured quad of `srv` (w x h px, top-left at x0, y0 rounded to whole pixels) into `rtv` (DrawCb).
 void DrawQuad(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
-              float w, float h, int outMode, ID3D11ShaderResourceView* srv, bool textureAlpha) {
+              float w, float h, int outMode, ID3D11ShaderResourceView* srv, bool textureAlpha, float alphaOverride = -1.0f) {
     const float px0 = std::floor(x0 + 0.5f), py0 = std::floor(y0 + 0.5f);   // whole pixels: 1:1 texels stay sharp
     CbData cb{};
     cb.rect[0] = px0 / (float)rtW * 2.0f - 1.0f;
@@ -754,7 +832,7 @@ void DrawQuad(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rt
     cb.rect[2] = (px0 + w) / (float)rtW * 2.0f - 1.0f;
     cb.rect[3] = 1.0f - (py0 + h) / (float)rtH * 2.0f;
     cb.opt[3] = 0.0f;                                        // the rect
-    DrawCb(ctx, rtv, rtW, rtH, cb, outMode, srv, textureAlpha);
+    DrawCb(ctx, rtv, rtW, rtH, cb, outMode, srv, textureAlpha, nullptr, nullptr, alphaOverride);
 }
 
 } // namespace
@@ -881,6 +959,46 @@ bool DrawWidget(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t 
     return true;
 }
 
+// phase 89e: the bug report's status box -- the fps box's look (outlined text, no background) at kStatusRefW x kWidgetRefH, always
+// white on a black outline at full opacity (not the fps_color / fps_opacity of the box). Own texture cache keyed on the lines + scale.
+// phase 91: ONE cache slot per caller (kStatusEyes / kStatusFlat). There was one cache for both, and the two build at different scales
+// (the eyes W / 1920 x 1.1, the desktop mirror H / 1080 x 1.25 x 2), so with both on EVERY call rebuilt it -- GDI + texture create +
+// upload, 1.58 ms/frame measured while the capture ran. Each slot owns its texture and pixels; RenderWidget paints into the slot's
+// buffer with explicit colours and the opacity goes to the draw as an argument, so the eyes (render thread) and the mirror (Present)
+// share no mutable state here any more (they swapped the fps box's g_wPixels / g_wText / g_wLine / g_wOpacity under each other).
+namespace {
+struct StatusSlot {
+    ComPtr<ID3D11Texture2D> tex; ComPtr<ID3D11ShaderResourceView> srv; uint32_t texW = 0, texH = 0;
+    float build = 0.0f; wchar_t last1[64] = {}, last2[64] = {}; std::vector<uint32_t> px;
+};
+StatusSlot g_status[TuningMenu::kStatusSlots];
+}
+bool DrawStatus(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, float x0, float y0,
+                float scale, float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2, int slot) {
+    if (!ctx || !rtv || !rtW || !rtH || !(scale > 0.0f) || !(buildScale > 0.0f) || slot < 0 || slot >= kStatusSlots) return false;
+    ComPtr<ID3D11Device> dev;
+    ctx->GetDevice(&dev);
+    if (!dev || !Ensure(dev.Get())) return false;
+    StatusSlot& c = g_status[slot];
+    wchar_t l1[64], l2[64];
+    wcsncpy_s(l1, line1 ? line1 : L"", _TRUNCATE);
+    wcsncpy_s(l2, line2 ? line2 : L"", _TRUNCATE);
+    if (!c.tex || std::fabs(c.build - buildScale) > 0.001f || wcscmp(l1, c.last1) || wcscmp(l2, c.last2)) {
+        const uint32_t w = (uint32_t)std::lround(kStatusRefW * buildScale), h = (uint32_t)std::lround(kWidgetRefH * buildScale);
+        if (w < 8 || h < 8 || w > 8192 || h > 4096) return false;
+        if (!RenderWidget(l1, l2, buildScale, w, h, false, c.px, RGB(255, 255, 255), RGB(8, 8, 8)) ||
+            !UploadTexture(dev.Get(), ctx, c.tex, c.srv, c.texW, c.texH, w, h, c.px, "status box")) {
+            c.tex.Reset(); c.srv.Reset(); c.texW = c.texH = 0;   // (no half-updated cache: the next call tries again)
+            return false;
+        }
+        c.build = buildScale;
+        wcscpy_s(c.last1, l1); wcscpy_s(c.last2, l2);
+    }
+    const float k = scale / c.build;
+    DrawQuad(ctx, rtv, rtW, rtH, x0, y0, (float)c.texW * k, (float)c.texH * k, outMode, c.srv.Get(), true, 1.0f);
+    return true;
+}
+
 // phase 44: the fps box turned (fps_vr_yaw / pitch / roll) in the drawn-in VR fallback -- DrawCorners with the box's texture.
 bool DrawWidgetCorners(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, uint32_t rtW, uint32_t rtH, const float clip[4][4],
                        float buildScale, int outMode, const wchar_t* line1, const wchar_t* line2) {
@@ -941,6 +1059,25 @@ void SetWidgetColors(uint8_t tr, uint8_t tg, uint8_t tb, uint8_t lr, uint8_t lg,
 }
 
 void SetWidgetOpacity(float a) { g_wOpacity = a < 0.0f ? 0.0f : (a > 1.0f ? 1.0f : a); }
+
+void SetWidgetGraph(const WidgetGraph& g) {                  // phase 88
+    AcquireSRWLockExclusive(&g_wGraphLock);
+    g_wGraph = g;
+    ReleaseSRWLockExclusive(&g_wGraphLock);
+}
+
+float WidgetTextRefH(const wchar_t* line1, const wchar_t* line2, bool graphOn) {
+    if (!graphOn) return kWidgetRefH;                        // (no graph: the box keeps its size, one line centred)
+    const int n = (line1 && line1[0] ? 1 : 0) + (line2 && line2[0] ? 1 : 0);
+    return n >= 2 ? kWidgetText2H : (n == 1 ? kWidgetText1H : 0.0f);
+}
+
+float WidgetRefH(const wchar_t* line1, const wchar_t* line2) {
+    AcquireSRWLockShared(&g_wGraphLock);
+    const bool on = g_wGraph.on;
+    ReleaseSRWLockShared(&g_wGraphLock);
+    return WidgetTextRefH(line1, line2, on) + (on ? kWidgetGraphH : 0.0f);
+}
 
 void ReleaseWidget() {
     DropWidget();

@@ -344,6 +344,7 @@ bool DlaaProcessor::CreateFeatureOnce(bool depthInverted, int perfQuality) {
     // (thin wires / cables: the pixels next to them take the wire's motion instead of the sky's).
     if (Upscaling() || g_mvDilate) flags |= NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
     if (m_hdr)         flags |= NVSDK_NGX_DLSS_Feature_Flags_IsHDR;
+    if (m_mvJittered)  flags |= NVSDK_NGX_DLSS_Feature_Flags_MVJittered;   // phase 82 (game_taa: the game's projection jitter)
 
     NVSDK_NGX_DLSS_Create_Params cp{};
     cp.Feature.InWidth            = m_width;   // render size (v0.7.0: == target only for DLAA)
@@ -411,6 +412,13 @@ bool DlaaProcessor::Evaluate(ID3D11DeviceContext* ctx,
     if (p.depthInverted != m_depthInverted) {
         Log("DLAA: depthInverted %d -> %d, recreating feature", m_depthInverted, p.depthInverted);
         if (!CreateFeature(p.depthInverted)) return false;
+    }
+    // phase 82: MVJittered is one too (game_taa: NGX gets the game's jitter and motion vectors that carry it)
+    if (p.mvJittered != m_mvJittered) {
+        Log("DLAA: MVJittered %d -> %d on eye %d (game_taa: %s), recreating feature", (int)m_mvJittered, (int)p.mvJittered, m_eye,
+            p.mvJittered ? "the game's own projection jitter, NGX told the motion vectors carry it" : "back to the mod's viewport jitter");
+        m_mvJittered = p.mvJittered;
+        if (!CreateFeature(m_depthInverted)) return false;
     }
 
     // NGX D3D11 takes raw resources; views are just how the caller hands them in.

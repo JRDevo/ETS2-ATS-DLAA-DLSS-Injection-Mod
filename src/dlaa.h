@@ -30,6 +30,9 @@ struct DlaaFrameParams {
     // True if the depth buffer is reversed-Z (1.0 = near). This is an NGX
     // *creation* flag; flipping it at runtime recreates the feature (logged).
     bool depthInverted = false;
+    // phase 82 (game_taa): the motion vectors include the jitter (the GAME jitters its projection; the MVPs the mod reprojects with
+    // carry it) -> NVSDK_NGX_DLSS_Feature_Flags_MVJittered. A creation flag too: a change recreates the feature (logged).
+    bool mvJittered = false;
 };
 
 class DlaaProcessor {
@@ -88,6 +91,9 @@ public:
     static bool MvDilate();
 
     void SetEye(int e) { m_eye = e; }          // v0.5.7: log tag only
+    // phase 82: the MVJittered creation flag a feature NOT created yet will get (a unit built while game_taa holds the jitter is created
+    // with it at once -- no create-then-recreate, game test 2 lines 491 / 641); an existing feature recreates at its next Evaluate
+    void PresetMvJittered(bool on) { if (!m_feature) m_mvJittered = on; }
 
     // v0.7.8 NGX pre-warm, called once at the first Present (render thread, the game's immediate context, its device):
     // initialises NGX, PINS it (one reference held for the process life, so it never shuts down and is never
@@ -128,6 +134,7 @@ private:
     uint32_t             m_outH     = 0;
     int                  m_perfQ    = 0;       // v0.7.0: NVSDK_NGX_PerfQuality_Value of m_feature (int: header stays NGX-free)
     bool                 m_depthInverted = false;
+    bool                 m_mvJittered   = false;   // phase 82: MVJittered creation flag (DlaaFrameParams::mvJittered)
     bool                 m_hdr          = false;   // v0.8.0: IsHDR creation flag (set by Init, kept across recreates)
     bool                 m_ngxInited    = false;
     uint32_t             m_presetGen    = 0;   // preset generation m_feature was (last tried to be) created with

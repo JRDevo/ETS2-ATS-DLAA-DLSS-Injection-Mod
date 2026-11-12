@@ -3,7 +3,9 @@
 
 #include "scene_dlaa.h"
 #include "gpu_perf.h"
+#include "outside_aa.h"                                // phase 81
 #include "shader_cache.h"
+#include "game_taa.h"                                  // phase 82: GameTaa::SplitX
 #include "log.h"
 #include <cmath>
 #include <cstring>
@@ -295,6 +297,9 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
 // (lobe + 5-tap min/max clamp) runs on those values, and the result is mapped back with c / (1 - max3(c)). No 0..1
 // saturate in HDR (the 5-tap clamp already bounds the result); the border blend lerps in linear space. Mode.x = 0:
 // exactly the LDR code path of v0.7.x.
+// phase 81 OUTSIDE AA (in place): Mode.yz = the offset of the pixel in Orig. 0 = Orig is colorIn (crop-sized, the raw frame) as
+// before; the rect origin = Orig is the full-size outside-AA scratch (the unjittered / edge-smoothed value), so the border ramp now
+// blends DLAA into the outside-AA picture instead of the raw jittered one.
 // kRcasShader-BEGIN (the build validates this block with fxc)
 const char kRcasShader[] = R"(
 cbuffer RcasCB : register(b0) {
@@ -303,10 +308,10 @@ cbuffer RcasCB : register(b0) {
     float  Feather;         // v0.6.4 border blend width in px (0 = hard edge)
     float  Blend;           // v0.6.4 1 = blend into Orig at the rect border (area < 100), 0 = off
     float4 EdgeOn;          // v0.6.4 (left, top, right, bottom): 1 = that rect edge is inside the image
-    float4 Mode;            // v0.8.0 x: 1 = HDR (linear RGBA16F, sharpen a compressed value), 0 = LDR; yzw unused
+    float4 Mode;            // v0.8.0 x: 1 = HDR (linear RGBA16F, sharpen a compressed value), 0 = LDR; phase 81 yz: Orig offset; w unused
 };
 Texture2D<float4>   Src                : register(t0);
-Texture2D<float4>   Orig               : register(t1);   // v0.6.4 colorIn (only read when Blend = 1)
+Texture2D<float4>   Orig               : register(t1);   // v0.6.4 colorIn (only read when Blend = 1); phase 81: or the scratch
 RWTexture2D<float4> Dst                : register(u0);
 SamplerState        LinearClampSampler : register(s0);
 
@@ -376,7 +381,7 @@ void CSMain(uint3 id : SV_DispatchThreadID) {
         }
         // phase 57 (perf): the mask is exactly 1 everywhere except the Feather band at the rect border -> read Orig
         // (a full-res load per pixel) only there; lerp(Orig, res, 1) is res.
-        if (mask < 1.0) res = lerp(Orig.Load(int3(p, 0)).rgb, res, mask);
+        if (mask < 1.0) res = lerp(Orig.Load(int3(p + int2(Mode.yz), 0)).rgb, res, mask);
     }
     Dst[id.xy] = float4(res, e0.a);
 }
@@ -402,6 +407,12 @@ float4 VSMain(uint id : SV_VertexID) : SV_Position {
 // on the image border (EdgeOn = 0) is not feathered; Blend = 0 or Feather = 0 -> alpha 1).
 // Params (t1, Buffer<float4>; no constant-buffer slot is touched): [0] = RT-space origin of the rect (px) and
 // its size, [1] = feather x / y (output px), Blend, SrgbDecode, [2] = EdgeOn (left, top, right, bottom).
+// phase 82 (game_taa): [3] = the mod's share (alpha multiplier; 1 = as before), the split column in RT px (< 0 = no split: right
+// of it alpha 0 = the game's TAA picture stays), the line width (px) and the OVERLAY flag: w = 1 draws only the split line (opaque
+// red, centred on the column) and the labels -- DrawSplitOverlay, every frame after the game's blit; [4] = the label cell size (px),
+// the labels' top row (RT px), the left / right label lengths; [5] / [6] = the left / right label's glyph codes (GameTaa::PackLabel:
+// a 5 x 7 pixel font, D L A S T O F M I X ( ) % 0-9 and space; white on a translucent black box). In the composite itself (w = 0) z is
+// the mod's share RIGHT of the split line (game_taa_pair: 0 = TAA, the mix share = Mix).
 // kCompositePs-BEGIN (the build validates this block with fxc, ps_5_0 / PSMain)
 const char kCompositePs[] = R"(
 Texture2D<float4> Src    : register(t0);
@@ -411,10 +422,49 @@ float3 SrgbToLinear(float3 c) {
     return (c <= 0.04045) ? c / 12.92 : pow(abs((c + 0.055) / 1.055), 2.4);   // (UNORM texels: never negative)
 }
 
+// 5 x 7 glyphs, row by row (bit 4 = left column): 0 space, 1 D, 2 L, 3 A, 4 S, 5 T, 6 O, 7 F, 8 (, 9 ), 10 M, 11 I, 12 X, 13 %,
+// 14..23 the digits 0..9
+static const uint kGlyph[168] = { 0, 0, 0, 0, 0, 0, 0,          30, 17, 17, 17, 17, 17, 30,   16, 16, 16, 16, 16, 16, 31,
+                                  14, 17, 17, 31, 17, 17, 17,   15, 16, 16, 14, 1, 1, 30,     31, 4, 4, 4, 4, 4, 4,
+                                  14, 17, 17, 17, 17, 17, 14,   31, 16, 16, 30, 16, 16, 16,   2, 4, 8, 8, 8, 4, 2,
+                                  8, 4, 2, 2, 2, 4, 8,          17, 27, 21, 21, 17, 17, 17,   14, 4, 4, 4, 4, 4, 14,
+                                  17, 17, 10, 4, 10, 17, 17,    25, 26, 2, 4, 8, 11, 19,      14, 17, 19, 21, 25, 17, 14,
+                                  4, 12, 4, 4, 4, 4, 14,        14, 17, 1, 2, 4, 8, 31,       31, 2, 4, 2, 1, 17, 14,
+                                  2, 6, 10, 18, 31, 2, 2,       31, 16, 30, 1, 1, 17, 14,     6, 8, 16, 30, 17, 17, 14,
+                                  31, 1, 2, 4, 8, 8, 8,         14, 17, 17, 14, 17, 17, 14,   14, 17, 17, 15, 1, 2, 12 };
+// the glyph code of character i of a label packed 4 per float-exact part (5 bits each: GameTaa::PackLabel)
+uint LabelCode(float3 packed, uint i) {
+    const uint part = (uint)(i < 4u ? packed.x : (i < 8u ? packed.y : packed.z));
+    return (part >> (5u * (i % 4u))) & 31u;
+}
+// a label of n glyphs with its top-left at o, cells of s px: 0 = outside, 1 = its box, 2 = a lit glyph pixel
+float LabelHit(float2 p, float2 o, float3 packed, uint n, float s) {
+    const float2 q = (p - o) / s;
+    const float w = (float)n * 6.0 - 1.0;
+    if (n == 0u || q.x < -1.0 || q.y < -1.0 || q.x >= w + 1.0 || q.y >= 8.0) return 0.0;
+    if (q.x < 0.0 || q.y < 0.0 || q.y >= 7.0) return 1.0;
+    const uint gi = (uint)q.x / 6u, cx = (uint)q.x % 6u, cy = (uint)q.y;
+    if (gi >= n || cx >= 5u) return 1.0;
+    const uint g = min(LabelCode(packed, gi), 23u);
+    return ((kGlyph[g * 7u + cy] >> (4u - cx)) & 1u) != 0u ? 2.0 : 1.0;
+}
+
 float4 PSMain(float4 pos : SV_Position) : SV_Target {
     const float4 p0 = Params[0];
     const float4 p1 = Params[1];
     const float4 e  = Params[2];
+    const float4 m  = Params[3];
+    if (m.w > 0.5) {                                         // phase 82 split OVERLAY: the red line + the labels, nothing else
+        const float4 l = Params[4], tl = Params[5], tr = Params[6];
+        if (abs(pos.x - m.y) < 0.5 * m.z) return float4(1.0, 0.0, 0.0, 1.0);
+        const float s = l.x, gap = 4.0 * l.x;
+        const uint nl = (uint)l.z, nr = (uint)l.w;
+        float h = LabelHit(pos.xy, float2(m.y - gap - ((float)nl * 6.0 - 1.0) * s, l.y), tl.xyz, nl, s);
+        if (h == 0.0) h = LabelHit(pos.xy, float2(m.y + gap, l.y), tr.xyz, nr, s);
+        if (h > 1.5) return float4(1.0, 1.0, 1.0, 1.0);
+        if (h > 0.5) return float4(0.0, 0.0, 0.0, 0.6);
+        return float4(0.0, 0.0, 0.0, 0.0);
+    }
     const float2 size = p0.zw;
     const int2   ip   = clamp(int2(pos.xy - p0.xy), int2(0, 0), int2(size) - 1);
     float3 c = Src.Load(int3(ip, 0)).rgb;
@@ -428,6 +478,8 @@ float4 PSMain(float4 pos : SV_Position) : SV_Target {
         if (p1.y > 0.0) ry = min(e.y > 0.5 ? saturate(lo.y / p1.y) : 1.0, e.w > 0.5 ? saturate(hi.y / p1.y) : 1.0);
         a = smoothstep(0.0, 1.0, rx) * smoothstep(0.0, 1.0, ry);
     }
+    // phase 82: the mod's share (game_taa_mix); split: m.x left of the line, m.z right of it (0 = the game's TAA picture stays)
+    a *= (m.y >= 0.0 && pos.x >= m.y) ? m.z : m.x;
     return float4(c, a);
 }
 )";
@@ -639,6 +691,11 @@ void SceneDlaa::RegisterShaders() {
     ShaderCache::Add(ShaderCache::kCompositePs, kCompositePs, sizeof(kCompositePs) - 1, "composite_ps", "PSMain", "ps_5_0");
     ShaderCache::Add(ShaderCache::kMvDebug, kMvDebugShader, sizeof(kMvDebugShader) - 1, "mv_debug", "CSMain", "cs_5_0");
     ShaderCache::Add(ShaderCache::kBiasPrep, kBiasPrepShader, sizeof(kBiasPrepShader) - 1, "bias_prep", "CSMain", "cs_5_0");   // phase 49
+    // phase 81 outside AA: one block (src/outside_aa.h), two entries
+    ShaderCache::Add(ShaderCache::kOutsideAaCs, OutsideAa::kOutsideAaShader, sizeof(OutsideAa::kOutsideAaShader) - 1, "outside_aa_cs",
+                     "CSMain", "cs_5_0");
+    ShaderCache::Add(ShaderCache::kOutsideAaPs, OutsideAa::kOutsideAaShader, sizeof(OutsideAa::kOutsideAaShader) - 1, "outside_aa_ps",
+                     "PSMain", "ps_5_0");
 }
 
 bool SceneDlaa::ShadersReady() { return ShaderCache::Done(); }
@@ -880,8 +937,10 @@ bool SceneDlaa::BuildColourSet(ID3D11Device* dev, bool hdr, bool keepsOther) {
         FAILED(hr = dev->CreateUnorderedAccessView(m_out.Get(), nullptr, &m_outUav))) {
         LogErr("DLAA: output create hr=0x%lx", hr); return false;
     }
-    if (m_up && FAILED(hr = dev->CreateShaderResourceView(m_out.Get(), nullptr, &m_outSrv))) {
-        LogErr("DLAA: output SRV create hr=0x%lx", hr); return false;   // v0.7.0: the composite needs it
+    // v0.7.0: the upscale composite reads it. phase 82 (game TAA test 2): a native-size unit needs it too -- SetCompositeOut draws the
+    // result with the same composite; without these SRVs (made only when upscaling before) no game_taa mix / split was ever drawn
+    if (FAILED(hr = dev->CreateShaderResourceView(m_out.Get(), nullptr, &m_outSrv))) {
+        LogErr("DLAA: output SRV create hr=0x%lx", hr); return false;
     }
 
     // v0.5.6 sharpen target + shader. v0.5.7: created even at sharpness 0 (Shift+PageUp can raise it live);
@@ -891,10 +950,9 @@ bool SceneDlaa::BuildColourSet(ID3D11Device* dev, bool hdr, bool keepsOther) {
     hr = S_OK;
     if (EnsureSharpen(dev) &&
         (m_outSrv || SUCCEEDED(hr = dev->CreateShaderResourceView(m_out.Get(), nullptr, &m_outSrv))) &&
-        SUCCEEDED(hr = MakeTex(dev, ow, oh, colorFmt,
-                               D3D11_BIND_UNORDERED_ACCESS | (m_up ? D3D11_BIND_SHADER_RESOURCE : 0u), &m_sharp)) &&
+        SUCCEEDED(hr = MakeTex(dev, ow, oh, colorFmt, D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE, &m_sharp)) &&
         SUCCEEDED(hr = dev->CreateUnorderedAccessView(m_sharp.Get(), nullptr, &m_sharpUav)) &&
-        (!m_up || SUCCEEDED(hr = dev->CreateShaderResourceView(m_sharp.Get(), nullptr, &m_sharpSrv)))) {
+        SUCCEEDED(hr = dev->CreateShaderResourceView(m_sharp.Get(), nullptr, &m_sharpSrv))) {   // phase 82: always (composite source)
         m_sharpRes = true;
         if (m_up)
             Log("DLAA: sharpen (RCAS) ready for eye %d -- strength %.2f r=%.1f output px%s, %ux%u target created "
@@ -911,8 +969,7 @@ bool SceneDlaa::BuildColourSet(ID3D11Device* dev, bool hdr, bool keepsOther) {
     } else {
         LogErr("DLAA: sharpen setup failed hr=0x%lx for eye %d -- sharpening OFF (DLAA continues)%s", (unsigned long)hr,
             m_eye, (m_crop && !m_up) ? "; DLAA area border blend OFF too (hard rect edge)" : "");
-        m_sharp.Reset(); m_sharpUav.Reset(); m_sharpSrv.Reset();
-        if (!m_up) m_outSrv.Reset();          // v0.7.0: upscale keeps it (composite source)
+        m_sharp.Reset(); m_sharpUav.Reset(); m_sharpSrv.Reset();   // (m_outSrv stays: the composite source; phase 82: always)
     }
 
     // Reversed-Z scene depth -> create the feature with DepthInverted from the start.
@@ -1016,6 +1073,7 @@ bool SceneDlaa::Warm(ID3D11DeviceContext* ctx, ID3D11Texture2D* colour, float ji
     DlaaFrameParams p;
     p.jitterX = jitterX;
     p.jitterY = jitterY;
+    p.mvJittered = m_mvJittered;                       // phase 82
     p.reset = m_park.resetPending;
     p.depthInverted = true;
     m_park.resetPending = false;
@@ -1138,8 +1196,12 @@ float SceneDlaa::s_sharpness = 0.4f;     // dlaa.ini sharpness (default 0.4; 0 =
 float SceneDlaa::s_sharpRadius = 1.5f;   // v0.5.8 dlaa.ini sharp_radius (default 1.5; clamp 1..4)
 int   SceneDlaa::s_biasPct = 100;         // phase 49 dlaa.ini dlss_bias_mask (default 100 %; 0 = off)
 int   SceneDlaa::s_area = 100;           // v0.6.4 dlaa.ini dlaa_area (default 100 = whole image; clamp kAreaMin (10)..100)
+uint32_t SceneDlaa::s_rectMoves = 0;     // phase 91: every unit's rect moves (RectMoves)
 int   SceneDlaa::s_feather = 96;         // v0.6.4 dlaa.ini dlaa_area_feather (default 96 px; clamp 0..512)
 bool  SceneDlaa::s_hdrLinear = true;     // v0.8.0 dlaa.ini dlss_hdr (default 1 = IsHDR for HDR units)
+int   SceneDlaa::s_oaaMode = 2;          // phase 81 dlaa.ini outside_aa (default 2 = unjitter + edge AA; 0 = off)
+int   SceneDlaa::s_oaaSignX = 1;         // phase 81: jitter_sign_x / _y (inject.cpp keeps them in step, default +1)
+int   SceneDlaa::s_oaaSignY = 1;
 
 bool SceneDlaa::EnsureSharpen(ID3D11Device* dev) {
     HRESULT hr;
@@ -1689,6 +1751,9 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
                     const DrawIdRecord* didFwdRec) {
     CpuProf::Block cpb(CpuProf::kBDlaaRun);            // phase 31 CPU profiler (cpu_prof.h)
     if (m_compPending) CancelComposite(ctx);           // v0.7.0: never left open (Composite always follows Run)
+    m_dlaa.PresetMvJittered(m_mvJittered);             // phase 82: a set built now gets the flag at its creation
+    m_park.dlaa.PresetMvJittered(m_mvJittered);
+    m_oaaArmed = false;                                // phase 81: armed again below for this Run's composite
     m_deferred = false;
     m_altFailed = false;                               // v0.10.0 phase 7
     m_warmable = false;                                // v0.10.0 phase 7: set again by a successful Run below
@@ -1743,6 +1808,7 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
         m_rx = rx; m_ry = ry;
         m_resetPending = true;
         m_park.resetPending = true;                    // v0.10.0 phase 7: the parked set's history is for the old window too
+        if (!m_menuUnit) ++s_rectMoves;                // phase 91: the Mix scissor draws full for a frame (inject.cpp TaaScissorBox)
     }
     if (m_resetPending) { reset = true; m_resetPending = false; }
 
@@ -1867,6 +1933,7 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
     p.jitterY = jitterY;
     p.reset = reset;
     p.depthInverted = true;
+    p.mvJittered = m_mvJittered;                       // phase 82: the game's projection jitter is in the reprojected MVs
     perfTok = GpuPerf::Begin(ctx, GpuPerf::kNgx);
     const bool ok = m_dlaa.Evaluate(ctx, m_colorInSrv.Get(), m_depthR32Srv.Get(),
                                     m_mvSrv.Get(), m_outUav.Get(), p, biasNgx);
@@ -1874,6 +1941,15 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
     ++m_runSerial;                                     // v0.10.0 phase 7: this set evaluated (KindIdleRuns; a failed
     if (ok) m_lastRunSerial = m_runSerial;             // evaluate does not count as keeping its history going)
     if (m_timing) GpuMark(ctx, 4);                     // after NGX evaluate
+
+    // d0. phase 81 OUTSIDE AA, in place (src/outside_aa.h): the CS reads the game's colour NOW -- before the copy-back below puts
+    // the DLAA result into the rect -- and writes the unjittered (+ edge-smoothed) outside into the full-size scratch m_oaaTex.
+    // RCAS's border blend then takes its raw side from there (Mode.yz = the rect origin, t1 = the scratch) and the 4 outer bands
+    // are copied back next to the rect: the seam is mask * DLAA + (1 - mask) * outside AA. Upscale: Composite draws the bands
+    // instead (OaaArm below). Not at area 100 (no crop), not after a failed evaluate (the frame stays untouched).
+    // COST: one CS over the image (interior threads return at once) + the outer-band copies, GpuPerf "outside-aa".
+    // phase 82: not with SetCompositeOut (nothing goes back into `tonemap`; outside the rect the game's own picture stays)
+    const bool oaaIn = ok && m_crop && !m_up && !m_compOut && OaaInPlace(dev.Get(), ctx, tonemap, td.Format, jitterX, jitterY);
 
     // d1. v0.5.6 RCAS sharpen: m_out -> m_sharp (skipped entirely when sharpness is 0 / setup failed).
     // v0.5.7: strength is live; re-upload the constant buffer when it changed since this eye last wrote it.
@@ -1885,14 +1961,16 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
     // feathers against the game's own stretched frame); the pass runs only for sharpening (skipped at 0).
     const float sharpNow  = m_noSharpen ? 0.0f : s_sharpness;   // v0.8.1: SetNoSharpen = as at sharpness 0
     const float radiusNow = s_sharpRadius;
-    const bool  blend     = m_crop && !m_up;
+    const bool  blend     = m_crop && !m_up && !m_compOut;   // phase 82: the composite feathers instead
     const float cbNow[kSharpCbFloats] = {
         sharpNow, radiusNow, blend ? (float)s_feather : 0.0f, blend ? 1.0f : 0.0f,
         (blend && m_rx > 0) ? 1.0f : 0.0f,                       // left edge inside the image
         (blend && m_ry > 0) ? 1.0f : 0.0f,                       // top
         (blend && m_rx + m_w < m_fullW) ? 1.0f : 0.0f,           // right
         (blend && m_ry + m_h < m_fullH) ? 1.0f : 0.0f,           // bottom
-        m_hdr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f };                 // v0.8.0 Mode: HDR unit (compressed-value RCAS)
+        m_hdr ? 1.0f : 0.0f,                                     // v0.8.0 Mode: HDR unit (compressed-value RCAS)
+        oaaIn ? (float)m_rx : 0.0f, oaaIn ? (float)m_ry : 0.0f,  // phase 81: Orig = the outside-AA scratch at the rect origin
+        0.0f };
     bool sharpOn = m_sharpRes && (sharpNow > 0.0f || blend);
     if (ok && sharpOn && (!m_sharpCbValid || memcmp(cbNow, m_sharpCbData, sizeof(cbNow)) != 0)) {
         D3D11_MAPPED_SUBRESOURCE mp{};
@@ -1915,7 +1993,8 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
         ID3D11UnorderedAccessView* suav[8] = { m_sharpUav.Get() };
         const UINT skeep[8] = { (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1 };
         // v0.6.4: t1 = colorIn (border blend) only with a crop; whole image binds t0 alone as before.
-        ID3D11ShaderResourceView*  ssrv[2] = { m_outSrv.Get(), m_colorInSrv.Get() };
+        // phase 81: t1 = the outside-AA scratch when it ran this Run (full size; the CB's Mode.yz = the rect origin)
+        ID3D11ShaderResourceView*  ssrv[2] = { m_outSrv.Get(), oaaIn ? m_oaaSrv.Get() : m_colorInSrv.Get() };
         const UINT                 nSrv = blend ? 2u : 1u;
         ID3D11ShaderResourceView*  snull[2] = {};
         ID3D11Buffer*              scb  = m_sharpCb.Get();          // b0 (CsState saves CB slots 0..13)
@@ -1937,16 +2016,23 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
     if (ok) {
         ID3D11Texture2D* res = sharpened ? m_sharp.Get() : m_out.Get();
         m_result = res;                                // v0.7.0: ResultTex() (self-test / snapshot)
-        if (m_up) {
+        if (m_up || m_compOut) {
             // v0.7.0 upscale: nothing goes back into the tonemap; Composite() draws `res` into the eye RT after
             // the game's blit. Composite needs the SRV + its shaders; without them the result is dropped.
+            // phase 82: the same for a native-size Run with SetCompositeOut (the game's TAA picture is the background)
             m_compSrc = sharpened ? m_sharpSrv.Get() : m_outSrv.Get();
             m_compPending = m_compSrc != nullptr && EnsureComposite(dev.Get());
+            // phase 81: the outside is drawn by Composite (from the game's blit SRV0, before the DLSS result) -- arm it
+            // phase 82: not with SetCompositeOut (the outside is the game's TAA picture: already anti-aliased, never re-shifted)
+            if (m_compPending && m_crop && m_up && !m_compOut) OaaArm(dev.Get(), tonemap, jitterX, jitterY);
         } else {
-            // UNORM -> SRGB twin, bytes preserved. v0.6.4: crop -> into the rect only.
-            GpuPerfScope gp(ctx, GpuPerf::kCopyOut);
-            if (m_crop) ctx->CopySubresourceRegion(tonemap, 0, m_rx, m_ry, 0, res, 0, nullptr);
-            else        ctx->CopyResource(tonemap, res);
+            {
+                // UNORM -> SRGB twin, bytes preserved. v0.6.4: crop -> into the rect only.
+                GpuPerfScope gp(ctx, GpuPerf::kCopyOut);
+                if (m_crop) ctx->CopySubresourceRegion(tonemap, 0, m_rx, m_ry, 0, res, 0, nullptr);
+                else        ctx->CopyResource(tonemap, res);
+            }
+            if (oaaIn) OaaCopyBack(ctx, tonemap);       // phase 81: the 4 outer bands next to the rect
         }
         ++m_frames;
     } else if (m_evalFails++ < 20) {
@@ -1982,7 +2068,7 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
         ctx->Dispatch((m_ow + 7) / 8, (m_oh + 7) / 8, 1);  // v0.7.0: output rect (= m_w x m_h without upscale)
         ctx->CSSetShaderResources(0, 9, dnull);
         ctx->CSSetUnorderedAccessViews(0, 1, &nullUav, &keep);
-        if (m_up) {
+        if (m_up || m_compOut) {
             // v0.7.0: the composite draws the visualization; a failed Evaluate left stamp 6 already taken.
             m_result = m_out.Get();
             m_compSrc = m_outSrv.Get();
@@ -2028,16 +2114,22 @@ bool SceneDlaa::Composite(ID3D11DeviceContext* ctx, uint32_t vpX, uint32_t vpY, 
     // Params: RT-space rect origin + size, feather (output px per axis), blend, sRGB decode, edge flags.
     // Feather: dlaa_area_feather is in render px; scaled per axis to output px (same image fraction as DLAA).
     // Edges: the rect edge is feathered only when it lies inside the output image (v0.6.4 rule).
+    // phase 82: a native-size composite (SetCompositeOut) has no output size of its own: the output IS the render size
+    const uint32_t ofw = m_up ? m_outFullW : m_fullW, ofh = m_up ? m_outFullH : m_fullH;
     const bool blend = m_crop;
-    const float fx = blend ? (float)s_feather * (float)m_outFullW / (float)m_fullW : 0.0f;
-    const float fy = blend ? (float)s_feather * (float)m_outFullH / (float)m_fullH : 0.0f;
-    const float data[12] = {
+    const float fx = blend ? (float)s_feather * (float)ofw / (float)m_fullW : 0.0f;
+    const float fy = blend ? (float)s_feather * (float)ofh / (float)m_fullH : 0.0f;
+    const float data[28] = {
         (float)(vpX + m_oxc), (float)(vpY + m_oyc), (float)m_ow, (float)m_oh,
         fx, fy, blend ? 1.0f : 0.0f, srgbDecode ? 1.0f : 0.0f,
         (blend && m_oxc > 0) ? 1.0f : 0.0f,                       // left edge inside the image
         (blend && m_oyc > 0) ? 1.0f : 0.0f,                       // top
-        (blend && m_oxc + m_ow < m_outFullW) ? 1.0f : 0.0f,       // right
-        (blend && m_oyc + m_oh < m_outFullH) ? 1.0f : 0.0f };     // bottom
+        (blend && m_oxc + m_ow < ofw) ? 1.0f : 0.0f,              // right
+        (blend && m_oyc + m_oh < ofh) ? 1.0f : 0.0f,              // bottom
+        m_mixShare,                                               // phase 82: the mod's share (1 = as before)
+        m_mixSplit ? GameTaa::SplitXc((float)vpX, (float)ofw, m_splitPct, m_cu) : -1.0f,   //   split column (RT px; VR: from the optical centre) / none
+        m_mixRight, 0.0f,                                         //   the share right of it; (the line + labels: DrawSplitOverlay)
+        0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
     if (!m_compDataValid || memcmp(data, m_compData, sizeof(data)) != 0) {
         D3D11_MAPPED_SUBRESOURCE mp{};
         if (FAILED(ctx->Map(m_compParams.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) {
@@ -2060,6 +2152,13 @@ bool SceneDlaa::Composite(ID3D11DeviceContext* ctx, uint32_t vpX, uint32_t vpY, 
 
     GfxState saved;
     saved.Save(ctx);
+
+    // phase 81 OUTSIDE AA (upscale): the bands outside the rect's interior first, alpha 1, from the game's blit SRV0 (saved.psSrv[0],
+    // the texture Run was handed, its view = the game's own decode); the DLSS draw below blends over them with the feather.
+    if (m_oaaArmed) {
+        const bool oe[4] = { m_oxc > 0, m_oyc > 0, m_oxc + m_ow < m_outFullW, m_oyc + m_oh < m_outFullH };
+        OaaDrawBands(ctx, saved.psSrv[0], vpX, vpY, fx, fy, oe);
+    }
 
     D3D11_VIEWPORT vp{};
     vp.TopLeftX = (float)(vpX + m_oxc);
@@ -2101,22 +2200,499 @@ bool SceneDlaa::Composite(ID3D11DeviceContext* ctx, uint32_t vpX, uint32_t vpY, 
     return true;
 }
 
+// phase 82: the split line + labels alone over the bound RT0 (the HDR path: after the game's tonemap, into its 8-bit target), viewport
+// (x0, y0, w, h). Needs the composite shaders (a composite ran before). Inside the caller's re-entrancy guard.
+bool SceneDlaa::DrawSplitOverlay(ID3D11DeviceContext* ctx, uint32_t x0, uint32_t y0, uint32_t w, uint32_t h, int pct,
+                                 const char* left, const char* right) {
+    // (the column: the same rule as the composite's cut -- pct from this unit's optical centre m_cu; 0.5 in flat)
+    if (!w || !h) return false;
+    {
+        Microsoft::WRL::ComPtr<ID3D11Device> dev;
+        ctx->GetDevice(&dev);
+        if (!dev || !EnsureComposite(dev.Get())) return false;
+    }
+    const GameTaa::Label ll = GameTaa::PackLabel(left), lr = GameTaa::PackLabel(right);
+    const float cell = LabelCell(h);
+    const float data[28] = { (float)x0, (float)y0, (float)w, (float)h, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                             0.0f, GameTaa::SplitXc((float)x0, (float)w, pct, m_cu), GameTaa::SplitLineWidth(h), 1.0f,
+                             cell, (float)y0 + 3.0f * cell, (float)ll.n, (float)lr.n,
+                             (float)ll.p[0], (float)ll.p[1], (float)ll.p[2], 0.0f, (float)lr.p[0], (float)lr.p[1], (float)lr.p[2], 0.0f };
+    if (!m_compDataValid || memcmp(data, m_compData, sizeof(data)) != 0) {
+        D3D11_MAPPED_SUBRESOURCE mp{};
+        if (FAILED(ctx->Map(m_compParams.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) return false;
+        memcpy(mp.pData, data, sizeof(data));
+        ctx->Unmap(m_compParams.Get(), 0);
+        memcpy(m_compData, data, sizeof(data));
+        m_compDataValid = true;
+    }
+    GfxState saved;
+    saved.Save(ctx);
+    D3D11_VIEWPORT vp{ (float)x0, (float)y0, (float)w, (float)h, 0.0f, 1.0f };
+    ID3D11ShaderResourceView* srv[2] = { nullptr, m_compParamsSrv.Get() };
+    const FLOAT bf[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    ctx->IASetInputLayout(nullptr);
+    ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    ctx->VSSetShader(m_compVs.Get(), nullptr, 0);
+    ctx->HSSetShader(nullptr, nullptr, 0);
+    ctx->DSSetShader(nullptr, nullptr, 0);
+    ctx->GSSetShader(nullptr, nullptr, 0);
+    ctx->PSSetShader(m_compPs.Get(), nullptr, 0);
+    ctx->PSSetShaderResources(0, 2, srv);
+    ctx->RSSetState(m_compRs.Get());
+    ctx->RSSetViewports(1, &vp);
+    ctx->OMSetBlendState(m_compBlend.Get(), bf, 0xffffffffu);
+    ctx->OMSetDepthStencilState(m_compDss.Get(), 0);
+    ctx->Draw(3, 0);
+    saved.Restore(ctx);
+    return true;
+}
+
+// phase 82: the pending composite into `dst` (the game's tonemap INPUT on the HDR path) through our own RTV -- see scene_dlaa.h.
+bool SceneDlaa::CompositeInto(ID3D11DeviceContext* ctx, ID3D11Texture2D* dst) {
+    if (!m_compPending) return false;
+    if (!dst) { CancelComposite(ctx); return false; }
+    if (dst != m_intoTex || !m_intoRtv) {
+        m_intoRtv.Reset();
+        m_intoTex = nullptr;
+        Microsoft::WRL::ComPtr<ID3D11Device> dev;
+        ctx->GetDevice(&dev);
+        D3D11_TEXTURE2D_DESC dd{};
+        dst->GetDesc(&dd);
+        // phase 90c: an LDR target (the game's blit source, VR test 2026-11-01) -- a TYPELESS one gets an _SRGB view, so like the
+        // post-blit composite the mix blends in linear: the composite decodes its bytes and the RTV re-encodes them
+        D3D11_RENDER_TARGET_VIEW_DESC rd{};
+        rd.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB; rd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D; rd.Texture2D.MipSlice = 0;
+        const bool typeless = dd.Format == DXGI_FORMAT_R8G8B8A8_TYPELESS;
+        const HRESULT hr = dev ? dev->CreateRenderTargetView(dst, typeless ? &rd : nullptr, &m_intoRtv) : E_FAIL;
+        if (FAILED(hr) || !m_intoRtv) {
+            static int warned = 0;
+            if (warned++ < 3)
+                LogErr("DLAA (phase 82): no render target view on the game's tonemap input (%ux%u fmt=%d, bind 0x%x) hr=0x%lx -- the "
+                    "mix is not drawn this frame", dd.Width, dd.Height, (int)dd.Format, dd.BindFlags, hr);
+            m_intoRtv.Reset();
+            CancelComposite(ctx);
+            return false;
+        }
+        m_intoTex = dst;
+        m_intoSrgb = typeless || dd.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB || dd.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+    }
+    ID3D11RenderTargetView*   rtv[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
+    ID3D11DepthStencilView*   dsv = nullptr;
+    ID3D11ShaderResourceView* srv[8] = {};
+    ctx->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, rtv, &dsv);
+    ctx->PSGetShaderResources(0, 8, srv);                // before our bind: binding dst as a target unbinds it as an input
+    ID3D11RenderTargetView* ours = m_intoRtv.Get();
+    ctx->OMSetRenderTargets(1, &ours, nullptr);
+    const bool ok = Composite(ctx, 0, 0, m_intoSrgb);
+    ctx->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, rtv, dsv);
+    ctx->PSSetShaderResources(0, 8, srv);
+    for (auto*& r : rtv) if (r) { r->Release(); r = nullptr; }
+    if (dsv) dsv->Release();
+    for (auto*& s : srv) if (s) { s->Release(); s = nullptr; }
+    return ok;
+}
+
 void SceneDlaa::CancelComposite(ID3D11DeviceContext* ctx) {
+    m_oaaArmed = false;                                // phase 81: no composite, no outside bands either
     if (!m_compPending) return;
     m_compPending = false;
     if (m_timing) GpuEnd(ctx, /*keep=*/false);
+}
+
+// ---- phase 81 OUTSIDE AA (see scene_dlaa.h and src/outside_aa.h) -------------------------------------------------------------
+static_assert(OutsideAa::kParamFloats == 20, "SceneDlaa::m_oaaData holds OutsideAa::kParamFloats floats");
+
+bool SceneDlaa::OaaCommon(ID3D11Device* dev) {
+    if (m_oaaParamsSrv && m_oaaSampler) return true;
+    if (m_oaaCommonTried) return false;
+    m_oaaCommonTried = true;
+    HRESULT hr;
+    D3D11_BUFFER_DESC pb{};
+    pb.ByteWidth = sizeof(m_oaaData);
+    pb.Usage = D3D11_USAGE_DYNAMIC;
+    pb.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    pb.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    if (FAILED(hr = dev->CreateBuffer(&pb, nullptr, &m_oaaParams))) {
+        LogErr("outside AA (phase 81): params buffer hr=0x%lx", hr); return false;
+    }
+    D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+    sd.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+    sd.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+    sd.Buffer.FirstElement = 0;
+    sd.Buffer.NumElements = (UINT)(sizeof(m_oaaData) / 16);
+    if (FAILED(hr = dev->CreateShaderResourceView(m_oaaParams.Get(), &sd, &m_oaaParamsSrv))) {
+        LogErr("outside AA (phase 81): params SRV hr=0x%lx", hr); return false;
+    }
+    D3D11_SAMPLER_DESC smp{};
+    smp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    smp.AddressU = smp.AddressV = smp.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    smp.ComparisonFunc = D3D11_COMPARISON_NEVER;
+    smp.MinLOD = 0.0f; smp.MaxLOD = D3D11_FLOAT32_MAX;
+    if (FAILED(hr = dev->CreateSamplerState(&smp, &m_oaaSampler))) {
+        LogErr("outside AA (phase 81): sampler hr=0x%lx", hr); return false;
+    }
+    m_oaaDataValid = false;
+    return true;
+}
+
+bool SceneDlaa::OaaUpload(ID3D11DeviceContext* ctx, const float* p) {
+    if (m_oaaDataValid && memcmp(p, m_oaaData, sizeof(m_oaaData)) == 0) return true;
+    D3D11_MAPPED_SUBRESOURCE mp{};
+    if (FAILED(ctx->Map(m_oaaParams.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) {
+        static int warned = 0;
+        if (warned++ < 5) LogErr("outside AA (phase 81): params Map failed on eye %d -- outside left raw this frame", m_eye);
+        return false;
+    }
+    memcpy(mp.pData, p, sizeof(m_oaaData));
+    ctx->Unmap(m_oaaParams.Get(), 0);
+    memcpy(m_oaaData, p, sizeof(m_oaaData));
+    m_oaaDataValid = true;
+    return true;
+}
+
+// phase 93: the visibility mask of this eye's OpenXR view (scene_dlaa.h SetVisibleMask)
+void SceneDlaa::SetVisibleMask(const float* t, uint32_t tris, uint64_t key) {
+    if (!t || !tris || !key) {
+        if (m_visKey) { m_visKey = 0; m_clipInN[0] = m_clipInN[1] = -1; }
+        return;
+    }
+    if (key == m_visKey) return;
+    m_visTri.assign(t, t + 6 * (size_t)tris);
+    m_visTris = tris;
+    m_visKey = key;
+    m_visBuiltKey = 0;
+    m_clipInN[0] = m_clipInN[1] = -1;
+}
+
+// phase 93: the bands clipped to the visible area (outside_aa.h SplitClip). No mask: the bands themselves (picture as before).
+// The per-row table is built once per (mask, image size) -- one pass over the rows x triangles (~1-3 ms at 2900 rows, logged);
+// the clip itself is cached per caller and recomputed only when its bands move (the rect follows dlaa_area / the optical centre).
+int SceneDlaa::OaaClip(int which, uint32_t w, uint32_t h, const OutsideAa::Box* b, int n, OutsideAa::Box* out) {
+    which &= 1;
+    if (!m_visKey) {
+        for (int i = 0; i < n; ++i) out[i] = b[i];
+        return n;
+    }
+    // phase 93 review: keyed on the size the rows were BUILT for (a failed build leaves m_vis empty = w 0, which re-ran this every blit)
+    if (m_visBuiltKey != m_visKey || m_visBuiltW != w || m_visBuiltH != h) {
+        {
+            LARGE_INTEGER t0{}, t1{}, fq{};
+            QueryPerformanceCounter(&t0);
+            const bool ok = OutsideAa::BuildVisRows(m_visTri.data(), m_visTris, w, h, OutsideAa::kClipMarginPx, &m_vis);
+            QueryPerformanceCounter(&t1);
+            QueryPerformanceFrequency(&fq);
+            m_visBuiltKey = m_visKey;
+            m_visBuiltW = w; m_visBuiltH = h;
+            m_visBuildFailed = !ok;
+            if (!ok) m_vis = OutsideAa::VisRows();
+            Log("outside AA (phase 93): eye %d visibility clip %s for %ux%u -- %u of %u rows show something, %u hidden triangles, "
+                "%u px margin (built in %.2f ms)", m_eye, ok ? "ready" : "NOT usable (bands drawn whole)", w, h, m_vis.visRows, h,
+                m_visTris, (unsigned)OutsideAa::kClipMarginPx,
+                fq.QuadPart ? (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)fq.QuadPart : 0.0);
+        }
+        m_clipInN[0] = m_clipInN[1] = -1;
+    }
+    if (m_clipInN[which] != n || m_clipInW[which] != w || m_clipInH[which] != h ||
+        memcmp(m_clipIn[which], b, sizeof(OutsideAa::Box) * (size_t)n) != 0) {
+        m_clipInN[which] = n; m_clipInW[which] = w; m_clipInH[which] = h;
+        memcpy(m_clipIn[which], b, sizeof(OutsideAa::Box) * (size_t)n);
+        m_clipArea[which] = m_clipKept[which] = 0;
+        m_clipOutN[which] = OutsideAa::SplitClip(m_vis, b, n, m_clipOut[which], &m_clipArea[which], &m_clipKept[which]);
+    }
+    const int m = m_clipOutN[which];
+    for (int i = 0; i < m; ++i) out[i] = m_clipOut[which][i];
+    if (which == 0) {                                    // the log: the computed / drawn bands only
+        m_oaaAreaWin += m_clipArea[0];
+        m_oaaKeptWin += m_clipKept[0];
+        if (++m_oaaClipRuns >= 600) {
+            LogDbg("outside AA (phase 93): eye %d visible-area clip -- %.1f %% of the band pixels skipped over the last %llu runs "
+                "(%.2f of %.2f Mpx per run kept, %d boxes; the lens corners the headset never shows)", m_eye,
+                m_oaaAreaWin ? 100.0 * (double)(m_oaaAreaWin - m_oaaKeptWin) / (double)m_oaaAreaWin : 0.0,
+                (unsigned long long)m_oaaClipRuns, (double)m_oaaKeptWin / (double)m_oaaClipRuns / 1.0e6,
+                (double)m_oaaAreaWin / (double)m_oaaClipRuns / 1.0e6, m);
+            m_oaaAreaWin = m_oaaKeptWin = m_oaaClipRuns = 0;
+        }
+    }
+    return m;
+}
+
+void SceneDlaa::OaaFirstLog(const char* what, uint32_t bands, int luma, float sx, float sy) {
+    const bool up = m_up;
+    Log("outside AA (phase 81): eye %d first outside-AA draw (%s) -- outside_aa=%d (%s), rect (%u,%u) %ux%u of %ux%u %s px, %u "
+        "band(s) around it, shift (%+.4f, %+.4f) render px (= NGX jitter x jitter sign %+d / %+d), source %s",
+        m_eye, what, s_oaaMode, s_oaaMode >= 2 ? "unjitter + edge AA" : "unjitter", up ? m_oxc : m_rx, up ? m_oyc : m_ry,
+        up ? m_ow : m_w, up ? m_oh : m_h, up ? m_outFullW : m_fullW, up ? m_outFullH : m_fullH, up ? "output" : "render", bands,
+        (double)sx, (double)sy, s_oaaSignX, s_oaaSignY,
+        luma == 2 ? "RGBA16F (HDR, compressed luma)" : (luma == 1 ? "R8G8B8A8 _SRGB view (linear, sqrt luma)" : "R8G8B8A8 encoded"));
+}
+
+bool SceneDlaa::OaaInPlace(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, DXGI_FORMAT fmt, float jitterX,
+                           float jitterY) {
+    // off, or the jitter is off / held (inject.cpp hands (0, 0) then: the raw frame does not move, nothing to undo)
+    if (s_oaaMode <= 0 || (jitterX == 0.0f && jitterY == 0.0f)) return false;
+    if (!m_oaaCs) {
+        if (m_oaaCsTried || !ShaderCache::Ready(ShaderCache::kOutsideAaCs)) return false;   // not compiled yet: next Run
+        m_oaaCsTried = true;
+        size_t sz = 0;
+        const void* code = ShaderCache::Code(ShaderCache::kOutsideAaCs, &sz);
+        HRESULT hr = E_FAIL;
+        if (!code || FAILED(hr = dev->CreateComputeShader(code, sz, nullptr, &m_oaaCs))) {
+            LogErr("outside AA (phase 81): CS unavailable on eye %d (hr=0x%lx) %s -- outside left raw", m_eye, hr,
+                ShaderCache::Error(ShaderCache::kOutsideAaCs));
+            return false;
+        }
+    }
+    if (!OaaCommon(dev)) return false;
+    // The colour must not be bound for OUTPUT right now: the runtime would null our SRV of it (a black outside). The blit-stage
+    // units read it as the blit's SRV0 (fine); a caller holding it as a render target is skipped (counted, logged once).
+    {
+        ID3D11RenderTargetView* rtv[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
+        ctx->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, rtv, nullptr);
+        bool bound = false;
+        for (ID3D11RenderTargetView* v : rtv) {
+            if (!v) continue;
+            ID3D11Resource* r = nullptr;
+            v->GetResource(&r);
+            if (r && (void*)r == (void*)tonemap) bound = true;
+            if (r) r->Release();
+            v->Release();
+        }
+        if (bound) {
+            if (m_oaaSkipBound++ == 0)
+                LogWarn("outside AA (phase 81): eye %d colour texture is bound as a render target at its DLAA Run -- outside left "
+                        "raw for this unit while that lasts", m_eye);
+            return false;
+        }
+    }
+    // SRV of the game's colour, cached per texture. TYPELESS / UNORM: the encoded bytes (like colorIn, copy-compatible); an
+    // _SRGB-only texture: its _SRGB view (linear) and the CS re-encodes; RGBA16F: as is.
+    if (m_oaaSrcTex != tonemap || !m_oaaSrcSrv) {
+        m_oaaSrcSrv.Reset();
+        m_oaaSrcTex = nullptr;
+        D3D11_TEXTURE2D_DESC td{};
+        tonemap->GetDesc(&td);
+        D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+        sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        sd.Texture2D.MostDetailedMip = 0;
+        sd.Texture2D.MipLevels = 1;
+        int luma = 0;
+        bool enc = false;
+        if (fmt == DXGI_FORMAT_R16G16B16A16_FLOAT)       { sd.Format = fmt; luma = 2; }
+        else if (fmt == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB) { sd.Format = fmt; luma = 1; enc = true; }
+        else                                             { sd.Format = DXGI_FORMAT_R8G8B8A8_UNORM; }
+        HRESULT hr = E_INVALIDARG;
+        if (!(td.BindFlags & D3D11_BIND_SHADER_RESOURCE) || td.ArraySize != 1 || td.SampleDesc.Count != 1 ||
+            FAILED(hr = dev->CreateShaderResourceView(tonemap, &sd, &m_oaaSrcSrv))) {
+            m_oaaSrcSrv.Reset();
+            if (m_oaaSkipSrc++ == 0)
+                LogWarn("outside AA (phase 81): eye %d cannot read its colour texture (%ux%u fmt=%d bind=0x%x array=%u samples=%u, "
+                        "hr=0x%lx) -- outside left raw", m_eye, td.Width, td.Height, (int)td.Format, td.BindFlags, td.ArraySize,
+                        td.SampleDesc.Count, hr);
+            return false;
+        }
+        m_oaaSrcTex = tonemap;
+        m_oaaSrcLuma = luma;
+        m_oaaSrcEncode = enc;
+    }
+    // The full-size scratch (the unit's colour format: 4 B/px LDR, 8 B/px HDR = 92 / 185 MB at 4136x5848). Its interior is never
+    // written or read; only the bands and the inner feather band (RCAS's raw side) are.
+    const DXGI_FORMAT sf = m_hdr ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM;
+    if (!m_oaaTex || m_oaaW != m_fullW || m_oaaH != m_fullH || m_oaaFmt != sf) {
+        if (m_oaaTexFailed && m_oaaW == m_fullW && m_oaaH == m_fullH && m_oaaFmt == sf) return false;
+        m_oaaTex.Reset(); m_oaaUav.Reset(); m_oaaSrv.Reset();
+        m_oaaW = m_fullW; m_oaaH = m_fullH; m_oaaFmt = sf; m_oaaTexFailed = false;
+        HRESULT hr;
+        if (FAILED(hr = MakeTex(dev, m_fullW, m_fullH, sf, D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE, &m_oaaTex)) ||
+            FAILED(hr = dev->CreateUnorderedAccessView(m_oaaTex.Get(), nullptr, &m_oaaUav)) ||
+            FAILED(hr = dev->CreateShaderResourceView(m_oaaTex.Get(), nullptr, &m_oaaSrv))) {
+            m_oaaTex.Reset(); m_oaaUav.Reset(); m_oaaSrv.Reset();
+            m_oaaTexFailed = true;
+            LogErr("outside AA (phase 81): eye %d scratch %ux%u create hr=0x%lx -- outside left raw at this size", m_eye, m_fullW,
+                m_fullH, hr);
+            return false;
+        }
+        Log("outside AA (phase 81): eye %d in-place scratch %ux%u %s created (%.0f MB)", m_eye, m_fullW, m_fullH,
+            m_hdr ? "RGBA16F" : "RGBA8", (double)m_fullW * (double)m_fullH * (m_hdr ? 8.0 : 4.0) / (1024.0 * 1024.0));
+        // phase 93: zeroed once -- with the visibility clip, scratch pixels in the hidden lens corners are never computed, yet the
+        // copy-back's clipped boxes and RCAS's feather read can still reach some of them: they must hold finite values (never shown)
+        const FLOAT zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        ctx->ClearUnorderedAccessViewFloat(m_oaaUav.Get(), zero);
+    }
+    // Params. The feather is the one RCAS blends with -- only when its resources exist (m_sharpRes); else the copy-back is a hard
+    // edge and the interior is the whole rect.
+    const bool edges[4] = { m_rx > 0, m_ry > 0, m_rx + m_w < m_fullW, m_ry + m_h < m_fullH };
+    const float f = m_sharpRes ? (float)s_feather : 0.0f;
+    const OutsideAa::Box rect{ (int32_t)m_rx, (int32_t)m_ry, (int32_t)(m_rx + m_w), (int32_t)(m_ry + m_h) };
+    const OutsideAa::Box in = OutsideAa::Interior(rect, f, f, edges);
+    const float sx = OutsideAa::ShiftFromNgx(jitterX, s_oaaSignX), sy = OutsideAa::ShiftFromNgx(jitterY, s_oaaSignY);
+    float p[OutsideAa::kParamFloats];
+    OutsideAa::FillParams(p, in, m_fullW, m_fullH, m_fullW, m_fullH, sx, sy, s_oaaMode, m_oaaSrcLuma, m_oaaSrcEncode, 0.0f, 0.0f);
+    // phase 93: only the bands' visible part is computed -- one dispatch over the union box of the clipped bands (Params[4].zw =
+    // its origin). Without a mask: the whole image from (0, 0) as before (the CS skips the interior itself).
+    UINT gx = (m_fullW + 7) / 8, gy = (m_fullH + 7) / 8;
+    if (m_visKey) {
+        OutsideAa::Box bands[4], clip[4 * OutsideAa::kClipStrips];
+        const int nb = OutsideAa::Bands(m_fullW, m_fullH, in, bands);
+        const int nc = OaaClip(0, m_fullW, m_fullH, bands, nb, clip);
+        const OutsideAa::Box u = OutsideAa::UnionBox(clip, nc);
+        if (OutsideAa::Empty(u)) { gx = gy = 0; }
+        else {
+            p[18] = (float)u.x0; p[19] = (float)u.y0;
+            gx = (UINT)(u.x1 - u.x0 + 7) / 8; gy = (UINT)(u.y1 - u.y0 + 7) / 8;
+        }
+    }
+    if (!OaaUpload(ctx, p)) return false;
+    // UAVs first (all 8 slots: NGX may have left one bound; CsState restores the game's), then the SRVs -- as the RCAS pass does
+    ID3D11UnorderedAccessView* uav[8] = { m_oaaUav.Get() };
+    const UINT keep[8] = { (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1 };
+    ID3D11ShaderResourceView* srv[2] = { m_oaaSrcSrv.Get(), m_oaaParamsSrv.Get() };
+    ID3D11SamplerState* smp = m_oaaSampler.Get();
+    ctx->CSSetShader(m_oaaCs.Get(), nullptr, 0);
+    ctx->CSSetUnorderedAccessViews(0, 8, uav, keep);
+    ctx->CSSetShaderResources(0, 2, srv);
+    ctx->CSSetSamplers(0, 1, &smp);
+    if (gx && gy) {
+        GpuPerfScope gp(ctx, GpuPerf::kOutsideAa);
+        ctx->Dispatch(gx, gy, 1);
+    }
+    ID3D11ShaderResourceView* ns[2] = {};
+    ID3D11UnorderedAccessView* nu = nullptr;
+    ID3D11SamplerState* nsmp = nullptr;
+    ctx->CSSetShaderResources(0, 2, ns);                 // (the colour is written by the copy-back next: never left bound)
+    ctx->CSSetUnorderedAccessViews(0, 1, &nu, keep);
+    ctx->CSSetSamplers(0, 1, &nsmp);
+    ++m_oaaRuns;
+    if (!m_oaaLogged[0]) {
+        m_oaaLogged[0] = true;
+        OutsideAa::Box b[4];
+        OaaFirstLog("in place", (uint32_t)OutsideAa::OuterBands(m_fullW, m_fullH, rect, b), m_oaaSrcLuma, sx, sy);
+    }
+    return true;
+}
+
+void SceneDlaa::OaaCopyBack(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap) {
+    const OutsideAa::Box rect{ (int32_t)m_rx, (int32_t)m_ry, (int32_t)(m_rx + m_w), (int32_t)(m_ry + m_h) };
+    OutsideAa::Box ob[4], b[4 * OutsideAa::kClipStrips];
+    const int nob = OutsideAa::OuterBands(m_fullW, m_fullH, rect, ob);
+    const int n = OaaClip(1, m_fullW, m_fullH, ob, nob, b);   // phase 93: the visible part only (no mask: the 4 bands)
+    GpuPerfScope gp(ctx, GpuPerf::kOutsideAa);
+    for (int i = 0; i < n; ++i) {
+        const D3D11_BOX box{ (UINT)b[i].x0, (UINT)b[i].y0, 0, (UINT)b[i].x1, (UINT)b[i].y1, 1 };
+        ctx->CopySubresourceRegion(tonemap, 0, (UINT)b[i].x0, (UINT)b[i].y0, 0, m_oaaTex.Get(), 0, &box);   // bytes preserved
+    }
+}
+
+void SceneDlaa::OaaArm(ID3D11Device* dev, ID3D11Texture2D* tonemap, float jitterX, float jitterY) {
+    m_oaaArmed = false;
+    if (s_oaaMode <= 0 || (jitterX == 0.0f && jitterY == 0.0f)) return;
+    if (!m_oaaPs) {
+        if (m_oaaPsTried || !ShaderCache::Ready(ShaderCache::kOutsideAaPs)) return;
+        m_oaaPsTried = true;
+        size_t sz = 0;
+        const void* code = ShaderCache::Code(ShaderCache::kOutsideAaPs, &sz);
+        HRESULT hr = E_FAIL;
+        if (!code || FAILED(hr = dev->CreatePixelShader(code, sz, nullptr, &m_oaaPs))) {
+            LogErr("outside AA (phase 81): PS unavailable on eye %d (hr=0x%lx) %s -- outside left as the game's stretch", m_eye, hr,
+                ShaderCache::Error(ShaderCache::kOutsideAaPs));
+            return;
+        }
+    }
+    if (!OaaCommon(dev)) return;
+    m_oaaRunTex = tonemap;                               // identity only: Composite checks the blit's SRV0 against it
+    m_oaaSx = OutsideAa::ShiftFromNgx(jitterX, s_oaaSignX);   // RENDER px (FillParams turns it into render uv)
+    m_oaaSy = OutsideAa::ShiftFromNgx(jitterY, s_oaaSignY);
+    m_oaaArmed = true;
+}
+
+// Inside Composite (after its GfxState save, before its own draw): one Draw(3) per band, viewport = the band in RT space. The
+// composite's VS / blend (alpha 1 = replace, RGB only) / rasterizer / depth state are reused; PS sampler 0 is saved here (GfxState
+// does not save samplers: the composite itself only Loads). PS SRV 0..1, viewports, shaders: GfxState restores them.
+void SceneDlaa::OaaDrawBands(ID3D11DeviceContext* ctx, ID3D11ShaderResourceView* gameSrv0, uint32_t vpX, uint32_t vpY, float fx,
+                             float fy, const bool edges[4]) {
+    m_oaaArmed = false;
+    ID3D11Resource* r = nullptr;
+    if (gameSrv0) gameSrv0->GetResource(&r);
+    const bool same = r && (void*)r == (void*)m_oaaRunTex;
+    if (r) r->Release();
+    if (!same) {
+        if (m_oaaSkipSrc++ == 0)
+            LogWarn("outside AA (phase 81): eye %d the blit's SRV0 is not the texture DLSS ran on -- outside left as the game's "
+                    "stretch (logged once)", m_eye);
+        return;
+    }
+    D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+    gameSrv0->GetDesc(&sd);
+    const bool srgb = sd.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB || sd.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+    const int luma = m_hdr ? 2 : (srgb ? 1 : 0);
+    const OutsideAa::Box rect{ (int32_t)m_oxc, (int32_t)m_oyc, (int32_t)(m_oxc + m_ow), (int32_t)(m_oyc + m_oh) };
+    const OutsideAa::Box in = OutsideAa::Interior(rect, fx, fy, edges);
+    OutsideAa::Box bands[4], b[4 * OutsideAa::kClipStrips];
+    const int nb = OutsideAa::Bands(m_outFullW, m_outFullH, in, bands);
+    const int n = OaaClip(0, m_outFullW, m_outFullH, bands, nb, b);   // phase 93: the visible part only (no mask: the bands)
+    if (n <= 0) return;
+    float p[OutsideAa::kParamFloats];
+    OutsideAa::FillParams(p, in, m_outFullW, m_outFullH, m_fullW, m_fullH, m_oaaSx, m_oaaSy, s_oaaMode, luma, false, (float)vpX,
+                          (float)vpY);
+    if (!OaaUpload(ctx, p)) return;
+    ID3D11SamplerState* oldSmp = nullptr;
+    ctx->PSGetSamplers(0, 1, &oldSmp);
+    ID3D11ShaderResourceView* srv[2] = { gameSrv0, m_oaaParamsSrv.Get() };
+    ID3D11SamplerState* smp = m_oaaSampler.Get();
+    const FLOAT bf[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    ctx->IASetInputLayout(nullptr);
+    ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    ctx->VSSetShader(m_compVs.Get(), nullptr, 0);
+    ctx->HSSetShader(nullptr, nullptr, 0);
+    ctx->DSSetShader(nullptr, nullptr, 0);
+    ctx->GSSetShader(nullptr, nullptr, 0);
+    ctx->PSSetShader(m_oaaPs.Get(), nullptr, 0);
+    ctx->PSSetShaderResources(0, 2, srv);
+    ctx->PSSetSamplers(0, 1, &smp);
+    ctx->RSSetState(m_compRs.Get());
+    ctx->OMSetBlendState(m_compBlend.Get(), bf, 0xffffffffu);
+    ctx->OMSetDepthStencilState(m_compDss.Get(), 0);
+    {
+        GpuPerfScope gp(ctx, GpuPerf::kOutsideAa);
+        for (int i = 0; i < n; ++i) {
+            D3D11_VIEWPORT vp{};
+            vp.TopLeftX = (float)vpX + (float)b[i].x0;
+            vp.TopLeftY = (float)vpY + (float)b[i].y0;
+            vp.Width    = (float)(b[i].x1 - b[i].x0);
+            vp.Height   = (float)(b[i].y1 - b[i].y0);
+            vp.MinDepth = 0.0f;
+            vp.MaxDepth = 1.0f;
+            ctx->RSSetViewports(1, &vp);                   // (hooked: passes straight through inside the guard)
+            ctx->Draw(3, 0);                               // (hooked: passes straight through inside the guard)
+        }
+    }
+    ctx->PSSetSamplers(0, 1, &oldSmp);
+    if (oldSmp) oldSmp->Release();
+    ++m_oaaRuns;
+    if (!m_oaaLogged[1]) {
+        m_oaaLogged[1] = true;
+        OaaFirstLog("upscale, drawn over the game's stretch", (uint32_t)n, luma, m_oaaSx, m_oaaSy);
+    }
+}
+
+void SceneDlaa::OaaShutdown() {
+    m_oaaCs.Reset(); m_oaaPs.Reset(); m_oaaParams.Reset(); m_oaaParamsSrv.Reset(); m_oaaSampler.Reset();
+    m_oaaTex.Reset(); m_oaaUav.Reset(); m_oaaSrv.Reset(); m_oaaW = m_oaaH = 0; m_oaaFmt = DXGI_FORMAT_UNKNOWN;
+    m_oaaSrcSrv.Reset(); m_oaaSrcTex = nullptr; m_oaaRunTex = nullptr; m_oaaArmed = false; m_oaaDataValid = false;
+    m_oaaCsTried = m_oaaPsTried = m_oaaCommonTried = m_oaaTexFailed = false;
 }
 
 void SceneDlaa::Shutdown() {
     m_dlaa.Shutdown();
     m_cam.Shutdown();
     BiasShutdown();                                    // phase 49
+    OaaShutdown();                                     // phase 81
     m_mvDbgCs.Reset(); m_mvDbgTried = false;
     m_sharp.Reset(); m_sharpUav.Reset(); m_sharpSrv.Reset(); m_outSrv.Reset(); m_sharpRes = false;
     m_sharpCs.Reset(); m_sharpCb.Reset(); m_sharpSampler.Reset(); m_sharpCbValid = false;
     m_depthCb.Reset(); m_depthCbX = m_depthCbY = 0;
     m_compVs.Reset(); m_compPs.Reset(); m_compBlend.Reset(); m_compRs.Reset(); m_compDss.Reset();   // v0.7.0
     m_compParams.Reset(); m_compParamsSrv.Reset(); m_compTried = false; m_compPending = false;
+    m_intoRtv.Reset(); m_intoTex = nullptr;                // phase 82
     m_compSrc = nullptr; m_result = nullptr; m_compDataValid = false;
     for (GpuQ& q : m_q) q = GpuQ();
     m_qHead = 0; m_qCur = -1; m_qNext = 0;

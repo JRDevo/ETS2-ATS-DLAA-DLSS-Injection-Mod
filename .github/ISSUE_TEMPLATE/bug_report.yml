@@ -11,7 +11,19 @@ body:
         **Please write in English**, so that everybody can read your issue and help. Not everyone understands your
         language, but most people read English. A translation tool (DeepL, Google Translate) is fine.
 
-        **Before you write, make the log (it takes a minute):**
+        **Easiest: the one-press bug report (3 steps).**
+        1. In game, where the problem shows, press `Insert` **twice** within one second (or menu: Bug report > Capture now).
+           One beep = started. Keep playing for a second or two. Two rising beeps = done.
+        2. Open the game's `bin\win_x64\dlaa_selftest\` folder (next to `dinput8.dll`).
+        3. Drag the newest **`shimmer_<date>_<time>_main.zip`** into the Files box below. (A big VR capture can be
+           `_main_part01.zip`, `_main_part02.zip` ...: then drag all `_main` parts.)
+
+        The `_main` zip holds the log, your `dlaa.ini`, system info and pictures with DLAA on and off. Your Windows user
+        name and home folder are removed from it. The `_full` and `_rewind` zips are extras: attach them only if I ask.
+        Each zip is at most 24 MB (GitHub takes up to 25 MB). Too big or too many? Upload the folder to Google Drive /
+        OneDrive / Dropbox and paste the link.
+
+        **Or make the log by hand (it takes a minute):**
         1. In `dlaa.ini` (next to `dinput8.dll` in the game's `bin\win_x64\` folder), change `log_level = 1` to `log_level = 4`.
         2. Start the game, load a save, and play for 1 to 2 minutes where the problem shows.
         3. **Quit the game.** Then attach the files below.
@@ -56,6 +68,17 @@ body:
     attributes:
       label: VR headset and how it connects (VR only)
       placeholder: "Example: Quest 3 via Virtual Desktop (VDXR)"
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode (the menu's Mode row / End key)
+      options:
+        - DLAA
+        - DLSS
+        - Mix (TAA + DLAA)
+        - Mix (TAA + DLSS)
+        - off
+        - I don't know
   - type: input
     id: gpu
     attributes:
@@ -68,7 +91,7 @@ body:
     attributes:
       label: Mod version
       description: The first line of the log says it (`DLAA injector v... loaded`).
-      placeholder: "Example: v0.15.0"
+      placeholder: "Example: v0.16.0"
     validations:
       required: true
   - type: input
@@ -83,11 +106,12 @@ body:
     attributes:
       label: Files (drag them into this box)
       description: |
-        **Required:** `dlaa_inject.log` (made with `log_level = 4`) and `dlaa.ini`, both in the game's `bin\win_x64\` folder.
+        **Required:** the capture's `_main` zip (`Insert` twice, see above) or a link to the capture folder, or
+        `dlaa_inject.log` (made with `log_level = 4`) and `dlaa.ini`, both in the game's `bin\win_x64\` folder.
         Attach them as files; please do not paste the text. A screenshot or short video helps too.
         No `dlaa_inject.log` at all? Write that here: then the mod did not load, and that is useful to know.
         Do **not** attach `nvngx_dlss.dll` or any other NVIDIA DLL.
-      placeholder: Drop dlaa_inject.log and dlaa.ini here.
+      placeholder: Drop the shimmer_..._main.zip file (or a link), or dlaa_inject.log and dlaa.ini, here.
     validations:
       required: true
   - type: checkboxes
@@ -95,6 +119,6 @@ body:
     attributes:
       label: Before you send
       options:
-        - label: I set `log_level = 4` and quit the game before I took the log.
+        - label: I attached the capture zip, or I set `log_level = 4` and quit the game before I took the log.
           required: true
         - label: I tried with DLAA off (`Shift+F11`) to see if the game itself shows the problem.

@@ -7,7 +7,9 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <new>
+#include <vector>
 #include <utility>
 #include "log.h"
 
@@ -52,6 +54,21 @@ std::atomic<uint32_t> g_hideBtn[4];            // bit = button - 1
 std::atomic<unsigned> g_hidePov{0};            // POV direction bits (1 up, 2 right, 4 down, 8 left)
 
 inline int  HideMode() { return g_hideMode.load(std::memory_order_acquire); }
+// phase 83: synthetic DirectInput keys (KeySwallow::InjectDiKey) -- the held state (bit per DIK code) and the buffered entries
+// still to deliver, the player's last key, whether a keyboard device exists
+std::atomic<uint32_t> g_injHeld[8];
+std::mutex            g_injMx;
+struct InjEv { uint8_t dik; bool down; uint64_t at; };   // phase 85: + when queued (entries older than kInjStaleMs are dropped)
+std::vector<InjEv>    g_injQueue;                     // (guarded by g_injMx)
+constexpr uint64_t    kInjStaleMs = 300;
+std::atomic<uint64_t> g_lastUserKey{0};
+// phase 85: the mod's SendInput keys reach DirectInput too, which has no extra info -- the DirectInput tap ignores key presses
+// until this time (GetTickCount64; set at each send + kSelfQuietMs)
+std::atomic<uint64_t> g_selfUntil{0};
+constexpr uint64_t    kSelfQuietMs = 250;
+inline bool SelfTyping() { return GetTickCount64() < g_selfUntil.load(std::memory_order_relaxed); }
+std::atomic<bool>     g_kbSeen{false};
+std::atomic<DWORD>    g_injSeq{0x40000000u};
 inline bool BitIn(const std::atomic<uint32_t>* set, unsigned i, unsigned words) {
     return i < words * 32u && (set[i >> 5].load(std::memory_order_relaxed) & (1u << (i & 31))) != 0;
 }
@@ -166,11 +183,16 @@ void ProductName(const DIDEVICEINSTANCEW& di, char* out, size_t cap) {
 // Keyboard: while the menu hides keys (v0.12.1 phase 50 HideMode) GetDeviceState clears the hidden keys' bytes (kHideAll: all
 // 256) and GetDeviceData drops their key-DOWN entries (v0.10.2 .. v0.12.0: every key while open). Key-up entries always pass.
 struct KbTap {
+    KbTap() { g_kbSeen.store(true, std::memory_order_relaxed); }
     void OnFormat(LPCDIDATAFORMAT) {}
     void OnActionMap() {}
     void OnUnacquire() {}
     void OnState(HRESULT hr, DWORD cb, LPVOID data) {
         if (FAILED(hr) || !data || cb < 256) return;          // c_dfDIKeyboard: 256 key bytes
+        for (unsigned w = 0; w < 8; ++w) {                    // phase 83: the mod's synthetic keys read pressed while held
+            uint32_t b = g_injHeld[w].load(std::memory_order_relaxed);
+            for (unsigned i = 0; b; ++i, b >>= 1) if (b & 1u) static_cast<BYTE*>(data)[w * 32 + i] = 0x80;
+        }
         const int mode = HideMode();
         if (mode == KeySwallow::kHideAll) { memset(data, 0, 256); return; }
         if (mode != KeySwallow::kHideMenuInputs) return;
@@ -180,8 +202,17 @@ struct KbTap {
             for (unsigned i = 0; b; ++i, b >>= 1) if (b & 1u) d[w * 32 + i] = 0;
         }
     }
-    void OnData(HRESULT hr, DWORD cbObj, LPDIDEVICEOBJECTDATA rg, LPDWORD inOut) {
+    void OnData(HRESULT hr, DWORD cbObj, LPDIDEVICEOBJECTDATA rg, LPDWORD inOut, DWORD cap, DWORD flags) {
         const int mode = HideMode();
+        // phase 83: the player's key presses (before any filtering: a hidden menu key is not typing into the game)
+        if (SUCCEEDED(hr) && rg && inOut && cbObj >= sizeof(DIDEVICEOBJECTDATA_DX3)) {
+            const BYTE* const base = reinterpret_cast<const BYTE*>(rg);
+            for (DWORD i = 0; i < *inOut; ++i) {
+                const DIDEVICEOBJECTDATA_DX3* e = reinterpret_cast<const DIDEVICEOBJECTDATA_DX3*>(base + (size_t)i * cbObj);
+                if ((e->dwData & 0x80u) && !HidesDik(mode, e->dwOfs) && !SelfTyping())   // phase 85: not the mod's SendInput keys
+                    g_lastUserKey.store(GetTickCount64(), std::memory_order_relaxed);
+            }
+        }
         if (SUCCEEDED(hr) && rg && inOut && *inOut && cbObj >= sizeof(DIDEVICEOBJECTDATA_DX3) && mode != KeySwallow::kHideNone) {
             BYTE* const base = reinterpret_cast<BYTE*>(rg);
             DWORD kept = 0;
@@ -193,6 +224,29 @@ struct KbTap {
                 ++kept;
             }
             *inOut = kept;
+        }
+        // phase 83: the mod's synthetic entries go after the game's own, as many as fit (the rest at the next read); a PEEK read
+        // sees them without taking them
+        if (SUCCEEDED(hr) && rg && inOut && cbObj >= sizeof(DIDEVICEOBJECTDATA_DX3) && *inOut < cap) {
+            std::lock_guard<std::mutex> lk(g_injMx);
+            size_t used = 0;
+            BYTE* const base = reinterpret_cast<BYTE*>(rg);
+            const uint64_t now = GetTickCount64();
+            if (!(flags & DIGDD_PEEK))                        // phase 85: entries the game did not read within kInjStaleMs are dropped
+                while (used < g_injQueue.size() && now - g_injQueue[used].at > kInjStaleMs) ++used;
+            if (used) { g_injQueue.erase(g_injQueue.begin(), g_injQueue.begin() + (ptrdiff_t)used); used = 0; }
+            while (used < g_injQueue.size() && *inOut < cap) {
+                BYTE* const slot = base + (size_t)(*inOut) * cbObj;
+                memset(slot, 0, cbObj);
+                DIDEVICEOBJECTDATA_DX3* e = reinterpret_cast<DIDEVICEOBJECTDATA_DX3*>(slot);
+                e->dwOfs = g_injQueue[used].dik;
+                e->dwData = g_injQueue[used].down ? 0x80u : 0u;
+                e->dwTimeStamp = GetTickCount();
+                e->dwSequence = g_injSeq.fetch_add(1, std::memory_order_relaxed);
+                ++*inOut;
+                ++used;
+            }
+            if (!(flags & DIGDD_PEEK) && used) g_injQueue.erase(g_injQueue.begin(), g_injQueue.begin() + (ptrdiff_t)used);
         }
     }
 };
@@ -320,7 +374,7 @@ struct JoyTap {
         }
     }
 
-    void OnData(HRESULT hr, DWORD cbObj, LPDIDEVICEOBJECTDATA rg, LPDWORD inOut) {
+    void OnData(HRESULT hr, DWORD cbObj, LPDIDEVICEOBJECTDATA rg, LPDWORD inOut, DWORD, DWORD) {
         if (FAILED(hr)) { if (slot) JoyClearLive(*slot); return; }
         const bool entries = rg && inOut && *inOut && cbObj >= sizeof(DIDEVICEOBJECTDATA_DX3);
         uint32_t b[4] = {}, pressed[4] = {};
@@ -418,8 +472,9 @@ public:
         return hr;
     }
     HRESULT STDMETHODCALLTYPE GetDeviceData(DWORD cbObj, LPDIDEVICEOBJECTDATA rg, LPDWORD inOut, DWORD flags) override {
+        const DWORD cap = inOut ? *inOut : 0;          // (the buffer's room; the real call overwrites it with the count)
         const HRESULT hr = real_->GetDeviceData(cbObj, rg, inOut, flags);
-        tap_.OnData(hr, cbObj, rg, inOut);
+        tap_.OnData(hr, cbObj, rg, inOut, cap, flags);
         return hr;
     }
     HRESULT STDMETHODCALLTYPE SetDataFormat(LPCDIDATAFORMAT f) override {
@@ -582,7 +637,32 @@ std::atomic<bool>     g_hookTried{false};
 LRESULT CALLBACK SubProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     const WNDPROC orig = reinterpret_cast<WNDPROC>(g_origProc.load(std::memory_order_acquire));
     const bool keyMsg = m == WM_KEYDOWN || m == WM_SYSKEYDOWN || m == WM_CHAR || m == WM_SYSCHAR || m == WM_INPUT;
+    // phase 83: the mod's own posted keys (scan code 0) pass untouched; a player's key / char that is not hidden marks "typing".
+    // phase 85: the mod's SendInput keys too (dwExtraInfo kInjectMark; a VK_PACKET, or anything within the self-typing window)
+    if ((m == WM_KEYDOWN || m == WM_CHAR || m == WM_SYSKEYDOWN || m == WM_SYSCHAR) &&
+        (((l >> 16) & 0xFF) == 0 || (ULONG_PTR)GetMessageExtraInfo() == (ULONG_PTR)KeySwallow::kInjectMark ||
+         (m == WM_KEYDOWN && w == VK_PACKET) || SelfTyping()))
+        return orig ? CallWindowProcW(orig, h, m, w, l) : DefWindowProcW(h, m, w, l);
     const int mode = keyMsg ? HideMode() : KeySwallow::kHideNone;
+    if (m == WM_KEYDOWN || m == WM_CHAR) {
+        const unsigned vk = m == WM_KEYDOWN ? (unsigned)w : (unsigned)VkOfCharMsg(l);
+        if (!(mode != KeySwallow::kHideNone && (mode == KeySwallow::kHideAll || HidesVk(mode, vk))))
+            g_lastUserKey.store(GetTickCount64(), std::memory_order_relaxed);
+    }
+    if (m == WM_INPUT) {                                  // phase 85: raw keyboard (the game's own key path, `sys.keyboard`)
+        alignas(8) BYTE buf[sizeof(RAWINPUT)];
+        UINT size = sizeof(buf);
+        if (GetRawInputData(reinterpret_cast<HRAWINPUT>(l), RID_INPUT, buf, &size, sizeof(RAWINPUTHEADER)) != (UINT)-1) {
+            const RAWINPUT* ri = reinterpret_cast<const RAWINPUT*>(buf);
+            if (ri->header.dwType == RIM_TYPEKEYBOARD) {
+                if (ri->data.keyboard.ExtraInformation == KeySwallow::kInjectMark || SelfTyping())   // the mod's own: untouched
+                    return orig ? CallWindowProcW(orig, h, m, w, l) : DefWindowProcW(h, m, w, l);
+                if (!(ri->data.keyboard.Flags & RI_KEY_BREAK) && !(mode != KeySwallow::kHideNone &&
+                    (mode == KeySwallow::kHideAll || HidesVk(mode, (unsigned)ri->data.keyboard.VKey))))
+                    g_lastUserKey.store(GetTickCount64(), std::memory_order_relaxed);
+            }
+        }
+    }
     if (mode != KeySwallow::kHideNone) {
         if (m == WM_SYSKEYDOWN && w == VK_F4) return orig ? CallWindowProcW(orig, h, m, w, l) : DefWindowProcW(h, m, w, l);   // Alt+F4 (close the game) always passes
         if (m == WM_KEYDOWN || m == WM_SYSKEYDOWN) {
@@ -650,6 +730,88 @@ void UnhookWindow() {
 }
 
 // v0.12.1 phase 50: see dinput_wrap.h. Render thread (inject.cpp, at a menu state change).
+int MenuHideMode() { return HideMode(); }
+void InjectDiKey(uint8_t dik, bool down) {
+    if (down) g_injHeld[dik >> 5].fetch_or(1u << (dik & 31), std::memory_order_relaxed);
+    else      g_injHeld[dik >> 5].fetch_and(~(1u << (dik & 31)), std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lk(g_injMx);
+    if (g_injQueue.size() < 512) g_injQueue.push_back({ dik, down, GetTickCount64() });
+}
+void ClearInjected() {
+    for (auto& w : g_injHeld) w.store(0, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lk(g_injMx);
+    g_injQueue.clear();
+}
+// phase 85: SendInput delivery (see dinput_wrap.h)
+bool GameHasFocus() {
+    const HWND fg = GetForegroundWindow();
+    if (!fg) return false;
+    const HWND h = g_hwnd.load(std::memory_order_acquire);
+    if (h) return fg == h || fg == GetAncestor(h, GA_ROOT);
+    DWORD pid = 0;                                        // (window not subclassed yet: any window of this process)
+    GetWindowThreadProcessId(fg, &pid);
+    return pid == GetCurrentProcessId();
+}
+static bool SendKeys(INPUT* in, UINT n) {
+    for (UINT i = 0; i < n; ++i) in[i].ki.dwExtraInfo = (ULONG_PTR)kInjectMark;
+    g_selfUntil.store(GetTickCount64() + kSelfQuietMs, std::memory_order_relaxed);   // (before the send: the game may read at once)
+    return SendInput(n, in, sizeof(INPUT)) == n;
+}
+static INPUT ScanInput(uint8_t dik, bool down) {
+    INPUT i{};
+    i.type = INPUT_KEYBOARD;
+    i.ki.wScan = (WORD)(dik & 0x7Fu);
+    i.ki.dwFlags = KEYEVENTF_SCANCODE | (down ? 0u : KEYEVENTF_KEYUP) | ((dik & 0x80u) ? KEYEVENTF_EXTENDEDKEY : 0u);
+    return i;
+}
+bool SendScanKey(uint8_t dik, bool down) {
+    INPUT i = ScanInput(dik, down);
+    return SendKeys(&i, 1);
+}
+bool SendUnicodeChar(wchar_t c) {
+    INPUT in[2] = {};
+    for (int k = 0; k < 2; ++k) {
+        in[k].type = INPUT_KEYBOARD;
+        in[k].ki.wScan = (WORD)c;
+        in[k].ki.dwFlags = KEYEVENTF_UNICODE | (k ? KEYEVENTF_KEYUP : 0u);
+    }
+    return SendKeys(in, 2);
+}
+bool SendCharScan(wchar_t c) {
+    const HWND h = g_hwnd.load(std::memory_order_acquire);
+    const HKL hkl = GetKeyboardLayout(h ? GetWindowThreadProcessId(h, nullptr) : 0);
+    const SHORT vs = VkKeyScanExW(c, hkl);
+    if (vs == -1 || (vs & 0xFF) == 0xFF) return false;
+    const UINT sc = MapVirtualKeyExW((UINT)(vs & 0xFF), MAPVK_VK_TO_VSC_EX, hkl);
+    if (!sc || (sc & 0xFFu) == 0) return false;
+    const uint8_t dik = (uint8_t)((sc & 0x7Fu) | (((sc & 0xFF00u) == 0xE000u) ? 0x80u : 0u));
+    const int mods = (vs >> 8) & 7;                       // 1 Shift, 2 Ctrl, 4 Alt (Ctrl + Alt = AltGr)
+    INPUT in[8] = {};
+    UINT n = 0;
+    if (mods & 1) in[n++] = ScanInput(0x2A, true);
+    if (mods & 2) in[n++] = ScanInput(0x1D, true);
+    if (mods & 4) in[n++] = ScanInput(0x38, true);
+    in[n++] = ScanInput(dik, true);
+    in[n++] = ScanInput(dik, false);
+    if (mods & 4) in[n++] = ScanInput(0x38, false);
+    if (mods & 2) in[n++] = ScanInput(0x1D, false);
+    if (mods & 1) in[n++] = ScanInput(0x2A, false);
+    return SendKeys(in, n);
+}
+bool InjectWindowKey(uint8_t vk, bool down) {
+    const HWND h = g_hwnd.load(std::memory_order_acquire);
+    if (!h) return false;
+    const LPARAM l = down ? 1 : (LPARAM)(1u | (1u << 30) | (1u << 31));   // repeat 1, scan code 0 (the mod's mark), up: prev + transition
+    return PostMessageW(h, down ? WM_KEYDOWN : WM_KEYUP, vk, l) != FALSE;
+}
+bool InjectWindowChar(char c) {
+    const HWND h = g_hwnd.load(std::memory_order_acquire);
+    return h && PostMessageW(h, WM_CHAR, (WPARAM)(unsigned char)c, 1) != FALSE;
+}
+uint64_t LastUserKeyMs() { return g_lastUserKey.load(std::memory_order_relaxed); }
+bool GameWindowKnown() { return g_hwnd.load(std::memory_order_acquire) != nullptr; }
+bool KeyboardDeviceSeen() { return g_kbSeen.load(std::memory_order_relaxed); }
+
 void SetMenuHide(int mode, const int* vks, const int* joys, int n) {
     uint32_t vk[8] = {}, dik[8] = {}, btn[4] = {};
     unsigned pov = 0;

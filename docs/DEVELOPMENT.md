@@ -363,7 +363,10 @@ game's fog triangle in the forward pass, which samples the scene by interpolated
 picture (shift + the phase-23 scale), at every silhouette the neighbour's depth: a dark 1 px line on the horizon and around bushes
 (ATS flat 2026-10-10, `Ctrl+F10` color_in: sky 204 / line 25 / hill 120; gone with DLAA off). Log line `jitter (v0.10.0 phase 25)`.
 Phase 55: the LIGHTING pass (2 RTVs + scene depth) stays unjittered, except its mesh redraws, which get the G-buffer's shifted
-viewport per draw (`light_redraw_jitter`, default 1; see "Phase 55" below).
+viewport per draw (`light_redraw_jitter`, default 1; see "Phase 55" below). Phase 78: and its FULL-SCREEN draws (the deferred
+sun light), which get the G-buffer's shift at the game's W x H, no overscan, plus an unshifted scissored re-draw of the far
+column / row a negative shift loses (`light_fs_jitter`, default 1; see "Phase 78" below). The light volumes keep the game's
+viewport.
 
 ## Motion vectors
 
@@ -2115,7 +2118,8 @@ non-blocking readback timing -- so it is judged by the check totals and a verify
   the unit's `jitOn`). A qualifying draw sets `g_lightRedrawShift`; `ReconcileViewports` then issues the G-buffer's viewport: the
   pass's `g_jx` / `g_jy` (main; per eye the order is G-buffer, lighting, forward, as the forward pass relies on) or the view's own
   shift (mirror), with the overscan, only when the game's viewport is the pass size. Any other draw of the binding gets the game's
-  viewport back: a `Draw` (the full-screen light passes, `hkDraw`), a non-qualifying `DrawIndexed`, or a depth-stencil state change
+  viewport back: a `Draw` (the full-screen light passes, `hkDraw`; since phase 78 those get the G-buffer's shift themselves, see
+  "Phase 78"), a non-qualifying `DrawIndexed`, or a depth-stencil state change
   to a non-qualifying state (`LightRedrawOnDss`, covers a following unhooked draw). Viewports are issued only when the
   qualification changes (one `RSSetViewports` at the start and one at the end of a run of redraws). The two state verdicts are
   cached per state object (64 entries each, ref held, dropped at a game context change). The game's own `RSSetViewports` inside the
@@ -2180,7 +2184,460 @@ non-blocking readback timing -- so it is judged by the check totals and a verify
 - **Not translated.** The fps box (numbers + units), the hotkey notes ("= Ctrl+F5 (taken from ...)"), the support reasons of
   Reflex / VRS (`SupportText`), the licence line, every log line.
 
-### The RenderDoc oracle (done in v0.2)
+### Phase 77: coverage-preserving alpha mips for cut-out textures (`cutout_mips`, default 0, startup only)
+
+- **Why.** Far chain-link fences shimmer and vanish. The game's BC3 alpha mips are binary 0 / 255 from a 2x2 box + a 0.5
+  threshold, so 1-2 texel wires drop out: the ATS fence (128x2048, 12 mips; `captures/ats_flat_fence_frame1634.fence_dump`)
+  covers 17.5 % at mip 0 (alpha >= 0.05, the PS cut: `lt r1.x, r1.x, l(0.049988); discard_nz`), then 16.0, 9.9, 6.7, 6.6, 7.8,
+  14.1, 6.2, 0, 0, 0, 0 %. The fence PS reuses the alpha after the discard (`mul o1.xyz, r0.wwww, cb0[1].xyz`, G-buffer RT1), so
+  the output stays BINARY (no soft Castano alpha scaling).
+- **How the game uploads** (a temporary probe, ATS 2026-10-28): `CreateTexture2D` with `D3D11_USAGE_DEFAULT`, bind SRV, no CPU
+  access and NO initial data (5500 of 5500 BC3 textures); right after, on the same loader thread, the IMMEDIATE context's
+  `ID3D11DeviceContext1::UpdateSubresource1` (vtable 116) uploads mip by mip, mip 0 first (DstSubresource = the mip, array size 1,
+  whole mip). No `UpdateSubresource`, `CopySubresourceRegion`, `CopyResource` or deferred-context upload into BC3.
+- **What** (`src/cutout_mips.h`, pure; `Cutout::` in `src/inject.cpp`). `hkUpdateSubresource1` (+ `hkUpdateSubresource`, vtable 48,
+  the same way for safety; `t_cutoutIn` stops a second pass when one calls the other) skips the mod's own work (`t_inDlaa`) and
+  OFXR / VectorXR. Mip 0 of a `BC3_UNORM` / `_SRGB` Texture2D, no box (ATS sends a box with every mip upload; a box that covers the whole mip, block aligned, counts as no box -- found in the first game test, when all 1500 textures were skipped as `size`): shape rule (array 1, the full mip chain, 64 <= W, H <=
+  4096) -> FNV-1a 64 of the alpha halves -> the cache (64 MB / 4096 entries, rejections too) or `Analyse`: decode the alpha;
+  BINARY = >= 97 % of the texels <= 0.02 or >= 0.6 (early stop: a soft alpha costs ~0.06 ms); coverage at the 0.05 cut 2 .. 60 %;
+  a REAL LOSS = the game rule (box of mip 0 >= 0.5, texels >= 128 for the alpha sum) keeps < 70 % of cov0 on some mip 2..(last
+  >= 4 px). Then per mip L >= 1 (not 1x1): the mip-0 footprint counts (an exact partition, NPOT too; halved axes summed from the
+  mip above), K_L = round(cov0 x W_L x H_L) texels opaque by key (covered count, then >= 128 count, then a fixed per-texel
+  dither; `nth_element`), encoded as binary BC3 alpha blocks (a0 = 255, a1 = 0, index 0 / 1: exact; texels outside a < 4 px mip
+  = 0). A per-texture record (resource pointer + W / H / mips / format, 10 s, dropped after the last mip or at a new mip 0)
+  waits for mips 1..N: `Replace` measures the game's own mip and, below 85 % of cov0, uploads a scratch copy of the game's
+  blocks with our alpha half (same row pitch; the colour 8 bytes untouched).
+- **Diagnostic** (permanent, instead of the probe): at log level 4, also with `cutout_mips = 0`, the Texture2D mip-0 uploads are
+  counted per DXGI format (BC1 / BC2 / BC3 / BC4 / BC5 / BC6H / BC7 / RGBA8 / other) in the stats line: do cut-outs also come as
+  BC1 (1-bit alpha) or BC7? Per-call cost while off and below level 4: an int + an atomic load.
+- **Log.** Start: `cut-out mips (phase 77): on|off (cutout_mips=N cutout_max_dim=N, 77c: analysis on a worker thread)`; 77c adds `cut-out mips (phase 77c): worker thread started` and, at the first rebuilt texture, the device creation flags. Level 3: `cut-out mips: first texture rebuilt WxH mips N fmt F
+  hash H cov mip0 ..% game rule mips2..7 a/b/.. % -> ours a/b/.. %, .. ms`. Level 4: one line per candidate (first 200), and
+  `cut-out mips: seen S patched P skipped K (soft, coverage, no loss, size) cache hits H cpu total .. ms max .. ms | mips
+  replaced R, left to the game G | uploads by format (...)` every 500 BC3 textures (every 2000 uploads while off) and at exit.
+  `scripts/feature_check.py` row "Cut-out alpha mips".
+- **Tests.** `tests/cutout_mips_test.cpp` (CI): block codec round trip, shape / soft / grey / no-loss / coverage rejections, a
+  synthetic 128x2048 chain-link (1 + 2 texel wires, period 16; the game rule loses everything from mip 2) with exact coverage on
+  every replaced mip, colour bytes and row padding untouched, a kept mip left alone, NPOT 96x40 / 96x64 / 100x68, padded pitches;
+  plus the captured ATS fence when `captures/` is there (local only): game 9.9 / 6.7 / 6.6 / 7.8 / 14.1 / 6.2 / 0 % on mips 2..8 ->
+  17.5 % on mips 2..5. CPU (the test's timing): ~1.8 ms for 128x2048 or 512x512, ~6 ms 1024x1024, ~24 ms 2048x2048 per rebuilt
+  texture (once; reloads hit the cache).
+- **Risks / not verified.** Nothing in game yet: the fence look near and far (VR + flat), load-time hitches, the counts. A BC3
+  whose alpha is binary but NOT a cut-out (a binary gloss / emissive mask) gets coverage-preserving mips too (still a sane
+  binary downsample). Textures uploaded with a partial box, as an array, or without the full chain are left alone. BC1 / BC7 cut-outs are
+  not handled (see the format counts first).
+
+### Phase 78: the lighting pass's full-screen draws get the G-buffer's jitter (`light_fs_jitter`, default 1, startup only)
+
+- **Report** (ATS flat, DLSS 2880x2160 -> 3840x2160, 2026-10-28, OBS video + RenderDoc frame1890): a shed roof in the soft edge of a
+  shadow (sunlit, penumbra) flickers dark while the mod jitters; Shift+F11 (jitter off) removes it.
+- **Cause** (Fable analysis of the capture): the deferred sun light is a full-screen `Draw(3)` of the lighting bind (EID 19329, PS
+  R188, 2 RTVs + the scene depth). It fetches the G-buffer with `ld` at `ftoi(v1.xy * size)` (point) and rebuilds the position as
+  `viewZ * (v1.xy * scale + offset, 1)`; `v1` = the full-screen triangle's UV = the UNSHIFTED pixel centre, while the G-buffer texel
+  was rasterised with the jitter. On the grazing roof (0.275 m of view z per row) a +-0.46 px y shift moves the rebuilt point
+  +-0.13 m: the shadow lookup (cascades + a world-projected dither texture) lands elsewhere in the penumbra on every phase (luma
+  96-99 vs 88-91, with the sign of the y shift). Until now every `Draw` of the lighting bind kept the game's viewport (phases 25 / 55).
+- **Fix** (`src/inject.cpp` `hkDraw`, block above `hkRSSetViewports`; `src/light_fs.h`): a `Draw` with 3 / 4 vertices in the main
+  lighting bind (`g_lightBind == 1`) or the open jittered mirror view's (`g_lightBind == 2`, `g_mirLight`), on the game context,
+  not our work, not in a jitter pass / preview pass, viewport depth 0..1, jitter live (`JitterLive() && !WorldJitterHeld()`;
+  mirror: `g_mirLight` = the unit's `jitOn`) sets `g_lightFsShift` for that one Draw. `ReconcileViewports` then issues viewport 0 =
+  the game's + the pass's `g_jx` / `g_jy` (mirror: `g_mirShX` / `g_mirShY`) -- only when the game's viewport is the pass size
+  (`g_sceneW x g_sceneH`; mirror `g_mirW x g_mirH`) -- with NO overscan (`over` is false while `g_lightFsShift`). Math: UV at
+  pixel p = (p + 0.5 - s) / W, so the ray matches the geometry the G-buffer stored in texel p, and `ftoi(uv * W)` = p for every
+  |s| < 0.5 (the rasterizer's 1/256 px snap moves that limit to ~0.498; 8 Halton phases reach 0.4375). The overscan viewport
+  would scale uv by W / (W + 1) and read the wrong texel toward the far edge (the phase-25 defect). After the Draw:
+  `LightFsEdgeFill` -- by the phase-23 edge rule a W x H viewport with a negative shift loses the LAST column / row; those pixels
+  (`LightFs::EdgeRects`: column full height, row left of it, the corner once) are drawn again with the game's own viewport and a
+  scissor (a cached scissor-enabled twin of the game's rasterizer state; if the game's state already scissors, its rect 0 is
+  intersected instead), so every pixel is written exactly once (additive light blends stay right). The game's rasterizer state and
+  scissor rects are restored; then `g_lightFsShift = false` + `ReconcileViewports` = the game's viewport again (the lighting bind
+  stays unshifted between draws). A phase-55 redraw run ending at this Draw goes straight to the full-screen shift (one viewport
+  call, not two). The 36-vertex light-volume `DrawIndexed` calls keep the game's viewport (out of scope).
+- **Bind tracking**: `g_lightBind` is now set when `light_redraw_jitter` OR `light_fs_jitter` is on; `LightRedrawOnDraw` checks
+  `light_redraw_jitter` itself. Context reset: `LightFsOnContextReset` drops the scissor twins.
+- **Log**: start `lighting full-screen jitter (phase 78): light_fs_jitter=N (...)`; once `lighting full-screen jitter (phase 78):
+  first main / mirror lighting-pass full-screen draw (verts=3) issued with the G-buffer's shift (..), game viewport WxH, no overscan`
+  (a WARNING tail if not shifted); level 4: the phase-55 stats line ends with `| phase 78 light_fs_jitter N: full-screen light draws
+  shifted A, full-screen NOT shifted B, edge re-draws C, scissor twins D`. `scripts/feature_check.py` "Lighting redraw jitter" row:
+  PASS on shifted redraws OR shifted full-screen draws (`tests/feature_check_test.py` `TestLightFsJitter`).
+- **Test** `tests/light_fs_test.cpp` (WARP, CI): the mod's sequence with a full-screen triangle whose PS point-fetches at
+  `ftoi(uv * size)` with an additive blend, 3 sizes x 13 shifts (the 8 Halton phases, +-0.49, -0.001, 0): every pixel written once,
+  its own texel read, uv * size = p + 0.5 - s (edge pixels p + 0.5); mutations: no edge fill -> holes in the last column / row,
+  overscan viewport -> wrong texels. Plus `EdgeRects` / `Clip` cases.
+- **Risks / not verified**: nothing in game yet (the roof, VR, mirrors, the counts). Any OTHER full-screen draw of the lighting bind
+  that samples the G-buffer BILINEARLY by UV now samples half-way between texels by the shift (blends neighbours at silhouettes, the
+  phase-25 line class) -- audit 2026-10-28: every Draw(3) of every lighting bind (main, mirrors, a 2048x512 view) in 4 ATS captures reads the G-buffer with point `ld` only (PS R188 / R298 / R148 / R142), none samples a screen-sized target by UV; `light_fs_jitter = 0` reverts. VR: per eye the order is
+  G-buffer, lighting, forward, so `g_jx` / `g_jy` are that eye's; a lighting viewport not of the eye's scene size is left alone
+  (counted NOT shifted). `DrawInstanced` / indirect full-screen draws are not hooked (stay unshifted).
+
+### Phase 80: AI cars are not dithered as far wires (`wire_solid_static_only`, default 1, startup only)
+
+- **Report** (ATS VR drive 2026-10-29, log level 4, `wire_widen = 1`; phase-79 rewind captures `shimmer_20261029_2024xx`): a near
+  van shows one-frame bright 1 px lines / small boxes on its bumper and undercarriage (not at the silhouette, a new place every
+  frame); a far car's outline changes every frame (no history at all). Pairing was healthy (96.6-99.2 %), and "instanced draws
+  with a moving parent 0".
+- **Facts** (RenderDoc, `scripts`-style replay of the last G-buffer writer per pixel + a per-draw VS / PS hash list):
+  every AI car pixel tested in `amtrucks_2026.10.09_21.10.01_frame5633` (pass 4, 3840x2160: parked cars ~80-90 m away),
+  `..._frame7227` (pass 2: 6 cars incl. a ~40 px far one) and the ambulance in the mirror pass of `ats_roof_flicker_frame5519` is
+  written by a plain `DrawIndexed` (no instancing), VS `07dfaa00`, a per-draw MVP in cb0 rows 4..7 (rows 0..3 = model-view, row 7
+  = the w row), a FullKey unique in the pass (IB / VB offsets per car) -- the pairing handles them. But 11 of the 33 draws with
+  VS `07dfaa00` + PS `b67da69f` in frame5633 are car parts (windows, the wheel draw, trims: draws 74-84, origin w 78-87 m): that
+  is the phase-63 SOLID pair A ("far high-voltage wires"). With `wire_widen = 1` every such draw goes through `GSolidA` + the
+  dither PS copy: each triangle whose estimated 3D face width is under `wire_min_px / 2` becomes a band whose pixels are kept with
+  a share k that changes every frame (`g_q.x`), and its G-buffer id replay (no GS) leaves the band pixels without an id. A far
+  car's triangles are all that small (its pair-A parts are dithered whole: no stable coverage, no history -- the body draws use
+  other PSs, e.g. draws 137 / 142); on a near van only the small trims and bolts are (the 1 px lines). The VR log: 78-108 solid G-buffer draws dithered per pass while driving (21 at the start, before
+  traffic). The cars are not instanced and pair normally; the dither is the cause the captures support (not proven pixel by
+  pixel for the VR van itself: no RenderDoc capture of that drive).
+- **Fix** (`DrawIdMv::SolidDitherOk`, `src/draw_ids.cpp` next to `StaticSkip`; `src/inject.cpp` `SolidOnDraw`): `DidOnDraw` keeps
+  the FullKey it just recorded (`g_didLastKey`, cleared before each G-buffer `DrawIndexed`); `SolidOnDraw`, after the shader
+  match, asks the phase-14 static table: a NON-instanced draw is dithered only when its key has a fresh deep-static verdict
+  (streak >= 1, seen within `kStatFresh` = 16 frames) and did not move within `kStatQuiet` = 60 frames. A mover, a key with no
+  verdict yet (a car that just appeared, an LOD switch) or only shallow-static (a car at the player's speed) is drawn by the
+  game's own shaders (no GS, no dither, no phase-64 forward record). Unchanged (old rule): instanced draws (the phase-66 street
+  lights: not in the static table), a draw without a recorded key (`mv_objects` not 2, record full), `mv_replay_static_frames 0`,
+  or `wire_solid_static_only = 0`. Wires / towers / parked cars are dithered as before once the table knows them (2-4 frames after
+  they appear; a table clear -- a 1-frame consensus failure -- leaves them undithered for those frames: the game's own dashes).
+- **Log**: start `solid dither gate (phase 80): wire_solid_static_only=N (...)`; level 4: the `wire widening (phase 61, ...)` stats
+  line ends with `| phase 80 solid dither gate (wire_solid_static_only N) per pass: known static .., old rule (instanced / no key /
+  gate off) .., NOT dithered: moving .., no static verdict ..`.
+- **Test**: `tests/drawid_harness.cpp` S15 (and its VR eye runs, scene 16) asks `SolidDitherOk` every frame with the frame's real
+  keys after the real pairing / readback: the overtaking car, its plate and the oncoming car must never be dithered from frame 12
+  (264 checks), the parked van, the ground and the 10 boxes must be known static from frame 20 (936 checks; 4 frames after a
+  static-table clear are not checked -- S15 has 2 one-frame consensus failures; fewer than 720 static checks = FAIL, so the grace
+  cannot hide a broken table). `mutsolid` (the gate off) fails S15 and both VR eye runs (264 car checks each); every other
+  scene passes either way. Full run 154393 / 154393.
+- **Risks / not verified**: nothing in game yet (does the van's line / the far car's flicker go; do far wires and towers still
+  get the dither in VR). The harness checks the gate's decision, not `SolidOnDraw`'s use of it (inject.cpp is not in the
+  harness). Parked cars ARE dithered once known static (their motion is the camera's, so DLSS averages the dither like a wire;
+  with the dither they look slightly see-through at distance, as before). A car stopped at a light becomes static after 60
+  frames without motion and is dithered until its next moving verdict (2-4 frames of dither when it pulls away). The phase-63
+  dither of the real far wires is unchanged; mirrors / cabin never ran it.
+
+### Phase 81: outside AA -- the picture outside the DLAA area no longer shakes with the jitter (`outside_aa`, default 2, startup only)
+
+- **Report** (VR video, still head, `dlaa_area = 50`, `dlss_upscale = 1`: DLSS Quality, render rect 2072x2928 of 4136x5848 ->
+  output 2761x2928 of 5512x5848, x1.333 / x1.0; also in plain DLAA): strong flicker on thin dark edges against a bright sky
+  (bridge railings and undersides, sign gantries, street-light heads, sign rims). 89 % of the strong-flicker pixels lie OUTSIDE the
+  AA rect; inside it the same railing is steady to 0.01 px.
+- **Cause**: `scene_dlaa.h` -- outside the rect the image is the raw frame, and the mod's viewport jitter
+  (`ReconcileViewports`: viewport 0 `TopLeft += (g_jx, g_jy)`, [-0.5, +0.5) px, 8 Halton phases, `jitter_overscan` (W+1) x (H+1))
+  moves all of it every frame -- worse than the game without the mod (no jitter at all).
+- **Fix** (`src/outside_aa.h`: geometry + the HLSL block `kOutsideAaShader`; `src/scene_dlaa.cpp` `OaaInPlace` / `OaaCopyBack` /
+  `OaaArm` / `OaaDrawBands`): every pixel whose feather mask (the rect's own `dlaa_area_feather` ramp, `kRcasShader` /
+  `kCompositePs`) is below 1 gets, instead of the raw value:
+  1. **unjitter** -- the raw frame resampled at `o_c * render / output + s` (uv `o_c / output + s / render`), s = the pass's viewport
+     shift in RENDER px = NGX jitter x `jitter_sign` (inject.cpp tells NGX `njx = g_signX * slot.jx`; `OutsideAa::ShiftFromNgx`;
+     the sign reaches `SceneDlaa::SetJitterSign` once per Present). The shifted viewport puts the scene point of render position X
+     at X + s, so sampling at X + s gives the shift-0 picture; jitter_overscan's (W+1)/W scale is the same every frame and is what
+     DLSS sees inside the rect, so it stays. Kernel: 5-tap Catmull-Rom (the 9-tap bilinear-optimised bicubic without its 4 corner
+     taps, renormalised) clamped into the 2x2 texels around the sample -- bilinear would be sharp at fraction 0 and blurred at 0.5
+     (sharpness pulsing with the phase).
+  2. **edge AA** (`outside_aa = 2`) -- FXAA 3.11 "console" on the unjittered grid (offsets in render texels). Luma: encoded LDR as
+     is; an `_SRGB` view (linear) and HDR (`l / (1 + l)`) through `sqrt`.
+  The seam: `mask * DLAA + (1 - mask) * outsideAA` (was `... * raw`).
+  - **DLAA in place**: right after the NGX evaluate (before the copy-back) a CS reads the game's colour (an SRV made per texture:
+    TYPELESS / UNORM -> the UNORM view = the encoded bytes like colorIn; `_SRGB`-only -> the `_SRGB` view + re-encode; RGBA16F) and
+    writes a full-size scratch (the unit's colour format, ~92 MB RGBA8 / 185 MB RGBA16F at 4136x5848; threads in the mask-1
+    interior return at once). RCAS's border blend reads its raw side from the scratch (`Mode.yz` = the rect origin, t1 = the
+    scratch; 0 / colorIn as before when the pass did not run) and the 4 outer bands are copied back after the rect. Skipped (counted,
+    WARN once) when the colour is bound as a render target at Run time (the runtime would null the SRV) -- the BGRA truck-preview
+    path now unbinds its scratch RT after its format copy for that reason.
+  - **DLSS upscale**: Run arms it (`OaaArm`: the shift, the colour texture's identity); `Composite` draws, after its GfxState save
+    and before the DLSS draw, one `Draw(3)` per band (`OutsideAa::Bands`: the complement of the mask-1 interior in output space,
+    feather = Composite's per-axis output-px feather) with the composite's VS / blend (alpha 1 = replace, RGB only) / rasterizer /
+    depth state, the source = the game's blit SRV0 (checked to be the texture Run was handed; its view decodes sRGB exactly like the
+    game's stretch), PS sampler 0 saved / restored. The DLSS draw then blends over it with the feather as before.
+  - Runs wherever a unit with a crop runs (VR world eyes, VR truck-preview units at the VR area; mirrors and flat use area 100 =
+    nothing). Nothing at `dlaa_area = 100` (no crop), with `outside_aa = 0`, with DLAA off / passive / jitter-only (no Run), with the
+    jitter off or held (Run gets (0, 0)), or after a failed evaluate.
+- **Cost** (estimate, not measured in game): mode 1 = 5 bilinear + 4 point fetches per outside pixel, mode 2 + 8 bilinear; at
+  `dlaa_area = 50` ~75 % of the pixels are outside (~24 M per eye at 5512x5848 output). In place also copies the outer bands back.
+  Expect a few tenths of a ms per eye on an RTX 40/50, above the 0.15 ms aimed at. GpuPerf section `outside-aa` (level 4 `perf eye`
+  lines; the menu counts it with the copies).
+- **Log**: start `outside AA (phase 81): outside_aa=N (...)`; once per unit and path `outside AA (phase 81): eye N first
+  outside-AA draw (in place | upscale, drawn over the game's stretch) -- ... rect, band(s), shift (sx, sy) render px (= NGX jitter x
+  jitter sign), source ...`; in place also `... in-place scratch WxH ... created (N MB)`; WARN once for a skip (colour bound as a
+  render target / not readable / blit SRV0 not the DLSS texture), ERROR for shader / resource failures.
+  `scripts/feature_check.py` row "Outside-AA (outside the area)" (VR; PASS on the `outside-aa` section of a main eye's `perf eye`
+  line, or the first-draw line at level 3; NOT USED at `dlaa_area` 100; `tests/feature_check_test.py` `TestOutsideAa`).
+- **Test** `tests/outside_aa_test.cpp` (WARP, CI): the feather interior / bands against a brute-force mask (640 cases), Catmull-Rom
+  weights, `ShiftFromNgx`, `FillParams`; then frames RASTERISED with the mod's jittered (W+1) x (H+1) viewport for the 8 Halton
+  phases through the real HLSL: in place (RGBA16F, mode 1) the outside matches the shift-0 frame (mean error 3.5 % of the raw
+  frame's jitter error, max 0.011), the interior is never written, the OPPOSITE sign is worse than raw (~2x) -- the sign is
+  checked against what D3D does with a viewport shift, with NGX jitter of both signs; mode 2 stays within 15 % of its own shift-0
+  output (edge AA blurs smooth texture by design, but does not move with the phase); upscale (PS per band, origin offset, 72x80 ->
+  96x80) matches the analytic shift-0 picture (mean error 0.0006 vs the game's bilinear stretch 0.009-0.038), interior and RT
+  margin untouched, every band pixel written, opposite sign fails.
+- **Risks / not verified**: nothing in game yet. (a) SUB-PIXEL lines: unjitter cannot steady them -- which pixels a 0.7 px line
+  covers changes with the phase (aliasing); resampling moves the pattern back but does not fill it in. The WARP thin-line scene:
+  per-pixel spread over the 8 phases raw 0.40, mode 1 0.43 (slightly worse), mode 2 0.30 (-26 %). The vanilla game (no jitter)
+  is steady there; only a temporal (history) pass outside the rect would get close, which needs the camera reprojection outside
+  the crop (not built). (b) Edge AA softens fine texture outside the rect (FXAA). (c) In place: the colour texture must be readable
+  (SHADER_RESOURCE, not an array / MSAA) and not bound as a render target at Run; else it stays raw (WARN once). (d) Upscale: the
+  game's blit is assumed to stretch the WHOLE colour texture across its viewport (the composite's rect mapping assumes the same).
+  (e) If the shift sign were wrong in game, the outside would shake at ~2x the raw amplitude (the test's mutation); `outside_aa =
+  0` reverts.
+
+### Phase 82: the game's own TAA together with the mod (`game_taa`, default 0; `game_taa_mix`, default 50)
+
+- **Why.** The mod's scope is the game's Anti-aliasing = Disabled (`r_aa 0`). With the game's TAA on (`r_aa 5`) the mod's DLAA ran on
+  an already TAA'd frame (stacked = blur) and the game's projection jitter and the mod's viewport jitter fought. `game_taa` (menu
+  rows "Game TAA" / "Game TAA share", Upscaling group; saved like every other key) lets a player run both on purpose:
+  0 off (default, the mod exactly as before; a TAA resolve seen logs one WARN), 1 mix (the game's TAA and the mod's DLAA / DLSS on the
+  SAME raw jittered frame, blended by `game_taa_mix` = the TAA share), 2 split (the mod left of `game_taa_split` % of the width, the
+  game's TAA right of it; a 1 px white line between 1 px black sides and 5 x 7-font labels "DLAA" / "DLSS" | "TAA" at the top, drawn
+  by `kCompositePs` Params[3] / [4]; the HDR path draws them after the game's tonemap into its 8-bit target, `DrawSplitOverlay`; VR:
+  per eye at the same %). Round 2 (after the first game test) dropped the first build's "TAA only" (= DLAA off with the game's TAA
+  on); `game_taa_ver = 2` marks the numbering, a dlaa.ini without it is migrated (2 -> 0, 3 -> 2, a WARN). The DLAA quality rows
+  (model, sharpen, light glow fix, DLAA before tonemap) are greyed while the main scene runs no DLAA (`MainDlaaRuns`), and the Game
+  TAA row's description line says in the player's language when mix / split fell back to the game's TAA and why (`GameTaa::Why`).
+- **The game's TAA** (RenderDoc, ATS flat 3840x2160, `captures/taa_2026-10-30/FINDINGS.md`; `src/game_taa.h` header): PS 535
+  range-compress (t0 = the raw jittered lit scene), PS 533 nearest depth, PS 524 the resolve (2 RGBA16F targets = result + next
+  history, `cb0[8].xy` = the jitter in UV, `cb0[11].xy` = the target size), PS 534 sharpen + inverse compress (= the tonemap's linear
+  HDR input), PS 327 tonemap, then the blit.
+- **Detection** (robust, not by event order): the resolve and compress pixel shaders by their DXBC checksum at `CreatePixelShader`
+  (`GameTaa::kResolvePs` / `kCompressPs`, RenderDoc's "Shader hash" dword order), plus the resolve's shape (2 RGBA16F targets, RT0
+  scene-size) at its `Draw`. Live = a resolve within `GameTaa::kLiveFrames` (30) Presents. A post chain (compress -> resolve ->
+  tonemap) is paired with its pass by the compress input = that pass's forward colour (`TaaNewest`), so a VR frame that renders both
+  eye scenes first still pairs correctly; else the newest pass.
+- **Jitter.** In modes 1..3 with a live resolve every world pass HOLDS the mod's viewport jitter (`StartPass` `g_taaHoldPass`,
+  `ReconcileViewports` no world shift / overscan; light redraw / full-screen jitter follow). NGX gets the GAME's jitter of the pass:
+  the resolve's `cb0[8].xy` x the target size = the geometry shift in px (same axes as the mod's own shift; NGX = `jitter_sign` x it,
+  so the existing jitter-sign key flips it if it is wrong in game). A GPU readback would stall or be late, so the game's own UPLOAD is
+  copied (`GameTaa::CbShadow`). **First game test (ATS flat, 070452f): 0 copies, every pass "no game jitter".** The resolve's cb0
+  rotates over THREE 2 MB DYNAMIC rings (usage 2, CPU write) at an offset that moves a little each frame (813824 -> 812800), and each
+  ring is filled by one Map(WRITE_DISCARD) / Unmap per frame on the game's MAIN thread (the CPU profiler: Map ~5 / frame there, ~1 on
+  the render thread) BEFORE the render thread binds it; the first build copied only the buffer the LAST resolve had bound (a new
+  buffer cleared it) -- never the one being filled. Now every buffer a resolve has read is watched (4, LRU); each of its Map / Unmap
+  (the new `hkUnmap`, vtable 15) or UpdateSubresource copies a window (+- 64 KB, doubling up to 512 KB when the offset leaves it)
+  around the resolve's last offset with SSE4.1 streaming loads (write-combined memory); the resolve's draw reads its own offset from
+  the copy of the buffer it bound when that copy is newer than this buffer's previous read (or from the same frame: VR's two eyes).
+  Map / Unmap and the draw run on two threads: one mutex. `tests/game_taa_test.cpp` simulates the rotation (3 rings, moving
+  offsets, a VR pair, a jump out of the window, UpdateSubresource). `GameTaa::ParseJitter`
+  accepts it only when row 11 is the target size and the jitter is sub-pixel (else: no jitter -> the pass is TAA only). The main
+  units' NGX features get `MVJittered` while held (`DlaaFrameParams::mvJittered`, a creation flag: recreated once at a change): the
+  per-draw MVPs the mod reprojects with carry the game's projection jitter. **Evidence status:** the three TAA captures were deleted
+  after their text dumps were made, so the G-buffer VS matrices of a TAA frame could not be checked; the dumps only show that the
+  resolve's own reprojection matrix (cb0[0..3]) does NOT carry cb0[8].xy (its column-2 x term is 0 in all 3 frames while cb0[8].x is
+  -5e-05 / +7e-05 / +1e-05) -- the resolve applies the jitter separately, which says nothing about the G-buffer MVPs. Hence
+  `game_taa_mvjit` (startup only): -1 auto = on unless the game's held world-pass viewports have a fractional origin (= viewport
+  jitter: clean MVPs), 0 / 1 forced; the verdict and its counts are logged (`NGX MVJittered ON / OFF (game_taa_mvjit auto)`).
+- **Per pass, at its tonemap** (`TaaOnTonemap`, before the game's tonemap draw; `GameTaa::Decide`):
+  - `kActHdr` (flat DLAA, the stage logic wanted the pre-tonemap HDR unit -- `PreTonemapPoint` defers its run in a held pass):
+    `PreTonemapRun` (split out of `PreTonemapPoint`) on the raw scene with `SceneDlaa::SetCompositeOut` (no copy-back), then
+    `SceneDlaa::CompositeInto` the tonemap's INPUT (own RTV; RTs / DSV / PS SRV 0..7 saved and put back): `lerp(TAA, mod, 1 - share)`
+    in linear HDR, or the split. The resolve's outputs / history are never written (pure TAA history). The blit does nothing (`pre 1`).
+  - `kActLdr` (DLSS upscaling, VR, the post-tonemap stage): the game's tonemap draw is re-issued once with t0 = the raw scene into a
+    mod texture of the tonemap target's shape (`TaaReissueTonemap`, 2 textures ping-pong); at the blit the unit runs on THAT and
+    composites over the game's own blit (the TAA picture, stretched when upscaling) -- `SetCompositeOut` for native size (the
+    upscale composite as before for DLSS), alpha x the mod's share, or the split (`kCompositePs` Params[3]). No RCAS border blend /
+    outside AA in that mode (outside the DLAA rect the game's TAA picture stays). The game's own draws into the tonemap target after
+    the tonemap and before the blit (frame15407: 2 x DrawIndexed, PS 674, no texture inputs -- not present in the r_aa 0 capture
+    `ats_roof_flicker_frame5519`, `captures/taa_2026-10-30/raa0_ats_frame5519.post_tonemap.txt`) are REPLAYED into the mod texture
+    (`TaaPostAfterDraw`, after each game Draw / DrawIndexed from the tonemap to the next blit: RT0 swapped, a read of the tonemap
+    target swapped for the mod texture), so the composite does not cover them. Raw-scene / mod-texture SRVs are cached (per texture).
+  - `kActTaaOnly` (a FALLBACK: a held pass the mix cannot take: no resolve in the pass, no jitter copy, no raw scene, a failed /
+    deferred run, no 8-bit tonemap at all -- Windows HDR output, logged): the mod's main-scene DLAA / DLSS is skipped for the pass (MV
+    history kept rolling). Never DLAA on the TAA'd frame.
+  - A held pass that had its blit without a resolve releases the hold at the next pass (the game's AA switched off: no ~30 passes
+    without any AA).
+- **Logs.** `game TAA (phase 82): mode=... | TAA resolve DETECTED / not seen | jitter: ... | path: ...` once per change (mode,
+  detection, share, path, fallback reason); `the TAA resolve reads cb0 = buffer ...` when it learns the buffer (says if the Unmap hook
+  is missing); a WARN once at `game_taa = 0` with a running TAA; at log level 4 a stats line every 1800 Presents (passes per path,
+  jitter misses, copies by kind). The menu's Game TAA row says whether the game's TAA runs now.
+- **Round 3 (game test 2, d4b0b4e, ATS flat 4K, split): 479 of 594 passes fell back to the game's TAA, no split line seen.** Cause:
+  the composite needs an SRV of the unit's result, and `SceneDlaa` made `m_outSrv` / `m_sharpSrv` ONLY for upscaling units -- a
+  native-size unit with `SetCompositeOut` evaluated (the log: `first DLAA evaluate OK BEFORE THE TONEMAP`, ngx 0.96 ms) but could
+  never arm its composite (no `DLAA: upscale composite ready` line in the whole log): every HDR pass reported "the HDR run or its
+  blend did not happen", and the re-issued-tonemap passes drew nothing. Both SRVs are made for every unit now. Also: a unit built
+  while the jitter is held gets MVJittered at its creation (`DlaaProcessor::PresetMvJittered`; the log had create-then-recreate for
+  each colour set); the jitter-copy window is the RANGE of the offsets in recent use + 64 KB each side (max 1.5 MB, re-measured every
+  900 reads; the offsets jumped 12 KB -> 186 KB -> 327 KB -> 368 KB in the first frames); per-reason fallback counters
+  (`fallbacks by reason`) and the stats every 600 Presents at log level 4. The stage hysteresis (post-tonemap -> pre-tonemap after 60
+  passes) is the one path change seen at the start, not a per-pass flap.
+- **Split line (round 3, user request):** an opaque RED vertical line of `GameTaa::SplitLineWidth` px (2 px per 1080 px of height:
+  4 px at 4K) at `game_taa_split` %, with the labels, drawn EVERY frame while `game_taa = 2` right after the game's blit of the main
+  scene (`TaaDrawSplitOverlay` -> `SceneDlaa::DrawSplitOverlay`: the blit's output rect -- output resolution with DLSS, each eye's
+  picture in VR, independent of the DLAA area), also when the pass fell back (the mod's label then reads "DLAA (OFF)" / "DLSS (OFF)";
+  "TAA (OFF)" when the game's TAA is not running). The composite itself only cuts at the line.
+- **Split compares (round 3, `game_taa_pair`, menu row, saved, live only in split):** 0 DLAA | TAA (default), 1 Mix | TAA, 2 DLAA | Mix
+  -- the left side is the first. Mix = the mod's result blended with the game's TAA at `game_taa_mix` (the share row is live in mix
+  and in a split with a Mix side, `GameTaa::ShareUsed`). The composite gets the mod's share left (`Params[3].x`) and right
+  (`Params[3].z`) of the line (`GameTaa::MixOf(mode, mix, pair)`); the labels name each side ("DLAA" / "DLSS", "TAA", "MIX 50%", each
+  " (OFF)" when that side's input is missing this pass; `GameTaa::SideLabel` / `PairSides`; the font has D L A S T O F M I X ( ) % 0-9).
+- **VR game test (ATS, 5512x5848 per eye, dlaa_area 50): the mix ran 4784 of 4802 passes, but two bugs.** (1) Two red lines: the line
+  was at the same % of each eye's PICTURE, and the eyes' optical centres are uv 0.379 / 0.621 -- a different view angle per eye, seen
+  double. The split (line AND the composite's cut) is now at the same offset from each eye's optical centre, `GameTaa::SplitXc`
+  (x0 + width * (cu + (pct - 50) / 100), clamped; flat cu = 0.5 = as before); the line is capped at 6 px (11 px at 5848 px before).
+  (2) A darker square on one eye (inside its DLAA rect): not found for certain from the code and the log. Fixed on suspicion: a tonemap
+  drawn in MORE than one draw had only its first draw re-issued (the rest of the mod's texture stayed unwritten = dark inside the rect
+  after the 70 % composite) and the further draw also ended the post-tonemap replays -- each further tonemap draw of the same pass is
+  now re-issued into the same texture (`TaaReissueTonemap(..., again)`, logged once). New diagnostics: `tonemap re-issue ... viewport
+  / scissor ... PARTIAL` (a partial tonemap draw) and per eye `eye N composite at RT ... rect ... unit centre uv ... DLAA input fmt ...
+  blit SRV0 view fmt ... sRGB decode` (on every rect change). Checked and ruled out from the code: the composite rect follows the unit's
+  rect every Run (`m_oxc` = the optical-centred crop); the two re-issued tonemap textures alternate per pass and the log shows each
+  eye's tonemap -> blit in order; both have the same format, and both eyes' blits decode sRGB.
+- **VR game test 2 (b7081e4): the darker square stayed -- eye 0 only, exactly the DLAA rect, only on the Mix side.** The recording
+  shows the inside darker by ~0.66-0.70 in sRGB while a white cloud stays white (a tone change, not a shift / ghost). The log shows
+  the order of a VR frame: pass 0's tonemap, pass 1's tonemap, then both blits (`tonemap re-issue pass s=10 / s=11` at the same time).
+  The post-tonemap replay (`TaaPost`) was ONE armed target and each new tonemap re-armed it: eye 0's post-tonemap draws (the 84-index
+  DrawIndexed into the tonemap target) came after eye 1's tonemap and were never replayed into eye 0's re-issued texture -- eye 0's
+  mod picture missed them, eye 1's had them. In flat (one tonemap per frame) this never happened. Now one entry per tonemap target
+  (`TaaPost::e[2]`), each armed from its own tonemap until the blit that reads that target (`Disarm(srcPtr)`). One-shot check per
+  eye: `game TAA (phase 82) probe eye N` -- the mean colour of 32 x 32 px at the DLAA rect centre in the re-issued tonemap, the game's
+  TAA picture, the DLAA input, the NGX output and the composite source (staging copies after 240 such blits, read without waiting);
+  all should be about equal.
+- **VR game test 3 (57882fb): the cause of the dark square.** The probe (log at 21:16:44): eye 0's re-issued tonemap 38.0 / 45.5 /
+  55.0 vs the game's TAA picture 109.4 / 133.8 / 168.2 at the same spot, the DLAA input / NGX output / composite source equal to the
+  re-issued value; eye 1 all ~109 / 134 / 168. So the re-issued tonemap of eye 0 was already dark: its RAW scene (the compress pass's
+  t0) was no longer raw at the tonemap -- the game reuses its pooled scene-size RGBA16F targets, and in VR the one eye 0's compress
+  read is bound again as a render target before eye 0's tonemap (a compressed-range picture of the same eye: tonemapped as linear =
+  midtones ~0.34 x, highlights near white). Fix (`TaaKeepRawOnBind`, from `hkOMSetRenderTargets` and `hkClearRTV`): when the game
+  binds / clears an outstanding held pass's raw scene before that pass's tonemap, the raw is copied first into a kept texture (2) and
+  the pass reads the copy (logged, first 4). (The 57882fb premise -- both tonemaps before the blits -- was wrong: the log has tonemap0
+  -> blit0 -> tonemap1 -> blit1; the per-target replay change is harmless.) The mod's own binds in the re-issue / replay now run
+  inside its re-entrancy guard. A compute shader writing the raw through a UAV is not watched (not seen so far).
+- **Not verified in game yet / limits.** Whether SCS TAA runs in VR (if not: VR stays exactly mode 0). Whether the constants come
+  through the window copy for every frame (round 2; a window miss grows it and is logged). The
+  jitter sign (cb0[8].xy taken as the geometry shift). MVJittered (see above). Mirrors keep the mod's own mirror jitter (if the game
+  also jitters the mirror projection, they double-jitter). What the 2 post-tonemap PS 674 draws are (the TAA capture is gone; replayed
+  either way).
+  `tests/game_taa_test.cpp` (CI) covers the pure logic; the settings round-trip test checks the two rows against `g_gameTaa`.
+
+### Phase 83: the game's in-game VR UI placement, live from the menu (group "In-game UI" (VR), `src/vr_ui.h`; delivery replaced in phase 85)
+
+- **What.** The game places its VR UI with console variables: `r_manual_stereo_ui_<y x dist pitch yaw fov radius>_game` while
+  driving and the same without `_game` on the menu screens (config.cfg; `uset r_manual_stereo_ui_y_game "-0.4"` in the console moves
+  the HUD at once -- user test, ATS). The group's rows: Layout (driving / menus, session only), Height, Side, Distance, Tilt, Turn,
+  Size, Curve (steps 0.05 / 0.05 / 0.1 / 0.05 / 0.05 / 1 / 0.5) and "Reset to config.cfg" (Right). VR only (hidden / greyed flat).
+- **Values.** Read from `Documents\<game>\config.cfg` (`Lang::ReadGameConfig`, the folder by the exe name) at the first use and at
+  every menu open (only the values not changed this session). Never written to config.cfg (the game saves its own cvars at exit)
+  or to dlaa.ini. Needs the console: config.cfg `g_developer "1"` and `g_console "1"` (`VrUi::ConsoleEnabled`); else the rows are
+  greyed and their description says how to enable it. Startup INFO line: what was read.
+- **How a change reaches the game.** The mod TYPES the console command. `VrUi::Debounce`: a changed value is sent once it stayed
+  0.4 s, one command per changed cvar, nothing when it went back to the game's value. `VrUiTick` (once per Present, render thread)
+  starts a batch only when the player typed nothing that reached the game for 2 s (`KeySwallow::LastUserKeyMs`: DirectInput key
+  presses and key / char window messages the menu did not hide -- console or chat in use) and never in Hotkeys-page bind mode.
+  `VrUi::KeyPlan`: console key (DIK_GRAVE) down / 50 ms / up, 150 ms, the text, Enter down / 50 ms / up, 100 ms per command, console
+  key again. Delivery (`dinput_wrap.cpp`, `dlaa.ini vr_ui_keys`, startup only): 0 (default) = the console key and Enter as
+  DirectInput events on the game's keyboard device (the key's state byte reads pressed in GetDeviceState while held + one buffered
+  entry appended to the game's GetDeviceData, queued in order, PEEK-safe), the text as WM_CHAR posted to the game window, Enter also
+  as WM_KEYDOWN / WM_CHAR '\r' / WM_KEYUP; 1 = window messages only; 2 = DirectInput only (letters as US-layout scan codes). The
+  mod's posted messages carry scan code 0: the menu's key filter and the player-typing watch pass / ignore them; the menu hides only
+  its own 5 inputs, so the console key, Enter and the text reach the game while the menu is open. One INFO line per sent command.
+- **Risks / not verified in game.** Whether SCS's console takes the toggle / Enter from DirectInput and the text from WM_CHAR (the
+  three `vr_ui_keys` modes are there to find out); a console the player left open would be closed by the toggle; the menu-screen
+  cvars may only apply on the menu screens. `tests/vr_ui_test.cpp` (CI): parsing, steps, debounce / queue, the keystroke plan.
+
+### Phase 84: menu regroup -- most-used first, rows of the other mode hidden
+
+- **Layout** (`enum MenuRowId`, `kMenuGroups`, `kMenuDesc` reordered by a script, the contiguity `static_assert` regenerated): top
+  Mode / Profile / Model; Picture (sharpen strength / width, texture / cut-out sharpness, see-through depth, light glow fix, DLAA area);
+  Motion and mirrors (part motion, mirror DLAA, mirrors in turns); Frame rate (was "Frame rate and CPU": CPU tuning, FPS cap, Reflex,
+  VR FPS cap); VR performance (Turbo, the Foveated rows, hidden area mask, OFXR Bridge, VectorXR); In-game UI (VR) (phase 83); the
+  `FPS counter` row + its group (was "FPS counter settings"; flat / both rows first, then the VR ones); Menu panel (was "Panel
+  settings"); Compare and test (new `MR_CMPGRP`: "DLAA off to compare (not saved)" = the old DLAA on / off row, Game TAA + share +
+  split position + split compares, the three thin-wire switches, DLAA before tonemap); Logging, Language, Hotkeys, Save, Reset, Close.
+  The DLSS upscale row (`MR_UPSCALE`) and its group "Upscaling and VR" are gone: the Mode row cycles off / DLAA / DLSS on the same
+  `g_dlssUpscale`; its hotkey and `dlss_upscale` stay. No dlaa.ini key changed.
+- **Visibility:** `MenuRowMode(id)` (Both / Flat / VR) in `MenuRowVisible`: rows of the other mode (by `MenuVr()`, so the VR main
+  menu / preview counts as VR) are hidden; a group header whose rows are all hidden is hidden; grey keeps its "not applicable right
+  now" meaning. `dlaa.ini menu_show_all = 1` (startup only) shows everything, greyed as before (the settings round-trip test boots
+  with it). After a flat <-> VR flip a hidden selection steps to the next visible row (`MenuBuildPanel`).
+- **Tests:** settings round-trip (show-all, the header list, no DLSS upscale row), `tests/menu_shot.cpp` (the VR layout).
+
+### Phase 85: fix round after the VR test of 287b6f3 and two audits (Opus + Fable)
+
+- **In-game UI typing never reached the game.** ATS binds the console on `sys.keyboard` (controls.sii: raw input / window
+  messages; only joysticks are DirectInput) and game.log.txt had no `r_manual_stereo_ui_*` line, so none of phase 83's 15 "sent"
+  commands ran. The default delivery (`vr_ui_keys` renumbered, `VrUi::kKeys*`) is now **SendInput**: 0 = console key (0x29) and
+  Enter (0x1C) by `KEYEVENTF_SCANCODE`, the text as `KEYEVENTF_UNICODE` (VK_PACKET -> WM_CHAR); 1 = also the text by scan code on the
+  game thread's layout (`VkKeyScanExW` + `MapVirtualKeyExW`, Shift / Ctrl / Alt as the layout needs; a character without a key falls
+  back to Unicode); 2 / 3 / 4 = the phase 83 mix / window messages / DirectInput. Every step (and the batch start) waits for
+  `GetForegroundWindow() == GetAncestor(game window, GA_ROOT)` (`KeySwallow::GameHasFocus`); while it waits the row says "click the
+  game window" and one INFO line is logged. The mod's events carry `dwExtraInfo = 'DLAA'` (`KeySwallow::kInjectMark`): the window
+  procedure (`GetMessageExtraInfo`, plus VK_PACKET and a 250 ms self-typing window for the TranslateMessage WM_CHAR), WM_INPUT
+  (`RAWKEYBOARD.ExtraInformation`) and the DirectInput tap (the self-typing window: DirectInput has no extra info) neither stamp
+  `LastUserKeyMs` nor hide them. WM_INPUT keyboard make events of the PLAYER now stamp it too (a game that reads raw input only).
+  Injected DirectInput entries carry a timestamp and are dropped after 300 ms unread; `ClearInjected` empties the queue and the held
+  keys at every batch end. **Confirmation:** the log size is taken at the batch start; after the last key `VrUiCheckConfirm` reads
+  what game.log.txt grew by (every 200 ms, up to 2 s, 256 KB) and looks for the exact command (`VrUi::Echoed`): INFO "CONFIRMED ...
+  N ms after the batch's last key" or WARN "NOT confirmed after 2 s" (the row then says the log did not confirm). The echo of a
+  TYPED command is assumed to look like the config.cfg exec lines (`<time> : uset <var> "<value>"`); not verified yet -- if every
+  command is "NOT confirmed" while the HUD moves, the echo differs (log it and adapt `Echoed`). Not done: reading the console key
+  from controls.sii (scan 0x29 = the key under Esc is assumed).
+- **Jitter misses in VR.** `GameTaa::CbShadow`: six 2 MB rings rotate in VR but `kBufs` was 4 (the LRU evicted each ring before it
+  came round), and the copy window was one min..max range of every offset centred on the last one -- the two eyes sit at both ends of
+  the ring, so one eye missed in bursts. Now: watch by SHAPE (`g_taaCbShape` = the resolve buffer's ByteWidth; a DISCARD Map of a
+  DYNAMIC constant buffer of that width is watched from that first Map, with a per-thread cache of resources known not to match;
+  kBufs 12), the copy = merged CLUSTERS of the last 32 offsets (+ 256 + 32 KB each side, circular mod ByteWidth, newest first up to
+  1 MB, at most 8 segments) per upload -- ~2 x 64 KB instead of up to 1.5 MB of write-combined reads. A miss no longer falls back to
+  the game's TAA: the same Present's other eye's jitter (when the VR pairs read so far agree; a disagreement is logged and disables
+  this) else the last jitter read; counted in the stats line ("jitter reused ... other eye / last", "VR pairs same / different").
+  The TaaNote 60-line cap is per reason.
+- **Model row flicker.** `MainDlaaRuns()` used the LAST pass's verdict, so one fallback pass greyed the DLAA quality rows for a
+  frame and rebuilt the panel texture. Now greyed only after 30 Presents without a pass that ran the mod (`g_taaLastModRanFrame`:
+  a mix / split pass, or an unheld pass); the Game TAA row's sentence uses the same hold.
+- **Menu.** A row hidden by the MODE inside an open group now moves the selection (only a row hidden by its collapsed group keeps it);
+  "closed (N)" counts the rows of the current mode. Titles lose "(VR)" / "(flat)" / "VR " where the group / mode says it (DLAA area,
+  DLAA before tonemap, Turbo mode, Hidden area mask, Reflex, FPS cap x2, Panel lock / depth / faces you, FPS distance; groups
+  Performance, In-game UI); the panel title line ends in "VR settings" / "Flat settings" ("all settings (flat and VR)" with
+  `menu_show_all = 1`, which keeps the old titles: `MenuGroupDef::titleAll`). The FPS counter / Menu panel group rows now use the
+  table titles (they still built "FPS counter settings" / "Panel settings"). With the game's console off the In-game UI group header
+  is greyed and does not open (Right beeps; not force-closed with `menu_show_all`). 17 new texts, AI drafts in all 41 languages.
+- **Tests:** game_taa_test (rotation watched by shape: 1 miss instead of 3; VR: 6 rings, eyes at both ends, 240 frames = misses only
+  in frame 0, 2 clusters, < 200 KB per upload; circular end; 12 watched + LRU), vr_ui_test (modes, clamp, `Echoed`), settings
+  round-trip `MenuRules` (closed (N) per mode, the title label, no mode words in shown titles, the mode-hidden selection, the
+  console-locked group). The save set is unchanged (settings_check: Save writes 72 keys, Reset removes 73).
+
+### Phase 86: the Game TAA row switches the game's Anti-aliasing
+
+- **What.** A Game TAA row change (`StepGameTaa`) asks for the game's `r_aa` of the new mode (`VrUi::RaaFor`: off -> `0`, mix /
+  split -> `5` = TAA, as captured; the game's TAA tuning / sharpening cvars are not touched). `VrUiTick` types it with the phase 85
+  delivery (SendInput, focus gate, `dwExtraInfo` mark, game.log.txt confirmation) in the same console batch as any In-game UI command,
+  debounced like them (400 ms stable: off -> mix -> split in a row types once), in FLAT and VR (the In-game UI rows stay VR-only),
+  only with the console on (`g_developer` / `g_console`; off = the row works as before, its line says to turn the console on), only
+  when `VrUi::RaaDecide` says the game's value differs: `g_raaKnown` = config.cfg `r_aa` (`VrUi::RaaFromCfg`, at start / menu open
+  until the mod typed one), then the value the mod typed. Never at startup by itself; Reset to defaults asks for it (game_taa 0 ->
+  `r_aa "0"`) only if the mod typed `r_aa` this session. `r_aa` is never written to dlaa.ini.
+- **Status / log.** The Game TAA row's line ends in "Game AA: TAA / off / unknown / other" + "switching..." / "waiting: click the
+  game window" / "switch confirmed" / "switch NOT confirmed (see the log)". INFO lines "Game AA (phase 86): typing ...", "... CONFIRMED
+  by game.log.txt", "... NOT confirmed after 2 s".
+- **Not verified in game:** whether the game applies `r_aa` live from the console (assumed: the user's capture switched it);
+  the echo format assumption of phase 85 applies here too.
+- **Translations:** from now on new / changed menu texts go into `lang/template.pot` only (English fallback); the .po files are
+  translated once before a release.
+- **Tests:** vr_ui_test `TestRaa` (row -> command or nothing, console off -> nothing, unchanged -> nothing, config.cfg parse);
+  settings round-trip: a Game TAA row change requests r_aa, Save writes `game_taa` but never `r_aa`.
+
+### Phase 87: plain-language menu, AMD cache cores row, no greyed rows
+
+- **Row titles** (text only, dlaa.ini keys unchanged): Quality preset, Sharpness size, Leaves and fences sharpness, Track moving
+  parts, Smooth mirrors, Mirrors take turns (faster), Glass and fence fix, Light trail fix, Wire fix: motion / depth, Thicker wires
+  (test), Run DLAA earlier (test), Game TAA amount, Split line position, Split: left | right, Foveated: lighting too, Skip hidden
+  edges, Low delay (Reflex), Log detail. `kMenuDesc` help lines rewritten without jargon (history, motion vectors, tonemap,
+  reprojection, GPU queue ...). Not renamed: the Hotkeys page's action labels and feature_check.py's report labels (they match log
+  lines / name features, not rows). Strings English only (template.pot), per the translate-before-release rule.
+- **CPU tuning** help line says which part works where: prefer fast cores = Intel P-core / E-core CPUs only; priority + no Windows
+  power saving = every CPU.
+- **AMD cache cores (X3D)** (`MR_CPUPIN`, Frame rate group after CPU tuning, both modes): `cpu_cache_pin` LIVE. `cpu_pin.h`:
+  `Detect()` (topology once, cached: the V-Cache mask or why not; < 4 logical processors = not supported), `Supported()`,
+  `Apply(on)` narrows the process affinity to the biggest L3 and remembers the one before; `Apply(off)` restores it (only if the
+  mod narrowed it). SetProcessAffinityMask is safe at any time (threads move at their next scheduling). Startup still calls Apply
+  before `CpuTuning::Start`, so cpu_pcore still defers to a narrowed affinity; a LIVE pin after start does not re-run cpu_pcore's
+  decision, which only matters on a CPU with two efficiency classes -- an X3D part reports one. Saved once explicit
+  (`g_cpuPinExplicit`, also set by LoadConfig), Reset removes it and restores the affinity. settings_check: Save 73 keys, Reset 74.
+  kMaxRows 88 vs 80 rows; the VR overlay image size cap (287b6f3) depends on kMaxRows, unchanged.
+- **No greyed rows** (user amendment): `g_menuHide[]` = the panel's grey flags at the end of each MenuBuildPanel (unless
+  `menu_show_all`); `MenuRowForMode` returns false for a hidden row, so the group header hiding, the selection step, "closed (N)"
+  and the compaction all follow (a hidden header also hides its rows). The rules read settings / slow state (the DLAA quality rows
+  use MainDlaaRuns' 30-Present hold), so rows do not pop per frame; the state lags one panel build. OFXR / VectorXR rows now count
+  as greyed when not present. Kept visible on purpose: `Panel depth` and `Panel faces you` (both also work on the in-picture
+  fallback without the VR layer); only `Panel lock` needs the layer. Hidden rows are still saved / loaded (by globals).
+- **Tests:** settings round-trip `MenuRules`: no greyed row is shown, every row greyed with show-all is hidden without it, "closed
+  (N)" = the shown rows, a row hidden by its rule while selected moves the selection (Sharpen strength 0), the console-off In-game UI
+  group is hidden; gates for the new row (value = cpu_cache_pin, grey = !Supported). menu_shot leaves greyed table rows out.
+
 
 Capture a frame of the unmodified game to learn empirically: which pass writes
 the final HDR color, where the depth buffer is, and where the scene is blitted to
@@ -2201,3 +2658,257 @@ injector survives game updates that break index-based hooks.
   always injected by Steam) detours dxgi Present and calls back through the
   vtable, which made a vtable hook recurse forever. A thread-local depth guard
   remains as a safety net.
+
+### Phase 89: steady edge (removed)
+
+- A post-DLSS anti-ghost clip (`steady_edge`, a YCoCg variance box of the input 3x3, + an edge history) was tried on 2026-10-31
+  and removed the same day: in game it added flicker; DLAA alone looked best. Old `steady_edge*` dlaa.ini lines are ignored.
+
+### Phase 89b-d: the one-press bug report (Insert twice, menu group "Bug report")
+
+- **What** (`src/bug_report.h`: CRC-32, stored ZIP writer, privacy scrubber, capture plan, rewind length, keep-N pruning, double
+  press; `inject.cpp` namespaces `Cap` / `Rewind`, `CaptureRequest` / `CaptureEnd` / `CaptureAtPresent`, the shimmer branch of
+  `SelfTestStep`): the phase 71 shimmer capture becomes a bug report. `key_shimmer_capture` needs TWO presses within 1 s (the
+  first arms, one short beep); the menu's `Capture now` row closes the menu and captures at once.
+- **Sets** (`BugReport::Plan`, eye 0 / main view, consecutive frames, PNG via WIC on the writer thread, cropped to the DLAA area
+  rect when the picture is bigger; `full_on_0.png` once uncropped; flat: `final_<set>_0.png` = the presented back buffer):
+  Quick (`capture_mode 1`) = `on` (8, no settle: the player's own picture) + `off` (2 + 4). Full (`2`) = `on` with the planes
+  (`color_in`, `ngx_out`, `mv` colour view made from the RG16F MVs, `depth`, + `mv_0.bin` / `depth_0.bin` raw: uint32 'RAW1', w,
+  h, comps, float32), `mvview` (Ctrl+F6), `partsoff` (ToggleDrawIds,
+  quiet), `mvoff`, `jitonly`, `off`. 124 frames incl. settles (Quick: 14).
+- **Restore**: `Cap::ApplyBase` puts every switch back before each set and at the end; `CaptureEnd` also restores the log level
+  (raised to debug for the capture) and the jitter sign; the watchdog (`CaptureAtPresent`: no eye-0 blit for 120 Presents) stops
+  the capture early with the same restore. Requests while one runs / is being written are refused (low beep).
+- **Rewind** (phase 79 ring, now PNG): length `rewind_secs` (0 / 0.5 / 1 / 2 / 3 s at the headset rate, flat: the measured
+  Present rate; -1 = unset: `rewind_frames`), LIVE (a change releases the ring at the next Record, never while draining).
+  Diag planes for the last `rewind_diag_frames` (default 8): copies of eye 0's colorIn / MV / depth (the unit's own crop-size
+  textures), only for frames whose Run really happened (`SceneDlaa::Frames` changed). GpuPerf section `rewind`; real VRAM in
+  `Rewind::g_vramBytes` (the menu's cost column). Default stays OFF (Fable design): estimate VR 2761 x 2928, 72 Hz, 0.5 s = 36 x
+  32 MB = 1.15 GB + 8 x 72 MB diag = 0.58 GB and ~0.2 - 0.4 ms of copies per frame -- over the 600 MB / 0.1 ms bar.
+- **Finish job** (writer thread, after every frame job): `sysinfo.txt` (render-thread part at the key + versions, OpenXR
+  ActiveRuntime, modules outside the Windows folder, config.cfg `uset r_*` / `g_vr*` lines, active dlaa.ini lines without
+  `fps_profile`), `README.txt`, copies of `dlaa_inject.log` (last 48 MB), `dlaa.ini` (without `fps_profile`), the last 2000 lines
+  of `game.log.txt`, `info.txt` -- all through `BugReport::MakeScrubber` (USERPROFILE, the user name as a path component, the Steam
+  library root) -- then `shimmer_<time>.zip` (stored), `capture_keep` pruning, "capture ready: <zip>" + two beeps.
+- **Menu** group `Bug report` (`MR_BUGGRP` after Compare and test, kMaxRows 88 -> 96): Send everything (`report_all`: forces
+  debug / 2 s / Full LIVE via `CaptureModeNow` / `RewindSecsNow`, saves only itself; Save writes the pre-forcing log level),
+  Log detail (moved here; locked while Send everything is on), Rewind before key, Capture includes (hidden without DLAA),
+  Capture key (Right = Hotkeys page line), Keep captures, Capture now (status). Cost sentences estimate VRAM / seconds / MB.
+- **Not done**: the Ctrl+F10 snapshot is not triggered (the Full planes are the same data); the GPU timer / CPU profiler figures
+  are only in the copied log, not summarised in sysinfo.txt. **Not tested in game.**
+- **Test** `tests/bug_report_test.cpp` (CI): zip read back byte by byte, scrubber (three path spellings), plan, pruning, guard.
+
+### Phase 89e: the capture after the first in-game test (ATS flat 4K, 2026-10-31)
+
+- **Found** (two Full captures, `shimmer_20261031_201805` / `_201905`): one writer thread encoded a 4K PNG in ~0.5 s, the 538 MB
+  queue cap was hit at once, 600 frames were skipped and the capture STOPPED EARLY at set 7 / 9 both times -- DLAA off was never
+  saved. Zips 1.3 GB (80 rewind frames at 4K, ~8.7 MB per PNG). HDR planes pale (no exposure), the MV picture one flat colour
+  (/16 far too small). The menu closed at Capture now and never came back; nothing showed progress.
+- **Writers**: a pool of min(4, max(1, cores / 4)) below-normal threads; HOLD during the sets (pixels only read back into RAM, cap
+  1 GB), released at CaptureEnd; the finish job waits until it is the last (WaitAlone). PNG filter "Sub" (WIC FilterOption).
+- **Order**: on, off, then mvview / partsoff / mvoff / jitonly (BugReport::Plan; 58 frames incl. settles in Full, 12 in Quick).
+- **Size**: every saved picture is the centre of the picture (or of the DLAA area rect) at most 1920 x 1080 flat / 1440 x 1440
+  VR (CentreCrop; the planes DLSS got: their centre, NGX output the same scene part via ScaleBox) + `full_on_0.png` once. The
+  Phase 89f: CropMax = no limit and no DLAA-area cut -- the 4K centre crop cut the gantry sign and missed the side signs
+  (user test 2026-10-31), so every picture is whole again (zip ~4x). The rewind drains AFTER the sets and saves the last 12 frames + 12 spread over the rest (RewindPick); `rewind_diag_frames` 8 -> 4;
+  the raw .bin pair once (from the rewind planes when there are any).
+- **Pictures**: HDR planes auto-exposed (log-average luma -> 0.18, AutoExposure), MVs auto-ranged (99th percentile, MvScale99);
+  each factor goes into info.txt ("how the pictures were made viewable").
+- **Status box** (`TuningMenu::DrawStatus`, the fps box's look, 300 ref px, white): "capturing i / n: <set>", "writing files a / b",
+  "making the zip p %", "done (N MB)" for 6 s, "FAILED: <why>" for 10 s. Flat: over the presented picture, but not on the Present
+  whose back buffer the capture saves (final_*.png); VR: into each eye picture after the blit (the capture reads its frames AT the
+  blit, so the box is never in one). Started from the menu: the menu opens again on the Capture now row when the sets end.
+- **Estimate** (not measured in game yet; PNG ~1.1 B/px from the 4K captures): flat 4K Full + 2 s rewind ~ 200 MB zip (rewind 24 x
+  ~2.5 MB, planes 4 x ~5 MB + raw 25 MB, sets 21 x ~2.5 MB, full picture 9 MB, final 2 x 2.5 MB, planes of the sets 3 x ~7 MB);
+  Quick without rewind ~ 40 MB. Capture window Full ~0.8 s of frames at 70 fps + the read-back syncs; encoding ~2 - 4 s on 4 threads.
+- **Removed** with it: the steady-edge filter (phase 89) and its capture sets.
+
+### Phase 89g: the capture in GitHub-sized parts
+
+- GitHub issue attachments take at most 25 MB per file (many per comment; .zip yes, .001 no). FinishJob now writes INDEPENDENT
+  stored zips `shimmer_<time>_part01.zip`, `_part02.zip` ... of at most 24 MB each (always `_partNN`, also for one part); every
+  part opens alone. `BugReport::PackParts`: priority order (text files, on_0 / off_0, the rest of on / off / final / full, rewind
+  newest first, rw_* planes, the other sets, .bin last), first fit by size. A file bigger than one part is CUT into
+  `name.part01`, `name.part02` ... (its own entries; README.txt: `copy /b name.part01 + name.part02 name`) -- no deflate in the
+  project (no zlib / miniz), and downscaling would lose the raw data. FitsZip32 per part; a failed part is deleted.
+- `capture_keep`: a capture = its folder + every `_partNN.zip` (`CaptureStem`). Status box / menu row / log: "N parts, X MB".
+- Test (bug_report_test): parts <= 24 MB, every byte in exactly one piece, part 1 = the text files then off_0 / on_0, a 66 MB
+  .bin -> 3 pieces, the pieces written with a 100 KB limit and read back byte-exact, pruning with part zips.
+
+### Phase 90: VR test fixes (2026-11-01) and Mix on the Mode row
+
+- **Bug report status box in VR**: `MenuDrawVrOn` returned right after `FpsCabDraw` (fps box attached to the cab,
+  `fps_vr_lock = 2`), so the status box was never drawn. It is now a lambda (`drawCapStatus`) called on both paths.
+- **In-game UI tilt / turn**: the game's `r_manual_stereo_ui_pitch[_game]` / `_yaw[_game]` are DEGREES. The rows stepped
+  0.05 up to +-1.6 (under 2 degrees: nothing visible). Now step 5, pitch -90..90, yaw -180..180 (`VrUi::kFields`).
+- **FPS graph**: no dark background (the game shows through); the target line is white with a dark edge above and below.
+- **Mix on the Mode row** (user request): `CycleMode` (Mode row and `End`) walks off -> DLAA -> DLSS -> Mix (TAA + DLAA) ->
+  Mix (TAA + DLSS) -> off. Mix = `game_taa 1` on top of `mode` 1 / 2; into / out of Mix writes `game_taa` + `game_taa_ver`
+  at once (like `mode`) and asks for the game's `r_aa` (phase 86). `MR_TAAMIX` ("Mix amount", value "N % TAA") moved under
+  Mode; the Compare and test row `MR_GAMETAA` is now "Split with game TAA" (off / on; Right replaces Mix, Left only turns the
+  split off). The Mode row shows the Game TAA status sentence while Mix is on. No dlaa.ini key changed.
+- **review3 fixes** (Sonnet / Opus / Fable on `src` since v0.15.1): the capture writer catches a job's exception (was
+  std::terminate), a failed capture no longer prunes older ones, `Crc32`'s table is a magic static, Save and Send everything
+  are refused while a capture's sets run (`Cap::g_state == 1`).
+- Tests: settings_roundtrip (Mode values incl. Mix, Mode -> Mix writes game_taa, split row on / off), vr_ui_test.- **Console stuck open (flat test 2026-11-01):** after `uset r_aa "5"` the game and the mod rebuild their AA (NGX features recreated,
+  the rewind ring re-made) -- a 100+ ms frame took the closing console key's down AND up in one game frame, the game missed the
+  toggle and the console stayed open (the next batch then toggled it the wrong way: `r_aa "0"` NOT confirmed). Every wait step of
+  the key plan now lasts its ms AND at least `VrUi::kMinWaitFrames` (3) Presents.
+- **Console-off hint (phase 90b, user request):** Mix and the split stay visible with the console off (they work when the player sets
+  the game's Anti-aliasing to TAA by hand). When Mix / split is chosen, the game's TAA is not running and the console is off, the
+  help line (Mode row in Mix, Split with game TAA row) says to set Anti-aliasing to TAA in the game's graphics settings, or to turn on
+  the console (`g_developer` / `g_console` 1 in config.cfg) so the mod switches it.
+
+### Phase 91: performance pass (status box, menu at Present, Mix tonemap scissor)
+
+- **Status box cache per caller** (`TuningMenu::DrawStatus`, `slot` = `kStatusEyes` / `kStatusFlat`): one cache served the VR eyes
+  (build scale W / 1920 x 1.1) and the desktop mirror (H / 1080 x 1.25 x 2), so with both drawing every call rebuilt it (GDI
+  `RenderWidget` + texture create + upload): 1.58 ms/frame measured while the capture ran (`Cap::g_state == 3`, 6 s). Each slot
+  owns its texture and pixels; `RenderWidget` paints into a caller's buffer with explicit colours and the status box passes its
+  opacity to the draw, so the eyes (render thread) and the mirror (Present) no longer swap the fps box's `g_wPixels` /
+  `g_wText` / `g_wLine` / `g_wOpacity` under each other.
+- **Menu panel built once per Present** in VR: `MenuDrawAtPresent` reuses the panel `MenuOvPanelUpdate` built in the same
+  Present on the same thread (`t_presentPanel`, cleared before `MenuOverlaySet` every Present) -- was two `MenuBuildPanel`.
+- **Mix (`kActLdr`) re-issued tonemap scissored**: `TaaReissueTonemap` drew the game's tonemap over the whole eye picture, but
+  only the DLAA rect of that texture is read (Run copies the rect, `SetCompositeOut` = no outside AA / no copy-back, the
+  composite / split / `CompositeInto` draw the unit's rect-sized output). Now it draws inside one box = the union of the rects
+  the blits will use (`SceneDlaa::CropRect`, every known optical centre + the image centre) + 64 px, via a ScissorEnable twin of
+  the game's rasterizer state (phase 78's `LightFsScissorRs`); the game's state and scissor rects are restored. The kept raw
+  scene (`TaaKeepRawOnBind`, a whole-resource copy of 134 MB in the VR test) copies only that box when the pass gets it. Full
+  draw / copy as before at dlaa_area 100, during a capture / self-test / rewind write-out, with the MV debug view, and for one
+  frame after any unit's rect moved (`SceneDlaa::RectMoves`). The blit checks that its rect lies inside the pass's box
+  (`TaaScissorCovers`); if not, that pass shows the game's TAA (log "phase 91 ... not inside"). Stats in the game TAA LogDbg block.
+  **91b**: ATS draws its tonemap with its own scissor on (rect = the whole target), and a review fix had made that case a full draw,
+  so the first VR test logged "re-issues scissored 0". Now the game's rect 0 is intersected with the box (its own state, no twin);
+  no rect / an empty intersection = the full draw.
+- **CPU profiler rows** splitting "frame-work": `fw-overlay` (MenuOverlaySet), `fw-menudraw` (MenuDrawAtPresent), `fw-boundary`
+  (back buffer refresh + OnPresentBoundary), `fw-ticks` (VrUiTick .. FpsProfileTick, incl. MenuKeys / FpsTick), `fw-late`
+  (MenuLateAtPresent).
+- **Not done**: caching the back buffer RTV in `MenuPresentTarget` -- a view kept across Presents holds a reference on the back
+  buffer, and the mod has no `ResizeBuffers` hook (the game's resize would fail) nor sees the game release its swapchain (a kept
+  reference keeps it alive; a new flip-model swapchain on the same window then fails). One view per Present stays.
+
+### Phase 92: bug report capture fixes (VR test 2026-11-02)
+
+- **Full capture stalled and stopped early**: the writers are HELD while the sets run (phase 89e), and since phase 89f every
+  picture is the whole one (3448x4872 RGBA8 = 67 MB in VR). In DLAA mode the 1 GB queue cap (`Cap::kQueueCap`) filled in set 3
+  of 6; `WriterBehind` then waited for writers that could not run, 600 frames (~9 s, with the `partsoff` setting live), and
+  `CaptureEnd("STOPPED EARLY")` lost the last 3 sets. Now `WriterBehind` ends the hold (`Rewind::SetHold(false)`, LogDbg "the
+  writers start now, during the sets"). VR re-test: both Full captures 2.0 s, 6 of 6 sets (some frames inside a set skipped).
+- **Mix capture saved only the DLAA square before the mix** (`on_N` 1728x2440 = the unit's `ResultTex`). After a 90c
+  `CompositeInto(ctx, tex)` the capture now saves `tex`: the whole eye picture with the mix in it. Rewind frames in Mix are still
+  the square (not changed).
+- **False "game's own TAA is ON while game_taa = 0" warning** right after leaving Mix: the game draws its TAA ~1 s more until the
+  typed `uset r_aa "0"` lands. `TaaOnResolve` skips the warning while `RaaSwitching()` (as the menu's "switching...").
+
+### Phase 93: performance pass (Fable audit 2026-11-09)
+
+A Fable audit of `captures/ats_2026-11-02_1717_phase92_rc1.log` (ATS VR, 72 Hz, log level 4). Read-only / scheduling changes: the
+picture is meant to stay the same (item 2 only skips pixels the headset never shows).
+- **93a, DidShadow PS / OM bank (`draw_ids.h` 14., `draw_ids.cpp`, `inject.cpp`; dlaa.ini `did_shadow_ps`, default 1, startup
+  only, needs `did_shadow` >= 1).** Why: ~265 ns per forward-pass entry (the `fwd-depth` CPU row) -- `FwdOnDraw` read the
+  depth-stencil / blend state + the VS through the getters and every forward record (`SetCapturePs`: the forward-depth batch, the
+  glow bias records, the mirror units) the PS, PS cbuffers 0..3 + windows, 16 PS SRVs and 8 PS samplers, each pointer an AddRef /
+  Release. How: a second shadow bank fed by the already-hooked `PSSetShader` / `PSSetSamplers` / `OMSetBlendState` /
+  `OMSetDepthStencilState` + new `PSSetConstantBuffers` (16) / `PSSetConstantBuffers1` (123) hooks, and by every direct trampoline
+  call of two of them (`ShNotePsSmp`: the LOD sampler sets in `LodEnter` / `LodLeave` / `LodBindSet`; `NoteDss`: the v0.9.0
+  stencil-id twins in `ObjBindForGame` / `ObjLeave` / `hkDrawIndexed`). The hooks note what was ACTUALLY bound (the LOD twins, the
+  stencil twins), right after the original call. Armed only by a forward use (`FwdStates` / `CapturePsShadow` -> `ArmAndSeed(ctx,
+  true)`), so the G-buffer pass's Notes stay one relaxed load; dropped with the first bank on every drop / kill / pass start /
+  frame start / ClearState / ExecuteCommandList / SwapDeviceContextState / other thread / vtable change (the 6 entries joined the
+  liveness targets). Exactness rules as phase 35: an output-capable PS cbuffer reads its group through the getter; the PS SRVs
+  ALWAYS read the getter (the runtime's hazard tracking unbinds an SRV whose resource is bound as an output -- not tracked); the
+  record AddRefs only a pointer its previous unreleased draw does not already name (`PsState::own`, `OwnAllPs` before a partial
+  release, `ReleasePs` honours it). `FwdStates` hands BORROWED pointers (the binding holds them while the draw hook runs;
+  `FwdDrawStates::borrowed` releases nothing, `BiasOnDraw` takes them as before). The replay's per-draw `PSSetConstantBuffers1`
+  goes through its trampoline (`kRawPsCb1`, phase 58b rules: `GfxSave::Restore` puts every PS cbuffer slot back through the hook).
+  `CaptureShadow`'s arm / seed code moved into `ShUsable` + `ArmAndSeed` unchanged. Verify mode (`did_shadow_verify`, 64 at log
+  level 4) compares the bank too: fields ps / pscb / pssmp / dss / bs (vs in the first bank's field). Expected saving: most of
+  the ~6 refcount pairs of `FwdOnDraw` + the ~13 of each PS record's shader / cbuffers / samplers (the PS SRV getter stays), on
+  the order of 0.05-0.1 ms per VR frame. **Check in the VR log:** startup `did_shadow_ps=1 (phase 93)`; the "MV draw-ids" stats
+  line's new `| PS/OM bank (phase 93): forward draws N/pass from it ... verify: X compared, 0 mismatching`; no `PS/OM bank
+  MISMATCH` warnings; the `fwd-depth` row of `CPU prof` (was ~0.16-0.21 ms/frame). Kill switch: `did_shadow_ps = 0`.
+  WARP harness: `drawid_harness.exe -1 0.1 didshadow=1 didshadowps=1 shverify=1` (new CI step) -- 2408 PS records from the bank,
+  0 mismatches, MV dump byte-identical to the HEAD build's default run; `FwdStates` itself is not in the harness (no `FwdOnDraw`
+  there): its verify runs in game.
+- **93b, outside-AA bands clipped to the VR visibility mask (`outside_aa.h` `BuildVisRows` / `ClipBox` / `SplitClip`,
+  `scene_dlaa.cpp` `SetVisibleMask` / `OaaClip`, `inject.cpp` `HmVisibleMask`).** Why: 0.207 ms per eye (GpuPerf `outside-aa`) over
+  the whole picture outside the rect, lens corners included. How: per eye, the hidden triangles of its OpenXR view (`g_hm.tri`,
+  phase 40, NDC from the SUBMITTED fov = the compositor's own mapping) only when phase 40's eye -> view check accepted that view's
+  current mesh for this eye (`HmCheckEye`'s cached verdict) and `xr_hidden_mask` is on; no mask = no clip (the bands as before). A
+  per-row CONSERVATIVE visible span (each row's centre line cut exactly against every triangle, float gaps between triangles count
+  as visible, the hull of what is left, + 8 px and +- 8 rows), each band cut into 8 strips along its long side, each strip shrunk
+  to the bounding box of its visible pixels (cached per unit until the bands or the mask move). Upscale path: one draw per box
+  (same PS, smaller viewports). In-place path: one CS dispatch over the union box (new `Params[4].zw` = the dispatch origin; 0 =
+  the old whole-image dispatch) + the copy-back of the clipped outer bands; the scratch is zeroed once at creation (hidden pixels
+  the copy-back / RCAS feather can still reach hold finite values). Tests: `outside_aa_test` part C (a lens-like mesh, 4 sizes:
+  every visible band pixel inside a box, boxes inside the bands, no mask = unchanged; 22-26 % of the band pixels skipped at
+  257..400 px images) and B5 (WARP: the CS with an origin writes exactly the full dispatch's pixels inside its box, nothing else).
+  **Check in the VR log:** `outside AA (phase 93): eye N visibility clip ready for WxH` (once per mesh / size, with its build time),
+  the LogDbg `visible-area clip -- X % of the band pixels skipped` every 600 runs per eye, and the `outside-aa` figure of the
+  `perf eye N` lines (was 0.207 ms).
+- **93c, preview depth assembly at half rate: NOT done.** The assembled picture depth (`PvAssembleTile`, 8 tile passes, 1.02 ms
+  per frame on the truck / profile screen) is THIS frame's NGX depth input and the depth the preview MVs reproject with: keeping the
+  previous frame's on every second frame changes what DLSS gets (the truck turns, the head moves in VR) -- not picture-identical.
+  (`A.frameMask` / `twin.valid` are also reset at every Present, so "keep the previous result" would need a validity change too.)
+- **93d, profiler self-cost at log level 4.** (a) `CPU_HOOK_COUNT` (`cpu_prof.h` `HookCount`): the light state Set hooks
+  (StateSet incl. the new PS cbuffer hooks, PSSetShader, PSSetSamplers, OMSetBlendState, OMSetDepthStencilState, RSSetViewports;
+  ~500 game calls per VR frame) count their calls but read no clock (a timed hook = 4 TSC reads, ~30 ns). The scope keeps a ghost
+  stack entry (`kGhost` bit) so hooked calls issued inside stay the mod's and a Block inside is still timed (Push charges nothing to
+  a ghost; `Drv` inside one is not timed either). Their hook-body time and the game's own call now land in "outside the hooks"; the
+  report prints them as `Name calls n/t`. (b) GpuPerf frame sampling: with the tuning menu closed only every 8th Present frame opens
+  a query set (`GpuPerf::SetFrameEvery`, `FrameTimed`; `Sampled()` also needs a timed frame); the menu sets 1 while open (its cost
+  column). Averages stay per timed pass; the `perf eye N` line says `sampled 1/8 frames`. The WARP harness keeps every frame.
+  **Check:** `CPU prof` line `profiler ~x ms/frame (N timer reads/frame ...)` (was 2081 reads/frame, ~0.014 ms) and `gpu-timers`
+  (was 0.015 ms/frame, 73 entries).
+- **Not verified in game:** every figure above; `FwdStates`' verify; the visibility clip on the user's headset (Virtual Desktop) and
+  its savings at the real mesh / 2928 px eyes; the in-place clip path (not the user's config).
+
+### Phase 97: the new SCS water without the jitter overscan (`water_overscan_fix`, default 1, startup only)
+
+- **Report**: issue #30 (Iceland DLC water, flat triple screen, AMD + OptiScaler) and the user's VR: ponds / sea vanish in big
+  rectangular blocks that move with the jitter phase (the gravel bed shows). VR A/B: `jitter_overscan = 0` -> the water is steady.
+- **Cause** (`captures/ets2_pond_water_audit.md`, RenderDoc ETS2 2026-11-11 frames 2564 / 3700): the new water keeps the bed's
+  G-buffer and the water surface on a checkerboard of the same G-buffer. Its G-buffer writer (PS `c369f136-...`) discards on
+  `(ftou(v5.yz / v5.x * cb0[17].xy) sum + cb0[20].x) & 1`, its forward reader (PS `185d5b7a-...`) picks the water / bed cell by the
+  same parity from its own interpolant; both use the INTERPOLATED clip position x the scene size, not `SV_Position`. A W x H
+  viewport shifted by |s| < 0.5 keeps that cell = the rasterised pixel; the phase-23 (W+1) x (H+1) viewport scales it by W / (W+1),
+  so beyond x = (0.5 - s) W / y = (0.5 - s) H the cell is 1 px off in that axis, the parity flips where exactly ONE axis is off,
+  and the reader takes the bed cell for the water cell. The model predicted all 8 VR phases of the user's capture.
+- **Fix** (`src/water_ps.h`, `src/inject.cpp` block above `hkCreatePixelShader`, `ReconcileViewports`, `hkDrawIndexed`,
+  `hkDrawIndexedInstanced`): every created pixel shader is classified once (`WaterPs::Classify`, a DXBC taint walk): **checker
+  writer** = a `div` of an input register by a component of the same input register (perspective divide), times a cbuffer value,
+  `ftou` / `ftoi`, `and ..., l(1)` of that integer, a `discard` on the parity; **checker reader** = the same parity chain and an `ld`
+  whose address carries the integer pixel AND the parity; **material flag** (PS `4b5eb7ed-...`, the G-buffer draw that writes the
+  water's depth + RT3 id before the writer tests GREATER_EQUAL against it) = no inputs, no resources, >= 4 outputs, only
+  `mov oN, l(...)` with an integer immediate; **hash** = the three audited checksums when no structural rule matched. Resource
+  fetches do not pass the address taint on (a flag bit loaded at the pixel is data, not the pixel's parity). The classified shader
+  objects live in a small lock-free-read table (`g_waterPs`, 64 slots; a shader created at a released one's address replaces / clears
+  its slot). A `DrawIndexed` / `DrawIndexedInstanced` of a jittered world / mirror pass (`g_jitterPass || g_mirJit`, not a preview)
+  whose current PS is classified sets `g_waterNoOver` BEFORE anything records the draw: `ReconcileViewports` issues the game's
+  viewport 0 + the pass's shift at the game's W x H (no overscan; TopLeft and size are the game's own, so one wide view, an offset
+  viewport and the flat multi-view passes get their own). After the draw (after `FwdOnDraw` / `BiasOnDraw`): the far column / row a
+  negative shift lost is re-drawn with the game's own viewport + scissor (`VpEdgeFill` = phase 78's `LightFsEdgeFill` body as a
+  template; cells there are exact too), then `g_waterNoOver = false` + `ReconcileViewports` = the overscan viewport again.
+- **MV replay**: `DidOnDraw` / `MirOnDraw` / `FwdOnDraw` read the viewport with `RSGetViewports` at the draw, so the draw-id replay
+  (depth EQUAL) re-issues these draws with the same W x H viewport and their ids line up. The edge re-draws are not recorded (that
+  1 px column / row of water gets no draw id on negative-shift frames: camera MVs there).
+- **Log**: start `water overscan exempt (phase 97): water_overscan_fix=N (...)`; one line per classified shader `water overscan
+  exempt (phase 97): PS <ptr> <checksum> classified: <rule> -- known hash (2026-11 audit) / NEW shader (...)` (a WARNING for a
+  hash-only match or a full table; 48 lines cap); once `first water draw (G-buffer / forward / mirror pass, ...) issued with the
+  pass's shift (..) at the game's viewport 0 = x,y WxH (no overscan; N viewport(s))`; level 4: the phase-55 / 78 stats line ends
+  with `| phase 97 water_overscan_fix N: water draws without overscan A, water draws NOT shifted B, water edge re-draws C, water
+  shaders D`.
+- **Test** `tests/water_ps_test.cpp` (CI): `Classify` on fxc look-alikes of the three game shaders (their disassembly matches the
+  audit's instruction for instruction in the parity chain; the reader compiles to `swapc` instead of the game's `movc`, both are
+  covered) -> writer / reader / flag, on SM4 too; negatives (soft-particle depth fetch, screen-space decal, `SV_Position` checker,
+  a loaded flag bit `& 1` + discard, a constant float colour, a VS, truncated / random-garbage blobs) -> none; patched known
+  checksums -> the hash fallback. WARP: a perspective quad whose PS writes the game's cell: W x H shifted by the 8 Halton phases ->
+  cell = pixel everywhere, holes exactly the edge rule's; + the edge re-draw -> no holes; mutation (W+1) x (H+1) -> 43-84 % wrong
+  parity, matching the audit's model. `water_ps_test.exe <folder>` classifies every `*.dxbc` in it: 0 matches over 333 game pixel
+  shaders of the older ETS2 / ATS captures (`ets2_flat_frame1969`, `ats_roof_flicker_frame1890`,
+  `amtrucks_2026.10.18_19.23.51_frame2443`) and the 10 PS in `captures/*.dxbc`.
+- **Not verified**: nothing in game. The real water bytecode was not available to the test (the 2026-11-11 `.rdc` files are gone;
+  the rules were written from the audit's disassembly). Multi-view: the exemption keeps the game's own viewport 0 per pass, but the
+  water's `cb0[17]` = viewport size assumption was only seen in a single-view capture. The water picture sits up to x / W px off the
+  overscanned ground around it (static, not per frame); `Draw` / `DrawInstanced` / indirect water draws are not hooked.
