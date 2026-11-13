@@ -1069,7 +1069,10 @@ static int PartC() {
            n, li.samples, li.samplesUsed, li.spreadMm, MaxCornerDiff(c5, truth));
     CHECK(li.samples == kLockSamplesDefault, "%d readbacks averaged (want %d)", li.samples, kLockSamplesDefault);
     CHECK(MaxCornerDiff(c5, truth) < 0.4, "the averaged lock is %.2f cm off the truth", MaxCornerDiff(c5, truth));
-    // ---- phase 51c: the ATS 14:38 truck -- every part its own transform, the STEERING WHEEL the biggest (the reference) ----
+    // ---- phase 51c: the ATS 14:38 truck -- every part its own transform, the STEERING WHEEL the biggest ----
+    // phase 99: the wheel turned at the lock-on does not share the cab frame's rotation (body / dash / console do) -> it is never
+    // the reference nor a carrier; the body is the reference and the stored pose holds the 3 cab-turning parts (51c: the wheel was
+    // the reference, its turn baked into the pose until the majority vote outvoted it).
     SetLockSamples(1);
     g_ownTransforms = true;
     g_haveStored = false;
@@ -1078,11 +1081,16 @@ static int PartC() {
     n = RunUntilLock(g, ring, f, 300, GetStats().locks, ErrNone);
     FpsProfile::CabPose cpw;
     double b1[4][4] = {}, d1[4][4] = {};
-    CHECK(n > 0 && GetStats().refIc == kIc[PWheel] && CurrentCabPose(&cpw) && EntryCorners(kIc[PBody], b1) && EntryCorners(kIc[PDash], d1),
-          "51c lock 1 (ref %u)", GetStats().refIc);
-    printf("  51c: first lock on the wheel (ref IndexCount %u): the stored pose holds %d part(s): %u%s%u%s%u\n", GetStats().refIc, cpw.Parts(),
+    CHECK(n > 0 && GetStats().refIc == kIc[PBody] && CurrentCabPose(&cpw) && EntryCorners(kIc[PBody], b1) && EntryCorners(kIc[PDash], d1),
+          "51c lock 1 (ref %u, want the body: phase 99)", GetStats().refIc);
+    printf("  51c: first lock, wheel turned 7 deg (ref IndexCount %u): the stored pose holds %d part(s): %u%s%u%s%u\n", GetStats().refIc, cpw.Parts(),
            cpw.Part(0).ic, cpw.Parts() > 1 ? ", " : "", cpw.Parts() > 1 ? cpw.Part(1).ic : 0u, cpw.Parts() > 2 ? ", " : "", cpw.Parts() > 2 ? cpw.Part(2).ic : 0u);
-    CHECK(cpw.Parts() == 3, "the stored pose holds %d parts (want 3: wheel, body, dash / console)", cpw.Parts());
+    CHECK(cpw.Parts() == 3, "the stored pose holds %d parts (want 3: body, dash, console)", cpw.Parts());
+    {
+        bool wheelIn = false;
+        for (int i = 0; i < cpw.Parts(); ++i) if (cpw.Part(i).ic == kIc[PWheel]) wheelIn = true;
+        CHECK(!wheelIn, "phase 99: the turned wheel entered the stored pose");
+    }
     {                                                     // (through the line: 3 parts round-trip)
         FpsProfile::Vals v;
         uint64_t k = 0;
@@ -1092,45 +1100,38 @@ static int PartC() {
               "the 3-part cab pose did not round-trip (%zu chars)", ln.size());
     }
     g_haveStored = true;
-    // later lock-on with the wheel straight: the body + dash agree, the wheel does not -> placed from the majority, the box exactly
-    // where it was in the cab (no tilt)
+    // later lock-on with the wheel straight + a pose error: every stored part agrees (phase 99: no wheel in the pose) -> placed from
+    // the stored cab pose, the box exactly where it was in the cab (no tilt)
     g_wheelA = 0.0;
     Reset("test 51c: the wheel straight");
     n = RunUntilLock(g, ring, f, 300, GetStats().locks, ErrConst);
     {
         const LockInfo li2 = GetLockInfo();
         double b2[4][4] = {};
-        CHECK(n > 0 && li2.placed == kPlacedCab && li2.cabFound == 3 && li2.cabAgree == 2 && li2.cabIc != kIc[PWheel] && EntryCorners(kIc[PBody], b2),
+        CHECK(n > 0 && li2.placed == kPlacedCab && li2.cabFound == 3 && li2.cabAgree == 3 && li2.cabIc != kIc[PWheel] && EntryCorners(kIc[PBody], b2),
               "51c majority: placed %d found %d agree %d ic %u", li2.placed, li2.cabFound, li2.cabAgree, li2.cabIc);
         printf("  51c: re-lock with the wheel straight + a pose error: %d of %d stored parts agree, placed from IndexCount %u, body corners moved %.2g cm\n",
                li2.cabAgree, li2.cabFound, li2.cabIc, MaxCornerDiff(b2, b1));
         CHECK(MaxCornerDiff(b2, b1) < 1e-3, "the majority placement moved the box %.3g cm (the stored 3 x 4 drops T's float-noise projective row: ~1e-5 cm)", MaxCornerDiff(b2, b1));
-        // the wheel-only pose (what 51b stored for the ATS truck): it carries the wheel's old turn into the box -> tilted
-        FpsProfile::CabPose only = cpw;
-        only.nx = 0;
-        if (only.ic != kIc[PWheel]) { for (int i = 0; i < cpw.Parts(); ++i) if (cpw.Part(i).ic == kIc[PWheel]) only.SetPart(0, cpw.Part(i)); }
-        CHECK(PlaceFromCab(only), "PlaceFromCab (wheel only)");
-        double b3[4][4] = {};
-        EntryCorners(kIc[PBody], b3);
-        printf("  51c: the same lock from a WHEEL-ONLY pose (51b): body corners off by %.2f cm (the wheel's 7-deg turn baked in)\n", MaxCornerDiff(b3, b1));
-        CHECK(MaxCornerDiff(b3, b1) > 1.0, "the wheel-only pose should be off (%.3f cm)", MaxCornerDiff(b3, b1));
-        // the wheel turns while attached: the monitor finds it moving -> CabMovedSerial names it (the profile drops it)
-        FpsProfile::CabPart mp;
-        const uint64_t ms0 = CabMovedSerial(&mp);
+        // (51b's wheel-only pose and the moving-wheel report: phase 99 keeps a turned wheel out of the pose; the report of a wheel
+        // that entered straight is Part D 4 below.) DropCabPart on the 3-part pose: one part out, then the last part clears it.
+        const FpsProfile::CabPart dp = cpw.Part(1);
+        FpsProfile::Store st;
+        st.Put(1, FpsProfile::Vals());
+        st.PutCab(1, cpw);
+        CHECK(st.DropCabPart(1, dp.ic, dp.stride, dp.fmt) && st.Cab(1) && st.Cab(1)->Parts() == 2, "DropCabPart (3 -> 2)");
+        FpsProfile::CabPose one = cpw;
+        one.nx = 0;
+        st.PutCab(1, one);
+        const FpsProfile::CabPart p0 = cpw.Part(0);
+        CHECK(st.DropCabPart(1, p0.ic, p0.stride, p0.fmt) && !st.Cab(1), "DropCabPart of the last part must clear the pose");
+        // the wheel turns while attached: it carries nothing, the box stays put
         static double (*turn)(int) = [](int k) { return 0.4 * std::sin(k * 0.15); };
         g_wheelAt = turn;
         RunUntilLock(g, ring, f, 80, ~0ull, ErrNone);
         g_wheelAt = nullptr;
-        const uint64_t ms1 = CabMovedSerial(&mp);
-        CHECK(ms1 > ms0 && mp.ic == kIc[PWheel], "the moving stored wheel part was not reported (serial %llu -> %llu, ic %u)",
-              (unsigned long long)ms0, (unsigned long long)ms1, mp.ic);
-        FpsProfile::Store st;
-        st.Put(1, FpsProfile::Vals());
-        st.PutCab(1, cpw);
-        CHECK(st.DropCabPart(1, mp.ic, mp.stride, mp.fmt) && st.Cab(1) && st.Cab(1)->Parts() == 2, "DropCabPart (3 -> 2)");
-        FpsProfile::CabPose one = only;
-        st.PutCab(1, one);
-        CHECK(st.DropCabPart(1, mp.ic, mp.stride, mp.fmt) && !st.Cab(1), "DropCabPart of the last part must clear the pose");
+        double b3[4][4] = {};
+        CHECK(EntryCorners(kIc[PBody], b3) && MaxCornerDiff(b3, b2) < 1e-3, "the turning wheel moved the box %.3g cm", MaxCornerDiff(b3, b2));
         // the next lock-on: the wheel is remembered as moving (by geometry) -> never the reference again
         g_wheelA = 0.0;
         g_haveStored = false;
@@ -1368,10 +1369,11 @@ static int PartD() {
           "the square pose moved (leveledOld %d, residual %.3g deg, %.3g cm)", (int)li.leveledOld, li.turnDeg, MaxCornerDiff(c3, c2));
     // 4. the ATS 47a8 line: a lock placed from the PLAY SPACE on the steering wheel stores a pose with the wheel; the monitor then finds
     //    it moving -> reported (51c reported only stored-pose locks) and dropped from the stored pose; a later lock-on from a stored pose
-    //    that still names the remembered wheel reports it again
+    //    that still names the remembered wheel reports it again. phase 99: only a wheel STRAIGHT at the lock-on shares the cab frame's
+    //    rotation and can enter (a turned one is kept out, 51c above) -- this is the case the monitor still guards.
     g_ownTransforms = true;
     g_haveStored = false;
-    g_wheelA = 0.12;
+    g_wheelA = 0.0;
     Reset("test 51d: wheel first");
     n = RunUntilLock(g, ring, f, 300, GetStats().locks, ErrNone);
     FpsProfile::CabPose cw;
@@ -1390,7 +1392,7 @@ static int PartD() {
         CabMovedSince(&ser, tmp, 16);                     // (skip the reports of the earlier parts)
         ser = CabMovedSerial(nullptr);
     }
-    static double (*turn)(int) = [](int k) { return 0.12 + 0.4 * std::sin(k * 0.15); };
+    static double (*turn)(int) = [](int k) { return 0.4 * std::sin(k * 0.15); };
     g_wheelAt = turn;
     RunUntilLock(g, ring, f, 80, ~0ull, ErrNone);
     g_wheelAt = nullptr;

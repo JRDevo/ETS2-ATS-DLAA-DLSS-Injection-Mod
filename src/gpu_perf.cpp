@@ -29,6 +29,7 @@ const SecInfo kInfo[kCount] = {
     { "bias-mask", true, false },                                                                  // phase 49
     { "outside-aa", true, false },                                                                 // phase 81
     { "rewind", true, false },                                                                     // phase 89c
+    { "motion-blur", true, false },                                                                // phase 100
 };
 static_assert(sizeof(kInfo) / sizeof(kInfo[0]) == kCount, "section table");
 

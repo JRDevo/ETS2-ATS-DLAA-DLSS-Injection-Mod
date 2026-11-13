@@ -4,6 +4,7 @@
 #include "scene_dlaa.h"
 #include "gpu_perf.h"
 #include "outside_aa.h"                                // phase 81
+#include "motion_blur.h"                               // phase 100
 #include "shader_cache.h"
 #include "game_taa.h"                                  // phase 82: GameTaa::SplitX
 #include "log.h"
@@ -696,6 +697,8 @@ void SceneDlaa::RegisterShaders() {
                      "CSMain", "cs_5_0");
     ShaderCache::Add(ShaderCache::kOutsideAaPs, OutsideAa::kOutsideAaShader, sizeof(OutsideAa::kOutsideAaShader) - 1, "outside_aa_ps",
                      "PSMain", "ps_5_0");
+    ShaderCache::Add(ShaderCache::kMotionBlurCs, MotionBlur::kMotionBlurShader, sizeof(MotionBlur::kMotionBlurShader) - 1,
+                     "motion_blur", "CSMain", "cs_5_0");   // phase 100
 }
 
 bool SceneDlaa::ShadersReady() { return ShaderCache::Done(); }
@@ -1202,6 +1205,8 @@ bool  SceneDlaa::s_hdrLinear = true;     // v0.8.0 dlaa.ini dlss_hdr (default 1 
 int   SceneDlaa::s_oaaMode = 2;          // phase 81 dlaa.ini outside_aa (default 2 = unjitter + edge AA; 0 = off)
 int   SceneDlaa::s_oaaSignX = 1;         // phase 81: jitter_sign_x / _y (inject.cpp keeps them in step, default +1)
 int   SceneDlaa::s_oaaSignY = 1;
+int   SceneDlaa::s_mbPct = 0;            // phase 100 dlaa.ini motion_blur (0 = off)
+bool  SceneDlaa::s_mbShow = false;       // phase 100b dlaa.ini motion_blur_show (pink test view)
 
 bool SceneDlaa::EnsureSharpen(ID3D11Device* dev) {
     HRESULT hr;
@@ -2011,16 +2016,22 @@ bool SceneDlaa::Run(ID3D11DeviceContext* ctx, ID3D11Texture2D* tonemap, ID3D11Te
         ctx->CSSetUnorderedAccessViews(0, 1, &nullUav, &keep);
         ctx->CSSetSamplers(0, 1, &nullSmp);
     }
-    if (m_timing) GpuMark(ctx, 5);                     // after sharpen
+    // d1b. phase 100 MOTION BLUR (src/motion_blur.h): the result smeared along this Run's motion vectors into m_mbTex, which goes
+    // back / is composited instead. Only on a unit the caller allows (the flat main view), with real motion vectors this frame,
+    // not on a history reset (a camera cut: the vectors are not motion), not with the MV debug view.
+    const bool blurred = ok && m_mbOk && s_mbPct > 0 && mvDone && !reset && !mvDebug &&
+                         MbRun(dev.Get(), ctx, sharpened ? m_sharpSrv.Get() : m_outSrv.Get(),
+                               m_hdr ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM);
+    if (m_timing) GpuMark(ctx, 5);                     // after sharpen (phase 100: + motion blur)
 
     if (ok) {
-        ID3D11Texture2D* res = sharpened ? m_sharp.Get() : m_out.Get();
+        ID3D11Texture2D* res = blurred ? m_mbTex.Get() : (sharpened ? m_sharp.Get() : m_out.Get());
         m_result = res;                                // v0.7.0: ResultTex() (self-test / snapshot)
         if (m_up || m_compOut) {
             // v0.7.0 upscale: nothing goes back into the tonemap; Composite() draws `res` into the eye RT after
             // the game's blit. Composite needs the SRV + its shaders; without them the result is dropped.
             // phase 82: the same for a native-size Run with SetCompositeOut (the game's TAA picture is the background)
-            m_compSrc = sharpened ? m_sharpSrv.Get() : m_outSrv.Get();
+            m_compSrc = blurred ? m_mbSrv.Get() : (sharpened ? m_sharpSrv.Get() : m_outSrv.Get());
             m_compPending = m_compSrc != nullptr && EnsureComposite(dev.Get());
             // phase 81: the outside is drawn by Composite (from the game's blit SRV0, before the DLSS result) -- arm it
             // phase 82: not with SetCompositeOut (the outside is the game's TAA picture: already anti-aliased, never re-shifted)
@@ -2681,11 +2692,98 @@ void SceneDlaa::OaaShutdown() {
     m_oaaCsTried = m_oaaPsTried = m_oaaCommonTried = m_oaaTexFailed = false;
 }
 
+// ---- phase 100 MOTION BLUR (see scene_dlaa.h and src/motion_blur.h) -----------------------------------------------------------
+static_assert(MotionBlur::kCbFloats == 12, "SceneDlaa::m_mbData holds MotionBlur::kCbFloats floats");
+bool SceneDlaa::MbRun(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11ShaderResourceView* src, DXGI_FORMAT fmt) {
+    if (!src || !m_mvSrv || !m_ow || !m_oh) return false;
+    if (!m_mbCs) {
+        if (m_mbCsTried || !ShaderCache::Ready(ShaderCache::kMotionBlurCs)) return false;   // not compiled yet: next Run
+        m_mbCsTried = true;
+        size_t sz = 0;
+        const void* code = ShaderCache::Code(ShaderCache::kMotionBlurCs, &sz);
+        HRESULT hr = E_FAIL;
+        if (!code || FAILED(hr = dev->CreateComputeShader(code, sz, nullptr, &m_mbCs))) {
+            LogErr("motion blur (phase 100): CS unavailable on eye %d (hr=0x%lx) %s -- no blur", m_eye, hr,
+                ShaderCache::Error(ShaderCache::kMotionBlurCs));
+            return false;
+        }
+        D3D11_BUFFER_DESC bd{};
+        bd.ByteWidth = sizeof(m_mbData);
+        bd.Usage = D3D11_USAGE_DYNAMIC;
+        bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        if (FAILED(hr = dev->CreateBuffer(&bd, nullptr, &m_mbCb))) {
+            m_mbCs.Reset();
+            LogErr("motion blur (phase 100): constant buffer create hr=0x%lx on eye %d -- no blur", hr, m_eye);
+            return false;
+        }
+    }
+    // the scratch: the result's size and format (4 B/px LDR, 8 B/px HDR)
+    if (!m_mbTex || m_mbW != m_ow || m_mbH != m_oh || m_mbFmt != fmt) {
+        if (m_mbTexFailed && m_mbW == m_ow && m_mbH == m_oh && m_mbFmt == fmt) return false;
+        m_mbTex.Reset(); m_mbUav.Reset(); m_mbSrv.Reset();
+        m_mbW = m_ow; m_mbH = m_oh; m_mbFmt = fmt; m_mbTexFailed = false;
+        HRESULT hr;
+        if (FAILED(hr = MakeTex(dev, m_ow, m_oh, fmt, D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE, &m_mbTex)) ||
+            FAILED(hr = dev->CreateUnorderedAccessView(m_mbTex.Get(), nullptr, &m_mbUav)) ||
+            FAILED(hr = dev->CreateShaderResourceView(m_mbTex.Get(), nullptr, &m_mbSrv))) {
+            m_mbTex.Reset(); m_mbUav.Reset(); m_mbSrv.Reset();
+            m_mbTexFailed = true;
+            LogErr("motion blur (phase 100): eye %d scratch %ux%u create hr=0x%lx -- no blur at this size", m_eye, m_ow, m_oh, hr);
+            return false;
+        }
+        Log("motion blur (phase 100): eye %d scratch %ux%u %s created (%.0f MB)", m_eye, m_ow, m_oh,
+            fmt == DXGI_FORMAT_R16G16B16A16_FLOAT ? "RGBA16F" : "RGBA8",
+            (double)m_ow * (double)m_oh * (fmt == DXGI_FORMAT_R16G16B16A16_FLOAT ? 8.0 : 4.0) / (1024.0 * 1024.0));
+    }
+    float cb[MotionBlur::kCbFloats];
+    MotionBlur::FillCb(cb, m_ow, m_oh, m_w, m_h, s_mbPct, s_mbShow);
+    if (!m_mbDataValid || memcmp(cb, m_mbData, sizeof(cb)) != 0) {
+        D3D11_MAPPED_SUBRESOURCE mp{};
+        if (FAILED(ctx->Map(m_mbCb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mp))) return false;   // stale CB: skip this frame
+        memcpy(mp.pData, cb, sizeof(cb));
+        ctx->Unmap(m_mbCb.Get(), 0);
+        memcpy(m_mbData, cb, sizeof(cb));
+        m_mbDataValid = true;
+    }
+    // UAVs first (all 8 slots, CsState restores them): RCAS's / NGX's UAV of the source must be gone before its SRV is bound
+    ID3D11UnorderedAccessView* uav[8] = { m_mbUav.Get() };
+    const UINT keep8[8] = { (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1, (UINT)-1 };
+    ID3D11ShaderResourceView* srv[2] = { src, m_mvSrv.Get() };
+    ID3D11ShaderResourceView* snull[2] = {};
+    ID3D11Buffer* b = m_mbCb.Get();
+    ctx->CSSetShader(m_mbCs.Get(), nullptr, 0);
+    ctx->CSSetUnorderedAccessViews(0, 8, uav, keep8);
+    ctx->CSSetShaderResources(0, 2, srv);
+    ctx->CSSetConstantBuffers(0, 1, &b);
+    {
+        GpuPerfScope gp(ctx, GpuPerf::kMotionBlur);
+        ctx->Dispatch((m_ow + 7) / 8, (m_oh + 7) / 8, 1);
+    }
+    ID3D11UnorderedAccessView* nullUav = nullptr;
+    const UINT keep = (UINT)-1;
+    ctx->CSSetShaderResources(0, 2, snull);
+    ctx->CSSetUnorderedAccessViews(0, 1, &nullUav, &keep);
+    ++m_mbRuns;
+    if (!m_mbLogged) {
+        m_mbLogged = true;
+        Log("motion blur (phase 100): eye %d first blurred frame -- motion_blur=%d %%, result %ux%u, motion vectors %ux%u, max smear "
+            "%.0f px, %s", m_eye, s_mbPct, m_ow, m_oh, m_w, m_h, (double)MotionBlur::MaxLen(m_ow), m_up ? "DLSS upscale" : "native");
+    }
+    return true;
+}
+
+void SceneDlaa::MbShutdown() {
+    m_mbCs.Reset(); m_mbCb.Reset(); m_mbTex.Reset(); m_mbUav.Reset(); m_mbSrv.Reset();
+    m_mbW = m_mbH = 0; m_mbFmt = DXGI_FORMAT_UNKNOWN; m_mbDataValid = false; m_mbCsTried = false; m_mbTexFailed = false;
+}
+
 void SceneDlaa::Shutdown() {
     m_dlaa.Shutdown();
     m_cam.Shutdown();
     BiasShutdown();                                    // phase 49
     OaaShutdown();                                     // phase 81
+    MbShutdown();                                      // phase 100
     m_mvDbgCs.Reset(); m_mvDbgTried = false;
     m_sharp.Reset(); m_sharpUav.Reset(); m_sharpSrv.Reset(); m_outSrv.Reset(); m_sharpRes = false;
     m_sharpCs.Reset(); m_sharpCb.Reset(); m_sharpSampler.Reset(); m_sharpCbValid = false;

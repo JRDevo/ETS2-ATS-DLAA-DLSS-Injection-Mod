@@ -1,3 +1,7 @@
+// v0.17.0-rc1 -- phase 99: the VR fps box attached to the vehicle no longer locks on the coach's steering wheel (fps_cab.cpp
+//           ProcessLock: only groups that share the cab frame's rotation can win). Phase 100 / 100b (issue #33): flat motion blur
+//           (src/motion_blur.h, scene_dlaa.cpp MbRun; dlaa.ini motion_blur 0..200 %, motion_blur_show pink test view; menu row
+//           "Motion blur" in Motion and mirrors). Details in docs/DEVELOPMENT.md.
 // v0.16.0 -- phases 77-90: cut-out mips (77), roof / fence shadow jitter (78), rewind capture (79), outside AA (81), game TAA
 //           mix + split (82-86, 90: Mode row Mix (TAA + DLAA) / Mix (TAA + DLSS), console-off hint 90b, stretched-blit
 //           mix 90c), In-game UI (83-85), plain menu + hidden rows (87), fps graph (88), one-press bug report (89, zips
@@ -838,6 +842,7 @@
 #include "flat_views.h"                             // v0.12.0 issue #12: flat multi-view (multi-monitor) detection (both builds)
 #include "other_mods.h"                             // phase 94: the other mods in the plain log (issue #31)
 #include "bug_report.h"                             // phase 89b: the one-press bug report (zip, scrubber, plan; both builds)
+#include "motion_blur.h"                            // phase 100: flat motion blur (issue #33; steps, pure maths; both builds)
 
 namespace {
 
@@ -1098,6 +1103,10 @@ int               g_wireDiagWindows = 0;
 // (default 100; 0 = off: NGX gets no mask), live from the menu's "Light glow ghosting fix" row (25 % steps)
 int               g_biasCfg = 100;
 bool              g_biasExplicit = false;   // set in dlaa.ini or changed in the menu -> SaveSettings writes dlss_bias_mask
+// phase 100 MOTION BLUR (src/motion_blur.h, issue #33): dlaa.ini motion_blur = strength in % 0..100 (25 % steps, default 0 = off),
+// live from the menu's "Motion blur" row (flat only). Only the flat main view's units blur (SetMotionBlurOk before each Run).
+int               g_mblurPct = 0;
+bool              g_mblurShow = false;     // phase 100b dlaa.ini motion_blur_show: the pink test view (the row's last step)
 // phase 89b-d BUG REPORT (src/bug_report.h, the capture below SelfTestStep, the menu's "Bug report" group): dlaa.ini rewind_secs
 // (0 / 0.5 / 1 / 2 / 3 s, default 0 = off; -1 = not set: rewind_frames decides, the phase 79 key), rewind_diag_frames (the planes
 // DLSS got, for the last N rewind frames; default 8), capture_mode (1 quick, 2 full), capture_keep (3 / 5 / 10 / 0 = all, default 5),
@@ -3476,6 +3485,8 @@ void SaveSettings(uint64_t n) {
     }
     if (g_xrHiddenMaskExplicit) snprintf(add("xr_hidden_mask"), sizeof(kv[0].val), "%d", g_xrHiddenMask);   // phase 40
     if (g_biasExplicit) snprintf(add("dlss_bias_mask"), sizeof(kv[0].val), "%d", g_biasCfg);   // phase 49 (glow ghosting row)
+    snprintf(add("motion_blur"), sizeof(kv[0].val), "%d", g_mblurPct);                       // phase 100 (Motion blur row)
+    snprintf(add("motion_blur_show"), sizeof(kv[0].val), "%d", g_mblurShow ? 1 : 0);         // phase 100b (its "+ pink" step)
     if (g_bugExplicit) {                                  // phase 89d (the Bug report rows; report_all's forced values never)
         if (g_rewindSecs >= 0.0f) snprintf(add("rewind_secs"), sizeof(kv[0].val), "%.1f", (double)g_rewindSecs);
         snprintf(add("capture_mode"), sizeof(kv[0].val), "%d", g_captureMode);
@@ -14251,6 +14262,7 @@ bool PreTonemapRun(ID3D11DeviceContext1* ctx, PassSlot& slot, ID3D11Texture2D* F
     dl.SetEye(0);
     dl.SetTiming(GpuTimingOn());
     dl.SetOpticalCentre(0.5f, 0.5f);
+    dl.SetMotionBlurOk(!FramePaceVrLoop());               // phase 100: flat only (never in VR)
     dl.Mv().SetObjPassInfo(slot.s, (int)(g_passSeq - g_fifoHead), g_cOverflow, g_passSeq);
     const int64_t now = Qpc();
     const double ivMs = g_eyeLastBlitT[0] && g_qpcFreq > 0 ? (double)(now - g_eyeLastBlitT[0]) * 1000.0 / (double)g_qpcFreq : 0.0;
@@ -16054,6 +16066,7 @@ void HandlePossibleBlit(ID3D11DeviceContext* ctx, UINT vertexCount) {
             if (taaLdr) ++g_taaLdrBlits;
         }
         ID3D11Texture2D* const runTex = taaLdr ? slot.taaLdr.Get() : tex;
+        dl.SetMotionBlurOk(isBackbuffer && !FramePaceVrLoop());   // phase 100: the flat main view only (never the VR eyes)
         t_inDlaa = true;
         const bool ok = dl.Run(ctx, runTex, PassDepth(slot), &slot.twin, &slot.cand, njx, njy, resetUsed, g_mvOn.load(),
                                g_mvDebug.load(), candBad, upW, upH, g_objCfg ? objRec : nullptr,
@@ -20570,7 +20583,7 @@ enum MenuRowId {
     // kMenuDesc is in THIS order. Rows of the other mode (flat / VR) are hidden: MenuRowMode.
     MR_MODE, MR_TAAMIX, MR_PROFILE, MR_MODEL,           // phase 90: Mix amount under Mode (shown only while Mix is used)
     MR_PICGRP, MR_SHARP, MR_WIDTH, MR_LOD, MR_LODCUT, MR_FWD, MR_BIAS, MR_AREA,
-    MR_MOTGRP, MR_DRAWIDS, MR_MIRROR, MR_MIRTURNS,
+    MR_MOTGRP, MR_DRAWIDS, MR_MIRROR, MR_MIRTURNS, MR_MBLUR,       // phase 100: + Motion blur (flat)
     MR_FRGRP, MR_CPU, MR_CPUPIN, MR_FPSCAP, MR_REFLEX, MR_VRFPSCAP,
     MR_VRPGRP, MR_TURBO, MR_VRS, MR_VRSSIZE, MR_VRSPASS, MR_VRSSTR, MR_VRSEYE, MR_HMASK, MR_OFXR, MR_VECTORXR,
     MR_UIGRP, MR_UISET, MR_UIY, MR_UIX, MR_UIDIST, MR_UIPITCH, MR_UIYAW, MR_UIFOV, MR_UIRADIUS, MR_UIRESET,
@@ -20591,7 +20604,7 @@ static_assert(MR_COUNT <= TuningMenu::kMaxRows, "tuning menu: too many rows");
 struct MenuGroupDef { int header, last; const wchar_t* title; const wchar_t* titleAll; };
 constexpr MenuGroupDef kMenuGroups[] = {
     { MR_PICGRP,   MR_AREA,     N_(L"Picture"), nullptr },   // phase 43 / 84
-    { MR_MOTGRP,   MR_MIRTURNS, N_(L"Motion and mirrors"), nullptr },   // phase 43 / 84
+    { MR_MOTGRP,   MR_MBLUR,    N_(L"Motion and mirrors"), nullptr },   // phase 43 / 84 / 100
     { MR_FRGRP,    MR_VRFPSCAP, N_(L"Frame rate"), nullptr },   // phase 52 / 84 (was "Frame rate and CPU")
     { MR_VRPGRP,   MR_VECTORXR, N_(L"Performance"), N_(L"VR performance") },   // phase 43 / 84 (+ OFXR / VectorXR); 85: mode word off
     { MR_UIGRP,    MR_UIRESET,  N_(L"In-game UI"), N_(L"In-game UI (VR)") },   // phase 83; 85: mode word off
@@ -20601,7 +20614,7 @@ constexpr MenuGroupDef kMenuGroups[] = {
     { MR_BUGGRP,   MR_CAPNOW,   N_(L"Bug report"), nullptr },         // phase 89d (Log detail moved in here)
 };
 constexpr int kMenuGroupCount = (int)(sizeof(kMenuGroups) / sizeof(kMenuGroups[0]));
-static_assert(MR_PICGRP + 1 == MR_SHARP && MR_AREA + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_MIRTURNS + 1 == MR_FRGRP &&
+static_assert(MR_PICGRP + 1 == MR_SHARP && MR_AREA + 1 == MR_MOTGRP && MR_MOTGRP + 1 == MR_DRAWIDS && MR_MBLUR + 1 == MR_FRGRP &&
               MR_FRGRP + 1 == MR_CPU && MR_VRFPSCAP + 1 == MR_VRPGRP && MR_VRPGRP + 1 == MR_TURBO && MR_VECTORXR + 1 == MR_UIGRP &&
               MR_UIGRP + 1 == MR_UISET && MR_UIRESET + 1 == MR_FPS && MR_FPSGRP + 1 == MR_FPSX && MR_FPSDIST + 1 == MR_PANELGRP &&
               MR_PANELGRP + 1 == MR_POSX && MR_FACE + 1 == MR_CMPGRP && MR_CMPGRP + 1 == MR_DLAA && MR_PRETM + 1 == MR_BUGGRP &&
@@ -20647,6 +20660,10 @@ const wchar_t* const kMenuDesc[] = {
     L"every mirror. camera = cheapest per mirror, moving traffic can leave trails in the glass; the others follow each moving thing."),
     N_(L"on = each mirror gets its DLAA every 2nd frame and shows its last clean picture in between: about half the mirror cost. Edges "
     L"stay clean; moving things in the glass update at half rate. off = every mirror every frame."),
+    // phase 100 (MR_MBLUR)
+    N_(L"Flat only. Things that move fast past you get a smear along their motion, like in films. Your own truck and the cab stay "
+    L"sharp. off = none (default); 25 - 200 % = a longer smear (100 % = one frame of motion). The last step tints the blurred "
+    L"pixels pink: a test to see where it works."),
     // phase 52 / 84 (MR_FRGRP)
     N_(L"Frame rate and CPU: CPU tuning, AMD cache cores, an FPS cap and Low delay (Reflex) for flat, an FPS cap for VR. Right opens the group, Left closes it; it starts closed every time the menu opens."),
     // phase 54 (MR_CPU); phase 87: which part works where
@@ -20844,7 +20861,7 @@ constexpr int MenuRowMode(int id) {
     case MR_FPSLOCK: case MR_FPSPROF: case MR_FPSREMEAS: case MR_FPSYAW: case MR_FPSPITCH: case MR_FPSROLL: case MR_FPSDIST:
     case MR_PANELLOCK: case MR_DEPTH: case MR_FACE:
         return kMmVr;
-    case MR_FPSCAP: case MR_REFLEX: case MR_PRETM:
+    case MR_FPSCAP: case MR_REFLEX: case MR_PRETM: case MR_MBLUR:   // phase 100: + Motion blur
         return kMmFlat;
     default:
         return kMmBoth;
@@ -21313,6 +21330,23 @@ void StepBiasMask(int dir, uint64_t n) {
                                            "by this share (the bias current colour mask)"
                                          : "off: NGX gets no mask, the glows come from the history as before phase 49");
     PlayTones(1, g_biasCfg ? 400 + 8 * g_biasCfg : 300, 120, 0);
+}
+// phase 100: the Motion blur row (flat only): 25 % steps, Right = longer smear, Left = shorter (0 = off); a low beep at the ends
+void StepMotionBlur(int dir, uint64_t n) {
+    // phase 100b: steps 0, 25, ..., 200 %, then "200 % + pink" (the test view) as the last one
+    constexpr int kTop = MotionBlur::kMaxPct / MotionBlur::kStepPct;   // index of 200 %
+    const int cur = g_mblurShow ? kTop + 1 : MotionBlur::ClampPct(g_mblurPct) / MotionBlur::kStepPct;
+    const int nxt = cur + (dir > 0 ? 1 : -1);
+    if (nxt < 0 || nxt > kTop + 1) { PlayTones(1, 200, 120, 0); return; }
+    g_mblurShow = nxt > kTop;
+    g_mblurPct = (nxt > kTop ? kTop : nxt) * MotionBlur::kStepPct;
+    SceneDlaa::SetMotionBlur(g_mblurPct);
+    SceneDlaa::SetMotionBlurShow(g_mblurShow);
+    Log("Motion blur (phase 100): motion_blur=%d %%%s (tuning menu, Present #%llu) -- %s", g_mblurPct,
+        g_mblurShow ? " + pink test view" : "", (unsigned long long)n,
+        g_mblurPct ? "flat main view: the DLAA result is smeared along each pixel's own motion vector (own truck stays sharp)"
+                   : "off: no blur");
+    PlayTones(1, g_mblurPct ? 400 + 8 * g_mblurPct : 300, 120, 0);
 }
 // ---- phase 89d: the Bug report rows ----
 int CaptureModeNow() { return g_reportAll ? BugReport::kCaptureFull : g_captureMode; }
@@ -21925,6 +21959,10 @@ void ResetSettings(uint64_t n) {
     g_biasCfg = 100;                                      // phase 49: the glow bias mask at full strength
     g_biasExplicit = false;
     SceneDlaa::SetBiasStrength(g_biasCfg);
+    g_mblurPct = 0;                                       // phase 100: motion blur off
+    g_mblurShow = false;
+    SceneDlaa::SetMotionBlurShow(false);
+    SceneDlaa::SetMotionBlur(0);
     ReportAllSet(false, n, "Reset row");                  // phase 89d: the Bug report rows (the log level is reset below anyway)
     g_rewindSecs = -1.0f;
     g_captureMode = BugReport::kCaptureQuick;
@@ -21981,6 +22019,7 @@ void ResetSettings(uint64_t n) {
         "mirror_turns",                                                                                 // phase 41
         "xr_hidden_mask",                                                                               // phase 40
         "dlss_bias_mask",                                                                               // phase 49
+        "motion_blur", "motion_blur_show",                                                              // phase 100 / 100b
         "rewind_secs", "capture_mode", "capture_keep", "report_all",                                    // phase 89d
         "cpu_pcore", "cpu_priority", "cpu_no_throttle",                                                 // phase 54
         "cpu_cache_pin",                                                                                // phase 87 (menu row)
@@ -22031,7 +22070,7 @@ void ResetSettings(uint64_t n) {
 // COST WHILE CLOSED: nothing of this runs (MenuPerfTick is called only while open); the profiler / GPU timers / g_measure go back
 // to the dlaa.ini + log level state at the close (MenuPerfClose): below level 4 every profiler scope is one relaxed load + a
 // not-taken branch, every GPU timer section one call + a flag test, every legacy CPU timer one relaxed load (MeasureOn).
-enum MenuCostGrp { MG_NGX, MG_PART, MG_CAM, MG_FWD, MG_MIR, MG_SHARP, MG_COPY, MG_BIAS, MG_REWIND, MG_COUNT };   // phase 49: + MG_BIAS; 89c: + MG_REWIND
+enum MenuCostGrp { MG_NGX, MG_PART, MG_CAM, MG_FWD, MG_MIR, MG_SHARP, MG_COPY, MG_BIAS, MG_REWIND, MG_MBLUR, MG_COUNT };   // phase 100: + MG_MBLUR   // phase 49: + MG_BIAS; 89c: + MG_REWIND
 int MenuCostGroup(int sec) {
     switch (sec) {
     case GpuPerf::kNgx:      return MG_NGX;
@@ -22050,6 +22089,7 @@ int MenuCostGroup(int sec) {
     case GpuPerf::kCopyIn:   case GpuPerf::kCopyOut:   case GpuPerf::kDbgView:  return MG_COPY;
     case GpuPerf::kOutsideAa: return MG_COPY;         // phase 81: outside AA (no menu row of its own: counted with the copies)
     case GpuPerf::kRewind:   return MG_REWIND;        // phase 89c: the rewind ring's per-frame copies (the Rewind row)
+    case GpuPerf::kMotionBlur: return MG_MBLUR;       // phase 100: the Motion blur row
     default:                 return -1;          // kReplayInst / kReplayRest: a sampled breakdown of kReplay (counted there)
     }
 }
@@ -22524,6 +22564,7 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
     if (mirOn) cell(MR_MIRROR, cpuS(cpuMir), gpuS(MG_MIR));      else txt(MR_MIRROR, TR(L"off"));
     // phase 41: the mirrors' cost as it is now (in turns: about half of the same row's figure without)
     if (mirOn) cell(MR_MIRTURNS, cpuS(cpuMir), gpuS(MG_MIR));    else txt(MR_MIRTURNS, TR(L"off"));
+    if (!vr && dlaaOn && g_mblurPct > 0) cell(MR_MBLUR, nullptr, gpuS(MG_MBLUR)); else txt(MR_MBLUR, TR(L"off"));   // phase 100
     txt(MR_PRETM, vr ? L"-" : TR(L"same"));
     if (fwdOn) cell(MR_FWD, cpuS(cpuFwd), gpuS(MG_FWD));         else txt(MR_FWD, TR(L"off"));
     // phase 49: GPU only (its CPU -- the glow draws' recording -- is inside the see-through depth's figure)
@@ -22693,6 +22734,12 @@ void MenuPerfCosts(TuningMenu::Panel& p, bool vr, int sel, wchar_t* sent, size_t
                                  L"Press its key to try again."), (double)g_fwdBudgetMs);
         else if (!fwdOn) swprintf(sent, sentCap, TRF(L"Off now: costs nothing."));
         else if ((fig = both(cpuFwd, MG_FWD))) swprintf(sent, sentCap, TRF(L"Costs %ls per frame now; off saves it."), fig);
+        break;
+    case MR_MBLUR:                                        // phase 100
+        if (vr)                            swprintf(sent, sentCap, TRF(L"Greyed in VR: motion blur is flat only."));
+        else if (g_mblurPct <= 0 || !dlaaOn) swprintf(sent, sentCap, TRF(L"Off now: costs nothing."));
+        else if (timers && gf.have)        { MenuNum(f, 64, gf.grp[MG_MBLUR]);
+                                             swprintf(sent, sentCap, TRF(L"Costs %ls ms GPU per frame now."), f); }
         break;
     case MR_BIAS:                                         // phase 49
         if (g_biasCfg <= 0 || !dlaaOn)     swprintf(sent, sentCap, TRF(L"Off now: costs nothing."));
@@ -23573,6 +23620,12 @@ void MenuBuildPanel(TuningMenu::Panel& p) {
         MenuRow(p, MR_MIRTURNS, TR(L"Mirrors take turns (faster)"), "dlaa.ini mirror_turns", nullptr, !mirLive || MirMode() == 3);
         swprintf(p.rows[MR_MIRTURNS].value, kV, L"%ls", MirMode() == 3 ? TR(L"on (mode 3)") : onOff[g_mirTurns ? 1 : 0]);
     }
+    // phase 100: Motion blur (flat only; greyed while the main scene runs no DLAA: the blur rides on its Run)
+    MenuRow(p, MR_MBLUR, all ? TR(L"Motion blur (flat)") : TR(L"Motion blur"), "dlaa.ini motion_blur", vr ? NA_("flat only") : nullptr,
+            vr || !mainDlaa);
+    if (g_mblurShow && g_mblurPct > 0) swprintf(p.rows[MR_MBLUR].value, kV, TRF(L"%d %% + pink (test)"), g_mblurPct);   // phase 100b
+    else if (g_mblurPct > 0) swprintf(p.rows[MR_MBLUR].value, kV, L"%d %%", g_mblurPct);
+    else                swprintf(p.rows[MR_MBLUR].value, kV, TRF(L"off"));
     {   // phase 69: the thin-wire switches (the same functions as Alt+F10 / Alt+F11 / Alt+F12)
 #ifdef WITH_DLAA
         const bool mvDil = DlaaProcessor::MvDilate();
@@ -24067,6 +24120,7 @@ void MenuChange(int row, int dir, bool repeat, uint64_t n) {
     case MR_PRETM:   TogglePreTonemap(n); break;
     case MR_FWD:     ToggleFwdDepth(n); break;
     case MR_BIAS:    StepBiasMask(dir, n); break;           // phase 49: 25 % steps, Right = stronger, Left = weaker (0 = off)
+    case MR_MBLUR:   StepMotionBlur(dir, n); break;         // phase 100: 25 % steps, Right = longer smear (0 = off)
     case MR_DLAA:    ToggleDlaa(n); break;
     case MR_GAMETAA: StepGameTaa(dir, n); break;            // phase 90: the split only, Right on / Left off (Mix: the Mode row)
     case MR_TAAMIX:  StepGameTaaMix(dir, n); break;         // phase 82: 10 % steps (kept while greyed)
@@ -27483,6 +27537,8 @@ bool DlaaOffFilePresent() {
 //   light_fs_jitter                0/1 (default 1, phase 78): the lighting pass's full-screen draws get the G-buffer's shift (W x H)
 //   water_overscan_fix             0/1 (default 1, phase 97): the new SCS water's draws get the shift without the overscan (W x H)
 //   outside_aa                     0/1/2 (default 2, phase 81): outside the DLAA area rect 1 = unjitter, 2 = + edge AA, 0 = raw frame
+//   motion_blur                    0..100 (default 0 = off, 25 % steps, phase 100, issue #33): flat only, the DLAA result smeared
+//                                  along each pixel's motion vector (share of one frame's motion); live from the menu
 //   game_taa                       0..3 (default 0, phase 82): the game's own TAA with the mod -- 0 off, 1 mix, 2 TAA only, 3 split
 //   game_taa_mix                   0..100 (default 50, phase 82): the TAA share of the mix in % (menu: 10 % steps)
 //   jitter_phases                  Halton phase count (default 8 since v0.5.7, was 16; NVIDIA: 8 x render ratio)
@@ -27795,6 +27851,8 @@ void LoadConfig() {
             if (!strcmp(key, "menu_vr_lock_dist")) { g_menuVrLockDist = v < 30 ? 30 : (v > 300 ? 300 : (int)v); continue; }
             if (!strcmp(key, "xr_hidden_mask"))     { g_xrHiddenMask = v != 0 ? 1 : 0; g_xrHiddenMaskExplicit = true; continue; }   // phase 40
             if (!strcmp(key, "dlss_bias_mask"))     { g_biasCfg = v < 0 ? 0 : (v > 100 ? 100 : (int)v); g_biasExplicit = true; continue; }   // phase 49
+            if (!strcmp(key, "motion_blur"))        { g_mblurPct = MotionBlur::ClampPct((int)v); continue; }   // phase 100
+            if (!strcmp(key, "motion_blur_show"))   { g_mblurShow = v > 0; continue; }                        // phase 100b
             if (!strcmp(key, "game_taa"))     { g_gameTaaIniRaw = (int)v; g_gameTaaExplicit = true; continue; }   // phase 82 (after the loop)
             if (!strcmp(key, "game_taa_ver")) { g_gameTaaIniVer = (int)v; continue; }                             // phase 82
             if (!strcmp(key, "game_taa_split")) { g_gameTaaSplit = GameTaa::ClampMix((int)v); g_gameTaaExplicit = true; continue; }
@@ -28357,6 +28415,12 @@ void LoadConfig() {
              "(Catmull-Rom), no edge pass; nothing at dlaa_area 100, with the jitter off, or with DLAA off")
         : "off: outside the DLAA area rect the picture is the raw jittered frame");
     SceneDlaa::SetBiasStrength(g_biasCfg);              // phase 49
+    if (g_mblurShow && g_mblurPct < MotionBlur::kMaxPct) g_mblurShow = false;   // phase 100b: the pink view is the row's 200 % step
+    SceneDlaa::SetMotionBlur(g_mblurPct);               // phase 100
+    SceneDlaa::SetMotionBlurShow(g_mblurShow);
+    Log("motion blur (phase 100): motion_blur=%d %%%s -- %s", g_mblurPct, g_mblurShow ? " + pink test view" : "",
+        g_mblurPct ? "flat main view only (never VR, mirrors, "
+        "menu preview)" : "off");
     if (g_reportAll) {                                   // phase 89d: Send everything from dlaa.ini -- forced from the start
         g_reportAll = 0;
         ReportAllSet(true, 0, "dlaa.ini report_all = 1");

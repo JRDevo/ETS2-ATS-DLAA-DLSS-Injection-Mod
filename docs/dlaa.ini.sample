@@ -584,6 +584,14 @@ log_level = 1
 # DLSS to take them (and the pixels where they were a frame ago) from the current frame. Lower it (25 % steps) if lamp glows
 # start to flicker. The tuning menu's "Light trail fix" row (Picture group) changes it live; Shift+F12 / Save writes it.
 # dlss_bias_mask = 100
+# Phase 100 MOTION BLUR (issue #33), FLAT ONLY, strength in % 0..200 (25 % steps; 100 = one frame of motion), default 0 = off. Fast-moving things get a
+# smear along their own motion (the mod's per-object motion vectors), like in films. Your own truck and the cab move with the
+# camera, so they stay sharp; the game's UI is drawn later and is never blurred. Never runs in VR. The tuning menu's
+# "Motion blur" row (Motion and mirrors group) changes it live; Shift+F12 / Save writes it.
+# motion_blur = 0
+# Test view: 1 = every blurred pixel is tinted pink (stronger for a longer smear), to see where the blur works. The menu row's
+# last step "200 % + pink (test)".
+# motion_blur_show = 0
 
 # Phase 82 GAME TAA: the game's own TAA together with the mod. The mod is made for the game's Anti-aliasing set to Disabled
 # (r_aa 0) -- keep game_taa = 0 then. With the game's Anti-aliasing = TAA (r_aa 5) the mod's DLAA would run on an already TAA'd

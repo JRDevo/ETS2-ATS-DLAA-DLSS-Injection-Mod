@@ -87,6 +87,7 @@ static const E kRows[] = {
     { G_MOT, false, M_B, false, L"Track moving parts", L"on", nullptr, L"Alt+F5", nullptr, L"<c>0.18</> | <g>0.70</>", L"<c>0.15</> | <g>0.35</>", nullptr, nullptr },
     { G_MOT, false, M_B, false, L"Smooth mirrors", L"2 mirrors (largest)", nullptr, L"Alt+F6", nullptr, L"<c>0.08</> | <g>0.34</>", L"<c>0.06</> | <g>0.17</>", nullptr, nullptr },
     { G_MOT, false, M_B, false, L"Mirrors take turns (faster)", L"on", nullptr, L"dlaa.ini mirror_turns", nullptr, L"<c>0.08</> | <g>0.34</>", L"<c>0.06</> | <g>0.17</>", nullptr, nullptr },
+    { G_MOT, false, M_F, false, L"Motion blur", L"off", nullptr, L"dlaa.ini motion_blur", nullptr, L"off", nullptr, nullptr, nullptr },   // phase 100: flat only
     // ---- Frame rate ----
     { G_FR, true, M_B, false, L"Frame rate", L"", nullptr, L"", nullptr, L"", nullptr,
       L"Frame rate and CPU: CPU tuning, AMD cache cores, an FPS cap and Low delay (Reflex) for flat, an FPS cap for VR. Right opens "
@@ -200,7 +201,7 @@ static const wchar_t kPerf1F[] = L"this mod: <c>0.28</> | <g>1.9</> ms -- GPU: N
                                  L"mirrors 0.17, sharpen 0.06, copies 0.1";
 static const wchar_t kPerf2F[] = L"<c>CPU</> | <g>GPU</> ms per frame, other threads 0.4. CPU = the game's render thread; measuring costs "
                                  L"0.12 ms CPU (taken out).";
-static const wchar_t kTitle[]  = L"ETS2 / ATS DLAA & DLSS mod v0.16.0 - tuning menu";
+static const wchar_t kTitle[]  = L"ETS2 / ATS DLAA & DLSS mod v0.17.0 - tuning menu";
 static const wchar_t kFooter[] = L"Up / Down select   Left / Right change   Delete close   keys: Hotkeys...";
 
 // Ink shorthand in the table strings: "<c>0.31</>" = CPU blue, "<g>3.4</>" = GPU orange (menu.h kInkCpu / kInkGpu / kInkEnd).
@@ -471,7 +472,7 @@ static void HotkeysShot(Gpu& g, const wchar_t* file) {
     const int bindLine = 8;                                        // "Sharpen strength +"
     TuningMenu::Panel p;
     memset(&p, 0, sizeof(p));
-    wcsncpy_s(p.title, L"ETS2 / ATS DLAA & DLSS mod v0.16.0 - hotkeys", _TRUNCATE);
+    wcsncpy_s(p.title, L"ETS2 / ATS DLAA & DLSS mod v0.17.0 - hotkeys", _TRUNCATE);
     Put(p.perf[0], 224, Ink(kPerf0));
     Put(p.perf[1], 224, Ink(kPerf1));
     Put(p.perf[2], 224, Ink(kPerf2));

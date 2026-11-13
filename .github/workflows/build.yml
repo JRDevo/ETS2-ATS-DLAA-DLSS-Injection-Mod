@@ -78,6 +78,8 @@ jobs:
           if not exist build\tests\other_mods_test.exe exit /b 1
           call tests\build_outside_aa_test.bat
           if not exist build\tests\outside_aa_test.exe exit /b 1
+          call tests\build_motion_blur_test.bat
+          if not exist build\tests\motion_blur_test.exe exit /b 1
           call tests\build_bug_report_test.bat
           if not exist build\tests\bug_report_test.exe exit /b 1
           call tests\build_game_taa_test.bat
@@ -133,6 +135,8 @@ jobs:
         run: build\tests\other_mods_test.exe
       - name: 'Test outside AA (phase 81 -- src/outside_aa.h feather bands; WARP: unjitter of jittered-viewport frames, in place + upscale, sign mutation)'
         run: build\tests\outside_aa_test.exe
+      - name: 'Test motion blur (phase 100, issue #33 -- src/motion_blur.h; WARP: still, smear keeps light, speed weight, upscale, clamp, NaN)'
+        run: build\tests\motion_blur_test.exe
       - name: Test bug report capture helpers (phase 89b-d -- src/bug_report.h; zip read back, privacy scrubber, plan, pruning, double press)
         run: build\tests\bug_report_test.exe
       - name: Test game TAA with the mod (phase 82 -- src/game_taa.h checksum, live window / jitter hold, resolve-constants jitter, per-pass decision, menu steps)

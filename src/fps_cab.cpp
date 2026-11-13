@@ -580,8 +580,50 @@ void ProcessLock(Snap& sn, const float* data) {
         if (j == ng) rep[ng++] = k;                      // (ord = biggest first: a group's rep is its biggest member)
         grp[k] = j; ++gn[j]; gsum[j] += ics[k];
     }
-    int bestG = -1;
-    for (int j = 0; j < ng; ++j) if (bestG < 0 || gsum[j] > gsum[bestG]) bestG = j;
+    // phase 99: the group must TURN WITH THE CAB. The ETS2 coach (2026-11-12 Norway bus): 13 of the 14 cab-frame draws are
+    // camera-relative (no lock), so the only multi-part group left was the steering wheel + column (2 draws, 31.4 deg off the cab
+    // frame) -- it won on summed IndexCount and the box rode the wheel (monitor: 70 cm off the lock spot). The cab frame (the
+    // rotation shared by the largest summed IndexCount of eye 0's cab draws, camera-relative ones included) is found first; a
+    // group whose rotation is not the cab frame's is a part with its own transform. Only when NO group shares the cab frame's
+    // rotation does the old rule (largest summed IndexCount) pick.
+    EyeFrame cabEf0;
+    bool haveCab0 = false;
+    {
+        struct RotG0 { EyeFrame ef; uint64_t sum = 0; };
+        RotG0 r0[2 * kCand];
+        int n0 = 0;
+        for (int q = 0; q < nk; ++q) {
+            const int k = ord[q];
+            const V& x = v[k][0];
+            if (!x.row) continue;
+            if (IsMoving(keys[k], looses[k]) || IsMovingGeom(ics[k], strides[k], fmts[k])) continue;
+            EyeFrame ef;
+            if (!EyeFrameOf(x.M, &ef) || HeadLocked(ef)) continue;
+            int j = 0;
+            while (j < n0 && !SameRot(r0[j].ef, ef)) ++j;
+            if (j == n0) { if (n0 == 2 * kCand) continue; r0[n0] = RotG0(); r0[n0].ef = ef; ++n0; }
+            r0[j].sum += ics[k];
+        }
+        int b0 = -1;
+        for (int j = 0; j < n0; ++j) if (b0 < 0 || r0[j].sum > r0[b0].sum) b0 = j;
+        if (b0 >= 0) { cabEf0 = r0[b0].ef; haveCab0 = true; }
+    }
+    int bestG = -1, nAligned = 0;
+    bool alignedG[2 * kCand] = {};
+    if (haveCab0)
+        for (int j = 0; j < ng; ++j) {
+            if (!SameRot(v[rep[j]][0].ef, cabEf0)) continue;
+            alignedG[j] = true; ++nAligned;
+            if (bestG < 0 || gsum[j] > gsum[bestG]) bestG = j;
+        }
+    if (bestG < 0)
+        for (int j = 0; j < ng; ++j) if (bestG < 0 || gsum[j] > gsum[bestG]) bestG = j;
+    if (haveCab0 && nAligned < ng && g.acc.n == 0 && g.linesLock < kLogLines) {   // (the first readback of a lock-on only)
+        ++g.linesLock;
+        Log("fps box attached to vehicle: lock-on -- %d of %d transform group(s) turn with the cab frame; %s", nAligned, ng,
+            nAligned ? "the box is carried by the heaviest of those (a group turned against the cab -- steering wheel / column -- is skipped)"
+                     : "NONE does: the heaviest group is used (old rule), the monitor drops it if it moves");
+    }
     int ref = bestG >= 0 ? rep[bestG] : -1;
     int others = 0;
     for (int q = 0; q < nk; ++q) if (grp[ord[q]] >= 0 && grp[ord[q]] != bestG) ++others;
@@ -743,7 +785,9 @@ void ProcessLock(Snap& sn, const float* data) {
     };
     addEntry(ref);
     for (int q = 0; q < nk; ++q)                                     // phase 47c: the cab group only (47d: all when it is one part)
-        if (ord[q] != ref && grp[ord[q]] >= 0 && (!groupOnly || grp[ord[q]] == bestG)) addEntry(ord[q]);
+        if (ord[q] != ref && grp[ord[q]] >= 0 &&
+            (groupOnly ? grp[ord[q]] == bestG : (nAligned == 0 || alignedG[grp[ord[q]]])))   // phase 99: one-part groups: the cab-turning ones only
+            addEntry(ord[q]);
     L.have = true;
     {                                                    // phase 51: the vehicle key -- every cab draw of both eyes' readback
         FpsProfile::Part parts[2 * kCand], used[FpsProfile::kKeyParts];

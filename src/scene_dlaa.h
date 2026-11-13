@@ -33,6 +33,9 @@
 // and, at 2, edge-smoothed (FXAA console). In place: a CS writes a full-size scratch before the copy-back, RCAS's border blend
 // reads its "raw" side from it, the 4 outer bands are copied back. Upscale: Composite() first draws the bands into RT0 from the
 // game's blit SRV0, then the DLSS result as before. Nothing runs at area 100, with outside_aa 0, or when the jitter is (0, 0).
+// phase 100 MOTION BLUR (dlaa.ini motion_blur, src/motion_blur.h, issue #33): after RCAS the result is smeared along this Run's
+// motion vectors into m_mbTex, which then goes back / is composited instead. Only on a unit the caller allows (SetMotionBlurOk:
+// the flat main view), never on a reset / MV-less / debug-view Run.
 #pragma once
 #ifdef WITH_DLAA
 
@@ -339,6 +342,13 @@ public:
     // (outside_aa.h BuildVisRows / SplitClip). key = any value that changes with the mesh / view (0 or ndcTris null = no clip).
     // Copied when the key changes; the per-row table is built lazily per image size.
     void SetVisibleMask(const float* ndcTris, uint32_t tris, uint64_t key);
+    // phase 100 MOTION BLUR: strength % (0 = off, process-wide, live from the menu) and the per-unit permission (default false: the
+    // mirror / preview / VR units never blur; inject.cpp sets it before each main-view Run).
+    static void SetMotionBlur(int pct) { s_mbPct = pct < 0 ? 0 : (pct > 200 ? 200 : pct); }   // phase 100b: up to 200 %
+    static void SetMotionBlurShow(bool on) { s_mbShow = on; }   // phase 100b: the pink test view
+    static int  MotionBlurPct() { return s_mbPct; }
+    void SetMotionBlurOk(bool on) { m_mbOk = on; }
+    uint64_t MotionBlurRuns() const { return m_mbRuns; }
     static void SetBiasStrength(int pct) { s_biasPct = pct < 0 ? 0 : (pct > 100 ? 100 : pct); }
     static int  BiasStrength() { return s_biasPct; }
     uint64_t BiasRuns() const { return m_biasRuns; }   // Runs that handed NGX a mask (log / menu)
@@ -435,6 +445,9 @@ private:
     bool OaaUpload(ID3D11DeviceContext* ctx, const float* p);   // Params, re-uploaded only when they changed
     void OaaFirstLog(const char* what, uint32_t bands, int luma, float sx, float sy);
     void OaaShutdown();
+    // phase 100 motion blur: `src` (the result, m_ow x m_oh, format `fmt`) -> m_mbTex. true = m_mbTex holds the blurred result.
+    bool MbRun(ID3D11Device* dev, ID3D11DeviceContext* ctx, ID3D11ShaderResourceView* src, DXGI_FORMAT fmt);
+    void MbShutdown();
 
     DlaaProcessor m_dlaa;
     CameraMv m_cam;
@@ -516,6 +529,23 @@ private:
     bool                                              m_biasFailed = false;   // shader / textures could not be made (logged once)
     uint64_t                                          m_biasRuns = 0;
 
+    // ---- phase 100 motion blur (MbRun) ----
+    static int                                        s_mbPct;        // dlaa.ini motion_blur (0..200, 0 = off)
+    static bool                                       s_mbShow;       // dlaa.ini motion_blur_show (pink test view)
+    bool                                              m_mbOk = false; // SetMotionBlurOk (the caller's per-Run permission)
+    Microsoft::WRL::ComPtr<ID3D11ComputeShader>       m_mbCs;
+    Microsoft::WRL::ComPtr<ID3D11Buffer>              m_mbCb;         // b0, MotionBlur::kCbFloats, DYNAMIC
+    Microsoft::WRL::ComPtr<ID3D11Texture2D>           m_mbTex;        // m_ow x m_oh, the result's format
+    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_mbUav;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>  m_mbSrv;
+    uint32_t                                          m_mbW = 0, m_mbH = 0;
+    DXGI_FORMAT                                       m_mbFmt = DXGI_FORMAT_UNKNOWN;
+    float                                             m_mbData[12] = {};      // last uploaded CB (MotionBlur::kCbFloats)
+    bool                                              m_mbDataValid = false;
+    bool                                              m_mbCsTried = false;    // shader creation failed once: no retry
+    bool                                              m_mbTexFailed = false;  // scratch creation failed at m_mbW x m_mbH
+    bool                                              m_mbLogged = false;     // first blurred Run logged
+    uint64_t                                          m_mbRuns = 0;
     // ---- phase 81 outside AA (OaaInPlace / OaaArm + OaaDrawBands) ----
     static int                                        s_oaaMode;      // dlaa.ini outside_aa (0..2, default 2)
     static int                                        s_oaaSignX, s_oaaSignY;   // jitter_sign_x / _y (+1 / -1)

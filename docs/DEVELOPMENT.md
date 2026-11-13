@@ -2912,3 +2912,40 @@ picture is meant to stay the same (item 2 only skips pixels the headset never sh
   the rules were written from the audit's disassembly). Multi-view: the exemption keeps the game's own viewport 0 per pass, but the
   water's `cb0[17]` = viewport size assumption was only seen in a single-view capture. The water picture sits up to x / W px off the
   overscanned ground around it (static, not per frame); `Draw` / `DrawInstanced` / indirect water draws are not hooked.
+
+### Phase 99: the VR fps box "attached to the vehicle" no longer locks on the coach's steering wheel
+
+- **Seen** (ETS2 VR, Coaches DLC, 2026-11-12): the box turned with the steering wheel. In the coach 13 of the 14 cab-frame draws
+  are camera-relative (no lock), so the only multi-part transform group left was the steering wheel + column (31.4 deg off the
+  cab frame); it won on summed IndexCount.
+- **Fix** (`src/fps_cab.cpp` `ProcessLock`): the cab frame (the rotation with the largest summed IndexCount of eye 0's cab draws,
+  camera-relative ones included) is found first; only transform groups that share its rotation can carry the box. With one-part
+  groups only the cab-turning parts carry. Only when no group shares it does the old rule pick.
+- **Tests**: `tests/fps_cab_test.cpp` 51c / 51d updated: a wheel turned at the lock-on never enters the stored pose (the body is
+  the reference, 3 parts); a wheel straight at the lock-on still can, and the monitor drops it once it turns (486 checks).
+- **Tested**: ETS2 VR in the coach (2026-11-13): the box stays put.
+
+### Phase 100: motion blur, flat only (`motion_blur`, default 0 = off, live; issue #33)
+
+- **Ask**: issue #33 asked for object-based motion blur as a look. The mod already has per-object motion vectors (`mv_objects = 2`)
+  for every DLAA unit, so no new data from the game is needed.
+- **Where** (`src/motion_blur.h`: maths + the HLSL block `kMotionBlurShader`; `src/scene_dlaa.cpp` `MbRun`, step d1b of `Run`):
+  after RCAS and before the copy-back / composite, the result is smeared along each pixel's own motion vector into `m_mbTex`
+  (the result's size and format), and that goes back instead. The game's UI is drawn later, so it never blurs. Only a unit the
+  caller allows (`SetMotionBlurOk`): the flat main view (pre-tonemap run and backbuffer blits, `!FramePaceVrLoop()`). VR eyes,
+  mirrors and the menu / truck preview never blur. Skipped on a history reset (camera cut), without motion vectors, with the MV
+  debug view.
+- **How**: `v = mv * (output / render) * motion_blur / 100`, clamped to 4 % of the output width (at least 16 px); below 1 px the
+  pixel is copied. Taps centred on the pixel at WHOLE-pixel offsets (pure shifts: a uniform smear keeps all of its light; random
+  per-pixel tap offsets lost 15 % on the test stripe), point reads at the texel whose speed is judged. SPEED WEIGHT: a tap moving
+  at <= 25 % of the pixel's speed counts 0, >= 75 % counts 1 -- the world seen through the windscreen does not smear the static
+  cab into itself. Own truck: it moves with the camera, its vectors are ~0, it stays sharp.
+- **Menu**: "Motion blur" row at the end of Motion and mirrors (flat only, 25 % steps), cost column = GpuPerf "motion-blur"
+  (`MG_MBLUR`). Save / Reset / LoadConfig handle `motion_blur`; the new menu texts are English until the release translation pass.
+- **Tests**: `tests/motion_blur_test.cpp` (WARP, 23 checks: still = bit-exact, smear keeps the light, no bleed from a static
+  neighbour, DLSS upscale scale, MaxLen clamp, NaN vectors, 50 %). `settings_roundtrip_test`, `settings_check.py`, `lang_tool.py`
+  pass.
+- **Phase 100b** (first game test, ATS flat: the blur ran -- a passing car in the OBS video is smeared, road and HUD sharp -- but
+  the user could not tell it from "normal" blur): the range goes to 200 % (MaxLen 6 % of the width, 48 taps), and a test view
+  `motion_blur_show` (the row's last step "200 % + pink (test)") tints blurred pixels pink by smear length (full at 24 px).
+- **Not verified**: the cost, the cab edges, the DLSS upscale path, flat multi-view, the 200 % / pink steps in game.

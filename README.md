@@ -48,6 +48,7 @@ an in-game menu (`Delete`) and an optional text config.
 - **Mix with the game's own TAA**: blend DLAA / DLSS with TAA, or split the screen to compare.
 - Four DLSS models, switched live with a key.
 - Sharper texture text and adjustable sharpening.
+- **Motion blur** (flat, off by default): fast traffic and the world passing by get a film-like smear; your own truck stays sharp (new in v0.17.0).
 
 **Flat and VR**
 - One DLL and one `dlaa.ini` for both; VR renders one pass per eye (OpenXR).
@@ -746,6 +747,10 @@ The three green lines under the title show the game's GPU time per frame, what t
   last clean picture in between. That is about half the mirror cost. Edges in the glass stay clean; moving things in the
   glass update at half the frame rate (a slight judder on passing traffic). A reset or a big camera jump updates every
   mirror at once.
+- **Motion blur** (`motion_blur`, off by default, flat only): things that move fast past you get a smear along their
+  motion, like in films. `25 %` to `200 %` = a longer smear (`100 %` = one frame of motion). Your own truck and the cab
+  stay sharp, and the game's UI is never blurred. It is a look, not a fix: it softens what DLAA made sharp. It never runs
+  in VR. The last step, `200 % + pink (test)`, colours every blurred pixel pink, so you can see where it works.
 - **Thin wires** (3 rows in the same group, also on the Hotkeys page): **Wire fix: motion** (`dlaa_mv_dilate`, on,
   `Alt+F10`) and **Wire fix: depth** (`mv_fwd_conservative`, on, `Alt+F11`) keep near telephone and power wires steady
   while you drive. Switch them off only to compare. **Thicker wires (test)** (`wire_widen`, off, `Alt+F12`) is experimental:
@@ -895,6 +900,8 @@ The table below lists the commonly used keys:
 | `cutout_mips` | `0` | sharper far fences: `1` = rebuild the small texture versions of alpha-tested cut-outs (chain-link fences, wire mesh) so distant wires keep their detail instead of fading away; `0` = off (default). `cutout_max_dim` (default 4096) caps the texture size it rebuilds |
 | `preview_dlaa` | `1` | `1` = also anti-alias the profile / truck-preview screen (flat and VR); `0` = leave that screen untouched. VR at eye resolution needs a lot of GPU memory and time there, turn it off if that screen stutters. That screen always uses model 2 (preset E); the model keys change the drive only |
 | `jitter_sign_x` / `jitter_sign_y` | `1` | flip if the image shimmers or looks doubled (try the 4 combinations) |
+| `motion_blur` | `0` | motion blur, flat only: strength in % `0`..`200` (25 % steps, `100` = one frame of motion), `0` = off (default). Fast-moving things get a smear along their own motion; your own truck, the cab and the game's UI stay sharp. Never in VR. The menu's `Motion blur` row (Motion and mirrors) |
+| `motion_blur_show` | `0` | test view for `motion_blur`: `1` = blurred pixels are tinted pink (stronger for a longer smear). The `Motion blur` row's last step (`200 % + pink (test)`) |
 | `dlss_bias_mask` | `100` | light glow ghosting fix: strength in % `0`..`100`, `0` = off. Street lamp and car light glows are told to DLSS as a mask so they leave no trail at night. Lower it (25 % steps) if glows flicker. The menu's `Light trail fix` row |
 | `game_taa` | `0` | only with the game's Anti-aliasing = TAA: `0` = off (the mod alone; set the game's AA to Disabled), `1` = mix (the game's TAA and DLAA / DLSS on the same raw frame, blended), `2` = split (the mod left of `game_taa_split`, TAA right of it, a thin line and labels). Without the game's TAA running, `1`..`2` act as `0`; DLAA off = the game's TAA alone. Phase 90: Mix is on the menu's `Mode` row (`Mix (TAA + DLAA)` / `Mix (TAA + DLSS)`, with `Mix amount` right under it); the split is the `Split with game TAA` row in Compare and test. Both rows (with the game's console on -- `g_developer "1"` and `g_console "1"` in config.cfg -- changing the row also switches the game's Anti-aliasing: `off` types `uset r_aa "0"`, `mix` / `split` type `uset r_aa "5"` (TAA), only when the game's value differs, flat and VR, never at startup; Reset to defaults puts `r_aa "0"` back only if the mod switched it. The game window must have the focus. The row's line shows `Game AA: TAA` / `off` and whether the switch was confirmed in game.log.txt. `r_aa` is the game's setting, never saved in dlaa.ini; the game's TAA tuning / sharpening are not touched) |
 | `game_taa_mix` | `50` | the game's TAA share of `game_taa = 1` (mix) in % `0`..`100`: more = calmer and softer, less = sharper. The menu's `Mix amount` row under Mode (10 % steps) |
@@ -1071,6 +1078,10 @@ Windows 11 Pro, 3840x2160 monitor; VR = Meta Quest 3 over Virtual Desktop (VDXR)
   view)?** Press `Alt+F5` (or set `mv_objects = 0` in `dlaa.ini`). That turns off
   the per-object motion and leaves the camera motion only.
   Then please send the log, see *Reporting a problem*.
+
+- **VR, coach / bus: the fps box set to "attached to the vehicle" turns with the steering wheel?** Fixed in
+  v0.17.0: update. In the coaches almost no cab part could hold the box, so it held on to the steering wheel. It now
+  only holds on to parts that sit straight with the cab.
 
 - **VR: a faint second copy of near objects (the steering wheel) beside the real one?** Fixed in
   v0.16.0: update. On headsets whose two eye views have the same shape, one eye's DLAA could get

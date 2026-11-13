@@ -300,6 +300,14 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 msgid ""
+"Flat only. Things that move fast past you get a smear along their motion, like in films. Your own "
+"truck and the cab stay sharp. off = none (default); 25 - 200 % = a longer smear (100 % = one "
+"frame of motion). The last step tints the blurred pixels pink: a test to see where it works."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+msgid ""
 "Frame rate and CPU: CPU tuning, AMD cache cores, an FPS cap and Low delay (Reflex) for flat, an "
 "FPS cap for VR. Right opens the group, Left closes it; it starts closed every time the menu opens."
 msgstr ""
@@ -1284,6 +1292,18 @@ msgstr ""
 #. Description of the selected row (up to 4 lines together with the cost sentence)
 #: src/inject.cpp
 #, c-format
+msgid "Greyed in VR: motion blur is flat only."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
+msgid "Costs %ls ms GPU per frame now."
+msgstr ""
+
+#. Description of the selected row (up to 4 lines together with the cost sentence)
+#: src/inject.cpp
+#, c-format
 msgid "Costs %ls ms GPU per frame now; most of it at night."
 msgstr ""
 
@@ -2084,6 +2104,27 @@ msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
+msgid "Motion blur (flat)"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "Motion blur"
+msgstr ""
+
+#. Keys: the Hotkey column (about 26 Latin characters)
+#: src/inject.cpp
+msgid "flat only"
+msgstr ""
+
+#. Value column (about 20 Latin characters)
+#: src/inject.cpp
+#, c-format
+msgid "%d %% + pink (test)"
+msgstr ""
+
+#. Setting / action name column (about 26 Latin characters)
+#: src/inject.cpp
 msgid "Wire fix: motion"
 msgstr ""
 
@@ -2115,11 +2156,6 @@ msgstr ""
 #. Setting / action name column (about 26 Latin characters)
 #: src/inject.cpp
 msgid "Run DLAA earlier (test)"
-msgstr ""
-
-#. Keys: the Hotkey column (about 26 Latin characters)
-#: src/inject.cpp
-msgid "flat only"
 msgstr ""
 
 #. Setting / action name column (about 26 Latin characters)

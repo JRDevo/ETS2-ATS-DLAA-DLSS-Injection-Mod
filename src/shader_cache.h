@@ -84,6 +84,7 @@ enum Id : int {
     kSolidPsB,             // wire_widen.cpp     kSolidPs / PSSolidB     ps_5_0 (phase 63: copy of G-buffer PS 34860eed + dither)
     kOutsideAaCs,          // outside_aa.h       kOutsideAaShader / CSMain cs_5_0 (phase 81: outside AA, in place)
     kOutsideAaPs,          // outside_aa.h       kOutsideAaShader / PSMain ps_5_0 (phase 81: outside AA, upscale band draws)
+    kMotionBlurCs,         // motion_blur.h      kMotionBlurShader / CSMain cs_5_0 (phase 100: flat motion blur, issue #33)
     kCount,
     kCoreLast = kPvEdgeFill  // v0.10.0 phase 17: ids 0..kCoreLast = the core group (compiled first, CoreDone)
 };
