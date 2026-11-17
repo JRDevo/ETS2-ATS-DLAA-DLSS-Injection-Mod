@@ -2031,6 +2031,8 @@ static void Phase115r() {
     size_t n;
     while ((n = fread(buf, 1, sizeof(buf), f)) > 0) src.append(buf, n);
     fclose(f);
+    // the CI checkout has CRLF (autocrlf): drop the CRs so "\n}\n" finds the end of the function in both
+    src.erase(std::remove(src.begin(), src.end(), '\r'), src.end());
     const size_t b = src.find("bool MaskTint(ID3D11DeviceContext* ctx");
     CHECK(b != std::string::npos, "MaskTint found in census_run.h");
     if (b == std::string::npos) return;
